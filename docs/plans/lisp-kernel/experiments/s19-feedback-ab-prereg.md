@@ -44,8 +44,8 @@ Fixed component hashes:
 
 | Component | Source path | Source hash |
 | --- | --- | --- |
-| `agent.prompt` | `priv/preludes/agent/prompt.lisp` | `827d9850b274a809f36782f3cd2c36191a5daf9b61fed3ebef381e4096cec29e` |
-| `agent.core` | `priv/preludes/agent/core.lisp` | `04470ec980f6e9f99988d31779b7b5b25c14da4a0e6a4342477176b4d28a370f` |
+| `agent.prompt` | `priv/preludes/agent/prompt.lisp` | `82bcd82d41d84580466531351c8750214a9945ef5bd5492da52742a82da0d746` |
+| `agent.core` | `priv/preludes/agent/core.lisp` | `7465d62ddc39b73969860acd45604bccbb3537aa2962ce662430d98cd5ed429a` |
 
 ## Frozen Suite
 

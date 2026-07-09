@@ -570,7 +570,25 @@ defmodule PtcRunner.KernelTest do
     task =
       Task.async(fn ->
         Kernel.run(%{"task" => "compute"},
-          llm: fn _ -> {:error, :unexpected_llm_call} end,
+          llm:
+            scripted_llm([
+              %{
+                tool_calls: [
+                  %{
+                    name: "run_ptc_lisp",
+                    args: %{"program" => ~S|(do (tool/barrier {"id" "a"}) (def a 1))|}
+                  }
+                ]
+              },
+              %{
+                tool_calls: [
+                  %{
+                    name: "run_ptc_lisp",
+                    args: %{"program" => ~S|(do (tool/barrier {"id" "b"}) (def b 2))|}
+                  }
+                ]
+              }
+            ]),
           tools: tools,
           prelude_source_overrides: %{
             "agent.core" => """
@@ -579,9 +597,17 @@ defmodule PtcRunner.KernelTest do
               {:visibility :prompt})
 
             (defn run-mission [mission cfg]
-              (let [parallel (pcalls
-                               (fn [] (tool/eval-program {"program" "(do (tool/barrier {\\"id\\" \\"a\\"}) (def a 1))" "turn" 0}))
-                               (fn [] (tool/eval-program {"program" "(do (tool/barrier {\\"id\\" \\"b\\"}) (def b 2))" "turn" 0})))
+              (let [action-a (tool/llm-complete {"system" (agent.prompt/system-message cfg)
+                                                 "messages" [(agent.prompt/task-message mission cfg)]
+                                                 "turn" 0})
+                    action-b (tool/llm-complete {"system" (agent.prompt/system-message cfg)
+                                                 "messages" [(agent.prompt/task-message mission cfg)]
+                                                 "turn" 1})
+                    parallel (pcalls
+                               (fn [] (tool/eval-program {"program" (action-a "program")
+                                                          "turn" 0}))
+                               (fn [] (tool/eval-program {"program" (action-b "program")
+                                                          "turn" 1})))
                     statuses (map #(% "status") parallel)
                     reasons (map #(% "reason") parallel)]
                 (return {"statuses" statuses
@@ -591,8 +617,7 @@ defmodule PtcRunner.KernelTest do
         )
       end)
 
-    assert_receive {:barrier, _first_id, first_pid}, 1_000
-
+    assert_receive {:barrier, _first_id, first_pid}, 5_000
     refute_receive {:barrier, _second_id, _second_pid}, 100
     send(first_pid, :release)
 
@@ -1092,6 +1117,132 @@ defmodule PtcRunner.KernelTest do
     refute content =~ "(ns agent.core"
   end
 
+  test "role-backed prelude bundle matches embedded agent prelude artifact" do
+    {:ok, store} = seeded_agent_prelude_store()
+
+    assert {:ok, embedded} = Kernel.compile_prelude()
+
+    assert {:ok, role_backed} =
+             Kernel.compile_prelude(
+               prelude_store: store,
+               role_policy: kernel_role_policy(),
+               role: "kernel_default"
+             )
+
+    embedded_summary = Lisp.Prelude.trace_summary(embedded)
+    role_summary = Lisp.Prelude.trace_summary(role_backed)
+
+    assert role_summary.source_hash == embedded_summary.source_hash
+    assert role_summary.artifact_hash == embedded_summary.artifact_hash
+    assert role_summary.protected_namespaces == embedded_summary.protected_namespaces
+    assert role_summary.exports == embedded_summary.exports
+
+    assert Enum.map(
+             role_summary.components,
+             &Map.take(&1, [:id, :checksum, :source_hash, :namespaces, :origin])
+           ) ==
+             Enum.map(
+               embedded_summary.components,
+               &Map.take(&1, [:id, :checksum, :source_hash, :namespaces, :origin])
+             )
+
+    assert Enum.map(role_summary.components, & &1.version) == [1, 1, 1]
+
+    assert %{
+             role: "kernel_default",
+             selected_refs: ["agent.core@1"],
+             resolved_refs: resolved_refs
+           } = role_summary.role_prelude_selection
+
+    assert Enum.map(resolved_refs, & &1.id) == ~w(agent.prompt agent.feedback agent.core)
+
+    assert Enum.map(resolved_refs, & &1.origin) ==
+             [
+               "file:priv/preludes/agent/prompt.lisp",
+               "file:priv/preludes/agent/feedback.lisp",
+               "file:priv/preludes/agent/core.lisp"
+             ]
+
+    refute inspect(role_summary) =~ "(ns agent.core"
+  end
+
+  test "role-backed prelude selection uses requested refs instead of role defaults" do
+    {:ok, store} = seeded_agent_prelude_store()
+
+    assert {:ok, prelude} =
+             Kernel.compile_prelude(
+               prelude_store: store,
+               role_policy: kernel_role_policy(default_preludes: ["agent.prompt@1"]),
+               role: "kernel_default",
+               preludes: ["agent.core@1"]
+             )
+
+    selection = prelude.metadata.role_prelude_selection
+    assert selection.selected_refs == ["agent.core@1"]
+
+    assert Enum.map(selection.resolved_refs, & &1.id) ==
+             ~w(agent.prompt agent.feedback agent.core)
+  end
+
+  test "role-backed prelude selection fails closed for missing store, unknown role, and empty selections" do
+    assert {:error, %{reason: :missing_prelude_store}} =
+             Kernel.compile_prelude(role_policy: kernel_role_policy(), role: "kernel_default")
+
+    {:ok, store} = seeded_agent_prelude_store()
+
+    assert {:error, %{reason: :invalid_prelude_store}} =
+             Kernel.compile_prelude(
+               prelude_store: :not_a_store,
+               role_policy: kernel_role_policy(),
+               role: "kernel_default"
+             )
+
+    assert {:error, %{reason: :invalid_policy}} =
+             Kernel.compile_prelude(
+               prelude_store: store,
+               role_policy: :not_a_policy,
+               role: "kernel_default"
+             )
+
+    assert {:error, %{reason: :unknown_role, message: message}} =
+             Kernel.compile_prelude(
+               prelude_store: store,
+               role_policy: kernel_role_policy(),
+               role: "missing"
+             )
+
+    assert message =~ "unknown prelude role"
+
+    assert {:error, %{reason: :missing_prelude_selection}} =
+             Kernel.compile_prelude(
+               prelude_store: store,
+               role_policy: kernel_role_policy(default_preludes: []),
+               role: "kernel_default"
+             )
+  end
+
+  test "role-backed prelude selection surfaces checksum mismatch before LLM call" do
+    {:ok, store} = seeded_agent_prelude_store()
+    bad_checksum = String.duplicate("0", 64)
+
+    assert {:error, %{reason: :prelude_selection_failed, message: message}} =
+             Kernel.compile_prelude(
+               prelude_store: store,
+               role_policy:
+                 kernel_role_policy(
+                   preludes: [
+                     %{"id" => "agent.core", "version" => 1, "checksum" => bad_checksum}
+                   ],
+                   default_preludes: [
+                     %{"id" => "agent.core", "version" => 1, "checksum" => bad_checksum}
+                   ]
+                 ),
+               role: "kernel_default"
+             )
+
+    assert message =~ "failed to resolve prelude"
+  end
+
   test "role-backed kernel turn events include source-free role and prelude provenance" do
     {:ok, store} = seeded_agent_prelude_store()
     {:ok, sink} = TraceLog.start_memory_sink()
@@ -1126,6 +1277,7 @@ defmodule PtcRunner.KernelTest do
     assert turn["attempt"] == 1
     assert turn["input_tokens"] == 3
     assert turn["output_tokens"] == 4
+    assert turn["total_tokens"] == 7
     assert turn["data"]["program"] == "(return (+ 40 2))"
     assert [%{"components" => components}] = turn["data"]["preludes"]
     assert Enum.map(components, & &1["id"]) == ~w(agent.prompt agent.feedback agent.core)
@@ -1142,6 +1294,67 @@ defmodule PtcRunner.KernelTest do
     refute inspected =~ "(ns agent.core"
     refute inspected =~ "(ns agent.prompt"
     refute inspected =~ "system-message"
+  end
+
+  test "embedded and role-backed kernel turn events share D4 correlation shape" do
+    {:ok, store} = seeded_agent_prelude_store()
+    {:ok, sink} = TraceLog.start_memory_sink()
+
+    try do
+      assert {:ok, %{"value" => 42}} =
+               Kernel.run(%{"task" => "compute"},
+                 llm:
+                   scripted_llm([
+                     %{
+                       tool_calls: [
+                         %{name: "run_ptc_lisp", args: %{"program" => "(return (+ 40 2))"}}
+                       ]
+                     }
+                   ]),
+                 kernel_run_id: "embedded-turn"
+               )
+
+      assert {:ok, %{"value" => 42}} =
+               Kernel.run(%{"task" => "compute"},
+                 llm:
+                   scripted_llm([
+                     %{
+                       tool_calls: [
+                         %{name: "run_ptc_lisp", args: %{"program" => "(return (+ 40 2))"}}
+                       ]
+                     }
+                   ]),
+                 prelude_store: store,
+                 role_policy: kernel_role_policy(),
+                 role: "kernel_default",
+                 kernel_run_id: "role-backed-turn"
+               )
+    after
+      TraceLog.stop_memory_sink(sink)
+    end
+
+    assert [embedded, role_backed] = MemorySink.events(sink)
+
+    for turn <- [embedded, role_backed] do
+      assert turn["driver"] == "kernel"
+      assert turn["turn"] == 1
+      assert turn["attempt"] == 1
+      assert turn["data"]["program"] == "(return (+ 40 2))"
+      assert [%{"components" => components}] = turn["data"]["preludes"]
+      assert Enum.map(components, & &1["id"]) == ~w(agent.prompt agent.feedback agent.core)
+    end
+
+    assert embedded["agent_id"] == "embedded-turn"
+    assert embedded["role"] == nil
+    assert embedded["grant_fingerprint"] == nil
+    assert embedded["data"]["prelude_projection"] == nil
+    assert embedded["data"]["prelude_call_policy"] == nil
+
+    assert role_backed["agent_id"] == "role-backed-turn"
+    assert role_backed["role"] == "kernel_default"
+    assert "sha256:" <> _ = role_backed["grant_fingerprint"]
+    assert role_backed["data"]["prelude_projection"]["selected_refs"] == ["agent.core@1"]
+    assert role_backed["data"]["prelude_call_policy"] == %{"prelude_store_access" => :none}
   end
 
   test "unsafe debug request payloads stay out of canonical kernel turn events" do
@@ -1248,6 +1461,245 @@ defmodule PtcRunner.KernelTest do
     assert success["attempt"] == 2
     assert success["committed"] == true
     assert success["status"] == "ok"
+  end
+
+  test "kernel turn recorder rejects duplicate evals without orphan turn events" do
+    parent = self()
+    model_program = ~S|(do (tool/barrier {"id" "a"}) (def a 1))|
+
+    tools = %{
+      "barrier" => fn args ->
+        send(parent, {:barrier, args["id"]})
+        args["id"]
+      end
+    }
+
+    core = """
+    (ns agent.core
+      "Variant that calls eval-program twice for one model action."
+      {:visibility :prompt})
+
+    (defn run-mission [mission cfg]
+      (let [action (tool/llm-complete {"system" (agent.prompt/system-message cfg)
+                                       "messages" [(agent.prompt/task-message mission cfg)]
+                                       "turn" 0})
+            first (tool/eval-program {"program" (action "program")
+                                      "turn" 0})
+            second (tool/eval-program {"program" "(return :second)"
+                                       "turn" 0})]
+        (return {"statuses" [(first "status") (second "status")]
+                 "reasons" [(first "reason") (second "reason")]})))
+    """
+
+    {:ok, sink} = TraceLog.start_memory_sink()
+
+    try do
+      assert {:ok, %{"statuses" => statuses, "reasons" => reasons}} =
+               Kernel.run(%{"task" => "compute"},
+                 llm:
+                   scripted_llm([
+                     %{
+                       tool_calls: [
+                         %{name: "run_ptc_lisp", args: %{"program" => model_program}}
+                       ],
+                       tokens: %{input: 2, output: 5}
+                     }
+                   ]),
+                 tools: tools,
+                 prelude_source_overrides: %{"agent.core" => core},
+                 kernel_run_id: "duplicate-eval-turn"
+               )
+
+      assert "continue" in statuses
+      assert "error" in statuses
+
+      assert "unmatched_eval_program_turn" in reasons
+
+      assert_received {:barrier, "a"}
+    after
+      TraceLog.stop_memory_sink(sink)
+    end
+
+    assert [turn] = MemorySink.events(sink)
+    assert turn["agent_id"] == "duplicate-eval-turn"
+    assert turn["attempt"] == 1
+    assert turn["turn"] == 1
+    assert turn["committed"] == true
+    assert turn["status"] == "ok"
+    assert turn["total_tokens"] == 7
+    assert turn["data"]["program"] == model_program
+  end
+
+  test "kernel turn recorder consumes pending action after mismatched eval program" do
+    parent = self()
+    model_program = ~S|(do (tool/barrier {"id" "should-not-run"}) (return 42))|
+    wrong_program = "(return :wrong)"
+
+    tools = %{
+      "barrier" => fn args ->
+        send(parent, {:barrier, args["id"]})
+        args["id"]
+      end
+    }
+
+    core = """
+    (ns agent.core
+      "Variant that tries a wrong eval-program before the model program."
+      {:visibility :prompt})
+
+    (defn run-mission [mission cfg]
+      (let [action (tool/llm-complete {"system" (agent.prompt/system-message cfg)
+                                       "messages" [(agent.prompt/task-message mission cfg)]
+                                       "turn" 0})
+            first (tool/eval-program {"program" "#{wrong_program}"
+                                      "turn" 0})
+            second (tool/eval-program {"program" (action "program")
+                                       "turn" 0})]
+        (return {"first_status" (first "status")
+                 "first_reason" (first "reason")
+                 "second_status" (second "status")
+                 "second_reason" (second "reason")})))
+    """
+
+    {:ok, sink} = TraceLog.start_memory_sink()
+
+    try do
+      assert {:ok,
+              %{
+                "first_status" => "error",
+                "first_reason" => "mismatched_eval_program",
+                "second_status" => "error",
+                "second_reason" => "unmatched_eval_program_turn"
+              }} =
+               Kernel.run(%{"task" => "compute"},
+                 llm:
+                   scripted_llm([
+                     %{
+                       tool_calls: [
+                         %{name: "run_ptc_lisp", args: %{"program" => model_program}}
+                       ],
+                       tokens: %{input: 2, output: 5}
+                     }
+                   ]),
+                 tools: tools,
+                 prelude_source_overrides: %{"agent.core" => core},
+                 kernel_run_id: "mismatched-eval-turn"
+               )
+
+      refute_received {:barrier, "should-not-run"}
+    after
+      TraceLog.stop_memory_sink(sink)
+    end
+
+    assert [turn] = MemorySink.events(sink)
+    assert turn["agent_id"] == "mismatched-eval-turn"
+    assert turn["attempt"] == 1
+    assert turn["turn"] == 0
+    assert turn["committed"] == false
+    assert turn["status"] == "error"
+    assert turn["total_tokens"] == 7
+    assert turn["data"]["turn_type"] == "protocol_error"
+    assert turn["data"]["program"] == model_program
+    assert turn["data"]["fail"]["reason"] == "mismatched_eval_program"
+  end
+
+  test "kernel turn recorder rejects duplicate llm-complete turns without overwriting pending action" do
+    core = """
+    (ns agent.core
+      "Variant that calls llm-complete twice for one turn."
+      {:visibility :prompt})
+
+    (defn run-mission [mission cfg]
+      (let [action-a (tool/llm-complete {"system" (agent.prompt/system-message cfg)
+                                         "messages" [(agent.prompt/task-message mission cfg)]
+                                         "turn" 0})
+            action-b (tool/llm-complete {"system" (agent.prompt/system-message cfg)
+                                         "messages" [(agent.prompt/task-message mission cfg)]
+                                         "turn" 0})
+            result (tool/eval-program {"program" (action-a "program")
+                                       "turn" 0})]
+        (return {"second_kind" (action-b "kind")
+                 "second_reason" (action-b "reason")
+                 "eval_status" (result "status")
+                 "eval_value" (result "value")})))
+    """
+
+    {:ok, sink} = TraceLog.start_memory_sink()
+
+    try do
+      assert {:ok,
+              %{
+                "second_kind" => "protocol_error",
+                "second_reason" => "duplicate_llm_complete_turn",
+                "eval_status" => "return",
+                "eval_value" => 42
+              }} =
+               Kernel.run(%{"task" => "compute"},
+                 llm:
+                   scripted_llm([
+                     %{
+                       tool_calls: [
+                         %{name: "run_ptc_lisp", args: %{"program" => "(return 42)"}}
+                       ],
+                       tokens: %{input: 2, output: 3}
+                     },
+                     %{
+                       tool_calls: [
+                         %{name: "run_ptc_lisp", args: %{"program" => "(return :ignored)"}}
+                       ],
+                       tokens: %{input: 5, output: 7}
+                     }
+                   ]),
+                 prelude_source_overrides: %{"agent.core" => core},
+                 kernel_run_id: "duplicate-llm-turn"
+               )
+    after
+      TraceLog.stop_memory_sink(sink)
+    end
+
+    assert [duplicate, success] = MemorySink.events(sink)
+
+    assert duplicate["agent_id"] == "duplicate-llm-turn"
+    assert duplicate["attempt"] == 2
+    assert duplicate["turn"] == 0
+    assert duplicate["committed"] == false
+    assert duplicate["status"] == "error"
+    assert duplicate["data"]["turn_type"] == "protocol_error"
+    assert duplicate["data"]["fail"]["reason"] == "duplicate_llm_complete_turn"
+
+    assert success["attempt"] == 1
+    assert success["turn"] == 1
+    assert success["committed"] == true
+    assert success["status"] == "ok"
+    assert success["total_tokens"] == 5
+    assert success["data"]["program"] == "(return 42)"
+  end
+
+  test "kernel turn events ignore non-integer token fields instead of raising" do
+    {:ok, sink} = TraceLog.start_memory_sink()
+
+    try do
+      assert {:ok, %{"value" => 42}} =
+               Kernel.run(%{"task" => "compute"},
+                 llm:
+                   scripted_llm([
+                     %{
+                       tool_calls: [
+                         %{name: "run_ptc_lisp", args: %{"program" => "(return 42)"}}
+                       ],
+                       tokens: %{input: 3, output: "4"}
+                     }
+                   ]),
+                 kernel_run_id: "mixed-token-turn"
+               )
+    after
+      TraceLog.stop_memory_sink(sink)
+    end
+
+    assert [turn] = MemorySink.events(sink)
+    assert turn["input_tokens"] == 3
+    assert turn["output_tokens"] == nil
+    assert turn["total_tokens"] == 3
   end
 
   test "variant agent.core missing eval turn fails closed" do
@@ -1377,15 +1829,27 @@ defmodule PtcRunner.KernelTest do
 
   defp seeded_agent_prelude_store do
     {:ok, store} = PreludeStore.new()
-    {:ok, _prompt} = PreludeStore.write(store, "agent.prompt", agent_prelude_source("prompt"))
+
+    {:ok, _prompt} =
+      PreludeStore.write(store, "agent.prompt", agent_prelude_source("prompt"), %{},
+        origin: {:file, "priv/preludes/agent/prompt.lisp"}
+      )
 
     {:ok, _feedback} =
-      PreludeStore.write(store, "agent.feedback", agent_prelude_source("feedback"))
+      PreludeStore.write(store, "agent.feedback", agent_prelude_source("feedback"), %{},
+        origin: {:file, "priv/preludes/agent/feedback.lisp"}
+      )
 
     {:ok, _core} =
-      PreludeStore.write(store, "agent.core", agent_prelude_source("core"), %{
-        "requires_preludes" => ["agent.prompt@1", "agent.feedback@1"]
-      })
+      PreludeStore.write(
+        store,
+        "agent.core",
+        agent_prelude_source("core"),
+        %{
+          "requires_preludes" => ["agent.prompt@1", "agent.feedback@1"]
+        },
+        origin: {:file, "priv/preludes/agent/core.lisp"}
+      )
 
     {:ok, store}
   end

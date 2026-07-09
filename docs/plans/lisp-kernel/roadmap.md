@@ -600,12 +600,16 @@ promote (execute §Teardown as M4), iterate, or archive with findings.
 
 The role-backed prelude selection cleanup is documented in
 [`autonomous-role-backed-prelude-selection.md`](autonomous-role-backed-prelude-selection.md).
-It is not an M3 benchmark and should not be run as an A/B. The core substrate is
-partially implemented: `Kernel.run/2` can resolve `agent.*` preludes from a
-`PreludeStore` by checking requested/default refs against a role allowlist, while
-embedded `priv/preludes/agent/*.lisp` remains the no-policy default seed path.
-The remaining work is closeout hardening: embedded-vs-role bundle equivalence,
-D4 TurnEvent correlation parity, parser/config edge cases, and final docs.
+It is not an M3 benchmark and should not be run as an A/B. The kernel substrate
+is implemented: `Kernel.run/2` can resolve `agent.*` preludes from a
+`PreludeStore` by checking requested/default refs against a role allowlist,
+expanding the dependency closure, and compiling one bundle, while embedded
+`priv/preludes/agent/*.lisp` remains the no-policy default seed path.
+Deterministic coverage pins embedded-vs-role bundle equivalence, D4 TurnEvent
+correlation parity, parser/config edge cases, missing-store/unknown-role/no
+selection failures, checksum mismatch surfacing, and source-free provenance.
+MCP adapter unification, external store loaders, and role-owned presentation
+extensions remain future work.
 
 This must not introduce a second "profile" abstraction. Role is the authority
 and allowed-surface concept; the run supplies selected refs or uses the role

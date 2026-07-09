@@ -1,9 +1,10 @@
 # Lisp Kernel - Autonomous Role-Backed Prelude Selection Plan
 
-**Status:** implementation substrate partially landed on `exp/lisp-kernel`;
-closeout/hardening brief updated 2026-07-09 after D4 kernel TurnEvents. The
-core resolver/runtime path exists; the remaining work is to close parity,
-documentation, and regression gaps before marking D20 resolved.
+**Status:** closeout/hardening pass in progress on `exp/lisp-kernel`;
+updated 2026-07-09 after role-backed PreludeStore selection, D4 kernel
+TurnEvents, and deterministic parity/regression coverage. The core
+resolver/runtime path exists and closeout now depends on review plus the normal
+quality gate.
 
 This plan is not an A/B run and not a live benchmark. It replaces the kernel's
 hardcoded `priv/preludes/agent/*.lisp` selection path with a role-resolved
@@ -14,7 +15,7 @@ surface within that role, or uses the role's default selection**.
 
 ## Current Implementation Audit
 
-Already present as of commit `566487cb`:
+Already present:
 
 - `PtcRunner.PreludeRolePolicy.from_map/1` parses the kernel-owned role subset
   without creating atoms from untrusted strings.
@@ -31,24 +32,18 @@ Already present as of commit `566487cb`:
 - `PreludeStore.write/5` accepts a validated per-write `origin:` option while
   preserving the existing store-level origin default.
 - Deterministic tests cover basic role parsing, unknown MCP-only keys,
-  default-prelude allowlist failures, duplicate grants, role-backed kernel
-  execution, source-free provenance, stale-core `turn` fail-closed behavior, and
-  per-write origin validation.
+  default-prelude allowlist failures, duplicate grants, atom-key parsing,
+  invalid default/role names, invalid requested `preludes:` type,
+  checksum-pinned requested refs, role-backed kernel execution, explicit
+  requested refs overriding `default_preludes`, missing store, unknown role, no
+  selected preludes, source-free provenance, stale-core `turn` fail-closed
+  behavior, per-write origin validation, embedded-vs-role bundle parity, and D4
+  TurnEvent correlation shape for embedded and role-backed runs.
 
 Known gaps before D20 should be called resolved:
 
-- The plan still needs explicit closeout tests proving embedded-default and
-  role-selected bundles have equivalent component hashes/runtime behavior and
-  D4 TurnEvent correlation.
-- `PtcRunner.PreludeRolePolicy` should cover more parser edge cases:
-  requested-ref checksum pins, invalid default role, empty/invalid roles, atom
-  keys vs string keys, invalid requested `preludes:` type, and checksum mismatch
-  surfacing from `PreludeStore.Selection`.
-- Kernel role-backed mode should have focused tests for missing/invalid
-  `:prelude_store`, missing/invalid `:role_policy`, unknown role, no selected
-  preludes, and explicit requested refs overriding `default_preludes`.
-- Docs still describe the work as mostly future work and should be updated once
-  closeout passes.
+- None for the kernel substrate. MCP adapter unification, external loaders, and
+  role-owned presentation extensions remain future work.
 
 ## Short Goal Prompt
 
@@ -230,12 +225,14 @@ accidentally replace the embedded kernel prelude. Loading source from files,
 HTTP, databases, or MCP is still outside runtime selection; hosts seed
 candidates into `PreludeStore` before calling the kernel.
 
-## Remaining Closeout Plan
+## Closeout Checklist
 
 Work risk-first. Do not broaden into MCP refactors, store editor tools, live
 model runs, or presentation-policy design.
 
 ### Phase A - Equivalence Harness
+
+Status: implemented in `test/ptc_runner/kernel_test.exs`.
 
 Add a helper in `test/ptc_runner/kernel_test.exs` or a focused
 `kernel/role_prelude_selection_test.exs` that builds both paths from the same
@@ -274,6 +271,9 @@ metadata drift.
 
 ### Phase B - Parser and Config-Space Closure
 
+Status: implemented in `test/ptc_runner/prelude_role_policy_test.exs` and
+`test/ptc_runner/kernel_test.exs`.
+
 Extend `test/ptc_runner/prelude_role_policy_test.exs` with focused cases for:
 
 - atom keys and string keys both parse without creating new atoms;
@@ -301,6 +301,9 @@ Extend kernel tests for:
 
 ### Phase C - Store-Origin Boundary Check
 
+Status: covered by `test/ptc_runner/kernel_test.exs` and existing
+`test/ptc_runner/prelude_store_test.exs` origin validation coverage.
+
 The per-write origin API already exists. Add only missing coverage if absent:
 
 - origin appears in `resolved_refs` public metadata used by
@@ -312,6 +315,9 @@ The per-write origin API already exists. Add only missing coverage if absent:
 Do not build filesystem/HTTP/database adapters in this phase.
 
 ### Phase D - Documentation and Registration
+
+Status: in progress; keep this section current with the final verification
+commands.
 
 After Phases A-C pass:
 
@@ -326,6 +332,9 @@ After Phases A-C pass:
   and strict-transitive behavior.
 
 ### Phase E - Verification and Review Gate
+
+Status: independent Codex review passed with no actionable findings; final
+quality gate passed with `mix precommit`.
 
 Run:
 

@@ -528,20 +528,22 @@ Record the resolution here when made:
   only facts and may be swapped fail-closed. Turn-aware reminder policy remains
   deferred. D17 is not resolved: source discovery remains a separate policy
   question, but renderer output does not advertise or include prelude source.
-- **D20 — Role-backed prelude selection.** Partially implemented 2026-07-09:
-  the kernel now has `PtcRunner.PreludeRolePolicy`, `PtcRunner.PreludeRuntime`,
-  role-backed `Kernel.compile_prelude/1`, source-free
-  `role_prelude_selection` provenance, and per-write `PreludeStore.write/5`
-  origins. The decision remains: use the existing MCP session role concept as
-  the long-term kernel authority and allowed-surface abstraction instead of a
+- **D20 — Role-backed prelude selection.** Resolved for the kernel substrate on
+  2026-07-09: `PtcRunner.Kernel.run/2` can resolve `agent.*` preludes from a
+  `PreludeStore` through `PtcRunner.PreludeRolePolicy` and
+  `PtcRunner.PreludeRuntime`, recording source-free
+  `role_prelude_selection` provenance and per-write `PreludeStore.write/5`
+  origins. The decision is to use the existing MCP session role concept as the
+  long-term kernel authority and allowed-surface abstraction instead of a
   separate "profile" layer. A role's `preludes` key keeps MCP allowlist
   semantics; a kernel run requests `preludes:` within that allowlist or falls
-  back to role `default_preludes`. Source loading remains host-side and writes
+  back to role `default_preludes`, then expands the `PreludeStore` dependency
+  closure into one compiled bundle. Source loading remains host-side and writes
   into `PreludeStore`; Lisp code must not load files/HTTP/database directly.
   Presentation options such as symbol-inventory renderer stay run-level until a
-  namespaced, cross-surface extension is designed. Remaining closeout is the
-  equivalence/parity and parser/config hardening in the autonomous plan:
-  [`autonomous-role-backed-prelude-selection.md`](autonomous-role-backed-prelude-selection.md).
+  namespaced, cross-surface extension is designed. Verified by:
+  `mix test test/ptc_runner/kernel_test.exs test/ptc_runner/prelude_role_policy_test.exs test/ptc_runner/lisp/heap_rebaseline_test.exs`.
+  MCP adapter unification and external loaders remain future work.
 
 ## Out of scope for the experiment
 

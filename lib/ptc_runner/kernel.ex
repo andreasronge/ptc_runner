@@ -281,7 +281,6 @@ defmodule PtcRunner.Kernel do
 
            duration_ms = System.monotonic_time(:millisecond) - started_at
            record_model_action(turn_recorder, args, action, duration_ms)
-           action
          end,
          [signature: "(system :string?, messages :any, turn :int) -> :map", visibility: :private]},
       "eval-program" =>
@@ -345,41 +344,69 @@ defmodule PtcRunner.Kernel do
   end
 
   defp record_model_action(recorder, args, action, duration_ms) do
-    turn = normalize_turn(Map.get(args, "turn"))
+    turn = normalize_turn(message_value(args, "turn"))
 
-    action =
+    {returned_action, event_action} =
       Agent.get_and_update(recorder, fn state ->
         attempt = state.attempt + 1
-        action = pending_action(action, duration_ms, attempt)
         state = %{state | attempt: attempt}
 
-        if action.kind in ["protocol_error", "transport_error"] do
-          {action, state}
-        else
-          {action, put_in(state, [:pending, turn], action)}
+        cond do
+          action.kind in ["protocol_error", "transport_error"] ->
+            event_action = pending_action(action, duration_ms, attempt)
+            {{action, event_action}, state}
+
+          Map.has_key?(state.pending, turn) ->
+            returned_action = duplicate_llm_turn_action(action, turn)
+            event_action = pending_action(returned_action, duration_ms, attempt)
+            {{returned_action, event_action}, state}
+
+          true ->
+            event_action = pending_action(action, duration_ms, attempt)
+            {{action, event_action}, put_in(state, [:pending, turn], event_action)}
         end
       end)
 
-    if action.kind in ["protocol_error", "transport_error"] do
-      emit_kernel_turn(recorder, action, nil, 0)
+    if event_action.kind in ["protocol_error", "transport_error"] do
+      emit_kernel_turn(recorder, event_action, nil, 0)
     end
 
-    :ok
+    returned_action
   end
 
-  defp record_eval_turn(recorder, turn, result, event_data, duration_ms) do
+  defp duplicate_llm_turn_action(action, turn) do
+    action
+    |> Map.drop([:public_tool_call, :tool_call_id])
+    |> Map.merge(%{
+      kind: "protocol_error",
+      program: nil,
+      reason: "duplicate_llm_complete_turn",
+      content: nil,
+      transport_error: nil,
+      duplicate_turn: turn
+    })
+  end
+
+  defp record_eval_turn(recorder, action, result, event_data, duration_ms) do
+    emit_kernel_turn(recorder, action, event_data, duration_ms)
+    result
+  end
+
+  defp claim_eval_action(recorder, turn, program) do
     turn = normalize_turn(turn)
 
-    action =
-      Agent.get_and_update(recorder, fn state ->
-        {
-          Map.get(state.pending, turn),
-          %{state | pending: Map.delete(state.pending, turn)}
-        }
-      end)
+    Agent.get_and_update(recorder, fn state ->
+      case Map.get(state.pending, turn) do
+        %{program: ^program} = action ->
+          {action, %{state | pending: Map.delete(state.pending, turn)}}
 
-    emit_kernel_turn(recorder, action || pending_action(%{}, 0, nil), event_data, duration_ms)
-    result
+        %{program: _program} = action ->
+          {{:program_mismatch, action}, %{state | pending: Map.delete(state.pending, turn)}}
+
+        nil ->
+          {nil, state}
+      end
+    end)
   end
 
   defp pending_action(action, duration_ms, attempt) when is_map(action) do
@@ -391,6 +418,14 @@ defmodule PtcRunner.Kernel do
       duration_ms: duration_ms,
       attempt: attempt
     }
+  end
+
+  defp mismatched_eval_action(action, supplied_program) do
+    Map.merge(action, %{
+      kind: "protocol_error",
+      reason: "mismatched_eval_program",
+      supplied_program: supplied_program
+    })
   end
 
   defp emit_kernel_turn(recorder, action, event_data, eval_duration_ms) do
@@ -417,9 +452,9 @@ defmodule PtcRunner.Kernel do
         committed: committed?,
         status: status,
         duration_ms: action.duration_ms + eval_duration_ms,
-        input_tokens: token_value(action.tokens, :input),
-        output_tokens: token_value(action.tokens, :output),
-        total_tokens: token_value(action.tokens, :total),
+        input_tokens: input_tokens(action.tokens),
+        output_tokens: output_tokens(action.tokens),
+        total_tokens: total_tokens(action.tokens),
         program: action.program,
         result_preview: Map.get(event_data || %{}, :result_preview),
         prints: Map.get(event_data || %{}, :prints, []),
@@ -464,6 +499,17 @@ defmodule PtcRunner.Kernel do
   defp turn_type(%{kind: "transport_error"}, _event_data), do: :transport_error
   defp turn_type(_action, _event_data), do: :eval
 
+  defp turn_fail(
+         %{kind: "protocol_error", reason: "mismatched_eval_program"} = action,
+         _event_data
+       ),
+       do: %{
+         reason: "mismatched_eval_program",
+         message: "eval-program program does not match the pending llm-complete action",
+         expected_program: action.program,
+         supplied_program: action.supplied_program
+       }
+
   defp turn_fail(%{kind: "protocol_error", reason: reason}, _event_data),
     do: %{
       reason: reason || "protocol_error",
@@ -503,6 +549,31 @@ defmodule PtcRunner.Kernel do
   end
 
   defp token_value(_tokens, _key), do: nil
+
+  defp input_tokens(tokens), do: integer_token_value(tokens, :input)
+  defp output_tokens(tokens), do: integer_token_value(tokens, :output)
+
+  defp total_tokens(tokens) do
+    case token_value(tokens, :total) do
+      total when is_integer(total) ->
+        total
+
+      _ ->
+        input = input_tokens(tokens)
+        output = output_tokens(tokens)
+
+        if is_integer(input) or is_integer(output) do
+          (input || 0) + (output || 0)
+        end
+    end
+  end
+
+  defp integer_token_value(tokens, key) do
+    case token_value(tokens, key) do
+      value when is_integer(value) -> value
+      _ -> nil
+    end
+  end
 
   defp resolve_system_prompt(args, override) do
     system = override || Map.get(args, "system")
@@ -680,6 +751,47 @@ defmodule PtcRunner.Kernel do
     turn = fetch_eval_turn!(args)
     started_at = System.monotonic_time(:millisecond)
 
+    case claim_eval_action(turn_recorder, turn, program) do
+      nil ->
+        unmatched_eval_turn_error(turn)
+
+      {:program_mismatch, action} ->
+        result = mismatched_eval_program_error(turn, action)
+
+        record_eval_turn(
+          turn_recorder,
+          mismatched_eval_action(action, program),
+          result,
+          nil,
+          System.monotonic_time(:millisecond) - started_at
+        )
+
+      action ->
+        do_eval_program(%{
+          program: program,
+          action: action,
+          mission: mission,
+          mission_tools: mission_tools,
+          opts: opts,
+          memory_agent: memory_agent,
+          events: events,
+          turn_recorder: turn_recorder,
+          started_at: started_at
+        })
+    end
+  end
+
+  defp do_eval_program(%{
+         program: program,
+         action: action,
+         mission: mission,
+         mission_tools: mission_tools,
+         opts: opts,
+         memory_agent: memory_agent,
+         events: events,
+         turn_recorder: turn_recorder,
+         started_at: started_at
+       }) do
     {result, event_data} =
       case checkout_memory(memory_agent) do
         {:ok, prior_memory} ->
@@ -707,13 +819,50 @@ defmodule PtcRunner.Kernel do
 
     record_eval_turn(
       turn_recorder,
-      turn,
+      action,
       result,
       event_data,
       System.monotonic_time(:millisecond) - started_at
     )
 
     result
+  end
+
+  defp unmatched_eval_turn_error(turn) do
+    eval_contract_error(
+      "unmatched_eval_program_turn",
+      "eval-program turn #{turn} does not match a pending llm-complete action; call eval-program exactly once for each model tool call.",
+      turn
+    )
+  end
+
+  defp mismatched_eval_program_error(turn, action) do
+    eval_contract_error(
+      "mismatched_eval_program",
+      "eval-program turn #{turn} program does not match the pending llm-complete action.",
+      turn,
+      %{"expected_program" => action.program}
+    )
+  end
+
+  defp eval_contract_error(reason, message, turn, details \\ %{}) do
+    %{
+      "status" => "error",
+      "reason" => reason,
+      "message" => message,
+      "details" => Map.put(details, "turn", turn),
+      "prints" => [],
+      "memory_summary" => %{
+        "defined" => [],
+        "defined_count" => 0,
+        "changed" => [],
+        "changed_count" => 0,
+        "entries" => [],
+        "truncated" => false,
+        "omitted_count" => 0,
+        "memory_bytes" => nil
+      }
+    }
   end
 
   defp fetch_eval_turn!(args) do
