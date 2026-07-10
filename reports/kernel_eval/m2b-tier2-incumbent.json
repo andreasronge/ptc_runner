@@ -1,0 +1,239 @@
+{
+  "mode": "live",
+  "aborted": false,
+  "provider": "openrouter",
+  "model": "openrouter:deepseek/deepseek-v4-flash",
+  "variant": "incumbent",
+  "abort_reason": null,
+  "suite": "tier2",
+  "runs": 1,
+  "case_definition_hash": "4b448ecc370db8260cc8b4537bd7ed61ae9c8c0c0bbec80203d754d362df4431",
+  "command_options": {
+    "mode": "live",
+    "report": "reports/kernel_eval/m2b-tier2-incumbent.md",
+    "case": null,
+    "seed": 17,
+    "variant": "incumbent",
+    "suite": "tier2",
+    "runs": 1,
+    "trace_dir": "reports/kernel_eval/m2b-tier2-incumbent-traces",
+    "llm_source": "registry",
+    "requested_model": "deepseek"
+  },
+  "llm_source": "registry",
+  "requested_model": "deepseek",
+  "commit": "27b49379922fd2968eb7cf43af59f565b489bb59",
+  "dataset_hash": "503d8233cce08aa825a00e14d49c6e13d2a9db931fa219a8cc3500866e8a0953",
+  "cases": [
+    {
+      "status": "fail",
+      "run": 1,
+      "case": "products_count",
+      "duration_ms": 2487,
+      "write_errors": 0,
+      "action_count": 1,
+      "action_hashes": [
+        "d4b4346e83b6ede5cc02e0545d4b7394ddbb8b418e837460f3159f7de74619bc"
+      ],
+      "actual_result": {
+        "count": 1,
+        "type": "map",
+        "hash": "d8bdf14e2486cac81be94e12231589e7ec3be87f806520e472a802f4175634d8"
+      },
+      "actual_turns": 1,
+      "dropped_turns": 0,
+      "eval_count": 1,
+      "expected_result": {
+        "constraint": {
+          "value": 500,
+          "kind": "eq"
+        },
+        "expect": "integer"
+      },
+      "expected_turns": 1,
+      "failure_hash": null,
+      "failure_reason": "expect_type_mismatch:integer",
+      "persistence_verified": null,
+      "prompt_hashes": [
+        "f3b308b6dab5f03481b0dc8c31b617c2b2bfc3eaaaa8008df140c56c551c16c0"
+      ],
+      "trace_path": "reports/kernel_eval/m2b-tier2-incumbent-traces/incumbent-products_count-run-1.jsonl",
+      "unexpected_turns": 0,
+      "preludes": [],
+      "inner_preludes": [],
+      "inner_prelude_call_counts": {},
+      "inner_prelude_projection": null
+    },
+    {
+      "status": "pass",
+      "run": 1,
+      "case": "delivered_orders",
+      "duration_ms": 2000,
+      "write_errors": 0,
+      "action_count": 1,
+      "action_hashes": [
+        "cffb6ffb63cb58ae517d522c2b6e5801b67609ee8745fac5f88d83ae210f3d33"
+      ],
+      "actual_result": {
+        "type": "integer",
+        "value": 200
+      },
+      "actual_turns": 1,
+      "dropped_turns": 0,
+      "eval_count": 1,
+      "expected_result": {
+        "constraint": {
+          "value": 200,
+          "kind": "eq"
+        },
+        "expect": "integer"
+      },
+      "expected_turns": 1,
+      "failure_hash": null,
+      "failure_reason": null,
+      "persistence_verified": null,
+      "prompt_hashes": [
+        "ebca92824545929add226f67faba60e8b588c2bec8dfbdae86bc4803d7382787"
+      ],
+      "trace_path": "reports/kernel_eval/m2b-tier2-incumbent-traces/incumbent-delivered_orders-run-1.jsonl",
+      "unexpected_turns": 0,
+      "preludes": [],
+      "inner_preludes": [],
+      "inner_prelude_call_counts": {},
+      "inner_prelude_projection": null
+    },
+    {
+      "status": "pass",
+      "run": 1,
+      "case": "total_revenue",
+      "duration_ms": 3664,
+      "write_errors": 0,
+      "action_count": 1,
+      "action_hashes": [
+        "d9cc12e163ea5f837562ec2a866940a8ba2b0650de008694b8fd4d13e8ca1448"
+      ],
+      "actual_result": {
+        "type": "float",
+        "value": 515675.0
+      },
+      "actual_turns": 1,
+      "dropped_turns": 0,
+      "eval_count": 1,
+      "expected_result": {
+        "constraint": {
+          "max": 515675.01,
+          "min": 515674.99,
+          "kind": "between"
+        },
+        "expect": "number"
+      },
+      "expected_turns": 1,
+      "failure_hash": null,
+      "failure_reason": null,
+      "persistence_verified": null,
+      "prompt_hashes": [
+        "04f802917230c4c3e3d60df10008af16eb95bd8e299ef53ff1b5d3e9d17a21a2"
+      ],
+      "trace_path": "reports/kernel_eval/m2b-tier2-incumbent-traces/incumbent-total_revenue-run-1.jsonl",
+      "unexpected_turns": 0,
+      "preludes": [],
+      "inner_preludes": [],
+      "inner_prelude_call_counts": {},
+      "inner_prelude_projection": null
+    },
+    {
+      "status": "fail",
+      "run": 1,
+      "case": "remote_employees",
+      "duration_ms": 5031,
+      "write_errors": 0,
+      "action_count": 2,
+      "action_hashes": [
+        "3e9b86f8f3c47c87c5cb227eb26507d7da0db1c0714d92dfa12327c99b88cf47",
+        "3e603eb8675d31f1a605895b28b339f5f4892425a4e024974f11bddf2d60f91e"
+      ],
+      "actual_result": {
+        "count": 1,
+        "type": "map",
+        "hash": "74bd1d256cc0d11e654d187de6d802d282e6d11b4b4345d297f0a3ef7689a50f"
+      },
+      "actual_turns": 2,
+      "dropped_turns": 0,
+      "eval_count": 2,
+      "expected_result": {
+        "constraint": {
+          "value": 67,
+          "kind": "eq"
+        },
+        "expect": "integer"
+      },
+      "expected_turns": 2,
+      "failure_hash": null,
+      "failure_reason": "expect_type_mismatch:integer",
+      "persistence_verified": null,
+      "prompt_hashes": [
+        "5bb8bcd461ffb127a6eb2da2199f7c3d19782ea2a7691b03c95aee78ca30715e",
+        "1108cb982c135f105cf30ea53a2092a5c4b92584b626d4b36636c9ccb53eefac"
+      ],
+      "trace_path": "reports/kernel_eval/m2b-tier2-incumbent-traces/incumbent-remote_employees-run-1.jsonl",
+      "unexpected_turns": 0,
+      "preludes": [],
+      "inner_preludes": [],
+      "inner_prelude_call_counts": {},
+      "inner_prelude_projection": null
+    },
+    {
+      "status": "fail",
+      "run": 1,
+      "case": "engineering_expenses",
+      "duration_ms": 18878,
+      "write_errors": 0,
+      "action_count": 4,
+      "action_hashes": [
+        "af506f257cb58f26a18505e23713eb844bb79cb79d7f9c0b2b5c77a14a1da2bf",
+        "419a8774a4e7516ed8aba9684d1f56c4f65d9dd5932a025972a1dfd32405ae5f",
+        "bd685cdd0a0020903d0a03c92e4b2fae52dd258dbd4f10e0661a0d02fd79a406",
+        "7fea8bdc53e6889b05aa986f0a23640d33cb22d27b21eebf7e36fcafd3a1d67d"
+      ],
+      "actual_result": {
+        "count": 1,
+        "type": "map",
+        "hash": "1323b4bb7ffe19976f334712ec96b5117b7f5ba93a08760cb0bbf54b9a4082ee"
+      },
+      "actual_turns": 4,
+      "dropped_turns": 0,
+      "eval_count": 4,
+      "expected_result": {
+        "constraint": {
+          "max": 24280.889999999992,
+          "min": 24280.869999999995,
+          "kind": "between"
+        },
+        "expect": "number"
+      },
+      "expected_turns": 4,
+      "failure_hash": null,
+      "failure_reason": "expect_type_mismatch:number",
+      "persistence_verified": false,
+      "prompt_hashes": [
+        "19212e164710116e35e124e882c9fe1e15595b4ed764cbfcacf3c3e233f4818a",
+        "56bdc8617275c952c9b324fad8945fc41985ce7ee153985e5569b4cd2b9214a3",
+        "1de4adfb655f3fc34533a61828fd7970d847788107d55049ec5c9c7a8c857907",
+        "df17ae284d74522b6518b2e3af7dc7a6c45cfea2ecc3057b9d4ad02f89177154"
+      ],
+      "trace_path": "reports/kernel_eval/m2b-tier2-incumbent-traces/incumbent-engineering_expenses-run-1.jsonl",
+      "unexpected_turns": 0,
+      "preludes": [],
+      "inner_preludes": [],
+      "inner_prelude_call_counts": {},
+      "inner_prelude_projection": null
+    }
+  ],
+  "dataset_seed": 17,
+  "evidence_eligible": true,
+  "preregistered_config": true,
+  "provenance_eligible": true,
+  "pass_rate": 0.4,
+  "pass_count": 2,
+  "case_count": 5
+}

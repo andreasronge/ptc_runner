@@ -71,4 +71,8 @@ M2, report both outcomes and treat the difference as run-to-run instability.
 
 ## Outcome
 
-Not run.
+Run completed on 2026-07-10 at commit `27b49379`. The pair was complete,
+non-aborted, and evidence-eligible. Kernel passed 4/5; incumbent passed 2/5.
+The overall gate failed because both cells were required to pass at least 3/5.
+Canonical evidence is in `reports/kernel_eval/m2b-tier2*`; analysis is in
+`reports/kernel_eval/m2b-analysis.md`.

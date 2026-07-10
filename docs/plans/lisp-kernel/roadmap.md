@@ -625,7 +625,10 @@ as the goal brief.
   observations recorded informally.
   Mock parity is 5/5 for both variants on an identical recorded dataset hash.
   The eligible 2026-07-10 run scored incumbent 2/5 and kernel 4/5. The overall
-  gate failed. A replication is frozen in `experiments/m2b-tier2-prereg.md`.
+  gate failed. M2b repeated the same aggregate scores and failed the same gate;
+  see `reports/kernel_eval/m2b-analysis.md` for the diagnostic finding that
+  incumbent failures are unstable scalar-envelope errors and the kernel's
+  persistence failure is a hidden list-versus-set oracle mismatch.
 - [x] Gate: standing gates + Tier-2 pass rates recorded (pre-register
   thresholds before running; suggest ≥ 3/5 each as a smoke bar, not a claim).
   The preregistered evidence is recorded; its overall verdict is fail because
