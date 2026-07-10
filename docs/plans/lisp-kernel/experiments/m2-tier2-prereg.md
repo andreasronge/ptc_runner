@@ -107,6 +107,9 @@ infrastructure-aborted pair remains invalid regardless of count.
 
 ## Outcome
 
-Not run. Lifecycle launch work is complete, the provider key/model resolution
-is available, and mock mode passes both variants. The frozen paired live command
-is ready to run from a clean worktree.
+Run completed on 2026-07-10 at commit `a693c6d0`. The pair was complete,
+non-aborted, and evidence-eligible. Kernel passed 4/5; incumbent passed 2/5.
+The overall gate failed because both cells were required to pass at least 3/5.
+Canonical evidence is in `reports/kernel_eval/m2-tier2*`. A prior mistaken
+unpaired kernel run was preserved as `m2-tier2-mistaken-unpaired*` and excluded
+from the verdict.

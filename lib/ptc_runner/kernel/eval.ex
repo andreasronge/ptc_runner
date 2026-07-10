@@ -852,7 +852,9 @@ defmodule PtcRunner.Kernel.Eval do
             max_turns: eval_case.max_turns,
             kernel_run_id: kernel_run_id,
             prelude_source_overrides: Keyword.get(opts, :prelude_source_overrides, %{}),
-            unsafe_debug: Keyword.get(opts, :unsafe_debug, false)
+            unsafe_debug:
+              Keyword.get(opts, :unsafe_debug, false) or
+                is_pid(Keyword.get(opts, :unsafe_debug_agent))
           ]
           |> Keyword.merge(
             Keyword.take(opts, [
@@ -866,7 +868,12 @@ defmodule PtcRunner.Kernel.Eval do
           )
           |> Keyword.put(
             :events,
-            &record_event(events, Keyword.get(opts, :unsafe_debug_agent), &1)
+            &record_event(
+              events,
+              Keyword.get(opts, :unsafe_debug_agent),
+              %{variant: "kernel", case: eval_case.id, run: run_index},
+              &1
+            )
           )
 
         trace_path = trace_path(eval_case, run_index, opts)
@@ -938,7 +945,21 @@ defmodule PtcRunner.Kernel.Eval do
       try do
         hashed_llm = fn request ->
           Agent.update(prompt_hashes, &[hash_term(request) | &1])
-          llm.(request)
+          identity = %{variant: "incumbent", case: eval_case.id, run: run_index}
+
+          maybe_record_unsafe(
+            Keyword.get(opts, :unsafe_debug_agent),
+            Map.merge(identity, %{event: "unsafe_llm_request", request: request})
+          )
+
+          response = llm.(request)
+
+          maybe_record_unsafe(
+            Keyword.get(opts, :unsafe_debug_agent),
+            Map.merge(identity, %{event: "unsafe_llm_response", response: response})
+          )
+
+          response
         end
 
         trace_path = trace_path(eval_case, run_index, Keyword.put(opts, :variant, "incumbent"))
@@ -1075,13 +1096,16 @@ defmodule PtcRunner.Kernel.Eval do
     end
   end
 
-  defp record_event(events, unsafe_debug_agent, event) do
+  defp record_event(events, unsafe_debug_agent, identity, event) do
     Agent.update(events, fn current -> [sanitize_event(event) | current] end)
-
-    if is_pid(unsafe_debug_agent) and Process.alive?(unsafe_debug_agent) do
-      Agent.update(unsafe_debug_agent, fn current -> [unsafe_event(event) | current] end)
-    end
+    maybe_record_unsafe(unsafe_debug_agent, Map.merge(identity, unsafe_event(event)))
   end
+
+  defp maybe_record_unsafe(agent, event) when is_pid(agent) do
+    if Process.alive?(agent), do: Agent.update(agent, fn current -> [event | current] end)
+  end
+
+  defp maybe_record_unsafe(_agent, _event), do: :ok
 
   defp unsafe_trace(nil), do: nil
 
@@ -1705,6 +1729,7 @@ defmodule PtcRunner.Kernel.Eval do
       |> maybe_put_hash("result_hash", result_preview)
       |> Map.put("prints_count", if(is_list(prints), do: length(prints), else: 0))
       |> maybe_put_memory_count(memory_diff)
+      |> maybe_put_changed_keys(memory_diff)
       |> Map.update("catalog_ops", [], &sanitize_catalog_ops/1)
       |> Map.update("fail", nil, &sanitize_persisted_fail/1)
 
@@ -1730,6 +1755,14 @@ defmodule PtcRunner.Kernel.Eval do
   end
 
   defp sanitize_persisted_event(_event), do: nil
+
+  defp maybe_put_changed_keys(data, %{"changed_keys" => keys}) when is_list(keys),
+    do: Map.put(data, "changed_keys", keys)
+
+  defp maybe_put_changed_keys(data, %{changed_keys: keys}) when is_list(keys),
+    do: Map.put(data, "changed_keys", keys)
+
+  defp maybe_put_changed_keys(data, _memory_diff), do: data
 
   defp maybe_put_hash(map, _key, nil), do: map
   defp maybe_put_hash(map, key, value), do: Map.put(map, key, hash_term(value))

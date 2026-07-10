@@ -356,6 +356,9 @@ the answer.
   to compile the kernel prelude bundle, inspect docs/meta/source, print a
   manifest/lock view (component id, namespace, origin, hash, deps, compile API),
   run a scripted mission, and replay a failing trace.
+  The eval CLI now has an explicit mode-`0600` unsafe diagnostic report that
+  captures exact model-visible requests/responses for both variants; case-level
+  rendering and replay UX remain open here.
 - [ ] **R20 — Kernel error envelope**: stable categories and rendering for
   prelude compile/runtime errors, private capability denial, LLM failure,
   protocol error, inner eval parse/eval/fail, timeout, heap/setup heap, and
@@ -398,6 +401,11 @@ the answer.
   schema extension (`driver: "kernel"`), analyzer compatibility, offline replay
   cassettes, kernel trace redaction defaults, dropped-event counters, and
   source-exposure policy for `agent.*` preludes. (Feeds D4, D17, Tier 2.)
+  First observation slice completed 2026-07-10: canonical evidence remains
+  sanitized, changed binding names (not values) survive in the safe projection,
+  and raw prompt/program/result capture is explicit, private, and makes a run
+  preregistration-ineligible. Private cassette retention and offline replay
+  remain open.
 - [ ] **R9 — Teardown inventory** (see §Teardown below): classify every
   module/test/doc/config/prompt under `lib/ptc_runner/sub_agent/`, related
   guides, prompt templates, e2e fixtures, and benchmark setup into **keep**
@@ -613,15 +621,15 @@ as the goal brief.
 - [x] Host-held state, trace, tool-cache, and pmap behavior follow R21/R22
   decisions; S11/S12 pass before widening live runs. Evidence:
   [`m2-lifecycle-audit.md`](m2-lifecycle-audit.md).
-- [ ] Parity per rule: Tier 2 paired incumbent→kernel run on the same suite;
+- [x] Parity per rule: Tier 2 paired incumbent→kernel run on the same suite;
   observations recorded informally.
   Mock parity is 5/5 for both variants on an identical recorded dataset hash.
-  The paired live command and the ≥3/5 threshold are frozen in
-  `experiments/m2-tier2-prereg.md`; the live cells have not run.
-- [ ] Gate: standing gates + Tier-2 pass rates recorded (pre-register
+  The eligible 2026-07-10 run scored incumbent 2/5 and kernel 4/5. The overall
+  gate failed. A replication is frozen in `experiments/m2b-tier2-prereg.md`.
+- [x] Gate: standing gates + Tier-2 pass rates recorded (pre-register
   thresholds before running; suggest ≥ 3/5 each as a smoke bar, not a claim).
-  Threshold preregistration and lifecycle prerequisites are complete; only the
-  paired live evidence remains open.
+  The preregistered evidence is recorded; its overall verdict is fail because
+  the incumbent cell missed 3/5.
 
 ## M3 — The payoff experiment: policy A/B with zero Elixir diff
 

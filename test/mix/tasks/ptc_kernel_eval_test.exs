@@ -51,6 +51,26 @@ defmodule Mix.Tasks.Ptc.KernelEvalTest do
   end
 
   @tag :tmp_dir
+  test "unsafe diagnostic reports are private and contain captured events", %{tmp_dir: dir} do
+    path = Path.join(dir, "unsafe.md")
+
+    assert :ok =
+             KernelEval.write_unsafe_debug_report(path, [
+               %{
+                 variant: "kernel",
+                 case: "example",
+                 run: 1,
+                 event: "unsafe_llm_request",
+                 system: "secret system",
+                 messages: [%{role: :user, content: "secret task"}]
+               }
+             ])
+
+    assert File.read!(path) =~ "secret system"
+    assert Bitwise.band(File.stat!(path).mode, 0o777) == 0o600
+  end
+
+  @tag :tmp_dir
   test "paired task completes after publishing its reports", %{tmp_dir: dir} do
     report = Path.join(dir, "pair.md")
     Mix.Task.reenable("ptc.kernel_eval")

@@ -1186,7 +1186,8 @@ defmodule PtcRunner.Kernel.EvalTest do
     assert Eval.failure_count(report) == 1
   end
 
-  test "mock report trace redacts raw host-held memory values" do
+  @tag :tmp_dir
+  test "mock report trace redacts raw host-held memory values", %{tmp_dir: dir} do
     secret = String.duplicate("SECRET-TRACE-", 40)
 
     memory_case = %{
@@ -1199,13 +1200,17 @@ defmodule PtcRunner.Kernel.EvalTest do
       mock_programs: [~s|(do (def payload "#{secret}") (return :ok))|]
     }
 
-    assert {:ok, report} = Eval.run_cases([memory_case], mode: :mock)
+    assert {:ok, report} = Eval.run_cases([memory_case], mode: :mock, trace_dir: dir)
     assert [%{status: :pass, trace: trace}] = report.cases
     inspected = inspect(trace)
 
     refute inspected =~ secret
     refute inspected =~ "payload"
     assert Enum.any?(trace, &(&1.event == "memory"))
+
+    persisted = report.cases |> hd() |> Map.fetch!(:trace_path) |> File.read!()
+    refute persisted =~ secret
+    assert persisted =~ ~s|"changed_keys":["payload"]|
   end
 
   @tag :tmp_dir
