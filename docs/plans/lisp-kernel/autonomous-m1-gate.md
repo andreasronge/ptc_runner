@@ -115,7 +115,13 @@ duplicate name, then normalized-name-sorted format/privacy validation.
 
 ### 4. Stable public failure envelopes
 
-Keep these classes distinct and bounded/JSON-safe:
+Establish the following target boundary contract. This is a migration, not a
+description of uniformly existing behavior: current `Kernel.run/2` preflight
+paths return incompatible atom/string reason maps, and the memory-cap error
+echoes the invalid value. M1 must normalize them rather than adding a third
+preflight shape.
+
+Keep the three target classes distinct and bounded/JSON-safe:
 
 | Class | Shape |
 | --- | --- |
@@ -125,6 +131,27 @@ Keep these classes distinct and bounded/JSON-safe:
 
 Never echo raw invalid values or arbitrary inspection output. Canonical option
 names and error details are strings from a fixed vocabulary.
+
+Migrate every existing public preflight path, including:
+
+- malformed/missing `role_policy`, missing/unknown `role`, invalid
+  `prelude_store`, and invalid or ungranted `preludes`/`inner_preludes`;
+- `kernel_memory_byte_cap`, removing its current raw `value` field;
+- missing/non-function `llm` and every existing/new execution-limit option;
+- malformed, public, non-native, duplicate, or reserved
+  `private_capabilities` entries.
+
+At the public `Kernel.run/2` boundary these return
+`reason: "invalid_kernel_option"` with canonical string `option` and
+`value_type`, except private-capability failures, which use
+`reason: "invalid_private_capability"` and may include bounded string
+`capability` and fixed-vocabulary `detail`.
+
+Internal policy/store/runtime modules and `Kernel.compile_prelude/1` may retain
+their detailed atom-keyed errors for composition and focused diagnostics.
+`Kernel.run/2` owns the public normalization layer. Tests must pin both the
+internal detail contract where it is intentionally public and the normalized
+kernel boundary, so callers never need to match three preflight formats.
 
 ### 5. Minimum Tier 2 smoke/report contract
 
@@ -182,7 +209,8 @@ HTTP/provider stability.
 2. **Failing tests:** add deterministic boundary reproductions for uncovered
    behavior.
 3. **Kernel hardening:** implement option validation, owner acquisition/cleanup,
-   atomic LLM budget, private capabilities, and stable envelopes.
+   atomic LLM budget, private capabilities, and the public preflight migration
+   for role/policy/store/selection and memory-cap errors.
 4. **Smoke/report:** extend the existing eval task and TraceLog contract with
    focused tests.
 5. **Soak:** add and run the two S11 cells.
