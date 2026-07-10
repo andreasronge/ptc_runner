@@ -194,7 +194,16 @@ not create parallel lanes unless explicitly requested later.
 
 ## Live Gates
 
-If `OPENROUTER_API_KEY` is available, run Tier 1 only through:
+Credentials are available in this worktree's ignored `.env`. The blessed eval
+path calls `PtcRunner.Dotenv.load/0` before live model resolution, so do not
+manually copy, print, or commit the key. Use the repository model alias
+`deepseek`, which currently resolves through OpenRouter to
+`openrouter:deepseek/deepseek-v4-flash`. Keep the alias in commands and record
+both the requested alias and exact resolved identifier in reports; the model
+registry remains the source of truth if the latest approved DeepSeek route is
+updated later.
+
+Tier 1 is therefore a required M1 run through:
 
 ```sh
 mix test test/ptc_runner/kernel/e2e_test.exs --include e2e
@@ -209,8 +218,9 @@ mix ptc.kernel_eval --suite smoke --live --runs 5 --variant kernel \
   --allow-failures
 ```
 
-Record unavailable credentials/provider failures honestly. They do not become
-a pass, and they do not authorize an ad-hoc live harness.
+Run Tier 2 with `--model deepseek` as shown above. Provider failures must still
+be recorded honestly; they do not become a pass and do not authorize an ad-hoc
+live harness or a switch to another provider/model.
 
 ## Non-Goals
 
