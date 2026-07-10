@@ -722,6 +722,44 @@ defmodule PtcRunner.KernelTest do
     assert "concurrent_eval_program" in reasons
   end
 
+  test "outer timeout promptly terminates a blocked linked inner sandbox" do
+    parent = self()
+
+    tools = %{
+      "block" => fn _args ->
+        send(parent, {:inner_sandbox, self()})
+
+        receive do
+          :never -> nil
+        after
+          5_000 -> nil
+        end
+      end
+    }
+
+    task =
+      Task.async(fn ->
+        Kernel.run(%{"task" => "compute"},
+          llm:
+            scripted_llm([
+              %{
+                tool_calls: [
+                  %{name: "run_ptc_lisp", args: %{"program" => "(tool/block {})"}}
+                ]
+              }
+            ]),
+          tools: tools,
+          timeout: 1_000,
+          inner_timeout: 10_000
+        )
+      end)
+
+    assert_receive {:inner_sandbox, inner_pid}, 5_000
+    inner_monitor = Process.monitor(inner_pid)
+    assert {:error, _error} = Task.await(task, 5_000)
+    assert_receive {:DOWN, ^inner_monitor, :process, ^inner_pid, _reason}, 1_000
+  end
+
   test "retry feedback renders bounded memory summary without dumping large values" do
     parent = self()
     large = String.duplicate("SECRET-BOUNDARY-", 40)

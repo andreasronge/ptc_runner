@@ -96,8 +96,8 @@ host-held memory (or opaque memory token) and the spike documents why.
 Note: even on PASS, keyword-lossiness is a semantic divergence from today's
 host-side threading — D1 weighs that against the purity win.
 
-**Result.** Partial kernel-path evidence, 2026-07-08. The M3 host-held memory
-implementation now starts a per-`Kernel.run/2` Agent, passes its native map to
+**Result.** Kernel-path evidence, updated 2026-07-10. The host-held memory
+implementation starts a monitored per-`Kernel.run/2` `StateHandle`, passes its native map to
 each inner `Lisp.run_native/2` with `preserve_runtime_callables: true`, commits
 returned `step.memory` under a heap-oriented byte cap, and returns only a
 bounded `memory_summary` to `agent.core`.
@@ -518,7 +518,15 @@ stay bounded.
 **Fail.** State survives run end unexpectedly, tokens leak authority across
 runs, pmap races corrupt state, or projections expose unbounded native memory.
 
-**Result.** _pending_
+**Result.** PASS, 2026-07-10. `PtcRunner.Kernel.StateHandle` owns each run's
+native memory behind an unforgeable run token and caller-bound checkout lease.
+It monitors both the run owner and active lease holder, rejects stale handles,
+leases, and concurrent checkout deterministically, rechecks the byte cap on
+commit, exposes only a bounded projection, and is stopped in kernel cleanup.
+Focused tests cover owner/holder death, foreign use of a valid lease, cap
+failure preserving prior memory, and run-end invalidation. Kernel integration
+tests cover continuation, concurrent `eval-program`, and linked inner cleanup
+on outer timeout; the registered 1,000/100 lifecycle soak passed.
 
 ---
 

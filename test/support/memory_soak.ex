@@ -53,6 +53,9 @@ defmodule PtcRunner.TestSupport.MemorySoak do
           mem: keyword(),
           atoms: non_neg_integer(),
           procs: non_neg_integer(),
+          reductions: non_neg_integer(),
+          mailbox_messages: non_neg_integer(),
+          max_mailbox_messages: non_neg_integer(),
           top_memory: [{pid(), non_neg_integer(), term()}],
           bin_leak: integer(),
           monotonic_ms: integer()
@@ -62,11 +65,15 @@ defmodule PtcRunner.TestSupport.MemorySoak do
   @spec snapshot(keyword()) :: snapshot()
   def snapshot(opts \\ []) do
     if Keyword.get(opts, :gc, true), do: gc_everywhere()
+    process_totals = process_totals()
 
     %{
       mem: :erlang.memory(),
       atoms: :erlang.system_info(:atom_count),
       procs: :erlang.system_info(:process_count),
+      reductions: process_totals.reductions,
+      mailbox_messages: process_totals.mailbox_messages,
+      max_mailbox_messages: process_totals.max_mailbox_messages,
       top_memory: top_by_memory(Keyword.get(opts, :top_n, top_n())),
       bin_leak: bin_leak(),
       monotonic_ms: System.monotonic_time(:millisecond)
@@ -264,7 +271,16 @@ defmodule PtcRunner.TestSupport.MemorySoak do
   end
 
   @doc "Pretty-print a snapshot."
-  def format(%{mem: mem, atoms: atoms, procs: procs, top_memory: top, bin_leak: bl}) do
+  def format(%{
+        mem: mem,
+        atoms: atoms,
+        procs: procs,
+        reductions: reductions,
+        mailbox_messages: mailbox_messages,
+        max_mailbox_messages: max_mailbox_messages,
+        top_memory: top,
+        bin_leak: bl
+      }) do
     """
       total: #{format_bytes(mem[:total])}
       processes: #{format_bytes(mem[:processes])}
@@ -273,6 +289,8 @@ defmodule PtcRunner.TestSupport.MemorySoak do
       atom: #{format_bytes(mem[:atom])} (#{atoms} atoms)
       code: #{format_bytes(mem[:code])}
       procs: #{procs}
+      reductions: #{reductions}
+      mailbox messages: #{mailbox_messages} (max per process: #{max_mailbox_messages})
       bin_leak reclaim: #{bl} (lower = less refc-binary pressure)
       top by memory:
     #{format_top(top)}
@@ -315,6 +333,26 @@ defmodule PtcRunner.TestSupport.MemorySoak do
       |> Enum.sort_by(fn {_, m, _} -> -m end)
       |> Enum.take(n)
     end
+  end
+
+  defp process_totals do
+    Enum.reduce(
+      Process.list(),
+      %{reductions: 0, mailbox_messages: 0, max_mailbox_messages: 0},
+      fn pid, acc ->
+        case Process.info(pid, [:reductions, :message_queue_len]) do
+          [{:reductions, reductions}, {:message_queue_len, mailbox_messages}] ->
+            %{
+              reductions: acc.reductions + reductions,
+              mailbox_messages: acc.mailbox_messages + mailbox_messages,
+              max_mailbox_messages: max(acc.max_mailbox_messages, mailbox_messages)
+            }
+
+          _dead ->
+            acc
+        end
+      end
+    )
   end
 
   defp bin_leak do

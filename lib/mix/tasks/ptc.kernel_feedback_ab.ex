@@ -50,7 +50,7 @@ defmodule Mix.Tasks.Ptc.KernelFeedbackAb do
       |> maybe_put_debug_agent(debug_agent)
 
     try do
-      case FeedbackAB.run(eval_opts) do
+      case run_feedback(eval_opts) do
         {:ok, result} ->
           handle_result!(result, opts)
 
@@ -64,6 +64,12 @@ defmodule Mix.Tasks.Ptc.KernelFeedbackAb do
       cleanup_debug.()
     end
   end
+
+  # Keep the Mix task boundary typed to the public contract. Dialyzer narrows
+  # FeedbackAB.run/1 to its live preflight error path when analysing this task,
+  # even though the mock path and injected-live path return successful results.
+  @spec run_feedback(keyword()) :: {:ok, FeedbackAB.result()} | {:error, term()}
+  defp run_feedback(opts), do: (&FeedbackAB.run/1).(opts)
 
   @doc false
   @spec handle_result!(FeedbackAB.result(), keyword()) :: :ok | no_return()

@@ -3,6 +3,7 @@ defmodule PtcRunner.Kernel do
 
   alias PtcRunner.Kernel.Action
   alias PtcRunner.Kernel.InnerPrelude
+  alias PtcRunner.Kernel.StateHandle
   alias PtcRunner.Lisp
   alias PtcRunner.Lisp.ExecutionError
   alias PtcRunner.Lisp.Format
@@ -26,6 +27,8 @@ defmodule PtcRunner.Kernel do
   @outer_heap_words 8_000_000
   @inner_timeout 1_000
   @inner_heap_words 1_250_000
+  @outer_parallel_workers 2
+  @inner_parallel_workers 1
   @memory_byte_cap 2_000_000
   @summary_name_limit 24
   @summary_entry_limit 8
@@ -275,7 +278,8 @@ defmodule PtcRunner.Kernel do
          :ok <- log_prelude(opts, preludes.inner, :inner),
          {:ok, symbol_facts, symbol_inventory, symbol_inventory_meta} <-
            render_symbol_inventory(mission, opts, preludes.inner),
-         {:ok, memory} <- Agent.start_link(fn -> %{memory: %{}, busy?: false} end) do
+         {:ok, memory} <-
+           StateHandle.start(byte_cap: Keyword.fetch!(opts, :kernel_memory_byte_cap)) do
       run_with_memory(
         mission,
         opts,
@@ -320,7 +324,7 @@ defmodule PtcRunner.Kernel do
 
     result
   after
-    stop_agent(memory)
+    StateHandle.stop(memory)
   end
 
   defp run_with_owners(
@@ -361,7 +365,9 @@ defmodule PtcRunner.Kernel do
              filter_context: false,
              timeout: Keyword.fetch!(opts, :timeout),
              max_heap: Keyword.fetch!(opts, :max_heap),
-             setup_max_heap: Keyword.fetch!(opts, :setup_max_heap)
+             setup_max_heap: Keyword.fetch!(opts, :setup_max_heap),
+             worker_max_heap: Keyword.fetch!(opts, :max_heap),
+             max_parallel_workers: @outer_parallel_workers
            ) do
         {:ok, step} -> unwrap_outer_step(step)
         {:error, step} -> {:error, %{reason: "kernel_error", step: project_public_step(step)}}
@@ -1355,21 +1361,21 @@ defmodule PtcRunner.Kernel do
          started_at: started_at
        }) do
     {result, event_data} =
-      case checkout_memory(memory_agent) do
-        {:ok, prior_memory} ->
+      case StateHandle.checkout(memory_agent) do
+        {:ok, prior_memory, lease} ->
           try do
             {result, next_memory, event_data} =
               run_inner_program(program, mission, mission_tools, opts, prior_memory)
 
-            checkin_memory(memory_agent, next_memory)
+            :ok = StateHandle.checkin(memory_agent, lease, next_memory)
             {result, event_data}
           rescue
             e ->
-              release_memory(memory_agent)
+              StateHandle.release(memory_agent, lease)
               reraise e, __STACKTRACE__
           catch
             kind, reason ->
-              release_memory(memory_agent)
+              StateHandle.release(memory_agent, lease)
               :erlang.raise(kind, reason, __STACKTRACE__)
           end
 
@@ -1455,32 +1461,17 @@ defmodule PtcRunner.Kernel do
            discovery_exec: nil,
            memory: prior_memory,
            preserve_runtime_callables: true,
+           link: true,
            timeout: Keyword.get(opts, :inner_timeout, @inner_timeout),
            max_heap: Keyword.get(opts, :inner_max_heap, @inner_heap_words),
+           worker_max_heap: Keyword.get(opts, :inner_max_heap, @inner_heap_words),
+           max_parallel_workers: @inner_parallel_workers,
            max_tool_calls:
              Keyword.get(opts, :inner_max_tool_calls, Keyword.get(opts, :max_tool_calls))
          ) do
       {:ok, step} -> commit_and_project_step(:ok, step, prior_memory, opts)
       {:error, step} -> commit_and_project_step(:error, step, prior_memory, opts)
     end
-  end
-
-  defp checkout_memory(memory_agent) do
-    Agent.get_and_update(memory_agent, fn
-      %{memory: memory, busy?: false} = state ->
-        {{:ok, memory}, %{state | busy?: true}}
-
-      %{memory: memory} = state ->
-        {{:busy, memory}, state}
-    end)
-  end
-
-  defp checkin_memory(memory_agent, memory) do
-    Agent.update(memory_agent, fn state -> %{state | memory: memory, busy?: false} end)
-  end
-
-  defp release_memory(memory_agent) do
-    Agent.update(memory_agent, fn state -> %{state | busy?: false} end)
   end
 
   defp concurrent_eval_error(prior_memory) do

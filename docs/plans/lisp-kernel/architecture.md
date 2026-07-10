@@ -83,9 +83,9 @@ So:
 - **Model program** (untrusted, LLM-emitted): standard strict sandbox,
   spawned per-eval by a kernel capability.
 
-Known wrinkle: if the outer sandbox is timeout-killed, an in-flight inner
-sandbox is orphaned until its own 1s limit fires (acceptable; `link:` exists
-if not). See spike S1.
+Kernel inner sandboxes run with `link: true`. If the outer sandbox is
+timeout-killed, the link promptly terminates in-flight inner work; the inner
+timeout remains an independent backstop. See spike S1.
 
 ## Copy-Volume Budget (risk)
 

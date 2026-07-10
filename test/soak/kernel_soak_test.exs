@@ -13,6 +13,7 @@ defmodule PtcRunner.KernelSoakTest do
 
   test "untraced kernel owner churn stays bounded across complete one-turn runs" do
     iterations = MemorySoak.iteration_count()
+    finch_before = finch_health!()
 
     {before, mid, after_snapshot} =
       MemorySoak.measure3(iterations, [warmup: 25], fn phase ->
@@ -32,10 +33,12 @@ defmodule PtcRunner.KernelSoakTest do
     )
 
     assert_trace_state_empty()
+    assert_finch_stable!(finch_before)
   end
 
   test "100 traced kernel turns persist without drops and collectors stop", %{tmp_dir: dir} do
     iterations = 100
+    finch_before = finch_health!()
 
     {before, mid, after_snapshot} =
       MemorySoak.measure3(iterations, [warmup: 10], fn phase ->
@@ -82,6 +85,7 @@ defmodule PtcRunner.KernelSoakTest do
     )
 
     assert_trace_state_empty()
+    assert_finch_stable!(finch_before)
   end
 
   defp assert_one_turn_kernel(_phase) do
@@ -110,6 +114,19 @@ defmodule PtcRunner.KernelSoakTest do
     |> Analyzer.load()
     |> Analyzer.turn_events()
     |> Enum.count(&(&1["driver"] == "kernel"))
+  end
+
+  defp finch_health! do
+    pid = Process.whereis(Req.Finch)
+    assert is_pid(pid) and Process.alive?(pid)
+    {:message_queue_len, mailbox_messages} = Process.info(pid, :message_queue_len)
+    %{pid: pid, mailbox_messages: mailbox_messages}
+  end
+
+  defp assert_finch_stable!(before) do
+    after_health = finch_health!()
+    assert after_health.pid == before.pid
+    assert after_health.mailbox_messages <= before.mailbox_messages + 1
   end
 
   defp phase_name({name, _index}), do: Atom.to_string(name)

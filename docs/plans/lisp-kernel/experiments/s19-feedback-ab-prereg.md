@@ -76,7 +76,7 @@ Any later randomized execution order must use seed `s19-feedback-ab-order-v1`.
 - Feedback contract: both cells return JSON containing
   `type`, `instruction`, and `untrusted_eval_result`; neither cell mutates or
   filters `untrusted_eval_result.memory_summary`.
-- Host-held memory: `Kernel.run/2` uses one per-run owner `Agent`, commits
+- Host-held memory: `Kernel.run/2` uses one per-run monitored `StateHandle`, commits
   inner `Lisp.run_native/2` memory only when under the byte cap, preserves
   runtime callables, and projects only bounded `memory_summary` to the prelude.
 - Memory cap/order: `kernel_memory_byte_cap` default `2_000_000`; defined and

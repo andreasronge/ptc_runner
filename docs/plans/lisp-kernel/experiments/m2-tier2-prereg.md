@@ -101,11 +101,12 @@ infrastructure-aborted pair remains invalid regardless of count.
 - No statistical or superiority claim.
 - No kernel-versus-incumbent optimization based on these five outcomes.
 - No parallel `agent.core`, sessions, compaction, MCP, or self-improvement.
-- No widened live run until R21/R22 and the remaining S11/S12 lifecycle checks
-  authorize it.
+- R21/R22 and S11/S12 launch checks are closed in
+  [`../m2-lifecycle-audit.md`](../m2-lifecycle-audit.md). This authorization is
+  limited to the frozen sequential paired command below.
 
 ## Outcome
 
-Not run. The paired live cells remain gated on the lifecycle work above and an
-available provider key. Mock mode must pass both variants before this section is
-updated.
+Not run. Lifecycle launch work is complete, the provider key/model resolution
+is available, and mock mode passes both variants. The frozen paired live command
+is ready to run from a clean worktree.

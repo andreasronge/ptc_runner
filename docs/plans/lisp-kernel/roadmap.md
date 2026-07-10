@@ -361,16 +361,17 @@ the answer.
   protocol error, inner eval parse/eval/fail, timeout, heap/setup heap, and
   budget exhaustion; define prelude-visible value, host result, trace fields,
   and report rendering for each.
-- [ ] **R21 — Runtime edge policy**: inner `link: true` cleanup, shared
+- [x] **R21 — Runtime edge policy**: inner `link: true` cleanup, shared
   atomic/server-owned LLM/eval counters under `pmap`, outer/inner
   `pmap_*`/worker heap settings, host-held memory holder lifecycle, and
   journal/tool-cache threading or explicit exclusion.
-- [ ] **R22 — Soak/lifecycle audit**: inventory every long-lived owner process,
+- [x] **R22 — Soak/lifecycle audit**: inventory every long-lived owner process,
   process-dictionary key, async queue, ref-counted binary holder, closure
   capture, cache, trace collector, HTTP pool interaction, and atomics slot
   involved in one kernel run. Define before/after measurements for process
   count, memory, reductions, mailbox length, trace drops, and pool health.
-  (Feeds D16, S11.)
+  (Feeds D16, S11.) Closed for the M2 sequential paired scope in
+  [`m2-lifecycle-audit.md`](m2-lifecycle-audit.md).
 - [ ] **R23 — Model-facing action UX**: decide whether the V1 tool schema stays
   `program`-only, whether `commentary` is worth adding as metadata, whether
   terminal free-text final answers exist at all, and how protocol errors spend
@@ -445,14 +446,16 @@ questions, use [`autonomous-spike.md`](autonomous-spike.md) as the goal brief.
   capability outside the hardcoded `llm-complete`/`eval-program`/`log` trio;
   a prelude export can call it, model/user code cannot, and the kernel traces
   it without source edits.
-- [ ] **S11 — Kernel-shaped soak**: M1's 1,000 untraced + 100 traced mock cells
+- [x] **S11 — Kernel-shaped soak**: M1's 1,000 untraced + 100 traced mock cells
   passed on 2026-07-10; the broader registered spike still includes live-short
   HTTP matrix; record process/memory/reduction deltas, collector mailbox/drop
   counts, stale TraceContext state, pmap worker cleanup, atomics slots, and
-  Req/Finch pool health.
-- [ ] **S12 — Host-held state handle prototype**: owner process with monitor
+  Req/Finch pool health. Re-run after the monitored StateHandle integration;
+  process counts stayed 188→188 and trace integrity remained exact.
+- [x] **S12 — Host-held state handle prototype**: owner process with monitor
   cleanup, stale-token errors, run-end invalidation, per-run byte caps, bounded
-  projections, and concurrent access behavior under `pmap`.
+  projections, and concurrent access behavior under `pmap`. Implemented by
+  `PtcRunner.Kernel.StateHandle` and integrated into every kernel run.
 - [ ] **S13 — Cross-domain holdout + retrieval negative controls**: run the
   blessed harness on non-demo cases and hostile retrieval semantics; report by
   task/tool/oracle family instead of aggregate only.
@@ -607,8 +610,9 @@ as the goal brief.
 - [x] Kernel emits turn events (per D4) so runs are measurable with existing
   tooling. Plan:
   [`autonomous-d4-kernel-turn-events.md`](autonomous-d4-kernel-turn-events.md).
-- [ ] Host-held state, trace, tool-cache, and pmap behavior follow R21/R22
-  decisions; S11/S12 pass before widening live runs.
+- [x] Host-held state, trace, tool-cache, and pmap behavior follow R21/R22
+  decisions; S11/S12 pass before widening live runs. Evidence:
+  [`m2-lifecycle-audit.md`](m2-lifecycle-audit.md).
 - [ ] Parity per rule: Tier 2 paired incumbent→kernel run on the same suite;
   observations recorded informally.
   Mock parity is 5/5 for both variants on an identical recorded dataset hash.
@@ -616,8 +620,8 @@ as the goal brief.
   `experiments/m2-tier2-prereg.md`; the live cells have not run.
 - [ ] Gate: standing gates + Tier-2 pass rates recorded (pre-register
   thresholds before running; suggest ≥ 3/5 each as a smoke bar, not a claim).
-  Threshold preregistration is complete; lifecycle prerequisites and paired
-  live evidence remain open.
+  Threshold preregistration and lifecycle prerequisites are complete; only the
+  paired live evidence remains open.
 
 ## M3 — The payoff experiment: policy A/B with zero Elixir diff
 
