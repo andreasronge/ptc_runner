@@ -29,6 +29,16 @@ defmodule PtcRunner.Kernel do
   @summary_name_limit 24
   @summary_entry_limit 8
   @summary_preview_chars 160
+  @private_capability_name ~r/\A[A-Za-z][A-Za-z0-9_.\/-]*\z/
+  @reserved_capabilities MapSet.new(["llm-complete", "eval-program", "log"])
+  @private_capability_options [
+    :signature,
+    :description,
+    :cache,
+    :expose,
+    :native_result,
+    :visibility
+  ]
 
   @prelude_dir Path.expand("../../priv/preludes/agent", __DIR__)
   @prelude_paths %{
@@ -52,6 +62,42 @@ defmodule PtcRunner.Kernel do
   @namespace_deps %{
     "agent.core" => ["agent.prompt", "agent.feedback"]
   }
+
+  {:ok, default_prompt} = Compiler.compile(@prelude_sources["agent.prompt"])
+  {:ok, default_feedback} = Compiler.compile(@prelude_sources["agent.feedback"])
+
+  {:ok, default_core} =
+    Compiler.compile(@prelude_sources["agent.core"],
+      deps: [default_prompt, default_feedback],
+      namespace_deps: @namespace_deps
+    )
+
+  {:ok, default_embedded_prelude} =
+    Bundle.compile_precompiled(
+      [
+        %{
+          id: "agent.prompt",
+          source: @prelude_sources["agent.prompt"],
+          prelude: default_prompt,
+          origin: {:file, @prelude_origin_paths["agent.prompt"]}
+        },
+        %{
+          id: "agent.feedback",
+          source: @prelude_sources["agent.feedback"],
+          prelude: default_feedback,
+          origin: {:file, @prelude_origin_paths["agent.feedback"]}
+        },
+        %{
+          id: "agent.core",
+          source: @prelude_sources["agent.core"],
+          prelude: default_core,
+          origin: {:file, @prelude_origin_paths["agent.core"]}
+        }
+      ],
+      namespace_deps: @namespace_deps
+    )
+
+  @default_embedded_prelude default_embedded_prelude
 
   @spec compile_prelude(keyword()) :: {:ok, Prelude.t()} | {:error, term()}
   def compile_prelude(opts \\ []) when is_list(opts) do
@@ -115,6 +161,14 @@ defmodule PtcRunner.Kernel do
   defp compile_embedded_prelude(opts) do
     overrides = Keyword.get(opts, :prelude_source_overrides, %{})
 
+    if map_size(overrides) == 0 do
+      {:ok, @default_embedded_prelude}
+    else
+      compile_overridden_embedded_prelude(overrides)
+    end
+  end
+
+  defp compile_overridden_embedded_prelude(overrides) do
     with {:ok, prompt} <- compile_component("agent.prompt", overrides),
          {:ok, feedback} <- compile_component("agent.feedback", overrides),
          {:ok, core} <-
@@ -196,52 +250,374 @@ defmodule PtcRunner.Kernel do
 
   @spec run(map(), keyword()) :: {:ok, map()} | {:error, map()}
   def run(mission, opts) when is_map(mission) and is_list(opts) do
-    with {:ok, memory_cap} <- memory_byte_cap(opts),
-         opts = Keyword.put(opts, :kernel_memory_byte_cap, memory_cap),
+    with {:ok, opts} <- validate_run_options(opts),
          {:ok, preludes} <- compile_preludes(opts, Keyword.get(opts, :tools, %{})),
          :ok <- log_prelude(opts, preludes.loop, :loop),
          :ok <- log_prelude(opts, preludes.inner, :inner),
          {:ok, symbol_facts, symbol_inventory, symbol_inventory_meta} <-
            render_symbol_inventory(mission, opts, preludes.inner),
-         {:ok, memory} <- Agent.start_link(fn -> %{memory: %{}, busy?: false} end),
-         {:ok, turn_recorder} <- start_turn_recorder(preludes, opts),
-         {:ok, tools} <-
-           kernel_tools(
-             mission,
-             Keyword.put(opts, :inner_prelude, preludes.inner)
-             |> Keyword.put(:inner_prelude_refs, preludes.inner_refs),
-             memory,
-             turn_recorder
-           ) do
-      cfg = %{
-        "max_turns" => Keyword.get(opts, :max_turns, 3),
-        "tool_names" => opts |> Keyword.get(:tools, %{}) |> public_tool_names(),
-        "symbol_facts" => symbol_facts,
-        "symbol_inventory" => symbol_inventory,
-        "symbol_inventory_meta" => symbol_inventory_meta
-      }
+         {:ok, memory} <- Agent.start_link(fn -> %{memory: %{}, busy?: false} end) do
+      run_with_memory(
+        mission,
+        opts,
+        preludes,
+        symbol_facts,
+        symbol_inventory,
+        symbol_inventory_meta,
+        memory
+      )
+    else
+      {:error, %{reason: reason} = error}
+      when reason in ["invalid_kernel_option", "invalid_private_capability"] ->
+        {:error, error}
 
-      program = ~S|(agent.core/run-mission data/mission data/cfg)|
-
-      try do
-        case Lisp.run(program,
-               prelude: preludes.loop,
-               tools: tools,
-               context: %{mission: mission, cfg: cfg},
-               filter_context: false,
-               timeout: Keyword.get(opts, :timeout, @outer_timeout),
-               max_heap: Keyword.get(opts, :max_heap, @outer_heap_words),
-               setup_max_heap: Keyword.get(opts, :setup_max_heap, @outer_heap_words * 2)
-             ) do
-          {:ok, step} -> unwrap_outer_step(step)
-          {:error, step} -> {:error, %{reason: "kernel_error", step: project_public_step(step)}}
-        end
-      after
-        stop_agent(memory)
-        stop_agent(turn_recorder)
-      end
+      {:error, error} ->
+        {:error, normalize_preflight_error(error, opts)}
     end
   end
+
+  defp run_with_memory(
+         mission,
+         opts,
+         preludes,
+         symbol_facts,
+         symbol_inventory,
+         symbol_inventory_meta,
+         memory
+       ) do
+    result =
+      with {:ok, turn_recorder} <- start_turn_recorder(preludes, opts) do
+        run_with_owners(
+          mission,
+          opts,
+          preludes,
+          symbol_facts,
+          symbol_inventory,
+          symbol_inventory_meta,
+          memory,
+          turn_recorder
+        )
+      end
+
+    result
+  after
+    stop_agent(memory)
+  end
+
+  defp run_with_owners(
+         mission,
+         opts,
+         preludes,
+         symbol_facts,
+         symbol_inventory,
+         symbol_inventory_meta,
+         memory,
+         turn_recorder
+       ) do
+    {:ok, tools} =
+      kernel_tools(
+        mission,
+        Keyword.put(opts, :inner_prelude, preludes.inner)
+        |> Keyword.put(:inner_prelude_refs, preludes.inner_refs),
+        memory,
+        turn_recorder
+      )
+
+    cfg = %{
+      "max_turns" => Keyword.fetch!(opts, :max_turns),
+      "tool_names" => opts |> Keyword.get(:tools, %{}) |> public_tool_names(),
+      "symbol_facts" => symbol_facts,
+      "symbol_inventory" => symbol_inventory,
+      "symbol_inventory_meta" => symbol_inventory_meta
+    }
+
+    program = ~S|(agent.core/run-mission data/mission data/cfg)|
+
+    result =
+      case Lisp.run(program,
+             prelude: preludes.loop,
+             tools: tools,
+             context: %{mission: mission, cfg: cfg},
+             filter_context: false,
+             timeout: Keyword.fetch!(opts, :timeout),
+             max_heap: Keyword.fetch!(opts, :max_heap),
+             setup_max_heap: Keyword.fetch!(opts, :setup_max_heap)
+           ) do
+        {:ok, step} -> unwrap_outer_step(step)
+        {:error, step} -> {:error, %{reason: "kernel_error", step: project_public_step(step)}}
+      end
+
+    result
+  after
+    stop_agent(turn_recorder)
+  end
+
+  defp validate_run_options(opts) do
+    max_turns = Keyword.get(opts, :max_turns, 3)
+
+    with :ok <- positive_integer_option(opts, :max_turns, max_turns),
+         max_llm_calls = Keyword.get(opts, :max_llm_calls, max_turns),
+         :ok <- positive_integer_option(opts, :max_llm_calls, max_llm_calls),
+         :ok <- function_option(opts, :llm, 1),
+         :ok <-
+           positive_integer_option(opts, :timeout, Keyword.get(opts, :timeout, @outer_timeout)),
+         :ok <-
+           positive_integer_option(
+             opts,
+             :max_heap,
+             Keyword.get(opts, :max_heap, @outer_heap_words)
+           ),
+         :ok <-
+           positive_integer_option(
+             opts,
+             :setup_max_heap,
+             Keyword.get(opts, :setup_max_heap, @outer_heap_words * 2)
+           ),
+         :ok <-
+           positive_integer_option(
+             opts,
+             :inner_timeout,
+             Keyword.get(opts, :inner_timeout, @inner_timeout)
+           ),
+         :ok <-
+           positive_integer_option(
+             opts,
+             :inner_max_heap,
+             Keyword.get(opts, :inner_max_heap, @inner_heap_words)
+           ),
+         :ok <- optional_positive_integer_option(opts, :max_tool_calls),
+         :ok <- optional_positive_integer_option(opts, :inner_max_tool_calls),
+         {:ok, memory_cap} <- memory_byte_cap(opts),
+         {:ok, private_capabilities} <- normalize_private_capabilities(opts) do
+      {:ok,
+       opts
+       |> Keyword.put(:max_turns, max_turns)
+       |> Keyword.put(:max_llm_calls, max_llm_calls)
+       |> Keyword.put(:timeout, Keyword.get(opts, :timeout, @outer_timeout))
+       |> Keyword.put(:max_heap, Keyword.get(opts, :max_heap, @outer_heap_words))
+       |> Keyword.put(:setup_max_heap, Keyword.get(opts, :setup_max_heap, @outer_heap_words * 2))
+       |> Keyword.put(:inner_timeout, Keyword.get(opts, :inner_timeout, @inner_timeout))
+       |> Keyword.put(:inner_max_heap, Keyword.get(opts, :inner_max_heap, @inner_heap_words))
+       |> Keyword.put(:kernel_memory_byte_cap, memory_cap)
+       |> Keyword.put(:private_capabilities, private_capabilities)}
+    end
+  end
+
+  defp positive_integer_option(_opts, _option, value) when is_integer(value) and value > 0,
+    do: :ok
+
+  defp positive_integer_option(_opts, option, value), do: invalid_option(option, value)
+
+  defp optional_positive_integer_option(opts, option) do
+    if Keyword.has_key?(opts, option) do
+      positive_integer_option(opts, option, Keyword.get(opts, option))
+    else
+      :ok
+    end
+  end
+
+  defp function_option(opts, option, arity) do
+    case Keyword.fetch(opts, option) do
+      {:ok, fun} when is_function(fun, arity) -> :ok
+      {:ok, value} -> invalid_option(option, value)
+      :error -> invalid_option(option, nil)
+    end
+  end
+
+  defp invalid_option(option, value) do
+    {:error,
+     %{
+       reason: "invalid_kernel_option",
+       option: Atom.to_string(option),
+       value_type: value_type(value)
+     }}
+  end
+
+  defp normalize_private_capabilities(opts) do
+    capabilities = Keyword.get(opts, :private_capabilities, %{})
+
+    if is_map(capabilities) do
+      normalize_private_capability_map(capabilities, Keyword.get(opts, :tools, %{}))
+    else
+      private_capability_error(capabilities, nil, "invalid_format")
+    end
+  end
+
+  defp normalize_private_capability_map(capabilities, mission_tools) do
+    entries =
+      Enum.map(capabilities, fn {name, format} ->
+        {normalize_capability_name(name), name, format}
+      end)
+
+    with :ok <- valid_capability_names(entries, capabilities),
+         :ok <- unreserved_capability_names(entries, capabilities),
+         :ok <- unique_capability_names(entries, mission_tools, capabilities) do
+      entries
+      |> Enum.sort_by(fn {{:ok, name}, _raw, _format} -> name end)
+      |> Enum.reduce_while({:ok, %{}}, fn {{:ok, name}, _raw, format}, {:ok, acc} ->
+        case normalize_private_capability(name, format, capabilities) do
+          {:ok, tool} -> {:cont, {:ok, Map.put(acc, name, tool)}}
+          {:error, _} = error -> {:halt, error}
+        end
+      end)
+    end
+  end
+
+  defp normalize_capability_name(name) when is_binary(name), do: {:ok, name}
+  defp normalize_capability_name(name) when is_atom(name), do: {:ok, Atom.to_string(name)}
+  defp normalize_capability_name(_name), do: :error
+
+  defp valid_capability_names(entries, original) do
+    case Enum.find(entries, fn
+           {{:ok, name}, _raw, _format} -> not Regex.match?(@private_capability_name, name)
+           {:error, _raw, _format} -> true
+         end) do
+      nil -> :ok
+      {{:ok, name}, _raw, _format} -> private_capability_error(original, name, "invalid_name")
+      {:error, _raw, _format} -> private_capability_error(original, nil, "invalid_name")
+    end
+  end
+
+  defp unreserved_capability_names(entries, original) do
+    case Enum.find(entries, fn {{:ok, name}, _, _} ->
+           MapSet.member?(@reserved_capabilities, name)
+         end) do
+      nil -> :ok
+      {{:ok, name}, _, _} -> private_capability_error(original, name, "reserved_name")
+    end
+  end
+
+  defp unique_capability_names(entries, mission_tools, original) do
+    names = Enum.map(entries, fn {{:ok, name}, _, _} -> name end)
+
+    duplicate =
+      Enum.find(names, fn name ->
+        Enum.count(names, &(&1 == name)) > 1 or mission_tool_name?(mission_tools, name)
+      end)
+
+    if duplicate, do: private_capability_error(original, duplicate, "duplicate_name"), else: :ok
+  end
+
+  defp mission_tool_name?(tools, name) when is_map(tools),
+    do: Enum.any?(Map.keys(tools), &(normalize_capability_name(&1) == {:ok, name}))
+
+  defp mission_tool_name?(_tools, _name), do: false
+
+  defp normalize_private_capability(name, %Tool{} = tool, original) do
+    cond do
+      tool.type != :native ->
+        private_capability_error(original, name, "not_native")
+
+      not is_function(tool.function, 1) ->
+        private_capability_error(original, name, "invalid_arity")
+
+      not Tool.private?(tool) ->
+        private_capability_error(original, name, "not_private")
+
+      true ->
+        {:ok, %{tool | name: name}}
+    end
+  end
+
+  defp normalize_private_capability(name, {fun, options} = format, original)
+       when is_function(fun, 1) and is_list(options) do
+    cond do
+      not Keyword.keyword?(options) ->
+        private_capability_error(original, name, "malformed_options")
+
+      Keyword.keys(options) -- @private_capability_options != [] ->
+        private_capability_error(original, name, "malformed_options")
+
+      true ->
+        normalize_private_tool(name, format, original)
+    end
+  end
+
+  defp normalize_private_capability(name, {fun, _options}, original) when is_function(fun),
+    do: private_capability_error(original, name, "invalid_arity")
+
+  defp normalize_private_capability(name, _format, original),
+    do: private_capability_error(original, name, "invalid_format")
+
+  defp normalize_private_tool(name, format, original) do
+    case Tool.new(name, format) do
+      {:ok, %Tool{type: :native, function: fun} = tool} when is_function(fun, 1) ->
+        if Tool.private?(tool),
+          do: {:ok, tool},
+          else: private_capability_error(original, name, "not_private")
+
+      {:ok, %Tool{type: type}} when type != :native ->
+        private_capability_error(original, name, "not_native")
+
+      {:ok, _tool} ->
+        private_capability_error(original, name, "invalid_arity")
+
+      {:error, _reason} ->
+        private_capability_error(original, name, "malformed_options")
+    end
+  end
+
+  defp private_capability_error(original, capability, detail) do
+    error = %{
+      reason: "invalid_private_capability",
+      option: "private_capabilities",
+      value_type: value_type(original),
+      detail: detail
+    }
+
+    {:error, if(capability, do: Map.put(error, :capability, capability), else: error)}
+  end
+
+  defp normalize_preflight_error(error, opts) do
+    option = preflight_option(error, opts)
+    value = Keyword.get(opts, option)
+
+    %{
+      reason: "invalid_kernel_option",
+      option: Atom.to_string(option),
+      value_type: value_type(value)
+    }
+  end
+
+  defp preflight_option(%{reason: reason}, _opts) when reason in [:invalid_policy],
+    do: :role_policy
+
+  defp preflight_option(%{reason: reason}, _opts)
+       when reason in [:role_required, :invalid_role, :unknown_role],
+       do: :role
+
+  defp preflight_option(%{reason: reason}, _opts)
+       when reason in [:missing_prelude_store, :invalid_prelude_store],
+       do: :prelude_store
+
+  defp preflight_option(%{reason: :role_policy_required}, opts) do
+    if Keyword.has_key?(opts, :inner_preludes), do: :inner_preludes, else: :role_policy
+  end
+
+  defp preflight_option(%{reason: :invalid_inner_prelude}, _opts), do: :inner_preludes
+
+  defp preflight_option(%{reason: "invalid_symbol_inventory_renderer"}, _opts),
+    do: :symbol_inventory_renderer
+
+  defp preflight_option(%{reason: reason}, opts)
+       when reason in [:invalid_prelude_ref, :prelude_not_granted] do
+    if Keyword.has_key?(opts, :inner_preludes), do: :inner_preludes, else: :preludes
+  end
+
+  defp preflight_option(_error, _opts), do: :kernel_configuration
+
+  defp value_type(nil), do: "nil"
+  defp value_type(value) when is_boolean(value), do: "boolean"
+  defp value_type(value) when is_integer(value), do: "integer"
+  defp value_type(value) when is_float(value), do: "float"
+  defp value_type(value) when is_binary(value), do: "string"
+  defp value_type(value) when is_atom(value), do: "atom"
+  defp value_type(value) when is_function(value), do: "function"
+  defp value_type(value) when is_list(value), do: "list"
+  defp value_type(%{__struct__: _}), do: "struct"
+  defp value_type(value) when is_map(value), do: "map"
+  defp value_type(value) when is_tuple(value), do: "tuple"
+  defp value_type(_value), do: "other"
 
   defp render_symbol_inventory(mission, opts, prelude) do
     facts =
@@ -303,30 +679,36 @@ defmodule PtcRunner.Kernel do
     mission_tools = Keyword.get(opts, :tools, %{})
     system_prompt = Keyword.get(opts, :system_prompt)
 
-    tools = %{
+    kernel_tools = %{
       "llm-complete" =>
         {fn args ->
-           system = resolve_system_prompt(args, system_prompt)
+           case claim_llm_slot(turn_recorder) do
+             :ok ->
+               system = resolve_system_prompt(args, system_prompt)
 
-           request = %{
-             system: system,
-             messages: normalize_messages(Map.get(args, "messages", [])),
-             tools: [Action.tool_schema()],
-             tool_choice: %{type: "tool", name: "run_ptc_lisp"}
-           }
+               request = %{
+                 system: system,
+                 messages: normalize_messages(Map.get(args, "messages", [])),
+                 tools: [Action.tool_schema()],
+                 tool_choice: %{type: "tool", name: "run_ptc_lisp"}
+               }
 
-           log_unsafe_llm_request(events, opts, args, request)
+               log_unsafe_llm_request(events, opts, args, request)
 
-           started_at = System.monotonic_time(:millisecond)
+               started_at = System.monotonic_time(:millisecond)
 
-           action =
-             request
-             |> llm.()
-             |> normalize_llm_result()
-             |> add_public_tool_call()
+               action =
+                 request
+                 |> llm.()
+                 |> normalize_llm_result()
+                 |> add_public_tool_call()
 
-           duration_ms = System.monotonic_time(:millisecond) - started_at
-           record_model_action(turn_recorder, args, action, duration_ms)
+               duration_ms = System.monotonic_time(:millisecond) - started_at
+               record_model_action(turn_recorder, args, action, duration_ms)
+
+             :exhausted ->
+               record_model_action(turn_recorder, args, llm_budget_action(), 0)
+           end
          end,
          [signature: "(system :string?, messages :any, turn :int) -> :map", visibility: :private]},
       "eval-program" =>
@@ -340,7 +722,31 @@ defmodule PtcRunner.Kernel do
          end, [signature: "(event :string) -> :map", visibility: :private]}
     }
 
-    {:ok, tools}
+    {:ok, Map.merge(Keyword.fetch!(opts, :private_capabilities), kernel_tools)}
+  end
+
+  defp claim_llm_slot(recorder) do
+    Agent.get_and_update(recorder, fn state ->
+      if state.llm_calls < state.max_llm_calls do
+        {:ok, %{state | llm_calls: state.llm_calls + 1}}
+      else
+        {:exhausted, state}
+      end
+    end)
+  end
+
+  defp llm_budget_action do
+    %{
+      kind: "budget_exhausted",
+      program: nil,
+      reason: "llm_budget_exhausted",
+      content: nil,
+      tokens: %{},
+      model: nil,
+      provider: nil,
+      provider_meta: %{},
+      transport_error: nil
+    }
   end
 
   defp compile_component(namespace, overrides, opts \\ []) do
@@ -388,6 +794,8 @@ defmodule PtcRunner.Kernel do
       trace_context: TraceContext.capture(),
       attempt: 0,
       committed_turn: 0,
+      llm_calls: 0,
+      max_llm_calls: Keyword.fetch!(opts, :max_llm_calls),
       pending: %{}
     }
 
@@ -403,7 +811,7 @@ defmodule PtcRunner.Kernel do
         state = %{state | attempt: attempt}
 
         cond do
-          action.kind in ["protocol_error", "transport_error"] ->
+          action.kind in ["protocol_error", "transport_error", "budget_exhausted"] ->
             event_action = pending_action(action, duration_ms, attempt)
             {{action, event_action}, state}
 
@@ -418,7 +826,7 @@ defmodule PtcRunner.Kernel do
         end
       end)
 
-    if event_action.kind in ["protocol_error", "transport_error"] do
+    if event_action.kind in ["protocol_error", "transport_error", "budget_exhausted"] do
       emit_kernel_turn(recorder, event_action, nil, 0)
     end
 
@@ -551,6 +959,7 @@ defmodule PtcRunner.Kernel do
 
   defp turn_type(%{kind: "protocol_error"}, _event_data), do: :protocol_error
   defp turn_type(%{kind: "transport_error"}, _event_data), do: :transport_error
+  defp turn_type(%{kind: "budget_exhausted"}, _event_data), do: :budget_exhausted
   defp turn_type(_action, _event_data), do: :eval
 
   defp turn_fail(
@@ -572,6 +981,9 @@ defmodule PtcRunner.Kernel do
 
   defp turn_fail(%{kind: "transport_error", reason: reason}, _event_data),
     do: %{reason: "transport_error", message: reason || "LLM transport error"}
+
+  defp turn_fail(%{kind: "budget_exhausted"}, _event_data),
+    do: %{reason: "llm_budget_exhausted", message: "host LLM-call budget exhausted"}
 
   defp turn_fail(_action, %{fail: fail}), do: fail
   defp turn_fail(_action, _event_data), do: nil
@@ -681,11 +1093,11 @@ defmodule PtcRunner.Kernel do
     |> Map.put(:transport_error, nil)
   end
 
-  defp normalize_llm_result({:error, reason}) do
+  defp normalize_llm_result({:error, _reason}) do
     %{
       kind: "transport_error",
       program: nil,
-      reason: inspect(reason, limit: 10, printable_limit: 500),
+      reason: "provider_error",
       content: nil,
       tokens: %{},
       model: nil,
@@ -707,12 +1119,7 @@ defmodule PtcRunner.Kernel do
         {:ok, cap}
 
       cap ->
-        {:error,
-         %{
-           reason: "invalid_kernel_memory_byte_cap",
-           message: "kernel_memory_byte_cap must be a positive integer",
-           value: inspect(cap, limit: 5, printable_limit: 100)
-         }}
+        invalid_option(:kernel_memory_byte_cap, cap)
     end
   end
 
@@ -1224,19 +1631,49 @@ defmodule PtcRunner.Kernel do
 
   defp unwrap_outer_step(step) do
     case step.return do
-      {:__ptc_return__, value} -> {:ok, value}
-      {:__ptc_fail__, value} -> {:error, value}
-      other -> {:ok, other}
+      {:__ptc_return__, value} ->
+        {:ok, value}
+
+      {:__ptc_fail__, %{"reason" => "unknown_action", "action" => action}}
+      when is_map(action) ->
+        if Map.get(action, "kind", Map.get(action, :kind)) == "budget_exhausted" do
+          {:error, %{"reason" => "llm_budget_exhausted"}}
+        else
+          {:error, %{"reason" => "unknown_action", "action" => action}}
+        end
+
+      {:__ptc_fail__, value} ->
+        {:error, value}
+
+      other ->
+        {:ok, other}
     end
   end
 
   defp project_public_step(step) do
     %{
-      fail: step.fail,
-      return: Public.value(step.return),
-      prints: bound_list(step.prints)
+      fail: bound_outer_fail(step.fail),
+      return: bound_outer_return(step.return),
+      prints: step.prints |> bound_list() |> Enum.map(&bound_outer_text/1)
     }
   end
+
+  defp bound_outer_fail(nil), do: nil
+
+  defp bound_outer_fail(fail) when is_map(fail) do
+    fail
+    |> Map.take([:reason, :message, :details])
+    |> Map.update(:message, nil, &bound_outer_text/1)
+    |> Map.update(:details, nil, &TurnEvent.preview(&1, limit: 500))
+  end
+
+  defp bound_outer_fail(fail), do: %{reason: :kernel_failure, message: TurnEvent.preview(fail)}
+
+  defp bound_outer_return(nil), do: nil
+  defp bound_outer_return(value), do: value |> Public.value() |> TurnEvent.preview(limit: 500)
+
+  defp bound_outer_text(value) when is_binary(value), do: String.slice(value, 0, 500)
+  defp bound_outer_text(value), do: TurnEvent.preview(value, limit: 500)
 
   defp bound_list(list) when is_list(list), do: Enum.take(list, 8)
 

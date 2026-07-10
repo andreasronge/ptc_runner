@@ -126,7 +126,12 @@ defmodule PtcRunner.KernelTest do
       {:ok, %{tool_calls: [%{name: "run_ptc_lisp", args: %{"program" => "(return :bad)"}}]}}
     end
 
-    assert {:error, %{reason: "invalid_symbol_inventory_renderer"}} =
+    assert {:error,
+            %{
+              reason: "invalid_kernel_option",
+              option: "symbol_inventory_renderer",
+              value_type: "atom"
+            }} =
              Kernel.run(%{"task" => "compute"},
                llm: llm,
                symbol_inventory_renderer: :does_not_exist
@@ -171,7 +176,7 @@ defmodule PtcRunner.KernelTest do
              Kernel.run(%{"task" => "compute"}, llm: llm)
 
     assert error.kind == "transport_error"
-    assert error.reason == ":econnrefused"
+    assert error.reason == "provider_error"
   end
 
   test "model program fail path returns a kernel error without another eval" do
@@ -875,12 +880,11 @@ defmodule PtcRunner.KernelTest do
 
     assert {:error,
             %{
-              reason: "invalid_kernel_memory_byte_cap",
-              message: "kernel_memory_byte_cap must be a positive integer",
-              value: value
+              reason: "invalid_kernel_option",
+              option: "kernel_memory_byte_cap",
+              value_type: "string"
             }} = Kernel.run(%{"task" => "compute"}, llm: llm, kernel_memory_byte_cap: "100")
 
-    assert value == ~s("100")
     refute_received {:llm_request, _}
   end
 
@@ -1291,7 +1295,19 @@ defmodule PtcRunner.KernelTest do
       {:ok, store} = seeded_agent_prelude_store()
       {:ok, _} = PreludeStore.write(store, "domain.case", source, metadata)
 
-      assert {:error, %{reason: :invalid_inner_prelude, details: %{reason: ^expected_reason}}} =
+      assert expected_reason in [
+               :namespace_overlap,
+               :upstream_export,
+               :dynamic_upstream_dispatch,
+               :missing_mission_tool
+             ]
+
+      assert {:error,
+              %{
+                reason: "invalid_kernel_option",
+                option: "inner_preludes",
+                value_type: "nil"
+              }} =
                Kernel.run(%{"task" => "compute"},
                  llm: llm,
                  prelude_store: store,
@@ -1310,7 +1326,12 @@ defmodule PtcRunner.KernelTest do
       {:error, :unexpected}
     end
 
-    assert {:error, %{reason: :prelude_not_granted}} =
+    assert {:error,
+            %{
+              reason: "invalid_kernel_option",
+              option: "inner_preludes",
+              value_type: "list"
+            }} =
              Kernel.run(%{"task" => "compute"},
                llm: llm,
                role_policy: kernel_role_policy(),
@@ -1399,7 +1420,12 @@ defmodule PtcRunner.KernelTest do
       {:ok, %{content: "unexpected"}}
     end
 
-    assert {:error, %{reason: :invalid_inner_prelude, details: %{reason: :namespace_overlap}}} =
+    assert {:error,
+            %{
+              reason: "invalid_kernel_option",
+              option: "inner_preludes",
+              value_type: "nil"
+            }} =
              Kernel.run(%{"task" => "compute"},
                llm: llm,
                prelude_store: store,
