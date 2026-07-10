@@ -38,15 +38,8 @@ defmodule PtcRunner.Lisp.Eval.Apply do
                                                         | {:error, term()})) ::
           {:ok, term(), EvalContext.t()} | {:error, term()}
   def apply_fun(fun_val, args, eval_ctx, do_eval_fn) do
-    eval_ctx = count_prelude_entry(fun_val, eval_ctx)
     do_apply_fun(fun_val, args, eval_ctx, do_eval_fn)
   end
-
-  defp count_prelude_entry({:closure, _params, _body, _env, _th, %{prelude_ref: ref}}, eval_ctx)
-       when is_binary(ref),
-       do: EvalContext.increment_prelude_call(eval_ctx, ref)
-
-  defp count_prelude_entry(_fun_val, eval_ctx), do: eval_ctx
 
   defp do_apply_fun(
          %Builtin{name: name, binding: {:normal, fun}} = builtin,
@@ -125,11 +118,13 @@ defmodule PtcRunner.Lisp.Eval.Apply do
 
   # Closure application (6-element tuple format with turn_history and metadata)
   defp do_apply_fun(
-         {:closure, patterns, _body, _env, _th, _meta} = closure,
+         {:closure, patterns, _body, _env, _th, metadata} = closure,
          args,
          %EvalContext{} = eval_ctx,
          do_eval_fn
        ) do
+    eval_ctx = count_prelude_entry_metadata(metadata, eval_ctx)
+
     case check_arity(patterns, args) do
       :ok -> execute_closure(closure, args, eval_ctx, do_eval_fn)
       {:error, _} = err -> err

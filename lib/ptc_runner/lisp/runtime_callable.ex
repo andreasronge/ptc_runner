@@ -136,6 +136,10 @@ defmodule PtcRunner.Lisp.RuntimeCallable do
           | tool_calls: Map.get(top, :tool_calls, []) ++ eval_ctx.tool_calls,
             prints: Map.get(top, :prints, []) ++ eval_ctx.prints,
             catalog_ops: Map.get(top, :catalog_ops, []) ++ eval_ctx.catalog_ops,
+            prelude_call_counts:
+              Map.merge(eval_ctx.prelude_call_counts, top.prelude_call_counts, fn
+                _ref, left, right -> left + right
+              end),
             tool_cache: Map.merge(eval_ctx.tool_cache, Map.get(top, :tool_cache, %{}))
         }
 
@@ -152,6 +156,8 @@ defmodule PtcRunner.Lisp.RuntimeCallable do
           | tool_calls: strip_baseline_suffix(ctx.tool_calls, base_ctx.tool_calls),
             prints: strip_baseline_suffix(ctx.prints, base_ctx.prints),
             catalog_ops: strip_baseline_suffix(ctx.catalog_ops, base_ctx.catalog_ops),
+            prelude_call_counts:
+              subtract_baseline_counts(ctx.prelude_call_counts, base_ctx.prelude_call_counts),
             tool_cache: ctx.tool_cache
         }
 
@@ -172,5 +178,10 @@ defmodule PtcRunner.Lisp.RuntimeCallable do
     else
       values
     end
+  end
+
+  defp subtract_baseline_counts(counts, baseline) do
+    Map.new(counts, fn {ref, count} -> {ref, count - Map.get(baseline, ref, 0)} end)
+    |> Map.reject(fn {_ref, count} -> count <= 0 end)
   end
 end

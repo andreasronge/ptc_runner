@@ -144,6 +144,26 @@ defmodule PtcRunner.Lisp.Prelude.RunIntegrationTest do
       assert parallel.prelude_call_counts == %{"domain.example/twice" => 3}
     end
 
+    test "counts exports entered through callable combinators" do
+      source = """
+      (ns domain.example "Neutral helpers." {:visibility :prompt})
+      (defn twice "Double a number." [x] (+ x x))
+      """
+
+      assert {:ok, prelude} = Compiler.compile(source)
+
+      program = """
+      (let [partial-call (partial domain.example/twice)
+            composed (comp inc domain.example/twice)
+            paired (juxt domain.example/twice identity)]
+        (return [(partial-call 2) (composed 3) (paired 4)]))
+      """
+
+      assert {:ok, step} = PtcRunner.Lisp.run(program, prelude: prelude)
+      assert step.return == {:__ptc_return__, [4, 7, [8, 4]]}
+      assert step.prelude_call_counts == %{"domain.example/twice" => 3}
+    end
+
     test "entry counts survive recur plus return and fail signals without private names" do
       source = """
       (ns domain.example "Neutral helpers." {:visibility :prompt})
