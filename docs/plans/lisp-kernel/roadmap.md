@@ -523,7 +523,7 @@ one mission, mock-llm tests, one live smoke.
   kill, private-capability authorization, inner eval isolation, redacted
   tracing, untrusted envelope, golden prompt hygiene, extension-contract smoke,
   turn-event shape parity. Closed 2026-07-10 by the series from `a4408b0f`
-  through `b3427fad`: the focused M1 suite now pins positive execution/LLM
+  through `899c68cd`: the focused M1 suite now pins positive execution/LLM
   limits, atomic LLM-slot exhaustion,
   timeout/runtime-heap/setup-heap envelopes, normalized source-free preflight
   errors, private outer capability validation/authorization and inner denial,
@@ -536,7 +536,7 @@ one mission, mock-llm tests, one live smoke.
 - [x] First `mix ptc.kernel_eval --suite smoke --runs 5 --variant kernel`
   run recorded (Tier 2, kernel variant only). On 2026-07-10 the blessed live
   command passed 5/5 using requested alias `deepseek`, resolved model
-  `openrouter:deepseek/deepseek-v4-flash`, at commit `b3427fad`; all runs
+  `openrouter:deepseek/deepseek-v4-flash`, at commit `899c68cd`; all runs
   returned the expected integer `250`, had expected=actual=1 canonical turn,
   and recorded zero write, drop, or unexpected counts. Exact prompt, action,
   bundle, and component hashes are recorded in architecture fact 20 and the

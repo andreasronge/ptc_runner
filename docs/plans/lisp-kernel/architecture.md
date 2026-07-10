@@ -447,7 +447,9 @@ Claims above rest on these, checked 2026-07-07 on `main`:
     and host-memory content as hashes/counts while retaining canonical turn
     and S21 evidence. Model-controlled failure reasons are reduced to a fixed
     class plus SHA-256 evidence in both the linked trace and report. Trace loss
-    fails the gate. The final live run at `b3427fad`
+    fails the gate. Dotenv loading is serialized through completion so
+    concurrent live starts record the same requested model. The final live run
+    at `899c68cd`
     used `deepseek` ->
     `openrouter:deepseek/deepseek-v4-flash` and passed 5/5 with five expected
     and five persisted turns and all loss/error counts zero. Its loop bundle
@@ -462,10 +464,10 @@ Claims above rest on these, checked 2026-07-07 on `main`:
     All five prompt hashes were
     `c6e520b93b7af8ab87c18a157ac2103fb1f6c1e2445095c6b05e70e60378bb26`;
     action hashes by run were
-    `2d66ca26fdd32d22f11b54f5b35e67fa6054d6b528fa5d592740beecd981fad3`,
-    `f016a3c584e88ca2e1ce33a89e635afc6c02b28fcd9c42620f6a1938a392e651`,
+    `1cc9792017763237923a9cbdaf4860f3a9391a8f30c4349631e40c8fa4df36cf`,
     `d87bca1f8bdf052a1435b1f6b41b4bff56ec5fa724196667e0161a1511d3b5a2`,
-    `355186ec945533b02d0550b456a2938553c380b3bf8f4943bfa6dd843b92acbb`,
+    `2d66ca26fdd32d22f11b54f5b35e67fa6054d6b528fa5d592740beecd981fad3`,
+    `d87bca1f8bdf052a1435b1f6b41b4bff56ec5fa724196667e0161a1511d3b5a2`,
     and
     `d87bca1f8bdf052a1435b1f6b41b4bff56ec5fa724196667e0161a1511d3b5a2`.
     Exact live commands were
