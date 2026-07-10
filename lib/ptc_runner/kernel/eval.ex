@@ -14,7 +14,12 @@ defmodule PtcRunner.Kernel.Eval do
   @type result :: %{
           suite: String.t(),
           mode: :mock | :live,
+          variant: String.t(),
+          requested_model: String.t() | nil,
           model: String.t() | nil,
+          provider: String.t() | nil,
+          commit: String.t(),
+          command_options: map(),
           runs: pos_integer(),
           cases: [map()]
         }
@@ -49,36 +54,43 @@ defmodule PtcRunner.Kernel.Eval do
     mode = Keyword.get(opts, :mode, :mock)
     runs = Keyword.get(opts, :runs, 1)
     variant = Keyword.get(opts, :variant, "kernel")
-    requested_model = requested_model(mode, Keyword.get(opts, :model))
 
     with :ok <- validate_report_contract(suite, mode, Keyword.get(opts, :report)),
          :ok <- validate_runs(runs),
          :ok <- validate_variant(variant),
-         {:ok, model} <- resolve_model(mode, Keyword.get(opts, :model)) do
+         {:ok, report} <- execute_cases(cases, suite, mode, runs, variant, opts),
+         :ok <- maybe_write_report(report, Keyword.get(opts, :report)) do
+      {:ok, report}
+    end
+  end
+
+  defp execute_cases(cases, suite, mode, runs, variant, opts) do
+    requested_model = requested_model(mode, Keyword.get(opts, :model))
+
+    with {:ok, model} <- resolve_model(mode, Keyword.get(opts, :model)) do
       results =
         for run_index <- 1..runs,
             eval_case <- cases do
           run_case(eval_case, run_index, mode, model, opts)
         end
 
-      report = %{
-        suite: suite,
-        mode: mode,
-        variant: variant,
-        requested_model: requested_model,
-        model: model,
-        provider: provider(model),
-        commit: commit(),
-        command_options: command_options(opts, suite, mode, variant, requested_model),
-        runs: runs,
-        cases: results
-      }
-
-      with :ok <- maybe_write_report(report, Keyword.get(opts, :report)), do: {:ok, report}
+      {:ok,
+       %{
+         suite: suite,
+         mode: mode,
+         variant: variant,
+         requested_model: requested_model,
+         model: model,
+         provider: provider(model),
+         commit: commit(),
+         command_options: command_options(opts, suite, mode, variant, requested_model),
+         runs: runs,
+         cases: results
+       }}
     end
   end
 
-  @spec render_markdown(result()) :: String.t()
+  @spec render_markdown(map()) :: String.t()
   def render_markdown(%{
         suite: suite,
         mode: mode,
@@ -328,11 +340,12 @@ defmodule PtcRunner.Kernel.Eval do
         |> Keyword.put(:events, &record_event(events, Keyword.get(opts, :unsafe_debug_agent), &1))
 
       trace_path = trace_path(eval_case, run_index, opts)
-      raw_trace_path = temporary_trace_path(trace_path, "raw")
+      raw_trace_dir = raw_trace_directory()
+      raw_trace_path = Path.join(raw_trace_dir, "trace.jsonl")
       sanitized_trace_path = temporary_trace_path(trace_path, "sanitized")
 
       try do
-        {:ok, result, trace_metadata} =
+        {:ok, result, %{write_errors: _} = trace_metadata} =
           TraceLog.with_trace(fn -> KernelRunner.run(mission(eval_case), kernel_opts) end,
             path: raw_trace_path,
             trace_kind: "kernel_eval",
@@ -343,7 +356,7 @@ defmodule PtcRunner.Kernel.Eval do
           )
 
         sanitize_persistent_trace!(raw_trace_path, sanitized_trace_path)
-        File.rename!(sanitized_trace_path, trace_path)
+        :ok = File.rename(sanitized_trace_path, trace_path)
         trace_metadata = %{trace_metadata | path: trace_path}
 
         sanitized_events = Agent.get(events, &Enum.reverse/1)
@@ -364,6 +377,7 @@ defmodule PtcRunner.Kernel.Eval do
       after
         File.rm(raw_trace_path)
         File.rm(sanitized_trace_path)
+        File.rmdir(raw_trace_dir)
       end
     after
       cleanup_llm.()
@@ -675,6 +689,7 @@ defmodule PtcRunner.Kernel.Eval do
       source_path
       |> Analyzer.load()
       |> Enum.map(&sanitize_persisted_event/1)
+      |> Enum.reject(&is_nil/1)
       |> Enum.map_join(&(Jason.encode!(&1) <> "\n"))
 
     File.write!(destination_path, sanitized)
@@ -699,7 +714,23 @@ defmodule PtcRunner.Kernel.Eval do
     Map.put(event, "data", sanitized_data)
   end
 
-  defp sanitize_persisted_event(event), do: event
+  defp sanitize_persisted_event(%{"event" => event_name} = event)
+       when event_name in ["trace.start", "trace.stop"] do
+    Map.take(event, [
+      "schema_version",
+      "event",
+      "trace_id",
+      "timestamp",
+      "seq",
+      "trace_kind",
+      "producer",
+      "trace_label",
+      "model",
+      "duration_ms"
+    ])
+  end
+
+  defp sanitize_persisted_event(_event), do: nil
 
   defp maybe_put_hash(map, _key, nil), do: map
   defp maybe_put_hash(map, key, value), do: Map.put(map, key, hash_term(value))
@@ -735,6 +766,18 @@ defmodule PtcRunner.Kernel.Eval do
 
   defp temporary_trace_path(path, kind) do
     "#{path}.#{kind}-#{System.unique_integer([:positive, :monotonic])}"
+  end
+
+  defp raw_trace_directory do
+    path =
+      Path.join(
+        System.tmp_dir!(),
+        "ptc-kernel-eval-#{System.unique_integer([:positive, :monotonic])}"
+      )
+
+    File.mkdir_p!(path)
+    File.chmod!(path, 0o700)
+    path
   end
 
   defp maybe_write_report(_report, nil), do: :ok

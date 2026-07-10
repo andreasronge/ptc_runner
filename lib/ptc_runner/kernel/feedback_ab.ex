@@ -131,7 +131,11 @@ defmodule PtcRunner.Kernel.FeedbackAB do
   defp preflight_live(:mock, _model), do: :ok
 
   defp preflight_live(:live, model) do
-    case Eval.run_cases([], mode: :live, model: model) do
+    case Eval.run_cases([],
+           mode: :live,
+           model: model,
+           report: eval_report_path([], "preflight")
+         ) do
       {:ok, _empty} -> :ok
       {:error, reason} -> {:error, reason}
     end
@@ -287,6 +291,8 @@ defmodule PtcRunner.Kernel.FeedbackAB do
              mode: mode,
              model: model,
              runs: 1,
+             report: eval_report_path(opts, "#{block.case.id}-#{block.replicate}-#{cell.id}"),
+             trace_dir: eval_trace_dir(opts, "#{block.case.id}-#{block.replicate}-#{cell.id}"),
              prelude_source_overrides: cell.override,
              receive_timeout: Keyword.get(opts, :receive_timeout, 60_000),
              max_tokens: Keyword.get(opts, :max_tokens, 512),
@@ -312,6 +318,23 @@ defmodule PtcRunner.Kernel.FeedbackAB do
     after
       cleanup_debug.()
     end
+  end
+
+  defp eval_report_path(opts, id) do
+    directory =
+      Keyword.get(
+        opts,
+        :eval_report_dir,
+        Path.join(Mix.Project.build_path(), "kernel_eval_traces")
+      )
+
+    Path.join(directory, "feedback-ab-#{id}.md")
+  end
+
+  defp eval_trace_dir(opts, id) do
+    opts
+    |> Keyword.get(:eval_report_dir, Path.join(Mix.Project.build_path(), "kernel_eval_traces"))
+    |> Path.join("feedback-ab-#{id}-traces")
   end
 
   defp unsafe_debug_agent(opts) do

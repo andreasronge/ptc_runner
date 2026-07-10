@@ -62,42 +62,11 @@ defmodule PtcRunner.Kernel do
   @namespace_deps %{
     "agent.core" => ["agent.prompt", "agent.feedback"]
   }
-
-  {:ok, default_prompt} = Compiler.compile(@prelude_sources["agent.prompt"])
-  {:ok, default_feedback} = Compiler.compile(@prelude_sources["agent.feedback"])
-
-  {:ok, default_core} =
-    Compiler.compile(@prelude_sources["agent.core"],
-      deps: [default_prompt, default_feedback],
-      namespace_deps: @namespace_deps
-    )
-
-  {:ok, default_embedded_prelude} =
-    Bundle.compile_precompiled(
-      [
-        %{
-          id: "agent.prompt",
-          source: @prelude_sources["agent.prompt"],
-          prelude: default_prompt,
-          origin: {:file, @prelude_origin_paths["agent.prompt"]}
-        },
-        %{
-          id: "agent.feedback",
-          source: @prelude_sources["agent.feedback"],
-          prelude: default_feedback,
-          origin: {:file, @prelude_origin_paths["agent.feedback"]}
-        },
-        %{
-          id: "agent.core",
-          source: @prelude_sources["agent.core"],
-          prelude: default_core,
-          origin: {:file, @prelude_origin_paths["agent.core"]}
-        }
-      ],
-      namespace_deps: @namespace_deps
-    )
-
-  @default_embedded_prelude default_embedded_prelude
+  @default_prelude_cache_key {
+    __MODULE__,
+    :default_embedded_prelude,
+    :crypto.hash(:sha256, :erlang.term_to_binary(@prelude_sources))
+  }
 
   @spec compile_prelude(keyword()) :: {:ok, Prelude.t()} | {:error, term()}
   def compile_prelude(opts \\ []) when is_list(opts) do
@@ -162,9 +131,21 @@ defmodule PtcRunner.Kernel do
     overrides = Keyword.get(opts, :prelude_source_overrides, %{})
 
     if map_size(overrides) == 0 do
-      {:ok, @default_embedded_prelude}
+      default_embedded_prelude()
     else
       compile_overridden_embedded_prelude(overrides)
+    end
+  end
+
+  defp default_embedded_prelude do
+    case :persistent_term.get(@default_prelude_cache_key, :missing) do
+      :missing ->
+        result = compile_overridden_embedded_prelude(%{})
+        :persistent_term.put(@default_prelude_cache_key, result)
+        result
+
+      result ->
+        result
     end
   end
 
@@ -211,8 +192,6 @@ defmodule PtcRunner.Kernel do
     end
   end
 
-  defp annotate_role_prelude(nil, _resolved, _surface), do: nil
-
   defp annotate_role_prelude(%Prelude{} = prelude, resolved, surface) do
     runtime = %{
       role: resolved.role,
@@ -225,6 +204,8 @@ defmodule PtcRunner.Kernel do
 
     %{prelude | metadata: Map.put(prelude.metadata, :role_prelude_selection, runtime)}
   end
+
+  defp annotate_role_prelude(nil, _resolved, :inner), do: nil
 
   defp public_selected_ref(ref) when is_binary(ref), do: ref
 
@@ -387,6 +368,7 @@ defmodule PtcRunner.Kernel do
            ),
          :ok <- optional_positive_integer_option(opts, :max_tool_calls),
          :ok <- optional_positive_integer_option(opts, :inner_max_tool_calls),
+         :ok <- prelude_source_overrides_option(opts),
          {:ok, memory_cap} <- memory_byte_cap(opts),
          {:ok, private_capabilities} <- normalize_private_capabilities(opts) do
       {:ok,
@@ -423,6 +405,36 @@ defmodule PtcRunner.Kernel do
       :error -> invalid_option(option, nil)
     end
   end
+
+  defp prelude_source_overrides_option(opts) do
+    overrides = Keyword.get(opts, :prelude_source_overrides, %{})
+
+    if is_map(overrides) and Enum.all?(overrides, &valid_prelude_override?/1) do
+      :ok
+    else
+      invalid_option(:prelude_source_overrides, overrides)
+    end
+  end
+
+  defp valid_prelude_override?({namespace, override})
+       when namespace in [
+              "agent.prompt",
+              "agent.feedback",
+              "agent.core",
+              :"agent.prompt",
+              :"agent.feedback",
+              :"agent.core"
+            ] do
+    case override do
+      source when is_binary(source) -> true
+      {source, _origin} when is_binary(source) -> true
+      %{source: source} when is_binary(source) -> true
+      %{"source" => source} when is_binary(source) -> true
+      _ -> false
+    end
+  end
+
+  defp valid_prelude_override?(_entry), do: false
 
   defp invalid_option(option, value) do
     {:error,
@@ -1714,8 +1726,6 @@ defmodule PtcRunner.Kernel do
     |> Map.update(:message, nil, &bound_outer_text/1)
     |> Map.update(:details, nil, &TurnEvent.preview(&1, limit: 500))
   end
-
-  defp bound_outer_fail(fail), do: %{reason: :kernel_failure, message: TurnEvent.preview(fail)}
 
   defp bound_outer_return(nil), do: nil
   defp bound_outer_return(value), do: value |> Public.value() |> TurnEvent.preview(limit: 500)

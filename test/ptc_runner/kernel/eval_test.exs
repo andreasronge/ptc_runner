@@ -5,6 +5,7 @@ defmodule PtcRunner.Kernel.EvalTest do
   alias PtcRunner.Kernel.Eval
   alias PtcRunner.Lisp.Prelude
   alias PtcRunner.PreludeStore
+  alias PtcRunner.TraceLog
 
   @variant_dir Path.expand("../../../priv/kernel_feedback_variants", __DIR__)
   @feedback_a_path Path.join(@variant_dir, "feedback_a_default.lisp")
@@ -148,29 +149,6 @@ defmodule PtcRunner.Kernel.EvalTest do
     assert Eval.failure_count(report) == 1
   end
 
-  @tag :tmp_dir
-  test "failed runs leave neither raw nor published persistent traces", %{tmp_dir: dir} do
-    assert_raise BadMapError, fn ->
-      Eval.run_cases(
-        [
-          %{
-            id: "crash",
-            task: "Return one.",
-            context: %{},
-            expected: 1,
-            max_turns: 1,
-            mock_programs: ["(return 1)"]
-          }
-        ],
-        mode: :mock,
-        trace_dir: dir,
-        prelude_source_overrides: :invalid
-      )
-    end
-
-    assert Path.wildcard(Path.join(dir, "*")) == []
-  end
-
   test "default markdown report is sanitized" do
     assert {:ok, report} = Eval.run(suite: "mini", mode: :mock)
 
@@ -234,6 +212,38 @@ defmodule PtcRunner.Kernel.EvalTest do
     refute inspected =~ secret
     refute inspected =~ "payload"
     assert Enum.any?(trace, &(&1.event == "memory"))
+  end
+
+  @tag :tmp_dir
+  test "persistent traces discard nested non-turn telemetry payloads", %{tmp_dir: dir} do
+    secret = "NESTED-TRACE-SECRET"
+
+    eval_case = %{
+      id: "nested_trace_redaction",
+      task: "Call the granted tool and return one.",
+      context: %{},
+      tools: %{
+        "leak" => fn _args ->
+          TraceLog.write_to_active(%{
+            "event" => "llm.stop",
+            "data" => %{"messages" => secret, "result" => secret}
+          })
+
+          %{"ok" => true}
+        end
+      },
+      expected: 1,
+      max_turns: 1,
+      mock_programs: ["(do (tool/leak {}) (return 1))"]
+    }
+
+    assert {:ok, %{cases: [%{status: :pass, trace_path: trace_path}]}} =
+             Eval.run_cases([eval_case], mode: :mock, trace_dir: dir)
+
+    persisted = File.read!(trace_path)
+    refute persisted =~ secret
+    refute persisted =~ "llm.stop"
+    assert persisted =~ ~s("event":"turn")
   end
 
   test "feedback variant swap changes only the feedback component hash" do

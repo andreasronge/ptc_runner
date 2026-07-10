@@ -8,7 +8,7 @@ defmodule PtcRunner.PreludeRuntime do
   alias PtcRunner.PreludeStore.Selection
 
   @type resolved :: %{
-          prelude: Prelude.t(),
+          prelude: Prelude.t() | nil,
           selected_refs: [term()],
           resolved_refs: [map()],
           role: String.t(),

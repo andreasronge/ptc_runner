@@ -304,6 +304,16 @@ defmodule PtcRunner.TraceLog.CollectorTest do
   end
 
   describe "write error logging (F8)" do
+    test "counts an event that cannot be JSON encoded", %{tmp_dir: dir} do
+      path = Path.join(dir, "invalid-encoding.jsonl")
+      {:ok, collector} = Collector.start_link(path: path)
+
+      Collector.write_event(collector, %{"event" => "invalid", "value" => <<255>>})
+
+      assert {:ok, ^path, 1} = Collector.stop(collector)
+      refute File.read!(path) =~ "invalid"
+    end
+
     test "logs warning on first write error, not on subsequent ones", %{tmp_dir: dir} do
       path = Path.join(dir, "test.jsonl")
       {:ok, collector} = Collector.start_link(path: path)

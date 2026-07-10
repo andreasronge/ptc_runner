@@ -57,6 +57,23 @@ defmodule PtcRunner.Kernel.M1GateTest do
     end
   end
 
+  test "malformed prelude source overrides fail as a bounded public preflight error" do
+    for overrides <- [:invalid, %{"unknown" => "source"}, %{"agent.core" => %{source: 42}}] do
+      assert {:error,
+              %{
+                reason: "invalid_kernel_option",
+                option: "prelude_source_overrides",
+                value_type: value_type
+              }} =
+               Kernel.run(%{"task" => "compute"},
+                 llm: fail_llm(),
+                 prelude_source_overrides: overrides
+               )
+
+      assert value_type in ["atom", "map"]
+    end
+  end
+
   test "private capabilities normalize names, reject ambiguity, and remain model-invisible" do
     private =
       {fn _args -> %{"secret" => "hidden"} end, [signature: "() -> :map", visibility: :private]}

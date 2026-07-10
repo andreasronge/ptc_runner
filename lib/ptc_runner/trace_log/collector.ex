@@ -238,7 +238,7 @@ defmodule PtcRunner.TraceLog.Collector do
   end
 
   def handle_call(:stop, _from, state) do
-    close_file(state)
+    state = close_file(state)
     {:stop, :normal, {:ok, state.path, state.write_errors}, %{state | file: nil}}
   end
 
@@ -255,7 +255,7 @@ defmodule PtcRunner.TraceLog.Collector do
   @impl true
   def handle_info({:DOWN, ref, :process, _pid, _reason}, %{parent_ref: ref} = state)
       when ref != nil do
-    close_file(state)
+    state = close_file(state)
     {:stop, :normal, %{state | file: nil, parent_ref: nil}}
   end
 
@@ -285,14 +285,7 @@ defmodule PtcRunner.TraceLog.Collector do
     event = Map.put(event, "seq", seq)
     event = bound_final_event(event)
 
-    if event do
-      case Event.encode(event) do
-        {:ok, json} -> IO.puts(state.file, json)
-        {:error, _} -> :ok
-      end
-    end
-
-    state
+    if event, do: write_encoded_event(event, state), else: increment_write_error(state)
   end
 
   defp prepare_for_enqueue(event) do
@@ -493,18 +486,22 @@ defmodule PtcRunner.TraceLog.Collector do
     {seq, %{state | seq: seq}}
   end
 
-  defp close_file(%{file: nil}), do: :ok
+  defp close_file(%{file: nil} = state), do: state
 
   defp close_file(state) do
     duration_ms = System.monotonic_time(:millisecond) - state.start_time
 
-    try do
-      write_trace_stop(state, duration_ms)
-    rescue
-      _ -> :ok
-    end
+    state =
+      try do
+        write_trace_stop(state, duration_ms)
+      rescue
+        _ -> increment_write_error(state)
+      end
 
-    File.close(state.file)
+    case File.close(state.file) do
+      :ok -> state
+      {:error, _reason} -> increment_write_error(state)
+    end
   end
 
   defp generate_trace_id do
@@ -542,16 +539,11 @@ defmodule PtcRunner.TraceLog.Collector do
       }
       |> Map.merge(header)
 
-    case Event.encode(event) do
-      {:ok, json} -> IO.puts(state.file, json)
-      {:error, _} -> :ok
-    end
-
-    state
+    write_encoded_event(event, state)
   end
 
   defp write_trace_stop(state, duration_ms) do
-    {seq, _state} = next_seq(state)
+    {seq, state} = next_seq(state)
 
     event = %{
       "schema_version" => @schema_version,
@@ -562,9 +554,18 @@ defmodule PtcRunner.TraceLog.Collector do
       "duration_ms" => duration_ms
     }
 
-    case Event.encode(event) do
-      {:ok, json} -> IO.puts(state.file, json)
-      {:error, _} -> :ok
+    write_encoded_event(event, state)
+  end
+
+  defp write_encoded_event(event, state) do
+    with {:ok, json} <- Event.encode(event),
+         :ok <- IO.puts(state.file, json) do
+      state
+    else
+      {:error, _reason} -> increment_write_error(state)
     end
   end
+
+  defp increment_write_error(state),
+    do: %{state | write_errors: state.write_errors + 1}
 end

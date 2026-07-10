@@ -245,6 +245,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
           tool_calls: [tool_call()],
           pmap_calls: [pmap_call()],
           catalog_ops: [catalog_op()],
+          prelude_call_counts: %{String.t() => non_neg_integer()},
           tool_cache: map()
         }
 
