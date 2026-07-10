@@ -140,6 +140,24 @@ defmodule PtcRunner.KernelTest do
     refute_received {:llm_request, _}
   end
 
+  test "invalid embedded prelude source is attributed to its override option" do
+    parent = self()
+    llm = fn _request -> send(parent, :llm_called) end
+
+    assert {:error,
+            %{
+              reason: "invalid_kernel_option",
+              option: "prelude_source_overrides",
+              value_type: "map"
+            }} =
+             Kernel.run(%{"task" => "compute"},
+               llm: llm,
+               prelude_source_overrides: %{"agent.core" => "(not valid"}
+             )
+
+    refute_received :llm_called
+  end
+
   test "variant core missing system field fails closed before LLM call" do
     parent = self()
 
@@ -1559,6 +1577,63 @@ defmodule PtcRunner.KernelTest do
              )
 
     assert message =~ "failed to resolve prelude"
+  end
+
+  test "run attributes loop prelude resolution failure to explicit loop selection" do
+    {:ok, store} = seeded_agent_prelude_store()
+    bad_ref = %{"id" => "agent.core", "version" => 1, "checksum" => String.duplicate("0", 64)}
+    parent = self()
+    llm = fn _request -> send(parent, :llm_called) end
+
+    assert {:error,
+            %{
+              reason: "invalid_kernel_option",
+              option: "preludes",
+              value_type: "list"
+            }} =
+             Kernel.run(%{"task" => "compute"},
+               llm: llm,
+               prelude_store: store,
+               role_policy: kernel_role_policy(preludes: [bad_ref], default_preludes: [bad_ref]),
+               preludes: [bad_ref],
+               inner_preludes: []
+             )
+
+    refute_received :llm_called
+  end
+
+  test "run attributes inner prelude resolution failure to explicit inner selection" do
+    {:ok, store} = seeded_agent_prelude_store()
+
+    {:ok, _} =
+      PreludeStore.write(
+        store,
+        "domain.example",
+        ~S|(ns domain.example "Example." {:visibility :prompt})
+           (defn value "Return one." [] 1)|
+      )
+
+    bad_ref =
+      %{"id" => "domain.example", "version" => 1, "checksum" => String.duplicate("0", 64)}
+
+    parent = self()
+    llm = fn _request -> send(parent, :llm_called) end
+
+    assert {:error,
+            %{
+              reason: "invalid_kernel_option",
+              option: "inner_preludes",
+              value_type: "list"
+            }} =
+             Kernel.run(%{"task" => "compute"},
+               llm: llm,
+               prelude_store: store,
+               role_policy: kernel_role_policy(inner_preludes: [bad_ref]),
+               preludes: ["agent.core@1"],
+               inner_preludes: [bad_ref]
+             )
+
+    refute_received :llm_called
   end
 
   test "role-backed kernel turn events include source-free role and prelude provenance" do

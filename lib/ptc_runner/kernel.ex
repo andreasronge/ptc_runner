@@ -82,9 +82,9 @@ defmodule PtcRunner.Kernel do
       role_backed_prelude?(opts) ->
         with {:ok, grant} <- resolve_role_grant(opts),
              {:ok, inner_resolved} <-
-               PreludeRuntime.resolve(Keyword.get(opts, :prelude_store), grant, :inner, opts),
+               resolve_prelude_surface(opts, grant, :inner),
              {:ok, loop_resolved} <-
-               PreludeRuntime.resolve(Keyword.get(opts, :prelude_store), grant, :loop, opts),
+               resolve_prelude_surface(opts, grant, :loop),
              {:ok, inner_refs} <-
                InnerPrelude.validate(loop_resolved.prelude, inner_resolved.prelude, mission_tools) do
           {:ok,
@@ -100,10 +100,32 @@ defmodule PtcRunner.Kernel do
          %{reason: :role_policy_required, message: ":inner_preludes requires :role_policy"}}
 
       true ->
-        with {:ok, loop} <- compile_embedded_prelude(opts),
+        with {:ok, loop} <-
+               compile_embedded_prelude(opts)
+               |> tag_preflight_option(:prelude_source_overrides),
              do: {:ok, %{loop: loop, inner: nil, inner_refs: MapSet.new()}}
     end
   end
+
+  defp resolve_prelude_surface(opts, grant, surface) do
+    opts
+    |> Keyword.get(:prelude_store)
+    |> PreludeRuntime.resolve(grant, surface, opts)
+    |> tag_preflight_option(prelude_selection_option(surface, opts))
+  end
+
+  defp prelude_selection_option(:loop, opts) do
+    if Keyword.has_key?(opts, :preludes), do: :preludes, else: :role_policy
+  end
+
+  defp prelude_selection_option(:inner, opts) do
+    if Keyword.has_key?(opts, :inner_preludes), do: :inner_preludes, else: :role_policy
+  end
+
+  defp tag_preflight_option({:error, error}, option) when is_map(error),
+    do: {:error, Map.put(error, :kernel_option, option)}
+
+  defp tag_preflight_option(result, _option), do: result
 
   defp compile_role_backed_prelude(opts) do
     with {:ok, grant} <- resolve_role_grant(opts),
@@ -632,6 +654,8 @@ defmodule PtcRunner.Kernel do
       value_type: value_type(value)
     }
   end
+
+  defp preflight_option(%{kernel_option: option}, _opts) when is_atom(option), do: option
 
   defp preflight_option(%{reason: reason}, _opts) when reason in [:invalid_policy],
     do: :role_policy

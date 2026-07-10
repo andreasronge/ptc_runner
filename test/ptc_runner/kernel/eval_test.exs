@@ -246,6 +246,35 @@ defmodule PtcRunner.Kernel.EvalTest do
     assert persisted =~ ~s("event":"turn")
   end
 
+  @tag :tmp_dir
+  test "persistent traces hash model-controlled failure reasons", %{tmp_dir: dir} do
+    secret = "PERSISTED-FAIL-SECRET"
+
+    eval_case = %{
+      id: "failure_reason_redaction",
+      task: "Fail with the supplied reason.",
+      context: %{},
+      expected: 1,
+      max_turns: 1,
+      mock_programs: [~s|(fail {"reason" "#{secret}"})|]
+    }
+
+    assert {:ok, %{cases: [%{status: :fail, trace_path: trace_path}]}} =
+             Eval.run_cases([eval_case], mode: :mock, trace_dir: dir)
+
+    persisted = File.read!(trace_path)
+    refute persisted =~ secret
+
+    turn =
+      trace_path
+      |> File.stream!()
+      |> Enum.map(&Jason.decode!/1)
+      |> Enum.find(&(&1["event"] == "turn"))
+
+    assert turn["data"]["fail"]["reason"] == "kernel_failure"
+    assert turn["data"]["fail"]["reason_hash"] =~ ~r/\A[0-9a-f]{64}\z/
+  end
+
   test "feedback variant swap changes only the feedback component hash" do
     {:ok, prelude_a} =
       Kernel.compile_prelude(prelude_source_overrides: feedback_override(@feedback_a_path))

@@ -745,7 +745,10 @@ defmodule PtcRunner.Kernel.Eval do
   defp sanitize_persisted_fail(nil), do: nil
 
   defp sanitize_persisted_fail(fail) when is_map(fail) do
-    %{"reason" => Map.get(fail, "reason", Map.get(fail, :reason, "kernel_failure"))}
+    reason = Map.get(fail, "reason", Map.get(fail, :reason))
+
+    %{"reason" => "kernel_failure"}
+    |> maybe_put_hash("reason_hash", reason)
   end
 
   defp sanitize_persisted_fail(_fail), do: %{"reason" => "kernel_failure"}
