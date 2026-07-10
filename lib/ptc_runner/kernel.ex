@@ -102,7 +102,7 @@ defmodule PtcRunner.Kernel do
       true ->
         with {:ok, loop} <-
                compile_embedded_prelude(opts)
-               |> tag_preflight_option(:prelude_source_overrides),
+               |> tag_error_option(:prelude_source_overrides),
              do: {:ok, %{loop: loop, inner: nil, inner_refs: MapSet.new()}}
     end
   end
@@ -123,9 +123,25 @@ defmodule PtcRunner.Kernel do
   end
 
   defp tag_preflight_option({:error, error}, option) when is_map(error),
-    do: {:error, Map.put(error, :kernel_option, option)}
+    do: tag_selection_error(error, option)
 
   defp tag_preflight_option(result, _option), do: result
+
+  defp tag_error_option({:error, error}, option) when is_map(error),
+    do: {:error, Map.put(error, :kernel_option, option)}
+
+  defp tag_error_option(result, _option), do: result
+
+  defp tag_selection_error(%{reason: reason} = error, option)
+       when reason in [
+              :missing_prelude_selection,
+              :prelude_selection_failed,
+              :invalid_prelude_ref,
+              :prelude_not_granted
+            ],
+       do: {:error, Map.put(error, :kernel_option, option)}
+
+  defp tag_selection_error(error, _option), do: {:error, error}
 
   defp compile_role_backed_prelude(opts) do
     with {:ok, grant} <- resolve_role_grant(opts),

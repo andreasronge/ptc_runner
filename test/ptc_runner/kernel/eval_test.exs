@@ -275,6 +275,75 @@ defmodule PtcRunner.Kernel.EvalTest do
     assert turn["data"]["fail"]["reason_hash"] =~ ~r/\A[0-9a-f]{64}\z/
   end
 
+  @tag :tmp_dir
+  test "reports hash non-string model-controlled failure reasons", %{tmp_dir: dir} do
+    secret = "PERSISTED-REPORT-FAIL-SECRET"
+    report_path = Path.join(dir, "failure.md")
+
+    core = ~s|(ns agent.core "Failure projection." {:visibility :prompt})
+               (defn run-mission [_mission _cfg]
+                 (fail {"reason" ["#{secret}"]}))|
+
+    eval_case = %{
+      id: "failure_report_redaction",
+      task: "Fail.",
+      context: %{},
+      expected: 1,
+      max_turns: 1,
+      mock_programs: ["(return 1)"]
+    }
+
+    assert {:ok, %{cases: [%{status: :fail} = result]}} =
+             Eval.run_cases([eval_case],
+               mode: :mock,
+               report: report_path,
+               trace_dir: Path.join(dir, "traces"),
+               prelude_source_overrides: %{"agent.core" => core}
+             )
+
+    assert result.failure_reason == "kernel_failure"
+    assert result.failure_hash =~ ~r/\A[0-9a-f]{64}\z/
+
+    markdown = File.read!(report_path)
+    json = File.read!(Path.rootname(report_path) <> ".json")
+    refute markdown =~ secret
+    refute json =~ secret
+    assert markdown =~ result.failure_hash
+    assert json =~ result.failure_hash
+  end
+
+  @tag :tmp_dir
+  test "report path cannot collide with its JSON twin", %{tmp_dir: dir} do
+    path = Path.join(dir, "smoke.json")
+
+    assert {:error, {:invalid_report_path, ^path}} =
+             Eval.run(suite: "smoke", mode: :mock, report: path)
+
+    refute File.exists?(path)
+  end
+
+  @tag :tmp_dir
+  test "dotenv model identity records the model selected after loading", %{tmp_dir: dir} do
+    dotenv_key = {PtcRunner.Dotenv, :dotenv_loaded}
+    previous_loaded = :persistent_term.get(dotenv_key, :missing)
+    previous_model = System.get_env("PTC_TEST_MODEL")
+    File.write!(Path.join(dir, ".env"), "PTC_TEST_MODEL=openai:gpt\n")
+    System.delete_env("PTC_TEST_MODEL")
+    :persistent_term.erase(dotenv_key)
+
+    on_exit(fn ->
+      restore_env("PTC_TEST_MODEL", previous_model)
+
+      case previous_loaded do
+        :missing -> :persistent_term.erase(dotenv_key)
+        value -> :persistent_term.put(dotenv_key, value)
+      end
+    end)
+
+    assert {:ok, "openai:gpt", "openai:gpt-4.1-mini"} =
+             File.cd!(dir, fn -> Eval.resolve_model_identity(nil) end)
+  end
+
   test "feedback variant swap changes only the feedback component hash" do
     {:ok, prelude_a} =
       Kernel.compile_prelude(prelude_source_overrides: feedback_override(@feedback_a_path))

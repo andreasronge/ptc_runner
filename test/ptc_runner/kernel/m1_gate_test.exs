@@ -179,7 +179,9 @@ defmodule PtcRunner.Kernel.M1GateTest do
       {[llm: fail_llm(), kernel_memory_byte_cap: sentinel], "kernel_memory_byte_cap"},
       {[llm: fail_llm(), role_policy: sentinel], "role_policy"},
       {[llm: fail_llm(), role_policy: %{"roles" => %{"worker" => %{}}}, role: sentinel], "role"},
-      {[llm: fail_llm(), inner_preludes: [sentinel]], "inner_preludes"}
+      {[llm: fail_llm(), inner_preludes: [sentinel]], "inner_preludes"},
+      {[llm: fail_llm(), role_policy: role_policy()], "prelude_store"},
+      {[llm: fail_llm(), role_policy: role_policy(), prelude_store: sentinel], "prelude_store"}
     ]
 
     for {opts, expected_option} <- cases do
@@ -257,6 +259,21 @@ defmodule PtcRunner.Kernel.M1GateTest do
 
   defp fail_llm do
     fn _ -> flunk("LLM must not be called during preflight") end
+  end
+
+  defp role_policy do
+    %{
+      "default_role" => "kernel",
+      "roles" => %{
+        "kernel" => %{
+          "prelude_store_access" => "none",
+          "preludes" => ["agent.core@1"],
+          "default_preludes" => ["agent.core@1"],
+          "inner_preludes" => [],
+          "default_inner_preludes" => []
+        }
+      }
+    }
   end
 
   defp assert_kernel_limit_failure(result, expected_reason) do

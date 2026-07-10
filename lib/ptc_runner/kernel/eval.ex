@@ -30,6 +30,19 @@ defmodule PtcRunner.Kernel.Eval do
     Registry.resolve(requested)
   end
 
+  @doc false
+  @spec resolve_model_identity(String.t() | nil) ::
+          {:ok, String.t(), String.t()} | {:error, term()}
+  def resolve_model_identity(model) do
+    PtcRunner.Dotenv.load()
+    requested = model || System.get_env("PTC_TEST_MODEL") || @default_live_model
+
+    case Registry.resolve(requested) do
+      {:ok, resolved} -> {:ok, requested, resolved}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
   @spec run(keyword()) :: {:ok, result()} | {:error, term()}
   def run(opts \\ []) do
     suite = Keyword.get(opts, :suite, "mini")
@@ -65,9 +78,7 @@ defmodule PtcRunner.Kernel.Eval do
   end
 
   defp execute_cases(cases, suite, mode, runs, variant, opts) do
-    requested_model = requested_model(mode, Keyword.get(opts, :model))
-
-    with {:ok, model} <- resolve_model(mode, Keyword.get(opts, :model)) do
+    with {:ok, requested_model, model} <- resolve_model(mode, Keyword.get(opts, :model)) do
       results =
         for run_index <- 1..runs,
             eval_case <- cases do
@@ -104,7 +115,7 @@ defmodule PtcRunner.Kernel.Eval do
       }) do
     rows =
       Enum.map(cases, fn case_result ->
-        "| #{case_result.run} | #{case_result.case} | #{case_result.status} | #{render_result(case_result.expected_result)} | #{render_result(case_result.actual_result)} | #{case_result.action_count} | #{case_result.eval_count} | #{case_result.expected_turns} | #{case_result.actual_turns} | #{case_result.dropped_turns} | #{case_result.unexpected_turns} | #{case_result.write_errors} | #{case_result.failure_reason || ""} |"
+        "| #{case_result.run} | #{case_result.case} | #{case_result.status} | #{render_result(case_result.expected_result)} | #{render_result(case_result.actual_result)} | #{case_result.action_count} | #{case_result.eval_count} | #{case_result.expected_turns} | #{case_result.actual_turns} | #{case_result.dropped_turns} | #{case_result.unexpected_turns} | #{case_result.write_errors} | #{case_result.failure_reason || ""} | #{case_result.failure_hash || ""} |"
       end)
 
     """
@@ -119,8 +130,8 @@ defmodule PtcRunner.Kernel.Eval do
     commit: #{commit}
     runs: #{runs}
 
-    | run | case | status | expected result | actual result | actions | evals | expected turns | actual turns | dropped | unexpected | write errors | failure |
-    | --- | --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+    | run | case | status | expected result | actual result | actions | evals | expected turns | actual turns | dropped | unexpected | write errors | failure | failure hash |
+    | --- | --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |
     #{Enum.join(rows, "\n")}
     """
     |> String.trim()
@@ -227,24 +238,27 @@ defmodule PtcRunner.Kernel.Eval do
   defp validate_variant(other), do: {:error, {:unsupported_variant, other}}
 
   defp validate_report_contract(suite, mode, report) do
-    if (suite == "smoke" or mode == :live) and not (is_binary(report) and report != "") do
-      {:error, {:report_required, suite}}
-    else
-      :ok
+    cond do
+      (suite == "smoke" or mode == :live) and not (is_binary(report) and report != "") ->
+        {:error, {:report_required, suite}}
+
+      is_binary(report) and String.downcase(Path.extname(report)) == ".json" ->
+        {:error, {:invalid_report_path, report}}
+
+      true ->
+        :ok
     end
   end
 
   defp validate_runs(runs) when is_integer(runs) and runs > 0, do: :ok
   defp validate_runs(other), do: {:error, {:invalid_runs, other}}
 
-  defp resolve_model(:mock, _model), do: {:ok, nil}
+  defp resolve_model(:mock, _model), do: {:ok, nil, nil}
 
   defp resolve_model(:live, model) do
-    PtcRunner.Dotenv.load()
-
-    with {:ok, resolved} <- resolve_model(model),
+    with {:ok, requested, resolved} <- resolve_model_identity(model),
          :ok <- ensure_key(resolved) do
-      {:ok, resolved}
+      {:ok, requested, resolved}
     end
   end
 
@@ -485,12 +499,12 @@ defmodule PtcRunner.Kernel.Eval do
          prompt_hashes,
          started
        ) do
-    {status, value, failure_reason} =
+    {status, value, failure_reason, failure_hash} =
       case result do
-        {:ok, %{"value" => value}} -> verify_expected(eval_case, value)
-        {:ok, other} -> verify_expected(eval_case, other)
-        {:error, %{"reason" => reason}} -> {:fail, nil, reason}
-        {:error, _other} -> {:fail, nil, "kernel_error"}
+        {:ok, %{"value" => value}} -> expected_result(eval_case, value)
+        {:ok, other} -> expected_result(eval_case, other)
+        {:error, %{"reason" => reason}} -> {:fail, nil, "kernel_failure", hash_term(reason)}
+        {:error, _other} -> {:fail, nil, "kernel_error", nil}
       end
 
     persisted_events = Analyzer.load(trace_metadata.path)
@@ -507,12 +521,12 @@ defmodule PtcRunner.Kernel.Eval do
     dropped_turns = max(expected_turns - actual_turns, 0)
     unexpected_turns = max(actual_turns - expected_turns, 0)
 
-    {status, failure_reason} =
+    {status, failure_reason, failure_hash} =
       if status == :pass and
            (trace_metadata.write_errors > 0 or dropped_turns > 0 or unexpected_turns > 0) do
-        {:fail, "trace_integrity_failure"}
+        {:fail, "trace_integrity_failure", nil}
       else
-        {status, failure_reason}
+        {status, failure_reason, failure_hash}
       end
 
     Map.merge(evidence, %{
@@ -523,6 +537,7 @@ defmodule PtcRunner.Kernel.Eval do
       expected_result: project_result(Map.get(eval_case, :expected)),
       actual_result: project_result(value),
       failure_reason: failure_reason,
+      failure_hash: failure_hash,
       action_count: Enum.count(events, &(&1.event == "action")),
       eval_count: Enum.count(events, &(&1.event == "eval")),
       duration_ms: duration_ms(started),
@@ -538,6 +553,11 @@ defmodule PtcRunner.Kernel.Eval do
       dropped_turns: dropped_turns,
       unexpected_turns: unexpected_turns
     })
+  end
+
+  defp expected_result(eval_case, value) do
+    {status, value, failure_reason} = verify_expected(eval_case, value)
+    {status, value, failure_reason, nil}
   end
 
   defp verify_expected(eval_case, value) do
@@ -802,13 +822,6 @@ defmodule PtcRunner.Kernel.Eval do
       Enum.map(cases, &Map.drop(&1, [:trace, :unsafe_trace, :value]))
     end)
   end
-
-  defp requested_model(:mock, _model), do: nil
-
-  defp requested_model(:live, model),
-    do: model || System.get_env("PTC_TEST_MODEL") || @default_live_model
-
-  defp requested_model(_mode, model), do: model
 
   defp provider(nil), do: nil
   defp provider(model), do: model |> Registry.provider_from_model() |> to_string()
