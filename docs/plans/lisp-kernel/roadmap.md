@@ -541,12 +541,12 @@ one mission, mock-llm tests, one live smoke.
   and recorded zero write, drop, or unexpected counts. Exact prompt, action,
   bundle, and component hashes are recorded in architecture fact 20 and the
   sanitized Markdown/JSON report pair.
-- [ ] Gate: standing gates + Tier 0 green + Tier 1 passes + Tier-2 smoke
+- [x] Gate: standing gates + Tier 0 green + Tier 1 passes + Tier-2 smoke
   records ≥ 4/5 on case #1 + S11 mock soak shows no unbounded process/memory/
   trace accumulation. All implementation, deterministic, live, soak,
-  redaction, and documentation evidence passed on 2026-07-10; final
-  `mix prepush` and a clean post-fix independent review remain before this
-  checkbox closes.
+  redaction, and documentation evidence passed on 2026-07-10. `mix prepush`
+  passed with zero Dialyzer findings, and the final post-fix independent review
+  reported no actionable findings. M1 is closed; no M2 work was started.
 
 ## M2 — Multi-turn + prelude split
 
