@@ -71,6 +71,9 @@ defmodule PtcRunner.Kernel.EvalTest do
     assert run.dropped_turns == 0
     assert run.unexpected_turns == 0
     assert run.write_errors == 0
+    assert length(run.prompt_hashes) == 1
+    assert length(run.action_hashes) == 1
+    assert Enum.all?(run.prompt_hashes ++ run.action_hashes, &(&1 =~ ~r/\A[0-9a-f]{64}\z/))
     assert File.exists?(run.trace_path)
     assert Path.dirname(run.trace_path) == trace_dir
 
@@ -80,19 +83,28 @@ defmodule PtcRunner.Kernel.EvalTest do
 
     markdown = File.read!(report_path)
     json = File.read!(json_path)
+    traces = trace_dir |> Path.join("*.jsonl") |> Path.wildcard() |> Enum.map_join(&File.read!/1)
 
     for forbidden <- [
           "OPENROUTER_API_KEY",
           "sk-or-",
           "You are controlling PTC-Lisp",
-          "tool_calls",
           "mock_programs",
           "(return",
           "messages"
         ] do
       refute markdown =~ forbidden
       refute json =~ forbidden
+      refute traces =~ forbidden
     end
+
+    refute markdown =~ "tool_calls"
+    refute json =~ "tool_calls"
+
+    assert traces =~ "program_hash"
+    assert traces =~ "result_hash"
+    refute traces =~ "result_preview"
+    refute traces =~ "changed_keys"
 
     decoded = Jason.decode!(json)
     assert decoded["cases"] |> hd() |> Map.fetch!("inner_prelude_call_counts") == %{}

@@ -302,12 +302,18 @@ defmodule PtcRunner.Kernel.Eval do
   defp run_case(eval_case, run_index, mode, model, opts) do
     started = System.monotonic_time()
     {:ok, events} = Agent.start_link(fn -> [] end)
+    {:ok, prompt_hashes} = Agent.start_link(fn -> [] end)
     {llm, cleanup_llm} = llm_for(eval_case, mode, model, opts)
+
+    hashed_llm = fn request ->
+      Agent.update(prompt_hashes, &[hash_term(request) | &1])
+      llm.(request)
+    end
 
     try do
       kernel_opts =
         [
-          llm: llm,
+          llm: hashed_llm,
           tools: Map.get(eval_case, :tools, %{}),
           max_turns: eval_case.max_turns,
           prelude_source_overrides: Keyword.get(opts, :prelude_source_overrides, %{}),
@@ -337,6 +343,7 @@ defmodule PtcRunner.Kernel.Eval do
         )
 
       sanitized_events = Agent.get(events, &Enum.reverse/1)
+      recorded_prompt_hashes = Agent.get(prompt_hashes, &Enum.reverse/1)
 
       unsafe_trace = unsafe_trace(Keyword.get(opts, :unsafe_debug_agent))
 
@@ -347,11 +354,13 @@ defmodule PtcRunner.Kernel.Eval do
         sanitized_events,
         unsafe_trace,
         trace_metadata,
+        recorded_prompt_hashes,
         started
       )
     after
       cleanup_llm.()
       stop_agent(events)
+      stop_agent(prompt_hashes)
     end
   end
 
@@ -451,6 +460,7 @@ defmodule PtcRunner.Kernel.Eval do
          events,
          unsafe_trace,
          trace_metadata,
+         prompt_hashes,
          started
        ) do
     {status, value, failure_reason} =
@@ -461,6 +471,7 @@ defmodule PtcRunner.Kernel.Eval do
         {:error, _other} -> {:fail, nil, "kernel_error"}
       end
 
+    sanitize_persistent_trace!(trace_metadata.path)
     persisted_events = Analyzer.load(trace_metadata.path)
 
     kernel_turns =
@@ -485,6 +496,9 @@ defmodule PtcRunner.Kernel.Eval do
       unsafe_trace: unsafe_trace,
       trace_path: trace_metadata.path,
       write_errors: trace_metadata.write_errors,
+      prompt_hashes: prompt_hashes,
+      action_hashes:
+        Enum.map(kernel_turns, &get_in(&1, ["data", "program_hash"])) |> Enum.reject(&is_nil/1),
       expected_turns: expected_turns,
       actual_turns: actual_turns,
       dropped_turns: max(expected_turns - actual_turns, 0),
@@ -634,6 +648,60 @@ defmodule PtcRunner.Kernel.Eval do
       counts = get_in(turn, ["data", "inner_prelude_call_counts"]) || %{}
       Map.merge(acc, counts, fn _ref, left, right -> left + right end)
     end)
+  end
+
+  defp sanitize_persistent_trace!(path) do
+    sanitized =
+      path
+      |> Analyzer.load()
+      |> Enum.map(&sanitize_persisted_event/1)
+      |> Enum.map_join(&(Jason.encode!(&1) <> "\n"))
+
+    File.write!(path, sanitized)
+  end
+
+  defp sanitize_persisted_event(%{"event" => "turn", "data" => data} = event)
+       when is_map(data) do
+    program = Map.get(data, "program")
+    result_preview = Map.get(data, "result_preview")
+    prints = Map.get(data, "prints", [])
+    memory_diff = Map.get(data, "memory_diff")
+
+    sanitized_data =
+      data
+      |> Map.drop(["program", "raw_response", "result_preview", "prints", "memory_diff"])
+      |> maybe_put_hash("program_hash", program)
+      |> maybe_put_hash("result_hash", result_preview)
+      |> Map.put("prints_count", if(is_list(prints), do: length(prints), else: 0))
+      |> maybe_put_memory_count(memory_diff)
+      |> Map.update("fail", nil, &sanitize_persisted_fail/1)
+
+    Map.put(event, "data", sanitized_data)
+  end
+
+  defp sanitize_persisted_event(event), do: event
+
+  defp maybe_put_hash(map, _key, nil), do: map
+  defp maybe_put_hash(map, key, value), do: Map.put(map, key, hash_term(value))
+
+  defp maybe_put_memory_count(map, memory_diff) when is_map(memory_diff) do
+    changed = Map.get(memory_diff, "changed_keys", [])
+    Map.put(map, "memory_changed_count", if(is_list(changed), do: length(changed), else: 0))
+  end
+
+  defp maybe_put_memory_count(map, _memory_diff), do: Map.put(map, "memory_changed_count", 0)
+
+  defp sanitize_persisted_fail(nil), do: nil
+
+  defp sanitize_persisted_fail(fail) when is_map(fail) do
+    %{"reason" => Map.get(fail, "reason", Map.get(fail, :reason, "kernel_failure"))}
+  end
+
+  defp sanitize_persisted_fail(_fail), do: %{"reason" => "kernel_failure"}
+
+  defp hash_term(term) do
+    :crypto.hash(:sha256, :erlang.term_to_binary(term))
+    |> Base.encode16(case: :lower)
   end
 
   defp trace_path(eval_case, run_index, opts) do
