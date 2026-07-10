@@ -484,7 +484,7 @@ questions, use [`autonomous-spike.md`](autonomous-spike.md) as the goal brief.
   functions, private/kernel tools are omitted, memory uses only
   `memory_summary.entries`, renderer selection is fail-closed, and Phase 2
   turn-aware/discovery alignment remains deferred.
-- [ ] **S21 — Inner-eval domain prelude injection**: resolve a second,
+- [x] **S21 — Inner-eval domain prelude injection**: resolve a second,
   explicitly role-authorized PreludeStore closure for model-authored inner
   programs; keep it disjoint from the trusted `agent.*` loop bundle; project
   only its prompt-visible exports through SymbolInventory; attach the same
@@ -494,6 +494,12 @@ questions, use [`autonomous-spike.md`](autonomous-spike.md) as the goal brief.
   honest evaluator-side invocation counts. Deterministic infrastructure only,
   not a domain A/B. Autonomous brief:
   [`autonomous-s21-inner-eval-domain-prelude.md`](autonomous-s21-inner-eval-domain-prelude.md).
+  Result, 2026-07-10: PASS. Separate loop and inner role grants now resolve and
+  freeze disjoint store closures; inner exports are the only prelude symbols
+  projected and callable by model programs; fail-closed closure validation,
+  cross-turn callable memory, source-free split provenance, and honest runtime
+  invocation counts are covered deterministically. No domain-effectiveness
+  experiment ran.
 
 **Exit gate:** D1 decided; D5 has initial projection caps; D9 action protocol
 and D10 error envelope have Tier 0 coverage; D14 minimal action surface is
@@ -628,7 +634,7 @@ store before runtime.
 
 ## Cross-Cut: Inner-Eval Domain Preludes
 
-S21 is the approved implementation spike for a model-callable prelude surface.
+S21 passed on 2026-07-10 and provides the model-callable prelude surface.
 It extends the existing role/PreludeStore authority model; it must not add a
 second profile abstraction or accept an ungoverned raw domain bundle. The role
 authorizes loop composition and inner callability separately, the store expands

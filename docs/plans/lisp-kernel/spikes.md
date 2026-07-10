@@ -44,7 +44,19 @@ bounded-orphan fallback.
 **Fail.** Any shared-state crash, mailbox leak, inner limit not enforced, or
 unbounded orphaned inner process.
 
-**Result.** _pending_
+**Result.** PASS, 2026-07-10. The kernel now resolves independently authorized
+loop and inner dependency closures before model access, freezes the validated
+inner artifact across host-memory turns, projects only its prompt exports, and
+attaches it with mission tools while keeping `runtime: nil` and
+`discovery_exec: nil`. Direct/transitive authority violations fail closed;
+canonical and ephemeral evidence distinguish the two slots without source,
+docs, private values, or untrusted origin leakage. Evaluator invocation counts
+cover direct, alias, nested-HOF, `pmap`, recur, return, and fail paths. No live
+model or domain-effectiveness experiment ran.
+
+Verified with the focused S21 test command from the autonomous plan (159 tests),
+`mix ptc.kernel_eval --suite mini`, `mix precommit`, and an independent Codex
+review. Commit: the coherent S21 implementation commit containing this entry.
 
 ---
 

@@ -152,6 +152,37 @@ For HTTP deployments, bind bearer tokens to allowed roles with
 `--http-role-tokens`; see
 [MCP server configuration](../mcp-server-configuration.md).
 
+## Kernel Loop and Inner Selections
+
+`PtcRunner.Kernel.run/2` uses the same role authority concept with two separate
+prelude surfaces. Kernel role documents use `prelude_store_access`, `preludes`,
+and `default_preludes` for the trusted loop bundle, plus `inner_preludes` and
+`default_inner_preludes` for the model-callable bundle:
+
+```json
+{
+  "default_role": "domain_eval",
+  "roles": {
+    "domain_eval": {
+      "prelude_store_access": "none",
+      "preludes": ["agent.core@1"],
+      "default_preludes": ["agent.core@1"],
+      "inner_preludes": ["domain.example@1"],
+      "default_inner_preludes": ["domain.example@1"]
+    }
+  }
+}
+```
+
+Pass `role_policy:`, `prelude_store:`, and optionally `role:` to
+`Kernel.run/2`. The `preludes:` and `inner_preludes:` run options override the
+corresponding defaults but must remain within their exact-ref allowlists. An
+explicit `inner_preludes: []` selects the no-inner baseline; a non-empty inner
+request without a role policy is rejected. Both closures are resolved and
+frozen before the first LLM call. The inner artifact receives only mission
+tools and never receives the loop artifact, an upstream runtime, or the kernel's
+private tools.
+
 ## Scoped Presentation
 
 Start normal sessions with `scoped_base_surface: true`:

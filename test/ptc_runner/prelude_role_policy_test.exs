@@ -198,4 +198,41 @@ defmodule PtcRunner.PreludeRolePolicyTest do
                preludes: [%{"id" => "agent.core", "version" => 1, "checksum" => checksum}]
              )
   end
+
+  test "authorizes inner refs independently and includes them in the fingerprint" do
+    base = %{
+      "default_role" => "kernel_default",
+      "roles" => %{
+        "kernel_default" => %{
+          "preludes" => ["agent.core@1"],
+          "default_preludes" => ["agent.core@1"],
+          "inner_preludes" => ["domain.example@1"],
+          "default_inner_preludes" => ["domain.example@1"]
+        }
+      }
+    }
+
+    assert {:ok, policy} = PreludeRolePolicy.from_map(base)
+    assert {:ok, grant} = PreludeRolePolicy.resolve(policy, nil)
+    assert {:ok, ["domain.example@1"]} = PreludeRolePolicy.selected_refs(grant, [], :inner)
+    assert {:ok, []} = PreludeRolePolicy.selected_refs(grant, [inner_preludes: []], :inner)
+
+    assert {:error, %{reason: :prelude_not_granted}} =
+             PreludeRolePolicy.selected_refs(grant, [inner_preludes: ["agent.core@1"]], :inner)
+
+    assert {:error, %{reason: :invalid_prelude_ref, message: message}} =
+             PreludeRolePolicy.selected_refs(grant, [inner_preludes: "domain.example@1"], :inner)
+
+    assert message =~ "inner_preludes must be a list"
+
+    changed_base =
+      base
+      |> put_in(["roles", "kernel_default", "inner_preludes"], [])
+      |> put_in(["roles", "kernel_default", "default_inner_preludes"], [])
+
+    assert {:ok, changed} = PreludeRolePolicy.from_map(changed_base)
+
+    assert {:ok, changed_grant} = PreludeRolePolicy.resolve(changed, nil)
+    refute changed_grant.fingerprint == grant.fingerprint
+  end
 end

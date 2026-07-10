@@ -1008,6 +1008,7 @@ defmodule PtcRunner.Lisp do
       tool_calls: cleaned_tool_calls,
       pmap_calls: cleaned_pmap_calls,
       catalog_ops: Enum.reverse(eval_ctx.catalog_ops),
+      prelude_call_counts: eval_ctx.prelude_call_counts,
       child_traces: child_traces,
       child_steps: child_steps,
       journal: eval_ctx.journal,
@@ -1204,6 +1205,7 @@ defmodule PtcRunner.Lisp do
       tool_calls: cleaned_tool_calls,
       pmap_calls: cleaned_pmap_calls,
       catalog_ops: Enum.reverse(ctx.catalog_ops),
+      prelude_call_counts: ctx.prelude_call_counts,
       child_traces: child_traces,
       child_steps: child_steps
     }

@@ -85,6 +85,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
     tool_calls: [],
     pmap_calls: [],
     catalog_ops: [],
+    prelude_call_counts: %{},
     tool_cache: %{},
     tools_meta: %{},
     locals: MapSet.new(),
@@ -536,6 +537,13 @@ defmodule PtcRunner.Lisp.Eval.Context do
     %{context | catalog_ops: [catalog_op | catalog_ops]}
   end
 
+  @doc false
+  @spec increment_prelude_call(t(), String.t()) :: t()
+  def increment_prelude_call(%__MODULE__{prelude_call_counts: counts} = context, ref)
+      when is_binary(ref) do
+    %{context | prelude_call_counts: Map.update(counts, ref, 1, &(&1 + 1))}
+  end
+
   @doc """
   Extracts accumulated side effects that must survive a `recur` jump.
   """
@@ -546,6 +554,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
       tool_calls: context.tool_calls,
       pmap_calls: context.pmap_calls,
       catalog_ops: context.catalog_ops,
+      prelude_call_counts: context.prelude_call_counts,
       tool_cache: context.tool_cache
     }
   end
@@ -561,6 +570,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
         tool_calls: effects.tool_calls,
         pmap_calls: effects.pmap_calls,
         catalog_ops: effects.catalog_ops,
+        prelude_call_counts: effects.prelude_call_counts,
         tool_cache: effects.tool_cache
     }
   end

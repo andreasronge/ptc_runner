@@ -251,7 +251,9 @@ defmodule PtcRunner.TraceLog.TurnEvent do
   defp stringify_component_keys(components) when is_list(components) do
     Enum.map(components, fn
       component when is_map(component) ->
-        Map.new(component, fn {key, value} -> {stringify(key), value} end)
+        component
+        |> Map.new(fn {key, value} -> {stringify(key), value} end)
+        |> sanitize_component_origin()
 
       other ->
         other
@@ -259,6 +261,23 @@ defmodule PtcRunner.TraceLog.TurnEvent do
   end
 
   defp stringify_component_keys(_), do: []
+
+  defp sanitize_component_origin(%{"origin" => origin} = component) do
+    Map.put(component, "origin", safe_component_origin(origin))
+  end
+
+  defp sanitize_component_origin(component), do: component
+
+  defp safe_component_origin("memory"), do: "memory"
+  defp safe_component_origin("file:priv/" <> _rest = origin), do: origin
+  defp safe_component_origin("file:test/" <> _rest = origin), do: origin
+
+  defp safe_component_origin(origin) when is_binary(origin) do
+    "redacted:" <>
+      (:crypto.hash(:sha256, origin) |> Base.encode16(case: :lower))
+  end
+
+  defp safe_component_origin(_origin), do: "redacted"
 
   @doc """
   Computes a memory diff (`changed_keys` + bounded `values`) between the
@@ -349,6 +368,9 @@ defmodule PtcRunner.TraceLog.TurnEvent do
       "evidence_reads" => EvidenceReadProjection.normalize(Map.get(attrs, :evidence_reads)),
       "limits_hit" => Map.get(attrs, :limits_hit) || [],
       "preludes" => Map.get(attrs, :preludes) || [],
+      "inner_preludes" => Map.get(attrs, :inner_preludes) || [],
+      "inner_prelude_projection" => Map.get(attrs, :inner_prelude_projection),
+      "inner_prelude_call_counts" => Map.get(attrs, :inner_prelude_call_counts) || %{},
       "prelude_projection" => Map.get(attrs, :prelude_projection),
       "prelude_call_policy" => Map.get(attrs, :prelude_call_policy),
       "prelude_presentation" => Map.get(attrs, :prelude_presentation),

@@ -48,6 +48,7 @@ defmodule PtcRunner.Step.Public do
       original_prompt: step.original_prompt,
       tools: step.tools,
       prelude_trace: step.prelude_trace,
+      prelude_call_counts: step.prelude_call_counts,
       summaries: step.summaries,
       tool_cache: render_value(step.tool_cache)
     }

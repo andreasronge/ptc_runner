@@ -19,7 +19,14 @@ defmodule PtcRunner.PreludeRuntime do
   @spec resolve(PreludeStore.t() | nil, Grant.t(), keyword()) ::
           {:ok, resolved()} | {:error, map()}
   def resolve(store, %Grant{} = grant, opts) when is_list(opts) do
-    with {:ok, selected_refs} <- PreludeRolePolicy.selected_refs(grant, opts),
+    resolve(store, grant, :loop, opts)
+  end
+
+  @spec resolve(PreludeStore.t() | nil, Grant.t(), :loop | :inner, keyword()) ::
+          {:ok, resolved()} | {:error, map()}
+  def resolve(store, %Grant{} = grant, surface, opts)
+      when is_list(opts) and surface in [:loop, :inner] do
+    with {:ok, selected_refs} <- PreludeRolePolicy.selected_refs(grant, opts, surface),
          :ok <- require_store(store, selected_refs) do
       try do
         {prelude, resolved_refs} = Selection.resolve!(store, selected_refs, opts)
@@ -31,6 +38,17 @@ defmodule PtcRunner.PreludeRuntime do
                prelude: prelude,
                selected_refs: selected_refs,
                resolved_refs: resolved_refs,
+               role: grant.role,
+               grant_fingerprint: grant.fingerprint,
+               prelude_store_access: grant.prelude_store_access
+             }}
+
+          nil when surface == :inner ->
+            {:ok,
+             %{
+               prelude: nil,
+               selected_refs: [],
+               resolved_refs: [],
                role: grant.role,
                grant_fingerprint: grant.fingerprint,
                prelude_store_access: grant.prelude_store_access
@@ -52,6 +70,8 @@ defmodule PtcRunner.PreludeRuntime do
   defp require_store(nil, refs) when refs != [] do
     {:error, error(:missing_prelude_store, ":prelude_store is required for role-backed preludes")}
   end
+
+  defp require_store(nil, []), do: :ok
 
   defp require_store(nil, _refs),
     do:

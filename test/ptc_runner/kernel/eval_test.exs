@@ -4,6 +4,7 @@ defmodule PtcRunner.Kernel.EvalTest do
   alias PtcRunner.Kernel
   alias PtcRunner.Kernel.Eval
   alias PtcRunner.Lisp.Prelude
+  alias PtcRunner.PreludeStore
 
   @variant_dir Path.expand("../../../priv/kernel_feedback_variants", __DIR__)
   @feedback_a_path Path.join(@variant_dir, "feedback_a_default.lisp")
@@ -192,6 +193,48 @@ defmodule PtcRunner.Kernel.EvalTest do
     refute inspect(report) =~ secret
   end
 
+  test "custom eval cases use role-backed inner preludes and retain sanitized slot provenance" do
+    {:ok, store} = seeded_store()
+    secret = "S21-EVAL-SECRET"
+
+    {:ok, _} =
+      PreludeStore.write(
+        store,
+        "domain.example",
+        """
+        (ns domain.example "#{secret}" {:visibility :prompt})
+        (defn twice "Double." [x] (+ x x))
+        """,
+        %{"secret" => secret},
+        origin: {:memory, secret}
+      )
+
+    eval_case = %{
+      id: "inner_prelude",
+      task: "Return the computed value.",
+      context: %{},
+      expected: 42,
+      max_turns: 1,
+      mock_programs: ["(return (domain.example/twice 21))"]
+    }
+
+    assert {:ok, %{cases: [%{status: :pass, trace: trace}]}} =
+             Eval.run_cases([eval_case],
+               mode: :mock,
+               prelude_store: store,
+               role_policy: role_policy(),
+               inner_preludes: ["domain.example@1"]
+             )
+
+    assert Enum.map(Enum.filter(trace, &(&1.event == "prelude")), & &1.slot) == [
+             "loop",
+             "inner"
+           ]
+
+    refute inspect(trace) =~ secret
+    refute inspect(trace) =~ "(ns domain.example"
+  end
+
   test "live mode reports provider-specific missing key" do
     previous_env = System.get_env("OPENAI_API_KEY")
     previous_config = Application.get_env(:req_llm, :openai_api_key)
@@ -261,5 +304,43 @@ defmodule PtcRunner.Kernel.EvalTest do
     |> File.read!()
     |> then(&:crypto.hash(:sha256, &1))
     |> Base.encode16(case: :lower)
+  end
+
+  defp seeded_store do
+    {:ok, store} = PreludeStore.new()
+
+    for name <- ~w(prompt feedback) do
+      {:ok, _} =
+        PreludeStore.write(
+          store,
+          "agent.#{name}",
+          File.read!(Path.expand("../../../priv/preludes/agent/#{name}.lisp", __DIR__))
+        )
+    end
+
+    {:ok, _} =
+      PreludeStore.write(
+        store,
+        "agent.core",
+        File.read!(Path.expand("../../../priv/preludes/agent/core.lisp", __DIR__)),
+        %{"requires_preludes" => ["agent.prompt@1", "agent.feedback@1"]}
+      )
+
+    {:ok, store}
+  end
+
+  defp role_policy do
+    %{
+      "default_role" => "kernel",
+      "roles" => %{
+        "kernel" => %{
+          "prelude_store_access" => "none",
+          "preludes" => ["agent.core@1"],
+          "default_preludes" => ["agent.core@1"],
+          "inner_preludes" => ["domain.example@1"],
+          "default_inner_preludes" => ["domain.example@1"]
+        }
+      }
+    }
   end
 end

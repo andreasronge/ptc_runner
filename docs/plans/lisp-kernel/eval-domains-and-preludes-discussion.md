@@ -358,13 +358,15 @@ Minimum controls:
 
 ## Likely Next Step
 
-The missing runtime channel is now registered as S21, with an autonomous
-implementation brief:
+The runtime channel now exists: S21 passed on 2026-07-10. Its autonomous
+implementation brief is:
 [`autonomous-s21-inner-eval-domain-prelude.md`](autonomous-s21-inner-eval-domain-prelude.md).
 S21 is deterministic infrastructure only. It separates the trusted loop bundle
 from a role-authorized model-callable inner bundle, keeps inner runtime
 authority nil, projects only callable inner exports, and adds separate
-provenance plus runtime invocation counts. It does not run the calendar pilot.
+provenance plus runtime invocation counts. No domain-effectiveness experiment
+or calendar pilot has run, so this establishes capability and attribution only,
+not improved task performance.
 
 Before implementing the calendar pilot, define the PTC-native eval contract:
 

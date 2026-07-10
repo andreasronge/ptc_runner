@@ -529,14 +529,19 @@ defmodule PtcRunner.Lisp.Eval do
           try do
             TraceContext.take_child_result()
 
-            value =
-              RuntimeCallable.with_context(worker_eval_ctx, &do_eval/2, fn ->
-                Callable.call(callable_fn, arg_list)
+            {value, prelude_call_counts} =
+              Apply.capture_prelude_call_counts(fn ->
+                RuntimeCallable.with_context(worker_eval_ctx, &do_eval/2, fn ->
+                  Callable.call(callable_fn, arg_list)
+                end)
               end)
 
             case TraceContext.take_child_result() do
-              {trace_id, child_step} -> {:ok, {:ok, value, trace_id, child_step}}
-              nil -> {:ok, {:ok, value, nil, nil}}
+              {trace_id, child_step} ->
+                {:ok, {:ok, value, trace_id, child_step, prelude_call_counts}}
+
+              nil ->
+                {:ok, {:ok, value, nil, nil, prelude_call_counts}}
             end
           rescue
             e in PtcRunner.ToolExecutionError ->
@@ -572,7 +577,7 @@ defmodule PtcRunner.Lisp.Eval do
         duration_ms = System.monotonic_time(:millisecond) - start_time
 
         case collect_runner_results(runner_result, :pmap) do
-          {:ok, values, child_trace_ids, child_steps} ->
+          {:ok, values, child_trace_ids, child_steps, prelude_call_counts} ->
             # Count successes and errors
             success_count = length(values)
             error_count = count - success_count
@@ -589,7 +594,11 @@ defmodule PtcRunner.Lisp.Eval do
               error_count: error_count
             }
 
-            eval_ctx3 = EvalContext.append_pmap_call(eval_ctx2, pmap_call)
+            eval_ctx3 =
+              eval_ctx2
+              |> EvalContext.append_pmap_call(pmap_call)
+              |> merge_parallel_prelude_call_counts(prelude_call_counts)
+
             {:ok, values, eval_ctx3}
 
           {:error, reason} ->
@@ -635,11 +644,16 @@ defmodule PtcRunner.Lisp.Eval do
           worker_fun = fn {erlang_fn, idx} ->
             try do
               TraceContext.take_child_result()
-              value = erlang_fn.()
+
+              {value, prelude_call_counts} =
+                Apply.capture_prelude_call_counts(erlang_fn)
 
               case TraceContext.take_child_result() do
-                {trace_id, child_step} -> {:ok, {:ok, value, trace_id, idx, child_step}}
-                nil -> {:ok, {:ok, value, nil, idx, nil}}
+                {trace_id, child_step} ->
+                  {:ok, {:ok, value, trace_id, idx, child_step, prelude_call_counts}}
+
+                nil ->
+                  {:ok, {:ok, value, nil, idx, nil, prelude_call_counts}}
               end
             rescue
               e in ExecutionError ->
@@ -671,7 +685,7 @@ defmodule PtcRunner.Lisp.Eval do
           duration_ms = System.monotonic_time(:millisecond) - start_time
 
           case collect_runner_results(runner_result, :pcalls) do
-            {:ok, values, child_trace_ids, child_steps} ->
+            {:ok, values, child_trace_ids, child_steps, prelude_call_counts} ->
               # Count successes and errors
               success_count = length(values)
               error_count = count - success_count
@@ -688,7 +702,11 @@ defmodule PtcRunner.Lisp.Eval do
                 error_count: error_count
               }
 
-              eval_ctx3 = EvalContext.append_pmap_call(eval_ctx2, pmap_call)
+              eval_ctx3 =
+                eval_ctx2
+                |> EvalContext.append_pmap_call(pmap_call)
+                |> merge_parallel_prelude_call_counts(prelude_call_counts)
+
               {:ok, values, eval_ctx3}
 
             {:error, reason} ->
@@ -984,6 +1002,7 @@ defmodule PtcRunner.Lisp.Eval do
       | tool_calls: export_ctx.tool_calls,
         pmap_calls: export_ctx.pmap_calls,
         catalog_ops: export_ctx.catalog_ops,
+        prelude_call_counts: export_ctx.prelude_call_counts,
         tool_cache: export_ctx.tool_cache,
         prints: export_ctx.prints,
         summaries: export_ctx.summaries,
@@ -1735,17 +1754,24 @@ defmodule PtcRunner.Lisp.Eval do
   # `{:ok, values, trace_ids, child_steps}` / `{:error, reason}` shape
   # the pmap/pcalls clauses expect.
   defp collect_runner_results({:ok, internal_results}, _type) do
-    {values, trace_ids, child_steps} =
-      Enum.reduce(internal_results, {[], [], []}, fn result, {vals, tids, steps} ->
-        {:ok, val, trace_id, child_step} = extract_parallel_result(result)
-        {[val | vals], [trace_id | tids], [child_step | steps]}
+    {values, trace_ids, child_steps, counts} =
+      Enum.reduce(internal_results, {[], [], [], %{}}, fn result, {vals, tids, steps, counts} ->
+        {:ok, val, trace_id, child_step, worker_counts} = extract_parallel_result(result)
+        counts = Map.merge(counts, worker_counts, fn _ref, left, right -> left + right end)
+        {[val | vals], [trace_id | tids], [child_step | steps], counts}
       end)
 
-    {:ok, Enum.reverse(values), Enum.reverse(trace_ids), Enum.reverse(child_steps)}
+    {:ok, Enum.reverse(values), Enum.reverse(trace_ids), Enum.reverse(child_steps), counts}
   end
 
   defp collect_runner_results({:error, reason}, type) do
     {:error, classify_runner_error(reason, type)}
+  end
+
+  defp merge_parallel_prelude_call_counts(eval_ctx, counts) do
+    Map.update!(eval_ctx, :prelude_call_counts, fn existing ->
+      Map.merge(existing, counts, fn _ref, left, right -> left + right end)
+    end)
   end
 
   # Map `ParallelRunner`'s stable error reasons onto the pmap/pcalls
@@ -1806,15 +1832,15 @@ defmodule PtcRunner.Lisp.Eval do
     do: {:pcalls_error, idx, msg}
 
   # Extract value, trace_id, and child_step from different result formats
-  defp extract_parallel_result({:ok, val, trace_id, child_step})
-       when is_map(child_step) or is_nil(child_step) do
-    {:ok, val, trace_id, child_step}
+  defp extract_parallel_result({:ok, val, trace_id, child_step, counts})
+       when (is_map(child_step) or is_nil(child_step)) and is_map(counts) do
+    {:ok, val, trace_id, child_step, counts}
   end
 
-  defp extract_parallel_result({:ok, val, trace_id, _idx, child_step}),
-    do: {:ok, val, trace_id, child_step}
+  defp extract_parallel_result({:ok, val, trace_id, _idx, child_step, counts}),
+    do: {:ok, val, trace_id, child_step, counts}
 
-  defp extract_parallel_result({:ok, val, trace_id}), do: {:ok, val, trace_id, nil}
+  defp extract_parallel_result({:ok, val, trace_id}), do: {:ok, val, trace_id, nil, %{}}
 
   # ============================================================
   # Pcalls helpers

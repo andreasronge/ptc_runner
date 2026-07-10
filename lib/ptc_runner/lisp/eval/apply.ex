@@ -38,8 +38,15 @@ defmodule PtcRunner.Lisp.Eval.Apply do
                                                         | {:error, term()})) ::
           {:ok, term(), EvalContext.t()} | {:error, term()}
   def apply_fun(fun_val, args, eval_ctx, do_eval_fn) do
+    eval_ctx = count_prelude_entry(fun_val, eval_ctx)
     do_apply_fun(fun_val, args, eval_ctx, do_eval_fn)
   end
+
+  defp count_prelude_entry({:closure, _params, _body, _env, _th, %{prelude_ref: ref}}, eval_ctx)
+       when is_binary(ref),
+       do: EvalContext.increment_prelude_call(eval_ctx, ref)
+
+  defp count_prelude_entry(_fun_val, eval_ctx), do: eval_ctx
 
   defp do_apply_fun(
          %Builtin{name: name, binding: {:normal, fun}} = builtin,
@@ -880,6 +887,9 @@ defmodule PtcRunner.Lisp.Eval.Apply do
          metadata,
          do_eval_fn
        ) do
+    eval_context = count_prelude_entry_metadata(metadata, eval_context)
+    stash_prelude_entry(metadata)
+
     case check_arity(patterns, args) do
       :ok ->
         :ok
@@ -975,6 +985,24 @@ defmodule PtcRunner.Lisp.Eval.Apply do
     end
   end
 
+  defp count_prelude_entry_metadata(%{prelude_ref: ref}, eval_context) when is_binary(ref),
+    do: EvalContext.increment_prelude_call(eval_context, ref)
+
+  defp count_prelude_entry_metadata(_metadata, eval_context), do: eval_context
+
+  defp stash_prelude_entry(%{prelude_ref: ref}) when is_binary(ref) do
+    case Process.get(:__ptc_hof_stack, []) do
+      [top | rest] ->
+        counts = Map.update(top.prelude_call_counts, ref, 1, &(&1 + 1))
+        Process.put(:__ptc_hof_stack, [%{top | prelude_call_counts: counts} | rest])
+
+      [] ->
+        :ok
+    end
+  end
+
+  defp stash_prelude_entry(_metadata), do: :ok
+
   # A closure-eval error from a *nested* pmap/pcalls (heap kill, shared
   # deadline, exhausted worker budget) is raised as `ExecutionError`
   # carrying the structured reason, so the surrounding pmap/pcalls worker
@@ -1035,8 +1063,38 @@ defmodule PtcRunner.Lisp.Eval.Apply do
     stack = Process.get(:__ptc_hof_stack, [])
 
     Process.put(:__ptc_hof_stack, [
-      %{tool_calls: [], prints: [], catalog_ops: [], tool_cache: %{}} | stack
+      %{tool_calls: [], prints: [], catalog_ops: [], prelude_call_counts: %{}, tool_cache: %{}}
+      | stack
     ])
+  end
+
+  @doc false
+  def capture_prelude_call_counts(fun) when is_function(fun, 0) do
+    push_side_effect_stash()
+
+    try do
+      value = fun.()
+      {value, take_stashed_prelude_call_counts()}
+    rescue
+      e ->
+        drop_side_effect_stash()
+        reraise e, __STACKTRACE__
+    catch
+      kind, reason ->
+        drop_side_effect_stash()
+        :erlang.raise(kind, reason, __STACKTRACE__)
+    end
+  end
+
+  defp take_stashed_prelude_call_counts do
+    case Process.get(:__ptc_hof_stack, []) do
+      [top | rest] ->
+        Process.put(:__ptc_hof_stack, rest)
+        top.prelude_call_counts
+
+      [] ->
+        %{}
+    end
   end
 
   defp drop_side_effect_stash do
@@ -1056,6 +1114,10 @@ defmodule PtcRunner.Lisp.Eval.Apply do
           tool_calls: ctx.tool_calls ++ top.tool_calls,
           prints: ctx.prints ++ top.prints,
           catalog_ops: ctx.catalog_ops ++ top.catalog_ops,
+          prelude_call_counts:
+            Map.merge(top.prelude_call_counts, ctx.prelude_call_counts, fn _key, left, right ->
+              left + right
+            end),
           tool_cache: Map.merge(Map.get(top, :tool_cache, %{}), ctx.tool_cache)
         }
 
@@ -1078,6 +1140,9 @@ defmodule PtcRunner.Lisp.Eval.Apply do
         |> Map.update!(:tool_calls, fn existing -> top.tool_calls ++ existing end)
         |> Map.update!(:prints, fn existing -> top.prints ++ existing end)
         |> Map.update!(:catalog_ops, fn existing -> top.catalog_ops ++ existing end)
+        |> Map.update!(:prelude_call_counts, fn existing ->
+          Map.merge(existing, top.prelude_call_counts, fn _key, left, right -> left + right end)
+        end)
         |> Map.update!(:tool_cache, fn existing ->
           Map.merge(existing, Map.get(top, :tool_cache, %{}))
         end)
@@ -1252,6 +1317,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
       | tool_calls: thrown_ctx.tool_calls,
         pmap_calls: thrown_ctx.pmap_calls,
         catalog_ops: thrown_ctx.catalog_ops,
+        prelude_call_counts: thrown_ctx.prelude_call_counts,
         tool_cache: thrown_ctx.tool_cache,
         prints: thrown_ctx.prints,
         summaries: thrown_ctx.summaries,
@@ -1328,6 +1394,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
               pmap_deadline: caller_ctx.pmap_deadline,
               tool_calls: caller_ctx.tool_calls,
               pmap_calls: caller_ctx.pmap_calls,
+              prelude_call_counts: caller_ctx.prelude_call_counts,
               tool_cache: caller_ctx.tool_cache,
               tools_meta: caller_ctx.tools_meta,
               # Propagate the ledger cap so tool calls inside a closure (e.g. the

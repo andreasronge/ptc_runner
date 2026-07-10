@@ -1112,9 +1112,301 @@ defmodule PtcRunner.KernelTest do
 
     refute Enum.any?(resolved_refs, &Map.has_key?(&1, :form_graph))
 
-    assert content =~ "agent.core/run-mission [mission cfg]"
-    assert content =~ "agent.prompt/task-message [mission cfg]"
+    refute content =~ "agent.core/run-mission [mission cfg]"
+    refute content =~ "agent.prompt/task-message [mission cfg]"
     refute content =~ "(ns agent.core"
+  end
+
+  test "role-authorized inner prelude is prompt-visible and callable without exposing loop exports" do
+    {:ok, store} = seeded_agent_prelude_store()
+
+    {:ok, _inner} =
+      PreludeStore.write(
+        store,
+        "domain.example",
+        ~S|(ns domain.example "Neutral helpers." {:visibility :prompt})
+           (defn twice "Double a number." [x] (+ x x))|
+      )
+
+    parent = self()
+
+    llm =
+      scripted_llm(
+        [
+          %{
+            tool_calls: [
+              %{name: "run_ptc_lisp", args: %{"program" => "(return (domain.example/twice 21))"}}
+            ]
+          }
+        ],
+        parent
+      )
+
+    assert {:ok, %{"value" => 42}} =
+             Kernel.run(%{"task" => "compute"},
+               llm: llm,
+               prelude_store: store,
+               role_policy: kernel_role_policy(inner_preludes: ["domain.example@1"]),
+               events: &send(parent, {:event, &1})
+             )
+
+    assert_received {:llm_request, %{messages: [%{role: :user, content: content}]}}
+    assert content =~ "domain.example/twice [x]"
+    refute content =~ "agent.core/run-mission"
+
+    assert_received {:event, %{"event" => "prelude", "slot" => "loop"}}
+    assert_received {:event, %{"event" => "prelude", "slot" => "inner"}}
+  end
+
+  test "inner exports and aliases survive host-held memory without colliding with private helpers" do
+    {:ok, store} = seeded_agent_prelude_store()
+
+    {:ok, _} =
+      PreludeStore.write(
+        store,
+        "domain.example",
+        ~S|(ns domain.example "Neutral helpers." {:visibility :prompt})
+           (defn- hidden [x] (inc x))
+           (defn twice "Double a number." [x] (+ x x))
+           (defn use-hidden "Use the private helper." [x] (hidden x))|
+      )
+
+    llm =
+      scripted_llm([
+        %{
+          tool_calls: [
+            %{
+              name: "run_ptc_lisp",
+              args: %{
+                "program" =>
+                  "(defn later [x] (domain.example/twice x)) (def alias domain.example/twice) (def hidden (fn [_] 999))"
+              }
+            }
+          ]
+        },
+        %{
+          tool_calls: [
+            %{
+              name: "run_ptc_lisp",
+              args: %{
+                "program" =>
+                  "(return [(later 5) (alias 6) (hidden 0) (domain.example/use-hidden 1)])"
+              }
+            }
+          ]
+        }
+      ])
+
+    assert {:ok, %{"value" => [10, 12, 999, 2]}} =
+             Kernel.run(%{"task" => "compute"},
+               llm: llm,
+               prelude_store: store,
+               role_policy: kernel_role_policy(inner_preludes: ["domain.example@1"]),
+               kernel_memory_byte_cap: 3_000_000
+             )
+  end
+
+  test "inner artifact is frozen for a run while a later run may select a newer version" do
+    {:ok, store} = seeded_agent_prelude_store()
+
+    {:ok, _v1} =
+      PreludeStore.write(
+        store,
+        "domain.example",
+        ~S|(ns domain.example "Version one." {:visibility :prompt})
+           (defn value "Return the frozen value." [] 1)|
+      )
+
+    parent = self()
+
+    mutating_llm = fn _request ->
+      {:ok, v2} =
+        PreludeStore.write(
+          store,
+          "domain.example",
+          ~S|(ns domain.example "Version two." {:visibility :prompt})
+             (defn value "Return the new value." [] 2)|
+        )
+
+      send(parent, {:v2_written, v2.checksum})
+
+      {:ok,
+       %{
+         tool_calls: [
+           %{name: "run_ptc_lisp", args: %{"program" => "(return (domain.example/value))"}}
+         ]
+       }}
+    end
+
+    assert {:ok, %{"value" => 1}} =
+             Kernel.run(%{"task" => "compute"},
+               llm: mutating_llm,
+               prelude_store: store,
+               role_policy: kernel_role_policy(inner_preludes: ["domain.example@1"])
+             )
+
+    assert_received {:v2_written, _checksum}
+
+    assert {:ok, %{"value" => 2}} =
+             Kernel.run(%{"task" => "compute"},
+               llm:
+                 scripted_llm([
+                   %{
+                     tool_calls: [
+                       %{
+                         name: "run_ptc_lisp",
+                         args: %{"program" => "(return (domain.example/value))"}
+                       }
+                     ]
+                   }
+                 ]),
+               prelude_store: store,
+               role_policy: kernel_role_policy(inner_preludes: ["domain.example@2"])
+             )
+  end
+
+  test "inner validation rejects transitive agent, upstream, dynamic, and missing-tool capabilities before LLM" do
+    parent = self()
+
+    llm = fn _ ->
+      send(parent, :llm_called)
+      {:error, :unexpected}
+    end
+
+    sources = [
+      {~S|(ns domain.case "Wrapper." {:visibility :prompt})
+          (defn wrap "Carry a forbidden transitive dependency." [x] x)|,
+       %{"requires_preludes" => ["agent.feedback@1"]}, :namespace_overlap},
+      {~S|(ns domain.case "Wrapper." {:visibility :prompt})
+          (defn fetch "Fetch." [x] (tool/call {:server "svc" :tool "get" :args {:x x}}))|, %{},
+       :upstream_export},
+      {~S|(ns domain.case "Wrapper." {:visibility :prompt})
+          (defn proxy "Proxy." [server tool] (tool/call {:server server :tool tool :args {}}))|,
+       %{}, :dynamic_upstream_dispatch},
+      {~S|(ns domain.case "Wrapper." {:visibility :prompt})
+          (defn lookup "Lookup." [x] (tool/lookup {:x x}))|, %{}, :missing_mission_tool}
+    ]
+
+    for {source, metadata, expected_reason} <- sources do
+      {:ok, store} = seeded_agent_prelude_store()
+      {:ok, _} = PreludeStore.write(store, "domain.case", source, metadata)
+
+      assert {:error, %{reason: :invalid_inner_prelude, details: %{reason: ^expected_reason}}} =
+               Kernel.run(%{"task" => "compute"},
+                 llm: llm,
+                 prelude_store: store,
+                 role_policy: kernel_role_policy(inner_preludes: ["domain.case@1"])
+               )
+    end
+
+    refute_received :llm_called
+  end
+
+  test "ungranted inner selection fails before store or LLM access" do
+    parent = self()
+
+    llm = fn _ ->
+      send(parent, :llm_called)
+      {:error, :unexpected}
+    end
+
+    assert {:error, %{reason: :prelude_not_granted}} =
+             Kernel.run(%{"task" => "compute"},
+               llm: llm,
+               role_policy: kernel_role_policy(),
+               inner_preludes: ["domain.example@1"]
+             )
+
+    refute_received :llm_called
+  end
+
+  test "inner runtime observably denies discovery, private kernel tools, and namespace redefinition" do
+    {:ok, store} = seeded_agent_prelude_store()
+
+    {:ok, _} =
+      PreludeStore.write(
+        store,
+        "domain.example",
+        ~S|(ns domain.example "Neutral helpers." {:visibility :prompt})
+           (defn value "Return one." [] 1)|
+      )
+
+    parent = self()
+
+    llm =
+      scripted_llm(
+        [
+          %{tool_calls: [%{name: "run_ptc_lisp", args: %{"program" => "(servers)"}}]},
+          %{
+            tool_calls: [
+              %{name: "run_ptc_lisp", args: %{"program" => "(tool/log {\"event\" \"forged\"})"}}
+            ]
+          },
+          %{
+            tool_calls: [
+              %{
+                name: "run_ptc_lisp",
+                args: %{"program" => "(def domain.example/forged 1)"}
+              }
+            ]
+          },
+          %{tool_calls: [%{name: "run_ptc_lisp", args: %{"program" => "(return :ok)"}}]}
+        ],
+        parent
+      )
+
+    assert {:ok, %{"value" => "ok"}} =
+             Kernel.run(%{"task" => "compute"},
+               llm: llm,
+               prelude_store: store,
+               role_policy: kernel_role_policy(inner_preludes: ["domain.example@1"]),
+               events: &send(parent, {:event, &1}),
+               max_turns: 4
+             )
+
+    assert_received {:event,
+                     %{
+                       "event" => "eval",
+                       "result" => %{"reason" => "unbound_var", "message" => discovery}
+                     }}
+
+    assert discovery =~ "Undefined variable: servers"
+
+    assert_received {:event,
+                     %{
+                       "event" => "eval",
+                       "result" => %{"reason" => "unknown_tool", "message" => private_tool}
+                     }}
+
+    assert private_tool =~ "No tools available"
+
+    assert_received {:event,
+                     %{
+                       "event" => "eval",
+                       "result" => %{"reason" => "invalid_form", "message" => protected}
+                     }}
+
+    assert protected =~ "protected"
+    refute_received {:event, %{"event" => "forged"}}
+  end
+
+  test "inner selection rejects loop components before invoking the model" do
+    {:ok, store} = seeded_agent_prelude_store()
+    parent = self()
+
+    llm = fn _request ->
+      send(parent, :llm_called)
+      {:ok, %{content: "unexpected"}}
+    end
+
+    assert {:error, %{reason: :invalid_inner_prelude, details: %{reason: :namespace_overlap}}} =
+             Kernel.run(%{"task" => "compute"},
+               llm: llm,
+               prelude_store: store,
+               role_policy: kernel_role_policy(inner_preludes: ["agent.core@1"])
+             )
+
+    refute_received :llm_called
   end
 
   test "role-backed prelude bundle matches embedded agent prelude artifact" do
@@ -1294,6 +1586,90 @@ defmodule PtcRunner.KernelTest do
     refute inspected =~ "(ns agent.core"
     refute inspected =~ "(ns agent.prompt"
     refute inspected =~ "system-message"
+  end
+
+  test "inner provenance and counts are redacted identically in memory and JSONL sinks" do
+    {:ok, store} = seeded_agent_prelude_store()
+    secret = "S21-INNER-SECRET-SENTINEL"
+
+    {:ok, _} =
+      PreludeStore.write(
+        store,
+        "domain.example",
+        """
+        (ns domain.example "#{secret} documentation" {:visibility :prompt})
+        (def private-value "#{secret} private")
+        (defn twice "Double safely." [x] (+ x x))
+        """,
+        %{"store_secret" => secret},
+        origin: {:memory, secret}
+      )
+
+    path =
+      Path.join(System.tmp_dir!(), "s21-inner-#{System.unique_integer([:positive])}.jsonl")
+
+    {:ok, sink} = TraceLog.start_memory_sink()
+
+    try do
+      assert {:ok, {:ok, %{"value" => [2, 4]}}, ^path} =
+               TraceLog.with_trace(
+                 fn ->
+                   Kernel.run(%{"task" => "compute"},
+                     llm:
+                       scripted_llm([
+                         %{
+                           tool_calls: [
+                             %{
+                               name: "run_ptc_lisp",
+                               args: %{
+                                 "program" =>
+                                   "(return [(domain.example/twice 1) (domain.example/twice 2)])"
+                               }
+                             }
+                           ]
+                         }
+                       ]),
+                     prelude_store: store,
+                     role_policy: kernel_role_policy(inner_preludes: ["domain.example@1"]),
+                     kernel_run_id: "inner-provenance"
+                   )
+                 end,
+                 path: path
+               )
+    after
+      TraceLog.stop_memory_sink(sink)
+    end
+
+    assert [memory_turn] = MemorySink.events(sink)
+    assert [jsonl_turn] = path |> TraceLog.Analyzer.load() |> TraceLog.Analyzer.turn_events()
+
+    for turn <- [memory_turn, jsonl_turn] do
+      assert [%{"components" => loop_components}] = turn["data"]["preludes"]
+      assert Enum.map(loop_components, & &1["id"]) == ~w(agent.prompt agent.feedback agent.core)
+
+      assert [%{"components" => [%{"id" => "domain.example"} = inner_component]}] =
+               turn["data"]["inner_preludes"]
+
+      assert inner_component["version"] == 1
+
+      assert turn["data"]["inner_prelude_projection"]["selected_refs"] == [
+               "domain.example@1"
+             ]
+
+      assert turn["data"]["inner_prelude_call_counts"] == %{
+               "domain.example/twice" => 2
+             }
+
+      refute inspect(turn) =~ secret
+      refute inspect(turn) =~ "private-value"
+    end
+
+    memory_turn = memory_turn |> Jason.encode!() |> Jason.decode!()
+
+    assert Map.drop(memory_turn, ~w(seq timestamp trace_id)) ==
+             Map.drop(jsonl_turn, ~w(seq timestamp trace_id))
+
+    File.rm(path)
   end
 
   test "embedded and role-backed kernel turn events share D4 correlation shape" do
@@ -1861,6 +2237,7 @@ defmodule PtcRunner.KernelTest do
   defp kernel_role_policy(opts \\ []) do
     preludes = Keyword.get(opts, :preludes, ~w(agent.prompt@1 agent.feedback@1 agent.core@1))
     default_preludes = Keyword.get(opts, :default_preludes, ["agent.core@1"])
+    inner_preludes = Keyword.get(opts, :inner_preludes, [])
 
     %{
       "default_role" => "kernel_default",
@@ -1868,7 +2245,9 @@ defmodule PtcRunner.KernelTest do
         "kernel_default" => %{
           "prelude_store_access" => "none",
           "preludes" => preludes,
-          "default_preludes" => default_preludes
+          "default_preludes" => default_preludes,
+          "inner_preludes" => inner_preludes,
+          "default_inner_preludes" => inner_preludes
         }
       }
     }

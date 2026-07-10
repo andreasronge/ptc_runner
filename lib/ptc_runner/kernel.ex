@@ -2,6 +2,7 @@ defmodule PtcRunner.Kernel do
   @moduledoc false
 
   alias PtcRunner.Kernel.Action
+  alias PtcRunner.Kernel.InnerPrelude
   alias PtcRunner.Lisp
   alias PtcRunner.Lisp.ExecutionError
   alias PtcRunner.Lisp.Format
@@ -60,13 +61,52 @@ defmodule PtcRunner.Kernel do
     end
   end
 
+  defp compile_preludes(opts, mission_tools) do
+    cond do
+      role_backed_prelude?(opts) ->
+        with {:ok, policy} <- role_policy(opts),
+             {:ok, grant} when not is_nil(grant) <-
+               PreludeRolePolicy.resolve(policy, Keyword.get(opts, :role)),
+             {:ok, _inner_selected_refs} <-
+               PreludeRolePolicy.selected_refs(grant, opts, :inner),
+             {:ok, loop_resolved} <-
+               PreludeRuntime.resolve(Keyword.get(opts, :prelude_store), grant, :loop, opts),
+             {:ok, inner_resolved} <-
+               PreludeRuntime.resolve(Keyword.get(opts, :prelude_store), grant, :inner, opts),
+             {:ok, inner_refs} <-
+               InnerPrelude.validate(loop_resolved.prelude, inner_resolved.prelude, mission_tools) do
+          {:ok,
+           %{
+             loop: annotate_role_prelude(loop_resolved.prelude, loop_resolved, :loop),
+             inner: annotate_role_prelude(inner_resolved.prelude, inner_resolved, :inner),
+             inner_refs: inner_refs
+           }}
+        else
+          {:ok, nil} ->
+            {:error,
+             %{reason: :role_required, message: "role is required for role-backed preludes"}}
+
+          {:error, _} = error ->
+            error
+        end
+
+      Keyword.has_key?(opts, :inner_preludes) ->
+        {:error,
+         %{reason: :role_policy_required, message: ":inner_preludes requires :role_policy"}}
+
+      true ->
+        with {:ok, loop} <- compile_embedded_prelude(opts),
+             do: {:ok, %{loop: loop, inner: nil, inner_refs: MapSet.new()}}
+    end
+  end
+
   defp compile_role_backed_prelude(opts) do
     with {:ok, policy} <- role_policy(opts),
          {:ok, grant} when not is_nil(grant) <-
            PreludeRolePolicy.resolve(policy, Keyword.get(opts, :role)),
          {:ok, resolved} <-
            PreludeRuntime.resolve(Keyword.get(opts, :prelude_store), grant, opts) do
-      {:ok, annotate_role_prelude(resolved.prelude, resolved, opts)}
+      {:ok, annotate_role_prelude(resolved.prelude, resolved, :loop)}
     else
       {:ok, nil} ->
         {:error, %{reason: :role_required, message: "role is required for role-backed preludes"}}
@@ -121,11 +161,14 @@ defmodule PtcRunner.Kernel do
     end
   end
 
-  defp annotate_role_prelude(%Prelude{} = prelude, resolved, _opts) do
+  defp annotate_role_prelude(nil, _resolved, _surface), do: nil
+
+  defp annotate_role_prelude(%Prelude{} = prelude, resolved, surface) do
     runtime = %{
       role: resolved.role,
       grant_fingerprint: resolved.grant_fingerprint,
       prelude_store_access: resolved.prelude_store_access,
+      surface: surface,
       selected_refs: Enum.map(resolved.selected_refs, &public_selected_ref/1),
       resolved_refs: Enum.map(resolved.resolved_refs, &public_resolved_ref/1)
     }
@@ -150,22 +193,42 @@ defmodule PtcRunner.Kernel do
       version: Map.get(ref, :version),
       checksum: Map.get(ref, :checksum),
       namespaces: Map.get(ref, :namespaces, []),
-      origin: Map.get(ref, :origin),
+      origin: public_origin(Map.get(ref, :origin)),
       required_by: Map.get(ref, :required_by, [])
     }
   end
+
+  defp public_origin("memory"), do: "memory"
+  defp public_origin("file:priv/" <> _rest = origin), do: origin
+  defp public_origin("file:test/" <> _rest = origin), do: origin
+
+  defp public_origin(origin) when is_binary(origin) do
+    "redacted:" <>
+      (:crypto.hash(:sha256, origin) |> Base.encode16(case: :lower))
+  end
+
+  defp public_origin(nil), do: nil
+  defp public_origin(_origin), do: "redacted"
 
   @spec run(map(), keyword()) :: {:ok, map()} | {:error, map()}
   def run(mission, opts) when is_map(mission) and is_list(opts) do
     with {:ok, memory_cap} <- memory_byte_cap(opts),
          opts = Keyword.put(opts, :kernel_memory_byte_cap, memory_cap),
-         {:ok, prelude} <- compile_prelude(opts),
-         :ok <- log_prelude(opts, prelude),
+         {:ok, preludes} <- compile_preludes(opts, Keyword.get(opts, :tools, %{})),
+         :ok <- log_prelude(opts, preludes.loop, :loop),
+         :ok <- log_prelude(opts, preludes.inner, :inner),
          {:ok, symbol_facts, symbol_inventory, symbol_inventory_meta} <-
-           render_symbol_inventory(mission, opts, prelude),
+           render_symbol_inventory(mission, opts, preludes.inner),
          {:ok, memory} <- Agent.start_link(fn -> %{memory: %{}, busy?: false} end),
-         {:ok, turn_recorder} <- start_turn_recorder(prelude, opts),
-         {:ok, tools} <- kernel_tools(mission, opts, memory, turn_recorder) do
+         {:ok, turn_recorder} <- start_turn_recorder(preludes, opts),
+         {:ok, tools} <-
+           kernel_tools(
+             mission,
+             Keyword.put(opts, :inner_prelude, preludes.inner)
+             |> Keyword.put(:inner_prelude_refs, preludes.inner_refs),
+             memory,
+             turn_recorder
+           ) do
       cfg = %{
         "max_turns" => Keyword.get(opts, :max_turns, 3),
         "tool_names" => opts |> Keyword.get(:tools, %{}) |> public_tool_names(),
@@ -178,7 +241,7 @@ defmodule PtcRunner.Kernel do
 
       try do
         case Lisp.run(program,
-               prelude: prelude,
+               prelude: preludes.loop,
                tools: tools,
                context: %{mission: mission, cfg: cfg},
                filter_context: false,
@@ -215,9 +278,8 @@ defmodule PtcRunner.Kernel do
     end
   end
 
-  defp role_backed_inventory_prelude(%Prelude{metadata: metadata} = prelude) do
-    if Map.has_key?(metadata, :role_prelude_selection), do: prelude
-  end
+  defp role_backed_inventory_prelude(%Prelude{} = prelude), do: prelude
+  defp role_backed_inventory_prelude(nil), do: nil
 
   defp string_key_fact(fact) when is_map(fact) do
     fact
@@ -303,12 +365,15 @@ defmodule PtcRunner.Kernel do
     |> Compiler.compile(opts)
   end
 
-  defp log_prelude(opts, prelude) do
+  defp log_prelude(_opts, nil, _slot), do: :ok
+
+  defp log_prelude(opts, prelude, slot) do
     events = Keyword.get(opts, :events)
 
     if is_function(events, 1) do
       events.(%{
         "event" => "prelude",
+        "slot" => Atom.to_string(slot),
         "prelude" => Prelude.trace_summary(prelude)
       })
     end
@@ -327,12 +392,14 @@ defmodule PtcRunner.Kernel do
     end
   end
 
-  defp start_turn_recorder(%Prelude{} = prelude, opts) do
+  defp start_turn_recorder(%{loop: %Prelude{} = loop, inner: inner}, opts) do
     state = %{
       kernel_run_id:
         Keyword.get(opts, :kernel_run_id, "kernel-#{System.unique_integer([:positive])}"),
-      prelude_trace: Prelude.trace_summary(prelude),
-      role_selection: Map.get(prelude.metadata, :role_prelude_selection),
+      prelude_trace: Prelude.trace_summary(loop),
+      role_selection: Map.get(loop.metadata, :role_prelude_selection),
+      inner_prelude_trace: Prelude.trace_summary(inner),
+      inner_role_selection: if(inner, do: Map.get(inner.metadata, :role_prelude_selection)),
       prelude_presentation: prelude_presentation(opts),
       trace_context: TraceContext.capture(),
       attempt: 0,
@@ -463,6 +530,9 @@ defmodule PtcRunner.Kernel do
         catalog_ops: Map.get(event_data || %{}, :catalog_ops, []),
         fail: turn_fail(action, event_data),
         preludes: TurnEvent.prelude_provenance(state.prelude_trace),
+        inner_preludes: TurnEvent.prelude_provenance(state.inner_prelude_trace),
+        inner_prelude_projection: role_prelude_projection(state.inner_role_selection),
+        inner_prelude_call_counts: Map.get(event_data || %{}, :inner_prelude_call_counts, %{}),
         prelude_projection: role_prelude_projection(state.role_selection),
         prelude_call_policy: role_prelude_call_policy(state.role_selection),
         prelude_presentation: state.prelude_presentation,
@@ -888,7 +958,7 @@ defmodule PtcRunner.Kernel do
     case Lisp.run_native(program,
            context: Map.get(mission, "context", %{}),
            tools: mission_tools,
-           prelude: nil,
+           prelude: Keyword.get(opts, :inner_prelude),
            runtime: nil,
            discovery_exec: nil,
            memory: prior_memory,
@@ -933,7 +1003,7 @@ defmodule PtcRunner.Kernel do
     result =
       project_step(:error, error_step, prior_memory, prior_memory, retained_size(prior_memory))
 
-    {result, event_data(error_step, prior_memory, prior_memory, result)}
+    {result, event_data(error_step, prior_memory, prior_memory, result, [])}
   end
 
   defp commit_and_project_step(tag, step, prior_memory, opts) do
@@ -944,7 +1014,7 @@ defmodule PtcRunner.Kernel do
     case candidate_bytes do
       bytes when is_integer(bytes) and bytes <= cap ->
         result = project_step(tag, step, prior_memory, candidate_memory, bytes)
-        {result, candidate_memory, event_data(step, prior_memory, candidate_memory, result)}
+        {result, candidate_memory, event_data(step, prior_memory, candidate_memory, result, opts)}
 
       bytes ->
         error_step =
@@ -964,19 +1034,28 @@ defmodule PtcRunner.Kernel do
             retained_size(prior_memory)
           )
 
-        {result, prior_memory, event_data(error_step, prior_memory, prior_memory, result)}
+        {result, prior_memory, event_data(error_step, prior_memory, prior_memory, result, opts)}
     end
   end
 
-  defp event_data(step, prior_memory, current_memory, result) do
+  defp event_data(step, prior_memory, current_memory, result, opts) do
     %{
       result_preview: result_preview(result),
       prints: bound_list(Map.get(step, :prints)),
       memory_diff: TurnEvent.memory_diff(prior_memory, current_memory),
       tool_calls: turn_tool_calls(Map.get(step, :tool_calls)),
       catalog_ops: turn_catalog_ops(Map.get(step, :catalog_ops)),
+      inner_prelude_call_counts: inner_prelude_call_counts(step, opts),
       fail: eval_projection_fail(result, Map.get(step, :fail))
     }
+  end
+
+  defp inner_prelude_call_counts(step, opts) do
+    refs = Keyword.get(opts, :inner_prelude_refs, MapSet.new())
+
+    step
+    |> Map.get(:prelude_call_counts, %{})
+    |> Map.take(MapSet.to_list(refs))
   end
 
   defp result_preview(%{"value" => value}), do: TurnEvent.preview(value)

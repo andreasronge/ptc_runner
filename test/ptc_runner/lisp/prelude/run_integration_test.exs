@@ -89,9 +89,82 @@ defmodule PtcRunner.Lisp.Prelude.RunIntegrationTest do
       assert {:__ptc_return__, %{"user" => %{"id" => "norm:u_123", "name" => "Ada"}}} =
                step.return
 
+      assert step.prelude_call_counts == %{"crm/get-user" => 1}
+
       # Existing ledger records EXACTLY ONE upstream attempt.
       assert length(step.tool_calls) == 1
       assert Agent.get(agent, & &1) |> length() == 1
+    end
+
+    test "counts value-position export applications rather than references" do
+      source = """
+      (ns domain.example "Neutral helpers." {:visibility :prompt})
+      (defn twice "Double a number." [x] (+ x x))
+      """
+
+      assert {:ok, prelude} = Compiler.compile(source)
+
+      assert {:ok, %Step{} = step} =
+               PtcRunner.Lisp.run("(return (map domain.example/twice [1 2 3]))", prelude: prelude)
+
+      assert step.return == {:__ptc_return__, [2, 4, 6]}
+      assert step.prelude_call_counts == %{"domain.example/twice" => 3}
+    end
+
+    test "counts only entered exports across branches, aliases, nested HOFs, and pmap" do
+      source = """
+      (ns domain.example "Neutral helpers." {:visibility :prompt})
+      (defn twice "Double a number." [x] (+ x x))
+      """
+
+      assert {:ok, prelude} = Compiler.compile(source)
+
+      assert {:ok, dead} =
+               PtcRunner.Lisp.run(
+                 "(let [unused domain.example/twice] (if false (unused 1) (return 0)))",
+                 prelude: prelude
+               )
+
+      assert dead.prelude_call_counts == %{}
+
+      assert {:ok, nested} =
+               PtcRunner.Lisp.run(
+                 "(return (map #(domain.example/twice %) (map #(domain.example/twice %) [1 2])))",
+                 prelude: prelude
+               )
+
+      assert nested.prelude_call_counts == %{"domain.example/twice" => 4}
+
+      assert {:ok, parallel} =
+               PtcRunner.Lisp.run("(return (pmap domain.example/twice [1 2 3]))",
+                 prelude: prelude,
+                 timeout: 5_000
+               )
+
+      assert parallel.prelude_call_counts == %{"domain.example/twice" => 3}
+    end
+
+    test "entry counts survive recur plus return and fail signals without private names" do
+      source = """
+      (ns domain.example "Neutral helpers." {:visibility :prompt})
+      (defn- hidden [x] (inc x))
+      (defn countdown "Recur to zero." [n]
+        (loop [x n]
+          (if (zero? x) (return (hidden x)) (recur (dec x)))))
+      (defn boom "Fail after entry." [] (fail {:reason :boom}))
+      """
+
+      assert {:ok, prelude} = Compiler.compile(source)
+
+      assert {:ok, returned} =
+               PtcRunner.Lisp.run("(domain.example/countdown 3)", prelude: prelude)
+
+      assert returned.prelude_call_counts == %{"domain.example/countdown" => 1}
+      refute Map.has_key?(returned.prelude_call_counts, "domain.example/hidden")
+
+      assert {:ok, failed} = PtcRunner.Lisp.run("(domain.example/boom)", prelude: prelude)
+      assert failed.prelude_call_counts == %{"domain.example/boom" => 1}
+      assert failed.return == {:__ptc_fail__, %{"reason" => "boom"}}
     end
 
     test "recoverable failure result is branchable", %{prelude: prelude} do

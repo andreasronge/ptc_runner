@@ -188,9 +188,14 @@ never reach the LLM or the evaluator, and even within the outer sandbox only
 `agent.core`'s own exports can — fail-closed by construction, defense in
 depth by declaration.
 
-```
+```text
 Kernel.run(mission, cfg)
-  1. bundle = compile the prelude components
+  1. role policy + PreludeStore resolve two frozen, disjoint artifacts:
+       loop bundle  = trusted agent.* policy selected by preludes/default_preludes
+       inner bundle = model-callable helpers selected by
+                      inner_preludes/default_inner_preludes
+     The embedded no-policy path retains only the loop bundle.
+  2. bundle = compile the loop prelude components
        M1 (single namespace):  Bundle.compile([core_src])
        M2+ (layered):          Bundle.compile_precompiled(components,
                                  namespace_deps: %{"agent.core" => ["agent.feedback"]})
@@ -200,7 +205,7 @@ Kernel.run(mission, cfg)
        (agent.feedback/config) fails "unknown namespace" even within one source
        blob. The layered bundle REQUIRES declared deps via
        compile_precompiled/2 or a store-resolved attach.
-  2. capabilities = %{
+  3. capabilities = %{
        # all three use the {fun, visibility: :private} options form —
        # a bare closure normalizes to :public (tool.ex:159, 270-299)
        "llm-complete"  => {counted, budget-capped wrapper over the LLM callback;
@@ -212,6 +217,9 @@ Kernel.run(mission, cfg)
        "eval-program"  => {fn %{"src" => s, "memory" => m, ...} ->
                              PtcRunner.Lisp.run(s, context: mission_ctx, memory: m,
                                                 tools: mission_tools,
+                                                prelude: inner_bundle,
+                                                runtime: nil,
+                                                discovery_exec: nil,
                                                 timeout: 1_000, max_heap: strict)
                              |> project_step()  # -> {:ok :return :fail :prints :memory}
                            end, visibility: :private},
@@ -219,11 +227,11 @@ Kernel.run(mission, cfg)
      # M1 hardcodes this trio. R24/S10 decide whether additional private
      # capabilities can be supplied by config/bundle selection without editing
      # PtcRunner.Kernel.run/2.
-  3. PtcRunner.Lisp.run("(agent/run-mission data/mission data/cfg)",
-                        prelude: bundle, tools: capabilities,
+  4. PtcRunner.Lisp.run("(agent/run-mission data/mission data/cfg)",
+                        prelude: loop_bundle, tools: capabilities,
                         context: %{mission: ..., cfg: ..., language_spec: ...},
                         timeout: deadline_ms, max_heap: relaxed)
-  4. Host backstops: outer deadline, outer heap, LLM-call counter.
+  5. Host backstops: outer deadline, outer heap, LLM-call counter.
 ```
 
 The kernel reuses `PtcRunner.Lisp`, `PtcRunner.LLM`, `PtcRunner.Sandbox`,
@@ -544,7 +552,7 @@ Record the resolution here when made:
   namespaced, cross-surface extension is designed. Verified by:
   `mix test test/ptc_runner/kernel_test.exs test/ptc_runner/prelude_role_policy_test.exs test/ptc_runner/lisp/heap_rebaseline_test.exs`.
   MCP adapter unification and external loaders remain future work.
-- **D21 — Inner-eval domain prelude surface.** PROPOSED by S21 on 2026-07-09:
+- **D21 — Inner-eval domain prelude surface.** Resolved by S21 on 2026-07-10:
   extend the existing role/PreludeStore model with a separately authorized
   `inner_preludes` surface. Resolve and freeze loop and inner dependency
   closures independently; reject namespace/component overlap, `agent.*`, and
@@ -553,8 +561,10 @@ Record the resolution here when made:
   `runtime: nil`, `discovery_exec: nil`, strict limits, mission tools, and
   host-held memory. TurnEvents and eval reports distinguish both artifacts and
   carry evaluator-side aggregate inner-export invocation counts. This is an
-  infrastructure decision only; domain efficacy remains a later preregistered
-  experiment. Autonomous brief:
+  infrastructure decision only; no domain-effectiveness experiment has run,
+  and domain efficacy remains a later preregistered experiment. Verified with
+  the S21 focused suite, the deterministic mini eval, and `mix precommit`.
+  Autonomous brief:
   [`autonomous-s21-inner-eval-domain-prelude.md`](autonomous-s21-inner-eval-domain-prelude.md).
 
 ## Out of scope for the experiment

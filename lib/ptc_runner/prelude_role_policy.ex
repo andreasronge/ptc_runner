@@ -9,7 +9,7 @@ defmodule PtcRunner.PreludeRolePolicy do
 
   @role_pattern ~r/\A[A-Za-z0-9_.-]{1,64}\z/
   @prelude_id_pattern ~r/\A[A-Za-z][A-Za-z0-9_.-]*\z/
-  @grant_fingerprint_schema_version 1
+  @grant_fingerprint_schema_version 2
 
   @type t :: %__MODULE__{
           default_role: String.t() | nil,
@@ -55,17 +55,28 @@ defmodule PtcRunner.PreludeRolePolicy do
 
   @spec selected_refs(Grant.t(), keyword()) :: {:ok, [term()]} | {:error, map()}
   def selected_refs(%Grant{} = grant, opts) when is_list(opts) do
-    requested? = Keyword.has_key?(opts, :preludes)
-    refs = if requested?, do: Keyword.get(opts, :preludes), else: grant.default_preludes
+    selected_refs(grant, opts, :loop)
+  end
 
-    with {:ok, refs} <- request_refs(refs, requested?),
-         :ok <- preludes_allowed(grant, refs) do
+  @spec selected_refs(Grant.t(), keyword(), :loop | :inner) :: {:ok, [term()]} | {:error, map()}
+  def selected_refs(%Grant{} = grant, opts, surface)
+      when is_list(opts) and surface in [:loop, :inner] do
+    {option, allowed, defaults, label} = surface_grant(grant, surface)
+    requested? = Keyword.has_key?(opts, option)
+    refs = if requested?, do: Keyword.get(opts, option), else: defaults
+
+    with {:ok, refs} <- request_refs(refs, requested?, label),
+         :ok <- preludes_allowed(grant, refs, allowed, label) do
       {:ok, refs}
     end
   end
 
   @spec preludes_allowed(Grant.t(), [term()]) :: :ok | {:error, map()}
   def preludes_allowed(%Grant{role: role, preludes: allowed}, refs) when is_list(refs) do
+    preludes_allowed(%Grant{role: role}, refs, allowed, "preludes")
+  end
+
+  defp preludes_allowed(%Grant{role: role}, refs, allowed, label) when is_list(refs) do
     refs
     |> Enum.with_index()
     |> Enum.reduce_while(:ok, fn {ref, index}, :ok ->
@@ -78,7 +89,7 @@ defmodule PtcRunner.PreludeRolePolicy do
              {:error,
               error(
                 :prelude_not_granted,
-                "preludes[#{index}] is not granted for role #{inspect(role)}",
+                "#{label}[#{index}] is not granted for role #{inspect(role)}",
                 %{index: index, ref: public_ref(parsed)}
               )}}
           end
@@ -86,7 +97,7 @@ defmodule PtcRunner.PreludeRolePolicy do
         {:error, %{message: message}} ->
           {:halt,
            {:error,
-            error(:invalid_prelude_ref, "preludes[#{index}] #{message}", %{
+            error(:invalid_prelude_ref, "#{label}[#{index}] #{message}", %{
               index: index,
               value: inspect(ref, limit: 5)
             })}}
@@ -111,18 +122,37 @@ defmodule PtcRunner.PreludeRolePolicy do
     with :ok <-
            validate_keys(
              map,
-             ["prelude_store_access", "preludes", "default_preludes"],
+             [
+               "prelude_store_access",
+               "preludes",
+               "default_preludes",
+               "inner_preludes",
+               "default_inner_preludes"
+             ],
              "roles.#{role}"
            ),
          {:ok, access} <- prelude_store_access(field(map, "prelude_store_access", "none"), role),
          {:ok, preludes} <- prelude_grants(field(map, "preludes", []), role),
          {:ok, default_preludes} <- default_preludes(field(map, "default_preludes", []), role),
-         :ok <- defaults_allowed(role, preludes, default_preludes) do
+         :ok <- defaults_allowed(role, preludes, default_preludes, "preludes", "default_preludes"),
+         {:ok, inner_preludes} <- prelude_grants(field(map, "inner_preludes", []), role),
+         {:ok, default_inner_preludes} <-
+           default_preludes(field(map, "default_inner_preludes", []), role),
+         :ok <-
+           defaults_allowed(
+             role,
+             inner_preludes,
+             default_inner_preludes,
+             "inner_preludes",
+             "default_inner_preludes"
+           ) do
       grant = %Grant{
         role: role,
         prelude_store_access: access,
         preludes: preludes,
-        default_preludes: default_preludes
+        default_preludes: default_preludes,
+        inner_preludes: inner_preludes,
+        default_inner_preludes: default_inner_preludes
       }
 
       {:ok, %{grant | fingerprint: fingerprint(grant)}}
@@ -194,8 +224,8 @@ defmodule PtcRunner.PreludeRolePolicy do
   defp default_preludes(_values, role),
     do: {:error, error(:invalid_policy, "roles.#{role}.default_preludes must be a list")}
 
-  defp defaults_allowed(role, allowed, default_refs) do
-    case preludes_allowed(%Grant{role: role, preludes: allowed}, default_refs) do
+  defp defaults_allowed(role, allowed, default_refs, allowed_label, default_label) do
+    case preludes_allowed(%Grant{role: role}, default_refs, allowed, allowed_label) do
       :ok ->
         :ok
 
@@ -203,15 +233,21 @@ defmodule PtcRunner.PreludeRolePolicy do
         {:error,
          error(
            :invalid_policy,
-           "roles.#{role}.default_preludes[#{index}] is not granted by roles.#{role}.preludes"
+           "roles.#{role}.#{default_label}[#{index}] is not granted by roles.#{role}.#{allowed_label}"
          )}
     end
   end
 
-  defp request_refs(refs, _requested?) when is_list(refs), do: {:ok, refs}
+  defp request_refs(refs, _requested?, _label) when is_list(refs), do: {:ok, refs}
 
-  defp request_refs(refs, _requested?),
-    do: {:error, error(:invalid_prelude_ref, "preludes must be a list, got: #{inspect(refs)}")}
+  defp request_refs(refs, _requested?, label),
+    do: {:error, error(:invalid_prelude_ref, "#{label} must be a list, got: #{inspect(refs)}")}
+
+  defp surface_grant(grant, :loop),
+    do: {:preludes, grant.preludes, grant.default_preludes, "preludes"}
+
+  defp surface_grant(grant, :inner),
+    do: {:inner_preludes, grant.inner_preludes, grant.default_inner_preludes, "inner_preludes"}
 
   defp parse_exact_ref(value) when is_binary(value), do: parse_ref_string(value)
 
@@ -346,6 +382,8 @@ defmodule PtcRunner.PreludeRolePolicy do
     data = %{
       "schema_version" => @grant_fingerprint_schema_version,
       "default_preludes" => ref_fingerprint(grant.default_preludes),
+      "default_inner_preludes" => ref_fingerprint(grant.default_inner_preludes),
+      "inner_preludes" => prelude_fingerprint(grant.inner_preludes),
       "prelude_store_access" => Atom.to_string(grant.prelude_store_access),
       "preludes" => prelude_fingerprint(grant.preludes),
       "role" => grant.role

@@ -83,6 +83,41 @@ defmodule PtcRunner.TraceLog.TurnEventTest do
       assert is_map(event["tags"])
       assert event["tags"]["k101"] == 101
     end
+
+    test "keeps loop and inner prelude evidence in distinct canonical fields" do
+      event =
+        TurnEvent.build(%{
+          driver: :kernel,
+          preludes: [%{"components" => [%{"id" => "agent.core"}]}],
+          inner_preludes: [%{"components" => [%{"id" => "domain.example"}]}],
+          inner_prelude_projection: %{
+            "selected_refs" => ["domain.example@1"],
+            "resolved_refs" => [%{"id" => "domain.example", "version" => 1}]
+          },
+          inner_prelude_call_counts: %{"domain.example/twice" => 2}
+        })
+
+      assert event["data"]["preludes"] == [
+               %{"components" => [%{"id" => "agent.core"}]}
+             ]
+
+      assert event["data"]["inner_preludes"] == [
+               %{"components" => [%{"id" => "domain.example"}]}
+             ]
+
+      assert event["data"]["inner_prelude_projection"]["selected_refs"] == [
+               "domain.example@1"
+             ]
+
+      assert event["data"]["inner_prelude_call_counts"] == %{
+               "domain.example/twice" => 2
+             }
+
+      baseline = TurnEvent.build(%{driver: :kernel})
+      assert baseline["data"]["inner_preludes"] == []
+      assert baseline["data"]["inner_prelude_projection"] == nil
+      assert baseline["data"]["inner_prelude_call_counts"] == %{}
+    end
   end
 
   describe "memory_diff/2" do

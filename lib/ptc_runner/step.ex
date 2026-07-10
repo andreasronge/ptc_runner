@@ -211,6 +211,7 @@ defmodule PtcRunner.Step do
     :original_prompt,
     :tools,
     :prelude_trace,
+    prelude_call_counts: %{},
     summaries: %{},
     tool_cache: %{}
   ]
@@ -362,6 +363,7 @@ defmodule PtcRunner.Step do
           prompt: String.t() | nil,
           tools: map() | nil,
           prelude_trace: PtcRunner.Lisp.Prelude.trace_summary() | nil,
+          prelude_call_counts: %{optional(String.t()) => non_neg_integer()},
           summaries: %{String.t() => String.t()},
           tool_cache: map()
         }

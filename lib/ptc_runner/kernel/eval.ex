@@ -227,15 +227,26 @@ defmodule PtcRunner.Kernel.Eval do
     {llm, cleanup_llm} = llm_for(eval_case, mode, model, opts)
 
     try do
-      result =
-        KernelRunner.run(mission(eval_case),
+      kernel_opts =
+        [
           llm: llm,
           tools: Map.get(eval_case, :tools, %{}),
           max_turns: eval_case.max_turns,
           prelude_source_overrides: Keyword.get(opts, :prelude_source_overrides, %{}),
-          unsafe_debug: Keyword.get(opts, :unsafe_debug, false),
-          events: &record_event(events, Keyword.get(opts, :unsafe_debug_agent), &1)
+          unsafe_debug: Keyword.get(opts, :unsafe_debug, false)
+        ]
+        |> Keyword.merge(
+          Keyword.take(opts, [
+            :role_policy,
+            :role,
+            :prelude_store,
+            :preludes,
+            :inner_preludes
+          ])
         )
+        |> Keyword.put(:events, &record_event(events, Keyword.get(opts, :unsafe_debug_agent), &1))
+
+      result = KernelRunner.run(mission(eval_case), kernel_opts)
 
       sanitized_events = Agent.get(events, &Enum.reverse/1)
 
@@ -399,9 +410,11 @@ defmodule PtcRunner.Kernel.Eval do
     }
   end
 
-  defp sanitize_event(%{"event" => "prelude", "prelude" => prelude}) when is_map(prelude) do
+  defp sanitize_event(%{"event" => "prelude", "prelude" => prelude} = event)
+       when is_map(prelude) do
     %{
       event: "prelude",
+      slot: Map.get(event, "slot"),
       prelude: %{
         source_hash: Map.get(prelude, :source_hash),
         artifact_hash: Map.get(prelude, :artifact_hash),
@@ -478,7 +491,7 @@ defmodule PtcRunner.Kernel.Eval do
 
   defp safe_origin?("file:priv/" <> _rest), do: true
   defp safe_origin?("file:test/" <> _rest), do: true
-  defp safe_origin?("memory" <> _rest), do: true
+  defp safe_origin?("memory"), do: true
   defp safe_origin?(_origin), do: false
 
   defp sha256(source) do
