@@ -6,6 +6,8 @@ defmodule PtcRunner.Kernel.Eval do
   alias PtcRunner.LLM.Registry
   alias PtcRunner.LLM.ReqLLMAdapter
   alias PtcRunner.PreludeOrigin
+  alias PtcRunner.TraceLog
+  alias PtcRunner.TraceLog.Analyzer
 
   @default_live_model "deepseek"
 
@@ -26,10 +28,22 @@ defmodule PtcRunner.Kernel.Eval do
   @spec run(keyword()) :: {:ok, result()} | {:error, term()}
   def run(opts \\ []) do
     suite = Keyword.get(opts, :suite, "mini")
+    mode = Keyword.get(opts, :mode, :mock)
+    variant = Keyword.get(opts, :variant, "kernel")
 
     with :ok <- validate_suite(suite),
-         {:ok, cases} <- select_cases(Keyword.get(opts, :case)) do
-      run_cases(cases, Keyword.put(opts, :suite, suite))
+         :ok <- validate_variant(variant),
+         :ok <- validate_report_contract(suite, mode, Keyword.get(opts, :report)),
+         {:ok, cases} <- select_cases(suite, Keyword.get(opts, :case)),
+         {:ok, report} <-
+           run_cases(
+             cases,
+             opts
+             |> Keyword.put(:suite, suite)
+             |> Keyword.put(:variant, variant)
+           ),
+         :ok <- maybe_write_report(report, Keyword.get(opts, :report)) do
+      {:ok, report}
     end
   end
 
@@ -39,8 +53,11 @@ defmodule PtcRunner.Kernel.Eval do
     suite = Keyword.get(opts, :suite, "custom")
     mode = Keyword.get(opts, :mode, :mock)
     runs = Keyword.get(opts, :runs, 1)
+    variant = Keyword.get(opts, :variant, "kernel")
+    requested_model = requested_model(mode, Keyword.get(opts, :model))
 
     with :ok <- validate_runs(runs),
+         :ok <- validate_variant(variant),
          {:ok, model} <- resolve_model(mode, Keyword.get(opts, :model)) do
       results =
         for run_index <- 1..runs,
@@ -48,15 +65,37 @@ defmodule PtcRunner.Kernel.Eval do
           run_case(eval_case, run_index, mode, model, opts)
         end
 
-      {:ok, %{suite: suite, mode: mode, model: model, runs: runs, cases: results}}
+      {:ok,
+       %{
+         suite: suite,
+         mode: mode,
+         variant: variant,
+         requested_model: requested_model,
+         model: model,
+         provider: provider(model),
+         commit: commit(),
+         command_options: command_options(opts, suite, mode, variant, requested_model),
+         runs: runs,
+         cases: results
+       }}
     end
   end
 
   @spec render_markdown(result()) :: String.t()
-  def render_markdown(%{suite: suite, mode: mode, model: model, runs: runs, cases: cases}) do
+  def render_markdown(%{
+        suite: suite,
+        mode: mode,
+        variant: variant,
+        requested_model: requested_model,
+        model: model,
+        provider: provider,
+        commit: commit,
+        runs: runs,
+        cases: cases
+      }) do
     rows =
       Enum.map(cases, fn case_result ->
-        "| #{case_result.run} | #{case_result.case} | #{case_result.status} | #{case_result.action_count} | #{case_result.eval_count} | #{case_result.failure_reason || ""} |"
+        "| #{case_result.run} | #{case_result.case} | #{case_result.status} | #{case_result.action_count} | #{case_result.eval_count} | #{case_result.expected_turns} | #{case_result.actual_turns} | #{case_result.dropped_turns} | #{case_result.unexpected_turns} | #{case_result.write_errors} | #{case_result.failure_reason || ""} |"
       end)
 
     """
@@ -64,11 +103,15 @@ defmodule PtcRunner.Kernel.Eval do
 
     suite: #{suite}
     mode: #{mode}
-    model: #{model || "mock"}
+    variant: #{variant}
+    requested_model: #{requested_model || "mock"}
+    resolved_model: #{model || "mock"}
+    provider: #{provider || "mock"}
+    commit: #{commit}
     runs: #{runs}
 
-    | run | case | status | actions | evals | failure |
-    | --- | --- | --- | ---: | ---: | --- |
+    | run | case | status | actions | evals | expected turns | actual turns | dropped | unexpected | write errors | failure |
+    | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
     #{Enum.join(rows, "\n")}
     """
     |> String.trim()
@@ -148,8 +191,39 @@ defmodule PtcRunner.Kernel.Eval do
     ]
   end
 
+  @spec smoke_cases() :: [map()]
+  def smoke_cases do
+    records =
+      for id <- 1..500 do
+        %{"id" => id, "included" => rem(id, 2) == 0}
+      end
+
+    [
+      %{
+        id: "record_count_500",
+        task: "Return the count of records whose included field is true.",
+        context: %{"records" => records},
+        expected: 250,
+        max_turns: 5,
+        mock_programs: [~S|(return (count (filter #(= (% "included") true) data/records)))|]
+      }
+    ]
+  end
+
   defp validate_suite("mini"), do: :ok
+  defp validate_suite("smoke"), do: :ok
   defp validate_suite(other), do: {:error, {:unknown_suite, other}}
+
+  defp validate_variant("kernel"), do: :ok
+  defp validate_variant(other), do: {:error, {:unsupported_variant, other}}
+
+  defp validate_report_contract(suite, mode, report) do
+    if (suite == "smoke" or mode == :live) and not (is_binary(report) and report != "") do
+      {:error, {:report_required, suite}}
+    else
+      :ok
+    end
+  end
 
   defp validate_runs(runs) when is_integer(runs) and runs > 0, do: :ok
   defp validate_runs(other), do: {:error, {:invalid_runs, other}}
@@ -213,10 +287,13 @@ defmodule PtcRunner.Kernel.Eval do
 
   defp present_env?(key), do: System.get_env(key) not in [nil, ""]
 
-  defp select_cases(nil), do: {:ok, mini_cases()}
+  defp select_cases("mini", nil), do: {:ok, mini_cases()}
+  defp select_cases("smoke", nil), do: {:ok, smoke_cases()}
 
-  defp select_cases(case_id) do
-    case Enum.filter(mini_cases(), &(&1.id == case_id)) do
+  defp select_cases(suite, case_id) do
+    cases = if suite == "smoke", do: smoke_cases(), else: mini_cases()
+
+    case Enum.filter(cases, &(&1.id == case_id)) do
       [] -> {:error, {:unknown_case, case_id}}
       cases -> {:ok, cases}
     end
@@ -247,13 +324,31 @@ defmodule PtcRunner.Kernel.Eval do
         )
         |> Keyword.put(:events, &record_event(events, Keyword.get(opts, :unsafe_debug_agent), &1))
 
-      result = KernelRunner.run(mission(eval_case), kernel_opts)
+      trace_path = trace_path(eval_case, run_index, opts)
+
+      {:ok, result, trace_metadata} =
+        TraceLog.with_trace(fn -> KernelRunner.run(mission(eval_case), kernel_opts) end,
+          path: trace_path,
+          trace_kind: "kernel_eval",
+          producer: "ptc.kernel_eval",
+          trace_label: "#{eval_case.id}-#{run_index}",
+          model: model,
+          return_metadata: true
+        )
 
       sanitized_events = Agent.get(events, &Enum.reverse/1)
 
       unsafe_trace = unsafe_trace(Keyword.get(opts, :unsafe_debug_agent))
 
-      build_case_result(eval_case, run_index, result, sanitized_events, unsafe_trace, started)
+      build_case_result(
+        eval_case,
+        run_index,
+        result,
+        sanitized_events,
+        unsafe_trace,
+        trace_metadata,
+        started
+      )
     after
       cleanup_llm.()
       stop_agent(events)
@@ -349,16 +444,35 @@ defmodule PtcRunner.Kernel.Eval do
     if Process.alive?(agent), do: Agent.get(agent, &Enum.reverse/1)
   end
 
-  defp build_case_result(eval_case, run_index, result, events, unsafe_trace, started) do
+  defp build_case_result(
+         eval_case,
+         run_index,
+         result,
+         events,
+         unsafe_trace,
+         trace_metadata,
+         started
+       ) do
     {status, value, failure_reason} =
       case result do
         {:ok, %{"value" => value}} -> verify_expected(eval_case, value)
         {:ok, other} -> verify_expected(eval_case, other)
         {:error, %{"reason" => reason}} -> {:fail, nil, reason}
-        {:error, other} -> {:fail, nil, inspect(other, limit: 5)}
+        {:error, _other} -> {:fail, nil, "kernel_error"}
       end
 
-    %{
+    persisted_events = Analyzer.load(trace_metadata.path)
+
+    kernel_turns =
+      persisted_events
+      |> Analyzer.turn_events()
+      |> Enum.filter(&(&1["driver"] == "kernel"))
+
+    expected_turns = expected_turns(events)
+    actual_turns = length(kernel_turns)
+    evidence = turn_evidence(kernel_turns)
+
+    Map.merge(evidence, %{
       run: run_index,
       case: eval_case.id,
       status: status,
@@ -368,8 +482,14 @@ defmodule PtcRunner.Kernel.Eval do
       eval_count: Enum.count(events, &(&1.event == "eval")),
       duration_ms: duration_ms(started),
       trace: events,
-      unsafe_trace: unsafe_trace
-    }
+      unsafe_trace: unsafe_trace,
+      trace_path: trace_metadata.path,
+      write_errors: trace_metadata.write_errors,
+      expected_turns: expected_turns,
+      actual_turns: actual_turns,
+      dropped_turns: max(expected_turns - actual_turns, 0),
+      unexpected_turns: max(actual_turns - expected_turns, 0)
+    })
   end
 
   defp verify_expected(eval_case, value) do
@@ -377,8 +497,8 @@ defmodule PtcRunner.Kernel.Eval do
       {:ok, ^value} ->
         {:pass, value, nil}
 
-      {:ok, expected} ->
-        {:fail, value, "expected_mismatch expected=#{inspect(expected)} actual=#{inspect(value)}"}
+      {:ok, _expected} ->
+        {:fail, value, "expected_mismatch"}
 
       :error ->
         {:fail, value, "missing_expected"}
@@ -474,6 +594,103 @@ defmodule PtcRunner.Kernel.Eval do
       source_hash: Map.get(component, :source_hash),
       namespaces: Map.get(component, :namespaces, []),
       origin: PreludeOrigin.sanitize(Map.get(component, :origin))
+    }
+  end
+
+  defp expected_turns(events) do
+    completed_evals = Enum.count(events, &(&1.event == "eval"))
+
+    terminal_actions =
+      Enum.count(events, fn event ->
+        event.event == "action" and
+          event.action_kind in ["protocol_error", "transport_error", "budget_exhausted"]
+      end)
+
+    completed_evals + terminal_actions
+  end
+
+  defp turn_evidence([]) do
+    %{
+      preludes: [],
+      inner_preludes: [],
+      inner_prelude_projection: nil,
+      inner_prelude_call_counts: %{}
+    }
+  end
+
+  defp turn_evidence(turns) do
+    first = hd(turns)
+
+    %{
+      preludes: get_in(first, ["data", "preludes"]) || [],
+      inner_preludes: get_in(first, ["data", "inner_preludes"]) || [],
+      inner_prelude_projection: get_in(first, ["data", "inner_prelude_projection"]),
+      inner_prelude_call_counts: aggregate_inner_call_counts(turns)
+    }
+  end
+
+  defp aggregate_inner_call_counts(turns) do
+    Enum.reduce(turns, %{}, fn turn, acc ->
+      counts = get_in(turn, ["data", "inner_prelude_call_counts"]) || %{}
+      Map.merge(acc, counts, fn _ref, left, right -> left + right end)
+    end)
+  end
+
+  defp trace_path(eval_case, run_index, opts) do
+    trace_dir =
+      Keyword.get(opts, :trace_dir) ||
+        Path.join(Mix.Project.build_path(), "kernel_eval_traces")
+
+    File.mkdir_p!(trace_dir)
+    Path.join(trace_dir, "#{eval_case.id}-run-#{run_index}.jsonl")
+  end
+
+  defp maybe_write_report(_report, nil), do: :ok
+
+  defp maybe_write_report(report, path) when is_binary(path) do
+    File.mkdir_p!(Path.dirname(path))
+    File.write!(path, render_markdown(report) <> "\n")
+
+    File.write!(
+      Path.rootname(path) <> ".json",
+      Jason.encode!(public_report(report), pretty: true) <> "\n"
+    )
+
+    :ok
+  end
+
+  defp public_report(report) do
+    Map.update!(report, :cases, fn cases ->
+      Enum.map(cases, &Map.drop(&1, [:trace, :unsafe_trace, :value]))
+    end)
+  end
+
+  defp requested_model(:mock, _model), do: nil
+
+  defp requested_model(:live, model),
+    do: model || System.get_env("PTC_TEST_MODEL") || @default_live_model
+
+  defp requested_model(_mode, model), do: model
+
+  defp provider(nil), do: nil
+  defp provider(model), do: model |> Registry.provider_from_model() |> to_string()
+
+  defp commit do
+    case System.cmd("git", ["rev-parse", "HEAD"], stderr_to_stdout: true) do
+      {hash, 0} -> String.trim(hash)
+      _ -> "unknown"
+    end
+  end
+
+  defp command_options(opts, suite, mode, variant, requested_model) do
+    %{
+      suite: suite,
+      mode: Atom.to_string(mode),
+      variant: variant,
+      requested_model: requested_model,
+      runs: Keyword.get(opts, :runs, 1),
+      case: Keyword.get(opts, :case),
+      trace_dir: Keyword.get(opts, :trace_dir)
     }
   end
 

@@ -44,6 +44,73 @@ defmodule PtcRunner.Kernel.EvalTest do
     end
   end
 
+  @tag :tmp_dir
+  test "smoke suite writes sanitized markdown, JSON twin, and persistent canonical traces", %{
+    tmp_dir: dir
+  } do
+    report_path = Path.join(dir, "m1-smoke.md")
+    trace_dir = Path.join(dir, "traces")
+
+    assert {:ok, report} =
+             Eval.run(
+               suite: "smoke",
+               mode: :mock,
+               variant: "kernel",
+               report: report_path,
+               trace_dir: trace_dir
+             )
+
+    assert report.suite == "smoke"
+    assert report.variant == "kernel"
+    assert report.commit =~ ~r/\A[0-9a-f]{40}\z/
+    assert report.command_options.variant == "kernel"
+    assert report.command_options.suite == "smoke"
+    assert [%{case: "record_count_500", status: :pass, value: 250} = run] = report.cases
+    assert run.expected_turns == 1
+    assert run.actual_turns == 1
+    assert run.dropped_turns == 0
+    assert run.unexpected_turns == 0
+    assert run.write_errors == 0
+    assert File.exists?(run.trace_path)
+    assert Path.dirname(run.trace_path) == trace_dir
+
+    json_path = Path.rootname(report_path) <> ".json"
+    assert File.exists?(report_path)
+    assert File.exists?(json_path)
+
+    markdown = File.read!(report_path)
+    json = File.read!(json_path)
+
+    for forbidden <- [
+          "OPENROUTER_API_KEY",
+          "sk-or-",
+          "You are controlling PTC-Lisp",
+          "tool_calls",
+          "mock_programs",
+          "(return",
+          "messages"
+        ] do
+      refute markdown =~ forbidden
+      refute json =~ forbidden
+    end
+
+    decoded = Jason.decode!(json)
+    assert decoded["cases"] |> hd() |> Map.fetch!("inner_prelude_call_counts") == %{}
+    assert is_list(decoded["cases"] |> hd() |> Map.fetch!("preludes"))
+    assert is_list(decoded["cases"] |> hd() |> Map.fetch!("inner_preludes"))
+  end
+
+  test "smoke and live runs require the report contract and reject non-kernel variants" do
+    assert {:error, {:report_required, "smoke"}} =
+             Eval.run(suite: "smoke", mode: :mock, variant: "kernel")
+
+    assert {:error, {:unsupported_variant, "incumbent"}} =
+             Eval.run(suite: "mini", mode: :mock, variant: "incumbent")
+
+    assert {:error, {:report_required, "mini"}} =
+             Eval.run(suite: "mini", mode: :live, variant: "kernel")
+  end
+
   test "default markdown report is sanitized" do
     assert {:ok, report} = Eval.run(suite: "mini", mode: :mock)
 
@@ -235,7 +302,8 @@ defmodule PtcRunner.Kernel.EvalTest do
     refute inspect(trace) =~ "(ns domain.example"
   end
 
-  test "live mode reports provider-specific missing key" do
+  @tag :tmp_dir
+  test "live mode reports provider-specific missing key", %{tmp_dir: dir} do
     previous_env = System.get_env("OPENAI_API_KEY")
     previous_config = Application.get_env(:req_llm, :openai_api_key)
 
@@ -248,10 +316,16 @@ defmodule PtcRunner.Kernel.EvalTest do
     end)
 
     assert {:error, {:missing_api_key, "OPENAI_API_KEY", "openai:gpt-4.1-mini"}} =
-             Eval.run(suite: "mini", mode: :live, model: "openai:gpt")
+             Eval.run(
+               suite: "mini",
+               mode: :live,
+               model: "openai:gpt",
+               report: Path.join(dir, "openai.md")
+             )
   end
 
-  test "bedrock live preflight requires bearer token or AWS key pair" do
+  @tag :tmp_dir
+  test "bedrock live preflight requires bearer token or AWS key pair", %{tmp_dir: dir} do
     keys = [
       "AWS_BEARER_TOKEN_BEDROCK",
       "AWS_ACCESS_KEY_ID",
@@ -272,7 +346,12 @@ defmodule PtcRunner.Kernel.EvalTest do
             {:missing_api_key,
              "AWS_BEARER_TOKEN_BEDROCK or AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY",
              "amazon_bedrock:anthropic.claude-haiku-4-5-20251001-v1:0"}} =
-             Eval.run(suite: "mini", mode: :live, model: "bedrock:haiku")
+             Eval.run(
+               suite: "mini",
+               mode: :live,
+               model: "bedrock:haiku",
+               report: Path.join(dir, "bedrock.md")
+             )
   end
 
   defp restore_env(_key, nil), do: :ok

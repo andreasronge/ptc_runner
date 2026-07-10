@@ -169,14 +169,21 @@ defmodule PtcRunner.TraceLog do
         query: "How many products?"
       )
   """
-  @spec with_trace((-> result), keyword()) :: {:ok, result, String.t()} when result: term()
+  @spec with_trace((-> result), keyword()) ::
+          {:ok, result, String.t() | %{path: String.t(), write_errors: non_neg_integer()}}
+        when result: term()
   def with_trace(fun, opts \\ []) when is_function(fun, 0) do
     {:ok, collector} = start(opts)
 
     try do
       result = fun.()
-      {:ok, path, _errors} = stop(collector)
-      {:ok, result, path}
+      {:ok, path, errors} = stop(collector)
+
+      if Keyword.get(opts, :return_metadata) == true do
+        {:ok, result, %{path: path, write_errors: errors}}
+      else
+        {:ok, result, path}
+      end
     catch
       kind, reason ->
         try do

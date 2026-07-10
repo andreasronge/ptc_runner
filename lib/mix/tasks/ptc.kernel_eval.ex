@@ -1,12 +1,15 @@
 defmodule Mix.Tasks.Ptc.KernelEval do
   @shortdoc "Run the tiny kernel eval suite"
   @moduledoc """
-  Runs the experimental kernel mini eval suite.
+  Runs the experimental kernel eval suites.
 
       mix ptc.kernel_eval --suite mini
       mix ptc.kernel_eval --suite mini --live --model deepseek
       mix ptc.kernel_eval --suite mini --live --model deepseek --allow-failures
       mix ptc.kernel_eval --suite mini --runs 3 --case eval_retry
+      mix ptc.kernel_eval --suite smoke --live --runs 5 --variant kernel \
+        --model deepseek --report reports/kernel_eval/m1-kernel-smoke.md \
+        --trace-dir reports/kernel_eval/m1-kernel-smoke-traces
   """
 
   use Mix.Task
@@ -26,7 +29,10 @@ defmodule Mix.Tasks.Ptc.KernelEval do
           model: :string,
           live: :boolean,
           mock: :boolean,
-          allow_failures: :boolean
+          allow_failures: :boolean,
+          variant: :string,
+          report: :string,
+          trace_dir: :string
         ]
       )
 
@@ -38,7 +44,7 @@ defmodule Mix.Tasks.Ptc.KernelEval do
 
     eval_opts =
       opts
-      |> Keyword.take([:suite, :runs, :case, :model])
+      |> Keyword.take([:suite, :runs, :case, :model, :variant, :report, :trace_dir])
       |> Keyword.put(:mode, mode)
 
     case Eval.run(eval_opts) do

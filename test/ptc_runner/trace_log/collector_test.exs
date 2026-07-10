@@ -7,7 +7,24 @@ defmodule PtcRunner.TraceLog.CollectorTest do
 
   import ExUnit.CaptureLog
 
+  alias PtcRunner.TraceLog
   alias PtcRunner.TraceLog.Collector
+
+  test "with_trace optionally returns collector metadata without changing the legacy shape", %{
+    tmp_dir: dir
+  } do
+    metadata_path = Path.join(dir, "metadata.jsonl")
+    legacy_path = Path.join(dir, "legacy.jsonl")
+
+    assert {:ok, :done, %{path: ^metadata_path, write_errors: 0}} =
+             TraceLog.with_trace(fn -> :done end,
+               path: metadata_path,
+               return_metadata: true
+             )
+
+    assert {:ok, :done, ^legacy_path} =
+             TraceLog.with_trace(fn -> :done end, path: legacy_path)
+  end
 
   @moduletag :tmp_dir
 
