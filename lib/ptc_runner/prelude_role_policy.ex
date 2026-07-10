@@ -71,11 +71,6 @@ defmodule PtcRunner.PreludeRolePolicy do
     end
   end
 
-  @spec preludes_allowed(Grant.t(), [term()]) :: :ok | {:error, map()}
-  def preludes_allowed(%Grant{role: role, preludes: allowed}, refs) when is_list(refs) do
-    preludes_allowed(%Grant{role: role}, refs, allowed, "preludes")
-  end
-
   defp preludes_allowed(%Grant{role: role}, refs, allowed, label) when is_list(refs) do
     refs
     |> Enum.with_index()
@@ -132,12 +127,18 @@ defmodule PtcRunner.PreludeRolePolicy do
              "roles.#{role}"
            ),
          {:ok, access} <- prelude_store_access(field(map, "prelude_store_access", "none"), role),
-         {:ok, preludes} <- prelude_grants(field(map, "preludes", []), role),
-         {:ok, default_preludes} <- default_preludes(field(map, "default_preludes", []), role),
+         {:ok, preludes} <- prelude_grants(field(map, "preludes", []), role, "preludes"),
+         {:ok, default_preludes} <-
+           default_preludes(field(map, "default_preludes", []), role, "default_preludes"),
          :ok <- defaults_allowed(role, preludes, default_preludes, "preludes", "default_preludes"),
-         {:ok, inner_preludes} <- prelude_grants(field(map, "inner_preludes", []), role),
+         {:ok, inner_preludes} <-
+           prelude_grants(field(map, "inner_preludes", []), role, "inner_preludes"),
          {:ok, default_inner_preludes} <-
-           default_preludes(field(map, "default_inner_preludes", []), role),
+           default_preludes(
+             field(map, "default_inner_preludes", []),
+             role,
+             "default_inner_preludes"
+           ),
          :ok <-
            defaults_allowed(
              role,
@@ -174,7 +175,7 @@ defmodule PtcRunner.PreludeRolePolicy do
      )}
   end
 
-  defp prelude_grants(values, role) when is_list(values) do
+  defp prelude_grants(values, role, label) when is_list(values) do
     values
     |> Enum.with_index()
     |> Enum.reduce_while({:ok, %{}}, fn {value, index}, {:ok, acc} ->
@@ -187,22 +188,22 @@ defmodule PtcRunner.PreludeRolePolicy do
              {:error,
               error(
                 :invalid_policy,
-                "roles.#{role}.preludes[#{index}] duplicates #{ref.id}@#{ref.version}"
+                "roles.#{role}.#{label}[#{index}] duplicates #{ref.id}@#{ref.version}"
               )}}
           else
             {:cont, {:ok, Map.put(acc, key, ref)}}
           end
 
         {:error, %{message: message}} ->
-          {:halt, {:error, error(:invalid_policy, "roles.#{role}.preludes[#{index}] #{message}")}}
+          {:halt, {:error, error(:invalid_policy, "roles.#{role}.#{label}[#{index}] #{message}")}}
       end
     end)
   end
 
-  defp prelude_grants(_values, role),
-    do: {:error, error(:invalid_policy, "roles.#{role}.preludes must be a list")}
+  defp prelude_grants(_values, role, label),
+    do: {:error, error(:invalid_policy, "roles.#{role}.#{label} must be a list")}
 
-  defp default_preludes(values, role) when is_list(values) do
+  defp default_preludes(values, role, label) when is_list(values) do
     values
     |> Enum.with_index()
     |> Enum.reduce_while({:ok, []}, fn {value, index}, {:ok, acc} ->
@@ -211,8 +212,7 @@ defmodule PtcRunner.PreludeRolePolicy do
           {:cont, {:ok, [value | acc]}}
 
         {:error, %{message: message}} ->
-          {:halt,
-           {:error, error(:invalid_policy, "roles.#{role}.default_preludes[#{index}] #{message}")}}
+          {:halt, {:error, error(:invalid_policy, "roles.#{role}.#{label}[#{index}] #{message}")}}
       end
     end)
     |> case do
@@ -221,8 +221,8 @@ defmodule PtcRunner.PreludeRolePolicy do
     end
   end
 
-  defp default_preludes(_values, role),
-    do: {:error, error(:invalid_policy, "roles.#{role}.default_preludes must be a list")}
+  defp default_preludes(_values, role, label),
+    do: {:error, error(:invalid_policy, "roles.#{role}.#{label} must be a list")}
 
   defp defaults_allowed(role, allowed, default_refs, allowed_label, default_label) do
     case preludes_allowed(%Grant{role: role}, default_refs, allowed, allowed_label) do

@@ -50,6 +50,7 @@ defmodule PtcRunner.TraceLog.TurnEvent do
   alias PtcRunner.Evidence.ReadProjection, as: EvidenceReadProjection
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
   alias PtcRunner.Lisp.RuntimeCallable
+  alias PtcRunner.PreludeOrigin
   alias PtcRunner.Step.Public, as: PublicStep
   alias PtcRunner.SubAgent.KeyNormalizer
   alias PtcRunner.TraceLog.Event
@@ -263,21 +264,10 @@ defmodule PtcRunner.TraceLog.TurnEvent do
   defp stringify_component_keys(_), do: []
 
   defp sanitize_component_origin(%{"origin" => origin} = component) do
-    Map.put(component, "origin", safe_component_origin(origin))
+    Map.put(component, "origin", PreludeOrigin.sanitize(origin))
   end
 
   defp sanitize_component_origin(component), do: component
-
-  defp safe_component_origin("memory"), do: "memory"
-  defp safe_component_origin("file:priv/" <> _rest = origin), do: origin
-  defp safe_component_origin("file:test/" <> _rest = origin), do: origin
-
-  defp safe_component_origin(origin) when is_binary(origin) do
-    "redacted:" <>
-      (:crypto.hash(:sha256, origin) |> Base.encode16(case: :lower))
-  end
-
-  defp safe_component_origin(_origin), do: "redacted"
 
   @doc """
   Computes a memory diff (`changed_keys` + bounded `values`) between the

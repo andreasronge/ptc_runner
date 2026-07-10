@@ -386,5 +386,23 @@ defmodule PtcRunner.TraceLog.TurnEventTest do
                }
              ]
     end
+
+    test "preserves an absent component origin as nil" do
+      summary = %{
+        source_hash: "aggregate",
+        protected_namespaces: ["domain.example"],
+        components: [
+          %{
+            id: "domain.example",
+            source_hash: "component",
+            namespaces: ["domain.example"],
+            origin: nil
+          }
+        ]
+      }
+
+      assert [%{"components" => [%{"origin" => nil}]}] =
+               TurnEvent.prelude_provenance(summary)
+    end
   end
 end

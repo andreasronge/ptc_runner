@@ -10,6 +10,7 @@ defmodule PtcRunner.Kernel do
   alias PtcRunner.Lisp.Prelude.Bundle
   alias PtcRunner.Lisp.Prelude.Compiler
   alias PtcRunner.Lisp.RetainedSize
+  alias PtcRunner.PreludeOrigin
   alias PtcRunner.PreludeRolePolicy
   alias PtcRunner.PreludeRuntime
   alias PtcRunner.Step
@@ -64,15 +65,11 @@ defmodule PtcRunner.Kernel do
   defp compile_preludes(opts, mission_tools) do
     cond do
       role_backed_prelude?(opts) ->
-        with {:ok, policy} <- role_policy(opts),
-             {:ok, grant} when not is_nil(grant) <-
-               PreludeRolePolicy.resolve(policy, Keyword.get(opts, :role)),
-             {:ok, _inner_selected_refs} <-
-               PreludeRolePolicy.selected_refs(grant, opts, :inner),
-             {:ok, loop_resolved} <-
-               PreludeRuntime.resolve(Keyword.get(opts, :prelude_store), grant, :loop, opts),
+        with {:ok, grant} <- resolve_role_grant(opts),
              {:ok, inner_resolved} <-
                PreludeRuntime.resolve(Keyword.get(opts, :prelude_store), grant, :inner, opts),
+             {:ok, loop_resolved} <-
+               PreludeRuntime.resolve(Keyword.get(opts, :prelude_store), grant, :loop, opts),
              {:ok, inner_refs} <-
                InnerPrelude.validate(loop_resolved.prelude, inner_resolved.prelude, mission_tools) do
           {:ok,
@@ -81,13 +78,6 @@ defmodule PtcRunner.Kernel do
              inner: annotate_role_prelude(inner_resolved.prelude, inner_resolved, :inner),
              inner_refs: inner_refs
            }}
-        else
-          {:ok, nil} ->
-            {:error,
-             %{reason: :role_required, message: "role is required for role-backed preludes"}}
-
-          {:error, _} = error ->
-            error
         end
 
       Keyword.has_key?(opts, :inner_preludes) ->
@@ -101,18 +91,24 @@ defmodule PtcRunner.Kernel do
   end
 
   defp compile_role_backed_prelude(opts) do
-    with {:ok, policy} <- role_policy(opts),
-         {:ok, grant} when not is_nil(grant) <-
-           PreludeRolePolicy.resolve(policy, Keyword.get(opts, :role)),
+    with {:ok, grant} <- resolve_role_grant(opts),
          {:ok, resolved} <-
            PreludeRuntime.resolve(Keyword.get(opts, :prelude_store), grant, opts) do
       {:ok, annotate_role_prelude(resolved.prelude, resolved, :loop)}
-    else
-      {:ok, nil} ->
-        {:error, %{reason: :role_required, message: "role is required for role-backed preludes"}}
+    end
+  end
 
-      {:error, _} = error ->
-        error
+  defp resolve_role_grant(opts) do
+    with {:ok, policy} <- role_policy(opts),
+         {:ok, grant} <- PreludeRolePolicy.resolve(policy, Keyword.get(opts, :role)) do
+      case grant do
+        nil ->
+          {:error,
+           %{reason: :role_required, message: "role is required for role-backed preludes"}}
+
+        grant ->
+          {:ok, grant}
+      end
     end
   end
 
@@ -193,22 +189,10 @@ defmodule PtcRunner.Kernel do
       version: Map.get(ref, :version),
       checksum: Map.get(ref, :checksum),
       namespaces: Map.get(ref, :namespaces, []),
-      origin: public_origin(Map.get(ref, :origin)),
+      origin: PreludeOrigin.sanitize(Map.get(ref, :origin)),
       required_by: Map.get(ref, :required_by, [])
     }
   end
-
-  defp public_origin("memory"), do: "memory"
-  defp public_origin("file:priv/" <> _rest = origin), do: origin
-  defp public_origin("file:test/" <> _rest = origin), do: origin
-
-  defp public_origin(origin) when is_binary(origin) do
-    "redacted:" <>
-      (:crypto.hash(:sha256, origin) |> Base.encode16(case: :lower))
-  end
-
-  defp public_origin(nil), do: nil
-  defp public_origin(_origin), do: "redacted"
 
   @spec run(map(), keyword()) :: {:ok, map()} | {:error, map()}
   def run(mission, opts) when is_map(mission) and is_list(opts) do

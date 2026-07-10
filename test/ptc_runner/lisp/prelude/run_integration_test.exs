@@ -187,6 +187,42 @@ defmodule PtcRunner.Lisp.Prelude.RunIntegrationTest do
       assert failed.return == {:__ptc_fail__, %{"reason" => "boom"}}
     end
 
+    test "HOF aborts retain counts through the invocation that raised the signal" do
+      source = """
+      (ns domain.example "Neutral helpers." {:visibility :prompt})
+      (defn safe-div "Fail on zero." [x]
+        (if (zero? x) (fail {:reason :zero}) (/ 10 x)))
+      """
+
+      assert {:ok, prelude} = Compiler.compile(source)
+
+      assert {:ok, step} =
+               PtcRunner.Lisp.run(
+                 "(return (map domain.example/safe-div [5 5 0 5]))",
+                 prelude: prelude
+               )
+
+      assert step.return == {:__ptc_fail__, %{"reason" => "zero"}}
+      assert step.prelude_call_counts == %{"domain.example/safe-div" => 3}
+
+      return_source = """
+      (ns domain.example "Neutral helpers." {:visibility :prompt})
+      (defn stop-at-zero "Return on zero." [x]
+        (if (zero? x) (return :done) x))
+      """
+
+      assert {:ok, return_prelude} = Compiler.compile(return_source)
+
+      assert {:ok, returned} =
+               PtcRunner.Lisp.run(
+                 "(map domain.example/stop-at-zero [5 5 0 5])",
+                 prelude: return_prelude
+               )
+
+      assert returned.return == {:__ptc_return__, "done"}
+      assert returned.prelude_call_counts == %{"domain.example/stop-at-zero" => 3}
+    end
+
     test "recoverable failure result is branchable", %{prelude: prelude} do
       {:ok, agent} = Agent.start_link(fn -> [] end)
       on_exit(fn -> stop_quietly(agent) end)

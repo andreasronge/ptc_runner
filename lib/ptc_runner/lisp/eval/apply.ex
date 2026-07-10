@@ -972,11 +972,18 @@ defmodule PtcRunner.Lisp.Eval.Apply do
       {:return_signal, value, %EvalContext{} = thrown_ctx} when not is_nil(prelude_ns) ->
         throw(
           {:return_signal, tag_prelude_ns(value, prelude_ns),
-           restore_prelude_caller(thrown_ctx, eval_context)}
+           thrown_ctx
+           |> merge_stashed_prelude_counts()
+           |> restore_prelude_caller(eval_context)}
         )
 
       {:fail_signal, value, %EvalContext{} = thrown_ctx} when not is_nil(prelude_ns) ->
-        throw({:fail_signal, value, restore_prelude_caller(thrown_ctx, eval_context)})
+        throw(
+          {:fail_signal, value,
+           thrown_ctx
+           |> merge_stashed_prelude_counts()
+           |> restore_prelude_caller(eval_context)}
+        )
     end
   end
 
@@ -997,6 +1004,13 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   end
 
   defp stash_prelude_entry(_metadata), do: :ok
+
+  defp merge_stashed_prelude_counts(%EvalContext{} = eval_ctx) do
+    case Process.get(:__ptc_hof_stack, []) do
+      [top | _rest] -> %{eval_ctx | prelude_call_counts: top.prelude_call_counts}
+      [] -> eval_ctx
+    end
+  end
 
   # A closure-eval error from a *nested* pmap/pcalls (heap kill, shared
   # deadline, exhausted worker budget) is raised as `ExecutionError`

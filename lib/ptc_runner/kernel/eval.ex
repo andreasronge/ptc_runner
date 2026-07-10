@@ -5,6 +5,7 @@ defmodule PtcRunner.Kernel.Eval do
   alias PtcRunner.LLM
   alias PtcRunner.LLM.Registry
   alias PtcRunner.LLM.ReqLLMAdapter
+  alias PtcRunner.PreludeOrigin
 
   @default_live_model "deepseek"
 
@@ -472,30 +473,8 @@ defmodule PtcRunner.Kernel.Eval do
       checksum: Map.get(component, :checksum),
       source_hash: Map.get(component, :source_hash),
       namespaces: Map.get(component, :namespaces, []),
-      origin: sanitize_origin(Map.get(component, :origin))
+      origin: PreludeOrigin.sanitize(Map.get(component, :origin))
     }
-  end
-
-  defp sanitize_origin(nil), do: nil
-
-  defp sanitize_origin(origin) when is_binary(origin) do
-    if safe_origin?(origin) and byte_size(origin) <= 160 do
-      origin
-    else
-      "redacted:" <> sha256(origin)
-    end
-  end
-
-  defp sanitize_origin(origin),
-    do: origin |> inspect(limit: 5, printable_limit: 160) |> sanitize_origin()
-
-  defp safe_origin?("file:priv/" <> _rest), do: true
-  defp safe_origin?("file:test/" <> _rest), do: true
-  defp safe_origin?("memory"), do: true
-  defp safe_origin?(_origin), do: false
-
-  defp sha256(source) do
-    :crypto.hash(:sha256, source) |> Base.encode16(case: :lower)
   end
 
   defp duration_ms(started) do

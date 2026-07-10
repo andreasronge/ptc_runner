@@ -27,7 +27,7 @@ defmodule PtcRunner.PreludeRuntime do
   def resolve(store, %Grant{} = grant, surface, opts)
       when is_list(opts) and surface in [:loop, :inner] do
     with {:ok, selected_refs} <- PreludeRolePolicy.selected_refs(grant, opts, surface),
-         :ok <- require_store(store, selected_refs) do
+         :ok <- require_store(store, selected_refs, surface) do
       try do
         {prelude, resolved_refs} = Selection.resolve!(store, selected_refs, opts)
 
@@ -65,20 +65,20 @@ defmodule PtcRunner.PreludeRuntime do
     end
   end
 
-  defp require_store(%PreludeStore{}, _refs), do: :ok
+  defp require_store(%PreludeStore{}, _refs, _surface), do: :ok
 
-  defp require_store(nil, refs) when refs != [] do
+  defp require_store(nil, refs, _surface) when refs != [] do
     {:error, error(:missing_prelude_store, ":prelude_store is required for role-backed preludes")}
   end
 
-  defp require_store(nil, []), do: :ok
+  defp require_store(nil, [], :inner), do: :ok
 
-  defp require_store(nil, _refs),
+  defp require_store(nil, _refs, _surface),
     do:
       {:error,
        error(:missing_prelude_store, ":prelude_store is required for role-backed preludes")}
 
-  defp require_store(store, _refs) do
+  defp require_store(store, _refs, _surface) do
     {:error,
      error(
        :invalid_prelude_store,

@@ -2,6 +2,8 @@ defmodule PtcRunner.PreludeRolePolicyTest do
   use ExUnit.Case, async: true
 
   alias PtcRunner.PreludeRolePolicy
+  alias PtcRunner.PreludeRolePolicy.Grant
+  alias PtcRunner.PreludeRuntime
 
   test "resolves default role with stable grant fingerprint" do
     assert {:ok, policy} =
@@ -234,5 +236,39 @@ defmodule PtcRunner.PreludeRolePolicyTest do
 
     assert {:ok, changed_grant} = PreludeRolePolicy.resolve(changed, nil)
     refute changed_grant.fingerprint == grant.fingerprint
+  end
+
+  test "reports malformed inner grant and default paths precisely" do
+    assert {:error, %{reason: :invalid_policy, message: grant_message}} =
+             PreludeRolePolicy.from_map(%{
+               "roles" => %{
+                 "kernel" => %{
+                   "inner_preludes" => ["domain.example@1", "domain.example@1"]
+                 }
+               }
+             })
+
+    assert grant_message =~ "roles.kernel.inner_preludes[1]"
+    refute grant_message =~ "roles.kernel.preludes[1]"
+
+    assert {:error, %{reason: :invalid_policy, message: default_message}} =
+             PreludeRolePolicy.from_map(%{
+               "roles" => %{
+                 "kernel" => %{
+                   "default_inner_preludes" => ["not a ref"]
+                 }
+               }
+             })
+
+    assert default_message =~ "roles.kernel.default_inner_preludes[0]"
+  end
+
+  test "missing loop store takes precedence over an empty loop selection" do
+    grant = %Grant{role: "kernel", default_preludes: [], default_inner_preludes: []}
+
+    assert {:error, %{reason: :missing_prelude_store}} =
+             PreludeRuntime.resolve(nil, grant, :loop, [])
+
+    assert {:ok, %{prelude: nil}} = PreludeRuntime.resolve(nil, grant, :inner, [])
   end
 end

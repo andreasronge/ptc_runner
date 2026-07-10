@@ -44,6 +44,7 @@ defmodule PtcRunner.Kernel.InnerPrelude do
     Enum.reduce_while(inner.exports, :ok, fn export, :ok ->
       requirements = Map.get(export, :requires, [])
       tool_refs = Map.get(export, :tool_refs, [])
+      missing_tool = missing_tool(requirements, mission_tools)
 
       cond do
         not is_nil(Map.get(export, :provider_ref)) ->
@@ -55,11 +56,11 @@ defmodule PtcRunner.Kernel.InnerPrelude do
         Enum.any?(tool_refs, &(to_string(&1) == "call")) ->
           {:halt, invalid(:dynamic_upstream_dispatch, export.ref)}
 
-        missing_tool(requirements, mission_tools) != nil ->
+        missing_tool != nil ->
           {:halt,
            invalid(:missing_mission_tool, %{
              ref: export.ref,
-             tool: missing_tool(requirements, mission_tools)
+             tool: missing_tool
            })}
 
         true ->
