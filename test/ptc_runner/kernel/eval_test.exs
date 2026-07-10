@@ -323,11 +323,16 @@ defmodule PtcRunner.Kernel.EvalTest do
   end
 
   @tag :tmp_dir
-  test "dotenv model identity records the model selected after loading", %{tmp_dir: dir} do
+  test "concurrent dotenv model identities wait for the selected model", %{tmp_dir: dir} do
     dotenv_key = {PtcRunner.Dotenv, :dotenv_loaded}
     previous_loaded = :persistent_term.get(dotenv_key, :missing)
     previous_model = System.get_env("PTC_TEST_MODEL")
-    File.write!(Path.join(dir, ".env"), "PTC_TEST_MODEL=openai:gpt\n")
+
+    File.write!(
+      Path.join(dir, ".env"),
+      String.duplicate("# keep loader busy\n", 100_000) <> "PTC_TEST_MODEL=openai:gpt\n"
+    )
+
     System.delete_env("PTC_TEST_MODEL")
     :persistent_term.erase(dotenv_key)
 
@@ -340,8 +345,28 @@ defmodule PtcRunner.Kernel.EvalTest do
       end
     end)
 
-    assert {:ok, "openai:gpt", "openai:gpt-4.1-mini"} =
-             File.cd!(dir, fn -> Eval.resolve_model_identity(nil) end)
+    identities =
+      File.cd!(dir, fn ->
+        parent = self()
+
+        tasks =
+          for _ <- 1..20 do
+            Task.async(fn ->
+              send(parent, {:ready, self()})
+
+              receive do
+                :go -> Eval.resolve_model_identity(nil)
+              end
+            end)
+          end
+
+        pids = for _ <- tasks, do: receive(do: ({:ready, pid} -> pid))
+        Enum.each(pids, &send(&1, :go))
+        Enum.map(tasks, &Task.await(&1, 10_000))
+      end)
+
+    assert identities ==
+             List.duplicate({:ok, "openai:gpt", "openai:gpt-4.1-mini"}, 20)
   end
 
   test "feedback variant swap changes only the feedback component hash" do

@@ -23,14 +23,16 @@ defmodule PtcRunner.Dotenv do
   """
   @spec load() :: :ok
   def load do
-    unless :persistent_term.get(@dotenv_loaded_key, false) do
-      :persistent_term.put(@dotenv_loaded_key, true)
+    :global.trans({@dotenv_loaded_key, self()}, fn ->
+      unless :persistent_term.get(@dotenv_loaded_key, false) do
+        case find_dotenv(File.cwd!()) do
+          nil -> :ok
+          path -> load_file(path)
+        end
 
-      case find_dotenv(File.cwd!()) do
-        nil -> :ok
-        path -> load_file(path)
+        :persistent_term.put(@dotenv_loaded_key, true)
       end
-    end
+    end)
 
     :ok
   end
