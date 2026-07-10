@@ -128,8 +128,8 @@ Stochastic evaluation is not assertion; it lives outside ExUnit as a mix task
 in the existing `ptc.*` namespace (no LLM-eval task exists in `lib/` today;
 `bench.check` is deterministic-only):
 
-    mix ptc.kernel_eval --suite smoke --model deepseek \
-      --runs 5 --variant kernel --report reports/kernel_eval.md
+    mix ptc.kernel_eval --suite tier2 --seed 17 --live --model deepseek \
+      --runs 1 --paired --report reports/kernel_eval/m2-tier2.md
 
 `--model` overrides `PTC_TEST_MODEL` for that invocation; both inputs resolve
 through the R14 library-visible seam backed by
@@ -137,19 +137,17 @@ through the R14 library-visible seam backed by
 valid. The flag is a per-run override of the env var, never a second
 resolution path.
 
-- **Cases are data, not test code** — lifted from demo per R10: the four
-  dependency-free files recon verified as entanglement-free
-  (`TestCase` case maps, the oracle core in `TestRunner.Base`, `SampleData`,
-  `SearchTool`). Reusing the demo domain here is sanctioned (the experiment
-  explicitly targets demo problems); it must still never leak into `agent.*`
-  prelude sources.
-- **Generate the dataset once per run** and share it across variants/cells.
-  Demo's clojure-validation path regenerates data mid-comparison and validates
-  against different data (lisp_test_runner.ex:723-765) — a known wart we must
-  not copy.
-- `--variant kernel | incumbent` — incumbent drives today's `SubAgent.run/2`
-  over the same cases, oracles, context, and tools. This is the only parity
-  mechanism (see rule below).
+- **Cases are data, not test code** — the five committed maps returned by
+  `PtcRunner.Kernel.Eval.tier2_cases/1` use the canonical case shape finalized
+  in R10. They are domain-blind library fixtures and do not import demo
+  modules or vocabulary into `agent.*` prelude sources.
+- **Generate the dataset once per seed** with
+  `PtcRunner.Kernel.Eval.Dataset.build/1` and share its hash and case-definition
+  hash across variants/cells. Each case carries the selected seed; mismatched
+  cases fail preflight rather than producing incomparable reports.
+- `--paired` schedules incumbent first and kernel second under one immutable
+  run context. Standalone `--variant kernel | incumbent` runs remain useful for
+  mock/debug work but are not Tier-2 evidence.
 - Every ask runs inside `TraceLog.with_trace/2` writing JSONL turn logs to a
   **persistent** reports directory — the Treatment-A harness lost its traces
   to ExUnit's tmp_dir; don't repeat that. Report output is markdown plus a
@@ -158,17 +156,14 @@ resolution path.
   rendered oracle failures, redacted prompt/action hashes, trace paths, and
   aggregate pass rates. Reports must surface trace drop/write-error counts;
   silent trace shedding is not acceptable for benchmark metrics.
-- Debugging uses the same code path, not ad-hoc scripts:
-
-      mix ptc.kernel_eval --suite smoke --case 1 --runs 1 \
-        --variant kernel --debug --trace-dir reports/kernel_eval/debug
-
-  Debug artifacts may include unsafe raw prompt/response excerpts only under an
-  explicit unsafe flag and are never used for benchmark claims.
-- Replay is offline by default: every Tier 2 report records sanitized action
-  envelopes and eval projections sufficient to replay a failed case without an
-  API key. Unsafe raw prompts/responses are optional debug artifacts, not the
-  replay substrate.
+- Debugging uses the same `Eval.run_cases/2` path. Unsafe raw traces require
+  the existing explicit in-process `unsafe_debug` opt-in and are never emitted
+  by the ordinary `ptc.kernel_eval` command or used for benchmark claims.
+- Offline replay is deferred to S8/S14. Tier 2 reports retain sanitized action
+  envelopes and eval projections for audit and revalidation, but intentionally
+  omit raw programs and therefore cannot replay execution without an API key.
+  Unsafe raw prompts/responses remain optional debugging artifacts, not the
+  default replay substrate.
 
 ### Tier 3 — A/B benchmark (M3 only)
 
@@ -189,25 +184,24 @@ alone is never the conclusion.
 ### Incumbent parity rule
 
 - **M1:** kernel is smoke-tested only (Tiers 0–1). No comparisons.
-- **M2:** Tier 2 runs both `--variant kernel` and `--variant incumbent` on the
-  case subset. Results are recorded as *informal parity observations* — used
-  to catch capability gaps, never quoted as claims.
+- **M2:** Tier 2 uses the paired coordinator for both variants on the case
+  subset. Results are recorded as *informal parity observations* — used to
+  catch capability gaps, never quoted as claims.
 - **M3:** preregistered comparisons only. The primary cell pair is
   kernel-bundle-A vs kernel-bundle-B (the policy thesis); kernel vs incumbent
   may run as an additional preregistered cell pair on the same tasks — never
   ad hoc.
 
-### Oracle contract (adopted from demo, one deliberate divergence)
+### Oracle contract
 
 Two-part oracle per case: an `:expect` type check plus a `:constraint` tuple —
 `{:eq, v}`, `{:gt, n}`, `{:gte, n}`, `{:lt, n}`, `{:between, min, max}`,
 `{:length, n}`, `{:gt_length, n}`, `{:starts_with, s}`, `{:one_of, list}`,
-`{:has_keys, keys}` (string-key normalization on both sides). There is
-deliberately no float `{:eq, _}` — SampleData is unseeded-random, so float
-expectations are ranges (`{:between, ...}`), the reason the whole format is
-constraint-based. Divergence: demo's checkers **fail open** on an unknown
-`:expect` atom or constraint tuple (base.ex:41,137); the kernel harness fails
-closed with a stable error, per repo policy on validation and limits.
+`{:has_keys, keys}` (string-key normalization on both sides). Floating
+expectations use ranges (`{:between, ...}`), while exact integer/scalar checks
+use `{:eq, value}`. `PtcRunner.Kernel.Eval.Oracle` fails closed with stable
+reasons for unknown expectation types, malformed constraints, and type or
+constraint mismatches.
 
 ## Phase 0 — Research backlog
 
@@ -271,7 +265,7 @@ the answer.
   investigation session): per-turn control flow of `loop.ex` driver_loop,
   `turn_feedback.ex`, retry/must-return phases — as the checklist of behaviors
   `agent.core`/`agent.feedback` must (or deliberately won't) reproduce.
-- [ ] **R10 — Case-format + oracle port**: lift the four R3 files into the
+- [x] **R10 — Case-format + oracle port**: lift the four R3 files into the
   kernel eval harness home (decision D8): finalize the canonical case shape
   (`id, query/task, context_ref, tools, expect, constraint, max_turns, tags`),
   close demo's fail-open oracle holes (fail closed, stable error), decide
@@ -279,6 +273,10 @@ the answer.
   is deliberately unseeded; preregistered cells may want a recorded seed),
   define model-visible case projection (never `expect`/`constraint`/`plan`),
   and define how oracle failures render in reports.
+  Completed 2026-07-10 in the kernel eval namespace: five seeded Tier 2 cases
+  use the canonical shape, `PtcRunner.Kernel.Eval.Oracle` fails closed with
+  stable reasons, only task/context reach the mission, and reports render
+  projected expectations and failures without exposing fixtures.
 - [ ] **R11 — Report/replay artifact schema**: finalize the Tier-2 JSON twin's
   required fields (model id, provider/backend metadata when available, repo
   commit, bundle manifest, component `source_hash`es, run command, seed/dataset
@@ -286,6 +284,12 @@ the answer.
   aggregate pass rates), the persistent trace/report directory layout, unsafe
   debug artifacts policy, and how `--replay-report CASE_ID` reproduces a
   failure.
+  2026-07-10 partial: the persistent Markdown/JSON schema now records seed,
+  dataset hash, case-definition hash, model/provider/LLM-source/commit/command
+  identity, evidence eligibility, aggregate rates,
+  per-case projected results, hashes, trace paths, and integrity counters.
+  Execution replay remains S8/S14: default sanitized artifacts intentionally
+  omit raw model programs rather than weakening the M1 redaction boundary.
 - [ ] **R12 — deepseek shakedown** (live, needs key; do before any
   conclusion-bearing run): establish that `deepseek`
   (openrouter:deepseek/deepseek-v4-flash) can do PTC-Lisp at all by running
@@ -556,50 +560,64 @@ repeatable eval path, use
 [`autonomous-m2-prelude-eval-spike.md`](autonomous-m2-prelude-eval-spike.md)
 as the goal brief.
 
-- [ ] Multi-turn loop in `agent.core`: feedback message construction,
+- [x] Multi-turn loop in `agent.core`: feedback message construction,
   max-turns wind-down, memory threading (per D1).
   2026-07-08 M3 partial: memory threading now uses per-run host-held native
   state in `Kernel.run/2`; deterministic tests prove `def` and `defn` survive
   across retry turns, bounded `memory_summary` crosses back to the loop, and
   memory cap breach fails closed while preserving prior state. Feedback now
   tells variants to use `untrusted_eval_result.memory_summary`; live payoff
-  probe remains open.
-- [ ] Memory-boundary property test: generated definition forms (`def`,
+  probe remains open. Deterministic multi-turn behavior is complete; the live
+  probe is evidence work rather than loop implementation.
+- [x] Memory-boundary property test: generated definition forms (`def`,
   `defn`, runtime-callable aliases like `(def add +)`, sets, nested
   closures, large/unencodable values) round-trip through host-held memory —
   pinning `RetainedSize` totality, preview bounds with honest flags,
   `eval-feedback` string totality, and turn-N+1 usability of every surviving
   definition. Retires the value-shape finding class from the M3 review
-  rounds; Formatter roundtrip property is the in-repo precedent.
-- [ ] Canonical memory-path declaration: `Lisp.run/2` moduledoc names which
+  rounds; Formatter roundtrip property is the in-repo precedent. Completed
+  2026-07-10 with generated scalar/collection/set/callable/closure definitions
+  plus the existing oversized and unencodable boundary cases.
+- [x] Canonical memory-path declaration: `Lisp.run/2` moduledoc names which
   memory projection host-side consumers (kernel, embedders) must use and
   what the normalizing path is for — lands with the native-result-path fix.
-- [ ] Split `agent.prompt` and `agent.feedback` into their own dotted
+  Documented 2026-07-10, including the callable-preserving kernel path and the
+  observation-only public/JSON projection.
+- [x] Split `agent.prompt` and `agent.feedback` into their own dotted
   PTC-Lisp namespaces/components; wire deps per R5. Policy constants as
   exports.
   2026-07-08 M2 2a proof is complete for `agent.core -> agent.feedback`;
   2b full graph is complete for `agent.core -> [agent.prompt, agent.feedback]`
   in `priv/preludes/agent/*.lisp`, with focused tests proving empty
   prompt/feedback `tool_refs`, single-channel system prompt forwarding, and a
-  feedback-only source override. Policy constants as exports remain open.
-- [ ] Truncation policy implemented **in** `agent.feedback` (caps + hint
-  wording).
-- [ ] Suite extended: eval-cases 3/5 (filter + aggregation) and a multi-turn
+  feedback-only source override. Policy constants were exported and tested on
+  2026-07-10.
+- [x] Truncation policy implemented **in** `agent.feedback` (caps + hint
+  wording). The component selects the retry projection and emits bounded valid
+  JSON with an explicit recovery hint.
+- [x] Suite extended: eval-cases 3/5 (filter + aggregation) and a multi-turn
   cross-dataset case, via Tier 2. M3 mini runner now has 6 tiny cases:
   arithmetic, context filter/count, context aggregation, one granted domain
   tool, forced eval retry, and memory persistence. Mock mode passes 6/6; the
   latest recorded live DeepSeek full-suite run passed 4/6 on 2026-07-08:
   memory persistence passed, domain-tool scalar extraction stayed red, and
-  aggregation remained unstable.
+  aggregation remained unstable. The seeded five-case Tier 2 suite added on
+  2026-07-10 passes 5/5 in mock mode through both kernel and incumbent adapters;
+  live evidence remains gated below.
 - [x] Kernel emits turn events (per D4) so runs are measurable with existing
   tooling. Plan:
   [`autonomous-d4-kernel-turn-events.md`](autonomous-d4-kernel-turn-events.md).
 - [ ] Host-held state, trace, tool-cache, and pmap behavior follow R21/R22
   decisions; S11/S12 pass before widening live runs.
-- [ ] Parity per rule: Tier 2 run with `--variant kernel` AND
-  `--variant incumbent` on the same suite; observations recorded informally.
+- [ ] Parity per rule: Tier 2 paired incumbent→kernel run on the same suite;
+  observations recorded informally.
+  Mock parity is 5/5 for both variants on an identical recorded dataset hash.
+  The paired live command and the ≥3/5 threshold are frozen in
+  `experiments/m2-tier2-prereg.md`; the live cells have not run.
 - [ ] Gate: standing gates + Tier-2 pass rates recorded (pre-register
   thresholds before running; suggest ≥ 3/5 each as a smoke bar, not a claim).
+  Threshold preregistration is complete; lifecycle prerequisites and paired
+  live evidence remain open.
 
 ## M3 — The payoff experiment: policy A/B with zero Elixir diff
 

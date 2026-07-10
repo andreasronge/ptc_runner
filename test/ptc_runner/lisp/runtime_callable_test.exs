@@ -170,6 +170,14 @@ defmodule PtcRunner.Lisp.RuntimeCallableTest do
       refute Map.has_key?(step.memory, "f")
     end
 
+    test "failed public runs retain native continuation memory with callable filtering" do
+      tools = %{"echo" => fn args -> args end}
+
+      assert {:error, step} = Lisp.run(~S|(def f tool/echo) missing|, tools: tools)
+      assert step.fail.reason == :unbound_var
+      refute Map.has_key?(step.memory, "f")
+    end
+
     test "runtime callable map participates in tool caching" do
       calls = :counters.new(1, [:atomics])
 

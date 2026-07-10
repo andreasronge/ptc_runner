@@ -156,10 +156,17 @@ defmodule PtcRunner.SubAgent.Loop.Metrics do
           Turn.t() | nil,
           map(),
           integer(),
+          map() | nil,
           map() | nil
         ) ::
           :ok
-  def emit_turn_stop_immediate(turn, state, turn_start, turn_tokens \\ nil) do
+  def emit_turn_stop_immediate(
+        turn,
+        state,
+        turn_start,
+        turn_tokens \\ nil,
+        effective_memory \\ nil
+      ) do
     turn_duration = System.monotonic_time() - turn_start
     # Use explicit turn_tokens if provided, otherwise fall back to state.turn_tokens
     tokens = turn_tokens || state.turn_tokens
@@ -205,7 +212,8 @@ defmodule PtcRunner.SubAgent.Loop.Metrics do
       program: program,
       result_preview: result_preview,
       prints: prints,
-      raw_response: raw_response
+      raw_response: raw_response,
+      effective_memory: effective_memory
     )
 
     :ok
@@ -229,8 +237,9 @@ defmodule PtcRunner.SubAgent.Loop.Metrics do
         driver: :sub_agent,
         agent_id: state.agent_id,
         agent_name: state.agent_name,
-        # SubAgent advances one loop turn per attempt; turn == attempt here.
-        turn: state.turn,
+        # Canonical `turn` counts only previously committed turns. `state.turn`
+        # is the loop-attempt counter and therefore belongs in `attempt`.
+        turn: Enum.count(state.turns, & &1.success?) + if(committed?, do: 1, else: 0),
         attempt: state.turn,
         committed: committed?,
         status: status,
@@ -244,6 +253,7 @@ defmodule PtcRunner.SubAgent.Loop.Metrics do
         raw_response: if(is_nil(program), do: Keyword.get(fields, :raw_response)),
         result_preview: Keyword.fetch!(fields, :result_preview),
         prints: Keyword.fetch!(fields, :prints),
+        memory_diff: turn_memory_diff(turn, state.memory, Keyword.get(fields, :effective_memory)),
         tool_calls: tool_calls,
         evidence_reads: evidence_reads(tool_calls),
         catalog_ops: turn_catalog_ops(turn),
@@ -278,6 +288,11 @@ defmodule PtcRunner.SubAgent.Loop.Metrics do
   # i.e. an LLM error before any Turn was created).
   defp turn_prelude_trace(%Turn{prelude_trace: trace}), do: trace
   defp turn_prelude_trace(_), do: nil
+
+  defp turn_memory_diff(%Turn{memory: turn_memory}, prior_memory, effective_memory),
+    do: TurnEvent.memory_diff(prior_memory, effective_memory || turn_memory)
+
+  defp turn_memory_diff(_turn, _prior_memory, _effective_memory), do: nil
 
   defp fail_from_result(%{reason: reason, message: message}),
     do: %{reason: reason, message: message}

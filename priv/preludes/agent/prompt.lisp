@@ -7,48 +7,15 @@
   [cfg]
   (str "You are controlling PTC-Lisp through native tool calling.\n"
        "PTC-Lisp is Clojure-like and runs as an interactive REPL: each program is evaluated, errors are reported, and definitions made with def or defn remain available to later programs in the same task. Reuse persisted definitions instead of recomputing prior work.\n"
-       "Call run_ptc_lisp exactly once per turn with JSON arguments {\"program\": \"...\"}.\n"
+       "Call " (cfg "protocol_tool_name") " exactly once per turn with JSON arguments {\"program\": \"...\"}.\n"
        "Successful programs end with (return value); explicit failures use (fail value).\n"
        "Use value symbols directly, e.g. data/items. Call only function symbols, e.g. (tool/name args). Context key x is available as data/x.\n"
        "Do not answer in prose."))
 
-(defn- optional-detail
-  [prefix value]
-  (if (empty? value) "" (str prefix value)))
-
-(defn- symbol-label
-  [fact]
-  (if (= (fact "kind") "function")
-    (str (fact "ref") " [" (str/join " " (fact "params")) "]")
-    (fact "ref")))
-
-(defn- symbol-detail
-  [fact]
-  (if (= (fact "kind") "function")
-    (str "function"
-         (optional-detail " [" (fact "effect"))
-         (if (empty? (fact "effect")) "" "]")
-         ", use: " (fact "usage")
-         (optional-detail " - " (fact "doc")))
-    (str "value"
-         (optional-detail " " (fact "type"))
-         (optional-detail ", sample: " (fact "sample"))
-         ", use: " (fact "usage")
-         (optional-detail " - " (fact "doc")))))
-
-(defn- symbol-line
-  [fact]
-  (str (symbol-label fact) " ; " (symbol-detail fact)))
-
 (defn render-symbols
-  "Render sanitized symbol facts supplied by the host."
+  "Select the bounded host-rendered symbol inventory."
   [cfg]
-  (let [facts (cfg "symbol_facts")]
-    (if (empty? facts)
-      (cfg "symbol_inventory")
-      (str ";; === available symbols ===\n"
-           "Use value symbols directly. Call only function symbols.\n"
-           (str/join "\n" (map symbol-line facts))))))
+  (cfg "symbol_inventory"))
 
 (defn task-message
   "Render the initial user task message."

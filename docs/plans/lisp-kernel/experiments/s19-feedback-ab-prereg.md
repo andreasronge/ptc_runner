@@ -8,6 +8,8 @@ changes; no unrelated dirty files were present before the spike edits.
 **Preregistration status:** completed before outcome-bearing runs.
 **Post-prereg shakedown status:** live descriptive shakedown run on 2026-07-08;
 not M3 evidence.
+**M2 control refresh:** a separate post-run revision is recorded below. It is
+not part of the frozen July 8 experiment or its outcome.
 
 This preregistration freezes a feedback-only comparison for a later run. It is
 valid only if the cells vary `agent.feedback` wording/rendering policy and
@@ -262,6 +264,24 @@ Guard/control endpoints:
 
 This is a non-M3 descriptive shakedown because D4 canonical TurnEvents are
 still absent. Do not use these counts as statistical evidence of superiority.
+
+## Post-Run M2 Control Refresh
+
+On 2026-07-10, after the outcome above had been recorded and before any M3
+evidence run, the candidate files were refreshed to route the protocol tool
+name through host configuration and apply the same bounded feedback envelope
+to every cell. This is a future experiment revision, not a mutation of the
+July 8 frozen cells or evidence. Runs using these hashes belong to the separate
+[`m2-feedback-ab-prereg.md`](m2-feedback-ab-prereg.md) experiment and must not
+be attributed to the outcome above.
+
+| Cell/component | Source hash |
+| --- | --- |
+| A, `agent.feedback` | `c7babc612f8e87a2556898ac4cea31668baa0ff73153636a48b38c1faa74ab0b` |
+| B, `agent.feedback` | `d39fae64506909201a5b3c542b504713984656c9f133423d9414138874282c8c` |
+| C, `agent.feedback` | `ae83f8c52d178b906e2034c0937b7bc5b516825d4657ac67240e993db6d27e21` |
+| `agent.prompt` | `9bcaa98e2f05d8a1a08a1f44bbe3b1a5a23b27bbb6af33419d1582f5b1d556eb` |
+| `agent.core` | `7465d62ddc39b73969860acd45604bccbb3537aa2962ce662430d98cd5ed429a` |
 
 ## Claim Boundary
 

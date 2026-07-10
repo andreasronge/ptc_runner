@@ -1,11 +1,11 @@
 defmodule Mix.Tasks.Ptc.KernelFeedbackAb do
-  @shortdoc "Run the S19 feedback-only A/B shakedown"
+  @shortdoc "Run the M2 feedback-only A/B shakedown"
   @moduledoc """
-  Runs the preregistered S19 feedback-only A/B shakedown.
+  Runs the preregistered M2 feedback-only A/B shakedown.
 
       mix ptc.kernel_feedback_ab --mock --runs 1
       mix ptc.kernel_feedback_ab --live --model deepseek --runs 5 --allow-failures
-      mix ptc.kernel_feedback_ab --live --model deepseek --runs 5 --allow-failures --report reports/kernel_eval/s19-feedback-ab-live.md
+      mix ptc.kernel_feedback_ab --live --model deepseek --runs 5 --allow-failures --report reports/kernel_eval/m2-feedback-ab-live.md
       mix ptc.kernel_feedback_ab --live --model deepseek --case context_aggregation --cell C --runs 20 --stop-on-failure --unsafe-debug-report reports/kernel_eval/debug-c-context.md
   """
 
@@ -46,21 +46,13 @@ defmodule Mix.Tasks.Ptc.KernelFeedbackAb do
       opts
       |> Keyword.take([:suite, :runs, :case, :cell, :model, :seed, :stop_on_failure])
       |> Keyword.put(:mode, mode)
+      |> Keyword.put(:report, opts[:report])
       |> maybe_put_debug_agent(debug_agent)
 
     try do
       case FeedbackAB.run(eval_opts) do
         {:ok, result} ->
-          markdown = FeedbackAB.render_markdown(result)
-          Mix.shell().info(markdown)
-          maybe_write_report(opts[:report], markdown)
-          maybe_write_unsafe_debug(opts[:unsafe_debug_report], result)
-
-          if opts[:allow_failures] != true and not FeedbackAB.passed?(result) do
-            Mix.raise(
-              "feedback A/B shakedown failed: #{FeedbackAB.failure_count(result)} case(s) failed"
-            )
-          end
+          handle_result!(result, opts)
 
         {:error, {:missing_api_key, key, model}} ->
           Mix.raise("#{key} is required for live model #{model}")
@@ -73,11 +65,41 @@ defmodule Mix.Tasks.Ptc.KernelFeedbackAb do
     end
   end
 
-  defp maybe_write_report(nil, _markdown), do: :ok
+  @doc false
+  @spec handle_result!(FeedbackAB.result(), keyword()) :: :ok | no_return()
+  def handle_result!(result, opts) do
+    markdown = FeedbackAB.render_markdown(result)
+    Mix.shell().info(markdown)
 
-  defp maybe_write_report(path, markdown) do
+    try do
+      maybe_write_report(opts[:report], markdown, not is_nil(Map.get(result, :run_context)))
+      maybe_write_unsafe_debug(opts[:unsafe_debug_report], result)
+      FeedbackAB.finalize_run_context(result)
+    rescue
+      exception ->
+        FeedbackAB.abort_run_context(result, exception)
+        reraise exception, __STACKTRACE__
+    end
+
+    cond do
+      result.aborted ->
+        Mix.raise("feedback A/B shakedown aborted: #{inspect(result.abort_reason)}")
+
+      opts[:allow_failures] != true and not FeedbackAB.passed?(result) ->
+        Mix.raise(
+          "feedback A/B shakedown failed: #{FeedbackAB.failure_count(result)} case(s) failed"
+        )
+
+      true ->
+        :ok
+    end
+  end
+
+  defp maybe_write_report(nil, _markdown, _exclusive?), do: :ok
+
+  defp maybe_write_report(path, markdown, exclusive?) do
     File.mkdir_p!(Path.dirname(path))
-    File.write!(path, markdown <> "\n")
+    File.write!(path, markdown <> "\n", if(exclusive?, do: [:exclusive], else: []))
     Mix.shell().info("Wrote #{path}")
   end
 
@@ -95,7 +117,14 @@ defmodule Mix.Tasks.Ptc.KernelFeedbackAb do
 
   defp maybe_write_unsafe_debug(path, result) do
     File.mkdir_p!(Path.dirname(path))
+    ensure_private_file!(path)
     File.write!(path, FeedbackAB.render_unsafe_debug(result) <> "\n")
+    File.chmod!(path, 0o600)
     Mix.shell().info("Wrote unsafe debug report #{path}")
+  end
+
+  defp ensure_private_file!(path) do
+    unless File.exists?(path), do: File.write!(path, "", [:exclusive])
+    File.chmod!(path, 0o600)
   end
 end

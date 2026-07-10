@@ -44,7 +44,11 @@ defmodule PtcRunner.TraceLog.TurnEvent do
   the driver's LLM generated when there is no parsed `program` (SubAgent
   parse/text-mode failures); it is nil for session turns and normal turns. The whole bag is run through
   `PtcRunner.TraceLog.Event.sanitize/1`, which bounds large strings/lists/maps —
-  that is where memory-diff values and prints get their byte bounds.
+  that is where prints and other retained diagnostic values get their byte
+  bounds. Memory diffs retain changed binding names only; values and value
+  fingerprints are deliberately excluded. Older v2 producers may include a
+  `memory_diff.values` member. Consumers must treat that legacy member as
+  optional; current producers never emit it.
   """
 
   alias PtcRunner.Evidence.ReadProjection, as: EvidenceReadProjection
@@ -270,12 +274,12 @@ defmodule PtcRunner.TraceLog.TurnEvent do
   defp sanitize_component_origin(component), do: component
 
   @doc """
-  Computes a memory diff (`changed_keys` + bounded `values`) between the
-  pre-turn and post-turn memory maps. Keys whose value is unchanged are
-  excluded. PTC-Lisp `def` cannot remove bindings, so this only surfaces
-  additions and rebindings.
+  Computes the changed binding names between the pre-turn and post-turn memory
+  maps. Keys whose value is unchanged are excluded. Values and fingerprints are
+  not persisted because memory may contain secrets returned by tools. PTC-Lisp
+  `def` cannot remove bindings, so this only surfaces additions and rebindings.
   """
-  @spec memory_diff(map(), map()) :: %{changed_keys: [String.t()], values: map()} | nil
+  @spec memory_diff(map(), map()) :: %{changed_keys: [String.t()]} | nil
   def memory_diff(before, after_memory)
       when is_map(before) and is_map(after_memory) do
     changed =
@@ -289,10 +293,7 @@ defmodule PtcRunner.TraceLog.TurnEvent do
     if map_size(changed) == 0 do
       nil
     else
-      %{
-        changed_keys: changed |> Map.keys() |> Enum.map(&to_string/1) |> Enum.sort(),
-        values: PublicStep.memory(changed)
-      }
+      %{changed_keys: changed |> Map.keys() |> Enum.map(&to_string/1) |> Enum.sort()}
     end
   end
 
@@ -370,9 +371,7 @@ defmodule PtcRunner.TraceLog.TurnEvent do
     |> Event.sanitize()
   end
 
-  defp normalize_memory_diff(%{changed_keys: keys, values: values}) do
-    %{"changed_keys" => keys, "values" => values}
-  end
+  defp normalize_memory_diff(%{changed_keys: keys}), do: %{"changed_keys" => keys}
 
   defp normalize_memory_diff(_), do: nil
 

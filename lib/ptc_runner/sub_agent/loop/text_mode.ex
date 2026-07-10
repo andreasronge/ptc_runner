@@ -227,7 +227,8 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
           turn,
           state,
           turn_start,
-          state_with_tokens.turn_tokens
+          state_with_tokens.turn_tokens,
+          step.memory
         )
 
         {:ok, step}
@@ -250,7 +251,7 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
             original_prompt: state.original_prompt
         }
 
-        Metrics.emit_turn_stop_immediate(nil, state, turn_start, nil)
+        Metrics.emit_turn_stop_immediate(nil, state, turn_start, nil, step_with_metrics.memory)
         {:error, step_with_metrics}
     end
   end
@@ -289,13 +290,21 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
               turn,
               state,
               turn_start,
-              next_state.turn_tokens
+              next_state.turn_tokens,
+              next_state.memory
             )
 
             json_driver_loop(agent, llm, next_state)
 
           {:stop, result, turn, turn_tokens} ->
-            Metrics.emit_turn_stop_immediate(turn, state, turn_start, turn_tokens)
+            Metrics.emit_turn_stop_immediate(
+              turn,
+              state,
+              turn_start,
+              turn_tokens,
+              result_memory(result, state.memory)
+            )
+
             result
         end
     end
@@ -541,13 +550,21 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
               turn,
               state,
               turn_start,
-              next_state.turn_tokens
+              next_state.turn_tokens,
+              next_state.memory
             )
 
             tool_driver_loop(agent, llm, next_state)
 
           {:stop, result, turn, turn_tokens} ->
-            Metrics.emit_turn_stop_immediate(turn, state, turn_start, turn_tokens)
+            Metrics.emit_turn_stop_immediate(
+              turn,
+              state,
+              turn_start,
+              turn_tokens,
+              result_memory(result, state.memory)
+            )
+
             result
         end
     end
@@ -2404,4 +2421,7 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
 
     {:error, step_with_metrics}
   end
+
+  defp result_memory({_tag, %{memory: memory}}, _fallback) when is_map(memory), do: memory
+  defp result_memory(_result, fallback), do: fallback
 end

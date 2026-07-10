@@ -198,15 +198,18 @@ defmodule PtcRunner.Lisp do
   On success, returns:
    - `{:ok, Step.t()}` with:
      - `step.return`: The value returned to the caller
-     - `step.memory`: Complete memory state after execution. This is native
-       continuation state for compatibility with direct Lisp callers that pass
+     - `step.memory`: Data memory after execution. Direct Lisp callers can pass
        it back through the `:memory` option on a later eval; use
        `PtcRunner.Step.Public.memory/1` when you need a purely public
-       observation shape. Do not serialize `step.memory` (JSON, ETF-to-disk,
-       database) between evals — serialization silently converts native
-       values such as keywords into plain strings. For persistent or
-       cross-process REPL state, use `PtcRunner.Session`, which owns
-       continuation memory and returns publicly rendered steps.
+       observation shape. The public `run/2` result preserves closures and
+       composed callable forms, but deliberately omits top-level runtime
+       callables such as directly bound builtin/tool aliases and renders nested
+       runtime callables as labels. Do not serialize `step.memory` (JSON,
+       ETF-to-disk, database) between evals —
+       serialization silently converts native values such as keywords into
+       plain strings. For persistent or cross-process REPL state, use
+       `PtcRunner.Session`, which owns continuation memory and returns publicly
+       rendered steps.
      - `step.usage`: Execution metrics (`duration_ms`, `memory_bytes`,
        `eval_reductions`)
 
@@ -214,7 +217,9 @@ defmodule PtcRunner.Lisp do
   - `{:error, Step.t()}` with:
     - `step.fail.reason`: Error reason atom
     - `step.fail.message`: Human-readable error description
-    - `step.memory`: Native memory state at time of error
+    - `step.memory`: Native continuation memory at the time of error, with the
+      same callable caveats as successful `run/2` results. Do not serialize it;
+      use `PtcRunner.Step.Public.memory/1` for an observation-only projection.
 
   ## Memory Contract
 
@@ -222,6 +227,17 @@ defmodule PtcRunner.Lisp do
   there is no implicit map merge and no special `:return` key handling. Storage
   is **explicit**: `(def x v)` persists `v` in memory (`step.memory["x"]`), and
   that memory survives across turns within a single `SubAgent` run.
+
+  There are two deliberate host memory projections. Ordinary embedders may use
+  `run/2` to continue data definitions, `defn` closures, and composed
+  callable forms by threading `step.memory` directly into the next call's
+  `:memory` option. Top-level direct runtime-callable aliases are not
+  preserved on this public path. Hosts that must preserve every runtime
+  callable, including direct builtin/tool aliases, use the internal
+  `run_native/2` continuation path with `preserve_runtime_callables: true`, as
+  `PtcRunner.Kernel` does. A host must not substitute the JSON/public memory
+  projection for either continuation path: that projection is observation-only
+  and cannot retain executable values.
 
   `:turn_history` is separate from memory. Hosts pass a list of prior
   successful `step.return` values in chronological order; `*1` reads the most

@@ -59,7 +59,7 @@ defmodule PtcRunner.TraceLog.TurnEventTest do
           driver: :session,
           status: :error,
           fail: %{reason: :runtime_error, message: "boom"},
-          memory_diff: %{changed_keys: ["x"], values: %{"x" => self()}},
+          memory_diff: %{changed_keys: ["x"]},
           turn_type: :retry
         })
 
@@ -67,7 +67,7 @@ defmodule PtcRunner.TraceLog.TurnEventTest do
       assert event["data"]["fail"] == %{"reason" => "runtime_error", "message" => "boom"}
       assert event["data"]["turn_type"] == "retry"
       # A pid is sanitized to its inspect string, never raw.
-      assert event["data"]["memory_diff"]["values"]["x"] =~ "#PID<"
+      assert event["data"]["memory_diff"] == %{"changed_keys" => ["x"]}
     end
 
     test "committed defaults to false and coerces truthy-but-not-true to false" do
@@ -121,12 +121,11 @@ defmodule PtcRunner.TraceLog.TurnEventTest do
   end
 
   describe "memory_diff/2" do
-    test "reports added and rebound keys with their post-turn values" do
-      assert TurnEvent.memory_diff(%{"a" => 1}, %{"a" => 1, "b" => 2}) ==
-               %{changed_keys: ["b"], values: %{"b" => 2}}
+    test "reports added and rebound keys without retaining value fingerprints" do
+      assert %{changed_keys: ["b"]} =
+               TurnEvent.memory_diff(%{"a" => 1}, %{"a" => 1, "b" => 2})
 
-      assert TurnEvent.memory_diff(%{"a" => 1}, %{"a" => 9}) ==
-               %{changed_keys: ["a"], values: %{"a" => 9}}
+      assert %{changed_keys: ["a"]} = TurnEvent.memory_diff(%{"a" => 1}, %{"a" => 9})
     end
 
     test "returns nil when nothing changed" do
@@ -137,36 +136,34 @@ defmodule PtcRunner.TraceLog.TurnEventTest do
     test "treats a newly added nil-valued binding as a change" do
       # `(def x nil)`: a missing key and a nil value both read as nil via
       # Map.get, so presence must be checked separately.
-      assert TurnEvent.memory_diff(%{}, %{"x" => nil}) ==
-               %{changed_keys: ["x"], values: %{"x" => nil}}
+      assert %{changed_keys: ["x"]} = TurnEvent.memory_diff(%{}, %{"x" => nil})
 
       # Rebinding an existing key to nil is also a change.
-      assert TurnEvent.memory_diff(%{"x" => 1}, %{"x" => nil}) ==
-               %{changed_keys: ["x"], values: %{"x" => nil}}
+      assert %{changed_keys: ["x"]} = TurnEvent.memory_diff(%{"x" => 1}, %{"x" => nil})
 
       # An unchanged nil binding is not a change.
       assert TurnEvent.memory_diff(%{"x" => nil}, %{"x" => nil}) == nil
     end
 
-    test "externalizes native Lisp keywords in changed values" do
-      diff =
-        TurnEvent.memory_diff(%{}, %{
-          "m" => %{"page" => %{"parse" => %LispKeyword{name: "jsonl"}}}
-        })
-
-      assert diff == %{
-               changed_keys: ["m"],
-               values: %{"m" => %{"page" => %{"parse" => "jsonl"}}}
-             }
+    test "does not retain externalized native Lisp keyword values" do
+      assert %{changed_keys: ["m"]} =
+               TurnEvent.memory_diff(%{}, %{
+                 "m" => %{"page" => %{"parse" => %LispKeyword{name: "jsonl"}}}
+               })
     end
 
-    test "renders closures in changed values as opaque function previews" do
+    test "does not retain closures or their fingerprints" do
       closure = {:closure, [{:var, :x}], nil, %{}, [], %{}}
 
-      assert TurnEvent.memory_diff(%{}, %{"f" => closure}) == %{
-               changed_keys: ["f"],
-               values: %{"f" => "#fn[x]"}
-             }
+      assert %{changed_keys: ["f"]} = TurnEvent.memory_diff(%{}, %{"f" => closure})
+    end
+
+    test "does not persist secret-bearing tool results stored in memory" do
+      secret = "MEMORY-DIFF-SECRET"
+      diff = TurnEvent.memory_diff(%{}, %{"result" => %{"token" => secret}})
+
+      refute inspect(diff) =~ secret
+      assert diff == %{changed_keys: ["result"]}
     end
 
     test "returns nil for non-map inputs" do

@@ -3,31 +3,43 @@ defmodule PtcRunner.Kernel.FeedbackAB do
 
   alias PtcRunner.Kernel
   alias PtcRunner.Kernel.Eval
+  alias PtcRunner.Kernel.Eval.RunContext
   alias PtcRunner.Lisp.Prelude
 
-  @seed "s19-feedback-ab-order-v1"
+  @seed "m2-feedback-ab-order-v1"
   @variant_a_path "priv/kernel_feedback_variants/feedback_a_default.lisp"
   @variant_b_path "priv/kernel_feedback_variants/feedback_b_memory_guidance.lisp"
   @variant_c_feedback_path "priv/kernel_feedback_variants/feedback_c_no_memory_guidance.lisp"
-  @variant_c_prompt_path "priv/kernel_feedback_variants/prompt_c_repl_memory.lisp"
   @prompt_path "priv/preludes/agent/prompt.lisp"
   @core_path "priv/preludes/agent/core.lisp"
 
-  @variant_a_hash "b220eb0b285e2d4bae6454889f8b90d893dc3dc017b6c9e28fabee9b951ae474"
-  @variant_b_hash "ef9bd2769fc404feed1db14e1de2923b4f6105f325b073cb0632c046f522eafe"
-  @variant_c_feedback_hash "f9fa94089cb08d86a2de97d17047f5f48c7228b8176328ee77757578e1b5a223"
-  @variant_c_prompt_hash "82bcd82d41d84580466531351c8750214a9945ef5bd5492da52742a82da0d746"
-  @prompt_hash "82bcd82d41d84580466531351c8750214a9945ef5bd5492da52742a82da0d746"
+  @variant_a_hash "c7babc612f8e87a2556898ac4cea31668baa0ff73153636a48b38c1faa74ab0b"
+  @variant_b_hash "d39fae64506909201a5b3c542b504713984656c9f133423d9414138874282c8c"
+  @variant_c_feedback_hash "ae83f8c52d178b906e2034c0937b7bc5b516825d4657ac67240e993db6d27e21"
+  @prompt_hash "9bcaa98e2f05d8a1a08a1f44bbe3b1a5a23b27bbb6af33419d1582f5b1d556eb"
   @core_hash "7465d62ddc39b73969860acd45604bccbb3537aa2962ce662430d98cd5ed429a"
+  @case_definition_hash "754473db7fa9d831a22a5d108765e732b574ac8bfdb283e25ce03472a2da14e5"
+  @case_ids ~w(arithmetic context_filter_count context_aggregation domain_tool eval_retry memory_persistence)
+  @cell_ids ~w(A B C)
+  @registered_report_path "reports/kernel_eval/m2-feedback-ab-live.md"
 
   @type result :: %{
           suite: String.t(),
           mode: :mock | :live,
           model: String.t() | nil,
+          requested_model: String.t() | nil,
+          commit: String.t(),
+          llm_source: String.t(),
+          evidence_eligible: boolean(),
+          preregistered_config: boolean(),
+          case_definition_hash: String.t(),
           runs: pos_integer(),
           seed: String.t(),
           cells: [map()],
-          rows: [map()]
+          rows: [map()],
+          complete: boolean(),
+          aborted: boolean(),
+          abort_reason: term() | nil
         }
 
   @spec run(keyword()) :: {:ok, result()} | {:error, term()}
@@ -41,27 +53,118 @@ defmodule PtcRunner.Kernel.FeedbackAB do
          :ok <- validate_runs(runs),
          {:ok, cells} <- selected_cells(Keyword.get(opts, :cell)),
          {:ok, cases} <- selected_cases(Keyword.get(opts, :case)),
-         {:ok, model} <- resolve_model(mode, Keyword.get(opts, :model)),
-         :ok <- preflight_live(mode, model),
-         {:ok, rows} <- run_order(cases, cells, suite, mode, model, runs, seed, opts) do
+         {:ok, requested_model, model} <- resolve_model(mode, Keyword.get(opts, :model)),
+         :ok <- preflight_live(mode, model, opts),
+         case_definition_hash = Eval.case_definition_hash(cases),
+         preregistered_config =
+           preregistered_config?(%{
+             suite: suite,
+             mode: mode,
+             runs: runs,
+             seed: seed,
+             requested_model: requested_model,
+             temperature: Keyword.get(opts, :temperature, 0.0),
+             max_tokens: Keyword.get(opts, :max_tokens, 512),
+             receive_timeout: Keyword.get(opts, :receive_timeout, 60_000),
+             report: Keyword.get(opts, :report),
+             live_llm: Keyword.get(opts, :live_llm),
+             unsafe_debug_agent: Keyword.get(opts, :unsafe_debug_agent),
+             stop_on_failure: Keyword.get(opts, :stop_on_failure, false),
+             case_ids: Enum.map(cases, & &1.id),
+             cell_ids: Enum.map(cells, & &1.id),
+             case_definition_hash: case_definition_hash
+           }),
+         run_context = maybe_start_run_context(preregistered_config, model, opts),
+         {:ok, rows, abort_reason} <-
+           run_order(
+             cases,
+             cells,
+             suite,
+             mode,
+             model,
+             runs,
+             seed,
+             opts
+             |> Keyword.put(:require_provenance, preregistered_config)
+             |> Keyword.put(:feedback_run_context, run_context)
+           ) do
+      llm_source = llm_source(mode, opts)
+      expected_row_count = length(cases) * length(cells) * runs
+      complete = length(rows) == expected_row_count
+      commit = top_level_commit(rows)
+
+      lifecycle_ok? = validate_lifecycle(run_context) == :ok
+      abort_reason = if lifecycle_ok?, do: abort_reason, else: "repository_state_changed"
+
       {:ok,
        %{
          suite: suite,
          mode: mode,
          model: if(mode == :live, do: model),
+         requested_model: requested_model,
+         commit: commit,
+         llm_source: llm_source,
+         evidence_eligible:
+           preregistered_config and
+             lifecycle_ok? and evidence_eligible?(rows, abort_reason, expected_row_count),
+         preregistered_config: preregistered_config,
+         case_definition_hash: case_definition_hash,
          runs: runs,
          seed: seed,
          cells: Enum.map(cells, &Map.delete(&1, :override)),
-         rows: rows
+         rows: rows,
+         complete: complete,
+         aborted: not is_nil(abort_reason),
+         abort_reason: abort_reason,
+         run_context: run_context
        }}
     end
   end
 
   @spec passed?(result()) :: boolean()
-  def passed?(%{rows: rows}), do: Enum.all?(rows, &(&1.status == :pass))
+  def passed?(%{aborted: false, rows: rows}), do: Enum.all?(rows, &(&1.status == :pass))
+  def passed?(_result), do: false
 
   @spec failure_count(result()) :: non_neg_integer()
   def failure_count(%{rows: rows}), do: Enum.count(rows, &(&1.status != :pass))
+
+  @doc false
+  @spec evidence_eligible?([map()], term() | nil, non_neg_integer()) :: boolean()
+  def evidence_eligible?(rows, abort_reason, expected_row_count) do
+    commits = rows |> Enum.map(&Map.get(&1, :commit)) |> Enum.uniq()
+
+    is_nil(abort_reason) and rows != [] and length(rows) == expected_row_count and
+      length(commits) == 1 and hd(commits) not in [nil, "unknown"] and
+      Enum.all?(rows, &(&1.provenance_eligible == true))
+  end
+
+  defp top_level_commit(rows) do
+    case rows |> Enum.map(&Map.get(&1, :commit)) |> Enum.uniq() do
+      [commit] when is_binary(commit) -> commit
+      [] -> "unknown"
+      _commits -> "mixed"
+    end
+  end
+
+  @doc false
+  @spec preregistered_config?(map()) :: boolean()
+  def preregistered_config?(config) do
+    config.suite == "mini" and config.mode == :live and config.runs == 5 and
+      config.seed == @seed and config.requested_model == "deepseek" and
+      config.temperature == 0.0 and config.max_tokens == 512 and
+      config.receive_timeout == 60_000 and registered_report_path?(config.report) and
+      is_nil(config.live_llm) and
+      is_nil(config.unsafe_debug_agent) and config.stop_on_failure == false and
+      Enum.sort(config.case_ids) == Enum.sort(@case_ids) and
+      Enum.sort(config.cell_ids) == Enum.sort(@cell_ids) and
+      config.case_definition_hash == @case_definition_hash
+  end
+
+  defp registered_report_path?(path) when is_binary(path) and path != "" do
+    Path.expand(path) == Path.expand(@registered_report_path)
+  end
+
+  defp registered_report_path?(_path), do: false
 
   @spec render_markdown(result()) :: String.t()
   def render_markdown(result) do
@@ -80,14 +183,23 @@ defmodule PtcRunner.Kernel.FeedbackAB do
       end)
 
     """
-    # S19 Feedback Policy Shakedown
+    # M2 Feedback Policy Shakedown
 
     evidence_level: non-M3 descriptive shakedown
     suite: #{result.suite}
     mode: #{result.mode}
     model: #{result.model || "mock"}
+    requested_model: #{result.requested_model || "none"}
+    commit: #{result.commit}
+    llm_source: #{result.llm_source}
+    evidence_eligible: #{result.evidence_eligible}
+    preregistered_config: #{result.preregistered_config}
+    case_definition_hash: #{result.case_definition_hash}
+    complete: #{result.complete}
     runs_per_cell_case: #{result.runs}
     seed: #{result.seed}
+    aborted: #{result.aborted}
+    abort_reason: #{render_abort_reason(result.abort_reason)}
 
     ## Frozen Cells
 
@@ -122,18 +234,22 @@ defmodule PtcRunner.Kernel.FeedbackAB do
     end)
   end
 
+  defp render_abort_reason(nil), do: "none"
+  defp render_abort_reason(reason), do: inspect(reason)
+
   defp validate_suite("mini"), do: :ok
   defp validate_suite(other), do: {:error, {:unknown_suite, other}}
 
   defp validate_runs(runs) when is_integer(runs) and runs > 0, do: :ok
   defp validate_runs(other), do: {:error, {:invalid_runs, other}}
 
-  defp preflight_live(:mock, _model), do: :ok
+  defp preflight_live(:mock, _model, _opts), do: :ok
 
-  defp preflight_live(:live, model) do
+  defp preflight_live(:live, model, opts) do
     case Eval.run_cases([],
            mode: :live,
            model: model,
+           live_llm: Keyword.get(opts, :live_llm),
            report: eval_report_path([], "preflight")
          ) do
       {:ok, _empty} -> :ok
@@ -141,11 +257,24 @@ defmodule PtcRunner.Kernel.FeedbackAB do
     end
   end
 
-  defp preflight_live(other, _model), do: {:error, {:unknown_mode, other}}
+  defp preflight_live(other, _model, _opts), do: {:error, {:unknown_mode, other}}
 
-  defp resolve_model(:mock, _model), do: {:ok, nil}
-  defp resolve_model(:live, model), do: Eval.resolve_model(model)
+  defp resolve_model(:mock, _model), do: {:ok, nil, nil}
+
+  defp resolve_model(:live, model) do
+    case Eval.resolve_model_identity(model) do
+      {:ok, requested, resolved} -> {:ok, requested, resolved}
+      {:error, _reason} = error -> error
+    end
+  end
+
   defp resolve_model(other, _model), do: {:error, {:unknown_mode, other}}
+
+  defp llm_source(:mock, _opts), do: "mock"
+
+  defp llm_source(:live, opts) do
+    if is_function(Keyword.get(opts, :live_llm), 1), do: "injected", else: "registry"
+  end
 
   defp selected_cases(nil), do: {:ok, Eval.mini_cases()}
 
@@ -160,13 +289,12 @@ defmodule PtcRunner.Kernel.FeedbackAB do
     with :ok <- validate_file_hash(@variant_a_path, @variant_a_hash),
          :ok <- validate_file_hash(@variant_b_path, @variant_b_hash),
          :ok <- validate_file_hash(@variant_c_feedback_path, @variant_c_feedback_hash),
-         :ok <- validate_file_hash(@variant_c_prompt_path, @variant_c_prompt_hash),
          :ok <- validate_file_hash(@prompt_path, @prompt_hash),
          :ok <- validate_file_hash(@core_path, @core_hash),
          {:ok, cell_a} <-
            validated_cell(
              "A",
-             "default-memory-summary-guidance",
+             "baseline-memory-summary-guidance",
              @prompt_path,
              @prompt_hash,
              @variant_a_path,
@@ -184,9 +312,9 @@ defmodule PtcRunner.Kernel.FeedbackAB do
          {:ok, cell_c} <-
            validated_cell(
              "C",
-             "system-repl-guidance-only",
-             @variant_c_prompt_path,
-             @variant_c_prompt_hash,
+             "no-memory-guidance",
+             @prompt_path,
+             @prompt_hash,
              @variant_c_feedback_path,
              @variant_c_feedback_hash
            ) do
@@ -273,12 +401,12 @@ defmodule PtcRunner.Kernel.FeedbackAB do
           end
 
         {:error, reason} ->
-          {:halt, {:error, reason}}
+          {:halt, {:aborted, rows, reason}}
       end
     end)
     |> case do
-      {:ok, rows} -> {:ok, Enum.reverse(rows)}
-      {:error, _reason} = error -> error
+      {:ok, rows} -> {:ok, Enum.reverse(rows), nil}
+      {:aborted, rows, reason} -> {:ok, Enum.reverse(rows), reason}
     end
   end
 
@@ -286,37 +414,113 @@ defmodule PtcRunner.Kernel.FeedbackAB do
     {unsafe_debug_agent, cleanup_debug} = unsafe_debug_agent(opts)
 
     try do
-      case Eval.run_cases([block.case],
-             suite: suite,
-             mode: mode,
-             model: model,
-             runs: 1,
-             report: eval_report_path(opts, "#{block.case.id}-#{block.replicate}-#{cell.id}"),
-             trace_dir: eval_trace_dir(opts, "#{block.case.id}-#{block.replicate}-#{cell.id}"),
-             prelude_source_overrides: cell.override,
-             receive_timeout: Keyword.get(opts, :receive_timeout, 60_000),
-             max_tokens: Keyword.get(opts, :max_tokens, 512),
-             temperature: Keyword.get(opts, :temperature, 0.0),
-             unsafe_debug: is_pid(unsafe_debug_agent),
-             unsafe_debug_agent: unsafe_debug_agent
-           ) do
-        {:ok, %{cases: [case_result]}} ->
-          case assert_report_provenance(case_result, cell) do
-            :ok ->
-              {:ok, row(block, cell, case_result)}
+      with :ok <- validate_lifecycle(Keyword.get(opts, :feedback_run_context)),
+           result <-
+             Eval.run_cases([block.case],
+               suite: suite,
+               mode: mode,
+               model: model,
+               runs: 1,
+               report: eval_report_path(opts, "#{block.case.id}-#{block.replicate}-#{cell.id}"),
+               trace_dir: eval_trace_dir(opts, "#{block.case.id}-#{block.replicate}-#{cell.id}"),
+               prelude_source_overrides: cell.override,
+               receive_timeout: Keyword.get(opts, :receive_timeout, 60_000),
+               max_tokens: Keyword.get(opts, :max_tokens, 512),
+               temperature: Keyword.get(opts, :temperature, 0.0),
+               live_llm: Keyword.get(opts, :live_llm),
+               unsafe_debug: is_pid(unsafe_debug_agent),
+               unsafe_debug_agent: unsafe_debug_agent
+             ),
+           :ok <- validate_lifecycle(Keyword.get(opts, :feedback_run_context)) do
+        case result do
+          {:ok, %{aborted: true, abort_reason: reason}} ->
+            {:error, {:infrastructure_abort, block.case.id, block.replicate, cell.id, reason}}
 
-            {:error, reason} ->
-              {:error, {:provenance_mismatch, block.case.id, block.replicate, cell.id, reason}}
-          end
+          {:ok, %{cases: [case_result]} = eval_report} ->
+            case require_preregistered_provenance(eval_report, opts) do
+              :ok ->
+                case validate_case_integrity(case_result) do
+                  :ok ->
+                    case assert_report_provenance(case_result, cell) do
+                      :ok ->
+                        {:ok, row(block, cell, case_result, eval_report)}
 
-        {:error, reason} ->
-          {:error, {:cell_run_failed, block.case.id, block.replicate, cell.id, reason}}
+                      {:error, reason} ->
+                        {:error,
+                         {:provenance_mismatch, block.case.id, block.replicate, cell.id, reason}}
+                    end
 
-        other ->
-          {:error, {:unexpected_cell_result, block.case.id, block.replicate, cell.id, other}}
+                  {:error, reason} ->
+                    {:error,
+                     {:infrastructure_abort, block.case.id, block.replicate, cell.id, reason}}
+                end
+
+              {:error, reason} ->
+                {:error, {:provenance_mismatch, block.case.id, block.replicate, cell.id, reason}}
+            end
+
+          {:error, reason} ->
+            {:error, {:cell_run_failed, block.case.id, block.replicate, cell.id, reason}}
+
+          other ->
+            {:error, {:unexpected_cell_result, block.case.id, block.replicate, cell.id, other}}
+        end
+      else
+        {:error, "repository_state_changed"} ->
+          {:error,
+           {:infrastructure_abort, block.case.id, block.replicate, cell.id,
+            "repository_state_changed"}}
       end
+    rescue
+      exception ->
+        {:error,
+         {:cell_run_raised, block.case.id, block.replicate, cell.id,
+          exception |> Map.fetch!(:__struct__) |> inspect()}}
     after
       cleanup_debug.()
+    end
+  end
+
+  @doc false
+  def finalize_run_context(%{run_context: nil}), do: :ok
+  def finalize_run_context(result) when not is_map_key(result, :run_context), do: :ok
+
+  def finalize_run_context(%{run_context: context} = result) do
+    state = if result.aborted, do: "aborted", else: "completed"
+    RunContext.finish!(context, state, %{abort_reason: inspect(result.abort_reason)})
+    :ok
+  end
+
+  @doc false
+  def abort_run_context(%{run_context: nil}, _reason), do: :ok
+  def abort_run_context(result, _reason) when not is_map_key(result, :run_context), do: :ok
+
+  def abort_run_context(%{run_context: context}, reason) do
+    RunContext.finish!(context, "aborted", %{abort_reason: inspect(reason.__struct__)})
+    :ok
+  end
+
+  defp maybe_start_run_context(true, model, opts) do
+    RunContext.start!(
+      Keyword.fetch!(opts, :report),
+      %{suite: "feedback_ab", model: model},
+      opts
+    )
+  end
+
+  defp maybe_start_run_context(false, _model, _opts), do: nil
+
+  defp validate_lifecycle(nil), do: :ok
+  defp validate_lifecycle(context), do: RunContext.validate(context)
+
+  @doc false
+  @spec require_preregistered_provenance(map(), keyword()) :: :ok | {:error, atom()}
+  def require_preregistered_provenance(eval_report, opts) do
+    if Keyword.get(opts, :require_provenance) == true and
+         Map.get(eval_report, :provenance_eligible) != true do
+      {:error, :ineligible_run_provenance}
+    else
+      :ok
     end
   end
 
@@ -346,7 +550,7 @@ defmodule PtcRunner.Kernel.FeedbackAB do
     end
   end
 
-  defp row(block, cell, case_result) do
+  defp row(block, cell, case_result, eval_report) do
     %{
       replicate: block.replicate,
       case: case_result.case,
@@ -360,9 +564,26 @@ defmodule PtcRunner.Kernel.FeedbackAB do
       duration_ms: case_result.duration_ms,
       prompt_hash: cell.prompt_hash,
       feedback_hash: cell.feedback_hash,
+      commit: eval_report.commit,
+      llm_source: eval_report.llm_source,
+      provenance_eligible: eval_report.provenance_eligible,
       unsafe_trace: Map.get(case_result, :unsafe_trace)
     }
   end
+
+  @doc false
+  @spec validate_case_integrity(map()) :: :ok | {:error, String.t()}
+  def validate_case_integrity(%{write_errors: count}) when count > 0,
+    do: {:error, "trace_integrity_failure"}
+
+  def validate_case_integrity(%{expected_turns: expected, actual_turns: actual})
+      when expected != actual,
+      do: {:error, "trace_integrity_failure"}
+
+  def validate_case_integrity(%{failure_reason: "trace_integrity_failure"}),
+    do: {:error, "trace_integrity_failure"}
+
+  def validate_case_integrity(_case_result), do: :ok
 
   @spec render_unsafe_debug(result()) :: String.t()
   def render_unsafe_debug(result) do
@@ -384,7 +605,7 @@ defmodule PtcRunner.Kernel.FeedbackAB do
       end)
 
     """
-    # UNSAFE S19 Feedback Debug Report
+    # UNSAFE M2 Feedback Debug Report
 
     This report intentionally includes raw model-visible prompts/messages and
     model-produced programs. Do not publish it as benchmark evidence.
@@ -392,6 +613,13 @@ defmodule PtcRunner.Kernel.FeedbackAB do
     suite: #{result.suite}
     mode: #{result.mode}
     model: #{result.model || "mock"}
+    requested_model: #{result.requested_model || "none"}
+    commit: #{result.commit}
+    llm_source: #{result.llm_source}
+    evidence_eligible: #{result.evidence_eligible}
+    preregistered_config: #{result.preregistered_config}
+    case_definition_hash: #{result.case_definition_hash}
+    complete: #{result.complete}
     runs_per_cell_case: #{result.runs}
     seed: #{result.seed}
 

@@ -1,5 +1,6 @@
 defmodule PtcRunner.KernelTest do
   use ExUnit.Case, async: true
+  use ExUnitProperties
 
   alias PtcRunner.Kernel
   alias PtcRunner.Lisp
@@ -138,6 +139,30 @@ defmodule PtcRunner.KernelTest do
              )
 
     refute_received {:llm_request, _}
+  end
+
+  test "initial request uses the selected bounded host renderer" do
+    parent = self()
+
+    llm = fn request ->
+      send(parent, {:llm_request, request})
+      {:ok, %{tool_calls: [%{name: "run_ptc_lisp", args: %{"program" => "(return 1)"}}]}}
+    end
+
+    assert {:ok, %{"value" => 1}} =
+             Kernel.run(
+               %{"task" => "compute", "context" => %{"a" => 1, "b" => 2, "c" => 3}},
+               llm: llm,
+               symbol_inventory_renderer: :reference,
+               symbol_inventory_renderer_opts: [cap: 1]
+             )
+
+    assert_received {:llm_request, %{messages: [%{role: :user, content: content}]}}
+    assert content =~ ";; === symbol reference ==="
+    assert content =~ "data/a"
+    refute content =~ "data/b"
+    refute content =~ "data/c"
+    assert content =~ "+2 more symbols omitted"
   end
 
   test "invalid embedded prelude source is attributed to its override option" do
@@ -573,6 +598,54 @@ defmodule PtcRunner.KernelTest do
 
     assert {:ok, %{"value" => 43}} =
              Kernel.run(%{"task" => "compute"}, llm: llm, kernel_memory_byte_cap: 3_000_000)
+  end
+
+  property "generated value shapes and callables survive the host-held memory boundary" do
+    check all(
+            base <- integer(-1_000..1_000),
+            values <- list_of(integer(-100..100), min_length: 1, max_length: 8),
+            max_runs: 25
+          ) do
+      vector = "[#{Enum.join(values, " ")}]"
+
+      definitions = """
+      (def base #{base})
+      (def values #{vector})
+      (def selected \#{#{base} #{base + 1}})
+      (def add +)
+      (defn bump [x] (add x 1))
+      (defn make-adder [n] (fn [x] (+ x n)))
+      (def add-base (make-adder base))
+      """
+
+      use_every_definition = """
+      (return [base
+               (count values)
+               (contains? selected base)
+               (add 1 2)
+               (bump base)
+               (add-base 2)])
+      """
+
+      llm =
+        scripted_llm([
+          %{tool_calls: [%{name: "run_ptc_lisp", args: %{"program" => definitions}}]},
+          %{tool_calls: [%{name: "run_ptc_lisp", args: %{"program" => use_every_definition}}]}
+        ])
+
+      assert {:ok,
+              %{
+                "value" => [^base, value_count, true, 3, bumped, closure_result]
+              }} =
+               Kernel.run(%{"task" => "use every persisted definition"},
+                 llm: llm,
+                 kernel_memory_byte_cap: 3_000_000
+               )
+
+      assert value_count == length(values)
+      assert bumped == base + 1
+      assert closure_result == base + 2
+    end
   end
 
   test "variant prelude parallel eval-program calls fail closed instead of racing memory" do

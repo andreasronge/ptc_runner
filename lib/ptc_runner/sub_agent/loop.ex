@@ -466,7 +466,8 @@ defmodule PtcRunner.SubAgent.Loop do
                   turn,
                   state,
                   turn_start,
-                  next_state.turn_tokens
+                  next_state.turn_tokens,
+                  next_state.memory
                 )
 
                 # TCO: tail-recursive call
@@ -477,7 +478,8 @@ defmodule PtcRunner.SubAgent.Loop do
                   turn,
                   state,
                   turn_start,
-                  next_state.turn_tokens
+                  next_state.turn_tokens,
+                  result_memory(result, next_state.memory)
                 )
 
                 result
@@ -490,13 +492,17 @@ defmodule PtcRunner.SubAgent.Loop do
               turn,
               state,
               turn_start,
-              turn_tokens
+              turn_tokens,
+              result_memory(result, state.memory)
             )
 
             result
         end
     end
   end
+
+  defp result_memory({_tag, %{memory: memory}}, _fallback) when is_map(memory), do: memory
+  defp result_memory(_result, fallback), do: fallback
 
   defp apply_continuation_guard(turn, state, next_state) do
     case state.continuation_guard do

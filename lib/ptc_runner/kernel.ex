@@ -344,6 +344,7 @@ defmodule PtcRunner.Kernel do
 
     cfg = %{
       "max_turns" => Keyword.fetch!(opts, :max_turns),
+      "protocol_tool_name" => Action.tool_name(),
       "tool_names" => opts |> Keyword.get(:tools, %{}) |> public_tool_names(),
       "symbol_facts" => symbol_facts,
       "symbol_inventory" => symbol_inventory,
@@ -790,7 +791,7 @@ defmodule PtcRunner.Kernel do
                  system: system,
                  messages: normalize_messages(Map.get(args, "messages", [])),
                  tools: [Action.tool_schema()],
-                 tool_choice: %{type: "tool", name: "run_ptc_lisp"}
+                 tool_choice: %{type: "tool", name: Action.tool_name()}
                }
 
                log_unsafe_llm_request(events, opts, args, request)
@@ -1291,7 +1292,7 @@ defmodule PtcRunner.Kernel do
   defp maybe_put_content(map, content, _tool_calls), do: maybe_put(map, :content, content)
 
   defp add_public_tool_call(%{kind: "tool_call", program: program} = action) do
-    id = "run_ptc_lisp_#{System.unique_integer([:positive])}"
+    id = "#{Action.tool_name()}_#{System.unique_integer([:positive])}"
 
     action
     |> Map.put(:tool_call_id, id)
@@ -1299,7 +1300,7 @@ defmodule PtcRunner.Kernel do
       "id" => id,
       "type" => "function",
       "function" => %{
-        "name" => "run_ptc_lisp",
+        "name" => Action.tool_name(),
         "arguments" => Jason.encode!(%{"program" => program})
       }
     })

@@ -16,6 +16,10 @@ defmodule PtcRunner.Kernel.Action do
             provider_meta: map()
           }
 
+  @doc false
+  @spec tool_name() :: String.t()
+  def tool_name, do: @tool_name
+
   @spec tool_schema() :: map()
   def tool_schema do
     %{

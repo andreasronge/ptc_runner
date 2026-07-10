@@ -1,347 +1,147 @@
-# Lisp Kernel — Autonomous M2 Prelude + Mini Eval Spike
+# Lisp Kernel — M2 completion brief
 
-**Status:** goal brief for the next autonomous Codex session on
-`exp/lisp-kernel`. Revised 2026-07-08 after the M1 review (system-prompt
-channel contract, risk-first ordering, runner naming, untrusted-envelope
-default).
+**Status:** active completion brief for `exp/lisp-kernel`, revised 2026-07-10
+after M1 closure and the deterministic M2 implementation.
 
-Use this after the first native-tool-call vertical slice. The `/goal` prompt
-should stay short and point here; this document carries the detailed contract.
+The earlier version of this document described a prelude-split and mini-eval
+spike. Those proofs now exist. This brief owns the remaining work required to
+close M2 without repeating them or creating a second evaluation runner.
 
-## Short Goal Prompt
+## Short goal prompt
 
 ```text
-Run the autonomous M2 Prelude + Mini Eval spike described in
-docs/plans/lisp-kernel/autonomous-m2-prelude-eval-spike.md.
-
-Goal: move the minimal kernel loop toward real swappable preludes, add a tiny
-repeatable eval runner, and test DeepSeek on 3-5 tasks beyond arithmetic. Prove
-at least one prompt/feedback behavior can change by swapping a prelude, with no
-Elixir loop-logic change.
-
-Work risk-first: prove the cross-namespace prelude compile path (Build Task
-2a, minimal two-namespace form) before anything else. Commit after each
-coherent batch. Keep scope bounded. Do not build full Tier 2, sessions,
-compaction, MCP, or self-improvement. Update docs with evidence, blockers,
-commands, and live results.
+Complete M2 using docs/plans/lisp-kernel/autonomous-m2-prelude-eval-spike.md.
+Keep agent.core sequential, preserve the S21 capability split and program-only
+action protocol, use the existing PtcRunner.Kernel.Eval harness for both
+variants, and do not widen live runs until the recorded lifecycle gates pass.
+Run both variants on the same seeded Tier 2 dataset and update the evidence.
 ```
 
-## Objective
-
-The first autonomous spike proved the minimum native tool-call kernel path:
-`PtcRunner.Kernel.run/2`, `run_ptc_lisp` action normalization, strict inner
-eval, private kernel capabilities, mock tests, and live DeepSeek smoke.
-
-This spike tests the next thesis:
-
-> Prompt and feedback policy can move from Elixir into swappable compiled
-> preludes, and model behavior can be evaluated on a small repeatable suite
-> without building the full Tier 2 harness.
-
-The goal is not polish. The goal is evidence about whether the M2 direction is
-pleasant, measurable, and still small.
-
-## Scope
-
-Read first:
-
-- `AGENTS.md`
-- `docs/plans/lisp-kernel/architecture.md`
-- `docs/plans/lisp-kernel/roadmap.md`
-- `docs/plans/lisp-kernel/spikes.md`
-- `docs/plans/lisp-kernel/autonomous-spike.md`
-- `lib/ptc_runner/kernel.ex`
-- `lib/ptc_runner/kernel/action.ex`
-- `test/ptc_runner/kernel*_test.exs`
-
-Allowed:
-
-- move or duplicate the embedded minimal prelude into experimental prelude
-  files;
-- add experimental bundle-loading/compilation code needed for the split;
-- add a small eval runner or mix task under an explicit kernel/eval namespace;
-- add a small case set and deterministic or live tests;
-- update docs with facts, corrections, and spike results.
-
-Avoid:
-
-- deleting the measured incumbent SubAgent path;
-- building the full Tier 2 benchmark harness;
-- building sessions, compaction, MCP, compiled agents, or self-improvement;
-- broad public API stabilization;
-- optimizing beyond what the spike needs.
-
-## Build Tasks
-
-**Sequencing (risk-first).** Task 2a's minimal two-namespace compile proof
-comes first — it is the highest-information step and the only one with a hard
-stop condition. Then the full split (task 1 + 2b), swappable policy (task 3),
-and only then the runner and live work (tasks 4-6). Commit after each coherent
-batch — code together with its tests and doc updates — rather than after every
-isolated fact, and do not let uncommitted work grow past one batch (the M1
-session left the entire slice uncommitted for hours, an unacceptable risk in a
-repo shared with concurrent automations). If unrelated dirty state appears in
-the worktree, stop and report it before touching anything.
-
-1. **Prelude file split**
-
-   Move the minimal loop toward separate policy components:
-
-   Use dotted PTC-Lisp namespaces for the split. These are the declared
-   `(ns ...)` names and the public call contract, not only file/component IDs:
-
-   - `agent.core`: turn loop, action dispatch, eval result handling,
-     return/fail control flow;
-   - `agent.prompt`: system/task message construction and compact PTC-Lisp
-     guidance;
-   - `agent.feedback`: protocol-error and eval-result feedback rendering.
-
-   The split may live under `priv/preludes/agent/`, `lib/ptc_runner/kernel/`,
-   or a clearly marked spike path. Record the chosen home and why.
-
-   **Policy interface.** Treat public exports as the swap contract:
-
-   - `agent.prompt/system-message [cfg]`;
-   - `agent.prompt/task-message [mission cfg]`;
-   - `agent.feedback/protocol-error [action cfg]`;
-   - `agent.feedback/eval-feedback [result cfg]`.
-
-   Variants may add private helpers, but a variant that renames these functions
-   or changes their arity is non-conforming. Use `defn-` by default for
-   composition helpers; cross-namespace callers only get declared public exports,
-   while source-level improvement tooling can still inspect reachable helpers.
-
-   **System-prompt channel contract.** The kernel sends the system prompt
-   through exactly one channel: the request-level `:system` field, set
-   host-side (fixed in `b49d822d` after a dual-channel bug). Moving prompt
-   policy into `agent.prompt` therefore requires extending the private
-   `llm-complete` args with a `"system"` field that the host forwards as
-   request-level `:system`. Do **not** re-embed a system-role message inside
-   `messages` (that reintroduces the dual-channel bug), and do not leave
-   default prompt rendering in Elixir (that defeats the swap thesis). Keep the
-   `:system_prompt` Elixir opt as an override for tests and live probes —
-   removing it is a separate API-cleanup decision that needs M2 evidence, not
-   part of this spike. What the spike must pin is precedence: when both the
-   opt and prelude-rendered prompt policy are present, exactly one wins
-   (suggested: the opt overrides the prelude, as an explicit test escape
-   hatch) and the request still carries a single system channel. Record the
-   decision and cover it with a test.
-
-   The prompt prelude should give compact, domain-blind PTC-Lisp orientation:
-   PTC-Lisp is Clojure-like prefix syntax; call exactly one `run_ptc_lisp`
-   action; successful programs end with `(return value)`; explicit failures use
-   `(fail value)`; read mission context by map keys; and call only granted tools
-   from inside the program. Treat this as a topic checklist, not fixed prose —
-   wording is exactly what prompt-prelude variants exist to explore.
-
-   Keep `agent.*` domain-blind. No product/order/employee/search benchmark
-   hints in prompt or feedback preludes.
-
-2. **Layered bundle compilation**
-
-   Prove the correct compile path for cross-namespace refs.
-
-   Requirements:
-
-   - use the repo-supported prelude compiler/bundle APIs. Verified 2026-07-08:
-     raw `Bundle.compile/1` **is** dep-blind by design (see the doc comment in
-     `lib/ptc_runner/lisp/prelude/bundle.ex`); cross-namespace visibility must
-     be declared via `Compiler.compile/2` `:namespace_deps`
-     (`%{ns => [dep_ns]}`) or `Bundle.compile_precompiled/2`, which forwards
-     it;
-   - **2a (first):** prove the minimal two-namespace case — `agent.core`
-     calling `agent.feedback` exports — with a deterministic test, before any
-     three-way split;
-   - **2b (after task 1):** prove the full graph — `agent.core` calling both
-     `agent.prompt` and `agent.feedback` — with a deterministic test;
-   - record the exact API shape that works;
-   - investigate and pin private-tool authority across the bundle: capability
-     V1 makes `private_env` namespace-scoped with transitive fail-closed
-     guards. Record how the kernel capabilities (`llm-complete`,
-     `eval-program`, `log`) distribute across `agent.*` namespaces, grant them
-     as narrowly as the model allows, and pin the observed behavior with a
-     test. The authority rule is export/tool-ref based, not namespace-only:
-     assert `agent.prompt/*` and `agent.feedback/*` exports have empty
-     `tool_refs`, while only the loop export carries `llm-complete`,
-     `eval-program`, and `log`. Also assert prompt/feedback exports cannot
-     reach kernel tools and fail closed.
-
-   If the split cannot compile cleanly, stop and document the compiler/API gap.
-
-3. **Kernel integration with swappable policy**
-
-   Adjust `PtcRunner.Kernel.run/2` or add an experimental option so the same
-   Elixir kernel can run different prompt/feedback prelude bundles.
-
-   Required proof:
-
-   - default behavior still passes existing kernel tests;
-   - one test swaps only feedback policy and observes different retry feedback;
-   - no Elixir loop-logic change is needed to swap that policy.
-
-4. **Mini eval runner**
-
-   Add a tiny repeatable eval path — built as the embryo of the roadmap's
-   Tier 2 task, not a parallel throwaway runner. The roadmap already reserves
-   `mix ptc.kernel_eval --suite smoke --runs 5 --variant kernel` and notes the
-   task can exist in minimal form this early: name this
-   `mix ptc.kernel_eval` and start with `--suite mini`. A small module or test
-   helper backing the mix task is fine. It is not the full Tier 2 harness.
-
-   Minimum features:
-
-   - named suite, initially `mini`;
-   - 3-5 cases;
-   - first implement the roadmap's R14 lib-visible model/config seam, then use
-     it for model selection through `PTC_TEST_MODEL` / `--model`, resolved with
-     `PtcRunner.LLM.Registry` (what `LLM.callback/2` already uses). The mix task
-     lives under `lib/` and must not reference `test/support` — `LLMSupport`
-     only compiles in the test env, and CI dialyzer (MIX_ENV=test) would not
-     catch the leak; it breaks dev/prod compile instead. Do not create a second
-     live-eval env/key path;
-   - deterministic mock mode and optional live DeepSeek mode;
-   - markdown or JSON-ish report printed to stdout or written under
-     `reports/kernel_eval/` — gitignore that directory; summarized results
-     belong in these docs, not committed raw reports;
-   - per-case outcome, action count, eval count, and failure reason;
-   - sanitized action/eval trace, no raw API key or unsafe raw provider dump.
-     Before any live run, add a deterministic mock report test proving the
-     runner excludes raw API keys, raw provider dumps, and full prompt/message
-     payloads by default.
-
-5. **Mini case set**
-
-   Include cases beyond arithmetic:
-
-   - arithmetic/no context: `40 + 2`;
-   - context count/filter: small list in mission context, no domain benchmark
-     hints;
-   - simple aggregation over context data;
-   - model PTC-Lisp calls one safe domain tool;
-   - eval failure then retry: for live forcing, reuse the
-     rewrite-first-program wrapper already proven in
-     `test/ptc_runner/kernel/e2e_test.exs` (rewrite the first live tool-call
-     program to one without `return`, which forces the retry path
-     deterministically); scripted responses cover mock mode.
-
-   Keep cases tiny and cheap. Prefer generic data names like `items`, `rows`,
-   `events`, or `numbers`. Retry-behavior cases need headroom: set
-   `max_turns` to 4-6 for them instead of relying on the kernel default of 3.
-
-6. **DeepSeek live run**
-
-   Run only if `OPENROUTER_API_KEY` is available.
-
-   Probes:
-
-   - Does compact PTC-Lisp guidance improve `(return ...)` compliance?
-   - Does DeepSeek call `run_ptc_lisp` exactly once per turn on context tasks?
-   - Does it use context keys correctly?
-   - Can it call a granted domain tool from inside PTC-Lisp?
-   - Does feedback-policy variant A vs B change recovery after eval failure?
-   - How many turns and protocol errors occur per case?
-
-## Suggested Feedback Variants
-
-Wrap eval output in an untrusted envelope in **both** variants, and vary only
-the instruction wording. Two reasons:
-
-- `a0683eb8` already moved the embedded M1 retry feedback to a JSON envelope
-  with `untrusted_eval_result`; the M2 split must preserve that safer default
-  when moving feedback policy into preludes;
-- with the envelope held constant, A vs B is a single-variable comparison
-  (wording only), so an observed difference actually means something.
-
-Variant A: terse instruction
-
-```json
-{
-  "type": "ptc_lisp_eval_feedback",
-  "instruction": "Previous program did not return. Call run_ptc_lisp again with a corrected program that uses (return ...).",
-  "untrusted_eval_result": ...
-}
-```
-
-Variant B: structured instruction
-
-```json
-{
-  "type": "ptc_lisp_eval_feedback",
-  "instruction": "Previous PTC-Lisp program did not return successfully. Inspect untrusted_eval_result for the value, prints, or error, then call run_ptc_lisp again with a corrected program that ends in (return value).",
-  "untrusted_eval_result": ...
-}
-```
-
-The goal is not to prove statistical superiority. It is to prove that a policy
-swap is possible and measurable without changing Elixir loop logic.
-
-## Verification
-
-Run, in order:
-
-1. existing focused kernel tests;
-2. new prelude-split tests;
-3. new mini eval tests or runner in mock mode;
-4. `mix format`;
-5. deterministic report-redaction test;
-6. live DeepSeek mini run, if `OPENROUTER_API_KEY` is present;
-7. `mix precommit` if the spike touches normal repo code;
-8. `codex review` over the session's commits as the final gate — fix or
-   explicitly defer each finding in the final report.
-
-If `mix precommit` fails due unrelated incumbent issues, record the exact
-failure and the narrower passing commands.
-
-## Deliverables
-
-- Split or experimental prelude components for core/prompt/feedback.
-- A demonstrated policy swap with no Elixir loop-logic change.
-- A tiny repeatable mini eval path with 3-5 cases.
-- Deterministic test coverage for the prelude split and policy swap.
-- Live DeepSeek results or an explicit blocked note.
-- Updated docs:
-  - `architecture.md` verified facts/open decisions;
-  - `roadmap.md` M2 progress and remaining gaps;
-  - `spikes.md` result entries, especially S4/S8/S13-adjacent evidence.
-- Final report:
-  - what changed;
-  - commands run;
-  - mock results;
-  - live results;
-  - whether M2 should proceed, split into smaller spikes, or revise design.
-
-## Stop Conditions
-
-Stop and document evidence if:
-
-- cross-namespace prelude compilation cannot be made to work cleanly;
-- swapping prompt/feedback policy requires changing Elixir loop logic;
-- the prompt/feedback split makes the prelude substantially harder to read than
-  the embedded version;
-- DeepSeek cannot handle context/tool cases even with compact PTC-Lisp guidance;
-- mini eval starts growing into full Tier 2 before the prelude split is proven;
-- trace/report artifacts would require unsafe raw prompt/provider dumps by
-  default.
-
-## Non-Goals
-
-- Full benchmark/evaluation harness.
-- Statistical A/B claims.
-- Incumbent SubAgent parity.
-- Host-held memory decision.
-- Copy-volume or soak tests.
-- Replay cassettes.
-- Self-improving prelude-writing loop.
-
-## Future Self-Improvement Note
-
-This spike should leave behind artifacts a future prelude-improvement loop can
-consume:
-
-- prelude component source hashes;
-- rendered prompt/feedback variant names;
-- sanitized action/eval histories;
-- per-case failure reasons;
-- enough report structure for a future agent to suggest a prelude diff.
-
-Do not build that loop yet.
+## Baseline already proved
+
+- `agent.core`, `agent.prompt`, and `agent.feedback` are separate dotted
+  namespaces with explicit dependency edges.
+- Only `agent.core` holds `llm-complete`, `eval-program`, and `log` tool
+  references. Prompt and feedback components remain capability-free.
+- The loop is multi-turn, emits turn events, threads host-held callable memory,
+  and records bounded memory summaries.
+- Feedback-only source overrides change component hashes without changing
+  Elixir loop logic.
+- `PtcRunner.Kernel.Eval` is the blessed deterministic/live runner. Do not add
+  another Mix task, report type, oracle, or trace path.
+
+## Frozen scope
+
+M2 completes the modular-policy and informal-parity claim. It includes:
+
+1. exported prompt/feedback policy constants and feedback-owned truncation;
+2. a generated memory-boundary property plus canonical continuation-path docs;
+3. five canonical Tier 2 cases, fail-closed typed constraints, one seeded
+   dataset shared across cells, and a multi-turn cross-dataset case;
+4. kernel and incumbent adapters behind the same cases, oracles, trace
+   sanitizer, report schema, and CLI;
+5. persistent Markdown/JSON reports with dataset/model/repository/provenance,
+   aggregate pass rate, projected results, prompt/action hashes, and trace
+   integrity fields;
+6. preregistered paired live smoke evidence after the lifecycle gates pass.
+
+M2 does not include sessions, compaction, MCP, self-improvement, a parallel
+`agent.core`, public API stabilization, or a statistical performance claim.
+The measured incumbent SubAgent path must remain intact.
+
+## Canonical contracts
+
+### Cases and data
+
+Each Tier 2 case has `id`, `task`, `context_ref`, `context`, `expect`,
+`constraint`, `max_turns`, `tags`, and adapter fixtures used only in mock mode.
+The multi-turn memory case also declares `required_persistence`, which is
+verified from raw private turn traces before those traces are sanitized. The
+definition must be committed, and the terminal program must pass host-scored
+dependency checks without rereading the source employee dataset. The host
+replays the definition to verify the expected ID set as the turn's only change,
+then evaluates the terminal program against several program-derived ID subsets.
+Every returned total must match the host-computed expense total for that exact
+subset; a hard-coded branch, unchanged answer, or counterfactual error fails the
+persistence gate.
+The model-visible mission contains only `task` and `context`; it never receives
+the oracle, tags, fixture programs, or plan metadata.
+
+Generate the dataset once for a requested integer seed, share it unchanged
+across the selected cell, and record its hash. Paired reports are comparable
+only when the seed and dataset hash match.
+
+### Oracle
+
+Use `PtcRunner.Kernel.Eval.Oracle`. Unknown/missing expectation types and
+constraint tuples fail closed with stable reasons. Equality is exact; floating
+answers use ranges. Oracle failures are data in the report, not exceptions and
+not model-visible retry instructions.
+
+### Variants
+
+- `kernel` calls `PtcRunner.Kernel.run/2` through the native action protocol.
+- `incumbent` calls `PtcRunner.SubAgent.run/2` with explicit completion.
+
+Both use the same task, context, tools, maximum turns, oracle, dataset, model,
+trace sanitizer, and report writer. Variant-specific adapters may translate the
+mock or provider response envelope but may not change case semantics or rewrite
+model-authored programs.
+
+### Memory
+
+Kernel continuation memory stays owner-held and is never serialized between
+turns. Callable definitions use `Lisp.run_native/2` with
+`preserve_runtime_callables: true`; the public/JSON memory projection is
+observation-only. Any future parallel eval path remains excluded until R21
+defines atomic budgets and state ownership.
+
+### Reports and privacy
+
+Tier 2 and all live modes require a persistent report path. Reports include the
+seed, dataset hash, case-definition hash, model identity, provider, LLM source,
+evidence eligibility, commit, command options, component provenance visible in
+sanitized turns, per-case projected oracle and
+actual results, trace paths, hashes, integrity counters, and aggregate rates.
+Eligibility requires a live registry-backed, non-aborted, nonempty run from a
+valid clean Git commit.
+Raw prompts, responses, programs, tool results, memory values, and credentials
+remain excluded unless the existing explicit unsafe-debug path is selected.
+
+Offline execution replay from sanitized artifacts remains S8/S14 work: the M2
+artifact preserves audit/revalidation evidence but deliberately does not store
+raw model programs merely to make execution replay possible. Do not weaken the
+M1 redaction boundary to claim replay completeness.
+
+## Required sequence
+
+1. Keep deterministic mock tests green for both variants and all five Tier 2
+   cases.
+2. Complete R21/R22 decisions relevant to state ownership and explicitly keep
+   parallel behavior excluded where no decision exists.
+3. Pass S12 owner cleanup/invalidation/cap/concurrency checks and the remaining
+   S11 live-short HTTP lifecycle matrix before widening live runs.
+4. Use `experiments/m2-tier2-prereg.md` unchanged. Run the incumbent cell first,
+   then kernel, with the same seed/model. If the incumbent shakedown fails,
+   attribute the result to model/configuration before architecture.
+5. Record outcomes honestly, including infrastructure failure or "not run".
+6. Run standing quality gates and an independent clean review before commit.
+
+## Stop conditions
+
+Stop and update the roadmap rather than silently expanding scope if:
+
+- parity requires changing the task, context, oracle, or model between cells;
+- a raw secret or model program would enter the default report/trace;
+- implementation requires concurrent `eval-program` calls or non-atomic owner
+  state mutation;
+- the provider/model cannot complete the incumbent shakedown;
+- lifecycle measurements show unbounded process, memory, mailbox, trace, or
+  HTTP-pool growth.
+
+## Completion evidence
+
+M2 closes only when deterministic tests, the lifecycle prerequisites, both
+preregistered live cells, standing gates, documentation, and independent review
+are all clean. The live smoke bar is at least 3/5 in each cell and remains an
+informal capability observation rather than a claim.

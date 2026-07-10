@@ -422,6 +422,12 @@ defmodule PtcRunner.TraceLog.TurnLogIntegrationTest do
                t["committed"] == false and is_map(t["data"]["fail"]) and
                  t["data"]["fail"]["reason"]
              end)
+
+      assert Enum.map(turns, &{&1["turn"], &1["attempt"], &1["committed"]}) == [
+               {0, 1, false},
+               {0, 2, false},
+               {1, 3, true}
+             ]
     end
   end
 
@@ -470,11 +476,13 @@ defmodule PtcRunner.TraceLog.TurnLogIntegrationTest do
         end)
 
       assert turn["data"]["memory_diff"]["changed_keys"] == ["answer"]
-      assert turn["data"]["memory_diff"]["values"]["answer"] == 42
+      refute Map.has_key?(turn["data"]["memory_diff"], "values")
+      refute Map.has_key?(turn["data"]["memory_diff"], "value_hashes")
+
       assert turn["data"]["preludes"] == []
     end
 
-    test "memory diff values externalize native Lisp keywords", %{tmp_dir: dir} do
+    test "memory diffs omit native Lisp keyword values and fingerprints", %{tmp_dir: dir} do
       [turn] =
         session_turn_events(dir, "keyword-memdiff", fn ->
           session = Session.new(session_id: "sess-K")
@@ -482,7 +490,64 @@ defmodule PtcRunner.TraceLog.TurnLogIntegrationTest do
         end)
 
       assert turn["data"]["memory_diff"]["changed_keys"] == ["m"]
-      assert turn["data"]["memory_diff"]["values"]["m"]["page"]["parse"] == "jsonl"
+      refute Map.has_key?(turn["data"]["memory_diff"], "values")
+      refute Map.has_key?(turn["data"]["memory_diff"], "value_hashes")
+    end
+
+    test "SubAgent memory diffs use effective memory after rollback", %{tmp_dir: dir} do
+      path = Path.join(dir, "subagent-rollback.jsonl")
+
+      llm =
+        mock_llm([
+          "```clojure\n(def rolled-back (tool/get-large {}))\n```",
+          "```clojure\n(return :ok)\n```"
+        ])
+
+      tools = %{"get-large" => fn %{} -> String.duplicate("x", 300) end}
+
+      assert {:ok, {:ok, _step}, ^path} =
+               TraceLog.with_trace(
+                 fn ->
+                   SubAgent.run("Recover after rollback.",
+                     llm: llm,
+                     tools: tools,
+                     memory_limit: 200,
+                     memory_strategy: :rollback,
+                     max_turns: 2
+                   )
+                 end,
+                 path: path
+               )
+
+      assert [rolled_back, completed] = path |> Analyzer.load() |> Analyzer.turn_events()
+      assert rolled_back["committed"] == false
+      assert rolled_back["data"]["memory_diff"] == nil
+      assert completed["committed"] == true
+      assert completed["data"]["memory_diff"] == nil
+    end
+
+    test "continuation-guard stops trace the adopted result memory", %{tmp_dir: dir} do
+      path = Path.join(dir, "subagent-guard-memory.jsonl")
+
+      guard = fn _turn, _state, _next_state ->
+        {:stop, {:error, PtcRunner.Step.error(:partial_side_effects, "guarded", %{"guard" => 2})}}
+      end
+
+      assert {:ok, {:error, step}, ^path} =
+               TraceLog.with_trace(
+                 fn ->
+                   SubAgent.run("Define state.",
+                     llm: mock_llm(["(def x 1)"]),
+                     continuation_guard: guard,
+                     max_turns: 2
+                   )
+                 end,
+                 path: path
+               )
+
+      assert step.memory == %{"guard" => 2}
+      assert [turn] = path |> Analyzer.load() |> Analyzer.turn_events()
+      assert turn["data"]["memory_diff"]["changed_keys"] == ["guard"]
     end
 
     test "result previews render native Lisp keyword returns", %{tmp_dir: dir} do
