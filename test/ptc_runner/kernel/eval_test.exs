@@ -107,6 +107,17 @@ defmodule PtcRunner.Kernel.EvalTest do
     refute traces =~ "changed_keys"
 
     decoded = Jason.decode!(json)
+
+    assert decoded["cases"] |> hd() |> Map.fetch!("expected_result") == %{
+             "type" => "integer",
+             "value" => 250
+           }
+
+    assert decoded["cases"] |> hd() |> Map.fetch!("actual_result") == %{
+             "type" => "integer",
+             "value" => 250
+           }
+
     assert decoded["cases"] |> hd() |> Map.fetch!("inner_prelude_call_counts") == %{}
     assert is_list(decoded["cases"] |> hd() |> Map.fetch!("preludes"))
     assert is_list(decoded["cases"] |> hd() |> Map.fetch!("inner_preludes"))
@@ -121,6 +132,43 @@ defmodule PtcRunner.Kernel.EvalTest do
 
     assert {:error, {:report_required, "mini"}} =
              Eval.run(suite: "mini", mode: :live, variant: "kernel")
+
+    assert {:error, {:report_required, "smoke"}} =
+             Eval.run_cases(Eval.smoke_cases(), suite: "smoke", mode: :mock)
+  end
+
+  test "trace-integrity loss fails the report even when the oracle passed" do
+    report = %{
+      cases: [
+        %{status: :pass, expected_turns: 1, actual_turns: 0, write_errors: 0}
+      ]
+    }
+
+    refute Eval.passed?(report)
+    assert Eval.failure_count(report) == 1
+  end
+
+  @tag :tmp_dir
+  test "failed runs leave neither raw nor published persistent traces", %{tmp_dir: dir} do
+    assert_raise BadMapError, fn ->
+      Eval.run_cases(
+        [
+          %{
+            id: "crash",
+            task: "Return one.",
+            context: %{},
+            expected: 1,
+            max_turns: 1,
+            mock_programs: ["(return 1)"]
+          }
+        ],
+        mode: :mock,
+        trace_dir: dir,
+        prelude_source_overrides: :invalid
+      )
+    end
+
+    assert Path.wildcard(Path.join(dir, "*")) == []
   end
 
   test "default markdown report is sanitized" do

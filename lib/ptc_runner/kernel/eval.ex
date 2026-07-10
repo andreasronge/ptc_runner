@@ -28,22 +28,17 @@ defmodule PtcRunner.Kernel.Eval do
   @spec run(keyword()) :: {:ok, result()} | {:error, term()}
   def run(opts \\ []) do
     suite = Keyword.get(opts, :suite, "mini")
-    mode = Keyword.get(opts, :mode, :mock)
     variant = Keyword.get(opts, :variant, "kernel")
 
     with :ok <- validate_suite(suite),
          :ok <- validate_variant(variant),
-         :ok <- validate_report_contract(suite, mode, Keyword.get(opts, :report)),
-         {:ok, cases} <- select_cases(suite, Keyword.get(opts, :case)),
-         {:ok, report} <-
-           run_cases(
-             cases,
-             opts
-             |> Keyword.put(:suite, suite)
-             |> Keyword.put(:variant, variant)
-           ),
-         :ok <- maybe_write_report(report, Keyword.get(opts, :report)) do
-      {:ok, report}
+         {:ok, cases} <- select_cases(suite, Keyword.get(opts, :case)) do
+      run_cases(
+        cases,
+        opts
+        |> Keyword.put(:suite, suite)
+        |> Keyword.put(:variant, variant)
+      )
     end
   end
 
@@ -56,7 +51,8 @@ defmodule PtcRunner.Kernel.Eval do
     variant = Keyword.get(opts, :variant, "kernel")
     requested_model = requested_model(mode, Keyword.get(opts, :model))
 
-    with :ok <- validate_runs(runs),
+    with :ok <- validate_report_contract(suite, mode, Keyword.get(opts, :report)),
+         :ok <- validate_runs(runs),
          :ok <- validate_variant(variant),
          {:ok, model} <- resolve_model(mode, Keyword.get(opts, :model)) do
       results =
@@ -65,19 +61,20 @@ defmodule PtcRunner.Kernel.Eval do
           run_case(eval_case, run_index, mode, model, opts)
         end
 
-      {:ok,
-       %{
-         suite: suite,
-         mode: mode,
-         variant: variant,
-         requested_model: requested_model,
-         model: model,
-         provider: provider(model),
-         commit: commit(),
-         command_options: command_options(opts, suite, mode, variant, requested_model),
-         runs: runs,
-         cases: results
-       }}
+      report = %{
+        suite: suite,
+        mode: mode,
+        variant: variant,
+        requested_model: requested_model,
+        model: model,
+        provider: provider(model),
+        commit: commit(),
+        command_options: command_options(opts, suite, mode, variant, requested_model),
+        runs: runs,
+        cases: results
+      }
+
+      with :ok <- maybe_write_report(report, Keyword.get(opts, :report)), do: {:ok, report}
     end
   end
 
@@ -95,7 +92,7 @@ defmodule PtcRunner.Kernel.Eval do
       }) do
     rows =
       Enum.map(cases, fn case_result ->
-        "| #{case_result.run} | #{case_result.case} | #{case_result.status} | #{case_result.action_count} | #{case_result.eval_count} | #{case_result.expected_turns} | #{case_result.actual_turns} | #{case_result.dropped_turns} | #{case_result.unexpected_turns} | #{case_result.write_errors} | #{case_result.failure_reason || ""} |"
+        "| #{case_result.run} | #{case_result.case} | #{case_result.status} | #{render_result(case_result.expected_result)} | #{render_result(case_result.actual_result)} | #{case_result.action_count} | #{case_result.eval_count} | #{case_result.expected_turns} | #{case_result.actual_turns} | #{case_result.dropped_turns} | #{case_result.unexpected_turns} | #{case_result.write_errors} | #{case_result.failure_reason || ""} |"
       end)
 
     """
@@ -110,8 +107,8 @@ defmodule PtcRunner.Kernel.Eval do
     commit: #{commit}
     runs: #{runs}
 
-    | run | case | status | actions | evals | expected turns | actual turns | dropped | unexpected | write errors | failure |
-    | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+    | run | case | status | expected result | actual result | actions | evals | expected turns | actual turns | dropped | unexpected | write errors | failure |
+    | --- | --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
     #{Enum.join(rows, "\n")}
     """
     |> String.trim()
@@ -119,12 +116,12 @@ defmodule PtcRunner.Kernel.Eval do
 
   @spec passed?(result()) :: boolean()
   def passed?(%{cases: cases}) when is_list(cases) do
-    Enum.all?(cases, &(&1.status == :pass))
+    Enum.all?(cases, &case_passed?/1)
   end
 
   @spec failure_count(result()) :: non_neg_integer()
   def failure_count(%{cases: cases}) when is_list(cases) do
-    Enum.count(cases, &(&1.status != :pass))
+    Enum.count(cases, &(not case_passed?(&1)))
   end
 
   @spec mini_cases() :: [map()]
@@ -331,32 +328,43 @@ defmodule PtcRunner.Kernel.Eval do
         |> Keyword.put(:events, &record_event(events, Keyword.get(opts, :unsafe_debug_agent), &1))
 
       trace_path = trace_path(eval_case, run_index, opts)
+      raw_trace_path = temporary_trace_path(trace_path, "raw")
+      sanitized_trace_path = temporary_trace_path(trace_path, "sanitized")
 
-      {:ok, result, trace_metadata} =
-        TraceLog.with_trace(fn -> KernelRunner.run(mission(eval_case), kernel_opts) end,
-          path: trace_path,
-          trace_kind: "kernel_eval",
-          producer: "ptc.kernel_eval",
-          trace_label: "#{eval_case.id}-#{run_index}",
-          model: model,
-          return_metadata: true
+      try do
+        {:ok, result, trace_metadata} =
+          TraceLog.with_trace(fn -> KernelRunner.run(mission(eval_case), kernel_opts) end,
+            path: raw_trace_path,
+            trace_kind: "kernel_eval",
+            producer: "ptc.kernel_eval",
+            trace_label: "#{eval_case.id}-#{run_index}",
+            model: model,
+            return_metadata: true
+          )
+
+        sanitize_persistent_trace!(raw_trace_path, sanitized_trace_path)
+        File.rename!(sanitized_trace_path, trace_path)
+        trace_metadata = %{trace_metadata | path: trace_path}
+
+        sanitized_events = Agent.get(events, &Enum.reverse/1)
+        recorded_prompt_hashes = Agent.get(prompt_hashes, &Enum.reverse/1)
+
+        unsafe_trace = unsafe_trace(Keyword.get(opts, :unsafe_debug_agent))
+
+        build_case_result(
+          eval_case,
+          run_index,
+          result,
+          sanitized_events,
+          unsafe_trace,
+          trace_metadata,
+          recorded_prompt_hashes,
+          started
         )
-
-      sanitized_events = Agent.get(events, &Enum.reverse/1)
-      recorded_prompt_hashes = Agent.get(prompt_hashes, &Enum.reverse/1)
-
-      unsafe_trace = unsafe_trace(Keyword.get(opts, :unsafe_debug_agent))
-
-      build_case_result(
-        eval_case,
-        run_index,
-        result,
-        sanitized_events,
-        unsafe_trace,
-        trace_metadata,
-        recorded_prompt_hashes,
-        started
-      )
+      after
+        File.rm(raw_trace_path)
+        File.rm(sanitized_trace_path)
+      end
     after
       cleanup_llm.()
       stop_agent(events)
@@ -471,7 +479,6 @@ defmodule PtcRunner.Kernel.Eval do
         {:error, _other} -> {:fail, nil, "kernel_error"}
       end
 
-    sanitize_persistent_trace!(trace_metadata.path)
     persisted_events = Analyzer.load(trace_metadata.path)
 
     kernel_turns =
@@ -483,11 +490,24 @@ defmodule PtcRunner.Kernel.Eval do
     actual_turns = length(kernel_turns)
     evidence = turn_evidence(kernel_turns)
 
+    dropped_turns = max(expected_turns - actual_turns, 0)
+    unexpected_turns = max(actual_turns - expected_turns, 0)
+
+    {status, failure_reason} =
+      if status == :pass and
+           (trace_metadata.write_errors > 0 or dropped_turns > 0 or unexpected_turns > 0) do
+        {:fail, "trace_integrity_failure"}
+      else
+        {status, failure_reason}
+      end
+
     Map.merge(evidence, %{
       run: run_index,
       case: eval_case.id,
       status: status,
       value: value,
+      expected_result: project_result(Map.get(eval_case, :expected)),
+      actual_result: project_result(value),
       failure_reason: failure_reason,
       action_count: Enum.count(events, &(&1.event == "action")),
       eval_count: Enum.count(events, &(&1.event == "eval")),
@@ -501,8 +521,8 @@ defmodule PtcRunner.Kernel.Eval do
         Enum.map(kernel_turns, &get_in(&1, ["data", "program_hash"])) |> Enum.reject(&is_nil/1),
       expected_turns: expected_turns,
       actual_turns: actual_turns,
-      dropped_turns: max(expected_turns - actual_turns, 0),
-      unexpected_turns: max(actual_turns - expected_turns, 0)
+      dropped_turns: dropped_turns,
+      unexpected_turns: unexpected_turns
     })
   end
 
@@ -650,14 +670,14 @@ defmodule PtcRunner.Kernel.Eval do
     end)
   end
 
-  defp sanitize_persistent_trace!(path) do
+  defp sanitize_persistent_trace!(source_path, destination_path) do
     sanitized =
-      path
+      source_path
       |> Analyzer.load()
       |> Enum.map(&sanitize_persisted_event/1)
       |> Enum.map_join(&(Jason.encode!(&1) <> "\n"))
 
-    File.write!(path, sanitized)
+    File.write!(destination_path, sanitized)
   end
 
   defp sanitize_persisted_event(%{"event" => "turn", "data" => data} = event)
@@ -713,6 +733,10 @@ defmodule PtcRunner.Kernel.Eval do
     Path.join(trace_dir, "#{eval_case.id}-run-#{run_index}.jsonl")
   end
 
+  defp temporary_trace_path(path, kind) do
+    "#{path}.#{kind}-#{System.unique_integer([:positive, :monotonic])}"
+  end
+
   defp maybe_write_report(_report, nil), do: :ok
 
   defp maybe_write_report(report, path) when is_binary(path) do
@@ -758,9 +782,37 @@ defmodule PtcRunner.Kernel.Eval do
       requested_model: requested_model,
       runs: Keyword.get(opts, :runs, 1),
       case: Keyword.get(opts, :case),
-      trace_dir: Keyword.get(opts, :trace_dir)
+      trace_dir: Keyword.get(opts, :trace_dir),
+      report: Keyword.get(opts, :report)
     }
   end
+
+  defp case_passed?(case_result) do
+    case_result.status == :pass and case_result.write_errors == 0 and
+      case_result.expected_turns == case_result.actual_turns
+  end
+
+  defp project_result(value) when is_integer(value), do: %{type: "integer", value: value}
+  defp project_result(value) when is_float(value), do: %{type: "float", value: value}
+  defp project_result(value) when is_boolean(value), do: %{type: "boolean", value: value}
+  defp project_result(nil), do: %{type: "nil", value: nil}
+
+  defp project_result(value) when is_binary(value),
+    do: %{type: "string", bytes: byte_size(value), hash: hash_term(value)}
+
+  defp project_result(value) when is_list(value),
+    do: %{type: "list", count: length(value), hash: hash_term(value)}
+
+  defp project_result(value) when is_map(value),
+    do: %{type: "map", count: map_size(value), hash: hash_term(value)}
+
+  defp project_result(value), do: %{type: value_type(value), hash: hash_term(value)}
+
+  defp value_type(value) when is_atom(value), do: "atom"
+  defp value_type(value) when is_tuple(value), do: "tuple"
+  defp value_type(_value), do: "other"
+
+  defp render_result(projection), do: Jason.encode!(projection)
 
   defp duration_ms(started) do
     System.monotonic_time()

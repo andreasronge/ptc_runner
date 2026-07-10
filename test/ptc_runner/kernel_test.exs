@@ -1305,8 +1305,8 @@ defmodule PtcRunner.KernelTest do
       assert {:error,
               %{
                 reason: "invalid_kernel_option",
-                option: "inner_preludes",
-                value_type: "nil"
+                option: "role_policy",
+                value_type: "map"
               }} =
                Kernel.run(%{"task" => "compute"},
                  llm: llm,
@@ -1423,8 +1423,8 @@ defmodule PtcRunner.KernelTest do
     assert {:error,
             %{
               reason: "invalid_kernel_option",
-              option: "inner_preludes",
-              value_type: "nil"
+              option: "role_policy",
+              value_type: "map"
             }} =
              Kernel.run(%{"task" => "compute"},
                llm: llm,

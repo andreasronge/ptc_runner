@@ -64,7 +64,34 @@ defmodule PtcRunner.Kernel.M1GateTest do
     assert_preflight(:private_capabilities, %{"x" => private, x: private}, "duplicate_name")
     assert_preflight(:private_capabilities, %{"llm-complete" => private}, "reserved_name")
     assert_preflight(:private_capabilities, %{123 => private}, "invalid_name")
+    huge_name = String.duplicate("x", 1_000)
+
+    assert {:error, error} =
+             Kernel.run(%{"task" => "test"},
+               llm: fn _ -> flunk("LLM must not run") end,
+               private_capabilities: %{huge_name => private}
+             )
+
+    assert error.detail == "invalid_name"
+    assert byte_size(error.capability) <= 128
+
     assert_preflight(:private_capabilities, %{"x" => fn _ -> :no end}, "invalid_format")
+
+    for options <- [
+          [signature: "not a signature", visibility: :private],
+          [description: 42, visibility: :private],
+          [cache: :yes, visibility: :private],
+          [expose: :unknown, visibility: :private],
+          [expose: :both, cache: true, native_result: [preview: :metadata], visibility: :private],
+          [native_result: :bad, visibility: :private],
+          [visibility: :private, visibility: :private]
+        ] do
+      assert_preflight(
+        :private_capabilities,
+        %{"x" => {fn _ -> :no end, options}},
+        "malformed_options"
+      )
+    end
 
     assert_preflight(
       :private_capabilities,
@@ -117,7 +144,7 @@ defmodule PtcRunner.Kernel.M1GateTest do
         prelude_source_overrides: %{"agent.core" => core}
       )
 
-    assert {:error, %{"reason" => _reason}} = result, inspect(result)
+    assert {:error, %{"reason" => "unknown_tool"}} = result, inspect(result)
 
     assert_received {:tool_names, ["run_ptc_lisp"]}
   end

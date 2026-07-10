@@ -15,6 +15,7 @@ defmodule PtcRunner.Kernel do
   alias PtcRunner.PreludeRuntime
   alias PtcRunner.Step
   alias PtcRunner.Step.Public
+  alias PtcRunner.SubAgent.Signature
   alias PtcRunner.SymbolInventory
   alias PtcRunner.Tool
   alias PtcRunner.TraceContext
@@ -30,13 +31,12 @@ defmodule PtcRunner.Kernel do
   @summary_entry_limit 8
   @summary_preview_chars 160
   @private_capability_name ~r/\A[A-Za-z][A-Za-z0-9_.\/-]*\z/
+  @private_capability_name_max 128
   @reserved_capabilities MapSet.new(["llm-complete", "eval-program", "log"])
   @private_capability_options [
     :signature,
     :description,
     :cache,
-    :expose,
-    :native_result,
     :visibility
   ]
 
@@ -469,8 +469,12 @@ defmodule PtcRunner.Kernel do
 
   defp valid_capability_names(entries, original) do
     case Enum.find(entries, fn
-           {{:ok, name}, _raw, _format} -> not Regex.match?(@private_capability_name, name)
-           {:error, _raw, _format} -> true
+           {{:ok, name}, _raw, _format} ->
+             byte_size(name) > @private_capability_name_max or
+               not Regex.match?(@private_capability_name, name)
+
+           {:error, _raw, _format} ->
+             true
          end) do
       nil -> :ok
       {{:ok, name}, _raw, _format} -> private_capability_error(original, name, "invalid_name")
@@ -511,6 +515,9 @@ defmodule PtcRunner.Kernel do
       not is_function(tool.function, 1) ->
         private_capability_error(original, name, "invalid_arity")
 
+      not valid_private_tool_fields?(tool) ->
+        private_capability_error(original, name, "malformed_options")
+
       not Tool.private?(tool) ->
         private_capability_error(original, name, "not_private")
 
@@ -528,6 +535,9 @@ defmodule PtcRunner.Kernel do
       Keyword.keys(options) -- @private_capability_options != [] ->
         private_capability_error(original, name, "malformed_options")
 
+      not valid_private_capability_options?(options) ->
+        private_capability_error(original, name, "malformed_options")
+
       true ->
         normalize_private_tool(name, format, original)
     end
@@ -538,6 +548,35 @@ defmodule PtcRunner.Kernel do
 
   defp normalize_private_capability(name, _format, original),
     do: private_capability_error(original, name, "invalid_format")
+
+  defp valid_private_capability_options?(options) do
+    keys = Keyword.keys(options)
+
+    length(keys) == length(Enum.uniq(keys)) and
+      valid_private_signature?(Keyword.get(options, :signature)) and
+      valid_optional_binary?(Keyword.get(options, :description)) and
+      valid_boolean?(Keyword.get(options, :cache, false))
+  end
+
+  defp valid_private_signature?(nil), do: true
+
+  defp valid_private_signature?(signature) when is_binary(signature),
+    do: match?({:ok, _}, Signature.parse(signature))
+
+  defp valid_private_signature?(_signature), do: false
+
+  defp valid_optional_binary?(nil), do: true
+  defp valid_optional_binary?(value), do: is_binary(value)
+
+  defp valid_boolean?(value), do: is_boolean(value)
+
+  defp valid_private_tool_fields?(tool) do
+    valid_private_signature?(tool.signature) and
+      valid_optional_binary?(tool.description) and
+      valid_boolean?(tool.cache) and
+      is_nil(tool.expose) and
+      is_nil(tool.native_result)
+  end
 
   defp normalize_private_tool(name, format, original) do
     case Tool.new(name, format) do
@@ -564,6 +603,9 @@ defmodule PtcRunner.Kernel do
       value_type: value_type(original),
       detail: detail
     }
+
+    capability =
+      if is_binary(capability), do: String.slice(capability, 0, @private_capability_name_max)
 
     {:error, if(capability, do: Map.put(error, :capability, capability), else: error)}
   end
@@ -594,14 +636,20 @@ defmodule PtcRunner.Kernel do
     if Keyword.has_key?(opts, :inner_preludes), do: :inner_preludes, else: :role_policy
   end
 
-  defp preflight_option(%{reason: :invalid_inner_prelude}, _opts), do: :inner_preludes
+  defp preflight_option(%{reason: :invalid_inner_prelude}, opts) do
+    if Keyword.has_key?(opts, :inner_preludes), do: :inner_preludes, else: :role_policy
+  end
 
   defp preflight_option(%{reason: "invalid_symbol_inventory_renderer"}, _opts),
     do: :symbol_inventory_renderer
 
   defp preflight_option(%{reason: reason}, opts)
        when reason in [:invalid_prelude_ref, :prelude_not_granted] do
-    if Keyword.has_key?(opts, :inner_preludes), do: :inner_preludes, else: :preludes
+    cond do
+      Keyword.has_key?(opts, :inner_preludes) -> :inner_preludes
+      Keyword.has_key?(opts, :preludes) -> :preludes
+      true -> :role_policy
+    end
   end
 
   defp preflight_option(_error, _opts), do: :kernel_configuration
