@@ -424,7 +424,15 @@ callers fail closed; trace/report rendering includes bounded metadata.
 **Fail.** The kernel must hardcode the new capability, private visibility is
 lost, or trace/report attribution cannot distinguish extension tools.
 
-**Result.** _pending_
+**Result.** PARTIAL PASS for the M1 extension mechanism, 2026-07-10.
+`Kernel.run/2` accepts only normalized native one-arity private `%Tool{}` or
+`{fun, opts}` entries, rejects invalid/reserved/duplicate names and malformed
+or public formats before owners/model access, and merges the result only into
+the trusted outer tool map. A source-override boundary test proves an inferred
+`agent.core` `tool_ref` can invoke the extension while the provider sees only
+`run_ptc_lisp` and the inner program receives `unknown_tool`. Dedicated trace
+attribution for the extension call remains unproven, so the broader S10 spike
+and roadmap checkbox stay open.
 
 ---
 
@@ -462,7 +470,29 @@ with configured caps.
 benchmark metrics, stale TraceContext state after failures, or degraded HTTP
 pool health.
 
-**Result.** _pending_
+**Result.** PASS for the autonomous M1 mock cells, 2026-07-10. The first
+required run exposed a deterministic four-atoms-per-mission leak caused by
+recompiling the unchanged embedded `agent.*` bundle. The fix series beginning
+at `a4408b0f` and finalized for the cache in `3329b51d` keeps that immutable
+default artifact in a source-versioned runtime cache while preserving dynamic
+source overrides, clean compilation, and role-backed loop/inner resolution.
+Final M1 evidence was refreshed at `b3427fad`. In that final run:
+
+- untraced 25/1,000 churn held processes at 188 -> 188, total memory at
+  98.58 MB -> 98.72 MB and binary memory at 9.02 MB -> 9.02 MB. Because this
+  cell ran first, it absorbed the 79-atom lazy instrumentation delta while the
+  asserted steady-state rate remained <= 0.1/iteration;
+- traced 10/100 churn held processes at 188 -> 188, total memory at
+  98.88 MB -> 99.01 MB, binary memory at 9.03 MB -> 9.03 MB, and atoms at
+  36,523 -> 36,523. It persisted exactly 100/100
+  kernel turns and recorded zero write errors, drops, or unexpected turns;
+  every collector was monitored to termination and trace context/sinks were
+  empty after every iteration.
+
+Command: `PTC_SOAK_ITERATIONS=1000 mix test
+test/soak/kernel_soak_test.exs --only soak --warnings-as-errors`. This proves the required mock
+lifecycle cells only; it does not claim live HTTP cancellation/pool soak or
+provider stability.
 
 ---
 
@@ -713,7 +743,15 @@ transitive dependencies bypass validation; memory and the frozen artifact do
 not coexist across turns; or honest invocation accounting requires an
 unbounded/incorrect ledger.
 
-**Result.** _pending_
+**Result.** PASS, 2026-07-10. The separately authorized loop and inner
+PreludeStore closures are frozen independently; inner exports remain the only
+model-callable prelude surface, with `runtime: nil` and `discovery_exec: nil`.
+Direct/transitive authority violations fail before model access, cross-turn
+callables retain their inner artifact, and canonical/ephemeral evidence keeps
+loop provenance, inner provenance/projection, and evaluator invocation counts
+separate and source-free. The post-M1 shared-path rerun passed 142 focused
+tests plus the six-case deterministic mini suite. No domain-effectiveness
+experiment ran.
 
 ---
 

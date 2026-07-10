@@ -441,7 +441,8 @@ questions, use [`autonomous-spike.md`](autonomous-spike.md) as the goal brief.
   capability outside the hardcoded `llm-complete`/`eval-program`/`log` trio;
   a prelude export can call it, model/user code cannot, and the kernel traces
   it without source edits.
-- [ ] **S11 — Kernel-shaped soak**: 1,000 mock turns plus a smaller live-short
+- [ ] **S11 — Kernel-shaped soak**: M1's 1,000 untraced + 100 traced mock cells
+  passed on 2026-07-10; the broader registered spike still includes live-short
   HTTP matrix; record process/memory/reduction deltas, collector mailbox/drop
   counts, stale TraceContext state, pmap worker cleanup, atomics slots, and
   Req/Finch pool health.
@@ -517,25 +518,35 @@ one mission, mock-llm tests, one live smoke.
 - [x] `agent.core` prelude v0: single-turn mission — render prompt, one
   `llm-complete`, accept exactly one `run_ptc_lisp` action, one `eval-program`,
   return/fail.
-- [ ] Tier 0 suite: scripted llm lambdas covering happy path, unparseable
+- [x] Tier 0 suite: scripted llm lambdas covering happy path, unparseable
   response/protocol error, program `fail`, LLM budget exhaustion, outer deadline
   kill, private-capability authorization, inner eval isolation, redacted
   tracing, untrusted envelope, golden prompt hygiene, extension-contract smoke,
-  turn-event shape parity. Partial M1 spike coverage landed for happy path,
-  protocol retry, action hardening, transport error, caller-supplied system
-  prompt channel, adapter-boundary retry message structification, JSON
-  untrusted eval feedback, program `fail`, private capability denial, bounded
-  projection, and prompt hygiene; budget/deadline/trace parity remain.
+  turn-event shape parity. Closed 2026-07-10 by the series from `a4408b0f`
+  through `b3427fad`: the focused M1 suite now pins positive execution/LLM
+  limits, atomic LLM-slot exhaustion,
+  timeout/runtime-heap/setup-heap envelopes, normalized source-free preflight
+  errors, private outer capability validation/authorization and inner denial,
+  transport redaction, plus the already-green protocol, S21 isolation,
+  provenance, hygiene, projection, and shared-driver parity coverage.
 - [x] Tier 1 smoke file with a tiny no-tool arithmetic mission live on the
   blessed command, plus a two-turn live retry smoke that forces the
-  assistant/tool-message transport path. The original eval-case #1
-  product-count oracle remains for the later Tier 2 harness.
-- [ ] First `mix ptc.kernel_eval --suite smoke --runs 5 --variant kernel`
-  run recorded (Tier 2, kernel variant only — the task can exist in minimal
-  form this early).
+  assistant/tool-message transport path. The Tier 2 harness separately uses
+  the required 500-record integer-count oracle.
+- [x] First `mix ptc.kernel_eval --suite smoke --runs 5 --variant kernel`
+  run recorded (Tier 2, kernel variant only). On 2026-07-10 the blessed live
+  command passed 5/5 using requested alias `deepseek`, resolved model
+  `openrouter:deepseek/deepseek-v4-flash`, at commit `b3427fad`; all runs
+  returned the expected integer `250`, had expected=actual=1 canonical turn,
+  and recorded zero write, drop, or unexpected counts. Exact prompt, action,
+  bundle, and component hashes are recorded in architecture fact 20 and the
+  sanitized Markdown/JSON report pair.
 - [ ] Gate: standing gates + Tier 0 green + Tier 1 passes + Tier-2 smoke
   records ≥ 4/5 on case #1 + S11 mock soak shows no unbounded process/memory/
-  trace accumulation.
+  trace accumulation. All implementation, deterministic, live, soak,
+  redaction, and documentation evidence passed on 2026-07-10; final
+  `mix prepush` and a clean post-fix independent review remain before this
+  checkbox closes.
 
 ## M2 — Multi-turn + prelude split
 

@@ -425,6 +425,62 @@ Claims above rest on these, checked 2026-07-07 on `main`:
     per-symbol distinction that caused the C probe failure: value symbols are
     used directly, while only function symbols are called. This is a prompt
     policy fix, not a runtime change; `(data/x)` is still not made callable.
+19. M1 host-boundary evidence, 2026-07-10: `Kernel.run/2` validates positive
+    `max_turns`/`max_llm_calls` and execution limits before owner/model work;
+    claims every provider slot with one `Agent.get_and_update/2`; emits
+    exhausted calls as uncommitted `budget_exhausted` turns; accepts only
+    normalized native one-arity private outer capabilities; and presents
+    bounded, JSON-safe public preflight/sandbox/mission failure classes. The
+    embedded default loop bundle is cached once per source version at runtime,
+    eliminating a measured four-atoms-per-run leak without introducing a
+    compiler-order dependency or changing role-backed/S21 inner-artifact
+    resolution.
+20. M1 recorded-smoke evidence, 2026-07-10: the existing
+    `mix ptc.kernel_eval` path accepts only `--variant kernel` before M2. Its
+    deterministic smoke suite contains one 500-record integer-count oracle;
+    smoke/live runs require a Markdown report and JSON twin; each case uses a
+    persistent `TraceLog.with_trace/2` collector and records requested/resolved
+    model identity, provider, commit, command options, prompt/action hashes,
+    loop and inner evidence, result, trace path, and write/drop/unexpected
+    counts. Raw collector output is written only to an ephemeral path; the
+    linked eval JSONL projection atomically publishes program, result, print,
+    and host-memory content as hashes/counts while retaining canonical turn
+    and S21 evidence. Model-controlled failure reasons are reduced to a fixed
+    class plus SHA-256 evidence in both the linked trace and report. Trace loss
+    fails the gate. The final live run at `b3427fad`
+    used `deepseek` ->
+    `openrouter:deepseek/deepseek-v4-flash` and passed 5/5 with five expected
+    and five persisted turns and all loss/error counts zero. Its loop bundle
+    source hash was
+    `16818dbdb9a30df0ed351e69c838f15b12571586fe7e687aebe637524023abb1`;
+    component source hashes were prompt
+    `82bcd82d41d84580466531351c8750214a9945ef5bd5492da52742a82da0d746`,
+    feedback
+    `f9fa94089cb08d86a2de97d17047f5f48c7228b8176328ee77757578e1b5a223`,
+    and core
+    `7465d62ddc39b73969860acd45604bccbb3537aa2962ce662430d98cd5ed429a`.
+    All five prompt hashes were
+    `c6e520b93b7af8ab87c18a157ac2103fb1f6c1e2445095c6b05e70e60378bb26`;
+    action hashes by run were
+    `2d66ca26fdd32d22f11b54f5b35e67fa6054d6b528fa5d592740beecd981fad3`,
+    `f016a3c584e88ca2e1ce33a89e635afc6c02b28fcd9c42620f6a1938a392e651`,
+    `d87bca1f8bdf052a1435b1f6b41b4bff56ec5fa724196667e0161a1511d3b5a2`,
+    `355186ec945533b02d0550b456a2938553c380b3bf8f4943bfa6dd843b92acbb`,
+    and
+    `d87bca1f8bdf052a1435b1f6b41b4bff56ec5fa724196667e0161a1511d3b5a2`.
+    Exact live commands were
+    `mix test test/ptc_runner/kernel/e2e_test.exs --include e2e` (2/2) and
+    `mix ptc.kernel_eval --suite smoke --live --runs 5 --variant kernel
+    --model deepseek --report reports/kernel_eval/m1-kernel-smoke.md
+    --trace-dir reports/kernel_eval/m1-kernel-smoke-traces --allow-failures`
+    (5/5).
+21. M1 lifecycle evidence, 2026-07-10: the S11 mock soak passed 25/1,000
+    untraced and 10/100 traced owner lifecycles. Both cells returned to the
+    same 188-process baseline, total/binary memory stayed flat within the
+    declared bounds, steady-state atom growth passed the strict 0.1/iteration
+    ceiling, traced expected/actual
+    turns were 100/100, and collectors, TraceContext, and sinks were empty.
+    This is not live HTTP/provider soak evidence.
 
 ## Open decisions
 
@@ -448,7 +504,8 @@ Record the resolution here when made:
   `Tool`, and `LLM` contracts. Release/API stability remains D18.
 - **D3 — Prelude file home.** RESOLVED for M2 spike 2026-07-08:
   `priv/preludes/agent/*.lisp`, referenced by `@external_resource`, embedded
-  into `PtcRunner.Kernel` module attributes for default runtime use, and
+  as source in `PtcRunner.Kernel` module attributes and compiled into a
+  source-versioned runtime cache for default use, and
   included in the package file list plus release smoke required paths. This
   mirrors the inspectable `priv/prompts/` convention while keeping the split
   policy source swappable in tests via `PtcRunner.Kernel.compile_prelude/1`
@@ -496,10 +553,12 @@ Record the resolution here when made:
   tool-call-only. The model must call `run_ptc_lisp`; free-text code
   extraction, Markdown parsing, structured-output-only mode, and legacy
   text-code fallback are out of scope.
-- **D10 — Kernel error envelope.** Stable categories and rendering for prelude
-  compile/runtime errors, private capability denial, LLM failure, protocol
-  error, inner eval parse/eval/fail, timeout, heap/setup heap, and budget
-  exhaustion. R15/R16/D5 feed the exact shape.
+- **D10 — Kernel error envelope.** RESOLVED for M1, 2026-07-10. Stable
+  categories and rendering for prelude compile/runtime errors, private
+  capability denial, LLM failure, protocol error, inner eval parse/eval/fail,
+  timeout, heap/setup heap, and budget exhaustion use normalized bounded public
+  preflight, sandbox, and mission envelopes; internal policy/store/compiler
+  modules retain detailed diagnostic errors for focused callers.
 - **D11 — LLM budget and provider controls.** Preflight prompt budget, max
   output/reasoning budget, retry accounting, provider routing/fallback,
   generation controls, and token/cost fields. R16 resolves the contract.
@@ -513,13 +572,18 @@ Record the resolution here when made:
   forever, admits optional `commentary` as non-instruction metadata, or admits
   any terminal final-answer text. Default M1 stance: `program` only, no final
   text; S6/R23 must justify any expansion.
-- **D15 — Extension seam.** Whether future private capabilities are configured
+- **D15 — Extension seam.** PARTIALLY RESOLVED for the M1 mechanism,
+  2026-07-10. Future private capabilities are configured
   through a generic kernel extension contract or require explicit
   `PtcRunner.Kernel` edits. R24/S10 resolve before any promotion claim that
-  policy changes are prelude-only beyond the first feedback A/B.
-- **D16 — Soak and deployment envelope.** Long-run accumulation limits,
+  through the validated `private_capabilities:` outer map and inferred prelude
+  `tool_refs`; they stay absent from provider inventory and inner programs.
+  Dedicated per-extension trace attribution remains open in S10.
+- **D16 — Soak and deployment envelope.** M1 mock lifecycle slice resolved
+  2026-07-10. Long-run accumulation limits,
   per-node/concurrent mission caps, trace backpressure behavior, and HTTP pool
-  health. R22/S11 resolve before M2/M3 claims.
+  health. S11 proves the required untraced/traced mock cells; live cancellation,
+  HTTP pool health, and wider concurrency remain later evidence.
 - **D17 — Prelude source exposure.** Whether model programs may inspect
   `agent.*` / `feedback.*` implementation source via source-discovery
   mechanisms. If yes, the domain-blind audit includes exposed source; if no,
