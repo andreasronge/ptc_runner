@@ -10,11 +10,11 @@ defmodule PtcRunner.Lisp.Prelude.Spec do
   metadata and reconstruct definition forms for env capture (fact #6).
 
   `metadata_form` is the **raw** `{:map, pairs}` parser node captured from a
-  `defn`/`defn-` before `normalize_meta/1` flattens it into the (lossy,
+  `def`, `defn`, or `defn-` before `normalize_meta/1` flattens it into the (lossy,
   order-destroying) `metadata` map. It exists so `source` discovery can render
   the author's metadata Formatter-faithfully with original key order; `metadata`
-  (normalized) still drives everything else. Always `nil` for constants — `(def
-  ...)` carries no metadata syntax.
+  (normalized) still drives everything else. It is `nil` when no metadata map
+  was authored.
   """
 
   @type t :: %__MODULE__{

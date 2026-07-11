@@ -57,6 +57,75 @@ defmodule PtcRunner.KernelTest do
     assert feedback =~ "run_ptc_lisp"
   end
 
+  test "return signature feeds back a type error, preserves memory, and accepts correction" do
+    parent = self()
+
+    llm =
+      scripted_llm(
+        [
+          %{
+            tool_calls: [
+              %{
+                name: "run_ptc_lisp",
+                args: %{"program" => "(do (def answer 42) (return {:answer answer}))"}
+              }
+            ]
+          },
+          %{tool_calls: [%{name: "run_ptc_lisp", args: %{"program" => "(return answer)"}}]}
+        ],
+        parent
+      )
+
+    assert {:ok, %{"value" => 42, "trace" => %{"turns" => 2}}} =
+             Kernel.run(%{"task" => "compute"}, llm: llm, signature: ":int")
+
+    assert_received {:llm_request, %{messages: [%{role: :user, content: first_message}]}}
+    assert first_message =~ ";; === required return ==="
+    assert first_message =~ ";; type: :int"
+
+    assert_received {:llm_request, %{messages: retry_messages}}
+    assert %{role: :tool, content: feedback} = List.last(retry_messages)
+    assert feedback =~ "return_validation_failed"
+    assert feedback =~ "Expected :int"
+    assert feedback =~ "expected int, got map"
+    assert feedback =~ "answer"
+  end
+
+  test "kernel rejects signatures with input parameters before calling the LLM" do
+    parent = self()
+    llm = fn request -> send(parent, {:unexpected_llm_request, request}) end
+
+    assert {:error, %{reason: "invalid_kernel_option", option: "signature"}} =
+             Kernel.run(%{"task" => "compute"},
+               llm: llm,
+               signature: "(query :string) -> :int"
+             )
+
+    refute_received {:unexpected_llm_request, _}
+  end
+
+  test "datetime signatures validate before the return value is JSON projected" do
+    llm =
+      scripted_llm([
+        %{
+          tool_calls: [
+            %{
+              name: "run_ptc_lisp",
+              args: %{
+                "program" => ~S|(return (java.time.Instant/parse "2026-01-01T00:00:00Z"))|
+              }
+            }
+          ]
+        }
+      ])
+
+    assert {:ok, %{"value" => "2026-01-01T00:00:00Z", "trace" => %{"turns" => 1}}} =
+             Kernel.run(%{"task" => "return a datetime"},
+               llm: llm,
+               signature: ":datetime"
+             )
+  end
+
   test "caller-supplied system prompt is sent once through the request system channel" do
     parent = self()
 

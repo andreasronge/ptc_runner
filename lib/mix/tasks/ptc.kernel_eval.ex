@@ -39,6 +39,7 @@ defmodule Mix.Tasks.Ptc.KernelEval do
           report: :string,
           trace_dir: :string,
           paired: :boolean,
+          return_contracts: :boolean,
           unsafe_debug_report: :string
         ]
       )
@@ -52,7 +53,17 @@ defmodule Mix.Tasks.Ptc.KernelEval do
 
     eval_opts =
       opts
-      |> Keyword.take([:suite, :runs, :seed, :case, :model, :variant, :report, :trace_dir])
+      |> Keyword.take([
+        :suite,
+        :runs,
+        :seed,
+        :case,
+        :model,
+        :variant,
+        :report,
+        :trace_dir,
+        :return_contracts
+      ])
       |> Keyword.put(:mode, mode)
       |> maybe_put_debug_agent(debug_agent)
 

@@ -179,6 +179,7 @@ defmodule PtcRunner.Kernel.Eval do
           kernel_memory_byte_cap: Keyword.get(opts, :kernel_memory_byte_cap),
           unsafe_debug: Keyword.get(opts, :unsafe_debug, false),
           unsafe_debug_agent: Keyword.get(opts, :unsafe_debug_agent),
+          return_contracts: Keyword.get(opts, :return_contracts, false),
           paired_run: Keyword.get(opts, :paired_run, false),
           case_ids: Enum.map(cases, & &1.id),
           case_definition_hash: case_definition_hash
@@ -856,6 +857,7 @@ defmodule PtcRunner.Kernel.Eval do
               Keyword.get(opts, :unsafe_debug, false) or
                 is_pid(Keyword.get(opts, :unsafe_debug_agent))
           ]
+          |> maybe_put_return_signature(eval_case, opts)
           |> Keyword.merge(
             Keyword.take(opts, [
               :role_policy,
@@ -971,14 +973,18 @@ defmodule PtcRunner.Kernel.Eval do
           {:ok, result, %{write_errors: _} = trace_metadata} =
             TraceLog.with_trace(
               fn ->
-                SubAgent.run(eval_case.task,
-                  name: incumbent_name,
-                  llm: hashed_llm,
-                  context: eval_case.context,
-                  tools: Map.get(eval_case, :tools, %{}),
-                  max_turns: eval_case.max_turns,
-                  completion_mode: :explicit
-                )
+                incumbent_opts =
+                  [
+                    name: incumbent_name,
+                    llm: hashed_llm,
+                    context: eval_case.context,
+                    tools: Map.get(eval_case, :tools, %{}),
+                    max_turns: eval_case.max_turns,
+                    completion_mode: :explicit
+                  ]
+                  |> maybe_put_return_signature(eval_case, opts)
+
+                SubAgent.run(eval_case.task, incumbent_opts)
               end,
               path: raw_trace_path,
               trace_kind: "kernel_eval",
@@ -1031,6 +1037,22 @@ defmodule PtcRunner.Kernel.Eval do
       "context" => eval_case.context
     }
   end
+
+  defp maybe_put_return_signature(run_opts, eval_case, opts) do
+    if Keyword.get(opts, :return_contracts, false) do
+      Keyword.put(run_opts, :signature, case_return_signature(eval_case))
+    else
+      run_opts
+    end
+  end
+
+  defp case_return_signature(%{expect: :integer}), do: ":int"
+  defp case_return_signature(%{expect: expect}) when expect in [:number, :float], do: ":float"
+  defp case_return_signature(%{expect: :string}), do: ":string"
+  defp case_return_signature(%{expect: :boolean}), do: ":bool"
+  defp case_return_signature(%{expect: :list}), do: "[:any]"
+  defp case_return_signature(%{expect: :map}), do: ":map"
+  defp case_return_signature(_eval_case), do: ":any"
 
   defp llm_for(eval_case, :mock, _model, _opts) do
     programs = Map.fetch!(eval_case, :mock_programs)
@@ -2067,8 +2089,16 @@ defmodule PtcRunner.Kernel.Eval do
 
     Map.take(config, Map.keys(expected)) == expected and
       config.variant in ["kernel", "incumbent"] and
-      Enum.sort(config.case_ids) == Enum.sort(@m2_case_ids)
+      Enum.sort(config.case_ids) == Enum.sort(@m2_case_ids) and
+      tier2_return_contract_config?(config)
   end
+
+  defp tier2_return_contract_config?(%{return_contracts: true, report: report})
+       when is_binary(report),
+       do: Path.basename(report) in ["m2c-tier2-kernel.md", "m2c-tier2-incumbent.md"]
+
+  defp tier2_return_contract_config?(config),
+    do: Map.get(config, :return_contracts, false) == false
 
   defp smoke_preregistered_config?(config) do
     expected = %{
@@ -2111,7 +2141,8 @@ defmodule PtcRunner.Kernel.Eval do
       seed: Keyword.get(opts, :seed, 0),
       case: Keyword.get(opts, :case),
       trace_dir: Keyword.get(opts, :trace_dir),
-      report: Keyword.get(opts, :report)
+      report: Keyword.get(opts, :report),
+      return_contracts: Keyword.get(opts, :return_contracts, false)
     }
   end
 

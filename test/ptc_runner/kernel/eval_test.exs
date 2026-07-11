@@ -187,6 +187,7 @@ defmodule PtcRunner.Kernel.EvalTest do
       kernel_memory_byte_cap: nil,
       unsafe_debug: false,
       unsafe_debug_agent: nil,
+      return_contracts: false,
       paired_run: true,
       case_ids:
         ~w(products_count delivered_orders total_revenue remote_employees engineering_expenses),
@@ -195,6 +196,19 @@ defmodule PtcRunner.Kernel.EvalTest do
 
     assert Eval.preregistered_config?(tier2)
     assert Eval.preregistered_config?(%{tier2 | variant: "incumbent"})
+
+    assert Eval.preregistered_config?(%{
+             tier2
+             | return_contracts: true,
+               report: "reports/kernel_eval/m2c-tier2-kernel.md"
+           })
+
+    refute Eval.preregistered_config?(%{
+             tier2
+             | return_contracts: true,
+               report: "reports/kernel_eval/other-kernel.md"
+           })
+
     refute Eval.preregistered_config?(%{tier2 | runs: 2})
     refute Eval.preregistered_config?(%{tier2 | seed: 18})
     refute Eval.preregistered_config?(%{tier2 | case_ids: ["products_count"]})
@@ -1184,6 +1198,37 @@ defmodule PtcRunner.Kernel.EvalTest do
     assert case_result.failure_reason == "constraint_failed:eq"
     refute Eval.passed?(report)
     assert Eval.failure_count(report) == 1
+  end
+
+  test "paired return contracts correct typed cases before the host oracle runs" do
+    eval_case = %{
+      id: "typed_retry",
+      task: "Return the integer answer.",
+      context: %{},
+      expect: :integer,
+      constraint: {:eq, 42},
+      max_turns: 2,
+      mock_programs: ["(return {:answer 42})", "(return 42)"]
+    }
+
+    assert {:ok, report} =
+             Eval.run_cases([eval_case],
+               mode: :mock,
+               variant: "kernel",
+               return_contracts: true
+             )
+
+    assert [%{status: :pass, action_count: 2, eval_count: 2}] = report.cases
+    assert report.command_options.return_contracts == true
+
+    assert {:ok, incumbent_report} =
+             Eval.run_cases([eval_case],
+               mode: :mock,
+               variant: "incumbent",
+               return_contracts: true
+             )
+
+    assert [%{status: :pass, action_count: 2, eval_count: 2}] = incumbent_report.cases
   end
 
   @tag :tmp_dir

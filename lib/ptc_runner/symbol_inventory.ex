@@ -25,6 +25,7 @@ defmodule PtcRunner.SymbolInventory do
           required(:kind) => kind(),
           required(:source) => source(),
           optional(:type) => String.t(),
+          optional(:signature) => String.t(),
           optional(:params) => [String.t()],
           optional(:doc) => String.t(),
           optional(:sample) => String.t(),
@@ -175,6 +176,8 @@ defmodule PtcRunner.SymbolInventory do
       doc: compact_doc(export.doc),
       usage: usage
     }
+    |> maybe_put(:signature, export.signature)
+    |> maybe_put(:type, export.type)
     |> maybe_put(:effect, export_effect(export.effect))
   end
 

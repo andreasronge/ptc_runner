@@ -48,6 +48,8 @@ defmodule PtcRunner.Lisp.Prelude.Export do
       `:constant` for a `def` export (a plain value, even if that value is a
       function). A call `(cfg/answer)` of a constant YIELDS the value rather
       than applying it.
+    * `signature` — optional canonical function contract string.
+    * `type` — optional canonical constant type string.
   """
 
   @type visibility :: :prompt | :discoverable
@@ -68,7 +70,9 @@ defmodule PtcRunner.Lisp.Prelude.Export do
           requires: [String.t()],
           tool_refs: [String.t()],
           min_arity: non_neg_integer(),
-          kind: kind()
+          kind: kind(),
+          signature: String.t() | nil,
+          type: String.t() | nil
         }
 
   @enforce_keys [:ref, :namespace, :symbol, :arity, :visibility]
@@ -84,7 +88,9 @@ defmodule PtcRunner.Lisp.Prelude.Export do
             requires: [],
             tool_refs: [],
             min_arity: 0,
-            kind: :function
+            kind: :function,
+            signature: nil,
+            type: nil
 
   @valid_visibilities [:prompt, :discoverable]
 

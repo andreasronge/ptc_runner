@@ -5,6 +5,28 @@ defmodule PtcRunner.SymbolInventoryTest do
   alias PtcRunner.SymbolInventory
 
   describe "project/1" do
+    test "projects typed prelude functions and constants into the rendered inventory" do
+      source = """
+      (ns typed "Typed helpers." {:visibility :prompt})
+      (defn lookup "Look up one item." {:signature "(id
+        :string)   ->   {id :string}"} [id]
+        {"id" id})
+      (def retry-limit "Maximum retries." {:type "  :int\n"} 3)
+      """
+
+      assert {:ok, prelude} = Compiler.compile(source)
+      facts = SymbolInventory.project(prelude: prelude)
+
+      assert %{signature: "(id :string) -> {id :string}"} =
+               Enum.find(facts, &(&1.ref == "typed/lookup"))
+
+      assert %{type: ":int"} = Enum.find(facts, &(&1.ref == "typed/retry-limit"))
+
+      {:ok, rendered, _meta} = SymbolInventory.render(facts)
+      assert rendered =~ "(id :string) -> {id :string}"
+      assert rendered =~ "value :int"
+    end
+
     test "projects data entries as values with bounded samples and direct usage" do
       facts = SymbolInventory.project(data: %{numbers: [2, 4, 6, 8]})
 

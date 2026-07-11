@@ -68,7 +68,7 @@ defmodule PtcRunner.SymbolInventory.DefaultRenderer do
   defp function_label(%{ref: ref}), do: "#{ref} []"
 
   defp details(%{kind: :function} = fact) do
-    ["function", effect(fact[:effect]), "use: #{fact[:usage]}"]
+    ["function", fact[:signature], effect(fact[:effect]), "use: #{fact[:usage]}"]
   end
 
   defp details(%{kind: :value} = fact) do

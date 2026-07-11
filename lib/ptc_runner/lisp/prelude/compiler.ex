@@ -46,6 +46,7 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
   alias PtcRunner.Lisp.Prelude.ValidationError
   alias PtcRunner.Lisp.ProtectedNamespaces
   alias PtcRunner.Sandbox
+  alias PtcRunner.SubAgent.Signature
 
   @default_visibility :prompt
   @valid_effects [:read, :write, :unknown]
@@ -536,13 +537,25 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
      )}
   end
 
+  defp handle_def([name_ast, {:string, doc}, {:map, pairs} = meta_form, value_ast], acc) do
+    with {:ok, meta} <- normalize_meta(pairs) do
+      add_const(acc, name_ast, doc, meta, meta_form, value_ast)
+    end
+  end
+
+  defp handle_def([name_ast, {:map, pairs} = meta_form, value_ast], acc) do
+    with {:ok, meta} <- normalize_meta(pairs) do
+      add_const(acc, name_ast, nil, meta, meta_form, value_ast)
+    end
+  end
+
   # (def name value) | (def name "doc" value)
   defp handle_def([name_ast, {:string, doc}, value_ast], acc) do
-    add_const(acc, name_ast, doc, value_ast)
+    add_const(acc, name_ast, doc, %{}, nil, value_ast)
   end
 
   defp handle_def([name_ast, value_ast], acc) do
-    add_const(acc, name_ast, nil, value_ast)
+    add_const(acc, name_ast, nil, %{}, nil, value_ast)
   end
 
   defp handle_def(other, _acc) do
@@ -578,7 +591,7 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
     end
   end
 
-  defp add_const(acc, name_ast, doc, value_ast) do
+  defp add_const(acc, name_ast, doc, metadata, metadata_form, value_ast) do
     with {:ok, ns} <- require_current_ns(acc, name_ast),
          {:ok, symbol} <- symbol_name(name_ast),
          :ok <- reject_qualified_self_refs([value_ast], ns) do
@@ -588,7 +601,8 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
         private?: false,
         arity: 0,
         doc: doc,
-        metadata: %{},
+        metadata: metadata,
+        metadata_form: metadata_form,
         params_form: nil,
         body_form: [value_ast]
       }
@@ -766,7 +780,8 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
 
     with {:ok, visibility} <- visibility(Map.get(spec.metadata, "visibility", ns_default)),
          {:ok, explicit_requires} <- validate_requires(Map.get(spec.metadata, "requires")),
-         {:ok, explicit_provider} <- validate_provider_ref(Map.get(spec.metadata, "provider-ref")) do
+         {:ok, explicit_provider} <- validate_provider_ref(Map.get(spec.metadata, "provider-ref")),
+         {:ok, signature, type} <- export_contract(spec) do
       graph_entry =
         form_graph
         |> Map.get(spec.namespace, %{})
@@ -821,7 +836,9 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
          provider_ref: backing.provider_ref,
          requires: backing.requires,
          tool_refs: transitive.tool_refs,
-         kind: export_kind(spec)
+         kind: export_kind(spec),
+         signature: signature,
+         type: type
        }}
     end
   end
@@ -829,6 +846,50 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
   # A `def` constant has no params vector; a `defn` always does.
   defp export_kind(%Spec{params_form: nil}), do: :constant
   defp export_kind(%Spec{}), do: :function
+
+  defp export_contract(%Spec{params_form: nil, metadata: metadata}) do
+    case Map.get(metadata, "type") do
+      nil -> {:ok, nil, nil}
+      type when is_binary(type) -> validate_constant_type(type)
+      _other -> invalid_contract("constant :type must be a signature type string")
+    end
+  end
+
+  defp export_contract(%Spec{arity: arity, metadata: metadata}) do
+    case Map.get(metadata, "signature") do
+      nil -> {:ok, nil, nil}
+      signature when is_binary(signature) -> validate_function_signature(signature, arity)
+      _other -> invalid_contract("function :signature must be a signature string")
+    end
+  end
+
+  defp validate_constant_type(type) do
+    case Signature.parse(type) do
+      {:ok, {:signature, [], return_type}} ->
+        {:ok, nil, Signature.Renderer.render_type(return_type, key_style: :lisp_prompt)}
+
+      _error ->
+        invalid_contract("invalid constant :type `#{type}`")
+    end
+  end
+
+  defp validate_function_signature(signature, arity) do
+    case Signature.parse(signature) do
+      {:ok, {:signature, params, _return_type} = parsed} when length(params) == arity ->
+        {:ok, Signature.render(parsed), nil}
+
+      {:ok, {:signature, params, _return_type}} ->
+        invalid_contract(
+          "function :signature declares #{length(params)} parameters but definition arity is #{arity}"
+        )
+
+      _error ->
+        invalid_contract("invalid function :signature `#{signature}`")
+    end
+  end
+
+  defp invalid_contract(message),
+    do: {:error, ValidationError.new(:invalid_signature, message)}
 
   # Constants have no params vector. Function params preserve source names for
   # display, while destructuring forms get a stable positional fallback.
@@ -1690,6 +1751,16 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
   # normalized `metadata` map is lossy). Author *structure* is preserved (macros
   # un-expanded); comments and original whitespace are NOT (the reader discards
   # them) — see the fidelity disclaimer in the spec.
+
+  # A typed/documented (def ...) constant.
+  defp spec_to_source_form(
+         %Spec{params_form: nil, body_form: [value_ast], metadata_form: meta} = spec
+       )
+       when not is_nil(meta) do
+    doc_part = if is_binary(spec.doc), do: [{:string, spec.doc}], else: []
+
+    {:list, [{:symbol, :def}, {:symbol, spec.symbol}] ++ doc_part ++ [meta, value_ast]}
+  end
 
   # A documented (def ...) constant: `(def name "doc" value)`.
   defp spec_to_source_form(%Spec{params_form: nil, body_form: [value_ast], doc: doc} = spec)

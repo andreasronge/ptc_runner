@@ -351,8 +351,9 @@ defmodule PtcRunner.Kernel do
       "protocol_tool_name" => Action.tool_name(),
       "tool_names" => opts |> Keyword.get(:tools, %{}) |> public_tool_names(),
       "symbol_facts" => symbol_facts,
-      "symbol_inventory" => symbol_inventory,
-      "symbol_inventory_meta" => symbol_inventory_meta
+      "symbol_inventory" => inventory_with_return_contract(symbol_inventory, opts),
+      "symbol_inventory_meta" => symbol_inventory_meta,
+      "return_type" => Keyword.get(opts, :return_type)
     }
 
     program = ~S|(agent.core/run-mission data/mission data/cfg)|
@@ -414,10 +415,13 @@ defmodule PtcRunner.Kernel do
          :ok <- optional_positive_integer_option(opts, :max_tool_calls),
          :ok <- optional_positive_integer_option(opts, :inner_max_tool_calls),
          :ok <- prelude_source_overrides_option(opts),
+         {:ok, parsed_signature, return_type} <- signature_option(opts),
          {:ok, memory_cap} <- memory_byte_cap(opts),
          {:ok, private_capabilities} <- normalize_private_capabilities(opts) do
       {:ok,
        opts
+       |> Keyword.put(:parsed_signature, parsed_signature)
+       |> Keyword.put(:return_type, return_type)
        |> Keyword.put(:max_turns, max_turns)
        |> Keyword.put(:max_llm_calls, max_llm_calls)
        |> Keyword.put(:timeout, Keyword.get(opts, :timeout, @outer_timeout))
@@ -440,6 +444,31 @@ defmodule PtcRunner.Kernel do
       positive_integer_option(opts, option, Keyword.get(opts, option))
     else
       :ok
+    end
+  end
+
+  defp signature_option(opts) do
+    case Keyword.get(opts, :signature) do
+      nil ->
+        {:ok, nil, nil}
+
+      signature when is_binary(signature) ->
+        case Signature.parse(signature) do
+          {:ok, {:signature, [], return_type} = parsed} ->
+            {:ok, parsed, Signature.Renderer.render_type(return_type, key_style: :lisp_prompt)}
+
+          _error ->
+            invalid_signature_option(signature)
+        end
+
+      other ->
+        invalid_signature_option(other)
+    end
+  end
+
+  defp invalid_signature_option(value) do
+    case invalid_option(:signature, value) do
+      {:error, error} -> {:error, error}
     end
   end
 
@@ -770,6 +799,23 @@ defmodule PtcRunner.Kernel do
   end
 
   defp public_tool_names(_tools), do: []
+
+  defp inventory_with_return_contract(inventory, opts) do
+    case Keyword.get(opts, :return_type) do
+      nil ->
+        inventory
+
+      return_type ->
+        contract =
+          ";; === required return ===\n" <>
+            ";; type: #{return_type}\n" <>
+            ";; The value passed to (return ...) must match this type exactly."
+
+        [inventory, contract]
+        |> Enum.reject(&(&1 in [nil, ""]))
+        |> Enum.join("\n\n")
+    end
+  end
 
   defp normalize_tool(name, %Tool{} = tool), do: %{tool | name: tool.name || name}
 
@@ -1496,7 +1542,10 @@ defmodule PtcRunner.Kernel do
 
     case candidate_bytes do
       bytes when is_integer(bytes) and bytes <= cap ->
-        result = project_step(tag, step, prior_memory, candidate_memory, bytes)
+        result =
+          project_step(tag, step, prior_memory, candidate_memory, bytes)
+          |> validate_return_result(step, opts)
+
         {result, candidate_memory, event_data(step, prior_memory, candidate_memory, result, opts)}
 
       bytes ->
@@ -1519,6 +1568,48 @@ defmodule PtcRunner.Kernel do
 
         {result, prior_memory, event_data(error_step, prior_memory, prior_memory, result, opts)}
     end
+  end
+
+  defp validate_return_result(
+         %{"status" => "return", "value" => value} = result,
+         step,
+         opts
+       ) do
+    case Keyword.get(opts, :parsed_signature) do
+      nil ->
+        result
+
+      parsed_signature ->
+        case Signature.validate(parsed_signature, native_return_value(step, value)) do
+          :ok -> result
+          {:error, errors} -> return_validation_result(result, opts, errors)
+        end
+    end
+  end
+
+  defp validate_return_result(result, _step, _opts), do: result
+
+  defp native_return_value(%{return: {:__ptc_return__, value}}, _projected_value),
+    do: Public.value(value)
+
+  defp native_return_value(_step, projected_value), do: projected_value
+
+  defp return_validation_result(result, opts, errors) do
+    expected = Keyword.fetch!(opts, :return_type)
+
+    details =
+      Enum.map_join(errors, "; ", fn %{path: path, message: message} ->
+        location = if path == [], do: "root", else: Enum.join(path, ".")
+        "#{location}: #{message}"
+      end)
+
+    %{
+      "status" => "continue",
+      "reason" => "return_validation_failed",
+      "message" => "Expected #{expected}; #{details}",
+      "prints" => Map.get(result, "prints", []),
+      "memory_summary" => Map.get(result, "memory_summary")
+    }
   end
 
   defp event_data(step, prior_memory, current_memory, result, opts) do
