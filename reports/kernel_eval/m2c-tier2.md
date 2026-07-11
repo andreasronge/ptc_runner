@@ -1,0 +1,11 @@
+# PTC Kernel Tier-2 Paired Eval
+
+model: openrouter:deepseek/deepseek-v4-flash
+commit: d94728134834993d1941e8686034bc72a688aba7
+dataset_hash: 503d8233cce08aa825a00e14d49c6e13d2a9db931fa219a8cc3500866e8a0953
+case_definition_hash: 4b448ecc370db8260cc8b4537bd7ed61ae9c8c0c0bbec80203d754d362df4431
+configuration_hash: 87b2fb9d3992abb84f3d6c9ee7b64805186f84e54b0d8279b0d8c41378c759ad
+complete: true
+aborted: false
+abort_reason: none
+evidence_eligible: true

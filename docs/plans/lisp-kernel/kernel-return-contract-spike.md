@@ -112,3 +112,10 @@ The implementation remains a spike. Prelude parameter names are not matched
 against signature names, constant values and function calls are not
 contract-checked, discovery metadata is not extended, and no supported public
 API documentation has been added.
+
+Post-spike review fixes validated `:datetime` before JSON projection,
+canonicalized prelude annotation strings before inventory storage/rendering,
+and synchronized the internal metadata/type documentation. M2c then exercised
+the return contract in both adapters; see
+`experiments/m2c-tier2-return-contracts-prereg.md` and
+`reports/kernel_eval/m2c-analysis.md`.

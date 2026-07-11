@@ -71,4 +71,8 @@ mix ptc.kernel_eval --suite tier2 --live --model deepseek --runs 1 --seed 17 \
 
 ## Outcome
 
-Not run.
+Run completed on 2026-07-11 at commit `d9472813`. The pair was complete,
+non-aborted, provenance-eligible, and evidence-eligible. Both incumbent and
+kernel passed 4/5, so the preregistered overall smoke gate passed. Canonical
+evidence is in `reports/kernel_eval/m2c-tier2*`; comparison with M2/M2b is in
+`reports/kernel_eval/m2c-analysis.md`.
