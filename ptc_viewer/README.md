@@ -12,7 +12,7 @@ The meta planner decomposes a mission into parallel tasks, assigns each to a spe
 
 ```bash
 # From the ptc_runner root directory
-mix ptc.viewer --trace-dir examples/page_index/traces --plan-dir examples/page_index/data
+mix ptc.viewer --trace-dir examples/page_index/traces
 ```
 
 This starts a local web server (default port 4123) and opens the viewer in your browser.
@@ -54,7 +54,6 @@ mix ptc.viewer [options]
 |--------|---------|-------------|
 | `--port` | 4123 | Port to listen on |
 | `--trace-dir` | `traces` | Directory containing `.jsonl` trace files |
-| `--plan-dir` | `data` | Directory containing `.json` plan files |
 | `--no-open` | false | Don't auto-open browser |
 
 ### Programmatic
@@ -62,8 +61,7 @@ mix ptc.viewer [options]
 ```elixir
 {:ok, pid} = PtcViewer.start(
   port: 4123,
-  trace_dir: "path/to/traces",
-  plan_dir: "path/to/plans"
+  trace_dir: "path/to/traces"
 )
 
 # Later...
