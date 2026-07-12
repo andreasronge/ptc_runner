@@ -1,7 +1,9 @@
 # Minimal Programmable Kernel — Temporary Migration Inventory
 
-**Status:** initial inventory. Complete and verify against `rg --files` before
-implementation. Delete this document after migration closes.
+**Status:** active migration inventory. The core owner primitives introduced in
+`exp/minimal-kernel` Slice 1 are tracked below; all rows remain open until their
+listed destination and final deletion audit are complete. Delete this document
+after migration closes.
 
 **Contract:** [`kernel-contract.md`](kernel-contract.md)
 
@@ -59,14 +61,14 @@ name its re-home/delete condition. `unknown` is not a durable classification.
 
 | Area | Class | Retained behavior / destination |
 | --- | --- | --- |
-| `Kernel.Capability` responsibility | new path | Environment-neutral metadata and callback/borrowed provider. |
-| `Kernel.WorkflowEnvironment` | new path | Frozen workflow bundle and workflow capability map. |
-| `Kernel.MissionEnvironment` | new path | Frozen mission bundle, mission capabilities, context/data. |
-| `Kernel.Limits` | new path | Normalized hard ceilings. |
-| `Kernel.RunState` | new path | Atomic deadline, counters, evaluation memory, closed status, dropped events. |
-| `Kernel.Dispatcher` | new path | Validation, reservation, timeout, fault containment, bounds, uniform envelope. |
+| `Kernel.Capability` responsibility | new path | Slice 1: host-owned metadata/callback representation; provider registry/manifest selection remains Slice 8. |
+| `Kernel.WorkflowEnvironment` | new path | Slice 1: frozen workflow capability map; frozen bundle assembly validation follows Slice 2. |
+| `Kernel.MissionEnvironment` | new path | Slice 1: structurally distinct map rejecting reserved workflow routes; mission bundle/context follows later slices. |
+| `Kernel.Limits` | new path | Slice 1: normalized positive hard ceilings. |
+| `Kernel.RunState` | new path | Slice 1: atomic deadline, counters, serialized evaluation-memory lease, and closed status; dropped-event accounting joins final run path. |
+| `Kernel.Dispatcher` | new path | Slice 1: validation, atomic reservation, timeout, fault containment, bounds, and uniform envelope; Lisp boundary wiring follows Slice 3. |
 | Host provider-registry interface | new path | Host-owned name-to-builder map; manifests can select names but never register executable code. |
-| `Kernel.EventSink` responsibility | new path | Minimum canonical event schema, bounded normal queue, fail-closed private policy, dropped-event accounting. |
+| `Kernel.EventSink` responsibility | new path | Slice 1: canonical bounded memory sink with normal lossy/private fail-closed policies; final run-owned integration follows Slice 3. |
 | `Kernel.Result` / `Kernel.Error` | new path | Only public Kernel outcomes. |
 | `Kernel.compile_bundle/1` | new path | Explicit bounded local component-DAG compilation. |
 | Bundle compilation limits | new path | Component/edge/source/time/heap/artifact/diagnostic ceilings independent of the run deadline. |
