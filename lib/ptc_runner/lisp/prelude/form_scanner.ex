@@ -112,9 +112,8 @@ defmodule PtcRunner.Lisp.Prelude.FormScanner do
 
   ## Locating the `(ns ...)` docstring
 
-  `locate_ns_doc/2` is the one narrowly-scoped extra entry point this module
-  carries for `prelude/edit`'s `set-ns-doc` op
-  (`PtcRunner.PreludeStore.FormEdit`): given the byte span of a `(ns ...)`
+  `locate_ns_doc/2` is a narrowly-scoped helper for source-authoring tools:
+  given the byte span of a `(ns ...)`
   form (as produced by `scan/1` — a `%{head: "ns", ...}` entry), it locates
   the docstring token, if any, WITHOUT re-deriving or duplicating any of
   `PtcRunner.Lisp.Prelude.Compiler`'s `ns_metadata/1` semantics — it reuses

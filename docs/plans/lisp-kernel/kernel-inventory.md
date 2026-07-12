@@ -51,11 +51,11 @@ name its re-home/delete condition. `unknown` is not a durable classification.
 | `lib/ptc_runner/lisp/prelude/bundle.ex` | migrate | Become explicit bounded component-ID DAG `compile_bundle/1` with frozen provenance. |
 | Protected namespace/export/prompt inventory primitives | foundation | Split workflow/mission validation and mission-only model inventory. |
 | `priv/preludes/agent/*.lisp` | migrate | Slice 7 replacements now ship as `agent.native`, `agent.core`, `agent.feedback`, `agent.retry`, `workflow.event`, and `result`; delete the legacy files with the old Kernel path. |
-| `PtcRunner.PreludeRolePolicy` and grants | delete | Roles remain an optional future environment-builder adapter. |
-| `PtcRunner.PreludeRuntime` | delete | Kernel accepts frozen bundles/environments. |
-| `PtcRunner.PreludeStore*` | delete | No mutable/versioned store in V1. |
-| `PtcRunner.PreludeCandidate` | delete | No live active-bundle editing in V1. |
-| Store/form-edit tools and churn soaks | delete | Candidate authoring/promotion is deferred and host-gated. |
+| `PtcRunner.PreludeRolePolicy` and grants | deleted | Roles remain an optional future environment-builder adapter. |
+| `PtcRunner.PreludeRuntime` | deleted | Kernel accepts frozen bundles/environments. |
+| `PtcRunner.PreludeStore*` | deleted | V1 has no mutable/versioned runtime store. |
+| `PtcRunner.PreludeCandidate` | deleted | V1 has no live active-bundle editing. |
+| Store/form-edit tools and churn soaks | deleted | Candidate authoring/promotion is deferred and host-gated. |
 
 ### New Kernel path
 

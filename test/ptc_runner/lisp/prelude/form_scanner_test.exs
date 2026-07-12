@@ -3,7 +3,6 @@ defmodule PtcRunner.Lisp.Prelude.FormScannerTest do
 
   alias PtcRunner.Lisp.Prelude.Compiler
   alias PtcRunner.Lisp.Prelude.FormScanner
-  alias PtcRunner.PreludeStore.Tools
 
   @root Path.expand("../../../..", __DIR__)
 
@@ -50,7 +49,7 @@ defmodule PtcRunner.Lisp.Prelude.FormScannerTest do
       |> Enum.reject(&generated_or_dependency_path?/1)
       |> Enum.map(fn path -> {Path.relative_to(path, @root), File.read!(path)} end)
 
-    file_sources ++ [{"PtcRunner.PreludeStore.Tools.prelude_source/0", Tools.prelude_source()}]
+    file_sources
   end
 
   defp generated_or_dependency_path?(path) do
