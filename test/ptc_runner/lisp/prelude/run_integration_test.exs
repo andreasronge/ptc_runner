@@ -16,7 +16,7 @@ defmodule PtcRunner.Lisp.Prelude.RunIntegrationTest do
 
   @paged_data_source File.read!(
                        Path.expand(
-                         "../../../../examples/paged_data_prelude/paged_data.clj",
+                         "../../../fixtures/preludes/paged_data.clj",
                          __DIR__
                        )
                      )

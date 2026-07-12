@@ -204,10 +204,10 @@ This area is governed by [`tracelog-contract.md`](tracelog-contract.md).
 | `docs/plans/lisp-kernel/private-experiment-transcripts.md` | superseded | Historical rationale retained; canonical private JSONL persistence and viewer confinement replaced only the transcript mechanism. The experiment/scoring harness was intentionally retired. |
 | `docs/plans/future/`, `docs/plans/archive/` | migrate | Keep only rationale for surviving systems; delete rejected-system plans. |
 | `docs/guidelines/` | migrate | Keep active repository rules not already canonical in `AGENTS.md`. |
-| `examples/` | delete | Convert unique retained mechanisms into focused integration fixtures first. |
-| `demo/` | delete | Replace with optional thin Kernel scenario harness only if actively needed. |
-| `livebooks/` | delete/replace | Remove current set; add at most one maintained Kernel playground later. |
-| `blog/`, `images/` | delete/move | Move to website repository if needed. |
+| `examples/` | deleted | The unique paged-prelude mechanism was retained as a focused integration fixture. |
+| `demo/` | deleted | Deterministic Kernel scenarios and the optional live-provider gate replace the old benchmark product. |
+| `livebooks/` | deleted | The obsolete notebooks and Kino test harness were removed. |
+| `blog/`, `images/` | deleted | Website assets are no longer packaged in this runtime repository. |
 | `reports/kernel_eval/` | deleted | Generated experiment reports and trace fixtures were removed with the evaluator harness. |
 | `bench/` | migrate | Small domain-blind deterministic corpus and baselines only. |
 | `scripts/` | migrate | Keep active release/repository automation for retained product. |
@@ -228,7 +228,7 @@ This area is governed by [`tracelog-contract.md`](tracelog-contract.md).
 | `req`, `req_llm` | migrate | Retain only for optional standard LLM provider. |
 | `telemetry` | migrate | Retain only if canonical event/host instrumentation uses it. |
 | `ptc_viewer` path dependency | foundation | Retain dev/test integration. |
-| `kino` | delete | Remove with Kino/Livebooks. |
+| `kino` | deleted | Removed with Kino/Livebooks. |
 | `ex_dna` | experiment | Keep through final duplication audit, then remove if no active task. |
 | `recon` | delete unless proven | Retain only for an active lifecycle/soak check. |
 | `benchee` | migrate | Retain only if deterministic benchmark task uses it. |

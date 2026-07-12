@@ -18,16 +18,12 @@ runs:
         path: |
           deps
           _build
-          demo/deps
-          demo/_build
         key: ${{ runner.os }}-mix-otp28.5.0.1-elixir1.20.0-${{ hashFiles('**/mix.lock') }}
         restore-keys: |
           ${{ runner.os }}-mix-otp28.5.0.1-elixir1.20.0-
 
     - name: Get dependencies
-      run: |
-        mix deps.get
-        cd demo && mix deps.get
+      run: mix deps.get
       shell: bash
 
     - name: Cache Dialyzer PLT

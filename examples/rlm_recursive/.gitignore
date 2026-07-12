@@ -1,9 +1,0 @@
-/_build
-/deps
-/*.ez
-
-# Traces
-/traces/
-
-# Benchmark results
-/results/

@@ -22,9 +22,6 @@ defmodule PtcRunner.MixProject do
           ~r/^Mix\.Tasks\./,
           ~r/^PtcRunner\.TestSupport\./,
           PtcRunner.TypeExtractorFixtures,
-          # Livebook widget: whole body is `if Code.ensure_loaded?(Kino.JS)`;
-          # kino is an optional dep absent in test, so it never compiles here.
-          PtcRunner.Kino.TraceTree,
           # Dev/conformance tool gated behind Babashka + `--include clojure`;
           # only production callers are Mix tasks, not runtime code.
           PtcRunner.Lisp.ClojureValidator,
@@ -93,7 +90,6 @@ defmodule PtcRunner.MixProject do
       {:ex_doc, "~> 0.31", only: :dev, runtime: false},
       {:req, "~> 0.5", optional: true},
       {:req_llm, "~> 1.8", optional: true},
-      {:kino, "~> 0.14", optional: true},
       {:ptc_viewer, path: "ptc_viewer", only: [:test, :dev]},
       {:usage_rules, "~> 1.2", only: :dev, runtime: false},
       {:ex_dna, "~> 1.5", only: [:dev, :test], runtime: false},
