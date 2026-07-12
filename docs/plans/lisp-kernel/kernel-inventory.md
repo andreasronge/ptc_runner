@@ -70,7 +70,7 @@ name its re-home/delete condition. `unknown` is not a durable classification.
 | Host provider-registry interface | new path | Host-owned name-to-builder map; manifests can select names but never register executable code. |
 | `Kernel.EventSink` responsibility | new path | Slice 1: canonical bounded memory sink with normal lossy/private fail-closed policies; final run-owned integration follows Slice 3. |
 | `Kernel.Result` / `Kernel.Error` | new path | Only public Kernel outcomes. |
-| `Kernel.compile_bundle/1` | new path | Slice 2 in progress: bounded component-ID DAG, deterministic ordering, frozen source hashes, and frozen prelude attachment. Environment `requires` validation and artifact limits remain open. |
+| `Kernel.compile_bundle/1` | new path | Slice 2 in progress: bounded component-ID DAG, deterministic ordering, frozen source hashes, prelude attachment, and explicit tool-requirement validation. Provider `requires` schema and artifact limits remain open. |
 | Bundle compilation limits | new path | Component/edge/source/time/heap/artifact/diagnostic ceilings independent of the run deadline. |
 | `Kernel.run/2` | new path | Slice 3 in progress: typed explicit configuration, bounded direct entry execution, canonical lifecycle events, and workflow capability dispatch. Workflow bundle assembly and mission confinement remain open. |
 | Reserved `kernel-eval` | new path | Slice 4 in progress: workflow-to-mission source route, serialized leases, transactional memory, and mission-only capability dispatch. Static Program values and Lisp helpers remain open. |

@@ -251,4 +251,17 @@ defmodule PtcRunner.Kernel.CoreContractTest do
                100
              )
   end
+
+  test "environment assembly rejects a bundle with an ungranted tool requirement" do
+    {:ok, component} =
+      Component.new(
+        id: "required",
+        source: "(ns required) (defn call [] (tool/missing {}))"
+      )
+
+    assert {:ok, bundle} = Kernel.compile_bundle([component])
+
+    assert {:error, {:missing_capability_requirement, ["missing"]}} =
+             WorkflowEnvironment.new(bundle: bundle)
+  end
 end

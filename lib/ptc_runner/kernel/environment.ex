@@ -9,7 +9,8 @@ defmodule PtcRunner.Kernel.Environment do
       when kind in [:workflow, :mission] and is_map(data) do
     with :ok <- valid_bundle(bundle),
          {:ok, capability_map} <- capability_map(capabilities),
-         :ok <- reserved_names(kind, capability_map) do
+         :ok <- reserved_names(kind, capability_map),
+         :ok <- bundle_requirements(bundle, capability_map) do
       {:ok, %{bundle: bundle, capabilities: capability_map, data: data}}
     end
   end
@@ -45,4 +46,18 @@ defmodule PtcRunner.Kernel.Environment do
       do: {:error, :reserved_capability},
       else: :ok
   end
+
+  defp bundle_requirements(%{prelude: %{exports: exports}}, capabilities) do
+    missing =
+      exports
+      |> Enum.flat_map(&Map.get(&1, :tool_refs, []))
+      |> Enum.uniq()
+      |> Enum.reject(&Map.has_key?(capabilities, &1))
+
+    if missing == [],
+      do: :ok,
+      else: {:error, {:missing_capability_requirement, Enum.sort(missing)}}
+  end
+
+  defp bundle_requirements(_bundle, _capabilities), do: :ok
 end
