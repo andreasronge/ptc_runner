@@ -5,6 +5,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
   alias PtcRunner.Kernel.Capability
   alias PtcRunner.Kernel.Component
   alias PtcRunner.Kernel.Dispatcher
+  alias PtcRunner.Kernel.Evaluation
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.MissionEnvironment
@@ -177,5 +178,27 @@ defmodule PtcRunner.Kernel.CoreContractTest do
 
     assert {:ok, %{value: %{status: :ok, value: %{"sum" => 42}}}} =
              Kernel.run("(return (tool/add {:left 40 :right 2}))", config)
+  end
+
+  test "mission evaluation is serialized, persistent, and cannot use workflow capabilities" do
+    {:ok, workflow_capability} =
+      Capability.new(name: "workflow-only", callback: fn _ -> {:ok, %{"ok" => true}} end)
+
+    {:ok, workflow} = WorkflowEnvironment.new(capabilities: [workflow_capability])
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, limits} = Limits.new()
+    {:ok, state} = RunState.start(limits)
+
+    assert %{outcome: :returned} =
+             Evaluation.evaluate_source(state, mission, "(def x 40)", 100)
+
+    assert %{outcome: :returned, value: 42} =
+             Evaluation.evaluate_source(state, mission, "(return (+ x 2))", 100)
+
+    assert %{outcome: :evaluation_error} =
+             Evaluation.evaluate_source(state, mission, "(tool/workflow-only {})", 100)
+
+    assert %{capability_calls: %{workflow: %{}, mission: %{}}} = RunState.usage(state)
+    assert workflow.capabilities["workflow-only"]
   end
 end

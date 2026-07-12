@@ -40,9 +40,7 @@ defmodule PtcRunner.Kernel.Environment do
 
   defp capability_map(_capabilities), do: {:error, :invalid_capability}
 
-  defp reserved_names(:workflow, _capabilities), do: :ok
-
-  defp reserved_names(:mission, capabilities) do
+  defp reserved_names(_kind, capabilities) do
     if Enum.any?(Map.keys(capabilities), &MapSet.member?(@reserved, &1)),
       do: {:error, :reserved_capability},
       else: :ok

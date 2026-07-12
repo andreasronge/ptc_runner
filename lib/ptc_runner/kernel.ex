@@ -6,6 +6,7 @@ defmodule PtcRunner.Kernel do
   alias PtcRunner.Kernel.Component
   alias PtcRunner.Kernel.Dispatcher
   alias PtcRunner.Kernel.Error
+  alias PtcRunner.Kernel.Evaluation
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.InnerPrelude
   alias PtcRunner.Kernel.Result
@@ -334,8 +335,7 @@ defmodule PtcRunner.Kernel do
   defp run_workflow(entry_source, config, state) do
     opts = [
       context: config.input,
-      tools:
-        workflow_tools(config.workflow_environment, state, config.limits.workflow_timeout_ms),
+      tools: workflow_tools(config, state),
       timeout: config.limits.workflow_timeout_ms,
       max_heap: config.limits.workflow_heap_words,
       max_program_bytes: config.limits.entry_source_bytes,
@@ -363,13 +363,47 @@ defmodule PtcRunner.Kernel do
     end
   end
 
-  defp workflow_tools(%{capabilities: capabilities} = environment, state, timeout_ms) do
-    Map.new(capabilities, fn {name, _capability} ->
-      {name,
-       fn arguments ->
-         Dispatcher.dispatch(state, :workflow, environment, name, arguments, timeout_ms)
-       end}
-    end)
+  defp workflow_tools(config, state) do
+    tools =
+      Map.new(config.workflow_environment.capabilities, fn {name, _capability} ->
+        {name,
+         fn arguments ->
+           Dispatcher.dispatch(
+             state,
+             :workflow,
+             config.workflow_environment,
+             name,
+             arguments,
+             config.limits.workflow_timeout_ms
+           )
+         end}
+      end)
+
+    Map.put(tools, "kernel-eval", fn arguments -> kernel_eval(config, state, arguments) end)
+  end
+
+  defp kernel_eval(config, state, %{"kind" => "source", "source" => source})
+       when is_binary(source),
+       do: %{
+         status: :ok,
+         value:
+           Evaluation.evaluate_source(
+             state,
+             config.mission_environment,
+             source,
+             config.limits.evaluation_timeout_ms
+           )
+       }
+
+  defp kernel_eval(_config, state, _arguments) do
+    _ = RunState.protocol_error(state)
+
+    %{
+      status: :error,
+      kind: :protocol_error,
+      reason: :invalid_kernel_eval_request,
+      retryable?: false
+    }
   end
 
   defp entry_source_within_limit(source, limits) do
