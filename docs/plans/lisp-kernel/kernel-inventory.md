@@ -68,16 +68,17 @@ name its re-home/delete condition. `unknown` is not a durable classification.
 | `Kernel.RunState` | new path | Atomic deadline, counters, protocol exhaustion, serialized evaluation-memory lease, late-provider completion, closed status, and explicit teardown; dropped-event ownership remains with the bounded sink pending final observability integration. |
 | `Kernel.Dispatcher` | new path | Validation, atomic reservation/completion, remaining-deadline timeout, fault containment, bounds, uniform envelopes, and workflow/mission Lisp wiring. |
 | Host provider-registry interface | new path | Host-owned name-to-builder map; manifests can select names but never register executable code. |
-| `Kernel.EventSink` responsibility | new path | Canonical bounded owner-monitored memory sink integrated with run lifecycle; normal drops appear in terminal usage and private exhaustion returns `:event_sink_error`. Evaluation/capability/limit/annotation vocabulary remains open. |
+| `Kernel.EventSink` responsibility | new path | Canonical bounded owner-monitored memory sink integrated with run lifecycle; normal drops appear in terminal usage and private exhaustion returns `:event_sink_error`. Run/evaluation/capability/limit/annotation/drop-summary events are wired; external normal-sink failure and private flush/backpressure semantics remain for TraceLog integration. |
 | `Kernel.Result` / `Kernel.Error` | new path | Only public Kernel outcomes. |
 | `Kernel.compile_bundle/1` | new path | Slice 2 in progress: bounded component-ID DAG, deterministic ordering, per-component validation, dependency namespace compilation, attested frozen artifacts, source hashes/provenance, prelude attachment, and explicit tool-requirement validation. Provider `requires` schema plus compile-time/heap/artifact limits remain open. |
 | Bundle compilation limits | new path | Component/edge/source/time/heap/artifact/diagnostic ceilings independent of the run deadline. |
 | `Kernel.run/2` | new path | Slice 3 in progress: typed explicit configuration, bounded direct entry execution including compile time, attested workflow bundles, lifecycle/error cleanup, terminal-result bounds, canonical start/stop events, and workflow capability dispatch. Remaining event vocabulary is open. |
-| Reserved `kernel-eval` | new path | Slice 4 in progress: workflow-to-mission source and embedded-Program routes, serialized leases, transactional memory, mission-only capability dispatch, and remaining-run timeout enforcement. Lisp helper APIs remain open. |
-| Opaque Program value | new path | Slice 5 in progress: static opaque source identity with byte size/digest, analyzer capture, embedded kernel-eval route, bounded public projection, and no workflow-local capture. Origin/spans and Lisp helper APIs remain open. |
-| `kernel/eval` / `kernel/eval-source` prelude | new path | Explicit embedded versus dynamic paths over one discriminated `kernel-eval` capability. |
-| Generic runtime usage/remaining | new path | Read-only changing enforced-resource snapshots. |
-| Workflow annotation | new path | Bounded host-stamped semantic annotation, not canonical event authority. |
+| Reserved `kernel-eval` | new path | Slice 4 implemented: workflow-to-mission source and embedded-Program routes, serialized leases, transactional memory, mission-only capability dispatch, remaining-run timeout enforcement, and canonical evaluation/capability events. |
+| Opaque Program value | new path | Slice 5 in progress: static opaque source identity with byte size/digest, analyzer capture, embedded kernel-eval route, bounded public projection, no workflow-local capture, and shipped helpers. Accurate origin/inner spans remain open on parser span preservation. |
+| `kernel/eval` / `kernel/eval-source` prelude | new path | Shipped explicit embedded versus dynamic helpers over one discriminated `kernel-eval` capability; errors remain recoverable values. |
+| Generic runtime usage/remaining | new path | Shipped read-only helpers over changing enforced-resource snapshots. |
+| Capability discovery | new path | Shipped environment-local `cap/list` and `cap/describe` helpers with bounded sanitized metadata. |
+| Workflow annotation | new path | Shipped bounded helper emitting host-stamped `workflow-annotation` events without lifecycle authority. |
 
 ### Experimental Kernel implementation
 

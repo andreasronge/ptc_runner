@@ -8,6 +8,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
   alias PtcRunner.Kernel.Evaluation
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.FrozenBundle
+  alias PtcRunner.Kernel.Library
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.MissionEnvironment
   alias PtcRunner.Kernel.ProviderError
@@ -173,8 +174,8 @@ defmodule PtcRunner.Kernel.CoreContractTest do
         event_sink: sink
       )
 
-    assert {:ok, %{usage: %{events_dropped: %{"run-stopped" => 1}}}} =
-             Kernel.run("(return 42)", config)
+    assert {:ok, %{usage: %{events_dropped: dropped}}} = Kernel.run("(return 42)", config)
+    assert dropped["run-stopped"] == 1
   end
 
   test "run owners provide explicit teardown and stop with their creating process" do
@@ -288,7 +289,8 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     assert {:ok, %{value: 42, evaluation_memory: %{defined_count: 0}}} =
              Kernel.run("(return (+ 40 2))", config)
 
-    assert [%{type: "run-started"}, %{type: "run-stopped"}] = EventSink.events(sink)
+    assert ["run-started", "evaluation-started", "evaluation-stopped", "run-stopped"] ==
+             Enum.map(EventSink.events(sink), & &1.type)
   end
 
   test "new Kernel workflow routes only granted capabilities through the dispatcher" do
@@ -314,6 +316,14 @@ defmodule PtcRunner.Kernel.CoreContractTest do
 
     assert {:ok, %{value: %{status: :ok, value: %{"sum" => 42}}}} =
              Kernel.run("(return (tool/add {:left 40 :right 2}))", config)
+
+    assert [started, stopped] =
+             sink
+             |> EventSink.events()
+             |> Enum.filter(&(&1.type in ["capability-started", "capability-stopped"]))
+
+    assert %{data: %{environment: :workflow, name: "add"}} = started
+    assert %{data: %{environment: :workflow, name: "add", status: :ok}} = stopped
   end
 
   test "mission evaluation is serialized, persistent, and cannot use workflow capabilities" do
@@ -358,6 +368,16 @@ defmodule PtcRunner.Kernel.CoreContractTest do
                "(return (tool/kernel-eval {:kind :source :source \"(return 42)\"}))",
                config
              )
+
+    assert [workflow_started, mission_started, mission_stopped, workflow_stopped] =
+             sink
+             |> EventSink.events()
+             |> Enum.filter(&(&1.type in ["evaluation-started", "evaluation-stopped"]))
+
+    assert workflow_started.data.environment == :workflow
+    assert mission_started.data.environment == :mission
+    assert mission_stopped.data.environment == :mission
+    assert workflow_stopped.data.environment == :workflow
   end
 
   test "workflow bundle exports are attached only to the workflow evaluator" do
@@ -467,6 +487,79 @@ defmodule PtcRunner.Kernel.CoreContractTest do
              )
   end
 
+  test "shipped kernel helpers keep embedded and dynamic evaluation explicit" do
+    assert {:ok, kernel_component} = Library.component("kernel")
+    assert {:ok, bundle} = Kernel.compile_bundle([kernel_component])
+    {:ok, workflow} = WorkflowEnvironment.new(bundle: bundle)
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, limits} = Limits.new()
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "kernel-library")
+
+    {:ok, config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        mission_environment: mission,
+        input: %{},
+        limits: limits,
+        event_sink: sink
+      )
+
+    source = """
+    (do
+      (kernel/eval-source "(def retained 40)")
+      (return (kernel/eval (program (return (+ retained 2))))))
+    """
+
+    assert {:ok, %{value: %{outcome: :returned, value: 42}}} = Kernel.run(source, config)
+
+    assert {:ok, %{value: %{kind: :protocol_error, reason: :invalid_kernel_eval_request}}} =
+             Kernel.run("(return (kernel/eval \"(return 42)\"))", config)
+  end
+
+  test "runtime discovery and workflow annotation helpers expose bounded host facts" do
+    assert {:ok, components} = Library.components(["runtime", "cap", "workflow.event"])
+    assert {:ok, bundle} = Kernel.compile_bundle(components)
+
+    {:ok, search} =
+      Capability.new(
+        name: "search",
+        description: "Search a fixed fixture",
+        callback: fn _ -> {:ok, []} end
+      )
+
+    {:ok, workflow} = WorkflowEnvironment.new(bundle: bundle, capabilities: [search])
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, limits} = Limits.new()
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "runtime-library")
+
+    {:ok, config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        mission_environment: mission,
+        input: %{},
+        limits: limits,
+        event_sink: sink
+      )
+
+    source = """
+    (do
+      (workflow.event/annotate "progress" {:stage "started"})
+      (return {:remaining (runtime/remaining)
+               :usage (runtime/usage)
+               :capabilities (cap/list)
+               :search (cap/describe "search")}))
+    """
+
+    assert {:ok, %{value: value}} = Kernel.run(source, config)
+    assert is_integer(value[:remaining])
+    assert is_map(value["usage"])
+    assert [%{name: "search"}] = value["capabilities"]
+    assert %{name: "search", description: "Search a fixed fixture"} = value["search"]
+
+    assert %{type: "workflow-annotation", data: %{annotation_type: "progress"}} =
+             Enum.find(EventSink.events(sink), &(&1.type == "workflow-annotation"))
+  end
+
   test "terminal workflow results and retained mission memory use Kernel limits and state" do
     {:ok, workflow} = WorkflowEnvironment.new([])
     {:ok, mission} = MissionEnvironment.new([])
@@ -485,7 +578,11 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     assert {:error, %{kind: :limit_exceeded, reason: :terminal_result_exceeded}} =
              Kernel.run("(return 42)", config)
 
-    {:ok, state} = RunState.start(Limits.defaults())
+    assert %{type: "limit-exceeded", data: %{reason: :terminal_result_exceeded}} =
+             Enum.find(EventSink.events(sink), &(&1.type == "limit-exceeded"))
+
+    {:ok, retained_limits} = Limits.new(run_duration_ms: 120_000)
+    {:ok, state} = RunState.start(retained_limits)
 
     assert %{outcome: :returned} =
              Evaluation.evaluate_source(state, mission, "(def retained 42)", 100)

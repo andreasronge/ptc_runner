@@ -5,7 +5,14 @@ defmodule PtcRunner.Kernel.Environment do
   alias PtcRunner.Kernel.FrozenBundle
   alias PtcRunner.Kernel.JSONValue
 
-  @reserved MapSet.new(["kernel-eval", "runtime/usage", "runtime/remaining"])
+  @reserved MapSet.new([
+              "kernel-eval",
+              "runtime-usage",
+              "runtime-remaining",
+              "cap-list",
+              "cap-describe",
+              "workflow-annotate"
+            ])
 
   def assemble(bundle, capabilities, data, kind)
       when kind in [:workflow, :mission] do
@@ -13,7 +20,7 @@ defmodule PtcRunner.Kernel.Environment do
          true <- JSONValue.map?(data),
          {:ok, capability_map} <- capability_map(capabilities),
          :ok <- reserved_names(kind, capability_map),
-         :ok <- bundle_requirements(bundle, capability_map) do
+         :ok <- bundle_requirements(bundle, capability_map, kind) do
       {:ok, %{bundle: bundle, capabilities: capability_map, data: data}}
     else
       false -> {:error, :invalid_environment_data}
@@ -56,17 +63,37 @@ defmodule PtcRunner.Kernel.Environment do
       else: :ok
   end
 
-  defp bundle_requirements(%{prelude: %{exports: exports}}, capabilities) do
+  defp bundle_requirements(%{prelude: %{exports: exports}}, capabilities, kind) do
+    granted_names =
+      capabilities
+      |> Map.keys()
+      |> MapSet.new()
+      |> MapSet.union(implicit_capabilities(kind))
+
     missing =
       exports
       |> Enum.flat_map(&Map.get(&1, :tool_refs, []))
       |> Enum.uniq()
-      |> Enum.reject(&Map.has_key?(capabilities, &1))
+      |> Enum.reject(&MapSet.member?(granted_names, &1))
 
     if missing == [],
       do: :ok,
       else: {:error, {:missing_capability_requirement, Enum.sort(missing)}}
   end
 
-  defp bundle_requirements(_bundle, _capabilities), do: :ok
+  defp bundle_requirements(_bundle, _capabilities, _kind), do: :ok
+
+  defp implicit_capabilities(:workflow),
+    do:
+      MapSet.new([
+        "kernel-eval",
+        "runtime-usage",
+        "runtime-remaining",
+        "cap-list",
+        "cap-describe",
+        "workflow-annotate"
+      ])
+
+  defp implicit_capabilities(:mission),
+    do: MapSet.new(["runtime-usage", "runtime-remaining", "cap-list", "cap-describe"])
 end

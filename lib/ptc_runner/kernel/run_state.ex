@@ -42,6 +42,12 @@ defmodule PtcRunner.Kernel.RunState do
   @spec protocol_error(t()) :: :ok | {:error, :protocol_error_limit}
   def protocol_error(state), do: call(state, :protocol_error)
 
+  @spec fail(t(), atom(), atom()) :: :ok
+  def fail(state, kind, reason), do: call(state, {:fail, kind, reason})
+
+  @spec terminal_failure(t()) :: nil | %{kind: atom(), reason: atom()}
+  def terminal_failure(state), do: call(state, :terminal_failure)
+
   @spec close(t()) :: :ok
   def close(state), do: call(state, :close)
 
@@ -79,6 +85,7 @@ defmodule PtcRunner.Kernel.RunState do
        totals: %{workflow: 0, mission: 0},
        evaluations: 0,
        protocol_errors: 0,
+       terminal_failure: nil,
        memory: %{},
        evaluation_lease: nil
      }}
@@ -163,8 +170,30 @@ defmodule PtcRunner.Kernel.RunState do
   def handle_call({token, :protocol_error}, _from, %{token: token} = state) do
     next = state.protocol_errors + 1
     reply = if next > state.limits.protocol_errors, do: {:error, :protocol_error_limit}, else: :ok
-    {:reply, reply, %{state | protocol_errors: next, closed?: state.closed? or reply != :ok}}
+
+    state =
+      if reply == :ok do
+        %{state | protocol_errors: next}
+      else
+        %{
+          state
+          | protocol_errors: next,
+            closed?: true,
+            terminal_failure: %{kind: :limit_exceeded, reason: :protocol_errors}
+        }
+      end
+
+    {:reply, reply, state}
   end
+
+  def handle_call({token, {:fail, kind, reason}}, _from, %{token: token} = state)
+      when is_atom(kind) and is_atom(reason) do
+    failure = state.terminal_failure || %{kind: kind, reason: reason}
+    {:reply, :ok, %{state | closed?: true, terminal_failure: failure}}
+  end
+
+  def handle_call({token, :terminal_failure}, _from, %{token: token} = state),
+    do: {:reply, state.terminal_failure, state}
 
   def handle_call({token, :close}, _from, %{token: token} = state),
     do: {:reply, :ok, %{state | closed?: true}}

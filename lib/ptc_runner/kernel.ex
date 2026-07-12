@@ -7,12 +7,14 @@ defmodule PtcRunner.Kernel do
   alias PtcRunner.Kernel.Dispatcher
   alias PtcRunner.Kernel.Error
   alias PtcRunner.Kernel.Evaluation
+  alias PtcRunner.Kernel.Events
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.InnerPrelude
   alias PtcRunner.Kernel.Program
   alias PtcRunner.Kernel.Result
   alias PtcRunner.Kernel.RunConfig
   alias PtcRunner.Kernel.RunState
+  alias PtcRunner.Kernel.RuntimeTools
   alias PtcRunner.Kernel.StateHandle
   alias PtcRunner.Lisp
   alias PtcRunner.Lisp.ExecutionError
@@ -332,12 +334,14 @@ defmodule PtcRunner.Kernel do
   end
 
   defp run_with_events(entry_source, config, state) do
-    case EventSink.emit(config.event_sink, "run-started", %{labels: config.labels}) do
+    case Events.emit(state, config.event_sink, "run-started", %{labels: config.labels}) do
       :ok ->
         result = run_workflow(entry_source, config, state)
+        result = apply_terminal_failure(result, state)
+        _ = emit_dropped_summary(state, config.event_sink)
         usage = usage_with_events(state, config.event_sink)
 
-        case EventSink.emit(config.event_sink, "run-stopped", %{
+        case Events.emit(state, config.event_sink, "run-stopped", %{
                outcome: outcome(result),
                usage: usage
              }) do
@@ -356,7 +360,33 @@ defmodule PtcRunner.Kernel do
   defp run_workflow(entry_source, config, state) do
     timeout_ms = min(config.limits.workflow_timeout_ms, RunState.remaining_ms(state))
     deadline_ms = System.monotonic_time(:millisecond) + timeout_ms
+    evaluation_id = Events.id("workflow-evaluation")
+    started_ms = System.monotonic_time(:millisecond)
 
+    case Events.emit(state, config.event_sink, "evaluation-started", %{
+           evaluation_id: evaluation_id,
+           environment: :workflow
+         }) do
+      :ok ->
+        result = execute_workflow(entry_source, config, state, timeout_ms, deadline_ms)
+        _ = maybe_emit_workflow_limit(state, config.event_sink, result)
+
+        _ =
+          Events.emit(state, config.event_sink, "evaluation-stopped", %{
+            evaluation_id: evaluation_id,
+            environment: :workflow,
+            status: outcome(result),
+            duration_ms: Events.duration_ms(started_ms)
+          })
+
+        result
+
+      {:error, :event_sink_error} ->
+        event_sink_error(RunState.usage(state))
+    end
+  end
+
+  defp execute_workflow(entry_source, config, state, timeout_ms, deadline_ms) do
     opts = [
       context: config.input,
       tools: workflow_tools(config, state),
@@ -413,12 +443,26 @@ defmodule PtcRunner.Kernel do
              config.workflow_environment,
              name,
              arguments,
-             config.limits.workflow_timeout_ms
+             config.limits.workflow_timeout_ms,
+             config.event_sink
            )
          end}
       end)
 
-    Map.put(tools, "kernel-eval", fn arguments -> kernel_eval(config, state, arguments) end)
+    tools
+    |> Map.merge(
+      RuntimeTools.tools(state, config.workflow_environment, config.event_sink, :workflow)
+    )
+    |> Map.put(
+      "kernel-eval",
+      RuntimeTools.instrument(
+        state,
+        config.event_sink,
+        :workflow,
+        "kernel-eval",
+        fn arguments -> kernel_eval(config, state, arguments) end
+      )
+    )
   end
 
   defp bundle_prelude(%{bundle: %{prelude: prelude}}), do: prelude
@@ -433,7 +477,8 @@ defmodule PtcRunner.Kernel do
             state,
             config.mission_environment,
             source,
-            config.limits.evaluation_timeout_ms
+            config.limits.evaluation_timeout_ms,
+            config.event_sink
           )
       }
     else
@@ -450,7 +495,8 @@ defmodule PtcRunner.Kernel do
             state,
             config.mission_environment,
             source,
-            config.limits.evaluation_timeout_ms
+            config.limits.evaluation_timeout_ms,
+            config.event_sink
           )
       }
     else
@@ -534,6 +580,41 @@ defmodule PtcRunner.Kernel do
          details: %{},
          usage: usage
        }}
+
+  defp apply_terminal_failure(result, state) do
+    case RunState.terminal_failure(state) do
+      nil ->
+        result
+
+      %{kind: :event_sink_error} ->
+        event_sink_error(RunState.usage(state))
+
+      %{kind: kind, reason: reason} ->
+        {:error,
+         %Error{
+           kind: kind,
+           reason: reason,
+           details: %{},
+           usage: RunState.usage(state)
+         }}
+    end
+  end
+
+  defp emit_dropped_summary(state, sink) do
+    case EventSink.dropped(sink) do
+      dropped when map_size(dropped) == 0 -> :ok
+      dropped -> Events.emit(state, sink, "events-dropped", %{counts: dropped})
+    end
+  end
+
+  defp maybe_emit_workflow_limit(
+         state,
+         sink,
+         {:error, %Error{kind: :limit_exceeded, reason: reason}}
+       ),
+       do: Events.emit(state, sink, "limit-exceeded", %{reason: reason})
+
+  defp maybe_emit_workflow_limit(_state, _sink, _result), do: :ok
 
   defp workflow_error_kind(reason)
        when reason in [:timeout, :memory_exceeded, :program_too_large], do: :limit_exceeded

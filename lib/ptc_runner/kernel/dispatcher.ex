@@ -2,6 +2,7 @@ defmodule PtcRunner.Kernel.Dispatcher do
   @moduledoc "Bounded capability invocation with late-result invalidation."
 
   alias PtcRunner.Kernel.Capability
+  alias PtcRunner.Kernel.Events
   alias PtcRunner.Kernel.JSONValue
   alias PtcRunner.Kernel.ProviderError
   alias PtcRunner.Kernel.RunState
@@ -12,29 +13,86 @@ defmodule PtcRunner.Kernel.Dispatcher do
   def dispatch(state, environment, %{capabilities: capabilities}, name, arguments, timeout_ms)
       when environment in [:workflow, :mission] and is_binary(name) and is_map(arguments) and
              is_integer(timeout_ms) do
+    dispatch(state, environment, %{capabilities: capabilities}, name, arguments, timeout_ms, nil)
+  end
+
+  @spec dispatch(
+          RunState.t(),
+          :workflow | :mission,
+          map(),
+          binary(),
+          map(),
+          non_neg_integer(),
+          term()
+        ) :: map()
+  def dispatch(
+        state,
+        environment,
+        %{capabilities: capabilities},
+        name,
+        arguments,
+        timeout_ms,
+        event_sink
+      )
+      when environment in [:workflow, :mission] and is_binary(name) and is_map(arguments) and
+             is_integer(timeout_ms) do
     with %Capability{} = capability <- Map.get(capabilities, name),
          :ok <- validate(capability, arguments),
          :ok <- validate_size(arguments, capability_argument_limit(state)),
          :ok <- RunState.reserve_capability(state, environment, name) do
-      invoke(state, capability, arguments, timeout_ms)
+      invoke_with_events(
+        state,
+        capability,
+        arguments,
+        timeout_ms,
+        environment,
+        event_sink
+      )
     else
       nil ->
         %{status: :error, kind: :capability_denied, reason: :capability_absent, retryable?: false}
 
       {:error, :invalid_arguments} ->
-        protocol_error(state, :invalid_arguments)
+        protocol_error(state, event_sink, :invalid_arguments)
 
       {:error, :argument_exceeded} ->
-        protocol_error(state, :argument_exceeded)
+        protocol_error(state, event_sink, :argument_exceeded)
 
       {:error, :limit_exceeded} ->
-        limit_error(:capability_quota)
+        limit_error(state, event_sink, :capability_quota)
 
       {:error, :live_task_limit} ->
-        limit_error(:live_provider_tasks)
+        limit_error(state, event_sink, :live_provider_tasks)
 
       {:error, :run_closed} ->
-        limit_error(:run_closed)
+        limit_error(state, event_sink, :run_closed)
+    end
+  end
+
+  defp invoke_with_events(state, capability, arguments, timeout_ms, environment, event_sink) do
+    capability_id = Events.id("capability")
+    started_ms = System.monotonic_time(:millisecond)
+    data = %{capability_id: capability_id, environment: environment, name: capability.name}
+
+    case Events.emit(state, event_sink, "capability-started", data) do
+      :ok ->
+        result = invoke(state, capability, arguments, timeout_ms)
+        _ = maybe_emit_limit(state, event_sink, result)
+
+        _ =
+          Events.emit(state, event_sink, "capability-stopped", %{
+            capability_id: capability_id,
+            environment: environment,
+            name: capability.name,
+            status: result.status,
+            duration_ms: Events.duration_ms(started_ms)
+          })
+
+        result
+
+      {:error, :event_sink_error} ->
+        RunState.release_provider_slot(state)
+        limit_error(state, nil, :run_closed)
     end
   end
 
@@ -45,7 +103,7 @@ defmodule PtcRunner.Kernel.Dispatcher do
 
     if timeout_ms <= 0 do
       RunState.release_provider_slot(state)
-      limit_error(:run_deadline)
+      limit_error(state, nil, :run_deadline)
     else
       parent = self()
 
@@ -66,7 +124,7 @@ defmodule PtcRunner.Kernel.Dispatcher do
 
           case RunState.finish_provider(state) do
             :ok -> normalize_result(state, result)
-            {:error, :run_closed} -> limit_error(:run_closed)
+            {:error, :run_closed} -> limit_error(state, nil, :run_closed)
           end
 
         {:DOWN, ^ref, :process, ^pid, reason} ->
@@ -153,15 +211,24 @@ defmodule PtcRunner.Kernel.Dispatcher do
     end
   end
 
-  defp protocol_error(state, reason) do
+  defp protocol_error(state, event_sink, reason) do
     case RunState.protocol_error(state) do
       :ok -> %{status: :error, kind: :protocol_error, reason: reason, retryable?: false}
-      {:error, :protocol_error_limit} -> limit_error(:protocol_errors)
+      {:error, :protocol_error_limit} -> limit_error(state, event_sink, :protocol_errors)
     end
   end
 
-  defp limit_error(reason),
-    do: %{status: :error, kind: :limit_exceeded, reason: reason, retryable?: false}
+  defp limit_error(state, event_sink, reason) do
+    _ = Events.emit(state, event_sink, "limit-exceeded", %{reason: reason})
+    %{status: :error, kind: :limit_exceeded, reason: reason, retryable?: false}
+  end
+
+  defp maybe_emit_limit(state, event_sink, %{kind: kind, reason: reason})
+       when kind in [:timeout, :result_exceeded, :limit_exceeded] do
+    Events.emit(state, event_sink, "limit-exceeded", %{reason: reason})
+  end
+
+  defp maybe_emit_limit(_state, _event_sink, _result), do: :ok
 
   defp normalize_exit(:killed), do: :provider_heap_exceeded
   defp normalize_exit(_reason), do: :provider_exit
