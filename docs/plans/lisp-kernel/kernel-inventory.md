@@ -170,9 +170,9 @@ This area is governed by [`tracelog-contract.md`](tracelog-contract.md).
 
 | Area | Class | Destination |
 | --- | --- | --- |
-| `lib/ptc_runner/upstream/**` | delete | A standard capability provider is the extension seam; no anticipatory generic adapter. |
-| `mcp_server/` | delete | Optional MCP frontend may return later over shared manifest/run builder. |
-| MCP/OpenAPI transports, credentials, catalogs, discovery | delete | Remove modules, deps, tests, docs, config, releases, CI. |
+| `lib/ptc_runner/upstream/**` | deleted | A standard capability provider is the extension seam; no anticipatory generic adapter remains. |
+| `mcp_server/` | deleted | An optional MCP frontend may return later over the shared manifest/run builder. |
+| MCP/OpenAPI transports, credentials, catalogs, discovery | deleted | Modules, tests, sibling package, Docker workflow, and release coupling were removed. |
 | REPL upstream flags/catalog modes | deleted | Removed from `mix ptc.repl`; the task uses explicit shared manifest/environment grants. |
 
 ## Mix tasks

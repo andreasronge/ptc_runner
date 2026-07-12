@@ -64,7 +64,6 @@ defmodule PtcRunner.Lisp do
   alias PtcRunner.Lisp.Result, as: Step
   alias PtcRunner.Lisp.Signature
   alias PtcRunner.Lisp.Tool
-  alias PtcRunner.Lisp.UpstreamAccess
 
   @valid_callers [:in_process_v1, :text_mode, :mcp]
   @valid_profiles [:mcp_no_tools, :mcp_aggregator, :in_process_v1, :text_mode]
@@ -158,12 +157,8 @@ defmodule PtcRunner.Lisp do
       prelude's protected namespaces and public export table are consulted by
       the analyzer/evaluator so qualified prelude calls (e.g. `crm/get-user`)
       resolve, while private helpers stay user-invisible. Compile/attach
-      failures return `{:error, Step}`. When a `:runtime` is also supplied,
-      attach-time `requires` validation runs first. (default: nil)
-    - `:runtime` - Selected upstream runtime handle used for attach-time prelude
-      `requires` validation. When `nil`, prelude `requires` are not validated
-      against any upstream (the configured `:tools` map still guards actual tool
-      surfaces). (default: nil)
+      failures return `{:error, Step}`. Attach-time `tool:<name>`
+      requirements are checked against the granted `:tools` map. (default: nil)
     - `:trace_context` - Trace context for nested agent tracing (default: nil)
     - `:caller` - Closed-set tag for telemetry. One of `:in_process_v1`,
       `:text_mode`, or `:mcp` (default: `:in_process_v1`). Pure
@@ -438,7 +433,6 @@ defmodule PtcRunner.Lisp do
     max_program_bytes = Keyword.get(opts, :max_program_bytes, @default_max_program_bytes)
     journal = Keyword.get(opts, :journal)
     prelude_opt = Keyword.get(opts, :prelude)
-    runtime = Keyword.get(opts, :runtime)
     tools = Keyword.get(opts, :tools, %{})
 
     # Preflight: reject oversized source before any parsing
@@ -452,34 +446,12 @@ defmodule PtcRunner.Lisp do
          journal: journal
        )}
     else
-      upstream_tools =
-        Keyword.get(opts, :upstream_tools, UpstreamAccess.tool_grants(runtime))
-
-      # Attach-time: compile prelude source if needed and validate its
-      # `requires` against the selected upstream runtime BEFORE parsing user
-      # code. On failure, return {:error, Step} :prelude_attach_failed (or the
-      # original compile reason). No prelude attached -> nil, unchanged path.
-      case UpstreamAccess.constrain(runtime, upstream_tools) do
-        {:ok, upstream_tools} ->
-          attach_and_run(
-            source,
-            opts,
-            prelude_opt,
-            runtime,
-            tools,
-            upstream_tools,
-            memory,
-            journal
-          )
-
-        {:error, message} ->
-          {:error, Step.error(:prelude_attach_failed, message, memory, %{}, journal: journal)}
-      end
+      attach_and_run(source, opts, prelude_opt, tools, memory, journal)
     end
   end
 
-  defp attach_and_run(source, opts, prelude_opt, runtime, tools, upstream_tools, memory, journal) do
-    case attach_prelude(prelude_opt, runtime, tools, upstream_tools, memory, journal) do
+  defp attach_and_run(source, opts, prelude_opt, tools, memory, journal) do
+    case attach_prelude(prelude_opt, tools, memory, journal) do
       {:ok, prelude} ->
         source
         |> do_run_inner(Map.put(run_params(opts), :prelude, prelude))
@@ -547,16 +519,11 @@ defmodule PtcRunner.Lisp do
   end
 
   # Resolve the `:prelude` option (compiled artifact or source) and run
-  # attach-time requires validation against the attach context (the selected
-  # upstream `:runtime` and the granted `:tools` map). `nil` means no prelude.
-  # `upstream:` requirements validate against the runtime (skipped when none is
-  # configured — see `PtcRunner.Lisp.Prelude.Attach`); `tool:` requirements
-  # validate against the granted tools map and fail closed when ungranted.
-  defp attach_prelude(nil, _runtime, _tools, _upstream_tools, _memory, _journal), do: {:ok, nil}
+  # attach-time requires validation against the granted tools map.
+  defp attach_prelude(nil, _tools, _memory, _journal), do: {:ok, nil}
 
-  defp attach_prelude(prelude_opt, runtime, tools, upstream_tools, memory, journal) do
-    context =
-      PreludeAttachContext.new(runtime: runtime, tools: tools, upstream_tools: upstream_tools)
+  defp attach_prelude(prelude_opt, tools, memory, journal) do
+    context = PreludeAttachContext.new(tools: tools)
 
     case PreludeAttach.attach(prelude_opt, context) do
       {:ok, prelude} ->

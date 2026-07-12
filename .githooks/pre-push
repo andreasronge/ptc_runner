@@ -259,7 +259,7 @@ echo "🔍 Running pre-push checks..."
 
 START_TIME=$(date +%s)
 
-PROJECTS=("." "mcp_server" "ptc_viewer")
+PROJECTS=("." "ptc_viewer")
 
 project_has_dep() {
   local proj="$1" dep="$2"

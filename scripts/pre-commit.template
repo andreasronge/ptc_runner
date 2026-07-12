@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Pre-commit hook: runs gates per top-level Mix project.
-# Projects: ".", "mcp_server", "ptc_viewer". Non-existent dirs are skipped.
+# Projects: "." and "ptc_viewer". Non-existent dirs are skipped.
 # Per spec Plans/ptc-runner-mcp-server.md §5.3 and §20.5.
 
 set -e
@@ -10,7 +10,7 @@ echo "🔍 Running pre-commit checks..."
 
 START_TIME=$(date +%s)
 
-PROJECTS=("." "mcp_server" "ptc_viewer")
+PROJECTS=("." "ptc_viewer")
 
 ALL_STAGED=$(git diff --cached --name-only --diff-filter=ACMR)
 ALL_DELETED=$(git diff --cached --diff-filter=D --name-only)
