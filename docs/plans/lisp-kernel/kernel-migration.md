@@ -251,22 +251,30 @@ the goal:
 The absence of a PR or human review does not relax repository safety rules,
 test-first bug fixes, documentation updates, or commit verification.
 
-## Retained foundation
+## Retained mechanisms and extraction seams
 
 Start narrowly with:
 
-- parser, analyzer, evaluator, runtime, format, and Clojure conformance;
-- sandbox, heap/time/source limits, and retained-size enforcement;
+- parser, atom-safe AST values, format, and Clojure conformance as foundation;
+- analyzer/evaluator/runtime semantics extracted behind a neutral Kernel
+  evaluation context, removing agent, upstream, journal, and public-Step policy;
+- sandbox process, heap/time/source, worker-limit, and cleanup mechanisms
+  extracted behind a neutral execution interface;
 - native continuation memory and persistent definitions;
-- prelude compiler, protected namespaces, exports, and `requires` discovery;
-- bundle provenance and deterministic source composition;
-- the minimum Lisp tool/capability representation;
+- protected namespace, export, and `requires` discovery extracted from the
+  prelude compiler after removing its SubAgent signature and upstream coupling;
+- existing bundle provenance and source composition as evidence for the new
+  component-ID DAG, not as the target bundle API;
+- current tool dispatch as evidence only; do not carry `PtcRunner.Tool` exposure,
+  caching, SubAgent type, or private-authorization policy into Capability;
 - canonical event data and minimum TraceLog storage/query primitives;
 - `ptc_viewer`, coordinated with its active work;
 - Babashka installer and conformance tooling.
 
 Existing code is evidence, not the target API. In particular, the current
-`PtcRunner.Kernel` hard-codes the policy that moves to Lisp.
+`PtcRunner.Kernel` hard-codes the policy that moves to Lisp, its error path may
+commit candidate evaluation memory, and `StateHandle` owns only leased memory,
+not the complete target RunState.
 
 ## Implementation slices
 
@@ -277,7 +285,8 @@ Each slice is independently reviewable and passes focused tests. Run
 
 - Review and approve `kernel-contract.md`.
 - Populate `kernel-inventory.md` with every root module/top-level directory.
-- Resolve all contract open decisions.
+- Approve the proposed core resolutions in `kernel-contract.md` and record any
+  later-slice schema details still intentionally deferred by the spike.
 - Record the current focused test and benchmark baselines.
 - Do not write runtime code or start deletion until this slice is complete.
 
@@ -291,6 +300,8 @@ Add responsibilities equivalent to:
 - `Kernel.Limits`;
 - `Kernel.RunState`;
 - `Kernel.Dispatcher`;
+- the host-only provider-registry interface;
+- the minimum canonical event and bounded sink primitive;
 - `Kernel.Result` and `Kernel.Error`.
 
 These are responsibilities first; create separate modules only where the code
@@ -305,28 +316,36 @@ Focused tests cover:
 - atomic subordinate-evaluation reservation;
 - deadline snapshots and closure;
 - callback raises, exits, hangs, invalid returns, and oversized results;
+- explicit provider-task heap and live-task ceilings;
 - per-call timeout under the remaining deadline;
 - late-result invalidation after timeout/close;
 - bounded uniform capability envelopes;
 - evaluation-memory commit/rollback and retained-size caps;
+- normal lossy versus private fail-closed event behavior;
+- one deterministic in-memory grant-bearing read capability proving that grant
+  objects remain host-held and cannot be forged from Lisp;
 - bounded usage projection.
 
-Provider callbacks run in monitored tasks. External cancellation is best effort;
-late results must never re-enter Lisp or mutate run state.
+Provider callbacks run in monitored, explicitly heap-limited tasks. External
+cancellation is best effort; late results must never re-enter Lisp or mutate run
+state. Tests distinguish contained provider faults from malicious host extension
+behavior outside the Kernel threat model.
 
-The first code PR should normally stop here.
+The first local implementation commit should normally stop here.
 
 ### 2. Component-ID bundle compilation
 
-Build `compile_bundle/1` over the retained compiler/bundle foundation:
+Build `compile_bundle/1` over the retained compiler/bundle mechanisms:
 
 - explicit closed component set;
 - component-ID dependency graph;
-- deterministic topological ordering;
+- deterministic topological ordering with component-ID tie-breaking;
 - missing dependency and cycle errors;
 - duplicate component ID, namespace, and export conflict errors;
-- environment-specific `requires` validation;
+- recorded `requires` metadata followed by separate environment-assembly
+  validation against the workflow or mission capability map;
 - frozen provenance and hashes;
+- component/edge/source/time/heap/artifact/diagnostic limits;
 - atomic failure with bounded diagnostics.
 
 Do not add stores, roles, fetching, version solving, or runtime selection.
@@ -352,8 +371,8 @@ Add reserved workflow-only `kernel-eval`.
 The first architectural milestone is two sequential evaluations such as:
 
 ```clojure
-(tool/kernel-eval {:program "(def x 40)"})
-(tool/kernel-eval {:program "(return (+ x 2))"})
+(tool/kernel-eval {:kind :source :source "(def x 40)"})
+(tool/kernel-eval {:kind :source :source "(return (+ x 2))"})
 ```
 
 Prove:
@@ -365,6 +384,8 @@ Prove:
 - `kernel-eval` receives only `%MissionEnvironment{}` and has no merge path;
 - definitions persist sequentially;
 - failed and oversized candidates preserve prior evaluation memory;
+- a concurrent evaluation receives recoverable `:busy` without consuming an
+  evaluation budget or queueing past the deadline;
 - all subordinate outcomes are bounded and recoverable by the workflow.
 
 Prefer structural function signatures and tests over checking confinement only
@@ -472,6 +493,10 @@ authority expansion.
 ### 10. Public cutover
 
 - Move retained internal callers to the new Kernel.
+- Run `mix xref graph` and a targeted source search proving that the new Kernel,
+  Lisp libraries, sandbox interface, compiler, and provider registry no longer
+  depend on any SubAgent/upstream/role-store/public-Step type scheduled for
+  deletion.
 - Replace the experimental public Kernel at one explicit cutover.
 - Publish only the contract result/error/environment/config surface.
 - Delete temporary implementation namespaces.

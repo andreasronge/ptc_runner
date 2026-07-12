@@ -26,11 +26,12 @@ name its re-home/delete condition. `unknown` is not a durable classification.
 
 | Area | Class | Retained behavior / destination |
 | --- | --- | --- |
-| `lib/ptc_runner/lisp.ex` | foundation | Public Lisp evaluation entry; simplify options after Kernel cutover. |
+| `lib/ptc_runner/lisp.ex` | migrate | Extract a neutral internal evaluation entry for Kernel; replace agent/context/journal/public-Step options at cutover. |
 | `lib/ptc_runner/lisp/parser*`, `fast_parser*`, AST/source modules | foundation | Parsing and source representation. Add span preservation as an early language workstream. |
-| `lib/ptc_runner/lisp/analyze*` | foundation | Static safety and semantic analysis. |
+| `lib/ptc_runner/lisp/analyze*` | migrate | Retain static safety and Clojure semantics; remove agent budget/history/upstream surfaces and add environment/profile inputs. |
 | Parser/analyzer `program` support | new path | Capture bounded forms without workflow evaluation/resolution; preserve origin/spans; no general collection quote/macros. |
-| `lib/ptc_runner/lisp/eval*`, `runtime*`, `env*` | foundation | Sandboxed evaluation, closures, functions, interop, transactional definitions. |
+| `lib/ptc_runner/lisp/eval*`, `runtime*`, `env*` | migrate | Retain closures/functions/interop/definitions behind a neutral evaluation context; remove agent, upstream, journal, and public-Step coupling. |
+| `Lisp.Eval.ParallelRunner`, `ParallelBudget`, `pmap`/`pcalls` workers | migrate | Retain bounded parallel data/capability execution; integrate provider-task limits and reject concurrent `kernel-eval` with recoverable `:busy`. |
 | `lib/ptc_runner/lisp/retained_size.ex` | foundation | Evaluation-memory and capability-result size enforcement. |
 | `lib/ptc_runner/lisp/format*`, `formatter*`, keyword representation | foundation | Deterministic Lisp formatting and keyword boundary. |
 | `lib/ptc_runner/lisp/registry*`, language/spec validation | foundation | Language reference and conformance. Remove agent-specific registrations only. |
@@ -38,14 +39,14 @@ name its re-home/delete condition. `unknown` is not a durable classification.
 | SubAgent budget/plan/journal special surfaces in Lisp | delete | Replace with generic runtime usage, workflow annotations, or optional capabilities. |
 | `*1`, `*2`, `*3` support | migrate | Retain only for direct REPL history; agent history becomes ordinary workflow data. |
 | `return` / `fail` | foundation | Workflow-neutral terminal control signals. |
-| `lib/ptc_runner/sandbox.ex` | foundation | Process isolation, timeout, heap, cleanup. |
+| `lib/ptc_runner/sandbox.ex` | migrate | Extract process isolation, timeout, heap, and cleanup behind a neutral interface; remove Context/TraceContext/MCP-specific API coupling. |
 
 ### Prelude foundation and deployment platform
 
 | Area | Class | Retained behavior / destination |
 | --- | --- | --- |
-| `lib/ptc_runner/lisp/prelude/compiler.ex` and compiler helpers | foundation | Protected namespaces, exports, `requires`, compilation. |
-| `lib/ptc_runner/lisp/prelude/bundle.ex` | migrate | Become explicit component-ID DAG `compile_bundle/1` with frozen provenance. |
+| `lib/ptc_runner/lisp/prelude/compiler.ex` and compiler helpers | migrate | Retain protected namespaces, exports, `requires`, and compilation after removing SubAgent signature and upstream-specific inference. |
+| `lib/ptc_runner/lisp/prelude/bundle.ex` | migrate | Become explicit bounded component-ID DAG `compile_bundle/1` with frozen provenance. |
 | Protected namespace/export/prompt inventory primitives | foundation | Split workflow/mission validation and mission-only model inventory. |
 | `priv/preludes/agent/*.lisp` | migrate | Split/rewrite as `agent.native`, `agent.core`, `agent.feedback`, `agent.retry`, `workflow.event`, and `result`. |
 | `PtcRunner.PreludeRolePolicy` and grants | delete | Roles remain an optional future environment-builder adapter. |
@@ -64,8 +65,11 @@ name its re-home/delete condition. `unknown` is not a durable classification.
 | `Kernel.Limits` | new path | Normalized hard ceilings. |
 | `Kernel.RunState` | new path | Atomic deadline, counters, evaluation memory, closed status, dropped events. |
 | `Kernel.Dispatcher` | new path | Validation, reservation, timeout, fault containment, bounds, uniform envelope. |
+| Host provider-registry interface | new path | Host-owned name-to-builder map; manifests can select names but never register executable code. |
+| `Kernel.EventSink` responsibility | new path | Minimum canonical event schema, bounded normal queue, fail-closed private policy, dropped-event accounting. |
 | `Kernel.Result` / `Kernel.Error` | new path | Only public Kernel outcomes. |
-| `Kernel.compile_bundle/1` | new path | Explicit local component-DAG compilation. |
+| `Kernel.compile_bundle/1` | new path | Explicit bounded local component-DAG compilation. |
+| Bundle compilation limits | new path | Component/edge/source/time/heap/artifact/diagnostic ceilings independent of the run deadline. |
 | `Kernel.run/2` | new path | Entry-expression workflow execution under two environments. |
 | Reserved `kernel-eval` | new path | Mission-only subordinate evaluation and transactional memory. |
 | Opaque Program value | new path | Static subordinate source identity, bytes/digest/origin/spans; no closures, interpolation, AST manipulation, or environment handles. |
@@ -108,9 +112,20 @@ name its re-home/delete condition. `unknown` is not a durable classification.
 | `PtcRunner.Evidence*` | delete unless proven | Retain only if a current Kernel/TraceLog contract test demonstrates an independent need. |
 | `PtcRunner.Schema` / generated `priv/ptc_schema.json` | migrate | Re-evaluate against manifest/capability schemas; delete SubAgent protocol schema. |
 | `PtcRunner.PtcToolProtocol` | delete | Native action policy moves to Lisp; Kernel capability contract replaces it. |
-| `PtcRunner.Tool` | migrate | Seed for environment-neutral Capability; delete exposure-specific fields. |
+| `PtcRunner.Tool` | migrate | Extract only callback normalization into Capability, then delete Tool and its SubAgent/exposure/cache/private-policy fields with the last old caller. |
 | `PtcRunner.Template`, `Mustache`, `Temporal` | delete | Last consumers are removed agent modes. |
 | `PtcRunner.Chunker` | delete unless proven | Retain only with independent language/Kernel consumer and integration test. |
+
+### Remaining root modules and cross-cutting runtime
+
+| Area | Class | Retained behavior / destination |
+| --- | --- | --- |
+| `PtcRunner.PreludeOrigin` | migrate | One bounded sanitized origin type for Component, diagnostics, and traces. |
+| `PtcRunner.SymbolInventory` | migrate | Derive bounded model-visible inventory exclusively from MissionEnvironment. |
+| `PtcRunner.TraceContext` | migrate/delete | Move unavoidable IDs/provenance to RunState and canonical events, then delete if no independent caller remains. |
+| `PtcRunner.Dotenv` | migrate | CLI/provider-builder convenience only; never ambient Kernel authority. |
+| `PtcRunner.PromptLoader`, `PtcRunner.Prompts` | delete | Remove with compiled SubAgent prompt files and last callers. |
+| `PtcRunner.LLM` | migrate | Thin embedding/provider-registry facade for `llm/request`; no agent policy. |
 
 ### LLM integration
 
@@ -171,6 +186,8 @@ This area is governed by [`tracelog-contract.md`](tracelog-contract.md).
 | Path | Class | Exit/destination |
 | --- | --- | --- |
 | `lib/`, core `test/` | migrate | Follow per-area rows; remove obsolete support/fixtures vertically. |
+| `config/`, `.env.example` | migrate | Retain only Kernel/provider/frontend defaults; remove SubAgent, MCP/upstream, demo, and obsolete release configuration. |
+| `priv/` | migrate | Retain language/spec and rewritten Lisp libraries; delete prompts, variants, schemas, and other assets with their last consumers. |
 | `docs/guides/` | delete/replace | Extract concise Kernel, capability/prelude, TraceLog, REPL/runner docs first. |
 | `docs/conformance/`, specification, function reference, conformance gaps | foundation | Retain. |
 | `docs/plans/lisp-kernel/private-experiment-transcripts.md` | experiment | Complete/re-home transcript work; retain viewer contract rationale. |
@@ -184,6 +201,11 @@ This area is governed by [`tracelog-contract.md`](tracelog-contract.md).
 | `bench/` | migrate | Small domain-blind deterministic corpus and baselines only. |
 | `scripts/` | migrate | Keep active release/repository automation for retained product. |
 | `.github/` | migrate | Remove demo/MCP/examples/old docs jobs; retain conformance/Kernel/viewer gates. |
+| `.githooks/` | migrate | Keep only hooks for retained prepush/precommit/release checks. |
+| root README/CHANGELOG/package metadata (`mix.exs`, `mix.lock`) | migrate | Describe and package only the retained language, Kernel, runner/REPL, and viewer integration. |
+| `AGENTS.md`, `CLAUDE.md`, `usage-rules*`, licenses/REUSE files | foundation | Retain canonical repository/dependency instructions and licensing; update stale product references only. |
+| formatter/Credo/Dialyzer/link-check/Docker control files | migrate | Remove deleted paths and dependencies; retain checks required by the final package/frontends. |
+| `conformance_inventory.json` | foundation | Retain with language conformance tooling. |
 | `priv/plts/`, `_build/`, `deps/`, `tmp/`, `erl_crash.dump` | local cleanup | Not architecture or tracked product content. |
 
 ## Dependencies

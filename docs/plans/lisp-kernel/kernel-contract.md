@@ -1,7 +1,8 @@
 # Minimal Programmable Kernel — V1 Contract
 
-**Status:** proposed normative contract. Resolve open decisions in this file
-before runtime implementation begins.
+**Status:** proposed normative contract for the implementation spike. Core
+runtime decisions are specified for approval; manifest/frontend schemas are
+gated at Slice 8.
 
 **Implementation branch:** `exp/minimal-kernel`, created from
 `exp/lisp-kernel` only when implementation begins.
@@ -15,7 +16,33 @@ It does not define an LLM protocol, agent turn, prompt policy, retry policy,
 conversation format, planning system, or completion contract. Those are shipped
 PTC-Lisp libraries.
 
-The irreducible interface is conceptually:
+The public V1 interface is:
+
+```elixir
+PtcRunner.Kernel.compile_bundle([PtcRunner.Kernel.Component.t()])
+
+PtcRunner.Kernel.run(
+  entry_source,
+  %PtcRunner.Kernel.RunConfig{}
+)
+```
+
+`entry_source` is bounded UTF-8 source text. `%RunConfig{}` has exactly these
+fields:
+
+- `workflow_environment` — a frozen `%WorkflowEnvironment{}`;
+- `mission_environment` — a frozen `%MissionEnvironment{}`;
+- `input` — one bounded JSON-like map with binary keys;
+- `limits` — one normalized `%Limits{}` with no disabled hard limits;
+- `event_sink` — one bounded sink descriptor, never an arbitrary callback;
+- `labels` — optional bounded, sanitized run labels.
+
+The two environment structs and `%RunState{}` are the final V1 module names.
+Environment constructors are the only public way to assemble them. They reject
+unknown fields, duplicate capabilities, reserved-name conflicts, invalid data,
+and unsatisfied prelude requirements before `run/2` begins.
+
+Conceptually this remains:
 
 ```text
 run(entry_expression,
@@ -29,6 +56,21 @@ run(entry_expression,
 BEAM code owns authority, containment, resource enforcement, provider
 boundaries, state ownership, and unavoidable runtime facts. PTC-Lisp owns
 workflow behavior.
+
+### Construction phases
+
+Construction is deliberately split into two phases:
+
+```text
+compile_bundle(components) -> frozen_bundle
+assemble_environment(frozen_bundle, capabilities, data) -> environment
+```
+
+Bundle compilation validates source, component identity, dependency structure,
+namespaces, exports, provenance, and recorded `requires`. Environment assembly
+validates those recorded requirements against the capabilities actually granted
+to that environment. Compilation never grants authority and does not need an
+environment.
 
 ## Inputs
 
@@ -59,18 +101,33 @@ deferred until a measured caching need exists.
 
 The Kernel receives one input map. Agent workflows conventionally use:
 
-```clojure
-{:task "Research the subject"
- :context {...}}
+```elixir
+%{"task" => "Research the subject",
+  "context" => %{}}
 ```
 
 The workflow receives it as explicit data, not through an ambient configuration
-namespace.
+namespace. Binary keys remain Lisp strings; Kernel does not implicitly
+keywordize host input.
 
 ### Frozen bundles
 
 `compile_bundle/1` accepts an explicit closed set of source or already compiled
-components and returns one immutable bundle.
+components and returns one immutable bundle. V1 uses fixed conservative bundle
+limits rather than adding a second configuration surface during the spike.
+
+A component contains:
+
+- an ID matching `[a-z][a-z0-9._-]{0,127}`;
+- exactly one of bounded UTF-8 `source` or a compatible compiled artifact;
+- a sorted, duplicate-free list of component-ID dependencies;
+- a bounded sanitized origin;
+- recorded namespace, export, and `requires` metadata.
+
+Compiled artifacts are accepted only when their compiler-format version is
+supported and their encoded artifact checksum verifies. V1 source components
+hash raw UTF-8 bytes with SHA-256. A frozen bundle records compiler-format
+version, source hash/provenance when present, and ordered component hashes.
 
 It:
 
@@ -82,11 +139,21 @@ It:
 - records component IDs, dependency edges, source origins, and hashes;
 - validates protected namespaces and export metadata.
 
+When several graph nodes are ready, lexicographic component ID is the
+topological tie-breaker. "Incompatible exports" means duplicate qualified
+public refs, a public/private collision at the same qualified ref, or conflicting
+signature/effect metadata for a qualified ref.
+
+Compilation is independently bounded by component count, dependency-edge
+count, aggregate source bytes, compile time, compile heap, frozen-artifact bytes,
+and diagnostic bytes. It is not covered by the later run deadline.
+
 Namespaces identify Lisp code and exports; they are not a second dependency
 graph. Selection, fetching, version choice, roles, and stores happen outside
 `compile_bundle/1` and `run/2`.
 
-`run/2` accepts only frozen workflow and mission bundles. Active bundles cannot
+`run/2` accepts only environments containing frozen workflow and mission
+bundles. Active bundles cannot
 be mutated during a run.
 
 ## Two environment confinement
@@ -149,15 +216,52 @@ A capability has:
 
 - a stable name;
 - bounded documentation;
-- an argument signature/schema;
+- a strict host-constructed argument schema;
 - presentation metadata such as `model_visible: false`;
 - a host callback or borrowed provider handle.
+
+Capability values and provider handles remain exclusively in host-owned
+environment maps. Lisp receives only sanitized metadata and an unforgeable
+dispatcher route; no callback, closure environment, provider handle, grant, or
+environment struct is representable as a Lisp value.
 
 Presentation controls inventory rendering only. Avoid `private` terminology as
 an authorization concept.
 
 For V1, manifests select providers from a host registry. They cannot name
 arbitrary Elixir modules, functions, or callback terms.
+
+Providers return only `{:ok, json_value}` or
+`{:error, %PtcRunner.Kernel.ProviderError{}}`. `json_value` is recursively
+limited to nil, booleans, finite numbers, UTF-8 binaries, lists, and maps with
+unique binary keys. Provider errors use a closed host atom vocabulary and
+bounded binary details. Bare values, exceptions, PIDs, ports, references,
+functions, structs, and arbitrary atoms are invalid provider returns.
+The reserved host-internal `kernel-eval` capability is not a manifest-selectable
+provider and is the only V1 dispatch route allowed to receive an opaque Program
+value. Its discriminated schema rejects Program values on the source path and
+strings on the embedded path.
+
+### Elixir/Lisp value boundary
+
+PTC-Lisp keeps its existing atom-safe keyword representation: keywords from the
+bounded runtime vocabulary may be atoms and novel source keywords are
+`%PtcRunner.Lisp.Keyword{name: binary}`. Arbitrary source text is never converted
+to a BEAM atom.
+
+At capability dispatch:
+
+- Lisp keyword map keys become binary provider keys using the keyword name;
+- Lisp string keys remain binary provider keys;
+- a map containing both a keyword and string key that normalize to the same
+  binary is rejected as an ambiguous argument;
+- provider binary map keys remain Lisp strings in domain values;
+- the dispatcher alone constructs keyword-keyed dispatch envelopes and the
+  closed keyword vocabulary used by their `:status`, `:kind`, `:reason`, and
+  `:outcome` fields.
+
+Run input and manifest/provider domain data are JSON-like binary-keyed values.
+They are not implicitly keywordized.
 
 ### Dispatch semantics
 
@@ -173,12 +277,24 @@ The host dispatcher:
 - invalidates borrowed results when the run closes;
 - prevents late callback results from re-entering Lisp or mutating run state.
 
+Each callback runs in its own monitored process with an explicit provider heap
+ceiling; BEAM process limits are not inherited. The dispatcher also bounds the
+number of live provider tasks. A callback may be killed after timeout, but
+already-issued external effects and descendants owned by trusted provider code
+cannot be rolled back by Kernel.
+
 A validated dispatch attempt consumes capability budget even if the provider
 fails. Argument-validation failures do not invoke the provider and are counted
 as protocol errors.
 
 External cancellation is best effort. The hard guarantee is that a timed-out or
 closed result cannot resume the workflow or commit state.
+
+Host-selected providers are trusted extension code. Kernel contains their
+ordinary raises, exits, hangs, invalid returns, and result sizes, but it is not a
+security boundary against a provider that deliberately creates ETS tables,
+ports, unlinked descendants, or VM-global state. Adversarial providers or
+tenants require a separate node or OS/container boundary.
 
 ### Uniform result envelope
 
@@ -224,12 +340,31 @@ or:
 Lisp programming errors outside capability dispatch abort that evaluation; they
 are not capability errors.
 
+### Dispatch failure matrix
+
+| Condition | Capability budget | Lisp result | Outer Kernel result |
+| --- | --- | --- | --- |
+| Argument/schema failure | Not consumed; protocol-error counter increments | `{:status :error :kind :protocol-error ...}` | None unless workflow chooses to fail |
+| Capability absent from active environment | Not consumed | Evaluation fails with environment-local `capability-denied` | Outer workflow aborts; subordinate evaluation returns `:capability-denied` |
+| Total/per-name quota exhausted | Not consumed beyond the exhausted count | `{:status :error :kind :limit-exceeded ...}` | None unless workflow chooses to fail |
+| Provider error or raise/exit | Consumed | `{:status :error :kind :provider-error ...}` | None unless workflow chooses to fail |
+| Provider timeout | Consumed | `{:status :error :kind :timeout ...}` | None unless the run deadline is also exhausted |
+| Invalid provider result | Consumed | `{:status :error :kind :invalid-result ...}` | None unless workflow chooses to fail |
+| Oversized provider result | Consumed | `{:status :error :kind :result-exceeded ...}` | None unless workflow chooses to fail |
+| Run closed/deadline exhausted | Not dispatched | No late value re-enters Lisp | `:limit-exceeded` |
+| Dispatcher/owner invariant failure | As atomically recorded before failure | No recoverable envelope is fabricated | `:internal-error` |
+
+All rows emit bounded canonical attempt/stop facts when the event policy permits.
+Provider failures never become an outer Kernel error merely because the
+provider failed; workflow policy decides whether a recoverable envelope is
+terminal.
+
 ## Safe subordinate evaluation
 
 `kernel-eval` is the essential authority-crossing workflow capability:
 
 ```clojure
-(tool/kernel-eval {:program source})
+(tool/kernel-eval {:kind :source :source source})
 ```
 
 It always:
@@ -244,6 +379,12 @@ It always:
 - commits acceptable memory transactionally;
 - preserves prior memory on failure or oversize;
 - returns a bounded domain outcome in the uniform dispatch envelope.
+
+Only a successfully completed evaluation may commit candidate memory. This
+includes a definition-only program that reaches normal end-of-input and a
+program that executes `return`. `fail`, parse/analyze/runtime errors, capability
+denial, timeout, heap kill, result oversize, retained-memory oversize, or run
+closure always release the lease and preserve the prior memory exactly.
 
 It has no agent turn number, pending LLM action, or native-tool handshake.
 Correlation policy belongs to the outer workflow; the host may assign immutable
@@ -319,6 +460,9 @@ Both remain ordinary Lisp functions over the one reserved host capability:
 The dispatcher validates the discriminated request and exactly one
 representation. Both paths use the same mission environment, evaluation
 memory, hard limits, transactional commit, result envelope, and tracing.
+The raw `tool/kernel-eval` route is reserved but callable by workflow Lisp so
+the helpers remain ordinary library code. It is absent from the mission
+environment and mission inventory.
 
 No interpolation is supported in V1. Changing values cross the boundary only
 through explicit mission input/context:
@@ -358,6 +502,13 @@ Program diagnostics should map to the original workflow origin and inner spans
 when end-to-end span preservation exists. Until then, diagnostics may refer to
 canonical rendered subordinate source and must state that limitation.
 
+Program identity is the SHA-256 digest of canonical UTF-8 source rendered from
+the captured forms. Its `byte_size` is the canonical-source byte size. The
+entire containing workflow source is still charged to workflow source limits;
+the canonical Program bytes are charged again on each subordinate evaluation.
+When parser spans exist, origin metadata may additionally identify the exact
+original source slice without changing Program identity.
+
 ## State
 
 Two Lisp state domains exist:
@@ -381,7 +532,14 @@ One run-owned process atomically owns:
 State mutations use single owner-process operations. A separate read followed
 by update is forbidden.
 
-V1 subordinate evaluation is sequential.
+V1 allows ordinary workflow capability calls to run concurrently where existing
+PTC-Lisp constructs permit it, subject to task and capability limits.
+Subordinate evaluation itself is serialized: at most one `kernel-eval` may hold
+the evaluation-memory lease. A concurrent request is not queued; it consumes no
+subordinate-evaluation budget and returns a recoverable
+`{:status :error :kind :busy :reason :evaluation-in-progress ...}` envelope.
+Mission programs may use bounded parallel data operations, but a mission
+environment cannot invoke `kernel-eval` recursively.
 
 ## Hard limits
 
@@ -391,11 +549,42 @@ Kernel limits are measurable host resources, not agent concepts:
 - total and per-name workflow capability calls;
 - total and per-name mission capability calls;
 - subordinate evaluations;
+- protocol errors;
 - entry and subordinate source bytes;
 - per-evaluation timeout and heap;
 - retained evaluation-memory bytes;
 - capability argument/result bytes;
-- feedback, event, and terminal-result bytes.
+- annotation, event, and terminal-result bytes.
+
+The normalized V1 defaults are application-independent and conservative:
+
+| Limit | Default |
+| --- | ---: |
+| Run duration | 30,000 ms |
+| Workflow/subordinate evaluation timeout | 30,000 / 1,000 ms |
+| Workflow/subordinate heap | 8,000,000 / 1,250,000 words |
+| Provider task heap | 5,000,000 words |
+| Live provider tasks | 8 |
+| Workflow capability calls, total/per name | 64 / 16 |
+| Mission capability calls, total/per name | 128 / 32 |
+| Subordinate evaluations | 16 |
+| Protocol errors | 32 |
+| Entry/subordinate source | 262,144 / 131,072 bytes |
+| Retained evaluation memory | 2,000,000 bytes |
+| Capability argument/result | 262,144 / 1,000,000 bytes |
+| Event payload/terminal result | 262,144 / 1,000,000 bytes |
+| Normal event queue | 256 events and 4,000,000 aggregate bytes |
+
+Bundle defaults are 128 components, 512 dependency edges, 2,000,000 aggregate
+source bytes, 5,000 ms compile time, 8,000,000 compile-heap words, 4,000,000
+frozen-artifact bytes, and 65,536 diagnostic bytes. Numeric limits are positive
+integers; V1 has no `nil`, zero, or infinity escape hatch. Embedders may lower or
+raise normalized limits before construction, but frontends apply their own
+administrator ceilings and untrusted manifests cannot exceed them.
+
+Retained-size accounting is the conservative `PtcRunner.Lisp.RetainedSize`
+measure, not exact physical memory. Shared referenced binaries may be counted
+more than once. Heap limits are per BEAM process, not whole-node limits.
 
 `max_turns`, retries, planning steps, and other workflow policy are Lisp
 configuration below these ceilings.
@@ -405,7 +594,8 @@ and frozen bundles have been validated and constructed. It covers workflow
 evaluation, subordinate evaluation, providers, required event delivery, final
 projection, and run closure.
 
-Bundle compilation normally occurs before the run deadline.
+Bundle compilation occurs before the run deadline under the independent bundle
+limits above.
 
 ## Runtime facts and discovery
 
@@ -438,6 +628,23 @@ only its own capabilities. Metadata is bounded, deterministic, and sanitized.
 The Kernel emits canonical unavoidable runtime facts to a bounded run-owned
 sink. It does not invoke arbitrary callbacks directly in the execution path.
 
+The minimum normal event vocabulary is:
+
+- `run-started` and exactly one attempted `run-stopped`;
+- `evaluation-started` / `evaluation-stopped` for workflow and subordinate
+  evaluations;
+- `capability-started` / `capability-stopped` for validated dispatch attempts;
+- `limit-exceeded`;
+- `workflow-annotation`;
+- `events-dropped`.
+
+Every event has schema version, run ID, trace ID, monotonic sequence, UTC
+timestamp, type, and bounded data. Applicable events add evaluation ID,
+capability ID, environment (`workflow` or `mission`), capability name, status,
+and duration in integer milliseconds. The run-owned event process assigns
+sequence and bounds payloads before enqueueing; producers cannot provide those
+fields.
+
 Normal tracing:
 
 - preserves event order;
@@ -446,8 +653,20 @@ Normal tracing:
 - reports dropped-event counts;
 - prevents sink failures from escaping as unrelated Kernel failures.
 
+The normal sink uses the event-count and aggregate-byte queue limits in
+`Limits`. Enqueue never blocks workflow execution. Once full, it drops later
+normal events and atomically increments counts by event type. Before
+`run-stopped`, Kernel attempts one bounded `events-dropped` summary; the same
+counts are also present in terminal usage and `run-stopped` data so a full sink
+cannot hide loss. Sink-worker failure closes normal delivery and is reported
+through those counts rather than changing the workflow outcome.
+
 Exact private transcript capture uses an explicit fail-closed sink policy where
 loss is not permitted. Its delivery remains within the run deadline.
+Its queue is still bounded, but enqueue applies backpressure within the remaining
+deadline. Queue exhaustion, sink failure, or failure to flush before the
+deadline closes the run with outer kind `:event_sink_error`; it never silently
+falls back to normal lossy tracing.
 
 Workflow code may emit a bounded annotation. The host stamps its type, run ID,
 sequence, timestamp, and workflow-authored provenance. Workflow code cannot
@@ -491,7 +710,7 @@ Stable V1 `kind` categories are small:
 - `:workflow_failed`;
 - `:limit_exceeded`;
 - `:protocol_error`;
-- `:capability_error`;
+- `:event_sink_error`;
 - `:configuration_error`;
 - `:internal_error`.
 
@@ -581,10 +800,22 @@ a new frozen bundle through a separate host-gated operation or later run.
 
 ## Manifest and frontend boundary
 
-V1 uses one strict versioned manifest format; JSON is the proposed choice.
-Unknown keys are rejected. Paths resolve according to documented rules relative
-to the manifest directory. Destinations such as private traces receive
-additional safety validation.
+V1 uses one strict versioned JSON manifest with top-level `"version": 1`.
+Unknown keys, duplicate JSON object keys, unsupported versions, non-UTF-8 input,
+and values outside documented bounds are rejected. There is no YAML, TOML, or
+implicit environment-variable substitution.
+
+Source and input paths are relative to the canonical manifest directory. They
+must resolve, after symlink resolution, to regular files beneath that directory;
+absolute paths, traversal, devices, FIFOs, sockets, and symlink escape are
+rejected. A host embedding API may construct environments from other paths
+directly because it is already the authority boundary.
+
+Trace destinations are relative to a separately configured administrator-owned
+output root, not the manifest source root. Normal trace files are created without
+following a final symlink. Private transcript directories/files use permissions
+`0700`/`0600`, reject pre-existing unsafe ownership or permissions, and fail
+closed on validation or write failure.
 
 The manifest selects:
 
@@ -597,6 +828,13 @@ The manifest selects:
 - event/trace policy.
 
 It cannot name arbitrary Elixir code.
+
+The provider registry is a host-owned map from bounded provider name to a
+trusted builder implementing the Kernel provider contract. PtcRunner ships a
+small built-in registry; embedders may supply additional builders directly to
+the run builder. Manifests contain only provider names and bounded provider
+configuration accepted by the selected builder. A manifest cannot register,
+replace, or point at a module, function, file, serialized callback, or code URL.
 
 One loader/run builder serves `mix ptc.run` and future Docker, HTTP, Viewer Lab,
 or optional MCP frontends. Server frontends should normally select
@@ -618,11 +856,14 @@ grants.
 - streaming LLM workflows;
 - chat lifecycle semantics.
 
-## Open decisions to close before implementation
+## Slice gates still requiring concrete schemas
 
-- Confirm JSON as the V1 manifest format and freeze unknown-key/version rules.
-- Freeze path-resolution and destination-safety rules.
-- Freeze the built-in provider registry and its extension mechanism.
-- Choose final module names for the two environment structs and run state.
-- Freeze exact Elixir-to-Lisp keyword/string boundary encoding.
-- Decide the minimum normal event vocabulary and dropped-event reporting shape.
+The architectural decisions formerly listed as open have proposed resolutions
+above. Approve them in Slice 0. Before
+Slice 1, the implementation commit must add exact struct types and validation
+tests for `Component`, `Capability`, both environments, `Limits`, `RunConfig`,
+`RunState`, provider errors, and event sinks. Before Slice 8, the manifest work
+must add the complete JSON field schema, built-in provider-name list, per-field
+bounds, and path test matrix. These are schema-definition tasks within the
+approved boundaries above, not invitations to silently change authority or
+execution semantics during implementation.
