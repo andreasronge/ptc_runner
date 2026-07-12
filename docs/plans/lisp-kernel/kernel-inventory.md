@@ -73,7 +73,7 @@ name its re-home/delete condition. `unknown` is not a durable classification.
 | `Kernel.compile_bundle/1` | new path | Slice 2 in progress: bounded component-ID DAG, deterministic ordering, frozen source hashes; environment `requires` validation and artifact limits remain open. |
 | Bundle compilation limits | new path | Component/edge/source/time/heap/artifact/diagnostic ceilings independent of the run deadline. |
 | `Kernel.run/2` | new path | Slice 3 in progress: typed explicit configuration, bounded direct entry execution, canonical lifecycle events, and workflow capability dispatch. Workflow bundle assembly and mission confinement remain open. |
-| Reserved `kernel-eval` | new path | Slice 4 in progress: source-only mission evaluation, serialized leases, transactional memory, and mission-only capability dispatch. Static Program values and Lisp helpers remain open. |
+| Reserved `kernel-eval` | new path | Slice 4 in progress: workflow-to-mission source route, serialized leases, transactional memory, and mission-only capability dispatch. Static Program values and Lisp helpers remain open. |
 | Opaque Program value | new path | Static subordinate source identity, bytes/digest/origin/spans; no closures, interpolation, AST manipulation, or environment handles. |
 | `kernel/eval` / `kernel/eval-source` prelude | new path | Explicit embedded versus dynamic paths over one discriminated `kernel-eval` capability. |
 | Generic runtime usage/remaining | new path | Read-only changing enforced-resource snapshots. |

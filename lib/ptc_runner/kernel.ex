@@ -16,6 +16,7 @@ defmodule PtcRunner.Kernel do
   alias PtcRunner.Lisp
   alias PtcRunner.Lisp.ExecutionError
   alias PtcRunner.Lisp.Format
+  alias PtcRunner.Lisp.Keyword, as: LispKeyword
   alias PtcRunner.Lisp.Prelude
   alias PtcRunner.Lisp.Prelude.Bundle
   alias PtcRunner.Lisp.Prelude.Compiler
@@ -382,20 +383,28 @@ defmodule PtcRunner.Kernel do
     Map.put(tools, "kernel-eval", fn arguments -> kernel_eval(config, state, arguments) end)
   end
 
-  defp kernel_eval(config, state, %{"kind" => "source", "source" => source})
-       when is_binary(source),
-       do: %{
-         status: :ok,
-         value:
-           Evaluation.evaluate_source(
-             state,
-             config.mission_environment,
-             source,
-             config.limits.evaluation_timeout_ms
-           )
-       }
+  defp kernel_eval(config, state, %{"kind" => kind, "source" => source}) when is_binary(source) do
+    if keyword_name(kind) == "source" do
+      %{
+        status: :ok,
+        value:
+          Evaluation.evaluate_source(
+            state,
+            config.mission_environment,
+            source,
+            config.limits.evaluation_timeout_ms
+          )
+      }
+    else
+      invalid_kernel_eval_request(state)
+    end
+  end
 
   defp kernel_eval(_config, state, _arguments) do
+    invalid_kernel_eval_request(state)
+  end
+
+  defp invalid_kernel_eval_request(state) do
     _ = RunState.protocol_error(state)
 
     %{
@@ -405,6 +414,11 @@ defmodule PtcRunner.Kernel do
       retryable?: false
     }
   end
+
+  defp keyword_name(%LispKeyword{name: name}), do: name
+  defp keyword_name(name) when is_atom(name), do: Atom.to_string(name)
+  defp keyword_name(name) when is_binary(name), do: name
+  defp keyword_name(_value), do: nil
 
   defp entry_source_within_limit(source, limits) do
     if byte_size(source) <= limits.entry_source_bytes,

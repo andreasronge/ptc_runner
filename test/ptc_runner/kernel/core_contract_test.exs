@@ -201,4 +201,26 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     assert %{capability_calls: %{workflow: %{}, mission: %{}}} = RunState.usage(state)
     assert workflow.capabilities["workflow-only"]
   end
+
+  test "workflow kernel-eval routes source into the mission environment" do
+    {:ok, workflow} = WorkflowEnvironment.new([])
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, limits} = Limits.new()
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "kernel-eval")
+
+    {:ok, config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        mission_environment: mission,
+        input: %{},
+        limits: limits,
+        event_sink: sink
+      )
+
+    assert {:ok, %{value: %{status: :ok, value: %{outcome: :returned, value: 42}}}} =
+             Kernel.run(
+               "(return (tool/kernel-eval {:kind :source :source \"(return 42)\"}))",
+               config
+             )
+  end
 end
