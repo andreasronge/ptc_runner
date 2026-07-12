@@ -7,15 +7,18 @@ defmodule PtcRunner.Kernel.Library do
   @runtime_path Path.expand("../../../priv/preludes/kernel/runtime.lisp", __DIR__)
   @cap_path Path.expand("../../../priv/preludes/kernel/cap.lisp", __DIR__)
   @workflow_event_path Path.expand("../../../priv/preludes/kernel/workflow.event.lisp", __DIR__)
+  @fs_path Path.expand("../../../priv/preludes/kernel/fs.lisp", __DIR__)
   @external_resource @kernel_path
   @external_resource @runtime_path
   @external_resource @cap_path
   @external_resource @workflow_event_path
+  @external_resource @fs_path
   @sources %{
     "kernel" => File.read!(@kernel_path),
     "runtime" => File.read!(@runtime_path),
     "cap" => File.read!(@cap_path),
-    "workflow.event" => File.read!(@workflow_event_path)
+    "workflow.event" => File.read!(@workflow_event_path),
+    "fs" => File.read!(@fs_path)
   }
 
   @spec component(binary()) :: {:ok, Component.t()} | {:error, :unknown_library}

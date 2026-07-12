@@ -79,6 +79,7 @@ name its re-home/delete condition. `unknown` is not a durable classification.
 | Generic runtime usage/remaining | new path | Shipped read-only helpers over changing enforced-resource snapshots. |
 | Capability discovery | new path | Shipped environment-local `cap/list` and `cap/describe` helpers with bounded sanitized metadata. |
 | Workflow annotation | new path | Shipped bounded helper emitting host-stamped `workflow-annotation` events without lifecycle authority. |
+| `Kernel.FileCapability` / `fs` library | new path | Slice 6 deterministic proof: host-held read root, exact argument schema, relative-path and symlink confinement, pre-read/result bounds, UTF-8 results, mission-only discovery, and no ambient workflow filesystem route. |
 
 ### Experimental Kernel implementation
 
