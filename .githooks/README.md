@@ -13,22 +13,20 @@ the per-clone `.git/hooks/` directory). Today there is one:
 
 ## One-time setup per clone
 
-After cloning (or in any existing clone), point git at this directory:
+Install the tracked pre-push entry point together with the repository's
+pre-commit hook:
 
 ```bash
-git config core.hooksPath .githooks
+./scripts/install-hooks.sh
 ```
 
-Verify with:
+The installer resolves the effective hook directory through Git, so it also
+works with linked worktrees and an existing `core.hooksPath` setting. Verify
+the effective path with:
 
 ```bash
-git config --get core.hooksPath
-# → .githooks
+git rev-parse --git-path hooks/pre-push
 ```
-
-This is per-clone (it lives in `.git/config`), so each contributor
-runs it once. Linked worktrees inherit the parent clone's setting —
-no extra step there.
 
 ## Override: skip the docs-only short-circuit
 
@@ -72,13 +70,18 @@ After that the hook (and `mix test`) work normally.
 Pushed/dirty paths matching these regexes are docs-only-eligible:
 
 - `^Plans/.*\.md$`
+- `^docs/plans/.*\.md$`
 - `^CHANGELOG\.md$`
 - `^LICENSES/MIT\.txt$`
 - `^\.gitignore$`
 - `^\.githooks/README\.md$`
 
-Everything else (including `README.md`, `docs/**.md`,
+Everything else (including `README.md`, non-plan `docs/**.md`,
 `priv/prompts/**.md`, `usage-rules*.md`, all source code, configs,
 fixtures) falls through to the full gate. See
 `Plans/pre-push-perf.md` §"Phase 1" for the verified list of
 runtime-read / doctested markdown that the deny side protects.
+
+The full gate reports elapsed seconds for each project's test and Dialyzer
+steps. This makes PLT refreshes and unusually slow test runs visible instead
+of folding them into one total.

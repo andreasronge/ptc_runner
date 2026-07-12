@@ -2,15 +2,9 @@
 
 echo "Installing git hooks..."
 
-# Determine git hooks directory (handles worktrees)
-if [ -f .git ]; then
-  # This is a worktree, read the gitdir
-  GITDIR=$(cat .git | sed 's/gitdir: //')
-  HOOKS_DIR="$GITDIR/hooks"
-else
-  # Regular git repo
-  HOOKS_DIR=".git/hooks"
-fi
+# Resolve the effective hooks directory through Git so linked worktrees and a
+# configured core.hooksPath use the same location Git itself will execute.
+HOOKS_DIR=$(git rev-parse --git-path hooks)
 
 # Create hooks directory if it doesn't exist
 mkdir -p "$HOOKS_DIR"

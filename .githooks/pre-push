@@ -53,6 +53,7 @@ RUN_FULL = 2
 # Strict allow-list (exact regexes against repo-relative paths).
 ALLOW_PATTERNS = [
     re.compile(r"^Plans/.*\.md$"),
+    re.compile(r"^docs/plans/.*\.md$"),
     re.compile(r"^CHANGELOG\.md$"),
     re.compile(r"^(mcp_server|ptc_viewer)/CHANGELOG\.md$"),
     re.compile(r"^LICENSES/MIT\.txt$"),
@@ -282,12 +283,13 @@ run_project_gates() {
   pushd "$proj" > /dev/null
 
   echo "  ⏳ Running full test suite..."
+  local test_start=$SECONDS
   if ! mix test --exclude clojure 2>&1; then
     echo "  ❌ Tests failed in $label. Run: (cd $proj && mix test)"
     popd > /dev/null
     exit 1
   fi
-  echo "  ✅ Tests passed"
+  echo "  ✅ Tests passed in $((SECONDS - test_start))s"
 
   # CWD is the project dir (we are inside `pushd "$proj"`), so check
   # `./mix.exs` rather than `$proj/mix.exs`. Passing `$proj` here would
@@ -295,6 +297,7 @@ run_project_gates() {
   # dialyzer for non-root projects.
   if project_has_dep "." "dialyxir"; then
     echo "  ⏳ Running dialyzer (this may take a moment)..."
+    local dialyzer_start=$SECONDS
     DIALYZER_OUTPUT=$(mix dialyzer 2>&1) || DIALYZER_EXIT=$?
     DIALYZER_EXIT=${DIALYZER_EXIT:-0}
 
@@ -306,7 +309,7 @@ run_project_gates() {
       popd > /dev/null
       exit 1
     fi
-    echo "  ✅ Dialyzer passed"
+    echo "  ✅ Dialyzer passed in $((SECONDS - dialyzer_start))s"
     unset DIALYZER_EXIT
   else
     echo "  ⏭️  Dialyzer not declared in ${label}mix.exs"
