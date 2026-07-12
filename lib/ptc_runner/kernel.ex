@@ -319,27 +319,51 @@ defmodule PtcRunner.Kernel do
   @spec run(binary(), RunConfig.t()) :: {:ok, Result.t()} | {:error, Error.t()}
   def run(entry_source, %RunConfig{} = config) when is_binary(entry_source) do
     with :ok <- entry_source_within_limit(entry_source, config.limits),
-         {:ok, state} <- RunState.start(config.limits),
-         :ok <- EventSink.emit(config.event_sink, "run-started", %{labels: config.labels}),
-         result <- run_workflow(entry_source, config, state),
-         :ok <-
-           EventSink.emit(config.event_sink, "run-stopped", %{
-             outcome: outcome(result),
-             usage: RunState.usage(state)
-           }) do
-      RunState.close(state)
-      result
+         {:ok, state} <- RunState.start(config.limits) do
+      try do
+        run_with_events(entry_source, config, state)
+      after
+        RunState.close(state)
+        RunState.stop(state)
+      end
     else
       {:error, reason} -> configuration_error(reason, %{})
     end
   end
 
+  defp run_with_events(entry_source, config, state) do
+    case EventSink.emit(config.event_sink, "run-started", %{labels: config.labels}) do
+      :ok ->
+        result = run_workflow(entry_source, config, state)
+        usage = usage_with_events(state, config.event_sink)
+
+        case EventSink.emit(config.event_sink, "run-stopped", %{
+               outcome: outcome(result),
+               usage: usage
+             }) do
+          :ok ->
+            put_result_usage(result, usage_with_events(state, config.event_sink))
+
+          {:error, :event_sink_error} ->
+            event_sink_error(usage_with_events(state, config.event_sink))
+        end
+
+      {:error, :event_sink_error} ->
+        event_sink_error(RunState.usage(state))
+    end
+  end
+
   defp run_workflow(entry_source, config, state) do
+    timeout_ms = min(config.limits.workflow_timeout_ms, RunState.remaining_ms(state))
+    deadline_ms = System.monotonic_time(:millisecond) + timeout_ms
+
     opts = [
       context: config.input,
       tools: workflow_tools(config, state),
       prelude: bundle_prelude(config.workflow_environment),
-      timeout: config.limits.workflow_timeout_ms,
+      timeout: timeout_ms,
+      compile_timeout: timeout_ms,
+      run_deadline_ms: deadline_ms,
       max_heap: config.limits.workflow_heap_words,
       max_program_bytes: config.limits.entry_source_bytes,
       filter_context: false,
@@ -348,12 +372,24 @@ defmodule PtcRunner.Kernel do
 
     case Lisp.run_native(entry_source, opts) do
       {:ok, step} ->
-        {:ok,
-         %Result{
-           value: step.return |> kernel_return_value() |> project_kernel_value(),
-           usage: RunState.usage(state),
-           evaluation_memory: %{defined_count: map_size(step.memory)}
-         }}
+        value = step.return |> kernel_return_value() |> project_kernel_value()
+
+        if terminal_result_within_limit?(value, config.limits.terminal_result_bytes) do
+          {:ok,
+           %Result{
+             value: value,
+             usage: RunState.usage(state),
+             evaluation_memory: RunState.evaluation_memory_summary(state)
+           }}
+        else
+          {:error,
+           %Error{
+             kind: :limit_exceeded,
+             reason: :terminal_result_exceeded,
+             details: %{},
+             usage: RunState.usage(state)
+           }}
+        end
 
       {:error, step} ->
         {:error,
@@ -427,14 +463,18 @@ defmodule PtcRunner.Kernel do
   end
 
   defp invalid_kernel_eval_request(state) do
-    _ = RunState.protocol_error(state)
+    case RunState.protocol_error(state) do
+      :ok ->
+        %{
+          status: :error,
+          kind: :protocol_error,
+          reason: :invalid_kernel_eval_request,
+          retryable?: false
+        }
 
-    %{
-      status: :error,
-      kind: :protocol_error,
-      reason: :invalid_kernel_eval_request,
-      retryable?: false
-    }
+      {:error, :protocol_error_limit} ->
+        %{status: :error, kind: :limit_exceeded, reason: :protocol_errors, retryable?: false}
+    end
   end
 
   defp keyword_name(%LispKeyword{name: name}), do: name
@@ -463,8 +503,37 @@ defmodule PtcRunner.Kernel do
 
   defp project_kernel_value(value), do: Lisp.externalize_value(value)
 
+  defp terminal_result_within_limit?(value, limit) do
+    case {RetainedSize.bytes_with_cap(value, limit), safe_encoded_size(value)} do
+      {bytes, encoded} when is_integer(bytes) and bytes <= limit and encoded <= limit -> true
+      _ -> false
+    end
+  end
+
+  defp safe_encoded_size(value) do
+    :erlang.external_size(value)
+  rescue
+    _exception -> :infinity
+  end
+
   defp outcome({:ok, _result}), do: :ok
   defp outcome({:error, _error}), do: :error
+
+  defp usage_with_events(state, sink),
+    do: Map.put(RunState.usage(state), :events_dropped, EventSink.dropped(sink))
+
+  defp put_result_usage({:ok, %Result{} = result}, usage), do: {:ok, %{result | usage: usage}}
+  defp put_result_usage({:error, %Error{} = error}, usage), do: {:error, %{error | usage: usage}}
+
+  defp event_sink_error(usage),
+    do:
+      {:error,
+       %Error{
+         kind: :event_sink_error,
+         reason: :event_sink_error,
+         details: %{},
+         usage: usage
+       }}
 
   defp workflow_error_kind(reason)
        when reason in [:timeout, :memory_exceeded, :program_too_large], do: :limit_exceeded

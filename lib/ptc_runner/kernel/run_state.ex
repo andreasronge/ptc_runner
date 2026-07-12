@@ -26,6 +26,9 @@ defmodule PtcRunner.Kernel.RunState do
   @spec release_provider_slot(t()) :: :ok | {:error, :closed}
   def release_provider_slot(state), do: call(state, :release_provider_slot)
 
+  @spec finish_provider(t()) :: :ok | {:error, :run_closed}
+  def finish_provider(state), do: call(state, :finish_provider)
+
   @spec reserve_evaluation(t()) :: {:ok, map(), reference()} | {:error, atom()}
   def reserve_evaluation(state), do: call(state, :reserve_evaluation)
 
@@ -42,11 +45,23 @@ defmodule PtcRunner.Kernel.RunState do
   @spec close(t()) :: :ok
   def close(state), do: call(state, :close)
 
+  @spec stop(t()) :: :ok
+  def stop(state), do: GenServer.stop(state.pid, :normal)
+
   @spec usage(t()) :: map()
   def usage(state), do: call(state, :usage)
 
   @spec limits(t()) :: Limits.t()
   def limits(state), do: call(state, :limits)
+
+  @spec remaining_ms(t()) :: non_neg_integer()
+  def remaining_ms(state), do: usage(state).remaining_ms
+
+  @spec open?(t()) :: boolean()
+  def open?(state), do: call(state, :open?)
+
+  @spec evaluation_memory_summary(t()) :: map()
+  def evaluation_memory_summary(state), do: call(state, :evaluation_memory_summary)
 
   @impl GenServer
   def init({limits, token, owner}) do
@@ -84,6 +99,12 @@ defmodule PtcRunner.Kernel.RunState do
 
   def handle_call({token, :release_provider_slot}, _from, %{token: token} = state) do
     {:reply, :ok, %{state | provider_tasks: max(state.provider_tasks - 1, 0)}}
+  end
+
+  def handle_call({token, :finish_provider}, _from, %{token: token} = state) do
+    state = %{state | provider_tasks: max(state.provider_tasks - 1, 0)}
+    reply = if unavailable?(state), do: {:error, :run_closed}, else: :ok
+    {:reply, reply, state}
   end
 
   def handle_call({token, :reserve_evaluation}, {caller, _tag}, %{token: token} = state) do
@@ -142,7 +163,7 @@ defmodule PtcRunner.Kernel.RunState do
   def handle_call({token, :protocol_error}, _from, %{token: token} = state) do
     next = state.protocol_errors + 1
     reply = if next > state.limits.protocol_errors, do: {:error, :protocol_error_limit}, else: :ok
-    {:reply, reply, %{state | protocol_errors: next}}
+    {:reply, reply, %{state | protocol_errors: next, closed?: state.closed? or reply != :ok}}
   end
 
   def handle_call({token, :close}, _from, %{token: token} = state),
@@ -153,6 +174,17 @@ defmodule PtcRunner.Kernel.RunState do
 
   def handle_call({token, :limits}, _from, %{token: token} = state),
     do: {:reply, state.limits, state}
+
+  def handle_call({token, :open?}, _from, %{token: token} = state),
+    do: {:reply, not unavailable?(state), state}
+
+  def handle_call({token, :evaluation_memory_summary}, _from, %{token: token} = state),
+    do:
+      {:reply,
+       %{
+         defined_count: map_size(state.memory),
+         bytes: RetainedSize.bytes_with_cap(state.memory, state.limits.evaluation_memory_bytes)
+       }, state}
 
   def handle_call({_token, _request}, _from, state), do: {:reply, {:error, :closed}, state}
 

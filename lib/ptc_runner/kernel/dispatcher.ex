@@ -2,6 +2,7 @@ defmodule PtcRunner.Kernel.Dispatcher do
   @moduledoc "Bounded capability invocation with late-result invalidation."
 
   alias PtcRunner.Kernel.Capability
+  alias PtcRunner.Kernel.JSONValue
   alias PtcRunner.Kernel.ProviderError
   alias PtcRunner.Kernel.RunState
   alias PtcRunner.Lisp.RetainedSize
@@ -62,8 +63,11 @@ defmodule PtcRunner.Kernel.Dispatcher do
       receive do
         {:provider_result, ^pid, result} ->
           Process.demonitor(ref, [:flush])
-          RunState.release_provider_slot(state)
-          normalize_result(state, result)
+
+          case RunState.finish_provider(state) do
+            :ok -> normalize_result(state, result)
+            {:error, :run_closed} -> limit_error(:run_closed)
+          end
 
         {:DOWN, ^ref, :process, ^pid, reason} ->
           RunState.release_provider_slot(state)
@@ -150,8 +154,10 @@ defmodule PtcRunner.Kernel.Dispatcher do
   end
 
   defp protocol_error(state, reason) do
-    _ = RunState.protocol_error(state)
-    %{status: :error, kind: :protocol_error, reason: reason, retryable?: false}
+    case RunState.protocol_error(state) do
+      :ok -> %{status: :error, kind: :protocol_error, reason: reason, retryable?: false}
+      {:error, :protocol_error_limit} -> limit_error(:protocol_errors)
+    end
   end
 
   defp limit_error(reason),
@@ -163,16 +169,5 @@ defmodule PtcRunner.Kernel.Dispatcher do
   defp capability_result_limit(state), do: state_limits(state).capability_result_bytes
   defp state_limits(state), do: RunState.limits(state)
 
-  defp json_value?(nil), do: true
-
-  defp json_value?(value) when is_boolean(value) or (is_number(value) and value == value),
-    do: true
-
-  defp json_value?(value) when is_binary(value), do: String.valid?(value)
-  defp json_value?(value) when is_list(value), do: Enum.all?(value, &json_value?/1)
-
-  defp json_value?(value) when is_map(value) and not is_struct(value),
-    do: Enum.all?(value, fn {key, item} -> is_binary(key) and json_value?(item) end)
-
-  defp json_value?(_value), do: false
+  defp json_value?(value), do: JSONValue.value?(value)
 end

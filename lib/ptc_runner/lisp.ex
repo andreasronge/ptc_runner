@@ -489,6 +489,7 @@ defmodule PtcRunner.Lisp do
         Keyword.get(opts, :max_parallel_workers, @default_max_parallel_workers),
       max_symbols: Keyword.get(opts, :max_symbols, 10_000),
       compile_timeout: Keyword.get(opts, :compile_timeout, @default_compile_timeout),
+      run_deadline_ms: Keyword.get(opts, :run_deadline_ms),
       turn_history: Keyword.get(opts, :turn_history, []),
       max_print_length: Keyword.get(opts, :max_print_length),
       filter_context: Keyword.get(opts, :filter_context, true),
@@ -723,7 +724,7 @@ defmodule PtcRunner.Lisp do
 
     case PtcRunner.Sandbox.run_bounded(compile_fn, compile_opts) do
       {:ok, {:ok, core_ast}} ->
-        execute_eval(core_ast, opts)
+        execute_eval(core_ast, apply_run_deadline(opts))
 
       {:ok, {:error, _} = compile_error} ->
         handle_compile_error(compile_error, memory, journal)
@@ -752,6 +753,13 @@ defmodule PtcRunner.Lisp do
         {:error,
          Step.error(:compile_error, "compilation failed: #{msg}", memory, %{}, journal: journal)}
     end
+  end
+
+  defp apply_run_deadline(%{run_deadline_ms: nil} = opts), do: opts
+
+  defp apply_run_deadline(%{run_deadline_ms: deadline_ms, timeout: timeout} = opts) do
+    remaining_ms = max(deadline_ms - System.monotonic_time(:millisecond), 1)
+    %{opts | timeout: min(timeout, remaining_ms)}
   end
 
   defp handle_compile_error({:error, {:parse_error, msg}}, memory, journal) do

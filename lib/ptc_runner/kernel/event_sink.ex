@@ -18,7 +18,8 @@ defmodule PtcRunner.Kernel.EventSink do
     trace_id = Keyword.get(opts, :trace_id, run_id)
 
     if is_binary(run_id) and is_binary(trace_id) do
-      {:ok, pid} = GenServer.start(__MODULE__, {policy, limits, token, run_id, trace_id})
+      owner = Keyword.get(opts, :owner, self())
+      {:ok, pid} = GenServer.start(__MODULE__, {policy, limits, token, run_id, trace_id, owner})
       {:ok, %__MODULE__{pid: pid, token: token}}
     else
       {:error, :invalid_event_sink}
@@ -35,13 +36,17 @@ defmodule PtcRunner.Kernel.EventSink do
   @spec dropped(t()) :: map()
   def dropped(sink), do: call(sink, :dropped)
 
+  @spec stop(t()) :: :ok
+  def stop(sink), do: GenServer.stop(sink.pid, :normal)
+
   @impl GenServer
-  def init({policy, limits, token, run_id, trace_id}) do
+  def init({policy, limits, token, run_id, trace_id, owner}) do
     {:ok,
      %{
        policy: policy,
        limits: limits,
        token: token,
+       owner_ref: Process.monitor(owner),
        run_id: run_id,
        trace_id: trace_id,
        sequence: 0,
@@ -67,6 +72,12 @@ defmodule PtcRunner.Kernel.EventSink do
 
   def handle_call({_token, _request}, _from, state),
     do: {:reply, {:error, :event_sink_error}, state}
+
+  @impl GenServer
+  def handle_info({:DOWN, ref, :process, _pid, _reason}, %{owner_ref: ref} = state),
+    do: {:stop, :normal, state}
+
+  def handle_info(_message, state), do: {:noreply, state}
 
   defp enqueue(state, type, data, bytes) do
     full? =

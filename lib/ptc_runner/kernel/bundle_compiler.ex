@@ -3,7 +3,7 @@ defmodule PtcRunner.Kernel.BundleCompiler do
 
   alias PtcRunner.Kernel.Component
   alias PtcRunner.Kernel.FrozenBundle
-  alias PtcRunner.Lisp.Prelude.Bundle
+  alias PtcRunner.Lisp.Parser
   alias PtcRunner.Lisp.Prelude.Compiler
 
   @max_components 128
@@ -16,8 +16,8 @@ defmodule PtcRunner.Kernel.BundleCompiler do
          {:ok, by_id} <- unique_ids(components),
          :ok <- dependencies_exist(by_id),
          {:ok, ordered} <- topological_order(by_id),
-         {:ok, compiled} <- compile_ordered(ordered),
-         {:ok, prelude} <- compile_prelude(ordered) do
+         {:ok, compiled} <- describe_ordered(ordered),
+         {:ok, prelude} <- compile_prelude(ordered, compiled) do
       ids = Enum.map(compiled, & &1.id)
 
       hash =
@@ -27,28 +27,31 @@ defmodule PtcRunner.Kernel.BundleCompiler do
         )
         |> Base.encode16(case: :lower)
 
-      {:ok, %FrozenBundle{components: compiled, component_ids: ids, hash: hash, prelude: prelude}}
+      bundle = %FrozenBundle{
+        components: compiled,
+        component_ids: ids,
+        hash: hash,
+        prelude: prelude
+      }
+
+      {:ok, FrozenBundle.seal(bundle)}
     end
   end
 
   def compile(_components), do: {:error, %{reason: :invalid_components}}
 
   defp bounded_components(components) do
-    total_bytes =
-      Enum.reduce(components, 0, fn %Component{source: source}, total ->
-        total + byte_size(source)
-      end)
+    if Enum.all?(components, &match?(%Component{}, &1)) do
+      total_bytes = Enum.reduce(components, 0, &(&2 + byte_size(&1.source)))
+      edges = Enum.reduce(components, 0, &(&2 + length(&1.dependencies)))
 
-    edges =
-      Enum.reduce(components, 0, fn %Component{dependencies: dependencies}, total ->
-        total + length(dependencies)
-      end)
-
-    if length(components) <= @max_components and total_bytes <= @max_source_bytes and
-         edges <= @max_edges and
-         Enum.all?(components, &match?(%Component{}, &1)),
-       do: :ok,
-       else: {:error, %{reason: :bundle_limit_exceeded}}
+      if length(components) <= @max_components and total_bytes <= @max_source_bytes and
+           edges <= @max_edges,
+         do: :ok,
+         else: {:error, %{reason: :bundle_limit_exceeded}}
+    else
+      {:error, %{reason: :invalid_components}}
+    end
   end
 
   defp unique_ids(components) do
@@ -93,27 +96,35 @@ defmodule PtcRunner.Kernel.BundleCompiler do
     end
   end
 
-  defp compile_ordered(components) do
+  defp describe_ordered(components) do
     Enum.reduce_while(components, {:ok, []}, fn component, {:ok, compiled} ->
-      case Compiler.compile(component.source) do
-        {:ok, prelude} ->
-          entry = %{
-            id: component.id,
-            dependencies: component.dependencies,
-            origin: component.origin,
-            source_hash: prelude.source_hash,
-            prelude: prelude
-          }
+      with {:ok, namespaces} <- component_namespaces(component.source),
+           dependencies = dependency_components(compiled, component.dependencies),
+           namespace_deps =
+             Map.new(namespaces, &{&1, dependency_namespaces(dependencies)}),
+           {:ok, prelude} <-
+             Compiler.compile(component.source,
+               deps: Enum.map(dependencies, & &1.prelude),
+               namespace_deps: namespace_deps
+             ) do
+        entry = %{
+          id: component.id,
+          dependencies: component.dependencies,
+          origin: component.origin,
+          source_hash: source_hash(component.source),
+          namespaces: namespaces,
+          prelude: prelude
+        }
 
-          {:cont, {:ok, [entry | compiled]}}
-
+        {:cont, {:ok, [entry | compiled]}}
+      else
         {:error, error} ->
           {:halt,
            {:error,
             %{
               reason: :component_compile_error,
               id: component.id,
-              details: Exception.message(error)
+              details: error_message(error)
             }}}
       end
     end)
@@ -123,16 +134,82 @@ defmodule PtcRunner.Kernel.BundleCompiler do
     end
   end
 
-  defp compile_prelude(components) do
+  defp dependency_components(compiled, dependency_ids) do
+    compiled
+    |> Enum.filter(&(&1.id in dependency_ids))
+    |> Enum.sort_by(& &1.id)
+  end
+
+  defp dependency_namespaces(components) do
     components
-    |> Enum.map(&%{id: &1.id, source: &1.source, origin: &1.origin})
-    |> Bundle.compile()
+    |> Enum.flat_map(& &1.namespaces)
+    |> Enum.uniq()
+    |> Enum.sort()
+  end
+
+  defp compile_prelude(components, compiled) do
+    namespace_deps = namespace_dependencies(compiled)
+    source = Enum.map_join(components, "\n", & &1.source)
+
+    Compiler.compile(source, namespace_deps: namespace_deps)
     |> case do
       {:ok, prelude} ->
-        {:ok, prelude}
+        metadata =
+          Enum.map(compiled, fn component ->
+            Map.take(component, [:id, :origin, :source_hash, :namespaces])
+          end)
+
+        {:ok, %{prelude | metadata: Map.put(prelude.metadata, :components, metadata)}}
 
       {:error, error} ->
-        {:error, %{reason: :bundle_compile_error, details: Exception.message(error)}}
+        {:error, %{reason: :bundle_compile_error, details: error_message(error)}}
     end
   end
+
+  defp namespace_dependencies(components) do
+    by_id = Map.new(components, &{&1.id, &1})
+
+    components
+    |> Enum.flat_map(fn component ->
+      dependency_namespaces =
+        component.dependencies
+        |> Enum.flat_map(&Map.fetch!(by_id, &1).namespaces)
+        |> Enum.uniq()
+        |> Enum.sort()
+
+      Enum.map(component.namespaces, &{&1, dependency_namespaces})
+    end)
+    |> Map.new()
+  end
+
+  defp component_namespaces(source) do
+    case Parser.parse(source) do
+      {:ok, ast} ->
+        namespaces = ast |> top_level_forms() |> Enum.flat_map(&namespace_form/1) |> Enum.uniq()
+
+        if namespaces == [],
+          do: {:error, "component declares no namespace"},
+          else: {:ok, namespaces}
+
+      {:error, error} ->
+        {:error, inspect(error, limit: 10, printable_limit: 1_000)}
+    end
+  end
+
+  defp top_level_forms({:program, forms}), do: forms
+  defp top_level_forms(form), do: [form]
+
+  defp namespace_form({:list, [{:symbol, name}, {:symbol, namespace} | _metadata]})
+       when name in [:ns, "ns"],
+       do: [to_string(namespace)]
+
+  defp namespace_form(_form), do: []
+
+  defp source_hash(source),
+    do: :crypto.hash(:sha256, source) |> Base.encode16(case: :lower)
+
+  defp error_message(%{message: message}) when is_binary(message),
+    do: String.slice(message, 0, 4_096)
+
+  defp error_message(error), do: inspect(error, limit: 10, printable_limit: 4_096)
 end

@@ -2,16 +2,22 @@ defmodule PtcRunner.Kernel.Environment do
   @moduledoc false
 
   alias PtcRunner.Kernel.Capability
+  alias PtcRunner.Kernel.FrozenBundle
+  alias PtcRunner.Kernel.JSONValue
 
   @reserved MapSet.new(["kernel-eval", "runtime/usage", "runtime/remaining"])
 
   def assemble(bundle, capabilities, data, kind)
-      when kind in [:workflow, :mission] and is_map(data) do
+      when kind in [:workflow, :mission] do
     with :ok <- valid_bundle(bundle),
+         true <- JSONValue.map?(data),
          {:ok, capability_map} <- capability_map(capabilities),
          :ok <- reserved_names(kind, capability_map),
          :ok <- bundle_requirements(bundle, capability_map) do
       {:ok, %{bundle: bundle, capabilities: capability_map, data: data}}
+    else
+      false -> {:error, :invalid_environment_data}
+      error -> error
     end
   end
 
@@ -24,7 +30,10 @@ defmodule PtcRunner.Kernel.Environment do
   end
 
   defp valid_bundle(nil), do: :ok
-  defp valid_bundle(bundle) when is_map(bundle), do: :ok
+
+  defp valid_bundle(%FrozenBundle{} = bundle),
+    do: if(FrozenBundle.valid?(bundle), do: :ok, else: {:error, :invalid_bundle})
+
   defp valid_bundle(_bundle), do: {:error, :invalid_bundle}
 
   defp capability_map(capabilities) when is_list(capabilities) do

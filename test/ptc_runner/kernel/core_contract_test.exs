@@ -7,6 +7,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
   alias PtcRunner.Kernel.Dispatcher
   alias PtcRunner.Kernel.Evaluation
   alias PtcRunner.Kernel.EventSink
+  alias PtcRunner.Kernel.FrozenBundle
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.MissionEnvironment
   alias PtcRunner.Kernel.ProviderError
@@ -97,6 +98,34 @@ defmodule PtcRunner.Kernel.CoreContractTest do
              Dispatcher.dispatch(state, :workflow, environment, "slow", %{}, 100)
   end
 
+  test "provider results are invalidated when the run closes during a callback" do
+    parent = self()
+
+    {:ok, capability} =
+      Capability.new(
+        name: "gate",
+        callback: fn _ ->
+          send(parent, {:provider_started, self()})
+
+          receive do
+            :finish -> {:ok, %{"late" => true}}
+          end
+        end
+      )
+
+    {:ok, environment} = WorkflowEnvironment.new(capabilities: [capability])
+    {:ok, state} = RunState.start(Limits.defaults())
+
+    task =
+      Task.async(fn -> Dispatcher.dispatch(state, :workflow, environment, "gate", %{}, 1_000) end)
+
+    assert_receive {:provider_started, provider_pid}
+    assert :ok = RunState.close(state)
+    send(provider_pid, :finish)
+
+    assert %{status: :error, kind: :limit_exceeded, reason: :run_closed} = Task.await(task)
+  end
+
   test "normal event sinks drop while private event sinks fail closed" do
     {:ok, limits} = Limits.new(normal_event_count: 1, normal_event_bytes: 100)
     {:ok, normal} = EventSink.start(:normal, limits, run_id: "normal")
@@ -108,6 +137,66 @@ defmodule PtcRunner.Kernel.CoreContractTest do
 
     assert :ok = EventSink.emit(private, "run-started", %{"safe" => true})
     assert {:error, :event_sink_error} = EventSink.emit(private, "run-stopped", %{"safe" => true})
+  end
+
+  test "private event sink exhaustion is a terminal event-sink error" do
+    {:ok, workflow} = WorkflowEnvironment.new([])
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, limits} = Limits.new(normal_event_count: 1, normal_event_bytes: 10_000)
+    {:ok, sink} = EventSink.start(:private, limits, run_id: "private-run")
+
+    {:ok, config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        mission_environment: mission,
+        input: %{},
+        limits: limits,
+        event_sink: sink
+      )
+
+    assert {:error, %{kind: :event_sink_error, reason: :event_sink_error}} =
+             Kernel.run("(return 42)", config)
+  end
+
+  test "normal sink terminal drops are included in returned usage" do
+    {:ok, workflow} = WorkflowEnvironment.new([])
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, limits} = Limits.new(normal_event_count: 1, normal_event_bytes: 10_000)
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "normal-run")
+
+    {:ok, config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        mission_environment: mission,
+        input: %{},
+        limits: limits,
+        event_sink: sink
+      )
+
+    assert {:ok, %{usage: %{events_dropped: %{"run-stopped" => 1}}}} =
+             Kernel.run("(return 42)", config)
+  end
+
+  test "run owners provide explicit teardown and stop with their creating process" do
+    {:ok, state} = RunState.start(Limits.defaults())
+    state_ref = Process.monitor(state.pid)
+    assert :ok = RunState.stop(state)
+    assert_receive {:DOWN, ^state_ref, :process, _, :normal}
+
+    parent = self()
+
+    owner =
+      spawn(fn ->
+        {:ok, sink} = EventSink.start(:normal, Limits.defaults())
+        send(parent, {:owned_sink, sink})
+      end)
+
+    owner_ref = Process.monitor(owner)
+    assert_receive {:owned_sink, sink}
+    sink_ref = Process.monitor(sink.pid)
+    assert_receive {:DOWN, ^owner_ref, :process, ^owner, :normal}
+    assert_receive {:DOWN, ^sink_ref, :process, _, sink_reason}
+    assert sink_reason in [:normal, :noproc]
   end
 
   test "component bundles use component IDs for deterministic dependency ordering" do
@@ -132,6 +221,53 @@ defmodule PtcRunner.Kernel.CoreContractTest do
 
     assert {:error, %{reason: :component_cycle}} =
              Kernel.compile_bundle([%{first | dependencies: ["second"]}, second])
+  end
+
+  test "component dependencies make dependency namespaces visible" do
+    {:ok, base} =
+      Component.new(id: "base", source: "(ns base \"Base helpers.\") (defn value [] 40)")
+
+    {:ok, consumer} =
+      Component.new(
+        id: "consumer",
+        source: "(ns consumer \"Consumer helpers.\") (defn answer [] (+ (base/value) 2))",
+        dependencies: ["base"]
+      )
+
+    assert {:ok, bundle} = Kernel.compile_bundle([consumer, base])
+    {:ok, workflow} = WorkflowEnvironment.new(bundle: bundle)
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, limits} = Limits.new()
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "component-dependencies")
+
+    {:ok, config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        mission_environment: mission,
+        input: %{},
+        limits: limits,
+        event_sink: sink
+      )
+
+    assert {:ok, %{value: 42}} = Kernel.run("(return (consumer/answer))", config)
+  end
+
+  test "each bundle component is validated before aggregate compilation" do
+    {:ok, first} = Component.new(id: "first", source: "(ns first) (defn value [] 1)")
+
+    {:ok, malformed} =
+      Component.new(
+        id: "malformed",
+        source: "(defn escaped [] 42) (ns malformed) (defn value [] 2)",
+        dependencies: ["first"]
+      )
+
+    assert {:error, %{reason: :component_compile_error, id: "malformed"}} =
+             Kernel.compile_bundle([first, malformed])
+  end
+
+  test "bundle compilation returns diagnostics for malformed component terms" do
+    assert {:error, %{reason: :invalid_components}} = Kernel.compile_bundle([%{}])
   end
 
   test "new Kernel run executes a bounded workflow through explicit configuration" do
@@ -329,5 +465,77 @@ defmodule PtcRunner.Kernel.CoreContractTest do
                "(let [x 42] (return (tool/kernel-eval {:kind :embedded :program (program (return x))})))",
                config
              )
+  end
+
+  test "terminal workflow results and retained mission memory use Kernel limits and state" do
+    {:ok, workflow} = WorkflowEnvironment.new([])
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, limits} = Limits.new(terminal_result_bytes: 1)
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "terminal-limit")
+
+    {:ok, config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        mission_environment: mission,
+        input: %{},
+        limits: limits,
+        event_sink: sink
+      )
+
+    assert {:error, %{kind: :limit_exceeded, reason: :terminal_result_exceeded}} =
+             Kernel.run("(return 42)", config)
+
+    {:ok, state} = RunState.start(Limits.defaults())
+
+    assert %{outcome: :returned} =
+             Evaluation.evaluate_source(state, mission, "(def retained 42)", 100)
+
+    assert %{defined_count: 1, bytes: bytes} = RunState.evaluation_memory_summary(state)
+    assert bytes > 0
+  end
+
+  test "environment constructors reject forged bundles and non-JSON mission data" do
+    assert {:error, :invalid_bundle} = WorkflowEnvironment.new(bundle: %{})
+    assert {:error, :invalid_bundle} = MissionEnvironment.new(bundle: %{prelude: %{}})
+
+    assert {:error, :invalid_environment_data} =
+             MissionEnvironment.new(data: %{"callback" => fn -> :ok end})
+
+    assert {:error, :invalid_environment_data} = MissionEnvironment.new(data: [])
+
+    assert {:error, :invalid_environment_data} =
+             MissionEnvironment.new(data: %{"text" => <<255>>})
+
+    forged = %FrozenBundle{components: [], component_ids: [], hash: "forged", prelude: nil}
+    assert {:error, :invalid_bundle} = WorkflowEnvironment.new(bundle: forged)
+  end
+
+  test "protocol errors exhaust their hard run limit" do
+    {:ok, capability} =
+      Capability.new(
+        name: "checked",
+        callback: fn _ -> {:ok, nil} end,
+        validate: fn _ -> {:error, :invalid} end
+      )
+
+    {:ok, environment} = WorkflowEnvironment.new(capabilities: [capability])
+    {:ok, limits} = Limits.new(protocol_errors: 1)
+    {:ok, state} = RunState.start(limits)
+
+    assert %{kind: :protocol_error} =
+             Dispatcher.dispatch(state, :workflow, environment, "checked", %{}, 100)
+
+    assert %{kind: :limit_exceeded, reason: :protocol_errors} =
+             Dispatcher.dispatch(state, :workflow, environment, "checked", %{}, 100)
+
+    assert %{closed?: true, protocol_errors: 2} = RunState.usage(state)
+  end
+
+  test "provider completion atomically releases its slot and rejects a closed run" do
+    {:ok, limits} = Limits.new(live_provider_tasks: 1)
+    {:ok, state} = RunState.start(limits)
+    assert :ok = RunState.reserve_capability(state, :workflow, "read")
+    assert :ok = RunState.close(state)
+    assert {:error, :run_closed} = RunState.finish_provider(state)
   end
 end

@@ -21,12 +21,19 @@ defmodule PtcRunner.Kernel.Evaluation do
   defp evaluate_with_lease(state, environment, source, timeout_ms, memory, lease) do
     limits = RunState.limits(state)
 
+    timeout_ms =
+      Enum.min([timeout_ms, limits.evaluation_timeout_ms, RunState.remaining_ms(state)])
+
+    deadline_ms = System.monotonic_time(:millisecond) + timeout_ms
+
     options = [
       context: environment.data,
       memory: memory,
       tools: mission_tools(environment, state, timeout_ms),
       prelude: bundle_prelude(environment),
-      timeout: min(timeout_ms, limits.evaluation_timeout_ms),
+      timeout: timeout_ms,
+      compile_timeout: timeout_ms,
+      run_deadline_ms: deadline_ms,
       max_heap: limits.evaluation_heap_words,
       max_program_bytes: limits.subordinate_source_bytes,
       filter_context: false,
