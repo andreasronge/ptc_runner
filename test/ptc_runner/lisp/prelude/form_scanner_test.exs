@@ -8,8 +8,7 @@ defmodule PtcRunner.Lisp.Prelude.FormScannerTest do
 
   # ============================================================
   # Corpus: every prelude-like source in the repo. This is the hard gate
-  # from docs/plans/prelude-form-edit-and-introspection.md Phase 3 — the
-  # scanner does not get to ship on hand-picked examples alone.
+  # The scanner does not get to ship on hand-picked examples alone.
   # ============================================================
 
   describe "corpus: every prelude-like source in the repo" do

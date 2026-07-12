@@ -1,11 +1,10 @@
 # Minimal Programmable Kernel — V1 Contract
 
-**Status:** proposed normative contract for the implementation spike. Core
-runtime decisions are specified for approval; manifest/frontend schemas are
-gated at Slice 8.
+**Status:** implemented normative V1 contract. The final manifest/frontend
+schemas and verification record are reflected in the migration documents.
 
 **Implementation branch:** `exp/minimal-kernel`, created from
-`exp/lisp-kernel` only when implementation begins.
+`exp/lisp-kernel` for the clean-path replacement.
 
 ## Purpose
 
@@ -76,7 +75,7 @@ environment.
 
 ### Entry expression and bundles
 
-`Kernel.run/2` executes one bounded entry expression. Namespace-bearing
+`PtcRunner.Kernel.run/2` executes one bounded entry expression. Namespace-bearing
 workflow files are compiled before the run as components of a frozen workflow
 bundle. Mission preludes are compiled as a separate frozen mission bundle.
 
@@ -582,7 +581,7 @@ integers; V1 has no `nil`, zero, or infinity escape hatch. Embedders may lower o
 raise normalized limits before construction, but frontends apply their own
 administrator ceilings and untrusted manifests cannot exceed them.
 
-Retained-size accounting is the conservative `PtcRunner.Lisp.RetainedSize`
+Retained-size accounting uses the evaluator's conservative retained-size
 measure, not exact physical memory. Shared referenced binaries may be counted
 more than once. Heap limits are per BEAM process, not whole-node limits.
 

@@ -3,11 +3,12 @@
 Canonical agent instructions for this repo. `CLAUDE.md` is a symlink to this
 file, so Claude Code and Codex read the same rules. Edit only this file.
 
-PtcRunner is a BEAM-native Elixir library for Programmatic Tool Calling (PTC):
-LLMs write safe PTC-Lisp programs that orchestrate tools and transform data in
-a sandboxed BEAM process (1s timeout, 10MB memory). Key docs: SubAgent guides
-in `docs/guides/`, language reference in `docs/ptc-lisp-specification.md`,
-built-ins in `docs/function-reference.md`.
+PtcRunner is a BEAM-native Elixir runtime for Programmatic Tool Calling (PTC):
+hosts compile immutable PTC-Lisp bundles, assemble explicit workflow and
+mission environments, and execute them through a bounded owner-based Kernel.
+Key docs: Kernel contract in `docs/plans/lisp-kernel/kernel-contract.md`,
+language reference in `docs/ptc-lisp-specification.md`, and built-ins in
+`docs/function-reference.md`.
 
 ## Working Style
 
@@ -36,11 +37,10 @@ how it was verified.
 
 ## Project Structure
 
-- `lib/ptc_runner/` — the library (`sub_agent/`, `lisp/`, `sandbox.ex`, …).
-- `docs/` — specs and guidelines. `priv/prompts/` — LLM prompt templates,
-  **compiled in; recompile after editing**.
-- Sibling Mix projects: `mcp_server/` (`ptc_runner_mcp` on Hex, stdio MCP
-  server), `ptc_viewer/` (trace viewer), `demo/` (LLM benchmarks).
+- `lib/ptc_runner/` — the library (`kernel/`, `lisp/`, `sandbox.ex`, …).
+- `docs/` — specifications, guides, and implementation records.
+  `priv/preludes/kernel/` — shipped Lisp libraries; recompile after editing.
+- Sibling Mix project: `ptc_viewer/` (canonical trace viewer).
 
 ## Conventions
 

@@ -9,7 +9,7 @@ defmodule PtcRunner.Kernel.FrozenBundle do
           component_ids: [binary()],
           hash: binary(),
           prelude: PtcRunner.Lisp.Prelude.t(),
-          attestation: binary()
+          attestation: binary() | nil
         }
 
   @spec seal(t()) :: t()

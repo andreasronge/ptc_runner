@@ -7,6 +7,7 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
   alias PtcRunner.Kernel.MissionEnvironment
   alias PtcRunner.Kernel.ReplSession
   alias PtcRunner.Kernel.RunConfig
+  alias PtcRunner.Kernel.RunState
   alias PtcRunner.Kernel.WorkflowEnvironment
 
   test "direct evaluations persist definitions and bounded turn history" do
@@ -167,5 +168,40 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
              "evaluation-stopped",
              "run-stopped"
            ] == Enum.map(events, & &1.type)
+  end
+
+  test "ambiguous capability arguments are counted without REPL provider dispatch" do
+    parent = self()
+
+    {:ok, capability} =
+      Capability.new(
+        name: "capture",
+        callback: fn arguments ->
+          send(parent, {:repl_provider_called, arguments})
+          {:ok, true}
+        end
+      )
+
+    {:ok, workflow} = WorkflowEnvironment.new(capabilities: [capability])
+    {:ok, mission} = MissionEnvironment.new([])
+    limits = Limits.defaults()
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "repl-ambiguous")
+
+    {:ok, config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        mission_environment: mission,
+        input: %{},
+        limits: limits,
+        event_sink: sink
+      )
+
+    {:ok, session} = ReplSession.new(config: config)
+
+    assert {:ok, %{return: %{kind: :protocol_error, reason: :ambiguous_arguments}}, session} =
+             ReplSession.eval(session, ~S|(tool/capture {"path" "a" :path "b"})|)
+
+    assert %{protocol_errors: 1} = RunState.usage(session.state)
+    refute_receive {:repl_provider_called, _arguments}
   end
 end

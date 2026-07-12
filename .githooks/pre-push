@@ -6,7 +6,7 @@
 #      (committed-diff against the remote + dirty worktree) matches the
 #      strict allow-list below, skip the test/dialyzer gate and exit 0.
 #   2. Otherwise: run `mix test --exclude clojure` and `mix dialyzer`
-#      for each top-level Mix project (".", "mcp_server", "ptc_viewer"),
+#      for each top-level Mix project ("." and "ptc_viewer"),
 #      preserving the existing pre-push behavior.
 #
 # Override:
@@ -55,7 +55,7 @@ ALLOW_PATTERNS = [
     re.compile(r"^Plans/.*\.md$"),
     re.compile(r"^docs/plans/.*\.md$"),
     re.compile(r"^CHANGELOG\.md$"),
-    re.compile(r"^(mcp_server|ptc_viewer)/CHANGELOG\.md$"),
+    re.compile(r"^ptc_viewer/CHANGELOG\.md$"),
     re.compile(r"^LICENSES/MIT\.txt$"),
     re.compile(r"^\.gitignore$"),
     re.compile(r"^\.githooks/README\.md$"),
@@ -293,7 +293,7 @@ run_project_gates() {
 
   # CWD is the project dir (we are inside `pushd "$proj"`), so check
   # `./mix.exs` rather than `$proj/mix.exs`. Passing `$proj` here would
-  # resolve to `mcp_server/mcp_server/mix.exs` and silently skip
+  # resolve to a duplicated project path and silently skip
   # dialyzer for non-root projects.
   if project_has_dep "." "dialyxir"; then
     echo "  ⏳ Running dialyzer (this may take a moment)..."

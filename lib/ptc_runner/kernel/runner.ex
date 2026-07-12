@@ -14,6 +14,7 @@ defmodule PtcRunner.Kernel.Runner do
   alias PtcRunner.Lisp
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
   alias PtcRunner.Lisp.RetainedSize
+  alias PtcRunner.Lisp.TrustedTool
 
   @spec run(binary(), RunConfig.t()) :: {:ok, Result.t()} | {:error, Error.t()}
   def run(entry_source, %RunConfig{} = config) when is_binary(entry_source) do
@@ -174,6 +175,7 @@ defmodule PtcRunner.Kernel.Runner do
         fn arguments -> kernel_eval(config, state, arguments) end
       )
     )
+    |> Map.new(fn {name, callback} -> {name, %TrustedTool{function: callback}} end)
   end
 
   defp bundle_prelude(%{bundle: %{prelude: prelude}}), do: prelude

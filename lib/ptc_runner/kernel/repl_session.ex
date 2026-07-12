@@ -12,6 +12,7 @@ defmodule PtcRunner.Kernel.ReplSession do
   alias PtcRunner.Lisp
   alias PtcRunner.Lisp.Result, as: Native
   alias PtcRunner.Lisp.RetainedSize
+  alias PtcRunner.Lisp.TrustedTool
 
   @default_history_depth 3
 
@@ -256,7 +257,7 @@ defmodule PtcRunner.Kernel.ReplSession do
         )
       end
 
-      {name, callback}
+      {name, %TrustedTool{function: callback}}
     end)
   end
 

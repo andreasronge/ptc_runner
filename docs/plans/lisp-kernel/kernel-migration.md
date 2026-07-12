@@ -1,10 +1,10 @@
 # Minimal Programmable Kernel — Migration Plan
 
-**Status:** proposed implementation sequence. Governed by
+**Status:** implemented migration record. Governed by
 [`kernel-contract.md`](kernel-contract.md).
 
 **Implementation branch:** `exp/minimal-kernel`, created from
-`exp/lisp-kernel` when implementation begins.
+`exp/lisp-kernel` for the clean-path replacement.
 
 ## Method
 
@@ -143,7 +143,6 @@ Authoritative documents:
 - docs/plans/lisp-kernel/tracelog-contract.md
 - docs/plans/lisp-kernel/kernel-migration.md
 - docs/plans/lisp-kernel/kernel-inventory.md
-- docs/plans/lisp-kernel/private-experiment-transcripts.md
 - AGENTS.md
 
 Before changing runtime code:
@@ -592,7 +591,8 @@ Run after each deletion wave:
   environment variables, and links;
 - `mix xref graph` and compile-cycle checks;
 - `mix deps.unlock --check-unused`;
-- `mix ptc.dna` while consolidation is active;
+- the temporary duplication audit while consolidation is active, removing its
+  task and dependency after the final audit;
 - coverage reports for retained but unreachable modules;
 - package/ExDoc file inventories;
 - CI, aliases, application config, Dialyzer apps, releases, and workflow search;

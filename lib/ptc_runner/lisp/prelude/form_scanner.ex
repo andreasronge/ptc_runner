@@ -2,10 +2,8 @@ defmodule PtcRunner.Lisp.Prelude.FormScanner do
   @moduledoc ~S"""
   Byte-exact top-level form span scanner for raw PTC-Lisp prelude source TEXT.
 
-  This is the missing piece `prelude/edit` and `prelude/form` need (plan
-  `docs/plans/prelude-form-edit-and-introspection.md`, Phase 3): the parser
-  (`PtcRunner.Lisp.Parser` / `PtcRunner.Lisp.FastParser`) tracks no source
-  positions, and parse -> swap-form -> re-render via `Formatter` would
+  The public and fast parser implementations track no source positions, and
+  parse -> swap-form -> re-render via `Formatter` would
   reformat every untouched form, destroying byte-identity. `scan/1` instead
   walks the RAW TEXT directly, tracking bracket/string/comment depth well
   enough to compute the byte span of every top-level form plus the
@@ -123,7 +121,7 @@ defmodule PtcRunner.Lisp.Prelude.FormScanner do
 
   ## Reader-macro coverage
 
-  Mirrors every construct `PtcRunner.Lisp.FastParser.parse/1` accepts:
+  Mirrors every construct the fast parser accepts:
   lists `(...)`, vectors `[...]`, maps `{...}`, sets `#{...}`, short-fn
   `#(...)`, strings `"..."` and regex literals `#"..."` (identical escape
   rules — `\\`, `\"`, `\n`, `\t`, `\r`, any other `\<char>` passed through,

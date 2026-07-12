@@ -50,8 +50,7 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
   @doc """
   Compiles prelude `source` into a `%PtcRunner.Lisp.Prelude{}`.
 
-  Options (declared prelude-to-prelude dependencies, see
-  `docs/plans/prelude-deps.md`):
+  Options for declared prelude-to-prelude dependencies:
 
     * `:deps` — compiled `%Prelude{}` artifacts whose PUBLIC exports are
       visible to namespaces that declare them in `:namespace_deps`.
@@ -124,7 +123,7 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
   defp normalize_program(single), do: {:program, [single]}
 
   # ============================================================
-  # Declared dependencies (docs/plans/prelude-deps.md, Phase 1)
+  # Declared prelude dependencies
   # ============================================================
 
   # Normalized dependency context threaded through the compile:

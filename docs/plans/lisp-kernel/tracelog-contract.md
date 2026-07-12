@@ -1,8 +1,7 @@
 # TraceLog and Log Prelude — V1 Contract
 
-**Status:** proposed retained product contract. Complements
-[`kernel-contract.md`](kernel-contract.md) and
-[`private-experiment-transcripts.md`](private-experiment-transcripts.md).
+**Status:** implemented retained product contract. Complements
+[`kernel-contract.md`](kernel-contract.md).
 
 ## Purpose and boundary
 
@@ -51,7 +50,8 @@ deterministic: discover supported files, normalize paths, sort them, then load
 in sorted order under one aggregate byte cap.
 
 Normal trace sinks sanitize before persistence. Exact private transcript sinks
-follow [`private-experiment-transcripts.md`](private-experiment-transcripts.md).
+use the separate fail-closed private policy specified by the event-sink section
+of [`kernel-contract.md`](kernel-contract.md).
 
 Malformed or unsupported canonical events fail closed by default. A debugging
 mode may report bounded per-file errors, but it never silently reinterprets

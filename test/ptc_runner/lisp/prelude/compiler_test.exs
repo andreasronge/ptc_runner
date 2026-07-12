@@ -461,7 +461,7 @@ defmodule PtcRunner.Lisp.Prelude.CompilerTest do
   end
 
   # ============================================================
-  # Declared prelude-to-prelude dependencies (docs/plans/prelude-deps.md)
+  # Declared prelude-to-prelude dependencies
   # ============================================================
 
   describe "compile/2 declared dependencies" do

@@ -1,5 +1,5 @@
 defmodule PtcRunner.Lisp.Result do
-  @moduledoc false
+  @moduledoc "Native continuation result returned by the neutral PTC-Lisp evaluator."
 
   defstruct [
     :return,

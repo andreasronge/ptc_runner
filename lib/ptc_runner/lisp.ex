@@ -58,6 +58,7 @@ defmodule PtcRunner.Lisp do
   # The top-level sandbox process is NOT counted as a slot. Overridable
   # per call via the `:max_parallel_workers` option to `run/2`.
   @default_max_parallel_workers 8
+  alias PtcRunner.Lisp.AmbiguousArguments
   alias PtcRunner.Lisp.Format.Var
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
   alias PtcRunner.Lisp.Result, as: Step
@@ -241,7 +242,7 @@ defmodule PtcRunner.Lisp do
   default depth of 3.
 
   **Related modules:**
-  - `PtcRunner.Kernel.Runner` - Executes bounded Kernel workflows
+  - `PtcRunner.Kernel` - Executes bounded Kernel workflows
   - `PtcRunner.Kernel.ReplSession` - Stateful direct evaluation wrapper
   - `PtcRunner.Lisp.Eval` - Evaluates programs with user_ns (memory) symbol resolution
 
@@ -1591,6 +1592,16 @@ defmodule PtcRunner.Lisp do
 
         raise ExecutionError, reason: :unknown_tool, message: name, data: available
     end
+  end
+
+  defp execute_tool_function(
+         %Tool{name: name, argument_collisions: :reject},
+         %AmbiguousArguments{}
+       ) do
+    raise ExecutionError,
+      reason: :invalid_tool_args,
+      message: name,
+      data: :ambiguous_arguments
   end
 
   defp execute_tool_function(%Tool{name: name, function: fun}, args) do

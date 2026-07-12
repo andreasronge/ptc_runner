@@ -4,7 +4,7 @@ defmodule PtcRunner.Lisp.HeapRebaselineTest do
   alias PtcRunner.Lisp
 
   @moduledoc """
-  Sandbox heap re-baseline (docs/plans/sandbox-heap-rebaseline.md, P1+P3):
+  Sandbox heap re-baseline contract:
   host-granted data (tools env, `memory:`) must not consume the program's
   `:max_heap` budget, while program-acquired memory stays fail-closed.
 

@@ -44,20 +44,12 @@ Rows marked `PTC extension` are intentionally outside Clojure/Java standard comp
 | `regex/` | Clojure standard | audited through `clojure.core` regex vars | N/A | N/A | N/A | N/A | [audit](clojure-core-audit.md) |
 | `data/` | PTC extension | context access | N/A | N/A | N/A | N/A | N/A |
 | `tool/` | PTC extension / capability | registered tool calls | N/A | N/A | N/A | N/A | N/A |
-| `budget/` | PTC extension / SubAgent budget profile | budget introspection | N/A | N/A | N/A | N/A | N/A |
 | `json/` | PTC extension | PTC JSON helpers | N/A | N/A | N/A | N/A | N/A |
-| `mcp/` | PTC extension / MCP server profile | profile-gated helper namespace; unavailable in base `Lisp.run/2` | N/A | N/A | N/A | N/A | N/A |
 
 ## REPL Environment Support
 
 | Command | Status | Scope | Notes |
 |---------|--------|-------|-------|
-| `(tool/servers)` | supported | MCP aggregator | List configured upstream servers, tool counts, and catalog load status |
-| `(apropos query)` | supported | local + MCP discovery | Search executable local PTC/Clojure/curated Java capabilities and, in aggregator mode, configured MCP tools. MCP matches rank before local matches. |
-| `(dir ref)` | supported | local + MCP discovery | List members for a local namespace/curated Java class, or tools for an MCP server. The ref is macro-like: an unquoted symbol, a quoted symbol, or a string. |
-| `(doc ref)` | supported | local + MCP discovery | Return human-readable docs for one executable local ref or MCP tool ref. Known local refs win over MCP refs. The ref is macro-like: an unquoted symbol, a quoted symbol, or a string. |
-| `(meta ref)` | supported | local + MCP discovery | Return structured metadata for one executable local ref or MCP tool ref. Known local refs win over MCP refs. The ref is macro-like: an unquoted symbol, a quoted symbol, or a string. |
-| `(ns-publics ns)` | supported | local discovery | Return public vars for a local PTC/Clojure namespace. Java classes and MCP servers are not supported. The ns is macro-like: an unquoted symbol, a quoted symbol, or a string. |
 | `(quote symbol)`, `'symbol` | partial | Core syntax | Symbol references only; quoted collections and syntax quote are not supported |
 
 

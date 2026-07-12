@@ -143,6 +143,7 @@ defmodule PtcRunner.MixProject do
           PtcRunner.Lisp.Context,
           PtcRunner.Lisp.Parser,
           PtcRunner.Lisp.Registry,
+          PtcRunner.Lisp.Result,
           PtcRunner.Lisp.Signature,
           PtcRunner.Lisp.Signature.Validator,
           PtcRunner.Lisp.TypeExtractor,
@@ -155,17 +156,20 @@ defmodule PtcRunner.MixProject do
           PtcRunner.LLM.ReqLLMAdapter
         ]
       ],
-      extras: [
-        "README.md",
-        "LICENSE",
-        "docs/ptc-lisp-specification.md",
-        "docs/clojure-conformance-gaps.md",
-        "docs/function-reference.md",
-        "docs/java-interop.md",
-        "docs/plans/lisp-kernel/kernel-contract.md",
-        "docs/plans/lisp-kernel/tracelog-contract.md",
-        "docs/conformance/index.md"
-      ],
+      extras:
+        [
+          "README.md",
+          "LICENSE",
+          "docs/ptc-lisp-specification.md",
+          "docs/clojure-conformance-gaps.md",
+          "docs/function-reference.md",
+          "docs/java-interop.md",
+          "docs/plans/lisp-kernel/kernel-contract.md",
+          "docs/plans/lisp-kernel/tracelog-contract.md",
+          "docs/conformance/index.md",
+          "docs/guides/capability-prelude.md",
+          "docs/guides/kernel-repl.md"
+        ] ++ Path.wildcard("docs/conformance/*-audit.md"),
       groups_for_extras: [
         Kernel: ~r/docs\/plans\/lisp-kernel\/.+\.md/,
         Reference: ~r/docs\/(ptc-lisp|clojure|function-reference|java-).+\.md/,

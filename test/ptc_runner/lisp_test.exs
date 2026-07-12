@@ -2,6 +2,7 @@ defmodule PtcRunner.LispTest do
   use ExUnit.Case, async: true
 
   alias PtcRunner.Lisp
+  alias PtcRunner.Lisp.Tool
 
   describe "basic execution" do
     test "evaluates simple expression" do
@@ -37,6 +38,36 @@ defmodule PtcRunner.LispTest do
     test "context access returns nil for missing keys" do
       assert {:ok, %{return: nil, memory: %{}}} = Lisp.run("data/missing")
     end
+  end
+
+  test "ambiguous normalized tool arguments never reach direct callbacks" do
+    parent = self()
+
+    tool = fn arguments ->
+      send(parent, {:direct_tool_called, arguments})
+      true
+    end
+
+    assert {:error, %{fail: %{reason: :invalid_tool_args}}} =
+             Lisp.run(~S|(tool/capture {"outer" {"path" "a" :path "b"}})|,
+               tools: %{"capture" => tool}
+             )
+
+    refute_received {:direct_tool_called, _arguments}
+
+    forged = %Tool{
+      name: "capture",
+      function: tool,
+      type: :native,
+      argument_collisions: :pass
+    }
+
+    assert {:error, %{fail: %{reason: :invalid_tool_args}}} =
+             Lisp.run(~S|(tool/capture {"path" "a" :path "b"})|,
+               tools: %{"capture" => forged}
+             )
+
+    refute_received {:direct_tool_called, _arguments}
   end
 
   describe "basic arithmetic" do

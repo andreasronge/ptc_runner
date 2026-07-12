@@ -6,6 +6,7 @@ defmodule PtcRunner.Kernel.Evaluation do
   alias PtcRunner.Kernel.RunState
   alias PtcRunner.Kernel.RuntimeTools
   alias PtcRunner.Lisp
+  alias PtcRunner.Lisp.TrustedTool
 
   @spec evaluate_source(RunState.t(), map(), binary(), non_neg_integer()) :: map()
   def evaluate_source(state, mission_environment, source, timeout_ms) when is_binary(source) do
@@ -159,6 +160,7 @@ defmodule PtcRunner.Kernel.Evaluation do
        end}
     end)
     |> Map.merge(RuntimeTools.tools(state, environment, event_sink, :mission))
+    |> Map.new(fn {name, callback} -> {name, %TrustedTool{function: callback}} end)
   end
 
   defp bundle_prelude(%{bundle: %{prelude: prelude}}), do: prelude

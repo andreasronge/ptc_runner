@@ -6,6 +6,7 @@ defmodule PtcRunner.Kernel.Dispatcher do
   alias PtcRunner.Kernel.JSONValue
   alias PtcRunner.Kernel.ProviderError
   alias PtcRunner.Kernel.RunState
+  alias PtcRunner.Lisp.AmbiguousArguments
   alias PtcRunner.Lisp.RetainedSize
 
   @spec dispatch(RunState.t(), :workflow | :mission, map(), binary(), map(), non_neg_integer()) ::
@@ -25,6 +26,19 @@ defmodule PtcRunner.Kernel.Dispatcher do
           non_neg_integer(),
           term()
         ) :: map()
+  def dispatch(
+        state,
+        environment,
+        %{capabilities: _capabilities},
+        _name,
+        %AmbiguousArguments{},
+        _timeout_ms,
+        event_sink
+      )
+      when environment in [:workflow, :mission] do
+    protocol_error(state, event_sink, :ambiguous_arguments)
+  end
+
   def dispatch(
         state,
         environment,

@@ -17,6 +17,7 @@ defmodule PtcRunner.Lisp.Eval do
 
   require Logger
 
+  alias PtcRunner.Lisp.AmbiguousArguments
   alias PtcRunner.Lisp.ChildResult
   alias PtcRunner.Lisp.ClosureCapture
   alias PtcRunner.Lisp.CoreAST
@@ -1096,7 +1097,13 @@ defmodule PtcRunner.Lisp.Eval do
     if tool_call_name?(tool_name) do
       case String.split(ref, "/", parts: 2) do
         [server, tool] when server != "" and tool != "" ->
-          {:ok, %{"server" => server, "tool" => tool, "args" => stringify_keys(args)}}
+          case stringify_keys(args) do
+            {:ok, normalized} ->
+              {:ok, %{"server" => server, "tool" => tool, "args" => normalized}}
+
+            :ambiguous ->
+              {:ok, %AmbiguousArguments{}}
+          end
 
         _ ->
           {:error,
@@ -1117,7 +1124,7 @@ defmodule PtcRunner.Lisp.Eval do
   end
 
   defp build_args_map([arg], _tool_name) when is_map(arg) and not is_struct(arg),
-    do: {:ok, stringify_keys(arg)}
+    do: normalized_args(arg)
 
   defp build_args_map(args, tool_name) do
     if keyword_style_args?(args) do
@@ -1164,24 +1171,65 @@ defmodule PtcRunner.Lisp.Eval do
   defp args_to_string_map(args) do
     args
     |> Enum.chunk_every(2)
-    |> Map.new(fn [k, v] -> {stringify_key(k), stringify_value(v)} end)
+    |> Enum.reduce_while({:ok, %{}}, fn [key, value], {:ok, normalized} ->
+      normalized_key = stringify_key(key)
+
+      with false <- Map.has_key?(normalized, normalized_key),
+           {:ok, normalized_value} <- stringify_value(value) do
+        {:cont, {:ok, Map.put(normalized, normalized_key, normalized_value)}}
+      else
+        _ -> {:halt, :ambiguous}
+      end
+    end)
+    |> case do
+      {:ok, normalized} -> normalized
+      :ambiguous -> %AmbiguousArguments{}
+    end
   end
 
   # Recursively convert map keys to strings (for tool boundary).
   # Handles nested maps and lists to ensure full protection against atom leaks.
   defp stringify_keys(map) when is_map(map) and not is_struct(map) do
-    Map.new(map, fn {k, v} -> {stringify_key(k), stringify_value(v)} end)
+    Enum.reduce_while(map, {:ok, %{}}, fn {key, value}, {:ok, normalized} ->
+      normalized_key = stringify_key(key)
+
+      with false <- Map.has_key?(normalized, normalized_key),
+           {:ok, normalized_value} <- stringify_value(value) do
+        {:cont, {:ok, Map.put(normalized, normalized_key, normalized_value)}}
+      else
+        _ -> {:halt, :ambiguous}
+      end
+    end)
   end
 
   # Recursively stringify values (for nested maps/lists in tool args).
   # A keyword value becomes its plain name string — deterministic and
   # JSON-friendly, matching how `stringify_key/1` handles keyword keys (#964).
-  defp stringify_value(%LispKeyword{name: name}), do: name
+  defp stringify_value(%LispKeyword{name: name}), do: {:ok, name}
 
   defp stringify_value(map) when is_map(map) and not is_struct(map), do: stringify_keys(map)
 
-  defp stringify_value(list) when is_list(list), do: Enum.map(list, &stringify_value/1)
-  defp stringify_value(other), do: other
+  defp stringify_value(list) when is_list(list) do
+    Enum.reduce_while(list, {:ok, []}, fn value, {:ok, normalized} ->
+      case stringify_value(value) do
+        {:ok, item} -> {:cont, {:ok, [item | normalized]}}
+        :ambiguous -> {:halt, :ambiguous}
+      end
+    end)
+    |> case do
+      {:ok, normalized} -> {:ok, Enum.reverse(normalized)}
+      :ambiguous -> :ambiguous
+    end
+  end
+
+  defp stringify_value(other), do: {:ok, other}
+
+  defp normalized_args(map) do
+    case stringify_keys(map) do
+      {:ok, normalized} -> {:ok, normalized}
+      :ambiguous -> {:ok, %AmbiguousArguments{}}
+    end
+  end
 
   defp stringify_key(k) when is_atom(k), do: KeyNormalizer.normalize_key(k)
   defp stringify_key(%LispKeyword{name: name}), do: KeyNormalizer.normalize_key(name)

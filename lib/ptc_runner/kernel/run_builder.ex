@@ -51,8 +51,14 @@ defmodule PtcRunner.Kernel.RunBuilder do
 
   @spec run(binary(), ProviderRegistry.t()) :: {:ok, term()} | {:error, term()}
   def run(path, registry, opts \\ []) do
-    with {:ok, built} <- load_and_build(path, registry, opts),
-         do: Kernel.run(built.entry_source, built.config)
+    with {:ok, built} <- load_and_build(path, registry, opts) do
+      try do
+        Kernel.run(built.entry_source, built.config)
+      after
+        if Process.alive?(built.config.event_sink.pid),
+          do: EventSink.stop(built.config.event_sink)
+      end
+    end
   end
 
   defp maybe_override_input(manifest, opts) do

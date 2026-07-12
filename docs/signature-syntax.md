@@ -53,18 +53,6 @@ signature: "{name :string, price :float}"
 ISO 8601 with offset (the LLM emits `"2026-05-03T09:14:00Z"`), but the value
 your code receives is an Elixir `%DateTime{}` struct in UTC.
 
-```elixir
-{:ok, step} =
-  SubAgent.run("When did the deploy happen?",
-    output: :text,
-    signature: "{event :string, at :datetime}",
-    llm: my_llm
-  )
-
-step.return["at"]                                  #=> ~U[2026-05-03 09:14:00Z]
-DateTime.diff(DateTime.utc_now(), step.return["at"])  # works directly
-```
-
 | LLM emits | Result |
 |-----------|--------|
 | `"2026-05-03T09:14:00Z"` | `~U[2026-05-03 09:14:00Z]` (UTC) |
@@ -282,21 +270,6 @@ Lenient coercion for inputs (LLMs sometimes quote numbers):
 | `42` | `:float` | `42.0` (silent) |
 
 Output validation is **strict** - no coercion applied.
-
-### Validation Modes
-
-```elixir
-SubAgent.run(agent, signature_validation: :enabled, llm: llm)
-```
-
-| Mode | Behavior |
-|------|----------|
-| `:enabled` | Validate, fail on errors, allow extra fields (default) |
-| `:warn_only` | Validate, log warnings, continue |
-| `:disabled` | Skip all validation |
-| `:strict` | Validate, fail on errors, reject extra fields |
-
----
 
 ## Error Messages
 
@@ -578,7 +551,6 @@ These extensions should be added only when genuine use cases emerge.
 
 ## See Also
 
-- [Core Concepts](guides/subagent-concepts.md) - How signatures interact with context
-- [Getting Started](guides/subagent-getting-started.md) - Using signatures in your first agent
-- [Patterns](guides/subagent-patterns.md) - Chaining agents using signatures
-- `PtcRunner.SubAgent` - API reference
+- [PTC-Lisp specification](ptc-lisp-specification.md)
+- [Function reference](function-reference.md)
+- `PtcRunner.Lisp.Signature`

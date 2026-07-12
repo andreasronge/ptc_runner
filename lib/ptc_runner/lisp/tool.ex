@@ -1,6 +1,7 @@
 defmodule PtcRunner.Lisp.Tool do
   @moduledoc false
 
+  alias PtcRunner.Lisp.TrustedTool
   alias PtcRunner.Lisp.TypeExtractor
 
   defstruct [
@@ -11,6 +12,7 @@ defmodule PtcRunner.Lisp.Tool do
     :type,
     :expose,
     :native_result,
+    argument_collisions: :reject,
     visibility: :public,
     cache: false
   ]
@@ -25,13 +27,24 @@ defmodule PtcRunner.Lisp.Tool do
           type: atom() | nil,
           expose: atom() | nil,
           native_result: keyword() | nil,
+          argument_collisions: :reject | :pass,
           visibility: :public | :private,
           cache: boolean()
         }
 
   @spec new(binary(), term()) :: {:ok, t()} | {:error, term()}
   def new(name, %__MODULE__{} = tool) when is_binary(name),
-    do: validate(%{tool | name: tool.name || name})
+    do: validate(%{tool | name: tool.name || name, argument_collisions: :reject})
+
+  def new(name, %TrustedTool{function: function})
+      when is_binary(name) and is_function(function, 1),
+      do:
+        validate(%__MODULE__{
+          name: name,
+          function: function,
+          type: :native,
+          argument_collisions: :pass
+        })
 
   def new(name, %_{} = tool) when is_binary(name) do
     fields = Map.from_struct(tool)
@@ -99,8 +112,16 @@ defmodule PtcRunner.Lisp.Tool do
   def private?(%__MODULE__{visibility: :private}), do: true
   def private?(%__MODULE__{}), do: false
 
-  defp validate(%__MODULE__{function: function, visibility: visibility, cache: cache} = tool)
-       when is_function(function) and visibility in [:public, :private] and is_boolean(cache),
+  defp validate(
+         %__MODULE__{
+           function: function,
+           visibility: visibility,
+           cache: cache,
+           argument_collisions: collisions
+         } = tool
+       )
+       when is_function(function) and visibility in [:public, :private] and is_boolean(cache) and
+              collisions in [:reject, :pass],
        do: {:ok, tool}
 
   defp validate(_tool), do: {:error, :invalid_tool}

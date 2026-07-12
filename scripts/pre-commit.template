@@ -2,7 +2,6 @@
 
 # Pre-commit hook: runs gates per top-level Mix project.
 # Projects: "." and "ptc_viewer". Non-existent dirs are skipped.
-# Per spec Plans/ptc-runner-mcp-server.md §5.3 and §20.5.
 
 set -e
 
@@ -17,11 +16,11 @@ ALL_DELETED=$(git diff --cached --diff-filter=D --name-only)
 ALL_RENAMED=$(git diff --cached --diff-filter=R --name-only)
 
 # Filter staged paths to those owned by a given project.
-# Root project ".": everything except mcp_server/ and ptc_viewer/.
+# Root project ".": everything except ptc_viewer/.
 project_filter() {
   local proj="$1" input="$2"
   if [ "$proj" = "." ]; then
-    echo "$input" | grep -v -E '^(mcp_server|ptc_viewer)/' || true
+    echo "$input" | grep -v -E '^ptc_viewer/' || true
   else
     echo "$input" | grep -E "^${proj}/" || true
   fi

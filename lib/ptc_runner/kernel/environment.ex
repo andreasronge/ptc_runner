@@ -5,14 +5,7 @@ defmodule PtcRunner.Kernel.Environment do
   alias PtcRunner.Kernel.FrozenBundle
   alias PtcRunner.Kernel.JSONValue
 
-  @reserved MapSet.new([
-              "kernel-eval",
-              "runtime-usage",
-              "runtime-remaining",
-              "cap-list",
-              "cap-describe",
-              "workflow-annotate"
-            ])
+  @reserved ~w(kernel-eval runtime-usage runtime-remaining cap-list cap-describe workflow-annotate)
 
   def assemble(bundle, capabilities, data, kind)
       when kind in [:workflow, :mission] do
@@ -58,23 +51,19 @@ defmodule PtcRunner.Kernel.Environment do
   defp capability_map(_capabilities), do: {:error, :invalid_capability}
 
   defp reserved_names(_kind, capabilities) do
-    if Enum.any?(Map.keys(capabilities), &MapSet.member?(@reserved, &1)),
+    if Enum.any?(Map.keys(capabilities), &(&1 in @reserved)),
       do: {:error, :reserved_capability},
       else: :ok
   end
 
   defp bundle_requirements(%{prelude: %{exports: exports}}, capabilities, kind) do
-    granted_names =
-      capabilities
-      |> Map.keys()
-      |> MapSet.new()
-      |> MapSet.union(implicit_capabilities(kind))
+    granted_names = Map.new(Map.keys(capabilities) ++ implicit_capabilities(kind), &{&1, true})
 
     missing =
       exports
       |> Enum.flat_map(&Map.get(&1, :tool_refs, []))
       |> Enum.uniq()
-      |> Enum.reject(&MapSet.member?(granted_names, &1))
+      |> Enum.reject(&Map.has_key?(granted_names, &1))
 
     if missing == [],
       do: :ok,
@@ -83,17 +72,8 @@ defmodule PtcRunner.Kernel.Environment do
 
   defp bundle_requirements(_bundle, _capabilities, _kind), do: :ok
 
-  defp implicit_capabilities(:workflow),
-    do:
-      MapSet.new([
-        "kernel-eval",
-        "runtime-usage",
-        "runtime-remaining",
-        "cap-list",
-        "cap-describe",
-        "workflow-annotate"
-      ])
+  defp implicit_capabilities(:workflow), do: @reserved
 
   defp implicit_capabilities(:mission),
-    do: MapSet.new(["runtime-usage", "runtime-remaining", "cap-list", "cap-describe"])
+    do: ~w(runtime-usage runtime-remaining cap-list cap-describe)
 end

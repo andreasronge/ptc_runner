@@ -45,7 +45,8 @@ defmodule PtcRunner.Kernel.Manifest do
          {:ok, limits} <- limits(Map.get(manifest, "limits", %{})),
          {:ok, events} <- events(Map.get(manifest, "events", %{})),
          labels when is_map(labels) <- Map.get(manifest, "labels", %{}),
-         true <- JSONValue.map?(labels) and byte_size(:erlang.term_to_binary(labels)) <= 8_192 do
+         true <- JSONValue.map?(labels),
+         true <- byte_size(:erlang.term_to_binary(labels)) <= 8_192 do
       {:ok,
        %__MODULE__{
          path: path,
@@ -80,7 +81,8 @@ defmodule PtcRunner.Kernel.Manifest do
     with :ok <- exact_keys(value, ~w(components entry), ~w(components entry)),
          {:ok, components} <- components(value["components"], directory),
          entry when is_binary(entry) <- value["entry"],
-         true <- String.valid?(entry) and entry =~ @entry do
+         true <- String.valid?(entry),
+         true <- entry =~ @entry do
       {:ok, %{components: components, entry: entry}}
     else
       _ -> {:error, :invalid_workflow_manifest}
@@ -182,27 +184,47 @@ defmodule PtcRunner.Kernel.Manifest do
   defp provider_list(_values), do: {:error, :invalid_providers}
 
   defp provider?(value) when is_map(value) do
-    exact_keys(value, ~w(name config), ~w(name)) == :ok and
-      is_binary(value["name"]) and value["name"] =~ ~r/\A[a-z][a-z0-9._-]{0,127}\z/ and
-      JSONValue.map?(Map.get(value, "config", %{}))
+    with :ok <- exact_keys(value, ~w(name config), ~w(name)),
+         name when is_binary(name) <- value["name"],
+         true <- name =~ ~r/\A[a-z][a-z0-9._-]{0,127}\z/,
+         true <- JSONValue.map?(Map.get(value, "config", %{})) do
+      true
+    else
+      _invalid -> false
+    end
   end
 
   defp provider?(_value), do: false
 
   defp limits(value) when is_map(value) do
-    names =
-      Limits.defaults() |> Map.from_struct() |> Map.keys() |> Map.new(&{Atom.to_string(&1), &1})
+    ceilings = Limits.defaults() |> Map.from_struct()
+    names = ceilings |> Map.keys() |> Map.new(&{Atom.to_string(&1), &1})
 
-    if Enum.all?(value, fn {key, number} ->
-         Map.has_key?(names, key) and is_integer(number) and number > 0
-       end) do
-      value |> Map.new(fn {key, number} -> {Map.fetch!(names, key), number} end) |> Limits.new()
-    else
-      {:error, :invalid_limits}
-    end
+    ceilings_by_name =
+      Map.new(ceilings, fn {name, ceiling} -> {Atom.to_string(name), ceiling} end)
+
+    value
+    |> Map.to_list()
+    |> normalize_limits(names, ceilings_by_name, %{})
   end
 
   defp limits(_value), do: {:error, :invalid_limits}
+
+  defp normalize_limits([], _names, _ceilings, normalized), do: Limits.new(normalized)
+
+  defp normalize_limits([{key, number} | rest], names, ceilings, normalized)
+       when is_integer(number) and number > 0 do
+    case {Map.fetch(names, key), Map.fetch(ceilings, key)} do
+      {{:ok, name}, {:ok, ceiling}} when number <= ceiling ->
+        normalize_limits(rest, names, ceilings, Map.put(normalized, name, number))
+
+      _invalid ->
+        {:error, :invalid_limits}
+    end
+  end
+
+  defp normalize_limits(_values, _names, _ceilings, _normalized),
+    do: {:error, :invalid_limits}
 
   defp events(value) when is_map(value) do
     with :ok <- exact_keys(value, ~w(policy run_id trace_id), []),
@@ -222,14 +244,19 @@ defmodule PtcRunner.Kernel.Manifest do
 
   defp events(_value), do: {:error, :invalid_events}
   defp optional_id?(nil), do: true
-  defp optional_id?(id), do: is_binary(id) and String.valid?(id) and byte_size(id) in 1..256
+
+  defp optional_id?(id) when is_binary(id) and byte_size(id) in 1..256,
+    do: String.valid?(id)
+
+  defp optional_id?(_id), do: false
 
   defp exact_keys(map, allowed, required) do
     keys = Map.keys(map)
 
-    if keys -- allowed == [] and required -- keys == [],
-      do: :ok,
-      else: {:error, :unknown_or_missing_keys}
+    case {keys -- allowed, required -- keys} do
+      {[], []} -> :ok
+      _unknown_or_missing -> {:error, :unknown_or_missing_keys}
+    end
   end
 
   defp ordered_map(%OrderedObject{values: pairs}) do
@@ -264,7 +291,9 @@ defmodule PtcRunner.Kernel.Manifest do
   defp ordered_map(value), do: {:ok, value}
 
   defp read_relative(directory, path, max_bytes) do
-    with true <- is_binary(path) and String.valid?(path) and byte_size(path) in 1..1_024,
+    with true <- is_binary(path),
+         true <- String.valid?(path),
+         true <- byte_size(path) in 1..1_024,
          {:ok, path} <- resolve_relative(directory, path),
          {:ok, capability} <- FileCapability.new(root: directory, max_bytes: max_bytes),
          {:ok, %{"content" => content}} <- capability.callback.(%{"path" => path}) do
@@ -320,6 +349,7 @@ defmodule PtcRunner.Kernel.Manifest do
 
   defp within_root?("/", target), do: Path.type(target) == :absolute
 
-  defp within_root?(root, target),
-    do: target == root or String.starts_with?(target, root <> "/")
+  defp within_root?(root, target) do
+    if target == root, do: true, else: String.starts_with?(target, root <> "/")
+  end
 end

@@ -140,6 +140,44 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     assert {:error, :event_sink_error} = EventSink.emit(private, "run-stopped", %{"safe" => true})
   end
 
+  test "stopped event sinks are contained according to their policy" do
+    {:ok, workflow} = WorkflowEnvironment.new([])
+    {:ok, mission} = MissionEnvironment.new([])
+    limits = Limits.defaults()
+
+    {:ok, normal} = EventSink.start(:normal, limits, run_id: "stopped-normal")
+
+    {:ok, normal_config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        mission_environment: mission,
+        input: %{},
+        limits: limits,
+        event_sink: normal
+      )
+
+    EventSink.stop(normal)
+
+    assert {:ok, %{value: 42, usage: %{events_dropped: %{"event-sink" => 1}}}} =
+             Kernel.run("(return 42)", normal_config)
+
+    {:ok, private} = EventSink.start(:private, limits, run_id: "stopped-private")
+
+    {:ok, private_config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        mission_environment: mission,
+        input: %{},
+        limits: limits,
+        event_sink: private
+      )
+
+    EventSink.stop(private)
+
+    assert {:error, %{kind: :event_sink_error, reason: :event_sink_error}} =
+             Kernel.run("(return 42)", private_config)
+  end
+
   test "private event sink exhaustion is a terminal event-sink error" do
     {:ok, workflow} = WorkflowEnvironment.new([])
     {:ok, mission} = MissionEnvironment.new([])
@@ -224,6 +262,16 @@ defmodule PtcRunner.Kernel.CoreContractTest do
              Kernel.compile_bundle([%{first | dependencies: ["second"]}, second])
   end
 
+  test "bundle compilation confines large artifacts with independent heap and artifact limits" do
+    payload = String.duplicate("x", 1_500_000)
+
+    {:ok, component} =
+      Component.new(id: "large", source: ~s|(ns large) (def value "#{payload}")|)
+
+    assert {:error, %{reason: reason}} = Kernel.compile_bundle([component])
+    assert reason in [:bundle_compile_heap_exceeded, :bundle_artifact_exceeded]
+  end
+
   test "component dependencies make dependency namespaces visible" do
     {:ok, base} =
       Component.new(id: "base", source: "(ns base \"Base helpers.\") (defn value [] 40)")
@@ -269,6 +317,19 @@ defmodule PtcRunner.Kernel.CoreContractTest do
 
   test "bundle compilation returns diagnostics for malformed component terms" do
     assert {:error, %{reason: :invalid_components}} = Kernel.compile_bundle([%{}])
+
+    {:ok, component} = Component.new(id: "valid", source: "(ns valid) (def value 1)")
+
+    assert {:error, %{reason: :invalid_components}} =
+             Kernel.compile_bundle([%{component | source: :forged}])
+
+    assert {:error, %{reason: :invalid_components}} =
+             Kernel.compile_bundle([%{component | dependencies: :forged}])
+
+    assert {:error, %{reason: :bundle_limit_exceeded}} =
+             Kernel.compile_bundle([
+               %{component | dependencies: List.duplicate("valid", 100_000)}
+             ])
   end
 
   test "new Kernel run executes a bounded workflow through explicit configuration" do
@@ -343,6 +404,68 @@ defmodule PtcRunner.Kernel.CoreContractTest do
 
     assert %{data: %{environment: :workflow, name: "add"}} = started
     assert %{data: %{environment: :workflow, name: "add", status: :ok}} = stopped
+  end
+
+  test "ambiguous normalized capability arguments are rejected before provider dispatch" do
+    parent = self()
+
+    {:ok, capability} =
+      Capability.new(
+        name: "capture",
+        callback: fn arguments ->
+          send(parent, {:provider_called, arguments})
+          {:ok, true}
+        end
+      )
+
+    {:ok, workflow} = WorkflowEnvironment.new(capabilities: [capability])
+    {:ok, mission} = MissionEnvironment.new([])
+    limits = Limits.defaults()
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "ambiguous-arguments")
+
+    {:ok, config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        mission_environment: mission,
+        input: %{},
+        limits: limits,
+        event_sink: sink
+      )
+
+    assert {:ok, %{value: %{status: :error, kind: :protocol_error, reason: :ambiguous_arguments}}} =
+             Kernel.run(
+               ~S|(return (tool/capture {"outer" {"path" "a" :path "b"}}))|,
+               config
+             )
+
+    refute_receive {:provider_called, _arguments}
+  end
+
+  test "mission ambiguity is a counted protocol error before provider dispatch" do
+    parent = self()
+
+    {:ok, capability} =
+      Capability.new(
+        name: "capture",
+        callback: fn arguments ->
+          send(parent, {:mission_provider_called, arguments})
+          {:ok, true}
+        end
+      )
+
+    {:ok, mission} = MissionEnvironment.new(capabilities: [capability])
+    {:ok, state} = RunState.start(Limits.defaults())
+
+    assert %{outcome: :returned, value: %{kind: :protocol_error, reason: :ambiguous_arguments}} =
+             Evaluation.evaluate_source(
+               state,
+               mission,
+               ~S|(return (tool/capture {"path" "a" :path "b"}))|,
+               100
+             )
+
+    assert %{protocol_errors: 1} = RunState.usage(state)
+    refute_receive {:mission_provider_called, _arguments}
   end
 
   test "mission evaluation is serialized, persistent, and cannot use workflow capabilities" do

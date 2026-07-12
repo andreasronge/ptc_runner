@@ -22,7 +22,7 @@ defmodule PtcRunner.Sandbox do
   **pre-eval sandbox baseline**, and re-arms the `max_heap_size` flag at
   `baseline + max_heap`. Host-granted data is therefore excluded from the
   program's bill; memory the *program* acquires stays fail-closed. Two
-  caveats (see `docs/plans/sandbox-heap-rebaseline.md`):
+  caveats:
 
   - the baseline is a *sandbox* baseline — it includes the parsed user
     program (bounded by `:max_program_bytes`) and eval plumbing, not just

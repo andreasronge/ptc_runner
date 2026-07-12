@@ -1,9 +1,8 @@
-# Minimal Programmable Kernel — Temporary Migration Inventory
+# Minimal Programmable Kernel — Migration Record
 
-**Status:** active migration inventory. The core owner primitives introduced in
-`exp/minimal-kernel` Slice 1 are tracked below; all rows remain open until their
-listed destination and final deletion audit are complete. Delete this document
-after migration closes.
+**Status:** implementation and deletion inventory closed on 2026-07-12. This is
+the as-built record for the `exp/minimal-kernel` replacement; Git history holds
+the removed product implementations and detailed deletion waves.
 
 **Contract:** [`kernel-contract.md`](kernel-contract.md)
 
@@ -11,16 +10,14 @@ after migration closes.
 
 **Sequence:** [`kernel-migration.md`](kernel-migration.md)
 
-## Classification
+## Final classification
 
-- **foundation** — retain initially; simplify only after the new path works.
-- **new path** — implement the normative Kernel contract here.
-- **migrate** — extract named retained behavior to the stated destination.
-- **delete** — belongs only to the old product.
-- **experiment** — temporarily retained with an explicit exit condition.
-
-Every `migrate` item must name its destination. Every `experiment` item must
-name its re-home/delete condition. `unknown` is not a durable classification.
+- **retained** — surviving language, sandbox, conformance, or tooling foundation.
+- **implemented** — contract behavior owned by the new Kernel path.
+- **migrated** — retained behavior moved to the named destination.
+- **deleted** — removed with its last old-product consumer.
+- **superseded/deferred/ignored** — explicitly resolved without a competing
+  runtime path.
 
 ## Source inventory
 
@@ -29,27 +26,27 @@ name its re-home/delete condition. `unknown` is not a durable classification.
 | Area | Class | Retained behavior / destination |
 | --- | --- | --- |
 | `lib/ptc_runner/lisp.ex` | migrated | Kernel uses neutral `Lisp.Result`, `Lisp.Context`, `Lisp.Tool`, signature, and metadata boundaries; journal, agent-budget, discovery-executor, catalog-op, and upstream-specific options are removed. |
-| `lib/ptc_runner/lisp/parser*`, `fast_parser*`, AST/source modules | foundation | Parsing and source representation. Add span preservation as an early language workstream. |
+| `lib/ptc_runner/lisp/parser*`, `fast_parser*`, AST/source modules | retained | Parsing and source representation. Exact inner source spans remain a language-quality enhancement, not a Kernel migration gate. |
 | `lib/ptc_runner/lisp/analyze*` | migrated | Retains static safety and Clojure semantics; agent budget/journal and MCP/catalog discovery surfaces are removed. |
-| Parser/analyzer `program` support | new path | Capture bounded forms without workflow evaluation/resolution; preserve origin/spans; no general collection quote/macros. |
+| Parser/analyzer `program` support | implemented | Captures bounded forms without workflow evaluation/resolution, with opaque source identity and no general collection quote/macros. Exact inner spans are deferred. |
 | `lib/ptc_runner/lisp/eval*`, `runtime*`, `env*` | migrated | Retains closures/functions/interop/definitions behind a neutral evaluation context; agent, upstream, journal, discovery-op, and catalog-op state is removed. |
-| `Lisp.Eval.ParallelRunner`, `ParallelBudget`, `pmap`/`pcalls` workers | migrate | Retain bounded parallel data/capability execution; integrate provider-task limits and reject concurrent `kernel-eval` with recoverable `:busy`. |
-| `lib/ptc_runner/lisp/retained_size.ex` | foundation | Evaluation-memory and capability-result size enforcement. |
-| `lib/ptc_runner/lisp/format*`, `formatter*`, keyword representation | foundation | Deterministic Lisp formatting and keyword boundary. |
-| `lib/ptc_runner/lisp/registry*`, language/spec validation | foundation | Language reference and conformance. Remove agent-specific registrations only. |
+| `Lisp.Eval.ParallelRunner`, `ParallelBudget`, `pmap`/`pcalls` workers | migrated | Bounded parallel data execution remains; provider calls have separate atomic live-task limits and concurrent `kernel-eval` returns recoverable `:busy`. |
+| `lib/ptc_runner/lisp/retained_size.ex` | retained | Evaluation-memory and capability-result size enforcement. |
+| `lib/ptc_runner/lisp/format*`, `formatter*`, keyword representation | retained | Deterministic Lisp formatting and keyword boundary. |
+| `lib/ptc_runner/lisp/registry*`, language/spec validation | retained | Language reference and conformance. Remove agent-specific registrations only. |
 | `lib/ptc_runner/lisp/discovery.ex` | deleted | Replaced by environment-local `cap/list` and `cap/describe` capabilities. |
 | SubAgent budget/plan/journal special surfaces in Lisp | deleted | Replaced by generic runtime usage and workflow annotations. |
-| `*1`, `*2`, `*3` support | migrate | Retain only for direct REPL history; agent history becomes ordinary workflow data. |
-| `return` / `fail` | foundation | Workflow-neutral terminal control signals. |
-| `lib/ptc_runner/sandbox.ex` | new path | Process isolation, timeout, heap, and cleanup accept a neutral context term and use Lisp-owned process propagation; public Context/MCP type coupling is removed. |
+| `*1`, `*2`, `*3` support | migrated | Retained for direct REPL history; agent history is ordinary workflow data. |
+| `return` / `fail` | retained | Workflow-neutral terminal control signals. |
+| `lib/ptc_runner/sandbox.ex` | implemented | Process isolation, timeout, heap, and cleanup accept a neutral context term and use Lisp-owned process propagation; public Context/MCP type coupling is removed. |
 
 ### Prelude foundation and deployment platform
 
 | Area | Class | Retained behavior / destination |
 | --- | --- | --- |
 | `lib/ptc_runner/lisp/prelude/compiler.ex` and compiler helpers | migrated | Retains protected namespaces, exports, compilation, and strict generic `tool:<name>` requirements; upstream inference and provider refs are removed. |
-| `lib/ptc_runner/lisp/prelude/bundle.ex` | migrate | Become explicit bounded component-ID DAG `compile_bundle/1` with frozen provenance. |
-| Protected namespace/export/prompt inventory primitives | foundation | Split workflow/mission validation and mission-only model inventory. |
+| `lib/ptc_runner/lisp/prelude/bundle.ex` | migrated | Become explicit bounded component-ID DAG `compile_bundle/1` with frozen provenance. |
+| Protected namespace/export/prompt inventory primitives | retained | Split workflow/mission validation and mission-only model inventory. |
 | `priv/preludes/agent/*.lisp` | deleted | Replaced by Kernel library components `agent.native`, `agent.core`, `agent.feedback`, `agent.retry`, `workflow.event`, and `result`. |
 | `PtcRunner.PreludeRolePolicy` and grants | deleted | Roles remain an optional future environment-builder adapter. |
 | `PtcRunner.PreludeRuntime` | deleted | Kernel accepts frozen bundles/environments. |
@@ -61,36 +58,36 @@ name its re-home/delete condition. `unknown` is not a durable classification.
 
 | Area | Class | Retained behavior / destination |
 | --- | --- | --- |
-| `Kernel.Capability` responsibility | new path | Host-owned metadata/callback representation selected only through the Slice 8 trusted provider registry. |
-| `Kernel.WorkflowEnvironment` | new path | Frozen workflow capability/data map with attested-bundle and recorded tool-requirement validation. |
-| `Kernel.MissionEnvironment` | new path | Structurally distinct mission capability/data map with attested-bundle validation and no workflow-route merge path. |
-| `Kernel.Limits` | new path | Slice 1: normalized positive hard ceilings. |
-| `Kernel.RunState` | new path | Atomic deadline, counters, protocol exhaustion, serialized evaluation-memory lease, late-provider completion, closed status, and explicit teardown; dropped-event ownership remains with the bounded sink pending final observability integration. |
-| `Kernel.Dispatcher` | new path | Validation, atomic reservation/completion, remaining-deadline timeout, fault containment, bounds, uniform envelopes, and workflow/mission Lisp wiring. |
-| Host provider-registry interface | new path | Host-owned name-to-builder map; manifests can select names but never register executable code. |
-| `Kernel.EventSink` responsibility | new path | Canonical bounded owner-monitored memory sink integrated with run lifecycle and the shared TraceLog loader; normal drops appear in terminal usage and private exhaustion returns `:event_sink_error`. Run/evaluation/capability/limit/annotation/drop-summary events are wired; external normal-sink failure and private flush/backpressure semantics remain for live persistence integration. |
-| `Kernel.Result` / `Kernel.Error` | new path | Only public Kernel outcomes. |
-| `Kernel.compile_bundle/1` | new path | Slice 2 in progress: bounded component-ID DAG, deterministic ordering, per-component validation, dependency namespace compilation, attested frozen artifacts, source hashes/provenance, prelude attachment, and explicit tool-requirement validation. Provider `requires` schema plus compile-time/heap/artifact limits remain open. |
-| Bundle compilation limits | new path | Component/edge/source/time/heap/artifact/diagnostic ceilings independent of the run deadline. |
-| `Kernel.run/2` | new path | Slice 3 in progress: typed explicit configuration, bounded direct entry execution including compile time, attested workflow bundles, lifecycle/error cleanup, terminal-result bounds, canonical start/stop events, and workflow capability dispatch. Remaining event vocabulary is open. |
-| Reserved `kernel-eval` | new path | Slice 4 implemented: workflow-to-mission source and embedded-Program routes, serialized leases, transactional memory, mission-only capability dispatch, remaining-run timeout enforcement, and canonical evaluation/capability events. |
-| Opaque Program value | new path | Slice 5 in progress: static opaque source identity with byte size/digest, analyzer capture, embedded kernel-eval route, bounded public projection, no workflow-local capture, and shipped helpers. Accurate origin/inner spans remain open on parser span preservation. |
-| `kernel/eval` / `kernel/eval-source` prelude | new path | Shipped explicit embedded versus dynamic helpers over one discriminated `kernel-eval` capability; errors remain recoverable values. |
-| Generic runtime usage/remaining | new path | Shipped read-only helpers over changing enforced-resource snapshots. |
-| Capability discovery | new path | Shipped environment-local `cap/list` and `cap/describe` helpers with bounded sanitized metadata. |
-| Workflow annotation | new path | Shipped bounded helper emitting host-stamped `workflow-annotation` events without lifecycle authority. |
-| `Kernel.FileCapability` / `fs` library | new path | Slice 6 deterministic proof: host-held read root, exact argument schema, relative-path and symlink confinement, pre-read/result bounds, UTF-8 results, mission-only discovery, and no ambient workflow filesystem route. |
-| `Kernel.LLMCapability` / `llm` library | new path | Slice 7 provider-neutral workflow capability with host-owned requester, request/response bounds, sanitized transport errors, JSON normalization, generic Kernel quotas/events, and no model policy in BEAM. |
-| Shipped agent/result libraries | new path | Slice 7 strict native action parsing, message loop, correction feedback, retry/backoff decisions, annotations, and opt-in uniform results; scripted tests cover success, prose/protocol correction, evaluation correction, explicit failure, provider failure, and quota exhaustion. |
-| `Kernel.Manifest` / `RunBuilder` | new path | Slice 8 strict duplicate-aware versioned JSON loader, manifest-relative confined sources/input, separate frozen bundles/environments, normalized limits/events/labels, generated qualified entry expression, and one shared build/run path. |
-| `Kernel.ProviderRegistry` | new path | Host-owned `llm`/`file-read` builders plus non-replacing embedder extensions; manifests select bounded names/config only and destination checks reject authority expansion. |
-| `mix ptc.run` | new path | Thin Slice 9 frontend over `RunBuilder`, with JSON output and a confined manifest-relative `--mission` input override. |
+| `Kernel.Capability` responsibility | implemented | Host-owned metadata/callback representation selected only through the Slice 8 trusted provider registry. |
+| `Kernel.WorkflowEnvironment` | implemented | Frozen workflow capability/data map with attested-bundle and recorded tool-requirement validation. |
+| `Kernel.MissionEnvironment` | implemented | Structurally distinct mission capability/data map with attested-bundle validation and no workflow-route merge path. |
+| `Kernel.Limits` | implemented | Slice 1: normalized positive hard ceilings. |
+| `Kernel.RunState` | implemented | Atomic deadline, counters, protocol exhaustion, serialized evaluation-memory lease, late-provider completion, closed status, and explicit teardown. Event drops remain owned and reported by the bounded sink. |
+| `Kernel.Dispatcher` | implemented | Validation, atomic reservation/completion, remaining-deadline timeout, fault containment, bounds, uniform envelopes, and workflow/mission Lisp wiring. |
+| Host provider-registry interface | implemented | Host-owned name-to-builder map; manifests can select names but never register executable code. |
+| `Kernel.EventSink` responsibility | implemented | Canonical bounded owner-monitored memory sink integrated with run lifecycle and TraceLog. Normal queue loss or sink failure is contained and reported; private exhaustion/failure returns `:event_sink_error`. Persistent JSONL append is an explicit host operation rather than a second live owner. |
+| `Kernel.Result` / `Kernel.Error` | implemented | Only public Kernel outcomes. |
+| `Kernel.compile_bundle/1` | implemented | Bounded component-ID DAG, deterministic ordering, dependency compilation, attested frozen artifacts, source hashes/provenance, tool-requirement validation, and independent source/time/heap/artifact/diagnostic ceilings. V1 records generic `tool:<name>` requirements rather than provider-specific schemas. |
+| Bundle compilation limits | implemented | Component/edge/source/time/heap/artifact/diagnostic ceilings independent of the run deadline. |
+| `Kernel.run/2` | implemented | Typed explicit configuration, bounded entry execution, attested workflow bundles, lifecycle cleanup, terminal-result bounds, canonical V1 events, and workflow capability dispatch. |
+| Reserved `kernel-eval` | implemented | Slice 4 implemented: workflow-to-mission source and embedded-Program routes, serialized leases, transactional memory, mission-only capability dispatch, remaining-run timeout enforcement, and canonical evaluation/capability events. |
+| Opaque Program value | implemented | Static opaque source identity with byte size/digest, analyzer capture, embedded evaluation route, bounded public projection, no workflow-local capture, and shipped helpers. Exact inner spans are deferred. |
+| `kernel/eval` / `kernel/eval-source` prelude | implemented | Shipped explicit embedded versus dynamic helpers over one discriminated `kernel-eval` capability; errors remain recoverable values. |
+| Generic runtime usage/remaining | implemented | Shipped read-only helpers over changing enforced-resource snapshots. |
+| Capability discovery | implemented | Shipped environment-local `cap/list` and `cap/describe` helpers with bounded sanitized metadata. |
+| Workflow annotation | implemented | Shipped bounded helper emitting host-stamped `workflow-annotation` events without lifecycle authority. |
+| `Kernel.FileCapability` / `fs` library | implemented | Slice 6 deterministic proof: host-held read root, exact argument schema, relative-path and symlink confinement, pre-read/result bounds, UTF-8 results, mission-only discovery, and no ambient workflow filesystem route. |
+| `Kernel.LLMCapability` / `llm` library | implemented | Slice 7 provider-neutral workflow capability with host-owned requester, request/response bounds, sanitized transport errors, JSON normalization, generic Kernel quotas/events, and no model policy in BEAM. |
+| Shipped agent/result libraries | implemented | Slice 7 strict native action parsing, message loop, correction feedback, retry/backoff decisions, annotations, and opt-in uniform results; scripted tests cover success, prose/protocol correction, evaluation correction, explicit failure, provider failure, and quota exhaustion. |
+| `Kernel.Manifest` / `RunBuilder` | implemented | Slice 8 strict duplicate-aware versioned JSON loader, manifest-relative confined sources/input, separate frozen bundles/environments, normalized limits/events/labels, generated qualified entry expression, and one shared build/run path. |
+| `Kernel.ProviderRegistry` | implemented | Host-owned `llm`/`file-read` builders plus non-replacing embedder extensions; manifests select bounded names/config only and destination checks reject authority expansion. |
+| `mix ptc.run` | implemented | Thin Slice 9 frontend over `RunBuilder`, with JSON output and a confined manifest-relative `--mission` input override. |
 
 ### Experimental Kernel implementation (closed at public cutover)
 
 | Area | Class | Retained behavior / exit condition |
 | --- | --- | --- |
-| `lib/ptc_runner/kernel.ex` | new path | Cut over to the contract-only `compile_bundle/1` and `run/2` surface; bounded execution is owned by the internal `Kernel.Runner`. |
+| `lib/ptc_runner/kernel.ex` | implemented | Cut over to the contract-only `compile_bundle/1` and `run/2` surface; bounded execution is owned by the internal `Kernel.Runner`. |
 | `lib/ptc_runner/kernel/state_handle.ex` | deleted | Atomic evaluation-memory ownership is implemented by `RunState`; the experiment handle and tests were removed. |
 | `lib/ptc_runner/kernel/inner_prelude.ex` | deleted | Frozen environment/bundle requirement validation superseded the role-specific experiment module. |
 | `lib/ptc_runner/kernel/action.ex` | deleted | Parity is proven in shipped `agent.native`; the legacy Elixir parser and tests were removed. |
@@ -116,7 +113,7 @@ name its re-home/delete condition. `unknown` is not a durable classification.
 | Area | Class | Retained behavior / destination |
 | --- | --- | --- |
 | `PtcRunner.Step`, `Step.Public` | deleted | Native ownership moved to `Lisp.Result`; public execution is Kernel Result/Error. |
-| `Kernel.ReplSession` | new path | Direct bounded evaluator continuation for definitions and `*1`/`*2`/`*3`, with transactional memory, Dispatcher-backed workflow capabilities, manifest configuration, and canonical session events. |
+| `Kernel.ReplSession` | implemented | Direct bounded evaluator continuation for definitions and `*1`/`*2`/`*3`, with transactional memory, Dispatcher-backed workflow capabilities, manifest configuration, and canonical session events. |
 | `PtcRunner.Session` | deleted | Retained REPL behavior lives in `Kernel.ReplSession`; old public/upstream/legacy-TraceLog semantics were removed. |
 | `PtcRunner.Context`, `PtcRunner.Turn` | deleted | The evaluator context moved to neutral `Lisp.Context`; the old Turn type had no surviving caller. |
 | `PtcRunner.Evidence*` | deleted | No current Kernel/TraceLog contract required the product-specific evidence projection. |
@@ -130,22 +127,23 @@ name its re-home/delete condition. `unknown` is not a durable classification.
 
 | Area | Class | Retained behavior / destination |
 | --- | --- | --- |
-| `PtcRunner.PreludeOrigin` | migrate | One bounded sanitized origin type for Component, diagnostics, and traces. |
+| `PtcRunner.PreludeOrigin` | deleted | Kernel components use bounded explicit binary origins; the unreferenced product-specific sanitizer was removed. |
+| `PtcRunner.Lisp.SampleFormatter` | deleted | The unreferenced presentation helper was removed; public Kernel projection owns result boundaries. |
 | `PtcRunner.SymbolInventory` | deleted | Kernel capability discovery derives bounded model-visible metadata directly from the selected environment. |
 | `PtcRunner.Lisp.TraceContext` | deleted | Canonical IDs live in RunState/events; evaluator child metadata uses a narrow process-local `Lisp.ChildResult`. |
-| `PtcRunner.Dotenv` | migrate | CLI/provider-builder convenience only; never ambient Kernel authority. |
+| Environment loading | migrated | CLI/provider configuration reads explicit environment values; no ambient Kernel authority or separate Dotenv product module remains. |
 | `PtcRunner.PromptLoader`, `PtcRunner.Prompts` | deleted | Removed with compiled SubAgent prompt files and last callers. |
-| `PtcRunner.LLM` | migrate | Thin embedding/provider-registry facade for `llm/request`; no agent policy. |
+| LLM integration | migrated | `Kernel.LLMCapability` and the trusted registry adapt ReqLLM; agent policy remains in Lisp. |
 
 ### LLM integration
 
 | Area | Class | Retained behavior / destination |
 | --- | --- | --- |
-| `PtcRunner.LLM.ReqLLMAdapter` | migrate | Optional provider implementing uniform `llm/request` workflow capability. |
-| Provider transport normalization | migrate | Bounded provider-neutral data and safe metadata. |
-| `PtcRunner.LLM.Registry` / default registry | migrate | Existing model-name resolution remains behind the built-in `llm` provider builder; manifests cannot name modules/functions or replace builders. |
-| Structured output, text/tool mode switching, prompt caching wrappers | delete | Policy lives in Lisp or is deferred. |
-| Streaming | delete/defer | V1 non-goal. |
+| ReqLLM adapter | migrated | The built-in trusted `llm` provider implements uniform `llm/request` capability semantics. |
+| Provider transport normalization | migrated | Bounded provider-neutral data and safe metadata. |
+| Model-name resolution | migrated | `ReqLLM.ModelRegistry` resolution remains behind the built-in `llm` provider builder; manifests cannot name modules/functions or replace builders. |
+| Structured output, text/tool mode switching, prompt caching wrappers | deleted | Policy lives in Lisp or is deferred. |
+| Streaming | deferred | V1 non-goal. |
 
 ### TraceLog and viewer
 
@@ -153,18 +151,18 @@ This area is governed by [`tracelog-contract.md`](tracelog-contract.md).
 
 | Area | Class | Retained behavior / destination |
 | --- | --- | --- |
-| Canonical TraceLog event/envelope | new path | `Kernel.TraceLog` strictly validates the bounded V1 Kernel event schema, version, run/trace identity, sequence order, JSON data, and timestamps before derivation. The viewer canonical routes now delegate to this implementation. |
-| JSONL handler/collector | new path | Admin-owned append/reload now preserves canonical order under aggregate byte and descriptor-identity checks; wiring a live normal sink with dropped-event accounting remains open. |
-| Private transcript sink | experiment | Explicit fail-closed sink in experiment harness; re-home before evaluator deletion. |
-| `Kernel.TraceLog` / `Kernel.TraceCapability` | new path | Shared source-scoped memory/file/directory loading, required run metadata, run/turn filters, counters, deterministic result-bounded pagination, source/query-bound cursors, duplicate-key rejection, reserved-suffix private-source confinement, explicit private grants, and uniform capability failures. |
+| Canonical TraceLog event/envelope | implemented | `Kernel.TraceLog` strictly validates the bounded V1 Kernel event schema, version, run/trace identity, sequence order, JSON data, and timestamps before derivation. The viewer canonical routes now delegate to this implementation. |
+| JSONL persistence | implemented | Admin-owned append/reload preserves canonical order under aggregate byte and descriptor-identity checks. Runtime collection remains the bounded event owner. |
+| Private transcript sink | implemented | Explicit private `EventSink` policy plus reserved-suffix private JSONL paths fail closed and require separate grants. The experiment harness was retired. |
+| `Kernel.TraceLog` / `Kernel.TraceCapability` | implemented | Shared source-scoped memory/file/directory loading, required run metadata, run/turn filters, counters, deterministic result-bounded pagination, source/query-bound cursors, duplicate-key rejection, reserved-suffix private-source confinement, explicit private grants, and uniform capability failures. |
 | Legacy `TraceLog.Introspection` | deleted | Remaining callers moved to `Kernel.TraceLog`; the parallel query implementation was removed. |
-| `log.core` prelude | new path | Shipped swappable mission prelude over four explicitly granted trace-query capabilities; missing grants fail during environment assembly and workflow inheritance is structurally absent. |
+| `log.core` prelude | implemented | Shipped swappable mission prelude over four explicitly granted trace-query capabilities; missing grants fail during environment assembly and workflow inheritance is structurally absent. |
 | `TraceLog.Analyzer` | deleted | Canonical viewer routes and `Kernel.TraceLog` superseded it. |
-| Trace memory sink | new path | `Kernel.EventSink` is the bounded in-memory source for Kernel runs, REPL integration, tests, and `log.core`; legacy sinks were removed. |
+| Trace memory sink | implemented | `Kernel.EventSink` is the bounded in-memory source for Kernel runs, REPL integration, tests, and `log.core`; legacy sinks were removed. |
 | `Tracer`, `Tracer.Timeline` | deleted | The viewer uses canonical Kernel events; the competing in-memory trace representation was removed. |
 | `Metrics.Statistics`, `Metrics.TurnAnalysis` | deleted | No retained Kernel or experiment caller remained. |
 | `PtcRunner.Kino.TraceTree` | deleted | Removed after the public Step/Turn trace tree was superseded. |
-| `ptc_viewer/` | foundation | Per-instance host adapter delegates bounded run/turn/counter routes and the primary UI to shared `Kernel.TraceLog`; ordinary discovery excludes reserved private traces. Delete the legacy raw agent/plan fallback with the last old producer. Interactive Lab deferred. |
+| `ptc_viewer/` | retained | Per-instance host adapter delegates bounded run/turn/counter routes and the primary UI to shared `Kernel.TraceLog`; ordinary discovery excludes reserved private traces. Legacy agent/plan fallback is removed; Interactive Lab is deferred. |
 
 ### Upstream and MCP
 
@@ -179,60 +177,60 @@ This area is governed by [`tracelog-contract.md`](tracelog-contract.md).
 
 | Task | Class | Destination |
 | --- | --- | --- |
-| `ptc.repl` | new path | Small direct bounded Lisp REPL with transactional definitions/history, scripts/setup files, shared manifest workflow grants, Dispatcher routing, and optional canonical JSONL persistence. |
-| `ptc.run` | new path | Thin shared manifest/run-builder frontend. |
-| `ptc.viewer` | foundation | Read-only trace/transcript frontend in V1. |
-| `ptc.validate_spec`, `ptc.update_spec_checksums`, `ptc.gen_docs` | foundation | Retain language/spec maintenance. |
-| `ptc.conformance_report`, `ptc.clojure_audit`, `ptc.audit_upstream` | foundation | Retain; rename “upstream” to clarify reference-runtime meaning. |
-| `ptc.smoke`, `ptc.install_babashka` | foundation | Retain while conformance uses Babashka. |
-| `bench.check` | migrate | Small deterministic runtime regression corpus. |
-| `parallel_workers` | delete | Delete with example. |
+| `ptc.repl` | implemented | Small direct bounded Lisp REPL with transactional definitions/history, scripts/setup files, shared manifest workflow grants, Dispatcher routing, and optional canonical JSONL persistence. |
+| `ptc.run` | implemented | Thin shared manifest/run-builder frontend. |
+| `ptc.viewer` | retained | Read-only trace/transcript frontend in V1. |
+| `ptc.validate_spec`, `ptc.update_spec_checksums`, `ptc.gen_docs` | retained | Retain language/spec maintenance. |
+| `ptc.conformance_report`, `ptc.clojure_audit`, `ptc.audit_upstream` | retained | “Upstream” means the Clojure reference runtime, not the deleted network-upstream product. |
+| `ptc.smoke`, `ptc.install_babashka` | retained | Retain while conformance uses Babashka. |
+| `bench.check` | migrated | Small deterministic runtime regression corpus. |
+| `parallel_workers` | deleted | Removed with its example. |
 | `ptc.kernel_feedback_ab` | deleted | Removed with the A/B harness. |
 | `ptc.kernel_eval` | deleted | Removed at public cutover; optional comparisons must use the shared manifest runner rather than a second Kernel product. |
 | `ptc.dna` | deleted | The final duplication audit ran; the temporary task and `ex_dna` dependency were removed. |
-| release/smoke tasks | migrate | Retain only checks for shipped language/Kernel/viewer artifacts. |
+| release/smoke tasks | migrated | Reduced to checks for shipped language, Kernel, and viewer artifacts. |
 
 ## Top-level directories and assets
 
 | Path | Class | Exit/destination |
 | --- | --- | --- |
-| `lib/`, core `test/` | migrate | Follow per-area rows; remove obsolete support/fixtures vertically. |
-| `config/`, `.env.example` | migrate | Retain only Kernel/provider/frontend defaults; remove SubAgent, MCP/upstream, demo, and obsolete release configuration. |
-| `priv/` | migrate | Retain language/spec and rewritten Lisp libraries; delete prompts, variants, schemas, and other assets with their last consumers. |
-| `docs/guides/` | delete/replace | Extract concise Kernel, capability/prelude, TraceLog, REPL/runner docs first. |
-| `docs/conformance/`, specification, function reference, conformance gaps | foundation | Retain. |
-| `docs/plans/lisp-kernel/private-experiment-transcripts.md` | superseded | Historical rationale retained; canonical private JSONL persistence and viewer confinement replaced only the transcript mechanism. The experiment/scoring harness was intentionally retired. |
-| `docs/plans/future/`, `docs/plans/archive/` | migrate | Keep only rationale for surviving systems; delete rejected-system plans. |
-| `docs/guidelines/` | migrate | Keep active repository rules not already canonical in `AGENTS.md`. |
+| `lib/`, core `test/` | migrated | Follow per-area rows; remove obsolete support/fixtures vertically. |
+| `config/`, `.env.example` | migrated | Contains only Kernel/provider/frontend defaults; SubAgent, MCP/upstream, demo, and obsolete release configuration is removed. |
+| `priv/` | migrated | Contains language/spec data and Kernel Lisp libraries; prompts, variants, and obsolete schemas are removed. |
+| `docs/guides/` | migrated | Extract concise Kernel, capability/prelude, TraceLog, REPL/runner docs first. |
+| `docs/conformance/`, specification, function reference, conformance gaps | retained | Retain. |
+| private experiment transcript plan | superseded | Relevant fail-closed requirements are retained in the Kernel and TraceLog contracts; the experiment/scoring document and harness were retired. |
+| old future/archive plans | deleted | Rejected-system plans were removed; Git history remains the archive. |
+| `docs/guidelines/` | migrated | Active repository rules were consolidated into `AGENTS.md`. |
 | `examples/` | deleted | The unique paged-prelude mechanism was retained as a focused integration fixture. |
 | `demo/` | deleted | Deterministic Kernel scenarios and the optional live-provider gate replace the old benchmark product. |
 | `livebooks/` | deleted | The obsolete notebooks and Kino test harness were removed. |
 | `blog/`, `images/` | deleted | Website assets are no longer packaged in this runtime repository. |
 | `reports/kernel_eval/` | deleted | Generated experiment reports and trace fixtures were removed with the evaluator harness. |
-| `bench/` | migrate | Small domain-blind deterministic corpus and baselines only. |
-| `scripts/` | migrate | Keep active release/repository automation for retained product. |
-| `.github/` | migrate | Remove demo/MCP/examples/old docs jobs; retain conformance/Kernel/viewer gates. |
-| `.githooks/` | migrate | Keep only hooks for retained prepush/precommit/release checks. |
-| root README/CHANGELOG/package metadata (`mix.exs`, `mix.lock`) | migrate | Describe and package only the retained language, Kernel, runner/REPL, and viewer integration. |
-| `AGENTS.md`, `CLAUDE.md`, `usage-rules*`, licenses/REUSE files | foundation | Retain canonical repository/dependency instructions and licensing; update stale product references only. |
-| formatter/Credo/Dialyzer/link-check/Docker control files | migrate | Remove deleted paths and dependencies; retain checks required by the final package/frontends. |
-| `conformance_inventory.json` | foundation | Retain with language conformance tooling. |
-| `priv/plts/`, `_build/`, `deps/`, `tmp/`, `erl_crash.dump` | local cleanup | Not architecture or tracked product content. |
+| `bench/` | migrated | Small domain-blind deterministic corpus and baselines only. |
+| `scripts/` | migrated | Keep active release/repository automation for retained product. |
+| `.github/` | migrated | Remove demo/MCP/examples/old docs jobs; retain conformance/Kernel/viewer gates. |
+| `.githooks/` | migrated | Contains only retained prepush/precommit/release checks. |
+| root README/CHANGELOG/package metadata (`mix.exs`, `mix.lock`) | migrated | Describe and package only the retained language, Kernel, runner/REPL, and viewer integration. |
+| `AGENTS.md`, `CLAUDE.md`, `usage-rules*`, licenses/REUSE files | retained | Retain canonical repository/dependency instructions and licensing; update stale product references only. |
+| formatter/Credo/Dialyzer/link-check/Docker control files | migrated | Remove deleted paths and dependencies; retain checks required by the final package/frontends. |
+| `conformance_inventory.json` | retained | Retain with language conformance tooling. |
+| `priv/plts/`, `_build/`, `deps/`, `tmp/`, `erl_crash.dump` | ignored | Not architecture or tracked product content. |
 
 ## Dependencies
 
 | Dependency | Class | Condition |
 | --- | --- | --- |
-| `jason`, parser/runtime dependencies | foundation | Retain. |
-| `stream_data` | foundation | Retain for language/property tests. |
-| `req`, `req_llm` | migrate | Retain only for optional standard LLM provider. |
-| `telemetry` | migrate | Retain only if canonical event/host instrumentation uses it. |
-| `ptc_viewer` path dependency | foundation | Retain dev/test integration. |
+| `jason`, parser/runtime dependencies | retained | Retain. |
+| `stream_data` | retained | Retain for language/property tests. |
+| `req`, `req_llm` | migrated | Retained for the optional standard LLM provider. |
+| `telemetry` | retained | Used by the neutral Lisp execution instrumentation and its tests. |
+| `ptc_viewer` path dependency | retained | Retain dev/test integration. |
 | `kino` | deleted | Removed with Kino/Livebooks. |
 | `ex_dna` | deleted | Removed after the final duplication audit. |
-| `recon` | delete unless proven | Retain only for an active lifecycle/soak check. |
-| `benchee` | migrate | Retain only if deterministic benchmark task uses it. |
-| MCP/upstream-only dependencies | delete | Remove with last transport consumer. |
+| `recon` | retained | Used by active memory-soak support and diagnostics. |
+| `benchee` | retained | Used by retained deterministic benchmark/profile scripts. |
+| MCP/upstream-only dependencies | deleted | Removed with the last transport consumer. |
 
 Run `mix deps.unlock --check-unused` after every dependency deletion wave.
 
@@ -263,15 +261,15 @@ Run `mix deps.unlock --check-unused` after every dependency deletion wave.
 - obsolete test support such as SubAgent helpers, type-extractor fixtures, and
   public-Step assertions.
 
-## Verification checklist per deletion wave
+## Final verification checklist
 
-- [ ] Focused contract/integration tests pass.
-- [ ] `mix precommit` passes.
-- [ ] `rg` finds no stale module/option/task/config/environment references.
-- [ ] ExDoc extras/module groups/package files contain no deleted paths.
-- [ ] CI/Mix aliases/releases/Dialyzer apps contain no deleted consumers.
-- [ ] Documentation links pass.
-- [ ] `mix xref graph` remains acyclic at the configured threshold.
-- [ ] `mix deps.unlock --check-unused` passes after dependency changes.
-- [ ] Coverage identifies no unexplained retained orphan modules.
-- [ ] Inventory rows and exit conditions are updated.
+- [x] Focused contract/integration tests pass.
+- [x] `mix precommit` passes.
+- [x] `rg` finds no stale module/option/task/config/environment references.
+- [x] ExDoc extras/module groups/package files contain no deleted paths.
+- [x] CI/Mix aliases/releases/Dialyzer apps contain no deleted consumers.
+- [x] Documentation links pass.
+- [x] `mix xref graph` remains acyclic at the configured threshold.
+- [x] `mix deps.unlock --check-unused` passes after dependency changes.
+- [x] Coverage identifies no unexplained retained orphan modules.
+- [x] Inventory rows and exit conditions are updated.

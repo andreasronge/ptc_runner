@@ -1,6 +1,7 @@
 defmodule PtcRunner.Kernel.BundleCompiler do
   @moduledoc false
 
+  alias PtcRunner.Kernel.BoundedWorker
   alias PtcRunner.Kernel.Component
   alias PtcRunner.Kernel.FrozenBundle
   alias PtcRunner.Lisp.Parser
@@ -9,10 +10,39 @@ defmodule PtcRunner.Kernel.BundleCompiler do
   @max_components 128
   @max_edges 512
   @max_source_bytes 2_000_000
+  @compile_timeout_ms 5_000
+  @compile_heap_words 8_000_000
+  @max_artifact_bytes 4_000_000
+  @max_diagnostic_bytes 65_536
 
   @spec compile([Component.t()]) :: {:ok, FrozenBundle.t()} | {:error, map()}
   def compile(components) when is_list(components) do
-    with :ok <- bounded_components(components),
+    with :ok <- bounded_components(components) do
+      compile_bounded(components)
+    end
+  end
+
+  def compile(_components), do: {:error, %{reason: :invalid_components}}
+
+  defp compile_bounded(components) do
+    case BoundedWorker.run(
+           fn ->
+             components
+             |> compile_unconfined()
+             |> enforce_result(@max_artifact_bytes, @max_diagnostic_bytes)
+           end,
+           timeout_ms: @compile_timeout_ms,
+           max_heap_words: @compile_heap_words
+         ) do
+      {:ok, result} -> result
+      {:error, :timeout} -> {:error, %{reason: :bundle_compile_timeout}}
+      {:error, :heap_exceeded} -> {:error, %{reason: :bundle_compile_heap_exceeded}}
+      {:error, :worker_failed} -> {:error, %{reason: :bundle_compile_failed}}
+    end
+  end
+
+  defp compile_unconfined(components) do
+    with {:ok, components} <- validate_components(components),
          {:ok, by_id} <- unique_ids(components),
          :ok <- dependencies_exist(by_id),
          {:ok, ordered} <- topological_order(by_id),
@@ -38,21 +68,85 @@ defmodule PtcRunner.Kernel.BundleCompiler do
     end
   end
 
-  def compile(_components), do: {:error, %{reason: :invalid_components}}
+  @doc false
+  @spec enforce_result({:ok, term()} | {:error, term()}, pos_integer(), pos_integer()) ::
+          {:ok, term()} | {:error, map()}
+  def enforce_result({:ok, bundle}, max_artifact_bytes, _max_diagnostic_bytes) do
+    if :erlang.external_size(bundle) <= max_artifact_bytes,
+      do: {:ok, bundle},
+      else: {:error, %{reason: :bundle_artifact_exceeded}}
+  end
+
+  def enforce_result({:error, diagnostic} = error, _max_artifact_bytes, max_diagnostic_bytes) do
+    if :erlang.external_size(diagnostic) <= max_diagnostic_bytes,
+      do: error,
+      else: {:error, %{reason: :bundle_diagnostic_exceeded}}
+  end
 
   defp bounded_components(components) do
-    if Enum.all?(components, &match?(%Component{}, &1)) do
-      total_bytes = Enum.reduce(components, 0, &(&2 + byte_size(&1.source)))
-      edges = Enum.reduce(components, 0, &(&2 + length(&1.dependencies)))
+    bounded_components(components, 0, 0, 0)
+  end
 
-      if length(components) <= @max_components and total_bytes <= @max_source_bytes and
-           edges <= @max_edges,
-         do: :ok,
-         else: {:error, %{reason: :bundle_limit_exceeded}}
+  defp bounded_components([], _count, _source_bytes, _edges), do: :ok
+
+  defp bounded_components(_components, count, _source_bytes, _edges)
+       when count >= @max_components,
+       do: {:error, %{reason: :bundle_limit_exceeded}}
+
+  defp bounded_components(
+         [%Component{source: source, dependencies: dependencies} | rest],
+         count,
+         source_bytes,
+         edges
+       )
+       when is_binary(source) and is_list(dependencies) do
+    next_source_bytes = source_bytes + byte_size(source)
+
+    with true <- next_source_bytes <= @max_source_bytes,
+         {:ok, next_edges} <- bounded_edge_count(dependencies, edges) do
+      bounded_components(rest, count + 1, next_source_bytes, next_edges)
     else
-      {:error, %{reason: :invalid_components}}
+      false -> {:error, %{reason: :bundle_limit_exceeded}}
+      {:error, reason} -> {:error, %{reason: reason}}
     end
   end
+
+  defp bounded_components(_components, _count, _source_bytes, _edges),
+    do: {:error, %{reason: :invalid_components}}
+
+  defp bounded_edge_count([], edges), do: {:ok, edges}
+
+  defp bounded_edge_count(_dependencies, edges) when edges >= @max_edges,
+    do: {:error, :bundle_limit_exceeded}
+
+  defp bounded_edge_count([_dependency | rest], edges),
+    do: bounded_edge_count(rest, edges + 1)
+
+  defp bounded_edge_count(_improper, _edges), do: {:error, :invalid_components}
+
+  defp validate_components(components) do
+    Enum.reduce_while(components, {:ok, []}, fn component, {:ok, validated} ->
+      case validate_component(component) do
+        {:ok, normalized} -> {:cont, {:ok, [normalized | validated]}}
+        {:error, _reason} -> {:halt, {:error, %{reason: :invalid_components}}}
+      end
+    end)
+    |> case do
+      {:ok, validated} -> {:ok, Enum.reverse(validated)}
+      error -> error
+    end
+  end
+
+  defp validate_component(%Component{} = component) do
+    Component.new(
+      id: component.id,
+      source: component.source,
+      dependencies: component.dependencies,
+      origin: component.origin
+    )
+  end
+
+  defp validate_component(_component), do: {:error, :invalid_component}
 
   defp unique_ids(components) do
     Enum.reduce_while(components, {:ok, %{}}, fn %Component{id: id} = component, {:ok, by_id} ->
@@ -72,18 +166,20 @@ defmodule PtcRunner.Kernel.BundleCompiler do
   end
 
   defp topological_order(by_id) do
-    do_topological_order(by_id, MapSet.new(), [])
+    do_topological_order(by_id, %{}, [])
   end
 
   defp do_topological_order(by_id, resolved, ordered) do
-    if map_size(by_id) == MapSet.size(resolved) do
+    if map_size(by_id) == map_size(resolved) do
       {:ok, Enum.reverse(ordered)}
     else
       ready =
         by_id
         |> Map.values()
-        |> Enum.reject(&MapSet.member?(resolved, &1.id))
-        |> Enum.filter(&MapSet.subset?(MapSet.new(&1.dependencies), resolved))
+        |> Enum.reject(&Map.has_key?(resolved, &1.id))
+        |> Enum.filter(fn component ->
+          Enum.all?(component.dependencies, &Map.has_key?(resolved, &1))
+        end)
         |> Enum.sort_by(& &1.id)
 
       case ready do
@@ -91,7 +187,7 @@ defmodule PtcRunner.Kernel.BundleCompiler do
           {:error, %{reason: :component_cycle}}
 
         [component | _] ->
-          do_topological_order(by_id, MapSet.put(resolved, component.id), [component | ordered])
+          do_topological_order(by_id, Map.put(resolved, component.id, true), [component | ordered])
       end
     end
   end

@@ -7,9 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
-### Fixed
+### Changed
 
-- Preserve native PTC-Lisp continuation state across session/SubAgent turns while rendering public outputs safely.
+- Replaced the legacy SubAgent, MCP, upstream, mutable-prelude, and trace
+  products with the owner-based `PtcRunner.Kernel` runtime.
+- Added immutable component bundles, structurally separate workflow and mission
+  environments, explicit host capabilities, strict JSON manifests, and shared
+  `ptc.run` / `ptc.repl` construction.
+- Added bounded mission evaluation, LLM/file/trace capability libraries,
+  generic Lisp-authored agent libraries, and canonical Kernel events.
+- Consolidated the Lisp evaluator around neutral contexts and results; removed
+  agent journal/budget/progress forms, MCP/catalog discovery, and upstream
+  inference.
+- Moved canonical trace loading/querying into `Kernel.TraceLog` and updated
+  `ptc_viewer` to use it.
+
+This is a 0.x replacement release. The deleted APIs have no compatibility
+facades.
 
 ## [0.13.0] - 2026-06-24
 

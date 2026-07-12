@@ -1148,12 +1148,12 @@ related nil-keyseq protocol-error case was fixed as a BUG under
 ```
 
 **Rationale:** PTC-Lisp's value model normalizes keyword and string keys
-(`SubAgent.KeyNormalizer`), so all key access — keyword invocation `(:k m)`,
+through one flexible-access layer, so all key access — keyword invocation `(:k m)`,
 `get`/`get-in`, `contains?`, and map-as-function `(m :k)` — looks keys up
 flexibly. This is a deliberate ergonomic bridge for the data PTC actually
 processes: tool/JSON results arrive with **string** keys, while LLM-written code
 naturally uses **keyword** access, so `(:field data)` works regardless of which
-the upstream produced. The behavior is universal across the key layer (the
+the tool produced. The behavior is universal across the key layer (the
 select-keys instance is [DIV-46](#div-46-select-keys-with-a-string-keyseq-matches-keyword-keys)),
 so it is the value model, not a per-function quirk. Tradeoff (acknowledged): a
 keyword lookup can return a string-keyed value, which can mask a data-shape
@@ -1491,7 +1491,7 @@ values.
 
 **Rationale:** No exception handling in the sandbox (DIV-10) means raising = unrecoverable program crash. `json/parse-string` returns `nil` on any failure (invalid JSON, `nil` input, non-binary input) so callers can guard with `(when result ...)` or thread through `(some->)`. Map keys are decoded as **strings** (not atoms) to match PTC-Lisp's tool-boundary convention and avoid atom memory leaks on untrusted input.
 
-The `nil` return for both real JSON `null` and parse failure is a known ambiguity (OQ-1 in the plan). Programs that need to distinguish should guard on `(empty? s)` / shape *before* calling. MCP aggregator calls use a separate tagged `tool/call` result where `:ok` distinguishes success from failure.
+The `nil` return for both real JSON `null` and parse failure is a known ambiguity. Programs that need to distinguish should guard on `(empty? s)` or shape before calling.
 
 ### DIV-24: `json/generate-string` returns `nil` on non-encodable input
 
@@ -2445,62 +2445,6 @@ silently split on a multi-character plain string — there is no `try`/`catch`,
 so it surfaces a recoverable `:type_error` signal value instead. Regex
 delimiters (single- or multi-character), the empty-string delimiter (graphemes),
 and single-character delimiters (char-equivalent) continue to work unchanged.
-
-### DIV-51: REPL discovery forms — `doc` prints, but `dir`/`apropos`/`meta` return data
-
-| Field | Value |
-|-------|-------|
-| **Priority** | P2 |
-| **Status** | **by design (DIV)** |
-| **Source** | Plan `docs/plans/archive/turn-log-and-prelude-derivation.md` (P1) |
-
-```clojure
-;; Clojure (clojure.repl)
-(doc 'str)     ;=> prints docs, returns nil
-(dir clojure.string)  ;=> prints member names, returns nil
-(apropos "map")       ;=> returns a seq of matching symbols
-
-;; PTC-Lisp
-(doc str)             ;=> prints docs, returns nil          (conformant)
-(dir clojure.string)  ;=> returns a vector of member lines  (DIV)
-(apropos "map")       ;=> returns a vector of match lines    (close)
-(meta str)            ;=> returns a metadata map             (DIV)
-```
-
-`doc`, `meta`, `dir`, `ns-publics`, and `ns-name` are macro-like over their ref
-argument (issue #1094): a bare symbol or namespaced symbol is auto-quoted, so
-`(doc paged/profile)` and `(dir clojure.string)` look the symbol up instead of
-evaluating it to a closure/builtin value first. Quoted symbols (`'str`) and
-string refs (`"str"`) keep working unchanged. The remaining divergence is only
-the print-vs-data channel choice below, not the quoting.
-
-**Decision:** DIV (split). `doc` is brought into line with `clojure.repl/doc`:
-it routes the rendered documentation through the **print** channel and returns
-`nil`. This restores conformance — returning the doc string (the prior PTC
-behavior) was the divergence, and it was costly because the result channel has
-the harshest output budget (512 chars on the MCP `:slim` profile), which
-truncated long docstrings to uselessness; the print channel is far larger.
-
-`dir`, `apropos`, and `meta` **deliberately keep returning structured data**
-instead of `clojure.repl`'s print-and-return-nil (`dir`) / seq-of-symbols
-(`apropos`) behavior. PTC programs consume these results programmatically
-(pagination, filtering, and — per the turn-log/prelude plan — programs that
-mine discovery output), so data-returning forms are the design goal. Only `doc`
-is a pure human-facing render with no useful structured form, so only `doc`
-prints.
-
-`source` (issue #1095) joins `doc` in the print-and-return-nil camp, matching
-`clojure.repl/source` on the success path — a rendered defining form has no
-useful structured shape and is multi-line, so it routes through the print
-channel. Two deliberate divergences from `clojure.repl/source`: (1) it is
-**prelude-only** in V1 — there is no builtin/core/upstream source, and (2) an
-unknown ref prints `"no source available"` and returns `nil` rather than
-raising, so it never falls through to a discovery backend (`doc`/`meta` do).
-
-**Fix:** None — by design. Hosts that attach preludes with long docstrings (or
-that want full-body `source` output) tune the per-entry print cap via
-`:max_print_length` (default 2000) and align it with their envelope print
-budget.
 
 ### GAP-S116: `clojure.string` helpers accept character arguments Clojure rejects
 

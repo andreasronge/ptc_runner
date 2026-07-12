@@ -193,63 +193,10 @@ defmodule Mix.Tasks.Ptc.GenDocs do
       target: "registered tool calls",
       audit: nil
     },
-    %{
-      namespace: "`budget/`",
-      scope: "PTC extension / SubAgent budget profile",
-      target: "budget introspection",
-      audit: nil
-    },
-    %{namespace: "`json/`", scope: "PTC extension", target: "PTC JSON helpers", audit: nil},
-    %{
-      namespace: "`mcp/`",
-      scope: "PTC extension / MCP server profile",
-      target: "profile-gated helper namespace; unavailable in base `Lisp.run/2`",
-      audit: nil
-    }
+    %{namespace: "`json/`", scope: "PTC extension", target: "PTC JSON helpers", audit: nil}
   ]
 
   @repl_environment_support [
-    %{
-      command: "`(tool/servers)`",
-      status: "supported",
-      scope: "MCP aggregator",
-      notes: "List configured upstream servers, tool counts, and catalog load status"
-    },
-    %{
-      command: "`(apropos query)`",
-      status: "supported",
-      scope: "local + MCP discovery",
-      notes:
-        "Search executable local PTC/Clojure/curated Java capabilities and, in aggregator mode, configured MCP tools. MCP matches rank before local matches."
-    },
-    %{
-      command: "`(dir ref)`",
-      status: "supported",
-      scope: "local + MCP discovery",
-      notes:
-        "List members for a local namespace/curated Java class, or tools for an MCP server. The ref is macro-like: an unquoted symbol, a quoted symbol, or a string."
-    },
-    %{
-      command: "`(doc ref)`",
-      status: "supported",
-      scope: "local + MCP discovery",
-      notes:
-        "Return human-readable docs for one executable local ref or MCP tool ref. Known local refs win over MCP refs. The ref is macro-like: an unquoted symbol, a quoted symbol, or a string."
-    },
-    %{
-      command: "`(meta ref)`",
-      status: "supported",
-      scope: "local + MCP discovery",
-      notes:
-        "Return structured metadata for one executable local ref or MCP tool ref. Known local refs win over MCP refs. The ref is macro-like: an unquoted symbol, a quoted symbol, or a string."
-    },
-    %{
-      command: "`(ns-publics ns)`",
-      status: "supported",
-      scope: "local discovery",
-      notes:
-        "Return public vars for a local PTC/Clojure namespace. Java classes and MCP servers are not supported. The ns is macro-like: an unquoted symbol, a quoted symbol, or a string."
-    },
     %{
       command: "`(quote symbol)`, `'symbol`",
       status: "partial",

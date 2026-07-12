@@ -5,11 +5,11 @@ defmodule PtcRunner.Kernel.EventSink do
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Lisp.RetainedSize
 
-  @enforce_keys [:pid, :token]
-  defstruct [:pid, :token]
+  @enforce_keys [:pid, :token, :policy]
+  defstruct [:pid, :token, :policy]
 
   @type policy :: :normal | :private
-  @type t :: %__MODULE__{pid: pid(), token: reference()}
+  @type t :: %__MODULE__{pid: pid(), token: reference(), policy: policy()}
 
   @spec start(policy(), Limits.t(), keyword()) :: {:ok, t()} | {:error, :invalid_event_sink}
   def start(policy, %Limits{} = limits, opts \\ []) when policy in [:normal, :private] do
@@ -20,27 +20,45 @@ defmodule PtcRunner.Kernel.EventSink do
     if is_binary(run_id) and is_binary(trace_id) do
       owner = Keyword.get(opts, :owner, self())
       {:ok, pid} = GenServer.start(__MODULE__, {policy, limits, token, run_id, trace_id, owner})
-      {:ok, %__MODULE__{pid: pid, token: token}}
+      {:ok, %__MODULE__{pid: pid, token: token, policy: policy}}
     else
       {:error, :invalid_event_sink}
     end
   end
 
   @spec emit(t(), binary(), map()) :: :ok | {:error, :event_sink_error}
-  def emit(sink, type, data) when is_binary(type) and is_map(data),
-    do: call(sink, {:emit, type, data})
+  def emit(sink, type, data) when is_binary(type) and is_map(data) do
+    case call(sink, {:emit, type, data}) do
+      {:error, :event_sink_error} when sink.policy == :normal -> :ok
+      result -> result
+    end
+  end
 
   @spec events(t()) :: [map()]
-  def events(sink), do: call(sink, :events)
+  def events(sink) do
+    case call(sink, :events) do
+      {:error, :event_sink_error} -> []
+      events -> events
+    end
+  end
 
   @spec dropped(t()) :: map()
-  def dropped(sink), do: call(sink, :dropped)
+  def dropped(sink) do
+    case call(sink, :dropped) do
+      {:error, :event_sink_error} -> %{"event-sink" => 1}
+      dropped -> dropped
+    end
+  end
 
   @spec policy(t()) :: policy() | {:error, :event_sink_error}
   def policy(sink), do: call(sink, :policy)
 
   @spec stop(t()) :: :ok
-  def stop(sink), do: GenServer.stop(sink.pid, :normal)
+  def stop(sink) do
+    GenServer.stop(sink.pid, :normal)
+  catch
+    :exit, _reason -> :ok
+  end
 
   @impl GenServer
   def init({policy, limits, token, run_id, trace_id, owner}) do
@@ -128,6 +146,9 @@ defmodule PtcRunner.Kernel.EventSink do
     end
   end
 
-  defp call(%__MODULE__{pid: pid, token: token}, request),
-    do: GenServer.call(pid, {token, request})
+  defp call(%__MODULE__{pid: pid, token: token}, request) do
+    GenServer.call(pid, {token, request})
+  catch
+    :exit, _reason -> {:error, :event_sink_error}
+  end
 end

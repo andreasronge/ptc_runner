@@ -57,7 +57,7 @@ defmodule PtcRunner.Lisp.Prelude.Bundle do
   # `compile_opts` are forwarded to the ONE aggregate `Compiler.compile/2`
   # call — the store-resolved attach path passes `namespace_deps:` derived
   # from recorded pins so dependent components compile with their declared
-  # dep scope (docs/plans/prelude-deps.md §3). The raw selection-list path
+  # dependency scope. The raw selection-list path
   # (`compile/1`) stays dep-blind by design.
   @spec compile_precompiled([map()], keyword()) ::
           {:ok, Prelude.t()} | {:error, ValidationError.t()}

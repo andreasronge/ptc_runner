@@ -12,7 +12,7 @@ defmodule PtcRunner.TestSupport.LLMSupport do
   alias PtcRunner.LLM.Registry
   alias PtcRunner.LLM.ReqLLMAdapter
 
-  @default_model "openrouter:google/gemini-2.5-flash"
+  @default_model "deepseek"
   @timeout 60_000
   @req_opts [retry: :transient, max_retries: 3]
 
@@ -32,7 +32,7 @@ defmodule PtcRunner.TestSupport.LLMSupport do
   @spec model() :: String.t()
   def model do
     case System.get_env("PTC_TEST_MODEL") do
-      nil -> @default_model
+      nil -> resolve_model(@default_model)
       name -> resolve_model(name)
     end
   end
@@ -103,7 +103,7 @@ defmodule PtcRunner.TestSupport.LLMSupport do
 
       For local development, create .env file with:
         OPENROUTER_API_KEY=sk-or-...
-        PTC_TEST_MODEL=haiku  # optional, defaults to gemini
+        PTC_TEST_MODEL=deepseek  # optional default
 
       Or use a local model (no API key required):
         PTC_TEST_MODEL=deepseek-local

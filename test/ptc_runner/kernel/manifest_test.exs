@@ -47,6 +47,28 @@ defmodule PtcRunner.Kernel.ManifestTest do
   end
 
   @tag :tmp_dir
+  test "one-shot manifest runs stop their owned event sink", %{tmp_dir: dir} do
+    File.write!(Path.join(dir, "main.lisp"), "(ns main) (defn run [_] (return 42))")
+
+    manifest = %{
+      "version" => 1,
+      "workflow" => %{
+        "components" => [%{"id" => "main", "path" => "main.lisp"}],
+        "entry" => "main/run"
+      },
+      "input" => %{"value" => %{}},
+      "events" => %{"run_id" => "owned-one-shot-sink"}
+    }
+
+    path = Path.join(dir, "owned.json")
+    File.write!(path, Jason.encode!(manifest))
+    {:ok, registry} = ProviderRegistry.new()
+
+    assert {:ok, %{value: 42}} = RunBuilder.run(path, registry)
+    assert event_sink_pids("owned-one-shot-sink") == []
+  end
+
+  @tag :tmp_dir
   test "manifest rejects unknown keys, duplicate JSON keys, versions, and path escape", %{
     tmp_dir: dir
   } do
@@ -82,6 +104,26 @@ defmodule PtcRunner.Kernel.ManifestTest do
     duplicate_path = Path.join(dir, "duplicate.json")
     File.write!(duplicate_path, duplicate)
     assert {:error, :duplicate_json_key} = Manifest.load(duplicate_path)
+  end
+
+  @tag :tmp_dir
+  test "manifest limits cannot exceed frontend administrator ceilings", %{tmp_dir: dir} do
+    File.write!(Path.join(dir, "main.lisp"), "(ns main) (defn run [_] (return 1))")
+
+    manifest = %{
+      "version" => 1,
+      "workflow" => %{
+        "components" => [%{"id" => "main", "path" => "main.lisp"}],
+        "entry" => "main/run"
+      },
+      "input" => %{"value" => %{}},
+      "limits" => %{"run_duration_ms" => 30_001}
+    }
+
+    path = Path.join(dir, "oversized-limits.json")
+    File.write!(path, Jason.encode!(manifest))
+
+    assert {:error, :invalid_limits} = Manifest.load(path)
   end
 
   @tag :tmp_dir
@@ -135,5 +177,25 @@ defmodule PtcRunner.Kernel.ManifestTest do
 
     File.write!(path, Jason.encode!(denied_manifest))
     assert {:error, :provider_destination_denied} = RunBuilder.load_and_build(path, registry)
+  end
+
+  defp event_sink_pids(run_id) do
+    Enum.filter(Process.list(), fn pid ->
+      case Process.info(pid, :dictionary) do
+        {:dictionary, dictionary} ->
+          if dictionary[:"$initial_call"] == {PtcRunner.Kernel.EventSink, :init, 1} do
+            try do
+              :sys.get_state(pid, 10).run_id == run_id
+            catch
+              :exit, _reason -> false
+            end
+          else
+            false
+          end
+
+        nil ->
+          false
+      end
+    end)
   end
 end
