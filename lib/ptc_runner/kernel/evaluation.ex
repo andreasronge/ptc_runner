@@ -107,8 +107,15 @@ defmodule PtcRunner.Kernel.Evaluation do
     ]
 
     case Lisp.run_native(source, options) do
-      {:ok, step} -> commit_result(state, lease, step)
-      {:error, step} -> release_failure(state, lease, step)
+      {:ok, %{return: {:__ptc_fail__, value}}} ->
+        :ok = RunState.release_evaluation(state, lease)
+        %{outcome: :failed, value: Lisp.externalize_value(value)}
+
+      {:ok, step} ->
+        commit_result(state, lease, step)
+
+      {:error, step} ->
+        release_failure(state, lease, step)
     end
   end
 

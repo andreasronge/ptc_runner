@@ -22,7 +22,7 @@ defmodule PtcRunner.Kernel.FileCapabilityTest do
     {:ok, mission_bundle} = Kernel.compile_bundle([fs_component, cap_component])
     {:ok, workflow} = WorkflowEnvironment.new(bundle: workflow_bundle)
     {:ok, mission} = MissionEnvironment.new(bundle: mission_bundle, capabilities: [capability])
-    {:ok, limits} = Limits.new()
+    {:ok, limits} = Limits.new(evaluation_timeout_ms: 5_000)
     {:ok, sink} = EventSink.start(:normal, limits, run_id: "file-capability")
 
     {:ok, config} =

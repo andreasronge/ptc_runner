@@ -293,6 +293,25 @@ defmodule PtcRunner.Kernel.CoreContractTest do
              Enum.map(EventSink.events(sink), & &1.type)
   end
 
+  test "explicit workflow failure returns the outer error algebra" do
+    {:ok, workflow} = WorkflowEnvironment.new([])
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, limits} = Limits.new()
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "workflow-fail")
+
+    {:ok, config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        mission_environment: mission,
+        input: %{},
+        limits: limits,
+        event_sink: sink
+      )
+
+    assert {:error, %{kind: :workflow_failed, reason: :explicit_failure}} =
+             Kernel.run("(fail \"stop\")", config)
+  end
+
   test "new Kernel workflow routes only granted capabilities through the dispatcher" do
     {:ok, add} =
       Capability.new(
@@ -346,6 +365,21 @@ defmodule PtcRunner.Kernel.CoreContractTest do
 
     assert %{capability_calls: %{workflow: %{}, mission: %{}}} = RunState.usage(state)
     assert workflow.capabilities["workflow-only"]
+  end
+
+  test "explicit subordinate failure is recoverable and rolls back candidate memory" do
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, state} = RunState.start(Limits.defaults())
+
+    assert %{outcome: :failed, value: "stop"} =
+             Evaluation.evaluate_source(
+               state,
+               mission,
+               "(do (def leaked 42) (fail \"stop\"))",
+               100
+             )
+
+    assert %{defined_count: 0} = RunState.evaluation_memory_summary(state)
   end
 
   test "workflow kernel-eval routes source into the mission environment" do

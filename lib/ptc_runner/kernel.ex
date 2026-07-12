@@ -401,6 +401,15 @@ defmodule PtcRunner.Kernel do
     ]
 
     case Lisp.run_native(entry_source, opts) do
+      {:ok, %{return: {:__ptc_fail__, value}}} ->
+        {:error,
+         %Error{
+           kind: :workflow_failed,
+           reason: :explicit_failure,
+           details: %{value: inspect(value, limit: 10, printable_limit: 1_024)},
+           usage: RunState.usage(state)
+         }}
+
       {:ok, step} ->
         value = step.return |> kernel_return_value() |> project_kernel_value()
 

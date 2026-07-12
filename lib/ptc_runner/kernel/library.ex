@@ -8,24 +8,58 @@ defmodule PtcRunner.Kernel.Library do
   @cap_path Path.expand("../../../priv/preludes/kernel/cap.lisp", __DIR__)
   @workflow_event_path Path.expand("../../../priv/preludes/kernel/workflow.event.lisp", __DIR__)
   @fs_path Path.expand("../../../priv/preludes/kernel/fs.lisp", __DIR__)
+  @llm_path Path.expand("../../../priv/preludes/kernel/llm.lisp", __DIR__)
+  @agent_native_path Path.expand("../../../priv/preludes/kernel/agent.native.lisp", __DIR__)
+  @agent_core_path Path.expand("../../../priv/preludes/kernel/agent.core.lisp", __DIR__)
+  @agent_feedback_path Path.expand("../../../priv/preludes/kernel/agent.feedback.lisp", __DIR__)
+  @agent_retry_path Path.expand("../../../priv/preludes/kernel/agent.retry.lisp", __DIR__)
+  @result_path Path.expand("../../../priv/preludes/kernel/result.lisp", __DIR__)
   @external_resource @kernel_path
   @external_resource @runtime_path
   @external_resource @cap_path
   @external_resource @workflow_event_path
   @external_resource @fs_path
+  @external_resource @llm_path
+  @external_resource @agent_native_path
+  @external_resource @agent_core_path
+  @external_resource @agent_feedback_path
+  @external_resource @agent_retry_path
+  @external_resource @result_path
   @sources %{
     "kernel" => File.read!(@kernel_path),
     "runtime" => File.read!(@runtime_path),
     "cap" => File.read!(@cap_path),
     "workflow.event" => File.read!(@workflow_event_path),
-    "fs" => File.read!(@fs_path)
+    "fs" => File.read!(@fs_path),
+    "llm" => File.read!(@llm_path),
+    "agent.native" => File.read!(@agent_native_path),
+    "agent.core" => File.read!(@agent_core_path),
+    "agent.feedback" => File.read!(@agent_feedback_path),
+    "agent.retry" => File.read!(@agent_retry_path),
+    "result" => File.read!(@result_path)
+  }
+  @dependencies %{
+    "agent.core" => [
+      "agent.feedback",
+      "agent.native",
+      "agent.retry",
+      "kernel",
+      "llm",
+      "result",
+      "workflow.event"
+    ]
   }
 
   @spec component(binary()) :: {:ok, Component.t()} | {:error, :unknown_library}
   def component(name) when is_binary(name) do
     case Map.fetch(@sources, name) do
       {:ok, source} ->
-        Component.new(id: name, source: source, origin: "priv/preludes/kernel/#{name}.lisp")
+        Component.new(
+          id: name,
+          source: source,
+          dependencies: Map.get(@dependencies, name, []),
+          origin: "priv/preludes/kernel/#{name}.lisp"
+        )
 
       :error ->
         {:error, :unknown_library}

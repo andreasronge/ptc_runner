@@ -50,7 +50,7 @@ name its re-home/delete condition. `unknown` is not a durable classification.
 | `lib/ptc_runner/lisp/prelude/compiler.ex` and compiler helpers | migrate | Retain protected namespaces, exports, `requires`, and compilation after removing SubAgent signature and upstream-specific inference. |
 | `lib/ptc_runner/lisp/prelude/bundle.ex` | migrate | Become explicit bounded component-ID DAG `compile_bundle/1` with frozen provenance. |
 | Protected namespace/export/prompt inventory primitives | foundation | Split workflow/mission validation and mission-only model inventory. |
-| `priv/preludes/agent/*.lisp` | migrate | Split/rewrite as `agent.native`, `agent.core`, `agent.feedback`, `agent.retry`, `workflow.event`, and `result`. |
+| `priv/preludes/agent/*.lisp` | migrate | Slice 7 replacements now ship as `agent.native`, `agent.core`, `agent.feedback`, `agent.retry`, `workflow.event`, and `result`; delete the legacy files with the old Kernel path. |
 | `PtcRunner.PreludeRolePolicy` and grants | delete | Roles remain an optional future environment-builder adapter. |
 | `PtcRunner.PreludeRuntime` | delete | Kernel accepts frozen bundles/environments. |
 | `PtcRunner.PreludeStore*` | delete | No mutable/versioned store in V1. |
@@ -80,6 +80,8 @@ name its re-home/delete condition. `unknown` is not a durable classification.
 | Capability discovery | new path | Shipped environment-local `cap/list` and `cap/describe` helpers with bounded sanitized metadata. |
 | Workflow annotation | new path | Shipped bounded helper emitting host-stamped `workflow-annotation` events without lifecycle authority. |
 | `Kernel.FileCapability` / `fs` library | new path | Slice 6 deterministic proof: host-held read root, exact argument schema, relative-path and symlink confinement, pre-read/result bounds, UTF-8 results, mission-only discovery, and no ambient workflow filesystem route. |
+| `Kernel.LLMCapability` / `llm` library | new path | Slice 7 provider-neutral workflow capability with host-owned requester, request/response bounds, sanitized transport errors, JSON normalization, generic Kernel quotas/events, and no model policy in BEAM. |
+| Shipped agent/result libraries | new path | Slice 7 strict native action parsing, message loop, correction feedback, retry/backoff decisions, annotations, and opt-in uniform results; scripted tests cover success, prose/protocol correction, evaluation correction, explicit failure, provider failure, and quota exhaustion. |
 
 ### Experimental Kernel implementation
 
@@ -88,7 +90,7 @@ name its re-home/delete condition. `unknown` is not a durable classification.
 | `lib/ptc_runner/kernel.ex` | experiment | Evidence/source for mechanisms. Replace at public cutover; do not refactor into target wholesale. |
 | `lib/ptc_runner/kernel/state_handle.ex` | migrate | Reuse atomic size-checked ownership in RunState; simplify leases after sequential confinement tests. |
 | `lib/ptc_runner/kernel/inner_prelude.ex` | migrate | Environment-specific frozen-bundle/`requires` validation, then delete old module. |
-| `lib/ptc_runner/kernel/action.ex` | delete | Port strict native action policy to `agent.native`; retain only generic provider normalization. |
+| `lib/ptc_runner/kernel/action.ex` | delete | Parity is proven in shipped `agent.native`; delete this legacy implementation with the old Kernel/eval consumers at cutover. |
 | `lib/ptc_runner/kernel/eval.ex` and `kernel/eval/*` | experiment | Re-home/delete after private transcript work and thin experiment harness exist. |
 | `lib/ptc_runner/kernel/feedback_ab.ex` | delete | Delete with A/B variants, task, tests, and reports. |
 | `priv/kernel_feedback_variants/` | delete | Delete with feedback A/B harness. |
