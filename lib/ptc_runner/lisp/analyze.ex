@@ -10,6 +10,7 @@ defmodule PtcRunner.Lisp.Analyze do
   Returns `{:ok, CoreAST.t()}` on success or `{:error, error_reason()}` on failure.
   """
 
+  alias PtcRunner.Kernel.Program
   alias PtcRunner.Lisp.Analyze.Conditionals
   alias PtcRunner.Lisp.Analyze.Definitions
   alias PtcRunner.Lisp.Analyze.Iteration
@@ -19,6 +20,7 @@ defmodule PtcRunner.Lisp.Analyze do
   alias PtcRunner.Lisp.Analyze.ShortFn
   alias PtcRunner.Lisp.CoreAST
   alias PtcRunner.Lisp.Env
+  alias PtcRunner.Lisp.Formatter
 
   # Special form names that can be shadowed by local bindings.
   # These correspond to Clojure macros (not true special forms like if/def/recur/do).
@@ -138,6 +140,7 @@ defmodule PtcRunner.Lisp.Analyze do
       :defonce,
       :defn,
       :quote,
+      :program,
       :apropos,
       :dir,
       :doc,
@@ -433,6 +436,17 @@ defmodule PtcRunner.Lisp.Analyze do
 
   defp dispatch_list_form({:symbol, :quote}, [symbol_ast], _list, _tail?),
     do: analyze_quote(symbol_ast)
+
+  defp dispatch_list_form({:symbol, :program}, forms, _list, _tail?) when forms != [] do
+    source = Enum.map_join(forms, "\n", &Formatter.format/1)
+    {:ok, {:literal, Program.new(source)}}
+  end
+
+  defp dispatch_list_form({:symbol, "program"}, forms, list, tail?),
+    do: dispatch_list_form({:symbol, :program}, forms, list, tail?)
+
+  defp dispatch_list_form({:symbol, :program}, _forms, _list, _tail?),
+    do: {:error, {:invalid_arity, :program, "(program ...) requires at least one form"}}
 
   defp dispatch_list_form({:symbol, :quote}, args, _list, _tail?) do
     {:error,

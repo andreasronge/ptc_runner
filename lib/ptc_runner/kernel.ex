@@ -9,6 +9,7 @@ defmodule PtcRunner.Kernel do
   alias PtcRunner.Kernel.Evaluation
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.InnerPrelude
+  alias PtcRunner.Kernel.Program
   alias PtcRunner.Kernel.Result
   alias PtcRunner.Kernel.RunConfig
   alias PtcRunner.Kernel.RunState
@@ -389,6 +390,23 @@ defmodule PtcRunner.Kernel do
 
   defp kernel_eval(config, state, %{"kind" => kind, "source" => source}) when is_binary(source) do
     if keyword_name(kind) == "source" do
+      %{
+        status: :ok,
+        value:
+          Evaluation.evaluate_source(
+            state,
+            config.mission_environment,
+            source,
+            config.limits.evaluation_timeout_ms
+          )
+      }
+    else
+      invalid_kernel_eval_request(state)
+    end
+  end
+
+  defp kernel_eval(config, state, %{"kind" => kind, "program" => %Program{source: source}}) do
+    if keyword_name(kind) == "embedded" do
       %{
         status: :ok,
         value:

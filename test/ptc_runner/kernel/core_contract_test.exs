@@ -264,4 +264,26 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     assert {:error, {:missing_capability_requirement, ["missing"]}} =
              WorkflowEnvironment.new(bundle: bundle)
   end
+
+  test "embedded programs cross into mission evaluation without workflow resolution" do
+    {:ok, workflow} = WorkflowEnvironment.new([])
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, limits} = Limits.new()
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "program")
+
+    {:ok, config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        mission_environment: mission,
+        input: %{},
+        limits: limits,
+        event_sink: sink
+      )
+
+    assert {:ok, %{value: %{status: :ok, value: %{outcome: :returned, value: 42}}}} =
+             Kernel.run(
+               "(return (tool/kernel-eval {:kind :embedded :program (program (return (+ 40 2)))}))",
+               config
+             )
+  end
 end

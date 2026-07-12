@@ -43,6 +43,7 @@ defmodule PtcRunner.Lisp do
     SymbolCounter
   }
 
+  alias PtcRunner.Kernel.Program
   alias PtcRunner.Lisp.Eval.Context, as: EvalContext
   alias PtcRunner.Lisp.Eval.Helpers
   alias PtcRunner.Lisp.Eval.ParallelBudget
@@ -1655,6 +1656,9 @@ defmodule PtcRunner.Lisp do
 
     {MapSet.new(values), cached_task_ids}
   end
+
+  defp prune_cached_task_bodies_with_cache(%Program{} = program, cached_task_ids),
+    do: {program, cached_task_ids}
 
   defp prune_cached_task_bodies_with_cache(map, cached_task_ids) when is_map(map) do
     {pairs, cached_task_ids} =
