@@ -86,7 +86,6 @@ defmodule PtcRunner.Lisp.Eval.ParallelRunner do
   """
 
   alias PtcRunner.Lisp.Eval.ParallelBudget
-  alias PtcRunner.Lisp.TraceContext
 
   # Process-dictionary key: append-only `MapSet` of EVERY worker pid
   # spawned by the in-progress `run/3` call. Never shrinks for the call
@@ -120,8 +119,6 @@ defmodule PtcRunner.Lisp.Eval.ParallelRunner do
     slot budget (used only when there is no global cap configured).
   - `:deadline_mono` - absolute monotonic-time deadline in ms shared by
     the whole operation (including nested runner calls).
-  - `:trace_ctx` - trace context captured in the parent, re-attached
-    inside each worker.
   - `:spawn_fun` - the 2-arity `(fun, spawn_opts) -> {pid, ref}` used to
     create each worker (default: `&Process.spawn/2`). A seam for
     fault-injection tests that need a spawn to raise partway through
@@ -132,7 +129,6 @@ defmodule PtcRunner.Lisp.Eval.ParallelRunner do
           max_concurrency: pos_integer(),
           budget: ParallelBudget.t() | nil,
           deadline_mono: integer(),
-          trace_ctx: term(),
           spawn_fun: (function(), list() -> {pid(), reference()})
         ]
 
@@ -141,8 +137,7 @@ defmodule PtcRunner.Lisp.Eval.ParallelRunner do
   and a shared global worker-slot budget.
 
   `fun` is invoked as `fun.(item)` inside a freshly spawned, heap-capped
-  worker process and must return a `worker_result`. The worker re-attaches
-  the supplied trace context before calling `fun`.
+  worker process and must return a `worker_result`.
 
   Returns `{:ok, results}` (per-worker return values, in input order) or
   `{:error, reason}` on the first failure. `reason` is one of:
@@ -164,7 +159,6 @@ defmodule PtcRunner.Lisp.Eval.ParallelRunner do
     max_concurrency = opts |> Keyword.fetch!(:max_concurrency) |> normalize_concurrency()
     budget = Keyword.get(opts, :budget)
     deadline_mono = Keyword.fetch!(opts, :deadline_mono)
-    trace_ctx = Keyword.get(opts, :trace_ctx)
     spawn_fun = Keyword.get(opts, :spawn_fun, &Process.spawn/2)
 
     indexed = items |> Enum.with_index() |> Map.new(fn {item, idx} -> {idx, item} end)
@@ -177,7 +171,6 @@ defmodule PtcRunner.Lisp.Eval.ParallelRunner do
       max_concurrency: max_concurrency,
       budget: budget,
       deadline_mono: deadline_mono,
-      trace_ctx: trace_ctx,
       spawn_fun: spawn_fun,
       total: total,
       next: 0,
@@ -436,7 +429,6 @@ defmodule PtcRunner.Lisp.Eval.ParallelRunner do
     item = Map.fetch!(state.indexed, index)
     parent = self()
     fun = state.fun
-    trace_ctx = state.trace_ctx
 
     worker = fn ->
       # The heap cap is set as a spawn option, so it is in force the
@@ -449,7 +441,6 @@ defmodule PtcRunner.Lisp.Eval.ParallelRunner do
       # environment is caught *before* `fun` runs, even when `fun`
       # itself is too cheap to trigger a GC on its own.
       :erlang.garbage_collect()
-      TraceContext.attach(trace_ctx)
       result = fun.(item)
       send(parent, {:worker_result, self(), index, result})
     end

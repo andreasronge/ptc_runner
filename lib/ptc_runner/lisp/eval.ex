@@ -17,6 +17,7 @@ defmodule PtcRunner.Lisp.Eval do
 
   require Logger
 
+  alias PtcRunner.Lisp.ChildResult
   alias PtcRunner.Lisp.ClosureCapture
   alias PtcRunner.Lisp.CoreAST
   alias PtcRunner.Lisp.Discovery
@@ -34,7 +35,6 @@ defmodule PtcRunner.Lisp.Eval do
   alias PtcRunner.Lisp.Runtime.Collection.Normalize
   alias PtcRunner.Lisp.RuntimeCallable
   alias PtcRunner.Lisp.SourceAtoms
-  alias PtcRunner.Lisp.TraceContext
   alias PtcRunner.Lisp.UntrustedRenderer
 
   import PtcRunner.Lisp.Runtime, only: [flex_get: 2]
@@ -521,12 +521,9 @@ defmodule PtcRunner.Lisp.Eval do
             do: fn_val,
             else: value_to_erlang_fn(fn_val, worker_eval_ctx)
 
-        # Capture trace context for propagation into worker processes
-        trace_ctx = TraceContext.capture()
-
         worker_fun = fn arg_list ->
           try do
-            TraceContext.take_child_result()
+            ChildResult.take()
 
             {value, prelude_call_counts} =
               Apply.capture_prelude_call_counts(fn ->
@@ -535,7 +532,7 @@ defmodule PtcRunner.Lisp.Eval do
                 end)
               end)
 
-            case TraceContext.take_child_result() do
+            case ChildResult.take() do
               {trace_id, child_step} ->
                 {:ok, {:ok, value, trace_id, child_step, prelude_call_counts}}
 
@@ -568,8 +565,7 @@ defmodule PtcRunner.Lisp.Eval do
             worker_max_heap: worker_max_heap,
             max_concurrency: concurrency,
             budget: eval_ctx2.parallel_budget,
-            deadline_mono: deadline_mono,
-            trace_ctx: trace_ctx
+            deadline_mono: deadline_mono
           )
 
         # Collect results and child trace IDs
@@ -637,17 +633,14 @@ defmodule PtcRunner.Lisp.Eval do
               {pcalls_fn_to_erlang(fn_val, worker_eval_ctx), idx}
             end)
 
-          # Capture trace context for propagation into worker processes
-          trace_ctx = TraceContext.capture()
-
           worker_fun = fn {erlang_fn, idx} ->
             try do
-              TraceContext.take_child_result()
+              ChildResult.take()
 
               {value, prelude_call_counts} =
                 Apply.capture_prelude_call_counts(erlang_fn)
 
-              case TraceContext.take_child_result() do
+              case ChildResult.take() do
                 {trace_id, child_step} ->
                   {:ok, {:ok, value, trace_id, idx, child_step, prelude_call_counts}}
 
@@ -676,8 +669,7 @@ defmodule PtcRunner.Lisp.Eval do
               worker_max_heap: worker_max_heap,
               max_concurrency: concurrency,
               budget: eval_ctx2.parallel_budget,
-              deadline_mono: deadline_mono,
-              trace_ctx: trace_ctx
+              deadline_mono: deadline_mono
             )
 
           # Collect results and child trace IDs
@@ -1470,10 +1462,10 @@ defmodule PtcRunner.Lisp.Eval do
           eval_ctx2
         end
 
-      # Metadata like child_trace_id is smuggled via TraceContext to avoid polluting
+      # Child metadata is process-local so it never pollutes
       # the Lisp value space with framework-internal wrappers.
       # This ensures tools always return data, not metadata, to the LLM.
-      TraceContext.put_child_result(child_trace_id, child_step)
+      ChildResult.put(child_trace_id, child_step)
       {:ok, result, eval_ctx3}
     end
   end

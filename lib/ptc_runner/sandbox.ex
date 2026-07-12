@@ -77,8 +77,6 @@ defmodule PtcRunner.Sandbox do
         default_max_heap: 2_500_000
   """
 
-  alias PtcRunner.Lisp.TraceContext
-
   # Default resource limits
   @default_timeout 1000
   @default_max_heap 1_250_000
@@ -170,9 +168,6 @@ defmodule PtcRunner.Sandbox do
     # the legacy behavior used by SubAgent and text-mode callers.
     link? = Keyword.get(opts, :link, false)
 
-    # Capture trace context for propagation into sandbox process
-    trace_ctx = TraceContext.capture()
-
     # Spawn isolated process with resource limits
     start_time = System.monotonic_time(:millisecond)
 
@@ -198,9 +193,6 @@ defmodule PtcRunner.Sandbox do
     {pid, ref} =
       Process.spawn(
         fn ->
-          # Re-attach trace context for tool telemetry capture
-          TraceContext.attach(trace_ctx)
-
           # Set process priority to normal within the process
           Process.flag(:priority, :normal)
 

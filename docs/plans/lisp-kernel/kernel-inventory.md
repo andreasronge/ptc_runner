@@ -132,7 +132,7 @@ name its re-home/delete condition. `unknown` is not a durable classification.
 | --- | --- | --- |
 | `PtcRunner.PreludeOrigin` | migrate | One bounded sanitized origin type for Component, diagnostics, and traces. |
 | `PtcRunner.SymbolInventory` | migrate | Derive bounded model-visible inventory exclusively from MissionEnvironment. |
-| `PtcRunner.Lisp.TraceContext` | migrate/delete | Move unavoidable IDs/provenance to RunState and canonical events, then delete if no independent caller remains. |
+| `PtcRunner.Lisp.TraceContext` | deleted | Canonical IDs live in RunState/events; evaluator child metadata uses a narrow process-local `Lisp.ChildResult`. |
 | `PtcRunner.Dotenv` | migrate | CLI/provider-builder convenience only; never ambient Kernel authority. |
 | `PtcRunner.PromptLoader`, `PtcRunner.Prompts` | deleted | Removed with compiled SubAgent prompt files and last callers. |
 | `PtcRunner.LLM` | migrate | Thin embedding/provider-registry facade for `llm/request`; no agent policy. |
@@ -157,10 +157,10 @@ This area is governed by [`tracelog-contract.md`](tracelog-contract.md).
 | JSONL handler/collector | new path | Admin-owned append/reload now preserves canonical order under aggregate byte and descriptor-identity checks; wiring a live normal sink with dropped-event accounting remains open. |
 | Private transcript sink | experiment | Explicit fail-closed sink in experiment harness; re-home before evaluator deletion. |
 | `Kernel.TraceLog` / `Kernel.TraceCapability` | new path | Shared source-scoped memory/file/directory loading, required run metadata, run/turn filters, counters, deterministic result-bounded pagination, source/query-bound cursors, duplicate-key rejection, reserved-suffix private-source confinement, explicit private grants, and uniform capability failures. |
-| Legacy `TraceLog.Introspection` | migrate | Replace remaining callers with `Kernel.TraceLog`, then delete the parallel SubAgent event/query implementation. |
+| Legacy `TraceLog.Introspection` | deleted | Remaining callers moved to `Kernel.TraceLog`; the parallel query implementation was removed. |
 | `log.core` prelude | new path | Shipped swappable mission prelude over four explicitly granted trace-query capabilities; missing grants fail during environment assembly and workflow inheritance is structurally absent. |
-| `TraceLog.Analyzer` | migrate | No longer used by canonical viewer routes; delete after the temporary raw viewer and remaining legacy trace callers are removed. |
-| Trace memory sink | new path | `Kernel.EventSink` is the bounded in-memory source for Kernel runs, REPL integration, tests, and `log.core`; legacy memory sinks remain until REPL/viewer cutover. |
+| `TraceLog.Analyzer` | deleted | Canonical viewer routes and `Kernel.TraceLog` superseded it. |
+| Trace memory sink | new path | `Kernel.EventSink` is the bounded in-memory source for Kernel runs, REPL integration, tests, and `log.core`; legacy sinks were removed. |
 | `Tracer`, `Tracer.Timeline` | deleted | The viewer uses canonical Kernel events; the competing in-memory trace representation was removed. |
 | `Metrics.Statistics`, `Metrics.TurnAnalysis` | deleted | No retained Kernel or experiment caller remained. |
 | `PtcRunner.Kino.TraceTree` | deleted | Removed after the public Step/Turn trace tree was superseded. |
