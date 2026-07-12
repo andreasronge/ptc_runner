@@ -337,6 +337,7 @@ defmodule PtcRunner.Kernel do
     opts = [
       context: config.input,
       tools: workflow_tools(config, state),
+      prelude: bundle_prelude(config.workflow_environment),
       timeout: config.limits.workflow_timeout_ms,
       max_heap: config.limits.workflow_heap_words,
       max_program_bytes: config.limits.entry_source_bytes,
@@ -382,6 +383,9 @@ defmodule PtcRunner.Kernel do
 
     Map.put(tools, "kernel-eval", fn arguments -> kernel_eval(config, state, arguments) end)
   end
+
+  defp bundle_prelude(%{bundle: %{prelude: prelude}}), do: prelude
+  defp bundle_prelude(_environment), do: nil
 
   defp kernel_eval(config, state, %{"kind" => kind, "source" => source}) when is_binary(source) do
     if keyword_name(kind) == "source" do

@@ -3,6 +3,7 @@ defmodule PtcRunner.Kernel.BundleCompiler do
 
   alias PtcRunner.Kernel.Component
   alias PtcRunner.Kernel.FrozenBundle
+  alias PtcRunner.Lisp.Prelude.Bundle
   alias PtcRunner.Lisp.Prelude.Compiler
 
   @max_components 128
@@ -15,7 +16,8 @@ defmodule PtcRunner.Kernel.BundleCompiler do
          {:ok, by_id} <- unique_ids(components),
          :ok <- dependencies_exist(by_id),
          {:ok, ordered} <- topological_order(by_id),
-         {:ok, compiled} <- compile_ordered(ordered) do
+         {:ok, compiled} <- compile_ordered(ordered),
+         {:ok, prelude} <- compile_prelude(ordered) do
       ids = Enum.map(compiled, & &1.id)
 
       hash =
@@ -25,7 +27,7 @@ defmodule PtcRunner.Kernel.BundleCompiler do
         )
         |> Base.encode16(case: :lower)
 
-      {:ok, %FrozenBundle{components: compiled, component_ids: ids, hash: hash}}
+      {:ok, %FrozenBundle{components: compiled, component_ids: ids, hash: hash, prelude: prelude}}
     end
   end
 
@@ -118,6 +120,19 @@ defmodule PtcRunner.Kernel.BundleCompiler do
     |> case do
       {:ok, compiled} -> {:ok, Enum.reverse(compiled)}
       error -> error
+    end
+  end
+
+  defp compile_prelude(components) do
+    components
+    |> Enum.map(&%{id: &1.id, source: &1.source, origin: &1.origin})
+    |> Bundle.compile()
+    |> case do
+      {:ok, prelude} ->
+        {:ok, prelude}
+
+      {:error, error} ->
+        {:error, %{reason: :bundle_compile_error, details: Exception.message(error)}}
     end
   end
 end

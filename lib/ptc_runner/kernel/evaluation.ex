@@ -25,6 +25,7 @@ defmodule PtcRunner.Kernel.Evaluation do
       context: environment.data,
       memory: memory,
       tools: mission_tools(environment, state, timeout_ms),
+      prelude: bundle_prelude(environment),
       timeout: min(timeout_ms, limits.evaluation_timeout_ms),
       max_heap: limits.evaluation_heap_words,
       max_program_bytes: limits.subordinate_source_bytes,
@@ -70,6 +71,9 @@ defmodule PtcRunner.Kernel.Evaluation do
        end}
     end)
   end
+
+  defp bundle_prelude(%{bundle: %{prelude: prelude}}), do: prelude
+  defp bundle_prelude(_environment), do: nil
 
   defp source_within_limit(source, limit),
     do: if(byte_size(source) <= limit, do: :ok, else: {:error, :source_exceeded})

@@ -223,4 +223,32 @@ defmodule PtcRunner.Kernel.CoreContractTest do
                config
              )
   end
+
+  test "workflow bundle exports are attached only to the workflow evaluator" do
+    {:ok, component} = Component.new(id: "workflow", source: "(ns workflow) (defn answer [] 42)")
+    assert {:ok, bundle} = Kernel.compile_bundle([component])
+    {:ok, workflow} = WorkflowEnvironment.new(bundle: bundle)
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, limits} = Limits.new()
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "bundle")
+
+    {:ok, config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        mission_environment: mission,
+        input: %{},
+        limits: limits,
+        event_sink: sink
+      )
+
+    assert {:ok, %{value: 42}} = Kernel.run("(return (workflow/answer))", config)
+
+    assert %{outcome: :evaluation_error} =
+             Evaluation.evaluate_source(
+               RunState.start(limits) |> elem(1),
+               mission,
+               "(workflow/answer)",
+               100
+             )
+  end
 end
