@@ -61,7 +61,7 @@ name its re-home/delete condition. `unknown` is not a durable classification.
 
 | Area | Class | Retained behavior / destination |
 | --- | --- | --- |
-| `Kernel.Capability` responsibility | new path | Slice 1: host-owned metadata/callback representation; provider registry/manifest selection remains Slice 8. |
+| `Kernel.Capability` responsibility | new path | Host-owned metadata/callback representation selected only through the Slice 8 trusted provider registry. |
 | `Kernel.WorkflowEnvironment` | new path | Frozen workflow capability/data map with attested-bundle and recorded tool-requirement validation. |
 | `Kernel.MissionEnvironment` | new path | Structurally distinct mission capability/data map with attested-bundle validation and no workflow-route merge path. |
 | `Kernel.Limits` | new path | Slice 1: normalized positive hard ceilings. |
@@ -82,6 +82,8 @@ name its re-home/delete condition. `unknown` is not a durable classification.
 | `Kernel.FileCapability` / `fs` library | new path | Slice 6 deterministic proof: host-held read root, exact argument schema, relative-path and symlink confinement, pre-read/result bounds, UTF-8 results, mission-only discovery, and no ambient workflow filesystem route. |
 | `Kernel.LLMCapability` / `llm` library | new path | Slice 7 provider-neutral workflow capability with host-owned requester, request/response bounds, sanitized transport errors, JSON normalization, generic Kernel quotas/events, and no model policy in BEAM. |
 | Shipped agent/result libraries | new path | Slice 7 strict native action parsing, message loop, correction feedback, retry/backoff decisions, annotations, and opt-in uniform results; scripted tests cover success, prose/protocol correction, evaluation correction, explicit failure, provider failure, and quota exhaustion. |
+| `Kernel.Manifest` / `RunBuilder` | new path | Slice 8 strict duplicate-aware versioned JSON loader, manifest-relative confined sources/input, separate frozen bundles/environments, normalized limits/events/labels, generated qualified entry expression, and one shared build/run path. |
+| `Kernel.ProviderRegistry` | new path | Host-owned `llm`/`file-read` builders plus non-replacing embedder extensions; manifests select bounded names/config only and destination checks reject authority expansion. |
 
 ### Experimental Kernel implementation
 
@@ -139,7 +141,7 @@ name its re-home/delete condition. `unknown` is not a durable classification.
 | --- | --- | --- |
 | `PtcRunner.LLM.ReqLLMAdapter` | migrate | Optional provider implementing uniform `llm/request` workflow capability. |
 | Provider transport normalization | migrate | Bounded provider-neutral data and safe metadata. |
-| `PtcRunner.LLM.Registry` / default registry | migrate | Strict host provider registry; remove inheritance and arbitrary callbacks from manifests. |
+| `PtcRunner.LLM.Registry` / default registry | migrate | Existing model-name resolution remains behind the built-in `llm` provider builder; manifests cannot name modules/functions or replace builders. |
 | Structured output, text/tool mode switching, prompt caching wrappers | delete | Policy lives in Lisp or is deferred. |
 | Streaming | delete/defer | V1 non-goal. |
 

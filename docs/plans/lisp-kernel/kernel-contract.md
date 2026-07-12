@@ -829,6 +829,69 @@ The manifest selects:
 
 It cannot name arbitrary Elixir code.
 
+### Exact V1 manifest schema
+
+The Slice 8 spike fixes the JSON shape below. All objects reject unknown and
+duplicate keys. All strings must be valid UTF-8. The manifest is at most
+1,000,000 bytes; relative path strings are non-empty and at most 1,024 bytes.
+
+```json
+{
+  "version": 1,
+  "workflow": {
+    "components": [
+      {"id": "workflow.main", "path": "workflow/main.lisp", "dependencies": []}
+    ],
+    "entry": "workflow.main/run"
+  },
+  "mission": {
+    "components": [],
+    "data": {}
+  },
+  "input": {"path": "input.json"},
+  "providers": {
+    "workflow": [{"name": "llm", "config": {"model": "provider:model"}}],
+    "mission": [{"name": "file-read", "config": {"root": "fixtures"}}]
+  },
+  "limits": {},
+  "events": {"policy": "normal"},
+  "labels": {}
+}
+```
+
+Top-level required keys are `version`, `workflow`, and `input`; optional keys
+are `mission`, `providers`, `limits`, `events`, and `labels`.
+
+- `workflow` requires `components` and `entry`. `entry` is one qualified ref
+  matching `[a-z][a-z0-9._-]*/[a-z][a-z0-9._?!-]*` and is rendered by the
+  builder as `(qualified/ref data/input)`; it is never arbitrary source.
+- `mission` accepts only `components` and bounded JSON-like `data`, defaulting
+  to an empty bundle/data map.
+- Each component accepts exactly `id`, `path`, and optional sorted unique
+  `dependencies`. IDs use the `Component` contract. Source origins are derived
+  from the safe manifest-relative path and cannot be supplied separately.
+- `input` contains exactly one of `value` (a JSON object) or `path` (a JSON file
+  containing an object). Input files are at most 2,000,000 bytes.
+- `providers` accepts `workflow` and `mission` arrays, each with at most 32
+  entries. An entry contains exactly bounded `name` and JSON-object `config`.
+  Duplicate names per destination are rejected. The built-in provider-name
+  list is `llm` and `file-read`; embedders may add host-owned builders. The
+  `file-read` root is manifest-relative and confined beneath the manifest
+  directory. A manifest cannot select `file-read` for the workflow destination.
+- `limits` contains only the string forms of fields in `Kernel.Limits`; values
+  are positive integers and are normalized by `Limits.new/1`.
+- `events` contains only `policy`, whose value is `normal` or `private`, plus
+  optional bounded `run_id` and `trace_id` strings.
+- `labels` is a JSON object whose encoded representation is at most 8,192
+  bytes, matching `RunConfig`.
+
+Component source reads use the fixed bundle aggregate source ceiling and the
+same descriptor-identity confinement used by the file capability. Symlinks may
+resolve only within the canonical manifest directory; devices, directories,
+FIFOs, sockets, and descriptor/path identity changes fail closed. The builder
+returns the generated entry source and one complete `RunConfig`; every frontend
+calls that same result.
+
 The provider registry is a host-owned map from bounded provider name to a
 trusted builder implementing the Kernel provider contract. PtcRunner ships a
 small built-in registry; embedders may supply additional builders directly to
