@@ -105,7 +105,6 @@ defmodule PtcRunner.MixProject do
         "compile --warnings-as-errors",
         "xref graph --format cycles --label compile-connected --fail-above 0",
         "credo --strict",
-        "schema.gen",
         "ptc.validate_spec",
         "test --warnings-as-errors",
         "cmd --cd ptc_viewer mix test --color"
@@ -118,9 +117,6 @@ defmodule PtcRunner.MixProject do
       ],
       coverage: [
         "test --cover"
-      ],
-      "schema.gen": [
-        "run -e 'File.write!(\"priv/ptc_schema.json\", Jason.encode!(PtcRunner.Schema.to_json_schema(), pretty: true))'"
       ]
     ]
   end
@@ -182,7 +178,7 @@ defmodule PtcRunner.MixProject do
   defp package do
     [
       files:
-        ~w(lib docs .formatter.exs mix.exs README.md LICENSE CHANGELOG.md priv/function_audit.exs priv/functions.exs priv/java_compat_audit.exs priv/preludes priv/ptc_schema.json priv/spec),
+        ~w(lib docs .formatter.exs mix.exs README.md LICENSE CHANGELOG.md priv/function_audit.exs priv/functions.exs priv/java_compat_audit.exs priv/preludes priv/spec),
       licenses: ["MIT"],
       links: %{
         "GitHub" => "https://github.com/andreasronge/ptc_runner",

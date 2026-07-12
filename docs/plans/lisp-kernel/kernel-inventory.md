@@ -120,18 +120,18 @@ name its re-home/delete condition. `unknown` is not a durable classification.
 | `PtcRunner.Session` | deleted | Retained REPL behavior lives in `Kernel.ReplSession`; old public/upstream/legacy-TraceLog semantics were removed. |
 | `PtcRunner.Context`, `PtcRunner.Turn` | deleted | The evaluator context moved to neutral `Lisp.Context`; the old Turn type had no surviving caller. |
 | `PtcRunner.Evidence*` | deleted | No current Kernel/TraceLog contract required the product-specific evidence projection. |
-| `PtcRunner.Schema` / generated `priv/ptc_schema.json` | migrate | Re-evaluate against manifest/capability schemas; delete SubAgent protocol schema. |
+| `PtcRunner.Schema` / generated `priv/ptc_schema.json` | deleted | The obsolete SubAgent JSON protocol schema had no Kernel caller; manifest/capability validation is owned by typed Kernel constructors. |
 | `PtcRunner.PtcToolProtocol` | deleted | Native action policy moved to Lisp; the Kernel capability contract replaces it. |
 | `PtcRunner.Tool` | deleted | Neutral direct-evaluator normalization lives in `Lisp.Tool`; Kernel providers use `Capability`. |
 | `PtcRunner.Template`, `Mustache`, `Temporal` | deleted | Removed with their last agent-mode consumers. |
-| `PtcRunner.Chunker` | delete unless proven | Retain only with independent language/Kernel consumer and integration test. |
+| `PtcRunner.Chunker` | deleted | No independent language/Kernel consumer remained. |
 
 ### Remaining root modules and cross-cutting runtime
 
 | Area | Class | Retained behavior / destination |
 | --- | --- | --- |
 | `PtcRunner.PreludeOrigin` | migrate | One bounded sanitized origin type for Component, diagnostics, and traces. |
-| `PtcRunner.SymbolInventory` | migrate | Derive bounded model-visible inventory exclusively from MissionEnvironment. |
+| `PtcRunner.SymbolInventory` | deleted | Kernel capability discovery derives bounded model-visible metadata directly from the selected environment. |
 | `PtcRunner.Lisp.TraceContext` | deleted | Canonical IDs live in RunState/events; evaluator child metadata uses a narrow process-local `Lisp.ChildResult`. |
 | `PtcRunner.Dotenv` | migrate | CLI/provider-builder convenience only; never ambient Kernel authority. |
 | `PtcRunner.PromptLoader`, `PtcRunner.Prompts` | deleted | Removed with compiled SubAgent prompt files and last callers. |

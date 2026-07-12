@@ -1,7 +1,7 @@
 defmodule PtcRunner.Lisp.Prelude.FullPathIntegrationTest do
   @moduledoc """
   THE full-path V1 integration the plan demands (Implementation Notes):
-  prelude load -> analyzer -> evaluator -> discovery -> prompt inventory, all
+  prelude load -> analyzer -> evaluator -> discovery, all
   driven off ONE compiled `%Prelude{}` artifact and the SAME `%Export{}`
   records.
 
@@ -14,8 +14,6 @@ defmodule PtcRunner.Lisp.Prelude.FullPathIntegrationTest do
        once and stays recoverable/branchable;
     4. discovery (`ns-publics`, `doc`, `meta`) returns the SAME export and hides
        the private helper;
-    5. the prompt-inventory renderer emits the compact `crm/get-user` entry from
-       the SAME records — with the private helper absent.
   """
   use ExUnit.Case, async: true
 
@@ -23,7 +21,6 @@ defmodule PtcRunner.Lisp.Prelude.FullPathIntegrationTest do
 
   alias PtcRunner.Lisp.Prelude
   alias PtcRunner.Lisp.Prelude.Compiler
-  alias PtcRunner.Lisp.Prelude.PromptInventory
   alias PtcRunner.Lisp.Result, as: Step
 
   @crm_source """
@@ -69,7 +66,7 @@ defmodule PtcRunner.Lisp.Prelude.FullPathIntegrationTest do
     %{agent: agent, prelude: prelude}
   end
 
-  test "one prelude flows through load, analyze, eval, discovery, and prompt inventory", %{
+  test "one prelude flows through load, analyze, eval, and discovery", %{
     agent: agent,
     prelude: prelude
   } do
@@ -115,25 +112,7 @@ defmodule PtcRunner.Lisp.Prelude.FullPathIntegrationTest do
 
     assert doc_step.fail.reason == :runtime_error
 
-    # --- 5. Prompt inventory renders the SAME records (compact entry) ---
-    inventory = PromptInventory.render(prelude, ledger: step.tool_calls)
-
-    assert inventory =~ "crm/get-user"
-    assert inventory =~ "use: (crm/get-user id)"
-    assert inventory =~ "Return a CRM user by id."
-    assert inventory =~ "[read]"
-    # The :discoverable export is omitted from the inventory but discoverable.
-    refute inventory =~ "List CRM users."
-    assert inventory =~ "ns-publics"
-    refute inventory =~ "(source"
-    # The private helper never appears.
-    refute inventory =~ "normalize-id"
-    # The ledger summary reflects the single tool call made above.
-    assert inventory =~ "Tool calls made: 1"
-    assert inventory =~ "Tool call errors: 0"
-
-    # The SAME export ref backs all three surfaces (analyzer/eval, discovery,
-    # inventory) — no separate registry.
+    # The same export record backs analysis, evaluation, and discovery.
     assert {:ok, export} = Prelude.fetch_export(prelude, "crm/get-user")
     assert export.ref == "crm/get-user"
     assert export.provider_ref == "upstream:crm/get_user"

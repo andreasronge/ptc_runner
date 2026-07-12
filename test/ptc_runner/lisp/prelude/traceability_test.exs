@@ -24,7 +24,6 @@ defmodule PtcRunner.Lisp.Prelude.TraceabilityTest do
 
   alias PtcRunner.Lisp.Prelude
   alias PtcRunner.Lisp.Prelude.Compiler
-  alias PtcRunner.Lisp.Prelude.PromptInventory
   alias PtcRunner.Lisp.Result, as: Step
 
   @crm_source """
@@ -187,13 +186,6 @@ defmodule PtcRunner.Lisp.Prelude.TraceabilityTest do
       refute deep_has_secret?(step.memory, @secret)
       refute deep_has_secret?(step.prelude_trace, @secret)
       assert Agent.get(agent, & &1) |> length() == 1
-    end
-
-    test "the secret does not appear in the prompt inventory", %{prelude: prelude} do
-      inventory = PromptInventory.render(prelude)
-      refute inventory =~ @secret
-      # Sanity: the inventory is non-empty (so the refute is meaningful).
-      assert inventory =~ "crm/get-user"
     end
   end
 
