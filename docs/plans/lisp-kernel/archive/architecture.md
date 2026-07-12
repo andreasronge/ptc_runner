@@ -2,7 +2,8 @@
 
 **Status:** active experiment design, branch `exp/lisp-kernel`. This is the
 durable reference for the kernel/prelude boundary; update it as spikes and
-milestones land. The evolving task list lives in [`roadmap.md`](roadmap.md);
+milestones land. The evolving task list lived in
+[`roadmap.md`](../roadmap.md);
 spike evidence lives in [`spikes.md`](spikes.md).
 
 ## The Bet

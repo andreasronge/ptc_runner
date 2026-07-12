@@ -11,7 +11,7 @@ Rules:
   Record failures as prominently as passes — a failed spike that redirects
   the design is a success of the method.
 - Each result feeds a decision (D#) or gate in
-  [`architecture.md`](architecture.md) / [`roadmap.md`](roadmap.md).
+  [`architecture.md`](architecture.md) / [`roadmap.md`](../roadmap.md).
 
 ---
 
