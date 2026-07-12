@@ -22,7 +22,6 @@ defmodule PtcRunner.Lisp.CoreAST do
           | {:string, String.t()}
           | {:keyword, name()}
           | {:symbol_ref, String.t()}
-          | {:repl_discovery, atom(), [t()]}
 
   @type fn_params :: [pattern()] | {:variadic, [pattern()], pattern()}
 
@@ -52,12 +51,6 @@ defmodule PtcRunner.Lisp.CoreAST do
           # Control flow signals
           | {:return, t()}
           | {:fail, t()}
-          # Journaled task: (task "id" expr) or (task id-expr expr)
-          | {:task, String.t(), t()}
-          | {:task_dynamic, t(), t()}
-          # Semantic progress: (step-done id summary), (task-reset id)
-          | {:step_done, t(), t()}
-          | {:task_reset, t()}
           # Tool invocation via tool/ namespace: (tool/name args...)
           | {:tool_call, name(), [t()]}
           # Public prelude export reference / call (Capability Prelude V1).

@@ -92,8 +92,7 @@ defmodule PtcRunner.Lisp.RegistryTest do
                  :regex,
                  :math,
                  :interop,
-                 :json,
-                 :mcp
+                 :json
                ],
                "Entry '#{entry.name}' has invalid category"
 
@@ -227,18 +226,11 @@ defmodule PtcRunner.Lisp.RegistryTest do
             "`regex/`",
             "`data/`",
             "`tool/`",
-            "`budget/`",
-            "`json/`",
-            "`mcp/`"
+            "`json/`"
           ] do
         assert index =~ namespace, "docs/conformance/index.md missing #{namespace}"
       end
 
-      assert index =~ "PTC extension / MCP server profile"
-      assert index =~ "profile-gated helper namespace"
-      assert index =~ "## REPL Environment Support"
-      assert index =~ "`(tool/servers)`"
-      assert index =~ "`(apropos query)`"
       refute index =~ "`catalog/`"
     end
 

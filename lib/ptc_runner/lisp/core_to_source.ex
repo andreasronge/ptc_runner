@@ -160,28 +160,7 @@ defmodule PtcRunner.Lisp.CoreToSource do
     "(recur #{format_list(args)})"
   end
 
-  # Task operations
-  def format({:task, id, body}) when is_binary(id) do
-    "(task #{format({:string, id})} #{format(body)})"
-  end
-
-  def format({:task_dynamic, id_expr, body}) do
-    "(task-dynamic #{format(id_expr)} #{format(body)})"
-  end
-
-  def format({:step_done, id, summary}) do
-    "(step-done #{format(id)} #{format(summary)})"
-  end
-
-  def format({:task_reset, id}) do
-    "(task-reset #{format(id)})"
-  end
-
-  # Budget and turn history
-  def format({:budget_remaining}) do
-    "(budget-remaining)"
-  end
-
+  # Turn history
   def format({:turn_history, n}) do
     "(turn-history #{format(n)})"
   end
@@ -384,19 +363,6 @@ defmodule PtcRunner.Lisp.CoreToSource do
 
   defp collect_var_refs({:juxt, fns}, acc) do
     Enum.reduce(fns, acc, &collect_var_refs/2)
-  end
-
-  defp collect_var_refs({:step_done, id, summary}, acc) do
-    acc = collect_var_refs(id, acc)
-    collect_var_refs(summary, acc)
-  end
-
-  defp collect_var_refs({:task_reset, id}, acc), do: collect_var_refs(id, acc)
-  defp collect_var_refs({:task, _id, body}, acc), do: collect_var_refs(body, acc)
-
-  defp collect_var_refs({:task_dynamic, id_expr, body}, acc) do
-    acc = collect_var_refs(id_expr, acc)
-    collect_var_refs(body, acc)
   end
 
   defp collect_var_refs({:variadic, _leading, _rest}, acc), do: acc

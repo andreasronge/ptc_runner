@@ -5,7 +5,6 @@ defmodule PtcRunner.Lisp.Result do
     :return,
     :fail,
     :memory,
-    :journal,
     :signature,
     :usage,
     :turns,
@@ -16,7 +15,6 @@ defmodule PtcRunner.Lisp.Result do
     :prints,
     :tool_calls,
     :pmap_calls,
-    :catalog_ops,
     :child_traces,
     :child_steps,
     :messages,
@@ -25,7 +23,6 @@ defmodule PtcRunner.Lisp.Result do
     :tools,
     :prelude_trace,
     prelude_call_counts: %{},
-    summaries: %{},
     tool_cache: %{}
   ]
 
@@ -33,7 +30,6 @@ defmodule PtcRunner.Lisp.Result do
           return: term() | nil,
           fail: map() | nil,
           memory: map(),
-          journal: map() | nil,
           signature: String.t() | nil,
           usage: map() | nil,
           turns: [term()] | nil,
@@ -43,7 +39,6 @@ defmodule PtcRunner.Lisp.Result do
           prints: [String.t()],
           tool_calls: [map()],
           pmap_calls: [map()],
-          catalog_ops: [map()],
           child_traces: [String.t()],
           child_steps: [t()],
           messages: [map()] | nil,
@@ -51,7 +46,6 @@ defmodule PtcRunner.Lisp.Result do
           tools: map() | nil,
           prelude_trace: PtcRunner.Lisp.Prelude.trace_summary() | nil,
           prelude_call_counts: %{optional(String.t()) => non_neg_integer()},
-          summaries: %{String.t() => String.t()},
           tool_cache: map()
         }
 
@@ -70,7 +64,6 @@ defmodule PtcRunner.Lisp.Result do
       prints: [],
       tool_calls: [],
       pmap_calls: [],
-      catalog_ops: [],
       child_traces: [],
       child_steps: []
     }
@@ -88,7 +81,6 @@ defmodule PtcRunner.Lisp.Result do
       return: nil,
       fail: %{reason: reason, message: message, details: details},
       memory: memory,
-      journal: Keyword.get(opts, :journal),
       tool_cache: Keyword.get(opts, :tool_cache, %{}),
       signature: nil,
       usage: nil,
@@ -99,7 +91,6 @@ defmodule PtcRunner.Lisp.Result do
       prints: [],
       tool_calls: [],
       pmap_calls: [],
-      catalog_ops: [],
       child_traces: [],
       child_steps: []
     }

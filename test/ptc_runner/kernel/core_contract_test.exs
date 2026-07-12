@@ -585,7 +585,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     """
 
     assert {:ok, %{value: value}} = Kernel.run(source, config)
-    assert is_integer(value[:remaining])
+    assert is_integer(value["remaining"])
     assert is_map(value["usage"])
     assert [%{name: "search"}] = value["capabilities"]
     assert %{name: "search", description: "Search a fixed fixture"} = value["search"]

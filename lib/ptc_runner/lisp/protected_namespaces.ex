@@ -4,7 +4,7 @@ defmodule PtcRunner.Lisp.ProtectedNamespaces do
 
   Reserved namespaces are host-owned and may never be declared by a
   deployment prelude, redefined by user code, or shadowed. V1 reserves
-  exactly: `tool`, `data`, `budget`, and `ptc.core` (plan §2). The future
+  exactly: `tool`, `data`, and `ptc.core` (plan §2). The future
   "catalog" namespace name is deliberately deferred.
 
   Namespace names are string-backed at the host boundary (plan §3,
@@ -24,10 +24,7 @@ defmodule PtcRunner.Lisp.ProtectedNamespaces do
   # shape. String-backed; NOT added to SourceAtoms @bounded_namespaces —
   # that would leak atoms and broaden the global vocabulary (plan §4).
   #
-  # `mcp` is reserved because the analyzer has a dedicated `mcp/...` dispatch
-  # clause that runs BEFORE prelude export lookup, so a prelude `mcp/foo` export
-  # could never be called — reject `(ns mcp ...)` at compile time instead.
-  @reserved_names ~w(tool data budget mcp ptc.core)
+  @reserved_names ~w(tool data ptc.core)
 
   @doc "The reserved (host-owned) namespace name set."
   @spec reserved() :: MapSet.t()

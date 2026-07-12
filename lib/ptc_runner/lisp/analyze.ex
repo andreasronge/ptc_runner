@@ -59,15 +59,7 @@ defmodule PtcRunner.Lisp.Analyze do
                       :comment,
                       :doseq,
                       :for,
-                      :quote,
-                      :apropos,
-                      :dir,
-                      :doc,
-                      :meta,
-                      :"all-ns",
-                      :"ns-name",
-                      :"ns-publics",
-                      :source
+                      :quote
                     ])
 
   @type error_reason ::
@@ -133,23 +125,11 @@ defmodule PtcRunner.Lisp.Analyze do
       :println,
       :return,
       :fail,
-      :task,
-      :"step-done",
-      :"task-reset",
       :def,
       :defonce,
       :defn,
       :quote,
-      :program,
-      :apropos,
-      :dir,
-      :doc,
-      :meta,
-      :source,
-      :"ns-publics",
-      :"all-ns",
-      :"ns-name",
-      :"tool/servers"
+      :program
     ]
   end
 
@@ -288,15 +268,6 @@ defmodule PtcRunner.Lisp.Analyze do
     {:ok, {:runtime_callable, :tool, name}}
   end
 
-  # Budget introspection: (budget/remaining) returns budget info map
-  defp do_analyze({:ns_symbol, :budget, :remaining}, _tail?), do: {:ok, {:budget_remaining}}
-
-  # Invalid budget namespace functions
-  defp do_analyze({:ns_symbol, :budget, other}, _tail?) do
-    {:error,
-     {:invalid_form, "Unknown budget function: budget/#{other}. Available: budget/remaining"}}
-  end
-
   # Clojure-style namespaces: normalize to built-in or provide helpful error.
   # `json/` uses namespace-qualified env keys (e.g., `:"json/parse-string"`)
   # so they need per-namespace lookup tables — see `normalize_clojure_namespace/3`
@@ -411,14 +382,6 @@ defmodule PtcRunner.Lisp.Analyze do
 
   defp dispatch_list_form({:symbol, :return}, rest, _list, tail?), do: analyze_return(rest, tail?)
   defp dispatch_list_form({:symbol, :fail}, rest, _list, tail?), do: analyze_fail(rest, tail?)
-  defp dispatch_list_form({:symbol, :task}, rest, _list, tail?), do: analyze_task(rest, tail?)
-
-  defp dispatch_list_form({:symbol, :"step-done"}, rest, _list, tail?),
-    do: analyze_step_done(rest, tail?)
-
-  defp dispatch_list_form({:symbol, :"task-reset"}, rest, _list, tail?),
-    do: analyze_task_reset(rest, tail?)
-
   # Qualified definition targets: `(def crm/x ...)` / `(defn crm/get-user ...)`.
   # V1 supports these only to REJECT writes into protected namespaces with a
   # protection programmer fault (plan §2), not to enable general qualified defs.
@@ -453,132 +416,9 @@ defmodule PtcRunner.Lisp.Analyze do
      {:invalid_arity, :quote, "(quote symbol) requires exactly 1 symbol, got #{length(args)}"}}
   end
 
-  defp dispatch_list_form({:symbol, :apropos}, [query_ast], _list, _tail?) do
-    with {:ok, query} <- do_analyze(query_ast, false) do
-      {:ok, {:repl_discovery, :apropos, [query]}}
-    end
-  end
-
-  defp dispatch_list_form({:symbol, :apropos}, [query_ast, opts_ast], _list, _tail?) do
-    with {:ok, query} <- do_analyze(query_ast, false),
-         {:ok, opts} <- do_analyze(opts_ast, false) do
-      {:ok, {:repl_discovery, :apropos, [query, opts]}}
-    end
-  end
-
-  defp dispatch_list_form({:symbol, :apropos}, args, _list, _tail?) do
-    {:error,
-     {:invalid_arity, :apropos,
-      "(apropos query) or (apropos query opts) — got #{length(args)} args"}}
-  end
-
-  defp dispatch_list_form({:symbol, :dir}, [server_ast], _list, _tail?) do
-    with {:ok, server} <- analyze_discovery_ref(server_ast) do
-      {:ok, {:repl_discovery, :dir, [server]}}
-    end
-  end
-
-  defp dispatch_list_form({:symbol, :dir}, [server_ast, opts_ast], _list, _tail?) do
-    with {:ok, server} <- analyze_discovery_ref(server_ast),
-         {:ok, opts} <- do_analyze(opts_ast, false) do
-      {:ok, {:repl_discovery, :dir, [server, opts]}}
-    end
-  end
-
-  defp dispatch_list_form({:symbol, :dir}, args, _list, _tail?) do
-    {:error,
-     {:invalid_arity, :dir, "(dir server) or (dir server opts) — got #{length(args)} args"}}
-  end
-
-  defp dispatch_list_form({:symbol, :doc}, [tool_ref_ast], _list, _tail?) do
-    with {:ok, tool_ref} <- analyze_discovery_ref(tool_ref_ast) do
-      {:ok, {:repl_discovery, :doc, [tool_ref]}}
-    end
-  end
-
-  defp dispatch_list_form({:symbol, :doc}, args, _list, _tail?) do
-    {:error,
-     {:invalid_arity, :doc, "(doc tool-ref) requires exactly 1 argument, got #{length(args)}"}}
-  end
-
-  defp dispatch_list_form({:symbol, :meta}, [tool_ref_ast], _list, _tail?) do
-    with {:ok, tool_ref} <- analyze_discovery_ref(tool_ref_ast) do
-      {:ok, {:repl_discovery, :meta, [tool_ref]}}
-    end
-  end
-
-  defp dispatch_list_form({:symbol, :meta}, args, _list, _tail?) do
-    {:error,
-     {:invalid_arity, :meta, "(meta tool-ref) requires exactly 1 argument, got #{length(args)}"}}
-  end
-
-  defp dispatch_list_form({:symbol, :source}, [ref_ast], _list, _tail?) do
-    with {:ok, ref} <- analyze_discovery_ref(ref_ast) do
-      {:ok, {:repl_discovery, :source, [ref]}}
-    end
-  end
-
-  defp dispatch_list_form({:symbol, :source}, args, _list, _tail?) do
-    {:error,
-     {:invalid_arity, :source, "(source ref) requires exactly 1 argument, got #{length(args)}"}}
-  end
-
-  defp dispatch_list_form({:symbol, :"ns-publics"}, [ns_ast], _list, _tail?) do
-    with {:ok, ns_ref} <- analyze_discovery_ref(ns_ast) do
-      {:ok, {:repl_discovery, :ns_publics, [ns_ref]}}
-    end
-  end
-
-  defp dispatch_list_form({:symbol, :"ns-publics"}, args, _list, _tail?) do
-    {:error,
-     {:invalid_arity, :"ns-publics",
-      "(ns-publics namespace) requires exactly 1 argument, got #{length(args)}"}}
-  end
-
-  defp dispatch_list_form({:symbol, :"all-ns"}, [], _list, _tail?),
-    do: {:ok, {:repl_discovery, :all_ns, []}}
-
-  defp dispatch_list_form({:symbol, :"all-ns"}, args, _list, _tail?) do
-    {:error, {:invalid_arity, :"all-ns", "(all-ns) takes no arguments, got #{length(args)}"}}
-  end
-
-  defp dispatch_list_form({:symbol, :"ns-name"}, [ns_ast], _list, _tail?) do
-    with {:ok, ns_ref} <- analyze_discovery_ref(ns_ast) do
-      {:ok, {:repl_discovery, :ns_name, [ns_ref]}}
-    end
-  end
-
-  defp dispatch_list_form({:symbol, :"ns-name"}, args, _list, _tail?) do
-    {:error,
-     {:invalid_arity, :"ns-name",
-      "(ns-name namespace) requires exactly 1 argument, got #{length(args)}"}}
-  end
-
   # Tool invocation via tool/ namespace: (tool/name args...)
-  # Tool discovery via tool/ namespace
-  defp dispatch_list_form({:ns_symbol, :tool, :servers}, [], _list, _tail?),
-    do: {:ok, {:repl_discovery, :servers, []}}
-
-  defp dispatch_list_form({:ns_symbol, :tool, :servers}, _args, _list, _tail?),
-    do: {:error, {:invalid_arity, :"tool/servers", "(tool/servers) takes no arguments"}}
-
   defp dispatch_list_form({:ns_symbol, :tool, tool_name}, rest, _list, tail?),
     do: analyze_tool_call(tool_name, rest, tail?)
-
-  defp dispatch_list_form({:ns_symbol, :mcp, other}, _rest, _list, _tail?),
-    do: {:error, {:invalid_form, "Unknown mcp function: mcp/#{other}. Available: tool/servers"}}
-
-  # Budget introspection via budget/ namespace: (budget/remaining)
-  defp dispatch_list_form({:ns_symbol, :budget, :remaining}, [], _list, _tail?),
-    do: {:ok, {:budget_remaining}}
-
-  defp dispatch_list_form({:ns_symbol, :budget, :remaining}, _args, _list, _tail?),
-    do: {:error, {:invalid_arity, :"budget/remaining", "(budget/remaining) takes no arguments"}}
-
-  defp dispatch_list_form({:ns_symbol, :budget, other}, _rest, _list, _tail?),
-    do:
-      {:error,
-       {:invalid_form, "Unknown budget function: budget/#{other}. Available: budget/remaining"}}
 
   # Clojure-style namespaces in call position: (clojure.string/join "," items)
   defp dispatch_list_form({:ns_symbol, ns, func}, rest, list, tail?) do
@@ -823,16 +663,6 @@ defmodule PtcRunner.Lisp.Analyze do
   defp analyze_quote(other) do
     {:error, {:invalid_form, "quote only supports symbols in this phase, got #{inspect(other)}"}}
   end
-
-  # REPL discovery forms (`doc`, `meta`, `dir`, `ns-publics`, `ns-name`) take a
-  # reference, not a value. They are macro-like (clojure.repl/doc style, issue
-  # #1094): a bare symbol or namespaced symbol in ref position is auto-quoted to
-  # a `{:symbol_ref, _}` so `(doc paged/profile)` looks the symbol up instead of
-  # evaluating it to a prelude closure. Quoted symbols, strings, and any other
-  # computed expression keep evaluating normally via `do_analyze/2`.
-  defp analyze_discovery_ref({:symbol, name}), do: {:ok, {:symbol_ref, to_string(name)}}
-  defp analyze_discovery_ref({:ns_symbol, ns, name}), do: {:ok, {:symbol_ref, "#{ns}/#{name}"}}
-  defp analyze_discovery_ref(other), do: do_analyze(other, false)
 
   defp analyze_list_of_patterns(patterns),
     do: Patterns.collect_results(patterns, &analyze_pattern/1)
@@ -1161,56 +991,6 @@ defmodule PtcRunner.Lisp.Analyze do
   end
 
   # ============================================================
-  # Journaled task: (task "id" expr) or (task id-expr expr)
-  # ============================================================
-
-  defp analyze_task([{:string, id}, body_ast], _tail?) do
-    with {:ok, body} <- do_analyze(body_ast, false) do
-      {:ok, {:task, id, body}}
-    end
-  end
-
-  defp analyze_task([id_ast, body_ast], _tail?) do
-    with {:ok, id_expr} <- do_analyze(id_ast, false),
-         {:ok, body} <- do_analyze(body_ast, false) do
-      {:ok, {:task_dynamic, id_expr, body}}
-    end
-  end
-
-  defp analyze_task(_, _tail?) do
-    {:error, {:invalid_arity, :task, "expected (task \"id\" expr)"}}
-  end
-
-  # ============================================================
-  # Step done: (step-done "id" "summary")
-  # ============================================================
-
-  defp analyze_step_done([id_ast, summary_ast], _tail?) do
-    with {:ok, id} <- do_analyze(id_ast, false),
-         {:ok, summary} <- do_analyze(summary_ast, false) do
-      {:ok, {:step_done, id, summary}}
-    end
-  end
-
-  defp analyze_step_done(_, _tail?) do
-    {:error, {:invalid_arity, :"step-done", "expected (step-done id summary)"}}
-  end
-
-  # ============================================================
-  # Task reset: (task-reset "id")
-  # ============================================================
-
-  defp analyze_task_reset([id_ast], _tail?) do
-    with {:ok, id} <- do_analyze(id_ast, false) do
-      {:ok, {:task_reset, id}}
-    end
-  end
-
-  defp analyze_task_reset(_, _tail?) do
-    {:error, {:invalid_arity, :"task-reset", "expected (task-reset id)"}}
-  end
-
-  # ============================================================
   # Definitions: def, defonce, defn
   # Delegated to PtcRunner.Lisp.Analyze.Definitions
   # ============================================================
@@ -1512,10 +1292,7 @@ defmodule PtcRunner.Lisp.Analyze do
   defp unknown_export_error(ns, func) do
     case PreludeScope.filtered_export(ns, func) do
       nil ->
-        {:error,
-         {:invalid_form,
-          "#{ns}/#{func} is not a public export of namespace #{ns}. " <>
-            "Discover its public exports with (ns-publics '#{ns}) or (apropos \"#{func}\")."}}
+        {:error, {:invalid_form, "#{ns}/#{func} is not a public export of namespace #{ns}."}}
 
       filtered ->
         ref = Map.get(filtered, :ref) || "#{ns}/#{func}"
@@ -1594,8 +1371,6 @@ defmodule PtcRunner.Lisp.Analyze do
     [
       "data/",
       "tool/",
-      "mcp/",
-      "budget/",
       "json/",
       "clojure.core/",
       "core/",

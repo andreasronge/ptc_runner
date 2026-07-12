@@ -105,7 +105,6 @@ defmodule PtcRunner.Lisp.Prelude.ProtectionTest do
       for {prog, ns} <- [
             {"(def tool/x 1)", "tool"},
             {"(defn data/foo [x] x)", "data"},
-            {"(def budget/x 1)", "budget"},
             {"(def ptc.core/x 1)", "ptc.core"}
           ] do
         assert {:error, {:invalid_form, msg}} = analyze(prog),
@@ -160,7 +159,7 @@ defmodule PtcRunner.Lisp.Prelude.ProtectionTest do
   end
 
   describe "Reject Unknown Namespaced Call — analyzer" do
-    test "(crm/delete-user ...) is an unknown-export fault suggesting discovery forms", %{
+    test "(crm/delete-user ...) is an unknown-export fault", %{
       prelude: prelude
     } do
       assert {:error, {:invalid_form, msg}} = analyze("(crm/delete-user \"u_123\")", prelude)
@@ -168,16 +167,13 @@ defmodule PtcRunner.Lisp.Prelude.ProtectionTest do
       # Names the offending ns/symbol.
       assert msg =~ "crm/delete-user"
       assert msg =~ "crm"
-      # Suggests discovery forms.
-      assert msg =~ "ns-publics"
-      assert msg =~ "apropos"
       # NOT a protection fault — it's an unknown EXPORT, not a write attempt.
       refute msg =~ "protected"
     end
 
     test "value-position crm/delete-user is also an unknown-export fault", %{prelude: prelude} do
       assert {:error, {:invalid_form, msg}} = analyze("(map crm/delete-user [1 2])", prelude)
-      assert msg =~ "ns-publics"
+      assert msg =~ "not a public export"
     end
   end
 
@@ -193,8 +189,7 @@ defmodule PtcRunner.Lisp.Prelude.ProtectionTest do
     test "EVERY ProtectedNamespaces.reserved/0 name is rejected at compile time" do
       # Cross-check: the compiler's reserved-namespace gate is driven by the
       # same ProtectedNamespaces table the analyzer's protection check consults,
-      # so every reserved name must fail prelude compilation. Pins budget and
-      # ptc.core alongside tool/data so the two surfaces cannot drift.
+      # so every reserved name must fail prelude compilation.
       for ns <- ProtectedNamespaces.reserved() do
         source = "(ns #{ns} \"nope\" {:visibility :prompt})\n(defn evil [x] x)"
 
@@ -206,9 +201,9 @@ defmodule PtcRunner.Lisp.Prelude.ProtectionTest do
       end
     end
 
-    test "the reserved set is exactly tool/data/budget/mcp/ptc.core (V1 lock)" do
+    test "the reserved set is exactly tool/data/ptc.core" do
       assert ProtectedNamespaces.reserved() ==
-               MapSet.new(["tool", "data", "budget", "mcp", "ptc.core"])
+               MapSet.new(["tool", "data", "ptc.core"])
     end
   end
 end

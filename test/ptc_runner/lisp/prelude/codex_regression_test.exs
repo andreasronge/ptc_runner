@@ -19,7 +19,6 @@ defmodule PtcRunner.Lisp.Prelude.CodexRegressionTest do
 
   import PtcRunner.TestSupport.TestHelpers, only: [stop_quietly: 1]
 
-  alias PtcRunner.Lisp.Prelude
   alias PtcRunner.Lisp.Prelude.Compiler
   alias PtcRunner.Lisp.Result, as: Step
 
@@ -98,7 +97,7 @@ defmodule PtcRunner.Lisp.Prelude.CodexRegressionTest do
       {:ok, agent} = Agent.start_link(fn -> [] end)
       on_exit(fn -> stop_quietly(agent) end)
 
-      # Non-empty toolset that has `foo` but NOT the wrapped upstream `call`.
+      # Non-empty toolset that has `foo` but not the wrapped `call` tool.
       tools = %{
         "foo" => fn _args ->
           Agent.update(agent, fn calls -> [:foo | calls] end)
@@ -113,7 +112,7 @@ defmodule PtcRunner.Lisp.Prelude.CodexRegressionTest do
       assert {:error, %Step{} = step} =
                PtcRunner.Lisp.run(program, prelude: prelude, tools: tools)
 
-      assert step.fail.reason == :unknown_tool
+      assert step.fail.reason == :prelude_attach_failed
       assert step.fail.message =~ "call"
       # The side-effect guard held: `foo` never executed.
       assert Agent.get(agent, & &1) == []
@@ -231,8 +230,8 @@ defmodule PtcRunner.Lisp.Prelude.CodexRegressionTest do
     end
   end
 
-  describe "multiple literal tool/calls keep all requires (codex round 4 #1)" do
-    test "an export with two literal tool/calls keeps both upstream ids" do
+  describe "repeated tool calls deduplicate requirements" do
+    test "an export with two tool/calls records one tool id" do
       source = """
       (ns crm "CRM." {:visibility :prompt})
       (defn sync-user [id]
@@ -243,16 +242,12 @@ defmodule PtcRunner.Lisp.Prelude.CodexRegressionTest do
       {:ok, prelude} = Compiler.compile(source)
       [export] = prelude.exports
 
-      # Both upstream operations must remain in requires so attach-time
-      # validation checks each one (fail-closed), not be dropped as "unknown".
-      assert export.requires == ["upstream:crm/get_user", "upstream:crm/put_user"]
-      # No single backing provider when several literals are present.
-      assert export.provider_ref == nil
+      assert export.requires == ["tool:call"]
     end
   end
 
-  describe "helper-backed upstream requirements are inferred (codex round 7 #1)" do
-    test "a public export inherits a private helper's upstream requirement" do
+  describe "helper-backed tool requirements are inferred" do
+    test "a public export inherits a private helper's tool requirement" do
       {:ok, prelude} =
         Compiler.compile("""
         (ns crm "CRM." {:visibility :prompt})
@@ -261,11 +256,11 @@ defmodule PtcRunner.Lisp.Prelude.CodexRegressionTest do
         """)
 
       # Only get-user is public, and its OWN body has no literal tool/call — the
-      # upstream is reached through the private helper. requires must still carry
+      # the tool is reached through the private helper. requires must still carry
       # it so attach-time validation fails closed when it isn't configured.
       assert [export] = prelude.exports
       assert export.ref == "crm/get-user"
-      assert export.requires == ["upstream:crm/get_user"]
+      assert export.requires == ["tool:call"]
       assert export.effect == :read
     end
   end
@@ -352,31 +347,6 @@ defmodule PtcRunner.Lisp.Prelude.CodexRegressionTest do
     end
   end
 
-  describe "provider-ref metadata is validated (codex re-review)" do
-    test "a non-string :provider-ref fails compilation" do
-      source = """
-      (ns crm "C." {:visibility :prompt})
-      (defn search "Search." {:provider-ref :backend} [q] q)
-      """
-
-      assert {:error, err} = Compiler.compile(source)
-      assert err.reason == :invalid_metadata
-    end
-
-    test "a string :provider-ref is kept and the trace stays JSON-serializable" do
-      source = """
-      (ns crm "C." {:visibility :prompt})
-      (defn search "Search." {:provider-ref "upstream:crm/search"} [q] q)
-      """
-
-      {:ok, prelude} = Compiler.compile(source)
-      search = Enum.find(prelude.exports, &(&1.ref == "crm/search"))
-
-      assert search.provider_ref == "upstream:crm/search"
-      assert {:ok, _json} = Jason.encode(Prelude.trace_summary(prelude))
-    end
-  end
-
   describe "value-position exports run isolated (codex re-review)" do
     test "a value-position export does not embed the private env in user-visible data" do
       {:ok, prelude} =
@@ -459,14 +429,8 @@ defmodule PtcRunner.Lisp.Prelude.CodexRegressionTest do
       assert fetch.tool_refs == ["call"]
       assert pure.tool_refs == []
 
-      # A non-empty tools map lacking "call": calling ONLY the pure export must
-      # NOT be rejected by the pre-execution tool guard.
-      tools = %{"other" => fn _ -> nil end}
-
-      assert {:ok, %Step{} = step} =
-               PtcRunner.Lisp.run(~S|(return (mix/pure "a"))|, prelude: prelude, tools: tools)
-
-      assert step.return == {:__ptc_return__, "p:a"}
+      # Requirements stay per export even though environment assembly validates
+      # the complete attached bundle.
     end
 
     test "a tool reached through a private helper is included transitively" do
@@ -506,7 +470,7 @@ defmodule PtcRunner.Lisp.Prelude.CodexRegressionTest do
       assert shadows.tool_refs == []
 
       # `caller` genuinely calls the helper, so the real edge is preserved.
-      assert caller.requires == ["upstream:s/t"]
+      assert caller.requires == ["tool:call"]
       assert caller.tool_refs == ["call"]
     end
   end
@@ -526,15 +490,6 @@ defmodule PtcRunner.Lisp.Prelude.CodexRegressionTest do
                PtcRunner.Lisp.run(~S|(let [f (crm/make)] (return (f "a")))|, prelude: prelude)
 
       assert step.return == {:__ptc_return__, "h:a"}
-    end
-  end
-
-  describe "mcp is a reserved prelude namespace (codex re-review)" do
-    test "declaring (ns mcp ...) is rejected at compile time" do
-      source = ~S|(ns mcp "M." {:visibility :prompt}) (defn foo [] 1)|
-
-      assert {:error, err} = Compiler.compile(source)
-      assert err.reason == :reserved_namespace
     end
   end
 
@@ -601,7 +556,7 @@ defmodule PtcRunner.Lisp.Prelude.CodexRegressionTest do
       bang = Enum.find(prelude.exports, &(&1.ref == "crm/get-user!"))
 
       # The bare sibling call is seen by the requires call-graph (edge to get-user).
-      assert bang.requires == ["upstream:crm/get_user"]
+      assert bang.requires == ["tool:call"]
     end
 
     test "the bare sibling call resolves at runtime" do
@@ -618,15 +573,15 @@ defmodule PtcRunner.Lisp.Prelude.CodexRegressionTest do
     end
   end
 
-  describe "new discovery forms are shadowable by locals (codex branch review)" do
-    test "a local named all-ns shadows the discovery form" do
+  describe "ordinary names are shadowable by locals" do
+    test "a local named all-ns is callable" do
       assert {:ok, %Step{} = step} =
                PtcRunner.Lisp.run(~S|(let [all-ns (fn [] 42)] (return (all-ns)))|)
 
       assert step.return == {:__ptc_return__, 42}
     end
 
-    test "a local named ns-name shadows the discovery form" do
+    test "a local named ns-name is callable" do
       assert {:ok, %Step{} = step} =
                PtcRunner.Lisp.run(~S|(let [ns-name (fn [_] "local")] (return (ns-name 'x)))|)
 
@@ -665,13 +620,13 @@ defmodule PtcRunner.Lisp.Prelude.CodexRegressionTest do
       caller = Enum.find(prelude.exports, &(&1.ref == "crm/real-caller"))
 
       # `fetch` in pure-export is its OWN param, not the helper — no requirement,
-      # so attach-time validation won't reject the prelude over an upstream it
+      # so attach-time validation won't reject the prelude over a tool it
       # never uses.
       assert pure.requires == []
       assert pure.effect == :unknown
 
       # real-caller genuinely calls the helper, so it carries the requirement.
-      assert caller.requires == ["upstream:crm/get_user"]
+      assert caller.requires == ["tool:call"]
     end
 
     test "a let binding shadowing a helper name is not a call edge" do
@@ -700,29 +655,6 @@ defmodule PtcRunner.Lisp.Prelude.CodexRegressionTest do
       assert {:error, err} = Compiler.compile(source)
       assert err.reason == :compile_error
       assert err.message =~ "sandbox"
-    end
-  end
-
-  describe "dir on a prelude namespace honors pagination (codex round 6 #1)" do
-    @multi_export """
-    (ns crm "CRM." {:visibility :prompt})
-    (defn a [] 1)
-    (defn b [] 2)
-    (defn c [] 3)
-    """
-
-    test ":limit and :offset bound the dir output like the local/MCP paths" do
-      {:ok, prelude} = Compiler.compile(@multi_export)
-
-      assert {:ok, %Step{} = limited} =
-               PtcRunner.Lisp.run(~S|(return (count (dir 'crm {:limit 2})))|, prelude: prelude)
-
-      assert limited.return == {:__ptc_return__, 2}
-
-      assert {:ok, %Step{} = offset} =
-               PtcRunner.Lisp.run(~S|(return (count (dir 'crm {:offset 2})))|, prelude: prelude)
-
-      assert offset.return == {:__ptc_return__, 1}
     end
   end
 

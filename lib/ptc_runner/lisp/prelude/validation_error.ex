@@ -9,7 +9,7 @@ defmodule PtcRunner.Lisp.Prelude.ValidationError do
   errors, reserved-namespace declarations, duplicate refs, bad visibility,
   invalid arity/signature metadata, and similar facts), and from
   `PtcRunner.Lisp.Prelude.Attach.validate_requires/2` with the
-  `:prelude_attach_failed` reason when a public export `requires` an upstream
+  `:prelude_attach_failed` reason when a public export requires a tool
   operation the selected runtime does not provide (plan §3 / §6A).
 
   ## Fields

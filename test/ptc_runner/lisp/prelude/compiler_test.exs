@@ -96,11 +96,11 @@ defmodule PtcRunner.Lisp.Prelude.CompilerTest do
   end
 
   # ============================================================
-  # requires / backing inference
+  # tool requirement inference
   # ============================================================
 
-  describe "compile/1 backing inference" do
-    test "literal tool/call infers a requires/provider_ref backing id" do
+  describe "compile/1 tool requirement inference" do
+    test "tool/call records the generic tool requirement" do
       source = """
       (ns crm "CRM helpers." {:visibility :prompt})
 
@@ -113,12 +113,11 @@ defmodule PtcRunner.Lisp.Prelude.CompilerTest do
       {:ok, prelude} = Compiler.compile(source)
       [export] = prelude.exports
 
-      assert export.requires == ["upstream:crm/get_user"]
-      assert export.provider_ref == "upstream:crm/get_user"
+      assert export.requires == ["tool:call"]
       assert export.effect == :read
     end
 
-    test "dynamic server/tool yields :unknown effect and no requires" do
+    test "dynamic arguments do not change the named tool requirement" do
       source = """
       (ns crm "CRM helpers." {:visibility :prompt})
 
@@ -131,18 +130,17 @@ defmodule PtcRunner.Lisp.Prelude.CompilerTest do
       {:ok, prelude} = Compiler.compile(source)
       [export] = prelude.exports
 
-      assert export.effect == :unknown
-      assert export.requires == []
-      assert export.provider_ref == nil
+      assert export.effect == :read
+      assert export.requires == ["tool:call"]
     end
 
-    test "explicit prelude metadata overrides inferred backing" do
+    test "explicit metadata adds requirements and overrides effect" do
       source = """
       (ns crm "CRM helpers." {:visibility :prompt})
 
       (defn get-user
         "Return a CRM user by id."
-        {:provider-ref "upstream:crm/get_user" :effect :read :requires ["upstream:crm/get_user"]}
+        {:effect :write :requires ["tool:audit"]}
         [id]
         (tool/call {:server "crm" :tool "get_user" :args {:id id}}))
       """
@@ -150,9 +148,8 @@ defmodule PtcRunner.Lisp.Prelude.CompilerTest do
       {:ok, prelude} = Compiler.compile(source)
       [export] = prelude.exports
 
-      assert export.provider_ref == "upstream:crm/get_user"
-      assert export.requires == ["upstream:crm/get_user"]
-      assert export.effect == :read
+      assert export.requires == ["tool:audit", "tool:call"]
+      assert export.effect == :write
     end
   end
 
@@ -282,7 +279,7 @@ defmodule PtcRunner.Lisp.Prelude.CompilerTest do
 
     test "direct requires/tool_refs cover only the form's own body", %{graph: graph} do
       helper = graph["fetch-raw"]
-      assert helper.requires.direct == ["upstream:crm/get_user"]
+      assert helper.requires.direct == ["tool:call"]
       assert helper.tool_refs.direct == ["call"]
 
       export = graph["get-user"]
@@ -295,9 +292,9 @@ defmodule PtcRunner.Lisp.Prelude.CompilerTest do
       entry = graph["get-user"]
       export = Enum.find(prelude.exports, &(&1.ref == "crm/get-user"))
 
-      assert entry.requires.transitive == ["upstream:crm/get_user"]
+      assert entry.requires.transitive == ["tool:call"]
       assert entry.tool_refs.transitive == ["call"]
-      assert export.requires == ["upstream:crm/get_user"]
+      assert export.requires == ["tool:call"]
       assert export.tool_refs == ["call"]
     end
 
@@ -397,19 +394,19 @@ defmodule PtcRunner.Lisp.Prelude.CompilerTest do
   # ============================================================
 
   describe "compile/1 metadata normalization" do
-    test "kebab-case :provider-ref keyword normalizes to a string-backed field" do
+    test "kebab-case :requires values remain string-backed" do
       source = """
       (ns crm "doc" {:visibility :prompt})
       (defn get-user
         "doc"
-        {:provider-ref "upstream:crm/get_user" :effect :read}
+        {:requires ["tool:audit"] :effect :read}
         [id]
         (tool/call {:server "crm" :tool "get_user" :args {:id id}}))
       """
 
       {:ok, prelude} = Compiler.compile(source)
       [export] = prelude.exports
-      assert export.provider_ref == "upstream:crm/get_user"
+      assert export.requires == ["tool:audit", "tool:call"]
       # host boundary stays string-backed; refs/namespace/symbol are strings.
       assert is_binary(export.ref)
       assert is_binary(export.namespace)
@@ -510,21 +507,21 @@ defmodule PtcRunner.Lisp.Prelude.CompilerTest do
     test "dep call unions the dep export's requires and tool_refs (call position)" do
       assert {:ok, prelude} = compile_audit("(defn check [id] (base/fetch id))")
       [%Export{} = check] = prelude.exports
-      assert "upstream:crm/get_user" in check.requires
+      assert "tool:call" in check.requires
       assert "call" in check.tool_refs
     end
 
     test "value-position dep ref unions authority too" do
       assert {:ok, prelude} = compile_audit("(defn check-all [ids] (map base/fetch ids))")
       [%Export{} = check] = prelude.exports
-      assert "upstream:crm/get_user" in check.requires
+      assert "tool:call" in check.requires
       assert "call" in check.tool_refs
     end
 
     test "short-fn dep ref unions authority (walker container coverage)" do
       assert {:ok, prelude} = compile_audit("(defn check-all [ids] (map #(base/fetch %) ids))")
       [%Export{} = check] = prelude.exports
-      assert "upstream:crm/get_user" in check.requires
+      assert "tool:call" in check.requires
     end
 
     test "union flows through the dependent's own private helpers" do
@@ -536,7 +533,7 @@ defmodule PtcRunner.Lisp.Prelude.CompilerTest do
 
       assert {:ok, prelude} = compile_audit(body)
       [%Export{ref: "audit/check"} = check] = prelude.exports
-      assert "upstream:crm/get_user" in check.requires
+      assert "tool:call" in check.requires
     end
 
     test "form_graph records dep_calls as full-ref strings" do
@@ -601,7 +598,7 @@ defmodule PtcRunner.Lisp.Prelude.CompilerTest do
 
         assert Prelude.namespaces(prelude) == ["audit", "base"]
         {:ok, check} = Prelude.fetch_export(prelude, "audit/check")
-        assert "upstream:crm/get_user" in check.requires
+        assert "tool:call" in check.requires
         assert "call" in check.tool_refs
       end
     end
@@ -617,7 +614,12 @@ defmodule PtcRunner.Lisp.Prelude.CompilerTest do
                  namespace_deps: %{"audit" => ["base"]}
                )
 
-      assert {:ok, step} = Lisp.run(~s{(audit/check "v")}, prelude: prelude)
+      assert {:ok, step} =
+               Lisp.run(~s{(audit/check "v")},
+                 prelude: prelude,
+                 tools: %{"call" => fn _ -> nil end}
+               )
+
       assert step.return == "helper:n:v"
     end
 

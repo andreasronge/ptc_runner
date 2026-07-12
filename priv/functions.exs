@@ -4524,22 +4524,6 @@
       divergences: nil
     },
     %{
-      name: "apropos",
-      description: "Search loaded REPL discovery backends",
-      binding: nil,
-      category: :mcp,
-      dispatch: :analyze,
-      signatures: ["(apropos query)", "(apropos query opts)"],
-      since: nil,
-      section: "Discovery",
-      ptc_extension?: true,
-      examples: [],
-      notes: "MCP-backed in aggregator mode; searches loaded discovery backends.",
-      see_also: ["dir", "doc", "meta", "tool/servers"],
-      clojure_var: "apropos",
-      divergences: nil
-    },
-    %{
       name: "as->",
       description: "",
       binding: nil,
@@ -4701,24 +4685,6 @@
       divergences: nil
     },
     %{
-      name: "dir",
-      description: "List members of a REPL discovery reference",
-      binding: nil,
-      category: :mcp,
-      dispatch: :analyze,
-      signatures: ["(dir server)", "(dir server opts)"],
-      since: nil,
-      section: "Discovery",
-      ptc_extension?: true,
-      examples: [],
-      notes:
-        "Macro-like over the ref argument: accepts an unquoted symbol (clojure.string), " <>
-          "a quoted symbol ('clojure.string), or a string. MCP-backed in aggregator mode.",
-      see_also: ["apropos", "doc", "meta", "tool/servers"],
-      clojure_var: "dir",
-      divergences: nil
-    },
-    %{
       name: "do",
       description: "",
       binding: nil,
@@ -4732,28 +4698,6 @@
       notes: nil,
       see_also: [],
       clojure_var: "do",
-      divergences: nil
-    },
-    %{
-      name: "doc",
-      description:
-        "Print human-readable documentation for a REPL discovery reference (returns nil)",
-      binding: nil,
-      category: :mcp,
-      dispatch: :analyze,
-      signatures: ["(doc tool-ref)"],
-      since: nil,
-      section: "Discovery",
-      ptc_extension?: true,
-      examples: [],
-      notes:
-        "Like clojure.repl/doc, prints the rendered documentation and returns nil, so doc text " <>
-          "flows through the (larger) print budget rather than the result channel. Sibling " <>
-          "discovery forms dir/apropos/meta return structured data instead of printing. " <>
-          "Macro-like over the ref argument: accepts an unquoted symbol (paged/profile), a " <>
-          "quoted symbol ('github/search), or a string (\"github/search\"). MCP-backed in aggregator mode.",
-      see_also: ["apropos", "dir", "meta"],
-      clojure_var: "doc",
       divergences: nil
     },
     %{
@@ -4936,95 +4880,6 @@
         "DIV-01: enforces a 1000-iteration default cap (configurable up to 10000) for sandbox safety. See docs/clojure-conformance-gaps.md."
     },
     %{
-      name: "meta",
-      description: "Return structured metadata for a REPL discovery reference",
-      binding: nil,
-      category: :mcp,
-      dispatch: :analyze,
-      signatures: ["(meta tool-ref)"],
-      since: nil,
-      section: "Discovery",
-      ptc_extension?: true,
-      examples: [],
-      notes:
-        "Macro-like over the ref argument: accepts an unquoted symbol (paged/profile), a " <>
-          "quoted symbol ('github/search), or a string (\"github/search\"). MCP-backed in aggregator mode.",
-      see_also: ["doc", "dir", "apropos"],
-      clojure_var: "meta",
-      divergences: nil
-    },
-    %{
-      name: "tool/servers",
-      description: "List configured upstream servers",
-      binding: nil,
-      category: :mcp,
-      dispatch: :analyze,
-      signatures: ["(tool/servers)"],
-      since: nil,
-      section: "Discovery",
-      ptc_extension?: true,
-      examples: [],
-      notes:
-        "MCP-backed in aggregator mode; returns server names, descriptions, tool counts, and load status.",
-      see_also: ["apropos", "dir", "doc", "meta"],
-      clojure_var: nil,
-      divergences: nil
-    },
-    %{
-      name: "ns-publics",
-      description: "Return public vars for a PTC/Clojure or prelude namespace",
-      binding: nil,
-      category: :core,
-      dispatch: :analyze,
-      signatures: ["(ns-publics namespace)"],
-      since: nil,
-      section: "Discovery",
-      ptc_extension?: false,
-      examples: [],
-      notes:
-        "Returns a map keyed by public symbol strings. Resolves prelude-export namespaces and local Clojure/PTC namespaces; Java classes and MCP servers are not supported. " <>
-          "Macro-like over the namespace argument: accepts an unquoted symbol (crm), a quoted symbol ('crm), or a string (\"crm\").",
-      see_also: ["dir", "doc", "meta", "apropos", "all-ns", "ns-name"],
-      clojure_var: "ns-publics",
-      divergences: nil
-    },
-    %{
-      name: "all-ns",
-      description: "Return a sorted list of discoverable namespace-name strings",
-      binding: nil,
-      category: :core,
-      dispatch: :analyze,
-      signatures: ["(all-ns)"],
-      since: nil,
-      section: "Discovery",
-      ptc_extension?: false,
-      examples: [],
-      notes:
-        "Curated Lisp-facing namespaces (e.g. clojure.core, clojure.string) plus any attached prelude namespaces. Does not leak BEAM internals, Java classes, or implementation-only namespaces.",
-      see_also: ["ns-name", "ns-publics", "dir"],
-      clojure_var: "all-ns",
-      divergences:
-        "Returns namespace-name STRINGS, not Clojure Namespace objects (PtcRunner has no first-class namespace value)."
-    },
-    %{
-      name: "ns-name",
-      description: "Return the namespace-name string for a known namespace",
-      binding: nil,
-      category: :core,
-      dispatch: :analyze,
-      signatures: ["(ns-name namespace)"],
-      since: nil,
-      section: "Discovery",
-      ptc_extension?: false,
-      examples: [],
-      notes:
-        "Macro-like over the namespace argument: accepts an unquoted symbol (crm), a quoted symbol ('crm), or a string (\"crm\"). Returns the namespace name as a string for curated and prelude namespaces.",
-      see_also: ["all-ns", "ns-publics"],
-      clojure_var: "ns-name",
-      divergences:
-        "Takes a namespace REF (symbol/string) rather than a Clojure Namespace object and returns a string, not a symbol."
-    },
-    %{
       name: "or",
       description: "Logical OR (short-circuits)",
       binding: nil,
@@ -5171,80 +5026,6 @@
       notes: nil,
       see_also: [],
       clojure_var: "some->>",
-      divergences: nil
-    },
-    %{
-      name: "source",
-      description: "Print the defining form of an attached-prelude reference (returns nil)",
-      binding: nil,
-      category: :mcp,
-      dispatch: :analyze,
-      signatures: ["(source ref)"],
-      since: nil,
-      section: "Discovery",
-      ptc_extension?: true,
-      examples: [],
-      notes:
-        "Like clojure.repl/source, prints the rendered defining form and returns nil, so the " <>
-          "(multi-line) source flows through the print budget (capped at :max_print_length) rather " <>
-          "than the result channel. Resolves ONLY against the attached prelude — unlike doc/meta " <>
-          "there is no local/MCP fallthrough; an unknown ref prints \"no source available\" and " <>
-          "returns nil instead of raising. Covers public exports plus the private helpers " <>
-          "transitively reachable from a public export, so a reachable defn- helper is " <>
-          "source-visible even though it stays invisible to doc/meta/ns-publics. Reveals " <>
-          "implementation, not just contract: deployments must keep secrets out of prelude bodies. " <>
-          "Macro-like over the ref argument: accepts an unquoted symbol (paged/profile), a quoted " <>
-          "symbol ('crm/get-user), or a string (\"crm/get-user\").",
-      see_also: ["doc", "meta", "ns-publics"],
-      clojure_var: "source",
-      divergences: nil
-    },
-    %{
-      name: "step-done",
-      description: "",
-      binding: nil,
-      category: :core,
-      dispatch: :analyze,
-      signatures: ["(step-done ...)"],
-      since: nil,
-      section: "Agent Control",
-      ptc_extension?: true,
-      examples: [],
-      notes: nil,
-      see_also: [],
-      clojure_var: nil,
-      divergences: nil
-    },
-    %{
-      name: "task",
-      description: "",
-      binding: nil,
-      category: :core,
-      dispatch: :analyze,
-      signatures: ["(task ...)"],
-      since: nil,
-      section: "Agent Control",
-      ptc_extension?: true,
-      examples: [],
-      notes: nil,
-      see_also: [],
-      clojure_var: nil,
-      divergences: nil
-    },
-    %{
-      name: "task-reset",
-      description: "",
-      binding: nil,
-      category: :core,
-      dispatch: :analyze,
-      signatures: ["(task-reset ...)"],
-      since: nil,
-      section: "Agent Control",
-      ptc_extension?: true,
-      examples: [],
-      notes: nil,
-      see_also: [],
-      clojure_var: nil,
       divergences: nil
     },
     %{

@@ -15,10 +15,8 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
        duplicate public refs, invalid visibility, invalid arity/signature
        metadata. Failures are returned as
        `{:error, %PtcRunner.Lisp.Prelude.ValidationError{}}`.
-    4. Builds `%Export{}` records for public definitions, normalizing
-       kebab-case PTC-Lisp metadata keywords (`:provider-ref`) at the host
-       boundary and inferring backing metadata only for literal
-       `(tool/call {:server "x" :tool "y" ...})` patterns (plan §3).
+    4. Builds `%Export{}` records for public definitions and records every
+       transitively referenced `tool/<name>` as a `tool:<name>` requirement.
     5. Captures a callable private prelude env by analyzing+evaluating the
        definition forms (ns directives stripped, `defn-` rewritten to `defn`)
        through the existing PTC-Lisp pipeline. The captured value is the
@@ -31,14 +29,12 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
        proven end-to-end during P0).
     6. Computes a sha256 source hash (plan §12).
 
-  Attach-time `requires` validation against a selected upstream runtime is a
-  SEPARATE later phase and is not performed here.
+  Attach-time `requires` validation against granted tools is a separate phase.
   """
 
   alias PtcRunner.Lisp.Analyze
   alias PtcRunner.Lisp.Env
   alias PtcRunner.Lisp.Eval
-  alias PtcRunner.Lisp.Formatter
   alias PtcRunner.Lisp.Parser
   alias PtcRunner.Lisp.Prelude
   alias PtcRunner.Lisp.Prelude.Export
@@ -91,7 +87,6 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
          exports: exports,
          private_env: private_env,
          source_hash: source_hash(source),
-         source_index: build_source_index(specs, exports, form_graph),
          form_graph: form_graph,
          metadata: %{namespaces: ns_meta}
        }}
@@ -105,7 +100,7 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
        ValidationError.new(
          :unrecognized_node,
          "prelude body contains an unrecognized syntax node `#{inspect(tag)}`; refusing to " <>
-           "compile because its tool/upstream requirements cannot be safely determined (fail-closed)"
+           "compile because its tool requirements cannot be safely determined (fail-closed)"
        )}
   end
 
@@ -780,7 +775,6 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
 
     with {:ok, visibility} <- visibility(Map.get(spec.metadata, "visibility", ns_default)),
          {:ok, explicit_requires} <- validate_requires(Map.get(spec.metadata, "requires")),
-         {:ok, explicit_provider} <- validate_provider_ref(Map.get(spec.metadata, "provider-ref")),
          {:ok, signature, type} <- export_contract(spec) do
       graph_entry =
         form_graph
@@ -820,7 +814,7 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
           |> Enum.sort()
       }
 
-      backing = backing(spec, explicit_requires, explicit_provider, transitive)
+      backing = backing(spec, explicit_requires, transitive)
 
       {:ok,
        %Export{
@@ -833,7 +827,6 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
          doc: spec.doc,
          visibility: visibility,
          effect: backing.effect,
-         provider_ref: backing.provider_ref,
          requires: backing.requires,
          tool_refs: transitive.tool_refs,
          kind: export_kind(spec),
@@ -925,60 +918,39 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
   defp ref(namespace, symbol), do: "#{namespace}/#{symbol}"
 
   # ============================================================
-  # Backing inference + explicit metadata (plan §3)
+  # Tool requirements + explicit metadata
   # ============================================================
 
-  # `requires` is the UNION of inferred and explicit backing ids (plan P3):
-  # explicit metadata can ADD requirements but never drop an inferred
-  # fail-closed one. `provider_ref` and `effect` keep their explicit-override
-  # semantics.
+  # `requires` is the union of inferred and explicit tool ids: explicit
+  # metadata can add requirements but never drop an inferred fail-closed one.
   #
   # Inferred ids are the export's TRANSITIVE backing — its own body plus the
   # bodies of the same-namespace private helpers it (transitively) calls, so an
   # export that reaches a capability THROUGH a helper still carries the
   # requirement WITHOUT inheriting a sibling export's unrelated requirements:
   #
-  #   * literal `(tool/call {:server "x" :tool "y" ...})` -> `upstream:x/y`, and
-  #   * each transitively-referenced typed tool `(tool/<name> ...)` ->
-  #     `tool:<name>`, EXCEPT the synthetic `"call"` of `(tool/call ...)` (the
-  #     literal case is already covered precisely by `upstream:`, and dynamic
-  #     `(tool/call ...)` dispatch must be declared explicitly).
-  @tool_call_name "call"
-
-  defp backing(
-         %Spec{metadata: metadata, body_form: body},
-         explicit_requires,
-         explicit_provider,
-         transitive
-       ) do
+  # Each transitively referenced `(tool/<name> ...)` becomes `tool:<name>`.
+  defp backing(%Spec{metadata: metadata}, explicit_requires, transitive) do
     explicit_effect = effect(Map.get(metadata, "effect"))
-
-    inferred = infer_backing(body)
-
-    provider_ref = explicit_provider || inferred.provider_ref
 
     inferred_tool_requires =
       transitive.tool_refs
-      |> Enum.reject(&(&1 == @tool_call_name))
       |> Enum.map(&("tool:" <> &1))
-
-    inferred_ids = transitive.requires ++ inferred_tool_requires
 
     # Union (explicit adds, never removes), deduped and sorted for determinism.
     requires =
-      (inferred_ids ++ (explicit_requires || []))
+      (transitive.requires ++ inferred_tool_requires ++ (explicit_requires || []))
       |> Enum.uniq()
       |> Enum.sort()
 
     effect =
       cond do
         explicit_effect != nil -> explicit_effect
-        provider_ref != nil -> :read
         requires != [] -> :read
         true -> :unknown
       end
 
-    %{provider_ref: provider_ref, requires: requires, effect: effect}
+    %{requires: requires, effect: effect}
   end
 
   # ============================================================
@@ -986,11 +958,9 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
   # ============================================================
 
   # `%{namespace => %{symbol => entry}}`, ONE construction pass over the
-  # scope-aware sibling call graph (`collect_refs`, direct upstream/tool
-  # literals) shared by every consumer that used to rebuild it independently:
-  # `build_export/3` (transitive requires/tool_refs), `source_dependencies/3`
-  # (the `depends-on` hint), and `reachable_private_symbols/1` (the D4
-  # reachable-private set). Stored on `%Prelude{}` as `form_graph` (plan §Phase
+  # scope-aware sibling call graph (`collect_refs`, direct tool
+  # literals) shared by export validation and bundle compilation. Stored on
+  # `%Prelude{}` as `form_graph` (plan §Phase
   # 1) so it is guaranteed consistent with write-time validation instead of
   # being an inline idiom recomputed ad hoc.
   defp build_form_graph(specs, dep_ctx) do
@@ -1023,17 +993,6 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
         {sym, refs}
       end)
 
-    direct_ids =
-      Map.new(ns_specs, fn %Spec{symbol: sym, body_form: body} ->
-        ids =
-          body
-          |> Enum.flat_map(&literal_tool_calls/1)
-          |> Enum.map(fn {server, tool} -> "upstream:#{server}/#{tool}" end)
-          |> Enum.uniq()
-
-        {sym, ids}
-      end)
-
     direct_tools =
       Map.new(ns_specs, fn %Spec{symbol: sym, body_form: body} ->
         {sym, body |> Enum.reduce([], &collect_tool_names_raw/2) |> Enum.uniq()}
@@ -1063,8 +1022,13 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
          doc: spec.doc,
          calls: Map.fetch!(calls, sym),
          requires: %{
-           direct: direct_ids |> Map.fetch!(sym) |> Enum.sort(),
-           transitive: sym |> reachable_ids(direct_ids, calls, []) |> Enum.uniq() |> Enum.sort()
+           direct: direct_tools |> Map.fetch!(sym) |> Enum.map(&("tool:" <> &1)) |> Enum.sort(),
+           transitive:
+             sym
+             |> reachable_ids(direct_tools, calls, [])
+             |> Enum.map(&("tool:" <> &1))
+             |> Enum.uniq()
+             |> Enum.sort()
          },
          tool_refs: %{
            direct: direct_tools |> Map.fetch!(sym) |> Enum.sort(),
@@ -1312,81 +1276,6 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
 
   defp map_binding_names({name_form, _source}), do: pattern_names(name_form)
 
-  # Look through the body forms for literal tool/calls with a string :server and
-  # string :tool. A single literal yields a backing provider_ref; multiple
-  # literals have no single provider but ALL their upstream ids are kept in
-  # `requires` so attach-time validation checks every one (fail-closed) instead
-  # of silently dropping them. Dynamic values yield :unknown.
-  defp infer_backing(body) do
-    case Enum.flat_map(body, &literal_tool_calls/1) do
-      [] ->
-        %{provider_ref: nil, requires: nil}
-
-      [{server, tool}] ->
-        id = "upstream:#{server}/#{tool}"
-        %{provider_ref: id, requires: [id]}
-
-      multiple ->
-        ids =
-          multiple
-          |> Enum.map(fn {server, tool} -> "upstream:#{server}/#{tool}" end)
-          |> Enum.uniq()
-          |> Enum.sort()
-
-        %{provider_ref: nil, requires: ids}
-    end
-  end
-
-  # Recursively find literal tool/call forms. Returns {server, tool} only when
-  # both are string literals.
-  defp literal_tool_calls({:list, [{:ns_symbol, :tool, name} | args]})
-       when name in ["call", :call] do
-    case args do
-      [{:map, pairs}] ->
-        with {:ok, server} <- literal_string(meta_get(pairs, "server")),
-             {:ok, tool} <- literal_string(meta_get(pairs, "tool")) do
-          [{server, tool}]
-        else
-          _ -> []
-        end
-
-      _ ->
-        []
-    end
-  end
-
-  # Non-executed forms (`(comment ...)`, `(quote ...)`) are dead/data, not calls.
-  defp literal_tool_calls({:list, [{:symbol, head} | _]})
-       when head in [:comment, "comment", :quote, "quote"],
-       do: []
-
-  defp literal_tool_calls({:list, items}) when is_list(items) do
-    Enum.flat_map(items, &literal_tool_calls/1)
-  end
-
-  defp literal_tool_calls({:vector, items}) when is_list(items) do
-    Enum.flat_map(items, &literal_tool_calls/1)
-  end
-
-  defp literal_tool_calls({:map, pairs}) when is_list(pairs) do
-    Enum.flat_map(pairs, fn {k, v} ->
-      literal_tool_calls(k) ++ literal_tool_calls(v)
-    end)
-  end
-
-  # `#(f a)` is an implicit application: the raw short-fn body is a flat element
-  # list, so reconstruct the call (`{:list, body}`) before matching — otherwise a
-  # `#(tool/call ...)` head is a bare ns_symbol and the upstream id is missed.
-  defp literal_tool_calls({:short_fn, body}) when is_list(body),
-    do: literal_tool_calls({:list, body})
-
-  defp literal_tool_calls({:set, items}) when is_list(items) do
-    Enum.flat_map(items, &literal_tool_calls/1)
-  end
-
-  defp literal_tool_calls(node), do: leaf_or_reject(node, [])
-
-  # ============================================================
   # Fail-closed raw-AST guard (issue #1095 hardening)
   # ============================================================
 
@@ -1424,21 +1313,6 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
       tag = if is_tuple(node) and tuple_size(node) >= 1, do: elem(node, 0), else: node
       throw({:unrecognized_prelude_node, tag})
     end
-  end
-
-  defp literal_string({:string, s}) when is_binary(s), do: {:ok, s}
-  defp literal_string(_), do: :error
-
-  # In a tool/call map the :server key is string-keyed but :tool may intern as
-  # an atom (it's in SourceAtoms @bounded_namespaces). Match both.
-  defp meta_get(pairs, "server"), do: keyword_value(pairs, "server")
-  defp meta_get(pairs, "tool"), do: keyword_value(pairs, "tool") || keyword_value(pairs, :tool)
-
-  defp keyword_value(pairs, key) do
-    Enum.find_value(pairs, fn
-      {{:keyword, ^key}, value} -> value
-      _ -> nil
-    end)
   end
 
   # ============================================================
@@ -1518,15 +1392,16 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
   defp validate_requires(nil), do: {:ok, nil}
 
   defp validate_requires(list) when is_list(list) do
-    if Enum.all?(list, &is_binary/1) do
+    if Enum.all?(list, &valid_tool_requirement?/1) do
       {:ok, list}
     else
-      bad = Enum.reject(list, &is_binary/1)
+      bad = Enum.reject(list, &valid_tool_requirement?/1)
 
       {:error,
        ValidationError.new(
          :invalid_requires,
-         "prelude :requires must be a list of strings; invalid entries: #{inspect(bad, limit: 5)}"
+         "prelude :requires must contain only non-empty tool:<name> strings; " <>
+           "invalid entries: #{inspect(bad, limit: 5)}"
        )}
     end
   end
@@ -1535,24 +1410,12 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
     {:error,
      ValidationError.new(
        :invalid_requires,
-       "prelude :requires must be a list of strings, got: #{inspect(other, limit: 5)}"
+       "prelude :requires must be a list of tool:<name> strings, got: #{inspect(other, limit: 5)}"
      )}
   end
 
-  # Explicit `:provider-ref` metadata must be a canonical string id. A non-string
-  # (e.g. a keyword `{:provider-ref :crm/search}`) normalizes to a tuple that
-  # would later break JSON serialization of the trace summary, so reject it at
-  # compile time (plan §10: bad metadata fails fast).
-  defp validate_provider_ref(nil), do: {:ok, nil}
-  defp validate_provider_ref(ref) when is_binary(ref), do: {:ok, ref}
-
-  defp validate_provider_ref(other) do
-    {:error,
-     ValidationError.new(
-       :invalid_metadata,
-       "prelude :provider-ref must be a string, got: #{inspect(other, limit: 3)}"
-     )}
-  end
+  defp valid_tool_requirement?("tool:" <> name), do: name != ""
+  defp valid_tool_requirement?(_other), do: false
 
   # ============================================================
   # Private env capture (fact #6)
@@ -1645,189 +1508,6 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
   end
 
   # ============================================================
-  # `source` discovery index (issue #1095)
-  # ============================================================
-
-  # A precomputed `%{full-ref => header <> "\n" <> rendered-source}` map for the
-  # `(source ns/name)` discovery form. Keyed by full ref (`"crm/get-user"`) for
-  # BOTH public exports and the private helpers transitively reachable from some
-  # public export (so `(source crm/normalize-id)` works when a public body names
-  # it, but unreferenced "dead" privates stay hidden — see plan D4). Rendered to
-  # strings at compile time: deterministic, bounded, and consistent with the
-  # no-raw-atoms discipline (the raw `%Spec{}` forms are discarded after compile).
-  defp build_source_index(specs, exports, form_graph) do
-    export_by_ref = Map.new(exports, &{&1.ref, &1})
-    reachable = reachable_private_symbols(form_graph)
-    dependencies_by_ref = source_dependencies(specs, reachable, form_graph)
-
-    specs
-    |> Enum.filter(fn %Spec{} = spec ->
-      not spec.private? or MapSet.member?(reachable, {spec.namespace, spec.symbol})
-    end)
-    |> Map.new(fn %Spec{} = spec ->
-      ref = ref(spec.namespace, spec.symbol)
-      header = source_header(ref, spec, Map.get(export_by_ref, ref))
-      dependencies = Map.get(dependencies_by_ref, ref, [])
-      {ref, header <> "\n" <> source_dependency_hint(dependencies) <> render_source_body(spec)}
-    end)
-  end
-
-  defp source_dependency_hint([]), do: ""
-
-  defp source_dependency_hint(dependencies) do
-    forms = Enum.map_join(dependencies, ", ", &"(source #{&1})")
-    ";; depends-on: #{forms}\n"
-  end
-
-  defp source_dependencies(specs, reachable_private, form_graph) do
-    public_symbols =
-      specs
-      |> Enum.reject(& &1.private?)
-      |> MapSet.new(fn %Spec{} = spec -> {spec.namespace, spec.symbol} end)
-
-    indexable_symbols = MapSet.union(public_symbols, reachable_private)
-
-    Map.new(specs, fn %Spec{} = spec ->
-      deps =
-        form_graph
-        |> get_in([spec.namespace, spec.symbol, :calls])
-        |> List.wrap()
-        |> Enum.reject(&(&1 == spec.symbol))
-        |> Enum.uniq()
-        |> Enum.filter(&MapSet.member?(indexable_symbols, {spec.namespace, &1}))
-        |> Enum.map(&ref(spec.namespace, &1))
-        |> Enum.sort()
-
-      {ref(spec.namespace, spec.symbol), deps}
-    end)
-  end
-
-  # `source` is a discovery convenience, so a Formatter gap must NEVER take down
-  # compilation of the whole capability prelude — it degrades that one export's
-  # `(source ...)` to a placeholder instead (fail-soft for cosmetics; the
-  # complement of the fail-closed authority guard). Note: an unrecognized node
-  # has already failed compilation in `build_exports`, so this only catches a
-  # printer that lacks a clause for an otherwise-recognized node.
-  defp render_source_body(%Spec{} = spec) do
-    Formatter.format(spec_to_source_form(spec))
-  rescue
-    _ -> ";; (source rendering unavailable for this export)"
-  end
-
-  # A single labeled effective-metadata provenance line ahead of the rendered
-  # form (plan D3b). The FORM stays verbatim author metadata (often none); this
-  # HEADER carries the RESOLVED visibility/effect/arity so visibility surfaces
-  # even in the common ns-inherited case where the defn carries no metadata. The
-  # `(effective)` label keeps it from masquerading as author-written source.
-  #
-  # Public ref → resolved `%Export{}`. Private ref → no `%Export{}`, so
-  # `visibility: private` + arity from the `%Spec{}`, effect omitted (effect
-  # resolution lives in the export pipeline; it is not computed for privates).
-  defp source_header(ref, %Spec{}, %Export{} = export) do
-    parts =
-      ["visibility: #{export.visibility}"] ++
-        effect_part(export.effect) ++
-        ["arity: #{arity_label(export.arity)}"]
-
-    ";; #{ref} — #{Enum.join(parts, ", ")} (effective)"
-  end
-
-  defp source_header(ref, %Spec{} = spec, nil) do
-    ";; #{ref} — visibility: private, arity: #{arity_label(spec.arity)} (effective)"
-  end
-
-  # `:unknown` effect carries no usable signal (mirrors the prompt inventory's
-  # `effect_hint` omission) — drop it rather than over/under-warn.
-  defp effect_part(:unknown), do: []
-  defp effect_part(effect), do: ["effect: #{effect}"]
-
-  defp arity_label(:variadic), do: "variadic"
-  defp arity_label(n) when is_integer(n), do: Integer.to_string(n)
-
-  # Reconstructs a Formatter-renderable defining form that PRESERVES what
-  # `spec_to_defn_form/1` deliberately drops for closure construction: the
-  # `defn-`/`defn` head (visibility-for-privates), the docstring, and the raw
-  # author metadata map (`metadata_form`, original key order intact — the
-  # normalized `metadata` map is lossy). Author *structure* is preserved (macros
-  # un-expanded); comments and original whitespace are NOT (the reader discards
-  # them) — see the fidelity disclaimer in the spec.
-
-  # A typed/documented (def ...) constant.
-  defp spec_to_source_form(
-         %Spec{params_form: nil, body_form: [value_ast], metadata_form: meta} = spec
-       )
-       when not is_nil(meta) do
-    doc_part = if is_binary(spec.doc), do: [{:string, spec.doc}], else: []
-
-    {:list, [{:symbol, :def}, {:symbol, spec.symbol}] ++ doc_part ++ [meta, value_ast]}
-  end
-
-  # A documented (def ...) constant: `(def name "doc" value)`.
-  defp spec_to_source_form(%Spec{params_form: nil, body_form: [value_ast], doc: doc} = spec)
-       when is_binary(doc) do
-    {:list, [{:symbol, :def}, {:symbol, spec.symbol}, {:string, doc}, value_ast]}
-  end
-
-  # A bare (def ...) constant: `(def name value)`.
-  defp spec_to_source_form(%Spec{params_form: nil, body_form: [value_ast]} = spec) do
-    {:list, [{:symbol, :def}, {:symbol, spec.symbol}, value_ast]}
-  end
-
-  # A (defn ...) / (defn- ...) function.
-  defp spec_to_source_form(%Spec{} = spec) do
-    head = if spec.private?, do: :"defn-", else: :defn
-    doc_part = if is_binary(spec.doc), do: [{:string, spec.doc}], else: []
-    meta_part = if spec.metadata_form, do: [spec.metadata_form], else: []
-
-    {:list,
-     [{:symbol, head}, {:symbol, spec.symbol}] ++
-       doc_part ++ meta_part ++ [spec.params_form | spec.body_form]}
-  end
-
-  # `MapSet` of `{namespace, symbol}` for private helpers transitively reachable
-  # from SOME public export (plan D4). Restricting to reachable-only keeps the
-  # property that every indexed private is named in some public chain — a private
-  # is discoverable only by reading a body that mentions it — instead of turning
-  # `(source ns/guessed)` into an existence oracle over all private names.
-  #
-  # Reuses the shared `form_graph`'s `calls` edges (built once by
-  # `build_form_graph/1`) but accumulates reachable SYMBOLS, which the graph
-  # itself does not. Scoped PER NAMESPACE and keyed by `{namespace, symbol}` so
-  # distinct namespaces can reuse a helper name without colliding.
-  defp reachable_private_symbols(form_graph) do
-    form_graph
-    |> Enum.flat_map(fn {ns, ns_graph} ->
-      calls = Map.new(ns_graph, fn {sym, entry} -> {sym, entry.calls} end)
-
-      private_syms =
-        ns_graph
-        |> Enum.filter(fn {_sym, entry} -> entry.visibility == :private end)
-        |> MapSet.new(fn {sym, _entry} -> sym end)
-
-      ns_graph
-      |> Enum.reject(fn {_sym, entry} -> entry.visibility == :private end)
-      |> Enum.flat_map(fn {sym, _entry} -> reachable_symbols(sym, calls, []) end)
-      |> Enum.filter(&MapSet.member?(private_syms, &1))
-      |> Enum.map(fn sym -> {ns, sym} end)
-    end)
-    |> MapSet.new()
-  end
-
-  # Same-namespace symbols transitively called from `sym` (EXCLUDING `sym`
-  # itself). `visited` guards mutual-recursion cycles, mirroring `reachable_ids`.
-  defp reachable_symbols(sym, calls, visited) do
-    if sym in visited do
-      []
-    else
-      visited = [sym | visited]
-      callees = Map.get(calls, sym, [])
-
-      Enum.reduce(callees, callees, fn callee, acc ->
-        acc ++ reachable_symbols(callee, calls, visited)
-      end)
-    end
-  end
-
   defp analyze(program, scope) do
     case Analyze.analyze(program, scope) do
       {:ok, core} ->

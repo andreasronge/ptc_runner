@@ -934,8 +934,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
         worker_max_heap: eval_context.worker_max_heap,
         parallel_budget: eval_context.parallel_budget,
         max_tool_call_result_bytes: eval_context.max_tool_call_result_bytes,
-        tools_meta: eval_context.tools_meta,
-        discovery_exec: eval_context.discovery_exec
+        tools_meta: eval_context.tools_meta
       )
 
     eval_ctx =
@@ -1072,7 +1071,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
     stack = Process.get(:__ptc_hof_stack, [])
 
     Process.put(:__ptc_hof_stack, [
-      %{tool_calls: [], prints: [], catalog_ops: [], prelude_call_counts: %{}, tool_cache: %{}}
+      %{tool_calls: [], prints: [], prelude_call_counts: %{}, tool_cache: %{}}
       | stack
     ])
   end
@@ -1122,7 +1121,6 @@ defmodule PtcRunner.Lisp.Eval.Apply do
         updated = %{
           tool_calls: ctx.tool_calls ++ top.tool_calls,
           prints: ctx.prints ++ top.prints,
-          catalog_ops: ctx.catalog_ops ++ top.catalog_ops,
           prelude_call_counts:
             Map.merge(top.prelude_call_counts, ctx.prelude_call_counts, fn _key, left, right ->
               left + right
@@ -1148,7 +1146,6 @@ defmodule PtcRunner.Lisp.Eval.Apply do
         eval_ctx
         |> Map.update!(:tool_calls, fn existing -> top.tool_calls ++ existing end)
         |> Map.update!(:prints, fn existing -> top.prints ++ existing end)
-        |> Map.update!(:catalog_ops, fn existing -> top.catalog_ops ++ existing end)
         |> Map.update!(:prelude_call_counts, fn existing ->
           Map.merge(existing, top.prelude_call_counts, fn _key, left, right -> left + right end)
         end)
@@ -1325,12 +1322,9 @@ defmodule PtcRunner.Lisp.Eval.Apply do
       caller_ctx
       | tool_calls: thrown_ctx.tool_calls,
         pmap_calls: thrown_ctx.pmap_calls,
-        catalog_ops: thrown_ctx.catalog_ops,
         prelude_call_counts: thrown_ctx.prelude_call_counts,
         tool_cache: thrown_ctx.tool_cache,
         prints: thrown_ctx.prints,
-        summaries: thrown_ctx.summaries,
-        journal: thrown_ctx.journal,
         iteration_count: thrown_ctx.iteration_count
     }
   end
@@ -1409,11 +1403,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
               # Propagate the ledger cap so tool calls inside a closure (e.g. the
               # paginated-read fold's `(map (fn [_] (tool/...)) ...)`) honor the
               # caller's cap instead of resetting to the struct default.
-              max_tool_call_result_bytes: caller_ctx.max_tool_call_result_bytes,
-              summaries: caller_ctx.summaries,
-              journal: caller_ctx.journal,
-              discovery_exec: caller_ctx.discovery_exec,
-              catalog_ops: caller_ctx.catalog_ops
+              max_tool_call_result_bytes: caller_ctx.max_tool_call_result_bytes
           }
           |> maybe_push_prelude_origin(meta, caller_ctx)
 

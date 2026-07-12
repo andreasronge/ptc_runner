@@ -2,7 +2,7 @@ defmodule PtcRunner.Lisp.Prelude.ToolRequiresTest do
   @moduledoc """
   Plan P3: the generalized `requires` resolver — `tool:<name>` capability
   requirements, union (not override) merge semantics, transitive `tool_refs`
-  promotion (excluding the synthetic `(tool/call ...)` `"call"`), and
+  promotion, and
   attach-time fail-closed validation against the granted `tools:` map.
   """
   use ExUnit.Case, async: true
@@ -65,24 +65,6 @@ defmodule PtcRunner.Lisp.Prelude.ToolRequiresTest do
       end
     end
 
-    test "a syntactically valid prelude using all reader forms compiles + renders source" do
-      prelude =
-        compile!(~S"""
-        (ns kit "All reader forms." {:visibility :prompt})
-        (defn formy
-          "Uses every reader form in one body."
-          [xs]
-          [(map #(inc %) xs) #"a+" 'flag #'inc #{1 2} *1])
-        """)
-
-      src = prelude.source_index["kit/formy"]
-      refute src =~ "rendering unavailable"
-      assert src =~ "#(inc %)"
-      assert src =~ ~S(#"a+")
-      assert src =~ "'flag"
-      assert src =~ "*1"
-    end
-
     test "a typed tool call inside #() is inferred (no fail-open through short-fn)" do
       [export] =
         compile!("""
@@ -94,7 +76,7 @@ defmodule PtcRunner.Lisp.Prelude.ToolRequiresTest do
       assert "get_thing" in export.tool_refs
     end
 
-    test "a literal (tool/call ...) inside #() carries the upstream: id (fail-closed)" do
+    test "a tool/call inside #() carries the generic tool requirement" do
       [export] =
         compile!("""
         (ns cap "Cap." {:visibility :prompt})
@@ -102,7 +84,7 @@ defmodule PtcRunner.Lisp.Prelude.ToolRequiresTest do
           (map #(tool/call {:server "svc" :tool "op" :args {:id %}}) ids))
         """).exports
 
-      assert "upstream:svc/op" in export.requires
+      assert "tool:call" in export.requires
     end
 
     test "a typed tool call inside a set literal #{} is inferred" do
@@ -134,16 +116,16 @@ defmodule PtcRunner.Lisp.Prelude.ToolRequiresTest do
       [export] =
         compile!("""
         (ns cap "Cap." {:visibility :prompt})
-        (defn f "doc" {:requires ["upstream:svc/extra"]} [x] (tool/foo {:x x}))
+        (defn f "doc" {:requires ["tool:extra"]} [x] (tool/foo {:x x}))
         """).exports
 
       # Old replacement semantics would have dropped the inferred tool:foo.
       assert "tool:foo" in export.requires
-      assert "upstream:svc/extra" in export.requires
+      assert "tool:extra" in export.requires
       assert export.requires == Enum.sort(export.requires)
     end
 
-    test "literal (tool/call ...) carries the precise upstream: id, never tool:call" do
+    test "tool/call is treated like every other named tool" do
       [export] =
         compile!("""
         (ns cap "Cap." {:visibility :prompt})
@@ -151,31 +133,26 @@ defmodule PtcRunner.Lisp.Prelude.ToolRequiresTest do
           (tool/call {:server "svc" :tool "op" :args {:id id}}))
         """).exports
 
-      assert export.requires == ["upstream:svc/op"]
-      refute "tool:call" in export.requires
+      assert export.requires == ["tool:call"]
     end
 
-    test "dynamic (tool/call ...) infers nothing; an explicit requirement is needed" do
+    test "dynamic tool/call arguments do not create ambient authority" do
       [implicit] =
         compile!("""
         (ns cap "Cap." {:visibility :prompt})
         (defn proxy "doc" [s t] (tool/call {:server s :tool t :args {}}))
         """).exports
 
-      # Dynamic dispatch is invisible to inference: no requires, and "call" is
-      # never promoted. Finite upstream grants therefore require explicit
-      # upstream metadata at attach/projection time.
-      assert implicit.requires == []
-      refute "tool:call" in implicit.requires
+      assert implicit.requires == ["tool:call"]
 
       [explicit] =
         compile!("""
         (ns cap "Cap." {:visibility :prompt})
-        (defn proxy "doc" {:requires ["upstream:svc/op"]} [s t]
+        (defn proxy "doc" {:requires ["tool:audit"]} [s t]
           (tool/call {:server s :tool t :args {}}))
         """).exports
 
-      assert explicit.requires == ["upstream:svc/op"]
+      assert explicit.requires == ["tool:audit", "tool:call"]
     end
   end
 
@@ -201,17 +178,15 @@ defmodule PtcRunner.Lisp.Prelude.ToolRequiresTest do
       assert :ok = Attach.validate_requires(compile!(@cap), ctx(tools: tools))
     end
 
-    test "fails closed for an unrecognized requirement shape" do
-      prelude =
-        compile!("""
-        (ns cap "Cap." {:visibility :prompt})
-        (defn f "doc" {:requires ["weird:thing"]} [] (tool/foo {}))
-        """)
+    test "fails compilation for an unrecognized requirement shape" do
+      assert {:error, err} =
+               Compiler.compile("""
+               (ns cap "Cap." {:visibility :prompt})
+               (defn f "doc" {:requires ["weird:thing"]} [] (tool/foo {}))
+               """)
 
-      ctx = ctx(tools: %{"foo" => fn _ -> nil end})
-      assert {:error, err} = Attach.validate_requires(prelude, ctx)
-      assert err.reason == :prelude_attach_failed
-      assert err.message =~ "unrecognized backing requirement"
+      assert err.reason == :invalid_requires
+      assert err.message =~ "tool:<name>"
     end
 
     test "a dynamic-dispatch export attaches only once the explicit requirement is satisfied" do
@@ -223,8 +198,12 @@ defmodule PtcRunner.Lisp.Prelude.ToolRequiresTest do
 
       # Without the grant -> fail closed.
       assert {:error, _} = Attach.validate_requires(explicit, ctx(tools: %{}))
-      # With the grant -> ok.
-      assert :ok = Attach.validate_requires(explicit, ctx(tools: %{"do_it" => fn _ -> nil end}))
+      # Both the inferred call tool and the explicit tool must be granted.
+      assert :ok =
+               Attach.validate_requires(
+                 explicit,
+                 ctx(tools: %{"do_it" => fn _ -> nil end, "call" => fn _ -> nil end})
+               )
     end
   end
 
@@ -534,23 +513,6 @@ defmodule PtcRunner.Lisp.Prelude.ToolRequiresTest do
                  ~S|(def wrapper (let [f cap/fetch] (fn [id] (f id)))) (wrapper "x")|,
                  prelude: compile!(@cap),
                  tools: tools
-               )
-
-      assert step.fail.reason == :private_tool_unauthorized
-      assert step.fail.message =~ "private_fetch"
-    end
-
-    test "task journaled prelude closures do not retain private tool authority" do
-      tools = %{
-        "private_fetch" => {fn _args -> "secret" end, visibility: :private}
-      }
-
-      assert {:error, %Step{} = step} =
-               Lisp.run(
-                 ~S|(let [f (task "stored-export" cap/fetch)] (f "x"))|,
-                 prelude: compile!(@cap),
-                 tools: tools,
-                 journal: %{}
                )
 
       assert step.fail.reason == :private_tool_unauthorized

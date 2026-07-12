@@ -128,31 +128,7 @@ defmodule PtcRunner.Lisp.CoreToSourceTest do
     end
   end
 
-  describe "format/1 task operations" do
-    test "task with string id" do
-      ast = {:task, "my-task", {:call, {:var, :+}, [1, 2]}}
-      assert CoreToSource.format(ast) == ~S[(task "my-task" (+ 1 2))]
-    end
-
-    test "task-dynamic" do
-      ast = {:task_dynamic, {:var, :id}, {:var, :body}}
-      assert CoreToSource.format(ast) == "(task-dynamic id body)"
-    end
-
-    test "step-done" do
-      ast = {:step_done, {:string, "step1"}, {:string, "done"}}
-      assert CoreToSource.format(ast) == ~S[(step-done "step1" "done")]
-    end
-
-    test "task-reset" do
-      ast = {:task_reset, {:string, "step1"}}
-      assert CoreToSource.format(ast) == ~S[(task-reset "step1")]
-    end
-
-    test "budget-remaining" do
-      assert CoreToSource.format({:budget_remaining}) == "(budget-remaining)"
-    end
-
+  describe "format/1 runtime state" do
     test "turn-history" do
       assert CoreToSource.format({:turn_history, 3}) == "(turn-history 3)"
     end

@@ -1203,118 +1203,6 @@ PTC-Lisp enforces an iteration limit on `loop`/`recur` jumps. If a `loop` or tai
 
 Multiple `:when` clauses act as AND (all must pass). `:let` supports destructuring.
 
-### 5.18 `task` — Journaled Task Execution
-
-> **Advanced.** Most agents use `plan:` labels for progress visibility and let the application own idempotency. These forms are for explicit crash-safe caching when the application needs resumability across re-invocations. Requires `journaling: true`.
-
-`task` executes an expression with caching and idempotency semantics. When a journal is available, tasks are memoized by ID, enabling safe retry loops in agentic execution.
-
-**Syntax:**
-
-```clojure
-(task "unique-id" expr)
-```
-
-**Semantics:**
-
-- **With journal:** Expression result is cached by ID on first execution. Subsequent calls with the same ID return the cached result without re-executing.
-- **Without journal:** Expression executes normally with no caching. A debug-level log message is emitted to note that caching and idempotency are inactive.
-- **Failure handling:** If `expr` raises an error or calls `(fail)`, the result is not cached and the error propagates.
-
-**Examples:**
-
-```clojure
-;; Cache expensive operation
-(task "fetch-users" (tool/get-users {:limit 1000}))
-; First call: executes tool, caches result
-; Second call: returns cached result
-
-;; Use with conditional execution
-(let [users (task "fetch-users" (tool/get-users {}))]
-  (count users))
-
-;; Multiple tasks in sequence
-(do
-  (def step1 (task "step1" (tool/process {:data data/input})))
-  (def step2 (task "step2" (tool/analyze step1)))
-  step2)
-```
-
-**Use Cases:**
-
-- **Safe retries:** Cache intermediate results during multi-turn agentic loops, ensuring tool calls aren't repeated
-- **Deterministic replay:** Re-run a program with the same journal to get identical results
-- **Resource optimization:** Avoid redundant API calls or expensive computations
-
-**Important Notes:**
-
-- Task IDs are typically **string literals** for predictable caching; expressions that evaluate to strings are also accepted (and coerced via `to_string`)
-- IDs should be **semantically meaningful** to enable consistent caching across retries (e.g., `"fetch-users"` rather than `"step1"`)
-- The journal is provided at execution time; running without a journal disables caching but still executes the expression
-- Task results must be serializable (maps, lists, primitives, etc.)
-
----
-
-### 5.19 `step-done` — Semantic Progress Reporting
-
-`step-done` records a summary for a plan step, signaling completion with a human-readable description. Used with the `plan` option on SubAgent to render progress checklists.
-
-**Syntax:**
-
-```clojure
-(step-done "step-id" "summary of what was accomplished")
-```
-
-**Semantics:**
-
-- Stores the summary string in the step's `summaries` map, keyed by ID
-- Returns the summary string
-- Summaries accumulate across turns within a SubAgent run
-- If called multiple times with the same ID, the last summary wins
-- **Deferred visibility:** summaries appear in the Progress checklist on the *next* turn, not the current one. If the current turn errors, its summaries are discarded.
-- **Must be called at top level** — summaries inside `pmap`, `pcalls`, or `map` closures are not propagated (closures run in isolated contexts)
-
-**Examples:**
-
-```clojure
-;; Report completion of a plan step
-(do
-  (def users (task "gather" (tool/get-users {})))
-  (step-done "gather" (str "Found " (count users) " users")))
-
-;; Multiple steps
-(do
-  (step-done "1" "Fetched 42 records from API")
-  (step-done "2" "Filtered to 12 matching criteria"))
-```
-
----
-
-### 5.20 `task-reset` — Clear Journaled Task Cache
-
-`task-reset` removes a cached task result from the journal, allowing it to be re-executed on the next call to `(task id expr)`.
-
-**Syntax:**
-
-```clojure
-(task-reset "task-id")
-```
-
-**Semantics:**
-
-- Deletes the given key from the journal map
-- Returns `nil`
-- No-op if the key doesn't exist in the journal
-- Only affects the journal (task cache), not summaries
-
-**Examples:**
-
-```clojure
-;; Re-fetch stale data
-(task-reset "fetch-users")
-(def users (task "fetch-users" (tool/get-users {:limit 1000})))
-```
-
 ### 5.21 `doseq` — Side-effecting Iteration
 
 `doseq` iterates over collections for side effects (like `for`, but returns `nil` instead of collecting results). Desugars to `loop`/`recur` at analysis time.
@@ -3269,60 +3157,6 @@ Access results from previous turns using the turn history symbols:
 
 **For reliable multi-turn patterns**, use `(def name value)` to store values in the User Namespace. Turn history (`*1`, `*2`, `*3`) is primarily a debugging aid, not a storage mechanism.
 
-### 9.5 Budget Introspection — `budget/remaining`
-
-Query the remaining budget using the `budget/` namespace. This enables programs to make intelligent decisions based on available resources.
-
-```clojure
-(budget/remaining)            ; returns budget map
-```
-
-**Return value:**
-
-The `budget/remaining` primitive returns a map with hyphenated keys (Clojure-style):
-
-```clojure
-{:turns 15                    ; total turns remaining
- :work-turns 10               ; work turns remaining
- :retry-turns 5               ; retry turns remaining
- :depth {:current 1 :max 3}   ; nesting depth info
- :tokens {:input 5000         ; input tokens used
-          :output 2000        ; output tokens used
-          :total 7000         ; total tokens used
-          :cache-creation 1000
-          :cache-read 2000}
- :llm-requests 3}             ; LLM API calls made
-```
-
-**Note:** The `:turns`, `:work-turns`, and `:retry-turns` fields report **remaining** budget, whereas the `:tokens` fields report **accumulated usage** so far (not remaining).
-
-**Accessing hyphenated keys:**
-
-```clojure
-(:work-turns (budget/remaining))              ; => 10
-(:retry-turns (budget/remaining))             ; => 5
-(:cache-read (:tokens (budget/remaining)))    ; => 2000
-```
-
-**Use cases:**
-
-- Adjust processing strategy based on remaining turns
-- Batch operations when budget is low
-- Log resource usage for monitoring
-
-```clojure
-;; Choose strategy based on remaining budget
-(let [b (budget/remaining)
-      items data/items]
-  (if (< (:turns b) (count items))
-    ;; Low budget: batch process
-    (tool/batch-process {:items items})
-    ;; High budget: process individually
-    (mapv (fn [i] (tool/process {:item i})) items)))
-```
-
-**Note:** Returns an empty map `{}` when running outside a SubAgent context (e.g., standalone `Lisp.run/2` without budget option).
-
 ### 9.6 Tool Invocation — `tool/tool-name`
 
 Invoke registered tools using the `tool/` namespace:
@@ -4418,7 +4252,7 @@ When the interpreter encounters a plain symbol, it resolves in this order:
 2. **`def` bindings** — values stored via `def`/`defn` (the User Namespace; persists across turns and shadows builtins)
 3. **Built-in functions** — `filter`, `map`, `count`, etc.
 
-Namespaced accesses (`data/y`, `tool/z`, `budget/remaining`) are *not* part of this plain-symbol chain — they are dispatched by a separate AST path before plain-symbol lookup is reached.
+Namespaced accesses (`data/y`, `tool/z`) are *not* part of this plain-symbol chain — they are dispatched by a separate AST path before plain-symbol lookup is reached.
 
 ### Namespace Symbols
 
@@ -4426,7 +4260,6 @@ Namespaced accesses (`data/y`, `tool/z`, `budget/remaining`) are *not* part of t
 |---------|-------------|
 | `data/bar` | `(get env.data :bar)` |
 | `tool/baz` | Tool invocation |
-| `budget/remaining` | Remaining tool call budget |
 | `tool/servers`, `apropos`, `dir`, `doc`, `meta`, `ns-publics`, `all-ns`, `ns-name` | REPL discovery |
 | `foo` | Local binding, `def` binding, or built-in |
 

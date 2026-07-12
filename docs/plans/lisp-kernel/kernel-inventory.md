@@ -28,17 +28,17 @@ name its re-home/delete condition. `unknown` is not a durable classification.
 
 | Area | Class | Retained behavior / destination |
 | --- | --- | --- |
-| `lib/ptc_runner/lisp.ex` | new path | Kernel uses the neutral `Lisp.Result`, `Lisp.Context`, `Lisp.Tool`, signature, metadata, and upstream-access boundaries; xref proves the retained Kernel/compiler graph has no legacy product dependency. Old journal/upstream options remain only until their callers are deleted. |
+| `lib/ptc_runner/lisp.ex` | migrated | Kernel uses neutral `Lisp.Result`, `Lisp.Context`, `Lisp.Tool`, signature, and metadata boundaries; journal, agent-budget, discovery-executor, catalog-op, and upstream-specific options are removed. |
 | `lib/ptc_runner/lisp/parser*`, `fast_parser*`, AST/source modules | foundation | Parsing and source representation. Add span preservation as an early language workstream. |
-| `lib/ptc_runner/lisp/analyze*` | migrate | Retain static safety and Clojure semantics; remove agent budget/history/upstream surfaces and add environment/profile inputs. |
+| `lib/ptc_runner/lisp/analyze*` | migrated | Retains static safety and Clojure semantics; agent budget/journal and MCP/catalog discovery surfaces are removed. |
 | Parser/analyzer `program` support | new path | Capture bounded forms without workflow evaluation/resolution; preserve origin/spans; no general collection quote/macros. |
-| `lib/ptc_runner/lisp/eval*`, `runtime*`, `env*` | migrate | Retain closures/functions/interop/definitions behind a neutral evaluation context; remove agent, upstream, journal, and public-Step coupling. |
+| `lib/ptc_runner/lisp/eval*`, `runtime*`, `env*` | migrated | Retains closures/functions/interop/definitions behind a neutral evaluation context; agent, upstream, journal, discovery-op, and catalog-op state is removed. |
 | `Lisp.Eval.ParallelRunner`, `ParallelBudget`, `pmap`/`pcalls` workers | migrate | Retain bounded parallel data/capability execution; integrate provider-task limits and reject concurrent `kernel-eval` with recoverable `:busy`. |
 | `lib/ptc_runner/lisp/retained_size.ex` | foundation | Evaluation-memory and capability-result size enforcement. |
 | `lib/ptc_runner/lisp/format*`, `formatter*`, keyword representation | foundation | Deterministic Lisp formatting and keyword boundary. |
 | `lib/ptc_runner/lisp/registry*`, language/spec validation | foundation | Language reference and conformance. Remove agent-specific registrations only. |
-| `lib/ptc_runner/lisp/discovery.ex` | migrate | Replace upstream/catalog semantics with environment-local capability metadata. |
-| SubAgent budget/plan/journal special surfaces in Lisp | delete | Replace with generic runtime usage, workflow annotations, or optional capabilities. |
+| `lib/ptc_runner/lisp/discovery.ex` | deleted | Replaced by environment-local `cap/list` and `cap/describe` capabilities. |
+| SubAgent budget/plan/journal special surfaces in Lisp | deleted | Replaced by generic runtime usage and workflow annotations. |
 | `*1`, `*2`, `*3` support | migrate | Retain only for direct REPL history; agent history becomes ordinary workflow data. |
 | `return` / `fail` | foundation | Workflow-neutral terminal control signals. |
 | `lib/ptc_runner/sandbox.ex` | new path | Process isolation, timeout, heap, and cleanup accept a neutral context term and use Lisp-owned process propagation; public Context/MCP type coupling is removed. |
@@ -47,10 +47,10 @@ name its re-home/delete condition. `unknown` is not a durable classification.
 
 | Area | Class | Retained behavior / destination |
 | --- | --- | --- |
-| `lib/ptc_runner/lisp/prelude/compiler.ex` and compiler helpers | migrate | Retain protected namespaces, exports, `requires`, and compilation after removing SubAgent signature and upstream-specific inference. |
+| `lib/ptc_runner/lisp/prelude/compiler.ex` and compiler helpers | migrated | Retains protected namespaces, exports, compilation, and strict generic `tool:<name>` requirements; upstream inference and provider refs are removed. |
 | `lib/ptc_runner/lisp/prelude/bundle.ex` | migrate | Become explicit bounded component-ID DAG `compile_bundle/1` with frozen provenance. |
 | Protected namespace/export/prompt inventory primitives | foundation | Split workflow/mission validation and mission-only model inventory. |
-| `priv/preludes/agent/*.lisp` | migrate | Slice 7 replacements now ship as `agent.native`, `agent.core`, `agent.feedback`, `agent.retry`, `workflow.event`, and `result`; delete the legacy files with the old Kernel path. |
+| `priv/preludes/agent/*.lisp` | deleted | Replaced by Kernel library components `agent.native`, `agent.core`, `agent.feedback`, `agent.retry`, `workflow.event`, and `result`. |
 | `PtcRunner.PreludeRolePolicy` and grants | deleted | Roles remain an optional future environment-builder adapter. |
 | `PtcRunner.PreludeRuntime` | deleted | Kernel accepts frozen bundles/environments. |
 | `PtcRunner.PreludeStore*` | deleted | V1 has no mutable/versioned runtime store. |
@@ -189,7 +189,7 @@ This area is governed by [`tracelog-contract.md`](tracelog-contract.md).
 | `parallel_workers` | delete | Delete with example. |
 | `ptc.kernel_feedback_ab` | deleted | Removed with the A/B harness. |
 | `ptc.kernel_eval` | deleted | Removed at public cutover; optional comparisons must use the shared manifest runner rather than a second Kernel product. |
-| `ptc.dna` | migrate | Keep through duplication audit; remove with `ex_dna` afterward if unused. |
+| `ptc.dna` | deleted | The final duplication audit ran; the temporary task and `ex_dna` dependency were removed. |
 | release/smoke tasks | migrate | Retain only checks for shipped language/Kernel/viewer artifacts. |
 
 ## Top-level directories and assets
@@ -229,7 +229,7 @@ This area is governed by [`tracelog-contract.md`](tracelog-contract.md).
 | `telemetry` | migrate | Retain only if canonical event/host instrumentation uses it. |
 | `ptc_viewer` path dependency | foundation | Retain dev/test integration. |
 | `kino` | deleted | Removed with Kino/Livebooks. |
-| `ex_dna` | experiment | Keep through final duplication audit, then remove if no active task. |
+| `ex_dna` | deleted | Removed after the final duplication audit. |
 | `recon` | delete unless proven | Retain only for an active lifecycle/soak check. |
 | `benchee` | migrate | Retain only if deterministic benchmark task uses it. |
 | MCP/upstream-only dependencies | delete | Remove with last transport consumer. |

@@ -43,7 +43,6 @@ defmodule PtcRunner.Lisp do
     SymbolCounter
   }
 
-  alias PtcRunner.Kernel.Program
   alias PtcRunner.Lisp.Eval.Context, as: EvalContext
   alias PtcRunner.Lisp.Eval.Helpers
   alias PtcRunner.Lisp.Eval.ParallelBudget
@@ -148,7 +147,6 @@ defmodule PtcRunner.Lisp do
     - `:max_program_bytes` - Max source code size in bytes (default: 1_000_000)
     - `:max_print_length` - Max characters per `println` call (default: 2000)
     - `:filter_context` - Filter context to only include accessed data keys (default: true)
-    - `:budget` - Budget info map for `(budget/remaining)` introspection (default: nil)
     - `:prelude` - A compiled `%PtcRunner.Lisp.Prelude{}` artifact, a prelude
       SOURCE string, or a list of source-bearing selection maps accepted by
       `PtcRunner.Lisp.Prelude.Bundle.compile/1` to attach before user code
@@ -342,10 +340,8 @@ defmodule PtcRunner.Lisp do
        step
        | return: public_result_value(step.return),
          fail: public_result_value(step.fail),
-         journal: public_result_value(step.journal),
          tool_calls: public_result_value(step.tool_calls),
          pmap_calls: public_result_value(step.pmap_calls),
-         catalog_ops: public_result_value(step.catalog_ops),
          child_steps: public_result_value(step.child_steps),
          tool_cache: public_result_value(step.tool_cache)
      }}
@@ -431,7 +427,6 @@ defmodule PtcRunner.Lisp do
   defp do_run(source, opts) do
     memory = Keyword.get(opts, :memory, %{})
     max_program_bytes = Keyword.get(opts, :max_program_bytes, @default_max_program_bytes)
-    journal = Keyword.get(opts, :journal)
     prelude_opt = Keyword.get(opts, :prelude)
     tools = Keyword.get(opts, :tools, %{})
 
@@ -442,16 +437,15 @@ defmodule PtcRunner.Lisp do
          :program_too_large,
          "program size #{byte_size(source)} bytes exceeds limit of #{max_program_bytes}",
          memory,
-         %{},
-         journal: journal
+         %{}
        )}
     else
-      attach_and_run(source, opts, prelude_opt, tools, memory, journal)
+      attach_and_run(source, opts, prelude_opt, tools, memory)
     end
   end
 
-  defp attach_and_run(source, opts, prelude_opt, tools, memory, journal) do
-    case attach_prelude(prelude_opt, tools, memory, journal) do
+  defp attach_and_run(source, opts, prelude_opt, tools, memory) do
+    case attach_prelude(prelude_opt, tools, memory) do
       {:ok, prelude} ->
         source
         |> do_run_inner(Map.put(run_params(opts), :prelude, prelude))
@@ -499,11 +493,9 @@ defmodule PtcRunner.Lisp do
       turn_history: Keyword.get(opts, :turn_history, []),
       max_print_length: Keyword.get(opts, :max_print_length),
       filter_context: Keyword.get(opts, :filter_context, true),
-      budget: Keyword.get(opts, :budget),
       pmap_timeout: Keyword.get(opts, :pmap_timeout),
       pmap_max_concurrency: Keyword.get(opts, :pmap_max_concurrency),
       trace_context: Keyword.get(opts, :trace_context),
-      journal: Keyword.get(opts, :journal),
       tool_cache: Keyword.get(opts, :tool_cache, %{}),
       max_tool_calls: Keyword.get(opts, :max_tool_calls),
       max_tool_call_result_bytes: Keyword.get(opts, :max_tool_call_result_bytes),
@@ -513,16 +505,15 @@ defmodule PtcRunner.Lisp do
       transitive_namespace_requirers: Keyword.get(opts, :transitive_namespace_requirers, %{}),
       prelude_export_mask: Keyword.get(opts, :prelude_export_mask),
       prelude_filtered_exports: Keyword.get(opts, :prelude_filtered_exports, []),
-      discovery_exec: Keyword.get(opts, :discovery_exec),
       link: Keyword.get(opts, :link, false)
     }
   end
 
   # Resolve the `:prelude` option (compiled artifact or source) and run
   # attach-time requires validation against the granted tools map.
-  defp attach_prelude(nil, _tools, _memory, _journal), do: {:ok, nil}
+  defp attach_prelude(nil, _tools, _memory), do: {:ok, nil}
 
-  defp attach_prelude(prelude_opt, tools, memory, journal) do
+  defp attach_prelude(prelude_opt, tools, memory) do
     context = PreludeAttachContext.new(tools: tools)
 
     case PreludeAttach.attach(prelude_opt, context) do
@@ -530,14 +521,11 @@ defmodule PtcRunner.Lisp do
         {:ok, prelude}
 
       {:error, %PreludeValidationError{} = err} ->
-        {:error,
-         Step.error(err.reason, "prelude attach failed: #{err.message}", memory, %{},
-           journal: journal
-         )}
+        {:error, Step.error(err.reason, "prelude attach failed: #{err.message}", memory, %{})}
     end
   end
 
-  defp do_run_inner(source, %{raw_tools: raw_tools, memory: memory, journal: journal} = params) do
+  defp do_run_inner(source, %{raw_tools: raw_tools, memory: memory} = params) do
     signature_str = params.signature_str
 
     # Normalize tools to Tool structs
@@ -566,16 +554,13 @@ defmodule PtcRunner.Lisp do
     else
       {:error, {:invalid_tool, tool_name, reason}} ->
         {:error,
-         Step.error(:invalid_tool, "Tool '#{tool_name}': #{inspect(reason)}", memory, %{},
-           journal: journal
-         )}
+         Step.error(:invalid_tool, "Tool '#{tool_name}': #{inspect(reason)}", memory, %{})}
 
       {:error, {:invalid_signature, msg}} ->
-        {:error,
-         Step.error(:parse_error, "Invalid signature: #{msg}", memory, %{}, journal: journal)}
+        {:error, Step.error(:parse_error, "Invalid signature: #{msg}", memory, %{})}
 
       {:error, {:invalid_config, msg}} ->
-        {:error, Step.error(:invalid_config, msg, memory, %{}, journal: journal)}
+        {:error, Step.error(:invalid_config, msg, memory, %{})}
     end
   end
 
@@ -677,8 +662,7 @@ defmodule PtcRunner.Lisp do
       memory: memory,
       normalized_tools: normalized_tools,
       max_symbols: max_symbols,
-      compile_timeout: compile_timeout,
-      journal: journal
+      compile_timeout: compile_timeout
     } = opts
 
     prelude = Map.get(opts, :prelude)
@@ -687,8 +671,8 @@ defmodule PtcRunner.Lisp do
     # The compile sandbox closure must capture ONLY what parse/analyze need:
     # tool NAMES and memory KEYS, never the tool closures or memory values
     # (whose data can be megabytes of granted environment). Error Steps built
-    # inside carry placeholder memory/journal, re-hydrated in
-    # `handle_compile_error/3`. `run_bounded/2` bills everything the closure
+    # inside carry placeholder memory, re-hydrated in
+    # `handle_compile_error/2`. `run_bounded/2` bills everything the closure
     # references against `max_heap` at spawn — by design (the closure is the
     # workload), so the grant must not ride along.
     tool_names = Map.keys(normalized_tools)
@@ -698,7 +682,6 @@ defmodule PtcRunner.Lisp do
       |> Enum.reject(fn {_name, tool} -> Tool.private?(tool) end)
       |> Enum.map(fn {name, _tool} -> name end)
 
-    cached_task_ids = cached_task_ids(journal)
     memory_keys = Map.keys(memory)
 
     compile_fn = fn ->
@@ -706,14 +689,7 @@ defmodule PtcRunner.Lisp do
            :ok <- check_symbol_limit(raw_ast, max_symbols),
            {:ok, core_ast} <- Analyze.analyze(raw_ast, prelude, prelude_filtered_exports),
            :ok <- check_undefined_vars(core_ast, memory_keys),
-           :ok <-
-             check_undefined_tools(
-               core_ast,
-               public_tool_names,
-               tool_names,
-               prelude,
-               cached_task_ids
-             ) do
+           :ok <- check_undefined_tools(core_ast, public_tool_names, tool_names, prelude) do
         {:ok, core_ast}
       end
     end
@@ -728,7 +704,7 @@ defmodule PtcRunner.Lisp do
         execute_eval(core_ast, apply_run_deadline(opts))
 
       {:ok, {:error, _} = compile_error} ->
-        handle_compile_error(compile_error, memory, journal)
+        handle_compile_error(compile_error, memory)
 
       {:error, {:timeout, ms}} ->
         {:error,
@@ -736,8 +712,7 @@ defmodule PtcRunner.Lisp do
            :compile_timeout,
            "compilation exceeded #{ms}ms limit",
            memory,
-           %{},
-           journal: journal
+           %{}
          )}
 
       {:error, {:memory_exceeded, bytes}} ->
@@ -746,13 +721,11 @@ defmodule PtcRunner.Lisp do
            :compile_memory_exceeded,
            "compilation exceeded #{bytes} byte heap limit",
            memory,
-           %{},
-           journal: journal
+           %{}
          )}
 
       {:error, {:execution_error, msg}} ->
-        {:error,
-         Step.error(:compile_error, "compilation failed: #{msg}", memory, %{}, journal: journal)}
+        {:error, Step.error(:compile_error, "compilation failed: #{msg}", memory, %{})}
     end
   end
 
@@ -763,25 +736,24 @@ defmodule PtcRunner.Lisp do
     %{opts | timeout: min(timeout, remaining_ms)}
   end
 
-  defp handle_compile_error({:error, {:parse_error, msg}}, memory, journal) do
-    {:error, Step.error(:parse_error, msg, memory, %{}, journal: journal)}
+  defp handle_compile_error({:error, {:parse_error, msg}}, memory) do
+    {:error, Step.error(:parse_error, msg, memory, %{})}
   end
 
-  # Compile-sandbox Steps are built with placeholder memory/journal so the
-  # compile closure doesn't capture the granted environment — restore the
-  # real values here.
-  defp handle_compile_error({:error, %Step{} = step}, memory, journal) do
-    {:error, %{step | memory: memory, journal: journal}}
+  # Compile-sandbox Steps are built with placeholder memory so the compile
+  # closure doesn't capture the granted environment — restore it here.
+  defp handle_compile_error({:error, %Step{} = step}, memory) do
+    {:error, %{step | memory: memory}}
   end
 
-  defp handle_compile_error({:error, {reason_atom, _, _} = reason}, memory, journal)
+  defp handle_compile_error({:error, {reason_atom, _, _} = reason}, memory)
        when is_atom(reason_atom) do
-    {:error, Step.error(reason_atom, format_error(reason), memory, %{}, journal: journal)}
+    {:error, Step.error(reason_atom, format_error(reason), memory, %{})}
   end
 
-  defp handle_compile_error({:error, {reason_atom, _} = reason}, memory, journal)
+  defp handle_compile_error({:error, {reason_atom, _} = reason}, memory)
        when is_atom(reason_atom) do
-    {:error, Step.error(reason_atom, format_error(reason), memory, %{}, journal: journal)}
+    {:error, Step.error(reason_atom, format_error(reason), memory, %{})}
   end
 
   defp execute_eval(core_ast, opts) do
@@ -798,11 +770,9 @@ defmodule PtcRunner.Lisp do
       turn_history: turn_history,
       max_print_length: max_print_length,
       filter_context: filter_context,
-      budget: budget,
       pmap_timeout: pmap_timeout,
       pmap_max_concurrency: pmap_max_concurrency,
       trace_context: trace_context,
-      journal: journal,
       tool_cache: tool_cache,
       tools_meta: tools_meta,
       max_tool_calls: max_tool_calls,
@@ -811,8 +781,7 @@ defmodule PtcRunner.Lisp do
       strict_transitive_calls: strict_transitive_calls,
       direct_namespaces: direct_namespaces,
       transitive_namespace_requirers: transitive_namespace_requirers,
-      prelude_export_mask: prelude_export_mask,
-      discovery_exec: discovery_exec
+      prelude_export_mask: prelude_export_mask
     } = opts
 
     prelude = Map.get(opts, :prelude)
@@ -833,14 +802,12 @@ defmodule PtcRunner.Lisp do
     eval_opts =
       [
         max_print_length: max_print_length,
-        budget: budget,
         max_heap: max_heap,
         worker_max_heap: worker_max_heap,
         parallel_budget: parallel_budget,
         pmap_timeout: pmap_timeout,
         pmap_max_concurrency: pmap_max_concurrency,
         trace_context: trace_context,
-        journal: journal,
         tool_cache: tool_cache,
         tools_meta: tools_meta,
         max_tool_calls: max_tool_calls,
@@ -850,7 +817,6 @@ defmodule PtcRunner.Lisp do
         direct_namespaces: direct_namespaces,
         transitive_namespace_requirers: transitive_namespace_requirers,
         prelude_export_mask: prelude_export_mask,
-        discovery_exec: discovery_exec,
         prelude: prelude
       ]
       |> Enum.reject(fn {_k, v} -> is_nil(v) end)
@@ -955,39 +921,26 @@ defmodule PtcRunner.Lisp do
     end
   end
 
-  defp handle_execute_result({:error, {:timeout, ms}}, %{memory: memory, journal: journal}) do
-    {:error,
-     Step.error(:timeout, "execution exceeded #{ms}ms limit", memory, %{}, journal: journal)}
+  defp handle_execute_result({:error, {:timeout, ms}}, %{memory: memory}) do
+    {:error, Step.error(:timeout, "execution exceeded #{ms}ms limit", memory, %{})}
   end
 
-  defp handle_execute_result({:error, {:memory_exceeded, info}}, %{
-         memory: memory,
-         journal: journal
-       }) do
-    memory_exceeded_step(info, memory, journal)
+  defp handle_execute_result({:error, {:memory_exceeded, info}}, %{memory: memory}) do
+    memory_exceeded_step(info, memory)
   end
 
-  defp handle_execute_result({:error, {reason_atom, _, _} = reason}, %{
-         memory: memory,
-         journal: journal
-       })
+  defp handle_execute_result({:error, {reason_atom, _, _} = reason}, %{memory: memory})
        when is_atom(reason_atom) do
-    {:error, Step.error(reason_atom, format_error(reason), memory, %{}, journal: journal)}
+    {:error, Step.error(reason_atom, format_error(reason), memory, %{})}
   end
 
-  defp handle_execute_result({:error, {reason_atom, _} = reason}, %{
-         memory: memory,
-         journal: journal
-       })
+  defp handle_execute_result({:error, {reason_atom, _} = reason}, %{memory: memory})
        when is_atom(reason_atom) do
-    {:error, Step.error(reason_atom, format_error(reason), memory, %{}, journal: journal)}
+    {:error, Step.error(reason_atom, format_error(reason), memory, %{})}
   end
 
-  defp handle_execute_result({:error, reason}, %{memory: memory, journal: journal}) do
-    {:error,
-     Step.error(direct_error_reason_atom(reason), format_error(reason), memory, %{},
-       journal: journal
-     )}
+  defp handle_execute_result({:error, reason}, %{memory: memory}) do
+    {:error, Step.error(direct_error_reason_atom(reason), format_error(reason), memory, %{})}
   end
 
   defp direct_error_reason_atom(reason), do: elem(reason, 0)
@@ -1033,12 +986,9 @@ defmodule PtcRunner.Lisp do
       prints: eval_ctx.prints,
       tool_calls: cleaned_tool_calls,
       pmap_calls: cleaned_pmap_calls,
-      catalog_ops: Enum.reverse(eval_ctx.catalog_ops),
       prelude_call_counts: eval_ctx.prelude_call_counts,
       child_traces: child_traces,
       child_steps: child_steps,
-      journal: eval_ctx.journal,
-      summaries: eval_ctx.summaries,
       tool_cache: eval_ctx.tool_cache
     }
 
@@ -1171,12 +1121,12 @@ defmodule PtcRunner.Lisp do
   # from the eval layer — already human-readable.
   defp memory_exceeded_message(message) when is_binary(message), do: message
 
-  defp memory_exceeded_step(info, memory, journal) do
+  defp memory_exceeded_step(info, memory) do
     message = memory_exceeded_message(info)
     details = if is_map(info), do: info, else: %{}
     Logger.warning("PTC-Lisp execution killed: #{message}")
 
-    {:error, Step.error(:memory_exceeded, message, memory, details, journal: journal)}
+    {:error, Step.error(:memory_exceeded, message, memory, details)}
   end
 
   defp put_setup_max_heap(opts, nil), do: opts
@@ -1221,8 +1171,6 @@ defmodule PtcRunner.Lisp do
       return: round_floats(value, precision),
       fail: nil,
       memory: native_memory(ctx.user_ns, preserve_runtime_callables),
-      journal: ctx.journal,
-      summaries: ctx.summaries,
       tool_cache: ctx.tool_cache,
       signature: nil,
       usage: nil,
@@ -1230,7 +1178,6 @@ defmodule PtcRunner.Lisp do
       prints: Enum.reverse(ctx.prints),
       tool_calls: cleaned_tool_calls,
       pmap_calls: cleaned_pmap_calls,
-      catalog_ops: Enum.reverse(ctx.catalog_ops),
       prelude_call_counts: ctx.prelude_call_counts,
       child_traces: child_traces,
       child_steps: child_steps
@@ -1428,11 +1375,11 @@ defmodule PtcRunner.Lisp do
 
   # Pre-execution check: reject programs with undefined variables before any
   # side effects (tool calls) can execute. Memory keys are included in scope
-  # to support multi-turn SubAgent execution where previous turns def'd variables.
+  # to support executions where the supplied memory pre-binds variables.
   # Runs inside the compile sandbox: takes memory KEYS (pre-bound vars from
   # prior turns), not the memory map, so the closure doesn't capture grant
-  # data. Error Steps carry placeholder memory/journal — re-hydrated in
-  # `handle_compile_error/3`.
+  # data. Error Steps carry placeholder memory, re-hydrated in
+  # `handle_compile_error/2`.
   defp check_undefined_vars(core_ast, memory_keys) do
     initial_scope = MapSet.new(memory_keys)
 
@@ -1457,17 +1404,15 @@ defmodule PtcRunner.Lisp do
   # references are checked against public names only; private names are admitted
   # only when they are reached through a prelude export's declared tool refs, and
   # runtime origin checks still enforce that same boundary at call time.
-  defp check_undefined_tools(core_ast, public_tool_names, tool_names, prelude, cached_task_ids) do
-    reachable_core_ast = prune_cached_task_bodies(core_ast, cached_task_ids)
-
+  defp check_undefined_tools(core_ast, public_tool_names, tool_names, prelude) do
     # CoreAST tool names are atoms, tool_names entries are strings — convert to strings
     direct =
-      reachable_core_ast |> collect_tool_names() |> MapSet.new(fn name -> to_string(name) end)
+      core_ast |> collect_tool_names() |> MapSet.new(fn name -> to_string(name) end)
 
     # A prelude export wraps tools in its captured body, invisible to the AST
     # walk above; union in the tools any referenced export will invoke so a
     # missing wrapped tool fails BEFORE an earlier tool can run (side-effect guard).
-    prelude_refs = collect_prelude_tool_refs(reachable_core_ast, prelude)
+    prelude_refs = collect_prelude_tool_refs(core_ast, prelude)
     available = MapSet.new(tool_names)
     public_available = MapSet.new(public_tool_names)
     private_available = MapSet.difference(available, public_available)
@@ -1504,200 +1449,6 @@ defmodule PtcRunner.Lisp do
     end
   end
 
-  defp cached_task_ids(journal) when is_map(journal) do
-    journal
-    |> Map.keys()
-    |> Enum.filter(&is_binary/1)
-    |> MapSet.new()
-  end
-
-  defp cached_task_ids(_journal), do: MapSet.new()
-
-  defp prune_cached_task_bodies(ast, cached_task_ids) do
-    ast
-    |> prune_cached_task_bodies_with_cache(cached_task_ids)
-    |> elem(0)
-  end
-
-  defp prune_cached_task_bodies_with_cache({:task, id, body}, cached_task_ids) do
-    if MapSet.member?(cached_task_ids, to_string(id)) do
-      {{:task, id, nil}, cached_task_ids}
-    else
-      {body, cached_task_ids} = prune_cached_task_bodies_with_cache(body, cached_task_ids)
-      {{:task, id, body}, cached_task_ids}
-    end
-  end
-
-  defp prune_cached_task_bodies_with_cache({:do, exprs}, cached_task_ids) do
-    {exprs, cached_task_ids} =
-      Enum.map_reduce(exprs, cached_task_ids, fn expr, cache ->
-        prune_cached_task_bodies_with_cache(expr, cache)
-      end)
-
-    {{:do, exprs}, cached_task_ids}
-  end
-
-  defp prune_cached_task_bodies_with_cache({:let, bindings, body}, cached_task_ids) do
-    {bindings, cached_task_ids} =
-      Enum.map_reduce(bindings, cached_task_ids, fn {:binding, pattern, value}, cache ->
-        {value, cache} = prune_cached_task_bodies_with_cache(value, cache)
-        {{:binding, pattern, value}, cache}
-      end)
-
-    {body, cached_task_ids} = prune_cached_task_bodies_with_cache(body, cached_task_ids)
-    {{:let, bindings, body}, cached_task_ids}
-  end
-
-  defp prune_cached_task_bodies_with_cache({:loop, bindings, body}, cached_task_ids) do
-    {bindings, cached_task_ids} =
-      Enum.map_reduce(bindings, cached_task_ids, fn {:binding, pattern, value}, cache ->
-        {value, cache} = prune_cached_task_bodies_with_cache(value, cache)
-        {{:binding, pattern, value}, cache}
-      end)
-
-    {body, cached_task_ids} = prune_cached_task_bodies_with_cache(body, cached_task_ids)
-    {{:loop, bindings, body}, cached_task_ids}
-  end
-
-  defp prune_cached_task_bodies_with_cache(
-         {:if, condition, then_branch, else_branch},
-         cached_task_ids
-       ) do
-    {condition, cached_task_ids} = prune_cached_task_bodies_with_cache(condition, cached_task_ids)
-    {then_branch, then_cache} = prune_cached_task_bodies_with_cache(then_branch, cached_task_ids)
-    {else_branch, else_cache} = prune_cached_task_bodies_with_cache(else_branch, cached_task_ids)
-
-    {{:if, condition, then_branch, else_branch}, MapSet.intersection(then_cache, else_cache)}
-  end
-
-  defp prune_cached_task_bodies_with_cache({:and, exprs}, cached_task_ids) do
-    {exprs, cached_task_ids} = prune_short_circuit_exprs(exprs, cached_task_ids)
-    {{:and, exprs}, cached_task_ids}
-  end
-
-  defp prune_cached_task_bodies_with_cache({:or, exprs}, cached_task_ids) do
-    {exprs, cached_task_ids} = prune_short_circuit_exprs(exprs, cached_task_ids)
-    {{:or, exprs}, cached_task_ids}
-  end
-
-  defp prune_cached_task_bodies_with_cache({:call, target, args}, cached_task_ids) do
-    {target, cached_task_ids} = prune_cached_task_bodies_with_cache(target, cached_task_ids)
-
-    {args, _cached_task_ids} =
-      Enum.map_reduce(args, cached_task_ids, fn arg, cache ->
-        prune_cached_task_bodies_with_cache(arg, cache)
-      end)
-
-    {{:call, target, args}, MapSet.new()}
-  end
-
-  defp prune_cached_task_bodies_with_cache({:prelude_call, ref, args}, cached_task_ids) do
-    {args, _cached_task_ids} =
-      Enum.map_reduce(args, cached_task_ids, fn arg, cache ->
-        prune_cached_task_bodies_with_cache(arg, cache)
-      end)
-
-    {{:prelude_call, ref, args}, MapSet.new()}
-  end
-
-  defp prune_cached_task_bodies_with_cache({:def, name, value, meta}, cached_task_ids) do
-    {value, cached_task_ids} = prune_cached_task_bodies_with_cache(value, cached_task_ids)
-    {{:def, name, value, meta}, cached_task_ids}
-  end
-
-  defp prune_cached_task_bodies_with_cache({:defonce, name, value, meta}, cached_task_ids) do
-    {value, cached_task_ids} = prune_cached_task_bodies_with_cache(value, cached_task_ids)
-    {{:defonce, name, value, meta}, cached_task_ids}
-  end
-
-  defp prune_cached_task_bodies_with_cache({:fn, _params, _body} = fun, cached_task_ids) do
-    {fun, cached_task_ids}
-  end
-
-  defp prune_cached_task_bodies_with_cache({:fn, _name, _params, _body} = fun, cached_task_ids) do
-    {fun, cached_task_ids}
-  end
-
-  defp prune_cached_task_bodies_with_cache({:task_dynamic, id, body}, cached_task_ids) do
-    # Dynamic ids are runtime values, so static cache pruning is intentionally
-    # limited to literal task ids whose journal key can be proven here.
-    {id, cached_task_ids} = prune_cached_task_bodies_with_cache(id, cached_task_ids)
-    {body, body_cache} = prune_cached_task_bodies_with_cache(body, cached_task_ids)
-
-    {{:task_dynamic, id, body}, MapSet.intersection(cached_task_ids, body_cache)}
-  end
-
-  defp prune_cached_task_bodies_with_cache({:task_reset, {:string, id}}, cached_task_ids) do
-    {{:task_reset, {:string, id}}, MapSet.delete(cached_task_ids, id)}
-  end
-
-  defp prune_cached_task_bodies_with_cache({:task_reset, id}, cached_task_ids) do
-    # A dynamic reset may invalidate any cached literal task id; subsequent task
-    # bodies must therefore remain visible to the static tool guard.
-    {id, _cached_task_ids} = prune_cached_task_bodies_with_cache(id, cached_task_ids)
-    {{:task_reset, id}, MapSet.new()}
-  end
-
-  defp prune_cached_task_bodies_with_cache(tuple, cached_task_ids) when is_tuple(tuple) do
-    {items, cached_task_ids} =
-      tuple
-      |> Tuple.to_list()
-      |> Enum.map_reduce(cached_task_ids, fn item, cache ->
-        prune_cached_task_bodies_with_cache(item, cache)
-      end)
-
-    {List.to_tuple(items), cached_task_ids}
-  end
-
-  defp prune_cached_task_bodies_with_cache(list, cached_task_ids) when is_list(list) do
-    Enum.map_reduce(list, cached_task_ids, fn item, cache ->
-      prune_cached_task_bodies_with_cache(item, cache)
-    end)
-  end
-
-  defp prune_cached_task_bodies_with_cache(%MapSet{} = set, cached_task_ids) do
-    {values, cached_task_ids} =
-      set
-      |> MapSet.to_list()
-      |> Enum.map_reduce(cached_task_ids, fn item, cache ->
-        prune_cached_task_bodies_with_cache(item, cache)
-      end)
-
-    {MapSet.new(values), cached_task_ids}
-  end
-
-  defp prune_cached_task_bodies_with_cache(%Program{} = program, cached_task_ids),
-    do: {program, cached_task_ids}
-
-  defp prune_cached_task_bodies_with_cache(map, cached_task_ids) when is_map(map) do
-    {pairs, cached_task_ids} =
-      Enum.map_reduce(map, cached_task_ids, fn {key, value}, cache ->
-        {key, cache} = prune_cached_task_bodies_with_cache(key, cache)
-        {value, cache} = prune_cached_task_bodies_with_cache(value, cache)
-        {{key, value}, cache}
-      end)
-
-    {Map.new(pairs), cached_task_ids}
-  end
-
-  defp prune_cached_task_bodies_with_cache(other, cached_task_ids), do: {other, cached_task_ids}
-
-  defp prune_short_circuit_exprs([], cached_task_ids), do: {[], cached_task_ids}
-
-  defp prune_short_circuit_exprs(exprs, cached_task_ids) do
-    {exprs, _prefix_cache, possible_caches} =
-      Enum.reduce(exprs, {[], cached_task_ids, []}, fn expr, {pruned, cache, possible} ->
-        {expr, cache} = prune_cached_task_bodies_with_cache(expr, cache)
-        {[expr | pruned], cache, [cache | possible]}
-      end)
-
-    guaranteed_cache =
-      possible_caches
-      |> Enum.reduce(cached_task_ids, &MapSet.intersection/2)
-
-    {Enum.reverse(exprs), guaranteed_cache}
-  end
-
   # Collect all tool names referenced in the CoreAST
   defp collect_tool_names(ast), do: collect_tool_names(ast, MapSet.new())
 
@@ -1715,9 +1466,6 @@ defmodule PtcRunner.Lisp do
   defp collect_tool_names({:prelude_ref, _ref}, acc), do: acc
 
   defp collect_tool_names({:prelude_call, _ref, args}, acc),
-    do: Enum.reduce(args, acc, &collect_tool_names/2)
-
-  defp collect_tool_names({:repl_discovery, _operation, args}, acc),
     do: Enum.reduce(args, acc, &collect_tool_names/2)
 
   defp collect_tool_names({:do, exprs}, acc) do
@@ -1945,10 +1693,7 @@ defmodule PtcRunner.Lisp do
         msg = format_validation_errors(errors)
 
         {:error,
-         Step.error(:validation_error, msg, step.memory, %{},
-           journal: step.journal,
-           tool_cache: step.tool_cache
-         )}
+         Step.error(:validation_error, msg, step.memory, %{}, tool_cache: step.tool_cache)}
     end
   end
 
@@ -2051,9 +1796,6 @@ defmodule PtcRunner.Lisp do
   defp collect_undefined_vars({:prelude_call, _ref, args}, scope),
     do: Enum.flat_map(args, &collect_undefined_vars(&1, scope))
 
-  defp collect_undefined_vars({:repl_discovery, _operation, args}, scope),
-    do: Enum.flat_map(args, &collect_undefined_vars(&1, scope))
-
   # def / defonce — add name to scope before recursing (enables recursive defn)
   defp collect_undefined_vars({:def, name, value, _meta}, scope) do
     collect_undefined_vars(value, MapSet.put(scope, name))
@@ -2137,24 +1879,7 @@ defmodule PtcRunner.Lisp do
   end
 
   # Task/step operations
-  defp collect_undefined_vars({:task, _id, body}, scope) do
-    collect_undefined_vars(body, scope)
-  end
-
-  defp collect_undefined_vars({:task_dynamic, id_expr, body}, scope) do
-    collect_undefined_vars(id_expr, scope) ++ collect_undefined_vars(body, scope)
-  end
-
-  defp collect_undefined_vars({:step_done, id, summary}, scope) do
-    collect_undefined_vars(id, scope) ++ collect_undefined_vars(summary, scope)
-  end
-
-  defp collect_undefined_vars({:task_reset, id}, scope) do
-    collect_undefined_vars(id, scope)
-  end
-
-  # Budget/turn history
-  defp collect_undefined_vars({:budget_remaining}, _scope), do: []
+  # Turn history
   defp collect_undefined_vars({:turn_history, _n}, _scope), do: []
 
   # Catch-all: safe to skip unknown nodes (runtime eval still catches real errors).

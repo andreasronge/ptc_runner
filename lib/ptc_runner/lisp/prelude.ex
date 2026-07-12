@@ -6,7 +6,7 @@ defmodule PtcRunner.Lisp.Prelude do
   namespaces (e.g. `crm`) and exports functions/constants. The compiler
   (`PtcRunner.Lisp.Prelude.Compiler`) turns that source into one of these
   artifacts, which is then attached to a run and consulted — unchanged —
-  across direct Lisp execution, SubAgent execution, and the REPL (plan §1A).
+  across direct Lisp execution, Kernel execution, and the REPL.
 
   ## Fields
 
@@ -24,14 +24,6 @@ defmodule PtcRunner.Lisp.Prelude do
       (evaluator threading) depends on.
     * `source_hash` — sha256 hex digest of the prelude source (plan §12
       traceability).
-    * `source_index` — precomputed `%{full-ref => rendered-source}` map for the
-      `(source ns/name)` discovery form (issue #1095). Keyed by full ref for
-      public exports PLUS the private helpers transitively reachable from some
-      public export; unreferenced privates stay out. Values are rendered strings
-      (a labeled effective-metadata header + the Formatter-rendered defining
-      form), so this cache leaks no captured closure or raw parser AST. NOTE: it
-      exposes export IMPLEMENTATION, not just contract — deployments must keep
-      secrets/credentials out of prelude bodies, not just docstrings.
     * `form_graph` — `%{namespace => %{symbol => entry}}`, the compiled
       per-namespace sibling call graph (prelude form-edit/introspection plan,
       Phase 1). Each entry carries `visibility` (`:public`/`:private`, this
@@ -40,9 +32,7 @@ defmodule PtcRunner.Lisp.Prelude do
       symbol references only), and `requires`/`tool_refs` each split into
       `direct` (this form's own body) and `transitive` (the closure over the
       siblings it calls). Includes BOTH public and private definitions — unlike
-      `source_index`, this is not reachable-filtered. This is the single
-      construction pass `build_export/3`, the `source` dependency hint, and the
-      D4 reachable-private set all consume; it carries no callables or captured
+      public export list. It carries no callables or captured
       env, only string/atom/list facts.
     * `metadata` — small map of namespace-level facts for traces/debugging,
       e.g. per-namespace docstring and default visibility.
@@ -94,7 +84,6 @@ defmodule PtcRunner.Lisp.Prelude do
           exports: [Export.t()],
           private_env: %{String.t() => %{String.t() => term()}},
           source_hash: String.t(),
-          source_index: %{String.t() => String.t()},
           form_graph: form_graph(),
           metadata: map()
         }
@@ -104,7 +93,6 @@ defmodule PtcRunner.Lisp.Prelude do
             exports: [],
             private_env: %{},
             source_hash: nil,
-            source_index: %{},
             form_graph: %{},
             metadata: %{}
 
@@ -173,7 +161,6 @@ defmodule PtcRunner.Lisp.Prelude do
           params: [String.t()],
           visibility: Export.visibility(),
           effect: Export.effect(),
-          provider_ref: String.t() | nil,
           requires: [String.t()]
         }
 
@@ -223,7 +210,6 @@ defmodule PtcRunner.Lisp.Prelude do
       params: export.params,
       visibility: export.visibility,
       effect: export.effect,
-      provider_ref: export.provider_ref,
       requires: export.requires
     }
   end

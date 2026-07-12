@@ -126,14 +126,4 @@ defmodule PtcRunner.Lisp.EvalJsonTest do
       assert msg =~ "json/generate-string"
     end
   end
-
-  describe "removed MCP helper namespace" do
-    test "mcp/text is an unknown mcp function" do
-      assert {:error, %{fail: %{message: msg}}} = Lisp.run(~S|(mcp/text {})|)
-
-      assert msg =~ "Unknown mcp function: mcp/text"
-      assert msg =~ "tool/servers"
-      refute msg =~ "MCP functions"
-    end
-  end
 end

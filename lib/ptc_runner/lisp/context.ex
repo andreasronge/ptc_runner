@@ -9,20 +9,16 @@ defmodule PtcRunner.Lisp.Context do
   Kernel environments construct this context at the evaluator boundary.
   """
 
-  defstruct [:ctx, :memory, :tools, :journal, turn_history: []]
+  defstruct [:ctx, :memory, :tools, turn_history: []]
 
   @typedoc """
   Context structure containing external data, memory, and tool registry.
 
-  - `journal`: Optional journal map for `(task)` idempotent execution.
-    When non-nil, task results are cached by ID. When nil, tasks execute
-    without caching (with a trace warning).
   """
   @type t :: %__MODULE__{
           ctx: map(),
           memory: map(),
           tools: map(),
-          journal: map() | nil,
           turn_history: list()
         }
 
@@ -40,14 +36,13 @@ defmodule PtcRunner.Lisp.Context do
       %{"counter" => 0}
 
   """
-  @spec new(map(), map(), map(), list(), map() | nil) :: t()
-  def new(ctx \\ %{}, memory \\ %{}, tools \\ %{}, turn_history \\ [], journal \\ nil) do
+  @spec new(map(), map(), map(), list()) :: t()
+  def new(ctx \\ %{}, memory \\ %{}, tools \\ %{}, turn_history \\ []) do
     %__MODULE__{
       ctx: ctx,
       memory: memory,
       tools: tools,
-      turn_history: turn_history,
-      journal: journal
+      turn_history: turn_history
     }
   end
 

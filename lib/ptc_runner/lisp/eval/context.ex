@@ -47,12 +47,8 @@ defmodule PtcRunner.Lisp.Eval.Context do
     :tool_exec,
     :origin_stack,
     :prelude_caller_user_ns_stack,
-    :discovery_exec,
     :turn_history,
-    :budget,
     :trace_context,
-    :journal,
-    summaries: %{},
     iteration_count: 0,
     loop_limit: 1000,
     max_print_length: @default_print_length,
@@ -84,7 +80,6 @@ defmodule PtcRunner.Lisp.Eval.Context do
     prints: [],
     tool_calls: [],
     pmap_calls: [],
-    catalog_ops: [],
     prelude_call_counts: %{},
     tool_cache: %{},
     tools_meta: %{},
@@ -112,11 +107,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
     # `user_ns` is the ordinary mutable namespace) cannot reach private helpers
     # by qualified symbol. `%{}` when no prelude is attached.
     prelude_exports: %{},
-    # The attached compiled prelude artifact (`%PtcRunner.Lisp.Prelude{}`) or
-    # `nil`. Discovery forms (`ns-publics`, `doc`, `meta`, `dir`, `apropos`,
-    # `all-ns`, `ns-name`) consult its PUBLIC export records — the SAME records
-    # the analyzer/evaluator use, no separate registry (plan §8). Private
-    # helpers have no export record and so never surface in discovery.
+    # The attached compiled prelude artifact (`%PtcRunner.Lisp.Prelude{}`) or `nil`.
     prelude: nil
   ]
 
@@ -183,24 +174,6 @@ defmodule PtcRunner.Lisp.Eval.Context do
           error_count: non_neg_integer()
         }
 
-  @typedoc """
-  Discovery operation record for tracing.
-
-  Fields:
-  - `operation`: Which discovery operation was called
-  - `args`: Arguments passed to the operation
-  - `outcome`: `:ok`, `:nil_world_fault`, or `:error`
-  - `reason`: Reason for nil/error outcome (e.g., `:catalog_cap_exhausted`)
-  - `duration_ms`: How long the operation took
-  """
-  @type catalog_op :: %{
-          operation: atom(),
-          args: map(),
-          outcome: :ok | :nil_world_fault | :error,
-          reason: atom() | nil,
-          duration_ms: non_neg_integer()
-        }
-
   @type t :: %__MODULE__{
           ctx: map(),
           user_ns: map(),
@@ -208,12 +181,8 @@ defmodule PtcRunner.Lisp.Eval.Context do
           tool_exec: (String.t(), map(), map() | nil -> term()),
           origin_stack: [map()],
           prelude_caller_user_ns_stack: [map()],
-          discovery_exec: (atom(), list() -> term()) | nil,
           turn_history: list(),
-          budget: map() | nil,
           trace_context: trace_context(),
-          journal: map() | nil,
-          summaries: %{String.t() => String.t()},
           iteration_count: integer(),
           loop_limit: integer(),
           max_tool_calls: pos_integer() | nil,
@@ -228,7 +197,6 @@ defmodule PtcRunner.Lisp.Eval.Context do
           prints: [String.t()],
           tool_calls: [tool_call()],
           pmap_calls: [pmap_call()],
-          catalog_ops: [catalog_op()],
           tool_cache: map(),
           tools_meta: %{String.t() => %{cache: boolean()}},
           strict_data: boolean(),
@@ -244,7 +212,6 @@ defmodule PtcRunner.Lisp.Eval.Context do
           prints: [String.t()],
           tool_calls: [tool_call()],
           pmap_calls: [pmap_call()],
-          catalog_ops: [catalog_op()],
           prelude_call_counts: %{String.t() => non_neg_integer()},
           tool_cache: map()
         }
@@ -255,7 +222,6 @@ defmodule PtcRunner.Lisp.Eval.Context do
   ## Options
 
   - `:max_print_length` - Max characters per `println` call (default: #{@default_print_length})
-  - `:budget` - Budget info map for `(budget/remaining)` introspection (default: nil)
   - `:pmap_timeout` - Timeout in ms for each pmap task (default: 5000). Increase for LLM-backed tools.
   - `:pmap_max_concurrency` - Max concurrent tasks in pmap/pcalls (default: `System.schedulers_online() * 2`)
   - `:max_heap` - Sandbox per-process heap cap in words (default: nil).
@@ -277,10 +243,6 @@ defmodule PtcRunner.Lisp.Eval.Context do
       iex> ctx.max_print_length
       500
 
-      iex> ctx = PtcRunner.Lisp.Eval.Context.new(%{}, %{}, %{}, fn _, _, _ -> nil end, [], budget: %{turns: 10})
-      iex> ctx.budget
-      %{turns: 10}
-
       iex> ctx = PtcRunner.Lisp.Eval.Context.new(%{}, %{}, %{}, fn _, _, _ -> nil end, [], pmap_timeout: 60_000)
       iex> ctx.pmap_timeout
       60000
@@ -296,7 +258,6 @@ defmodule PtcRunner.Lisp.Eval.Context do
       tool_exec: tool_exec,
       origin_stack: Keyword.get(opts, :origin_stack, []),
       prelude_caller_user_ns_stack: Keyword.get(opts, :prelude_caller_user_ns_stack, []),
-      discovery_exec: Keyword.get(opts, :discovery_exec),
       turn_history: turn_history,
       max_tool_calls: Keyword.get(opts, :max_tool_calls),
       max_tool_call_result_bytes:
@@ -308,9 +269,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
       max_heap: Keyword.get(opts, :max_heap),
       worker_max_heap: Keyword.get(opts, :worker_max_heap, Keyword.get(opts, :max_heap)),
       parallel_budget: Keyword.get(opts, :parallel_budget),
-      budget: Keyword.get(opts, :budget),
       trace_context: Keyword.get(opts, :trace_context),
-      journal: Keyword.get(opts, :journal),
       tool_cache: Keyword.get(opts, :tool_cache, %{}),
       tools_meta: Keyword.get(opts, :tools_meta, %{}),
       strict_data: Keyword.get(opts, :strict_data, false),
@@ -323,8 +282,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
       prelude: prelude_artifact(Keyword.get(opts, :prelude)),
       prints: [],
       tool_calls: [],
-      pmap_calls: [],
-      catalog_ops: []
+      pmap_calls: []
     }
   end
 
@@ -530,14 +488,6 @@ defmodule PtcRunner.Lisp.Eval.Context do
     %{context | pmap_calls: [pmap_call | pmap_calls]}
   end
 
-  @doc """
-  Appends a catalog operation record to the context.
-  """
-  @spec append_catalog_op(t(), catalog_op()) :: t()
-  def append_catalog_op(%__MODULE__{catalog_ops: catalog_ops} = context, catalog_op) do
-    %{context | catalog_ops: [catalog_op | catalog_ops]}
-  end
-
   @doc false
   @spec increment_prelude_call(t(), String.t()) :: t()
   def increment_prelude_call(%__MODULE__{prelude_call_counts: counts} = context, ref)
@@ -554,7 +504,6 @@ defmodule PtcRunner.Lisp.Eval.Context do
       prints: context.prints,
       tool_calls: context.tool_calls,
       pmap_calls: context.pmap_calls,
-      catalog_ops: context.catalog_ops,
       prelude_call_counts: context.prelude_call_counts,
       tool_cache: context.tool_cache
     }
@@ -570,7 +519,6 @@ defmodule PtcRunner.Lisp.Eval.Context do
       | prints: effects.prints,
         tool_calls: effects.tool_calls,
         pmap_calls: effects.pmap_calls,
-        catalog_ops: effects.catalog_ops,
         prelude_call_counts: effects.prelude_call_counts,
         tool_cache: effects.tool_cache
     }

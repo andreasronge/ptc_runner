@@ -129,14 +129,7 @@ defmodule PtcRunner.Lisp.SpecValidator do
   """
   @spec validate_example(String.t(), any()) :: :ok | {:error, String.t()}
   def validate_example(code, expected) do
-    opts =
-      if String.contains?(code, "budget/remaining") do
-        [budget: mock_budget()]
-      else
-        []
-      end
-
-    case PtcRunner.Lisp.run(code, opts) do
+    case PtcRunner.Lisp.run(code) do
       {:ok, %{return: result}} ->
         if values_match?(expected, result) do
           :ok
@@ -303,16 +296,6 @@ defmodule PtcRunner.Lisp.SpecValidator do
       {:error, _} ->
         {:error, "Could not read specification file: #{path}"}
     end
-  end
-
-  # Mock budget for spec validation of budget/remaining examples.
-  # Values match expected results in the specification.
-  defp mock_budget do
-    %{
-      "work-turns" => 10,
-      "retry-turns" => 5,
-      "tokens" => %{"cache-read" => 2000}
-    }
   end
 
   # ============================================================

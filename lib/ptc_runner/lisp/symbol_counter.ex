@@ -39,10 +39,6 @@ defmodule PtcRunner.Lisp.SymbolCounter do
                   :return,
                   :fail,
                   :quote,
-                  :apropos,
-                  :dir,
-                  :doc,
-                  :meta,
                   # Comparison operators
                   :=,
                   :"not=",

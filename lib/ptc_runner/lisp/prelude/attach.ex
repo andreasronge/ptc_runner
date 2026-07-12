@@ -92,11 +92,6 @@ defmodule PtcRunner.Lisp.Prelude.Attach do
     check_tool_grant(name, export, context)
   end
 
-  # Historical source metadata may still describe an external provider binding.
-  # Provider availability is now validated by Kernel environment assembly, not
-  # by the neutral Lisp evaluator.
-  defp validate_required("upstream:" <> _provider_ref, _export, %AttachContext{}), do: :ok
-
   defp validate_required(required, export, %AttachContext{}) when is_binary(required) do
     {:error,
      attach_error(

@@ -28,11 +28,10 @@ defmodule PtcRunner.Lisp.SourceAtoms do
        aspirational Clojure entries.
     3. Bounded keyword modifiers used by `for`/`doseq`/destructuring —
        `:else`, `:keys`, `:as`, `:or`, etc.
-    4. Bounded namespaces — `data`, `tool`, `budget`,
-       `json`, `mcp`, plus Clojure aliases (`clojure.string`),
+    4. Bounded namespaces — `data`, `tool`, `json`, plus Clojure aliases (`clojure.string`),
        and fully-qualified Java namespaces from `Env.clojure_namespaces`
        (`java.time.LocalDate`, etc.).
-    5. Qualified analyzer keys such as `servers` and JSON member
+    5. Qualified analyzer keys such as JSON member
        names matched as atom literals in `dispatch_list_form` clauses.
     6. Short-fn param atoms `:p1`..`:p20` synthesized by the
        short-fn analyzer.
@@ -91,7 +90,6 @@ defmodule PtcRunner.Lisp.SourceAtoms do
   # closure-error hints. Audited 2026-05-15: no aspirational entries.
   @special_forms ~w(
     return fail
-    task step-done task-reset
     let fn def defn defonce
     if if-let if-not if-some
     when when-let when-not when-some when-first
@@ -102,7 +100,7 @@ defmodule PtcRunner.Lisp.SourceAtoms do
     doseq for
     comment
     juxt pmap pcalls
-    quote apropos dir doc meta ns-publics all-ns ns-name source
+    quote
     .
   )a
 
@@ -120,7 +118,7 @@ defmodule PtcRunner.Lisp.SourceAtoms do
   # `parse_namespaced_symbol` doesn't split them — `java.time.LocalDate`
   # is one atom, not `java.time` + `LocalDate`.
   @bounded_namespaces ~w(
-    data tool budget json mcp
+    data tool json
     str string set regex
     walk
     Math System Boolean Double Float Integer Long
@@ -131,10 +129,9 @@ defmodule PtcRunner.Lisp.SourceAtoms do
   )a
 
   # Qualified analyzer keys — atom literals after `ns/` in dispatch
-  # clauses (e.g. `(tool/servers)` and other REPL discovery forms).
+  # clauses.
   # Verified via `rg ':"[a-z-]+"' lib/ptc_runner/lisp/analyze.ex`.
   @qualified_keys ~w(
-    summary remaining servers
     parse-string parse-lines generate-string between text json
     re-pattern
   )a
