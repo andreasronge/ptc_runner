@@ -4,6 +4,17 @@ The Lisp kernel is an active experiment, not a committed product roadmap.
 
 - [`roadmap.md`](roadmap.md) is the lightweight discussion guide and current
   set of questions.
+- [`kernel-contract.md`](kernel-contract.md) is the proposed normative V1
+  contract for the small programmable Kernel.
+- [`kernel-migration.md`](kernel-migration.md) defines the implementation,
+  cutover, testing, and deletion sequence.
+- [`kernel-inventory.md`](kernel-inventory.md) is the temporary
+  retain/migrate/delete checklist.
+- [`tracelog-contract.md`](tracelog-contract.md) defines retained TraceLog
+  storage, source grants, run discovery/metadata, bounded queries, and the
+  swappable `log/` prelude.
+- [`private-experiment-transcripts.md`](private-experiment-transcripts.md)
+  describes the approved local transcript work and its `ptc_viewer` contract.
 - [`archive/`](archive/README.md) preserves the former architecture, milestone,
   spike, autonomous-work, and experiment documents as historical reference.
 
