@@ -307,4 +307,27 @@ defmodule PtcRunner.Kernel.CoreContractTest do
 
     assert is_binary(digest)
   end
+
+  test "embedded programs do not capture workflow locals" do
+    {:ok, workflow} = WorkflowEnvironment.new([])
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, limits} = Limits.new()
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "program-local")
+
+    {:ok, config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        mission_environment: mission,
+        input: %{},
+        limits: limits,
+        event_sink: sink
+      )
+
+    assert {:ok,
+            %{value: %{status: :ok, value: %{outcome: :evaluation_error, kind: :unbound_var}}}} =
+             Kernel.run(
+               "(let [x 42] (return (tool/kernel-eval {:kind :embedded :program (program (return x))})))",
+               config
+             )
+  end
 end

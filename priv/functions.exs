@@ -5093,6 +5093,22 @@
         "DIV: quoted lists, vectors, maps, sets, syntax quote, unquote, and reader metadata are not supported."
     },
     %{
+      name: "program",
+      description: "Capture static subordinate source without resolving workflow symbols",
+      binding: nil,
+      category: :core,
+      dispatch: :analyze,
+      signatures: ["(program form...)"],
+      since: nil,
+      section: "Kernel",
+      ptc_extension?: true,
+      examples: [],
+      notes: "Produces an opaque Program value for the embedded kernel-eval route.",
+      see_also: ["return"],
+      clojure_var: "program",
+      divergences: "PTC Kernel extension; it does not introduce general quoting or eval."
+    },
+    %{
       name: "recur",
       description: "",
       binding: nil,
