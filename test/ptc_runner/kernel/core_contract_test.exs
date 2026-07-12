@@ -9,6 +9,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.MissionEnvironment
   alias PtcRunner.Kernel.ProviderError
+  alias PtcRunner.Kernel.RunConfig
   alias PtcRunner.Kernel.RunState
   alias PtcRunner.Kernel.WorkflowEnvironment
 
@@ -130,5 +131,26 @@ defmodule PtcRunner.Kernel.CoreContractTest do
 
     assert {:error, %{reason: :component_cycle}} =
              Kernel.compile_bundle([%{first | dependencies: ["second"]}, second])
+  end
+
+  test "new Kernel run executes a bounded workflow through explicit configuration" do
+    {:ok, workflow} = WorkflowEnvironment.new([])
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, limits} = Limits.new()
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "workflow")
+
+    {:ok, config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        mission_environment: mission,
+        input: %{},
+        limits: limits,
+        event_sink: sink
+      )
+
+    assert {:ok, %{value: 42, evaluation_memory: %{defined_count: 0}}} =
+             Kernel.run("(return (+ 40 2))", config)
+
+    assert [%{type: "run-started"}, %{type: "run-stopped"}] = EventSink.events(sink)
   end
 end

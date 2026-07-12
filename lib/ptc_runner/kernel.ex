@@ -4,7 +4,12 @@ defmodule PtcRunner.Kernel do
   alias PtcRunner.Kernel.Action
   alias PtcRunner.Kernel.BundleCompiler
   alias PtcRunner.Kernel.Component
+  alias PtcRunner.Kernel.Error
+  alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.InnerPrelude
+  alias PtcRunner.Kernel.Result
+  alias PtcRunner.Kernel.RunConfig
+  alias PtcRunner.Kernel.RunState
   alias PtcRunner.Kernel.StateHandle
   alias PtcRunner.Lisp
   alias PtcRunner.Lisp.ExecutionError
@@ -305,6 +310,75 @@ defmodule PtcRunner.Kernel do
         {:error, normalize_preflight_error(error, opts)}
     end
   end
+
+  @doc "Runs one bounded workflow entry expression through the new Kernel path."
+  @spec run(binary(), RunConfig.t()) :: {:ok, Result.t()} | {:error, Error.t()}
+  def run(entry_source, %RunConfig{} = config) when is_binary(entry_source) do
+    with :ok <- entry_source_within_limit(entry_source, config.limits),
+         {:ok, state} <- RunState.start(config.limits),
+         :ok <- EventSink.emit(config.event_sink, "run-started", %{labels: config.labels}),
+         result <- run_workflow(entry_source, config, state),
+         :ok <-
+           EventSink.emit(config.event_sink, "run-stopped", %{
+             outcome: outcome(result),
+             usage: RunState.usage(state)
+           }) do
+      RunState.close(state)
+      result
+    else
+      {:error, reason} -> configuration_error(reason, %{})
+    end
+  end
+
+  defp run_workflow(entry_source, config, state) do
+    opts = [
+      context: config.input,
+      timeout: config.limits.workflow_timeout_ms,
+      max_heap: config.limits.workflow_heap_words,
+      max_program_bytes: config.limits.entry_source_bytes,
+      filter_context: false,
+      caller: :in_process_v1
+    ]
+
+    case Lisp.run_native(entry_source, opts) do
+      {:ok, step} ->
+        {:ok,
+         %Result{
+           value: step.return |> kernel_return_value() |> Lisp.externalize_value(),
+           usage: RunState.usage(state),
+           evaluation_memory: %{defined_count: map_size(step.memory)}
+         }}
+
+      {:error, step} ->
+        {:error,
+         %Error{
+           kind: workflow_error_kind(step.fail.reason),
+           reason: step.fail.reason,
+           details: %{message: String.slice(step.fail.message || "workflow failed", 0, 4_096)},
+           usage: RunState.usage(state)
+         }}
+    end
+  end
+
+  defp entry_source_within_limit(source, limits) do
+    if byte_size(source) <= limits.entry_source_bytes,
+      do: :ok,
+      else: {:error, :entry_source_exceeded}
+  end
+
+  defp kernel_return_value({:__ptc_return__, value}), do: value
+  defp kernel_return_value(value), do: value
+
+  defp outcome({:ok, _result}), do: :ok
+  defp outcome({:error, _error}), do: :error
+
+  defp workflow_error_kind(reason)
+       when reason in [:timeout, :memory_exceeded, :program_too_large], do: :limit_exceeded
+
+  defp workflow_error_kind(_reason), do: :workflow_failed
+
+  defp configuration_error(reason, usage),
+    do: {:error, %Error{kind: :configuration_error, reason: reason, details: %{}, usage: usage}}
 
   defp run_with_memory(
          mission,
