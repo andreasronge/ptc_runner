@@ -269,43 +269,6 @@ defmodule PtcRunner.TraceLog do
   end
 
   @doc """
-  Records an already-built turn-event map to every active sink — *every* JSONL
-  collector on the stack and every active in-memory sink.
-
-  Unlike `write_to_active/1` (innermost collector only), this fans out to all
-  active collectors, matching the telemetry handler's routing: under nested
-  `with_trace/2` scopes both the inner and outer trace files capture the turn,
-  so cross-session analysis works for either. Each collector stamps its own
-  `trace_id`/`seq` on its copy of the event.
-
-  This is the single emission point shared by turn drivers (`PtcRunner.Session`,
-  legacy drivers and `PtcRunner.Kernel`). It never raises and
-  is a no-op when nothing is recording. Build the event with
-  `PtcRunner.TraceLog.TurnEvent.build/1`.
-  """
-  @spec record_turn_event(map()) :: :ok
-  def record_turn_event(event_map) when is_map(event_map) do
-    Enum.each(TraceContext.collectors(), fn collector ->
-      safe_write(fn -> Collector.write_event(collector, event_map) end)
-    end)
-
-    Enum.each(TraceContext.memory_sinks(), fn sink ->
-      safe_write(fn -> MemorySink.record(sink, event_map) end)
-    end)
-
-    :ok
-  end
-
-  def record_turn_event(_), do: :ok
-
-  defp safe_write(fun) do
-    fun.()
-    :ok
-  catch
-    _, _ -> :ok
-  end
-
-  @doc """
   Starts an in-memory turn-log sink and activates it for the current process.
 
   Returns the sink pid; query it with `PtcRunner.TraceLog.MemorySink.events/1`

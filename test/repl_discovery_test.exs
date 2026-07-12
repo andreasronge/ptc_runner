@@ -2,9 +2,6 @@ defmodule PtcRunner.ReplDiscoveryTest do
   use ExUnit.Case, async: true
 
   alias PtcRunner.Lisp
-  alias PtcRunner.Step.Public
-
-  import PtcRunner.TestSupport.PublicStepAssertions
 
   defp discovery_exec(overrides \\ %{}) do
     fn operation, args ->
@@ -78,23 +75,6 @@ defmodule PtcRunner.ReplDiscoveryTest do
                  args: %{query: "github", opts: %{"mode" => "jsonl"}}
                }
              ] = step.catalog_ops
-    end
-
-    test "native catalog operation args render at the public step boundary" do
-      assert {:ok, native_step} =
-               Lisp.run_native(~s|(apropos "github" {:mode :jsonl})|,
-                 discovery_exec: discovery_exec()
-               )
-
-      public_step = Public.from_native(native_step)
-      assert_public_step!(public_step)
-
-      assert [
-               %{
-                 operation: :apropos,
-                 args: %{query: "github", opts: %{"mode" => "jsonl"}}
-               }
-             ] = public_step.catalog_ops
     end
 
     test "local discovery works without discovery_exec" do

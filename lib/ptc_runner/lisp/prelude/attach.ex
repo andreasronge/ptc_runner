@@ -25,13 +25,13 @@ defmodule PtcRunner.Lisp.Prelude.Attach do
 
   ## Where the attach hook lives
 
-  `attach/2` is the seam P2 wires at the TOP of `PtcRunner.Lisp.run` (and the
-  SubAgent / REPL surfaces), before parsing/analyzing user code. The `prelude:`
+  `attach/2` is wired at the top of `PtcRunner.Lisp.run`, before
+  parsing/analyzing user code. The `prelude:`
   option may be either a compiled `%PtcRunner.Lisp.Prelude{}` artifact or raw
   prelude source (a binary), which `attach/2` compiles first. On success it
   yields the compiled artifact for the analyzer/evaluator path; on failure it
   yields a `%PtcRunner.Lisp.Prelude.ValidationError{}` that the call site maps
-  to `{:error, %PtcRunner.Step{fail: %{reason: :prelude_attach_failed}}}`.
+  to a neutral `%PtcRunner.Lisp.Result{}` error.
 
   Genuine programmer misuse (passing a value that is neither a prelude
   artifact nor source) raises `ArgumentError`; a missing/ungranted upstream op

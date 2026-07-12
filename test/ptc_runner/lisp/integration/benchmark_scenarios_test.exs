@@ -1,9 +1,6 @@
 defmodule PtcRunner.Lisp.Integration.BenchmarkScenariosTest do
   @moduledoc """
-  E2E tests for PTC-Lisp benchmark scenarios (Levels 1-5).
-
-  These tests verify the interpreter correctly executes programs matching
-  the scenarios defined in PtcLispBenchmark.
+  Deterministic integration scenarios for representative PTC-Lisp programs.
   """
   use ExUnit.Case, async: true
 

@@ -115,11 +115,11 @@ name its re-home/delete condition. `unknown` is not a durable classification.
 
 | Area | Class | Retained behavior / destination |
 | --- | --- | --- |
-| `PtcRunner.Step`, `Step.Public` | delete | Native ownership moved to `Lisp.Result`; public execution is Kernel Result/Error. Delete the old public projection with the remaining SubAgent/session callers. |
+| `PtcRunner.Step`, `Step.Public` | deleted | Native ownership moved to `Lisp.Result`; public execution is Kernel Result/Error. |
 | `Kernel.ReplSession` | new path | Direct bounded evaluator continuation for definitions and `*1`/`*2`/`*3`, with transactional memory, Dispatcher-backed workflow capabilities, manifest configuration, and canonical session events. |
-| `PtcRunner.Session` | delete | Retained REPL behavior now lives in `Kernel.ReplSession`; delete the old public/upstream/legacy-TraceLog semantics with remaining callers. |
-| `PtcRunner.Context`, `PtcRunner.Turn` | delete | The evaluator context moved to neutral `Lisp.Context`; delete the old Turn type with legacy callers. |
-| `PtcRunner.Evidence*` | delete unless proven | Retain only if a current Kernel/TraceLog contract test demonstrates an independent need. |
+| `PtcRunner.Session` | deleted | Retained REPL behavior lives in `Kernel.ReplSession`; old public/upstream/legacy-TraceLog semantics were removed. |
+| `PtcRunner.Context`, `PtcRunner.Turn` | deleted | The evaluator context moved to neutral `Lisp.Context`; the old Turn type had no surviving caller. |
+| `PtcRunner.Evidence*` | deleted | No current Kernel/TraceLog contract required the product-specific evidence projection. |
 | `PtcRunner.Schema` / generated `priv/ptc_schema.json` | migrate | Re-evaluate against manifest/capability schemas; delete SubAgent protocol schema. |
 | `PtcRunner.PtcToolProtocol` | deleted | Native action policy moved to Lisp; the Kernel capability contract replaces it. |
 | `PtcRunner.Tool` | deleted | Neutral direct-evaluator normalization lives in `Lisp.Tool`; Kernel providers use `Capability`. |
@@ -161,9 +161,9 @@ This area is governed by [`tracelog-contract.md`](tracelog-contract.md).
 | `log.core` prelude | new path | Shipped swappable mission prelude over four explicitly granted trace-query capabilities; missing grants fail during environment assembly and workflow inheritance is structurally absent. |
 | `TraceLog.Analyzer` | migrate | No longer used by canonical viewer routes; delete after the temporary raw viewer and remaining legacy trace callers are removed. |
 | Trace memory sink | new path | `Kernel.EventSink` is the bounded in-memory source for Kernel runs, REPL integration, tests, and `log.core`; legacy memory sinks remain until REPL/viewer cutover. |
-| `Tracer`, `Tracer.Timeline`, Chrome exports | delete unless viewer requires | Move required facts to canonical events, then delete competing representations. |
-| `Metrics.Statistics`, `Metrics.TurnAnalysis` | delete/re-home | Optional experiment harness only if actively used. |
-| `PtcRunner.Kino.TraceTree` | delete | Remove with old Livebooks/Kino dependency. |
+| `Tracer`, `Tracer.Timeline` | deleted | The viewer uses canonical Kernel events; the competing in-memory trace representation was removed. |
+| `Metrics.Statistics`, `Metrics.TurnAnalysis` | deleted | No retained Kernel or experiment caller remained. |
+| `PtcRunner.Kino.TraceTree` | deleted | Removed after the public Step/Turn trace tree was superseded. |
 | `ptc_viewer/` | foundation | Per-instance host adapter delegates bounded run/turn/counter routes and the primary UI to shared `Kernel.TraceLog`; ordinary discovery excludes reserved private traces. Delete the legacy raw agent/plan fallback with the last old producer. Interactive Lab deferred. |
 
 ### Upstream and MCP

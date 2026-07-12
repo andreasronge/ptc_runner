@@ -7,7 +7,6 @@ defmodule PtcRunner.PreludeStore.ToolsTest do
   alias PtcRunner.Lisp.Result, as: Step
   alias PtcRunner.PreludeStore
   alias PtcRunner.PreludeStore.Tools
-  alias PtcRunner.TraceLog.TurnEvent
 
   @paged_source """
   (ns paged "Paged helpers.")
@@ -602,7 +601,7 @@ defmodule PtcRunner.PreludeStore.ToolsTest do
     end
   end
 
-  test "private source args are summarized before tool ledger and trace projections" do
+  test "private source args are summarized before the tool ledger" do
     {:ok, store} = PreludeStore.new()
     {:ok, prelude} = Tools.prelude()
 
@@ -624,13 +623,9 @@ defmodule PtcRunner.PreludeStore.ToolsTest do
            }
 
     refute inspect(step.tool_calls) =~ @paged_source
-
-    projection = TurnEvent.tool_call_summary(call)
-    refute inspect(projection) =~ @paged_source
-    assert projection["args_hash"] =~ ~r/\A[0-9a-f]{64}\z/
   end
 
-  test "private set-default metadata is public-filtered before tool ledger and traces" do
+  test "private set-default metadata is public-filtered before the tool ledger" do
     {:ok, store} = PreludeStore.new()
     {:ok, prelude} = Tools.prelude()
     assert {:ok, _} = PreludeStore.write(store, "paged", @paged_source)
@@ -645,10 +640,6 @@ defmodule PtcRunner.PreludeStore.ToolsTest do
     assert [%{name: "prelude_store_set_default", private: true} = call] = step.tool_calls
     assert call.args["metadata"] == %{"reason" => "verified"}
     refute inspect(step.tool_calls) =~ "secret"
-
-    projection = TurnEvent.tool_call_summary(call)
-    refute inspect(projection) =~ "secret"
-    assert projection["args_hash"] =~ ~r/\A[0-9a-f]{64}\z/
   end
 
   test "private non-map metadata is removed before tool ledger and traces" do
@@ -668,7 +659,6 @@ defmodule PtcRunner.PreludeStore.ToolsTest do
 
     assert write_call.args["metadata"] == %{}
     refute inspect(write_step.tool_calls) =~ "secret"
-    refute inspect(TurnEvent.tool_call_summary(write_call)) =~ "secret"
 
     assert {:ok, %Step{} = set_default_step} =
              Lisp.run(
@@ -682,7 +672,6 @@ defmodule PtcRunner.PreludeStore.ToolsTest do
 
     assert set_default_call.args["metadata"] == %{}
     refute inspect(set_default_step.tool_calls) =~ "secret"
-    refute inspect(TurnEvent.tool_call_summary(set_default_call)) =~ "secret"
   end
 
   test "private nested metadata is removed before tool ledger and traces" do
@@ -702,7 +691,6 @@ defmodule PtcRunner.PreludeStore.ToolsTest do
 
     assert write_call.args["metadata"] == %{}
     refute inspect(write_step.tool_calls) =~ "secret"
-    refute inspect(TurnEvent.tool_call_summary(write_call)) =~ "secret"
 
     assert {:ok, %Step{} = set_default_step} =
              Lisp.run(
@@ -716,7 +704,6 @@ defmodule PtcRunner.PreludeStore.ToolsTest do
 
     assert set_default_call.args["metadata"] == %{}
     refute inspect(set_default_step.tool_calls) =~ "secret"
-    refute inspect(TurnEvent.tool_call_summary(set_default_call)) =~ "secret"
   end
 
   defp sha256(source) do
