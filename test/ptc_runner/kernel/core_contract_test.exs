@@ -286,4 +286,25 @@ defmodule PtcRunner.Kernel.CoreContractTest do
                config
              )
   end
+
+  test "Program values expose only bounded opaque metadata in public results" do
+    {:ok, workflow} = WorkflowEnvironment.new([])
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, limits} = Limits.new()
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "program-projection")
+
+    {:ok, config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        mission_environment: mission,
+        input: %{},
+        limits: limits,
+        event_sink: sink
+      )
+
+    assert {:ok, %{value: %{program?: true, byte_size: 7, digest: digest}}} =
+             Kernel.run("(return (program (+ 1 2)))", config)
+
+    assert is_binary(digest)
+  end
 end

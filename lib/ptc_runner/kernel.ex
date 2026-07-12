@@ -350,7 +350,7 @@ defmodule PtcRunner.Kernel do
       {:ok, step} ->
         {:ok,
          %Result{
-           value: step.return |> kernel_return_value() |> Lisp.externalize_value(),
+           value: step.return |> kernel_return_value() |> project_kernel_value(),
            usage: RunState.usage(state),
            evaluation_memory: %{defined_count: map_size(step.memory)}
          }}
@@ -450,6 +450,18 @@ defmodule PtcRunner.Kernel do
 
   defp kernel_return_value({:__ptc_return__, value}), do: value
   defp kernel_return_value(value), do: value
+
+  defp project_kernel_value(%Program{} = program),
+    do: %{program?: true, byte_size: program.byte_size, digest: program.digest}
+
+  defp project_kernel_value(value) when is_list(value),
+    do: Enum.map(value, &project_kernel_value/1)
+
+  defp project_kernel_value(value) when is_map(value) and not is_struct(value) do
+    Map.new(value, fn {key, item} -> {project_kernel_value(key), project_kernel_value(item)} end)
+  end
+
+  defp project_kernel_value(value), do: Lisp.externalize_value(value)
 
   defp outcome({:ok, _result}), do: :ok
   defp outcome({:error, _error}), do: :error
