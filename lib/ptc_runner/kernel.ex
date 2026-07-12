@@ -2,6 +2,8 @@ defmodule PtcRunner.Kernel do
   @moduledoc false
 
   alias PtcRunner.Kernel.Action
+  alias PtcRunner.Kernel.BundleCompiler
+  alias PtcRunner.Kernel.Component
   alias PtcRunner.Kernel.InnerPrelude
   alias PtcRunner.Kernel.StateHandle
   alias PtcRunner.Lisp
@@ -79,6 +81,11 @@ defmodule PtcRunner.Kernel do
       compile_embedded_prelude(opts)
     end
   end
+
+  @doc "Compiles an explicit, component-ID addressed source bundle."
+  @spec compile_bundle([Component.t()]) ::
+          {:ok, PtcRunner.Kernel.FrozenBundle.t()} | {:error, map()}
+  def compile_bundle(components), do: BundleCompiler.compile(components)
 
   defp compile_preludes(opts, mission_tools) do
     cond do

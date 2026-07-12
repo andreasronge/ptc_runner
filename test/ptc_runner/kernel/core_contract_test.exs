@@ -1,7 +1,9 @@
 defmodule PtcRunner.Kernel.CoreContractTest do
   use ExUnit.Case, async: true
 
+  alias PtcRunner.Kernel
   alias PtcRunner.Kernel.Capability
+  alias PtcRunner.Kernel.Component
   alias PtcRunner.Kernel.Dispatcher
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.Limits
@@ -104,5 +106,29 @@ defmodule PtcRunner.Kernel.CoreContractTest do
 
     assert :ok = EventSink.emit(private, "run-started", %{"safe" => true})
     assert {:error, :event_sink_error} = EventSink.emit(private, "run-stopped", %{"safe" => true})
+  end
+
+  test "component bundles use component IDs for deterministic dependency ordering" do
+    {:ok, first} = Component.new(id: "first", source: "(ns first) (defn value [] 1)")
+
+    {:ok, second} =
+      Component.new(
+        id: "second",
+        source: "(ns second) (defn value [] 2)",
+        dependencies: ["first"]
+      )
+
+    assert {:ok,
+            %{component_ids: ["first", "second"], components: [first_component, second_component]}} =
+             Kernel.compile_bundle([second, first])
+
+    assert first_component.id == "first"
+    assert second_component.id == "second"
+
+    assert {:error, %{reason: :missing_component_dependency}} =
+             Kernel.compile_bundle([%{first | dependencies: ["missing"]}])
+
+    assert {:error, %{reason: :component_cycle}} =
+             Kernel.compile_bundle([%{first | dependencies: ["second"]}, second])
   end
 end
