@@ -43,14 +43,23 @@ defmodule PtcRunner.Kernel.RunBuilder do
 
   @spec load_and_build(binary(), ProviderRegistry.t()) ::
           {:ok, %{entry_source: binary(), config: RunConfig.t()}} | {:error, term()}
-  def load_and_build(path, registry) do
-    with {:ok, manifest} <- Manifest.load(path), do: build(manifest, registry)
+  def load_and_build(path, registry, opts \\ []) do
+    with {:ok, manifest} <- Manifest.load(path),
+         {:ok, manifest} <- maybe_override_input(manifest, opts),
+         do: build(manifest, registry)
   end
 
   @spec run(binary(), ProviderRegistry.t()) :: {:ok, term()} | {:error, term()}
-  def run(path, registry) do
-    with {:ok, built} <- load_and_build(path, registry),
+  def run(path, registry, opts \\ []) do
+    with {:ok, built} <- load_and_build(path, registry, opts),
          do: Kernel.run(built.entry_source, built.config)
+  end
+
+  defp maybe_override_input(manifest, opts) do
+    case Keyword.get(opts, :mission) do
+      nil -> {:ok, manifest}
+      path -> Manifest.override_input(manifest, path)
+    end
   end
 
   defp capabilities(manifest, registry, destination) do

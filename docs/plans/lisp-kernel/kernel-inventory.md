@@ -84,6 +84,7 @@ name its re-home/delete condition. `unknown` is not a durable classification.
 | Shipped agent/result libraries | new path | Slice 7 strict native action parsing, message loop, correction feedback, retry/backoff decisions, annotations, and opt-in uniform results; scripted tests cover success, prose/protocol correction, evaluation correction, explicit failure, provider failure, and quota exhaustion. |
 | `Kernel.Manifest` / `RunBuilder` | new path | Slice 8 strict duplicate-aware versioned JSON loader, manifest-relative confined sources/input, separate frozen bundles/environments, normalized limits/events/labels, generated qualified entry expression, and one shared build/run path. |
 | `Kernel.ProviderRegistry` | new path | Host-owned `llm`/`file-read` builders plus non-replacing embedder extensions; manifests select bounded names/config only and destination checks reject authority expansion. |
+| `mix ptc.run` | new path | Thin Slice 9 frontend over `RunBuilder`, with JSON output and a confined manifest-relative `--mission` input override. |
 
 ### Experimental Kernel implementation
 

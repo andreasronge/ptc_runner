@@ -68,6 +68,14 @@ defmodule PtcRunner.Kernel.Manifest do
 
   def load(_path), do: {:error, :invalid_manifest}
 
+  @spec override_input(t(), binary()) :: {:ok, t()} | {:error, term()}
+  def override_input(%__MODULE__{} = manifest, path) when is_binary(path) do
+    with {:ok, value} <- input(%{"path" => path}, manifest.directory),
+         do: {:ok, %{manifest | input: value}}
+  end
+
+  def override_input(_manifest, _path), do: {:error, :invalid_input}
+
   defp workflow(value, directory) when is_map(value) do
     with :ok <- exact_keys(value, ~w(components entry), ~w(components entry)),
          {:ok, components} <- components(value["components"], directory),
