@@ -1,6 +1,15 @@
 # Private Experiment Transcripts
 
-**Status:** approved exploratory implementation.
+**Status:** superseded at the public Kernel cutover.
+
+The evaluator-specific design below is retained only as historical rationale.
+Only the transcript mechanism was superseded: the shipped path persists
+canonical normal or explicitly private `.private.jsonl` events through
+`Kernel.TraceLog`; private files are mode `0600`, require an explicit private
+grant, and are omitted by normal directory queries and the viewer. The old
+dataset runner, oracle/scoring, comparisons, feedback A/B tasks, and generated
+reports were intentionally retired without replacement rather than becoming a
+second product surface.
 
 ## Question
 

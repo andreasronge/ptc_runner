@@ -86,17 +86,17 @@ name its re-home/delete condition. `unknown` is not a durable classification.
 | `Kernel.ProviderRegistry` | new path | Host-owned `llm`/`file-read` builders plus non-replacing embedder extensions; manifests select bounded names/config only and destination checks reject authority expansion. |
 | `mix ptc.run` | new path | Thin Slice 9 frontend over `RunBuilder`, with JSON output and a confined manifest-relative `--mission` input override. |
 
-### Experimental Kernel implementation
+### Experimental Kernel implementation (closed at public cutover)
 
 | Area | Class | Retained behavior / exit condition |
 | --- | --- | --- |
-| `lib/ptc_runner/kernel.ex` | experiment | Evidence/source for mechanisms. Replace at public cutover; do not refactor into target wholesale. |
-| `lib/ptc_runner/kernel/state_handle.ex` | migrate | Reuse atomic size-checked ownership in RunState; simplify leases after sequential confinement tests. |
-| `lib/ptc_runner/kernel/inner_prelude.ex` | migrate | Environment-specific frozen-bundle/`requires` validation, then delete old module. |
-| `lib/ptc_runner/kernel/action.ex` | delete | Parity is proven in shipped `agent.native`; delete this legacy implementation with the old Kernel/eval consumers at cutover. |
-| `lib/ptc_runner/kernel/eval.ex` and `kernel/eval/*` | experiment | Re-home/delete after private transcript work and thin experiment harness exist. |
-| `lib/ptc_runner/kernel/feedback_ab.ex` | delete | Delete with A/B variants, task, tests, and reports. |
-| `priv/kernel_feedback_variants/` | delete | Delete with feedback A/B harness. |
+| `lib/ptc_runner/kernel.ex` | new path | Cut over to the contract-only `compile_bundle/1` and `run/2` surface; bounded execution is owned by the internal `Kernel.Runner`. |
+| `lib/ptc_runner/kernel/state_handle.ex` | deleted | Atomic evaluation-memory ownership is implemented by `RunState`; the experiment handle and tests were removed. |
+| `lib/ptc_runner/kernel/inner_prelude.ex` | deleted | Frozen environment/bundle requirement validation superseded the role-specific experiment module. |
+| `lib/ptc_runner/kernel/action.ex` | deleted | Parity is proven in shipped `agent.native`; the legacy Elixir parser and tests were removed. |
+| `lib/ptc_runner/kernel/eval.ex` and `kernel/eval/*` | deleted | Transcript persistence/privacy moved to the shared REPL/TraceLog path. The benchmark runner, datasets, oracle/scoring, comparisons, reports, tasks, and tests were intentionally retired without a compatibility replacement. |
+| `lib/ptc_runner/kernel/feedback_ab.ex` | deleted | Removed with A/B variants, task, tests, and generated reports. |
+| `priv/kernel_feedback_variants/` | deleted | Removed with the feedback A/B harness. |
 
 ### SubAgent and surrounding platform
 
@@ -187,8 +187,8 @@ This area is governed by [`tracelog-contract.md`](tracelog-contract.md).
 | `ptc.smoke`, `ptc.install_babashka` | foundation | Retain while conformance uses Babashka. |
 | `bench.check` | migrate | Small deterministic runtime regression corpus. |
 | `parallel_workers` | delete | Delete with example. |
-| `ptc.kernel_feedback_ab` | delete | Delete with A/B harness. |
-| `ptc.kernel_eval` | experiment | Re-home to thin optional harness after transcript work. |
+| `ptc.kernel_feedback_ab` | deleted | Removed with the A/B harness. |
+| `ptc.kernel_eval` | deleted | Removed at public cutover; optional comparisons must use the shared manifest runner rather than a second Kernel product. |
 | `ptc.dna` | migrate | Keep through duplication audit; remove with `ex_dna` afterward if unused. |
 | release/smoke tasks | migrate | Retain only checks for shipped language/Kernel/viewer artifacts. |
 
@@ -201,14 +201,14 @@ This area is governed by [`tracelog-contract.md`](tracelog-contract.md).
 | `priv/` | migrate | Retain language/spec and rewritten Lisp libraries; delete prompts, variants, schemas, and other assets with their last consumers. |
 | `docs/guides/` | delete/replace | Extract concise Kernel, capability/prelude, TraceLog, REPL/runner docs first. |
 | `docs/conformance/`, specification, function reference, conformance gaps | foundation | Retain. |
-| `docs/plans/lisp-kernel/private-experiment-transcripts.md` | experiment | Complete/re-home transcript work; retain viewer contract rationale. |
+| `docs/plans/lisp-kernel/private-experiment-transcripts.md` | superseded | Historical rationale retained; canonical private JSONL persistence and viewer confinement replaced only the transcript mechanism. The experiment/scoring harness was intentionally retired. |
 | `docs/plans/future/`, `docs/plans/archive/` | migrate | Keep only rationale for surviving systems; delete rejected-system plans. |
 | `docs/guidelines/` | migrate | Keep active repository rules not already canonical in `AGENTS.md`. |
 | `examples/` | delete | Convert unique retained mechanisms into focused integration fixtures first. |
 | `demo/` | delete | Replace with optional thin Kernel scenario harness only if actively needed. |
 | `livebooks/` | delete/replace | Remove current set; add at most one maintained Kernel playground later. |
 | `blog/`, `images/` | delete/move | Move to website repository if needed. |
-| `reports/kernel_eval/` | delete | Extract durable conclusions; generated/private artifacts remain untracked. |
+| `reports/kernel_eval/` | deleted | Generated experiment reports and trace fixtures were removed with the evaluator harness. |
 | `bench/` | migrate | Small domain-blind deterministic corpus and baselines only. |
 | `scripts/` | migrate | Keep active release/repository automation for retained product. |
 | `.github/` | migrate | Remove demo/MCP/examples/old docs jobs; retain conformance/Kernel/viewer gates. |
