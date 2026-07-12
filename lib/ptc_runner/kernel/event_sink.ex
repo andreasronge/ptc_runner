@@ -36,6 +36,9 @@ defmodule PtcRunner.Kernel.EventSink do
   @spec dropped(t()) :: map()
   def dropped(sink), do: call(sink, :dropped)
 
+  @spec policy(t()) :: policy() | {:error, :event_sink_error}
+  def policy(sink), do: call(sink, :policy)
+
   @spec stop(t()) :: :ok
   def stop(sink), do: GenServer.stop(sink.pid, :normal)
 
@@ -69,6 +72,9 @@ defmodule PtcRunner.Kernel.EventSink do
 
   def handle_call({token, :dropped}, _from, %{token: token} = state),
     do: {:reply, state.dropped, state}
+
+  def handle_call({token, :policy}, _from, %{token: token} = state),
+    do: {:reply, state.policy, state}
 
   def handle_call({_token, _request}, _from, state),
     do: {:reply, {:error, :event_sink_error}, state}

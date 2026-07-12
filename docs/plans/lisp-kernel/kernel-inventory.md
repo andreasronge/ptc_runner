@@ -68,7 +68,7 @@ name its re-home/delete condition. `unknown` is not a durable classification.
 | `Kernel.RunState` | new path | Atomic deadline, counters, protocol exhaustion, serialized evaluation-memory lease, late-provider completion, closed status, and explicit teardown; dropped-event ownership remains with the bounded sink pending final observability integration. |
 | `Kernel.Dispatcher` | new path | Validation, atomic reservation/completion, remaining-deadline timeout, fault containment, bounds, uniform envelopes, and workflow/mission Lisp wiring. |
 | Host provider-registry interface | new path | Host-owned name-to-builder map; manifests can select names but never register executable code. |
-| `Kernel.EventSink` responsibility | new path | Canonical bounded owner-monitored memory sink integrated with run lifecycle; normal drops appear in terminal usage and private exhaustion returns `:event_sink_error`. Run/evaluation/capability/limit/annotation/drop-summary events are wired; external normal-sink failure and private flush/backpressure semantics remain for TraceLog integration. |
+| `Kernel.EventSink` responsibility | new path | Canonical bounded owner-monitored memory sink integrated with run lifecycle and the shared TraceLog loader; normal drops appear in terminal usage and private exhaustion returns `:event_sink_error`. Run/evaluation/capability/limit/annotation/drop-summary events are wired; external normal-sink failure and private flush/backpressure semantics remain for live persistence integration. |
 | `Kernel.Result` / `Kernel.Error` | new path | Only public Kernel outcomes. |
 | `Kernel.compile_bundle/1` | new path | Slice 2 in progress: bounded component-ID DAG, deterministic ordering, per-component validation, dependency namespace compilation, attested frozen artifacts, source hashes/provenance, prelude attachment, and explicit tool-requirement validation. Provider `requires` schema plus compile-time/heap/artifact limits remain open. |
 | Bundle compilation limits | new path | Component/edge/source/time/heap/artifact/diagnostic ceilings independent of the run deadline. |
@@ -152,13 +152,14 @@ This area is governed by [`tracelog-contract.md`](tracelog-contract.md).
 
 | Area | Class | Retained behavior / destination |
 | --- | --- | --- |
-| Canonical TraceLog event/envelope | foundation | One bounded schema shared by Kernel, capabilities, transcript harness, and viewer. |
-| JSONL handler/collector | migrate | Bounded ordered normal sink with dropped-event accounting. |
+| Canonical TraceLog event/envelope | new path | `Kernel.TraceLog` strictly validates the bounded V1 Kernel event schema, version, run/trace identity, sequence order, JSON data, and timestamps before derivation. Viewer adoption remains open. |
+| JSONL handler/collector | new path | Admin-owned append/reload now preserves canonical order under aggregate byte and descriptor-identity checks; wiring a live normal sink with dropped-event accounting remains open. |
 | Private transcript sink | experiment | Explicit fail-closed sink in experiment harness; re-home before evaluator deletion. |
-| `TraceLog.Introspection` | migrate | Simplified source-scoped run discovery, metadata, turns, counters, pagination, bounds. |
-| `log/` prelude | new path | Swappable mission prelude over explicitly granted trace capabilities. |
+| `Kernel.TraceLog` / `Kernel.TraceCapability` | new path | Shared source-scoped memory/file/directory loading, required run metadata, run/turn filters, counters, deterministic result-bounded pagination, source/query-bound cursors, duplicate-key rejection, explicit private grants, and uniform capability failures. |
+| Legacy `TraceLog.Introspection` | migrate | Replace remaining callers with `Kernel.TraceLog`, then delete the parallel SubAgent event/query implementation. |
+| `log.core` prelude | new path | Shipped swappable mission prelude over four explicitly granted trace-query capabilities; missing grants fail during environment assembly and workflow inheritance is structurally absent. |
 | `TraceLog.Analyzer` | migrate | Keep only shared query/index behavior required by viewer/log capability. |
-| Trace memory sink | migrate | Retain bounded sink if needed by REPL/tests/log capability. |
+| Trace memory sink | new path | `Kernel.EventSink` is the bounded in-memory source for Kernel runs, REPL integration, tests, and `log.core`; legacy memory sinks remain until REPL/viewer cutover. |
 | `Tracer`, `Tracer.Timeline`, Chrome exports | delete unless viewer requires | Move required facts to canonical events, then delete competing representations. |
 | `Metrics.Statistics`, `Metrics.TurnAnalysis` | delete/re-home | Optional experiment harness only if actively used. |
 | `PtcRunner.Kino.TraceTree` | delete | Remove with old Livebooks/Kino dependency. |

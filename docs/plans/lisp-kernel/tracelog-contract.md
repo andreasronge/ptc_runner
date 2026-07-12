@@ -182,6 +182,12 @@ Every collection query has:
 - one aggregate source-read byte cap;
 - bounded filter/tag/name lengths and counts.
 
+A cursor is bound to the source identity, query operation, and normalized
+filters that produced it. Changing filters or reusing a cursor for another
+operation fails as an invalid query; changing the source fails as
+`source-changed`. The caller may reduce or increase the page limit within the
+hard maximum without changing the selected result set.
+
 If a page would exceed the result ceiling, return the largest valid prefix plus
 explicit truncation/next-cursor metadata, or a stable bounded error. Never build
 an unbounded result and truncate only after allocation.
