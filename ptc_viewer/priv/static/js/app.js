@@ -61,6 +61,8 @@ function render() {
   const current = state.navStack[state.navStack.length - 1];
   if (current.type === 'agent') {
     renderAgentView(container, state, current.data);
+  } else if (current.type === 'kernel') {
+    renderKernelView(container, current.data);
   }
 
   // Scroll to the top of the content
@@ -146,6 +148,15 @@ function autoNavigate() {
 
 async function tryLoadFromApi() {
   try {
+    const kernelResp = await fetch('/api/kernel/runs?limit=100');
+    if (kernelResp.ok) {
+      const page = await kernelResp.json();
+      if (page.items?.length > 0) {
+        setupKernelRunPicker(page);
+        return;
+      }
+    }
+
     const resp = await fetch('/api/traces');
     if (resp.ok) {
       const traces = await resp.json();
@@ -156,6 +167,107 @@ async function tryLoadFromApi() {
   } catch {
     // Not running with API server, drag-drop only
   }
+}
+
+function setupKernelRunPicker(page, priorRuns = []) {
+  const runs = [...priorRuns, ...(page.items || [])];
+  const picker = document.getElementById('file-picker');
+  picker.innerHTML = `
+    <div class="file-picker-header" id="file-picker-toggle">
+      <h3>Kernel Runs <span class="file-picker-count">${runs.length}${page.truncated ? '+' : ''} runs</span></h3>
+      <span class="file-picker-expand">&#9662;</span>
+    </div>
+    <div class="file-picker-list">
+      ${runs.map(run => `
+        <div class="file-picker-item" data-run-id="${escapeHtml(run.run_id)}">
+          <div class="file-picker-main">
+            <span class="filename">${escapeHtml(run.name || run.run_id)}</span>
+            <span class="file-meta">
+              <span class="trace-kind badge-${run.status === 'ok' ? 'agent' : 'error'}">${escapeHtml(run.status || 'incomplete')}</span>
+              ${run.start_timestamp ? `<span class="modified">${formatDate(run.start_timestamp)}</span>` : ''}
+              <span class="size">${run.subordinate_evaluations || 0} evaluations</span>
+            </span>
+          </div>
+          <div class="file-picker-query">${escapeHtml(run.run_id)}</div>
+        </div>
+      `).join('')}
+      ${page.next_cursor ? '<button class="btn kernel-load-more" type="button">Load more runs</button>' : ''}
+    </div>
+  `;
+  picker.style.display = 'block';
+  picker.querySelector('#file-picker-toggle').addEventListener('click', () => picker.classList.toggle('collapsed'));
+  picker.querySelectorAll('.file-picker-item').forEach(item => {
+    item.addEventListener('click', async () => {
+      item.classList.add('loading');
+      await loadKernelRun(item.dataset.runId);
+      item.classList.remove('loading');
+    });
+  });
+  picker.querySelector('.kernel-load-more')?.addEventListener('click', async event => {
+    event.currentTarget.disabled = true;
+    const response = await fetch(`/api/kernel/runs?limit=100&cursor=${encodeURIComponent(page.next_cursor)}`);
+    if (response.ok) setupKernelRunPicker(await response.json(), runs);
+    else event.currentTarget.disabled = false;
+  });
+}
+
+async function loadKernelRun(runId) {
+  const [runResp, turnsResp] = await Promise.all([
+    fetch(`/api/kernel/runs/${encodeURIComponent(runId)}`),
+    fetch(`/api/kernel/runs/${encodeURIComponent(runId)}/turns?limit=100`)
+  ]);
+  if (!runResp.ok || !turnsResp.ok) return;
+
+  const metadata = await runResp.json();
+  const turns = await turnsResp.json();
+  state.navStack = [];
+  navigateTo({ type: 'kernel', label: metadata.name || runId, data: { metadata, turns } });
+}
+
+function renderKernelView(container, { metadata, turns }) {
+  const events = turns.items || [];
+  container.innerHTML = `
+    <section class="kernel-run">
+      <h2>${escapeHtml(metadata.name || metadata.run_id)}</h2>
+      <div class="kernel-summary">
+        <span>Status: ${escapeHtml(metadata.status || 'incomplete')}</span>
+        <span>Run: ${escapeHtml(metadata.run_id)}</span>
+        <span>Trace: ${escapeHtml(metadata.trace_id || '')}</span>
+        <span>Duration: ${metadata.duration_ms == null ? '—' : `${metadata.duration_ms} ms`}</span>
+      </div>
+      ${turns.next_cursor ? `<p class="drop-hint">Showing ${events.length} canonical events.</p>` : ''}
+      <div class="kernel-events">
+        ${events.map(event => `
+          <article class="kernel-event">
+            <header><strong>${event.sequence}. ${escapeHtml(event.type)}</strong><span>${escapeHtml(event.timestamp)}</span></header>
+            <pre>${escapeHtml(JSON.stringify(event.data, null, 2))}</pre>
+          </article>
+        `).join('')}
+      </div>
+      ${turns.next_cursor ? '<button class="btn kernel-load-more" type="button">Load more events</button>' : ''}
+    </section>
+  `;
+  container.querySelector('.kernel-load-more')?.addEventListener('click', async event => {
+    event.currentTarget.disabled = true;
+    const response = await fetch(
+      `/api/kernel/runs/${encodeURIComponent(metadata.run_id)}/turns?limit=100&cursor=${encodeURIComponent(turns.next_cursor)}`
+    );
+    if (!response.ok) {
+      event.currentTarget.disabled = false;
+      return;
+    }
+
+    const nextPage = await response.json();
+    const accumulated = {
+      metadata,
+      turns: { ...nextPage, items: [...events, ...(nextPage.items || [])] }
+    };
+    const current = state.navStack[state.navStack.length - 1];
+    if (current?.type === 'kernel' && current.data.metadata.run_id === metadata.run_id) {
+      current.data = accumulated;
+    }
+    renderKernelView(container, accumulated);
+  });
 }
 
 function setupFilePicker(traces) {

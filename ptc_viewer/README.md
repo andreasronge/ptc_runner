@@ -1,101 +1,86 @@
 # PTC Trace Viewer
 
-A web-based trace viewer for [PtcRunner](https://github.com/andreasronge/ptc_runner) execution traces. Visualizes LLM agent runs, multi-task execution plans, and parallel operations as interactive DAGs and turn-based timelines.
+A local, read-only web UI for canonical PtcRunner Kernel traces. It uses the
+same source-scoped `Kernel.TraceLog` projections as `log.core`, so run metadata,
+turns, filters, counters, pagination, and validation have one implementation.
 
-The meta planner decomposes a mission into parallel tasks, assigns each to a specialized agent, and orchestrates execution across phases. The viewer lets you inspect the full execution — from the high-level DAG down to individual agent turns.
+The legacy raw JSONL views remain as a temporary fallback during the Kernel
+migration. They are not the canonical query path.
 
-![Planner overview showing task execution DAG with phases, status, and dependency edges](../images/planner_view.png)
+## Quick start
 
-![Agent view showing turn-by-turn LLM interaction with thinking, PTC-Lisp program, and tool output](../images/agent_view.png)
-
-## Quick Start
-
-```bash
-# From the ptc_runner root directory
-mix ptc.viewer --trace-dir examples/page_index/traces
-```
-
-This starts a local web server (default port 4123) and opens the viewer in your browser.
-
-## How It Works
-
-PtcRunner's tracer emits `.jsonl` files containing timestamped events (LLM calls, tool executions, task start/stop, plan generation). The viewer parses these events and renders two levels of visualization:
-
-### Overview (Plan Traces)
-
-For traces containing `plan.generated` and `execution.start` events, the viewer shows:
-
-- **Summary stats** — total duration, LLM calls, token usage (with in/out/cached breakdown), task count
-- **Timeline** — horizontal bar showing LLM and tool execution segments proportional to duration
-- **DAG graph** — D3-rendered directed acyclic graph of task dependencies, laid out by execution phase. Nodes are colored by status (green=ok, red=error, blue=running, gray=pending) and badged by output mode (PTC-Lisp/JSON/SYNTH). Supports replan tabs when the executor retries with a modified plan.
-- **Plan card** — mission statement, agent definitions, and task list from the generated plan
-
-### Agent View (Single-Agent Traces)
-
-For individual agent traces, the viewer shows:
-
-- **Agent header** — name, output mode, duration, token count
-- **Turn lane** — horizontal row of clickable pills, one per LLM turn. Color indicates status (green=returned, red=error). Navigate with arrow keys.
-- **Turn detail** — expandable sections for each turn: system prompt, thinking block, PTC-Lisp program (syntax-highlighted), tool calls with arguments/results, parallel execution fork-join diagrams, and final output
-
-### Navigation
-
-Breadcrumb-based drill-down: click a DAG node or child-agent tool call to navigate into that agent's trace. Press Escape to go back up.
-
-## Usage
-
-### Mix Task
+From the PtcRunner root:
 
 ```bash
-mix ptc.viewer [options]
+mix ptc.viewer --trace-dir traces
 ```
 
-| Option | Default | Description |
-|--------|---------|-------------|
-| `--port` | 4123 | Port to listen on |
-| `--trace-dir` | `traces` | Directory containing `.jsonl` trace files |
-| `--no-open` | false | Don't auto-open browser |
+The root task installs `PtcRunner.Kernel.ViewerAdapter` automatically, starts a
+local server on port 4123, and opens the browser. Use `--port`, `--trace-dir`,
+or `--no-open` to override those defaults.
 
-### Programmatic
+The UI first lists bounded canonical run summaries. Selecting a run loads its
+metadata and turn events through the shared Kernel query layer. If the viewer
+is embedded without a Kernel adapter, the UI falls back to the legacy raw-file
+picker.
+
+Private traces use the reserved `.private.jsonl` suffix. The standard viewer
+directory source and raw-file routes omit that suffix; accessing private data
+requires a separate host-controlled private source grant outside this UI.
+
+## Programmatic use
+
+The standalone viewer deliberately has no dependency on the PtcRunner host.
+The host supplies a module or three-argument function implementing
+`PtcViewer.KernelTraceAdapter`:
 
 ```elixir
-{:ok, pid} = PtcViewer.start(
-  port: 4123,
-  trace_dir: "path/to/traces"
-)
+{:ok, pid} =
+  PtcViewer.start(
+    port: 4123,
+    trace_dir: "traces",
+    kernel_trace_adapter: PtcRunner.Kernel.ViewerAdapter,
+    open: false
+  )
 
-# Later...
 PtcViewer.stop(pid)
 ```
 
-### Drag-and-Drop
+Configuration is scoped to the individual server instance; starting another
+viewer does not mutate application-global adapter or trace-directory state.
 
-The viewer also works without a server. Open `index.html` directly and drag `.jsonl` files onto the drop zone. Load the main trace plus its child traces to see the full hierarchy.
+## HTTP API
+
+| Endpoint | Shared Kernel operation |
+| --- | --- |
+| `GET /api/kernel/runs` | `list_runs` with bounded filters and pagination |
+| `GET /api/kernel/runs/:run_id` | `get_run` |
+| `GET /api/kernel/runs/:run_id/turns` | `list_turns` with bounded filters and pagination |
+| `GET /api/kernel/counters` | `counters` |
+
+Query parameters are passed to `Kernel.TraceLog`; `limit` is decoded as an
+integer and `tags` as a JSON object. The routes preserve not-found, invalid
+query, unavailable-adapter, and adapter-failure classifications.
+
+Temporary legacy endpoints:
+
+| Endpoint | Description |
+| --- | --- |
+| `GET /api/traces` | List public `.jsonl` files under the configured directory |
+| `GET /api/traces/:filename` | Read one bounded public JSONL file |
+
+Raw reads reject traversal, symbolic links, non-regular files, oversized
+files, files that change between inspection and opening, and private-suffixed
+traces.
 
 ## Architecture
 
-```
-Elixir (Plug + Bandit)          Browser (ES Modules + D3.js)
-──────────────────────          ────────────────────────────
-GET /api/traces      ──────>    app.js        (state, navigation)
-GET /api/traces/:file ─────>    parser.js     (JSONL parsing, event pairing, DAG model)
-GET /api/plans       ──────>    overview.js   (summary, timeline, plan card)
-GET /api/plans/:file  ─────>    dag.js        (D3 SVG DAG rendering)
-Plug.Static (/, css, js) ──>    agent-view.js (turn lane, turn detail)
-                                fork-join.js  (D3 parallel execution diagram)
-                                timeline.js   (horizontal timeline bar)
-                                highlight.js  (PTC-Lisp syntax highlighting)
-                                tooltip.js    (hover tooltips)
-                                utils.js      (formatting helpers)
-```
+The root-owned adapter constructs a `Kernel.TraceLog` from the configured
+directory for every query. The viewer owns only HTTP argument decoding and
+rendering; it does not duplicate trace validation or run derivation. Adapter
+configuration is passed through the Bandit/Plug instance rather than global
+application environment.
 
-## API
-
-| Endpoint | Description |
-|----------|-------------|
-| `GET /api/traces` | List `.jsonl` files with filename, size, modified date |
-| `GET /api/traces/:filename` | Serve trace file content (NDJSON) |
-| `GET /api/plans` | List `.json` files with filename, size, modified date |
-| `GET /api/plans/:filename` | Serve plan file content (JSON) |
-
-All file access uses `Path.basename/1` to prevent path traversal.
+The browser assets still contain the old agent/plan renderers for raw-trace
+fallback. They can be deleted when the public Kernel cutover removes the last
+legacy trace producer.

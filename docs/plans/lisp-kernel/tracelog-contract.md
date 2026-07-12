@@ -229,6 +229,9 @@ programs, and prelude source under explicit local-only controls. Those fields do
 not appear in normal queries without a distinct private source grant.
 Private JSONL destinations are restricted to owner read/write permissions
 before any event payload is appended; a permission failure aborts the append.
+They use the reserved `.private.jsonl` suffix. Normal file/directory grants and
+viewer discovery reject or omit that suffix; loading it requires an explicit
+private file or private-directory source grant.
 
 Workflow annotations are host stamped and cannot forge canonical events.
 

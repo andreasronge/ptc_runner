@@ -18,6 +18,7 @@ defmodule Mix.Tasks.Ptc.Viewer do
       |> maybe_add(:port, opts[:port])
       |> maybe_add(:trace_dir, opts[:trace_dir])
       |> maybe_add(:open, if(opts[:no_open], do: false, else: true))
+      |> maybe_add(:kernel_trace_adapter, default_kernel_adapter())
 
     case PtcViewer.start(viewer_opts) do
       {:ok, _pid} ->
@@ -33,4 +34,9 @@ defmodule Mix.Tasks.Ptc.Viewer do
 
   defp maybe_add(opts, _key, nil), do: opts
   defp maybe_add(opts, key, value), do: Keyword.put(opts, key, value)
+
+  defp default_kernel_adapter do
+    adapter = Module.concat([PtcRunner, Kernel, ViewerAdapter])
+    if Code.ensure_loaded?(adapter), do: adapter, else: nil
+  end
 end

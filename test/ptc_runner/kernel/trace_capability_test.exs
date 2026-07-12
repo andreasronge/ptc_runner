@@ -144,6 +144,37 @@ defmodule PtcRunner.Kernel.TraceCapabilityTest do
   end
 
   @tag :tmp_dir
+  test "private JSONL sources require reserved names and explicit grants", %{tmp_dir: directory} do
+    normal_path = Path.join(directory, "normal.jsonl")
+    private_path = Path.join(directory, "secret.private.jsonl")
+    normal_event = decoded_event("normal", 1, "run-started")
+    private_event = decoded_event("private", 1, "run-started")
+
+    assert :ok = TraceLog.append_jsonl(normal_path, [normal_event])
+    assert :ok = TraceLog.append_jsonl(private_path, [private_event], private: true)
+
+    assert {:error, :invalid_trace_log} =
+             TraceLog.append_jsonl(normal_path, [private_event], private: true)
+
+    assert {:error, :invalid_trace_log} = TraceLog.append_jsonl(private_path, [normal_event])
+    assert {:error, :invalid_trace_log} = TraceLog.new(source: {:file, private_path})
+    assert {:ok, private_log} = TraceLog.new(source: {:private_file, private_path})
+    assert {:ok, normal_log} = TraceLog.new(source: {:directory, directory})
+
+    assert {:ok, private_directory_log} =
+             TraceLog.new(source: {:private_directory, directory})
+
+    assert {:ok, %{"items" => [%{"run_id" => "normal", "source" => "sanitized"}]}} =
+             TraceLog.query(normal_log, :list_runs, %{})
+
+    assert {:ok, %{"items" => [%{"run_id" => "private", "source" => "private"}]}} =
+             TraceLog.query(private_log, :list_runs, %{})
+
+    assert {:ok, %{"items" => [%{"run_id" => "private", "source" => "private"}]}} =
+             TraceLog.query(private_directory_log, :list_runs, %{})
+  end
+
+  @tag :tmp_dir
   test "file and directory grants reject malformed, duplicate, changed, and oversized sources", %{
     tmp_dir: directory
   } do

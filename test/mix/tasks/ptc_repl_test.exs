@@ -78,7 +78,7 @@ defmodule Mix.Tasks.Ptc.ReplTest do
   test "a private manifest restricts the trace before appending events", %{tmp_dir: directory} do
     component_path = Path.join(directory, "helpers.lisp")
     manifest_path = Path.join(directory, "private.json")
-    trace_path = Path.join(directory, "private.jsonl")
+    trace_path = Path.join(directory, "private.private.jsonl")
     File.write!(component_path, "(ns helpers) (defn answer [] 42)")
 
     File.write!(

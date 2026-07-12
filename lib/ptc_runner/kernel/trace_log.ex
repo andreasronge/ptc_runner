@@ -78,7 +78,8 @@ defmodule PtcRunner.Kernel.TraceLog do
     with true <- Keyword.keys(opts) -- [:max_source_bytes, :private] == [],
          max_bytes when is_integer(max_bytes) and max_bytes > 0 <-
            Keyword.get(opts, :max_source_bytes, @default_source_bytes),
-         private? when is_boolean(private?) <- Keyword.get(opts, :private, false) do
+         private? when is_boolean(private?) <- Keyword.get(opts, :private, false),
+         true <- private_path?(path) == private? do
       path = Path.expand(path)
 
       :global.trans({__MODULE__, path}, fn ->
@@ -282,9 +283,15 @@ defmodule PtcRunner.Kernel.TraceLog do
   end
 
   defp validate_source({:file, path}) when is_binary(path) do
-    case File.lstat(path) do
-      {:ok, %File.Stat{type: :regular}} -> {:ok, {:file, Path.expand(path)}, :sanitized}
-      _ -> {:error, :invalid_trace_log}
+    case {private_path?(path), File.lstat(path)} do
+      {true, _stat} ->
+        {:error, :invalid_trace_log}
+
+      {false, {:ok, %File.Stat{type: :regular}}} ->
+        {:ok, {:file, Path.expand(path)}, :sanitized}
+
+      _ ->
+        {:error, :invalid_trace_log}
     end
   end
 
@@ -299,9 +306,12 @@ defmodule PtcRunner.Kernel.TraceLog do
   end
 
   defp validate_source({:private_file, path}) when is_binary(path) do
-    case File.lstat(path) do
-      {:ok, %File.Stat{type: :regular}} -> {:ok, {:file, Path.expand(path)}, :private}
-      _ -> {:error, :invalid_trace_log}
+    case {private_path?(path), File.lstat(path)} do
+      {true, {:ok, %File.Stat{type: :regular}}} ->
+        {:ok, {:file, Path.expand(path)}, :private}
+
+      _ ->
+        {:error, :invalid_trace_log}
     end
   end
 
@@ -332,10 +342,11 @@ defmodule PtcRunner.Kernel.TraceLog do
          do: validate_loaded(events, max_bytes)
   end
 
-  defp load(%__MODULE__{source: {:directory, directory}, max_source_bytes: max_bytes}) do
+  defp load(%__MODULE__{source: {:directory, directory}, max_source_bytes: max_bytes} = trace_log) do
     with {:ok, %File.Stat{type: :directory}} <- File.lstat(directory),
          {:ok, names} <- File.ls(directory),
-         {:ok, events} <- load_files(directory, supported_names(names), max_bytes) do
+         {:ok, events} <-
+           load_files(directory, supported_names(names, trace_log.source_kind), max_bytes) do
       validate_loaded(events, max_bytes)
     else
       {:error, reason} = error when reason in [:source_limit_exceeded, :malformed_source] ->
@@ -346,9 +357,12 @@ defmodule PtcRunner.Kernel.TraceLog do
     end
   end
 
-  defp supported_names(names) do
+  defp supported_names(names, source_kind) do
     names
-    |> Enum.filter(&(Path.basename(&1) == &1 and String.ends_with?(&1, ".jsonl")))
+    |> Enum.filter(fn name ->
+      Path.basename(name) == name and String.ends_with?(name, ".jsonl") and
+        private_path?(name) == (source_kind == :private)
+    end)
     |> Enum.sort()
   end
 
@@ -837,4 +851,6 @@ defmodule PtcRunner.Kernel.TraceLog do
     do: Map.new(value, fn {key, item} -> {to_string(key), normalize(item)} end)
 
   defp normalize(value), do: value
+
+  defp private_path?(path), do: String.ends_with?(path, ".private.jsonl")
 end

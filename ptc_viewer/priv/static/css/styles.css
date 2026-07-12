@@ -1149,3 +1149,46 @@ input[type="file"] { display: none; }
   flex-wrap: wrap;
   gap: 4px;
 }
+
+/* === Canonical Kernel runs === */
+.kernel-run {
+  max-width: 1100px;
+  margin: 0 auto;
+}
+
+.kernel-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  color: var(--muted);
+  margin-bottom: 18px;
+}
+
+.kernel-event {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  margin-bottom: 10px;
+  overflow: hidden;
+}
+
+.kernel-event header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  color: var(--muted);
+}
+
+.kernel-event pre {
+  margin: 0;
+  padding: 12px;
+  overflow-x: auto;
+  font-size: 12px;
+}
+
+.kernel-load-more {
+  display: block;
+  margin: 14px auto;
+}

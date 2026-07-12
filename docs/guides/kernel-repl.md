@@ -33,6 +33,8 @@ mix ptc.repl --manifest ptc.json --trace trace.jsonl
 ```
 
 Private event policies require an explicit private manifest selection; the
-REPL restricts a persisted private trace file to owner read/write permissions.
+REPL requires the reserved `.private.jsonl` suffix and restricts the file to
+owner read/write permissions before appending event data. Normal directory
+grants and the viewer do not discover private-suffixed traces.
 The resulting file uses the same `Kernel.TraceLog` loader and query semantics
 as `log.core` and the viewer integration.
