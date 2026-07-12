@@ -1,9 +1,9 @@
 defmodule PtcRunner.SubAgent.Namespace.Data do
   @moduledoc "Renders the data/ namespace section."
 
+  alias PtcRunner.Lisp.Signature.Renderer
+  alias PtcRunner.Lisp.TypeVocabulary
   alias PtcRunner.SubAgent.Namespace.SampleFormatter
-  alias PtcRunner.SubAgent.Namespace.TypeVocabulary
-  alias PtcRunner.SubAgent.Signature.Renderer
 
   @name_width 30
 

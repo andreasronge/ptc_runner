@@ -46,10 +46,10 @@ defmodule PtcRunner.PtcToolProtocol do
   """
 
   alias PtcRunner.Lisp
+  alias PtcRunner.Lisp.Signature
   alias PtcRunner.SubAgent.Definition
   alias PtcRunner.SubAgent.Loop.JsonHandler
   alias PtcRunner.SubAgent.Loop.TurnFeedback
-  alias PtcRunner.SubAgent.Signature
 
   # ----------------------------------------------------------------
   # Capability-profile description constants
@@ -415,7 +415,7 @@ defmodule PtcRunner.PtcToolProtocol do
   @doc """
   Parse a PTC signature string for use by out-of-tree callers.
 
-  Thin wrapper over `PtcRunner.SubAgent.Signature.parse/1`. Per § 13.1
+  Thin wrapper over `PtcRunner.Lisp.Signature.parse/1`. Per § 13.1
   of `Plans/ptc-runner-mcp-server.md`, `:ptc_runner_mcp` consumes
   signatures exclusively through this function so the parser can
   later move out of the `SubAgent` namespace without breaking the MCP

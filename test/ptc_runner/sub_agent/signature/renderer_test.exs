@@ -1,8 +1,8 @@
-defmodule PtcRunner.SubAgent.Signature.RendererTest do
+defmodule PtcRunner.Lisp.Signature.RendererTest do
   use ExUnit.Case, async: true
-  doctest PtcRunner.SubAgent.Signature.Renderer
+  doctest PtcRunner.Lisp.Signature.Renderer
 
-  alias PtcRunner.SubAgent.Signature.Renderer
+  alias PtcRunner.Lisp.Signature.Renderer
 
   describe "to_lisp_key/1" do
     test "converts snake_case to kebab-case" do

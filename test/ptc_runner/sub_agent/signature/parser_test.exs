@@ -1,7 +1,7 @@
-defmodule PtcRunner.SubAgent.Signature.ParserTest do
+defmodule PtcRunner.Lisp.Signature.ParserTest do
   use ExUnit.Case
 
-  alias PtcRunner.SubAgent.Signature.Parser
+  alias PtcRunner.Lisp.Signature.Parser
 
   describe "parse/1 - primitives" do
     test "parses :string" do

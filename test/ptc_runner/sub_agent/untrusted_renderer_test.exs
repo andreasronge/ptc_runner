@@ -1,9 +1,9 @@
-defmodule PtcRunner.SubAgent.UntrustedRendererTest do
+defmodule PtcRunner.Lisp.UntrustedRendererTest do
   use ExUnit.Case, async: true
 
-  alias PtcRunner.SubAgent.UntrustedRenderer
+  alias PtcRunner.Lisp.UntrustedRenderer
 
-  doctest PtcRunner.SubAgent.UntrustedRenderer
+  doctest PtcRunner.Lisp.UntrustedRenderer
 
   describe "wrap/2" do
     test "wraps content in XML-style data envelope" do

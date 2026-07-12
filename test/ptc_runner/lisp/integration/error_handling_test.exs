@@ -7,7 +7,7 @@ defmodule PtcRunner.Lisp.Integration.ErrorHandlingTest do
   use ExUnit.Case, async: true
 
   alias PtcRunner.Lisp
-  alias PtcRunner.Step
+  alias PtcRunner.Lisp.Result, as: Step
 
   describe "invalid programs - parse errors" do
     test "missing closing paren" do

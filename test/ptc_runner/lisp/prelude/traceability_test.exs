@@ -25,7 +25,7 @@ defmodule PtcRunner.Lisp.Prelude.TraceabilityTest do
   alias PtcRunner.Lisp.Prelude
   alias PtcRunner.Lisp.Prelude.Compiler
   alias PtcRunner.Lisp.Prelude.PromptInventory
-  alias PtcRunner.Step
+  alias PtcRunner.Lisp.Result, as: Step
 
   @crm_source """
   (ns crm

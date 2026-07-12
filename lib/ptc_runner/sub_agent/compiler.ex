@@ -20,7 +20,7 @@ defmodule PtcRunner.SubAgent.Compiler do
   See `PtcRunner.SubAgent.compile/2` for the public API.
   """
 
-  alias PtcRunner.Step.Native
+  alias PtcRunner.Lisp.Result, as: Native
   alias PtcRunner.Step.Public, as: PublicStep
   alias PtcRunner.SubAgent.CompiledAgent
   alias PtcRunner.SubAgent.Definition

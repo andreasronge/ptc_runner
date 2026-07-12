@@ -28,15 +28,15 @@ defmodule PtcRunner.Lisp.Eval do
   alias PtcRunner.Lisp.ExecutionError
   require PtcRunner.Lisp.ExecutionError
   alias PtcRunner.Lisp.Format.Var
+  alias PtcRunner.Lisp.KeyNormalizer
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
+  alias PtcRunner.Lisp.Metadata
   alias PtcRunner.Lisp.Runtime.Callable
   alias PtcRunner.Lisp.Runtime.Collection.Normalize
   alias PtcRunner.Lisp.RuntimeCallable
   alias PtcRunner.Lisp.SourceAtoms
-  alias PtcRunner.PreludeCandidate
-  alias PtcRunner.SubAgent.KeyNormalizer
-  alias PtcRunner.SubAgent.UntrustedRenderer
-  alias PtcRunner.TraceContext
+  alias PtcRunner.Lisp.TraceContext
+  alias PtcRunner.Lisp.UntrustedRenderer
 
   import PtcRunner.Lisp.Runtime, only: [flex_get: 2]
 
@@ -544,7 +544,7 @@ defmodule PtcRunner.Lisp.Eval do
                 {:ok, {:ok, value, nil, nil, prelude_call_counts}}
             end
           rescue
-            e in PtcRunner.ToolExecutionError ->
+            e in PtcRunner.Lisp.ToolError ->
               {:error, {:pmap_error, "tool '#{e.tool_name}' failed: #{e.message}"}}
 
             e in ExecutionError ->
@@ -1459,7 +1459,7 @@ defmodule PtcRunner.Lisp.Eval do
 
     if error do
       # Throw a special exception that carries the eval_ctx so tool_calls aren't lost
-      raise PtcRunner.ToolExecutionError,
+      raise PtcRunner.Lisp.ToolError,
         message: error,
         eval_ctx: eval_ctx2,
         tool_name: tool_name
@@ -1522,7 +1522,7 @@ defmodule PtcRunner.Lisp.Eval do
         {key, source_arg_summary(source)}
 
       {key, metadata} when key in ["metadata", :metadata] ->
-        {key, PreludeCandidate.public_metadata(metadata, complex: :drop)}
+        {key, Metadata.public(metadata, complex: :drop)}
 
       {key, value} ->
         {key, redact_source_args(value)}

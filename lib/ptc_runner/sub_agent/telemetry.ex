@@ -56,7 +56,7 @@ defmodule PtcRunner.SubAgent.Telemetry do
   Convert to milliseconds with `System.convert_time_unit(duration, :native, :millisecond)`.
   """
 
-  alias PtcRunner.TraceContext
+  alias PtcRunner.Lisp.TraceContext
 
   @prefix [:ptc_runner, :sub_agent]
 

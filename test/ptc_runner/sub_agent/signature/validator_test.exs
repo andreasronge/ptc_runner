@@ -1,7 +1,7 @@
-defmodule PtcRunner.SubAgent.Signature.ValidatorTest do
+defmodule PtcRunner.Lisp.Signature.ValidatorTest do
   use ExUnit.Case
 
-  alias PtcRunner.SubAgent.Signature.Validator
+  alias PtcRunner.Lisp.Signature.Validator
 
   describe "validate/2 - primitives" do
     test "validates string" do

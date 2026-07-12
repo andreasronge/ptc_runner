@@ -15,7 +15,7 @@ defmodule PtcRunner.Lisp.Prelude.DiscoveryTest do
 
   alias PtcRunner.Lisp.Parser
   alias PtcRunner.Lisp.Prelude.Compiler
-  alias PtcRunner.Step
+  alias PtcRunner.Lisp.Result, as: Step
 
   # A prelude with: a :prompt export (`get-user`), a :discoverable export
   # (`list-users`), and a PRIVATE helper (`normalize-id`) with no export record.

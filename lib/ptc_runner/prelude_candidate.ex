@@ -7,14 +7,13 @@ defmodule PtcRunner.PreludeCandidate do
   and private environment are never exposed.
   """
 
+  alias PtcRunner.Lisp.Metadata
   alias PtcRunner.Lisp.Prelude
   alias PtcRunner.Lisp.Prelude.Export
 
   @default_source_bytes 64 * 1024
   @default_metadata_bytes 8 * 1024
   @default_origin_bytes 128
-  @public_metadata_keys ~w(reason parent_version parent_checksum source_session_id created_by
-                           requires_preludes prelude_deps)
 
   @type origin :: {:file, Path.t()} | {:memory, term()} | {:upstream, term()} | nil
 
@@ -112,56 +111,7 @@ defmodule PtcRunner.PreludeCandidate do
 
   @doc "Filters untrusted metadata to documented public keys and byte bounds."
   @spec public_metadata(map(), keyword()) :: map()
-  def public_metadata(metadata, opts \\ [])
-
-  def public_metadata(metadata, opts) when is_map(metadata) do
-    max_bytes = byte_bound(opts, :max_metadata_bytes, @default_metadata_bytes)
-
-    metadata
-    |> Enum.reduce(%{}, fn {key, value}, acc ->
-      key = normalize_key(key)
-
-      cond do
-        # Dependency keys get structural (JSON-safe) projections instead of
-        # the generic inspect/drop handling: pins and declarations must
-        # survive both the outbound echo AND the inbound Lisp-op filter
-        # (`complex: :drop` would silently strip them as complex values).
-        key == "prelude_deps" ->
-          case public_pins(value) do
-            [] -> acc
-            pins -> Map.put(acc, key, pins)
-          end
-
-        key == "requires_preludes" ->
-          case public_ref_list(value) do
-            [] -> acc
-            refs -> Map.put(acc, key, refs)
-          end
-
-        key in @public_metadata_keys ->
-          case public_metadata_value(value, max_bytes, Keyword.get(opts, :complex, :inspect)) do
-            :drop -> acc
-            public_value -> Map.put(acc, key, public_value)
-          end
-
-        true ->
-          acc
-      end
-    end)
-  end
-
-  def public_metadata(_metadata, _opts), do: %{}
-
-  defp public_ref_list(refs) when is_list(refs), do: Enum.filter(refs, &is_binary/1)
-  defp public_ref_list(_), do: []
-
-  defp public_pins(value) do
-    %{"prelude_deps" => value}
-    |> dep_pins()
-    |> Enum.map(fn pin ->
-      %{"id" => pin.id, "version" => pin.version, "checksum" => pin.checksum}
-    end)
-  end
+  def public_metadata(metadata, opts \\ []), do: Metadata.public(metadata, opts)
 
   @doc "Returns a bounded, JSON-safe provenance tag for a candidate origin."
   @spec public_origin(origin(), keyword()) :: String.t() | nil
@@ -182,28 +132,11 @@ defmodule PtcRunner.PreludeCandidate do
   defp origin_string(origin) when is_atom(origin), do: Atom.to_string(origin)
   defp origin_string(origin), do: safe_to_string(origin)
 
-  defp normalize_key(key) when is_binary(key), do: key
-  defp normalize_key(key) when is_atom(key), do: Atom.to_string(key)
-  defp normalize_key(key), do: inspect(key)
-
   defp safe_to_string(value) do
     to_string(value)
   rescue
     _ -> inspect(value, limit: 10)
   end
-
-  defp public_metadata_value(value, max_bytes, _complex) when is_binary(value) do
-    truncate_binary(value, max_bytes)
-  end
-
-  defp public_metadata_value(value, _max_bytes, _complex)
-       when is_integer(value) or is_float(value) or is_boolean(value) or is_nil(value),
-       do: value
-
-  defp public_metadata_value(_value, _max_bytes, :drop), do: :drop
-
-  defp public_metadata_value(value, max_bytes, _complex),
-    do: value |> inspect(limit: 20) |> truncate_binary(max_bytes)
 
   defp byte_bound(opts, key, default) when is_list(opts) do
     case Keyword.get(opts, key, default) do

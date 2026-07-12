@@ -1,12 +1,12 @@
-defmodule PtcRunner.SubAgent.Signature.Validator do
+defmodule PtcRunner.Lisp.Signature.Validator do
   @moduledoc """
   Validates data against signature type specifications.
 
   Provides strict validation with path-based error reporting.
   """
 
+  alias PtcRunner.Lisp.KeyNormalizer
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
-  alias PtcRunner.SubAgent.KeyNormalizer
 
   @type validation_error :: %{
           path: [String.t() | non_neg_integer()],

@@ -1,9 +1,9 @@
 defmodule PtcRunner.SubAgent.Namespace.User do
   @moduledoc "Renders the user/ namespace section (LLM-defined functions and values)."
 
+  alias PtcRunner.Lisp.TypeVocabulary
+  alias PtcRunner.Lisp.UntrustedRenderer
   alias PtcRunner.SubAgent.Namespace.SampleFormatter
-  alias PtcRunner.SubAgent.Namespace.TypeVocabulary
-  alias PtcRunner.SubAgent.UntrustedRenderer
 
   @doc """
   Render user/ namespace section for USER message.

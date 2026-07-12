@@ -253,7 +253,7 @@ defmodule PtcRunner.SubAgent.Validator do
   end
 
   defp validate_signature!(opts) do
-    alias PtcRunner.SubAgent.Signature
+    alias PtcRunner.Lisp.Signature
 
     case Keyword.fetch(opts, :signature) do
       {:ok, sig} when is_binary(sig) ->
@@ -529,7 +529,8 @@ defmodule PtcRunner.SubAgent.Validator do
 
   # Text mode: validate all signature params are used in prompt (via variables or sections)
   defp validate_text_all_params_used!(opts) do
-    alias PtcRunner.SubAgent.{PromptExpander, Signature}
+    alias PtcRunner.Lisp.Signature
+    alias PtcRunner.SubAgent.PromptExpander
 
     prompt = Keyword.get(opts, :prompt)
     signature = Keyword.get(opts, :signature)
@@ -594,8 +595,9 @@ defmodule PtcRunner.SubAgent.Validator do
 
   # Validate section fields against signature types
   defp validate_section_fields!(opts) do
-    alias PtcRunner.SubAgent.{PromptExpander, Signature}
-    alias PtcRunner.SubAgent.Signature.TypeResolver
+    alias PtcRunner.Lisp.Signature
+    alias PtcRunner.Lisp.Signature.TypeResolver
+    alias PtcRunner.SubAgent.PromptExpander
 
     prompt = Keyword.get(opts, :prompt)
     signature = Keyword.get(opts, :signature)
@@ -635,7 +637,7 @@ defmodule PtcRunner.SubAgent.Validator do
   end
 
   defp validate_variable(%{type: :simple, path: path}, parsed_sig) do
-    alias PtcRunner.SubAgent.Signature.TypeResolver
+    alias PtcRunner.Lisp.Signature.TypeResolver
 
     param_name = hd(path)
 
@@ -650,7 +652,7 @@ defmodule PtcRunner.SubAgent.Validator do
          parsed_sig
        )
        when type in [:section, :inverted_section] do
-    alias PtcRunner.SubAgent.Signature.TypeResolver
+    alias PtcRunner.Lisp.Signature.TypeResolver
 
     # Check if section name is a valid param
     case TypeResolver.resolve_path(parsed_sig, [section_name]) do
@@ -725,7 +727,7 @@ defmodule PtcRunner.SubAgent.Validator do
 
   defp validate_section_fields_list(fields, scalar_type, section_name) do
     # List of scalars: only {{.}} is valid
-    alias PtcRunner.SubAgent.Signature.TypeResolver
+    alias PtcRunner.Lisp.Signature.TypeResolver
 
     Enum.flat_map(fields, fn
       %{type: :simple, path: ["."]} ->

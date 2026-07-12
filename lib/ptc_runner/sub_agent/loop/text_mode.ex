@@ -18,12 +18,15 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
 
   alias PtcRunner.{Lisp, PtcToolProtocol}
   alias PtcRunner.Lisp.Format
+  alias PtcRunner.Lisp.KeyNormalizer
+  alias PtcRunner.Lisp.Result, as: Step
+  alias PtcRunner.Lisp.Signature
+  alias PtcRunner.Lisp.TraceContext
+  alias PtcRunner.Lisp.UntrustedRenderer
   alias PtcRunner.Prompts
-  alias PtcRunner.Step.Native, as: Step
   alias PtcRunner.SubAgent.BuiltinTools
   alias PtcRunner.SubAgent.Definition
   alias PtcRunner.SubAgent.Exposure
-  alias PtcRunner.SubAgent.KeyNormalizer
 
   alias PtcRunner.SubAgent.Loop.{
     JsonHandler,
@@ -37,11 +40,9 @@ defmodule PtcRunner.SubAgent.Loop.TextMode do
     TurnFeedback
   }
 
-  alias PtcRunner.SubAgent.{PromptExpander, Signature, SystemPrompt, Telemetry}
+  alias PtcRunner.SubAgent.{PromptExpander, SystemPrompt, Telemetry}
   alias PtcRunner.SubAgent.ToolSchema
-  alias PtcRunner.SubAgent.UntrustedRenderer
   alias PtcRunner.Tool
-  alias PtcRunner.TraceContext
 
   @lisp_eval_name "lisp_eval"
 

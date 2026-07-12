@@ -12,7 +12,7 @@ defmodule PtcRunner.Lisp.E2ETest do
 
   @moduletag :e2e
 
-  alias PtcRunner.Step
+  alias PtcRunner.Lisp.Result, as: Step
   alias PtcRunner.TestSupport.LispTestLLM
 
   setup_all do

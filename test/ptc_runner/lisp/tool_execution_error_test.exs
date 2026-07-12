@@ -1,27 +1,27 @@
-defmodule PtcRunner.ToolExecutionErrorTest do
+defmodule PtcRunner.Lisp.ToolErrorTest do
   use ExUnit.Case, async: true
 
-  alias PtcRunner.ToolExecutionError
+  alias PtcRunner.Lisp.ToolError
 
   describe "exception/1 — map arm" do
     test "carries message, eval_ctx and tool_name from a map" do
       ctx = %{tool_calls: [%{name: "search", error: "boom"}]}
 
       err =
-        ToolExecutionError.exception(%{
+        ToolError.exception(%{
           message: "tool blew up",
           eval_ctx: ctx,
           tool_name: "search"
         })
 
-      assert %ToolExecutionError{} = err
+      assert %ToolError{} = err
       assert err.message == "tool blew up"
       assert err.eval_ctx == ctx
       assert err.tool_name == "search"
     end
 
     test "falls back to default message when map omits :message" do
-      err = ToolExecutionError.exception(%{tool_name: "fetch", eval_ctx: nil})
+      err = ToolError.exception(%{tool_name: "fetch", eval_ctx: nil})
 
       assert err.message == "Tool execution failed"
       assert err.tool_name == "fetch"
@@ -34,7 +34,7 @@ defmodule PtcRunner.ToolExecutionErrorTest do
       ctx = %{tool_calls: []}
 
       err =
-        ToolExecutionError.exception(
+        ToolError.exception(
           message: "kw failure",
           eval_ctx: ctx,
           tool_name: "list_emails"
@@ -46,7 +46,7 @@ defmodule PtcRunner.ToolExecutionErrorTest do
     end
 
     test "falls back to default message when keyword list omits :message" do
-      err = ToolExecutionError.exception(tool_name: "noop")
+      err = ToolError.exception(tool_name: "noop")
 
       assert err.message == "Tool execution failed"
       assert err.tool_name == "noop"
@@ -56,7 +56,7 @@ defmodule PtcRunner.ToolExecutionErrorTest do
 
   describe "exception/1 — binary arm" do
     test "wraps a bare string with nil eval_ctx and tool_name" do
-      err = ToolExecutionError.exception("plain string failure")
+      err = ToolError.exception("plain string failure")
 
       assert err.message == "plain string failure"
       assert err.eval_ctx == nil
@@ -70,12 +70,12 @@ defmodule PtcRunner.ToolExecutionErrorTest do
 
       err =
         try do
-          raise ToolExecutionError,
+          raise ToolError,
             message: "payment declined",
             eval_ctx: ctx,
             tool_name: "billing"
         rescue
-          e in ToolExecutionError -> e
+          e in ToolError -> e
         end
 
       assert Exception.message(err) == "payment declined"
@@ -89,9 +89,9 @@ defmodule PtcRunner.ToolExecutionErrorTest do
     test "raising with a bare string message round-trips" do
       err =
         try do
-          raise ToolExecutionError, "bare message"
+          raise ToolError, "bare message"
         rescue
-          e in ToolExecutionError -> e
+          e in ToolError -> e
         end
 
       assert Exception.message(err) == "bare message"
@@ -103,7 +103,7 @@ defmodule PtcRunner.ToolExecutionErrorTest do
   describe "real PTC-Lisp path — a failing tool surfaces the carried eval_ctx" do
     test "tool that raises produces a :tool_error Step whose tool_calls are preserved" do
       # Drives lib/ptc_runner/lisp/eval.ex record_tool_call_execute -> raise
-      # PtcRunner.ToolExecutionError, which lisp.ex rescues into a Step carrying
+      # PtcRunner.Lisp.ToolError, which lisp.ex rescues into a Step carrying
       # the failed call. This exercises the exception end-to-end through the
       # production evaluator, not just the constructor.
       tools = %{

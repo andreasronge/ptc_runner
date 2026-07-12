@@ -3,7 +3,7 @@ defmodule CodeScout.Tools do
   Tools for the Code Scout agent to explore the codebase.
 
   These tools use Elixir `@spec` annotations that are automatically extracted
-  to PTC-Lisp signatures by `PtcRunner.SubAgent.TypeExtractor`.
+  to PTC-Lisp signatures by `PtcRunner.Lisp.TypeExtractor`.
   """
 
   @typedoc "Grep result entry with file location and matched snippet"

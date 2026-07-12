@@ -206,7 +206,7 @@ Hook contracts the host enforces:
   and `max_heap` are process-level mechanisms — the host-fallback design
   depends on a runaway hook being killable without taking the Loop with it.
 - **Rendering safety:** any hook-produced text that reaches the prompt goes
-  through `PtcRunner.SubAgent.UntrustedRenderer` envelopes, same as tool
+  through `PtcRunner.Lisp.UntrustedRenderer` envelopes, same as tool
   output. A hook is *policy*, but its output is still model-visible text and
   must not become an injection channel.
 - **Attribution:** hook identity and failures land in the trace

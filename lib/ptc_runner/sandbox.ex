@@ -77,8 +77,7 @@ defmodule PtcRunner.Sandbox do
         default_max_heap: 2_500_000
   """
 
-  alias PtcRunner.Context
-  alias PtcRunner.TraceContext
+  alias PtcRunner.Lisp.TraceContext
 
   # Default resource limits
   @default_timeout 1000
@@ -117,7 +116,7 @@ defmodule PtcRunner.Sandbox do
   @typedoc """
   Evaluator function that takes AST and context and returns result with memory.
   """
-  @type eval_fn :: (any(), Context.t() ->
+  @type eval_fn :: (any(), term() ->
                       {:ok, any(), map()}
                       | {:error,
                          {atom(), String.t()}
@@ -145,7 +144,7 @@ defmodule PtcRunner.Sandbox do
     - `{:error, reason}` on failure; a heap kill is
       `{:memory_exceeded, memory_exceeded_info()}`
   """
-  @spec execute(any(), Context.t(), keyword()) ::
+  @spec execute(any(), term(), keyword()) ::
           {:ok, any(), metrics(), map()}
           | {:error,
              {atom(), memory_exceeded_info()}

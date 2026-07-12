@@ -1,4 +1,4 @@
-defmodule PtcRunner.SubAgent.TypeExtractor do
+defmodule PtcRunner.Lisp.TypeExtractor do
   @moduledoc """
   Extract signature and description from Elixir function @spec and @doc.
 
@@ -16,7 +16,7 @@ defmodule PtcRunner.SubAgent.TypeExtractor do
   ## Examples
 
       # Anonymous function - cannot extract
-      iex> PtcRunner.SubAgent.TypeExtractor.extract(fn x -> x end)
+      iex> PtcRunner.Lisp.TypeExtractor.extract(fn x -> x end)
       {:ok, {nil, nil}}
 
   """
@@ -32,7 +32,7 @@ defmodule PtcRunner.SubAgent.TypeExtractor do
 
   ## Examples
 
-      iex> {:ok, {signature, _description}} = PtcRunner.SubAgent.TypeExtractor.extract(&String.upcase/1)
+      iex> {:ok, {signature, _description}} = PtcRunner.Lisp.TypeExtractor.extract(&String.upcase/1)
       iex> is_binary(signature) or is_nil(signature)
       true
 

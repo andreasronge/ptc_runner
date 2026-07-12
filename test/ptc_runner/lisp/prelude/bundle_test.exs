@@ -5,7 +5,7 @@ defmodule PtcRunner.Lisp.Prelude.BundleTest do
   alias PtcRunner.Lisp.Prelude.Bundle
   alias PtcRunner.Lisp.Prelude.Compiler
   alias PtcRunner.Lisp.Prelude.ValidationError
-  alias PtcRunner.Step
+  alias PtcRunner.Lisp.Result, as: Step
 
   @math_source """
   (ns mathx "Math helpers.")

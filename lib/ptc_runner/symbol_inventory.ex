@@ -8,10 +8,10 @@ defmodule PtcRunner.SymbolInventory do
 
   alias PtcRunner.Lisp.Prelude
   alias PtcRunner.Lisp.Prelude.Export
+  alias PtcRunner.Lisp.Signature
+  alias PtcRunner.Lisp.Signature.Renderer, as: SignatureRenderer
+  alias PtcRunner.Lisp.TypeVocabulary
   alias PtcRunner.SubAgent.Namespace.SampleFormatter
-  alias PtcRunner.SubAgent.Namespace.TypeVocabulary
-  alias PtcRunner.SubAgent.Signature
-  alias PtcRunner.SubAgent.Signature.Renderer, as: SignatureRenderer
   alias PtcRunner.Tool
 
   @kernel_private_tools MapSet.new(["llm-complete", "eval-program", "log"])

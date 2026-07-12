@@ -26,7 +26,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   alias PtcRunner.Lisp.Runtime.Math
   alias PtcRunner.Lisp.Runtime.Predicates
   alias PtcRunner.Lisp.RuntimeCallable
-  alias PtcRunner.SubAgent.Namespace.TypeVocabulary
+  alias PtcRunner.Lisp.TypeVocabulary
 
   import PtcRunner.Lisp.Runtime, only: [flex_get: 2, flex_fetch: 2]
 

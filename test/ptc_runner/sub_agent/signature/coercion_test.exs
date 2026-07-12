@@ -1,8 +1,8 @@
-defmodule PtcRunner.SubAgent.Signature.CoercionTest do
+defmodule PtcRunner.Lisp.Signature.CoercionTest do
   use ExUnit.Case
-  doctest PtcRunner.SubAgent.Signature.Coercion
+  doctest PtcRunner.Lisp.Signature.Coercion
 
-  alias PtcRunner.SubAgent.Signature.Coercion
+  alias PtcRunner.Lisp.Signature.Coercion
 
   describe "coerce/2 - string" do
     test "accepts string" do

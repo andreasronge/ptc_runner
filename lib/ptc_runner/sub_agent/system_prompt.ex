@@ -51,11 +51,11 @@ defmodule PtcRunner.SubAgent.SystemPrompt do
   alias PtcRunner.Lisp.LanguageSpec
   alias PtcRunner.Lisp.Prelude.PromptInventory
   alias PtcRunner.Lisp.PromptRegistry
+  alias PtcRunner.Lisp.Signature
   alias PtcRunner.SubAgent.BuiltinTools
   alias PtcRunner.SubAgent.Exposure
   alias PtcRunner.SubAgent.Namespace
   alias PtcRunner.SubAgent.PromptExpander
-  alias PtcRunner.SubAgent.Signature
   alias PtcRunner.SubAgent.SystemPrompt.Output
   alias PtcRunner.Tool
 

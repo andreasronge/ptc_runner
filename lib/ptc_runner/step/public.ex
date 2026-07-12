@@ -1,6 +1,6 @@
 defmodule PtcRunner.Step.Public do
   @moduledoc """
-  Public rendering for native `%PtcRunner.Step.Native{}` values.
+  Public rendering for native `%PtcRunner.Lisp.Result{}` values.
 
   Runtime code may keep PTC-Lisp values in their native representation so
   continuation state preserves keyword/function semantics across turns. This
@@ -11,11 +11,11 @@ defmodule PtcRunner.Step.Public do
 
   alias PtcRunner.Lisp
   alias PtcRunner.Lisp.Format
+  alias PtcRunner.Lisp.KeyNormalizer
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
+  alias PtcRunner.Lisp.Result, as: Native
   alias PtcRunner.Lisp.RuntimeCallable
   alias PtcRunner.Step
-  alias PtcRunner.Step.Native
-  alias PtcRunner.SubAgent.KeyNormalizer
 
   @type render_opt ::
           {:memory, :public | :native}

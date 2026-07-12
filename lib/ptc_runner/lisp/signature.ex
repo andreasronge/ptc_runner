@@ -1,4 +1,4 @@
-defmodule PtcRunner.SubAgent.Signature do
+defmodule PtcRunner.Lisp.Signature do
   @moduledoc """
   Signature parsing and validation for SubAgents.
 
@@ -19,19 +19,19 @@ defmodule PtcRunner.SubAgent.Signature do
 
   ## Examples
 
-      iex> {:ok, sig} = PtcRunner.SubAgent.Signature.parse("(name :string) -> {greeting :string}")
+      iex> {:ok, sig} = PtcRunner.Lisp.Signature.parse("(name :string) -> {greeting :string}")
       iex> sig
       {:signature, [{"name", :string}], {:map, [{"greeting", :string}]}}
 
-      iex> {:ok, sig} = PtcRunner.SubAgent.Signature.parse("{count :int}")
+      iex> {:ok, sig} = PtcRunner.Lisp.Signature.parse("{count :int}")
       iex> sig
       {:signature, [], {:map, [{"count", :int}]}}
 
   """
 
-  alias PtcRunner.SubAgent.Signature.Parser
-  alias PtcRunner.SubAgent.Signature.Renderer
-  alias PtcRunner.SubAgent.Signature.Validator
+  alias PtcRunner.Lisp.Signature.Parser
+  alias PtcRunner.Lisp.Signature.Renderer
+  alias PtcRunner.Lisp.Signature.Validator
 
   @type signature :: {:signature, [param()], return_type()}
 
@@ -67,16 +67,16 @@ defmodule PtcRunner.SubAgent.Signature do
 
   ## Examples
 
-      iex> PtcRunner.SubAgent.Signature.parse("(id :int) -> {name :string}")
+      iex> PtcRunner.Lisp.Signature.parse("(id :int) -> {name :string}")
       {:ok, {:signature, [{"id", :int}], {:map, [{"name", :string}]}}}
 
-      iex> PtcRunner.SubAgent.Signature.parse("() -> :string")
+      iex> PtcRunner.Lisp.Signature.parse("() -> :string")
       {:ok, {:signature, [], :string}}
 
-      iex> PtcRunner.SubAgent.Signature.parse("{count :int}")
+      iex> PtcRunner.Lisp.Signature.parse("{count :int}")
       {:ok, {:signature, [], {:map, [{"count", :int}]}}}
 
-      iex> match?({:error, _}, PtcRunner.SubAgent.Signature.parse("invalid"))
+      iex> match?({:error, _}, PtcRunner.Lisp.Signature.parse("invalid"))
       true
   """
   @spec parse(String.t()) :: {:ok, signature()} | {:error, String.t()}
@@ -95,12 +95,12 @@ defmodule PtcRunner.SubAgent.Signature do
 
   ## Examples
 
-      iex> {:ok, sig} = PtcRunner.SubAgent.Signature.parse("() -> {count :int, items [:string]}")
-      iex> PtcRunner.SubAgent.Signature.validate(sig, %{count: 5, items: ["a", "b"]})
+      iex> {:ok, sig} = PtcRunner.Lisp.Signature.parse("() -> {count :int, items [:string]}")
+      iex> PtcRunner.Lisp.Signature.validate(sig, %{count: 5, items: ["a", "b"]})
       :ok
 
-      iex> {:ok, sig} = PtcRunner.SubAgent.Signature.parse("() -> :int")
-      iex> PtcRunner.SubAgent.Signature.validate(sig, "not an int")
+      iex> {:ok, sig} = PtcRunner.Lisp.Signature.parse("() -> :int")
+      iex> PtcRunner.Lisp.Signature.validate(sig, "not an int")
       {:error, [%{path: [], message: "expected int, got string"}]}
   """
   @spec validate(signature(), term()) :: :ok | {:error, [validation_error()]}
@@ -148,8 +148,8 @@ defmodule PtcRunner.SubAgent.Signature do
 
   ## Examples
 
-      iex> {:ok, sig} = PtcRunner.SubAgent.Signature.parse("() -> {sentiment :string, score :float}")
-      iex> PtcRunner.SubAgent.Signature.to_json_schema(sig)
+      iex> {:ok, sig} = PtcRunner.Lisp.Signature.parse("() -> {sentiment :string, score :float}")
+      iex> PtcRunner.Lisp.Signature.to_json_schema(sig)
       %{
         "type" => "object",
         "properties" => %{
@@ -160,8 +160,8 @@ defmodule PtcRunner.SubAgent.Signature do
         "additionalProperties" => false
       }
 
-      iex> {:ok, sig} = PtcRunner.SubAgent.Signature.parse("() -> [:int]")
-      iex> PtcRunner.SubAgent.Signature.to_json_schema(sig)
+      iex> {:ok, sig} = PtcRunner.Lisp.Signature.parse("() -> [:int]")
+      iex> PtcRunner.Lisp.Signature.to_json_schema(sig)
       %{
         "type" => "object",
         "properties" => %{
@@ -219,22 +219,22 @@ defmodule PtcRunner.SubAgent.Signature do
 
   ## Examples
 
-      iex> PtcRunner.SubAgent.Signature.from_json_schema(%{"type" => "integer"})
+      iex> PtcRunner.Lisp.Signature.from_json_schema(%{"type" => "integer"})
       {:ok, :int}
 
-      iex> PtcRunner.SubAgent.Signature.from_json_schema(%{"type" => "array", "items" => %{"type" => "string"}})
+      iex> PtcRunner.Lisp.Signature.from_json_schema(%{"type" => "array", "items" => %{"type" => "string"}})
       {:ok, {:list, :string}}
 
-      iex> PtcRunner.SubAgent.Signature.from_json_schema(%{"type" => "object", "properties" => %{"count" => %{"type" => "integer"}}, "required" => ["count"]})
+      iex> PtcRunner.Lisp.Signature.from_json_schema(%{"type" => "object", "properties" => %{"count" => %{"type" => "integer"}}, "required" => ["count"]})
       {:ok, {:map, [{"count", :int}]}}
 
-      iex> PtcRunner.SubAgent.Signature.from_json_schema(%{"type" => "object", "properties" => %{"name" => %{"type" => "string"}}})
+      iex> PtcRunner.Lisp.Signature.from_json_schema(%{"type" => "object", "properties" => %{"name" => %{"type" => "string"}}})
       {:ok, {:map, [{"name", {:optional, :string}}]}}
 
-      iex> PtcRunner.SubAgent.Signature.from_json_schema(%{"type" => "object", "properties" => %{"x" => %{"type" => "integer"}}, "required" => ["x"], "additionalProperties" => false})
+      iex> PtcRunner.Lisp.Signature.from_json_schema(%{"type" => "object", "properties" => %{"x" => %{"type" => "integer"}}, "required" => ["x"], "additionalProperties" => false})
       {:ok, {:closed_map, [{"x", :int}]}}
 
-      iex> match?({:error, _}, PtcRunner.SubAgent.Signature.from_json_schema(%{"type" => "object", "properties" => %{}, "required" => ["missing"]}))
+      iex> match?({:error, _}, PtcRunner.Lisp.Signature.from_json_schema(%{"type" => "object", "properties" => %{}, "required" => ["missing"]}))
       true
 
   """

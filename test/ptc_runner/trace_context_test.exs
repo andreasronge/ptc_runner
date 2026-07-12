@@ -1,7 +1,7 @@
-defmodule PtcRunner.TraceContextTest do
+defmodule PtcRunner.Lisp.TraceContextTest do
   use ExUnit.Case, async: true
 
-  alias PtcRunner.TraceContext
+  alias PtcRunner.Lisp.TraceContext
 
   setup do
     # Clean process dictionary before each test

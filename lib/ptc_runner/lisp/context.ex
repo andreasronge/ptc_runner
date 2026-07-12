@@ -1,4 +1,4 @@
-defmodule PtcRunner.Context do
+defmodule PtcRunner.Lisp.Context do
   @moduledoc """
   Manages context, memory, and tools for program execution.
 
@@ -31,11 +31,11 @@ defmodule PtcRunner.Context do
 
   ## Examples
 
-      iex> ctx = PtcRunner.Context.new(%{"users" => [1, 2, 3]})
+      iex> ctx = PtcRunner.Lisp.Context.new(%{"users" => [1, 2, 3]})
       iex> ctx.ctx
       %{"users" => [1, 2, 3]}
 
-      iex> ctx = PtcRunner.Context.new(%{}, %{"counter" => 0})
+      iex> ctx = PtcRunner.Lisp.Context.new(%{}, %{"counter" => 0})
       iex> ctx.memory
       %{"counter" => 0}
 
@@ -58,12 +58,12 @@ defmodule PtcRunner.Context do
 
   ## Examples
 
-      iex> ctx = PtcRunner.Context.new(%{"users" => [1, 2, 3]})
-      iex> PtcRunner.Context.get_ctx(ctx, "users")
+      iex> ctx = PtcRunner.Lisp.Context.new(%{"users" => [1, 2, 3]})
+      iex> PtcRunner.Lisp.Context.get_ctx(ctx, "users")
       {:ok, [1, 2, 3]}
 
-      iex> ctx = PtcRunner.Context.new()
-      iex> PtcRunner.Context.get_ctx(ctx, "missing")
+      iex> ctx = PtcRunner.Lisp.Context.new()
+      iex> PtcRunner.Lisp.Context.get_ctx(ctx, "missing")
       {:ok, nil}
 
   """
@@ -83,12 +83,12 @@ defmodule PtcRunner.Context do
 
   ## Examples
 
-      iex> ctx = PtcRunner.Context.new(%{}, %{"counter" => 42})
-      iex> PtcRunner.Context.get_memory(ctx, "counter")
+      iex> ctx = PtcRunner.Lisp.Context.new(%{}, %{"counter" => 42})
+      iex> PtcRunner.Lisp.Context.get_memory(ctx, "counter")
       {:ok, 42}
 
-      iex> ctx = PtcRunner.Context.new()
-      iex> PtcRunner.Context.get_memory(ctx, "missing")
+      iex> ctx = PtcRunner.Lisp.Context.new()
+      iex> PtcRunner.Lisp.Context.get_memory(ctx, "missing")
       {:ok, nil}
 
   """
@@ -106,8 +106,8 @@ defmodule PtcRunner.Context do
 
   ## Examples
 
-      iex> ctx = PtcRunner.Context.new()
-      iex> ctx = PtcRunner.Context.put_memory(ctx, "result", 100)
+      iex> ctx = PtcRunner.Lisp.Context.new()
+      iex> ctx = PtcRunner.Lisp.Context.put_memory(ctx, "result", 100)
       iex> ctx.memory
       %{"result" => 100}
 

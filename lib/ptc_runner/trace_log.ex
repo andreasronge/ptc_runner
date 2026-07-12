@@ -69,8 +69,8 @@ defmodule PtcRunner.TraceLog do
   - [Observability Guide](subagent-observability.md) - How TraceLog relates to `PtcRunner.Tracer`
   """
 
+  alias PtcRunner.Lisp.TraceContext
   alias PtcRunner.SubAgent.Telemetry
-  alias PtcRunner.TraceContext
   alias PtcRunner.TraceLog.{Collector, Handler, MemorySink}
 
   @doc """

@@ -52,11 +52,11 @@ defmodule PtcRunner.TraceLog.TurnEvent do
   """
 
   alias PtcRunner.Evidence.ReadProjection, as: EvidenceReadProjection
+  alias PtcRunner.Lisp.KeyNormalizer
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
   alias PtcRunner.Lisp.RuntimeCallable
   alias PtcRunner.PreludeOrigin
   alias PtcRunner.Step.Public, as: PublicStep
-  alias PtcRunner.SubAgent.KeyNormalizer
   alias PtcRunner.TraceLog.Event
 
   @schema_version 2

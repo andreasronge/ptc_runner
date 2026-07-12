@@ -21,7 +21,7 @@ defmodule PtcRunner.Lisp.Prelude.CodexRegressionTest do
 
   alias PtcRunner.Lisp.Prelude
   alias PtcRunner.Lisp.Prelude.Compiler
-  alias PtcRunner.Step
+  alias PtcRunner.Lisp.Result, as: Step
 
   # A `def`-bound name is externalized into `Step.memory` through the bounded
   # vocabulary, so it may surface as either an atom or a binary key. Check both.

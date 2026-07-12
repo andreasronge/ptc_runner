@@ -7,7 +7,7 @@ defmodule PtcRunner.Upstream.Eval do
   `discovery_exec:`), and runs PTC-Lisp programs against them.
   """
 
-  alias PtcRunner.Step.Native, as: NativeStep
+  alias PtcRunner.Lisp.Result, as: NativeStep
   alias PtcRunner.Step.Public, as: PublicStep
   alias PtcRunner.SubAgent.{Definition, Runner}
   alias PtcRunner.Upstream.{CallTool, Discovery, RunContext, SideEffectGuard}
@@ -50,7 +50,7 @@ defmodule PtcRunner.Upstream.Eval do
   end
 
   @spec run_lisp(struct() | pid(), String.t(), keyword()) ::
-          {:ok, PtcRunner.Step.Native.t()} | {:error, PtcRunner.Step.Native.t()}
+          {:ok, PtcRunner.Lisp.Result.t()} | {:error, PtcRunner.Lisp.Result.t()}
   def run_lisp(runtime, program, opts \\ []) do
     {result, _records} = run_lisp_with_records(runtime, program, opts)
     result
@@ -58,7 +58,7 @@ defmodule PtcRunner.Upstream.Eval do
 
   @doc false
   @spec run_lisp_with_records(struct() | pid(), String.t(), keyword()) ::
-          {{:ok, PtcRunner.Step.Native.t()} | {:error, PtcRunner.Step.Native.t()}, [map()]}
+          {{:ok, PtcRunner.Lisp.Result.t()} | {:error, PtcRunner.Lisp.Result.t()}, [map()]}
   def run_lisp_with_records(runtime, program, opts \\ []) do
     context_opts = Keyword.take(opts, @run_context_keys)
     lisp_opts = Keyword.drop(opts, @context_keys)

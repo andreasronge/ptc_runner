@@ -37,8 +37,8 @@ defmodule PtcRunner.SubAgent.TextModeCombinedE2ETest do
 
   @moduletag :e2e
 
+  alias PtcRunner.Lisp.KeyNormalizer
   alias PtcRunner.SubAgent
-  alias PtcRunner.SubAgent.KeyNormalizer
   alias PtcRunner.TestSupport.LLMSupport
 
   @model "haiku"

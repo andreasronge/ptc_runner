@@ -10,8 +10,8 @@ defmodule PtcRunner.SubAgent.Definition do
   or the DSL macros instead.
   """
 
+  alias PtcRunner.Lisp.Result, as: Native
   alias PtcRunner.PreludeStore.Selection
-  alias PtcRunner.Step.Native
   alias PtcRunner.Step.Public, as: PublicStep
 
   @typedoc """
@@ -282,7 +282,8 @@ defmodule PtcRunner.SubAgent.Definition do
   @doc false
   @spec new(keyword()) :: t()
   def new(opts) when is_list(opts) do
-    alias PtcRunner.SubAgent.{Signature, Validator}
+    alias PtcRunner.Lisp.Signature
+    alias PtcRunner.SubAgent.Validator
 
     {prelude_store, opts} = Keyword.pop(opts, :prelude_store)
     {prelude_refs, opts} = Keyword.pop(opts, :preludes)

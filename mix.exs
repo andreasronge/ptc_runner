@@ -137,7 +137,7 @@ defmodule PtcRunner.MixProject do
       groups_for_modules: [
         Core: [
           PtcRunner,
-          PtcRunner.Context,
+          PtcRunner.Lisp.Context,
           PtcRunner.Step,
           PtcRunner.Tool,
           PtcRunner.Schema,
@@ -172,21 +172,21 @@ defmodule PtcRunner.MixProject do
           PtcRunner.SubAgent.Debug,
           PtcRunner.SubAgentError,
           PtcRunner.SubAgent.JsonParser,
-          PtcRunner.SubAgent.KeyNormalizer,
+          PtcRunner.Lisp.KeyNormalizer,
           PtcRunner.SubAgent.LLMResolver,
           PtcRunner.SubAgent.ProgressRenderer,
           PtcRunner.SubAgent.PromptExpander,
           PtcRunner.SubAgent.Validator
         ],
         "SubAgent — Signatures": [
-          PtcRunner.SubAgent.Signature,
-          PtcRunner.SubAgent.Signature.Coercion,
-          PtcRunner.SubAgent.Signature.Parser,
-          PtcRunner.SubAgent.Signature.ParserHelpers,
-          PtcRunner.SubAgent.Signature.Renderer,
-          PtcRunner.SubAgent.Signature.TypeResolver,
-          PtcRunner.SubAgent.Signature.Validator,
-          PtcRunner.SubAgent.TypeExtractor,
+          PtcRunner.Lisp.Signature,
+          PtcRunner.Lisp.Signature.Coercion,
+          PtcRunner.Lisp.Signature.Parser,
+          PtcRunner.Lisp.Signature.ParserHelpers,
+          PtcRunner.Lisp.Signature.Renderer,
+          PtcRunner.Lisp.Signature.TypeResolver,
+          PtcRunner.Lisp.Signature.Validator,
+          PtcRunner.Lisp.TypeExtractor,
           PtcRunner.SubAgent.Sigils
         ],
         "SubAgent — Prompts & Tools": [
@@ -196,7 +196,7 @@ defmodule PtcRunner.MixProject do
           PtcRunner.SubAgent.Namespace.Data,
           PtcRunner.SubAgent.Namespace.ExecutionHistory,
           PtcRunner.SubAgent.Namespace.Tool,
-          PtcRunner.SubAgent.Namespace.TypeVocabulary,
+          PtcRunner.Lisp.TypeVocabulary,
           PtcRunner.SubAgent.Namespace.User,
           PtcRunner.SubAgent.BuiltinTools,
           PtcRunner.SubAgent.LLMTool,
@@ -248,7 +248,7 @@ defmodule PtcRunner.MixProject do
           PtcRunner.Lisp.Runtime.SpecialValues,
           PtcRunner.Lisp.Runtime.String,
           PtcRunner.Lisp.ExecutionError,
-          PtcRunner.ToolExecutionError,
+          PtcRunner.Lisp.ToolError,
           PtcRunner.Lisp.TypeError
         ],
         LLM: [
@@ -260,7 +260,7 @@ defmodule PtcRunner.MixProject do
         Observability: [
           PtcRunner.Tracer,
           PtcRunner.Tracer.Timeline,
-          PtcRunner.TraceContext,
+          PtcRunner.Lisp.TraceContext,
           PtcRunner.TraceLog,
           PtcRunner.TraceLog.Analyzer,
           PtcRunner.TraceLog.Collector,

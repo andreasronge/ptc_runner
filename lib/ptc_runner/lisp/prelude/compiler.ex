@@ -45,8 +45,8 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
   alias PtcRunner.Lisp.Prelude.Spec
   alias PtcRunner.Lisp.Prelude.ValidationError
   alias PtcRunner.Lisp.ProtectedNamespaces
+  alias PtcRunner.Lisp.Signature
   alias PtcRunner.Sandbox
-  alias PtcRunner.SubAgent.Signature
 
   @default_visibility :prompt
   @valid_effects [:read, :write, :unknown]

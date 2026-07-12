@@ -7,7 +7,7 @@ defmodule PtcRunner.Lisp.Integration.FunctionOpsTest do
   use ExUnit.Case, async: true
 
   alias PtcRunner.Lisp
-  alias PtcRunner.Step
+  alias PtcRunner.Lisp.Result, as: Step
 
   # ==========================================================================
   # Builtins as Higher-Order Function Arguments

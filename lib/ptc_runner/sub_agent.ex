@@ -38,8 +38,8 @@ defmodule PtcRunner.SubAgent do
   - [Phoenix Streaming](guides/phoenix-streaming.md) - Real-time streaming in LiveView
   """
 
+  alias PtcRunner.Lisp.Result, as: Native
   alias PtcRunner.PreludeStore.Selection
-  alias PtcRunner.Step.Native
   alias PtcRunner.Step.Public, as: PublicStep
   alias PtcRunner.SubAgent.Chat
   alias PtcRunner.SubAgent.Definition

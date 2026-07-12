@@ -1,7 +1,7 @@
 defmodule PtcRunner.Upstream.SideEffectGuard do
   @moduledoc false
 
-  alias PtcRunner.Step.Native, as: Step
+  alias PtcRunner.Lisp.Result, as: Step
   alias PtcRunner.SubAgent.Loop.StepAssembler
   alias PtcRunner.Upstream.Effect
 

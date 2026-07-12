@@ -309,7 +309,7 @@ renderer/scanner discipline for any new value-carrying fields; item 5 remains
 as finalization/render-once cleanup.
 
 1. **Resolved: one struct, two meanings.** `Step.Public.from_native/2` now maps
-   `%PtcRunner.Step.Native{}` to public `%PtcRunner.Step{}`. Native/public
+   `%PtcRunner.Lisp.Result{}` to public `%PtcRunner.Step{}`. Native/public
    confusion is visible in pattern matches instead of being implicit temporal
    state.
 
@@ -369,7 +369,7 @@ enforce the boundary, so review no longer has to enumerate paths.
 Introduce an internal native result type and reserve `%PtcRunner.Step{}` for
 the public shape:
 
-- `%PtcRunner.Step.Native{}` (working name) is what `Lisp.run` internals, the
+- `%PtcRunner.Lisp.Result{}` (working name) is what `Lisp.run` internals, the
   SubAgent loop, session eval, and the upstream bridge produce and thread.
   Same field names as today's step, so internal code changes are mechanical.
 - Rename `Step.Public.render/2` to `Step.Public.from_native/2` with the

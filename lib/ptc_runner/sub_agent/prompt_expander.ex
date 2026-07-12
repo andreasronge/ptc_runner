@@ -170,7 +170,7 @@ defmodule PtcRunner.SubAgent.PromptExpander do
   """
   @spec extract_signature_params(String.t()) :: [String.t()]
   def extract_signature_params(signature) when is_binary(signature) do
-    alias PtcRunner.SubAgent.Signature.Parser
+    alias PtcRunner.Lisp.Signature.Parser
 
     case Parser.parse(signature) do
       {:ok, {:signature, params, _output}} ->

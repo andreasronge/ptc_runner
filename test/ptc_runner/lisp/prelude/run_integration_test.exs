@@ -12,7 +12,7 @@ defmodule PtcRunner.Lisp.Prelude.RunIntegrationTest do
   import PtcRunner.TestSupport.TestHelpers, only: [stop_quietly: 1]
 
   alias PtcRunner.Lisp.Prelude.Compiler
-  alias PtcRunner.Step
+  alias PtcRunner.Lisp.Result, as: Step
 
   @paged_data_source File.read!(
                        Path.expand(

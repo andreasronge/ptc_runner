@@ -547,7 +547,7 @@ defmodule PtcRunner.Upstream.EvalRunSubagentTest do
     test "a non-Definition that DOES carry a :tools field still raises at enrich",
          %{runtime: runtime} do
       # Guards against a looser `%{tools: _}` match: a bare map (or any non-Definition
-      # struct with a :tools field, e.g. %PtcRunner.Context{}) is NOT a Definition.
+      # struct with a :tools field, e.g. %PtcRunner.Lisp.Context{}) is NOT a Definition.
       # FunctionClauseError alone is not enough to pin the fix: under a loose head the
       # map would slip through enrich and raise the *same* error later in Runner.run/2.
       # So assert the raise originates in enrich_agent/3 specifically — a regression to

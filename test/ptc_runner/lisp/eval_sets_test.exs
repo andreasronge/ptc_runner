@@ -1,7 +1,7 @@
 defmodule PtcRunner.Lisp.EvalSetsTest do
   use ExUnit.Case, async: true
 
-  alias PtcRunner.Step
+  alias PtcRunner.Lisp.Result, as: Step
 
   describe "set predicates" do
     test "set? returns true for sets" do

@@ -3,7 +3,7 @@ defmodule PtcRunner.EvidenceTest do
 
   alias PtcRunner.{Evidence, Lisp}
   alias PtcRunner.Evidence.{Bundle, ReadProjection}
-  alias PtcRunner.Step
+  alias PtcRunner.Lisp.Result, as: Step
   alias PtcRunner.TraceLog.{Introspection, TurnEvent}
 
   @tag :tmp_dir

@@ -66,7 +66,7 @@ defmodule PtcRunner.Lisp.Prelude.Attach do
   alias PtcRunner.Lisp.Prelude.Compiler
   alias PtcRunner.Lisp.Prelude.Export
   alias PtcRunner.Lisp.Prelude.ValidationError
-  alias PtcRunner.Upstream.Runtime
+  alias PtcRunner.Lisp.UpstreamAccess
 
   @typedoc """
   A selected upstream runtime handle (a `%PtcRunner.Upstream.Runtime{}`
@@ -250,7 +250,7 @@ defmodule PtcRunner.Lisp.Prelude.Attach do
   defp check_upstream_op(_server, _tool, _required, _export, nil), do: :ok
 
   defp check_upstream_op(server, tool, required, export, runtime) do
-    case Runtime.upstream(runtime, server) do
+    case UpstreamAccess.upstream(runtime, server) do
       nil ->
         {:error,
          attach_error(

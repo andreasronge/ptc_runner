@@ -15,7 +15,7 @@ defmodule PtcRunner.TraceLog.Handler do
 
   require Logger
 
-  alias PtcRunner.TraceContext
+  alias PtcRunner.Lisp.TraceContext
   alias PtcRunner.TraceLog.{Collector, Event}
 
   @events [

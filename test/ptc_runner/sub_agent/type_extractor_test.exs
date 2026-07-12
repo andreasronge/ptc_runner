@@ -1,8 +1,8 @@
-defmodule PtcRunner.SubAgent.TypeExtractorTest do
+defmodule PtcRunner.Lisp.TypeExtractorTest do
   use ExUnit.Case, async: true
-  doctest PtcRunner.SubAgent.TypeExtractor
+  doctest PtcRunner.Lisp.TypeExtractor
 
-  alias PtcRunner.SubAgent.TypeExtractor
+  alias PtcRunner.Lisp.TypeExtractor
   alias PtcRunner.TypeExtractorFixtures, as: TestFunctions
 
   describe "extract/1" do

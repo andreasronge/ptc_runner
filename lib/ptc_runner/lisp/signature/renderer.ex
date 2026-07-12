@@ -1,4 +1,4 @@
-defmodule PtcRunner.SubAgent.Signature.Renderer do
+defmodule PtcRunner.Lisp.Signature.Renderer do
   @moduledoc """
   Renders signatures back to string representation.
 
@@ -12,11 +12,11 @@ defmodule PtcRunner.SubAgent.Signature.Renderer do
   ## Examples
 
       iex> sig = {:signature, [{"id", :int}], :string}
-      iex> PtcRunner.SubAgent.Signature.Renderer.render(sig)
+      iex> PtcRunner.Lisp.Signature.Renderer.render(sig)
       "(id :int) -> :string"
 
       iex> sig = {:signature, [], {:map, [{"count", :int}]}}
-      iex> PtcRunner.SubAgent.Signature.Renderer.render(sig)
+      iex> PtcRunner.Lisp.Signature.Renderer.render(sig)
       "-> {count :int}"
   """
   @spec render({:signature, list(), term()}) :: String.t()
@@ -42,13 +42,13 @@ defmodule PtcRunner.SubAgent.Signature.Renderer do
 
   ## Examples
 
-      iex> PtcRunner.SubAgent.Signature.Renderer.to_lisp_key("q1_total")
+      iex> PtcRunner.Lisp.Signature.Renderer.to_lisp_key("q1_total")
       "q1-total"
 
-      iex> PtcRunner.SubAgent.Signature.Renderer.to_lisp_key("_email_ids")
+      iex> PtcRunner.Lisp.Signature.Renderer.to_lisp_key("_email_ids")
       "_email-ids"
 
-      iex> PtcRunner.SubAgent.Signature.Renderer.to_lisp_key("name")
+      iex> PtcRunner.Lisp.Signature.Renderer.to_lisp_key("name")
       "name"
   """
   @spec to_lisp_key(String.t()) :: String.t()
@@ -74,13 +74,13 @@ defmodule PtcRunner.SubAgent.Signature.Renderer do
 
   ## Examples
 
-      iex> PtcRunner.SubAgent.Signature.Renderer.render_type(:string)
+      iex> PtcRunner.Lisp.Signature.Renderer.render_type(:string)
       ":string"
 
-      iex> PtcRunner.SubAgent.Signature.Renderer.render_type({:optional, :int})
+      iex> PtcRunner.Lisp.Signature.Renderer.render_type({:optional, :int})
       ":int?"
 
-      iex> PtcRunner.SubAgent.Signature.Renderer.render_type({:list, :string})
+      iex> PtcRunner.Lisp.Signature.Renderer.render_type({:list, :string})
       "[:string]"
   """
   @spec render_type(term(), keyword()) :: String.t()

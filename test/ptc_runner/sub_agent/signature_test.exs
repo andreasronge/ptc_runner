@@ -1,9 +1,9 @@
-defmodule PtcRunner.SubAgent.SignatureTest do
+defmodule PtcRunner.Lisp.SignatureTest do
   use ExUnit.Case
 
-  doctest PtcRunner.SubAgent.Signature
+  doctest PtcRunner.Lisp.Signature
 
-  alias PtcRunner.SubAgent.Signature
+  alias PtcRunner.Lisp.Signature
 
   describe "parse/1" do
     test "parses simple signature" do

@@ -16,7 +16,7 @@ defmodule PtcRunner.PreludeStore.FormEdit do
   dual-key style already used throughout `PreludeStore`). Op names use
   underscores (`"replace_form"`, not `"replace-form"`): the tool-boundary key
   normalizer rewrites hyphens in ARG KEYS but not in keyword-derived VALUES
-  (`PtcRunner.SubAgent.KeyNormalizer`), so a canonical underscore spelling
+  (`PtcRunner.Lisp.KeyNormalizer`), so a canonical underscore spelling
   keeps the wire value unambiguous regardless of path.
 
     * `%{"op" => "replace_form", "name" => n, "source" => s}` — `s` must

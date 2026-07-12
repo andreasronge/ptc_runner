@@ -45,15 +45,15 @@ defmodule PtcRunner.Kernel.FrozenBundle do
   end
 
   defp key do
-    key = {__MODULE__, :attestation_key}
+    storage_key = {__MODULE__, :attestation_key}
 
-    case :persistent_term.get(key, :missing) do
+    case :persistent_term.get(storage_key, :missing) do
       :missing ->
-        :global.trans(key, fn ->
-          case :persistent_term.get(key, :missing) do
+        :global.trans({storage_key, self()}, fn ->
+          case :persistent_term.get(storage_key, :missing) do
             :missing ->
               secret = :crypto.strong_rand_bytes(32)
-              :persistent_term.put(key, secret)
+              :persistent_term.put(storage_key, secret)
               secret
 
             secret ->

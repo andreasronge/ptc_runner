@@ -380,7 +380,7 @@ end
 For custom code that spawns tasks, use `TraceContext` directly:
 
 ```elixir
-alias PtcRunner.TraceContext
+alias PtcRunner.Lisp.TraceContext
 
 # This is what PtcRunner does internally for pmap/pcalls:
 #
@@ -436,4 +436,4 @@ IO.puts("trace_dir:             #{Application.get_env(:ptc_runner, :trace_dir, "
 * [SubAgent Getting Started](https://hexdocs.pm/ptc_runner/subagent-getting-started.html)
 * [Composition Patterns](https://hexdocs.pm/ptc_runner/subagent-patterns.html)
 * `PtcRunner.TraceLog.Analyzer` — API docs for offline analysis
-* `PtcRunner.TraceContext` — cross-process propagation API
+* `PtcRunner.Lisp.TraceContext` — cross-process propagation API

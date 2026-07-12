@@ -11,11 +11,11 @@ defmodule PtcRunner.SubAgent.Loop.TurnFeedback do
   """
 
   alias PtcRunner.Lisp.Format
+  alias PtcRunner.Lisp.UntrustedRenderer
   alias PtcRunner.Mustache
   alias PtcRunner.Prompts
   alias PtcRunner.SubAgent.Definition
   alias PtcRunner.SubAgent.ProgressRenderer
-  alias PtcRunner.SubAgent.UntrustedRenderer
 
   @doc """
   Append turn progress info to a feedback message.

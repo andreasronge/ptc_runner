@@ -8,8 +8,8 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
   use ExUnit.Case, async: true
 
   alias PtcRunner.Lisp
+  alias PtcRunner.Lisp.Result, as: Step
   alias PtcRunner.Lisp.Runtime.Collection
-  alias PtcRunner.Step
 
   describe "group-by with destructuring" do
     test "average by category using destructuring" do

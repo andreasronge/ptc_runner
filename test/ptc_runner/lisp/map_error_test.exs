@@ -2,7 +2,7 @@ defmodule PtcRunner.Lisp.MapErrorTest do
   use ExUnit.Case, async: true
 
   alias PtcRunner.Lisp
-  alias PtcRunner.Step
+  alias PtcRunner.Lisp.Result, as: Step
 
   describe "map with keyword and single map" do
     test "keyword on map applies to [k,v] entry pairs" do

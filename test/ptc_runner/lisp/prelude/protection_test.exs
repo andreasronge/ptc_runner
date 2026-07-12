@@ -29,7 +29,7 @@ defmodule PtcRunner.Lisp.Prelude.ProtectionTest do
   alias PtcRunner.Lisp.Prelude
   alias PtcRunner.Lisp.Prelude.Compiler
   alias PtcRunner.Lisp.ProtectedNamespaces
-  alias PtcRunner.Step
+  alias PtcRunner.Lisp.Result, as: Step
 
   @crm_source """
   (ns crm

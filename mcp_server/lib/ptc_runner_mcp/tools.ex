@@ -22,7 +22,7 @@ defmodule PtcRunnerMcp.Tools do
   so a malformed argument never consumes a permit.
   """
 
-  alias PtcRunner.SubAgent.Signature
+  alias PtcRunner.Lisp.Signature
   alias PtcRunner.Upstream.{Eval, Result, RunContext}
 
   alias PtcRunnerMcp.{

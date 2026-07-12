@@ -160,7 +160,7 @@ defmodule PtcRunner.Tool do
     cache: false
   ]
 
-  alias PtcRunner.SubAgent.TypeExtractor
+  alias PtcRunner.Lisp.TypeExtractor
 
   @doc """
   Creates a normalized Tool struct from a name and format.

@@ -2,7 +2,7 @@ defmodule PtcRunner.Lisp.EvalDoseqTest do
   use ExUnit.Case, async: true
 
   alias PtcRunner.Lisp
-  alias PtcRunner.Step
+  alias PtcRunner.Lisp.Result, as: Step
 
   describe "doseq" do
     test "basic single binding" do

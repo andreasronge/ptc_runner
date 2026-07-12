@@ -13,9 +13,9 @@ defmodule PtcRunner.SubAgent.Runner do
   public `PtcRunner.SubAgent` facade; only Definition execution lives here.
   """
 
-  alias PtcRunner.Step.Native, as: Step
+  alias PtcRunner.Lisp.KeyNormalizer
+  alias PtcRunner.Lisp.Result, as: Step
   alias PtcRunner.SubAgent.Definition
-  alias PtcRunner.SubAgent.KeyNormalizer
   alias PtcRunner.SubAgent.LLMResolver
   alias PtcRunner.SubAgent.Loop
   alias PtcRunner.SubAgent.Loop.Metrics

@@ -61,11 +61,10 @@ defmodule PtcRunner.Lisp do
   @default_max_parallel_workers 8
   alias PtcRunner.Lisp.Format.Var
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
-  alias PtcRunner.Step.Native, as: Step
-  alias PtcRunner.Step.Public, as: PublicStep
-  alias PtcRunner.SubAgent.Signature
-  alias PtcRunner.Tool
-  alias PtcRunner.Upstream.Runtime, as: UpstreamRuntime
+  alias PtcRunner.Lisp.Result, as: Step
+  alias PtcRunner.Lisp.Signature
+  alias PtcRunner.Lisp.Tool
+  alias PtcRunner.Lisp.UpstreamAccess
 
   @valid_callers [:in_process_v1, :text_mode, :mcp]
   @valid_profiles [:mcp_no_tools, :mcp_aggregator, :in_process_v1, :text_mode]
@@ -93,7 +92,7 @@ defmodule PtcRunner.Lisp do
 
   @doc """
   Converts native PTC-Lisp runtime values into the public Elixir/JSON-facing
-  representation used by `Step.return` and default `Step.memory`.
+  representation used by `PtcRunner.Lisp.Result.return`.
 
   Stateful hosts may keep native values internally between turns, but should use
   this at public observation boundaries such as final steps and trace events.
@@ -197,37 +196,36 @@ defmodule PtcRunner.Lisp do
   ## Return Value
 
   On success, returns:
-   - `{:ok, Step.t()}` with:
+   - `{:ok, PtcRunner.Lisp.Result.t()}` with:
      - `step.return`: The value returned to the caller
      - `step.memory`: Data memory after execution. Direct Lisp callers can pass
        it back through the `:memory` option on a later eval; use
-       `PtcRunner.Step.Public.memory/1` when you need a purely public
-       observation shape. The public `run/2` result preserves closures and
+       `externalize_memory/1` when you need a purely public observation shape.
+       The `run/2` result preserves closures and
        composed callable forms, but deliberately omits top-level runtime
        callables such as directly bound builtin/tool aliases and renders nested
        runtime callables as labels. Do not serialize `step.memory` (JSON,
        ETF-to-disk, database) between evals —
        serialization silently converts native values such as keywords into
        plain strings. For persistent or cross-process REPL state, use
-       `PtcRunner.Session`, which owns continuation memory and returns publicly
-       rendered steps.
+       `PtcRunner.Kernel.ReplSession`, which owns continuation memory.
      - `step.usage`: Execution metrics (`duration_ms`, `memory_bytes`,
        `eval_reductions`)
 
   On error, returns:
-  - `{:error, Step.t()}` with:
+  - `{:error, PtcRunner.Lisp.Result.t()}` with:
     - `step.fail.reason`: Error reason atom
     - `step.fail.message`: Human-readable error description
     - `step.memory`: Native continuation memory at the time of error, with the
       same callable caveats as successful `run/2` results. Do not serialize it;
-      use `PtcRunner.Step.Public.memory/1` for an observation-only projection.
+      use `externalize_memory/1` for an observation-only projection.
 
   ## Memory Contract
 
   The top-level program value passes through to `step.return` **unchanged** —
   there is no implicit map merge and no special `:return` key handling. Storage
   is **explicit**: `(def x v)` persists `v` in memory (`step.memory["x"]`), and
-  that memory survives across turns within a single `SubAgent` run.
+  that memory can survive across explicitly managed evaluations.
 
   There are two deliberate host memory projections. Ordinary embedders may use
   `run/2` to continue data definitions, `defn` closures, and composed
@@ -246,12 +244,12 @@ defmodule PtcRunner.Lisp do
   Missing history reads return `nil`. `run/2` does not mutate the supplied
   history; callers that want REPL semantics should append `step.return` only
   after a successful run and keep their chosen bounded depth. For direct
-  embedding use, `PtcRunner.Session` implements this contract with a default
-  depth of 3.
+  embedding use, `PtcRunner.Kernel.ReplSession` implements this contract with a
+  default depth of 3.
 
   **Related modules:**
-  - `PtcRunner.SubAgent.Loop` - Uses this contract to persist memory across turns
-  - `PtcRunner.Session` - Public stateful embedding wrapper for memory and turn history
+  - `PtcRunner.Kernel.Runner` - Executes bounded Kernel workflows
+  - `PtcRunner.Kernel.ReplSession` - Stateful direct evaluation wrapper
   - `PtcRunner.Lisp.Eval` - Evaluates programs with user_ns (memory) symbol resolution
 
   ## Float Precision
@@ -302,8 +300,7 @@ defmodule PtcRunner.Lisp do
 
   See `PtcRunner.Lisp.DataKeys` for the static analysis implementation.
   """
-  @spec run(String.t(), keyword()) ::
-          {:ok, PtcRunner.Step.t()} | {:error, PtcRunner.Step.t()}
+  @spec run(String.t(), keyword()) :: {:ok, Step.t()} | {:error, Step.t()}
   def run(source, opts \\ []) do
     source
     |> run_native(opts)
@@ -344,11 +341,48 @@ defmodule PtcRunner.Lisp do
     end)
   end
 
-  defp public_result({:ok, %Step{} = step}),
-    do: {:ok, PublicStep.from_native(step, memory: :native, normalize_return_keys: false)}
+  defp public_result({tag, %Step{} = step}) when tag in [:ok, :error] do
+    {tag,
+     %{
+       step
+       | return: public_result_value(step.return),
+         fail: public_result_value(step.fail),
+         journal: public_result_value(step.journal),
+         tool_calls: public_result_value(step.tool_calls),
+         pmap_calls: public_result_value(step.pmap_calls),
+         catalog_ops: public_result_value(step.catalog_ops),
+         child_steps: public_result_value(step.child_steps),
+         tool_cache: public_result_value(step.tool_cache)
+     }}
+  end
 
-  defp public_result({:error, %Step{} = step}),
-    do: {:error, PublicStep.from_native(step, memory: :native, normalize_return_keys: false)}
+  defp public_result_value({:closure, _params, _body, _env, _history, _metadata}),
+    do: "#fn[...]"
+
+  defp public_result_value({:juxt_fn, _fns}), do: "#fn[...]"
+  defp public_result_value({:partial_fn, _function, _fixed}), do: "#fn[...]"
+  defp public_result_value({:comp_fn, _fns}), do: "#fn[...]"
+  defp public_result_value({:complement_fn, _function}), do: "#fn[...]"
+  defp public_result_value({:constantly_fn, _value}), do: "#fn[...]"
+  defp public_result_value({:every_pred_fn, _predicates}), do: "#fn[...]"
+  defp public_result_value({:some_fn, _functions}), do: "#fn[...]"
+  defp public_result_value({:fnil_fn, _function, _default}), do: "#fn[...]"
+
+  defp public_result_value(%Step{} = step), do: public_result({:ok, step}) |> elem(1)
+
+  defp public_result_value(value) when is_tuple(value),
+    do: value |> Tuple.to_list() |> Enum.map(&public_result_value/1) |> List.to_tuple()
+
+  defp public_result_value(value) when is_list(value), do: Enum.map(value, &public_result_value/1)
+
+  defp public_result_value(%MapSet{} = value),
+    do: value |> Enum.map(&public_result_value/1) |> MapSet.new()
+
+  defp public_result_value(value) when is_map(value) and not is_struct(value),
+    do:
+      Map.new(value, fn {key, item} -> {public_result_value(key), public_result_value(item)} end)
+
+  defp public_result_value(value), do: externalize_lisp_values(value)
 
   # Closed atom set for :caller telemetry tag. Validated at entry to
   # `run/2` so out-of-set values fail fast and don't reach instrumentation.
@@ -419,13 +453,13 @@ defmodule PtcRunner.Lisp do
        )}
     else
       upstream_tools =
-        Keyword.get(opts, :upstream_tools, UpstreamRuntime.upstream_tool_grants(runtime))
+        Keyword.get(opts, :upstream_tools, UpstreamAccess.tool_grants(runtime))
 
       # Attach-time: compile prelude source if needed and validate its
       # `requires` against the selected upstream runtime BEFORE parsing user
       # code. On failure, return {:error, Step} :prelude_attach_failed (or the
       # original compile reason). No prelude attached -> nil, unchanged path.
-      case UpstreamRuntime.constrain_upstream_tool_grants(runtime, upstream_tools) do
+      case UpstreamAccess.constrain(runtime, upstream_tools) do
         {:ok, upstream_tools} ->
           attach_and_run(
             source,
@@ -825,7 +859,7 @@ defmodule PtcRunner.Lisp do
         do: DataKeys.filter_context(core_ast, ctx),
         else: ctx
 
-    context = PtcRunner.Context.new(filtered_ctx, memory, normalized_tools, turn_history)
+    context = PtcRunner.Lisp.Context.new(filtered_ctx, memory, normalized_tools, turn_history)
 
     parallel_budget = ParallelBudget.new(max_parallel_workers)
 
@@ -869,7 +903,7 @@ defmodule PtcRunner.Lisp do
         e in ExecutionError ->
           {:error, {e.reason, e.message, e.data}}
 
-        e in PtcRunner.ToolExecutionError ->
+        e in PtcRunner.Lisp.ToolError ->
           {:error, {:tool_error, e.tool_name, e.message}, e.eval_ctx}
 
         e ->
@@ -1935,7 +1969,7 @@ defmodule PtcRunner.Lisp do
   defp validate_return_value(nil, _signature_str, step), do: {:ok, step}
 
   defp validate_return_value(parsed_signature, signature_str, step) do
-    case Signature.validate(parsed_signature, PublicStep.value(step.return)) do
+    case Signature.validate(parsed_signature, externalize_lisp_values(step.return)) do
       :ok ->
         # Store the original signature string in the step
         {:ok, %{step | signature: signature_str}}

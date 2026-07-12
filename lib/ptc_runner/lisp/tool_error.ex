@@ -1,4 +1,4 @@
-defmodule PtcRunner.ToolExecutionError do
+defmodule PtcRunner.Lisp.ToolError do
   @moduledoc """
   Exception raised when a tool execution fails.
 

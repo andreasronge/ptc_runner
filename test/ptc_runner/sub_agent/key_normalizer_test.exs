@@ -1,5 +1,5 @@
-defmodule PtcRunner.SubAgent.KeyNormalizerTest do
+defmodule PtcRunner.Lisp.KeyNormalizerTest do
   use ExUnit.Case, async: true
 
-  doctest PtcRunner.SubAgent.KeyNormalizer
+  doctest PtcRunner.Lisp.KeyNormalizer
 end

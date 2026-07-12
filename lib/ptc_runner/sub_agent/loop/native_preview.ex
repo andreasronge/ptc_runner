@@ -31,7 +31,7 @@ defmodule PtcRunner.SubAgent.Loop.NativePreview do
   require Logger
 
   alias PtcRunner.Lisp.Formatter
-  alias PtcRunner.SubAgent.KeyNormalizer
+  alias PtcRunner.Lisp.KeyNormalizer
   alias PtcRunner.Temporal
   alias PtcRunner.Tool
 

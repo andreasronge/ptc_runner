@@ -1,4 +1,4 @@
-defmodule PtcRunner.SubAgent.Namespace.TypeVocabulary do
+defmodule PtcRunner.Lisp.TypeVocabulary do
   @moduledoc "Converts Elixir values to human-readable type labels."
 
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
@@ -8,52 +8,52 @@ defmodule PtcRunner.SubAgent.Namespace.TypeVocabulary do
 
   ## Examples
 
-      iex> PtcRunner.SubAgent.Namespace.TypeVocabulary.type_of([])
+      iex> PtcRunner.Lisp.TypeVocabulary.type_of([])
       "list[0]"
 
-      iex> PtcRunner.SubAgent.Namespace.TypeVocabulary.type_of([1, 2, 3])
+      iex> PtcRunner.Lisp.TypeVocabulary.type_of([1, 2, 3])
       "list[3]"
 
-      iex> PtcRunner.SubAgent.Namespace.TypeVocabulary.type_of(%{})
+      iex> PtcRunner.Lisp.TypeVocabulary.type_of(%{})
       "map[0]"
 
-      iex> PtcRunner.SubAgent.Namespace.TypeVocabulary.type_of(%{a: 1})
+      iex> PtcRunner.Lisp.TypeVocabulary.type_of(%{a: 1})
       "map[1]"
 
-      iex> PtcRunner.SubAgent.Namespace.TypeVocabulary.type_of(MapSet.new([1, 2]))
+      iex> PtcRunner.Lisp.TypeVocabulary.type_of(MapSet.new([1, 2]))
       "set[2]"
 
-      iex> PtcRunner.SubAgent.Namespace.TypeVocabulary.type_of(~U[2026-05-03 09:14:00Z])
+      iex> PtcRunner.Lisp.TypeVocabulary.type_of(~U[2026-05-03 09:14:00Z])
       "datetime"
 
-      iex> PtcRunner.SubAgent.Namespace.TypeVocabulary.type_of(~D[2026-05-03])
+      iex> PtcRunner.Lisp.TypeVocabulary.type_of(~D[2026-05-03])
       "date"
 
-      iex> PtcRunner.SubAgent.Namespace.TypeVocabulary.type_of({:closure, [], nil, %{}, [], %{}})
+      iex> PtcRunner.Lisp.TypeVocabulary.type_of({:closure, [], nil, %{}, [], %{}})
       "#fn[...]"
 
-      iex> PtcRunner.SubAgent.Namespace.TypeVocabulary.type_of("hello")
+      iex> PtcRunner.Lisp.TypeVocabulary.type_of("hello")
       "string"
 
-      iex> PtcRunner.SubAgent.Namespace.TypeVocabulary.type_of(42)
+      iex> PtcRunner.Lisp.TypeVocabulary.type_of(42)
       "integer"
 
-      iex> PtcRunner.SubAgent.Namespace.TypeVocabulary.type_of(3.14)
+      iex> PtcRunner.Lisp.TypeVocabulary.type_of(3.14)
       "float"
 
-      iex> PtcRunner.SubAgent.Namespace.TypeVocabulary.type_of(true)
+      iex> PtcRunner.Lisp.TypeVocabulary.type_of(true)
       "boolean"
 
-      iex> PtcRunner.SubAgent.Namespace.TypeVocabulary.type_of(false)
+      iex> PtcRunner.Lisp.TypeVocabulary.type_of(false)
       "boolean"
 
-      iex> PtcRunner.SubAgent.Namespace.TypeVocabulary.type_of(:foo)
+      iex> PtcRunner.Lisp.TypeVocabulary.type_of(:foo)
       "keyword"
 
-      iex> PtcRunner.SubAgent.Namespace.TypeVocabulary.type_of(nil)
+      iex> PtcRunner.Lisp.TypeVocabulary.type_of(nil)
       "nil"
 
-      iex> PtcRunner.SubAgent.Namespace.TypeVocabulary.type_of(fn -> :ok end)
+      iex> PtcRunner.Lisp.TypeVocabulary.type_of(fn -> :ok end)
       "fn"
   """
   @spec type_of(term()) :: String.t()

@@ -7,7 +7,7 @@ defmodule PtcRunner.SubAgent.SystemPrompt.Output do
   for output fields.
   """
 
-  alias PtcRunner.SubAgent.Signature.Renderer
+  alias PtcRunner.Lisp.Signature.Renderer
 
   @doc """
   Generate the expected output section from signature.
@@ -34,7 +34,7 @@ defmodule PtcRunner.SubAgent.SystemPrompt.Output do
       true
 
   """
-  @spec generate(PtcRunner.SubAgent.Signature.signature() | nil, map() | nil) :: String.t()
+  @spec generate(PtcRunner.Lisp.Signature.signature() | nil, map() | nil) :: String.t()
   def generate(nil, _field_descriptions), do: ""
 
   def generate({:signature, _params, return_type}, field_descriptions) do

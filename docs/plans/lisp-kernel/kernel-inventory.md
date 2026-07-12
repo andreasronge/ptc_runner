@@ -28,7 +28,7 @@ name its re-home/delete condition. `unknown` is not a durable classification.
 
 | Area | Class | Retained behavior / destination |
 | --- | --- | --- |
-| `lib/ptc_runner/lisp.ex` | migrate | Extract a neutral internal evaluation entry for Kernel; replace agent/context/journal/public-Step options at cutover. |
+| `lib/ptc_runner/lisp.ex` | new path | Kernel uses the neutral `Lisp.Result`, `Lisp.Context`, `Lisp.Tool`, signature, metadata, and upstream-access boundaries; xref proves the retained Kernel/compiler graph has no legacy product dependency. Old journal/upstream options remain only until their callers are deleted. |
 | `lib/ptc_runner/lisp/parser*`, `fast_parser*`, AST/source modules | foundation | Parsing and source representation. Add span preservation as an early language workstream. |
 | `lib/ptc_runner/lisp/analyze*` | migrate | Retain static safety and Clojure semantics; remove agent budget/history/upstream surfaces and add environment/profile inputs. |
 | Parser/analyzer `program` support | new path | Capture bounded forms without workflow evaluation/resolution; preserve origin/spans; no general collection quote/macros. |
@@ -41,7 +41,7 @@ name its re-home/delete condition. `unknown` is not a durable classification.
 | SubAgent budget/plan/journal special surfaces in Lisp | delete | Replace with generic runtime usage, workflow annotations, or optional capabilities. |
 | `*1`, `*2`, `*3` support | migrate | Retain only for direct REPL history; agent history becomes ordinary workflow data. |
 | `return` / `fail` | foundation | Workflow-neutral terminal control signals. |
-| `lib/ptc_runner/sandbox.ex` | migrate | Extract process isolation, timeout, heap, and cleanup behind a neutral interface; remove Context/TraceContext/MCP-specific API coupling. |
+| `lib/ptc_runner/sandbox.ex` | new path | Process isolation, timeout, heap, and cleanup accept a neutral context term and use Lisp-owned process propagation; public Context/MCP type coupling is removed. |
 
 ### Prelude foundation and deployment platform
 
@@ -115,14 +115,14 @@ name its re-home/delete condition. `unknown` is not a durable classification.
 
 | Area | Class | Retained behavior / destination |
 | --- | --- | --- |
-| `PtcRunner.Step`, `Step.Native`, `Step.Public` | migrate | Keep an internal Lisp evaluation result; public execution becomes Kernel Result/Error. |
+| `PtcRunner.Step`, `Step.Public` | delete | Native ownership moved to `Lisp.Result`; public execution is Kernel Result/Error. Delete the old public projection with the remaining SubAgent/session callers. |
 | `Kernel.ReplSession` | new path | Direct bounded evaluator continuation for definitions and `*1`/`*2`/`*3`, with transactional memory, Dispatcher-backed workflow capabilities, manifest configuration, and canonical session events. |
 | `PtcRunner.Session` | delete | Retained REPL behavior now lives in `Kernel.ReplSession`; delete the old public/upstream/legacy-TraceLog semantics with remaining callers. |
-| `PtcRunner.Context`, `PtcRunner.Turn` | delete | Explicit input and canonical events replace them. |
+| `PtcRunner.Context`, `PtcRunner.Turn` | delete | The evaluator context moved to neutral `Lisp.Context`; delete the old Turn type with legacy callers. |
 | `PtcRunner.Evidence*` | delete unless proven | Retain only if a current Kernel/TraceLog contract test demonstrates an independent need. |
 | `PtcRunner.Schema` / generated `priv/ptc_schema.json` | migrate | Re-evaluate against manifest/capability schemas; delete SubAgent protocol schema. |
 | `PtcRunner.PtcToolProtocol` | delete | Native action policy moves to Lisp; Kernel capability contract replaces it. |
-| `PtcRunner.Tool` | migrate | Extract only callback normalization into Capability, then delete Tool and its SubAgent/exposure/cache/private-policy fields with the last old caller. |
+| `PtcRunner.Tool` | delete | Neutral direct-evaluator normalization now lives in `Lisp.Tool`; Kernel providers use `Capability`. Delete the agent/exposure Tool with its last legacy caller. |
 | `PtcRunner.Template`, `Mustache`, `Temporal` | delete | Last consumers are removed agent modes. |
 | `PtcRunner.Chunker` | delete unless proven | Retain only with independent language/Kernel consumer and integration test. |
 
@@ -132,7 +132,7 @@ name its re-home/delete condition. `unknown` is not a durable classification.
 | --- | --- | --- |
 | `PtcRunner.PreludeOrigin` | migrate | One bounded sanitized origin type for Component, diagnostics, and traces. |
 | `PtcRunner.SymbolInventory` | migrate | Derive bounded model-visible inventory exclusively from MissionEnvironment. |
-| `PtcRunner.TraceContext` | migrate/delete | Move unavoidable IDs/provenance to RunState and canonical events, then delete if no independent caller remains. |
+| `PtcRunner.Lisp.TraceContext` | migrate/delete | Move unavoidable IDs/provenance to RunState and canonical events, then delete if no independent caller remains. |
 | `PtcRunner.Dotenv` | migrate | CLI/provider-builder convenience only; never ambient Kernel authority. |
 | `PtcRunner.PromptLoader`, `PtcRunner.Prompts` | delete | Remove with compiled SubAgent prompt files and last callers. |
 | `PtcRunner.LLM` | migrate | Thin embedding/provider-registry facade for `llm/request`; no agent policy. |

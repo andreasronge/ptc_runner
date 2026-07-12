@@ -1,4 +1,4 @@
-defmodule PtcRunner.SubAgent.Signature.Parser do
+defmodule PtcRunner.Lisp.Signature.Parser do
   @moduledoc """
   NimbleParsec-based parser for signature strings.
 
@@ -11,7 +11,7 @@ defmodule PtcRunner.SubAgent.Signature.Parser do
 
   import NimbleParsec
 
-  alias PtcRunner.SubAgent.Signature.ParserHelpers
+  alias PtcRunner.Lisp.Signature.ParserHelpers
 
   # ============================================================
   # Whitespace

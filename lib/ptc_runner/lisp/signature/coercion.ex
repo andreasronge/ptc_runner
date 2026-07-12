@@ -1,4 +1,4 @@
-defmodule PtcRunner.SubAgent.Signature.Coercion do
+defmodule PtcRunner.Lisp.Signature.Coercion do
   @moduledoc """
   Coerce values to expected types with warning generation.
 
@@ -67,16 +67,16 @@ defmodule PtcRunner.SubAgent.Signature.Coercion do
 
   ## Examples
 
-      iex> PtcRunner.SubAgent.Signature.Coercion.coerce("42", :int)
+      iex> PtcRunner.Lisp.Signature.Coercion.coerce("42", :int)
       {:ok, 42, ["coerced string \\"42\\" to integer"]}
 
-      iex> PtcRunner.SubAgent.Signature.Coercion.coerce(42, :float)
+      iex> PtcRunner.Lisp.Signature.Coercion.coerce(42, :float)
       {:ok, 42.0, []}
 
-      iex> PtcRunner.SubAgent.Signature.Coercion.coerce("hello", :int)
+      iex> PtcRunner.Lisp.Signature.Coercion.coerce("hello", :int)
       {:error, "cannot coerce string \\"hello\\" to integer"}
 
-      iex> PtcRunner.SubAgent.Signature.Coercion.coerce("hello", :keyword)
+      iex> PtcRunner.Lisp.Signature.Coercion.coerce("hello", :keyword)
       {:ok, :hello, ["coerced string \\"hello\\" to keyword"]}
   """
 
@@ -89,16 +89,16 @@ defmodule PtcRunner.SubAgent.Signature.Coercion do
 
   ## Examples
 
-      iex> PtcRunner.SubAgent.Signature.Coercion.coerce("42", :int)
+      iex> PtcRunner.Lisp.Signature.Coercion.coerce("42", :int)
       {:ok, 42, ["coerced string \\"42\\" to integer"]}
 
-      iex> PtcRunner.SubAgent.Signature.Coercion.coerce(42, :float)
+      iex> PtcRunner.Lisp.Signature.Coercion.coerce(42, :float)
       {:ok, 42.0, []}
 
-      iex> PtcRunner.SubAgent.Signature.Coercion.coerce("hello", :int)
+      iex> PtcRunner.Lisp.Signature.Coercion.coerce("hello", :int)
       {:error, "cannot coerce string \\"hello\\" to integer"}
 
-      iex> PtcRunner.SubAgent.Signature.Coercion.coerce(%{"id" => "42", "name" => "Alice"}, {:map, [{"id", :int}, {"name", :string}]})
+      iex> PtcRunner.Lisp.Signature.Coercion.coerce(%{"id" => "42", "name" => "Alice"}, {:map, [{"id", :int}, {"name", :string}]})
       {:ok, %{"id" => 42, "name" => "Alice"}, ["coerced string \\"42\\" to integer"]}
   """
   @spec coerce(term(), atom() | tuple()) :: coercion_result()

@@ -2,7 +2,7 @@ defmodule PtcRunner.SubAgent.Namespace.ExecutionHistory do
   @moduledoc "Renders tool call history and println output."
 
   alias PtcRunner.Lisp.Format
-  alias PtcRunner.SubAgent.UntrustedRenderer
+  alias PtcRunner.Lisp.UntrustedRenderer
 
   @doc """
   Render tool calls made during successful turns.

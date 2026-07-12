@@ -1,9 +1,9 @@
-defmodule PtcRunner.SubAgent.Namespace.TypeVocabularyTest do
+defmodule PtcRunner.Lisp.TypeVocabularyTest do
   use ExUnit.Case, async: true
 
-  alias PtcRunner.SubAgent.Namespace.TypeVocabulary
+  alias PtcRunner.Lisp.TypeVocabulary
 
-  doctest PtcRunner.SubAgent.Namespace.TypeVocabulary
+  doctest PtcRunner.Lisp.TypeVocabulary
 
   test "native function combinators render as functions" do
     assert TypeVocabulary.type_of({:juxt_fn, []}) == "fn"

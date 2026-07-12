@@ -26,9 +26,9 @@ defmodule PtcRunner.Session do
       2
   """
 
+  alias PtcRunner.Lisp.Result, as: Native
   alias PtcRunner.PreludeStore.Selection
   alias PtcRunner.Step
-  alias PtcRunner.Step.Native
   alias PtcRunner.Step.Public, as: PublicStep
   alias PtcRunner.TraceLog
   alias PtcRunner.TraceLog.TurnEvent

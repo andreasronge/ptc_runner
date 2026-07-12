@@ -7,7 +7,7 @@ defmodule PtcRunner.TraceLog.IntrospectionTest do
   use ExUnit.Case, async: true
 
   alias PtcRunner.{Lisp, Session, TraceLog}
-  alias PtcRunner.Step
+  alias PtcRunner.Lisp.Result, as: Step
   alias PtcRunner.TraceLog.{Introspection, MemorySink}
 
   # Records a 3-turn session (2 committed + 1 failed attempt) and returns its

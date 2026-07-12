@@ -13,6 +13,24 @@ defmodule PtcRunner.LispTest do
     test "propagates parser errors" do
       assert {:error, %{fail: %{reason: :parse_error}}} = Lisp.run("(invalid syntax!")
     end
+
+    test "rejects unsupported upstream runtime handles before evaluation" do
+      assert {:error, %{fail: %{reason: :prelude_attach_failed, message: message}}} =
+               Lisp.run("(+ 1 2)", runtime: %URI{scheme: "unsupported"})
+
+      assert message =~ "unsupported upstream runtime handle"
+    end
+
+    test "validates explicit upstream grants without a runtime" do
+      assert {:error, %{fail: %{reason: :prelude_attach_failed, message: message}}} =
+               Lisp.run("(+ 1 2)", upstream_tools: ["invalid"])
+
+      assert message =~ "upstream:<server>/<tool>"
+    end
+
+    test "public results hide native closures" do
+      assert {:ok, %{return: "#fn[...]"}} = Lisp.run("(fn [x] x)")
+    end
   end
 
   describe "format_value/2" do
@@ -489,6 +507,13 @@ defmodule PtcRunner.LispTest do
 
       source = ~S|(do (tool/greet {}) (tool/farewell {}))|
       assert {:ok, %{return: "bye"}} = Lisp.run(source, tools: tools)
+    end
+
+    test "rejects legacy symbolic agent tool formats" do
+      assert {:error, %{fail: %{reason: :invalid_tool}}} =
+               Lisp.run(~S|(tool/grep {:pattern "x" :text "x"})|,
+                 tools: %{"grep" => :builtin_grep}
+               )
     end
   end
 end

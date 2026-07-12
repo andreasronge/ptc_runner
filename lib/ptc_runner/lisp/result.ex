@@ -1,7 +1,5 @@
-defmodule PtcRunner.Step.Native do
+defmodule PtcRunner.Lisp.Result do
   @moduledoc false
-
-  alias PtcRunner.Step
 
   defstruct [
     :return,
@@ -33,22 +31,22 @@ defmodule PtcRunner.Step.Native do
 
   @type t :: %__MODULE__{
           return: term() | nil,
-          fail: Step.fail() | nil,
+          fail: map() | nil,
           memory: map(),
           journal: map() | nil,
           signature: String.t() | nil,
-          usage: Step.usage() | nil,
-          turns: [PtcRunner.Turn.t()] | nil,
+          usage: map() | nil,
+          turns: [term()] | nil,
           trace_id: String.t() | nil,
           parent_trace_id: String.t() | nil,
           field_descriptions: map() | nil,
           prints: [String.t()],
-          tool_calls: [Step.tool_call()],
-          pmap_calls: [Step.pmap_call()],
-          catalog_ops: [Step.catalog_op()],
+          tool_calls: [map()],
+          pmap_calls: [map()],
+          catalog_ops: [map()],
           child_traces: [String.t()],
           child_steps: [t()],
-          messages: [Step.message()] | nil,
+          messages: [map()] | nil,
           prompt: String.t() | nil,
           tools: map() | nil,
           prelude_trace: PtcRunner.Lisp.Prelude.trace_summary() | nil,
@@ -104,38 +102,6 @@ defmodule PtcRunner.Step.Native do
       catalog_ops: [],
       child_traces: [],
       child_steps: []
-    }
-  end
-
-  @doc false
-  @spec from_public(Step.t()) :: t()
-  def from_public(%Step{} = step) do
-    %__MODULE__{
-      return: step.return,
-      fail: step.fail,
-      memory: step.memory,
-      journal: step.journal,
-      signature: step.signature,
-      usage: step.usage,
-      turns: step.turns,
-      trace_id: step.trace_id,
-      parent_trace_id: step.parent_trace_id,
-      name: step.name,
-      field_descriptions: step.field_descriptions,
-      prints: step.prints,
-      tool_calls: step.tool_calls,
-      pmap_calls: step.pmap_calls,
-      catalog_ops: step.catalog_ops,
-      child_traces: step.child_traces,
-      child_steps: step.child_steps,
-      messages: step.messages,
-      prompt: step.prompt,
-      original_prompt: step.original_prompt,
-      tools: step.tools,
-      prelude_trace: step.prelude_trace,
-      prelude_call_counts: step.prelude_call_counts,
-      summaries: step.summaries,
-      tool_cache: step.tool_cache
     }
   end
 end

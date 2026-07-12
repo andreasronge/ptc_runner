@@ -1,7 +1,7 @@
 defmodule PtcRunner.Lisp.FlexAccessTest do
   use ExUnit.Case, async: true
 
-  alias PtcRunner.Step
+  alias PtcRunner.Lisp.Result, as: Step
 
   describe "flex_fetch preserves nil values" do
     test "select-keys includes nil values" do

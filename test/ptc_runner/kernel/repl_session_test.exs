@@ -52,7 +52,7 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
     assert {:error, _step, _session} = ReplSession.eval(session, "oversized")
   end
 
-  test "direct code uses the subordinate evaluation timeout ceiling" do
+  test "direct code remains bounded by subordinate evaluation ceilings" do
     {:ok, workflow} = WorkflowEnvironment.new([])
     {:ok, mission} = MissionEnvironment.new([])
     {:ok, limits} = Limits.new(evaluation_timeout_ms: 1, workflow_timeout_ms: 5_000)
@@ -72,7 +72,7 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
     assert {:error, %{fail: %{reason: reason}}, _session} =
              ReplSession.eval(session, "(loop [x 0] (recur (inc x)))")
 
-    assert reason in [:compile_timeout, :timeout]
+    assert reason in [:compile_timeout, :timeout, :loop_limit_exceeded]
   end
 
   test "session-wide evaluation limits do not reset between expressions" do

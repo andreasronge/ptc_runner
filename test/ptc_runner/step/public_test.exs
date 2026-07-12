@@ -2,7 +2,7 @@ defmodule PtcRunner.Step.PublicTest do
   use ExUnit.Case, async: true
 
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
-  alias PtcRunner.Step.Native
+  alias PtcRunner.Lisp.Result, as: Native
   alias PtcRunner.Step.Public
   alias PtcRunner.Turn
 

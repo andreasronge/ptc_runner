@@ -1,8 +1,8 @@
 defmodule PtcRunner.SubAgent.Namespace.Tool do
   @moduledoc "Renders available tools for the USER message namespace section."
 
-  alias PtcRunner.SubAgent.Signature
-  alias PtcRunner.SubAgent.Signature.Renderer
+  alias PtcRunner.Lisp.Signature
+  alias PtcRunner.Lisp.Signature.Renderer
   alias PtcRunner.Tool
 
   @doc """

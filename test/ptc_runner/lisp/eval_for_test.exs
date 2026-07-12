@@ -2,7 +2,7 @@ defmodule PtcRunner.Lisp.EvalForTest do
   use ExUnit.Case, async: true
 
   alias PtcRunner.Lisp
-  alias PtcRunner.Step
+  alias PtcRunner.Lisp.Result, as: Step
 
   describe "for - single binding" do
     test "basic transform" do

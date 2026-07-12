@@ -161,7 +161,7 @@ Two things make this work:
    results are safe to reuse for identical canonical args. This is the
    same `cache:` field PTC-Lisp tools have always had — combined mode
    reuses it rather than introducing a parallel `cacheable:` flag.
-2. **Canonical cache key.** `PtcRunner.SubAgent.KeyNormalizer.canonical_cache_key/2`
+2. **Canonical cache key.** `PtcRunner.Lisp.KeyNormalizer.canonical_cache_key/2`
    normalizes args before hashing: atom and string keys converge,
    nested map ordering is stabilized, and integer-equal floats collapse
    to integers. Native and PTC-Lisp callers always agree on the key

@@ -263,19 +263,19 @@ Tracer.new(max_entries: 100)
 
 ### Cross-Process Context
 
-Trace context (collectors and span hierarchy) is managed by `PtcRunner.TraceContext`.
+Trace context (collectors and span hierarchy) is managed by `PtcRunner.Lisp.TraceContext`.
 When execution spans multiple processes (sandbox, `pmap`, `pcalls`), use
-`PtcRunner.TraceContext.capture/0` and `PtcRunner.TraceContext.attach/1` to propagate
+`PtcRunner.Lisp.TraceContext.capture/0` and `PtcRunner.Lisp.TraceContext.attach/1` to propagate
 context to child processes. The sandbox and parallel execution primitives do this
 automatically.
 
 For manual propagation in custom code:
 
 ```elixir
-ctx = PtcRunner.TraceContext.capture()
+ctx = PtcRunner.Lisp.TraceContext.capture()
 
 Task.async(fn ->
-  PtcRunner.TraceContext.attach(ctx)
+  PtcRunner.Lisp.TraceContext.attach(ctx)
   # Events from this process are now captured and linked to the parent span
 end)
 ```

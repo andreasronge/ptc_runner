@@ -673,8 +673,12 @@ defmodule PtcRunner.Lisp.IntegrationTest do
       # Simulates the planner-worker-reviewer do-step pattern:
       # tool/worker → (format-result ...) → tool/reviewer
       # The format-result closure must not discard worker's child_step.
-      worker_step = %PtcRunner.Step{return: %{data: "ok"}, trace_id: "worker_1"}
-      reviewer_step = %PtcRunner.Step{return: %{approved: true}, trace_id: "reviewer_1"}
+      worker_step = %PtcRunner.Lisp.Result{
+        return: {:wrapped, {:closure, [], nil, %{"captured_secret" => "must-not-leak"}, [], %{}}},
+        trace_id: "worker_1"
+      }
+
+      reviewer_step = %PtcRunner.Lisp.Result{return: %{approved: true}, trace_id: "reviewer_1"}
 
       tools = %{
         "worker" =>
@@ -700,6 +704,8 @@ defmodule PtcRunner.Lisp.IntegrationTest do
 
       assert length(step.child_steps) == 2
       assert Enum.map(step.child_steps, & &1.trace_id) == ["worker_1", "reviewer_1"]
+      assert hd(step.child_steps).return == {:wrapped, "#fn[...]"}
+      refute inspect(step.child_steps) =~ "must-not-leak"
     end
   end
 

@@ -5,7 +5,7 @@ defmodule PtcRunner.SubAgent.ToolSchema do
   Used by `:tool_calling` mode to provide tool schemas to the LLM API.
   """
 
-  alias PtcRunner.SubAgent.Signature
+  alias PtcRunner.Lisp.Signature
   alias PtcRunner.Tool
 
   @doc """

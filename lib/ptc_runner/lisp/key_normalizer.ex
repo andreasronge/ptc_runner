@@ -1,4 +1,4 @@
-defmodule PtcRunner.SubAgent.KeyNormalizer do
+defmodule PtcRunner.Lisp.KeyNormalizer do
   @moduledoc """
   Normalizes map keys at the tool boundary.
 
@@ -24,13 +24,13 @@ defmodule PtcRunner.SubAgent.KeyNormalizer do
 
   ## Examples
 
-      iex> PtcRunner.SubAgent.KeyNormalizer.normalize_keys(%{"was-improved" => true})
+      iex> PtcRunner.Lisp.KeyNormalizer.normalize_keys(%{"was-improved" => true})
       %{"was_improved" => true}
 
-      iex> PtcRunner.SubAgent.KeyNormalizer.normalize_keys(%{nested: %{"foo-bar" => 1}})
+      iex> PtcRunner.Lisp.KeyNormalizer.normalize_keys(%{nested: %{"foo-bar" => 1}})
       %{"nested" => %{"foo_bar" => 1}}
 
-      iex> PtcRunner.SubAgent.KeyNormalizer.normalize_keys([%{"list-item" => 1}])
+      iex> PtcRunner.Lisp.KeyNormalizer.normalize_keys([%{"list-item" => 1}])
       [%{"list_item" => 1}]
 
   """
@@ -52,13 +52,13 @@ defmodule PtcRunner.SubAgent.KeyNormalizer do
 
   ## Examples
 
-      iex> PtcRunner.SubAgent.KeyNormalizer.normalize_key(:"was-improved")
+      iex> PtcRunner.Lisp.KeyNormalizer.normalize_key(:"was-improved")
       "was_improved"
 
-      iex> PtcRunner.SubAgent.KeyNormalizer.normalize_key("foo-bar")
+      iex> PtcRunner.Lisp.KeyNormalizer.normalize_key("foo-bar")
       "foo_bar"
 
-      iex> PtcRunner.SubAgent.KeyNormalizer.normalize_key(:no_hyphens)
+      iex> PtcRunner.Lisp.KeyNormalizer.normalize_key(:no_hyphens)
       "no_hyphens"
 
   """
@@ -120,39 +120,39 @@ defmodule PtcRunner.SubAgent.KeyNormalizer do
 
   ## Examples
 
-      iex> PtcRunner.SubAgent.KeyNormalizer.canonical_cache_key("search", %{q: "x"})
+      iex> PtcRunner.Lisp.KeyNormalizer.canonical_cache_key("search", %{q: "x"})
       {"search", %{"q" => "x"}}
 
       # Atom and string keys converge.
-      iex> a = PtcRunner.SubAgent.KeyNormalizer.canonical_cache_key("t", %{foo: 1})
-      iex> b = PtcRunner.SubAgent.KeyNormalizer.canonical_cache_key("t", %{"foo" => 1})
+      iex> a = PtcRunner.Lisp.KeyNormalizer.canonical_cache_key("t", %{foo: 1})
+      iex> b = PtcRunner.Lisp.KeyNormalizer.canonical_cache_key("t", %{"foo" => 1})
       iex> a == b
       true
 
       # Hyphenated and underscored keys converge (PTC-Lisp parity).
-      iex> a = PtcRunner.SubAgent.KeyNormalizer.canonical_cache_key("t", %{"was-improved" => true})
-      iex> b = PtcRunner.SubAgent.KeyNormalizer.canonical_cache_key("t", %{"was_improved" => true})
+      iex> a = PtcRunner.Lisp.KeyNormalizer.canonical_cache_key("t", %{"was-improved" => true})
+      iex> b = PtcRunner.Lisp.KeyNormalizer.canonical_cache_key("t", %{"was_improved" => true})
       iex> a == b
       true
 
       # Integer-equal floats collapse to integers.
-      iex> PtcRunner.SubAgent.KeyNormalizer.canonical_cache_key("t", %{n: 1.0})
+      iex> PtcRunner.Lisp.KeyNormalizer.canonical_cache_key("t", %{n: 1.0})
       {"t", %{"n" => 1}}
 
       # Non-integer floats stay floats.
-      iex> PtcRunner.SubAgent.KeyNormalizer.canonical_cache_key("t", %{n: 1.5})
+      iex> PtcRunner.Lisp.KeyNormalizer.canonical_cache_key("t", %{n: 1.5})
       {"t", %{"n" => 1.5}}
 
       # Nested maps and lists recurse.
-      iex> PtcRunner.SubAgent.KeyNormalizer.canonical_cache_key("t", %{xs: [%{a: 1.0}, %{a: 2.0}]})
+      iex> PtcRunner.Lisp.KeyNormalizer.canonical_cache_key("t", %{xs: [%{a: 1.0}, %{a: 2.0}]})
       {"t", %{"xs" => [%{"a" => 1}, %{"a" => 2}]}}
 
       # Tuples canonicalize to lists for PTC-Lisp parity.
-      iex> PtcRunner.SubAgent.KeyNormalizer.canonical_cache_key("t", %{p: {1, 2}})
+      iex> PtcRunner.Lisp.KeyNormalizer.canonical_cache_key("t", %{p: {1, 2}})
       {"t", %{"p" => [1, 2]}}
 
       # Non-map args wrap in a `{:non_map, args}` sentinel rather than crash.
-      iex> PtcRunner.SubAgent.KeyNormalizer.canonical_cache_key("t", [1, 2, 3])
+      iex> PtcRunner.Lisp.KeyNormalizer.canonical_cache_key("t", [1, 2, 3])
       {"t", {:non_map, [1, 2, 3]}}
 
   """

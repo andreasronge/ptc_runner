@@ -10,8 +10,8 @@ defmodule PtcRunner.SubAgent.Loop.Metrics do
   - Trace filtering based on execution result
   """
 
+  alias PtcRunner.Lisp.TraceContext
   alias PtcRunner.SubAgent.{LLMResolver, Telemetry}
-  alias PtcRunner.TraceContext
   alias PtcRunner.TraceLog
   alias PtcRunner.TraceLog.TurnEvent
   alias PtcRunner.Turn

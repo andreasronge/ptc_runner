@@ -86,7 +86,7 @@ defmodule PtcRunner.Lisp.Eval.ParallelRunner do
   """
 
   alias PtcRunner.Lisp.Eval.ParallelBudget
-  alias PtcRunner.TraceContext
+  alias PtcRunner.Lisp.TraceContext
 
   # Process-dictionary key: append-only `MapSet` of EVERY worker pid
   # spawned by the in-progress `run/3` call. Never shrinks for the call

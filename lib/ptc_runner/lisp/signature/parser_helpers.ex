@@ -1,4 +1,4 @@
-defmodule PtcRunner.SubAgent.Signature.ParserHelpers do
+defmodule PtcRunner.Lisp.Signature.ParserHelpers do
   @moduledoc """
   Helper functions for signature parser AST building.
   """

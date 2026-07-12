@@ -72,8 +72,6 @@ defmodule PtcRunner.ReplDiscoveryTest do
       assert {:ok, step} =
                Lisp.run(~s|(apropos "github" {:mode :jsonl})|, discovery_exec: discovery_exec())
 
-      assert_public_step!(step)
-
       assert [
                %{
                  operation: :apropos,

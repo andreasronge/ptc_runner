@@ -59,7 +59,7 @@ defmodule UsageRulesTest do
 
       for file <- @rules_files do
         assert_no_match(file, pattern, """
-        `step.trace` does not exist on `%PtcRunner.Step{}`. Use `step.turns`
+        `step.trace` does not exist on `%PtcRunner.Lisp.Result{}`. Use `step.turns`
         for execution history, or `step.trace_id` / `step.parent_trace_id`
         for telemetry correlation.
         """)

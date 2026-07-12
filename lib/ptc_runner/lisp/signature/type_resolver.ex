@@ -1,4 +1,4 @@
-defmodule PtcRunner.SubAgent.Signature.TypeResolver do
+defmodule PtcRunner.Lisp.Signature.TypeResolver do
   @moduledoc """
   Resolve paths against parsed signature types.
 
@@ -14,11 +14,11 @@ defmodule PtcRunner.SubAgent.Signature.TypeResolver do
   ## Examples
 
       iex> sig = {:signature, [{"user", :string}], {:map, [{"result", :int}]}}
-      iex> PtcRunner.SubAgent.Signature.TypeResolver.resolve_path(sig, ["user"])
+      iex> PtcRunner.Lisp.Signature.TypeResolver.resolve_path(sig, ["user"])
       {:ok, :string}
 
       iex> sig = {:signature, [{"items", {:list, {:map, [{"name", :string}]}}}], :any}
-      iex> PtcRunner.SubAgent.Signature.TypeResolver.resolve_path(sig, ["items"])
+      iex> PtcRunner.Lisp.Signature.TypeResolver.resolve_path(sig, ["items"])
       {:ok, {:list, {:map, [{"name", :string}]}}}
 
   """
@@ -50,15 +50,15 @@ defmodule PtcRunner.SubAgent.Signature.TypeResolver do
   ## Examples
 
       iex> sig = {:signature, [{"items", {:list, {:map, [{"name", :string}]}}}], :any}
-      iex> PtcRunner.SubAgent.Signature.TypeResolver.list_element_type(sig, "items")
+      iex> PtcRunner.Lisp.Signature.TypeResolver.list_element_type(sig, "items")
       {:ok, {:map, [{"name", :string}]}}
 
       iex> sig = {:signature, [{"tags", {:list, :string}}], :any}
-      iex> PtcRunner.SubAgent.Signature.TypeResolver.list_element_type(sig, "tags")
+      iex> PtcRunner.Lisp.Signature.TypeResolver.list_element_type(sig, "tags")
       {:ok, :string}
 
       iex> sig = {:signature, [{"name", :string}], :any}
-      iex> PtcRunner.SubAgent.Signature.TypeResolver.list_element_type(sig, "name")
+      iex> PtcRunner.Lisp.Signature.TypeResolver.list_element_type(sig, "name")
       {:error, {:not_a_list, :string}}
 
   """
@@ -77,13 +77,13 @@ defmodule PtcRunner.SubAgent.Signature.TypeResolver do
 
   ## Examples
 
-      iex> PtcRunner.SubAgent.Signature.TypeResolver.scalar_type?(:string)
+      iex> PtcRunner.Lisp.Signature.TypeResolver.scalar_type?(:string)
       true
 
-      iex> PtcRunner.SubAgent.Signature.TypeResolver.scalar_type?({:map, [{"x", :int}]})
+      iex> PtcRunner.Lisp.Signature.TypeResolver.scalar_type?({:map, [{"x", :int}]})
       false
 
-      iex> PtcRunner.SubAgent.Signature.TypeResolver.scalar_type?({:list, :string})
+      iex> PtcRunner.Lisp.Signature.TypeResolver.scalar_type?({:list, :string})
       false
 
   """
@@ -107,13 +107,13 @@ defmodule PtcRunner.SubAgent.Signature.TypeResolver do
 
   ## Examples
 
-      iex> PtcRunner.SubAgent.Signature.TypeResolver.iterable_type?({:list, :string})
+      iex> PtcRunner.Lisp.Signature.TypeResolver.iterable_type?({:list, :string})
       true
 
-      iex> PtcRunner.SubAgent.Signature.TypeResolver.iterable_type?(:string)
+      iex> PtcRunner.Lisp.Signature.TypeResolver.iterable_type?(:string)
       false
 
-      iex> PtcRunner.SubAgent.Signature.TypeResolver.iterable_type?({:map, [{"x", :int}]})
+      iex> PtcRunner.Lisp.Signature.TypeResolver.iterable_type?({:map, [{"x", :int}]})
       true
 
   """
@@ -132,10 +132,10 @@ defmodule PtcRunner.SubAgent.Signature.TypeResolver do
 
   ## Examples
 
-      iex> PtcRunner.SubAgent.Signature.TypeResolver.map_fields({:map, [{"name", :string}, {"age", :int}]})
+      iex> PtcRunner.Lisp.Signature.TypeResolver.map_fields({:map, [{"name", :string}, {"age", :int}]})
       {:ok, [{"name", :string}, {"age", :int}]}
 
-      iex> PtcRunner.SubAgent.Signature.TypeResolver.map_fields(:string)
+      iex> PtcRunner.Lisp.Signature.TypeResolver.map_fields(:string)
       {:error, {:not_a_map, :string}}
 
   """

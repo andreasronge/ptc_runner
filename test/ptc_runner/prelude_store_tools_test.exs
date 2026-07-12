@@ -4,9 +4,9 @@ defmodule PtcRunner.PreludeStore.ToolsTest do
   alias PtcRunner.Lisp
   alias PtcRunner.Lisp.Prelude
   alias PtcRunner.Lisp.Prelude.FormScanner
+  alias PtcRunner.Lisp.Result, as: Step
   alias PtcRunner.PreludeStore
   alias PtcRunner.PreludeStore.Tools
-  alias PtcRunner.Step
   alias PtcRunner.SubAgent.Namespace.Tool, as: ToolNamespace
   alias PtcRunner.SubAgent.ToolSchema
   alias PtcRunner.TraceLog.TurnEvent

@@ -8,7 +8,7 @@ defmodule PtcRunner.Lisp.Integration.BenchmarkScenariosTest do
   use ExUnit.Case, async: true
 
   alias PtcRunner.Lisp
-  alias PtcRunner.Step
+  alias PtcRunner.Lisp.Result, as: Step
 
   # ==========================================================================
   # Level 1: Simple Operations

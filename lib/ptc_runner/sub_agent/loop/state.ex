@@ -28,7 +28,7 @@ defmodule PtcRunner.SubAgent.Loop.State do
   `compaction_stats`
   """
 
-  alias PtcRunner.Step.Native
+  alias PtcRunner.Lisp.Result, as: Native
   alias PtcRunner.Turn
 
   @enforce_keys [:llm, :context, :turn, :messages, :start_time, :work_turns_remaining]

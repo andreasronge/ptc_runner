@@ -9,7 +9,7 @@ defmodule PtcRunner.Lisp.Prelude.ToolRequiresTest do
 
   alias PtcRunner.Lisp
   alias PtcRunner.Lisp.Prelude.{Attach, AttachContext, Compiler}
-  alias PtcRunner.Step
+  alias PtcRunner.Lisp.Result, as: Step
 
   defp compile!(source) do
     {:ok, prelude} = Compiler.compile(source)

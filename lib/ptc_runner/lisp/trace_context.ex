@@ -1,4 +1,4 @@
-defmodule PtcRunner.TraceContext do
+defmodule PtcRunner.Lisp.TraceContext do
   @moduledoc """
   Centralizes process dictionary access for tracing context.
 

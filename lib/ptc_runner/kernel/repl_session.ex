@@ -10,8 +10,8 @@ defmodule PtcRunner.Kernel.ReplSession do
   alias PtcRunner.Kernel.RunState
   alias PtcRunner.Kernel.WorkflowEnvironment
   alias PtcRunner.Lisp
+  alias PtcRunner.Lisp.Result, as: Native
   alias PtcRunner.Lisp.RetainedSize
-  alias PtcRunner.Step.Native
 
   @default_history_depth 3
 

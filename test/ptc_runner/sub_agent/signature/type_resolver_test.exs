@@ -1,10 +1,10 @@
-defmodule PtcRunner.SubAgent.Signature.TypeResolverTest do
+defmodule PtcRunner.Lisp.Signature.TypeResolverTest do
   use ExUnit.Case, async: true
 
-  alias PtcRunner.SubAgent.Signature.Parser
-  alias PtcRunner.SubAgent.Signature.TypeResolver
+  alias PtcRunner.Lisp.Signature.Parser
+  alias PtcRunner.Lisp.Signature.TypeResolver
 
-  doctest PtcRunner.SubAgent.Signature.TypeResolver
+  doctest PtcRunner.Lisp.Signature.TypeResolver
 
   # The Parser produces exactly the `{:signature, params, return}` tuples that
   # TypeResolver consumes, so most tests below drive the REAL parse -> resolve

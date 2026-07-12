@@ -7,9 +7,10 @@ defmodule PtcRunner.SubAgent.Loop.JsonHandler do
   that is shared across the json-only and tool-calling code paths.
   """
 
-  alias PtcRunner.Step.Native, as: Step
+  alias PtcRunner.Lisp.{KeyNormalizer, Signature}
+  alias PtcRunner.Lisp.Result, as: Step
   alias PtcRunner.SubAgent.Definition
-  alias PtcRunner.SubAgent.{JsonParser, KeyNormalizer, Signature}
+  alias PtcRunner.SubAgent.JsonParser
   alias PtcRunner.SubAgent.Loop.Metrics
   alias PtcRunner.SubAgent.Loop.Shared
 

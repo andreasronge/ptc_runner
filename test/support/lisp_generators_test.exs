@@ -3,7 +3,7 @@ defmodule PtcRunner.TestSupport.LispGeneratorsTest do
   use ExUnitProperties
 
   alias PtcRunner.Lisp.{Formatter, Parser, SourceAtoms}
-  alias PtcRunner.Step
+  alias PtcRunner.Lisp.Result, as: Step
   alias PtcRunner.TestSupport.LispGenerators, as: Gen
 
   describe "roundtrip parsing" do

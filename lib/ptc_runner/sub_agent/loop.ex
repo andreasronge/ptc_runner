@@ -62,11 +62,12 @@ defmodule PtcRunner.SubAgent.Loop do
   """
 
   alias PtcRunner.Lisp
-  alias PtcRunner.Step.Native, as: Step
+  alias PtcRunner.Lisp.KeyNormalizer
+  alias PtcRunner.Lisp.Result, as: Step
+  alias PtcRunner.Lisp.TraceContext
   alias PtcRunner.Step.Public, as: PublicStep
   alias PtcRunner.SubAgent.BuiltinTools
   alias PtcRunner.SubAgent.Definition
-  alias PtcRunner.Turn
 
   alias PtcRunner.SubAgent.Loop.{
     Budget,
@@ -84,8 +85,8 @@ defmodule PtcRunner.SubAgent.Loop do
     TurnFeedback
   }
 
-  alias PtcRunner.SubAgent.{Compaction, KeyNormalizer, SystemPrompt, Telemetry}
-  alias PtcRunner.TraceContext
+  alias PtcRunner.SubAgent.{Compaction, SystemPrompt, Telemetry}
+  alias PtcRunner.Turn
 
   @doc """
   Execute a SubAgent in loop mode (multi-turn with tools).
@@ -527,10 +528,10 @@ defmodule PtcRunner.SubAgent.Loop do
           # the native memory from the state it was given, not rebuild it from
           # externalized values.
           {:stop, {:ok, %PtcRunner.Step{} = step}} ->
-            {:stop, {:ok, Step.from_public(step)}}
+            {:stop, {:ok, struct(Step, Map.from_struct(step))}}
 
           {:stop, {:error, %PtcRunner.Step{} = step}} ->
-            {:stop, {:error, Step.from_public(step)}}
+            {:stop, {:error, struct(Step, Map.from_struct(step))}}
 
           other ->
             raise ArgumentError, "continuation_guard returned invalid value: #{inspect(other)}"

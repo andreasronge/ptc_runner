@@ -6,10 +6,10 @@ defmodule PtcRunner.SubAgent.Loop.ReturnValidation do
   formats validation errors for LLM feedback.
   """
 
+  alias PtcRunner.Lisp.KeyNormalizer
+  alias PtcRunner.Lisp.Signature
   alias PtcRunner.Step.Public, as: PublicStep
   alias PtcRunner.SubAgent.Definition
-  alias PtcRunner.SubAgent.KeyNormalizer
-  alias PtcRunner.SubAgent.Signature
 
   @doc """
   Validate return value against agent's parsed signature.

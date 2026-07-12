@@ -13,7 +13,7 @@ defmodule PtcRunner do
   | `PtcRunner.SubAgent` | Agentic loop: prompt → LLM → program → execute → repeat |
   | `PtcRunner.Lisp` | PTC-Lisp interpreter |
   | `PtcRunner.Sandbox` | Isolated execution with timeout/memory limits |
-  | `PtcRunner.Context` | Tools and memory container |
+  | `PtcRunner.Lisp.Context` | Tools and memory container |
 
   ## Example
 

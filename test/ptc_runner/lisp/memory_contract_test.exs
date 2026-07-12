@@ -2,7 +2,7 @@ defmodule PtcRunner.Lisp.MemoryContractTest do
   use ExUnit.Case, async: true
 
   alias PtcRunner.Lisp
-  alias PtcRunner.Step
+  alias PtcRunner.Lisp.Result, as: Step
 
   @moduledoc """
   Tests for V2 simplified memory contract.

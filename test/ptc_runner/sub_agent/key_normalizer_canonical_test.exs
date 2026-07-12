@@ -1,4 +1,4 @@
-defmodule PtcRunner.SubAgent.KeyNormalizerCanonicalTest do
+defmodule PtcRunner.Lisp.KeyNormalizerCanonicalTest do
   @moduledoc """
   Edge-case tests for `KeyNormalizer.canonical_cache_key/2`.
 
@@ -13,7 +13,7 @@ defmodule PtcRunner.SubAgent.KeyNormalizerCanonicalTest do
 
   use ExUnit.Case, async: true
 
-  alias PtcRunner.SubAgent.KeyNormalizer
+  alias PtcRunner.Lisp.KeyNormalizer
 
   describe "tool name + args shape" do
     test "returns a {tool_name, args_map} tuple" do
