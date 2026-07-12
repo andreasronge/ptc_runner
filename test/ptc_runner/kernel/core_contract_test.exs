@@ -153,4 +153,29 @@ defmodule PtcRunner.Kernel.CoreContractTest do
 
     assert [%{type: "run-started"}, %{type: "run-stopped"}] = EventSink.events(sink)
   end
+
+  test "new Kernel workflow routes only granted capabilities through the dispatcher" do
+    {:ok, add} =
+      Capability.new(
+        name: "add",
+        callback: fn %{"left" => left, "right" => right} -> {:ok, %{"sum" => left + right}} end
+      )
+
+    {:ok, workflow} = WorkflowEnvironment.new(capabilities: [add])
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, limits} = Limits.new()
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "capability")
+
+    {:ok, config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        mission_environment: mission,
+        input: %{},
+        limits: limits,
+        event_sink: sink
+      )
+
+    assert {:ok, %{value: %{status: :ok, value: %{"sum" => 42}}}} =
+             Kernel.run("(return (tool/add {:left 40 :right 2}))", config)
+  end
 end
