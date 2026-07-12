@@ -367,17 +367,6 @@ defmodule PtcRunner.Lisp.Signature.ValidatorTest do
                  {:map, [{"at", :datetime}]}
                )
     end
-
-    test ":datetime inside closed_map gets coercion via JsonHandler.atomize_value" do
-      alias PtcRunner.SubAgent.Loop.JsonHandler
-
-      iso = "2026-05-03T09:14:00Z"
-      schema = {:closed_map, [{"at", :datetime}]}
-
-      atomized = JsonHandler.atomize_value(%{"at" => iso}, schema)
-      assert %{at: %DateTime{}} = atomized
-      assert :ok = Validator.validate(atomized, schema)
-    end
   end
 
   describe "validate/2 - closed maps" do

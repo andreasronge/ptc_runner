@@ -1,69 +1,10 @@
 defmodule PtcRunner.LLM.Registry do
   @moduledoc """
-  Behaviour and unified interface for model resolution.
+  Resolves trusted model aliases to provider model identifiers.
 
-  Resolves model aliases (e.g., "haiku") to full provider:model strings
-  (e.g., "openrouter:anthropic/claude-haiku-4.5"). This enables simple
-  model references in SubAgent.run:
-
-      # Instead of building callbacks manually:
-      {:ok, step} = SubAgent.run(agent, llm: "haiku")
-      {:ok, step} = SubAgent.run(agent, llm: "bedrock:haiku")
-
-  ## Configuration
-
-  The default implementation uses built-in aliases. To swap registries:
-
-      config :ptc_runner, :model_registry, MyApp.ModelRegistry
-
-  Or configure the default provider:
-
-      config :ptc_runner, :default_provider, :bedrock
-
-  ## Custom Registry
-
-  Implement the behaviour to add custom aliases:
-
-      defmodule MyApp.ModelRegistry do
-        @behaviour PtcRunner.LLM.Registry
-
-        @impl true
-        def resolve("fast"), do: {:ok, "anthropic:claude-haiku-4-5-20251001"}
-        def resolve("smart"), do: {:ok, "anthropic:claude-sonnet-4-5-20250929"}
-        def resolve(name), do: PtcRunner.LLM.DefaultRegistry.resolve(name)
-
-        @impl true
-        def resolve!(name) do
-          case resolve(name) do
-            {:ok, model_id} -> model_id
-            {:error, reason} -> raise ArgumentError, reason
-          end
-        end
-
-        @impl true
-        def validate(model_string) do
-          case resolve(model_string) do
-            {:ok, _} -> :ok
-            {:error, reason} -> {:error, reason}
-          end
-        end
-
-        # Delegate remaining callbacks to DefaultRegistry
-        @impl true
-        defdelegate default_model(), to: PtcRunner.LLM.DefaultRegistry
-        @impl true
-        defdelegate default_provider(), to: PtcRunner.LLM.DefaultRegistry
-        @impl true
-        defdelegate aliases(), to: PtcRunner.LLM.DefaultRegistry
-        @impl true
-        defdelegate list_models(), to: PtcRunner.LLM.DefaultRegistry
-        @impl true
-        defdelegate preset_models(provider), to: PtcRunner.LLM.DefaultRegistry
-        @impl true
-        defdelegate available_providers(), to: PtcRunner.LLM.DefaultRegistry
-        @impl true
-        defdelegate provider_from_model(model), to: PtcRunner.LLM.DefaultRegistry
-      end
+  The standard Kernel LLM provider builder uses this registry while assembling
+  an explicit `llm/request` capability. Manifests cannot replace the registry
+  or name adapter modules.
   """
 
   @doc """

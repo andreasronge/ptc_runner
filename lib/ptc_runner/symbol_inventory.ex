@@ -8,11 +8,11 @@ defmodule PtcRunner.SymbolInventory do
 
   alias PtcRunner.Lisp.Prelude
   alias PtcRunner.Lisp.Prelude.Export
+  alias PtcRunner.Lisp.SampleFormatter
   alias PtcRunner.Lisp.Signature
   alias PtcRunner.Lisp.Signature.Renderer, as: SignatureRenderer
+  alias PtcRunner.Lisp.Tool
   alias PtcRunner.Lisp.TypeVocabulary
-  alias PtcRunner.SubAgent.Namespace.SampleFormatter
-  alias PtcRunner.Tool
 
   @kernel_private_tools MapSet.new(["llm-complete", "eval-program", "log"])
   @secret_key_regex ~r/(^|[_-])(token|secret|password|api[_-]?key|access[_-]?key|credential|passwd)([_-]|$)/i

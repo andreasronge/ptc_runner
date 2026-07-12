@@ -2,6 +2,7 @@ defmodule PtcRunner.Lisp.TypeExtractorTest do
   use ExUnit.Case, async: true
   doctest PtcRunner.Lisp.TypeExtractor
 
+  alias PtcRunner.Lisp.Tool
   alias PtcRunner.Lisp.TypeExtractor
   alias PtcRunner.TypeExtractorFixtures, as: TestFunctions
 
@@ -245,9 +246,9 @@ defmodule PtcRunner.Lisp.TypeExtractorTest do
     end
   end
 
-  describe "integration with Tool.new/2" do
+  describe "integration with Lisp.Tool.new/2" do
     test "bare function reference extracts metadata" do
-      {:ok, tool} = PtcRunner.Tool.new("get_time", &TestFunctions.get_time/0)
+      {:ok, tool} = Tool.new("get_time", &TestFunctions.get_time/0)
 
       assert tool.name == "get_time"
       assert tool.signature == "() -> :string"
@@ -256,7 +257,7 @@ defmodule PtcRunner.Lisp.TypeExtractorTest do
     end
 
     test "bare function with parameters extracts metadata" do
-      {:ok, tool} = PtcRunner.Tool.new("add", &TestFunctions.add/2)
+      {:ok, tool} = Tool.new("add", &TestFunctions.add/2)
 
       assert tool.name == "add"
       assert tool.signature == "(a :int, b :int) -> :int"
@@ -265,7 +266,7 @@ defmodule PtcRunner.Lisp.TypeExtractorTest do
     end
 
     test "anonymous function has nil metadata" do
-      {:ok, tool} = PtcRunner.Tool.new("anon", fn x -> x end)
+      {:ok, tool} = Tool.new("anon", fn x -> x end)
 
       assert tool.name == "anon"
       assert tool.signature == nil
@@ -275,7 +276,7 @@ defmodule PtcRunner.Lisp.TypeExtractorTest do
 
     test "explicit signature overrides extracted signature" do
       explicit_sig = "(x :int, y :int) -> :float"
-      {:ok, tool} = PtcRunner.Tool.new("add", {&TestFunctions.add/2, explicit_sig})
+      {:ok, tool} = Tool.new("add", {&TestFunctions.add/2, explicit_sig})
 
       assert tool.signature == explicit_sig
       # Description is not extracted when explicit signature is provided
@@ -288,7 +289,7 @@ defmodule PtcRunner.Lisp.TypeExtractorTest do
         description: "Custom description"
       ]
 
-      {:ok, tool} = PtcRunner.Tool.new("custom", {&TestFunctions.add/2, options})
+      {:ok, tool} = Tool.new("custom", {&TestFunctions.add/2, options})
 
       assert tool.signature == "(custom :string) -> :int"
       assert tool.description == "Custom description"

@@ -1,68 +1,10 @@
 defmodule PtcRunner.LLM do
   @moduledoc """
-  Behaviour and convenience API for LLM adapters.
+  Provider-neutral LLM adapter boundary used by trusted Kernel provider builders.
 
-  Provides a standard interface for LLM providers, with auto-discovery of the
-  built-in `ReqLLMAdapter` when `req_llm` is available.
-
-  ## Configuration
-
-  Set a custom adapter in config:
-
-      config :ptc_runner, :llm_adapter, MyApp.LLMAdapter
-
-  Or the built-in adapter is used automatically when `{:req_llm, "~> 1.8"}` is
-  added to your dependencies.
-
-  ## Usage
-
-      # Pass model aliases directly to SubAgent (recommended)
-      {:ok, step} = PtcRunner.SubAgent.run(agent, llm: "haiku")
-
-      # Or create a callback with a full provider:model string
-      llm = PtcRunner.LLM.callback("openrouter:anthropic/claude-haiku-4.5", cache: true)
-      {:ok, step} = PtcRunner.SubAgent.run(agent, llm: llm)
-
-      # Stream responses through SubAgent for real-time chat UX
-      on_chunk = fn %{delta: text} -> send(self(), {:chunk, text}) end
-      {:ok, step} = PtcRunner.SubAgent.run(agent, llm: llm, on_chunk: on_chunk)
-
-      # Stream responses directly (without SubAgent)
-      {:ok, stream} = PtcRunner.LLM.stream("openrouter:anthropic/claude-haiku-4.5", %{system: "...", messages: [...]})
-      stream |> Stream.each(fn
-        %{delta: text} -> send_chunk(text)
-        %{done: true, tokens: t} -> track_usage(t)
-      end) |> Stream.run()
-
-  ## Testing
-
-  The `llm:` option on `SubAgent.run/2` accepts any 1-arity function. For tests,
-  pass an inline lambda instead of a real callback — there is no separate
-  `stub`/`mock`/`fake` helper:
-
-      mock_llm = fn _request -> {:ok, ~S|(return {:result 42})|} end
-      {:ok, step} = PtcRunner.SubAgent.run(agent, llm: mock_llm)
-
-  See [Testing SubAgents](guides/subagent-testing.md) for scripted callbacks,
-  error paths, and integration testing patterns.
-
-  ## Custom Adapters
-
-  Implement the `PtcRunner.LLM` behaviour:
-
-      defmodule MyApp.LLMAdapter do
-        @behaviour PtcRunner.LLM
-
-        @impl true
-        def call(model, request) do
-          # Your implementation
-        end
-
-        @impl true
-        def stream(model, request) do
-          # Optional streaming support
-        end
-      end
+  `callback/2` resolves a configured model and returns a one-argument provider
+  callback. Kernel policy, retries, prompt construction, and protocol recovery
+  live in shipped Lisp libraries rather than this transport adapter.
   """
 
   @type message :: %{role: :system | :user | :assistant | :tool, content: String.t()}
@@ -115,40 +57,11 @@ defmodule PtcRunner.LLM do
   @optional_callbacks [stream: 2]
 
   @doc """
-  Create a SubAgent-compatible callback function for a model.
+  Creates a normalized callback for a configured model.
 
-  Resolves model aliases via the configured model registry before
-  creating the callback. Already-resolved `provider:model` strings pass
-  through unchanged.
-
-  When the request map contains a `:stream` key with a callback function,
-  the callback will use `adapter.stream/2` (if available) and pipe chunks
-  through the stream function. The return value remains `{:ok, %{content, tokens}}`
-  so downstream code is unaffected.
-
-  ## Options
-
-  - `:cache` - Enable prompt caching (default: false)
-  - `:adapter` - Override the LLM adapter module for this callback only.
-    When omitted, falls back to the globally configured adapter via
-    `adapter!/0` (read at callback-construction time, not per-call). Tests
-    SHOULD pass `:adapter` directly so they can run async without
-    racing global `Application.put_env(:ptc_runner, :llm_adapter, …)`.
-
-  ## Examples
-
-      # Using aliases (resolved via Registry)
-      llm = PtcRunner.LLM.callback("haiku")
-      {:ok, step} = PtcRunner.SubAgent.run(agent, llm: llm)
-
-      # Using provider:alias format
-      llm = PtcRunner.LLM.callback("bedrock:haiku", cache: true)
-
-      # Using full model ID (passes through)
-      llm = PtcRunner.LLM.callback("openrouter:anthropic/claude-haiku-4.5")
-
-      # Inject a specific adapter (e.g. in tests)
-      llm = PtcRunner.LLM.callback("ollama:test-model", adapter: MyMockAdapter)
+  Model aliases are resolved through `PtcRunner.LLM.Registry`. The optional
+  `:adapter` setting selects a transport explicitly; other options are merged
+  into every request.
   """
   @spec callback(String.t(), keyword()) :: (map() -> {:ok, map()} | {:error, term()})
   def callback(model, opts \\ []) do

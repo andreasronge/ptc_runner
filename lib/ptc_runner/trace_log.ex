@@ -1,82 +1,13 @@
 defmodule PtcRunner.TraceLog do
-  @moduledoc """
-  Captures SubAgent execution events to JSONL files for offline analysis.
-
-  TraceLog attaches to SubAgent telemetry events and writes them to a JSONL file,
-  enabling detailed debugging and performance analysis of agent executions.
-
-  ## Usage
-
-  The simplest way to capture a trace is with `with_trace/2`:
-
-      {:ok, {:ok, step}, trace_path} = TraceLog.with_trace(fn ->
-        SubAgent.run(agent, llm: my_llm())
-      end)
-
-      # Analyze the trace
-      events = TraceLog.Analyzer.load(trace_path)
-      summary = TraceLog.Analyzer.summary(events)
-
-  For more control, use `start/1` and `stop/1`:
-
-      {:ok, collector} = TraceLog.start(path: "my_trace.jsonl")
-      {:ok, step} = SubAgent.run(agent, llm: my_llm())
-      {:ok, path, errors} = TraceLog.stop(collector)
-
-  ## Event Format
-
-  Each line in the JSONL file is a JSON object with:
-
-      {
-        "event": "run.start",           # Event type (run|turn|llm|tool).(start|stop|exception)
-        "trace_id": "abc123...",        # Unique trace identifier
-        "timestamp": "2024-01-...",     # ISO 8601 timestamp
-        "measurements": {...},          # Telemetry measurements
-        "metadata": {...},              # Event-specific metadata
-        "duration_ms": 123              # Duration (for stop events)
-      }
-
-  ## Process Isolation and Cross-Process Propagation
-
-  Traces are isolated by process. Only events from the process that called `start/1`
-  are captured. This allows multiple concurrent traces without interference.
-
-  Nested traces are supported - each `with_trace` call creates its own trace file,
-  and events are routed to the innermost active collector.
-
-  ### Cross-Process Tracing
-
-  When execution spans multiple processes (e.g., parallel tasks), use
-  `join/2` to propagate trace context to child processes:
-
-      collectors = TraceLog.active_collectors()
-      parent_span = PtcRunner.SubAgent.Telemetry.current_span_id()
-
-      Task.async(fn ->
-        TraceLog.join(collectors, parent_span)
-        # Events from this process are now captured AND linked to parent
-      end)
-
-  **Note:** The sandbox process inherits trace collectors via `join/2`, so tool
-  telemetry events (`tool.start`, `tool.stop`) emitted inside the sandbox are
-  captured directly by the trace handler.
-
-  ## See Also
-
-  - `PtcRunner.TraceLog.Analyzer` - Load and analyze trace files
-  - `PtcRunner.TraceLog.Collector` - Low-level file writing
-  - `PtcRunner.TraceLog.Handler` - Telemetry handler
-  - [Observability Guide](subagent-observability.md) - How TraceLog relates to `PtcRunner.Tracer`
-  """
+  @moduledoc false
 
   alias PtcRunner.Lisp.TraceContext
-  alias PtcRunner.SubAgent.Telemetry
   alias PtcRunner.TraceLog.{Collector, Handler, MemorySink}
 
   @doc """
   Starts trace collection for the current process.
 
-  Returns a collector process that will capture all SubAgent telemetry events
+  Returns a collector process that will capture all legacy telemetry events
   from this process until `stop/1` is called.
 
   ## Options
@@ -93,7 +24,7 @@ defmodule PtcRunner.TraceLog do
   ## Examples
 
       {:ok, collector} = TraceLog.start()
-      {:ok, step} = SubAgent.run(agent, llm: my_llm())
+      {:ok, step} = run_fun(agent, llm: my_llm())
       {:ok, path, errors} = TraceLog.stop(collector)
 
       # With typed trace header
@@ -159,12 +90,12 @@ defmodule PtcRunner.TraceLog do
   ## Examples
 
       {:ok, {:ok, step}, trace_path} = TraceLog.with_trace(fn ->
-        SubAgent.run(agent, llm: my_llm())
+        run_fun(agent, llm: my_llm())
       end)
 
       # With typed trace header
       {:ok, {:ok, step}, path} = TraceLog.with_trace(
-        fn -> SubAgent.run(agent, llm: my_llm()) end,
+        fn -> run_fun(agent, llm: my_llm()) end,
         trace_kind: "benchmark",
         query: "How many products?"
       )
@@ -237,13 +168,13 @@ defmodule PtcRunner.TraceLog do
 
       # In parent process
       collectors = TraceLog.active_collectors()
-      parent_span = PtcRunner.SubAgent.Telemetry.current_span_id()
+      parent_span = PtcRunner.Lisp.TraceContext.current_span_id()
 
       Task.async(fn ->
         TraceLog.join(collectors, parent_span)
         # Now trace events from this process will be captured
         # AND linked to the parent span hierarchy
-        SubAgent.run(agent, llm: llm)
+        run_fun(agent, llm: llm)
       end)
 
   ## Notes
@@ -261,7 +192,7 @@ defmodule PtcRunner.TraceLog do
 
   def join([], parent_span_id) do
     # Even without collectors, set up span hierarchy if provided
-    Telemetry.set_parent_span(parent_span_id)
+    TraceContext.set_parent_span(parent_span_id)
     :ok
   end
 
@@ -269,7 +200,7 @@ defmodule PtcRunner.TraceLog do
     TraceContext.merge_collectors(collectors)
 
     # Set up span hierarchy for proper parent-child relationships
-    Telemetry.set_parent_span(parent_span_id)
+    TraceContext.set_parent_span(parent_span_id)
 
     :ok
   end
@@ -281,7 +212,7 @@ defmodule PtcRunner.TraceLog do
   calling process's collector stack.
 
   Used by call sites that need to emit a custom JSONL line from outside
-  the SubAgent telemetry path (e.g., the MCP server recording per-call
+  the legacy telemetry path (e.g., the MCP server recording per-call
   outcomes). The event map is forwarded as-is to
   `PtcRunner.TraceLog.Collector.write_event/2`, which assigns a `seq`,
   encodes via `PtcRunner.TraceLog.Event.encode/1`, and appends a JSONL
@@ -348,7 +279,7 @@ defmodule PtcRunner.TraceLog do
   `trace_id`/`seq` on its copy of the event.
 
   This is the single emission point shared by turn drivers (`PtcRunner.Session`,
-  the `PtcRunner.SubAgent` loop, and `PtcRunner.Kernel`). It never raises and
+  legacy drivers and `PtcRunner.Kernel`). It never raises and
   is a no-op when nothing is recording. Build the event with
   `PtcRunner.TraceLog.TurnEvent.build/1`.
   """

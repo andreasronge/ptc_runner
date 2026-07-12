@@ -920,9 +920,11 @@ defmodule PtcRunner.TraceLog.Analyzer do
 
   # Extract program code from LLM response (handles various formats)
   defp extract_program_from_response(response) when is_binary(response) do
-    alias PtcRunner.SubAgent.Loop.ResponseHandler
+    blocks =
+      ~r/```(clojure|lisp)?\s*\n(.*?)\n(?:```|<\/(?:clojure|lisp)>)/s
+      |> Regex.scan(response, capture: :all_but_first)
+      |> Enum.map(fn [language, code] -> {language, code} end)
 
-    blocks = ResponseHandler.extract_fenced_blocks(response)
     tagged = Enum.filter(blocks, fn {lang, _} -> lang in ["clojure", "lisp"] end)
 
     case tagged do

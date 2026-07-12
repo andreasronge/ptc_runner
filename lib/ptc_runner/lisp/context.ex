@@ -6,7 +6,7 @@ defmodule PtcRunner.Lisp.Context do
   - `memory`: Mutable state passed through evaluation
   - `tools`: Tool registry
 
-  See `PtcRunner.SubAgent` for usage in agentic loops.
+  Kernel environments construct this context at the evaluator boundary.
   """
 
   defstruct [:ctx, :memory, :tools, :journal, turn_history: []]

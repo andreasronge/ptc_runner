@@ -8,9 +8,7 @@ defmodule PtcRunner.Upstream.Eval do
   """
 
   alias PtcRunner.Lisp.Result, as: NativeStep
-  alias PtcRunner.Step.Public, as: PublicStep
-  alias PtcRunner.SubAgent.{Definition, Runner}
-  alias PtcRunner.Upstream.{CallTool, Discovery, RunContext, SideEffectGuard}
+  alias PtcRunner.Upstream.{CallTool, Discovery, RunContext}
 
   @context_keys [
     :max_tool_calls,
@@ -94,115 +92,6 @@ defmodule PtcRunner.Upstream.Eval do
 
       {:error, message} ->
         {{:error, NativeStep.error(:prelude_attach_failed, message, %{})}, []}
-    end
-  end
-
-  @doc """
-  Run a multi-turn `PtcRunner.SubAgent` over an upstream runtime.
-
-  This is the first-class SubAgent↔upstream bridge. It owns **one**
-  `RunContext` spanning the entire multi-turn run (so the ledger, caps, and
-  discovery cache aggregate across all turns), derives the upstream `"call"`
-  tool + discovery hook from it, enriches the agent's tool map **before** prompt
-  generation so the capability is prompt-visible, and threads the runtime handle
-  into every turn so attach-time prelude `requires` validation runs fail-closed.
-  The SubAgent loop never opens a `RunContext`; this function does.
-
-  Returns `{result, records}` where `result` is the `SubAgent.run/2` result and
-  `records` are the drained upstream call records (mirrors
-  `run_lisp_with_records/3`).
-
-  ## Options
-
-  All `SubAgent.run/2` opts are forwarded, plus:
-
-    * the upstream context-limit keys (`:max_tool_calls`, `:max_catalog_ops`,
-      `:call_timeout_ms`, `:max_response_bytes`, `:max_catalog_result_bytes`) —
-      consumed to build the `RunContext`, not forwarded to `SubAgent.run`.
-    * `:on_upstream_call` — optional `((args -> result) -> (args -> result))`
-      decorator wrapping the upstream `"call"` fn, e.g. a server-side ledger
-      that records attempts before dispatch. The mcp ledger lives here.
-    * `:allow_call_override` — when `true`, a local `"call"` tool on the agent is
-      kept instead of raising on the collision (tests/stubs only).
-
-  `:discovery_exec` and `:runtime` are bridge-owned; any caller-supplied values
-  for those keys are ignored.
-
-  The `agent` argument must be a `%PtcRunner.SubAgent.Definition{}` (as built by
-  `SubAgent.new/1`): the bridge merges the upstream `"call"` tool into the
-  agent's `.tools` map and re-enters the internal `PtcRunner.SubAgent.Runner.run/2`
-  rather than the public facade.
-  """
-  @bridge_keys [:on_upstream_call, :allow_call_override, :discovery_exec, :runtime]
-
-  @spec run_subagent(struct() | pid(), Definition.t(), keyword()) ::
-          {{:ok, PtcRunner.Step.t()} | {:error, PtcRunner.Step.t()}, [map()]}
-  def run_subagent(runtime, agent, opts \\ []) do
-    context_opts = Keyword.take(opts, @run_context_keys)
-    decorate = Keyword.get(opts, :on_upstream_call)
-    allow_override = Keyword.get(opts, :allow_call_override, false)
-    sub_opts = Keyword.drop(opts, @context_keys ++ @bridge_keys)
-
-    case run_context(runtime, context_opts) do
-      {:ok, context} ->
-        with_open_context(context, fn context ->
-          eval_opts = eval_options(context)
-          call_tool = maybe_decorate(eval_opts[:tools], decorate)
-          enriched = enrich_agent(agent, call_tool, allow_override)
-
-          run_opts =
-            sub_opts
-            |> Keyword.put(:discovery_exec, eval_opts[:discovery_exec])
-            |> Keyword.put(:runtime, runtime)
-            |> Keyword.put_new(:continuation_guard, SideEffectGuard.default(runtime))
-
-          # Internal runner, not the public facade -- pre-empts facade/bridge recursion
-          # when the Phase-2 SubAgent.run(runtime:) facade lands (plan section 3.1).
-          # Behaviour-preserving today: the %Definition{} clause of SubAgent.run/2 is a
-          # pure forward to Runner.run/2.
-          enriched
-          |> Runner.run(run_opts)
-          |> render_subagent_result()
-        end)
-
-      {:error, message} ->
-        step = NativeStep.error(:prelude_attach_failed, message, %{})
-        {{:error, PublicStep.from_native(step)}, []}
-    end
-  end
-
-  defp render_subagent_result({:ok, step}), do: {:ok, PublicStep.from_native(step)}
-  defp render_subagent_result({:error, step}), do: {:error, PublicStep.from_native(step)}
-
-  defp maybe_decorate(tools, nil), do: tools
-
-  defp maybe_decorate(%{"call" => call} = tools, decorate) when is_function(decorate, 1) do
-    %{tools | "call" => decorate.(call)}
-  end
-
-  # Merge the upstream `"call"` tool into the agent BEFORE the agent runs so it is
-  # visible both in the first-turn prompt and in every per-turn execution surface
-  # (both re-derive from `agent.tools`). Reserve `"call"` for the upstream tool: a
-  # silent local override would make prelude `requires` validation (against the
-  # runtime) disagree with execution (a local fn).
-  #
-  # Matches `%Definition{}` specifically (not just any `%{tools: _}`): the bridge
-  # is Definition-only (see `@spec`), so a non-Definition agent fails closed here
-  # with `FunctionClauseError` rather than slipping through enrich to raise later.
-  defp enrich_agent(%Definition{tools: tools} = agent, call_tool, allow_override) do
-    cond do
-      not Map.has_key?(tools, "call") ->
-        %{agent | tools: Map.merge(tools, call_tool)}
-
-      allow_override ->
-        # Caller explicitly keeps its local "call" (tests/stubs).
-        %{agent | tools: Map.merge(call_tool, tools)}
-
-      true ->
-        raise ArgumentError,
-              "agent defines a local \"call\" tool that collides with the upstream " <>
-                "call tool; pass `allow_call_override: true` to keep the local one " <>
-                "(tests/stubs only)"
     end
   end
 end

@@ -1,4 +1,4 @@
-defmodule PtcRunner.SubAgent.Namespace.SampleFormatter do
+defmodule PtcRunner.Lisp.SampleFormatter do
   @moduledoc "Shared sample-value formatting for namespace renderers."
 
   alias PtcRunner.Lisp.Format
@@ -11,10 +11,10 @@ defmodule PtcRunner.SubAgent.Namespace.SampleFormatter do
 
   ## Examples
 
-      iex> PtcRunner.SubAgent.Namespace.SampleFormatter.format(42, [])
+      iex> PtcRunner.Lisp.SampleFormatter.format(42, [])
       "42"
 
-      iex> PtcRunner.SubAgent.Namespace.SampleFormatter.format([1, 2, 3, 4, 5], sample_limit: 2)
+      iex> PtcRunner.Lisp.SampleFormatter.format([1, 2, 3, 4, 5], sample_limit: 2)
       "[1 2 ...] (5 items, showing first 2)"
   """
   @spec format(term(), keyword()) :: String.t()

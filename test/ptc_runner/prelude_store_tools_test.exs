@@ -7,8 +7,6 @@ defmodule PtcRunner.PreludeStore.ToolsTest do
   alias PtcRunner.Lisp.Result, as: Step
   alias PtcRunner.PreludeStore
   alias PtcRunner.PreludeStore.Tools
-  alias PtcRunner.SubAgent.Namespace.Tool, as: ToolNamespace
-  alias PtcRunner.SubAgent.ToolSchema
   alias PtcRunner.TraceLog.TurnEvent
 
   @paged_source """
@@ -102,26 +100,6 @@ defmodule PtcRunner.PreludeStore.ToolsTest do
     refute "prelude_store_write" in read_tool_names
     refute "prelude_store_edit" in read_tool_names
     refute "prelude_store_set_default" in read_tool_names
-  end
-
-  test "private backing tools are hidden from native schema and prompt namespace projections" do
-    {:ok, store} = PreludeStore.new()
-    tools = Tools.tools(store, base_tools: %{"visible" => fn _args -> "ok" end})
-
-    schema_names =
-      tools
-      |> ToolSchema.to_tool_definitions()
-      |> Enum.map(&get_in(&1, ["function", "name"]))
-
-    assert schema_names == ["visible"]
-
-    rendered = ToolNamespace.render(tools)
-    assert rendered =~ "tool/visible"
-
-    for name <- Tools.reserved_names() do
-      refute name in schema_names
-      refute rendered =~ name
-    end
   end
 
   test "direct private store tool calls fail during analysis" do

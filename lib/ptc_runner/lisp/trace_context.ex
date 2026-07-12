@@ -15,7 +15,7 @@ defmodule PtcRunner.Lisp.TraceContext do
   ## Span Stack
 
   Maintains parent-child span relationships for telemetry correlation.
-  Used by `PtcRunner.SubAgent.Telemetry` to track nested spans.
+  Used by legacy telemetry collectors to track nested spans.
 
   ## Cross-Process Propagation
 
@@ -31,7 +31,7 @@ defmodule PtcRunner.Lisp.TraceContext do
 
   - [Observability Guide](subagent-observability.md) — cross-process tracing section
   - `PtcRunner.TraceLog` — JSONL trace capture
-  - `PtcRunner.SubAgent.Telemetry` — telemetry event emission
+  - `PtcRunner.Kernel.EventSink` — canonical Kernel event ownership
   """
 
   @collector_key :ptc_trace_collectors
@@ -44,13 +44,13 @@ defmodule PtcRunner.Lisp.TraceContext do
 
   # --- Turn Lisp Prelude Trace ---
   #
-  # The SubAgent loop runs each turn's `Lisp.run/2` and emits the canonical turn
+  # The legacy loop runs each turn's `Lisp.run/2` and emits the canonical turn
   # event in the SAME process, but the execution `Step` (which carries the
   # ACTUAL attached prelude trace — nil when attach failed or no Lisp ran) does
   # not flow to the emit site. The loop stashes `step.prelude_trace` here right
   # after each `Lisp.run`, clears it at turn start (so no-program / no-Lisp turns
   # read nil, never a stale value), and the turn-event builder reads it — giving
-  # the SubAgent driver the same actual-attachment provenance the Session driver
+  # the legacy driver the same actual-attachment provenance the Session driver
   # gets from `step.prelude_trace` directly.
 
   @doc "Stashes the just-executed turn's Lisp `prelude_trace` (or nil)."

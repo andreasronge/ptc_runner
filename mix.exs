@@ -12,8 +12,7 @@ defmodule PtcRunner.MixProject do
       aliases: aliases(),
       usage_rules: usage_rules(),
       name: "PtcRunner",
-      description:
-        "Secure BEAM sandbox runtime for LLM code mode and MCP aggregation. Run concurrent LLM/tool clients safely while agents orchestrate approved tools, call upstream MCP/OpenAPI servers, and transform data.",
+      description: "BEAM-native sandbox and minimal Kernel for bounded PTC-Lisp workflows.",
       source_url: "https://github.com/andreasronge/ptc_runner",
       docs: docs(),
       package: package(),
@@ -113,7 +112,6 @@ defmodule PtcRunner.MixProject do
         "schema.gen",
         "ptc.validate_spec",
         "test --warnings-as-errors",
-        "cmd --cd demo mix test --color",
         "cmd --cd ptc_viewer mix test --color"
       ],
       # Slower checks kept out of the per-commit loop; run before pushing.
@@ -135,263 +133,60 @@ defmodule PtcRunner.MixProject do
     [
       main: "readme",
       groups_for_modules: [
-        Core: [
-          PtcRunner,
-          PtcRunner.Lisp.Context,
-          PtcRunner.Step,
-          PtcRunner.Tool,
-          PtcRunner.Schema,
-          PtcRunner.Sandbox,
-          PtcRunner.Template,
-          PtcRunner.Mustache,
-          PtcRunner.Chunker,
-          PtcRunner.Dotenv,
-          PtcRunner.Turn
-        ],
-        SubAgent: [
-          PtcRunner.SubAgent,
-          PtcRunner.SubAgent.Compiler,
-          PtcRunner.SubAgent.CompiledAgent,
-          PtcRunner.SubAgent.Definition,
-          PtcRunner.SubAgent.Chaining,
-          PtcRunner.SubAgent.Loop,
-          PtcRunner.SubAgent.Loop.Budget,
-          PtcRunner.SubAgent.Loop.JsonHandler,
-          PtcRunner.SubAgent.Loop.LLMRetry,
-          PtcRunner.SubAgent.Loop.Metrics,
-          PtcRunner.SubAgent.Loop.ResponseHandler,
-          PtcRunner.SubAgent.Loop.ReturnValidation,
-          PtcRunner.SubAgent.Loop.State,
-          PtcRunner.SubAgent.Loop.StepAssembler,
-          PtcRunner.SubAgent.Loop.TextMode,
-          PtcRunner.SubAgent.Loop.ToolNormalizer,
-          PtcRunner.SubAgent.Loop.TurnFeedback,
-          PtcRunner.SubAgent.Compaction,
-          PtcRunner.SubAgent.Compaction.Context,
-          PtcRunner.SubAgent.Compaction.Trim,
-          PtcRunner.SubAgent.Debug,
-          PtcRunner.SubAgentError,
-          PtcRunner.SubAgent.JsonParser,
-          PtcRunner.Lisp.KeyNormalizer,
-          PtcRunner.SubAgent.LLMResolver,
-          PtcRunner.SubAgent.ProgressRenderer,
-          PtcRunner.SubAgent.PromptExpander,
-          PtcRunner.SubAgent.Validator
-        ],
-        "SubAgent — Signatures": [
-          PtcRunner.Lisp.Signature,
-          PtcRunner.Lisp.Signature.Coercion,
-          PtcRunner.Lisp.Signature.Parser,
-          PtcRunner.Lisp.Signature.ParserHelpers,
-          PtcRunner.Lisp.Signature.Renderer,
-          PtcRunner.Lisp.Signature.TypeResolver,
-          PtcRunner.Lisp.Signature.Validator,
-          PtcRunner.Lisp.TypeExtractor,
-          PtcRunner.SubAgent.Sigils
-        ],
-        "SubAgent — Prompts & Tools": [
-          PtcRunner.SubAgent.SystemPrompt,
-          PtcRunner.SubAgent.SystemPrompt.Output,
-          PtcRunner.SubAgent.Namespace,
-          PtcRunner.SubAgent.Namespace.Data,
-          PtcRunner.SubAgent.Namespace.ExecutionHistory,
-          PtcRunner.SubAgent.Namespace.Tool,
-          PtcRunner.Lisp.TypeVocabulary,
-          PtcRunner.SubAgent.Namespace.User,
-          PtcRunner.SubAgent.BuiltinTools,
-          PtcRunner.SubAgent.LLMTool,
-          PtcRunner.SubAgent.SubAgentTool,
-          PtcRunner.SubAgent.ToolSchema,
-          PtcRunner.SubAgent.Telemetry,
-          PtcRunner.Prompts,
-          PtcRunner.PromptLoader
+        Kernel: [
+          PtcRunner.Kernel,
+          PtcRunner.Kernel.Capability,
+          PtcRunner.Kernel.Component,
+          PtcRunner.Kernel.Limits,
+          PtcRunner.Kernel.Manifest,
+          PtcRunner.Kernel.MissionEnvironment,
+          PtcRunner.Kernel.ProviderRegistry,
+          PtcRunner.Kernel.ReplSession,
+          PtcRunner.Kernel.RunBuilder,
+          PtcRunner.Kernel.RunConfig,
+          PtcRunner.Kernel.TraceLog,
+          PtcRunner.Kernel.WorkflowEnvironment
         ],
         "PTC-Lisp": [
           PtcRunner.Lisp,
+          PtcRunner.Lisp.Context,
           PtcRunner.Lisp.Parser,
-          PtcRunner.Lisp.Analyze,
-          PtcRunner.Lisp.Analyze.Conditionals,
-          PtcRunner.Lisp.Analyze.Definitions,
-          PtcRunner.Lisp.Analyze.Iteration,
-          PtcRunner.Lisp.Analyze.Patterns,
-          PtcRunner.Lisp.Analyze.ShortFn,
-          PtcRunner.Lisp.AST,
-          PtcRunner.Lisp.CoreAST,
-          PtcRunner.Lisp.CoreToSource,
-          PtcRunner.Lisp.Env,
-          PtcRunner.Lisp.LanguageSpec,
           PtcRunner.Lisp.Registry,
-          PtcRunner.Lisp.SpecValidator,
-          PtcRunner.Lisp.ClojureValidator,
-          PtcRunner.Lisp.DataKeys,
-          PtcRunner.Lisp.SymbolCounter,
-          PtcRunner.Lisp.Formatter
-        ],
-        "PTC-Lisp — Evaluation": [
-          PtcRunner.Lisp.Eval,
-          PtcRunner.Lisp.Eval.Apply,
-          PtcRunner.Lisp.Eval.Context,
-          PtcRunner.Lisp.Eval.Helpers,
-          PtcRunner.Lisp.Eval.Patterns,
-          PtcRunner.Lisp.Runtime,
-          PtcRunner.Lisp.Runtime.Callable,
-          PtcRunner.Lisp.Runtime.Collection,
-          PtcRunner.Lisp.Runtime.Collection.Normalize,
-          PtcRunner.Lisp.Runtime.Collection.Select,
-          PtcRunner.Lisp.Runtime.Collection.Transform,
-          PtcRunner.Lisp.Runtime.FlexAccess,
-          PtcRunner.Lisp.Runtime.Interop,
-          PtcRunner.Lisp.Runtime.MapOps,
-          PtcRunner.Lisp.Runtime.Math,
-          PtcRunner.Lisp.Runtime.Predicates,
-          PtcRunner.Lisp.Runtime.Regex,
-          PtcRunner.Lisp.Runtime.SpecialValues,
-          PtcRunner.Lisp.Runtime.String,
-          PtcRunner.Lisp.ExecutionError,
-          PtcRunner.Lisp.ToolError,
-          PtcRunner.Lisp.TypeError
+          PtcRunner.Lisp.Signature,
+          PtcRunner.Lisp.Signature.Validator,
+          PtcRunner.Lisp.TypeExtractor,
+          PtcRunner.Sandbox
         ],
         LLM: [
           PtcRunner.LLM,
           PtcRunner.LLM.Registry,
           PtcRunner.LLM.DefaultRegistry,
           PtcRunner.LLM.ReqLLMAdapter
-        ],
-        Observability: [
-          PtcRunner.Tracer,
-          PtcRunner.Tracer.Timeline,
-          PtcRunner.Lisp.TraceContext,
-          PtcRunner.TraceLog,
-          PtcRunner.TraceLog.Analyzer,
-          PtcRunner.TraceLog.Collector,
-          PtcRunner.TraceLog.Event,
-          PtcRunner.TraceLog.Handler,
-          PtcRunner.Metrics.Statistics,
-          PtcRunner.Metrics.TurnAnalysis,
-          PtcRunner.Kino.TraceTree
         ]
       ],
       extras: [
         "README.md",
         "LICENSE",
-        # SubAgent Guides (learning path)
-        "docs/guides/subagent-getting-started.md",
-        "docs/guides/subagent-llm-setup.md",
-        "docs/guides/subagent-text-mode.md",
-        "docs/guides/text-mode-ptc-compute.md",
-        "docs/guides/subagent-concepts.md",
-        "docs/guides/subagent-patterns.md",
-        "docs/guides/subagent-ptc-transport.md",
-        "docs/guides/subagent-navigator.md",
-        "docs/guides/subagent-rlm-patterns.md",
-        "docs/guides/subagent-testing.md",
-        "docs/guides/subagent-troubleshooting.md",
-        "docs/guides/subagent-observability.md",
-        "docs/guides/subagent-compaction.md",
-        "docs/guides/subagent-advanced.md",
-        "docs/guides/capability-prelude.md",
-        "docs/guides/subagent-prompts.md",
-        # Integration Guides
-        "docs/guides/phoenix-streaming.md",
-        "docs/guides/structured-output-callbacks.md",
-        # MCP Server
-        {"mcp_server/README.md", [filename: "mcp-server-readme", title: "MCP Server README"]},
-        {"mcp_server/DEVELOPMENT.md",
-         [filename: "mcp-server-development", title: "MCP Server Development"]},
-        "docs/mcp-server-cli.md",
-        "docs/mcp-server.md",
-        "docs/guides/mcp-getting-started.md",
-        "docs/guides/mcp-prelude-roles.md",
-        "docs/upstream-runtime.md",
-        "docs/aggregator-mode.md",
-        "docs/agentic-mode.md",
-        "docs/mcp-debug.md",
-        "docs/mcp-server-configuration.md",
-        "docs/mcp-server-http-deployment.md",
-        # Reference
-        "docs/signature-syntax.md",
-        "docs/benchmark-eval.md",
-        # PTC-Lisp
         "docs/ptc-lisp-specification.md",
         "docs/clojure-conformance-gaps.md",
-        # Generated Reference (mix ptc.gen_docs)
         "docs/function-reference.md",
         "docs/java-interop.md",
-        "docs/conformance/index.md",
-        "docs/conformance/clojure-core-audit.md",
-        "docs/conformance/clojure-string-audit.md",
-        "docs/conformance/clojure-set-audit.md",
-        "docs/conformance/clojure-walk-audit.md",
-        "docs/conformance/java-math-audit.md",
-        "docs/conformance/java-lang-boolean-audit.md",
-        "docs/conformance/java-lang-double-audit.md",
-        "docs/conformance/java-lang-float-audit.md",
-        "docs/conformance/java-lang-integer-audit.md",
-        "docs/conformance/java-lang-long-audit.md",
-        "docs/conformance/java-lang-string-audit.md",
-        "docs/conformance/java-lang-system-audit.md",
-        "docs/conformance/java-time-local-date-audit.md",
-        "docs/conformance/java-time-instant-audit.md",
-        "docs/conformance/java-time-duration-audit.md",
-        "docs/conformance/java-time-period-audit.md",
-        "docs/conformance/java-util-date-audit.md",
-        # Livebooks
-        "livebooks/ptc_runner_playground.livemd",
-        "livebooks/ptc_runner_llm_agent.livemd",
-        "livebooks/output_modes_in_app_loops.livemd",
-        "livebooks/joke_workflow.livemd",
-        "livebooks/observability_and_tracing.livemd",
-        "livebooks/prompt_caching.livemd"
+        "docs/plans/lisp-kernel/kernel-contract.md",
+        "docs/plans/lisp-kernel/tracelog-contract.md",
+        "docs/conformance/index.md"
       ],
       groups_for_extras: [
-        "SubAgent Guides":
-          ~r/docs\/guides\/(subagent-.+|text-mode-ptc-compute|capability-prelude)\.md/,
-        "Integration Guides": ~r/docs\/guides\/(phoenix-|structured-).+\.md/,
-        "Upstream Runtime": ~r/docs\/(upstream-runtime|aggregator-mode)\.md/,
-        "MCP Server":
-          ~r/mcp_server\/(README|DEVELOPMENT)\.md|docs\/(mcp-server|mcp-server-cli|mcp-server-configuration|mcp-server-http-deployment|mcp-debug|agentic-mode)\.md|docs\/guides\/mcp-(getting-started|prelude-roles)\.md/,
-        Reference:
-          ~r/docs\/(signature-syntax|benchmark-eval|ptc-lisp-.+|clojure-.+|function-reference|java-.+|reference\/.+)\.md|docs\/conformance\/.+\.md/,
-        Livebooks: ~r/livebooks\/.+\.livemd/
-      ],
-      assets: %{"images" => "images"},
-      before_closing_body_tag: &before_closing_body_tag/1
+        Kernel: ~r/docs\/plans\/lisp-kernel\/.+\.md/,
+        Reference: ~r/docs\/(ptc-lisp|clojure|function-reference|java-).+\.md/,
+        Conformance: ~r/docs\/conformance\/.+\.md/
+      ]
     ]
   end
-
-  defp before_closing_body_tag(:html) do
-    """
-    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
-    <script>
-      document.addEventListener("DOMContentLoaded", function () {
-        mermaid.initialize({
-          startOnLoad: false,
-          theme: document.body.className.includes("dark") ? "dark" : "default"
-        });
-        let id = 0;
-        for (const codeEl of document.querySelectorAll("pre code.mermaid")) {
-          const preEl = codeEl.parentElement;
-          const graphDefinition = codeEl.textContent;
-          const graphEl = document.createElement("div");
-          const graphId = "mermaid-graph-" + id++;
-          mermaid.render(graphId, graphDefinition).then(({svg, bindFunctions}) => {
-            graphEl.innerHTML = svg;
-            bindFunctions?.(graphEl);
-            preEl.insertAdjacentElement("afterend", graphEl);
-            preEl.remove();
-          });
-        }
-      });
-    </script>
-    """
-  end
-
-  defp before_closing_body_tag(_), do: ""
 
   defp package do
     [
       files:
-        ~w(lib docs .formatter.exs mix.exs README.md LICENSE CHANGELOG.md usage-rules.md usage-rules priv/function_audit.exs priv/functions.exs priv/java_compat_audit.exs priv/preludes priv/prompts priv/ptc_schema.json priv/spec),
+        ~w(lib docs .formatter.exs mix.exs README.md LICENSE CHANGELOG.md priv/function_audit.exs priv/functions.exs priv/java_compat_audit.exs priv/preludes priv/ptc_schema.json priv/spec),
       licenses: ["MIT"],
       links: %{
         "GitHub" => "https://github.com/andreasronge/ptc_runner",

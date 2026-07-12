@@ -102,14 +102,14 @@ name its re-home/delete condition. `unknown` is not a durable classification.
 
 | Area | Class | Destination |
 | --- | --- | --- |
-| `lib/ptc_runner/sub_agent.ex` and `sub_agent/**` | delete | Retained policies move to shipped Lisp libraries or generic Kernel capabilities. |
-| SubAgent definitions, validation, compiler, chaining, child agents | delete | No compatibility facade. |
-| Text/JSON modes, code-fence/JSON recovery, combined transports | delete | LLM is one generic workflow capability; policies live in Lisp. |
-| Prompt expansion, Mustache templates, prompt modes | delete | Workflow/prelude functions construct prompts. |
-| Compaction, plan/progress, journaling, completion modes | delete | Optional Lisp policies/capabilities only when demonstrated. |
-| Built-in grep and exposure/native-preview machinery | delete | Capabilities/preludes replace these. |
-| LLM registry inheritance and SubAgent retries | delete | Provider registry builds workflow capability; retry policy lives in Lisp. |
-| `priv/prompts/` | delete | Remove after last SubAgent consumer; retain Lisp agent preludes. |
+| `lib/ptc_runner/sub_agent.ex` and `sub_agent/**` | deleted | Removed without a compatibility facade after Kernel cutover. |
+| SubAgent definitions, validation, compiler, chaining, child agents | deleted | Shipped Lisp libraries and Kernel capabilities own retained behavior. |
+| Text/JSON modes, code-fence/JSON recovery, combined transports | deleted | LLM is one generic workflow capability; policies live in Lisp. |
+| Prompt expansion, Mustache templates, prompt modes | deleted | Workflow/prelude functions construct prompts. |
+| Compaction, plan/progress, journaling, completion modes | deleted | No retained product caller remained. |
+| Built-in grep and exposure/native-preview machinery | deleted | Capabilities/preludes replace these. |
+| LLM registry inheritance and SubAgent retries | deleted | The trusted provider registry builds workflow capability; retry policy lives in Lisp. |
+| `priv/prompts/` | deleted | Kernel agent libraries under `priv/preludes/kernel/` are the retained model policy. |
 
 ### Public data abstractions
 
@@ -121,9 +121,9 @@ name its re-home/delete condition. `unknown` is not a durable classification.
 | `PtcRunner.Context`, `PtcRunner.Turn` | delete | The evaluator context moved to neutral `Lisp.Context`; delete the old Turn type with legacy callers. |
 | `PtcRunner.Evidence*` | delete unless proven | Retain only if a current Kernel/TraceLog contract test demonstrates an independent need. |
 | `PtcRunner.Schema` / generated `priv/ptc_schema.json` | migrate | Re-evaluate against manifest/capability schemas; delete SubAgent protocol schema. |
-| `PtcRunner.PtcToolProtocol` | delete | Native action policy moves to Lisp; Kernel capability contract replaces it. |
-| `PtcRunner.Tool` | delete | Neutral direct-evaluator normalization now lives in `Lisp.Tool`; Kernel providers use `Capability`. Delete the agent/exposure Tool with its last legacy caller. |
-| `PtcRunner.Template`, `Mustache`, `Temporal` | delete | Last consumers are removed agent modes. |
+| `PtcRunner.PtcToolProtocol` | deleted | Native action policy moved to Lisp; the Kernel capability contract replaces it. |
+| `PtcRunner.Tool` | deleted | Neutral direct-evaluator normalization lives in `Lisp.Tool`; Kernel providers use `Capability`. |
+| `PtcRunner.Template`, `Mustache`, `Temporal` | deleted | Removed with their last agent-mode consumers. |
 | `PtcRunner.Chunker` | delete unless proven | Retain only with independent language/Kernel consumer and integration test. |
 
 ### Remaining root modules and cross-cutting runtime
@@ -134,7 +134,7 @@ name its re-home/delete condition. `unknown` is not a durable classification.
 | `PtcRunner.SymbolInventory` | migrate | Derive bounded model-visible inventory exclusively from MissionEnvironment. |
 | `PtcRunner.Lisp.TraceContext` | migrate/delete | Move unavoidable IDs/provenance to RunState and canonical events, then delete if no independent caller remains. |
 | `PtcRunner.Dotenv` | migrate | CLI/provider-builder convenience only; never ambient Kernel authority. |
-| `PtcRunner.PromptLoader`, `PtcRunner.Prompts` | delete | Remove with compiled SubAgent prompt files and last callers. |
+| `PtcRunner.PromptLoader`, `PtcRunner.Prompts` | deleted | Removed with compiled SubAgent prompt files and last callers. |
 | `PtcRunner.LLM` | migrate | Thin embedding/provider-registry facade for `llm/request`; no agent policy. |
 
 ### LLM integration
