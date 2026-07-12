@@ -65,19 +65,24 @@ defmodule PtcRunner.Kernel.TraceLog do
 
   def query(_trace_log, _operation, _arguments), do: {:error, :invalid_query}
 
-  @doc "Appends canonical events to one admin-selected JSONL file under a total byte cap."
+  @doc """
+  Appends canonical events to one admin-selected JSONL file under a total byte
+  cap. `private: true` restricts the empty/new or existing file to mode `0600`
+  before event bytes are appended.
+  """
   @spec append_jsonl(binary(), [map()], keyword()) :: :ok | {:error, atom()}
   def append_jsonl(path, events, opts \\ [])
 
   def append_jsonl(path, events, opts)
       when is_binary(path) and is_list(events) and is_list(opts) do
-    with true <- Keyword.keys(opts) -- [:max_source_bytes] == [],
+    with true <- Keyword.keys(opts) -- [:max_source_bytes, :private] == [],
          max_bytes when is_integer(max_bytes) and max_bytes > 0 <-
-           Keyword.get(opts, :max_source_bytes, @default_source_bytes) do
+           Keyword.get(opts, :max_source_bytes, @default_source_bytes),
+         private? when is_boolean(private?) <- Keyword.get(opts, :private, false) do
       path = Path.expand(path)
 
       :global.trans({__MODULE__, path}, fn ->
-        append_locked(path, normalize(events), max_bytes)
+        append_locked(path, normalize(events), max_bytes, private?)
       end)
     else
       _ -> {:error, :invalid_trace_log}
@@ -164,8 +169,8 @@ defmodule PtcRunner.Kernel.TraceLog do
     end
   end
 
-  defp append_locked(path, events, max_bytes) do
-    with :ok <- ensure_trace_file(path),
+  defp append_locked(path, events, max_bytes, private?) do
+    with :ok <- ensure_trace_file(path, private?),
          {:ok, existing_source} <- read_regular_file(path, max_bytes),
          {:ok, existing_events} <- decode_jsonl(existing_source),
          {:ok, _events, _source_id} <- validate_loaded(existing_events ++ events, max_bytes),
@@ -181,22 +186,43 @@ defmodule PtcRunner.Kernel.TraceLog do
     Jason.EncodeError -> {:error, :malformed_source}
   end
 
-  defp ensure_trace_file(path) do
+  defp ensure_trace_file(path, private?) do
     case File.lstat(path) do
-      {:ok, %File.Stat{type: :regular}} -> :ok
+      {:ok, %File.Stat{type: :regular}} -> restrict_trace_file(path, private?)
       {:ok, %File.Stat{}} -> {:error, :malformed_source}
-      {:error, :enoent} -> create_trace_file(path)
+      {:error, :enoent} -> create_trace_file(path, private?)
       {:error, _reason} -> {:error, :source_unavailable}
     end
   end
 
-  defp create_trace_file(path) do
+  defp create_trace_file(path, private?) do
     case File.write(path, "", [:exclusive]) do
+      :ok ->
+        case restrict_trace_file(path, private?) do
+          :ok ->
+            :ok
+
+          {:error, _reason} = error ->
+            File.rm(path)
+            error
+        end
+
+      {:error, :eexist} ->
+        ensure_trace_file(path, private?)
+
+      {:error, _reason} ->
+        {:error, :source_unavailable}
+    end
+  end
+
+  defp restrict_trace_file(path, true) do
+    case File.chmod(path, 0o600) do
       :ok -> :ok
-      {:error, :eexist} -> ensure_trace_file(path)
       {:error, _reason} -> {:error, :source_unavailable}
     end
   end
+
+  defp restrict_trace_file(_path, false), do: :ok
 
   defp append_regular_file(path, existing_source, encoded, max_bytes) do
     with {:ok, %File.Stat{type: :regular} = expected} <- File.lstat(path),

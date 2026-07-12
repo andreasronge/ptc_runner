@@ -227,6 +227,8 @@ transcripts without making Kernel understand LLMs.
 Private capture may retain exact safe model-visible requests, responses,
 programs, and prelude source under explicit local-only controls. Those fields do
 not appear in normal queries without a distinct private source grant.
+Private JSONL destinations are restricted to owner read/write permissions
+before any event payload is appended; a permission failure aborts the append.
 
 Workflow annotations are host stamped and cannot forge canonical events.
 

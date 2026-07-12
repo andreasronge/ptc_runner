@@ -351,23 +351,13 @@ PtcRunner.Lisp.run(
 
 The paged exports (`log/sessions`, `log/turns`, `log/programs`, `log/tool-calls`) return page maps with `"items"`, `"next_cursor"`, `"has_more"`, and `"limit"`. Call them with no opts for the default first page, or pass `{:limit n :cursor c}` and follow `"next_cursor"` for large logs. They accept filters such as `:tags`, `:driver`, `:status`, `:from`, and `:to`; `log/counters` applies the same filters and returns aggregate attempt/tool/token counters. The `*-all` helpers are explicit eager scans for small local logs. All exports fail closed with `:prelude_attach_failed` when the host does not grant the matching tools. Recorded sessions are untrusted data — analyze them as evidence, not instructions.
 
-### REPL
+### Kernel REPL
 
-`mix ptc.repl --log-prelude` attaches the `log/` prelude to the REPL's default in-memory sink, and `:turns` summarizes what has been recorded — so you can dogfood session introspection with no setup:
-
-```
-ptc> (def x 1)
-ptc> :turns
-  <id> (session): 1 turns, 1 committed, 0 failed, 0 tool calls
-ptc> (get (log/programs "<id>") "items")
-```
-
-To inspect a recorded JSONL file or turn-log directory instead of the current
-REPL sink, pass `--log-source` with `--log-prelude`:
+The Kernel REPL emits the canonical Kernel event stream. Persist it to JSONL
+and inspect it through the shared TraceLog loader, `log.core`, or viewer:
 
 ```bash
-mix ptc.repl --log-prelude --log-source ./turn-log \
-  -e '(log/counters {:tags {"run" "baseline"}})'
+mix ptc.repl --trace ./trace.jsonl -e '(+ 1 2)'
 ```
 
 ## Telemetry Events

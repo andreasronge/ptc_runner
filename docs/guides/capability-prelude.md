@@ -343,25 +343,18 @@ configured.
 
 ---
 
-## 8. Iterating with the REPL
+## 8. Iterating with the Kernel REPL
 
-The REPL uses the **same** compiler, protected-namespace tables, export records,
-and shared symbol-inventory renderer as SubAgent execution — it is not a
-parallel implementation:
+Put component sources in a strict Kernel manifest so the REPL and `ptc.run`
+use the same component DAG and frozen bundle:
 
 ```bash
-# Attach a prelude file and open the REPL
-mix ptc.repl --prelude crm.clj            # alias: -p crm.clj
-
-# Print the prompt inventory the agent would see
-mix ptc.repl --prelude crm.clj --show-prompt-inventory
-
-# Evaluate a program against the attached prelude
-mix ptc.repl --prelude crm.clj -e "(ns-publics 'crm)"
+mix ptc.repl --manifest crm.json
+mix ptc.repl --manifest crm.json -e "(ns-publics 'crm)"
 ```
 
-`--prelude` is separate from `-l/--load` (which loads ordinary user code).
-`--help` is side-effect-free — it never loads the prelude.
+`-l/--load` evaluates ordinary setup code into persistent REPL memory. It does
+not grant components or capabilities. See [Kernel REPL](kernel-repl.md).
 
 Hosts that already have multiple prelude sources can compose them in process
 without a store:

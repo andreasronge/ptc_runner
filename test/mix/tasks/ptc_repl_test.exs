@@ -4,94 +4,129 @@ defmodule Mix.Tasks.Ptc.ReplTest do
   import ExUnit.CaptureIO
 
   alias Mix.Tasks.Ptc.Repl
-  alias PtcRunner.{Session, TraceLog}
+  alias PtcRunner.Kernel.TraceLog
 
-  test "interactive repl prints captured println output before return value" do
-    output =
-      capture_io("(println 42)\n", fn ->
-        Repl.run([])
-      end)
-
-    assert output =~ "42\nnil"
-  end
-
-  test "-e prints captured println output before return value" do
-    output =
-      capture_io(fn ->
-        Repl.run(["-e", ~S|(do (println "first") (println "second"))|])
-      end)
-
-    assert output == "first\nsecond\nnil\n"
-  end
-
-  test "--log-prelude exposes the current REPL turn log to Lisp" do
+  setup do
     Mix.Task.reenable("ptc.repl")
+    :ok
+  end
 
+  test "repeated evals preserve definitions, history, and captured output" do
     output =
       capture_io(fn ->
         Repl.run([
-          "--log-prelude",
           "-e",
-          "(def x 1)",
+          "(def x 40)",
           "-e",
-          ~S|(get (log/programs (get (first (get (log/sessions) "items")) "correlation_id")) "items")|
+          ~S|(do (println "value") (+ x 2))|,
+          "-e",
+          "(+ *1 1)"
         ])
       end)
 
-    assert output =~ "#'x"
-    assert output =~ ~S|["(def x 1)"]|
+    assert output =~ "#'x\n"
+    assert output =~ "value\n42\n43\n"
   end
 
-  test "--log-prelude is mutually exclusive with --prelude" do
-    Mix.Task.reenable("ptc.repl")
+  test "interactive mode prints output and exits on EOF" do
+    output = capture_io("(println 42)\n", fn -> Repl.run([]) end)
+    assert output =~ "42\nnil"
+    assert output =~ "Goodbye!"
+  end
 
-    assert_raise Mix.Error, ~r/--log-prelude is mutually exclusive with --prelude/, fn ->
-      Repl.run(["--log-prelude", "--prelude", "somewhere.clj", "-e", "(+ 1 2)"])
-    end
+  test "empty stdin is a successful empty script" do
+    assert "" = capture_io("", fn -> Repl.run(["-"]) end)
   end
 
   @tag :tmp_dir
-  test "--log-source queries a recorded JSONL log through the log prelude", %{tmp_dir: dir} do
-    Mix.Task.reenable("ptc.repl")
-    path = Path.join(dir, "turns.jsonl")
+  test "a strict manifest supplies the REPL workflow bundle", %{tmp_dir: directory} do
+    component_path = Path.join(directory, "helpers.lisp")
+    manifest_path = Path.join(directory, "ptc.json")
+    File.write!(component_path, "(ns helpers) (defn answer [] 42)")
 
-    {:ok, _result, ^path} =
-      TraceLog.with_trace(
-        fn ->
-          session = Session.new(session_id: "recorded", tags: %{"run" => "repl"})
-          {{:ok, _}, _session} = Session.eval(session, "(def recorded 42)")
-        end,
-        path: path
-      )
+    File.write!(
+      manifest_path,
+      Jason.encode!(%{
+        "version" => 1,
+        "workflow" => %{
+          "components" => [%{"id" => "helpers", "path" => "helpers.lisp"}],
+          "entry" => "helpers/answer"
+        },
+        "input" => %{"value" => %{}}
+      })
+    )
 
     output =
-      capture_io(fn ->
-        Repl.run([
-          "--log-prelude",
-          "--log-source",
-          path,
-          "-e",
-          ~S|(log/counters {:tags {"run" "repl"}})|
-        ])
-      end)
+      capture_io(fn -> Repl.run(["--manifest", manifest_path, "-e", "(helpers/answer)"]) end)
 
-    assert output =~ ~S|"attempts" 1|
-    assert output =~ ~S|"sessions" 1|
+    assert output == "42\n"
   end
 
-  test "-l prints captured println output before entering repl" do
-    path = Path.join(System.tmp_dir!(), "ptc-repl-load-#{System.unique_integer([:positive])}.clj")
-    File.write!(path, ~S|(println "loaded output")|)
+  @tag :tmp_dir
+  test "--trace persists canonical session events through the shared loader", %{
+    tmp_dir: directory
+  } do
+    path = Path.join(directory, "repl.jsonl")
+    assert "3\n" = capture_io(fn -> Repl.run(["--trace", path, "-e", "(+ 1 2)"]) end)
+    {:ok, trace_log} = TraceLog.new(source: {:file, path})
 
-    try do
-      output =
-        capture_io("\n", fn ->
-          Repl.run(["-l", path])
-        end)
+    assert {:ok, %{"items" => [%{"complete" => true, "name" => "ptc.repl"}]}} =
+             TraceLog.query(trace_log, :list_runs, %{})
+  end
 
-      assert output =~ "loaded output\nLoaded #{path}"
-    after
-      File.rm(path)
+  @tag :tmp_dir
+  test "a private manifest restricts the trace before appending events", %{tmp_dir: directory} do
+    component_path = Path.join(directory, "helpers.lisp")
+    manifest_path = Path.join(directory, "private.json")
+    trace_path = Path.join(directory, "private.jsonl")
+    File.write!(component_path, "(ns helpers) (defn answer [] 42)")
+
+    File.write!(
+      manifest_path,
+      Jason.encode!(%{
+        "version" => 1,
+        "workflow" => %{
+          "components" => [%{"id" => "helpers", "path" => "helpers.lisp"}],
+          "entry" => "helpers/answer"
+        },
+        "input" => %{"value" => %{}},
+        "events" => %{"policy" => "private"}
+      })
+    )
+
+    assert "42\n" =
+             capture_io(fn ->
+               Repl.run(["--manifest", manifest_path, "--trace", trace_path, "-e", "42"])
+             end)
+
+    {:ok, stat} = File.stat(trace_path)
+    assert Bitwise.band(stat.mode, 0o777) == 0o600
+  end
+
+  @tag :tmp_dir
+  test "-l evaluates setup before entering the REPL", %{tmp_dir: directory} do
+    path = Path.join(directory, "setup.lisp")
+    File.write!(path, "(def loaded 41)")
+    output = capture_io("(+ loaded 1)\n", fn -> Repl.run(["-l", path]) end)
+    assert output =~ "Loaded #{path}"
+    assert output =~ "42"
+  end
+
+  test "removed upstream and special log options fail closed" do
+    assert_raise Mix.Error, ~r/invalid ptc.repl options/, fn ->
+      Repl.run(["--log-prelude", "-e", "(+ 1 2)"])
+    end
+  end
+
+  test "eval and positional script modes are mutually exclusive" do
+    assert_raise Mix.Error, ~r/cannot combine --eval with a script/, fn ->
+      Repl.run(["-e", "42", "script.lisp"])
+    end
+  end
+
+  test "history depth is validated before manifest setup" do
+    assert_raise Mix.Error, ~r/history-depth must be between 1 and 3/, fn ->
+      Repl.run(["--history-depth", "0", "--manifest", "missing.json"])
     end
   end
 end

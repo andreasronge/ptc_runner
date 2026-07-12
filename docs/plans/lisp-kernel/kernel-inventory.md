@@ -116,7 +116,8 @@ name its re-home/delete condition. `unknown` is not a durable classification.
 | Area | Class | Retained behavior / destination |
 | --- | --- | --- |
 | `PtcRunner.Step`, `Step.Native`, `Step.Public` | migrate | Keep an internal Lisp evaluation result; public execution becomes Kernel Result/Error. |
-| `PtcRunner.Session` | migrate | Minimum direct REPL history/state primitive; delete old public semantics. |
+| `Kernel.ReplSession` | new path | Direct bounded evaluator continuation for definitions and `*1`/`*2`/`*3`, with transactional memory, Dispatcher-backed workflow capabilities, manifest configuration, and canonical session events. |
+| `PtcRunner.Session` | delete | Retained REPL behavior now lives in `Kernel.ReplSession`; delete the old public/upstream/legacy-TraceLog semantics with remaining callers. |
 | `PtcRunner.Context`, `PtcRunner.Turn` | delete | Explicit input and canonical events replace them. |
 | `PtcRunner.Evidence*` | delete unless proven | Retain only if a current Kernel/TraceLog contract test demonstrates an independent need. |
 | `PtcRunner.Schema` / generated `priv/ptc_schema.json` | migrate | Re-evaluate against manifest/capability schemas; delete SubAgent protocol schema. |
@@ -172,13 +173,13 @@ This area is governed by [`tracelog-contract.md`](tracelog-contract.md).
 | `lib/ptc_runner/upstream/**` | delete | A standard capability provider is the extension seam; no anticipatory generic adapter. |
 | `mcp_server/` | delete | Optional MCP frontend may return later over shared manifest/run builder. |
 | MCP/OpenAPI transports, credentials, catalogs, discovery | delete | Remove modules, deps, tests, docs, config, releases, CI. |
-| REPL upstream flags/catalog modes | delete | REPL uses explicit shared manifest/environment grants. |
+| REPL upstream flags/catalog modes | deleted | Removed from `mix ptc.repl`; the task uses explicit shared manifest/environment grants. |
 
 ## Mix tasks
 
 | Task | Class | Destination |
 | --- | --- | --- |
-| `ptc.repl` | migrate | Small direct Lisp REPL with history, scripts, bundles/shared manifest, canonical trace. |
+| `ptc.repl` | new path | Small direct bounded Lisp REPL with transactional definitions/history, scripts/setup files, shared manifest workflow grants, Dispatcher routing, and optional canonical JSONL persistence. |
 | `ptc.run` | new path | Thin shared manifest/run-builder frontend. |
 | `ptc.viewer` | foundation | Read-only trace/transcript frontend in V1. |
 | `ptc.validate_spec`, `ptc.update_spec_checksums`, `ptc.gen_docs` | foundation | Retain language/spec maintenance. |

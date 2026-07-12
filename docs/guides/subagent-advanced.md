@@ -304,8 +304,8 @@ specification.
 > credentials live in host/deployment config and never appear in the prelude
 > artifact, prompts, or traces.
 
-The same compiled artifact also drives the REPL
-(`mix ptc.repl --prelude crm.clj`) and direct execution
+The same component source can drive the Kernel REPL through a strict manifest
+(`mix ptc.repl --manifest crm.json`) and direct execution
 (`PtcRunner.Lisp.run(program, prelude: prelude)`), so behavior is identical
 across surfaces.
 

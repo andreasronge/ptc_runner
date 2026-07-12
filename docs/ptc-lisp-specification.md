@@ -3498,7 +3498,7 @@ seam:
 
 - direct execution: `PtcRunner.Lisp.run(program, prelude: artifact_or_source)`;
 - SubAgent: the `runtime_prelude:` field on `%PtcRunner.SubAgent.Definition{}`;
-- REPL: `mix ptc.repl --prelude file.clj`.
+- Kernel REPL: a component selected by `mix ptc.repl --manifest manifest.json`.
 
 All three surfaces use the same compiled artifact, the same protected namespace
 and export tables, and the same analyzer/evaluator resolution.

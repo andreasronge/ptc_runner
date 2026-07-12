@@ -1,39 +1,15 @@
 # Root Upstream Runtime
 
-The root `ptc_runner` library owns the upstream runtime used by both
-`mix ptc.repl` and `ptc_runner_mcp`. It lets PTC-Lisp programs call
+The legacy root `ptc_runner` library owns the upstream runtime used by
+`ptc_runner_mcp`. It lets PTC-Lisp programs call
 configured upstream tools with `(tool/call ...)` and inspect them with
 `(tool/servers)`, `(dir ...)`, `(doc ...)`, `(meta ...)`, and
 `(apropos ...)`.
 
-Use this when you want local REPL programs or embedded Elixir callers
-to use the same OpenAPI/MCP upstream machinery without running the MCP
-server process.
-
-## REPL Usage
-
-```bash
-mix ptc.repl --upstreams-config upstreams.json
-mix ptc.repl --upstreams-config upstreams.json -e "(tool/servers)"
-mix ptc.repl --upstreams-config upstreams.json \
-  --catalog-snapshot-mode frozen \
-  -e "(dir \"github\")"
-```
-
-The REPL resolves the config path from `--upstreams-config` first, then
-`PTC_RUNNER_UPSTREAMS`. If neither is set, it starts a plain PTC-Lisp
-REPL with no upstream tools.
-
-Useful options:
-
-| Option | Default | Meaning |
-|---|---:|---|
-| `--max-tool-calls` | `50` | Per-evaluation `(tool/call ...)` budget. |
-| `--max-catalog-ops` | `25` | Per-evaluation discovery form budget. |
-| `--upstream-call-timeout-ms` | `5000` | Per-upstream-call timeout. |
-| `--max-upstream-response-bytes` | `2097152` | Per-response cap before decode. |
-| `--catalog-mode` | `auto` | `auto`, `inline`, or `lazy` catalog text exposure. |
-| `--catalog-snapshot-mode` | `live` | `live` or `frozen` catalog population. |
+This runtime is scheduled for deletion by the minimal-Kernel migration. The
+Kernel REPL no longer accepts upstream flags; use a strict manifest and a
+registered capability provider as described in
+[Kernel REPL](guides/kernel-repl.md).
 
 ## Config Format
 

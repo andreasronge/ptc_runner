@@ -1,319 +1,185 @@
 defmodule Mix.Tasks.Ptc.Repl do
-  @shortdoc "Interactive PTC-Lisp REPL with turn history (*1, *2, *3)"
+  @shortdoc "Direct bounded PTC-Lisp REPL"
   @moduledoc """
-  Starts an interactive REPL for testing PTC-Lisp expressions.
+  Starts the direct Kernel PTC-Lisp REPL.
 
-  ## Usage
+      mix ptc.repl
+      mix ptc.repl -e "(+ 1 2)" -e "(+ *1 3)"
+      mix ptc.repl -l setup.lisp
+      mix ptc.repl script.lisp
+      mix ptc.repl -
+      mix ptc.repl --manifest ptc.json
+      mix ptc.repl --manifest ptc.json --trace trace.jsonl
 
-      mix ptc.repl                      # Interactive REPL (default)
-      mix ptc.repl -l user.clj          # Load user-code file, then interactive
-      mix ptc.repl --prelude crm.clj    # Attach a deployment prelude
-      mix ptc.repl --log-prelude        # Attach the built-in turn-log prelude
-      mix ptc.repl --log-prelude --log-source ./turn-log
-      mix ptc.repl --prelude crm.clj -e "(ns-publics 'crm)"
-      mix ptc.repl --prelude crm.clj --show-prompt-inventory
-      mix ptc.repl -e "(+ 1 2)"         # Eval and print result
-      mix ptc.repl --upstreams-config upstreams.json -e "(tool/servers)"
-      mix ptc.repl -e "(def x 1)" -e "(* x 2)"  # Chain evals (memory persists)
-      mix ptc.repl script.clj           # Run script file
-      mix ptc.repl -                    # Run from stdin
+  Options:
 
-  ## Options
+    * `-e, --eval` — evaluate an expression; repeat to preserve definitions and
+      `*1`/`*2`/`*3` history;
+    * `-l, --load` — evaluate a setup file before expressions or interaction;
+    * `-m, --manifest` — reuse a strict Kernel manifest's workflow bundle,
+      capabilities, limits, input, labels, and event policy;
+    * `-t, --trace` — append this session's canonical events to a JSONL file;
+    * `--history-depth` — retain one to three successful results (default 3);
+    * `-h, --help` — print this help without loading files or providers.
 
-    * `-e, --eval` - Evaluate expression and print result (can be repeated)
-    * `-l, --load` - Load file before entering interactive mode
-    * `-p, --prelude` - Compile a deployment prelude file and attach it to every
-      evaluation (protected namespaces, public exports, discovery). SEPARATE
-      from `-l/--load`, which loads ordinary user code.
-    * `--log-prelude` - Attach the built-in read-only `log/` introspection
-      prelude to the REPL's default in-memory turn-log sink. Mutually exclusive
-      with `--prelude` until general prelude composition is defined.
-    * `--log-source` - With `--log-prelude`, query a recorded JSONL file or
-      turn-log directory instead of the current REPL's in-memory sink.
-    * `--show-prompt-inventory` - Print the prelude's compact prompt inventory
-      (the same rendering SubAgent execution injects) before evaluating.
-    * `--upstreams-config` - Root upstream JSON config path
-      (or `PTC_RUNNER_UPSTREAMS`)
-    * `--max-tool-calls` - Per-evaluation `tool/call` cap
-    * `--max-catalog-ops` - Per-evaluation discovery form cap
-    * `--upstream-call-timeout-ms` - Per-upstream-call timeout
-    * `--max-upstream-response-bytes` - Per-upstream response cap
-    * `--catalog-mode` - Catalog exposure mode: `auto`, `inline`, or `lazy`
-    * `--catalog-snapshot-mode` - Catalog snapshot mode: `live` or `frozen`
-    * `-h, --help` - Print this help
-
-  ## Features
-
-  - Evaluate PTC-Lisp expressions interactively
-  - Multi-line input: continues prompting until parens are balanced
-  - Turn history: `*1`, `*2`, `*3` reference last 3 results
-  - Memory persists between evaluations
-  - Optional upstream runtime for `(tool/call ...)`, `(tool/servers)`,
-    `dir`, `doc`, `meta`, and `apropos`
-  - Exit with Ctrl+D
-
-  ## Example Session
-
-      ptc> (+ 1 2)
-      3
-      ptc> (* *1 10)
-      30
-      ptc> {:sum *1, :product *2}
-      %{sum: 30, product: 30}
+  A positional file runs as one script. `-` reads one script from standard
+  input. With no script or `--eval`, the task starts an interactive multi-line
+  REPL. Ctrl+D exits.
   """
 
   use Mix.Task
 
+  alias PtcRunner.Kernel.EventSink
+  alias PtcRunner.Kernel.ProviderRegistry
+  alias PtcRunner.Kernel.ReplSession
+  alias PtcRunner.Kernel.RunBuilder
+  alias PtcRunner.Kernel.TraceLog
   alias PtcRunner.Lisp.Format
-  alias PtcRunner.Lisp.Prelude.Compiler, as: PreludeCompiler
-  alias PtcRunner.Lisp.Prelude.PromptInventory
   alias PtcRunner.Lisp.Registry
-  alias PtcRunner.SubAgent.Loop.ResponseHandler
-  alias PtcRunner.TraceLog
-  alias PtcRunner.TraceLog.{Analyzer, Introspection, MemorySink}
-  alias PtcRunner.Upstream.Eval, as: UpstreamEval
-  alias PtcRunner.Upstream.Runtime, as: UpstreamRuntime
 
   @switches [
     eval: :keep,
     load: :string,
-    prelude: :string,
-    log_prelude: :boolean,
-    log_source: :string,
-    show_prompt_inventory: :boolean,
-    help: :boolean,
-    upstreams_config: :string,
-    max_tool_calls: :integer,
-    max_catalog_ops: :integer,
-    upstream_call_timeout_ms: :integer,
-    max_upstream_response_bytes: :integer,
-    catalog_mode: :string,
-    catalog_snapshot_mode: :string
+    manifest: :string,
+    trace: :string,
+    history_depth: :integer,
+    help: :boolean
   ]
-  @aliases [e: :eval, l: :load, p: :prelude, h: :help]
+  @aliases [e: :eval, l: :load, m: :manifest, t: :trace, h: :help]
 
   @impl Mix.Task
   def run(args) do
     Mix.Task.run("app.start")
+    {opts, arguments, invalid} = OptionParser.parse(args, strict: @switches, aliases: @aliases)
 
-    {opts, rest, _invalid} = OptionParser.parse(args, switches: @switches, aliases: @aliases)
+    cond do
+      opts[:help] ->
+        Mix.shell().info(@moduledoc)
 
-    # `--help` must stay side-effect-free: load the prelude (and print the
-    # inventory) only AFTER ruling out help, so `--help --prelude missing.clj`
-    # shows help instead of raising a file error.
-    if opts[:help] do
-      print_help()
+      invalid != [] ->
+        Mix.raise("invalid ptc.repl options: #{inspect(invalid)}")
+
+      length(arguments) > 1 ->
+        Mix.raise("usage: mix ptc.repl [OPTIONS] [SCRIPT|-]")
+
+      opts[:eval] && arguments != [] ->
+        Mix.raise("cannot combine --eval with a script or stdin")
+
+      opts[:history_depth] && opts[:history_depth] not in 1..3 ->
+        Mix.raise("--history-depth must be between 1 and 3")
+
+      true ->
+        run_session(opts, arguments)
+    end
+  end
+
+  defp run_session(opts, arguments) do
+    with {:ok, config} <- load_config(opts[:manifest]),
+         {:ok, session} <-
+           ReplSession.new(config: config, history_depth: opts[:history_depth] || 3) do
+      try do
+        outcome = evaluate_mode(session, opts, arguments)
+        finish(outcome, opts[:trace])
+      rescue
+        exception ->
+          ReplSession.abort(session, :frontend_exception)
+          reraise exception, __STACKTRACE__
+      catch
+        kind, reason ->
+          ReplSession.abort(session, :frontend_exit)
+          :erlang.raise(kind, reason, __STACKTRACE__)
+      end
     else
-      validate_prelude_opts!(opts)
-      prelude = load_prelude(opts)
-      if opts[:show_prompt_inventory], do: print_prompt_inventory(prelude)
+      {:error, reason} -> Mix.raise("ptc.repl setup failed: #{inspect(reason)}")
+    end
+  end
 
-      # Each run drives a `PtcRunner.Session` (the canonical external turn
-      # driver, plan D1): it owns memory + `*1/*2/*3` history and emits a turn
-      # event per eval. A default in-memory turn-log sink is enabled so
-      # "analyze my last session" (`:turns`) works with no filesystem setup.
-      with_session = fn fun ->
-        with_upstream_runtime(opts, fn runtime ->
-          {:ok, sink} = TraceLog.start_memory_sink()
-          fun.(build_session(runtime, prelude, sink, opts))
-        end)
-      end
+  defp load_config(nil), do: {:ok, nil}
 
+  defp load_config(path) do
+    with {:ok, registry} <- ProviderRegistry.new(),
+         {:ok, built} <- RunBuilder.load_and_build(path, registry),
+         do: {:ok, built.config}
+  end
+
+  defp evaluate_mode(session, opts, arguments) do
+    with {:ok, session} <- maybe_load(session, opts[:load]) do
       cond do
-        rest == ["-"] ->
-          with_session.(&run_stdin/1)
-
-        rest != [] ->
-          with_session.(&run_file(hd(rest), &1))
-
-        opts[:eval] ->
-          with_session.(&run_evals(Keyword.get_values(opts, :eval), &1))
-
-        opts[:load] ->
-          with_session.(&load_and_repl(opts[:load], &1))
-
-        true ->
-          with_session.(&interactive_repl/1)
+        opts[:eval] -> run_sources(session, Keyword.get_values(opts, :eval))
+        arguments == ["-"] -> read_stdin(session)
+        arguments != [] -> run_file(session, hd(arguments))
+        true -> interactive(session)
       end
     end
   end
 
-  # Builds the session that owns REPL state for this run. The optional upstream
-  # runtime and compiled prelude are bound here so every eval attaches the SAME
-  # artifact (the prelude rides as a default run option).
-  defp build_session(runtime, prelude, sink, opts) do
-    opts =
-      cond do
-        prelude ->
-          [prelude: prelude]
+  defp maybe_load(session, nil), do: {:ok, session}
 
-        opts[:log_prelude] ->
-          [
-            prelude: compile_introspection_prelude!(),
-            tools: Introspection.tools(opts[:log_source] || sink)
-          ]
+  defp maybe_load(session, path) do
+    with {:ok, source} <- File.read(path),
+         {:ok, _step, session} <- evaluate(session, source, :noninteractive) do
+      Mix.shell().info("Loaded #{path}")
+      {:ok, session}
+    else
+      {:error, reason} when is_atom(reason) -> {:error, reason, session}
+      {:error, step, session} -> {:error, step, session}
+    end
+  end
 
-        true ->
-          []
+  defp run_sources(session, sources) do
+    Enum.reduce_while(sources, {:ok, session}, fn source, {:ok, current} ->
+      case evaluate(current, source, :noninteractive) do
+        {:ok, _step, next} -> {:cont, {:ok, next}}
+        {:error, step, next} -> {:halt, {:error, step, next}}
       end
-
-    PtcRunner.Session.new([upstream_runtime: runtime] ++ opts)
-  end
-
-  defp compile_introspection_prelude! do
-    case PreludeCompiler.compile(Introspection.prelude_source()) do
-      {:ok, prelude} ->
-        prelude
-
-      {:error, error} ->
-        Mix.raise("Built-in log/ prelude compile error (#{error.reason}): #{error.message}")
-    end
-  end
-
-  defp validate_prelude_opts!(opts) do
-    if opts[:prelude] && opts[:log_prelude] do
-      Mix.raise("--log-prelude is mutually exclusive with --prelude")
-    end
-
-    if opts[:log_source] && !opts[:log_prelude] do
-      Mix.raise("--log-source requires --log-prelude")
-    end
-  end
-
-  @doc """
-  Compiles a deployment prelude source file into a
-  `%PtcRunner.Lisp.Prelude{}` artifact — the SAME compiler, protected-namespace
-  tables, and export records SubAgent execution uses. Raises `Mix.Error` on a
-  missing file or a prelude compile/validation failure.
-  """
-  @spec compile_prelude!(Path.t()) :: PtcRunner.Lisp.Prelude.t()
-  def compile_prelude!(path) do
-    source =
-      case File.read(path) do
-        {:ok, source} ->
-          source
-
-        {:error, reason} ->
-          Mix.raise("Error reading prelude #{path}: #{:file.format_error(reason)}")
-      end
-
-    case PreludeCompiler.compile(source) do
-      {:ok, prelude} ->
-        prelude
-
-      {:error, error} ->
-        Mix.raise("Prelude compile error (#{error.reason}): #{error.message}")
-    end
-  end
-
-  defp load_prelude(opts) do
-    case opts[:prelude] do
-      nil -> nil
-      path -> compile_prelude!(path)
-    end
-  end
-
-  defp print_prompt_inventory(nil), do: :ok
-
-  defp print_prompt_inventory(prelude) do
-    case PromptInventory.render(prelude) do
-      nil -> :ok
-      text -> IO.puts(text <> "\n")
-    end
-  end
-
-  defp print_help do
-    IO.puts(@moduledoc)
-  end
-
-  defp run_stdin(session) do
-    case IO.read(:stdio, :eof) do
-      {:error, reason} ->
-        IO.puts(:stderr, "Error reading stdin: #{reason}")
-        System.halt(1)
-
-      source ->
-        run_source(source, session)
-    end
-  end
-
-  defp run_file(path, session) do
-    case File.read(path) do
-      {:ok, source} ->
-        run_source(source, session)
-
-      {:error, reason} ->
-        IO.puts(:stderr, "Error reading #{path}: #{:file.format_error(reason)}")
-        System.halt(1)
-    end
-  end
-
-  defp run_evals(exprs, session) do
-    # run_source halts on error, so we can use a simple reduce over sessions.
-    Enum.reduce(exprs, session, fn expr, sess ->
-      {:ok, next} = run_source(expr, sess)
-      next
     end)
   end
 
-  defp run_source(source, session) do
-    case PtcRunner.Session.eval(session, source) do
-      {{:ok, step}, session} ->
-        print_captured_output(step.prints)
-        {output, _truncated?} = Format.to_clojure(step.return)
-        IO.puts(output)
-        {:ok, session}
-
-      {{:error, step}, _session} ->
-        IO.puts(:stderr, format_error(step.fail))
-        System.halt(1)
+  defp read_stdin(session) do
+    case IO.read(:stdio, :eof) do
+      source when is_binary(source) -> evaluate_outcome(session, source)
+      :eof -> {:ok, session}
+      {:error, reason} -> {:error, reason, session}
     end
   end
 
-  defp interactive_repl(session) do
-    IO.puts("PTC-Lisp REPL (Ctrl+D to exit)")
-    IO.puts("Type :help for commands, :doc <name> for function docs\n")
-
-    loop(session)
-  end
-
-  defp load_and_repl(path, session) do
+  defp run_file(session, path) do
     case File.read(path) do
-      {:ok, source} ->
-        case PtcRunner.Session.eval(session, source) do
-          {{:ok, step}, session} ->
-            print_captured_output(step.prints)
-            IO.puts("Loaded #{path}")
-            IO.puts("PTC-Lisp REPL (Ctrl+D to exit)")
-            IO.puts("Type :help for commands, :doc <name> for function docs\n")
-            loop(session)
-
-          {{:error, step}, _session} ->
-            IO.puts(:stderr, format_error(step.fail))
-            System.halt(1)
-        end
-
-      {:error, reason} ->
-        IO.puts(:stderr, "Error reading #{path}: #{:file.format_error(reason)}")
-        System.halt(1)
+      {:ok, source} -> evaluate_outcome(session, source)
+      {:error, reason} -> {:error, reason, session}
     end
+  end
+
+  defp evaluate_outcome(session, source) do
+    case evaluate(session, source, :noninteractive) do
+      {:ok, _step, session} -> {:ok, session}
+      {:error, step, session} -> {:error, step, session}
+    end
+  end
+
+  defp interactive(session) do
+    Mix.shell().info("PTC-Lisp REPL (Ctrl+D to exit; :help for commands)\n")
+    loop(session)
   end
 
   defp loop(session) do
     case read_expression("ptc> ", "") do
       :eof ->
-        IO.puts("\nGoodbye!")
+        Mix.shell().info("\nGoodbye!")
+        {:ok, session}
 
       "" ->
-        # Ignore empty lines, only Ctrl+D exits
         loop(session)
 
-      ":" <> meta ->
-        handle_meta(String.trim(meta), session)
+      ":" <> command ->
+        handle_command(String.trim(command), session)
         loop(session)
 
-      input ->
-        loop(evaluate(input, session))
+      source ->
+        case evaluate(session, source, :interactive) do
+          {:ok, _step, next} -> loop(next)
+          {:error, _step, next} -> loop(next)
+        end
     end
   end
 
@@ -323,245 +189,109 @@ defmodule Mix.Tasks.Ptc.Repl do
         :eof
 
       line ->
-        combined = buffer <> line
-
-        if balanced?(combined) do
-          String.trim(combined)
-        else
-          read_expression("...> ", combined)
-        end
+        source = buffer <> line
+        if balanced?(source), do: String.trim(source), else: read_expression("...> ", source)
     end
   end
 
-  defp balanced?(str) do
-    str
+  defp balanced?(source) do
+    source
     |> String.graphemes()
-    |> Enum.reduce_while(0, fn
-      _, n when n < 0 -> {:halt, -1}
-      "(", n -> {:cont, n + 1}
-      ")", n -> {:cont, n - 1}
-      _, n -> {:cont, n}
+    |> Enum.reduce_while({0, false, false}, fn
+      _char, {depth, _quoted?, _escaped?} when depth < 0 -> {:halt, {-1, false, false}}
+      "\\", {depth, true, false} -> {:cont, {depth, true, true}}
+      _char, {depth, true, true} -> {:cont, {depth, true, false}}
+      "\"", {depth, quoted?, false} -> {:cont, {depth, not quoted?, false}}
+      "(", {depth, false, false} -> {:cont, {depth + 1, false, false}}
+      ")", {depth, false, false} -> {:cont, {depth - 1, false, false}}
+      _char, state -> {:cont, state}
     end)
-    |> Kernel.==(0)
-  end
-
-  defp evaluate(input, session) do
-    case PtcRunner.Session.eval(session, input) do
-      {{:ok, step}, session} ->
-        # Show truncated output exactly like LLM feedback sees
-        print_captured_output(step.prints)
-        {output, _truncated?} = ResponseHandler.format_execution_result(step.return)
-        IO.puts(output)
-        session
-
-      {{:error, step}, session} ->
-        IO.puts(format_error(step.fail))
-        session
+    |> case do
+      {0, false, false} -> true
+      _state -> false
     end
   end
 
-  defp print_captured_output([]), do: :ok
+  defp evaluate(session, source, mode) do
+    case ReplSession.eval(session, source) do
+      {:ok, step, next} ->
+        print_step(step)
+        {:ok, step, next}
 
-  defp print_captured_output(prints) do
-    Enum.each(prints, &IO.puts/1)
+      {:error, step, next} ->
+        message = format_error(step)
+        if mode == :interactive, do: Mix.shell().info(message), else: Mix.shell().error(message)
+        {:error, step, next}
+    end
   end
 
-  defp handle_meta("help", _session) do
-    IO.puts("""
+  defp print_step(step) do
+    Enum.each(step.prints, fn line -> Mix.shell().info(line) end)
+    {formatted, _truncated?} = Format.to_clojure(step.return)
+    Mix.shell().info(formatted)
+  end
+
+  defp format_error(%{fail: %{reason: reason, message: message}}),
+    do: "Error (#{reason}): #{message}"
+
+  defp finish({:ok, session}, trace_path) do
+    persist_and_stop(session, trace_path)
+  end
+
+  defp finish({:error, %{} = step, session}, trace_path) do
+    persist_and_stop(session, trace_path)
+    Mix.raise(format_error(step))
+  end
+
+  defp finish({:error, reason, session}, trace_path) do
+    persist_and_stop(session, trace_path)
+    Mix.raise("ptc.repl failed: #{inspect(reason)}")
+  end
+
+  defp persist_and_stop(session, trace_path) do
+    private? = EventSink.policy(session.config.event_sink) == :private
+
+    with {:ok, events} <- ReplSession.close(session),
+         :ok <- persist_trace(trace_path, events, private?) do
+      :ok
+    else
+      {:error, reason} -> Mix.raise("ptc.repl trace failed: #{inspect(reason)}")
+    end
+  end
+
+  defp persist_trace(nil, _events, _private?), do: :ok
+
+  defp persist_trace(path, events, private?) do
+    TraceLog.append_jsonl(path, events, private: private?)
+  end
+
+  defp handle_command("help", _session) do
+    Mix.shell().info("""
     Commands:
-      :doc <name>      Show documentation for a function
-      :find <pattern>  Search functions by name or description
-      :apropos <pat>   Alias for :find
-      :tools           Show configured upstream tools
-      :turns           Summarize recorded turns (this REPL session)
+      :doc <name>      Show core function documentation
+      :find <pattern>  Search core functions
       :help            Show this help
 
-    Turn history: *1, *2, *3 reference last 3 results
-    Ctrl+D to exit
+    Successful results and definitions persist. *1, *2, and *3 read recent results.
     """)
   end
 
-  defp handle_meta("doc " <> name, session) do
+  defp handle_command("doc " <> name, _session) do
     case Registry.doc(String.trim(name)) do
-      nil -> print_upstream_doc(String.trim(name), session.upstream_runtime)
-      entry -> print_doc(entry)
+      nil -> Mix.shell().info("No documentation found for: #{String.trim(name)}")
+      entry -> Mix.shell().info(Enum.join(entry.signatures, "\n") <> "\n  " <> entry.description)
     end
   end
 
-  defp handle_meta("find " <> pattern, session),
-    do: print_search_results(String.trim(pattern), session.upstream_runtime)
-
-  defp handle_meta("apropos " <> pattern, session),
-    do: print_search_results(String.trim(pattern), session.upstream_runtime)
-
-  defp handle_meta("tools", session), do: print_tools(session.upstream_runtime)
-
-  defp handle_meta("turns", _session), do: print_turns()
-
-  defp handle_meta(_, _session) do
-    IO.puts(
-      "Unknown command. Available: :doc <name>, :find <pattern>, :apropos <pattern>, :tools, :turns"
-    )
+  defp handle_command("find " <> pattern, _session) do
+    pattern
+    |> String.trim()
+    |> Registry.find_doc()
+    |> Enum.each(fn entry ->
+      Mix.shell().info("#{entry.name} — #{Enum.join(entry.signatures, " | ")}")
+    end)
   end
 
-  defp print_tools(nil), do: IO.puts("No upstream runtime configured")
-  defp print_tools(runtime), do: IO.puts(UpstreamRuntime.catalog_text(runtime))
-
-  # Summarize the in-memory turn log enabled by default for this REPL run. This
-  # is the "analyze my last session" affordance — turn records with no
-  # filesystem setup (plan P2).
-  defp print_turns do
-    case TraceLog.active_memory_sinks() do
-      [] ->
-        IO.puts("No turn-log sink active")
-
-      [sink | _] ->
-        case Analyzer.sessions(MemorySink.events(sink)) do
-          [] ->
-            IO.puts("No turns recorded yet")
-
-          summaries ->
-            Enum.each(summaries, fn s ->
-              IO.puts(
-                "  #{s.correlation_id} (#{s.driver}): #{s.turns} turns, " <>
-                  "#{s.committed} committed, #{s.failed} failed, #{s.tool_calls} tool calls"
-              )
-            end)
-        end
-    end
-  end
-
-  defp print_doc(entry) do
-    IO.puts("-------------------------")
-    IO.puts(Enum.join(entry.signatures, "\n"))
-    IO.puts("  #{entry.description}")
-    if entry.notes, do: IO.puts("\n  #{entry.notes}")
-
-    if entry.examples != [] do
-      IO.puts("\nExamples:")
-
-      Enum.each(entry.examples, fn {code, result} ->
-        IO.puts("  #{code}")
-        IO.puts("  ;; => #{result}")
-      end)
-    end
-
-    if entry.see_also != [] do
-      IO.puts("\nSee also: #{Enum.join(entry.see_also, ", ")}")
-    end
-
-    IO.puts("-------------------------")
-  end
-
-  defp print_search_results(pattern, runtime) do
-    case Registry.find_doc(pattern) do
-      [] ->
-        print_upstream_apropos(pattern, runtime)
-
-      results ->
-        Enum.each(results, fn entry ->
-          sigs = Enum.join(entry.signatures, " | ")
-          IO.puts("  #{entry.name} — #{sigs}")
-          if entry.description != "", do: IO.puts("    #{entry.description}")
-        end)
-
-        IO.puts("\n#{length(results)} result(s)")
-    end
-  end
-
-  defp format_error(%{reason: reason, message: message}) do
-    reason_str = reason |> to_string() |> String.replace("_", " ")
-    "Error (#{reason_str}): #{message}"
-  end
-
-  # `session` is `{runtime, prelude}`. The prelude artifact is attached to every
-  # evaluation via the same `:prelude` opt SubAgent execution uses. With an
-  # upstream runtime present, also pass `:runtime` so attach-time `requires`
-  # validation runs against it.
-  defp with_upstream_runtime(opts, fun) do
-    case upstream_runtime_opts(opts) do
-      nil ->
-        fun.(nil)
-
-      runtime_opts ->
-        case UpstreamRuntime.start_link(runtime_opts) do
-          {:ok, runtime} ->
-            try do
-              fun.(runtime)
-            after
-              UpstreamRuntime.stop(runtime)
-            end
-
-          {:error, reason} ->
-            IO.puts(:stderr, "Error starting upstream runtime: #{inspect(reason)}")
-            System.halt(1)
-        end
-    end
-  end
-
-  defp upstream_runtime_opts(opts) do
-    config_path = opts[:upstreams_config] || System.get_env("PTC_RUNNER_UPSTREAMS")
-
-    if config_path do
-      [
-        config_path: config_path,
-        catalog_exposure_mode: mode(opts[:catalog_mode], [:auto, :inline, :lazy], :auto),
-        catalog_snapshot_mode: mode(opts[:catalog_snapshot_mode], [:frozen, :live], :live)
-      ]
-      |> maybe_put(:max_tool_calls, opts[:max_tool_calls])
-      |> maybe_put(:max_catalog_ops, opts[:max_catalog_ops])
-      |> maybe_put(:call_timeout_ms, opts[:upstream_call_timeout_ms])
-      |> maybe_put(:max_response_bytes, opts[:max_upstream_response_bytes])
-    end
-  end
-
-  defp mode(nil, _allowed, default), do: default
-
-  defp mode(value, allowed, default) do
-    Enum.find(allowed, default, &(Atom.to_string(&1) == value))
-  end
-
-  defp maybe_put(opts, _key, nil), do: opts
-  defp maybe_put(opts, key, value), do: Keyword.put(opts, key, value)
-
-  defp print_upstream_doc(name, nil), do: IO.puts("No documentation found for: #{name}")
-
-  defp print_upstream_doc(name, runtime) do
-    ref = if String.contains?(name, "/"), do: name, else: nil
-
-    if ref do
-      case discovery_once(runtime, :doc, [ref]) do
-        {:ok, text} -> IO.puts(text)
-        _ -> IO.puts("No documentation found for: #{name}")
-      end
-    else
-      IO.puts("No documentation found for: #{name}")
-    end
-  end
-
-  defp print_upstream_apropos(pattern, nil), do: IO.puts("No matches for: #{pattern}")
-
-  defp print_upstream_apropos(pattern, runtime) do
-    case discovery_once(runtime, :apropos, [pattern]) do
-      {:ok, []} ->
-        IO.puts("No matches for: #{pattern}")
-
-      {:ok, lines} ->
-        Enum.each(lines, &IO.puts("  #{&1}"))
-        IO.puts("\n#{length(lines)} upstream result(s)")
-
-      _ ->
-        IO.puts("No matches for: #{pattern}")
-    end
-  end
-
-  defp discovery_once(runtime, operation, args) do
-    {result, _records} =
-      UpstreamEval.with_run_context(runtime, [], fn context ->
-        exec = UpstreamEval.eval_options(context)[:discovery_exec]
-        exec.(operation, args)
-      end)
-
-    result
-  end
+  defp handle_command(_command, _session),
+    do: Mix.shell().info("Unknown command. Available: :doc <name>, :find <pattern>, :help")
 end
