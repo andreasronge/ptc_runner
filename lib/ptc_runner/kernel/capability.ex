@@ -1,7 +1,20 @@
 defmodule PtcRunner.Kernel.Capability do
   @moduledoc """
-  A host-owned capability route. Its callback is intentionally never projected
-  into Lisp values or capability discovery metadata.
+  A host-owned route from PTC-Lisp to trusted extension code.
+
+  `name` is the environment-local Lisp tool name. `validate` optionally checks
+  the normalized binary-keyed argument map before budget reservation and
+  provider invocation. `callback` returns `{:ok, json_value}` or
+  `{:error, %PtcRunner.Kernel.ProviderError{}}`.
+
+  `description` and `model_visible` control bounded discovery metadata only.
+  They do not grant authority. A capability can be invoked only when the host
+  placed it in the active workflow or mission environment.
+
+  Callbacks and validators remain host-owned and are never projected into Lisp
+  values. The dispatcher contains ordinary raises, exits, timeouts, and
+  oversized or invalid results, but capability implementations are trusted
+  BEAM extensions rather than an adversarial-code boundary.
   """
 
   @name ~r|\A[a-z][a-z0-9._/-]{0,127}\z|
@@ -18,6 +31,13 @@ defmodule PtcRunner.Kernel.Capability do
         }
 
   @spec new(keyword()) :: {:ok, t()} | {:error, :invalid_capability}
+  @doc """
+  Constructs a capability from `:name` and `:callback` plus optional
+  `:validate`, `:description`, and `:model_visible` options.
+
+  Names are bounded lower-case identifiers and may contain `.`, `_`, `/`, and
+  `-`. Descriptions are limited to 4,096 bytes.
+  """
   def new(opts) when is_list(opts) do
     with {:ok, name} <- valid_name(Keyword.get(opts, :name)),
          callback when is_function(callback, 1) <- Keyword.get(opts, :callback),
@@ -38,6 +58,7 @@ defmodule PtcRunner.Kernel.Capability do
   end
 
   @spec metadata(t()) :: map()
+  @doc "Returns sanitized discovery metadata without the callback or validator."
   def metadata(%__MODULE__{} = capability) do
     %{
       name: capability.name,

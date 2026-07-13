@@ -1,6 +1,12 @@
 defmodule PtcRunner.Kernel.BoundedWorker do
-  @moduledoc false
+  @moduledoc """
+  Internal one-shot worker for heap- and time-bounded host computation.
 
+  Results use a process alias so timeout cleanup can invalidate and drain a
+  late reply before returning to the caller.
+  """
+
+  @doc "Runs a zero-arity function in a monitored process under explicit limits."
   @spec run((-> term()), keyword()) ::
           {:ok, term()} | {:error, :timeout | :heap_exceeded | :worker_failed}
   def run(function, opts) when is_function(function, 0) and is_list(opts) do

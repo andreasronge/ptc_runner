@@ -6,7 +6,7 @@ file, so Claude Code and Codex read the same rules. Edit only this file.
 PtcRunner is a BEAM-native Elixir runtime for Programmatic Tool Calling (PTC):
 hosts compile immutable PTC-Lisp bundles, assemble explicit workflow and
 mission environments, and execute them through a bounded owner-based Kernel.
-Key docs: Kernel contract in `docs/plans/lisp-kernel/kernel-contract.md`,
+Key docs: Kernel architecture in `docs/guides/kernel-maintainer.md`,
 language reference in `docs/ptc-lisp-specification.md`, and built-ins in
 `docs/function-reference.md`.
 

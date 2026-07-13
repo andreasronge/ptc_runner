@@ -1,5 +1,23 @@
 defmodule PtcRunner.Kernel.TraceLog do
-  @moduledoc "Bounded canonical trace loading, derivation, filtering, and pagination."
+  @moduledoc """
+  Bounded canonical trace loading, validation, filtering, and pagination.
+
+  A source is an in-memory `PtcRunner.Kernel.EventSink`, one JSONL file, or a
+  directory of JSONL files. Loading validates the complete event envelope,
+  schema version, JSON-like data, run/trace identity, timestamps, and monotonic
+  sequence before deriving query results.
+
+  Supported query operations are:
+
+  - `:list_runs` — bounded filtered run summaries;
+  - `:get_run` — one run summary by run ID;
+  - `:list_turns` — ordered evaluation/capability facts for one run;
+  - `:counters` — aggregate counters for filtered runs.
+
+  Pagination cursors are bound to the source and operation. Every source and
+  result has an aggregate byte ceiling. Normal directory sources exclude the
+  reserved private filename suffix; private files require an explicit source.
+  """
 
   alias Jason.OrderedObject
   alias PtcRunner.Kernel.EventSink
@@ -26,6 +44,10 @@ defmodule PtcRunner.Kernel.TraceLog do
         }
 
   @spec new(keyword()) :: {:ok, t()} | {:error, :invalid_trace_log}
+  @doc """
+  Constructs a query boundary from required `:source` and optional positive
+  `:max_source_bytes` and `:max_result_bytes` limits.
+  """
   def new(opts) when is_list(opts) do
     with true <- Keyword.keys(opts) -- [:source, :max_source_bytes, :max_result_bytes] == [],
          {:ok, source, source_kind} <- validate_source(Keyword.get(opts, :source)),
@@ -49,6 +71,7 @@ defmodule PtcRunner.Kernel.TraceLog do
 
   @spec query(t(), :list_runs | :get_run | :list_turns | :counters, map()) ::
           {:ok, map()} | {:error, atom()}
+  @doc "Executes one validated, source-scoped bounded trace query."
   def query(%__MODULE__{} = trace_log, operation, arguments)
       when operation in [:list_runs, :get_run, :list_turns, :counters] and is_map(arguments) do
     with {:ok, events, source_id} <- load(trace_log),

@@ -1,5 +1,15 @@
 defmodule PtcRunner.Kernel.FileCapability do
-  @moduledoc "Constructs one read-only, explicitly root-confined file capability."
+  @moduledoc """
+  Constructs the read-only `fs-read` mission capability.
+
+  The callback accepts exactly `%{"path" => relative_path}` and returns one
+  bounded UTF-8 regular file beneath the configured root. Absolute paths,
+  empty or dot segments, symbolic links, non-regular files, descriptor/path
+  identity changes, oversized files, and invalid UTF-8 are rejected.
+
+  The root remains in the host callback closure and is never exposed through
+  Lisp discovery metadata.
+  """
 
   alias PtcRunner.Kernel.Capability
   alias PtcRunner.Kernel.ProviderError
@@ -8,6 +18,10 @@ defmodule PtcRunner.Kernel.FileCapability do
   @max_path_bytes 4_096
 
   @spec new(keyword()) :: {:ok, Capability.t()} | {:error, :invalid_file_capability}
+  @doc """
+  Constructs `fs-read` with required directory `:root` and optional positive
+  `:max_bytes`, which defaults to 1,000,000.
+  """
   def new(opts) when is_list(opts) do
     with true <- Keyword.keys(opts) -- [:root, :max_bytes] == [],
          root when is_binary(root) <- Keyword.get(opts, :root),

@@ -1,9 +1,9 @@
 # Lisp Kernel implementation and readiness
 
-The minimal programmable Kernel migration is implemented on
-`exp/minimal-kernel`. The contract and migration documents record the completed
-replacement. Product-readiness work continues in a separate active roadmap so
-future usability work is not confused with unresolved Kernel-contract work.
+The minimal programmable Kernel migration is implemented. Current architecture
+is documented in the [Kernel maintainer guide](../../guides/kernel-maintainer.md)
+and exact API contracts live in the `PtcRunner.Kernel.*` module documentation.
+This directory contains active product and extension plans only.
 
 - [`product-readiness.md`](product-readiness.md) assesses what is usable now,
   current limitations, prioritized improvements, and release gates for a
@@ -16,14 +16,9 @@ future usability work is not confused with unresolved Kernel-contract work.
   Viewer path, versioned prelude candidates, promotion gates, implementation
   slices, and appendix usage examples.
 
-- [`kernel-contract.md`](kernel-contract.md) is the normative V1 runtime
-  contract.
 - [`tracelog-contract.md`](tracelog-contract.md) defines canonical event
   storage, source grants, bounded queries, and the swappable `log/` library.
-- [`kernel-migration.md`](kernel-migration.md) records the completed vertical
-  implementation, cutover, deletion, and verification sequence.
-- [`kernel-inventory.md`](kernel-inventory.md) is the closed as-built
-  retain/migrate/delete record.
 
 Current user-facing material lives in [`../../guides/`](../../guides/). Git
-history is the archive for removed experiments and superseded product plans.
+history is the archive for the completed Kernel migration, removed experiments,
+and superseded product plans.

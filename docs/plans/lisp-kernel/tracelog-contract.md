@@ -1,7 +1,8 @@
 # TraceLog and Log Prelude — V1 Contract
 
-**Status:** implemented retained product contract. Complements
-[`kernel-contract.md`](kernel-contract.md).
+**Status:** implemented retained product contract. Complements the
+[Kernel maintainer guide](../../guides/kernel-maintainer.md) and
+`PtcRunner.Kernel.TraceLog` module documentation.
 
 ## Purpose and boundary
 
@@ -51,7 +52,7 @@ in sorted order under one aggregate byte cap.
 
 Normal trace sinks sanitize before persistence. Exact private transcript sinks
 use the separate fail-closed private policy specified by the event-sink section
-of [`kernel-contract.md`](kernel-contract.md).
+of the `PtcRunner.Kernel.EventSink` module documentation.
 
 Malformed or unsupported canonical events fail closed by default. A debugging
 mode may report bounded per-file errors, but it never silently reinterprets

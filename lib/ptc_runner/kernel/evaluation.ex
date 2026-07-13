@@ -1,5 +1,12 @@
 defmodule PtcRunner.Kernel.Evaluation do
-  @moduledoc false
+  @moduledoc """
+  Internal subordinate PTC-Lisp evaluation boundary.
+
+  Evaluation reserves the single transactional mission-memory lease, executes
+  source exclusively against a mission environment, and commits candidate
+  memory only after successful bounded completion. Every failure path releases
+  the lease without changing prior memory.
+  """
 
   alias PtcRunner.Kernel.Dispatcher
   alias PtcRunner.Kernel.Events
@@ -8,6 +15,7 @@ defmodule PtcRunner.Kernel.Evaluation do
   alias PtcRunner.Lisp
   alias PtcRunner.Lisp.TrustedTool
 
+  @doc "Evaluates bounded subordinate source with optional canonical event collection."
   @spec evaluate_source(RunState.t(), map(), binary(), non_neg_integer()) :: map()
   def evaluate_source(state, mission_environment, source, timeout_ms) when is_binary(source) do
     evaluate_source(state, mission_environment, source, timeout_ms, nil)

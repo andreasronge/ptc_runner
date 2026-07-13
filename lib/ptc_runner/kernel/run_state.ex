@@ -1,5 +1,18 @@
 defmodule PtcRunner.Kernel.RunState do
-  @moduledoc "The single owner of mutable per-run resource state."
+  @moduledoc """
+  Internal single owner of mutable per-run resource state.
+
+  One GenServer owns the deadline, open/closed status, workflow and mission
+  capability counters, live provider-task count, protocol errors, subordinate
+  evaluation count, terminal failure, evaluation-memory lease, and committed
+  evaluation memory.
+
+  Reservations and commits are deliberately atomic owner operations. Callers
+  must not recreate them as separate read and update steps. The opaque token
+  prevents messages that did not originate through the returned handle from
+  mutating state. The process monitors the run owner and automatically exits
+  with it.
+  """
   use GenServer
 
   alias PtcRunner.Kernel.Limits
@@ -12,6 +25,7 @@ defmodule PtcRunner.Kernel.RunState do
   @type t :: %__MODULE__{pid: pid(), token: reference()}
 
   @spec start(Limits.t(), keyword()) :: {:ok, t()}
+  @doc "Starts run state with a deadline beginning at construction time."
   def start(%Limits{} = limits, opts \\ []) do
     token = make_ref()
     owner = Keyword.get(opts, :owner, self())
@@ -20,53 +34,69 @@ defmodule PtcRunner.Kernel.RunState do
   end
 
   @spec reserve_capability(t(), environment(), binary()) :: :ok | {:error, atom()}
+  @doc "Atomically reserves environment, per-name, and live-provider budgets."
   def reserve_capability(state, environment, name),
     do: call(state, {:reserve_capability, environment, name})
 
   @spec release_provider_slot(t()) :: :ok | {:error, :closed}
+  @doc "Releases a live provider slot without accepting a result."
   def release_provider_slot(state), do: call(state, :release_provider_slot)
 
   @spec finish_provider(t()) :: :ok | {:error, :run_closed}
+  @doc "Releases a provider slot and accepts completion only while the run is open."
   def finish_provider(state), do: call(state, :finish_provider)
 
   @spec reserve_evaluation(t()) :: {:ok, map(), reference()} | {:error, atom()}
+  @doc "Reserves the single subordinate-evaluation lease and returns current memory."
   def reserve_evaluation(state), do: call(state, :reserve_evaluation)
 
   @spec commit_evaluation(t(), reference(), map()) :: :ok | {:error, atom()}
+  @doc "Atomically commits bounded candidate memory for the caller's active lease."
   def commit_evaluation(state, lease, memory) when is_map(memory),
     do: call(state, {:commit_evaluation, lease, memory})
 
   @spec release_evaluation(t(), reference()) :: :ok | {:error, atom()}
+  @doc "Releases the caller's evaluation lease without changing committed memory."
   def release_evaluation(state, lease), do: call(state, {:release_evaluation, lease})
 
   @spec protocol_error(t()) :: :ok | {:error, :protocol_error_limit}
+  @doc "Records one protocol error and closes the run when its ceiling is exceeded."
   def protocol_error(state), do: call(state, :protocol_error)
 
   @spec fail(t(), atom(), atom()) :: :ok
+  @doc "Records the first terminal failure and closes the run."
   def fail(state, kind, reason), do: call(state, {:fail, kind, reason})
 
   @spec terminal_failure(t()) :: nil | %{kind: atom(), reason: atom()}
+  @doc "Returns the first terminal failure, if any."
   def terminal_failure(state), do: call(state, :terminal_failure)
 
   @spec close(t()) :: :ok
+  @doc "Closes the run against further reservations and result commits."
   def close(state), do: call(state, :close)
 
   @spec stop(t()) :: :ok
+  @doc "Stops the owner process after the run has closed."
   def stop(state), do: GenServer.stop(state.pid, :normal)
 
   @spec usage(t()) :: map()
+  @doc "Returns a read-only bounded usage snapshot."
   def usage(state), do: call(state, :usage)
 
   @spec limits(t()) :: Limits.t()
+  @doc "Returns the normalized limits owned by this run."
   def limits(state), do: call(state, :limits)
 
   @spec remaining_ms(t()) :: non_neg_integer()
+  @doc "Returns non-negative wall time remaining before the run deadline."
   def remaining_ms(state), do: usage(state).remaining_ms
 
   @spec open?(t()) :: boolean()
+  @doc "Returns whether the run is open and its deadline has not elapsed."
   def open?(state), do: call(state, :open?)
 
   @spec evaluation_memory_summary(t()) :: map()
+  @doc "Returns bounded byte and definition counts for committed mission memory."
   def evaluation_memory_summary(state), do: call(state, :evaluation_memory_summary)
 
   @impl GenServer

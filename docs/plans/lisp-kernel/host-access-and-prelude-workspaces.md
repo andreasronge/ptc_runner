@@ -34,10 +34,11 @@ This plan generalizes the authorization context around those components. It
 does not move authorization into Lisp, make the Viewer an authority, or make a
 connector responsible for roles or prelude storage.
 
-The following existing contracts remain authoritative until their own planned
-changes land:
+The following current implementation and contracts remain authoritative until
+their own planned changes land:
 
-- [Kernel contract](kernel-contract.md)
+- [Kernel maintainer guide](../../guides/kernel-maintainer.md) and the
+  `PtcRunner.Kernel.*` module documentation
 - [TraceLog contract](tracelog-contract.md)
 - [Capability connectors](capability-connectors.md)
 

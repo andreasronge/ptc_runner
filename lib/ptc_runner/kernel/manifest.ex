@@ -1,5 +1,44 @@
 defmodule PtcRunner.Kernel.Manifest do
-  @moduledoc "Strict, path-confined V1 JSON manifest loader."
+  @moduledoc """
+  Strict, path-confined version 1 JSON manifest loader.
+
+  The supported top-level shape is:
+
+      {
+        "version": 1,
+        "workflow": {
+          "components": [
+            {"id": "workflow.main", "path": "workflow.lisp", "dependencies": []}
+          ],
+          "entry": "workflow.main/run"
+        },
+        "mission": {"components": [], "data": {}},
+        "input": {"value": {}},
+        "providers": {"workflow": [], "mission": []},
+        "limits": {},
+        "events": {"policy": "normal"},
+        "labels": {}
+      }
+
+  Required top-level fields are `version`, `workflow`, and `input`. Every
+  object rejects unknown and duplicate keys.
+
+  `workflow.components` and optional `mission.components` contain
+  manifest-relative source paths. The workflow `entry` is a qualified
+  function name; `PtcRunner.Kernel.RunBuilder` renders the executable entry
+  expression. Input contains exactly one of a JSON object in `value` or a
+  manifest-relative JSON file in `path`.
+
+  Provider entries contain a bounded `name` and JSON `config`. The manifest can
+  select only builders installed in `PtcRunner.Kernel.ProviderRegistry`.
+  Limit names match `PtcRunner.Kernel.Limits`; version 1 accepts values no
+  greater than its installed defaults. Event policy is `normal` or `private`
+  with optional run and trace IDs.
+
+  The loader resolves paths relative to the canonical manifest directory and
+  rejects absolute paths, traversal, devices, non-regular files, and symlink
+  escape. Loading performs no workflow execution.
+  """
 
   alias Jason.OrderedObject
   alias PtcRunner.Kernel.Component
@@ -27,8 +66,21 @@ defmodule PtcRunner.Kernel.Manifest do
   ]
   defstruct @enforce_keys
 
-  @type t :: %__MODULE__{}
+  @type t :: %__MODULE__{
+          path: binary(),
+          directory: binary(),
+          workflow_components: [Component.t()],
+          mission_components: [Component.t()],
+          entry: binary(),
+          input: map(),
+          mission_data: map(),
+          providers: %{workflow: [map()], mission: [map()]},
+          limits: Limits.t(),
+          events: %{policy: :normal | :private, run_id: binary() | nil, trace_id: binary() | nil},
+          labels: map()
+        }
 
+  @doc "Loads and validates one manifest and all referenced source/input files."
   @spec load(binary()) :: {:ok, t()} | {:error, term()}
   def load(path) when is_binary(path) do
     with {:ok, path} <- resolve_absolute(Path.expand(path)),
@@ -69,6 +121,11 @@ defmodule PtcRunner.Kernel.Manifest do
 
   def load(_path), do: {:error, :invalid_manifest}
 
+  @doc """
+  Replaces the decoded input with a manifest-relative JSON object file.
+
+  The same path confinement and input-size rules as `load/1` apply.
+  """
   @spec override_input(t(), binary()) :: {:ok, t()} | {:error, term()}
   def override_input(%__MODULE__{} = manifest, path) when is_binary(path) do
     with {:ok, value} <- input(%{"path" => path}, manifest.directory),

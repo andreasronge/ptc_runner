@@ -1,5 +1,15 @@
 defmodule PtcRunner.Kernel.Component do
-  @moduledoc "A source-bearing, component-ID addressed bundle input."
+  @moduledoc """
+  A source-bearing, component-ID-addressed bundle input.
+
+  A component has one stable `id`, non-empty UTF-8 PTC-Lisp `source`, a sorted
+  duplicate-free list of component-ID `dependencies`, and a bounded `origin`
+  used for provenance and diagnostics. IDs match
+  `[a-z][a-z0-9._-]{0,127}`.
+
+  Components describe code and dependency identity only. They do not select
+  providers or grant runtime authority.
+  """
 
   @id ~r/\A[a-z][a-z0-9._-]{0,127}\z/
   @enforce_keys [:id, :source, :dependencies, :origin]
@@ -13,6 +23,13 @@ defmodule PtcRunner.Kernel.Component do
         }
 
   @spec new(keyword()) :: {:ok, t()} | {:error, :invalid_component}
+  @doc """
+  Validates and constructs a source component.
+
+  Options are `:id`, `:source`, optional `:dependencies`, and optional
+  `:origin`. Dependencies must already be sorted and unique. The default origin
+  is `"memory"`.
+  """
   def new(opts) when is_list(opts) do
     with {:ok, id} <- valid_id(Keyword.get(opts, :id)),
          {:ok, source} <- valid_source(Keyword.get(opts, :source)),

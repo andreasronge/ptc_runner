@@ -18,7 +18,7 @@ defmodule PtcRunner do
 
   ## Guides
 
-  - [Kernel contract](plans/lisp-kernel/kernel-contract.md)
+  - [Kernel maintainer guide](kernel-maintainer.html)
   - [PTC-Lisp specification](ptc-lisp-specification.md)
   - [Function reference](function-reference.md)
   """

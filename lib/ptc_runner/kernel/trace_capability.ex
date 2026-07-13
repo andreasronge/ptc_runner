@@ -1,11 +1,19 @@
 defmodule PtcRunner.Kernel.TraceCapability do
-  @moduledoc "Source-scoped capabilities over the shared canonical TraceLog query layer."
+  @moduledoc """
+  Source-scoped Lisp capabilities over the canonical TraceLog query layer.
+
+  One explicit trace source produces four capabilities: `trace-list-runs`,
+  `trace-get-run`, `trace-list-turns`, and `trace-counters`. Granting these
+  capabilities exposes only the selected source and bounded query results; it
+  does not grant ambient filesystem or cross-environment access.
+  """
 
   alias PtcRunner.Kernel.Capability
   alias PtcRunner.Kernel.ProviderError
   alias PtcRunner.Kernel.TraceLog
 
   @spec new(keyword()) :: {:ok, [Capability.t()]} | {:error, :invalid_trace_capability}
+  @doc "Builds the four trace-query capabilities from `PtcRunner.Kernel.TraceLog` options."
   def new(opts) when is_list(opts) do
     with {:ok, trace_log} <- TraceLog.new(opts),
          {:ok, list_runs} <- capability(trace_log, "trace-list-runs", :list_runs),

@@ -1,5 +1,16 @@
 defmodule PtcRunner.Kernel.LLMCapability do
-  @moduledoc "Constructs the provider-neutral, bounded `llm-request` workflow capability."
+  @moduledoc """
+  Constructs the provider-neutral `llm-request` workflow capability.
+
+  The supplied requester owns transport and credential handling. Requests and
+  normalized JSON-like responses are independently bounded. Transport errors
+  become retryable `:unavailable` provider failures; invalid or oversized
+  responses do not cross back into Lisp.
+
+  This adapter provides model access, not agent policy. Message construction,
+  tool protocols, feedback, retries, and completion remain PTC-Lisp workflow
+  concerns.
+  """
 
   alias PtcRunner.Kernel.Capability
   alias PtcRunner.Kernel.JSONValue
@@ -9,6 +20,10 @@ defmodule PtcRunner.Kernel.LLMCapability do
   @default_max_bytes 1_000_000
 
   @spec new(keyword()) :: {:ok, Capability.t()} | {:error, :invalid_llm_capability}
+  @doc """
+  Constructs `llm-request` from a required one-argument `:requester` and
+  optional positive `:max_request_bytes` and `:max_response_bytes` limits.
+  """
   def new(opts) when is_list(opts) do
     with true <- Keyword.keys(opts) -- [:requester, :max_request_bytes, :max_response_bytes] == [],
          requester when is_function(requester, 1) <- Keyword.get(opts, :requester),

@@ -1,5 +1,11 @@
 defmodule PtcRunner.Kernel.RuntimeTools do
-  @moduledoc false
+  @moduledoc """
+  Internal construction of reserved runtime capabilities.
+
+  Both environments receive read-only usage and local capability discovery.
+  Only the workflow receives the annotation route. Every route is instrumented
+  with the same canonical capability start/stop events.
+  """
 
   alias PtcRunner.Kernel.Environment
   alias PtcRunner.Kernel.Events
@@ -7,6 +13,7 @@ defmodule PtcRunner.Kernel.RuntimeTools do
   alias PtcRunner.Kernel.RunState
   alias PtcRunner.Lisp.RetainedSize
 
+  @doc "Builds the reserved runtime-tool map for one environment."
   def tools(state, environment, event_sink, kind) when kind in [:workflow, :mission] do
     %{
       "runtime-usage" => fn arguments -> usage(state, arguments) end,
@@ -20,6 +27,7 @@ defmodule PtcRunner.Kernel.RuntimeTools do
     end)
   end
 
+  @doc "Wraps an internal runtime callback with canonical capability events."
   def instrument(state, event_sink, environment, name, callback)
       when environment in [:workflow, :mission] and is_binary(name) and is_function(callback, 1) do
     fn arguments ->

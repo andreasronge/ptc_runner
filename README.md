@@ -62,8 +62,9 @@ mix prepush
 The language reference is in
 [`docs/ptc-lisp-specification.md`](docs/ptc-lisp-specification.md), built-ins
 are listed in [`docs/function-reference.md`](docs/function-reference.md), and
-the Kernel contract is in
-[`docs/plans/lisp-kernel/kernel-contract.md`](docs/plans/lisp-kernel/kernel-contract.md).
+the implementation is mapped in the
+[Kernel maintainer guide](docs/guides/kernel-maintainer.md). Exact host API
+contracts live in the `PtcRunner.Kernel.*` module documentation.
 
 ## License
 

@@ -1,5 +1,15 @@
 defmodule PtcRunner.Kernel.FrozenBundle do
-  @moduledoc "An immutable, deterministically ordered bundle compilation result."
+  @moduledoc """
+  An immutable, deterministically ordered component compilation result.
+
+  Bundles contain compiled component metadata, ordered component IDs, an
+  aggregate source hash, and the compiled PTC-Lisp prelude. An in-VM
+  attestation prevents callers from mutating a bundle struct and presenting it
+  as compiler output during environment assembly.
+
+  Hosts obtain bundles through `PtcRunner.Kernel.compile_bundle/1`; `seal/1`
+  and `valid?/1` support the Kernel's construction boundary.
+  """
   import Bitwise, only: [bor: 2, bxor: 2]
   @enforce_keys [:components, :component_ids, :hash, :prelude]
   defstruct [:components, :component_ids, :hash, :prelude, :attestation]
@@ -13,9 +23,11 @@ defmodule PtcRunner.Kernel.FrozenBundle do
         }
 
   @spec seal(t()) :: t()
+  @doc "Attests a newly compiled bundle for later environment validation."
   def seal(%__MODULE__{} = bundle), do: %{bundle | attestation: attest(bundle)}
 
   @spec valid?(t()) :: boolean()
+  @doc "Checks that a bundle still matches its in-VM attestation."
   def valid?(%__MODULE__{attestation: attestation} = bundle) when is_binary(attestation),
     do: secure_compare(attestation, attest(bundle))
 

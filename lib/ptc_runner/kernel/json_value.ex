@@ -1,8 +1,15 @@
 defmodule PtcRunner.Kernel.JSONValue do
-  @moduledoc false
+  @moduledoc """
+  Internal validator for values that may cross JSON-shaped Kernel boundaries.
 
+  Accepted values are nil, booleans, finite numbers, valid UTF-8 binaries,
+  lists, and non-struct maps with unique binary keys.
+  """
+
+  @doc "Returns whether a value is a JSON-like map."
   def map?(value), do: is_map(value) and not is_struct(value) and value?(value)
 
+  @doc "Returns whether a value is recursively JSON-like."
   def value?(nil), do: true
   def value?(value) when is_boolean(value) or is_integer(value), do: true
   def value?(value) when is_float(value), do: value == value

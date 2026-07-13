@@ -1,5 +1,11 @@
 defmodule PtcRunner.Kernel.Environment do
-  @moduledoc false
+  @moduledoc """
+  Internal shared validator for workflow and mission environment constructors.
+
+  It verifies bundle attestations, JSON-like data, capability identity,
+  reserved routes, and bundle tool requirements. The public environment
+  structs remain distinct even though they share this validation path.
+  """
 
   alias PtcRunner.Kernel.Capability
   alias PtcRunner.Kernel.FrozenBundle
@@ -7,6 +13,7 @@ defmodule PtcRunner.Kernel.Environment do
 
   @reserved ~w(kernel-eval runtime-usage runtime-remaining cap-list cap-describe workflow-annotate)
 
+  @doc "Validates common environment fields and returns normalized attributes."
   def assemble(bundle, capabilities, data, kind)
       when kind in [:workflow, :mission] do
     with :ok <- valid_bundle(bundle),
@@ -21,6 +28,7 @@ defmodule PtcRunner.Kernel.Environment do
     end
   end
 
+  @doc "Returns sorted model-visible capability metadata for one environment."
   def metadata(%{capabilities: capabilities}) do
     capabilities
     |> Map.values()

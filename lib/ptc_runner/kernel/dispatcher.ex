@@ -1,5 +1,13 @@
 defmodule PtcRunner.Kernel.Dispatcher do
-  @moduledoc "Bounded capability invocation with late-result invalidation."
+  @moduledoc """
+  Internal bounded capability invocation boundary.
+
+  Dispatch validates normalized arguments, atomically reserves environment and
+  provider-task budgets in `PtcRunner.Kernel.RunState`, emits canonical attempt
+  events, runs the trusted callback in a monitored heap-limited process, and
+  constructs the uniform Lisp result envelope. Completion is checked against
+  run closure so late results cannot re-enter Lisp.
+  """
 
   alias PtcRunner.Kernel.Capability
   alias PtcRunner.Kernel.Events
@@ -9,6 +17,7 @@ defmodule PtcRunner.Kernel.Dispatcher do
   alias PtcRunner.Lisp.AmbiguousArguments
   alias PtcRunner.Lisp.RetainedSize
 
+  @doc "Dispatches one environment-local capability with optional event collection."
   @spec dispatch(RunState.t(), :workflow | :mission, map(), binary(), map(), non_neg_integer()) ::
           map()
   def dispatch(state, environment, %{capabilities: capabilities}, name, arguments, timeout_ms)

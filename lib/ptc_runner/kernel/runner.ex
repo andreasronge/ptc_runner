@@ -1,5 +1,11 @@
 defmodule PtcRunner.Kernel.Runner do
-  @moduledoc false
+  @moduledoc """
+  Internal implementation of `PtcRunner.Kernel.run/2`.
+
+  It owns run-state lifetime, workflow evaluation, runtime-tool wiring,
+  subordinate-evaluation routing, canonical lifecycle events, public value
+  projection, and terminal error normalization.
+  """
 
   alias PtcRunner.Kernel.Dispatcher
   alias PtcRunner.Kernel.Error
@@ -17,6 +23,7 @@ defmodule PtcRunner.Kernel.Runner do
   alias PtcRunner.Lisp.TrustedTool
 
   @spec run(binary(), RunConfig.t()) :: {:ok, Result.t()} | {:error, Error.t()}
+  @doc "Executes one validated run configuration and always tears down run state."
   def run(entry_source, %RunConfig{} = config) when is_binary(entry_source) do
     with :ok <- entry_source_within_limit(entry_source, config.limits),
          {:ok, state} <- RunState.start(config.limits) do

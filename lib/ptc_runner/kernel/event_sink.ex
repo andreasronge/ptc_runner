@@ -1,5 +1,18 @@
 defmodule PtcRunner.Kernel.EventSink do
-  @moduledoc "A bounded canonical event sink with explicit normal/private policies."
+  @moduledoc """
+  Bounded in-memory owner for canonical Kernel events.
+
+  The sink assigns schema version, run/trace identity, monotonic sequence, and
+  UTC timestamp. Producers supply only event type and bounded data.
+
+  Under `:normal` policy, a full or failed sink drops later events and records
+  loss by event type without changing workflow execution. Under `:private`
+  policy, the same condition returns `:event_sink_error` so the run can fail
+  closed. The sink monitors its owner and exits when the owner terminates.
+
+  Persistent JSONL storage is an explicit `PtcRunner.Kernel.TraceLog` operation
+  after collection, not an arbitrary callback in the runtime path.
+  """
   use GenServer
 
   alias PtcRunner.Kernel.Limits
@@ -12,6 +25,12 @@ defmodule PtcRunner.Kernel.EventSink do
   @type t :: %__MODULE__{pid: pid(), token: reference(), policy: policy()}
 
   @spec start(policy(), Limits.t(), keyword()) :: {:ok, t()} | {:error, :invalid_event_sink}
+  @doc """
+  Starts a sink with one policy and the event bounds from `limits`.
+
+  Options are `:run_id`, `:trace_id`, and `:owner`. IDs must be binaries; a
+  unique run ID is generated when omitted and is also the default trace ID.
+  """
   def start(policy, %Limits{} = limits, opts \\ []) when policy in [:normal, :private] do
     token = make_ref()
     run_id = Keyword.get_lazy(opts, :run_id, &default_run_id/0)
@@ -27,6 +46,7 @@ defmodule PtcRunner.Kernel.EventSink do
   end
 
   @spec emit(t(), binary(), map()) :: :ok | {:error, :event_sink_error}
+  @doc "Emits one bounded event or applies the sink's loss policy."
   def emit(sink, type, data) when is_binary(type) and is_map(data) do
     case call(sink, {:emit, type, data}) do
       {:error, :event_sink_error} when sink.policy == :normal -> :ok
@@ -35,6 +55,7 @@ defmodule PtcRunner.Kernel.EventSink do
   end
 
   @spec events(t()) :: [map()]
+  @doc "Returns retained canonical events in sequence order."
   def events(sink) do
     case call(sink, :events) do
       {:error, :event_sink_error} -> []
@@ -43,6 +64,7 @@ defmodule PtcRunner.Kernel.EventSink do
   end
 
   @spec dropped(t()) :: map()
+  @doc "Returns dropped-event counts keyed by event type."
   def dropped(sink) do
     case call(sink, :dropped) do
       {:error, :event_sink_error} -> %{"event-sink" => 1}
@@ -51,9 +73,11 @@ defmodule PtcRunner.Kernel.EventSink do
   end
 
   @spec policy(t()) :: policy() | {:error, :event_sink_error}
+  @doc "Returns the configured loss policy."
   def policy(sink), do: call(sink, :policy)
 
   @spec stop(t()) :: :ok
+  @doc "Stops the sink. Calling it after owner-driven shutdown is harmless."
   def stop(sink) do
     GenServer.stop(sink.pid, :normal)
   catch

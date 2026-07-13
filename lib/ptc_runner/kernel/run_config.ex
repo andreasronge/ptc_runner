@@ -1,5 +1,19 @@
 defmodule PtcRunner.Kernel.RunConfig do
-  @moduledoc "The complete host-constructed configuration for one Kernel run."
+  @moduledoc """
+  The complete host-constructed configuration for one Kernel run.
+
+  The required fields are:
+
+  - `workflow_environment` — trusted outer workflow code and capabilities;
+  - `mission_environment` — confined subordinate code and capabilities;
+  - `input` — a JSON-like map exposed as the workflow evaluation context;
+  - `limits` — normalized positive runtime ceilings;
+  - `event_sink` — the bounded owner of canonical run events.
+
+  `labels` is an optional bounded JSON-like map copied into `run-started`.
+  Constructing a config validates shape and ownership objects but performs no
+  execution and grants no authority beyond the supplied environments.
+  """
 
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.JSONValue
@@ -17,9 +31,17 @@ defmodule PtcRunner.Kernel.RunConfig do
     labels: %{}
   ]
 
-  @type t :: %__MODULE__{}
+  @type t :: %__MODULE__{
+          workflow_environment: WorkflowEnvironment.t(),
+          mission_environment: MissionEnvironment.t(),
+          input: map(),
+          limits: Limits.t(),
+          event_sink: EventSink.t(),
+          labels: map()
+        }
 
   @spec new(keyword()) :: {:ok, t()} | {:error, :invalid_run_config}
+  @doc "Constructs a run configuration and rejects missing or unknown fields."
   def new(opts) when is_list(opts) do
     with false <-
            Keyword.keys(opts) --

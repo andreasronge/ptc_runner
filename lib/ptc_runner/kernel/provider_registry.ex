@@ -1,5 +1,17 @@
 defmodule PtcRunner.Kernel.ProviderRegistry do
-  @moduledoc "Host-owned mapping from manifest provider names to trusted builders."
+  @moduledoc """
+  Host-owned mapping from manifest provider names to trusted builders.
+
+  A manifest can select a bounded provider name and JSON configuration; it
+  cannot register a module, function, callback, command, or code URL. Builders
+  receive the canonical manifest directory and the requested workflow or
+  mission destination, then return one `PtcRunner.Kernel.Capability`.
+
+  The built-ins are `llm`, permitted only in the workflow environment, and
+  `file-read`, permitted only in the mission environment. Additional builders
+  cannot replace built-in names. Builder exceptions are contained as
+  `:provider_build_failed` during construction.
+  """
 
   alias PtcRunner.Kernel.Capability
   alias PtcRunner.Kernel.FileCapability
@@ -13,6 +25,10 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
   @type t :: %__MODULE__{builders: %{binary() => builder()}}
 
   @spec new(map()) :: {:ok, t()} | {:error, :invalid_provider_registry}
+  @doc """
+  Creates a registry with the built-ins and optional additional builder
+  functions keyed by provider name.
+  """
   def new(additional_builders \\ %{})
 
   def new(additional_builders) when is_map(additional_builders) do
@@ -30,6 +46,7 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
   def new(_builders), do: {:error, :invalid_provider_registry}
 
   @spec build(t(), binary(), map(), context()) :: {:ok, Capability.t()} | {:error, term()}
+  @doc "Builds a capability from one trusted registry entry."
   def build(%__MODULE__{builders: builders}, name, config, context) do
     case Map.fetch(builders, name) do
       {:ok, builder} -> builder.(config, context)

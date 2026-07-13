@@ -1,5 +1,11 @@
 defmodule PtcRunner.Kernel.BundleCompiler do
-  @moduledoc false
+  @moduledoc """
+  Internal implementation of `PtcRunner.Kernel.compile_bundle/1`.
+
+  It bounds the closed component set, resolves its component-ID dependency DAG
+  deterministically, compiles the combined prelude in a bounded worker, limits
+  diagnostics and artifact size, and seals the resulting bundle.
+  """
 
   alias PtcRunner.Kernel.BoundedWorker
   alias PtcRunner.Kernel.Component
@@ -16,6 +22,7 @@ defmodule PtcRunner.Kernel.BundleCompiler do
   @max_diagnostic_bytes 65_536
 
   @spec compile([Component.t()]) :: {:ok, FrozenBundle.t()} | {:error, map()}
+  @doc "Compiles and attests a bounded closed component set."
   def compile(components) when is_list(components) do
     with :ok <- bounded_components(components) do
       compile_bounded(components)

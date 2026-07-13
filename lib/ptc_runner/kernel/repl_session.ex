@@ -1,5 +1,16 @@
 defmodule PtcRunner.Kernel.ReplSession do
-  @moduledoc "Direct bounded PTC-Lisp session for the Kernel REPL frontend."
+  @moduledoc """
+  Direct bounded PTC-Lisp continuation used by the Kernel REPL frontend.
+
+  Successful forms commit definitions transactionally and retain up to three
+  prior results for `*1`, `*2`, and `*3`. Failed forms preserve the previous
+  memory. A session uses the workflow bundle, capabilities, limits, input,
+  labels, and event policy from an optional `PtcRunner.Kernel.RunConfig` but
+  does not execute the manifest entry function.
+
+  The session owns one internal run state and event sink. Call `close/1` for a
+  normal terminal event or `abort/2` when the frontend terminates early.
+  """
 
   alias PtcRunner.Kernel.Dispatcher
   alias PtcRunner.Kernel.Events
@@ -19,9 +30,24 @@ defmodule PtcRunner.Kernel.ReplSession do
   @enforce_keys [:config, :state, :memory, :history, :history_depth]
   defstruct [:config, :state, :memory, :history, :history_depth, attempts: 0, errors: 0]
 
-  @type t :: %__MODULE__{}
+  @type t :: %__MODULE__{
+          config: RunConfig.t(),
+          state: RunState.t(),
+          memory: map(),
+          history: [term()],
+          history_depth: 1..3,
+          attempts: non_neg_integer(),
+          errors: non_neg_integer()
+        }
 
   @spec new(keyword()) :: {:ok, t()} | {:error, term()}
+  @doc """
+  Starts a session with optional `:config` and `:history_depth` options.
+
+  Without a config, the session creates empty environments, default limits,
+  and a normal in-memory event sink. History depth must be between one and
+  three.
+  """
   def new(opts \\ [])
 
   def new(opts) when is_list(opts) do
@@ -44,6 +70,7 @@ defmodule PtcRunner.Kernel.ReplSession do
   def new(_opts), do: {:error, :invalid_repl_session}
 
   @spec eval(t(), binary()) :: {:ok, Native.t(), t()} | {:error, Native.t(), t()}
+  @doc "Evaluates one bounded source form and returns the updated session."
   def eval(%__MODULE__{} = session, source) when is_binary(source) do
     if sink_alive?(session) do
       eval_open(session, source)
@@ -67,6 +94,7 @@ defmodule PtcRunner.Kernel.ReplSession do
   end
 
   @spec close(t()) :: {:ok, [map()]} | {:error, :event_sink_error | :session_closed}
+  @doc "Closes a session normally and returns its retained canonical events."
   def close(%__MODULE__{} = session) do
     if sink_alive?(session) do
       try do
@@ -97,6 +125,7 @@ defmodule PtcRunner.Kernel.ReplSession do
   end
 
   @spec abort(t(), atom()) :: {:ok, [map()]} | :ok
+  @doc "Closes a session with an error reason and returns retained events when available."
   def abort(%__MODULE__{} = session, reason) when is_atom(reason) do
     if sink_alive?(session) do
       try do

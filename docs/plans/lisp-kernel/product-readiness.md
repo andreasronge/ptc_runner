@@ -4,10 +4,10 @@ Status: active roadmap, reviewed 2026-07-13.
 
 This document records the current limitations of the implemented minimal
 Kernel and the work that would make it usable as a developer-facing product.
-It is deliberately separate from the closed migration record. The
-[`kernel-contract.md`](kernel-contract.md) remains the normative runtime
-contract; this document is a product assessment and may change as the product
-surface develops.
+The [Kernel maintainer guide](../../guides/kernel-maintainer.md) maps the
+implemented runtime and the `PtcRunner.Kernel.*` module documentation defines
+its exact API. This document is a product assessment and may change as the
+product surface develops.
 
 ## Assessment
 
@@ -52,13 +52,14 @@ SubAgent architecture.
   E2E credentials are available.
 
 See the [Kernel tutorial](../../guides/kernel-tutorial.md) for runnable examples
-and `docs/plans/lisp-kernel/kernel-inventory.md` for the completed as-built
+and the [Kernel maintainer guide](../../guides/kernel-maintainer.md) for the
+implemented code map and invariants. Git history contains the completed
 migration record.
 
 ## Current limitations
 
-The priorities below describe product readiness, not defects in the normative
-Kernel contract.
+The priorities below describe product readiness, not defects in the current
+Kernel execution boundary.
 
 | Priority | Area | Current limitation | Consequence |
 | --- | --- | --- | --- |
@@ -434,18 +435,15 @@ block the manifest-first milestone.
 
 ## Related documents
 
-- [`kernel-contract.md`](kernel-contract.md) — normative V1 authority,
-  lifecycle, limits, result, and manifest contract.
+- [Kernel maintainer guide](../../guides/kernel-maintainer.md) — current
+  authority, lifecycle, ownership, and implementation map; exact API details
+  live in the `PtcRunner.Kernel.*` module documentation.
 - [`tracelog-contract.md`](tracelog-contract.md) — canonical event and source
   contract.
 - [`host-access-and-prelude-workspaces.md`](host-access-and-prelude-workspaces.md)
   — future shared authorization, TraceLog/Viewer, and versioned prelude plan.
 - [`capability-connectors.md`](capability-connectors.md) — future external
   capability source and inbound frontend plan.
-- `docs/plans/lisp-kernel/kernel-migration.md` — completed implementation and
-  cutover sequence.
-- `docs/plans/lisp-kernel/kernel-inventory.md` — closed retain/migrate/delete
-  record.
 - [Kernel tutorial](../../guides/kernel-tutorial.md) — current runnable user
   journey.
 - [Kernel REPL](../../guides/kernel-repl.md) — current interactive interface.

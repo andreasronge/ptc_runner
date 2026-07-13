@@ -1,5 +1,13 @@
 defmodule PtcRunner.Kernel.RunBuilder do
-  @moduledoc "Builds and runs the one shared Kernel configuration from a V1 manifest."
+  @moduledoc """
+  Shared manifest-backed construction and execution path.
+
+  The builder resolves trusted provider names, compiles separate workflow and
+  mission bundles, assembles their environments, starts the configured event
+  sink, and produces the same `PtcRunner.Kernel.RunConfig` accepted by direct
+  Elixir embedding. Frontends should delegate here instead of creating a
+  second manifest, authority, or event path.
+  """
 
   alias PtcRunner.Kernel
   alias PtcRunner.Kernel.EventSink
@@ -12,6 +20,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
 
   @spec build(Manifest.t(), ProviderRegistry.t()) ::
           {:ok, %{entry_source: binary(), config: RunConfig.t()}} | {:error, term()}
+  @doc "Builds an entry expression and complete run configuration from a loaded manifest."
   def build(%Manifest{} = manifest, %ProviderRegistry{} = registry) do
     with {:ok, workflow_capabilities} <- capabilities(manifest, registry, :workflow),
          {:ok, mission_capabilities} <- capabilities(manifest, registry, :mission),
@@ -44,6 +53,13 @@ defmodule PtcRunner.Kernel.RunBuilder do
 
   @spec load_and_build(binary(), ProviderRegistry.t()) ::
           {:ok, %{entry_source: binary(), config: RunConfig.t()}} | {:error, term()}
+  @doc """
+  Loads a manifest and builds its run.
+
+  The optional `:mission` path replaces the manifest input using the same
+  manifest-relative confinement rules. The name is retained from the CLI
+  option; it changes top-level workflow input, not mission-environment data.
+  """
   def load_and_build(path, registry, opts \\ []) do
     with {:ok, manifest} <- Manifest.load(path),
          {:ok, manifest} <- maybe_override_input(manifest, opts),
@@ -51,6 +67,14 @@ defmodule PtcRunner.Kernel.RunBuilder do
   end
 
   @spec run(binary(), ProviderRegistry.t()) :: {:ok, term()} | {:error, term()}
+  @doc """
+  Loads, builds, and executes a manifest-backed run.
+
+  In addition to `:mission`, the optional `:trace` path persists retained
+  canonical events as JSONL after execution. The event sink is always stopped.
+  A trace persistence error is returned together with the completed Kernel
+  result so callers do not mistake persistence failure for workflow failure.
+  """
   def run(path, registry, opts \\ []) do
     with {:ok, built} <- load_and_build(path, registry, opts) do
       try do

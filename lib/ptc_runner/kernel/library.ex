@@ -1,5 +1,15 @@
 defmodule PtcRunner.Kernel.Library do
-  @moduledoc "Shipped PTC-Lisp library components for explicit Kernel composition."
+  @moduledoc """
+  Shipped PTC-Lisp libraries as explicit Kernel components.
+
+  Available component IDs are `kernel`, `runtime`, `cap`, `workflow.event`,
+  `fs`, `llm`, `agent.native`, `agent.core`, `agent.feedback`, `agent.retry`,
+  `result`, and `log.core`.
+
+  Fetching a component grants no capability. The host still compiles the
+  selected closed component set and supplies the capabilities required by its
+  exports when assembling an environment.
+  """
 
   alias PtcRunner.Kernel.Component
 
@@ -54,6 +64,7 @@ defmodule PtcRunner.Kernel.Library do
   }
 
   @spec component(binary()) :: {:ok, Component.t()} | {:error, :unknown_library}
+  @doc "Returns one shipped component by its stable component ID."
   def component(name) when is_binary(name) do
     case Map.fetch(@sources, name) do
       {:ok, source} ->
@@ -72,6 +83,7 @@ defmodule PtcRunner.Kernel.Library do
   def component(_name), do: {:error, :unknown_library}
 
   @spec components([binary()]) :: {:ok, [Component.t()]} | {:error, :unknown_library}
+  @doc "Returns shipped components in the requested order."
   def components(names) when is_list(names) do
     Enum.reduce_while(names, {:ok, []}, fn name, {:ok, components} ->
       case component(name) do

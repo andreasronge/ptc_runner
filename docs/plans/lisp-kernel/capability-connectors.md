@@ -1,7 +1,7 @@
 # Capability connectors and server frontends
 
 Status: future plan, reviewed 2026-07-13. Not implemented and not part of the
-normative V1 Kernel contract.
+current Kernel API.
 
 This plan describes how PtcRunner can consume tools from MCP, HTTP/OpenAPI,
 databases, files, and native host extensions without rebuilding the deleted
@@ -15,8 +15,9 @@ The central decision is:
 > `Kernel.Capability` values before a run begins; keep transport, credentials,
 > sessions, and native handles outside Lisp.
 
-The [`kernel-contract.md`](kernel-contract.md) remains authoritative until a
-future slice promotes an approved part of this plan into that contract.
+The implemented `PtcRunner.Kernel.*` module contracts and
+[Kernel maintainer guide](../../guides/kernel-maintainer.md) remain
+authoritative until a future slice promotes an approved part of this plan.
 The shared principal, resource, grant, bounds, and audit vocabulary is defined
 by the future
 [`host-access-and-prelude-workspaces.md`](host-access-and-prelude-workspaces.md)
@@ -635,8 +636,8 @@ transport-neutral `ProviderError` kinds:
 The dispatcher continues to own timeout, invalid-result, result-exceeded,
 quota, and run-closure classifications. Do not create parallel MCP, HTTP, or
 database variants of those errors. If a real connector proves the closed
-vocabulary insufficient, change the Kernel contract and all adapters together
-before adding a new kind.
+vocabulary insufficient, change `Kernel.ProviderError` and all adapters
+together before adding a new kind.
 
 Exact upstream exceptions, URLs with query parameters, headers, SQL, stack
 traces, response bodies, and credentials do not become Lisp-visible details.
@@ -753,8 +754,9 @@ concurrency, cancellation, and input limits tested separately.
   owned TraceLog and versioned prelude services.
 - [`product-readiness.md`](product-readiness.md) — product sequence and release
   gates; this plan expands its capability-ecosystem phase.
-- [`kernel-contract.md`](kernel-contract.md) — current normative V1 authority
-  and dispatch behavior.
+- [Kernel maintainer guide](../../guides/kernel-maintainer.md) — current
+  authority, ownership, and dispatch architecture; exact contracts live in the
+  `PtcRunner.Kernel.*` module documentation.
 - [`tracelog-contract.md`](tracelog-contract.md) — sanitized canonical event
   and source contract.
 - [Kernel component bundles](../../guides/capability-prelude.md) — current

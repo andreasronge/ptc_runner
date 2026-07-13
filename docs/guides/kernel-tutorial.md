@@ -632,8 +632,9 @@ cannot provide executable callback code.
 - [Kernel REPL](kernel-repl.md) covers session modes and trace persistence.
 - [Kernel component bundles](capability-prelude.md) covers namespaces,
   dependencies, exports, and tool requirements.
-- [Kernel contract](../plans/lisp-kernel/kernel-contract.md) defines authority,
-  lifecycle, results, and the manifest schema.
+- [Kernel maintainer guide](kernel-maintainer.md) maps authority, lifecycle,
+  ownership, code modules, and extension points. Exact API details live in the
+  `PtcRunner.Kernel.*` module documentation.
 - [TraceLog contract](../plans/lisp-kernel/tracelog-contract.md) defines event
   schemas, sanitization, filtering, pagination, and private sources.
 - [Kernel product readiness](../plans/lisp-kernel/product-readiness.md) records
