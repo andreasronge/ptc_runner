@@ -4,7 +4,7 @@ defmodule PtcRunner.Kernel.EventSinkTest do
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.Limits
 
-  test "default run identifiers are safe to mix across separate CLI invocations" do
+  test "default run identifiers have fixed entropy format and remain unique" do
     {:ok, limits} = Limits.new(normal_event_count: 4, normal_event_bytes: 10_000)
 
     ids =
@@ -16,11 +16,6 @@ defmodule PtcRunner.Kernel.EventSinkTest do
       end
 
     assert Enum.uniq(ids) == ids
-
-    # A VM-local counter ("run-<integer>") restarts on every CLI invocation,
-    # so traces written by separate invocations into one directory collide on
-    # run identity and Kernel.TraceLog fail-closes the whole directory source.
-    # The default must therefore carry entropy, never just the counter.
-    refute Enum.any?(ids, &Regex.match?(~r/\Arun-\d+\z/, &1))
+    assert Enum.all?(ids, &Regex.match?(~r/\Arun-[0-9a-f]{12}\z/, &1))
   end
 end
