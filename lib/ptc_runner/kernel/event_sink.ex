@@ -14,7 +14,7 @@ defmodule PtcRunner.Kernel.EventSink do
   @spec start(policy(), Limits.t(), keyword()) :: {:ok, t()} | {:error, :invalid_event_sink}
   def start(policy, %Limits{} = limits, opts \\ []) when policy in [:normal, :private] do
     token = make_ref()
-    run_id = Keyword.get(opts, :run_id, "run-#{System.unique_integer([:positive])}")
+    run_id = Keyword.get_lazy(opts, :run_id, &default_run_id/0)
     trace_id = Keyword.get(opts, :trace_id, run_id)
 
     if is_binary(run_id) and is_binary(trace_id) do
@@ -150,5 +150,14 @@ defmodule PtcRunner.Kernel.EventSink do
     GenServer.call(pid, {token, request})
   catch
     :exit, _reason -> {:error, :event_sink_error}
+  end
+
+  # Run identifiers must be unique across separate OS processes: traces from
+  # independent CLI invocations commonly land in one directory, and
+  # `Kernel.TraceLog` fail-closes the whole directory source when two files
+  # reuse a run/trace identity with restarted sequences. A per-VM counter
+  # collides almost deterministically there, so the default carries entropy.
+  defp default_run_id do
+    "run-" <> Base.encode16(:crypto.strong_rand_bytes(6), case: :lower)
   end
 end

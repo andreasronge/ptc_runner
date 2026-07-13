@@ -156,6 +156,15 @@ async function tryLoadFromApi() {
         setupKernelRunPicker(page);
         return;
       }
+    } else if (kernelResp.status !== 503) {
+      // 503 means no Kernel adapter is configured — the documented silent
+      // legacy fallback. Anything else (malformed source, adapter failure)
+      // must be surfaced, not silently degraded to the raw-file picker.
+      showNotice(
+        `Kernel run listing failed (HTTP ${kernelResp.status}: ${await safeBodyText(kernelResp)}). ` +
+        'The trace directory contains a trace the canonical validator rejects. ' +
+        'Raw trace files are listed below as a fallback.'
+      );
     }
 
     const resp = await fetch('/api/traces');
@@ -168,6 +177,28 @@ async function tryLoadFromApi() {
   } catch {
     // Not running with API server, drag-drop only
   }
+}
+
+async function safeBodyText(response) {
+  try {
+    const text = await response.text();
+    return truncate(text.trim() || response.statusText, 200);
+  } catch {
+    return response.statusText;
+  }
+}
+
+function showNotice(message) {
+  let notice = document.getElementById('viewer-notice');
+  if (!notice) {
+    notice = document.createElement('div');
+    notice.id = 'viewer-notice';
+    notice.className = 'viewer-notice';
+    const picker = document.getElementById('file-picker');
+    picker.parentNode.insertBefore(notice, picker);
+  }
+  notice.textContent = message;
+  notice.style.display = '';
 }
 
 function setupKernelRunPicker(page, priorRuns = []) {
@@ -217,7 +248,11 @@ async function loadKernelRun(runId) {
     fetch(`/api/kernel/runs/${encodeURIComponent(runId)}`),
     fetch(`/api/kernel/runs/${encodeURIComponent(runId)}/turns?limit=100`)
   ]);
-  if (!runResp.ok || !turnsResp.ok) return;
+  if (!runResp.ok || !turnsResp.ok) {
+    const failed = runResp.ok ? turnsResp : runResp;
+    showNotice(`Failed to load run ${runId} (HTTP ${failed.status}: ${await safeBodyText(failed)}).`);
+    return;
+  }
 
   const metadata = await runResp.json();
   const turns = await turnsResp.json();

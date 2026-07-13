@@ -1436,3 +1436,14 @@ input[type="file"] { display: none; }
   .kt-summary-meta > span:not(.kt-status) { display: none; }
   .kt-evaluation-body { padding-left: 13px; }
 }
+
+/* Viewer-level notice banner (kernel source failures, load errors) */
+.viewer-notice {
+  background: rgba(255, 180, 0, 0.1);
+  border: 1px solid rgba(255, 180, 0, 0.45);
+  border-radius: 8px;
+  padding: 10px 14px;
+  margin: 0 0 12px;
+  font-size: 13px;
+  line-height: 1.5;
+}

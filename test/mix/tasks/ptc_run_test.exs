@@ -69,4 +69,38 @@ defmodule Mix.Tasks.Ptc.RunTest do
     assert {:ok, %{"items" => [%{"complete" => true, "name" => "traceable-run"}]}} =
              TraceLog.query(trace_log, :list_runs, %{})
   end
+
+  @tag :tmp_dir
+  test "traces from separate runs remain a valid shared directory source", %{tmp_dir: dir} do
+    File.write!(
+      Path.join(dir, "main.lisp"),
+      ~S|(ns main) (defn run [input] (return (get input "value")))|
+    )
+
+    manifest = %{
+      "version" => 1,
+      "workflow" => %{
+        "components" => [%{"id" => "main", "path" => "main.lisp"}],
+        "entry" => "main/run"
+      },
+      "input" => %{"value" => %{"value" => 7}}
+    }
+
+    manifest_path = Path.join(dir, "ptc.json")
+    File.write!(manifest_path, Jason.encode!(manifest))
+
+    for name <- ["first", "second"] do
+      capture_io(fn ->
+        Mix.Task.reenable("ptc.run")
+        Run.run([manifest_path, "--trace", Path.join(dir, "#{name}.jsonl")])
+      end)
+    end
+
+    assert {:ok, trace_log} = TraceLog.new(source: {:directory, dir})
+    assert {:ok, %{"items" => items}} = TraceLog.query(trace_log, :list_runs, %{})
+
+    run_ids = Enum.map(items, & &1["run_id"])
+    assert length(items) == 2
+    assert Enum.uniq(run_ids) == run_ids
+  end
 end
