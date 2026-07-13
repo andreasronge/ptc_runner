@@ -638,3 +638,6 @@ cannot provide executable callback code.
   schemas, sanitization, filtering, pagination, and private sources.
 - [Kernel product readiness](../plans/lisp-kernel/product-readiness.md) records
   current limitations, prioritized improvements, and release gates.
+- [Capability connectors](../plans/lisp-kernel/capability-connectors.md) is the
+  future plan for MCP, OpenAPI, database, file, and server integrations, with
+  proposed configuration and PTC-Lisp examples.

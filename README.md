@@ -39,6 +39,9 @@ The active
 [Kernel product-readiness roadmap](docs/plans/lisp-kernel/product-readiness.md)
 describes current limitations, the recommended next milestone, and the gates
 for a standalone non-Elixir developer experience.
+The separate
+[capability connector plan](docs/plans/lisp-kernel/capability-connectors.md)
+proposes host-installed MCP, OpenAPI, database, file, and native extensions.
 
 Elixir applications can use `PtcRunner.Kernel.compile_bundle/1` and
 `PtcRunner.Kernel.run/2` directly. A run accepts only a validated

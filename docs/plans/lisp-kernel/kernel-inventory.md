@@ -166,6 +166,10 @@ This area is governed by [`tracelog-contract.md`](tracelog-contract.md).
 
 ### Upstream and MCP
 
+The future [`capability-connectors.md`](capability-connectors.md) plan builds on
+the standard `Kernel.Capability` seam. It does not reverse this deletion or
+restore the legacy catalog/session/orchestration product.
+
 | Area | Class | Destination |
 | --- | --- | --- |
 | `lib/ptc_runner/upstream/**` | deleted | A standard capability provider is the extension seam; no anticipatory generic adapter remains. |

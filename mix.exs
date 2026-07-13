@@ -164,6 +164,7 @@ defmodule PtcRunner.MixProject do
           "docs/clojure-conformance-gaps.md",
           "docs/function-reference.md",
           "docs/java-interop.md",
+          "docs/plans/lisp-kernel/capability-connectors.md",
           "docs/plans/lisp-kernel/kernel-contract.md",
           "docs/plans/lisp-kernel/product-readiness.md",
           "docs/plans/lisp-kernel/tracelog-contract.md",

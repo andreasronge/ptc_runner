@@ -38,3 +38,10 @@ to structurally distinct environments.
 For deployable runs, prefer a versioned JSON manifest and `mix ptc.run`. The
 manifest selects component sources and trusted provider names; executable
 callbacks remain in the host-owned provider registry.
+
+The current manifest supports only the built-in or embedder-registered
+single-capability builders. The future
+[capability connector plan](../plans/lisp-kernel/capability-connectors.md)
+describes how MCP, OpenAPI, database, grouped file, and native sources could
+resolve to the same immutable capability boundary without granting manifests
+arbitrary endpoints, credentials, SQL, commands, or callbacks.

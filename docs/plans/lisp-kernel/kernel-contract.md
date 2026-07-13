@@ -901,12 +901,15 @@ replace, or point at a module, function, file, serialized callback, or code URL.
 One loader/run builder serves `mix ptc.run` and future Docker, HTTP, Viewer Lab,
 or optional MCP frontends. Server frontends should normally select
 administrator-installed named manifests rather than accept arbitrary authority
-grants.
+grants. Outbound connectors and inbound server frontends remain a V1 non-goal;
+their proposed separation is recorded in the non-normative
+[`capability-connectors.md`](capability-connectors.md) future plan.
 
 ## V1 non-goals
 
 - roles and mutable prelude stores;
-- MCP or a generic upstream subsystem;
+- MCP or a generic upstream subsystem (see the separate future
+  [`capability-connectors.md`](capability-connectors.md) plan);
 - compiled entry programs;
 - general collection quoting, quasiquote/unquote, macros, AST manipulation, and
   general `eval` beyond the opaque `program` form;

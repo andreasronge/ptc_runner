@@ -8,6 +8,9 @@ future usability work is not confused with unresolved Kernel-contract work.
 - [`product-readiness.md`](product-readiness.md) assesses what is usable now,
   current limitations, prioritized improvements, and release gates for a
   non-Elixir developer experience.
+- [`capability-connectors.md`](capability-connectors.md) is the future plan for
+  host-installed MCP, HTTP/OpenAPI, database, file, and native capability
+  sources plus separate inbound HTTP/MCP frontends.
 
 - [`kernel-contract.md`](kernel-contract.md) is the normative V1 runtime
   contract.

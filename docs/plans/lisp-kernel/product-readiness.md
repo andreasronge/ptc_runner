@@ -203,6 +203,10 @@ one administrator-installed route to external tools. An MCP client is the most
 natural first option for the intended audience; an allowlisted HTTP/OpenAPI
 bridge is also viable.
 
+The proposed source contract, security boundary, usage examples, and staged
+acceptance tests are defined in the
+[`capability-connectors.md`](capability-connectors.md) future plan.
+
 The bridge must preserve Kernel authority rules:
 
 - the deployment installs servers, base URLs, credentials, and network
@@ -312,7 +316,9 @@ completes the documented file workflow within declared budgets.
 
 ### Phase 3: capability ecosystem
 
-- Add one safe administrator-installed MCP or allowlisted HTTP/OpenAPI bridge.
+- Implement the staged
+  [capability connector plan](capability-connectors.md), beginning with one safe
+  administrator-installed MCP Streamable HTTP tools connector.
 - Freeze schemas, credentials policy, network policy, quotas, and visibility
   into the run configuration.
 - Add contract tests for timeout, cancellation, late results, oversized
