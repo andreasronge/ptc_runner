@@ -24,10 +24,16 @@ The normal application boundary is a versioned JSON manifest:
 
 ```console
 mix ptc.run path/to/manifest.json
+mix ptc.run path/to/manifest.json --trace traces/run.jsonl
 ```
 
 Use `mix ptc.repl --manifest path/to/manifest.json` for an interactive
 session over the same frozen environments and provider registry.
+
+Start with the
+[Kernel tutorial](docs/guides/kernel-tutorial.md) for complete deterministic,
+DeepSeek, model-authored program, feedback, logging, and viewer examples that
+primarily use JSON manifests and PTC-Lisp rather than Elixir.
 
 Elixir applications can use `PtcRunner.Kernel.compile_bundle/1` and
 `PtcRunner.Kernel.run/2` directly. A run accepts only a validated

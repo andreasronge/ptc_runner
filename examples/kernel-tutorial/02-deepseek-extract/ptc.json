@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "workflow": {
+    "components": [
+      {"id": "tutorial.extract", "path": "extract.lisp"}
+    ],
+    "entry": "tutorial.extract/extract"
+  },
+  "input": {
+    "value": {
+      "text": "Project Atlas is owned by Priya. The launch risk is delayed vendor security approval."
+    }
+  },
+  "providers": {
+    "workflow": [
+      {"name": "llm", "config": {"model": "deepseek", "cache": false}}
+    ]
+  },
+  "labels": {
+    "name": "tutorial-deepseek-extract",
+    "model": "deepseek",
+    "provider": "openrouter",
+    "tags": {"tutorial": "direct-llm"}
+  }
+}

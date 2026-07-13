@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "workflow": {
+    "components": [
+      {"id": "tutorial.orders", "path": "orders.lisp"}
+    ],
+    "entry": "tutorial.orders/summarize"
+  },
+  "input": {"path": "orders.json"},
+  "labels": {
+    "name": "tutorial-orders",
+    "tags": {"tutorial": "deterministic"}
+  }
+}

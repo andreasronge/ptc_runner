@@ -168,10 +168,12 @@ defmodule PtcRunner.MixProject do
           "docs/plans/lisp-kernel/tracelog-contract.md",
           "docs/conformance/index.md",
           "docs/guides/capability-prelude.md",
+          "docs/guides/kernel-tutorial.md",
           "docs/guides/kernel-repl.md"
         ] ++ Path.wildcard("docs/conformance/*-audit.md"),
       groups_for_extras: [
         Kernel: ~r/docs\/plans\/lisp-kernel\/.+\.md/,
+        Guides: ~r/docs\/guides\/.+\.md/,
         Reference: ~r/docs\/(ptc-lisp|clojure|function-reference|java-).+\.md/,
         Conformance: ~r/docs\/conformance\/.+\.md/
       ]
@@ -181,7 +183,7 @@ defmodule PtcRunner.MixProject do
   defp package do
     [
       files:
-        ~w(lib docs .formatter.exs mix.exs README.md LICENSE CHANGELOG.md priv/function_audit.exs priv/functions.exs priv/java_compat_audit.exs priv/preludes priv/spec),
+        ~w(lib docs examples/kernel-tutorial .formatter.exs mix.exs README.md LICENSE CHANGELOG.md priv/function_audit.exs priv/functions.exs priv/java_compat_audit.exs priv/preludes priv/spec),
       licenses: ["MIT"],
       links: %{
         "GitHub" => "https://github.com/andreasronge/ptc_runner",

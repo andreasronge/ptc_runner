@@ -1,0 +1,4 @@
+Project Lantern
+Owner: Morgan
+Current risk: the production data-retention decision is still unresolved.
+Next checkpoint: architecture review on Thursday.

@@ -1,0 +1,34 @@
+{
+  "version": 1,
+  "workflow": {
+    "components": [
+      {"id": "tutorial.agent", "path": "agent.lisp"}
+    ],
+    "entry": "tutorial.agent/run"
+  },
+  "mission": {
+    "components": [
+      {"id": "tutorial.files", "path": "files.lisp"}
+    ],
+    "data": {}
+  },
+  "input": {
+    "value": {
+      "task": "Read brief.txt using (tutorial.files/read-text \"brief.txt\"). Return the exact file content as a string."
+    }
+  },
+  "providers": {
+    "workflow": [
+      {"name": "llm", "config": {"model": "deepseek", "cache": false}}
+    ],
+    "mission": [
+      {"name": "file-read", "config": {"root": "files", "max_bytes": 65536}}
+    ]
+  },
+  "labels": {
+    "name": "tutorial-deepseek-file-agent",
+    "model": "deepseek",
+    "provider": "openrouter",
+    "tags": {"tutorial": "model-authored-program"}
+  }
+}
