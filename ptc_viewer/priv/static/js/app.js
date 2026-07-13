@@ -1,5 +1,6 @@
 import { parseJsonl, extractTraceId, extractChildTraceIds } from './parser.js';
 import { renderAgentView } from './agent-view.js';
+import { renderKernelTranscript } from './kernel-transcript.js';
 import { initTooltip } from './tooltip.js';
 import { escapeHtml, truncate } from './utils.js';
 
@@ -225,48 +226,34 @@ async function loadKernelRun(runId) {
 }
 
 function renderKernelView(container, { metadata, turns }) {
-  const events = turns.items || [];
-  container.innerHTML = `
-    <section class="kernel-run">
-      <h2>${escapeHtml(metadata.name || metadata.run_id)}</h2>
-      <div class="kernel-summary">
-        <span>Status: ${escapeHtml(metadata.status || 'incomplete')}</span>
-        <span>Run: ${escapeHtml(metadata.run_id)}</span>
-        <span>Trace: ${escapeHtml(metadata.trace_id || '')}</span>
-        <span>Duration: ${metadata.duration_ms == null ? '—' : `${metadata.duration_ms} ms`}</span>
-      </div>
-      ${turns.next_cursor ? `<p class="drop-hint">Showing ${events.length} canonical events.</p>` : ''}
-      <div class="kernel-events">
-        ${events.map(event => `
-          <article class="kernel-event">
-            <header><strong>${event.sequence}. ${escapeHtml(event.type)}</strong><span>${escapeHtml(event.timestamp)}</span></header>
-            <pre>${escapeHtml(JSON.stringify(event.data, null, 2))}</pre>
-          </article>
-        `).join('')}
-      </div>
-      ${turns.next_cursor ? '<button class="btn kernel-load-more" type="button">Load more events</button>' : ''}
-    </section>
-  `;
-  container.querySelector('.kernel-load-more')?.addEventListener('click', async event => {
-    event.currentTarget.disabled = true;
-    const response = await fetch(
-      `/api/kernel/runs/${encodeURIComponent(metadata.run_id)}/turns?limit=100&cursor=${encodeURIComponent(turns.next_cursor)}`
-    );
-    if (!response.ok) {
-      event.currentTarget.disabled = false;
-      return;
-    }
+  renderKernelTranscript(container, { metadata, turns }, {
+    onLoadMore: async button => {
+      button.disabled = true;
+      button.textContent = 'Loading…';
 
-    const nextPage = await response.json();
-    const accumulated = {
-      metadata,
-      turns: { ...nextPage, items: [...events, ...(nextPage.items || [])] }
-    };
-    const current = state.navStack[state.navStack.length - 1];
-    if (current?.type === 'kernel' && current.data.metadata.run_id === metadata.run_id) {
-      current.data = accumulated;
+      const response = await fetch(
+        `/api/kernel/runs/${encodeURIComponent(metadata.run_id)}/turns?limit=100&cursor=${encodeURIComponent(turns.next_cursor)}`
+      );
+
+      if (!response.ok) {
+        button.disabled = false;
+        button.textContent = 'Load more events';
+        return;
+      }
+
+      const nextPage = await response.json();
+      const accumulated = {
+        metadata,
+        turns: { ...nextPage, items: [...(turns.items || []), ...(nextPage.items || [])] }
+      };
+      const current = state.navStack[state.navStack.length - 1];
+
+      if (current?.type === 'kernel' && current.data.metadata.run_id === metadata.run_id) {
+        current.data = accumulated;
+      }
+
+      renderKernelView(container, accumulated);
     }
-    renderKernelView(container, accumulated);
   });
 }
 

@@ -20,9 +20,15 @@ local server on port 4123, and opens the browser. Use `--port`, `--trace-dir`,
 or `--no-open` to override those defaults.
 
 The UI first lists bounded canonical run summaries. Selecting a run loads its
-metadata and turn events through the shared Kernel query layer. If the viewer
-is embedded without a Kernel adapter, the UI falls back to the legacy raw-file
-picker.
+metadata and turn events through the shared Kernel query layer. The run view
+pairs canonical evaluation and capability start/stop events into an expandable
+execution transcript, with run metrics, prelude component fingerprints,
+workflow annotations, limit failures, and raw event metadata available on
+demand. Sanitized traces do not contain prompts, provider responses,
+capability arguments/results, or private prelude source; the UI identifies
+those omissions rather than inferring or reconstructing payloads. If the
+viewer is embedded without a Kernel adapter, the UI falls back to the legacy
+raw-file picker.
 
 Private traces use the reserved `.private.jsonl` suffix. The standard viewer
 directory source and raw-file routes omit that suffix; accessing private data

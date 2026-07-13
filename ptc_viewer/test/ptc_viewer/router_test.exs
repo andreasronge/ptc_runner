@@ -53,6 +53,14 @@ defmodule PtcViewer.RouterTest do
     assert conn.status == 404
   end
 
+  test "canonical transcript frontend asset is served", %{router_opts: router_opts} do
+    conn = conn(:get, "/js/kernel-transcript.js") |> call_router(router_opts)
+
+    assert conn.status == 200
+    assert get_resp_header(conn, "content-type") |> hd() =~ "javascript"
+    assert conn.resp_body =~ "Canonical Kernel TraceLog transcript view"
+  end
+
   test "GET /api/traces with path traversal returns 404", %{router_opts: router_opts} do
     conn =
       conn(:get, "/api/traces/..%2F..%2Fetc%2Fpasswd")
