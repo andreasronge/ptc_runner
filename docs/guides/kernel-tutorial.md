@@ -636,3 +636,5 @@ cannot provide executable callback code.
   lifecycle, results, and the manifest schema.
 - [TraceLog contract](../plans/lisp-kernel/tracelog-contract.md) defines event
   schemas, sanitization, filtering, pagination, and private sources.
+- [Kernel product readiness](../plans/lisp-kernel/product-readiness.md) records
+  current limitations, prioritized improvements, and release gates.

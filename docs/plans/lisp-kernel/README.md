@@ -1,8 +1,13 @@
-# Lisp Kernel implementation record
+# Lisp Kernel implementation and readiness
 
 The minimal programmable Kernel migration is implemented on
-`exp/minimal-kernel`. These documents record the contract and completed
-replacement rather than an active exploratory roadmap.
+`exp/minimal-kernel`. The contract and migration documents record the completed
+replacement. Product-readiness work continues in a separate active roadmap so
+future usability work is not confused with unresolved Kernel-contract work.
+
+- [`product-readiness.md`](product-readiness.md) assesses what is usable now,
+  current limitations, prioritized improvements, and release gates for a
+  non-Elixir developer experience.
 
 - [`kernel-contract.md`](kernel-contract.md) is the normative V1 runtime
   contract.

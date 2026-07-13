@@ -35,6 +35,11 @@ Start with the
 DeepSeek, model-authored program, feedback, logging, and viewer examples that
 primarily use JSON manifests and PTC-Lisp rather than Elixir.
 
+The active
+[Kernel product-readiness roadmap](docs/plans/lisp-kernel/product-readiness.md)
+describes current limitations, the recommended next milestone, and the gates
+for a standalone non-Elixir developer experience.
+
 Elixir applications can use `PtcRunner.Kernel.compile_bundle/1` and
 `PtcRunner.Kernel.run/2` directly. A run accepts only a validated
 `PtcRunner.Kernel.RunConfig`; authority is supplied through its explicit
