@@ -796,6 +796,10 @@ advertised as supported behavior.
 Model-editable does not mean live self-modifying execution. Models may author
 candidate source only through explicit grants. Compilation and promotion create
 a new frozen bundle through a separate host-gated operation or later run.
+The non-normative
+[`host-access-and-prelude-workspaces.md`](host-access-and-prelude-workspaces.md)
+plan specifies that future candidate lifecycle, shared authorization boundary,
+and human/Viewer adapter. It does not change V1 runtime mutability.
 
 ## Manifest and frontend boundary
 
@@ -904,10 +908,15 @@ administrator-installed named manifests rather than accept arbitrary authority
 grants. Outbound connectors and inbound server frontends remain a V1 non-goal;
 their proposed separation is recorded in the non-normative
 [`capability-connectors.md`](capability-connectors.md) future plan.
+Future host-authorized trace inspection and versioned prelude candidate work are
+specified separately in
+[`host-access-and-prelude-workspaces.md`](host-access-and-prelude-workspaces.md).
 
 ## V1 non-goals
 
-- roles and mutable prelude stores;
+- roles and mutable prelude stores in V1 (a clean-path, versioned future design
+  is described in
+  [`host-access-and-prelude-workspaces.md`](host-access-and-prelude-workspaces.md));
 - MCP or a generic upstream subsystem (see the separate future
   [`capability-connectors.md`](capability-connectors.md) plan);
 - compiled entry programs;

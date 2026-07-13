@@ -165,6 +165,7 @@ defmodule PtcRunner.MixProject do
           "docs/function-reference.md",
           "docs/java-interop.md",
           "docs/plans/lisp-kernel/capability-connectors.md",
+          "docs/plans/lisp-kernel/host-access-and-prelude-workspaces.md",
           "docs/plans/lisp-kernel/kernel-contract.md",
           "docs/plans/lisp-kernel/product-readiness.md",
           "docs/plans/lisp-kernel/tracelog-contract.md",

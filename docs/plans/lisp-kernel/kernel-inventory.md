@@ -54,6 +54,12 @@ the removed product implementations and detailed deletion waves.
 | `PtcRunner.PreludeCandidate` | deleted | V1 has no live active-bundle editing. |
 | Store/form-edit tools and churn soaks | deleted | Candidate authoring/promotion is deferred and host-gated. |
 
+The clean-path future replacement for the last four deleted policy/store rows
+is specified in
+[`host-access-and-prelude-workspaces.md`](host-access-and-prelude-workspaces.md).
+It adds exact host grants and immutable promoted revisions; it does not restore
+the evaluator-era modules or permit live active-bundle editing.
+
 ### New Kernel path
 
 | Area | Class | Retained behavior / destination |
@@ -169,6 +175,9 @@ This area is governed by [`tracelog-contract.md`](tracelog-contract.md).
 The future [`capability-connectors.md`](capability-connectors.md) plan builds on
 the standard `Kernel.Capability` seam. It does not reverse this deletion or
 restore the legacy catalog/session/orchestration product.
+Its authorization dependency is the small shared contract in
+[`host-access-and-prelude-workspaces.md`](host-access-and-prelude-workspaces.md),
+not a revived upstream role or session subsystem.
 
 | Area | Class | Destination |
 | --- | --- | --- |

@@ -45,3 +45,9 @@ single-capability builders. The future
 describes how MCP, OpenAPI, database, grouped file, and native sources could
 resolve to the same immutable capability boundary without granting manifests
 arbitrary endpoints, credentials, SQL, commands, or callbacks.
+
+Future human/model source inspection and safe prelude authoring are specified
+in the
+[host access and prelude workspace plan](../plans/lisp-kernel/host-access-and-prelude-workspaces.md).
+Candidates are versioned host resources compiled and promoted into a new frozen
+revision for later environments; they never mutate the active bundle of a run.

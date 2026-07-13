@@ -245,6 +245,13 @@ The viewer may render richer presentations, but it is not a second query
 implementation or authority source. A future Viewer Lab remains a client of the
 same run and TraceLog contracts.
 
+The non-normative
+[`host-access-and-prelude-workspaces.md`](host-access-and-prelude-workspaces.md)
+plan extends this sharing with a common host-created principal/grant context,
+authenticated Viewer requests, and explicit program/prelude source reads. It
+keeps `Kernel.TraceLog` as the query owner and keeps private-source grants
+separate; current V1 behavior is unchanged.
+
 ## Failure algebra
 
 Trace failures use the standard capability envelope with stable kinds such as:

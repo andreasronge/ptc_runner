@@ -11,6 +11,10 @@ future usability work is not confused with unresolved Kernel-contract work.
 - [`capability-connectors.md`](capability-connectors.md) is the future plan for
   host-installed MCP, HTTP/OpenAPI, database, file, and native capability
   sources plus separate inbound HTTP/MCP frontends.
+- [`host-access-and-prelude-workspaces.md`](host-access-and-prelude-workspaces.md)
+  defines the shared host authorization substrate, authenticated TraceLog and
+  Viewer path, versioned prelude candidates, promotion gates, implementation
+  slices, and appendix usage examples.
 
 - [`kernel-contract.md`](kernel-contract.md) is the normative V1 runtime
   contract.

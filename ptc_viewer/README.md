@@ -34,6 +34,15 @@ Private traces use the reserved `.private.jsonl` suffix. The standard viewer
 directory source and raw-file routes omit that suffix; accessing private data
 requires a separate host-controlled private source grant outside this UI.
 
+The current Viewer does not expose exact generated program/prelude source or a
+prelude editor. The future
+[host access and prelude workspace plan](../docs/plans/lisp-kernel/host-access-and-prelude-workspaces.md)
+keeps the Viewer as an adapter over shared domain services: authenticated human
+sessions receive host-resolved grants, private source remains separately
+authorized, and edits create versioned candidates rather than changing a live
+run. Connector transport and credentials remain a separate concern covered by
+the [capability connector plan](../docs/plans/lisp-kernel/capability-connectors.md).
+
 ## Programmatic use
 
 The standalone viewer deliberately has no dependency on the PtcRunner host.

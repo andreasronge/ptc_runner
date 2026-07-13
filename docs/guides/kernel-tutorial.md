@@ -641,3 +641,7 @@ cannot provide executable callback code.
 - [Capability connectors](../plans/lisp-kernel/capability-connectors.md) is the
   future plan for MCP, OpenAPI, database, file, and server integrations, with
   proposed configuration and PTC-Lisp examples.
+- [Host access and prelude workspaces](../plans/lisp-kernel/host-access-and-prelude-workspaces.md)
+  plans authenticated human/model trace inspection, exact-source grants,
+  versioned prelude candidates, validation, review, and promotion, with usage
+  examples in its appendix.

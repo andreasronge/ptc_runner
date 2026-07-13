@@ -71,6 +71,7 @@ Kernel contract.
 | P1 | Agent feedback | The shipped loop does not automatically receive a frozen inventory of mission exports and capability schemas. Evaluation corrections provide limited diagnostics, message history is not a full assistant/tool exchange, and the available retry helper is not integrated into the loop. | Models spend turns discovering authority, repeat protocol mistakes, and recover inconsistently. |
 | P1 | Output contracts | A manifest cannot declare and enforce an input or terminal-result JSON Schema. Direct LLM calls return untrusted model text. | Hosts must add validation outside the manifest and successful runs may still return unusable data. |
 | P1 | Trace operation | A malformed, duplicate, or oversized trace can make a directory source fail as a whole. Trace persistence is post-run, and the canonical sanitized vocabulary intentionally omits prompts, responses, arguments, results, and generated source. | One damaged file can hide healthy runs; crashes can lose buffered events; model debugging lacks a separate privacy-controlled transcript. |
+| P1 | Host resources and prelude authoring | Trace access, private source inspection, and future prelude edits do not yet share an authenticated principal/grant contract. The Viewer is local and read-only; models and humans cannot create, validate, review, or promote versioned prelude candidates. | Generated programs and source preludes cannot be inspected through one safe product surface, and improving a prelude requires an out-of-band code change. |
 | P1 | Distribution | The user workflow currently assumes a source checkout, Erlang/Elixir, and Mix. The viewer is a development/test path dependency rather than a production artifact. | Installation and deployment are too heavy for the intended non-Elixir audience. |
 | P1 | End-to-end evidence | Normal tests cover the deterministic tutorial, while model examples mainly prove compilation/assembly and the live E2E check is intentionally small. There is no packaged-install or full CLI file-agent smoke test. | The most important user journey can regress across CLI, manifest, agent loop, provider, trace, and viewer boundaries without one test failing. |
 | P2 | Language expectations | PTC-Lisp is Clojure-oriented, not a full Clojure implementation. The conformance report currently records 300 of 382 audited functions as supported, with notable gaps in `clojure.set` and `clojure.walk`. | Familiar-looking programs can encounter missing functions or semantic differences unless the supported profile is made explicit. |
@@ -196,7 +197,27 @@ One provider name and one selected model per workflow are sufficient for the
 next milestone. Multi-model routing can wait until the single-model path is
 operationally clear.
 
-### 6. Add one constrained external capability route
+### 6. Add shared host access and versioned prelude workspaces
+
+Introduce a small host-only contract for principals, exact resource grants,
+bounds, request correlation, and redacted audit records. Keep operation
+semantics in separate services: TraceLog remains the trace query owner, a new
+prelude workspace service owns immutable revisions and candidates, and the
+Viewer remains an authenticated adapter rather than an authority source.
+
+Models receive only explicitly compiled capabilities delegated to their run.
+Humans receive only grants resolved from their authenticated host session.
+Neither the manifest nor browser can select a role, path, endpoint, credential,
+or grant. Prelude edits create optimistic-concurrency candidates; validation,
+compilation, and promotion are distinct operations, and promotion affects only
+later rebuilt frozen environments.
+
+The exact structs, schemas, service operations, implementation slices, test
+gates, and examples are defined in
+[`host-access-and-prelude-workspaces.md`](host-access-and-prelude-workspaces.md).
+Its H0 contract is also the authorization dependency for connector sources.
+
+### 7. Add one constrained external capability route
 
 After trusted libraries, schemas, diagnostics, and ceilings are in place, add
 one administrator-installed route to external tools. An MCP client is the most
@@ -221,7 +242,7 @@ The bridge must preserve Kernel authority rules:
 Do not reintroduce the deleted broad tool platform merely to gain connectivity.
 Prove one narrow bridge end to end first.
 
-### 7. Split operational traces from diagnostic transcripts
+### 8. Split operational traces from diagnostic transcripts
 
 Keep the canonical normal trace sanitized. Its current omission of sensitive
 prompts, model responses, arguments, results, and generated source is a useful
@@ -244,7 +265,7 @@ create a validator-accepted run with more than 100 events and confirm in a real
 browser that repeated `Load more events` actions preserve order, add no
 duplicates, retain the current run, and stop cleanly at the final cursor.
 
-### 8. Package the user journey
+### 9. Package the user journey
 
 Once the manifest and CLI contracts are stable, publish a breaking 0.x release
 that represents the new Kernel product rather than the deleted architecture.
@@ -257,7 +278,7 @@ project through development-only wiring. A later service frontend can add job
 submission, cancellation, concurrency control, and durable results without
 changing the Kernel authority model.
 
-### 9. Define the supported PTC-Clojure profile
+### 10. Define the supported PTC-Clojure profile
 
 Continue treating Clojure compatibility as the default, subject to sandbox
 safety and recoverable signal values. Product docs should nevertheless name a
@@ -314,11 +335,29 @@ Exit gate: scripted protocol failures recover deterministically, schema-invalid
 terminal output cannot report success, and the supported DeepSeek E2E agent
 completes the documented file workflow within declared budgets.
 
-### Phase 3: capability ecosystem
+### Phase 3: authenticated host resources and prelude workspaces
+
+- Implement the H0 shared principal, exact-resource grant, bounds, scoped
+  authorization, error, and audit contract.
+- Prove it by routing model and Viewer trace reads through the same TraceLog
+  service without changing canonical event semantics.
+- Add separately authorized exact generated-program/prelude source views.
+- Add immutable prelude revisions, candidate authoring, validation, compilation,
+  atomic promotion, explicit model capabilities, and authenticated Viewer UI in
+  the slices defined by the host-access plan.
+
+Exit gate: an authenticated human and delegated model receive equivalent
+domain results for equivalent grants, sensitive source requires a distinct
+grant, concurrent edits cannot overwrite each other, and promotion creates a
+new revision used only by later frozen environments.
+
+### Phase 4: capability ecosystem
 
 - Implement the staged
   [capability connector plan](capability-connectors.md), beginning with one safe
   administrator-installed MCP Streamable HTTP tools connector.
+- Reuse the H0 host-access types and audit context while keeping discovery,
+  transport, credentials, snapshots, sessions, and leases connector-owned.
 - Freeze schemas, credentials policy, network policy, quotas, and visibility
   into the run configuration.
 - Add contract tests for timeout, cancellation, late results, oversized
@@ -327,7 +366,10 @@ completes the documented file workflow within declared budgets.
 Exit gate: a manifest can select a real external tool without adding Elixir or
 gaining ambient host/network authority.
 
-### Phase 4: distribution and operation
+Connector C0 may begin as soon as H0 is stable; it need not wait for prelude or
+Viewer slices.
+
+### Phase 5: distribution and operation
 
 - Publish a Kernel-era breaking release and standalone CLI/container.
 - Package the viewer for production use.
@@ -360,6 +402,10 @@ following are true:
   live DeepSeek journey run manually or on a scheduled credentialed job.
 - Normal traces remain sanitized, diagnostic transcripts are explicitly
   opt-in, and damaged files do not poison trace discovery.
+- Authenticated host grants are shared across adapters without making the
+  Viewer or manifest an authority source.
+- Human or model prelude changes remain candidates until separately authorized
+  atomic promotion creates an immutable revision for a later environment.
 - A published artifact installs and runs without a repository checkout.
 - The advertised PTC-Clojure profile and all known semantic gaps are easy to
   find.
@@ -392,6 +438,10 @@ block the manifest-first milestone.
   lifecycle, limits, result, and manifest contract.
 - [`tracelog-contract.md`](tracelog-contract.md) — canonical event and source
   contract.
+- [`host-access-and-prelude-workspaces.md`](host-access-and-prelude-workspaces.md)
+  — future shared authorization, TraceLog/Viewer, and versioned prelude plan.
+- [`capability-connectors.md`](capability-connectors.md) — future external
+  capability source and inbound frontend plan.
 - `docs/plans/lisp-kernel/kernel-migration.md` — completed implementation and
   cutover sequence.
 - `docs/plans/lisp-kernel/kernel-inventory.md` — closed retain/migrate/delete

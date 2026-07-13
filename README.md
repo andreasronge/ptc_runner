@@ -42,6 +42,10 @@ for a standalone non-Elixir developer experience.
 The separate
 [capability connector plan](docs/plans/lisp-kernel/capability-connectors.md)
 proposes host-installed MCP, OpenAPI, database, file, and native extensions.
+The
+[host access and prelude workspace plan](docs/plans/lisp-kernel/host-access-and-prelude-workspaces.md)
+defines how authenticated humans and explicitly delegated model runs can share
+bounded TraceLog and versioned prelude services without mutating active runs.
 
 Elixir applications can use `PtcRunner.Kernel.compile_bundle/1` and
 `PtcRunner.Kernel.run/2` directly. A run accepts only a validated

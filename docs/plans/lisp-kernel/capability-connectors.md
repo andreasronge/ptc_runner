@@ -17,6 +17,11 @@ The central decision is:
 
 The [`kernel-contract.md`](kernel-contract.md) remains authoritative until a
 future slice promotes an approved part of this plan into that contract.
+The shared principal, resource, grant, bounds, and audit vocabulary is defined
+by the future
+[`host-access-and-prelude-workspaces.md`](host-access-and-prelude-workspaces.md)
+plan. Connector code consumes that vocabulary; it does not own human roles,
+Viewer sessions, trace authorization, or prelude storage.
 
 ## Why this fits the current Kernel
 
@@ -74,8 +79,9 @@ reintroduce mutable evaluator sessions or upstream catalogs.
 - A manifest-defined generic HTTP client, arbitrary SQL tool, shell command, or
   arbitrary MCP stdio command.
 - Dynamic tool installation or capability mutation during a run.
-- Restoring roles, mutable catalogs, prelude stores, or the deleted SubAgent
-  and session products.
+- Restoring the deleted evaluator-era roles, mutable catalogs, prelude stores,
+  SubAgent, or session products inside the connector subsystem. A new
+  host-access layer and versioned prelude workspace are planned separately.
 - Passing credentials, connection handles, PIDs, callbacks, or transport
   objects into Lisp values.
 - Treating a provider subprocess as hostile-code isolation. Adversarial native
@@ -94,8 +100,10 @@ Use names that distinguish installed authority from selected authority:
   database adapter;
 - **source instance** — one installed and credential-bound configuration, such
   as `github-production` or `reporting-db`;
-- **grant** — the bounded subset and limits selected for one manifest
-  destination;
+- **host grant** — exact installed authority resolved by the shared host-access
+  policy before connector discovery or use;
+- **manifest selection** — the bounded subset and lower limits requested for
+  one manifest destination; it can only narrow a host grant;
 - **connector lease** — opaque host-owned lifecycle state released when
   building fails or the run ends;
 - **capability snapshot** — the frozen public names, schemas, metadata, limits,
@@ -108,14 +116,18 @@ callback.
 
 ## Proposed host contract
 
-The exact structs belong in the implementation contract before code is added.
-The intended shape is:
+The H0 slice of
+[`host-access-and-prelude-workspaces.md`](host-access-and-prelude-workspaces.md)
+defines `Principal`, `ResourceRef`, `Grant`, `Bounds`, `RequestContext`,
+`ScopedGrant`, common service errors, and audit records before connector code
+is added. The connector-specific shape is then:
 
 ```elixir
 @type build_context :: %{
         manifest_directory: binary(),
         destination: :workflow | :mission,
-        installed_ceilings: Limits.t()
+        installed_ceilings: Limits.t(),
+        request_context: HostAccess.RequestContext.t()
       }
 
 @type built_source :: %{
@@ -124,9 +136,16 @@ The intended shape is:
         lease: ConnectorLease.t() | nil
       }
 
-@callback build(installed_config(), grant(), build_context()) ::
+@callback build(installed_config(), manifest_selection(), build_context()) ::
             {:ok, built_source()} | {:error, ConnectorError.t()}
 ```
+
+The adapter authorizes `capabilities.discover` for the exact installed
+`:connector_source` and pins that instance before discovery. Each resulting
+callback retains an operation-scoped grant for `capability.call`; it cannot
+reuse discovery authority to access a different source. The manifest selection
+contains only allowlisted public names and lower ceilings, never a principal,
+role, endpoint, credential, or grant object.
 
 `Kernel.Capability` needs additional frozen metadata:
 
@@ -155,8 +174,9 @@ connector lease remain excluded from discovery metadata and all Lisp values.
 2. The manifest selects a source, destination, allowlist, and requested limits.
 3. The adapter discovers or loads source metadata under separate build-time
    ceilings.
-4. Names are explicitly mapped, schemas are checked, grants are intersected,
-   and a deterministic snapshot hash is created.
+4. Host grants, manifest selection, destination rules, and ceilings are
+   intersected; names are explicitly mapped, schemas are checked, and a
+   deterministic snapshot hash is created.
 5. `RunBuilder` inserts only the resulting capabilities into the chosen
    environment.
 6. Calls go through the existing `Kernel.Dispatcher`.
@@ -260,9 +280,10 @@ Do not automatically lowercase or rewrite arbitrary MCP names. Explicit
 mapping prevents lossy collisions between names that are distinct upstream but
 would normalize to the same Kernel name.
 
-### Manifest grant
+### Manifest selection
 
-This workflow grants only the read operation to mission evaluation:
+This workflow requests only the read operation for mission evaluation. The
+selection remains subject to the run's host grant:
 
 ```json
 "capabilities": {
@@ -405,7 +426,7 @@ Expose administrator-defined named operations, not model-authored SQL:
 }
 ```
 
-Manifest grant:
+Manifest selection:
 
 ```json
 {"source": "reporting-db", "allow": ["orders.find"], "limits": {"calls": 2}}
@@ -463,8 +484,8 @@ Elixir embedders can continue installing direct builders. They use the same
 snapshot and metadata rules but skip transport discovery:
 
 ```elixir
-source = fn _installed, grant, %{destination: :mission} ->
-  with true <- "clock.now" in grant.allow,
+source = fn _installed, selection, %{destination: :mission} ->
+  with true <- "clock.now" in selection.allow,
        {:ok, capability} <-
          Capability.new(
            name: "clock.now",
@@ -482,7 +503,7 @@ source = fn _installed, grant, %{destination: :mission} ->
          ) do
     {:ok, %{capabilities: [capability], snapshot: snapshot(capability), lease: nil}}
   else
-    _ -> {:error, :invalid_clock_grant}
+    _ -> {:error, :invalid_clock_selection}
   end
 end
 ```
@@ -627,9 +648,11 @@ transcripts remain separately opt-in and redacted.
 
 ### C0: contract prerequisites
 
+- Implement or depend on the H0 shared principal, exact-resource grant, bounds,
+  scoped-grant, error, and audit contracts.
 - Add bounded input/output schemas and effect metadata to `Kernel.Capability`.
-- Define the installed-source, manifest-grant, snapshot, lease, and error
-  structs before runtime work.
+- Define the installed-source, manifest-selection, snapshot, lease, and
+  connector error structs before runtime work.
 - Separate installed ceilings from manifest-requested limits.
 - Define stable machine-readable build/CLI errors.
 
@@ -683,7 +706,7 @@ concurrency, cancellation, and input limits tested separately.
 
 - Installed configuration rejects unknown keys, unsafe paths, arbitrary
   destinations, commands, credentials, and excessive definitions.
-- Manifest grants cannot select unknown sources/tools or override installed
+- Manifest selections cannot select unknown sources/tools or override installed
   endpoints, effects, schemas, credentials, or ceilings.
 - Public-name mapping is explicit, deterministic, collision-free, and stable
   across discovery order.
@@ -715,7 +738,7 @@ concurrency, cancellation, and input limits tested separately.
 2. Choose the supported JSON Schema dialect/profile and whether schemas are
    stored verbatim or normalized.
 3. Decide whether per-capability limits live only in installed configuration or
-   may be lowered in a manifest grant.
+   may be lowered in a manifest selection.
 4. Define read/write/idempotent/destructive effect metadata and any approval
    hook without making annotations authorization.
 5. Define the result subset for MCP text and structured content.
@@ -725,6 +748,9 @@ concurrency, cancellation, and input limits tested separately.
 
 ## Related documents
 
+- [`host-access-and-prelude-workspaces.md`](host-access-and-prelude-workspaces.md)
+  — shared authorization contract consumed by connectors, plus separately
+  owned TraceLog and versioned prelude services.
 - [`product-readiness.md`](product-readiness.md) — product sequence and release
   gates; this plan expands its capability-ecosystem phase.
 - [`kernel-contract.md`](kernel-contract.md) — current normative V1 authority
