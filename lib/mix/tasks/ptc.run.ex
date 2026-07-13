@@ -5,6 +5,7 @@ defmodule Mix.Tasks.Ptc.Run do
 
       mix ptc.run MANIFEST
       mix ptc.run MANIFEST --mission alternate-input.json
+      mix ptc.run MANIFEST --trace traces/run.jsonl
   """
   use Mix.Task
 
@@ -16,7 +17,10 @@ defmodule Mix.Tasks.Ptc.Run do
     Mix.Task.run("app.start")
 
     with {opts, [manifest], []} <-
-           OptionParser.parse(args, strict: [mission: :string], aliases: [m: :mission]),
+           OptionParser.parse(args,
+             strict: [mission: :string, trace: :string],
+             aliases: [m: :mission, t: :trace]
+           ),
          {:ok, registry} <- ProviderRegistry.new(),
          {:ok, result} <- RunBuilder.run(manifest, registry, opts) do
       Mix.shell().info(Jason.encode!(public(result)))
@@ -25,7 +29,7 @@ defmodule Mix.Tasks.Ptc.Run do
         Mix.raise("invalid ptc.run options: #{inspect(invalid)}")
 
       {_opts, _arguments, _invalid} ->
-        Mix.raise("usage: mix ptc.run MANIFEST [--mission PATH]")
+        Mix.raise("usage: mix ptc.run MANIFEST [--mission PATH] [--trace PATH]")
 
       {:error, error} ->
         Mix.raise("ptc.run failed: #{inspect(error, limit: 10, printable_limit: 1_024)}")

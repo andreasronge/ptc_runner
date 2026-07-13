@@ -81,7 +81,7 @@ the removed product implementations and detailed deletion waves.
 | Shipped agent/result libraries | implemented | Slice 7 strict native action parsing, message loop, correction feedback, retry/backoff decisions, annotations, and opt-in uniform results; scripted tests cover success, prose/protocol correction, evaluation correction, explicit failure, provider failure, and quota exhaustion. |
 | `Kernel.Manifest` / `RunBuilder` | implemented | Slice 8 strict duplicate-aware versioned JSON loader, manifest-relative confined sources/input, separate frozen bundles/environments, normalized limits/events/labels, generated qualified entry expression, and one shared build/run path. |
 | `Kernel.ProviderRegistry` | implemented | Host-owned `llm`/`file-read` builders plus non-replacing embedder extensions; manifests select bounded names/config only and destination checks reject authority expansion. |
-| `mix ptc.run` | implemented | Thin Slice 9 frontend over `RunBuilder`, with JSON output and a confined manifest-relative `--mission` input override. |
+| `mix ptc.run` | implemented | Thin Slice 9 frontend over `RunBuilder`, with JSON output, a confined manifest-relative `--mission` input override, and explicit bounded JSONL trace persistence through `--trace`. |
 
 ### Experimental Kernel implementation (closed at public cutover)
 

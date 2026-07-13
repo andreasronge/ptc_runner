@@ -4,6 +4,7 @@ defmodule Mix.Tasks.Ptc.RunTest do
   import ExUnit.CaptureIO
 
   alias Mix.Tasks.Ptc.Run
+  alias PtcRunner.Kernel.TraceLog
 
   @tag :tmp_dir
   test "runs the shared manifest path and accepts a confined mission override", %{tmp_dir: dir} do
@@ -33,5 +34,39 @@ defmodule Mix.Tasks.Ptc.RunTest do
       end)
 
     assert %{"value" => 42} = Jason.decode!(output)
+  end
+
+  @tag :tmp_dir
+  test "persists canonical run events when --trace is selected", %{tmp_dir: dir} do
+    File.write!(
+      Path.join(dir, "main.lisp"),
+      ~S|(ns main) (defn run [input] (return (get input "value")))|
+    )
+
+    manifest = %{
+      "version" => 1,
+      "workflow" => %{
+        "components" => [%{"id" => "main", "path" => "main.lisp"}],
+        "entry" => "main/run"
+      },
+      "input" => %{"value" => %{"value" => 42}},
+      "labels" => %{"name" => "traceable-run"}
+    }
+
+    manifest_path = Path.join(dir, "ptc.json")
+    trace_path = Path.join(dir, "run.jsonl")
+    File.write!(manifest_path, Jason.encode!(manifest))
+
+    output =
+      capture_io(fn ->
+        Mix.Task.reenable("ptc.run")
+        Run.run([manifest_path, "--trace", trace_path])
+      end)
+
+    assert %{"value" => 42} = Jason.decode!(output)
+    assert {:ok, trace_log} = TraceLog.new(source: {:file, trace_path})
+
+    assert {:ok, %{"items" => [%{"complete" => true, "name" => "traceable-run"}]}} =
+             TraceLog.query(trace_log, :list_runs, %{})
   end
 end

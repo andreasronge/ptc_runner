@@ -474,7 +474,7 @@ authority expansion.
 
 ### 9. CLI, REPL, TraceLog, and viewer
 
-- Add thin `mix ptc.run MANIFEST [--mission PATH]`.
+- Add thin `mix ptc.run MANIFEST [--mission PATH] [--trace PATH]`.
 - Simplify `mix ptc.repl` to direct PTC-Lisp evaluation, persistent history,
   scripts, basic bundle support, optional shared manifest grants, and canonical
   traces.

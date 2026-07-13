@@ -7,6 +7,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
   alias PtcRunner.Kernel.MissionEnvironment
   alias PtcRunner.Kernel.ProviderRegistry
   alias PtcRunner.Kernel.RunConfig
+  alias PtcRunner.Kernel.TraceLog
   alias PtcRunner.Kernel.WorkflowEnvironment
 
   @spec build(Manifest.t(), ProviderRegistry.t()) ::
@@ -53,7 +54,12 @@ defmodule PtcRunner.Kernel.RunBuilder do
   def run(path, registry, opts \\ []) do
     with {:ok, built} <- load_and_build(path, registry, opts) do
       try do
-        Kernel.run(built.entry_source, built.config)
+        result = Kernel.run(built.entry_source, built.config)
+
+        case persist_trace(Keyword.get(opts, :trace), built.config.event_sink) do
+          :ok -> result
+          {:error, reason} -> {:error, {:trace_persistence_failed, reason, result}}
+        end
       after
         if Process.alive?(built.config.event_sink.pid),
           do: EventSink.stop(built.config.event_sink)
@@ -67,6 +73,15 @@ defmodule PtcRunner.Kernel.RunBuilder do
       path -> Manifest.override_input(manifest, path)
     end
   end
+
+  defp persist_trace(nil, _sink), do: :ok
+
+  defp persist_trace(path, sink) when is_binary(path) do
+    private? = EventSink.policy(sink) == :private
+    TraceLog.append_jsonl(path, EventSink.events(sink), private: private?)
+  end
+
+  defp persist_trace(_path, _sink), do: {:error, :invalid_trace_log}
 
   defp capabilities(manifest, registry, destination) do
     manifest.providers

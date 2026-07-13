@@ -38,3 +38,7 @@ owner read/write permissions before appending event data. Normal directory
 grants and the viewer do not discover private-suffixed traces.
 The resulting file uses the same `Kernel.TraceLog` loader and query semantics
 as `log.core` and the viewer integration.
+
+For a manifest entry run rather than a direct REPL session, use
+`mix ptc.run MANIFEST --trace PATH`. The same public/private suffix rule
+applies.
