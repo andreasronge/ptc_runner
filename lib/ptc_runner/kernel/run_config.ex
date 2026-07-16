@@ -13,6 +13,10 @@ defmodule PtcRunner.Kernel.RunConfig do
   Construction derives and freezes `mission_inventory` from the mission
   environment and limits. Hosts cannot supply mutable inventory text.
 
+  `provider_resources` are opaque idempotent close functions owned by the host.
+  `connector_snapshots` are bounded safe metadata copied into `run-started`;
+  neither field is visible to Lisp.
+
   `labels` is an optional bounded JSON-like map copied into `run-started`.
   Constructing a config validates shape and ownership objects but performs no
   execution and grants no authority beyond the supplied environments.
@@ -40,6 +44,8 @@ defmodule PtcRunner.Kernel.RunConfig do
     :limits,
     :event_sink,
     :mission_inventory,
+    provider_resources: [],
+    connector_snapshots: [],
     labels: %{}
   ]
 
@@ -50,6 +56,8 @@ defmodule PtcRunner.Kernel.RunConfig do
           limits: Limits.t(),
           event_sink: EventSink.t(),
           mission_inventory: MissionInventory.t(),
+          provider_resources: [(-> :ok)],
+          connector_snapshots: [map()],
           labels: map()
         }
 
@@ -59,13 +67,24 @@ defmodule PtcRunner.Kernel.RunConfig do
   def new(opts) when is_list(opts) do
     with false <-
            Keyword.keys(opts) --
-             [:workflow_environment, :mission_environment, :input, :limits, :event_sink, :labels] !=
+             [
+               :workflow_environment,
+               :mission_environment,
+               :input,
+               :limits,
+               :event_sink,
+               :provider_resources,
+               :connector_snapshots,
+               :labels
+             ] !=
              [],
          %WorkflowEnvironment{} = workflow <- Keyword.get(opts, :workflow_environment),
          %MissionEnvironment{} = mission <- Keyword.get(opts, :mission_environment),
          true <- JSONValue.map?(Keyword.get(opts, :input)),
          %Limits{} = limits <- Keyword.get(opts, :limits),
          %EventSink{} = sink <- Keyword.get(opts, :event_sink),
+         true <- provider_resources?(Keyword.get(opts, :provider_resources, [])),
+         true <- connector_snapshots?(Keyword.get(opts, :connector_snapshots, [])),
          true <- labels?(Keyword.get(opts, :labels, %{})),
          {:ok, mission_inventory} <- MissionInventory.build(mission, limits) do
       {:ok,
@@ -76,12 +95,39 @@ defmodule PtcRunner.Kernel.RunConfig do
          limits: limits,
          event_sink: sink,
          mission_inventory: mission_inventory,
+         provider_resources: Keyword.get(opts, :provider_resources, []),
+         connector_snapshots: Keyword.get(opts, :connector_snapshots, []),
          labels: Keyword.get(opts, :labels, %{})
        }}
     else
       {:error, :mission_inventory_exceeded} = error -> error
       _ -> {:error, :invalid_run_config}
     end
+  end
+
+  @spec close_provider_resources(t()) :: :ok
+  @doc "Closes opaque provider resources in their stored reverse-build order."
+  def close_provider_resources(%__MODULE__{provider_resources: resources}) do
+    Enum.each(resources, fn close ->
+      try do
+        _ = close.()
+      rescue
+        _exception -> :ok
+      catch
+        _kind, _reason -> :ok
+      end
+    end)
+
+    :ok
+  end
+
+  defp provider_resources?(resources),
+    do: is_list(resources) and Enum.all?(resources, &is_function(&1, 0))
+
+  defp connector_snapshots?(snapshots) do
+    is_list(snapshots) and length(snapshots) <= 128 and
+      Enum.all?(snapshots, &JSONValue.map?/1) and
+      byte_size(:erlang.term_to_binary(snapshots)) <= 262_144
   end
 
   defp labels?(labels),

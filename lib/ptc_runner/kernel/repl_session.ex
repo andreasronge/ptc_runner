@@ -59,7 +59,7 @@ defmodule PtcRunner.Kernel.ReplSession do
       if history_depth in 1..3 do
         start_session(config, history_depth)
       else
-        EventSink.stop(config.event_sink)
+        close_config(config)
         {:error, :invalid_repl_session}
       end
     else
@@ -176,29 +176,34 @@ defmodule PtcRunner.Kernel.ReplSession do
       workflow_prelude: trace_bundle(config.workflow_environment.bundle),
       mission_prelude: trace_bundle(config.mission_environment.bundle),
       mission_inventory_hash: config.mission_inventory.hash,
-      mission_inventory_bytes: config.mission_inventory.bytes
+      mission_inventory_bytes: config.mission_inventory.bytes,
+      connector_snapshots: config.connector_snapshots
     })
   end
 
   defp start_session(config, history_depth) do
-    with {:ok, state} <- RunState.start(config.limits) do
-      case emit_run_started(config) do
-        :ok ->
-          {:ok,
-           %__MODULE__{
-             config: config,
-             state: state,
-             memory: %{},
-             history: [],
-             history_depth: history_depth
-           }}
+    {:ok, state} = RunState.start(config.limits)
+    start_session_with_state(config, history_depth, state)
+  end
 
-        {:error, :event_sink_error} = error ->
-          RunState.close(state)
-          RunState.stop(state)
-          EventSink.stop(config.event_sink)
-          error
-      end
+  defp start_session_with_state(config, history_depth, state) do
+    case emit_run_started(config) do
+      :ok ->
+        {:ok,
+         %__MODULE__{
+           config: config,
+           state: state,
+           memory: %{},
+           history: [],
+           history_depth: history_depth
+         }}
+
+      {:error, :event_sink_error} = error ->
+        RunState.close(state)
+        RunState.stop(state)
+        RunConfig.close_provider_resources(config)
+        EventSink.stop(config.event_sink)
+        error
     end
   end
 
@@ -450,10 +455,16 @@ defmodule PtcRunner.Kernel.ReplSession do
   end
 
   defp stop_owners(session) do
+    if Process.alive?(session.state.pid), do: RunState.stop(session.state)
+    RunConfig.close_provider_resources(session.config)
+
     if Process.alive?(session.config.event_sink.pid),
       do: EventSink.stop(session.config.event_sink)
+  end
 
-    if Process.alive?(session.state.pid), do: RunState.stop(session.state)
+  defp close_config(config) do
+    RunConfig.close_provider_resources(config)
+    if Process.alive?(config.event_sink.pid), do: EventSink.stop(config.event_sink)
   end
 
   defp sink_alive?(session),

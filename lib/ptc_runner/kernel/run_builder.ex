@@ -22,32 +22,119 @@ defmodule PtcRunner.Kernel.RunBuilder do
           {:ok, %{entry_source: binary(), config: RunConfig.t()}} | {:error, term()}
   @doc "Builds an entry expression and complete run configuration from a loaded manifest."
   def build(%Manifest{} = manifest, %ProviderRegistry{} = registry) do
-    with {:ok, workflow_capabilities} <- capabilities(manifest, registry, :workflow),
-         {:ok, mission_capabilities} <- capabilities(manifest, registry, :mission),
-         {:ok, workflow_bundle} <- bundle(manifest.workflow_components),
-         {:ok, mission_bundle} <- bundle(manifest.mission_components),
-         {:ok, workflow} <-
-           WorkflowEnvironment.new(
-             bundle: workflow_bundle,
-             capabilities: workflow_capabilities
-           ),
-         {:ok, mission} <-
-           MissionEnvironment.new(
-             bundle: mission_bundle,
-             capabilities: mission_capabilities,
-             data: manifest.mission_data
-           ),
-         {:ok, sink} <- event_sink(manifest),
-         {:ok, config} <-
-           RunConfig.new(
-             workflow_environment: workflow,
-             mission_environment: mission,
-             input: %{"input" => manifest.input},
-             limits: manifest.limits,
-             event_sink: sink,
-             labels: manifest.labels
-           ) do
-      {:ok, %{entry_source: "(#{manifest.entry} data/input)", config: config}}
+    case providers(manifest, registry) do
+      {:ok, providers} -> build_with_providers(manifest, providers)
+      {:error, _reason} = error -> error
+    end
+  end
+
+  defp build_with_providers(manifest, providers) do
+    result =
+      with {:ok, workflow_bundle} <- bundle(manifest.workflow_components),
+           {:ok, mission_bundle} <- bundle(manifest.mission_components),
+           {:ok, workflow} <-
+             WorkflowEnvironment.new(
+               bundle: workflow_bundle,
+               capabilities: providers.workflow.capabilities
+             ),
+           {:ok, mission} <-
+             MissionEnvironment.new(
+               bundle: mission_bundle,
+               capabilities: providers.mission.capabilities,
+               data: manifest.mission_data
+             ),
+           {:ok, sink} <- event_sink(manifest) do
+        build_config(manifest, providers, workflow, mission, sink)
+      end
+
+    case result do
+      {:ok, _built} = success ->
+        success
+
+      {:error, _reason} = error ->
+        close_resources(providers.resources)
+        error
+    end
+  end
+
+  defp build_config(manifest, providers, workflow, mission, sink) do
+    case RunConfig.new(
+           workflow_environment: workflow,
+           mission_environment: mission,
+           input: %{"input" => manifest.input},
+           limits: manifest.limits,
+           event_sink: sink,
+           provider_resources: providers.resources,
+           connector_snapshots: providers.snapshots,
+           labels: manifest.labels
+         ) do
+      {:ok, config} ->
+        {:ok, %{entry_source: "(#{manifest.entry} data/input)", config: config}}
+
+      {:error, _reason} = error ->
+        EventSink.stop(sink)
+        error
+    end
+  end
+
+  defp providers(manifest, registry) do
+    case capabilities(manifest, registry, :workflow) do
+      {:ok, workflow} ->
+        case capabilities(manifest, registry, :mission) do
+          {:ok, mission} ->
+            {:ok,
+             %{
+               workflow: workflow,
+               mission: mission,
+               resources: mission.resources ++ workflow.resources,
+               snapshots: sort_snapshots(workflow.snapshots ++ mission.snapshots)
+             }}
+
+          {:error, _reason} = error ->
+            close_resources(workflow.resources)
+            error
+        end
+
+      {:error, _reason} = error ->
+        error
+    end
+  end
+
+  defp sort_snapshots(snapshots), do: Enum.sort_by(snapshots, &Map.get(&1, "provider", ""))
+
+  @spec close(%{config: RunConfig.t()} | RunConfig.t()) :: :ok
+  @doc "Closes a built but unexecuted configuration and its event sink."
+  def close(%{config: %RunConfig{} = config}), do: close(config)
+
+  def close(%RunConfig{} = config) do
+    RunConfig.close_provider_resources(config)
+
+    if Process.alive?(config.event_sink.pid), do: EventSink.stop(config.event_sink)
+    :ok
+  end
+
+  defp close_resources(resources) do
+    Enum.each(resources, fn close ->
+      try do
+        _ = close.()
+      rescue
+        _exception -> :ok
+      catch
+        _kind, _reason -> :ok
+      end
+    end)
+
+    :ok
+  end
+
+  # Provider resources are already closed by `Kernel.run/2`; the event sink
+  # remains live long enough for optional post-run canonical trace persistence.
+  defp execute_built(built, opts) do
+    result = Kernel.run(built.entry_source, built.config)
+
+    case persist_trace(Keyword.get(opts, :trace), built.config.event_sink) do
+      :ok -> result
+      {:error, reason} -> {:error, {:trace_persistence_failed, reason, result}}
     end
   end
 
@@ -78,12 +165,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
   def run(path, registry, opts \\ []) do
     with {:ok, built} <- load_and_build(path, registry, opts) do
       try do
-        result = Kernel.run(built.entry_source, built.config)
-
-        case persist_trace(Keyword.get(opts, :trace), built.config.event_sink) do
-          :ok -> result
-          {:error, reason} -> {:error, {:trace_persistence_failed, reason, result}}
-        end
+        execute_built(built, opts)
       after
         if Process.alive?(built.config.event_sink.pid),
           do: EventSink.stop(built.config.event_sink)
@@ -110,19 +192,43 @@ defmodule PtcRunner.Kernel.RunBuilder do
   defp capabilities(manifest, registry, destination) do
     manifest.providers
     |> Map.fetch!(destination)
-    |> Enum.reduce_while({:ok, []}, fn spec, {:ok, capabilities} ->
-      context = %{directory: manifest.directory, destination: destination}
+    |> Enum.reduce_while(
+      {:ok, %{capabilities: [], snapshots: [], resources: []}},
+      fn spec, {:ok, accumulated} ->
+        context = %{
+          directory: manifest.directory,
+          destination: destination,
+          owner: self(),
+          limits: manifest.limits
+        }
 
-      case ProviderRegistry.build(registry, spec["name"], Map.get(spec, "config", %{}), context) do
-        {:ok, capability} -> {:cont, {:ok, [capability | capabilities]}}
-        {:error, _reason} = error -> {:halt, error}
+        case ProviderRegistry.build(
+               registry,
+               spec["name"],
+               Map.get(spec, "config", %{}),
+               context
+             ) do
+          {:ok, built} ->
+            next = %{
+              capabilities: accumulated.capabilities ++ built.capabilities,
+              snapshots: maybe_append(accumulated.snapshots, built.snapshot),
+              resources: maybe_prepend(accumulated.resources, built.close)
+            }
+
+            {:cont, {:ok, next}}
+
+          {:error, _reason} = error ->
+            close_resources(accumulated.resources)
+            {:halt, error}
+        end
       end
-    end)
-    |> case do
-      {:ok, capabilities} -> {:ok, Enum.reverse(capabilities)}
-      error -> error
-    end
+    )
   end
+
+  defp maybe_append(values, nil), do: values
+  defp maybe_append(values, value), do: values ++ [value]
+  defp maybe_prepend(values, nil), do: values
+  defp maybe_prepend(values, value), do: [value | values]
 
   defp bundle([]), do: {:ok, nil}
   defp bundle(components), do: Kernel.compile_bundle(components)

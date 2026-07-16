@@ -4,8 +4,11 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
 
   A manifest can select a bounded provider name and JSON configuration; it
   cannot register a module, function, callback, command, or code URL. Builders
-  receive the canonical manifest directory and the requested workflow or
-  mission destination, then return one `PtcRunner.Kernel.Capability`.
+  receive the canonical manifest directory, requested workflow or mission
+  destination, building owner, and installed limits. They return either one
+  legacy `PtcRunner.Kernel.Capability` or a normalized provider build with one
+  or more capabilities, an optional safe snapshot, and an optional idempotent
+  close function.
 
   The built-ins are `llm`, permitted only in the workflow environment, and
   `file-read`, permitted only in the mission environment. Additional builders
@@ -15,13 +18,26 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
 
   alias PtcRunner.Kernel.Capability
   alias PtcRunner.Kernel.FileCapability
+  alias PtcRunner.Kernel.JSONValue
   alias PtcRunner.Kernel.LLMCapability
 
   @enforce_keys [:builders]
   defstruct [:builders]
 
-  @type context :: %{directory: binary(), destination: :workflow | :mission}
-  @type builder :: (map(), context() -> {:ok, Capability.t()} | {:error, term()})
+  @type context :: %{
+          directory: binary(),
+          destination: :workflow | :mission,
+          owner: pid(),
+          limits: PtcRunner.Kernel.Limits.t()
+        }
+  @type built_provider :: %{
+          capabilities: [Capability.t()],
+          snapshot: map() | nil,
+          close: (-> :ok) | nil
+        }
+  @type builder ::
+          (map(), context() ->
+             {:ok, Capability.t() | built_provider()} | {:error, term()})
   @type t :: %__MODULE__{builders: %{binary() => builder()}}
 
   @spec new(map()) :: {:ok, t()} | {:error, :invalid_provider_registry}
@@ -45,11 +61,11 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
 
   def new(_builders), do: {:error, :invalid_provider_registry}
 
-  @spec build(t(), binary(), map(), context()) :: {:ok, Capability.t()} | {:error, term()}
-  @doc "Builds a capability from one trusted registry entry."
+  @spec build(t(), binary(), map(), context()) :: {:ok, built_provider()} | {:error, term()}
+  @doc "Builds and normalizes one trusted registry entry."
   def build(%__MODULE__{builders: builders}, name, config, context) do
     case Map.fetch(builders, name) do
-      {:ok, builder} -> builder.(config, context)
+      {:ok, builder} -> builder.(config, context) |> normalize_build()
       :error -> {:error, :unknown_provider}
     end
   rescue
@@ -57,6 +73,28 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
   catch
     _kind, _reason -> {:error, :provider_build_failed}
   end
+
+  defp normalize_build({:ok, %Capability{} = capability}) do
+    {:ok, %{capabilities: [capability], snapshot: nil, close: nil}}
+  end
+
+  defp normalize_build({:ok, %{capabilities: capabilities} = built}) do
+    snapshot = Map.get(built, :snapshot)
+    close = Map.get(built, :close)
+
+    if Map.keys(built) -- [:capabilities, :snapshot, :close] == [] and
+         capabilities != [] and length(capabilities) <= 128 and
+         Enum.all?(capabilities, &match?(%Capability{}, &1)) and
+         (is_nil(snapshot) or JSONValue.map?(snapshot)) and
+         (is_nil(close) or is_function(close, 0)) do
+      {:ok, %{capabilities: capabilities, snapshot: snapshot, close: close}}
+    else
+      {:error, :invalid_provider_build}
+    end
+  end
+
+  defp normalize_build({:error, _reason} = error), do: error
+  defp normalize_build(_result), do: {:error, :invalid_provider_build}
 
   defp build_file(config, %{directory: directory, destination: :mission}) do
     with :ok <- exact_keys(config, ~w(root max_bytes), ~w(root)),

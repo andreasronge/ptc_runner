@@ -34,6 +34,8 @@ defmodule PtcRunner.Kernel.Runner do
     else
       {:error, reason} -> configuration_error(reason, %{})
     end
+  after
+    RunConfig.close_provider_resources(config)
   end
 
   defp run_with_events(entry_source, config, state) do
@@ -42,7 +44,8 @@ defmodule PtcRunner.Kernel.Runner do
            workflow_prelude: trace_bundle(config.workflow_environment.bundle),
            mission_prelude: trace_bundle(config.mission_environment.bundle),
            mission_inventory_hash: config.mission_inventory.hash,
-           mission_inventory_bytes: config.mission_inventory.bytes
+           mission_inventory_bytes: config.mission_inventory.bytes,
+           connector_snapshots: config.connector_snapshots
          }) do
       :ok ->
         result = run_workflow(entry_source, config, state)

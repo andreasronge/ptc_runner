@@ -210,6 +210,14 @@ To add a host capability:
 5. Add an integration test that exercises the Lisp dispatch boundary, limits,
    and denied destination.
 
+Provider builders may return one legacy capability or a normalized build with
+`capabilities`, a safe optional `snapshot`, and an idempotent optional `close`
+function. `RunBuilder` closes successful resources in reverse order on later
+assembly failure and freezes successful resources into `RunConfig`. Normal
+runs and REPL sessions stop run state—and therefore attached provider
+workers—before closing those resources. Call `RunBuilder.close/1` for a built
+configuration that will not be executed.
+
 To add a shipped Lisp library, add its source under `priv/preludes/kernel/`,
 register it in `PtcRunner.Kernel.Library`, declare component dependencies, and
 recompile the shipped preludes. Agent policy should normally change here rather
