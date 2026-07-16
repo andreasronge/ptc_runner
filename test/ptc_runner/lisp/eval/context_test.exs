@@ -139,7 +139,7 @@ defmodule PtcRunner.Lisp.Eval.ContextTest do
       assert stored.child_step == %{some: :step}
     end
 
-    test "args are left intact even when large (telemetry needs raw args)" do
+    test "args are left intact even when large for canonical summarization" do
       # TurnEvent.tool_call_summary/1 reads :args for upstream server/tool and
       # the canonical args hash; truncating it would break duplicate-fetch
       # detection. So :args is preserved raw regardless of size.

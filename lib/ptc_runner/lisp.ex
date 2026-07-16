@@ -1901,8 +1901,8 @@ defmodule PtcRunner.Lisp do
 
   # Catch-all: safe to skip unknown nodes (runtime eval still catches real errors).
   # Log in debug to surface missing clauses when CoreAST is extended.
-  defp collect_undefined_vars(other, _scope) do
-    Logger.debug("collect_undefined_vars: unhandled node #{inspect(other, limit: 3)}")
+  defp collect_undefined_vars(_other, _scope) do
+    Logger.debug("collect_undefined_vars: unhandled CoreAST node")
     []
   end
 

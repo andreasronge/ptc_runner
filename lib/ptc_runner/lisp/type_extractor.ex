@@ -59,10 +59,8 @@ defmodule PtcRunner.Lisp.TypeExtractor do
     {:ok, {signature, description}}
   rescue
     # Handle any errors during extraction gracefully
-    e ->
-      Logger.warning(
-        "TypeExtractor failed for #{inspect(module)}.#{name}/#{arity}: #{Exception.format(:error, e, __STACKTRACE__)}"
-      )
+    _exception ->
+      Logger.warning("TypeExtractor failed; callable metadata omitted")
 
       {:ok, {nil, nil}}
   end
@@ -374,10 +372,8 @@ defmodule PtcRunner.Lisp.TypeExtractor do
     expand_user_type(module, type_name, depth)
   end
 
-  defp convert_type({:user_type, _line, type_name, []}, depth, _module) when depth >= 3 do
-    Logger.warning(
-      "TypeExtractor: max depth reached for custom type #{type_name}, falling back to :any"
-    )
+  defp convert_type({:user_type, _line, _type_name, []}, depth, _module) when depth >= 3 do
+    Logger.warning("TypeExtractor: custom type depth exceeded, falling back to :any")
 
     ":any"
   end
@@ -421,9 +417,7 @@ defmodule PtcRunner.Lisp.TypeExtractor do
         find_and_expand_type(types, type_name, module, depth)
 
       :error ->
-        Logger.debug(
-          "TypeExtractor: could not fetch types from #{inspect(module)}, falling back to :any"
-        )
+        Logger.debug("TypeExtractor: unavailable custom types, falling back to :any")
 
         ":any"
     end
@@ -440,14 +434,12 @@ defmodule PtcRunner.Lisp.TypeExtractor do
         convert_type(type_def, depth + 1, module)
 
       {:opaque, {^type_name, _type_def, _args}} ->
-        Logger.warning(
-          "TypeExtractor: opaque type #{type_name} cannot be expanded, falling back to :any"
-        )
+        Logger.warning("TypeExtractor: opaque type cannot be expanded, falling back to :any")
 
         ":any"
 
       nil ->
-        Logger.debug("TypeExtractor: custom type #{type_name} not found, falling back to :any")
+        Logger.debug("TypeExtractor: custom type not found, falling back to :any")
         ":any"
     end
   end

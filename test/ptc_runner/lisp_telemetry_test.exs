@@ -1,6 +1,8 @@
 defmodule PtcRunner.LispTelemetryTest do
   use ExUnit.Case, async: false
 
+  import ExUnit.CaptureLog
+
   alias PtcRunner.Lisp
 
   @events [
@@ -110,6 +112,17 @@ defmodule PtcRunner.LispTelemetryTest do
                signature_supplied?: false
              }
     end
+  end
+
+  test "operator logs do not copy identifiers from evaluated source" do
+    source_identifier = "private_transcript_sentinel"
+
+    log =
+      capture_log([level: :debug], fn ->
+        assert {:ok, _step} = Lisp.run("(or #{source_identifier} 1)")
+      end)
+
+    refute log =~ source_identifier
   end
 
   defp flush_telemetry do

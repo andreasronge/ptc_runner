@@ -1616,8 +1616,8 @@ defmodule PtcRunner.Lisp.Eval do
           do_eval_or(rest, value, eval_ctx2)
         end
 
-      {:error, {:unbound_var, name}} ->
-        Logger.debug("[ptc-lisp] or: #{name} unbound, treating as nil")
+      {:error, {:unbound_var, _name}} ->
+        Logger.debug("[ptc-lisp] or: unbound value treated as nil")
         do_eval_or(rest, nil, eval_ctx)
 
       {:error, _} = err ->
