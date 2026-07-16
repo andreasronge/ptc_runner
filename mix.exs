@@ -133,6 +133,8 @@ defmodule PtcRunner.MixProject do
           PtcRunner.Kernel.EventSink,
           PtcRunner.Kernel.FileCapability,
           PtcRunner.Kernel.FrozenBundle,
+          PtcRunner.Kernel.InspectionArtifact,
+          PtcRunner.Kernel.InspectionSink,
           PtcRunner.Kernel.Library,
           PtcRunner.Kernel.Limits,
           PtcRunner.Kernel.LLMCapability,

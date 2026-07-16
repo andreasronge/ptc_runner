@@ -76,6 +76,16 @@ defmodule PtcRunner.Kernel.EventSink do
   @doc "Returns the configured loss policy."
   def policy(sink), do: call(sink, :policy)
 
+  @spec identity(t()) ::
+          {:ok, %{run_id: binary(), trace_id: binary()}} | {:error, :event_sink_error}
+  @doc "Returns only this sink's run and trace identity to its token holder."
+  def identity(sink) do
+    case call(sink, :identity) do
+      %{run_id: _run_id, trace_id: _trace_id} = identity -> {:ok, identity}
+      {:error, :event_sink_error} = error -> error
+    end
+  end
+
   @spec stop(t()) :: :ok
   @doc "Stops the sink. Calling it after owner-driven shutdown is harmless."
   def stop(sink) do
@@ -117,6 +127,9 @@ defmodule PtcRunner.Kernel.EventSink do
 
   def handle_call({token, :policy}, _from, %{token: token} = state),
     do: {:reply, state.policy, state}
+
+  def handle_call({token, :identity}, _from, %{token: token} = state),
+    do: {:reply, %{run_id: state.run_id, trace_id: state.trace_id}, state}
 
   def handle_call({_token, _request}, _from, state),
     do: {:reply, {:error, :event_sink_error}, state}

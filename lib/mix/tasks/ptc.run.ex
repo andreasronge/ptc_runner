@@ -6,6 +6,7 @@ defmodule Mix.Tasks.Ptc.Run do
       mix ptc.run MANIFEST
       mix ptc.run MANIFEST --mission alternate-input.json
       mix ptc.run MANIFEST --trace traces/run.jsonl
+      mix ptc.run MANIFEST --trace traces/run.jsonl --inspect traces/run.inspection.jsonl
   """
   use Mix.Task
 
@@ -18,7 +19,7 @@ defmodule Mix.Tasks.Ptc.Run do
 
     with {opts, [manifest], []} <-
            OptionParser.parse(args,
-             strict: [mission: :string, trace: :string],
+             strict: [mission: :string, trace: :string, inspect: :string],
              aliases: [m: :mission, t: :trace]
            ),
          {:ok, registry} <- ProviderRegistry.new(),

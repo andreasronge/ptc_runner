@@ -34,6 +34,10 @@ defmodule PtcViewer.Router do
     send_kernel_query(conn, :counters, query_arguments(conn))
   end
 
+  get "/api/inspection/runs/:run_id" do
+    send_inspection(conn, run_id)
+  end
+
   match "/api/*path" do
     send_resp(conn, 404, "Not found")
   end
@@ -87,6 +91,38 @@ defmodule PtcViewer.Router do
 
       {:error, _reason} ->
         send_resp(conn, 400, "Invalid trace query")
+    end
+  end
+
+  defp send_inspection(conn, run_id) do
+    case PtcViewer.Api.inspection(viewer_config(conn), run_id) do
+      {:ok, result} ->
+        send_json(conn, result)
+
+      {:error, :not_found} ->
+        send_resp(conn, 404, "Not found")
+
+      {:error, :unavailable} ->
+        send_resp(conn, 503, "Inspection artifact unavailable")
+
+      {:error, :adapter_failure} ->
+        send_resp(conn, 500, "Inspection adapter failed")
+
+      {:error, :inspection_source_unavailable} ->
+        send_resp(conn, 503, "Inspection source unavailable")
+
+      {:error, :inspection_source_changed} ->
+        send_resp(conn, 409, "Inspection source changed")
+
+      {:error, :inspection_source_limit_exceeded} ->
+        send_resp(conn, 413, "Inspection source too large")
+
+      {:error, reason}
+      when reason in [:malformed_inspection_artifact, :invalid_inspection_artifact] ->
+        send_resp(conn, 422, "Unsupported inspection artifact")
+
+      {:error, _reason} ->
+        send_resp(conn, 400, "Invalid inspection query")
     end
   end
 

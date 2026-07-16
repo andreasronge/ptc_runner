@@ -15,6 +15,7 @@ defmodule PtcRunner.Kernel.ReplSession do
   alias PtcRunner.Kernel.Dispatcher
   alias PtcRunner.Kernel.Events
   alias PtcRunner.Kernel.EventSink
+  alias PtcRunner.Kernel.InspectionSink
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.MissionEnvironment
   alias PtcRunner.Kernel.RunConfig
@@ -202,6 +203,7 @@ defmodule PtcRunner.Kernel.ReplSession do
         RunState.close(state)
         RunState.stop(state)
         RunConfig.close_provider_resources(config)
+        if config.inspection_sink, do: InspectionSink.stop(config.inspection_sink)
         EventSink.stop(config.event_sink)
         error
     end
@@ -291,7 +293,8 @@ defmodule PtcRunner.Kernel.ReplSession do
           name,
           arguments,
           timeout_ms,
-          session.config.event_sink
+          session.config.event_sink,
+          session.config.inspection_sink
         )
       end
 
@@ -308,7 +311,8 @@ defmodule PtcRunner.Kernel.ReplSession do
           session.state,
           session.config.mission_environment,
           session.config.limits,
-          session.config.event_sink
+          session.config.event_sink,
+          session.config.inspection_sink
         )
       )
     )
@@ -457,6 +461,7 @@ defmodule PtcRunner.Kernel.ReplSession do
   defp stop_owners(session) do
     if Process.alive?(session.state.pid), do: RunState.stop(session.state)
     RunConfig.close_provider_resources(session.config)
+    if session.config.inspection_sink, do: InspectionSink.stop(session.config.inspection_sink)
 
     if Process.alive?(session.config.event_sink.pid),
       do: EventSink.stop(session.config.event_sink)
@@ -464,6 +469,7 @@ defmodule PtcRunner.Kernel.ReplSession do
 
   defp close_config(config) do
     RunConfig.close_provider_resources(config)
+    if config.inspection_sink, do: InspectionSink.stop(config.inspection_sink)
     if Process.alive?(config.event_sink.pid), do: EventSink.stop(config.event_sink)
   end
 

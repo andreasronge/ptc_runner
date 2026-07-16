@@ -23,6 +23,7 @@ defmodule PtcRunner.Kernel.RunConfig do
   """
 
   alias PtcRunner.Kernel.EventSink
+  alias PtcRunner.Kernel.InspectionSink
   alias PtcRunner.Kernel.JSONValue
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.MissionEnvironment
@@ -44,6 +45,8 @@ defmodule PtcRunner.Kernel.RunConfig do
     :limits,
     :event_sink,
     :mission_inventory,
+    inspection_sink: nil,
+    inspection_path: nil,
     provider_resources: [],
     connector_snapshots: [],
     labels: %{}
@@ -56,6 +59,8 @@ defmodule PtcRunner.Kernel.RunConfig do
           limits: Limits.t(),
           event_sink: EventSink.t(),
           mission_inventory: MissionInventory.t(),
+          inspection_sink: InspectionSink.t() | nil,
+          inspection_path: binary() | nil,
           provider_resources: [(-> :ok)],
           connector_snapshots: [map()],
           labels: map()
@@ -73,6 +78,8 @@ defmodule PtcRunner.Kernel.RunConfig do
                :input,
                :limits,
                :event_sink,
+               :inspection_sink,
+               :inspection_path,
                :provider_resources,
                :connector_snapshots,
                :labels
@@ -83,6 +90,8 @@ defmodule PtcRunner.Kernel.RunConfig do
          true <- JSONValue.map?(Keyword.get(opts, :input)),
          %Limits{} = limits <- Keyword.get(opts, :limits),
          %EventSink{} = sink <- Keyword.get(opts, :event_sink),
+         true <-
+           inspection?(Keyword.get(opts, :inspection_sink), Keyword.get(opts, :inspection_path)),
          true <- provider_resources?(Keyword.get(opts, :provider_resources, [])),
          true <- connector_snapshots?(Keyword.get(opts, :connector_snapshots, [])),
          true <- labels?(Keyword.get(opts, :labels, %{})),
@@ -95,6 +104,8 @@ defmodule PtcRunner.Kernel.RunConfig do
          limits: limits,
          event_sink: sink,
          mission_inventory: mission_inventory,
+         inspection_sink: Keyword.get(opts, :inspection_sink),
+         inspection_path: Keyword.get(opts, :inspection_path),
          provider_resources: Keyword.get(opts, :provider_resources, []),
          connector_snapshots: Keyword.get(opts, :connector_snapshots, []),
          labels: Keyword.get(opts, :labels, %{})
@@ -129,6 +140,13 @@ defmodule PtcRunner.Kernel.RunConfig do
       Enum.all?(snapshots, &JSONValue.map?/1) and
       byte_size(:erlang.term_to_binary(snapshots)) <= 262_144
   end
+
+  defp inspection?(nil, nil), do: true
+
+  defp inspection?(%InspectionSink{}, path),
+    do: is_binary(path) and String.ends_with?(path, ".inspection.jsonl")
+
+  defp inspection?(_sink, _path), do: false
 
   defp labels?(labels),
     do: JSONValue.map?(labels) and byte_size(:erlang.term_to_binary(labels)) <= 8_192

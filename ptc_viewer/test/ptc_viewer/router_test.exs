@@ -139,5 +139,57 @@ defmodule PtcViewer.RouterTest do
     end)
   end
 
+  test "inspection route is unavailable by default and delegates a fixed source", %{
+    trace_dir: trace_dir
+  } do
+    unavailable = conn(:get, "/api/inspection/runs/run-1") |> call_router(trace_dir: trace_dir)
+    assert unavailable.status == 503
+
+    artifact = Path.join(trace_dir, "fixed.inspection.jsonl")
+
+    adapter = fn path, run_id ->
+      {:ok, %{"path" => path, "run_id" => run_id, "records" => [%{"sequence" => 1}]}}
+    end
+
+    response =
+      conn(:get, "/api/inspection/runs/run-1")
+      |> call_router(
+        trace_dir: trace_dir,
+        inspection_file: artifact,
+        inspection_adapter: adapter
+      )
+
+    assert response.status == 200
+
+    assert Jason.decode!(response.resp_body) == %{
+             "path" => artifact,
+             "run_id" => "run-1",
+             "records" => [%{"sequence" => 1}]
+           }
+  end
+
+  test "inspection route classifies fixed source failures", %{trace_dir: trace_dir} do
+    statuses = %{
+      not_found: 404,
+      inspection_source_unavailable: 503,
+      inspection_source_changed: 409,
+      inspection_source_limit_exceeded: 413,
+      malformed_inspection_artifact: 422,
+      invalid_inspection_artifact: 422
+    }
+
+    Enum.each(statuses, fn {reason, expected_status} ->
+      response =
+        conn(:get, "/api/inspection/runs/run-1")
+        |> call_router(
+          trace_dir: trace_dir,
+          inspection_file: Path.join(trace_dir, "fixed.inspection.jsonl"),
+          inspection_adapter: fn _, _ -> {:error, reason} end
+        )
+
+      assert response.status == expected_status
+    end)
+  end
+
   defp call_router(conn, opts), do: PtcViewer.Router.call(conn, PtcViewer.Router.init(opts))
 end

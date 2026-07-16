@@ -188,6 +188,22 @@ defmodule PtcRunner.Kernel.TraceCapabilityTest do
   end
 
   @tag :tmp_dir
+  test "inspection artifacts are never accepted as canonical or private trace sources", %{
+    tmp_dir: directory
+  } do
+    path = Path.join(directory, "run.inspection.jsonl")
+    File.write!(path, jsonl_event("inspection", 1, "run-started"))
+
+    assert {:error, :invalid_trace_log} = TraceLog.new(source: {:file, path})
+    assert {:error, :invalid_trace_log} = TraceLog.new(source: {:private_file, path})
+
+    assert {:ok, normal_log} = TraceLog.new(source: {:directory, directory})
+    assert {:ok, private_log} = TraceLog.new(source: {:private_directory, directory})
+    assert {:ok, %{"items" => []}} = TraceLog.query(normal_log, :list_runs, %{})
+    assert {:ok, %{"items" => []}} = TraceLog.query(private_log, :list_runs, %{})
+  end
+
+  @tag :tmp_dir
   test "file and directory grants reject malformed, duplicate, changed, and oversized sources", %{
     tmp_dir: directory
   } do

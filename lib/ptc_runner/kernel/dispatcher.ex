@@ -11,6 +11,7 @@ defmodule PtcRunner.Kernel.Dispatcher do
 
   alias PtcRunner.Kernel.Capability
   alias PtcRunner.Kernel.Events
+  alias PtcRunner.Kernel.InspectionSink
   alias PtcRunner.Kernel.JSONSchema
   alias PtcRunner.Kernel.JSONValue
   alias PtcRunner.Kernel.ProviderError
@@ -52,11 +53,47 @@ defmodule PtcRunner.Kernel.Dispatcher do
   def dispatch(
         state,
         environment,
-        %{capabilities: capabilities},
+        environment_value,
         name,
         arguments,
         timeout_ms,
         event_sink
+      ) do
+    dispatch(
+      state,
+      environment,
+      environment_value,
+      name,
+      arguments,
+      timeout_ms,
+      event_sink,
+      nil
+    )
+  end
+
+  def dispatch(
+        state,
+        environment,
+        %{capabilities: _capabilities},
+        _name,
+        %AmbiguousArguments{},
+        _timeout_ms,
+        event_sink,
+        _inspection_sink
+      )
+      when environment in [:workflow, :mission] do
+    protocol_error(state, event_sink, :ambiguous_arguments)
+  end
+
+  def dispatch(
+        state,
+        environment,
+        %{capabilities: capabilities},
+        name,
+        arguments,
+        timeout_ms,
+        event_sink,
+        inspection_sink
       )
       when environment in [:workflow, :mission] and is_binary(name) and is_map(arguments) and
              is_integer(timeout_ms) do
@@ -70,7 +107,8 @@ defmodule PtcRunner.Kernel.Dispatcher do
         arguments,
         timeout_ms,
         environment,
-        event_sink
+        event_sink,
+        inspection_sink
       )
     else
       nil ->
@@ -96,14 +134,49 @@ defmodule PtcRunner.Kernel.Dispatcher do
     end
   end
 
-  defp invoke_with_events(state, capability, arguments, timeout_ms, environment, event_sink) do
+  defp invoke_with_events(
+         state,
+         capability,
+         arguments,
+         timeout_ms,
+         environment,
+         event_sink,
+         inspection_sink
+       ) do
     capability_id = Events.id("capability")
     started_ms = System.monotonic_time(:millisecond)
     data = %{capability_id: capability_id, environment: environment, name: capability.name}
 
     case Events.emit(state, event_sink, "capability-started", data) do
       :ok ->
-        result = invoke(state, capability, arguments, timeout_ms)
+        {result, input_captured?} =
+          case inspection_input(
+                 inspection_sink,
+                 capability_id,
+                 environment,
+                 capability.name,
+                 arguments
+               ) do
+            :ok -> {invoke(state, capability, arguments, timeout_ms), true}
+            {:error, :inspection_sink_error} -> {inspection_failure(state), false}
+          end
+
+        result =
+          if input_captured? do
+            case inspection_output(
+                   inspection_sink,
+                   capability_id,
+                   environment,
+                   capability.name,
+                   result
+                 ) do
+              :ok -> result
+              {:error, :inspection_sink_error} -> inspection_failure(state)
+            end
+          else
+            result
+          end
+
         _ = maybe_emit_limit(state, event_sink, result)
 
         _ =
@@ -121,6 +194,39 @@ defmodule PtcRunner.Kernel.Dispatcher do
         RunState.release_provider_slot(state)
         limit_error(state, nil, :run_closed)
     end
+  end
+
+  defp inspection_input(nil, _capability_id, _environment, _name, _arguments), do: :ok
+
+  defp inspection_input(sink, capability_id, environment, name, arguments) do
+    InspectionSink.emit(
+      sink,
+      "capability-input",
+      %{capability_id: capability_id},
+      %{environment: environment, name: name, arguments: arguments}
+    )
+  end
+
+  defp inspection_output(nil, _capability_id, _environment, _name, _result), do: :ok
+
+  defp inspection_output(sink, capability_id, environment, name, result) do
+    InspectionSink.emit(
+      sink,
+      "capability-output",
+      %{capability_id: capability_id},
+      %{environment: environment, name: name, result: result}
+    )
+  end
+
+  defp inspection_failure(state) do
+    :ok = RunState.fail(state, :inspection_sink_error, :inspection_sink_error)
+
+    %{
+      status: :error,
+      kind: :inspection_sink_error,
+      reason: :inspection_sink_error,
+      retryable?: false
+    }
   end
 
   defp invoke(state, capability, arguments, requested_timeout_ms) do

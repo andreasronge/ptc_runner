@@ -1,4 +1,5 @@
 import { renderKernelTranscript } from './kernel-transcript.js';
+import { renderInspection } from './inspection.js';
 import { escapeHtml, truncate } from './utils.js';
 
 function formatDate(isoString) {
@@ -84,9 +85,10 @@ function setupRunPicker(page, priorRuns = []) {
 }
 
 async function loadRun(runId) {
-  const [runResponse, turnsResponse] = await Promise.all([
+  const [runResponse, turnsResponse, inspectionResponse] = await Promise.all([
     fetch(`/api/kernel/runs/${encodeURIComponent(runId)}`),
-    fetch(`/api/kernel/runs/${encodeURIComponent(runId)}/turns?limit=100`)
+    fetch(`/api/kernel/runs/${encodeURIComponent(runId)}/turns?limit=100`),
+    fetch(`/api/inspection/runs/${encodeURIComponent(runId)}`)
   ]);
 
   if (!runResponse.ok || !turnsResponse.ok) {
@@ -95,12 +97,13 @@ async function loadRun(runId) {
     return;
   }
 
-  renderRun({ metadata: await runResponse.json(), turns: await turnsResponse.json() });
+  const inspection = inspectionResponse.ok ? await inspectionResponse.json() : null;
+  renderRun({ metadata: await runResponse.json(), turns: await turnsResponse.json(), inspection });
 }
 
 function renderRun(data) {
   state.currentRun = data;
-  const { metadata, turns } = data;
+  const { metadata, turns, inspection } = data;
   document.getElementById('breadcrumb').innerHTML = `
     <span class="breadcrumb-item breadcrumb-home">Runs</span>
     <span class="breadcrumb-sep">/</span>
@@ -129,10 +132,12 @@ function renderRun(data) {
       const nextPage = await response.json();
       renderRun({
         metadata,
+        inspection,
         turns: { ...nextPage, items: [...(turns.items || []), ...(nextPage.items || [])] }
       });
     }
   });
+  renderInspection(document.getElementById('view-container'), inspection);
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 

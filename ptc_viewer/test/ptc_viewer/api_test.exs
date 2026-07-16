@@ -38,9 +38,44 @@ defmodule PtcViewer.ApiTest do
              PtcViewer.Api.kernel_query(config, :list_runs, %{})
   end
 
+  test "inspection delegates only the exact configured file and run", %{trace_dir: trace_dir} do
+    parent = self()
+    artifact = Path.join(trace_dir, "run.inspection.jsonl")
+
+    adapter = fn path, run_id ->
+      send(parent, {:inspection, path, run_id})
+      {:ok, %{"run_id" => run_id, "records" => []}}
+    end
+
+    config = [
+      trace_dir: trace_dir,
+      kernel_trace_adapter: nil,
+      inspection_file: artifact,
+      inspection_adapter: adapter
+    ]
+
+    assert {:ok, %{"run_id" => "run-1", "records" => []}} =
+             PtcViewer.Api.inspection(config, "run-1")
+
+    assert_receive {:inspection, ^artifact, "run-1"}
+    assert {:error, :unavailable} = PtcViewer.Api.inspection([], "run-1")
+  end
+
   test "start rejects an adapter that does not implement the query contract" do
     assert {:error, :invalid_kernel_trace_adapter} =
              PtcViewer.start(kernel_trace_adapter: String, open: false)
+  end
+
+  test "start requires a valid inspection adapter for a fixed file" do
+    assert {:error, :invalid_inspection_config} =
+             PtcViewer.start(inspection_file: "run.inspection.jsonl", open: false)
+
+    assert {:error, :invalid_inspection_adapter} =
+             PtcViewer.start(
+               inspection_file: "run.inspection.jsonl",
+               inspection_adapter: String,
+               open: false
+             )
   end
 
   test "legacy raw trace API is absent" do

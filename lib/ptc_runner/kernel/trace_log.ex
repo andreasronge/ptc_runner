@@ -306,7 +306,7 @@ defmodule PtcRunner.Kernel.TraceLog do
   end
 
   defp validate_source({:file, path}) when is_binary(path) do
-    case {private_path?(path), File.lstat(path)} do
+    case {reserved_path?(path), File.lstat(path)} do
       {true, _stat} ->
         {:error, :invalid_trace_log}
 
@@ -384,7 +384,7 @@ defmodule PtcRunner.Kernel.TraceLog do
     names
     |> Enum.filter(fn name ->
       Path.basename(name) == name and String.ends_with?(name, ".jsonl") and
-        private_path?(name) == (source_kind == :private)
+        not inspection_path?(name) and private_path?(name) == (source_kind == :private)
     end)
     |> Enum.sort()
   end
@@ -876,4 +876,6 @@ defmodule PtcRunner.Kernel.TraceLog do
   defp normalize(value), do: value
 
   defp private_path?(path), do: String.ends_with?(path, ".private.jsonl")
+  defp inspection_path?(path), do: String.ends_with?(path, ".inspection.jsonl")
+  defp reserved_path?(path), do: private_path?(path) or inspection_path?(path)
 end

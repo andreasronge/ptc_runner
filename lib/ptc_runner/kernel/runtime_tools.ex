@@ -42,7 +42,7 @@ defmodule PtcRunner.Kernel.RuntimeTools do
   end
 
   @doc "Builds the workflow-only subordinate-evaluation callback."
-  def kernel_eval(state, mission, limits, event_sink) do
+  def kernel_eval(state, mission, limits, event_sink, inspection_sink \\ nil) do
     fn
       %{"kind" => kind, "source" => source} when is_binary(source) ->
         if keyword_name(kind) == "source" do
@@ -54,7 +54,8 @@ defmodule PtcRunner.Kernel.RuntimeTools do
                 mission,
                 source,
                 limits.evaluation_timeout_ms,
-                event_sink
+                event_sink,
+                inspection_sink
               )
           }
         else
@@ -71,7 +72,8 @@ defmodule PtcRunner.Kernel.RuntimeTools do
                 mission,
                 source,
                 limits.evaluation_timeout_ms,
-                event_sink
+                event_sink,
+                inspection_sink
               )
           }
         else

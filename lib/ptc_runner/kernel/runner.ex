@@ -166,7 +166,8 @@ defmodule PtcRunner.Kernel.Runner do
              name,
              arguments,
              config.limits.workflow_timeout_ms,
-             config.event_sink
+             config.event_sink,
+             config.inspection_sink
            )
          end}
       end)
@@ -186,7 +187,8 @@ defmodule PtcRunner.Kernel.Runner do
           state,
           config.mission_environment,
           config.limits,
-          config.event_sink
+          config.event_sink,
+          config.inspection_sink
         )
       )
     )

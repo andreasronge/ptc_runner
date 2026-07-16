@@ -10,6 +10,7 @@ defmodule PtcRunner.Kernel.Evaluation do
 
   alias PtcRunner.Kernel.Dispatcher
   alias PtcRunner.Kernel.Events
+  alias PtcRunner.Kernel.InspectionSink
   alias PtcRunner.Kernel.RunState
   alias PtcRunner.Kernel.RuntimeTools
   alias PtcRunner.Lisp
@@ -18,11 +19,24 @@ defmodule PtcRunner.Kernel.Evaluation do
   @doc "Evaluates bounded subordinate source with optional canonical event collection."
   @spec evaluate_source(RunState.t(), map(), binary(), non_neg_integer()) :: map()
   def evaluate_source(state, mission_environment, source, timeout_ms) when is_binary(source) do
-    evaluate_source(state, mission_environment, source, timeout_ms, nil)
+    evaluate_source(state, mission_environment, source, timeout_ms, nil, nil)
   end
 
   @spec evaluate_source(RunState.t(), map(), binary(), non_neg_integer(), term()) :: map()
   def evaluate_source(state, mission_environment, source, timeout_ms, event_sink)
+      when is_binary(source) do
+    evaluate_source(state, mission_environment, source, timeout_ms, event_sink, nil)
+  end
+
+  @spec evaluate_source(RunState.t(), map(), binary(), non_neg_integer(), term(), term()) :: map()
+  def evaluate_source(
+        state,
+        mission_environment,
+        source,
+        timeout_ms,
+        event_sink,
+        inspection_sink
+      )
       when is_binary(source) do
     with :ok <- source_within_limit(source, RunState.limits(state).subordinate_source_bytes),
          {:ok, memory, lease} <- RunState.reserve_evaluation(state) do
@@ -33,7 +47,8 @@ defmodule PtcRunner.Kernel.Evaluation do
         timeout_ms,
         memory,
         lease,
-        event_sink
+        event_sink,
+        inspection_sink
       )
     else
       {:error, :busy} -> failure(:busy, :evaluation_in_progress)
@@ -43,7 +58,16 @@ defmodule PtcRunner.Kernel.Evaluation do
     end
   end
 
-  defp evaluate_with_lease(state, environment, source, timeout_ms, memory, lease, event_sink) do
+  defp evaluate_with_lease(
+         state,
+         environment,
+         source,
+         timeout_ms,
+         memory,
+         lease,
+         event_sink,
+         inspection_sink
+       ) do
     limits = RunState.limits(state)
 
     timeout_ms =
@@ -52,35 +76,53 @@ defmodule PtcRunner.Kernel.Evaluation do
     deadline_ms = System.monotonic_time(:millisecond) + timeout_ms
     evaluation_id = Events.id("mission-evaluation")
     started_ms = System.monotonic_time(:millisecond)
+    source_hash = sha256(source)
+    source_bytes = byte_size(source)
 
-    case Events.emit(state, event_sink, "evaluation-started", %{
-           evaluation_id: evaluation_id,
-           environment: :mission
-         }) do
-      :ok ->
-        result =
-          execute_with_lease(
-            state,
-            environment,
-            source,
-            timeout_ms,
-            memory,
-            lease,
-            event_sink,
-            deadline_ms
-          )
+    with :ok <-
+           inspection_source(
+             inspection_sink,
+             evaluation_id,
+             source,
+             source_hash,
+             source_bytes
+           ),
+         :ok <-
+           Events.emit(state, event_sink, "evaluation-started", %{
+             evaluation_id: evaluation_id,
+             environment: :mission,
+             program_kind: :"ptc-lisp",
+             source_hash: source_hash,
+             source_bytes: source_bytes
+           }) do
+      result =
+        execute_with_lease(
+          state,
+          environment,
+          source,
+          timeout_ms,
+          memory,
+          lease,
+          %{event_sink: event_sink, inspection_sink: inspection_sink},
+          deadline_ms
+        )
 
-        _ = maybe_emit_limit(state, event_sink, result)
+      _ = maybe_emit_limit(state, event_sink, result)
 
-        _ =
-          Events.emit(state, event_sink, "evaluation-stopped", %{
-            evaluation_id: evaluation_id,
-            environment: :mission,
-            status: result.outcome,
-            duration_ms: Events.duration_ms(started_ms)
-          })
+      _ =
+        Events.emit(state, event_sink, "evaluation-stopped", %{
+          evaluation_id: evaluation_id,
+          environment: :mission,
+          status: result.outcome,
+          duration_ms: Events.duration_ms(started_ms)
+        })
 
-        result
+      result
+    else
+      {:error, :inspection_sink_error} ->
+        :ok = RunState.release_evaluation(state, lease)
+        :ok = RunState.fail(state, :inspection_sink_error, :inspection_sink_error)
+        failure(:evaluation_error, :inspection_sink_error)
 
       {:error, :event_sink_error} ->
         :ok = RunState.release_evaluation(state, lease)
@@ -95,7 +137,7 @@ defmodule PtcRunner.Kernel.Evaluation do
          timeout_ms,
          memory,
          lease,
-         event_sink,
+         capture,
          deadline_ms
        ) do
     limits = RunState.limits(state)
@@ -103,7 +145,14 @@ defmodule PtcRunner.Kernel.Evaluation do
     options = [
       context: environment.data,
       memory: memory,
-      tools: mission_tools(environment, state, timeout_ms, event_sink),
+      tools:
+        mission_tools(
+          environment,
+          state,
+          timeout_ms,
+          capture.event_sink,
+          capture.inspection_sink
+        ),
       prelude: bundle_prelude(environment),
       timeout: timeout_ms,
       compile_timeout: timeout_ms,
@@ -151,7 +200,7 @@ defmodule PtcRunner.Kernel.Evaluation do
     }
   end
 
-  defp mission_tools(environment, state, timeout_ms, event_sink) do
+  defp mission_tools(environment, state, timeout_ms, event_sink, inspection_sink) do
     environment.capabilities
     |> Map.new(fn {name, _capability} ->
       {name,
@@ -163,7 +212,8 @@ defmodule PtcRunner.Kernel.Evaluation do
            name,
            arguments,
            timeout_ms,
-           event_sink
+           event_sink,
+           inspection_sink
          )
        end}
     end)
@@ -190,4 +240,24 @@ defmodule PtcRunner.Kernel.Evaluation do
   end
 
   defp maybe_emit_limit(_state, _event_sink, _result), do: :ok
+
+  defp inspection_source(nil, _evaluation_id, _source, _source_hash, _source_bytes), do: :ok
+
+  defp inspection_source(sink, evaluation_id, source, source_hash, source_bytes) do
+    InspectionSink.emit(
+      sink,
+      "evaluation-source",
+      %{evaluation_id: evaluation_id},
+      %{
+        environment: :mission,
+        program_kind: :"ptc-lisp",
+        source: source,
+        source_hash: source_hash,
+        source_bytes: source_bytes
+      }
+    )
+  end
+
+  defp sha256(source),
+    do: :crypto.hash(:sha256, source) |> Base.encode16(case: :lower)
 end

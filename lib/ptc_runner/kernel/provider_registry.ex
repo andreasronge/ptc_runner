@@ -29,6 +29,7 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
           destination: :workflow | :mission,
           owner: pid(),
           limits: PtcRunner.Kernel.Limits.t(),
+          installed_limits: PtcRunner.Kernel.Limits.t(),
           provider: binary()
         }
   @type built_provider :: %{

@@ -11,6 +11,9 @@ defmodule PtcRunner.Kernel.RunBuilder do
 
   alias PtcRunner.Kernel
   alias PtcRunner.Kernel.EventSink
+  alias PtcRunner.Kernel.InspectionArtifact
+  alias PtcRunner.Kernel.InspectionSink
+  alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.Manifest
   alias PtcRunner.Kernel.MissionEnvironment
   alias PtcRunner.Kernel.ProviderRegistry
@@ -18,17 +21,19 @@ defmodule PtcRunner.Kernel.RunBuilder do
   alias PtcRunner.Kernel.TraceLog
   alias PtcRunner.Kernel.WorkflowEnvironment
 
-  @spec build(Manifest.t(), ProviderRegistry.t()) ::
+  @spec build(Manifest.t(), ProviderRegistry.t(), keyword()) ::
           {:ok, %{entry_source: binary(), config: RunConfig.t()}} | {:error, term()}
   @doc "Builds an entry expression and complete run configuration from a loaded manifest."
-  def build(%Manifest{} = manifest, %ProviderRegistry{} = registry) do
+  def build(manifest, registry, opts \\ [])
+
+  def build(%Manifest{} = manifest, %ProviderRegistry{} = registry, opts) when is_list(opts) do
     case providers(manifest, registry) do
-      {:ok, providers} -> build_with_providers(manifest, providers)
+      {:ok, providers} -> build_with_providers(manifest, providers, opts)
       {:error, _reason} = error -> error
     end
   end
 
-  defp build_with_providers(manifest, providers) do
+  defp build_with_providers(manifest, providers, opts) do
     result =
       with {:ok, workflow_bundle} <- bundle(manifest.workflow_components),
            {:ok, mission_bundle} <- bundle(manifest.mission_components),
@@ -43,8 +48,17 @@ defmodule PtcRunner.Kernel.RunBuilder do
                capabilities: providers.mission.capabilities,
                data: manifest.mission_data
              ),
-           {:ok, sink} <- event_sink(manifest) do
-        build_config(manifest, providers, workflow, mission, sink)
+           {:ok, sink} <- event_sink(manifest),
+           {:ok, inspection_sink, inspection_path} <- inspection_sink(sink, opts) do
+        build_config(
+          manifest,
+          providers,
+          workflow,
+          mission,
+          sink,
+          inspection_sink,
+          inspection_path
+        )
       end
 
     case result do
@@ -57,13 +71,23 @@ defmodule PtcRunner.Kernel.RunBuilder do
     end
   end
 
-  defp build_config(manifest, providers, workflow, mission, sink) do
+  defp build_config(
+         manifest,
+         providers,
+         workflow,
+         mission,
+         sink,
+         inspection_sink,
+         inspection_path
+       ) do
     case RunConfig.new(
            workflow_environment: workflow,
            mission_environment: mission,
            input: %{"input" => manifest.input},
            limits: manifest.limits,
            event_sink: sink,
+           inspection_sink: inspection_sink,
+           inspection_path: inspection_path,
            provider_resources: providers.resources,
            connector_snapshots: providers.snapshots,
            labels: manifest.labels
@@ -72,6 +96,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
         {:ok, %{entry_source: "(#{manifest.entry} data/input)", config: config}}
 
       {:error, _reason} = error ->
+        if inspection_sink, do: InspectionSink.stop(inspection_sink)
         EventSink.stop(sink)
         error
     end
@@ -108,6 +133,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
 
   def close(%RunConfig{} = config) do
     RunConfig.close_provider_resources(config)
+    if config.inspection_sink, do: InspectionSink.stop(config.inspection_sink)
 
     if Process.alive?(config.event_sink.pid), do: EventSink.stop(config.event_sink)
     :ok
@@ -132,9 +158,15 @@ defmodule PtcRunner.Kernel.RunBuilder do
   defp execute_built(built, opts) do
     result = Kernel.run(built.entry_source, built.config)
 
-    case persist_trace(Keyword.get(opts, :trace), built.config.event_sink) do
-      :ok -> result
-      {:error, reason} -> {:error, {:trace_persistence_failed, reason, result}}
+    with :ok <- persist_trace(Keyword.get(opts, :trace), built.config.event_sink),
+         :ok <- persist_inspection(built.config) do
+      result
+    else
+      {:error, {:trace, reason}} ->
+        {:error, {:trace_persistence_failed, reason, result}}
+
+      {:error, {:inspection, reason}} ->
+        {:error, {:inspection_persistence_failed, reason, result}}
     end
   end
 
@@ -148,9 +180,11 @@ defmodule PtcRunner.Kernel.RunBuilder do
   option; it changes top-level workflow input, not mission-environment data.
   """
   def load_and_build(path, registry, opts \\ []) do
-    with {:ok, manifest} <- Manifest.load(path),
+    installed_limits = Keyword.get(opts, :installed_limits, Limits.installed_defaults())
+
+    with {:ok, manifest} <- Manifest.load(path, installed_limits),
          {:ok, manifest} <- maybe_override_input(manifest, opts),
-         do: build(manifest, registry)
+         do: build(manifest, registry, opts)
   end
 
   @spec run(binary(), ProviderRegistry.t()) :: {:ok, term()} | {:error, term()}
@@ -167,6 +201,8 @@ defmodule PtcRunner.Kernel.RunBuilder do
       try do
         execute_built(built, opts)
       after
+        if built.config.inspection_sink, do: InspectionSink.stop(built.config.inspection_sink)
+
         if Process.alive?(built.config.event_sink.pid),
           do: EventSink.stop(built.config.event_sink)
       end
@@ -184,10 +220,30 @@ defmodule PtcRunner.Kernel.RunBuilder do
 
   defp persist_trace(path, sink) when is_binary(path) do
     private? = EventSink.policy(sink) == :private
-    TraceLog.append_jsonl(path, EventSink.events(sink), private: private?)
+
+    case TraceLog.append_jsonl(path, EventSink.events(sink), private: private?) do
+      :ok -> :ok
+      {:error, reason} -> {:error, {:trace, reason}}
+    end
   end
 
-  defp persist_trace(_path, _sink), do: {:error, :invalid_trace_log}
+  defp persist_trace(_path, _sink), do: {:error, {:trace, :invalid_trace_log}}
+
+  defp persist_inspection(%RunConfig{inspection_sink: nil}), do: :ok
+
+  defp persist_inspection(%RunConfig{} = config) do
+    with {:ok, records} <- InspectionSink.records(config.inspection_sink),
+         :ok <-
+           InspectionArtifact.persist(
+             config.inspection_path,
+             records,
+             EventSink.events(config.event_sink)
+           ) do
+      :ok
+    else
+      {:error, reason} -> {:error, {:inspection, reason}}
+    end
+  end
 
   defp capabilities(manifest, registry, destination) do
     manifest.providers
@@ -199,7 +255,8 @@ defmodule PtcRunner.Kernel.RunBuilder do
           directory: manifest.directory,
           destination: destination,
           owner: self(),
-          limits: manifest.limits
+          limits: manifest.limits,
+          installed_limits: manifest.installed_limits
         }
 
         case ProviderRegistry.build(
@@ -240,6 +297,31 @@ defmodule PtcRunner.Kernel.RunBuilder do
       |> maybe_put(:trace_id, manifest.events.trace_id)
 
     EventSink.start(manifest.events.policy, manifest.limits, opts)
+  end
+
+  defp inspection_sink(event_sink, opts) do
+    case Keyword.get(opts, :inspect) do
+      nil ->
+        {:ok, nil, nil}
+
+      path when is_binary(path) ->
+        result =
+          with {:ok, identity} <- EventSink.identity(event_sink),
+               {:ok, inspection_sink} <-
+                 InspectionSink.start(
+                   run_id: identity.run_id,
+                   trace_id: identity.trace_id
+                 ) do
+            {:ok, inspection_sink, Path.expand(path)}
+          end
+
+        if match?({:error, _reason}, result), do: EventSink.stop(event_sink)
+        result
+
+      _path ->
+        EventSink.stop(event_sink)
+        {:error, :invalid_inspection_path}
+    end
   end
 
   defp maybe_put(opts, _key, nil), do: opts
