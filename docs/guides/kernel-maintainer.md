@@ -186,7 +186,7 @@ contract remains in the [TraceLog contract](../plans/lisp-kernel/tracelog-contra
 | Public execution boundary | `PtcRunner.Kernel`, `PtcRunner.Kernel.RunConfig`, `PtcRunner.Kernel.Result`, `PtcRunner.Kernel.Error` |
 | Components and compiled code | `PtcRunner.Kernel.Component`, `PtcRunner.Kernel.FrozenBundle`, `PtcRunner.Kernel.Library`, internal `PtcRunner.Kernel.BundleCompiler` |
 | Authority construction | `PtcRunner.Kernel.Capability`, `PtcRunner.Kernel.WorkflowEnvironment`, `PtcRunner.Kernel.MissionEnvironment`, internal `PtcRunner.Kernel.Environment` |
-| Manifest-backed assembly | `PtcRunner.Kernel.Manifest`, `PtcRunner.Kernel.ProviderRegistry`, `PtcRunner.Kernel.RunBuilder` |
+| Manifest-backed assembly | `PtcRunner.Kernel.Manifest`, `PtcRunner.Kernel.ProviderRegistry`, `PtcRunner.Kernel.RunBuilder`, `PtcRunner.Kernel.MissionInventory` |
 | Enforced resources | `PtcRunner.Kernel.Limits`, internal `PtcRunner.Kernel.RunState` and `PtcRunner.Kernel.BoundedWorker` |
 | Execution and dispatch | internal `PtcRunner.Kernel.Runner`, `PtcRunner.Kernel.Dispatcher`, `PtcRunner.Kernel.Evaluation`, `PtcRunner.Kernel.RuntimeTools` |
 | Provider adapters | `PtcRunner.Kernel.FileCapability`, `PtcRunner.Kernel.LLMCapability`, `PtcRunner.Kernel.TraceCapability` |
@@ -213,7 +213,15 @@ To add a host capability:
 To add a shipped Lisp library, add its source under `priv/preludes/kernel/`,
 register it in `PtcRunner.Kernel.Library`, declare component dependencies, and
 recompile the shipped preludes. Agent policy should normally change here rather
-than in the Kernel execution modules.
+than in the Kernel execution modules. Manifest `{"library": id}` selections
+expand their installed dependency closure deterministically and are compiled
+with local components; local IDs cannot shadow installed IDs.
+
+`RunConfig` freezes one bounded deterministic mission inventory containing
+prompt-visible exports, model-visible capability schemas, and mission limits.
+Normal runs and REPL sessions expose the same inventory through the reserved
+`kernel-mission-inventory` route. Keep this projection payload-free and update
+its exact golden test whenever its versioned contract changes.
 
 To add a frontend, build through `PtcRunner.Kernel.RunBuilder` or construct the
 same public Kernel values directly. Do not create a second manifest parser,

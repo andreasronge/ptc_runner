@@ -15,3 +15,11 @@
     (if (= :ok (get response :status))
       (get response :value)
       response)))
+
+(defn mission-inventory
+  "Return the exact frozen model-visible mission inventory JSON."
+  []
+  (let [response (tool/kernel-mission-inventory {})]
+    (if (= :ok (get response :status))
+      (get response :value)
+      response)))

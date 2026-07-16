@@ -5,5 +5,12 @@
        ". Call run_ptc_lisp exactly once with one program string."))
 
 (defn evaluation-error [evaluation]
-  (str "The PTC-Lisp evaluation did not return successfully ("
-       (get evaluation :outcome) "). Send one corrected run_ptc_lisp call."))
+  (let [outcome (get evaluation :outcome)
+        code (or (get evaluation :kind)
+                 (get evaluation :reason)
+                 outcome)
+        message (get-in evaluation [:details :message])]
+    (str "The PTC-Lisp evaluation did not return successfully. "
+         "outcome=" outcome "; error_code=" code
+         (if message (str "; message=" message) "")
+         ". Send one corrected run_ptc_lisp call.")))

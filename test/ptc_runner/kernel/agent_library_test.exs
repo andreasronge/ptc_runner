@@ -147,6 +147,40 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
 
     assert {:ok, %{value: %{"ok" => true, "value" => 7}}} =
              Kernel.run(~S|(agent.core/run "Correct errors" {"max_turns" 3})|, config)
+
+    assert_receive {:agent_request, first_request}
+    assert_receive {:agent_request, second_request}
+    assert_receive {:agent_request, third_request}
+
+    inventory = config.mission_inventory.rendered
+    assert first_request["system"] =~ inventory
+    assert second_request["system"] =~ inventory
+    assert third_request["system"] =~ inventory
+
+    assert [
+             %{"role" => "user", "content" => "Correct errors"},
+             %{"role" => "user", "content" => protocol_feedback},
+             %{
+               "role" => "assistant",
+               "content" => nil,
+               "tool_calls" => [failed_call]
+             },
+             %{
+               "role" => "tool",
+               "tool_call_id" => "eval-bad",
+               "content" => evaluation_feedback
+             }
+           ] = third_request["messages"]
+
+    assert protocol_feedback =~ "Protocol error"
+
+    assert failed_call == %{
+             "id" => "eval-bad",
+             "name" => "run_ptc_lisp",
+             "args" => %{"program" => "(missing/function)"}
+           }
+
+    assert evaluation_feedback =~ "evaluation did not return successfully"
   end
 
   test "agent.core exposes explicit failure, provider failure, and generic quota exhaustion" do
@@ -175,9 +209,12 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
   end
 
   defp agent_config(responses, limit_overrides \\ []) do
+    parent = self()
     {:ok, queue} = Agent.start_link(fn -> responses end)
 
-    requester = fn _request ->
+    requester = fn request ->
+      send(parent, {:agent_request, request})
+
       Agent.get_and_update(queue, fn
         [{:error, _reason} = error | rest] -> {error, rest}
         [response | rest] -> {{:ok, response}, rest}

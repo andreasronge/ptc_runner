@@ -8,9 +8,12 @@ defmodule PtcRunner.Kernel.RuntimeTools do
   """
 
   alias PtcRunner.Kernel.Environment
+  alias PtcRunner.Kernel.Evaluation
   alias PtcRunner.Kernel.Events
   alias PtcRunner.Kernel.JSONValue
+  alias PtcRunner.Kernel.Program
   alias PtcRunner.Kernel.RunState
+  alias PtcRunner.Lisp.Keyword, as: LispKeyword
   alias PtcRunner.Lisp.RetainedSize
 
   @doc "Builds the reserved runtime-tool map for one environment."
@@ -25,6 +28,59 @@ defmodule PtcRunner.Kernel.RuntimeTools do
     |> Map.new(fn {name, callback} ->
       {name, instrument(state, event_sink, kind, name, callback)}
     end)
+  end
+
+  @doc "Builds the workflow-only frozen mission-inventory callback."
+  def mission_inventory(state, rendered) when is_binary(rendered) do
+    fn
+      arguments when is_map(arguments) and map_size(arguments) == 0 ->
+        %{status: :ok, value: rendered}
+
+      _arguments ->
+        protocol_error(state, :invalid_mission_inventory_request)
+    end
+  end
+
+  @doc "Builds the workflow-only subordinate-evaluation callback."
+  def kernel_eval(state, mission, limits, event_sink) do
+    fn
+      %{"kind" => kind, "source" => source} when is_binary(source) ->
+        if keyword_name(kind) == "source" do
+          %{
+            status: :ok,
+            value:
+              Evaluation.evaluate_source(
+                state,
+                mission,
+                source,
+                limits.evaluation_timeout_ms,
+                event_sink
+              )
+          }
+        else
+          invalid_kernel_eval_request(state)
+        end
+
+      %{"kind" => kind, "program" => %Program{source: source}} ->
+        if keyword_name(kind) == "embedded" do
+          %{
+            status: :ok,
+            value:
+              Evaluation.evaluate_source(
+                state,
+                mission,
+                source,
+                limits.evaluation_timeout_ms,
+                event_sink
+              )
+          }
+        else
+          invalid_kernel_eval_request(state)
+        end
+
+      _arguments ->
+        invalid_kernel_eval_request(state)
+    end
   end
 
   @doc "Wraps an internal runtime callback with canonical capability events."
@@ -120,6 +176,26 @@ defmodule PtcRunner.Kernel.RuntimeTools do
         %{status: :error, kind: :limit_exceeded, reason: :protocol_errors}
     end
   end
+
+  defp invalid_kernel_eval_request(state) do
+    case RunState.protocol_error(state) do
+      :ok ->
+        %{
+          status: :error,
+          kind: :protocol_error,
+          reason: :invalid_kernel_eval_request,
+          retryable?: false
+        }
+
+      {:error, :protocol_error_limit} ->
+        %{status: :error, kind: :limit_exceeded, reason: :protocol_errors, retryable?: false}
+    end
+  end
+
+  defp keyword_name(%LispKeyword{name: name}), do: name
+  defp keyword_name(name) when is_atom(name), do: Atom.to_string(name)
+  defp keyword_name(name) when is_binary(name), do: name
+  defp keyword_name(_value), do: nil
 
   defp result_status(%{status: status}), do: status
   defp result_status(_result), do: :ok

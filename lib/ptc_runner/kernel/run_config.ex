@@ -10,6 +10,9 @@ defmodule PtcRunner.Kernel.RunConfig do
   - `limits` — normalized positive runtime ceilings;
   - `event_sink` — the bounded owner of canonical run events.
 
+  Construction derives and freezes `mission_inventory` from the mission
+  environment and limits. Hosts cannot supply mutable inventory text.
+
   `labels` is an optional bounded JSON-like map copied into `run-started`.
   Constructing a config validates shape and ownership objects but performs no
   execution and grants no authority beyond the supplied environments.
@@ -19,15 +22,24 @@ defmodule PtcRunner.Kernel.RunConfig do
   alias PtcRunner.Kernel.JSONValue
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.MissionEnvironment
+  alias PtcRunner.Kernel.MissionInventory
   alias PtcRunner.Kernel.WorkflowEnvironment
 
-  @enforce_keys [:workflow_environment, :mission_environment, :input, :limits, :event_sink]
+  @enforce_keys [
+    :workflow_environment,
+    :mission_environment,
+    :input,
+    :limits,
+    :event_sink,
+    :mission_inventory
+  ]
   defstruct [
     :workflow_environment,
     :mission_environment,
     :input,
     :limits,
     :event_sink,
+    :mission_inventory,
     labels: %{}
   ]
 
@@ -37,10 +49,12 @@ defmodule PtcRunner.Kernel.RunConfig do
           input: map(),
           limits: Limits.t(),
           event_sink: EventSink.t(),
+          mission_inventory: MissionInventory.t(),
           labels: map()
         }
 
-  @spec new(keyword()) :: {:ok, t()} | {:error, :invalid_run_config}
+  @spec new(keyword()) ::
+          {:ok, t()} | {:error, :invalid_run_config | :mission_inventory_exceeded}
   @doc "Constructs a run configuration and rejects missing or unknown fields."
   def new(opts) when is_list(opts) do
     with false <-
@@ -52,7 +66,8 @@ defmodule PtcRunner.Kernel.RunConfig do
          true <- JSONValue.map?(Keyword.get(opts, :input)),
          %Limits{} = limits <- Keyword.get(opts, :limits),
          %EventSink{} = sink <- Keyword.get(opts, :event_sink),
-         true <- labels?(Keyword.get(opts, :labels, %{})) do
+         true <- labels?(Keyword.get(opts, :labels, %{})),
+         {:ok, mission_inventory} <- MissionInventory.build(mission, limits) do
       {:ok,
        %__MODULE__{
          workflow_environment: workflow,
@@ -60,9 +75,11 @@ defmodule PtcRunner.Kernel.RunConfig do
          input: Keyword.fetch!(opts, :input),
          limits: limits,
          event_sink: sink,
+         mission_inventory: mission_inventory,
          labels: Keyword.get(opts, :labels, %{})
        }}
     else
+      {:error, :mission_inventory_exceeded} = error -> error
       _ -> {:error, :invalid_run_config}
     end
   end

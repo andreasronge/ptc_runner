@@ -3270,6 +3270,11 @@ including transitive helper and component-dependency calls. Requirements are
 validated against an explicit workflow or mission environment and never grant
 authority. See [Kernel component bundles](guides/capability-prelude.md).
 
+Manifest component arrays may combine local source objects with exact
+`{"library": id}` selections. Library selections resolve only from the trusted
+installed catalog, expand their transitive closure before compilation, and may
+not be repeated or shadowed by a local component ID.
+
 ## 10. Complete Examples
 
 ### 10.1 Filter and Sum (Pure Query)

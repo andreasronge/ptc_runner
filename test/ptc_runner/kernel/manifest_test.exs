@@ -3,6 +3,7 @@ defmodule PtcRunner.Kernel.ManifestTest do
 
   alias PtcRunner.Kernel.Capability
   alias PtcRunner.Kernel.Manifest
+  alias PtcRunner.Kernel.ProviderError
   alias PtcRunner.Kernel.ProviderRegistry
   alias PtcRunner.Kernel.RunBuilder
 
@@ -126,6 +127,74 @@ defmodule PtcRunner.Kernel.ManifestTest do
     File.write!(path, Jason.encode!(manifest))
 
     assert {:error, :invalid_limits} = Manifest.load(path)
+  end
+
+  @tag :tmp_dir
+  test "manifest selects the shipped agent.core dependency closure without source copies", %{
+    tmp_dir: dir
+  } do
+    manifest = %{
+      "version" => 1,
+      "workflow" => %{
+        "components" => [%{"library" => "agent.core"}],
+        "entry" => "agent.core/run"
+      },
+      "input" => %{"value" => %{}},
+      "providers" => %{"workflow" => [%{"name" => "fixture"}]}
+    }
+
+    path = Path.join(dir, "installed-agent.json")
+    File.write!(path, Jason.encode!(manifest))
+
+    builder = fn _config, _context ->
+      Capability.new(
+        name: "llm-request",
+        input_schema: @input_schema,
+        callback: fn _request -> {:error, ProviderError.new(:unavailable)} end
+      )
+    end
+
+    {:ok, registry} = ProviderRegistry.new(%{"fixture" => builder})
+    assert {:ok, built} = RunBuilder.load_and_build(path, registry)
+
+    assert built.config.workflow_environment.bundle.component_ids == [
+             "agent.feedback",
+             "agent.native",
+             "agent.retry",
+             "kernel",
+             "llm",
+             "result",
+             "workflow.event",
+             "agent.core"
+           ]
+  end
+
+  @tag :tmp_dir
+  test "manifest component union rejects duplicates, collisions, and ambiguous entries", %{
+    tmp_dir: dir
+  } do
+    File.write!(Path.join(dir, "kernel.lisp"), "(ns local.kernel)")
+
+    base = %{
+      "version" => 1,
+      "workflow" => %{"components" => [], "entry" => "agent.core/run"},
+      "input" => %{"value" => %{}}
+    }
+
+    invalid_component_lists = [
+      [%{"library" => "agent.core"}, %{"library" => "agent.core"}],
+      [%{"library" => "missing"}],
+      [%{"library" => "kernel"}, %{"id" => "kernel", "path" => "kernel.lisp"}],
+      [%{"library" => "kernel", "path" => "kernel.lisp"}],
+      [%{"id" => "kernel", "path" => "kernel.lisp", "extra" => true}]
+    ]
+
+    for {components, index} <- Enum.with_index(invalid_component_lists) do
+      manifest = put_in(base, ["workflow", "components"], components)
+      path = Path.join(dir, "invalid-components-#{index}.json")
+      File.write!(path, Jason.encode!(manifest))
+      assert {:error, _reason} = Manifest.load(path)
+    end
   end
 
   @tag :tmp_dir

@@ -98,4 +98,157 @@ defmodule PtcRunner.Kernel.Library do
   end
 
   def components(_names), do: {:error, :unknown_library}
+
+  @spec resolve_components([Component.t() | {:library, binary()}]) ::
+          {:ok, [Component.t()]}
+          | {:error,
+             :invalid_component_selection
+             | :duplicate_library_selection
+             | :duplicate_component_id
+             | :unknown_library
+             | :missing_component_dependency
+             | :component_cycle
+             | :local_library_collision
+             | :component_limit_exceeded}
+  @doc """
+  Resolves local components and explicit shipped-library selections.
+
+  Explicit library selections must be unique. Installed dependency closure is
+  expanded from this module only, transitive duplicates coalesce, and local
+  component IDs may not collide with any installed ID. The result is ordered
+  with dependencies before dependants and lexical component-ID tie breaking.
+  Missing dependencies and cycles fail before bundle compilation.
+  """
+  def resolve_components(selections) when is_list(selections) do
+    with {:ok, local, installed_ids} <- split_selections(selections),
+         :ok <- unique_explicit_libraries(installed_ids),
+         {:ok, installed} <- load_installed(installed_ids),
+         {:ok, local_by_id} <- unique_local(local),
+         :ok <- no_collisions(local_by_id, installed),
+         all = Map.merge(installed, local_by_id),
+         true <- map_size(all) <= 128,
+         :ok <- dependencies_exist(all),
+         {:ok, ordered} <- topological_order(all) do
+      {:ok, ordered}
+    else
+      false -> {:error, :component_limit_exceeded}
+      {:error, _reason} = error -> error
+    end
+  end
+
+  def resolve_components(_selections), do: {:error, :invalid_component_selection}
+
+  defp split_selections(selections) do
+    Enum.reduce_while(selections, {:ok, [], []}, fn
+      %Component{} = component, {:ok, local, installed} ->
+        {:cont, {:ok, [component | local], installed}}
+
+      {:library, id}, {:ok, local, installed} when is_binary(id) ->
+        {:cont, {:ok, local, [id | installed]}}
+
+      _selection, _acc ->
+        {:halt, {:error, :invalid_component_selection}}
+    end)
+    |> case do
+      {:ok, local, installed} -> {:ok, Enum.reverse(local), Enum.reverse(installed)}
+      error -> error
+    end
+  end
+
+  defp unique_explicit_libraries(ids) do
+    if ids == Enum.uniq(ids), do: :ok, else: {:error, :duplicate_library_selection}
+  end
+
+  defp load_installed(ids) do
+    Enum.reduce_while(Enum.sort(ids), {:ok, %{}}, fn id, {:ok, loaded} ->
+      case load_installed_component(id, loaded, MapSet.new(), :explicit) do
+        {:ok, next} -> {:cont, {:ok, next}}
+        error -> {:halt, error}
+      end
+    end)
+  end
+
+  defp load_installed_component(id, loaded, visiting, source) do
+    cond do
+      Map.has_key?(loaded, id) ->
+        {:ok, loaded}
+
+      MapSet.member?(visiting, id) ->
+        {:error, :component_cycle}
+
+      true ->
+        load_new_installed_component(id, loaded, visiting, source)
+    end
+  end
+
+  defp load_new_installed_component(id, loaded, visiting, source) do
+    case component(id) do
+      {:ok, component} ->
+        visiting = MapSet.put(visiting, id)
+
+        Enum.reduce_while(component.dependencies, {:ok, loaded}, fn dependency, {:ok, acc} ->
+          case load_installed_component(dependency, acc, visiting, :dependency) do
+            {:ok, next} -> {:cont, {:ok, next}}
+            error -> {:halt, error}
+          end
+        end)
+        |> case do
+          {:ok, dependencies} -> {:ok, Map.put(dependencies, id, component)}
+          error -> error
+        end
+
+      {:error, :unknown_library} when source == :explicit ->
+        {:error, :unknown_library}
+
+      {:error, :unknown_library} ->
+        {:error, :missing_component_dependency}
+    end
+  end
+
+  defp unique_local(components) do
+    Enum.reduce_while(components, {:ok, %{}}, fn %Component{id: id} = component, {:ok, by_id} ->
+      if Map.has_key?(by_id, id),
+        do: {:halt, {:error, :duplicate_component_id}},
+        else: {:cont, {:ok, Map.put(by_id, id, component)}}
+    end)
+  end
+
+  defp no_collisions(local, installed) do
+    if Enum.any?(Map.keys(local), &Map.has_key?(installed, &1)),
+      do: {:error, :local_library_collision},
+      else: :ok
+  end
+
+  defp dependencies_exist(by_id) do
+    if Enum.any?(by_id, fn {_id, component} ->
+         Enum.any?(component.dependencies, &(not Map.has_key?(by_id, &1)))
+       end),
+       do: {:error, :missing_component_dependency},
+       else: :ok
+  end
+
+  defp topological_order(by_id), do: topological_order(by_id, MapSet.new(), [])
+
+  defp topological_order(by_id, resolved, ordered) do
+    if map_size(by_id) == MapSet.size(resolved) do
+      {:ok, Enum.reverse(ordered)}
+    else
+      next =
+        by_id
+        |> Map.values()
+        |> Enum.reject(&MapSet.member?(resolved, &1.id))
+        |> Enum.filter(fn component ->
+          Enum.all?(component.dependencies, &MapSet.member?(resolved, &1))
+        end)
+        |> Enum.min_by(& &1.id, fn -> nil end)
+
+      case next do
+        nil ->
+          {:error, :component_cycle}
+
+        component ->
+          topological_order(by_id, MapSet.put(resolved, component.id), [component | ordered])
+      end
+    end
+  end
 end

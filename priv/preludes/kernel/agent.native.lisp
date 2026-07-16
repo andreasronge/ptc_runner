@@ -54,6 +54,8 @@
               program (if (map? arguments) (get arguments "program") nil)]
           (cond
             (not= "run_ptc_lisp" (call-name call)) (protocol-error :wrong-tool-name)
+            (or (not (string? (get call "id")))
+                (blank? (get call "id"))) (protocol-error :invalid-tool-call-id)
             (not (map? arguments)) (protocol-error :invalid-json-arguments)
             (or (not= 1 (count arguments))
                 (not (contains? arguments "program"))) (protocol-error :extra-or-missing-arguments)

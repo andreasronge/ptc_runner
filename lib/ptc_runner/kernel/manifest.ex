@@ -8,7 +8,8 @@ defmodule PtcRunner.Kernel.Manifest do
         "version": 1,
         "workflow": {
           "components": [
-            {"id": "workflow.main", "path": "workflow.lisp", "dependencies": []}
+            {"id": "workflow.main", "path": "workflow.lisp", "dependencies": ["agent.core"]},
+            {"library": "agent.core"}
           ],
           "entry": "workflow.main/run"
         },
@@ -23,11 +24,15 @@ defmodule PtcRunner.Kernel.Manifest do
   Required top-level fields are `version`, `workflow`, and `input`. Every
   object rejects unknown and duplicate keys.
 
-  `workflow.components` and optional `mission.components` contain
-  manifest-relative source paths. The workflow `entry` is a qualified
-  function name; `PtcRunner.Kernel.RunBuilder` renders the executable entry
-  expression. Input contains exactly one of a JSON object in `value` or a
-  manifest-relative JSON file in `path`.
+  `workflow.components` and optional `mission.components` contain a strict
+  tagged union: local `id`/`path`/optional `dependencies` objects or exact
+  `{"library": id}` selections resolved only through
+  `PtcRunner.Kernel.Library`. Installed dependencies expand deterministically;
+  explicit duplicates, missing dependencies, cycles, and local/installed ID
+  collisions fail loading. The workflow `entry` is a qualified function name;
+  `PtcRunner.Kernel.RunBuilder` renders the executable entry expression. Input
+  contains exactly one of a JSON object in `value` or a manifest-relative JSON
+  file in `path`.
 
   Provider entries contain a bounded `name` and JSON `config`. The manifest can
   select only builders installed in `PtcRunner.Kernel.ProviderRegistry`.
@@ -44,6 +49,7 @@ defmodule PtcRunner.Kernel.Manifest do
   alias PtcRunner.Kernel.Component
   alias PtcRunner.Kernel.FileCapability
   alias PtcRunner.Kernel.JSONValue
+  alias PtcRunner.Kernel.Library
   alias PtcRunner.Kernel.Limits
 
   @max_manifest_bytes 1_000_000
@@ -142,6 +148,7 @@ defmodule PtcRunner.Kernel.Manifest do
          true <- entry =~ @entry do
       {:ok, %{components: components, entry: entry}}
     else
+      {:error, _reason} = error -> error
       _ -> {:error, :invalid_workflow_manifest}
     end
   end
@@ -155,6 +162,7 @@ defmodule PtcRunner.Kernel.Manifest do
          true <- JSONValue.map?(data) do
       {:ok, %{components: components, data: data}}
     else
+      {:error, _reason} = error -> error
       _ -> {:error, :invalid_mission_manifest}
     end
   end
@@ -169,12 +177,21 @@ defmodule PtcRunner.Kernel.Manifest do
       end
     end)
     |> case do
-      {:ok, components} -> {:ok, Enum.reverse(components)}
+      {:ok, components} -> components |> Enum.reverse() |> Library.resolve_components()
       error -> error
     end
   end
 
   defp components(_values, _directory), do: {:error, :invalid_components}
+
+  defp component(%{"library" => library} = value, _directory) do
+    with :ok <- exact_keys(value, ~w(library), ~w(library)),
+         true <- is_binary(library) and String.valid?(library) do
+      {:ok, {:library, library}}
+    else
+      _ -> {:error, :invalid_component}
+    end
+  end
 
   defp component(value, directory) when is_map(value) do
     with :ok <- exact_keys(value, ~w(id path dependencies), ~w(id path)),

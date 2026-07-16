@@ -3,7 +3,9 @@
 (defn- system-message []
   (str "Use the run_ptc_lisp tool exactly once per turn with one program string. "
        "End successful programs with return and explicit failures with fail. "
-       "Do not answer in prose."))
+       "Do not answer in prose.\n\n"
+       "Frozen mission inventory (JSON):\n"
+       (kernel/mission-inventory)))
 
 (defn- retry-or-fail [turn max-turns reason]
   (if (agent.retry/retry? turn max-turns)
@@ -39,9 +41,14 @@
                 (do
                   (retry-or-fail turn max-turns :evaluation-error)
                   (recur (inc turn)
-                         (conj messages
-                               {"role" "user"
-                                "content" (agent.feedback/evaluation-error evaluation)})))))
+                         (conj
+                           (conj messages
+                                 {"role" "assistant"
+                                  "content" nil
+                                  "tool_calls" [(get action :public-tool-call)]})
+                           {"role" "tool"
+                            "tool_call_id" (get action :tool-call-id)
+                            "content" (agent.feedback/evaluation-error evaluation)})))))
 
             :protocol-error
             (do

@@ -2,7 +2,8 @@
   "version": 1,
   "workflow": {
     "components": [
-      {"id": "tutorial.agent", "path": "agent.lisp"}
+      {"id": "tutorial.agent", "path": "agent.lisp", "dependencies": ["agent.core"]},
+      {"library": "agent.core"}
     ],
     "entry": "tutorial.agent/run"
   },

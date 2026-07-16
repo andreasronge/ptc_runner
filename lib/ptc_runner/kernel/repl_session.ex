@@ -19,6 +19,7 @@ defmodule PtcRunner.Kernel.ReplSession do
   alias PtcRunner.Kernel.MissionEnvironment
   alias PtcRunner.Kernel.RunConfig
   alias PtcRunner.Kernel.RunState
+  alias PtcRunner.Kernel.RuntimeTools
   alias PtcRunner.Kernel.WorkflowEnvironment
   alias PtcRunner.Lisp
   alias PtcRunner.Lisp.Result, as: Native
@@ -173,7 +174,9 @@ defmodule PtcRunner.Kernel.ReplSession do
     EventSink.emit(config.event_sink, "run-started", %{
       labels: config.labels,
       workflow_prelude: trace_bundle(config.workflow_environment.bundle),
-      mission_prelude: trace_bundle(config.mission_environment.bundle)
+      mission_prelude: trace_bundle(config.mission_environment.bundle),
+      mission_inventory_hash: config.mission_inventory.hash,
+      mission_inventory_bytes: config.mission_inventory.bytes
     })
   end
 
@@ -273,7 +276,8 @@ defmodule PtcRunner.Kernel.ReplSession do
     environment = session.config.workflow_environment
     timeout_ms = session.config.limits.evaluation_timeout_ms
 
-    Map.new(environment.capabilities, fn {name, _capability} ->
+    environment.capabilities
+    |> Map.new(fn {name, _capability} ->
       callback = fn arguments ->
         Dispatcher.dispatch(
           session.state,
@@ -286,8 +290,37 @@ defmodule PtcRunner.Kernel.ReplSession do
         )
       end
 
-      {name, %TrustedTool{function: callback}}
+      {name, callback}
     end)
+    |> Map.put(
+      "kernel-eval",
+      RuntimeTools.instrument(
+        session.state,
+        session.config.event_sink,
+        :workflow,
+        "kernel-eval",
+        RuntimeTools.kernel_eval(
+          session.state,
+          session.config.mission_environment,
+          session.config.limits,
+          session.config.event_sink
+        )
+      )
+    )
+    |> Map.put(
+      "kernel-mission-inventory",
+      RuntimeTools.instrument(
+        session.state,
+        session.config.event_sink,
+        :workflow,
+        "kernel-mission-inventory",
+        RuntimeTools.mission_inventory(
+          session.state,
+          session.config.mission_inventory.rendered
+        )
+      )
+    )
+    |> Map.new(fn {name, callback} -> {name, %TrustedTool{function: callback}} end)
   end
 
   defp finish_evaluation(session, {:ok, %Native{} = step}, lease, evaluation_id, started_ms) do

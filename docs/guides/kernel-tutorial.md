@@ -156,6 +156,21 @@ another component only when its manifest entry lists the dependency:
 }
 ```
 
+Trusted shipped components are selected without copying their source into the
+project. For example, a local entry can depend on the complete installed
+`agent.core` closure:
+
+```json
+"components": [
+  {"id": "my.workflow", "path": "workflow.lisp", "dependencies": ["agent.core"]},
+  {"library": "agent.core"}
+]
+```
+
+Library IDs resolve only from the runtime's installed catalog. Their transitive
+dependencies are frozen into the same compiled bundle as local components;
+unknown IDs, repeated selections, and local/library ID collisions are rejected.
+
 Dependency IDs must be sorted and unique. Unknown manifest keys, duplicate
 JSON keys, undeclared component calls, missing capabilities, unsafe paths, and
 limit values above the host ceiling are rejected before execution.
@@ -294,7 +309,8 @@ where the model returns data but does not author executable mission logic.
 The file-agent example separates orchestration from task authority:
 
 - the human-authored workflow may call DeepSeek and `kernel-eval`;
-- the model receives one `run_ptc_lisp` tool schema and creates a program;
+- the installed `agent.core` loop gives the model one `run_ptc_lisp` tool
+  schema and the frozen mission inventory, then receives a program;
 - that program executes in the mission environment;
 - only the mission environment has `file-read`, rooted at
   `examples/kernel-tutorial/03-file-agent/files/`;
@@ -312,43 +328,32 @@ The human creates the mission helper:
       response)))
 ```
 
-The human also creates the workflow protocol and feedback policy in
-[`agent.lisp`](https://github.com/andreasronge/ptc_runner/blob/main/examples/kernel-tutorial/03-file-agent/agent.lisp). The
-important loop is:
+The manifest selects the shipped agent library and uses a four-line local entry
+to pass manifest input into it:
 
 ```clojure
-(loop [turn 0
-       messages [{"role" "user" "content" task}]]
-  (let [action (normalize-action (request-model messages))]
-    (case (get action :kind)
-      :program
-      ;; Call the reserved boundary with dynamic model source.
-      (tool/kernel-eval {"kind" :source "source" (get action :program)})
+(ns tutorial.agent)
 
-      :protocol-error
-      ;; Add bounded correction feedback and ask again.
-      (recur (inc turn)
-             (conj messages {"role" "user" "content" correction})))))
+(defn run [input]
+  (agent.core/run (get input "task") {"max_turns" 4}))
 ```
 
-The model can receive these exact corrections:
+The system request includes an exact bounded JSON inventory of prompt-visible
+mission exports, model-visible capability schemas, and applicable limits. For
+an evaluation failure, the next request preserves the exact assistant tool
+call and appends a provider-valid `tool` result with the same call ID. The
+bounded result begins like this:
 
 ```text
-Protocol error: <reason>. Call run_ptc_lisp exactly once with one program string.
-
-The PTC-Lisp evaluation did not return successfully (<outcome>).
-Send one corrected run_ptc_lisp call.
-
-Your program ran, but its return value had the wrong shape.
-Return the file content as a string. Send one corrected run_ptc_lisp call.
+The PTC-Lisp evaluation did not return successfully. outcome=<outcome>;
+error_code=<code>; message=<bounded message>. Send one corrected run_ptc_lisp call.
 ```
 
 The workflow caps the loop at four turns. It validates that the model made
-exactly one correctly named tool call, supplied only a non-empty `program`
-argument, used an explicit `return`, produced evaluable PTC-Lisp, and returned
-the expected value type. A provider failure and a model-program `(fail ...)`
-terminate immediately; protocol/evaluation mistakes are recoverable until the
-turn limit.
+exactly one correctly named tool call with an ID, supplied only a non-empty
+bounded `program` argument, and produced evaluable PTC-Lisp. A provider failure
+and a model-program `(fail ...)` terminate immediately; protocol/evaluation
+mistakes are recoverable until the turn limit.
 
 Run it:
 
@@ -367,10 +372,8 @@ The human received:
 ```json
 {
   "value": {
-    "model_program": "(return (tutorial.files/read-text \"brief.txt\"))",
-    "result": {
-      "content": "Project Lantern\nOwner: Morgan\nCurrent risk: the production data-retention decision is still unresolved.\nNext checkpoint: architecture review on Thursday.\n"
-    }
+    "ok": true,
+    "value": "Project Lantern\nOwner: Morgan\nCurrent risk: the production data-retention decision is still unresolved.\nNext checkpoint: architecture review on Thursday.\n"
   },
   "usage": {
     "protocol_errors": 0,
@@ -383,11 +386,9 @@ The human received:
 }
 ```
 
-The example intentionally returns `model_program` so the tutorial user can
-inspect what DeepSeek authored. Canonical operational traces omit model
-prompts, responses, capability arguments/results, and dynamic program source.
-A production application should expose model source only when its own privacy
-and retention policy permits it.
+Canonical operational traces omit model prompts, responses, capability
+arguments/results, and dynamic program source. Do not put those payloads into
+workflow results merely for debugging.
 
 This pattern fits model-authored queries, data exploration, file analysis, and
 tool orchestration where the model needs narrow task authority but must not

@@ -9,7 +9,6 @@ defmodule PtcRunner.Kernel.Runner do
 
   alias PtcRunner.Kernel.Dispatcher
   alias PtcRunner.Kernel.Error
-  alias PtcRunner.Kernel.Evaluation
   alias PtcRunner.Kernel.Events
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.Program
@@ -18,7 +17,6 @@ defmodule PtcRunner.Kernel.Runner do
   alias PtcRunner.Kernel.RunState
   alias PtcRunner.Kernel.RuntimeTools
   alias PtcRunner.Lisp
-  alias PtcRunner.Lisp.Keyword, as: LispKeyword
   alias PtcRunner.Lisp.RetainedSize
   alias PtcRunner.Lisp.TrustedTool
 
@@ -42,7 +40,9 @@ defmodule PtcRunner.Kernel.Runner do
     case Events.emit(state, config.event_sink, "run-started", %{
            labels: config.labels,
            workflow_prelude: trace_bundle(config.workflow_environment.bundle),
-           mission_prelude: trace_bundle(config.mission_environment.bundle)
+           mission_prelude: trace_bundle(config.mission_environment.bundle),
+           mission_inventory_hash: config.mission_inventory.hash,
+           mission_inventory_bytes: config.mission_inventory.bytes
          }) do
       :ok ->
         result = run_workflow(entry_source, config, state)
@@ -179,7 +179,22 @@ defmodule PtcRunner.Kernel.Runner do
         config.event_sink,
         :workflow,
         "kernel-eval",
-        fn arguments -> kernel_eval(config, state, arguments) end
+        RuntimeTools.kernel_eval(
+          state,
+          config.mission_environment,
+          config.limits,
+          config.event_sink
+        )
+      )
+    )
+    |> Map.put(
+      "kernel-mission-inventory",
+      RuntimeTools.instrument(
+        state,
+        config.event_sink,
+        :workflow,
+        "kernel-mission-inventory",
+        RuntimeTools.mission_inventory(state, config.mission_inventory.rendered)
       )
     )
     |> Map.new(fn {name, callback} -> {name, %TrustedTool{function: callback}} end)
@@ -187,65 +202,6 @@ defmodule PtcRunner.Kernel.Runner do
 
   defp bundle_prelude(%{bundle: %{prelude: prelude}}), do: prelude
   defp bundle_prelude(_environment), do: nil
-
-  defp kernel_eval(config, state, %{"kind" => kind, "source" => source})
-       when is_binary(source) do
-    if keyword_name(kind) == "source" do
-      %{
-        status: :ok,
-        value:
-          Evaluation.evaluate_source(
-            state,
-            config.mission_environment,
-            source,
-            config.limits.evaluation_timeout_ms,
-            config.event_sink
-          )
-      }
-    else
-      invalid_kernel_eval_request(state)
-    end
-  end
-
-  defp kernel_eval(config, state, %{"kind" => kind, "program" => %Program{source: source}}) do
-    if keyword_name(kind) == "embedded" do
-      %{
-        status: :ok,
-        value:
-          Evaluation.evaluate_source(
-            state,
-            config.mission_environment,
-            source,
-            config.limits.evaluation_timeout_ms,
-            config.event_sink
-          )
-      }
-    else
-      invalid_kernel_eval_request(state)
-    end
-  end
-
-  defp kernel_eval(_config, state, _arguments), do: invalid_kernel_eval_request(state)
-
-  defp invalid_kernel_eval_request(state) do
-    case RunState.protocol_error(state) do
-      :ok ->
-        %{
-          status: :error,
-          kind: :protocol_error,
-          reason: :invalid_kernel_eval_request,
-          retryable?: false
-        }
-
-      {:error, :protocol_error_limit} ->
-        %{status: :error, kind: :limit_exceeded, reason: :protocol_errors, retryable?: false}
-    end
-  end
-
-  defp keyword_name(%LispKeyword{name: name}), do: name
-  defp keyword_name(name) when is_atom(name), do: Atom.to_string(name)
-  defp keyword_name(name) when is_binary(name), do: name
-  defp keyword_name(_value), do: nil
 
   defp entry_source_within_limit(source, limits) do
     if byte_size(source) <= limits.entry_source_bytes,
