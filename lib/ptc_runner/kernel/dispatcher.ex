@@ -87,6 +87,9 @@ defmodule PtcRunner.Kernel.Dispatcher do
       {:error, :live_task_limit} ->
         limit_error(state, event_sink, :live_provider_tasks)
 
+      {:error, :reservation_held} ->
+        limit_error(state, event_sink, :reservation_held)
+
       {:error, :run_closed} ->
         limit_error(state, event_sink, :run_closed)
     end
@@ -129,6 +132,7 @@ defmodule PtcRunner.Kernel.Dispatcher do
       limit_error(state, nil, :run_deadline)
     else
       parent = self()
+      go = make_ref()
 
       {pid, ref} =
         spawn_monitor(fn ->
@@ -138,8 +142,26 @@ defmodule PtcRunner.Kernel.Dispatcher do
             error_logger: false
           })
 
-          send(parent, {:provider_result, self(), safely_invoke(capability.callback, arguments)})
+          # Gate: run nothing until the dispatcher has attached this pid to
+          # its reservation in RunState. If the dispatching process dies
+          # first, exit instead of running the callback as an untracked
+          # orphan holding a live provider slot.
+          parent_ref = Process.monitor(parent)
+
+          receive do
+            ^go ->
+              send(
+                parent,
+                {:provider_result, self(), safely_invoke(capability.callback, arguments)}
+              )
+
+            {:DOWN, ^parent_ref, :process, _parent, _reason} ->
+              :ok
+          end
         end)
+
+      RunState.attach_provider(state, pid)
+      send(pid, go)
 
       receive do
         {:provider_result, ^pid, result} ->

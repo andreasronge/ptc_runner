@@ -38,6 +38,15 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     assert {:error, :limit_exceeded} = RunState.reserve_capability(state, :workflow, "other")
   end
 
+  test "a caller cannot hold two capability reservations at once" do
+    {:ok, state} = RunState.start(Limits.defaults())
+
+    assert :ok = RunState.reserve_capability(state, :workflow, "read")
+    assert {:error, :reservation_held} = RunState.reserve_capability(state, :workflow, "other")
+    assert :ok = RunState.release_provider_slot(state)
+    assert :ok = RunState.reserve_capability(state, :workflow, "other")
+  end
+
   test "only one evaluation lease is granted and failed candidates preserve memory" do
     {:ok, limits} = Limits.new(subordinate_evaluations: 2, evaluation_memory_bytes: 1_000)
     {:ok, state} = RunState.start(limits)
@@ -125,6 +134,74 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     send(provider_pid, :finish)
 
     assert %{status: :error, kind: :limit_exceeded, reason: :run_closed} = Task.await(task)
+  end
+
+  test "a dispatching process killed mid-call releases its slot and stops its provider" do
+    parent = self()
+
+    {:ok, capability} =
+      Capability.new(
+        name: "slow",
+        callback: fn _ ->
+          send(parent, {:provider_started, self()})
+
+          receive do
+            :finish -> {:ok, nil}
+          end
+        end
+      )
+
+    {:ok, environment} = WorkflowEnvironment.new(capabilities: [capability])
+    {:ok, limits} = Limits.new(live_provider_tasks: 1)
+    {:ok, state} = RunState.start(limits)
+
+    caller =
+      spawn(fn -> Dispatcher.dispatch(state, :workflow, environment, "slow", %{}, 30_000) end)
+
+    assert_receive {:provider_started, provider}, 1_000
+    provider_ref = Process.monitor(provider)
+
+    Process.exit(caller, :kill)
+
+    assert_receive {:DOWN, ^provider_ref, :process, ^provider, :killed}, 1_000
+    assert :ok = RunState.reserve_capability(state, :workflow, "slow")
+  end
+
+  test "run state shutdown kills providers attached to live reservations" do
+    parent = self()
+
+    {:ok, capability} =
+      Capability.new(
+        name: "slow",
+        callback: fn _ ->
+          send(parent, {:provider_started, self()})
+
+          receive do
+            :finish -> {:ok, nil}
+          end
+        end
+      )
+
+    {:ok, environment} = WorkflowEnvironment.new(capabilities: [capability])
+
+    # The owner is also the dispatching process, so its death must not stop
+    # run state before attached providers are reclaimed.
+    owner =
+      spawn(fn ->
+        {:ok, state} = RunState.start(Limits.defaults())
+        send(parent, {:state, state})
+        Dispatcher.dispatch(state, :workflow, environment, "slow", %{}, 30_000)
+      end)
+
+    assert_receive {:state, state}, 1_000
+    assert_receive {:provider_started, provider}, 1_000
+    provider_ref = Process.monitor(provider)
+    state_ref = Process.monitor(state.pid)
+
+    Process.exit(owner, :kill)
+
+    assert_receive {:DOWN, ^state_ref, :process, _pid, _reason}, 1_000
+    assert_receive {:DOWN, ^provider_ref, :process, ^provider, :killed}, 1_000
   end
 
   test "normal event sinks drop while private event sinks fail closed" do

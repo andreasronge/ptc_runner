@@ -12,6 +12,16 @@ defmodule PtcRunner.Kernel.RunState do
   prevents messages that did not originate through the returned handle from
   mutating state. The process monitors the run owner and automatically exits
   with it.
+
+  Each capability reservation also monitors the dispatching process. If that
+  process dies mid-call (heap kill, timeout kill), the reservation is
+  reclaimed: the live provider slot is released and the attached provider
+  process is killed, so an abandoned dispatch can neither exhaust the slot
+  pool nor leave its callback running as an orphan. Shutdown — owner death or
+  explicit stop — kills every still-attached provider for the same reason. A
+  process holds at most one reservation at a time: dispatch is sequential per
+  process, so a second reserve while one is active is a protocol violation and
+  is rejected rather than silently replacing the tracked reservation.
   """
   use GenServer
 
@@ -37,6 +47,11 @@ defmodule PtcRunner.Kernel.RunState do
   @doc "Atomically reserves environment, per-name, and live-provider budgets."
   def reserve_capability(state, environment, name),
     do: call(state, {:reserve_capability, environment, name})
+
+  @spec attach_provider(t(), pid()) :: :ok | {:error, :closed}
+  @doc "Attaches the caller's live provider process to its capability reservation."
+  def attach_provider(state, provider) when is_pid(provider),
+    do: call(state, {:attach_provider, provider})
 
   @spec release_provider_slot(t()) :: :ok | {:error, :closed}
   @doc "Releases a live provider slot without accepting a result."
@@ -117,29 +132,41 @@ defmodule PtcRunner.Kernel.RunState do
        protocol_errors: 0,
        terminal_failure: nil,
        memory: %{},
-       evaluation_lease: nil
+       evaluation_lease: nil,
+       reservations: %{}
      }}
   end
 
   @impl GenServer
   def handle_call(
         {token, {:reserve_capability, environment, name}},
-        _from,
+        {caller, _tag},
         %{token: token} = state
       )
       when environment in [:workflow, :mission] do
-    case reserve_capability_state(state, environment, name) do
+    case reserve_capability_state(state, environment, name, caller) do
       {:ok, state} -> {:reply, :ok, state}
       {:error, reason, state} -> {:reply, {:error, reason}, state}
     end
   end
 
-  def handle_call({token, :release_provider_slot}, _from, %{token: token} = state) do
-    {:reply, :ok, %{state | provider_tasks: max(state.provider_tasks - 1, 0)}}
+  def handle_call({token, {:attach_provider, provider}}, {caller, _tag}, %{token: token} = state) do
+    case state.reservations do
+      %{^caller => reservation} ->
+        reservations = Map.put(state.reservations, caller, %{reservation | provider: provider})
+        {:reply, :ok, %{state | reservations: reservations}}
+
+      _ ->
+        {:reply, :ok, state}
+    end
   end
 
-  def handle_call({token, :finish_provider}, _from, %{token: token} = state) do
-    state = %{state | provider_tasks: max(state.provider_tasks - 1, 0)}
+  def handle_call({token, :release_provider_slot}, {caller, _tag}, %{token: token} = state) do
+    {:reply, :ok, release_reservation(state, caller)}
+  end
+
+  def handle_call({token, :finish_provider}, {caller, _tag}, %{token: token} = state) do
+    state = release_reservation(state, caller)
     reply = if unavailable?(state), do: {:error, :run_closed}, else: :ok
     {:reply, reply, state}
   end
@@ -257,9 +284,33 @@ defmodule PtcRunner.Kernel.RunState do
       ),
       do: {:noreply, %{state | evaluation_lease: nil}}
 
+  def handle_info({:DOWN, ref, :process, pid, _reason}, state) do
+    case state.reservations do
+      %{^pid => %{ref: ^ref, provider: provider}} ->
+        if is_pid(provider), do: Process.exit(provider, :kill)
+
+        {:noreply,
+         %{
+           state
+           | provider_tasks: max(state.provider_tasks - 1, 0),
+             reservations: Map.delete(state.reservations, pid)
+         }}
+
+      _ ->
+        {:noreply, state}
+    end
+  end
+
   def handle_info(_message, state), do: {:noreply, state}
 
-  defp reserve_capability_state(state, environment, name) do
+  @impl GenServer
+  def terminate(_reason, state) do
+    Enum.each(state.reservations, fn {_caller, %{provider: provider}} ->
+      if is_pid(provider), do: Process.exit(provider, :kill)
+    end)
+  end
+
+  defp reserve_capability_state(state, environment, name, caller) do
     {limit_total, limit_name} = capability_limits(state.limits, environment)
     count = get_in(state.calls, [environment, name]) || 0
 
@@ -273,14 +324,38 @@ defmodule PtcRunner.Kernel.RunState do
       Map.fetch!(state.totals, environment) >= limit_total or count >= limit_name ->
         {:error, :limit_exceeded, state}
 
+      Map.has_key?(state.reservations, caller) ->
+        {:error, :reservation_held, state}
+
       true ->
+        reservation = %{ref: Process.monitor(caller), provider: nil}
+
         state =
           state
           |> update_in([:calls, environment], &Map.put(&1, name, count + 1))
           |> update_in([:totals, environment], &(&1 + 1))
 
-        {:ok, %{state | provider_tasks: state.provider_tasks + 1}}
+        {:ok,
+         %{
+           state
+           | provider_tasks: state.provider_tasks + 1,
+             reservations: Map.put(state.reservations, caller, reservation)
+         }}
     end
+  end
+
+  # Drops the caller's reservation: slot released, reservation monitor
+  # flushed. A missing entry still releases the slot, preserving the
+  # unconditional clamped-release contract for direct callers.
+  defp release_reservation(state, caller) do
+    {reservation, reservations} = Map.pop(state.reservations, caller)
+
+    case reservation do
+      %{ref: ref} -> Process.demonitor(ref, [:flush])
+      nil -> :ok
+    end
+
+    %{state | provider_tasks: max(state.provider_tasks - 1, 0), reservations: reservations}
   end
 
   defp unavailable?(state),

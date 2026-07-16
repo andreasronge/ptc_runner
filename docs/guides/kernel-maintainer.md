@@ -125,7 +125,11 @@ read-then-write sequence around run state.
 `PtcRunner.Kernel.Dispatcher` validates arguments, atomically reserves call and
 provider-task budgets, runs each trusted provider callback in a monitored
 heap-limited process, normalizes its result, and prevents a late result from
-re-entering Lisp after timeout or run closure. Provider code is a trusted host
+re-entering Lisp after timeout or run closure. Each reservation monitors the
+dispatching process: if that process is killed mid-call (heap or timeout kill
+of its sandbox), `RunState` releases the provider slot and kills the attached
+provider process, so abandoned dispatches cannot exhaust the slot pool or
+leave callbacks running as orphans. Provider code is a trusted host
 extension: the Kernel contains ordinary faults and bounded results, but it is
 not an isolation boundary against deliberately hostile BEAM code.
 
