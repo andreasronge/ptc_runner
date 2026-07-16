@@ -37,8 +37,9 @@ defmodule PtcRunner.Kernel.Manifest do
   Provider entries contain a bounded `name` and JSON `config`. The manifest can
   select only builders installed in `PtcRunner.Kernel.ProviderRegistry`.
   Limit names match `PtcRunner.Kernel.Limits`; version 1 accepts values no
-  greater than its installed defaults. Event policy is `normal` or `private`
-  with optional run and trace IDs.
+  greater than the host-supplied installed ceilings. Omitted values use the
+  normal runtime defaults, capped by a lower host ceiling. Event policy is
+  `normal` or `private` with optional run and trace IDs.
 
   The loader resolves paths relative to the canonical manifest directory and
   rejects absolute paths, traversal, devices, non-regular files, and symlink
@@ -67,6 +68,7 @@ defmodule PtcRunner.Kernel.Manifest do
     :mission_data,
     :providers,
     :limits,
+    :installed_limits,
     :events,
     :labels
   ]
@@ -82,13 +84,16 @@ defmodule PtcRunner.Kernel.Manifest do
           mission_data: map(),
           providers: %{workflow: [map()], mission: [map()]},
           limits: Limits.t(),
+          installed_limits: Limits.t(),
           events: %{policy: :normal | :private, run_id: binary() | nil, trace_id: binary() | nil},
           labels: map()
         }
 
   @doc "Loads and validates one manifest and all referenced source/input files."
-  @spec load(binary()) :: {:ok, t()} | {:error, term()}
-  def load(path) when is_binary(path) do
+  @spec load(binary(), Limits.t()) :: {:ok, t()} | {:error, term()}
+  def load(path, installed_limits \\ Limits.installed_defaults())
+
+  def load(path, %Limits{} = installed_limits) when is_binary(path) do
     with {:ok, path} <- resolve_absolute(Path.expand(path)),
          directory = Path.dirname(path),
          {:ok, source} <- read_relative(directory, Path.basename(path), @max_manifest_bytes),
@@ -100,7 +105,7 @@ defmodule PtcRunner.Kernel.Manifest do
          {:ok, mission} <- mission(Map.get(manifest, "mission", %{}), directory),
          {:ok, input} <- input(manifest["input"], directory),
          {:ok, providers} <- providers(Map.get(manifest, "providers", %{})),
-         {:ok, limits} <- limits(Map.get(manifest, "limits", %{})),
+         {:ok, limits} <- limits(Map.get(manifest, "limits", %{}), installed_limits),
          {:ok, events} <- events(Map.get(manifest, "events", %{})),
          labels when is_map(labels) <- Map.get(manifest, "labels", %{}),
          true <- JSONValue.map?(labels),
@@ -116,6 +121,7 @@ defmodule PtcRunner.Kernel.Manifest do
          mission_data: mission.data,
          providers: providers,
          limits: limits,
+         installed_limits: installed_limits,
          events: events,
          labels: labels
        }}
@@ -125,7 +131,7 @@ defmodule PtcRunner.Kernel.Manifest do
     end
   end
 
-  def load(_path), do: {:error, :invalid_manifest}
+  def load(_path, _installed_limits), do: {:error, :invalid_manifest}
 
   @doc """
   Replaces the decoded input with a manifest-relative JSON object file.
@@ -270,19 +276,22 @@ defmodule PtcRunner.Kernel.Manifest do
 
   defp provider?(_value), do: false
 
-  defp limits(value) when is_map(value) do
-    ceilings = Limits.defaults() |> Map.from_struct()
+  defp limits(value, %Limits{} = installed_limits) when is_map(value) do
+    ceilings = Map.from_struct(installed_limits)
+    defaults = Limits.defaults() |> Map.from_struct()
     names = ceilings |> Map.keys() |> Map.new(&{Atom.to_string(&1), &1})
 
     ceilings_by_name =
       Map.new(ceilings, fn {name, ceiling} -> {Atom.to_string(name), ceiling} end)
 
+    requested = Map.new(defaults, fn {name, default} -> {name, min(default, ceilings[name])} end)
+
     value
     |> Map.to_list()
-    |> normalize_limits(names, ceilings_by_name, %{})
+    |> normalize_limits(names, ceilings_by_name, requested)
   end
 
-  defp limits(_value), do: {:error, :invalid_limits}
+  defp limits(_value, _installed_limits), do: {:error, :invalid_limits}
 
   defp normalize_limits([], _names, _ceilings, normalized), do: Limits.new(normalized)
 

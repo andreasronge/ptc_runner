@@ -23,8 +23,11 @@ defmodule PtcRunner.Kernel.Limits do
   - `event_payload_bytes`, `normal_event_count`, and `normal_event_bytes` bound
     canonical event collection.
 
-  These are runtime enforcement values. A frontend may apply a separate
-  administrator ceiling before constructing them.
+  `defaults/0` are the effective limits used when a manifest does not request
+  narrower values. `installed_defaults/0` are the larger host-controlled
+  ceilings used by manifest-backed frontends. A host may supply another
+  complete `Limits` value as its installation ceiling; manifests can only
+  narrow it.
   """
 
   @defaults %{
@@ -51,6 +54,11 @@ defmodule PtcRunner.Kernel.Limits do
     normal_event_count: 256,
     normal_event_bytes: 4_000_000
   }
+  @installed_defaults Map.merge(@defaults, %{
+                        run_duration_ms: 300_000,
+                        workflow_timeout_ms: 120_000,
+                        evaluation_timeout_ms: 60_000
+                      })
   @enforce_keys Map.keys(@defaults)
   defstruct Map.to_list(@defaults)
 
@@ -81,6 +89,10 @@ defmodule PtcRunner.Kernel.Limits do
   @spec defaults() :: t()
   @doc "Returns the complete application-independent default limit set."
   def defaults, do: struct!(__MODULE__, @defaults)
+
+  @spec installed_defaults() :: t()
+  @doc "Returns practical host ceilings for manifest-backed model and connector runs."
+  def installed_defaults, do: struct!(__MODULE__, @installed_defaults)
 
   @spec new(map() | keyword()) :: {:ok, t()} | {:error, :invalid_limits}
   @doc """

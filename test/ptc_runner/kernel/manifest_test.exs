@@ -2,6 +2,7 @@ defmodule PtcRunner.Kernel.ManifestTest do
   use ExUnit.Case, async: true
 
   alias PtcRunner.Kernel.Capability
+  alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.Manifest
   alias PtcRunner.Kernel.ProviderError
   alias PtcRunner.Kernel.ProviderRegistry
@@ -110,7 +111,7 @@ defmodule PtcRunner.Kernel.ManifestTest do
   end
 
   @tag :tmp_dir
-  test "manifest limits cannot exceed frontend administrator ceilings", %{tmp_dir: dir} do
+  test "manifest limits are narrowed independently from host-installed ceilings", %{tmp_dir: dir} do
     File.write!(Path.join(dir, "main.lisp"), "(ns main) (defn run [_] (return 1))")
 
     manifest = %{
@@ -120,13 +121,27 @@ defmodule PtcRunner.Kernel.ManifestTest do
         "entry" => "main/run"
       },
       "input" => %{"value" => %{}},
-      "limits" => %{"run_duration_ms" => 30_001}
+      "limits" => %{"run_duration_ms" => 60_000, "evaluation_timeout_ms" => 20_000}
     }
 
-    path = Path.join(dir, "oversized-limits.json")
+    path = Path.join(dir, "limits.json")
     File.write!(path, Jason.encode!(manifest))
 
-    assert {:error, :invalid_limits} = Manifest.load(path)
+    assert {:ok, loaded} = Manifest.load(path)
+    assert loaded.limits.run_duration_ms == 60_000
+    assert loaded.limits.evaluation_timeout_ms == 20_000
+    assert loaded.installed_limits == Limits.installed_defaults()
+
+    {:ok, lower_ceiling} =
+      Limits.new(run_duration_ms: 45_000, evaluation_timeout_ms: 500)
+
+    assert {:error, :invalid_limits} = Manifest.load(path, lower_ceiling)
+
+    manifest = put_in(manifest, ["limits"], %{})
+    File.write!(path, Jason.encode!(manifest))
+    assert {:ok, lowered_defaults} = Manifest.load(path, lower_ceiling)
+    assert lowered_defaults.limits.run_duration_ms == 30_000
+    assert lowered_defaults.limits.evaluation_timeout_ms == 500
   end
 
   @tag :tmp_dir
