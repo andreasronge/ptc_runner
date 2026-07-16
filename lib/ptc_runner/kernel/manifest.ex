@@ -39,7 +39,9 @@ defmodule PtcRunner.Kernel.Manifest do
   Limit names match `PtcRunner.Kernel.Limits`; version 1 accepts values no
   greater than the host-supplied installed ceilings. Omitted values use the
   normal runtime defaults, capped by a lower host ceiling. Event policy is
-  `normal` or `private` with optional run and trace IDs.
+  `normal` or `private` with optional run and trace IDs. Labels use the closed
+  `name`, `model`, `provider`, and flat `tags` safe-metadata profile; arbitrary
+  text and nested application data are rejected rather than copied into traces.
 
   The loader resolves paths relative to the canonical manifest directory and
   rejects absolute paths, traversal, devices, non-regular files, and symlink
@@ -52,6 +54,7 @@ defmodule PtcRunner.Kernel.Manifest do
   alias PtcRunner.Kernel.JSONValue
   alias PtcRunner.Kernel.Library
   alias PtcRunner.Kernel.Limits
+  alias PtcRunner.Kernel.SafeMetadata
 
   @max_manifest_bytes 1_000_000
   @max_input_bytes 2_000_000
@@ -107,9 +110,8 @@ defmodule PtcRunner.Kernel.Manifest do
          {:ok, providers} <- providers(Map.get(manifest, "providers", %{})),
          {:ok, limits} <- limits(Map.get(manifest, "limits", %{}), installed_limits),
          {:ok, events} <- events(Map.get(manifest, "events", %{})),
-         labels when is_map(labels) <- Map.get(manifest, "labels", %{}),
-         true <- JSONValue.map?(labels),
-         true <- byte_size(:erlang.term_to_binary(labels)) <= 8_192 do
+         labels = Map.get(manifest, "labels", %{}),
+         true <- SafeMetadata.labels?(labels) do
       {:ok,
        %__MODULE__{
          path: path,

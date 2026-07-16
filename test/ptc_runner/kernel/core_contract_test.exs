@@ -469,8 +469,12 @@ defmodule PtcRunner.Kernel.CoreContractTest do
         event_sink: sink
       )
 
-    assert {:error, %{kind: :workflow_failed, reason: :explicit_failure}} =
-             Kernel.run("(fail \"stop\")", config)
+    private = "PRIVATE_GENERATED_SOURCE_(return_42)"
+
+    assert {:error, %{kind: :workflow_failed, reason: :explicit_failure} = error} =
+             Kernel.run(~s|(fail "#{private}")|, config)
+
+    refute inspect(error) =~ private
   end
 
   test "new Kernel workflow routes only granted capabilities through the dispatcher" do
@@ -823,6 +827,16 @@ defmodule PtcRunner.Kernel.CoreContractTest do
 
     assert %{type: "workflow-annotation", data: %{annotation_type: "progress"}} =
              Enum.find(EventSink.events(sink), &(&1.type == "workflow-annotation"))
+
+    private = "PRIVATE_GENERATED_SOURCE_(return_42)"
+
+    assert {:ok, %{value: %{status: :error, reason: :invalid_workflow_annotation}}} =
+             Kernel.run(
+               ~s|(return (workflow.event/annotate "progress" {"source" "#{private}"}))|,
+               config
+             )
+
+    refute EventSink.events(sink) |> Jason.encode!() |> String.contains?(private)
   end
 
   test "terminal workflow results and retained mission memory use Kernel limits and state" do

@@ -111,6 +111,38 @@ defmodule PtcRunner.Kernel.ManifestTest do
   end
 
   @tag :tmp_dir
+  test "manifest labels accept only bounded safe metadata", %{tmp_dir: dir} do
+    File.write!(Path.join(dir, "main.lisp"), "(ns main) (defn run [_] (return 1))")
+
+    base = %{
+      "version" => 1,
+      "workflow" => %{
+        "components" => [%{"id" => "main", "path" => "main.lisp"}],
+        "entry" => "main/run"
+      },
+      "input" => %{"value" => %{}}
+    }
+
+    path = Path.join(dir, "labels.json")
+
+    valid =
+      Map.put(base, "labels", %{
+        "name" => "safe-run",
+        "model" => "provider:model-v1",
+        "provider" => "provider",
+        "tags" => %{"suite" => "privacy"}
+      })
+
+    File.write!(path, Jason.encode!(valid))
+    assert {:ok, loaded} = Manifest.load(path)
+    assert loaded.labels == valid["labels"]
+
+    private = "PRIVATE GENERATED SOURCE (return 42)"
+    File.write!(path, Jason.encode!(Map.put(base, "labels", %{"name" => private})))
+    assert {:error, :invalid_manifest} = Manifest.load(path)
+  end
+
+  @tag :tmp_dir
   test "inspection capture cannot be enabled by manifest data", %{tmp_dir: dir} do
     File.write!(Path.join(dir, "main.lisp"), "(ns main) (defn run [_] (return 1))")
 

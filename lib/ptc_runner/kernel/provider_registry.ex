@@ -133,7 +133,8 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
 
   defp build_llm(_config, _context), do: {:error, :provider_destination_denied}
 
-  defp adapter_request(request) do
+  @doc false
+  def adapter_request(request) do
     request
     |> Map.take(~w(system messages tools cache))
     |> Map.new(fn {key, value} -> {String.to_existing_atom(key), adapter_value(key, value)} end)
@@ -170,7 +171,8 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
   defp adapter_tool_call(call) when is_map(call) do
     call
     |> Enum.reduce(%{}, fn
-      {key, value}, map when key in ["id", "type", "function"] ->
+      {key, value}, map
+      when key in ["id", "type", "function", "name", "args", "args_error"] ->
         value = if key == "function", do: adapter_function(value), else: value
         Map.put(map, String.to_existing_atom(key), value)
 

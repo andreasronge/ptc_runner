@@ -349,5 +349,27 @@ defmodule PtcRunner.LLM.ReqLLMAdapterTest do
       assert %ToolCall{id: "call_9", type: "function", function: %{name: "f", arguments: "{}"}} =
                tool_call
     end
+
+    test "renders Kernel correction-history tool calls without losing name or arguments" do
+      req = %{
+        messages: [
+          %{
+            role: :assistant,
+            content: nil,
+            tool_calls: [
+              %{id: "call_10", name: "run_ptc_lisp", args: %{"program" => "(return 42)"}}
+            ]
+          }
+        ]
+      }
+
+      assert [%Message{tool_calls: [%ToolCall{} = tool_call]}] =
+               ReqLLMAdapter.build_messages(req)
+
+      assert tool_call.function == %{
+               name: "run_ptc_lisp",
+               arguments: ~s|{"program":"(return 42)"}|
+             }
+    end
   end
 end

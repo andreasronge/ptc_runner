@@ -17,7 +17,7 @@ defmodule PtcRunner.Kernel.RunConfig do
   `connector_snapshots` are bounded safe metadata copied into `run-started`;
   neither field is visible to Lisp.
 
-  `labels` is an optional bounded JSON-like map copied into `run-started`.
+  `labels` is an optional closed safe-metadata map copied into `run-started`.
   Constructing a config validates shape and ownership objects but performs no
   execution and grants no authority beyond the supplied environments.
   """
@@ -28,6 +28,7 @@ defmodule PtcRunner.Kernel.RunConfig do
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.MissionEnvironment
   alias PtcRunner.Kernel.MissionInventory
+  alias PtcRunner.Kernel.SafeMetadata
   alias PtcRunner.Kernel.WorkflowEnvironment
 
   @enforce_keys [
@@ -94,7 +95,7 @@ defmodule PtcRunner.Kernel.RunConfig do
            inspection?(Keyword.get(opts, :inspection_sink), Keyword.get(opts, :inspection_path)),
          true <- provider_resources?(Keyword.get(opts, :provider_resources, [])),
          true <- connector_snapshots?(Keyword.get(opts, :connector_snapshots, [])),
-         true <- labels?(Keyword.get(opts, :labels, %{})),
+         true <- SafeMetadata.labels?(Keyword.get(opts, :labels, %{})),
          {:ok, mission_inventory} <- MissionInventory.build(mission, limits) do
       {:ok,
        %__MODULE__{
@@ -147,7 +148,4 @@ defmodule PtcRunner.Kernel.RunConfig do
     do: is_binary(path) and String.ends_with?(path, ".inspection.jsonl")
 
   defp inspection?(_sink, _path), do: false
-
-  defp labels?(labels),
-    do: JSONValue.map?(labels) and byte_size(:erlang.term_to_binary(labels)) <= 8_192
 end

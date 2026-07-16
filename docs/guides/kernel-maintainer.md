@@ -176,6 +176,10 @@ Runtime observability has separate planes with separate data contracts:
 `PtcRunner.Kernel.EventSink` owns canonical event sequence numbers, timestamps,
 queue bounds, and loss accounting. Normal policy is lossy and reports dropped
 events. Private policy fails closed when it cannot retain the required event.
+Run labels and workflow annotations accept only the closed scalar
+`PtcRunner.Kernel.SafeMetadata` profile. Arbitrary JSON, free-form text,
+generated source, and failure values are never copied into canonical events or
+ordinary Kernel error details.
 
 `PtcRunner.Kernel.TraceLog` validates and queries completed canonical events
 from an in-memory sink, one JSONL file, or a directory. The viewer and

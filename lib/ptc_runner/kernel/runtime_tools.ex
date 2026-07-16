@@ -3,16 +3,17 @@ defmodule PtcRunner.Kernel.RuntimeTools do
   Internal construction of reserved runtime capabilities.
 
   Both environments receive read-only usage and local capability discovery.
-  Only the workflow receives the annotation route. Every route is instrumented
-  with the same canonical capability start/stop events.
+  Only the workflow receives the annotation route. Annotation data uses the
+  flat scalar-only safe-metadata profile, not arbitrary JSON payloads. Every
+  route is instrumented with the same canonical capability start/stop events.
   """
 
   alias PtcRunner.Kernel.Environment
   alias PtcRunner.Kernel.Evaluation
   alias PtcRunner.Kernel.Events
-  alias PtcRunner.Kernel.JSONValue
   alias PtcRunner.Kernel.Program
   alias PtcRunner.Kernel.RunState
+  alias PtcRunner.Kernel.SafeMetadata
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
   alias PtcRunner.Lisp.RetainedSize
 
@@ -155,8 +156,7 @@ defmodule PtcRunner.Kernel.RuntimeTools do
     payload = %{annotation_type: type, data: data, provenance: :workflow}
     bytes = RetainedSize.bytes_with_cap(payload, limit)
 
-    if String.valid?(type) and byte_size(type) <= 128 and JSONValue.value?(data) and
-         is_integer(bytes) and bytes <= limit do
+    if SafeMetadata.annotation?(type, data) and is_integer(bytes) and bytes <= limit do
       case Events.emit(state, event_sink, "workflow-annotation", payload) do
         :ok -> %{status: :ok}
         {:error, :event_sink_error} -> %{status: :error, kind: :event_sink_error}

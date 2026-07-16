@@ -11,6 +11,8 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
   alias PtcRunner.Kernel.RunBuilder
   alias PtcRunner.Kernel.RunConfig
   alias PtcRunner.Kernel.WorkflowEnvironment
+  alias PtcRunner.LLM.ReqLLMAdapter
+  alias ReqLLM.ToolCall
 
   @schema %{"type" => "object", "additionalProperties" => false}
 
@@ -46,6 +48,30 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
             }} = ProviderRegistry.build(registry, "resource", %{}, context)
 
     assert is_function(close, 0)
+  end
+
+  test "built-in LLM adaptation preserves provider-valid correction history" do
+    request = %{
+      "messages" => [
+        %{
+          "role" => "assistant",
+          "content" => nil,
+          "tool_calls" => [
+            %{
+              "id" => "call-1",
+              "name" => "run_ptc_lisp",
+              "args" => %{"program" => "(return 42)"}
+            }
+          ]
+        }
+      ]
+    }
+
+    adapted = ProviderRegistry.adapter_request(request)
+
+    assert [%{tool_calls: [%ToolCall{} = call]}] = ReqLLMAdapter.build_messages(adapted)
+    assert call.function.name == "run_ptc_lisp"
+    assert Jason.decode!(call.function.arguments) == %{"program" => "(return 42)"}
   end
 
   @tag :tmp_dir

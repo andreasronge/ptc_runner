@@ -557,7 +557,7 @@ if Code.ensure_loaded?(ReqLLM) do
                 %ReqLLM.ToolCall{
                   id: tc[:id] || tc["id"],
                   type: "function",
-                  function: tc[:function] || tc["function"]
+                  function: tool_call_function(tc)
                 }
               end)
 
@@ -575,6 +575,21 @@ if Code.ensure_loaded?(ReqLLM) do
         end)
 
       system_msgs ++ user_msgs
+    end
+
+    defp tool_call_function(tc) do
+      case tc[:function] || tc["function"] do
+        function when is_map(function) ->
+          function
+
+        _function ->
+          name = tc[:name] || tc["name"]
+          args = tc[:args] || tc["args"]
+
+          if is_binary(name) and is_map(args),
+            do: %{name: name, arguments: Jason.encode!(args)},
+            else: nil
+      end
     end
 
     # --- Caching ---
