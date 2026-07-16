@@ -122,9 +122,8 @@ the common fields and lifecycle proven by both implementations.
 
 ## Resource ownership
 
-Discovery currently occurs before `Kernel.Runner` creates `RunState`, and the
-implemented `RunConfig` has no provider-resource field. The connector therefore
-requires one explicit breaking lifecycle change:
+Discovery occurs before `Kernel.Runner` creates `RunState`. The implemented
+connector lifecycle closes that assembly/execution ownership gap explicitly:
 
 1. `RunBuilder` accumulates each successful builder's idempotent close function.
 2. Any later provider, bundle, environment, or config failure closes the
