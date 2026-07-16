@@ -137,6 +137,7 @@ defmodule PtcRunner.MixProject do
           PtcRunner.Kernel.Limits,
           PtcRunner.Kernel.LLMCapability,
           PtcRunner.Kernel.Manifest,
+          PtcRunner.Kernel.MCPSource,
           PtcRunner.Kernel.MissionInventory,
           PtcRunner.Kernel.MissionEnvironment,
           PtcRunner.Kernel.ProviderError,

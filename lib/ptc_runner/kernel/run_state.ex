@@ -305,9 +305,31 @@ defmodule PtcRunner.Kernel.RunState do
 
   @impl GenServer
   def terminate(_reason, state) do
-    Enum.each(state.reservations, fn {_caller, %{provider: provider}} ->
-      if is_pid(provider), do: Process.exit(provider, :kill)
+    state.reservations
+    |> Enum.flat_map(fn
+      {_caller, %{provider: provider}} when is_pid(provider) -> [provider]
+      _reservation -> []
     end)
+    |> Enum.uniq()
+    |> kill_and_drain()
+  end
+
+  defp kill_and_drain(providers) do
+    refs = Map.new(providers, fn provider -> {Process.monitor(provider), provider} end)
+    Enum.each(providers, &Process.exit(&1, :kill))
+    drain_providers(refs)
+  end
+
+  defp drain_providers(refs) when map_size(refs) == 0, do: :ok
+
+  defp drain_providers(refs) do
+    receive do
+      {:DOWN, ref, :process, _pid, _reason} -> drain_providers(Map.delete(refs, ref))
+    after
+      1_000 ->
+        Enum.each(Map.keys(refs), &Process.demonitor(&1, [:flush]))
+        :ok
+    end
   end
 
   defp reserve_capability_state(state, environment, name, caller) do

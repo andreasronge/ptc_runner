@@ -189,7 +189,7 @@ contract remains in the [TraceLog contract](../plans/lisp-kernel/tracelog-contra
 | Manifest-backed assembly | `PtcRunner.Kernel.Manifest`, `PtcRunner.Kernel.ProviderRegistry`, `PtcRunner.Kernel.RunBuilder`, `PtcRunner.Kernel.MissionInventory` |
 | Enforced resources | `PtcRunner.Kernel.Limits`, internal `PtcRunner.Kernel.RunState` and `PtcRunner.Kernel.BoundedWorker` |
 | Execution and dispatch | internal `PtcRunner.Kernel.Runner`, `PtcRunner.Kernel.Dispatcher`, `PtcRunner.Kernel.Evaluation`, `PtcRunner.Kernel.RuntimeTools` |
-| Provider adapters | `PtcRunner.Kernel.FileCapability`, `PtcRunner.Kernel.LLMCapability`, `PtcRunner.Kernel.TraceCapability` |
+| Provider adapters | `PtcRunner.Kernel.FileCapability`, `PtcRunner.Kernel.LLMCapability`, `PtcRunner.Kernel.MCPSource`, `PtcRunner.Kernel.TraceCapability` |
 | Events and inspection | `PtcRunner.Kernel.EventSink`, `PtcRunner.Kernel.TraceLog`, internal `PtcRunner.Kernel.Events` and `PtcRunner.Kernel.ViewerAdapter` |
 | Interactive evaluation | `PtcRunner.Kernel.ReplSession` and `mix ptc.repl` |
 
@@ -217,6 +217,24 @@ assembly failure and freezes successful resources into `RunConfig`. Normal
 runs and REPL sessions stop run state—and therefore attached provider
 workers—before closing those resources. Call `RunBuilder.close/1` for a built
 configuration that will not be executed.
+
+The only installed remote-tools adapter is `PtcRunner.Kernel.MCPSource`. Its
+host builder freezes one HTTPS endpoint (or an explicitly enabled loopback HTTP
+fixture), a header callback, read-only upstream-to-public mappings, and source
+ceilings. Manifest configuration is exactly an `allow` list of mapped public
+names plus optional lower `timeout_ms` and `max_result_bytes`; endpoints,
+headers, upstream names, effects, and retries are not manifest fields.
+
+Every build owns one monitored MCP 2025-11-25 session across initialization,
+bounded paginated discovery, and calls. Discovered schemas pass the Kernel's
+strict JSON Schema profile before capabilities are frozen. Structured results
+must match an advertised object schema; otherwise only text blocks are
+accepted. Mixed content, unsupported blocks, remote errors, oversized bodies,
+session expiry, transport failures, and invalid schemas become bounded errors.
+The safe `connector_snapshots` projection in `run-started` contains only the
+provider alias, protocol, public names, effects, and deterministic schema and
+snapshot hashes—never endpoint, upstream names, credentials, session IDs,
+arguments, results, or response bodies.
 
 To add a shipped Lisp library, add its source under `priv/preludes/kernel/`,
 register it in `PtcRunner.Kernel.Library`, declare component dependencies, and

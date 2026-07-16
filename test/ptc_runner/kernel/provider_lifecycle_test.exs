@@ -2,11 +2,15 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
   use ExUnit.Case, async: true
 
   alias PtcRunner.Kernel.Capability
+  alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.Manifest
+  alias PtcRunner.Kernel.MissionEnvironment
   alias PtcRunner.Kernel.ProviderRegistry
   alias PtcRunner.Kernel.ReplSession
   alias PtcRunner.Kernel.RunBuilder
+  alias PtcRunner.Kernel.RunConfig
+  alias PtcRunner.Kernel.WorkflowEnvironment
 
   @schema %{"type" => "object", "additionalProperties" => false}
 
@@ -105,6 +109,50 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
     assert :ok = RunBuilder.close(unused)
     assert_receive {:closed, "unused"}
     refute Process.alive?(unused.config.event_sink.pid)
+  end
+
+  test "run shutdown kills and drains provider work before closing its resource" do
+    parent = self()
+
+    callback = fn _arguments ->
+      send(parent, {:provider_started, self()})
+
+      receive do
+        :never -> {:ok, %{}}
+      end
+    end
+
+    {:ok, capability} =
+      Capability.new(name: "slow", input_schema: @schema, callback: callback)
+
+    {:ok, workflow} = WorkflowEnvironment.new(capabilities: [capability])
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, limits} = Limits.new(workflow_timeout_ms: 1_000, run_duration_ms: 2_000)
+    {:ok, sink} = EventSink.start(:normal, limits)
+
+    close = fn ->
+      receive do
+        {:provider_started, pid} -> send(parent, {:resource_closed, Process.alive?(pid)})
+      after
+        0 -> send(parent, {:resource_closed, :provider_not_started})
+      end
+
+      :ok
+    end
+
+    {:ok, config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        mission_environment: mission,
+        input: %{},
+        limits: limits,
+        event_sink: sink,
+        provider_resources: [close]
+      )
+
+    assert {:error, %{reason: :timeout}} = PtcRunner.Kernel.run("(tool/slow {})", config)
+    assert_receive {:resource_closed, false}
+    EventSink.stop(sink)
   end
 
   defp registry_with_close(parent) do

@@ -11,7 +11,18 @@ defmodule PtcRunner.Kernel.ProviderError do
   @enforce_keys [:kind]
   defstruct [:kind, :details, retryable?: false]
 
-  @type kind :: :denied | :not_found | :unavailable | :invalid_request | :internal
+  @type kind ::
+          :denied
+          | :not_found
+          | :unavailable
+          | :invalid_request
+          | :internal
+          | :domain_error
+          | :invalid_result
+          | :session_expired
+          | :authentication_failed
+          | :timeout
+          | :transport_error
   @type t :: %__MODULE__{kind: kind(), details: binary() | nil, retryable?: boolean()}
 
   @spec new(kind(), binary() | nil, keyword()) :: t()
@@ -20,7 +31,19 @@ defmodule PtcRunner.Kernel.ProviderError do
   `:retryable?` metadata.
   """
   def new(kind, details \\ nil, opts \\ [])
-      when kind in [:denied, :not_found, :unavailable, :invalid_request, :internal] and
+      when kind in [
+             :denied,
+             :not_found,
+             :unavailable,
+             :invalid_request,
+             :internal,
+             :domain_error,
+             :invalid_result,
+             :session_expired,
+             :authentication_failed,
+             :timeout,
+             :transport_error
+           ] and
              (is_binary(details) or is_nil(details)) do
     %__MODULE__{
       kind: kind,

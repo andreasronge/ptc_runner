@@ -28,7 +28,8 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
           directory: binary(),
           destination: :workflow | :mission,
           owner: pid(),
-          limits: PtcRunner.Kernel.Limits.t()
+          limits: PtcRunner.Kernel.Limits.t(),
+          provider: binary()
         }
   @type built_provider :: %{
           capabilities: [Capability.t()],
@@ -65,7 +66,7 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
   @doc "Builds and normalizes one trusted registry entry."
   def build(%__MODULE__{builders: builders}, name, config, context) do
     case Map.fetch(builders, name) do
-      {:ok, builder} -> builder.(config, context) |> normalize_build()
+      {:ok, builder} -> builder.(config, Map.put(context, :provider, name)) |> normalize_build()
       :error -> {:error, :unknown_provider}
     end
   rescue
