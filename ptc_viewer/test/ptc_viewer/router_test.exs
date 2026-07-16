@@ -10,10 +10,6 @@ defmodule PtcViewer.RouterTest do
 
     File.mkdir_p!(trace_dir)
 
-    # Create fixture files
-    File.write!(Path.join(trace_dir, "trace1.jsonl"), ~s|{"event":"start"}\n{"event":"end"}\n|)
-    File.write!(Path.join(trace_dir, "trace2.jsonl"), ~s|{"event":"solo"}\n|)
-
     on_exit(fn ->
       File.rm_rf!(trace_dir)
     end)
@@ -21,36 +17,9 @@ defmodule PtcViewer.RouterTest do
     %{trace_dir: trace_dir, router_opts: [trace_dir: trace_dir, kernel_trace_adapter: nil]}
   end
 
-  test "GET /api/traces returns list of .jsonl files", %{router_opts: router_opts} do
-    conn = conn(:get, "/api/traces") |> call_router(router_opts)
-
-    assert conn.status == 200
-    assert get_resp_header(conn, "content-type") |> hd() =~ "application/json"
-
-    body = Jason.decode!(conn.resp_body)
-    assert length(body) == 2
-
-    filenames = Enum.map(body, & &1["filename"])
-    assert "trace1.jsonl" in filenames
-    assert "trace2.jsonl" in filenames
-
-    first = Enum.find(body, &(&1["filename"] == "trace1.jsonl"))
-    assert first["size"] > 0
-    assert first["modified"]
-  end
-
-  test "GET /api/traces/:filename returns file content", %{router_opts: router_opts} do
-    conn = conn(:get, "/api/traces/trace1.jsonl") |> call_router(router_opts)
-
-    assert conn.status == 200
-    assert get_resp_header(conn, "content-type") |> hd() =~ "application/x-ndjson"
-    assert conn.resp_body =~ ~s|{"event":"start"}|
-  end
-
-  test "GET /api/traces/:filename returns 404 for missing file", %{router_opts: router_opts} do
-    conn = conn(:get, "/api/traces/missing.jsonl") |> call_router(router_opts)
-
-    assert conn.status == 404
+  test "legacy raw trace routes are absent", %{router_opts: router_opts} do
+    assert (conn(:get, "/api/traces") |> call_router(router_opts)).status == 404
+    assert (conn(:get, "/api/traces/trace1.jsonl") |> call_router(router_opts)).status == 404
   end
 
   test "canonical transcript frontend asset is served", %{router_opts: router_opts} do
@@ -59,14 +28,6 @@ defmodule PtcViewer.RouterTest do
     assert conn.status == 200
     assert get_resp_header(conn, "content-type") |> hd() =~ "javascript"
     assert conn.resp_body =~ "Canonical Kernel TraceLog transcript view"
-  end
-
-  test "GET /api/traces with path traversal returns 404", %{router_opts: router_opts} do
-    conn =
-      conn(:get, "/api/traces/..%2F..%2Fetc%2Fpasswd")
-      |> call_router(router_opts)
-
-    assert conn.status == 404
   end
 
   test "GET /api/kernel/runs uses the shared host query adapter", %{trace_dir: trace_dir} do

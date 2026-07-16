@@ -17,23 +17,6 @@ defmodule PtcViewer.Router do
     |> super(config)
   end
 
-  get "/api/traces" do
-    traces = PtcViewer.Api.list_traces(trace_dir(conn))
-    send_json(conn, traces)
-  end
-
-  get "/api/traces/:filename" do
-    case PtcViewer.Api.get_trace(filename, trace_dir(conn)) do
-      {:ok, content} ->
-        conn
-        |> put_resp_content_type("application/x-ndjson")
-        |> send_resp(200, content)
-
-      {:error, :not_found} ->
-        send_resp(conn, 404, "Not found")
-    end
-  end
-
   get "/api/kernel/runs" do
     send_kernel_query(conn, :list_runs, query_arguments(conn))
   end
@@ -49,6 +32,10 @@ defmodule PtcViewer.Router do
 
   get "/api/kernel/counters" do
     send_kernel_query(conn, :counters, query_arguments(conn))
+  end
+
+  match "/api/*path" do
+    send_resp(conn, 404, "Not found")
   end
 
   match _ do
@@ -104,7 +91,6 @@ defmodule PtcViewer.Router do
   end
 
   defp viewer_config(conn), do: conn.assigns.viewer_config
-  defp trace_dir(conn), do: Keyword.fetch!(viewer_config(conn), :trace_dir)
 
   defp query_arguments(conn) do
     conn

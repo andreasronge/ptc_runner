@@ -5,6 +5,12 @@ defmodule PtcRunner.Lisp.Eval.ContextTest do
 
   doctest PtcRunner.Lisp.Eval.Context
 
+  test "does not carry the retired trace context plumbing" do
+    ctx = Context.new(%{}, %{}, %{}, fn _, _, _ -> nil end, [])
+
+    refute Map.has_key?(Map.from_struct(ctx), :trace_context)
+  end
+
   describe "append_tool_call/2" do
     test "accumulates tool calls in reverse order" do
       ctx = Context.new(%{}, %{}, %{}, fn _, _ -> nil end, [])

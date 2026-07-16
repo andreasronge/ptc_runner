@@ -315,7 +315,7 @@ if Code.ensure_loaded?(ReqLLM) do
           {:error, %{status: status, body: body}}
 
         {:error, %{reason: :econnrefused}} ->
-          {:error, "Ollama not running at #{base_url}. Start with: ollama serve"}
+          {:error, "Ollama is unavailable. Start it with: ollama serve"}
 
         {:error, reason} ->
           {:error, reason}
@@ -330,8 +330,6 @@ if Code.ensure_loaded?(ReqLLM) do
         Enum.map(messages, fn msg ->
           %{"role" => to_string(msg.role), "content" => msg.content}
         end)
-
-      Logger.debug("Calling OpenAI-compatible API: #{base_url} with #{model}")
 
       case Req.post("#{base_url}/chat/completions",
              json:
@@ -502,7 +500,7 @@ if Code.ensure_loaded?(ReqLLM) do
           {:error, %{status: status, body: body}}
 
         {:error, %{reason: :econnrefused}} ->
-          {:error, "Ollama not running at #{base_url}. Start with: ollama serve"}
+          {:error, "Ollama is unavailable. Start it with: ollama serve"}
 
         {:error, reason} ->
           {:error, reason}

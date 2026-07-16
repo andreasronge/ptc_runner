@@ -48,7 +48,6 @@ defmodule PtcRunner.Lisp.Eval.Context do
     :origin_stack,
     :prelude_caller_user_ns_stack,
     :turn_history,
-    :trace_context,
     iteration_count: 0,
     loop_limit: 1000,
     max_print_length: @default_print_length,
@@ -136,22 +135,6 @@ defmodule PtcRunner.Lisp.Eval.Context do
         }
 
   @typedoc """
-  Trace context for nested agent execution tracing.
-
-  Fields:
-  - `trace_id`: Unique identifier for this trace session
-  - `parent_span_id`: Span ID of the parent operation (nil for root)
-  - `depth`: Nesting depth for visualization
-  """
-  @type trace_context ::
-          %{
-            trace_id: String.t(),
-            parent_span_id: String.t() | nil,
-            depth: non_neg_integer()
-          }
-          | nil
-
-  @typedoc """
   Parallel map/calls execution record for tracing.
 
   Fields:
@@ -182,7 +165,6 @@ defmodule PtcRunner.Lisp.Eval.Context do
           origin_stack: [map()],
           prelude_caller_user_ns_stack: [map()],
           turn_history: list(),
-          trace_context: trace_context(),
           iteration_count: integer(),
           loop_limit: integer(),
           max_tool_calls: pos_integer() | nil,
@@ -231,7 +213,6 @@ defmodule PtcRunner.Lisp.Eval.Context do
   - `:parallel_budget` - shared `PtcRunner.Lisp.Eval.ParallelBudget`
     semaphore bounding the number of parallel workers alive at once
     across the whole run (default: nil = uncounted).
-  - `:trace_context` - Trace context for nested agent tracing (default: nil)
 
   ## Examples
 
@@ -269,7 +250,6 @@ defmodule PtcRunner.Lisp.Eval.Context do
       max_heap: Keyword.get(opts, :max_heap),
       worker_max_heap: Keyword.get(opts, :worker_max_heap, Keyword.get(opts, :max_heap)),
       parallel_budget: Keyword.get(opts, :parallel_budget),
-      trace_context: Keyword.get(opts, :trace_context),
       tool_cache: Keyword.get(opts, :tool_cache, %{}),
       tools_meta: Keyword.get(opts, :tools_meta, %{}),
       strict_data: Keyword.get(opts, :strict_data, false),

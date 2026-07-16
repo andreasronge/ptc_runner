@@ -252,7 +252,7 @@ defmodule PtcRunner.Kernel.ReplSession do
     timeout_ms = min(limits.evaluation_timeout_ms, RunState.remaining_ms(session.state))
 
     Lisp.run_native(source,
-      caller: :in_process_v1,
+      caller: :repl,
       context: session.config.input,
       memory: memory,
       turn_history: session.history,

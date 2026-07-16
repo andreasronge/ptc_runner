@@ -111,7 +111,7 @@ defmodule PtcRunner.Kernel.Evaluation do
       max_heap: limits.evaluation_heap_words,
       max_program_bytes: limits.subordinate_source_bytes,
       filter_context: false,
-      caller: :in_process_v1,
+      caller: :kernel,
       preserve_runtime_callables: true
     ]
 

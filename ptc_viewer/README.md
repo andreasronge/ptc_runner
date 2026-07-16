@@ -4,10 +4,9 @@ A local, read-only web UI for canonical PtcRunner Kernel traces. It uses the
 same source-scoped `Kernel.TraceLog` projections as `log.core`, so run metadata,
 turns, filters, counters, pagination, and validation have one implementation.
 
-The legacy raw JSONL views remain as a temporary fallback during the Kernel
-migration. They are not the canonical query path and are scheduled for removal
-before the private inspection loader is added, so that loader does not inherit
-or legitimize a second run-event schema.
+The Viewer accepts only the canonical Kernel event model. Trace loading,
+validation, run derivation, filtering, and pagination remain owned by
+`PtcRunner.Kernel.TraceLog` through the configured host adapter.
 
 ## Quick start
 
@@ -28,9 +27,9 @@ execution transcript, with run metrics, prelude component fingerprints,
 workflow annotations, limit failures, and raw event metadata available on
 demand. Sanitized traces do not contain prompts, provider responses,
 capability arguments/results, or private prelude source; the UI identifies
-those omissions rather than inferring or reconstructing payloads. If the
-viewer is embedded without a Kernel adapter, the UI falls back to the legacy
-raw-file picker.
+those omissions rather than inferring or reconstructing payloads. Starting the
+Viewer without a Kernel adapter leaves canonical queries unavailable; it does
+not expose raw files through a second trace format.
 
 Private traces use the reserved `.private.jsonl` suffix. The standard viewer
 directory source and raw-file routes omit that suffix; accessing private data
@@ -79,25 +78,12 @@ Query parameters are passed to `Kernel.TraceLog`; `limit` is decoded as an
 integer and `tags` as a JSON object. The routes preserve not-found, invalid
 query, unavailable-adapter, and adapter-failure classifications.
 
-Temporary legacy endpoints:
-
-| Endpoint | Description |
-| --- | --- |
-| `GET /api/traces` | List public `.jsonl` files under the configured directory |
-| `GET /api/traces/:filename` | Read one bounded public JSONL file |
-
-Raw reads reject traversal, symbolic links, non-regular files, oversized
-files, files that change between inspection and opening, and private-suffixed
-traces.
-
 ## Architecture
 
 The root-owned adapter constructs a `Kernel.TraceLog` from the configured
 directory for every query. The viewer owns only HTTP argument decoding and
 rendering; it does not duplicate trace validation or run derivation. Adapter
 configuration is passed through the Bandit/Plug instance rather than global
-application environment.
-
-The browser assets still contain the old agent/plan renderers for raw-trace
-fallback. The product-readiness plan removes them, their raw-file routes, and
-their parser after confirming that no supported legacy trace producer remains.
+application environment. No browser route reads an arbitrary trace filename,
+and the frontend contains no parser or renderer for the retired raw event
+format.

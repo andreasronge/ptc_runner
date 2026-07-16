@@ -14,7 +14,7 @@ defmodule PtcRunner.Lisp.ClosureCaptureTest do
   alias PtcRunner.Lisp.ClosureCapture
 
   defp run!(src) do
-    case Lisp.run(src, profile: :mcp_no_tools, mode: :multi_turn) do
+    case Lisp.run(src, mode: :multi_turn) do
       {:ok, step} -> step.return
     end
   end
@@ -248,7 +248,7 @@ defmodule PtcRunner.Lisp.ClosureCaptureTest do
         (count (clojure.string/split (clojure.string/trim text) #"\\s+")))
       """
 
-      {:ok, step} = Lisp.run(src, profile: :mcp_no_tools, mode: :multi_turn)
+      {:ok, step} = Lisp.run(src, mode: :multi_turn)
       memory_size = :erlang.external_size(step.memory)
 
       # Pre-fix this was ~18 KB per closure (whole builtin env). With the
@@ -266,7 +266,7 @@ defmodule PtcRunner.Lisp.ClosureCaptureTest do
           (fn [] 42)))
       """
 
-      {:ok, step} = Lisp.run(src, profile: :mcp_no_tools, mode: :multi_turn)
+      {:ok, step} = Lisp.run(src, mode: :multi_turn)
       {:closure, _params, _body, captured_env, _history, _meta} = step.memory["f"]
 
       # The body is the literal `42` — it references nothing, so neither
@@ -285,7 +285,7 @@ defmodule PtcRunner.Lisp.ClosureCaptureTest do
           (fn [n] (+ n base))))
       """
 
-      {:ok, step} = Lisp.run(src, profile: :mcp_no_tools, mode: :multi_turn)
+      {:ok, step} = Lisp.run(src, mode: :multi_turn)
       {:closure, _params, _body, captured_env, _history, _meta} = step.memory["adder"]
 
       # `base` is referenced and must survive; `unused-big` must not.
@@ -293,7 +293,7 @@ defmodule PtcRunner.Lisp.ClosureCaptureTest do
 
       # The captured closure remains callable in a later turn.
       {:ok, next} =
-        Lisp.run("(adder 5)", profile: :mcp_no_tools, mode: :multi_turn, memory: step.memory)
+        Lisp.run("(adder 5)", mode: :multi_turn, memory: step.memory)
 
       assert next.return == 105
     end
@@ -305,7 +305,7 @@ defmodule PtcRunner.Lisp.ClosureCaptureTest do
           (fn [n] n)))
       """
 
-      {:ok, step} = Lisp.run(src, profile: :mcp_no_tools, mode: :multi_turn)
+      {:ok, step} = Lisp.run(src, mode: :multi_turn)
 
       {:closure, _params, _body, captured_env, _history, _meta} =
         Map.get(step.memory, "f") || Map.fetch!(step.memory, :f)
@@ -313,7 +313,7 @@ defmodule PtcRunner.Lisp.ClosureCaptureTest do
       assert captured_env == %{}
 
       {:ok, next} =
-        Lisp.run("(f 123)", profile: :mcp_no_tools, mode: :multi_turn, memory: step.memory)
+        Lisp.run("(f 123)", mode: :multi_turn, memory: step.memory)
 
       assert next.return == 123
       assert :erlang.external_size(step.memory) < 2_000
@@ -326,7 +326,7 @@ defmodule PtcRunner.Lisp.ClosureCaptureTest do
           (fn [] (let [x 2] x))))
       """
 
-      {:ok, step} = Lisp.run(src, profile: :mcp_no_tools, mode: :multi_turn)
+      {:ok, step} = Lisp.run(src, mode: :multi_turn)
 
       {:closure, _params, _body, captured_env, _history, _meta} =
         Map.get(step.memory, "f") || Map.fetch!(step.memory, :f)
@@ -334,7 +334,7 @@ defmodule PtcRunner.Lisp.ClosureCaptureTest do
       assert captured_env == %{}
 
       {:ok, next} =
-        Lisp.run("(f)", profile: :mcp_no_tools, mode: :multi_turn, memory: step.memory)
+        Lisp.run("(f)", mode: :multi_turn, memory: step.memory)
 
       assert next.return == 2
       assert :erlang.external_size(step.memory) < 2_000
@@ -345,7 +345,6 @@ defmodule PtcRunner.Lisp.ClosureCaptureTest do
 
       {:ok, step} =
         Lisp.run("(def f (fn [] 1))",
-          profile: :mcp_no_tools,
           mode: :multi_turn,
           turn_history: [large_history_entry]
         )
@@ -362,14 +361,12 @@ defmodule PtcRunner.Lisp.ClosureCaptureTest do
     test "closure reads current caller turn history, not definition-time history" do
       {:ok, step1} =
         Lisp.run("(def f (fn [] *1))",
-          profile: :mcp_no_tools,
           mode: :multi_turn,
           turn_history: ["definition-time"]
         )
 
       {:ok, step2} =
         Lisp.run("(f)",
-          profile: :mcp_no_tools,
           mode: :multi_turn,
           memory: step1.memory,
           turn_history: ["call-time"]

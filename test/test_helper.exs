@@ -1,8 +1,7 @@
 # Suppress sandbox process crash reports during tests
 # Set OTP logger level to :critical to hide spawned process exceptions
 # (these are expected in property tests and error handling tests)
-Logger.configure(level: :warning)
-:logger.set_primary_config(:level, :critical)
+Logger.configure(level: :critical)
 
 if System.get_env("CI") do
   Application.put_env(:stream_data, :max_runs, 300)

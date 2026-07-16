@@ -65,8 +65,7 @@ defmodule PtcRunner.Lisp do
   alias PtcRunner.Lisp.Signature
   alias PtcRunner.Lisp.Tool
 
-  @valid_callers [:in_process_v1, :text_mode, :mcp]
-  @valid_profiles [:mcp_no_tools, :mcp_aggregator, :in_process_v1, :text_mode]
+  @valid_callers [:direct, :kernel, :repl]
 
   @doc """
   Format a PTC-Lisp value as Clojure-style syntax for display.
@@ -158,34 +157,26 @@ defmodule PtcRunner.Lisp do
       resolve, while private helpers stay user-invisible. Compile/attach
       failures return `{:error, Step}`. Attach-time `tool:<name>`
       requirements are checked against the granted `:tools` map. (default: nil)
-    - `:trace_context` - Trace context for nested agent tracing (default: nil)
-    - `:caller` - Closed-set tag for telemetry. One of `:in_process_v1`,
-      `:text_mode`, or `:mcp` (default: `:in_process_v1`). Pure
+    - `:caller` - Closed-set tag for telemetry. One of `:direct`, `:kernel`,
+      or `:repl` (default: `:direct`). Pure
       instrumentation: attached to `[:ptc_runner, :lisp, :execute, *]`
       events and otherwise discarded. Out-of-set values raise
       `ArgumentError`.
-    - `:profile` - Closed-set telemetry tag for the calling profile.
-      One of `:mcp_no_tools`, `:mcp_aggregator`, `:in_process_v1`, or
-      `:text_mode`, or `nil` (default). Pure instrumentation: attached
-      to `[:ptc_runner, :lisp, :execute, *]` events and otherwise
-      discarded. Out-of-set values raise `ArgumentError`. The MCP v1
-      handler passes `:mcp_no_tools`; the aggregator (Phase 1a)
-      flips it to `:mcp_aggregator`. See
-      `Plans/ptc-runner-mcp-aggregator.md` §11.5.
 
   ## Telemetry
 
-  `run/2` is wrapped in `:telemetry.span/3` and emits the following events:
+  `run/2` emits the following events:
 
   - `[:ptc_runner, :lisp, :execute, :start]` — measurements
-    `monotonic_time`, `system_time`; metadata `caller`, `profile`,
+    `monotonic_time`, `system_time`; metadata `caller`,
     `program_bytes`, `signature_supplied?`.
   - `[:ptc_runner, :lisp, :execute, :stop]` — measurements `duration`,
     `monotonic_time`, `result_bytes`, `prints_count`; metadata `caller`,
-    `profile`, `program_bytes`, `signature_supplied?`.
+    `program_bytes`, `signature_supplied?`, and semantic `outcome`.
   - `[:ptc_runner, :lisp, :execute, :exception]` — measurements `duration`,
-    `monotonic_time`; metadata `caller`, `profile`, `program_bytes`,
-    `signature_supplied?`, `kind`, `reason`, `stacktrace`.
+    `monotonic_time`; metadata `caller`, `program_bytes`,
+    `signature_supplied?`, and `exception_class`. Exception reasons,
+    stacktraces, source, arguments, and results are never attached.
 
   ## Return Value
 
@@ -305,35 +296,68 @@ defmodule PtcRunner.Lisp do
   @spec run_native(String.t(), keyword()) ::
           {:ok, Step.t()} | {:error, Step.t()}
   def run_native(source, opts \\ []) do
-    caller = validate_caller!(Keyword.get(opts, :caller, :in_process_v1))
-    profile = validate_profile!(Keyword.get(opts, :profile))
-    # Strip :caller / :profile from opts: pure instrumentation; must
-    # not affect execution semantics or be re-read by downstream code.
-    inner_opts = opts |> Keyword.delete(:caller) |> Keyword.delete(:profile)
+    caller = validate_caller!(Keyword.get(opts, :caller, :direct))
+    # Strip instrumentation options so they cannot affect execution semantics
+    # or be re-read by downstream code.
+    inner_opts = Keyword.delete(opts, :caller)
     signature_supplied? = not is_nil(Keyword.get(inner_opts, :signature))
     program_bytes = if is_binary(source), do: byte_size(source), else: 0
 
-    start_meta = %{
+    metadata = %{
       caller: caller,
-      profile: profile,
       program_bytes: program_bytes,
       signature_supplied?: signature_supplied?
     }
 
-    :telemetry.span([:ptc_runner, :lisp, :execute], start_meta, fn ->
+    started_at = System.monotonic_time()
+
+    :telemetry.execute(
+      [:ptc_runner, :lisp, :execute, :start],
+      %{monotonic_time: started_at, system_time: System.system_time()},
+      metadata
+    )
+
+    try do
       result = do_run(source, inner_opts)
       {result_bytes, prints_count} = telemetry_result_stats(result)
+      stopped_at = System.monotonic_time()
 
-      stop_meta = %{
-        caller: caller,
-        profile: profile,
-        program_bytes: program_bytes,
-        signature_supplied?: signature_supplied?
-      }
+      :telemetry.execute(
+        [:ptc_runner, :lisp, :execute, :stop],
+        %{
+          duration: stopped_at - started_at,
+          monotonic_time: stopped_at,
+          result_bytes: result_bytes,
+          prints_count: prints_count
+        },
+        Map.put(metadata, :outcome, telemetry_outcome(result))
+      )
 
-      {result, %{result_bytes: result_bytes, prints_count: prints_count}, stop_meta}
-    end)
+      result
+    rescue
+      exception ->
+        emit_telemetry_exception(started_at, metadata, exception.__struct__)
+        reraise exception, __STACKTRACE__
+    catch
+      kind, reason ->
+        emit_telemetry_exception(started_at, metadata, kind)
+        :erlang.raise(kind, reason, __STACKTRACE__)
+    end
   end
+
+  defp emit_telemetry_exception(started_at, metadata, exception_class) do
+    stopped_at = System.monotonic_time()
+
+    :telemetry.execute(
+      [:ptc_runner, :lisp, :execute, :exception],
+      %{duration: stopped_at - started_at, monotonic_time: stopped_at},
+      Map.put(metadata, :exception_class, exception_class)
+    )
+  end
+
+  defp telemetry_outcome({:ok, %Step{}}), do: :ok
+  defp telemetry_outcome({:error, %Step{}}), do: :error
+  defp telemetry_outcome(_other), do: :error
 
   defp public_result({tag, %Step{} = step}) when tag in [:ok, :error] do
     {tag,
@@ -384,20 +408,6 @@ defmodule PtcRunner.Lisp do
     raise ArgumentError,
           "invalid :caller option #{inspect(other)}; expected one of " <>
             inspect(@valid_callers)
-  end
-
-  # Closed atom set for :profile telemetry tag. `nil` (default) is
-  # accepted so existing in-process callers don't have to pass it; MCP
-  # callsites pass the appropriate profile (`:mcp_no_tools` for v1,
-  # `:mcp_aggregator` for the aggregator) per
-  # `Plans/ptc-runner-mcp-aggregator.md` §11.5.
-  defp validate_profile!(nil), do: nil
-  defp validate_profile!(profile) when profile in @valid_profiles, do: profile
-
-  defp validate_profile!(other) do
-    raise ArgumentError,
-          "invalid :profile option #{inspect(other)}; expected nil or one of " <>
-            inspect(@valid_profiles)
   end
 
   # Compute telemetry stop measurements from the run result.
@@ -496,7 +506,6 @@ defmodule PtcRunner.Lisp do
       filter_context: Keyword.get(opts, :filter_context, true),
       pmap_timeout: Keyword.get(opts, :pmap_timeout),
       pmap_max_concurrency: Keyword.get(opts, :pmap_max_concurrency),
-      trace_context: Keyword.get(opts, :trace_context),
       tool_cache: Keyword.get(opts, :tool_cache, %{}),
       max_tool_calls: Keyword.get(opts, :max_tool_calls),
       max_tool_call_result_bytes: Keyword.get(opts, :max_tool_call_result_bytes),
@@ -773,7 +782,6 @@ defmodule PtcRunner.Lisp do
       filter_context: filter_context,
       pmap_timeout: pmap_timeout,
       pmap_max_concurrency: pmap_max_concurrency,
-      trace_context: trace_context,
       tool_cache: tool_cache,
       tools_meta: tools_meta,
       max_tool_calls: max_tool_calls,
@@ -808,7 +816,6 @@ defmodule PtcRunner.Lisp do
         parallel_budget: parallel_budget,
         pmap_timeout: pmap_timeout,
         pmap_max_concurrency: pmap_max_concurrency,
-        trace_context: trace_context,
         tool_cache: tool_cache,
         tools_meta: tools_meta,
         max_tool_calls: max_tool_calls,

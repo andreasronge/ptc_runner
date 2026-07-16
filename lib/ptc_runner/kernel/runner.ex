@@ -107,7 +107,7 @@ defmodule PtcRunner.Kernel.Runner do
       max_heap: config.limits.workflow_heap_words,
       max_program_bytes: config.limits.entry_source_bytes,
       filter_context: false,
-      caller: :in_process_v1
+      caller: :kernel
     ]
 
     case Lisp.run_native(entry_source, opts) do

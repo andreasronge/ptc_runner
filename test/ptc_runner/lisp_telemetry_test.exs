@@ -23,117 +23,55 @@ defmodule PtcRunner.LispTelemetryTest do
     )
 
     on_exit(fn -> :telemetry.detach(handler_id) end)
-
     :ok
   end
 
   describe "Lisp.run/2 telemetry" do
-    test "emits :start and :stop with the spec'd metadata and measurement keys" do
+    test "emits bounded start and successful stop measurements" do
       assert {:ok, _step} = Lisp.run("(+ 1 2)")
 
       assert_receive {:telemetry, [:ptc_runner, :lisp, :execute, :start], start_meas, start_meta}
       assert_receive {:telemetry, [:ptc_runner, :lisp, :execute, :stop], stop_meas, stop_meta}
 
-      # :start measurements are :telemetry.span defaults
-      assert Map.has_key?(start_meas, :system_time)
-      assert Map.has_key?(start_meas, :monotonic_time)
+      assert Map.keys(start_meas) |> Enum.sort() == [:monotonic_time, :system_time]
 
-      # :start metadata: caller, program_bytes, signature_supplied?
-      assert start_meta.caller == :in_process_v1
-      assert start_meta.program_bytes == byte_size("(+ 1 2)")
-      assert start_meta.signature_supplied? == false
+      assert start_meta == %{
+               caller: :direct,
+               program_bytes: byte_size("(+ 1 2)"),
+               signature_supplied?: false
+             }
 
-      # :stop measurements: duration plus our additions
-      assert Map.has_key?(stop_meas, :duration)
-      assert is_integer(Map.fetch!(stop_meas, :result_bytes))
-      assert Map.fetch!(stop_meas, :result_bytes) > 0
-      assert Map.fetch!(stop_meas, :prints_count) == 0
+      assert Map.keys(stop_meas) |> Enum.sort() ==
+               [:duration, :monotonic_time, :prints_count, :result_bytes]
 
-      # :stop metadata mirrors :start metadata
-      assert stop_meta.caller == :in_process_v1
-      assert stop_meta.program_bytes == byte_size("(+ 1 2)")
-      assert stop_meta.signature_supplied? == false
+      assert is_integer(stop_meas.duration)
+      assert stop_meas.result_bytes > 0
+      assert stop_meas.prints_count == 0
+      assert stop_meta == Map.put(start_meta, :outcome, :ok)
     end
 
-    test "default :caller is :in_process_v1" do
-      assert {:ok, _} = Lisp.run("(+ 1 2)")
+    test "accepts only the direct, kernel, and repl caller taxonomy" do
+      for caller <- [:direct, :kernel, :repl] do
+        assert {:ok, _} = Lisp.run("(+ 1 2)", caller: caller)
 
-      assert_receive {:telemetry, [:ptc_runner, :lisp, :execute, :start], _,
-                      %{caller: :in_process_v1}}
+        assert_receive {:telemetry, [:ptc_runner, :lisp, :execute, :start], _, %{caller: ^caller}}
 
-      assert_receive {:telemetry, [:ptc_runner, :lisp, :execute, :stop], _,
-                      %{caller: :in_process_v1}}
-    end
-
-    test ":caller option propagates to :start and :stop" do
-      assert {:ok, _} = Lisp.run("(+ 1 2)", caller: :mcp)
-      assert_receive {:telemetry, [:ptc_runner, :lisp, :execute, :start], _, %{caller: :mcp}}
-      assert_receive {:telemetry, [:ptc_runner, :lisp, :execute, :stop], _, %{caller: :mcp}}
-    end
-
-    test ":caller :text_mode is accepted" do
-      assert {:ok, _} = Lisp.run("(+ 1 2)", caller: :text_mode)
-
-      assert_receive {:telemetry, [:ptc_runner, :lisp, :execute, :start], _,
-                      %{caller: :text_mode}}
-    end
-
-    test ":profile defaults to nil and propagates to :start and :stop (Phase 0 §11.5)" do
-      assert {:ok, _} = Lisp.run("(+ 1 2)")
-
-      assert_receive {:telemetry, [:ptc_runner, :lisp, :execute, :start], _, %{profile: nil}}
-
-      assert_receive {:telemetry, [:ptc_runner, :lisp, :execute, :stop], _, %{profile: nil}}
-    end
-
-    test ":profile :mcp_no_tools propagates (Phase 0 §11.5)" do
-      assert {:ok, _} = Lisp.run("(+ 1 2)", caller: :mcp, profile: :mcp_no_tools)
-
-      assert_receive {:telemetry, [:ptc_runner, :lisp, :execute, :start], _,
-                      %{caller: :mcp, profile: :mcp_no_tools}}
-
-      assert_receive {:telemetry, [:ptc_runner, :lisp, :execute, :stop], _,
-                      %{caller: :mcp, profile: :mcp_no_tools}}
-    end
-
-    test "out-of-set :profile raises ArgumentError (closed set)" do
-      assert_raise ArgumentError, fn ->
-        Lisp.run("(+ 1 2)", profile: :bogus)
+        assert_receive {:telemetry, [:ptc_runner, :lisp, :execute, :stop], _, %{caller: ^caller}}
       end
+
+      assert_raise ArgumentError, fn -> Lisp.run("(+ 1 2)", caller: :mcp) end
+      assert_raise ArgumentError, fn -> Lisp.run("(+ 1 2)", caller: :in_process_v1) end
     end
 
-    test ":profile accepts :mcp_aggregator, :in_process_v1, :text_mode" do
-      for prof <- [:mcp_aggregator, :in_process_v1, :text_mode] do
-        assert {:ok, _} = Lisp.run("(+ 1 2)", profile: prof)
-        assert_receive {:telemetry, [:ptc_runner, :lisp, :execute, :start], _, %{profile: ^prof}}
-      end
-    end
-
-    test "out-of-set :caller raises ArgumentError naming the bad atom and the closed set" do
-      assert_raise ArgumentError, fn -> Lisp.run("(+ 1 2)", caller: :bogus) end
-
-      try do
-        Lisp.run("(+ 1 2)", caller: :bogus)
-      rescue
-        e in ArgumentError ->
-          assert e.message =~ ":bogus"
-          assert e.message =~ ":in_process_v1"
-          assert e.message =~ ":text_mode"
-          assert e.message =~ ":mcp"
-      end
-    end
-
-    test "ArgumentError fires before any telemetry event is emitted" do
-      # Drain any prior messages
+    test "invalid caller fails before telemetry is emitted" do
       flush_telemetry()
 
       assert_raise ArgumentError, fn -> Lisp.run("(+ 1 2)", caller: :bogus) end
       refute_received {:telemetry, [:ptc_runner, :lisp, :execute, _], _, _}
     end
 
-    test "signature_supplied? is true when :signature opt is given" do
-      sig = "() -> :int"
-      assert {:ok, _} = Lisp.run("(+ 1 2)", signature: sig)
+    test "signature_supplied? is true when a signature is supplied" do
+      assert {:ok, _} = Lisp.run("(+ 1 2)", signature: "() -> :int")
 
       assert_receive {:telemetry, [:ptc_runner, :lisp, :execute, :start], _,
                       %{signature_supplied?: true}}
@@ -142,33 +80,35 @@ defmodule PtcRunner.LispTelemetryTest do
                       %{signature_supplied?: true}}
     end
 
-    test "errors returned via {:error, Step.t()} still emit :stop (not :exception)" do
-      # An undefined variable produces {:error, step}, not a raise.
-      # The span fn returns normally, so :stop fires.
-      assert {:error, _} = Lisp.run("(+ undefined-var 1)", caller: :mcp)
-      assert_receive {:telemetry, [:ptc_runner, :lisp, :execute, :start], _, %{caller: :mcp}}
-      assert_receive {:telemetry, [:ptc_runner, :lisp, :execute, :stop], _, %{caller: :mcp}}
+    test "recoverable Lisp failures emit a semantic error outcome" do
+      assert {:error, _} = Lisp.run("(+ undefined-var 1)", caller: :kernel)
+
+      assert_receive {:telemetry, [:ptc_runner, :lisp, :execute, :start], _, %{caller: :kernel}}
+
+      assert_receive {:telemetry, [:ptc_runner, :lisp, :execute, :stop], _,
+                      %{caller: :kernel, outcome: :error}}
+
       refute_received {:telemetry, [:ptc_runner, :lisp, :execute, :exception], _, _}
     end
 
-    test ":exception event fires when run/2 itself raises and carries caller + kind/reason/stacktrace" do
-      # Force a raise inside the span body by passing non-enumerable tools.
-      # normalize_tools calls Enum.reduce_while, which raises Protocol.UndefinedError
-      # for non-enumerable values. This happens before the bounded compile process.
+    test "exception metadata identifies only its class, never raw reason or stacktrace" do
       assert_raise Protocol.UndefinedError, fn ->
-        Lisp.run("1", tools: :not_enumerable, caller: :text_mode)
+        Lisp.run("1", tools: :not_enumerable, caller: :repl)
       end
 
-      assert_receive {:telemetry, [:ptc_runner, :lisp, :execute, :start], _,
-                      %{caller: :text_mode}}
+      assert_receive {:telemetry, [:ptc_runner, :lisp, :execute, :start], _, %{caller: :repl}}
 
-      assert_receive {:telemetry, [:ptc_runner, :lisp, :execute, :exception], exc_meas, exc_meta}
+      assert_receive {:telemetry, [:ptc_runner, :lisp, :execute, :exception], measurements,
+                      metadata}
 
-      assert Map.has_key?(exc_meas, :duration)
-      assert exc_meta.caller == :text_mode
-      assert Map.has_key?(exc_meta, :kind)
-      assert Map.has_key?(exc_meta, :reason)
-      assert Map.has_key?(exc_meta, :stacktrace)
+      assert Map.keys(measurements) |> Enum.sort() == [:duration, :monotonic_time]
+
+      assert metadata == %{
+               caller: :repl,
+               exception_class: Protocol.UndefinedError,
+               program_bytes: 1,
+               signature_supplied?: false
+             }
     end
   end
 

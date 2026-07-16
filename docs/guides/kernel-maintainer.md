@@ -147,6 +147,21 @@ The public result algebra is `{:ok, %PtcRunner.Kernel.Result{}}` or
 `{:error, %PtcRunner.Kernel.Error{}}`. Capability failures are normally bounded
 values returned to Lisp; the workflow decides whether they are terminal.
 
+Runtime observability has separate planes with separate data contracts:
+
+- OTP Logger carries sparse operator diagnostics and never transcripts,
+  prompts, source, capability payloads, credentials, endpoints, headers, or
+  session identifiers.
+- Telemetry carries low-cardinality measurements. Lisp execution uses the
+  `[:ptc_runner, :lisp, :execute]` prefix, the closed `:direct | :kernel |
+  :repl` caller taxonomy, and `:ok | :error` semantic outcomes. Exception
+  events identify only the exception class.
+- `PtcRunner.Kernel.EventSink` and `PtcRunner.Kernel.TraceLog` own sanitized,
+  bounded canonical run events.
+- Exact sensitive development payloads belong only to an explicitly enabled
+  run-owned inspection sink; Logger, Telemetry, and canonical events never
+  receive them.
+
 `PtcRunner.Kernel.EventSink` owns canonical event sequence numbers, timestamps,
 queue bounds, and loss accounting. Normal policy is lossy and reports dropped
 events. Private policy fails closed when it cannot retain the required event.
