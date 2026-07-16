@@ -193,6 +193,7 @@ defmodule PtcRunner.MixProject do
           "docs/plans/lisp-kernel/tracelog-contract.md",
           "docs/conformance/index.md",
           "docs/guides/capability-prelude.md",
+          "docs/guides/documentation-guidelines.md",
           "docs/guides/kernel-maintainer.md",
           "docs/guides/kernel-tutorial.md",
           "docs/guides/kernel-repl.md"

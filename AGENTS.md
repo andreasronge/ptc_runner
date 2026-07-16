@@ -7,7 +7,8 @@ PtcRunner is a BEAM-native Elixir runtime for Programmatic Tool Calling (PTC):
 hosts compile immutable PTC-Lisp bundles, assemble explicit workflow and
 mission environments, and execute them through a bounded owner-based Kernel.
 Key docs: Kernel architecture in `docs/guides/kernel-maintainer.md`,
-language reference in `docs/ptc-lisp-specification.md`, and built-ins in
+documentation guidance in `docs/guides/documentation-guidelines.md`, language
+reference in `docs/ptc-lisp-specification.md`, and built-ins in
 `docs/function-reference.md`.
 
 ## Working Style

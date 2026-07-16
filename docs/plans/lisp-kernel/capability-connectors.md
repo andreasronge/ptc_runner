@@ -1,765 +1,508 @@
-# Capability connectors and server frontends
+# Capability connectors
 
-Status: future plan, reviewed 2026-07-13. Not implemented and not part of the
-current Kernel API.
+Status: 0.x implementation plan, reviewed 2026-07-16. This is not implemented
+yet.
 
-This plan describes how PtcRunner can consume tools from MCP, HTTP/OpenAPI,
-databases, files, and native host extensions without rebuilding the deleted
-generic upstream platform. It also separates that outbound extension work from
-future HTTP or MCP frontends that expose PtcRunner workflows to other clients.
+## Decision
 
-The central decision is:
+Ship one useful external-tools path before designing a connector framework:
 
-> Make the generic abstraction a host-installed **capability source**, not an
-> upstream server. Resolve every selected source into immutable
-> `Kernel.Capability` values before a run begins; keep transport, credentials,
-> sessions, and native handles outside Lisp.
+> Extend the existing provider-builder seam just enough for one installed MCP
+> source to produce several frozen `Kernel.Capability` values for one run.
 
-The implemented `PtcRunner.Kernel.*` module contracts and
-[Kernel maintainer guide](../../guides/kernel-maintainer.md) remain
-authoritative until a future slice promotes an approved part of this plan.
-The shared principal, resource, grant, bounds, and audit vocabulary is defined
-by the future
-[`host-access-and-prelude-workspaces.md`](host-access-and-prelude-workspaces.md)
-plan. Connector code consumes that vocabulary; it does not own human roles,
-Viewer sessions, trace authorization, or prelude storage.
+The milestone is not complete at “the HTTP call works.” It must also supply one
+runnable developer journey in which a model receives a frozen mission inventory,
+generates PTC-Lisp that calls the discovered tools, and the completed exchange
+can be inspected locally in `ptc_viewer`. This inspection path is explicitly
+host-enabled and private; it does not make sensitive payloads part of canonical
+traces.
 
-## Why this fits the current Kernel
+The first release does not include a transport-neutral adapter hierarchy, a
+catalog service, shared IAM, database configuration, inbound server frontend,
+or dynamic capability changes. Those features require separate evidence.
 
-The extension seam already exists:
+## Why this is enough
 
-- `Kernel.Capability` owns the public name, validator, bounded description,
-  model visibility, and host callback.
-- `Kernel.ProviderRegistry` maps bounded manifest names to host-owned builders.
-- `Kernel.RunBuilder` resolves those builders before constructing separate
+The current Kernel already supplies the important runtime boundary:
+
+- `Kernel.Capability` owns a public name, validation, description, visibility,
+  and host callback.
+- `Kernel.ProviderRegistry` maps bounded manifest names to trusted host
+  builders.
+- `Kernel.RunBuilder` resolves providers before creating separate immutable
   workflow and mission environments.
-- `Kernel.Dispatcher` validates arguments, atomically charges quota, contains
-  provider processes, enforces timeout/heap/result limits, rejects late
-  results, and creates the uniform Lisp result envelope.
-- Manifests can select registered authority but cannot register executable
-  callbacks or name Elixir modules and functions.
+- `Kernel.Dispatcher` validates arguments, charges quota atomically, contains
+  provider work, enforces limits, rejects late results, and normalizes errors.
+- `Kernel.TraceCapability.new/1` already demonstrates that one trusted source
+  can naturally produce several capabilities.
 
-The current limitation is that a builder returns exactly one capability and
-the manifest supplies provider configuration directly. A remote MCP server,
-an OpenAPI document, or a database catalog normally produces several tools and
-requires host-owned connection and cleanup state.
+The missing vertical path is MCP discovery, installed endpoint and credential
+configuration, schema/result validation, session ownership, and cleanup. It is
+not a reason to model OpenAPI, databases, files, and native Elixir up front.
 
-The old `lib/ptc_runner/upstream/**` and `mcp_server/` products combined
-transport, discovery, credentials, sessions, roles, prompts, catalogs, policy,
-and evaluator behavior. That breadth was deleted during the Kernel migration.
-This plan restores only the small transport-to-capability normalization layer.
+## MVP scope
 
-## Two independent directions
+The MCP MVP supports:
 
-Do not use one subsystem for both directions.
+- one host-installed MCP Streamable HTTP source type;
+- read-only tools initially;
+- one source producing a bounded list of capabilities;
+- explicit upstream-to-public name mappings;
+- discovery during run assembly;
+- one run-owned MCP session used for discovery and calls;
+- frozen per-run tool metadata and snapshot hash;
+- strict input and output validation;
+- bounded JSON/text results;
+- cleanup on build failure, completion, timeout, cancellation, caller death,
+  and run closure;
+- safe connector snapshot metadata in the canonical run summary; and
+- one opt-in local inspection artifact for the development journey described in
+  [`host-access-and-prelude-workspaces.md`](host-access-and-prelude-workspaces.md).
 
-| Direction | Purpose | Boundary |
-| --- | --- | --- |
-| Outbound connector | PtcRunner calls an MCP tool, fixed HTTP operation, database query, file operation, or native extension. | Installed source resolves to frozen `Kernel.Capability` values. |
-| Inbound frontend | An HTTP or MCP client invokes a PtcRunner workflow. | Thin server invokes an administrator-installed named manifest through `RunBuilder`. |
+It explicitly excludes:
 
-An inbound MCP frontend is not an MCP connector. It does not grant an active
-run access to every tool available to the calling MCP client, and it must not
-reintroduce mutable evaluator sessions or upstream catalogs.
+- cached or persisted catalogs and refresh commands;
+- automatic startup discovery;
+- OpenAPI and database adapters;
+- filesystem roots beyond the existing explicit file capability;
+- MCP resources, prompts, sampling, elicitation, and roots;
+- a background Streamable HTTP GET notification stream, resumability, or tasks;
+- writes, approval workflows, and automatic retries;
+- a generic source behaviour intended for adapters that do not exist yet;
+- shared principals, grants, roles, or policy engines;
+- inbound HTTP or MCP exposure of PtcRunner; and
+- changes to a run's capabilities after assembly.
 
-## Goals
+## Minimal host seam
 
-- Give non-Elixir users useful external tools through manifests and PTC-Lisp.
-- Use one transport-independent capability contract for local and remote
-  extensions.
-- Preserve workflow/mission authority separation and immutable environments.
-- Keep destinations, commands, credentials, connection strings, and native
-  callbacks under administrator control.
-- Freeze selected names, schemas, metadata, limits, and source identity before
-  execution.
-- Reuse the existing dispatcher and canonical event vocabulary.
-- Add one narrow connector at a time with end-to-end confinement tests.
+The host passes the exact registry available to a run build. Possession of that
+registry is the 0.x source-authorization boundary; there is no process-global
+catalog and no manifest-selectable access profile. A manifest cannot reach a
+source omitted from the supplied registry.
 
-## Non-goals
+Keep the implemented registry's arity-two builder contract. An installed MCP
+source is one additional registry entry whose builder closure owns the endpoint,
+credential callback, public-name mappings, and installed ceilings. The JSON
+config supplied by the manifest is only the selection for that installed entry.
 
-- A manifest-defined generic HTTP client, arbitrary SQL tool, shell command, or
-  arbitrary MCP stdio command.
-- Dynamic tool installation or capability mutation during a run.
-- Restoring the deleted evaluator-era roles, mutable catalogs, prelude stores,
-  SubAgent, or session products inside the connector subsystem. A new
-  host-access layer and versioned prelude workspace are planned separately.
-- Passing credentials, connection handles, PIDs, callbacks, or transport
-  objects into Lisp values.
-- Treating a provider subprocess as hostile-code isolation. Adversarial native
-  extensions still require a separate node or OS/container boundary.
-- Supporting every MCP feature in the first connector. Prompts, resources,
-  sampling, elicitation, tasks, and arbitrary protocol extensions remain out of
-  scope until the tools path is proven.
-
-## Proposed vocabulary
-
-Use names that distinguish installed authority from selected authority:
-
-- **capability source** — an administrator-installed definition that can
-  produce one or more capabilities;
-- **source adapter** — trusted host code for `local`, `mcp`, `openapi`, or a
-  database adapter;
-- **source instance** — one installed and credential-bound configuration, such
-  as `github-production` or `reporting-db`;
-- **host grant** — exact installed authority resolved by the shared host-access
-  policy before connector discovery or use;
-- **manifest selection** — the bounded subset and lower limits requested for
-  one manifest destination; it can only narrow a host grant;
-- **connector lease** — opaque host-owned lifecycle state released when
-  building fails or the run ends;
-- **capability snapshot** — the frozen public names, schemas, metadata, limits,
-  upstream identity, and content hash used by one run.
-
-`ProviderRegistry` may be renamed in a breaking slice because “provider” is
-easily confused with an LLM vendor. The important change is semantic: registry
-entries return a bounded capability set and optional lease, not just one
-callback.
-
-## Proposed host contract
-
-The H0 slice of
-[`host-access-and-prelude-workspaces.md`](host-access-and-prelude-workspaces.md)
-defines `Principal`, `ResourceRef`, `Grant`, `Bounds`, `RequestContext`,
-`ScopedGrant`, common service errors, and audit records before connector code
-is added. The connector-specific shape is then:
+Normalize registry builder results internally to the following small shape:
 
 ```elixir
-@type build_context :: %{
-        manifest_directory: binary(),
-        destination: :workflow | :mission,
-        installed_ceilings: Limits.t(),
-        request_context: HostAccess.RequestContext.t()
+@type built_provider :: %{
+        capabilities: [Kernel.Capability.t()],
+        snapshot: map() | nil,
+        close: (-> :ok) | nil
       }
 
-@type built_source :: %{
-        capabilities: [Capability.t()],
-        snapshot: CapabilitySnapshot.t(),
-        lease: ConnectorLease.t() | nil
-      }
-
-@callback build(installed_config(), manifest_selection(), build_context()) ::
-            {:ok, built_source()} | {:error, ConnectorError.t()}
+@type builder ::
+        (manifest_selection(), build_context() ->
+           {:ok, built_provider()} | {:error, term()})
 ```
 
-The adapter authorizes `capabilities.discover` for the exact installed
-`:connector_source` and pins that instance before discovery. Each resulting
-callback retains an operation-scoped grant for `capability.call`; it cannot
-reuse discovery authority to access a different source. The manifest selection
-contains only allowlisted public names and lower ceilings, never a principal,
-role, endpoint, credential, or grant object.
+The existing `llm` and `file-read` builders normalize to one capability with no
+snapshot or close function. The MCP-specific constructor may expose a host API
+that returns the installed builder closure; it does not imply a generic
+`CapabilitySource` behaviour.
 
-`Kernel.Capability` needs additional frozen metadata:
+`build_context` needs only the destination, manifest directory where already
+required by current providers, the building owner PID, and installed execution
+ceilings. It is connector execution context, not `H0-lite` and not a reusable
+authorization vocabulary. A run ID or correlation vocabulary is unnecessary at
+this seam: safe snapshots are copied into `RunConfig` and correlated when
+`run-started` is emitted.
+
+The manifest may select an installed source, public tool names, destination,
+and lower limits. It cannot provide an endpoint, credential, command, module,
+function, access profile, grant, or source configuration.
+
+Do not extract a public `CapabilitySource` behaviour in this milestone. A
+public MCP-specific constructor plus the existing registry builder function is
+enough. If a second real remote adapter later needs the same shape, extract only
+the common fields and lifecycle proven by both implementations.
+
+## Resource ownership
+
+Discovery currently occurs before `Kernel.Runner` creates `RunState`, and the
+implemented `RunConfig` has no provider-resource field. The connector therefore
+requires one explicit breaking lifecycle change:
+
+1. `RunBuilder` accumulates each successful builder's idempotent close function.
+2. Any later provider, bundle, environment, or config failure closes the
+   already-built resources in reverse order.
+3. A successful `RunConfig` carries the close functions as opaque host-owned
+   resources; they never enter Lisp or discovery metadata.
+4. `Runner` first closes `RunState`, which kills and drains attached provider
+   workers, and only then closes provider resources.
+5. `ReplSession.close/1` performs the same ordering. A built configuration that
+   is never run has one explicit `RunBuilder.close/1` path.
+6. The MCP lease owner monitors the process that built the run, so caller death
+   closes the session even when normal cleanup is skipped.
+
+The lease process makes `close` idempotent and owns session termination; it is
+not a pool, catalog, or general resource manager. In-flight HTTP work executes
+in the dispatcher's attached provider worker so timeout or caller death kills
+the request before the lease is closed.
+
+## Run lifecycle
+
+For every run build:
+
+1. Resolve the requested alias from the host-supplied registry.
+2. Load its installed endpoint, credential callback, mappings, and ceilings.
+3. Start one owned MCP client/session.
+4. Initialize and negotiate one supported protocol version.
+5. Send `notifications/initialized`.
+6. Fetch bounded, paginated `tools/list` in that same session.
+7. Validate names, descriptions, schemas, and configured mappings.
+8. Intersect installed tools and ceilings with manifest names, destination,
+   and lower limits.
+9. Freeze the selected metadata and deterministic snapshot hash.
+10. Insert callbacks closed over the same source, session, and upstream name.
+11. Route calls through `Kernel.Dispatcher`.
+12. Cancel and drain provider work before closing the session when the run
+    ends or assembly fails.
+
+Discovery during assembly deliberately makes build availability depend on the
+remote MCP server. That is an acceptable 0.x tradeoff: it avoids catalog
+artifacts, refresh state, and possible disagreement between cached discovery
+and a different run session. Add caching only after measured startup or
+availability problems justify it.
+
+When a server returns an MCP session ID, subsequent requests use it and cleanup
+attempts the transport-defined HTTP `DELETE`. The client accepts bounded
+`application/json` and `text/event-stream` responses to POST requests, but does
+not open a background GET stream. Notifications received while waiting for a
+POST response are bounded and ignored. No notification mutates the current run;
+a later run discovers again.
+
+The first implementation pins the 2025-11-25 protocol version and sends the
+negotiated version header on later requests. To keep session mutation and retry
+races out of this pre-production slice, a session-expired HTTP 404 becomes one
+bounded `:session_expired` provider error and closes the lease; a later run
+initializes and discovers again. Standards-compliant in-run session recovery is
+a documented gap that must close before calling the connector production-ready.
+Other automatic retries remain out of scope.
+
+## Frozen capability contract
+
+Each selected tool becomes one ordinary frozen capability containing at least:
 
 ```elixir
 %Kernel.Capability{
-  name: "github.issues.search",
-  description: "Search visible GitHub issues",
+  name: "issues.search",
+  description: "Search visible issues",
   input_schema: %{...},
   output_schema: %{...},
   effect: :read,
   model_visible: true,
-  timeout_ms: 5_000,
-  max_result_bytes: 256_000,
   callback: host_owned_callback
 }
 ```
 
-Schemas should use a documented bounded JSON Schema profile. Unsupported
-keywords, excessive depth/size, remote `$ref`, ambiguous keys, or non-object
-argument roots fail during source resolution. The capability callback and
-connector lease remain excluded from discovery metadata and all Lisp values.
+Only `input_schema`, `output_schema`, and `effect` need to be added to the
+current capability struct. The connector callback enforces its installed and
+manifest-narrowed request timeout and raw response ceiling, while the dispatcher
+continues to enforce the existing run-wide timeout and argument/result ceilings.
+Do not add a generic per-source quota group or per-capability limit hierarchy in
+this slice. Existing environment and per-name call budgets remain authoritative.
 
-### Lifecycle
+`input_schema` is required for every model-visible capability and describes its
+binary-keyed argument object. `output_schema` is optional and describes only a
+successful capability value, not the Dispatcher status envelope. `effect` uses
+the same closed `:read | :write | :unknown` vocabulary as prelude exports and
+defaults to `:unknown`; every MCP capability in this read-only milestone is
+`:read`. Capability metadata projects these fields, while callbacks and compiled
+validators remain opaque. Schema validation and the existing semantic
+`validate` callback must both pass before dispatch; MCP success values are
+validated by the connector before returning to Dispatcher.
 
-1. The host loads installed source instances and credentials.
-2. The manifest selects a source, destination, allowlist, and requested limits.
-3. The adapter discovers or loads source metadata under separate build-time
-   ceilings.
-4. Host grants, manifest selection, destination rules, and ceilings are
-   intersected; names are explicitly mapped, schemas are checked, and a
-   deterministic snapshot hash is created.
-5. `RunBuilder` inserts only the resulting capabilities into the chosen
-   environment.
-6. Calls go through the existing `Kernel.Dispatcher`.
-7. Any source lease is released exactly once after build failure, normal
-   completion, abort, or frontend cancellation.
+Exact call authority remains structural:
 
-For the first remote connector, prefer a per-run lease. Pooling can be added
-later only if credentials, session isolation, cancellation, and cleanup remain
-unambiguous.
-
-## Configuration boundary
-
-Examples in this document are proposed syntax. They do not work on the current
-branch yet.
-
-Administrator configuration creates authority:
-
-```yaml
-capability_sources:
-  github-production:
-    adapter: mcp
-    transport: streamable_http
-    endpoint: https://mcp.example.internal/mcp
-    credentials_ref: github-production
-    protocol_version: "2025-11-25"
-    tools:
-      searchIssues:
-        as: github.issues.search
-        effect: read
-      getIssue:
-        as: github.issues.get
-        effect: read
-
-  reporting-db:
-    adapter: postgres
-    connection_ref: reporting-readonly
-    operations_file: config/reporting-operations.json
-
-  workspace-files:
-    adapter: file
-    root: /srv/jobs/workspace
-    operations: [read, list, stat]
+```text
+host-supplied source registry
+        ∩ installed tool mapping and ceilings
+        ∩ manifest selection and lower limits
+        ∩ workflow/mission destination
+        ∩ frozen environment membership
 ```
 
-The manifest only selects installed authority:
+The callback is closed over one fixed upstream source and tool name. No generic
+grant or runtime string selects a different operation.
+
+Input and output schemas use a deliberately small JSON Schema 2020-12 profile.
+V1 accepts `type`, `title`, `description`, `properties`, `required`,
+`additionalProperties`, `items`, `enum`, `const`, `minimum`, `maximum`,
+`minLength`, `maxLength`, `minItems`, and `maxItems`. It rejects reference,
+composition, conditional, pattern, and unevaluated keywords. `type` is one
+scalar JSON type rather than a union. Input roots and advertised output roots
+are objects. Missing `additionalProperties` is normalized to `false` on every
+object, deliberately narrowing the upstream contract. Each schema is at most
+64 KiB encoded, depth 16, 128 properties per object, and 256 enum members;
+catalog-wide limits apply in addition. JSV compiles this profile once during
+assembly. Unsupported keywords, excessive structure, duplicate/ambiguous keys,
+or non-object roots fail assembly. The first version rejects images, audio,
+embedded resources, and resource links.
+
+Result normalization is deliberately deterministic:
+
+- `isError: true` becomes a bounded non-retryable provider/domain error;
+- when `structuredContent` is present, validate it against the advertised
+  output schema and return that JSON object as the capability value; and
+- otherwise accept text-only content blocks and return
+  `%{"text" => [bounded_text, ...]}`.
+
+`isError` takes precedence over content. Structured content without an
+advertised output schema, text-only content when an output schema was
+advertised, mixed structured/text results, and any unsupported content block
+become bounded `:invalid_result` provider errors.
+
+Reject mixed or unsupported content rather than guessing, concatenating text,
+or exposing raw MCP envelopes to Lisp.
+
+## Configuration example
+
+The host installation API remains illustrative because it is trusted Elixir
+configuration:
+
+```elixir
+issue_tracker =
+  MCPSource.builder(
+    endpoint: "https://tools.internal.example/mcp",
+    headers: fn ->
+      [{"authorization", "Bearer " <> System.fetch_env!("ISSUE_TRACKER_TOKEN")}]
+    end,
+    tools: %{
+      "search_issues" => %{as: "issues.search", effect: :read}
+    }
+  )
+
+ProviderRegistry.new(%{"issue-tracker" => issue_tracker})
+```
+
+Manifest selection stays inside the existing `providers` shape:
 
 ```json
 {
-  "version": 2,
-  "workflow": {
-    "components": [{"id": "agent", "path": "agent.lisp"}],
-    "entry": "agent/run"
-  },
-  "mission": {"components": [], "data": {}},
-  "input": {"path": "request.json"},
-  "capabilities": {
-    "workflow": [
-      {"source": "deepseek", "allow": ["llm.request"]}
-    ],
+  "providers": {
     "mission": [
       {
-        "source": "github-production",
-        "allow": ["github.issues.search", "github.issues.get"],
-        "limits": {"calls": 8, "timeout_ms": 5000}
+        "name": "issue-tracker",
+        "config": {
+          "allow": ["issues.search"],
+          "timeout_ms": 4000,
+          "max_result_bytes": 256000
+        }
       }
     ]
   }
 }
 ```
 
-The version is shown as `2` to make clear that this would be a breaking
-manifest change. Do not add a compatibility shim to the 0.x loader. Installed
-source configuration must have its own strict schema and must not share the
-manifest directory or trust boundary.
+The manifest `config` above is the exact MCP V1 selection shape. `allow` is
+required and contains 1–128 unique mapped public capability names. Optional
+`timeout_ms` and `max_result_bytes` are positive integers no greater than the
+installed source ceilings or effective run ceilings. Unknown keys, upstream
+tool names, duplicate names, an empty allowlist, or a name omitted from the
+installed mapping fail assembly. Effect, endpoint, headers, credentials,
+protocol version, and retry policy are never manifest fields.
 
-## Example: consuming an MCP server
+The host application decides which source registry is supplied for that build.
+The manifest cannot name another registry or expand the installed mapping.
 
-### Administrator setup
-
-The administrator installs the endpoint, credentials, public-name mapping,
-and allowed effect classification:
-
-```yaml
-capability_sources:
-  issue-tracker:
-    adapter: mcp
-    transport: streamable_http
-    endpoint: https://tools.internal.example/mcp
-    credentials_ref: issue-tracker-oauth
-    tools:
-      search_issues:
-        as: issues.search
-        effect: read
-      add_comment:
-        as: issues.comment.create
-        effect: write
-        approval: required
-```
-
-Do not automatically lowercase or rewrite arbitrary MCP names. Explicit
-mapping prevents lossy collisions between names that are distinct upstream but
-would normalize to the same Kernel name.
-
-### Manifest selection
-
-This workflow requests only the read operation for mission evaluation. The
-selection remains subject to the run's host grant:
+The safe connector projection added to `run-started.data` is exactly
+`connector_snapshots`, sorted by provider name:
 
 ```json
-"capabilities": {
-  "mission": [
-    {
-      "source": "issue-tracker",
-      "allow": ["issues.search"],
-      "limits": {"calls": 3, "timeout_ms": 4000}
-    }
-  ]
-}
-```
-
-The omitted `issues.comment.create` operation does not exist in the mission
-environment, even though the installed source knows about it.
-
-### PTC-Lisp call
-
-```clojure
-(ns issue-report
-  "Summarize matching issues.")
-
-(defn run [input]
-  (let [response (tool/issues.search {"query" (get input "query")
-                                      "limit" 10})]
-    (if (= :ok (get response :status))
-      (return {"issues" (get response :value)})
-      (fail {:reason :issue-search-failed
-             :details response}))))
-```
-
-The compiler infers the `tool:issues.search` requirement from the qualified
-`tool/` call and environment assembly rejects the bundle when the capability
-was not granted.
-
-At build time, the adapter performs the MCP initialization and paged
-`tools/list`, validates the selected tool schema, creates a snapshot, and
-freezes the callback. At call time it sends `tools/call` with the fixed upstream
-tool name and validated JSON arguments.
-
-If MCP returns structured content with an output schema, validate it and expose
-the structured JSON value. A bounded text-only result may be normalized into a
-documented JSON content envelope. Images, audio, embedded resources, and
-resource links should be rejected in the first slice rather than silently
-decoded into large or authority-bearing values.
-
-An MCP tool result with `isError: true` is a completed remote call with a domain
-error, not a transport or protocol failure. Normalize it as a recoverable
-domain outcome. JSON-RPC, authentication, schema, session, or transport
-failures become bounded `ProviderError` values and the dispatcher creates the
-standard error envelope.
-
-### Tool-list changes
-
-The current run remains immutable when an MCP server advertises
-`notifications/tools/list_changed`. Record the notification, mark the installed
-source stale for the next build, and do not add or remove active capabilities.
-If a frozen upstream tool disappears, its next call returns a bounded provider
-error. A later run receives a newly validated snapshot.
-
-## Example: consuming an OpenAPI service
-
-Do not provide a generic `http/request` capability. Compile selected operations
-from an administrator-installed OpenAPI document:
-
-```yaml
-capability_sources:
-  inventory-api:
-    adapter: openapi
-    document: /etc/ptc/openapi/inventory.json
-    base_url: https://inventory.internal.example
-    credentials_ref: inventory-service
-    operations:
-      getInventoryItem:
-        as: inventory.item.get
-        effect: read
-```
-
-Manifest:
-
-```json
-"capabilities": {
-  "mission": [
-    {
-      "source": "inventory-api",
-      "allow": ["inventory.item.get"],
-      "limits": {"calls": 5, "timeout_ms": 3000}
-    }
-  ]
-}
-```
-
-PTC-Lisp:
-
-```clojure
-(let [response (tool/inventory.item.get {"sku" "A-1042"})]
-  (if (= :ok (get response :status))
-    (return (get response :value))
-    (fail {:reason :inventory-unavailable :details response})))
-```
-
-The adapter owns URL construction, parameter encoding, authentication,
-redirect policy, content types, and response decoding. The manifest cannot
-override the base URL or headers. Redirects must remain inside an installed
-destination allowlist, and request/response bodies remain bounded.
-
-## Example: database operations
-
-Expose administrator-defined named operations, not model-authored SQL:
-
-```json
-{
-  "orders.find": {
-    "sql": "SELECT id, status, total FROM orders WHERE customer_id = $1 ORDER BY id DESC LIMIT $2",
-    "effect": "read",
-    "parameters": {
-      "type": "object",
-      "properties": {
-        "customer_id": {"type": "integer"},
-        "limit": {"type": "integer", "minimum": 1, "maximum": 50}
-      },
-      "required": ["customer_id", "limit"],
-      "additionalProperties": false
-    },
-    "result": {
-      "type": "array",
-      "maxItems": 50,
-      "items": {
-        "type": "object",
-        "properties": {
-          "id": {"type": "integer"},
-          "status": {"type": "string"},
-          "total": {"type": "number"}
-        },
-        "required": ["id", "status", "total"],
-        "additionalProperties": false
+[
+  {
+    "provider": "issue-tracker",
+    "protocol": "mcp-2025-11-25",
+    "snapshot_hash": "lower-case-sha256",
+    "tools": [
+      {
+        "name": "issues.search",
+        "effect": "read",
+        "input_schema_hash": "lower-case-sha256",
+        "output_schema_hash": "lower-case-sha256-or-null"
       }
-    }
+    ]
   }
-}
+]
 ```
 
-Manifest selection:
+Tools are sorted by public name. Schema hashes cover the normalized compact
+JSON schema bytes used by the validator. `snapshot_hash` covers `protocol` and
+the sorted `tools` array with keys in the order shown. The projection excludes
+the endpoint, upstream names, headers, credentials, session ID, descriptions,
+and full schemas. The complete model-visible schemas remain in the frozen
+mission inventory and, when enabled, its captured LLM request.
 
-```json
-{"source": "reporting-db", "allow": ["orders.find"], "limits": {"calls": 2}}
-```
+Use one small internal deterministic JSON encoder for schema, inventory, and
+snapshot hashes rather than three hashing implementations. It requires binary
+object keys, sorts every object recursively by UTF-8 key bytes, preserves array
+order, emits no insignificant whitespace, and rejects duplicate keys before
+ordinary maps erase them. It is a hashing/rendering utility, not a new public
+serialization format. Source hashes continue to cover exact source bytes and do
+not use this encoder.
 
-PTC-Lisp:
+## Security and error rules
 
-```clojure
-(let [response (tool/orders.find
-                 {"customer_id" (get data/input "customer_id")
-                  "limit" 20})]
-  (if (= :ok (get response :status))
-    (return {"orders" (get response :value)})
-    (fail {:reason :order-query-failed :details response})))
-```
+- Accept the endpoint only from host installation, require HTTPS except for an
+  explicit loopback fixture mode, disable redirects, and never adopt an
+  endpoint supplied by an MCP response. Proxy use is an explicit host option.
+- Keep credentials and session IDs out of Lisp values, prompts, errors,
+  ordinary traces, and snapshot hashes.
+- Treat MCP metadata and results as untrusted input.
+- Use stable bounded connector errors; do not return endpoints, headers,
+  credentials, raw response bodies, stack traces, or local paths.
+- Treat `isError: true` as a completed remote domain error. Treat JSON-RPC,
+  authentication, transport, session, and schema failures as provider errors.
+- Do not retry writes. The MVP is read-only.
+- Provider callback processes are run-owned. Rejecting a late reply is not
+  enough if external work continues after the run closes.
 
-The adapter uses prepared parameters, a read-only database role, statement
-timeout, row/result-size limits, and explicit JSON conversion. Write operations
-need separate installed entries, idempotency policy, audit events, and any
-required approval boundary. A general `database/query` accepting a SQL string
-is outside this plan.
+The MVP pins the MCP protocol version supported by its implementation and
+tests. Relevant protocol contracts are [MCP tools](https://modelcontextprotocol.io/specification/2025-11-25/server/tools)
+and [MCP Streamable HTTP](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports).
 
-## Example: file operations
+Make `Req` and `JSV` direct, pinned dependencies for this feature. Do not
+implement an HTTP client or a JSON Schema evaluator inside PtcRunner. Support
+one documented bounded subset of JSV's 2020-12 profile and reject unsupported
+or remote-reference schemas during assembly.
 
-The existing `file-read` provider already demonstrates that a local operation
-can use the same capability boundary without a network server. A future source
-can group several separately granted operations:
+### Connector observability
 
-```yaml
-capability_sources:
-  job-inputs:
-    adapter: file
-    root: /srv/ptc/jobs/current/input
-    operations:
-      read: {as: file.read, max_bytes: 1048576}
-      list: {as: file.list, max_entries: 200}
-      stat: {as: file.stat}
-```
+Connectors use the existing observability planes rather than installing a
+connector-specific logger or trace sink:
 
-```clojure
-(let [files-response (tool/file.list {"path" "reports"})]
-  (if (= :ok (get files-response :status))
-    (return (get files-response :value))
-    (fail {:reason :file-list-failed :details files-response})))
-```
+- `Dispatcher` emits the canonical capability lifecycle and safe connector
+  snapshot metadata through `Kernel.EventSink`;
+- sparse operator diagnostics may use Elixir `Logger`, but never include the
+  endpoint, credentials, headers, session ID, arguments, results, or response
+  body;
+- optional Telemetry reports aggregate transport measurements with
+  low-cardinality tags and is never required for correctness; and
+- exact bounded arguments and normalized results/errors go only to the
+  host-enabled `InspectionSink`.
 
-Each operation retains descriptor/path identity checks, symlink confinement,
-type checks, UTF-8/JSON normalization where applicable, and independent result
-limits. File writes should be a separate adapter or installed source so a
-read-only grant cannot accidentally expand through configuration.
+The connector callback does not mirror one call into multiple trace schemas.
+Run, capability, and evaluation IDs provide correlation between the canonical
+trace and private inspection sidecar.
 
-## Example: native host extensions
+## Database position
 
-Elixir embedders can continue installing direct builders. They use the same
-snapshot and metadata rules but skip transport discovery:
+There is no 0.x configured database connector.
 
-```elixir
-source = fn _installed, selection, %{destination: :mission} ->
-  with true <- "clock.now" in selection.allow,
-       {:ok, capability} <-
-         Capability.new(
-           name: "clock.now",
-           description: "Return the host UTC time",
-           input_schema: %{"type" => "object", "additionalProperties" => false},
-           output_schema: %{
-             "type" => "object",
-             "properties" => %{"timestamp" => %{"type" => "string"}},
-             "required" => ["timestamp"]
-           },
-           effect: :read,
-           callback: fn %{} ->
-             {:ok, %{"timestamp" => DateTime.utc_now() |> DateTime.to_iso8601()}}
-           end
-         ) do
-    {:ok, %{capabilities: [capability], snapshot: snapshot(capability), lease: nil}}
-  else
-    _ -> {:error, :invalid_clock_selection}
-  end
-end
-```
+An Elixir host can already expose a named operation through trusted native code
+using its existing Ecto, Postgrex, or MyXQL stack. That is the first database
+path: the Kernel sees only an ordinary capability callback and schemas.
 
-This is trusted host code. Kernel contains ordinary faults but does not make a
-malicious native callback safe.
+Do not add PostgreSQL packages to the core dependency tree or design YAML SQL,
+pool references, type normalization, cursor bounds, redaction, and transaction
+semantics until a concrete deployment cannot reasonably use native Elixir.
+If that demand appears, start with a separate PostgreSQL read-only package for
+fixed named queries—never a universal “connect to databases” feature.
 
-## Example: exposing PtcRunner through HTTP
+## One delivery milestone
 
-An inbound HTTP frontend should expose administrator-installed workflow names,
-not arbitrary manifests or capability-source definitions:
+The MCP work is one product milestone. Small reviewable commits are useful, but
+the milestone is not done until a real read-only MCP call works from manifest
+through PTC-Lisp and cleanup completes.
 
-```http
-POST /v1/workflows/order-summary/runs
-Content-Type: application/json
-Authorization: Bearer <deployment token>
+### Small prerequisites
 
-{"input": {"customer_id": 42}}
-```
+The connector transport should not be built before the model can reliably use
+and diagnose it. Only these existing roadmap items are prerequisites:
 
-```json
-{
-  "ok": true,
-  "run_id": "run-a13f09e21c44",
-  "result": {"orders": []},
-  "usage": {"capability_calls": 1, "evaluations": 2},
-  "trace": "/v1/runs/run-a13f09e21c44/events"
-}
-```
+1. Manifests can select the shipped `agent.core` dependency closure without
+   copying its source. This is read-only installed library selection, not a
+   prelude workspace.
+2. `agent.core` receives a bounded frozen mission inventory rendered from
+   `Prelude.prompt_exports/1` and model-visible capability metadata, including
+   schemas, through the workflow-only `kernel-mission-inventory` route. The
+   system prompt remains domain-blind and the route transfers no mission
+   authority.
+3. Installed ceilings are distinct from manifest-requested lower limits so one
+   remote model/tool round trip fits within a practical bounded run.
+4. The opt-in local inspection artifact and Viewer rendering described in the
+   host/prelude plan can show the exact model request, normalized response,
+   generated program, connector arguments/result, and evaluation outcome.
 
-The frontend resolves `order-summary` to a server-installed manifest, supplies
-only validated input and request labels, invokes the shared `RunBuilder`, and
-uses stable JSON error envelopes. Authentication, rate limiting, input size,
-concurrency, cancellation, and trace access are frontend policy. They do not
-change Kernel authority.
+These are one narrow integration seam, not a prerequisite for IAM, workspaces,
+catalog caching, arbitrary installed libraries, or production packaging.
 
-Start synchronously. Add a durable job API only when real deployments need
-queueing, cancellation, or results that outlive the request process.
+### Implementation order
 
-## Example: exposing PtcRunner as an MCP server
+1. Add capability input/output schemas and effect metadata.
+2. Normalize registry builder results and implement transactional resource
+   ownership across build, run, and REPL closure.
+3. Add Streamable HTTP initialization, discovery, calls, validation, and
+   session cleanup.
+4. Add safe connector snapshots to canonical run metadata and render them in
+   `ptc_viewer`.
+5. Complete the developer validation journey below.
 
-A thin inbound MCP frontend can publish installed workflows as MCP tools:
+### Developer validation journey
 
-```json
-{
-  "name": "ptc.order_summary",
-  "description": "Run the installed bounded order-summary workflow",
-  "inputSchema": {
-    "type": "object",
-    "properties": {"customer_id": {"type": "integer"}},
-    "required": ["customer_id"],
-    "additionalProperties": false
-  }
-}
-```
+Check in one protocol-faithful fixture MCP server and a small, domain-neutral
+lab setup. It must be runnable without credentials using a scripted LLM and may
+also have one optional live-model E2E variant.
 
-`tools/call` invokes one named manifest and returns its bounded structured
-result. The frontend should not expose general Lisp evaluation, mutable
-sessions, arbitrary manifest paths, connector configuration, credentials, or
-ambient tool forwarding. This keeps it a protocol adapter over the same CLI
-product rather than a second orchestration product.
+The matrix stays intentionally small:
 
-## MCP scope and protocol position
+- the existing `file-read` mission provider;
+- one host-native fixture capability registered through the existing builder
+  seam; and
+- one MCP source exposing a structured-result tool, a text-result tool, and a
+  tool that returns `isError: true`.
 
-The first outbound MCP slice targets the stable MCP `2025-11-25` tools
-contract:
+Run the same generic task with a direct capability inventory and with one small
+wrapper prelude. This proves installed setup, manifest narrowing, prelude hashes
+and prompt projection, tool discovery, generated PTC-Lisp, calls, and results
+without pretending that three connector frameworks exist.
 
-- initialization and negotiated protocol version;
-- Streamable HTTP transport;
-- paginated `tools/list`;
-- `tools/call`;
-- input and optional output schemas;
-- bounded text or structured JSON results;
-- explicit session cleanup when the server supports it;
-- observation of tool-list change notifications without mutating the active
-  snapshot.
+Required evidence:
 
-The official specification defines stdio and Streamable HTTP transports. Start
-with Streamable HTTP because stdio requires launching and supervising an
-administrator-selected subprocess. Add stdio later with explicit executable,
-argument, environment, stderr, child-process, and resource policies.
+- one real or protocol-faithful fixture MCP server works end to end;
+- malformed discovery, pagination, duplicate mappings, invalid schemas, and
+  excessive catalogs fail assembly;
+- the exact manifest allowlist contract rejects unknown keys and cannot select
+  upstream or unmapped names;
+- schema-profile boundary fixtures cover every accepted keyword plus rejected
+  references, composites, excess depth/properties/enums, and non-object roots;
+- connector snapshot ordering and schema/snapshot hashes are byte-stable across
+  repeated builds of identical discovery data;
+- bad output, oversized content, disconnects, authentication failure, timeout,
+  cancellation, caller death, and late replies are bounded;
+- run closure cancels and drains work before session cleanup;
+- workflow/mission separation and manifest narrowing cannot be bypassed; and
+- secrets are absent from errors and ordinary traces;
+- the scripted model journey generates and executes a program that uses the MCP
+  source, while the file and native variants prove the unchanged local seams;
+- `ptc_viewer` shows the safe connector/prelude fingerprints from the canonical
+  trace and, only when explicitly enabled, the private model/program/call
+  exchange; and
+- Viewer API and rendering tests load the artifacts produced by the same
+  end-to-end fixture rather than unrelated hand-written JSON.
 
-References:
+## Demand-triggered follow-ons
 
-- [MCP 2025-11-25 transports](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports)
-- [MCP 2025-11-25 tools](https://modelcontextprotocol.io/specification/2025-11-25/server/tools)
-- [MCP 2025-11-25 authorization](https://modelcontextprotocol.io/specification/2025-11-25/basic/authorization)
+Only add the following after the named evidence exists:
 
-Pin supported protocol versions in installed configuration and tests. A future
-MCP specification does not silently change the semantics of an existing
-PtcRunner release.
-
-## Authority and security rules
-
-- Endpoints, executable commands, database connections, credentials, and
-  native builders are installed by the host, never supplied by a manifest.
-- The manifest allowlist only narrows an installed source. It can never widen
-  its tools, destinations, effects, limits, or model visibility.
-- Workflow and mission grants remain structurally separate. LLM/control tools
-  normally belong to workflow; model-authored domain/data tools normally
-  belong to mission.
-- Connector metadata is untrusted until bounded and validated. MCP annotations
-  and OpenAPI descriptions do not create authority.
-- Secrets never enter Lisp data, prompts, results, errors, normal traces, or
-  snapshot hashes.
-- HTTP clients enforce scheme, host, port, DNS/IP, redirect, proxy, and maximum
-  body policy to prevent SSRF and authority expansion.
-- Remote results are untrusted JSON. Validate keys, depth, size, schemas, UTF-8,
-  finite numbers, and duplicate-key behavior before they re-enter Lisp.
-- External effects cannot be rolled back when a run times out. Write tools need
-  clear effect metadata, idempotency behavior, retry rules, and optional
-  approval policy.
-- Native adapters remain trusted extension code. Remote servers may be
-  untrusted, but the adapter parsing their messages is part of the trusted host
-  boundary.
-
-## Errors and result normalization
-
-Keep the existing Kernel dispatch envelope. Connector adapters return only
-`{:ok, json_value}` or `{:error, ProviderError.t()}`. Prefer the current closed,
-transport-neutral `ProviderError` kinds:
-
-- `:denied` for an installed authentication or authorization rejection;
-- `:not_found` for a removed or unknown frozen operation;
-- `:unavailable` for network, remote-session, or service availability failure;
-- `:invalid_request` for a request rejected before useful remote execution;
-- `:internal` for a contained adapter invariant or normalization failure.
-
-The dispatcher continues to own timeout, invalid-result, result-exceeded,
-quota, and run-closure classifications. Do not create parallel MCP, HTTP, or
-database variants of those errors. If a real connector proves the closed
-vocabulary insufficient, change `Kernel.ProviderError` and all adapters
-together before adding a new kind.
-
-Exact upstream exceptions, URLs with query parameters, headers, SQL, stack
-traces, response bodies, and credentials do not become Lisp-visible details.
-Canonical events may record installed source name, public capability name,
-adapter kind, snapshot hash, status, duration, and bounded usage. Diagnostic
-transcripts remain separately opt-in and redacted.
-
-## Implementation phases
-
-### C0: contract prerequisites
-
-- Implement or depend on the H0 shared principal, exact-resource grant, bounds,
-  scoped-grant, error, and audit contracts.
-- Add bounded input/output schemas and effect metadata to `Kernel.Capability`.
-- Define the installed-source, manifest-selection, snapshot, lease, and
-  connector error structs before runtime work.
-- Separate installed ceilings from manifest-requested limits.
-- Define stable machine-readable build/CLI errors.
-
-Exit gate: one local multi-capability fixture source builds deterministic
-snapshots, rejects schema/name/grant errors, and cleans up exactly once.
-
-### C1: generic source assembly
-
-- Generalize registry builders to return bounded capability lists.
-- Freeze source identity, public name mapping, schemas, effects, visibility,
-  quotas, and hashes into each environment.
-- Add lease ownership to every `RunBuilder` success/failure/abort path.
-- Expose source and snapshot facts through sanitized canonical events.
-
-Exit gate: two sources may provide several capabilities without name
-collisions, authority expansion, lifecycle leaks, or changes to Dispatcher
-semantics.
-
-### C2: MCP Streamable HTTP tools
-
-- Implement initialization, version negotiation, paginated discovery,
-  `tools/call`, session handling, cancellation, and cleanup.
-- Support a strict structured/text result subset.
-- Treat list changes as next-run refreshes.
-- Bind credentials and endpoints only through installed configuration.
-
-Exit gate: a real fixture MCP server works end to end through a manifest and
-PTC-Lisp, while contract tests cover malformed JSON-RPC, authentication,
-pagination, tool changes, disconnects, timeout, cancellation, late replies,
-oversized results, schema mismatch, redirects, and secret redaction.
-
-### C3: second adapter proof
-
-Implement either OpenAPI operations or database named queries. Choose based on
-an immediate user workflow, not a desire for adapter count.
-
-Exit gate: the second adapter demonstrates that the source contract is truly
-transport-neutral without adding adapter-specific behavior to Kernel,
-Dispatcher, Lisp, or component compilation.
-
-### C4: inbound frontend
-
-Add a thin HTTP or MCP frontend over administrator-installed named manifests.
-Do not combine it with outbound source discovery.
-
-Exit gate: the same manifest produces equivalent bounded results and canonical
-events through CLI and the server frontend, with frontend authentication,
-concurrency, cancellation, and input limits tested separately.
-
-## Required test matrix
-
-- Installed configuration rejects unknown keys, unsafe paths, arbitrary
-  destinations, commands, credentials, and excessive definitions.
-- Manifest selections cannot select unknown sources/tools or override installed
-  endpoints, effects, schemas, credentials, or ceilings.
-- Public-name mapping is explicit, deterministic, collision-free, and stable
-  across discovery order.
-- Schema discovery is bounded by bytes, depth, count, time, and supported
-  keywords.
-- Duplicate JSON keys, invalid UTF-8, non-finite numbers, non-JSON values, and
-  oversized results fail before reaching Lisp.
-- Provider slot, call quota, timeout, heap, result, run closure, and late-result
-  behavior remain those of the existing dispatcher.
-- Build failure and run termination release each lease once without
-  `Process.sleep`-based tests.
-- HTTP redirects, DNS changes, proxies, and resolved addresses cannot escape
-  installed destination policy.
-- MCP discovery pagination, session expiry/reinitialization, tool removal,
-  list-change notification, explicit cancellation, and cleanup are covered.
-- Database operations use prepared parameters and enforce role, statement,
-  rows, result, and transaction limits.
-- Secrets are absent from results, errors, standard logs, normal traces,
-  snapshots, and viewer responses.
-- Write retries cannot duplicate an effect without declared idempotency or an
-  explicit workflow decision.
-- CLI and any inbound frontend produce the same Kernel result and event facts
-  for the same installed manifest and input.
-
-## Decisions to make before C0
-
-1. Rename `ProviderRegistry` now or retain the name until the manifest V2
-   schema lands.
-2. Choose the supported JSON Schema dialect/profile and whether schemas are
-   stored verbatim or normalized.
-3. Decide whether per-capability limits live only in installed configuration or
-   may be lowered in a manifest selection.
-4. Define read/write/idempotent/destructive effect metadata and any approval
-   hook without making annotations authorization.
-5. Define the result subset for MCP text and structured content.
-6. Decide whether connector sessions are always per run in the first release.
-7. Choose the first real MCP fixture/server and one user journey that proves
-   value without domain-specific system prompts.
+- **Catalog cache:** measured run-build latency or availability problems.
+- **Generic source behaviour:** a second real adapter with duplicated code.
+- **Configured PostgreSQL adapter:** a deployment that cannot use native
+  Elixir named operations.
+- **Shared host authorization:** an authenticated non-model caller that needs
+  the same source through a domain service.
+- **Inbound HTTP/MCP frontend:** a concrete caller that needs to invoke
+  PtcRunner remotely; this is a separate plan and trust boundary.
 
 ## Related documents
 
+- [`kernel-maintainer.md`](../../guides/kernel-maintainer.md) — current Kernel
+  authority, ownership, and dispatch architecture.
 - [`host-access-and-prelude-workspaces.md`](host-access-and-prelude-workspaces.md)
-  — shared authorization contract consumed by connectors, plus separately
-  owned TraceLog and versioned prelude services.
-- [`product-readiness.md`](product-readiness.md) — product sequence and release
-  gates; this plan expands its capability-ecosystem phase.
-- [Kernel maintainer guide](../../guides/kernel-maintainer.md) — current
-  authority, ownership, and dispatch architecture; exact contracts live in the
-  `PtcRunner.Kernel.*` module documentation.
-- [`tracelog-contract.md`](tracelog-contract.md) — sanitized canonical event
-  and source contract.
-- [Kernel component bundles](../../guides/capability-prelude.md) — current
-  component requirements and capability authority.
-- [Kernel tutorial](../../guides/kernel-tutorial.md) — current implemented
-  manifest and PTC-Lisp user journey.
+  — the small local inspection/prelude-selection prerequisites plus deferred
+  host-access and authoring triggers.
+- [`product-readiness.md`](product-readiness.md) — roadmap placement.

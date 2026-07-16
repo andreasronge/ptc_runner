@@ -5,7 +5,9 @@ same source-scoped `Kernel.TraceLog` projections as `log.core`, so run metadata,
 turns, filters, counters, pagination, and validation have one implementation.
 
 The legacy raw JSONL views remain as a temporary fallback during the Kernel
-migration. They are not the canonical query path.
+migration. They are not the canonical query path and are scheduled for removal
+before the private inspection loader is added, so that loader does not inherit
+or legitimize a second run-event schema.
 
 ## Quick start
 
@@ -34,14 +36,14 @@ Private traces use the reserved `.private.jsonl` suffix. The standard viewer
 directory source and raw-file routes omit that suffix; accessing private data
 requires a separate host-controlled private source grant outside this UI.
 
-The current Viewer does not expose exact generated program/prelude source or a
-prelude editor. The future
+The current Viewer does not expose exact model exchanges, generated program
+source, connector payloads, or a prelude editor. The
 [host access and prelude workspace plan](../docs/plans/lisp-kernel/host-access-and-prelude-workspaces.md)
-keeps the Viewer as an adapter over shared domain services: authenticated human
-sessions receive host-resolved grants, private source remains separately
-authorized, and edits create versioned candidates rather than changing a live
-run. Connector transport and credentials remain a separate concern covered by
-the [capability connector plan](../docs/plans/lisp-kernel/capability-connectors.md).
+allows a future explicit loopback-only mode for one host-selected bounded
+inspection artifact without putting sensitive payloads into canonical traces.
+Authenticated remote access and prelude editing remain deferred. Connector
+transport and credentials remain a separate concern covered by the
+[capability connector plan](../docs/plans/lisp-kernel/capability-connectors.md).
 
 ## Programmatic use
 
@@ -97,5 +99,5 @@ configuration is passed through the Bandit/Plug instance rather than global
 application environment.
 
 The browser assets still contain the old agent/plan renderers for raw-trace
-fallback. They can be deleted when the public Kernel cutover removes the last
-legacy trace producer.
+fallback. The product-readiness plan removes them, their raw-file routes, and
+their parser after confirming that no supported legacy trace producer remains.

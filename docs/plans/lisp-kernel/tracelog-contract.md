@@ -1,6 +1,7 @@
 # TraceLog and Log Prelude — V1 Contract
 
-**Status:** implemented retained product contract. Complements the
+**Status:** implemented retained product contract. The explicitly labeled 0.x
+increment remains planned until its acceptance tests pass. Complements the
 [Kernel maintainer guide](../../guides/kernel-maintainer.md) and
 `PtcRunner.Kernel.TraceLog` module documentation.
 
@@ -22,6 +23,47 @@ Consumers
 
 Kernel does not know how traces are stored or queried. TraceLog does not control
 workflow execution. Consumers do not invent competing event representations.
+
+## Observability planes
+
+PtcRunner keeps four observability concerns separate:
+
+- Elixir `Logger`, backed by OTP `:logger`, reports sparse operational
+  diagnostics such as unexpected host failures and degraded optional services.
+- `:telemetry` reports low-cardinality measurements for embedders and host
+  monitoring. It is not an event store or an authorization boundary.
+- `Kernel.EventSink` and `Kernel.TraceLog` own the canonical bounded run event
+  journal consumed by `ptc_viewer`, CLI diagnostics, and `log/` capabilities.
+- the planned opt-in `Kernel.InspectionSink` owns exact sensitive development
+  payloads under the separate controls below.
+
+These are different planes, not interchangeable logging implementations.
+Canonical events are not implemented by forwarding Logger messages or
+Telemetry callbacks: neither supplies the retention, sequencing, bounds,
+source grants, or fail-closed policy required by this contract. Conversely,
+canonical events are not mirrored wholesale into Logger or Telemetry.
+
+All planes may share run, evaluation, and capability correlation IDs, subject
+to their own cardinality rules. Logger and Telemetry never add prompts,
+generated source, capability arguments/results, credentials, transport
+headers, session IDs, or endpoints. Exact application payloads appear only in
+an explicitly enabled inspection artifact. Erlang VM tracing (`:erlang.trace`,
+`:dbg`, or `:sys.trace`) is an operator debugging facility, not a product trace
+source.
+
+After the Phase 0 cleanup, the existing Lisp execution Telemetry prefix remains
+`[:ptc_runner, :lisp, :execute]`. Its closed `caller` values are `:direct`,
+`:kernel`, and `:repl`; the obsolete `profile` tag is removed. Stop metadata
+adds the semantic `outcome` (`:ok` or `:error`) while measurements retain
+duration, program/result byte counts, and print count. Exception telemetry may
+identify the exception class but does not attach the raw reason, stacktrace,
+source, arguments, or result. These events are metrics for embedders, not the
+source used to reconstruct a run.
+
+The Viewer must have one canonical event model. Its temporary legacy raw-JSONL
+routes and `trace.start`/`run.start` parser are removed before the inspection
+loader lands, once no supported producer remains. The inspection loader is not
+a replacement legacy trace schema; it joins private records to canonical IDs.
 
 ## Canonical authority
 
@@ -50,9 +92,10 @@ JSONL files are written in canonical sequence order. Directory loading is
 deterministic: discover supported files, normalize paths, sort them, then load
 in sorted order under one aggregate byte cap.
 
-Normal trace sinks sanitize before persistence. Exact private transcript sinks
-use the separate fail-closed private policy specified by the event-sink section
-of the `PtcRunner.Kernel.EventSink` module documentation.
+Normal trace sinks sanitize before persistence. Private canonical event sinks
+use the separate fail-closed policy specified by the event-sink section of the
+`PtcRunner.Kernel.EventSink` module documentation, but retain the same event
+vocabulary rather than capturing exact payloads or source.
 
 Malformed or unsupported canonical events fail closed by default. A debugging
 mode may report bounded per-file errors, but it never silently reinterprets
@@ -76,7 +119,7 @@ The implementation:
 - rejects traversal, symlink escape, and unsupported file types;
 - applies one aggregate input-byte limit across directory files;
 - exposes no ambient filesystem operations;
-- keeps private transcript access separate and explicitly granted;
+- keeps private canonical event-source access separate and explicit;
 - never infers access from visible names, tags, or run IDs.
 
 The `log/` prelude contains no authority. It requires host trace-query
@@ -115,6 +158,9 @@ a run without loading its turns:
 - error count and duration summary;
 - tags and caller-supplied safe labels;
 - effective workflow and mission prelude component IDs and hashes;
+- frozen mission-inventory hash and byte count when an inventory was rendered;
+- safe connector snapshots containing public names, effects, schema hashes, and
+  snapshot hashes, but no endpoint or session data;
 - completeness and truncation indicators;
 - schema version;
 - whether the source is sanitized normal data or an explicitly granted private
@@ -218,21 +264,117 @@ Preludes may change ergonomics, projections, defaults, or analysis policy. They
 cannot expand the source grant, bypass bounds/sanitization, or acquire private
 trace access.
 
-## Events and private transcripts
+## Events and private data
 
 The generic Kernel emits lifecycle, subordinate-evaluation, capability,
 resource, annotation, and terminal facts. Providers may attach safe typed
-metadata. An LLM adapter can therefore support model request/response
-transcripts without making Kernel understand LLMs.
+metadata without making Kernel understand provider-specific transcripts.
 
-Private capture may retain exact safe model-visible requests, responses,
-programs, and prelude source under explicit local-only controls. Those fields do
-not appear in normal queries without a distinct private source grant.
-Private JSONL destinations are restricted to owner read/write permissions
-before any event payload is appended; a permission failure aborts the append.
-They use the reserved `.private.jsonl` suffix. Normal file/directory grants and
-viewer discovery reject or omit that suffix; loading it requires an explicit
-private file or private-directory source grant.
+The implemented private event policy stores the same canonical event
+vocabulary as the normal policy. It changes sink failure behavior, file
+permissions, and discovery; it does not capture prompts, responses, capability
+payloads, generated programs, or prelude source. Private JSONL destinations are
+restricted to owner read/write permissions before any event payload is
+appended. They use the reserved `.private.jsonl` suffix, and normal
+file/directory sources and Viewer discovery reject or omit that suffix.
+
+### Planned 0.x developer-inspection increment
+
+Sanitized subordinate `evaluation-started` data adds:
+
+- `source_hash` — lower-case SHA-256 hex over the exact UTF-8 source bytes passed
+  to `Lisp.run_native/2`;
+- `source_bytes` — `byte_size(source)` over those same bytes; and
+- `program_kind: "ptc-lisp"` alongside the existing
+  `environment: "mission"` and `evaluation_id`.
+
+It must not contain exact source. `trace-list-turns` returns canonical event
+data, so embedding source in a supposedly private event would collapse source
+authorization into the ordinary turns query.
+
+Optional sensitive development capture uses a separate private inspection
+record stream, not a canonical event. Every `.inspection.jsonl` line is one
+JSON object with this exact envelope:
+
+```json
+{
+  "schema_version": 1,
+  "run_id": "run-id",
+  "trace_id": "trace-id",
+  "sequence": 1,
+  "timestamp": "2026-07-16T12:00:00.000000Z",
+  "record_type": "capability-input",
+  "correlation": {"capability_id": "capability-id"},
+  "payload": {}
+}
+```
+
+Keys are exact. `sequence` is positive and strictly increasing within the
+artifact. The timestamp is UTC ISO 8601. `correlation` contains exactly one of
+`capability_id` or `evaluation_id`, and that value must occur in the canonical
+trace for the same run. V1 record types and payloads are:
+
+| Record type | Correlation | Exact payload fields |
+| --- | --- | --- |
+| `capability-input` | `capability_id` | `environment`, `name`, `arguments` |
+| `capability-output` | `capability_id` | `environment`, `name`, `result` |
+| `evaluation-source` | `evaluation_id` | `environment`, `program_kind`, `source`, `source_hash`, `source_bytes` |
+
+Enums and map keys are normalized to JSON strings before retention. `result` is
+the bounded Dispatcher envelope returned to Lisp, so `llm-request` input/output
+records contain the provider-neutral model request and normalized response, and
+MCP records contain the public connector arguments and normalized result/error.
+`evaluation-source` is emitted only for subordinate mission evaluation in this
+increment. Its hash and byte count must equal the corresponding canonical
+`evaluation-started` fields.
+
+The input record is accepted before the callback starts, and the source record
+is accepted before evaluation starts. The output record is accepted after
+normalization and before the canonical stop event. A missing output therefore
+means the attempt was interrupted; the loader does not synthesize one. Failure
+to accept a required input/source record prevents execution. Failure after an
+external read has completed fails the run but cannot retroactively undo that
+read.
+
+The host enables capture independently of manifest event policy and selects a
+fixed exact destination. The destination is restricted to `0600` before content
+is written. Per-record and aggregate byte ceilings apply before persistence.
+Capture is either disabled or required/fail-closed; there is no silent partial-
+capture mode. Retention belongs to the host in 0.x.
+
+Installed defaults are 2,000,000 encoded bytes per record and 16,000,000
+encoded bytes for the artifact; a host may lower them but a manifest cannot
+raise or select them. Retained-size prechecks run before JSON encoding, followed
+by an encoded-byte check. Post-run persistence writes an exclusive `0600`
+temporary sibling and renames it to a previously absent destination only after
+the complete artifact validates, so a failed write is not mistaken for a
+complete capture. The first increment deliberately does not append or merge
+inspection runs.
+
+The first increment captures the normalized LLM request and response, exact
+generated subordinate PTC-Lisp, and connector capability arguments and
+normalized results/errors needed to inspect a development run. It does not add
+transport headers, connector credentials, session IDs, endpoints, arbitrary
+host terms, complete workflow entry source, or exact effective prelude source.
+Application arguments/results may themselves be sensitive, so the entire
+artifact is private. The exact mission inventory that the model received is
+already part of the captured LLM request.
+
+The inspection artifact is absent from TraceLog file/directory discovery and
+from every `log/` query. Normal discovery explicitly rejects or omits the
+`.inspection.jsonl` suffix rather than accidentally parsing it as canonical
+JSONL.
+
+A later host-installed capability may read one completed immutable inspection
+record by run and record ID under separate input, source, and result ceilings.
+Possessing `trace-list-turns`, a private canonical event source, local Viewer
+access, or the active run does not imply this capability. Calls emit ordinary
+bounded capability facts without copying returned payloads into the trace.
+
+Active-run trace self-query remains unsupported. Every trace capability call
+adds events to the same sink, while pagination cursors are source-digest-bound;
+the query would mutate the source it is paging. Same-run correction retains the
+bounded prior program directly in provider-valid assistant/tool/result history.
 
 Workflow annotations are host stamped and cannot forge canonical events.
 
@@ -242,16 +384,17 @@ Workflow annotations are host stamped and cannot forge canonical events.
 same loader, metadata derivation, filtering, ordering, and pagination code where
 practical.
 
-The viewer may render richer presentations, but it is not a second query
-implementation or authority source. A future Viewer Lab remains a client of the
-same run and TraceLog contracts.
+The viewer may render richer presentations, but it is not a second canonical
+query implementation or authority source. An explicit loopback-only development
+mode may additionally read one exact host-selected inspection artifact through
+a separate bounded loader. The browser cannot select a server-side path, and
+that loader does not become a `TraceLog` operation or model capability.
 
 The non-normative
 [`host-access-and-prelude-workspaces.md`](host-access-and-prelude-workspaces.md)
-plan extends this sharing with a common host-created principal/grant context,
-authenticated Viewer requests, and explicit program/prelude source reads. It
-keeps `Kernel.TraceLog` as the query owner and keeps private-source grants
-separate; current V1 behavior is unchanged.
+notes defer authenticated remote Viewer access and shared host authorization
+until a real host product exists. Local private inspection does not wait for
+that broader work and does not change `Kernel.TraceLog` ownership.
 
 ## Failure algebra
 
@@ -269,6 +412,15 @@ Trace failures use the standard capability envelope with stable kinds such as:
 Details are bounded and sanitized. Host paths are not exposed beyond safe
 grant-relative identifiers.
 
+Inspection loading and persistence use a separate stable error set:
+`:inspection-sink-error`, `:inspection-persistence-failed`,
+`:invalid-inspection-source`, `:inspection-source-changed`,
+`:inspection-source-limit-exceeded`, and `:inspection-run-mismatch`. Errors do
+not include a record payload or host path. A completed Kernel result may be
+returned as bounded context with `:inspection-persistence-failed`, matching the
+existing trace-persistence distinction; persistence failure is not rewritten
+as workflow failure.
+
 ## V1 non-goals
 
 - ambient search over all host traces;
@@ -276,7 +428,7 @@ grant-relative identifiers.
 - write/update/delete through `log/`;
 - a mutable authoritative run database;
 - unbounded full-text search or arbitrary query expressions;
-- automatic access to the current run's private transcript;
+- automatic access to the current run's private events or source records;
 - live prelude mutation or trace rewriting;
 - benchmark/oracle/report semantics;
 - provider-specific query APIs.
@@ -297,3 +449,23 @@ grant-relative identifiers.
 - Share query semantics across library, capability prelude, and viewer API.
 - Truncate deterministically without unbounded intermediate allocation.
 - Prove mission-only trace confinement and missing-`requires` rejection.
+
+The planned developer-inspection increment additionally requires tests that:
+
+- normal and private canonical turn queries never contain inspection payloads;
+- evaluation source hashes and byte counts match the executed bounded source;
+- the inspection loader rejects unknown/duplicate envelope or payload keys,
+  invalid record types, non-monotonic sequences, and correlation IDs absent
+  from the selected canonical run;
+- required capability input and evaluation-source records are accepted before
+  their callback/evaluation can execute, and output records contain the exact
+  normalized Dispatcher envelope;
+- inspection capture cannot be enabled by manifest or Lisp input;
+- the private destination is restricted before its first record;
+- per-record and aggregate ceilings fail closed without partial persistence;
+- connector credentials, transport headers, session IDs, and endpoints are not
+  added by the capture path;
+- normal directory discovery omits `.inspection.jsonl` artifacts;
+- the local Viewer accepts only the exact host-configured artifact and rejects
+  symlinks, changed files, wrong run IDs, and oversized input; and
+- querying a trace source never grants or reconstructs an inspection record.
