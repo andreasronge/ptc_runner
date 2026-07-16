@@ -25,8 +25,9 @@ The UI first lists bounded canonical run summaries. Selecting a run loads its
 metadata and turn events through the shared Kernel query layer. The run view
 pairs canonical evaluation and capability start/stop events into an expandable
 execution transcript, with run metrics, prelude component fingerprints,
-workflow annotations, limit failures, and raw event metadata available on
-demand. Sanitized traces do not contain prompts, provider responses,
+mission inventory and connector fingerprints, workflow annotations, limit
+failures, and raw event metadata available on demand. Sanitized traces do not
+contain prompts, provider responses,
 capability arguments/results, or private prelude source; the UI identifies
 those omissions rather than inferring or reconstructing payloads. Starting the
 Viewer without a Kernel adapter leaves canonical queries unavailable; it does
@@ -40,10 +41,12 @@ outside this UI.
 An explicitly selected `.inspection.jsonl` file is different. It can contain
 exact model exchanges, generated source, and capability arguments/results. The
 host fixes one exact file when it starts the Viewer; the browser cannot choose
-a server path or discover other inspection files. The bounded loader rejects
-symlinks, changed files, oversized input, malformed records, and a requested
-run ID that does not match the artifact. The UI keeps a sensitive-data warning
-visible whenever it renders these records.
+a server path or discover other inspection files. Startup loads the artifact
+into an immutable grant, so replacing the path after startup cannot change what
+requests inspect. The bounded loader rejects symlinks, changed files, aggregate
+input above 16 MB, records above 2,000,000 encoded bytes, malformed records,
+and a requested run ID that does not match the artifact. The UI keeps a
+sensitive-data warning visible whenever it renders these records.
 
 ```bash
 mix ptc.viewer --trace-dir traces \
@@ -97,6 +100,6 @@ directory for every query. The viewer owns only HTTP argument decoding and
 rendering; it does not duplicate trace validation or run derivation. Adapter
 configuration is passed through the Bandit/Plug instance rather than global
 application environment. No browser route reads an arbitrary trace filename,
-and the separate inspection adapter receives only the fixed host path and URL
-run ID. The frontend contains no parser or renderer for the retired raw event
-format.
+and the separate inspection adapter receives only the startup-pinned opaque
+grant and URL run ID. The frontend contains no parser or renderer for the
+retired raw event format.

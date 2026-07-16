@@ -54,6 +54,9 @@ defmodule PtcRunner.Kernel.TraceCapabilityTest do
     assert is_integer(metadata["duration_ms"])
     assert metadata["workflow_prelude"] == %{"component_ids" => [], "hash" => nil}
     assert metadata["mission_prelude"] == %{"component_ids" => [], "hash" => nil}
+    assert metadata["mission_inventory_hash"] =~ ~r/\A[0-9a-f]{64}\z/
+    assert is_integer(metadata["mission_inventory_bytes"])
+    assert metadata["connector_snapshots"] == []
     assert first_page["next_cursor"] == nil
 
     assert {:ok, turns} =

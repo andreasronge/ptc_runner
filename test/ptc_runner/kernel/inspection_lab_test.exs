@@ -10,7 +10,6 @@ defmodule PtcRunner.Kernel.InspectionLabTest do
 
   alias PtcRunner.Examples.KernelInspectionLab
   alias PtcRunner.Kernel.InspectionArtifact
-  alias PtcRunner.Kernel.TraceLog
   alias PtcRunner.Kernel.ViewerAdapter
 
   @tag :tmp_dir
@@ -88,10 +87,12 @@ defmodule PtcRunner.Kernel.InspectionLabTest do
                  get_in(record, ["payload", "result", "reason"]) == "domain_error"
              end)
 
+      assert {:ok, inspection_source} = ViewerAdapter.pin_inspection(journey.inspection)
+
       viewer_opts = [
         trace_dir: Path.dirname(journey.trace),
         kernel_trace_adapter: ViewerAdapter,
-        inspection_file: journey.inspection,
+        inspection_source: inspection_source,
         inspection_adapter: ViewerAdapter
       ]
 
@@ -102,12 +103,38 @@ defmodule PtcRunner.Kernel.InspectionLabTest do
       assert inspection.status == 200
       assert %{"records" => ^records} = Jason.decode!(inspection.resp_body)
 
+      metadata =
+        Plug.Test.conn(:get, "/api/kernel/runs/#{journey.run_id}")
+        |> PtcViewer.Router.call(PtcViewer.Router.init(viewer_opts))
+
+      turns =
+        Plug.Test.conn(:get, "/api/kernel/runs/#{journey.run_id}/turns?limit=100")
+        |> PtcViewer.Router.call(PtcViewer.Router.init(viewer_opts))
+
+      assert metadata.status == 200
+      assert turns.status == 200
+
+      assert %{"mission_inventory_hash" => inventory_hash, "connector_snapshots" => snapshots} =
+               Jason.decode!(metadata.resp_body)
+
+      assert inventory_hash =~ ~r/\A[0-9a-f]{64}\z/
+      assert [_snapshot | _rest] = snapshots
+
+      metadata_path = Path.join(dir, "#{journey.name}-metadata.json")
+      turns_path = Path.join(dir, "#{journey.name}-turns.json")
+      inspection_path = Path.join(dir, "#{journey.name}-inspection.json")
+      File.write!(metadata_path, metadata.resp_body)
+      File.write!(turns_path, turns.resp_body)
+      File.write!(inspection_path, inspection.resp_body)
+
       {rendered, 0} =
         System.cmd(
           "node",
           [
-            Path.expand("../../../ptc_viewer/test/render_inspection.mjs", __DIR__),
-            journey.inspection
+            Path.expand("../../../ptc_viewer/test/render_viewer.mjs", __DIR__),
+            metadata_path,
+            turns_path,
+            inspection_path
           ],
           stderr_to_stdout: true
         )
@@ -117,15 +144,12 @@ defmodule PtcRunner.Kernel.InspectionLabTest do
       assert rendered =~ "remote.structured"
       assert rendered =~ "remote.text"
       assert rendered =~ "remote.fail"
+      assert rendered =~ "Canonical Kernel trace"
+      assert rendered =~ "Mission inventory"
+      assert rendered =~ "Connector"
 
-      assert {:ok, canonical_trace} = TraceLog.new(source: {:file, journey.trace})
-
-      assert {:ok, turns} =
-               TraceLog.query(canonical_trace, :list_turns, %{"run_id" => journey.run_id})
-
-      encoded_turns = Jason.encode!(turns)
-      refute encoded_turns =~ "fixture-text"
-      refute encoded_turns =~ "fixture-file"
+      refute turns.resp_body =~ "fixture-text"
+      refute turns.resp_body =~ "fixture-file"
     end
 
     direct_request = model_request(direct.inspection)

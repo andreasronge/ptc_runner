@@ -172,7 +172,45 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
     assert {:error, :inspection_source_limit_exceeded} =
              InspectionArtifact.load(path, max_bytes: 1)
 
-    assert {:error, :inspection_run_mismatch} = ViewerAdapter.inspection(path, "another-run")
+    oversized = Path.join(dir, "oversized.inspection.jsonl")
+
+    records
+    |> hd()
+    |> put_in(["payload", "arguments"], %{"value" => String.duplicate("x", 2_100_000)})
+    |> then(&File.write!(oversized, Jason.encode!(&1) <> "\n"))
+
+    assert {:error, :inspection_source_limit_exceeded} = InspectionArtifact.load(oversized)
+
+    assert {:ok, grant} = ViewerAdapter.pin_inspection(path)
+    assert {:error, :inspection_run_mismatch} = ViewerAdapter.inspection(grant, "another-run")
+  end
+
+  @tag :tmp_dir
+  test "viewer startup pins the selected artifact even if its path is replaced", %{tmp_dir: dir} do
+    first_path = Path.join(dir, "pinned.inspection.jsonl")
+    first_records = persisted_records(first_path, "first")
+
+    {:ok, viewer} =
+      PtcViewer.start(
+        port: 0,
+        trace_dir: dir,
+        inspection_file: first_path,
+        inspection_adapter: ViewerAdapter,
+        open: false
+      )
+
+    Process.unlink(viewer)
+    on_exit(fn -> if Process.alive?(viewer), do: PtcViewer.stop(viewer) end)
+
+    File.rm!(first_path)
+    replacement_records = persisted_records(first_path, "replacement")
+    refute replacement_records == first_records
+
+    assert {:ok, {_address, port}} = ThousandIsland.listener_info(viewer)
+
+    response = Req.get!("http://127.0.0.1:#{port}/api/inspection/runs/run-1")
+    assert response.status == 200
+    assert response.body["records"] == first_records
   end
 
   @tag :tmp_dir
@@ -270,10 +308,12 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
     refute encoded_turns =~ "inspect me"
     refute encoded_turns =~ program
 
+    assert {:ok, inspection_source} = ViewerAdapter.pin_inspection(inspection_path)
+
     viewer_opts = [
       trace_dir: dir,
       kernel_trace_adapter: ViewerAdapter,
-      inspection_file: inspection_path,
+      inspection_source: inspection_source,
       inspection_adapter: ViewerAdapter
     ]
 
@@ -292,5 +332,23 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
       %{capability_id: capability_id},
       %{environment: :mission, name: "read", arguments: %{"id" => 1}}
     )
+  end
+
+  defp persisted_records(path, value) do
+    {:ok, sink} = InspectionSink.start(run_id: "run-1", trace_id: "trace-1")
+
+    assert :ok =
+             InspectionSink.emit(
+               sink,
+               "capability-input",
+               %{capability_id: "cap-1"},
+               %{environment: :mission, name: "read", arguments: %{"value" => value}}
+             )
+
+    assert {:ok, records} = InspectionSink.records(sink)
+    events = [%{run_id: "run-1", trace_id: "trace-1", data: %{capability_id: "cap-1"}}]
+    assert :ok = InspectionArtifact.persist(path, records, events)
+    assert :ok = InspectionSink.stop(sink)
+    records
   end
 end

@@ -7,13 +7,15 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
   sibling whose permissions are restricted to `0600` before content is
   written. The create fails when the destination already exists; unlike a
   rename, it cannot replace an existing artifact. Loading rejects symlinks,
-  changed files, oversized content, malformed lines, mixed identities,
-  non-contiguous sequences, and records outside the exact V1 vocabulary.
+  changed files, content above 16 MB, any record above 2,000,000 encoded bytes,
+  malformed lines, mixed identities, non-contiguous sequences, and records
+  outside the exact V1 vocabulary.
   """
 
   alias Jason.OrderedObject
 
   @max_bytes 16_000_000
+  @max_record_bytes 2_000_000
   @suffix ".inspection.jsonl"
   @record_types ~w(capability-input capability-output evaluation-source)
   @envelope_keys ~w(schema_version run_id trace_id sequence timestamp record_type correlation payload)
@@ -41,21 +43,25 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
   def persist(_path, _records, _events), do: {:error, :invalid_inspection_artifact}
 
   @spec load(binary(), keyword()) :: {:ok, [map()]} | {:error, atom()}
-  @doc "Loads one exact fixed artifact with optional lower `:max_bytes`."
+  @doc "Loads one exact fixed artifact with optional lower aggregate and per-record limits."
   def load(path, opts \\ [])
 
   def load(path, opts) when is_binary(path) and is_list(opts) do
     max_bytes = Keyword.get(opts, :max_bytes, @max_bytes)
+    max_record_bytes = Keyword.get(opts, :max_record_bytes, @max_record_bytes)
 
-    with true <- Keyword.keys(opts) -- [:max_bytes] == [],
+    with true <- Keyword.keys(opts) -- [:max_bytes, :max_record_bytes] == [],
          true <- is_integer(max_bytes) and max_bytes > 0 and max_bytes <= @max_bytes,
+         true <-
+           is_integer(max_record_bytes) and max_record_bytes > 0 and
+             max_record_bytes <= @max_record_bytes,
          :ok <- valid_path(path),
          {:ok, before} <- regular_file(path),
          :ok <- within_limit(before, max_bytes),
          {:ok, content} <- File.read(path),
          {:ok, after_read} <- regular_file(path),
          :ok <- unchanged(before, after_read),
-         {:ok, records} <- decode(content),
+         {:ok, records} <- decode(content, max_record_bytes),
          :ok <- validate_records(records) do
       {:ok, records}
     else
@@ -77,8 +83,14 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
     records
     |> Enum.reduce_while({:ok, []}, fn record, {:ok, lines} ->
       case Jason.encode(record) do
-        {:ok, line} -> {:cont, {:ok, [line | lines]}}
-        {:error, _reason} -> {:halt, {:error, :invalid_inspection_artifact}}
+        {:ok, line} when byte_size(line) + 1 <= @max_record_bytes ->
+          {:cont, {:ok, [line | lines]}}
+
+        {:ok, _line} ->
+          {:halt, {:error, :inspection_source_limit_exceeded}}
+
+        {:error, _reason} ->
+          {:halt, {:error, :invalid_inspection_artifact}}
       end
     end)
     |> case do
@@ -87,13 +99,17 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
     end
   end
 
-  defp decode(content) do
+  defp decode(content, max_record_bytes) do
     content
     |> String.split("\n", trim: true)
     |> Enum.reduce_while({:ok, []}, fn line, {:ok, records} ->
-      case decode_line(line) do
-        {:ok, record} when is_map(record) -> {:cont, {:ok, [record | records]}}
-        _error -> {:halt, {:error, :malformed_inspection_artifact}}
+      if byte_size(line) + 1 <= max_record_bytes do
+        case decode_line(line) do
+          {:ok, record} when is_map(record) -> {:cont, {:ok, [record | records]}}
+          _error -> {:halt, {:error, :malformed_inspection_artifact}}
+        end
+      else
+        {:halt, {:error, :inspection_source_limit_exceeded}}
       end
     end)
     |> case do

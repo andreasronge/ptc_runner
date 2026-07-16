@@ -145,24 +145,29 @@ defmodule PtcViewer.RouterTest do
     unavailable = conn(:get, "/api/inspection/runs/run-1") |> call_router(trace_dir: trace_dir)
     assert unavailable.status == 503
 
-    artifact = Path.join(trace_dir, "fixed.inspection.jsonl")
+    source = {:pinned, "fixed.inspection.jsonl"}
 
-    adapter = fn path, run_id ->
-      {:ok, %{"path" => path, "run_id" => run_id, "records" => [%{"sequence" => 1}]}}
+    adapter = fn pinned_source, run_id ->
+      {:ok,
+       %{
+         "source" => inspect(pinned_source),
+         "run_id" => run_id,
+         "records" => [%{"sequence" => 1}]
+       }}
     end
 
     response =
       conn(:get, "/api/inspection/runs/run-1")
       |> call_router(
         trace_dir: trace_dir,
-        inspection_file: artifact,
+        inspection_source: source,
         inspection_adapter: adapter
       )
 
     assert response.status == 200
 
     assert Jason.decode!(response.resp_body) == %{
-             "path" => artifact,
+             "source" => inspect(source),
              "run_id" => "run-1",
              "records" => [%{"sequence" => 1}]
            }
@@ -184,7 +189,7 @@ defmodule PtcViewer.RouterTest do
         conn(:get, "/api/inspection/runs/run-1")
         |> call_router(
           trace_dir: trace_dir,
-          inspection_file: Path.join(trace_dir, "fixed.inspection.jsonl"),
+          inspection_source: {:pinned, "fixed.inspection.jsonl"},
           inspection_adapter: fn _, _ -> {:error, reason} end
         )
 

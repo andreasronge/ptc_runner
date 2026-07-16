@@ -43,18 +43,14 @@ The credential-free
 scripted agent across file, native, and MCP read capabilities and produces the
 canonical/private artifacts used by the local Viewer tests.
 
-The active
-[Kernel product-readiness roadmap](docs/plans/lisp-kernel/product-readiness.md)
-describes current limitations, the recommended next milestone, and the gates
-for a standalone non-Elixir developer experience.
-The separate
-[capability connector record](docs/plans/lisp-kernel/capability-connectors.md)
-documents the implemented MCP-first slice and demand triggers for later
-extensions.
-The
-[host access and prelude workspace record](docs/plans/lisp-kernel/host-access-and-prelude-workspaces.md)
-documents the implemented local boundary and defers authenticated shared
-services until a host product requires them.
+The active product-readiness roadmap under `docs/plans/lisp-kernel/` describes
+current limitations, the recommended next milestone, and the gates for a
+standalone non-Elixir developer experience.
+The [Kernel maintainer guide](docs/guides/kernel-maintainer.md) documents the
+implemented MCP-first connector, canonical/private observability boundaries,
+and local Viewer inspection lifecycle. Later connector families and
+authenticated shared services remain roadmap work until a host product
+requires them.
 
 Elixir applications can use `PtcRunner.Kernel.compile_bundle/1` and
 `PtcRunner.Kernel.run/2` directly. A run accepts only a validated

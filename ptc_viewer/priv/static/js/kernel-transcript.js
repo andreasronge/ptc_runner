@@ -11,18 +11,7 @@ const SUCCESS = new Set(['ok', 'returned', 'completed', 'success']);
 const FAILURE = new Set(['error', 'failed', 'timeout', 'memory_exceeded', 'limit_exceeded']);
 
 export function renderKernelTranscript(container, { metadata = {}, turns = {} }, options = {}) {
-  const events = [...(turns.items || [])].sort((left, right) => left.sequence - right.sequence);
-  const transcript = buildTranscript(events);
-
-  container.innerHTML = `
-    <section class="kernel-transcript">
-      ${renderHeader(metadata, transcript, events.length, Boolean(turns.next_cursor))}
-      ${renderPreludes(metadata)}
-      ${renderExecution(transcript)}
-      ${renderLooseEvents(transcript.looseEvents)}
-      ${turns.next_cursor ? '<button class="btn kernel-load-more" type="button">Load more events</button>' : ''}
-    </section>
-  `;
+  container.innerHTML = renderKernelTranscriptMarkup({ metadata, turns });
 
   container.querySelector('[data-kt-action="expand"]')?.addEventListener('click', () => {
     container.querySelectorAll('.kernel-transcript details').forEach(details => { details.open = true; });
@@ -34,6 +23,22 @@ export function renderKernelTranscript(container, { metadata = {}, turns = {} },
 
   const loadMore = container.querySelector('.kernel-load-more');
   if (loadMore && options.onLoadMore) loadMore.addEventListener('click', () => options.onLoadMore(loadMore));
+}
+
+export function renderKernelTranscriptMarkup({ metadata = {}, turns = {} }) {
+  const events = [...(turns.items || [])].sort((left, right) => left.sequence - right.sequence);
+  const transcript = buildTranscript(events);
+
+  return `
+    <section class="kernel-transcript">
+      ${renderHeader(metadata, transcript, events.length, Boolean(turns.next_cursor))}
+      ${renderPreludes(metadata)}
+      ${renderFingerprints(metadata)}
+      ${renderExecution(transcript)}
+      ${renderLooseEvents(transcript.looseEvents)}
+      ${turns.next_cursor ? '<button class="btn kernel-load-more" type="button">Load more events</button>' : ''}
+    </section>
+  `;
 }
 
 export function buildTranscript(events) {
@@ -173,6 +178,29 @@ function renderPreludes(metadata) {
         `;
       }).join('')}
     </div>
+  `;
+}
+
+function renderFingerprints(metadata) {
+  const connectors = metadata.connector_snapshots || [];
+  const inventoryHash = metadata.mission_inventory_hash;
+  if (!inventoryHash && !connectors.length) return '';
+
+  return `
+    <section class="kt-fingerprints" aria-label="Frozen run fingerprints">
+      <article class="kt-prelude-card">
+        <div class="kt-card-label">Mission inventory</div>
+        <div class="kt-fingerprint-summary">${escapeHtml(String(metadata.mission_inventory_bytes ?? 0))} bytes</div>
+        <div class="kt-hash" title="${escapeHtml(String(inventoryHash || ''))}">${escapeHtml(shorten(inventoryHash) || 'No inventory hash')}</div>
+      </article>
+      ${connectors.map(connector => `
+        <article class="kt-prelude-card">
+          <div class="kt-card-label">Connector · ${escapeHtml(String(connector.provider || 'unknown'))}</div>
+          <div class="kt-fingerprint-summary">${escapeHtml(String(connector.protocol || 'unknown protocol'))} · ${(connector.tools || []).length} tools</div>
+          <div class="kt-hash" title="${escapeHtml(String(connector.snapshot_hash || ''))}">${escapeHtml(shorten(connector.snapshot_hash) || 'No snapshot hash')}</div>
+        </article>
+      `).join('')}
+    </section>
   `;
 }
 

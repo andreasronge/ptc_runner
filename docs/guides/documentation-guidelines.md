@@ -35,8 +35,9 @@ normative references such as the PTC-Lisp language specification.
   specs beside the implementation.
 - Reference modules by full name, such as `PtcRunner.Kernel.TraceLog`.
 - Reference functions by name and arity: `query/3` locally or
-  `PtcRunner.Kernel.TraceLog.query/3` across modules. Use `c:build/3` for a
-  callback and `t:PtcRunner.Kernel.Result.t/0` for a type.
+  `PtcRunner.Kernel.TraceLog.query/3` across modules. Use
+  `c:GenServer.handle_call/3` for a callback and
+  `t:PtcRunner.Kernel.Result.t/0` for a type.
 - Start sections inside module and function documentation with `##`, commonly
   `## Examples`, `## Options`, and `## Errors`.
 - Put documentation before the first clause of a multi-clause function. Add a

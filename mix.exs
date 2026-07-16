@@ -194,10 +194,7 @@ defmodule PtcRunner.MixProject do
           "docs/clojure-conformance-gaps.md",
           "docs/function-reference.md",
           "docs/java-interop.md",
-          "docs/plans/lisp-kernel/capability-connectors.md",
-          "docs/plans/lisp-kernel/host-access-and-prelude-workspaces.md",
-          "docs/plans/lisp-kernel/product-readiness.md",
-          "docs/plans/lisp-kernel/tracelog-contract.md",
+          "docs/trace-log-contract.md",
           "docs/conformance/index.md",
           "docs/guides/capability-prelude.md",
           "docs/guides/documentation-guidelines.md",
@@ -207,7 +204,7 @@ defmodule PtcRunner.MixProject do
         ] ++ Path.wildcard("docs/conformance/*-audit.md"),
       groups_for_extras: [
         Maintainers: ~r/docs\/guides\/kernel-maintainer\.md/,
-        "Plans and contracts": ~r/docs\/plans\/lisp-kernel\/.+\.md/,
+        Contracts: ~r/docs\/trace-log-contract\.md/,
         Guides: ~r/docs\/guides\/.+\.md/,
         Reference: ~r/docs\/(ptc-lisp|clojure|function-reference|java-).+\.md/,
         Conformance: ~r/docs\/conformance\/.+\.md/

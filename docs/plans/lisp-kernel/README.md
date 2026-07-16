@@ -8,20 +8,13 @@ This directory contains active product and extension plans only.
 - [`product-readiness.md`](product-readiness.md) assesses what is usable now,
   current limitations, prioritized improvements, and release gates for a
   non-Elixir developer experience.
-- [`capability-connectors.md`](capability-connectors.md) records the implemented
-  MCP-first read-only route and inspectable developer validation journey. Other
-  adapters and inbound frontends remain demand-triggered follow-ons.
-- [`host-access-and-prelude-workspaces.md`](host-access-and-prelude-workspaces.md)
-  records the implemented local inspection and read-only installed-prelude work,
-  while deferring shared host authorization, authenticated remote
-  Viewer access, writable prelude candidates, and promotion services.
-
-- [`tracelog-contract.md`](tracelog-contract.md) defines canonical event
-  storage, source grants, bounded queries, and the swappable `log/` library.
 
 Current user-facing material lives in [`../../guides/`](../../guides/). Git
 history is the archive for the completed Kernel migration, removed experiments,
-and superseded product plans.
+and superseded product plans. The retained
+[`../../trace-log-contract.md`](../../trace-log-contract.md) owns the canonical
+event/query contract; the maintainer guide owns implemented connector,
+inspection, and prelude-selection boundaries.
 
 Planned shapes in this directory are staging contracts, not claims about the
 current API. In the implementation commit that makes one real, move its exact

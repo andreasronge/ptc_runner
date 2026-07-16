@@ -2,7 +2,7 @@
 
 **Status:** implemented retained product contract, including the local 0.x
 inspection increment. Complements the
-[Kernel maintainer guide](../../guides/kernel-maintainer.md) and
+[Kernel maintainer guide](guides/kernel-maintainer.md) and
 `PtcRunner.Kernel.TraceLog` module documentation.
 
 ## Purpose and boundary
@@ -392,11 +392,9 @@ mode may additionally read one exact host-selected inspection artifact through
 a separate bounded loader. The browser cannot select a server-side path, and
 that loader does not become a `TraceLog` operation or model capability.
 
-The non-normative
-[`host-access-and-prelude-workspaces.md`](host-access-and-prelude-workspaces.md)
-notes defer authenticated remote Viewer access and shared host authorization
-until a real host product exists. Local private inspection does not wait for
-that broader work and does not change `Kernel.TraceLog` ownership.
+Authenticated remote Viewer access and shared host authorization remain
+deferred until a real host product exists. Local private inspection does not
+wait for that broader work and does not change `Kernel.TraceLog` ownership.
 
 ## Failure algebra
 

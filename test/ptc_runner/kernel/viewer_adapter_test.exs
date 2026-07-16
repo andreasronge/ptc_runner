@@ -7,7 +7,21 @@ defmodule PtcRunner.Kernel.ViewerAdapterTest do
   @tag :tmp_dir
   test "viewer API and TraceLog return the same source-scoped projection", %{tmp_dir: directory} do
     path = Path.join(directory, "kernel.jsonl")
-    events = [event(1, "run-started", %{}), event(2, "run-stopped", %{"outcome" => "ok"})]
+
+    connector = %{
+      "provider" => "fixture-mcp",
+      "protocol" => "mcp-2025-11-25",
+      "snapshot_hash" => String.duplicate("a", 64),
+      "tools" => []
+    }
+
+    started = %{
+      "mission_inventory_hash" => String.duplicate("b", 64),
+      "mission_inventory_bytes" => 321,
+      "connector_snapshots" => [connector]
+    }
+
+    events = [event(1, "run-started", started), event(2, "run-stopped", %{"outcome" => "ok"})]
     assert :ok = TraceLog.append_jsonl(path, events)
     config = [trace_dir: directory, kernel_trace_adapter: ViewerAdapter]
 
@@ -16,6 +30,9 @@ defmodule PtcRunner.Kernel.ViewerAdapterTest do
     assert {:ok, ^expected} = PtcViewer.Api.kernel_query(config, :list_runs, %{"limit" => 1})
 
     assert {:ok, run} = TraceLog.query(trace_log, :get_run, %{"run_id" => "viewer-run"})
+    assert run["mission_inventory_hash"] == String.duplicate("b", 64)
+    assert run["mission_inventory_bytes"] == 321
+    assert run["connector_snapshots"] == [connector]
     assert {:ok, ^run} = PtcViewer.Api.kernel_query(config, :get_run, %{"run_id" => "viewer-run"})
 
     assert {:ok, turns} =

@@ -19,9 +19,9 @@ defmodule PtcViewer.Api do
 
   @doc "Delegates a private inspection read for one run to an explicitly configured host adapter."
   def inspection(config, run_id) when is_list(config) and is_binary(run_id) do
-    with path when is_binary(path) <- Keyword.get(config, :inspection_file),
+    with source when not is_nil(source) <- Keyword.get(config, :inspection_source),
          adapter when not is_nil(adapter) <- Keyword.get(config, :inspection_adapter) do
-      safely_inspect(adapter, path, run_id)
+      safely_inspect(adapter, source, run_id)
     else
       _missing -> {:error, :unavailable}
     end
@@ -47,8 +47,8 @@ defmodule PtcViewer.Api do
     _kind, _reason -> {:error, :adapter_failure}
   end
 
-  defp safely_inspect(adapter, path, run_id) when is_function(adapter, 2) do
-    adapter.(path, run_id)
+  defp safely_inspect(adapter, source, run_id) when is_function(adapter, 2) do
+    adapter.(source, run_id)
     |> normalize_adapter_result()
   rescue
     _exception -> {:error, :adapter_failure}
@@ -56,8 +56,8 @@ defmodule PtcViewer.Api do
     _kind, _reason -> {:error, :adapter_failure}
   end
 
-  defp safely_inspect(adapter, path, run_id) when is_atom(adapter) do
-    apply(adapter, :inspection, [path, run_id])
+  defp safely_inspect(adapter, source, run_id) when is_atom(adapter) do
+    apply(adapter, :inspection, [source, run_id])
     |> normalize_adapter_result()
   rescue
     _exception -> {:error, :adapter_failure}

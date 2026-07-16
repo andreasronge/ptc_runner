@@ -39,15 +39,15 @@ For deployable runs, prefer a versioned JSON manifest and `mix ptc.run`. The
 manifest selects component sources and trusted provider names; executable
 callbacks remain in the host-owned provider registry.
 
-The current manifest supports only the built-in or embedder-registered
-single-capability builders. The future
-[capability connector plan](../plans/lisp-kernel/capability-connectors.md)
-describes how MCP, OpenAPI, database, grouped file, and native sources could
-resolve to the same immutable capability boundary without granting manifests
-arbitrary endpoints, credentials, SQL, commands, or callbacks.
+The current manifest supports built-in or embedder-registered capability
+builders, including the host-installed MCP source described in the
+[Kernel maintainer guide](kernel-maintainer.md). Future OpenAPI, database, or
+command sources must resolve to the same immutable capability boundary without
+granting manifests arbitrary endpoints, credentials, SQL, commands, or
+callbacks.
 
-Future human/model source inspection and safe prelude authoring are specified
-in the
-[host access and prelude workspace plan](../plans/lisp-kernel/host-access-and-prelude-workspaces.md).
-Candidates are versioned host resources compiled and promoted into a new frozen
-revision for later environments; they never mutate the active bundle of a run.
+Human inspection is implemented as a separate host-selected private artifact,
+also documented in the maintainer guide. Writable prelude workspaces remain
+deferred: any future candidate must be a versioned host resource compiled and
+promoted into a new frozen revision for later environments, never a mutation
+of the active run bundle.

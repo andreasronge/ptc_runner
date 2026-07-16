@@ -194,7 +194,7 @@ ordinary Kernel error details.
 from an in-memory sink, one JSONL file, or a directory. The viewer and
 `PtcRunner.Kernel.TraceCapability` delegate to this same query layer rather
 than maintaining another event model. The detailed storage and authorization
-contract remains in the [TraceLog contract](../plans/lisp-kernel/tracelog-contract.md).
+contract remains in the retained [TraceLog contract](../trace-log-contract.md).
 
 Host callers enable sensitive capture only through `RunBuilder`'s `:inspect`
 option. `InspectionSink` accepts exact bounded source and capability records
@@ -204,9 +204,12 @@ correlation against canonical events and installs one previously absent
 `.inspection.jsonl` sidecar at mode `0600`. Installation uses an atomic
 hard-link create from an exclusive temporary sibling because `File.rename/2`
 may replace an existing destination and therefore cannot uphold the no-clobber
-contract. TraceLog excludes the inspection suffix.
-`PtcRunner.Kernel.ViewerAdapter.inspection/2` reads one fixed artifact for the
-loopback-only Viewer; it is not a TraceLog operation or Lisp capability.
+contract. Loading enforces the same 2,000,000-byte encoded per-record ceiling
+as capture as well as the 16 MB aggregate ceiling. TraceLog excludes the
+inspection suffix. `PtcRunner.Kernel.ViewerAdapter.pin_inspection/1` loads the
+host-selected artifact once at Viewer startup; requests use only that immutable
+grant, so replacing the original path cannot change the inspected content.
+This is not a TraceLog operation or Lisp capability.
 
 ## Code map
 
@@ -263,7 +266,9 @@ session expiry, transport failures, and invalid schemas become bounded errors.
 The safe `connector_snapshots` projection in `run-started` contains only the
 provider alias, protocol, public names, effects, and deterministic schema and
 snapshot hashes—never endpoint, upstream names, credentials, session IDs,
-arguments, results, or response bodies.
+arguments, results, or response bodies. `TraceLog` run metadata preserves
+these snapshots plus the mission inventory hash and encoded byte count, and
+the canonical Viewer renders those safe fingerprints.
 
 To add a shipped Lisp library, add its source under `priv/preludes/kernel/`,
 register it in `PtcRunner.Kernel.Library`, declare component dependencies, and

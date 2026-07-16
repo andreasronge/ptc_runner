@@ -654,12 +654,11 @@ cannot provide executable callback code.
 - [Kernel maintainer guide](kernel-maintainer.md) maps authority, lifecycle,
   ownership, code modules, and extension points. Exact API details live in the
   `PtcRunner.Kernel.*` module documentation.
-- [TraceLog contract](../plans/lisp-kernel/tracelog-contract.md) defines event
+- [TraceLog contract](../trace-log-contract.md) defines event
   schemas, sanitization, filtering, pagination, and private sources.
-- [Kernel product readiness](../plans/lisp-kernel/product-readiness.md) records
-  current limitations, prioritized improvements, and release gates.
-- [Capability connectors](../plans/lisp-kernel/capability-connectors.md) records
-  the implemented MCP-first slice and demand triggers for later adapters.
-- [Host access and prelude workspaces](../plans/lisp-kernel/host-access-and-prelude-workspaces.md)
-  records the implemented local inspection boundary and the triggers for
-  deferred authenticated access or writable workspaces.
+- [Kernel maintainer guide](kernel-maintainer.md) defines the implemented
+  provider, MCP, inspection, Viewer, and lifecycle boundaries.
+- [Kernel inspection lab](../../examples/kernel-inspection-lab/README.md)
+  exercises canonical and private Viewer API/rendering with real artifacts.
+- [Documentation guidelines](documentation-guidelines.md) explain where
+  implemented contracts and future plans belong.

@@ -233,8 +233,7 @@ runs.
 
 Do not add a proposal inbox, PR adapter, workspace repository, Viewer editor,
 or runtime promotion API until a concrete model or non-maintainer authoring
-workflow needs one. The decision triggers and invariants are recorded in
-[`host-access-and-prelude-workspaces.md`](host-access-and-prelude-workspaces.md).
+workflow needs one.
 
 ### 8. Add one constrained external capability route
 
@@ -242,8 +241,9 @@ One administrator-installed MCP Streamable HTTP tools route is implemented as
 the first external-tools path. It deliberately remains an embedding API rather
 than a process-global or manifest-configured endpoint catalog.
 
-The minimal source seam, security boundary, and acceptance tests are defined in
-the [`capability-connectors.md`](capability-connectors.md) 0.x plan.
+The implemented source seam and security boundary are defined in the
+[Kernel maintainer guide](../../guides/kernel-maintainer.md) and owning module
+documentation.
 
 The bridge must preserve Kernel authority rules:
 
@@ -418,9 +418,8 @@ The pre-production vertical slice in this phase is implemented, including the
 credential-free file/native/MCP agent lab and local inspection path. Production
 packaging and any demand-triggered connector expansion remain later work.
 
-- Implement the single vertical
-  [capability connector milestone](capability-connectors.md): one safe,
-  read-only, host-installed MCP Streamable HTTP tools source.
+- Retain the single implemented vertical connector: one safe, read-only,
+  host-installed MCP Streamable HTTP tools source.
 - Discover tools during run assembly in the same run-owned session used for
   calls; freeze the selected schemas and metadata for that run. Do not build a
   catalog cache, refresh subsystem, generic adapter hierarchy, or shared IAM.
@@ -510,13 +509,8 @@ work. They are not 0.x release gates.
 - [Kernel maintainer guide](../../guides/kernel-maintainer.md) — current
   authority, lifecycle, ownership, and implementation map; exact API details
   live in the `PtcRunner.Kernel.*` module documentation.
-- [`tracelog-contract.md`](tracelog-contract.md) — canonical event and source
+- [TraceLog contract](../../trace-log-contract.md) — canonical event and source
   contract.
-- [`host-access-and-prelude-workspaces.md`](host-access-and-prelude-workspaces.md)
-  — active local inspection/read-only prelude selection plus deferred host
-  authorization and prelude-authoring decision triggers.
-- [`capability-connectors.md`](capability-connectors.md) — active MCP-first 0.x
-  external-tools plan.
 - [Kernel tutorial](../../guides/kernel-tutorial.md) — current runnable user
   journey.
 - [Kernel REPL](../../guides/kernel-repl.md) — current interactive interface.

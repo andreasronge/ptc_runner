@@ -1285,6 +1285,8 @@ input[type="file"] { display: none; }
 .kt-text-button:hover { color: #9cdcfe; text-decoration: underline; }
 
 .kt-preludes { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 24px; }
+.kt-fingerprints { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; margin: -14px 0 24px; }
+.kt-fingerprint-summary { margin: 8px 0; color: var(--fg); font-size: 11px; }
 .kt-prelude-card {
   min-width: 0;
   padding: 13px 15px;
