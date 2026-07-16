@@ -21,6 +21,9 @@ Explore the codebase before proposing changes — never claim a feature is
 missing without evidence from the source files. When you find a problem, fix
 the code and the docs together.
 
+Code documentation must not link to `docs/plans/`; plans are disposable. Move
+durable contracts into module docs, guides, or retained specifications first.
+
 ## Commit Messages
 
 Use a concise Conventional Commit subject, e.g. `feat(mcp): add stateful
@@ -41,7 +44,11 @@ how it was verified.
 - `lib/ptc_runner/` — the library (`kernel/`, `lisp/`, `sandbox.ex`, …).
 - `docs/` — specifications, guides, and implementation records.
   `priv/preludes/kernel/` — shipped Lisp libraries; recompile after editing.
-- Sibling Mix project: `ptc_viewer/` (canonical trace viewer).
+- `docs/function-reference.md`, `docs/java-interop.md`, and `docs/conformance/`
+  are generated. Edit their `priv/*.exs` sources and run `mix ptc.gen_docs`.
+- `ptc_viewer/` — separate nested Mix project and canonical trace viewer. Root
+  `mix precommit` runs its tests but not its formatter; format Viewer edits
+  from that directory.
 
 ## Conventions
 
