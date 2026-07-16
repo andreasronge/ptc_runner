@@ -2,6 +2,7 @@ defmodule PtcRunner.Kernel.TraceCapabilityTest do
   use ExUnit.Case, async: true
 
   alias PtcRunner.Kernel
+  alias PtcRunner.Kernel.Capability
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.Library
   alias PtcRunner.Kernel.Limits
@@ -27,6 +28,18 @@ defmodule PtcRunner.Kernel.TraceCapabilityTest do
     run_kernel(sink, limits)
 
     assert {:ok, capabilities} = TraceCapability.new(source: sink, max_result_bytes: 100_000)
+
+    assert Enum.all?(capabilities, fn capability ->
+             match?(
+               %{
+                 effect: :read,
+                 input_schema: %{"additionalProperties" => true},
+                 output_schema: %{"additionalProperties" => true}
+               },
+               Capability.metadata(capability)
+             )
+           end)
+
     callbacks = Map.new(capabilities, &{&1.name, &1.callback})
 
     assert {:ok, first_page} = callbacks["trace-list-runs"].(%{"limit" => 1})

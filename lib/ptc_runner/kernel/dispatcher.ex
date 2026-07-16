@@ -11,6 +11,7 @@ defmodule PtcRunner.Kernel.Dispatcher do
 
   alias PtcRunner.Kernel.Capability
   alias PtcRunner.Kernel.Events
+  alias PtcRunner.Kernel.JSONSchema
   alias PtcRunner.Kernel.JSONValue
   alias PtcRunner.Kernel.ProviderError
   alias PtcRunner.Kernel.RunState
@@ -168,7 +169,7 @@ defmodule PtcRunner.Kernel.Dispatcher do
           Process.demonitor(ref, [:flush])
 
           case RunState.finish_provider(state) do
-            :ok -> normalize_result(state, result)
+            :ok -> normalize_result(state, capability, result)
             {:error, :run_closed} -> limit_error(state, nil, :run_closed)
           end
 
@@ -206,18 +207,33 @@ defmodule PtcRunner.Kernel.Dispatcher do
     _kind, _reason -> {:raised, :throw}
   end
 
-  defp normalize_result(state, {:ok, value}) do
+  defp normalize_result(state, capability, {:ok, value}) do
     cap = capability_result_limit(state)
     bytes = RetainedSize.bytes_with_cap(value, cap)
 
-    if json_value?(value) and is_integer(bytes) and bytes <= cap do
-      %{status: :ok, value: value}
-    else
-      %{status: :error, kind: :result_exceeded, reason: :provider_result_limit, retryable?: false}
+    cond do
+      not (json_value?(value) and is_integer(bytes) and bytes <= cap) ->
+        %{
+          status: :error,
+          kind: :result_exceeded,
+          reason: :provider_result_limit,
+          retryable?: false
+        }
+
+      not valid_output?(capability, value) ->
+        %{
+          status: :error,
+          kind: :invalid_result,
+          reason: :output_schema_mismatch,
+          retryable?: false
+        }
+
+      true ->
+        %{status: :ok, value: value}
     end
   end
 
-  defp normalize_result(_state, {:error, %ProviderError{} = error}) do
+  defp normalize_result(_state, _capability, {:error, %ProviderError{} = error}) do
     %{
       status: :error,
       kind: :provider_error,
@@ -227,10 +243,10 @@ defmodule PtcRunner.Kernel.Dispatcher do
     }
   end
 
-  defp normalize_result(_state, {:raised, reason}),
+  defp normalize_result(_state, _capability, {:raised, reason}),
     do: %{status: :error, kind: :provider_error, reason: reason, retryable?: true}
 
-  defp normalize_result(_state, _result),
+  defp normalize_result(_state, _capability, _result),
     do: %{
       status: :error,
       kind: :invalid_result,
@@ -238,9 +254,15 @@ defmodule PtcRunner.Kernel.Dispatcher do
       retryable?: false
     }
 
-  defp validate(%Capability{validate: nil}, _arguments), do: :ok
+  defp validate(%Capability{} = capability, arguments) do
+    if JSONSchema.valid?(capability.input_validator, arguments),
+      do: semantic_validate(capability, arguments),
+      else: {:error, :invalid_arguments}
+  end
 
-  defp validate(%Capability{validate: validate}, arguments) do
+  defp semantic_validate(%Capability{validate: nil}, _arguments), do: :ok
+
+  defp semantic_validate(%Capability{validate: validate}, arguments) do
     case validate.(arguments) do
       :ok -> :ok
       _ -> {:error, :invalid_arguments}
@@ -248,6 +270,11 @@ defmodule PtcRunner.Kernel.Dispatcher do
   rescue
     _exception -> {:error, :invalid_arguments}
   end
+
+  defp valid_output?(%Capability{output_validator: nil}, _value), do: true
+
+  defp valid_output?(%Capability{output_validator: validator}, value),
+    do: JSONSchema.valid?(validator, value)
 
   defp validate_size(value, cap) do
     case RetainedSize.bytes_with_cap(value, cap) do

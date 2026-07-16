@@ -35,6 +35,22 @@ defmodule PtcRunner.Kernel.LLMCapability do
            Capability.new(
              name: "llm-request",
              description: "Submit one provider-neutral bounded language-model request",
+             input_schema: %{
+               "type" => "object",
+               "properties" => %{
+                 "system" => %{"type" => "string"},
+                 "messages" => %{
+                   "type" => "array",
+                   "items" => %{"type" => "object", "additionalProperties" => true}
+                 },
+                 "tools" => %{
+                   "type" => "array",
+                   "items" => %{"type" => "object", "additionalProperties" => true}
+                 },
+                 "cache" => %{"type" => "boolean"}
+               }
+             },
+             output_schema: %{"type" => "object", "additionalProperties" => true},
              validate: fn request -> validate_request(request, request_limit) end,
              callback: fn request -> invoke(requester, request, response_limit) end
            ) do

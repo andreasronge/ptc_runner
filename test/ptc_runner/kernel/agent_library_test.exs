@@ -2,6 +2,7 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
   use ExUnit.Case, async: true
 
   alias PtcRunner.Kernel
+  alias PtcRunner.Kernel.Capability
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.Library
   alias PtcRunner.Kernel.Limits
@@ -19,6 +20,13 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     end
 
     {:ok, capability} = LLMCapability.new(requester: requester)
+
+    assert %{
+             effect: :unknown,
+             input_schema: %{"additionalProperties" => false},
+             output_schema: %{"additionalProperties" => true}
+           } = Capability.metadata(capability)
+
     {:ok, component} = Library.component("llm")
     {:ok, bundle} = Kernel.compile_bundle([component])
     {:ok, workflow} = WorkflowEnvironment.new(bundle: bundle, capabilities: [capability])

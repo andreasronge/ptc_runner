@@ -6,6 +6,8 @@ defmodule PtcRunner.Kernel.ManifestTest do
   alias PtcRunner.Kernel.ProviderRegistry
   alias PtcRunner.Kernel.RunBuilder
 
+  @input_schema %{"type" => "object", "additionalProperties" => true}
+
   @tag :tmp_dir
   test "one strict manifest deterministically builds and runs the shared Kernel path", %{
     tmp_dir: dir
@@ -156,7 +158,12 @@ defmodule PtcRunner.Kernel.ManifestTest do
 
     builder = fn config, context ->
       send(parent, {:provider_built, config, context.destination})
-      Capability.new(name: "fixture", callback: fn _arguments -> {:ok, true} end)
+
+      Capability.new(
+        name: "fixture",
+        input_schema: @input_schema,
+        callback: fn _arguments -> {:ok, true} end
+      )
     end
 
     {:ok, custom_registry} = ProviderRegistry.new(%{"fixture" => builder})

@@ -2,6 +2,7 @@ defmodule PtcRunner.Kernel.FileCapabilityTest do
   use ExUnit.Case, async: true
 
   alias PtcRunner.Kernel
+  alias PtcRunner.Kernel.Capability
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.FileCapability
   alias PtcRunner.Kernel.Library
@@ -15,6 +16,13 @@ defmodule PtcRunner.Kernel.FileCapabilityTest do
     File.write!(Path.join(root, "inside.txt"), "bounded fixture")
 
     {:ok, capability} = FileCapability.new(root: root, max_bytes: 1_024)
+
+    assert %{
+             effect: :read,
+             input_schema: %{"additionalProperties" => false, "required" => ["path"]},
+             output_schema: %{"additionalProperties" => false}
+           } = Capability.metadata(capability)
+
     {:ok, kernel_component} = Library.component("kernel")
     {:ok, fs_component} = Library.component("fs")
     {:ok, cap_component} = Library.component("cap")

@@ -32,6 +32,9 @@ defmodule PtcRunner.Kernel.TraceCapability do
     Capability.new(
       name: name,
       description: "Bounded source-scoped canonical trace query",
+      input_schema: %{"type" => "object", "additionalProperties" => true},
+      output_schema: %{"type" => "object", "additionalProperties" => true},
+      effect: :read,
       callback: fn arguments -> query(trace_log, operation, arguments) end,
       validate: &validate_arguments/1
     )

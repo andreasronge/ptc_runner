@@ -77,6 +77,13 @@ compiles namespaces and exports deterministically, records capability
 requirements, and produces an attested `PtcRunner.Kernel.FrozenBundle`.
 Compilation does not grant authority.
 
+Every model-visible capability freezes a bounded input schema, an optional
+successful-output schema, and a `read`, `write`, or `unknown` effect alongside
+its public name and description. The Kernel normalizes the supported JSON
+Schema profile, compiles it once with JSV, and projects only safe metadata;
+callbacks and compiled validators remain host-owned. Schema validation and any
+semantic validator must both pass before dispatch.
+
 The host then places the frozen bundle, capabilities, and JSON-like data into
 one of two structurally distinct environments:
 

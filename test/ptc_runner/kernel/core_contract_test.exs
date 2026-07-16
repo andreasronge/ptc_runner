@@ -16,14 +16,26 @@ defmodule PtcRunner.Kernel.CoreContractTest do
   alias PtcRunner.Kernel.RunState
   alias PtcRunner.Kernel.WorkflowEnvironment
 
+  @input_schema %{"type" => "object", "additionalProperties" => true}
+
   test "environment constructors reject duplicate and mission-reserved capability names" do
     assert {:ok, capability} =
-             Capability.new(name: "read", callback: fn _ -> {:ok, %{"ok" => true}} end)
+             Capability.new(
+               name: "read",
+               input_schema: @input_schema,
+               callback: fn _ -> {:ok, %{"ok" => true}} end
+             )
 
     assert {:error, :duplicate_capability} =
              WorkflowEnvironment.new(capabilities: [capability, capability])
 
-    assert {:ok, reserved} = Capability.new(name: "kernel-eval", callback: fn _ -> {:ok, nil} end)
+    assert {:ok, reserved} =
+             Capability.new(
+               name: "kernel-eval",
+               input_schema: @input_schema,
+               callback: fn _ -> {:ok, nil} end
+             )
+
     assert {:error, :reserved_capability} = MissionEnvironment.new(capabilities: [reserved])
   end
 
@@ -63,12 +75,19 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     assert {:ok, unavailable} =
              Capability.new(
                name: "unavailable",
+               input_schema: @input_schema,
                callback: fn _ ->
                  {:error, ProviderError.new(:unavailable, "try later", retryable?: true)}
                end
              )
 
-    assert {:ok, invalid} = Capability.new(name: "invalid", callback: fn _ -> {:ok, self()} end)
+    assert {:ok, invalid} =
+             Capability.new(
+               name: "invalid",
+               input_schema: @input_schema,
+               callback: fn _ -> {:ok, self()} end
+             )
+
     assert {:ok, environment} = WorkflowEnvironment.new(capabilities: [unavailable, invalid])
     {:ok, state} = RunState.start(Limits.defaults())
 
@@ -85,6 +104,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     {:ok, capability} =
       Capability.new(
         name: "slow",
+        input_schema: @input_schema,
         callback: fn _ ->
           send(parent, :started)
 
@@ -114,6 +134,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     {:ok, capability} =
       Capability.new(
         name: "gate",
+        input_schema: @input_schema,
         callback: fn _ ->
           send(parent, {:provider_started, self()})
 
@@ -142,6 +163,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     {:ok, capability} =
       Capability.new(
         name: "slow",
+        input_schema: @input_schema,
         callback: fn _ ->
           send(parent, {:provider_started, self()})
 
@@ -173,6 +195,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     {:ok, capability} =
       Capability.new(
         name: "slow",
+        input_schema: @input_schema,
         callback: fn _ ->
           send(parent, {:provider_started, self()})
 
@@ -454,6 +477,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     {:ok, add} =
       Capability.new(
         name: "add",
+        input_schema: @input_schema,
         callback: fn %{"left" => left, "right" => right} -> {:ok, %{"sum" => left + right}} end
       )
 
@@ -489,6 +513,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     {:ok, capability} =
       Capability.new(
         name: "capture",
+        input_schema: @input_schema,
         callback: fn arguments ->
           send(parent, {:provider_called, arguments})
           {:ok, true}
@@ -524,6 +549,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     {:ok, capability} =
       Capability.new(
         name: "capture",
+        input_schema: @input_schema,
         callback: fn arguments ->
           send(parent, {:mission_provider_called, arguments})
           {:ok, true}
@@ -547,7 +573,11 @@ defmodule PtcRunner.Kernel.CoreContractTest do
 
   test "mission evaluation is serialized, persistent, and cannot use workflow capabilities" do
     {:ok, workflow_capability} =
-      Capability.new(name: "workflow-only", callback: fn _ -> {:ok, %{"ok" => true}} end)
+      Capability.new(
+        name: "workflow-only",
+        input_schema: @input_schema,
+        callback: fn _ -> {:ok, %{"ok" => true}} end
+      )
 
     {:ok, workflow} = WorkflowEnvironment.new(capabilities: [workflow_capability])
     {:ok, mission} = MissionEnvironment.new([])
@@ -758,6 +788,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
       Capability.new(
         name: "search",
         description: "Search a fixed fixture",
+        input_schema: @input_schema,
         callback: fn _ -> {:ok, []} end
       )
 
@@ -845,6 +876,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     {:ok, capability} =
       Capability.new(
         name: "checked",
+        input_schema: @input_schema,
         callback: fn _ -> {:ok, nil} end,
         validate: fn _ -> {:error, :invalid} end
       )

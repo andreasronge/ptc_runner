@@ -10,6 +10,8 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
   alias PtcRunner.Kernel.RunState
   alias PtcRunner.Kernel.WorkflowEnvironment
 
+  @input_schema %{"type" => "object", "additionalProperties" => true}
+
   test "direct evaluations persist definitions and bounded turn history" do
     {:ok, session} = ReplSession.new()
     assert {:ok, first, session} = ReplSession.eval(session, "(def x 40)")
@@ -140,7 +142,13 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
   end
 
   test "configured workflow capabilities use the bounded dispatcher and canonical events" do
-    {:ok, echo} = Capability.new(name: "echo", callback: fn args -> {:ok, args} end)
+    {:ok, echo} =
+      Capability.new(
+        name: "echo",
+        input_schema: @input_schema,
+        callback: fn args -> {:ok, args} end
+      )
+
     {:ok, workflow} = WorkflowEnvironment.new(capabilities: [echo])
     {:ok, mission} = MissionEnvironment.new([])
     {:ok, limits} = Limits.new()
@@ -176,6 +184,7 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
     {:ok, capability} =
       Capability.new(
         name: "capture",
+        input_schema: @input_schema,
         callback: fn arguments ->
           send(parent, {:repl_provider_called, arguments})
           {:ok, true}

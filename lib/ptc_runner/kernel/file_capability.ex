@@ -34,6 +34,21 @@ defmodule PtcRunner.Kernel.FileCapability do
            Capability.new(
              name: "fs-read",
              description: "Read one bounded UTF-8 file beneath the configured root",
+             input_schema: %{
+               "type" => "object",
+               "properties" => %{"path" => %{"type" => "string", "minLength" => 1}},
+               "required" => ["path"]
+             },
+             output_schema: %{
+               "type" => "object",
+               "properties" => %{
+                 "path" => %{"type" => "string"},
+                 "content" => %{"type" => "string"},
+                 "bytes" => %{"type" => "integer", "minimum" => 0}
+               },
+               "required" => ["path", "content", "bytes"]
+             },
+             effect: :read,
              validate: &validate_arguments/1,
              callback: fn arguments -> read(root, max_bytes, arguments) end
            ) do
