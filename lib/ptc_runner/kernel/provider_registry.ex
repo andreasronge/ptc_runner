@@ -24,6 +24,13 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
   @enforce_keys [:builders]
   defstruct [:builders]
 
+  @type build_context :: %{
+          directory: binary(),
+          destination: :workflow | :mission,
+          owner: pid(),
+          limits: PtcRunner.Kernel.Limits.t(),
+          installed_limits: PtcRunner.Kernel.Limits.t()
+        }
   @type context :: %{
           directory: binary(),
           destination: :workflow | :mission,
@@ -63,7 +70,8 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
 
   def new(_builders), do: {:error, :invalid_provider_registry}
 
-  @spec build(t(), binary(), map(), context()) :: {:ok, built_provider()} | {:error, term()}
+  @spec build(t(), binary(), map(), build_context()) ::
+          {:ok, built_provider()} | {:error, term()}
   @doc "Builds and normalizes one trusted registry entry."
   def build(%__MODULE__{builders: builders}, name, config, context) do
     case Map.fetch(builders, name) do

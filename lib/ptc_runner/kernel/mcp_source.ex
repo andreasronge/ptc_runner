@@ -202,7 +202,7 @@ defmodule PtcRunner.Kernel.MCPSource do
   end
 
   defp list_tools(lease, installed),
-    do: list_tools(lease, installed, nil, MapSet.new(), %{}, 0)
+    do: list_tools(lease, installed, nil, %{}, %{}, 0)
 
   defp list_tools(_lease, installed, _cursor, _seen, tools, pages)
        when pages >= installed.max_pages or map_size(tools) > installed.max_catalog_tools,
@@ -217,11 +217,11 @@ defmodule PtcRunner.Kernel.MCPSource do
          {:ok, tools} <- merge_tools(tools, page),
          next <- result["nextCursor"],
          true <- is_nil(next) or (is_binary(next) and byte_size(next) in 1..1_024),
-         false <- is_binary(next) and MapSet.member?(seen, next) do
+         false <- is_binary(next) and Map.has_key?(seen, next) do
       if is_nil(next) do
         bounded_catalog(tools)
       else
-        list_tools(lease, installed, next, MapSet.put(seen, next), tools, pages + 1)
+        list_tools(lease, installed, next, Map.put(seen, next, true), tools, pages + 1)
       end
     else
       {:error, _reason} = error -> error

@@ -357,7 +357,6 @@ defmodule PtcRunner.Lisp do
 
   defp telemetry_outcome({:ok, %Step{}}), do: :ok
   defp telemetry_outcome({:error, %Step{}}), do: :error
-  defp telemetry_outcome(_other), do: :error
 
   defp public_result({tag, %Step{} = step}) when tag in [:ok, :error] do
     {tag,

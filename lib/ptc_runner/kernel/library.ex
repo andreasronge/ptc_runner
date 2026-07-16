@@ -161,7 +161,7 @@ defmodule PtcRunner.Kernel.Library do
 
   defp load_installed(ids) do
     Enum.reduce_while(Enum.sort(ids), {:ok, %{}}, fn id, {:ok, loaded} ->
-      case load_installed_component(id, loaded, MapSet.new(), :explicit) do
+      case load_installed_component(id, loaded, %{}, :explicit) do
         {:ok, next} -> {:cont, {:ok, next}}
         error -> {:halt, error}
       end
@@ -173,7 +173,7 @@ defmodule PtcRunner.Kernel.Library do
       Map.has_key?(loaded, id) ->
         {:ok, loaded}
 
-      MapSet.member?(visiting, id) ->
+      Map.has_key?(visiting, id) ->
         {:error, :component_cycle}
 
       true ->
@@ -184,7 +184,7 @@ defmodule PtcRunner.Kernel.Library do
   defp load_new_installed_component(id, loaded, visiting, source) do
     case component(id) do
       {:ok, component} ->
-        visiting = MapSet.put(visiting, id)
+        visiting = Map.put(visiting, id, true)
 
         Enum.reduce_while(component.dependencies, {:ok, loaded}, fn dependency, {:ok, acc} ->
           case load_installed_component(dependency, acc, visiting, :dependency) do
@@ -227,18 +227,18 @@ defmodule PtcRunner.Kernel.Library do
        else: :ok
   end
 
-  defp topological_order(by_id), do: topological_order(by_id, MapSet.new(), [])
+  defp topological_order(by_id), do: topological_order(by_id, %{}, [])
 
   defp topological_order(by_id, resolved, ordered) do
-    if map_size(by_id) == MapSet.size(resolved) do
+    if map_size(by_id) == map_size(resolved) do
       {:ok, Enum.reverse(ordered)}
     else
       next =
         by_id
         |> Map.values()
-        |> Enum.reject(&MapSet.member?(resolved, &1.id))
+        |> Enum.reject(&Map.has_key?(resolved, &1.id))
         |> Enum.filter(fn component ->
-          Enum.all?(component.dependencies, &MapSet.member?(resolved, &1))
+          Enum.all?(component.dependencies, &Map.has_key?(resolved, &1))
         end)
         |> Enum.min_by(& &1.id, fn -> nil end)
 
@@ -247,7 +247,7 @@ defmodule PtcRunner.Kernel.Library do
           {:error, :component_cycle}
 
         component ->
-          topological_order(by_id, MapSet.put(resolved, component.id), [component | ordered])
+          topological_order(by_id, Map.put(resolved, component.id, true), [component | ordered])
       end
     end
   end
