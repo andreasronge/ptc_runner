@@ -10,6 +10,7 @@ defmodule PtcRunner.Kernel.InspectionLabTest do
 
   alias PtcRunner.Examples.KernelInspectionLab
   alias PtcRunner.Kernel.InspectionArtifact
+  alias PtcRunner.Kernel.TraceLog
   alias PtcRunner.Kernel.ViewerAdapter
 
   @tag :tmp_dir
@@ -25,6 +26,11 @@ defmodule PtcRunner.Kernel.InspectionLabTest do
       assert {:ok, records} = InspectionArtifact.load(journey.inspection)
       assert File.read!(journey.trace) =~ "mcp-2025-11-25"
 
+      inspection_body = File.read!(journey.inspection)
+      refute inspection_body =~ "127.0.0.1"
+      refute inspection_body =~ "inspection-lab-session"
+      refute inspection_body =~ "mcp-session-id"
+
       assert Enum.any?(records, fn record ->
                record["record_type"] == "capability-input" and
                  record["payload"]["name"] == "llm-request" and
@@ -38,8 +44,48 @@ defmodule PtcRunner.Kernel.InspectionLabTest do
 
       assert Enum.any?(records, fn record ->
                record["record_type"] == "capability-output" and
+                 record["payload"]["name"] == "llm-request" and
+                 get_in(record, [
+                   "payload",
+                   "result",
+                   "value",
+                   "tool_calls",
+                   Access.at(0),
+                   "args",
+                   "program"
+                 ]) =~
+                   "remote"
+             end)
+
+      assert Enum.any?(records, fn record ->
+               record["record_type"] == "capability-output" and
+                 record["payload"]["name"] == "fs-read" and
+                 get_in(record, ["payload", "result", "value", "content"]) == "fixture-file"
+             end)
+
+      assert Enum.any?(records, fn record ->
+               record["record_type"] == "capability-output" and
+                 record["payload"]["name"] == "native-echo" and
+                 get_in(record, ["payload", "result", "value", "echo"]) == "fixture"
+             end)
+
+      assert Enum.any?(records, fn record ->
+               record["record_type"] == "capability-output" and
                  record["payload"]["name"] == "remote.structured" and
                  get_in(record, ["payload", "result", "value", "value"]) == 42
+             end)
+
+      assert Enum.any?(records, fn record ->
+               record["record_type"] == "capability-output" and
+                 record["payload"]["name"] == "remote.text" and
+                 get_in(record, ["payload", "result", "value", "text"]) == ["fixture-text"]
+             end)
+
+      assert Enum.any?(records, fn record ->
+               record["record_type"] == "capability-output" and
+                 record["payload"]["name"] == "remote.fail" and
+                 get_in(record, ["payload", "result", "status"]) == "error" and
+                 get_in(record, ["payload", "result", "reason"]) == "domain_error"
              end)
 
       viewer_opts = [
@@ -56,13 +102,30 @@ defmodule PtcRunner.Kernel.InspectionLabTest do
       assert inspection.status == 200
       assert %{"records" => ^records} = Jason.decode!(inspection.resp_body)
 
-      renderer =
-        Plug.Test.conn(:get, "/js/inspection.js")
-        |> PtcViewer.Router.call(PtcViewer.Router.init(viewer_opts))
+      {rendered, 0} =
+        System.cmd(
+          "node",
+          [
+            Path.expand("../../../ptc_viewer/test/render_inspection.mjs", __DIR__),
+            journey.inspection
+          ],
+          stderr_to_stdout: true
+        )
 
-      assert renderer.status == 200
-      assert renderer.resp_body =~ "Sensitive inspection data"
-      assert renderer.resp_body =~ "evaluation-source"
+      assert rendered =~ "Sensitive inspection data"
+      assert rendered =~ "evaluation-source"
+      assert rendered =~ "remote.structured"
+      assert rendered =~ "remote.text"
+      assert rendered =~ "remote.fail"
+
+      assert {:ok, canonical_trace} = TraceLog.new(source: {:file, journey.trace})
+
+      assert {:ok, turns} =
+               TraceLog.query(canonical_trace, :list_turns, %{"run_id" => journey.run_id})
+
+      encoded_turns = Jason.encode!(turns)
+      refute encoded_turns =~ "fixture-text"
+      refute encoded_turns =~ "fixture-file"
     end
 
     direct_request = model_request(direct.inspection)

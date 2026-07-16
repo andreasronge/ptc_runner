@@ -6,7 +6,15 @@ export function renderInspection(container, inspection) {
 
   const section = document.createElement('section');
   section.className = 'inspection-panel';
-  section.innerHTML = `
+  section.innerHTML = renderInspectionMarkup(inspection);
+  container.appendChild(section);
+}
+
+export function renderInspectionMarkup(inspection) {
+  const records = inspection?.records || [];
+  if (!records.length) return '';
+
+  return `
     <div class="inspection-warning" role="alert">
       <strong>Sensitive inspection data.</strong>
       This fixed private artifact contains full evaluated source and capability inputs and outputs.
@@ -23,7 +31,6 @@ export function renderInspection(container, inspection) {
       ${records.map(renderRecord).join('')}
     </div>
   `;
-  container.appendChild(section);
 }
 
 function renderRecord(record) {

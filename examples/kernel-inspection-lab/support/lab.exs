@@ -11,8 +11,8 @@ defmodule PtcRunner.Examples.KernelInspectionLab do
 
   @task "Use every available read-only fixture and return their results in one map."
 
-  @direct_program ~S|(let [file (tool/fs-read {"path" "value.txt"}) native (tool/native-echo {"value" "fixture"}) remote (tool/remote.structured {"query" "fixture"})] (return {"file" file "native" native "remote" remote}))|
-  @wrapper_program ~S|(return {"file" (lab.tools/read-file) "native" (lab.tools/echo) "remote" (lab.tools/remote-value)})|
+  @direct_program ~S|(let [file (tool/fs-read {"path" "value.txt"}) native (tool/native-echo {"value" "fixture"}) structured (tool/remote.structured {"query" "fixture"}) text (tool/remote.text {"query" "fixture"}) failed (tool/remote.fail {"query" "fixture"})] (return {"file" file "native" native "structured" structured "text" text "failed" failed}))|
+  @wrapper_program ~S|(return {"file" (lab.tools/read-file) "native" (lab.tools/echo) "structured" (lab.tools/remote-structured) "text" (lab.tools/remote-text) "failed" (lab.tools/remote-failure)})|
 
   def run(output_dir) when is_binary(output_dir) do
     output_dir = Path.expand(output_dir)
@@ -104,7 +104,11 @@ defmodule PtcRunner.Examples.KernelInspectionLab do
       MCPSource.builder(
         endpoint: endpoint,
         allow_insecure_loopback: true,
-        tools: %{"structured" => %{as: "remote.structured", effect: :read}},
+        tools: %{
+          "structured" => %{as: "remote.structured", effect: :read},
+          "text" => %{as: "remote.text", effect: :read},
+          "fail" => %{as: "remote.fail", effect: :read}
+        },
         timeout_ms: 2_000,
         max_result_bytes: 64_000
       )
@@ -139,7 +143,7 @@ defmodule PtcRunner.Examples.KernelInspectionLab do
           %{
             "name" => "fixture-mcp",
             "config" => %{
-              "allow" => ["remote.structured"],
+              "allow" => ["remote.structured", "remote.text", "remote.fail"],
               "timeout_ms" => 2_000,
               "max_result_bytes" => 64_000
             }
@@ -164,7 +168,9 @@ defmodule PtcRunner.Examples.KernelInspectionLab do
 
 (defn read-file [] (tool/fs-read {"path" "value.txt"}))
 (defn echo [] (tool/native-echo {"value" "fixture"}))
-(defn remote-value [] (tool/remote.structured {"query" "fixture"}))|
+(defn remote-structured [] (tool/remote.structured {"query" "fixture"}))
+(defn remote-text [] (tool/remote.text {"query" "fixture"}))
+(defn remote-failure [] (tool/remote.fail {"query" "fixture"}))|
   end
 
   defp model_response(program) do
@@ -207,13 +213,43 @@ defmodule PtcRunner.Examples.KernelInspectionLab do
             "properties" => %{"value" => %{"type" => "integer"}},
             "required" => ["value"]
           }
+        },
+        %{
+          "name" => "text",
+          "description" => "Return one text fixture value",
+          "inputSchema" => input_schema()
+        },
+        %{
+          "name" => "fail",
+          "description" => "Return one MCP domain error",
+          "inputSchema" => input_schema()
         }
       ]
     })
   end
 
-  defp mcp_response(%{body: %{"method" => "tools/call", "id" => id}}),
-    do: json(id, %{"structuredContent" => %{"value" => 42}, "content" => []})
+  defp mcp_response(%{
+         body: %{"method" => "tools/call", "id" => id, "params" => %{"name" => "structured"}}
+       }),
+       do: json(id, %{"structuredContent" => %{"value" => 42}, "content" => []})
+
+  defp mcp_response(%{
+         body: %{"method" => "tools/call", "id" => id, "params" => %{"name" => "text"}}
+       }),
+       do: json(id, %{"content" => [%{"type" => "text", "text" => "fixture-text"}]})
+
+  defp mcp_response(%{
+         body: %{"method" => "tools/call", "id" => id, "params" => %{"name" => "fail"}}
+       }),
+       do: json(id, %{"isError" => true, "content" => []})
+
+  defp input_schema do
+    %{
+      "type" => "object",
+      "properties" => %{"query" => %{"type" => "string"}},
+      "required" => ["query"]
+    }
+  end
 
   defp json(id, result, headers \\ []) do
     body = Jason.encode!(%{"jsonrpc" => "2.0", "id" => id, "result" => result})
