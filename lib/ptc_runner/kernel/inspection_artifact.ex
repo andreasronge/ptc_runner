@@ -3,8 +3,10 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
   Persists and loads one immutable private inspection JSONL artifact.
 
   Destinations must end in `.inspection.jsonl`, must not already exist, and are
-  installed atomically from an exclusive temporary sibling whose permissions
-  are restricted to `0600` before content is written. Loading rejects symlinks,
+  installed atomically with a hard-link create from an exclusive temporary
+  sibling whose permissions are restricted to `0600` before content is
+  written. The create fails when the destination already exists; unlike a
+  rename, it cannot replace an existing artifact. Loading rejects symlinks,
   changed files, oversized content, malformed lines, mixed identities,
   non-contiguous sequences, and records outside the exact V1 vocabulary.
   """
@@ -135,7 +137,7 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
 
   defp ordered_value(value), do: {:ok, value}
 
-  defp validate_records([]), do: {:error, :empty_inspection_artifact}
+  defp validate_records([]), do: {:error, :invalid_inspection_artifact}
 
   defp validate_records([first | _rest] = records) do
     run_id = first["run_id"]

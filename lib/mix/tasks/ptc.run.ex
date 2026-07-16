@@ -30,7 +30,7 @@ defmodule Mix.Tasks.Ptc.Run do
         Mix.raise("invalid ptc.run options: #{inspect(invalid)}")
 
       {_opts, _arguments, _invalid} ->
-        Mix.raise("usage: mix ptc.run MANIFEST [--mission PATH] [--trace PATH]")
+        Mix.raise("usage: mix ptc.run MANIFEST [--mission PATH] [--trace PATH] [--inspect PATH]")
 
       {:error, error} ->
         Mix.raise("ptc.run failed: #{inspect(error, limit: 10, printable_limit: 1_024)}")

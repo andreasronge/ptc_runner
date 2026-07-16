@@ -111,6 +111,33 @@ defmodule PtcRunner.Kernel.ManifestTest do
   end
 
   @tag :tmp_dir
+  test "inspection capture cannot be enabled by manifest data", %{tmp_dir: dir} do
+    File.write!(Path.join(dir, "main.lisp"), "(ns main) (defn run [_] (return 1))")
+
+    manifest = %{
+      "version" => 1,
+      "workflow" => %{
+        "components" => [%{"id" => "main", "path" => "main.lisp"}],
+        "entry" => "main/run"
+      },
+      "input" => %{"value" => %{"inspect" => "requested.inspection.jsonl"}},
+      "inspect" => "requested.inspection.jsonl"
+    }
+
+    path = Path.join(dir, "inspection.json")
+    File.write!(path, Jason.encode!(manifest))
+
+    assert {:error, :unknown_or_missing_keys} = Manifest.load(path)
+
+    manifest = Map.delete(manifest, "inspect")
+    File.write!(path, Jason.encode!(manifest))
+    {:ok, registry} = ProviderRegistry.new()
+
+    assert {:ok, %{value: 1}} = RunBuilder.run(path, registry)
+    refute File.exists?(Path.join(dir, "requested.inspection.jsonl"))
+  end
+
+  @tag :tmp_dir
   test "manifest limits are narrowed independently from host-installed ceilings", %{tmp_dir: dir} do
     File.write!(Path.join(dir, "main.lisp"), "(ns main) (defn run [_] (return 1))")
 

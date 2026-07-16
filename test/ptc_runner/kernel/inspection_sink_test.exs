@@ -6,6 +6,7 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
   alias PtcRunner.Kernel.InspectionSink
   alias PtcRunner.Kernel.ProviderRegistry
   alias PtcRunner.Kernel.RunBuilder
+  alias PtcRunner.Kernel.TraceLog
   alias PtcRunner.Kernel.ViewerAdapter
 
   @source "(return 42)"
@@ -145,6 +146,10 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
     File.write!(invalid, Jason.encode!(Map.put(hd(records), "unknown", true)) <> "\n")
     assert {:error, :invalid_inspection_artifact} = InspectionArtifact.load(invalid)
 
+    empty = Path.join(dir, "empty.inspection.jsonl")
+    File.write!(empty, "")
+    assert {:error, :invalid_inspection_artifact} = InspectionArtifact.load(empty)
+
     wrong_type = Path.join(dir, "wrong-type.inspection.jsonl")
 
     File.write!(
@@ -191,11 +196,12 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
       "input" => %{"value" => %{"program" => program}},
       "providers" => %{
         "mission" => [%{"name" => "native", "config" => %{}}]
-      }
+      },
+      "events" => %{"policy" => "private"}
     }
 
     manifest_path = Path.join(dir, "ptc.json")
-    trace_path = Path.join(dir, "run.jsonl")
+    trace_path = Path.join(dir, "run.private.jsonl")
     inspection_path = Path.join(dir, "run.inspection.jsonl")
     File.write!(manifest_path, Jason.encode!(manifest))
 
@@ -254,6 +260,15 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
     assert evaluation_started["data"]["source_hash"] == source["payload"]["source_hash"]
     assert evaluation_started["data"]["source_bytes"] == byte_size(program)
     refute Map.has_key?(evaluation_started["data"], "source")
+
+    assert {:ok, private_trace} = TraceLog.new(source: {:private_file, trace_path})
+
+    assert {:ok, turns} =
+             TraceLog.query(private_trace, :list_turns, %{"run_id" => source["run_id"]})
+
+    encoded_turns = Jason.encode!(turns)
+    refute encoded_turns =~ "inspect me"
+    refute encoded_turns =~ program
 
     viewer_opts = [
       trace_dir: dir,

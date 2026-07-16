@@ -188,7 +188,10 @@ option. `InspectionSink` accepts exact bounded source and capability records
 before execution crosses the relevant boundary; rejection fails the run rather
 than silently producing a partial capture. `InspectionArtifact` validates
 correlation against canonical events and installs one previously absent
-`.inspection.jsonl` sidecar at mode `0600`. TraceLog excludes that suffix.
+`.inspection.jsonl` sidecar at mode `0600`. Installation uses an atomic
+hard-link create from an exclusive temporary sibling because `File.rename/2`
+may replace an existing destination and therefore cannot uphold the no-clobber
+contract. TraceLog excludes the inspection suffix.
 `PtcRunner.Kernel.ViewerAdapter.inspection/2` reads one fixed artifact for the
 loopback-only Viewer; it is not a TraceLog operation or Lisp capability.
 

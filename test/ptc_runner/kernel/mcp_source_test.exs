@@ -137,6 +137,8 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     assert Enum.map(snapshot["tools"], & &1["name"]) == ["remote.structured"]
     assert :ok = RunBuilder.close(built)
     assert_receive :mcp_deleted
+    assert :ok = RunBuilder.close(built)
+    refute_receive :mcp_deleted
 
     duplicate = fixture(parent, duplicate_catalog?: true)
     on_exit(duplicate.close)

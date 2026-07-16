@@ -346,10 +346,12 @@ Installed defaults are 2,000,000 encoded bytes per record and 16,000,000
 encoded bytes for the artifact; a host may lower them but a manifest cannot
 raise or select them. Retained-size prechecks run before JSON encoding, followed
 by an encoded-byte check. Post-run persistence writes an exclusive `0600`
-temporary sibling and renames it to a previously absent destination only after
+temporary sibling and installs it with an atomic hard-link create only after
 the complete artifact validates, so a failed write is not mistaken for a
-complete capture. The first increment deliberately does not append or merge
-inspection runs.
+complete capture. This is the smallest coherent no-clobber behavior:
+`File.rename/2` can replace an existing destination, while hard-link creation
+fails when the destination already exists. The temporary link is then removed.
+The first increment deliberately does not append or merge inspection runs.
 
 The first increment captures the normalized LLM request and response, exact
 generated subordinate PTC-Lisp, and connector capability arguments and
@@ -413,11 +415,11 @@ Details are bounded and sanitized. Host paths are not exposed beyond safe
 grant-relative identifiers.
 
 Inspection loading and persistence use a separate stable error set:
-`:inspection-sink-error`, `:inspection-persistence-failed`,
-`:invalid-inspection-source`, `:inspection-source-changed`,
-`:inspection-source-limit-exceeded`, and `:inspection-run-mismatch`. Errors do
+`:inspection_sink_error`, `:inspection_persistence_failed`,
+`:invalid_inspection_source`, `:inspection_source_changed`,
+`:inspection_source_limit_exceeded`, and `:inspection_run_mismatch`. Errors do
 not include a record payload or host path. A completed Kernel result may be
-returned as bounded context with `:inspection-persistence-failed`, matching the
+returned as bounded context with `:inspection_persistence_failed`, matching the
 existing trace-persistence distinction; persistence failure is not rewritten
 as workflow failure.
 
