@@ -14,9 +14,10 @@ workflow and mission environments, and run an entry program through
 - A minimal owner-based Kernel with hard time, memory, result, evaluation, and
   capability limits.
 - Frozen component bundles and separate workflow/mission environments.
-- Host-registered capabilities, including optional file, LLM, and trace
-  providers.
-- Canonical bounded trace events, a manifest runner, and a stateful Kernel REPL.
+- Host-registered capabilities, including optional file, LLM, trace, and
+  read-only MCP providers.
+- Canonical bounded traces plus a separate opt-in private inspection artifact,
+  a manifest runner, local Viewer, and stateful Kernel REPL.
 
 ## Running a workflow
 
@@ -25,6 +26,8 @@ The normal application boundary is a versioned JSON manifest:
 ```console
 mix ptc.run path/to/manifest.json
 mix ptc.run path/to/manifest.json --trace traces/run.jsonl
+mix ptc.run path/to/manifest.json --trace traces/run.jsonl \
+  --inspect traces/run.inspection.jsonl
 ```
 
 Use `mix ptc.repl --manifest path/to/manifest.json` for an interactive
@@ -32,20 +35,26 @@ session over the same frozen environments and provider registry.
 
 Start with the
 [Kernel tutorial](docs/guides/kernel-tutorial.md) for complete deterministic,
-DeepSeek, model-authored program, feedback, logging, and viewer examples that
+DeepSeek, model-authored program, feedback, logging, and Viewer examples that
 primarily use JSON manifests and PTC-Lisp rather than Elixir.
+
+The credential-free
+[Kernel inspection lab](examples/kernel-inspection-lab/README.md) runs a
+scripted agent across file, native, and MCP read capabilities and produces the
+canonical/private artifacts used by the local Viewer tests.
 
 The active
 [Kernel product-readiness roadmap](docs/plans/lisp-kernel/product-readiness.md)
 describes current limitations, the recommended next milestone, and the gates
 for a standalone non-Elixir developer experience.
 The separate
-[capability connector plan](docs/plans/lisp-kernel/capability-connectors.md)
-proposes host-installed MCP, OpenAPI, database, file, and native extensions.
+[capability connector record](docs/plans/lisp-kernel/capability-connectors.md)
+documents the implemented MCP-first slice and demand triggers for later
+extensions.
 The
-[host access and prelude workspace plan](docs/plans/lisp-kernel/host-access-and-prelude-workspaces.md)
-defines how authenticated humans and explicitly delegated model runs can share
-bounded TraceLog and versioned prelude services without mutating active runs.
+[host access and prelude workspace record](docs/plans/lisp-kernel/host-access-and-prelude-workspaces.md)
+documents the implemented local boundary and defers authenticated shared
+services until a host product requires them.
 
 Elixir applications can use `PtcRunner.Kernel.compile_bundle/1` and
 `PtcRunner.Kernel.run/2` directly. A run accepts only a validated

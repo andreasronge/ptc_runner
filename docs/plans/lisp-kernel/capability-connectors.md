@@ -1,7 +1,7 @@
 # Capability connectors
 
-Status: 0.x implementation plan, reviewed 2026-07-16. This is not implemented
-yet.
+Status: implemented pre-production 0.x vertical slice, reviewed 2026-07-16.
+The demand-triggered production follow-ons remain deferred.
 
 ## Decision
 

@@ -9,6 +9,8 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
   non-contiguous sequences, and records outside the exact V1 vocabulary.
   """
 
+  alias Jason.OrderedObject
+
   @max_bytes 16_000_000
   @suffix ".inspection.jsonl"
   @record_types ~w(capability-input capability-output evaluation-source)
@@ -87,7 +89,7 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
     content
     |> String.split("\n", trim: true)
     |> Enum.reduce_while({:ok, []}, fn line, {:ok, records} ->
-      case Jason.decode(line) do
+      case decode_line(line) do
         {:ok, record} when is_map(record) -> {:cont, {:ok, [record | records]}}
         _error -> {:halt, {:error, :malformed_inspection_artifact}}
       end
@@ -97,6 +99,41 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
       error -> error
     end
   end
+
+  defp decode_line(line) do
+    with {:ok, decoded} <- Jason.decode(line, objects: :ordered_objects),
+         do: ordered_value(decoded)
+  end
+
+  defp ordered_value(%OrderedObject{values: pairs}) do
+    keys = Enum.map(pairs, &elem(&1, 0))
+
+    if keys == Enum.uniq(keys) do
+      Enum.reduce_while(pairs, {:ok, %{}}, fn {key, value}, {:ok, normalized} ->
+        case ordered_value(value) do
+          {:ok, value} -> {:cont, {:ok, Map.put(normalized, key, value)}}
+          {:error, _reason} = error -> {:halt, error}
+        end
+      end)
+    else
+      {:error, :duplicate_inspection_key}
+    end
+  end
+
+  defp ordered_value(values) when is_list(values) do
+    Enum.reduce_while(values, {:ok, []}, fn value, {:ok, normalized} ->
+      case ordered_value(value) do
+        {:ok, value} -> {:cont, {:ok, [value | normalized]}}
+        {:error, _reason} = error -> {:halt, error}
+      end
+    end)
+    |> case do
+      {:ok, normalized} -> {:ok, Enum.reverse(normalized)}
+      {:error, _reason} = error -> error
+    end
+  end
+
+  defp ordered_value(value), do: {:ok, value}
 
   defp validate_records([]), do: {:error, :empty_inspection_artifact}
 
@@ -153,27 +190,52 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
 
   defp valid_shape?(_record), do: false
 
-  defp validate_correlations(records, events) do
+  defp validate_correlations([first | _rest] = records, events) do
+    events =
+      Enum.filter(events, fn event ->
+        event_value(event, :run_id) == first["run_id"] and
+          event_value(event, :trace_id) == first["trace_id"]
+      end)
+
     capability_ids =
       events
-      |> Enum.flat_map(fn event ->
-        [get_in(event, [:data, :capability_id]), get_in(event, ["data", "capability_id"])]
-      end)
+      |> Enum.map(&event_data(&1, :capability_id))
       |> MapSet.new()
 
-    evaluation_ids =
-      events
-      |> Enum.flat_map(fn event ->
-        [get_in(event, [:data, :evaluation_id]), get_in(event, ["data", "evaluation_id"])]
+    evaluations =
+      Enum.reduce(events, %{}, fn event, evaluations ->
+        id = event_data(event, :evaluation_id)
+        hash = event_data(event, :source_hash)
+        bytes = event_data(event, :source_bytes)
+
+        if is_binary(id) and is_binary(hash) and is_integer(bytes),
+          do: Map.put(evaluations, id, {hash, bytes}),
+          else: evaluations
       end)
-      |> MapSet.new()
 
     if Enum.all?(records, fn
-         %{"correlation" => %{"capability_id" => id}} -> MapSet.member?(capability_ids, id)
-         %{"correlation" => %{"evaluation_id" => id}} -> MapSet.member?(evaluation_ids, id)
+         %{"correlation" => %{"capability_id" => id}} ->
+           MapSet.member?(capability_ids, id)
+
+         %{
+           "correlation" => %{"evaluation_id" => id},
+           "payload" => %{"source_hash" => hash, "source_bytes" => bytes}
+         } ->
+           Map.get(evaluations, id) == {hash, bytes}
        end),
        do: :ok,
        else: {:error, :inspection_correlation_missing}
+  end
+
+  defp validate_correlations(_records, _events), do: {:error, :inspection_correlation_missing}
+
+  defp event_value(event, key), do: Map.get(event, key) || Map.get(event, Atom.to_string(key))
+
+  defp event_data(event, key) do
+    case event_value(event, :data) do
+      data when is_map(data) -> Map.get(data, key) || Map.get(data, Atom.to_string(key))
+      _data -> nil
+    end
   end
 
   defp persist_new(path, encoded) do

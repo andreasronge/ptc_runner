@@ -1,8 +1,8 @@
 # Host access and prelude workspaces
 
 Status: narrow 0.x local-inspection and read-only installed-prelude increments
-are active. Authenticated host access and writable prelude workspaces remain
-deferred. Reviewed 2026-07-16.
+are implemented. Authenticated host access and writable prelude workspaces
+remain deferred. Reviewed 2026-07-16.
 
 ## Decision
 

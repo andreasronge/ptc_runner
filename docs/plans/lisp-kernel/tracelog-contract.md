@@ -1,7 +1,7 @@
 # TraceLog and Log Prelude — V1 Contract
 
-**Status:** implemented retained product contract. The explicitly labeled 0.x
-increment remains planned until its acceptance tests pass. Complements the
+**Status:** implemented retained product contract, including the local 0.x
+inspection increment. Complements the
 [Kernel maintainer guide](../../guides/kernel-maintainer.md) and
 `PtcRunner.Kernel.TraceLog` module documentation.
 
@@ -34,7 +34,7 @@ PtcRunner keeps four observability concerns separate:
   monitoring. It is not an event store or an authorization boundary.
 - `Kernel.EventSink` and `Kernel.TraceLog` own the canonical bounded run event
   journal consumed by `ptc_viewer`, CLI diagnostics, and `log/` capabilities.
-- the planned opt-in `Kernel.InspectionSink` owns exact sensitive development
+- the opt-in `Kernel.InspectionSink` owns exact sensitive development
   payloads under the separate controls below.
 
 These are different planes, not interchangeable logging implementations.
@@ -278,7 +278,7 @@ restricted to owner read/write permissions before any event payload is
 appended. They use the reserved `.private.jsonl` suffix, and normal
 file/directory sources and Viewer discovery reject or omit that suffix.
 
-### Planned 0.x developer-inspection increment
+### Implemented 0.x developer-inspection increment
 
 Sanitized subordinate `evaluation-started` data adds:
 
@@ -450,7 +450,7 @@ as workflow failure.
 - Truncate deterministically without unbounded intermediate allocation.
 - Prove mission-only trace confinement and missing-`requires` rejection.
 
-The planned developer-inspection increment additionally requires tests that:
+The developer-inspection increment additionally has tests that:
 
 - normal and private canonical turn queries never contain inspection payloads;
 - evaluation source hashes and byte counts match the executed bounded source;

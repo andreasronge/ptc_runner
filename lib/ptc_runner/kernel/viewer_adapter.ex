@@ -22,7 +22,7 @@ defmodule PtcRunner.Kernel.ViewerAdapter do
          true <- Enum.all?(records, &(&1["run_id"] == run_id)) do
       {:ok, %{"run_id" => run_id, "records" => records}}
     else
-      false -> {:error, :not_found}
+      false -> {:error, :inspection_run_mismatch}
       {:error, _reason} = error -> error
     end
   end

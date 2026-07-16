@@ -557,6 +557,24 @@ mission input, file content, and provider output as untrusted data.
 | `mix precommit` | Run format, compile, Credo, spec, tests, and viewer tests |
 | `mix prepush` | Run Dialyzer and unused-dependency checks |
 
+## Inspect a credential-free connector run
+
+The checked-in inspection lab exercises the complete local development path
+without a model credential. A scripted model receives the frozen mission
+inventory and generates a mission program that calls the existing file
+provider, a host-native capability, and a loopback MCP 2025-11-25 source. Two
+runs compare direct capability exposure with a small prompt-visible wrapper.
+
+```bash
+mix run examples/kernel-inspection-lab/run.exs
+```
+
+The command prints canonical trace and private inspection paths plus an exact
+Viewer command. The canonical trace contains only hashes, sizes, public names,
+outcomes, and safe connector fingerprints. The `0600` inspection artifact
+contains the full model request/response, generated PTC-Lisp, and capability
+payloads. Treat it as sensitive application data.
+
 `mix help ptc.run`, `mix help ptc.repl`, and `mix help ptc.viewer` show the
 installed command options.
 
@@ -640,10 +658,8 @@ cannot provide executable callback code.
   schemas, sanitization, filtering, pagination, and private sources.
 - [Kernel product readiness](../plans/lisp-kernel/product-readiness.md) records
   current limitations, prioritized improvements, and release gates.
-- [Capability connectors](../plans/lisp-kernel/capability-connectors.md) is the
-  future plan for MCP, OpenAPI, database, file, and server integrations, with
-  proposed configuration and PTC-Lisp examples.
+- [Capability connectors](../plans/lisp-kernel/capability-connectors.md) records
+  the implemented MCP-first slice and demand triggers for later adapters.
 - [Host access and prelude workspaces](../plans/lisp-kernel/host-access-and-prelude-workspaces.md)
-  plans authenticated human/model trace inspection, exact-source grants,
-  versioned prelude candidates, validation, review, and promotion, with usage
-  examples in its appendix.
+  records the implemented local inspection boundary and the triggers for
+  deferred authenticated access or writable workspaces.

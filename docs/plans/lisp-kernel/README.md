@@ -8,13 +8,12 @@ This directory contains active product and extension plans only.
 - [`product-readiness.md`](product-readiness.md) assesses what is usable now,
   current limitations, prioritized improvements, and release gates for a
   non-Elixir developer experience.
-- [`capability-connectors.md`](capability-connectors.md) is the active MCP-first
-  plan for one host-installed read-only external-tools route and its inspectable
-  developer validation journey. Other adapters and inbound frontends remain
-  demand-triggered follow-ons.
+- [`capability-connectors.md`](capability-connectors.md) records the implemented
+  MCP-first read-only route and inspectable developer validation journey. Other
+  adapters and inbound frontends remain demand-triggered follow-ons.
 - [`host-access-and-prelude-workspaces.md`](host-access-and-prelude-workspaces.md)
-  defines the narrow local inspection and read-only installed-prelude work that
-  can land now, while deferring shared host authorization, authenticated remote
+  records the implemented local inspection and read-only installed-prelude work,
+  while deferring shared host authorization, authenticated remote
   Viewer access, writable prelude candidates, and promotion services.
 
 - [`tracelog-contract.md`](tracelog-contract.md) defines canonical event

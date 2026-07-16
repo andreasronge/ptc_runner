@@ -171,6 +171,7 @@ defmodule PtcViewer.RouterTest do
   test "inspection route classifies fixed source failures", %{trace_dir: trace_dir} do
     statuses = %{
       not_found: 404,
+      inspection_run_mismatch: 404,
       inspection_source_unavailable: 503,
       inspection_source_changed: 409,
       inspection_source_limit_exceeded: 413,

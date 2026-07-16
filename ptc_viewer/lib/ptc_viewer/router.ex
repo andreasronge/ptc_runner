@@ -102,6 +102,9 @@ defmodule PtcViewer.Router do
       {:error, :not_found} ->
         send_resp(conn, 404, "Not found")
 
+      {:error, :inspection_run_mismatch} ->
+        send_resp(conn, 404, "Inspection run mismatch")
+
       {:error, :unavailable} ->
         send_resp(conn, 503, "Inspection artifact unavailable")
 

@@ -12,8 +12,9 @@ product surface develops.
 ## Assessment
 
 The Kernel is implementable and its bounded-runtime foundation is working. It
-is already useful for deterministic manifest workflows and focused LLM or
-read-only file experiments from a repository checkout. The separation of
+is already useful for deterministic manifest workflows, focused LLM/file
+experiments, and one installed read-only MCP route from a repository checkout.
+The separation of
 workflow and mission authority, immutable bundles, owner-process accounting,
 hard limits, confined file access, and canonical events form a credible base.
 
@@ -39,12 +40,19 @@ SubAgent architecture.
   rejection after run closure.
 - Run, workflow, mission-evaluation, heap, source, result, call, evaluation,
   and event limits are enforced.
-- The built-in `llm` and mission-only `file-read` providers are confined by
-  explicit environment authority.
+- The built-in `llm` and mission-only `file-read` providers plus a
+  host-installed read-only MCP source are confined by explicit environment
+  authority.
+- Manifests select shipped library dependency closures, and `agent.core`
+  receives a deterministic frozen mission inventory with schemas and limits.
+- Host-installed ceilings are distinct from manifest-requested runtime limits.
 - Manifest and file paths reject traversal and symlink escapes. JSON inputs are
   checked for duplicate keys and non-JSON host values are rejected.
-- Canonical traces are bounded and sanitized, with normal and private source
-  policies and a browser viewer for completed traces.
+- Canonical traces are bounded and sanitized, while an explicit `0600`
+  inspection sidecar and loopback-only Viewer mode expose sensitive
+  development payloads separately.
+- Provider-valid agent correction history retains the bounded assistant tool
+  call and paired tool result.
 - Default run identifiers now use cryptographic entropy. This closes the
   cross-OS-process collision discovered while repeatedly running the CLI.
 - Deterministic examples and focused Kernel contracts are covered by normal
@@ -64,14 +72,11 @@ Kernel execution boundary.
 | Priority | Area | Current limitation | Consequence |
 | --- | --- | --- | --- |
 | P0 | CLI diagnostics | `mix ptc.run` reports many failures through `Mix.raise/1` and inspected Elixir terms; manifest failures often collapse to broad atoms such as `invalid_manifest`, `invalid_component`, or `invalid_limits`. | Scripts and non-Elixir users cannot reliably identify the failing file, field, phase, or repair. |
-| P0 | Library access | Trusted shipped components such as `agent.core`, `agent.feedback`, `agent.retry`, `llm`, `fs`, and `result` are host-accessible, but a manifest can reference only local component files. | The main tutorial must carry a large local agent loop instead of selecting the runtime's tested library. |
-| P0 | Limits | Manifest values are compared directly with `Limits.defaults/0`, so the defaults also act as hard ceilings. The default one-second evaluation and thirty-second run are too restrictive for many real model workflows. | Operators cannot set a higher safe ceiling while allowing a manifest to request a practical bounded model budget. |
 | P0 | REPL parity | The REPL does not assemble the same reserved runtime tools as a normal workflow and uses the evaluation timeout for both the whole form and provider dispatch. | A manifest may work through `ptc.run` but fail or expose a different tool surface in `ptc.repl`; remote LLM calls are especially fragile. |
-| P1 | Capability ecosystem | Manifests can select only built-in providers. Registering a normal application tool requires an Elixir callback; there is no constrained MCP, HTTP, or OpenAPI bridge. | Non-Elixir users cannot connect the Kernel to their existing tools without writing a host application. |
+| P1 | Capability ecosystem | One host-installed read-only MCP source is implemented, but installation still requires an Elixir host; HTTP, OpenAPI, databases, writes, and catalog refresh remain intentionally absent. | The safe connector path is usable by embedders but is not yet a no-code packaged product. |
 | P1 | Model protocol | The Kernel LLM adapter exposes a narrow request shape and does not carry structured-output schema, token limits, temperature/reasoning choices, or explicit provider timeout through the public manifest surface. | Model behavior is harder to constrain and operational budgets are incomplete. |
-| P1 | Agent feedback | The shipped loop does not automatically receive a frozen inventory of mission exports and capability schemas. Evaluation corrections discard the assistant tool call and exact bounded program, then add only generic user feedback. | Models spend turns rediscovering authority and cannot reliably repair the program they just produced. |
 | P1 | Output contracts | A manifest cannot declare and enforce an input or terminal-result JSON Schema. Direct LLM calls return untrusted model text. | Hosts must add validation outside the manifest and successful runs may still return unusable data. |
-| P1 | Trace operation | A malformed, duplicate, or oversized trace can make a directory source fail as a whole. Trace persistence is post-run, and canonical events neither correlate evaluations with generated-source hashes nor have a separate opt-in inspection artifact for model/program/capability payloads. | One damaged file can hide healthy runs; crashes can lose buffered events; connector and generated-program failures are difficult to diagnose from the local Viewer. |
+| P1 | Trace operation | A malformed, duplicate, or oversized trace can make a directory source fail as a whole, and trace persistence remains post-run. Generated source is hash-correlated and sensitive payloads have a separate bounded local inspection path. | One damaged file can still hide healthy runs and crashes can lose buffered events, although completed connector/program runs are diagnosable. |
 | P1 | Distribution | The user workflow currently assumes a source checkout, Erlang/Elixir, and Mix. The viewer is a development/test path dependency rather than a production artifact. | Installation and deployment are too heavy for the intended non-Elixir audience. |
 | P1 | End-to-end evidence | Normal tests cover the deterministic tutorial, while model examples mainly prove compilation/assembly and the live E2E check is intentionally small. There is no packaged-install or full CLI file-agent smoke test. | The most important user journey can regress across CLI, manifest, agent loop, provider, trace, and viewer boundaries without one test failing. |
 | P2 | Language expectations | PTC-Lisp is Clojure-oriented, not a full Clojure implementation. The conformance report currently records 300 of 382 audited functions as supported, with notable gaps in `clojure.set` and `clojure.walk`. | Familiar-looking programs can encounter missing functions or semantic differences unless the supported profile is made explicit. |
@@ -87,9 +92,10 @@ The manifest is already the safest and simplest boundary for a non-Elixir
 user. It should be able to express a useful workflow without copying runtime
 library source into the project.
 
-Add trusted, versioned library references alongside local components. A
-reference should resolve only from an administrator-installed catalog and
-should freeze:
+The first narrow form is implemented: `{"library": id}` resolves shipped
+components only from `Kernel.Library`, expands dependencies deterministically,
+and enters the ordinary immutable compiler. A broader administrator-installed
+catalog would still need to freeze:
 
 - exact component source or content hash;
 - transitive dependency closure;
@@ -146,6 +152,10 @@ manifest-relative files, and optional viewer availability without exposing
 secret values.
 
 ### 3. Separate installed ceilings from requested limits
+
+The initial host/manifest split is implemented. `Limits.installed_defaults/0`
+provides practical host ceilings and `Manifest.load/2` accepts another complete
+installation while allowing manifest values only to narrow it.
 
 Keep all current hard bounds, but distinguish two sources:
 
@@ -228,9 +238,9 @@ workflow needs one. The decision triggers and invariants are recorded in
 
 ### 8. Add one constrained external capability route
 
-After trusted libraries, schemas, diagnostics, and ceilings are in place, add
-one administrator-installed route to external tools. An MCP client is the most
-natural first option for the intended audience.
+One administrator-installed MCP Streamable HTTP tools route is implemented as
+the first external-tools path. It deliberately remains an embedding API rather
+than a process-global or manifest-configured endpoint catalog.
 
 The minimal source seam, security boundary, and acceptance tests are defined in
 the [`capability-connectors.md`](capability-connectors.md) 0.x plan.
@@ -249,6 +259,9 @@ Do not reintroduce the deleted broad tool platform merely to gain connectivity.
 Prove one narrow bridge end to end first.
 
 ### 9. Add local developer inspection without weakening traces
+
+The bounded local increment below is implemented. Production retention and
+authenticated remote access remain separate work.
 
 Keep the canonical normal trace sanitized. Its current omission of sensitive
 prompts, model responses, arguments, results, and generated source is a useful
@@ -400,6 +413,10 @@ cannot report success; and the supported DeepSeek E2E agent completes the
 documented file workflow within declared budgets.
 
 ### Phase 3: one external capability route
+
+The pre-production vertical slice in this phase is implemented, including the
+credential-free file/native/MCP agent lab and local inspection path. Production
+packaging and any demand-triggered connector expansion remain later work.
 
 - Implement the single vertical
   [capability connector milestone](capability-connectors.md): one safe,

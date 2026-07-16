@@ -1,4 +1,4 @@
-# PTC Trace Viewer
+# PTC Kernel Viewer
 
 A local, read-only web UI for canonical PtcRunner Kernel traces. It uses the
 same source-scoped `Kernel.TraceLog` projections as `log.core`, so run metadata,
@@ -18,7 +18,8 @@ mix ptc.viewer --trace-dir traces
 
 The root task installs `PtcRunner.Kernel.ViewerAdapter` automatically, starts a
 local server on port 4123, and opens the browser. Use `--port`, `--trace-dir`,
-or `--no-open` to override those defaults.
+`--inspection-file`, or `--no-open` to override those defaults. The server
+always binds to loopback.
 
 The UI first lists bounded canonical run summaries. Selecting a run loads its
 metadata and turn events through the shared Kernel query layer. The run view
@@ -31,18 +32,26 @@ those omissions rather than inferring or reconstructing payloads. Starting the
 Viewer without a Kernel adapter leaves canonical queries unavailable; it does
 not expose raw files through a second trace format.
 
-Private traces use the reserved `.private.jsonl` suffix. The standard viewer
-directory source and raw-file routes omit that suffix; accessing private data
-requires a separate host-controlled private source grant outside this UI.
+Private canonical traces use the reserved `.private.jsonl` suffix. The
+standard viewer directory source and raw-file routes omit that suffix;
+accessing private data requires a separate host-controlled private source grant
+outside this UI.
 
-The current Viewer does not expose exact model exchanges, generated program
-source, connector payloads, or a prelude editor. The
-[host access and prelude workspace plan](../docs/plans/lisp-kernel/host-access-and-prelude-workspaces.md)
-allows a future explicit loopback-only mode for one host-selected bounded
-inspection artifact without putting sensitive payloads into canonical traces.
-Authenticated remote access and prelude editing remain deferred. Connector
-transport and credentials remain a separate concern covered by the
-[capability connector plan](../docs/plans/lisp-kernel/capability-connectors.md).
+An explicitly selected `.inspection.jsonl` file is different. It can contain
+exact model exchanges, generated source, and capability arguments/results. The
+host fixes one exact file when it starts the Viewer; the browser cannot choose
+a server path or discover other inspection files. The bounded loader rejects
+symlinks, changed files, oversized input, malformed records, and a requested
+run ID that does not match the artifact. The UI keeps a sensitive-data warning
+visible whenever it renders these records.
+
+```bash
+mix ptc.viewer --trace-dir traces \
+  --inspection-file traces/run.inspection.jsonl
+```
+
+Authenticated remote access, multiple private artifacts, and prelude editing
+remain outside this local development mode.
 
 ## Programmatic use
 
@@ -56,6 +65,8 @@ The host supplies a module or three-argument function implementing
     port: 4123,
     trace_dir: "traces",
     kernel_trace_adapter: PtcRunner.Kernel.ViewerAdapter,
+    inspection_file: "traces/run.inspection.jsonl",
+    inspection_adapter: PtcRunner.Kernel.ViewerAdapter,
     open: false
   )
 
@@ -73,6 +84,7 @@ viewer does not mutate application-global adapter or trace-directory state.
 | `GET /api/kernel/runs/:run_id` | `get_run` |
 | `GET /api/kernel/runs/:run_id/turns` | `list_turns` with bounded filters and pagination |
 | `GET /api/kernel/counters` | `counters` |
+| `GET /api/inspection/runs/:run_id` | Fixed private artifact records for the exact run |
 
 Query parameters are passed to `Kernel.TraceLog`; `limit` is decoded as an
 integer and `tags` as a JSON object. The routes preserve not-found, invalid
@@ -85,5 +97,6 @@ directory for every query. The viewer owns only HTTP argument decoding and
 rendering; it does not duplicate trace validation or run derivation. Adapter
 configuration is passed through the Bandit/Plug instance rather than global
 application environment. No browser route reads an arbitrary trace filename,
-and the frontend contains no parser or renderer for the retired raw event
+and the separate inspection adapter receives only the fixed host path and URL
+run ID. The frontend contains no parser or renderer for the retired raw event
 format.

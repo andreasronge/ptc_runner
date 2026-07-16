@@ -54,6 +54,7 @@ Kernel.run/2 ------------ Runner / RunState / Dispatcher / Evaluation
     |
     +--> Kernel.Result | Kernel.Error
     +--> canonical EventSink events --> TraceLog --> viewer or log capabilities
+    +--> optional InspectionSink records --> fixed local Viewer artifact
 ```
 
 `PtcRunner.Kernel.Manifest` parses untrusted manifest data but never creates
@@ -144,9 +145,12 @@ Subordinate evaluation is serialized because it owns transactional evaluation
 memory. A concurrent attempt receives a recoverable busy result rather than
 waiting in an unbounded queue.
 
-The complete current ceilings and defaults are documented by
-`PtcRunner.Kernel.Limits`. Workflow turn counts, retries, and other policy
-budgets belong in Lisp below those enforced host ceilings.
+The complete current limits are documented by `PtcRunner.Kernel.Limits`.
+`defaults/0` supplies ordinary effective runtime values, while
+`installed_defaults/0` supplies larger host-controlled manifest ceilings.
+`Manifest.load/2` accepts a complete host ceiling and allows the manifest only
+to narrow it. Workflow turn counts, retries, and other policy budgets belong in
+Lisp below those enforced host ceilings.
 
 ## Results and events
 
@@ -178,6 +182,15 @@ from an in-memory sink, one JSONL file, or a directory. The viewer and
 `PtcRunner.Kernel.TraceCapability` delegate to this same query layer rather
 than maintaining another event model. The detailed storage and authorization
 contract remains in the [TraceLog contract](../plans/lisp-kernel/tracelog-contract.md).
+
+Host callers enable sensitive capture only through `RunBuilder`'s `:inspect`
+option. `InspectionSink` accepts exact bounded source and capability records
+before execution crosses the relevant boundary; rejection fails the run rather
+than silently producing a partial capture. `InspectionArtifact` validates
+correlation against canonical events and installs one previously absent
+`.inspection.jsonl` sidecar at mode `0600`. TraceLog excludes that suffix.
+`PtcRunner.Kernel.ViewerAdapter.inspection/2` reads one fixed artifact for the
+loopback-only Viewer; it is not a TraceLog operation or Lisp capability.
 
 ## Code map
 
@@ -252,6 +265,10 @@ its exact golden test whenever its versioned contract changes.
 To add a frontend, build through `PtcRunner.Kernel.RunBuilder` or construct the
 same public Kernel values directly. Do not create a second manifest parser,
 provider registry, event schema, or execution path.
+
+The credential-free end-to-end fixture in `examples/kernel-inspection-lab/`
+runs the installed agent loop against file, native, and MCP read capabilities,
+then produces canonical and private artifacts for local Viewer inspection.
 
 ## Verification map
 

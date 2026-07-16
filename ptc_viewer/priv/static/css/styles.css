@@ -1455,13 +1455,16 @@ input[type="file"] { display: none; }
   background: rgba(244, 71, 71, 0.035);
 }
 .inspection-warning {
-  position: sticky;
+  position: fixed;
   z-index: 2;
-  top: 0;
+  right: 18px;
+  bottom: 18px;
+  max-width: 560px;
   padding: 12px 16px;
-  border-bottom: 1px solid rgba(244, 71, 71, 0.5);
-  border-radius: 8px 8px 0 0;
+  border: 1px solid rgba(244, 71, 71, 0.6);
+  border-radius: 8px;
   background: #351f22;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.45);
   color: #ffd8dc;
   font-size: 12px;
   line-height: 1.5;

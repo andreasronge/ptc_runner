@@ -1,0 +1,222 @@
+defmodule PtcRunner.Examples.KernelInspectionLab do
+  @moduledoc false
+
+  alias PtcRunner.Examples.KernelInspectionLab.MCPFixture
+  alias PtcRunner.Kernel.Capability
+  alias PtcRunner.Kernel.InspectionArtifact
+  alias PtcRunner.Kernel.LLMCapability
+  alias PtcRunner.Kernel.MCPSource
+  alias PtcRunner.Kernel.ProviderRegistry
+  alias PtcRunner.Kernel.RunBuilder
+
+  @task "Use every available read-only fixture and return their results in one map."
+
+  @direct_program ~S|(let [file (tool/fs-read {"path" "value.txt"}) native (tool/native-echo {"value" "fixture"}) remote (tool/remote.structured {"query" "fixture"})] (return {"file" file "native" native "remote" remote}))|
+  @wrapper_program ~S|(return {"file" (lab.tools/read-file) "native" (lab.tools/echo) "remote" (lab.tools/remote-value)})|
+
+  def run(output_dir) when is_binary(output_dir) do
+    output_dir = Path.expand(output_dir)
+    :ok = File.mkdir_p(output_dir)
+    fixture = MCPFixture.start(&mcp_response/1)
+
+    try do
+      journeys = [
+        run_journey(output_dir, fixture.endpoint, "direct", @direct_program, false),
+        run_journey(output_dir, fixture.endpoint, "wrapper", @wrapper_program, true)
+      ]
+
+      {:ok, journeys}
+    after
+      fixture.close.()
+    end
+  end
+
+  defp run_journey(output_dir, endpoint, name, program, wrapper?) do
+    directory = Path.join(output_dir, name)
+    :ok = File.mkdir(directory)
+    files = Path.join(directory, "files")
+    :ok = File.mkdir(files)
+    :ok = File.write(Path.join(files, "value.txt"), "fixture-file")
+    :ok = File.write(Path.join(directory, "workflow.lisp"), workflow_source())
+
+    mission_components =
+      if wrapper? do
+        :ok = File.write(Path.join(directory, "mission.lisp"), mission_source())
+        [%{"id" => "lab.tools", "path" => "mission.lisp"}]
+      else
+        []
+      end
+
+    manifest = manifest(name, mission_components)
+    manifest_path = Path.join(directory, "ptc.json")
+    trace_path = Path.join(directory, "run.jsonl")
+    inspection_path = Path.join(directory, "run.inspection.jsonl")
+    :ok = File.write(manifest_path, Jason.encode!(manifest))
+    registry = registry(endpoint, program)
+
+    {:ok, result} =
+      RunBuilder.run(manifest_path, registry, trace: trace_path, inspect: inspection_path)
+
+    {:ok, records} = InspectionArtifact.load(inspection_path)
+
+    %{
+      name: name,
+      result: result,
+      trace: trace_path,
+      inspection: inspection_path,
+      run_id: records |> hd() |> Map.fetch!("run_id")
+    }
+  end
+
+  defp registry(endpoint, program) do
+    scripted = fn config, _context ->
+      if config == %{} do
+        LLMCapability.new(requester: fn _request -> {:ok, model_response(program)} end)
+      else
+        {:error, :invalid_scripted_model_config}
+      end
+    end
+
+    native = fn config, _context ->
+      if config == %{} do
+        Capability.new(
+          name: "native-echo",
+          description: "Return one fixture string through the native provider seam",
+          effect: :read,
+          input_schema: %{
+            "type" => "object",
+            "properties" => %{"value" => %{"type" => "string"}},
+            "required" => ["value"]
+          },
+          output_schema: %{
+            "type" => "object",
+            "properties" => %{"echo" => %{"type" => "string"}},
+            "required" => ["echo"]
+          },
+          callback: fn %{"value" => value} -> {:ok, %{"echo" => value}} end
+        )
+      else
+        {:error, :invalid_native_config}
+      end
+    end
+
+    mcp =
+      MCPSource.builder(
+        endpoint: endpoint,
+        allow_insecure_loopback: true,
+        tools: %{"structured" => %{as: "remote.structured", effect: :read}},
+        timeout_ms: 2_000,
+        max_result_bytes: 64_000
+      )
+
+    {:ok, registry} =
+      ProviderRegistry.new(%{
+        "fixture-model" => scripted,
+        "fixture-native" => native,
+        "fixture-mcp" => mcp
+      })
+
+    registry
+  end
+
+  defp manifest(name, mission_components) do
+    %{
+      "version" => 1,
+      "workflow" => %{
+        "components" => [
+          %{"library" => "agent.core"},
+          %{"id" => "lab.workflow", "path" => "workflow.lisp", "dependencies" => ["agent.core"]}
+        ],
+        "entry" => "lab.workflow/run"
+      },
+      "mission" => %{"components" => mission_components, "data" => %{}},
+      "input" => %{"value" => %{"task" => @task}},
+      "providers" => %{
+        "workflow" => [%{"name" => "fixture-model", "config" => %{}}],
+        "mission" => [
+          %{"name" => "file-read", "config" => %{"root" => "files", "max_bytes" => 8_192}},
+          %{"name" => "fixture-native", "config" => %{}},
+          %{
+            "name" => "fixture-mcp",
+            "config" => %{
+              "allow" => ["remote.structured"],
+              "timeout_ms" => 2_000,
+              "max_result_bytes" => 64_000
+            }
+          }
+        ]
+      },
+      "limits" => %{"evaluation_timeout_ms" => 10_000, "run_duration_ms" => 60_000},
+      "events" => %{"run_id" => "inspection-lab-#{name}"},
+      "labels" => %{"name" => "inspection-lab-#{name}", "tags" => %{"lab" => name}}
+    }
+  end
+
+  defp workflow_source do
+    ~S|(ns lab.workflow "Credential-free scripted inspection entry." {:visibility :prompt})
+
+(defn run [input]
+  (agent.core/run (get input "task") {"max_turns" 1}))|
+  end
+
+  defp mission_source do
+    ~S|(ns lab.tools "Small prompt-visible wrapper over unchanged mission capabilities." {:visibility :prompt})
+
+(defn read-file [] (tool/fs-read {"path" "value.txt"}))
+(defn echo [] (tool/native-echo {"value" "fixture"}))
+(defn remote-value [] (tool/remote.structured {"query" "fixture"}))|
+  end
+
+  defp model_response(program) do
+    %{
+      content: nil,
+      tool_calls: [
+        %{id: "scripted-call", name: "run_ptc_lisp", args: %{"program" => program}}
+      ],
+      tokens: %{input: 0, output: 0}
+    }
+  end
+
+  defp mcp_response(%{method: "DELETE"}),
+    do: {200, [{"content-type", "application/json"}], "{}"}
+
+  defp mcp_response(%{body: %{"method" => "initialize", "id" => id}}) do
+    json(
+      id,
+      %{"protocolVersion" => "2025-11-25", "capabilities" => %{"tools" => %{}}},
+      [{"mcp-session-id", "inspection-lab-session"}]
+    )
+  end
+
+  defp mcp_response(%{body: %{"method" => "notifications/initialized"}}),
+    do: {202, [{"content-type", "application/json"}], ""}
+
+  defp mcp_response(%{body: %{"method" => "tools/list", "id" => id}}) do
+    json(id, %{
+      "tools" => [
+        %{
+          "name" => "structured",
+          "description" => "Return one structured fixture value",
+          "inputSchema" => %{
+            "type" => "object",
+            "properties" => %{"query" => %{"type" => "string"}},
+            "required" => ["query"]
+          },
+          "outputSchema" => %{
+            "type" => "object",
+            "properties" => %{"value" => %{"type" => "integer"}},
+            "required" => ["value"]
+          }
+        }
+      ]
+    })
+  end
+
+  defp mcp_response(%{body: %{"method" => "tools/call", "id" => id}}),
+    do: json(id, %{"structuredContent" => %{"value" => 42}, "content" => []})
+
+  defp json(id, result, headers \\ []) do
+    body = Jason.encode!(%{"jsonrpc" => "2.0", "id" => id, "result" => result})
+    {200, headers ++ [{"content-type", "application/json"}], body}
+  end
+end

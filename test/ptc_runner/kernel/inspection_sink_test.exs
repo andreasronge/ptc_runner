@@ -105,7 +105,7 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
     assert :ok = emit_small(sink, "cap-1")
     assert {:ok, records} = InspectionSink.records(sink)
 
-    events = [%{data: %{capability_id: "cap-1"}}]
+    events = [%{run_id: "run-1", trace_id: "trace-1", data: %{capability_id: "cap-1"}}]
     path = Path.join(dir, "run.inspection.jsonl")
 
     assert :ok = InspectionArtifact.persist(path, records, events)
@@ -129,6 +129,45 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
     link = Path.join(dir, "link.inspection.jsonl")
     File.ln_s!(path, link)
     assert {:error, :invalid_inspection_source} = InspectionArtifact.load(link)
+
+    duplicate = Path.join(dir, "duplicate.inspection.jsonl")
+
+    duplicate_line =
+      records
+      |> hd()
+      |> Jason.encode!()
+      |> String.replace_prefix("{", ~S|{"schema_version":1,|)
+
+    File.write!(duplicate, duplicate_line <> "\n")
+    assert {:error, :malformed_inspection_artifact} = InspectionArtifact.load(duplicate)
+
+    invalid = Path.join(dir, "invalid.inspection.jsonl")
+    File.write!(invalid, Jason.encode!(Map.put(hd(records), "unknown", true)) <> "\n")
+    assert {:error, :invalid_inspection_artifact} = InspectionArtifact.load(invalid)
+
+    wrong_type = Path.join(dir, "wrong-type.inspection.jsonl")
+
+    File.write!(
+      wrong_type,
+      Jason.encode!(Map.put(hd(records), "record_type", "unknown")) <> "\n"
+    )
+
+    assert {:error, :invalid_inspection_artifact} = InspectionArtifact.load(wrong_type)
+
+    repeated_sequence = Path.join(dir, "sequence.inspection.jsonl")
+
+    File.write!(
+      repeated_sequence,
+      Enum.map_join([hd(records), hd(records)], "\n", &Jason.encode!/1)
+    )
+
+    assert {:error, :invalid_inspection_artifact} =
+             InspectionArtifact.load(repeated_sequence)
+
+    assert {:error, :inspection_source_limit_exceeded} =
+             InspectionArtifact.load(path, max_bytes: 1)
+
+    assert {:error, :inspection_run_mismatch} = ViewerAdapter.inspection(path, "another-run")
   end
 
   @tag :tmp_dir
