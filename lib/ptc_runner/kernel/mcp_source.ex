@@ -7,7 +7,15 @@ defmodule PtcRunner.Kernel.MCPSource do
   select mapped public names and lower the request timeout or result ceiling.
   Each run build initializes one MCP 2025-11-25 session, discovers tools in
   that session, compiles their bounded schemas, and returns ordinary frozen
-  Kernel capabilities plus a safe deterministic snapshot.
+  Kernel capabilities plus a safe deterministic snapshot. Request deadlines
+  bound connection checkout, connection establishment, response receipt, and
+  total elapsed work. Responses reject duplicate JSON object keys before
+  protocol validation. Input and output schemas are compiled once during
+  assembly and the compiled validators are reused for every invocation.
+
+  The session lease owns every active request. Closing the lease first kills
+  and drains request owners, then issues a separately bounded session DELETE,
+  establishing the required request-termination-before-session-close order.
 
   This pre-production source supports JSON and SSE responses to POST requests,
   structured object results, and text-only results. It rejects mixed or
@@ -21,6 +29,7 @@ defmodule PtcRunner.Kernel.MCPSource do
   alias PtcRunner.Kernel.JSONValue
   alias PtcRunner.Kernel.MCPLease
   alias PtcRunner.Kernel.ProviderError
+  alias PtcRunner.Kernel.StrictJSON
 
   @protocol "2025-11-25"
   @max_discovery_bytes 1_048_576
@@ -279,7 +288,6 @@ defmodule PtcRunner.Kernel.MCPSource do
          true <-
            is_nil(description) or (is_binary(description) and byte_size(description) <= 4_096),
          input when is_map(input) <- tool["inputSchema"],
-         {:ok, input, _validator} <- JSONSchema.compile(input),
          {:ok, output} <- optional_output_schema(tool),
          {:ok, capability} <-
            Capability.new(
@@ -288,10 +296,14 @@ defmodule PtcRunner.Kernel.MCPSource do
              input_schema: input,
              output_schema: output,
              effect: :read,
-             callback: callback(lease, upstream, output, selected)
+             callback: fn _arguments -> {:error, :uninstalled_mcp_callback} end
            ),
-         {:ok, input_hash} <- schema_hash(input),
-         {:ok, output_hash} <- optional_schema_hash(output) do
+         capability = %{
+           capability
+           | callback: callback(lease, upstream, capability.output_validator, selected)
+         },
+         {:ok, input_hash} <- schema_hash(capability.input_schema),
+         {:ok, output_hash} <- optional_schema_hash(capability.output_schema) do
       {:ok, capability,
        %{
          "name" => mapping.as,
@@ -305,10 +317,7 @@ defmodule PtcRunner.Kernel.MCPSource do
   end
 
   defp optional_output_schema(%{"outputSchema" => output}) when is_map(output) do
-    case JSONSchema.compile(output) do
-      {:ok, normalized, _validator} -> {:ok, normalized}
-      {:error, :invalid_schema} -> {:error, :mcp_invalid_tool_schema}
-    end
+    {:ok, output}
   end
 
   defp optional_output_schema(tool) do
@@ -317,7 +326,7 @@ defmodule PtcRunner.Kernel.MCPSource do
       else: {:ok, nil}
   end
 
-  defp callback(lease, upstream, output_schema, selected) do
+  defp callback(lease, upstream, output_validator, selected) do
     fn arguments ->
       case rpc(
              lease,
@@ -325,20 +334,20 @@ defmodule PtcRunner.Kernel.MCPSource do
              %{"name" => upstream, "arguments" => arguments},
              selected.max_result_bytes
            ) do
-        {:ok, result} -> normalize_result(result, output_schema)
+        {:ok, result} -> normalize_result(result, output_validator)
         {:error, reason} -> {:error, provider_error(reason)}
       end
     end
   end
 
-  defp normalize_result(%{"isError" => true}, _output_schema),
+  defp normalize_result(%{"isError" => true}, _output_validator),
     do: {:error, ProviderError.new(:domain_error, "mcp_domain_error")}
 
-  defp normalize_result(%{"structuredContent" => structured} = result, output_schema)
-       when is_map(structured) and not is_nil(output_schema) do
+  defp normalize_result(%{"structuredContent" => structured} = result, output_validator)
+       when is_map(structured) and not is_nil(output_validator) do
     content = Map.get(result, "content", [])
 
-    if content in [nil, []] and schema_valid?(output_schema, structured),
+    if content in [nil, []] and JSONSchema.valid?(output_validator, structured),
       do: {:ok, structured},
       else: {:error, ProviderError.new(:invalid_result, "mcp_invalid_result")}
   end
@@ -351,7 +360,7 @@ defmodule PtcRunner.Kernel.MCPSource do
     end
   end
 
-  defp normalize_result(_result, _output_schema),
+  defp normalize_result(_result, _output_validator),
     do: {:error, ProviderError.new(:invalid_result, "mcp_invalid_result")}
 
   defp text_result(content) do
@@ -366,13 +375,6 @@ defmodule PtcRunner.Kernel.MCPSource do
     |> case do
       {:ok, texts} -> {:ok, %{"text" => Enum.reverse(texts)}}
       error -> error
-    end
-  end
-
-  defp schema_valid?(schema, value) do
-    case JSONSchema.compile(schema) do
-      {:ok, _normalized, validator} -> JSONSchema.valid?(validator, value)
-      {:error, :invalid_schema} -> false
     end
   end
 
@@ -412,31 +414,62 @@ defmodule PtcRunner.Kernel.MCPSource do
   defp optional_schema_hash(schema), do: schema_hash(schema)
 
   defp rpc(lease, method, params, max_bytes) do
-    with {:ok, request} <- MCPLease.next_request(lease),
-         {:ok, headers} <- request_headers(request),
-         payload = %{
-           "jsonrpc" => "2.0",
-           "id" => request.id,
-           "method" => method,
-           "params" => params
-         },
-         {:ok, response} <- http(:post, lease, request, headers, payload, max_bytes),
-         :ok <- maybe_capture_session(lease, response),
-         {:ok, body} <- response_body(response, request.id) do
-      case body do
-        %{"result" => result} when is_map(result) -> {:ok, result}
-        %{"error" => _error} -> {:error, :mcp_remote_error}
-        _body -> {:error, :mcp_protocol_error}
+    with_request(lease, fn request ->
+      with {:ok, headers} <- request_headers(request),
+           payload = %{
+             "jsonrpc" => "2.0",
+             "id" => request.id,
+             "method" => method,
+             "params" => params
+           },
+           {:ok, response} <- http(:post, lease, request, headers, payload, max_bytes),
+           :ok <- maybe_capture_session(lease, response),
+           {:ok, body} <- response_body(response, request.id) do
+        case body do
+          %{"result" => result} when is_map(result) -> {:ok, result}
+          %{"error" => _error} -> {:error, :mcp_remote_error}
+          _body -> {:error, :mcp_protocol_error}
+        end
       end
-    end
+    end)
   end
 
   defp notification(lease, method, params) do
-    with {:ok, request} <- MCPLease.next_request(lease),
-         {:ok, headers} <- request_headers(request),
-         payload = %{"jsonrpc" => "2.0", "method" => method, "params" => params},
-         {:ok, response} <- http(:post, lease, request, headers, payload, 65_536) do
-      if response.status in [200, 202, 204], do: :ok, else: {:error, :mcp_transport_error}
+    with_request(lease, fn request ->
+      with {:ok, headers} <- request_headers(request),
+           payload = %{"jsonrpc" => "2.0", "method" => method, "params" => params},
+           {:ok, response} <- http(:post, lease, request, headers, payload, 65_536) do
+        if response.status in [200, 202, 204], do: :ok, else: {:error, :mcp_transport_error}
+      end
+    end)
+  end
+
+  defp with_request(lease, callback) do
+    case MCPLease.begin_request(lease) do
+      {:ok, request} ->
+        try do
+          task =
+            Task.async(fn ->
+              try do
+                callback.(request)
+              rescue
+                _exception -> {:error, :mcp_transport_error}
+              catch
+                _kind, _reason -> {:error, :mcp_transport_error}
+              end
+            end)
+
+          case Task.yield(task, request.timeout_ms) || Task.shutdown(task, :brutal_kill) do
+            {:ok, result} -> result
+            {:exit, _reason} -> {:error, :mcp_transport_error}
+            nil -> {:error, :mcp_timeout}
+          end
+        after
+          MCPLease.finish_request(lease)
+        end
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
@@ -502,6 +535,8 @@ defmodule PtcRunner.Kernel.MCPSource do
            url: request.endpoint,
            headers: headers,
            json: payload,
+           connect_options: [timeout: request.timeout_ms],
+           pool_timeout: request.timeout_ms,
            receive_timeout: request.timeout_ms,
            retry: false,
            redirect: false,
@@ -564,7 +599,7 @@ defmodule PtcRunner.Kernel.MCPSource do
   defp response_body(_response, _id), do: {:error, :mcp_response_exceeded}
 
   defp decode_json(body, id) do
-    with {:ok, decoded} <- Jason.decode(body),
+    with {:ok, decoded} <- StrictJSON.decode(body),
          true <- JSONValue.map?(decoded),
          ^id <- decoded["id"],
          "2.0" <- decoded["jsonrpc"] do

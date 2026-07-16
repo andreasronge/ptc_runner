@@ -3,6 +3,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
 
   alias PtcRunner.Kernel
   alias PtcRunner.Kernel.EventSink
+  alias PtcRunner.Kernel.MCPLease
   alias PtcRunner.Kernel.MCPSource
   alias PtcRunner.Kernel.ProviderRegistry
   alias PtcRunner.Kernel.RunBuilder
@@ -118,6 +119,64 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
         }
       )
     end
+  end
+
+  @tag :tmp_dir
+  test "rejects duplicate JSON response keys before protocol validation", %{tmp_dir: dir} do
+    parent = self()
+    duplicate = fixture(parent, duplicate_json?: true)
+    on_exit(duplicate.close)
+
+    assert {:error, :mcp_protocol_error} =
+             dir
+             |> manifest(["remote.structured"])
+             |> RunBuilder.load_and_build(registry(duplicate.endpoint))
+
+    assert_receive :mcp_deleted
+  end
+
+  test "lease close drains active request callers before deleting the session" do
+    parent = self()
+
+    fixture =
+      MCPHTTPFixture.start(fn request ->
+        if request.method == "DELETE" do
+          send(parent, :mcp_deleted_after_drain)
+          {200, [{"content-type", "application/json"}], "{}"}
+        else
+          {400, [{"content-type", "application/json"}], "{}"}
+        end
+      end)
+
+    on_exit(fixture.close)
+
+    {:ok, lease} =
+      MCPLease.start(
+        owner: self(),
+        endpoint: fixture.endpoint,
+        headers: fn -> [] end,
+        timeout_ms: 500
+      )
+
+    assert :ok = MCPLease.set_session(lease, "drain-session")
+
+    active =
+      spawn(fn ->
+        {:ok, _request} = MCPLease.begin_request(lease)
+        send(parent, {:active_request, self()})
+
+        receive do
+          :never -> :ok
+        end
+      end)
+
+    assert_receive {:active_request, ^active}
+    active_ref = Process.monitor(active)
+    closer = Task.async(fn -> MCPLease.close(lease) end)
+
+    assert_receive {:DOWN, ^active_ref, :process, ^active, :killed}
+    assert :ok = Task.await(closer, 1_500)
+    assert_receive :mcp_deleted_after_drain
   end
 
   @tag :tmp_dir
@@ -273,6 +332,52 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     assert_receive {:mcp_blocked, worker}
     assert {:error, :mcp_timeout} = Task.await(task, 2_000)
     send(worker, :release)
+
+    header_builder =
+      MCPSource.builder(
+        endpoint: invalid_output.endpoint,
+        allow_insecure_loopback: true,
+        headers: fn ->
+          send(parent, {:mcp_header_blocked, self()})
+
+          receive do
+            :never -> []
+          end
+        end,
+        tools: mappings(),
+        timeout_ms: 100
+      )
+
+    {:ok, header_registry} = ProviderRegistry.new(%{"fixture-mcp" => header_builder})
+
+    header_task =
+      Task.async(fn ->
+        dir
+        |> manifest(["remote.structured"], timeout_ms: 100)
+        |> RunBuilder.load_and_build(header_registry)
+      end)
+
+    assert_receive {:mcp_header_blocked, header_worker}
+    header_ref = Process.monitor(header_worker)
+    assert {:error, :mcp_timeout} = Task.await(header_task, 2_000)
+    assert_receive {:DOWN, ^header_ref, :process, ^header_worker, :killed}
+  end
+
+  @tag :tmp_dir
+  test "session cleanup obeys the selected end-to-end timeout", %{tmp_dir: dir} do
+    parent = self()
+    blocked = fixture(parent, block_delete?: true)
+    on_exit(blocked.close)
+
+    {:ok, built} =
+      dir
+      |> manifest(["remote.structured"], timeout_ms: 500)
+      |> RunBuilder.load_and_build(registry(blocked.endpoint, timeout_ms: 500))
+
+    closer = Task.async(fn -> RunBuilder.close(built) end)
+    assert_receive {:mcp_delete_blocked, worker}
+    assert :ok = Task.await(closer, 1_500)
+    send(worker, :release)
   end
 
   @tag :tmp_dir
@@ -280,11 +385,11 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     parent = self()
     fixture = fixture(parent, block_tool: "structured")
     on_exit(fixture.close)
-    registry = registry(fixture.endpoint, timeout_ms: 100)
+    registry = registry(fixture.endpoint, timeout_ms: 500)
 
     {:ok, built} =
       dir
-      |> manifest(Map.keys(public_mappings()), timeout_ms: 100, evaluation_timeout_ms: 100)
+      |> manifest(Map.keys(public_mappings()), timeout_ms: 500, evaluation_timeout_ms: 500)
       |> RunBuilder.load_and_build(registry)
 
     task = Task.async(fn -> Kernel.run(built.entry_source, built.config) end)
@@ -324,6 +429,14 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
   defp fixture(parent, opts \\ []) do
     MCPHTTPFixture.start(fn request ->
       if request.method == "DELETE" do
+        if opts[:block_delete?] do
+          send(parent, {:mcp_delete_blocked, self()})
+
+          receive do
+            :release -> :ok
+          end
+        end
+
         send(parent, :mcp_deleted)
         {200, [{"content-type", "application/json"}], "{}"}
       else
@@ -357,10 +470,17 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     end)
   end
 
-  defp response(%{body: %{"method" => "initialize", "id" => id}}, _opts) do
-    json(id, %{"protocolVersion" => "2025-11-25", "capabilities" => %{"tools" => %{}}},
-      headers: [{"mcp-session-id", "fixture-session"}]
-    )
+  defp response(%{body: %{"method" => "initialize", "id" => id}}, opts) do
+    if opts[:duplicate_json?] do
+      body =
+        ~s|{"jsonrpc":"2.0","id":#{id},"result":{"protocolVersion":"2025-11-25","protocolVersion":"2025-11-25","capabilities":{"tools":{}}}}|
+
+      {200, [{"mcp-session-id", "fixture-session"}, {"content-type", "application/json"}], body}
+    else
+      json(id, %{"protocolVersion" => "2025-11-25", "capabilities" => %{"tools" => %{}}},
+        headers: [{"mcp-session-id", "fixture-session"}]
+      )
+    end
   end
 
   defp response(%{body: %{"method" => "notifications/initialized"}}, _opts),

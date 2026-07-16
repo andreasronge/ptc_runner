@@ -15,10 +15,10 @@ defmodule PtcRunner.Kernel.RunState do
 
   Each capability reservation also monitors the dispatching process. If that
   process dies mid-call (heap kill, timeout kill), the reservation is
-  reclaimed: the live provider slot is released and the attached provider
-  process is killed, so an abandoned dispatch can neither exhaust the slot
-  pool nor leave its callback running as an orphan. Shutdown — owner death or
-  explicit stop — kills every still-attached provider for the same reason. A
+  reclaimed only after the attached provider process has been killed and its
+  `:DOWN` observed. Thus connector cleanup cannot begin while a callback from
+  that run remains live. Shutdown — owner death or explicit stop — likewise
+  kills and drains every still-attached provider before state terminates. A
   process holds at most one reservation at a time: dispatch is sequential per
   process, so a second reserve while one is active is a protocol violation and
   is rejected rather than silently replacing the tracked reservation.
@@ -54,7 +54,7 @@ defmodule PtcRunner.Kernel.RunState do
     do: call(state, {:attach_provider, provider})
 
   @spec release_provider_slot(t()) :: :ok | {:error, :closed}
-  @doc "Releases a live provider slot without accepting a result."
+  @doc "Releases the caller's live provider slot without accepting a result."
   def release_provider_slot(state), do: call(state, :release_provider_slot)
 
   @spec finish_provider(t()) :: :ok | {:error, :run_closed}
@@ -153,11 +153,17 @@ defmodule PtcRunner.Kernel.RunState do
   def handle_call({token, {:attach_provider, provider}}, {caller, _tag}, %{token: token} = state) do
     case state.reservations do
       %{^caller => reservation} ->
-        reservations = Map.put(state.reservations, caller, %{reservation | provider: provider})
+        reservation =
+          reservation
+          |> Map.put(:provider, provider)
+          |> Map.put(:provider_ref, Process.monitor(provider))
+
+        reservations = Map.put(state.reservations, caller, reservation)
         {:reply, :ok, %{state | reservations: reservations}}
 
       _ ->
-        {:reply, :ok, state}
+        Process.exit(provider, :kill)
+        {:reply, {:error, :closed}, state}
     end
   end
 
@@ -286,18 +292,27 @@ defmodule PtcRunner.Kernel.RunState do
 
   def handle_info({:DOWN, ref, :process, pid, _reason}, state) do
     case state.reservations do
-      %{^pid => %{ref: ^ref, provider: provider}} ->
-        if is_pid(provider), do: Process.exit(provider, :kill)
-
-        {:noreply,
-         %{
-           state
-           | provider_tasks: max(state.provider_tasks - 1, 0),
-             reservations: Map.delete(state.reservations, pid)
-         }}
+      %{^pid => %{caller_ref: ^ref, provider: provider} = reservation} ->
+        if is_pid(provider) do
+          Process.exit(provider, :kill)
+          reservations = Map.put(state.reservations, pid, %{reservation | caller_ref: nil})
+          {:noreply, %{state | reservations: reservations}}
+        else
+          {:noreply, release_reservation(state, pid)}
+        end
 
       _ ->
-        {:noreply, state}
+        case reservation_by_provider_ref(state.reservations, ref) do
+          {caller, %{caller_ref: nil}} ->
+            {:noreply, release_reservation(state, caller)}
+
+          {caller, reservation} ->
+            reservation = %{reservation | provider: nil, provider_ref: nil}
+            {:noreply, put_in(state.reservations[caller], reservation)}
+
+          nil ->
+            {:noreply, state}
+        end
     end
   end
 
@@ -350,7 +365,11 @@ defmodule PtcRunner.Kernel.RunState do
         {:error, :reservation_held, state}
 
       true ->
-        reservation = %{ref: Process.monitor(caller), provider: nil}
+        reservation = %{
+          caller_ref: Process.monitor(caller),
+          provider: nil,
+          provider_ref: nil
+        }
 
         state =
           state
@@ -366,18 +385,30 @@ defmodule PtcRunner.Kernel.RunState do
     end
   end
 
-  # Drops the caller's reservation: slot released, reservation monitor
-  # flushed. A missing entry still releases the slot, preserving the
-  # unconditional clamped-release contract for direct callers.
+  # Drops the caller's reservation only after its provider is known to be down.
   defp release_reservation(state, caller) do
     {reservation, reservations} = Map.pop(state.reservations, caller)
 
     case reservation do
-      %{ref: ref} -> Process.demonitor(ref, [:flush])
-      nil -> :ok
+      %{caller_ref: caller_ref, provider_ref: provider_ref} ->
+        if is_reference(caller_ref), do: Process.demonitor(caller_ref, [:flush])
+        if is_reference(provider_ref), do: Process.demonitor(provider_ref, [:flush])
+
+      nil ->
+        :ok
     end
 
-    %{state | provider_tasks: max(state.provider_tasks - 1, 0), reservations: reservations}
+    if reservation do
+      %{state | provider_tasks: max(state.provider_tasks - 1, 0), reservations: reservations}
+    else
+      state
+    end
+  end
+
+  defp reservation_by_provider_ref(reservations, ref) do
+    Enum.find_value(reservations, fn {caller, reservation} ->
+      if reservation.provider_ref == ref, do: {caller, reservation}
+    end)
   end
 
   defp unavailable?(state),

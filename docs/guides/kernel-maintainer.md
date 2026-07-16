@@ -135,11 +135,20 @@ provider-task budgets, runs each trusted provider callback in a monitored
 heap-limited process, normalizes its result, and prevents a late result from
 re-entering Lisp after timeout or run closure. Each reservation monitors the
 dispatching process: if that process is killed mid-call (heap or timeout kill
-of its sandbox), `RunState` releases the provider slot and kills the attached
-provider process, so abandoned dispatches cannot exhaust the slot pool or
-leave callbacks running as orphans. Provider code is a trusted host
+of its sandbox), `RunState` kills the attached provider and retains its
+reservation until the provider's `:DOWN` is observed. Run termination likewise
+kills and drains all attached providers before connector resources close, so
+abandoned dispatches cannot exhaust the slot pool, leave callbacks running as
+orphans, or race connector cleanup. Provider code is a trusted host
 extension: the Kernel contains ordinary faults and bounded results, but it is
 not an isolation boundary against deliberately hostile BEAM code.
+
+`PtcRunner.Kernel.MCPSource` treats the selected `timeout_ms` as an end-to-end
+deadline for pool checkout, connection establishment, response receipt, and
+elapsed request work. Its lease drains active requests before a bounded
+session DELETE. MCP JSON rejects duplicate object keys before protocol
+validation, and discovered schemas are compiled once during assembly rather
+than on each result.
 
 Subordinate evaluation is serialized because it owns transactional evaluation
 memory. A concurrent attempt receives a recoverable busy result rather than

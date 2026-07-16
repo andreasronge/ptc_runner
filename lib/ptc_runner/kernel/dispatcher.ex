@@ -267,40 +267,49 @@ defmodule PtcRunner.Kernel.Dispatcher do
           end
         end)
 
-      RunState.attach_provider(state, pid)
-      send(pid, go)
+      case RunState.attach_provider(state, pid) do
+        :ok ->
+          send(pid, go)
+          await_provider(state, capability, pid, ref, timeout_ms)
 
-      receive do
-        {:provider_result, ^pid, result} ->
-          Process.demonitor(ref, [:flush])
-
-          case RunState.finish_provider(state) do
-            :ok -> normalize_result(state, capability, result)
-            {:error, :run_closed} -> limit_error(state, nil, :run_closed)
-          end
-
-        {:DOWN, ^ref, :process, ^pid, reason} ->
-          RunState.release_provider_slot(state)
-
-          %{
-            status: :error,
-            kind: :provider_error,
-            reason: normalize_exit(reason),
-            retryable?: true
-          }
-      after
-        timeout_ms ->
-          Process.exit(pid, :kill)
-
-          receive do
-            {:DOWN, ^ref, :process, ^pid, _reason} -> :ok
-          after
-            0 -> :ok
-          end
-
-          RunState.release_provider_slot(state)
-          %{status: :error, kind: :timeout, reason: :provider_timeout, retryable?: true}
+        {:error, :closed} ->
+          await_down(pid, ref)
+          limit_error(state, nil, :run_closed)
       end
+    end
+  end
+
+  defp await_provider(state, capability, pid, ref, timeout_ms) do
+    receive do
+      {:provider_result, ^pid, result} ->
+        await_down(pid, ref)
+
+        case RunState.finish_provider(state) do
+          :ok -> normalize_result(state, capability, result)
+          {:error, :run_closed} -> limit_error(state, nil, :run_closed)
+        end
+
+      {:DOWN, ^ref, :process, ^pid, reason} ->
+        RunState.release_provider_slot(state)
+
+        %{
+          status: :error,
+          kind: :provider_error,
+          reason: normalize_exit(reason),
+          retryable?: true
+        }
+    after
+      timeout_ms ->
+        Process.exit(pid, :kill)
+        await_down(pid, ref)
+        RunState.release_provider_slot(state)
+        %{status: :error, kind: :timeout, reason: :provider_timeout, retryable?: true}
+    end
+  end
+
+  defp await_down(pid, ref) do
+    receive do
+      {:DOWN, ^ref, :process, ^pid, _reason} -> :ok
     end
   end
 
