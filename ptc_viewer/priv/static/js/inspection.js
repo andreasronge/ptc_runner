@@ -1,5 +1,32 @@
 import { escapeHtml } from './utils.js';
 
+// Index private inspection records by their canonical correlation IDs so the
+// transcript and dialogue views can join exact payloads to canonical events.
+export function indexInspection(inspection) {
+  const byCapability = new Map();
+  const byEvaluation = new Map();
+
+  for (const record of inspection?.records || []) {
+    const capabilityId = record.correlation?.capability_id;
+    const evaluationId = record.correlation?.evaluation_id;
+
+    if (capabilityId) {
+      const entry = byCapability.get(capabilityId) || { input: null, output: null };
+      if (record.record_type === 'capability-input') entry.input = record;
+      if (record.record_type === 'capability-output') entry.output = record;
+      byCapability.set(capabilityId, entry);
+    } else if (evaluationId && record.record_type === 'evaluation-source') {
+      byEvaluation.set(evaluationId, record);
+    }
+  }
+
+  return {
+    byCapability,
+    byEvaluation,
+    present: byCapability.size > 0 || byEvaluation.size > 0
+  };
+}
+
 export function renderInspection(container, inspection) {
   const records = inspection?.records || [];
   if (!records.length) return;

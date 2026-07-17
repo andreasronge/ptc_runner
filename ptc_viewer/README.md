@@ -49,6 +49,46 @@ files, aggregate input above 16 MB, records above 2,000,000 encoded bytes,
 malformed records, and a requested run ID that does not match the artifact. The
 UI keeps a sensitive-data warning visible whenever it renders these records.
 
+When the artifact is pinned, the run view joins its records to canonical IDs
+and renders four private additions alongside the sanitized transcript:
+
+- an **LLM token spend** panel summarizing the run's provider-reported usage:
+  total input/output tokens, cache reads/creation, and reported cost, with a
+  per-call table and an input-composition breakdown (base system text,
+  embedded frozen mission inventory, tool schemas, and message history by
+  role). Providers report only aggregate counts, so section tokens apportion
+  each call's reported input tokens by character share and are labeled as
+  estimates; runs without input token counts fall back to exact character
+  proportions, and calls without reported usage are labeled rather than
+  counted as zero;
+- a **model dialogue** that replays the agent loop turn by turn — the messages
+  sent to the model (highlighting tool-role feedback about the previous
+  program), the generated PTC-Lisp program from each response, and the
+  canonical outcome of the mission evaluation whose captured source exactly
+  matches that response's generated program. A window without an exact match
+  renders as unpaired rather than positionally inferred;
+- a **program source** panel inside each subordinate evaluation, verifying the
+  captured source hash against the canonical `evaluation-started`
+  `source_hash` and flagging any mismatch;
+- **arguments/result** panels inside each captured capability call.
+
+Every joined panel carries a `private` marker; runs without a pinned artifact
+render the sanitized transcript unchanged. The viewer eagerly loads all
+bounded canonical event pages before deriving run-level projections; a run
+exceeding the page budget keeps its cursor and its dialogue and spend panels
+are explicitly labeled partial instead of presenting a prefix as the whole
+run.
+
+The prelude cards list effective workflow and mission components in frozen
+load order (dependencies before dependants) with the bundle hash. When run
+metadata carries a compact dependency projection — `component_ids` plus
+positionally aligned `dependency_indices` whose entries are unique,
+ascending, and strictly earlier than their own position — the cards render
+per-component dependency lists. The complete graph must validate; missing or
+malformed projections fall back to the ordered chips without partially
+rendered edges, reordered IDs, or inferred dependencies. Current canonical
+metadata records only ordered component IDs and the bundle hash.
+
 ```bash
 mix ptc.viewer --trace-dir traces \
   --inspection-file traces/run.inspection.jsonl

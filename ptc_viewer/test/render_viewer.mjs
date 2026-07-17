@@ -26,5 +26,5 @@ const turns = readJson(turnsPath);
 const inspection = readJson(inspectionPath);
 
 process.stdout.write(
-  renderKernelTranscriptMarkup({ metadata, turns }) + renderInspectionMarkup(inspection)
+  renderKernelTranscriptMarkup({ metadata, turns, inspection }) + renderInspectionMarkup(inspection)
 );

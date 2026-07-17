@@ -84,21 +84,49 @@ function setupRunPicker(page, priorRuns = []) {
   });
 }
 
+// Bounded page budget for the eager turn fetch. Run-level projections
+// (metrics, dialogue, token spend) must not silently summarize a prefix, so
+// all pages are loaded up front; a run exceeding the budget keeps its
+// next_cursor and is explicitly rendered as partial.
+const MAX_TURN_PAGES = 20;
+
+async function fetchAllTurns(runId) {
+  let merged = null;
+  let cursor = null;
+
+  for (let page = 0; page < MAX_TURN_PAGES; page++) {
+    const suffix = cursor ? `&cursor=${encodeURIComponent(cursor)}` : '';
+    const response = await fetch(
+      `/api/kernel/runs/${encodeURIComponent(runId)}/turns?limit=100${suffix}`
+    );
+    if (!response.ok) return { failed: response };
+
+    const pageData = await response.json();
+    merged = merged
+      ? { ...pageData, items: [...merged.items, ...(pageData.items || [])] }
+      : { ...pageData, items: pageData.items || [] };
+    cursor = pageData.next_cursor;
+    if (!cursor) break;
+  }
+
+  return { turns: merged };
+}
+
 async function loadRun(runId) {
-  const [runResponse, turnsResponse, inspectionResponse] = await Promise.all([
+  const [runResponse, turnsResult, inspectionResponse] = await Promise.all([
     fetch(`/api/kernel/runs/${encodeURIComponent(runId)}`),
-    fetch(`/api/kernel/runs/${encodeURIComponent(runId)}/turns?limit=100`),
+    fetchAllTurns(runId),
     fetch(`/api/inspection/runs/${encodeURIComponent(runId)}`)
   ]);
 
-  if (!runResponse.ok || !turnsResponse.ok) {
-    const failed = runResponse.ok ? turnsResponse : runResponse;
+  if (!runResponse.ok || turnsResult.failed) {
+    const failed = runResponse.ok ? turnsResult.failed : runResponse;
     showNotice(`Failed to load run ${runId} (HTTP ${failed.status}: ${await safeBodyText(failed)}).`);
     return;
   }
 
   const inspection = inspectionResponse.ok ? await inspectionResponse.json() : null;
-  renderRun({ metadata: await runResponse.json(), turns: await turnsResponse.json(), inspection });
+  renderRun({ metadata: await runResponse.json(), turns: turnsResult.turns, inspection });
 }
 
 function renderRun(data) {
