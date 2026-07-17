@@ -69,3 +69,6 @@ demo/traces/
 .claude/scheduled_tasks.lock
 .context/
 MEMORY/
+
+# Generated viewer-demo data root
+/examples/viewer-demo/files/

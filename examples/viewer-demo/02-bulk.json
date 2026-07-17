@@ -1,0 +1,61 @@
+{
+  "version": 1,
+  "workflow": {
+    "components": [
+      {
+        "id": "demo.agent",
+        "path": "agent.lisp",
+        "dependencies": [
+          "agent.core"
+        ]
+      },
+      {
+        "library": "agent.core"
+      }
+    ],
+    "entry": "demo.agent/run"
+  },
+  "mission": {
+    "components": [
+      {
+        "id": "demo.files",
+        "path": "files.lisp"
+      }
+    ],
+    "data": {}
+  },
+  "input": {
+    "value": {
+      "task": "Call (demo.files/sum-values) with no arguments and return the integer it produces.",
+      "max_turns": 6
+    }
+  },
+  "providers": {
+    "workflow": [
+      {
+        "name": "llm",
+        "config": {
+          "model": "deepseek",
+          "cache": true
+        }
+      }
+    ],
+    "mission": [
+      {
+        "name": "file-read",
+        "config": {
+          "root": "files",
+          "max_bytes": 65536
+        }
+      }
+    ]
+  },
+  "labels": {
+    "name": "viewer-demo-bulk",
+    "model": "deepseek",
+    "provider": "openrouter",
+    "tags": {
+      "mode": "agent"
+    }
+  }
+}

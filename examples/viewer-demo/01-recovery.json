@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "workflow": {
+    "components": [
+      {"id": "demo.agent", "path": "agent.lisp", "dependencies": ["agent.core"]},
+      {"library": "agent.core"}
+    ],
+    "entry": "demo.agent/run"
+  },
+  "mission": {
+    "components": [
+      {"id": "demo.files", "path": "files.lisp"}
+    ],
+    "data": {}
+  },
+  "input": {
+    "value": {
+      "task": "First call (demo.files/parse-lines \"notes.txt\") and return its result. If an evaluation fails, recover: read the file with (demo.files/read-text \"notes.txt\") instead and return its exact content as a string.",
+      "max_turns": 6
+    }
+  },
+  "providers": {
+    "workflow": [
+      {"name": "llm", "config": {"model": "deepseek", "cache": true}}
+    ],
+    "mission": [
+      {"name": "file-read", "config": {"root": "files", "max_bytes": 65536}}
+    ]
+  },
+  "labels": {
+    "name": "viewer-demo-recovery",
+    "model": "deepseek",
+    "provider": "openrouter",
+    "tags": {"mode": "agent"}
+  }
+}

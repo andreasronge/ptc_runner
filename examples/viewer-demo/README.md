@@ -1,0 +1,50 @@
+# Viewer demo journeys
+
+Five small manifest runs against the trusted `deepseek` model alias that
+together produce enough varied trace data to exercise `ptc_viewer` by hand:
+a mixed-status run picker, multi-turn model dialogue with error feedback and
+recovery, real token/cost usage, bulk mission capability calls,
+limit-exceeded events, and error-outcome runs. Requires
+`OPENROUTER_API_KEY` in `.env`; a full pass costs a few cents (≤ ~15 model
+calls). The script enforces each journey's intended outcome class and fails
+on missing artifacts, so a passing run is a real smoke check.
+
+```console
+examples/viewer-demo/run.sh            # outputs to tmp/viewer-demo
+examples/viewer-demo/run.sh /path/out  # or an explicit directory
+```
+
+The script regenerates the granted `files/` root, runs each journey with
+`--trace` and `--inspect`, and prints a `mix ptc.viewer` command. The viewer
+pins exactly one inspection artifact per instance — pick the journey whose
+private payloads you want to inspect; the other runs still render their
+sanitized transcripts.
+
+## Journeys
+
+| Journey | Design | Viewer surfaces exercised |
+| --- | --- | --- |
+| `01-recovery` | The task names `demo.files/parse-lines`, which does not exist, then instructs recovery via `demo.files/read-text`. Expect an `:unbound_var` evaluation error, a tool-role correction message, and a successful second turn. | Multi-turn dialogue, error feedback then recovery, source-hash verification, ok status. |
+| `02-bulk` | The task calls `demo.files/sum-values`, which itself reads `index.txt` plus all 30 listed record files (31 `fs-read` calls, just under the installed per-name quota of 32) and computes a sum the model cannot fabricate (3255). | Long capability lists in the transcript, per-call private payloads, deterministic bulk event volume (~76 events), ok status. |
+| `03-limits` | Same task, but the manifest lowers `mission_capability_calls_per_name` to 6, so `sum-values` exhausts the quota mid-evaluation and the model receives the failure as feedback. | `limit-exceeded` events, error feedback turns, quota-error envelopes in private payloads. |
+| `04-loop-limit` | The task calls `demo.files/spin-forever`, an unbounded `loop`/`recur`, which hits the evaluator's deterministic loop-iteration bound. | Error-outcome runs in the picker, `:loop_limit_exceeded` feedback turns, `explicit_failure` terminal reason. |
+| `05-memory` | The task calls `demo.files/exhaust-memory`, which doubles a string until the in-evaluator heap budget rejects it. | `:memory_exceeded` error feedback, error-outcome run, heap-budget message in the dialogue. |
+
+The bulk read volume and journey 03's quota trigger are deterministic (the
+reads happen inside the mission prelude, not at the model's discretion); turn
+counts and journey 03's final status depend on how the model reacts to the
+failure feedback.
+
+## Known coverage gaps
+
+These journeys cannot produce runs above 100 canonical events per run (the
+installed per-name mission quota bounds capability volume), so the viewer's
+multi-page turn fetching and the partial-run labeling are exercised only by
+the synthetic fixtures in `ptc_viewer/test/ptc_viewer/dialogue_render_test.exs`.
+Connector (MCP) fingerprints and zero-token scripted models are covered by
+`examples/kernel-inspection-lab` instead.
+
+Canonical `timeout` and process-level `memory_exceeded` evaluation statuses
+are not reachable here: pure computation hits the deterministic loop and heap
+budgets first (journeys 04/05), and a wall-clock evaluation timeout requires
+a deliberately slow mission capability, which this demo does not grant.
