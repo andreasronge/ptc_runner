@@ -87,12 +87,15 @@ defmodule PtcRunner.Kernel.InspectionLabTest do
                  get_in(record, ["payload", "result", "reason"]) == "domain_error"
              end)
 
-      assert {:ok, inspection_source} = ViewerAdapter.pin_inspection(journey.inspection)
+      assert {:ok, inspection_source} =
+               ViewerAdapter.pin_inspection(journey.inspection, {:file, journey.trace})
+
+      {:ok, inspection_store} = PtcViewer.InspectionStore.start(inspection_source)
 
       viewer_opts = [
         trace_dir: Path.dirname(journey.trace),
         kernel_trace_adapter: ViewerAdapter,
-        inspection_source: inspection_source,
+        inspection_store: inspection_store,
         inspection_adapter: ViewerAdapter
       ]
 
@@ -150,6 +153,7 @@ defmodule PtcRunner.Kernel.InspectionLabTest do
 
       refute turns.resp_body =~ "fixture-text"
       refute turns.resp_body =~ "fixture-file"
+      PtcViewer.InspectionStore.stop(inspection_store)
     end
 
     direct_request = model_request(direct.inspection)

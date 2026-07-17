@@ -1,5 +1,5 @@
 defmodule PtcRunner.Kernel.InspectionSinkTest do
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
 
   alias PtcRunner.Kernel.Capability
   alias PtcRunner.Kernel.InspectionArtifact
@@ -181,14 +181,53 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
 
     assert {:error, :inspection_source_limit_exceeded} = InspectionArtifact.load(oversized)
 
-    assert {:ok, grant} = ViewerAdapter.pin_inspection(path)
+    trace_path = Path.join(dir, "run.jsonl")
+    assert :ok = TraceLog.append_jsonl(trace_path, canonical_events())
+    assert {:ok, grant} = ViewerAdapter.pin_inspection(path, {:file, trace_path})
     assert {:error, :inspection_run_mismatch} = ViewerAdapter.inspection(grant, "another-run")
+
+    orphan = Path.join(dir, "pin-orphan.inspection.jsonl")
+    orphan_record = put_in(hd(records), ["correlation", "capability_id"], "missing-capability")
+    orphan_record = Map.put(orphan_record, "trace_id", "unrelated-trace")
+    File.write!(orphan, Jason.encode!(orphan_record) <> "\n")
+
+    assert {:error, :inspection_correlation_missing} =
+             ViewerAdapter.pin_inspection(orphan, {:file, trace_path})
   end
 
   @tag :tmp_dir
   test "viewer startup pins the selected artifact even if its path is replaced", %{tmp_dir: dir} do
     first_path = Path.join(dir, "pinned.inspection.jsonl")
-    first_records = persisted_records(first_path, "first")
+    private_marker = "PRIVATE_VIEWER_MARKER"
+    first_records = persisted_records(first_path, private_marker)
+    assert :ok = TraceLog.append_jsonl(Path.join(dir, "canonical.jsonl"), canonical_events())
+
+    telemetry_id = "inspection-telemetry-#{System.unique_integer([:positive])}"
+
+    :telemetry.attach_many(
+      telemetry_id,
+      [[:bandit, :request, :start], [:bandit, :request, :stop]],
+      fn event, _measurements, metadata, test_pid ->
+        send(test_pid, {:bandit_telemetry, event, metadata})
+      end,
+      self()
+    )
+
+    logger_id = :inspection_logger_probe
+    previous_level = Logger.level()
+    Logger.configure(level: :info)
+
+    :ok =
+      :logger.add_handler(logger_id, PtcRunner.TestSupport.LoggerProbeHandler, %{
+        level: :all,
+        test_pid: self()
+      })
+
+    on_exit(fn ->
+      :telemetry.detach(telemetry_id)
+      :logger.remove_handler(logger_id)
+      Logger.configure(level: previous_level)
+    end)
 
     {:ok, viewer} =
       PtcViewer.start(
@@ -211,6 +250,15 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
     response = Req.get!("http://127.0.0.1:#{port}/api/inspection/runs/run-1")
     assert response.status == 200
     assert response.body["records"] == first_records
+    assert inspect(response.body) =~ private_marker
+
+    assert_receive {:logger_probe, startup_event}
+    refute inspect(startup_event) =~ private_marker
+
+    assert_receive {:bandit_telemetry, [:bandit, :request, :start], start_metadata}
+    assert_receive {:bandit_telemetry, [:bandit, :request, :stop], stop_metadata}
+    refute inspect(start_metadata) =~ private_marker
+    refute inspect(stop_metadata) =~ private_marker
   end
 
   @tag :tmp_dir
@@ -308,12 +356,19 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
     refute encoded_turns =~ "inspect me"
     refute encoded_turns =~ program
 
-    assert {:ok, inspection_source} = ViewerAdapter.pin_inspection(inspection_path)
+    assert {:ok, inspection_source} =
+             ViewerAdapter.pin_inspection(inspection_path, {:private_file, trace_path})
+
+    {:ok, inspection_store} = PtcViewer.InspectionStore.start(inspection_source)
+
+    on_exit(fn ->
+      if Process.alive?(inspection_store), do: PtcViewer.InspectionStore.stop(inspection_store)
+    end)
 
     viewer_opts = [
       trace_dir: dir,
       kernel_trace_adapter: ViewerAdapter,
-      inspection_source: inspection_source,
+      inspection_store: inspection_store,
       inspection_adapter: ViewerAdapter
     ]
 
@@ -350,5 +405,26 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
     assert :ok = InspectionArtifact.persist(path, records, events)
     assert :ok = InspectionSink.stop(sink)
     records
+  end
+
+  defp canonical_events do
+    [
+      canonical_event(1, "run-started", %{}),
+      canonical_event(2, "capability-started", %{"capability_id" => "cap-1"}),
+      canonical_event(3, "capability-stopped", %{"capability_id" => "cap-1"}),
+      canonical_event(4, "run-stopped", %{"outcome" => "ok"})
+    ]
+  end
+
+  defp canonical_event(sequence, type, data) do
+    %{
+      "schema_version" => 1,
+      "run_id" => "run-1",
+      "trace_id" => "trace-1",
+      "sequence" => sequence,
+      "timestamp" => "2026-07-17T12:00:00Z",
+      "type" => type,
+      "data" => data
+    }
   end
 end

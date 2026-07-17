@@ -42,11 +42,12 @@ An explicitly selected `.inspection.jsonl` file is different. It can contain
 exact model exchanges, generated source, and capability arguments/results. The
 host fixes one exact file when it starts the Viewer; the browser cannot choose
 a server path or discover other inspection files. Startup loads the artifact
-into an immutable grant, so replacing the path after startup cannot change what
-requests inspect. The bounded loader rejects symlinks, changed files, aggregate
-input above 16 MB, records above 2,000,000 encoded bytes, malformed records,
-and a requested run ID that does not match the artifact. The UI keeps a
-sensitive-data warning visible whenever it renders these records.
+into an immutable grant and validates its identity and correlations against the
+selected canonical trace source, so replacing the path after startup cannot
+change what requests inspect. The bounded loader rejects symlinks, changed
+files, aggregate input above 16 MB, records above 2,000,000 encoded bytes,
+malformed records, and a requested run ID that does not match the artifact. The
+UI keeps a sensitive-data warning visible whenever it renders these records.
 
 ```bash
 mix ptc.viewer --trace-dir traces \
@@ -101,5 +102,8 @@ rendering; it does not duplicate trace validation or run derivation. Adapter
 configuration is passed through the Bandit/Plug instance rather than global
 application environment. No browser route reads an arbitrary trace filename,
 and the separate inspection adapter receives only the startup-pinned opaque
-grant and URL run ID. The frontend contains no parser or renderer for the
-retired raw event format.
+grant and URL run ID. Private records are held in a dedicated process; Bandit
+plug options and request Logger/Telemetry metadata contain only that process
+PID. After sending an inspection response, the returned connection is scrubbed
+of its response body before Bandit emits stop metadata. The frontend contains
+no parser or renderer for the retired raw event format.

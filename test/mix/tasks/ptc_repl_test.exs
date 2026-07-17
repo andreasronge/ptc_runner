@@ -4,6 +4,7 @@ defmodule Mix.Tasks.Ptc.ReplTest do
   import ExUnit.CaptureIO
 
   alias Mix.Tasks.Ptc.Repl
+  alias PtcRunner.Kernel.SafeMetadata
   alias PtcRunner.Kernel.TraceLog
 
   setup do
@@ -70,8 +71,15 @@ defmodule Mix.Tasks.Ptc.ReplTest do
     assert "3\n" = capture_io(fn -> Repl.run(["--trace", path, "-e", "(+ 1 2)"]) end)
     {:ok, trace_log} = TraceLog.new(source: {:file, path})
 
-    assert {:ok, %{"items" => [%{"complete" => true, "name" => "ptc.repl"}]}} =
+    assert {:ok,
+            %{
+              "items" => [
+                %{"complete" => true, "name" => name}
+              ]
+            }} =
              TraceLog.query(trace_log, :list_runs, %{})
+
+    assert name == SafeMetadata.fingerprint("ptc.repl")
   end
 
   @tag :tmp_dir

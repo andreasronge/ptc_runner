@@ -20,6 +20,6 @@
     "name": "tutorial-deepseek-extract",
     "model": "deepseek",
     "provider": "openrouter",
-    "tags": {"tutorial": "direct-llm"}
+    "tags": {"mode": "direct"}
   }
 }

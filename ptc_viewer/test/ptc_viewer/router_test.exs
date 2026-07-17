@@ -156,11 +156,14 @@ defmodule PtcViewer.RouterTest do
        }}
     end
 
+    {:ok, store} = PtcViewer.InspectionStore.start(source)
+    on_exit(fn -> if Process.alive?(store), do: PtcViewer.InspectionStore.stop(store) end)
+
     response =
       conn(:get, "/api/inspection/runs/run-1")
       |> call_router(
         trace_dir: trace_dir,
-        inspection_source: source,
+        inspection_store: store,
         inspection_adapter: adapter
       )
 
@@ -185,15 +188,19 @@ defmodule PtcViewer.RouterTest do
     }
 
     Enum.each(statuses, fn {reason, expected_status} ->
+      {:ok, store} =
+        PtcViewer.InspectionStore.start({:pinned, "fixed.inspection.jsonl"})
+
       response =
         conn(:get, "/api/inspection/runs/run-1")
         |> call_router(
           trace_dir: trace_dir,
-          inspection_source: {:pinned, "fixed.inspection.jsonl"},
+          inspection_store: store,
           inspection_adapter: fn _, _ -> {:error, reason} end
         )
 
       assert response.status == expected_status
+      PtcViewer.InspectionStore.stop(store)
     end)
   end
 

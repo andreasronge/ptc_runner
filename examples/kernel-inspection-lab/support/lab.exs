@@ -152,7 +152,7 @@ defmodule PtcRunner.Examples.KernelInspectionLab do
       },
       "limits" => %{"evaluation_timeout_ms" => 10_000, "run_duration_ms" => 60_000},
       "events" => %{"run_id" => "inspection-lab-#{name}"},
-      "labels" => %{"name" => "inspection-lab-#{name}", "tags" => %{"lab" => name}}
+      "labels" => %{"name" => "inspection-lab-#{name}", "tags" => %{"mode" => name}}
     }
   end
 

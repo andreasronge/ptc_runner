@@ -9,6 +9,6 @@
   "input": {"path": "orders.json"},
   "labels": {
     "name": "tutorial-orders",
-    "tags": {"tutorial": "deterministic"}
+    "tags": {"mode": "deterministic"}
   }
 }

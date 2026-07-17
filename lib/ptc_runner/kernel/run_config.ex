@@ -17,7 +17,9 @@ defmodule PtcRunner.Kernel.RunConfig do
   `connector_snapshots` are bounded safe metadata copied into `run-started`;
   neither field is visible to Lisp.
 
-  `labels` is an optional closed safe-metadata map copied into `run-started`.
+  `labels` is an optional closed safe-metadata map. Caller-defined identifier
+  fields become SHA-256 fingerprints and tags use finite enumerated values
+  before the map enters `run-started`.
   Constructing a config validates shape and ownership objects but performs no
   execution and grants no authority beyond the supplied environments.
   """
@@ -95,7 +97,7 @@ defmodule PtcRunner.Kernel.RunConfig do
            inspection?(Keyword.get(opts, :inspection_sink), Keyword.get(opts, :inspection_path)),
          true <- provider_resources?(Keyword.get(opts, :provider_resources, [])),
          true <- connector_snapshots?(Keyword.get(opts, :connector_snapshots, [])),
-         true <- SafeMetadata.labels?(Keyword.get(opts, :labels, %{})),
+         {:ok, labels} <- SafeMetadata.normalize_labels(Keyword.get(opts, :labels, %{})),
          {:ok, mission_inventory} <- MissionInventory.build(mission, limits) do
       {:ok,
        %__MODULE__{
@@ -109,7 +111,7 @@ defmodule PtcRunner.Kernel.RunConfig do
          inspection_path: Keyword.get(opts, :inspection_path),
          provider_resources: Keyword.get(opts, :provider_resources, []),
          connector_snapshots: Keyword.get(opts, :connector_snapshots, []),
-         labels: Keyword.get(opts, :labels, %{})
+         labels: labels
        }}
     else
       {:error, :mission_inventory_exceeded} = error -> error

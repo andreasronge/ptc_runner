@@ -3,9 +3,10 @@ defmodule PtcRunner.Kernel.RuntimeTools do
   Internal construction of reserved runtime capabilities.
 
   Both environments receive read-only usage and local capability discovery.
-  Only the workflow receives the annotation route. Annotation data uses the
-  flat scalar-only safe-metadata profile, not arbitrary JSON payloads. Every
-  route is instrumented with the same canonical capability start/stop events.
+  Only the workflow receives the annotation route. Annotation data uses a
+  finite type/key/value vocabulary, not caller-defined scalar metadata or
+  arbitrary JSON payloads. Every route is instrumented with the same canonical
+  capability start/stop events.
   """
 
   alias PtcRunner.Kernel.Environment

@@ -4,6 +4,7 @@ defmodule Mix.Tasks.Ptc.RunTest do
   import ExUnit.CaptureIO
 
   alias Mix.Tasks.Ptc.Run
+  alias PtcRunner.Kernel.SafeMetadata
   alias PtcRunner.Kernel.TraceLog
 
   @tag :tmp_dir
@@ -66,8 +67,10 @@ defmodule Mix.Tasks.Ptc.RunTest do
     assert %{"value" => 42} = Jason.decode!(output)
     assert {:ok, trace_log} = TraceLog.new(source: {:file, trace_path})
 
-    assert {:ok, %{"items" => [%{"complete" => true, "name" => "traceable-run"}]}} =
+    assert {:ok, %{"items" => [%{"complete" => true, "name" => name}]}} =
              TraceLog.query(trace_log, :list_runs, %{})
+
+    assert name == SafeMetadata.fingerprint("traceable-run")
   end
 
   @tag :tmp_dir

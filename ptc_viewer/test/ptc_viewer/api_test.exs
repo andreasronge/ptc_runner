@@ -47,10 +47,13 @@ defmodule PtcViewer.ApiTest do
       {:ok, %{"run_id" => run_id, "records" => []}}
     end
 
+    {:ok, store} = PtcViewer.InspectionStore.start(source)
+    on_exit(fn -> if Process.alive?(store), do: PtcViewer.InspectionStore.stop(store) end)
+
     config = [
       trace_dir: trace_dir,
       kernel_trace_adapter: nil,
-      inspection_source: source,
+      inspection_store: store,
       inspection_adapter: adapter
     ]
 

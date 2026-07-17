@@ -41,7 +41,58 @@ defmodule PtcRunner.Kernel.MCPSource do
   @type builder :: PtcRunner.Kernel.ProviderRegistry.builder()
 
   @spec builder(keyword()) :: builder()
-  @doc "Returns an installed provider builder for one fixed MCP source."
+  @doc """
+  Returns an installed provider builder for one fixed MCP source.
+
+  ## Options
+
+    * `:endpoint` - required fixed HTTPS URL. Loopback HTTP is accepted only
+      when `:allow_insecure_loopback` is `true` (default `false`). Userinfo and
+      fragments are rejected.
+    * `:headers` - zero-argument credential/header callback, evaluated inside
+      each request deadline (default `fn -> [] end`). At most 32 valid headers
+      totaling 16,384 bytes are accepted. Values never enter capabilities,
+      snapshots, errors, Logger, Telemetry, or canonical events.
+    * `:tools` - required map from fixed upstream names to
+      `%{as: public_name, effect: :read}`. Both names are unique and bounded;
+      only the public name crosses the capability boundary.
+    * `:timeout_ms` - installed end-to-end ceiling for discovery, calls, and
+      session cleanup (default `5_000`). A manifest may only lower it.
+    * `:max_result_bytes` - installed response ceiling (default `1_000_000`).
+    * `:max_catalog_tools` - discovery catalog ceiling from 1 through 128
+      (default `128`).
+    * `:max_pages` - discovery pagination ceiling from 1 through 64
+      (default `16`).
+
+  Unknown or invalid installation options raise `ArgumentError` without
+  including option values. The returned registry builder accepts only an
+  `"allow"` list of installed public names and optional lower `"timeout_ms"`
+  and `"max_result_bytes"` values; invalid selections return
+  `{:error, :invalid_mcp_selection}`. Assembly returns
+  `{:ok, %{capabilities: list, snapshot: map, close: zero_arity_function}}` or a
+  stable atom error: `:mcp_authentication_failed`, `:mcp_timeout`,
+  `:mcp_transport_error`, `:mcp_protocol_error`, `:mcp_response_exceeded`,
+  `:mcp_session_expired`, `:mcp_catalog_exceeded`, `:mcp_invalid_catalog`,
+  `:mcp_invalid_tool_schema`, or `:mcp_mapped_tool_missing`.
+
+  ## Frozen result and snapshot contracts
+
+  Discovery produces ordinary read-only `PtcRunner.Kernel.Capability` values.
+  An advertised object output schema accepts only schema-valid
+  `structuredContent` with absent or empty `content`. A tool without an output
+  schema accepts only exact text blocks and returns `%{"text" => [string()]}`.
+  MCP `isError`, malformed/mixed content, invalid JSON-RPC envelopes, and
+  schema failures become bounded `PtcRunner.Kernel.ProviderError` values with
+  closed reasons. Authentication, timeout, session-expiry, invalid-result, and
+  transport failures never include remote messages or payloads.
+
+  The safe connector snapshot has exact top-level fields `provider`,
+  `protocol`, `snapshot_hash`, and `tools`. Each sorted tool entry contains
+  only its public `name`, fixed `"read"` effect, `input_schema_hash`, and
+  nullable `output_schema_hash`. Hashes are lowercase SHA-256; endpoints,
+  upstream names, descriptions, headers, credentials, session IDs, arguments,
+  and results are excluded.
+  """
   def builder(opts) when is_list(opts) do
     case installed_config(opts) do
       {:ok, installed} -> fn selection, context -> build(installed, selection, context) end
@@ -425,10 +476,10 @@ defmodule PtcRunner.Kernel.MCPSource do
            {:ok, response} <- http(:post, lease, request, headers, payload, max_bytes),
            :ok <- maybe_capture_session(lease, response),
            {:ok, body} <- response_body(response, request.id) do
-        case body do
-          %{"result" => result} when is_map(result) -> {:ok, result}
-          %{"error" => _error} -> {:error, :mcp_remote_error}
-          _body -> {:error, :mcp_protocol_error}
+        case {Map.fetch(body, "result"), Map.fetch(body, "error")} do
+          {{:ok, result}, :error} when is_map(result) -> {:ok, result}
+          {:error, {:ok, error}} when is_map(error) -> {:error, :mcp_remote_error}
+          _invalid -> {:error, :mcp_protocol_error}
         end
       end
     end)
@@ -637,6 +688,9 @@ defmodule PtcRunner.Kernel.MCPSource do
 
   defp provider_error(:mcp_response_exceeded),
     do: ProviderError.new(:invalid_result, "mcp_response_exceeded")
+
+  defp provider_error(:mcp_protocol_error),
+    do: ProviderError.new(:invalid_result, "mcp_protocol_error")
 
   defp provider_error(_reason),
     do: ProviderError.new(:transport_error, "mcp_transport_error", retryable?: true)

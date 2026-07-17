@@ -40,8 +40,9 @@ defmodule PtcRunner.Kernel.Manifest do
   greater than the host-supplied installed ceilings. Omitted values use the
   normal runtime defaults, capped by a lower host ceiling. Event policy is
   `normal` or `private` with optional run and trace IDs. Labels use the closed
-  `name`, `model`, `provider`, and flat `tags` safe-metadata profile; arbitrary
-  text and nested application data are rejected rather than copied into traces.
+  `name`, `model`, `provider`, and flat `tags` safe-metadata profile. Identifier
+  fields become SHA-256 fingerprints and tags use finite enumerated values, so
+  arbitrary text and secrets are never copied into traces.
 
   The loader resolves paths relative to the canonical manifest directory and
   rejects absolute paths, traversal, devices, non-regular files, and symlink
@@ -110,8 +111,7 @@ defmodule PtcRunner.Kernel.Manifest do
          {:ok, providers} <- providers(Map.get(manifest, "providers", %{})),
          {:ok, limits} <- limits(Map.get(manifest, "limits", %{}), installed_limits),
          {:ok, events} <- events(Map.get(manifest, "events", %{})),
-         labels = Map.get(manifest, "labels", %{}),
-         true <- SafeMetadata.labels?(labels) do
+         {:ok, labels} <- SafeMetadata.normalize_labels(Map.get(manifest, "labels", %{})) do
       {:ok,
        %__MODULE__{
          path: path,
@@ -128,6 +128,7 @@ defmodule PtcRunner.Kernel.Manifest do
          labels: labels
        }}
     else
+      {:error, :invalid_safe_metadata} -> {:error, :invalid_manifest}
       {:error, _reason} = error -> error
       _ -> {:error, :invalid_manifest}
     end

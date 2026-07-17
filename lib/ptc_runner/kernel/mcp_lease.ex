@@ -148,18 +148,18 @@ defmodule PtcRunner.Kernel.MCPLease do
   end
 
   defp terminate_session(state) do
-    with {:ok, installed_headers} <- safe_headers(state.headers) do
-      headers =
-        installed_headers ++
-          [
-            {"mcp-protocol-version", @protocol},
-            {"mcp-session-id", state.session_id}
-          ]
+    timeout_ms = min(state.timeout_ms, 1_000)
 
-      timeout_ms = min(state.timeout_ms, 1_000)
+    task =
+      Task.async(fn ->
+        with {:ok, installed_headers} <- safe_headers(state.headers) do
+          headers =
+            installed_headers ++
+              [
+                {"mcp-protocol-version", @protocol},
+                {"mcp-session-id", state.session_id}
+              ]
 
-      task =
-        Task.async(fn ->
           Req.delete(state.endpoint,
             headers: headers,
             connect_options: [timeout: timeout_ms],
@@ -169,10 +169,10 @@ defmodule PtcRunner.Kernel.MCPLease do
             redirect: false,
             decode_body: false
           )
-        end)
+        end
+      end)
 
-      _ = Task.yield(task, timeout_ms) || Task.shutdown(task, :brutal_kill)
-    end
+    _ = Task.yield(task, timeout_ms) || Task.shutdown(task, :brutal_kill)
   rescue
     _exception -> :ok
   catch

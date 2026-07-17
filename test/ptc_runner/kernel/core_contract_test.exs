@@ -836,7 +836,18 @@ defmodule PtcRunner.Kernel.CoreContractTest do
                config
              )
 
+    prompt = "SECRET_PROMPT"
+    session = "session-123"
+
+    assert {:ok, %{value: %{status: :error, reason: :invalid_workflow_annotation}}} =
+             Kernel.run(
+               ~s|(return (workflow.event/annotate "progress" {"prompt" "#{prompt}" "session_id" "#{session}"}))|,
+               config
+             )
+
     refute EventSink.events(sink) |> Jason.encode!() |> String.contains?(private)
+    refute EventSink.events(sink) |> Jason.encode!() |> String.contains?(prompt)
+    refute EventSink.events(sink) |> Jason.encode!() |> String.contains?(session)
   end
 
   test "terminal workflow results and retained mission memory use Kernel limits and state" do

@@ -185,10 +185,13 @@ Runtime observability has separate planes with separate data contracts:
 `PtcRunner.Kernel.EventSink` owns canonical event sequence numbers, timestamps,
 queue bounds, and loss accounting. Normal policy is lossy and reports dropped
 events. Private policy fails closed when it cannot retain the required event.
-Run labels and workflow annotations accept only the closed scalar
-`PtcRunner.Kernel.SafeMetadata` profile. Arbitrary JSON, free-form text,
-generated source, and failure values are never copied into canonical events or
-ordinary Kernel error details.
+Run labels and workflow annotations use `PtcRunner.Kernel.SafeMetadata`.
+Caller-supplied `name`, `model`, and `provider` label strings become one-way
+SHA-256 fingerprints. Tags use fixed `environment`, `mode`, `stage`, and
+`suite` keys with finite enumerated values. Annotations likewise accept only a
+finite semantic type/key/value vocabulary. Arbitrary JSON, free-form text,
+generated source, credentials, and failure values are never copied into
+canonical events or ordinary Kernel error details.
 
 `PtcRunner.Kernel.TraceLog` validates and queries completed canonical events
 from an in-memory sink, one JSONL file, or a directory. The viewer and
@@ -206,10 +209,14 @@ hard-link create from an exclusive temporary sibling because `File.rename/2`
 may replace an existing destination and therefore cannot uphold the no-clobber
 contract. Loading enforces the same 2,000,000-byte encoded per-record ceiling
 as capture as well as the 16 MB aggregate ceiling. TraceLog excludes the
-inspection suffix. `PtcRunner.Kernel.ViewerAdapter.pin_inspection/1` loads the
-host-selected artifact once at Viewer startup; requests use only that immutable
-grant, so replacing the original path cannot change the inspected content.
-This is not a TraceLog operation or Lisp capability.
+inspection suffix. `PtcRunner.Kernel.ViewerAdapter.pin_inspection/2` loads the
+host-selected artifact once at Viewer startup and validates its run/trace IDs
+and every record correlation against the explicitly selected canonical trace
+source. Private records live in a dedicated owner process; Bandit plug options,
+Logger metadata, Telemetry metadata, and returned `Plug.Conn` values contain
+only its PID, never the grant or response body. Replacing the original path
+cannot change the inspected content. This is not a TraceLog operation or Lisp
+capability.
 
 ## Code map
 

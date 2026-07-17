@@ -347,6 +347,20 @@ note where possible.
 
 ### Phase 0: close immediate correctness and DX gaps
 
+Implemented foundation in the current 0.x line:
+
+- Public maintenance documentation separates Logger, Telemetry, canonical
+  EventSink/TraceLog data, and opt-in private inspection.
+- Logger and Telemetry use closed low-cardinality metadata and are regression
+  tested against canonical and inspection payload markers.
+- The Viewer has one canonical event model; legacy raw-trace routes and
+  renderers are gone.
+- Obsolete Lisp trace-context/profile plumbing is removed and Lisp execution
+  reports a bounded semantic outcome.
+- Test logging is configured once through Elixir `Logger`.
+
+Remaining productization work:
+
 - Keep the entropy-based default run IDs and add a subprocess regression that
   proves repeated CLI processes can share a trace directory.
 - Isolate malformed trace files during directory discovery.
@@ -355,21 +369,6 @@ note where possible.
 - Correct stale CLI advice and documentation where current behavior differs.
 - Browser-test viewer pagination with a valid run containing more than 100
   canonical events.
-- Make the observability planes explicit in public maintenance docs: OTP
-  Logger for safe operator diagnostics, Telemetry for low-cardinality metrics,
-  EventSink/TraceLog for canonical run events, and the opt-in inspection
-  sidecar for exact sensitive development payloads.
-- Audit the sparse existing Logger calls and remove provider endpoint logging;
-  operational records must not grow into an unbounded or sensitive transcript.
-- Remove the Viewer's legacy raw-trace routes, parser, and renderers after
-  confirming no supported producer remains; do not carry that second event
-  schema into the inspection work.
-- Remove the unused Lisp `trace_context` plumbing, replace stale MCP-aggregator
-  Telemetry profiles with a small closed caller surface that distinguishes
-  Kernel from direct execution, and expose a bounded semantic outcome on the
-  existing Lisp execution span.
-- Configure the test Logger once through Elixir `Logger` rather than setting
-  two levels on the same OTP logging pipeline.
 
 Exit gate: repeated subprocess runs persist and load independently, a bad
 trace does not hide good traces, and common invalid manifests have asserted
@@ -393,15 +392,22 @@ agent from JSON, PTC-Lisp, and shell commands without editing Elixir.
 
 ### Phase 2: model reliability
 
-- Generate mission export and capability inventories with schemas.
+Implemented in the current 0.x line:
+
+- Mission export/capability inventories are frozen with schemas and safe
+  fingerprints.
+- Provider-valid correction history retains the exact bounded prior program,
+  paired tool result, bounded diagnostics, and retry policy.
+- Sanitized evaluation events carry generated-source hash/byte correlation;
+  exact model exchanges, generated programs, and connector calls require one
+  host-opt-in bounded inspection artifact.
+- The loopback-only Viewer pins one exact inspection artifact, validates it
+  against the canonical run, and renders it beside canonical API data.
+
+Remaining reliability work:
+
 - Add structured model output and bounded model options.
 - Track token/cost metadata and enforce configured budgets where available.
-- Preserve provider-valid correction history containing the exact bounded prior
-  program, paired tool result, bounded diagnostics, and retry policy.
-- Add generated-source hash/byte correlation to sanitized evaluation events and
-  one host-opt-in private inspection artifact for completed model exchanges,
-  generated programs, and connector calls.
-- Add an explicit loopback-only Viewer path for one fixed inspection artifact.
 - Improve source spans through compile and runtime errors.
 
 Exit gate: scripted evaluation failures send the original assistant tool call

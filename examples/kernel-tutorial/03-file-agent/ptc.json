@@ -30,6 +30,6 @@
     "name": "tutorial-deepseek-file-agent",
     "model": "deepseek",
     "provider": "openrouter",
-    "tags": {"tutorial": "model-authored-program"}
+    "tags": {"mode": "agent"}
   }
 }

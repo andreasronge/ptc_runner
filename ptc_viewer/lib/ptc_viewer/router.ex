@@ -97,7 +97,7 @@ defmodule PtcViewer.Router do
   defp send_inspection(conn, run_id) do
     case PtcViewer.Api.inspection(viewer_config(conn), run_id) do
       {:ok, result} ->
-        send_json(conn, result)
+        send_private_json(conn, result)
 
       {:error, :not_found} ->
         send_resp(conn, 404, "Not found")
@@ -126,6 +126,15 @@ defmodule PtcViewer.Router do
 
       {:error, _reason} ->
         send_resp(conn, 400, "Invalid inspection query")
+    end
+  end
+
+  defp send_private_json(conn, data) do
+    conn = send_json(conn, data)
+
+    case conn.adapter do
+      {Bandit.Adapter, _adapter} -> %{conn | resp_body: nil}
+      {_adapter, _state} -> conn
     end
   end
 

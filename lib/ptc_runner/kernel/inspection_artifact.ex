@@ -208,7 +208,9 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
 
   defp valid_shape?(_record), do: false
 
-  defp validate_correlations([first | _rest] = records, events) do
+  @spec validate_correlations([map()], [map()]) :: :ok | {:error, :inspection_correlation_missing}
+  @doc "Validates every record identity and correlation against one canonical event set."
+  def validate_correlations([first | _rest] = records, events) do
     events =
       Enum.filter(events, fn event ->
         event_value(event, :run_id) == first["run_id"] and
@@ -245,7 +247,7 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
        else: {:error, :inspection_correlation_missing}
   end
 
-  defp validate_correlations(_records, _events), do: {:error, :inspection_correlation_missing}
+  def validate_correlations(_records, _events), do: {:error, :inspection_correlation_missing}
 
   defp event_value(event, key), do: Map.get(event, key) || Map.get(event, Atom.to_string(key))
 

@@ -179,6 +179,50 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     assert_receive :mcp_deleted_after_drain
   end
 
+  test "lease cleanup bounds a blocking credential callback" do
+    parent = self()
+
+    {:ok, lease} =
+      MCPLease.start(
+        owner: self(),
+        endpoint: "http://127.0.0.1:1/mcp",
+        headers: fn ->
+          send(parent, {:cleanup_headers_blocked, self()})
+
+          receive do
+            :never -> []
+          end
+        end,
+        timeout_ms: 50
+      )
+
+    assert :ok = MCPLease.set_session(lease, "cleanup-session")
+    closer = Task.async(fn -> MCPLease.close(lease) end)
+    assert_receive {:cleanup_headers_blocked, header_worker}
+    header_ref = Process.monitor(header_worker)
+    assert :ok = Task.await(closer, 500)
+    assert_receive {:DOWN, ^header_ref, :process, ^header_worker, :killed}
+  end
+
+  @tag :tmp_dir
+  test "rejects JSON-RPC envelopes containing both result and error", %{tmp_dir: dir} do
+    parent = self()
+    invalid = fixture(parent, result_and_error?: true)
+    on_exit(invalid.close)
+
+    {:ok, built} =
+      dir
+      |> manifest(Map.keys(public_mappings()))
+      |> RunBuilder.load_and_build(registry(invalid.endpoint))
+
+    assert {:ok, result} = Kernel.run(built.entry_source, built.config)
+
+    assert %{status: :error, kind: :provider_error, reason: :invalid_result} =
+             get_in(result.value, [:value, :value, "structured"])
+
+    EventSink.stop(built.config.event_sink)
+  end
+
   @tag :tmp_dir
   test "accepts bounded SSE responses and rejects malformed pagination and selection keys", %{
     tmp_dir: dir
@@ -190,7 +234,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     {:ok, built} =
       dir
       |> manifest(["remote.structured"])
-      |> RunBuilder.load_and_build(registry(sse.endpoint))
+      |> RunBuilder.load_and_build(registry(sse.endpoint, timeout_ms: 5_000))
 
     assert [snapshot] = built.config.connector_snapshots
     assert Enum.map(snapshot["tools"], & &1["name"]) == ["remote.structured"]
@@ -385,16 +429,16 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     parent = self()
     fixture = fixture(parent, block_tool: "structured")
     on_exit(fixture.close)
-    registry = registry(fixture.endpoint, timeout_ms: 500)
+    registry = registry(fixture.endpoint, timeout_ms: 1_500)
 
     {:ok, built} =
       dir
-      |> manifest(Map.keys(public_mappings()), timeout_ms: 500, evaluation_timeout_ms: 500)
+      |> manifest(Map.keys(public_mappings()), timeout_ms: 1_500, evaluation_timeout_ms: 1_500)
       |> RunBuilder.load_and_build(registry)
 
     task = Task.async(fn -> Kernel.run(built.entry_source, built.config) end)
     assert_receive {:mcp_blocked, worker}
-    assert {:ok, _result} = Task.await(task, 2_000)
+    assert {:ok, _result} = Task.await(task, 3_000)
     assert_receive :mcp_deleted
     send(worker, :release)
     EventSink.stop(built.config.event_sink)
@@ -509,7 +553,19 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     case params["name"] do
       "structured" ->
         value = Keyword.get(opts, :structured_value, 42)
-        json(id, %{"structuredContent" => %{"value" => value}, "content" => []})
+
+        if opts[:result_and_error?] do
+          body = %{
+            "jsonrpc" => "2.0",
+            "id" => id,
+            "result" => %{"structuredContent" => %{"value" => value}, "content" => []},
+            "error" => %{"code" => -32_000, "message" => "must not coexist"}
+          }
+
+          {200, [{"content-type", "application/json"}], Jason.encode!(body)}
+        else
+          json(id, %{"structuredContent" => %{"value" => value}, "content" => []})
+        end
 
       "text" ->
         text = if opts[:large_text?], do: String.duplicate("x", 40_000), else: "hello"

@@ -156,7 +156,8 @@ a run without loading its turns:
 - workflow and mission capability-call counts;
 - LLM-call summary derived from named `llm/request` events when applicable;
 - error count and duration summary;
-- tags and caller-supplied safe labels;
+- one-way fingerprints of caller-supplied name/model/provider labels, plus
+  finite canonical tag keys and enumerated values;
 - effective workflow and mission prelude component IDs and hashes;
 - frozen mission-inventory hash and byte count when an inventory was rendered;
 - safe connector snapshots containing public names, effects, schema hashes, and
@@ -184,7 +185,7 @@ The shipped default prelude exposes:
 Examples:
 
 ```clojure
-(log/runs {:status :error :tags {:stage "editor"} :limit 20})
+(log/runs {:status :error :tags {:stage "failed"} :limit 20})
 (log/run "run-id")
 (log/turns "run-id" {:status :error :limit 20})
 (log/counters {:run "run-id"})
@@ -378,7 +379,8 @@ adds events to the same sink, while pagination cursors are source-digest-bound;
 the query would mutate the source it is paging. Same-run correction retains the
 bounded prior program directly in provider-valid assistant/tool/result history.
 
-Workflow annotations are host stamped and cannot forge canonical events.
+Workflow annotations are host stamped, use a finite semantic vocabulary with
+no caller-defined keys or string values, and cannot forge canonical events.
 
 ## Viewer and CLI sharing
 

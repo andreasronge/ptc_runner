@@ -7,6 +7,7 @@ defmodule PtcRunner.Kernel.ManifestTest do
   alias PtcRunner.Kernel.ProviderError
   alias PtcRunner.Kernel.ProviderRegistry
   alias PtcRunner.Kernel.RunBuilder
+  alias PtcRunner.Kernel.SafeMetadata
 
   @input_schema %{"type" => "object", "additionalProperties" => true}
 
@@ -135,7 +136,21 @@ defmodule PtcRunner.Kernel.ManifestTest do
 
     File.write!(path, Jason.encode!(valid))
     assert {:ok, loaded} = Manifest.load(path)
-    assert loaded.labels == valid["labels"]
+
+    assert loaded.labels == %{
+             "name" => SafeMetadata.fingerprint("safe-run"),
+             "model" => SafeMetadata.fingerprint("provider:model-v1"),
+             "provider" => SafeMetadata.fingerprint("provider"),
+             "tags" => %{"suite" => "privacy"}
+           }
+
+    credential = "sk-secret"
+
+    credential_labels =
+      Map.put(base, "labels", %{"tags" => %{"credential" => credential}})
+
+    File.write!(path, Jason.encode!(credential_labels))
+    assert {:error, :invalid_manifest} = Manifest.load(path)
 
     private = "PRIVATE GENERATED SOURCE (return 42)"
     File.write!(path, Jason.encode!(Map.put(base, "labels", %{"name" => private})))

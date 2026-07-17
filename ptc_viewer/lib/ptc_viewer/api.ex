@@ -19,7 +19,8 @@ defmodule PtcViewer.Api do
 
   @doc "Delegates a private inspection read for one run to an explicitly configured host adapter."
   def inspection(config, run_id) when is_list(config) and is_binary(run_id) do
-    with source when not is_nil(source) <- Keyword.get(config, :inspection_source),
+    with store when is_pid(store) <- Keyword.get(config, :inspection_store),
+         {:ok, source} <- PtcViewer.InspectionStore.fetch(store),
          adapter when not is_nil(adapter) <- Keyword.get(config, :inspection_adapter) do
       safely_inspect(adapter, source, run_id)
     else
