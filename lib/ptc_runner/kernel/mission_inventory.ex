@@ -2,11 +2,20 @@ defmodule PtcRunner.Kernel.MissionInventory do
   @moduledoc """
   Builds the exact frozen model-facing inventory for one mission environment.
 
-  Version 1 contains prompt-visible prelude exports, model-visible capability
+  Version 2 contains prompt-visible prelude exports, model-visible capability
   schemas, and the mission execution limits relevant to generated programs.
   Arrays are sorted by public reference/name. The compact UTF-8 rendering and
   lower-case SHA-256 hash are frozen into `PtcRunner.Kernel.RunConfig` and are
   identical for normal runs and `PtcRunner.Kernel.ReplSession`.
+
+  Every bare capability entry carries a frozen `call` form: the literal
+  string `(tool/<name> arguments)`, with the capability's already-validated
+  public name inserted verbatim and `arguments` as a fixed placeholder token
+  for the single argument map that `input_schema` describes. No other
+  whitespace, casing, or formatting varies. Version 2 added this field —
+  live models given only a capability name invent invalid invocation
+  syntax, so the inventory itself must teach the `tool/` namespace and the
+  single argument-map position.
 
   Rendering uses `PtcRunner.Kernel.DeterministicJSON`. The installed ceiling
   is 256 KiB; callers may lower it but inventory is never truncated.
@@ -24,7 +33,7 @@ defmodule PtcRunner.Kernel.MissionInventory do
   defstruct [:schema_version, :rendered, :hash, :bytes]
 
   @type t :: %__MODULE__{
-          schema_version: 1,
+          schema_version: 2,
           rendered: binary(),
           hash: binary(),
           bytes: non_neg_integer()
@@ -32,7 +41,7 @@ defmodule PtcRunner.Kernel.MissionInventory do
 
   @spec build(MissionEnvironment.t(), Limits.t(), keyword()) ::
           {:ok, t()} | {:error, :invalid_mission_inventory | :mission_inventory_exceeded}
-  @doc "Builds one bounded version 1 mission inventory."
+  @doc "Builds one bounded version 2 mission inventory."
   def build(mission, limits, opts \\ [])
 
   def build(%MissionEnvironment{} = mission, %Limits{} = limits, opts) when is_list(opts) do
@@ -43,7 +52,7 @@ defmodule PtcRunner.Kernel.MissionInventory do
          true <- byte_size(rendered) <= max_bytes do
       {:ok,
        %__MODULE__{
-         schema_version: 1,
+         schema_version: 2,
          rendered: rendered,
          hash: sha256(rendered),
          bytes: byte_size(rendered)
@@ -59,7 +68,7 @@ defmodule PtcRunner.Kernel.MissionInventory do
   defp projection(mission, limits) do
     {:object,
      [
-       {"schema_version", 1},
+       {"schema_version", 2},
        {"exports", exports(mission)},
        {"capabilities", capabilities(mission)},
        {"limits", limit_projection(limits)}
@@ -102,6 +111,7 @@ defmodule PtcRunner.Kernel.MissionInventory do
       {:object,
        [
          {"name", capability.name},
+         {"call", "(tool/#{capability.name} arguments)"},
          {"description", capability.description},
          {"effect", Atom.to_string(capability.effect)},
          {"input_schema", capability.input_schema},

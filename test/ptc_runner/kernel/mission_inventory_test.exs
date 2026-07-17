@@ -13,7 +13,7 @@ defmodule PtcRunner.Kernel.MissionInventoryTest do
   alias PtcRunner.Kernel.RunConfig
   alias PtcRunner.Kernel.WorkflowEnvironment
 
-  @expected ~S|{"schema_version":1,"exports":[{"ref":"tools/ping","kind":"function","call":"(tools/ping value)","doc":"Ping.","effect":"unknown","contract":null}],"capabilities":[{"name":"native.read","description":"Read","effect":"read","input_schema":{"additionalProperties":false,"properties":{"query":{"type":"string"}},"required":["query"],"type":"object"},"output_schema":null}],"limits":{"evaluation_timeout_ms":1000,"subordinate_source_bytes":131072,"mission_capability_calls":128,"mission_capability_calls_per_name":32,"capability_argument_bytes":262144,"capability_result_bytes":1000000}}|
+  @expected ~S|{"schema_version":2,"exports":[{"ref":"tools/ping","kind":"function","call":"(tools/ping value)","doc":"Ping.","effect":"unknown","contract":null}],"capabilities":[{"name":"native.read","call":"(tool/native.read arguments)","description":"Read","effect":"read","input_schema":{"additionalProperties":false,"properties":{"query":{"type":"string"}},"required":["query"],"type":"object"},"output_schema":null}],"limits":{"evaluation_timeout_ms":1000,"subordinate_source_bytes":131072,"mission_capability_calls":128,"mission_capability_calls_per_name":32,"capability_argument_bytes":262144,"capability_result_bytes":1000000}}|
 
   test "renders and hashes the exact versioned frozen inventory" do
     {:ok, mission, limits} = mission_fixture()
@@ -56,6 +56,16 @@ defmodule PtcRunner.Kernel.MissionInventoryTest do
     started = Enum.find(EventSink.events(sink), &(&1.type == "run-started"))
     assert started.data.mission_inventory_hash == config.mission_inventory.hash
     assert started.data.mission_inventory_bytes == byte_size(@expected)
+
+    # Both emitters send the one prebuilt payload, so the compact dependency
+    # projection is identical for Runner and REPL by construction.
+    assert started.data.workflow_prelude == %{
+             component_ids: ["kernel"],
+             dependency_indices: [[]],
+             hash: workflow_bundle.hash
+           }
+
+    assert started.data == config.run_started_metadata
 
     {:ok, repl} = ReplSession.new(config: config)
 

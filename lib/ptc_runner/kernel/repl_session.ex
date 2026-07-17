@@ -172,14 +172,7 @@ defmodule PtcRunner.Kernel.ReplSession do
   defp config(_config), do: {:error, :invalid_repl_session}
 
   defp emit_run_started(config) do
-    EventSink.emit(config.event_sink, "run-started", %{
-      labels: config.labels,
-      workflow_prelude: trace_bundle(config.workflow_environment.bundle),
-      mission_prelude: trace_bundle(config.mission_environment.bundle),
-      mission_inventory_hash: config.mission_inventory.hash,
-      mission_inventory_bytes: config.mission_inventory.bytes,
-      connector_snapshots: config.connector_snapshots
-    })
+    EventSink.emit(config.event_sink, "run-started", config.run_started_metadata)
   end
 
   defp start_session(config, history_depth) do
@@ -300,6 +293,14 @@ defmodule PtcRunner.Kernel.ReplSession do
 
       {name, callback}
     end)
+    |> Map.merge(
+      RuntimeTools.tools(
+        session.state,
+        environment,
+        session.config.event_sink,
+        :workflow
+      )
+    )
     |> Map.put(
       "kernel-eval",
       RuntimeTools.instrument(
@@ -478,8 +479,4 @@ defmodule PtcRunner.Kernel.ReplSession do
 
   defp prelude(%{bundle: nil}), do: nil
   defp prelude(%{bundle: bundle}), do: bundle.prelude
-  defp trace_bundle(nil), do: %{component_ids: [], hash: nil}
-
-  defp trace_bundle(%{component_ids: component_ids, hash: hash}),
-    do: %{component_ids: component_ids, hash: hash}
 end

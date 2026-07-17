@@ -1,7 +1,22 @@
 # Viewer-ready run observability
 
-Status: planned, not implemented. Created 2026-07-17; revised 2026-07-17 after
-boundedness and ownership review.
+Status: implemented in the current change set. Item 2: `SafeMetadata`
+accepts the exact coarse `agent-action` shape, `agent.core` omits the
+detailed reason, and the shipped-agent integration test proves one accepted
+annotation per turn with zero protocol errors. Item 3:
+`InspectionArtifact.preflight_destination/1` owns the shared path rules and
+`RunBuilder` rejects occupied destinations after manifest/input validation
+but before any provider builder, with precedence, builder-not-invoked, and
+Mix task regressions. Item 1: `FrozenBundle.trace_metadata/1` is the single
+projection owner, `RunConfig` assembles and size-validates the complete
+`run-started` payload (`:run_started_metadata_exceeded`), Runner and REPL
+emit the one prebuilt payload, TraceLog passes projections through without
+inventing edges, and the Viewer renders real-run dependency graphs with
+strict validation and chip fallback. Contracts now live in the
+`SafeMetadata`, `InspectionArtifact`, `RunBuilder`, `FrozenBundle`, and
+`RunConfig` module documentation and `docs/trace-log-contract.md`; this plan
+can be removed once its acceptance evidence is reviewed. Created
+2026-07-17; revised 2026-07-17 after boundedness and ownership review.
 
 This plan closes three gaps between the Kernel's frozen run model and the
 developer experience exposed by `ptc_viewer` and `mix ptc.run`:

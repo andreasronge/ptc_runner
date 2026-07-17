@@ -160,7 +160,11 @@ a run without loading its turns:
 - error count and duration summary;
 - one-way fingerprints of caller-supplied name/model/provider labels, plus
   finite canonical tag keys and enumerated values;
-- effective workflow and mission prelude component IDs and hashes;
+- effective workflow and mission prelude component IDs, hashes, and the
+  compact dependency projection (`dependency_indices`, positionally aligned
+  with `component_ids`; every entry lists unique ascending indices strictly
+  earlier than its own position). Legacy events without the projection are
+  served verbatim; the query layer never invents missing edges;
 - frozen mission-inventory hash and byte count when an inventory was rendered;
 - safe connector snapshots containing public names, effects, schema hashes, and
   snapshot hashes, but no endpoint or session data;
@@ -313,15 +317,18 @@ JSON object with this exact envelope:
 ```
 
 Keys are exact. `sequence` is positive and strictly increasing within the
-artifact. The timestamp is UTC ISO 8601. `correlation` contains exactly one of
-`capability_id` or `evaluation_id`, and that value must occur in the canonical
-trace for the same run. V1 record types and payloads are:
+artifact. The timestamp is UTC ISO 8601. `correlation` contains exactly one
+of `capability_id`, `evaluation_id`, or `component_id`. Capability and
+evaluation values must occur in the canonical trace for the same run; a
+component value must occur in the canonical `run-started` prelude component
+IDs for the record's environment. V1 record types and payloads are:
 
 | Record type | Correlation | Exact payload fields |
 | --- | --- | --- |
 | `capability-input` | `capability_id` | `environment`, `name`, `arguments` |
 | `capability-output` | `capability_id` | `environment`, `name`, `result` |
 | `evaluation-source` | `evaluation_id` | `environment`, `program_kind`, `source`, `source_hash`, `source_bytes` |
+| `prelude-source` | `component_id` | `environment`, `source`, `source_hash`, `source_bytes` |
 
 Enums and map keys are normalized to JSON strings before retention. `result` is
 the bounded Dispatcher envelope returned to Lisp, so `llm-request` input/output
@@ -329,7 +336,10 @@ records contain the provider-neutral model request and normalized response, and
 MCP records contain the public connector arguments and normalized result/error.
 `evaluation-source` is emitted only for subordinate mission evaluation in this
 increment. Its hash and byte count must equal the corresponding canonical
-`evaluation-started` fields.
+`evaluation-started` fields. `prelude-source` records carry the exact
+effective source of every frozen workflow and mission component, one record
+per component in frozen order, emitted by the manifest-backed builder before
+execution begins.
 
 The input record is accepted before the callback starts, and the source record
 is accepted before evaluation starts. The output record is accepted after
@@ -357,13 +367,14 @@ fails when the destination already exists. The temporary link is then removed.
 The first increment deliberately does not append or merge inspection runs.
 
 The first increment captures the normalized LLM request and response, exact
-generated subordinate PTC-Lisp, and connector capability arguments and
-normalized results/errors needed to inspect a development run. It does not add
-transport headers, connector credentials, session IDs, endpoints, arbitrary
-host terms, complete workflow entry source, or exact effective prelude source.
-Application arguments/results may themselves be sensitive, so the entire
-artifact is private. The exact mission inventory that the model received is
-already part of the captured LLM request.
+generated subordinate PTC-Lisp, exact effective prelude component source, and
+connector capability arguments and normalized results/errors needed to
+inspect a development run. It does not add transport headers, connector
+credentials, session IDs, endpoints, arbitrary host terms, or the composed
+workflow entry expression. Application arguments/results and prelude source
+may themselves be sensitive, so the entire artifact is private. The exact
+mission inventory that the model received is already part of the captured
+LLM request.
 
 The inspection artifact is absent from TraceLog file/directory discovery and
 from every `log/` query. Normal discovery explicitly rejects or omits the

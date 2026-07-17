@@ -49,7 +49,8 @@ defmodule PtcRunner.Kernel.RunBuilder do
                data: manifest.mission_data
              ),
            {:ok, sink} <- event_sink(manifest),
-           {:ok, inspection_sink, inspection_path} <- inspection_sink(sink, opts) do
+           {:ok, inspection_sink, inspection_path} <- inspection_sink(sink, opts),
+           :ok <- capture_prelude_sources(inspection_sink, sink, {workflow, mission}, manifest) do
         build_config(
           manifest,
           providers,
@@ -100,6 +101,68 @@ defmodule PtcRunner.Kernel.RunBuilder do
         EventSink.stop(sink)
         error
     end
+  end
+
+  # When capture is enabled, the exact effective prelude source of every
+  # frozen component is retained as one private `prelude-source` record per
+  # component, in frozen order, before execution. Frozen bundles retain only
+  # source hashes, so source text comes from the manifest's validated
+  # components, joined by the bundle's frozen order. Capture is required and
+  # fail-closed: a rejected record prevents the run from starting.
+  defp capture_prelude_sources(nil, _sink, _environments, _manifest), do: :ok
+
+  defp capture_prelude_sources(inspection_sink, sink, {workflow, mission}, manifest) do
+    result =
+      with :ok <-
+             capture_bundle_sources(
+               inspection_sink,
+               "workflow",
+               workflow.bundle,
+               manifest.workflow_components
+             ) do
+        capture_bundle_sources(
+          inspection_sink,
+          "mission",
+          mission.bundle,
+          manifest.mission_components
+        )
+      end
+
+    case result do
+      :ok ->
+        :ok
+
+      {:error, _reason} = error ->
+        InspectionSink.stop(inspection_sink)
+        EventSink.stop(sink)
+        error
+    end
+  end
+
+  defp capture_bundle_sources(_inspection_sink, _environment, nil, _components), do: :ok
+
+  defp capture_bundle_sources(inspection_sink, environment, bundle, components) do
+    sources = Map.new(components, &{&1.id, &1.source})
+
+    Enum.reduce_while(bundle.component_ids, :ok, fn id, :ok ->
+      with {:ok, source} when is_binary(source) <- Map.fetch(sources, id),
+           :ok <-
+             InspectionSink.emit(
+               inspection_sink,
+               "prelude-source",
+               %{component_id: id},
+               %{
+                 environment: environment,
+                 source: source,
+                 source_hash: :crypto.hash(:sha256, source) |> Base.encode16(case: :lower),
+                 source_bytes: byte_size(source)
+               }
+             ) do
+        {:cont, :ok}
+      else
+        _failure -> {:halt, {:error, :inspection_sink_error}}
+      end
+    end)
   end
 
   defp providers(manifest, registry) do
@@ -184,7 +247,26 @@ defmodule PtcRunner.Kernel.RunBuilder do
 
     with {:ok, manifest} <- Manifest.load(path, installed_limits),
          {:ok, manifest} <- maybe_override_input(manifest, opts),
+         :ok <- preflight_inspection(opts),
          do: build(manifest, registry, opts)
+  end
+
+  # A deterministic destination conflict is reported after manifest and input
+  # validation (so a bad output path never masks a more useful error) but
+  # before provider builders — including MCP discovery — or model calls run.
+  # The atomic no-clobber creation in `InspectionArtifact.persist/3` remains
+  # authoritative for destinations that appear after this check.
+  defp preflight_inspection(opts) do
+    case Keyword.get(opts, :inspect) do
+      nil ->
+        :ok
+
+      path ->
+        case InspectionArtifact.preflight_destination(path) do
+          :ok -> :ok
+          {:error, reason} -> {:error, {:inspection_preflight_failed, reason}}
+        end
+    end
   end
 
   @spec run(binary(), ProviderRegistry.t()) :: {:ok, term()} | {:error, term()}

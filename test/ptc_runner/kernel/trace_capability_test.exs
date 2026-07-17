@@ -52,8 +52,13 @@ defmodule PtcRunner.Kernel.TraceCapabilityTest do
     assert metadata["mission_capability_calls"] == 0
     assert metadata["error_count"] == 0
     assert is_integer(metadata["duration_ms"])
-    assert metadata["workflow_prelude"] == %{"component_ids" => [], "hash" => nil}
-    assert metadata["mission_prelude"] == %{"component_ids" => [], "hash" => nil}
+
+    assert metadata["workflow_prelude"] ==
+             %{"component_ids" => [], "dependency_indices" => [], "hash" => nil}
+
+    assert metadata["mission_prelude"] ==
+             %{"component_ids" => [], "dependency_indices" => [], "hash" => nil}
+
     assert metadata["mission_inventory_hash"] =~ ~r/\A[0-9a-f]{64}\z/
     assert is_integer(metadata["mission_inventory_bytes"])
     assert metadata["connector_snapshots"] == []
@@ -143,6 +148,39 @@ defmodule PtcRunner.Kernel.TraceCapabilityTest do
 
     assert {:error, %{kind: :workflow_failed}} =
              Kernel.run("(return (tool/trace-list-runs {}))", config)
+  end
+
+  @tag :tmp_dir
+  test "run summaries pass prelude dependency projections through verbatim", %{
+    tmp_dir: directory
+  } do
+    v2_prelude = %{
+      "component_ids" => ["kernel", "llm", "agent.core"],
+      "dependency_indices" => [[], [], [0, 1]],
+      "hash" => "abc"
+    }
+
+    legacy_prelude = %{"component_ids" => ["kernel"], "hash" => "def"}
+
+    path = Path.join(directory, "trace.jsonl")
+
+    events = [
+      decoded_event("v2-run", 1, "run-started", %{"workflow_prelude" => v2_prelude}),
+      decoded_event("v2-run", 2, "run-stopped", %{"outcome" => "ok"}),
+      decoded_event("legacy-run", 1, "run-started", %{"workflow_prelude" => legacy_prelude}),
+      decoded_event("legacy-run", 2, "run-stopped", %{"outcome" => "ok"})
+    ]
+
+    assert :ok = TraceLog.append_jsonl(path, events)
+    assert {:ok, trace_log} = TraceLog.new(source: {:file, path})
+    assert {:ok, %{"items" => items}} = TraceLog.query(trace_log, :list_runs, %{})
+
+    summaries = Map.new(items, &{&1["run_id"], &1})
+
+    # The complete nested projection survives, and a legacy payload without
+    # dependency_indices is never backfilled with invented edges.
+    assert summaries["v2-run"]["workflow_prelude"] == v2_prelude
+    assert summaries["legacy-run"]["workflow_prelude"] == legacy_prelude
   end
 
   @tag :tmp_dir

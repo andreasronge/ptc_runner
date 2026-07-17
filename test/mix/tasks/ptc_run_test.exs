@@ -38,6 +38,37 @@ defmodule Mix.Tasks.Ptc.RunTest do
   end
 
   @tag :tmp_dir
+  test "rejects an occupied inspection destination before execution", %{tmp_dir: dir} do
+    File.write!(
+      Path.join(dir, "main.lisp"),
+      ~S|(ns main) (defn run [input] (return 1))|
+    )
+
+    manifest = %{
+      "version" => 1,
+      "workflow" => %{
+        "components" => [%{"id" => "main", "path" => "main.lisp"}],
+        "entry" => "main/run"
+      },
+      "input" => %{"value" => %{}}
+    }
+
+    path = Path.join(dir, "ptc.json")
+    File.write!(path, Jason.encode!(manifest))
+
+    occupied = Path.join(dir, "run.inspection.jsonl")
+    File.write!(occupied, "occupied")
+
+    Mix.Task.reenable("ptc.run")
+
+    assert_raise Mix.Error, ~r/inspection_preflight_failed/, fn ->
+      Run.run([path, "--inspect", occupied])
+    end
+
+    assert File.read!(occupied) == "occupied"
+  end
+
+  @tag :tmp_dir
   test "persists canonical run events when --trace is selected", %{tmp_dir: dir} do
     File.write!(
       Path.join(dir, "main.lisp"),

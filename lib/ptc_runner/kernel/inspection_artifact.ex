@@ -17,8 +17,36 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
   @max_bytes 16_000_000
   @max_record_bytes 2_000_000
   @suffix ".inspection.jsonl"
-  @record_types ~w(capability-input capability-output evaluation-source)
+  @record_types ~w(capability-input capability-output evaluation-source prelude-source)
   @envelope_keys ~w(schema_version run_id trace_id sequence timestamp record_type correlation payload)
+
+  @spec preflight_destination(term()) ::
+          :ok
+          | {:error,
+             :invalid_inspection_path
+             | :inspection_destination_exists
+             | :inspection_destination_unavailable}
+  @doc """
+  Read-only destination preflight using the same path rules as `persist/3`.
+
+  Classifies common deterministic conflicts — an invalid path or suffix, an
+  existing file, symlink, or directory, or an unreadable location — before
+  expensive work such as provider discovery or model calls begins. It never
+  authorizes overwrite: a destination can appear after this check, so
+  `persist/3`'s exclusive atomic creation remains authoritative, and a free
+  preflight does not promise the destination stays creatable.
+  """
+  def preflight_destination(path) when is_binary(path) do
+    with :ok <- valid_path(path) do
+      case File.lstat(path) do
+        {:ok, _stat} -> {:error, :inspection_destination_exists}
+        {:error, :enoent} -> :ok
+        {:error, _reason} -> {:error, :inspection_destination_unavailable}
+      end
+    end
+  end
+
+  def preflight_destination(_path), do: {:error, :invalid_inspection_path}
 
   @spec persist(binary(), [map()], [map()]) :: :ok | {:error, atom()}
   @doc "Validates and atomically persists one previously absent artifact."
@@ -206,6 +234,18 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
       payload["source_hash"] == sha256(payload["source"])
   end
 
+  defp valid_shape?(%{
+         "record_type" => "prelude-source",
+         "correlation" => %{"component_id" => id},
+         "payload" => payload
+       }) do
+    exact_keys?(payload, ~w(environment source source_hash source_bytes)) and
+      valid_id?(id) and payload["environment"] in ["workflow", "mission"] and
+      is_binary(payload["source"]) and
+      payload["source_bytes"] == byte_size(payload["source"]) and
+      payload["source_hash"] == sha256(payload["source"])
+  end
+
   defp valid_shape?(_record), do: false
 
   @spec validate_correlations([map()], [map()]) :: :ok | {:error, :inspection_correlation_missing}
@@ -233,6 +273,13 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
           else: evaluations
       end)
 
+    prelude_components =
+      Enum.reduce(events, %{}, fn event, acc ->
+        acc
+        |> merge_prelude_ids("workflow", event_data(event, :workflow_prelude))
+        |> merge_prelude_ids("mission", event_data(event, :mission_prelude))
+      end)
+
     if Enum.all?(records, fn
          %{"correlation" => %{"capability_id" => id}} ->
            MapSet.member?(capability_ids, id)
@@ -242,12 +289,29 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
            "payload" => %{"source_hash" => hash, "source_bytes" => bytes}
          } ->
            Map.get(evaluations, id) == {hash, bytes}
+
+         %{
+           "correlation" => %{"component_id" => id},
+           "payload" => %{"environment" => environment}
+         } ->
+           MapSet.member?(Map.get(prelude_components, environment, MapSet.new()), id)
        end),
        do: :ok,
        else: {:error, :inspection_correlation_missing}
   end
 
   def validate_correlations(_records, _events), do: {:error, :inspection_correlation_missing}
+
+  defp merge_prelude_ids(acc, environment, prelude) when is_map(prelude) do
+    ids =
+      (Map.get(prelude, :component_ids) || Map.get(prelude, "component_ids") || [])
+      |> List.wrap()
+      |> Enum.filter(&is_binary/1)
+
+    Map.update(acc, environment, MapSet.new(ids), &MapSet.union(&1, MapSet.new(ids)))
+  end
+
+  defp merge_prelude_ids(acc, _environment, _prelude), do: acc
 
   defp event_value(event, key), do: Map.get(event, key) || Map.get(event, Atom.to_string(key))
 

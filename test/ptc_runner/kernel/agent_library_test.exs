@@ -102,8 +102,97 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
 
     {:ok, config} = agent_config([response])
 
-    assert {:ok, %{value: %{"ok" => true, "value" => 42}}} =
+    assert {:ok, %{value: %{"ok" => true, "value" => 42}, usage: usage}} =
              Kernel.run(~S|(agent.core/run "Compute the value" {"max_turns" 2})|, config)
+
+    # The shipped loop's instrumentation must not consume protocol-error
+    # budget or emit failed capability calls: each turn lands one accepted
+    # agent-action annotation.
+    assert usage.protocol_errors == 0
+
+    events = EventSink.events(config.event_sink)
+
+    refute Enum.any?(events, fn event ->
+             event.type == "capability-stopped" and
+               event.data[:name] == "workflow-annotate" and
+               event.data[:status] != :ok
+           end)
+
+    assert [annotation] = Enum.filter(events, &(&1.type == "workflow-annotation"))
+    assert annotation.data.annotation_type == "agent-action"
+    assert annotation.data.data == %{"turn" => 0, "kind" => "tool-call"}
+  end
+
+  test "the V2 inventory call form alone enables direct bare-capability use" do
+    parent = self()
+    call_form = ~S|"call":"(tool/native-echo arguments)"|
+
+    # The scripted model acts only when the system prompt actually carries
+    # the frozen call form, proving the inventory itself teaches the tool/
+    # namespace and single argument-map position — no prompt-visible wrapper
+    # and no fixture assumption.
+    requester = fn request ->
+      send(parent, {:system_prompt, request["system"]})
+
+      if String.contains?(request["system"], call_form) do
+        {:ok,
+         %{
+           content: nil,
+           tool_calls: [
+             %{
+               id: "c1",
+               name: "run_ptc_lisp",
+               args: %{"program" => ~S|(return (tool/native-echo {"value" "hi"}))|}
+             }
+           ],
+           tokens: %{input: 0, output: 0}
+         }}
+      else
+        {:ok, %{content: "call form missing", tool_calls: [], tokens: %{input: 0, output: 0}}}
+      end
+    end
+
+    {:ok, llm} = LLMCapability.new(requester: requester)
+
+    {:ok, echo} =
+      Capability.new(
+        name: "native-echo",
+        description: "Echo one value",
+        effect: :read,
+        input_schema: %{
+          "type" => "object",
+          "properties" => %{"value" => %{"type" => "string"}},
+          "required" => ["value"]
+        },
+        callback: fn %{"value" => value} -> {:ok, %{"echo" => value}} end
+      )
+
+    names =
+      ~w(agent.core agent.feedback agent.native agent.retry kernel llm result workflow.event)
+
+    {:ok, components} = Library.components(names)
+    {:ok, bundle} = Kernel.compile_bundle(components)
+    {:ok, workflow} = WorkflowEnvironment.new(bundle: bundle, capabilities: [llm])
+    {:ok, mission} = MissionEnvironment.new(capabilities: [echo])
+    {:ok, limits} = Limits.new(evaluation_timeout_ms: 5_000)
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "inventory-call-form")
+
+    {:ok, config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        mission_environment: mission,
+        input: %{},
+        limits: limits,
+        event_sink: sink
+      )
+
+    assert {:ok, result} =
+             Kernel.run(~S|(agent.core/run "Echo the value hi" {"max_turns" 2})|, config)
+
+    assert Jason.encode!(result.value) =~ ~s("echo":"hi")
+
+    assert_receive {:system_prompt, system}
+    assert system =~ call_form
   end
 
   test "agent.core bounds malformed public limit configuration" do

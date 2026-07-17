@@ -39,14 +39,7 @@ defmodule PtcRunner.Kernel.Runner do
   end
 
   defp run_with_events(entry_source, config, state) do
-    case Events.emit(state, config.event_sink, "run-started", %{
-           labels: config.labels,
-           workflow_prelude: trace_bundle(config.workflow_environment.bundle),
-           mission_prelude: trace_bundle(config.mission_environment.bundle),
-           mission_inventory_hash: config.mission_inventory.hash,
-           mission_inventory_bytes: config.mission_inventory.bytes,
-           connector_snapshots: config.connector_snapshots
-         }) do
+    case Events.emit(state, config.event_sink, "run-started", config.run_started_metadata) do
       :ok ->
         result = run_workflow(entry_source, config, state)
         result = apply_terminal_failure(result, state)
@@ -246,11 +239,6 @@ defmodule PtcRunner.Kernel.Runner do
   defp outcome({:error, _error}), do: :error
   defp terminal_reason({:ok, _result}), do: nil
   defp terminal_reason({:error, %Error{reason: reason}}), do: reason
-
-  defp trace_bundle(nil), do: %{component_ids: [], hash: nil}
-
-  defp trace_bundle(%{component_ids: component_ids, hash: hash}),
-    do: %{component_ids: component_ids, hash: hash}
 
   defp usage_with_events(state, sink),
     do: Map.put(RunState.usage(state), :events_dropped, EventSink.dropped(sink))

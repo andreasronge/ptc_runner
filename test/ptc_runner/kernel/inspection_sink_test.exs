@@ -45,11 +45,27 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
                }
              )
 
-    assert {:ok, [input, output, source]} = InspectionSink.records(sink)
-    assert Enum.map([input, output, source], & &1["sequence"]) == [1, 2, 3]
+    assert :ok =
+             InspectionSink.emit(
+               sink,
+               "prelude-source",
+               %{component_id: "tools"},
+               %{
+                 environment: :workflow,
+                 source: @source,
+                 source_hash: @source_hash,
+                 source_bytes: byte_size(@source)
+               }
+             )
+
+    assert {:ok, [input, output, source, prelude]} = InspectionSink.records(sink)
+    assert Enum.map([input, output, source, prelude], & &1["sequence"]) == [1, 2, 3, 4]
     assert input["payload"]["environment"] == "mission"
     assert output["payload"]["result"] == %{"status" => "ok", "value" => 42}
     assert source["payload"]["source"] == @source
+    assert prelude["correlation"] == %{"component_id" => "tools"}
+    assert prelude["payload"]["environment"] == "workflow"
+    assert prelude["payload"]["source"] == @source
 
     assert {:error, :inspection_sink_error} =
              InspectionSink.emit(
@@ -317,7 +333,14 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
                inspect: inspection_path
              )
 
-    assert {:ok, [source, input, output] = records} = InspectionArtifact.load(inspection_path)
+    assert {:ok, [prelude, source, input, output] = records} =
+             InspectionArtifact.load(inspection_path)
+
+    assert prelude["record_type"] == "prelude-source"
+    assert prelude["correlation"] == %{"component_id" => "app"}
+    assert prelude["payload"]["environment"] == "workflow"
+    assert prelude["payload"]["source"] =~ "(ns app)"
+
     assert source["record_type"] == "evaluation-source"
     assert source["payload"]["source"] == program
 

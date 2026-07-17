@@ -617,7 +617,11 @@ defmodule PtcRunner.Kernel.TraceLog do
     }
   end
 
-  defp empty_prelude, do: %{"component_ids" => [], "hash" => nil}
+  # Absent prelude data projects to an empty graph. Legacy run-started
+  # payloads without dependency_indices pass through verbatim — the query
+  # layer never invents missing edges.
+  defp empty_prelude,
+    do: %{"component_ids" => [], "dependency_indices" => [], "hash" => nil}
 
   defp filter_runs(items, arguments) do
     Enum.filter(items, fn item ->

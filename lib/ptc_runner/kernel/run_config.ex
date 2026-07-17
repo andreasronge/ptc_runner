@@ -25,6 +25,7 @@ defmodule PtcRunner.Kernel.RunConfig do
   """
 
   alias PtcRunner.Kernel.EventSink
+  alias PtcRunner.Kernel.FrozenBundle
   alias PtcRunner.Kernel.InspectionSink
   alias PtcRunner.Kernel.JSONValue
   alias PtcRunner.Kernel.Limits
@@ -32,6 +33,7 @@ defmodule PtcRunner.Kernel.RunConfig do
   alias PtcRunner.Kernel.MissionInventory
   alias PtcRunner.Kernel.SafeMetadata
   alias PtcRunner.Kernel.WorkflowEnvironment
+  alias PtcRunner.Lisp.RetainedSize
 
   @enforce_keys [
     :workflow_environment,
@@ -52,7 +54,8 @@ defmodule PtcRunner.Kernel.RunConfig do
     inspection_path: nil,
     provider_resources: [],
     connector_snapshots: [],
-    labels: %{}
+    labels: %{},
+    run_started_metadata: %{}
   ]
 
   @type t :: %__MODULE__{
@@ -66,11 +69,16 @@ defmodule PtcRunner.Kernel.RunConfig do
           inspection_path: binary() | nil,
           provider_resources: [(-> :ok)],
           connector_snapshots: [map()],
-          labels: map()
+          labels: map(),
+          run_started_metadata: map()
         }
 
   @spec new(keyword()) ::
-          {:ok, t()} | {:error, :invalid_run_config | :mission_inventory_exceeded}
+          {:ok, t()}
+          | {:error,
+             :invalid_run_config
+             | :mission_inventory_exceeded
+             | :run_started_metadata_exceeded}
   @doc "Constructs a run configuration and rejects missing or unknown fields."
   def new(opts) when is_list(opts) do
     with false <-
@@ -98,7 +106,16 @@ defmodule PtcRunner.Kernel.RunConfig do
          true <- provider_resources?(Keyword.get(opts, :provider_resources, [])),
          true <- connector_snapshots?(Keyword.get(opts, :connector_snapshots, [])),
          {:ok, labels} <- SafeMetadata.normalize_labels(Keyword.get(opts, :labels, %{})),
-         {:ok, mission_inventory} <- MissionInventory.build(mission, limits) do
+         {:ok, mission_inventory} <- MissionInventory.build(mission, limits),
+         {:ok, run_started_metadata} <-
+           run_started_metadata(
+             workflow,
+             mission,
+             mission_inventory,
+             Keyword.get(opts, :connector_snapshots, []),
+             labels,
+             limits
+           ) do
       {:ok,
        %__MODULE__{
          workflow_environment: workflow,
@@ -111,11 +128,42 @@ defmodule PtcRunner.Kernel.RunConfig do
          inspection_path: Keyword.get(opts, :inspection_path),
          provider_resources: Keyword.get(opts, :provider_resources, []),
          connector_snapshots: Keyword.get(opts, :connector_snapshots, []),
-         labels: labels
+         labels: labels,
+         run_started_metadata: run_started_metadata
        }}
     else
       {:error, :mission_inventory_exceeded} = error -> error
+      {:error, :run_started_metadata_exceeded} = error -> error
       _ -> {:error, :invalid_run_config}
+    end
+  end
+
+  # One owner assembles the complete static `run-started` payload — labels,
+  # both prelude projections, mission-inventory fingerprints, and connector
+  # snapshots — and measures it with the sink's retained-size rule against
+  # the selected event-payload ceiling. A successful build therefore cannot
+  # knowingly begin with a `run-started` payload its configured sink must
+  # reject; the sink remains the final runtime authority.
+  defp run_started_metadata(workflow, mission, inventory, snapshots, labels, limits) do
+    with {:ok, workflow_prelude} <- FrozenBundle.trace_metadata(workflow.bundle),
+         {:ok, mission_prelude} <- FrozenBundle.trace_metadata(mission.bundle) do
+      payload = %{
+        labels: labels,
+        workflow_prelude: workflow_prelude,
+        mission_prelude: mission_prelude,
+        mission_inventory_hash: inventory.hash,
+        mission_inventory_bytes: inventory.bytes,
+        connector_snapshots: snapshots
+      }
+
+      limit = limits.event_payload_bytes
+      bytes = RetainedSize.bytes_with_cap(payload, limit)
+
+      if is_integer(bytes) and bytes <= limit,
+        do: {:ok, payload},
+        else: {:error, :run_started_metadata_exceeded}
+    else
+      {:error, :invalid_bundle} -> {:error, :invalid_run_config}
     end
   end
 

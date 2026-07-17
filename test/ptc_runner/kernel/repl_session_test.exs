@@ -1,9 +1,12 @@
 defmodule PtcRunner.Kernel.ReplSessionTest do
   use ExUnit.Case, async: true
 
+  alias PtcRunner.Kernel
   alias PtcRunner.Kernel.Capability
   alias PtcRunner.Kernel.EventSink
+  alias PtcRunner.Kernel.Library
   alias PtcRunner.Kernel.Limits
+  alias PtcRunner.Kernel.LLMCapability
   alias PtcRunner.Kernel.MissionEnvironment
   alias PtcRunner.Kernel.ReplSession
   alias PtcRunner.Kernel.RunConfig
@@ -11,6 +14,53 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
   alias PtcRunner.Kernel.WorkflowEnvironment
 
   @input_schema %{"type" => "object", "additionalProperties" => true}
+
+  test "manifest sessions grant the Runner's workflow runtime tools" do
+    # A reused manifest bundle must mean the same thing in the REPL as in the
+    # Runner: shipped preludes require runtime tools (workflow-annotate,
+    # runtime-usage), and fail-closed attach rejects a session missing them.
+    names =
+      ~w(agent.core agent.feedback agent.native agent.retry kernel llm result workflow.event)
+
+    {:ok, components} = Library.components(names)
+    {:ok, bundle} = Kernel.compile_bundle(components)
+
+    {:ok, llm} =
+      LLMCapability.new(
+        requester: fn _request ->
+          {:ok, %{content: "unused", tokens: %{input: 0, output: 0}}}
+        end
+      )
+
+    {:ok, workflow} = WorkflowEnvironment.new(bundle: bundle, capabilities: [llm])
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, limits} = Limits.new(evaluation_timeout_ms: 5_000)
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "repl-manifest-tools")
+
+    {:ok, config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        mission_environment: mission,
+        input: %{},
+        limits: limits,
+        event_sink: sink
+      )
+
+    {:ok, session} = ReplSession.new(config: config)
+
+    assert {:ok, step, _session} =
+             ReplSession.eval(
+               session,
+               ~S|(workflow.event/annotate "agent-action" {:turn 0 :kind "tool-call"})|
+             )
+
+    assert step.return[:status] == :ok or step.return["status"] == "ok"
+
+    assert Enum.any?(EventSink.events(sink), fn event ->
+             event.type == "workflow-annotation" and
+               event.data.annotation_type == "agent-action"
+           end)
+  end
 
   test "direct evaluations persist definitions and bounded turn history" do
     {:ok, session} = ReplSession.new()
@@ -112,12 +162,16 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
 
     assert {:error, :session_closed} = ReplSession.close(session)
 
+    # Build-time validation now rejects a payload the configured sink could
+    # not accept, so the runtime constructor failure is triggered by a full
+    # sink instead of an oversized payload.
     {:ok, workflow} = WorkflowEnvironment.new([])
     {:ok, mission} = MissionEnvironment.new([])
-    {:ok, limits} = Limits.new(event_payload_bytes: 1)
+    {:ok, limits} = Limits.new(normal_event_count: 1)
     {:ok, private_sink} = EventSink.start(:private, limits, run_id: "repl-constructor")
     failed_pid = private_sink.pid
     failed_ref = Process.monitor(failed_pid)
+    :ok = EventSink.emit(private_sink, "run-started", %{})
 
     {:ok, config} =
       RunConfig.new(
@@ -130,6 +184,39 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
 
     assert {:error, :event_sink_error} = ReplSession.new(config: config)
     assert_receive {:DOWN, ^failed_ref, :process, ^failed_pid, :normal}
+  end
+
+  test "configuration assembly rejects a run-started payload above the event ceiling" do
+    {:ok, workflow} = WorkflowEnvironment.new([])
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, limits} = Limits.new(event_payload_bytes: 1)
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "repl-metadata-ceiling")
+
+    assert {:error, :run_started_metadata_exceeded} =
+             RunConfig.new(
+               workflow_environment: workflow,
+               mission_environment: mission,
+               input: %{},
+               limits: limits,
+               event_sink: sink
+             )
+
+    {:ok, private_limits} = Limits.new(event_payload_bytes: 1)
+
+    {:ok, private_sink} =
+      EventSink.start(:private, private_limits, run_id: "repl-private-ceiling")
+
+    assert {:error, :run_started_metadata_exceeded} =
+             RunConfig.new(
+               workflow_environment: workflow,
+               mission_environment: mission,
+               input: %{},
+               limits: private_limits,
+               event_sink: private_sink
+             )
+
+    EventSink.stop(sink)
+    EventSink.stop(private_sink)
   end
 
   test "abort derives error usage even when the caller holds the original session value" do

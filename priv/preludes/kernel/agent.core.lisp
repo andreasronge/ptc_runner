@@ -31,7 +31,7 @@
               action (agent.native/normalize response max-program-chars)]
           (workflow.event/annotate
             "agent-action"
-            {:turn turn :kind (get action :kind) :reason (get action :reason)})
+            {:turn turn :kind (get action :kind)})
           (case (get action :kind)
             :tool-call
             (let [evaluation (kernel/eval-source (get action :program))]

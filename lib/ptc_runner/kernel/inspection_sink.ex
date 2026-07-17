@@ -21,7 +21,7 @@ defmodule PtcRunner.Kernel.InspectionSink do
 
   @default_record_bytes 2_000_000
   @default_total_bytes 16_000_000
-  @record_types ~w(capability-input capability-output evaluation-source)
+  @record_types ~w(capability-input capability-output evaluation-source prelude-source)
 
   @enforce_keys [:pid, :token]
   defstruct [:pid, :token]
@@ -201,6 +201,17 @@ defmodule PtcRunner.Kernel.InspectionSink do
         ~w(environment program_kind source source_hash source_bytes)
       ) and valid_id?(id) and payload["environment"] == "mission" and
         payload["program_kind"] == "ptc-lisp" and is_binary(payload["source"]) and
+        payload["source_hash"] == sha256(payload["source"]) and
+        payload["source_bytes"] == byte_size(payload["source"])
+
+    ok_or_error(valid?)
+  end
+
+  defp shape("prelude-source", %{"component_id" => id}, payload) do
+    valid? =
+      exact_payload(payload, ~w(environment source source_hash source_bytes)) and
+        valid_id?(id) and payload["environment"] in ["workflow", "mission"] and
+        is_binary(payload["source"]) and
         payload["source_hash"] == sha256(payload["source"]) and
         payload["source_bytes"] == byte_size(payload["source"])
 

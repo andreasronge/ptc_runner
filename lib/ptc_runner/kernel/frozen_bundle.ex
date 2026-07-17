@@ -22,6 +22,58 @@ defmodule PtcRunner.Kernel.FrozenBundle do
           attestation: binary() | nil
         }
 
+  @spec trace_metadata(t() | nil) ::
+          {:ok,
+           %{
+             component_ids: [binary()],
+             dependency_indices: [[non_neg_integer()]],
+             hash: binary() | nil
+           }}
+          | {:error, :invalid_bundle}
+  @doc """
+  Derives the compact canonical dependency projection for `run-started`.
+
+  `dependency_indices` is positionally aligned with `component_ids`: the
+  list at position `i` holds the unique, ascending indices of that
+  component's direct dependencies, and every index is strictly less than
+  `i` (the frozen order places dependencies before dependants, so forward
+  references and cycles are unrepresentable). A missing bundle projects to
+  empty lists and a nil hash. Component source, origins, namespaces, and
+  other compilation data never enter the projection.
+  """
+  def trace_metadata(nil), do: {:ok, %{component_ids: [], dependency_indices: [], hash: nil}}
+
+  def trace_metadata(%__MODULE__{} = bundle) do
+    positions = bundle.component_ids |> Enum.with_index() |> Map.new()
+
+    bundle.components
+    |> Enum.with_index()
+    |> Enum.reduce_while({:ok, []}, fn {component, position}, {:ok, acc} ->
+      indices =
+        component.dependencies
+        |> Enum.map(&Map.get(positions, &1))
+        |> Enum.sort()
+
+      valid? =
+        indices == Enum.uniq(indices) and
+          Enum.all?(indices, &(is_integer(&1) and &1 >= 0 and &1 < position))
+
+      if valid?, do: {:cont, {:ok, [indices | acc]}}, else: {:halt, {:error, :invalid_bundle}}
+    end)
+    |> case do
+      {:ok, indices} ->
+        {:ok,
+         %{
+           component_ids: bundle.component_ids,
+           dependency_indices: Enum.reverse(indices),
+           hash: bundle.hash
+         }}
+
+      {:error, _reason} = error ->
+        error
+    end
+  end
+
   @spec seal(t()) :: t()
   @doc "Attests a newly compiled bundle for later environment validation."
   def seal(%__MODULE__{} = bundle), do: %{bundle | attestation: attest(bundle)}

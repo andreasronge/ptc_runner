@@ -20,6 +20,7 @@ defmodule PtcRunner.Kernel.SafeMetadata do
   @identifier ~r/\A[A-Za-z0-9][A-Za-z0-9._:\/@+-]{0,255}\z/
   @fingerprint ~r/\Asha256:[0-9a-f]{64}\z/
   @progress_stages ~w(started planning executing validating completed failed)
+  @agent_action_kinds ~w(tool-call protocol-error provider-error)
 
   @spec normalize_labels(term()) :: {:ok, map()} | {:error, :invalid_safe_metadata}
   @doc "Validates labels and fingerprints caller-defined identifier fields."
@@ -46,8 +47,23 @@ defmodule PtcRunner.Kernel.SafeMetadata do
   def labels?(labels), do: match?({:ok, ^labels}, normalize_labels(labels))
 
   @spec annotation?(term(), term()) :: boolean()
-  @doc "Returns whether an annotation belongs to the finite canonical vocabulary."
+  @doc """
+  Returns whether an annotation belongs to the finite canonical vocabulary.
+
+  `"progress"` carries exactly one enumerated `stage`. `"agent-action"` is
+  the shipped agent loop's coarse per-turn record: exactly the keys `turn`
+  (an integer from 0 through 127, matching the loop's maximum turn count)
+  and `kind` (one of `tool-call`, `protocol-error`, or `provider-error`).
+  It never carries detailed reasons, generated source, or model content —
+  those stay in the agent's own history and, when enabled, in private
+  inspection records.
+  """
   def annotation?("progress", %{"stage" => stage}) when stage in @progress_stages, do: true
+
+  def annotation?("agent-action", %{"turn" => turn, "kind" => kind} = data)
+      when map_size(data) == 2 and is_integer(turn) and turn >= 0 and turn <= 127 and
+             kind in @agent_action_kinds,
+      do: true
 
   def annotation?(_type, _data), do: false
 
