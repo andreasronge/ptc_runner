@@ -8,6 +8,10 @@ This directory contains active product and extension plans only.
 - [`product-readiness.md`](product-readiness.md) assesses what is usable now,
   current limitations, prioritized improvements, and release gates for a
   non-Elixir developer experience.
+- [`viewer-ready-run-observability.md`](viewer-ready-run-observability.md)
+  plans bounded prelude dependency metadata, a valid shipped-agent annotation
+  vocabulary, and inspection-destination preflight for trustworthy Viewer
+  runs.
 
 Current user-facing material lives in [`../../guides/`](../../guides/). Git
 history is the archive for the completed Kernel migration, removed experiments,
