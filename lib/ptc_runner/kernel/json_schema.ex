@@ -9,6 +9,16 @@ defmodule PtcRunner.Kernel.JSONSchema do
   than unions, roots are objects, and a missing `additionalProperties` on an
   object is normalized to `false`.
 
+  `$schema` selects the schema dialect; absence means the MCP default
+  (2020-12). Because the accepted profile is a common subset of the
+  allowlisted dialects, a supported root `$schema` URI (2020-12, or draft-07
+  as a deliberate compatibility translation) is accepted and removed, while
+  unknown, malformed, and nested dialect markers are rejected. Vendor `x-…`
+  extension keys are discarded from every level as a deliberate client
+  policy — mainstream MCP SDKs emit them by default. Neither reaches
+  normalized output, encodings, or hashes. All other unknown keywords remain
+  rejected.
+
   Each normalized schema is at most 64 KiB with maximum depth 16, 128
   properties per object, and 256 enum members. Schemas are compiled once with
   JSV. Runtime validation delegates to the compiled JSV root; this module does
@@ -27,9 +37,15 @@ defmodule PtcRunner.Kernel.JSONSchema do
 
   @type compiled :: JSV.Root.t()
 
+  @dialects [
+    "https://json-schema.org/draft/2020-12/schema",
+    "http://json-schema.org/draft-07/schema#"
+  ]
+
   @spec compile(map()) :: {:ok, map(), compiled()} | {:error, :invalid_schema}
   def compile(schema) when is_map(schema) and not is_struct(schema) do
-    with {:ok, normalized} <- normalize(schema, 1),
+    with {:ok, schema} <- validate_dialect(schema),
+         {:ok, normalized} <- normalize(schema, 1),
          true <- normalized["type"] == "object",
          {:ok, encoded} <- DeterministicJSON.encode(normalized),
          true <- byte_size(encoded) <= @max_schema_bytes,
@@ -56,6 +72,7 @@ defmodule PtcRunner.Kernel.JSONSchema do
 
   defp normalize(schema, depth) when is_map(schema) and not is_struct(schema) do
     with true <- JSONValue.map?(schema),
+         schema = drop_ignored_annotations(schema),
          true <- Map.keys(schema) -- @allowed == [],
          type when type in @types <- schema["type"],
          :ok <- validate_text(schema, "title"),
@@ -82,6 +99,24 @@ defmodule PtcRunner.Kernel.JSONSchema do
   end
 
   defp normalize(_schema, _depth), do: {:error, :invalid_schema}
+
+  # A root "$schema" selects the dialect: absence defaults to 2020-12, a
+  # supported URI is removed after validation, anything else is rejected.
+  # Nested "$schema" is rejected in normalize/2 like any unknown keyword.
+  defp validate_dialect(schema) do
+    case Map.fetch(schema, "$schema") do
+      :error -> {:ok, schema}
+      {:ok, dialect} when dialect in @dialects -> {:ok, Map.delete(schema, "$schema")}
+      {:ok, _dialect} -> {:error, :invalid_schema}
+    end
+  end
+
+  # Vendor "x-…" extension keys are discarded as deliberate client policy;
+  # mainstream MCP SDKs emit them by default and this profile assigns them
+  # no semantics. Unsupported semantic keywords remain rejected.
+  defp drop_ignored_annotations(schema) do
+    Map.reject(schema, fn {key, _value} -> String.starts_with?(key, "x-") end)
+  end
 
   defp normalize_properties(schema, "object", depth) do
     case Map.fetch(schema, "properties") do

@@ -78,6 +78,53 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
   end
 
   @tag :tmp_dir
+  @tag :tmp_dir
+  test "tolerates spec-standard extra tool fields and SDK annotation keys", %{tmp_dir: dir} do
+    parent = self()
+    fixture = fixture(parent, spec_extras?: true)
+    on_exit(fixture.close)
+
+    registry = registry(fixture.endpoint)
+    manifest = manifest(dir, ~w(remote.structured))
+
+    assert {:ok, built} = RunBuilder.load_and_build(manifest, registry)
+
+    assert [snapshot] = built.config.connector_snapshots
+    assert Enum.map(snapshot["tools"], & &1["name"]) == ["remote.structured"]
+
+    encoded = Jason.encode!(snapshot)
+    refute encoded =~ "x-vendor-wrap"
+    refute encoded =~ "$schema"
+    refute encoded =~ "taskSupport"
+  end
+
+  @tag :tmp_dir
+  test "rejects tools that require task-based invocation", %{tmp_dir: dir} do
+    parent = self()
+    fixture = fixture(parent, execution: %{"taskSupport" => "required"})
+    on_exit(fixture.close)
+
+    registry = registry(fixture.endpoint)
+    manifest = manifest(dir, ~w(remote.structured))
+
+    assert {:error, :mcp_tool_task_required} = RunBuilder.load_and_build(manifest, registry)
+  end
+
+  @tag :tmp_dir
+  test "rejects malformed execution declarations under the pinned protocol", %{tmp_dir: dir} do
+    parent = self()
+
+    for execution <- [%{"taskSupport" => "later"}, %{"taskSupport" => 42}, "sync"] do
+      fixture = fixture(parent, execution: execution)
+      registry = registry(fixture.endpoint)
+      manifest = manifest(dir, ~w(remote.structured))
+
+      assert {:error, :mcp_invalid_catalog} = RunBuilder.load_and_build(manifest, registry)
+      fixture.close.()
+    end
+  end
+
+  @tag :tmp_dir
   test "rejects manifest expansion and invalid discovered schemas during assembly", %{
     tmp_dir: dir
   } do
@@ -580,12 +627,36 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     input =
       if opts[:invalid_schema?], do: Map.put(@input_schema, "$ref", "remote"), else: @input_schema
 
-    %{
+    base = %{
       "name" => "structured",
       "description" => "Return one structured value.",
       "inputSchema" => input,
       "outputSchema" => @output_schema
     }
+
+    base =
+      if opts[:spec_extras?] do
+        base
+        |> Map.merge(%{
+          "title" => "Structured",
+          "execution" => %{"taskSupport" => "forbidden"},
+          "_meta" => %{"vendor" => %{"tags" => []}}
+        })
+        |> Map.update!(
+          "inputSchema",
+          &Map.merge(&1, %{
+            "$schema" => "http://json-schema.org/draft-07/schema#",
+            "x-vendor-wrap" => true
+          })
+        )
+      else
+        base
+      end
+
+    case Keyword.fetch(opts, :execution) do
+      {:ok, execution} -> Map.put(base, "execution", execution)
+      :error -> base
+    end
   end
 
   defp tool(name, _opts) do

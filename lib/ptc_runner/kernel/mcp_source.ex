@@ -73,7 +73,8 @@ defmodule PtcRunner.Kernel.MCPSource do
   stable atom error: `:mcp_authentication_failed`, `:mcp_timeout`,
   `:mcp_transport_error`, `:mcp_protocol_error`, `:mcp_response_exceeded`,
   `:mcp_session_expired`, `:mcp_catalog_exceeded`, `:mcp_invalid_catalog`,
-  `:mcp_invalid_tool_schema`, or `:mcp_mapped_tool_missing`.
+  `:mcp_invalid_tool_schema`, `:mcp_tool_task_required`, or
+  `:mcp_mapped_tool_missing`.
 
   ## Frozen result and snapshot contracts
 
@@ -333,9 +334,37 @@ defmodule PtcRunner.Kernel.MCPSource do
   defp capability(_lease, _upstream, _mapping, nil, _selected),
     do: {:error, :mcp_mapped_tool_missing}
 
+  # Genuinely unknown tool-entry fields (title, _meta, icons, vendor
+  # metadata) are ignored per MCP forward compatibility: never rejected,
+  # never read, never forwarded. `execution` is a known field that changes
+  # invocation semantics under the pinned protocol, so it is parsed rather
+  # than ignored.
   defp capability(lease, upstream, mapping, tool, selected) do
-    with true <- Map.keys(tool) -- ~w(name description inputSchema outputSchema annotations) == [],
-         description <- Map.get(tool, "description"),
+    case task_support(tool) do
+      :ok -> assemble_capability(lease, upstream, mapping, tool, selected)
+      {:error, _reason} = error -> error
+    end
+  end
+
+  # A tool declaring `execution.taskSupport: "required"` must be invoked
+  # through the task primitives, which this synchronous client does not
+  # implement; exposing it as an ordinary capability would be incorrect, so
+  # assembly fails with a stable error. Absent, "forbidden", and "optional"
+  # execute as ordinary calls. Malformed pinned-protocol values are rejected.
+  defp task_support(%{"execution" => execution}) when is_map(execution) do
+    case Map.get(execution, "taskSupport") do
+      nil -> :ok
+      support when support in ["forbidden", "optional"] -> :ok
+      "required" -> {:error, :mcp_tool_task_required}
+      _invalid -> {:error, :mcp_invalid_catalog}
+    end
+  end
+
+  defp task_support(%{"execution" => _invalid}), do: {:error, :mcp_invalid_catalog}
+  defp task_support(_tool), do: :ok
+
+  defp assemble_capability(lease, upstream, mapping, tool, selected) do
+    with description <- Map.get(tool, "description"),
          true <-
            is_nil(description) or (is_binary(description) and byte_size(description) <= 4_096),
          input when is_map(input) <- tool["inputSchema"],
