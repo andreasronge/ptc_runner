@@ -12,6 +12,10 @@ This directory contains active product and extension plans only.
   plans compact prelude dependency metadata with complete-payload bounds, a
   coarse shipped-agent annotation vocabulary, strict Viewer validation, and
   inspection-destination preflight for trustworthy Viewer runs.
+- [`real-flow-e2e-hardening.md`](real-flow-e2e-hardening.md) plans REPL
+  manifest runtime-tool grants, scheduled e2e execution, private-sink and
+  overflow journeys, and delivers remote MCP e2e flows against a public
+  read-only server.
 
 Current user-facing material lives in [`../../guides/`](../../guides/). Git
 history is the archive for the completed Kernel migration, removed experiments,
