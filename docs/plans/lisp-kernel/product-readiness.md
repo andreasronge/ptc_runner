@@ -1,6 +1,6 @@
 # Lisp Kernel product readiness
 
-Status: active roadmap, reviewed 2026-07-16.
+Status: active roadmap, reviewed 2026-07-17.
 
 This document records the current limitations of the implemented minimal
 Kernel and the work that would make it usable as a developer-facing product.
@@ -378,12 +378,18 @@ event schema, and Logger/Telemetry contain no canonical or inspection payloads.
 
 ### Phase 1: manifest-first productization
 
+Implemented foundation in the current 0.x line:
+
+- Trusted manifest library references resolve shipped dependency closures, and
+  the tutorial uses the shipped `agent.core` implementation.
+- Installed host ceilings are separate from manifest-requested limits, which
+  may only narrow the installed values.
+
+Remaining productization work:
+
 - Add `ptc init`, `ptc validate`, `ptc models`, and `ptc doctor` equivalents.
-- Add trusted manifest library references and migrate the tutorial to the
-  shipped `agent.core` implementation.
 - Add manifest input/output schemas.
 - Rename `--mission` to `--input`.
-- Separate installed ceilings from manifest-requested limits.
 - Make REPL tool assembly and timeouts match normal workflow execution.
 - Add full scripted CLI and optional live DeepSeek manifest-agent tests.
 

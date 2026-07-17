@@ -278,7 +278,10 @@ defmodule PtcRunner.Kernel.RunState do
          bytes: RetainedSize.bytes_with_cap(state.memory, state.limits.evaluation_memory_bytes)
        }, state}
 
-  def handle_call({_token, _request}, _from, state), do: {:reply, {:error, :closed}, state}
+  def handle_call(_request, _from, state), do: {:reply, {:error, :closed}, state}
+
+  @impl GenServer
+  def handle_cast(_request, state), do: {:noreply, state}
 
   @impl GenServer
   def handle_info({:DOWN, ref, :process, _pid, _reason}, %{owner_ref: ref} = state),
@@ -318,6 +321,16 @@ defmodule PtcRunner.Kernel.RunState do
 
   def handle_info(_message, state), do: {:noreply, state}
 
+  if {:format_status, 1} in GenServer.behaviour_info(:callbacks) do
+    @impl GenServer
+    def format_status(status), do: redact_status(status)
+  else
+    def format_status(status), do: redact_status(status)
+  end
+
+  @impl GenServer
+  def format_status(_reason, _status), do: [data: [{~c"State", :redacted}]]
+
   @impl GenServer
   def terminate(_reason, state) do
     state.reservations
@@ -333,6 +346,14 @@ defmodule PtcRunner.Kernel.RunState do
     refs = Map.new(providers, fn provider -> {Process.monitor(provider), provider} end)
     Enum.each(providers, &Process.exit(&1, :kill))
     drain_providers(refs)
+  end
+
+  defp redact_status(status) do
+    Map.new(status, fn
+      {key, _value} when key in [:state, :message, :reason] -> {key, :redacted}
+      {:log, _value} -> {:log, []}
+      key_value -> key_value
+    end)
   end
 
   defp drain_providers(refs) when map_size(refs) == 0, do: :ok

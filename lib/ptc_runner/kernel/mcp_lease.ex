@@ -122,6 +122,11 @@ defmodule PtcRunner.Kernel.MCPLease do
       else: {:noreply, state}
   end
 
+  def handle_call(_request, _from, state), do: {:reply, {:error, :closed}, state}
+
+  @impl GenServer
+  def handle_cast(_request, state), do: {:noreply, state}
+
   @impl GenServer
   def handle_info({:DOWN, ref, :process, _pid, _reason}, %{owner_ref: ref} = state) do
     state = %{state | closing: state.closing || :owner_down}
@@ -140,6 +145,16 @@ defmodule PtcRunner.Kernel.MCPLease do
   end
 
   def handle_info(_message, state), do: {:noreply, state}
+
+  if {:format_status, 1} in GenServer.behaviour_info(:callbacks) do
+    @impl GenServer
+    def format_status(status), do: redact_status(status)
+  else
+    def format_status(status), do: redact_status(status)
+  end
+
+  @impl GenServer
+  def format_status(_reason, _status), do: [data: [{~c"State", :redacted}]]
 
   @impl GenServer
   def terminate(_reason, state) do
@@ -194,6 +209,14 @@ defmodule PtcRunner.Kernel.MCPLease do
     GenServer.call(pid, request)
   catch
     :exit, _reason -> {:error, :closed}
+  end
+
+  defp redact_status(status) do
+    Map.new(status, fn
+      {key, _value} when key in [:state, :message, :reason] -> {key, :redacted}
+      {:log, _value} -> {:log, []}
+      key_value -> key_value
+    end)
   end
 
   defp valid_session_id?(session_id),

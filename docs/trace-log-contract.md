@@ -47,9 +47,11 @@ All planes may share run, evaluation, and capability correlation IDs, subject
 to their own cardinality rules. Logger and Telemetry never add prompts,
 generated source, capability arguments/results, credentials, transport
 headers, session IDs, or endpoints. Exact application payloads appear only in
-an explicitly enabled inspection artifact. Erlang VM tracing (`:erlang.trace`,
-`:dbg`, or `:sys.trace`) is an operator debugging facility, not a product trace
-source.
+an explicitly enabled inspection artifact. Owner processes that retain private
+inspection/evaluation values or connector endpoint/session state use closed
+callback fallbacks and constant redacted OTP status, including abnormal-exit
+reports. Erlang VM tracing (`:erlang.trace`, `:dbg`, or `:sys.trace`) is an
+operator debugging facility, not a product trace source.
 
 After the Phase 0 cleanup, the existing Lisp execution Telemetry prefix remains
 `[:ptc_runner, :lisp, :execute]`. Its closed `caller` values are `:direct`,

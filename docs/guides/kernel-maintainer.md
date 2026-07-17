@@ -171,7 +171,8 @@ Runtime observability has separate planes with separate data contracts:
 
 - OTP Logger carries sparse operator diagnostics and never transcripts,
   prompts, source, capability payloads, credentials, endpoints, headers, or
-  session identifiers.
+  session identifiers. Owners retaining those values reject unknown callbacks
+  without crashing and expose only constant redacted OTP status.
 - Telemetry carries low-cardinality measurements. Lisp execution uses the
   `[:ptc_runner, :lisp, :execute]` prefix, the closed `:direct | :kernel |
   :repl` caller taxonomy, and `:ok | :error` semantic outcomes. Exception
