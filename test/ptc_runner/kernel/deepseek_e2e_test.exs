@@ -27,13 +27,15 @@ defmodule PtcRunner.Kernel.DeepSeekE2ETest do
     model = System.get_env("PTC_TEST_MODEL", "deepseek")
     {:ok, registry} = ProviderRegistry.new()
 
-    {:ok, capability} =
+    {:ok, %{capabilities: [capability], close: close}} =
       ProviderRegistry.build(
         registry,
         "llm",
         %{"model" => model},
         %{directory: File.cwd!(), destination: :workflow}
       )
+
+    if close, do: on_exit(close)
 
     {:ok, component} = Library.component("llm")
     {:ok, bundle} = Kernel.compile_bundle([component])
