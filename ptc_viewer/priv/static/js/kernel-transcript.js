@@ -8,6 +8,7 @@
 // marked private panels; nothing is inferred or reconstructed without it.
 
 import { escapeHtml } from './utils.js';
+import { highlightLisp } from './highlight.js';
 import { indexInspection } from './inspection.js';
 import { renderTokenUsage } from './token-usage.js';
 
@@ -41,7 +42,7 @@ export function renderKernelTranscriptMarkup({ metadata = {}, turns = {}, inspec
   return `
     <section class="kernel-transcript">
       ${renderHeader(metadata, transcript, events.length, Boolean(turns.next_cursor))}
-      ${renderPreludes(metadata)}
+      ${renderPreludes(metadata, privateIndex)}
       ${renderFingerprints(metadata)}
       ${renderTokenUsage(dialogueTurns, { partial: Boolean(turns.next_cursor) })}
       ${renderDialogue(dialogueTurns, { partial: Boolean(turns.next_cursor) })}
@@ -174,20 +175,22 @@ function renderToolbar() {
   `;
 }
 
-function renderPreludes(metadata) {
+function renderPreludes(metadata, index) {
   const entries = [
-    ['Workflow prelude', metadata.workflow_prelude],
-    ['Mission prelude', metadata.mission_prelude]
+    ['Workflow prelude', 'workflow', metadata.workflow_prelude],
+    ['Mission prelude', 'mission', metadata.mission_prelude]
   ];
 
   return `
     <div class="kt-preludes">
-      ${entries.map(([title, prelude]) => renderPreludeCard(title, prelude)).join('')}
+      ${entries
+        .map(([title, environment, prelude]) => renderPreludeCard(title, environment, prelude, index))
+        .join('')}
     </div>
   `;
 }
 
-function renderPreludeCard(title, prelude) {
+function renderPreludeCard(title, environment, prelude, index) {
   const ids = Array.isArray(prelude?.component_ids) ? prelude.component_ids : [];
   const components = dependencyGraph(prelude);
 
@@ -196,8 +199,29 @@ function renderPreludeCard(title, prelude) {
       <div class="kt-card-label">${escapeHtml(title)}${ids.length ? ` <span class="kt-card-count">${ids.length} component${ids.length === 1 ? '' : 's'}</span>` : ''}</div>
       ${components ? renderComponentRows(components) : renderComponentChips(ids)}
       ${ids.length > 1 ? '<div class="kt-prelude-order-note">Load order — dependencies before dependants.</div>' : ''}
+      ${renderComponentSources(environment, ids, index)}
       <div class="kt-hash" title="${escapeHtml(String(prelude?.hash || ''))}">${escapeHtml(shorten(prelude?.hash) || 'No bundle hash')}</div>
     </article>
+  `;
+}
+
+// Exact effective component source is available only through the pinned
+// private inspection artifact; without it the card shows identity and
+// dependency facts alone.
+function renderComponentSources(environment, ids, index) {
+  const records = ids
+    .map(id => [id, index.byComponent.get(`${environment}/${id}`)])
+    .filter(([, record]) => typeof record?.payload?.source === 'string');
+  if (!records.length) return '';
+
+  return `
+    <div class="kt-turn-label">Component source <span class="kt-private-chip">private</span></div>
+    ${records.map(([id, record]) => `
+      <details class="kt-raw kt-private-payload">
+        <summary>${escapeHtml(id)} <span>${escapeHtml(String(record.payload.source_bytes))} bytes</span></summary>
+        <pre class="kt-code kt-code-lisp">${highlightLisp(record.payload.source)}</pre>
+      </details>
+    `).join('')}
   `;
 }
 
@@ -430,7 +454,7 @@ function renderFullRequest(request) {
 
   return `
     <details class="kt-raw kt-turn-request">
-      <summary>Full request <span>${messages.length} messages · ${tools.length} tools${request.system ? ' · system prompt' : ''}</span></summary>
+      <summary>Exact request sent to the model <span>${messages.length} messages · ${tools.length} tools${request.system ? ' · system prompt' : ''}</span></summary>
       ${request.system ? `<div class="kt-turn-label">System prompt</div><pre class="kt-code">${escapeHtml(String(request.system))}</pre>` : ''}
       <div class="kt-turn-label">Messages</div>
       ${messages.map(renderMessage).join('')}
@@ -471,7 +495,7 @@ function renderProgram(program, label) {
   return `
     <div class="kt-program">
       <div class="kt-program-label">${escapeHtml(String(label || 'run_ptc_lisp'))} · generated program</div>
-      <pre class="kt-code kt-code-lisp">${escapeHtml(program)}</pre>
+      <pre class="kt-code kt-code-lisp">${highlightLisp(program)}</pre>
     </div>
   `;
 }
@@ -567,7 +591,7 @@ function renderEvaluationSource(evaluation, index) {
             : '<span class="kt-hash-bad" title="Captured source hash does not match the canonical evaluation-started source_hash">source hash mismatch</span>')
           : ''}
       </h4>
-      <pre class="kt-code kt-code-lisp">${escapeHtml(String(payload.source ?? ''))}</pre>
+      <pre class="kt-code kt-code-lisp">${highlightLisp(String(payload.source ?? ''))}</pre>
       <div class="kt-turn-tokens">${escapeHtml(String(payload.program_kind || ''))} · ${escapeHtml(String(payload.source_bytes ?? '?'))} bytes</div>
     </section>
   `;

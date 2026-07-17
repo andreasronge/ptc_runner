@@ -109,6 +109,8 @@ defmodule PtcViewer.DialogueRenderTest do
       assert rendered =~ "run_ptc_lisp"
       assert rendered =~ "tool · feedback"
       assert rendered =~ "The PTC-Lisp evaluation did not return successfully."
+      # Generated programs are syntax-highlighted PTC-Lisp, not flat text.
+      assert rendered =~ ~r{kt-code kt-code-lisp">.*?class="hljs-}s
     end
 
     test "verifies captured source hashes against canonical evaluation events", %{
@@ -140,6 +142,43 @@ defmodule PtcViewer.DialogueRenderTest do
         })
 
       assert rendered =~ "pairing is omitted rather than inferred"
+    end
+
+    test "renders captured prelude component source inside the matching card" do
+      rendered =
+        render_fixtures(%{
+          inspection: fn inspection ->
+            update_in(inspection, ["records"], fn records ->
+              last = List.last(records)
+
+              records ++
+                [
+                  %{
+                    "schema_version" => 1,
+                    "run_id" => last["run_id"],
+                    "trace_id" => last["trace_id"],
+                    "sequence" => last["sequence"] + 1,
+                    "timestamp" => last["timestamp"],
+                    "record_type" => "prelude-source",
+                    "correlation" => %{"component_id" => "agent.core"},
+                    "payload" => %{
+                      "environment" => "workflow",
+                      "source" => "(ns agent.core) (defn zzz-card-marker [task cfg] task)",
+                      "source_hash" => "ignored-by-renderer",
+                      "source_bytes" => 42
+                    }
+                  }
+                ]
+            end)
+          end
+        })
+
+      assert rendered =~ "Component source"
+      # The component source is syntax-highlighted, not dumped as raw text: the
+      # defined name renders inside a highlight.js title span. (The raw record
+      # text also appears in the inspection dump, so assert the highlighted form
+      # specifically to pin the rendering.)
+      assert rendered =~ ~s(hljs-title">zzz-card-marker</span>)
     end
 
     test "marks private payload panels and keeps the sanitized-trace notice", %{
@@ -219,6 +258,31 @@ defmodule PtcViewer.DialogueRenderTest do
       assert rendered =~ "<th>Cache creation</th>"
       refute rendered =~ "<th>Cache read</th>"
       assert rendered =~ "Input composition (by characters)"
+
+      # The never-reported input field renders as a gap, not a zero.
+      assert rendered =~ "<strong>—</strong><span>input tokens</span>"
+      refute rendered =~ "<strong>0</strong><span>input tokens</span>"
+    end
+
+    test "renders legitimately reported zero usage as zeros, not missing data" do
+      rendered =
+        render_fixtures(%{
+          inspection: fn inspection ->
+            map_llm_outputs(inspection, fn record, _index ->
+              put_in(
+                record,
+                ["payload", "result", "value", "tokens"],
+                %{"input" => 0, "output" => 0}
+              )
+            end)
+          end
+        })
+
+      assert rendered =~ "<strong>0</strong><span>input tokens</span>"
+      assert rendered =~ "<strong>0</strong><span>output tokens</span>"
+      assert rendered =~ "Input token counts were reported as zero"
+      refute rendered =~ "No input token counts were reported"
+      refute rendered =~ "totals exclude the unreported calls"
     end
 
     test "labels totals when some calls lack reported usage" do

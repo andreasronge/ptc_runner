@@ -50,7 +50,7 @@ malformed records, and a requested run ID that does not match the artifact. The
 UI keeps a sensitive-data warning visible whenever it renders these records.
 
 When the artifact is pinned, the run view joins its records to canonical IDs
-and renders four private additions alongside the sanitized transcript:
+and renders five private additions alongside the sanitized transcript:
 
 - an **LLM token spend** panel summarizing the run's provider-reported usage:
   total input/output tokens, cache reads/creation, and reported cost, with a
@@ -70,7 +70,10 @@ and renders four private additions alongside the sanitized transcript:
 - a **program source** panel inside each subordinate evaluation, verifying the
   captured source hash against the canonical `evaluation-started`
   `source_hash` and flagging any mismatch;
-- **arguments/result** panels inside each captured capability call.
+- **arguments/result** panels inside each captured capability call;
+- expandable **component source** inside each prelude card, joining
+  `prelude-source` records to the frozen component IDs of the matching
+  environment.
 
 Every joined panel carries a `private` marker; runs without a pinned artifact
 render the sanitized transcript unchanged. The viewer eagerly loads all

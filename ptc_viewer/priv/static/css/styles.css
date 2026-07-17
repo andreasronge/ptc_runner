@@ -1536,7 +1536,22 @@ input[type="file"] { display: none; }
   white-space: pre-wrap;
   word-break: break-word;
 }
-.kt-code-lisp { color: #ce9178; }
+/* PTC-Lisp / Clojure highlighting — highlight.js `hljs-*` token classes mapped
+   to the viewer's VS Code-style theme variables (no vendored hljs theme). */
+.kt-code-lisp { color: var(--fg); }
+.kt-code-lisp .hljs-comment,
+.kt-code-lisp .hljs-quote { color: var(--comment); font-style: italic; }
+.kt-code-lisp .hljs-string,
+.kt-code-lisp .hljs-regexp,
+.kt-code-lisp .hljs-char { color: var(--string); }
+.kt-code-lisp .hljs-keyword,
+.kt-code-lisp .hljs-built_in { color: var(--keyword); }
+.kt-code-lisp .hljs-symbol { color: var(--success); }
+.kt-code-lisp .hljs-number { color: #b5cea8; }
+.kt-code-lisp .hljs-literal { color: var(--accent); }
+.kt-code-lisp .hljs-title { color: var(--warning); font-weight: 600; }
+.kt-code-lisp .hljs-meta { color: var(--muted); }
+.kt-code-lisp .hljs-name { color: var(--fg); }
 .kt-turn-request { margin-top: 8px; }
 .kt-turn-request > div,
 .kt-turn-request > pre { margin: 6px 8px; }

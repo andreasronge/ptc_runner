@@ -5,10 +5,12 @@ import { escapeHtml } from './utils.js';
 export function indexInspection(inspection) {
   const byCapability = new Map();
   const byEvaluation = new Map();
+  const byComponent = new Map();
 
   for (const record of inspection?.records || []) {
     const capabilityId = record.correlation?.capability_id;
     const evaluationId = record.correlation?.evaluation_id;
+    const componentId = record.correlation?.component_id;
 
     if (capabilityId) {
       const entry = byCapability.get(capabilityId) || { input: null, output: null };
@@ -17,13 +19,16 @@ export function indexInspection(inspection) {
       byCapability.set(capabilityId, entry);
     } else if (evaluationId && record.record_type === 'evaluation-source') {
       byEvaluation.set(evaluationId, record);
+    } else if (componentId && record.record_type === 'prelude-source') {
+      byComponent.set(`${record.payload?.environment}/${componentId}`, record);
     }
   }
 
   return {
     byCapability,
     byEvaluation,
-    present: byCapability.size > 0 || byEvaluation.size > 0
+    byComponent,
+    present: byCapability.size > 0 || byEvaluation.size > 0 || byComponent.size > 0
   };
 }
 

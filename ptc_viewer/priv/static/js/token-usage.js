@@ -36,11 +36,17 @@ export function buildTokenUsage(turns) {
 
   for (const turn of turns) {
     const tokens = turn.value?.tokens;
-    const reported = tokens != null && typeof tokens === 'object' &&
-      USAGE_KEYS.some(key => typeof tokens[key] === 'number');
+    // A reported zero is data; a missing field is not. Presence is tracked
+    // per field so legitimate zeros (scripted providers) render as zeros
+    // while absent fields render as gaps.
+    const fields = Object.fromEntries(
+      USAGE_KEYS.map(key => [key, tokens != null && typeof tokens === 'object' &&
+        typeof tokens[key] === 'number'])
+    );
     const call = {
       turn: turn.turn,
-      reported,
+      fields,
+      reported: USAGE_KEYS.some(key => fields[key]),
       input: countOr0(tokens?.input),
       output: countOr0(tokens?.output),
       cacheRead: countOr0(tokens?.cache_read),
@@ -72,8 +78,10 @@ export function buildTokenUsage(turns) {
     calls,
     totals,
     reportedCalls: calls.filter(call => call.reported).length,
+    inputReported: calls.some(call => call.fields.input),
+    outputReported: calls.some(call => call.fields.output),
     composition: [...composition.values()],
-    hasUsage: Object.values(totals).some(value => value > 0),
+    hasUsage: calls.some(call => call.reported),
     estimable: totals.input > 0
   };
 }
@@ -118,7 +126,7 @@ export function renderTokenUsage(turns, options = {}) {
     </div>
     <section class="kt-tokens" aria-label="LLM token spend">
       ${options.partial ? '<p class="kt-token-note kt-token-warning">More canonical events exist beyond the loaded pages; these figures cover only the loaded events, not the whole run.</p>' : ''}
-      ${usage.hasUsage ? renderTiles(usage.totals) : ''}
+      ${usage.hasUsage ? renderTiles(usage) : ''}
       ${usage.hasUsage ? renderCallTable(usage) : ''}
       ${usage.hasUsage && unreported > 0
         ? `<p class="kt-token-note kt-token-warning">Provider usage was reported for ${usage.reportedCalls} of ${usage.calls.length} calls; totals exclude the unreported calls.</p>`
@@ -128,10 +136,11 @@ export function renderTokenUsage(turns, options = {}) {
   `;
 }
 
-function renderTiles(totals) {
+function renderTiles(usage) {
+  const totals = usage.totals;
   const tiles = [
-    [formatCount(totals.input), 'input tokens'],
-    [formatCount(totals.output), 'output tokens']
+    [usage.inputReported ? formatCount(totals.input) : '—', 'input tokens'],
+    [usage.outputReported ? formatCount(totals.output) : '—', 'output tokens']
   ];
   if (totals.cacheRead > 0) tiles.push([formatCount(totals.cacheRead), 'cache read']);
   if (totals.cacheCreation > 0) tiles.push([formatCount(totals.cacheCreation), 'cache creation']);
@@ -151,18 +160,22 @@ function renderCallTable(usage) {
   const showCacheCreation = usage.totals.cacheCreation > 0;
   const showCost = usage.totals.cost > 0;
 
-  const cell = (reported, value) => `<td>${reported ? escapeHtml(value) : '—'}</td>`;
+  const cell = (present, value) => `<td>${present ? escapeHtml(value) : '—'}</td>`;
 
-  const row = (label, call, cssClass = '') => `
+  const row = (label, call, fields, cssClass = '') => `
     <tr${cssClass ? ` class="${cssClass}"` : ''}>
       <td>${escapeHtml(label)}</td>
-      ${cell(call.reported, formatCount(call.input))}
-      ${cell(call.reported, formatCount(call.output))}
-      ${showCacheRead ? cell(call.reported, formatCount(call.cacheRead)) : ''}
-      ${showCacheCreation ? cell(call.reported, formatCount(call.cacheCreation)) : ''}
-      ${showCost ? cell(call.reported && call.cost > 0, formatCost(call.cost)) : ''}
+      ${cell(fields.input, formatCount(call.input))}
+      ${cell(fields.output, formatCount(call.output))}
+      ${showCacheRead ? cell(fields.cache_read, formatCount(call.cacheRead)) : ''}
+      ${showCacheCreation ? cell(fields.cache_creation, formatCount(call.cacheCreation)) : ''}
+      ${showCost ? cell(fields.total_cost && call.cost > 0, formatCost(call.cost)) : ''}
     </tr>
   `;
+
+  const totalFields = Object.fromEntries(
+    USAGE_KEYS.map(key => [key, usage.calls.some(call => call.fields[key])])
+  );
 
   return `
     <table class="kt-token-table">
@@ -175,8 +188,8 @@ function renderCallTable(usage) {
         </tr>
       </thead>
       <tbody>
-        ${usage.calls.map(call => row(`LLM call ${call.turn + 1}`, call)).join('')}
-        ${row('Total', { ...usage.totals, reported: true }, 'kt-token-total')}
+        ${usage.calls.map(call => row(`LLM call ${call.turn + 1}`, call, call.fields)).join('')}
+        ${row('Total', usage.totals, totalFields, 'kt-token-total')}
       </tbody>
     </table>
   `;
@@ -224,7 +237,9 @@ function renderComposition(usage) {
       <p class="kt-token-note">
         ${usage.estimable
           ? 'Providers report aggregate counts per call; section tokens apportion each call’s reported input tokens by character share.'
-          : 'No input token counts were reported for this run; proportions use exact character counts of the captured requests.'}
+          : usage.inputReported
+            ? 'Input token counts were reported as zero; proportions use exact character counts of the captured requests.'
+            : 'No input token counts were reported for this run; proportions use exact character counts of the captured requests.'}
       </p>
     </div>
   `;
