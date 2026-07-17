@@ -112,13 +112,23 @@ defmodule PtcRunner.Kernel.MCPRemoteAgentE2ETest do
     encoded_value = Jason.encode!(result.value)
     assert encoded_value =~ "Context7-compatible library ID"
 
-    # The canonical success path must be present: the remote capability call
-    # completed inside a mission evaluation that returned. The shipped
-    # `agent-action` annotation is still rejected by `SafeMetadata`, so
-    # `usage.protocol_errors` cannot be asserted to zero yet; once the
-    # shipped-agent annotation vocabulary is accepted, this test must also
-    # assert zero protocol errors and no failed instrumentation calls.
+    # The canonical success path must be present, and the run must be clean:
+    # no protocol errors and no failed instrumentation calls — the shipped
+    # agent-action annotation is accepted vocabulary.
+    assert result.usage.protocol_errors == 0
+
     events = trace_path |> File.stream!() |> Enum.map(&Jason.decode!/1)
+
+    refute Enum.any?(events, fn event ->
+             event["type"] == "capability-stopped" and
+               event["data"]["name"] == "workflow-annotate" and
+               event["data"]["status"] != "ok"
+           end)
+
+    assert Enum.any?(events, fn event ->
+             event["type"] == "workflow-annotation" and
+               event["data"]["annotation_type"] == "agent-action"
+           end)
 
     assert Enum.any?(events, fn event ->
              event["type"] == "capability-stopped" and

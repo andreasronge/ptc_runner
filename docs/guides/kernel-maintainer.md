@@ -312,8 +312,19 @@ The main contract-level tests are intentionally integration-oriented:
   `viewer_adapter_test.exs` — canonical event and query boundaries;
 - `agent_library_test.exs` — shipped Lisp workflow policy;
 - `tutorial_examples_test.exs` — checked-in user journeys;
-- `deepseek_e2e_test.exs` — optional live provider verification.
+- `deepseek_e2e_test.exs`, `mcp_remote_e2e_test.exs`, and
+  `mcp_remote_agent_e2e_test.exs` — live provider and remote MCP
+  verification.
 
 Run `mix precommit` before every commit and `mix prepush` before pushing. Use
 the optional E2E suite for provider integration changes; deterministic tests
 remain the authority for confinement, ownership, limits, rollback, and cleanup.
+
+The `:e2e` tag has a contract: tagged tests stay excluded from push/PR
+pipelines and run on the scheduled Integration Tests workflow (also manually
+dispatchable), which is the guard against silent rot. Anything tagged `:e2e`
+must skip cleanly when its environment (provider API key) is absent, must not
+depend on fixture-only state, and must assert clean instrumentation
+(`usage.protocol_errors == 0` for agent flows). Because live providers are
+nondeterministic, treat a single scheduled red as retry-worthy before
+escalating.

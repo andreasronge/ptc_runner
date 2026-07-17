@@ -6,8 +6,10 @@ a mixed-status run picker, multi-turn model dialogue with error feedback and
 recovery, real token/cost usage, bulk mission capability calls,
 limit-exceeded events, and error-outcome runs. Requires
 `OPENROUTER_API_KEY` in `.env`; a full pass costs a few cents (≤ ~15 model
-calls). The script enforces each journey's intended outcome class and fails
-on missing artifacts, so a passing run is a real smoke check.
+calls). The script enforces each journey's intended outcome class, checks
+the advertised evidence (limit-exceeded events for journey 03, loop-limit
+and heap-budget error feedback for journeys 04/05), and fails on missing
+artifacts, so a passing run is a real smoke check.
 
 ```console
 examples/viewer-demo/run.sh            # outputs to tmp/viewer-demo

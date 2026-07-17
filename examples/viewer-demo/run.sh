@@ -59,15 +59,28 @@ run_journey() {
   done
 }
 
+require_evidence() {
+  local journey=$1 file=$2 pattern=$3 label=$4
+  if ! grep -q "$pattern" "$file"; then
+    echo "FAIL: $journey missing $label in $file" >&2
+    exit 1
+  fi
+}
+
 run_journey 01-recovery ok
 run_journey 02-bulk ok
 run_journey 03-limits any
-if ! grep -q '"limit-exceeded"' "$out/03-limits.jsonl"; then
-  echo "FAIL: 03-limits produced no limit-exceeded events" >&2
-  exit 1
-fi
+require_evidence 03-limits "$out/03-limits.jsonl" '"limit-exceeded"' "limit-exceeded events"
+
+# 04/05 must fail for the advertised reason, not from an unrelated
+# provider or runtime error: the canonical trace must end in an error
+# outcome and the private feedback must carry the intended error code.
 run_journey 04-loop-limit error
+require_evidence 04-loop-limit "$out/04-loop-limit.jsonl" '"outcome":"error"' "an error run outcome"
+require_evidence 04-loop-limit "$out/04-loop-limit.inspection.jsonl" 'loop_limit_exceeded' "loop-limit feedback"
 run_journey 05-memory error
+require_evidence 05-memory "$out/05-memory.jsonl" '"outcome":"error"' "an error run outcome"
+require_evidence 05-memory "$out/05-memory.inspection.jsonl" 'memory_exceeded' "heap-budget feedback"
 
 echo
 echo "Traces collected in $out. View one journey's private payloads with e.g.:"

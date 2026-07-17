@@ -1,6 +1,10 @@
 name: Integration Tests
 
 on:
+  # Scheduled e2e execution is the rot guard for :e2e-tagged tests, which
+  # stay excluded from push/PR pipelines and would otherwise decay silently.
+  schedule:
+    - cron: '17 5 * * *'
   workflow_dispatch:
     inputs:
       test_type:
@@ -8,8 +12,9 @@ on:
         required: false
         type: choice
         options:
+          - 'e2e'
           - 'integration'
-        default: 'integration'
+        default: 'e2e'
 
 jobs:
   integration:
@@ -28,6 +33,13 @@ jobs:
       - name: Compile
         run: mix compile
 
-      - name: Run integration tests
-        run: mix test --include integration --trace
+      - name: Run tagged tests
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: |
+          if [ "${{ github.event_name }}" = "schedule" ] || [ "${{ inputs.test_type }}" = "e2e" ]; then
+            mix test --include e2e --trace
+          else
+            mix test --include integration --trace
+          fi
         timeout-minutes: 15

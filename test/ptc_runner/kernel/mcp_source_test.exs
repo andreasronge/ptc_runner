@@ -114,7 +114,12 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
   test "rejects malformed execution declarations under the pinned protocol", %{tmp_dir: dir} do
     parent = self()
 
-    for execution <- [%{"taskSupport" => "later"}, %{"taskSupport" => 42}, "sync"] do
+    for execution <- [
+          %{"taskSupport" => "later"},
+          %{"taskSupport" => 42},
+          %{"taskSupport" => nil},
+          "sync"
+        ] do
       fixture = fixture(parent, execution: execution)
       registry = registry(fixture.endpoint)
       manifest = manifest(dir, ~w(remote.structured))

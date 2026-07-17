@@ -352,11 +352,11 @@ defmodule PtcRunner.Kernel.MCPSource do
   # assembly fails with a stable error. Absent, "forbidden", and "optional"
   # execute as ordinary calls. Malformed pinned-protocol values are rejected.
   defp task_support(%{"execution" => execution}) when is_map(execution) do
-    case Map.get(execution, "taskSupport") do
-      nil -> :ok
-      support when support in ["forbidden", "optional"] -> :ok
-      "required" -> {:error, :mcp_tool_task_required}
-      _invalid -> {:error, :mcp_invalid_catalog}
+    case Map.fetch(execution, "taskSupport") do
+      :error -> :ok
+      {:ok, support} when support in ["forbidden", "optional"] -> :ok
+      {:ok, "required"} -> {:error, :mcp_tool_task_required}
+      {:ok, _invalid} -> {:error, :mcp_invalid_catalog}
     end
   end
 

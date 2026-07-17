@@ -1,11 +1,16 @@
 # Real-flow e2e hardening
 
-Status: planned, not implemented, except the parts included in the current
-change set: the remote MCP e2e tests plus the MCP interop fixes they forced
-(schema dialect handling, vendor-annotation policy, tool-entry forward
-compatibility, and task-support parsing). Created 2026-07-17 from a
-real-flow audit of the branch (live provider runs, generated traces and
-inspection artifacts, and live Viewer checks).
+Status: largely included in the current change set — the remote MCP e2e
+tests and the MCP interop fixes they forced (items 1), the
+instrumentation-clean agent e2e and scheduled workflow with the
+maintainer-guide tag contract (item 3), the REPL manifest runtime-tool
+grants (item 2), and the inventory V2 call forms with the
+prompt-inspecting scripted-model proof (item 6). The inspection-destination
+preflight sequenced here landed under its owning plan. Remaining: the
+pre-production release-hardening journeys (item 4) and cache diagnosis
+(item 5). Created 2026-07-17 from a real-flow audit of the branch (live
+provider runs, generated traces and inspection artifacts, and live Viewer
+checks).
 
 This plan closes the gap between the branch's boundary-heavy unit/property
 coverage and what actually happens in end-to-end flows with real providers.
@@ -128,7 +133,9 @@ Two `:e2e`-tagged tests run against a fixed public read-only MCP endpoint
   (`RunBuilder.run` with an injected registry): live DeepSeek plans a
   program that calls the remote MCP tool through a prompt-visible mission
   wrapper, with `--trace`/`--inspect` artifacts written and audited in-test
-  for endpoint, session-ID, and header absence.
+  for endpoint-host and transport field-name absence. Exact secret and
+  session-value scrubbing stays with the deterministic loopback fixture,
+  where those values are known.
 
 Assertions cover the connector snapshot (provider, protocol, public tool
 names, schema hashes), capability start/stop events, and scrubbing of
@@ -193,16 +200,23 @@ before the schedule becomes the rot guard.
 
 ### 6. Capability invocation syntax in the frozen inventory
 
-1. Bump the frozen mission inventory schema from V1 to V2, adding an exact
-   `call` form (for example `(tool/NAME {…})`) to every bare capability
-   entry, mirroring the `call` field prelude exports already carry.
+1. Bump the frozen mission inventory schema from V1 to V2, adding a `call`
+   field to every bare capability entry, mirroring the `call` field prelude
+   exports already carry. The rendering is frozen exactly: the value is the
+   literal string `(tool/<name> arguments)`, where `<name>` is the
+   capability's already-validated public name (`[a-z][a-z0-9._-]{0,127}`)
+   inserted verbatim and `arguments` is a fixed placeholder token; no other
+   whitespace, casing, or formatting varies, and the field participates in
+   the existing deterministic inventory encoding.
 2. Add golden and hash tests: the rendered inventory, its byte count, and
    `mission_inventory_hash` change together and deterministically.
 3. Prove Runner and REPL emit the identical V2 inventory from one shared
    renderer.
 4. Add a scripted-model journey that drives a bare capability directly from
-   the advertised `call` form — no prompt-visible wrapper — proving the
-   inventory alone is sufficient for correct invocation.
+   the advertised `call` form — no prompt-visible wrapper. The scripted
+   provider must inspect the captured system prompt and return its program
+   only when the exact V2 call form is present, proving the inventory itself
+   carries the enabling information rather than the fixture assuming it.
 
 ## Non-goals
 
@@ -219,18 +233,27 @@ before the schedule becomes the rot guard.
 ## Delivery sequence
 
 1. Remote MCP e2e tests and interop fixes (the current change set).
-2. REPL manifest runtime-tool grants with its regression test.
-3. Capability invocation syntax in the frozen inventory (V2).
-4. Agent-e2e instrumentation assertions (after the annotation vocabulary fix
-   from `viewer-ready-run-observability.md`), then the scheduled e2e CI
-   workflow and maintainer-guide testing contract.
-5. Private-sink, events-dropped, and multi-page journeys.
-6. Cache-usage diagnosis and demo extension.
+2. Agent-e2e instrumentation assertions immediately after the annotation
+   vocabulary fix from `viewer-ready-run-observability.md`, then the
+   scheduled e2e CI workflow and maintainer-guide testing contract — closing
+   the rot window before larger work begins.
+3. REPL manifest runtime-tool grants with its regression test.
+4. Inspection-destination preflight (owned by
+   `viewer-ready-run-observability.md`; sequenced here as the quick win
+   before the inventory change).
+5. Capability invocation syntax in the frozen inventory (V2).
+6. Private-sink, events-dropped, and multi-page journeys — pre-production
+   release hardening: they do not block the correctness and product work
+   above, but the private-file security contract and the synthetic-only
+   eager pagination path must be proven before the vertical slice is called
+   production-ready.
+7. Cache-usage diagnosis and demo extension.
 
 ## Acceptance gate
 
-- Both remote MCP e2e tests pass against the default public endpoint and
-  skip cleanly without their environment.
+- Both remote MCP e2e tests pass against the default public endpoint; the
+  agent flow additionally skips cleanly without its provider API key, while
+  the credential-free direct flow needs only network access.
 - `mix ptc.repl --manifest examples/kernel-tutorial/03-file-agent/ptc.json`
   starts, evaluates an expression, and its trace renders in the Viewer.
 - After the annotation vocabulary fix lands, the agent e2e asserts
