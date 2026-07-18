@@ -23,7 +23,7 @@ defmodule PtcRunner.Lisp.Eval do
   alias PtcRunner.Lisp.CoreAST
   alias PtcRunner.Lisp.Env
   alias PtcRunner.Lisp.Env.Builtin
-  alias PtcRunner.Lisp.Eval.{Apply, ParallelRunner, Patterns}
+  alias PtcRunner.Lisp.Eval.{Apply, Effects, ParallelRunner, Patterns}
   alias PtcRunner.Lisp.Eval.Context, as: EvalContext
   alias PtcRunner.Lisp.ExecutionError
   require PtcRunner.Lisp.ExecutionError
@@ -988,11 +988,7 @@ defmodule PtcRunner.Lisp.Eval do
   defp merge_export_effects(%EvalContext{} = caller_ctx, %EvalContext{} = export_ctx) do
     %{
       caller_ctx
-      | tool_calls: export_ctx.tool_calls,
-        pmap_calls: export_ctx.pmap_calls,
-        prelude_call_counts: export_ctx.prelude_call_counts,
-        tool_cache: export_ctx.tool_cache,
-        prints: export_ctx.prints,
+      | effects: export_ctx.effects,
         iteration_count: export_ctx.iteration_count
     }
   end
@@ -1370,8 +1366,8 @@ defmodule PtcRunner.Lisp.Eval do
     cache_key = if cacheable?, do: KeyNormalizer.canonical_cache_key(tool_name, args_map)
 
     # Check cache for hit (cached calls don't count against limit - already counted)
-    if cacheable? and Map.has_key?(eval_ctx.tool_cache, cache_key) do
-      cached = Map.get(eval_ctx.tool_cache, cache_key)
+    if cacheable? and Map.has_key?(eval_ctx.effects.tool_cache, cache_key) do
+      cached = Map.get(eval_ctx.effects.tool_cache, cache_key)
 
       tool_call =
         %{
@@ -1754,53 +1750,46 @@ defmodule PtcRunner.Lisp.Eval do
   # `{:ok, values, trace_ids, child_steps}` / `{:error, reason}` shape
   # the pmap/pcalls clauses expect.
   defp collect_runner_results({:ok, internal_results}, _type) do
-    {values, trace_ids, child_steps, effects} =
-      Enum.reduce(
-        internal_results,
-        {[], [], [], empty_parallel_effects()},
-        fn result, {vals, tids, steps, effects} ->
-          {:ok, val, trace_id, child_step, _worker_counts, worker_effects} =
-            extract_parallel_result(result)
-
-          effects = merge_parallel_effect_deltas(worker_effects, effects)
-          {[val | vals], [trace_id | tids], [child_step | steps], effects}
-        end
-      )
-
-    {:ok, Enum.reverse(values), Enum.reverse(trace_ids), Enum.reverse(child_steps), effects}
-  end
-
-  defp collect_runner_results(
-         {:error, {:parallel_contract_error, reason, effects}},
-         _type
-       ) do
-    {:contract_error, reason, effects}
-  end
-
-  defp collect_runner_results(
-         {:error, {:parallel_contract_error, reason, effects, completed_results}},
-         _type
-       ) do
-    completed_effects =
-      Enum.reduce(completed_results, empty_parallel_effects(), fn result, accumulated ->
-        {:ok, _value, _trace_id, _child_step, _counts, worker_effects} =
+    {values, trace_ids, child_steps, indexed_effects} =
+      internal_results
+      |> Enum.with_index()
+      |> Enum.reduce({[], [], [], []}, fn {result, index}, {vals, tids, steps, effects} ->
+        {:ok, val, trace_id, child_step, _worker_counts, worker_effects} =
           extract_parallel_result(result)
 
-        merge_parallel_effect_deltas(worker_effects, accumulated)
+        {[val | vals], [trace_id | tids], [child_step | steps],
+         [{index, worker_effects} | effects]}
       end)
 
-    {:contract_error, reason, merge_parallel_effect_deltas(effects, completed_effects)}
+    {:ok, Enum.reverse(values), Enum.reverse(trace_ids), Enum.reverse(child_steps),
+     Effects.merge_indexed(indexed_effects)}
   end
 
   defp collect_runner_results(
-         {:error, {:parallel_error, reason, completed_results}},
+         {:error,
+          {:parallel_contract_error, reason, failed_index, failed_effects, completed_results}},
+         _type
+       ) do
+    indexed_effects = [
+      {failed_index, failed_effects} | parallel_results_effects(completed_results)
+    ]
+
+    {:contract_error, reason, Effects.merge_indexed(indexed_effects)}
+  end
+
+  defp collect_runner_results(
+         {:error, {:parallel_error, failed_index, reason, completed_results}},
          type
        ) do
     {reason, failed_effects} = unwrap_parallel_effect_error(reason)
-    completed_effects = parallel_results_effects(completed_results)
+    indexed_effects = parallel_results_effects(completed_results)
 
-    {:error, classify_runner_error(reason, type),
-     merge_parallel_effect_deltas(failed_effects, completed_effects)}
+    indexed_effects =
+      if is_integer(failed_index),
+        do: [{failed_index, failed_effects} | indexed_effects],
+        else: indexed_effects
+
+    {:error, classify_runner_error(reason, type), Effects.merge_indexed(indexed_effects)}
   end
 
   defp collect_runner_results({:error, reason}, type) do
@@ -1836,11 +1825,11 @@ defmodule PtcRunner.Lisp.Eval do
   defp unwrap_parallel_effect_error(reason), do: {reason, empty_parallel_effects()}
 
   defp parallel_results_effects(results) do
-    Enum.reduce(results, empty_parallel_effects(), fn result, accumulated ->
+    Enum.map(results, fn {index, result} ->
       {:ok, _value, _trace_id, _child_step, _counts, worker_effects} =
         extract_parallel_result(result)
 
-      merge_parallel_effect_deltas(worker_effects, accumulated)
+      {index, worker_effects}
     end)
   end
 
@@ -2020,26 +2009,7 @@ defmodule PtcRunner.Lisp.Eval do
   defp extract_parallel_result({:ok, val, trace_id}),
     do: {:ok, val, trace_id, nil, %{}, empty_parallel_effects()}
 
-  defp empty_parallel_effects do
-    %{tool_calls: [], pmap_calls: [], prints: [], prelude_call_counts: %{}, tool_cache: %{}}
-  end
-
-  # Effect lists use evaluator prepend order. `newer` therefore precedes
-  # `older`; counts add and later cache entries win.
-  defp merge_parallel_effect_deltas(newer, older) do
-    %{
-      tool_calls: Map.fetch!(newer, :tool_calls) ++ Map.fetch!(older, :tool_calls),
-      pmap_calls: Map.fetch!(newer, :pmap_calls) ++ Map.fetch!(older, :pmap_calls),
-      prints: Map.fetch!(newer, :prints) ++ Map.fetch!(older, :prints),
-      prelude_call_counts:
-        Map.merge(
-          Map.fetch!(older, :prelude_call_counts),
-          Map.fetch!(newer, :prelude_call_counts),
-          fn _ref, left, right -> left + right end
-        ),
-      tool_cache: Map.merge(Map.fetch!(older, :tool_cache), Map.fetch!(newer, :tool_cache))
-    }
-  end
+  defp empty_parallel_effects, do: Effects.empty()
 
   # ============================================================
   # Pcalls helpers

@@ -28,6 +28,11 @@ records for recently completed cross-cutting work.
   unified model-contract projection consumed by configurable `Available API`
   rendering without numeric limits, and continued JSON Schema enforcement at
   raw capability boundaries.
+- [`unified-evaluator-effects-and-outcomes.md`](unified-evaluator-effects-and-outcomes.md)
+  plans one typed evaluator-effects representation, one nestable capture stack,
+  one effect-bearing outcome protocol, and a scheduler-only parallel boundary
+  so audit accounting and retry safety no longer depend on duplicated implicit
+  transport paths.
 
 Current user-facing material lives in [`../../guides/`](../../guides/). Git
 history is the archive for the completed Kernel migration, removed experiments,

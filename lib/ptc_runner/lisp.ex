@@ -44,6 +44,7 @@ defmodule PtcRunner.Lisp do
   }
 
   alias PtcRunner.Lisp.Eval.Context, as: EvalContext
+  alias PtcRunner.Lisp.Eval.Effects
   alias PtcRunner.Lisp.Eval.Helpers
   alias PtcRunner.Lisp.Eval.ParallelBudget
   alias PtcRunner.Lisp.Prelude
@@ -961,9 +962,10 @@ defmodule PtcRunner.Lisp do
 
   defp eval_error_step(reason, metrics, memory, %EvalContext{} = eval_ctx) do
     reason_atom = if is_tuple(reason), do: elem(reason, 0), else: reason
+    effects = Effects.chronological(eval_ctx.effects)
 
-    reversed_tool_calls = Enum.reverse(eval_ctx.tool_calls)
-    reversed_pmap_calls = Enum.reverse(eval_ctx.pmap_calls)
+    reversed_tool_calls = effects.tool_calls
+    reversed_pmap_calls = effects.pmap_calls
 
     tool_child_traces =
       reversed_tool_calls
@@ -1004,13 +1006,13 @@ defmodule PtcRunner.Lisp do
       trace_id: nil,
       parent_trace_id: nil,
       field_descriptions: nil,
-      prints: Enum.reverse(eval_ctx.prints),
+      prints: effects.prints,
       tool_calls: cleaned_tool_calls,
       pmap_calls: cleaned_pmap_calls,
-      prelude_call_counts: eval_ctx.prelude_call_counts,
+      prelude_call_counts: effects.prelude_call_counts,
       child_traces: child_traces,
       child_steps: child_steps,
-      tool_cache: eval_ctx.tool_cache
+      tool_cache: effects.tool_cache
     }
 
     {:error, step}
@@ -1162,8 +1164,9 @@ defmodule PtcRunner.Lisp do
   # Storage is explicit via `def` (values persist in user_ns).
   # No implicit map merge or :return key handling.
   defp apply_memory_contract(value, precision, %EvalContext{} = ctx, preserve_runtime_callables) do
-    reversed_tool_calls = Enum.reverse(ctx.tool_calls)
-    reversed_pmap_calls = Enum.reverse(ctx.pmap_calls)
+    effects = Effects.chronological(ctx.effects)
+    reversed_tool_calls = effects.tool_calls
+    reversed_pmap_calls = effects.pmap_calls
 
     # Extract child_trace_ids from both direct tool calls and pmap/pcalls
     tool_child_traces =
@@ -1197,14 +1200,14 @@ defmodule PtcRunner.Lisp do
       return: round_floats(value, precision),
       fail: nil,
       memory: native_memory(ctx.user_ns, preserve_runtime_callables),
-      tool_cache: ctx.tool_cache,
+      tool_cache: effects.tool_cache,
       signature: nil,
       usage: nil,
       turns: nil,
-      prints: Enum.reverse(ctx.prints),
+      prints: effects.prints,
       tool_calls: cleaned_tool_calls,
       pmap_calls: cleaned_pmap_calls,
-      prelude_call_counts: ctx.prelude_call_counts,
+      prelude_call_counts: effects.prelude_call_counts,
       child_traces: child_traces,
       child_steps: child_steps
     }

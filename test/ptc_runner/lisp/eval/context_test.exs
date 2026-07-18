@@ -37,12 +37,12 @@ defmodule PtcRunner.Lisp.Eval.ContextTest do
       ctx = Context.append_tool_call(ctx, tool_call_2)
 
       # Tool calls are prepended (most recent first)
-      assert [^tool_call_2, ^tool_call_1] = ctx.tool_calls
+      assert [^tool_call_2, ^tool_call_1] = ctx.effects.tool_calls
     end
 
     test "starts with empty tool_calls list" do
       ctx = Context.new(%{}, %{}, %{}, fn _, _ -> nil end, [])
-      assert ctx.tool_calls == []
+      assert ctx.effects.tool_calls == []
     end
   end
 
@@ -68,14 +68,14 @@ defmodule PtcRunner.Lisp.Eval.ContextTest do
       ctx = ctx_with_cap(100)
       tc = tool_call(%{result: [1, 2, 3], args: %{path: "x"}})
       ctx = Context.append_tool_call(ctx, tc)
-      assert [^tc] = ctx.tool_calls
+      assert [^tc] = ctx.effects.tool_calls
     end
 
     test "large result is truncated to a bounded preview and marked" do
       ctx = ctx_with_cap(100)
       tc = tool_call(%{result: Enum.to_list(1..10_000)})
       ctx = Context.append_tool_call(ctx, tc)
-      [stored] = ctx.tool_calls
+      [stored] = ctx.effects.tool_calls
 
       assert stored.result_truncated == true
       assert is_binary(stored.result)
@@ -87,7 +87,7 @@ defmodule PtcRunner.Lisp.Eval.ContextTest do
       ctx = ctx_with_cap(40)
       tc = tool_call(%{result: String.duplicate("é", 1_000)})
       ctx = Context.append_tool_call(ctx, tc)
-      [stored] = ctx.tool_calls
+      [stored] = ctx.effects.tool_calls
 
       assert stored.result_truncated == true
       assert byte_size(stored.result) <= 40
@@ -98,7 +98,7 @@ defmodule PtcRunner.Lisp.Eval.ContextTest do
       ctx = ctx_with_cap(8)
       tc = tool_call(%{result: Enum.to_list(1..10_000)})
       ctx = Context.append_tool_call(ctx, tc)
-      [stored] = ctx.tool_calls
+      [stored] = ctx.effects.tool_calls
 
       assert stored.result_truncated == true
       assert byte_size(stored.result) <= 8
@@ -111,7 +111,7 @@ defmodule PtcRunner.Lisp.Eval.ContextTest do
       ctx = Context.new(%{}, %{}, %{}, fn _, _ -> nil end, [])
       tc = tool_call(%{result: List.duplicate(0, 16_000)})
       ctx = Context.append_tool_call(ctx, tc)
-      [stored] = ctx.tool_calls
+      [stored] = ctx.effects.tool_calls
 
       assert stored.result_truncated == true
       assert stored.result_bytes > 100_000
@@ -130,7 +130,7 @@ defmodule PtcRunner.Lisp.Eval.ContextTest do
         })
 
       ctx = Context.append_tool_call(ctx, tc)
-      [stored] = ctx.tool_calls
+      [stored] = ctx.effects.tool_calls
 
       assert stored.name == "read"
       assert stored.error == nil
@@ -147,7 +147,7 @@ defmodule PtcRunner.Lisp.Eval.ContextTest do
       big_args = %{"server" => "fs", "tool" => "call", "blob" => String.duplicate("x", 5_000)}
       tc = tool_call(%{args: big_args, result: 42})
       ctx = Context.append_tool_call(ctx, tc)
-      [stored] = ctx.tool_calls
+      [stored] = ctx.effects.tool_calls
 
       assert stored.args == big_args
       refute Map.has_key?(stored, :args_truncated)
@@ -162,7 +162,7 @@ defmodule PtcRunner.Lisp.Eval.ContextTest do
       big = for _ <- 1..50, do: String.duplicate("abcdefgh", 5_000)
       ctx = ctx_with_cap(200)
       ctx = Context.append_tool_call(ctx, tool_call(%{result: big}))
-      [stored] = ctx.tool_calls
+      [stored] = ctx.effects.tool_calls
 
       assert stored.result_truncated == true
       assert byte_size(stored.result) <= 200
@@ -179,7 +179,7 @@ defmodule PtcRunner.Lisp.Eval.ContextTest do
 
       ctx = ctx_with_cap(5_000)
       ctx = Context.append_tool_call(ctx, tool_call(%{result: result}))
-      [stored] = ctx.tool_calls
+      [stored] = ctx.effects.tool_calls
 
       assert stored.result_truncated == true
       assert stored.result_bytes > 5_000
@@ -199,7 +199,7 @@ defmodule PtcRunner.Lisp.Eval.ContextTest do
 
       ctx = ctx_with_cap(5_000)
       ctx = Context.append_tool_call(ctx, tool_call(%{result: result}))
-      [stored] = ctx.tool_calls
+      [stored] = ctx.effects.tool_calls
 
       assert stored.result_truncated == true
       assert stored.result_bytes >= 100_000
@@ -209,7 +209,7 @@ defmodule PtcRunner.Lisp.Eval.ContextTest do
       ctx = ctx_with_cap(100)
       tc = tool_call(%{result: nil, error: "boom"})
       ctx = Context.append_tool_call(ctx, tc)
-      assert [^tc] = ctx.tool_calls
+      assert [^tc] = ctx.effects.tool_calls
     end
 
     test "a long fold of large results keeps the ledger bounded" do
@@ -223,11 +223,11 @@ defmodule PtcRunner.Lisp.Eval.ContextTest do
           Context.append_tool_call(acc, tool_call(%{name: "read_lines", result: page}))
         end)
 
-      assert length(ctx.tool_calls) == 50
-      total = :erlang.external_size(ctx.tool_calls)
+      assert length(ctx.effects.tool_calls) == 50
+      total = :erlang.external_size(ctx.effects.tool_calls)
       # 50 entries, each result capped to ~200-byte preview, plus small metadata.
       assert total < 50 * 2_000
-      assert Enum.all?(ctx.tool_calls, & &1.result_truncated)
+      assert Enum.all?(ctx.effects.tool_calls, & &1.result_truncated)
     end
   end
 end

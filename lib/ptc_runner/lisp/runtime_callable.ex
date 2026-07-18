@@ -9,6 +9,7 @@ defmodule PtcRunner.Lisp.RuntimeCallable do
   """
 
   alias PtcRunner.Lisp.Eval.Context, as: EvalContext
+  alias PtcRunner.Lisp.Eval.Effects
   alias PtcRunner.Lisp.Eval.Helpers
   alias PtcRunner.Lisp.ExecutionError
 
@@ -131,17 +132,7 @@ defmodule PtcRunner.Lisp.RuntimeCallable do
   defp context_with_hof_side_effects(%EvalContext{} = eval_ctx) do
     case Process.get(:__ptc_hof_stack, []) do
       [top | _rest] ->
-        %{
-          eval_ctx
-          | tool_calls: Map.get(top, :tool_calls, []) ++ eval_ctx.tool_calls,
-            pmap_calls: Map.get(top, :pmap_calls, []) ++ eval_ctx.pmap_calls,
-            prints: Map.get(top, :prints, []) ++ eval_ctx.prints,
-            prelude_call_counts:
-              Map.merge(eval_ctx.prelude_call_counts, top.prelude_call_counts, fn
-                _ref, left, right -> left + right
-              end),
-            tool_cache: Map.merge(eval_ctx.tool_cache, Map.get(top, :tool_cache, %{}))
-        }
+        %{eval_ctx | effects: Effects.merge(top, eval_ctx.effects)}
 
       [] ->
         eval_ctx
@@ -150,38 +141,13 @@ defmodule PtcRunner.Lisp.RuntimeCallable do
 
   defp stash_hof_side_effects(%EvalContext{} = ctx, %EvalContext{} = base_ctx) do
     case Process.get(:__ptc_hof_stack, []) do
-      [top | rest] ->
-        updated = %{
-          top
-          | tool_calls: strip_baseline_suffix(ctx.tool_calls, base_ctx.tool_calls),
-            pmap_calls: strip_baseline_suffix(ctx.pmap_calls, base_ctx.pmap_calls),
-            prints: strip_baseline_suffix(ctx.prints, base_ctx.prints),
-            prelude_call_counts:
-              subtract_baseline_counts(ctx.prelude_call_counts, base_ctx.prelude_call_counts),
-            tool_cache: ctx.tool_cache
-        }
+      [_top | rest] ->
+        updated = Effects.delta(ctx.effects, base_ctx.effects)
 
         Process.put(:__ptc_hof_stack, [updated | rest])
 
       [] ->
         :ok
     end
-  end
-
-  defp strip_baseline_suffix(values, []), do: values
-
-  defp strip_baseline_suffix(values, baseline) do
-    count = length(values) - length(baseline)
-
-    if count >= 0 and Enum.drop(values, count) == baseline do
-      Enum.take(values, count)
-    else
-      values
-    end
-  end
-
-  defp subtract_baseline_counts(counts, baseline) do
-    Map.new(counts, fn {ref, count} -> {ref, count - Map.get(baseline, ref, 0)} end)
-    |> Map.reject(fn {_ref, count} -> count <= 0 end)
   end
 end

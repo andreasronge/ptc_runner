@@ -1,11 +1,13 @@
 defmodule PtcRunner.Lisp.ToolErrorTest do
   use ExUnit.Case, async: true
 
+  alias PtcRunner.Lisp.Eval.Context, as: EvalContext
+  alias PtcRunner.Lisp.Eval.Effects
   alias PtcRunner.Lisp.ToolError
 
   describe "exception/1 — map arm" do
     test "carries message, eval_ctx and tool_name from a map" do
-      ctx = %{tool_calls: [%{name: "search", error: "boom"}]}
+      ctx = eval_context(%Effects{tool_calls: [%{name: "search", error: "boom"}]})
 
       err =
         ToolError.exception(%{
@@ -31,7 +33,7 @@ defmodule PtcRunner.Lisp.ToolErrorTest do
 
   describe "exception/1 — keyword arm" do
     test "carries message, eval_ctx and tool_name from a keyword list" do
-      ctx = %{tool_calls: []}
+      ctx = eval_context()
 
       err =
         ToolError.exception(
@@ -66,7 +68,11 @@ defmodule PtcRunner.Lisp.ToolErrorTest do
 
   describe "raise/rescue round-trip" do
     test "Exception.message/1 reflects the raised message and eval_ctx survives" do
-      ctx = %{tool_calls: [%{name: "billing", error: "402"}], prints: ["log"]}
+      ctx =
+        eval_context(%Effects{
+          tool_calls: [%{name: "billing", error: "402"}],
+          prints: ["log"]
+        })
 
       err =
         try do
@@ -79,10 +85,11 @@ defmodule PtcRunner.Lisp.ToolErrorTest do
         end
 
       assert Exception.message(err) == "payment declined"
-      # The whole point of this exception: the eval context (recorded tool_calls)
-      # is carried across the raise boundary so traces are not lost.
+      # The whole point of this exception: the eval context and its effects are
+      # carried across the raise boundary so traces are not lost.
       assert err.eval_ctx == ctx
-      assert err.eval_ctx.tool_calls == [%{name: "billing", error: "402"}]
+      assert err.eval_ctx.effects.tool_calls == [%{name: "billing", error: "402"}]
+      assert err.eval_ctx.effects.prints == ["log"]
       assert err.tool_name == "billing"
     end
 
@@ -122,5 +129,10 @@ defmodule PtcRunner.Lisp.ToolErrorTest do
       assert call.error =~ "kaboom from tool"
       assert call.result == nil
     end
+  end
+
+  defp eval_context(effects \\ Effects.empty()) do
+    ctx = EvalContext.new(%{}, %{}, %{}, fn _, _, _ -> nil end, [])
+    %{ctx | effects: effects}
   end
 end

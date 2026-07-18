@@ -182,6 +182,47 @@ defmodule PtcRunner.Lisp.ParallelEffectsTest do
     assert Enum.map(step.tool_calls, & &1.args["x"]) == [1]
   end
 
+  test "lower-index failure preserves input-order effects and higher-index cache precedence" do
+    coordinator = spawn_link(fn -> coordinate_parallel_release(nil, false) end)
+
+    tools = %{
+      "cache" =>
+        {fn _arguments -> inspect(self()) end, signature: "(key :int) -> :string", cache: true},
+      "wait" => fn _arguments ->
+        send(coordinator, {:wait, self()})
+
+        receive do
+          :go -> inspect(self())
+        end
+      end,
+      "release" => fn _arguments ->
+        send(coordinator, {:release_on_down, self()})
+        inspect(self())
+      end
+    }
+
+    source = ~S"""
+    (pmap
+      (fn [x]
+        (let [cached (tool/cache {"key" 1})]
+          (if (= x 0)
+            (do (tool/wait {"x" x}) (inc "bad"))
+            (do (tool/release {"x" x}) cached))))
+      [0 1])
+    """
+
+    assert {:error, step} = Lisp.run(source, tools: tools, pmap_max_concurrency: 2)
+
+    [lower_cache, higher_cache] = Enum.filter(step.tool_calls, &(&1.name == "cache"))
+    wait_call = Enum.find(step.tool_calls, &(&1.name == "wait"))
+    release_call = Enum.find(step.tool_calls, &(&1.name == "release"))
+
+    assert lower_cache.result == wait_call.result
+    assert higher_cache.result == release_call.result
+    assert [%{result: cached_result}] = Map.values(step.tool_cache)
+    assert cached_result == higher_cache.result
+  end
+
   test "generic pmap failure retains effects from the failing worker itself" do
     tools = %{"touch" => fn arguments -> arguments end}
 
@@ -260,5 +301,27 @@ defmodule PtcRunner.Lisp.ParallelEffectsTest do
     assert step.fail.reason == :pmap_error
     assert step.prints == ["completed"]
     assert Enum.map(step.tool_calls, & &1.args["x"]) == [1]
+  end
+
+  defp coordinate_parallel_release(waiter, released?) do
+    receive do
+      {:wait, pid} ->
+        if released? do
+          send(pid, :go)
+        else
+          coordinate_parallel_release(pid, false)
+        end
+
+      {:release_on_down, pid} ->
+        Process.monitor(pid)
+        coordinate_parallel_release(waiter, released?)
+
+      {:DOWN, _ref, :process, _pid, _reason} ->
+        if waiter do
+          send(waiter, :go)
+        else
+          coordinate_parallel_release(nil, true)
+        end
+    end
   end
 end

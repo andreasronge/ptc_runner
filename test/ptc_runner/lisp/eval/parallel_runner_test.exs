@@ -165,7 +165,8 @@ defmodule PtcRunner.Lisp.Eval.ParallelRunnerTest do
       end
 
       assert {:error,
-              {:parallel_contract_error, :contract_reason, ^effects, [:completed_audit_payload]}} =
+              {:parallel_contract_error, :contract_reason, 0, ^effects,
+               [{1, :completed_audit_payload}]}} =
                ParallelRunner.run(
                  [:failure, :success],
                  fun,

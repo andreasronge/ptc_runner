@@ -1,15 +1,9 @@
 defmodule PtcRunner.Lisp.Eval.EffectCapture do
   @moduledoc false
 
-  @key :__ptc_parallel_effect_capture_stack__
+  alias PtcRunner.Lisp.Eval.Effects
 
-  @type effects :: %{
-          tool_calls: [map()],
-          pmap_calls: [map()],
-          prints: [String.t()],
-          prelude_call_counts: %{String.t() => non_neg_integer()},
-          tool_cache: map()
-        }
+  @key :__ptc_parallel_effect_capture_stack__
 
   @spec push() :: :ok
   def push do
@@ -17,7 +11,7 @@ defmodule PtcRunner.Lisp.Eval.EffectCapture do
     :ok
   end
 
-  @spec pop() :: effects()
+  @spec pop() :: Effects.t()
   def pop do
     case Process.get(@key, []) do
       [effects | rest] ->
@@ -39,46 +33,26 @@ defmodule PtcRunner.Lisp.Eval.EffectCapture do
   def record_pmap_call(pmap_call) when is_map(pmap_call), do: update_list(:pmap_calls, pmap_call)
 
   @spec record_prelude_call(String.t()) :: :ok
-  def record_prelude_call(ref) when is_binary(ref) do
-    update(fn effects ->
-      Map.update!(
-        effects,
-        :prelude_call_counts,
-        &Map.update(&1, ref, 1, fn count -> count + 1 end)
-      )
-    end)
-  end
+  def record_prelude_call(ref) when is_binary(ref),
+    do: update(&Effects.record_prelude_call(&1, ref))
 
   @spec record_cache(term(), term()) :: :ok
-  def record_cache(key, value) do
-    update(&Map.update!(&1, :tool_cache, fn cache -> Map.put(cache, key, value) end))
-  end
+  def record_cache(key, value), do: update(&Effects.record_cache(&1, key, value))
 
-  @spec record_effects(effects()) :: :ok
-  def record_effects(effects) when is_map(effects) do
-    update(fn captured ->
-      %{
-        tool_calls: Map.fetch!(effects, :tool_calls) ++ captured.tool_calls,
-        pmap_calls: Map.fetch!(effects, :pmap_calls) ++ captured.pmap_calls,
-        prints: Map.fetch!(effects, :prints) ++ captured.prints,
-        prelude_call_counts:
-          Map.merge(
-            captured.prelude_call_counts,
-            Map.fetch!(effects, :prelude_call_counts),
-            fn _ref, left, right -> left + right end
-          ),
-        tool_cache: Map.merge(captured.tool_cache, Map.fetch!(effects, :tool_cache))
-      }
-    end)
-  end
+  @spec record_effects(Effects.t()) :: :ok
+  def record_effects(%Effects{} = effects), do: update(&Effects.merge(effects, &1))
 
-  @spec empty() :: effects()
-  def empty do
-    %{tool_calls: [], pmap_calls: [], prints: [], prelude_call_counts: %{}, tool_cache: %{}}
-  end
+  @spec empty() :: Effects.t()
+  def empty, do: Effects.empty()
 
   defp update_list(field, value) do
-    update(&Map.update!(&1, field, fn values -> [value | values] end))
+    update(fn effects ->
+      case field do
+        :prints -> Effects.record_print(effects, value)
+        :tool_calls -> Effects.record_tool_call(effects, value)
+        :pmap_calls -> Effects.record_pmap_call(effects, value)
+      end
+    end)
   end
 
   defp update(fun) do

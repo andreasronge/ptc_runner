@@ -8,7 +8,8 @@ defmodule PtcRunner.Lisp.ToolError do
   ## Fields
 
   - `message`: Error message from the tool
-  - `eval_ctx`: The evaluation context at time of failure (contains recorded tool_calls)
+  - `eval_ctx`: The evaluation context at time of failure (contains recorded
+    tool calls in `eval_ctx.effects.tool_calls`)
   - `tool_name`: Name of the tool that failed
   """
 

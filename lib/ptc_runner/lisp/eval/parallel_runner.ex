@@ -124,9 +124,10 @@ defmodule PtcRunner.Lisp.Eval.ParallelRunner do
     fault-injection tests that need a spawn to raise partway through
     filling the window; production callers never set it.
   - `:retain_completed_results` - wrap failures with successful payloads
-    already observed before the failure (default: `false`). The evaluator
-    enables this to preserve audit effects; direct callers retain the legacy
-    verbatim error shape.
+    already observed before the failure as `{input_index, payload}` pairs and
+    include the authoritative failing-worker index (default: `false`). The
+    evaluator enables this to preserve deterministic audit-effect and cache
+    ordering; direct callers retain the verbatim error shape.
   """
   @type opts :: [
           worker_max_heap: pos_integer() | nil,
@@ -570,7 +571,7 @@ defmodule PtcRunner.Lisp.Eval.ParallelRunner do
             # A `fun`-returned error fails the whole run. The worker is
             # finishing; `finish_error/2` -> `kill_all/1` reaps it
             # (releasing its slot) along with the rest.
-            finish_error(state, {:fun_error, reason})
+            finish_error(state, {:fun_error, info.index, reason})
         end
     end
   end
@@ -665,22 +666,26 @@ defmodule PtcRunner.Lisp.Eval.ParallelRunner do
   # Contract errors additionally retain completed worker payloads so the
   # evaluator can preserve their already-observed audit effects.
   defp unwrap_error(
-         {:fun_error, {:parallel_contract_error, reason, effects}},
+         {:fun_error, failed_index, {:parallel_contract_error, reason, effects}},
          results,
          live,
          _retain_completed_results?
        ) do
-    {:parallel_contract_error, reason, effects, completed_results(results, live)}
+    {:parallel_contract_error, reason, failed_index, effects, completed_results(results, live)}
   end
 
-  defp unwrap_error({:fun_error, term}, results, live, true),
-    do: {:parallel_error, term, completed_results(results, live)}
+  defp unwrap_error({:fun_error, failed_index, term}, results, live, true),
+    do: {:parallel_error, failed_index, term, completed_results(results, live)}
 
   defp unwrap_error(other, results, live, true),
-    do: {:parallel_error, other, completed_results(results, live)}
+    do: {:parallel_error, failure_index(other), other, completed_results(results, live)}
 
-  defp unwrap_error({:fun_error, term}, _results, _live, false), do: term
+  defp unwrap_error({:fun_error, _failed_index, term}, _results, _live, false), do: term
   defp unwrap_error(other, _results, _live, false), do: other
+
+  defp failure_index({_reason, index}) when is_integer(index), do: index
+  defp failure_index({_reason, index, _detail}) when is_integer(index), do: index
+  defp failure_index(_reason), do: nil
 
   defp completed_results(results, live) do
     live
@@ -689,7 +694,6 @@ defmodule PtcRunner.Lisp.Eval.ParallelRunner do
       _entry, acc -> acc
     end)
     |> Enum.sort_by(&elem(&1, 0))
-    |> Enum.map(&elem(&1, 1))
   end
 
   # Kill every live worker and release each one's global budget slot.

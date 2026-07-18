@@ -17,6 +17,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   alias PtcRunner.Lisp.Env.Builtin
   alias PtcRunner.Lisp.Eval.Context, as: EvalContext
   alias PtcRunner.Lisp.Eval.EffectCapture
+  alias PtcRunner.Lisp.Eval.Effects
   alias PtcRunner.Lisp.Eval.Helpers
   alias PtcRunner.Lisp.Eval.Patterns
   alias PtcRunner.Lisp.ExecutionError
@@ -782,7 +783,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
       # Stash the print in the process dictionary for HOF side-effect collection
       case Process.get(:__ptc_hof_stack, []) do
         [top | rest] ->
-          updated = %{top | prints: [message | top.prints]}
+          updated = Effects.record_print(top, message)
           Process.put(:__ptc_hof_stack, [updated | rest])
 
         [] ->
@@ -1027,8 +1028,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   defp stash_prelude_entry(%{prelude_ref: ref}) when is_binary(ref) do
     case Process.get(:__ptc_hof_stack, []) do
       [top | rest] ->
-        counts = Map.update(top.prelude_call_counts, ref, 1, &(&1 + 1))
-        Process.put(:__ptc_hof_stack, [%{top | prelude_call_counts: counts} | rest])
+        Process.put(:__ptc_hof_stack, [Effects.record_prelude_call(top, ref) | rest])
 
       [] ->
         :ok
@@ -1040,9 +1040,10 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   defp merge_stashed_prelude_counts(%EvalContext{} = eval_ctx) do
     case Process.get(:__ptc_hof_stack, []) do
       [top | _rest] ->
-        Map.update!(eval_ctx, :prelude_call_counts, fn current ->
-          Map.merge(current, top.prelude_call_counts, fn _ref, left, right -> left + right end)
-        end)
+        %{
+          eval_ctx
+          | effects: Effects.add_prelude_counts(eval_ctx.effects, top.prelude_call_counts)
+        }
 
       [] ->
         eval_ctx
@@ -1115,8 +1116,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
     stack = Process.get(:__ptc_hof_stack, [])
 
     Process.put(:__ptc_hof_stack, [
-      %{tool_calls: [], pmap_calls: [], prints: [], prelude_call_counts: %{}, tool_cache: %{}}
-      | stack
+      Effects.empty() | stack
     ])
   end
 
@@ -1151,19 +1151,10 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   defp stash_side_effects(%EvalContext{} = ctx) do
     case Process.get(:__ptc_hof_stack, []) do
       [top | rest] ->
-        # EvalContext stores tool_calls/prints in prepend order (newest first).
+        # EvalContext effects store tool_calls/prints in prepend order (newest first).
         # Maintain prepend order in the stash: current invocation's newest first,
         # then previous invocations'.
-        updated = %{
-          tool_calls: ctx.tool_calls ++ top.tool_calls,
-          pmap_calls: ctx.pmap_calls ++ Map.get(top, :pmap_calls, []),
-          prints: ctx.prints ++ top.prints,
-          prelude_call_counts:
-            Map.merge(top.prelude_call_counts, ctx.prelude_call_counts, fn _key, left, right ->
-              left + right
-            end),
-          tool_cache: Map.merge(Map.get(top, :tool_cache, %{}), ctx.tool_cache)
-        }
+        updated = Effects.merge(ctx.effects, top)
 
         Process.put(:__ptc_hof_stack, [updated | rest])
 
@@ -1180,16 +1171,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
         # Stash is in prepend order (newest first), same as eval_ctx.
         # Prepend stash before eval_ctx's existing items so the final
         # Enum.reverse in Lisp.run produces chronological order.
-        eval_ctx
-        |> Map.update!(:tool_calls, fn existing -> top.tool_calls ++ existing end)
-        |> Map.update!(:pmap_calls, fn existing -> Map.get(top, :pmap_calls, []) ++ existing end)
-        |> Map.update!(:prints, fn existing -> top.prints ++ existing end)
-        |> Map.update!(:prelude_call_counts, fn existing ->
-          Map.merge(existing, top.prelude_call_counts, fn _key, left, right -> left + right end)
-        end)
-        |> Map.update!(:tool_cache, fn existing ->
-          Map.merge(existing, Map.get(top, :tool_cache, %{}))
-        end)
+        %{eval_ctx | effects: Effects.merge(top, eval_ctx.effects)}
 
       [] ->
         eval_ctx
@@ -1358,11 +1340,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   defp restore_prelude_caller(%EvalContext{} = thrown_ctx, %EvalContext{} = caller_ctx) do
     %{
       caller_ctx
-      | tool_calls: thrown_ctx.tool_calls,
-        pmap_calls: thrown_ctx.pmap_calls,
-        prelude_call_counts: thrown_ctx.prelude_call_counts,
-        tool_cache: thrown_ctx.tool_cache,
-        prints: thrown_ctx.prints,
+      | effects: thrown_ctx.effects,
         iteration_count: thrown_ctx.iteration_count
     }
   end
@@ -1375,16 +1353,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   defp merge_hof_prelude_delta(%EvalContext{} = delta_ctx, %EvalContext{} = caller_ctx) do
     %{
       caller_ctx
-      | tool_calls: delta_ctx.tool_calls ++ caller_ctx.tool_calls,
-        pmap_calls: delta_ctx.pmap_calls ++ caller_ctx.pmap_calls,
-        prelude_call_counts:
-          Map.merge(
-            caller_ctx.prelude_call_counts,
-            delta_ctx.prelude_call_counts,
-            fn _ref, left, right -> left + right end
-          ),
-        tool_cache: Map.merge(caller_ctx.tool_cache, delta_ctx.tool_cache),
-        prints: delta_ctx.prints ++ caller_ctx.prints,
+      | effects: Effects.merge(delta_ctx.effects, caller_ctx.effects),
         iteration_count: caller_ctx.iteration_count + delta_ctx.iteration_count
     }
   end
@@ -1449,7 +1418,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
             closure_ctx
             | locals: closure_locals(meta, bindings),
               loop_limit: caller_ctx.loop_limit,
-              prints: caller_ctx.prints,
+              effects: caller_ctx.effects,
               max_print_length: caller_ctx.max_print_length,
               pmap_timeout: caller_ctx.pmap_timeout,
               pmap_max_concurrency: caller_ctx.pmap_max_concurrency,
@@ -1461,10 +1430,6 @@ defmodule PtcRunner.Lisp.Eval.Apply do
               worker_max_heap: caller_ctx.worker_max_heap,
               parallel_budget: caller_ctx.parallel_budget,
               pmap_deadline: caller_ctx.pmap_deadline,
-              tool_calls: caller_ctx.tool_calls,
-              pmap_calls: caller_ctx.pmap_calls,
-              prelude_call_counts: caller_ctx.prelude_call_counts,
-              tool_cache: caller_ctx.tool_cache,
               tools_meta: caller_ctx.tools_meta,
               # Propagate the ledger cap so tool calls inside a closure (e.g. the
               # paginated-read fold's `(map (fn [_] (tool/...)) ...)`) honor the
