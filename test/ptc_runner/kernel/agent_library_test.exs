@@ -3,6 +3,7 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
 
   alias PtcRunner.Kernel
   alias PtcRunner.Kernel.Capability
+  alias PtcRunner.Kernel.Component
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.Library
   alias PtcRunner.Kernel.Limits
@@ -168,7 +169,7 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
       )
 
     names =
-      ~w(agent.core agent.feedback agent.native agent.retry kernel llm result workflow.event)
+      ~w(agent.core agent.feedback agent.native agent.prompt agent.retry kernel llm result workflow.event)
 
     {:ok, components} = Library.components(names)
     {:ok, bundle} = Kernel.compile_bundle(components)
@@ -241,10 +242,14 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     assert_receive {:agent_request, second_request}
     assert_receive {:agent_request, third_request}
 
-    inventory = config.mission_inventory.rendered
-    assert first_request["system"] =~ inventory
-    assert second_request["system"] =~ inventory
-    assert third_request["system"] =~ inventory
+    model_context = config.mission_inventory.model_rendered
+
+    for request <- [first_request, second_request, third_request] do
+      assert request["system"] =~ "PTC_AGENT_PROMPT_V1"
+      assert request["system"] =~ "PTC-Lisp"
+      assert request["system"] =~ model_context
+      refute request["system"] =~ config.mission_inventory.rendered
+    end
 
     assert [
              %{"role" => "user", "content" => "Correct errors"},
@@ -272,6 +277,65 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     assert evaluation_feedback =~ "evaluation did not return successfully"
   end
 
+  test "agent.prompt is swappable code and transitions bounded state between calls" do
+    prompt_source = """
+    (ns agent.prompt "Test prompt policy" {:visibility :discoverable})
+    (defn initial-state [_cfg] {:revision 0})
+    (defn render [state] (str "CUSTOM_PROMPT_" (get state :revision)))
+    (defn transition [state _event] (assoc state :revision (inc (get state :revision))))
+    """
+
+    malformed = %{content: "prose", tool_calls: []}
+
+    corrected = %{
+      content: nil,
+      tool_calls: [
+        %{id: "good", name: "run_ptc_lisp", args: %{"program" => "(return 9)"}}
+      ]
+    }
+
+    {:ok, config} = agent_config([malformed, corrected], [], prompt_source: prompt_source)
+
+    assert {:ok, %{value: %{"ok" => true, "value" => 9}}} =
+             Kernel.run(~S|(agent.core/run "Revise" {"max_turns" 2})|, config)
+
+    assert_receive {:agent_request, %{"system" => "CUSTOM_PROMPT_0"}}
+    assert_receive {:agent_request, %{"system" => "CUSTOM_PROMPT_1"}}
+  end
+
+  test "invalid and multibyte oversized prompt renders fail before provider invocation" do
+    invalid_sources = [
+      """
+      (ns agent.prompt "Blank" {:visibility :discoverable})
+      (defn initial-state [_cfg] {})
+      (defn render [_state] "  ")
+      (defn transition [state _event] state)
+      """,
+      """
+      (ns agent.prompt "Wrong type" {:visibility :discoverable})
+      (defn initial-state [_cfg] {})
+      (defn render [_state] {:not "a string"})
+      (defn transition [state _event] state)
+      """,
+      """
+      (ns agent.prompt "Oversized" {:visibility :discoverable})
+      (defn initial-state [_cfg] {})
+      (defn render [_state] "#{String.duplicate("é", 200)}")
+      (defn transition [state _event] state)
+      """
+    ]
+
+    for prompt_source <- invalid_sources do
+      {:ok, config} =
+        agent_config([], [], prompt_source: prompt_source, llm_max_request_bytes: 300)
+
+      assert {:error, %{kind: :workflow_failed}} =
+               Kernel.run(~S|(agent.core/run "Never dispatch" {"max_turns" 1})|, config)
+    end
+
+    refute_receive {:agent_request, _request}
+  end
+
   test "agent.core exposes explicit failure, provider failure, and generic quota exhaustion" do
     explicit = %{
       content: nil,
@@ -297,7 +361,7 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
              Kernel.run(~S|(agent.core/run "Quota" {"max_turns" 2})|, quota_config)
   end
 
-  defp agent_config(responses, limit_overrides \\ []) do
+  defp agent_config(responses, limit_overrides \\ [], opts \\ []) do
     parent = self()
     {:ok, queue} = Agent.start_link(fn -> responses end)
 
@@ -311,12 +375,17 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
       end)
     end
 
-    {:ok, llm} = LLMCapability.new(requester: requester)
+    {:ok, llm} =
+      LLMCapability.new(
+        requester: requester,
+        max_request_bytes: Keyword.get(opts, :llm_max_request_bytes, 1_000_000)
+      )
 
     names = [
       "agent.core",
       "agent.feedback",
       "agent.native",
+      "agent.prompt",
       "agent.retry",
       "kernel",
       "llm",
@@ -325,6 +394,27 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     ]
 
     {:ok, components} = Library.components(names)
+
+    components =
+      case Keyword.fetch(opts, :prompt_source) do
+        {:ok, source} ->
+          {:ok, replacement} =
+            Component.new(
+              id: "agent.prompt",
+              source: source,
+              dependencies: ["kernel"],
+              origin: "test"
+            )
+
+          Enum.map(components, fn
+            %{id: "agent.prompt"} -> replacement
+            component -> component
+          end)
+
+        :error ->
+          components
+      end
+
     {:ok, bundle} = Kernel.compile_bundle(components)
     {:ok, workflow} = WorkflowEnvironment.new(bundle: bundle, capabilities: [llm])
     {:ok, mission} = MissionEnvironment.new([])

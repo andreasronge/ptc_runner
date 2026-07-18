@@ -187,13 +187,83 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
     run_id = first["run_id"]
     trace_id = first["trace_id"]
 
+    result =
+      records
+      |> Enum.with_index(1)
+      |> Enum.reduce_while(:ok, fn {record, sequence}, :ok ->
+        if valid_record?(record, run_id, trace_id, sequence),
+          do: {:cont, :ok},
+          else: {:halt, {:error, :invalid_inspection_artifact}}
+      end)
+
+    case result do
+      :ok -> validate_record_set(records)
+      {:error, _reason} = error -> error
+    end
+  end
+
+  defp validate_record_set(records) do
+    initial = %{
+      inputs: %{},
+      outputs: MapSet.new(),
+      evaluations: MapSet.new(),
+      preludes: MapSet.new()
+    }
+
     records
-    |> Enum.with_index(1)
-    |> Enum.reduce_while(:ok, fn {record, sequence}, :ok ->
-      if valid_record?(record, run_id, trace_id, sequence),
-        do: {:cont, :ok},
-        else: {:halt, {:error, :invalid_inspection_artifact}}
+    |> Enum.reduce_while({:ok, initial}, fn record, {:ok, state} ->
+      case record do
+        %{
+          "record_type" => "capability-input",
+          "correlation" => %{"capability_id" => id},
+          "payload" => %{"environment" => environment, "name" => name}
+        } ->
+          if Map.has_key?(state.inputs, id) do
+            {:halt, {:error, :invalid_inspection_artifact}}
+          else
+            {:cont, {:ok, put_in(state, [:inputs, id], {environment, name})}}
+          end
+
+        %{
+          "record_type" => "capability-output",
+          "correlation" => %{"capability_id" => id},
+          "payload" => %{"environment" => environment, "name" => name}
+        } ->
+          if Map.get(state.inputs, id) == {environment, name} and
+               not MapSet.member?(state.outputs, id) do
+            {:cont, {:ok, %{state | outputs: MapSet.put(state.outputs, id)}}}
+          else
+            {:halt, {:error, :invalid_inspection_artifact}}
+          end
+
+        %{
+          "record_type" => "evaluation-source",
+          "correlation" => %{"evaluation_id" => id}
+        } ->
+          unique_record(state, :evaluations, id)
+
+        %{
+          "record_type" => "prelude-source",
+          "correlation" => %{"component_id" => id},
+          "payload" => %{"environment" => environment}
+        } ->
+          unique_record(state, :preludes, {environment, id})
+      end
     end)
+    |> case do
+      {:ok, _state} -> :ok
+      {:error, _reason} = error -> error
+    end
+  end
+
+  defp unique_record(state, field, key) do
+    seen = Map.fetch!(state, field)
+
+    if MapSet.member?(seen, key) do
+      {:halt, {:error, :invalid_inspection_artifact}}
+    else
+      {:cont, {:ok, Map.put(state, field, MapSet.put(seen, key))}}
+    end
   end
 
   defp valid_record?(record, run_id, trace_id, sequence) do
@@ -257,50 +327,70 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
           event_value(event, :trace_id) == first["trace_id"]
       end)
 
-    capability_ids =
-      events
-      |> Enum.map(&event_data(&1, :capability_id))
-      |> MapSet.new()
+    with {:ok, capabilities} <- canonical_capabilities(events) do
+      evaluations =
+        Enum.reduce(events, %{}, fn event, evaluations ->
+          id = event_data(event, :evaluation_id)
+          hash = event_data(event, :source_hash)
+          bytes = event_data(event, :source_bytes)
 
-    evaluations =
-      Enum.reduce(events, %{}, fn event, evaluations ->
-        id = event_data(event, :evaluation_id)
-        hash = event_data(event, :source_hash)
-        bytes = event_data(event, :source_bytes)
+          if is_binary(id) and is_binary(hash) and is_integer(bytes),
+            do: Map.put(evaluations, id, {hash, bytes}),
+            else: evaluations
+        end)
 
-        if is_binary(id) and is_binary(hash) and is_integer(bytes),
-          do: Map.put(evaluations, id, {hash, bytes}),
-          else: evaluations
-      end)
+      prelude_components =
+        Enum.reduce(events, %{}, fn event, acc ->
+          acc
+          |> merge_prelude_ids("workflow", event_data(event, :workflow_prelude))
+          |> merge_prelude_ids("mission", event_data(event, :mission_prelude))
+        end)
 
-    prelude_components =
-      Enum.reduce(events, %{}, fn event, acc ->
-        acc
-        |> merge_prelude_ids("workflow", event_data(event, :workflow_prelude))
-        |> merge_prelude_ids("mission", event_data(event, :mission_prelude))
-      end)
+      if Enum.all?(records, fn
+           %{
+             "correlation" => %{"capability_id" => id},
+             "payload" => %{"environment" => environment, "name" => name}
+           } ->
+             Map.get(capabilities, id) == {environment, name}
 
-    if Enum.all?(records, fn
-         %{"correlation" => %{"capability_id" => id}} ->
-           MapSet.member?(capability_ids, id)
+           %{
+             "correlation" => %{"evaluation_id" => id},
+             "payload" => %{"source_hash" => hash, "source_bytes" => bytes}
+           } ->
+             Map.get(evaluations, id) == {hash, bytes}
 
-         %{
-           "correlation" => %{"evaluation_id" => id},
-           "payload" => %{"source_hash" => hash, "source_bytes" => bytes}
-         } ->
-           Map.get(evaluations, id) == {hash, bytes}
-
-         %{
-           "correlation" => %{"component_id" => id},
-           "payload" => %{"environment" => environment}
-         } ->
-           MapSet.member?(Map.get(prelude_components, environment, MapSet.new()), id)
-       end),
-       do: :ok,
-       else: {:error, :inspection_correlation_missing}
+           %{
+             "correlation" => %{"component_id" => id},
+             "payload" => %{"environment" => environment}
+           } ->
+             MapSet.member?(Map.get(prelude_components, environment, MapSet.new()), id)
+         end),
+         do: :ok,
+         else: {:error, :inspection_correlation_missing}
+    end
   end
 
   def validate_correlations(_records, _events), do: {:error, :inspection_correlation_missing}
+
+  defp canonical_capabilities(events) do
+    Enum.reduce_while(events, {:ok, %{}}, fn event, {:ok, capabilities} ->
+      id = event_data(event, :capability_id)
+      environment = event_data(event, :environment) |> string_value()
+      name = event_data(event, :name)
+
+      cond do
+        event_value(event, :type) != "capability-started" or not is_binary(id) or
+          environment not in ["workflow", "mission"] or not is_binary(name) ->
+          {:cont, {:ok, capabilities}}
+
+        Map.has_key?(capabilities, id) ->
+          {:halt, {:error, :inspection_correlation_missing}}
+
+        true ->
+          {:cont, {:ok, Map.put(capabilities, id, {environment, name})}}
+      end
+    end)
+  end
 
   defp merge_prelude_ids(acc, environment, prelude) when is_map(prelude) do
     ids =
@@ -321,6 +411,10 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
       _data -> nil
     end
   end
+
+  defp string_value(value) when is_atom(value), do: Atom.to_string(value)
+  defp string_value(value) when is_binary(value), do: value
+  defp string_value(_value), do: nil
 
   defp persist_new(path, encoded) do
     temporary = path <> ".tmp-" <> Base.encode16(:crypto.strong_rand_bytes(6), case: :lower)

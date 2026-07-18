@@ -17,9 +17,13 @@ const FAILURE = new Set([
   'error', 'failed', 'timeout', 'memory_exceeded', 'limit_exceeded',
   'evaluation_error', 'protocol_error'
 ]);
+const RESERVED_CAPABILITIES = new Set([
+  'kernel-eval', 'kernel-mission-inventory', 'kernel-mission-model-context',
+  'runtime-usage', 'runtime-remaining', 'cap-list', 'cap-describe', 'workflow-annotate'
+]);
 
-export function renderKernelTranscript(container, { metadata = {}, turns = {}, inspection = null }, options = {}) {
-  container.innerHTML = renderKernelTranscriptMarkup({ metadata, turns, inspection });
+export function renderKernelTranscript(container, { metadata = {}, turns = {}, inspection = null, inspectionStatus = null }, options = {}) {
+  container.innerHTML = renderKernelTranscriptMarkup({ metadata, turns, inspection, inspectionStatus });
 
   container.querySelector('[data-kt-action="expand"]')?.addEventListener('click', () => {
     container.querySelectorAll('.kernel-transcript details').forEach(details => { details.open = true; });
@@ -33,7 +37,7 @@ export function renderKernelTranscript(container, { metadata = {}, turns = {}, i
   if (loadMore && options.onLoadMore) loadMore.addEventListener('click', () => options.onLoadMore(loadMore));
 }
 
-export function renderKernelTranscriptMarkup({ metadata = {}, turns = {}, inspection = null }) {
+export function renderKernelTranscriptMarkup({ metadata = {}, turns = {}, inspection = null, inspectionStatus = null }) {
   const events = [...(turns.items || [])].sort((left, right) => left.sequence - right.sequence);
   const transcript = buildTranscript(events);
   const privateIndex = indexInspection(inspection);
@@ -42,8 +46,10 @@ export function renderKernelTranscriptMarkup({ metadata = {}, turns = {}, inspec
   return `
     <section class="kernel-transcript">
       ${renderHeader(metadata, transcript, events.length, Boolean(turns.next_cursor))}
+      ${renderProvenance(metadata, turns, transcript, privateIndex, inspection, inspectionStatus)}
       ${renderPreludes(metadata, privateIndex)}
       ${renderFingerprints(metadata)}
+      ${renderModelContext(dialogueTurns)}
       ${renderTokenUsage(dialogueTurns, { partial: Boolean(turns.next_cursor) })}
       ${renderDialogue(dialogueTurns, { partial: Boolean(turns.next_cursor) })}
       ${renderToolbar()}
@@ -148,10 +154,6 @@ function renderHeader(metadata, transcript, eventCount, truncatedPage) {
         ${facts.map(([key, value]) => fact(key, value)).join('')}
       </div>
       ${renderTags(metadata.tags || metadata.labels?.tags)}
-      <div class="kt-privacy-note">
-        <span class="kt-privacy-icon" aria-hidden="true">◈</span>
-        <span><strong>Sanitized trace.</strong> Prompts, responses, capability payloads and private prelude source are intentionally omitted.</span>
-      </div>
     </div>
     <div class="kt-metrics" aria-label="Run summary">
       ${metric(transcript.evaluations.length, 'evaluations')}
@@ -161,6 +163,50 @@ function renderHeader(metadata, transcript, eventCount, truncatedPage) {
       ${metric(eventCount, truncatedPage ? 'events loaded' : 'events')}
     </div>
   `;
+}
+
+function renderProvenance(metadata, turns, transcript, index, inspection, inspectionStatus) {
+  const llmCalls = transcript.capabilities.filter(call => nameOf(call) === 'llm-request');
+  const dispatchCalls = transcript.capabilities.filter(call => !RESERVED_CAPABILITIES.has(nameOf(call)));
+  const llm = joinCounts(llmCalls, index);
+  const dispatch = joinCounts(dispatchCalls, index);
+  const evidenceComplete = Boolean(metadata.complete) && !metadata.truncated && !turns.next_cursor;
+  const conflict = index.conflicts.length > 0;
+
+  if (inspectionStatus?.state === 'error') {
+    const status = inspectionStatus.status ? `HTTP ${inspectionStatus.status}` : 'request failed';
+    const reason = inspectionStatus.reason ? `: ${inspectionStatus.reason}` : '';
+    return `<div class="kt-provenance kt-provenance-warning" role="status"><strong>Private inspection overlay could not be loaded (${escapeHtml(status + reason)}).</strong> The canonical trace remains available and sanitized.</div>`;
+  }
+
+  if (!inspection) {
+    return '<div class="kt-provenance" role="status"><strong>Sanitized canonical trace.</strong> Prompts, responses, generated source and capability payloads are not present. Start the Viewer with a matching local inspection artifact to inspect model context.</div>';
+  }
+
+  const counts = `${llm.joined}/${llm.expected} LLM calls joined · ${dispatch.joined}/${dispatch.expected} dispatch calls joined`;
+  const interrupted = llm.interrupted ? ` · ${llm.interrupted} interrupted` : '';
+
+  if (llm.joined === llm.expected && dispatch.joined === dispatch.expected && evidenceComplete && !conflict) {
+    return `<div class="kt-provenance kt-provenance-private" role="status"><strong>Private inspection overlay loaded.</strong> Canonical events remain sanitized; model requests, responses, generated programs, feedback and capability payloads shown below come from the pinned local artifact. <span>${escapeHtml(counts)}</span></div>`;
+  }
+
+  const evidence = evidenceComplete ? '' : ' Canonical evidence incomplete.';
+  const conflicts = conflict ? ' Conflicting private records were ignored.' : '';
+  return `<div class="kt-provenance kt-provenance-warning" role="status"><strong>Private inspection overlay is incomplete: ${llm.joined}/${llm.expected} LLM calls joined.</strong>${escapeHtml(interrupted)} ${escapeHtml(`${dispatch.joined}/${dispatch.expected} dispatch calls joined.`)}${escapeHtml(evidence + conflicts)}</div>`;
+}
+
+function joinCounts(calls, index) {
+  let joined = 0;
+  let interrupted = 0;
+
+  for (const call of calls) {
+    const records = index.byCapability.get(call.id);
+    const complete = Boolean(records?.input && (!call.stop || records.output));
+    if (complete) joined += 1;
+    else if (records?.input && call.stop && !records.output) interrupted += 1;
+  }
+
+  return { expected: calls.length, joined, interrupted };
 }
 
 function renderToolbar() {
@@ -316,6 +362,73 @@ function renderFingerprints(metadata) {
 // what the model was told (including feedback on its previous program), the
 // program it generated, and how that program's evaluation ended.
 
+function renderModelContext(turns) {
+  if (!turns.length) return '';
+  const system = turns[0].request?.system;
+  if (typeof system !== 'string') return '';
+
+  return `
+    <div class="kt-toolbar kt-dialogue-toolbar">
+      <span>Captured model request</span>
+      <span class="kt-private-chip">private</span>
+    </div>
+    <section class="kt-model-context" aria-label="Captured model request">
+      <details class="kt-system-prompt" open>
+        <summary>System prompt <span>LLM call ${turns[0].turn + 1} · ${escapeHtml(String(new TextEncoder().encode(system).length))} bytes</span></summary>
+        ${renderSystemPrompt(system)}
+      </details>
+    </section>
+  `;
+}
+
+function renderSystemPrompt(system) {
+  if (!system.startsWith('PTC_AGENT_PROMPT_V1\n')) {
+    return `<p class="kt-sanitized-note">Edited or unknown prompt format; showing the exact captured prompt.</p><pre class="kt-code kt-code-prompt">${escapeHtml(system)}</pre>`;
+  }
+
+  const sections = splitPromptSections(system);
+  if (!sections) {
+    return `<pre class="kt-code kt-code-prompt">${escapeHtml(system)}</pre>`;
+  }
+
+  return `
+    <div class="kt-prompt-version">${escapeHtml(sections.version)}</div>
+    ${sections.items.map(section => `
+      <section class="kt-prompt-section">
+        <h4>${escapeHtml(section.heading)}</h4>
+        <pre>${escapeHtml(section.body)}</pre>
+      </section>
+    `).join('')}
+    <details class="kt-raw kt-prompt-exact">
+      <summary>Exact captured prompt</summary>
+      <pre class="kt-code kt-code-raw">${escapeHtml(system)}</pre>
+    </details>
+  `;
+}
+
+function splitPromptSections(system) {
+  const lines = system.split('\n');
+  const version = lines.shift();
+  const headings = new Set([
+    'Instructions', 'PTC-Lisp', 'Examples', 'Mission API and limits (deterministic JSON)'
+  ]);
+  const items = [];
+  let current = null;
+
+  for (const line of lines) {
+    if (headings.has(line)) {
+      if (current) items.push({ ...current, body: current.lines.join('\n').trim() });
+      current = { heading: line, lines: [] };
+    } else if (current) {
+      current.lines.push(line);
+    } else if (line.trim()) {
+      return null;
+    }
+  }
+  if (current) items.push({ ...current, body: current.lines.join('\n').trim() });
+  return items.length === headings.size ? { version, items } : null;
+}
+
 function renderDialogue(turns, options = {}) {
   if (!turns.length) return '';
 
@@ -332,21 +445,26 @@ function renderDialogue(turns, options = {}) {
 }
 
 export function buildDialogueTurns(transcript, index) {
-  const llmCalls = transcript.capabilities.filter(call =>
-    nameOf(call) === 'llm-request' && index.byCapability.get(call.id)?.input
-  );
+  const canonicalLlmCalls = transcript.capabilities.filter(call => nameOf(call) === 'llm-request');
+  const llmCalls = canonicalLlmCalls
+    .map((call, ordinal) => ({ call, ordinal, nextCall: canonicalLlmCalls[ordinal + 1] }))
+    .filter(({ call }) => index.byCapability.get(call.id)?.input);
   if (!llmCalls.length) return [];
 
   const missionEvaluations = transcript.evaluations.filter(evaluation =>
     environmentOf(evaluation) === 'mission'
   );
-  let previousMessageCount = 0;
+  const firstSystem = index.byCapability.get(llmCalls[0].call.id)?.input?.payload?.arguments?.system;
+  let previousMessageCount = null;
 
-  return llmCalls.map((call, turnIndex) => {
+  return llmCalls.map(({ call, ordinal, nextCall }, joinedIndex) => {
     const records = index.byCapability.get(call.id);
     const request = records.input?.payload?.arguments || {};
     const messages = Array.isArray(request.messages) ? request.messages : [];
-    const newMessages = messages.slice(previousMessageCount);
+    const previousJoined = llmCalls[joinedIndex - 1];
+    const previousAvailable = ordinal === 0 || previousJoined?.ordinal === ordinal - 1;
+    const messageRelation = ordinal === 0 ? 'initial' : previousAvailable ? 'delta' : 'unavailable';
+    const newMessages = messageRelation === 'delta' ? messages.slice(previousMessageCount) : messages;
     previousMessageCount = messages.length;
 
     const result = records.output?.payload?.result;
@@ -357,7 +475,6 @@ export function buildDialogueTurns(transcript, index) {
     // one of this turn's generated programs — never positionally. A window
     // without a verifiable match renders unpaired rather than guessed.
     const lowerBound = call.stop?.sequence ?? call.start?.sequence ?? 0;
-    const nextCall = llmCalls[turnIndex + 1];
     const upperBound = nextCall ? sequenceOf(nextCall) : Infinity;
     const programs = toolCalls
       .map(toolCall => toolCall?.args?.program)
@@ -372,7 +489,9 @@ export function buildDialogueTurns(transcript, index) {
     const sourceRecord = evaluation ? index.byEvaluation.get(evaluation.id) || null : null;
 
     return {
-      turn: turnIndex,
+      turn: ordinal,
+      firstCaptured: joinedIndex === 0,
+      messageRelation,
       call,
       request,
       newMessages,
@@ -381,6 +500,9 @@ export function buildDialogueTurns(transcript, index) {
       toolCalls,
       evaluation,
       sourceRecord,
+      systemRelation: joinedIndex === 0
+        ? 'first'
+        : previousAvailable ? request.system === firstSystem ? 'same' : 'changed' : 'unanchored',
       sourceVerified: Boolean(
         sourceRecord?.payload?.source_hash &&
         evaluation?.start?.data?.source_hash &&
@@ -405,11 +527,16 @@ function renderDialogueTurn(turn) {
         </span>
       </header>
       <div class="kt-turn-in">
-        <div class="kt-turn-label">${turn.turn === 0 ? 'Sent to model' : 'New since previous call'}</div>
+        <div class="kt-turn-label">${turn.messageRelation === 'initial'
+          ? 'Sent to model'
+          : turn.messageRelation === 'delta'
+            ? 'New since previous call'
+            : 'Captured messages · previous request unavailable'}</div>
         ${turn.newMessages.length
-          ? turn.newMessages.map(renderMessage).join('')
+          ? turn.newMessages.map(message => renderMessage(message, { targetCall: turn.turn + 1 })).join('')
           : '<p class="kt-missing">No new messages recorded for this call.</p>'}
-        ${renderFullRequest(turn.request)}
+        ${renderPromptRelation(turn)}
+        ${renderFullRequest(turn)}
       </div>
       <div class="kt-turn-out">
         <div class="kt-turn-label">Model response</div>
@@ -420,7 +547,21 @@ function renderDialogueTurn(turn) {
   `;
 }
 
-function renderMessage(message) {
+function renderPromptRelation(turn) {
+  if (['first', 'unanchored'].includes(turn.systemRelation) || typeof turn.request?.system !== 'string') return '';
+  if (turn.systemRelation === 'same') {
+    return '<p class="kt-prompt-same">System prompt: same as LLM call 1.</p>';
+  }
+
+  return `
+    <details class="kt-system-prompt kt-prompt-revision" open>
+      <summary>System prompt changed <span>LLM call ${turn.turn + 1}</span></summary>
+      ${renderSystemPrompt(turn.request.system)}
+    </details>
+  `;
+}
+
+function renderMessage(message, options = {}) {
   const role = String(message?.role || 'unknown');
   const feedback = role === 'tool';
 
@@ -435,7 +576,7 @@ function renderMessage(message) {
 
   return `
     <div class="kt-msg kt-msg-${safeClass(role)}">
-      <span class="kt-msg-role">${escapeHtml(role)}${feedback ? ' · feedback' : ''}</span>
+      <span class="kt-msg-role">${escapeHtml(role)}${feedback ? ` · feedback · Feedback sent to LLM call ${escapeHtml(String(options.targetCall || '?'))}` : ''}</span>
       <div class="kt-msg-content">${escapeHtml(messageText(message))}</div>
     </div>
   `;
@@ -448,17 +589,15 @@ function messageText(message) {
   return JSON.stringify(content, null, 2);
 }
 
-function renderFullRequest(request) {
+function renderFullRequest(turn) {
+  const request = turn.request;
   const messages = Array.isArray(request.messages) ? request.messages : [];
   const tools = Array.isArray(request.tools) ? request.tools : [];
 
   return `
     <details class="kt-raw kt-turn-request">
-      <summary>Exact request sent to the model <span>${messages.length} messages · ${tools.length} tools${request.system ? ' · system prompt' : ''}</span></summary>
-      ${request.system ? `<div class="kt-turn-label">System prompt</div><pre class="kt-code">${escapeHtml(String(request.system))}</pre>` : ''}
-      <div class="kt-turn-label">Messages</div>
-      ${messages.map(renderMessage).join('')}
-      ${tools.length ? `<div class="kt-turn-label">Tools</div><pre class="kt-code">${json(tools)}</pre>` : ''}
+      <summary>Raw captured request <span>${messages.length} messages · ${tools.length} tools${request.system ? ` · ${turn.firstCaptured ? 'system prompt shown above' : 'system prompt captured'}` : ''}</span></summary>
+      <pre class="kt-code kt-code-raw">${json(request)}</pre>
     </details>
   `;
 }

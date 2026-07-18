@@ -10,7 +10,10 @@
 
 import { escapeHtml } from './utils.js';
 
-const INVENTORY_MARKER = 'Frozen mission inventory (JSON):';
+const INVENTORY_MARKERS = [
+  'Frozen mission inventory (JSON):',
+  'Mission API and limits (deterministic JSON)'
+];
 
 const USAGE_KEYS = ['input', 'output', 'cache_read', 'cache_creation', 'total_cost'];
 
@@ -90,7 +93,10 @@ function sectionChars(request) {
   const chars = { system: 0, inventory: 0, tools: 0, user: 0, assistant: 0, feedback: 0 };
 
   const system = typeof request.system === 'string' ? request.system : '';
-  const markerAt = system.indexOf(INVENTORY_MARKER);
+  const markerAt = INVENTORY_MARKERS
+    .map(marker => system.indexOf(marker))
+    .filter(index => index >= 0)
+    .sort((left, right) => left - right)[0] ?? -1;
   if (markerAt >= 0) {
     chars.system = markerAt;
     chars.inventory = system.length - markerAt;

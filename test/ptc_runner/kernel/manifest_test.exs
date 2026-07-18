@@ -251,6 +251,7 @@ defmodule PtcRunner.Kernel.ManifestTest do
              "agent.native",
              "agent.retry",
              "kernel",
+             "agent.prompt",
              "llm",
              "result",
              "workflow.event",

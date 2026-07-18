@@ -15,7 +15,7 @@ globalThis.document = {
   }
 };
 
-const [metadataPath, turnsPath, inspectionPath] = process.argv.slice(2);
+const [metadataPath, turnsPath, inspectionPath, inspectionStatusPath] = process.argv.slice(2);
 if (!metadataPath || !turnsPath || !inspectionPath) {
   throw new Error('usage: node render_viewer.mjs METADATA TURNS INSPECTION');
 }
@@ -24,7 +24,9 @@ const readJson = path => JSON.parse(fs.readFileSync(path, 'utf8'));
 const metadata = readJson(metadataPath);
 const turns = readJson(turnsPath);
 const inspection = readJson(inspectionPath);
+const inspectionStatus = inspectionStatusPath ? readJson(inspectionStatusPath) : null;
 
 process.stdout.write(
-  renderKernelTranscriptMarkup({ metadata, turns, inspection }) + renderInspectionMarkup(inspection)
+  renderKernelTranscriptMarkup({ metadata, turns, inspection, inspectionStatus }) +
+    renderInspectionMarkup(inspection)
 );

@@ -19,21 +19,25 @@ defmodule PtcRunner.Kernel.FileCapability do
 
   @spec new(keyword()) :: {:ok, Capability.t()} | {:error, :invalid_file_capability}
   @doc """
-  Constructs `fs-read` with required directory `:root` and optional positive
-  `:max_bytes`, which defaults to 1,000,000.
+  Constructs `fs-read` with required directory `:root`, optional positive
+  `:max_bytes` (default 1,000,000), and optional boolean `:model_visible`
+  (default `true`). Visibility controls discovery metadata, not authority.
   """
   def new(opts) when is_list(opts) do
-    with true <- Keyword.keys(opts) -- [:root, :max_bytes] == [],
+    with true <- Keyword.keys(opts) -- [:root, :max_bytes, :model_visible] == [],
          root when is_binary(root) <- Keyword.get(opts, :root),
          true <- String.valid?(root),
          root = Path.expand(root),
          {:ok, %{type: :directory}} <- File.lstat(root),
          max_bytes when is_integer(max_bytes) and max_bytes > 0 <-
            Keyword.get(opts, :max_bytes, @default_max_bytes),
+         model_visible when is_boolean(model_visible) <-
+           Keyword.get(opts, :model_visible, true),
          {:ok, capability} <-
            Capability.new(
              name: "fs-read",
              description: "Read one bounded UTF-8 file beneath the configured root",
+             model_visible: model_visible,
              input_schema: %{
                "type" => "object",
                "properties" => %{"path" => %{"type" => "string", "minLength" => 1}},

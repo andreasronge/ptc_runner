@@ -6,6 +6,7 @@ export function indexInspection(inspection) {
   const byCapability = new Map();
   const byEvaluation = new Map();
   const byComponent = new Map();
+  const conflicts = [];
 
   for (const record of inspection?.records || []) {
     const capabilityId = record.correlation?.capability_id;
@@ -14,13 +15,22 @@ export function indexInspection(inspection) {
 
     if (capabilityId) {
       const entry = byCapability.get(capabilityId) || { input: null, output: null };
-      if (record.record_type === 'capability-input') entry.input = record;
-      if (record.record_type === 'capability-output') entry.output = record;
+      if (record.record_type === 'capability-input') {
+        if (entry.input) conflicts.push(`capability-input/${capabilityId}`);
+        else entry.input = record;
+      }
+      if (record.record_type === 'capability-output') {
+        if (entry.output) conflicts.push(`capability-output/${capabilityId}`);
+        else entry.output = record;
+      }
       byCapability.set(capabilityId, entry);
     } else if (evaluationId && record.record_type === 'evaluation-source') {
-      byEvaluation.set(evaluationId, record);
+      if (byEvaluation.has(evaluationId)) conflicts.push(`evaluation-source/${evaluationId}`);
+      else byEvaluation.set(evaluationId, record);
     } else if (componentId && record.record_type === 'prelude-source') {
-      byComponent.set(`${record.payload?.environment}/${componentId}`, record);
+      const key = `${record.payload?.environment}/${componentId}`;
+      if (byComponent.has(key)) conflicts.push(`prelude-source/${key}`);
+      else byComponent.set(key, record);
     }
   }
 
@@ -28,6 +38,7 @@ export function indexInspection(inspection) {
     byCapability,
     byEvaluation,
     byComponent,
+    conflicts,
     present: byCapability.size > 0 || byEvaluation.size > 0 || byComponent.size > 0
   };
 }
@@ -37,7 +48,7 @@ export function renderInspection(container, inspection) {
   if (!records.length) return;
 
   const section = document.createElement('section');
-  section.className = 'inspection-panel';
+  section.className = 'inspection-wrapper';
   section.innerHTML = renderInspectionMarkup(inspection);
   container.appendChild(section);
 }
@@ -46,22 +57,32 @@ export function renderInspectionMarkup(inspection) {
   const records = inspection?.records || [];
   if (!records.length) return '';
 
+  const counts = records.reduce((result, record) => {
+    result[record.record_type] = (result[record.record_type] || 0) + 1;
+    return result;
+  }, {});
+  const countSummary = Object.entries(counts)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([type, count]) => `${count} ${type}`)
+    .join(' · ');
+
   return `
-    <div class="inspection-warning" role="alert">
-      <strong>Sensitive inspection data.</strong>
-      This fixed private artifact contains full evaluated source and capability inputs and outputs.
-      Keep it local and do not share it as a sanitized trace.
-    </div>
-    <div class="inspection-heading">
+    <details class="inspection-panel inspection-advanced">
+      <summary class="inspection-heading">
       <div>
         <span>Private artifact</span>
-        <h3>Captured payloads</h3>
+        <h3>Advanced/private records</h3>
       </div>
       <strong>${records.length} records</strong>
-    </div>
-    <div class="inspection-records">
-      ${records.map(renderRecord).join('')}
-    </div>
+      </summary>
+      <div class="inspection-sensitivity">
+        Sensitive private data from the pinned local artifact. Keep it local.
+      </div>
+      <div class="inspection-counts">${escapeHtml(countSummary)}</div>
+      <div class="inspection-records">
+        ${records.map(renderRecord).join('')}
+      </div>
+    </details>
   `;
 }
 

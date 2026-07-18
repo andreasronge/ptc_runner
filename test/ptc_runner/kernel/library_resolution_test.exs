@@ -13,6 +13,7 @@ defmodule PtcRunner.Kernel.LibraryResolutionTest do
              "agent.native",
              "agent.retry",
              "kernel",
+             "agent.prompt",
              "llm",
              "result",
              "workflow.event",

@@ -3,7 +3,8 @@
 The minimal programmable Kernel migration is implemented. Current architecture
 is documented in the [Kernel maintainer guide](../../guides/kernel-maintainer.md)
 and exact API contracts live in the `PtcRunner.Kernel.*` module documentation.
-This directory contains active product and extension plans only.
+This directory contains active product plans and retained implementation
+records for recently completed cross-cutting work.
 
 - [`product-readiness.md`](product-readiness.md) assesses what is usable now,
   current limitations, prioritized improvements, and release gates for a
@@ -16,6 +17,15 @@ This directory contains active product and extension plans only.
   manifest runtime-tool grants, scheduled e2e execution, private-sink and
   overflow journeys, and delivers remote MCP e2e flows against a public
   read-only server.
+- [`swappable-agent-prompt-and-viewer-context.md`](swappable-agent-prompt-and-viewer-context.md)
+  records the implemented `agent.prompt` prelude with bounded policy state, a
+  compact PTC-Lisp reference, manifest-selectable capability visibility,
+  deterministic model-facing context, stronger inspection correlation, and a
+  state-aware private inspection experience in the Viewer.
+- [`runtime-prelude-contract-validation.md`](runtime-prelude-contract-validation.md)
+  plans strict runtime input and output validation for public prelude
+  signatures, compile-time constant checks, safe model correction feedback,
+  and continued JSON Schema enforcement at raw capability boundaries.
 
 Current user-facing material lives in [`../../guides/`](../../guides/). Git
 history is the archive for the completed Kernel migration, removed experiments,

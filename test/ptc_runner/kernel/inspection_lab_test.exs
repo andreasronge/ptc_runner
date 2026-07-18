@@ -33,7 +33,8 @@ defmodule PtcRunner.Kernel.InspectionLabTest do
       assert Enum.any?(records, fn record ->
                record["record_type"] == "capability-input" and
                  record["payload"]["name"] == "llm-request" and
-                 record["payload"]["arguments"]["system"] =~ "Frozen mission inventory"
+                 record["payload"]["arguments"]["system"] =~ "PTC_AGENT_PROMPT_V1" and
+                 record["payload"]["arguments"]["system"] =~ "Mission API and limits"
              end)
 
       assert Enum.any?(records, fn record ->
@@ -142,7 +143,8 @@ defmodule PtcRunner.Kernel.InspectionLabTest do
           stderr_to_stdout: true
         )
 
-      assert rendered =~ "Sensitive inspection data"
+      assert rendered =~ "Private inspection overlay loaded"
+      assert rendered =~ "Advanced/private records"
       assert rendered =~ "evaluation-source"
       assert rendered =~ "remote.structured"
       assert rendered =~ "remote.text"
@@ -160,6 +162,8 @@ defmodule PtcRunner.Kernel.InspectionLabTest do
     wrapper_request = model_request(wrapper.inspection)
     refute direct_request["system"] =~ "lab.tools/read-file"
     assert wrapper_request["system"] =~ "lab.tools/read-file"
+    assert direct_request["system"] =~ ~s|"call":"(tool/fs-read arguments)"|
+    refute wrapper_request["system"] =~ ~s|"call":"(tool/fs-read arguments)"|
   end
 
   defp model_request(path) do

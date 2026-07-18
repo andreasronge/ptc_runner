@@ -126,12 +126,23 @@ async function loadRun(runId) {
   }
 
   const inspection = inspectionResponse.ok ? await inspectionResponse.json() : null;
-  renderRun({ metadata: await runResponse.json(), turns: turnsResult.turns, inspection });
+  let inspectionStatus;
+  if (inspectionResponse.ok) {
+    inspectionStatus = { state: 'loaded', status: inspectionResponse.status };
+  } else {
+    const reason = await safeBodyText(inspectionResponse);
+    inspectionStatus = {
+      state: reason === 'Inspection artifact unavailable' ? 'not-configured' : 'error',
+      status: inspectionResponse.status,
+      reason
+    };
+  }
+  renderRun({ metadata: await runResponse.json(), turns: turnsResult.turns, inspection, inspectionStatus });
 }
 
 function renderRun(data) {
   state.currentRun = data;
-  const { metadata, turns, inspection } = data;
+  const { metadata, turns, inspection, inspectionStatus } = data;
   document.getElementById('breadcrumb').innerHTML = `
     <span class="breadcrumb-item breadcrumb-home">Runs</span>
     <span class="breadcrumb-sep">/</span>
@@ -161,6 +172,7 @@ function renderRun(data) {
       renderRun({
         metadata,
         inspection,
+        inspectionStatus,
         turns: { ...nextPage, items: [...(turns.items || []), ...(nextPage.items || [])] }
       });
     }

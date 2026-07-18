@@ -47,12 +47,12 @@ defmodule PtcRunner.Examples.KernelInspectionLab do
         []
       end
 
-    manifest = manifest(name, mission_components)
+    manifest = manifest(name, mission_components, wrapper?)
     manifest_path = Path.join(directory, "ptc.json")
     trace_path = Path.join(directory, "run.jsonl")
     inspection_path = Path.join(directory, "run.inspection.jsonl")
     :ok = File.write(manifest_path, Jason.encode!(manifest))
-    registry = registry(endpoint, program)
+    registry = registry(endpoint, program, wrapper?)
 
     {:ok, result} =
       RunBuilder.run(manifest_path, registry, trace: trace_path, inspect: inspection_path)
@@ -68,20 +68,29 @@ defmodule PtcRunner.Examples.KernelInspectionLab do
     }
   end
 
-  defp registry(endpoint, program) do
+  defp registry(endpoint, program, _wrapper?) do
+    turn = :atomics.new(1, signed: false)
+
     scripted = fn config, _context ->
       if config == %{} do
-        LLMCapability.new(requester: fn _request -> {:ok, model_response(program)} end)
+        LLMCapability.new(
+          requester: fn _request ->
+            current = :atomics.add_get(turn, 1, 1)
+            generated = if current == 1, do: "(missing/function)", else: program
+            {:ok, model_response(generated, current)}
+          end
+        )
       else
         {:error, :invalid_scripted_model_config}
       end
     end
 
     native = fn config, _context ->
-      if config == %{} do
+      if config in [%{}, %{"model_visible" => false}] do
         Capability.new(
           name: "native-echo",
           description: "Return one fixture string through the native provider seam",
+          model_visible: Map.get(config, "model_visible", true),
           effect: :read,
           input_schema: %{
             "type" => "object",
@@ -123,7 +132,9 @@ defmodule PtcRunner.Examples.KernelInspectionLab do
     registry
   end
 
-  defp manifest(name, mission_components) do
+  defp manifest(name, mission_components, wrapper?) do
+    visibility = if wrapper?, do: %{"model_visible" => false}, else: %{}
+
     %{
       "version" => 1,
       "workflow" => %{
@@ -138,12 +149,20 @@ defmodule PtcRunner.Examples.KernelInspectionLab do
       "providers" => %{
         "workflow" => [%{"name" => "fixture-model", "config" => %{}}],
         "mission" => [
-          %{"name" => "file-read", "config" => %{"root" => "files", "max_bytes" => 8_192}},
-          %{"name" => "fixture-native", "config" => %{}},
+          %{
+            "name" => "file-read",
+            "config" => Map.merge(%{"root" => "files", "max_bytes" => 8_192}, visibility)
+          },
+          %{"name" => "fixture-native", "config" => visibility},
           %{
             "name" => "fixture-mcp",
             "config" => %{
               "allow" => ["remote.structured", "remote.text", "remote.fail"],
+              "model_visible" =>
+                if(wrapper?,
+                  do: [],
+                  else: ["remote.structured", "remote.text", "remote.fail"]
+                ),
               "timeout_ms" => 2_000,
               "max_result_bytes" => 64_000
             }
@@ -160,7 +179,7 @@ defmodule PtcRunner.Examples.KernelInspectionLab do
     ~S|(ns lab.workflow "Credential-free scripted inspection entry." {:visibility :prompt})
 
 (defn run [input]
-  (agent.core/run (get input "task") {"max_turns" 1}))|
+  (agent.core/run (get input "task") {"max_turns" 2}))|
   end
 
   defp mission_source do
@@ -173,13 +192,18 @@ defmodule PtcRunner.Examples.KernelInspectionLab do
 (defn remote-failure [] (tool/remote.fail {"query" "fixture"}))|
   end
 
-  defp model_response(program) do
+  defp model_response(program, turn) do
     %{
       content: nil,
       tool_calls: [
-        %{id: "scripted-call", name: "run_ptc_lisp", args: %{"program" => program}}
+        %{id: "scripted-call-#{turn}", name: "run_ptc_lisp", args: %{"program" => program}}
       ],
-      tokens: %{input: 0, output: 0}
+      tokens: %{
+        input: 1_000 + turn,
+        output: 20 + turn,
+        cache_read: if(turn == 2, do: 100, else: 0),
+        total_cost: 0.0001 * turn
+      }
     }
   end
 

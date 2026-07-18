@@ -117,12 +117,161 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
   end
 
   @tag :tmp_dir
+  test "artifacts reject duplicate, output-only, and identity-mismatched joins", %{tmp_dir: dir} do
+    {:ok, sink} = InspectionSink.start(run_id: "run-1", trace_id: "trace-1")
+    assert :ok = emit_small(sink, "cap-1")
+
+    assert :ok =
+             InspectionSink.emit(
+               sink,
+               "capability-output",
+               %{capability_id: "cap-1"},
+               %{environment: :mission, name: "read", result: %{status: :ok, value: 1}}
+             )
+
+    assert {:ok, [input, output]} = InspectionSink.records(sink)
+
+    events = [
+      %{
+        run_id: "run-1",
+        trace_id: "trace-1",
+        type: "capability-started",
+        data: %{capability_id: "cap-1", environment: :mission, name: "read"}
+      }
+    ]
+
+    duplicate_input = resequence([input, input])
+
+    assert {:error, :invalid_inspection_artifact} =
+             InspectionArtifact.persist(
+               Path.join(dir, "duplicate-input.inspection.jsonl"),
+               duplicate_input,
+               events
+             )
+
+    assert {:error, :invalid_inspection_artifact} =
+             InspectionArtifact.persist(
+               Path.join(dir, "duplicate-output.inspection.jsonl"),
+               resequence([input, output, output]),
+               events
+             )
+
+    assert {:error, :invalid_inspection_artifact} =
+             InspectionArtifact.persist(
+               Path.join(dir, "output-only.inspection.jsonl"),
+               resequence([output]),
+               events
+             )
+
+    mismatched_output = put_in(output, ["payload", "name"], "other")
+
+    assert {:error, :invalid_inspection_artifact} =
+             InspectionArtifact.persist(
+               Path.join(dir, "mismatched-pair.inspection.jsonl"),
+               [input, mismatched_output],
+               events
+             )
+
+    wrong_canonical_name = put_in(events, [Access.at(0), :data, :name], "other")
+
+    assert {:error, :inspection_correlation_missing} =
+             InspectionArtifact.validate_correlations([input, output], wrong_canonical_name)
+
+    wrong_canonical_environment =
+      put_in(events, [Access.at(0), :data, :environment], :workflow)
+
+    assert {:error, :inspection_correlation_missing} =
+             InspectionArtifact.validate_correlations(
+               [input, output],
+               wrong_canonical_environment
+             )
+
+    duplicate_canonical = events ++ events
+
+    assert {:error, :inspection_correlation_missing} =
+             InspectionArtifact.validate_correlations(
+               [input, output],
+               duplicate_canonical
+             )
+
+    conflicting_canonical =
+      events ++ [put_in(hd(events), [:data, :name], "other")]
+
+    assert {:error, :inspection_correlation_missing} =
+             InspectionArtifact.validate_correlations(
+               [input, output],
+               conflicting_canonical
+             )
+
+    {:ok, source_sink} = InspectionSink.start(run_id: "run-1", trace_id: "trace-1")
+
+    for _index <- 1..2 do
+      assert :ok =
+               InspectionSink.emit(
+                 source_sink,
+                 "evaluation-source",
+                 %{evaluation_id: "eval-1"},
+                 %{
+                   environment: :mission,
+                   program_kind: :"ptc-lisp",
+                   source: @source,
+                   source_hash: @source_hash,
+                   source_bytes: byte_size(@source)
+                 }
+               )
+    end
+
+    assert {:ok, duplicate_evaluations} = InspectionSink.records(source_sink)
+
+    assert {:error, :invalid_inspection_artifact} =
+             InspectionArtifact.persist(
+               Path.join(dir, "duplicate-evaluation.inspection.jsonl"),
+               duplicate_evaluations,
+               []
+             )
+
+    {:ok, prelude_sink} = InspectionSink.start(run_id: "run-1", trace_id: "trace-1")
+
+    for _index <- 1..2 do
+      assert :ok =
+               InspectionSink.emit(
+                 prelude_sink,
+                 "prelude-source",
+                 %{component_id: "tools"},
+                 %{
+                   environment: :mission,
+                   source: @source,
+                   source_hash: @source_hash,
+                   source_bytes: byte_size(@source)
+                 }
+               )
+    end
+
+    assert {:ok, duplicate_preludes} = InspectionSink.records(prelude_sink)
+
+    assert {:error, :invalid_inspection_artifact} =
+             InspectionArtifact.persist(
+               Path.join(dir, "duplicate-prelude.inspection.jsonl"),
+               duplicate_preludes,
+               []
+             )
+  end
+
+  @tag :tmp_dir
   test "persists one exclusive 0600 artifact and validates immutable loading", %{tmp_dir: dir} do
     {:ok, sink} = InspectionSink.start(run_id: "run-1", trace_id: "trace-1")
     assert :ok = emit_small(sink, "cap-1")
     assert {:ok, records} = InspectionSink.records(sink)
 
-    events = [%{run_id: "run-1", trace_id: "trace-1", data: %{capability_id: "cap-1"}}]
+    events = [
+      %{
+        run_id: "run-1",
+        trace_id: "trace-1",
+        type: "capability-started",
+        data: %{capability_id: "cap-1", environment: :mission, name: "read"}
+      }
+    ]
+
     path = Path.join(dir, "run.inspection.jsonl")
 
     assert :ok = InspectionArtifact.persist(path, records, events)
@@ -424,7 +573,16 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
              )
 
     assert {:ok, records} = InspectionSink.records(sink)
-    events = [%{run_id: "run-1", trace_id: "trace-1", data: %{capability_id: "cap-1"}}]
+
+    events = [
+      %{
+        run_id: "run-1",
+        trace_id: "trace-1",
+        type: "capability-started",
+        data: %{capability_id: "cap-1", environment: :mission, name: "read"}
+      }
+    ]
+
     assert :ok = InspectionArtifact.persist(path, records, events)
     assert :ok = InspectionSink.stop(sink)
     records
@@ -433,8 +591,16 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
   defp canonical_events do
     [
       canonical_event(1, "run-started", %{}),
-      canonical_event(2, "capability-started", %{"capability_id" => "cap-1"}),
-      canonical_event(3, "capability-stopped", %{"capability_id" => "cap-1"}),
+      canonical_event(2, "capability-started", %{
+        "capability_id" => "cap-1",
+        "environment" => "mission",
+        "name" => "read"
+      }),
+      canonical_event(3, "capability-stopped", %{
+        "capability_id" => "cap-1",
+        "environment" => "mission",
+        "name" => "read"
+      }),
       canonical_event(4, "run-stopped", %{"outcome" => "ok"})
     ]
   end
@@ -449,5 +615,11 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
       "type" => type,
       "data" => data
     }
+  end
+
+  defp resequence(records) do
+    records
+    |> Enum.with_index(1)
+    |> Enum.map(fn {record, sequence} -> Map.put(record, "sequence", sequence) end)
   end
 end

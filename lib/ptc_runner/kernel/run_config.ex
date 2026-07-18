@@ -11,7 +11,10 @@ defmodule PtcRunner.Kernel.RunConfig do
   - `event_sink` — the bounded owner of canonical run events.
 
   Construction derives and freezes `mission_inventory` from the mission
-  environment and limits. Hosts cannot supply mutable inventory text.
+  environment and limits. It contains both the authoritative versioned
+  structured inventory and a separately versioned compact model rendering,
+  each with distinct hashes and byte counts. Hosts cannot supply mutable
+  inventory text.
 
   `provider_resources` are opaque idempotent close functions owned by the host.
   `connector_snapshots` are bounded safe metadata copied into `run-started`;
@@ -153,6 +156,8 @@ defmodule PtcRunner.Kernel.RunConfig do
         mission_prelude: mission_prelude,
         mission_inventory_hash: inventory.hash,
         mission_inventory_bytes: inventory.bytes,
+        mission_model_context_hash: inventory.model_hash,
+        mission_model_context_bytes: inventory.model_bytes,
         connector_snapshots: snapshots
       }
 

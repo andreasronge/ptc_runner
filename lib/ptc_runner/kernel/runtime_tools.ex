@@ -43,6 +43,17 @@ defmodule PtcRunner.Kernel.RuntimeTools do
     end
   end
 
+  @doc "Builds the workflow-only frozen compact mission-model-context callback."
+  def mission_model_context(state, rendered) when is_binary(rendered) do
+    fn
+      arguments when is_map(arguments) and map_size(arguments) == 0 ->
+        %{status: :ok, value: rendered}
+
+      _arguments ->
+        protocol_error(state, :invalid_mission_model_context_request)
+    end
+  end
+
   @doc "Builds the workflow-only subordinate-evaluation callback."
   def kernel_eval(state, mission, limits, event_sink, inspection_sink \\ nil) do
     fn

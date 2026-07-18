@@ -107,12 +107,14 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
   defp normalize_build(_result), do: {:error, :invalid_provider_build}
 
   defp build_file(config, %{directory: directory, destination: :mission}) do
-    with :ok <- exact_keys(config, ~w(root max_bytes), ~w(root)),
+    with :ok <- exact_keys(config, ~w(root max_bytes model_visible), ~w(root)),
          root when is_binary(root) <- config["root"],
          {:ok, root} <- safe_directory(directory, root),
          max_bytes when is_integer(max_bytes) and max_bytes > 0 <-
-           Map.get(config, "max_bytes", 1_000_000) do
-      FileCapability.new(root: root, max_bytes: max_bytes)
+           Map.get(config, "max_bytes", 1_000_000),
+         model_visible when is_boolean(model_visible) <-
+           Map.get(config, "model_visible", true) do
+      FileCapability.new(root: root, max_bytes: max_bytes, model_visible: model_visible)
     else
       _ -> {:error, :invalid_file_provider}
     end

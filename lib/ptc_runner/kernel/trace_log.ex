@@ -609,6 +609,8 @@ defmodule PtcRunner.Kernel.TraceLog do
       "mission_prelude" => event_data(started, "mission_prelude", empty_prelude()),
       "mission_inventory_hash" => event_data(started, "mission_inventory_hash"),
       "mission_inventory_bytes" => event_data(started, "mission_inventory_bytes"),
+      "mission_model_context_hash" => event_data(started, "mission_model_context_hash"),
+      "mission_model_context_bytes" => event_data(started, "mission_model_context_bytes"),
       "connector_snapshots" => event_data(started, "connector_snapshots", []),
       "complete" => not is_nil(stopped),
       "truncated" => Enum.any?(events, &(&1["type"] == "events-dropped")),

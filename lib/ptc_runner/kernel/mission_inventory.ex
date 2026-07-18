@@ -4,9 +4,11 @@ defmodule PtcRunner.Kernel.MissionInventory do
 
   Version 2 contains prompt-visible prelude exports, model-visible capability
   schemas, and the mission execution limits relevant to generated programs.
-  Arrays are sorted by public reference/name. The compact UTF-8 rendering and
-  lower-case SHA-256 hash are frozen into `PtcRunner.Kernel.RunConfig` and are
-  identical for normal runs and `PtcRunner.Kernel.ReplSession`.
+  A separate version 1 compact model rendering keeps concise wrapper call forms
+  and full schemas only for capabilities called directly. Arrays are sorted by
+  public reference/name. Both UTF-8 renderings and lower-case SHA-256 hashes are
+  frozen into `PtcRunner.Kernel.RunConfig` and are identical for normal runs
+  and `PtcRunner.Kernel.ReplSession`.
 
   Every bare capability entry carries a frozen `call` form: the literal
   string `(tool/<name> arguments)`, with the capability's already-validated
@@ -29,14 +31,28 @@ defmodule PtcRunner.Kernel.MissionInventory do
   alias PtcRunner.Lisp.Prelude.Export
 
   @max_bytes 256 * 1_024
-  @enforce_keys [:schema_version, :rendered, :hash, :bytes]
-  defstruct [:schema_version, :rendered, :hash, :bytes]
+  @max_model_bytes 256 * 1_024
+  @enforce_keys [
+    :schema_version,
+    :rendered,
+    :hash,
+    :bytes,
+    :model_schema_version,
+    :model_rendered,
+    :model_hash,
+    :model_bytes
+  ]
+  defstruct @enforce_keys
 
   @type t :: %__MODULE__{
           schema_version: 2,
           rendered: binary(),
           hash: binary(),
-          bytes: non_neg_integer()
+          bytes: non_neg_integer(),
+          model_schema_version: 1,
+          model_rendered: binary(),
+          model_hash: binary(),
+          model_bytes: non_neg_integer()
         }
 
   @spec build(MissionEnvironment.t(), Limits.t(), keyword()) ::
@@ -45,17 +61,25 @@ defmodule PtcRunner.Kernel.MissionInventory do
   def build(mission, limits, opts \\ [])
 
   def build(%MissionEnvironment{} = mission, %Limits{} = limits, opts) when is_list(opts) do
-    with true <- Keyword.keys(opts) -- [:max_bytes] == [],
+    with true <- Keyword.keys(opts) -- [:max_bytes, :max_model_bytes] == [],
          max_bytes when is_integer(max_bytes) and max_bytes > 0 <-
            Keyword.get(opts, :max_bytes, @max_bytes),
+         max_model_bytes when is_integer(max_model_bytes) and max_model_bytes > 0 <-
+           Keyword.get(opts, :max_model_bytes, @max_model_bytes),
          {:ok, rendered} <- DeterministicJSON.encode(projection(mission, limits)),
-         true <- byte_size(rendered) <= max_bytes do
+         true <- byte_size(rendered) <= max_bytes,
+         {:ok, model_rendered} <- DeterministicJSON.encode(model_projection(mission, limits)),
+         true <- byte_size(model_rendered) <= max_model_bytes do
       {:ok,
        %__MODULE__{
          schema_version: 2,
          rendered: rendered,
          hash: sha256(rendered),
-         bytes: byte_size(rendered)
+         bytes: byte_size(rendered),
+         model_schema_version: 1,
+         model_rendered: model_rendered,
+         model_hash: sha256(model_rendered),
+         model_bytes: byte_size(model_rendered)
        }}
     else
       false -> {:error, :mission_inventory_exceeded}
@@ -71,6 +95,16 @@ defmodule PtcRunner.Kernel.MissionInventory do
        {"schema_version", 2},
        {"exports", exports(mission)},
        {"capabilities", capabilities(mission)},
+       {"limits", limit_projection(limits)}
+     ]}
+  end
+
+  defp model_projection(mission, limits) do
+    {:object,
+     [
+       {"schema_version", 1},
+       {"mission_api", model_exports(mission)},
+       {"direct_capabilities", model_capabilities(mission)},
        {"limits", limit_projection(limits)}
      ]}
   end
@@ -104,6 +138,17 @@ defmodule PtcRunner.Kernel.MissionInventory do
     |> String.replace_prefix("(#{export.symbol}", "(#{export.ref}")
   end
 
+  defp model_exports(%{bundle: %{prelude: prelude}}) do
+    prelude
+    |> Prelude.prompt_exports()
+    |> Enum.sort_by(& &1.ref)
+    |> Enum.map(fn export ->
+      {:object, [{"call", export_call(export)}, {"doc", export.doc}]}
+    end)
+  end
+
+  defp model_exports(_mission), do: []
+
   defp capabilities(mission) do
     mission
     |> Environment.metadata()
@@ -114,6 +159,20 @@ defmodule PtcRunner.Kernel.MissionInventory do
          {"call", "(tool/#{capability.name} arguments)"},
          {"description", capability.description},
          {"effect", Atom.to_string(capability.effect)},
+         {"input_schema", capability.input_schema},
+         {"output_schema", capability.output_schema}
+       ]}
+    end)
+  end
+
+  defp model_capabilities(mission) do
+    mission
+    |> Environment.metadata()
+    |> Enum.map(fn capability ->
+      {:object,
+       [
+         {"call", "(tool/#{capability.name} arguments)"},
+         {"description", capability.description},
          {"input_schema", capability.input_schema},
          {"output_schema", capability.output_schema}
        ]}

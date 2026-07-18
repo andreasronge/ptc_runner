@@ -65,9 +65,10 @@ defmodule PtcRunner.Kernel.MCPSource do
       (default `16`).
 
   Unknown or invalid installation options raise `ArgumentError` without
-  including option values. The returned registry builder accepts only an
-  `"allow"` list of installed public names and optional lower `"timeout_ms"`
-  and `"max_result_bytes"` values; invalid selections return
+  including option values. The returned registry builder accepts an `"allow"`
+  list of installed public names, an optional `"model_visible"` subset
+  (defaulting to the full allow list), and optional lower `"timeout_ms"` and
+  `"max_result_bytes"` values; invalid selections return
   `{:error, :invalid_mcp_selection}`. Assembly returns
   `{:ok, %{capabilities: list, snapshot: map, close: zero_arity_function}}` or a
   stable atom error: `:mcp_authentication_failed`, `:mcp_timeout`,
@@ -207,12 +208,19 @@ defmodule PtcRunner.Kernel.MCPSource do
 
   defp selection(installed, selection, context) do
     with true <- is_map(selection) and not is_struct(selection),
-         true <- Map.keys(selection) -- ~w(allow timeout_ms max_result_bytes) == [],
+         true <-
+           Map.keys(selection) -- ~w(allow model_visible timeout_ms max_result_bytes) == [],
          allow when is_list(allow) and length(allow) in 1..128 <- selection["allow"],
          true <- Enum.all?(allow, &is_binary/1) and Enum.uniq(allow) == allow,
          public_names =
            Map.new(installed.tools, fn {_upstream, mapping} -> {mapping.as, true} end),
          true <- Enum.all?(allow, &Map.has_key?(public_names, &1)),
+         model_visible when is_list(model_visible) and length(model_visible) <= 128 <-
+           Map.get(selection, "model_visible", allow),
+         true <-
+           Enum.all?(model_visible, &is_binary/1) and
+             Enum.uniq(model_visible) == model_visible,
+         true <- Enum.all?(model_visible, &(&1 in allow)),
          timeout_ms when is_integer(timeout_ms) and timeout_ms > 0 <-
            Map.get(selection, "timeout_ms", installed.timeout_ms),
          true <- timeout_ms <= installed.timeout_ms,
@@ -224,6 +232,7 @@ defmodule PtcRunner.Kernel.MCPSource do
       {:ok,
        %{
          allow: MapSet.new(allow),
+         model_visible: MapSet.new(model_visible),
          timeout_ms: timeout_ms,
          max_result_bytes: max_result_bytes
        }}
@@ -373,6 +382,7 @@ defmodule PtcRunner.Kernel.MCPSource do
            Capability.new(
              name: mapping.as,
              description: description,
+             model_visible: MapSet.member?(selected.model_visible, mapping.as),
              input_schema: input,
              output_schema: output,
              effect: :read,

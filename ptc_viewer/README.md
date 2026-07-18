@@ -47,10 +47,19 @@ selected canonical trace source, so replacing the path after startup cannot
 change what requests inspect. The bounded loader rejects symlinks, changed
 files, aggregate input above 16 MB, records above 2,000,000 encoded bytes,
 malformed records, and a requested run ID that does not match the artifact. The
-UI keeps a sensitive-data warning visible whenever it renders these records.
+UI renders one state-aware provenance notice for the selected run. It
+distinguishes canonical-only, complete private-overlay, incomplete/interrupted,
+selected-run mismatch, and fetch-failure states instead of showing
+contradictory sanitized and sensitive warnings.
 
 When the artifact is pinned, the run view joins its records to canonical IDs
-and renders five private additions alongside the sanitized transcript:
+and renders private additions alongside the sanitized transcript:
+
+- a default-open **captured model request** panel showing the first exact
+  system prompt. Known `PTC_AGENT_PROMPT_V1` text is split into readable
+  sections with the exact prompt retained; edited/unknown formats fall back to
+  opaque exact text. Each provider-neutral request remains available under
+  **Raw captured request** because adapters may transform it before transport;
 
 - an **LLM token spend** panel summarizing the run's provider-reported usage:
   total input/output tokens, cache reads/creation, and reported cost, with a
@@ -73,10 +82,15 @@ and renders five private additions alongside the sanitized transcript:
 - **arguments/result** panels inside each captured capability call;
 - expandable **component source** inside each prelude card, joining
   `prelude-source` records to the frozen component IDs of the matching
-  environment.
+  environment;
+- one closed **Advanced/private records** disclosure with counts by record
+  type. Exact JSON uses preserved whitespace and horizontal scrolling, so long
+  identifiers are not visually split into invented whitespace.
 
 Every joined panel carries a `private` marker; runs without a pinned artifact
-render the sanitized transcript unchanged. The viewer eagerly loads all
+render a canonical-only provenance notice. Join counts use canonical
+capability starts as their denominator, and input-only stopped calls are
+reported as interrupted rather than complete. The viewer eagerly loads all
 bounded canonical event pages before deriving run-level projections; a run
 exceeding the page budget keeps its cursor and its dialogue and spend panels
 are explicitly labeled partial instead of presenting a prefix as the whole
@@ -99,6 +113,14 @@ mix ptc.viewer --trace-dir traces \
 
 Authenticated remote access, multiple private artifacts, and prelude editing
 remain outside this local development mode.
+
+The checked-in dialogue fixture is generated from the current credential-free
+inspection lab. Regenerate its V2 two-call recovery artifacts from the
+repository root with:
+
+```bash
+mix run ptc_viewer/scripts/generate_dialogue_fixture.exs
+```
 
 ## Programmatic use
 

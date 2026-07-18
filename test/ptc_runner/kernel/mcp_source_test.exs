@@ -264,8 +264,11 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
 
     {:ok, built} =
       dir
-      |> manifest(Map.keys(public_mappings()))
-      |> RunBuilder.load_and_build(registry(invalid.endpoint))
+      |> manifest(Map.keys(public_mappings()),
+        timeout_ms: 5_000,
+        evaluation_timeout_ms: 5_000
+      )
+      |> RunBuilder.load_and_build(registry(invalid.endpoint, timeout_ms: 5_000))
 
     assert {:ok, result} = Kernel.run(built.entry_source, built.config)
 
@@ -319,6 +322,38 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
              dir
              |> manifest(["remote.structured"], config_extra: %{"endpoint" => "forbidden"})
              |> RunBuilder.load_and_build(registry(excessive.endpoint))
+  end
+
+  @tag :tmp_dir
+  test "selection can hide an allowed MCP capability from model discovery", %{tmp_dir: dir} do
+    parent = self()
+    fixture = fixture(parent)
+    on_exit(fixture.close)
+
+    {:ok, built} =
+      dir
+      |> manifest(~w(remote.structured remote.text),
+        timeout_ms: 5_000,
+        evaluation_timeout_ms: 5_000,
+        config_extra: %{"model_visible" => ["remote.structured"]}
+      )
+      |> RunBuilder.load_and_build(registry(fixture.endpoint, timeout_ms: 5_000))
+
+    visibility =
+      Map.new(built.config.mission_environment.capabilities, fn {_name, capability} ->
+        {capability.name, capability.model_visible}
+      end)
+
+    assert visibility == %{"remote.structured" => true, "remote.text" => false}
+    assert :ok = RunBuilder.close(built)
+    assert_receive :mcp_deleted
+
+    assert {:error, :invalid_mcp_selection} =
+             dir
+             |> manifest(["remote.structured"],
+               config_extra: %{"model_visible" => ["remote.text"]}
+             )
+             |> RunBuilder.load_and_build(registry(fixture.endpoint))
   end
 
   @tag :tmp_dir
@@ -416,16 +451,16 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
 
     blocked = fixture(parent, block_initialize?: true)
     on_exit(blocked.close)
-    timeout_registry = registry(blocked.endpoint, timeout_ms: 100)
+    timeout_registry = registry(blocked.endpoint, timeout_ms: 500)
 
     task =
       Task.async(fn ->
         dir
-        |> manifest(["remote.structured"], timeout_ms: 100)
+        |> manifest(["remote.structured"], timeout_ms: 500)
         |> RunBuilder.load_and_build(timeout_registry)
       end)
 
-    assert_receive {:mcp_blocked, worker}
+    assert_receive {:mcp_blocked, worker}, 1_000
     assert {:error, :mcp_timeout} = Task.await(task, 2_000)
     send(worker, :release)
 
@@ -441,7 +476,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
           end
         end,
         tools: mappings(),
-        timeout_ms: 100
+        timeout_ms: 500
       )
 
     {:ok, header_registry} = ProviderRegistry.new(%{"fixture-mcp" => header_builder})
@@ -449,11 +484,11 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     header_task =
       Task.async(fn ->
         dir
-        |> manifest(["remote.structured"], timeout_ms: 100)
+        |> manifest(["remote.structured"], timeout_ms: 500)
         |> RunBuilder.load_and_build(header_registry)
       end)
 
-    assert_receive {:mcp_header_blocked, header_worker}
+    assert_receive {:mcp_header_blocked, header_worker}, 1_000
     header_ref = Process.monitor(header_worker)
     assert {:error, :mcp_timeout} = Task.await(header_task, 2_000)
     assert_receive {:DOWN, ^header_ref, :process, ^header_worker, :killed}

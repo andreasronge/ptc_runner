@@ -330,6 +330,19 @@ defmodule PtcRunner.Kernel.ReplSession do
         )
       )
     )
+    |> Map.put(
+      "kernel-mission-model-context",
+      RuntimeTools.instrument(
+        session.state,
+        session.config.event_sink,
+        :workflow,
+        "kernel-mission-model-context",
+        RuntimeTools.mission_model_context(
+          session.state,
+          session.config.mission_inventory.model_rendered
+        )
+      )
+    )
     |> Map.new(fn {name, callback} -> {name, %TrustedTool{function: callback}} end)
   end
 

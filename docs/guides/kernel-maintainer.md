@@ -261,9 +261,13 @@ configuration that will not be executed.
 The only installed remote-tools adapter is `PtcRunner.Kernel.MCPSource`. Its
 host builder freezes one HTTPS endpoint (or an explicitly enabled loopback HTTP
 fixture), a header callback, read-only upstream-to-public mappings, and source
-ceilings. Manifest configuration is exactly an `allow` list of mapped public
-names plus optional lower `timeout_ms` and `max_result_bytes`; endpoints,
-headers, upstream names, effects, and retries are not manifest fields.
+ceilings. Manifest configuration is an `allow` list of mapped public names,
+an optional `model_visible` subset (defaulting to all allowed names), and
+optional lower `timeout_ms` and `max_result_bytes`; endpoints, headers,
+upstream names, effects, and retries are not manifest fields. The built-in
+`file-read` provider likewise accepts optional boolean `model_visible`.
+Visibility affects discovery and prompt context, not the authority granted by
+the environment.
 
 Every build owns one monitored MCP 2025-11-25 session across initialization,
 bounded paginated discovery, and calls. Discovered schemas pass the Kernel's
@@ -285,11 +289,20 @@ than in the Kernel execution modules. Manifest `{"library": id}` selections
 expand their installed dependency closure deterministically and are compiled
 with local components; local IDs cannot shadow installed IDs.
 
-`RunConfig` freezes one bounded deterministic mission inventory containing
-prompt-visible exports, model-visible capability schemas, and mission limits.
-Normal runs and REPL sessions expose the same inventory through the reserved
-`kernel-mission-inventory` route. Keep this projection payload-free and update
-its exact golden test whenever its versioned contract changes.
+`RunConfig` freezes two bounded deterministic mission projections. The
+authoritative V2 inventory contains prompt-visible exports, model-visible
+capability schemas, and mission limits and is exposed through
+`kernel-mission-inventory`. A separate compact V1 model rendering preserves
+wrapper call forms, schemas for directly visible capabilities, and limits and
+is exposed through `kernel-mission-model-context`. Their hashes and byte counts
+have distinct canonical metadata names. Keep both projections payload-free and
+update exact golden tests whenever either versioned contract changes.
+
+The shipped agent dependency graph keeps prompt policy in `agent.prompt`, which
+depends on `kernel`, while `agent.core` owns the provider/evaluation loop.
+`agent.prompt/initial-state`, `render`, and `transition` are called directly by
+the frozen Lisp bundle. Changing prompt policy therefore changes the prompt
+component and bundle hashes without mixing wording into the control loop.
 
 To add a frontend, build through `PtcRunner.Kernel.RunBuilder` or construct the
 same public Kernel values directly. Do not create a second manifest parser,

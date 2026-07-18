@@ -195,6 +195,16 @@ defmodule PtcRunner.Kernel.Runner do
         RuntimeTools.mission_inventory(state, config.mission_inventory.rendered)
       )
     )
+    |> Map.put(
+      "kernel-mission-model-context",
+      RuntimeTools.instrument(
+        state,
+        config.event_sink,
+        :workflow,
+        "kernel-mission-model-context",
+        RuntimeTools.mission_model_context(state, config.mission_inventory.model_rendered)
+      )
+    )
     |> Map.new(fn {name, callback} -> {name, %TrustedTool{function: callback}} end)
   end
 

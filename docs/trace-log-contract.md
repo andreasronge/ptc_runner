@@ -349,6 +349,16 @@ to accept a required input/source record prevents execution. Failure after an
 external read has completed fails the run but cannot retroactively undo that
 read.
 
+Artifact validation rejects ambiguous joins before persistence or Viewer
+pinning. There may be at most one input and one output for a capability ID, one
+source for an evaluation ID, and one source for an environment/component pair.
+A capability output requires an earlier matching input; an input without an
+output is valid only as an interrupted attempt. Private capability name and
+environment must match the canonical `capability-started` event carrying the
+same ID, and canonical capability-start IDs must themselves be unique. Browser
+indexing also refuses to overwrite a prior identity defensively, but server
+validation is authoritative.
+
 The host enables capture independently of manifest event policy and selects a
 fixed exact destination. The destination is restricted to `0600` before content
 is written. Per-record and aggregate byte ceilings apply before persistence.
@@ -373,8 +383,20 @@ inspect a development run. It does not add transport headers, connector
 credentials, session IDs, endpoints, arbitrary host terms, or the composed
 workflow entry expression. Application arguments/results and prelude source
 may themselves be sensitive, so the entire artifact is private. The exact
-mission inventory that the model received is already part of the captured
-LLM request.
+mission context that the model received is already part of the captured LLM
+request. This is the exact provider-neutral `llm-request` input, not a promise
+of byte-for-byte provider wire capture after adapter transformation.
+
+The Viewer defines overlay completeness from canonical evidence. Expected LLM
+calls are canonical `capability-started` events named `llm-request`; a stopped
+call joins only when both private input and output exist. Expected dispatched
+calls exclude reserved Kernel runtime routes (`kernel-eval`, both mission
+context routes, runtime usage/remaining, capability discovery, and workflow
+annotation). A run cannot claim a complete overlay when it lacks a terminal
+event, reports dropped events, exceeds the Viewer page budget, or lacks an
+expected join. Exactly one state-aware provenance notice distinguishes a
+canonical-only trace, a complete private overlay, and incomplete or failed
+inspection states.
 
 The inspection artifact is absent from TraceLog file/directory discovery and
 from every `log/` query. Normal discovery explicitly rejects or omits the

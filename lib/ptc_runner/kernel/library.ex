@@ -4,7 +4,7 @@ defmodule PtcRunner.Kernel.Library do
 
   Available component IDs are `kernel`, `runtime`, `cap`, `workflow.event`,
   `fs`, `llm`, `agent.native`, `agent.core`, `agent.feedback`, `agent.retry`,
-  `result`, and `log.core`.
+  `agent.prompt`, `result`, and `log.core`.
 
   Fetching a component grants no capability. The host still compiles the
   selected closed component set and supplies the capabilities required by its
@@ -20,6 +20,7 @@ defmodule PtcRunner.Kernel.Library do
   @fs_path Path.expand("../../../priv/preludes/kernel/fs.lisp", __DIR__)
   @llm_path Path.expand("../../../priv/preludes/kernel/llm.lisp", __DIR__)
   @agent_native_path Path.expand("../../../priv/preludes/kernel/agent.native.lisp", __DIR__)
+  @agent_prompt_path Path.expand("../../../priv/preludes/kernel/agent.prompt.lisp", __DIR__)
   @agent_core_path Path.expand("../../../priv/preludes/kernel/agent.core.lisp", __DIR__)
   @agent_feedback_path Path.expand("../../../priv/preludes/kernel/agent.feedback.lisp", __DIR__)
   @agent_retry_path Path.expand("../../../priv/preludes/kernel/agent.retry.lisp", __DIR__)
@@ -32,6 +33,7 @@ defmodule PtcRunner.Kernel.Library do
   @external_resource @fs_path
   @external_resource @llm_path
   @external_resource @agent_native_path
+  @external_resource @agent_prompt_path
   @external_resource @agent_core_path
   @external_resource @agent_feedback_path
   @external_resource @agent_retry_path
@@ -45,6 +47,7 @@ defmodule PtcRunner.Kernel.Library do
     "fs" => File.read!(@fs_path),
     "llm" => File.read!(@llm_path),
     "agent.native" => File.read!(@agent_native_path),
+    "agent.prompt" => File.read!(@agent_prompt_path),
     "agent.core" => File.read!(@agent_core_path),
     "agent.feedback" => File.read!(@agent_feedback_path),
     "agent.retry" => File.read!(@agent_retry_path),
@@ -52,9 +55,11 @@ defmodule PtcRunner.Kernel.Library do
     "log.core" => File.read!(@log_core_path)
   }
   @dependencies %{
+    "agent.prompt" => ["kernel"],
     "agent.core" => [
       "agent.feedback",
       "agent.native",
+      "agent.prompt",
       "agent.retry",
       "kernel",
       "llm",

@@ -309,8 +309,9 @@ where the model returns data but does not author executable mission logic.
 The file-agent example separates orchestration from task authority:
 
 - the human-authored workflow may call DeepSeek and `kernel-eval`;
-- the installed `agent.core` loop gives the model one `run_ptc_lisp` tool
-  schema and the frozen mission inventory, then receives a program;
+- the installed `agent.core` loop asks the separate `agent.prompt` prelude to
+  render a compact PTC-Lisp language card and mission context, gives the model
+  one `run_ptc_lisp` tool schema, then receives a program;
 - that program executes in the mission environment;
 - only the mission environment has `file-read`, rooted at
   `examples/kernel-tutorial/03-file-agent/files/`;
@@ -338,9 +339,16 @@ to pass manifest input into it:
   (agent.core/run (get input "task") {"max_turns" 4}))
 ```
 
-The system request includes an exact bounded JSON inventory of prompt-visible
-mission exports, model-visible capability schemas, and applicable limits. For
-an evaluation failure, the next request preserves the exact assistant tool
+`agent.prompt` owns the system text independently of the retry/evaluation loop
+in `agent.core`. Its `initial-state`, `render`, and `transition` functions form
+a bounded policy seam; the shipped transition currently keeps state unchanged.
+The rendered `PTC_AGENT_PROMPT_V1` text teaches the supported PTC-Lisp subset
+and appends a deterministic compact context of prompt-visible mission exports,
+direct capability schemas, and applicable limits. The full structured V2
+inventory remains available to trusted workflow code through
+`kernel/mission-inventory`.
+
+For an evaluation failure, the next request preserves the exact assistant tool
 call and appends a provider-valid `tool` result with the same call ID. The
 bounded result begins like this:
 
@@ -531,6 +539,11 @@ Authority is equally explicit:
 
 - `llm` is allowed only in the workflow provider list;
 - `file-read` is allowed only in the mission provider list;
+- `file-read` configuration may set `"model_visible": false`; MCP selection
+  may provide a `model_visible` list that is a subset of `allow`;
+- visibility removes discovery/model-context metadata only. A granted hidden
+  capability remains callable by exact name, while an ungranted capability
+  remains denied;
 - file paths must be relative, remain below the configured root, and contain
   no symlink traversal;
 - component tool requirements are discovered at compilation and must match

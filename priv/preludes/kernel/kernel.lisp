@@ -23,3 +23,11 @@
     (if (= :ok (get response :status))
       (get response :value)
       response)))
+
+(defn mission-model-context
+  "Return the compact deterministic mission context for the model prompt."
+  []
+  (let [response (tool/kernel-mission-model-context {})]
+    (if (= :ok (get response :status))
+      (get response :value)
+      response)))
