@@ -16,12 +16,16 @@ defmodule PtcRunner.Lisp.Eval.Apply do
 
   alias PtcRunner.Lisp.Env.Builtin
   alias PtcRunner.Lisp.Eval.Context, as: EvalContext
+  alias PtcRunner.Lisp.Eval.EffectCapture
   alias PtcRunner.Lisp.Eval.Helpers
   alias PtcRunner.Lisp.Eval.Patterns
   alias PtcRunner.Lisp.ExecutionError
   require PtcRunner.Lisp.ExecutionError
   alias PtcRunner.Lisp.Format
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
+  alias PtcRunner.Lisp.ParallelError
+  alias PtcRunner.Lisp.Prelude.Contract
+  alias PtcRunner.Lisp.Prelude.ContractError
   alias PtcRunner.Lisp.Runtime.Args
   alias PtcRunner.Lisp.Runtime.Math
   alias PtcRunner.Lisp.Runtime.Predicates
@@ -123,11 +127,22 @@ defmodule PtcRunner.Lisp.Eval.Apply do
          %EvalContext{} = eval_ctx,
          do_eval_fn
        ) do
-    eval_ctx = count_prelude_entry_metadata(metadata, eval_ctx)
-
     case check_arity(patterns, args) do
-      :ok -> execute_closure(closure, args, eval_ctx, do_eval_fn)
-      {:error, _} = err -> err
+      :ok ->
+        Contract.validate_input!(metadata, args, eval_ctx)
+        eval_ctx = count_prelude_entry_metadata(metadata, eval_ctx)
+
+        case execute_closure(closure, args, eval_ctx, do_eval_fn) do
+          {:ok, result, final_ctx} = success ->
+            Contract.validate_output!(metadata, result, final_ctx)
+            success
+
+          {:error, _} = error ->
+            error
+        end
+
+      {:error, _} = err ->
+        err
     end
   end
 
@@ -750,13 +765,19 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   end
 
   # Special forms like println - convert to a function
-  def closure_to_fun({:special, :println}, %EvalContext{}, _do_eval_fn) do
+  def closure_to_fun(
+        {:special, :println},
+        %EvalContext{max_print_length: max_print_length},
+        _do_eval_fn
+      ) do
     fn arg ->
       message =
         case arg do
           s when is_binary(s) -> s
           v -> format_for_println(v)
         end
+
+      message = EvalContext.truncate_print(message, max_print_length)
 
       # Stash the print in the process dictionary for HOF side-effect collection
       case Process.get(:__ptc_hof_stack, []) do
@@ -767,6 +788,8 @@ defmodule PtcRunner.Lisp.Eval.Apply do
         [] ->
           :ok
       end
+
+      :ok = EffectCapture.record_print(message)
 
       nil
     end
@@ -882,8 +905,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
          metadata,
          do_eval_fn
        ) do
-    eval_context = count_prelude_entry_metadata(metadata, eval_context)
-    stash_prelude_entry(metadata)
+    caller_baseline = eval_context
 
     case check_arity(patterns, args) do
       :ok ->
@@ -892,6 +914,10 @@ defmodule PtcRunner.Lisp.Eval.Apply do
       {:error, {:arity_mismatch, expected, actual}} ->
         raise RuntimeError, "closure arity mismatch: expected #{expected}, got #{actual}"
     end
+
+    Contract.validate_input!(metadata, args, eval_context)
+    eval_context = count_prelude_entry_metadata(metadata, eval_context)
+    stash_prelude_entry(metadata)
 
     # Match each argument against its corresponding pattern
     bindings =
@@ -924,6 +950,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
         new_env,
         eval_context.tool_exec,
         eval_context.turn_history,
+        max_print_length: eval_context.max_print_length,
         pmap_timeout: eval_context.pmap_timeout,
         pmap_max_concurrency: eval_context.pmap_max_concurrency,
         # Security H1: propagate the sandbox cap, the FIXED per-worker
@@ -957,6 +984,8 @@ defmodule PtcRunner.Lisp.Eval.Apply do
     try do
       case do_eval_fn.(body, eval_ctx) do
         {:ok, result, final_ctx} ->
+          contract_ctx = merge_hof_prelude_delta(final_ctx, caller_baseline)
+          Contract.validate_output!(metadata, result, contract_ctx)
           # Stash side effects (tool_calls, prints) in process dictionary
           # so they survive the Erlang HOF boundary (closure_to_fun returns only a value)
           stash_side_effects(final_ctx)
@@ -969,19 +998,23 @@ defmodule PtcRunner.Lisp.Eval.Apply do
       end
     catch
       {:return_signal, value, %EvalContext{} = thrown_ctx} when not is_nil(prelude_ns) ->
-        throw(
-          {:return_signal, tag_prelude_ns(value, prelude_ns),
-           thrown_ctx
-           |> merge_stashed_prelude_counts()
-           |> restore_prelude_caller(eval_context)}
-        )
+        restored_ctx = merge_hof_prelude_delta(thrown_ctx, caller_baseline)
+
+        value = tag_prelude_ns(value, prelude_ns)
+        Contract.validate_output!(metadata, value, restored_ctx)
+
+        # Merge the HOF stash only after successful validation. On a contract
+        # error, with_side_effect_stash/3 pops the same stash into the error
+        # context; merging it before validation would count this call twice.
+        restored_ctx = merge_stashed_prelude_counts(restored_ctx)
+        throw({:return_signal, value, restored_ctx})
 
       {:fail_signal, value, %EvalContext{} = thrown_ctx} when not is_nil(prelude_ns) ->
         throw(
           {:fail_signal, value,
            thrown_ctx
            |> merge_stashed_prelude_counts()
-           |> restore_prelude_caller(eval_context)}
+           |> merge_hof_prelude_delta(caller_baseline)}
         )
     end
   end
@@ -1006,8 +1039,13 @@ defmodule PtcRunner.Lisp.Eval.Apply do
 
   defp merge_stashed_prelude_counts(%EvalContext{} = eval_ctx) do
     case Process.get(:__ptc_hof_stack, []) do
-      [top | _rest] -> %{eval_ctx | prelude_call_counts: top.prelude_call_counts}
-      [] -> eval_ctx
+      [top | _rest] ->
+        Map.update!(eval_ctx, :prelude_call_counts, fn current ->
+          Map.merge(current, top.prelude_call_counts, fn _ref, left, right -> left + right end)
+        end)
+
+      [] ->
+        eval_ctx
     end
   end
 
@@ -1057,6 +1095,12 @@ defmodule PtcRunner.Lisp.Eval.Apply do
       result = RuntimeCallable.with_context(eval_ctx, do_eval_fn, fun)
       {:ok, result, pop_side_effects(eval_ctx)}
     rescue
+      e in ContractError ->
+        reraise %{e | eval_ctx: pop_side_effects(e.eval_ctx)}, __STACKTRACE__
+
+      e in ParallelError ->
+        reraise %{e | eval_ctx: pop_side_effects(e.eval_ctx)}, __STACKTRACE__
+
       e ->
         drop_side_effect_stash()
         reraise e, __STACKTRACE__
@@ -1071,37 +1115,29 @@ defmodule PtcRunner.Lisp.Eval.Apply do
     stack = Process.get(:__ptc_hof_stack, [])
 
     Process.put(:__ptc_hof_stack, [
-      %{tool_calls: [], prints: [], prelude_call_counts: %{}, tool_cache: %{}}
+      %{tool_calls: [], pmap_calls: [], prints: [], prelude_call_counts: %{}, tool_cache: %{}}
       | stack
     ])
   end
 
   @doc false
-  def capture_prelude_call_counts(fun) when is_function(fun, 0) do
+  def capture_parallel_effects(%EvalContext{} = eval_ctx, fun) when is_function(fun, 0) do
     push_side_effect_stash()
+    :ok = EffectCapture.push()
 
     try do
       value = fun.()
-      {value, take_stashed_prelude_call_counts()}
+      final_ctx = pop_side_effects(eval_ctx)
+      _captured = EffectCapture.pop()
+      {:ok, value, EvalContext.parallel_effects(final_ctx, eval_ctx)}
     rescue
       e ->
         drop_side_effect_stash()
-        reraise e, __STACKTRACE__
+        {:error, :error, e, __STACKTRACE__, EffectCapture.pop()}
     catch
       kind, reason ->
         drop_side_effect_stash()
-        :erlang.raise(kind, reason, __STACKTRACE__)
-    end
-  end
-
-  defp take_stashed_prelude_call_counts do
-    case Process.get(:__ptc_hof_stack, []) do
-      [top | rest] ->
-        Process.put(:__ptc_hof_stack, rest)
-        top.prelude_call_counts
-
-      [] ->
-        %{}
+        {:error, kind, reason, __STACKTRACE__, EffectCapture.pop()}
     end
   end
 
@@ -1120,6 +1156,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
         # then previous invocations'.
         updated = %{
           tool_calls: ctx.tool_calls ++ top.tool_calls,
+          pmap_calls: ctx.pmap_calls ++ Map.get(top, :pmap_calls, []),
           prints: ctx.prints ++ top.prints,
           prelude_call_counts:
             Map.merge(top.prelude_call_counts, ctx.prelude_call_counts, fn _key, left, right ->
@@ -1145,6 +1182,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
         # Enum.reverse in Lisp.run produces chronological order.
         eval_ctx
         |> Map.update!(:tool_calls, fn existing -> top.tool_calls ++ existing end)
+        |> Map.update!(:pmap_calls, fn existing -> Map.get(top, :pmap_calls, []) ++ existing end)
         |> Map.update!(:prints, fn existing -> top.prints ++ existing end)
         |> Map.update!(:prelude_call_counts, fn existing ->
           Map.merge(existing, top.prelude_call_counts, fn _key, left, right -> left + right end)
@@ -1329,6 +1367,28 @@ defmodule PtcRunner.Lisp.Eval.Apply do
     }
   end
 
+  # A closure converted to an Erlang function for a regular HOF evaluates in a
+  # fresh context. Its ledgers are therefore deltas, unlike `do_execute_closure`
+  # contexts, which already contain the caller baseline. Merge those deltas
+  # before contract validation so an error carries both earlier caller effects
+  # and effects from the failing HOF invocation.
+  defp merge_hof_prelude_delta(%EvalContext{} = delta_ctx, %EvalContext{} = caller_ctx) do
+    %{
+      caller_ctx
+      | tool_calls: delta_ctx.tool_calls ++ caller_ctx.tool_calls,
+        pmap_calls: delta_ctx.pmap_calls ++ caller_ctx.pmap_calls,
+        prelude_call_counts:
+          Map.merge(
+            caller_ctx.prelude_call_counts,
+            delta_ctx.prelude_call_counts,
+            fn _ref, left, right -> left + right end
+          ),
+        tool_cache: Map.merge(caller_ctx.tool_cache, delta_ctx.tool_cache),
+        prints: delta_ctx.prints ++ caller_ctx.prints,
+        iteration_count: caller_ctx.iteration_count + delta_ctx.iteration_count
+    }
+  end
+
   # Re-throw a `(return …)`/`(fail …)` signal that escaped a value-position
   # closure. For a prelude export, restore the caller's namespace tables and tag
   # a returned closure; for an ordinary user closure, re-throw verbatim so the
@@ -1342,7 +1402,13 @@ defmodule PtcRunner.Lisp.Eval.Apply do
 
       ns ->
         tagged = if signal == :return_signal, do: tag_prelude_ns(value, ns), else: value
-        throw({signal, tagged, restore_prelude_caller(thrown_ctx, caller_ctx)})
+        restored_ctx = restore_prelude_caller(thrown_ctx, caller_ctx)
+
+        if signal == :return_signal do
+          Contract.validate_output!(meta, tagged, restored_ctx)
+        end
+
+        throw({signal, tagged, restored_ctx})
     end
   end
 

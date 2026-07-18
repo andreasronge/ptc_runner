@@ -85,6 +85,50 @@ Schema profile, compiles it once with JSV, and projects only safe metadata;
 callbacks and compiled validators remain host-owned. Schema validation and any
 semantic validator must both pass before dispatch.
 
+Prompt-visible component exports can add `:signature` (functions) or `:type`
+(constants) metadata. These contracts are compiled once and enforced at the
+public prelude boundary: inputs before function entry and successful outputs
+after evaluation. Syntax validation, fixed-arity validation, and runtime value
+validation are distinct checks. Clojure `^` reader metadata is unsupported;
+the metadata is the ordinary map accepted by `defn` and `def`. Optional
+positional types accept `nil` but do not permit an omitted argument. Runtime
+prelude contracts validate internal Lisp values, so an ordinary string never
+satisfies `:keyword` even when its text would be a valid keyword name.
+
+Capability input-schema property names must survive the Lisp tool boundary's
+recursive hyphen-to-underscore normalization unchanged. Assembly rejects a
+hyphenated input property (and therefore any hyphen/underscore collision)
+instead of advertising a direct call that cannot pass its own schema. The same
+check recursively covers object keys inside `const` and `enum` values. Output
+schemas are unaffected because provider results do not cross that argument
+normalization boundary.
+
+The shipped `agent.prompt` prelude renders the frozen structured projection as
+one `Available API` section. When the mission has any prompt-visible prelude
+function, that prelude is treated as the complete model-facing facade and raw
+`tool/...` capabilities are omitted; otherwise direct capabilities are shown.
+The heading remains present for an empty mission. Direct-capability field
+titles and descriptions are rendered with stable argument/return paths, and
+semantically unordered enum members are canonicalized before the model-context
+hash is computed.
+The default prompt omits numeric Kernel limits because they are enforced rather
+than usefully estimated by the model. Prompt wording and omission policy can be
+replaced without changing `agent.core`; the host continues to own
+canonicalization, bounds, effects, and hashes. Raw capability JSON Schema
+remains authoritative at dispatch even when a capability is omitted from the
+prompt.
+
+Kernel correction policy retries a contract mismatch only when the complete
+evaluation recorded no capability activity. Input validation still runs before
+the selected wrapper body, but an earlier top-level form or higher-order
+invocation may already have called a capability. Mission-memory rollback cannot
+undo external reads or writes. Contract failures inside `pmap`/`pcalls` retain
+the failed worker's bounded ledgers and public prelude call counts in the error
+step instead of returning activity metadata with an empty diagnostic ledger.
+The Kernel combines this evaluator marker with dispatcher accounting while the
+single evaluation lease is still held, so reserved runtime tools and concurrent
+lease handoff cannot produce a false retry classification.
+
 The host then places the frozen bundle, capabilities, and JSON-like data into
 one of two structurally distinct environments:
 
@@ -292,7 +336,7 @@ with local components; local IDs cannot shadow installed IDs.
 `RunConfig` freezes two bounded deterministic mission projections. The
 authoritative V2 inventory contains prompt-visible exports, model-visible
 capability schemas, and mission limits and is exposed through
-`kernel-mission-inventory`. A separate compact V1 model rendering preserves
+`kernel-mission-inventory`. A separate compact V2 model rendering preserves
 wrapper call forms, schemas for directly visible capabilities, and limits and
 is exposed through `kernel-mission-model-context`. Their hashes and byte counts
 have distinct canonical metadata names. Keep both projections payload-free and

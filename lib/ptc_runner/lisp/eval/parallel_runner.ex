@@ -123,12 +123,17 @@ defmodule PtcRunner.Lisp.Eval.ParallelRunner do
     create each worker (default: `&Process.spawn/2`). A seam for
     fault-injection tests that need a spawn to raise partway through
     filling the window; production callers never set it.
+  - `:retain_completed_results` - wrap failures with successful payloads
+    already observed before the failure (default: `false`). The evaluator
+    enables this to preserve audit effects; direct callers retain the legacy
+    verbatim error shape.
   """
   @type opts :: [
           worker_max_heap: pos_integer() | nil,
           max_concurrency: pos_integer(),
           budget: ParallelBudget.t() | nil,
           deadline_mono: integer(),
+          retain_completed_results: boolean(),
           spawn_fun: (function(), list() -> {pid(), reference()})
         ]
 
@@ -160,6 +165,7 @@ defmodule PtcRunner.Lisp.Eval.ParallelRunner do
     budget = Keyword.get(opts, :budget)
     deadline_mono = Keyword.fetch!(opts, :deadline_mono)
     spawn_fun = Keyword.get(opts, :spawn_fun, &Process.spawn/2)
+    retain_completed_results? = Keyword.get(opts, :retain_completed_results, false)
 
     indexed = items |> Enum.with_index() |> Map.new(fn {item, idx} -> {idx, item} end)
     total = map_size(indexed)
@@ -172,6 +178,7 @@ defmodule PtcRunner.Lisp.Eval.ParallelRunner do
       budget: budget,
       deadline_mono: deadline_mono,
       spawn_fun: spawn_fun,
+      retain_completed_results?: retain_completed_results?,
       total: total,
       next: 0,
       # %{ref => %{pid, index, slot_held?: boolean}}
@@ -642,16 +649,48 @@ defmodule PtcRunner.Lisp.Eval.ParallelRunner do
   # draining is re-propagated rather than masked by the error tuple.
   defp finish_error(state, error) do
     kill_all(state)
+    {cancellation, drained_results} = drain_worker_results(nil, state.live)
 
-    case drain_worker_signals(nil) do
-      nil -> {:error, unwrap_error(error)}
-      cancellation -> exit(cancellation)
+    case cancellation do
+      nil ->
+        results = Map.merge(state.results, drained_results)
+        {:error, unwrap_error(error, results, state.live, state.retain_completed_results?)}
+
+      reason ->
+        exit(reason)
     end
   end
 
   # A `{:error, term}` returned by `fun` is surfaced as `term` verbatim.
-  defp unwrap_error({:fun_error, term}), do: term
-  defp unwrap_error(other), do: other
+  # Contract errors additionally retain completed worker payloads so the
+  # evaluator can preserve their already-observed audit effects.
+  defp unwrap_error(
+         {:fun_error, {:parallel_contract_error, reason, effects}},
+         results,
+         live,
+         _retain_completed_results?
+       ) do
+    {:parallel_contract_error, reason, effects, completed_results(results, live)}
+  end
+
+  defp unwrap_error({:fun_error, term}, results, live, true),
+    do: {:parallel_error, term, completed_results(results, live)}
+
+  defp unwrap_error(other, results, live, true),
+    do: {:parallel_error, other, completed_results(results, live)}
+
+  defp unwrap_error({:fun_error, term}, _results, _live, false), do: term
+  defp unwrap_error(other, _results, _live, false), do: other
+
+  defp completed_results(results, live) do
+    live
+    |> Enum.reduce(results, fn
+      {_ref, %{index: index, result: {:ok, value}}}, acc -> Map.put_new(acc, index, value)
+      _entry, acc -> acc
+    end)
+    |> Enum.sort_by(&elem(&1, 0))
+    |> Enum.map(&elem(&1, 1))
+  end
 
   # Kill every live worker and release each one's global budget slot.
   defp kill_all(state) do
@@ -698,12 +737,35 @@ defmodule PtcRunner.Lisp.Eval.ParallelRunner do
   # Drain stray worker signals; see moduledoc. Returns a non-worker
   # abnormal-EXIT cancellation reason if one was seen, else `nil`.
   defp drain_worker_signals(cancellation) do
+    {cancellation, _results} = drain_worker_results(cancellation, %{})
+    cancellation
+  end
+
+  # Finish-error cleanup may race a successful sibling result already queued
+  # behind the failing worker's message. Drain those successful payloads using
+  # the authoritative pid/index mapping from the still-live registry so audit
+  # effects already sent to the runner are not discarded.
+  defp drain_worker_results(cancellation, live) do
+    worker_indexes = Map.new(live, fn {_ref, %{pid: pid, index: index}} -> {pid, index} end)
+    do_drain_worker_signals(cancellation, %{}, worker_indexes)
+  end
+
+  defp do_drain_worker_signals(cancellation, results, worker_indexes) do
     receive do
       {:DOWN, _ref, :process, _pid, _reason} ->
-        drain_worker_signals(cancellation)
+        do_drain_worker_signals(cancellation, results, worker_indexes)
+
+      {:worker_result, pid, _idx, {:ok, value}} ->
+        results =
+          case Map.fetch(worker_indexes, pid) do
+            {:ok, index} -> Map.put_new(results, index, value)
+            :error -> results
+          end
+
+        do_drain_worker_signals(cancellation, results, worker_indexes)
 
       {:worker_result, _pid, _idx, _result} ->
-        drain_worker_signals(cancellation)
+        do_drain_worker_signals(cancellation, results, worker_indexes)
 
       {:EXIT, pid, reason} ->
         # Use the APPEND-ONLY ever-spawned set, not the not-yet-reaped
@@ -714,11 +776,14 @@ defmodule PtcRunner.Lisp.Eval.ParallelRunner do
         worker_pids = Process.get(@worker_pids_key, MapSet.new())
 
         case classify_drain_exit(pid, reason, worker_pids) do
-          :drain -> drain_worker_signals(cancellation)
-          {:cancel, cancel_reason} -> drain_worker_signals(cancellation || cancel_reason)
+          :drain ->
+            do_drain_worker_signals(cancellation, results, worker_indexes)
+
+          {:cancel, cancel_reason} ->
+            do_drain_worker_signals(cancellation || cancel_reason, results, worker_indexes)
         end
     after
-      0 -> cancellation
+      0 -> {cancellation, results}
     end
   end
 

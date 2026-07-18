@@ -409,9 +409,9 @@ function renderSystemPrompt(system) {
 function splitPromptSections(system) {
   const lines = system.split('\n');
   const version = lines.shift();
-  const headings = new Set([
-    'Instructions', 'PTC-Lisp', 'Examples', 'Mission API and limits (deterministic JSON)'
-  ]);
+  const fixedHeadings = ['Instructions', 'PTC-Lisp', 'Examples'];
+  const apiHeadings = ['Available API', 'Mission API and limits (deterministic JSON)'];
+  const headings = new Set([...fixedHeadings, ...apiHeadings]);
   const items = [];
   let current = null;
 
@@ -426,7 +426,11 @@ function splitPromptSections(system) {
     }
   }
   if (current) items.push({ ...current, body: current.lines.join('\n').trim() });
-  return items.length === headings.size ? { version, items } : null;
+  const found = new Set(items.map(item => item.heading));
+  const complete = fixedHeadings.every(heading => found.has(heading)) &&
+    apiHeadings.filter(heading => found.has(heading)).length === 1 &&
+    items.length === fixedHeadings.length + 1;
+  return complete ? { version, items } : null;
 }
 
 function renderDialogue(turns, options = {}) {

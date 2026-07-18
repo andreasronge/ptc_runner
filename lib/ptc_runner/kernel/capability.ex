@@ -20,6 +20,7 @@ defmodule PtcRunner.Kernel.Capability do
 
   @name ~r|\A[a-z][a-z0-9._/-]{0,127}\z|
   alias PtcRunner.Kernel.JSONSchema
+  alias PtcRunner.Lisp.KeyNormalizer
 
   @effects [:read, :write, :unknown]
   @options ~w(name callback validate description model_visible input_schema output_schema effect)a
@@ -59,8 +60,10 @@ defmodule PtcRunner.Kernel.Capability do
 
   Names are bounded lower-case identifiers and may contain `.`, `_`, `/`, and
   `-`. Descriptions are limited to 4,096 bytes. Schemas use the bounded JSON
-  Schema 2020-12 profile compiled by `PtcRunner.Kernel.JSONSchema`. Effects are
-  `:read`, `:write`, or `:unknown` and default to `:unknown`.
+  Schema 2020-12 profile compiled by `PtcRunner.Kernel.JSONSchema`. Input
+  property and constrained-literal keys must already use their underscore form
+  so recursive Lisp argument normalization cannot change their meaning.
+  Effects are `:read`, `:write`, or `:unknown` and default to `:unknown`.
   """
   def new(opts) when is_list(opts) do
     with true <- Keyword.keys(opts) -- @options == [],
@@ -72,6 +75,7 @@ defmodule PtcRunner.Kernel.Capability do
          effect when effect in @effects <- Keyword.get(opts, :effect, :unknown),
          {:ok, input_schema, input_validator} <-
            JSONSchema.compile(Keyword.get(opts, :input_schema)),
+         true <- callable_input_schema?(input_schema),
          {:ok, output_schema, output_validator} <-
            optional_schema(Keyword.get(opts, :output_schema)) do
       {:ok,
@@ -122,4 +126,46 @@ defmodule PtcRunner.Kernel.Capability do
 
   defp optional_schema(nil), do: {:ok, nil, nil}
   defp optional_schema(schema), do: JSONSchema.compile(schema)
+
+  # PTC-Lisp recursively normalizes hyphens to underscores in tool argument
+  # keys before dispatch. Reject schemas whose property names would change at
+  # that boundary; otherwise the advertised exact call can never validate.
+  defp callable_input_schema?(schema) when is_map(schema) do
+    callable_constraints?(schema) and callable_children?(schema)
+  end
+
+  defp callable_input_schema?(_schema), do: true
+
+  defp callable_constraints?(schema) do
+    Enum.all?(["const", "enum"], fn key ->
+      case Map.fetch(schema, key) do
+        {:ok, value} -> callable_argument_value?(value)
+        :error -> true
+      end
+    end)
+  end
+
+  defp callable_children?(%{"type" => "object"} = schema) do
+    schema
+    |> Map.get("properties", %{})
+    |> Enum.all?(fn {name, child} ->
+      KeyNormalizer.normalize_key(name) == name and callable_input_schema?(child)
+    end)
+  end
+
+  defp callable_children?(%{"type" => "array", "items" => items}),
+    do: callable_input_schema?(items)
+
+  defp callable_children?(_schema), do: true
+
+  defp callable_argument_value?(value) when is_map(value) and not is_struct(value) do
+    Enum.all?(value, fn {key, child} ->
+      KeyNormalizer.normalize_key(key) == key and callable_argument_value?(child)
+    end)
+  end
+
+  defp callable_argument_value?(value) when is_list(value),
+    do: Enum.all?(value, &callable_argument_value?/1)
+
+  defp callable_argument_value?(_value), do: true
 end

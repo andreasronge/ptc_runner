@@ -52,18 +52,14 @@ defmodule PtcRunner.Lisp.PrintlnTest do
     assert step.prints == ["debug x: 10"]
   end
 
-  test "println in pmap is not captured (by design)" do
-    # Parallel branches communicate via return values, not side effects.
-    # This is intentional: ordering would be non-deterministic, and return
-    # values are the proper communication channel for parallel execution.
-
+  test "println in pmap is captured in input order" do
     source = """
     (pmap (fn [x] (println "item" x) (* x x)) [1 2 3])
     """
 
     {:ok, step} = Lisp.run(source)
     assert step.return == [1, 4, 9]
-    assert step.prints == []
+    assert step.prints == ["item 1", "item 2", "item 3"]
   end
 
   test "println in loop with recur captures all iterations" do
@@ -90,6 +86,16 @@ defmodule PtcRunner.Lisp.PrintlnTest do
     assert step.return == [nil, nil, nil]
     # Prints are captured from HOF closure invocations
     assert step.prints == ["1", "2", "3"]
+  end
+
+  test "map println respects configurable max_print_length" do
+    assert {:ok, step} = Lisp.run(~S|(map println ["abcdef"])|, max_print_length: 3)
+    assert step.prints == ["abc... (3/6 chars)"]
+  end
+
+  test "pmap println respects configurable max_print_length" do
+    assert {:ok, step} = Lisp.run(~S|(pmap println ["abcdef"])|, max_print_length: 3)
+    assert step.prints == ["abc... (3/6 chars)"]
   end
 
   test "println output truncated at 2000 characters (TRN-011)" do

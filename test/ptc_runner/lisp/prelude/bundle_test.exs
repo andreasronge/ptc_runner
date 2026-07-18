@@ -19,6 +19,29 @@ defmodule PtcRunner.Lisp.Prelude.BundleTest do
   (defn shout [x] (str x "!"))
   """
 
+  test "trace artifact hash changes with enforced export contracts" do
+    {:ok, int_function} =
+      Compiler.compile(~S|(ns api) (defn id {:signature "(value :int) -> :int"} [value] value)|)
+
+    {:ok, string_function} =
+      Compiler.compile(
+        ~S|(ns api) (defn id {:signature "(value :string) -> :string"} [value] value)|
+      )
+
+    {:ok, int_constant} = Compiler.compile(~S|(ns api) (def answer {:type ":int"} 42)|)
+    {:ok, string_constant} = Compiler.compile(~S|(ns api) (def answer {:type ":string"} "42")|)
+
+    int_function_trace = Prelude.trace_summary(int_function)
+    string_function_trace = Prelude.trace_summary(string_function)
+    int_constant_trace = Prelude.trace_summary(int_constant)
+    string_constant_trace = Prelude.trace_summary(string_constant)
+
+    assert [%{signature: "(value :int) -> :int", type: nil}] = int_function_trace.exports
+    assert [%{signature: nil, type: ":int"}] = int_constant_trace.exports
+    refute int_function_trace.artifact_hash == string_function_trace.artifact_hash
+    refute int_constant_trace.artifact_hash == string_constant_trace.artifact_hash
+  end
+
   test "compiles selected source components once into a normal prelude artifact" do
     assert {:ok, %Prelude{} = prelude} =
              Bundle.compile([

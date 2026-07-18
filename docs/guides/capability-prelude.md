@@ -24,6 +24,38 @@ Public `defn` and `def` forms become qualified exports. `defn-` remains
 private to its namespace. Cross-component calls require both a declared
 component dependency and a public export in the dependency.
 
+Public exports may declare runtime contracts in their ordinary metadata map:
+
+```clojure
+(defn search
+  "Search the configured document source."
+  {:signature "(query :string, limit :int?) -> {items [:string]}"
+   :effect :read}
+  [query limit]
+  ...)
+
+(def default-limit
+  "Default number of results."
+  {:type ":int"}
+  10)
+```
+
+The compiler parses the contract once, rejects malformed declarations,
+duplicate parameter or normalized field names, signature/arity mismatches,
+invalid effects, and constant values that do not match `:type`. At runtime a
+signed function validates positional arguments before entering its body and
+validates every successful result, including an export-local `(return ...)`.
+An explicit `(fail ...)` is not a successful result and its payload is not
+output-validated. Unsigned exports retain dynamic behavior.
+
+Contract syntax is a string with its own small type grammar; Clojure reader
+metadata such as `^{:signature ...}` is not supported. `:int?` accepts an
+integer or `nil`; it does not make a positional argument omittable. In shaped
+maps, an optional field may be omitted or `nil`. Function signatures currently
+apply only to fixed-arity exports; the grammar has no rest-parameter contract.
+See the
+[PTC-Lisp specification](../ptc-lisp-specification.md#910-public-component-contracts).
+
 Tool authority is explicit. Every `tool/name` used by an export is recorded
 as `tool:name`, including calls reached through private helpers or component
 dependencies. Environment assembly rejects a bundle unless the destination

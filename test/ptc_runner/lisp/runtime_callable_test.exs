@@ -197,6 +197,25 @@ defmodule PtcRunner.Lisp.RuntimeCallableTest do
       assert Enum.map(step.tool_calls, &Map.get(&1, :cached, false)) == [false, true]
     end
 
+    test "cache hits do not consume additional max_tool_calls reservations" do
+      calls = :counters.new(1, [:atomics])
+
+      tools = %{
+        "cached" =>
+          {fn args ->
+             :counters.add(calls, 1, 1)
+             args["x"] * 10
+           end, signature: "(x :int) -> :int", cache: true}
+      }
+
+      source = ~S|(map tool/cached [{:x 1} {:x 1}])|
+
+      assert {:ok, step} = Lisp.run(source, tools: tools, max_tool_calls: 1)
+      assert step.return == [10, 10]
+      assert :counters.get(calls, 1) == 1
+      assert Enum.map(step.tool_calls, &Map.get(&1, :cached, false)) == [false, true]
+    end
+
     test "runtime callable map enforces max_tool_calls across invocations" do
       tools = %{
         "echo" => fn args -> args end
@@ -207,6 +226,40 @@ defmodule PtcRunner.Lisp.RuntimeCallableTest do
       assert {:error, step} = Lisp.run(source, tools: tools, max_tool_calls: 1)
       assert step.fail.reason == :tool_call_limit_exceeded
       assert step.fail.message =~ "tool_call_limit_exceeded"
+    end
+
+    test "user closure map shares max_tool_calls with its caller" do
+      provider_calls = :atomics.new(1, [])
+
+      tools = %{
+        "echo" => fn args ->
+          :atomics.add(provider_calls, 1, 1)
+          args
+        end
+      }
+
+      source = ~S|(map (fn [x] (tool/echo {"x" x})) [1 2])|
+
+      assert {:error, step} = Lisp.run(source, tools: tools, max_tool_calls: 1)
+      assert step.fail.message =~ "tool_call_limit_exceeded"
+      assert :atomics.get(provider_calls, 1) == 1
+    end
+
+    test "nested HOF closures share max_tool_calls with the whole program" do
+      provider_calls = :atomics.new(1, [])
+
+      tools = %{
+        "echo" => fn args ->
+          :atomics.add(provider_calls, 1, 1)
+          args
+        end
+      }
+
+      source = ~S|(map (fn [xs] (map (fn [x] (tool/echo {"x" x})) xs)) [[1 2]])|
+
+      assert {:error, step} = Lisp.run(source, tools: tools, max_tool_calls: 1)
+      assert step.fail.message =~ "tool_call_limit_exceeded"
+      assert :atomics.get(provider_calls, 1) == 1
     end
 
     test "saved runtime callable HOF invocation uses call-time max_tool_calls state" do

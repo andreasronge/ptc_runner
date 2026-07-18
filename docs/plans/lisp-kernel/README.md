@@ -23,9 +23,11 @@ records for recently completed cross-cutting work.
   deterministic model-facing context, stronger inspection correlation, and a
   state-aware private inspection experience in the Viewer.
 - [`runtime-prelude-contract-validation.md`](runtime-prelude-contract-validation.md)
-  plans strict runtime input and output validation for public prelude
-  signatures, compile-time constant checks, safe model correction feedback,
-  and continued JSON Schema enforcement at raw capability boundaries.
+  records strict runtime input and output validation for public prelude
+  signatures, compile-time constant checks, safe model correction feedback, a
+  unified model-contract projection consumed by configurable `Available API`
+  rendering without numeric limits, and continued JSON Schema enforcement at
+  raw capability boundaries.
 
 Current user-facing material lives in [`../../guides/`](../../guides/). Git
 history is the archive for the completed Kernel migration, removed experiments,

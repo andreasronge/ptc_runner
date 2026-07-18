@@ -32,6 +32,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
   identity + the canonical args hash), as are `:child_trace_id`/`:child_step`.
   """
 
+  alias PtcRunner.Lisp.Eval.EffectCapture
   alias PtcRunner.Lisp.RetainedSize
 
   @default_print_length 2000
@@ -52,6 +53,10 @@ defmodule PtcRunner.Lisp.Eval.Context do
     loop_limit: 1000,
     max_print_length: @default_print_length,
     max_tool_calls: nil,
+    # Shared atomic reservation counter for uncached tool invocations. Every
+    # closure and parallel worker in one run inherits the same reference, so
+    # `max_tool_calls` is a program-wide bound rather than a per-context bound.
+    tool_call_budget: nil,
     max_tool_call_result_bytes: @default_tool_call_result_bytes,
     pmap_timeout: @default_pmap_timeout,
     pmap_max_concurrency: @default_pmap_max_concurrency,
@@ -76,6 +81,10 @@ defmodule PtcRunner.Lisp.Eval.Context do
     # nested pmap/pcalls inherit and reuse the SAME object. `nil` when
     # no global cap is configured (uncounted parallel execution).
     parallel_budget: nil,
+    # Shared monotonic marker for uncached tool execution. Atomics remain
+    # shared across pmap/pcalls workers even though their context ledgers are
+    # copied, so contract retry classification cannot lose sibling activity.
+    tool_activity: nil,
     prints: [],
     tool_calls: [],
     pmap_calls: [],
@@ -168,6 +177,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
           iteration_count: integer(),
           loop_limit: integer(),
           max_tool_calls: pos_integer() | nil,
+          tool_call_budget: :atomics.atomics_ref(),
           max_tool_call_result_bytes: pos_integer(),
           max_print_length: pos_integer(),
           pmap_timeout: pos_integer(),
@@ -176,6 +186,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
           max_heap: pos_integer() | nil,
           worker_max_heap: pos_integer() | nil,
           parallel_budget: PtcRunner.Lisp.Eval.ParallelBudget.t() | nil,
+          tool_activity: :atomics.atomics_ref(),
           prints: [String.t()],
           tool_calls: [tool_call()],
           pmap_calls: [pmap_call()],
@@ -197,6 +208,8 @@ defmodule PtcRunner.Lisp.Eval.Context do
           prelude_call_counts: %{String.t() => non_neg_integer()},
           tool_cache: map()
         }
+
+  @type parallel_effects :: recur_effects()
 
   @doc """
   Creates a new evaluation context.
@@ -241,6 +254,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
       prelude_caller_user_ns_stack: Keyword.get(opts, :prelude_caller_user_ns_stack, []),
       turn_history: turn_history,
       max_tool_calls: Keyword.get(opts, :max_tool_calls),
+      tool_call_budget: Keyword.get_lazy(opts, :tool_call_budget, fn -> :atomics.new(1, []) end),
       max_tool_call_result_bytes:
         Keyword.get(opts, :max_tool_call_result_bytes, @default_tool_call_result_bytes),
       max_print_length: Keyword.get(opts, :max_print_length, @default_print_length),
@@ -250,6 +264,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
       max_heap: Keyword.get(opts, :max_heap),
       worker_max_heap: Keyword.get(opts, :worker_max_heap, Keyword.get(opts, :max_heap)),
       parallel_budget: Keyword.get(opts, :parallel_budget),
+      tool_activity: Keyword.get_lazy(opts, :tool_activity, fn -> :atomics.new(1, []) end),
       tool_cache: Keyword.get(opts, :tool_cache, %{}),
       tools_meta: Keyword.get(opts, :tools_meta, %{}),
       strict_data: Keyword.get(opts, :strict_data, false),
@@ -352,16 +367,22 @@ defmodule PtcRunner.Lisp.Eval.Context do
   """
   @spec append_print(t(), String.t()) :: t()
   def append_print(%__MODULE__{prints: prints, max_print_length: max_len} = context, message) do
+    truncated = truncate_print(message, max_len)
+
+    :ok = EffectCapture.record_print(truncated)
+    %{context | prints: [truncated | prints]}
+  end
+
+  @doc false
+  @spec truncate_print(String.t(), non_neg_integer()) :: String.t()
+  def truncate_print(message, max_len) when is_binary(message) and is_integer(max_len) do
     total = String.length(message)
 
-    truncated =
-      if total > max_len do
-        String.slice(message, 0, max_len) <> "... (#{max_len}/#{total} chars)"
-      else
-        message
-      end
-
-    %{context | prints: [truncated | prints]}
+    if total > max_len do
+      String.slice(message, 0, max_len) <> "... (#{max_len}/#{total} chars)"
+    else
+      message
+    end
   end
 
   @doc """
@@ -378,7 +399,9 @@ defmodule PtcRunner.Lisp.Eval.Context do
         %__MODULE__{tool_calls: tool_calls, max_tool_call_result_bytes: cap} = context,
         tool_call
       ) do
-    %{context | tool_calls: [compact_ledger_entry(tool_call, cap) | tool_calls]}
+    ledger_entry = compact_ledger_entry(tool_call, cap)
+    :ok = EffectCapture.record_tool_call(ledger_entry)
+    %{context | tool_calls: [ledger_entry | tool_calls]}
   end
 
   # Bound the LEDGER copy of :result only. Preserves every other field,
@@ -465,6 +488,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
   """
   @spec append_pmap_call(t(), pmap_call()) :: t()
   def append_pmap_call(%__MODULE__{pmap_calls: pmap_calls} = context, pmap_call) do
+    :ok = EffectCapture.record_pmap_call(pmap_call)
     %{context | pmap_calls: [pmap_call | pmap_calls]}
   end
 
@@ -472,7 +496,15 @@ defmodule PtcRunner.Lisp.Eval.Context do
   @spec increment_prelude_call(t(), String.t()) :: t()
   def increment_prelude_call(%__MODULE__{prelude_call_counts: counts} = context, ref)
       when is_binary(ref) do
+    :ok = EffectCapture.record_prelude_call(ref)
     %{context | prelude_call_counts: Map.update(counts, ref, 1, &(&1 + 1))}
+  end
+
+  @doc false
+  @spec put_tool_cache(t(), term(), term()) :: t()
+  def put_tool_cache(%__MODULE__{} = context, key, value) do
+    :ok = EffectCapture.record_cache(key, value)
+    %{context | tool_cache: Map.put(context.tool_cache, key, value)}
   end
 
   @doc """
@@ -504,6 +536,58 @@ defmodule PtcRunner.Lisp.Eval.Context do
     }
   end
 
+  @doc false
+  @spec parallel_effects(t(), t()) :: parallel_effects()
+  def parallel_effects(%__MODULE__{} = context, %__MODULE__{} = baseline) do
+    %{
+      prints: strip_baseline_suffix(context.prints, baseline.prints),
+      tool_calls: strip_baseline_suffix(context.tool_calls, baseline.tool_calls),
+      pmap_calls: strip_baseline_suffix(context.pmap_calls, baseline.pmap_calls),
+      prelude_call_counts:
+        subtract_baseline_counts(context.prelude_call_counts, baseline.prelude_call_counts),
+      tool_cache: Map.drop(context.tool_cache, Map.keys(baseline.tool_cache))
+    }
+  end
+
+  @doc false
+  @spec merge_parallel_effects(t(), parallel_effects()) :: t()
+  def merge_parallel_effects(%__MODULE__{} = context, effects) when is_map(effects) do
+    :ok = EffectCapture.record_effects(effects)
+
+    %{
+      context
+      | prints: Map.fetch!(effects, :prints) ++ context.prints,
+        tool_calls: Map.fetch!(effects, :tool_calls) ++ context.tool_calls,
+        pmap_calls: Map.fetch!(effects, :pmap_calls) ++ context.pmap_calls,
+        prelude_call_counts:
+          Map.merge(
+            context.prelude_call_counts,
+            Map.fetch!(effects, :prelude_call_counts),
+            fn _ref, left, right -> left + right end
+          ),
+        tool_cache: Map.merge(context.tool_cache, Map.fetch!(effects, :tool_cache))
+    }
+  end
+
+  defp strip_baseline_suffix(values, []), do: values
+
+  defp strip_baseline_suffix(values, baseline) do
+    added = length(values) - length(baseline)
+
+    if added >= 0 and Enum.drop(values, added) == baseline,
+      do: Enum.take(values, added),
+      else: values
+  end
+
+  defp subtract_baseline_counts(counts, baseline) do
+    Enum.reduce(counts, %{}, fn {ref, count}, acc ->
+      case count - Map.get(baseline, ref, 0) do
+        delta when delta > 0 -> Map.put(acc, ref, delta)
+        _non_positive -> acc
+      end
+    end)
+  end
+
   @doc """
   Updates the user namespace in the context.
   """
@@ -513,7 +597,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
   end
 
   @doc """
-  Copies the attached prelude tables (`prelude_exports`/`prelude`) from
+  Copies the attached prelude tables and shared run-scoped resources from
   `source` onto `context`.
 
   Sub-contexts built with `new/6` for closure/thunk evaluation start with empty
@@ -530,10 +614,24 @@ defmodule PtcRunner.Lisp.Eval.Context do
         direct_namespaces: source.direct_namespaces,
         transitive_namespace_requirers: source.transitive_namespace_requirers,
         prelude_export_mask: source.prelude_export_mask,
+        max_tool_calls: source.max_tool_calls,
+        tool_call_budget: source.tool_call_budget,
+        tool_activity: source.tool_activity,
         origin_stack: source.origin_stack,
         prelude_caller_user_ns_stack: source.prelude_caller_user_ns_stack
     }
   end
+
+  @doc false
+  @spec record_tool_activity(t()) :: :ok
+  def record_tool_activity(%__MODULE__{tool_activity: activity}) do
+    _ = :atomics.add_get(activity, 1, 1)
+    :ok
+  end
+
+  @doc false
+  @spec tool_activity?(t()) :: boolean()
+  def tool_activity?(%__MODULE__{tool_activity: activity}), do: :atomics.get(activity, 1) > 0
 
   @doc "Returns true when a namespace was directly selected by the session."
   @spec direct_namespace?(t(), String.t()) :: boolean()
@@ -614,16 +712,32 @@ defmodule PtcRunner.Lisp.Eval.Context do
   end
 
   @doc """
-  Checks whether the tool call limit has been reached.
+  Atomically reserves one uncached tool invocation against the program-wide
+  tool-call limit.
 
-  Returns `:ok` when unlimited (`nil`) or under the limit,
-  `{:error, :tool_call_limit_exceeded}` when at or over.
+  Returns `:ok` when unlimited (`nil`) or when the reservation succeeds,
+  `{:error, :tool_call_limit_exceeded}` when the shared limit is exhausted.
   """
-  @spec check_tool_call_limit(t()) :: :ok | {:error, :tool_call_limit_exceeded}
-  def check_tool_call_limit(%{max_tool_calls: nil}), do: :ok
+  @spec reserve_tool_call(t()) :: :ok | {:error, :tool_call_limit_exceeded}
+  def reserve_tool_call(%{max_tool_calls: nil}), do: :ok
 
-  def check_tool_call_limit(%{max_tool_calls: limit, tool_calls: calls}) do
-    if length(calls) >= limit, do: {:error, :tool_call_limit_exceeded}, else: :ok
+  def reserve_tool_call(%{max_tool_calls: limit, tool_call_budget: budget}) do
+    reserve_tool_call(budget, limit)
+  end
+
+  defp reserve_tool_call(budget, limit) do
+    current = :atomics.get(budget, 1)
+
+    cond do
+      current >= limit ->
+        {:error, :tool_call_limit_exceeded}
+
+      :atomics.compare_exchange(budget, 1, current, current + 1) == :ok ->
+        :ok
+
+      true ->
+        reserve_tool_call(budget, limit)
+    end
   end
 
   @doc """

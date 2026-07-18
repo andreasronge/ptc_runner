@@ -150,6 +150,7 @@ defmodule PtcRunner.Lisp.Prelude.CompilerTest do
 
       assert export.requires == ["tool:audit", "tool:call"]
       assert export.effect == :write
+      assert export.declared_effect == :write
     end
   end
 
@@ -309,6 +310,134 @@ defmodule PtcRunner.Lisp.Prelude.CompilerTest do
   # ============================================================
 
   describe "compile/1 rejections" do
+    test "rejects duplicate signature parameter names" do
+      source = """
+      (ns crm "doc" {:visibility :prompt})
+      (defn find {:signature "(query :string, query :int) -> :string"} [left right] left)
+      """
+
+      assert {:error, %Prelude.ValidationError{} = err} = Compiler.compile(source)
+      assert err.reason == :invalid_signature
+      assert err.message =~ "duplicate"
+      assert err.message =~ "query"
+    end
+
+    test "rejects signatures on variadic definitions explicitly" do
+      source = """
+      (ns crm "doc" {:visibility :prompt})
+      (defn find {:signature "(query :string) -> :string"} [query & rest] query)
+      """
+
+      assert {:error, %Prelude.ValidationError{} = err} = Compiler.compile(source)
+      assert err.reason == :invalid_signature
+      assert err.message =~ "fixed-arity"
+    end
+
+    test "rejects normalized shaped-map field collisions" do
+      source = """
+      (ns crm "doc" {:visibility :prompt})
+      (defn find
+        {:signature "(input {user-id :string, user_id :int}) -> :string"}
+        [input]
+        "ok")
+      """
+
+      assert {:error, %Prelude.ValidationError{} = err} = Compiler.compile(source)
+      assert err.reason == :invalid_signature
+      assert err.message =~ "duplicate"
+      assert err.message =~ "user_id"
+    end
+
+    test "rejects a public constant whose value violates its type" do
+      source = """
+      (ns cfg "doc" {:visibility :prompt})
+      (def answer {:type ":int"} "forty-two")
+      """
+
+      assert {:error, %Prelude.ValidationError{} = err} = Compiler.compile(source)
+      assert err.reason == :invalid_signature
+      assert err.message =~ "cfg/answer"
+      assert err.message =~ "expected int"
+    end
+
+    test "bounds diagnostics for a constant with many invalid elements" do
+      values = Enum.map_join(0..99, " ", &~s|"bad#{&1}"|)
+
+      assert {:error, %Prelude.ValidationError{} = err} =
+               Compiler.compile("""
+               (ns api)
+               (def values {:type "[:int]"} [#{values}])
+               """)
+
+      assert err.reason == :invalid_signature
+      assert err.message =~ "0: expected int"
+      assert err.message =~ "15: expected int"
+      refute err.message =~ "16: expected int"
+      assert byte_size(err.message) <= 4_096
+    end
+
+    test "bounds a constant diagnostic containing a very long contract path" do
+      field = String.duplicate("a", 5_000)
+
+      assert {:error, %Prelude.ValidationError{} = err} =
+               Compiler.compile("""
+               (ns api)
+               (def value {:type "{#{field} :int}"} {})
+               """)
+
+      assert err.reason == :invalid_signature
+      assert byte_size(err.message) == 4_096
+      assert String.valid?(err.message)
+    end
+
+    test "rejects function-style signatures used as constant types without crashing" do
+      source = """
+      (ns cfg "Config")
+      (def answer {:type "(value :int) -> :int"} 42)
+      """
+
+      assert {:error, %Prelude.ValidationError{} = err} = Compiler.compile(source)
+      assert err.reason == :invalid_signature
+      assert err.message =~ "constant :type"
+      assert err.message =~ "parameters"
+    end
+
+    test "rejects strings, nil, and boolean constants declared as keywords" do
+      for value <- [~S|"plain"|, "nil", "true", "false"] do
+        source = """
+        (ns cfg "Config")
+        (def answer {:type ":keyword"} #{value})
+        """
+
+        assert {:error, %Prelude.ValidationError{} = err} = Compiler.compile(source)
+        assert err.reason == :invalid_signature
+        assert err.message =~ "expected keyword"
+      end
+    end
+
+    test "rejects invalid effect metadata" do
+      source = """
+      (ns crm "doc" {:visibility :prompt})
+      (defn find {:effect :maybe} [query] query)
+      """
+
+      assert {:error, %Prelude.ValidationError{} = err} = Compiler.compile(source)
+      assert err.reason == :invalid_metadata
+      assert err.message =~ "effect"
+    end
+
+    test "rejects invalid effect metadata on private helpers" do
+      source = """
+      (ns crm "doc" {:visibility :prompt})
+      (defn- find {:effect :maybe} [query] query)
+      (defn run [query] (find query))
+      """
+
+      assert {:error, %Prelude.ValidationError{} = err} = Compiler.compile(source)
+      assert err.reason == :invalid_metadata
+      assert err.message =~ "effect"
+    end
+
     test "rejects declaring a reserved namespace (tool)" do
       source = """
       (ns tool "nope" {:visibility :prompt})

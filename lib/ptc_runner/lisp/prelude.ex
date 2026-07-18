@@ -63,7 +63,7 @@ defmodule PtcRunner.Lisp.Prelude do
   @typedoc """
   A `form_graph` entry: one compiled top-level definition (plan Phase 1).
 
-  `calls` is DIRECT same-namespace references only; `requires`/`tool_refs`
+  `calls` is DIRECT same-namespace references only; `requires`/`tool_refs`/`effects`
   split `direct` (this form's own body) from `transitive` (the closure over
   the siblings it calls) — both sorted and deduped.
   """
@@ -74,7 +74,8 @@ defmodule PtcRunner.Lisp.Prelude do
           doc: String.t() | nil,
           calls: [String.t()],
           requires: %{direct: [String.t()], transitive: [String.t()]},
-          tool_refs: %{direct: [String.t()], transitive: [String.t()]}
+          tool_refs: %{direct: [String.t()], transitive: [String.t()]},
+          effects: %{direct: [Export.effect()], transitive: [Export.effect()]}
         }
 
   @type form_graph :: %{String.t() => %{String.t() => form_graph_entry()}}
@@ -161,7 +162,9 @@ defmodule PtcRunner.Lisp.Prelude do
           params: [String.t()],
           visibility: Export.visibility(),
           effect: Export.effect(),
-          requires: [String.t()]
+          requires: [String.t()],
+          signature: String.t() | nil,
+          type: String.t() | nil
         }
 
   @type trace_summary :: %{
@@ -210,7 +213,9 @@ defmodule PtcRunner.Lisp.Prelude do
       params: export.params,
       visibility: export.visibility,
       effect: export.effect,
-      requires: export.requires
+      requires: export.requires,
+      signature: export.signature,
+      type: export.type
     }
   end
 

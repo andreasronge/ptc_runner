@@ -104,6 +104,74 @@ defmodule PtcRunner.Lisp.Eval.ParallelRunnerTest do
 
       assert {:error, :boom} = ParallelRunner.run([1, 2, 3], fun, base_opts())
     end
+
+    test "a contract error retains a successful worker result received before DOWN" do
+      counter = :atomics.new(1, [])
+
+      spawn_fun = fn worker, opts ->
+        runner = self()
+        index = :atomics.add_get(counter, 1, 1) - 1
+
+        case index do
+          0 ->
+            Process.spawn(
+              fn ->
+                worker.()
+                send(runner, :failure_sent)
+                wait_for_go()
+              end,
+              opts
+            )
+
+          1 ->
+            # The first worker sends its failure result before this marker to
+            # the same runner process. Selectively receive the marker while the
+            # result remains queued, then do the same for the successful worker.
+            # collect/1 therefore observes failure first and cleanup must retain
+            # the queued successful result deterministically.
+            receive do
+              :failure_sent -> :ok
+            end
+
+            spawned =
+              Process.spawn(
+                fn ->
+                  worker.()
+                  send(runner, :success_sent)
+                  wait_for_go()
+                end,
+                opts
+              )
+
+            receive do
+              :success_sent -> :ok
+            end
+
+            spawned
+        end
+      end
+
+      effects = %{
+        tool_calls: [],
+        pmap_calls: [],
+        prints: [],
+        prelude_call_counts: %{},
+        tool_cache: %{}
+      }
+
+      fun = fn
+        :failure -> {:error, {:parallel_contract_error, :contract_reason, effects}}
+        :success -> {:ok, :completed_audit_payload}
+      end
+
+      assert {:error,
+              {:parallel_contract_error, :contract_reason, ^effects, [:completed_audit_payload]}} =
+               ParallelRunner.run(
+                 [:failure, :success],
+                 fun,
+                 base_opts(max_concurrency: 2, spawn_fun: spawn_fun)
+               )
+    end
   end
 
   describe "heap cap at spawn time" do

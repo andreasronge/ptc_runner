@@ -4,20 +4,18 @@ defmodule PtcRunner.Kernel.MissionInventory do
 
   Version 2 contains prompt-visible prelude exports, model-visible capability
   schemas, and the mission execution limits relevant to generated programs.
-  A separate version 1 compact model rendering keeps concise wrapper call forms
-  and full schemas only for capabilities called directly. Arrays are sorted by
-  public reference/name. Both UTF-8 renderings and lower-case SHA-256 hashes are
-  frozen into `PtcRunner.Kernel.RunConfig` and are identical for normal runs
-  and `PtcRunner.Kernel.ReplSession`.
+  A separate version 2 model-contract rendering normalizes prompt-visible
+  exports and directly callable capabilities into one structured API list.
+  Arrays are sorted by public form. Both UTF-8 renderings and lower-case SHA-256
+  hashes are frozen into `PtcRunner.Kernel.RunConfig` and are identical for
+  normal runs and `PtcRunner.Kernel.ReplSession`.
 
-  Every bare capability entry carries a frozen `call` form: the literal
-  string `(tool/<name> arguments)`, with the capability's already-validated
-  public name inserted verbatim and `arguments` as a fixed placeholder token
-  for the single argument map that `input_schema` describes. No other
-  whitespace, casing, or formatting varies. Version 2 added this field —
-  live models given only a capability name invent invalid invocation
-  syntax, so the inventory itself must teach the `tool/` namespace and the
-  single argument-map position.
+  Every bare capability entry carries a frozen `call` form. In the secondary
+  model-contract projection, required input fields are expanded into the
+  literal argument map, for example `(tool/search {"query" query})`; the
+  authoritative inventory retains its generic one-map form and full schemas.
+  Live models given only a capability name invent invalid invocation syntax,
+  so the model projection teaches the exact required-field form.
 
   Rendering uses `PtcRunner.Kernel.DeterministicJSON`. The installed ceiling
   is 256 KiB; callers may lower it but inventory is never truncated.
@@ -27,6 +25,7 @@ defmodule PtcRunner.Kernel.MissionInventory do
   alias PtcRunner.Kernel.Environment
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.MissionEnvironment
+  alias PtcRunner.Kernel.ModelContract
   alias PtcRunner.Lisp.Prelude
   alias PtcRunner.Lisp.Prelude.Export
 
@@ -49,7 +48,7 @@ defmodule PtcRunner.Kernel.MissionInventory do
           rendered: binary(),
           hash: binary(),
           bytes: non_neg_integer(),
-          model_schema_version: 1,
+          model_schema_version: 2,
           model_rendered: binary(),
           model_hash: binary(),
           model_bytes: non_neg_integer()
@@ -68,7 +67,8 @@ defmodule PtcRunner.Kernel.MissionInventory do
            Keyword.get(opts, :max_model_bytes, @max_model_bytes),
          {:ok, rendered} <- DeterministicJSON.encode(projection(mission, limits)),
          true <- byte_size(rendered) <= max_bytes,
-         {:ok, model_rendered} <- DeterministicJSON.encode(model_projection(mission, limits)),
+         {:ok, model_projection} <- model_projection(mission, limits),
+         {:ok, model_rendered} <- DeterministicJSON.encode(model_projection),
          true <- byte_size(model_rendered) <= max_model_bytes do
       {:ok,
        %__MODULE__{
@@ -76,7 +76,7 @@ defmodule PtcRunner.Kernel.MissionInventory do
          rendered: rendered,
          hash: sha256(rendered),
          bytes: byte_size(rendered),
-         model_schema_version: 1,
+         model_schema_version: 2,
          model_rendered: model_rendered,
          model_hash: sha256(model_rendered),
          model_bytes: byte_size(model_rendered)
@@ -100,32 +100,34 @@ defmodule PtcRunner.Kernel.MissionInventory do
   end
 
   defp model_projection(mission, limits) do
-    {:object,
-     [
-       {"schema_version", 1},
-       {"mission_api", model_exports(mission)},
-       {"direct_capabilities", model_capabilities(mission)},
-       {"limits", limit_projection(limits)}
-     ]}
+    with {:ok, entries} <- model_entries(mission) do
+      {:ok,
+       {:object,
+        [
+          {"schema_version", 2},
+          {"entries", Enum.sort_by(entries, &entry_form/1)},
+          {"limits", limit_projection(limits)}
+        ]}}
+    end
   end
 
-  defp exports(%{bundle: %{prelude: prelude}}) do
+  defp exports(%{bundle: %{prelude: prelude}} = mission) do
     prelude
     |> Prelude.prompt_exports()
     |> Enum.sort_by(& &1.ref)
-    |> Enum.map(&export_projection/1)
+    |> Enum.map(&export_projection(&1, mission))
   end
 
   defp exports(_mission), do: []
 
-  defp export_projection(%Export{} = export) do
+  defp export_projection(%Export{} = export, mission) do
     {:object,
      [
        {"ref", export.ref},
        {"kind", Atom.to_string(export.kind)},
        {"call", export_call(export)},
        {"doc", export.doc},
-       {"effect", Atom.to_string(export.effect)},
+       {"effect", export |> resolved_export_effect(mission) |> Atom.to_string()},
        {"contract", export.signature || export.type}
      ]}
   end
@@ -138,16 +140,52 @@ defmodule PtcRunner.Kernel.MissionInventory do
     |> String.replace_prefix("(#{export.symbol}", "(#{export.ref}")
   end
 
-  defp model_exports(%{bundle: %{prelude: prelude}}) do
-    prelude
-    |> Prelude.prompt_exports()
-    |> Enum.sort_by(& &1.ref)
-    |> Enum.map(fn export ->
-      {:object, [{"call", export_call(export)}, {"doc", export.doc}]}
-    end)
+  defp model_entries(mission) do
+    with {:ok, exports} <- model_exports(mission),
+         {:ok, capabilities} <- model_capabilities(mission) do
+      {:ok, exports ++ capabilities}
+    end
   end
 
-  defp model_exports(_mission), do: []
+  defp model_exports(%{bundle: %{prelude: prelude}} = mission) do
+    prelude
+    |> Prelude.prompt_exports()
+    |> Enum.reduce_while({:ok, []}, fn export, {:ok, entries} ->
+      case model_export(export, mission) do
+        {:ok, entry} -> {:cont, {:ok, [entry | entries]}}
+        {:error, _} = error -> {:halt, error}
+      end
+    end)
+    |> reverse_entries()
+  end
+
+  defp model_exports(_mission), do: {:ok, []}
+
+  defp model_export(%Export{kind: :function, parsed_signature: signature} = export, mission) do
+    with {:ok, contract} <- optional_function_contract(signature) do
+      {:ok,
+       model_entry(
+         "call",
+         export_call(export),
+         contract,
+         resolved_export_effect(export, mission),
+         export.doc
+       )}
+    end
+  end
+
+  defp model_export(%Export{kind: :constant, parsed_type: type} = export, mission) do
+    with {:ok, contract} <- optional_value_contract(type) do
+      {:ok,
+       model_entry(
+         "value",
+         export_call(export),
+         contract,
+         resolved_export_effect(export, mission),
+         export.doc
+       )}
+    end
+  end
 
   defp capabilities(mission) do
     mission
@@ -168,16 +206,80 @@ defmodule PtcRunner.Kernel.MissionInventory do
   defp model_capabilities(mission) do
     mission
     |> Environment.metadata()
-    |> Enum.map(fn capability ->
-      {:object,
-       [
-         {"call", "(tool/#{capability.name} arguments)"},
-         {"description", capability.description},
-         {"input_schema", capability.input_schema},
-         {"output_schema", capability.output_schema}
-       ]}
+    |> Enum.reduce_while({:ok, []}, fn capability, {:ok, entries} ->
+      case ModelContract.capability(capability.input_schema, capability.output_schema) do
+        {:ok, contract} ->
+          form = ModelContract.capability_call(capability.name, capability.input_schema)
+
+          entry =
+            model_entry(
+              "call",
+              form,
+              contract,
+              capability.effect,
+              capability.description
+            )
+
+          {:cont, {:ok, [entry | entries]}}
+
+        {:error, _} = error ->
+          {:halt, error}
+      end
     end)
+    |> reverse_entries()
   end
+
+  defp optional_function_contract(nil), do: {:ok, nil}
+  defp optional_function_contract(signature), do: ModelContract.function(signature)
+
+  defp optional_value_contract(nil), do: {:ok, nil}
+  defp optional_value_contract(type), do: ModelContract.value(type)
+
+  defp model_entry(kind, form, contract, effect, docs) do
+    {:object,
+     [
+       {"kind", kind},
+       {"form", form},
+       {"contract", contract},
+       {"effect", Atom.to_string(effect)},
+       {"docs", docs}
+     ]}
+  end
+
+  defp entry_form({:object, pairs}), do: pairs |> Map.new() |> Map.fetch!("form")
+
+  defp resolved_export_effect(export, %{capabilities: capabilities}) do
+    required_names =
+      export.requires
+      |> Enum.flat_map(fn
+        "tool:" <> name -> [name]
+        _requirement -> []
+      end)
+
+    dependency_effects =
+      (export.tool_refs ++ required_names)
+      |> Enum.uniq()
+      |> Enum.map(fn name ->
+        case Map.fetch(capabilities, name) do
+          {:ok, capability} -> capability.effect
+          :error -> :unknown
+        end
+      end)
+
+    join_effects([export.effect | dependency_effects])
+  end
+
+  defp join_effects(effects) do
+    cond do
+      :write in effects -> :write
+      :unknown in effects -> :unknown
+      :read in effects -> :read
+      true -> :unknown
+    end
+  end
+
+  defp reverse_entries({:ok, entries}), do: {:ok, Enum.reverse(entries)}
+  defp reverse_entries({:error, _} = error), do: error
 
   defp limit_projection(limits) do
     {:object,

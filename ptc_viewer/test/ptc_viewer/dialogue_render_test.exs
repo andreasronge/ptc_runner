@@ -88,6 +88,21 @@ defmodule PtcViewer.DialogueRenderTest do
     end)
   end
 
+  defp map_llm_inputs(inspection, fun) do
+    update_in(inspection, ["records"], fn records ->
+      records
+      |> Enum.filter(fn record ->
+        record["record_type"] == "capability-input" and
+          record["payload"]["name"] == "llm-request"
+      end)
+      |> Enum.with_index()
+      |> Enum.reduce(records, fn {record, index}, acc ->
+        replaced = fun.(record, index)
+        Enum.map(acc, fn candidate -> if candidate == record, do: replaced, else: candidate end)
+      end)
+    end)
+  end
+
   defp group_digits(value) do
     value
     |> Integer.to_charlist()
@@ -213,8 +228,10 @@ defmodule PtcViewer.DialogueRenderTest do
       assert rendered =~ "Raw captured request"
       assert rendered =~ "kt-prompt-version"
       assert rendered =~ "PTC_AGENT_PROMPT_V1"
+      assert rendered =~ "Available API"
       assert rendered =~ "Exact captured prompt"
       assert rendered =~ "System prompt: same as LLM call 1."
+      refute rendered =~ "Edited or unknown prompt format"
       refute rendered =~ "Exact request sent to the model"
     end
 
@@ -241,6 +258,60 @@ defmodule PtcViewer.DialogueRenderTest do
 
       assert rendered =~ "Edited or unknown prompt format"
       assert rendered =~ "EDITED_PROMPT"
+    end
+
+    test "keeps legacy mission-API prompts structured" do
+      rendered =
+        render_fixtures(%{
+          inspection: fn inspection ->
+            update_in(inspection, ["records"], fn records ->
+              Enum.map(records, fn record ->
+                if record["record_type"] == "capability-input" and
+                     record["payload"]["name"] == "llm-request" do
+                  update_in(
+                    record,
+                    ["payload", "arguments", "system"],
+                    &String.replace(
+                      &1,
+                      "Available API",
+                      "Mission API and limits (deterministic JSON)"
+                    )
+                  )
+                else
+                  record
+                end
+              end)
+            end)
+          end
+        })
+
+      assert rendered =~ "Mission API and limits (deterministic JSON)"
+      refute rendered =~ "Edited or unknown prompt format"
+    end
+
+    test "keeps a canonical empty Available API section structured" do
+      rendered =
+        render_fixtures(%{
+          inspection: fn inspection ->
+            update_in(inspection, ["records"], fn records ->
+              Enum.map(records, fn record ->
+                if record["record_type"] == "capability-input" and
+                     record["payload"]["name"] == "llm-request" do
+                  update_in(
+                    record,
+                    ["payload", "arguments", "system"],
+                    &String.replace(&1, ~r/Available API.*\z/s, "Available API\n")
+                  )
+                else
+                  record
+                end
+              end)
+            end)
+          end
+        })
+
+      assert rendered =~ "Available API"
+      refute rendered =~ "Edited or unknown prompt format"
     end
 
     test "moves exact private records behind one closed advanced disclosure", %{
@@ -357,12 +428,31 @@ defmodule PtcViewer.DialogueRenderTest do
       assert rendered =~ "Input composition (estimated)"
       assert rendered =~ "System · instructions"
       assert rendered =~ "System · mission inventory"
+      assert rendered =~ ~r/System · mission inventory<\/span>\s*<span[^>]*>≈[1-9]/
       assert rendered =~ "Tool feedback"
       assert rendered =~ "resent with every call"
       assert rendered =~ "apportion each call’s reported input tokens by character share"
 
       refute rendered =~ "partial"
       refute rendered =~ "totals exclude the unreported calls"
+    end
+
+    test "does not treat an inline Available API phrase as an inventory heading" do
+      rendered =
+        render_fixtures(%{
+          inspection: fn inspection ->
+            map_llm_inputs(inspection, fn record, _index ->
+              put_in(
+                record,
+                ["payload", "arguments", "system"],
+                "PTC_AGENT_PROMPT_V1\nInstructions\nOrdinary prose mentions Available API inline."
+              )
+            end)
+          end
+        })
+
+      assert rendered =~ "System · instructions"
+      refute rendered =~ "System · mission inventory"
     end
 
     test "falls back to character proportions when no usage at all is reported" do

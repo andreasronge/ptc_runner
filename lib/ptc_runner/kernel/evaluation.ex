@@ -164,6 +164,8 @@ defmodule PtcRunner.Kernel.Evaluation do
       preserve_runtime_callables: true
     ]
 
+    mission_calls_before = mission_capability_call_count(state)
+
     case Lisp.run_native(source, options) do
       {:ok, %{return: {:__ptc_fail__, value}}} ->
         :ok = RunState.release_evaluation(state, lease)
@@ -173,7 +175,7 @@ defmodule PtcRunner.Kernel.Evaluation do
         commit_result(state, lease, step)
 
       {:error, step} ->
-        release_failure(state, lease, step)
+        release_failure(state, lease, step, mission_calls_before)
     end
   end
 
@@ -190,14 +192,56 @@ defmodule PtcRunner.Kernel.Evaluation do
     end
   end
 
-  defp release_failure(state, lease, step) do
+  defp release_failure(state, lease, step, mission_calls_before) do
+    capability_activity? =
+      mission_capability_call_count(state) > mission_calls_before or
+        evaluator_capability_activity?(step)
+
     :ok = RunState.release_evaluation(state, lease)
 
-    %{
+    details =
+      step.fail
+      |> Map.get(:details, %{})
+      |> Map.put(:message, String.slice(step.fail.message || "evaluation failed", 0, 4_096))
+      |> maybe_put_capability_activity(step.fail.reason, capability_activity?)
+
+    result = %{
       outcome: :evaluation_error,
       kind: step.fail.reason,
-      details: %{message: String.slice(step.fail.message || "evaluation failed", 0, 4_096)}
+      details: details
     }
+
+    case contract_retryable(step, capability_activity?) do
+      retryable? when is_boolean(retryable?) -> Map.put(result, :retryable?, retryable?)
+      nil -> result
+    end
+  end
+
+  defp maybe_put_capability_activity(details, :prelude_contract_error, activity?),
+    do: Map.put(details, :capability_activity?, activity?)
+
+  defp maybe_put_capability_activity(details, _reason, _activity?), do: details
+
+  defp contract_retryable(
+         %{fail: %{reason: :prelude_contract_error, details: %{phase: phase}}},
+         capability_activity?
+       )
+       when phase in [:input, :output] and is_boolean(capability_activity?),
+       do: not capability_activity?
+
+  defp contract_retryable(_step, _capability_activity?), do: nil
+
+  defp evaluator_capability_activity?(%{fail: %{details: %{capability_activity?: true}}}),
+    do: true
+
+  defp evaluator_capability_activity?(_step), do: false
+
+  defp mission_capability_call_count(state) do
+    state
+    |> RunState.usage()
+    |> get_in([:capability_calls, :mission])
+    |> Map.values()
+    |> Enum.sum()
   end
 
   defp mission_tools(environment, state, timeout_ms, event_sink, inspection_sink) do

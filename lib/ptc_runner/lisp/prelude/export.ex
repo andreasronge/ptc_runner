@@ -30,6 +30,8 @@ defmodule PtcRunner.Lisp.Prelude.Export do
     * `visibility` — `:prompt` (prompt inventory + discoverable) or
       `:discoverable` (discovery-only).
     * `effect` — resolved effect hint: `:read`, `:write`, or `:unknown`.
+    * `declared_effect` — explicit metadata value, or `nil`; retained for
+      introspection while `effect` also includes transitive wrapper declarations.
     * `requires` — list of canonical backing ids the export needs, validated
       against the selected runtime at attach time (not here).
     * `tool_refs` — sorted typed-tool names (binaries) this export invokes,
@@ -48,6 +50,8 @@ defmodule PtcRunner.Lisp.Prelude.Export do
       than applying it.
     * `signature` — optional canonical function contract string.
     * `type` — optional canonical constant type string.
+    * `parsed_signature` / `parsed_type` — bounded compiled contract values
+      retained for runtime validation and structured model projection.
   """
 
   @type visibility :: :prompt | :discoverable
@@ -64,12 +68,15 @@ defmodule PtcRunner.Lisp.Prelude.Export do
           doc: String.t() | nil,
           visibility: visibility(),
           effect: effect(),
+          declared_effect: effect() | nil,
           requires: [String.t()],
           tool_refs: [String.t()],
           min_arity: non_neg_integer(),
           kind: kind(),
           signature: String.t() | nil,
-          type: String.t() | nil
+          type: String.t() | nil,
+          parsed_signature: PtcRunner.Lisp.Signature.signature() | nil,
+          parsed_type: PtcRunner.Lisp.Signature.type() | nil
         }
 
   @enforce_keys [:ref, :namespace, :symbol, :arity, :visibility]
@@ -81,12 +88,15 @@ defmodule PtcRunner.Lisp.Prelude.Export do
             doc: nil,
             visibility: :prompt,
             effect: :unknown,
+            declared_effect: nil,
             requires: [],
             tool_refs: [],
             min_arity: 0,
             kind: :function,
             signature: nil,
-            type: nil
+            type: nil,
+            parsed_signature: nil,
+            parsed_type: nil
 
   @valid_visibilities [:prompt, :discoverable]
 

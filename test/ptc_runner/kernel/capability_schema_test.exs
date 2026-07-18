@@ -178,6 +178,51 @@ defmodule PtcRunner.Kernel.CapabilitySchemaTest do
     end
   end
 
+  test "rejects input property names that cannot survive the Lisp tool boundary" do
+    schemas = [
+      %{
+        "type" => "object",
+        "properties" => %{"user-id" => %{"type" => "integer"}},
+        "required" => ["user-id"]
+      },
+      %{
+        "type" => "object",
+        "properties" => %{
+          "nested" => %{
+            "type" => "object",
+            "properties" => %{"user-id" => %{"type" => "integer"}}
+          }
+        }
+      },
+      %{
+        "type" => "object",
+        "properties" => %{
+          "user-id" => %{"type" => "integer"},
+          "user_id" => %{"type" => "integer"}
+        }
+      },
+      %{
+        "type" => "object",
+        "additionalProperties" => true,
+        "const" => %{"user-id" => 1}
+      },
+      %{
+        "type" => "object",
+        "properties" => %{
+          "filter" => %{
+            "type" => "object",
+            "additionalProperties" => true,
+            "enum" => [%{"user-id" => 1}]
+          }
+        }
+      }
+    ]
+
+    for schema <- schemas do
+      assert {:error, :invalid_capability} = capability_with_schema(schema)
+    end
+  end
+
   test "rejects excessive depth, properties, enums, and encoded bytes" do
     too_deep =
       Enum.reduce(1..16, %{"type" => "string"}, fn index, child ->

@@ -134,6 +134,7 @@ defmodule PtcRunner.Lisp.RuntimeCallable do
         %{
           eval_ctx
           | tool_calls: Map.get(top, :tool_calls, []) ++ eval_ctx.tool_calls,
+            pmap_calls: Map.get(top, :pmap_calls, []) ++ eval_ctx.pmap_calls,
             prints: Map.get(top, :prints, []) ++ eval_ctx.prints,
             prelude_call_counts:
               Map.merge(eval_ctx.prelude_call_counts, top.prelude_call_counts, fn
@@ -153,6 +154,7 @@ defmodule PtcRunner.Lisp.RuntimeCallable do
         updated = %{
           top
           | tool_calls: strip_baseline_suffix(ctx.tool_calls, base_ctx.tool_calls),
+            pmap_calls: strip_baseline_suffix(ctx.pmap_calls, base_ctx.pmap_calls),
             prints: strip_baseline_suffix(ctx.prints, base_ctx.prints),
             prelude_call_counts:
               subtract_baseline_counts(ctx.prelude_call_counts, base_ctx.prelude_call_counts),

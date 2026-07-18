@@ -29,6 +29,7 @@ defmodule PtcRunner.Lisp.Signature do
 
   """
 
+  alias PtcRunner.Lisp.KeyNormalizer
   alias PtcRunner.Lisp.Signature.Parser
   alias PtcRunner.Lisp.Signature.Renderer
   alias PtcRunner.Lisp.Signature.Validator
@@ -345,21 +346,47 @@ defmodule PtcRunner.Lisp.Signature do
   end
 
   defp convert_object_fields(properties, required, mode) do
-    properties
-    |> Enum.sort_by(&elem(&1, 0))
-    |> Enum.reduce_while({:ok, []}, fn {name, sub_schema}, {:ok, acc} ->
-      case from_json_schema(sub_schema) do
-        {:ok, type} ->
-          field_type = if name in required, do: type, else: {:optional, type}
-          {:cont, {:ok, [{name, field_type} | acc]}}
-
-        {:error, reason} ->
-          {:halt, {:error, "property #{inspect(name)}: #{reason}"}}
+    with :ok <- validate_normalized_property_names(properties) do
+      properties
+      |> Enum.sort_by(&elem(&1, 0))
+      |> Enum.reduce_while({:ok, []}, &convert_object_field(&1, &2, required))
+      |> case do
+        {:ok, fields} -> {:ok, build_object_type(mode, Enum.reverse(fields))}
+        {:error, _} = err -> err
       end
+    end
+  end
+
+  defp convert_object_field({name, sub_schema}, {:ok, acc}, required) do
+    case from_json_schema(sub_schema) do
+      {:ok, type} ->
+        field_type = if name in required, do: type, else: {:optional, type}
+        {:cont, {:ok, [{name, field_type} | acc]}}
+
+      {:error, reason} ->
+        {:halt, {:error, "property #{inspect(name)}: #{reason}"}}
+    end
+  end
+
+  defp validate_normalized_property_names(properties) do
+    properties
+    |> Map.keys()
+    |> Enum.reduce_while(MapSet.new(), fn
+      name, seen when is_binary(name) ->
+        normalized = KeyNormalizer.normalize_key(name)
+
+        if MapSet.member?(seen, normalized),
+          do:
+            {:halt,
+             {:error, "property names normalize to duplicate field #{inspect(normalized)}"}},
+          else: {:cont, MapSet.put(seen, normalized)}
+
+      name, _seen ->
+        {:halt, {:error, "property name must be a string, got #{inspect(name)}"}}
     end)
     |> case do
-      {:ok, fields} -> {:ok, build_object_type(mode, Enum.reverse(fields))}
-      {:error, _} = err -> err
+      %MapSet{} -> :ok
+      {:error, _} = error -> error
     end
   end
 

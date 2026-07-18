@@ -14,7 +14,7 @@ defmodule PtcRunner.Kernel.MissionInventoryTest do
   alias PtcRunner.Kernel.WorkflowEnvironment
 
   @expected ~S|{"schema_version":2,"exports":[{"ref":"tools/ping","kind":"function","call":"(tools/ping value)","doc":"Ping.","effect":"unknown","contract":null}],"capabilities":[{"name":"native.read","call":"(tool/native.read arguments)","description":"Read","effect":"read","input_schema":{"additionalProperties":false,"properties":{"query":{"type":"string"}},"required":["query"],"type":"object"},"output_schema":null}],"limits":{"evaluation_timeout_ms":1000,"subordinate_source_bytes":131072,"mission_capability_calls":128,"mission_capability_calls_per_name":32,"capability_argument_bytes":262144,"capability_result_bytes":1000000}}|
-  @expected_model ~S|{"schema_version":1,"mission_api":[{"call":"(tools/ping value)","doc":"Ping."}],"direct_capabilities":[{"call":"(tool/native.read arguments)","description":"Read","input_schema":{"additionalProperties":false,"properties":{"query":{"type":"string"}},"required":["query"],"type":"object"},"output_schema":null}],"limits":{"evaluation_timeout_ms":1000,"subordinate_source_bytes":131072,"mission_capability_calls":128,"mission_capability_calls_per_name":32,"capability_argument_bytes":262144,"capability_result_bytes":1000000}}|
+  @expected_model ~S|{"schema_version":2,"entries":[{"kind":"call","form":"(tool/native.read {\"query\" query})","contract":{"parameters":[{"name":"arguments","type":{"kind":"object","nullable":false,"closed":true,"fields":[{"name":"query","required":true,"type":{"kind":"string","nullable":false}}]}}],"returns":null},"effect":"read","docs":"Read"},{"kind":"call","form":"(tools/ping value)","contract":null,"effect":"unknown","docs":"Ping."}],"limits":{"evaluation_timeout_ms":1000,"subordinate_source_bytes":131072,"mission_capability_calls":128,"mission_capability_calls_per_name":32,"capability_argument_bytes":262144,"capability_result_bytes":1000000}}|
 
   test "renders and hashes the exact versioned frozen inventory" do
     {:ok, mission, limits} = mission_fixture()
@@ -26,7 +26,7 @@ defmodule PtcRunner.Kernel.MissionInventoryTest do
     assert inventory.hash ==
              :crypto.hash(:sha256, @expected) |> Base.encode16(case: :lower)
 
-    assert inventory.model_schema_version == 1
+    assert inventory.model_schema_version == 2
     assert inventory.model_rendered == @expected_model
     assert inventory.model_bytes == byte_size(@expected_model)
 
@@ -120,8 +120,127 @@ defmodule PtcRunner.Kernel.MissionInventoryTest do
     assert decoded["capabilities"] == []
 
     model = Jason.decode!(inventory.model_rendered)
-    assert Enum.map(model["mission_api"], & &1["call"]) == ["(visible/shown)"]
-    assert model["direct_capabilities"] == []
+    assert Enum.map(model["entries"], & &1["form"]) == ["(visible/shown)"]
+  end
+
+  test "authoritative and model projections use the same mission-resolved wrapper effect" do
+    source = """
+    (ns api "API" {:visibility :prompt})
+    (defn save {:signature "() -> :any" :effect :read} [] (tool/write {}))
+    """
+
+    {:ok, component} = Component.new(id: "api", source: source)
+    {:ok, bundle} = Kernel.compile_bundle([component])
+
+    {:ok, capability} =
+      Capability.new(
+        name: "write",
+        effect: :write,
+        input_schema: %{"type" => "object"},
+        callback: fn _ -> {:ok, %{}} end
+      )
+
+    {:ok, mission} = MissionEnvironment.new(bundle: bundle, capabilities: [capability])
+    {:ok, inventory} = MissionInventory.build(mission, Limits.defaults())
+
+    assert [export] = Jason.decode!(inventory.rendered)["exports"]
+    assert export["effect"] == "write"
+
+    model_export =
+      inventory.model_rendered
+      |> Jason.decode!()
+      |> Map.fetch!("entries")
+      |> Enum.find(&(&1["form"] == "(api/save)"))
+
+    assert model_export["effect"] == export["effect"]
+  end
+
+  test "unknown capability effects cannot be weakened by a declared read effect" do
+    source = """
+    (ns api "API" {:visibility :prompt})
+    (defn inspect {:signature "() -> :any" :effect :read} [] (tool/opaque {}))
+    """
+
+    {:ok, component} = Component.new(id: "api", source: source)
+    {:ok, bundle} = Kernel.compile_bundle([component])
+
+    {:ok, capability} =
+      Capability.new(
+        name: "opaque",
+        effect: :unknown,
+        input_schema: %{"type" => "object"},
+        callback: fn _ -> {:ok, %{}} end
+      )
+
+    {:ok, mission} = MissionEnvironment.new(bundle: bundle, capabilities: [capability])
+    {:ok, inventory} = MissionInventory.build(mission, Limits.defaults())
+
+    assert [export] = Jason.decode!(inventory.rendered)["exports"]
+    assert export["effect"] == "unknown"
+
+    model_export =
+      inventory.model_rendered
+      |> Jason.decode!()
+      |> Map.fetch!("entries")
+      |> Enum.find(&(&1["form"] == "(api/inspect)"))
+
+    assert model_export["effect"] == "unknown"
+  end
+
+  test "propagates stronger declared effects through nested wrappers" do
+    source = """
+    (ns api "API" {:visibility :prompt})
+    (defn inner {:effect :write} [] (tool/read {}))
+    (defn outer [] (inner))
+    """
+
+    {:ok, component} = Component.new(id: "api", source: source)
+    {:ok, bundle} = Kernel.compile_bundle([component])
+
+    {:ok, capability} =
+      Capability.new(
+        name: "read",
+        effect: :read,
+        input_schema: %{"type" => "object"},
+        callback: fn _ -> {:ok, %{}} end
+      )
+
+    {:ok, mission} = MissionEnvironment.new(bundle: bundle, capabilities: [capability])
+    {:ok, inventory} = MissionInventory.build(mission, Limits.defaults())
+
+    rendered = Jason.decode!(inventory.rendered)
+    effects = Map.new(rendered["exports"], &{&1["ref"], &1["effect"]})
+    assert effects == %{"api/inner" => "write", "api/outer" => "write"}
+
+    model = Jason.decode!(inventory.model_rendered)
+    model_effects = Map.new(model["entries"], &{&1["form"], &1["effect"]})
+    assert model_effects["(api/inner)"] == "write"
+    assert model_effects["(api/outer)"] == "write"
+  end
+
+  test "propagates declared effects from private helpers" do
+    source = """
+    (ns api "API" {:visibility :prompt})
+    (defn- inner {:effect :write} [] (tool/read {}))
+    (defn outer [] (inner))
+    """
+
+    {:ok, component} = Component.new(id: "api", source: source)
+    {:ok, bundle} = Kernel.compile_bundle([component])
+
+    {:ok, capability} =
+      Capability.new(
+        name: "read",
+        effect: :read,
+        input_schema: %{"type" => "object"},
+        callback: fn _ -> {:ok, %{}} end
+      )
+
+    {:ok, mission} = MissionEnvironment.new(bundle: bundle, capabilities: [capability])
+    {:ok, inventory} = MissionInventory.build(mission, Limits.defaults())
+
+    assert [%{"ref" => "api/outer", "effect" => "write"}] =
+             Jason.decode!(inventory.rendered)["exports"]
   end
 
   test "compact context accepts every capability inventory within the installed ceiling" do

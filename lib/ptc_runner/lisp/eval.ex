@@ -31,6 +31,8 @@ defmodule PtcRunner.Lisp.Eval do
   alias PtcRunner.Lisp.KeyNormalizer
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
   alias PtcRunner.Lisp.Metadata
+  alias PtcRunner.Lisp.ParallelError
+  alias PtcRunner.Lisp.Prelude.ContractError
   alias PtcRunner.Lisp.Runtime.Callable
   alias PtcRunner.Lisp.Runtime.Collection.Normalize
   alias PtcRunner.Lisp.RuntimeCallable
@@ -72,6 +74,9 @@ defmodule PtcRunner.Lisp.Eval do
       {:ok, result, %EvalContext{user_ns: user_ns}} -> {:ok, result, user_ns}
       {:error, _} = err -> err
     end
+  rescue
+    e in ContractError -> {:error, e.reason}
+    e in ParallelError -> {:error, e.reason}
   end
 
   @spec eval_with_context(CoreAST.t(), map(), map(), env(), tool_executor(), list(), keyword()) ::
@@ -505,23 +510,51 @@ defmodule PtcRunner.Lisp.Eval do
           try do
             ChildResult.take()
 
-            {value, prelude_call_counts} =
-              Apply.capture_prelude_call_counts(fn ->
+            capture =
+              Apply.capture_parallel_effects(worker_eval_ctx, fn ->
                 RuntimeCallable.with_context(worker_eval_ctx, &do_eval/2, fn ->
                   Callable.call(callable_fn, arg_list)
                 end)
               end)
 
-            case ChildResult.take() do
-              {trace_id, child_step} ->
-                {:ok, {:ok, value, trace_id, child_step, prelude_call_counts}}
+            case capture do
+              {:ok, value, worker_effects} ->
+                prelude_call_counts = worker_effects.prelude_call_counts
 
-              nil ->
-                {:ok, {:ok, value, nil, nil, prelude_call_counts}}
+                case ChildResult.take() do
+                  {trace_id, child_step} ->
+                    {:ok, {:ok, value, trace_id, child_step, prelude_call_counts, worker_effects}}
+
+                  nil ->
+                    {:ok, {:ok, value, nil, nil, prelude_call_counts, worker_effects}}
+                end
+
+              {:error, kind, reason, stacktrace, worker_effects} ->
+                captured_parallel_failure(
+                  :pmap,
+                  nil,
+                  kind,
+                  reason,
+                  stacktrace,
+                  worker_effects
+                )
             end
           rescue
+            e in ContractError ->
+              {:error,
+               {:parallel_contract_error, e.reason,
+                EvalContext.parallel_effects(e.eval_ctx, worker_eval_ctx)}}
+
             e in PtcRunner.Lisp.ToolError ->
-              {:error, {:pmap_error, "tool '#{e.tool_name}' failed: #{e.message}"}}
+              {:error,
+               {:parallel_effect_error,
+                {:pmap_error, "tool '#{e.tool_name}' failed: #{e.message}"},
+                EvalContext.parallel_effects(e.eval_ctx, worker_eval_ctx)}}
+
+            e in ParallelError ->
+              {:error,
+               {:parallel_effect_error, e.reason,
+                EvalContext.parallel_effects(e.eval_ctx, worker_eval_ctx)}}
 
             e in ExecutionError ->
               # Re-surface stable error atoms from a nested pmap/pcalls
@@ -545,14 +578,15 @@ defmodule PtcRunner.Lisp.Eval do
             worker_max_heap: worker_max_heap,
             max_concurrency: concurrency,
             budget: eval_ctx2.parallel_budget,
-            deadline_mono: deadline_mono
+            deadline_mono: deadline_mono,
+            retain_completed_results: true
           )
 
         # Collect results and child trace IDs
         duration_ms = System.monotonic_time(:millisecond) - start_time
 
         case collect_runner_results(runner_result, :pmap) do
-          {:ok, values, child_trace_ids, child_steps, prelude_call_counts} ->
+          {:ok, values, child_trace_ids, child_steps, worker_effects} ->
             # Count successes and errors
             success_count = length(values)
             error_count = count - success_count
@@ -571,10 +605,16 @@ defmodule PtcRunner.Lisp.Eval do
 
             eval_ctx3 =
               eval_ctx2
+              |> EvalContext.merge_parallel_effects(worker_effects)
               |> EvalContext.append_pmap_call(pmap_call)
-              |> merge_parallel_prelude_call_counts(prelude_call_counts)
 
             {:ok, values, eval_ctx3}
+
+          {:contract_error, reason, effects} ->
+            raise_parallel_contract_error(reason, effects, eval_ctx2)
+
+          {:error, reason, effects} ->
+            raise_parallel_error(reason, effects, eval_ctx2)
 
           {:error, reason} ->
             {:error, reason}
@@ -617,17 +657,47 @@ defmodule PtcRunner.Lisp.Eval do
             try do
               ChildResult.take()
 
-              {value, prelude_call_counts} =
-                Apply.capture_prelude_call_counts(erlang_fn)
+              case Apply.capture_parallel_effects(worker_eval_ctx, erlang_fn) do
+                {:ok, value, worker_effects} ->
+                  prelude_call_counts = worker_effects.prelude_call_counts
 
-              case ChildResult.take() do
-                {trace_id, child_step} ->
-                  {:ok, {:ok, value, trace_id, idx, child_step, prelude_call_counts}}
+                  case ChildResult.take() do
+                    {trace_id, child_step} ->
+                      {:ok,
+                       {:ok, value, trace_id, idx, child_step, prelude_call_counts,
+                        worker_effects}}
 
-                nil ->
-                  {:ok, {:ok, value, nil, idx, nil, prelude_call_counts}}
+                    nil ->
+                      {:ok, {:ok, value, nil, idx, nil, prelude_call_counts, worker_effects}}
+                  end
+
+                {:error, kind, reason, stacktrace, worker_effects} ->
+                  captured_parallel_failure(
+                    :pcalls,
+                    idx,
+                    kind,
+                    reason,
+                    stacktrace,
+                    worker_effects
+                  )
               end
             rescue
+              e in ContractError ->
+                {:error,
+                 {:parallel_contract_error, e.reason,
+                  EvalContext.parallel_effects(e.eval_ctx, worker_eval_ctx)}}
+
+              e in PtcRunner.Lisp.ToolError ->
+                {:error,
+                 {:parallel_effect_error,
+                  {:pcalls_error, idx, "tool '#{e.tool_name}' failed: #{e.message}"},
+                  EvalContext.parallel_effects(e.eval_ctx, worker_eval_ctx)}}
+
+              e in ParallelError ->
+                {:error,
+                 {:parallel_effect_error, e.reason,
+                  EvalContext.parallel_effects(e.eval_ctx, worker_eval_ctx)}}
+
               e in ExecutionError ->
                 # Re-surface stable error atoms from a nested
                 # pmap/pcalls (heap kill / shared-deadline timeout).
@@ -649,14 +719,15 @@ defmodule PtcRunner.Lisp.Eval do
               worker_max_heap: worker_max_heap,
               max_concurrency: concurrency,
               budget: eval_ctx2.parallel_budget,
-              deadline_mono: deadline_mono
+              deadline_mono: deadline_mono,
+              retain_completed_results: true
             )
 
           # Collect results and child trace IDs
           duration_ms = System.monotonic_time(:millisecond) - start_time
 
           case collect_runner_results(runner_result, :pcalls) do
-            {:ok, values, child_trace_ids, child_steps, prelude_call_counts} ->
+            {:ok, values, child_trace_ids, child_steps, worker_effects} ->
               # Count successes and errors
               success_count = length(values)
               error_count = count - success_count
@@ -675,10 +746,16 @@ defmodule PtcRunner.Lisp.Eval do
 
               eval_ctx3 =
                 eval_ctx2
+                |> EvalContext.merge_parallel_effects(worker_effects)
                 |> EvalContext.append_pmap_call(pmap_call)
-                |> merge_parallel_prelude_call_counts(prelude_call_counts)
 
               {:ok, values, eval_ctx3}
+
+            {:contract_error, reason, effects} ->
+              raise_parallel_contract_error(reason, effects, eval_ctx2)
+
+            {:error, reason, effects} ->
+              raise_parallel_error(reason, effects, eval_ctx2)
 
             {:error, reason} ->
               {:error, reason}
@@ -824,11 +901,19 @@ defmodule PtcRunner.Lisp.Eval do
       |> Map.put(:prelude_ns, Map.fetch!(export, :namespace))
       |> Map.put(:prelude_ref, Map.fetch!(export, :ref))
       |> Map.put(:prelude_tool_refs, Map.get(export, :tool_refs, []))
+      |> put_prelude_contract(export)
 
     {:closure, params, body, captured_env, turn_history, meta}
   end
 
   defp bind_prelude_ref(callable, _export), do: callable
+
+  defp put_prelude_contract(meta, %{parsed_signature: signature, signature: display, ref: ref})
+       when is_tuple(signature) and is_binary(display) and is_binary(ref) do
+    Map.put(meta, :prelude_contract, %{ref: ref, signature: signature, display: display})
+  end
+
+  defp put_prelude_contract(meta, _export), do: meta
 
   defp tag_prelude_ns(
          {:closure, params, body, captured_env, turn_history, %{prelude_internal: true} = meta},
@@ -1259,21 +1344,15 @@ defmodule PtcRunner.Lisp.Eval do
          origin,
          private_tool?
        ) do
-    case EvalContext.check_tool_call_limit(eval_ctx) do
-      {:error, :tool_call_limit_exceeded} ->
-        {:error, {:tool_call_limit_exceeded, eval_ctx.max_tool_calls}}
-
-      :ok ->
-        record_tool_call_inner(
-          tool_name,
-          args_map,
-          tool_exec,
-          eval_ctx,
-          cacheable?,
-          origin,
-          private_tool?
-        )
-    end
+    record_tool_call_inner(
+      tool_name,
+      args_map,
+      tool_exec,
+      eval_ctx,
+      cacheable?,
+      origin,
+      private_tool?
+    )
   end
 
   defp record_tool_call_inner(
@@ -1320,16 +1399,22 @@ defmodule PtcRunner.Lisp.Eval do
       eval_ctx2 = EvalContext.append_tool_call(eval_ctx, tool_call)
       {:ok, cached.result, eval_ctx2}
     else
-      record_tool_call_execute(
-        tool_name,
-        args_map,
-        tool_exec,
-        eval_ctx,
-        cacheable?,
-        cache_key,
-        origin,
-        private_tool?
-      )
+      case EvalContext.reserve_tool_call(eval_ctx) do
+        {:error, :tool_call_limit_exceeded} ->
+          {:error, {:tool_call_limit_exceeded, eval_ctx.max_tool_calls}}
+
+        :ok ->
+          record_tool_call_execute(
+            tool_name,
+            args_map,
+            tool_exec,
+            eval_ctx,
+            cacheable?,
+            cache_key,
+            origin,
+            private_tool?
+          )
+      end
     end
   end
 
@@ -1343,6 +1428,7 @@ defmodule PtcRunner.Lisp.Eval do
          origin,
          private_tool?
        ) do
+    :ok = EvalContext.record_tool_activity(eval_ctx)
     start_time = System.monotonic_time(:millisecond)
     timestamp = DateTime.utc_now()
 
@@ -1414,7 +1500,7 @@ defmodule PtcRunner.Lisp.Eval do
       eval_ctx3 =
         if cacheable? do
           cached_entry = %{result: result, child_step: child_step, child_trace_id: child_trace_id}
-          %{eval_ctx2 | tool_cache: Map.put(eval_ctx2.tool_cache, cache_key, cached_entry)}
+          EvalContext.put_tool_cache(eval_ctx2, cache_key, cached_entry)
         else
           eval_ctx2
         end
@@ -1668,25 +1754,106 @@ defmodule PtcRunner.Lisp.Eval do
   # `{:ok, values, trace_ids, child_steps}` / `{:error, reason}` shape
   # the pmap/pcalls clauses expect.
   defp collect_runner_results({:ok, internal_results}, _type) do
-    {values, trace_ids, child_steps, counts} =
-      Enum.reduce(internal_results, {[], [], [], %{}}, fn result, {vals, tids, steps, counts} ->
-        {:ok, val, trace_id, child_step, worker_counts} = extract_parallel_result(result)
-        counts = Map.merge(counts, worker_counts, fn _ref, left, right -> left + right end)
-        {[val | vals], [trace_id | tids], [child_step | steps], counts}
+    {values, trace_ids, child_steps, effects} =
+      Enum.reduce(
+        internal_results,
+        {[], [], [], empty_parallel_effects()},
+        fn result, {vals, tids, steps, effects} ->
+          {:ok, val, trace_id, child_step, _worker_counts, worker_effects} =
+            extract_parallel_result(result)
+
+          effects = merge_parallel_effect_deltas(worker_effects, effects)
+          {[val | vals], [trace_id | tids], [child_step | steps], effects}
+        end
+      )
+
+    {:ok, Enum.reverse(values), Enum.reverse(trace_ids), Enum.reverse(child_steps), effects}
+  end
+
+  defp collect_runner_results(
+         {:error, {:parallel_contract_error, reason, effects}},
+         _type
+       ) do
+    {:contract_error, reason, effects}
+  end
+
+  defp collect_runner_results(
+         {:error, {:parallel_contract_error, reason, effects, completed_results}},
+         _type
+       ) do
+    completed_effects =
+      Enum.reduce(completed_results, empty_parallel_effects(), fn result, accumulated ->
+        {:ok, _value, _trace_id, _child_step, _counts, worker_effects} =
+          extract_parallel_result(result)
+
+        merge_parallel_effect_deltas(worker_effects, accumulated)
       end)
 
-    {:ok, Enum.reverse(values), Enum.reverse(trace_ids), Enum.reverse(child_steps), counts}
+    {:contract_error, reason, merge_parallel_effect_deltas(effects, completed_effects)}
+  end
+
+  defp collect_runner_results(
+         {:error, {:parallel_error, reason, completed_results}},
+         type
+       ) do
+    {reason, failed_effects} = unwrap_parallel_effect_error(reason)
+    completed_effects = parallel_results_effects(completed_results)
+
+    {:error, classify_runner_error(reason, type),
+     merge_parallel_effect_deltas(failed_effects, completed_effects)}
   end
 
   defp collect_runner_results({:error, reason}, type) do
     {:error, classify_runner_error(reason, type)}
   end
 
-  defp merge_parallel_prelude_call_counts(eval_ctx, counts) do
-    Map.update!(eval_ctx, :prelude_call_counts, fn existing ->
-      Map.merge(existing, counts, fn _ref, left, right -> left + right end)
+  defp raise_parallel_contract_error(reason, effects, %EvalContext{} = eval_ctx) do
+    merged_ctx = EvalContext.merge_parallel_effects(eval_ctx, effects)
+    reason = refresh_contract_capability_activity(reason, merged_ctx)
+
+    message =
+      case reason do
+        {:prelude_contract_error, message, _details} when is_binary(message) -> message
+        _other -> "prelude contract failed"
+      end
+
+    raise ContractError,
+      reason: reason,
+      message: message,
+      eval_ctx: merged_ctx
+  end
+
+  defp raise_parallel_error(reason, effects, %EvalContext{} = eval_ctx) do
+    raise ParallelError,
+      reason: reason,
+      message: inspect(reason),
+      eval_ctx: EvalContext.merge_parallel_effects(eval_ctx, effects)
+  end
+
+  defp unwrap_parallel_effect_error({:parallel_effect_error, reason, effects}),
+    do: {reason, effects}
+
+  defp unwrap_parallel_effect_error(reason), do: {reason, empty_parallel_effects()}
+
+  defp parallel_results_effects(results) do
+    Enum.reduce(results, empty_parallel_effects(), fn result, accumulated ->
+      {:ok, _value, _trace_id, _child_step, _counts, worker_effects} =
+        extract_parallel_result(result)
+
+      merge_parallel_effect_deltas(worker_effects, accumulated)
     end)
   end
+
+  defp refresh_contract_capability_activity(
+         {:prelude_contract_error, message, details},
+         %EvalContext{} = eval_ctx
+       )
+       when is_binary(message) and is_map(details) do
+    details = Map.put(details, :capability_activity?, EvalContext.tool_activity?(eval_ctx))
+    {:prelude_contract_error, message, details}
+  end
+
+  defp refresh_contract_capability_activity(reason, %EvalContext{}), do: reason
 
   # Map `ParallelRunner`'s stable error reasons onto the pmap/pcalls
   # error shape.
@@ -1705,6 +1872,10 @@ defmodule PtcRunner.Lisp.Eval do
   defp classify_runner_error({:timeout, _index}, _type),
     do: {:timeout, "the parallel operation exceeded its deadline", nil}
 
+  defp classify_runner_error({reason, _message, nil} = error, _type)
+       when reason in ExecutionError.stable_parallel_reasons(),
+       do: error
+
   defp classify_runner_error(:parallel_capacity_exceeded, _type),
     do:
       {:parallel_capacity_exceeded,
@@ -1718,6 +1889,9 @@ defmodule PtcRunner.Lisp.Eval do
 
   defp classify_runner_error({:runtime_error, index, detail}, type),
     do: {parallel_error_type(type), "parallel worker #{index} crashed: #{inspect(detail)}"}
+
+  defp classify_runner_error({:prelude_contract_error, _message, _details} = error, _type),
+    do: error
 
   defp classify_runner_error({:pmap_error, _} = err, _type), do: err
   defp classify_runner_error({:pcalls_error, _, _} = err, _type), do: err
@@ -1745,16 +1919,127 @@ defmodule PtcRunner.Lisp.Eval do
   defp nested_parallel_error(%ExecutionError{message: msg}, idx),
     do: {:pcalls_error, idx, msg}
 
+  defp captured_parallel_failure(
+         _type,
+         _index,
+         :error,
+         %ContractError{} = error,
+         _stacktrace,
+         effects
+       ) do
+    {:error, {:parallel_contract_error, error.reason, effects}}
+  end
+
+  defp captured_parallel_failure(
+         type,
+         index,
+         :error,
+         %PtcRunner.Lisp.ToolError{} = error,
+         _stacktrace,
+         effects
+       ) do
+    message = "tool '#{error.tool_name}' failed: #{error.message}"
+    {:error, {:parallel_effect_error, parallel_worker_error(type, index, message), effects}}
+  end
+
+  defp captured_parallel_failure(
+         _type,
+         _index,
+         :error,
+         %ParallelError{} = error,
+         _stacktrace,
+         effects
+       ) do
+    {:error, {:parallel_effect_error, error.reason, effects}}
+  end
+
+  defp captured_parallel_failure(
+         :pmap,
+         _index,
+         :error,
+         %ExecutionError{} = error,
+         _stacktrace,
+         effects
+       ) do
+    {:error, {:parallel_effect_error, nested_parallel_error(error), effects}}
+  end
+
+  defp captured_parallel_failure(
+         :pcalls,
+         index,
+         :error,
+         %ExecutionError{} = error,
+         _stacktrace,
+         effects
+       ) do
+    {:error, {:parallel_effect_error, nested_parallel_error(error, index), effects}}
+  end
+
+  defp captured_parallel_failure(type, index, :error, error, _stacktrace, effects) do
+    reason = parallel_worker_error(type, index, Exception.message(error))
+    {:error, {:parallel_effect_error, reason, effects}}
+  end
+
+  defp captured_parallel_failure(type, index, :throw, signal, _stacktrace, effects) do
+    message =
+      case signal do
+        {:return_signal, _, _} -> "return called inside #{type}"
+        {:fail_signal, _, _} -> "fail called inside #{type}"
+        other -> "worker threw #{inspect(other)}"
+      end
+
+    {:error, {:parallel_effect_error, parallel_worker_error(type, index, message), effects}}
+  end
+
+  defp captured_parallel_failure(type, index, kind, reason, _stacktrace, effects) do
+    message = "worker #{kind}: #{inspect(reason)}"
+    {:error, {:parallel_effect_error, parallel_worker_error(type, index, message), effects}}
+  end
+
+  defp parallel_worker_error(:pmap, _index, message), do: {:pmap_error, message}
+  defp parallel_worker_error(:pcalls, index, message), do: {:pcalls_error, index, message}
+
   # Extract value, trace_id, and child_step from different result formats
+  defp extract_parallel_result({:ok, val, trace_id, child_step, counts, effects})
+       when (is_map(child_step) or is_nil(child_step)) and is_map(counts) and is_map(effects) do
+    {:ok, val, trace_id, child_step, counts, effects}
+  end
+
+  defp extract_parallel_result({:ok, val, trace_id, _idx, child_step, counts, effects})
+       when is_map(counts) and is_map(effects),
+       do: {:ok, val, trace_id, child_step, counts, effects}
+
   defp extract_parallel_result({:ok, val, trace_id, child_step, counts})
        when (is_map(child_step) or is_nil(child_step)) and is_map(counts) do
-    {:ok, val, trace_id, child_step, counts}
+    {:ok, val, trace_id, child_step, counts, empty_parallel_effects()}
   end
 
   defp extract_parallel_result({:ok, val, trace_id, _idx, child_step, counts}),
-    do: {:ok, val, trace_id, child_step, counts}
+    do: {:ok, val, trace_id, child_step, counts, empty_parallel_effects()}
 
-  defp extract_parallel_result({:ok, val, trace_id}), do: {:ok, val, trace_id, nil, %{}}
+  defp extract_parallel_result({:ok, val, trace_id}),
+    do: {:ok, val, trace_id, nil, %{}, empty_parallel_effects()}
+
+  defp empty_parallel_effects do
+    %{tool_calls: [], pmap_calls: [], prints: [], prelude_call_counts: %{}, tool_cache: %{}}
+  end
+
+  # Effect lists use evaluator prepend order. `newer` therefore precedes
+  # `older`; counts add and later cache entries win.
+  defp merge_parallel_effect_deltas(newer, older) do
+    %{
+      tool_calls: Map.fetch!(newer, :tool_calls) ++ Map.fetch!(older, :tool_calls),
+      pmap_calls: Map.fetch!(newer, :pmap_calls) ++ Map.fetch!(older, :pmap_calls),
+      prints: Map.fetch!(newer, :prints) ++ Map.fetch!(older, :prints),
+      prelude_call_counts:
+        Map.merge(
+          Map.fetch!(older, :prelude_call_counts),
+          Map.fetch!(newer, :prelude_call_counts),
+          fn _ref, left, right -> left + right end
+        ),
+      tool_cache: Map.merge(Map.fetch!(older, :tool_cache), Map.fetch!(newer, :tool_cache))
+    }
+  end
 
   # ============================================================
   # Pcalls helpers
@@ -1762,51 +2047,10 @@ defmodule PtcRunner.Lisp.Eval do
 
   # Convert a closure to a zero-arity Erlang function for use in pcalls
   defp pcalls_fn_to_erlang(
-         {:closure, [], body, closure_env, _turn_history, metadata} = closure,
+         {:closure, [], _body, _closure_env, _turn_history, _metadata} = closure,
          %EvalContext{} = eval_ctx
        ) do
-    closure_env = Apply.bind_self_recursion(closure_env, metadata, closure)
-
-    fn ->
-      ctx =
-        EvalContext.new(
-          eval_ctx.ctx,
-          pcalls_user_ns(eval_ctx, metadata),
-          closure_env,
-          eval_ctx.tool_exec,
-          eval_ctx.turn_history
-        )
-        |> EvalContext.inherit_prelude(eval_ctx)
-        |> maybe_push_prelude_origin(metadata, eval_ctx)
-
-      ctx = %{
-        ctx
-        | locals: Apply.closure_locals(metadata, %{}),
-          loop_limit: eval_ctx.loop_limit,
-          prints: eval_ctx.prints,
-          max_print_length: eval_ctx.max_print_length,
-          max_tool_call_result_bytes: eval_ctx.max_tool_call_result_bytes,
-          pmap_timeout: eval_ctx.pmap_timeout,
-          pmap_max_concurrency: eval_ctx.pmap_max_concurrency,
-          # Security H1: propagate the heap caps + shared worker-slot
-          # budget so a nested pmap/pcalls inside this thunk caps and
-          # counts its workers, and the shared deadline so nested calls
-          # don't multiply total wall time.
-          max_heap: eval_ctx.max_heap,
-          worker_max_heap: eval_ctx.worker_max_heap,
-          parallel_budget: eval_ctx.parallel_budget,
-          pmap_deadline: eval_ctx.pmap_deadline,
-          tools_meta: eval_ctx.tools_meta
-      }
-
-      case do_eval(body, ctx) do
-        {:ok, result, _ctx2} ->
-          result
-
-        {:error, reason} ->
-          raise_pcalls_body_error(reason)
-      end
-    end
+    Apply.closure_to_fun(closure, eval_ctx, &do_eval/2)
   end
 
   defp pcalls_fn_to_erlang(
@@ -1828,49 +2072,6 @@ defmodule PtcRunner.Lisp.Eval do
 
   defp pcalls_fn_to_erlang(value, %EvalContext{}) do
     raise "pcalls requires callable thunks, got: #{inspect(value)}"
-  end
-
-  defp maybe_push_prelude_origin(
-         %EvalContext{} = context,
-         %{
-           prelude_ref: ref,
-           prelude_ns: ns,
-           prelude_tool_refs: tool_refs
-         },
-         %EvalContext{} = caller_ctx
-       )
-       when is_binary(ref) and is_binary(ns) and is_list(tool_refs) do
-    caller_user_ns = EvalContext.current_prelude_caller_user_ns(caller_ctx) || caller_ctx.user_ns
-
-    context
-    |> EvalContext.push_prelude_caller_user_ns(caller_user_ns)
-    |> EvalContext.push_prelude_origin(%{ref: ref, namespace: ns, tool_refs: tool_refs})
-  end
-
-  defp maybe_push_prelude_origin(%EvalContext{} = context, %{prelude_internal: true}, _caller_ctx) do
-    context
-  end
-
-  defp maybe_push_prelude_origin(%EvalContext{} = context, %{prelude_ns: ns}, _caller_ctx)
-       when is_binary(ns) do
-    EvalContext.push_prelude_returned_origin(context, ns)
-  end
-
-  defp maybe_push_prelude_origin(%EvalContext{} = context, _meta, _caller_ctx) do
-    EvalContext.push_user_origin(context)
-  end
-
-  defp pcalls_user_ns(%EvalContext{prelude: %{private_env: private_env}, user_ns: user_ns}, %{
-         prelude_ns: ns
-       })
-       when is_binary(ns) do
-    private_env
-    |> Map.get(ns, user_ns)
-    |> tag_prelude_ns_env(ns)
-  end
-
-  defp pcalls_user_ns(%EvalContext{} = eval_ctx, _metadata) do
-    EvalContext.current_prelude_caller_user_ns(eval_ctx) || eval_ctx.user_ns
   end
 
   defp tag_prelude_ns_env(env, ns) when is_map(env) do
@@ -1905,30 +2106,6 @@ defmodule PtcRunner.Lisp.Eval do
       _origin ->
         meta
     end
-  end
-
-  # A nested pmap/pcalls failure (heap kill, deadline, exhausted worker
-  # budget) raises structured so a surrounding worker re-surfaces the
-  # stable atom; every other body error keeps the legacy RuntimeError
-  # shape. Parallel errors arrive as 2- or 3-tuples.
-  @spec raise_pcalls_body_error(term()) :: no_return()
-  defp raise_pcalls_body_error({atom, _} = reason)
-       when atom in ExecutionError.stable_parallel_reasons() do
-    raise_pcalls_parallel_error(atom, reason)
-  end
-
-  defp raise_pcalls_body_error({atom, _, _} = reason)
-       when atom in ExecutionError.stable_parallel_reasons() do
-    raise_pcalls_parallel_error(atom, reason)
-  end
-
-  defp raise_pcalls_body_error(reason) do
-    raise "pcalls function failed: #{inspect(reason)}"
-  end
-
-  @spec raise_pcalls_parallel_error(atom(), term()) :: no_return()
-  defp raise_pcalls_parallel_error(atom, reason) do
-    raise ExecutionError, reason: atom, message: "pcalls function failed: #{inspect(reason)}"
   end
 
   # ============================================================

@@ -320,14 +320,22 @@ The file-agent example separates orchestration from task authority:
 The human creates the mission helper:
 
 ```clojure
-(ns tutorial.files)
+(ns tutorial.files "Mission-only access to the granted file root." {:visibility :prompt})
 
-(defn read-text [path]
+(defn read-text
+  "Read one UTF-8 file beneath the configured mission root."
+  {:signature "(path :string) -> :string"}
+  [path]
   (let [response (tool/fs-read {"path" path})]
     (if (= :ok (get response :status))
       (get-in response [:value "content"])
-      response)))
+      (fail response))))
 ```
+
+The signature rejects a non-string path before the wrapper body runs and
+checks successful content on return. A failed raw capability response is an
+explicit mission failure, not a value that can accidentally violate the
+wrapper's output contract.
 
 The manifest selects the shipped agent library and uses a four-line local entry
 to pass manifest input into it:
@@ -343,9 +351,17 @@ to pass manifest input into it:
 in `agent.core`. Its `initial-state`, `render`, and `transition` functions form
 a bounded policy seam; the shipped transition currently keeps state unchanged.
 The rendered `PTC_AGENT_PROMPT_V1` text teaches the supported PTC-Lisp subset
-and appends a deterministic compact context of prompt-visible mission exports,
-direct capability schemas, and applicable limits. The full structured V2
-inventory remains available to trusted workflow code through
+and asks for one self-contained program. Top-level forms run in order, while
+failed evaluations roll back and retry turns cannot depend on their
+definitions. The prompt renders one
+deterministic `Available API`: prompt-visible mission functions form a complete
+facade and suppress raw `tool/...` entries; when no such facade exists, direct
+capabilities are shown. An empty mission still emits the heading, keeping the
+prompt format stable. For direct capabilities, nested schema titles and
+descriptions appear beside stable argument/return paths rather than being lost
+from the readable summary. Numeric Kernel limits remain enforced and available in
+the frozen structured V2 inventory, but the default prompt does not render
+them. Trusted workflow code can read that inventory through
 `kernel/mission-inventory`.
 
 For an evaluation failure, the next request preserves the exact assistant tool

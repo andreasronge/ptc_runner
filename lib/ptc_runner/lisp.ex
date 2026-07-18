@@ -49,6 +49,7 @@ defmodule PtcRunner.Lisp do
   alias PtcRunner.Lisp.Prelude
   alias PtcRunner.Lisp.Prelude.Attach, as: PreludeAttach
   alias PtcRunner.Lisp.Prelude.AttachContext, as: PreludeAttachContext
+  alias PtcRunner.Lisp.Prelude.ContractError
   alias PtcRunner.Lisp.Prelude.ValidationError, as: PreludeValidationError
 
   # Default capacity of the global parallel-worker slot semaphore (see
@@ -840,6 +841,12 @@ defmodule PtcRunner.Lisp do
           eval_opts
         )
       rescue
+        e in ContractError ->
+          {:error, e.reason, e.eval_ctx}
+
+        e in PtcRunner.Lisp.ParallelError ->
+          {:error, e.reason, e.eval_ctx}
+
         e in ExecutionError ->
           {:error, {e.reason, e.message, e.data}}
 
@@ -938,12 +945,12 @@ defmodule PtcRunner.Lisp do
 
   defp handle_execute_result({:error, {reason_atom, _, _} = reason}, %{memory: memory})
        when is_atom(reason_atom) do
-    {:error, Step.error(reason_atom, format_error(reason), memory, %{})}
+    {:error, Step.error(reason_atom, format_error(reason), memory, error_details(reason))}
   end
 
   defp handle_execute_result({:error, {reason_atom, _} = reason}, %{memory: memory})
        when is_atom(reason_atom) do
-    {:error, Step.error(reason_atom, format_error(reason), memory, %{})}
+    {:error, Step.error(reason_atom, format_error(reason), memory, error_details(reason))}
   end
 
   defp handle_execute_result({:error, reason}, %{memory: memory}) do
@@ -955,34 +962,41 @@ defmodule PtcRunner.Lisp do
   defp eval_error_step(reason, metrics, memory, %EvalContext{} = eval_ctx) do
     reason_atom = if is_tuple(reason), do: elem(reason, 0), else: reason
 
+    reversed_tool_calls = Enum.reverse(eval_ctx.tool_calls)
+    reversed_pmap_calls = Enum.reverse(eval_ctx.pmap_calls)
+
     tool_child_traces =
-      eval_ctx.tool_calls
+      reversed_tool_calls
       |> Enum.filter(&Map.has_key?(&1, :child_trace_id))
       |> Enum.map(& &1.child_trace_id)
 
     pmap_child_traces =
-      eval_ctx.pmap_calls
+      reversed_pmap_calls
       |> Enum.flat_map(& &1.child_trace_ids)
 
     child_traces = tool_child_traces ++ pmap_child_traces
 
     tool_child_steps =
-      eval_ctx.tool_calls
+      reversed_tool_calls
       |> Enum.filter(&Map.has_key?(&1, :child_step))
       |> Enum.map(& &1.child_step)
 
     pmap_child_steps =
-      eval_ctx.pmap_calls
+      reversed_pmap_calls
       |> Enum.flat_map(&Map.get(&1, :child_steps, []))
 
     child_steps = tool_child_steps ++ pmap_child_steps
 
-    cleaned_tool_calls = Enum.map(eval_ctx.tool_calls, &Map.delete(&1, :child_step))
-    cleaned_pmap_calls = Enum.map(eval_ctx.pmap_calls, &Map.delete(&1, :child_steps))
+    cleaned_tool_calls = Enum.map(reversed_tool_calls, &Map.delete(&1, :child_step))
+    cleaned_pmap_calls = Enum.map(reversed_pmap_calls, &Map.delete(&1, :child_steps))
 
     step = %Step{
       return: nil,
-      fail: %{reason: reason_atom, message: format_error(reason)},
+      fail: %{
+        reason: reason_atom,
+        message: format_error(reason),
+        details: error_details(reason)
+      },
       memory: memory,
       signature: nil,
       usage: metrics,
@@ -990,7 +1004,7 @@ defmodule PtcRunner.Lisp do
       trace_id: nil,
       parent_trace_id: nil,
       field_descriptions: nil,
-      prints: eval_ctx.prints,
+      prints: Enum.reverse(eval_ctx.prints),
       tool_calls: cleaned_tool_calls,
       pmap_calls: cleaned_pmap_calls,
       prelude_call_counts: eval_ctx.prelude_call_counts,
@@ -1001,6 +1015,11 @@ defmodule PtcRunner.Lisp do
 
     {:error, step}
   end
+
+  defp error_details({:prelude_contract_error, _message, details}) when is_map(details),
+    do: details
+
+  defp error_details(_reason), do: %{}
 
   @doc """
   Format an error tuple into a human-readable string.

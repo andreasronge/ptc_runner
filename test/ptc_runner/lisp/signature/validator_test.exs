@@ -1,6 +1,7 @@
 defmodule PtcRunner.Lisp.Signature.ValidatorTest do
   use ExUnit.Case
 
+  alias PtcRunner.Lisp.Signature
   alias PtcRunner.Lisp.Signature.Validator
 
   describe "validate/2 - primitives" do
@@ -71,8 +72,13 @@ defmodule PtcRunner.Lisp.Signature.ValidatorTest do
     end
 
     test "rejects a non-keyword value as keyword" do
-      assert {:error, [%{path: [], message: "expected keyword, got " <> _}]} =
-               Validator.validate(42, :keyword)
+      for invalid <- [42, nil, true, false] do
+        assert {:error, [%{path: [], message: "expected keyword, got " <> _}]} =
+                 Validator.validate(invalid, :keyword)
+      end
+
+      assert {:error, [%{message: "expected keyword, got nil"}]} =
+               Validator.validate(nil, :keyword)
     end
   end
 
@@ -420,7 +426,7 @@ defmodule PtcRunner.Lisp.Signature.ValidatorTest do
       schema = {:closed_map, [{"user_id", :int}]}
 
       assert {:error, errors} = Validator.validate(data, schema)
-      assert Enum.any?(errors, &(&1.message =~ "unexpected field"))
+      assert Enum.any?(errors, &(&1.message =~ "ambiguous field aliases"))
     end
 
     test "rejects atom alias key alongside string canonical key" do
@@ -428,7 +434,84 @@ defmodule PtcRunner.Lisp.Signature.ValidatorTest do
       schema = {:closed_map, [{"user_id", :int}]}
 
       assert {:error, errors} = Validator.validate(data, schema)
-      assert Enum.any?(errors, &(&1.message =~ "unexpected field"))
+      assert Enum.any?(errors, &(&1.message =~ "ambiguous field aliases"))
+    end
+  end
+
+  describe "validate/2 - shaped-map key aliases" do
+    test "rejects multiple alias-equivalent keys in an open map" do
+      assert {:error, [%{path: ["user-id"], message: message}]} =
+               Validator.validate(
+                 %{"user_id" => 1, :"user-id" => "bad"},
+                 {:map, [{"user-id", :int}]}
+               )
+
+      assert message =~ "ambiguous field aliases"
+    end
+
+    test "rejects atom and string representations of the same field" do
+      assert {:error, [%{path: ["id"], message: message}]} =
+               Validator.validate(%{:id => 1, "id" => "bad"}, {:map, [{"id", :int}]})
+
+      assert message =~ "ambiguous field aliases"
+    end
+  end
+
+  describe "validate/3 - bounded errors" do
+    test "stops nested list validation at the requested error budget" do
+      invalid = List.duplicate("bad", 100)
+
+      assert {:error, errors} =
+               Validator.validate(invalid, {:list, :int}, max_errors: 2)
+
+      assert errors == [
+               %{path: [0], message: "expected int, got string"},
+               %{path: [1], message: "expected int, got string"}
+             ]
+    end
+
+    test "shares the error budget across shaped fields and closed-map extras" do
+      value = %{"a" => "bad", "b" => "bad", "extra" => true}
+      type = {:closed_map, [{"a", :int}, {"b", :int}]}
+
+      assert {:error, errors} = Validator.validate(value, type, max_errors: 2)
+      assert Enum.map(errors, & &1.path) == [["a"], ["b"]]
+    end
+  end
+
+  describe "from_json_schema/1 field aliases" do
+    test "rejects normalized property collisions" do
+      schema = %{
+        "type" => "object",
+        "properties" => %{
+          "user-id" => %{"type" => "integer"},
+          "user_id" => %{"type" => "integer"}
+        },
+        "required" => ["user-id", "user_id"]
+      }
+
+      assert {:error, message} = Signature.from_json_schema(schema)
+      assert message =~ "normalize to duplicate field"
+      assert message =~ "user_id"
+    end
+
+    test "rejects normalized collisions recursively" do
+      schema = %{
+        "type" => "object",
+        "properties" => %{
+          "outer" => %{
+            "type" => "object",
+            "properties" => %{
+              "item-id" => %{"type" => "string"},
+              "item_id" => %{"type" => "string"}
+            }
+          }
+        }
+      }
+
+      assert {:error, message} = Signature.from_json_schema(schema)
+      assert message =~ ~s|property "outer"|
+      assert message =~ "normalize to duplicate field"
     end
   end
 end

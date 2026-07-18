@@ -11,6 +11,7 @@ defmodule PtcRunner.Lisp.Signature.Parser do
 
   import NimbleParsec
 
+  alias PtcRunner.Lisp.KeyNormalizer
   alias PtcRunner.Lisp.Signature.ParserHelpers
 
   # ============================================================
@@ -195,7 +196,9 @@ defmodule PtcRunner.Lisp.Signature.Parser do
   def parse(input) when is_binary(input) do
     case parse_impl(input) do
       {:ok, [ast], "", _context, _position, _offset} ->
-        {:ok, ast}
+        with :ok <- validate_unique_names(ast) do
+          {:ok, ast}
+        end
 
       {:ok, _parsed, rest, _context, {line, _}, _offset} ->
         column = String.length(input) - String.length(rest) + 1
@@ -234,5 +237,51 @@ defmodule PtcRunner.Lisp.Signature.Parser do
     Regex.match?(~r/:([a-z]+)/, input) and
       Regex.scan(~r/:([a-z]+)/, input)
       |> Enum.any?(fn [_, type] -> type not in @valid_types end)
+  end
+
+  defp validate_unique_names({:signature, params, return_type}) do
+    with :ok <- reject_name_collisions(params, "signature parameter"),
+         :ok <- validate_nested_types(Enum.map(params, &elem(&1, 1))) do
+      validate_nested_type(return_type)
+    end
+  end
+
+  defp validate_nested_types(types) do
+    Enum.reduce_while(types, :ok, fn type, :ok ->
+      case validate_nested_type(type) do
+        :ok -> {:cont, :ok}
+        {:error, _} = error -> {:halt, error}
+      end
+    end)
+  end
+
+  defp validate_nested_type({:optional, type}), do: validate_nested_type(type)
+  defp validate_nested_type({:list, type}), do: validate_nested_type(type)
+
+  defp validate_nested_type({map_kind, fields}) when map_kind in [:map, :closed_map] do
+    with :ok <- reject_name_collisions(fields, "map field") do
+      validate_nested_types(Enum.map(fields, &elem(&1, 1)))
+    end
+  end
+
+  defp validate_nested_type(_type), do: :ok
+
+  defp reject_name_collisions(named_types, label) do
+    collision =
+      named_types
+      |> Enum.group_by(fn {name, _type} -> KeyNormalizer.normalize_key(name) end)
+      |> Enum.find(fn {_normalized, entries} -> length(entries) > 1 end)
+
+    case collision do
+      nil ->
+        :ok
+
+      {normalized, entries} ->
+        names = entries |> Enum.map(&elem(&1, 0)) |> Enum.uniq() |> Enum.sort()
+
+        {:error,
+         "duplicate #{label} names normalize to #{inspect(normalized)}: " <>
+           Enum.join(names, ", ")}
+    end
   end
 end

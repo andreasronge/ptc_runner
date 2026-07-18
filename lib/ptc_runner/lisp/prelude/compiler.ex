@@ -46,6 +46,8 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
 
   @default_visibility :prompt
   @valid_effects [:read, :write, :unknown]
+  @max_contract_errors 16
+  @max_contract_diagnostic_bytes 4_096
 
   @doc """
   Compiles prelude `source` into a `%PtcRunner.Lisp.Prelude{}`.
@@ -73,11 +75,13 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
   def compile(source, opts) when is_binary(source) and is_list(opts) do
     with {:ok, {:program, forms}} <- parse(source),
          {:ok, specs, ns_meta} <- collect_specs(forms),
+         :ok <- validate_spec_effects(specs),
          {:ok, dep_ctx} <- build_dep_context(ns_meta, opts),
          :ok <- reject_dep_refs_in_defs(specs, dep_ctx),
          form_graph = build_form_graph(specs, dep_ctx),
          {:ok, exports} <- build_exports(specs, ns_meta, form_graph, dep_ctx),
-         {:ok, private_env} <- build_runtime(specs, exports, dep_ctx) do
+         {:ok, private_env} <- build_runtime(specs, exports, dep_ctx),
+         :ok <- validate_constant_contracts(exports, private_env) do
       namespaces = ns_meta |> Map.keys() |> Enum.sort()
 
       {:ok,
@@ -774,14 +778,16 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
 
     with {:ok, visibility} <- visibility(Map.get(spec.metadata, "visibility", ns_default)),
          {:ok, explicit_requires} <- validate_requires(Map.get(spec.metadata, "requires")),
-         {:ok, signature, type} <- export_contract(spec) do
+         {:ok, declared_effect} <- validate_effect(Map.get(spec.metadata, "effect")),
+         {:ok, signature, type, parsed_signature, parsed_type} <- export_contract(spec) do
       graph_entry =
         form_graph
         |> Map.get(spec.namespace, %{})
         |> Map.get(spec.symbol, %{
           requires: %{transitive: []},
           tool_refs: %{transitive: []},
-          dep_calls: %{transitive: []}
+          dep_calls: %{transitive: []},
+          effects: %{transitive: []}
         })
 
       # Union the referenced dep exports' FINAL requires/tool_refs into this
@@ -810,10 +816,14 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
         tool_refs:
           (graph_entry.tool_refs.transitive ++ Enum.flat_map(dep_exports, & &1.tool_refs))
           |> Enum.uniq()
+          |> Enum.sort(),
+        effects:
+          (graph_entry.effects.transitive ++ Enum.map(dep_exports, & &1.effect))
+          |> Enum.uniq()
           |> Enum.sort()
       }
 
-      backing = backing(spec, explicit_requires, transitive)
+      backing = backing(explicit_requires, transitive, declared_effect)
 
       {:ok,
        %Export{
@@ -826,11 +836,14 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
          doc: spec.doc,
          visibility: visibility,
          effect: backing.effect,
+         declared_effect: declared_effect,
          requires: backing.requires,
          tool_refs: transitive.tool_refs,
          kind: export_kind(spec),
          signature: signature,
-         type: type
+         type: type,
+         parsed_signature: parsed_signature,
+         parsed_type: parsed_type
        }}
     end
   end
@@ -841,7 +854,7 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
 
   defp export_contract(%Spec{params_form: nil, metadata: metadata}) do
     case Map.get(metadata, "type") do
-      nil -> {:ok, nil, nil}
+      nil -> {:ok, nil, nil, nil, nil}
       type when is_binary(type) -> validate_constant_type(type)
       _other -> invalid_contract("constant :type must be a signature type string")
     end
@@ -849,39 +862,112 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
 
   defp export_contract(%Spec{arity: arity, metadata: metadata}) do
     case Map.get(metadata, "signature") do
-      nil -> {:ok, nil, nil}
-      signature when is_binary(signature) -> validate_function_signature(signature, arity)
-      _other -> invalid_contract("function :signature must be a signature string")
+      nil ->
+        {:ok, nil, nil, nil, nil}
+
+      signature when is_binary(signature) and arity == :variadic ->
+        invalid_contract("function :signature is supported only on fixed-arity definitions")
+
+      signature when is_binary(signature) ->
+        validate_function_signature(signature, arity)
+
+      _other ->
+        invalid_contract("function :signature must be a signature string")
     end
   end
 
   defp validate_constant_type(type) do
     case Signature.parse(type) do
       {:ok, {:signature, [], return_type}} ->
-        {:ok, nil, Signature.Renderer.render_type(return_type, key_style: :lisp_prompt)}
+        {:ok, nil, Signature.Renderer.render_type(return_type, key_style: :lisp_prompt), nil,
+         return_type}
 
-      _error ->
-        invalid_contract("invalid constant :type `#{type}`")
+      {:ok, {:signature, params, _return_type}} ->
+        invalid_contract(
+          "constant :type must not declare parameters, got #{length(params)} parameter(s)"
+        )
+
+      {:error, reason} ->
+        invalid_contract("invalid constant :type `#{type}`: #{reason}")
     end
   end
 
   defp validate_function_signature(signature, arity) do
     case Signature.parse(signature) do
       {:ok, {:signature, params, _return_type} = parsed} when length(params) == arity ->
-        {:ok, Signature.render(parsed), nil}
+        {:ok, Signature.render(parsed), nil, parsed, nil}
 
       {:ok, {:signature, params, _return_type}} ->
         invalid_contract(
           "function :signature declares #{length(params)} parameters but definition arity is #{arity}"
         )
 
-      _error ->
-        invalid_contract("invalid function :signature `#{signature}`")
+      {:error, reason} ->
+        invalid_contract("invalid function :signature `#{signature}`: #{reason}")
     end
   end
 
   defp invalid_contract(message),
     do: {:error, ValidationError.new(:invalid_signature, message)}
+
+  defp validate_constant_contracts(exports, private_env) do
+    exports
+    |> Enum.filter(&(&1.kind == :constant and not is_nil(&1.parsed_type)))
+    |> Enum.reduce_while(:ok, fn export, :ok ->
+      case validate_constant_contract(export, private_env) do
+        :ok -> {:cont, :ok}
+        {:error, _} = error -> {:halt, error}
+      end
+    end)
+  end
+
+  defp validate_constant_contract(export, private_env) do
+    value = get_in(private_env, [export.namespace, export.symbol])
+
+    case Signature.Validator.validate(value, export.parsed_type,
+           keyword_representation: :internal,
+           max_errors: @max_contract_errors
+         ) do
+      :ok ->
+        :ok
+
+      {:error, errors} ->
+        details = Enum.map_join(errors, "; ", &format_contract_error/1)
+
+        message =
+          "constant `#{export.ref}` violates declared type #{export.type}: #{details}"
+          |> truncate_contract_diagnostic()
+
+        {:error,
+         ValidationError.new(
+           :invalid_signature,
+           message,
+           namespace: export.namespace,
+           ref: export.ref
+         )}
+    end
+  end
+
+  defp format_contract_error(%{path: path, message: message}) do
+    prefix = if path == [], do: "", else: Enum.join(path, ".") <> ": "
+    prefix <> message
+  end
+
+  defp truncate_contract_diagnostic(message)
+       when byte_size(message) <= @max_contract_diagnostic_bytes,
+       do: message
+
+  defp truncate_contract_diagnostic(message) do
+    message
+    |> binary_part(0, @max_contract_diagnostic_bytes)
+    |> valid_utf8_prefix()
+  end
+
+  defp valid_utf8_prefix(message) do
+    if String.valid?(message),
+      do: message,
+      else: valid_utf8_prefix(binary_part(message, 0, byte_size(message) - 1))
+  end
 
   # Constants have no params vector. Function params preserve source names for
   # display, while destructuring forms get a stable positional fallback.
@@ -929,9 +1015,7 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
   # requirement WITHOUT inheriting a sibling export's unrelated requirements:
   #
   # Each transitively referenced `(tool/<name> ...)` becomes `tool:<name>`.
-  defp backing(%Spec{metadata: metadata}, explicit_requires, transitive) do
-    explicit_effect = effect(Map.get(metadata, "effect"))
-
+  defp backing(explicit_requires, transitive, declared_effect) do
     inferred_tool_requires =
       transitive.tool_refs
       |> Enum.map(&("tool:" <> &1))
@@ -942,12 +1026,8 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
       |> Enum.uniq()
       |> Enum.sort()
 
-    effect =
-      cond do
-        explicit_effect != nil -> explicit_effect
-        requires != [] -> :read
-        true -> :unknown
-      end
+    inferred_effects = if requires == [], do: [], else: [:read]
+    effect = join_effects([declared_effect | transitive.effects ++ inferred_effects])
 
     %{requires: requires, effect: effect}
   end
@@ -973,11 +1053,11 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
   # Plain lists throughout (not MapSet) to avoid dialyzer opaque-type friction;
   # results are small (a namespace's symbol/id sets) so list dedup is cheap.
   #
-  # `calls` is the DIRECT same-namespace reference edges only. `requires`/
-  # `tool_refs` each carry `direct` (the symbol's own body) and `transitive`
-  # (the closure over `calls`) so an export's requirement precisely follows
-  # what it itself reaches — it does NOT absorb a sibling export's unrelated
-  # requirements.
+  # `calls` is the DIRECT same-namespace reference edges only. `requires`,
+  # `tool_refs`, and declared `effects` each carry `direct` (the symbol's own
+  # body/metadata) and `transitive` (the closure over `calls`) so an export's
+  # contract precisely follows what it itself reaches — it does NOT absorb a
+  # sibling export's unrelated requirements or effects.
   defp namespace_form_graph(ns_specs, dep_set) do
     ns_symbols = Enum.map(ns_specs, & &1.symbol)
 
@@ -995,6 +1075,12 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
     direct_tools =
       Map.new(ns_specs, fn %Spec{symbol: sym, body_form: body} ->
         {sym, body |> Enum.reduce([], &collect_tool_names_raw/2) |> Enum.uniq()}
+      end)
+
+    direct_effects =
+      Map.new(ns_specs, fn %Spec{symbol: sym, metadata: metadata} ->
+        effect = metadata |> Map.get("effect") |> metadata_effect()
+        {sym, if(is_nil(effect), do: [], else: [effect])}
       end)
 
     # Qualified refs into DECLARED dep namespaces, as full-ref strings
@@ -1032,6 +1118,11 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
          tool_refs: %{
            direct: direct_tools |> Map.fetch!(sym) |> Enum.sort(),
            transitive: sym |> reachable_ids(direct_tools, calls, []) |> Enum.uniq() |> Enum.sort()
+         },
+         effects: %{
+           direct: Map.fetch!(direct_effects, sym),
+           transitive:
+             sym |> reachable_ids(direct_effects, calls, []) |> Enum.uniq() |> Enum.sort()
          },
          dep_calls: %{
            direct: direct_dep_calls |> Map.fetch!(sym) |> Enum.sort(),
@@ -1373,15 +1464,57 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
      )}
   end
 
-  # Effect value (string-keyed keyword after normalize). Unknown effects are
-  # ignored (fall back to inference) rather than rejected in V1.
-  defp effect(nil), do: nil
-  defp effect({:keyword, name}), do: effect_atom(name)
-  defp effect(name) when is_binary(name), do: effect_atom(name)
-  defp effect(_), do: nil
+  defp validate_effect(nil), do: {:ok, nil}
+
+  defp validate_effect({:keyword, name}), do: validate_effect_name(name)
+  defp validate_effect(name) when is_binary(name), do: validate_effect_name(name)
+
+  defp validate_effect(other) do
+    {:error,
+     ValidationError.new(
+       :invalid_metadata,
+       "prelude :effect must be :read, :write, or :unknown, got: #{inspect(other, limit: 3)}"
+     )}
+  end
+
+  defp validate_effect_name(name) do
+    case effect_atom(name) do
+      nil ->
+        {:error,
+         ValidationError.new(
+           :invalid_metadata,
+           "invalid prelude :effect #{inspect(name)} (expected read, write, or unknown)"
+         )}
+
+      effect ->
+        {:ok, effect}
+    end
+  end
+
+  defp validate_spec_effects(specs) do
+    Enum.reduce_while(specs, :ok, fn spec, :ok ->
+      case validate_effect(Map.get(spec.metadata, "effect")) do
+        {:ok, _effect} -> {:cont, :ok}
+        {:error, _reason} = error -> {:halt, error}
+      end
+    end)
+  end
 
   defp effect_atom(name) do
     Enum.find(@valid_effects, fn e -> Atom.to_string(e) == name end)
+  end
+
+  defp metadata_effect({:keyword, name}), do: effect_atom(name)
+  defp metadata_effect(name) when is_binary(name), do: effect_atom(name)
+  defp metadata_effect(_other), do: nil
+
+  defp join_effects(effects) do
+    cond do
+      :write in effects -> :write
+      :unknown in effects -> :unknown
+      :read in effects -> :read
+      true -> :unknown
+    end
   end
 
   # Explicit `:requires` metadata must be a list of canonical string ids. Invalid

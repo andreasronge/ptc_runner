@@ -47,22 +47,24 @@
                 (case (get evaluation :outcome)
                   :returned (return (result/ok (get evaluation :value)))
                   :failed (fail (result/error :model-program-failed (get evaluation :value)))
-                  (do
-                    (retry-or-fail turn max-turns :evaluation-error)
-                    (let [next-prompt-state
-                          (transition-prompt
-                            prompt-state
-                            {:type :evaluation-error :turn turn})]
-                      (recur (inc turn)
-                             (conj
-                               (conj messages
-                                     {"role" "assistant"
-                                      "content" nil
-                                      "tool_calls" [(get action :public-tool-call)]})
-                               {"role" "tool"
-                                "tool_call_id" (get action :tool-call-id)
-                                "content" (agent.feedback/evaluation-error evaluation)})
-                             next-prompt-state)))))
+                  (if (false? (get evaluation :retryable?))
+                    (fail (result/error :non-retryable-evaluation (get evaluation :kind)))
+                    (do
+                      (retry-or-fail turn max-turns :evaluation-error)
+                      (let [next-prompt-state
+                            (transition-prompt
+                              prompt-state
+                              {:type :evaluation-error :turn turn})]
+                        (recur (inc turn)
+                               (conj
+                                 (conj messages
+                                       {"role" "assistant"
+                                        "content" nil
+                                        "tool_calls" [(get action :public-tool-call)]})
+                                 {"role" "tool"
+                                  "tool_call_id" (get action :tool-call-id)
+                                  "content" (agent.feedback/evaluation-error evaluation)})
+                               next-prompt-state))))))
 
               :protocol-error
               (do

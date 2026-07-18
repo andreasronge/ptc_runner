@@ -2904,7 +2904,7 @@ Programs that call `println` will have their output available in the `prints` li
 }}
 ```
 
-**Note:** In parallel operations like `pmap` and `pcalls`, `println` output from parallel branches is not captured. This is intentional—parallel branches communicate via return values, not side effects. Use `println` for sequential debugging between turns.
+**Note:** In parallel operations like `pmap` and `pcalls`, `println` output from successful branches is captured in input order, independent of worker completion order. Output from a worker that fails before returning may be retained for diagnostics when its error context is available.
 
 ### 8.14 Date and Time (Minimal Java Interop)
 
@@ -3274,6 +3274,54 @@ Manifest component arrays may combine local source objects with exact
 `{"library": id}` selections. Library selections resolve only from the trusted
 installed catalog, expand their transitive closure before compilation, and may
 not be repeated or shadowed by a local component ID.
+
+### 9.10 Public Component Contracts
+
+Host-compiled components may attach an optional contract metadata map to a
+public function or constant:
+
+```clojure
+(defn search
+  "Search documents."
+  {:signature "(query :string, limit :int?) -> {items [:string]}"}
+  [query limit]
+  ...)
+
+(def default-limit {:type ":int"} 10)
+```
+
+This uses the supported `defn`/`def` metadata-map position. Clojure reader
+metadata syntax such as `^{:signature "..."}` is not supported.
+
+Contract enforcement has three stages:
+
+1. Component compilation parses the signature/type string and rejects invalid
+   syntax, duplicate parameter names, normalized shaped-map field collisions,
+   and invalid constant values.
+2. Compilation checks that a function signature has exactly the declared
+   function arity.
+3. Evaluation validates signed function arguments before body entry and every
+   successful result after execution. This applies to direct calls and calls
+   through higher-order functions. An export-local `(return value)` is a
+   successful result; `(fail value)` is not.
+
+Supported scalar types are `:string`, `:int`, `:float`, `:bool`/`:boolean`,
+`:keyword`, `:map`, `:datetime`, and `:any`, plus homogeneous lists such as
+`[:string]` and shaped maps such as `{id :string, title :string?}`. A `?`
+means the value may be `nil`. It does not make a positional parameter
+omittable; fixed arity still applies. For a shaped-map field, the same marker
+allows the field to be omitted or set to `nil`. Signatures are currently
+supported only on fixed-arity component exports; the contract grammar has no
+rest-parameter type. Prelude contracts distinguish internal Lisp keywords from
+strings: `:ready` satisfies `:keyword`, while `"ready"` satisfies `:string` and
+does not satisfy `:keyword`.
+
+These contracts apply to public prelude exports. Raw `tool/name` argument and
+result validation remains governed by the host capability's JSON Schema.
+Capability input-property names must be stable under the tool boundary's
+hyphen-to-underscore normalization, as must object keys nested in input
+`const`/`enum` values; the host rejects incompatible schemas rather than
+publishing an exact call that runtime validation cannot accept.
 
 ## 10. Complete Examples
 
@@ -3792,7 +3840,7 @@ This means `-1` is always the integer negative one, never a symbol named "-1". S
 | Max Heap | ~10 MB | Sandbox-process memory limit (1,250,000 words) |
 | Worker Max Heap | = Max Heap | Fixed per-worker `pmap`/`pcalls` heap cap |
 | Max Parallel Workers | 8 | Global cap on live `pmap`/`pcalls` workers |
-| Max Tool Calls | unlimited (`nil`) | Per-program tool invocation limit; enforced only when set via the `:max_tool_calls` option |
+| Max Tool Calls | unlimited (`nil`) | Program-wide uncached tool invocation limit shared atomically by ordinary closures and all `pmap`/`pcalls` workers; enforced only when set via the `:max_tool_calls` option |
 | Loop/Recur Iterations | 1,000 | Per-loop/recur jump limit; ordinary non-tail recursion is bounded by timeout and heap |
 
 Every `pmap`/`pcalls` worker process — top-level *and* nested — is
@@ -4061,7 +4109,7 @@ Every execution produces a log entry:
 |-------|---------|-------------|
 | `timeout_ms` | 1,000 | Max execution time per program |
 | `max_heap` | ~10 MB | Memory limit (1,250,000 words) |
-| `max_tool_calls` | unlimited (`nil`) | Max tool invocations per program; no limit unless explicitly set |
+| `max_tool_calls` | unlimited (`nil`) | Program-wide max uncached tool invocations; cache hits do not consume reservations, and no limit applies unless explicitly set |
 | `max_tool_call_result_bytes` | 16,384 | Per-call cap on the tool result **retained in the in-eval ledger** (`tool_calls`). A result whose retained heap size exceeds this is stored as a bounded preview, so a looping/paginated tool fold cannot accumulate full payloads in eval memory. Does **not** affect the value returned to the program — only what the audit ledger keeps (see §16.7). |
 
 *Note: Hosts can configure higher timeouts (e.g., 5,000ms) to accommodate slow tool calls.*
