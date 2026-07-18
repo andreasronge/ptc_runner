@@ -3,22 +3,23 @@ defmodule PtcRunner.Lisp.RuntimeCallableTest do
 
   alias PtcRunner.Lisp
   alias PtcRunner.Lisp.Analyze
+  alias PtcRunner.Lisp.Eval.Capture
   alias PtcRunner.Lisp.Eval.Context, as: EvalContext
   alias PtcRunner.Lisp.RuntimeCallable
 
   defp clear_runtime_callable_process_state! do
     Process.delete(:__ptc_runtime_callable_context)
-    Process.delete(:__ptc_hof_stack)
+    assert Capture.empty?()
 
     on_exit(fn ->
       Process.delete(:__ptc_runtime_callable_context)
-      Process.delete(:__ptc_hof_stack)
+      assert Capture.empty?()
     end)
   end
 
   defp assert_runtime_callable_process_state_clean do
     assert Process.get(:__ptc_runtime_callable_context) == nil
-    assert Process.get(:__ptc_hof_stack, []) == []
+    assert Capture.empty?()
   end
 
   defp assert_no_persisted_runtime_context!(memory) do

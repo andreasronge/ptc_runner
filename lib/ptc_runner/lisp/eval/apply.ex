@@ -15,9 +15,8 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   """
 
   alias PtcRunner.Lisp.Env.Builtin
+  alias PtcRunner.Lisp.Eval.Capture
   alias PtcRunner.Lisp.Eval.Context, as: EvalContext
-  alias PtcRunner.Lisp.Eval.EffectCapture
-  alias PtcRunner.Lisp.Eval.Effects
   alias PtcRunner.Lisp.Eval.Helpers
   alias PtcRunner.Lisp.Eval.Patterns
   alias PtcRunner.Lisp.ExecutionError
@@ -780,17 +779,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
 
       message = EvalContext.truncate_print(message, max_print_length)
 
-      # Stash the print in the process dictionary for HOF side-effect collection
-      case Process.get(:__ptc_hof_stack, []) do
-        [top | rest] ->
-          updated = Effects.record_print(top, message)
-          Process.put(:__ptc_hof_stack, [updated | rest])
-
-        [] ->
-          :ok
-      end
-
-      :ok = EffectCapture.record_print(message)
+      :ok = Capture.record_print(message)
 
       nil
     end
@@ -906,6 +895,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
          metadata,
          do_eval_fn
        ) do
+    eval_context = Capture.materialize_context(eval_context)
     caller_baseline = eval_context
 
     case check_arity(patterns, args) do
@@ -918,7 +908,6 @@ defmodule PtcRunner.Lisp.Eval.Apply do
 
     Contract.validate_input!(metadata, args, eval_context)
     eval_context = count_prelude_entry_metadata(metadata, eval_context)
-    stash_prelude_entry(metadata)
 
     # Match each argument against its corresponding pattern
     bindings =
@@ -969,12 +958,14 @@ defmodule PtcRunner.Lisp.Eval.Apply do
       %{
         eval_ctx
         | locals: closure_locals(metadata, bindings),
+          effects: eval_context.effects,
           # Security H1: propagate the shared parallel deadline so a
           # nested pmap/pcalls inside this closure inherits it.
           pmap_deadline: eval_context.pmap_deadline
       }
       |> EvalContext.inherit_prelude(eval_context)
       |> maybe_push_prelude_origin(metadata, eval_context)
+      |> Capture.materialize_context()
 
     # A `(return …)`/`(fail …)` inside a value-position prelude export throws the
     # export context (user_ns = private prelude env). Catch it here — at the HOF
@@ -985,11 +976,8 @@ defmodule PtcRunner.Lisp.Eval.Apply do
     try do
       case do_eval_fn.(body, eval_ctx) do
         {:ok, result, final_ctx} ->
-          contract_ctx = merge_hof_prelude_delta(final_ctx, caller_baseline)
+          contract_ctx = restore_hof_caller(final_ctx, caller_baseline)
           Contract.validate_output!(metadata, result, contract_ctx)
-          # Stash side effects (tool_calls, prints) in process dictionary
-          # so they survive the Erlang HOF boundary (closure_to_fun returns only a value)
-          stash_side_effects(final_ctx)
           # Tag a returned closure so its private-helper references still resolve
           # when the HOF result is applied later.
           tag_prelude_ns(result, prelude_ns)
@@ -999,24 +987,76 @@ defmodule PtcRunner.Lisp.Eval.Apply do
       end
     catch
       {:return_signal, value, %EvalContext{} = thrown_ctx} when not is_nil(prelude_ns) ->
-        restored_ctx = merge_hof_prelude_delta(thrown_ctx, caller_baseline)
+        restored_ctx =
+          thrown_ctx
+          |> restore_hof_caller(caller_baseline)
+          |> Capture.materialize_context()
 
         value = tag_prelude_ns(value, prelude_ns)
         Contract.validate_output!(metadata, value, restored_ctx)
 
-        # Merge the HOF stash only after successful validation. On a contract
-        # error, with_side_effect_stash/3 pops the same stash into the error
-        # context; merging it before validation would count this call twice.
-        restored_ctx = merge_stashed_prelude_counts(restored_ctx)
         throw({:return_signal, value, restored_ctx})
 
       {:fail_signal, value, %EvalContext{} = thrown_ctx} when not is_nil(prelude_ns) ->
-        throw(
-          {:fail_signal, value,
-           thrown_ctx
-           |> merge_stashed_prelude_counts()
-           |> merge_hof_prelude_delta(caller_baseline)}
+        restored_ctx =
+          thrown_ctx
+          |> restore_hof_caller(caller_baseline)
+          |> Capture.materialize_context()
+
+        throw({:fail_signal, value, restored_ctx})
+
+      {:recur_signal, new_args, effects} ->
+        recur_hof_closure(
+          new_args,
+          effects,
+          patterns,
+          body,
+          closure_env,
+          caller_baseline,
+          metadata,
+          do_eval_fn
         )
+    end
+  end
+
+  defp recur_hof_closure(
+         new_args,
+         effects,
+         patterns,
+         body,
+         closure_env,
+         %EvalContext{} = caller_ctx,
+         metadata,
+         do_eval_fn
+       ) do
+    recur_patterns =
+      case patterns do
+        {:variadic, leading, rest} -> leading ++ [rest]
+        fixed -> fixed
+      end
+
+    case check_arity(recur_patterns, new_args) do
+      :ok ->
+        case EvalContext.increment_iteration(caller_ctx) do
+          {:ok, next_ctx} ->
+            next_ctx = EvalContext.restore_recur_effects(next_ctx, effects)
+
+            eval_closure_args(
+              new_args,
+              recur_patterns,
+              body,
+              closure_env,
+              next_ctx,
+              metadata,
+              do_eval_fn
+            )
+
+          {:error, :loop_limit_exceeded} ->
+            raise_closure_error({:loop_limit_exceeded, caller_ctx.loop_limit})
+        end
+
+      {:error, reason} ->
+        raise_closure_error(reason)
     end
   end
 
@@ -1024,31 +1064,6 @@ defmodule PtcRunner.Lisp.Eval.Apply do
     do: EvalContext.increment_prelude_call(eval_context, ref)
 
   defp count_prelude_entry_metadata(_metadata, eval_context), do: eval_context
-
-  defp stash_prelude_entry(%{prelude_ref: ref}) when is_binary(ref) do
-    case Process.get(:__ptc_hof_stack, []) do
-      [top | rest] ->
-        Process.put(:__ptc_hof_stack, [Effects.record_prelude_call(top, ref) | rest])
-
-      [] ->
-        :ok
-    end
-  end
-
-  defp stash_prelude_entry(_metadata), do: :ok
-
-  defp merge_stashed_prelude_counts(%EvalContext{} = eval_ctx) do
-    case Process.get(:__ptc_hof_stack, []) do
-      [top | _rest] ->
-        %{
-          eval_ctx
-          | effects: Effects.add_prelude_counts(eval_ctx.effects, top.prelude_call_counts)
-        }
-
-      [] ->
-        eval_ctx
-    end
-  end
 
   # A closure-eval error from a *nested* pmap/pcalls (heap kill, shared
   # deadline, exhausted worker budget) is raised as `ExecutionError`
@@ -1079,104 +1094,53 @@ defmodule PtcRunner.Lisp.Eval.Apply do
       message: Helpers.format_closure_error(reason)
   end
 
-  # Side-effect accumulation via Process dictionary.
-  # When closures run inside Erlang HOFs (Enum.reduce, Enum.map, etc.),
-  # the eval context is lost because the wrapper function can only return a value.
-  # We stash tool_calls and prints in the process dictionary so the HOF caller
-  # can collect them after the HOF completes.
-  #
-  # Uses a stack to handle nested HOFs: each HOF pushes a fresh accumulator,
-  # inner HOFs push/pop their own level, and the outer HOF collects everything.
-
   defp with_side_effect_stash(%EvalContext{} = eval_ctx, do_eval_fn, fun)
        when is_function(do_eval_fn, 2) and is_function(fun, 0) do
-    push_side_effect_stash()
+    case Capture.run_value(eval_ctx, fn ->
+           RuntimeCallable.with_context(Capture.materialize_context(eval_ctx), do_eval_fn, fun)
+         end) do
+      {:ok, result, final_ctx} ->
+        {:ok, result, final_ctx}
 
-    try do
-      result = RuntimeCallable.with_context(eval_ctx, do_eval_fn, fun)
-      {:ok, result, pop_side_effects(eval_ctx)}
-    rescue
-      e in ContractError ->
-        reraise %{e | eval_ctx: pop_side_effects(e.eval_ctx)}, __STACKTRACE__
-
-      e in ParallelError ->
-        reraise %{e | eval_ctx: pop_side_effects(e.eval_ctx)}, __STACKTRACE__
-
-      e ->
-        drop_side_effect_stash()
-        reraise e, __STACKTRACE__
-    catch
-      kind, reason ->
-        drop_side_effect_stash()
-        :erlang.raise(kind, reason, __STACKTRACE__)
+      {:raise, kind, reason, stacktrace, final_ctx} ->
+        reraise_captured(kind, reason, stacktrace, final_ctx)
     end
-  end
-
-  defp push_side_effect_stash do
-    stack = Process.get(:__ptc_hof_stack, [])
-
-    Process.put(:__ptc_hof_stack, [
-      Effects.empty() | stack
-    ])
   end
 
   @doc false
   def capture_parallel_effects(%EvalContext{} = eval_ctx, fun) when is_function(fun, 0) do
-    push_side_effect_stash()
-    :ok = EffectCapture.push()
+    baseline_ctx = Capture.materialize_context(eval_ctx)
 
-    try do
-      value = fun.()
-      final_ctx = pop_side_effects(eval_ctx)
-      _captured = EffectCapture.pop()
-      {:ok, value, EvalContext.parallel_effects(final_ctx, eval_ctx)}
-    rescue
-      e ->
-        drop_side_effect_stash()
-        {:error, :error, e, __STACKTRACE__, EffectCapture.pop()}
-    catch
-      kind, reason ->
-        drop_side_effect_stash()
-        {:error, kind, reason, __STACKTRACE__, EffectCapture.pop()}
+    case Capture.run_value(baseline_ctx, fun) do
+      {:ok, value, final_ctx} ->
+        {:ok, value, EvalContext.parallel_effects(final_ctx, baseline_ctx)}
+
+      {:raise, kind, reason, stacktrace, final_ctx} ->
+        {:error, kind, reason, stacktrace, EvalContext.parallel_effects(final_ctx, baseline_ctx)}
     end
   end
 
-  defp drop_side_effect_stash do
-    case Process.get(:__ptc_hof_stack, []) do
-      [_top | rest] -> Process.put(:__ptc_hof_stack, rest)
-      [] -> :ok
-    end
+  defp reraise_captured(:throw, {signal, value, %EvalContext{}}, stacktrace, final_ctx)
+       when signal in [:return_signal, :fail_signal, :recur_signal] do
+    :erlang.raise(:throw, {signal, value, final_ctx}, stacktrace)
   end
 
-  defp stash_side_effects(%EvalContext{} = ctx) do
-    case Process.get(:__ptc_hof_stack, []) do
-      [top | rest] ->
-        # EvalContext effects store tool_calls/prints in prepend order (newest first).
-        # Maintain prepend order in the stash: current invocation's newest first,
-        # then previous invocations'.
-        updated = Effects.merge(ctx.effects, top)
+  defp reraise_captured(:error, %ContractError{} = error, stacktrace, final_ctx),
+    do: reraise(%{error | eval_ctx: final_ctx}, stacktrace)
 
-        Process.put(:__ptc_hof_stack, [updated | rest])
+  defp reraise_captured(:error, %ParallelError{} = error, stacktrace, final_ctx),
+    do: reraise(%{error | eval_ctx: final_ctx}, stacktrace)
 
-      [] ->
-        :ok
-    end
-  end
+  defp reraise_captured(
+         :error,
+         %PtcRunner.Lisp.ToolError{} = error,
+         stacktrace,
+         final_ctx
+       ),
+       do: reraise(%{error | eval_ctx: final_ctx}, stacktrace)
 
-  defp pop_side_effects(%EvalContext{} = eval_ctx) do
-    case Process.get(:__ptc_hof_stack, []) do
-      [top | rest] ->
-        Process.put(:__ptc_hof_stack, rest)
-
-        # Stash is in prepend order (newest first), same as eval_ctx.
-        # Prepend stash before eval_ctx's existing items so the final
-        # Enum.reverse in Lisp.run produces chronological order.
-        %{eval_ctx | effects: Effects.merge(top, eval_ctx.effects)}
-
-      [] ->
-        eval_ctx
-    end
-  end
+  defp reraise_captured(kind, reason, stacktrace, _final_ctx),
+    do: :erlang.raise(kind, reason, stacktrace)
 
   defp execution_error_tuple(%ExecutionError{reason: reason, message: message, data: nil}),
     do: {reason, message}
@@ -1345,16 +1309,17 @@ defmodule PtcRunner.Lisp.Eval.Apply do
     }
   end
 
-  # A closure converted to an Erlang function for a regular HOF evaluates in a
-  # fresh context. Its ledgers are therefore deltas, unlike `do_execute_closure`
-  # contexts, which already contain the caller baseline. Merge those deltas
-  # before contract validation so an error carries both earlier caller effects
-  # and effects from the failing HOF invocation.
-  defp merge_hof_prelude_delta(%EvalContext{} = delta_ctx, %EvalContext{} = caller_ctx) do
+  # Restore the caller's non-effect scope around a context produced by a closure
+  # converted for host HOF use. Converted closures start with the caller's
+  # cumulative effects; materialization replaces them with the active frame's
+  # authoritative cumulative value when capture is present.
+  defp restore_hof_caller(%EvalContext{} = closure_ctx, %EvalContext{} = caller_ctx) do
+    closure_ctx = Capture.materialize_context(closure_ctx)
+
     %{
       caller_ctx
-      | effects: Effects.merge(delta_ctx.effects, caller_ctx.effects),
-        iteration_count: caller_ctx.iteration_count + delta_ctx.iteration_count
+      | effects: closure_ctx.effects,
+        iteration_count: caller_ctx.iteration_count + closure_ctx.iteration_count
     }
   end
 

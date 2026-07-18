@@ -8,8 +8,8 @@ defmodule PtcRunner.Lisp.RuntimeCallable do
   bound form is created at application time for higher-order runtime calls.
   """
 
+  alias PtcRunner.Lisp.Eval.Capture
   alias PtcRunner.Lisp.Eval.Context, as: EvalContext
-  alias PtcRunner.Lisp.Eval.Effects
   alias PtcRunner.Lisp.Eval.Helpers
   alias PtcRunner.Lisp.ExecutionError
 
@@ -86,12 +86,11 @@ defmodule PtcRunner.Lisp.RuntimeCallable do
 
   defp call_with_context(%__MODULE__{} = callable, args, %EvalContext{} = base_ctx, do_eval)
        when is_function(do_eval, 2) do
-    eval_ctx = context_with_hof_side_effects(base_ctx)
+    eval_ctx = Capture.materialize_context(base_ctx)
     callable = bind(callable, eval_ctx, do_eval)
 
     case invoke(callable, args, eval_ctx) do
-      {:ok, result, final_ctx} ->
-        stash_hof_side_effects(final_ctx, base_ctx)
+      {:ok, result, _final_ctx} ->
         result
 
       {:error, reason} ->
@@ -127,27 +126,5 @@ defmodule PtcRunner.Lisp.RuntimeCallable do
 
   defp raise_error(reason) do
     raise ExecutionError, reason: :runtime_error, message: Helpers.format_closure_error(reason)
-  end
-
-  defp context_with_hof_side_effects(%EvalContext{} = eval_ctx) do
-    case Process.get(:__ptc_hof_stack, []) do
-      [top | _rest] ->
-        %{eval_ctx | effects: Effects.merge(top, eval_ctx.effects)}
-
-      [] ->
-        eval_ctx
-    end
-  end
-
-  defp stash_hof_side_effects(%EvalContext{} = ctx, %EvalContext{} = base_ctx) do
-    case Process.get(:__ptc_hof_stack, []) do
-      [_top | rest] ->
-        updated = Effects.delta(ctx.effects, base_ctx.effects)
-
-        Process.put(:__ptc_hof_stack, [updated | rest])
-
-      [] ->
-        :ok
-    end
   end
 end

@@ -32,7 +32,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
   identity + the canonical args hash), as are `:child_trace_id`/`:child_step`.
   """
 
-  alias PtcRunner.Lisp.Eval.EffectCapture
+  alias PtcRunner.Lisp.Eval.Capture
   alias PtcRunner.Lisp.Eval.Effects
   alias PtcRunner.Lisp.RetainedSize
 
@@ -354,7 +354,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
   def append_print(%__MODULE__{max_print_length: max_len} = context, message) do
     truncated = truncate_print(message, max_len)
 
-    :ok = EffectCapture.record_print(truncated)
+    :ok = Capture.record_print(truncated)
     %{context | effects: Effects.record_print(context.effects, truncated)}
   end
 
@@ -385,7 +385,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
         tool_call
       ) do
     ledger_entry = compact_ledger_entry(tool_call, cap)
-    :ok = EffectCapture.record_tool_call(ledger_entry)
+    :ok = Capture.record_tool_call(ledger_entry)
     %{context | effects: Effects.record_tool_call(context.effects, ledger_entry)}
   end
 
@@ -473,21 +473,21 @@ defmodule PtcRunner.Lisp.Eval.Context do
   """
   @spec append_pmap_call(t(), pmap_call()) :: t()
   def append_pmap_call(%__MODULE__{} = context, pmap_call) do
-    :ok = EffectCapture.record_pmap_call(pmap_call)
+    :ok = Capture.record_pmap_call(pmap_call)
     %{context | effects: Effects.record_pmap_call(context.effects, pmap_call)}
   end
 
   @doc false
   @spec increment_prelude_call(t(), String.t()) :: t()
   def increment_prelude_call(%__MODULE__{} = context, ref) when is_binary(ref) do
-    :ok = EffectCapture.record_prelude_call(ref)
+    :ok = Capture.record_prelude_call(ref)
     %{context | effects: Effects.record_prelude_call(context.effects, ref)}
   end
 
   @doc false
   @spec put_tool_cache(t(), term(), term()) :: t()
   def put_tool_cache(%__MODULE__{} = context, key, value) do
-    :ok = EffectCapture.record_cache(key, value)
+    :ok = Capture.record_cache(key, value)
     %{context | effects: Effects.record_cache(context.effects, key, value)}
   end
 
@@ -512,7 +512,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
   @doc false
   @spec merge_parallel_effects(t(), parallel_effects()) :: t()
   def merge_parallel_effects(%__MODULE__{} = context, %Effects{} = effects) do
-    :ok = EffectCapture.record_effects(effects)
+    :ok = Capture.record_effects(effects)
     %{context | effects: Effects.merge(effects, context.effects)}
   end
 

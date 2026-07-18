@@ -12,14 +12,15 @@ defmodule PtcRunner.Lisp.HofSideEffectsTest do
 
   alias PtcRunner.Lisp
   alias PtcRunner.Lisp.{Env, Eval}
+  alias PtcRunner.Lisp.Eval.Capture
 
   defp clear_hof_stack! do
-    Process.delete(:__ptc_hof_stack)
-    on_exit(fn -> Process.delete(:__ptc_hof_stack) end)
+    assert Capture.empty?()
+    on_exit(fn -> assert Capture.empty?() end)
   end
 
   defp assert_hof_stack_empty do
-    assert Process.get(:__ptc_hof_stack, []) == []
+    assert Capture.empty?()
   end
 
   describe "tool_calls inside reduce" do

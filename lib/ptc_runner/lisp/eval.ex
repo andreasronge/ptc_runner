@@ -23,7 +23,7 @@ defmodule PtcRunner.Lisp.Eval do
   alias PtcRunner.Lisp.CoreAST
   alias PtcRunner.Lisp.Env
   alias PtcRunner.Lisp.Env.Builtin
-  alias PtcRunner.Lisp.Eval.{Apply, Effects, ParallelRunner, Patterns}
+  alias PtcRunner.Lisp.Eval.{Apply, Capture, Effects, ParallelRunner, Patterns}
   alias PtcRunner.Lisp.Eval.Context, as: EvalContext
   alias PtcRunner.Lisp.ExecutionError
   require PtcRunner.Lisp.ExecutionError
@@ -72,7 +72,7 @@ defmodule PtcRunner.Lisp.Eval do
   def eval(ast, ctx, memory, env, tool_executor, turn_history \\ [], opts \\ []) do
     case eval_with_context(ast, ctx, memory, env, tool_executor, turn_history, opts) do
       {:ok, result, %EvalContext{user_ns: user_ns}} -> {:ok, result, user_ns}
-      {:error, _} = err -> err
+      {:error, reason, %EvalContext{}} -> {:error, reason}
     end
   rescue
     e in ContractError -> {:error, e.reason}
@@ -80,17 +80,61 @@ defmodule PtcRunner.Lisp.Eval do
   end
 
   @spec eval_with_context(CoreAST.t(), map(), map(), env(), tool_executor(), list(), keyword()) ::
-          {:ok, value(), EvalContext.t()} | {:error, runtime_error()}
+          {:ok, value(), EvalContext.t()} | {:error, runtime_error(), EvalContext.t()}
   def eval_with_context(ast, ctx, memory, env, tool_executor, turn_history \\ [], opts \\ []) do
     tool_executor = normalize_tool_executor(tool_executor)
     eval_ctx = EvalContext.new(ctx, memory, env, tool_executor, turn_history, opts)
 
-    try do
-      do_eval(ast, eval_ctx)
-    catch
-      {:return_signal, value, ctx} -> {:ok, {:return_signal, value}, ctx}
-      {:fail_signal, value, ctx} -> {:ok, {:fail_signal, value}, ctx}
+    case Capture.run_outcome(eval_ctx, fn -> eval_outcome(ast, eval_ctx) end) do
+      {:ok, value, final_ctx} ->
+        {:ok, value, final_ctx}
+
+      {:error, reason, final_ctx} ->
+        {:error, reason, final_ctx}
+
+      {:control, :return, value, final_ctx} ->
+        {:ok, {:return_signal, value}, final_ctx}
+
+      {:control, :fail, value, final_ctx} ->
+        {:ok, {:fail_signal, value}, final_ctx}
+
+      {:control, :recur, values, final_ctx} ->
+        {:error, {:invalid_recur, values}, final_ctx}
+
+      {:raise, :error, %ContractError{} = error, _stacktrace, final_ctx} ->
+        {:error, error.reason, final_ctx}
+
+      {:raise, :error, %ParallelError{} = error, _stacktrace, final_ctx} ->
+        {:error, error.reason, final_ctx}
+
+      {:raise, :error, %PtcRunner.Lisp.ToolError{} = error, _stacktrace, final_ctx} ->
+        {:error, {:tool_error, error.tool_name, error.message}, final_ctx}
+
+      {:raise, :error, %ExecutionError{} = error, _stacktrace, final_ctx} ->
+        {:error, {error.reason, error.message, error.data}, final_ctx}
+
+      {:raise, kind, reason, stacktrace, _final_ctx} ->
+        :erlang.raise(kind, reason, stacktrace)
     end
+  end
+
+  defp eval_outcome(ast, %EvalContext{} = eval_ctx) do
+    case do_eval(ast, eval_ctx) do
+      {:ok, value, %EvalContext{} = final_ctx} ->
+        {:ok, value, final_ctx}
+
+      {:error, reason} ->
+        {:error, reason, Capture.materialize_context(eval_ctx)}
+    end
+  catch
+    {:return_signal, value, %EvalContext{} = final_ctx} ->
+      {:control, :return, value, final_ctx}
+
+    {:fail_signal, value, %EvalContext{} = final_ctx} ->
+      {:control, :fail, value, final_ctx}
+
+    {:recur_signal, values, %Effects{} = effects} ->
+      {:control, :recur, values, %{Capture.materialize_context(eval_ctx) | effects: effects}}
   end
 
   defp normalize_tool_executor(tool_executor) when is_function(tool_executor, 3),
