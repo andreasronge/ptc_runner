@@ -12,8 +12,10 @@ defmodule PtcRunner.Lisp.Eval.ParallelRunnerTest do
   """
   use ExUnit.Case, async: true
 
+  alias PtcRunner.Lisp.Eval.Effects
   alias PtcRunner.Lisp.Eval.ParallelBudget
   alias PtcRunner.Lisp.Eval.ParallelRunner
+  alias PtcRunner.Lisp.Eval.ParallelRunner.Envelope
 
   # A far-future deadline for tests that should not time out.
   defp far_deadline, do: System.monotonic_time(:millisecond) + 60_000
@@ -39,6 +41,65 @@ defmodule PtcRunner.Lisp.Eval.ParallelRunnerTest do
     end
   end
 
+  defp queued_result_spawn_fun(counter) do
+    fn worker, opts ->
+      runner = self()
+      index = :atomics.add_get(counter, 1, 1) - 1
+
+      case index do
+        0 ->
+          Process.spawn(
+            fn ->
+              worker.()
+              send(runner, :failure_sent)
+              wait_for_go()
+            end,
+            opts
+          )
+
+        1 ->
+          receive do
+            :failure_sent -> :ok
+          end
+
+          spawned =
+            Process.spawn(
+              fn ->
+                worker.()
+                send(runner, :success_sent)
+                wait_for_go()
+              end,
+              opts
+            )
+
+          receive do
+            :success_sent -> :ok
+          end
+
+          spawned
+      end
+    end
+  end
+
+  defp unwrap_runner_result({:ok, envelopes}) do
+    {:ok, Enum.map(envelopes, fn %Envelope{outcome: {:ok, value}} -> value end)}
+  end
+
+  defp unwrap_runner_result({:error, envelopes}) do
+    %Envelope{index: index, outcome: {:error, reason}} =
+      Enum.find(envelopes, &(not Envelope.success?(&1)))
+
+    reason =
+      case reason do
+        :memory_exceeded -> {:memory_exceeded, index}
+        :timeout -> {:timeout, index}
+        {:runtime_error, detail} -> {:runtime_error, index, detail}
+        other -> other
+      end
+
+    {:error, reason}
+  end
+
   describe "basic execution" do
     test "empty input returns {:ok, []}" do
       assert {:ok, []} = ParallelRunner.run([], fn x -> {:ok, x} end, base_opts())
@@ -58,7 +119,8 @@ defmodule PtcRunner.Lisp.Eval.ParallelRunnerTest do
 
       parent =
         spawn(fn ->
-          send(test_pid, {:result, ParallelRunner.run([:a, :b, :c, :d], fun, base_opts())})
+          result = ParallelRunner.run([:a, :b, :c, :d], fun, base_opts())
+          send(test_pid, {:result, unwrap_runner_result(result)})
         end)
 
       _ref = Process.monitor(parent)
@@ -90,6 +152,7 @@ defmodule PtcRunner.Lisp.Eval.ParallelRunnerTest do
 
       assert {:ok, results} =
                ParallelRunner.run(Enum.to_list(1..12), fun, base_opts(max_concurrency: 3))
+               |> unwrap_runner_result()
 
       assert length(results) == 12
       {_live, peak} = Agent.get(agent, & &1)
@@ -102,76 +165,35 @@ defmodule PtcRunner.Lisp.Eval.ParallelRunnerTest do
         x -> {:ok, x}
       end
 
-      assert {:error, :boom} = ParallelRunner.run([1, 2, 3], fun, base_opts())
+      assert {:error, :boom} =
+               ParallelRunner.run([1, 2, 3], fun, base_opts())
+               |> unwrap_runner_result()
     end
 
-    test "a contract error retains a successful worker result received before DOWN" do
-      counter = :atomics.new(1, [])
-
-      spawn_fun = fn worker, opts ->
-        runner = self()
-        index = :atomics.add_get(counter, 1, 1) - 1
-
-        case index do
-          0 ->
-            Process.spawn(
-              fn ->
-                worker.()
-                send(runner, :failure_sent)
-                wait_for_go()
-              end,
-              opts
-            )
-
-          1 ->
-            # The first worker sends its failure result before this marker to
-            # the same runner process. Selectively receive the marker while the
-            # result remains queued, then do the same for the successful worker.
-            # collect/1 therefore observes failure first and cleanup must retain
-            # the queued successful result deterministically.
-            receive do
-              :failure_sent -> :ok
-            end
-
-            spawned =
-              Process.spawn(
-                fn ->
-                  worker.()
-                  send(runner, :success_sent)
-                  wait_for_go()
-                end,
-                opts
-              )
-
-            receive do
-              :success_sent -> :ok
-            end
-
-            spawned
-        end
-      end
-
-      effects = %{
-        tool_calls: [],
-        pmap_calls: [],
-        prints: [],
-        prelude_call_counts: %{},
-        tool_cache: %{}
-      }
-
+    test "a failure repeatedly retains a successful result queued before cancellation" do
       fun = fn
-        :failure -> {:error, {:parallel_contract_error, :contract_reason, effects}}
+        :failure -> {:error, :worker_reason}
         :success -> {:ok, :completed_audit_payload}
       end
 
-      assert {:error,
-              {:parallel_contract_error, :contract_reason, 0, ^effects,
-               [{1, :completed_audit_payload}]}} =
-               ParallelRunner.run(
-                 [:failure, :success],
-                 fun,
-                 base_opts(max_concurrency: 2, spawn_fun: spawn_fun)
-               )
+      for iteration <- 1..100 do
+        counter = :atomics.new(1, [])
+
+        assert {:error,
+                [
+                  %Envelope{index: 0, outcome: {:error, :worker_reason}},
+                  %Envelope{index: 1, outcome: {:ok, :completed_audit_payload}}
+                ]} =
+                 ParallelRunner.run(
+                   [:failure, :success],
+                   fun,
+                   base_opts(
+                     max_concurrency: 2,
+                     spawn_fun: queued_result_spawn_fun(counter)
+                   )
+                 ),
+               "iteration #{iteration} dropped or reordered a retained envelope"
+      end
     end
   end
 
@@ -184,6 +206,7 @@ defmodule PtcRunner.Lisp.Eval.ParallelRunnerTest do
 
       assert {:error, {:memory_exceeded, 0}} =
                ParallelRunner.run([:a], fun, base_opts(worker_max_heap: 50_000))
+               |> unwrap_runner_result()
     end
 
     test "the cap is in force before the worker body runs (closure copy)" do
@@ -195,6 +218,7 @@ defmodule PtcRunner.Lisp.Eval.ParallelRunnerTest do
 
       assert {:error, {:memory_exceeded, 0}} =
                ParallelRunner.run([:a], fun, base_opts(worker_max_heap: 50_000))
+               |> unwrap_runner_result()
     end
   end
 
@@ -362,7 +386,8 @@ defmodule PtcRunner.Lisp.Eval.ParallelRunnerTest do
                  max_concurrency: 4,
                  spawn_fun: lingering_spawn_fun(test_pid)
                )
-             )}
+             )
+             |> unwrap_runner_result()}
           )
         end)
 
@@ -394,6 +419,98 @@ defmodule PtcRunner.Lisp.Eval.ParallelRunnerTest do
   end
 
   describe "deadline" do
+    test "a received final envelope completes even while its worker is still exiting" do
+      runner = self()
+      effects = Effects.empty() |> Effects.record_print("completed")
+
+      spawn_fun = fn worker, opts ->
+        Process.spawn(
+          fn ->
+            worker.()
+            send(runner, :result_sent)
+            wait_for_go()
+          end,
+          opts
+        )
+      end
+
+      envelope =
+        Envelope.success(:done,
+          effects: effects,
+          child_trace_id: "completed-child",
+          child_step: %{id: "completed-step"}
+        )
+
+      deadline = System.monotonic_time(:millisecond) + 50
+
+      assert {:ok, [%Envelope{} = completed]} =
+               ParallelRunner.run(
+                 [:item],
+                 fn :item -> envelope end,
+                 base_opts(deadline_mono: deadline, spawn_fun: spawn_fun)
+               )
+
+      assert completed == Envelope.attach_index(envelope, 0)
+    end
+
+    test "timeout retains a successful envelope from a still-live sibling" do
+      counter = :atomics.new(1, [])
+      runner = self()
+      effects = Effects.empty() |> Effects.record_print("retained")
+
+      spawn_fun = fn worker, opts ->
+        case :atomics.add_get(counter, 1, 1) - 1 do
+          0 ->
+            Process.spawn(
+              fn ->
+                worker.()
+                send(runner, :success_sent)
+                wait_for_go()
+              end,
+              opts
+            )
+
+          1 ->
+            receive do
+              :success_sent -> :ok
+            end
+
+            Process.spawn(fn -> worker.() end, opts)
+        end
+      end
+
+      fun = fn
+        :success ->
+          Envelope.success(:done,
+            effects: effects,
+            child_trace_id: "retained-child",
+            child_step: %{id: "retained-step"}
+          )
+
+        :blocked ->
+          wait_for_go()
+      end
+
+      deadline = System.monotonic_time(:millisecond) + 50
+
+      assert {:error,
+              [
+                %Envelope{
+                  index: 0,
+                  outcome: {:ok, :done},
+                  effects: ^effects,
+                  child_trace_id: "retained-child",
+                  child_step: %{id: "retained-step"}
+                },
+                %Envelope{index: 1, outcome: {:error, :timeout}}
+              ]} =
+               ParallelRunner.run(
+                 [:success, :blocked],
+                 fun,
+                 base_opts(max_concurrency: 2, deadline_mono: deadline, spawn_fun: spawn_fun)
+               )
+    end
+
     test "a worker past the shared deadline yields :timeout" do
       # Worker blocks forever (until killed); deadline is in the past.
       fun = fn _ -> wait_for_go() end
@@ -401,6 +518,7 @@ defmodule PtcRunner.Lisp.Eval.ParallelRunnerTest do
 
       assert {:error, {:timeout, _index}} =
                ParallelRunner.run([:a, :b], fun, base_opts(deadline_mono: deadline))
+               |> unwrap_runner_result()
     end
 
     test "timeout is distinct from memory_exceeded" do
@@ -409,6 +527,7 @@ defmodule PtcRunner.Lisp.Eval.ParallelRunnerTest do
 
       assert {:error, {:timeout, _}} =
                ParallelRunner.run([:a], fun, base_opts(deadline_mono: deadline))
+               |> unwrap_runner_result()
     end
 
     test "deadline_passed? gates spawning before vs after the deadline" do
@@ -454,6 +573,7 @@ defmodule PtcRunner.Lisp.Eval.ParallelRunnerTest do
                  deadline_mono: expired,
                  trace_ctx: nil
                )
+               |> unwrap_runner_result()
 
       # No worker's `fun` may have run.
       refute_receive {:worker_started, _}, 100
@@ -466,6 +586,7 @@ defmodule PtcRunner.Lisp.Eval.ParallelRunnerTest do
 
       assert {:error, {:runtime_error, 0, _reason}} =
                ParallelRunner.run([:a], fun, base_opts())
+               |> unwrap_runner_result()
     end
   end
 
@@ -482,6 +603,7 @@ defmodule PtcRunner.Lisp.Eval.ParallelRunnerTest do
       # do not fall back to sequential.
       assert {:error, :parallel_capacity_exceeded} =
                ParallelRunner.run([:a, :b], fun, base_opts(budget: budget))
+               |> unwrap_runner_result()
     end
 
     test "never exceeds capacity, and frees every slot on normal completion" do
@@ -506,7 +628,8 @@ defmodule PtcRunner.Lisp.Eval.ParallelRunnerTest do
                Enum.to_list(1..6),
                fun,
                base_opts(budget: budget, max_concurrency: 10)
-             )}
+             )
+             |> unwrap_runner_result()}
           )
         end)
 
@@ -544,6 +667,7 @@ defmodule PtcRunner.Lisp.Eval.ParallelRunnerTest do
                  fun,
                  base_opts(budget: budget, worker_max_heap: 50_000)
                )
+               |> unwrap_runner_result()
 
       assert ParallelBudget.held(budget) == 0
     end
@@ -559,6 +683,7 @@ defmodule PtcRunner.Lisp.Eval.ParallelRunnerTest do
                  fun,
                  base_opts(budget: budget, deadline_mono: deadline)
                )
+               |> unwrap_runner_result()
 
       assert ParallelBudget.held(budget) == 0
     end
@@ -608,12 +733,16 @@ defmodule PtcRunner.Lisp.Eval.ParallelRunnerTest do
 
       fun = fn _ ->
         # Inside this worker (1 slot held), run a nested operation.
-        result = ParallelRunner.run([1, 2], nested_fun, base_opts(budget: budget))
+        result =
+          ParallelRunner.run([1, 2], nested_fun, base_opts(budget: budget))
+          |> unwrap_runner_result()
+
         {:ok, result}
       end
 
       assert {:ok, [{:ok, [10, 20]}]} =
                ParallelRunner.run([:outer], fun, base_opts(budget: budget))
+               |> unwrap_runner_result()
 
       assert ParallelBudget.held(budget) == 0
     end
@@ -626,7 +755,10 @@ defmodule PtcRunner.Lisp.Eval.ParallelRunnerTest do
       budget = ParallelBudget.new(1)
 
       fun = fn _ ->
-        nested = ParallelRunner.run([1, 2], fn x -> {:ok, x} end, base_opts(budget: budget))
+        nested =
+          ParallelRunner.run([1, 2], fn x -> {:ok, x} end, base_opts(budget: budget))
+          |> unwrap_runner_result()
+
         {:ok, nested}
       end
 
@@ -635,6 +767,7 @@ defmodule PtcRunner.Lisp.Eval.ParallelRunnerTest do
       # never a hang.
       assert {:ok, [{:error, :parallel_capacity_exceeded}]} =
                ParallelRunner.run([:outer], fun, base_opts(budget: budget))
+               |> unwrap_runner_result()
 
       assert ParallelBudget.held(budget) == 0
     end
@@ -658,7 +791,8 @@ defmodule PtcRunner.Lisp.Eval.ParallelRunnerTest do
       # Spawn the runner so we can collect sibling pids while it runs.
       runner =
         spawn(fn ->
-          send(test_pid, {:result, ParallelRunner.run([0, 1, 2, 3], fun, base_opts())})
+          result = ParallelRunner.run([0, 1, 2, 3], fun, base_opts())
+          send(test_pid, {:result, unwrap_runner_result(result)})
         end)
 
       _ = Process.monitor(runner)
@@ -835,7 +969,8 @@ defmodule PtcRunner.Lisp.Eval.ParallelRunnerTest do
                    items,
                    fn x -> {:ok, x * 2} end,
                    base_opts(budget: budget, max_concurrency: 10)
-                 ),
+                 )
+                 |> unwrap_runner_result(),
                "iteration #{i} did not complete cleanly"
 
         # Input ordering preserved despite out-of-order completion.
@@ -863,7 +998,8 @@ defmodule PtcRunner.Lisp.Eval.ParallelRunnerTest do
                    [0, 1, 2, 3],
                    fun,
                    base_opts(budget: budget, worker_max_heap: 50_000, max_concurrency: 4)
-                 ),
+                 )
+                 |> unwrap_runner_result(),
                "iteration #{i}: expected a heap-kill failure"
 
         assert ParallelBudget.held(budget) == 0, "iteration #{i}: slot leak after heap kill"
@@ -879,11 +1015,17 @@ defmodule PtcRunner.Lisp.Eval.ParallelRunnerTest do
         nested_fun = fn x -> {:ok, x + 1} end
 
         fun = fn _ ->
-          {:ok, ParallelRunner.run([1, 2, 3], nested_fun, base_opts(budget: budget))}
+          nested = ParallelRunner.run([1, 2, 3], nested_fun, base_opts(budget: budget))
+          {:ok, unwrap_runner_result(nested)}
         end
 
         assert {:ok, _} =
-                 ParallelRunner.run([:a, :b], fun, base_opts(budget: budget, max_concurrency: 2)),
+                 ParallelRunner.run(
+                   [:a, :b],
+                   fun,
+                   base_opts(budget: budget, max_concurrency: 2)
+                 )
+                 |> unwrap_runner_result(),
                "iteration #{i}: nested run did not complete"
 
         assert ParallelBudget.held(budget) == 0, "iteration #{i}: shared-budget slot leak"

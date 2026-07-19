@@ -86,6 +86,7 @@ defmodule PtcRunner.Lisp.Eval.ParallelRunner do
   """
 
   alias PtcRunner.Lisp.Eval.ParallelBudget
+  alias PtcRunner.Lisp.Eval.ParallelRunner.Envelope
 
   # Process-dictionary key: append-only `MapSet` of EVERY worker pid
   # spawned by the in-progress `run/3` call. Never shrinks for the call
@@ -103,8 +104,8 @@ defmodule PtcRunner.Lisp.Eval.ParallelRunner do
   # recognised as ours, not mistaken for caller cancellation).
   @worker_registry_key :__ptc_parallel_runner_worker_registry__
 
-  @typedoc "Per-worker payload returned by `fun`."
-  @type worker_result :: {:ok, term()} | {:error, term()}
+  @typedoc "Per-worker result returned by `fun` before runner indexing."
+  @type worker_result :: Envelope.t() | {:ok, term()} | {:error, term()}
 
   @typedoc """
   Options for `run/3`.
@@ -123,18 +124,12 @@ defmodule PtcRunner.Lisp.Eval.ParallelRunner do
     create each worker (default: `&Process.spawn/2`). A seam for
     fault-injection tests that need a spawn to raise partway through
     filling the window; production callers never set it.
-  - `:retain_completed_results` - wrap failures with successful payloads
-    already observed before the failure as `{input_index, payload}` pairs and
-    include the authoritative failing-worker index (default: `false`). The
-    evaluator enables this to preserve deterministic audit-effect and cache
-    ordering; direct callers retain the verbatim error shape.
   """
   @type opts :: [
           worker_max_heap: pos_integer() | nil,
           max_concurrency: pos_integer(),
           budget: ParallelBudget.t() | nil,
           deadline_mono: integer(),
-          retain_completed_results: boolean(),
           spawn_fun: (function(), list() -> {pid(), reference()})
         ]
 
@@ -145,19 +140,21 @@ defmodule PtcRunner.Lisp.Eval.ParallelRunner do
   `fun` is invoked as `fun.(item)` inside a freshly spawned, heap-capped
   worker process and must return a `worker_result`.
 
-  Returns `{:ok, results}` (per-worker return values, in input order) or
-  `{:error, reason}` on the first failure. `reason` is one of:
+  Returns `{:ok, envelopes}` when every worker succeeds or
+  `{:error, envelopes}` on the first failure. Envelopes are sorted by input
+  index. A failed result retains the failing envelope plus every successful
+  envelope observed before or during cancellation cleanup. Stable runner
+  failures use these reasons inside the failing envelope:
 
-  - `{:memory_exceeded, index}` - worker `index` was killed by its heap cap
-  - `{:timeout, index}` - the shared deadline elapsed before worker `index`
-    finished
+  - `:memory_exceeded` - the indexed worker was killed by its heap cap
+  - `:timeout` - the shared deadline elapsed before the indexed worker finished
   - `:parallel_capacity_exceeded` - the global worker-slot budget was
     exhausted, so a worker could not be started
-  - `{:runtime_error, index, term}` - worker `index` exited abnormally
-  - any `term` from an `{:error, term}` returned by `fun` itself
+  - `{:runtime_error, term}` - the indexed worker exited abnormally
+  - any `term` in a failure envelope returned by `fun` itself
   """
   @spec run([term()], (term() -> worker_result()), opts()) ::
-          {:ok, [term()]} | {:error, term()}
+          {:ok, [Envelope.t()]} | {:error, [Envelope.t()]}
   def run([], _fun, _opts), do: {:ok, []}
 
   def run(items, fun, opts) when is_list(items) and is_function(fun, 1) do
@@ -166,7 +163,6 @@ defmodule PtcRunner.Lisp.Eval.ParallelRunner do
     budget = Keyword.get(opts, :budget)
     deadline_mono = Keyword.fetch!(opts, :deadline_mono)
     spawn_fun = Keyword.get(opts, :spawn_fun, &Process.spawn/2)
-    retain_completed_results? = Keyword.get(opts, :retain_completed_results, false)
 
     indexed = items |> Enum.with_index() |> Map.new(fn {item, idx} -> {idx, item} end)
     total = map_size(indexed)
@@ -179,7 +175,6 @@ defmodule PtcRunner.Lisp.Eval.ParallelRunner do
       budget: budget,
       deadline_mono: deadline_mono,
       spawn_fun: spawn_fun,
-      retain_completed_results?: retain_completed_results?,
       total: total,
       next: 0,
       # %{ref => %{pid, index, slot_held?: boolean}}
@@ -292,7 +287,7 @@ defmodule PtcRunner.Lisp.Eval.ParallelRunner do
       {:DOWN, _ref, :process, _pid, _reason} ->
         drain_cancellations(cancellation, deadline)
 
-      {:worker_result, _pid, _idx, _result} ->
+      {:worker_result, _pid, %Envelope{}} ->
         drain_cancellations(cancellation, deadline)
 
       {:EXIT, pid, reason} ->
@@ -449,8 +444,8 @@ defmodule PtcRunner.Lisp.Eval.ParallelRunner do
       # environment is caught *before* `fun` runs, even when `fun`
       # itself is too cheap to trigger a GC on its own.
       :erlang.garbage_collect()
-      result = fun.(item)
-      send(parent, {:worker_result, self(), index, result})
+      envelope = item |> fun.() |> normalize_envelope() |> Envelope.attach_index(index)
+      send(parent, {:worker_result, self(), envelope})
     end
 
     # The budget slot for this worker was already acquired by
@@ -504,7 +499,11 @@ defmodule PtcRunner.Lisp.Eval.ParallelRunner do
       # whose own window simply exceeds the budget is never failed, and
       # nesting cannot deadlock.)
       state.budget_blocked? and map_size(state.live) == 0 and map_size(results) < total ->
-        finish_error(state, :parallel_capacity_exceeded)
+        finish_error(
+          state,
+          Envelope.failure(:parallel_capacity_exceeded)
+          |> Envelope.attach_index(state.next)
+        )
 
       map_size(results) == total and map_size(state.live) == 0 ->
         {:ok, ordered_results(results, total)}
@@ -518,11 +517,11 @@ defmodule PtcRunner.Lisp.Eval.ParallelRunner do
     remaining = state.deadline_mono - System.monotonic_time(:millisecond)
 
     if remaining <= 0 do
-      finish_error(state, {:timeout, any_live_index(state)})
+      finish_deadline(state)
     else
       receive do
-        {:worker_result, pid, index, result} ->
-          handle_worker_result(state, pid, index, result)
+        {:worker_result, pid, %Envelope{} = envelope} ->
+          handle_worker_result(state, pid, envelope)
 
         {:DOWN, ref, :process, _pid, reason} ->
           handle_down(state, ref, reason)
@@ -531,8 +530,21 @@ defmodule PtcRunner.Lisp.Eval.ParallelRunner do
           handle_exit(state, pid, reason)
       after
         remaining ->
-          finish_error(state, {:timeout, any_live_index(state)})
+          finish_deadline(state)
       end
+    end
+  end
+
+  defp finish_deadline(state) do
+    received_results = received_results(state)
+
+    if map_size(received_results) == state.total do
+      finish_success(state, received_results)
+    else
+      finish_error(
+        state,
+        Envelope.failure(:timeout) |> Envelope.attach_index(timeout_index(state))
+      )
     end
   end
 
@@ -546,32 +558,34 @@ defmodule PtcRunner.Lisp.Eval.ParallelRunner do
   # guarantees `fill_window` cannot spawn a replacement while the
   # completed worker is still running, so live workers (and aggregate
   # heap) never exceed `max_parallel_workers`.
-  # `index` from the message is ignored — the authoritative index is
-  # the one in the worker's `live` entry, keyed by its monitor ref.
-  defp handle_worker_result(state, pid, _index, result) do
+  # The envelope's worker-supplied index is overwritten from the authoritative
+  # scheduling entry before it is retained.
+  defp handle_worker_result(state, pid, %Envelope{} = envelope) do
     case pop_by_pid(state.live, pid) do
       {nil, _live} ->
         # Worker already reaped (DOWN seen first) — its result is stale.
         collect(state)
 
       {%{ref: ref} = info, live_without} ->
-        case result do
-          {:ok, value} ->
+        envelope = Envelope.attach_index(envelope, info.index)
+
+        case envelope do
+          %Envelope{outcome: {:ok, _value}} ->
             # Stash the value; keep the worker in `live` (slot still
             # held) tagged with its result, awaiting its `:DOWN`.
             entry =
               info
               |> Map.delete(:ref)
-              |> Map.put(:result, {:ok, value})
+              |> Map.put(:result, envelope)
 
             %{state | live: Map.put(live_without, ref, entry)}
             |> collect()
 
-          {:error, reason} ->
-            # A `fun`-returned error fails the whole run. The worker is
+          %Envelope{outcome: {:error, _reason}} ->
+            # A worker failure fails the whole run. The worker is
             # finishing; `finish_error/2` -> `kill_all/1` reaps it
             # (releasing its slot) along with the rest.
-            finish_error(state, {:fun_error, info.index, reason})
+            finish_error(state, envelope)
         end
     end
   end
@@ -628,72 +642,74 @@ defmodule PtcRunner.Lisp.Eval.ParallelRunner do
     reap_worker(state.budget, pid, ref, info.slot_held?, kill: false)
 
     case info do
-      %{result: {:ok, value}} ->
+      %{result: %Envelope{outcome: {:ok, _value}} = envelope} ->
         state
-        |> Map.update!(:results, &Map.put(&1, index, value))
+        |> Map.update!(:results, &Map.put(&1, index, envelope))
         |> fill_window()
         |> collect()
 
       _no_result ->
-        finish_error(state, classify_down(index, reason))
+        finish_error(
+          state,
+          Envelope.failure(classify_down(reason)) |> Envelope.attach_index(index)
+        )
     end
   end
 
   # Stable classification of an abnormal worker exit (issue H1):
   # callers can assert ONE reason, not a set.
-  defp classify_down(index, :killed), do: {:memory_exceeded, index}
-  defp classify_down(index, :normal), do: {:runtime_error, index, :exited_without_result}
-  defp classify_down(index, reason), do: {:runtime_error, index, reason}
+  defp classify_down(:killed), do: :memory_exceeded
+  defp classify_down(:normal), do: {:runtime_error, :exited_without_result}
+  defp classify_down(reason), do: {:runtime_error, reason}
 
   # Kill every still-live worker (releasing its slot), then return the
   # error. A linked caller's abnormal cancellation EXIT seen while
   # draining is re-propagated rather than masked by the error tuple.
-  defp finish_error(state, error) do
+  defp finish_error(state, %Envelope{} = failing_envelope) do
     kill_all(state)
     {cancellation, drained_results} = drain_worker_results(nil, state.live)
 
     case cancellation do
       nil ->
         results = Map.merge(state.results, drained_results)
-        {:error, unwrap_error(error, results, state.live, state.retain_completed_results?)}
+        {:error, retained_envelopes(results, state.live, failing_envelope)}
 
       reason ->
         exit(reason)
     end
   end
 
-  # A `{:error, term}` returned by `fun` is surfaced as `term` verbatim.
-  # Contract errors additionally retain completed worker payloads so the
-  # evaluator can preserve their already-observed audit effects.
-  defp unwrap_error(
-         {:fun_error, failed_index, {:parallel_contract_error, reason, effects}},
-         results,
-         live,
-         _retain_completed_results?
-       ) do
-    {:parallel_contract_error, reason, failed_index, effects, completed_results(results, live)}
+  # Receipt of every worker envelope completes the operation even if the final
+  # worker's monitor signal has not arrived yet. The envelope is the worker's
+  # authoritative result; process termination after sending it is lifecycle
+  # cleanup and must not replace that result with a timeout.
+  defp finish_success(state, results) do
+    kill_all(state)
+    {cancellation, drained_results} = drain_worker_results(nil, state.live)
+
+    case cancellation do
+      nil ->
+        results
+        |> Map.merge(drained_results)
+        |> ordered_results(state.total)
+        |> then(&{:ok, &1})
+
+      reason ->
+        exit(reason)
+    end
   end
 
-  defp unwrap_error({:fun_error, failed_index, term}, results, live, true),
-    do: {:parallel_error, failed_index, term, completed_results(results, live)}
-
-  defp unwrap_error(other, results, live, true),
-    do: {:parallel_error, failure_index(other), other, completed_results(results, live)}
-
-  defp unwrap_error({:fun_error, _failed_index, term}, _results, _live, false), do: term
-  defp unwrap_error(other, _results, _live, false), do: other
-
-  defp failure_index({_reason, index}) when is_integer(index), do: index
-  defp failure_index({_reason, index, _detail}) when is_integer(index), do: index
-  defp failure_index(_reason), do: nil
-
-  defp completed_results(results, live) do
+  defp retained_envelopes(results, live, %Envelope{} = failing_envelope) do
     live
     |> Enum.reduce(results, fn
-      {_ref, %{index: index, result: {:ok, value}}}, acc -> Map.put_new(acc, index, value)
-      _entry, acc -> acc
+      {_ref, %{index: index, result: %Envelope{} = envelope}}, acc ->
+        Map.put_new(acc, index, envelope)
+
+      _entry, acc ->
+        acc
     end)
-    |> Enum.sort_by(&elem(&1, 0))
+    |> Map.put(failing_envelope.index, failing_envelope)
+    |> ordered_envelopes()
   end
 
   # Kill every live worker and release each one's global budget slot.
@@ -759,16 +775,19 @@ defmodule PtcRunner.Lisp.Eval.ParallelRunner do
       {:DOWN, _ref, :process, _pid, _reason} ->
         do_drain_worker_signals(cancellation, results, worker_indexes)
 
-      {:worker_result, pid, _idx, {:ok, value}} ->
+      {:worker_result, pid, %Envelope{outcome: {:ok, _value}} = envelope} ->
         results =
           case Map.fetch(worker_indexes, pid) do
-            {:ok, index} -> Map.put_new(results, index, value)
-            :error -> results
+            {:ok, index} ->
+              Map.put_new(results, index, Envelope.attach_index(envelope, index))
+
+            :error ->
+              results
           end
 
         do_drain_worker_signals(cancellation, results, worker_indexes)
 
-      {:worker_result, _pid, _idx, _result} ->
+      {:worker_result, _pid, %Envelope{}} ->
         do_drain_worker_signals(cancellation, results, worker_indexes)
 
       {:EXIT, pid, reason} ->
@@ -812,9 +831,39 @@ defmodule PtcRunner.Lisp.Eval.ParallelRunner do
     Enum.map(0..(total - 1), fn idx -> Map.fetch!(results, idx) end)
   end
 
-  defp any_live_index(%{live: live}) do
-    case Enum.min_by(live, fn {_ref, %{index: idx}} -> idx end, fn -> nil end) do
+  defp ordered_envelopes(envelopes) do
+    envelopes
+    |> Enum.sort_by(&elem(&1, 0))
+    |> Enum.map(&elem(&1, 1))
+  end
+
+  defp normalize_envelope(%Envelope{} = envelope), do: envelope
+  defp normalize_envelope({:ok, value}), do: Envelope.success(value)
+  defp normalize_envelope({:error, reason}), do: Envelope.failure(reason)
+
+  defp received_results(%{results: results, live: live}) do
+    Enum.reduce(live, results, fn
+      {_ref, %{index: index, result: %Envelope{} = envelope}}, acc ->
+        Map.put_new(acc, index, envelope)
+
+      _entry, acc ->
+        acc
+    end)
+  end
+
+  # Attribute a timeout to work that has not produced an envelope. A live
+  # worker whose successful envelope is already retained may still be awaiting
+  # its DOWN signal and must not be selected ahead of an unfinished sibling.
+  defp timeout_index(%{live: live, next: next, total: total}) do
+    unfinished_live =
+      Enum.reject(live, fn
+        {_ref, %{result: %Envelope{}}} -> true
+        _entry -> false
+      end)
+
+    case Enum.min_by(unfinished_live, fn {_ref, %{index: idx}} -> idx end, fn -> nil end) do
       {_ref, %{index: idx}} -> idx
+      nil when next < total -> next
       nil -> 0
     end
   end

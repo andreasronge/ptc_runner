@@ -109,7 +109,16 @@ defmodule PtcRunner.Lisp.Eval.Effects do
   def merge_indexed(indexed_effects) when is_list(indexed_effects) do
     indexed_effects
     |> Enum.sort_by(&elem(&1, 0))
-    |> Enum.reduce(empty(), fn {_index, effects}, accumulated -> merge(effects, accumulated) end)
+    |> Enum.map(&elem(&1, 1))
+    |> merge_ordered()
+  end
+
+  @doc "Merges effect deltas already ordered by ascending semantic execution order."
+  @spec merge_ordered([t()]) :: t()
+  def merge_ordered(ordered_effects) when is_list(ordered_effects) do
+    Enum.reduce(ordered_effects, empty(), fn effects, accumulated ->
+      merge(effects, accumulated)
+    end)
   end
 
   @doc "Returns effects in their public chronological representation."

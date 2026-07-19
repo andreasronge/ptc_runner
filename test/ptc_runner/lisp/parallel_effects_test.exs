@@ -147,6 +147,22 @@ defmodule PtcRunner.Lisp.ParallelEffectsTest do
     assert :atomics.get(provider_calls, 1) == 1
   end
 
+  test "nested capacity failure records every post-scheduling non-success" do
+    source = ~S|(pmap (fn [_] (pmap inc [1 2])) [0])|
+
+    assert {:error, step} =
+             Lisp.run(source,
+               max_parallel_workers: 1,
+               pmap_max_concurrency: 1
+             )
+
+    assert step.fail.reason == :parallel_capacity_exceeded
+
+    assert [inner, outer] = step.pmap_calls
+    assert %{type: :pmap, count: 2, success_count: 0, error_count: 2} = inner
+    assert %{type: :pmap, count: 1, success_count: 0, error_count: 1} = outer
+  end
+
   test "generic pmap failure retains completed worker audit effects" do
     tools = %{"touch" => fn arguments -> arguments end}
 
@@ -243,6 +259,44 @@ defmodule PtcRunner.Lisp.ParallelEffectsTest do
     assert Enum.map(step.tool_calls, & &1.args["x"]) == [1]
   end
 
+  test "failed pmap records every retained child including the failing worker" do
+    tools = %{
+      "child" => fn %{"x" => x} ->
+        child_step = %PtcRunner.Lisp.Result{return: x, trace_id: "child-#{x}"}
+
+        %{
+          __child_trace_id__: "child-#{x}",
+          __child_step__: child_step,
+          value: x
+        }
+      end
+    }
+
+    source = ~S"""
+    (pmap
+      (fn [x]
+        (do
+          (tool/child {"x" x})
+          (if (= x 1) x (inc "bad"))))
+      [1 2])
+    """
+
+    assert {:error, step} =
+             Lisp.run(source, tools: tools, pmap_max_concurrency: 1)
+
+    assert [call] = step.pmap_calls
+    assert call.type == :pmap
+    assert call.count == 2
+    assert call.success_count == 1
+    assert call.error_count == 1
+    assert call.child_trace_ids == ["child-1", "child-2"]
+
+    assert step.child_steps |> Enum.map(& &1.trace_id) |> Enum.frequencies() == %{
+             "child-1" => 2,
+             "child-2" => 2
+           }
+  end
+
   test "generic pcalls failure retains effects from the failing worker itself" do
     tools = %{"touch" => fn arguments -> arguments end}
 
@@ -260,6 +314,36 @@ defmodule PtcRunner.Lisp.ParallelEffectsTest do
     assert step.fail.reason == :pcalls_error
     assert step.prints == ["before failure"]
     assert Enum.map(step.tool_calls, & &1.args["x"]) == [1]
+  end
+
+  test "failed pcalls records every retained child including the failing worker" do
+    tools = %{
+      "child" => fn %{"x" => x} ->
+        child_step = %PtcRunner.Lisp.Result{return: x, trace_id: "child-#{x}"}
+
+        %{
+          __child_trace_id__: "child-#{x}",
+          __child_step__: child_step,
+          value: x
+        }
+      end
+    }
+
+    source = ~S"""
+    (pcalls
+      (fn [] (tool/child {"x" 1}))
+      (fn [] (do (tool/child {"x" 2}) (inc "bad"))))
+    """
+
+    assert {:error, step} =
+             Lisp.run(source, tools: tools, pmap_max_concurrency: 1)
+
+    assert [call] = step.pmap_calls
+    assert call.type == :pcalls
+    assert call.count == 2
+    assert call.success_count == 1
+    assert call.error_count == 1
+    assert call.child_trace_ids == ["child-1", "child-2"]
   end
 
   test "pmap return signal retains effects from the failing worker" do
