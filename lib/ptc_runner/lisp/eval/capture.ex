@@ -1,5 +1,17 @@
 defmodule PtcRunner.Lisp.Eval.Capture do
-  @moduledoc false
+  @moduledoc """
+  The evaluator's single nestable effect-capture stack.
+
+  Capture brackets make `Effects` produced inside plain host callbacks
+  explicit without creating a second effect representation. A frame owns a
+  stable baseline, its local delta, and the cumulative effects visible to a
+  nested callback. On every return, expected abort, throw, or exception the
+  frame is popped exactly once and the normalized context's `effects` field is
+  replaced from that authoritative frame.
+
+  Host callback binding and selection of value-versus-outcome capture belong
+  to `PtcRunner.Lisp.Eval.HostContext`.
+  """
 
   alias PtcRunner.Lisp.Eval.Abort
   alias PtcRunner.Lisp.Eval.Context, as: EvalContext

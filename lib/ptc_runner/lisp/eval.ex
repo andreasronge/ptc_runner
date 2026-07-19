@@ -16,8 +16,9 @@ defmodule PtcRunner.Lisp.Eval do
   `Eval.Context` owns the normalized cumulative `Eval.Effects`. `Eval.Capture`
   is the single callback capture stack; it records the authoritative effect
   delta and replaces only an outcome context's effects during normalization.
-  Callable-specific adapters remain responsible for restoring lexical,
-  namespace, and prelude-authority state before an outcome crosses a boundary.
+  `Eval.HostContext` is the one adapter for plain host callbacks. Callable
+  dispatch remains responsible for restoring lexical, namespace, and
+  prelude-authority state before an outcome crosses a boundary.
 
   ## Module Structure
 
@@ -28,6 +29,8 @@ defmodule PtcRunner.Lisp.Eval do
   - `Eval.Outcome` / `Eval.Abort` - Expected outcomes and the private callback carrier
   - `Eval.HostContext` - Active evaluator context for host callbacks
   - `Eval.Effects` / `Eval.Capture` - Effect algebra and callback capture
+  - `Eval.Parallel` - pmap/pcalls evaluation and worker-result semantics
+  - `Eval.ParallelRunner` - Parallel scheduling and process lifecycle
   - `Eval.Helpers` - Type errors and utilities
   """
 
@@ -44,26 +47,20 @@ defmodule PtcRunner.Lisp.Eval do
     Abort,
     Apply,
     Capture,
-    Effects,
     Helpers,
     HostContext,
     Outcome,
-    ParallelRunner,
+    Parallel,
     Patterns
   }
 
   alias PtcRunner.Lisp.Eval.Context, as: EvalContext
-  alias PtcRunner.Lisp.Eval.ParallelRunner.Envelope
   alias PtcRunner.Lisp.Format.Var
   alias PtcRunner.Lisp.KeyNormalizer
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
   alias PtcRunner.Lisp.Metadata
-  alias PtcRunner.Lisp.Runtime.Callable
-  alias PtcRunner.Lisp.Runtime.Collection.Normalize
   alias PtcRunner.Lisp.RuntimeCallable
   alias PtcRunner.Lisp.UntrustedRenderer
-
-  @hof_callback_error :__ptc_hof_callback_error__
 
   import PtcRunner.Lisp.Runtime, only: [flex_get: 2]
 
@@ -121,10 +118,8 @@ defmodule PtcRunner.Lisp.Eval do
     tool_executor = normalize_tool_executor(tool_executor)
     eval_ctx = EvalContext.new(ctx, memory, env, tool_executor, turn_history, opts)
 
-    case Capture.run_outcome(eval_ctx, fn ->
-           HostContext.with_context(eval_ctx, &do_eval/2, fn ->
-             normalize_outcome(do_eval(ast, eval_ctx), eval_ctx)
-           end)
+    case HostContext.run_outcome(eval_ctx, &do_eval/2, fn ->
+           normalize_outcome(do_eval(ast, eval_ctx), eval_ctx)
          end) do
       {:ok, value, final_ctx} ->
         {:ok, value, final_ctx}
@@ -480,101 +475,7 @@ defmodule PtcRunner.Lisp.Eval do
   defp do_eval({:pmap, fn_ast, coll_asts}, %EvalContext{} = eval_ctx) do
     with {:ok, fn_val, eval_ctx1} <- eval_child(fn_ast, eval_ctx),
          {:ok, coll_vals, eval_ctx2} <- eval_all(coll_asts, eval_ctx1) do
-      # Consistency check: a keyword accessor over a SINGLE hash-map is rejected
-      # (in map/pmap the map would coerce to [k v] pairs and the keyword would
-      # see lists, not maps). Only the single-collection arity is ambiguous;
-      # with 2+ collections the keyword is a 2-arg lookup-with-default
-      # (`(:k m default)`), which Callable.call dispatches — see callable_fn.
-      single_map_coll? = match?([m] when is_map(m) and not is_struct(m), coll_vals)
-
-      if keyword_runtime?(fn_val) and single_map_coll? do
-        {:error,
-         {:type_error, "pmap: keyword accessor requires a list of maps, got a single map",
-          [fn_val, hd(coll_vals)]}}
-      else
-        # Record start time for pmap execution
-        start_time = System.monotonic_time(:millisecond)
-        timestamp = DateTime.utc_now()
-        # Coerce each collection to a seq (nil -> [], string -> graphemes,
-        # map -> [k v] pairs) and zip multiple collections element-wise,
-        # truncating to the shortest — matching `map`'s finite contract.
-        arg_lists = pmap_arg_lists(coll_vals)
-        count = length(arg_lists)
-
-        # Security H1: every pmap/pcalls worker — top-level and nested —
-        # is spawned with a FIXED `max_heap_size` (`worker_max_heap`),
-        # NOT divided by concurrency. A shared `ParallelBudget` semaphore
-        # (`parallel_budget`) caps how many workers may be alive at once
-        # across the whole run, so aggregate live parallel heap is
-        # bounded by `max_parallel_workers * worker_max_heap` at any
-        # nesting depth. The worker's `EvalContext` keeps the SAME
-        # `worker_max_heap` and `parallel_budget`, so a nested
-        # pmap/pcalls inherits both. `pmap_deadline` is inherited so all
-        # nested calls share one deadline.
-        worker_max_heap = eval_ctx2.worker_max_heap
-        concurrency = bounded_concurrency(eval_ctx2.pmap_max_concurrency)
-        deadline_mono = parallel_deadline(eval_ctx2)
-        worker_eval_ctx = %{eval_ctx2 | pmap_deadline: deadline_mono}
-
-        # Convert the function value to a callable (may be a tuple for builtins).
-        # The closure captures a read-only snapshot of the environment at creation
-        # time. Keyword accessors are kept un-converted: Callable.call dispatches
-        # them at both arity 1 (lookup) and arity 2 (lookup-with-default), matching
-        # `map` and Clojure. value_to_erlang_fn would instead build a strict
-        # arity-1 closure that crashes when multiple collections zip into a 2-arg
-        # call (the single_map_coll? guard above already handles the 1-coll case).
-        callable_fn =
-          if keyword_runtime?(fn_val),
-            do: fn_val,
-            else: value_to_erlang_fn(fn_val, worker_eval_ctx)
-
-        worker_fun = fn arg_list ->
-          try do
-            ChildResult.take()
-
-            capture =
-              Apply.capture_parallel_effects(worker_eval_ctx, fn ->
-                RuntimeCallable.with_context(worker_eval_ctx, &do_eval/2, fn ->
-                  Callable.call(callable_fn, arg_list)
-                end)
-              end)
-
-            case capture do
-              {:ok, value, worker_effects} ->
-                parallel_success_envelope(value, worker_effects)
-
-              {:error, kind, reason, stacktrace, worker_effects} ->
-                parallel_failure_envelope(
-                  captured_parallel_failure(kind, reason, stacktrace),
-                  worker_effects
-                )
-            end
-          rescue
-            e ->
-              parallel_failure_envelope({:worker_message, Exception.message(e)}, Effects.empty())
-          end
-        end
-
-        runner_result =
-          ParallelRunner.run(arg_lists, worker_fun,
-            worker_max_heap: worker_max_heap,
-            max_concurrency: concurrency,
-            budget: eval_ctx2.parallel_budget,
-            deadline_mono: deadline_mono
-          )
-
-        # Collect results and child trace IDs
-        duration_ms = System.monotonic_time(:millisecond) - start_time
-
-        finalize_parallel_result(
-          runner_result,
-          :pmap,
-          count,
-          timestamp,
-          duration_ms,
-          eval_ctx2
-        )
-      end
+      Parallel.eval_pmap(fn_val, coll_vals, eval_ctx2, &do_eval/2)
     end
   end
 
@@ -583,77 +484,9 @@ defmodule PtcRunner.Lisp.Eval do
   # ============================================================
 
   defp do_eval({:pcalls, fn_asts}, %EvalContext{} = eval_ctx) do
-    # First evaluate all function expressions to get function values
     case eval_all(fn_asts, eval_ctx) do
       {:ok, fn_vals, eval_ctx2} ->
-        # Record start time for pcalls execution
-        start_time = System.monotonic_time(:millisecond)
-        timestamp = DateTime.utc_now()
-        count = length(fn_vals)
-
-        # Security H1: fixed per-worker heap cap + shared slot budget —
-        # see the pmap clause above for the full rationale.
-        worker_max_heap = eval_ctx2.worker_max_heap
-        concurrency = bounded_concurrency(eval_ctx2.pmap_max_concurrency)
-        deadline_mono = parallel_deadline(eval_ctx2)
-        worker_eval_ctx = %{eval_ctx2 | pmap_deadline: deadline_mono}
-
-        # Convert each function value to an Erlang function (zero-arity thunk)
-        # Use a try/rescue to catch validation errors (wrong arity, non-callable)
-        try do
-          erlang_fns = Enum.map(fn_vals, &pcalls_fn_to_erlang(&1, worker_eval_ctx))
-
-          worker_fun = fn erlang_fn ->
-            try do
-              ChildResult.take()
-
-              capture =
-                Apply.capture_parallel_effects(worker_eval_ctx, fn ->
-                  RuntimeCallable.with_context(worker_eval_ctx, &do_eval/2, erlang_fn)
-                end)
-
-              case capture do
-                {:ok, value, worker_effects} ->
-                  parallel_success_envelope(value, worker_effects)
-
-                {:error, kind, reason, stacktrace, worker_effects} ->
-                  parallel_failure_envelope(
-                    captured_parallel_failure(kind, reason, stacktrace),
-                    worker_effects
-                  )
-              end
-            rescue
-              e ->
-                parallel_failure_envelope(
-                  {:worker_message, Exception.message(e)},
-                  Effects.empty()
-                )
-            end
-          end
-
-          runner_result =
-            ParallelRunner.run(erlang_fns, worker_fun,
-              worker_max_heap: worker_max_heap,
-              max_concurrency: concurrency,
-              budget: eval_ctx2.parallel_budget,
-              deadline_mono: deadline_mono
-            )
-
-          # Collect results and child trace IDs
-          duration_ms = System.monotonic_time(:millisecond) - start_time
-
-          finalize_parallel_result(
-            runner_result,
-            :pcalls,
-            count,
-            timestamp,
-            duration_ms,
-            eval_ctx2
-          )
-        rescue
-          e in RuntimeError ->
-            {:error, {:pcalls_error, Exception.message(e)}}
-        end
+        Parallel.eval_pcalls(fn_vals, eval_ctx2, &do_eval/2)
 
       {:error, _} = err ->
         err
@@ -1494,24 +1327,7 @@ defmodule PtcRunner.Lisp.Eval do
     end
   end
 
-  # Evaluate all expressions in order, returning results in original order
-  # Build the per-element argument lists for pmap.
-  #
-  # Single collection: each element becomes a one-arg call `[x]`.
-  # Multiple collections: zip element-wise, truncating to the shortest
-  # (matching `map`'s multi-collection contract). Each collection is coerced
-  # through `Normalize.to_seq` first — nil -> [], string -> graphemes,
-  # map -> [k v] pairs — so pmap shares `map`'s finite seqable contract.
-  defp pmap_arg_lists([coll]) do
-    coll |> Normalize.to_seq() |> Enum.map(&[&1])
-  end
-
-  defp pmap_arg_lists(colls) do
-    colls
-    |> Enum.map(&Normalize.to_seq/1)
-    |> Enum.zip_with(& &1)
-  end
-
+  # Evaluate all expressions in order, returning results in original order.
   defp eval_all(asts, eval_ctx) do
     result =
       Enum.reduce_while(asts, {:ok, [], eval_ctx}, fn ast, {:ok, acc, ctx} ->
@@ -1612,290 +1428,6 @@ defmodule PtcRunner.Lisp.Eval do
         {:error, reason} = err
         Abort.error!(reason, eval_ctx)
     end
-  end
-
-  # ============================================================
-  # Shared helpers
-  # ============================================================
-
-  # Convert a value to an Erlang function for use in juxt, pmap, etc.
-  # Keywords need special handling as map accessors
-  defp value_to_erlang_fn(k, %EvalContext{}) when is_atom(k) and not is_boolean(k) do
-    fn m -> flex_get(m, k) end
-  end
-
-  defp value_to_erlang_fn(%LispKeyword{} = k, %EvalContext{}) do
-    fn m -> flex_get(m, k) end
-  end
-
-  defp value_to_erlang_fn(value, %EvalContext{} = eval_ctx) do
-    Apply.closure_to_fun(value, eval_ctx, &do_eval/2)
-  end
-
-  # ============================================================
-  # Parallel execution helpers (shared by pmap and pcalls)
-  # ============================================================
-
-  # Defensive bound on the local pmap/pcalls scheduling window. The HARD
-  # aggregate cap is the global `ParallelBudget` semaphore;
-  # `pmap_max_concurrency` is only a per-call window size. Clamp to a
-  # positive integer.
-  defp bounded_concurrency(conc) when is_integer(conc) and conc > 0, do: conc
-  defp bounded_concurrency(_), do: 1
-
-  # Resolve the shared absolute deadline for a parallel operation. The
-  # OUTERMOST pmap/pcalls computes `now + pmap_timeout`; a nested call
-  # inherits the parent's `pmap_deadline` unchanged so N branches cannot
-  # multiply total wall time.
-  defp parallel_deadline(%EvalContext{pmap_deadline: deadline}) when is_integer(deadline),
-    do: deadline
-
-  defp parallel_deadline(%EvalContext{pmap_timeout: timeout}),
-    do: System.monotonic_time(:millisecond) + timeout
-
-  # Merge every retained worker exactly once, then append the outer operation
-  # record. `ParallelRunner` has already sorted the envelopes by input index.
-  defp finalize_parallel_result(
-         {status, envelopes},
-         type,
-         count,
-         timestamp,
-         duration_ms,
-         %EvalContext{} = eval_ctx
-       )
-       when status in [:ok, :error] and is_list(envelopes) do
-    successful = Enum.filter(envelopes, &Envelope.success?/1)
-    success_count = length(successful)
-
-    worker_effects =
-      envelopes
-      |> Enum.map(& &1.effects)
-      |> Effects.merge_ordered()
-
-    pmap_call = %{
-      type: type,
-      count: count,
-      child_trace_ids: envelopes |> Enum.map(& &1.child_trace_id) |> Enum.reject(&is_nil/1),
-      child_steps: envelopes |> Enum.map(& &1.child_step) |> Enum.reject(&is_nil/1),
-      timestamp: timestamp,
-      duration_ms: duration_ms,
-      success_count: success_count,
-      error_count: count - success_count
-    }
-
-    final_ctx =
-      eval_ctx
-      |> EvalContext.merge_parallel_effects(worker_effects)
-      |> EvalContext.append_pmap_call(pmap_call)
-
-    case status do
-      :ok ->
-        values = Enum.map(successful, fn %Envelope{outcome: {:ok, value}} -> value end)
-        {:ok, values, final_ctx}
-
-      :error ->
-        %Envelope{index: index, outcome: {:error, worker_reason}} =
-          Enum.find(envelopes, &(not Envelope.success?(&1)))
-
-        reason =
-          worker_reason
-          |> classify_worker_failure(type, index)
-          |> refresh_contract_capability_activity(final_ctx)
-
-        Abort.error!(reason, final_ctx)
-    end
-  end
-
-  defp refresh_contract_capability_activity(
-         {:prelude_contract_error, message, details},
-         %EvalContext{} = eval_ctx
-       )
-       when is_binary(message) and is_map(details) do
-    details = Map.put(details, :capability_activity?, EvalContext.tool_activity?(eval_ctx))
-    {:prelude_contract_error, message, details}
-  end
-
-  defp refresh_contract_capability_activity(reason, %EvalContext{}), do: reason
-
-  # Map `ParallelRunner`'s stable error reasons onto the pmap/pcalls
-  # error shape.
-  #
-  # P3 fix: heap/timeout/capacity failures are surfaced as the 3-tuple
-  # `{reason_atom, message, nil}`. `Lisp.execute_program/2` routes
-  # 3-tuples through `format_error/1` (which renders `"reason: msg"`)
-  # and tags the step with `reason_atom` directly — so `step.fail.reason`
-  # stays `:memory_exceeded` / `:timeout` / `:parallel_capacity_exceeded`
-  # AND the message reads cleanly. The 2-tuple `{:memory_exceeded, bytes}`
-  # shape is reserved for the sandbox-process heap kill, where element 2
-  # really is a numeric byte limit.
-  defp classify_runner_error(:memory_exceeded, _type, _index),
-    do: {:memory_exceeded, "a parallel worker exceeded its per-worker heap cap", nil}
-
-  defp classify_runner_error(:timeout, _type, _index),
-    do: {:timeout, "the parallel operation exceeded its deadline", nil}
-
-  defp classify_runner_error({:memory_exceeded, _detail}, _type, _index),
-    do: {:memory_exceeded, "a parallel worker exceeded its per-worker heap cap", nil}
-
-  defp classify_runner_error({:timeout, _detail}, _type, _index),
-    do: {:timeout, "the parallel operation exceeded its deadline", nil}
-
-  defp classify_runner_error({reason, _message, nil} = error, _type, _index)
-       when reason in [:memory_exceeded, :timeout, :parallel_capacity_exceeded],
-       do: error
-
-  defp classify_runner_error(:parallel_capacity_exceeded, _type, _index),
-    do:
-      {:parallel_capacity_exceeded,
-       "the parallel worker budget is exhausted; reduce nesting or collection size", nil}
-
-  # A nested capacity/heap/timeout failure re-surfaced by
-  # `nested_parallel_error/1,2` arrives as a `{reason, message}` tuple —
-  # normalise it through the same clauses above.
-  defp classify_runner_error({:parallel_capacity_exceeded, _msg}, type, index),
-    do: classify_runner_error(:parallel_capacity_exceeded, type, index)
-
-  defp classify_runner_error({:runtime_error, detail}, type, index),
-    do: {parallel_error_type(type), "parallel worker #{index} crashed: #{inspect(detail)}"}
-
-  defp classify_runner_error(
-         {:prelude_contract_error, _message, _details} = error,
-         _type,
-         _index
-       ),
-       do: error
-
-  defp classify_runner_error({:pmap_error, _} = err, _type, _index), do: err
-  defp classify_runner_error({:pcalls_error, _, _} = err, _type, _index), do: err
-
-  defp classify_runner_error(other, type, _index),
-    do: {parallel_error_type(type), inspect(other)}
-
-  defp parallel_error_type(:pmap), do: :pmap_error
-  defp parallel_error_type(:pcalls), do: :pcalls_error
-
-  defp classify_worker_failure({:worker_message, message}, type, index),
-    do: parallel_worker_error(type, index, message)
-
-  defp classify_worker_failure({:worker_abort, reason}, type, index) do
-    reason
-    |> parallel_abort_error(type, index)
-    |> classify_runner_error(type, index)
-  end
-
-  defp classify_worker_failure({:worker_control, signal}, type, index),
-    do: parallel_worker_error(type, index, "#{signal} called inside #{type}")
-
-  defp classify_worker_failure(reason, type, index),
-    do: classify_runner_error(reason, type, index)
-
-  defp captured_parallel_failure(
-         :error,
-         %Abort{outcome: {:error, {:prelude_contract_error, _, _} = reason, _context}},
-         _stacktrace
-       ),
-       do: reason
-
-  defp captured_parallel_failure(
-         :error,
-         %Abort{outcome: {:error, {:tool_error, tool_name, message}, _context}},
-         _stacktrace
-       ),
-       do: {:worker_message, parallel_tool_failure_message(tool_name, message)}
-
-  defp captured_parallel_failure(
-         :error,
-         %Abort{outcome: {:error, reason, _context}},
-         _stacktrace
-       ),
-       do: {:worker_abort, reason}
-
-  defp captured_parallel_failure(
-         :error,
-         %Abort{outcome: {:control, signal, _value, _context}},
-         _stacktrace
-       ),
-       do: {:worker_control, signal}
-
-  defp captured_parallel_failure(:error, error, _stacktrace),
-    do: {:worker_message, Exception.message(error)}
-
-  defp captured_parallel_failure(:throw, signal, _stacktrace),
-    do: {:worker_message, "worker threw #{inspect(signal)}"}
-
-  defp captured_parallel_failure(kind, reason, _stacktrace),
-    do: {:worker_message, "worker #{kind}: #{inspect(reason)}"}
-
-  defp parallel_worker_error(:pmap, _index, message), do: {:pmap_error, message}
-  defp parallel_worker_error(:pcalls, index, message), do: {:pcalls_error, index, message}
-
-  defp parallel_abort_error({reason, message, nil}, _type, _index)
-       when reason in [:memory_exceeded, :timeout, :parallel_capacity_exceeded],
-       do: {reason, message}
-
-  defp parallel_abort_error({@hof_callback_error, message}, type, index)
-       when is_binary(message),
-       do: parallel_worker_error(type, index, message)
-
-  defp parallel_abort_error({_reason, message, _data}, type, index) when is_binary(message),
-    do: parallel_worker_error(type, index, message)
-
-  defp parallel_abort_error({_reason, message}, type, index) when is_binary(message),
-    do: parallel_worker_error(type, index, message)
-
-  defp parallel_abort_error(reason, type, index),
-    do: parallel_worker_error(type, index, inspect(reason))
-
-  defp parallel_tool_failure_message(tool_name, data), do: format_tool_failure(tool_name, data)
-
-  defp parallel_success_envelope(value, %Effects{} = effects) do
-    {trace_id, child_step} = take_child_result()
-    Envelope.success(value, effects: effects, child_trace_id: trace_id, child_step: child_step)
-  end
-
-  defp parallel_failure_envelope(reason, %Effects{} = effects) do
-    {trace_id, child_step} = take_child_result()
-    Envelope.failure(reason, effects: effects, child_trace_id: trace_id, child_step: child_step)
-  end
-
-  defp take_child_result do
-    case ChildResult.take() do
-      {trace_id, child_step} -> {trace_id, child_step}
-      nil -> {nil, nil}
-    end
-  end
-
-  # ============================================================
-  # Pcalls helpers
-  # ============================================================
-
-  # Convert a closure to a zero-arity Erlang function for use in pcalls
-  defp pcalls_fn_to_erlang(
-         {:closure, [], _body, _closure_env, _turn_history, _metadata} = closure,
-         %EvalContext{} = eval_ctx
-       ) do
-    Apply.closure_to_fun(closure, eval_ctx, &do_eval/2)
-  end
-
-  defp pcalls_fn_to_erlang(
-         {:closure, params, _body, _closure_env, _turn_history, _metadata},
-         %EvalContext{}
-       ) do
-    arity = length(params)
-    raise "pcalls requires zero-arity thunks, got function with arity #{arity}"
-  end
-
-  defp pcalls_fn_to_erlang(f, %EvalContext{}) when is_function(f, 0) do
-    f
-  end
-
-  defp pcalls_fn_to_erlang(f, %EvalContext{}) when is_function(f) do
-    {:arity, arity} = Function.info(f, :arity)
-    raise "pcalls requires zero-arity thunks, got function with arity #{arity}"
-  end
-
-  defp pcalls_fn_to_erlang(value, %EvalContext{}) do
-    raise "pcalls requires callable thunks, got: #{inspect(value)}"
   end
 
   defp tag_prelude_ns_env(env, ns) when is_map(env) do

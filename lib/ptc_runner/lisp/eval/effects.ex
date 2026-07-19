@@ -100,19 +100,6 @@ defmodule PtcRunner.Lisp.Eval.Effects do
     }
   end
 
-  @doc """
-  Merges indexed worker deltas so public reversal reports lower indexes first.
-
-  A higher input index is semantically later and therefore wins cache conflicts.
-  """
-  @spec merge_indexed([{non_neg_integer(), t()}]) :: t()
-  def merge_indexed(indexed_effects) when is_list(indexed_effects) do
-    indexed_effects
-    |> Enum.sort_by(&elem(&1, 0))
-    |> Enum.map(&elem(&1, 1))
-    |> merge_ordered()
-  end
-
   @doc "Merges effect deltas already ordered by ascending semantic execution order."
   @spec merge_ordered([t()]) :: t()
   def merge_ordered(ordered_effects) when is_list(ordered_effects) do

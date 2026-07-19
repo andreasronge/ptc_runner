@@ -9,7 +9,6 @@ defmodule PtcRunner.Lisp.RuntimeCallable do
   """
 
   alias PtcRunner.Lisp.Eval.Abort
-  alias PtcRunner.Lisp.Eval.Capture
   alias PtcRunner.Lisp.Eval.Context, as: EvalContext
   alias PtcRunner.Lisp.Eval.Helpers
   alias PtcRunner.Lisp.Eval.HostContext
@@ -66,24 +65,19 @@ defmodule PtcRunner.Lisp.RuntimeCallable do
     end
   end
 
-  @spec with_context(EvalContext.t(), function(), (-> term())) :: term()
-  def with_context(%EvalContext{} = eval_ctx, do_eval, fun)
-      when is_function(do_eval, 2) and is_function(fun, 0) do
-    HostContext.with_context(eval_ctx, do_eval, fun)
-  end
-
   defp call_with_context(%__MODULE__{} = callable, args, %EvalContext{} = base_ctx, do_eval)
        when is_function(do_eval, 2) do
-    eval_ctx = Capture.materialize_context(base_ctx)
-    callable = bind(callable, eval_ctx, do_eval)
+    HostContext.with_materialized_context(base_ctx, do_eval, fn eval_ctx ->
+      callable = bind(callable, eval_ctx, do_eval)
 
-    case invoke(callable, args, eval_ctx) do
-      {:ok, result, _final_ctx} ->
-        result
+      case invoke(callable, args, eval_ctx) do
+        {:ok, result, _final_ctx} ->
+          result
 
-      {:error, reason} ->
-        Abort.error!(error_reason(reason), eval_ctx)
-    end
+        {:error, reason} ->
+          Abort.error!(error_reason(reason), eval_ctx)
+      end
+    end)
   end
 
   @spec serializable?(term()) :: boolean()

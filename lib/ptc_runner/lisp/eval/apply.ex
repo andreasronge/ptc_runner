@@ -1179,27 +1179,12 @@ defmodule PtcRunner.Lisp.Eval.Apply do
 
   defp with_side_effect_stash(%EvalContext{} = eval_ctx, do_eval_fn, fun)
        when is_function(do_eval_fn, 2) and is_function(fun, 0) do
-    case Capture.run_value(eval_ctx, fn ->
-           RuntimeCallable.with_context(Capture.materialize_context(eval_ctx), do_eval_fn, fun)
-         end) do
+    case HostContext.run_value(eval_ctx, do_eval_fn, fun) do
       {:ok, result, final_ctx} ->
         {:ok, result, final_ctx}
 
       {:raise, kind, reason, stacktrace, final_ctx} ->
         reraise_captured(kind, reason, stacktrace, final_ctx)
-    end
-  end
-
-  @doc false
-  def capture_parallel_effects(%EvalContext{} = eval_ctx, fun) when is_function(fun, 0) do
-    baseline_ctx = Capture.materialize_context(eval_ctx)
-
-    case Capture.run_value(baseline_ctx, fun) do
-      {:ok, value, final_ctx} ->
-        {:ok, value, EvalContext.parallel_effects(final_ctx, baseline_ctx)}
-
-      {:raise, kind, reason, stacktrace, final_ctx} ->
-        {:error, kind, reason, stacktrace, EvalContext.parallel_effects(final_ctx, baseline_ctx)}
     end
   end
 

@@ -62,12 +62,12 @@ defmodule PtcRunner.Lisp.Eval.EffectsTest do
     assert Effects.merge(delta, baseline).tool_cache === cumulative.tool_cache
   end
 
-  test "indexed merge reports lower indexes first and lets higher indexes win cache conflicts" do
+  test "ordered merge reports earlier deltas first and lets later cache writes win" do
     effects =
-      Effects.merge_indexed([
-        {2, %Effects{prints: ["2"], tool_cache: %{shared: 2}}},
-        {0, %Effects{prints: ["0"], tool_cache: %{shared: 0}}},
-        {1, %Effects{prints: ["1"], tool_cache: %{shared: 1}}}
+      Effects.merge_ordered([
+        %Effects{prints: ["0"], tool_cache: %{shared: 0}},
+        %Effects{prints: ["1"], tool_cache: %{shared: 1}},
+        %Effects{prints: ["2"], tool_cache: %{shared: 2}}
       ])
 
     assert Effects.chronological(effects).prints == ["0", "1", "2"]
