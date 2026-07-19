@@ -1,9 +1,11 @@
 # PTC Kernel tutorial: bounded Lisp workflows and model-written programs
 
-This tutorial builds three workflows from the command line. The first is
+This tutorial builds four workflows from the command line. The first is
 fully deterministic, the second calls DeepSeek as a bounded capability, and
 the third lets DeepSeek write a small PTC-Lisp mission program that can read
-one explicitly granted directory.
+one explicitly granted directory. The fourth makes the REPL-style continuation
+visible by requiring DeepSeek to define a helper in one evaluation and call it
+from the next.
 
 You do not need to write Elixir for the main tutorial. You need a PtcRunner
 checkout, Elixir/Mix to run its command-line tasks, basic Clojure syntax, and
@@ -463,6 +465,50 @@ This pattern fits model-authored queries, data exploration, file analysis, and
 tool orchestration where the model needs narrow task authority but must not
 inherit the workflow's provider or control capabilities.
 
+## Use case 4: observe a committed multi-turn continuation
+
+The file-agent may finish in one turn, so the final example isolates the new
+continuation behavior. Its task asks DeepSeek to make exactly two
+`run_ptc_lisp` calls. The first program defines a helper without returning:
+
+```clojure
+(defn answer [] 42)
+```
+
+That ordinary success commits the definition, appends its exact native result
+to bounded history, and sends a correlated success observation back to the
+model. The second program can call the retained helper and explicitly complete:
+
+```clojure
+(return (answer))
+```
+
+The workflow itself remains the same thin host-owned policy boundary, narrowed
+to two turns:
+
+```clojure
+(ns tutorial.multi-turn)
+
+(defn run [input]
+  (agent.core/run (get input "task") {"max_turns" 2}))
+```
+
+Run it with:
+
+```bash
+mix ptc.run examples/kernel-tutorial/04-multi-turn-agent/ptc.json
+```
+
+The successful result contains `{"ok":true,"value":42}`. Its usage reports
+two workflow `llm-request` calls and two subordinate evaluations, while the
+safe continuation summary reports one retained definition and one history
+value. Neither the definition body nor the history value is exposed in that
+summary.
+
+This deliberately small example is for understanding the continuation
+contract. Real agent tasks should describe the desired outcome and let the
+model choose how many bounded turns it needs.
+
 ## Logging and the trace viewer
 
 Persist the canonical events for any manifest entry run with `--trace`:
@@ -678,10 +724,17 @@ test "$actual" = \
 ```
 
 For model workflows, test the protocol parser and feedback loop with scripted
-responses in normal tests, then keep one small live DeepSeek E2E check for the
-real provider boundary. Do not make correctness depend on an exact natural
-language completion unless the prompt explicitly constrains it to one token or
-one schema.
+responses in normal tests, then keep small live DeepSeek E2E checks for the real
+provider boundary. The checked-in tutorial contracts are manual-only:
+
+```bash
+mix test test/ptc_runner/kernel/tutorial_examples_e2e_test.exs --include e2e
+```
+
+The module is tagged `:e2e`, so normal `mix test` and `mix precommit` runs
+exclude its live provider calls. Do not make correctness depend on an exact
+natural-language completion unless the prompt explicitly constrains it to one
+token or one schema.
 
 ## Advanced: embedding from Elixir
 

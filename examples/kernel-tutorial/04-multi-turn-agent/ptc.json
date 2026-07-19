@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "workflow": {
+    "components": [
+      {"id": "tutorial.multi-turn", "path": "agent.lisp", "dependencies": ["agent.core"]},
+      {"library": "agent.core"}
+    ],
+    "entry": "tutorial.multi-turn/run"
+  },
+  "input": {
+    "value": {
+      "task": "Complete this task in exactly two run_ptc_lisp calls. First call run_ptc_lisp with the program (defn answer [] 42) and do not call return or fail. After the success observation, call run_ptc_lisp with the program (return (answer))."
+    }
+  },
+  "providers": {
+    "workflow": [
+      {"name": "llm", "config": {"model": "deepseek", "cache": false}}
+    ]
+  },
+  "labels": {
+    "name": "tutorial-deepseek-multi-turn-agent",
+    "model": "deepseek",
+    "provider": "openrouter",
+    "tags": {"mode": "agent"}
+  }
+}

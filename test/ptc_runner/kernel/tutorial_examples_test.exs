@@ -24,7 +24,7 @@ defmodule PtcRunner.Kernel.TutorialExamplesTest do
   test "the live-model tutorial manifests compile and assemble without calling a provider" do
     {:ok, registry} = ProviderRegistry.new()
 
-    for example <- ["02-deepseek-extract", "03-file-agent"] do
+    for example <- ["02-deepseek-extract", "03-file-agent", "04-multi-turn-agent"] do
       assert {:ok, built} = RunBuilder.load_and_build(path(example), registry)
       assert is_binary(built.entry_source)
       EventSink.stop(built.config.event_sink)
