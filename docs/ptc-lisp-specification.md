@@ -1668,8 +1668,13 @@ missing key: `(find {:a nil} :a)` => `[:a nil]` while `(find {:a 1} :b)` =>
 - Each parallel branch gets a read-only snapshot of the user namespace
 - Writes within branches (via `def`) are isolated and discarded
 - Errors in any branch propagate to the caller
-- Concurrency is bounded to `2 × CPU cores` to prevent resource exhaustion
-- Individual tasks timeout after 5 seconds
+- Effects completed before the selected expected branch failure remain
+  available in the result's existing diagnostic fields when that worker returns
+  an error context; concurrently returned secondary failures are not retained
+- The local scheduling window defaults to `2 × CPU cores`; the program-wide
+  worker cap in §15.2 is the hard aggregate bound
+- The whole operation, including nested parallel calls, shares one default
+  5-second deadline
 
 **Parallel Calls (`pcalls`):** Executes multiple zero-arity functions (thunks) concurrently and returns their results as a vector. Unlike `pmap` which applies one function to many items, `pcalls` runs multiple different functions in parallel:
 
@@ -1691,8 +1696,13 @@ missing key: `(find {:a nil} :a)` => `[:a nil]` while `(find {:a 1} :b)` =>
 - If any function fails, entire `pcalls` expression fails (atomic)
 - Errors include the failed function index and error details
 - Each parallel branch gets a read-only snapshot of the user namespace
-- Concurrency is bounded to `2 × CPU cores` to prevent resource exhaustion
-- Individual tasks timeout after 5 seconds
+- Effects completed before the selected expected thunk failure remain available
+  in the result's existing diagnostic fields when that worker returns an error
+  context; concurrently returned secondary failures are not retained
+- The local scheduling window defaults to `2 × CPU cores`; the program-wide
+  worker cap in §15.2 is the hard aggregate bound
+- The whole operation, including nested parallel calls, shares one default
+  5-second deadline
 
 #### Ordering
 
@@ -2904,7 +2914,11 @@ Programs that call `println` will have their output available in the `prints` li
 }}
 ```
 
-**Note:** In parallel operations like `pmap` and `pcalls`, `println` output from successful branches is captured in input order, independent of worker completion order. Output from a worker that fails before returning may be retained for diagnostics when its error context is available.
+**Note:** In parallel operations like `pmap` and `pcalls`, `println` output from
+retained worker envelopes is captured in input order, independent of worker
+completion order. Output from the selected worker error envelope is retained;
+concurrently returned secondary errors are not retained, and detailed output
+may be unavailable when a worker is killed before it can return an envelope.
 
 ### 8.14 Date and Time (Minimal Java Interop)
 

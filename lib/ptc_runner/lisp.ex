@@ -131,7 +131,9 @@ defmodule PtcRunner.Lisp do
     - `:float_precision` - Number of decimal places for floats in result (default: nil = full precision)
     - `:timeout` - Timeout in milliseconds for entire sandbox execution (default: 1000)
     - `:compile_timeout` - Timeout in milliseconds for the compile phase (parse + analyze) (default: 5000)
-    - `:pmap_timeout` - Timeout in milliseconds per pmap/pcalls task (default: 5000). Increase for LLM-backed tools.
+    - `:pmap_timeout` - Shared absolute deadline in milliseconds for each
+      pmap/pcalls operation, including nested parallel calls (default: 5000).
+      Increase for LLM-backed tools.
     - `:pmap_max_concurrency` - Local pmap/pcalls scheduling window — max tasks one call keeps in flight (default: `System.schedulers_online() * 2`). Reduce to avoid overflowing connection pools. The HARD aggregate cap is `:max_parallel_workers`.
     - `:max_heap` - Program heap budget in words ABOVE the measured
       environment baseline (default: 1_250_000). Host-provided data

@@ -1,8 +1,8 @@
 # Unified evaluator effects and outcomes
 
-Status: proposed. Created 2026-07-18 after the runtime-prelude contract review
-found that nested higher-order and parallel failures can cross several distinct
-effect-capture and error-transport paths.
+Status: implemented 2026-07-19. Created 2026-07-18 after the runtime-prelude
+contract review found that nested higher-order and parallel failures could
+cross several distinct effect-capture and error-transport paths.
 
 This plan consolidates evaluator audit effects into one typed representation,
 one process-local capture stack, and one effect-bearing outcome protocol. It is

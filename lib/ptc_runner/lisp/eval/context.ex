@@ -207,7 +207,9 @@ defmodule PtcRunner.Lisp.Eval.Context do
   ## Options
 
   - `:max_print_length` - Max characters per `println` call (default: #{@default_print_length})
-  - `:pmap_timeout` - Timeout in ms for each pmap task (default: 5000). Increase for LLM-backed tools.
+  - `:pmap_timeout` - Shared absolute deadline in ms for each pmap/pcalls
+    operation, including nested parallel calls (default: 5000). Increase for
+    LLM-backed tools.
   - `:pmap_max_concurrency` - Max concurrent tasks in pmap/pcalls (default: `System.schedulers_online() * 2`)
   - `:max_heap` - Sandbox per-process heap cap in words (default: nil).
   - `:worker_max_heap` - FIXED `max_heap_size` (in words) for every

@@ -164,6 +164,52 @@ rest of the run. Commit is transactional: parse, analysis, runtime, timeout,
 memory, capability, result-size, or explicit-failure outcomes preserve the
 previous evaluation memory.
 
+## Evaluator effects, outcomes, and parallel work
+
+`PtcRunner.Lisp.Eval` recursively evaluates analyzed expressions and leaves
+public result assembly to `PtcRunner.Lisp`. Its context contains one canonical
+`PtcRunner.Lisp.Eval.Effects` value for tool calls, parallel-call records,
+prints, public prelude counts, and the tool cache. Effect lists use an internal
+newest-first representation; `Effects` alone owns merge direction, cache
+precedence, deltas, and conversion to chronological output.
+
+Plain Elixir callbacks cannot return a threaded evaluator context.
+`PtcRunner.Lisp.Eval.Capture` is the single nestable process-local effect
+stack, while `PtcRunner.Lisp.Eval.HostContext` is the adapter that binds an
+active evaluator context around host callbacks and selects value or outcome
+capture. `PtcRunner.Lisp.Eval.Outcome` represents expected success, error, and
+`return`/`fail`/`recur` control with one normalized context. When such an
+outcome must cross a value-only host callback, `PtcRunner.Lisp.Eval.Abort` is
+the only private carrier. Callable dispatch restores caller lexical,
+namespace, and prelude-authority state before capture replaces the outcome's
+effects.
+
+This arrangement preserves effects that executed before a later expected
+failure. That includes earlier top-level forms, prior higher-order callback
+iterations, and the retained failing callback itself. Cache entries recorded
+by an earlier callback are materialized into later callbacks during the same
+evaluation. Unexpected BEAM exceptions keep their native class and stacktrace,
+including when they cross a parallel worker boundary; they are not converted
+into an expected evaluator error transport.
+
+Parallel responsibilities are deliberately split. `PtcRunner.Lisp.Eval.Parallel`
+owns `pmap`/`pcalls` callable adaptation, worker effect capture, expected-error
+classification, and outer operation records. `PtcRunner.Lisp.Eval.ParallelRunner`
+owns only indexed scheduling, heap-capped process lifecycle, the shared worker
+budget, deadlines, cancellation, and monitor cleanup. Every evaluator worker
+returns one envelope containing its outcome, effects, and child metadata; the
+runner attaches the authoritative input index.
+
+After scheduling begins, success or failure appends one outer parallel-call
+record. `count` is the input work count, `success_count` is the number of
+retained successful envelopes, and `error_count` is the remainder. Retained
+worker envelopes are merged in input order before the outer record is
+appended. On failure, the retained set contains successful envelopes plus the
+selected failing envelope; concurrently returned secondary failure envelopes
+are not retained. A heap-killed or otherwise abnormal worker may be unable to
+return its detailed ledger, but the shared capability-activity and quota
+counters remain authoritative for retry and limit enforcement.
+
 ## Ownership, limits, and concurrency
 
 `PtcRunner.Kernel.RunState` is the single owner of mutable per-run accounting.
@@ -273,6 +319,7 @@ capability.
 | Manifest-backed assembly | `PtcRunner.Kernel.Manifest`, `PtcRunner.Kernel.ProviderRegistry`, `PtcRunner.Kernel.RunBuilder`, `PtcRunner.Kernel.MissionInventory` |
 | Enforced resources | `PtcRunner.Kernel.Limits`, internal `PtcRunner.Kernel.RunState` and `PtcRunner.Kernel.BoundedWorker` |
 | Execution and dispatch | internal `PtcRunner.Kernel.Runner`, `PtcRunner.Kernel.Dispatcher`, `PtcRunner.Kernel.Evaluation`, `PtcRunner.Kernel.RuntimeTools` |
+| Lisp evaluation | `PtcRunner.Lisp.Eval`, `PtcRunner.Lisp.Eval.Context`, `PtcRunner.Lisp.Eval.Effects`, `PtcRunner.Lisp.Eval.Capture`, `PtcRunner.Lisp.Eval.HostContext`, `PtcRunner.Lisp.Eval.Parallel`, `PtcRunner.Lisp.Eval.ParallelRunner` |
 | Provider adapters | `PtcRunner.Kernel.FileCapability`, `PtcRunner.Kernel.LLMCapability`, `PtcRunner.Kernel.MCPSource`, `PtcRunner.Kernel.TraceCapability` |
 | Events and inspection | `PtcRunner.Kernel.EventSink`, `PtcRunner.Kernel.TraceLog`, internal `PtcRunner.Kernel.Events` and `PtcRunner.Kernel.ViewerAdapter` |
 | Interactive evaluation | `PtcRunner.Kernel.ReplSession` and `mix ptc.repl` |

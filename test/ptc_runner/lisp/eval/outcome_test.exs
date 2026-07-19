@@ -8,6 +8,7 @@ defmodule PtcRunner.Lisp.Eval.OutcomeTest do
   alias PtcRunner.Lisp.Eval.Abort
   alias PtcRunner.Lisp.Eval.Context
   alias PtcRunner.Lisp.Eval.Outcome
+  alias PtcRunner.Lisp.Eval.Parallel
   alias PtcRunner.Lisp.Parser
   alias PtcRunner.Lisp.Prelude.Compiler
   alias PtcRunner.Lisp.Runtime.Callable
@@ -38,6 +39,62 @@ defmodule PtcRunner.Lisp.Eval.OutcomeTest do
     assert error.outcome == {:control, :return, 7, context}
   end
 
+  test "parallel workers preserve unexpected exception class and stacktrace" do
+    context = context()
+    do_eval = fn value, eval_context -> {:ok, value, eval_context} end
+
+    error =
+      try do
+        Parallel.eval_pcalls(
+          [fn -> raise "unexpected parallel failure" end],
+          context,
+          do_eval
+        )
+
+        flunk("expected the worker exception to be re-raised")
+      rescue
+        error in RuntimeError -> {error, __STACKTRACE__}
+      end
+
+    assert {%RuntimeError{message: "unexpected parallel failure"}, stacktrace} = error
+
+    assert Enum.any?(
+             stacktrace,
+             &match?(
+               {__MODULE__,
+                :"-test parallel workers preserve unexpected exception class and stacktrace/1-fun-1-",
+                _, _},
+               &1
+             )
+           )
+  end
+
+  test "pmap dispatch preserves unexpected exception class and stacktrace" do
+    context = context()
+    do_eval = fn value, eval_context -> {:ok, value, eval_context} end
+
+    error =
+      try do
+        Parallel.eval_pmap(
+          &raise_unexpected_parallel_failure/1,
+          [[:value]],
+          context,
+          do_eval
+        )
+
+        flunk("expected the worker exception to be re-raised")
+      rescue
+        error in RuntimeError -> {error, __STACKTRACE__}
+      end
+
+    assert {%RuntimeError{message: "unexpected pmap failure"}, stacktrace} = error
+
+    assert Enum.any?(
+             stacktrace,
+             &match?({__MODULE__, :raise_unexpected_parallel_failure, 1, _}, &1)
+           )
+  end
+
   test "a failing tool keeps its recorded call in the public result" do
     tools = %{"explode" => fn _args -> raise "kaboom from tool" end}
 
@@ -49,6 +106,8 @@ defmodule PtcRunner.Lisp.Eval.OutcomeTest do
     assert [%{name: "explode", args: %{"x" => 1}, result: nil} = call] = step.tool_calls
     assert call.error =~ "kaboom from tool"
   end
+
+  defp raise_unexpected_parallel_failure(_value), do: raise("unexpected pmap failure")
 
   test "tool result cannot impersonate an evaluator failure" do
     attacker_token = make_ref()

@@ -11,13 +11,13 @@ defmodule PtcRunner.Lisp.Eval.Parallel do
   alias PtcRunner.Lisp.ChildResult
   alias PtcRunner.Lisp.Eval.Abort
   alias PtcRunner.Lisp.Eval.Apply
+  alias PtcRunner.Lisp.Eval.Capture
   alias PtcRunner.Lisp.Eval.Context, as: EvalContext
   alias PtcRunner.Lisp.Eval.Effects
   alias PtcRunner.Lisp.Eval.HostContext
   alias PtcRunner.Lisp.Eval.ParallelRunner
   alias PtcRunner.Lisp.Eval.ParallelRunner.Envelope
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
-  alias PtcRunner.Lisp.Runtime.Callable
   alias PtcRunner.Lisp.Runtime.Collection.Normalize
   alias PtcRunner.Lisp.UntrustedRenderer
 
@@ -49,7 +49,6 @@ defmodule PtcRunner.Lisp.Eval.Parallel do
       arguments = pmap_arguments(collection_values)
       deadline = parallel_deadline(eval_context)
       worker_context = %{eval_context | pmap_deadline: deadline}
-      callable = pmap_callable(fn_value, worker_context, do_eval)
 
       run(
         :pmap,
@@ -59,7 +58,9 @@ defmodule PtcRunner.Lisp.Eval.Parallel do
         started_at,
         timestamp,
         fn argument_list ->
-          capture_worker(worker_context, do_eval, fn -> Callable.call(callable, argument_list) end)
+          capture_worker(worker_context, do_eval, fn ->
+            apply_worker_callable(fn_value, argument_list, worker_context, do_eval)
+          end)
         end
       )
     end
@@ -79,20 +80,20 @@ defmodule PtcRunner.Lisp.Eval.Parallel do
     deadline = parallel_deadline(eval_context)
     worker_context = %{eval_context | pmap_deadline: deadline}
 
-    try do
-      thunks = Enum.map(function_values, &pcalls_thunk(&1, worker_context, do_eval))
+    case build_pcalls_thunks(function_values, worker_context, do_eval) do
+      {:ok, thunks} ->
+        run(
+          :pcalls,
+          thunks,
+          eval_context,
+          deadline,
+          started_at,
+          timestamp,
+          fn thunk -> capture_worker(worker_context, do_eval, thunk) end
+        )
 
-      run(
-        :pcalls,
-        thunks,
-        eval_context,
-        deadline,
-        started_at,
-        timestamp,
-        fn thunk -> capture_worker(worker_context, do_eval, thunk) end
-      )
-    rescue
-      error in RuntimeError -> {:error, {:pcalls_error, Exception.message(error)}}
+      {:error, message} ->
+        {:error, {:pcalls_error, message}}
     end
   end
 
@@ -134,7 +135,11 @@ defmodule PtcRunner.Lisp.Eval.Parallel do
         failure_envelope(captured_failure(kind, reason, stacktrace), effects)
     end
   rescue
-    error -> failure_envelope({:worker_message, Exception.message(error)}, Effects.empty())
+    error ->
+      failure_envelope(
+        {:unexpected_raise, :error, error, __STACKTRACE__},
+        Effects.empty()
+      )
   end
 
   # Merge every retained worker exactly once, then append the outer operation
@@ -181,12 +186,18 @@ defmodule PtcRunner.Lisp.Eval.Parallel do
         %Envelope{index: index, outcome: {:error, worker_reason}} =
           Enum.find(envelopes, &(not Envelope.success?(&1)))
 
-        reason =
-          worker_reason
-          |> classify_worker_failure(type, index)
-          |> refresh_contract_capability_activity(final_context)
+        case worker_reason do
+          {:unexpected_raise, kind, reason, stacktrace} ->
+            :erlang.raise(kind, reason, stacktrace)
 
-        Abort.error!(reason, final_context)
+          expected_reason ->
+            reason =
+              expected_reason
+              |> classify_worker_failure(type, index)
+              |> refresh_contract_capability_activity(final_context)
+
+            Abort.error!(reason, final_context)
+        end
     end
   end
 
@@ -284,14 +295,14 @@ defmodule PtcRunner.Lisp.Eval.Parallel do
        ),
        do: {:worker_control, signal}
 
-  defp captured_failure(:error, error, _stacktrace),
-    do: {:worker_message, Exception.message(error)}
+  defp captured_failure(:error, error, stacktrace),
+    do: {:unexpected_raise, :error, error, stacktrace}
 
-  defp captured_failure(:throw, signal, _stacktrace),
-    do: {:worker_message, "worker threw #{inspect(signal)}"}
+  defp captured_failure(:throw, signal, stacktrace),
+    do: {:unexpected_raise, :throw, signal, stacktrace}
 
-  defp captured_failure(kind, reason, _stacktrace),
-    do: {:worker_message, "worker #{kind}: #{inspect(reason)}"}
+  defp captured_failure(kind, reason, stacktrace),
+    do: {:unexpected_raise, kind, reason, stacktrace}
 
   defp parallel_abort_error({reason, message, nil}, _type, _index)
        when reason in [:memory_exceeded, :timeout, :parallel_capacity_exceeded],
@@ -333,8 +344,13 @@ defmodule PtcRunner.Lisp.Eval.Parallel do
     end
   end
 
-  defp pmap_callable(value, %EvalContext{} = context, do_eval) do
-    if keyword_runtime?(value), do: value, else: Apply.closure_to_fun(value, context, do_eval)
+  defp apply_worker_callable(value, args, %EvalContext{} = context, do_eval) do
+    context = Capture.materialize_context(context)
+
+    case Apply.apply_fun(value, args, context, do_eval) do
+      {:ok, result, _final_context} -> result
+      {:error, reason} -> Abort.error!(reason, context)
+    end
   end
 
   defp pcalls_thunk(
@@ -342,7 +358,7 @@ defmodule PtcRunner.Lisp.Eval.Parallel do
          %EvalContext{} = context,
          do_eval
        ) do
-    Apply.closure_to_fun(closure, context, do_eval)
+    {:ok, fn -> apply_worker_callable(closure, [], context, do_eval) end}
   end
 
   defp pcalls_thunk(
@@ -350,18 +366,31 @@ defmodule PtcRunner.Lisp.Eval.Parallel do
          %EvalContext{},
          _do_eval
        ) do
-    raise "pcalls requires zero-arity thunks, got function with arity #{length(params)}"
+    {:error, "pcalls requires zero-arity thunks, got function with arity #{length(params)}"}
   end
 
-  defp pcalls_thunk(fun, %EvalContext{}, _do_eval) when is_function(fun, 0), do: fun
+  defp pcalls_thunk(fun, %EvalContext{}, _do_eval) when is_function(fun, 0), do: {:ok, fun}
 
   defp pcalls_thunk(fun, %EvalContext{}, _do_eval) when is_function(fun) do
     {:arity, arity} = Function.info(fun, :arity)
-    raise "pcalls requires zero-arity thunks, got function with arity #{arity}"
+    {:error, "pcalls requires zero-arity thunks, got function with arity #{arity}"}
   end
 
   defp pcalls_thunk(value, %EvalContext{}, _do_eval) do
-    raise "pcalls requires callable thunks, got: #{inspect(value)}"
+    {:error, "pcalls requires callable thunks, got: #{inspect(value)}"}
+  end
+
+  defp build_pcalls_thunks(values, %EvalContext{} = context, do_eval) do
+    Enum.reduce_while(values, {:ok, []}, fn value, {:ok, thunks} ->
+      case pcalls_thunk(value, context, do_eval) do
+        {:ok, thunk} -> {:cont, {:ok, [thunk | thunks]}}
+        {:error, message} -> {:halt, {:error, message}}
+      end
+    end)
+    |> case do
+      {:ok, thunks} -> {:ok, Enum.reverse(thunks)}
+      {:error, message} -> {:error, message}
+    end
   end
 
   defp pmap_arguments([collection]) do

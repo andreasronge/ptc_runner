@@ -29,10 +29,9 @@ records for recently completed cross-cutting work.
   rendering without numeric limits, and continued JSON Schema enforcement at
   raw capability boundaries.
 - [`unified-evaluator-effects-and-outcomes.md`](unified-evaluator-effects-and-outcomes.md)
-  plans one typed evaluator-effects representation, one nestable capture stack,
-  one effect-bearing outcome protocol, and a scheduler-only parallel boundary
-  so audit accounting and retry safety no longer depend on duplicated implicit
-  transport paths.
+  records the implemented typed evaluator-effects representation, nestable
+  capture stack, effect-bearing outcome protocol, and scheduler-only parallel
+  boundary that centralize audit accounting and retry safety.
 
 Current user-facing material lives in [`../../guides/`](../../guides/). Git
 history is the archive for the completed Kernel migration, removed experiments,
