@@ -407,6 +407,17 @@ memory cannot reverse the external effect. The final available model turn must
 use `return` or `fail`; an intermediate success still commits its definitions,
 then the loop stops because no next turn remains.
 
+`max_turns` is agent policy, not additional authority. Each request and
+generated program still consumes the run-wide workflow capability and
+subordinate-evaluation quotas, and every turn shares the same deadline and
+mission capability counters. The loop also bounds the complete prospective
+model request before dispatch: `max_transcript_chars` defaults to 262,144,
+accepts positive values through 1,000,000, and measures the JSON-encoded
+`system`, accumulated correlated `messages`, and tool schema. A request over
+that ceiling or one that cannot be encoded fails without calling the provider.
+The provider's independent request-size validator remains authoritative and may
+apply a lower byte ceiling.
+
 Run it:
 
 ```bash
@@ -578,6 +589,12 @@ mission evaluations, bounded workflow/mission heaps, 64 workflow capability
 calls, 128 mission calls, 16 subordinate evaluations, bounded source/result
 sizes, and a bounded event sink. See `PtcRunner.Kernel.Limits.defaults/0` for
 the complete current set.
+
+Agent-level `max_turns`, `max_program_chars`, `max_observation_chars`, and
+`max_transcript_chars` narrow behavior inside those host limits. They cannot
+raise workflow capability, subordinate evaluation, mission capability, time,
+heap, memory, result, or event ceilings. Accumulated assistant/tool pairs are
+never silently dropped to fit the transcript bound.
 
 Authority is equally explicit:
 

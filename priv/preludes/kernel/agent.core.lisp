@@ -37,6 +37,20 @@
      "tool_call_id" (get action :tool-call-id)
      "content" content}))
 
+(defn- bounded-request [prompt-state messages max-transcript-chars]
+  (let [request {"system" (system-message prompt-state)
+                 "messages" messages
+                 "tools" [(agent.native/tool-schema)]}
+        encoded (json/generate-string request)]
+    (cond
+      (not (string? encoded))
+      (fail (result/error :invalid-transcript :encoding-failed))
+
+      (> (count encoded) max-transcript-chars)
+      (fail (result/error :transcript-limit :request-too-large))
+
+      :else request)))
+
 (defn run [task cfg]
   (let [max-turns (positive-int-or (get cfg "max_turns") 4 128)
         max-program-chars (positive-int-or (get cfg "max_program_chars") 64000 1000000)
@@ -55,10 +69,8 @@
              prompt-state initial-prompt-state]
         (if (>= turn max-turns)
           (fail (result/error :turn-limit :turn-limit-exceeded))
-          (let [response (llm/request
-                           {"system" (system-message prompt-state)
-                            "messages" messages
-                            "tools" [(agent.native/tool-schema)]})
+          (let [request (bounded-request prompt-state messages max-transcript-chars)
+                response (llm/request request)
                 action (agent.native/normalize response max-program-chars)]
             (workflow.event/annotate
               "agent-action"

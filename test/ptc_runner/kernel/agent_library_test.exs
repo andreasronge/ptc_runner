@@ -5,12 +5,15 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
   alias PtcRunner.Kernel.Capability
   alias PtcRunner.Kernel.Component
   alias PtcRunner.Kernel.EventSink
+  alias PtcRunner.Kernel.InspectionSink
   alias PtcRunner.Kernel.Library
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.LLMCapability
   alias PtcRunner.Kernel.MissionEnvironment
   alias PtcRunner.Kernel.RunConfig
   alias PtcRunner.Kernel.WorkflowEnvironment
+  alias PtcRunner.Lisp
+  alias PtcRunner.Lisp.TrustedTool
 
   test "llm/request is an ordinary bounded workflow capability" do
     parent = self()
@@ -101,7 +104,8 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
       ]
     }
 
-    {:ok, config} = agent_config([response])
+    {:ok, config} =
+      agent_config([response], [], provider_resources: [close_counter(self(), :terminal_success)])
 
     assert {:ok, %{value: %{"ok" => true, "value" => 42}, usage: usage}} =
              Kernel.run(~S|(agent.core/run "Compute the value" {"max_turns" 2})|, config)
@@ -122,6 +126,8 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     assert [annotation] = Enum.filter(events, &(&1.type == "workflow-annotation"))
     assert annotation.data.annotation_type == "agent-action"
     assert annotation.data.data == %{"turn" => 0, "kind" => "tool-call"}
+    assert_receive {:provider_closed, :terminal_success}
+    refute_receive {:provider_closed, :terminal_success}
   end
 
   test "agent.core persists a defn across a correlated intermediate turn" do
@@ -443,6 +449,208 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
              )
   end
 
+  @tag :tmp_dir
+  test "agent.core bounds the complete encoded request at the exact character ceiling", %{
+    tmp_dir: dir
+  } do
+    response = %{
+      content: nil,
+      tool_calls: [
+        %{id: "done", name: "run_ptc_lisp", args: %{"program" => "(return 42)"}}
+      ]
+    }
+
+    task = "quoted \"text\" with \\ slash, newline\n, é, \u2028, \u2029, and 🧪"
+    prompt_source = tiny_prompt_source()
+
+    {:ok, baseline_config} =
+      agent_config([response], [], prompt_source: prompt_source, input: %{"task" => task})
+
+    assert {:ok, _result} =
+             Kernel.run(~S|(agent.core/run data/task {"max_turns" 1})|, baseline_config)
+
+    assert_receive {:agent_request, baseline_request}
+    encoded_chars = baseline_request |> Jason.encode!() |> String.length()
+
+    raw_chars = String.length(baseline_request["system"] <> task)
+
+    assert encoded_chars > raw_chars
+
+    {:ok, exact_config} =
+      agent_config([response], [], prompt_source: prompt_source, input: %{"task" => task})
+
+    assert {:ok, _result} =
+             Kernel.run(
+               ~s|(agent.core/run data/task {"max_turns" 1 "max_transcript_chars" #{encoded_chars}})|,
+               exact_config
+             )
+
+    assert_receive {:agent_request, exact_request}
+    assert String.length(Jason.encode!(exact_request)) == encoded_chars
+
+    {:ok, inspection_sink} =
+      InspectionSink.start(run_id: "transcript-rejected", trace_id: "transcript-rejected")
+
+    {:ok, rejected_config} =
+      agent_config([response], [],
+        prompt_source: prompt_source,
+        input: %{"task" => task},
+        provider_resources: [close_counter(self(), :transcript_rejected)],
+        inspection_sink: inspection_sink,
+        inspection_path: Path.join(dir, "transcript-rejected.inspection.jsonl")
+      )
+
+    assert {:error, %{kind: :workflow_failed}} =
+             Kernel.run(
+               ~s|(agent.core/run data/task {"max_turns" 1 "max_transcript_chars" #{encoded_chars - 1}})|,
+               rejected_config
+             )
+
+    refute_receive {:agent_request, _request}
+    assert_receive {:provider_closed, :transcript_rejected}
+    refute_receive {:provider_closed, :transcript_rejected}
+    assert {:ok, []} = InspectionSink.records(inspection_sink)
+
+    {:ok, bundle} = agent_bundle(prompt_source: prompt_source)
+
+    assert {:ok, %{return: {:__ptc_fail__, failure}}} =
+             Lisp.run_native(
+               ~S|(agent.core/run "x" {"max_turns" 1 "max_transcript_chars" 1})|,
+               prelude: bundle.prelude,
+               tools: required_agent_tools(),
+               filter_context: false,
+               caller: :kernel
+             )
+
+    {formatted_failure, false} = Lisp.format_value(failure)
+    assert formatted_failure =~ ":kind :transcript-limit"
+    assert formatted_failure =~ ":reason :request-too-large"
+  end
+
+  @tag :tmp_dir
+  test "agent.core rejects an unencodable request before provider dispatch", %{tmp_dir: dir} do
+    response = %{
+      content: nil,
+      tool_calls: [
+        %{id: "unused", name: "run_ptc_lisp", args: %{"program" => "(return 42)"}}
+      ]
+    }
+
+    {:ok, inspection_sink} =
+      InspectionSink.start(run_id: "encoding-rejected", trace_id: "encoding-rejected")
+
+    {:ok, config} =
+      agent_config([response], [],
+        prompt_source: tiny_prompt_source(),
+        provider_resources: [close_counter(self(), :encoding_rejected)],
+        inspection_sink: inspection_sink,
+        inspection_path: Path.join(dir, "encoding-rejected.inspection.jsonl")
+      )
+
+    assert {:error, %{kind: :workflow_failed, usage: usage}} =
+             Kernel.run(
+               ~S|(agent.core/run (fn [] 1) {"max_turns" 1 "max_transcript_chars" 1000000})|,
+               config
+             )
+
+    assert usage.capability_calls.workflow == %{}
+    refute_receive {:agent_request, _request}
+    assert_receive {:provider_closed, :encoding_rejected}
+    refute_receive {:provider_closed, :encoding_rejected}
+    assert {:ok, []} = InspectionSink.records(inspection_sink)
+
+    refute Enum.any?(EventSink.events(config.event_sink), fn event ->
+             event.type == "capability-started" and event.data[:name] == "llm-request"
+           end)
+
+    {:ok, bundle} = agent_bundle(prompt_source: tiny_prompt_source())
+
+    assert {:ok, %{return: {:__ptc_fail__, failure}}} =
+             Lisp.run_native(
+               ~S|(agent.core/run (fn [] 1) {"max_turns" 1 "max_transcript_chars" 1000000})|,
+               prelude: bundle.prelude,
+               tools: required_agent_tools(),
+               filter_context: false,
+               caller: :kernel
+             )
+
+    {formatted_failure, false} = Lisp.format_value(failure)
+    assert formatted_failure =~ ":ok false"
+    assert formatted_failure =~ ":kind :invalid-transcript"
+    assert formatted_failure =~ ":reason :encoding-failed"
+  end
+
+  test "an intermediate result on the final turn commits before turn-limit failure" do
+    response = %{
+      content: nil,
+      tool_calls: [
+        %{id: "continue", name: "run_ptc_lisp", args: %{"program" => "(def committed 42)"}}
+      ]
+    }
+
+    {:ok, config} =
+      agent_config([response], [], provider_resources: [close_counter(self(), :final_turn)])
+
+    assert {:error, %{kind: :workflow_failed, reason: :explicit_failure, usage: usage}} =
+             Kernel.run(~S|(agent.core/run "Use the final turn" {"max_turns" 1})|, config)
+
+    assert usage.subordinate_evaluations == 1
+    assert usage.evaluation_memory_bytes > 24
+    assert_receive {:agent_request, _request}
+    refute_receive {:agent_request, _request}
+    assert_receive {:provider_closed, :final_turn}
+    refute_receive {:provider_closed, :final_turn}
+
+    assert Enum.any?(EventSink.events(config.event_sink), fn event ->
+             event.type == "evaluation-stopped" and event.data[:environment] == :mission and
+               event.data[:status] == :continued
+           end)
+  end
+
+  test "host quotas can stop a continued loop before max_turns" do
+    continue = %{
+      content: nil,
+      tool_calls: [
+        %{id: "continue", name: "run_ptc_lisp", args: %{"program" => "(def committed 42)"}}
+      ]
+    }
+
+    finish = %{
+      content: nil,
+      tool_calls: [
+        %{id: "finish", name: "run_ptc_lisp", args: %{"program" => "(return committed)"}}
+      ]
+    }
+
+    {:ok, llm_limited} =
+      agent_config([continue, finish], [workflow_capability_calls: 1],
+        provider_resources: [close_counter(self(), :llm_quota)]
+      )
+
+    assert {:error, %{kind: :workflow_failed, usage: llm_usage}} =
+             Kernel.run(~S|(agent.core/run "Quota" {"max_turns" 4})|, llm_limited)
+
+    assert llm_usage.subordinate_evaluations == 1
+    assert_receive {:agent_request, _first}
+    refute_receive {:agent_request, _second}
+    assert_receive {:provider_closed, :llm_quota}
+    refute_receive {:provider_closed, :llm_quota}
+
+    {:ok, evaluation_limited} =
+      agent_config([continue, finish], [subordinate_evaluations: 1],
+        provider_resources: [close_counter(self(), :evaluation_quota)]
+      )
+
+    assert {:error, %{kind: :workflow_failed, usage: evaluation_usage}} =
+             Kernel.run(~S|(agent.core/run "Quota" {"max_turns" 4})|, evaluation_limited)
+
+    assert evaluation_usage.subordinate_evaluations == 1
+    assert_receive {:agent_request, _first}
+    assert_receive {:agent_request, _second}
+    assert_receive {:provider_closed, :evaluation_quota}
+    refute_receive {:provider_closed, :evaluation_quota}
+  end
+
   test "agent.core corrects protocol and evaluation errors" do
     mixed = %{
       content: "I will explain",
@@ -627,7 +835,11 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
         end
       )
 
-    {:ok, config} = agent_config([response], [], mission_capabilities: [touch])
+    {:ok, config} =
+      agent_config([response], [],
+        mission_capabilities: [touch],
+        provider_resources: [close_counter(self(), :non_retryable)]
+      )
 
     assert {:error, %{kind: :workflow_failed}} =
              Kernel.run(~S|(agent.core/run "Do not repeat the read" {"max_turns" 3})|, config)
@@ -636,6 +848,8 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     assert_receive {:agent_request, _first}
     refute_receive :touch_called
     refute_receive {:agent_request, _second}
+    assert_receive {:provider_closed, :non_retryable}
+    refute_receive {:provider_closed, :non_retryable}
   end
 
   test "agent.core does not retry an ordinary runtime error after a mission runtime tool" do
@@ -952,15 +1166,25 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
       ]
     }
 
-    {:ok, explicit_config} = agent_config([explicit])
+    {:ok, explicit_config} =
+      agent_config([explicit], [], provider_resources: [close_counter(self(), :explicit_failure)])
 
     assert {:error, %{kind: :workflow_failed, reason: :explicit_failure}} =
              Kernel.run(~S|(agent.core/run "Fail" {"max_turns" 1})|, explicit_config)
 
-    {:ok, provider_config} = agent_config([{:error, :transport_down}])
+    assert_receive {:provider_closed, :explicit_failure}
+    refute_receive {:provider_closed, :explicit_failure}
+
+    {:ok, provider_config} =
+      agent_config([{:error, :transport_down}], [],
+        provider_resources: [close_counter(self(), :provider_failure)]
+      )
 
     assert {:error, %{kind: :workflow_failed, reason: :explicit_failure}} =
              Kernel.run(~S|(agent.core/run "Provider" {"max_turns" 1})|, provider_config)
+
+    assert_receive {:provider_closed, :provider_failure}
+    refute_receive {:provider_closed, :provider_failure}
 
     mixed = %{"content" => "prose", "tool_calls" => []}
     {:ok, quota_config} = agent_config([mixed, explicit], workflow_capability_calls: 1)
@@ -989,41 +1213,7 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
         max_request_bytes: Keyword.get(opts, :llm_max_request_bytes, 1_000_000)
       )
 
-    names = [
-      "agent.core",
-      "agent.feedback",
-      "agent.native",
-      "agent.prompt",
-      "agent.retry",
-      "kernel",
-      "llm",
-      "result",
-      "workflow.event"
-    ]
-
-    {:ok, components} = Library.components(names)
-
-    components =
-      case Keyword.fetch(opts, :prompt_source) do
-        {:ok, source} ->
-          {:ok, replacement} =
-            Component.new(
-              id: "agent.prompt",
-              source: source,
-              dependencies: ["kernel"],
-              origin: "test"
-            )
-
-          Enum.map(components, fn
-            %{id: "agent.prompt"} -> replacement
-            component -> component
-          end)
-
-        :error ->
-          components
-      end
-
-    {:ok, bundle} = Kernel.compile_bundle(components)
+    {:ok, bundle} = agent_bundle(opts)
     {:ok, workflow} = WorkflowEnvironment.new(bundle: bundle, capabilities: [llm])
     {:ok, mission} = mission_environment(opts)
     limit_overrides = Keyword.put_new(limit_overrides, :evaluation_timeout_ms, 5_000)
@@ -1033,9 +1223,12 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     RunConfig.new(
       workflow_environment: workflow,
       mission_environment: mission,
-      input: %{},
+      input: Keyword.get(opts, :input, %{}),
       limits: limits,
-      event_sink: sink
+      event_sink: sink,
+      provider_resources: Keyword.get(opts, :provider_resources, []),
+      inspection_sink: Keyword.get(opts, :inspection_sink),
+      inspection_path: Keyword.get(opts, :inspection_path)
     )
   end
 
@@ -1091,6 +1284,61 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     [_, body | _] = String.split(feedback, ~s|<untrusted_ptc_output source="evaluation">|)
     [body | _] = String.split(body, "</untrusted_ptc_output>")
     body
+  end
+
+  defp tiny_prompt_source do
+    """
+    (ns agent.prompt "Tiny transcript-boundary prompt." {:visibility :discoverable})
+    (defn initial-state [cfg] {:turns-remaining (get cfg "max_turns")})
+    (defn render [_state] "tiny prompt")
+    (defn transition [state _event] state)
+    """
+  end
+
+  defp agent_bundle(opts) do
+    names =
+      ~w(agent.core agent.feedback agent.native agent.prompt agent.retry kernel llm result workflow.event)
+
+    with {:ok, components} <- Library.components(names),
+         {:ok, components} <- replace_prompt(components, opts) do
+      Kernel.compile_bundle(components)
+    end
+  end
+
+  defp replace_prompt(components, opts) do
+    case Keyword.fetch(opts, :prompt_source) do
+      {:ok, source} ->
+        with {:ok, replacement} <-
+               Component.new(
+                 id: "agent.prompt",
+                 source: source,
+                 dependencies: ["kernel"],
+                 origin: "test"
+               ) do
+          {:ok,
+           Enum.map(components, fn
+             %{id: "agent.prompt"} -> replacement
+             component -> component
+           end)}
+        end
+
+      :error ->
+        {:ok, components}
+    end
+  end
+
+  defp close_counter(parent, label) do
+    fn ->
+      send(parent, {:provider_closed, label})
+      :ok
+    end
+  end
+
+  defp required_agent_tools do
+    Map.new(
+      ~w(kernel-eval kernel-mission-inventory kernel-mission-model-context llm-request workflow-annotate),
+      &{&1, %TrustedTool{function: fn _arguments -> %{status: :error} end}}
+    )
   end
 
   defp mission_environment(opts) do

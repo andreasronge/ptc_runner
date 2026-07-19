@@ -281,6 +281,23 @@ The complete current limits are documented by `PtcRunner.Kernel.Limits`.
 to narrow it. Workflow turn counts, retries, and other policy budgets belong in
 Lisp below those enforced host ceilings.
 
+The shipped `agent.core` normalizes its policy limits once. Before every model
+call it constructs the prospective request exactly once, JSON-encodes the
+complete `system`, accumulated provider-correlated `messages`, and tool schema,
+then applies `max_transcript_chars`. The default is 262,144 encoded characters;
+a positive override may narrow or raise it only through the hard prelude
+maximum of 1,000,000. Encoding failure and an over-limit request terminate
+before `llm-request`, so they consume no provider call. This deterministic
+character ceiling complements rather than replaces `LLMCapability`'s final
+retained-size/byte validation. The loop does not compact or discard earlier
+assistant/tool pairs.
+
+`max_turns` likewise grants no quota. A loop may stop first at the workflow
+`llm-request` quota, subordinate-evaluation quota, shared run deadline, or any
+other host ceiling. Runner teardown closes and stops RunState after every
+terminal path, drains attached provider work, and invokes each configured
+idempotent provider-resource closer once for that run.
+
 ## Results and events
 
 The public result algebra is `{:ok, %PtcRunner.Kernel.Result{}}` or
