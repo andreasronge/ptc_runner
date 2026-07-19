@@ -26,6 +26,8 @@ defmodule Mix.Tasks.Ptc.Viewer do
       |> maybe_add(:open, if(opts[:no_open], do: false, else: true))
       |> maybe_add(:kernel_trace_adapter, default_kernel_adapter())
       |> maybe_add(:inspection_adapter, inspection_adapter(opts[:inspection_file]))
+      |> maybe_add(:repl_adapter, default_repl_adapter())
+      |> maybe_add(:repl_config, repl_config(opts[:trace_dir]))
 
     case PtcViewer.start(viewer_opts) do
       {:ok, _pid} ->
@@ -52,4 +54,13 @@ defmodule Mix.Tasks.Ptc.Viewer do
 
   defp inspection_adapter(nil), do: nil
   defp inspection_adapter(_path), do: default_kernel_adapter()
+
+  defp default_repl_adapter do
+    adapter = Module.concat([PtcRunner, Kernel, ViewerReplAdapter])
+    if Code.ensure_loaded?(adapter), do: adapter, else: nil
+  end
+
+  defp repl_config(trace_dir) do
+    %{trace_dir: Path.expand(trace_dir || "traces"), profile_id: "log-analysis-v1"}
+  end
 end

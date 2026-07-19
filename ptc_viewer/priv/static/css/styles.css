@@ -1682,14 +1682,19 @@ input[type="file"] { display: none; }
 .kt-token-total td { border-bottom: none; color: var(--accent); font-weight: 600; }
 .kt-token-total td:first-child { color: var(--muted); }
 .kt-token-bar {
-  display: flex;
-  gap: 2px;
+  display: block;
+  width: 100%;
   height: 14px;
   margin: 6px 0 10px;
   border-radius: 4px;
   overflow: hidden;
 }
-.kt-token-seg { flex-basis: 0; min-width: 2px; }
+.kt-token-color-system { fill: #3987e5; background: #3987e5; }
+.kt-token-color-inventory { fill: #008300; background: #008300; }
+.kt-token-color-tools { fill: #d55181; background: #d55181; }
+.kt-token-color-user { fill: #c98500; background: #c98500; }
+.kt-token-color-assistant { fill: #199e70; background: #199e70; }
+.kt-token-color-feedback { fill: #d95926; background: #d95926; }
 .kt-token-legend {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));

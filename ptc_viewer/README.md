@@ -1,8 +1,10 @@
 # PTC Kernel Viewer
 
-A local, read-only web UI for canonical PtcRunner Kernel traces. It uses the
-same source-scoped `Kernel.TraceLog` projections as `log.core`, so run metadata,
-turns, filters, counters, pagination, and validation have one implementation.
+A local web UI for canonical PtcRunner Kernel traces. Its Runs tab is read-only
+and uses the same source-scoped `Kernel.TraceLog` projections as `log.core`, so
+run metadata, turns, filters, counters, pagination, and validation have one
+implementation. When launched from the PtcRunner root, it also enables a
+bounded log-analysis REPL backed by Core.
 
 The Viewer accepts only the canonical Kernel event model. Trace loading,
 validation, run derivation, filtering, and pagination remain owned by
@@ -20,6 +22,26 @@ The root task installs `PtcRunner.Kernel.ViewerAdapter` automatically, starts a
 local server on port 4123, and opens the browser. Use `--port`, `--trace-dir`,
 `--inspection-file`, or `--no-open` to override those defaults. The server
 always binds to loopback.
+
+The REPL evaluates PTC-Lisp against an immutable capture of the selected trace
+directory. The server fixes the `log-analysis-v1` profile: normal bounded
+PTC-Lisp built-ins, the shipped `log.core` component (`log/runs`, `log/run`,
+`log/turns`, and `log/counters`), four read-only trace capabilities, and the
+ordinary runtime/capability introspection routes. It does not grant filesystem,
+network, LLM, MCP, workflow-event, or arbitrary prelude authority.
+
+Forms such as `(log/runs {})`, `(log/run "run-id")`, and
+`(log/turns "run-id" {})` return bounded values, prints, errors, continuation
+effects, duration, and remaining usage. The server-owned transcript survives a
+page reload. Reset first closes and persists the analysis run, then captures a
+new snapshot and starts with fresh definitions; Close persists the analysis
+trace and ends further evaluation.
+
+Entered human-REPL source and returned inspection payloads are not copied into
+the canonical analysis trace. Model-generated PTC-Lisp and the feedback sent
+back to a model are visible only when the original run has an explicitly pinned
+private inspection artifact, in the Runs tab's model dialogue. The human REPL
+transcript is separate presentation state.
 
 The UI first lists bounded canonical run summaries. Selecting a run loads its
 metadata and turn events through the shared Kernel query layer. The run view
@@ -144,6 +166,9 @@ PtcViewer.stop(pid)
 
 Configuration is scoped to the individual server instance; starting another
 viewer does not mutate application-global adapter or trace-directory state.
+Standalone hosts may additionally supply a module implementing
+`PtcViewer.ReplAdapter` plus opaque `:repl_config`; omitting it preserves the
+Runs-only UI.
 
 ## HTTP API
 
@@ -154,6 +179,11 @@ viewer does not mutate application-global adapter or trace-directory state.
 | `GET /api/kernel/runs/:run_id/turns` | `list_turns` with bounded filters and pagination |
 | `GET /api/kernel/counters` | `counters` |
 | `GET /api/inspection/runs/:run_id` | Fixed private artifact records for the exact run |
+| `GET /api/repl` | Bootstrap or refresh the server-owned analysis session |
+| `POST /api/repl/evaluations` | Evaluate one bounded PTC-Lisp form |
+| `POST /api/repl/templates` | Format an inert `log/run` or `log/turns` editor template |
+| `POST /api/repl/reset` | Persist the current session and capture a replacement |
+| `DELETE /api/repl` | Close and persist the current analysis session |
 
 Query parameters are passed to `Kernel.TraceLog`; `limit` is decoded as an
 integer and `tags` as a JSON object. The routes preserve not-found, invalid

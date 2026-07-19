@@ -410,7 +410,7 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
     replacement_records = persisted_records(first_path, "replacement")
     refute replacement_records == first_records
 
-    assert {:ok, {_address, port}} = ThousandIsland.listener_info(viewer)
+    assert {:ok, {_address, port}} = PtcViewer.listener_info(viewer)
 
     response = Req.get!("http://127.0.0.1:#{port}/api/inspection/runs/run-1")
     assert response.status == 200

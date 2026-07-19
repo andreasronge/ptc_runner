@@ -345,7 +345,10 @@ defmodule PtcRunner.Kernel.ViewerReplAdapterTest do
   defp random_id, do: Base.url_encode64(:crypto.strong_rand_bytes(32), padding: false)
 
   defp await_backend_state(pid, predicate) do
-    deadline = System.monotonic_time(:millisecond) + 1_000
+    # The callback task can be starved briefly when the full 4k-test suite is
+    # saturating schedulers; the backend operation itself remains bounded by
+    # its independent 20-second watchdog.
+    deadline = System.monotonic_time(:millisecond) + 5_000
     do_await_backend_state(pid, predicate, deadline)
   end
 

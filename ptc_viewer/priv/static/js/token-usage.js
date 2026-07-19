@@ -21,12 +21,12 @@ const USAGE_KEYS = ['input', 'output', 'cache_read', 'cache_creation', 'total_co
 // Fixed categorical slot order (validated palette, dark surface); color
 // follows the section identity even when a section is empty.
 const SECTIONS = [
-  { key: 'system', label: 'System · instructions', color: '#3987e5' },
-  { key: 'inventory', label: 'System · mission inventory', color: '#008300' },
-  { key: 'tools', label: 'Tool schemas', color: '#d55181' },
-  { key: 'user', label: 'User messages', color: '#c98500' },
-  { key: 'assistant', label: 'Assistant history', color: '#199e70' },
-  { key: 'feedback', label: 'Tool feedback', color: '#d95926' }
+  { key: 'system', label: 'System · instructions' },
+  { key: 'inventory', label: 'System · mission inventory' },
+  { key: 'tools', label: 'Tool schemas' },
+  { key: 'user', label: 'User messages' },
+  { key: 'assistant', label: 'Assistant history' },
+  { key: 'feedback', label: 'Tool feedback' }
 ];
 
 const RESENT_KEYS = new Set(['system', 'inventory', 'tools']);
@@ -225,19 +225,29 @@ function renderComposition(usage) {
     ? `≈${formatCount(Math.round(bucket.estTokens))} tokens`
     : `${formatCount(bucket.chars)} chars`;
 
+  let offset = 0;
+  const segments = buckets.map(bucket => {
+    const width = (bucket[measure] / total) * 100;
+    const segment = { bucket, x: offset, width };
+    offset += width;
+    return segment;
+  });
+
   return `
     <div class="kt-token-composition">
       <div class="kt-turn-label">Input composition${usage.estimable ? ' (estimated)' : ' (by characters)'}</div>
-      <div class="kt-token-bar" role="img" aria-label="Input composition by request section">
-        ${buckets.map(bucket => `
-          <span class="kt-token-seg" style="flex-grow:${bucket[measure] / total};background:${bucket.color}"
-            title="${escapeHtml(`${bucket.label}: ${value(bucket)} · ${Math.round((bucket[measure] / total) * 100)}%`)}"></span>
+      <svg class="kt-token-bar" viewBox="0 0 100 10" preserveAspectRatio="none"
+        role="img" aria-label="Input composition by request section">
+        ${segments.map(({ bucket, x, width }) => `
+          <rect class="kt-token-color-${bucket.key}" x="${x}" width="${width}" height="10">
+            <title>${escapeHtml(`${bucket.label}: ${value(bucket)} · ${Math.round((bucket[measure] / total) * 100)}%`)}</title>
+          </rect>
         `).join('')}
-      </div>
+      </svg>
       <ul class="kt-token-legend">
         ${buckets.map(bucket => `
           <li>
-            <span class="kt-token-chip" style="background:${bucket.color}"></span>
+            <span class="kt-token-chip kt-token-color-${bucket.key}"></span>
             <span class="kt-token-name">${escapeHtml(bucket.label)}</span>
             <span class="kt-token-value">${escapeHtml(value(bucket))} · ${Math.round((bucket[measure] / total) * 100)}%</span>
           </li>
