@@ -147,6 +147,26 @@ defmodule PtcViewer.DialogueRenderTest do
       assert rendered =~ ~r{kt-code kt-code-lisp">.*?class="hljs-}s
     end
 
+    test "renders continued evaluations as successful" do
+      rendered =
+        render_fixtures(%{
+          turns: fn turns ->
+            update_in(turns, ["items"], fn items ->
+              Enum.map(items, fn item ->
+                if item["type"] == "evaluation-stopped" and
+                     item["data"]["status"] == "returned" do
+                  put_in(item, ["data", "status"], "continued")
+                else
+                  item
+                end
+              end)
+            end)
+          end
+        })
+
+      assert rendered =~ ~s|class="kt-status kt-status-success">continued</span>|
+    end
+
     test "verifies captured source hashes against canonical evaluation events", %{
       rendered: rendered
     } do
@@ -219,7 +239,7 @@ defmodule PtcViewer.DialogueRenderTest do
       assert length(Regex.scan(~r/class="kt-provenance/, rendered)) == 1
     end
 
-    test "shows the first system prompt by default and keeps raw capture secondary", %{
+    test "shows turn-specific system prompts and keeps raw capture secondary", %{
       rendered: rendered
     } do
       assert rendered =~ ~r/<details class="kt-system-prompt" open>/
@@ -230,7 +250,9 @@ defmodule PtcViewer.DialogueRenderTest do
       assert rendered =~ "PTC_AGENT_PROMPT_V1"
       assert rendered =~ "Available API"
       assert rendered =~ "Exact captured prompt"
-      assert rendered =~ "System prompt: same as LLM call 1."
+      assert rendered =~ "System prompt changed"
+      assert rendered =~ "FINAL TURN: the next program must call"
+      refute rendered =~ "System prompt: same as LLM call 1."
       refute rendered =~ "Edited or unknown prompt format"
       refute rendered =~ "Exact request sent to the model"
     end

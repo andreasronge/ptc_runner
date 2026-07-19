@@ -1,7 +1,10 @@
 (ns agent.prompt "Domain-blind system-prompt policy for agent.core." {:visibility :discoverable})
 
-(defn initial-state [_cfg]
-  {:revision 0})
+(defn initial-state [cfg]
+  {:revision 0
+   :turns-remaining (get cfg "max_turns")
+   :max-observation-chars (get cfg "max_observation_chars")
+   :max-program-chars (get cfg "max_program_chars")})
 
 (defn- inline-json [value]
   (let [encoded (json/generate-string value)
@@ -222,19 +225,31 @@
         (str "PTC_AGENT_PROMPT_V1\n\n"
              "Instructions\n"
              "Use the run_ptc_lisp tool exactly once per turn with one program string.\n"
-             "End successful programs with (return value) and explicit failures with (fail value).\n"
+             "Ordinary expression results are intermediate observations and continue to another turn.\n"
+             "Definitions created by successful programs persist and can be reused by later programs in this run.\n"
+             "Failed evaluations roll back every definition created by that failed program.\n"
+             "Use (return value) only when the task is complete; (return value) completes successfully.\n"
+             "Use (fail value) only when the task cannot be completed; (fail value) aborts the run.\n"
+             "Generated programs run only against the advertised mission API below.\n"
+             "Do not repeat irreversible capability effects merely to reconstruct state.\n"
+             (if (= 1 (get state :turns-remaining))
+               "FINAL TURN: the next program must call (return value) or (fail value).\n"
+               "")
              "Do not answer in prose.\n\n"
              "PTC-Lisp\n"
              "- PTC-Lisp is a bounded Clojure-like language.\n"
              "- Use let, fn, def/defn, if, loop/recur, map/filter/reduce, and collection helpers.\n"
              "- Also available: cond/case, ->/->>, for/doseq, string, set, regex, math, date/time, and json helpers.\n"
              "- Decoded JSON maps use string keys; read them with get/get-in.\n"
-             "- Send a self-contained program. Top-level forms are evaluated in order; retries cannot rely on definitions from failed attempts.\n"
+             "- Explore first, return last. Use (println ...) only for concise diagnostics; output previews are bounded.\n"
+             "- Successful def and defn bindings remain callable in later turns; failed turns publish none of their candidate bindings.\n"
              "- Value references are values; call only function references.\n"
              "- Call granted capabilities only with the exact tool/... forms shown below.\n"
              "- Fixed namespaces: clojure.core/core, clojure.string/str/string, clojure.set/set, clojure.walk/walk, regex, Math, System, Boolean, numeric/date/time namespaces, data, tool, and json.\n"
              "- No ns/require/refer/import, user-defined macros, eval/read-string, host file I/O, or general Java interop.\n\n"
              "Examples\n"
+             "Turn 1: (defn add-one [x] (+ x 1))\n"
+             "Turn 2: (return (add-one 41))\n"
              "(let [rows (get data/input \"rows\") active (filter #(true? (get % \"active\")) rows)] (return (mapv #(get % \"id\") active)))\n"
              "(let [response (tool/exact-name {\"query\" \"value\"})] (if (= :ok (get response :status)) (return (get response :value)) (fail response)))\n\n"
              (render-api
@@ -245,5 +260,7 @@
 
 (defn transition [state event]
   (if (and (map? state) (map? event))
-    state
+    (assoc state
+           :revision (inc (get state :revision 0))
+           :turns-remaining (get event :turns-remaining))
     nil))

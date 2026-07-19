@@ -4,7 +4,7 @@
   {"type" "function"
    "function"
    {"name" "run_ptc_lisp"
-    "description" "Run one PTC-Lisp program ending in return or fail."
+    "description" "Run one PTC-Lisp program. Ordinary success continues; return completes and fail aborts."
     "parameters"
     {"type" "object"
      "additionalProperties" false

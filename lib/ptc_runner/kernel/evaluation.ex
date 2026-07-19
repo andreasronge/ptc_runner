@@ -6,6 +6,12 @@ defmodule PtcRunner.Kernel.Evaluation do
   source exclusively against a mission environment, and commits candidate
   memory only after successful bounded completion. Every failure path releases
   the lease without changing prior memory.
+
+  An ordinary successful value is projected as `:continued`; an explicit
+  `(return value)` is projected as `:returned`; and `(fail value)` is projected
+  as `:failed`. Continued and returned evaluations commit native memory before
+  exposing only an inert public value. Continued results additionally expose
+  bounded chronological prints for the next agent turn.
   """
 
   alias PtcRunner.Kernel.Dispatcher
@@ -182,7 +188,7 @@ defmodule PtcRunner.Kernel.Evaluation do
   defp commit_result(state, lease, step) do
     case RunState.commit_evaluation(state, lease, step.memory) do
       :ok ->
-        %{outcome: :returned, value: step.return |> returned_value() |> Lisp.externalize_value()}
+        classify_success(step)
 
       {:error, :memory_exceeded} ->
         %{outcome: :memory_exceeded}
@@ -190,6 +196,18 @@ defmodule PtcRunner.Kernel.Evaluation do
       {:error, _reason} ->
         %{outcome: :evaluation_error, kind: :state}
     end
+  end
+
+  defp classify_success(%{return: {:__ptc_return__, value}}) do
+    %{outcome: :returned, value: Lisp.externalize_value(value)}
+  end
+
+  defp classify_success(step) do
+    %{
+      outcome: :continued,
+      value: Lisp.externalize_value(step.return),
+      prints: step.prints || []
+    }
   end
 
   defp release_failure(state, lease, step, mission_calls_before) do
@@ -273,8 +291,6 @@ defmodule PtcRunner.Kernel.Evaluation do
   defp source_within_limit(source, limit),
     do: if(byte_size(source) <= limit, do: :ok, else: {:error, :source_exceeded})
 
-  defp returned_value({:__ptc_return__, value}), do: value
-  defp returned_value(value), do: value
   defp failure(kind, reason), do: %{outcome: kind, kind: kind, reason: reason}
 
   defp maybe_emit_limit(state, event_sink, %{outcome: outcome} = result)

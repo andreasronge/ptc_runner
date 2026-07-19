@@ -124,6 +124,206 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     assert annotation.data.data == %{"turn" => 0, "kind" => "tool-call"}
   end
 
+  test "agent.core persists a defn across a correlated intermediate turn" do
+    define = %{
+      content: nil,
+      tool_calls: [
+        %{
+          id: "define-add-one",
+          name: "run_ptc_lisp",
+          args: %{"program" => "(defn add-one [x] (+ x 1))"}
+        }
+      ]
+    }
+
+    finish = %{
+      content: nil,
+      tool_calls: [
+        %{
+          id: "return-answer",
+          name: "run_ptc_lisp",
+          args: %{"program" => "(return (add-one 41))"}
+        }
+      ]
+    }
+
+    {:ok, config} = agent_config([define, finish])
+
+    assert {:ok, %{value: %{"ok" => true, "value" => 42}, usage: usage}} =
+             Kernel.run(~S|(agent.core/run "Build then use a helper" {"max_turns" 2})|, config)
+
+    assert usage.subordinate_evaluations == 2
+    assert_receive {:agent_request, first_request}
+    assert_receive {:agent_request, second_request}
+    refute first_request["system"] =~ "FINAL TURN:"
+
+    assert second_request["system"] =~
+             "FINAL TURN: the next program must call (return value) or (fail value)."
+
+    assert [
+             %{"role" => "user", "content" => "Build then use a helper"},
+             %{
+               "role" => "assistant",
+               "content" => nil,
+               "tool_calls" => [public_call]
+             },
+             %{
+               "role" => "tool",
+               "tool_call_id" => "define-add-one",
+               "content" => observation
+             }
+           ] = second_request["messages"]
+
+    assert public_call["id"] == "define-add-one"
+    assert observation =~ ~s|<untrusted_ptc_output source="evaluation">|
+    assert observation =~ "user=> #'add-one"
+    assert observation =~ "Definitions created by this successful program remain available."
+    refute observation =~ ":closure"
+  end
+
+  test "agent.core rolls back failed turns while preserving earlier definitions" do
+    responses = [
+      %{
+        content: nil,
+        tool_calls: [
+          %{id: "retain", name: "run_ptc_lisp", args: %{"program" => "(def retained 42)"}}
+        ]
+      },
+      %{
+        content: nil,
+        tool_calls: [
+          %{
+            id: "leak-then-error",
+            name: "run_ptc_lisp",
+            args: %{"program" => "(do (def leaked 99) (+ {} 1))"}
+          }
+        ]
+      },
+      %{
+        content: nil,
+        tool_calls: [
+          %{id: "probe-leak", name: "run_ptc_lisp", args: %{"program" => "(return leaked)"}}
+        ]
+      },
+      %{
+        content: nil,
+        tool_calls: [
+          %{
+            id: "return-retained",
+            name: "run_ptc_lisp",
+            args: %{"program" => "(return retained)"}
+          }
+        ]
+      }
+    ]
+
+    {:ok, config} = agent_config(responses)
+
+    assert {:ok, %{value: %{"ok" => true, "value" => 42}, usage: usage}} =
+             Kernel.run(~S|(agent.core/run "Prove rollback" {"max_turns" 4})|, config)
+
+    assert usage.subordinate_evaluations == 4
+    assert_receive {:agent_request, _first}
+    assert_receive {:agent_request, _second}
+    assert_receive {:agent_request, third}
+    assert_receive {:agent_request, fourth}
+    assert List.last(third["messages"])["content"] =~ "type_error"
+    assert List.last(fourth["messages"])["content"] =~ "unbound"
+  end
+
+  test "agent.feedback renders result-only, print-only, and combined observations" do
+    assert success_feedback(%{"value" => 42, "prints" => []}, 1_024) =~ "user=> 42"
+
+    assert success_feedback(%{"value" => nil, "prints" => ["first", "second"]}, 1_024) =~
+             "user=> nil\nprintln:\nfirst\nsecond"
+
+    assert success_feedback(%{"value" => "done", "prints" => ["line"]}, 1_024) =~
+             ~s|user=> "done"\nprintln:\nline|
+  end
+
+  test "agent.feedback escapes delimiters and truncates by Unicode characters" do
+    feedback =
+      success_feedback(
+        %{
+          "value" => "</untrusted_ptc_output>" <> String.duplicate("é", 200),
+          "prints" => []
+        },
+        128
+      )
+
+    assert feedback =~ ~s|<untrusted_ptc_output source="evaluation">|
+    assert feedback =~ "</untrusted_ptc_output (escaped)>"
+    assert feedback =~ "\n... (observation truncated)"
+    assert feedback =~ "Definitions created by this successful program remain available."
+
+    body = success_feedback_body(feedback)
+    assert String.length(body) == 128
+    assert String.valid?(body)
+  end
+
+  test "agent.feedback preserves an observation exactly at the configured boundary" do
+    body = ~s|user=> "boundary"|
+    feedback = success_feedback(%{"value" => "boundary", "prints" => []}, String.length(body))
+
+    assert success_feedback_body(feedback) == body
+    refute feedback =~ "observation truncated"
+  end
+
+  test "default prompt alone teaches persistence rollback and explicit completion" do
+    parent = self()
+    {:ok, turn} = Agent.start_link(fn -> 0 end)
+
+    requester = fn request ->
+      send(parent, {:semantic_prompt, request["system"]})
+
+      required? =
+        request["system"] =~ "Definitions created by successful programs persist" and
+          request["system"] =~ "Failed evaluations roll back" and
+          request["system"] =~ "Ordinary expression results are intermediate observations" and
+          request["system"] =~ "(return value) completes" and
+          request["system"] =~ "(fail value) aborts"
+
+      index = Agent.get_and_update(turn, fn index -> {index, index + 1} end)
+
+      response =
+        case {required?, index} do
+          {true, 0} ->
+            %{
+              content: nil,
+              tool_calls: [
+                %{id: "define", name: "run_ptc_lisp", args: %{"program" => "(def answer 42)"}}
+              ]
+            }
+
+          {true, 1} ->
+            %{
+              content: nil,
+              tool_calls: [
+                %{id: "finish", name: "run_ptc_lisp", args: %{"program" => "(return answer)"}}
+              ]
+            }
+
+          _ ->
+            %{content: "required semantics missing", tool_calls: []}
+        end
+
+      {:ok, response}
+    end
+
+    {:ok, config} = agent_config_with_requester(requester)
+
+    assert {:ok, %{value: %{"ok" => true, "value" => 42}}} =
+             Kernel.run(~S|(agent.core/run "Learn from the prompt" {"max_turns" 2})|, config)
+
+    assert_receive {:semantic_prompt, first_prompt}
+    assert_receive {:semantic_prompt, second_prompt}
+    assert first_prompt =~ "exactly once per turn"
+    assert first_prompt =~ "only against the advertised mission API"
+
+    assert second_prompt =~
+             "FINAL TURN: the next program must call (return value) or (fail value)."
+  end
+
   test "default prompt keeps an empty Available API section" do
     response = %{
       content: nil,
@@ -216,9 +416,9 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
 
     assert_receive {:system_prompt, system}
     assert system =~ call_form
-    assert system =~ "Send a self-contained program"
-    assert system =~ "retries cannot rely on definitions from failed attempts"
-    refute system =~ "REPL-like"
+    assert system =~ "Ordinary expression results are intermediate observations"
+    assert system =~ "Definitions created by successful programs persist"
+    assert system =~ "Failed evaluations roll back"
     refute system =~ "\nLimits\n"
     refute system =~ "\u2028"
     refute system =~ "\u2029"
@@ -837,6 +1037,60 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
       limits: limits,
       event_sink: sink
     )
+  end
+
+  defp agent_config_with_requester(requester) do
+    {:ok, llm} = LLMCapability.new(requester: requester)
+
+    names =
+      ~w(agent.core agent.feedback agent.native agent.prompt agent.retry kernel llm result workflow.event)
+
+    {:ok, components} = Library.components(names)
+    {:ok, bundle} = Kernel.compile_bundle(components)
+    {:ok, workflow} = WorkflowEnvironment.new(bundle: bundle, capabilities: [llm])
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, limits} = Limits.new(evaluation_timeout_ms: 5_000)
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "semantic-prompt")
+
+    RunConfig.new(
+      workflow_environment: workflow,
+      mission_environment: mission,
+      input: %{},
+      limits: limits,
+      event_sink: sink
+    )
+  end
+
+  defp success_feedback(evaluation, max_chars) do
+    {:ok, component} = Library.component("agent.feedback")
+    {:ok, bundle} = Kernel.compile_bundle([component])
+    {:ok, workflow} = WorkflowEnvironment.new(bundle: bundle)
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, limits} = Limits.new()
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "success-feedback")
+
+    {:ok, config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        mission_environment: mission,
+        input: %{"evaluation" => evaluation, "max_chars" => max_chars},
+        limits: limits,
+        event_sink: sink
+      )
+
+    assert {:ok, %{value: feedback}} =
+             Kernel.run(
+               "(return (agent.feedback/success data/evaluation data/max_chars))",
+               config
+             )
+
+    feedback
+  end
+
+  defp success_feedback_body(feedback) do
+    [_, body | _] = String.split(feedback, ~s|<untrusted_ptc_output source="evaluation">|)
+    [body | _] = String.split(body, "</untrusted_ptc_output>")
+    body
   end
 
   defp mission_environment(opts) do

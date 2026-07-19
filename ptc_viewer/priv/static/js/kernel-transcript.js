@@ -12,7 +12,7 @@ import { highlightLisp } from './highlight.js';
 import { indexInspection } from './inspection.js';
 import { renderTokenUsage } from './token-usage.js';
 
-const SUCCESS = new Set(['ok', 'returned', 'completed', 'success']);
+const SUCCESS = new Set(['ok', 'continued', 'returned', 'completed', 'success']);
 const FAILURE = new Set([
   'error', 'failed', 'timeout', 'memory_exceeded', 'limit_exceeded',
   'evaluation_error', 'protocol_error'

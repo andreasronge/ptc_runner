@@ -589,7 +589,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     {:ok, limits} = Limits.new()
     {:ok, state} = RunState.start(limits)
 
-    assert %{outcome: :returned} =
+    assert %{outcome: :continued} =
              Evaluation.evaluate_source(state, mission, "(def x 40)", 100)
 
     assert %{outcome: :returned, value: 42} =
@@ -609,7 +609,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     {:ok, state} = RunState.start(limits)
     {:ok, sink} = EventSink.start(:normal, limits, run_id: "closure-projection")
 
-    assert %{outcome: :returned, value: %Format.Fn{params: "..."}} =
+    assert %{outcome: :continued, value: %Format.Fn{params: "..."}, prints: []} =
              Evaluation.evaluate_source(
                state,
                mission,
@@ -718,6 +718,36 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     assert %{defined_count: 0} = RunState.evaluation_memory_summary(state)
   end
 
+  test "subordinate ordinary return and fail outcomes commit or roll back atomically" do
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, state} = RunState.start(Limits.defaults())
+
+    assert %{outcome: :continued, value: %Format.Var{name: "committed"}, prints: []} =
+             Evaluation.evaluate_source(state, mission, "(def committed 1)", 100)
+
+    assert %{outcome: :returned, value: 2} =
+             Evaluation.evaluate_source(
+               state,
+               mission,
+               "(def returned 2) (return returned)",
+               100
+             )
+
+    assert %{outcome: :failed, value: 3} =
+             Evaluation.evaluate_source(
+               state,
+               mission,
+               "(def leaked 3) (fail leaked)",
+               100
+             )
+
+    assert %{outcome: :returned, value: [1, 2]} =
+             Evaluation.evaluate_source(state, mission, "(return [committed returned])", 100)
+
+    assert %{outcome: :evaluation_error} =
+             Evaluation.evaluate_source(state, mission, "leaked", 100)
+  end
+
   test "ordinary evaluation errors expose capability activity and preserve committed memory" do
     parent = self()
 
@@ -735,7 +765,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     {:ok, mission} = MissionEnvironment.new(capabilities: [touch])
     {:ok, state} = RunState.start(Limits.defaults())
 
-    assert %{outcome: :returned} =
+    assert %{outcome: :continued} =
              Evaluation.evaluate_source(state, mission, "(def retained 42)", 100)
 
     assert %{
@@ -852,6 +882,43 @@ defmodule PtcRunner.Kernel.CoreContractTest do
                "(return (tool/kernel-eval {:kind :embedded :program (program (return (+ 40 2)))}))",
                config
              )
+  end
+
+  test "dynamic and embedded workflow routes preserve ordinary and terminal classifications" do
+    {:ok, workflow} = WorkflowEnvironment.new([])
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, limits} = Limits.new()
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "classification-parity")
+
+    {:ok, config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        mission_environment: mission,
+        input: %{},
+        limits: limits,
+        event_sink: sink
+      )
+
+    source = """
+    (let [dynamic-ordinary (tool/kernel-eval {:kind :source :source "(+ 1 1)"})
+          embedded-ordinary (tool/kernel-eval {:kind :embedded :program (program (+ 2 2))})
+          dynamic-return (tool/kernel-eval {:kind :source :source "(return 6)"})
+          embedded-fail (tool/kernel-eval {:kind :embedded :program (program (fail 7))})]
+      (return [(get dynamic-ordinary :value)
+               (get embedded-ordinary :value)
+               (get dynamic-return :value)
+               (get embedded-fail :value)]))
+    """
+
+    assert {:ok,
+            %{
+              value: [
+                %{outcome: :continued, value: 2},
+                %{outcome: :continued, value: 4},
+                %{outcome: :returned, value: 6},
+                %{outcome: :failed, value: 7}
+              ]
+            }} = Kernel.run(source, config)
   end
 
   test "Program values expose only bounded opaque metadata in public results" do
@@ -1017,7 +1084,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     {:ok, retained_limits} = Limits.new(run_duration_ms: 120_000)
     {:ok, state} = RunState.start(retained_limits)
 
-    assert %{outcome: :returned} =
+    assert %{outcome: :continued} =
              Evaluation.evaluate_source(state, mission, "(def retained 42)", 100)
 
     assert %{defined_count: 1, bytes: bytes} = RunState.evaluation_memory_summary(state)

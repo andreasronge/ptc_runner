@@ -3930,11 +3930,17 @@ The host builds an execution environment for each program:
 
 ### 16.3 Result Contract (V2 Simplified Model)
 
-The program's return value is passed through unchanged. Storage is explicit via `def`:
+At the language boundary, ordinary completion produces the value of the last
+expression and storage is explicit via `def`. A host running a multi-turn
+Kernel agent distinguishes that ordinary completion from the explicit control
+forms: an ordinary value is an intermediate observation, `(return value)` is
+successful terminal completion, and `(fail value)` is terminal failure.
 
 | Behavior | How It Works |
 |----------|--------------|
-| **Return value** | Last expression result (standard REPL semantics) |
+| **Ordinary value** | Last expression result; a Kernel agent continues to another turn |
+| **Terminal success** | `(return value)` explicitly completes a Kernel agent |
+| **Terminal failure** | `(fail value)` explicitly aborts and rolls back the current program |
 | **Persistent storage** | Use `(def name value)` to store values |
 | **Access stored values** | Use plain symbols (e.g., `my-value`) |
 
@@ -3952,7 +3958,7 @@ The program's return value is passed through unchanged. Storage is explicit via 
 #### Explicit Storage with def
 
 ```clojure
-;; Store values explicitly, return a result
+;; Store values explicitly and produce an intermediate result
 (def high-paid (->> (tool/find-employees {})
                     (filter (fn [e] (> (:salary e) 100000)))))
 (def last-query "employees")
@@ -3962,7 +3968,14 @@ The program's return value is passed through unchanged. Storage is explicit via 
 After execution:
 - `high-paid` = the filtered list (available as symbol in next turn)
 - `last-query` = `"employees"` (available as symbol in next turn)
-- Return value = `["alice@example.com", "bob@example.com", ...]`
+- Ordinary value = `["alice@example.com", "bob@example.com", ...]`
+
+Within one Kernel run, the successful definitions above are available to every
+later generated program. A later turn can complete explicitly:
+
+```clojure
+(return {:query last-query :emails (map :email high-paid)})
+```
 
 #### Return Map Without Storage
 
@@ -3975,7 +3988,9 @@ Maps return as-is, no special handling:
  :items data/items}
 ```
 
-Return value = `{:summary "Query complete", :count 5, :items [...]}`, no symbols stored.
+Ordinary value = `{:summary "Query complete", :count 5, :items [...]}`, no symbols stored.
+In a Kernel agent this is an intermediate observation unless it is wrapped in
+`return`.
 
 ### 16.4 Symbol Storage Semantics
 
@@ -4022,15 +4037,19 @@ After Turn 2: `a=1, b={:y 20}, c=3`
 │                                                                 │
 │  4. HANDLE RESULT                                               │
 │     │                                                           │
-│     ├─ ON SUCCESS:                                              │
-│     │   ├─ Return last expression value (standard REPL)         │
+│     ├─ ON ORDINARY SUCCESS:                                     │
+│     │   ├─ Publish last expression as an intermediate value     │
 │     │   ├─ Persist def bindings as symbols                      │
-│     │   └─ Log: program, tool calls, stored symbols, result     │
+│     │   └─ Continue the agent when another turn remains         │
 │     │                                                           │
-│     └─ ON ERROR:                                                │
+│     ├─ ON EXPLICIT RETURN:                                      │
+│     │   ├─ Persist def bindings as symbols                      │
+│     │   └─ Complete successfully with the returned value        │
+│     │                                                           │
+│     └─ ON FAIL OR ERROR:                                        │
 │         ├─ NO symbol changes (rollback)                         │
 │         ├─ Log: program, error, partial trace                   │
-│         └─ Return error to LLM for retry                        │
+│         └─ Fail or offer bounded correction under host policy   │
 │                                                                 │
 │  5. NEXT TURN                                                   │
 │     ├─ Feed stored symbols to LLM                               │

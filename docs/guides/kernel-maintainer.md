@@ -168,6 +168,23 @@ rest of the run. Commit is transactional: parse, analysis, runtime, timeout,
 memory, capability, result-size, or explicit-failure outcomes preserve the
 previous evaluation memory.
 
+The workflow-visible subordinate outcome algebra is deliberately distinct from
+the evaluator's internal controls:
+
+| Outcome | Memory | Agent policy |
+| --- | --- | --- |
+| `:continued` | commit | ordinary value; append its inert value and chronological prints as one correlated tool observation, then request another turn |
+| `:returned` | commit | explicit `(return value)`; complete successfully |
+| `:failed` | roll back | explicit `(fail value)`; terminate as workflow failure |
+| evaluation or limit error | roll back | correct only when retry policy, capability activity, and turn budget permit |
+
+Both dynamic `kernel/eval-source` and embedded `kernel/eval` enter this same
+classification boundary. The agent retains each accepted public assistant tool
+call together with exactly one `role: tool` observation carrying the same call
+ID. Continued observations are escaped and bounded text; they do not expose
+native continuation memory. An intermediate result on the final turn commits
+before the agent reports that no model turn remains.
+
 Native continuation memory never crosses back into workflow Lisp. Subordinate
 values and the workflow's terminal value pass through
 `PtcRunner.Lisp.externalize_value/1`, which recursively replaces closures,

@@ -22,10 +22,32 @@
     value
     default))
 
+(defn- completed-event [type turn max-turns]
+  {:type type
+   :turn turn
+   :turns-remaining (- max-turns (inc turn))})
+
+(defn- append-correlated [messages action content]
+  (conj
+    (conj messages
+          {"role" "assistant"
+           "content" nil
+           "tool_calls" [(get action :public-tool-call)]})
+    {"role" "tool"
+     "tool_call_id" (get action :tool-call-id)
+     "content" content}))
+
 (defn run [task cfg]
   (let [max-turns (positive-int-or (get cfg "max_turns") 4 128)
         max-program-chars (positive-int-or (get cfg "max_program_chars") 64000 1000000)
-        initial-prompt-state (agent.prompt/initial-state cfg)]
+        max-observation-chars (positive-int-or (get cfg "max_observation_chars") 2048 16384)
+        max-transcript-chars (positive-int-or (get cfg "max_transcript_chars") 262144 1000000)
+        effective-cfg (assoc cfg
+                             "max_turns" max-turns
+                             "max_program_chars" max-program-chars
+                             "max_observation_chars" max-observation-chars
+                             "max_transcript_chars" max-transcript-chars)
+        initial-prompt-state (agent.prompt/initial-state effective-cfg)]
     (if (not (map? initial-prompt-state))
       (fail (result/error :invalid-prompt :invalid-initial-state))
       (loop [turn 0
@@ -47,6 +69,15 @@
                 (case (get evaluation :outcome)
                   :returned (return (result/ok (get evaluation :value)))
                   :failed (fail (result/error :model-program-failed (get evaluation :value)))
+                  :continued
+                  (do
+                    (retry-or-fail turn max-turns :intermediate-result)
+                    (let [event (completed-event :evaluation-success turn max-turns)
+                          next-prompt-state (transition-prompt prompt-state event)
+                          observation (agent.feedback/success evaluation max-observation-chars)]
+                      (recur (inc turn)
+                             (append-correlated messages action observation)
+                             next-prompt-state)))
                   (if (false? (get evaluation :retryable?))
                     (fail (result/error :non-retryable-evaluation (get evaluation :kind)))
                     (do
@@ -54,16 +85,12 @@
                       (let [next-prompt-state
                             (transition-prompt
                               prompt-state
-                              {:type :evaluation-error :turn turn})]
+                              (completed-event :evaluation-error turn max-turns))]
                         (recur (inc turn)
-                               (conj
-                                 (conj messages
-                                       {"role" "assistant"
-                                        "content" nil
-                                        "tool_calls" [(get action :public-tool-call)]})
-                                 {"role" "tool"
-                                  "tool_call_id" (get action :tool-call-id)
-                                  "content" (agent.feedback/evaluation-error evaluation)})
+                               (append-correlated
+                                 messages
+                                 action
+                                 (agent.feedback/evaluation-error evaluation))
                                next-prompt-state))))))
 
               :protocol-error
@@ -72,7 +99,7 @@
                 (let [next-prompt-state
                       (transition-prompt
                         prompt-state
-                        {:type :protocol-error :turn turn})]
+                        (completed-event :protocol-error turn max-turns))]
                   (recur (inc turn)
                          (conj messages
                                {"role" "user"
