@@ -360,6 +360,90 @@ applies bounded pre/post file inventories, identity and byte verification, the
 existing 8 MB source ceiling, and a separate 32 MB decoded retained-size ceiling
 before snapshot-backed capabilities are constructed.
 
+The local Viewer log-analysis path is a separate, profile-specific mission
+frontend. `PtcRunner.Kernel.LogAnalysisSessionBuilder` is its only host entry:
+it selects the code-owned `log-analysis-v1` recipe, compiles the shipped
+`log.core` component, grants exactly the four snapshot-backed trace
+capabilities, builds empty workflow/mission data, and creates fresh limits and
+owners. Browser or Lisp input cannot supply a path, profile, component,
+capability, or limit. The profile digest covers the bundle, authoritative
+mission inventory, complete implicit mission-runtime contract, effective
+limits, and result/persistence policies. Only the profile ID and digest enter
+canonical metadata. Session startup does not trust the assembly attestation by
+itself: it independently reconstructs the fixed profile from the snapshot and
+trace sink, then requires exact config, bundle, capability callback, inventory,
+limit, and profile equality. A host-created sealed assembly with a substituted
+mission callback is therefore rejected.
+The trace owner is additionally bound to the exact combined runtime/sink,
+limits, sink run/trace identity, and `<run-id>.jsonl` destination at
+construction, and assembly validation rechecks that binding. Construction also
+requires the exact two-event terminal reserve, an unfinalized empty recorder,
+and an open `RunState`. The sole session attaches before `run-started` is
+emitted, so replaying a previously attached assembly cannot append a duplicate
+start event.
+
+`PtcRunner.Kernel.LogAnalysisSession` serializes forms through the same detailed
+`Evaluation` operation used by `kernel-eval`; it does not reconstruct Lisp
+options. The result projection reports the committed continuation effect,
+bounded JSON value when available, bounded Clojure rendering, prints, error,
+evaluation identity, duration, and authoritative usage. Prints are bounded in
+one pass to 128 entries and a 65,536-byte encoded JSON array, so zero-length
+prints cannot evade the cardinality limit. JSON projection rejects maps whose
+distinct Lisp keys would collapse to the same JSON object key; their bounded
+Clojure rendering remains available instead of returning a corrupted value.
+Return and fail remain per-form
+outcomes and leave the human session open. A terminal RunState budget
+rejects later forms but leaves explicit close available; close persists an error
+terminal event with the authoritative exhausted-budget reason. Abort and
+deadline expiry preserve that prior terminal result rather than replacing it.
+The owner deadline uses a private correlation token, so an arbitrary mailbox
+message cannot close the session. Its `RunState` GenServer also embeds the
+tokenized normal-event state. Recorder readiness validation and continuation
+commit therefore occur atomically in one owner callback, and both the session
+and `SessionTrace` monitor that combined runtime. Runtime or trace-owner death
+cannot leave a committed continuation without its event authority; the handle
+closes or reports backend failure and releases the snapshot rather than
+silently evaluating without canonical events.
+
+`PtcRunner.Kernel.SessionTrace` lifecycle-owns the combined runtime and monitors
+the session. The event state's opt-in terminal reserve keeps capacity for one
+bounded `events-dropped` summary and exactly one `run-stopped` event inside the
+normal hard count/byte ceilings. One owner call finalizes and returns the
+complete batch before the runtime is stopped; `SessionTrace` then publishes it
+through TraceLog's atomic no-clobber operation. Persistence failure keeps the
+same terminal batch for an idempotent close retry, while the already closed
+runtime and snapshot owners are released immediately. The trace owner itself
+stops and observes those resources before it clears their handles or begins
+publication, so session death during close cannot orphan a continuation.
+If the runtime is already dead before orderly close is accepted, resource
+handoff marks an open recorder `backend_failed` before flushing its monitor.
+Failure before the terminal batch is frozen makes finalization fail and never
+creates a retryable nil batch. Runtime loss after the batch is frozen preserves
+that batch and its terminal result for persistence or retry.
+Unexpected session-owner death is independently finalized and best-effort
+persisted once by `SessionTrace`, which then stops. Because no caller-visible
+session authority survives that death, a failed unexpected-death publication
+does not retain an unreachable retry owner.
+If the session had already reached a terminal Kernel budget, it transfers that
+first authoritative reason to `SessionTrace` before replying; unexpected death
+before explicit close therefore persists the budget reason rather than a
+generic owner-failure reason.
+During construction, `SessionTrace` monitors the calling process as the stable
+lifecycle owner while the session and snapshot are attached. Builder
+cancellation kills and observes the partial session and cleans every constructed
+owner before stopping. Successful construction marks the guard complete but
+retains the monitor: owner death before the result can be installed therefore
+cannot orphan a session, while later owner death aborts and best-effort persists
+the completed session. The Viewer root backend must invoke the builder from its
+long-lived connected backend owner, not from a disposable callback task.
+Exceptions after snapshot or trace-owner acquisition run the same owner cleanup
+path. Session death while that construction guard is incomplete is a
+construction failure and never publishes a terminal trace. Read-only session
+information is serialized behind an accepted evaluation without a shorter
+owner-call timeout, so a busy live owner is not reported as closed. Exact entered source,
+values, continuation state, snapshot contents, and paths never enter canonical
+events or redacted owner status.
+
 Host callers enable sensitive capture only through `RunBuilder`'s `:inspect`
 option. `InspectionSink` accepts exact bounded source and capability records
 before execution crosses the relevant boundary; rejection fails the run rather

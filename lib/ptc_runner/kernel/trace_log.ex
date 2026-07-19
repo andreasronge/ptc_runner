@@ -26,6 +26,7 @@ defmodule PtcRunner.Kernel.TraceLog do
 
   alias Jason.OrderedObject
   alias PtcRunner.Kernel.BoundedWorker
+  alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.JSONValue
 
@@ -198,6 +199,45 @@ defmodule PtcRunner.Kernel.TraceLog do
 
   def append_jsonl(_path, _events, _opts), do: {:error, :invalid_trace_log}
 
+  @doc false
+  @spec publish_jsonl(binary(), [map()], keyword()) :: :ok | {:error, atom()}
+  def publish_jsonl(path, events, opts \\ [])
+
+  def publish_jsonl(path, events, opts)
+      when is_binary(path) and is_list(events) and is_list(opts) do
+    with true <- Keyword.keys(opts) -- [:max_source_bytes, :fault_hook] == [],
+         true <- String.valid?(path),
+         true <- Path.basename(path) == Path.basename(Path.expand(path)),
+         true <- String.ends_with?(path, ".jsonl") and not reserved_path?(path),
+         max_bytes when max_bytes in 1..@default_source_bytes <-
+           Keyword.get(opts, :max_source_bytes, @default_source_bytes),
+         fault_hook when is_nil(fault_hook) or is_function(fault_hook, 1) <-
+           Keyword.get(opts, :fault_hook),
+         normalized = normalize(events),
+         {:ok, _validated, _source_id} <- validate_loaded(normalized, max_bytes),
+         :ok <- publication_fault(fault_hook, :after_validation),
+         {:ok, encoded} <- encode_jsonl(normalized, max_bytes),
+         :ok <- publication_fault(fault_hook, :after_encoding) do
+      publish_encoded(Path.expand(path), encoded, fault_hook)
+    else
+      false ->
+        {:error, :invalid_trace_log}
+
+      {:error, reason} when reason in [:malformed_source, :unsupported_version] ->
+        {:error, reason}
+
+      {:error, _reason} ->
+        {:error, :trace_persistence_failed}
+
+      _ ->
+        {:error, :invalid_trace_log}
+    end
+  rescue
+    _exception -> {:error, :trace_persistence_failed}
+  end
+
+  def publish_jsonl(_path, _events, _opts), do: {:error, :invalid_trace_log}
+
   defp execute(:list_runs, events, source_id, arguments, max_result_bytes, source_kind) do
     with :ok <-
            validate_keys(
@@ -291,6 +331,226 @@ defmodule PtcRunner.Kernel.TraceLog do
     end
   rescue
     Jason.EncodeError -> {:error, :malformed_source}
+  end
+
+  defp encode_jsonl(events, max_bytes) do
+    Enum.reduce_while(events, {:ok, [], 0}, fn event, {:ok, encoded, bytes} ->
+      case DeterministicJSON.encode(event) do
+        {:ok, line} when bytes + byte_size(line) + 1 <= max_bytes ->
+          {:cont, {:ok, ["\n", line | encoded], bytes + byte_size(line) + 1}}
+
+        _ ->
+          {:halt, {:error, :source_limit_exceeded}}
+      end
+    end)
+    |> case do
+      {:ok, encoded, _bytes} -> {:ok, encoded |> Enum.reverse() |> IO.iodata_to_binary()}
+      {:error, _reason} = error -> error
+    end
+  end
+
+  defp publish_encoded(path, encoded, fault_hook) do
+    :global.trans({{__MODULE__, {:publish, path}}, self()}, fn ->
+      case read_publication(path, byte_size(encoded), fault_hook) do
+        {:ok, ^encoded} -> sync_directory(Path.dirname(path))
+        {:ok, _different} -> {:error, :trace_collision}
+        {:error, :enoent} -> publish_new(path, encoded, fault_hook)
+        {:error, reason} -> {:error, reason}
+      end
+    end)
+  end
+
+  defp publish_new(path, encoded, fault_hook) do
+    temporary =
+      path <> ".ptc-tmp-" <> Base.encode16(:crypto.strong_rand_bytes(8), case: :lower)
+
+    result =
+      with :ok <- publication_fault(fault_hook, :before_write),
+           {:ok, device} <-
+             :file.open(String.to_charlist(temporary), [:write, :binary, :raw, :exclusive]) do
+        try do
+          with {:ok, file_info} <- :file.read_file_info(device),
+               opened = File.Stat.from_record(file_info),
+               :ok <- write_publication(device, encoded, fault_hook),
+               :ok <- :file.sync(device),
+               :ok <- publication_fault(fault_hook, :after_sync),
+               :ok <- link_publication(temporary, path, opened, encoded),
+               :ok <- sync_directory(Path.dirname(path)),
+               :ok <- publication_fault(fault_hook, :after_publish) do
+            :ok
+          else
+            {:error, _reason} = error -> error
+          end
+        after
+          :file.close(device)
+        end
+      else
+        {:error, _reason} = error -> error
+      end
+
+    cleanup_result = cleanup_temporary(temporary, fault_hook)
+
+    cleanup_result =
+      case cleanup_result do
+        :ok -> sync_directory(Path.dirname(path))
+        {:error, _reason} = error -> error
+      end
+
+    case {result, cleanup_result} do
+      {:ok, :ok} -> :ok
+      {{:error, reason}, _cleanup} -> {:error, reason}
+      {:ok, {:error, reason}} -> {:error, reason}
+    end
+  end
+
+  defp write_publication(device, encoded, fault_hook) do
+    case publication_fault(fault_hook, :during_write) do
+      :ok ->
+        :file.write(device, encoded)
+
+      {:error, :partial_write} ->
+        partial_bytes = div(byte_size(encoded), 2)
+        _ = :file.write(device, binary_part(encoded, 0, partial_bytes))
+        {:error, :trace_persistence_failed}
+
+      {:error, _reason} = error ->
+        error
+    end
+  end
+
+  defp link_publication(temporary, path, opened, encoded) do
+    with {:ok, current} <- File.lstat(temporary),
+         :ok <- publication_same_file(opened, current),
+         true <- current.type == :regular and current.size == byte_size(encoded) do
+      case File.ln(temporary, path) do
+        :ok -> verify_linked_publication(path, opened, encoded)
+        {:error, :eexist} -> verify_publication(path, encoded)
+        {:error, _reason} -> {:error, :trace_persistence_failed}
+      end
+    else
+      _ -> {:error, :trace_collision}
+    end
+  end
+
+  defp verify_linked_publication(path, opened, encoded) do
+    with {:ok, linked} <- File.lstat(path),
+         :ok <- publication_same_file(opened, linked),
+         {:ok, ^encoded} <- read_publication(path, byte_size(encoded), nil),
+         {:ok, current} <- File.lstat(path),
+         :ok <- publication_same_file(opened, current) do
+      :ok
+    else
+      _ -> {:error, :trace_collision}
+    end
+  end
+
+  defp publication_same_file(expected, current) do
+    case same_file(expected, current) do
+      :ok -> :ok
+      {:error, _reason} -> {:error, :trace_collision}
+    end
+  end
+
+  defp verify_publication(path, encoded) do
+    case read_publication(path, byte_size(encoded), nil) do
+      {:ok, ^encoded} -> :ok
+      {:ok, _different} -> {:error, :trace_collision}
+      {:error, _reason} -> {:error, :trace_collision}
+    end
+  end
+
+  defp sync_directory(directory) do
+    case :file.open(String.to_charlist(directory), [:directory, :read, :raw]) do
+      {:ok, device} ->
+        try do
+          case :file.sync(device) do
+            :ok -> :ok
+            {:error, _reason} -> {:error, :trace_persistence_failed}
+          end
+        after
+          :file.close(device)
+        end
+
+      {:error, _reason} ->
+        {:error, :trace_persistence_failed}
+    end
+  end
+
+  defp read_publication(path, max_bytes, fault_hook) do
+    case File.lstat(path) do
+      {:ok, %File.Stat{type: :regular, size: size} = expected} when size <= max_bytes ->
+        with :ok <- publication_fault(fault_hook, :before_publication_read),
+             {:ok, device} <- :file.open(String.to_charlist(path), [:read, :binary, :raw]) do
+          try do
+            with {:ok, file_info} <- :file.read_file_info(device),
+                 opened = File.Stat.from_record(file_info),
+                 :ok <- same_file(expected, opened),
+                 true <- opened.type == :regular and opened.size <= max_bytes,
+                 {:ok, source} <- bounded_publication_read(device, max_bytes),
+                 {:ok, current} <- File.lstat(path),
+                 :ok <- same_file(expected, current),
+                 true <- current.type == :regular and current.size == opened.size do
+              {:ok, source}
+            else
+              _ -> {:error, :trace_collision}
+            end
+          after
+            :file.close(device)
+          end
+        else
+          {:error, :trace_persistence_failed} = error -> error
+          _ -> {:error, :trace_collision}
+        end
+
+      {:ok, %File.Stat{}} ->
+        {:error, :trace_collision}
+
+      {:error, :enoent} ->
+        {:error, :enoent}
+
+      {:error, _reason} ->
+        {:error, :trace_persistence_failed}
+    end
+  end
+
+  defp bounded_publication_read(device, max_bytes) do
+    case :file.read(device, max_bytes + 1) do
+      {:ok, source} when byte_size(source) <= max_bytes -> {:ok, source}
+      :eof -> {:ok, ""}
+      _ -> {:error, :trace_collision}
+    end
+  end
+
+  defp cleanup_temporary(temporary, fault_hook) do
+    injected = publication_fault(fault_hook, :cleanup)
+
+    removed =
+      case File.rm(temporary) do
+        :ok -> :ok
+        {:error, :enoent} -> :ok
+        {:error, _reason} -> {:error, :trace_persistence_failed}
+      end
+
+    case {injected, removed} do
+      {:ok, :ok} -> :ok
+      {{:error, _reason} = error, _removed} -> error
+      {:ok, {:error, _reason} = error} -> error
+    end
+  end
+
+  defp publication_fault(nil, _stage), do: :ok
+
+  defp publication_fault(hook, stage) do
+    case hook.(stage) do
+      :ok -> :ok
+      {:error, :partial_write} = error -> error
+      {:error, _reason} -> {:error, :trace_persistence_failed}
+      _ -> {:error, :trace_persistence_failed}
+    end
+  rescue
+    _exception -> {:error, :trace_persistence_failed}
+  catch
+    _kind, _reason -> {:error, :trace_persistence_failed}
   end
 
   defp ensure_trace_file(path, private?) do
@@ -918,6 +1178,7 @@ defmodule PtcRunner.Kernel.TraceLog do
       "mission_model_context_hash" => event_data(started, "mission_model_context_hash"),
       "mission_model_context_bytes" => event_data(started, "mission_model_context_bytes"),
       "connector_snapshots" => event_data(started, "connector_snapshots", []),
+      "session_profile" => event_data(started, "session_profile"),
       "complete" => not is_nil(stopped),
       "truncated" => Enum.any?(events, &(&1["type"] == "events-dropped")),
       "schema_version" => 1,

@@ -26,13 +26,17 @@ defmodule PtcRunner.Kernel.Evaluation do
   @doc "Evaluates bounded subordinate source with optional canonical event collection."
   @spec evaluate_source(RunState.t(), map(), binary(), non_neg_integer()) :: map()
   def evaluate_source(state, mission_environment, source, timeout_ms) when is_binary(source) do
-    evaluate_source(state, mission_environment, source, timeout_ms, nil, nil)
+    state
+    |> evaluate_source_detailed(mission_environment, source, timeout_ms, nil, nil)
+    |> legacy_projection()
   end
 
   @spec evaluate_source(RunState.t(), map(), binary(), non_neg_integer(), term()) :: map()
   def evaluate_source(state, mission_environment, source, timeout_ms, event_sink)
       when is_binary(source) do
-    evaluate_source(state, mission_environment, source, timeout_ms, event_sink, nil)
+    state
+    |> evaluate_source_detailed(mission_environment, source, timeout_ms, event_sink, nil)
+    |> legacy_projection()
   end
 
   @spec evaluate_source(RunState.t(), map(), binary(), non_neg_integer(), term(), term()) :: map()
@@ -45,6 +49,64 @@ defmodule PtcRunner.Kernel.Evaluation do
         inspection_sink
       )
       when is_binary(source) do
+    state
+    |> evaluate_source_detailed(
+      mission_environment,
+      source,
+      timeout_ms,
+      event_sink,
+      inspection_sink
+    )
+    |> legacy_projection()
+  end
+
+  @doc false
+  @spec evaluate_source_detailed(
+          RunState.t(),
+          map(),
+          binary(),
+          non_neg_integer(),
+          term(),
+          term(),
+          keyword()
+        ) :: map()
+  def evaluate_source_detailed(
+        state,
+        mission_environment,
+        source,
+        timeout_ms,
+        event_sink \\ nil,
+        inspection_sink \\ nil,
+        opts \\ []
+      )
+      when is_binary(source) and is_list(opts) do
+    evaluation_id = Events.id("mission-evaluation")
+    started_ms = System.monotonic_time(:millisecond)
+
+    result =
+      evaluate_detailed(
+        state,
+        mission_environment,
+        source,
+        timeout_ms,
+        %{event_sink: event_sink, inspection_sink: inspection_sink},
+        {evaluation_id, started_ms, Keyword.get(opts, :after_started_hook)}
+      )
+
+    result
+    |> Map.put(:evaluation_id, evaluation_id)
+    |> Map.put_new(:duration_ms, Events.duration_ms(started_ms))
+    |> Map.put_new(:continuation_effect, :preserved)
+  end
+
+  defp evaluate_detailed(
+         state,
+         mission_environment,
+         source,
+         timeout_ms,
+         capture,
+         evaluation_context
+       ) do
     with :ok <- source_within_limit(source, RunState.limits(state).subordinate_source_bytes),
          {:ok, memory, history, lease} <- RunState.reserve_evaluation(state) do
       evaluate_with_lease(
@@ -53,14 +115,24 @@ defmodule PtcRunner.Kernel.Evaluation do
         source,
         timeout_ms,
         {memory, history, lease},
-        event_sink,
-        inspection_sink
+        capture,
+        evaluation_context
       )
     else
-      {:error, :busy} -> failure(:busy, :evaluation_in_progress)
-      {:error, :limit_exceeded} -> failure(:limit_exceeded, :subordinate_evaluations)
-      {:error, :source_exceeded} -> failure(:result_exceeded, :subordinate_source_bytes)
-      {:error, :run_closed} -> failure(:limit_exceeded, :run_closed)
+      {:error, :busy} ->
+        failure(:busy, :evaluation_in_progress)
+
+      {:error, :limit_exceeded} ->
+        preflight_limit(state, capture.event_sink, :limit_exceeded, :subordinate_evaluations)
+
+      {:error, :source_exceeded} ->
+        preflight_limit(state, capture.event_sink, :result_exceeded, :subordinate_source_bytes)
+
+      {:error, :run_closed} ->
+        preflight_limit(state, capture.event_sink, :limit_exceeded, :run_closed)
+
+      {:error, :deadline_expired} ->
+        preflight_limit(state, capture.event_sink, :limit_exceeded, :deadline_expired)
     end
   end
 
@@ -70,8 +142,8 @@ defmodule PtcRunner.Kernel.Evaluation do
          source,
          timeout_ms,
          {memory, history, lease},
-         event_sink,
-         inspection_sink
+         capture,
+         {evaluation_id, started_ms, after_started_hook}
        ) do
     limits = RunState.limits(state)
 
@@ -79,27 +151,26 @@ defmodule PtcRunner.Kernel.Evaluation do
       Enum.min([timeout_ms, limits.evaluation_timeout_ms, RunState.remaining_ms(state)])
 
     deadline_ms = System.monotonic_time(:millisecond) + timeout_ms
-    evaluation_id = Events.id("mission-evaluation")
-    started_ms = System.monotonic_time(:millisecond)
     source_hash = sha256(source)
     source_bytes = byte_size(source)
 
     with :ok <-
            inspection_source(
-             inspection_sink,
+             capture.inspection_sink,
              evaluation_id,
              source,
              source_hash,
              source_bytes
            ),
          :ok <-
-           Events.emit(state, event_sink, "evaluation-started", %{
+           Events.emit(state, capture.event_sink, "evaluation-started", %{
              evaluation_id: evaluation_id,
              environment: :mission,
              program_kind: :"ptc-lisp",
              source_hash: source_hash,
              source_bytes: source_bytes
-           }) do
+           }),
+         :ok <- after_started(after_started_hook) do
       result =
         execute_with_lease(
           state,
@@ -107,22 +178,24 @@ defmodule PtcRunner.Kernel.Evaluation do
           source,
           timeout_ms,
           {memory, history, lease},
-          %{event_sink: event_sink, inspection_sink: inspection_sink},
+          capture,
           deadline_ms
         )
 
-      _ = maybe_emit_limit(state, event_sink, result)
+      _ = maybe_emit_limit(state, capture.event_sink, result)
+
+      duration_ms = Events.duration_ms(started_ms)
 
       _ =
-        Events.emit(state, event_sink, "evaluation-stopped", %{
+        Events.emit(state, capture.event_sink, "evaluation-stopped", %{
           evaluation_id: evaluation_id,
           environment: :mission,
           status: result.outcome,
           continuation: RunState.evaluation_memory_summary(state),
-          duration_ms: Events.duration_ms(started_ms)
+          duration_ms: duration_ms
         })
 
-      result
+      Map.put(result, :duration_ms, duration_ms)
     else
       {:error, :inspection_sink_error} ->
         :ok = RunState.release_evaluation(state, lease)
@@ -132,8 +205,27 @@ defmodule PtcRunner.Kernel.Evaluation do
       {:error, :event_sink_error} ->
         :ok = RunState.release_evaluation(state, lease)
         failure(:evaluation_error, :event_sink_error)
+
+      {:error, :evaluation_hook_error} ->
+        :ok = RunState.release_evaluation(state, lease)
+        failure(:evaluation_error, :evaluation_hook_error)
     end
   end
+
+  defp after_started(nil), do: :ok
+
+  defp after_started(hook) when is_function(hook, 0) do
+    case hook.() do
+      :ok -> :ok
+      _other -> {:error, :evaluation_hook_error}
+    end
+  rescue
+    _exception -> {:error, :evaluation_hook_error}
+  catch
+    _kind, _reason -> {:error, :evaluation_hook_error}
+  end
+
+  defp after_started(_hook), do: {:error, :evaluation_hook_error}
 
   defp execute_with_lease(
          state,
@@ -172,9 +264,15 @@ defmodule PtcRunner.Kernel.Evaluation do
     mission_calls_before = mission_capability_call_count(state)
 
     case Lisp.run_native(source, options) do
-      {:ok, %{return: {:__ptc_fail__, value}}} ->
+      {:ok, %{return: {:__ptc_fail__, value}} = step} ->
         :ok = RunState.release_evaluation(state, lease)
-        %{outcome: :failed, value: Lisp.externalize_value(value)}
+
+        %{
+          outcome: :failed,
+          value: Lisp.externalize_value(value),
+          prints: Map.get(step, :prints, []),
+          continuation_effect: :preserved
+        }
 
       {:ok, step} ->
         commit_result(state, lease, history, step)
@@ -189,21 +287,68 @@ defmodule PtcRunner.Kernel.Evaluation do
 
     case RunState.commit_evaluation(state, lease, step.memory, candidate_history) do
       :ok ->
-        classify_success(step)
+        step
+        |> classify_success()
+        |> Map.put(
+          :continuation_effect,
+          if(match?({:__ptc_return__, _value}, step.return),
+            do: :committed_without_history,
+            else: :committed_with_history
+          )
+        )
 
       {:error, :memory_exceeded} ->
-        %{outcome: :memory_exceeded}
+        %{
+          outcome: :memory_exceeded,
+          prints: Map.get(step, :prints, []),
+          continuation_effect: :preserved
+        }
 
       {:error, :history_exceeded} ->
-        %{outcome: :history_exceeded}
+        %{
+          outcome: :history_exceeded,
+          prints: Map.get(step, :prints, []),
+          continuation_effect: :preserved
+        }
 
-      {:error, _reason} ->
-        %{outcome: :evaluation_error, kind: :state}
+      {:error, :run_closed} ->
+        case RunState.terminal_failure(state) do
+          %{kind: kind, reason: reason} ->
+            %{
+              outcome: kind,
+              kind: kind,
+              reason: reason,
+              prints: Map.get(step, :prints, []),
+              continuation_effect: :preserved
+            }
+
+          nil ->
+            %{
+              outcome: :limit_exceeded,
+              kind: :limit_exceeded,
+              reason: :run_closed,
+              prints: Map.get(step, :prints, []),
+              continuation_effect: :preserved
+            }
+        end
+
+      {:error, reason} ->
+        %{
+          outcome: :evaluation_error,
+          kind: :state,
+          reason: reason,
+          prints: Map.get(step, :prints, []),
+          continuation_effect: :preserved
+        }
     end
   end
 
-  defp classify_success(%{return: {:__ptc_return__, value}}) do
-    %{outcome: :returned, value: Lisp.externalize_value(value)}
+  defp classify_success(%{return: {:__ptc_return__, value}} = step) do
+    %{
+      outcome: :returned,
+      value: Lisp.externalize_value(value),
+      prints: Map.get(step, :prints, [])
+    }
   end
 
   defp classify_success(step) do
@@ -233,7 +378,9 @@ defmodule PtcRunner.Kernel.Evaluation do
     result = %{
       outcome: :evaluation_error,
       kind: step.fail.reason,
-      details: details
+      details: details,
+      prints: Map.get(step, :prints, []),
+      continuation_effect: :preserved
     }
 
     case evaluation_retryable(step, capability_activity?) do
@@ -298,7 +445,23 @@ defmodule PtcRunner.Kernel.Evaluation do
   defp source_within_limit(source, limit),
     do: if(byte_size(source) <= limit, do: :ok, else: {:error, :source_exceeded})
 
-  defp failure(kind, reason), do: %{outcome: kind, kind: kind, reason: reason}
+  defp failure(kind, reason),
+    do: %{outcome: kind, kind: kind, reason: reason, continuation_effect: :preserved}
+
+  defp preflight_limit(state, event_sink, kind, reason) do
+    result = failure(kind, reason)
+    _ = maybe_emit_limit(state, event_sink, result)
+    result
+  end
+
+  defp legacy_projection(result) do
+    result
+    |> Map.drop([:continuation_effect, :duration_ms, :evaluation_id])
+    |> maybe_drop_terminal_prints()
+  end
+
+  defp maybe_drop_terminal_prints(%{outcome: :continued} = result), do: result
+  defp maybe_drop_terminal_prints(result), do: Map.delete(result, :prints)
 
   defp maybe_emit_limit(state, event_sink, %{outcome: outcome} = result)
        when outcome in [

@@ -110,6 +110,7 @@ defmodule PtcRunner.Lisp.Format do
   end
 
   alias PtcRunner.Lisp.Env.Builtin, as: EnvBuiltin
+  alias PtcRunner.Lisp.ExternalizedMapKey
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
   alias PtcRunner.Lisp.Runtime.Interop.Duration
   alias PtcRunner.Lisp.RuntimeCallable
@@ -376,6 +377,9 @@ defmodule PtcRunner.Lisp.Format do
   defp format_clojure_key(k) when is_atom(k), do: ":#{k}"
   defp format_clojure_key(%LispKeyword{name: name}), do: ":#{name}"
   defp format_clojure_key(k) when is_binary(k), do: inspect(k)
+
+  defp format_clojure_key(%ExternalizedMapKey{value: value}),
+    do: format_clojure_key(value)
 
   defp format_clojure_key(k) do
     {str, _truncated} = format_clojure(k, [])

@@ -25,6 +25,8 @@ defmodule PtcRunner.Kernel.RunState do
   """
   use GenServer
 
+  alias PtcRunner.Kernel.EventSink
+  alias PtcRunner.Kernel.EventSinkState
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Lisp.RetainedSize
 
@@ -41,8 +43,22 @@ defmodule PtcRunner.Kernel.RunState do
   def start(%Limits{} = limits, opts \\ []) do
     token = make_ref()
     owner = Keyword.get(opts, :owner, self())
-    {:ok, pid} = GenServer.start(__MODULE__, {limits, token, owner})
+    {:ok, pid} = GenServer.start(__MODULE__, {limits, token, owner, nil})
     {:ok, %__MODULE__{pid: pid, token: token}}
+  end
+
+  @doc false
+  def start_with_event_sink(%Limits{} = limits, sink_opts, opts \\ []) do
+    token = make_ref()
+    owner = Keyword.get(opts, :owner, self())
+
+    with true <- Keyword.keys(opts) -- [:owner] == [],
+         {:ok, event_sink, handle} <- EventSink.prepare(:normal, limits, sink_opts),
+         {:ok, pid} <- GenServer.start(__MODULE__, {limits, token, owner, event_sink}) do
+      {:ok, %__MODULE__{pid: pid, token: token}, struct!(EventSink, Map.put(handle, :pid, pid))}
+    else
+      _ -> {:error, :invalid_run_state}
+    end
   end
 
   @spec reserve_capability(t(), environment(), binary()) :: :ok | {:error, atom()}
@@ -117,14 +133,18 @@ defmodule PtcRunner.Kernel.RunState do
   @doc "Returns bounded definition, history, and retained continuation byte counts."
   def evaluation_memory_summary(state), do: call(state, :evaluation_memory_summary)
 
+  @doc false
+  def transfer_owner(state, owner) when is_pid(owner), do: call(state, {:transfer_owner, owner})
+
   @impl GenServer
-  def init({limits, token, owner}) do
+  def init({limits, token, owner, event_sink}) do
     now = System.monotonic_time(:millisecond)
 
     {:ok,
      %{
        token: token,
        owner_ref: Process.monitor(owner),
+       event_sink: event_sink,
        limits: limits,
        deadline_ms: now + limits.run_duration_ms,
        closed?: false,
@@ -142,6 +162,15 @@ defmodule PtcRunner.Kernel.RunState do
   end
 
   @impl GenServer
+  def handle_call(
+        {event_token, _request} = request,
+        _from,
+        %{event_sink: %{token: event_token}} = state
+      ) do
+    {reply, event_sink} = EventSinkState.handle(request, state.event_sink)
+    {:reply, reply, %{state | event_sink: event_sink}}
+  end
+
   def handle_call(
         {token, {:reserve_capability, environment, name}},
         {caller, _tag},
@@ -183,8 +212,11 @@ defmodule PtcRunner.Kernel.RunState do
 
   def handle_call({token, :reserve_evaluation}, {caller, _tag}, %{token: token} = state) do
     cond do
-      unavailable?(state) ->
+      state.closed? ->
         {:reply, {:error, :run_closed}, state}
+
+      deadline_expired?(state) ->
+        {:reply, {:error, :deadline_expired}, state}
 
       state.evaluation_lease != nil ->
         {:reply, {:error, :busy}, state}
@@ -230,6 +262,19 @@ defmodule PtcRunner.Kernel.RunState do
         cond do
           unavailable?(state) ->
             {:reply, {:error, :run_closed}, %{state | evaluation_lease: nil}}
+
+          not event_sink_ready?(state.event_sink) ->
+            failure =
+              state.terminal_failure || %{kind: :event_sink_error, reason: :event_sink_error}
+
+            next = %{
+              state
+              | closed?: true,
+                terminal_failure: failure,
+                evaluation_lease: nil
+            }
+
+            {:reply, {:error, :run_closed}, next}
 
           not (is_integer(memory_bytes) and
                    memory_bytes <= state.limits.evaluation_memory_bytes) ->
@@ -301,6 +346,16 @@ defmodule PtcRunner.Kernel.RunState do
 
   def handle_call({token, :evaluation_memory_summary}, _from, %{token: token} = state),
     do: {:reply, continuation_summary(state), state}
+
+  def handle_call({token, {:transfer_owner, owner}}, _from, %{token: token} = state)
+      when is_pid(owner) do
+    if Process.alive?(owner) do
+      Process.demonitor(state.owner_ref, [:flush])
+      {:reply, :ok, %{state | owner_ref: Process.monitor(owner)}}
+    else
+      {:reply, {:error, :closed}, state}
+    end
+  end
 
   def handle_call(_request, _from, state), do: {:reply, {:error, :closed}, state}
 
@@ -457,7 +512,13 @@ defmodule PtcRunner.Kernel.RunState do
   end
 
   defp unavailable?(state),
-    do: state.closed? or System.monotonic_time(:millisecond) >= state.deadline_ms
+    do: state.closed? or deadline_expired?(state)
+
+  defp deadline_expired?(state),
+    do: System.monotonic_time(:millisecond) >= state.deadline_ms
+
+  defp event_sink_ready?(nil), do: true
+  defp event_sink_ready?(event_sink), do: EventSinkState.ready?(event_sink)
 
   defp capability_limits(limits, :workflow),
     do: {limits.workflow_capability_calls, limits.workflow_capability_calls_per_name}

@@ -23,6 +23,9 @@ defmodule PtcRunner.Kernel.RunConfig do
   `labels` is an optional closed safe-metadata map. Caller-defined identifier
   fields become SHA-256 fingerprints and tags use finite enumerated values
   before the map enters `run-started`.
+  `session_profile` is an optional closed profile ID and SHA-256 digest used by
+  server-owned interactive mission sessions; it grants no authority and is
+  copied only into safe `run-started` metadata.
   Constructing a config validates shape and ownership objects but performs no
   execution and grants no authority beyond the supplied environments.
   """
@@ -57,6 +60,7 @@ defmodule PtcRunner.Kernel.RunConfig do
     inspection_path: nil,
     provider_resources: [],
     connector_snapshots: [],
+    session_profile: nil,
     labels: %{},
     run_started_metadata: %{}
   ]
@@ -72,6 +76,7 @@ defmodule PtcRunner.Kernel.RunConfig do
           inspection_path: binary() | nil,
           provider_resources: [(-> :ok)],
           connector_snapshots: [map()],
+          session_profile: map() | nil,
           labels: map(),
           run_started_metadata: map()
         }
@@ -96,6 +101,7 @@ defmodule PtcRunner.Kernel.RunConfig do
                :inspection_path,
                :provider_resources,
                :connector_snapshots,
+               :session_profile,
                :labels
              ] !=
              [],
@@ -108,6 +114,7 @@ defmodule PtcRunner.Kernel.RunConfig do
            inspection?(Keyword.get(opts, :inspection_sink), Keyword.get(opts, :inspection_path)),
          true <- provider_resources?(Keyword.get(opts, :provider_resources, [])),
          true <- connector_snapshots?(Keyword.get(opts, :connector_snapshots, [])),
+         {:ok, session_profile} <- session_profile(Keyword.get(opts, :session_profile)),
          {:ok, labels} <- SafeMetadata.normalize_labels(Keyword.get(opts, :labels, %{})),
          {:ok, mission_inventory} <- MissionInventory.build(mission, limits),
          {:ok, run_started_metadata} <-
@@ -116,6 +123,7 @@ defmodule PtcRunner.Kernel.RunConfig do
              mission,
              mission_inventory,
              Keyword.get(opts, :connector_snapshots, []),
+             session_profile,
              labels,
              limits
            ) do
@@ -131,6 +139,7 @@ defmodule PtcRunner.Kernel.RunConfig do
          inspection_path: Keyword.get(opts, :inspection_path),
          provider_resources: Keyword.get(opts, :provider_resources, []),
          connector_snapshots: Keyword.get(opts, :connector_snapshots, []),
+         session_profile: session_profile,
          labels: labels,
          run_started_metadata: run_started_metadata
        }}
@@ -147,19 +156,29 @@ defmodule PtcRunner.Kernel.RunConfig do
   # the selected event-payload ceiling. A successful build therefore cannot
   # knowingly begin with a `run-started` payload its configured sink must
   # reject; the sink remains the final runtime authority.
-  defp run_started_metadata(workflow, mission, inventory, snapshots, labels, limits) do
+  defp run_started_metadata(
+         workflow,
+         mission,
+         inventory,
+         snapshots,
+         session_profile,
+         labels,
+         limits
+       ) do
     with {:ok, workflow_prelude} <- FrozenBundle.trace_metadata(workflow.bundle),
          {:ok, mission_prelude} <- FrozenBundle.trace_metadata(mission.bundle) do
-      payload = %{
-        labels: labels,
-        workflow_prelude: workflow_prelude,
-        mission_prelude: mission_prelude,
-        mission_inventory_hash: inventory.hash,
-        mission_inventory_bytes: inventory.bytes,
-        mission_model_context_hash: inventory.model_hash,
-        mission_model_context_bytes: inventory.model_bytes,
-        connector_snapshots: snapshots
-      }
+      payload =
+        %{
+          labels: labels,
+          workflow_prelude: workflow_prelude,
+          mission_prelude: mission_prelude,
+          mission_inventory_hash: inventory.hash,
+          mission_inventory_bytes: inventory.bytes,
+          mission_model_context_hash: inventory.model_hash,
+          mission_model_context_bytes: inventory.model_bytes,
+          connector_snapshots: snapshots
+        }
+        |> maybe_put_session_profile(session_profile)
 
       limit = limits.event_payload_bytes
       bytes = RetainedSize.bytes_with_cap(payload, limit)
@@ -196,6 +215,23 @@ defmodule PtcRunner.Kernel.RunConfig do
       Enum.all?(snapshots, &JSONValue.map?/1) and
       byte_size(:erlang.term_to_binary(snapshots)) <= 262_144
   end
+
+  defp session_profile(nil), do: {:ok, nil}
+
+  defp session_profile(%{"id" => id, "digest" => "sha256:" <> hash} = profile)
+       when map_size(profile) == 2 and is_binary(id) and byte_size(id) in 1..128 and
+              byte_size(hash) == 64 do
+    if id =~ ~r/\A[a-z][a-z0-9-]*\z/ and hash =~ ~r/\A[0-9a-f]{64}\z/,
+      do: {:ok, profile},
+      else: {:error, :invalid_run_config}
+  end
+
+  defp session_profile(_profile), do: {:error, :invalid_run_config}
+
+  defp maybe_put_session_profile(payload, nil), do: payload
+
+  defp maybe_put_session_profile(payload, profile),
+    do: Map.put(payload, :session_profile, profile)
 
   defp inspection?(nil, nil), do: true
 

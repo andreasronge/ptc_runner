@@ -35,6 +35,7 @@ defmodule PtcRunner.Lisp do
     DataKeys,
     Env,
     Eval,
+    ExternalizedMapKey,
     Format,
     Parser,
     RuntimeCallable,
@@ -100,6 +101,9 @@ defmodule PtcRunner.Lisp do
   Executable closures, builtins, composed callables, runtime callables, and
   plain BEAM functions are replaced recursively with deterministic display
   labels that cannot retain callable state, captured environments, or metadata.
+  If distinct map keys collapse to the same inert representation, both entries
+  are retained with opaque inert key wrappers so boundary projections can reject
+  ambiguous JSON while human formatting preserves the original distinction.
   """
   @spec externalize_value(term()) :: term()
   def externalize_value(value), do: externalize_lisp_values(value)
@@ -1417,8 +1421,21 @@ defmodule PtcRunner.Lisp do
   end
 
   defp externalize_lisp_values(value) when is_map(value) and not is_struct(value) do
-    Map.new(value, fn {k, v} ->
-      {externalize_lisp_values(k), externalize_lisp_values(v)}
+    pairs =
+      Enum.map(value, fn {key, item} ->
+        externalized_key = externalize_lisp_values(key)
+        display_key = if match?(%LispKeyword{}, key), do: key, else: externalized_key
+        {externalized_key, display_key, externalize_lisp_values(item)}
+      end)
+
+    frequencies = Enum.frequencies_by(pairs, &elem(&1, 0))
+
+    pairs
+    |> Enum.with_index()
+    |> Map.new(fn {{key, display_key, item}, ordinal} ->
+      if Map.fetch!(frequencies, key) > 1,
+        do: {%ExternalizedMapKey{value: display_key, ordinal: ordinal}, item},
+        else: {key, item}
     end)
   end
 

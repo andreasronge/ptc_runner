@@ -107,7 +107,8 @@ workflow scratchpad, not the model-equivalent mission boundary.
   Close, or selecting Reset while persistence has failed, retries the retained
   batch; Reset creates a replacement only after that retry succeeds.
 - Unexpected owner failure attempts best-effort aborted persistence through a
-  separate trace recorder that survives the evaluation owner.
+  separate trace recorder that survives the evaluation owner long enough for
+  one attempt, then stops. Retry retention requires a still-live session.
 - Exact source, trace-query arguments/results, and other inspection payloads
   stay outside canonical events.
 
@@ -139,9 +140,9 @@ workflow scratchpad, not the model-equivalent mission boundary.
 | --- | --- | --- |
 | Analysis authority recipe | code-owned `LogAnalysisProfile` definition for `log-analysis-v1` | `LogAnalysisSessionBuilder` only |
 | Mission execution | `PtcRunner.Kernel.Evaluation` | `RuntimeTools.kernel_eval/5` and `LogAnalysisSession` |
-| Continuation memory/history and quotas | one `RunState` owned by `LogAnalysisSession` | `Evaluation` reserves and atomically commits/releases |
+| Continuation memory/history, quotas, and canonical event buffer | one combined `RunState`/`EventSinkState` process lifecycle-owned by `SessionTrace` | `Evaluation` reserves and atomically commits/releases; event-token operations share the same owner |
 | Frozen trace data | tokenized `TraceSnapshot` owner | snapshot-backed `TraceCapability` callbacks |
-| Canonical session events and persistence state | `SessionTrace` owner plus its normal `EventSink` | `Evaluation`, `LogAnalysisSession`, and close/reset lifecycle |
+| Finalized canonical event batch and persistence state | `SessionTrace` | `LogAnalysisSession` and close/reset lifecycle |
 | Connected local backend and start-operation reconciliation | adapter-owned backend context | `PtcViewer.ReplStore` through typed callbacks |
 | Browser lifecycle and presentation transcript | `PtcViewer.ReplStore` | HTTP API and REPL UI |
 | Strict HTTP projection | root `ViewerReplAdapter` | standalone Viewer behavior |
@@ -225,6 +226,11 @@ profile ID and digest in safe analysis-session metadata so persisted runs can
 be audited. If the authority contract changes incompatibly, introduce a new
 versioned ID rather than silently redefining `log-analysis-v1`.
 
+Core `info/1` is serialized behind an already accepted evaluation and waits for
+that bounded operation rather than applying a shorter call timeout that could
+falsely report the live session as closed. Viewer background refreshes may use
+their own discardable outer watchdog as specified below.
+
 ### Configuration and authorization seam
 
 Keep three concerns separate:
@@ -265,10 +271,13 @@ abort(session, reason)
 The builder creates all environments and resources and returns an opaque
 session handle. The internal owner's `start_link` accepts only a private,
 builder-produced and attested assembly value tying together profile identity,
-mission environment, limits, trace, and snapshot. It must reject independently
-assembled environments or mismatched profile metadata. No public session API
-accepts a browser-selected path or an already assembled arbitrary capability
-set.
+mission environment, limits, trace, and snapshot. Attestation is not sufficient
+authority: startup independently reconstructs the fixed profile from that
+snapshot and trace sink and requires exact config, bundle, snapshot-bound
+capabilities, inventory, limits, and profile equality. It must reject
+independently assembled environments, substituted callbacks, or mismatched
+profile metadata. No public session API accepts a browser-selected path or an
+already assembled arbitrary capability set.
 
 `evaluate/2` calls the same internal mission-evaluation operation used by
 `Evaluation.evaluate_source/6`. It must not reconstruct the
@@ -282,18 +291,51 @@ evaluation continues invisibly. If the HTTP client disconnects, the accepted
 evaluation completes, commits or rolls back normally, emits its events, and is
 recorded in the bounded presentation transcript.
 
-`LogAnalysisSession` also owns a timer for the fixed run deadline. Expiry
+`LogAnalysisSession` also owns a token-correlated timer for the fixed run deadline. Expiry
 atomically rejects new work, waits for any already accepted bounded evaluation
 to finish, and runs the normal close-and-persist path. The owner remains able
 to report safe closed information and accept idempotent `close` after successful
-publication. If automatic persistence fails, it retains the closed resources
-required by `SessionTrace` and reports the normal retryable persistence state.
+publication. If automatic persistence fails, it retains only the finalized
+batch and closed trace owner required for retry, releases the continuation and
+snapshot owners, and reports the normal retryable persistence state.
+
+Treat both `SessionTrace` and the combined continuation/event owner as
+fail-closed dependencies. The `RunState` GenServer embeds the session's
+`EventSinkState`, so recorder readiness validation and continuation commit are
+one callback in one owner rather than a cross-process check followed by a
+commit. The session and `SessionTrace` monitor that combined runtime. If either
+owner dies, no in-flight continuation can commit without its corresponding
+event authority, later work is refused or the opaque handle closes, and the
+snapshot is released; normal-policy capacity loss must never be confused with
+recorder death. During construction, `SessionTrace` monitors the builder as
+well as any attached partial session. Builder death or an exception after any
+owner is acquired kills and observes that session and cleans every owner.
+Session death while the builder guard remains active is construction cleanup,
+not an operational abort, and must not publish a terminal trace. Any failed
+post-start handoff explicitly stops the retained partial session even if the
+trace owner is already unavailable. If the trace owner dies before ownership
+of the combined runtime is transferred, the builder explicitly cleans that
+still-builder-owned runtime rather than relying on the builder process to exit.
+Attach the sole session owner before emitting `run-started`, so replay of an
+already-attached assembly is rejected without mutating the canonical batch.
+Invoke the builder from the root adapter's long-lived connected backend owner,
+not its disposable callback wrapper. After snapshot transfer and safe info
+capture, mark construction complete but retain that lifecycle-owner monitor.
+Owner death during the final call/reply window can then neither lose the only
+handle nor orphan the session; later backend-owner death aborts and best-effort
+persists the completed session.
 
 After every evaluation, inspect the authoritative `RunState` terminal status
 before replying. A terminal budget such as the protocol-error ceiling returns
 the triggering bounded domain result and marks the session
 `:terminal_unpersisted`; it does not automatically persist. Later evaluation is
 rejected, while `info`, `close`, and the close phase of Reset remain available.
+Retain the authoritative terminal reason and use error outcome plus that reason
+for the eventual `run-stopped`; close, abort, and deadline expiry succeeding as
+operations must not rewrite budget exhaustion into another terminal result.
+Transfer the first authoritative reason to `SessionTrace` before replying so an
+unexpected owner death while terminal-but-unpersisted cannot replace it with a
+generic owner-failure reason.
 
 ### Evaluation result projection
 
@@ -377,7 +419,10 @@ Projection rules:
   return an explicit truncation marker and flag;
 - preserve bounded evaluator prints for every outcome for which the detailed
   evaluator result has them; terminal returned/failed forms should remain
-  useful to a human even though the model loop does not need terminal prints;
+  useful to a human even though the model loop does not need terminal prints.
+  Project them in one pass under a fixed 128-entry ceiling and a 65,536-byte
+  encoded JSON-array ceiling, returning the truncation flag from that pass so
+  empty strings cannot evade the bound;
 - apply an authoritative public-result ceiling before returning through HTTP;
   a result-limit failure does not undo continuation state already committed by
   the shared evaluation boundary;
@@ -499,8 +544,9 @@ Add `PtcRunner.Kernel.LogAnalysisSessionBuilder`:
 9. Install the fixed profile limits.
 10. Generate a unique run/trace identity and a deterministic filename derived
    only from that safe identity.
-11. Start `SessionTrace`, which owns the normal `EventSink` and persistence
-   destination.
+11. Start the combined tokenized `RunState`/normal-event owner, then start
+    `SessionTrace` with that handle and the persistence destination. Transfer
+    the combined owner's lifecycle to `SessionTrace` before session startup.
 12. Build `RunConfig` metadata with valid safe labels:
     `%{"name" => "ptc.viewer.repl", "tags" => %{"mode" => "repl"}}`.
     Extend `RunConfig` with one optional closed `session_profile` projection
@@ -519,7 +565,7 @@ Do not add a trace provider to the default manifest registry. Do not migrate
 
 Add `PtcRunner.Kernel.SessionTrace` as the single owner of:
 
-- the normal `EventSink` and its token;
+- the lifecycle of the combined `RunState`/normal-event owner and its handles;
 - the unique run/trace identity;
 - the validated destination beneath the configured trace directory;
 - terminal-event state;
@@ -528,8 +574,14 @@ Add `PtcRunner.Kernel.SessionTrace` as the single owner of:
   `{:persistence_failed, reason}`;
 - the last successfully persisted sequence.
 
-`SessionTrace` owns its sink, then monitors the attached analysis session. This
-allows retained events to remain available if the evaluation owner exits.
+Construction accepts only an empty, unfinalized combined recorder with open
+RunState and the exact reserve for one dropped summary plus one stopped event.
+A zero-reserve, already-finalized, or closed runtime is rejected before session
+attachment.
+
+`SessionTrace` owns the combined runtime lifecycle, then monitors the attached
+analysis session. This allows it to atomically take possession of a finalized
+event batch if the evaluation owner exits.
 
 ### Orderly close
 
@@ -537,17 +589,23 @@ allows retained events to remain available if the evaluation owner exits.
 2. Wait for an accepted evaluation to finish; the Viewer normally prevents
    overlapping close before this reaches core.
 3. Close `RunState` against new reservations.
-4. Construct the bounded terminal usage/outcome payload and read the sink's
-   accumulated loss counts without publishing either yet.
-5. Ask the sink's atomic owner-only finalization operation to emit the bounded
-   dropped summary when needed and exactly one reserved `run-stopped` event
-   with normal outcome.
-6. Ask `SessionTrace` to persist the complete batch to a new, no-clobber normal
+4. Construct the bounded terminal usage/outcome payload.
+5. Ask the combined owner's atomic finalization-and-handoff operation to emit
+   the bounded dropped summary when needed, emit exactly one reserved
+   `run-stopped`, and return the complete frozen batch in the same callback.
+6. Ask `SessionTrace`, which lifecycle-owns the combined runtime and snapshot,
+   to stop and observe those resources exactly once before clearing their
+   handles. A session-owner death during this synchronous handoff leaves the
+   trace owner able to finish cleanup; `SessionTrace` and its frozen batch are
+   then the sole retry authority. If an otherwise open runtime died before
+   orderly `RunState.close/1` was accepted, mark the recorder `backend_failed`
+   before flushing its monitor. Failure before the batch is frozen makes
+   finalization fail without a retry batch; failure after handoff preserves the
+   frozen batch and terminal result.
+7. Ask `SessionTrace` to persist the complete batch to a new, no-clobber normal
    JSONL file.
-7. On success, stop continuation, snapshot, provider, and sink resources
-   exactly once.
-8. On persistence failure, keep the closed session and retained trace owner
-   alive so repeated `close` can retry without appending duplicates.
+8. On persistence failure, keep only the closed session and retained trace
+   owner alive so repeated `close` can retry without appending duplicates.
 
 Persistence failure is returned separately and never rewrites the final
 evaluation outcome or the already emitted run terminal outcome.
@@ -558,7 +616,8 @@ evaluation outcome or the already emitted run terminal outcome.
   continuation/provider resources, and attempts persistence.
 - When the session process dies unexpectedly, `SessionTrace` observes `:DOWN`,
   emits an aborted terminal event if none exists, and attempts best-effort
-  persistence independently.
+  persistence independently exactly once before stopping. It does not retain an
+  unreachable retry owner after the only caller-visible session authority died.
 - An OS/BEAM crash may still lose the in-memory batch; durable per-event
   streaming remains deferred.
 - Repeated close, abort, reset, Viewer shutdown, or owner-down notifications
@@ -575,11 +634,17 @@ existing file:
    whose suffix is not discoverable as a trace.
 3. Publish it with an atomic no-replace primitive, such as a same-filesystem
    hard link followed by removal of the temporary name. Never use a rename that
-   can replace an existing destination.
+   can replace an existing destination. Sync the containing directory after
+   installing the final link and again after removing the temporary link before
+   reporting success. Compare device/inode identity between the still-open
+   temporary descriptor, the temporary pathname immediately before linking,
+   and the destination immediately after linking; pathname replacement is a
+   collision and must never be acknowledged as success.
 4. If the final path already exists after a retry or process interruption,
    validate that it is a complete byte-identical publication of this exact
-   run. Treat that as success; a partial or different file is a collision and
-   must not be appended or overwritten.
+   run. Sync its containing directory before treating that retry as success; a
+   partial or different file is a collision and must not be appended or
+   overwritten.
 5. Clean temporary files after every observed failure while preserving enough
    state for a safe retry.
 
@@ -1482,14 +1547,17 @@ must not guess that no session exists or start again with a fresh operation ID.
 Core additions/refactors:
 
 - `lib/ptc_runner/kernel/log_analysis_profile.ex`
+- `lib/ptc_runner/kernel/log_analysis_assembly.ex`
 - `lib/ptc_runner/kernel/log_analysis_session.ex`
 - `lib/ptc_runner/kernel/log_analysis_session_builder.ex`
 - `lib/ptc_runner/kernel/session_trace.ex`
 - `lib/ptc_runner/kernel/event_sink.ex`
+- `lib/ptc_runner/kernel/event_sink_state.ex`
 - `lib/ptc_runner/kernel/trace_snapshot.ex`
 - `lib/ptc_runner/kernel/trace_log.ex`
 - `lib/ptc_runner/kernel/trace_capability.ex`
 - `lib/ptc_runner/kernel/evaluation.ex`
+- `lib/ptc_runner/kernel/run_state.ex`
 - `lib/ptc_runner/kernel/run_config.ex`
 - `lib/ptc_runner/kernel/runtime_tools.ex`
 - `lib/ptc_runner/kernel/viewer_repl_adapter.ex`
@@ -1497,8 +1565,11 @@ Core additions/refactors:
   is justified; `mode = repl` requires no change
 - Kernel public/module docs and `docs/guides/kernel-maintainer.md`
 
-No production change is expected in `repl_session.ex`, `run_state.ex`, or
-`mix ptc.repl` unless a focused regression exposes a shared-boundary defect.
+`RunState` changes to co-host session event state because focused ownership and
+race review required recorder readiness and continuation commit to occur in one
+atomic owner callback. No production change is expected in `repl_session.ex`
+or `mix ptc.repl` unless a focused regression exposes another shared-boundary
+defect.
 
 Viewer additions/refactors:
 
@@ -1562,7 +1633,8 @@ trace-log contract as they are implemented.
 11. JSON-hostile inert values produce bounded formatted text and
    `value_available?: false` without crashing encoding.
 12. Large values, prints, formatted values, error messages, and complete HTTP
-   projections respect their independent limits and expose truncation.
+   projections respect their independent limits and expose truncation,
+   including more than 128 zero-length prints without unbounded cardinality.
 13. A public result-limit failure retains the shared evaluation boundary's
     closed `continuation_effect`, including committed-with-history and
     committed-without-history cases, rather than being misreported as preserved.

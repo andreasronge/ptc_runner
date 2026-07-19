@@ -81,6 +81,13 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
   def info(%__MODULE__{} = snapshot), do: call(snapshot, :info)
   def info(_snapshot), do: {:error, :invalid_snapshot}
 
+  @doc false
+  @spec transfer_owner(t(), pid()) :: :ok | {:error, atom()}
+  def transfer_owner(%__MODULE__{} = snapshot, owner) when is_pid(owner),
+    do: call(snapshot, {:transfer_owner, owner})
+
+  def transfer_owner(_snapshot, _owner), do: {:error, :invalid_snapshot}
+
   @spec stop(t()) :: :ok
   def stop(%__MODULE__{} = snapshot) do
     case call(snapshot, :stop) do
@@ -140,6 +147,16 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
 
   def handle_call({token, :stop}, _from, %{token: token} = state),
     do: {:stop, :normal, :ok, state}
+
+  def handle_call({token, {:transfer_owner, owner}}, _from, %{token: token} = state)
+      when is_pid(owner) do
+    if Process.alive?(owner) do
+      Process.demonitor(state.owner_ref, [:flush])
+      {:reply, :ok, %{state | owner_ref: Process.monitor(owner)}}
+    else
+      {:reply, {:error, :snapshot_unavailable}, state}
+    end
+  end
 
   def handle_call({_token, _request}, _from, state),
     do: {:reply, {:error, :invalid_snapshot}, state}

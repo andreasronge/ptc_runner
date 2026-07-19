@@ -198,6 +198,151 @@ defmodule PtcRunner.Kernel.TraceCapabilityTest do
   end
 
   @tag :tmp_dir
+  test "atomic publication is no-clobber, retry-safe, and cleans partial temporaries", %{
+    tmp_dir: directory
+  } do
+    path = Path.join(directory, "publication.jsonl")
+    events = [decoded_event("publication", 1, "run-started")]
+
+    assert :ok = TraceLog.publish_jsonl(path, events)
+    first = File.read!(path)
+    assert :ok = TraceLog.publish_jsonl(path, events)
+    assert File.read!(path) == first
+
+    parent = self()
+
+    replacement =
+      Task.async(fn ->
+        TraceLog.publish_jsonl(path, events,
+          fault_hook: fn
+            :before_publication_read ->
+              send(parent, {:publication_read_ready, self()})
+
+              receive do
+                :continue_publication_read -> :ok
+              end
+
+            _stage ->
+              :ok
+          end
+        )
+      end)
+
+    assert_receive {:publication_read_ready, publisher}
+    oversized = Path.join(directory, "oversized-replacement")
+    File.write!(oversized, String.duplicate("x", byte_size(first) + 1))
+    File.rm!(path)
+    File.ln_s!(oversized, path)
+    send(publisher, :continue_publication_read)
+    assert {:error, :trace_collision} = Task.await(replacement)
+    File.rm!(path)
+    File.rm!(oversized)
+    File.write!(path, first)
+
+    different = [decoded_event("different", 1, "run-started")]
+    assert {:error, :trace_collision} = TraceLog.publish_jsonl(path, different)
+    assert File.read!(path) == first
+
+    replaced_temporary_path = Path.join(directory, "replaced-temporary.jsonl")
+
+    replaced_temporary =
+      Task.async(fn ->
+        TraceLog.publish_jsonl(replaced_temporary_path, events,
+          fault_hook: fn
+            :after_sync ->
+              send(parent, {:temporary_synced, self()})
+
+              receive do
+                :continue_temporary_publication -> :ok
+              end
+
+            _stage ->
+              :ok
+          end
+        )
+      end)
+
+    assert_receive {:temporary_synced, temporary_publisher}
+
+    [temporary] =
+      directory
+      |> File.ls!()
+      |> Enum.filter(&String.starts_with?(&1, "replaced-temporary.jsonl.ptc-tmp-"))
+
+    temporary = Path.join(directory, temporary)
+    File.rm!(temporary)
+    File.write!(temporary, "attacker-controlled replacement")
+    send(temporary_publisher, :continue_temporary_publication)
+
+    assert {:error, :trace_collision} = Task.await(replaced_temporary)
+
+    if File.exists?(replaced_temporary_path),
+      do: assert(File.read!(replaced_temporary_path) != first)
+
+    refute Enum.any?(File.ls!(directory), &String.contains?(&1, ".ptc-tmp-"))
+
+    partial_path = Path.join(directory, "partial.jsonl")
+
+    assert {:error, :trace_persistence_failed} =
+             TraceLog.publish_jsonl(partial_path, events,
+               fault_hook: fn
+                 :during_write -> {:error, :partial_write}
+                 _stage -> :ok
+               end
+             )
+
+    refute File.exists?(partial_path)
+    refute Enum.any?(File.ls!(directory), &String.contains?(&1, ".ptc-tmp-"))
+
+    before_write_path = Path.join(directory, "before-write.jsonl")
+
+    assert {:error, :trace_persistence_failed} =
+             TraceLog.publish_jsonl(before_write_path, events,
+               fault_hook: fn
+                 :before_write -> {:error, :injected}
+                 _stage -> :ok
+               end
+             )
+
+    refute File.exists?(before_write_path)
+
+    published_path = Path.join(directory, "published-before-ack.jsonl")
+    {:ok, attempts} = Agent.start_link(fn -> 0 end)
+
+    hook = fn
+      :after_publish ->
+        Agent.get_and_update(attempts, fn
+          0 -> {{:error, :injected}, 1}
+          count -> {:ok, count + 1}
+        end)
+
+      _stage ->
+        :ok
+    end
+
+    assert {:error, :trace_persistence_failed} =
+             TraceLog.publish_jsonl(published_path, events, fault_hook: hook)
+
+    assert File.regular?(published_path)
+    assert :ok = TraceLog.publish_jsonl(published_path, events, fault_hook: hook)
+    refute Enum.any?(File.ls!(directory), &String.contains?(&1, ".ptc-tmp-"))
+
+    cleanup_path = Path.join(directory, "cleanup-fault.jsonl")
+
+    assert {:error, :trace_persistence_failed} =
+             TraceLog.publish_jsonl(cleanup_path, events,
+               fault_hook: fn
+                 :cleanup -> {:error, :injected}
+                 _stage -> :ok
+               end
+             )
+
+    assert File.regular?(cleanup_path)
+    refute Enum.any?(File.ls!(directory), &String.contains?(&1, ".ptc-tmp-"))
+    assert :ok = TraceLog.publish_jsonl(cleanup_path, events)
+  end
+
+  @tag :tmp_dir
   test "private JSONL sources require reserved names and explicit grants", %{tmp_dir: directory} do
     normal_path = Path.join(directory, "normal.jsonl")
     private_path = Path.join(directory, "secret.private.jsonl")

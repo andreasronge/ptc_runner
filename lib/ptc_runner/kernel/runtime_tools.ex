@@ -18,14 +18,27 @@ defmodule PtcRunner.Kernel.RuntimeTools do
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
   alias PtcRunner.Lisp.RetainedSize
 
+  @mission_contract_version 1
+  @mission_routes [
+    {"cap-describe", :capability_description},
+    {"cap-list", :capability_list},
+    {"runtime-remaining", :remaining},
+    {"runtime-usage", :usage}
+  ]
+
+  @doc false
+  @spec mission_contract_descriptor() :: map()
+  def mission_contract_descriptor do
+    %{
+      "version" => @mission_contract_version,
+      "routes" => Enum.map(@mission_routes, &elem(&1, 0))
+    }
+  end
+
   @doc "Builds the reserved runtime-tool map for one environment."
   def tools(state, environment, event_sink, kind) when kind in [:workflow, :mission] do
-    %{
-      "runtime-usage" => fn arguments -> usage(state, arguments) end,
-      "runtime-remaining" => fn arguments -> remaining(state, arguments) end,
-      "cap-list" => fn arguments -> capability_list(state, environment, arguments) end,
-      "cap-describe" => fn arguments -> capability_description(state, environment, arguments) end
-    }
+    @mission_routes
+    |> Map.new(fn {name, route} -> {name, route_callback(route, state, environment)} end)
     |> maybe_put_annotation(state, event_sink, kind)
     |> Map.new(fn {name, callback} ->
       {name, instrument(state, event_sink, kind, name, callback)}
@@ -153,6 +166,18 @@ defmodule PtcRunner.Kernel.RuntimeTools do
 
   defp capability_description(state, _environment, _arguments),
     do: protocol_error(state, :invalid_capability_description_request)
+
+  defp route_callback(:usage, state, _environment),
+    do: fn arguments -> usage(state, arguments) end
+
+  defp route_callback(:remaining, state, _environment),
+    do: fn arguments -> remaining(state, arguments) end
+
+  defp route_callback(:capability_list, state, environment),
+    do: fn arguments -> capability_list(state, environment, arguments) end
+
+  defp route_callback(:capability_description, state, environment),
+    do: fn arguments -> capability_description(state, environment, arguments) end
 
   defp maybe_put_annotation(tools, state, event_sink, :workflow) do
     Map.put(tools, "workflow-annotate", fn arguments ->

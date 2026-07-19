@@ -5,41 +5,60 @@ defmodule PtcRunner.Kernel.EventSink do
   The sink assigns schema version, run/trace identity, monotonic sequence, and
   UTC timestamp. Producers supply only event type and bounded data.
 
-  Under `:normal` policy, a full or failed sink drops later events and records
-  loss by event type without changing workflow execution. Under `:private`
-  policy, the same condition returns `:event_sink_error` so the run can fail
-  closed. The sink monitors its owner and exits when the owner terminates.
+  Under `:normal` policy, a full or unavailable sink ordinarily records or
+  projects loss without changing workflow execution. An internal normal sink
+  may opt into fail-closed owner loss so a session cannot continue without its
+  canonical recorder. The sink monitors its owner and exits when the owner
+  terminates.
 
   Persistent JSONL storage is an explicit `PtcRunner.Kernel.TraceLog` operation
   after collection, not an arbitrary callback in the runtime path.
   """
   use GenServer
 
+  alias PtcRunner.Kernel.EventSinkState
   alias PtcRunner.Kernel.Limits
-  alias PtcRunner.Lisp.RetainedSize
 
   @enforce_keys [:pid, :token, :policy]
-  defstruct [:pid, :token, :policy]
+  defstruct [:pid, :token, :policy, fail_closed?: false]
 
   @type policy :: :normal | :private
-  @type t :: %__MODULE__{pid: pid(), token: reference(), policy: policy()}
+  @type t :: %__MODULE__{
+          pid: pid(),
+          token: reference(),
+          policy: policy(),
+          fail_closed?: boolean()
+        }
 
   @spec start(policy(), Limits.t(), keyword()) :: {:ok, t()} | {:error, :invalid_event_sink}
   @doc """
   Starts a sink with one policy and the event bounds from `limits`.
 
-  Options are `:run_id`, `:trace_id`, and `:owner`. IDs must be binaries; a
-  unique run ID is generated when omitted and is also the default trace ID.
+  Options are `:run_id`, `:trace_id`, `:owner`, and the internal normal-policy
+  `:terminal_reserve` and `:fail_closed`. IDs must be binaries; a unique run ID
+  is generated when omitted and is also the default trace ID.
   """
   def start(policy, %Limits{} = limits, opts \\ []) when policy in [:normal, :private] do
+    with {:ok, sink_state, handle} <- prepare(policy, limits, opts) do
+      owner = Keyword.get(opts, :owner, self())
+      {:ok, pid} = GenServer.start(__MODULE__, {sink_state, owner})
+      {:ok, struct!(__MODULE__, Map.put(handle, :pid, pid))}
+    end
+  end
+
+  @doc false
+  def prepare(policy, %Limits{} = limits, opts) when policy in [:normal, :private] do
     token = make_ref()
     run_id = Keyword.get_lazy(opts, :run_id, &default_run_id/0)
     trace_id = Keyword.get(opts, :trace_id, run_id)
+    terminal_reserve = Keyword.get(opts, :terminal_reserve, %{count: 0, bytes: 0})
+    fail_closed? = Keyword.get(opts, :fail_closed, false)
 
-    if is_binary(run_id) and is_binary(trace_id) do
-      owner = Keyword.get(opts, :owner, self())
-      {:ok, pid} = GenServer.start(__MODULE__, {policy, limits, token, run_id, trace_id, owner})
-      {:ok, %__MODULE__{pid: pid, token: token, policy: policy}}
+    if Keyword.keys(opts) -- [:run_id, :trace_id, :owner, :terminal_reserve, :fail_closed] == [] and
+         is_binary(run_id) and is_binary(trace_id) and is_boolean(fail_closed?) and
+         valid_terminal_reserve?(policy, terminal_reserve, limits) do
+      state = EventSinkState.new(policy, limits, token, run_id, trace_id, terminal_reserve)
+      {:ok, state, %{token: token, policy: policy, fail_closed?: fail_closed?}}
     else
       {:error, :invalid_event_sink}
     end
@@ -49,7 +68,7 @@ defmodule PtcRunner.Kernel.EventSink do
   @doc "Emits one bounded event or applies the sink's loss policy."
   def emit(sink, type, data) when is_binary(type) and is_map(data) do
     case call(sink, {:emit, type, data}) do
-      {:error, :event_sink_error} when sink.policy == :normal -> :ok
+      {:error, :event_sink_error} when sink.policy == :normal and not sink.fail_closed? -> :ok
       result -> result
     end
   end
@@ -72,6 +91,24 @@ defmodule PtcRunner.Kernel.EventSink do
     end
   end
 
+  @doc false
+  @spec finalize(t(), map(), map()) :: :ok | {:error, :event_sink_error}
+  def finalize(%__MODULE__{policy: :normal} = sink, dropped_data, stopped_data)
+      when is_map(dropped_data) and is_map(stopped_data),
+      do: call(sink, {:finalize, dropped_data, stopped_data})
+
+  def finalize(_sink, _dropped_data, _stopped_data), do: {:error, :event_sink_error}
+
+  @doc false
+  @spec finalize_and_events(t(), map(), map()) ::
+          {:ok, [map()]} | {:error, :event_sink_error}
+  def finalize_and_events(%__MODULE__{policy: :normal} = sink, dropped_data, stopped_data)
+      when is_map(dropped_data) and is_map(stopped_data),
+      do: call(sink, {:finalize_and_events, dropped_data, stopped_data})
+
+  def finalize_and_events(_sink, _dropped_data, _stopped_data),
+    do: {:error, :event_sink_error}
+
   @spec policy(t()) :: policy() | {:error, :event_sink_error}
   @doc "Returns the configured loss policy."
   def policy(sink), do: call(sink, :policy)
@@ -86,6 +123,14 @@ defmodule PtcRunner.Kernel.EventSink do
     end
   end
 
+  @doc false
+  def session_contract(sink) do
+    case call(sink, :session_contract) do
+      %{terminal_reserve: _reserve, ready?: _ready?} = contract -> {:ok, contract}
+      {:error, :event_sink_error} = error -> error
+    end
+  end
+
   @spec stop(t()) :: :ok
   @doc "Stops the sink. Calling it after owner-driven shutdown is harmless."
   def stop(sink) do
@@ -95,44 +140,15 @@ defmodule PtcRunner.Kernel.EventSink do
   end
 
   @impl GenServer
-  def init({policy, limits, token, run_id, trace_id, owner}) do
-    {:ok,
-     %{
-       policy: policy,
-       limits: limits,
-       token: token,
-       owner_ref: Process.monitor(owner),
-       run_id: run_id,
-       trace_id: trace_id,
-       sequence: 0,
-       bytes: 0,
-       events: [],
-       dropped: %{}
-     }}
+  def init({sink_state, owner}) do
+    {:ok, Map.put(sink_state, :owner_ref, Process.monitor(owner))}
   end
 
   @impl GenServer
-  def handle_call({token, {:emit, type, data}}, _from, %{token: token} = state) do
-    case event_bytes(data, state.limits.event_payload_bytes) do
-      {:ok, bytes} -> enqueue(state, type, data, bytes)
-      :error -> sink_failure(state, type)
-    end
+  def handle_call(request, _from, state) do
+    {reply, next} = EventSinkState.handle(request, state)
+    {:reply, reply, next}
   end
-
-  def handle_call({token, :events}, _from, %{token: token} = state),
-    do: {:reply, Enum.reverse(state.events), state}
-
-  def handle_call({token, :dropped}, _from, %{token: token} = state),
-    do: {:reply, state.dropped, state}
-
-  def handle_call({token, :policy}, _from, %{token: token} = state),
-    do: {:reply, state.policy, state}
-
-  def handle_call({token, :identity}, _from, %{token: token} = state),
-    do: {:reply, %{run_id: state.run_id, trace_id: state.trace_id}, state}
-
-  def handle_call({_token, _request}, _from, state),
-    do: {:reply, {:error, :event_sink_error}, state}
 
   @impl GenServer
   def handle_info({:DOWN, ref, :process, _pid, _reason}, %{owner_ref: ref} = state),
@@ -140,48 +156,14 @@ defmodule PtcRunner.Kernel.EventSink do
 
   def handle_info(_message, state), do: {:noreply, state}
 
-  defp enqueue(state, type, data, bytes) do
-    full? =
-      length(state.events) >= state.limits.normal_event_count or
-        state.bytes + bytes > state.limits.normal_event_bytes
-
-    if full? do
-      sink_failure(state, type)
-    else
-      event = %{
-        schema_version: 1,
-        run_id: state.run_id,
-        trace_id: state.trace_id,
-        sequence: state.sequence + 1,
-        timestamp: DateTime.utc_now(),
-        type: type,
-        data: data
-      }
-
-      {:reply, :ok,
-       %{
-         state
-         | sequence: state.sequence + 1,
-           bytes: state.bytes + bytes,
-           events: [event | state.events]
-       }}
-    end
+  defp valid_terminal_reserve?(:normal, %{count: count, bytes: bytes}, limits)
+       when is_integer(count) and is_integer(bytes) and count >= 0 and bytes >= 0 do
+    count <= limits.normal_event_count and bytes <= limits.normal_event_bytes and
+      ((count == 0 and bytes == 0) or (count >= 2 and bytes >= limits.event_payload_bytes * 2))
   end
 
-  defp sink_failure(%{policy: :private} = state, _type),
-    do: {:reply, {:error, :event_sink_error}, state}
-
-  defp sink_failure(state, type) do
-    dropped = Map.update(state.dropped, type, 1, &(&1 + 1))
-    {:reply, :ok, %{state | dropped: dropped}}
-  end
-
-  defp event_bytes(data, cap) do
-    case RetainedSize.bytes_with_cap(data, cap) do
-      bytes when is_integer(bytes) and bytes <= cap -> {:ok, bytes}
-      _ -> :error
-    end
-  end
+  defp valid_terminal_reserve?(:private, %{count: 0, bytes: 0}, _limits), do: true
+  defp valid_terminal_reserve?(_policy, _reserve, _limits), do: false
 
   defp call(%__MODULE__{pid: pid, token: token}, request) do
     GenServer.call(pid, {token, request})

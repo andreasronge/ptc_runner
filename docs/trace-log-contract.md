@@ -103,6 +103,20 @@ Malformed or unsupported canonical events fail closed by default. A debugging
 mode may report bounded per-file errors, but it never silently reinterprets
 malformed data as valid runs.
 
+Complete analysis-session batches use atomic no-clobber publication rather than
+append. TraceLog validates and deterministically encodes the whole batch, writes
+and syncs an exclusive same-directory temporary sibling whose name is not a
+discoverable trace, installs the final name with a hard link, and syncs the
+containing directory before reporting success. Removing the temporary link is
+followed by another directory sync. An existing byte-identical complete
+destination is a successful retry only after the directory is synced; a
+different or partial destination is a collision and is never replaced or
+appended. The open temporary descriptor, temporary pathname before linking, and
+published pathname after linking must retain the same device/inode identity;
+pathname replacement is a collision and is never acknowledged as successful.
+Observed failure paths remove the temporary sibling. This publication contract
+is for host-selected destinations only and does not grant Lisp write authority.
+
 ### Immutable normal-directory captures
 
 An internal `PtcRunner.Kernel.TraceSnapshot` owner can pin one host-selected
@@ -144,6 +158,76 @@ bind to the captured digest and therefore remain stable when the original
 directory changes later. The snapshot exits with its owning analysis session;
 cleanup is idempotent. This immutable boundary also prevents an analysis run's
 new canonical events from mutating the source it is paging.
+
+### Local log-analysis sessions
+
+The server-owned `log-analysis-v1` profile is the sole profile in the local
+Viewer increment. Its mission bundle contains the shipped `log.core` component,
+its explicit authority contains only `trace-list-runs`, `trace-get-run`,
+`trace-list-turns`, and `trace-counters`, and ordinary implicit mission
+introspection remains available. Filesystem, network, LLM, agent, workflow,
+MCP, private-inspection, and nested `kernel-eval` authority are absent.
+
+Each session queries one immutable snapshot and records its own canonical events
+in the same owner process that holds its continuation and quotas, under a
+separate token. The active mutating session trace is never queryable from that
+session. Orderly close, reset, and deadline expiry finalize and publish the
+batch; a later refreshed session captures the directory again and can therefore
+query its predecessor. Explicit return and fail are evaluation facts rather
+than session lifecycle commands. Exhausting a terminal session budget persists
+an error run with that authoritative limit reason, even when abort or deadline
+expiry performs the eventual close. Recorder readiness and continuation commit
+are one owner callback, so combined-runtime or trace-owner death cannot leave a
+committed result without event authority and releases the snapshot. During
+orderly close, `SessionTrace` synchronously stops and observes the combined
+runtime and snapshot before relinquishing their handles or starting
+persistence. The deadline message is privately correlated and cannot be forged
+from the session PID alone. Every evaluation admission also checks the same
+authoritative deadline before running; expiry therefore closes and publishes
+with the same outcome regardless of timer-message ordering. Before the builder
+releases its construction guard,
+session death cleans partial owners without publishing a run; every post-start
+handoff failure explicitly stops the partial session even when the trace owner
+has already died. Session information requests serialize behind an accepted
+evaluation and do not mistake that bounded wait for owner death.
+The trace owner is constructed only when its limits, combined runtime/sink,
+normal fail-closed policy, exact two-event terminal reserve, empty unfinalized
+recorder, open RunState, sink run/trace identity, and `<run-id>.jsonl`
+destination agree. Assembly validation rechecks the runtime binding. The sole
+session attaches before `run-started`, so rejected assembly replay is side-effect
+free.
+Unexpected session-owner death receives one independent best-effort aborted
+publication attempt before `SessionTrace` stops. Retryable batch retention is
+available only through a still-live session's explicit close path; failed
+unexpected-death publication does not leave an unreachable retry owner.
+An authoritative terminal-budget reason is transferred to the trace owner
+before the triggering evaluation reply and takes precedence over the generic
+unexpected-owner reason if death occurs before explicit close.
+If resource handoff encounters a combined runtime that died before orderly
+`RunState.close/1` was accepted, an otherwise open recorder becomes
+`backend_failed` before its monitor is flushed; cleanup cannot erase the
+failure signal.
+Failure before terminal-batch handoff makes finalization fail without inventing
+a retry batch. Failure after the batch is frozen preserves its terminal reason,
+events, and persistence state.
+
+The process calling the builder remains the stable lifecycle owner after the
+construction guard is marked complete. Its monitor is intentionally retained:
+death during the final reply window cannot orphan a completed session, and
+later owner death aborts and best-effort persists it. A host must therefore call
+the builder from its long-lived connected backend owner rather than a disposable
+request or callback task.
+
+Public evaluation prints are projected in one pass under both a 128-entry
+ceiling and a 65,536-byte encoded JSON-array ceiling. The truncation flag is
+authoritative even when omitted entries are empty strings.
+
+The session EventSink opts into a terminal reserve. Ordinary events stop before
+the count and byte ceilings would consume capacity for one bounded
+`events-dropped` summary and exactly one `run-stopped`; atomic finalization also
+returns the frozen terminal batch in that same owner call, without exceeding
+either hard ceiling. Existing normal and private sinks retain their original
+behavior unless explicitly constructed with the reserve.
 
 ## Source grants and authority
 
@@ -210,6 +294,7 @@ a run without loading its turns:
 - frozen mission-inventory hash and byte count when an inventory was rendered;
 - safe connector snapshots containing public names, effects, schema hashes, and
   snapshot hashes, but no endpoint or session data;
+- an optional server-owned session-profile ID and SHA-256 authority digest;
 - completeness and truncation indicators;
 - schema version;
 - whether the source is sanitized normal data or an explicitly granted private
@@ -533,6 +618,15 @@ as workflow failure.
   stable cursors after source mutation, and owner-driven idempotent cleanup.
 - Prove snapshot-backed trace capability closures retain only the opaque token
   and return the same four canonical query projections as TraceLog.
+- Prove the fixed log-analysis profile's positive and negative authority
+  inventory, direct Evaluation parity, exact continuation behavior, bounded
+  result/accounting projection, terminal-budget lifecycle, and path/source
+  redaction.
+- Saturate ordinary event count and byte capacity and retain one dropped summary
+  plus exactly one terminal event through a reloadable persisted batch.
+- Fault atomic publication before/during write, after sync/publication, and at
+  cleanup; retries produce one complete file or a stable collision without
+  partial discoverable traces or duplicate sequences.
 
 The developer-inspection increment additionally has tests that:
 

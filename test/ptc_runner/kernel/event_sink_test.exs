@@ -18,4 +18,100 @@ defmodule PtcRunner.Kernel.EventSinkTest do
     assert Enum.uniq(ids) == ids
     assert Enum.all?(ids, &Regex.match?(~r/\Arun-[0-9a-f]{12}\z/, &1))
   end
+
+  test "terminal reserve retains one dropped summary and one run-stopped event" do
+    {:ok, limits} =
+      Limits.new(
+        normal_event_count: 4,
+        normal_event_bytes: 20_000,
+        event_payload_bytes: 1_000
+      )
+
+    {:ok, sink} =
+      EventSink.start(:normal, limits,
+        run_id: "reserved",
+        terminal_reserve: %{count: 2, bytes: 2_000}
+      )
+
+    assert :ok = EventSink.emit(sink, "run-started", %{})
+    assert :ok = EventSink.emit(sink, "evaluation-started", %{})
+    assert :ok = EventSink.emit(sink, "evaluation-stopped", %{})
+    assert %{"evaluation-stopped" => 1} = EventSink.dropped(sink)
+
+    assert :ok =
+             EventSink.finalize(sink, %{}, %{
+               outcome: :ok,
+               reason: nil,
+               usage: %{}
+             })
+
+    assert :ok = EventSink.finalize(sink, %{}, %{outcome: :error})
+
+    events = EventSink.events(sink)
+
+    assert Enum.map(events, & &1.type) ==
+             ["run-started", "evaluation-started", "events-dropped", "run-stopped"]
+
+    assert List.last(events).data.outcome == :ok
+  end
+
+  test "terminal reserve remains available after the ordinary byte budget is saturated" do
+    {:ok, limits} =
+      Limits.new(
+        normal_event_count: 10,
+        normal_event_bytes: 3_000,
+        event_payload_bytes: 1_000
+      )
+
+    {:ok, sink} =
+      EventSink.start(:normal, limits,
+        run_id: "byte-reserved",
+        terminal_reserve: %{count: 2, bytes: 2_000}
+      )
+
+    assert :ok = EventSink.emit(sink, "run-started", %{value: String.duplicate("x", 400)})
+    assert :ok = EventSink.emit(sink, "evaluation-started", %{value: String.duplicate("x", 400)})
+    assert %{"evaluation-started" => 1} = EventSink.dropped(sink)
+
+    assert :ok = EventSink.finalize(sink, %{}, %{outcome: :ok, usage: %{}})
+
+    assert Enum.map(EventSink.events(sink), & &1.type) ==
+             ["run-started", "events-dropped", "run-stopped"]
+  end
+
+  test "finalization atomically hands off a frozen terminal batch" do
+    {:ok, limits} =
+      Limits.new(
+        normal_event_count: 4,
+        normal_event_bytes: 20_000,
+        event_payload_bytes: 1_000
+      )
+
+    {:ok, sink} =
+      EventSink.start(:normal, limits,
+        run_id: "atomic-finalize",
+        fail_closed: true,
+        terminal_reserve: %{count: 2, bytes: limits.event_payload_bytes * 2}
+      )
+
+    assert :ok = EventSink.emit(sink, "run-started", %{})
+
+    assert {:ok, events} =
+             EventSink.finalize_and_events(sink, %{}, %{outcome: :ok, reason: nil})
+
+    EventSink.stop(sink)
+
+    assert Enum.map(events, & &1.type) == ["run-started", "run-stopped"]
+    assert List.last(events).data.outcome == :ok
+    assert {:error, :event_sink_error} = EventSink.emit(sink, "evaluation-started", %{})
+  end
+
+  test "normal sinks report owner failure instead of treating it as an ordinary drop" do
+    {:ok, limits} = Limits.new()
+    {:ok, sink} = EventSink.start(:normal, limits, fail_closed: true)
+    ref = Process.monitor(sink.pid)
+    EventSink.stop(sink)
+    assert_receive {:DOWN, ^ref, :process, _pid, :normal}
+    assert {:error, :event_sink_error} = EventSink.emit(sink, "evaluation-started", %{})
+  end
 end
