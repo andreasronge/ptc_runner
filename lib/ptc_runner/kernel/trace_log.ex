@@ -17,14 +17,24 @@ defmodule PtcRunner.Kernel.TraceLog do
   Pagination cursors are bound to the source and operation. Every source and
   result has an aggregate byte ceiling. Normal directory sources exclude the
   reserved private filename suffix; private files require an explicit source.
+
+  The internal `PtcRunner.Kernel.TraceSnapshot` capture owner uses this module's
+  canonical validation and query execution against one immutable normal
+  directory capture. A snapshot is deliberately not another public
+  `t:source/0` variant.
   """
 
   alias Jason.OrderedObject
+  alias PtcRunner.Kernel.BoundedWorker
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.JSONValue
 
   @default_source_bytes 8_000_000
   @default_result_bytes 1_000_000
+  @default_capture_directory_entries 4_096
+  @default_capture_trace_files 1_024
+  @capture_listing_timeout_ms 5_000
+  @capture_listing_heap_words 1_000_000
   @default_limit 20
   @max_limit 100
   @max_cursor_bytes 1_024
@@ -87,6 +97,79 @@ defmodule PtcRunner.Kernel.TraceLog do
   end
 
   def query(_trace_log, _operation, _arguments), do: {:error, :invalid_query}
+
+  @doc false
+  @spec query_loaded(
+          [map()],
+          binary(),
+          :list_runs | :get_run | :list_turns | :counters,
+          map(),
+          pos_integer(),
+          :sanitized | :private
+        ) :: {:ok, map()} | {:error, atom()}
+  def query_loaded(events, source_id, operation, arguments, max_result_bytes, source_kind)
+      when is_list(events) and is_binary(source_id) and
+             operation in [:list_runs, :get_run, :list_turns, :counters] and is_map(arguments) and
+             is_integer(max_result_bytes) and max_result_bytes > 0 and
+             source_kind in [:sanitized, :private] do
+    execute(operation, events, source_id, arguments, max_result_bytes, source_kind)
+  end
+
+  def query_loaded(_events, _source_id, _operation, _arguments, _max_result_bytes, _source_kind),
+    do: {:error, :invalid_query}
+
+  @doc false
+  @spec capture_directory(binary(), keyword()) ::
+          {:ok, %{events: [map()], source_id: binary(), source_bytes: non_neg_integer()}}
+          | {:error, atom()}
+  def capture_directory(directory, opts \\ [])
+
+  def capture_directory(directory, opts) when is_binary(directory) and is_list(opts) do
+    with true <-
+           Keyword.keys(opts) --
+             [
+               :max_source_bytes,
+               :max_directory_entries,
+               :max_trace_files,
+               :capture_hook,
+               :listing_hook
+             ] == [],
+         true <- String.valid?(directory),
+         max_source_bytes when max_source_bytes in 1..@default_source_bytes <-
+           Keyword.get(opts, :max_source_bytes, @default_source_bytes),
+         max_directory_entries
+         when max_directory_entries in 1..@default_capture_directory_entries <-
+           Keyword.get(
+             opts,
+             :max_directory_entries,
+             @default_capture_directory_entries
+           ),
+         max_trace_files when max_trace_files in 1..@default_capture_trace_files <-
+           Keyword.get(opts, :max_trace_files, @default_capture_trace_files),
+         capture_hook when is_nil(capture_hook) or is_function(capture_hook, 0) <-
+           Keyword.get(opts, :capture_hook),
+         listing_hook when is_nil(listing_hook) or is_function(listing_hook, 0) <-
+           Keyword.get(opts, :listing_hook),
+         {:ok, capture} <-
+           capture_normal_directory(
+             Path.expand(directory),
+             max_source_bytes,
+             max_directory_entries,
+             max_trace_files,
+             capture_hook,
+             listing_hook
+           ) do
+      {:ok, capture}
+    else
+      false -> {:error, :invalid_trace_log}
+      {:error, _reason} = error -> error
+      _ -> {:error, :invalid_trace_log}
+    end
+  rescue
+    _exception -> {:error, :source_unavailable}
+  end
+
+  def capture_directory(_directory, _opts), do: {:error, :invalid_trace_log}
 
   @doc """
   Appends canonical events to one admin-selected JSONL file under a total byte
@@ -382,11 +465,234 @@ defmodule PtcRunner.Kernel.TraceLog do
 
   defp supported_names(names, source_kind) do
     names
-    |> Enum.filter(fn name ->
-      Path.basename(name) == name and String.ends_with?(name, ".jsonl") and
-        not inspection_path?(name) and private_path?(name) == (source_kind == :private)
-    end)
+    |> Enum.filter(&supported_name?(&1, source_kind))
     |> Enum.sort()
+  end
+
+  defp supported_name?(name, source_kind) do
+    Path.basename(name) == name and String.ends_with?(name, ".jsonl") and
+      not inspection_path?(name) and private_path?(name) == (source_kind == :private)
+  end
+
+  defp capture_normal_directory(
+         directory,
+         max_source_bytes,
+         max_directory_entries,
+         max_trace_files,
+         capture_hook,
+         listing_hook
+       ) do
+    with {:ok, before_inventory} <-
+           directory_inventory(directory, max_directory_entries, max_trace_files, listing_hook),
+         {:ok, sources, source_bytes} <-
+           read_inventory(directory, before_inventory.files, max_source_bytes),
+         :ok <- run_capture_hook(capture_hook),
+         {:ok, after_read_inventory} <-
+           changed_inventory(directory, max_directory_entries, max_trace_files, listing_hook),
+         :ok <- same_inventory(before_inventory, after_read_inventory),
+         :ok <- verify_sources(directory, after_read_inventory.files, sources),
+         {:ok, after_verify_inventory} <-
+           changed_inventory(directory, max_directory_entries, max_trace_files, listing_hook),
+         :ok <- same_inventory(after_read_inventory, after_verify_inventory),
+         :ok <- verify_sources(directory, after_verify_inventory.files, sources),
+         {:ok, events} <- decode_sources(sources),
+         {:ok, events, source_id} <- validate_loaded(events, max_source_bytes) do
+      {:ok, %{events: events, source_id: source_id, source_bytes: source_bytes}}
+    end
+  end
+
+  defp directory_inventory(directory, max_directory_entries, max_trace_files, listing_hook) do
+    with {:ok, %File.Stat{type: :directory} = directory_stat} <-
+           File.lstat(directory, time: :posix),
+         {:ok, names} <- bounded_directory_names(directory, max_directory_entries, listing_hook),
+         {:ok, names} <-
+           bounded_supported_names(names, :sanitized, max_trace_files),
+         {:ok, files} <- inventory_files(directory, names) do
+      {:ok, %{directory: stat_identity(directory_stat), files: files}}
+    else
+      {:ok, %File.Stat{}} -> {:error, :malformed_source}
+      {:error, :source_limit_exceeded} = error -> error
+      {:error, _reason} -> {:error, :source_unavailable}
+    end
+  end
+
+  defp changed_inventory(directory, max_directory_entries, max_trace_files, listing_hook) do
+    case directory_inventory(directory, max_directory_entries, max_trace_files, listing_hook) do
+      {:ok, inventory} -> {:ok, inventory}
+      {:error, _reason} -> {:error, :source_changed}
+    end
+  end
+
+  defp bounded_directory_names(directory, max_directory_entries, listing_hook) do
+    case BoundedWorker.run(
+           fn ->
+             if listing_hook, do: listing_hook.()
+
+             with {:ok, names} <- File.ls(directory),
+                  true <- length(names) <= max_directory_entries do
+               {:ok, names}
+             else
+               false -> {:error, :source_limit_exceeded}
+               {:error, _reason} -> {:error, :source_unavailable}
+             end
+           end,
+           timeout_ms: @capture_listing_timeout_ms,
+           max_heap_words: @capture_listing_heap_words,
+           cancel_with_caller: true
+         ) do
+      {:ok, result} -> result
+      {:error, :heap_exceeded} -> {:error, :source_limit_exceeded}
+      {:error, _reason} -> {:error, :source_unavailable}
+    end
+  end
+
+  defp bounded_supported_names(names, source_kind, max_trace_files) do
+    supported = Enum.filter(names, &supported_name?(&1, source_kind))
+
+    if length(supported) <= max_trace_files,
+      do: {:ok, Enum.sort(supported)},
+      else: {:error, :source_limit_exceeded}
+  end
+
+  defp inventory_files(directory, names) do
+    Enum.reduce_while(names, {:ok, []}, fn name, {:ok, files} ->
+      case File.lstat(Path.join(directory, name), time: :posix) do
+        {:ok, %File.Stat{type: :regular} = stat} ->
+          {:cont, {:ok, [{name, stat_identity(stat)} | files]}}
+
+        {:ok, %File.Stat{}} ->
+          {:halt, {:error, :malformed_source}}
+
+        {:error, _reason} ->
+          {:halt, {:error, :source_unavailable}}
+      end
+    end)
+    |> case do
+      {:ok, files} -> {:ok, Enum.reverse(files)}
+      {:error, _reason} = error -> error
+    end
+  end
+
+  defp read_inventory(directory, files, max_source_bytes) do
+    source_bytes = Enum.reduce(files, 0, fn {_name, stat}, bytes -> bytes + stat.size end)
+
+    if source_bytes <= max_source_bytes do
+      Enum.reduce_while(files, {:ok, []}, fn {name, expected}, {:ok, sources} ->
+        case read_inventory_file(Path.join(directory, name), expected) do
+          {:ok, source} -> {:cont, {:ok, [{name, source} | sources]}}
+          {:error, _reason} = error -> {:halt, error}
+        end
+      end)
+      |> case do
+        {:ok, sources} -> {:ok, Enum.reverse(sources), source_bytes}
+        {:error, _reason} = error -> error
+      end
+    else
+      {:error, :source_limit_exceeded}
+    end
+  end
+
+  defp read_inventory_file(path, expected) do
+    with {:ok, %File.Stat{type: :regular} = current} <- File.lstat(path, time: :posix),
+         :ok <- same_stat_identity(expected, stat_identity(current)),
+         {:ok, device} <- :file.open(String.to_charlist(path), [:read, :binary, :raw]) do
+      try do
+        read_inventory_device(device, expected)
+      after
+        :file.close(device)
+      end
+    else
+      {:ok, %File.Stat{}} -> {:error, :source_changed}
+      {:error, :source_changed} = error -> error
+      {:error, _reason} -> {:error, :source_changed}
+    end
+  end
+
+  defp read_inventory_device(device, expected) do
+    with {:ok, before_info} <- :file.read_file_info(device, time: :posix),
+         :ok <-
+           same_stat_identity(expected, before_info |> File.Stat.from_record() |> stat_identity()),
+         {:ok, source} <- read_exact_source(device, expected.size),
+         {:ok, after_info} <- :file.read_file_info(device, time: :posix),
+         :ok <-
+           same_stat_identity(expected, after_info |> File.Stat.from_record() |> stat_identity()) do
+      {:ok, source}
+    else
+      {:error, :source_changed} = error -> error
+      {:error, _reason} -> {:error, :source_changed}
+    end
+  end
+
+  defp read_exact_source(device, 0) do
+    case :file.read(device, 1) do
+      :eof -> {:ok, ""}
+      _ -> {:error, :source_changed}
+    end
+  end
+
+  defp read_exact_source(device, expected_size) do
+    case :file.read(device, expected_size + 1) do
+      {:ok, source} when byte_size(source) == expected_size -> {:ok, source}
+      _ -> {:error, :source_changed}
+    end
+  end
+
+  defp verify_sources(directory, files, sources) do
+    expected_sources = Map.new(sources)
+
+    Enum.reduce_while(files, :ok, fn {name, expected}, :ok ->
+      with {:ok, source} <- read_inventory_file(Path.join(directory, name), expected),
+           true <- source == Map.fetch!(expected_sources, name) do
+        {:cont, :ok}
+      else
+        _ -> {:halt, {:error, :source_changed}}
+      end
+    end)
+  end
+
+  defp decode_sources(sources) do
+    Enum.reduce_while(sources, {:ok, []}, fn {_name, source}, {:ok, event_groups} ->
+      case decode_jsonl(source) do
+        {:ok, events} -> {:cont, {:ok, [events | event_groups]}}
+        {:error, _reason} = error -> {:halt, error}
+      end
+    end)
+    |> case do
+      {:ok, event_groups} -> {:ok, event_groups |> Enum.reverse() |> List.flatten()}
+      {:error, _reason} = error -> error
+    end
+  end
+
+  defp same_inventory(inventory, inventory), do: :ok
+  defp same_inventory(_before, _after), do: {:error, :source_changed}
+
+  defp same_stat_identity(identity, identity), do: :ok
+  defp same_stat_identity(_expected, _current), do: {:error, :source_changed}
+
+  defp stat_identity(%File.Stat{} = stat) do
+    %{
+      major_device: stat.major_device,
+      minor_device: stat.minor_device,
+      inode: stat.inode,
+      type: stat.type,
+      size: stat.size,
+      mode: stat.mode,
+      mtime: stat.mtime,
+      ctime: stat.ctime
+    }
+  end
+
+  defp run_capture_hook(nil), do: :ok
+
+  defp run_capture_hook(capture_hook) do
+    case capture_hook.() do
+      :ok -> :ok
+      _other -> {:error, :source_unavailable}
+    end
+  rescue
+    _exception -> {:error, :source_unavailable}
+  catch
+    _kind, _reason -> {:error, :source_unavailable}
   end
 
   defp load_files(directory, names, max_bytes) do
@@ -407,7 +713,7 @@ defmodule PtcRunner.Kernel.TraceLog do
     end
   end
 
-  defp read_regular_file(_path, remaining) when remaining <= 0,
+  defp read_regular_file(_path, remaining) when remaining < 0,
     do: {:error, :source_limit_exceeded}
 
   defp read_regular_file(path, remaining) do

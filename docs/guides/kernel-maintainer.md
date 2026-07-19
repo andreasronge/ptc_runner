@@ -352,6 +352,14 @@ from an in-memory sink, one JSONL file, or a directory. The viewer and
 than maintaining another event model. The detailed storage and authorization
 contract remains in the retained [TraceLog contract](../trace-log-contract.md).
 
+`PtcRunner.Kernel.TraceSnapshot` is the internal primitive available to
+log-analysis session builders for validating and retaining one immutable normal-
+directory capture. Its tokenized owner keeps no path, exits with its owner, and
+serves the same four TraceLog query operations from the captured digest. Capture
+applies bounded pre/post file inventories, identity and byte verification, the
+existing 8 MB source ceiling, and a separate 32 MB decoded retained-size ceiling
+before snapshot-backed capabilities are constructed.
+
 Host callers enable sensitive capture only through `RunBuilder`'s `:inspect`
 option. `InspectionSink` accepts exact bounded source and capability records
 before execution crosses the relevant boundary; rejection fails the run rather

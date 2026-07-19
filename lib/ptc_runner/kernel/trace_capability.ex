@@ -6,11 +6,17 @@ defmodule PtcRunner.Kernel.TraceCapability do
   `trace-get-run`, `trace-list-turns`, and `trace-counters`. Granting these
   capabilities exposes only the selected source and bounded query results; it
   does not grant ambient filesystem or cross-environment access.
+
+  Internal log-analysis sessions may instead construct the same four
+  capabilities from a tokenized `PtcRunner.Kernel.TraceSnapshot`. Capability
+  closures retain only that opaque handle and still delegate to the canonical
+  TraceLog query implementation.
   """
 
   alias PtcRunner.Kernel.Capability
   alias PtcRunner.Kernel.ProviderError
   alias PtcRunner.Kernel.TraceLog
+  alias PtcRunner.Kernel.TraceSnapshot
 
   @spec new(keyword()) :: {:ok, [Capability.t()]} | {:error, :invalid_trace_capability}
   @doc "Builds the four trace-query capabilities from `PtcRunner.Kernel.TraceLog` options."
@@ -28,6 +34,22 @@ defmodule PtcRunner.Kernel.TraceCapability do
 
   def new(_opts), do: {:error, :invalid_trace_capability}
 
+  @doc false
+  @spec from_snapshot(TraceSnapshot.t()) ::
+          {:ok, [Capability.t()]} | {:error, :invalid_trace_capability}
+  def from_snapshot(%TraceSnapshot{} = snapshot) do
+    with {:ok, list_runs} <- capability(snapshot, "trace-list-runs", :list_runs),
+         {:ok, get_run} <- capability(snapshot, "trace-get-run", :get_run),
+         {:ok, list_turns} <- capability(snapshot, "trace-list-turns", :list_turns),
+         {:ok, counters} <- capability(snapshot, "trace-counters", :counters) do
+      {:ok, [list_runs, get_run, list_turns, counters]}
+    else
+      _ -> {:error, :invalid_trace_capability}
+    end
+  end
+
+  def from_snapshot(_snapshot), do: {:error, :invalid_trace_capability}
+
   defp capability(trace_log, name, operation) do
     Capability.new(
       name: name,
@@ -44,7 +66,7 @@ defmodule PtcRunner.Kernel.TraceCapability do
   defp validate_arguments(_arguments), do: {:error, "map required"}
 
   defp query(trace_log, operation, arguments) do
-    case TraceLog.query(trace_log, operation, arguments) do
+    case query_source(trace_log, operation, arguments) do
       {:ok, result} ->
         {:ok, result}
 
@@ -73,6 +95,12 @@ defmodule PtcRunner.Kernel.TraceCapability do
         provider_error(:internal, "trace source unavailable")
     end
   end
+
+  defp query_source(%TraceLog{} = trace_log, operation, arguments),
+    do: TraceLog.query(trace_log, operation, arguments)
+
+  defp query_source(%TraceSnapshot{} = snapshot, operation, arguments),
+    do: TraceSnapshot.query(snapshot, operation, arguments)
 
   defp provider_error(kind, details), do: {:error, ProviderError.new(kind, details)}
 end

@@ -103,6 +103,48 @@ Malformed or unsupported canonical events fail closed by default. A debugging
 mode may report bounded per-file errors, but it never silently reinterprets
 malformed data as valid runs.
 
+### Immutable normal-directory captures
+
+An internal `PtcRunner.Kernel.TraceSnapshot` owner can pin one host-selected
+normal directory for a bounded analysis session. It is not an additional public
+`PtcRunner.Kernel.TraceLog.source()` form and cannot capture a file, private
+directory, or inspection artifact.
+
+Capture enumerates supported normal `.jsonl` names in canonical sorted order,
+records a pre-read directory/file inventory, opens only regular files, compares
+path and descriptor identity, retains the baseline bytes, and performs a second
+byte-for-byte verification around a final inventory check, followed by one last
+content verification after that inventory. A name, identity, metadata, type, or
+content change between the baseline and final verification returns
+`:source_changed`; it never installs a mixed capture. The complete
+decoded event set is normalized and validated exactly once before the owner
+becomes queryable. Private `.private.jsonl` and `.inspection.jsonl` artifacts
+remain excluded by the ordinary normal-directory discovery rules.
+
+The default aggregate encoded-source ceiling remains 8,000,000 bytes. Capture
+enumerates under a fixed heap and time bound, and rejects directories above
+4,096 total entries or 1,024 selected normal trace files before sorting,
+stating, opening, or verifying selected files. Snapshot retention independently
+limits the decoded representation to 32,000,000 retained bytes, and query
+results retain the existing 1,000,000-byte default. These values are hard
+ceilings: hosts may lower the internal construction limits but cannot raise
+them, and browser or Lisp input cannot select them.
+
+The owner retains only validated events, their digest, fixed query limits, safe
+capture metadata, and an owner monitor. Its tokenized handle contains only a PID
+and unforgeable reference; neither owner state, status output, capability
+closures, safe metadata, nor errors retain or expose the directory path. Safe
+metadata contains the capture digest, UTC capture time, visible run count, raw
+encoded source bytes, and retained decoded bytes. Owner death cancels an
+in-progress capture worker as well as stopping an installed snapshot.
+
+All four snapshot queries execute the same TraceLog filtering, metadata,
+ordering, pagination, cursor, and result-limit code as ordinary sources. Cursors
+bind to the captured digest and therefore remain stable when the original
+directory changes later. The snapshot exits with its owning analysis session;
+cleanup is idempotent. This immutable boundary also prevents an analysis run's
+new canonical events from mutating the source it is paging.
+
 ## Source grants and authority
 
 Trace access is authority-bearing and source scoped. A TraceLog capability is
@@ -486,6 +528,11 @@ as workflow failure.
 - Share query semantics across library, capability prelude, and viewer API.
 - Truncate deterministically without unbounded intermediate allocation.
 - Prove mission-only trace confinement and missing-`requires` rejection.
+- Capture a normal directory immutably with pre/post inventory and content
+  verification, independent encoded/retained ceilings, path-redacted ownership,
+  stable cursors after source mutation, and owner-driven idempotent cleanup.
+- Prove snapshot-backed trace capability closures retain only the opaque token
+  and return the same four canonical query projections as TraceLog.
 
 The developer-inspection increment additionally has tests that:
 

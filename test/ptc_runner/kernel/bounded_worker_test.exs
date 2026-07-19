@@ -67,4 +67,73 @@ defmodule PtcRunner.Kernel.BoundedWorkerTest do
     refute_receive {^reply_ref, :late_result}
     refute_receive {:DOWN, ^monitor_ref, :process, ^worker, _reason}
   end
+
+  test "caller kill propagates to an opted-in bounded worker" do
+    test = self()
+
+    caller =
+      spawn(fn ->
+        BoundedWorker.run(
+          fn ->
+            send(test, {:bounded_worker, self()})
+
+            receive do
+              :never -> :unexpected
+            end
+          end,
+          timeout_ms: 5_000,
+          max_heap_words: 10_000,
+          cancel_with_caller: true
+        )
+      end)
+
+    assert_receive {:bounded_worker, worker}
+    worker_ref = Process.monitor(worker)
+    Process.exit(caller, :kill)
+    assert_receive {:DOWN, ^worker_ref, :process, ^worker, :killed}
+  end
+
+  test "successful linked work leaves no exit message" do
+    assert {:ok, :done} =
+             BoundedWorker.run(fn -> :done end,
+               timeout_ms: 1_000,
+               max_heap_words: 10_000,
+               cancel_with_caller: true
+             )
+
+    refute_receive {:EXIT, _pid, _reason}
+  end
+
+  test "caller kill during timeout cleanup still terminates linked work" do
+    test = self()
+
+    caller =
+      spawn(fn ->
+        BoundedWorker.run(
+          fn ->
+            send(test, {:timeout_worker, self()})
+
+            receive do
+              :never -> :unexpected
+            end
+          end,
+          timeout_ms: 1,
+          max_heap_words: 10_000,
+          cancel_with_caller: true,
+          timeout_cleanup_hook: fn ->
+            send(test, {:timeout_cleanup, self()})
+
+            receive do
+              :continue_cleanup -> :ok
+            end
+          end
+        )
+      end)
+
+    assert_receive {:timeout_worker, worker}
+    assert_receive {:timeout_cleanup, ^caller}
+    worker_ref = Process.monitor(worker)
+    Process.exit(caller, :kill)
+    assert_receive {:DOWN, ^worker_ref, :process, ^worker, :killed}
+  end
 end
