@@ -168,6 +168,15 @@ rest of the run. Commit is transactional: parse, analysis, runtime, timeout,
 memory, capability, result-size, or explicit-failure outcomes preserve the
 previous evaluation memory.
 
+Native continuation memory never crosses back into workflow Lisp. Subordinate
+values and the workflow's terminal value pass through
+`PtcRunner.Lisp.externalize_value/1`, which recursively replaces closures,
+builtins, composed callables, runtime callables, and plain BEAM functions with
+inert deterministic display values. These projections retain neither callable
+implementations nor closure parameters, bodies, captured environments,
+history, or metadata. Canonical events likewise carry only bounded status and
+accounting metadata; exact values remain outside ordinary observability.
+
 ## Evaluator effects, outcomes, and parallel work
 
 `PtcRunner.Lisp.Eval` recursively evaluates analyzed expressions and leaves

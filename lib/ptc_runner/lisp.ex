@@ -60,6 +60,7 @@ defmodule PtcRunner.Lisp do
   # per call via the `:max_parallel_workers` option to `run/2`.
   @default_max_parallel_workers 8
   alias PtcRunner.Lisp.AmbiguousArguments
+  alias PtcRunner.Lisp.Env.Builtin, as: EnvBuiltin
   alias PtcRunner.Lisp.Format.Var
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
   alias PtcRunner.Lisp.Result, as: Step
@@ -91,11 +92,14 @@ defmodule PtcRunner.Lisp do
   end
 
   @doc """
-  Converts native PTC-Lisp runtime values into the public Elixir/JSON-facing
-  representation used by `PtcRunner.Lisp.Result.return`.
+  Converts native PTC-Lisp runtime values into an inert public Elixir/JSON-facing
+  representation.
 
   Stateful hosts may keep native values internally between turns, but should use
   this at public observation boundaries such as final steps and trace events.
+  Executable closures, builtins, composed callables, runtime callables, and
+  plain BEAM functions are replaced recursively with deterministic display
+  labels that cannot retain callable state, captured environments, or metadata.
   """
   @spec externalize_value(term()) :: term()
   def externalize_value(value), do: externalize_lisp_values(value)
@@ -1350,15 +1354,23 @@ defmodule PtcRunner.Lisp do
   # boundary contract (signature validation, mustache, chaining).
   defp externalize_lisp_values(%LispKeyword{name: name}), do: SourceAtoms.intern(name)
 
+  defp externalize_lisp_values({:closure, _params, _body, _env, _turn_history, _metadata}),
+    do: %Format.Fn{params: "..."}
+
+  defp externalize_lisp_values(%EnvBuiltin{}), do: %Format.Builtin{}
+
   defp externalize_lisp_values(%RuntimeCallable{} = callable) do
     RuntimeCallable.label(callable)
   end
 
-  defp externalize_lisp_values(value) when is_function(value), do: "#fn[...]"
+  defp externalize_lisp_values(value) when is_function(value), do: %Format.Fn{params: "..."}
 
   defp externalize_lisp_values(%Var{name: name} = var) when is_binary(name) do
     %{var | name: existing_atom_or(name, name)}
   end
+
+  defp externalize_lisp_values({:var, name}) when is_atom(name) or is_binary(name),
+    do: %Var{name: existing_atom_or(Kernel.to_string(name), name)}
 
   defp externalize_lisp_values({:__ptc_return__, inner}) do
     {:__ptc_return__, externalize_lisp_values(inner)}
@@ -1368,14 +1380,31 @@ defmodule PtcRunner.Lisp do
     {:__ptc_fail__, externalize_lisp_values(inner)}
   end
 
-  defp externalize_lisp_values({:juxt_fn, _fns}), do: "#fn[...]"
-  defp externalize_lisp_values({:partial_fn, _f, _fixed}), do: "#fn[...]"
-  defp externalize_lisp_values({:comp_fn, _fns}), do: "#fn[...]"
-  defp externalize_lisp_values({:complement_fn, _f}), do: "#fn[...]"
-  defp externalize_lisp_values({:constantly_fn, _value}), do: "#fn[...]"
-  defp externalize_lisp_values({:every_pred_fn, _preds}), do: "#fn[...]"
-  defp externalize_lisp_values({:some_fn, _fns}), do: "#fn[...]"
-  defp externalize_lisp_values({:fnil_fn, _f, _default}), do: "#fn[...]"
+  defp externalize_lisp_values({:normal, function}) when is_function(function),
+    do: %Format.Builtin{}
+
+  defp externalize_lisp_values({:variadic, function, _identity}) when is_function(function),
+    do: %Format.Builtin{}
+
+  defp externalize_lisp_values({:variadic_nonempty, name, function})
+       when is_atom(name) and is_function(function),
+       do: %Format.Builtin{}
+
+  defp externalize_lisp_values({:multi_arity, name, functions})
+       when is_atom(name) and is_tuple(functions),
+       do: %Format.Builtin{}
+
+  defp externalize_lisp_values({:collect, function}) when is_function(function),
+    do: %Format.Fn{params: "..."}
+
+  defp externalize_lisp_values({:juxt_fn, _fns}), do: %Format.Fn{params: "..."}
+  defp externalize_lisp_values({:partial_fn, _f, _fixed}), do: %Format.Fn{params: "..."}
+  defp externalize_lisp_values({:comp_fn, _fns}), do: %Format.Fn{params: "..."}
+  defp externalize_lisp_values({:complement_fn, _f}), do: %Format.Fn{params: "..."}
+  defp externalize_lisp_values({:constantly_fn, _value}), do: %Format.Fn{params: "..."}
+  defp externalize_lisp_values({:every_pred_fn, _preds}), do: %Format.Fn{params: "..."}
+  defp externalize_lisp_values({:some_fn, _fns}), do: %Format.Fn{params: "..."}
+  defp externalize_lisp_values({:fnil_fn, _f, _default}), do: %Format.Fn{params: "..."}
 
   defp externalize_lisp_values(value) when is_list(value) do
     Enum.map(value, &externalize_lisp_values/1)
@@ -1391,6 +1420,13 @@ defmodule PtcRunner.Lisp do
     Map.new(value, fn {k, v} ->
       {externalize_lisp_values(k), externalize_lisp_values(v)}
     end)
+  end
+
+  defp externalize_lisp_values(value) when is_tuple(value) do
+    value
+    |> Tuple.to_list()
+    |> Enum.map(&externalize_lisp_values/1)
+    |> List.to_tuple()
   end
 
   defp externalize_lisp_values(value), do: value

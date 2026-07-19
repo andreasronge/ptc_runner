@@ -15,6 +15,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
   alias PtcRunner.Kernel.RunConfig
   alias PtcRunner.Kernel.RunState
   alias PtcRunner.Kernel.WorkflowEnvironment
+  alias PtcRunner.Lisp.Format
 
   @input_schema %{"type" => "object", "additionalProperties" => true}
 
@@ -599,6 +600,107 @@ defmodule PtcRunner.Kernel.CoreContractTest do
 
     assert %{capability_calls: %{workflow: %{}, mission: %{}}} = RunState.usage(state)
     assert workflow.capabilities["workflow-only"]
+  end
+
+  test "subordinate and workflow terminal values project closures without executable state" do
+    {:ok, workflow} = WorkflowEnvironment.new([])
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, limits} = Limits.new()
+    {:ok, state} = RunState.start(limits)
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "closure-projection")
+
+    assert %{outcome: :returned, value: %Format.Fn{params: "..."}} =
+             Evaluation.evaluate_source(
+               state,
+               mission,
+               ~S|(let [secret "sentinel-projection-secret"] (fn [named-parameter] secret))|,
+               100
+             )
+
+    assert %{outcome: :failed, value: %Format.Fn{params: "..."}} =
+             Evaluation.evaluate_source(
+               state,
+               mission,
+               ~S|(let [secret "sentinel-projection-secret"] (fail (fn [] secret)))|,
+               100
+             )
+
+    {:ok, config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        mission_environment: mission,
+        input: %{},
+        limits: limits,
+        event_sink: sink
+      )
+
+    assert {:ok, %{value: %Format.Fn{params: "..."}} = result} =
+             Kernel.run(
+               ~S|(let [secret "sentinel-projection-secret"] (return (fn [named-parameter] secret)))|,
+               config
+             )
+
+    public_planes = inspect(%{result: result, events: EventSink.events(sink)})
+    refute public_planes =~ "sentinel-projection-secret"
+    refute public_planes =~ "named-parameter"
+    refute public_planes =~ ":closure"
+  end
+
+  test "closure state is absent from Logger and Telemetry metadata" do
+    secret = "sentinel-projection-secret"
+    handler_id = "closure-projection-#{System.unique_integer([:positive])}"
+
+    :ok =
+      :telemetry.attach_many(
+        handler_id,
+        [
+          [:ptc_runner, :lisp, :execute, :start],
+          [:ptc_runner, :lisp, :execute, :stop]
+        ],
+        fn event, measurements, metadata, pid ->
+          send(pid, {:projection_telemetry, event, measurements, metadata})
+        end,
+        self()
+      )
+
+    on_exit(fn -> :telemetry.detach(handler_id) end)
+
+    {:ok, workflow} = WorkflowEnvironment.new([])
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, limits} = Limits.new()
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "closure-observability")
+
+    {:ok, config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        mission_environment: mission,
+        input: %{},
+        limits: limits,
+        event_sink: sink
+      )
+
+    log =
+      ExUnit.CaptureLog.capture_log(fn ->
+        assert {:ok, %{value: %Format.Fn{params: "..."}}} =
+                 Kernel.run(
+                   ~S|(let [secret "sentinel-projection-secret"] (return (fn [] secret)))|,
+                   config
+                 )
+      end)
+
+    assert_receive {:projection_telemetry, _start, start_measurements, start_metadata}
+    assert_receive {:projection_telemetry, _stop, stop_measurements, stop_metadata}
+
+    observability =
+      inspect(%{
+        log: log,
+        start: {start_measurements, start_metadata},
+        stop: {stop_measurements, stop_metadata},
+        events: EventSink.events(sink)
+      })
+
+    refute observability =~ secret
+    refute observability =~ ":closure"
   end
 
   test "explicit subordinate failure is recoverable and rolls back candidate memory" do

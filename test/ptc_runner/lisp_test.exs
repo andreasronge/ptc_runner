@@ -2,6 +2,9 @@ defmodule PtcRunner.LispTest do
   use ExUnit.Case, async: true
 
   alias PtcRunner.Lisp
+  alias PtcRunner.Lisp.Env.Builtin, as: EnvBuiltin
+  alias PtcRunner.Lisp.Format
+  alias PtcRunner.Lisp.RuntimeCallable
   alias PtcRunner.Lisp.Tool
 
   describe "basic execution" do
@@ -26,6 +29,57 @@ defmodule PtcRunner.LispTest do
                {"{:count 2 :ids [1 2]}", false}
 
       assert Lisp.format_value([1, 2, 3], limit: 2) == {"[1 2 ...] (2/3)", true}
+    end
+  end
+
+  describe "externalize_value/1" do
+    test "replaces every executable value with an inert display wrapper" do
+      closure =
+        {:closure, [{:var, :secret_name}], :secret_body,
+         %{"captured" => "sentinel-projection-secret"}, [], %{private: true}}
+
+      builtin = EnvBuiltin.wrap(:+, {:variadic, &Kernel.+/2, 0})
+      runtime_callable = RuntimeCallable.new(:tool, :search)
+      composed = {:comp_fn, [closure, &Kernel.to_string/1]}
+
+      assert %Format.Fn{params: "..."} = Lisp.externalize_value(closure)
+      assert %Format.Builtin{} = Lisp.externalize_value(builtin)
+      assert %Format.Builtin{} = Lisp.externalize_value({:normal, &Kernel.to_string/1})
+      assert "tool/search" = Lisp.externalize_value(runtime_callable)
+      assert %Format.Fn{params: "..."} = Lisp.externalize_value(composed)
+      assert %Format.Fn{params: "..."} = Lisp.externalize_value(&Kernel.to_string/1)
+      assert %Format.Var{name: :value} = Lisp.externalize_value(%Format.Var{name: "value"})
+    end
+
+    test "recursively sanitizes collections and terminal sentinels" do
+      closure =
+        {:closure, [], :secret_body, %{"captured" => "sentinel-projection-secret"}, [], %{}}
+
+      projected =
+        Lisp.externalize_value(%{
+          direct: closure,
+          nested: [MapSet.new([closure])],
+          returned: {:__ptc_return__, closure},
+          failed: {:__ptc_fail__, closure}
+        })
+
+      assert %Format.Fn{params: "..."} = projected.direct
+      assert [%MapSet{} = set] = projected.nested
+      assert Enum.all?(set, &match?(%Format.Fn{params: "..."}, &1))
+      assert {:__ptc_return__, %Format.Fn{params: "..."}} = projected.returned
+      assert {:__ptc_fail__, %Format.Fn{params: "..."}} = projected.failed
+
+      encoded =
+        Jason.encode!([
+          projected.direct,
+          elem(projected.returned, 1),
+          elem(projected.failed, 1)
+        ])
+
+      refute encoded =~ "sentinel-projection-secret"
+      refute encoded =~ "secret_body"
+      refute encoded =~ "closure"
+      assert encoded =~ "#fn[...]"
     end
   end
 

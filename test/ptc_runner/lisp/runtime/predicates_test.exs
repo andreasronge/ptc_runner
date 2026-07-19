@@ -12,6 +12,7 @@ defmodule PtcRunner.Lisp.Runtime.PredicatesTest do
 
   alias PtcRunner.Lisp
   alias PtcRunner.Lisp.Env.Builtin
+  alias PtcRunner.Lisp.Format
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
   alias PtcRunner.Lisp.Runtime.Callable
   alias PtcRunner.Lisp.Runtime.Math
@@ -639,10 +640,10 @@ defmodule PtcRunner.Lisp.Runtime.PredicatesTest do
     end
 
     test "fnil default callable renders opaquely at public return boundary" do
-      assert {:ok, %{return: "#fn[...]"}} =
+      assert {:ok, %{return: %Format.Fn{params: "..."}}} =
                Lisp.run("((fnil identity (fn [x] x)) nil)")
 
-      assert {:ok, %{return: ["#fn[...]"]}} =
+      assert {:ok, %{return: [%Format.Fn{params: "..."}]}} =
                Lisp.run("(map (fnil identity (fn [x] x)) [nil])")
     end
   end
