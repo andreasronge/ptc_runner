@@ -149,8 +149,8 @@ defmodule PtcRunner.Lisp.PmapHeapCapTest do
     test "a regular HOF wrapping a heap-exceeding pmap fails with :memory_exceeded" do
       # Round-5 P2-a regression. `map` is a regular HOF — its apply path
       # rescues closure errors. The closure runs a nested `pmap` whose
-      # workers blow the heap budget. The nested heap kill is raised as
-      # an ExecutionError; the HOF apply path must surface its stable
+      # workers blow the heap budget. The nested heap kill crosses the
+      # host-callback boundary as an evaluator abort; the HOF must surface its stable
       # `:memory_exceeded` reason rather than let it crash the sandbox
       # as a generic `:execution_error`.
       program = "(map (fn [_] (pmap #{@big_alloc_fn} [1 2 3 4])) [1 2])"

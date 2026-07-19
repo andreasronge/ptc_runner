@@ -47,6 +47,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
     :user_ns,
     :env,
     :tool_exec,
+    :tool_failure_token,
     :origin_stack,
     :prelude_caller_user_ns_stack,
     :turn_history,
@@ -168,6 +169,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
           user_ns: map(),
           env: map(),
           tool_exec: (String.t(), map(), map() | nil -> term()),
+          tool_failure_token: reference() | nil,
           origin_stack: [map()],
           prelude_caller_user_ns_stack: [map()],
           turn_history: list(),
@@ -238,6 +240,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
       user_ns: user_ns,
       env: env,
       tool_exec: tool_exec,
+      tool_failure_token: Keyword.get(opts, :tool_failure_token),
       origin_stack: Keyword.get(opts, :origin_stack, []),
       prelude_caller_user_ns_stack: Keyword.get(opts, :prelude_caller_user_ns_stack, []),
       turn_history: turn_history,
@@ -545,6 +548,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
         max_tool_calls: source.max_tool_calls,
         tool_call_budget: source.tool_call_budget,
         tool_activity: source.tool_activity,
+        tool_failure_token: source.tool_failure_token,
         origin_stack: source.origin_stack,
         prelude_caller_user_ns_stack: source.prelude_caller_user_ns_stack
     }

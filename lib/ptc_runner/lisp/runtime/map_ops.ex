@@ -5,7 +5,7 @@ defmodule PtcRunner.Lisp.Runtime.MapOps do
   Provides get, assoc, update, merge, and other map manipulation functions.
   """
 
-  alias PtcRunner.Lisp.ExecutionError
+  alias PtcRunner.Lisp.Eval.HostContext
   alias PtcRunner.Lisp.Runtime.Callable
   alias PtcRunner.Lisp.Runtime.Collection.Normalize
   alias PtcRunner.Lisp.Runtime.FlexAccess
@@ -43,8 +43,9 @@ defmodule PtcRunner.Lisp.Runtime.MapOps do
 
   defp build_map(args, name) do
     if rem(length(args), 2) != 0 do
-      raise ExecutionError,
-        message: "#{name} requires an even number of arguments, got #{length(args)}"
+      HostContext.error!(
+        {:arity_error, "#{name} requires an even number of arguments, got #{length(args)}"}
+      )
     end
 
     args
@@ -475,8 +476,7 @@ defmodule PtcRunner.Lisp.Runtime.MapOps do
         "#{context}: function expects #{expected} argument(s) but was called with #{got}. " <>
           arity_hint(expected, got, context)
 
-      reraise ExecutionError.exception(reason: :arity_error, message: msg, data: nil),
-              __STACKTRACE__
+      HostContext.error!({:arity_error, msg})
   end
 
   defp arity_hint(expected, got, context) when got > expected do

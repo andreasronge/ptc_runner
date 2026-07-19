@@ -267,6 +267,89 @@ defmodule PtcRunner.Lisp.EvalErrorsTest do
   end
 
   describe "arithmetic errors in variadic functions" do
+    test "higher-order arithmetic type errors retain their argument payload" do
+      env = Env.initial()
+
+      ast =
+        {:call, {:var, :map}, [{:var, :+}, {:vector, [{:vector, [1, 2]}]}]}
+
+      assert {:error, {:type_error, msg, [[1, 2]]}} =
+               Eval.eval(ast, %{}, %{}, env, &dummy_tool/2)
+
+      assert msg =~ "invalid argument types"
+    end
+
+    test "bitwise type errors retain the documented third tuple element" do
+      env = Env.initial()
+      ast = {:call, {:var, :"bit-not"}, [{:string, "x"}]}
+
+      assert {:error, {:type_error, msg, nil}} =
+               Eval.eval(ast, %{}, %{}, env, &dummy_tool/2)
+
+      assert msg =~ "expected an integer"
+    end
+
+    test "ordinary HOF callback errors retain the outer callback arguments" do
+      env = Env.initial()
+      closure = {:fn, [{:var, :x}], {:call, {:var, :x}, [1]}}
+      ast = {:call, {:var, :map}, [closure, {:vector, [nil]}]}
+
+      assert {:error, {:type_error, msg, [callback, [nil]]}} =
+               Eval.eval(ast, %{}, %{}, env, &dummy_tool/2)
+
+      assert is_function(callback, 1)
+      assert msg =~ "not_callable"
+    end
+
+    test "runtime callable errors retain their trailing data element" do
+      env = Env.initial()
+
+      ast =
+        {:call, {:var, :map},
+         [
+           {:runtime_callable, :tool, "echo"},
+           {:vector, [{:map, [{{:keyword, "x"}, 1}]}, {:map, [{{:keyword, "x"}, 2}]}]}
+         ]}
+
+      tool_exec = fn _name, args, _origin -> args end
+
+      assert {:error, {:tool_call_limit_exceeded, msg, nil}} =
+               Eval.eval(ast, %{}, %{}, env, tool_exec, [],
+                 max_tool_calls: 1,
+                 tools_meta: %{"echo" => %{cache: false}}
+               )
+
+      assert msg =~ "tool_call_limit_exceeded"
+    end
+
+    test "sort-by preserves expected abort messages from its key function" do
+      env = Env.initial()
+      closure = {:fn, [{:var, :x}], {:call, {:var, :"bit-not"}, [{:var, :x}]}}
+      ast = {:call, {:var, :"sort-by"}, [closure, {:vector, [{:string, "x"}]}]}
+
+      assert {:error, {:type_error, msg, nil}} =
+               Eval.eval(ast, %{}, %{}, env, &dummy_tool/2)
+
+      assert msg == ~S|bit-not: expected an integer, got string "x"|
+    end
+
+    test "sort-by contextualizes ordinary closure failures from its key function" do
+      env = Env.initial()
+
+      closure =
+        {:fn, [{:var, :x}], {:call, {:var, :x}, [1]}}
+
+      ast = {:call, {:var, :"sort-by"}, [closure, {:vector, [nil]}]}
+
+      assert {:error, {:type_error, msg, [callback, [nil]]}} =
+               Eval.eval(ast, %{}, %{}, env, &dummy_tool/2)
+
+      assert is_function(callback, 1)
+
+      assert msg ==
+               "sort-by key function failed for item nil: closure error: {:not_callable, nil}"
+    end
+
     test "division with nil operand returns type_error" do
       # (/ 10 nil) should return type error, not :badarith
       env = Env.initial()

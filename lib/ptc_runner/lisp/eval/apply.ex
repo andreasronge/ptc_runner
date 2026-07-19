@@ -15,21 +15,21 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   """
 
   alias PtcRunner.Lisp.Env.Builtin
+  alias PtcRunner.Lisp.Eval.Abort
   alias PtcRunner.Lisp.Eval.Capture
   alias PtcRunner.Lisp.Eval.Context, as: EvalContext
   alias PtcRunner.Lisp.Eval.Helpers
+  alias PtcRunner.Lisp.Eval.HostContext
   alias PtcRunner.Lisp.Eval.Patterns
-  alias PtcRunner.Lisp.ExecutionError
-  require PtcRunner.Lisp.ExecutionError
   alias PtcRunner.Lisp.Format
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
-  alias PtcRunner.Lisp.ParallelError
   alias PtcRunner.Lisp.Prelude.Contract
-  alias PtcRunner.Lisp.Prelude.ContractError
   alias PtcRunner.Lisp.Runtime.Args
   alias PtcRunner.Lisp.Runtime.Math
   alias PtcRunner.Lisp.Runtime.Predicates
   alias PtcRunner.Lisp.RuntimeCallable
+
+  @hof_callback_error :__ptc_hof_callback_error__
   alias PtcRunner.Lisp.TypeVocabulary
 
   import PtcRunner.Lisp.Runtime, only: [flex_get: 2, flex_fetch: 2]
@@ -52,14 +52,14 @@ defmodule PtcRunner.Lisp.Eval.Apply do
          do_eval_fn
        )
        when name in [:fnil, :complement, :constantly] and is_function(fun) do
-    with :ok <- maybe_validate_builtin_args(builtin, args) do
+    with :ok <- validate_builtin_args!(builtin, args, eval_ctx, do_eval_fn) do
       try do
         with_side_effect_stash(eval_ctx, do_eval_fn, fn -> apply(fun, args) end)
       rescue
+        e in Abort -> reraise_hof_callback_error(e, args, __STACKTRACE__)
         FunctionClauseError -> {:error, Helpers.type_error_for_args(fun, args)}
         e in BadArityError -> {:error, {:arity_error, Exception.message(e)}}
         e in RuntimeError -> {:error, {:type_error, Exception.message(e), args}}
-        e in PtcRunner.Lisp.TypeError -> {:error, {:type_error, Exception.message(e), args}}
       end
     end
   end
@@ -71,19 +71,19 @@ defmodule PtcRunner.Lisp.Eval.Apply do
          do_eval_fn
        )
        when name in [:comp, :partial, :"every-pred", :"some-fn"] and is_function(fun, 1) do
-    with :ok <- maybe_validate_builtin_args(builtin, args) do
+    with :ok <- validate_builtin_args!(builtin, args, eval_ctx, do_eval_fn) do
       try do
         with_side_effect_stash(eval_ctx, do_eval_fn, fn -> fun.(args) end)
       rescue
+        e in Abort -> reraise_hof_callback_error(e, args, __STACKTRACE__)
         FunctionClauseError -> {:error, Helpers.type_error_for_args(fun, args)}
         e in RuntimeError -> {:error, {:type_error, Exception.message(e), args}}
-        e in PtcRunner.Lisp.TypeError -> {:error, {:type_error, Exception.message(e), args}}
       end
     end
   end
 
   defp do_apply_fun(%Builtin{} = builtin, args, %EvalContext{} = eval_ctx, do_eval_fn) do
-    with :ok <- maybe_validate_builtin_args(builtin, args) do
+    with :ok <- validate_builtin_args!(builtin, args, eval_ctx, do_eval_fn) do
       do_apply_fun(Builtin.unwrap(builtin), args, eval_ctx, do_eval_fn)
     end
   end
@@ -186,6 +186,9 @@ defmodule PtcRunner.Lisp.Eval.Apply do
     try do
       with_side_effect_stash(eval_ctx, do_eval_fn, fn -> apply(fun, converted_args) end)
     rescue
+      e in Abort ->
+        reraise_hof_callback_error(e, converted_args, __STACKTRACE__)
+
       FunctionClauseError ->
         # Provide a helpful error message for type mismatches
         {:error, Helpers.type_error_for_args(fun, converted_args)}
@@ -208,17 +211,6 @@ defmodule PtcRunner.Lisp.Eval.Apply do
       e in RuntimeError ->
         # Catch errors from closure evaluation (destructuring, arity, eval errors)
         {:error, {:type_error, Exception.message(e), converted_args}}
-
-      e in PtcRunner.Lisp.TypeError ->
-        {:error, {:type_error, Exception.message(e), converted_args}}
-
-      e in ExecutionError ->
-        # A nested pmap/pcalls failure (`:memory_exceeded` / `:timeout`)
-        # raised through a closure run by a regular HOF (map/filter/...).
-        # Surface its stable reason instead of letting it crash the
-        # sandbox as `:execution_error`. Non-parallel ExecutionErrors
-        # (e.g. tool errors) are re-raised to keep their semantics.
-        reraise_unless_parallel(e, __STACKTRACE__)
 
       e in ArithmeticError ->
         {:error, {:arithmetic_error, Exception.message(e)}}
@@ -261,6 +253,9 @@ defmodule PtcRunner.Lisp.Eval.Apply do
 
     {:ok, result, eval_ctx}
   rescue
+    e in Abort ->
+      reraise_hof_callback_error(e, args, __STACKTRACE__)
+
     ArithmeticError ->
       # Distinguish between type errors (nil/non-number) and arithmetic errors (e.g., overflow)
       if Enum.all?(args, &is_number/1) do
@@ -268,9 +263,6 @@ defmodule PtcRunner.Lisp.Eval.Apply do
       else
         {:error, Helpers.type_error_for_args(fun2, args)}
       end
-
-    e in PtcRunner.Lisp.TypeError ->
-      {:error, {:type_error, Exception.message(e), args}}
   end
 
   # Variadic requiring at least one arg: {:variadic_nonempty, name, fun2}
@@ -294,6 +286,9 @@ defmodule PtcRunner.Lisp.Eval.Apply do
 
     {:ok, result, eval_ctx}
   rescue
+    e in Abort ->
+      reraise_hof_callback_error(e, args, __STACKTRACE__)
+
     e in ArithmeticError ->
       # Distinguish between type errors (nil/non-number) and arithmetic errors
       if Enum.all?(args, &is_number/1) do
@@ -316,9 +311,6 @@ defmodule PtcRunner.Lisp.Eval.Apply do
       else
         {:error, Helpers.type_error_for_args(fun2, args)}
       end
-
-    e in PtcRunner.Lisp.TypeError ->
-      {:error, {:type_error, Exception.message(e), args}}
   end
 
   # Collect builtins: pass all args as a list to unary function
@@ -330,6 +322,9 @@ defmodule PtcRunner.Lisp.Eval.Apply do
     try do
       with_side_effect_stash(eval_ctx, do_eval_fn, fn -> fun.(converted_args) end)
     rescue
+      e in Abort ->
+        reraise_hof_callback_error(e, converted_args, __STACKTRACE__)
+
       FunctionClauseError ->
         # A bad argument shape inside a collect builtin (e.g. (update-in [1 2]
         # [] f) routing a vector root through flex_update_in's integer-key
@@ -338,12 +333,6 @@ defmodule PtcRunner.Lisp.Eval.Apply do
         # {:normal} and {:multi_arity} handlers so all builtin dispatch shapes
         # fail consistently.
         {:error, Helpers.type_error_for_args(fun, converted_args)}
-
-      e in ExecutionError ->
-        {:error, execution_error_tuple(e)}
-
-      e in PtcRunner.Lisp.TypeError ->
-        {:error, {:type_error, Exception.message(e), args}}
     end
   end
 
@@ -365,20 +354,15 @@ defmodule PtcRunner.Lisp.Eval.Apply do
       try do
         with_side_effect_stash(eval_ctx, do_eval_fn, fn -> apply(fun, converted_args) end)
       rescue
+        e in Abort ->
+          reraise_hof_callback_error(e, converted_args, __STACKTRACE__)
+
         FunctionClauseError ->
           # Provide a helpful error message for type mismatches
           {:error, Helpers.type_error_for_args(fun, converted_args)}
 
         e in RuntimeError ->
           # Catch errors from closure evaluation (destructuring, arity, eval errors)
-          {:error, {:type_error, Exception.message(e), converted_args}}
-
-        e in ExecutionError ->
-          # See the `{:normal, fun}` clause: surface nested parallel
-          # `:memory_exceeded` / `:timeout` rather than crash the sandbox.
-          reraise_unless_parallel(e, __STACKTRACE__)
-
-        e in PtcRunner.Lisp.TypeError ->
           {:error, {:type_error, Exception.message(e), converted_args}}
       end
     else
@@ -544,8 +528,12 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   defp validate_builtin_args(builtin, args) do
     Args.validate!(builtin, args)
     :ok
-  rescue
-    e in PtcRunner.Lisp.TypeError -> {:error, {:type_error, Exception.message(e), args}}
+  end
+
+  defp validate_builtin_args!(builtin, args, eval_ctx, do_eval_fn) do
+    HostContext.with_context(eval_ctx, do_eval_fn, fn ->
+      maybe_validate_builtin_args(builtin, args)
+    end)
   end
 
   defp function_arity(fun), do: :erlang.fun_info(fun, :arity) |> elem(1)
@@ -967,12 +955,11 @@ defmodule PtcRunner.Lisp.Eval.Apply do
       |> maybe_push_prelude_origin(metadata, eval_context)
       |> Capture.materialize_context()
 
-    # A `(return …)`/`(fail …)` inside a value-position prelude export throws the
-    # export context (user_ns = private prelude env). Catch it here — at the HOF
-    # boundary where the closure's metadata is still in scope — to restore the
-    # caller's namespace tables before it propagates, so the private env never
-    # leaks into `Step.memory`. The guard limits this to tagged prelude exports;
-    # an ordinary closure's signal propagates unchanged.
+    # A `(return …)`/`(fail …)` inside a value-position closure throws the
+    # callback context. Catch it at the HOF boundary where the closure metadata
+    # is still in scope and restore the caller's lexical/namespace/authority
+    # scope before it propagates. Prelude exports additionally tag returned
+    # closures and sanitize private errors.
     try do
       case do_eval_fn.(body, eval_ctx) do
         {:ok, result, final_ctx} ->
@@ -983,40 +970,135 @@ defmodule PtcRunner.Lisp.Eval.Apply do
           tag_prelude_ns(result, prelude_ns)
 
         {:error, reason} ->
-          raise_closure_error(reason)
+          raise_closure_error(maybe_sanitize_private_error(reason, prelude_ns))
       end
-    catch
-      {:return_signal, value, %EvalContext{} = thrown_ctx} when not is_nil(prelude_ns) ->
-        restored_ctx =
-          thrown_ctx
-          |> restore_hof_caller(caller_baseline)
-          |> Capture.materialize_context()
+    rescue
+      error in Abort ->
+        callback = %{
+          patterns: patterns,
+          body: body,
+          closure_env: closure_env,
+          metadata: metadata,
+          do_eval_fn: do_eval_fn
+        }
 
-        value = tag_prelude_ns(value, prelude_ns)
-        Contract.validate_output!(metadata, value, restored_ctx)
-
-        throw({:return_signal, value, restored_ctx})
-
-      {:fail_signal, value, %EvalContext{} = thrown_ctx} when not is_nil(prelude_ns) ->
-        restored_ctx =
-          thrown_ctx
-          |> restore_hof_caller(caller_baseline)
-          |> Capture.materialize_context()
-
-        throw({:fail_signal, value, restored_ctx})
-
-      {:recur_signal, new_args, effects} ->
-        recur_hof_closure(
-          new_args,
-          effects,
-          patterns,
-          body,
-          closure_env,
+        handle_hof_abort(
+          error,
+          prelude_ns,
           caller_baseline,
-          metadata,
-          do_eval_fn
+          callback,
+          __STACKTRACE__
         )
     end
+  end
+
+  defp handle_hof_abort(
+         %Abort{outcome: {:control, :return, value, %EvalContext{} = abort_ctx}},
+         prelude_ns,
+         caller_baseline,
+         %{metadata: metadata},
+         _stacktrace
+       ) do
+    restored_ctx =
+      abort_ctx
+      |> restore_hof_caller(caller_baseline)
+      |> Capture.materialize_context()
+
+    value = tag_prelude_ns(value, prelude_ns)
+
+    if prelude_ns do
+      Contract.validate_output!(metadata, value, restored_ctx)
+    end
+
+    Abort.control!(:return, value, restored_ctx)
+  end
+
+  defp handle_hof_abort(
+         %Abort{outcome: {:control, :fail, value, %EvalContext{} = abort_ctx}},
+         _prelude_ns,
+         caller_baseline,
+         _callback,
+         _stacktrace
+       ) do
+    restored_ctx =
+      abort_ctx
+      |> restore_hof_caller(caller_baseline)
+      |> Capture.materialize_context()
+
+    Abort.control!(:fail, value, restored_ctx)
+  end
+
+  defp handle_hof_abort(
+         %Abort{outcome: {:control, :recur, new_args, %EvalContext{} = abort_ctx}},
+         _prelude_ns,
+         caller_baseline,
+         %{
+           patterns: patterns,
+           body: body,
+           closure_env: closure_env,
+           metadata: metadata,
+           do_eval_fn: do_eval_fn
+         },
+         _stacktrace
+       ) do
+    recur_hof_closure(
+      new_args,
+      abort_ctx.effects,
+      patterns,
+      body,
+      closure_env,
+      caller_baseline,
+      metadata,
+      do_eval_fn
+    )
+  end
+
+  defp handle_hof_abort(
+         %Abort{outcome: {:error, reason, %EvalContext{} = abort_ctx}},
+         prelude_ns,
+         caller_baseline,
+         _callback,
+         _stacktrace
+       ) do
+    restored_ctx = restore_hof_caller(abort_ctx, caller_baseline)
+    reason = maybe_sanitize_private_error(reason, prelude_ns)
+
+    if passthrough_hof_error?(reason) do
+      Abort.error!(reason, restored_ctx)
+    else
+      Abort.error!({@hof_callback_error, Helpers.format_closure_error(reason)}, restored_ctx)
+    end
+  end
+
+  defp handle_hof_abort(%Abort{} = error, _ns, _context, _callback, stacktrace),
+    do: reraise(error, stacktrace)
+
+  defp passthrough_hof_error?(reason) do
+    case reason do
+      {kind, _detail} -> kind in passthrough_hof_error_kinds()
+      {kind, _detail, _data} -> kind in passthrough_hof_error_kinds()
+      _other -> false
+    end
+  end
+
+  defp passthrough_hof_error_kinds do
+    [
+      @hof_callback_error,
+      :tool_error,
+      :type_error,
+      :unknown_tool,
+      :invalid_tool_args,
+      :private_tool_unauthorized,
+      :private_tool_args_error,
+      :prelude_contract_error,
+      :pmap_error,
+      :pcalls_error,
+      :memory_exceeded,
+      :timeout,
+      :parallel_capacity_exceeded,
+      :loop_limit_exceeded,
+      :tool_call_limit_exceeded
+    ]
   end
 
   defp recur_hof_closure(
@@ -1065,34 +1147,35 @@ defmodule PtcRunner.Lisp.Eval.Apply do
 
   defp count_prelude_entry_metadata(_metadata, eval_context), do: eval_context
 
-  # A closure-eval error from a *nested* pmap/pcalls (heap kill, shared
-  # deadline, exhausted worker budget) is raised as `ExecutionError`
-  # carrying the structured reason, so the surrounding pmap/pcalls worker
-  # can re-surface the stable atom instead of flattening it into a
-  # string. Every other closure error keeps the legacy `RuntimeError`
-  # shape that `do_apply_fun/4`'s rescue clauses convert into `{:error,
-  # ...}`. Parallel errors arrive as 2- or 3-tuples.
+  # Stable nested-parallel failures cross the host callback via the evaluator's
+  # single abort carrier. Other closure errors keep the public HOF type-error
+  # classification by using the existing RuntimeError adapter.
   @spec raise_closure_error(term()) :: no_return()
   defp raise_closure_error({atom, _} = reason)
-       when atom in ExecutionError.stable_parallel_reasons() do
-    raise_parallel_closure_error(atom, reason)
+       when atom in [:memory_exceeded, :timeout, :parallel_capacity_exceeded] do
+    HostContext.error!(reason)
   end
 
   defp raise_closure_error({atom, _, _} = reason)
-       when atom in ExecutionError.stable_parallel_reasons() do
-    raise_parallel_closure_error(atom, reason)
+       when atom in [:memory_exceeded, :timeout, :parallel_capacity_exceeded] do
+    HostContext.error!(reason)
   end
 
   defp raise_closure_error(reason) do
-    raise RuntimeError, Helpers.format_closure_error(reason)
+    HostContext.error!({@hof_callback_error, Helpers.format_closure_error(reason)})
   end
 
-  @spec raise_parallel_closure_error(atom(), term()) :: no_return()
-  defp raise_parallel_closure_error(atom, reason) do
-    raise PtcRunner.Lisp.ExecutionError,
-      reason: atom,
-      message: Helpers.format_closure_error(reason)
+  @spec reraise_hof_callback_error(Abort.t(), [term()], Exception.stacktrace()) :: no_return()
+  defp reraise_hof_callback_error(
+         %Abort{outcome: {:error, {@hof_callback_error, message}, %EvalContext{} = context}},
+         args,
+         _stacktrace
+       ) do
+    Abort.error!({:type_error, message, args}, context)
   end
+
+  defp reraise_hof_callback_error(%Abort{} = error, _args, stacktrace),
+    do: reraise(error, stacktrace)
 
   defp with_side_effect_stash(%EvalContext{} = eval_ctx, do_eval_fn, fun)
        when is_function(do_eval_fn, 2) and is_function(fun, 0) do
@@ -1120,47 +1203,8 @@ defmodule PtcRunner.Lisp.Eval.Apply do
     end
   end
 
-  defp reraise_captured(:throw, {signal, value, %EvalContext{}}, stacktrace, final_ctx)
-       when signal in [:return_signal, :fail_signal, :recur_signal] do
-    :erlang.raise(:throw, {signal, value, final_ctx}, stacktrace)
-  end
-
-  defp reraise_captured(:error, %ContractError{} = error, stacktrace, final_ctx),
-    do: reraise(%{error | eval_ctx: final_ctx}, stacktrace)
-
-  defp reraise_captured(:error, %ParallelError{} = error, stacktrace, final_ctx),
-    do: reraise(%{error | eval_ctx: final_ctx}, stacktrace)
-
-  defp reraise_captured(
-         :error,
-         %PtcRunner.Lisp.ToolError{} = error,
-         stacktrace,
-         final_ctx
-       ),
-       do: reraise(%{error | eval_ctx: final_ctx}, stacktrace)
-
   defp reraise_captured(kind, reason, stacktrace, _final_ctx),
     do: :erlang.raise(kind, reason, stacktrace)
-
-  defp execution_error_tuple(%ExecutionError{reason: reason, message: message, data: nil}),
-    do: {reason, message}
-
-  defp execution_error_tuple(%ExecutionError{reason: reason, message: message, data: data}),
-    do: {reason, message, data}
-
-  # An `ExecutionError` raised from a closure run inside a regular HOF.
-  # If it carries a nested-parallel reason (`:memory_exceeded`,
-  # `:timeout`, `:parallel_capacity_exceeded`) surface it as a structured
-  # error tuple so the stable reason reaches the caller. Anything else
-  # (e.g. `:tool_error`) is re-raised unchanged.
-  defp reraise_unless_parallel(%ExecutionError{reason: reason} = e, _stacktrace)
-       when reason in ExecutionError.stable_parallel_reasons() do
-    {:error, execution_error_tuple(e)}
-  end
-
-  defp reraise_unless_parallel(%ExecutionError{} = e, stacktrace) do
-    reraise e, stacktrace
-  end
 
   # ============================================================
   # Closure Execution Helpers
@@ -1295,17 +1339,20 @@ defmodule PtcRunner.Lisp.Eval.Apply do
 
   defp tag_prelude_ns(value, _ns), do: value
 
-  # Restore the caller's namespace tables onto a context thrown out of a
-  # value-position prelude export (a `(return …)`/`(fail …)` abort), while
-  # carrying the export's side-effecting accumulators back. Without this the
-  # thrown context's `user_ns` (the private prelude env) would surface as
-  # `Step.memory` and the caller's own bindings would be dropped. Mirrors
-  # `Eval.merge_export_effects/2` on the direct call path.
-  defp restore_prelude_caller(%EvalContext{} = thrown_ctx, %EvalContext{} = caller_ctx) do
+  # Restore caller lexical, namespace, and authority scope on every expected
+  # direct closure exit. Successful ordinary calls retain their namespace
+  # writes in the success path above; errors and control signals do not expose
+  # callback-local writes. Prelude closures likewise discard their private
+  # namespace wholesale.
+  defp restore_direct_caller(
+         %EvalContext{} = closure_ctx,
+         %EvalContext{} = caller_ctx,
+         _meta
+       ) do
     %{
       caller_ctx
-      | effects: thrown_ctx.effects,
-        iteration_count: thrown_ctx.iteration_count
+      | effects: closure_ctx.effects,
+        iteration_count: closure_ctx.iteration_count
     }
   end
 
@@ -1324,25 +1371,25 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   end
 
   # Re-throw a `(return …)`/`(fail …)` signal that escaped a value-position
-  # closure. For a prelude export, restore the caller's namespace tables and tag
-  # a returned closure; for an ordinary user closure, re-throw verbatim so the
-  # top-level evaluator handles it unchanged.
+  # closure after restoring the caller scope. Prelude exports additionally
+  # discard their private namespace and tag returned closures.
   @spec rethrow_export_abort(atom(), term(), EvalContext.t(), map(), EvalContext.t()) ::
           no_return()
   defp rethrow_export_abort(signal, value, thrown_ctx, meta, caller_ctx) do
+    restored_ctx = restore_direct_caller(thrown_ctx, caller_ctx, meta)
+
     case prelude_ns_tag(meta) do
       nil ->
-        throw({signal, value, thrown_ctx})
+        Abort.control!(signal, value, restored_ctx)
 
       ns ->
-        tagged = if signal == :return_signal, do: tag_prelude_ns(value, ns), else: value
-        restored_ctx = restore_prelude_caller(thrown_ctx, caller_ctx)
+        tagged = if signal == :return, do: tag_prelude_ns(value, ns), else: value
 
-        if signal == :return_signal do
+        if signal == :return do
           Contract.validate_output!(meta, tagged, restored_ctx)
         end
 
-        throw({signal, tagged, restored_ctx})
+        Abort.control!(signal, tagged, restored_ctx)
     end
   end
 
@@ -1424,60 +1471,111 @@ defmodule PtcRunner.Lisp.Eval.Apply do
                  origin_stack: caller_ctx.origin_stack
              }}
 
-          {:error, _} = err ->
-            err
+          {:error, reason} ->
+            Abort.error!(
+              maybe_sanitize_private_error(reason, prelude_ns_tag(meta)),
+              caller_ctx
+            )
         end
 
-      {:error, _} = err ->
-        err
+      {:error, reason} ->
+        Abort.error!(maybe_sanitize_private_error(reason, prelude_ns_tag(meta)), caller_ctx)
     end
-  catch
-    # `(return …)`/`(fail …)` inside a value-position prelude export throws the
-    # EXPORT context (user_ns = private prelude env). Restore the caller's
-    # namespace tables before it propagates so the private env never lands in
-    # `Step.memory` and the caller's bindings survive; ordinary user closures
-    # re-throw verbatim.
-    {:return_signal, value, %EvalContext{} = thrown_ctx} ->
-      rethrow_export_abort(:return_signal, value, thrown_ctx, meta, caller_ctx)
+  rescue
+    error in Abort ->
+      handle_direct_closure_abort(error, closure, meta, caller_ctx, do_eval_fn, __STACKTRACE__)
+  end
 
-    {:fail_signal, value, %EvalContext{} = thrown_ctx} ->
-      rethrow_export_abort(:fail_signal, value, thrown_ctx, meta, caller_ctx)
+  defp handle_direct_closure_abort(
+         %Abort{outcome: {:control, :return, value, %EvalContext{} = abort_ctx}},
+         _closure,
+         meta,
+         caller_ctx,
+         _do_eval_fn,
+         _stacktrace
+       ),
+       do: rethrow_export_abort(:return, value, abort_ctx, meta, caller_ctx)
 
-    {:recur_signal, new_args, effects} ->
-      # For recur, variadic functions behave like fixed-arity functions
-      # where the & rest pattern is the last parameter.
-      {:closure, closure_patterns, _, _, _, _} = closure
+  defp handle_direct_closure_abort(
+         %Abort{outcome: {:control, :fail, value, %EvalContext{} = abort_ctx}},
+         _closure,
+         meta,
+         caller_ctx,
+         _do_eval_fn,
+         _stacktrace
+       ),
+       do: rethrow_export_abort(:fail, value, abort_ctx, meta, caller_ctx)
 
-      recur_patterns =
-        case closure_patterns do
-          {:variadic, leading, rest} -> leading ++ [rest]
-          others -> others
+  defp handle_direct_closure_abort(
+         %Abort{outcome: {:control, :recur, new_args, %EvalContext{} = abort_ctx}},
+         closure,
+         _meta,
+         caller_ctx,
+         do_eval_fn,
+         _stacktrace
+       ) do
+    # For recur, variadic functions behave like fixed-arity functions
+    # where the & rest pattern is the last parameter.
+    {:closure, closure_patterns, _, _, _, _} = closure
+
+    recur_patterns =
+      case closure_patterns do
+        {:variadic, leading, rest} -> leading ++ [rest]
+        others -> others
+      end
+
+    case check_arity(recur_patterns, new_args) do
+      :ok ->
+        # Check iteration limit
+        case EvalContext.increment_iteration(caller_ctx) do
+          {:ok, updated_caller_ctx} ->
+            updated_caller_ctx =
+              EvalContext.restore_recur_effects(updated_caller_ctx, abort_ctx.effects)
+
+            do_execute_closure(
+              closure,
+              recur_patterns,
+              new_args,
+              updated_caller_ctx,
+              do_eval_fn
+            )
+
+          {:error, :loop_limit_exceeded} ->
+            {:error, {:loop_limit_exceeded, caller_ctx.loop_limit}}
         end
 
-      case check_arity(recur_patterns, new_args) do
-        :ok ->
-          # Check iteration limit
-          case EvalContext.increment_iteration(caller_ctx) do
-            {:ok, updated_caller_ctx} ->
-              updated_caller_ctx =
-                EvalContext.restore_recur_effects(updated_caller_ctx, effects)
-
-              do_execute_closure(
-                closure,
-                recur_patterns,
-                new_args,
-                updated_caller_ctx,
-                do_eval_fn
-              )
-
-            {:error, :loop_limit_exceeded} ->
-              {:error, {:loop_limit_exceeded, caller_ctx.loop_limit}}
-          end
-
-        {:error, {:arity_mismatch, expected, actual}} ->
-          {:error, {:arity_mismatch, expected, actual}}
-      end
+      {:error, {:arity_mismatch, expected, actual}} ->
+        {:error, {:arity_mismatch, expected, actual}}
+    end
   end
+
+  defp handle_direct_closure_abort(
+         %Abort{outcome: {:error, reason, %EvalContext{} = abort_ctx}},
+         _closure,
+         meta,
+         caller_ctx,
+         _do_eval_fn,
+         _stacktrace
+       ) do
+    restored_ctx = restore_direct_caller(abort_ctx, caller_ctx, meta)
+    reason = maybe_sanitize_private_error(reason, prelude_ns_tag(meta))
+    Abort.error!(reason, restored_ctx)
+  end
+
+  defp handle_direct_closure_abort(
+         %Abort{} = error,
+         _closure,
+         _meta,
+         _caller_ctx,
+         _do_eval_fn,
+         stacktrace
+       ),
+       do: reraise(error, stacktrace)
+
+  defp maybe_sanitize_private_error(reason, nil), do: reason
+
+  defp maybe_sanitize_private_error(reason, _prelude_ns),
+    do: Helpers.sanitize_private_error(reason)
 
   # Update closure metadata with return type if closure exists in user_ns
   defp update_closure_return_type(

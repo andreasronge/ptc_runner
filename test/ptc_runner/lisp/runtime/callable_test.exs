@@ -3,10 +3,12 @@ defmodule PtcRunner.Lisp.Runtime.CallableTest do
 
   alias PtcRunner.Lisp.Env
   alias PtcRunner.Lisp.Env.Builtin
+  alias PtcRunner.Lisp.Eval.Abort
+  alias PtcRunner.Lisp.Eval.Context
+  alias PtcRunner.Lisp.Eval.HostContext
   alias PtcRunner.Lisp.Runtime.Callable
   alias PtcRunner.Lisp.Runtime.MapOps
   alias PtcRunner.Lisp.Runtime.Math
-  alias PtcRunner.Lisp.TypeError
 
   describe "call/2 with plain functions" do
     test "calls function with args" do
@@ -111,9 +113,18 @@ defmodule PtcRunner.Lisp.Runtime.CallableTest do
     test "validates with builtin metadata before calling" do
       builtin = Builtin.wrap(:merge, {:collect, &MapOps.merge_variadic/1}, {:rest, :map_or_nil})
 
-      assert_raise TypeError, "merge: arg 2 expected map, got list", fn ->
-        Callable.call(builtin, [%{}, [1, 2]])
-      end
+      context = Context.new(%{}, %{}, %{}, fn _, _, _ -> nil end, [])
+
+      error =
+        assert_raise Abort, fn ->
+          HostContext.with_context(context, fn _, _ -> nil end, fn ->
+            Callable.call(builtin, [%{}, [1, 2]])
+          end)
+        end
+
+      assert {:error, {:type_error, "merge: arg 2 expected map, got list", [%{}, [1, 2]]},
+              ^context} =
+               error.outcome
     end
 
     test "wrapped multi-arity builtin preserves arity errors" do

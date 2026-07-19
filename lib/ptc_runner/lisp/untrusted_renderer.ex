@@ -35,6 +35,13 @@ defmodule PtcRunner.Lisp.UntrustedRenderer do
     "<untrusted_ptc_output source=\"#{source}\">\n#{safe}\n</untrusted_ptc_output>"
   end
 
+  @doc false
+  @spec tool_failure(String.t(), term()) :: String.t()
+  def tool_failure(name, data) when is_binary(name) do
+    rendered = inspect(data, limit: 50, printable_limit: 2_000)
+    "Tool '#{name}' failed:\n#{wrap(rendered, "tool_error")}"
+  end
+
   @doc """
   Returns a preamble instruction for the LLM about untrusted data blocks.
 

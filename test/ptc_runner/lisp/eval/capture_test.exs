@@ -1,6 +1,7 @@
 defmodule PtcRunner.Lisp.Eval.CaptureTest do
   use ExUnit.Case, async: true
 
+  alias PtcRunner.Lisp.Eval.Abort
   alias PtcRunner.Lisp.Eval.Apply
   alias PtcRunner.Lisp.Eval.Capture
   alias PtcRunner.Lisp.Eval.Context
@@ -70,16 +71,15 @@ defmodule PtcRunner.Lisp.Eval.CaptureTest do
     assert Capture.empty?()
   end
 
-  test "context-bearing throws are normalized from the authoritative frame" do
+  test "expected aborts are normalized from the authoritative frame" do
     context = context()
 
-    assert {:raise, :throw, {:return_signal, 7, thrown_context}, _stacktrace, final_context} =
-             Capture.run_value(context, fn ->
-               thrown_context = Context.append_print(context, "before return")
-               throw({:return_signal, 7, thrown_context})
+    assert {:control, :return, 7, final_context} =
+             Capture.run_outcome(context, fn ->
+               abort_context = Context.append_print(context, "before return")
+               Abort.control!(:return, 7, abort_context)
              end)
 
-    assert thrown_context.effects.prints == ["before return"]
     assert final_context.effects.prints == ["before return"]
     assert Capture.empty?()
   end
@@ -103,10 +103,19 @@ defmodule PtcRunner.Lisp.Eval.CaptureTest do
 
     fun =
       Apply.closure_to_fun(closure, context, fn :body, closure_context ->
-        throw({:return_signal, 7, closure_context})
+        Abort.control!(:return, 7, closure_context)
       end)
 
-    assert {:return_signal, 7, thrown_context} = catch_throw(fun.())
+    assert_raise Abort, fn -> fun.() end
+
+    error =
+      try do
+        fun.()
+      rescue
+        error in Abort -> error
+      end
+
+    assert {:control, :return, 7, thrown_context} = error.outcome
     assert thrown_context.effects.prints == ["baseline"]
     assert Capture.empty?()
   end

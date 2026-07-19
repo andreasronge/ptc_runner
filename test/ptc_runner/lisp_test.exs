@@ -298,7 +298,8 @@ defmodule PtcRunner.LispTest do
       assert {:error, %{fail: %{reason: :tool_error, message: msg}}} =
                Lisp.run("(tool/kaboom)", tools: tools)
 
-      assert msg =~ "Tool 'kaboom' failed: \"boom\""
+      assert msg =~ "Tool 'kaboom' failed:"
+      assert msg =~ "<untrusted_ptc_output source=\"tool_error\">\n\"boom\""
     end
 
     test "builtin type error after tool result reports as type_error not tool_error" do
@@ -329,7 +330,8 @@ defmodule PtcRunner.LispTest do
       assert {:error, %{fail: %{reason: :tool_error, message: msg}}} =
                Lisp.run("(tool/kaboom)", tools: tools)
 
-      assert msg =~ "Tool 'kaboom' failed: \"unexpected error\""
+      assert msg =~ "Tool 'kaboom' failed:"
+      assert msg =~ "<untrusted_ptc_output source=\"tool_error\">\n\"unexpected error\""
     end
   end
 

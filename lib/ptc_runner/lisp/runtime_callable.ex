@@ -8,10 +8,11 @@ defmodule PtcRunner.Lisp.RuntimeCallable do
   bound form is created at application time for higher-order runtime calls.
   """
 
+  alias PtcRunner.Lisp.Eval.Abort
   alias PtcRunner.Lisp.Eval.Capture
   alias PtcRunner.Lisp.Eval.Context, as: EvalContext
   alias PtcRunner.Lisp.Eval.Helpers
-  alias PtcRunner.Lisp.ExecutionError
+  alias PtcRunner.Lisp.Eval.HostContext
 
   defstruct [:namespace, :name, :eval_ctx, :do_eval]
 
@@ -54,34 +55,21 @@ defmodule PtcRunner.Lisp.RuntimeCallable do
   end
 
   def call(%__MODULE__{} = callable, args) do
-    case Process.get(:__ptc_runtime_callable_context) do
-      {%EvalContext{} = eval_ctx, do_eval} when is_function(do_eval, 2) ->
+    case HostContext.current() do
+      {%EvalContext{} = eval_ctx, do_eval} ->
         call_with_context(callable, args, eval_ctx, do_eval)
 
       _ ->
-        raise ExecutionError,
-          reason: :runtime_error,
-          message: "#{label(callable)} is not bound to the current evaluation context"
+        HostContext.error!(
+          {:runtime_error, "#{label(callable)} is not bound to the current evaluation context"}
+        )
     end
   end
 
   @spec with_context(EvalContext.t(), function(), (-> term())) :: term()
   def with_context(%EvalContext{} = eval_ctx, do_eval, fun)
       when is_function(do_eval, 2) and is_function(fun, 0) do
-    previous = Process.get(:__ptc_runtime_callable_context, :__ptc_no_context)
-    Process.put(:__ptc_runtime_callable_context, {eval_ctx, do_eval})
-
-    try do
-      fun.()
-    after
-      case previous do
-        :__ptc_no_context ->
-          Process.delete(:__ptc_runtime_callable_context)
-
-        context ->
-          Process.put(:__ptc_runtime_callable_context, context)
-      end
-    end
+    HostContext.with_context(eval_ctx, do_eval, fun)
   end
 
   defp call_with_context(%__MODULE__{} = callable, args, %EvalContext{} = base_ctx, do_eval)
@@ -94,7 +82,7 @@ defmodule PtcRunner.Lisp.RuntimeCallable do
         result
 
       {:error, reason} ->
-        raise_error(reason)
+        Abort.error!(error_reason(reason), eval_ctx)
     end
   end
 
@@ -112,19 +100,14 @@ defmodule PtcRunner.Lisp.RuntimeCallable do
 
   defp literal_args(args), do: Enum.map(args, &{:literal, &1})
 
-  defp raise_error({reason, message, data}) when is_atom(reason) and is_binary(message) do
-    raise ExecutionError, reason: reason, message: message, data: data
-  end
+  defp error_reason({reason, message, data}) when is_atom(reason) and is_binary(message),
+    do: {reason, message, data}
 
-  defp raise_error({reason, message}) when is_atom(reason) and is_binary(message) do
-    raise ExecutionError, reason: reason, message: message
-  end
+  defp error_reason({reason, message}) when is_atom(reason) and is_binary(message),
+    do: {reason, message, nil}
 
-  defp raise_error({reason, _} = error) when is_atom(reason) do
-    raise ExecutionError, reason: reason, message: Helpers.format_closure_error(error)
-  end
+  defp error_reason({reason, _} = error) when is_atom(reason),
+    do: {reason, Helpers.format_closure_error(error), nil}
 
-  defp raise_error(reason) do
-    raise ExecutionError, reason: :runtime_error, message: Helpers.format_closure_error(reason)
-  end
+  defp error_reason(reason), do: {:runtime_error, Helpers.format_closure_error(reason)}
 end

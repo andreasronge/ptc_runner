@@ -35,7 +35,6 @@ defmodule PtcRunner.Lisp do
     DataKeys,
     Env,
     Eval,
-    ExecutionError,
     Format,
     Parser,
     RuntimeCallable,
@@ -46,11 +45,11 @@ defmodule PtcRunner.Lisp do
   alias PtcRunner.Lisp.Eval.Context, as: EvalContext
   alias PtcRunner.Lisp.Eval.Effects
   alias PtcRunner.Lisp.Eval.Helpers
+  alias PtcRunner.Lisp.Eval.HostContext
   alias PtcRunner.Lisp.Eval.ParallelBudget
   alias PtcRunner.Lisp.Prelude
   alias PtcRunner.Lisp.Prelude.Attach, as: PreludeAttach
   alias PtcRunner.Lisp.Prelude.AttachContext, as: PreludeAttachContext
-  alias PtcRunner.Lisp.Prelude.ContractError
   alias PtcRunner.Lisp.Prelude.ValidationError, as: PreludeValidationError
 
   # Default capacity of the global parallel-worker slot semaphore (see
@@ -66,6 +65,7 @@ defmodule PtcRunner.Lisp do
   alias PtcRunner.Lisp.Result, as: Step
   alias PtcRunner.Lisp.Signature
   alias PtcRunner.Lisp.Tool
+  alias PtcRunner.Lisp.UntrustedRenderer
 
   @valid_callers [:direct, :kernel, :repl]
 
@@ -543,8 +543,10 @@ defmodule PtcRunner.Lisp do
     with :ok <- validate_parallel_config(params.worker_max_heap, params.max_parallel_workers),
          {:ok, normalized_tools} <- normalize_tools(raw_tools),
          {:ok, parsed_signature} <- parse_signature(signature_str) do
+      tool_failure_token = make_ref()
+
       tool_executor = fn name, args, origin ->
-        execute_tool(normalized_tools, name, args, origin)
+        execute_tool(normalized_tools, name, args, origin, tool_failure_token)
       end
 
       tools_meta =
@@ -558,6 +560,7 @@ defmodule PtcRunner.Lisp do
           tool_executor: tool_executor,
           parsed_signature: parsed_signature,
           signature_str: signature_str,
+          tool_failure_token: tool_failure_token,
           tools_meta: tools_meta
         })
 
@@ -819,6 +822,7 @@ defmodule PtcRunner.Lisp do
         pmap_max_concurrency: pmap_max_concurrency,
         tool_cache: tool_cache,
         tools_meta: tools_meta,
+        tool_failure_token: Map.fetch!(opts, :tool_failure_token),
         max_tool_calls: max_tool_calls,
         max_tool_call_result_bytes: max_tool_call_result_bytes,
         strict_data: strict_data,
@@ -832,28 +836,21 @@ defmodule PtcRunner.Lisp do
 
     eval_fn = fn _ast, sandbox_context ->
       try do
-        Eval.eval_with_context(
-          core_ast,
-          sandbox_context.ctx,
-          sandbox_context.memory,
-          Env.initial(),
-          tool_executor,
-          sandbox_context.turn_history,
-          eval_opts
-        )
+        case Eval.eval_with_context(
+               core_ast,
+               sandbox_context.ctx,
+               sandbox_context.memory,
+               Env.initial(),
+               tool_executor,
+               sandbox_context.turn_history,
+               eval_opts
+             ) do
+          {:control, :return, value, context} -> {:ok, {:return_signal, value}, context}
+          {:control, :fail, value, context} -> {:ok, {:fail_signal, value}, context}
+          {:control, :recur, values, context} -> {:error, {:invalid_recur, values}, context}
+          outcome -> outcome
+        end
       rescue
-        e in ContractError ->
-          {:error, e.reason, e.eval_ctx}
-
-        e in PtcRunner.Lisp.ParallelError ->
-          {:error, e.reason, e.eval_ctx}
-
-        e in ExecutionError ->
-          {:error, {e.reason, e.message, e.data}}
-
-        e in PtcRunner.Lisp.ToolError ->
-          {:error, {:tool_error, e.tool_name, e.message}, e.eval_ctx}
-
         e ->
           {:error, {:runtime_error, Exception.message(e)}}
       end
@@ -1113,7 +1110,10 @@ defmodule PtcRunner.Lisp do
   end
 
   def format_error({:runtime_error, msg}), do: "Runtime error: #{msg}"
-  def format_error({:tool_error, name, reason}), do: "Tool '#{name}' failed: #{inspect(reason)}"
+
+  def format_error({:tool_error, name, reason}),
+    do: UntrustedRenderer.tool_failure(name, reason)
+
   # Handle other 3-tuple error formats from Eval: {type, message, data}
   def format_error({type, msg, _}) when is_atom(type) and is_binary(msg), do: "#{type}: #{msg}"
   def format_error({type, msg}) when is_atom(type) and is_binary(msg), do: "#{type}: #{msg}"
@@ -1603,12 +1603,12 @@ defmodule PtcRunner.Lisp do
 
   defp collect_prelude_refs(_other, acc), do: acc
 
-  defp execute_tool(normalized_tools, name, args, origin) do
+  defp execute_tool(normalized_tools, name, args, origin, failure_token) do
     case Map.fetch(normalized_tools, name) do
       {:ok, %Tool{} = tool} ->
-        with :ok <- authorize_tool_call(tool, origin),
-             :ok <- validate_private_tool_args(tool, args) do
-          execute_tool_function(tool, args)
+        with :ok <- authorize_tool_call(tool, origin, failure_token),
+             :ok <- validate_private_tool_args(tool, args, failure_token) do
+          execute_tool_function(tool, args, failure_token)
         end
 
       :error ->
@@ -1618,77 +1618,83 @@ defmodule PtcRunner.Lisp do
           |> Enum.map(fn {tool_name, _tool} -> tool_name end)
           |> Enum.sort()
 
-        raise ExecutionError, reason: :unknown_tool, message: name, data: available
+        tool_failure(failure_token, :unknown_tool, name, available)
     end
   end
 
   defp execute_tool_function(
          %Tool{name: name, argument_collisions: :reject},
-         %AmbiguousArguments{}
+         %AmbiguousArguments{},
+         failure_token
        ) do
-    raise ExecutionError,
-      reason: :invalid_tool_args,
-      message: name,
-      data: :ambiguous_arguments
+    tool_failure(failure_token, :invalid_tool_args, name, :ambiguous_arguments)
   end
 
-  defp execute_tool_function(%Tool{name: name, function: fun}, args) do
-    case fun.(args) do
+  defp execute_tool_function(%Tool{name: name, function: fun}, args, failure_token) do
+    case HostContext.without_context(fn -> fun.(args) end) do
       {:ok, value} ->
         value
 
       {:error, reason} ->
-        raise ExecutionError, reason: :tool_error, message: name, data: reason
+        recorded_tool_failure(failure_token, name, reason)
 
       value ->
         value
     end
   end
 
-  defp authorize_tool_call(%Tool{visibility: :public}, _origin), do: :ok
+  defp authorize_tool_call(%Tool{visibility: :public}, _origin, _failure_token), do: :ok
 
-  defp authorize_tool_call(%Tool{name: name, visibility: :private}, %{
-         type: :prelude_export,
-         ref: ref,
-         tool_refs: tool_refs
-       })
+  defp authorize_tool_call(
+         %Tool{name: name, visibility: :private},
+         %{
+           type: :prelude_export,
+           ref: ref,
+           tool_refs: tool_refs
+         },
+         failure_token
+       )
        when is_list(tool_refs) do
     if name in tool_refs do
       :ok
     else
-      raise ExecutionError,
-        reason: :private_tool_unauthorized,
-        message: name,
-        data: %{origin: ref, allowed_tools: tool_refs}
+      tool_failure(failure_token, :private_tool_unauthorized, name, %{
+        origin: ref,
+        allowed_tools: tool_refs
+      })
     end
   end
 
-  defp authorize_tool_call(%Tool{name: name, visibility: :private}, _origin) do
-    raise ExecutionError,
-      reason: :private_tool_unauthorized,
-      message: name,
-      data: %{origin: nil}
+  defp authorize_tool_call(
+         %Tool{name: name, visibility: :private},
+         _origin,
+         failure_token
+       ) do
+    tool_failure(failure_token, :private_tool_unauthorized, name, %{origin: nil})
   end
 
-  defp validate_private_tool_args(%Tool{visibility: :public}, _args), do: :ok
-  defp validate_private_tool_args(%Tool{signature: nil}, _args), do: :ok
+  defp validate_private_tool_args(%Tool{visibility: :public}, _args, _failure_token), do: :ok
+  defp validate_private_tool_args(%Tool{signature: nil}, _args, _failure_token), do: :ok
 
-  defp validate_private_tool_args(%Tool{name: name, signature: signature}, args) do
+  defp validate_private_tool_args(
+         %Tool{name: name, signature: signature},
+         args,
+         failure_token
+       ) do
     with {:ok, parsed} <- Signature.parse(signature),
          :ok <- Signature.validate_input(parsed, args) do
       :ok
     else
       {:error, errors} when is_list(errors) ->
-        raise ExecutionError,
-          reason: :private_tool_args_error,
-          message: name,
-          data: format_signature_errors(errors)
+        tool_failure(
+          failure_token,
+          :private_tool_args_error,
+          name,
+          format_signature_errors(errors)
+        )
 
       {:error, error} ->
-        raise ExecutionError,
-          reason: :private_tool_args_error,
-          message: name,
-          data: error
+        tool_failure(failure_token, :private_tool_args_error, name, error)
     end
   end
 
@@ -1698,6 +1704,30 @@ defmodule PtcRunner.Lisp do
       other -> inspect(other)
     end)
   end
+
+  defp tool_failure(token, reason, message, data, record? \\ false),
+    do: {:__ptc_tool_failure__, token, reason, message, data, record?}
+
+  defp recorded_tool_failure(token, name, reason) do
+    {reason, child_trace_id, child_step} = tool_failure_metadata(reason)
+
+    {:__ptc_tool_failure__, token, :tool_error, name, reason, true, child_trace_id, child_step}
+  end
+
+  defp tool_failure_metadata(%{
+         __child_trace_id__: child_trace_id,
+         __child_step__: child_step,
+         value: reason
+       }),
+       do: {reason, child_trace_id, child_step}
+
+  defp tool_failure_metadata(%{__child_trace_id__: child_trace_id, value: reason}),
+    do: {reason, child_trace_id, nil}
+
+  defp tool_failure_metadata(%{__child_step__: child_step, value: reason}),
+    do: {reason, nil, child_step}
+
+  defp tool_failure_metadata(reason), do: {reason, nil, nil}
 
   # Normalize tools from various formats to Tool structs
   defp normalize_tools(raw_tools) do

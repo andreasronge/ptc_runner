@@ -9,6 +9,8 @@ defmodule PtcRunner.Lisp.Eval.Helpers do
   alias PtcRunner.Lisp.Env.Builtin
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
 
+  @stable_parallel_errors [:memory_exceeded, :timeout, :parallel_capacity_exceeded]
+
   @doc """
   Generates a type error tuple for FunctionClauseError in builtins.
   """
@@ -219,6 +221,82 @@ defmodule PtcRunner.Lisp.Eval.Helpers do
   end
 
   def format_closure_error(reason), do: "closure error: #{inspect(reason)}"
+
+  @doc false
+  @spec sanitize_private_error(term()) :: term()
+  def sanitize_private_error({reason, _message, nil}) when reason in @stable_parallel_errors,
+    do: {reason, stable_parallel_error_message(reason), nil}
+
+  def sanitize_private_error({:loop_limit_exceeded, limit}) when is_integer(limit),
+    do: {:loop_limit_exceeded, limit}
+
+  def sanitize_private_error({:tool_call_limit_exceeded, limit})
+      when is_integer(limit) or is_nil(limit),
+      do: {:tool_call_limit_exceeded, limit}
+
+  def sanitize_private_error({:type_error, _message, _callback_args}),
+    do: {:type_error, "private prelude evaluation failed with a type error", nil}
+
+  def sanitize_private_error({:destructure_error, _message}),
+    do: {:destructure_error, "private prelude evaluation failed during destructuring"}
+
+  def sanitize_private_error({:not_callable, _private_value}),
+    do: {:not_callable, :private_prelude_value}
+
+  def sanitize_private_error({:invalid_map_call, _private_map, _private_args}),
+    do: {:invalid_map_call, :private_prelude_value, []}
+
+  def sanitize_private_error({:invalid_keyword_call, _private_key, _private_args}),
+    do: {:invalid_keyword_call, :private_prelude_value, []}
+
+  def sanitize_private_error({:invalid_tool_args, _private_message}),
+    do: {:invalid_tool_args, "private prelude tool call received invalid arguments"}
+
+  def sanitize_private_error({:private_tool_unauthorized, name, authorization})
+      when is_binary(name) and is_map(authorization),
+      do: {:private_tool_unauthorized, name, authorization}
+
+  def sanitize_private_error({:private_tool_args_error, name, details}) when is_binary(name),
+    do: {:private_tool_args_error, name, sanitize_private_validation_details(details)}
+
+  def sanitize_private_error({:prelude_contract_error, message, details})
+      when is_binary(message) and is_map(details),
+      do: {:prelude_contract_error, message, details}
+
+  def sanitize_private_error({:__ptc_hof_callback_error__, _private_message}),
+    do: {:__ptc_hof_callback_error__, "private prelude callback failed"}
+
+  def sanitize_private_error({:private_prelude_error, _private_message}),
+    do: {:private_prelude_error, "private prelude evaluation failed"}
+
+  def sanitize_private_error(_reason),
+    do: {:private_prelude_error, "private prelude evaluation failed"}
+
+  defp stable_parallel_error_message(:memory_exceeded),
+    do: "a parallel worker exceeded its per-worker heap cap"
+
+  defp stable_parallel_error_message(:timeout),
+    do: "the parallel operation exceeded its deadline"
+
+  defp stable_parallel_error_message(:parallel_capacity_exceeded),
+    do: "the parallel worker budget is exhausted; reduce nesting or collection size"
+
+  defp sanitize_private_validation_details(details) when is_binary(details) do
+    details
+    |> String.split("; ")
+    |> Enum.map_join("; ", fn detail ->
+      message =
+        case String.split(detail, ": ", parts: 2) do
+          [_private_path, safe_message] -> safe_message
+          [_message] -> "arguments did not match the private tool signature"
+        end
+
+      "private validation: #{message}"
+    end)
+  end
+
+  defp sanitize_private_validation_details(_details),
+    do: "private validation: arguments did not match the private tool signature"
 
   # Find a similar builtin name using Jaro distance + heuristics
   defp find_similar_builtin(name) do

@@ -18,13 +18,13 @@ defmodule PtcRunner.Lisp.Runtime.Callable do
 
   alias PtcRunner.Lisp.Env.Builtin
   alias PtcRunner.Lisp.Eval.Helpers
+  alias PtcRunner.Lisp.Eval.HostContext
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
   alias PtcRunner.Lisp.Runtime.Args
   alias PtcRunner.Lisp.Runtime.FlexAccess
   alias PtcRunner.Lisp.Runtime.Math
   alias PtcRunner.Lisp.Runtime.Predicates
   alias PtcRunner.Lisp.RuntimeCallable
-  alias PtcRunner.Lisp.TypeError
 
   # Guard: true keywords (atoms that aren't nil, true, or false)
   defguardp is_keyword(k) when is_atom(k) and k != nil and k != true and k != false
@@ -176,12 +176,13 @@ defmodule PtcRunner.Lisp.Runtime.Callable do
   defp truthy?(false), do: false
   defp truthy?(_), do: true
 
+  @spec raise_type_error_or_reraise(function(), [term()], Exception.stacktrace()) :: no_return()
   defp raise_type_error_or_reraise(fun2, args, stacktrace) do
     if Enum.all?(args, &is_number/1) do
       reraise ArithmeticError, [message: "bad argument in arithmetic expression"], stacktrace
     else
-      {:type_error, message, _args} = Helpers.type_error_for_args(fun2, args)
-      raise TypeError, message: message
+      {:type_error, message, error_args} = Helpers.type_error_for_args(fun2, args)
+      HostContext.error!({:type_error, message, error_args})
     end
   end
 end

@@ -5,20 +5,21 @@ defmodule PtcRunner.Lisp.RuntimeCallableTest do
   alias PtcRunner.Lisp.Analyze
   alias PtcRunner.Lisp.Eval.Capture
   alias PtcRunner.Lisp.Eval.Context, as: EvalContext
+  alias PtcRunner.Lisp.Eval.HostContext
   alias PtcRunner.Lisp.RuntimeCallable
 
   defp clear_runtime_callable_process_state! do
-    Process.delete(:__ptc_runtime_callable_context)
+    assert HostContext.current() == nil
     assert Capture.empty?()
 
     on_exit(fn ->
-      Process.delete(:__ptc_runtime_callable_context)
+      assert HostContext.current() == nil
       assert Capture.empty?()
     end)
   end
 
   defp assert_runtime_callable_process_state_clean do
-    assert Process.get(:__ptc_runtime_callable_context) == nil
+    assert HostContext.current() == nil
     assert Capture.empty?()
   end
 
@@ -193,6 +194,25 @@ defmodule PtcRunner.Lisp.RuntimeCallableTest do
       source = ~S|(map tool/cached [{:x 1} {:x 1}])|
 
       assert {:ok, step} = Lisp.run(source, tools: tools)
+      assert step.return == [10, 10]
+      assert :counters.get(calls, 1) == 1
+      assert Enum.map(step.tool_calls, &Map.get(&1, :cached, false)) == [false, true]
+    end
+
+    test "ordinary closure callbacks observe cache writes from earlier callbacks" do
+      calls = :counters.new(1, [:atomics])
+
+      tools = %{
+        "cached" =>
+          {fn args ->
+             :counters.add(calls, 1, 1)
+             args["x"] * 10
+           end, signature: "(x :int) -> :int", cache: true}
+      }
+
+      source = ~S|(map (fn [args] (tool/cached args)) [{:x 1} {:x 1}])|
+
+      assert {:ok, step} = Lisp.run(source, tools: tools, max_tool_calls: 1)
       assert step.return == [10, 10]
       assert :counters.get(calls, 1) == 1
       assert Enum.map(step.tool_calls, &Map.get(&1, :cached, false)) == [false, true]

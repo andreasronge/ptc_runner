@@ -7,7 +7,7 @@ defmodule PtcRunner.Lisp.Runtime.Math do
   """
 
   alias PtcRunner.Lisp.Eval.Helpers
-  alias PtcRunner.Lisp.ExecutionError
+  alias PtcRunner.Lisp.Eval.HostContext
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
   alias PtcRunner.Lisp.Runtime.SpecialValues
 
@@ -407,10 +407,8 @@ defmodule PtcRunner.Lisp.Runtime.Math do
   # Clojure exactly. `unsigned-bit-shift-right` is intentionally not provided
   # because it has no well-defined meaning without a fixed integer width.
   #
-  # Type errors are raised as `ExecutionError{reason: :type_error}` so they
-  # surface as PTC-Lisp `:type_error`s regardless of how the builtin is
-  # bound (`:normal` vs `:collect`) — the per-binding dispatchers in
-  # `Eval.Apply` only rescue `RuntimeError`/`ArithmeticError`.
+  # Type and arity failures abort through the evaluator's single host-callback
+  # carrier so every builtin binding shape preserves the same classification.
   # ============================================================
 
   @doc "Bitwise AND of all arguments (at least one, all integers)."
@@ -468,31 +466,31 @@ defmodule PtcRunner.Lisp.Runtime.Math do
   defp int!(x, _name) when is_integer(x), do: x
 
   defp int!(x, name) do
-    raise ExecutionError,
-      reason: :type_error,
-      message: "#{name}: expected an integer, got #{Helpers.describe_type(x)} #{inspect(x)}"
+    HostContext.error!(
+      {:type_error, "#{name}: expected an integer, got #{Helpers.describe_type(x)} #{inspect(x)}",
+       nil}
+    )
   end
 
   defp shift!(n, _name) when is_integer(n) and n >= 0, do: n
 
   defp shift!(n, name) do
-    raise ExecutionError,
-      reason: :type_error,
-      message: "#{name}: shift amount must be a non-negative integer, got #{inspect(n)}"
+    HostContext.error!(
+      {:type_error, "#{name}: shift amount must be a non-negative integer, got #{inspect(n)}",
+       nil}
+    )
   end
 
   defp bit_mask(n, name), do: :erlang.bsl(1, shift!(n, name))
 
+  @spec arity_error(String.t()) :: no_return()
   defp arity_error(name) do
-    raise ExecutionError,
-      reason: :arity_error,
-      message: "#{name} requires at least 1 argument, got 0"
+    HostContext.error!({:arity_error, "#{name} requires at least 1 argument, got 0"})
   end
 
+  @spec binary_arity_error(String.t(), non_neg_integer()) :: no_return()
   defp binary_arity_error(name, got) do
-    raise ExecutionError,
-      reason: :arity_error,
-      message: "#{name} requires at least 2 arguments, got #{got}"
+    HostContext.error!({:arity_error, "#{name} requires at least 2 arguments, got #{got}"})
   end
 
   # Comparison (for direct use, not inside where)

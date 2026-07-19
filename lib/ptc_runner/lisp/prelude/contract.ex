@@ -1,8 +1,8 @@
 defmodule PtcRunner.Lisp.Prelude.Contract do
   @moduledoc false
 
+  alias PtcRunner.Lisp.Eval.Abort
   alias PtcRunner.Lisp.Eval.Context, as: EvalContext
-  alias PtcRunner.Lisp.Prelude.ContractError
   alias PtcRunner.Lisp.Signature.Validator
 
   @max_errors 16
@@ -55,6 +55,7 @@ defmodule PtcRunner.Lisp.Prelude.Contract do
 
   defp contract(_metadata), do: nil
 
+  @spec raise_contract(map(), atom(), [map()], EvalContext.t()) :: no_return()
   defp raise_contract(contract, phase, errors, eval_ctx) do
     errors = errors |> Enum.take(@max_errors) |> Enum.map(&public_error/1)
     first = List.first(errors) || %{path: [], message: "contract validation failed"}
@@ -75,7 +76,7 @@ defmodule PtcRunner.Lisp.Prelude.Contract do
     }
 
     reason = {:prelude_contract_error, message, details}
-    raise ContractError, reason: reason, message: message, eval_ctx: eval_ctx
+    Abort.error!(reason, eval_ctx)
   end
 
   defp public_error(%{path: path, message: message}) when is_list(path) and is_binary(message) do

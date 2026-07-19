@@ -5,10 +5,10 @@ defmodule PtcRunner.Lisp.Runtime.Args do
 
   alias PtcRunner.Lisp.Env.Builtin
   alias PtcRunner.Lisp.Eval.Helpers
+  alias PtcRunner.Lisp.Eval.HostContext
   alias PtcRunner.Lisp.Format
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
   alias PtcRunner.Lisp.RuntimeCallable
-  alias PtcRunner.Lisp.TypeError
 
   @spec validate!(Builtin.t() | term(), [term()]) :: :ok
   def validate!(callable, args) do
@@ -22,7 +22,7 @@ defmodule PtcRunner.Lisp.Runtime.Args do
         end
 
       message ->
-        raise TypeError, message: message
+        HostContext.error!({:type_error, message, args})
     end
   end
 
@@ -146,12 +146,14 @@ defmodule PtcRunner.Lisp.Runtime.Args do
         if valid?(spec, arg) do
           :ok
         else
-          raise TypeError,
-            message: "#{name}: arg #{index} expected #{expected(spec)}, got #{actual(arg)}"
+          HostContext.error!(
+            {:type_error, "#{name}: arg #{index} expected #{expected(spec)}, got #{actual(arg)}",
+             args}
+          )
         end
 
       message ->
-        raise TypeError, message: message
+        HostContext.error!({:type_error, message, args})
     end
   end
 

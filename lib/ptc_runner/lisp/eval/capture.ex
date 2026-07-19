@@ -1,6 +1,7 @@
 defmodule PtcRunner.Lisp.Eval.Capture do
   @moduledoc false
 
+  alias PtcRunner.Lisp.Eval.Abort
   alias PtcRunner.Lisp.Eval.Context, as: EvalContext
   alias PtcRunner.Lisp.Eval.Effects
 
@@ -68,6 +69,9 @@ defmodule PtcRunner.Lisp.Eval.Capture do
       {:ok, other, _captured_context} ->
         raise ArgumentError,
               "capture outcome callback returned an invalid evaluator outcome: #{inspect(other)}"
+
+      {:raise, :error, %Abort{outcome: outcome}, _stacktrace, captured_context} ->
+        normalize_outcome(outcome, captured_context)
 
       {:raise, _kind, _reason, _stacktrace, _context} = raised ->
         raised
@@ -165,11 +169,29 @@ defmodule PtcRunner.Lisp.Eval.Capture do
   end
 
   defp context_from_reason({_, _, %EvalContext{} = context}, _fallback), do: context
+
+  defp context_from_reason(%Abort{outcome: outcome}, fallback),
+    do: outcome_context(outcome, fallback)
+
   defp context_from_reason(%{eval_ctx: %EvalContext{} = context}, _fallback), do: context
   defp context_from_reason(_reason, %EvalContext{} = fallback), do: fallback
 
   defp replace_effects(%EvalContext{} = context, %Effects{} = effects),
     do: %{context | effects: effects}
+
+  defp normalize_outcome({:ok, value, %EvalContext{} = context}, captured),
+    do: {:ok, value, replace_effects(context, captured.effects)}
+
+  defp normalize_outcome({:error, reason, %EvalContext{} = context}, captured),
+    do: {:error, reason, replace_effects(context, captured.effects)}
+
+  defp normalize_outcome({:control, signal, value, %EvalContext{} = context}, captured)
+       when signal in [:return, :fail, :recur],
+       do: {:control, signal, value, replace_effects(context, captured.effects)}
+
+  defp outcome_context({_, _, %EvalContext{} = context}, _fallback), do: context
+  defp outcome_context({:control, _, _, %EvalContext{} = context}, _fallback), do: context
+  defp outcome_context(_outcome, fallback), do: fallback
 
   defp record(fun) when is_function(fun, 1) do
     update(fn frame ->

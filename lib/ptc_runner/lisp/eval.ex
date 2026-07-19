@@ -6,12 +6,28 @@ defmodule PtcRunner.Lisp.Eval do
   from lexical environments, applying builtins and user functions, and
   handling control flow.
 
+  Expected evaluation exits use one context-bearing protocol owned by
+  `Eval.Outcome`: success, recoverable error, or `return`/`fail`/`recur`
+  control. Host callbacks that cannot return an outcome use the private
+  `Eval.Abort` carrier. `Eval.HostContext` installs the active evaluator
+  context around those callbacks so validation and runtime helpers can abort
+  without introducing parallel exception transports.
+
+  `Eval.Context` owns the normalized cumulative `Eval.Effects`. `Eval.Capture`
+  is the single callback capture stack; it records the authoritative effect
+  delta and replaces only an outcome context's effects during normalization.
+  Callable-specific adapters remain responsible for restoring lexical,
+  namespace, and prelude-authority state before an outcome crosses a boundary.
+
   ## Module Structure
 
   This module delegates to specialized submodules:
   - `Eval.Context` - Evaluation context struct
   - `Eval.Patterns` - Pattern matching for let bindings
   - `Eval.Apply` - Function application dispatch
+  - `Eval.Outcome` / `Eval.Abort` - Expected outcomes and the private callback carrier
+  - `Eval.HostContext` - Active evaluator context for host callbacks
+  - `Eval.Effects` / `Eval.Capture` - Effect algebra and callback capture
   - `Eval.Helpers` - Type errors and utilities
   """
 
@@ -23,20 +39,30 @@ defmodule PtcRunner.Lisp.Eval do
   alias PtcRunner.Lisp.CoreAST
   alias PtcRunner.Lisp.Env
   alias PtcRunner.Lisp.Env.Builtin
-  alias PtcRunner.Lisp.Eval.{Apply, Capture, Effects, ParallelRunner, Patterns}
+
+  alias PtcRunner.Lisp.Eval.{
+    Abort,
+    Apply,
+    Capture,
+    Effects,
+    Helpers,
+    HostContext,
+    Outcome,
+    ParallelRunner,
+    Patterns
+  }
+
   alias PtcRunner.Lisp.Eval.Context, as: EvalContext
-  alias PtcRunner.Lisp.ExecutionError
-  require PtcRunner.Lisp.ExecutionError
   alias PtcRunner.Lisp.Format.Var
   alias PtcRunner.Lisp.KeyNormalizer
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
   alias PtcRunner.Lisp.Metadata
-  alias PtcRunner.Lisp.ParallelError
-  alias PtcRunner.Lisp.Prelude.ContractError
   alias PtcRunner.Lisp.Runtime.Callable
   alias PtcRunner.Lisp.Runtime.Collection.Normalize
   alias PtcRunner.Lisp.RuntimeCallable
   alias PtcRunner.Lisp.UntrustedRenderer
+
+  @hof_callback_error :__ptc_hof_callback_error__
 
   import PtcRunner.Lisp.Runtime, only: [flex_get: 2]
 
@@ -71,21 +97,34 @@ defmodule PtcRunner.Lisp.Eval do
           {:ok, value(), map()} | {:error, runtime_error()}
   def eval(ast, ctx, memory, env, tool_executor, turn_history \\ [], opts \\ []) do
     case eval_with_context(ast, ctx, memory, env, tool_executor, turn_history, opts) do
-      {:ok, result, %EvalContext{user_ns: user_ns}} -> {:ok, result, user_ns}
-      {:error, reason, %EvalContext{}} -> {:error, reason}
+      {:ok, result, %EvalContext{user_ns: user_ns}} ->
+        {:ok, result, user_ns}
+
+      {:error, reason, %EvalContext{}} ->
+        {:error, reason}
+
+      {:control, :return, value, %EvalContext{user_ns: user_ns}} ->
+        {:ok, {:return_signal, value}, user_ns}
+
+      {:control, :fail, value, %EvalContext{user_ns: user_ns}} ->
+        {:ok, {:fail_signal, value}, user_ns}
+
+      {:control, :recur, values, %EvalContext{}} ->
+        {:error, {:invalid_recur, values}}
     end
-  rescue
-    e in ContractError -> {:error, e.reason}
-    e in ParallelError -> {:error, e.reason}
   end
 
   @spec eval_with_context(CoreAST.t(), map(), map(), env(), tool_executor(), list(), keyword()) ::
-          {:ok, value(), EvalContext.t()} | {:error, runtime_error(), EvalContext.t()}
+          Outcome.t()
   def eval_with_context(ast, ctx, memory, env, tool_executor, turn_history \\ [], opts \\ []) do
     tool_executor = normalize_tool_executor(tool_executor)
     eval_ctx = EvalContext.new(ctx, memory, env, tool_executor, turn_history, opts)
 
-    case Capture.run_outcome(eval_ctx, fn -> eval_outcome(ast, eval_ctx) end) do
+    case Capture.run_outcome(eval_ctx, fn ->
+           HostContext.with_context(eval_ctx, &do_eval/2, fn ->
+             normalize_outcome(do_eval(ast, eval_ctx), eval_ctx)
+           end)
+         end) do
       {:ok, value, final_ctx} ->
         {:ok, value, final_ctx}
 
@@ -93,48 +132,30 @@ defmodule PtcRunner.Lisp.Eval do
         {:error, reason, final_ctx}
 
       {:control, :return, value, final_ctx} ->
-        {:ok, {:return_signal, value}, final_ctx}
+        Outcome.control(:return, value, final_ctx)
 
       {:control, :fail, value, final_ctx} ->
-        {:ok, {:fail_signal, value}, final_ctx}
+        Outcome.control(:fail, value, final_ctx)
 
       {:control, :recur, values, final_ctx} ->
-        {:error, {:invalid_recur, values}, final_ctx}
-
-      {:raise, :error, %ContractError{} = error, _stacktrace, final_ctx} ->
-        {:error, error.reason, final_ctx}
-
-      {:raise, :error, %ParallelError{} = error, _stacktrace, final_ctx} ->
-        {:error, error.reason, final_ctx}
-
-      {:raise, :error, %PtcRunner.Lisp.ToolError{} = error, _stacktrace, final_ctx} ->
-        {:error, {:tool_error, error.tool_name, error.message}, final_ctx}
-
-      {:raise, :error, %ExecutionError{} = error, _stacktrace, final_ctx} ->
-        {:error, {error.reason, error.message, error.data}, final_ctx}
+        Outcome.control(:recur, values, final_ctx)
 
       {:raise, kind, reason, stacktrace, _final_ctx} ->
         :erlang.raise(kind, reason, stacktrace)
     end
   end
 
-  defp eval_outcome(ast, %EvalContext{} = eval_ctx) do
-    case do_eval(ast, eval_ctx) do
-      {:ok, value, %EvalContext{} = final_ctx} ->
-        {:ok, value, final_ctx}
+  defp normalize_outcome({:ok, value, %EvalContext{} = context}, _fallback),
+    do: Outcome.ok(value, context)
 
-      {:error, reason} ->
-        {:error, reason, Capture.materialize_context(eval_ctx)}
+  defp normalize_outcome({:error, reason}, %EvalContext{} = fallback),
+    do: Outcome.error(reason, Capture.materialize_context(fallback))
+
+  defp eval_child(ast, %EvalContext{} = context) do
+    case do_eval(ast, context) do
+      {:ok, _value, %EvalContext{}} = outcome -> outcome
+      {:error, reason} -> Abort.error!(reason, context)
     end
-  catch
-    {:return_signal, value, %EvalContext{} = final_ctx} ->
-      {:control, :return, value, final_ctx}
-
-    {:fail_signal, value, %EvalContext{} = final_ctx} ->
-      {:control, :fail, value, final_ctx}
-
-    {:recur_signal, values, %Effects{} = effects} ->
-      {:control, :recur, values, %{Capture.materialize_context(eval_ctx) | effects: effects}}
   end
 
   defp normalize_tool_executor(tool_executor) when is_function(tool_executor, 3),
@@ -244,9 +265,9 @@ defmodule PtcRunner.Lisp.Eval do
     if data_key_present?(ctx, key) do
       {:ok, flex_get(ctx, key), eval_ctx}
     else
-      raise PtcRunner.Lisp.ExecutionError,
-        reason: :runtime_error,
-        message: "data/#{key} is not bound: the `context` object did not provide a `#{key}` key"
+      {:error,
+       {:runtime_error,
+        "data/#{key} is not bound: the `context` object did not provide a `#{key}` key", nil}}
     end
   end
 
@@ -262,7 +283,7 @@ defmodule PtcRunner.Lisp.Eval do
   # Returns the var, not the value (Clojure semantics)
   # Opts may contain :docstring which is merged into closure metadata for functions
   defp do_eval({:def, name, value_ast, opts}, %EvalContext{} = eval_ctx) do
-    with {:ok, value, eval_ctx2} <- do_eval(value_ast, eval_ctx) do
+    with {:ok, value, eval_ctx2} <- eval_child(value_ast, eval_ctx) do
       # Merge docstring into closure metadata if value is a closure, but never
       # persist ephemeral private-tool authority from a value-position prelude ref.
       value = value |> merge_docstring_into_closure(opts) |> strip_prelude_tool_authority()
@@ -288,7 +309,7 @@ defmodule PtcRunner.Lisp.Eval do
     if Map.has_key?(user_ns, name) or (is_binary(name) and legacy_var_present?(user_ns, name)) do
       {:ok, %Var{name: name}, eval_ctx}
     else
-      with {:ok, value, eval_ctx2} <- do_eval(value_ast, eval_ctx) do
+      with {:ok, value, eval_ctx2} <- eval_child(value_ast, eval_ctx) do
         value = value |> merge_docstring_into_closure(opts) |> strip_prelude_tool_authority()
         new_user_ns = Map.put(eval_ctx2.user_ns, name, value)
         {:ok, %Var{name: name}, EvalContext.update_user_ns(eval_ctx2, new_user_ns)}
@@ -313,89 +334,45 @@ defmodule PtcRunner.Lisp.Eval do
 
   # Conditional: if
   defp do_eval({:if, cond_ast, then_ast, else_ast}, %EvalContext{} = eval_ctx) do
-    with {:ok, cond_val, eval_ctx2} <- do_eval(cond_ast, eval_ctx) do
+    with {:ok, cond_val, eval_ctx2} <- eval_child(cond_ast, eval_ctx) do
       if truthy?(cond_val) do
-        do_eval(then_ast, eval_ctx2)
+        eval_child(then_ast, eval_ctx2)
       else
-        do_eval(else_ast, eval_ctx2)
+        eval_child(else_ast, eval_ctx2)
       end
     end
   end
 
   # Let bindings
   defp do_eval({:let, bindings, body}, %EvalContext{} = eval_ctx) do
-    result =
-      Enum.reduce_while(bindings, {:ok, eval_ctx}, fn {:binding, pattern, value_ast},
-                                                      {:ok, acc_ctx} ->
-        case do_eval(value_ast, acc_ctx) do
-          {:ok, value, eval_ctx2} ->
-            case Patterns.match_pattern(pattern, value) do
-              {:ok, new_bindings} ->
-                {:cont,
-                 {:ok,
-                  eval_ctx2
-                  |> EvalContext.merge_env(new_bindings)}}
+    new_ctx =
+      Enum.reduce(bindings, eval_ctx, fn {:binding, pattern, value_ast}, acc_ctx ->
+        {:ok, value, value_ctx} = eval_child(value_ast, acc_ctx)
 
-              {:error, _} = err ->
-                {:halt, err}
-            end
-
-          {:error, _} = err ->
-            {:halt, err}
+        case Patterns.match_pattern(pattern, value) do
+          {:ok, new_bindings} -> EvalContext.merge_env(value_ctx, new_bindings)
+          {:error, reason} -> Abort.error!(reason, value_ctx)
         end
       end)
 
-    case result do
-      {:ok, new_ctx} ->
-        case do_eval(body, new_ctx) do
-          {:ok, value, final_ctx} ->
-            # Restore the original environment and locals from before the let block
-            {:ok, value, %{final_ctx | env: eval_ctx.env, locals: eval_ctx.locals}}
-
-          {:error, _} = err ->
-            err
-        end
-
-      {:error, _} = err ->
-        err
-    end
+    {:ok, value, final_ctx} = eval_child(body, new_ctx)
+    {:ok, value, %{final_ctx | env: eval_ctx.env, locals: eval_ctx.locals}}
   end
 
   # Tail recursion: loop
   defp do_eval({:loop, bindings, body}, %EvalContext{} = eval_ctx) do
-    # 1. Initial bindings evaluation (like let)
-    result =
-      Enum.reduce_while(bindings, {:ok, eval_ctx}, fn {:binding, pattern, value_ast},
-                                                      {:ok, acc_ctx} ->
-        case do_eval(value_ast, acc_ctx) do
-          {:ok, value, eval_ctx2} ->
-            case Patterns.match_pattern(pattern, value) do
-              {:ok, new_bindings} ->
-                {:cont, {:ok, EvalContext.merge_env(eval_ctx2, new_bindings)}}
+    loop_ctx =
+      Enum.reduce(bindings, eval_ctx, fn {:binding, pattern, value_ast}, acc_ctx ->
+        {:ok, value, value_ctx} = eval_child(value_ast, acc_ctx)
 
-              {:error, _} = err ->
-                {:halt, err}
-            end
-
-          {:error, _} = err ->
-            {:halt, err}
+        case Patterns.match_pattern(pattern, value) do
+          {:ok, new_bindings} -> EvalContext.merge_env(value_ctx, new_bindings)
+          {:error, reason} -> Abort.error!(reason, value_ctx)
         end
       end)
 
-    case result do
-      {:ok, loop_ctx} ->
-        case execute_loop(body, loop_ctx, bindings) do
-          {:ok, value, final_ctx} ->
-            # Restore the original environment AND locals from before the loop
-            {:ok, value, %{final_ctx | env: eval_ctx.env, locals: eval_ctx.locals}}
-
-          {:error, _} = err ->
-            err
-        end
-
-      {:error, _} = err ->
-        err
-    end
+    {:ok, value, final_ctx} = execute_loop(body, loop_ctx, bindings)
+    {:ok, value, %{final_ctx | env: eval_ctx.env, locals: eval_ctx.locals}}
   end
 
   # Tail recursion: recur signal
@@ -404,7 +381,7 @@ defmodule PtcRunner.Lisp.Eval do
     case eval_all(arg_asts, eval_ctx) do
       {:ok, values, ctx} ->
         # Include accumulated state in signal so it's preserved across iterations
-        throw({:recur_signal, values, EvalContext.recur_effects(ctx)})
+        Abort.control!(:recur, values, ctx)
 
       {:error, _} = err ->
         err
@@ -446,9 +423,9 @@ defmodule PtcRunner.Lisp.Eval do
           [n_ast, {:call, {:var, :range} = range_ast, [start_ast, end_ast, step_ast]}]},
          %EvalContext{} = eval_ctx
        ) do
-    with {:ok, take_fun, eval_ctx1} <- do_eval(take_ast, eval_ctx),
-         {:ok, n, eval_ctx2} <- do_eval(n_ast, eval_ctx1),
-         {:ok, range_fun, eval_ctx3} <- do_eval(range_ast, eval_ctx2),
+    with {:ok, take_fun, eval_ctx1} <- eval_child(take_ast, eval_ctx),
+         {:ok, n, eval_ctx2} <- eval_child(n_ast, eval_ctx1),
+         {:ok, range_fun, eval_ctx3} <- eval_child(range_ast, eval_ctx2),
          {:ok, [start, end_val, step], eval_ctx4} <-
            eval_all([start_ast, end_ast, step_ast], eval_ctx3) do
       if builtin_named?(take_fun, :take) and builtin_named?(range_fun, :range) and
@@ -464,7 +441,7 @@ defmodule PtcRunner.Lisp.Eval do
   end
 
   defp do_eval({:call, fun_ast, arg_asts}, %EvalContext{} = eval_ctx) do
-    with {:ok, fun_val, eval_ctx1} <- do_eval(fun_ast, eval_ctx),
+    with {:ok, fun_val, eval_ctx1} <- eval_child(fun_ast, eval_ctx),
          {:ok, arg_vals, eval_ctx2} <- eval_all(arg_asts, eval_ctx1) do
       Apply.apply_fun(
         fun_val,
@@ -500,7 +477,7 @@ defmodule PtcRunner.Lisp.Eval do
   # ============================================================
 
   defp do_eval({:pmap, fn_ast, coll_asts}, %EvalContext{} = eval_ctx) do
-    with {:ok, fn_val, eval_ctx1} <- do_eval(fn_ast, eval_ctx),
+    with {:ok, fn_val, eval_ctx1} <- eval_child(fn_ast, eval_ctx),
          {:ok, coll_vals, eval_ctx2} <- eval_all(coll_asts, eval_ctx1) do
       # Consistency check: a keyword accessor over a SINGLE hash-map is rejected
       # (in map/pmap the map would coerce to [k v] pairs and the keyword would
@@ -584,36 +561,8 @@ defmodule PtcRunner.Lisp.Eval do
                 )
             end
           rescue
-            e in ContractError ->
-              {:error,
-               {:parallel_contract_error, e.reason,
-                EvalContext.parallel_effects(e.eval_ctx, worker_eval_ctx)}}
-
-            e in PtcRunner.Lisp.ToolError ->
-              {:error,
-               {:parallel_effect_error,
-                {:pmap_error, "tool '#{e.tool_name}' failed: #{e.message}"},
-                EvalContext.parallel_effects(e.eval_ctx, worker_eval_ctx)}}
-
-            e in ParallelError ->
-              {:error,
-               {:parallel_effect_error, e.reason,
-                EvalContext.parallel_effects(e.eval_ctx, worker_eval_ctx)}}
-
-            e in ExecutionError ->
-              # Re-surface stable error atoms from a nested pmap/pcalls
-              # (heap kill / shared-deadline timeout) instead of
-              # flattening them into a generic :pmap_error string.
-              {:error, nested_parallel_error(e)}
-
             e ->
               {:error, {:pmap_error, Exception.message(e)}}
-          catch
-            {:return_signal, _, _} ->
-              {:error, {:pmap_error, "return called inside pmap"}}
-
-            {:fail_signal, _, _} ->
-              {:error, {:pmap_error, "fail called inside pmap"}}
           end
         end
 
@@ -701,7 +650,12 @@ defmodule PtcRunner.Lisp.Eval do
             try do
               ChildResult.take()
 
-              case Apply.capture_parallel_effects(worker_eval_ctx, erlang_fn) do
+              capture =
+                Apply.capture_parallel_effects(worker_eval_ctx, fn ->
+                  RuntimeCallable.with_context(worker_eval_ctx, &do_eval/2, erlang_fn)
+                end)
+
+              case capture do
                 {:ok, value, worker_effects} ->
                   prelude_call_counts = worker_effects.prelude_call_counts
 
@@ -726,35 +680,8 @@ defmodule PtcRunner.Lisp.Eval do
                   )
               end
             rescue
-              e in ContractError ->
-                {:error,
-                 {:parallel_contract_error, e.reason,
-                  EvalContext.parallel_effects(e.eval_ctx, worker_eval_ctx)}}
-
-              e in PtcRunner.Lisp.ToolError ->
-                {:error,
-                 {:parallel_effect_error,
-                  {:pcalls_error, idx, "tool '#{e.tool_name}' failed: #{e.message}"},
-                  EvalContext.parallel_effects(e.eval_ctx, worker_eval_ctx)}}
-
-              e in ParallelError ->
-                {:error,
-                 {:parallel_effect_error, e.reason,
-                  EvalContext.parallel_effects(e.eval_ctx, worker_eval_ctx)}}
-
-              e in ExecutionError ->
-                # Re-surface stable error atoms from a nested
-                # pmap/pcalls (heap kill / shared-deadline timeout).
-                {:error, nested_parallel_error(e, idx)}
-
               e ->
                 {:error, {:pcalls_error, idx, Exception.message(e)}}
-            catch
-              {:return_signal, _, _} ->
-                {:error, {:pcalls_error, idx, "return called inside pcalls"}}
-
-              {:fail_signal, _, _} ->
-                {:error, {:pcalls_error, idx, "fail called inside pcalls"}}
             end
           end
 
@@ -816,14 +743,14 @@ defmodule PtcRunner.Lisp.Eval do
 
   # Control flow signals: return and fail
   defp do_eval({:return, value_ast}, %EvalContext{} = eval_ctx) do
-    with {:ok, value, eval_ctx2} <- do_eval(value_ast, eval_ctx) do
-      throw({:return_signal, value, eval_ctx2})
+    with {:ok, value, eval_ctx2} <- eval_child(value_ast, eval_ctx) do
+      Abort.control!(:return, value, eval_ctx2)
     end
   end
 
   defp do_eval({:fail, error_ast}, %EvalContext{} = eval_ctx) do
-    with {:ok, error, eval_ctx2} <- do_eval(error_ast, eval_ctx) do
-      throw({:fail_signal, error, eval_ctx2})
+    with {:ok, error, eval_ctx2} <- eval_child(error_ast, eval_ctx) do
+      Abort.control!(:fail, error, eval_ctx2)
     end
   end
 
@@ -1005,23 +932,31 @@ defmodule PtcRunner.Lisp.Eval do
           # results pass through unchanged.
           {:ok, tag_prelude_ns(result, ns_name), merge_export_effects(caller_ctx, final_ctx)}
 
-        {:error, _} = err ->
-          err
+        {:error, reason} ->
+          {:error, Helpers.sanitize_private_error(reason)}
       end
-    catch
-      # `(return ...)` / `(fail ...)` (the `name!` abort convention) inside an
-      # export body throw the EXPORT context (whose user_ns is the prelude env).
-      # Re-throw with the CALLER's user_ns/env restored and the export's side
-      # effects merged in, so the prelude env never leaks into user memory and
-      # the user's own bindings survive.
-      {:return_signal, value, %EvalContext{} = thrown_ctx} ->
-        throw(
-          {:return_signal, tag_prelude_ns(value, ns_name),
-           merge_export_effects(caller_ctx, thrown_ctx)}
-        )
+    rescue
+      error in Abort ->
+        case error.outcome do
+          {:control, :return, value, %EvalContext{} = abort_ctx} ->
+            Abort.control!(
+              :return,
+              tag_prelude_ns(value, ns_name),
+              merge_export_effects(caller_ctx, abort_ctx)
+            )
 
-      {:fail_signal, value, %EvalContext{} = thrown_ctx} ->
-        throw({:fail_signal, value, merge_export_effects(caller_ctx, thrown_ctx)})
+          {:control, :fail, value, %EvalContext{} = abort_ctx} ->
+            Abort.control!(:fail, value, merge_export_effects(caller_ctx, abort_ctx))
+
+          {:error, reason, %EvalContext{} = abort_ctx} ->
+            Abort.error!(
+              Helpers.sanitize_private_error(reason),
+              merge_export_effects(caller_ctx, abort_ctx)
+            )
+
+          _other ->
+            reraise error, __STACKTRACE__
+        end
     end
   end
 
@@ -1471,23 +1406,43 @@ defmodule PtcRunner.Lisp.Eval do
     :ok = EvalContext.record_tool_activity(eval_ctx)
     start_time = System.monotonic_time(:millisecond)
     timestamp = DateTime.utc_now()
+    failure_token = eval_ctx.tool_failure_token
 
-    {raw_result, error, error_child_step, error_child_trace_id} =
+    provider_result =
       try do
-        {tool_exec.(tool_name, args_map, origin), nil, nil, nil}
+        {:ok,
+         HostContext.without_context(fn ->
+           tool_exec.(tool_name, args_map, origin)
+         end)}
       rescue
-        e in ExecutionError ->
-          if e.child_step do
-            # Failed SubAgent call — capture child info and record as tool error
-            {nil, format_execution_error(e), e.child_step, e.child_trace_id}
-          else
-            # Other ExecutionErrors (unknown tool, validation, etc.) — propagate as before
-            reraise e, __STACKTRACE__
+        error -> {:error, error}
+      end
+
+    {raw_result, error, error_child_step, error_child_trace_id, tool_error_reason} =
+      case provider_result do
+        {:ok, result} ->
+          case result do
+            {:__ptc_tool_failure__, ^failure_token, reason, message, data, false}
+            when is_reference(failure_token) ->
+              Abort.error!({reason, message, data}, eval_ctx)
+
+            {:__ptc_tool_failure__, ^failure_token, :tool_error, name, data, true, child_trace_id,
+             child_step}
+            when is_reference(failure_token) ->
+              {nil, format_tool_failure(name, data), child_step, child_trace_id,
+               {:tool_error, name, data}}
+
+            {:__ptc_tool_failure__, ^failure_token, :tool_error, name, data, true}
+            when is_reference(failure_token) ->
+              {nil, format_tool_failure(name, data), nil, nil, {:tool_error, name, data}}
+
+            result ->
+              {result, nil, nil, nil, nil}
           end
 
-        e ->
+        {:error, error} ->
           # Catch unexpected exceptions and record the error
-          {nil, Exception.message(e), nil, nil}
+          {nil, Exception.message(error), nil, nil, nil}
       end
 
     duration_ms = System.monotonic_time(:millisecond) - start_time
@@ -1530,11 +1485,7 @@ defmodule PtcRunner.Lisp.Eval do
     eval_ctx2 = EvalContext.append_tool_call(eval_ctx, tool_call)
 
     if error do
-      # Throw a special exception that carries the eval_ctx so tool_calls aren't lost
-      raise PtcRunner.Lisp.ToolError,
-        message: error,
-        eval_ctx: eval_ctx2,
-        tool_name: tool_name
+      Abort.error!(tool_error_reason || {:tool_error, tool_name, error}, eval_ctx2)
     else
       # Store in cache on success if cacheable (include child metadata for TraceTree)
       eval_ctx3 =
@@ -1553,13 +1504,9 @@ defmodule PtcRunner.Lisp.Eval do
     end
   end
 
-  # Format ExecutionError into a human-readable error string preserving the data field
-  defp format_execution_error(%ExecutionError{reason: :tool_error, message: name, data: data}) do
-    wrapped_data = UntrustedRenderer.wrap(inspect(data), "tool_error")
-    "Tool '#{name}' failed:\n#{wrapped_data}"
+  defp format_tool_failure(name, data) do
+    UntrustedRenderer.tool_failure(name, data)
   end
-
-  defp format_execution_error(%ExecutionError{} = e), do: Exception.message(e)
 
   defp maybe_put_tool_origin(tool_call, %{type: :prelude_export, ref: ref}, private_tool?) do
     tool_call
@@ -1622,11 +1569,9 @@ defmodule PtcRunner.Lisp.Eval do
 
   # Helper for map pair evaluation to reduce nesting
   defp eval_map_pair(k_ast, v_ast, %EvalContext{} = eval_ctx, acc) do
-    with {:ok, k, eval_ctx2} <- do_eval(k_ast, eval_ctx),
-         {:ok, v, eval_ctx3} <- do_eval(v_ast, eval_ctx2) do
+    with {:ok, k, eval_ctx2} <- eval_child(k_ast, eval_ctx),
+         {:ok, v, eval_ctx3} <- eval_child(v_ast, eval_ctx2) do
       {:cont, {:ok, [{k, v} | acc], eval_ctx3}}
-    else
-      {:error, _} = err -> {:halt, err}
     end
   end
 
@@ -1651,10 +1596,8 @@ defmodule PtcRunner.Lisp.Eval do
   defp eval_all(asts, eval_ctx) do
     result =
       Enum.reduce_while(asts, {:ok, [], eval_ctx}, fn ast, {:ok, acc, ctx} ->
-        case do_eval(ast, ctx) do
-          {:ok, v, ctx2} -> {:cont, {:ok, [v | acc], ctx2}}
-          {:error, _} = err -> {:halt, err}
-        end
+        {:ok, value, next_ctx} = eval_child(ast, ctx)
+        {:cont, {:ok, [value | acc], next_ctx}}
       end)
 
     case result do
@@ -1698,11 +1641,11 @@ defmodule PtcRunner.Lisp.Eval do
   defp do_eval_do([], %EvalContext{} = eval_ctx), do: {:ok, nil, eval_ctx}
 
   defp do_eval_do([e], %EvalContext{} = eval_ctx) do
-    do_eval(e, eval_ctx)
+    eval_child(e, eval_ctx)
   end
 
   defp do_eval_do([e | rest], %EvalContext{} = eval_ctx) do
-    with {:ok, _value, eval_ctx2} <- do_eval(e, eval_ctx) do
+    with {:ok, _value, eval_ctx2} <- eval_child(e, eval_ctx) do
       do_eval_do(rest, eval_ctx2)
     end
   end
@@ -1715,7 +1658,7 @@ defmodule PtcRunner.Lisp.Eval do
     do: {:ok, last_value, eval_ctx}
 
   defp do_eval_and([e | rest], _last_value, %EvalContext{} = eval_ctx) do
-    with {:ok, value, eval_ctx2} <- do_eval(e, eval_ctx) do
+    with {:ok, value, eval_ctx2} <- eval_child(e, eval_ctx) do
       if truthy?(value) do
         do_eval_and(rest, value, eval_ctx2)
       else
@@ -1747,7 +1690,8 @@ defmodule PtcRunner.Lisp.Eval do
         do_eval_or(rest, nil, eval_ctx)
 
       {:error, _} = err ->
-        err
+        {:error, reason} = err
+        Abort.error!(reason, eval_ctx)
     end
   end
 
@@ -1840,27 +1784,16 @@ defmodule PtcRunner.Lisp.Eval do
     {:error, classify_runner_error(reason, type)}
   end
 
+  @spec raise_parallel_contract_error(term(), Effects.t(), EvalContext.t()) :: no_return()
   defp raise_parallel_contract_error(reason, effects, %EvalContext{} = eval_ctx) do
     merged_ctx = EvalContext.merge_parallel_effects(eval_ctx, effects)
     reason = refresh_contract_capability_activity(reason, merged_ctx)
-
-    message =
-      case reason do
-        {:prelude_contract_error, message, _details} when is_binary(message) -> message
-        _other -> "prelude contract failed"
-      end
-
-    raise ContractError,
-      reason: reason,
-      message: message,
-      eval_ctx: merged_ctx
+    Abort.error!(reason, merged_ctx)
   end
 
+  @spec raise_parallel_error(term(), Effects.t(), EvalContext.t()) :: no_return()
   defp raise_parallel_error(reason, effects, %EvalContext{} = eval_ctx) do
-    raise ParallelError,
-      reason: reason,
-      message: inspect(reason),
-      eval_ctx: EvalContext.merge_parallel_effects(eval_ctx, effects)
+    Abort.error!(reason, EvalContext.merge_parallel_effects(eval_ctx, effects))
   end
 
   defp unwrap_parallel_effect_error({:parallel_effect_error, reason, effects}),
@@ -1906,7 +1839,7 @@ defmodule PtcRunner.Lisp.Eval do
     do: {:timeout, "the parallel operation exceeded its deadline", nil}
 
   defp classify_runner_error({reason, _message, nil} = error, _type)
-       when reason in ExecutionError.stable_parallel_reasons(),
+       when reason in [:memory_exceeded, :timeout, :parallel_capacity_exceeded],
        do: error
 
   defp classify_runner_error(:parallel_capacity_exceeded, _type),
@@ -1933,79 +1866,50 @@ defmodule PtcRunner.Lisp.Eval do
   defp parallel_error_type(:pmap), do: :pmap_error
   defp parallel_error_type(:pcalls), do: :pcalls_error
 
-  # Re-surface a nested pmap/pcalls failure caught as an ExecutionError
-  # inside a pmap worker. A stable reason keeps its atom; anything else
-  # stays a generic :pmap_error.
-  defp nested_parallel_error(%ExecutionError{reason: reason, message: msg})
-       when reason in ExecutionError.stable_parallel_reasons() do
-    {reason, msg}
-  end
-
-  defp nested_parallel_error(%ExecutionError{message: msg}), do: {:pmap_error, msg}
-
-  # pcalls variant — same, but produces the 3-tuple pcalls error shape.
-  defp nested_parallel_error(%ExecutionError{reason: reason, message: msg}, _idx)
-       when reason in ExecutionError.stable_parallel_reasons() do
-    {reason, msg}
-  end
-
-  defp nested_parallel_error(%ExecutionError{message: msg}, idx),
-    do: {:pcalls_error, idx, msg}
-
   defp captured_parallel_failure(
          _type,
          _index,
          :error,
-         %ContractError{} = error,
+         %Abort{outcome: {:error, {:prelude_contract_error, _, _} = reason, _context}},
          _stacktrace,
          effects
        ) do
-    {:error, {:parallel_contract_error, error.reason, effects}}
+    {:error, {:parallel_contract_error, reason, effects}}
   end
 
   defp captured_parallel_failure(
          type,
          index,
          :error,
-         %PtcRunner.Lisp.ToolError{} = error,
+         %Abort{outcome: {:error, {:tool_error, tool_name, message}, _context}},
          _stacktrace,
          effects
        ) do
-    message = "tool '#{error.tool_name}' failed: #{error.message}"
+    message = parallel_tool_failure_message(tool_name, message)
     {:error, {:parallel_effect_error, parallel_worker_error(type, index, message), effects}}
   end
 
   defp captured_parallel_failure(
-         _type,
-         _index,
-         :error,
-         %ParallelError{} = error,
-         _stacktrace,
-         effects
-       ) do
-    {:error, {:parallel_effect_error, error.reason, effects}}
-  end
-
-  defp captured_parallel_failure(
-         :pmap,
-         _index,
-         :error,
-         %ExecutionError{} = error,
-         _stacktrace,
-         effects
-       ) do
-    {:error, {:parallel_effect_error, nested_parallel_error(error), effects}}
-  end
-
-  defp captured_parallel_failure(
-         :pcalls,
+         type,
          index,
          :error,
-         %ExecutionError{} = error,
+         %Abort{outcome: {:error, reason, _context}},
          _stacktrace,
          effects
        ) do
-    {:error, {:parallel_effect_error, nested_parallel_error(error, index), effects}}
+    {:error, {:parallel_effect_error, parallel_abort_error(reason, type, index), effects}}
+  end
+
+  defp captured_parallel_failure(
+         type,
+         index,
+         :error,
+         %Abort{outcome: {:control, signal, _value, _context}},
+         _stacktrace,
+         effects
+       ) do
+    message = "#{signal} called inside #{type}"
+    {:error, {:parallel_effect_error, parallel_worker_error(type, index, message), effects}}
   end
 
   defp captured_parallel_failure(type, index, :error, error, _stacktrace, effects) do
@@ -2014,13 +1918,7 @@ defmodule PtcRunner.Lisp.Eval do
   end
 
   defp captured_parallel_failure(type, index, :throw, signal, _stacktrace, effects) do
-    message =
-      case signal do
-        {:return_signal, _, _} -> "return called inside #{type}"
-        {:fail_signal, _, _} -> "fail called inside #{type}"
-        other -> "worker threw #{inspect(other)}"
-      end
-
+    message = "worker threw #{inspect(signal)}"
     {:error, {:parallel_effect_error, parallel_worker_error(type, index, message), effects}}
   end
 
@@ -2031,6 +1929,25 @@ defmodule PtcRunner.Lisp.Eval do
 
   defp parallel_worker_error(:pmap, _index, message), do: {:pmap_error, message}
   defp parallel_worker_error(:pcalls, index, message), do: {:pcalls_error, index, message}
+
+  defp parallel_abort_error({reason, message, nil}, _type, _index)
+       when reason in [:memory_exceeded, :timeout, :parallel_capacity_exceeded],
+       do: {reason, message}
+
+  defp parallel_abort_error({@hof_callback_error, message}, type, index)
+       when is_binary(message),
+       do: parallel_worker_error(type, index, message)
+
+  defp parallel_abort_error({_reason, message, _data}, type, index) when is_binary(message),
+    do: parallel_worker_error(type, index, message)
+
+  defp parallel_abort_error({_reason, message}, type, index) when is_binary(message),
+    do: parallel_worker_error(type, index, message)
+
+  defp parallel_abort_error(reason, type, index),
+    do: parallel_worker_error(type, index, inspect(reason))
+
+  defp parallel_tool_failure_message(tool_name, data), do: format_tool_failure(tool_name, data)
 
   # Extract value, trace_id, and child_step from different result formats
   defp extract_parallel_result({:ok, val, trace_id, child_step, counts, effects})
@@ -2127,29 +2044,36 @@ defmodule PtcRunner.Lisp.Eval do
   # ============================================================
 
   defp execute_loop(body, %EvalContext{} = ctx, bindings) do
-    do_eval(body, ctx)
-  catch
-    {:recur_signal, new_values, effects} ->
-      patterns = Enum.map(bindings, fn {:binding, p, _} -> p end)
+    eval_child(body, ctx)
+  rescue
+    error in Abort ->
+      case error.outcome do
+        {:control, :recur, new_values, %EvalContext{} = abort_ctx} ->
+          continue_loop(body, ctx, bindings, new_values, abort_ctx.effects)
 
-      if length(patterns) != length(new_values) do
-        {:error, {:arity_mismatch, length(patterns), length(new_values)}}
-      else
-        case bind_recur_values(patterns, new_values) do
-          {:ok, new_bindings} ->
-            case EvalContext.increment_iteration(ctx) do
-              {:ok, ctx2} ->
-                ctx3 = EvalContext.restore_recur_effects(ctx2, effects)
-                execute_loop(body, EvalContext.merge_env(ctx3, new_bindings), bindings)
-
-              {:error, :loop_limit_exceeded} ->
-                {:error, {:loop_limit_exceeded, ctx.loop_limit}}
-            end
-
-          {:error, _} = err ->
-            err
-        end
+        _other ->
+          reraise error, __STACKTRACE__
       end
+  end
+
+  defp continue_loop(body, ctx, bindings, new_values, effects) do
+    patterns = Enum.map(bindings, fn {:binding, pattern, _} -> pattern end)
+    recur_ctx = EvalContext.restore_recur_effects(ctx, effects)
+
+    if length(patterns) != length(new_values) do
+      Abort.error!({:arity_mismatch, length(patterns), length(new_values)}, recur_ctx)
+    else
+      with {:ok, new_bindings} <- bind_recur_values(patterns, new_values),
+           {:ok, next_ctx} <- EvalContext.increment_iteration(recur_ctx) do
+        execute_loop(body, EvalContext.merge_env(next_ctx, new_bindings), bindings)
+      else
+        {:error, :loop_limit_exceeded} ->
+          Abort.error!({:loop_limit_exceeded, ctx.loop_limit}, recur_ctx)
+
+        {:error, reason} ->
+          Abort.error!(reason, recur_ctx)
+      end
+    end
   end
 
   defp bind_recur_values(patterns, values), do: Patterns.match_zipped(patterns, values)

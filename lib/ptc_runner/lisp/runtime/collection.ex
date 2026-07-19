@@ -12,7 +12,9 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   """
 
   alias PtcRunner.Lisp.Env.Builtin
+  alias PtcRunner.Lisp.Eval.Abort
   alias PtcRunner.Lisp.Eval.Helpers
+  alias PtcRunner.Lisp.Eval.HostContext
   alias PtcRunner.Lisp.Format
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
   alias PtcRunner.Lisp.Runtime.Callable
@@ -20,7 +22,8 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   alias PtcRunner.Lisp.Runtime.Collection.Select
   alias PtcRunner.Lisp.Runtime.Collection.Transform
   alias PtcRunner.Lisp.Runtime.FlexAccess
-  alias PtcRunner.Lisp.TypeError
+
+  @hof_callback_error :__ptc_hof_callback_error__
 
   defguardp is_sort_key(key)
             when is_atom(key) or is_binary(key) or is_list(key) or is_struct(key, LispKeyword)
@@ -107,17 +110,22 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
         key_fun.(item)
       rescue
         e in FunctionClauseError ->
-          reraise TypeError, [message: sort_key_error_message(keyfn, item, e)], __STACKTRACE__
+          hof_callback_error!(sort_key_error_message(keyfn, item, e))
 
-        e in TypeError ->
-          reraise TypeError,
-                  [message: sort_key_error_message(item, Exception.message(e))],
-                  __STACKTRACE__
+        e in Abort ->
+          case e.outcome do
+            {:error, {:type_error, message, args}, _context} when is_list(args) ->
+              hof_callback_error!(sort_key_error_message(item, message))
+
+            {:error, {@hof_callback_error, message}, _context} when is_binary(message) ->
+              hof_callback_error!(sort_key_error_message(item, message))
+
+            _other ->
+              reraise e, __STACKTRACE__
+          end
 
         e in RuntimeError ->
-          reraise TypeError,
-                  [message: sort_key_error_message(item, Exception.message(e))],
-                  __STACKTRACE__
+          hof_callback_error!(sort_key_error_message(item, Exception.message(e)))
       end
     end
   end
@@ -154,6 +162,9 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
     {formatted, _truncated?} = Format.to_clojure(item, limit: 80)
     formatted
   end
+
+  @spec hof_callback_error!(String.t()) :: no_return()
+  defp hof_callback_error!(message), do: HostContext.error!({@hof_callback_error, message})
 
   defp validate_n(n, _name) when is_integer(n) and n > 0, do: :ok
 
@@ -1346,8 +1357,9 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
     if Enumerable.impl_for(val) do
       :ok
     else
-      raise PtcRunner.Lisp.TypeError,
-            "#{fn_name} expected collections, got #{Helpers.describe_type(val)} #{inspect(val)}"
+      hof_callback_error!(
+        "#{fn_name} expected collections, got #{Helpers.describe_type(val)} #{inspect(val)}"
+      )
     end
   end
 end
