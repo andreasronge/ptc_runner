@@ -1,5 +1,9 @@
 defmodule PtcRunner.Kernel.MCPSourceTest do
-  use ExUnit.Case, async: true
+  # This integration suite uses real TCP requests and intentionally exercises
+  # short request deadlines. Running it beside unrelated async suites makes
+  # scheduler and connection-pool contention part of those deadlines, causing
+  # valid fixture responses to be reported intermittently as `:mcp_timeout`.
+  use ExUnit.Case, async: false
 
   alias PtcRunner.Kernel
   alias PtcRunner.Kernel.EventSink
