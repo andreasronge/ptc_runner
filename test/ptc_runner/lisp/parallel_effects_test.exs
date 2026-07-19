@@ -259,6 +259,54 @@ defmodule PtcRunner.Lisp.ParallelEffectsTest do
     assert Enum.map(step.tool_calls, & &1.args["x"]) == [1]
   end
 
+  test "unexpected parallel worker failures retain effects and the outer record" do
+    tools = %{"touch" => fn arguments -> arguments end}
+
+    cases = [
+      {fn _ -> raise "native raise" end, :runtime_error},
+      {fn _ -> throw(:native_throw) end, :execution_error},
+      {fn _ -> exit(:native_exit) end, :execution_error}
+    ]
+
+    sources = [
+      {:pmap,
+       ~S"""
+       (pmap
+         (fn [x]
+           (do
+             (println "before native failure")
+             (tool/touch {"x" x})
+             (native x)))
+         [1])
+       """},
+      {:pcalls,
+       ~S"""
+       (pcalls
+         (fn []
+           (do
+             (println "before native failure")
+             (tool/touch {"x" 1})
+             (native 1))))
+       """}
+    ]
+
+    for {native, expected_reason} <- cases, {type, source} <- sources do
+      assert {:error, step} =
+               Lisp.run(source,
+                 tools: tools,
+                 memory: %{"native" => native},
+                 pmap_max_concurrency: 1
+               )
+
+      assert step.fail.reason == expected_reason
+      assert step.prints == ["before native failure"]
+      assert Enum.map(step.tool_calls, & &1.args["x"]) == [1]
+
+      assert [%{type: ^type, count: 1, success_count: 0, error_count: 1}] =
+               step.pmap_calls
+    end
+  end
+
   test "failed pmap records every retained child including the failing worker" do
     tools = %{
       "child" => fn %{"x" => x} ->
@@ -295,6 +343,93 @@ defmodule PtcRunner.Lisp.ParallelEffectsTest do
              "child-1" => 2,
              "child-2" => 2
            }
+  end
+
+  test "cached child tools publish metadata to pmap and pcalls records" do
+    provider_calls = :atomics.new(1, [])
+    child_step = %PtcRunner.Lisp.Result{return: 1, trace_id: "cached-child"}
+
+    tools = %{
+      "child" =>
+        {fn _arguments ->
+           :atomics.add(provider_calls, 1, 1)
+
+           %{
+             __child_trace_id__: "cached-child",
+             __child_step__: child_step,
+             value: 1
+           }
+         end, cache: true}
+    }
+
+    parallel_forms = [
+      {:pmap, "(pmap (fn [_] (tool/child {\"x\" 1})) [0])"},
+      {:pcalls, "(pcalls (fn [] (tool/child {\"x\" 1})))"}
+    ]
+
+    for {type, parallel_form} <- parallel_forms do
+      source = "(do (tool/child {\"x\" 1}) #{parallel_form})"
+
+      assert {:ok, step} =
+               Lisp.run(source, tools: tools, pmap_max_concurrency: 1)
+
+      assert [%{type: ^type, child_trace_ids: ["cached-child"]}] = step.pmap_calls
+      assert Enum.count(step.tool_calls, &Map.get(&1, :cached, false)) == 1
+    end
+
+    assert :atomics.get(provider_calls, 1) == 2
+  end
+
+  test "failed pmap child tool publishes its metadata to the parallel record" do
+    child_step = %PtcRunner.Lisp.Result{return: nil, trace_id: "child-failed"}
+
+    tools = %{
+      "child" => fn _arguments ->
+        {:error,
+         %{
+           __child_trace_id__: "child-failed",
+           __child_step__: child_step,
+           value: :child_failed
+         }}
+      end
+    }
+
+    assert {:error, step} =
+             Lisp.run("(pmap (fn [_] (tool/child {})) [1])",
+               tools: tools,
+               pmap_max_concurrency: 1
+             )
+
+    assert [%{child_trace_ids: ["child-failed"]}] = step.pmap_calls
+    assert Enum.count(step.child_steps, &(&1 == child_step)) == 2
+  end
+
+  test "metadata-less tool failures do not erase earlier parallel child metadata" do
+    child_step = %PtcRunner.Lisp.Result{return: :ok, trace_id: "child-before-failure"}
+
+    tools = %{
+      "child" => fn _arguments ->
+        %{
+          __child_trace_id__: "child-before-failure",
+          __child_step__: child_step,
+          value: :ok
+        }
+      end,
+      "bad" => fn _arguments -> {:error, :failed} end
+    }
+
+    sources = [
+      "(pmap (fn [_] (do (tool/child {}) (tool/bad {}))) [1])",
+      "(pcalls (fn [] (do (tool/child {}) (tool/bad {}))))"
+    ]
+
+    for source <- sources do
+      assert {:error, step} =
+               Lisp.run(source, tools: tools, pmap_max_concurrency: 1)
+
+      assert [%{child_trace_ids: ["child-before-failure"]}] = step.pmap_calls
+      assert Enum.count(step.child_steps, &(&1 == child_step)) == 2
+    end
   end
 
   test "generic pcalls failure retains effects from the failing worker itself" do
@@ -344,6 +479,30 @@ defmodule PtcRunner.Lisp.ParallelEffectsTest do
     assert call.success_count == 1
     assert call.error_count == 1
     assert call.child_trace_ids == ["child-1", "child-2"]
+  end
+
+  test "failed pcalls child tool publishes its metadata to the parallel record" do
+    child_step = %PtcRunner.Lisp.Result{return: nil, trace_id: "child-failed"}
+
+    tools = %{
+      "child" => fn _arguments ->
+        {:error,
+         %{
+           __child_trace_id__: "child-failed",
+           __child_step__: child_step,
+           value: :child_failed
+         }}
+      end
+    }
+
+    assert {:error, step} =
+             Lisp.run("(pcalls (fn [] (tool/child {})))",
+               tools: tools,
+               pmap_max_concurrency: 1
+             )
+
+    assert [%{child_trace_ids: ["child-failed"]}] = step.pmap_calls
+    assert Enum.count(step.child_steps, &(&1 == child_step)) == 2
   end
 
   test "pmap return signal retains effects from the failing worker" do

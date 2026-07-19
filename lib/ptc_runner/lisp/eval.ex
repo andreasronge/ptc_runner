@@ -115,6 +115,34 @@ defmodule PtcRunner.Lisp.Eval do
   @spec eval_with_context(CoreAST.t(), map(), map(), env(), tool_executor(), list(), keyword()) ::
           Outcome.t()
   def eval_with_context(ast, ctx, memory, env, tool_executor, turn_history \\ [], opts \\ []) do
+    case eval_with_context_captured(ast, ctx, memory, env, tool_executor, turn_history, opts) do
+      {:raise, kind, reason, stacktrace, _final_ctx} ->
+        :erlang.raise(kind, reason, stacktrace)
+
+      outcome ->
+        outcome
+    end
+  end
+
+  @doc false
+  @spec eval_with_context_captured(
+          CoreAST.t(),
+          map(),
+          map(),
+          env(),
+          tool_executor(),
+          list(),
+          keyword()
+        ) :: Outcome.t() | Capture.value_result()
+  def eval_with_context_captured(
+        ast,
+        ctx,
+        memory,
+        env,
+        tool_executor,
+        turn_history \\ [],
+        opts \\ []
+      ) do
     tool_executor = normalize_tool_executor(tool_executor)
     eval_ctx = EvalContext.new(ctx, memory, env, tool_executor, turn_history, opts)
 
@@ -136,8 +164,8 @@ defmodule PtcRunner.Lisp.Eval do
       {:control, :recur, values, final_ctx} ->
         Outcome.control(:recur, values, final_ctx)
 
-      {:raise, kind, reason, stacktrace, _final_ctx} ->
-        :erlang.raise(kind, reason, stacktrace)
+      {:raise, _kind, _reason, _stacktrace, _final_ctx} = raised ->
+        raised
     end
   end
 
@@ -1124,6 +1152,7 @@ defmodule PtcRunner.Lisp.Eval do
           else: tool_call
 
       eval_ctx2 = EvalContext.append_tool_call(eval_ctx, tool_call)
+      maybe_put_child_result(cached.child_trace_id, cached.child_step)
       {:ok, cached.result, eval_ctx2}
     else
       case EvalContext.reserve_tool_call(eval_ctx) do
@@ -1207,12 +1236,15 @@ defmodule PtcRunner.Lisp.Eval do
     child_trace_id = child_trace_id || error_child_trace_id
     child_step = child_step || error_child_step
 
+    {child_trace_id, child_step} =
+      private_failure_child_metadata(child_trace_id, child_step, error, origin)
+
     tool_call =
       %{
         name: tool_name,
         args: ledger_tool_args(args_map, private_tool?),
         result: ledger_tool_result(result, private_tool?),
-        error: error,
+        error: ledger_tool_error(error, tool_name, origin),
         timestamp: timestamp,
         duration_ms: duration_ms
       }
@@ -1236,6 +1268,12 @@ defmodule PtcRunner.Lisp.Eval do
 
     eval_ctx2 = EvalContext.append_tool_call(eval_ctx, tool_call)
 
+    # Child metadata is process-local so it never pollutes the Lisp value
+    # space. Publish it before either outcome so parallel workers retain the
+    # child hierarchy when the child tool itself fails. A metadata-less tool
+    # must not erase a child result produced earlier in the same worker.
+    maybe_put_child_result(child_trace_id, child_step)
+
     if error do
       Abort.error!(tool_error_reason || {:tool_error, tool_name, error}, eval_ctx2)
     else
@@ -1248,10 +1286,6 @@ defmodule PtcRunner.Lisp.Eval do
           eval_ctx2
         end
 
-      # Child metadata is process-local so it never pollutes
-      # the Lisp value space with framework-internal wrappers.
-      # This ensures tools always return data, not metadata, to the LLM.
-      ChildResult.put(child_trace_id, child_step)
       {:ok, result, eval_ctx3}
     end
   end
@@ -1259,6 +1293,23 @@ defmodule PtcRunner.Lisp.Eval do
   defp format_tool_failure(name, data) do
     UntrustedRenderer.tool_failure(name, data)
   end
+
+  defp maybe_put_child_result(nil, nil), do: :ok
+
+  defp maybe_put_child_result(child_trace_id, child_step),
+    do: ChildResult.put(child_trace_id, child_step)
+
+  defp private_failure_child_metadata(
+         _child_trace_id,
+         _child_step,
+         error,
+         %{type: :prelude_export}
+       )
+       when not is_nil(error),
+       do: {nil, nil}
+
+  defp private_failure_child_metadata(child_trace_id, child_step, _error, _origin),
+    do: {child_trace_id, child_step}
 
   defp maybe_put_tool_origin(tool_call, %{type: :prelude_export, ref: ref}, private_tool?) do
     tool_call
@@ -1276,6 +1327,14 @@ defmodule PtcRunner.Lisp.Eval do
 
   defp ledger_tool_result(result, false), do: result
   defp ledger_tool_result(result, true), do: redact_source_args(result)
+
+  defp ledger_tool_error(nil, _tool_name, _origin), do: nil
+
+  defp ledger_tool_error(_error, tool_name, %{type: :prelude_export}) do
+    format_tool_failure(tool_name, "private prelude tool execution failed")
+  end
+
+  defp ledger_tool_error(error, _tool_name, _origin), do: error
 
   defp redact_source_args(%{} = map) when not is_struct(map) do
     Map.new(map, fn
@@ -1412,7 +1471,7 @@ defmodule PtcRunner.Lisp.Eval do
   defp do_eval_or([], last_value, %EvalContext{} = eval_ctx), do: {:ok, last_value, eval_ctx}
 
   defp do_eval_or([e | rest], _last_value, %EvalContext{} = eval_ctx) do
-    case do_eval(e, eval_ctx) do
+    case eval_or_clause(e, eval_ctx) do
       {:ok, value, eval_ctx2} ->
         if truthy?(value) do
           {:ok, value, eval_ctx2}
@@ -1424,10 +1483,27 @@ defmodule PtcRunner.Lisp.Eval do
         Logger.debug("[ptc-lisp] or: unbound value treated as nil")
         do_eval_or(rest, nil, eval_ctx)
 
+      {:unbound, %EvalContext{} = normalized_ctx} ->
+        Logger.debug("[ptc-lisp] or: nested unbound value treated as nil")
+        do_eval_or(rest, nil, normalized_ctx)
+
       {:error, _} = err ->
         {:error, reason} = err
         Abort.error!(reason, eval_ctx)
     end
+  end
+
+  defp eval_or_clause(ast, %EvalContext{} = eval_ctx) do
+    do_eval(ast, eval_ctx)
+  rescue
+    error in Abort ->
+      case error.outcome do
+        {:error, {:unbound_var, _name}, %EvalContext{} = abort_ctx} ->
+          {:unbound, Capture.materialize_context(abort_ctx)}
+
+        _other ->
+          reraise error, __STACKTRACE__
+      end
   end
 
   defp tag_prelude_ns_env(env, ns) when is_map(env) do

@@ -755,7 +755,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   # Special forms like println - convert to a function
   def closure_to_fun(
         {:special, :println},
-        %EvalContext{max_print_length: max_print_length},
+        %EvalContext{} = eval_ctx,
         _do_eval_fn
       ) do
     fn arg ->
@@ -765,9 +765,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
           v -> format_for_println(v)
         end
 
-      message = EvalContext.truncate_print(message, max_print_length)
-
-      :ok = Capture.record_print(message)
+      _updated_context = EvalContext.append_print(eval_ctx, message)
 
       nil
     end

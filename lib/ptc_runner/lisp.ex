@@ -838,7 +838,7 @@ defmodule PtcRunner.Lisp do
 
     eval_fn = fn _ast, sandbox_context ->
       try do
-        case Eval.eval_with_context(
+        case Eval.eval_with_context_captured(
                core_ast,
                sandbox_context.ctx,
                sandbox_context.memory,
@@ -847,10 +847,20 @@ defmodule PtcRunner.Lisp do
                sandbox_context.turn_history,
                eval_opts
              ) do
-          {:control, :return, value, context} -> {:ok, {:return_signal, value}, context}
-          {:control, :fail, value, context} -> {:ok, {:fail_signal, value}, context}
-          {:control, :recur, values, context} -> {:error, {:invalid_recur, values}, context}
-          outcome -> outcome
+          {:control, :return, value, context} ->
+            {:ok, {:return_signal, value}, context}
+
+          {:control, :fail, value, context} ->
+            {:ok, {:fail_signal, value}, context}
+
+          {:control, :recur, values, context} ->
+            {:error, {:invalid_recur, values}, context}
+
+          {:raise, kind, reason, stacktrace, context} ->
+            {:error, unexpected_eval_error(kind, reason, stacktrace), context}
+
+          outcome ->
+            outcome
         end
       rescue
         e ->
@@ -871,6 +881,18 @@ defmodule PtcRunner.Lisp do
     |> PtcRunner.Sandbox.execute(context, sandbox_opts)
     |> handle_execute_result(opts)
   end
+
+  defp unexpected_eval_error(:error, exception, _stacktrace) when is_exception(exception),
+    do: {:runtime_error, Exception.message(exception)}
+
+  defp unexpected_eval_error(:error, reason, _stacktrace),
+    do: {:runtime_error, Exception.format_banner(:error, reason)}
+
+  defp unexpected_eval_error(:throw, reason, stacktrace),
+    do: {:execution_error, "Process terminated: #{inspect({{:nocatch, reason}, stacktrace})}"}
+
+  defp unexpected_eval_error(:exit, reason, _stacktrace),
+    do: {:execution_error, "Process terminated: #{inspect(reason)}"}
 
   defp handle_execute_result(
          {:ok, {:return_signal, value}, metrics, %EvalContext{} = eval_ctx},

@@ -98,6 +98,12 @@ defmodule PtcRunner.Lisp.EvalControlFlowTest do
       assert {:ok, nil, _} = Eval.eval({:or, exprs}, %{}, %{}, %{}, &dummy_tool/2)
     end
 
+    test "unbound variables nested in an expression fall through to the default" do
+      exprs = [{:do, [{:var, :missing}]}, 42]
+
+      assert {:ok, 42, _} = Eval.eval({:or, exprs}, %{}, %{}, %{}, &dummy_tool/2)
+    end
+
     test "non-unbound errors still propagate" do
       # Only :unbound_var is suppressed; other errors (e.g. type errors) surface.
       # Test via Lisp.run where error handling is clean.

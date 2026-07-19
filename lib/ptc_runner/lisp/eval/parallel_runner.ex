@@ -329,19 +329,40 @@ defmodule PtcRunner.Lisp.Eval.ParallelRunner do
     Process.put(@worker_registry_key, Map.delete(registry(), pid))
   end
 
-  # `after`-block safety net: kill every worker still in the registry
-  # and release its slot. On the normal paths the registry is already
-  # empty (every worker reaped via `reap_worker/5`); this only fires
-  # when `fill_window/1` raised partway and left workers unreaped.
+  # `after`-block safety net: kill every worker still in the registry and wait
+  # for monitor-confirmed termination before releasing its slot. On normal
+  # paths the registry is already empty; this covers a raise during spawning.
   defp sweep_registry(budget) do
-    Enum.each(registry(), fn {pid, %{ref: ref, slot_held?: slot_held?}} ->
-      Process.demonitor(ref, [:flush])
-      Process.unlink(pid)
-      Process.exit(pid, :kill)
-      release_slot(budget, slot_held?)
-    end)
+    workers =
+      Map.new(registry(), fn {pid, info} ->
+        # A custom spawn seam may have consumed the original DOWN while raising.
+        # Install a fresh monitor so even an already-dead pid yields :noproc and
+        # slot release still follows an observed termination notification.
+        Process.demonitor(info.ref, [:flush])
+        {pid, %{info | ref: Process.monitor(pid)}}
+      end)
+
+    Enum.each(workers, fn {pid, _info} -> Process.exit(pid, :kill) end)
+    await_swept_workers(workers, budget)
 
     Process.put(@worker_registry_key, %{})
+  end
+
+  defp await_swept_workers(workers, _budget) when map_size(workers) == 0, do: :ok
+
+  defp await_swept_workers(workers, budget) do
+    receive do
+      {:DOWN, ref, :process, pid, _reason} when is_map_key(workers, pid) ->
+        case Map.fetch!(workers, pid) do
+          %{ref: ^ref, slot_held?: slot_held?} ->
+            Process.unlink(pid)
+            release_slot(budget, slot_held?)
+            await_swept_workers(Map.delete(workers, pid), budget)
+
+          _different_monitor ->
+            await_swept_workers(workers, budget)
+        end
+    end
   end
 
   # Spawn workers until the local scheduling window is full, items run
@@ -599,7 +620,7 @@ defmodule PtcRunner.Lisp.Eval.ParallelRunner do
   defp handle_down(state, ref, reason) do
     case Map.pop(state.live, ref) do
       {nil, _live} ->
-        # Already reaped (its `{:EXIT, ...}` was handled first).
+        # Already reaped by an earlier monitor notification.
         collect(state)
 
       {info, live} ->
@@ -610,10 +631,10 @@ defmodule PtcRunner.Lisp.Eval.ParallelRunner do
   # `{:EXIT, ...}` while `trap_exit` is enabled. See moduledoc.
   defp handle_exit(state, pid, reason) do
     case pop_by_pid(state.live, pid) do
-      {%{} = info, live} ->
-        # Case 1: an EXIT from one of our workers — confirms its
-        # termination, exactly like `:DOWN` (it may arrive first).
-        reap_terminated_worker(%{state | live: live}, info, reason)
+      {%{}, _live} ->
+        # Case 1: a linked worker EXIT. Keep its monitor and slot until the
+        # corresponding `:DOWN` confirms termination.
+        collect(state)
 
       {nil, _live} when reason == :normal ->
         # Case 3: a non-worker exited normally — not cancellation.
@@ -621,10 +642,9 @@ defmodule PtcRunner.Lisp.Eval.ParallelRunner do
 
       {nil, _live} ->
         # Case 2: abnormal exit from a non-worker (linked caller
-        # cancellation). Tear down workers (releasing their slots),
-        # then propagate so the sandbox process dies.
-        kill_all(state)
-        _ = drain_worker_signals(nil)
+        # cancellation). Tear down workers, retaining every slot until its
+        # monitor confirms termination, then propagate so the sandbox dies.
+        _ = terminate_all(state)
         exit(reason)
     end
   end
@@ -639,7 +659,7 @@ defmodule PtcRunner.Lisp.Eval.ParallelRunner do
   # and the slot is being released only NOW that termination is
   # confirmed — never on result receipt.
   defp reap_terminated_worker(state, %{pid: pid, ref: ref, index: index} = info, reason) do
-    reap_worker(state.budget, pid, ref, info.slot_held?, kill: false)
+    reap_worker(state.budget, pid, ref, info.slot_held?)
 
     case info do
       %{result: %Envelope{outcome: {:ok, _value}} = envelope} ->
@@ -662,12 +682,11 @@ defmodule PtcRunner.Lisp.Eval.ParallelRunner do
   defp classify_down(:normal), do: {:runtime_error, :exited_without_result}
   defp classify_down(reason), do: {:runtime_error, reason}
 
-  # Kill every still-live worker (releasing its slot), then return the
-  # error. A linked caller's abnormal cancellation EXIT seen while
-  # draining is re-propagated rather than masked by the error tuple.
+  # Kill every still-live worker, wait for monitor-confirmed termination, and
+  # only then release its slot. A linked caller's abnormal cancellation EXIT
+  # seen while draining is re-propagated rather than masked by the error tuple.
   defp finish_error(state, %Envelope{} = failing_envelope) do
-    kill_all(state)
-    {cancellation, drained_results} = drain_worker_results(nil, state.live)
+    {cancellation, drained_results} = terminate_all(state)
 
     case cancellation do
       nil ->
@@ -684,8 +703,7 @@ defmodule PtcRunner.Lisp.Eval.ParallelRunner do
   # authoritative result; process termination after sending it is lifecycle
   # cleanup and must not replace that result with a timeout.
   defp finish_success(state, results) do
-    kill_all(state)
-    {cancellation, drained_results} = drain_worker_results(nil, state.live)
+    {cancellation, drained_results} = terminate_all(state)
 
     case cancellation do
       nil ->
@@ -712,27 +730,66 @@ defmodule PtcRunner.Lisp.Eval.ParallelRunner do
     |> ordered_envelopes()
   end
 
-  # Kill every live worker and release each one's global budget slot.
-  defp kill_all(state) do
-    Enum.each(state.live, fn {ref, %{pid: pid} = info} ->
-      reap_worker(state.budget, pid, ref, info.slot_held?, kill: true)
-    end)
+  # Request termination for every live worker, then retain the monitors until
+  # each `:DOWN` arrives. This keeps the shared budget authoritative while the
+  # worker heap is being torn down.
+  defp terminate_all(state) do
+    Enum.each(state.live, fn {_ref, %{pid: pid}} -> Process.exit(pid, :kill) end)
+    await_terminated_workers(state.live, state.budget, nil, %{})
   end
 
-  # Reap a worker: demonitor + unlink + (optionally) kill it, release
-  # its global budget slot, and remove it from the registry so the
-  # `after`-block sweep does not double-act on it. The single place
-  # every worker termination path funnels through.
-  defp reap_worker(budget, pid, ref, slot_held?, kill: kill?) do
+  defp await_terminated_workers(live, _budget, cancellation, results)
+       when map_size(live) == 0,
+       do: {cancellation, results}
+
+  defp await_terminated_workers(live, budget, cancellation, results) do
+    receive do
+      {:DOWN, ref, :process, pid, _reason} ->
+        case Map.pop(live, ref) do
+          {nil, _live} ->
+            await_terminated_workers(live, budget, cancellation, results)
+
+          {info, remaining} ->
+            reap_worker(budget, pid, ref, info.slot_held?)
+            await_terminated_workers(remaining, budget, cancellation, results)
+        end
+
+      {:worker_result, pid, %Envelope{outcome: {:ok, _value}} = envelope} ->
+        results = retain_terminating_result(results, live, pid, envelope)
+        await_terminated_workers(live, budget, cancellation, results)
+
+      {:worker_result, _pid, %Envelope{}} ->
+        await_terminated_workers(live, budget, cancellation, results)
+
+      {:EXIT, pid, reason} ->
+        worker_pids = Process.get(@worker_pids_key, MapSet.new())
+
+        cancellation =
+          case classify_drain_exit(pid, reason, worker_pids) do
+            :drain -> cancellation
+            {:cancel, cancel_reason} -> cancellation || cancel_reason
+          end
+
+        await_terminated_workers(live, budget, cancellation, results)
+    end
+  end
+
+  defp retain_terminating_result(results, live, pid, %Envelope{} = envelope) do
+    case Enum.find(live, fn {_ref, %{pid: worker_pid}} -> worker_pid == pid end) do
+      {_ref, %{index: index}} ->
+        Map.put_new(results, index, Envelope.attach_index(envelope, index))
+
+      nil ->
+        results
+    end
+  end
+
+  # Reap a monitor-confirmed worker: unlink it, release its global budget slot,
+  # and remove it from the registry so the after-block sweep cannot double-act.
+  defp reap_worker(budget, pid, ref, slot_held?) do
     Process.demonitor(ref, [:flush])
     Process.unlink(pid)
-
-    if kill? do
-      Process.exit(pid, :kill)
-    else
-      drain_exit_for(pid)
-    end
-
+    drain_exit_for(pid)
     release_slot(budget, slot_held?)
     unregister_worker(pid)
   end

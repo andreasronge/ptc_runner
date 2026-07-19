@@ -453,6 +453,47 @@ defmodule PtcRunner.Lisp.Eval.ParallelRunnerTest do
       assert completed == Envelope.attach_index(envelope, 0)
     end
 
+    test "deadline success releases its budget slot only after monitor-confirmed termination" do
+      test_pid = self()
+      budget = ParallelBudget.new(1)
+
+      spawn_fun = fn worker, opts ->
+        Process.spawn(
+          fn ->
+            worker.()
+            wait_for_go()
+          end,
+          opts
+        )
+      end
+
+      runner =
+        spawn(fn ->
+          receive do
+            :run ->
+              result =
+                ParallelRunner.run(
+                  [:item],
+                  fn :item -> Envelope.success(:done) end,
+                  base_opts(
+                    budget: budget,
+                    deadline_mono: System.monotonic_time(:millisecond) + 50,
+                    spawn_fun: spawn_fun
+                  )
+                )
+
+              send(test_pid, {:deadline_result, result})
+          end
+        end)
+
+      :erlang.trace(runner, true, [:receive])
+      send(runner, :run)
+
+      assert_receive {:trace, ^runner, :receive, {:DOWN, _, :process, _, :killed}}, 1_000
+      assert_receive {:deadline_result, {:ok, [%Envelope{outcome: {:ok, :done}}]}}, 1_000
+      assert ParallelBudget.held(budget) == 0
+    end
+
     test "timeout retains a successful envelope from a still-live sibling" do
       counter = :atomics.new(1, [])
       runner = self()

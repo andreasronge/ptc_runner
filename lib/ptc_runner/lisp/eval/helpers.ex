@@ -252,6 +252,9 @@ defmodule PtcRunner.Lisp.Eval.Helpers do
   def sanitize_private_error({:invalid_tool_args, _private_message}),
     do: {:invalid_tool_args, "private prelude tool call received invalid arguments"}
 
+  def sanitize_private_error({:tool_error, name, _private_reason}) when is_binary(name),
+    do: {:tool_error, name, "private prelude tool execution failed"}
+
   def sanitize_private_error({:private_tool_unauthorized, name, authorization})
       when is_binary(name) and is_map(authorization),
       do: {:private_tool_unauthorized, name, authorization}

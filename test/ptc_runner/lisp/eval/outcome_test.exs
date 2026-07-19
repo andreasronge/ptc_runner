@@ -440,6 +440,39 @@ defmodule PtcRunner.Lisp.Eval.OutcomeTest do
     end
   end
 
+  test "private prelude provider failures retain tool classifications without leaking reasons" do
+    prelude = private_tool_failure_prelude!()
+
+    child_step = %PtcRunner.Lisp.Result{
+      fail: %{reason: :provider_error, message: "PRIVATE_CHILD_STEP_SECRET"},
+      trace_id: "private-child"
+    }
+
+    tools = %{
+      "read" => fn _args ->
+        {:error,
+         %{
+           __child_trace_id__: "private-child",
+           __child_step__: child_step,
+           value: "PRIVATE_PROVIDER_SECRET"
+         }}
+      end
+    }
+
+    cases = [
+      {"(api/fetch 1)", :tool_error},
+      {"(map api/fetch [1])", :tool_error},
+      {"(pmap api/fetch [1])", :pmap_error}
+    ]
+
+    for {source, expected_reason} <- cases do
+      assert {:error, step} = Lisp.run(source, prelude: prelude, tools: tools)
+      assert step.fail.reason == expected_reason, source
+      refute inspect(step) =~ "PRIVATE_PROVIDER_SECRET", source
+      refute inspect(step) =~ "PRIVATE_CHILD_STEP_SECRET", source
+    end
+  end
+
   test "private prelude error sanitization fails closed for unknown error shapes" do
     assert {:private_prelude_error, "private prelude evaluation failed"} =
              Eval.Helpers.sanitize_private_error({:unexpected, "PRIVATE_UNKNOWN_SECRET"})
@@ -627,6 +660,17 @@ defmodule PtcRunner.Lisp.Eval.OutcomeTest do
       (defn bad [ignored]
         (let [private "PRIVATE_TOOL_ARGUMENT_SECRET"]
           (tool/foo private)))
+      """)
+
+    prelude
+  end
+
+  defp private_tool_failure_prelude! do
+    {:ok, prelude} =
+      Compiler.compile("""
+      (ns api "API" {:visibility :prompt})
+      (defn fetch [x]
+        (tool/read {:x x}))
       """)
 
     prelude
