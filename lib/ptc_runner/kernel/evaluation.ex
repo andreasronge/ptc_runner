@@ -210,7 +210,7 @@ defmodule PtcRunner.Kernel.Evaluation do
     %{
       outcome: :continued,
       value: Lisp.externalize_value(step.return),
-      prints: step.prints || []
+      prints: step.prints
     }
   end
 
