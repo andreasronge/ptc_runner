@@ -616,6 +616,47 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     assert %{defined_count: 0} = RunState.evaluation_memory_summary(state)
   end
 
+  test "ordinary evaluation errors expose capability activity and preserve committed memory" do
+    parent = self()
+
+    {:ok, touch} =
+      Capability.new(
+        name: "touch",
+        effect: :read,
+        input_schema: @input_schema,
+        callback: fn _ ->
+          send(parent, :mission_touch_called)
+          {:ok, 42}
+        end
+      )
+
+    {:ok, mission} = MissionEnvironment.new(capabilities: [touch])
+    {:ok, state} = RunState.start(Limits.defaults())
+
+    assert %{outcome: :returned} =
+             Evaluation.evaluate_source(state, mission, "(def retained 42)", 100)
+
+    assert %{
+             outcome: :evaluation_error,
+             retryable?: false,
+             details: %{capability_activity?: true}
+           } =
+             Evaluation.evaluate_source(
+               state,
+               mission,
+               ~S|(do (def leaked 99) (tool/touch {}) (+ {} 1))|,
+               100
+             )
+
+    assert_receive :mission_touch_called
+
+    assert %{outcome: :returned, value: 42} =
+             Evaluation.evaluate_source(state, mission, "(return retained)", 100)
+
+    assert %{outcome: :evaluation_error, details: %{capability_activity?: false}} =
+             Evaluation.evaluate_source(state, mission, "leaked", 100)
+  end
+
   test "workflow kernel-eval routes source into the mission environment" do
     {:ok, workflow} = WorkflowEnvironment.new([])
     {:ok, mission} = MissionEnvironment.new([])

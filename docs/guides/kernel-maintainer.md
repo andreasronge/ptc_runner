@@ -118,16 +118,20 @@ canonicalization, bounds, effects, and hashes. Raw capability JSON Schema
 remains authoritative at dispatch even when a capability is omitted from the
 prompt.
 
-Kernel correction policy retries a contract mismatch only when the complete
-evaluation recorded no capability activity. Input validation still runs before
-the selected wrapper body, but an earlier top-level form or higher-order
-invocation may already have called a capability. Mission-memory rollback cannot
-undo external reads or writes. Contract failures inside `pmap`/`pcalls` retain
-the failed worker's bounded ledgers and public prelude call counts in the error
-step instead of returning activity metadata with an empty diagnostic ledger.
-The Kernel combines this evaluator marker with dispatcher accounting while the
-single evaluation lease is still held, so reserved runtime tools and concurrent
-lease handoff cannot produce a false retry classification.
+Kernel correction policy never retries any evaluation error after capability
+activity. Input validation still runs before the selected wrapper body, but an
+earlier top-level form or higher-order invocation may already have called a
+capability; ordinary type and runtime failures can likewise occur after an
+external effect. Mission-memory rollback cannot undo external reads or writes.
+Every parse, analysis, contract, type, and runtime evaluation error therefore
+exposes one bounded `capability_activity?` boolean. The Kernel derives it while the single
+evaluation lease remains held by combining authoritative mission reservation
+accounting with the unified evaluator tool-call ledger and its retained
+activity marker. This covers dispatcher-backed capabilities, runtime tools,
+contract failures inside `pmap`/`pcalls`, and killed workers that cannot return
+a detailed ledger without allowing concurrent lease handoff to produce a false
+retry classification. Pure failures remain eligible for correction under the
+agent's turn policy.
 
 The host then places the frozen bundle, capabilities, and JSON-like data into
 one of two structurally distinct environments:

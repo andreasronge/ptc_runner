@@ -203,7 +203,7 @@ defmodule PtcRunner.Kernel.Evaluation do
       step.fail
       |> Map.get(:details, %{})
       |> Map.put(:message, String.slice(step.fail.message || "evaluation failed", 0, 4_096))
-      |> maybe_put_capability_activity(step.fail.reason, capability_activity?)
+      |> Map.put(:capability_activity?, capability_activity?)
 
     result = %{
       outcome: :evaluation_error,
@@ -211,30 +211,32 @@ defmodule PtcRunner.Kernel.Evaluation do
       details: details
     }
 
-    case contract_retryable(step, capability_activity?) do
+    case evaluation_retryable(step, capability_activity?) do
       retryable? when is_boolean(retryable?) -> Map.put(result, :retryable?, retryable?)
       nil -> result
     end
   end
 
-  defp maybe_put_capability_activity(details, :prelude_contract_error, activity?),
-    do: Map.put(details, :capability_activity?, activity?)
+  defp evaluation_retryable(_step, true), do: false
 
-  defp maybe_put_capability_activity(details, _reason, _activity?), do: details
-
-  defp contract_retryable(
+  defp evaluation_retryable(
          %{fail: %{reason: :prelude_contract_error, details: %{phase: phase}}},
-         capability_activity?
+         false
        )
-       when phase in [:input, :output] and is_boolean(capability_activity?),
-       do: not capability_activity?
+       when phase in [:input, :output],
+       do: true
 
-  defp contract_retryable(_step, _capability_activity?), do: nil
+  defp evaluation_retryable(_step, false), do: nil
 
-  defp evaluator_capability_activity?(%{fail: %{details: %{capability_activity?: true}}}),
-    do: true
+  defp evaluator_capability_activity?(step) do
+    tool_calls = Map.get(step, :tool_calls, [])
+    ledger_activity? = is_list(tool_calls) and tool_calls != []
 
-  defp evaluator_capability_activity?(_step), do: false
+    marker_activity? =
+      get_in(step, [Access.key(:fail), Access.key(:details), :capability_activity?]) == true
+
+    ledger_activity? or marker_activity?
+  end
 
   defp mission_capability_call_count(state) do
     state

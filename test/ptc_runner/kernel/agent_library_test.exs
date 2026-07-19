@@ -402,6 +402,66 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     refute_receive {:agent_request, _second}
   end
 
+  test "agent.core does not retry an ordinary runtime error after a capability call" do
+    parent = self()
+
+    response = %{
+      content: nil,
+      tool_calls: [
+        %{
+          id: "runtime-error-after-read",
+          name: "run_ptc_lisp",
+          args: %{"program" => ~S|(do (def leaked 99) (tool/touch {}) (+ {} 1))|}
+        }
+      ]
+    }
+
+    {:ok, touch} =
+      Capability.new(
+        name: "touch",
+        effect: :read,
+        input_schema: %{"type" => "object"},
+        callback: fn _ ->
+          send(parent, :touch_called)
+          {:ok, 42}
+        end
+      )
+
+    {:ok, config} = agent_config([response], [], mission_capabilities: [touch])
+
+    assert {:error, %{kind: :workflow_failed}} =
+             Kernel.run(~S|(agent.core/run "Do not repeat the read" {"max_turns" 3})|, config)
+
+    assert_receive :touch_called
+    assert_receive {:agent_request, _first}
+    refute_receive :touch_called
+    refute_receive {:agent_request, _second}
+  end
+
+  test "agent.core does not retry an ordinary runtime error after a mission runtime tool" do
+    response = %{
+      content: nil,
+      tool_calls: [
+        %{
+          id: "runtime-error-after-runtime-tool",
+          name: "run_ptc_lisp",
+          args: %{"program" => ~S|(do (tool/runtime-usage {}) (+ {} 1))|}
+        }
+      ]
+    }
+
+    {:ok, config} = agent_config([response], [])
+
+    assert {:error, %{kind: :workflow_failed}} =
+             Kernel.run(
+               ~S|(agent.core/run "Do not repeat runtime reads" {"max_turns" 3})|,
+               config
+             )
+
+    assert_receive {:agent_request, _first}
+    refute_receive {:agent_request, _second}
+  end
+
   test "agent.core does not retry an input contract failure after earlier capability activity" do
     response = %{
       content: nil,
