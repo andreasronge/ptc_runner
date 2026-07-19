@@ -27,42 +27,32 @@ defmodule PtcRunner.Kernel.ReplSession do
   alias PtcRunner.Lisp.RetainedSize
   alias PtcRunner.Lisp.TrustedTool
 
-  @default_history_depth 3
-
-  @enforce_keys [:config, :state, :memory, :history, :history_depth]
-  defstruct [:config, :state, :memory, :history, :history_depth, attempts: 0, errors: 0]
+  @enforce_keys [:config, :state, :memory, :history]
+  defstruct [:config, :state, :memory, :history, attempts: 0, errors: 0]
 
   @type t :: %__MODULE__{
           config: RunConfig.t(),
           state: RunState.t(),
           memory: map(),
           history: [term()],
-          history_depth: 1..3,
           attempts: non_neg_integer(),
           errors: non_neg_integer()
         }
 
   @spec new(keyword()) :: {:ok, t()} | {:error, term()}
   @doc """
-  Starts a session with optional `:config` and `:history_depth` options.
+  Starts a session with an optional `:config`.
 
   Without a config, the session creates empty environments, default limits,
-  and a normal in-memory event sink. History depth must be between one and
-  three.
+  and a normal in-memory event sink. Exact native history has the fixed language
+  depth of three and is owned by RunState with continuation memory.
   """
   def new(opts \\ [])
 
   def new(opts) when is_list(opts) do
-    with true <- Keyword.keys(opts) -- [:config, :history_depth] == [],
+    with true <- Keyword.keys(opts) -- [:config] == [],
          {:ok, config} <- config(Keyword.get(opts, :config)) do
-      history_depth = Keyword.get(opts, :history_depth, @default_history_depth)
-
-      if history_depth in 1..3 do
-        start_session(config, history_depth)
-      else
-        close_config(config)
-        {:error, :invalid_repl_session}
-      end
+      start_session(config)
     else
       false -> {:error, :invalid_repl_session}
       {:error, _reason} = error -> error
@@ -83,7 +73,7 @@ defmodule PtcRunner.Kernel.ReplSession do
 
   defp eval_open(session, source) do
     case RunState.reserve_evaluation(session.state) do
-      {:ok, memory, lease} -> eval_reserved(session, source, memory, lease)
+      {:ok, memory, history, lease} -> eval_reserved(session, source, memory, history, lease)
       {:error, reason} -> evaluation_reservation_failure(session, reason)
     end
   catch
@@ -175,12 +165,12 @@ defmodule PtcRunner.Kernel.ReplSession do
     EventSink.emit(config.event_sink, "run-started", config.run_started_metadata)
   end
 
-  defp start_session(config, history_depth) do
+  defp start_session(config) do
     {:ok, state} = RunState.start(config.limits)
-    start_session_with_state(config, history_depth, state)
+    start_session_with_state(config, state)
   end
 
-  defp start_session_with_state(config, history_depth, state) do
+  defp start_session_with_state(config, state) do
     case emit_run_started(config) do
       :ok ->
         {:ok,
@@ -188,8 +178,7 @@ defmodule PtcRunner.Kernel.ReplSession do
            config: config,
            state: state,
            memory: %{},
-           history: [],
-           history_depth: history_depth
+           history: []
          }}
 
       {:error, :event_sink_error} = error ->
@@ -226,7 +215,7 @@ defmodule PtcRunner.Kernel.ReplSession do
     end)
   end
 
-  defp eval_reserved(session, source, memory, lease) do
+  defp eval_reserved(session, source, memory, history, lease) do
     evaluation_id = Events.id("repl-evaluation")
     started_ms = System.monotonic_time(:millisecond)
 
@@ -236,8 +225,8 @@ defmodule PtcRunner.Kernel.ReplSession do
              environment: :workflow
            }) do
         :ok ->
-          result = run_lisp(session, memory, source)
-          finish_evaluation(session, result, lease, evaluation_id, started_ms)
+          result = run_lisp(session, memory, history, source)
+          finish_evaluation(session, result, history, lease, evaluation_id, started_ms)
 
         {:error, :event_sink_error} ->
           RunState.release_evaluation(session.state, lease)
@@ -250,7 +239,7 @@ defmodule PtcRunner.Kernel.ReplSession do
     end
   end
 
-  defp run_lisp(session, memory, source) do
+  defp run_lisp(session, memory, history, source) do
     limits = session.config.limits
     timeout_ms = min(limits.evaluation_timeout_ms, RunState.remaining_ms(session.state))
 
@@ -258,7 +247,7 @@ defmodule PtcRunner.Kernel.ReplSession do
       caller: :repl,
       context: session.config.input,
       memory: memory,
-      turn_history: session.history,
+      turn_history: history,
       tools: tools(session),
       prelude: prelude(session.config.workflow_environment),
       timeout: timeout_ms,
@@ -346,15 +335,54 @@ defmodule PtcRunner.Kernel.ReplSession do
     |> Map.new(fn {name, callback} -> {name, %TrustedTool{function: callback}} end)
   end
 
-  defp finish_evaluation(session, {:ok, %Native{} = step}, lease, evaluation_id, started_ms) do
+  defp finish_evaluation(
+         session,
+         {:ok, %Native{return: {:__ptc_fail__, _value}}},
+         _history,
+         lease,
+         evaluation_id,
+         started_ms
+       ) do
+    _ = RunState.release_evaluation(session.state, lease)
+    step = Native.error(:explicit_failure, "REPL evaluation explicitly failed", session.memory)
+    next = increment_error(session)
+
+    case emit_evaluation_stopped(
+           session,
+           session.state,
+           evaluation_id,
+           started_ms,
+           :error,
+           :explicit_failure
+         ) do
+      :ok -> {:error, step, next}
+      {:error, :event_sink_error} -> event_sink_failure(session)
+    end
+  end
+
+  defp finish_evaluation(
+         session,
+         {:ok, %Native{} = step},
+         history,
+         lease,
+         evaluation_id,
+         started_ms
+       ) do
     limits = session.config.limits
 
     if result_within_limit?(step.return, limits.terminal_result_bytes),
-      do: commit_success(session, step, lease, evaluation_id, started_ms),
+      do: commit_success(session, step, history, lease, evaluation_id, started_ms),
       else: reject_success(session, lease, evaluation_id, started_ms, :result_exceeded)
   end
 
-  defp finish_evaluation(session, {:error, %Native{} = step}, lease, evaluation_id, started_ms) do
+  defp finish_evaluation(
+         session,
+         {:error, %Native{} = step},
+         _history,
+         lease,
+         evaluation_id,
+         started_ms
+       ) do
     _ = RunState.release_evaluation(session.state, lease)
     next = increment_error(session)
 
@@ -371,13 +399,15 @@ defmodule PtcRunner.Kernel.ReplSession do
     end
   end
 
-  defp commit_success(session, step, lease, evaluation_id, started_ms) do
-    case RunState.commit_evaluation(session.state, lease, step.memory) do
+  defp commit_success(session, step, history, lease, evaluation_id, started_ms) do
+    candidate_history = history_after_success(history, step.return)
+
+    case RunState.commit_evaluation(session.state, lease, step.memory, candidate_history) do
       :ok ->
         next = %{
           session
           | memory: step.memory,
-            history: append_history(session.history, step.return, session.history_depth),
+            history: candidate_history,
             attempts: session.attempts + 1
         }
 
@@ -405,9 +435,11 @@ defmodule PtcRunner.Kernel.ReplSession do
 
   defp reject_committed_failure(session, evaluation_id, started_ms, reason) do
     message =
-      if reason == :memory_exceeded,
-        do: "REPL memory exceeded its byte limit",
-        else: "REPL result exceeded its byte limit"
+      case reason do
+        :memory_exceeded -> "REPL memory exceeded its byte limit"
+        :history_exceeded -> "REPL history exceeded its byte limit"
+        _reason -> "REPL result exceeded its byte limit"
+      end
 
     failure = Native.error(reason, message, session.memory)
 
@@ -456,7 +488,8 @@ defmodule PtcRunner.Kernel.ReplSession do
   defp increment_error(session),
     do: %{session | attempts: session.attempts + 1, errors: session.errors + 1}
 
-  defp append_history(history, value, depth), do: Enum.take(history ++ [value], -depth)
+  defp history_after_success(history, {:__ptc_return__, _value}), do: history
+  defp history_after_success(history, value), do: Enum.take(history ++ [value], -3)
 
   defp result_within_limit?(value, limit) do
     case RetainedSize.bytes_with_cap(value, limit) do
@@ -479,12 +512,6 @@ defmodule PtcRunner.Kernel.ReplSession do
 
     if Process.alive?(session.config.event_sink.pid),
       do: EventSink.stop(session.config.event_sink)
-  end
-
-  defp close_config(config) do
-    RunConfig.close_provider_resources(config)
-    if config.inspection_sink, do: InspectionSink.stop(config.inspection_sink)
-    if Process.alive?(config.event_sink.pid), do: EventSink.stop(config.event_sink)
   end
 
   defp sink_alive?(session),

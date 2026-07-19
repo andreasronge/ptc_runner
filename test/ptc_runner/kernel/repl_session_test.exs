@@ -70,6 +70,45 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
     assert second.return == 42
     assert {:ok, third, _session} = ReplSession.eval(session, "(+ *1 1)")
     assert third.return == 43
+
+    assert %{history_count: 3, history_bytes: history_bytes} =
+             RunState.evaluation_memory_summary(session.state)
+
+    assert history_bytes > 0
+  end
+
+  test "history has a separate ceiling and rejects a candidate continuation atomically" do
+    {:ok, workflow} = WorkflowEnvironment.new([])
+    {:ok, mission} = MissionEnvironment.new([])
+
+    {:ok, limits} =
+      Limits.new(evaluation_memory_bytes: 512, evaluation_history_bytes: 128)
+
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "repl-history-limit")
+
+    {:ok, config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        mission_environment: mission,
+        input: %{},
+        limits: limits,
+        event_sink: sink
+      )
+
+    {:ok, session} = ReplSession.new(config: config)
+    assert {:ok, _step, session} = ReplSession.eval(session, "(def retained 42)")
+    retained_history = session.history
+
+    source = ~s|"#{String.duplicate("x", 512)}"|
+
+    assert {:error, %{fail: %{reason: :history_exceeded}}, session} =
+             ReplSession.eval(session, source)
+
+    assert session.history == retained_history
+
+    assert {:ok, step, session} = ReplSession.eval(session, "retained")
+    assert step.return == 42
+    assert session.history == retained_history ++ [42]
   end
 
   test "failed evaluations roll back continuation memory and emit canonical status" do
@@ -78,6 +117,19 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
     assert {:error, _step, session} = ReplSession.eval(session, "(do (def leaked 1) missing)")
     assert {:ok, step, session} = ReplSession.eval(session, "retained")
     assert step.return == 42
+    assert {:error, _step, _session} = ReplSession.eval(session, "leaked")
+  end
+
+  test "explicit failure rolls back memory and turn history" do
+    {:ok, session} = ReplSession.new()
+    assert {:ok, _step, session} = ReplSession.eval(session, "(def retained 42)")
+    retained_history = session.history
+
+    assert {:error, %{fail: %{reason: :explicit_failure}}, session} =
+             ReplSession.eval(session, ~s|(do (def leaked 1) (fail "stop"))|)
+
+    assert session.history == retained_history
+    assert {:ok, %{return: 42}, session} = ReplSession.eval(session, "retained")
     assert {:error, _step, _session} = ReplSession.eval(session, "leaked")
   end
 

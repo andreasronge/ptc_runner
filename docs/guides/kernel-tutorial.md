@@ -218,7 +218,13 @@ the checked-in fixture is:
     "capability_calls": {"mission": {}, "workflow": {}},
     "events_dropped": {}
   },
-  "evaluation_memory": {"bytes": 24, "defined_count": 0}
+  "evaluation_memory": {
+    "bytes": 24,
+    "defined_count": 0,
+    "history_count": 0,
+    "memory_bytes": 24,
+    "history_bytes": 0
+  }
 }
 ```
 
@@ -540,7 +546,9 @@ events a full prompt/response transcript.
 - `usage` reports remaining time, calls by environment/name, subordinate
   evaluations, protocol errors, memory state, closure state, and dropped
   events;
-- `evaluation_memory` summarizes committed mission definitions/state.
+- `evaluation_memory` summarizes the committed mission continuation:
+  definition and exact-history counts plus separate and combined retained-byte
+  accounting. It never contains retained values.
 
 An explicit Lisp `(fail value)` becomes a `workflow_failed` / `explicit_failure`
 Kernel error. Parser, analyzer, timeout, memory, source, result, quota, provider,

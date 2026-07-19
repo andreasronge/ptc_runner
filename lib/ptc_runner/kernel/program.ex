@@ -5,7 +5,7 @@ defmodule PtcRunner.Kernel.Program do
   The Lisp `(program ...)` form captures canonical source without resolving or
   evaluating it in the workflow environment. Only bounded identity metadata is
   projected through public results; the source is evaluated later against the
-  mission environment and current evaluation memory.
+  mission environment and current native evaluation continuation.
   """
   @enforce_keys [:source, :byte_size, :digest]
   defstruct [:source, :byte_size, :digest]

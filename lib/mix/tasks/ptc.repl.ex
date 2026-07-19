@@ -19,7 +19,6 @@ defmodule Mix.Tasks.Ptc.Repl do
     * `-m, --manifest` — reuse a strict Kernel manifest's workflow bundle,
       capabilities, limits, input, labels, and event policy;
     * `-t, --trace` — append this session's canonical events to a JSONL file;
-    * `--history-depth` — retain one to three successful results (default 3);
     * `-h, --help` — print this help without loading files or providers.
 
   A positional file runs as one script. `-` reads one script from standard
@@ -42,7 +41,6 @@ defmodule Mix.Tasks.Ptc.Repl do
     load: :string,
     manifest: :string,
     trace: :string,
-    history_depth: :integer,
     help: :boolean
   ]
   @aliases [e: :eval, l: :load, m: :manifest, t: :trace, h: :help]
@@ -65,9 +63,6 @@ defmodule Mix.Tasks.Ptc.Repl do
       opts[:eval] && arguments != [] ->
         Mix.raise("cannot combine --eval with a script or stdin")
 
-      opts[:history_depth] && opts[:history_depth] not in 1..3 ->
-        Mix.raise("--history-depth must be between 1 and 3")
-
       true ->
         run_session(opts, arguments)
     end
@@ -75,8 +70,7 @@ defmodule Mix.Tasks.Ptc.Repl do
 
   defp run_session(opts, arguments) do
     with {:ok, config} <- load_config(opts[:manifest]),
-         {:ok, session} <-
-           ReplSession.new(config: config, history_depth: opts[:history_depth] || 3) do
+         {:ok, session} <- ReplSession.new(config: config) do
       try do
         outcome = evaluate_mode(session, opts, arguments)
         finish(outcome, opts[:trace])

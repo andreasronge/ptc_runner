@@ -4,7 +4,7 @@ defmodule PtcRunner.Kernel.MissionEnvironment do
 
   A mission environment contains only its optional bundle, explicitly granted
   capabilities, and JSON-like mission data. Subordinate evaluation is built
-  exclusively from this struct and committed evaluation memory; it never
+  exclusively from this struct and committed evaluation memory/history; it never
   inherits or falls back to the workflow environment.
 
   Workflow-only reserved routes such as subordinate evaluation and annotation

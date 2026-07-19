@@ -187,6 +187,45 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     refute observation =~ ":closure"
   end
 
+  test "agent.core exposes exact three-value subordinate history across turns" do
+    responses = [
+      %{
+        content: nil,
+        tool_calls: [
+          %{id: "forty", name: "run_ptc_lisp", args: %{"program" => "40"}}
+        ]
+      },
+      %{
+        content: nil,
+        tool_calls: [
+          %{id: "forty-one", name: "run_ptc_lisp", args: %{"program" => "(+ *1 1)"}}
+        ]
+      },
+      %{
+        content: nil,
+        tool_calls: [
+          %{
+            id: "sum-history",
+            name: "run_ptc_lisp",
+            args: %{"program" => "(return (+ *1 *2))"}
+          }
+        ]
+      }
+    ]
+
+    {:ok, config} = agent_config(responses)
+
+    assert {:ok, %{value: %{"ok" => true, "value" => 81}, usage: usage}} =
+             Kernel.run(~S|(agent.core/run "Use exact history" {"max_turns" 3})|, config)
+
+    assert usage.subordinate_evaluations == 3
+    assert usage.evaluation_history_bytes > 0
+    assert_receive {:agent_request, _first}
+    assert_receive {:agent_request, _second}
+    assert_receive {:agent_request, _third}
+    refute_receive {:agent_request, _fourth}
+  end
+
   test "agent.core rolls back failed turns while preserving earlier definitions" do
     responses = [
       %{

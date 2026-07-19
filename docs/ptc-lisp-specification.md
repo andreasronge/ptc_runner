@@ -3137,10 +3137,15 @@ Access results from previous turns using the turn history symbols:
 ```
 
 **Semantics:**
-- `*1` returns the result of the most recent turn
+- `*1` returns the exact native result of the most recent ordinary successful turn
+- `*2` and `*3` return the next two older ordinary successful results
 - Returns `nil` if the turn doesn't exist (e.g., `*1` on turn 1)
-- The host controls how many prior return values are supplied. The public
-  `PtcRunner.Session` wrapper keeps the last 3 successful returns by default.
+- A Kernel run and direct Kernel REPL retain exactly the last three results;
+  the oldest is discarded when a fourth ordinary success commits
+- Explicit `return` commits definitions but does not advance history
+- Failed evaluations and explicit `fail` roll back definitions and history
+- History values retain their exact native types and callable identities; only
+  inert projections cross public or model-observation boundaries
 - Use stored values (plain symbols defined via `def`) for persistent access to full values
 
 **Use cases:**
@@ -3157,7 +3162,10 @@ Access results from previous turns using the turn history symbols:
 (> (count data/items) (count *1))
 ```
 
-**For reliable multi-turn patterns**, use `(def name value)` to store values in the User Namespace. Turn history (`*1`, `*2`, `*3`) is primarily a debugging aid, not a storage mechanism.
+History and definition memory commit atomically under separate host byte
+ceilings. If either candidate exceeds its ceiling, neither changes. Use
+`(def name value)` when a value needs a stable name beyond the three-result
+history window.
 
 ### 9.6 Tool Invocation — `tool/tool-name`
 
@@ -4014,6 +4022,20 @@ After Turn 2: `a=1, b={:y 20}, c=3`
 - Existing symbols are replaced (not deep-merged)
 - Symbols not referenced remain unchanged
 
+Definition memory and exact turn history form one transactional continuation
+inside a Kernel run. Each ordinary successful program appends its native result
+to the oldest-to-newest history and retains only the last three entries.
+`*1`, `*2`, and `*3` resolve newest-first on the next program. An explicit
+`return` commits definitions without adding its terminal value. Parse,
+analysis, runtime, limit, and explicit-failure outcomes change neither memory
+nor history.
+
+The host applies separate definition-memory and history byte ceilings. It
+validates each history value and the complete three-value aggregate before one
+atomic owner commit. A history rejection therefore cannot publish candidate
+definitions, and a valid definition map is not charged again to the history
+ceiling.
+
 ### 16.5 Execution Flow
 
 ```
@@ -4144,6 +4166,8 @@ Every execution produces a log entry:
 | `max_heap` | ~10 MB | Memory limit (1,250,000 words) |
 | `max_tool_calls` | unlimited (`nil`) | Program-wide max uncached tool invocations; cache hits do not consume reservations, and no limit applies unless explicitly set |
 | `max_tool_call_result_bytes` | 16,384 | Per-call cap on the tool result **retained in the in-eval ledger** (`tool_calls`). A result whose retained heap size exceeds this is stored as a bounded preview, so a looping/paginated tool fold cannot accumulate full payloads in eval memory. Does **not** affect the value returned to the program — only what the audit ledger keeps (see §16.7). |
+| Kernel `evaluation_memory_bytes` | 2,000,000 | Run-wide retained definition-memory ceiling |
+| Kernel `evaluation_history_bytes` | 1,000,000 | Independent per-value and aggregate ceiling for exact `*1`/`*2`/`*3` history |
 
 *Note: Hosts can configure higher timeouts (e.g., 5,000ms) to accommodate slow tool calls.*
 

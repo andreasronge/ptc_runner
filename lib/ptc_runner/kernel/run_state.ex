@@ -4,8 +4,8 @@ defmodule PtcRunner.Kernel.RunState do
 
   One GenServer owns the deadline, open/closed status, workflow and mission
   capability counters, live provider-task count, protocol errors, subordinate
-  evaluation count, terminal failure, evaluation-memory lease, and committed
-  evaluation memory.
+  evaluation count, terminal failure, evaluation-continuation lease, and
+  committed native evaluation memory/history.
 
   Reservations and commits are deliberately atomic owner operations. Callers
   must not recreate them as separate read and update steps. The opaque token
@@ -27,6 +27,8 @@ defmodule PtcRunner.Kernel.RunState do
 
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Lisp.RetainedSize
+
+  @history_depth 3
 
   @enforce_keys [:pid, :token]
   defstruct [:pid, :token]
@@ -61,14 +63,15 @@ defmodule PtcRunner.Kernel.RunState do
   @doc "Releases a provider slot and accepts completion only while the run is open."
   def finish_provider(state), do: call(state, :finish_provider)
 
-  @spec reserve_evaluation(t()) :: {:ok, map(), reference()} | {:error, atom()}
-  @doc "Reserves the single subordinate-evaluation lease and returns current memory."
+  @spec reserve_evaluation(t()) :: {:ok, map(), [term()], reference()} | {:error, atom()}
+  @doc "Atomically reserves and returns native subordinate memory and turn history."
   def reserve_evaluation(state), do: call(state, :reserve_evaluation)
 
-  @spec commit_evaluation(t(), reference(), map()) :: :ok | {:error, atom()}
-  @doc "Atomically commits bounded candidate memory for the caller's active lease."
-  def commit_evaluation(state, lease, memory) when is_map(memory),
-    do: call(state, {:commit_evaluation, lease, memory})
+  @spec commit_evaluation(t(), reference(), map(), [term()]) :: :ok | {:error, atom()}
+  @doc "Atomically commits one bounded native memory/history continuation candidate."
+  def commit_evaluation(state, lease, memory, history)
+      when is_map(memory) and is_list(history),
+      do: call(state, {:commit_evaluation, lease, memory, history})
 
   @spec release_evaluation(t(), reference()) :: :ok | {:error, atom()}
   @doc "Releases the caller's evaluation lease without changing committed memory."
@@ -111,7 +114,7 @@ defmodule PtcRunner.Kernel.RunState do
   def open?(state), do: call(state, :open?)
 
   @spec evaluation_memory_summary(t()) :: map()
-  @doc "Returns bounded byte and definition counts for committed mission memory."
+  @doc "Returns bounded definition, history, and retained continuation byte counts."
   def evaluation_memory_summary(state), do: call(state, :evaluation_memory_summary)
 
   @impl GenServer
@@ -132,6 +135,7 @@ defmodule PtcRunner.Kernel.RunState do
        protocol_errors: 0,
        terminal_failure: nil,
        memory: %{},
+       history: [],
        evaluation_lease: nil,
        reservations: %{}
      }}
@@ -191,13 +195,13 @@ defmodule PtcRunner.Kernel.RunState do
       true ->
         lease = {make_ref(), caller, Process.monitor(caller)}
 
-        {:reply, {:ok, state.memory, elem(lease, 0)},
+        {:reply, {:ok, state.memory, state.history, elem(lease, 0)},
          %{state | evaluations: state.evaluations + 1, evaluation_lease: lease}}
     end
   end
 
   def handle_call(
-        {token, {:commit_evaluation, lease, memory}},
+        {token, {:commit_evaluation, lease, memory, history}},
         {caller, _tag},
         %{token: token} = state
       ) do
@@ -205,13 +209,38 @@ defmodule PtcRunner.Kernel.RunState do
       {^lease, ^caller, monitor_ref} ->
         Process.demonitor(monitor_ref, [:flush])
 
-        bytes = RetainedSize.bytes_with_cap(memory, state.limits.evaluation_memory_bytes)
+        memory_bytes =
+          RetainedSize.bytes_with_cap(memory, state.limits.evaluation_memory_bytes)
 
-        if is_integer(bytes) and bytes <= state.limits.evaluation_memory_bytes and
-             not unavailable?(state) do
-          {:reply, :ok, %{state | memory: memory, evaluation_lease: nil}}
-        else
-          {:reply, {:error, :memory_exceeded}, %{state | evaluation_lease: nil}}
+        history_bytes =
+          RetainedSize.bytes_with_cap(history, state.limits.evaluation_history_bytes)
+
+        history_values_valid? =
+          length(history) <= @history_depth and
+            Enum.all?(history, fn value ->
+              case RetainedSize.bytes_with_cap(value, state.limits.evaluation_history_bytes) do
+                bytes when is_integer(bytes) ->
+                  bytes <= state.limits.evaluation_history_bytes
+
+                _ ->
+                  false
+              end
+            end)
+
+        cond do
+          unavailable?(state) ->
+            {:reply, {:error, :run_closed}, %{state | evaluation_lease: nil}}
+
+          not (is_integer(memory_bytes) and
+                   memory_bytes <= state.limits.evaluation_memory_bytes) ->
+            {:reply, {:error, :memory_exceeded}, %{state | evaluation_lease: nil}}
+
+          not (history_values_valid? and is_integer(history_bytes) and
+                   history_bytes <= state.limits.evaluation_history_bytes) ->
+            {:reply, {:error, :history_exceeded}, %{state | evaluation_lease: nil}}
+
+          true ->
+            {:reply, :ok, %{state | memory: memory, history: history, evaluation_lease: nil}}
         end
 
       _ ->
@@ -271,12 +300,7 @@ defmodule PtcRunner.Kernel.RunState do
     do: {:reply, not unavailable?(state), state}
 
   def handle_call({token, :evaluation_memory_summary}, _from, %{token: token} = state),
-    do:
-      {:reply,
-       %{
-         defined_count: map_size(state.memory),
-         bytes: RetainedSize.bytes_with_cap(state.memory, state.limits.evaluation_memory_bytes)
-       }, state}
+    do: {:reply, continuation_summary(state), state}
 
   def handle_call(_request, _from, state), do: {:reply, {:error, :closed}, state}
 
@@ -450,9 +474,38 @@ defmodule PtcRunner.Kernel.RunState do
       protocol_errors: state.protocol_errors,
       evaluation_memory_bytes:
         RetainedSize.bytes_with_cap(state.memory, state.limits.evaluation_memory_bytes),
+      evaluation_history_bytes:
+        RetainedSize.bytes_with_cap(state.history, state.limits.evaluation_history_bytes),
+      evaluation_continuation_bytes: continuation_bytes(state),
       evaluation_busy?: not is_nil(state.evaluation_lease)
     }
   end
+
+  defp continuation_summary(state) do
+    memory_bytes =
+      RetainedSize.bytes_with_cap(state.memory, state.limits.evaluation_memory_bytes)
+
+    history_bytes =
+      RetainedSize.bytes_with_cap(state.history, state.limits.evaluation_history_bytes)
+
+    %{
+      defined_count: map_size(state.memory),
+      history_count: length(state.history),
+      memory_bytes: memory_bytes,
+      history_bytes: history_bytes,
+      bytes: sum_retained_bytes(memory_bytes, history_bytes)
+    }
+  end
+
+  defp continuation_bytes(state) do
+    summary = continuation_summary(state)
+    summary.bytes
+  end
+
+  defp sum_retained_bytes(left, right) when is_integer(left) and is_integer(right),
+    do: left + right
+
+  defp sum_retained_bytes(_left, _right), do: :oversized
 
   defp call(%__MODULE__{pid: pid, token: token}, request),
     do: GenServer.call(pid, {token, request})

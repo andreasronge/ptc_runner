@@ -104,8 +104,15 @@ defmodule PtcRunner.Kernel.OwnerStatusPrivacyTest do
       )
 
     {:ok, run_state} = RunState.start(Limits.defaults())
-    {:ok, %{}, evaluation_lease} = RunState.reserve_evaluation(run_state)
-    :ok = RunState.commit_evaluation(run_state, evaluation_lease, %{"value" => markers.run_state})
+    {:ok, %{}, [], evaluation_lease} = RunState.reserve_evaluation(run_state)
+
+    :ok =
+      RunState.commit_evaluation(
+        run_state,
+        evaluation_lease,
+        %{"value" => markers.run_state},
+        [markers.run_state]
+      )
 
     endpoint = "http://127.0.0.1:1/#{markers.endpoint}"
 

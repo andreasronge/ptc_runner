@@ -132,8 +132,8 @@ defmodule Mix.Tasks.Ptc.ReplTest do
     end
   end
 
-  test "history depth is validated before manifest setup" do
-    assert_raise Mix.Error, ~r/history-depth must be between 1 and 3/, fn ->
+  test "removed configurable history depth fails closed" do
+    assert_raise Mix.Error, ~r/invalid ptc.repl options/, fn ->
       Repl.run(["--history-depth", "0", "--manifest", "missing.json"])
     end
   end

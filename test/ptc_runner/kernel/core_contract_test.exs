@@ -16,6 +16,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
   alias PtcRunner.Kernel.RunState
   alias PtcRunner.Kernel.WorkflowEnvironment
   alias PtcRunner.Lisp.Format
+  alias PtcRunner.Lisp.RetainedSize
 
   @input_schema %{"type" => "object", "additionalProperties" => true}
 
@@ -63,13 +64,69 @@ defmodule PtcRunner.Kernel.CoreContractTest do
   test "only one evaluation lease is granted and failed candidates preserve memory" do
     {:ok, limits} = Limits.new(subordinate_evaluations: 2, evaluation_memory_bytes: 1_000)
     {:ok, state} = RunState.start(limits)
-    assert {:ok, %{}, lease} = RunState.reserve_evaluation(state)
+    assert {:ok, %{}, [], lease} = RunState.reserve_evaluation(state)
     assert {:error, :busy} = RunState.reserve_evaluation(state)
     assert :ok = RunState.release_evaluation(state, lease)
-    assert {:ok, %{}, next_lease} = RunState.reserve_evaluation(state)
-    assert :ok = RunState.commit_evaluation(state, next_lease, %{"x" => 42})
+    assert {:ok, %{}, [], next_lease} = RunState.reserve_evaluation(state)
+    assert :ok = RunState.commit_evaluation(state, next_lease, %{"x" => 42}, [41])
     assert %{evaluation_memory_bytes: memory_bytes} = RunState.usage(state)
     assert memory_bytes > 0
+
+    assert %{
+             defined_count: 1,
+             history_count: 1,
+             memory_bytes: ^memory_bytes,
+             history_bytes: history_bytes,
+             bytes: combined_bytes
+           } = RunState.evaluation_memory_summary(state)
+
+    assert history_bytes > 0
+    assert combined_bytes == memory_bytes + history_bytes
+  end
+
+  test "continuation commit applies separate memory and exact-history ceilings atomically" do
+    memory = %{"retained" => String.duplicate("m", 64)}
+    history_value = String.duplicate("h", 64)
+    memory_limit = RetainedSize.bytes(memory)
+    history_limit = RetainedSize.bytes([history_value])
+
+    {:ok, limits} =
+      Limits.new(
+        subordinate_evaluations: 4,
+        evaluation_memory_bytes: memory_limit,
+        evaluation_history_bytes: history_limit
+      )
+
+    {:ok, state} = RunState.start(limits)
+    assert {:ok, %{}, [], first_lease} = RunState.reserve_evaluation(state)
+    assert :ok = RunState.commit_evaluation(state, first_lease, memory, [])
+
+    assert {:ok, ^memory, [], history_lease} = RunState.reserve_evaluation(state)
+    assert :ok = RunState.commit_evaluation(state, history_lease, memory, [history_value])
+
+    assert %{
+             memory_bytes: ^memory_limit,
+             history_bytes: ^history_limit,
+             bytes: combined_bytes
+           } = RunState.evaluation_memory_summary(state)
+
+    assert combined_bytes > memory_limit
+
+    assert {:ok, ^memory, [^history_value], rejected_lease} =
+             RunState.reserve_evaluation(state)
+
+    assert {:error, :history_exceeded} =
+             RunState.commit_evaluation(
+               state,
+               rejected_lease,
+               memory,
+               [history_value, "overflow"]
+             )
+
+    assert {:ok, ^memory, [^history_value], release_lease} =
+             RunState.reserve_evaluation(state)
+
+    assert :ok = RunState.release_evaluation(state, release_lease)
   end
 
   test "dispatcher contains provider errors and rejects invalid returns" do
@@ -746,6 +803,48 @@ defmodule PtcRunner.Kernel.CoreContractTest do
 
     assert %{outcome: :evaluation_error} =
              Evaluation.evaluate_source(state, mission, "leaked", 100)
+  end
+
+  test "subordinate continuation retains exact three-value history and rolls failures back" do
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, state} = RunState.start(Limits.defaults())
+
+    assert %{outcome: :continued, value: 40} =
+             Evaluation.evaluate_source(state, mission, "40", 100)
+
+    assert %{outcome: :continued, value: 41} =
+             Evaluation.evaluate_source(state, mission, "(+ *1 1)", 100)
+
+    assert %{outcome: :returned, value: 81} =
+             Evaluation.evaluate_source(state, mission, "(return (+ *1 *2))", 100)
+
+    for value <- [42, 43] do
+      assert %{outcome: :continued, value: ^value} =
+               Evaluation.evaluate_source(state, mission, Integer.to_string(value), 100)
+    end
+
+    assert %{outcome: :evaluation_error} =
+             Evaluation.evaluate_source(state, mission, "(do 999 missing)", 100)
+
+    assert %{outcome: :returned, value: [43, 42, 41]} =
+             Evaluation.evaluate_source(state, mission, "(return [*1 *2 *3])", 100)
+
+    assert %{history_count: 3, history_bytes: history_bytes, bytes: combined_bytes} =
+             RunState.evaluation_memory_summary(state)
+
+    assert history_bytes > 0
+    assert combined_bytes >= history_bytes
+  end
+
+  test "subordinate history preserves native callable identity behind inert observations" do
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, state} = RunState.start(Limits.defaults())
+
+    assert %{outcome: :continued, value: %Format.Fn{params: "..."}} =
+             Evaluation.evaluate_source(state, mission, "(fn [x] (+ x 1))", 100)
+
+    assert %{outcome: :returned, value: 42} =
+             Evaluation.evaluate_source(state, mission, "(return (*1 41))", 100)
   end
 
   test "ordinary evaluation errors expose capability activity and preserve committed memory" do

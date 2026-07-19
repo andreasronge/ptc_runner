@@ -150,7 +150,7 @@ for discovery, but membership in the environment is what grants authority.
 Workflow Lisp can invoke the reserved `kernel-eval` route with either dynamic
 source or an opaque static `program` value. Both paths enter the internal
 `PtcRunner.Kernel.Evaluation` module and execute against the mission bundle,
-mission data, mission capabilities, and current evaluation memory.
+mission data, mission capabilities, and current native evaluation continuation.
 
 The central confinement invariant is:
 
@@ -163,20 +163,24 @@ recursively invoke `kernel-eval`, or emit workflow-only annotations. Preserve
 this structurally in function inputs and environment construction; symbol
 filtering alone is not an adequate boundary.
 
-Definitions created by successful subordinate evaluations can persist for the
-rest of the run. Commit is transactional: parse, analysis, runtime, timeout,
-memory, capability, result-size, or explicit-failure outcomes preserve the
-previous evaluation memory.
+Definitions and the three most recent ordinary results from successful
+subordinate evaluations persist for the rest of the run. RunState reserves
+native memory and exact `*1`/`*2`/`*3` history together under one lease.
+Ordinary success appends its native result and trims oldest-first history to
+three; explicit `return` commits definitions without advancing history. Commit
+is transactional: parse, analysis, runtime, timeout, memory, history,
+capability, result-size, or explicit-failure outcomes preserve the complete
+previous continuation.
 
 The workflow-visible subordinate outcome algebra is deliberately distinct from
 the evaluator's internal controls:
 
-| Outcome | Memory | Agent policy |
+| Outcome | Continuation | Agent policy |
 | --- | --- | --- |
-| `:continued` | commit | ordinary value; append its inert value and chronological prints as one correlated tool observation, then request another turn |
-| `:returned` | commit | explicit `(return value)`; complete successfully |
-| `:failed` | roll back | explicit `(fail value)`; terminate as workflow failure |
-| evaluation or limit error | roll back | correct only when retry policy, capability activity, and turn budget permit |
+| `:continued` | commit memory and advance exact history | ordinary value; append its inert value and chronological prints as one correlated tool observation, then request another turn |
+| `:returned` | commit memory without advancing history | explicit `(return value)`; complete successfully |
+| `:failed` | roll back memory and history | explicit `(fail value)`; terminate as workflow failure |
+| evaluation or limit error | roll back memory and history | correct only when retry policy, capability activity, and turn budget permit |
 
 Both dynamic `kernel/eval-source` and embedded `kernel/eval` enter this same
 classification boundary. The agent retains each accepted public assistant tool
@@ -185,7 +189,7 @@ ID. Continued observations are escaped and bounded text; they do not expose
 native continuation memory. An intermediate result on the final turn commits
 before the agent reports that no model turn remains.
 
-Native continuation memory never crosses back into workflow Lisp. Subordinate
+Native continuation memory and exact history never cross back into workflow Lisp. Subordinate
 values and the workflow's terminal value pass through
 `PtcRunner.Lisp.externalize_value/1`, which recursively replaces closures,
 builtins, composed callables, runtime callables, and plain BEAM functions with
@@ -244,7 +248,8 @@ counters remain authoritative for retry and limit enforcement.
 
 `PtcRunner.Kernel.RunState` is the single owner of mutable per-run accounting.
 It owns the deadline, open/closed state, capability counters, protocol-error
-count, subordinate-evaluation lease, and committed evaluation memory.
+count, subordinate-evaluation lease, and committed native evaluation
+continuation (definitions plus exact three-value history).
 
 Every reservation or commit that depends on current state must happen in one
 owner operation. Do not introduce an `Agent.get`/`Agent.update` or equivalent
@@ -270,9 +275,19 @@ session DELETE. MCP JSON rejects duplicate object keys before protocol
 validation, and discovered schemas are compiled once during assembly rather
 than on each result.
 
-Subordinate evaluation is serialized because it owns transactional evaluation
-memory. A concurrent attempt receives a recoverable busy result rather than
-waiting in an unbounded queue.
+Subordinate evaluation is serialized because it owns the transactional
+continuation. Reservation returns memory, history, and the lease token in one
+owner operation; commit validates and installs the complete candidate in one
+owner operation. A concurrent attempt receives a recoverable busy result rather
+than waiting in an unbounded queue. ReplSession projects memory and history for
+its caller but does not own a competing copy for evaluation decisions.
+
+`evaluation_memory_bytes` continues to charge definitions only.
+`evaluation_history_bytes` independently bounds every exact history value and
+the three-value aggregate, so adding history cannot invalidate previously valid
+definition memory. Public continuation summaries report definition count,
+history count, separate memory/history bytes, and their combined retained-byte
+total without exposing values.
 
 The complete current limits are documented by `PtcRunner.Kernel.Limits`.
 `defaults/0` supplies ordinary effective runtime values, while

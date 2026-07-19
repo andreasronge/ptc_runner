@@ -2,16 +2,17 @@ defmodule PtcRunner.Kernel.Evaluation do
   @moduledoc """
   Internal subordinate PTC-Lisp evaluation boundary.
 
-  Evaluation reserves the single transactional mission-memory lease, executes
-  source exclusively against a mission environment, and commits candidate
-  memory only after successful bounded completion. Every failure path releases
-  the lease without changing prior memory.
+  Evaluation reserves the single transactional mission-continuation lease,
+  executes source exclusively against a mission environment, and commits
+  candidate memory/history only after successful bounded completion. Every
+  failure path releases the lease without changing the prior continuation.
 
   An ordinary successful value is projected as `:continued`; an explicit
   `(return value)` is projected as `:returned`; and `(fail value)` is projected
-  as `:failed`. Continued and returned evaluations commit native memory before
-  exposing only an inert public value. Continued results additionally expose
-  bounded chronological prints for the next agent turn.
+  as `:failed`. Continued and returned evaluations atomically commit native
+  memory and exact bounded history before exposing only an inert public value.
+  Continued results additionally expose bounded chronological prints for the
+  next agent turn.
   """
 
   alias PtcRunner.Kernel.Dispatcher
@@ -45,14 +46,13 @@ defmodule PtcRunner.Kernel.Evaluation do
       )
       when is_binary(source) do
     with :ok <- source_within_limit(source, RunState.limits(state).subordinate_source_bytes),
-         {:ok, memory, lease} <- RunState.reserve_evaluation(state) do
+         {:ok, memory, history, lease} <- RunState.reserve_evaluation(state) do
       evaluate_with_lease(
         state,
         mission_environment,
         source,
         timeout_ms,
-        memory,
-        lease,
+        {memory, history, lease},
         event_sink,
         inspection_sink
       )
@@ -69,8 +69,7 @@ defmodule PtcRunner.Kernel.Evaluation do
          environment,
          source,
          timeout_ms,
-         memory,
-         lease,
+         {memory, history, lease},
          event_sink,
          inspection_sink
        ) do
@@ -107,8 +106,7 @@ defmodule PtcRunner.Kernel.Evaluation do
           environment,
           source,
           timeout_ms,
-          memory,
-          lease,
+          {memory, history, lease},
           %{event_sink: event_sink, inspection_sink: inspection_sink},
           deadline_ms
         )
@@ -120,6 +118,7 @@ defmodule PtcRunner.Kernel.Evaluation do
           evaluation_id: evaluation_id,
           environment: :mission,
           status: result.outcome,
+          continuation: RunState.evaluation_memory_summary(state),
           duration_ms: Events.duration_ms(started_ms)
         })
 
@@ -141,8 +140,7 @@ defmodule PtcRunner.Kernel.Evaluation do
          environment,
          source,
          timeout_ms,
-         memory,
-         lease,
+         {memory, history, lease},
          capture,
          deadline_ms
        ) do
@@ -151,6 +149,7 @@ defmodule PtcRunner.Kernel.Evaluation do
     options = [
       context: environment.data,
       memory: memory,
+      turn_history: history,
       tools:
         mission_tools(
           environment,
@@ -178,20 +177,25 @@ defmodule PtcRunner.Kernel.Evaluation do
         %{outcome: :failed, value: Lisp.externalize_value(value)}
 
       {:ok, step} ->
-        commit_result(state, lease, step)
+        commit_result(state, lease, history, step)
 
       {:error, step} ->
         release_failure(state, lease, step, mission_calls_before)
     end
   end
 
-  defp commit_result(state, lease, step) do
-    case RunState.commit_evaluation(state, lease, step.memory) do
+  defp commit_result(state, lease, history, step) do
+    candidate_history = history_after_success(history, step.return)
+
+    case RunState.commit_evaluation(state, lease, step.memory, candidate_history) do
       :ok ->
         classify_success(step)
 
       {:error, :memory_exceeded} ->
         %{outcome: :memory_exceeded}
+
+      {:error, :history_exceeded} ->
+        %{outcome: :history_exceeded}
 
       {:error, _reason} ->
         %{outcome: :evaluation_error, kind: :state}
@@ -209,6 +213,9 @@ defmodule PtcRunner.Kernel.Evaluation do
       prints: step.prints || []
     }
   end
+
+  defp history_after_success(history, {:__ptc_return__, _value}), do: history
+  defp history_after_success(history, value), do: Enum.take(history ++ [value], -3)
 
   defp release_failure(state, lease, step, mission_calls_before) do
     capability_activity? =
@@ -294,7 +301,13 @@ defmodule PtcRunner.Kernel.Evaluation do
   defp failure(kind, reason), do: %{outcome: kind, kind: kind, reason: reason}
 
   defp maybe_emit_limit(state, event_sink, %{outcome: outcome} = result)
-       when outcome in [:timeout, :memory_exceeded, :result_exceeded, :limit_exceeded] do
+       when outcome in [
+              :timeout,
+              :memory_exceeded,
+              :history_exceeded,
+              :result_exceeded,
+              :limit_exceeded
+            ] do
     Events.emit(state, event_sink, "limit-exceeded", %{
       reason: Map.get(result, :reason, outcome),
       environment: :mission

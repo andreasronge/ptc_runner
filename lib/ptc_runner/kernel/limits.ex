@@ -16,8 +16,9 @@ defmodule PtcRunner.Kernel.Limits do
   - `workflow_capability_calls` and `mission_capability_calls` are total call
     quotas, with matching `*_per_name` quotas;
   - `subordinate_evaluations` and `protocol_errors` bound those operations;
-  - `entry_source_bytes`, `subordinate_source_bytes`, and
-    `evaluation_memory_bytes` bound code and retained mission state;
+  - `entry_source_bytes` and `subordinate_source_bytes` bound code;
+  - `evaluation_memory_bytes` and `evaluation_history_bytes` independently
+    bound retained mission definitions and exact three-value turn history;
   - `capability_argument_bytes`, `capability_result_bytes`, and
     `terminal_result_bytes` bound values crossing runtime boundaries;
   - `event_payload_bytes`, `normal_event_count`, and `normal_event_bytes` bound
@@ -47,6 +48,7 @@ defmodule PtcRunner.Kernel.Limits do
     entry_source_bytes: 262_144,
     subordinate_source_bytes: 131_072,
     evaluation_memory_bytes: 2_000_000,
+    evaluation_history_bytes: 1_000_000,
     capability_argument_bytes: 262_144,
     capability_result_bytes: 1_000_000,
     event_payload_bytes: 262_144,
@@ -79,6 +81,7 @@ defmodule PtcRunner.Kernel.Limits do
           entry_source_bytes: pos_integer(),
           subordinate_source_bytes: pos_integer(),
           evaluation_memory_bytes: pos_integer(),
+          evaluation_history_bytes: pos_integer(),
           capability_argument_bytes: pos_integer(),
           capability_result_bytes: pos_integer(),
           event_payload_bytes: pos_integer(),

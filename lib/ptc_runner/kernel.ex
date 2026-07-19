@@ -44,7 +44,8 @@ defmodule PtcRunner.Kernel do
   The entry source executes with the workflow bundle, data, and capabilities
   in `config`. Calls across the reserved subordinate-evaluation boundary use
   only the mission environment. The run owns its resource counters,
-  transactional evaluation memory, deadline, and canonical events.
+  transactional native evaluation memory/history, deadline, and canonical
+  events.
 
   Returns a bounded `PtcRunner.Kernel.Result` or
   `PtcRunner.Kernel.Error`. Capability failures normally remain recoverable
