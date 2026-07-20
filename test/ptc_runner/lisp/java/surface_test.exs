@@ -149,7 +149,7 @@ defmodule PtcRunner.Lisp.Java.SurfaceTest do
         target <- Surface.audit_targets(spec.key),
         target.status == :supported do
       assert {:ok, reference} = Surface.fetch_reference(target.reference_id)
-      assert reference.overload_ids != []
+      assert [_ | _] = reference.overload_ids
       assert Enum.all?(reference.overload_ids, &MapSet.member?(overload_ids, &1))
     end
   end
@@ -583,7 +583,7 @@ defmodule PtcRunner.Lisp.Java.SurfaceTest do
 
     for malformed <- malformed_manifests do
       assert {:error, errors} = validate(malformed)
-      assert errors != []
+      assert [_ | _] = errors
     end
   end
 
