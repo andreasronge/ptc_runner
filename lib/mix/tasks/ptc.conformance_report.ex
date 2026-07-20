@@ -8,6 +8,8 @@ defmodule Mix.Tasks.Ptc.ConformanceReport do
       mix ptc.conformance_report --check-inventory
 
   The inventory is built from audit metadata, not from generated docs.
+  `--check-inventory` also requires every supported Java target to have an
+  explicit conformance case.
   """
 
   use Mix.Task
@@ -38,6 +40,7 @@ defmodule Mix.Tasks.Ptc.ConformanceReport do
 
       "--check-inventory" in args ->
         check_inventory!(inventory_content)
+        validate_supported_java_coverage!(inventory, cases)
 
       true ->
         :ok
@@ -57,6 +60,32 @@ defmodule Mix.Tasks.Ptc.ConformanceReport do
       {:error, reason} ->
         Mix.raise("Cannot verify conformance_inventory.json: #{reason}")
     end
+  end
+
+  @doc false
+  @spec validate_supported_java_coverage!([map()], [map()]) :: :ok
+  def validate_supported_java_coverage!(inventory, cases) do
+    case missing_supported_java_cases(inventory, cases) do
+      [] ->
+        :ok
+
+      missing ->
+        labels = Enum.map_join(missing, ", ", &"#{&1.namespace}/#{&1.symbol}")
+        Mix.raise("Supported Java entries lack explicit conformance cases: #{labels}")
+    end
+  end
+
+  @doc false
+  @spec missing_supported_java_cases([map()], [map()]) :: [map()]
+  def missing_supported_java_cases(inventory, cases) do
+    covered =
+      cases
+      |> Enum.reject(&(&1.policy == :unsupported))
+      |> covered_keys()
+
+    inventory
+    |> Enum.filter(&(&1.compatibility_target == "Java" and &1.status == :supported))
+    |> Enum.reject(&covered?(&1, covered))
   end
 
   defp load_case_files do

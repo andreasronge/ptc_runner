@@ -10,6 +10,7 @@ defmodule PtcRunner.Lisp.Java.SurfaceTest do
   alias PtcRunner.Lisp.Java.Surface.Validator
   alias PtcRunner.Lisp.Registry
   alias PtcRunner.Lisp.SourceAtoms
+  alias PtcRunner.TestSupport.LispConformanceCases.Manual
 
   @namespace_members %{
     :Math => [
@@ -150,6 +151,25 @@ defmodule PtcRunner.Lisp.Java.SurfaceTest do
       assert {:ok, reference} = Surface.fetch_reference(target.reference_id)
       assert reference.overload_ids != []
       assert Enum.all?(reference.overload_ids, &MapSet.member?(overload_ids, &1))
+    end
+  end
+
+  test "every supported Java target has an explicit conformance case" do
+    covered =
+      Manual.all()
+      |> Enum.reject(&(&1.policy == :unsupported))
+      |> Enum.flat_map(fn case_data ->
+        Enum.map(Map.get(case_data, :vars, []), &{case_data.namespace, &1})
+      end)
+      |> MapSet.new()
+
+    for spec <- Surface.audit_specs(),
+        target <- Surface.audit_targets(spec.key),
+        target.status == :supported do
+      symbol = Map.get(spec, :conformance_prefix, "") <> target.name
+
+      assert MapSet.member?(covered, {spec.namespace, symbol}),
+             "supported Java target #{spec.namespace}/#{symbol} has no explicit conformance case"
     end
   end
 
@@ -567,6 +587,78 @@ defmodule PtcRunner.Lisp.Java.SurfaceTest do
     end
   end
 
+  test "stable manifest IDs and links must be non-nil atoms" do
+    manifest = Surface.manifest()
+    [class | classes] = manifest.classes
+
+    nil_class_id =
+      manifest
+      |> Map.put(:classes, [%{class | class_id: nil} | classes])
+      |> Map.update!(:references, fn references ->
+        Enum.map(references, fn reference ->
+          if reference.class_id == class.class_id,
+            do: %{reference | class_id: nil},
+            else: reference
+        end)
+      end)
+      |> Map.update!(:audit_specs, fn specs ->
+        Enum.map(specs, fn spec ->
+          if spec.class_id == class.class_id, do: %{spec | class_id: nil}, else: spec
+        end)
+      end)
+      |> Map.update!(:namespaces, fn namespaces ->
+        Enum.map(namespaces, fn namespace ->
+          if namespace.class_id == class.class_id,
+            do: %{namespace | class_id: nil},
+            else: namespace
+        end)
+      end)
+
+    assert {:error, errors} = validate(nil_class_id)
+    assert Enum.any?(errors, &String.contains?(&1, "class_id must be a non-nil atom"))
+
+    reference_id = :boolean_parse_boolean
+    invalid_reference_id = "boolean_parse_boolean"
+
+    string_reference_id =
+      manifest
+      |> Map.update!(:references, fn references ->
+        Enum.map(references, fn reference ->
+          if reference.reference_id == reference_id,
+            do: %{reference | reference_id: invalid_reference_id},
+            else: reference
+        end)
+      end)
+      |> replace_reference_links(reference_id, invalid_reference_id)
+
+    assert {:error, errors} = validate(string_reference_id)
+    assert Enum.any?(errors, &String.contains?(&1, "reference_id must be a non-nil atom"))
+
+    [audit_spec | audit_specs] = manifest.audit_specs
+    audit_rows = Map.fetch!(manifest.audits, audit_spec.key)
+    invalid_audit_key = Atom.to_string(audit_spec.key)
+
+    string_audit_key = %{
+      manifest
+      | audit_specs: [%{audit_spec | key: invalid_audit_key} | audit_specs],
+        audits:
+          manifest.audits
+          |> Map.delete(audit_spec.key)
+          |> Map.put(invalid_audit_key, audit_rows)
+    }
+
+    assert {:error, errors} = validate(string_audit_key)
+    assert Enum.any?(errors, &String.contains?(&1, "key must be a non-nil atom"))
+
+    [target | targets] = audit_rows
+
+    invalid_audits =
+      Map.put(manifest.audits, audit_spec.key, [%{target | target_id: ""} | targets])
+
+    assert {:error, errors} = validate(%{manifest | audits: invalid_audits})
+    assert Enum.any?(errors, &String.contains?(&1, "target_id must be a non-nil atom"))
+  end
+
   test "validator rejects invalid UTF-8 before semantic processing" do
     manifest = Surface.manifest()
     [function | functions] = manifest.function_entries
@@ -624,6 +716,50 @@ defmodule PtcRunner.Lisp.Java.SurfaceTest do
 
     assert {:error, errors} = validate(missing_extension_rationale)
     assert Enum.any?(errors, &String.contains?(&1, "requires divergence IDs"))
+  end
+
+  test "coordinated manifest edits cannot erase independent Phase-0 attestations" do
+    manifest = Surface.manifest()
+
+    coordinated_descriptor_downgrade =
+      manifest
+      |> replace_overload(:double_parse_double_string, fn overload ->
+        %{
+          overload
+          | classification: :intentional_ptc_alias,
+            attestation: :ptc_only,
+            descriptor: nil
+        }
+      end)
+      |> replace_audit_target(
+        :java_lang_double_audit,
+        :double_parse_double,
+        &%{&1 | jvm_descriptor_attestations: %{}}
+      )
+
+    assert {:error, errors} = validate(coordinated_descriptor_downgrade)
+    assert Enum.any?(errors, &String.contains?(&1, "independent Phase-0 attestation"))
+
+    coordinated_divergence_removal =
+      manifest
+      |> replace_overload(
+        :double_parse_double_string,
+        &%{&1 | divergence_ids: []}
+      )
+      |> replace_audit_target(
+        :java_lang_double_audit,
+        :double_parse_double,
+        fn target ->
+          %{
+            target
+            | admitted_overload_divergences: %{double_parse_double_string: []},
+              notes: String.replace(target.notes, "GAP-J01", "")
+          }
+        end
+      )
+
+    assert {:error, errors} = validate(coordinated_divergence_removal)
+    assert Enum.any?(errors, &String.contains?(&1, "independent Phase-0 attestation"))
   end
 
   test "overload divergence IDs are durable and linked to audit rationale" do
@@ -902,12 +1038,69 @@ defmodule PtcRunner.Lisp.Java.SurfaceTest do
     end
   end
 
+  test "Java namespaces cannot shadow protected or fixed non-Java namespaces" do
+    manifest = Surface.manifest()
+
+    for reserved <- [
+          :tool,
+          :data,
+          :"ptc.core",
+          :json,
+          :"clojure.core",
+          :core,
+          :"clojure.string",
+          :str,
+          :string,
+          :"clojure.set",
+          :set,
+          :"clojure.walk",
+          :walk,
+          :regex
+        ] do
+      classes =
+        Enum.map(manifest.classes, fn class ->
+          if class.class_id == :java_lang_math,
+            do: %{class | spellings: class.spellings ++ [Atom.to_string(reserved)]},
+            else: class
+        end)
+
+      namespace = %{
+        namespace: reserved,
+        class_id: :java_lang_math,
+        category: :math,
+        members: [
+          %{
+            source_name: :abs,
+            legacy_binding: :abs,
+            classification: :incorrect_non_java_alias,
+            reference_id: nil
+          }
+        ]
+      }
+
+      assert {:error, errors} =
+               validate(%{
+                 manifest
+                 | classes: classes,
+                   namespaces: manifest.namespaces ++ [namespace]
+               })
+
+      assert Enum.any?(errors, &String.contains?(&1, "reserved non-Java namespace"))
+    end
+  end
+
   test "Java atom-named namespace members come from the manifest vocabulary" do
     assert :between in BuiltinNames.java_member_atoms()
     assert SourceAtoms.intern("between") == :between
   end
 
-  defp validate(manifest), do: Validator.validate(manifest, Surface.legacy_bindings())
+  defp validate(manifest) do
+    Validator.validate(
+      manifest,
+      Surface.legacy_bindings(),
+      Surface.phase0_attestations()
+    )
+  end
 
   defp replace_overload(manifest, overload_id, update) do
     overloads =
@@ -920,6 +1113,59 @@ defmodule PtcRunner.Lisp.Java.SurfaceTest do
 
   defp replace_entry(entries, name, update) do
     Enum.map(entries, fn entry -> if entry.name == name, do: update.(entry), else: entry end)
+  end
+
+  defp replace_audit_target(manifest, audit_key, reference_id, update) do
+    audits =
+      Map.update!(manifest.audits, audit_key, fn targets ->
+        Enum.map(targets, fn target ->
+          if target.reference_id == reference_id, do: update.(target), else: target
+        end)
+      end)
+
+    %{manifest | audits: audits}
+  end
+
+  defp replace_reference_links(manifest, old_reference_id, new_reference_id) do
+    replace = fn reference_id ->
+      if reference_id == old_reference_id, do: new_reference_id, else: reference_id
+    end
+
+    namespaces =
+      Enum.map(manifest.namespaces, fn namespace ->
+        members =
+          Enum.map(namespace.members, fn member ->
+            %{member | reference_id: replace.(member.reference_id)}
+          end)
+
+        %{namespace | members: members}
+      end)
+
+    audits =
+      Map.new(manifest.audits, fn {key, targets} ->
+        {key,
+         Enum.map(targets, fn target ->
+           %{target | reference_id: replace.(target.reference_id)}
+         end)}
+      end)
+
+    replace_entries = fn entries ->
+      Enum.map(entries, fn entry ->
+        %{entry | reference_ids: Enum.map(entry.reference_ids, replace)}
+      end)
+    end
+
+    %{
+      manifest
+      | overloads:
+          Enum.map(manifest.overloads, fn overload ->
+            %{overload | reference_id: replace.(overload.reference_id)}
+          end),
+        namespaces: namespaces,
+        audits: audits,
+        function_entries: replace_entries.(manifest.function_entries),
+        interop_entries: replace_entries.(manifest.interop_entries)
+    }
   end
 
   defp runtime_binding_kind(%Env.Builtin{binding: binding}), do: elem(binding, 0)

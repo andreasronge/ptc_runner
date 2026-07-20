@@ -21,14 +21,30 @@ defmodule PtcRunner.Lisp.Java.Surface.Validator do
   @error_types ~w(arithmetic_exception date_time_exception date_time_parse_exception illegal_argument_exception null_pointer_exception number_format_exception string_index_out_of_bounds_exception)a
   @constructor_return_types %{java_util_date: :date}
   @divergence_id_pattern ~r/\A(?:GAP-[A-Z]\d+|DIV-\d+)\z/
+  @reserved_non_java_namespaces [
+    :tool,
+    :data,
+    :"ptc.core",
+    :json,
+    :"clojure.core",
+    :core,
+    :"clojure.string",
+    :str,
+    :string,
+    :"clojure.set",
+    :set,
+    :"clojure.walk",
+    :walk,
+    :regex
+  ]
 
-  @spec validate(map(), %{atom() => atom()}) :: :ok | {:error, [String.t()]}
-  def validate(manifest, legacy_bindings) when is_map(manifest) do
-    structural_errors = validate_structure(manifest, legacy_bindings)
+  @spec validate(map(), %{atom() => atom()}, map()) :: :ok | {:error, [String.t()]}
+  def validate(manifest, legacy_bindings, phase0_attestations) when is_map(manifest) do
+    structural_errors = validate_structure(manifest, legacy_bindings, phase0_attestations)
 
     errors =
       if structural_errors == [] do
-        validate_semantics(manifest, legacy_bindings)
+        validate_semantics(manifest, legacy_bindings, phase0_attestations)
       else
         structural_errors
       end
@@ -39,9 +55,10 @@ defmodule PtcRunner.Lisp.Java.Surface.Validator do
     end
   end
 
-  def validate(_manifest, _legacy_bindings), do: {:error, ["manifest must be a map"]}
+  def validate(_manifest, _legacy_bindings, _phase0_attestations),
+    do: {:error, ["manifest must be a map"]}
 
-  defp validate_semantics(manifest, legacy_bindings) do
+  defp validate_semantics(manifest, legacy_bindings, phase0_attestations) do
     []
     |> validate_version(manifest)
     |> validate_ids(manifest)
@@ -50,13 +67,14 @@ defmodule PtcRunner.Lisp.Java.Surface.Validator do
     |> validate_overloads(manifest, legacy_bindings)
     |> validate_namespaces(manifest, legacy_bindings)
     |> validate_audits(manifest)
+    |> validate_phase0_attestations(manifest, phase0_attestations)
     |> validate_descriptor_audit_links(manifest)
     |> validate_divergence_audit_links(manifest)
     |> validate_presentations(manifest, legacy_bindings)
     |> validate_projection_coverage(manifest)
   end
 
-  defp validate_structure(manifest, legacy_bindings) do
+  defp validate_structure(manifest, legacy_bindings, phase0_attestations) do
     errors =
       []
       |> require_keys(manifest)
@@ -70,6 +88,7 @@ defmodule PtcRunner.Lisp.Java.Surface.Validator do
       |> require_row_collection(manifest[:function_entries], "function_entries")
       |> require_row_collection(manifest[:interop_entries], "interop_entries")
       |> require_binding_map(legacy_bindings)
+      |> require_phase0_attestation_catalog(phase0_attestations)
 
     errors
     |> validate_class_structure(manifest[:classes])
@@ -90,6 +109,7 @@ defmodule PtcRunner.Lisp.Java.Surface.Validator do
         [:class_id, :name, :spellings, :receiver_profile],
         "class row #{index}"
       )
+      |> require_id_field(row, :class_id, "class row #{index}")
       |> require_binary_field(row, :name, "class row #{index}")
       |> require_binary_list_field(row, :spellings, "class row #{index}")
     end)
@@ -103,10 +123,12 @@ defmodule PtcRunner.Lisp.Java.Surface.Validator do
         [:reference_id, :class_id, :member, :kind, :callable?, :spellings, :overload_ids],
         "reference row #{index}"
       )
+      |> require_id_field(row, :reference_id, "reference row #{index}")
+      |> require_id_field(row, :class_id, "reference row #{index}")
       |> require_binary_field(row, :member, "reference row #{index}")
       |> require_boolean_field(row, :callable?, "reference row #{index}")
       |> require_binary_list_field(row, :spellings, "reference row #{index}")
-      |> require_list_field(row, :overload_ids, "reference row #{index}")
+      |> require_id_list_field(row, :overload_ids, "reference row #{index}")
     end)
   end
 
@@ -131,6 +153,8 @@ defmodule PtcRunner.Lisp.Java.Surface.Validator do
         ],
         "overload row #{index}"
       )
+      |> require_id_field(row, :overload_id, "overload row #{index}")
+      |> require_id_field(row, :reference_id, "overload row #{index}")
       |> require_nonnegative_integer_field(row, :arity, "overload row #{index}")
       |> require_list_field(row, :arguments, "overload row #{index}")
       |> require_list_field(row, :errors, "overload row #{index}")
@@ -146,7 +170,8 @@ defmodule PtcRunner.Lisp.Java.Surface.Validator do
       acc =
         acc
         |> require_fields(row, [:namespace, :class_id, :category, :members], label)
-        |> require_atom_field(row, :namespace, label)
+        |> require_id_field(row, :namespace, label)
+        |> require_id_field(row, :class_id, label)
         |> require_row_field(row, :members, label)
 
       validate_rows(acc, row[:members], fn member, member_index, inner ->
@@ -159,6 +184,7 @@ defmodule PtcRunner.Lisp.Java.Surface.Validator do
           member_label
         )
         |> require_atom_or_binary_field(member, :source_name, member_label)
+        |> require_optional_id_field(member, :reference_id, member_label)
       end)
     end)
   end
@@ -184,6 +210,8 @@ defmodule PtcRunner.Lisp.Java.Surface.Validator do
         ],
         label
       )
+      |> require_id_field(row, :key, label)
+      |> require_id_field(row, :class_id, label)
       |> require_binary_fields(
         row,
         [:namespace, :path, :title, :description, :scope, :target, :namespace_label],
@@ -215,6 +243,8 @@ defmodule PtcRunner.Lisp.Java.Surface.Validator do
           [:target_id, :name, :status, :reference_id, :description, :notes],
           label
         )
+        |> require_id_field(row, :target_id, label)
+        |> require_optional_id_field(row, :reference_id, label)
         |> require_binary_fields(row, [:name, :description, :notes], label)
         |> require_optional_descriptor_map_field(row, :jvm_descriptor_attestations, label)
         |> require_optional_divergence_map_field(row, :admitted_overload_divergences, label)
@@ -251,7 +281,7 @@ defmodule PtcRunner.Lisp.Java.Surface.Validator do
         label
       )
       |> require_binary_fields(row, [:name, :description, :section], label)
-      |> require_list_field(row, :reference_ids, label)
+      |> require_id_list_field(row, :reference_ids, label)
       |> require_binary_list_field(row, :signatures, label)
       |> require_example_list_field(row, :examples, label)
       |> require_binary_list_field(row, :see_also, label)
@@ -274,14 +304,14 @@ defmodule PtcRunner.Lisp.Java.Surface.Validator do
         label
       )
       |> require_binary_fields(row, [:name, :description, :class, :notes], label)
-      |> require_list_field(row, :reference_ids, label)
+      |> require_id_list_field(row, :reference_ids, label)
       |> require_binary_list_field(row, :signatures, label)
     end)
   end
 
-  @spec validate!(map(), %{atom() => atom()}) :: :ok
-  def validate!(manifest, legacy_bindings) do
-    case validate(manifest, legacy_bindings) do
+  @spec validate!(map(), %{atom() => atom()}, map()) :: :ok
+  def validate!(manifest, legacy_bindings, phase0_attestations) do
+    case validate(manifest, legacy_bindings, phase0_attestations) do
       :ok ->
         :ok
 
@@ -291,6 +321,31 @@ defmodule PtcRunner.Lisp.Java.Surface.Validator do
                 Enum.map_join(errors, "\n", &"  - #{&1}")
     end
   end
+
+  defp require_phase0_attestation_catalog(errors, %{overloads: overloads})
+       when is_map(overloads) do
+    Enum.reduce(overloads, errors, fn {overload_id, attestation}, acc ->
+      label = "independent Phase-0 attestation #{inspect(overload_id)}"
+
+      acc =
+        if valid_atom_id?(overload_id),
+          do: acc,
+          else: ["#{label} overload ID must be a non-nil atom" | acc]
+
+      if is_map(attestation) do
+        acc
+        |> require_fields(attestation, [:attestation, :descriptor, :divergence_ids], label)
+        |> require_enum(attestation[:attestation], @attestations, "#{label} kind")
+        |> require_optional_binary_field(attestation, :descriptor, label)
+        |> require_binary_list_field(attestation, :divergence_ids, label)
+      else
+        ["#{label} must be a map" | acc]
+      end
+    end)
+  end
+
+  defp require_phase0_attestation_catalog(errors, _attestations),
+    do: ["independent Phase-0 attestation catalog must contain an overload map" | errors]
 
   defp require_keys(errors, manifest) do
     Enum.reduce(@required_keys, errors, fn key, acc ->
@@ -896,6 +951,7 @@ defmodule PtcRunner.Lisp.Java.Surface.Validator do
           @namespace_categories,
           "namespace #{inspect(namespace_id)} category"
         )
+        |> validate_reserved_namespace(namespace_id)
         |> validate_namespace_spelling(namespace, manifest[:classes] || [])
 
       acc =
@@ -929,6 +985,13 @@ defmodule PtcRunner.Lisp.Java.Surface.Validator do
       end)
     end)
   end
+
+  defp validate_reserved_namespace(errors, namespace)
+       when namespace in @reserved_non_java_namespaces do
+    ["namespace #{inspect(namespace)} is a reserved non-Java namespace" | errors]
+  end
+
+  defp validate_reserved_namespace(errors, _namespace), do: errors
 
   defp validate_namespace_spelling(errors, namespace, classes) do
     class = Enum.find(classes, &(&1[:class_id] == namespace[:class_id]))
@@ -1161,6 +1224,45 @@ defmodule PtcRunner.Lisp.Java.Surface.Validator do
     if row.name == reference.member or row.name in reference.spellings,
       do: errors,
       else: ["audit target #{inspect(row.target_id)} does not name its linked reference" | errors]
+  end
+
+  defp validate_phase0_attestations(errors, manifest, phase0_attestations) do
+    actual =
+      Map.new(manifest.overloads, fn overload ->
+        {overload.overload_id, Map.take(overload, [:attestation, :descriptor, :divergence_ids])}
+      end)
+
+    expected = phase0_attestations.overloads
+
+    (Map.keys(actual) ++ Map.keys(expected))
+    |> Enum.uniq()
+    |> Enum.sort()
+    |> Enum.reduce(errors, fn overload_id, acc ->
+      case {Map.fetch(expected, overload_id), Map.fetch(actual, overload_id)} do
+        {{:ok, expected_attestation}, {:ok, actual_attestation}}
+        when expected_attestation == actual_attestation ->
+          acc
+
+        {{:ok, expected_attestation}, {:ok, actual_attestation}} ->
+          [
+            "overload #{inspect(overload_id)} disagrees with its independent Phase-0 attestation: " <>
+              "expected #{inspect(expected_attestation)}, got #{inspect(actual_attestation)}"
+            | acc
+          ]
+
+        {:error, {:ok, _actual_attestation}} ->
+          [
+            "overload #{inspect(overload_id)} has no independent Phase-0 attestation"
+            | acc
+          ]
+
+        {{:ok, _expected_attestation}, :error} ->
+          [
+            "independent Phase-0 attestation #{inspect(overload_id)} has no manifest overload"
+            | acc
+          ]
+      end
+    end)
   end
 
   defp validate_descriptor_audit_links(errors, manifest) do
@@ -1692,6 +1794,11 @@ defmodule PtcRunner.Lisp.Java.Surface.Validator do
 
   defp require_audit_collection(errors, audits) when is_map(audits) do
     Enum.reduce(audits, errors, fn {key, rows}, acc ->
+      acc =
+        if valid_atom_id?(key),
+          do: acc,
+          else: ["audit key must be a non-nil atom, got #{inspect(key)}" | acc]
+
       require_row_collection(acc, rows, "audit #{inspect(key)}")
     end)
   end
@@ -1706,7 +1813,7 @@ defmodule PtcRunner.Lisp.Java.Surface.Validator do
       [:audit_reference_coverage, :interop_omitted_reference_ids, :interop_omission_reason],
       "projection policy"
     )
-    |> require_list_field(policy, :interop_omitted_reference_ids, "projection policy")
+    |> require_id_list_field(policy, :interop_omitted_reference_ids, "projection policy")
     |> require_binary_field(policy, :interop_omission_reason, "projection policy")
   end
 
@@ -1748,6 +1855,18 @@ defmodule PtcRunner.Lisp.Java.Surface.Validator do
     end
   end
 
+  defp require_id_list_field(errors, row, field, label) do
+    case Map.get(row, field) do
+      values when is_list(values) ->
+        if Enum.all?(values, &valid_atom_id?/1),
+          do: errors,
+          else: ["#{label} #{field} must contain only non-nil atoms" | errors]
+
+      value ->
+        ["#{label} #{field} must be a list, got #{inspect(value)}" | errors]
+    end
+  end
+
   defp require_binary_list_field(errors, row, field, label) do
     case row[field] do
       values when is_list(values) ->
@@ -1767,11 +1886,13 @@ defmodule PtcRunner.Lisp.Java.Surface.Validator do
 
       {:ok, values} when is_map(values) ->
         if Enum.all?(values, fn {overload_id, ids} ->
-             is_atom(overload_id) and is_list(ids) and Enum.all?(ids, &valid_string?/1)
+             valid_atom_id?(overload_id) and is_list(ids) and
+               Enum.all?(ids, &valid_string?/1)
            end),
            do: errors,
            else: [
-             "#{label} #{field} must map overload atoms to valid UTF-8 string lists" | errors
+             "#{label} #{field} must map non-nil overload atoms to valid UTF-8 string lists"
+             | errors
            ]
 
       {:ok, value} ->
@@ -1786,11 +1907,12 @@ defmodule PtcRunner.Lisp.Java.Surface.Validator do
 
       {:ok, values} when is_map(values) ->
         if Enum.all?(values, fn {overload_id, descriptor} ->
-             is_atom(overload_id) and valid_string?(descriptor)
+             valid_atom_id?(overload_id) and valid_string?(descriptor)
            end),
            do: errors,
            else: [
-             "#{label} #{field} must map overload atoms to valid UTF-8 descriptors" | errors
+             "#{label} #{field} must map non-nil overload atoms to valid UTF-8 descriptors"
+             | errors
            ]
 
       {:ok, value} ->
@@ -1853,10 +1975,26 @@ defmodule PtcRunner.Lisp.Java.Surface.Validator do
     end
   end
 
-  defp require_atom_field(errors, row, field, label) do
+  defp require_id_field(errors, row, field, label) do
     case Map.get(row, field) do
-      value when is_atom(value) -> errors
-      value -> ["#{label} #{field} must be an atom, got #{inspect(value)}" | errors]
+      value when is_atom(value) and not is_nil(value) ->
+        errors
+
+      value ->
+        ["#{label} #{field} must be a non-nil atom, got #{inspect(value)}" | errors]
+    end
+  end
+
+  defp require_optional_id_field(errors, row, field, label) do
+    case Map.get(row, field) do
+      nil ->
+        errors
+
+      value when is_atom(value) ->
+        errors
+
+      value ->
+        ["#{label} #{field} must be nil or a non-nil atom, got #{inspect(value)}" | errors]
     end
   end
 
@@ -1931,9 +2069,11 @@ defmodule PtcRunner.Lisp.Java.Surface.Validator do
     do: ["#{label} must be a string list, got #{inspect(values)}" | errors]
 
   defp valid_string?(value), do: is_binary(value) and String.valid?(value)
+  defp valid_atom_id?(value), do: is_atom(value) and not is_nil(value)
 
-  defp valid_id?(value) when is_atom(value), do: true
-  defp valid_id?(value), do: valid_string?(value)
+  defp valid_id?(value) when is_atom(value), do: valid_atom_id?(value)
+  defp valid_id?(value) when is_binary(value), do: value != "" and valid_string?(value)
+  defp valid_id?(_value), do: false
 
   defp require_nonempty_string(errors, value, _label) when is_binary(value) and value != "",
     do: errors

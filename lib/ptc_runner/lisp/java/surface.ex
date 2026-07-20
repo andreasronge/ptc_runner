@@ -4,11 +4,13 @@ defmodule PtcRunner.Lisp.Java.Surface do
 
   The surface is data, not reflection. `priv/java_interop.exs` owns admitted
   classes and references, JVM descriptors, temporary legacy Env routes, audit
-  targets, and documentation projections. During the Phase-0 migration every
-  overload still routes to a binding in the compile-independent builtin
-  catalog; runtime parity tests ensure those bindings match `Env.initial/0`.
-  Later phases replace the routes family-by-family with closed Java dispatch
-  handlers.
+  targets, and documentation projections. The separately owned
+  `priv/java_interop_phase0_attestations.exs` baseline prevents coordinated
+  manifest edits from silently weakening descriptor or divergence coverage.
+  During the Phase-0 migration every overload still routes to a binding in the
+  compile-independent builtin catalog; runtime parity tests ensure those
+  bindings match `Env.initial/0`. Later phases replace the routes
+  family-by-family with closed Java dispatch handlers.
   """
 
   alias PtcRunner.Lisp.BuiltinNames
@@ -18,7 +20,8 @@ defmodule PtcRunner.Lisp.Java.Surface do
   @external_resource @manifest_path
   @manifest Code.eval_file(@manifest_path) |> elem(0)
   @legacy_bindings BuiltinNames.env_binding_kinds()
-  :ok = Validator.validate!(@manifest, @legacy_bindings)
+  @phase0_attestations BuiltinNames.java_phase0_attestations()
+  :ok = Validator.validate!(@manifest, @legacy_bindings, @phase0_attestations)
 
   @classes @manifest.classes
   @references @manifest.references
@@ -47,6 +50,10 @@ defmodule PtcRunner.Lisp.Java.Surface do
   @doc false
   @spec legacy_bindings() :: %{atom() => atom()}
   def legacy_bindings, do: @legacy_bindings
+
+  @doc false
+  @spec phase0_attestations() :: map()
+  def phase0_attestations, do: @phase0_attestations
 
   @doc "Returns admitted and inventory-only Java class records."
   @spec classes() :: [map()]

@@ -6625,6 +6625,13 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         ["GAP-J13"],
         [:numeric]
       ),
+      c(
+        "java/math-sqrt-001",
+        "java.lang.Math",
+        ["Math/sqrt"],
+        "(Math/sqrt 25)",
+        [:java, :numeric]
+      ),
       div_case(
         "java/math-ceil-double-rendering-001",
         "java.lang.Math",
