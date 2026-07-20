@@ -27,9 +27,10 @@ defmodule Mix.Tasks.Ptc.InstallBabashka do
 
   use Mix.Task
 
+  alias PtcRunner.Lisp.Java.Oracle.Config
+
   @shortdoc "Install Babashka for Clojure validation"
 
-  @default_version "1.4.192"
   @download_base "https://github.com/babashka/babashka/releases/download"
   @allowed_download_hosts [
     "github.com",
@@ -49,7 +50,7 @@ defmodule Mix.Tasks.Ptc.InstallBabashka do
       )
 
     force = Keyword.get(opts, :force, false)
-    version = Keyword.get(opts, :version, @default_version)
+    version = Keyword.get(opts, :version, Config.versions().babashka)
 
     validate_version!(version)
 

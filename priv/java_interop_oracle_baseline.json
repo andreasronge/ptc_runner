@@ -1,0 +1,579 @@
+{
+  "versions": {
+    "java": {
+      "distribution": "temurin",
+      "vendor": "Eclipse Adoptium",
+      "feature": 21,
+      "runtime": "21.0.11+10",
+      "setup_java": "21.0.11+10",
+      "mise": "temurin-21.0.11+10.0.LTS"
+    },
+    "clojure": "1.12.5",
+    "babashka": "1.4.192"
+  },
+  "environment": {
+    "locale": "en_US",
+    "timezone": "UTC"
+  },
+  "provenance": {
+    "oracle": "JVM Clojure exact-descriptor reflection adapter",
+    "command": "java -Duser.language=en -Duser.country=US -Duser.timezone=UTC -cp <pinned-jars> clojure.main <bounded-source>",
+    "java_runtime_version": "21.0.11+10-LTS",
+    "java_vendor": "Eclipse Adoptium",
+    "clojure_version": "1.12.5",
+    "locale": "en_US",
+    "timezone": "UTC"
+  },
+  "outcomes": [
+    {
+      "case_id": "boolean-parse-boolean-string",
+      "overload_id": "boolean_parse_boolean_string",
+      "descriptor": "(Ljava/lang/String;)Z",
+      "expected": {
+        "status": "ok",
+        "type": "boolean",
+        "value": "true"
+      }
+    },
+    {
+      "case_id": "double-parse-double-string",
+      "overload_id": "double_parse_double_string",
+      "descriptor": "(Ljava/lang/String;)D",
+      "expected": {
+        "status": "ok",
+        "type": "double",
+        "value": "0x1.8p0"
+      }
+    },
+    {
+      "case_id": "double-parse-double-string-invalid",
+      "overload_id": "double_parse_double_string",
+      "descriptor": "(Ljava/lang/String;)D",
+      "expected": {
+        "status": "error",
+        "type": "error",
+        "value": "java.lang.NumberFormatException"
+      }
+    },
+    {
+      "case_id": "double-positive-infinity-field",
+      "overload_id": "double_positive_infinity_field",
+      "descriptor": "D",
+      "expected": {
+        "status": "ok",
+        "type": "double",
+        "value": "Infinity"
+      }
+    },
+    {
+      "case_id": "double-negative-infinity-field",
+      "overload_id": "double_negative_infinity_field",
+      "descriptor": "D",
+      "expected": {
+        "status": "ok",
+        "type": "double",
+        "value": "-Infinity"
+      }
+    },
+    {
+      "case_id": "double-nan-field",
+      "overload_id": "double_nan_field",
+      "descriptor": "D",
+      "expected": {
+        "status": "ok",
+        "type": "double",
+        "value": "NaN"
+      }
+    },
+    {
+      "case_id": "float-parse-float-string",
+      "overload_id": "float_parse_float_string",
+      "descriptor": "(Ljava/lang/String;)F",
+      "expected": {
+        "status": "ok",
+        "type": "float",
+        "value": "0x1.8p0"
+      }
+    },
+    {
+      "case_id": "integer-parse-int-string",
+      "overload_id": "integer_parse_int_string",
+      "descriptor": "(Ljava/lang/String;)I",
+      "expected": {
+        "status": "ok",
+        "type": "int",
+        "value": "-42"
+      }
+    },
+    {
+      "case_id": "long-parse-long-string",
+      "overload_id": "long_parse_long_string",
+      "descriptor": "(Ljava/lang/String;)J",
+      "expected": {
+        "status": "ok",
+        "type": "long",
+        "value": "9223372036854775807"
+      }
+    },
+    {
+      "case_id": "system-current-time-millis-0",
+      "overload_id": "system_current_time_millis_0",
+      "descriptor": "()J",
+      "expected": {
+        "status": "ok",
+        "type": "long",
+        "value": "<non-negative>"
+      }
+    },
+    {
+      "case_id": "string-contains-char-sequence",
+      "overload_id": "string_contains_char_sequence",
+      "descriptor": "(Ljava/lang/CharSequence;)Z",
+      "expected": {
+        "status": "ok",
+        "type": "boolean",
+        "value": "true"
+      }
+    },
+    {
+      "case_id": "string-index-of-string",
+      "overload_id": "string_index_of_string",
+      "descriptor": "(Ljava/lang/String;)I",
+      "expected": {
+        "status": "ok",
+        "type": "int",
+        "value": "2"
+      }
+    },
+    {
+      "case_id": "string-index-of-string-from",
+      "overload_id": "string_index_of_string_from",
+      "descriptor": "(Ljava/lang/String;I)I",
+      "expected": {
+        "status": "ok",
+        "type": "int",
+        "value": "3"
+      }
+    },
+    {
+      "case_id": "string-last-index-of-string",
+      "overload_id": "string_last_index_of_string",
+      "descriptor": "(Ljava/lang/String;)I",
+      "expected": {
+        "status": "ok",
+        "type": "int",
+        "value": "3"
+      }
+    },
+    {
+      "case_id": "string-to-lower-case-0",
+      "overload_id": "string_to_lower_case_0",
+      "descriptor": "()Ljava/lang/String;",
+      "expected": {
+        "status": "ok",
+        "type": "string",
+        "value": "abc"
+      }
+    },
+    {
+      "case_id": "string-to-upper-case-0",
+      "overload_id": "string_to_upper_case_0",
+      "descriptor": "()Ljava/lang/String;",
+      "expected": {
+        "status": "ok",
+        "type": "string",
+        "value": "ABC"
+      }
+    },
+    {
+      "case_id": "string-starts-with-string",
+      "overload_id": "string_starts_with_string",
+      "descriptor": "(Ljava/lang/String;)Z",
+      "expected": {
+        "status": "ok",
+        "type": "boolean",
+        "value": "true"
+      }
+    },
+    {
+      "case_id": "string-ends-with-string",
+      "overload_id": "string_ends_with_string",
+      "descriptor": "(Ljava/lang/String;)Z",
+      "expected": {
+        "status": "ok",
+        "type": "boolean",
+        "value": "true"
+      }
+    },
+    {
+      "case_id": "string-length-0",
+      "overload_id": "string_length_0",
+      "descriptor": "()I",
+      "expected": {
+        "status": "ok",
+        "type": "int",
+        "value": "3"
+      }
+    },
+    {
+      "case_id": "string-substring-begin",
+      "overload_id": "string_substring_begin",
+      "descriptor": "(I)Ljava/lang/String;",
+      "expected": {
+        "status": "ok",
+        "type": "string",
+        "value": "a"
+      }
+    },
+    {
+      "case_id": "string-substring-begin-end",
+      "overload_id": "string_substring_begin_end",
+      "descriptor": "(II)Ljava/lang/String;",
+      "expected": {
+        "status": "ok",
+        "type": "string",
+        "value": "😀"
+      }
+    },
+    {
+      "case_id": "local-date-parse-char-sequence",
+      "overload_id": "local_date_parse_char_sequence",
+      "descriptor": "(Ljava/lang/CharSequence;)Ljava/time/LocalDate;",
+      "expected": {
+        "status": "ok",
+        "type": "local_date",
+        "value": "2024-01-02"
+      }
+    },
+    {
+      "case_id": "local-date-to-epoch-day-0",
+      "overload_id": "local_date_to_epoch_day_0",
+      "descriptor": "()J",
+      "expected": {
+        "status": "ok",
+        "type": "long",
+        "value": "1"
+      }
+    },
+    {
+      "case_id": "local-date-plus-days-long",
+      "overload_id": "local_date_plus_days_long",
+      "descriptor": "(J)Ljava/time/LocalDate;",
+      "expected": {
+        "status": "ok",
+        "type": "local_date",
+        "value": "2024-01-04"
+      }
+    },
+    {
+      "case_id": "local-date-minus-days-long",
+      "overload_id": "local_date_minus_days_long",
+      "descriptor": "(J)Ljava/time/LocalDate;",
+      "expected": {
+        "status": "ok",
+        "type": "local_date",
+        "value": "2023-12-31"
+      }
+    },
+    {
+      "case_id": "local-date-is-before-chrono-local-date",
+      "overload_id": "local_date_is_before_chrono_local_date",
+      "descriptor": "(Ljava/time/chrono/ChronoLocalDate;)Z",
+      "expected": {
+        "status": "ok",
+        "type": "boolean",
+        "value": "true"
+      }
+    },
+    {
+      "case_id": "local-date-is-after-chrono-local-date",
+      "overload_id": "local_date_is_after_chrono_local_date",
+      "descriptor": "(Ljava/time/chrono/ChronoLocalDate;)Z",
+      "expected": {
+        "status": "ok",
+        "type": "boolean",
+        "value": "true"
+      }
+    },
+    {
+      "case_id": "instant-parse-char-sequence",
+      "overload_id": "instant_parse_char_sequence",
+      "descriptor": "(Ljava/lang/CharSequence;)Ljava/time/Instant;",
+      "expected": {
+        "status": "ok",
+        "type": "instant",
+        "value": "2024-01-02T03:04:05.006Z"
+      }
+    },
+    {
+      "case_id": "instant-is-before-instant",
+      "overload_id": "instant_is_before_instant",
+      "descriptor": "(Ljava/time/Instant;)Z",
+      "expected": {
+        "status": "ok",
+        "type": "boolean",
+        "value": "true"
+      }
+    },
+    {
+      "case_id": "instant-is-after-instant",
+      "overload_id": "instant_is_after_instant",
+      "descriptor": "(Ljava/time/Instant;)Z",
+      "expected": {
+        "status": "ok",
+        "type": "boolean",
+        "value": "true"
+      }
+    },
+    {
+      "case_id": "duration-between-temporal",
+      "overload_id": "duration_between_temporal",
+      "descriptor": "(Ljava/time/temporal/Temporal;Ljava/time/temporal/Temporal;)Ljava/time/Duration;",
+      "expected": {
+        "status": "ok",
+        "type": "duration",
+        "value": "PT1.5S"
+      }
+    },
+    {
+      "case_id": "duration-to-millis-0",
+      "overload_id": "duration_to_millis_0",
+      "descriptor": "()J",
+      "expected": {
+        "status": "ok",
+        "type": "long",
+        "value": "129600000"
+      }
+    },
+    {
+      "case_id": "duration-to-days-0",
+      "overload_id": "duration_to_days_0",
+      "descriptor": "()J",
+      "expected": {
+        "status": "ok",
+        "type": "long",
+        "value": "1"
+      }
+    },
+    {
+      "case_id": "date-new-0",
+      "overload_id": "date_new_0",
+      "descriptor": "()V",
+      "expected": {
+        "status": "ok",
+        "type": "date",
+        "value": "<dynamic>"
+      }
+    },
+    {
+      "case_id": "date-new-long",
+      "overload_id": "date_new_long",
+      "descriptor": "(J)V",
+      "expected": {
+        "status": "ok",
+        "type": "date",
+        "value": "1"
+      }
+    },
+    {
+      "case_id": "date-new-string",
+      "overload_id": "date_new_string",
+      "descriptor": "(Ljava/lang/String;)V",
+      "expected": {
+        "status": "ok",
+        "type": "date",
+        "value": "1000"
+      }
+    },
+    {
+      "case_id": "date-get-time-0",
+      "overload_id": "date_get_time_0",
+      "descriptor": "()J",
+      "expected": {
+        "status": "ok",
+        "type": "long",
+        "value": "1234"
+      }
+    },
+    {
+      "case_id": "math-abs-int",
+      "overload_id": "math_abs_int",
+      "descriptor": "(I)I",
+      "expected": {
+        "status": "ok",
+        "type": "int",
+        "value": "7"
+      }
+    },
+    {
+      "case_id": "math-abs-long",
+      "overload_id": "math_abs_long",
+      "descriptor": "(J)J",
+      "expected": {
+        "status": "ok",
+        "type": "long",
+        "value": "9"
+      }
+    },
+    {
+      "case_id": "math-abs-float",
+      "overload_id": "math_abs_float",
+      "descriptor": "(F)F",
+      "expected": {
+        "status": "ok",
+        "type": "float",
+        "value": "0x1.8p0"
+      }
+    },
+    {
+      "case_id": "math-abs-double",
+      "overload_id": "math_abs_double",
+      "descriptor": "(D)D",
+      "expected": {
+        "status": "ok",
+        "type": "double",
+        "value": "0x1.8p0"
+      }
+    },
+    {
+      "case_id": "math-ceil-double",
+      "overload_id": "math_ceil_double",
+      "descriptor": "(D)D",
+      "expected": {
+        "status": "ok",
+        "type": "double",
+        "value": "0x1.0p1"
+      }
+    },
+    {
+      "case_id": "math-floor-double",
+      "overload_id": "math_floor_double",
+      "descriptor": "(D)D",
+      "expected": {
+        "status": "ok",
+        "type": "double",
+        "value": "-0x1.0p1"
+      }
+    },
+    {
+      "case_id": "math-max-int",
+      "overload_id": "math_max_int",
+      "descriptor": "(II)I",
+      "expected": {
+        "status": "ok",
+        "type": "int",
+        "value": "2"
+      }
+    },
+    {
+      "case_id": "math-max-long",
+      "overload_id": "math_max_long",
+      "descriptor": "(JJ)J",
+      "expected": {
+        "status": "ok",
+        "type": "long",
+        "value": "9"
+      }
+    },
+    {
+      "case_id": "math-max-float",
+      "overload_id": "math_max_float",
+      "descriptor": "(FF)F",
+      "expected": {
+        "status": "ok",
+        "type": "float",
+        "value": "0x1.4p1"
+      }
+    },
+    {
+      "case_id": "math-max-double",
+      "overload_id": "math_max_double",
+      "descriptor": "(DD)D",
+      "expected": {
+        "status": "ok",
+        "type": "double",
+        "value": "0x1.4p1"
+      }
+    },
+    {
+      "case_id": "math-min-int",
+      "overload_id": "math_min_int",
+      "descriptor": "(II)I",
+      "expected": {
+        "status": "ok",
+        "type": "int",
+        "value": "1"
+      }
+    },
+    {
+      "case_id": "math-min-long",
+      "overload_id": "math_min_long",
+      "descriptor": "(JJ)J",
+      "expected": {
+        "status": "ok",
+        "type": "long",
+        "value": "8"
+      }
+    },
+    {
+      "case_id": "math-min-float",
+      "overload_id": "math_min_float",
+      "descriptor": "(FF)F",
+      "expected": {
+        "status": "ok",
+        "type": "float",
+        "value": "0x1.4p0"
+      }
+    },
+    {
+      "case_id": "math-min-double",
+      "overload_id": "math_min_double",
+      "descriptor": "(DD)D",
+      "expected": {
+        "status": "ok",
+        "type": "double",
+        "value": "0x1.4p0"
+      }
+    },
+    {
+      "case_id": "math-pow-double",
+      "overload_id": "math_pow_double",
+      "descriptor": "(DD)D",
+      "expected": {
+        "status": "ok",
+        "type": "double",
+        "value": "0x1.0p3"
+      }
+    },
+    {
+      "case_id": "math-round-float",
+      "overload_id": "math_round_float",
+      "descriptor": "(F)I",
+      "expected": {
+        "status": "ok",
+        "type": "int",
+        "value": "-1"
+      }
+    },
+    {
+      "case_id": "math-round-double",
+      "overload_id": "math_round_double",
+      "descriptor": "(D)J",
+      "expected": {
+        "status": "ok",
+        "type": "long",
+        "value": "-1"
+      }
+    },
+    {
+      "case_id": "math-sqrt-double",
+      "overload_id": "math_sqrt_double",
+      "descriptor": "(D)D",
+      "expected": {
+        "status": "ok",
+        "type": "double",
+        "value": "0x1.8p1"
+      }
+    }
+  ]
+}

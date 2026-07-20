@@ -1,6 +1,6 @@
 # Bounded class-aware Java interop
 
-**Status:** Phase 0 metadata consolidation implemented; dispatch phases planned
+**Status:** Phase 0 metadata and oracle baseline implemented; dispatch phases planned
 
 **Implementation checkpoint (2026-07-20):** `priv/java_interop.exs` and
 `PtcRunner.Lisp.Java.Surface` now own the bounded class/reference/overload
@@ -13,9 +13,13 @@ analyzer, Env/Registry metadata, bounded source vocabulary, generated docs,
 upstream audit, and conformance inventory project from the manifest, while the
 inventory check also requires an explicit case for every supported Java
 target. Runtime execution is intentionally unchanged and every overload still
-uses a validated `{:legacy_env, binding_id}` route. Authoritative JVM behavior
-fixtures, selected alias removals, CoreAST/dispatch work, and family migrations
-remain for later checkpoints.
+uses a validated `{:legacy_env, binding_id}` route. The pinned Temurin
+21.0.11+10 and JVM Clojure 1.12.5 oracle executes one typed, exact-descriptor
+case for every JVM-attested overload, while explicit PTC-only cases preserve
+the complete admitted inventory through the bounded PTC evaluator and
+Babashka provides the bounded fast subset.
+Selected alias removals, CoreAST/dispatch work, and family migrations remain
+for later checkpoints.
 
 **Baseline:** `exp/minimal-kernel` at `294e438f`
 
@@ -793,6 +797,7 @@ Required commands may be introduced as:
 mix ptc.java_conformance --oracle babashka --subset fast
 mix ptc.java_conformance --oracle jvm --subset implemented
 mix ptc.java_fixtures --oracle jvm --check
+mix ptc.java_conformance --oracle ptc --subset ptc-only
 ```
 
 The JVM implemented-surface check must be a required CI job rather than relying

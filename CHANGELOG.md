@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added a bounded Java interop oracle baseline with pinned Temurin and JVM
+  Clojure versions, typed fixtures for every admitted overload, exact descriptor
+  attestation for every JVM overload, executable PTC-only compatibility cases,
+  a Babashka fast subset, and a dedicated CI conformance job.
 - Added the code-owned `log-analysis-v1` profile to `mix ptc.repl`, with
   bounded multi-turn mission evaluation over an immutable trace capture,
   deterministic JSONL output for coding agents, safe profile discovery, and

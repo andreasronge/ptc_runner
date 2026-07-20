@@ -22,7 +22,7 @@ jobs:
         uses: actions/setup-java@v5
         with:
           distribution: temurin
-          java-version: "21"
+          java-version: "21.0.11+10"
 
       - name: Setup Elixir environment
         uses: ./.github/actions/setup-elixir
@@ -55,3 +55,43 @@ jobs:
 
       - name: Build documentation
         run: MIX_ENV=dev mix deps.get && MIX_ENV=dev mix docs --warnings-as-errors
+
+  java-interop-conformance:
+    runs-on: ubuntu-latest
+    name: Java interop conformance
+    env:
+      MIX_ENV: test
+      HEX_SPONSOR: false
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Setup pinned Java oracle
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21.0.11+10"
+
+      - name: Setup Elixir environment
+        uses: ./.github/actions/setup-elixir
+
+      - name: Cache pinned JVM Clojure
+        uses: actions/cache@v5
+        with:
+          path: _build/tools/jvm_clojure
+          key: jvm-clojure-${{ runner.os }}-1.12.5-sha256-v1
+
+      - name: Install pinned JVM Clojure
+        run: mix ptc.install_clojure
+
+      - name: Verify authoritative JVM fixtures
+        run: |
+          mix ptc.java_conformance --oracle jvm --subset implemented
+          mix ptc.java_fixtures --oracle jvm --check
+
+      - name: Verify Babashka fast subset
+        run: mix ptc.java_conformance --oracle babashka --subset fast
+
+      - name: Verify PTC-only Java compatibility cases
+        run: mix ptc.java_conformance --oracle ptc --subset ptc-only

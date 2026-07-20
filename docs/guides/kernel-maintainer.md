@@ -549,6 +549,31 @@ than in the Kernel execution modules. Manifest `{"library": id}` selections
 expand their installed dependency closure deterministically and are compiled
 with local components; local IDs cannot shadow installed IDs.
 
+To change the admitted Java-shaped Lisp surface, update the authoritative
+`priv/java_interop.exs` manifest and the structured cases in
+`priv/java_interop_oracle_cases.exs` together. Every admitted overload has at
+least one case; case IDs are unique while overload and divergence identities
+remain stable. JVM-attested
+cases resolve and invoke the exact manifest descriptor through Clojure 1.12.5
+on Temurin 21.0.11+10; the checked-in typed outcomes live in
+`priv/java_interop_oracle_baseline.json`. Install the checksum-pinned Clojure
+jars with `mix ptc.install_clojure`, then run:
+
+```console
+mix ptc.java_conformance --oracle jvm --subset implemented
+mix ptc.java_fixtures --oracle jvm --check
+mix ptc.java_conformance --oracle babashka --subset fast
+mix ptc.java_conformance --oracle ptc --subset ptc-only
+```
+
+Use `mix ptc.java_fixtures --oracle jvm --write` only after reviewing an
+intentional behavior change on the pinned toolchain. The JVM run is the
+descriptor and behavior authority. Babashka covers only cases marked `fast`
+and cannot attest overload selection. Both runners use bounded source, output,
+and runtime limits with an observed `en_US` locale and UTC timezone. PTC-only
+aliases and extensions run through the bounded PTC evaluator but are not
+presented as JVM behavior.
+
 `RunConfig` freezes two bounded deterministic mission projections. The
 authoritative V2 inventory contains prompt-visible exports, model-visible
 capability schemas, and mission limits and is exposed through
@@ -584,6 +609,8 @@ The main contract-level tests are intentionally integration-oriented:
 - `event_sink_test.exs`, `trace_capability_test.exs`, and
   `viewer_adapter_test.exs` — canonical event and query boundaries;
 - `agent_library_test.exs` — shipped Lisp workflow policy;
+- `java/oracle_fixtures_test.exs` — Java overload fixture completeness,
+  descriptor identity, typed outcomes, and toolchain pin drift;
 - `tutorial_examples_test.exs` — checked-in user journeys;
 - `deepseek_e2e_test.exs`, `mcp_remote_e2e_test.exs`, and
   `mcp_remote_agent_e2e_test.exs` — live provider and remote MCP
