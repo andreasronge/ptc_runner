@@ -636,6 +636,22 @@ not as `java.time.Instant` compatibility.
 and `.isAfter` are `java.time` method names. Java-shaped dot calls should keep
 Java receiver semantics unless explicitly reclassified as PTC extensions.
 
+### GAP-J21: `java.util.Date.` accepts existing PTC temporal values
+
+| Field | Value |
+|-------|-------|
+| **Priority** | P2 |
+| **Status** | **by design (extension)** |
+| **Source** | Manual conformance case `java/util-date-native-temporal-extension-001` and runtime interop tests for `DateTime`, `NaiveDateTime`, and `Date` arguments |
+
+Java has no `java.util.Date` constructor overload for PTC-Lisp's native
+temporal values. PTC-Lisp accepts those values directly so tool-provided dates
+and timestamps can be used without a stringify-and-parse round trip.
+
+**Decision:** Keep as a bounded PTC extension. It has no JVM descriptor and
+must remain explicitly classified so it cannot be mistaken for an attested
+Java constructor overload.
+
 ### GAP-J18: `Instant.toEpochMilli` is unsupported
 
 | Field | Value |

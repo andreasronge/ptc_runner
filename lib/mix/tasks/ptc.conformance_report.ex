@@ -5,12 +5,14 @@ defmodule Mix.Tasks.Ptc.ConformanceReport do
 
       mix ptc.conformance_report
       mix ptc.conformance_report --write-inventory
+      mix ptc.conformance_report --check-inventory
 
   The inventory is built from audit metadata, not from generated docs.
   """
 
   use Mix.Task
 
+  alias PtcRunner.Lisp.Java.Surface
   alias PtcRunner.Lisp.Registry
 
   @case_files [
@@ -26,16 +28,35 @@ defmodule Mix.Tasks.Ptc.ConformanceReport do
     cases = conformance_cases()
     covered = covered_keys(cases)
 
-    if "--write-inventory" in args do
-      File.write!(
-        "conformance_inventory.json",
-        Jason.encode!(ordered_inventory(inventory), pretty: true) <> "\n"
-      )
+    inventory_content =
+      Jason.encode!(ordered_inventory(inventory), pretty: true) <> "\n"
 
-      Mix.shell().info("Wrote conformance_inventory.json")
+    cond do
+      "--write-inventory" in args ->
+        File.write!("conformance_inventory.json", inventory_content)
+        Mix.shell().info("Wrote conformance_inventory.json")
+
+      "--check-inventory" in args ->
+        check_inventory!(inventory_content)
+
+      true ->
+        :ok
     end
 
     print_summary(inventory, cases, covered)
+  end
+
+  defp check_inventory!(expected) do
+    case File.read("conformance_inventory.json") do
+      {:ok, ^expected} ->
+        Mix.shell().info("Verified conformance_inventory.json")
+
+      {:ok, _stale} ->
+        Mix.raise("Generated conformance inventory is stale: conformance_inventory.json")
+
+      {:error, reason} ->
+        Mix.raise("Cannot verify conformance_inventory.json: #{reason}")
+    end
   end
 
   defp load_case_files do
@@ -72,13 +93,14 @@ defmodule Mix.Tasks.Ptc.ConformanceReport do
   end
 
   defp java_inventory do
-    Registry.java_compat_audit_keys()
-    |> Enum.flat_map(fn key ->
-      namespace = java_namespace(key)
-
-      key
-      |> Registry.java_compat_audit()
-      |> Enum.map(&inventory_entry(namespace, &1, "Java"))
+    Surface.audit_specs()
+    |> Enum.flat_map(fn spec ->
+      spec.key
+      |> Surface.audit()
+      |> Enum.map(fn entry ->
+        entry = Map.update!(entry, :name, &(Map.get(spec, :conformance_prefix, "") <> &1))
+        inventory_entry(spec.namespace, entry, "Java")
+      end)
     end)
   end
 
@@ -103,19 +125,6 @@ defmodule Mix.Tasks.Ptc.ConformanceReport do
       )
     end)
   end
-
-  defp java_namespace(:java_lang_boolean_audit), do: "java.lang.Boolean"
-  defp java_namespace(:java_lang_double_audit), do: "java.lang.Double"
-  defp java_namespace(:java_lang_float_audit), do: "java.lang.Float"
-  defp java_namespace(:java_lang_integer_audit), do: "java.lang.Integer"
-  defp java_namespace(:java_lang_long_audit), do: "java.lang.Long"
-  defp java_namespace(:java_lang_string_audit), do: "java.lang.String"
-  defp java_namespace(:java_lang_system_audit), do: "java.lang.System"
-  defp java_namespace(:java_time_duration_audit), do: "java.time.Duration"
-  defp java_namespace(:java_time_instant_audit), do: "java.time.Instant"
-  defp java_namespace(:java_time_local_date_audit), do: "java.time.LocalDate"
-  defp java_namespace(:java_time_period_audit), do: "java.time.Period"
-  defp java_namespace(:java_util_date_audit), do: "java.util.Date"
 
   defp covered_keys(cases) do
     cases

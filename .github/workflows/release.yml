@@ -24,6 +24,10 @@ jobs:
             exit 1
           fi
           git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
       - uses: ./.github/actions/setup-elixir
       - run: mix precommit
       - run: mix prepush

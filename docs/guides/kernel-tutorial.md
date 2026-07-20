@@ -683,7 +683,7 @@ mission input, file content, and provider output as untrusted data.
 | `mix ptc.validate_spec` | Validate generated language/spec artifacts |
 | `mix ptc.smoke` | Compare shared `.clj` smoke cases with Babashka |
 | `mix precommit` | Run format, compile, Credo, spec, tests, and viewer tests |
-| `mix prepush` | Run Dialyzer and unused-dependency checks |
+| `mix prepush` | Audit upstream API metadata, then run Dialyzer and unused-dependency checks |
 
 ## Inspect a credential-free connector run
 

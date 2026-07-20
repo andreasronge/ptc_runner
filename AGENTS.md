@@ -37,8 +37,8 @@ how it was verified.
 
 - `mix precommit` — fast quality gate (format, compile, credo, schema, spec,
   tests); run before every commit.
-- `mix prepush` — slower checks (dialyzer, unused-deps) before `git push`; CI
-  runs these on every PR regardless.
+- `mix prepush` — slower checks (upstream API audit, dialyzer, unused-deps) before `git push`;
+  PR CI runs the same checks as individual steps.
 - `mix test --include e2e` — E2E tests (requires `OPENROUTER_API_KEY`).
 - Fix all failures before committing/pushing.
 

@@ -106,12 +106,16 @@ defmodule PtcRunner.MixProject do
         "xref graph --format cycles --label compile-connected --fail-above 0",
         "credo --strict",
         "ptc.validate_spec",
+        "ptc.gen_docs --check",
+        "ptc.conformance_report --check-inventory",
         "test --warnings-as-errors",
         "cmd --cd ptc_viewer mix test --color"
       ],
       # Slower checks kept out of the per-commit loop; run before pushing.
-      # CI runs dialyzer + the unused-deps check on every PR regardless.
+      # PR CI runs these as individual steps. The upstream audit attests all
+      # exact Java descriptors when Java 11 or newer is available.
       prepush: [
+        "ptc.audit_upstream",
         "dialyzer",
         "deps.unlock --check-unused"
       ],
@@ -220,7 +224,7 @@ defmodule PtcRunner.MixProject do
   defp package do
     [
       files:
-        ~w(lib docs examples/kernel-tutorial examples/kernel-inspection-lab .formatter.exs mix.exs README.md LICENSE CHANGELOG.md priv/function_audit.exs priv/functions.exs priv/java_compat_audit.exs priv/preludes priv/spec),
+        ~w(lib docs examples/kernel-tutorial examples/kernel-inspection-lab .formatter.exs mix.exs README.md LICENSE CHANGELOG.md priv/function_audit.exs priv/functions.exs priv/java_interop.exs priv/preludes priv/spec),
       licenses: ["MIT"],
       links: %{
         "GitHub" => "https://github.com/andreasronge/ptc_runner",

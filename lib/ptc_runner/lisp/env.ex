@@ -13,6 +13,7 @@ defmodule PtcRunner.Lisp.Env do
   """
 
   alias PtcRunner.Lisp.Env.Builtin
+  alias PtcRunner.Lisp.Java.Surface
   alias PtcRunner.Lisp.Runtime.Builtins
 
   @type binding ::
@@ -68,34 +69,22 @@ defmodule PtcRunner.Lisp.Env do
   # ============================================================
 
   # Map Clojure-style namespaces to function categories for suggestions
-  @clojure_namespaces %{
-    :"clojure.string" => :string,
-    :str => :string,
-    :string => :string,
-    :"clojure.core" => :core,
-    :core => :core,
-    :"clojure.set" => :set,
-    :set => :set,
-    :"clojure.walk" => :walk,
-    :walk => :walk,
-    :regex => :regex,
-    :Math => :math,
-    :System => :interop,
-    :Boolean => :interop,
-    :Float => :interop,
-    :Integer => :interop,
-    :Long => :interop,
-    :"java.time.LocalDate" => :interop,
-    :LocalDate => :interop,
-    # `Instant/parse` and `LocalDate/parse` both resolve to the `parse`
-    # builtin, which auto-dispatches on the string shape (Date vs DateTime).
-    :"java.time.Instant" => :interop,
-    :Instant => :interop,
-    :"java.time.Duration" => :interop,
-    :Duration => :interop,
-    :Double => :interop,
-    :json => :json
-  }
+  @clojure_namespaces Map.merge(
+                        %{
+                          :"clojure.string" => :string,
+                          :str => :string,
+                          :string => :string,
+                          :"clojure.core" => :core,
+                          :core => :core,
+                          :"clojure.set" => :set,
+                          :set => :set,
+                          :"clojure.walk" => :walk,
+                          :walk => :walk,
+                          :regex => :regex,
+                          :json => :json
+                        },
+                        Surface.namespace_categories()
+                      )
 
   @doc """
   Check if a namespace is a known Clojure-style namespace.
