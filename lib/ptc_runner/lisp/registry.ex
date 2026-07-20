@@ -2,15 +2,14 @@ defmodule PtcRunner.Lisp.Registry do
   @moduledoc """
   Single source of truth for PTC-Lisp function metadata.
 
-  Loads `priv/functions.exs` (implemented + Java interop entries),
-  `priv/function_audit.exs` (Clojure/Java Math parity triage notes), and
-  `priv/java_compat_audit.exs` (curated Java compatibility targets) at
-  compile time via `@external_resource`. No runtime file I/O —
-  recompiles automatically when any source file changes.
+  Loads ordinary implemented functions from `priv/functions.exs`, Clojure
+  parity metadata from `priv/function_audit.exs`, and validated Java metadata
+  through `PtcRunner.Lisp.Java.Surface`. No runtime file I/O is performed.
 
-  The two files are split (#896) because their change cadence differs:
+  The files are split because their change cadence differs:
   `functions.exs` is touched when the language definition evolves, while
-  `function_audit.exs` is touched when triaging Clojure/Java parity.
+  `function_audit.exs` is touched when triaging Clojure parity and
+  `java_interop.exs` owns the bounded Java compatibility surface.
   Keeping them separate keeps each file in a more manageable size range
   and avoids recompiling dependents when only audit metadata changes.
 
@@ -29,44 +28,34 @@ defmodule PtcRunner.Lisp.Registry do
   """
 
   alias PtcRunner.Lisp.Env
+  alias PtcRunner.Lisp.Java.Surface
 
   @registry_path "priv/functions.exs"
   @audit_path "priv/function_audit.exs"
-  @java_compat_audit_path "priv/java_compat_audit.exs"
 
   # Compile-time loading (no runtime file I/O)
   @external_resource @registry_path
   @external_resource @audit_path
-  @external_resource @java_compat_audit_path
   @registry Code.eval_file(@registry_path) |> elem(0)
   @audit Code.eval_file(@audit_path) |> elem(0)
-  @java_compat_audit Code.eval_file(@java_compat_audit_path) |> elem(0)
-  @doc_namespaces %{
-    "clojure.core" => :"clojure.core",
-    "core" => :core,
-    "clojure.string" => :"clojure.string",
-    "str" => :str,
-    "string" => :string,
-    "clojure.set" => :"clojure.set",
-    "set" => :set,
-    "clojure.walk" => :"clojure.walk",
-    "walk" => :walk,
-    "regex" => :regex,
-    "Math" => :Math,
-    "System" => :System,
-    "Boolean" => :Boolean,
-    "Double" => :Double,
-    "Float" => :Float,
-    "Integer" => :Integer,
-    "Long" => :Long,
-    "LocalDate" => :LocalDate,
-    "java.time.LocalDate" => :"java.time.LocalDate",
-    "Instant" => :Instant,
-    "java.time.Instant" => :"java.time.Instant",
-    "Duration" => :Duration,
-    "java.time.Duration" => :"java.time.Duration",
-    "json" => :json
-  }
+  :ok = Surface.validate_legacy_sources!(@registry, @audit)
+  @implemented Surface.replace_function_entries(@registry.implemented)
+  @doc_namespaces Map.merge(
+                    %{
+                      "clojure.core" => :"clojure.core",
+                      "core" => :core,
+                      "clojure.string" => :"clojure.string",
+                      "str" => :str,
+                      "string" => :string,
+                      "clojure.set" => :"clojure.set",
+                      "set" => :set,
+                      "clojure.walk" => :"clojure.walk",
+                      "walk" => :walk,
+                      "regex" => :regex,
+                      "json" => :json
+                    },
+                    Surface.doc_namespaces()
+                  )
 
   @doc """
   Returns all implemented function entries.
@@ -78,7 +67,7 @@ defmodule PtcRunner.Lisp.Registry do
       true
   """
   @spec implemented() :: [map()]
-  def implemented, do: @registry.implemented
+  def implemented, do: @implemented
 
   @doc """
   Returns all clojure.core audit entries.
@@ -138,19 +127,23 @@ defmodule PtcRunner.Lisp.Registry do
       true
   """
   @spec java_math_audit() :: [map()]
-  def java_math_audit, do: @audit.java_math_audit
+  def java_math_audit, do: Surface.audit(:java_math_audit)
 
   @doc """
   Returns the available curated Java compatibility audit keys.
   """
   @spec java_compat_audit_keys() :: [atom()]
-  def java_compat_audit_keys, do: @java_compat_audit |> Map.keys() |> Enum.sort()
+  def java_compat_audit_keys, do: Surface.audit_keys() -- [:java_math_audit]
 
   @doc """
   Returns a curated Java compatibility audit by key.
   """
   @spec java_compat_audit(atom()) :: [map()]
-  def java_compat_audit(key), do: Map.fetch!(@java_compat_audit, key)
+  def java_compat_audit(key), do: Surface.audit(key)
+
+  @doc "Returns a curated Java audit including stable surface target/reference IDs."
+  @spec java_audit_targets(atom()) :: [map()]
+  def java_audit_targets(key), do: Surface.audit_targets(key)
 
   @doc """
   Returns all Java interop entries.
@@ -162,7 +155,7 @@ defmodule PtcRunner.Lisp.Registry do
       true
   """
   @spec java_interop() :: [map()]
-  def java_interop, do: @registry.java_interop
+  def java_interop, do: Surface.interop_entries()
 
   @doc """
   Returns env-dispatched builtin names for the given category.
@@ -217,28 +210,17 @@ defmodule PtcRunner.Lisp.Registry do
   def builtins_by_namespace(ns) when ns in [:"clojure.walk", :walk],
     do: builtins_by_category(:walk)
 
-  def builtins_by_namespace(:System), do: [:currentTimeMillis]
-
-  def builtins_by_namespace(:Boolean), do: ["parseBoolean"]
-
-  def builtins_by_namespace(:Double),
-    do: ["parseDouble", :POSITIVE_INFINITY, :NEGATIVE_INFINITY, :NaN]
-
-  def builtins_by_namespace(:Float), do: ["parseFloat"]
-  def builtins_by_namespace(:Integer), do: ["parseInt"]
-  def builtins_by_namespace(:Long), do: ["parseLong"]
-
-  def builtins_by_namespace(ns) when ns in [:LocalDate, :"java.time.LocalDate"], do: [:parse]
-  def builtins_by_namespace(ns) when ns in [:Instant, :"java.time.Instant"], do: [:parse]
-  def builtins_by_namespace(ns) when ns in [:Duration, :"java.time.Duration"], do: [:between]
-
   def builtins_by_namespace(ns) do
-    ns
-    |> Env.namespace_category()
-    |> case do
-      nil -> []
-      :interop -> []
-      category -> builtins_by_category(category)
+    if Surface.namespace?(ns) do
+      Surface.namespace_members(ns)
+    else
+      ns
+      |> Env.namespace_category()
+      |> case do
+        nil -> []
+        :interop -> []
+        category -> builtins_by_category(category)
+      end
     end
   end
 
@@ -318,13 +300,15 @@ defmodule PtcRunner.Lisp.Registry do
     |> Enum.any?(&(to_string(&1) == func))
   end
 
-  defp canonical_doc_names("Boolean", "parseBoolean"), do: ["Boolean/parseBoolean"]
-  defp canonical_doc_names("Double", "parseDouble"), do: ["parse-double"]
-  defp canonical_doc_names("Float", "parseFloat"), do: ["parse-double"]
-  defp canonical_doc_names("Integer", "parseInt"), do: ["parse-long"]
-  defp canonical_doc_names("Long", "parseLong"), do: ["parse-long"]
+  defp canonical_doc_names(ns, func) do
+    ns_atom = Map.fetch!(@doc_namespaces, ns)
 
-  defp canonical_doc_names(ns, func), do: [short_qualified_name(ns, func), func]
+    if Surface.namespace?(ns_atom) do
+      [Surface.canonical_function_name(ns_atom, func)]
+    else
+      [short_qualified_name(ns, func), func]
+    end
+  end
 
   defp short_qualified_name(ns, func) do
     ns

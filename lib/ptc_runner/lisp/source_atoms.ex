@@ -31,8 +31,8 @@ defmodule PtcRunner.Lisp.SourceAtoms do
     4. Bounded namespaces — `data`, `tool`, `json`, plus Clojure aliases (`clojure.string`),
        and fully-qualified Java namespaces from `Env.clojure_namespaces`
        (`java.time.LocalDate`, etc.).
-    5. Qualified analyzer keys such as JSON member
-       names matched as atom literals in `dispatch_list_form` clauses.
+    5. Qualified analyzer keys such as JSON member names plus atom-named Java
+       namespace members projected from `priv/java_interop.exs`.
     6. Short-fn param atoms `:p1`..`:p20` synthesized by the
        short-fn analyzer.
 
@@ -114,25 +114,21 @@ defmodule PtcRunner.Lisp.SourceAtoms do
 
   # Bounded namespace prefixes used in `ns/key` syntax. The analyzer
   # pattern-matches these as atom literals in `{:ns_symbol, ns, _}`.
-  # Fully-qualified Java namespaces are included verbatim because
-  # `parse_namespaced_symbol` doesn't split them — `java.time.LocalDate`
-  # is one atom, not `java.time` + `LocalDate`.
+  # Java namespaces are projected separately from `priv/java_interop.exs`
+  # through the leaf `BuiltinNames` module.
   @bounded_namespaces ~w(
     data tool json
     str string set regex
     walk
-    Math System Boolean Double Float Integer Long
-    LocalDate Instant Duration
-    java.time.LocalDate java.time.Instant java.time.Duration java.util.Date.
     clojure.core clojure.string clojure.set clojure.walk
     core
   )a
 
-  # Qualified analyzer keys — atom literals after `ns/` in dispatch
-  # clauses.
+  # Non-Java qualified analyzer keys — atom literals after `ns/` in dispatch
+  # clauses. Java member atoms are projected from the surface manifest below.
   # Verified via `rg ':"[a-z-]+"' lib/ptc_runner/lisp/analyze.ex`.
   @qualified_keys ~w(
-    parse-string parse-lines generate-string between text json
+    parse-string parse-lines generate-string text json
     re-pattern
   )a
 
@@ -158,6 +154,8 @@ defmodule PtcRunner.Lisp.SourceAtoms do
       @special_forms ++
         @keyword_modifiers ++
         @bounded_namespaces ++
+        BuiltinNames.java_namespace_atoms() ++
+        BuiltinNames.java_member_atoms() ++
         @qualified_keys ++
         @special_symbols ++
         @short_fn_params

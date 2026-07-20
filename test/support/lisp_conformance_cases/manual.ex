@@ -6649,6 +6649,15 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
   defp divergence_cases do
     [
       div_case(
+        "java/util-date-native-temporal-extension-001",
+        "java.util.Date",
+        ["java.util.Date.", ".getTime", "LocalDate/parse"],
+        ~S|(.getTime (java.util.Date. (LocalDate/parse "1970-01-02")))|,
+        "GAP-J21",
+        86_400_000,
+        "PTC-Lisp accepts its native LocalDate value directly although Java Date has no matching constructor overload."
+      ),
+      div_case(
         "div/parse-long-001",
         "clojure.core",
         ["parse-long"],

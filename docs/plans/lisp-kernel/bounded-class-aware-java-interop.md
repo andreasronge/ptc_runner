@@ -1,6 +1,17 @@
 # Bounded class-aware Java interop
 
-**Status:** planned
+**Status:** Phase 0 metadata consolidation implemented; dispatch phases planned
+
+**Implementation checkpoint (2026-07-20):** `priv/java_interop.exs` and
+`PtcRunner.Lisp.Java.Surface` now own the bounded class/reference/overload
+inventory, current namespace spellings, explicit legacy Env routes, audit
+targets, upstream identities, and documentation presentation rows. The
+analyzer, Env/Registry metadata, bounded source vocabulary, generated docs,
+upstream audit, and conformance inventory project from that manifest. Runtime
+execution is intentionally unchanged and every overload still uses a validated
+`{:legacy_env, binding_id}` route. Authoritative JVM behavior fixtures,
+selected alias removals, CoreAST/dispatch work, and family migrations remain
+for later checkpoints.
 
 **Baseline:** `exp/minimal-kernel` at `294e438f`
 
@@ -205,8 +216,10 @@ categories, not only printed output or the fact that both sides failed.
 Add `priv/java_interop.exs` and load it through
 `PtcRunner.Lisp.Java.Surface`.
 
-The manifest is the only semantic authority for supported Java operations.
-Other tables are generated projections.
+The manifest is the only semantic authority for Java support decisions:
+admitted operations, rejected/candidate targets, source spellings, overloads,
+runtime routes, and durable divergence identities. Other semantic tables are
+generated projections.
 
 Each class record contains:
 
@@ -231,12 +244,35 @@ Each overload contains:
 - stable `overload_id`;
 - exact arity;
 - JVM descriptor or field type;
+- independent identity attestation: `:jvm` or `:ptc_only`;
 - receiver profile;
 - argument/coercion profiles;
 - return profile;
 - declared error categories;
-- optional divergence ID; and
-- a closed implementation key.
+- structured, plural `divergence_ids` (empty only when no admitted behavior
+  diverges); and
+- a closed runtime route: `{:dispatch, implementation_key}` or, during
+  migration only, `{:legacy_env, binding_id}`.
+
+Each audit target contains:
+
+- stable `target_id`;
+- upstream class/member/descriptor identity where one exists;
+- status: `:supported`, `:candidate`, or `:not_relevant`;
+- links to admitted reference/overload IDs for supported targets;
+- an audit-owned per-overload JVM descriptor map, independent of behavioral
+  classification in the overload rows;
+- a per-overload divergence attestation map, checked bidirectionally against
+  the overload rows;
+- rationale for candidates and exclusions; and
+- an owning phase, issue, or divergence ID where applicable.
+
+Presentation records are also keyed by stable target/reference IDs. They may
+contain descriptions, usage signatures, notes, examples, and `see_also` links,
+but may not redefine semantic spellings, arity, descriptors, status, or dispatch
+behavior. Keeping this content in a distinct section of `priv/java_interop.exs`
+allows generated prose to remain useful without creating a second semantic
+authority.
 
 Example shape:
 
@@ -264,11 +300,13 @@ Example shape:
     %{
       overload_id: :local_date_parse_string,
       descriptor: "(Ljava/lang/CharSequence;)Ljava/time/LocalDate;",
+      attestation: :jvm,
       arity: 1,
       arguments: [:java_string],
       return: :local_date,
       errors: [:date_time_parse_exception],
-      implementation: :local_date_parse
+      divergence_ids: ["GAP-J06"],
+      route: {:dispatch, :local_date_parse}
     }
   ]
 }
@@ -277,15 +315,38 @@ Example shape:
 `Java.Surface` validates at compile time:
 
 - globally unique IDs;
-- unique class/member/kind/spelling combinations;
-- exact descriptor/arity agreement;
-- valid receiver, argument, coercion, return, error, and implementation enums;
+- unique class/member/kind identities and unique spellings within each class;
+- unique overload identities and exact descriptor/arity agreement;
+- JVM identity attestation independently requires a valid descriptor, while
+  PTC-only aliases/extensions prohibit one, and the result must exactly match
+  the audit-owned per-overload descriptor map;
+- durable, plural divergence IDs on every admitted behavioral difference,
+  with exact per-overload agreement between runtime and audit metadata;
+- valid receiver, argument, coercion, return, error, and implementation enums,
+  with every instance overload matching its owning class's receiver profile;
 - no ambiguous direct-dot family without an explicit policy;
-- every implementation key has a code-owned handler;
+- every dispatch implementation key has a code-owned handler and every
+  temporary legacy route resolves through an independent, code-owned catalog
+  to a current Env binding;
 - every documented or runtime-linked row resolves back to the same manifest
   identity; and
-- no Java-shaped entry remains in the generic function manifest after final
-  migration.
+- every admitted reference is covered by an audit and either a Java interop
+  presentation or an explicit omission policy, every presentation and
+  runtime spelling resolves and appears in the relevant presentation,
+  `see_also` IDs resolve, unsupported audit targets do not claim runtime
+  references, and every supported target resolves to at least one admitted
+  overload; and
+- legacy Java rows and top-level Java tables cannot reappear in the generic
+  function/audit manifests; consolidation fails instead of masking them.
+
+While a family is still on the old implementation, each affected overload uses
+an explicit `{:legacy_env, binding_id}` route. `Java.Surface` validates that the
+binding exists in a compile-independent implementation catalog and the
+analyzer/runtime projection agrees with it. The catalog must not be derived
+from the manifest routes it attests. Migrating a family replaces those routes
+with `{:dispatch, implementation_key}` in the same change that deletes the
+legacy binding and its catalog row. This is the only temporary dual-schema
+mechanism; Phase 4 removes it.
 
 The manifest must be included as `@external_resource` and in Hex package files.
 
@@ -295,11 +356,14 @@ Generated consumers:
 - bounded source atom/name inventory;
 - dispatch tables;
 - Java audit and coverage inventory;
-- generated Java interop documentation; and
+- generated Java interop documentation;
+- Java rows in the generated function reference; and
 - conformance target inventory.
 
 The generated `docs/java-interop.md` remains generated. Update its generator
 input and run `mix ptc.gen_docs` rather than editing it directly.
+`mix ptc.gen_docs --check` and
+`mix ptc.conformance_report --check-inventory` are required drift gates.
 
 ### 2. Class-aware syntax and CoreAST
 
@@ -344,9 +408,25 @@ Update all CoreAST consumers in the same slice:
 - data-key/static walks; and
 - any prelude compiler/bundle walkers that enumerate CoreAST explicitly.
 
-Tests must prove both valid recursion and rejection of malformed Java nodes. A
-source export/reload test should round-trip closures containing qualified and
+Tests must prove both valid recursion and rejection of malformed Java nodes.
+`CoreToSource` must format Java AST nodes and value-position references so a
+source export/reload test can round-trip closures containing qualified and
 direct-dot Java calls.
+
+Runtime Java values are a separate case from Java syntax in a closure body. The
+initial implementation does not invent reader literals for wrappers, primitive
+tags, or `%Java.Callable{}`. Change `CoreToSource.export_namespace/1` to return
+an explicit result and reject an exported namespace containing any such stored
+value with:
+
+```elixir
+{:error, {:non_exportable_java_value, bounded_path, class_or_reference_id}}
+```
+
+The rejection recursively covers captured environments and collections and
+must occur before partial source is returned. A later plan may add reversible
+reader forms. Tests cover both closure-body round trips and bounded rejection
+of stored Java object, primitive, and callable values.
 
 ### 3. Closed dispatch
 
@@ -434,6 +514,32 @@ Add one struct per represented Java object class:
 | `java.time.Duration` | signed seconds plus nanosecond adjustment | between, duration accessors, toString |
 | `java.util.Date` | signed epoch milliseconds | constructors, getTime, before/after, toString policy |
 
+Also add a closed `%Java.Primitive{kind: kind, value: value}` representation for
+Java numeric results whose boxed primitive identity can affect a later overload.
+The initial `kind` set is `:int`, `:long`, `:float`, and `:double`:
+
+- `:int` and `:long` payloads are integers validated against their Java ranges;
+- `:float` payloads are rounded once to IEEE-754 binary32 and stored exactly in
+  a BEAM float together with the `:float` tag;
+- `:double` payloads use IEEE-754 binary64; and
+- signed zero, NaN, and infinities retain both the primitive kind and the
+  existing PTC special-value policy.
+
+Java numeric parsers, numeric fields, and overloads return a primitive wrapper
+when Java would return a boxed primitive value whose identity is observable by
+another admitted overload. The wrapper survives `let`, collections, higher-order
+functions, closures, REPL continuation, and `run_native/2`.
+
+Ordinary PTC numeric literals remain ordinary PTC numbers. For Java overload
+selection, an untagged PTC integer has the documented default profile `:long`
+and an untagged PTC float has `:double`; a manifest row may reject rather than
+narrow either value. Passing a tagged primitive directly to another Java call
+uses its retained kind. Passing it through an ordinary PTC arithmetic operation
+first exposes its numeric payload and produces an ordinary PTC number, so that
+operation deliberately ends the Java primitive provenance. Numeric predicates,
+equality, ordering, formatting, retained-size accounting, and public projection
+must treat valid wrappers as numbers while never accepting a forged wrapper.
+
 Do not infer these identities from arbitrary `%Date{}` or `%DateTime{}` values.
 Every constructor validates the selected Java range and normalization invariant.
 Every consumer validates a wrapper before using its payload so a host-forged
@@ -445,6 +551,9 @@ Native wrappers are retained in:
 - REPL continuation memory/history;
 - closures and user definitions; and
 - native intermediate evaluation values.
+
+Here and below, “wrappers” includes `%Java.Primitive{}` unless a boundary rule
+specifically distinguishes object and primitive values.
 
 Class-specific corrections include:
 
@@ -463,6 +572,13 @@ Class-specific corrections include:
 Numeric coercion must be selected by the overload row, not by a generic BEAM
 number helper. Define closed profiles for Java primitive arguments and results,
 including range, float/double rounding, signed zero, infinities, and NaN.
+
+Overload selection must consume `%Java.Primitive{}` before unwrapping its
+payload. It is an implementation error to select an overload from only the BEAM
+shape when the value carries a primitive kind. Tests must route parser results
+through `let`, user memory, collections, `map`/`apply`, and Java callables before
+calling another overloaded Java member; equal numeric results alone are not
+evidence that the correct overload was selected.
 
 Implement strict Java parser behavior for admitted forms such as:
 
@@ -525,7 +641,19 @@ host input.
 Java identity must remain native while evaluation can use it, but wrapper structs
 and callable authority must not escape accidentally.
 
-Extend the existing boundary code with a focused Java projection layer:
+Add a focused, total `PtcRunner.Lisp.Java.Project` API:
+
+```elixir
+project(value, boundary, contract \\ nil)
+  :: {:ok, projected_value} | {:error, projection_error}
+```
+
+It validates every Java leaf, tracks a bounded structural path, detects map-key
+and set-member collisions, and never raises for untrusted values. The existing
+recursive externalizers may delegate Java leaves to it, but callers that can
+encounter Java values must handle its result explicitly.
+
+Apply it at these boundaries:
 
 | Boundary | Required behavior |
 |---|---|
@@ -533,7 +661,8 @@ Extend the existing boundary code with a focused Java projection layer:
 | REPL continuation | retain valid native wrappers/callables for later forms |
 | `run/2` public result | recursively replace wrappers with inert canonical values and callables with inert labels |
 | `format_value` / runtime `str` | class-aware canonical display without struct internals |
-| declared direct tool argument/result | apply existing signature contract, converting an Instant/legacy Date to `%DateTime{}` only when exact and representable |
+| direct tool callback arguments | prepare Java leaves from the parsed tool signature before callback invocation |
+| direct tool callback result | reject Java wrappers/callables initially; do not infer Java identity from ordinary host values |
 | Kernel/tool JSON | emit canonical JSON-safe values or reject before callback/publication |
 | cache identity | derive from the already-prepared callback-visible value; do not key from raw wrapper storage |
 
@@ -544,12 +673,72 @@ Canonical inert values should initially be:
 - Duration: Java `Duration.toString`-compatible text;
 - legacy Date: a documented canonical UTC instant derived from exact epoch
   milliseconds; and
+- Java primitive: its inert PTC numeric payload after range/representation
+  validation; and
 - Java callable: a fixed class/member label with no executable state.
 
 Projection recursively covers lists, tuples, sets, map keys/values, result
 records, and nested tool values. If two distinct native keys or set members
 become equal after projection, return a bounded projection-collision error; do
 not silently overwrite one.
+
+The closed error families are:
+
+- `:invalid_java_value` for a forged or malformed wrapper;
+- `:java_projection_collision` with bounded path and collection kind;
+- `:unsupported_java_boundary_value` for a valid value, such as a callable,
+  that the selected boundary forbids; and
+- `:inexact_java_boundary_conversion` when a declared conversion would lose
+  range or precision.
+
+For `run/2`, projection is part of final result construction. A projection
+failure replaces the would-be public result with the ordinary error `Step`
+category `:java_projection_error`, preserving already-recorded usage/effects and
+without exposing the colliding values. Kernel execution receives that normal
+Lisp error and uses its existing terminal path, including an error
+`run-stopped` outcome. This plan does not change `EventSink`, `RunState`,
+`TraceLog`, or REPL ownership to achieve that propagation.
+
+#### Direct tool preparation contract
+
+The current public direct-tool path does not provide general input or result
+signature enforcement, so this plan must not describe that enforcement as
+already existing. For Java leaves only, use the parsed `Tool.signature` as
+conversion metadata when it is present:
+
+- a value at a declared `:datetime` argument path accepts an Instant or legacy
+  Date wrapper and converts it to `%DateTime{}` only when exact and
+  representable; LocalDate and Duration are type errors there;
+- a declared `:string` path receives the wrapper's canonical inert text;
+- a declared `:any` path receives the canonical inert projection;
+- without a signature, only canonical JSON-safe projection is available—there
+  is no implicit DateTime conversion; and
+- Java callables are rejected for every initial tool contract.
+
+This preparation transforms and validates only Java values. It does not add
+general validation or coercion for unrelated public-tool arguments. The initial
+tool-result contract rejects Java wrappers and Java callables returned by a
+callback; ordinary `%DateTime{}` and other host values follow existing result
+handling and are never promoted implicitly to LocalDate, Instant, Duration, or
+legacy Date.
+
+Ordering is normative:
+
+```text
+normalize Lisp tool arguments
+  -> prepare/validate Java leaves against declared paths
+  -> compute cache key and ledger arguments from callback-visible values
+  -> invoke callback
+  -> reject forbidden Java result leaves
+  -> record/cache the callback result
+  -> expose the result to evaluation
+```
+
+A cache hit therefore returns the same already-prepared Java-free result that a
+callback execution would return. Preparation or collision failure occurs before
+callback invocation and is reported through the existing bounded tool-failure
+path. Supporting native Java values returned from trusted tools requires a
+future explicit contract and is not part of this plan.
 
 This slice may factor the existing recursive externalization code so direct and
 Kernel callers share Java leaf handling. It must not redesign EventSink,
@@ -567,7 +756,7 @@ Every Java case has:
 - structured invocation/fixtures;
 - expected typed value or structured error category;
 - oracle choice; and
-- optional durable divergence ID.
+- zero or more durable divergence IDs.
 
 For overload coverage, the PTC side must report the selected `overload_id` from
 `Java.Dispatch` through a test-only internal attestation hook. The ID is not
@@ -623,8 +812,10 @@ compatibility shims.
    - intentional PTC divergence;
    - temporary legacy route needing migration; or
    - incorrect/non-Java alias to remove.
-3. Add `priv/java_interop.exs`, `Java.Surface`, stable IDs, and validation.
-4. Make audit/docs/conformance inventories projections of that manifest.
+3. Add `priv/java_interop.exs`, `Java.Surface`, stable IDs, audit targets,
+   presentation records, temporary legacy-route IDs, and validation.
+4. Make the Java audit, Java interop guide, Java function-reference rows, and
+   conformance inventories projections of that manifest.
 5. Add typed JVM/Babashka cases that characterize current behavior and expose
    the selected fixes as failing regressions.
 6. Remove clearly non-Java-shaped aliases such as variadic Java Math forms once
@@ -635,7 +826,8 @@ Phase-0 gate:
 - every shipped Java spelling has exactly one classification;
 - every exact admitted operation has a JVM descriptor and executable case;
 - every known mismatch has a durable divergence/bug record and owning phase;
-- no documentation or audit row is orphaned; and
+- no documentation, function-reference, or audit row is orphaned;
+- every legacy route resolves to exactly one current Env binding; and
 - ordinary runtime behavior is unchanged except for explicitly selected alias
   removals.
 
@@ -644,8 +836,10 @@ Phase-0 gate:
 1. Add the complete existing CoreAST validation baseline and Java nodes.
 2. Update every CoreAST consumer.
 3. Add `Java.Dispatch`, handler postcondition validation, and structured errors.
-4. Add `%Java.Callable{}` and update existing callable consumers.
-5. Add minimal Java native/public/tool/Kernel projection.
+4. Add `%Java.Callable{}` and `%Java.Primitive{}` and update callable, numeric,
+   formatting, storage, retained-size, and predicate consumers.
+5. Add the error-returning Java projector, public-result error propagation, and
+   the Java-only direct-tool preparation pipeline.
 6. Migrate Boolean, numeric parser, selected Math, System, and constant/static
    rows one complete family at a time.
 7. Delete each migrated Env/runtime route and regenerate docs.
@@ -654,6 +848,9 @@ Phase-1 gate:
 
 - no migrated operation remains live through both Env and Java dispatch;
 - direct, native, tool, Kernel, and callable cases agree on manifest identity;
+- primitive parser results retain their exact kind through storage and
+  higher-order calls;
+- projection and tool-preparation failures use bounded existing result paths;
 - all scalar overloads have authoritative JVM coverage; and
 - `mix precommit` passes after every family.
 
@@ -698,8 +895,10 @@ Phase-3 gate:
 
 1. Prove all surviving Java rows use closed dispatch.
 2. Delete temporary legacy-route schema and adapter.
-3. Delete duplicate Java analyzer clauses, Env bindings, metadata, audit tables,
-   and obsolete tests.
+3. Delete duplicate Java analyzer clauses, Env bindings, semantic metadata,
+   audit tables, function-reference rows, and obsolete tests. Retain only
+   presentation content keyed by manifest IDs if it has not been folded into
+   `priv/java_interop.exs`.
 4. Regenerate `docs/java-interop.md`, function reference material, and
    conformance reports.
 5. Move durable behavior into the language specification, module docs, and
@@ -724,7 +923,9 @@ Final gate:
   CoreAST tests;
 - unknown class/member/kind/arity diagnostics;
 - complete CoreAST consumer recursion tests; and
-- source export/reload round trips.
+- source export/reload round trips for closures containing Java syntax; and
+- bounded namespace-export rejection for stored Java object, primitive, and
+  callable values, including nested/captured cases.
 
 ### Dispatch
 
@@ -741,14 +942,17 @@ Final gate:
 - valid and forged wrappers at top level and nested positions;
 - continuation memory/history across forms;
 - canonical formatting and public projection;
-- map/set projection collisions;
-- direct tool signature conversion and precision/range rejection;
+- map/set projection collisions and `run/2`/Kernel error propagation;
+- direct tool Java-leaf conversion, missing-signature behavior, callback
+  ordering, cache-hit equivalence, and precision/range rejection;
+- rejection of Java wrappers/callables returned by tool callbacks;
 - Kernel JSON acceptance/rejection; and
 - Java callable native retention and inert public projection.
 
 ### Semantic families
 
-- numeric primitive boundaries and special values;
+- numeric primitive identity through `let`, memory, collections, HOFs, and
+  chained overloads, plus primitive boundaries and special values;
 - strict parser syntax and Java error categories;
 - temporal class/range/precision/method families;
 - Date milliseconds with no heuristic;
@@ -777,6 +981,18 @@ gates require this vertical slice.
 Retain them only at native boundaries. Add the focused recursive projection and
 collision tests before the first wrapper-producing operation is enabled.
 
+### Primitive results can lose overload identity
+
+Never unwrap `%Java.Primitive{}` before Java overload selection. Ordinary PTC
+arithmetic may deliberately erase the tag, but storage and higher-order passage
+must not. Use selected-overload attestation after each such path.
+
+### Projection failure can bypass normal outcomes
+
+Keep projection result-returning and integrate it with `Step` construction and
+the existing Kernel/tool terminal paths. Do not raise from public projection or
+silently rebuild maps/sets with colliding projected members.
+
 ### Overload tests can pass accidentally
 
 Equal results do not prove equal overloads. Require exact JVM descriptor and PTC
@@ -804,10 +1020,13 @@ The plan is complete when:
 - the supported Java surface is defined once;
 - analyzer and runtime preserve exact Java identity;
 - instance methods are receiver/class constrained;
-- temporal values retain distinct native class identity;
+- temporal values and observable Java primitive results retain distinct native
+  identity;
 - selected numeric, Math, temporal, and String behavior matches pinned JVM
   cases or an explicit divergence;
 - native/public/tool/Kernel boundaries handle Java values deliberately;
-- generated docs and audit inventory cannot drift from dispatch;
+- projection failures remain bounded ordinary outcomes;
+- generated docs, function-reference rows, and audit inventory cannot drift
+  from dispatch;
 - every admitted overload is executable and descriptor-attested; and
 - all replaced flat Java routes are deleted.

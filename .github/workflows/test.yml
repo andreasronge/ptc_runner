@@ -18,6 +18,12 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v6
 
+      - name: Setup Java environment
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+
       - name: Setup Elixir environment
         uses: ./.github/actions/setup-elixir
 
@@ -32,6 +38,14 @@ jobs:
 
       - name: Run Credo
         run: mix credo --strict
+
+      - name: Check generated Java documentation and conformance inventory
+        run: |
+          mix ptc.gen_docs --check
+          mix ptc.conformance_report --check-inventory
+
+      - name: Audit upstream compatibility metadata
+        run: mix ptc.audit_upstream
 
       - name: Dialyzer
         run: mix dialyzer --format github

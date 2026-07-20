@@ -21,6 +21,7 @@ defmodule PtcRunner.Lisp.Analyze do
   alias PtcRunner.Lisp.CoreAST
   alias PtcRunner.Lisp.Env
   alias PtcRunner.Lisp.Formatter
+  alias PtcRunner.Lisp.Java.Surface, as: JavaSurface
 
   # Special form names that can be shadowed by local bindings.
   # These correspond to Clojure macros (not true special forms like if/def/recur/do).
@@ -1159,7 +1160,7 @@ defmodule PtcRunner.Lisp.Analyze do
   # interned before any user input reaches the analyzer (avoids the
   # `String.to_existing_atom/1` race where the analyzer module loads before
   # `Env.initial/0` (which consumes `Runtime.Builtins.bindings/0`) runs).
-  @qualified_namespaces [:json, :Duration]
+  @qualified_namespaces [:json]
 
   @qualified_namespace_tables (for ns <- @qualified_namespaces, into: %{} do
                                  prefix = Atom.to_string(ns) <> "/"
@@ -1194,31 +1195,35 @@ defmodule PtcRunner.Lisp.Analyze do
   #   - `:unknown_member` when `<ns>` is qualified but `<func>` isn't a member
   #   - `:not_qualified` when `<ns>` is not in the qualified namespace set
   #     (caller falls through to the legacy `normalize_clojure_namespace/3` path)
-  defp qualified_namespace_lookup(:Boolean, "parseBoolean"), do: {:ok, :"Boolean/parseBoolean"}
-  defp qualified_namespace_lookup(:Double, "parseDouble"), do: {:ok, :"parse-double"}
-  defp qualified_namespace_lookup(:Float, "parseFloat"), do: {:ok, :"parse-double"}
-  defp qualified_namespace_lookup(:Integer, "parseInt"), do: {:ok, :"parse-long"}
-  defp qualified_namespace_lookup(:Long, "parseLong"), do: {:ok, :"parse-long"}
-  defp qualified_namespace_lookup(:"java.time.Duration", :between), do: {:ok, :"Duration/between"}
-
-  defp qualified_namespace_lookup(:"java.time.Duration", "between"),
-    do: {:ok, :"Duration/between"}
-
   defp qualified_namespace_lookup(ns, func) do
-    case Map.get(@qualified_namespace_tables, ns) do
-      nil ->
-        :not_qualified
+    case JavaSurface.qualified_legacy_alias(ns, func) do
+      {:ok, binding} ->
+        {:ok, binding}
 
-      table ->
-        case Map.get(table, func) do
-          nil -> :unknown_member
-          qualified -> {:ok, qualified}
+      :unknown_member ->
+        :unknown_member
+
+      :not_qualified ->
+        case Map.get(@qualified_namespace_tables, ns) do
+          nil ->
+            :not_qualified
+
+          table ->
+            case Map.get(table, func) do
+              nil -> :unknown_member
+              qualified -> {:ok, qualified}
+            end
         end
     end
   end
 
   defp namespaced_unknown_member_error(ns, func) do
-    available = Map.get(@qualified_namespace_members, ns, "")
+    available =
+      case JavaSurface.qualified_legacy_members(ns) do
+        [] -> Map.get(@qualified_namespace_members, ns, "")
+        members -> members |> Enum.sort() |> Enum.join(", ")
+      end
+
     category_name = Env.category_name(Env.namespace_category(ns))
 
     {:error,
@@ -1366,35 +1371,23 @@ defmodule PtcRunner.Lisp.Analyze do
   end
 
   defp available_namespaces do
-    [
-      "data/",
-      "tool/",
-      "json/",
-      "clojure.core/",
-      "core/",
-      "clojure.string/",
-      "str/",
-      "string/",
-      "clojure.set/",
-      "set/",
-      "clojure.walk/",
-      "walk/",
-      "regex/",
-      "Math/",
-      "System/",
-      "Boolean/",
-      "Double/",
-      "Float/",
-      "Integer/",
-      "Long/",
-      "LocalDate/",
-      "Instant/",
-      "Duration/",
-      "java.time.LocalDate/",
-      "java.time.Instant/",
-      "java.time.Duration/",
-      "java.util.Date."
-    ]
+    ([
+       "data/",
+       "tool/",
+       "json/",
+       "clojure.core/",
+       "core/",
+       "clojure.string/",
+       "str/",
+       "string/",
+       "clojure.set/",
+       "set/",
+       "clojure.walk/",
+       "walk/",
+       "regex/"
+     ] ++
+       JavaSurface.available_namespace_labels() ++ ["java.util.Date."])
+    |> Enum.uniq()
     |> Enum.join(", ")
   end
 

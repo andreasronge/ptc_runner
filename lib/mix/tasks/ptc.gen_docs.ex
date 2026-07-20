@@ -1,9 +1,9 @@
 defmodule Mix.Tasks.Ptc.GenDocs do
   @shortdoc "Generate function reference and audit docs from registry"
   @moduledoc """
-  Generates documentation from `priv/functions.exs` (implemented + interop),
-  `priv/function_audit.exs` (Clojure/Java Math parity triage notes), and
-  `priv/java_compat_audit.exs` (curated Java compatibility targets):
+  Generates documentation from `priv/functions.exs` (ordinary implemented
+  functions), `priv/function_audit.exs` (Clojure parity triage notes), and
+  `priv/java_interop.exs` (bounded Java surface and presentation metadata):
 
   1. `docs/function-reference.md` — all implemented functions grouped by section
   2. `docs/conformance/index.md` — namespace coverage dashboard
@@ -12,9 +12,13 @@ defmodule Mix.Tasks.Ptc.GenDocs do
   ## Usage
 
       mix ptc.gen_docs
+      mix ptc.gen_docs --check
+
+  `--check` verifies the checked-in files without rewriting them.
   """
   use Mix.Task
 
+  alias PtcRunner.Lisp.Java.Surface
   alias PtcRunner.Lisp.Registry
 
   @function_ref_path "docs/function-reference.md"
@@ -56,126 +60,6 @@ defmodule Mix.Tasks.Ptc.GenDocs do
       title: "Clojure Walk Audit for PTC-Lisp",
       description: "Comparison of `clojure.walk` vars against PTC-Lisp builtins.",
       fetch: &Registry.clojure_walk_audit/0
-    },
-    %{
-      path: "docs/conformance/java-math-audit.md",
-      namespace: "`Math/`, `java.lang.Math`",
-      scope: "Java standard",
-      target: "curated Java standard methods",
-      title: "Java Math Audit for PTC-Lisp",
-      description: "Comparison of `java.lang.Math` methods against PTC-Lisp builtins.",
-      fetch: &Registry.java_math_audit/0
-    }
-  ]
-
-  @java_compat_audits [
-    %{
-      key: :java_lang_boolean_audit,
-      path: "docs/conformance/java-lang-boolean-audit.md",
-      namespace: "`Boolean/`, `java.lang.Boolean`",
-      scope: "Java standard",
-      target: "curated Java standard methods/constants",
-      title: "Java Boolean Audit for PTC-Lisp",
-      description: "Curated LLM-compatibility target for `java.lang.Boolean`."
-    },
-    %{
-      key: :java_lang_double_audit,
-      path: "docs/conformance/java-lang-double-audit.md",
-      namespace: "`Double/`, `java.lang.Double`",
-      scope: "Java standard",
-      target: "curated Java standard methods/constants",
-      title: "Java Double Audit for PTC-Lisp",
-      description: "Curated LLM-compatibility target for `java.lang.Double`."
-    },
-    %{
-      key: :java_lang_float_audit,
-      path: "docs/conformance/java-lang-float-audit.md",
-      namespace: "`Float/`, `java.lang.Float`",
-      scope: "Java standard",
-      target: "curated Java standard methods",
-      title: "Java Float Audit for PTC-Lisp",
-      description: "Curated LLM-compatibility target for `java.lang.Float`."
-    },
-    %{
-      key: :java_lang_integer_audit,
-      path: "docs/conformance/java-lang-integer-audit.md",
-      namespace: "`Integer/`, `java.lang.Integer`",
-      scope: "Java standard",
-      target: "curated Java standard methods/constants",
-      title: "Java Integer Audit for PTC-Lisp",
-      description: "Curated LLM-compatibility target for `java.lang.Integer`."
-    },
-    %{
-      key: :java_lang_long_audit,
-      path: "docs/conformance/java-lang-long-audit.md",
-      namespace: "`Long/`, `java.lang.Long`",
-      scope: "Java standard",
-      target: "curated Java standard methods/constants",
-      title: "Java Long Audit for PTC-Lisp",
-      description: "Curated LLM-compatibility target for `java.lang.Long`."
-    },
-    %{
-      key: :java_lang_string_audit,
-      path: "docs/conformance/java-lang-string-audit.md",
-      namespace: "`java.lang.String` dot methods",
-      scope: "Java standard",
-      target: "curated Java standard methods",
-      title: "Java String Audit for PTC-Lisp",
-      description: "Curated LLM-compatibility target for `java.lang.String` methods."
-    },
-    %{
-      key: :java_lang_system_audit,
-      path: "docs/conformance/java-lang-system-audit.md",
-      namespace: "`System/`, `java.lang.System`",
-      scope: "Java standard",
-      target: "curated Java standard methods",
-      title: "Java System Audit for PTC-Lisp",
-      description: "Curated LLM-compatibility target for `java.lang.System`."
-    },
-    %{
-      key: :java_time_local_date_audit,
-      path: "docs/conformance/java-time-local-date-audit.md",
-      namespace: "`LocalDate/`, `java.time.LocalDate/`",
-      scope: "Java standard",
-      target: "curated Java standard methods",
-      title: "Java LocalDate Audit for PTC-Lisp",
-      description: "Curated LLM-compatibility target for `java.time.LocalDate`."
-    },
-    %{
-      key: :java_time_instant_audit,
-      path: "docs/conformance/java-time-instant-audit.md",
-      namespace: "`Instant/`, `java.time.Instant/`",
-      scope: "Java standard",
-      target: "curated Java standard methods",
-      title: "Java Instant Audit for PTC-Lisp",
-      description: "Curated LLM-compatibility target for `java.time.Instant`."
-    },
-    %{
-      key: :java_time_duration_audit,
-      path: "docs/conformance/java-time-duration-audit.md",
-      namespace: "`Duration/`, `java.time.Duration`",
-      scope: "Java standard candidate",
-      target: "curated Java standard methods",
-      title: "Java Duration Audit for PTC-Lisp",
-      description: "Curated LLM-compatibility target for `java.time.Duration`."
-    },
-    %{
-      key: :java_time_period_audit,
-      path: "docs/conformance/java-time-period-audit.md",
-      namespace: "`Period/`, `java.time.Period`",
-      scope: "Java standard candidate",
-      target: "curated Java standard methods",
-      title: "Java Period Audit for PTC-Lisp",
-      description: "Curated LLM-compatibility target for `java.time.Period`."
-    },
-    %{
-      key: :java_util_date_audit,
-      path: "docs/conformance/java-util-date-audit.md",
-      namespace: "`java.util.Date.`",
-      scope: "Java standard",
-      target: "curated Java standard methods/constructors",
-      title: "Java Date Audit for PTC-Lisp",
-      description: "Curated LLM-compatibility target for `java.util.Date`."
     }
   ]
 
@@ -213,23 +97,77 @@ defmodule Mix.Tasks.Ptc.GenDocs do
   @interop_path "docs/java-interop.md"
 
   @impl Mix.Task
-  def run(_args) do
+  def run(args) do
     Mix.Task.run("app.start")
+    check? = "--check" in args
 
-    generate_function_reference()
-    Enum.each(all_audits(), &generate_audit/1)
-    generate_audit_index()
-    generate_java_interop()
+    if check?, do: check_java_audit_path_set!()
+
+    generate_function_reference(check?)
+    Enum.each(all_audits(), &generate_audit(&1, check?))
+    generate_audit_index(check?)
+    generate_java_interop(check?)
+  end
+
+  defp check_java_audit_path_set! do
+    expected = Enum.map(Surface.audit_specs(), & &1.path)
+    actual = generated_java_audit_paths()
+
+    case java_audit_path_drift(expected, actual) do
+      %{missing: [], orphaned: []} ->
+        :ok
+
+      drift ->
+        Mix.raise("Generated Java audit path set is stale: #{inspect(drift)}")
+    end
+  end
+
+  @doc false
+  def generated_java_audit_paths(root \\ ".") do
+    root
+    |> Path.join("docs/conformance/**/*.md")
+    |> Path.wildcard()
+    |> Enum.filter(&generated_java_audit?/1)
+    |> Enum.sort()
+  end
+
+  @doc false
+  def java_audit_path_drift(expected, actual) do
+    expected = MapSet.new(expected)
+    actual = MapSet.new(actual)
+
+    %{
+      missing: expected |> MapSet.difference(actual) |> Enum.sort(),
+      orphaned: actual |> MapSet.difference(expected) |> Enum.sort()
+    }
+  end
+
+  defp generated_java_audit?(path) do
+    case File.read(path) do
+      {:ok, content} ->
+        String.starts_with?(content, "<!-- Auto-generated") and
+          Enum.any?(
+            ["priv/java_interop.exs", "priv/java_compat_audit.exs"],
+            &String.contains?(content, "from `#{&1}`")
+          )
+
+      {:error, _reason} ->
+        false
+    end
   end
 
   defp all_audits do
-    @audits ++
-      Enum.map(@java_compat_audits, fn spec ->
-        Map.put(spec, :fetch, fn -> Registry.java_compat_audit(spec.key) end)
+    clojure_audits = Enum.reject(@audits, &(&1.path == "docs/conformance/java-math-audit.md"))
+
+    clojure_audits ++
+      Enum.map(Surface.audit_specs(), fn spec ->
+        spec
+        |> Map.put(:namespace, spec.namespace_label)
+        |> Map.put(:fetch, fn -> Surface.audit(spec.key) end)
       end)
   end
 
-  defp generate_function_reference do
+  defp generate_function_reference(check?) do
     entries = Registry.implemented()
 
     sections =
@@ -241,8 +179,8 @@ defmodule Mix.Tasks.Ptc.GenDocs do
     <!-- Auto-generated — do not edit by hand -->
     # PTC-Lisp Function Reference
 
-    > **Warning:** This file is auto-generated by `mix ptc.gen_docs` from `priv/functions.exs`.
-    > Manual edits will be overwritten. Edit `priv/functions.exs` instead.
+    > **Warning:** This file is auto-generated by `mix ptc.gen_docs` from `priv/functions.exs` and `priv/java_interop.exs`.
+    > Manual edits will be overwritten. Edit those source manifests instead.
 
     #{length(entries)} functions and special forms.
 
@@ -255,8 +193,8 @@ defmodule Mix.Tasks.Ptc.GenDocs do
     #{Enum.map_join(sections, "\n\n", &render_section/1)}
     """
 
-    File.write!(@function_ref_path, content)
-    Mix.shell().info("Generated #{@function_ref_path} (#{length(entries)} entries)")
+    write_or_check!(@function_ref_path, String.trim_trailing(content) <> "\n", check?)
+    report_generation(@function_ref_path, length(entries), "entries", check?)
   end
 
   defp toc(sections) do
@@ -325,7 +263,10 @@ defmodule Mix.Tasks.Ptc.GenDocs do
     """
   end
 
-  defp generate_audit(%{path: path, title: title, description: description, fetch: fetch} = spec) do
+  defp generate_audit(
+         %{path: path, title: title, description: description, fetch: fetch} = spec,
+         check?
+       ) do
     entries = fetch.()
 
     counts = Enum.frequencies_by(entries, & &1.status)
@@ -333,9 +274,7 @@ defmodule Mix.Tasks.Ptc.GenDocs do
     coverage = coverage_percent(counts)
 
     source_file =
-      if Map.has_key?(spec, :key),
-        do: "priv/java_compat_audit.exs",
-        else: "priv/function_audit.exs"
+      if Map.has_key?(spec, :key), do: "priv/java_interop.exs", else: "priv/function_audit.exs"
 
     rows =
       entries
@@ -390,12 +329,11 @@ defmodule Mix.Tasks.Ptc.GenDocs do
     #{rows}
     """
 
-    File.mkdir_p!(Path.dirname(path))
-    File.write!(path, content)
-    Mix.shell().info("Generated #{path} (#{length(entries)} entries)")
+    write_or_check!(path, content, check?)
+    report_generation(path, length(entries), "entries", check?)
   end
 
-  defp generate_audit_index do
+  defp generate_audit_index(check?) do
     audited_rows = Enum.map(all_audits(), &audited_index_row/1)
     non_audited_rows = Enum.map(@non_audited_namespaces, &non_audited_index_row/1)
     rows = audited_rows ++ non_audited_rows
@@ -416,7 +354,7 @@ defmodule Mix.Tasks.Ptc.GenDocs do
     # PTC-Lisp Namespace Coverage
 
     > **Warning:** This file is auto-generated by `mix ptc.gen_docs` from registry audit metadata.
-    > Manual edits will be overwritten. Edit `priv/function_audit.exs`, `priv/java_compat_audit.exs`, or `lib/mix/tasks/ptc.gen_docs.ex` instead.
+    > Manual edits will be overwritten. Edit `priv/function_audit.exs`, `priv/java_interop.exs`, or `lib/mix/tasks/ptc.gen_docs.ex` instead.
 
     This dashboard tracks how close each namespace is to its documented compatibility target and separates standard compatibility surfaces from PTC-specific extensions.
     Coverage is `supported / (supported + candidate + not_classified)` and excludes APIs marked `not_relevant`.
@@ -449,9 +387,8 @@ defmodule Mix.Tasks.Ptc.GenDocs do
     #{repl_candidates_table()}
     """
 
-    File.mkdir_p!(Path.dirname(@audit_index_path))
-    File.write!(@audit_index_path, content)
-    Mix.shell().info("Generated #{@audit_index_path} (#{length(rows)} rows)")
+    write_or_check!(@audit_index_path, content, check?)
+    report_generation(@audit_index_path, length(rows), "rows", check?)
   end
 
   defp audited_index_row(%{
@@ -533,8 +470,18 @@ defmodule Mix.Tasks.Ptc.GenDocs do
     end
   end
 
-  defp generate_java_interop do
+  defp generate_java_interop(check?) do
     entries = Registry.java_interop()
+
+    linked_class_count =
+      entries
+      |> Enum.flat_map(& &1.reference_ids)
+      |> Enum.map(fn reference_id ->
+        {:ok, reference} = Surface.fetch_reference(reference_id)
+        reference.class_id
+      end)
+      |> Enum.uniq()
+      |> length()
 
     by_class =
       entries
@@ -566,21 +513,40 @@ defmodule Mix.Tasks.Ptc.GenDocs do
     <!-- Auto-generated — do not edit by hand -->
     # Java Interop Reference for PTC-Lisp
 
-    > **Warning:** This file is auto-generated by `mix ptc.gen_docs` from `priv/functions.exs`.
-    > Manual edits will be overwritten. Edit `priv/functions.exs` instead.
+    > **Warning:** This file is auto-generated by `mix ptc.gen_docs` from `priv/java_interop.exs`.
+    > Manual edits will be overwritten. Edit `priv/java_interop.exs` instead.
 
     PTC-Lisp emulates a subset of Java interop for LLM compatibility. These are **not** real JVM calls — they are BEAM-native implementations that mirror the Java API surface LLMs are trained on.
 
-    #{length(entries)} interop entries across #{length(by_class)} classes.
+    #{length(entries)} interop entries covering #{linked_class_count} Java classes in #{length(by_class)} presentation groups.
 
     See also: [Function Reference](function-reference.md) | [PTC-Lisp Specification](ptc-lisp-specification.md) | [Namespace Coverage](conformance/index.md)
 
     #{sections}
     """
 
-    File.write!(@interop_path, content)
-    Mix.shell().info("Generated #{@interop_path} (#{length(entries)} entries)")
+    write_or_check!(@interop_path, content, check?)
+    report_generation(@interop_path, length(entries), "entries", check?)
   end
+
+  defp write_or_check!(path, expected, true) do
+    case File.read(path) do
+      {:ok, ^expected} -> :ok
+      {:ok, _stale} -> Mix.raise("Generated documentation is stale: #{path}")
+      {:error, reason} -> Mix.raise("Cannot verify generated documentation #{path}: #{reason}")
+    end
+  end
+
+  defp write_or_check!(path, content, false) do
+    File.mkdir_p!(Path.dirname(path))
+    File.write!(path, content)
+  end
+
+  defp report_generation(path, count, unit, true),
+    do: Mix.shell().info("Verified #{path} (#{count} #{unit})")
+
+  defp report_generation(path, count, unit, false),
+    do: Mix.shell().info("Generated #{path} (#{count} #{unit})")
 
   defp status_icon(:supported), do: "✅"
   defp status_icon(:candidate), do: "🔲"
