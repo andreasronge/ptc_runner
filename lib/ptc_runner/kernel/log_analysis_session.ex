@@ -1,13 +1,15 @@
 defmodule PtcRunner.Kernel.LogAnalysisSession do
   @moduledoc """
-  Owner of one bounded human log-analysis mission continuation.
+  Owner of one bounded local log-analysis mission continuation.
 
   Sessions are created only from a builder-attested, independently validated
   assembly. One GenServer serializes evaluations, owns the deadline transition,
   monitors its trace owner, and delegates all Lisp execution to
   `PtcRunner.Kernel.Evaluation`. Return and fail are per-form outcomes; only
   lifecycle close, abort, deadline, or terminal Kernel budgets close the session
-  against new forms.
+  against new forms. Close and abort finalize resources and persistence but
+  deliberately leave this GenServer alive for idempotent close retry and info;
+  every host must eventually call `stop/1`.
   """
   use GenServer
 

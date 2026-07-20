@@ -9,6 +9,11 @@ records for recently completed cross-cutting work.
 - [`product-readiness.md`](product-readiness.md) assesses what is usable now,
   current limitations, prioritized improvements, and release gates for a
   non-Elixir developer experience.
+- [`profile-backed-ptc-repl-plan.md`](profile-backed-ptc-repl-plan.md) records
+  the implemented local terminal frontend for the server-owned
+  `log-analysis-v1` mission
+  profile, including strict resources, separate trace persistence, and JSONL
+  output for coding agents without MCP or remote-session scope.
 - [`viewer-ready-run-observability.md`](viewer-ready-run-observability.md)
   plans compact prelude dependency metadata with complete-payload bounds, a
   coarse shipped-agent annotation vocabulary, strict Viewer validation, and

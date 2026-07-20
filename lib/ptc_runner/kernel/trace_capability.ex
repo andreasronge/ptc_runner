@@ -37,18 +37,17 @@ defmodule PtcRunner.Kernel.TraceCapability do
   @doc false
   @spec from_snapshot(TraceSnapshot.t()) ::
           {:ok, [Capability.t()]} | {:error, :invalid_trace_capability}
-  def from_snapshot(%TraceSnapshot{} = snapshot) do
-    with {:ok, list_runs} <- capability(snapshot, "trace-list-runs", :list_runs),
-         {:ok, get_run} <- capability(snapshot, "trace-get-run", :get_run),
-         {:ok, list_turns} <- capability(snapshot, "trace-list-turns", :list_turns),
-         {:ok, counters} <- capability(snapshot, "trace-counters", :counters) do
+  def from_snapshot(snapshot) do
+    with true <- TraceSnapshot.valid?(snapshot),
+         {:ok, list_runs} <- snapshot_capability(snapshot, "trace-list-runs", :list_runs),
+         {:ok, get_run} <- snapshot_capability(snapshot, "trace-get-run", :get_run),
+         {:ok, list_turns} <- snapshot_capability(snapshot, "trace-list-turns", :list_turns),
+         {:ok, counters} <- snapshot_capability(snapshot, "trace-counters", :counters) do
       {:ok, [list_runs, get_run, list_turns, counters]}
     else
       _ -> {:error, :invalid_trace_capability}
     end
   end
-
-  def from_snapshot(_snapshot), do: {:error, :invalid_trace_capability}
 
   defp capability(trace_log, name, operation) do
     Capability.new(
@@ -62,11 +61,35 @@ defmodule PtcRunner.Kernel.TraceCapability do
     )
   end
 
+  defp snapshot_capability(snapshot, name, operation) do
+    Capability.new(
+      name: name,
+      description: "Bounded source-scoped canonical trace query",
+      input_schema: %{"type" => "object", "additionalProperties" => true},
+      output_schema: %{"type" => "object", "additionalProperties" => true},
+      effect: :read,
+      callback: fn arguments -> query_snapshot(snapshot, operation, arguments) end,
+      validate: &validate_arguments/1
+    )
+  end
+
   defp validate_arguments(arguments) when is_map(arguments), do: :ok
   defp validate_arguments(_arguments), do: {:error, "map required"}
 
   defp query(trace_log, operation, arguments) do
-    case query_source(trace_log, operation, arguments) do
+    trace_log
+    |> query_source(operation, arguments)
+    |> normalize_query_result()
+  end
+
+  defp query_snapshot(snapshot, operation, arguments) do
+    snapshot
+    |> TraceSnapshot.query(operation, arguments)
+    |> normalize_query_result()
+  end
+
+  defp normalize_query_result(result) do
+    case result do
       {:ok, result} ->
         {:ok, result}
 
@@ -98,9 +121,6 @@ defmodule PtcRunner.Kernel.TraceCapability do
 
   defp query_source(%TraceLog{} = trace_log, operation, arguments),
     do: TraceLog.query(trace_log, operation, arguments)
-
-  defp query_source(%TraceSnapshot{} = snapshot, operation, arguments),
-    do: TraceSnapshot.query(snapshot, operation, arguments)
 
   defp provider_error(kind, details), do: {:error, ProviderError.new(kind, details)}
 end

@@ -113,7 +113,7 @@ defmodule PtcRunner.Kernel.ViewerReplHttpTest do
     persisted =
       trace_dir
       |> File.ls!()
-      |> Enum.filter(&String.starts_with?(&1, "viewer-repl-"))
+      |> Enum.filter(&String.starts_with?(&1, "log-analysis-"))
 
     assert length(persisted) == 1
   end

@@ -42,6 +42,35 @@ defmodule PtcRunner.Kernel.TraceLog do
   @max_string_bytes 256
   @event_type ~r/\A[a-z][a-z0-9-]{0,127}\z/
   @event_keys ~w(schema_version run_id trace_id sequence timestamp type data)
+  @bound_publication_helper ~S"""
+  set -eu
+  final_name=$1
+  temporary_name=$2
+  byte_count=$3
+  marker_name=$4
+  umask 077
+  trap 'rm -f "$temporary_name" "$marker_name"' EXIT HUP INT TERM
+  : > "$marker_name"
+  printf 'READY\n'
+  command=$(dd bs=1 count=1 2>/dev/null)
+  [ "$command" = W ]
+  head -c "$byte_count" > "$temporary_name"
+  printf 'DATA\n'
+  sentinel=$(dd bs=1 count=1 2>/dev/null)
+  [ "$sentinel" = X ]
+  sync
+  if ln "$temporary_name" "$final_name" 2>/dev/null; then
+    :
+  elif cmp -s "$temporary_name" "$final_name"; then
+    :
+  else
+    exit 1
+  fi
+  sync
+  rm -f "$temporary_name" "$marker_name"
+  trap - EXIT HUP INT TERM
+  sync
+  """
 
   @enforce_keys [:source, :source_kind, :max_source_bytes, :max_result_bytes]
   defstruct [:source, :source_kind, :max_source_bytes, :max_result_bytes]
@@ -205,7 +234,8 @@ defmodule PtcRunner.Kernel.TraceLog do
 
   def publish_jsonl(path, events, opts)
       when is_binary(path) and is_list(events) and is_list(opts) do
-    with true <- Keyword.keys(opts) -- [:max_source_bytes, :fault_hook] == [],
+    with true <-
+           Keyword.keys(opts) -- [:max_source_bytes, :fault_hook, :expected_parent_identity] == [],
          true <- String.valid?(path),
          true <- Path.basename(path) == Path.basename(Path.expand(path)),
          true <- String.ends_with?(path, ".jsonl") and not reserved_path?(path),
@@ -213,12 +243,14 @@ defmodule PtcRunner.Kernel.TraceLog do
            Keyword.get(opts, :max_source_bytes, @default_source_bytes),
          fault_hook when is_nil(fault_hook) or is_function(fault_hook, 1) <-
            Keyword.get(opts, :fault_hook),
+         expected_parent_identity = Keyword.get(opts, :expected_parent_identity),
+         true <- valid_expected_parent_identity?(expected_parent_identity),
          normalized = normalize(events),
          {:ok, _validated, _source_id} <- validate_loaded(normalized, max_bytes),
          :ok <- publication_fault(fault_hook, :after_validation),
          {:ok, encoded} <- encode_jsonl(normalized, max_bytes),
          :ok <- publication_fault(fault_hook, :after_encoding) do
-      publish_encoded(Path.expand(path), encoded, fault_hook)
+      publish_encoded(Path.expand(path), encoded, fault_hook, expected_parent_identity)
     else
       false ->
         {:error, :invalid_trace_log}
@@ -349,15 +381,232 @@ defmodule PtcRunner.Kernel.TraceLog do
     end
   end
 
-  defp publish_encoded(path, encoded, fault_hook) do
+  defp publish_encoded(path, encoded, fault_hook, nil) do
     :global.trans({{__MODULE__, {:publish, path}}, self()}, fn ->
-      case read_publication(path, byte_size(encoded), fault_hook) do
-        {:ok, ^encoded} -> sync_directory(Path.dirname(path))
-        {:ok, _different} -> {:error, :trace_collision}
-        {:error, :enoent} -> publish_new(path, encoded, fault_hook)
-        {:error, reason} -> {:error, reason}
-      end
+      publish_at_path(path, encoded, fault_hook)
     end)
+  end
+
+  defp publish_encoded(path, encoded, fault_hook, expected_parent_identity) do
+    :global.trans({{__MODULE__, {:publish, path}}, self()}, fn ->
+      publish_bound(path, encoded, fault_hook, expected_parent_identity)
+    end)
+  end
+
+  defp publish_bound(path, encoded, fault_hook, expected_parent_identity) do
+    case start_bound_publisher(path, encoded, expected_parent_identity) do
+      {:ok, lease} ->
+        try do
+          with :ok <- publication_fault(fault_hook, :before_write),
+               :ok <- publication_fault(fault_hook, :during_write),
+               :ok <- publication_fault(fault_hook, :after_sync),
+               true <- Port.command(lease.port, ["W", encoded]),
+               :ok <- await_bound_data(lease.port, ""),
+               true <- Port.command(lease.port, "X"),
+               :ok <- await_bound_publication(lease.port),
+               :ok <- publication_fault(fault_hook, :after_publish),
+               :ok <- publication_fault(fault_hook, :cleanup) do
+            verify_parent_identity(path, expected_parent_identity)
+          else
+            {:error, _reason} = error -> error
+          end
+        after
+          close_bound_lease(lease)
+        end
+
+      {:error, _reason} = error ->
+        error
+    end
+  end
+
+  defp start_bound_publisher(path, encoded, expected_parent_identity) do
+    with executable when is_binary(executable) <- System.find_executable("sh"),
+         parent = Path.dirname(path),
+         final_name = Path.basename(path),
+         temporary_name =
+           ".ptc-tmp-" <> Base.encode16(:crypto.strong_rand_bytes(16), case: :lower),
+         marker_name =
+           ".ptc-marker-" <> Base.encode16(:crypto.strong_rand_bytes(16), case: :lower),
+         port <-
+           Port.open(
+             {:spawn_executable, executable},
+             [
+               :binary,
+               :exit_status,
+               :use_stdio,
+               :stderr_to_stdout,
+               {:cd, parent},
+               {:args,
+                [
+                  "-c",
+                  @bound_publication_helper,
+                  "--",
+                  final_name,
+                  temporary_name,
+                  Integer.to_string(byte_size(encoded)),
+                  marker_name
+                ]}
+             ]
+           ),
+         result <-
+           await_bound_ready(port, parent, marker_name, expected_parent_identity, "") do
+      case result do
+        :ok ->
+          {:ok,
+           %{port: port, parent: parent, temporary_name: temporary_name, marker_name: marker_name}}
+
+        {:error, _reason} = error ->
+          close_bound_lease(%{
+            port: port,
+            parent: parent,
+            temporary_name: temporary_name,
+            marker_name: marker_name
+          })
+
+          error
+      end
+    else
+      nil -> {:error, :trace_persistence_failed}
+    end
+  rescue
+    _exception -> {:error, :trace_persistence_failed}
+  catch
+    _kind, _reason -> {:error, :trace_persistence_failed}
+  end
+
+  defp await_bound_ready(port, parent, marker_name, expected, buffered) do
+    receive do
+      {^port, {:data, data}} ->
+        parse_bound_ready(port, parent, marker_name, expected, buffered <> data)
+
+      {^port, {:exit_status, _status}} ->
+        {:error, :trace_persistence_failed}
+    after
+      5_000 -> {:error, :trace_persistence_failed}
+    end
+  end
+
+  defp parse_bound_ready(port, parent, marker_name, expected, buffered) do
+    case String.split(buffered, "\n", parts: 2) do
+      ["READY", _rest] ->
+        verify_bound_marker(parent, marker_name, expected)
+
+      [_line, _rest] ->
+        {:error, :trace_persistence_failed}
+
+      [_partial] ->
+        await_bound_ready(port, parent, marker_name, expected, buffered)
+    end
+  end
+
+  defp verify_bound_marker(parent, marker_name, expected) do
+    marker = Path.join(parent, marker_name)
+
+    with :ok <- verify_parent_identity(marker, expected),
+         {:ok, %File.Stat{type: :regular}} <- File.lstat(marker) do
+      :ok
+    else
+      _ -> {:error, :trace_persistence_failed}
+    end
+  end
+
+  defp await_bound_data(port, buffered) do
+    receive do
+      {^port, {:data, data}} ->
+        case String.split(buffered <> data, "\n", parts: 2) do
+          ["DATA", _rest] -> :ok
+          [_line, _rest] -> {:error, :trace_persistence_failed}
+          [_partial] -> await_bound_data(port, buffered <> data)
+        end
+
+      {^port, {:exit_status, _status}} ->
+        {:error, :trace_persistence_failed}
+    after
+      5_000 -> {:error, :trace_persistence_failed}
+    end
+  end
+
+  defp await_bound_publication(port) do
+    receive do
+      {^port, {:data, _diagnostic}} -> await_bound_publication(port)
+      {^port, {:exit_status, 0}} -> :ok
+      {^port, {:exit_status, _status}} -> {:error, :trace_persistence_failed}
+    after
+      30_000 -> {:error, :trace_persistence_failed}
+    end
+  end
+
+  defp close_port(port) do
+    if Port.info(port), do: Port.close(port)
+    :ok
+  catch
+    :error, :badarg -> :ok
+  end
+
+  defp close_bound_lease(lease) do
+    abort_bound_publisher(lease.port)
+    _ = File.rm(Path.join(lease.parent, lease.temporary_name))
+    _ = File.rm(Path.join(lease.parent, lease.marker_name))
+    :ok
+  end
+
+  defp abort_bound_publisher(port) do
+    if Port.info(port) do
+      _ = safe_port_command(port, "A")
+      await_bound_shutdown(port)
+    end
+
+    close_port(port)
+  end
+
+  defp safe_port_command(port, data) do
+    Port.command(port, data)
+  catch
+    :error, :badarg -> false
+  end
+
+  defp await_bound_shutdown(port) do
+    receive do
+      {^port, {:data, _diagnostic}} -> await_bound_shutdown(port)
+      {^port, {:exit_status, _status}} -> :ok
+    after
+      5_000 -> :ok
+    end
+  end
+
+  defp publish_at_path(path, encoded, fault_hook) do
+    case read_publication(path, byte_size(encoded), fault_hook) do
+      {:ok, ^encoded} -> sync_directory(Path.dirname(path))
+      {:ok, _different} -> {:error, :trace_collision}
+      {:error, :enoent} -> publish_new(path, encoded, fault_hook)
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp valid_expected_parent_identity?(nil), do: true
+
+  defp valid_expected_parent_identity?({major, minor, inode}),
+    do: is_integer(major) and is_integer(minor) and is_integer(inode)
+
+  defp valid_expected_parent_identity?(_identity), do: false
+
+  defp verify_parent_identity(_path, nil), do: :ok
+
+  defp verify_parent_identity(path, expected) do
+    case File.stat(Path.dirname(path)) do
+      {:ok,
+       %File.Stat{
+         type: :directory,
+         major_device: major,
+         minor_device: minor,
+         inode: inode
+       }}
+      when {major, minor, inode} == expected ->
+        :ok
+
+      _ ->
+        {:error, :trace_persistence_failed}
+    end
   end
 
   defp publish_new(path, encoded, fault_hook) do

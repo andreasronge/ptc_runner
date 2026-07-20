@@ -360,15 +360,24 @@ applies bounded pre/post file inventories, identity and byte verification, the
 existing 8 MB source ceiling, and a separate 32 MB decoded retained-size ceiling
 before snapshot-backed capabilities are constructed.
 
-The local Viewer log-analysis path is a separate, profile-specific mission
-frontend. `PtcRunner.Kernel.LogAnalysisSessionBuilder` is its only host entry:
+The local log-analysis path is a separate, profile-specific mission session
+shared by the Viewer and `mix ptc.repl` frontends.
+`PtcRunner.Kernel.LogAnalysisSessionBuilder` is its only host entry:
 it selects the code-owned `log-analysis-v1` recipe, compiles the shipped
 `log.core` component, grants exactly the four snapshot-backed trace
 capabilities, builds empty workflow/mission data, and creates fresh limits and
-owners. Browser or Lisp input cannot supply a path, profile, component,
-capability, or limit. The profile digest covers the bundle, authoritative
-mission inventory, complete implicit mission-runtime contract, effective
-limits, and result/persistence policies. Only the profile ID and digest enter
+owners. The builder accepts one host-selected normal source directory and one
+host-selected normal output directory; it does not accept profile internals.
+The Viewer supplies its configured trace directory for both so a refreshed
+session can inspect its predecessor. The terminal validates a physically
+separate output tree before construction. The trace owner requires the
+directory-bound publication helper's working-directory identity to match the
+builder-bound output identity before sending trace bytes, so later pathname
+replacement cannot redirect the write. Browser or Lisp input cannot supply a
+path, profile, component, capability, or limit. The profile digest covers the
+bundle, authoritative mission inventory, complete implicit mission-runtime
+contract, effective limits, and result/persistence policies. Only the profile
+ID and digest enter
 canonical metadata. Session startup does not trust the assembly attestation by
 itself: it independently reconstructs the fixed profile from the snapshot and
 trace sink, then requires exact config, bundle, capability callback, inventory,
@@ -391,8 +400,7 @@ one pass to 128 entries and a 65,536-byte encoded JSON array, so zero-length
 prints cannot evade the cardinality limit. JSON projection rejects maps whose
 distinct Lisp keys would collapse to the same JSON object key; their bounded
 Clojure rendering remains available instead of returning a corrupted value.
-Return and fail remain per-form
-outcomes and leave the human session open. A terminal RunState budget
+Return and fail remain per-form outcomes and leave the local session open. A terminal RunState budget
 rejects later forms but leaves explicit close available; close persists an error
 terminal event with the authoritative exhausted-budget reason. Abort and
 deadline expiry preserve that prior terminal result rather than replacing it.
@@ -434,15 +442,19 @@ cancellation kills and observes the partial session and cleans every constructed
 owner before stopping. Successful construction marks the guard complete but
 retains the monitor: owner death before the result can be installed therefore
 cannot orphan a session, while later owner death aborts and best-effort persists
-the completed session. The Viewer root backend must invoke the builder from its
-long-lived connected backend owner, not from a disposable callback task.
+the completed session. The Viewer root backend invokes the builder from its
+long-lived connected backend owner, and the Mix task itself remains the stable
+owner for the complete terminal command; neither may construct a session in a
+disposable callback task.
 Exceptions after snapshot or trace-owner acquisition run the same owner cleanup
 path. Session death while that construction guard is incomplete is a
 construction failure and never publishes a terminal trace. Read-only session
 information is serialized behind an accepted evaluation without a shorter
-owner-call timeout, so a busy live owner is not reported as closed. Exact entered source,
-values, continuation state, snapshot contents, and paths never enter canonical
-events or redacted owner status.
+owner-call timeout, so a busy live owner is not reported as closed. Close and
+abort intentionally leave the session owner alive for idempotent retry and
+information reads; each frontend explicitly stops it when that authority is no
+longer needed. Exact entered source, values, continuation state, snapshot
+contents, and paths never enter canonical events or redacted owner status.
 
 Host callers enable sensitive capture only through `RunBuilder`'s `:inspect`
 option. `InspectionSink` accepts exact bounded source and capability records

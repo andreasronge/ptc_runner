@@ -7,7 +7,7 @@ defmodule PtcRunner.Kernel.ViewerReplSessionWorker do
   def run(backend, trace_dir, public_session_id) when is_pid(backend) do
     Process.link(backend)
 
-    case LogAnalysisSessionBuilder.start({:directory, trace_dir}) do
+    case LogAnalysisSessionBuilder.start({:directory, trace_dir}, {:directory, trace_dir}) do
       {:ok, session, info} ->
         session_ref = Process.monitor(session.pid)
         send(backend, {:viewer_repl_started, self(), {:ok, public_info(info, public_session_id)}})

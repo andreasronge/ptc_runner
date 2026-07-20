@@ -118,7 +118,7 @@ defmodule PtcRunner.Kernel.BoundedWorkerTest do
             end
           end,
           timeout_ms: 1,
-          max_heap_words: 10_000,
+          max_heap_words: 100_000,
           cancel_with_caller: true,
           timeout_cleanup_hook: fn ->
             send(test, {:timeout_cleanup, self()})

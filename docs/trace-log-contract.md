@@ -161,8 +161,9 @@ new canonical events from mutating the source it is paging.
 
 ### Local log-analysis sessions
 
-The server-owned `log-analysis-v1` profile is the sole profile in the local
-Viewer increment. Its mission bundle contains the shipped `log.core` component,
+The server-owned `log-analysis-v1` profile is the sole local analysis profile
+and is shared by the Viewer and terminal REPL frontends. Its mission bundle
+contains the shipped `log.core` component,
 its explicit authority contains only `trace-list-runs`, `trace-get-run`,
 `trace-list-turns`, and `trace-counters`, and ordinary implicit mission
 introspection remains available. Filesystem, network, LLM, agent, workflow,
@@ -171,9 +172,17 @@ MCP, private-inspection, and nested `kernel-eval` authority are absent.
 Each session queries one immutable snapshot and records its own canonical events
 in the same owner process that holds its continuation and quotas, under a
 separate token. The active mutating session trace is never queryable from that
-session. Orderly close, reset, and deadline expiry finalize and publish the
-batch; a later refreshed session captures the directory again and can therefore
-query its predecessor. Explicit return and fail are evaluation facts rather
+session. The Viewer publishes into its host-configured input directory, so a
+later refreshed Viewer session captures the directory again and can query its
+predecessor. A terminal `mix ptc.repl` session instead publishes into a
+physically separate host-selected or private temporary directory and never
+mutates its captured input tree. The builder binds the accepted output
+directory's filesystem identity into `SessionTrace`; atomic publication
+uses a directory-bound helper whose working-directory identity is verified
+before it receives trace bytes. Replacing or retargeting the pathname therefore
+cannot redirect the write.
+Orderly close, reset, and deadline expiry finalize and publish the batch.
+Explicit return and fail are evaluation facts rather
 than session lifecycle commands. Exhausting a terminal session budget persists
 an error run with that authoritative limit reason, even when abort or deadline
 expiry performs the eventual close. Recorder readiness and continuation commit
@@ -216,7 +225,9 @@ construction guard is marked complete. Its monitor is intentionally retained:
 death during the final reply window cannot orphan a completed session, and
 later owner death aborts and best-effort persists it. A host must therefore call
 the builder from its long-lived connected backend owner rather than a disposable
-request or callback task.
+request or callback task. Close and abort preserve the live session owner for
+idempotent persistence retry; the frontend explicitly stops it after its final
+close or abort attempt.
 
 Public evaluation prints are projected in one pass under both a 128-entry
 ceiling and a 65,536-byte encoded JSON-array ceiling. The truncation flag is

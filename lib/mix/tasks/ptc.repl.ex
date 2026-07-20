@@ -1,7 +1,8 @@
 defmodule Mix.Tasks.Ptc.Repl do
-  @shortdoc "Direct bounded PTC-Lisp REPL"
+  @shortdoc "Bounded direct or profile-backed PTC-Lisp REPL"
   @moduledoc """
-  Starts the direct Kernel PTC-Lisp REPL.
+  Starts a direct workflow PTC-Lisp REPL or the fixed log-analysis mission
+  profile.
 
       mix ptc.repl
       mix ptc.repl -e "(+ 1 2)" -e "(+ *1 3)"
@@ -10,6 +11,8 @@ defmodule Mix.Tasks.Ptc.Repl do
       mix ptc.repl -
       mix ptc.repl --manifest ptc.json
       mix ptc.repl --manifest ptc.json --trace trace.jsonl
+      mix ptc.repl --profile log-analysis-v1 --resource traces=tmp/traces
+      mix ptc.repl --describe-profile log-analysis-v1
 
   Options:
 
@@ -19,16 +22,43 @@ defmodule Mix.Tasks.Ptc.Repl do
     * `-m, --manifest` — reuse a strict Kernel manifest's workflow bundle,
       capabilities, limits, input, labels, and event policy;
     * `-t, --trace` — append this session's canonical events to a JSONL file;
+    * `--profile` — select a code-owned mission session profile;
+    * `--resource NAME=VALUE` — supply a required profile resource; repeatable;
+    * `--session-trace-dir` — existing output directory for a profile session's
+      separate canonical trace;
+    * `--format clojure|jsonl` — choose human output or non-interactive
+      profile-mode JSON Lines;
+    * `--continue-on-error` — evaluate later repeated `--eval` forms after a
+      recoverable profile evaluation error, then exit unsuccessfully;
+    * `--describe-profile` — print a safe static profile contract;
     * `-h, --help` — print this help without loading files or providers.
 
   A positional file runs as one script. `-` reads one script from standard
   input. With no script or `--eval`, the task starts an interactive multi-line
   REPL. Ctrl+D exits.
+
+  Direct and manifest sessions evaluate the workflow environment. Profile mode
+  evaluates one serialized mission continuation and requires exactly
+  `--resource traces=DIR`. Its analysis trace is atomically published outside
+  that captured directory; without `--session-trace-dir`, the task creates and
+  reports a private temporary output directory.
+
+  JSONL mode is non-interactive and conditionally emits schema-version-1
+  `session-started`, `evaluation`, and successfully persisted `session-closed`
+  records for lifecycle stages that are reached. An unsuccessful command ends
+  with `command-error`; validation failures can therefore emit that record
+  alone. Evaluation records contain the existing bounded public mission result
+  projection and never add a raw source field. A failing command raises
+  `Mix.Error`; the task never halts the VM directly.
   """
 
   use Mix.Task
 
+  alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.EventSink
+  alias PtcRunner.Kernel.LogAnalysisProfile
+  alias PtcRunner.Kernel.LogAnalysisSession
+  alias PtcRunner.Kernel.LogAnalysisSessionBuilder
   alias PtcRunner.Kernel.ProviderRegistry
   alias PtcRunner.Kernel.ReplSession
   alias PtcRunner.Kernel.RunBuilder
@@ -41,6 +71,12 @@ defmodule Mix.Tasks.Ptc.Repl do
     load: :string,
     manifest: :string,
     trace: :string,
+    profile: :string,
+    resource: :keep,
+    session_trace_dir: :string,
+    format: :string,
+    continue_on_error: :boolean,
+    describe_profile: :string,
     help: :boolean
   ]
   @aliases [e: :eval, l: :load, m: :manifest, t: :trace, h: :help]
@@ -50,21 +86,782 @@ defmodule Mix.Tasks.Ptc.Repl do
     Mix.Task.run("app.start")
     {opts, arguments, invalid} = OptionParser.parse(args, strict: @switches, aliases: @aliases)
 
-    cond do
-      opts[:help] ->
-        Mix.shell().info(@moduledoc)
+    if opts[:help] do
+      Mix.shell().info(@moduledoc)
+    else
+      case validate_command(opts, arguments, invalid) do
+        {:ok, :describe} -> describe_profile(opts)
+        {:ok, :profile} -> run_profile_session(opts, arguments)
+        {:ok, :direct} -> run_session(opts, arguments)
+        {:error, message} -> command_error(opts, :cli, message)
+      end
+    end
+  end
 
+  defp validate_command(opts, arguments, invalid) do
+    format = Keyword.get(opts, :format, "clojure")
+    evals = Keyword.get_values(opts, :eval)
+    resources = Keyword.get_values(opts, :resource)
+
+    with :ok <- validate_common_command(arguments, invalid, evals, format) do
+      select_command(opts, arguments, evals, resources, format)
+    end
+  end
+
+  defp validate_common_command(arguments, invalid, evals, format) do
+    cond do
       invalid != [] ->
-        Mix.raise("invalid ptc.repl options: #{inspect(invalid)}")
+        {:error, "invalid ptc.repl options: #{inspect(invalid)}"}
 
       length(arguments) > 1 ->
-        Mix.raise("usage: mix ptc.repl [OPTIONS] [SCRIPT|-]")
+        {:error, "usage: mix ptc.repl [OPTIONS] [SCRIPT|-]"}
 
-      opts[:eval] && arguments != [] ->
-        Mix.raise("cannot combine --eval with a script or stdin")
+      evals != [] and arguments != [] ->
+        {:error, "cannot combine --eval with a script or stdin"}
+
+      format not in ["clojure", "jsonl"] ->
+        {:error, "invalid ptc.repl format: #{inspect(format)}"}
 
       true ->
-        run_session(opts, arguments)
+        :ok
+    end
+  end
+
+  defp select_command(opts, arguments, evals, resources, format) do
+    cond do
+      opts[:describe_profile] ->
+        validate_description(opts, arguments)
+
+      opts[:profile] ->
+        validate_profile_command(opts, arguments, evals, resources, format)
+
+      opts[:manifest] && (resources != [] or not is_nil(opts[:session_trace_dir])) ->
+        {:error, "profile resources require --profile"}
+
+      resources != [] or not is_nil(opts[:session_trace_dir]) or
+          Keyword.has_key?(opts, :continue_on_error) ->
+        {:error, "profile options require --profile"}
+
+      format == "jsonl" ->
+        {:error, "--format jsonl requires --profile or --describe-profile"}
+
+      true ->
+        {:ok, :direct}
+    end
+  end
+
+  defp validate_description(opts, arguments) do
+    disallowed = Keyword.keys(opts) -- [:describe_profile, :format]
+
+    cond do
+      arguments != [] ->
+        {:error, "--describe-profile does not accept a script or stdin"}
+
+      disallowed != [] ->
+        {:error, "--describe-profile cannot be combined with runtime options"}
+
+      opts[:describe_profile] != LogAnalysisProfile.id() ->
+        {:error, "unsupported session profile"}
+
+      true ->
+        {:ok, :describe}
+    end
+  end
+
+  defp validate_profile_command(opts, arguments, evals, resources, format) do
+    cond do
+      opts[:profile] != LogAnalysisProfile.id() ->
+        {:error, "unsupported session profile"}
+
+      opts[:manifest] ->
+        {:error, "cannot combine --profile with --manifest"}
+
+      opts[:trace] ->
+        {:error, "use --session-trace-dir instead of --trace with --profile"}
+
+      resources == [] ->
+        {:error, "--profile log-analysis-v1 requires --resource traces=DIR"}
+
+      format == "jsonl" and evals == [] and arguments == [] ->
+        {:error, "--format jsonl requires non-interactive profile input"}
+
+      opts[:continue_on_error] && length(evals) < 2 ->
+        {:error, "--continue-on-error requires repeated --eval in profile mode"}
+
+      true ->
+        {:ok, :profile}
+    end
+  end
+
+  defp describe_profile(opts) do
+    description =
+      Map.put(LogAnalysisProfile.description(), "frontend", %{
+        "input_modes" => ["interactive", "eval", "load", "script", "stdin"],
+        "output_formats" => ["clojure", "jsonl"],
+        "continue_on_error" => "repeated-eval-only"
+      })
+
+    if output_format(opts) == :jsonl do
+      emit_jsonl(Map.merge(description, %{"schema_version" => 1, "type" => "profile"}))
+    else
+      {formatted, _truncated?} = Format.to_clojure(description)
+      Mix.shell().info(formatted)
+    end
+  end
+
+  defp run_profile_session(opts, arguments) do
+    with {:ok, input_directory} <- profile_resource(opts),
+         {:ok, output_directory, temporary?} <- profile_output_directory(opts) do
+      case separate_directories(input_directory, output_directory) do
+        {:ok, output_identity} ->
+          start_profile_session(
+            opts,
+            arguments,
+            input_directory,
+            output_directory,
+            temporary?,
+            output_identity
+          )
+
+        {:error, message} ->
+          cleanup_temporary_directory(output_directory, temporary?)
+          command_error(opts, :cli, message)
+      end
+    else
+      {:error, category, message} -> command_error(opts, category, message)
+    end
+  end
+
+  defp profile_resource(opts) do
+    resources = Keyword.get_values(opts, :resource)
+
+    with {:ok, parsed} <- parse_resources(resources),
+         %{"traces" => directory} when map_size(parsed) == 1 <- parsed,
+         true <- String.valid?(directory),
+         expanded = Path.expand(directory),
+         {:ok, %File.Stat{type: :directory}} <- File.lstat(expanded) do
+      {:ok, expanded}
+    else
+      {:error, message} -> {:error, :cli, message}
+      _ -> {:error, :cli, "log-analysis-v1 requires one normal traces directory"}
+    end
+  rescue
+    _exception -> {:error, :cli, "log-analysis-v1 requires one normal traces directory"}
+  end
+
+  defp parse_resources(resources) do
+    Enum.reduce_while(resources, {:ok, %{}}, fn resource, {:ok, parsed} ->
+      with true <- is_binary(resource) and String.valid?(resource),
+           [name, value] <- String.split(resource, "=", parts: 2),
+           true <- name =~ ~r/\A[A-Za-z][A-Za-z0-9_-]{0,63}\z/,
+           true <- value != "" and String.valid?(value),
+           false <- Map.has_key?(parsed, name),
+           true <- name == "traces" do
+        {:cont, {:ok, Map.put(parsed, name, value)}}
+      else
+        true -> {:halt, {:error, "duplicate profile resource"}}
+        false -> {:halt, {:error, "invalid or unsupported profile resource"}}
+        _ -> {:halt, {:error, "invalid profile resource; expected NAME=VALUE"}}
+      end
+    end)
+  end
+
+  defp profile_output_directory(opts) do
+    case opts[:session_trace_dir] do
+      nil -> create_temporary_trace_directory(16)
+      directory -> existing_output_directory(directory)
+    end
+  end
+
+  defp existing_output_directory(directory) do
+    with true <- is_binary(directory) and String.valid?(directory),
+         expanded = Path.expand(directory),
+         {:ok, %File.Stat{type: :directory}} <- File.lstat(expanded) do
+      {:ok, expanded, false}
+    else
+      _ -> {:error, :cli, "--session-trace-dir must be an existing normal directory"}
+    end
+  rescue
+    _exception -> {:error, :cli, "--session-trace-dir must be an existing normal directory"}
+  end
+
+  defp create_temporary_trace_directory(0),
+    do: {:error, :setup, "could not create a private session trace directory"}
+
+  defp create_temporary_trace_directory(attempts) do
+    base = System.tmp_dir!() |> Path.expand()
+    name = "ptc-repl-" <> Base.encode16(:crypto.strong_rand_bytes(12), case: :lower)
+    directory = Path.join(base, name)
+
+    case File.mkdir(directory) do
+      :ok ->
+        case File.chmod(directory, 0o700) do
+          :ok ->
+            {:ok, directory, true}
+
+          {:error, _reason} ->
+            _ = File.rmdir(directory)
+            {:error, :setup, "could not secure the session trace directory"}
+        end
+
+      {:error, :eexist} ->
+        create_temporary_trace_directory(attempts - 1)
+
+      {:error, _reason} ->
+        {:error, :setup, "could not create a private session trace directory"}
+    end
+  rescue
+    _exception -> {:error, :setup, "could not create a private session trace directory"}
+  end
+
+  defp separate_directories(input_directory, output_directory) do
+    with {:ok, input_identity, input_lineage} <- directory_lineage(input_directory),
+         {:ok, output_identity, output_lineage} <- directory_lineage(output_directory),
+         false <- MapSet.member?(output_lineage, input_identity),
+         false <- MapSet.member?(input_lineage, output_identity) do
+      {:ok, output_identity}
+    else
+      _ -> {:error, "input and session trace directories must be physically separate"}
+    end
+  end
+
+  defp directory_lineage(directory) do
+    with {:ok, physical} <- physical_directory_path(directory),
+         {:ok, identity} <- directory_identity(physical),
+         {:ok, lineage} <- collect_directory_lineage(physical, []) do
+      {:ok, identity, MapSet.new(lineage)}
+    end
+  end
+
+  defp physical_directory_path(directory) do
+    expanded = Path.expand(directory)
+    relative = Path.relative_to(expanded, "/")
+    resolve_physical_segments(Path.split(relative), 0)
+  end
+
+  defp resolve_physical_segments(_segments, depth) when depth > 32,
+    do: {:error, :directory_identity_unavailable}
+
+  defp resolve_physical_segments(segments, depth) do
+    segments
+    |> Enum.with_index()
+    |> Enum.reduce_while({:ok, "/"}, fn {segment, index}, {:ok, parent} ->
+      candidate = Path.join(parent, segment)
+
+      case File.lstat(candidate) do
+        {:ok, %File.Stat{type: :symlink}} ->
+          case File.read_link(candidate) do
+            {:ok, target} ->
+              target_segments =
+                target
+                |> Path.expand(parent)
+                |> Path.relative_to("/")
+                |> Path.split()
+
+              remaining = Enum.drop(segments, index + 1)
+              {:halt, resolve_physical_segments(target_segments ++ remaining, depth + 1)}
+
+            _ ->
+              {:halt, {:error, :directory_identity_unavailable}}
+          end
+
+        {:ok, _stat} ->
+          {:cont, {:ok, candidate}}
+
+        {:error, _reason} ->
+          {:halt, {:error, :directory_identity_unavailable}}
+      end
+    end)
+  end
+
+  defp collect_directory_lineage(directory, identities) do
+    with {:ok, identity} <- directory_identity(directory) do
+      next = [identity | identities]
+      parent = Path.dirname(directory)
+
+      if parent == directory,
+        do: {:ok, next},
+        else: collect_directory_lineage(parent, next)
+    end
+  end
+
+  defp directory_identity(directory) do
+    case File.stat(directory) do
+      {:ok,
+       %File.Stat{
+         type: :directory,
+         major_device: major,
+         minor_device: minor,
+         inode: inode
+       }}
+      when is_integer(major) and is_integer(minor) and is_integer(inode) ->
+        {:ok, {major, minor, inode}}
+
+      _ ->
+        {:error, :directory_identity_unavailable}
+    end
+  end
+
+  defp start_profile_session(
+         opts,
+         arguments,
+         input_directory,
+         output_directory,
+         temporary?,
+         output_identity
+       ) do
+    case LogAnalysisSessionBuilder.start(
+           {:directory, input_directory},
+           {:directory, output_directory},
+           expected_destination_identity: output_identity
+         ) do
+      {:ok, session, info} ->
+        trace_path = Path.join(output_directory, info.session_id <> ".jsonl")
+
+        try do
+          present_profile_started(opts, info)
+          state = evaluate_profile_mode(session, opts, arguments)
+          finish_profile_session(session, opts, state, trace_path)
+        rescue
+          exception ->
+            safe_profile_abort(session, :frontend_exception)
+            reraise exception, __STACKTRACE__
+        catch
+          kind, reason ->
+            safe_profile_abort(session, :frontend_exit)
+            :erlang.raise(kind, reason, __STACKTRACE__)
+        after
+          LogAnalysisSession.stop(session)
+        end
+
+      {:error, reason} ->
+        cleanup_temporary_directory(output_directory, temporary?)
+        command_error(opts, :setup, "ptc.repl profile setup failed: #{reason}")
+    end
+  end
+
+  defp evaluate_profile_mode(session, opts, arguments) do
+    initial = %{next_index: 1, failed_indexes: [], failure: nil}
+
+    case maybe_profile_load(session, opts, initial) do
+      {:ok, state} -> run_profile_input(session, opts, arguments, state)
+      {:halt, state} -> state
+    end
+  end
+
+  defp maybe_profile_load(session, opts, state) do
+    case opts[:load] do
+      nil ->
+        {:ok, state}
+
+      path ->
+        read_profile_load(session, opts, path, state)
+    end
+  end
+
+  defp read_profile_load(session, opts, path, state) do
+    case read_bounded_profile_file(path) do
+      {:ok, source} ->
+        case evaluate_profile_source(session, opts, source, :load, state) do
+          {:ok, next} ->
+            if output_format(opts) == :clojure, do: Mix.shell().info("Loaded #{path}")
+            {:ok, next}
+
+          {_disposition, next} ->
+            {:halt, put_failure(next, :setup, "profile load evaluation failed")}
+        end
+
+      {:error, :source_limit_exceeded} ->
+        {:halt,
+         put_failure(
+           state,
+           :setup,
+           "profile load exceeds the #{profile_source_bytes()}-byte source limit"
+         )}
+
+      {:error, _reason} ->
+        {:halt, put_failure(state, :setup, "could not read the profile load file")}
+    end
+  end
+
+  defp run_profile_input(session, opts, arguments, state) do
+    evals = Keyword.get_values(opts, :eval)
+
+    cond do
+      evals != [] -> run_profile_sources(session, opts, evals, :eval, state)
+      arguments == ["-"] -> read_profile_stdin(session, opts, state)
+      arguments != [] -> run_profile_file(session, opts, hd(arguments), state)
+      true -> interactive_profile(session, opts, state)
+    end
+  end
+
+  defp run_profile_sources(session, opts, sources, input_kind, state) do
+    Enum.reduce_while(sources, state, fn source, current ->
+      case evaluate_profile_source(session, opts, source, input_kind, current) do
+        {:ok, next} ->
+          {:cont, next}
+
+        {:error, next} ->
+          if opts[:continue_on_error],
+            do: {:cont, next},
+            else: {:halt, put_failure(next, :evaluation, "profile evaluation failed")}
+
+        {:terminal, next} ->
+          {:halt, put_failure(next, :lifecycle, "profile session became terminal")}
+      end
+    end)
+    |> ensure_evaluation_failure()
+  end
+
+  defp read_profile_stdin(session, opts, state) do
+    case read_bounded_profile_stdin() do
+      {:ok, source} ->
+        profile_single_source(session, opts, source, :stdin, state)
+
+      {:error, :source_limit_exceeded} ->
+        put_failure(
+          state,
+          :frontend,
+          "profile stdin exceeds the #{profile_source_bytes()}-byte source limit"
+        )
+
+      {:error, _reason} ->
+        put_failure(state, :frontend, "could not read profile stdin")
+    end
+  end
+
+  defp run_profile_file(session, opts, file, state) do
+    case read_bounded_profile_file(file) do
+      {:ok, source} ->
+        profile_single_source(session, opts, source, :script, state)
+
+      {:error, :source_limit_exceeded} ->
+        put_failure(
+          state,
+          :setup,
+          "profile script exceeds the #{profile_source_bytes()}-byte source limit"
+        )
+
+      {:error, _reason} ->
+        put_failure(state, :setup, "could not read the profile script")
+    end
+  end
+
+  defp profile_single_source(session, opts, source, input_kind, state) do
+    case evaluate_profile_source(session, opts, source, input_kind, state) do
+      {:ok, next} -> next
+      {:error, next} -> put_failure(next, :evaluation, "profile evaluation failed")
+      {:terminal, next} -> put_failure(next, :lifecycle, "profile session became terminal")
+    end
+  end
+
+  defp interactive_profile(session, opts, state) do
+    Mix.shell().info("PTC-Lisp REPL [log-analysis-v1] (Ctrl+D to exit; :help for commands)\n")
+    profile_loop(session, opts, state)
+  end
+
+  defp profile_loop(session, opts, state) do
+    case read_profile_expression("ptc> ", "") do
+      :eof ->
+        Mix.shell().info("\nGoodbye!")
+        ensure_evaluation_failure(state)
+
+      {:error, :source_limit_exceeded} ->
+        put_failure(
+          state,
+          :frontend,
+          "profile interactive input exceeds the #{profile_source_bytes()}-byte source limit"
+        )
+
+      "" ->
+        profile_loop(session, opts, state)
+
+      ":" <> command ->
+        handle_profile_command(String.trim(command))
+        profile_loop(session, opts, state)
+
+      source ->
+        case evaluate_profile_source(session, opts, source, :interactive, state) do
+          {:ok, next} -> profile_loop(session, opts, next)
+          {:error, next} -> profile_loop(session, opts, next)
+          {:terminal, next} -> put_failure(next, :lifecycle, "profile session became terminal")
+        end
+    end
+  end
+
+  defp evaluate_profile_source(session, opts, source, input_kind, state) do
+    index = state.next_index
+
+    case LogAnalysisSession.evaluate(session, source) do
+      {:ok, result} ->
+        present_profile_result(opts, index, input_kind, result)
+        next = %{state | next_index: index + 1}
+
+        if result.status == :ok do
+          {:ok, next}
+        else
+          next = %{next | failed_indexes: [index | next.failed_indexes]}
+
+          case LogAnalysisSession.info(session) do
+            {:ok, %{lifecycle: :open}} -> {:error, next}
+            _ -> {:terminal, next}
+          end
+        end
+
+      {:error, _reason} ->
+        {:terminal, %{state | next_index: index + 1}}
+    end
+  end
+
+  defp ensure_evaluation_failure(%{failure: nil, failed_indexes: [_ | _]} = state),
+    do: put_failure(state, :evaluation, "one or more profile evaluations failed")
+
+  defp ensure_evaluation_failure(state), do: state
+
+  defp put_failure(%{failure: nil} = state, category, message),
+    do: %{state | failure: {category, message}}
+
+  defp put_failure(state, _category, _message), do: state
+
+  defp finish_profile_session(session, opts, state, trace_path) do
+    case close_profile_session(session) do
+      {:ok, info} ->
+        present_profile_closed(opts, info, trace_path)
+
+        case state.failure do
+          nil ->
+            :ok
+
+          {category, message} ->
+            command_error(opts, category, message, %{
+              "evaluation_indexes" => Enum.reverse(state.failed_indexes)
+            })
+        end
+
+      {:error, reason} ->
+        command_error(opts, :persistence, "profile trace persistence failed: #{reason}")
+    end
+  end
+
+  defp close_profile_session(session) do
+    case LogAnalysisSession.close(session) do
+      {:ok, _info} = success -> success
+      {:error, _first_reason} -> LogAnalysisSession.close(session)
+    end
+  end
+
+  defp present_profile_started(opts, info) do
+    if output_format(opts) == :jsonl do
+      emit_jsonl(%{
+        "schema_version" => 1,
+        "type" => "session-started",
+        "profile_id" => info.profile_id,
+        "profile_digest" => info.profile_digest,
+        "session_id" => info.session_id,
+        "namespaces" => info.namespaces
+      })
+    end
+  end
+
+  defp present_profile_result(opts, index, input_kind, result) do
+    if output_format(opts) == :jsonl do
+      emit_jsonl(%{
+        "schema_version" => 1,
+        "type" => "evaluation",
+        "index" => index,
+        "input_kind" => Atom.to_string(input_kind),
+        "result" => json_projection(result)
+      })
+    else
+      Enum.each(result.prints, fn print -> Mix.shell().info(print) end)
+      if is_binary(result.formatted), do: Mix.shell().info(result.formatted)
+      if result.status == :error, do: Mix.shell().error(format_profile_error(result))
+    end
+  end
+
+  defp present_profile_closed(opts, info, trace_path) do
+    if output_format(opts) == :jsonl do
+      emit_jsonl(%{
+        "schema_version" => 1,
+        "type" => "session-closed",
+        "status" => "ok",
+        "trace_path" => trace_path,
+        "session" =>
+          info
+          |> Map.take([:lifecycle, :evaluation_count, :terminal_reason, :usage, :trace])
+          |> json_projection()
+      })
+    else
+      Mix.shell().info("Analysis trace: #{trace_path}")
+    end
+  end
+
+  defp format_profile_error(result) do
+    error = result.error || %{}
+    kind = Map.get(error, :kind, result.outcome)
+    message = Map.get(error, :message) || Map.get(error, :reason) || result.outcome
+    "Error (#{kind}): #{message} [continuation #{result.continuation_effect}]"
+  end
+
+  defp handle_profile_command("help") do
+    Mix.shell().info("""
+    Commands:
+      :doc <name>      Show core function documentation
+      :find <pattern>  Search core functions
+      :help            Show this help
+
+    Profile: log-analysis-v1; component: log.core; exported namespace: log.
+    Use (tool/runtime-usage {}) to inspect remaining bounded usage.
+    """)
+  end
+
+  defp handle_profile_command(command), do: handle_command(command, nil)
+
+  @spec command_error(keyword(), atom(), binary()) :: no_return()
+  defp command_error(opts, category, message), do: command_error(opts, category, message, %{})
+
+  @spec command_error(keyword(), atom(), binary(), map()) :: no_return()
+  defp command_error(opts, category, message, extra) do
+    if output_format(opts) == :jsonl do
+      emit_jsonl(
+        Map.merge(
+          %{
+            "schema_version" => 1,
+            "type" => "command-error",
+            "category" => Atom.to_string(category),
+            "message" => message
+          },
+          extra
+        )
+      )
+    end
+
+    Mix.raise(message)
+  end
+
+  defp output_format(opts),
+    do: if(Keyword.get(opts, :format) == "jsonl", do: :jsonl, else: :clojure)
+
+  defp emit_jsonl(value) do
+    case value |> json_projection() |> DeterministicJSON.encode() do
+      {:ok, encoded} -> IO.puts(encoded)
+      {:error, _reason} -> Mix.raise("ptc.repl could not encode JSONL output")
+    end
+  end
+
+  defp json_projection(value) when is_map(value) and not is_struct(value) do
+    Map.new(value, fn {key, nested} -> {json_key(key), json_projection(nested)} end)
+  end
+
+  defp json_projection(value) when is_list(value), do: Enum.map(value, &json_projection/1)
+  defp json_projection(value) when is_boolean(value) or is_nil(value), do: value
+  defp json_projection(value) when is_atom(value) and not is_nil(value), do: Atom.to_string(value)
+  defp json_projection(value), do: value
+
+  defp json_key(key) when is_atom(key), do: key |> Atom.to_string() |> String.trim_trailing("?")
+  defp json_key(key) when is_binary(key), do: key
+
+  defp safe_profile_abort(session, reason) do
+    case LogAnalysisSession.info(session) do
+      {:ok, %{lifecycle: lifecycle}}
+      when lifecycle in [:closed, :persistence_failed, :backend_failed] ->
+        :ok
+
+      _ ->
+        _ = LogAnalysisSession.abort(session, reason)
+        :ok
+    end
+
+    :ok
+  catch
+    _kind, _reason -> :ok
+  end
+
+  defp cleanup_temporary_directory(directory, true) do
+    _ = File.rmdir(directory)
+    :ok
+  end
+
+  defp cleanup_temporary_directory(_directory, false), do: :ok
+
+  defp read_bounded_profile_file(path) do
+    max_bytes = profile_source_bytes()
+
+    path
+    |> File.open([:read, :binary], &IO.binread(&1, max_bytes + 1))
+    |> bounded_profile_source(max_bytes)
+  end
+
+  defp read_bounded_profile_stdin do
+    max_bytes = profile_source_bytes()
+
+    :stdio
+    |> IO.read(max_bytes + 1)
+    |> bounded_profile_source(max_bytes)
+  end
+
+  defp bounded_profile_source(:eof, _max_bytes), do: {:ok, ""}
+
+  defp bounded_profile_source({:ok, source}, max_bytes),
+    do: bounded_profile_source(source, max_bytes)
+
+  defp bounded_profile_source(source, max_bytes)
+       when is_binary(source) and byte_size(source) <= max_bytes,
+       do: {:ok, source}
+
+  defp bounded_profile_source(source, _max_bytes) when is_binary(source),
+    do: {:error, :source_limit_exceeded}
+
+  defp bounded_profile_source({:error, reason}, _max_bytes), do: {:error, reason}
+
+  defp profile_source_bytes, do: LogAnalysisProfile.limits().subordinate_source_bytes
+
+  defp read_profile_expression(prompt, buffer) do
+    remaining = profile_source_bytes() - byte_size(buffer)
+
+    case read_bounded_line(prompt, max(remaining, 0)) do
+      {:ok, line} ->
+        source = buffer <> line
+
+        if balanced?(source),
+          do: String.trim(source),
+          else: read_profile_expression("...> ", source)
+
+      :eof ->
+        :eof
+
+      {:error, _reason} = error ->
+        error
+    end
+  end
+
+  defp read_bounded_line(prompt, max_bytes),
+    do: read_bounded_line(prompt, max_bytes, [], 0)
+
+  defp read_bounded_line(prompt, max_bytes, characters, bytes) do
+    case IO.getn(prompt, 1) do
+      :eof when characters == [] ->
+        :eof
+
+      :eof ->
+        {:ok, characters |> Enum.reverse() |> IO.iodata_to_binary()}
+
+      {:error, reason} ->
+        {:error, reason}
+
+      character when is_binary(character) ->
+        next_bytes = bytes + byte_size(character)
+
+        cond do
+          next_bytes > max_bytes ->
+            {:error, :source_limit_exceeded}
+
+          String.ends_with?(character, "\n") ->
+            {:ok, [character | characters] |> Enum.reverse() |> IO.iodata_to_binary()}
+
+          true ->
+            read_bounded_line("", max_bytes, [character | characters], next_bytes)
+        end
     end
   end
 

@@ -548,7 +548,7 @@ Add `PtcRunner.Kernel.LogAnalysisSessionBuilder`:
     `SessionTrace` with that handle and the persistence destination. Transfer
     the combined owner's lifecycle to `SessionTrace` before session startup.
 12. Build `RunConfig` metadata with valid safe labels:
-    `%{"name" => "ptc.viewer.repl", "tags" => %{"mode" => "repl"}}`.
+    `%{"name" => "ptc.log-analysis.repl", "tags" => %{"mode" => "repl"}}`.
     Extend `RunConfig` with one optional closed `session_profile` projection
     containing the bounded profile ID and digest. `RunConfig` remains the sole
     constructor of complete `run-started` metadata; do not create an analysis-
@@ -623,7 +623,7 @@ evaluation outcome or the already emitted run terminal outcome.
 - Repeated close, abort, reset, Viewer shutdown, or owner-down notifications
   must never append the same event sequence twice.
 
-Use a per-run filename such as `viewer-repl-<safe-run-id>.jsonl`. The browser
+Use a per-run filename such as `log-analysis-<safe-run-id>.jsonl`. The browser
 never receives the path. Add a no-clobber atomic publication operation for a
 complete validated batch rather than silently appending to an unrelated
 existing file:

@@ -99,6 +99,17 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
 
   def stop(_snapshot), do: :ok
 
+  @doc false
+  @spec valid?(term()) :: boolean()
+  def valid?(%__MODULE__{pid: pid, token: token}),
+    do: is_pid(pid) and is_reference(token)
+
+  def valid?(_snapshot), do: false
+
+  @doc false
+  @spec alive?(t()) :: boolean()
+  def alive?(%__MODULE__{pid: pid}), do: Process.alive?(pid)
+
   @impl GenServer
   def init(
         {directory, owner, token, max_source_bytes, max_retained_bytes, max_result_bytes,
@@ -223,9 +234,6 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
 
       {:error, reason} when is_atom(reason) ->
         {:error, reason}
-
-      _ ->
-        {:error, :source_unavailable}
     end
   end
 

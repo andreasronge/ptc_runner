@@ -290,11 +290,11 @@ defmodule PtcRunner.Kernel.TraceSnapshotTest do
       end)
 
     for _inventory <- 1..2 do
-      assert_receive {:inventory_listing, listing_pid}
+      assert_receive {:inventory_listing, listing_pid}, 5_000
       send(listing_pid, :continue_listing)
     end
 
-    assert_receive {:inventory_listing, final_listing_pid}
+    assert_receive {:inventory_listing, final_listing_pid}, 5_000
     write_events(path, [after_rewrite])
     send(final_listing_pid, :continue_listing)
 

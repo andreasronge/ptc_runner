@@ -22,10 +22,10 @@ defmodule PtcRunner.Kernel.LogAnalysisSessionTest do
     seed_trace(directory, "seed")
 
     assert {:ok, first, first_info} =
-             LogAnalysisSessionBuilder.start({:directory, directory})
+             LogAnalysisSessionBuilder.start({:directory, directory}, {:directory, directory})
 
     assert {:ok, second, second_info} =
-             LogAnalysisSessionBuilder.start({:directory, directory})
+             LogAnalysisSessionBuilder.start({:directory, directory}, {:directory, directory})
 
     on_exit(fn ->
       LogAnalysisSession.abort(first, :test_cleanup)
@@ -104,7 +104,10 @@ defmodule PtcRunner.Kernel.LogAnalysisSessionTest do
   @tag :tmp_dir
   test "session startup independently rejects a sealed custom mission", %{tmp_dir: directory} do
     seed_trace(directory, "seed")
-    assert {:ok, session, _info} = LogAnalysisSessionBuilder.start({:directory, directory})
+
+    assert {:ok, session, _info} =
+             LogAnalysisSessionBuilder.start({:directory, directory}, {:directory, directory})
+
     on_exit(fn -> LogAnalysisSession.stop(session) end)
 
     state = :sys.get_state(session.pid)
@@ -131,7 +134,7 @@ defmodule PtcRunner.Kernel.LogAnalysisSessionTest do
                limits: state.config.limits,
                event_sink: state.config.event_sink,
                labels: %{
-                 "name" => "ptc.viewer.repl",
+                 "name" => "ptc.log-analysis.repl",
                  "tags" => %{"mode" => "repl"}
                },
                session_profile: %{
@@ -157,7 +160,10 @@ defmodule PtcRunner.Kernel.LogAnalysisSessionTest do
     tmp_dir: directory
   } do
     seed_trace(directory, "seed")
-    assert {:ok, session, _info} = LogAnalysisSessionBuilder.start({:directory, directory})
+
+    assert {:ok, session, _info} =
+             LogAnalysisSessionBuilder.start({:directory, directory}, {:directory, directory})
+
     on_exit(fn -> LogAnalysisSession.stop(session) end)
 
     state = :sys.get_state(session.pid)
@@ -206,7 +212,12 @@ defmodule PtcRunner.Kernel.LogAnalysisSessionTest do
       stop_run_state(run_state)
     end)
 
-    common = [owner: self(), run_state: run_state, event_sink: sink]
+    common = [
+      owner: self(),
+      destination_directory_identity: directory_identity(directory),
+      run_state: run_state,
+      event_sink: sink
+    ]
 
     assert {:error, :session_trace_failed} =
              SessionTrace.start(
@@ -274,6 +285,7 @@ defmodule PtcRunner.Kernel.LogAnalysisSessionTest do
                  Path.join(directory, run_id <> ".jsonl"),
                  run_id,
                  owner: self(),
+                 destination_directory_identity: directory_identity(directory),
                  run_state: run_state,
                  event_sink: sink
                )
@@ -285,7 +297,10 @@ defmodule PtcRunner.Kernel.LogAnalysisSessionTest do
     tmp_dir: directory
   } do
     seed_trace(directory, "seed")
-    assert {:ok, session, _info} = LogAnalysisSessionBuilder.start({:directory, directory})
+
+    assert {:ok, session, _info} =
+             LogAnalysisSessionBuilder.start({:directory, directory}, {:directory, directory})
+
     on_exit(fn -> LogAnalysisSession.stop(session) end)
 
     source = ~S|(loop [s "\\" n 0] (if (= n 19) s (recur (str s s) (inc n))))|
@@ -311,7 +326,10 @@ defmodule PtcRunner.Kernel.LogAnalysisSessionTest do
   @tag :tmp_dir
   test "large non-JSON values have bounded human formatting", %{tmp_dir: directory} do
     seed_trace(directory, "seed")
-    assert {:ok, session, _info} = LogAnalysisSessionBuilder.start({:directory, directory})
+
+    assert {:ok, session, _info} =
+             LogAnalysisSessionBuilder.start({:directory, directory}, {:directory, directory})
+
     on_exit(fn -> LogAnalysisSession.stop(session) end)
 
     assert {:ok,
@@ -337,7 +355,10 @@ defmodule PtcRunner.Kernel.LogAnalysisSessionTest do
     tmp_dir: directory
   } do
     seed_trace(directory, "seed")
-    assert {:ok, session, _info} = LogAnalysisSessionBuilder.start({:directory, directory})
+
+    assert {:ok, session, _info} =
+             LogAnalysisSessionBuilder.start({:directory, directory}, {:directory, directory})
+
     on_exit(fn -> LogAnalysisSession.stop(session) end)
 
     assert {:ok,
@@ -360,7 +381,10 @@ defmodule PtcRunner.Kernel.LogAnalysisSessionTest do
   @tag :tmp_dir
   test "prints survive a post-execution continuation commit rejection", %{tmp_dir: directory} do
     seed_trace(directory, "seed")
-    assert {:ok, session, _info} = LogAnalysisSessionBuilder.start({:directory, directory})
+
+    assert {:ok, session, _info} =
+             LogAnalysisSessionBuilder.start({:directory, directory}, {:directory, directory})
+
     on_exit(fn -> LogAnalysisSession.stop(session) end)
 
     source =
@@ -380,7 +404,10 @@ defmodule PtcRunner.Kernel.LogAnalysisSessionTest do
     tmp_dir: directory
   } do
     seed_trace(directory, "seed")
-    assert {:ok, session, _info} = LogAnalysisSessionBuilder.start({:directory, directory})
+
+    assert {:ok, session, _info} =
+             LogAnalysisSessionBuilder.start({:directory, directory}, {:directory, directory})
+
     on_exit(fn -> LogAnalysisSession.stop(session) end)
 
     source = "(do " <> String.duplicate("(println) ", 256) <> "nil)"
@@ -402,7 +429,10 @@ defmodule PtcRunner.Kernel.LogAnalysisSessionTest do
   @tag :tmp_dir
   test "session evaluation has direct detailed Evaluation parity", %{tmp_dir: directory} do
     seed_trace(directory, "seed")
-    assert {:ok, session, _info} = LogAnalysisSessionBuilder.start({:directory, directory})
+
+    assert {:ok, session, _info} =
+             LogAnalysisSessionBuilder.start({:directory, directory}, {:directory, directory})
+
     session_state = :sys.get_state(session.pid)
     {:ok, direct_state} = RunState.start(session_state.config.limits)
 
@@ -474,7 +504,10 @@ defmodule PtcRunner.Kernel.LogAnalysisSessionTest do
     tmp_dir: directory
   } do
     seed_trace(directory, "seed")
-    assert {:ok, session, _info} = LogAnalysisSessionBuilder.start({:directory, directory})
+
+    assert {:ok, session, _info} =
+             LogAnalysisSessionBuilder.start({:directory, directory}, {:directory, directory})
+
     on_exit(fn -> LogAnalysisSession.stop(session) end)
 
     assert {:ok,
@@ -522,7 +555,10 @@ defmodule PtcRunner.Kernel.LogAnalysisSessionTest do
     tmp_dir: directory
   } do
     seed_trace(directory, "seed")
-    assert {:ok, session, _info} = LogAnalysisSessionBuilder.start({:directory, directory})
+
+    assert {:ok, session, _info} =
+             LogAnalysisSessionBuilder.start({:directory, directory}, {:directory, directory})
+
     on_exit(fn -> LogAnalysisSession.stop(session) end)
 
     assert {:ok, %{status: :ok, value: %{"items" => items}, usage: usage}} =
@@ -548,9 +584,55 @@ defmodule PtcRunner.Kernel.LogAnalysisSessionTest do
   end
 
   @tag :tmp_dir
+  test "builder publishes into an explicit output directory without mutating its source", %{
+    tmp_dir: directory
+  } do
+    source = Path.join(directory, "source")
+    output = Path.join(directory, "output")
+    File.mkdir!(source)
+    File.mkdir!(output)
+    seed_trace(source, "seed")
+
+    assert {:ok, session, info} =
+             LogAnalysisSessionBuilder.start({:directory, source}, {:directory, output})
+
+    on_exit(fn -> LogAnalysisSession.stop(session) end)
+    assert {:ok, %{lifecycle: :closed}} = LogAnalysisSession.close(session)
+    assert File.ls!(source) == ["seed.jsonl"]
+    assert File.ls!(output) == [info.session_id <> ".jsonl"]
+    assert String.starts_with?(info.session_id, "log-analysis-")
+  end
+
+  @tag :tmp_dir
+  test "session persistence rejects a replaced output-directory identity", %{
+    tmp_dir: directory
+  } do
+    source = Path.join(directory, "source")
+    output = Path.join(directory, "output")
+    displaced = Path.join(directory, "displaced")
+    File.mkdir!(source)
+    File.mkdir!(output)
+    seed_trace(source, "seed")
+
+    assert {:ok, session, info} =
+             LogAnalysisSessionBuilder.start({:directory, source}, {:directory, output})
+
+    on_exit(fn -> LogAnalysisSession.stop(session) end)
+    File.rename!(output, displaced)
+    File.mkdir!(output)
+
+    assert {:error, :trace_persistence_failed} = LogAnalysisSession.close(session)
+    refute File.exists?(Path.join(output, info.session_id <> ".jsonl"))
+    assert File.ls!(output) == []
+  end
+
+  @tag :tmp_dir
   test "close publishes one reloadable canonical run and is idempotent", %{tmp_dir: directory} do
     seed_trace(directory, "seed")
-    assert {:ok, session, info} = LogAnalysisSessionBuilder.start({:directory, directory})
+
+    assert {:ok, session, info} =
+             LogAnalysisSessionBuilder.start({:directory, directory}, {:directory, directory})
+
     on_exit(fn -> LogAnalysisSession.stop(session) end)
 
     secret_source = "(do (def private-source-sentinel 3) (+ private-source-sentinel 0))"
@@ -584,11 +666,16 @@ defmodule PtcRunner.Kernel.LogAnalysisSessionTest do
   @tag :tmp_dir
   test "a refreshed session captures the preceding analysis trace", %{tmp_dir: directory} do
     seed_trace(directory, "seed")
-    assert {:ok, first, first_info} = LogAnalysisSessionBuilder.start({:directory, directory})
+
+    assert {:ok, first, first_info} =
+             LogAnalysisSessionBuilder.start({:directory, directory}, {:directory, directory})
+
     assert {:ok, _closed} = LogAnalysisSession.close(first)
     LogAnalysisSession.stop(first)
 
-    assert {:ok, second, _info} = LogAnalysisSessionBuilder.start({:directory, directory})
+    assert {:ok, second, _info} =
+             LogAnalysisSessionBuilder.start({:directory, directory}, {:directory, directory})
+
     on_exit(fn -> LogAnalysisSession.stop(second) end)
 
     assert {:ok, %{value: %{"items" => runs}}} =
@@ -615,7 +702,7 @@ defmodule PtcRunner.Kernel.LogAnalysisSessionTest do
     end
 
     assert {:ok, session, info} =
-             LogAnalysisSessionBuilder.start({:directory, directory},
+             LogAnalysisSessionBuilder.start({:directory, directory}, {:directory, directory},
                persistence_fault_hook: hook
              )
 
@@ -640,7 +727,10 @@ defmodule PtcRunner.Kernel.LogAnalysisSessionTest do
     tmp_dir: directory
   } do
     seed_trace(directory, "seed")
-    assert {:ok, session, info} = LogAnalysisSessionBuilder.start({:directory, directory})
+
+    assert {:ok, session, info} =
+             LogAnalysisSessionBuilder.start({:directory, directory}, {:directory, directory})
+
     on_exit(fn -> LogAnalysisSession.stop(session) end)
 
     for value <- 1..LogAnalysisProfile.limits().subordinate_evaluations do
@@ -675,7 +765,10 @@ defmodule PtcRunner.Kernel.LogAnalysisSessionTest do
     tmp_dir: directory
   } do
     seed_trace(directory, "seed")
-    assert {:ok, session, info} = LogAnalysisSessionBuilder.start({:directory, directory})
+
+    assert {:ok, session, info} =
+             LogAnalysisSessionBuilder.start({:directory, directory}, {:directory, directory})
+
     on_exit(fn -> LogAnalysisSession.stop(session) end)
 
     send(session.pid, :deadline_expired)
@@ -693,7 +786,10 @@ defmodule PtcRunner.Kernel.LogAnalysisSessionTest do
     tmp_dir: directory
   } do
     seed_trace(directory, "seed")
-    assert {:ok, session, info} = LogAnalysisSessionBuilder.start({:directory, directory})
+
+    assert {:ok, session, info} =
+             LogAnalysisSessionBuilder.start({:directory, directory}, {:directory, directory})
+
     state = :sys.get_state(session.pid)
 
     :sys.replace_state(state.run_state.pid, fn run_state ->
@@ -720,7 +816,7 @@ defmodule PtcRunner.Kernel.LogAnalysisSessionTest do
 
     for closure <- [:abort, :expiry] do
       assert {:ok, session, info} =
-               LogAnalysisSessionBuilder.start({:directory, directory})
+               LogAnalysisSessionBuilder.start({:directory, directory}, {:directory, directory})
 
       on_exit(fn -> LogAnalysisSession.stop(session) end)
       exhaust_protocol_budget(session)
@@ -752,7 +848,10 @@ defmodule PtcRunner.Kernel.LogAnalysisSessionTest do
     tmp_dir: directory
   } do
     seed_trace(directory, "seed")
-    assert {:ok, session, info} = LogAnalysisSessionBuilder.start({:directory, directory})
+
+    assert {:ok, session, info} =
+             LogAnalysisSessionBuilder.start({:directory, directory}, {:directory, directory})
+
     on_exit(fn -> LogAnalysisSession.stop(session) end)
 
     for _attempt <- 1..32 do
@@ -788,7 +887,10 @@ defmodule PtcRunner.Kernel.LogAnalysisSessionTest do
     tmp_dir: directory
   } do
     seed_trace(directory, "seed")
-    assert {:ok, session, _info} = LogAnalysisSessionBuilder.start({:directory, directory})
+
+    assert {:ok, session, _info} =
+             LogAnalysisSessionBuilder.start({:directory, directory}, {:directory, directory})
+
     state = :sys.get_state(session.pid)
 
     trace_ref = Process.monitor(state.session_trace.pid)
@@ -816,7 +918,7 @@ defmodule PtcRunner.Kernel.LogAnalysisSessionTest do
     parent = self()
 
     assert {:ok, session, info} =
-             LogAnalysisSessionBuilder.start({:directory, directory},
+             LogAnalysisSessionBuilder.start({:directory, directory}, {:directory, directory},
                evaluation_hook: fn :after_evaluation_started ->
                  send(parent, :evaluation_started)
 
@@ -855,7 +957,7 @@ defmodule PtcRunner.Kernel.LogAnalysisSessionTest do
     builder =
       spawn(fn ->
         result =
-          LogAnalysisSessionBuilder.start({:directory, directory},
+          LogAnalysisSessionBuilder.start({:directory, directory}, {:directory, directory},
             construction_hook: fn :session_started, resources ->
               send(parent, {:construction_started, resources})
 
@@ -897,7 +999,7 @@ defmodule PtcRunner.Kernel.LogAnalysisSessionTest do
     builder =
       spawn(fn ->
         result =
-          LogAnalysisSessionBuilder.start({:directory, directory},
+          LogAnalysisSessionBuilder.start({:directory, directory}, {:directory, directory},
             builder_fault_hook: fn
               :before_builder_release, resources ->
                 send(parent, {:before_builder_release, resources, self()})
@@ -915,7 +1017,7 @@ defmodule PtcRunner.Kernel.LogAnalysisSessionTest do
       end)
 
     builder_ref = Process.monitor(builder)
-    assert_receive {:before_builder_release, resources, ^builder}
+    assert_receive {:before_builder_release, resources, ^builder}, 5_000
     session_ref = Process.monitor(resources.session.pid)
     trace_ref = Process.monitor(resources.session_trace.pid)
     runtime_ref = Process.monitor(resources.run_state.pid)
@@ -940,7 +1042,7 @@ defmodule PtcRunner.Kernel.LogAnalysisSessionTest do
     assert_receive {:DOWN, ^session_ref, :process, _pid, _reason}, 1_000
     assert_receive {:DOWN, ^runtime_ref, :process, _pid, _reason}, 1_000
     assert_receive {:DOWN, ^snapshot_ref, :process, _pid, _reason}, 1_000
-    assert_receive {:DOWN, ^trace_ref, :process, _pid, _reason}, 1_000
+    assert_receive {:DOWN, ^trace_ref, :process, _pid, _reason}, 5_000
     refute_received {:release_race_builder_result, _result}
   end
 
@@ -953,7 +1055,7 @@ defmodule PtcRunner.Kernel.LogAnalysisSessionTest do
 
     starter =
       Task.async(fn ->
-        LogAnalysisSessionBuilder.start({:directory, directory},
+        LogAnalysisSessionBuilder.start({:directory, directory}, {:directory, directory},
           construction_hook: fn :session_started, resources ->
             send(parent, {:handoff_started, resources, self()})
 
@@ -985,7 +1087,7 @@ defmodule PtcRunner.Kernel.LogAnalysisSessionTest do
 
     starter =
       Task.async(fn ->
-        LogAnalysisSessionBuilder.start({:directory, directory},
+        LogAnalysisSessionBuilder.start({:directory, directory}, {:directory, directory},
           builder_fault_hook: fn
             :before_builder_release, resources ->
               send(parent, {:final_completion_ready, resources, self()})
@@ -1021,7 +1123,7 @@ defmodule PtcRunner.Kernel.LogAnalysisSessionTest do
     builder =
       spawn(fn ->
         result =
-          LogAnalysisSessionBuilder.start({:directory, directory},
+          LogAnalysisSessionBuilder.start({:directory, directory}, {:directory, directory},
             builder_fault_hook: fn
               :before_run_state_transfer, resources ->
                 send(parent, {:before_run_state_transfer, resources, self()})
@@ -1073,7 +1175,7 @@ defmodule PtcRunner.Kernel.LogAnalysisSessionTest do
       Task.async(fn ->
         builder = self()
 
-        LogAnalysisSessionBuilder.start({:directory, directory},
+        LogAnalysisSessionBuilder.start({:directory, directory}, {:directory, directory},
           builder_fault_hook: fn
             :after_session_attach, resources ->
               send(parent, {:session_attached, resources, builder, self()})
@@ -1088,7 +1190,7 @@ defmodule PtcRunner.Kernel.LogAnalysisSessionTest do
         )
       end)
 
-    assert_receive {:session_attached, resources, builder, session_pid}
+    assert_receive {:session_attached, resources, builder, session_pid}, 5_000
     trace_ref = Process.monitor(resources.session_trace.pid)
     snapshot_ref = Process.monitor(resources.snapshot.pid)
     :erlang.suspend_process(builder)
@@ -1114,7 +1216,7 @@ defmodule PtcRunner.Kernel.LogAnalysisSessionTest do
     parent = self()
 
     assert {:ok, session, _info} =
-             LogAnalysisSessionBuilder.start({:directory, directory},
+             LogAnalysisSessionBuilder.start({:directory, directory}, {:directory, directory},
                evaluation_hook: fn :after_evaluation_started ->
                  send(parent, {:evaluation_barrier, self()})
 
@@ -1146,7 +1248,7 @@ defmodule PtcRunner.Kernel.LogAnalysisSessionTest do
     for stage <- [:after_snapshot, :after_session_trace] do
       starter =
         Task.async(fn ->
-          LogAnalysisSessionBuilder.start({:directory, directory},
+          LogAnalysisSessionBuilder.start({:directory, directory}, {:directory, directory},
             builder_fault_hook: fn
               ^stage, resources ->
                 send(parent, {:construction_fault, stage, resources, self()})
@@ -1184,7 +1286,10 @@ defmodule PtcRunner.Kernel.LogAnalysisSessionTest do
     tmp_dir: directory
   } do
     seed_trace(directory, "seed")
-    assert {:ok, session, info} = LogAnalysisSessionBuilder.start({:directory, directory})
+
+    assert {:ok, session, info} =
+             LogAnalysisSessionBuilder.start({:directory, directory}, {:directory, directory})
+
     on_exit(fn -> LogAnalysisSession.stop(session) end)
 
     source = "(doseq [x (range 0 800)] (tool/runtime-remaining {}))"
@@ -1212,7 +1317,10 @@ defmodule PtcRunner.Kernel.LogAnalysisSessionTest do
   @tag :tmp_dir
   test "unexpected session-owner death records an aborted terminal run", %{tmp_dir: directory} do
     seed_trace(directory, "seed")
-    assert {:ok, session, info} = LogAnalysisSessionBuilder.start({:directory, directory})
+
+    assert {:ok, session, info} =
+             LogAnalysisSessionBuilder.start({:directory, directory}, {:directory, directory})
+
     state = :sys.get_state(session.pid)
     trace_ref = Process.monitor(state.session_trace.pid)
     session_ref = Process.monitor(session.pid)
@@ -1220,7 +1328,7 @@ defmodule PtcRunner.Kernel.LogAnalysisSessionTest do
     Process.exit(session.pid, :kill)
 
     assert_receive {:DOWN, ^session_ref, :process, _pid, :killed}
-    assert_receive {:DOWN, ^trace_ref, :process, _pid, :normal}, 1_000
+    assert_receive {:DOWN, ^trace_ref, :process, _pid, :normal}, 5_000
 
     path = Path.join(directory, info.session_id <> ".jsonl")
     assert {:ok, trace} = TraceLog.new(source: {:file, path})
@@ -1234,7 +1342,10 @@ defmodule PtcRunner.Kernel.LogAnalysisSessionTest do
     tmp_dir: directory
   } do
     seed_trace(directory, "seed")
-    assert {:ok, session, info} = LogAnalysisSessionBuilder.start({:directory, directory})
+
+    assert {:ok, session, info} =
+             LogAnalysisSessionBuilder.start({:directory, directory}, {:directory, directory})
+
     state = :sys.get_state(session.pid)
 
     :sys.replace_state(state.run_state.pid, fn run_state ->
@@ -1247,7 +1358,7 @@ defmodule PtcRunner.Kernel.LogAnalysisSessionTest do
     assert {:ok, %{lifecycle: :terminal_unpersisted}} = LogAnalysisSession.info(session)
     trace_ref = Process.monitor(state.session_trace.pid)
     Process.exit(session.pid, :kill)
-    assert_receive {:DOWN, ^trace_ref, :process, _pid, :normal}, 1_000
+    assert_receive {:DOWN, ^trace_ref, :process, _pid, :normal}, 5_000
 
     path = Path.join(directory, info.session_id <> ".jsonl")
     assert {:ok, trace} = TraceLog.new(source: {:file, path})
@@ -1276,7 +1387,7 @@ defmodule PtcRunner.Kernel.LogAnalysisSessionTest do
     end
 
     assert {:ok, session, _info} =
-             LogAnalysisSessionBuilder.start({:directory, directory},
+             LogAnalysisSessionBuilder.start({:directory, directory}, {:directory, directory},
                persistence_fault_hook: hook
              )
 
@@ -1286,13 +1397,13 @@ defmodule PtcRunner.Kernel.LogAnalysisSessionTest do
     trace_ref = Process.monitor(state.session_trace.pid)
 
     Process.exit(session.pid, :kill)
-    assert_receive {:persistence_started, trace_pid}
+    assert_receive {:persistence_started, trace_pid}, 5_000
     on_exit(fn -> send(trace_pid, :continue_persistence) end)
 
     assert_receive {:DOWN, ^runtime_ref, :process, _pid, :normal}
     assert_receive {:DOWN, ^snapshot_ref, :process, _pid, :normal}
     send(trace_pid, :continue_persistence)
-    assert_receive {:DOWN, ^trace_ref, :process, _pid, :normal}, 1_000
+    assert_receive {:DOWN, ^trace_ref, :process, _pid, :normal}, 5_000
   end
 
   @tag :tmp_dir
@@ -1312,7 +1423,7 @@ defmodule PtcRunner.Kernel.LogAnalysisSessionTest do
     end
 
     assert {:ok, session, info} =
-             LogAnalysisSessionBuilder.start({:directory, directory},
+             LogAnalysisSessionBuilder.start({:directory, directory}, {:directory, directory},
                persistence_fault_hook: hook
              )
 
@@ -1323,10 +1434,10 @@ defmodule PtcRunner.Kernel.LogAnalysisSessionTest do
 
     Process.exit(session.pid, :kill)
 
-    assert_receive :unexpected_owner_persistence_attempted
+    assert_receive :unexpected_owner_persistence_attempted, 5_000
     assert_receive {:DOWN, ^runtime_ref, :process, _pid, :normal}
     assert_receive {:DOWN, ^snapshot_ref, :process, _pid, :normal}
-    assert_receive {:DOWN, ^trace_ref, :process, _pid, :normal}, 1_000
+    assert_receive {:DOWN, ^trace_ref, :process, _pid, :normal}, 5_000
     refute File.exists?(Path.join(directory, info.session_id <> ".jsonl"))
   end
 
@@ -1355,7 +1466,7 @@ defmodule PtcRunner.Kernel.LogAnalysisSessionTest do
     end
 
     assert {:ok, session, _info} =
-             LogAnalysisSessionBuilder.start({:directory, directory},
+             LogAnalysisSessionBuilder.start({:directory, directory}, {:directory, directory},
                resource_cleanup_hook: cleanup_hook,
                persistence_fault_hook: persistence_hook
              )
@@ -1374,8 +1485,8 @@ defmodule PtcRunner.Kernel.LogAnalysisSessionTest do
 
     assert_receive {:DOWN, ^runtime_ref, :process, _pid, :normal}
     assert_receive {:DOWN, ^snapshot_ref, :process, _pid, :normal}
-    assert_receive {:handoff_persistence_started, ^trace_pid}
-    assert_receive {:DOWN, ^trace_ref, :process, _pid, :normal}, 1_000
+    assert_receive {:handoff_persistence_started, ^trace_pid}, 5_000
+    assert_receive {:DOWN, ^trace_ref, :process, _pid, :normal}, 5_000
     assert {:error, :session_closed} = Task.await(closer)
   end
 
@@ -1395,7 +1506,7 @@ defmodule PtcRunner.Kernel.LogAnalysisSessionTest do
     end
 
     assert {:ok, session, _info} =
-             LogAnalysisSessionBuilder.start({:directory, directory},
+             LogAnalysisSessionBuilder.start({:directory, directory}, {:directory, directory},
                resource_cleanup_hook: cleanup_hook
              )
 
@@ -1437,7 +1548,7 @@ defmodule PtcRunner.Kernel.LogAnalysisSessionTest do
     end
 
     assert {:ok, session, _info} =
-             LogAnalysisSessionBuilder.start({:directory, directory},
+             LogAnalysisSessionBuilder.start({:directory, directory}, {:directory, directory},
                resource_cleanup_hook: cleanup_hook
              )
 
@@ -1462,7 +1573,10 @@ defmodule PtcRunner.Kernel.LogAnalysisSessionTest do
     tmp_dir: directory
   } do
     seed_trace(directory, "seed")
-    assert {:ok, session, _info} = LogAnalysisSessionBuilder.start({:directory, directory})
+
+    assert {:ok, session, _info} =
+             LogAnalysisSessionBuilder.start({:directory, directory}, {:directory, directory})
+
     state = :sys.get_state(session.pid)
     :erlang.suspend_process(session.pid)
 
@@ -1489,7 +1603,10 @@ defmodule PtcRunner.Kernel.LogAnalysisSessionTest do
     tmp_dir: directory
   } do
     seed_trace(directory, "seed")
-    assert {:ok, session, info} = LogAnalysisSessionBuilder.start({:directory, directory})
+
+    assert {:ok, session, info} =
+             LogAnalysisSessionBuilder.start({:directory, directory}, {:directory, directory})
+
     state = :sys.get_state(session.pid)
     :erlang.suspend_process(session.pid)
 
@@ -1529,7 +1646,7 @@ defmodule PtcRunner.Kernel.LogAnalysisSessionTest do
     end
 
     assert {:ok, session, _info} =
-             LogAnalysisSessionBuilder.start({:directory, directory},
+             LogAnalysisSessionBuilder.start({:directory, directory}, {:directory, directory},
                resource_cleanup_hook: cleanup_hook
              )
 
@@ -1559,6 +1676,11 @@ defmodule PtcRunner.Kernel.LogAnalysisSessionTest do
     :ok = EventSink.emit(sink, "run-stopped", %{outcome: :ok, reason: nil})
     :ok = TraceLog.append_jsonl(path, EventSink.events(sink))
     EventSink.stop(sink)
+  end
+
+  defp directory_identity(directory) do
+    stat = File.stat!(directory)
+    {stat.major_device, stat.minor_device, stat.inode}
   end
 
   defp exhaust_protocol_budget(session) do

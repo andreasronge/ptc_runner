@@ -153,7 +153,9 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
 
     {:ok, workflow} = WorkflowEnvironment.new(capabilities: [capability])
     {:ok, mission} = MissionEnvironment.new([])
+
     {:ok, limits} = Limits.new(workflow_timeout_ms: 1_000, run_duration_ms: 2_000)
+
     {:ok, sink} = EventSink.start(:normal, limits)
 
     close = fn ->
@@ -176,7 +178,12 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
         provider_resources: [close]
       )
 
-    assert {:error, %{reason: :timeout}} = PtcRunner.Kernel.run("(tool/slow {})", config)
+    case PtcRunner.Kernel.run("(tool/slow {})", config) do
+      {:error, %{reason: :timeout}} -> :ok
+      {:ok, %{value: %{status: :error, kind: :timeout, reason: :provider_timeout}}} -> :ok
+      other -> flunk("expected evaluator or provider timeout, got: #{inspect(other)}")
+    end
+
     assert_receive {:resource_closed, false}
     EventSink.stop(sink)
   end

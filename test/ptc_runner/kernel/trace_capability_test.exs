@@ -343,6 +343,57 @@ defmodule PtcRunner.Kernel.TraceCapabilityTest do
   end
 
   @tag :tmp_dir
+  test "atomic publication rejects a replaced destination directory identity", %{
+    tmp_dir: directory
+  } do
+    destination = Path.join(directory, "destination")
+    displaced = Path.join(directory, "displaced")
+    File.mkdir!(destination)
+    expected_identity = directory_identity(destination)
+    File.rename!(destination, displaced)
+    File.mkdir!(destination)
+    path = Path.join(destination, "identity.jsonl")
+    events = [decoded_event("identity", 1, "run-started")]
+
+    assert {:error, :trace_persistence_failed} =
+             TraceLog.publish_jsonl(path, events, expected_parent_identity: expected_identity)
+
+    refute File.exists?(path)
+    assert File.ls!(destination) == []
+  end
+
+  @tag :tmp_dir
+  test "identity-bound publication cannot write through a replaced parent path", %{
+    tmp_dir: directory
+  } do
+    destination = Path.join(directory, "destination")
+    displaced = Path.join(directory, "displaced")
+    File.mkdir!(destination)
+    expected_identity = directory_identity(destination)
+    path = Path.join(destination, "bound.jsonl")
+    events = [decoded_event("bound", 1, "run-started")]
+
+    hook = fn
+      :before_write ->
+        File.rename!(destination, displaced)
+        File.mkdir!(destination)
+        :ok
+
+      _stage ->
+        :ok
+    end
+
+    assert {:error, :trace_persistence_failed} =
+             TraceLog.publish_jsonl(path, events,
+               expected_parent_identity: expected_identity,
+               fault_hook: hook
+             )
+
+    assert File.ls!(destination) == []
+    assert File.regular?(Path.join(displaced, "bound.jsonl"))
+  end
+
+  @tag :tmp_dir
   test "private JSONL sources require reserved names and explicit grants", %{tmp_dir: directory} do
     normal_path = Path.join(directory, "normal.jsonl")
     private_path = Path.join(directory, "secret.private.jsonl")
@@ -510,6 +561,11 @@ defmodule PtcRunner.Kernel.TraceCapabilityTest do
 
   defp jsonl_event(run_id, sequence, type) do
     Jason.encode!(decoded_event(run_id, sequence, type)) <> "\n"
+  end
+
+  defp directory_identity(directory) do
+    stat = File.stat!(directory)
+    {stat.major_device, stat.minor_device, stat.inode}
   end
 
   defp decoded_event(run_id, sequence, type, data \\ %{}) do

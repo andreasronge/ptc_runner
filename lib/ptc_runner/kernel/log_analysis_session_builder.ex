@@ -1,12 +1,13 @@
 defmodule PtcRunner.Kernel.LogAnalysisSessionBuilder do
   @moduledoc """
-  Host boundary for the fixed local Viewer log-analysis profile.
+  Host boundary for the fixed local log-analysis profile.
 
-  The builder accepts only a host-selected normal trace directory. It captures
-  that directory immutably, compiles the shipped `log.core` closure, grants the
-  four snapshot-bound read capabilities, creates fresh bounded owners, and
-  starts one attested `PtcRunner.Kernel.LogAnalysisSession`. No caller can
-  supply a profile, component, capability set, mission data, or limit.
+  The builder accepts only a host-selected normal trace directory and a
+  host-selected normal output directory. It captures the source immutably,
+  compiles the shipped `log.core` closure, grants the four snapshot-bound read
+  capabilities, creates fresh bounded owners, and starts one attested
+  `PtcRunner.Kernel.LogAnalysisSession`. No caller can supply a profile,
+  component, capability set, mission data, label, or limit.
 
   The calling process remains the completed session's stable lifecycle owner.
   Long-lived hosts must therefore invoke the builder in their connected backend
@@ -21,12 +22,27 @@ defmodule PtcRunner.Kernel.LogAnalysisSessionBuilder do
   alias PtcRunner.Kernel.TraceSnapshot
 
   @type source :: {:directory, binary()}
+  @type destination :: {:directory, binary()}
 
-  @spec start(source()) :: {:ok, LogAnalysisSession.t(), map()} | {:error, atom()}
-  def start(source), do: start(source, [])
+  @doc """
+  Starts one fixed log-analysis session over an immutable source capture.
+
+  The destination directory receives one atomically published
+  `<log-analysis-id>.jsonl` trace on close. Hosts decide whether source and
+  destination may be the same: the Viewer intentionally uses one directory so
+  refreshed sessions can inspect predecessors, while terminal callers require
+  physically separate directories. The builder binds the destination's
+  filesystem identity into the session trace. Publication runs relative to a
+  helper process whose working directory is verified before bytes are sent, so
+  later pathname replacement cannot redirect the write.
+  """
+  @spec start(source(), destination()) ::
+          {:ok, LogAnalysisSession.t(), map()} | {:error, atom()}
+  def start(source, destination), do: start(source, destination, [])
 
   @doc false
-  def start({:directory, directory}, opts) when is_binary(directory) and is_list(opts) do
+  def start({:directory, directory}, {:directory, trace_directory}, opts)
+      when is_binary(directory) and is_binary(trace_directory) and is_list(opts) do
     allowed = [
       :persistence_fault_hook,
       :capture_hook,
@@ -34,7 +50,8 @@ defmodule PtcRunner.Kernel.LogAnalysisSessionBuilder do
       :construction_hook,
       :evaluation_hook,
       :builder_fault_hook,
-      :resource_cleanup_hook
+      :resource_cleanup_hook,
+      :expected_destination_identity
     ]
 
     construction_hook = Keyword.get(opts, :construction_hook)
@@ -48,28 +65,34 @@ defmodule PtcRunner.Kernel.LogAnalysisSessionBuilder do
          true <- is_nil(builder_fault_hook) or is_function(builder_fault_hook, 2),
          true <- is_nil(resource_cleanup_hook) or is_function(resource_cleanup_hook, 0),
          true <- String.valid?(directory),
+         true <- String.valid?(trace_directory),
          expanded = Path.expand(directory),
-         {:ok, %File.Stat{type: :directory}} <- File.stat(expanded),
+         expanded_trace_directory = Path.expand(trace_directory),
+         {:ok, %File.Stat{type: :directory}} <- File.lstat(expanded),
+         {:ok, %File.Stat{type: :directory}} <- File.lstat(expanded_trace_directory),
+         {:ok, destination_identity} <- directory_identity(expanded_trace_directory),
+         true <-
+           destination_identity ==
+             Keyword.get(opts, :expected_destination_identity, destination_identity),
          {:ok, snapshot} <-
            TraceSnapshot.start({:directory, expanded},
              owner: self(),
              capture_hook: Keyword.get(opts, :capture_hook),
              listing_hook: Keyword.get(opts, :listing_hook)
            ) do
-      build_owned_snapshot(snapshot, expanded, opts)
+      build_owned_snapshot(snapshot, expanded_trace_directory, destination_identity, opts)
     else
       false -> {:error, :invalid_log_analysis_source}
       {:ok, %File.Stat{}} -> {:error, :invalid_log_analysis_source}
       {:error, reason} when is_atom(reason) -> {:error, reason}
-      _ -> {:error, :invalid_log_analysis_source}
     end
   rescue
     _exception -> {:error, :invalid_log_analysis_source}
   end
 
-  def start(_source, _opts), do: {:error, :invalid_log_analysis_source}
+  def start(_source, _destination, _opts), do: {:error, :invalid_log_analysis_source}
 
-  defp build_owned_snapshot(snapshot, directory, opts) do
+  defp build_owned_snapshot(snapshot, directory, destination_identity, opts) do
     result =
       try do
         with :ok <-
@@ -78,7 +101,7 @@ defmodule PtcRunner.Kernel.LogAnalysisSessionBuilder do
                  :after_snapshot,
                  %{snapshot: snapshot}
                ) do
-          build(snapshot, directory, opts)
+          build(snapshot, directory, destination_identity, opts)
         end
       rescue
         _exception -> {:error, :log_analysis_session_failed}
@@ -96,10 +119,10 @@ defmodule PtcRunner.Kernel.LogAnalysisSessionBuilder do
     end
   end
 
-  defp build(snapshot, directory, opts) do
+  defp build(snapshot, trace_directory, destination_identity, opts) do
     limits = LogAnalysisProfile.limits()
-    run_id = "viewer-repl-" <> Base.encode16(:crypto.strong_rand_bytes(8), case: :lower)
-    destination = Path.join(directory, run_id <> ".jsonl")
+    run_id = "log-analysis-" <> Base.encode16(:crypto.strong_rand_bytes(8), case: :lower)
+    destination = Path.join(trace_directory, run_id <> ".jsonl")
     terminal_reserve = %{count: 2, bytes: limits.event_payload_bytes * 2}
 
     case RunState.start_with_event_sink(
@@ -113,18 +136,37 @@ defmodule PtcRunner.Kernel.LogAnalysisSessionBuilder do
            owner: self()
          ) do
       {:ok, run_state, sink} ->
-        start_session(snapshot, run_state, sink, limits, destination, run_id, opts)
+        start_session(
+          snapshot,
+          run_state,
+          sink,
+          limits,
+          destination,
+          destination_identity,
+          run_id,
+          opts
+        )
 
       {:error, reason} ->
         {:error, normalize_error(reason)}
     end
   end
 
-  defp start_session(snapshot, run_state, sink, limits, destination, run_id, opts) do
+  defp start_session(
+         snapshot,
+         run_state,
+         sink,
+         limits,
+         destination,
+         destination_identity,
+         run_id,
+         opts
+       ) do
     case SessionTrace.start(limits, destination, run_id,
            owner: self(),
            persistence_fault_hook: Keyword.get(opts, :persistence_fault_hook),
            resource_cleanup_hook: Keyword.get(opts, :resource_cleanup_hook),
+           destination_directory_identity: destination_identity,
            run_state: run_state,
            event_sink: sink
          ) do
@@ -174,6 +216,23 @@ defmodule PtcRunner.Kernel.LogAnalysisSessionBuilder do
         cleanup_run_state(run_state)
         TraceSnapshot.stop(snapshot)
         {:error, normalize_error(reason)}
+    end
+  end
+
+  defp directory_identity(directory) do
+    case File.stat(directory) do
+      {:ok,
+       %File.Stat{
+         type: :directory,
+         major_device: major,
+         minor_device: minor,
+         inode: inode
+       }}
+      when is_integer(major) and is_integer(minor) and is_integer(inode) ->
+        {:ok, {major, minor, inode}}
+
+      _ ->
+        {:error, :invalid_log_analysis_source}
     end
   end
 

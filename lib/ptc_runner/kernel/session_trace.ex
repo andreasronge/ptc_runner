@@ -7,7 +7,9 @@ defmodule PtcRunner.Kernel.SessionTrace do
   as stable lifecycle owner, monitors the evaluation owner, and retains a
   finalized batch for close retries while that owner remains available.
   Finalization and batch handoff are one owner operation. Publication is atomic
-  and no-clobber; retrying never appends or emits another terminal event.
+  and no-clobber, and binds writes to a directory context whose filesystem
+  identity matches the builder-bound destination; retrying never appends or
+  emits another terminal event.
   Unexpected evaluation- or lifecycle-owner death gets one independent
   best-effort publication attempt before this trace owner stops; that path has
   no surviving caller-visible retry authority.
@@ -31,20 +33,27 @@ defmodule PtcRunner.Kernel.SessionTrace do
     token = make_ref()
     fault_hook = Keyword.get(opts, :persistence_fault_hook)
     resource_cleanup_hook = Keyword.get(opts, :resource_cleanup_hook)
+    destination_directory_identity = Keyword.get(opts, :destination_directory_identity)
     owner = Keyword.get(opts, :owner, self())
     run_state = Keyword.get(opts, :run_state)
     sink = Keyword.get(opts, :event_sink)
 
-    if Keyword.keys(opts) --
-         [:owner, :persistence_fault_hook, :resource_cleanup_hook, :run_state, :event_sink] == [] and
-         is_pid(owner) and match?(%RunState{}, run_state) and match?(%EventSink{}, sink) and
-         run_state.pid == sink.pid and (is_nil(fault_hook) or is_function(fault_hook, 1)) and
-         (is_nil(resource_cleanup_hook) or is_function(resource_cleanup_hook, 0)) and
-         valid_trace_contract?(limits, destination, run_id, run_state, sink) do
+    if valid_start_options?(%{
+         opts: opts,
+         owner: owner,
+         fault_hook: fault_hook,
+         resource_cleanup_hook: resource_cleanup_hook,
+         destination_directory_identity: destination_directory_identity,
+         run_state: run_state,
+         sink: sink,
+         limits: limits,
+         destination: destination,
+         run_id: run_id
+       }) do
       case GenServer.start(
              __MODULE__,
-             {limits, destination, run_id, token, fault_hook, resource_cleanup_hook, owner,
-              run_state, sink}
+             {limits, destination, destination_directory_identity, run_id, token, fault_hook,
+              resource_cleanup_hook, owner, run_state, sink}
            ) do
         {:ok, pid} -> {:ok, %__MODULE__{pid: pid, token: token}}
         {:error, _reason} -> {:error, :session_trace_failed}
@@ -101,14 +110,15 @@ defmodule PtcRunner.Kernel.SessionTrace do
 
   @impl GenServer
   def init(
-        {limits, destination, run_id, token, fault_hook, resource_cleanup_hook, owner, run_state,
-         sink}
+        {limits, destination, destination_directory_identity, run_id, token, fault_hook,
+         resource_cleanup_hook, owner, run_state, sink}
       ) do
     {:ok,
      %{
        token: token,
        limits: limits,
        destination: destination,
+       destination_directory_identity: destination_directory_identity,
        run_id: run_id,
        fault_hook: fault_hook,
        resource_cleanup_hook: resource_cleanup_hook,
@@ -348,7 +358,10 @@ defmodule PtcRunner.Kernel.SessionTrace do
   defp persist_state(state) do
     with true <- valid_terminal_batch?(state.events),
          :ok <-
-           TraceLog.publish_jsonl(state.destination, state.events, fault_hook: state.fault_hook) do
+           TraceLog.publish_jsonl(state.destination, state.events,
+             fault_hook: state.fault_hook,
+             expected_parent_identity: state.destination_directory_identity
+           ) do
       {:ok, %{state | persistence: :persisted}}
     else
       {:error, reason} ->
@@ -365,6 +378,39 @@ defmodule PtcRunner.Kernel.SessionTrace do
   end
 
   defp valid_terminal_batch?(_events), do: false
+
+  defp valid_directory_identity?({major, minor, inode}),
+    do: is_integer(major) and is_integer(minor) and is_integer(inode)
+
+  defp valid_directory_identity?(_identity), do: false
+
+  defp valid_start_options?(%{
+         opts: opts,
+         owner: owner,
+         fault_hook: fault_hook,
+         resource_cleanup_hook: resource_cleanup_hook,
+         destination_directory_identity: destination_directory_identity,
+         run_state: run_state,
+         sink: sink,
+         limits: limits,
+         destination: destination,
+         run_id: run_id
+       }) do
+    Keyword.keys(opts) --
+      [
+        :owner,
+        :persistence_fault_hook,
+        :resource_cleanup_hook,
+        :destination_directory_identity,
+        :run_state,
+        :event_sink
+      ] == [] and
+      is_pid(owner) and match?(%RunState{}, run_state) and match?(%EventSink{}, sink) and
+      run_state.pid == sink.pid and (is_nil(fault_hook) or is_function(fault_hook, 1)) and
+      (is_nil(resource_cleanup_hook) or is_function(resource_cleanup_hook, 0)) and
+      valid_directory_identity?(destination_directory_identity) and
+      valid_trace_contract?(limits, destination, run_id, run_state, sink)
+  end
 
   defp safe_info(state) do
     %{
@@ -456,9 +502,9 @@ defmodule PtcRunner.Kernel.SessionTrace do
 
   defp cleanup_run_state(state), do: state
 
-  defp cleanup_snapshot(%{snapshot: %TraceSnapshot{} = snapshot} = state) do
+  defp cleanup_snapshot(%{snapshot: snapshot} = state) when not is_nil(snapshot) do
     TraceSnapshot.stop(snapshot)
-    if Process.alive?(snapshot.pid), do: state, else: %{state | snapshot: nil}
+    if TraceSnapshot.alive?(snapshot), do: state, else: %{state | snapshot: nil}
   end
 
   defp cleanup_snapshot(state), do: state

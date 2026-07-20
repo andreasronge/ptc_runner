@@ -1,6 +1,6 @@
 defmodule PtcRunner.Kernel.LogAnalysisProfile do
   @moduledoc """
-  Fixed authority recipe for the local Viewer log-analysis session.
+  Fixed authority recipe for local log-analysis sessions.
 
   `log-analysis-v1` installs only the shipped `log.core` mission component,
   four read-only snapshot capabilities, empty mission data, and the ordinary
@@ -22,6 +22,8 @@ defmodule PtcRunner.Kernel.LogAnalysisProfile do
   alias PtcRunner.Kernel.WorkflowEnvironment
 
   @id "log-analysis-v1"
+  @component_ids ["log.core"]
+  @namespaces ["log"]
   @capabilities ~w(trace-counters trace-get-run trace-list-runs trace-list-turns)
   @persistence "canonical-trace-on-close"
   @result_policy "bounded-json-v1"
@@ -30,7 +32,7 @@ defmodule PtcRunner.Kernel.LogAnalysisProfile do
   def id, do: @id
 
   @spec component_selections() :: [{:library, binary()}]
-  def component_selections, do: [{:library, "log.core"}]
+  def component_selections, do: Enum.map(@component_ids, &{:library, &1})
 
   @spec explicit_capabilities() :: [binary()]
   def explicit_capabilities, do: @capabilities
@@ -40,6 +42,28 @@ defmodule PtcRunner.Kernel.LogAnalysisProfile do
 
   @spec result_policy() :: binary()
   def result_policy, do: @result_policy
+
+  @doc "Returns the safe, static discovery contract for `log-analysis-v1`."
+  @spec description() :: map()
+  def description do
+    %{
+      "id" => @id,
+      "summary" => "Analyze an immutable capture of canonical sanitized traces",
+      "resources" => %{
+        "traces" => %{
+          "required" => true,
+          "kind" => "normal-trace-directory",
+          "summary" => "Immutable capture of canonical sanitized trace files"
+        }
+      },
+      "components" => @component_ids,
+      "namespaces" => @namespaces,
+      "explicit_capabilities" => @capabilities,
+      "limits" => limits() |> Map.from_struct() |> stringify_keys(),
+      "persistence_policy" => @persistence,
+      "result_policy" => @result_policy
+    }
+  end
 
   @spec limits() :: Limits.t()
   def limits do
@@ -61,11 +85,13 @@ defmodule PtcRunner.Kernel.LogAnalysisProfile do
   @doc false
   @spec assemble(TraceSnapshot.t(), PtcRunner.Kernel.EventSink.t()) ::
           {:ok, %{config: RunConfig.t(), profile: map()}} | {:error, atom()}
-  def assemble(%TraceSnapshot{} = snapshot, sink) do
+  def assemble(snapshot, sink) do
     limits = limits()
 
-    with {:ok, components} <- Library.resolve_components(component_selections()),
+    with true <- TraceSnapshot.valid?(snapshot),
+         {:ok, components} <- Library.resolve_components(component_selections()),
          {:ok, bundle} <- PtcRunner.Kernel.compile_bundle(components),
+         true <- namespaces(bundle) == @namespaces,
          {:ok, capabilities} <- TraceCapability.from_snapshot(snapshot),
          true <- capability_names(capabilities) == explicit_capabilities(),
          {:ok, mission} <-
@@ -81,8 +107,9 @@ defmodule PtcRunner.Kernel.LogAnalysisProfile do
 
   @doc false
   @spec valid_assembly?(term(), term(), term(), term()) :: boolean()
-  def valid_assembly?(config, profile, %TraceSnapshot{} = snapshot, session_trace) do
-    with {:ok, sink} <- SessionTrace.sink(session_trace),
+  def valid_assembly?(config, profile, snapshot, session_trace) do
+    with true <- TraceSnapshot.valid?(snapshot),
+         {:ok, sink} <- SessionTrace.sink(session_trace),
          {:ok, expected} <- assemble(snapshot, sink) do
       config === expected.config and profile === expected.profile
     else
@@ -92,12 +119,11 @@ defmodule PtcRunner.Kernel.LogAnalysisProfile do
     :exit, _reason -> false
   end
 
-  def valid_assembly?(_config, _profile, _snapshot, _session_trace), do: false
-
   @doc false
   @spec descriptor(map(), map(), Limits.t()) :: {:ok, map()} | {:error, atom()}
   def descriptor(bundle, mission, %Limits{} = limits) do
-    with {:ok, inventory} <- MissionInventory.build(mission, limits),
+    with true <- namespaces(bundle) == @namespaces,
+         {:ok, inventory} <- MissionInventory.build(mission, limits),
          identity = identity(bundle, inventory, limits),
          {:ok, encoded} <- DeterministicJSON.encode(identity) do
       digest = "sha256:" <> sha256(encoded)
@@ -106,7 +132,7 @@ defmodule PtcRunner.Kernel.LogAnalysisProfile do
        %{
          id: @id,
          digest: digest,
-         namespaces: namespaces(bundle),
+         namespaces: @namespaces,
          identity: identity,
          mission_inventory: inventory
        }}
@@ -123,7 +149,7 @@ defmodule PtcRunner.Kernel.LogAnalysisProfile do
       "implicit_runtime" => RuntimeTools.mission_contract_descriptor(),
       "limits" => limits |> Map.from_struct() |> stringify_keys(),
       "explicit_capabilities" => @capabilities,
-      "components" => ["log.core"],
+      "components" => @component_ids,
       "mission_data" => %{},
       "persistence_policy" => @persistence,
       "result_policy" => @result_policy
@@ -138,7 +164,7 @@ defmodule PtcRunner.Kernel.LogAnalysisProfile do
       limits: limits,
       event_sink: sink,
       labels: %{
-        "name" => "ptc.viewer.repl",
+        "name" => "ptc.log-analysis.repl",
         "tags" => %{"mode" => "repl"}
       },
       session_profile: %{"id" => profile.id, "digest" => profile.digest}
