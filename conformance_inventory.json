@@ -4047,6 +4047,349 @@
   },
   {
     "status": "supported",
+    "symbol": "Math/abs",
+    "namespace": "java.lang.Math",
+    "compatibility_target": "Java",
+    "notes": "DIV-45: uses PTC-Lisp arbitrary-precision integers, so abs returns the mathematically correct positive value and accepts BigInt input rather than reproducing Java long-overflow/overload artifacts"
+  },
+  {
+    "status": "candidate",
+    "symbol": "Math/acos",
+    "namespace": "java.lang.Math",
+    "compatibility_target": "Java",
+    "notes": "pure math"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "Math/addExact",
+    "namespace": "java.lang.Math",
+    "compatibility_target": "Java",
+    "notes": "Java overflow semantics not applicable on BEAM"
+  },
+  {
+    "status": "candidate",
+    "symbol": "Math/asin",
+    "namespace": "java.lang.Math",
+    "compatibility_target": "Java",
+    "notes": "pure math"
+  },
+  {
+    "status": "candidate",
+    "symbol": "Math/atan",
+    "namespace": "java.lang.Math",
+    "compatibility_target": "Java",
+    "notes": "pure math"
+  },
+  {
+    "status": "candidate",
+    "symbol": "Math/atan2",
+    "namespace": "java.lang.Math",
+    "compatibility_target": "Java",
+    "notes": "pure math"
+  },
+  {
+    "status": "candidate",
+    "symbol": "Math/cbrt",
+    "namespace": "java.lang.Math",
+    "compatibility_target": "Java",
+    "notes": "pure math"
+  },
+  {
+    "status": "supported",
+    "symbol": "Math/ceil",
+    "namespace": "java.lang.Math",
+    "compatibility_target": "Java",
+    "notes": "DIV-42: integer-returning PTC-Lisp extension, so finite results render as integers rather than Java's double shape"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "Math/copySign",
+    "namespace": "java.lang.Math",
+    "compatibility_target": "Java",
+    "notes": "low-level IEEE 754 manipulation"
+  },
+  {
+    "status": "candidate",
+    "symbol": "Math/cos",
+    "namespace": "java.lang.Math",
+    "compatibility_target": "Java",
+    "notes": "pure math"
+  },
+  {
+    "status": "candidate",
+    "symbol": "Math/cosh",
+    "namespace": "java.lang.Math",
+    "compatibility_target": "Java",
+    "notes": "pure math"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "Math/decrementExact",
+    "namespace": "java.lang.Math",
+    "compatibility_target": "Java",
+    "notes": "Java overflow semantics not applicable on BEAM"
+  },
+  {
+    "status": "candidate",
+    "symbol": "Math/exp",
+    "namespace": "java.lang.Math",
+    "compatibility_target": "Java",
+    "notes": "pure math"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "Math/expm1",
+    "namespace": "java.lang.Math",
+    "compatibility_target": "Java",
+    "notes": "specialized numerical precision, low demand"
+  },
+  {
+    "status": "supported",
+    "symbol": "Math/floor",
+    "namespace": "java.lang.Math",
+    "compatibility_target": "Java",
+    "notes": "DIV-42: integer-returning PTC-Lisp extension, so finite results render as integers rather than Java's double shape"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "Math/floorDiv",
+    "namespace": "java.lang.Math",
+    "compatibility_target": "Java",
+    "notes": "Java integer division semantics; use quot + floor"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "Math/floorMod",
+    "namespace": "java.lang.Math",
+    "compatibility_target": "Java",
+    "notes": "Java integer semantics; use mod"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "Math/fma",
+    "namespace": "java.lang.Math",
+    "compatibility_target": "Java",
+    "notes": "specialized numerical precision"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "Math/getExponent",
+    "namespace": "java.lang.Math",
+    "compatibility_target": "Java",
+    "notes": "low-level IEEE 754 inspection"
+  },
+  {
+    "status": "candidate",
+    "symbol": "Math/hypot",
+    "namespace": "java.lang.Math",
+    "compatibility_target": "Java",
+    "notes": "pure math"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "Math/IEEEremainder",
+    "namespace": "java.lang.Math",
+    "compatibility_target": "Java",
+    "notes": "low-level IEEE 754 semantics; use rem/mod"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "Math/incrementExact",
+    "namespace": "java.lang.Math",
+    "compatibility_target": "Java",
+    "notes": "Java overflow semantics not applicable on BEAM"
+  },
+  {
+    "status": "candidate",
+    "symbol": "Math/log",
+    "namespace": "java.lang.Math",
+    "compatibility_target": "Java",
+    "notes": "pure math"
+  },
+  {
+    "status": "candidate",
+    "symbol": "Math/log10",
+    "namespace": "java.lang.Math",
+    "compatibility_target": "Java",
+    "notes": "pure math"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "Math/log1p",
+    "namespace": "java.lang.Math",
+    "compatibility_target": "Java",
+    "notes": "specialized numerical precision, low demand"
+  },
+  {
+    "status": "supported",
+    "symbol": "Math/max",
+    "namespace": "java.lang.Math",
+    "compatibility_target": "Java",
+    "notes": "DIV-44: max is the Clojure-named variadic helper (Math/max is an alias), not Java's two-argument primitive. DIV-45: mixed numeric and total-ordering comparisons are accepted via PTC-Lisp's generic value model rather than Java's primitive overloads"
+  },
+  {
+    "status": "supported",
+    "symbol": "Math/min",
+    "namespace": "java.lang.Math",
+    "compatibility_target": "Java",
+    "notes": "DIV-44: min is the Clojure-named variadic helper (Math/min is an alias), not Java's two-argument primitive. DIV-45: mixed numeric and total-ordering comparisons are accepted via PTC-Lisp's generic value model rather than Java's primitive overloads"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "Math/multiplyExact",
+    "namespace": "java.lang.Math",
+    "compatibility_target": "Java",
+    "notes": "Java overflow semantics not applicable on BEAM"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "Math/multiplyHigh",
+    "namespace": "java.lang.Math",
+    "compatibility_target": "Java",
+    "notes": "low-level 64-bit arithmetic"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "Math/negateExact",
+    "namespace": "java.lang.Math",
+    "compatibility_target": "Java",
+    "notes": "Java overflow semantics not applicable on BEAM"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "Math/nextAfter",
+    "namespace": "java.lang.Math",
+    "compatibility_target": "Java",
+    "notes": "low-level IEEE 754 manipulation"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "Math/nextDown",
+    "namespace": "java.lang.Math",
+    "compatibility_target": "Java",
+    "notes": "low-level IEEE 754 manipulation"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "Math/nextUp",
+    "namespace": "java.lang.Math",
+    "compatibility_target": "Java",
+    "notes": "low-level IEEE 754 manipulation"
+  },
+  {
+    "status": "supported",
+    "symbol": "Math/pow",
+    "namespace": "java.lang.Math",
+    "compatibility_target": "Java",
+    "notes": "Follows java.lang.Math.pow's IEEE 754 special-case table, returning :nan / :infinity / :negative_infinity as recoverable signal values instead of raising (e.g. (pow -1 0.5) => NaN, (pow 0 -1) => Inf)"
+  },
+  {
+    "status": "candidate",
+    "symbol": "Math/random",
+    "namespace": "java.lang.Math",
+    "compatibility_target": "Java",
+    "notes": "pure (non-deterministic but side-effect free)"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "Math/rint",
+    "namespace": "java.lang.Math",
+    "compatibility_target": "Java",
+    "notes": "use round instead"
+  },
+  {
+    "status": "supported",
+    "symbol": "Math/round",
+    "namespace": "java.lang.Math",
+    "compatibility_target": "Java",
+    "notes": "DIV-43: round-half-away-from-zero, integer result, and special values (NaN/infinity) are preserved rather than Java's floor(x+0.5) and long saturation. DIV-45: integer and BigInt arguments are accepted (returned unchanged) via PTC-Lisp's value model rather than Java's float/double-only overloads"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "Math/scalb",
+    "namespace": "java.lang.Math",
+    "compatibility_target": "Java",
+    "notes": "low-level IEEE 754 manipulation"
+  },
+  {
+    "status": "candidate",
+    "symbol": "Math/signum",
+    "namespace": "java.lang.Math",
+    "compatibility_target": "Java",
+    "notes": "pure math"
+  },
+  {
+    "status": "candidate",
+    "symbol": "Math/sin",
+    "namespace": "java.lang.Math",
+    "compatibility_target": "Java",
+    "notes": "pure math"
+  },
+  {
+    "status": "candidate",
+    "symbol": "Math/sinh",
+    "namespace": "java.lang.Math",
+    "compatibility_target": "Java",
+    "notes": "pure math"
+  },
+  {
+    "status": "supported",
+    "symbol": "Math/sqrt",
+    "namespace": "java.lang.Math",
+    "compatibility_target": "Java",
+    "notes": ""
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "Math/subtractExact",
+    "namespace": "java.lang.Math",
+    "compatibility_target": "Java",
+    "notes": "Java overflow semantics not applicable on BEAM"
+  },
+  {
+    "status": "candidate",
+    "symbol": "Math/tan",
+    "namespace": "java.lang.Math",
+    "compatibility_target": "Java",
+    "notes": "pure math"
+  },
+  {
+    "status": "candidate",
+    "symbol": "Math/tanh",
+    "namespace": "java.lang.Math",
+    "compatibility_target": "Java",
+    "notes": "pure math"
+  },
+  {
+    "status": "candidate",
+    "symbol": "Math/toDegrees",
+    "namespace": "java.lang.Math",
+    "compatibility_target": "Java",
+    "notes": "pure math"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "Math/toIntExact",
+    "namespace": "java.lang.Math",
+    "compatibility_target": "Java",
+    "notes": "Java type narrowing not applicable on BEAM"
+  },
+  {
+    "status": "candidate",
+    "symbol": "Math/toRadians",
+    "namespace": "java.lang.Math",
+    "compatibility_target": "Java",
+    "notes": "pure math"
+  },
+  {
+    "status": "not_relevant",
+    "symbol": "Math/ulp",
+    "namespace": "java.lang.Math",
+    "compatibility_target": "Java",
+    "notes": "low-level IEEE 754 inspection"
+  },
+  {
+    "status": "supported",
     "symbol": "Boolean/parseBoolean",
     "namespace": "java.lang.Boolean",
     "compatibility_target": "Java",
@@ -4383,90 +4726,6 @@
   },
   {
     "status": "supported",
-    "symbol": "Duration/between",
-    "namespace": "java.time.Duration",
-    "compatibility_target": "Java",
-    "notes": "Requested in issue #1019 for millisecond/day differences. BUG GAP-J19: java.util.Date inputs are accepted instead of rejected."
-  },
-  {
-    "status": "supported",
-    "symbol": ".toMillis",
-    "namespace": "java.time.Duration",
-    "compatibility_target": "Java",
-    "notes": "Requested in issue #1019 for instant differences."
-  },
-  {
-    "status": "supported",
-    "symbol": ".toDays",
-    "namespace": "java.time.Duration",
-    "compatibility_target": "Java",
-    "notes": "Requested in issue #1019 for bucket/day calculations."
-  },
-  {
-    "status": "candidate",
-    "symbol": "Duration/ofMillis",
-    "namespace": "java.time.Duration",
-    "compatibility_target": "Java",
-    "notes": "Useful companion for bounded Duration support."
-  },
-  {
-    "status": "candidate",
-    "symbol": "Duration/parse",
-    "namespace": "java.time.Duration",
-    "compatibility_target": "Java",
-    "notes": "Useful but lower-priority than between/toMillis/toDays."
-  },
-  {
-    "status": "supported",
-    "symbol": "Instant/parse",
-    "namespace": "java.time.Instant",
-    "compatibility_target": "Java",
-    "notes": "Also available as java.time.Instant/parse and parse. BUG GAP-J06: date-only and no-zone date-time strings are accepted instead of rejected."
-  },
-  {
-    "status": "candidate",
-    "symbol": "Instant/now",
-    "namespace": "java.time.Instant",
-    "compatibility_target": "Java",
-    "notes": "System/currentTimeMillis plus java.util.Date. covers many cases."
-  },
-  {
-    "status": "supported",
-    "symbol": ".isBefore",
-    "namespace": "java.time.Instant",
-    "compatibility_target": "Java",
-    "notes": "Works for same-type Date or DateTime values."
-  },
-  {
-    "status": "supported",
-    "symbol": ".isAfter",
-    "namespace": "java.time.Instant",
-    "compatibility_target": "Java",
-    "notes": "Works for same-type Date or DateTime values."
-  },
-  {
-    "status": "supported",
-    "symbol": ".getTime",
-    "namespace": "java.time.Instant",
-    "compatibility_target": "Java",
-    "notes": "BUG GAP-J04: Java Instant has toEpochMilli, not getTime; current behavior is a PTC convenience."
-  },
-  {
-    "status": "candidate",
-    "symbol": ".toEpochMilli",
-    "namespace": "java.time.Instant",
-    "compatibility_target": "Java",
-    "notes": "BUG GAP-J18: Java Instant.toEpochMilli is unsupported while .getTime is exposed."
-  },
-  {
-    "status": "candidate",
-    "symbol": "Instant/ofEpochMilli",
-    "namespace": "java.time.Instant",
-    "compatibility_target": "Java",
-    "notes": "java.util.Date. already accepts seconds or milliseconds."
-  },
-  {
-    "status": "supported",
     "symbol": "LocalDate/parse",
     "namespace": "java.time.LocalDate",
     "compatibility_target": "Java",
@@ -4529,6 +4788,90 @@
     "notes": "Requested in issue #1019 for date arithmetic. BUG GAP-J12: floating and NaN day counts are rejected instead of following Clojure Java interop coercion."
   },
   {
+    "status": "supported",
+    "symbol": "Instant/parse",
+    "namespace": "java.time.Instant",
+    "compatibility_target": "Java",
+    "notes": "Also available as java.time.Instant/parse and parse. BUG GAP-J06: date-only and no-zone date-time strings are accepted instead of rejected."
+  },
+  {
+    "status": "candidate",
+    "symbol": "Instant/now",
+    "namespace": "java.time.Instant",
+    "compatibility_target": "Java",
+    "notes": "System/currentTimeMillis plus java.util.Date. covers many cases."
+  },
+  {
+    "status": "supported",
+    "symbol": ".isBefore",
+    "namespace": "java.time.Instant",
+    "compatibility_target": "Java",
+    "notes": "Works for same-type Date or DateTime values."
+  },
+  {
+    "status": "supported",
+    "symbol": ".isAfter",
+    "namespace": "java.time.Instant",
+    "compatibility_target": "Java",
+    "notes": "Works for same-type Date or DateTime values."
+  },
+  {
+    "status": "supported",
+    "symbol": ".getTime",
+    "namespace": "java.time.Instant",
+    "compatibility_target": "Java",
+    "notes": "BUG GAP-J04: Java Instant has toEpochMilli, not getTime; current behavior is a PTC convenience."
+  },
+  {
+    "status": "candidate",
+    "symbol": ".toEpochMilli",
+    "namespace": "java.time.Instant",
+    "compatibility_target": "Java",
+    "notes": "BUG GAP-J18: Java Instant.toEpochMilli is unsupported while .getTime is exposed."
+  },
+  {
+    "status": "candidate",
+    "symbol": "Instant/ofEpochMilli",
+    "namespace": "java.time.Instant",
+    "compatibility_target": "Java",
+    "notes": "java.util.Date. already accepts seconds or milliseconds."
+  },
+  {
+    "status": "supported",
+    "symbol": "Duration/between",
+    "namespace": "java.time.Duration",
+    "compatibility_target": "Java",
+    "notes": "Requested in issue #1019 for millisecond/day differences. BUG GAP-J19: java.util.Date inputs are accepted instead of rejected."
+  },
+  {
+    "status": "supported",
+    "symbol": ".toMillis",
+    "namespace": "java.time.Duration",
+    "compatibility_target": "Java",
+    "notes": "Requested in issue #1019 for instant differences."
+  },
+  {
+    "status": "supported",
+    "symbol": ".toDays",
+    "namespace": "java.time.Duration",
+    "compatibility_target": "Java",
+    "notes": "Requested in issue #1019 for bucket/day calculations."
+  },
+  {
+    "status": "candidate",
+    "symbol": "Duration/ofMillis",
+    "namespace": "java.time.Duration",
+    "compatibility_target": "Java",
+    "notes": "Useful companion for bounded Duration support."
+  },
+  {
+    "status": "candidate",
+    "symbol": "Duration/parse",
+    "namespace": "java.time.Duration",
+    "compatibility_target": "Java",
+    "notes": "Useful but lower-priority than between/toMillis/toDays."
+  },
+  {
     "status": "candidate",
     "symbol": "Period/between",
     "namespace": "java.time.Period",
@@ -4561,7 +4904,7 @@
     "symbol": "java.util.Date.",
     "namespace": "java.util.Date",
     "compatibility_target": "Java",
-    "notes": "BUG GAP-J03: numeric constructor currently treats milliseconds as seconds. BUG GAP-J06: ISO date strings are accepted by PTC-Lisp but rejected by the Java oracle. BUG GAP-J11: Java-accepted legacy date strings are rejected."
+    "notes": "BUG GAP-J03: numeric constructor currently treats milliseconds as seconds. BUG GAP-J06: ISO date strings are accepted by PTC-Lisp but rejected by the Java oracle. BUG GAP-J11: Java-accepted legacy date strings are rejected. EXTENSION GAP-J21: existing PTC temporal values are accepted directly."
   },
   {
     "status": "supported",
