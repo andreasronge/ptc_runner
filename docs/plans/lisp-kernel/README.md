@@ -41,6 +41,10 @@ records for recently completed cross-cutting work.
   records the implemented typed evaluator-effects representation, nestable
   capture stack, effect-bearing outcome protocol, and scheduler-only parallel
   boundary that centralize audit accounting and retry safety.
+- [`bounded-class-aware-java-interop.md`](bounded-class-aware-java-interop.md)
+  plans a closed Java surface manifest, explicit class-aware CoreAST and
+  receiver dispatch, tagged temporal values, UTF-16-aware String methods, and
+  executable JVM/Babashka conformance gates.
 
 Current user-facing material lives in [`../../guides/`](../../guides/). Git
 history is the archive for the completed Kernel migration, removed experiments,
