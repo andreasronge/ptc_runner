@@ -521,10 +521,10 @@ defmodule Mix.Tasks.Ptc.ReplTest do
           "(count (get (log/runs {}) \"items\"))"
         ],
         cd: File.cwd!(),
-        env: [{"MIX_ENV", "test"}]
+        env: [{"MIX_ENV", "test"}, {"MIX_QUIET", "1"}]
       )
 
-    records = decode_jsonl(output)
+    records = decode_mix_jsonl(output)
     assert Enum.map(records, & &1["type"]) == ["session-started", "evaluation", "session-closed"]
     assert Enum.at(records, 1)["result"]["value"] == 1
     assert File.regular?(List.last(records)["trace_path"])
@@ -544,6 +544,13 @@ defmodule Mix.Tasks.Ptc.ReplTest do
   defp decode_jsonl(output) do
     output
     |> String.split("\n", trim: true)
+    |> Enum.map(&Jason.decode!/1)
+  end
+
+  defp decode_mix_jsonl(output) do
+    output
+    |> String.split("\n", trim: true)
+    |> Enum.reject(&String.starts_with?(&1, "==> "))
     |> Enum.map(&Jason.decode!/1)
   end
 

@@ -179,7 +179,10 @@ defmodule PtcViewer.ReplStore do
   def handle_call(_request, _from, state), do: {:reply, {:error, :adapter_failure}, state}
 
   @impl GenServer
-  def handle_info({ref, result}, %{foreground: %{task: %{ref: ref}} = foreground} = state) do
+  def handle_info(
+        {ref, result},
+        %{foreground: %{task: %{task: %{ref: ref}}} = foreground} = state
+      ) do
     observe_task_down(foreground.task)
     state = %{state | foreground: nil}
     {:noreply, finish_foreground(state, foreground, result)}
@@ -187,7 +190,7 @@ defmodule PtcViewer.ReplStore do
 
   def handle_info(
         {:DOWN, ref, :process, _pid, reason},
-        %{foreground: %{task: %{ref: ref}}} = state
+        %{foreground: %{task: %{task: %{ref: ref}}}} = state
       ) do
     if reason == :normal do
       {:noreply, state}
@@ -196,7 +199,10 @@ defmodule PtcViewer.ReplStore do
     end
   end
 
-  def handle_info({:foreground_timeout, ref}, %{foreground: %{task: %{ref: ref}}} = state) do
+  def handle_info(
+        {:foreground_timeout, ref},
+        %{foreground: %{task: %{task: %{ref: ref}}}} = state
+      ) do
     terminate_task(state.foreground.task)
     {:noreply, recover_or_fail_foreground(state, :timeout)}
   end
@@ -209,7 +215,10 @@ defmodule PtcViewer.ReplStore do
     {:noreply, %{state | recovery: %{recovery | task: task, retry_timer: nil}}}
   end
 
-  def handle_info({ref, result}, %{recovery: %{task: %{ref: ref}} = recovery} = state) do
+  def handle_info(
+        {ref, result},
+        %{recovery: %{task: %{task: %{ref: ref}}} = recovery} = state
+      ) do
     observe_task_down(recovery.task)
 
     foreground =
@@ -224,7 +233,7 @@ defmodule PtcViewer.ReplStore do
 
   def handle_info(
         {:DOWN, ref, :process, _pid, reason},
-        %{recovery: %{task: %{ref: ref}} = recovery} = state
+        %{recovery: %{task: %{task: %{ref: ref}}} = recovery} = state
       ) do
     if reason == :normal do
       {:noreply, state}
@@ -233,12 +242,18 @@ defmodule PtcViewer.ReplStore do
     end
   end
 
-  def handle_info({:recovery_timeout, ref}, %{recovery: %{task: %{ref: ref}} = recovery} = state) do
+  def handle_info(
+        {:recovery_timeout, ref},
+        %{recovery: %{task: %{task: %{ref: ref}}} = recovery} = state
+      ) do
     terminate_task(recovery.task)
     {:noreply, schedule_recovery(%{state | recovery: %{recovery | task: nil}})}
   end
 
-  def handle_info({ref, result}, %{info_task: %{task: %{ref: ref}} = info_task} = state) do
+  def handle_info(
+        {ref, result},
+        %{info_task: %{task: %{task: %{ref: ref}}} = info_task} = state
+      ) do
     observe_task_down(info_task.task)
     state = %{state | info_task: nil}
 
@@ -254,11 +269,14 @@ defmodule PtcViewer.ReplStore do
 
   def handle_info(
         {:DOWN, ref, :process, _pid, _reason},
-        %{info_task: %{task: %{ref: ref}}} = state
+        %{info_task: %{task: %{task: %{ref: ref}}}} = state
       ),
       do: {:noreply, %{state | info_task: nil}}
 
-  def handle_info({:info_timeout, ref}, %{info_task: %{task: %{ref: ref}}} = state) do
+  def handle_info(
+        {:info_timeout, ref},
+        %{info_task: %{task: %{task: %{ref: ref}}}} = state
+      ) do
     terminate_task(state.info_task.task)
     {:noreply, %{state | info_task: nil}}
   end
@@ -876,13 +894,13 @@ defmodule PtcViewer.ReplStore do
   defp launch_task(state, timeout_ms, function) do
     task = Task.Supervisor.async_nolink(state.task_supervisor, function)
     timer = Process.send_after(self(), {:foreground_timeout, task.ref}, timeout_ms)
-    Map.put(task, :timer, timer)
+    %{task: task, timer: timer}
   end
 
   defp launch_info_task(state, function) do
     task = Task.Supervisor.async_nolink(state.task_supervisor, function)
     timer = Process.send_after(self(), {:info_timeout, task.ref}, @short_timeout_ms)
-    Map.put(task, :timer, timer)
+    %{task: task, timer: timer}
   end
 
   defp launch_reconciliation_task(state, foreground) do
@@ -899,11 +917,8 @@ defmodule PtcViewer.ReplStore do
         ])
       end)
 
-    Map.put(
-      task,
-      :timer,
-      Process.send_after(self(), {:recovery_timeout, task.ref}, @short_timeout_ms)
-    )
+    timer = Process.send_after(self(), {:recovery_timeout, task.ref}, @short_timeout_ms)
+    %{task: task, timer: timer}
   end
 
   defp launch_recovery_task(state, recovery) do
@@ -912,11 +927,8 @@ defmodule PtcViewer.ReplStore do
         reconciliation_result(state, recovery)
       end)
 
-    Map.put(
-      task,
-      :timer,
-      Process.send_after(self(), {:recovery_timeout, task.ref}, @operation_timeout_ms)
-    )
+    timer = Process.send_after(self(), {:recovery_timeout, task.ref}, @operation_timeout_ms)
+    %{task: task, timer: timer}
   end
 
   defp reconciliation_result(state, foreground) do
@@ -960,12 +972,12 @@ defmodule PtcViewer.ReplStore do
 
   defp preserve_recovery_failure_state(state, _foreground), do: state
 
-  defp terminate_task(task) do
-    cancel_timer(task.timer)
+  defp terminate_task(%{task: task, timer: timer}) do
+    cancel_timer(timer)
     Task.shutdown(task, :brutal_kill)
   end
 
-  defp observe_task_down(%{pid: pid, ref: ref, timer: timer}) do
+  defp observe_task_down(%{task: %{pid: pid, ref: ref}, timer: timer}) do
     cancel_timer(timer)
 
     receive do

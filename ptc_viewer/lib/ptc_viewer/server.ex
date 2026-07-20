@@ -217,8 +217,6 @@ defmodule PtcViewer.Server do
 
   defp connect_repl(_adapter, _config), do: {:error, :invalid_repl_config}
 
-  defp start_repl_store(nil, nil, _task_supervisor), do: {:ok, nil}
-
   defp start_repl_store(%ReplConnection{} = connection, adapter, task_supervisor) do
     ReplStore.start_link(
       owner: self(),

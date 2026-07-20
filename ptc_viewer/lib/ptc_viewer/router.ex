@@ -462,8 +462,12 @@ defmodule PtcViewer.Router do
   defp allowed_methods("/api/repl"), do: "GET, DELETE"
   defp allowed_methods(_path), do: "POST"
 
-  defp scrub_bandit_response(%{adapter: {Bandit.Adapter, _adapter}} = conn),
-    do: %{conn | resp_body: nil, req_headers: []}
+  defp scrub_bandit_response(%{adapter: {Bandit.Adapter, _adapter}} = conn) do
+    resp_headers =
+      Enum.reject(conn.resp_headers, fn {name, _value} -> name == "x-ptc-viewer-session" end)
+
+    %{conn | resp_body: nil, req_headers: [], resp_headers: resp_headers}
+  end
 
   defp scrub_bandit_response(conn), do: conn
 
