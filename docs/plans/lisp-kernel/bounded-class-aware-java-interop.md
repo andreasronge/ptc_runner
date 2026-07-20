@@ -6,12 +6,16 @@
 `PtcRunner.Lisp.Java.Surface` now own the bounded class/reference/overload
 inventory, current namespace spellings, explicit legacy Env routes, audit
 targets, upstream identities, and documentation presentation rows. The
+independent `priv/java_interop_phase0_attestations.exs` baseline pins every
+Phase-0 overload's attestation kind, JVM descriptor, and divergence IDs so a
+coordinated manifest edit cannot silently weaken the audit boundary. The
 analyzer, Env/Registry metadata, bounded source vocabulary, generated docs,
-upstream audit, and conformance inventory project from that manifest. Runtime
-execution is intentionally unchanged and every overload still uses a validated
-`{:legacy_env, binding_id}` route. Authoritative JVM behavior fixtures,
-selected alias removals, CoreAST/dispatch work, and family migrations remain
-for later checkpoints.
+upstream audit, and conformance inventory project from the manifest, while the
+inventory check also requires an explicit case for every supported Java
+target. Runtime execution is intentionally unchanged and every overload still
+uses a validated `{:legacy_env, binding_id}` route. Authoritative JVM behavior
+fixtures, selected alias removals, CoreAST/dispatch work, and family migrations
+remain for later checkpoints.
 
 **Baseline:** `exp/minimal-kernel` at `294e438f`
 

@@ -224,7 +224,7 @@ defmodule PtcRunner.MixProject do
   defp package do
     [
       files:
-        ~w(lib docs examples/kernel-tutorial examples/kernel-inspection-lab .formatter.exs mix.exs README.md LICENSE CHANGELOG.md priv/function_audit.exs priv/functions.exs priv/java_interop.exs priv/preludes priv/spec),
+        ~w(lib docs examples/kernel-tutorial examples/kernel-inspection-lab .formatter.exs mix.exs README.md LICENSE CHANGELOG.md priv/function_audit.exs priv/functions.exs priv/java_interop.exs priv/java_interop_phase0_attestations.exs priv/preludes priv/spec),
       licenses: ["MIT"],
       links: %{
         "GitHub" => "https://github.com/andreasronge/ptc_runner",
