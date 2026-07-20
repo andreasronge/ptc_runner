@@ -8,6 +8,10 @@
 
 Both modes retain successful definitions and exact `*1`, `*2`, and `*3`
 history for one command. Failed forms preserve the previously committed state.
+A successful evaluation is installed before its terminal event is recorded; if
+that fail-closed event write fails, the returned session reflects the committed
+continuation and is terminally closed instead of exposing a competing stale
+copy.
 They do not share authority: selecting a profile is mutually exclusive with a
 manifest.
 
@@ -32,9 +36,9 @@ mix ptc.repl --manifest ptc.json
 mix ptc.repl --manifest ptc.json -e '(workflow/helper data/input)'
 ```
 
-The direct REPL does not accept legacy upstream catalogs, mutable prelude
-selections, or arbitrary profile configuration. Providers and component
-sources are selected only by the manifest and trusted provider registry.
+The direct REPL does not accept an ambient capability catalog or arbitrary
+profile configuration. Providers and component sources are selected only by
+the manifest and trusted provider registry.
 
 Every workflow session emits canonical Kernel events. Persist them as bounded,
 append-only JSONL with:

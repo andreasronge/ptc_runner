@@ -1,7 +1,6 @@
 # Runtime performance benchmarks
 
-Micro-benchmarks and profiling for the PtcRunner runtime — distinct from
-the LLM/token-cost benchmarks in `demo/` and `mcp_server/bench/`.
+Micro-benchmarks and profiling for the PtcRunner PTC-Lisp runtime.
 
 Focused on the cost of creating and running many **short** PTC-Lisp
 programs, and how that cost scales under concurrency (the basis for

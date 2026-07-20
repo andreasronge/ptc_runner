@@ -67,7 +67,8 @@ jobs:
                ```bash
                gh issue list --label "type:epic" --label "status:active" --state open --json number,body --limit 1
                ```
-            3. Read `docs/guidelines/planning-guidelines.md` for review checklist
+            3. Read `AGENTS.md` and, for cross-cutting work,
+               `docs/guides/large-change-guidelines.md`
 
             ## Step 2: Review
 

@@ -110,8 +110,10 @@ jobs:
         run: |
           # Define protected file patterns
           PROTECTED_PATTERNS=(
-            "docs/specs/"
-            "docs/guidelines/"
+            "docs/guides/"
+            "docs/plans/"
+            "docs/ptc-lisp-specification.md"
+            "docs/trace-log-contract.md"
             ".github/workflows/"
             ".credo.exs"
             ".formatter.exs"
@@ -140,8 +142,9 @@ jobs:
               echo 'EOF'
             } >> $GITHUB_OUTPUT
 
-            # Check if spec files specifically changed
-            if echo "$PROTECTED_CHANGED" | grep -q "docs/specs/"; then
+            # Check if retained contract files specifically changed
+            if echo "$PROTECTED_CHANGED" | grep -Eq \
+              'docs/(ptc-lisp-specification\.md|trace-log-contract\.md)'; then
               echo "has_spec_changes=true" >> $GITHUB_OUTPUT
             else
               echo "has_spec_changes=false" >> $GITHUB_OUTPUT
@@ -226,7 +229,7 @@ jobs:
             ```
 
             **Review these changes carefully:**
-            - Spec changes (`docs/specs/`): Is this a legitimate spec update or implementation avoidance?
+            - Contract changes: Is this a legitimate update or implementation avoidance?
             - Guideline changes: Are these process improvements or shortcuts?
             - Workflow changes: Are these automation improvements?
             - Linter config changes: Are these necessary or disabling valid checks?
@@ -235,13 +238,13 @@ jobs:
 
             ## Instructions
 
-            1. Read `docs/guidelines/pr-review-guidelines.md` for complete review guidelines
+            1. Read `AGENTS.md` and `docs/guides/large-change-guidelines.md`
             2. Use `gh pr view ${{ github.event.pull_request.number }}` to see the PR description
             3. Use `gh pr diff ${{ github.event.pull_request.number }}` to see changes
             4. If the PR references an issue (e.g., "Fixes #N"), read it with comments: `gh issue view N --comments`
             5. **Check spec documents**: If the issue references a spec/plan document (e.g., `docs/*-plan.md`),
                read it and verify the implementation matches the spec
-            6. Follow the review structure and severity language from the guidelines
+            6. Report actionable findings in severity order
             7. Post your review using `gh pr comment ${{ github.event.pull_request.number }} --body "..."`
 
             **CRITICAL**: Check for in-scope completeness - if the PR establishes a pattern,
@@ -253,14 +256,16 @@ jobs:
             **CRITICAL**: Check for code duplication:
             - Flag duplicated production code that should be extracted into helpers
             - Flag duplicated test code that should use setup blocks or helper functions
-            - See `docs/guidelines/development-guidelines.md` (DRY section) and `docs/guidelines/testing-guidelines.md` (Avoid Duplication section)
+            - Apply the repository guidance in `AGENTS.md`; prefer one authoritative path
+              when duplicated implementations can drift
 
             **CRITICAL**: If the File Size Analysis above shows files exceeding the threshold:
             - Flag as "Suggestion (Optional)" with recommendation to split into smaller modules
             - Only flag if the PR added significant lines to the file (not just minor edits to already-large files)
 
             **CRITICAL - Spec Change Detection (Anti-Cheating)**:
-            If spec files (`docs/specs/*.md`) are modified:
+            If retained contracts (`docs/ptc-lisp-specification.md` or
+            `docs/trace-log-contract.md`) are modified:
             1. Read the ORIGINAL spec (use `git show origin/main:path/to/spec.md`)
             2. Compare with the new version
             3. Determine if this is:

@@ -278,8 +278,8 @@ jobs:
           prompt: |
             STUCK ISSUES: ${{ needs.detect-issues.outputs.stuck_issues_summary }}
 
-            These issues appear stuck in the automation pipeline. Read `docs/guidelines/github-workflows.md`
-            to understand the workflow, then investigate each issue and fix whatever is blocking it.
+            These issues appear stuck in the automation pipeline. Read `AGENTS.md` and inspect the
+            current workflow files, then investigate each issue and fix whatever is blocking it.
 
             Use `gh` commands to inspect issues, check blockers, and take corrective action
             (add labels, fix issue bodies, post comments). Be concise.

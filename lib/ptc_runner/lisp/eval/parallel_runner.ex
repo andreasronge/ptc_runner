@@ -74,9 +74,9 @@ defmodule PtcRunner.Lisp.Eval.ParallelRunner do
   restores the prior flag in an `after` block, converting worker link
   signals into `{:EXIT, _, _}` messages.
 
-  Because the sandbox process may *itself* be linked to its caller (the
-  `link: true` mode of `Sandbox.execute/3`, used by the MCP request
-  worker), the temporary `trap_exit` must not swallow that caller's
+  Because the sandbox process may *itself* be linked to a disposable caller
+  through the `link: true` mode of `Sandbox.execute/3`, the temporary
+  `trap_exit` must not swallow that caller's
   cancellation. `run/3` therefore distinguishes `{:EXIT, ...}` signals
   by source: signals from its own workers are handled as worker exits,
   while an *abnormal* exit from any non-worker is treated as real

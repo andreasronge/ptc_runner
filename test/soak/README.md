@@ -1,37 +1,25 @@
 # Memory soak tests
 
-Long-running tests that hammer specific PtcRunner / MCP-server
-subsystems and assert memory + process state stays flat. Excluded
-from `mix test` by default — opt in with `--only soak`.
+Long-running tests that exercise PtcRunner runtime allocation and assert that
+memory and process state stay flat. They are excluded from `mix test` by
+default; opt in with `--only soak`.
 
 ## Run
 
 ```bash
-# ptc_runner-side (closures, tracer)
 mix test --only soak
-
-# MCP-side (session churn, many-turn sessions, stdio)
-cd mcp_server && mix test --only soak
 
 # Crank iteration count for real soak runs
 PTC_SOAK_ITERATIONS=10000 mix test --only soak
-
-# stdio soak needs a built release first
-MIX_ENV=prod mix release --overwrite       # in mcp_server/
-MIX_ENV=test mix test --only soak test/soak/mcp_stdio_soak_test.exs
 ```
 
 ## Tests
 
-| File                                            | Investigates |
-|-------------------------------------------------|--------------|
-| `closure_capture_soak_test.exs`                 | Host-process accumulation across `Lisp.run/2` calls; refc-binary pinning by returned closures |
-| `atom_leak_soak_test.exs`                       | `Lisp.run/2` parser atom interning on novel var/keyword/ns-symbol names (#953) |
-| `prelude_compile_atom_leak_soak_test.exs`       | `Prelude.Compiler.compile/1` atom interning on novel namespace/export/helper/keyword names |
-| `mcp_server/.../session_churn_soak_test.exs`    | `Sessions.Registry` + DynamicSupervisor cleanup over many start/eval/close cycles |
-| `mcp_server/.../many_turns_soak_test.exs`       | Per-turn projection state growth; atom-table growth on user-supplied var names |
-| `mcp_server/.../mcp_stdio_soak_test.exs`        | Built release driven over real stdio with repeated stateless eval calls |
-| `mcp_server/.../http_mcp_soak_test.exs`         | Real Bandit HTTP MCP endpoint churn, DELETE cleanup, registry restart cleanup, and HTTP-owned PTC session ownership |
+| File | Investigates |
+| --- | --- |
+| `closure_capture_soak_test.exs` | Host-process accumulation across `Lisp.run/2` calls and refc-binary pinning by returned closures |
+| `atom_leak_soak_test.exs` | Parser atom interning on novel variable, keyword, and namespace-symbol names |
+| `prelude_compile_atom_leak_soak_test.exs` | Component compilation atom interning on novel namespaces, exports, helpers, and keywords |
 
 ## Tunables (env vars)
 

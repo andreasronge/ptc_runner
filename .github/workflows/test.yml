@@ -38,3 +38,6 @@ jobs:
 
       - name: Check unused dependencies
         run: mix deps.unlock --check-unused
+
+      - name: Build documentation
+        run: MIX_ENV=dev mix deps.get && MIX_ENV=dev mix docs --warnings-as-errors

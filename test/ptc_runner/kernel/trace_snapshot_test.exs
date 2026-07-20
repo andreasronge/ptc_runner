@@ -229,7 +229,7 @@ defmodule PtcRunner.Kernel.TraceSnapshotTest do
         )
       end)
 
-    assert_receive {:inventory_captured, capture_pid}
+    assert_receive {:inventory_captured, capture_pid}, 5_000
     write_events(path, [event("after-with-different-size", 1, "run-started")])
     send(capture_pid, :continue_capture)
 
@@ -259,7 +259,7 @@ defmodule PtcRunner.Kernel.TraceSnapshotTest do
         )
       end)
 
-    assert_receive {:baseline_captured, capture_pid}
+    assert_receive {:baseline_captured, capture_pid}, 5_000
     write_events(path, [after_rewrite])
     send(capture_pid, :continue_capture)
 
@@ -321,7 +321,7 @@ defmodule PtcRunner.Kernel.TraceSnapshotTest do
     assert {:error, :invalid_snapshot} = TraceSnapshot.info(forged)
 
     send(owner, :stop)
-    assert_receive {:DOWN, ^snapshot_ref, :process, _, :normal}
+    assert_receive {:DOWN, ^snapshot_ref, :process, _, :normal}, 5_000
     assert {:error, :snapshot_unavailable} = TraceSnapshot.info(snapshot)
     assert :ok = TraceSnapshot.stop(snapshot)
     assert :ok = TraceSnapshot.stop(snapshot)
@@ -358,12 +358,12 @@ defmodule PtcRunner.Kernel.TraceSnapshotTest do
         )
       end)
 
-    assert_receive {:capture_paused, capture_pid}
+    assert_receive {:capture_paused, capture_pid}, 5_000
     capture_ref = Process.monitor(capture_pid)
     Process.exit(owner, :kill)
 
     assert {:error, :snapshot_unavailable} = Task.await(starter)
-    assert_receive {:DOWN, ^capture_ref, :process, ^capture_pid, :killed}
+    assert_receive {:DOWN, ^capture_ref, :process, ^capture_pid, :killed}, 5_000
 
     dead_owner =
       spawn(fn ->
@@ -374,7 +374,7 @@ defmodule PtcRunner.Kernel.TraceSnapshotTest do
 
     dead_ref = Process.monitor(dead_owner)
     send(dead_owner, :stop)
-    assert_receive {:DOWN, ^dead_ref, :process, ^dead_owner, :normal}
+    assert_receive {:DOWN, ^dead_ref, :process, ^dead_owner, :normal}, 5_000
 
     assert {:error, :snapshot_unavailable} =
              TraceSnapshot.start({:directory, directory}, owner: dead_owner)
@@ -406,12 +406,12 @@ defmodule PtcRunner.Kernel.TraceSnapshotTest do
         )
       end)
 
-    assert_receive {:listing_paused, listing_pid}
+    assert_receive {:listing_paused, listing_pid}, 5_000
     listing_ref = Process.monitor(listing_pid)
     Process.exit(owner, :kill)
 
     assert {:error, :snapshot_unavailable} = Task.await(starter)
-    assert_receive {:DOWN, ^listing_ref, :process, ^listing_pid, :killed}
+    assert_receive {:DOWN, ^listing_ref, :process, ^listing_pid, :killed}, 5_000
   end
 
   @tag :tmp_dir

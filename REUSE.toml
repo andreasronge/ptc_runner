@@ -31,11 +31,6 @@ SPDX-FileCopyrightText = "2025 Andreas Ronge"
 SPDX-License-Identifier = "MIT"
 
 [[annotations]]
-path = ["livebooks/**"]
-SPDX-FileCopyrightText = "2025 Andreas Ronge"
-SPDX-License-Identifier = "MIT"
-
-[[annotations]]
 path = ["**/*.lock", "mix.exs"]
 SPDX-FileCopyrightText = "2025 Andreas Ronge"
 SPDX-License-Identifier = "MIT"

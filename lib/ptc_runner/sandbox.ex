@@ -159,13 +159,11 @@ defmodule PtcRunner.Sandbox do
     max_heap = Keyword.get(opts, :max_heap, default_max_heap)
     setup_max_heap = Keyword.get(opts, :setup_max_heap, 4 * max_heap)
     eval_fn = Keyword.fetch!(opts, :eval_fn)
-    # When `link: true`, the spawned sandbox process is linked to the
-    # caller in addition to monitored. Used by the MCP server's
-    # per-call worker (Phase 4): if the worker is killed (e.g. by
-    # `notifications/cancelled`), the link signal propagates and the
-    # sandbox child terminates promptly rather than running orphaned
-    # until its own heap/timeout limit fires. Default `false` preserves
-    # the legacy behavior used by SubAgent and text-mode callers.
+    # When `link: true`, the spawned sandbox process is linked to the caller in
+    # addition to being monitored. If a disposable caller is killed, the link
+    # terminates the sandbox child promptly instead of leaving it to run until
+    # its own heap or timeout limit fires. The default is `false` for callers
+    # whose lifetime is independent of the sandbox worker.
     link? = Keyword.get(opts, :link, false)
 
     # Spawn isolated process with resource limits

@@ -13,6 +13,8 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
   alias PtcRunner.Kernel.RunBuilder
   alias PtcRunner.TestSupport.MCPHTTPFixture
 
+  @owner_lifecycle_timeout_ms 30_000
+
   @input_schema %{
     "type" => "object",
     "properties" => %{"query" => %{"type" => "string"}},
@@ -189,6 +191,35 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
              |> RunBuilder.load_and_build(registry(duplicate.endpoint))
 
     assert_receive :mcp_deleted
+  end
+
+  @tag :tmp_dir
+  test "JSON-RPC errors have closed discovery and non-retryable invocation outcomes", %{
+    tmp_dir: dir
+  } do
+    parent = self()
+    discovery_error = fixture(parent, initialize_error?: true)
+    on_exit(discovery_error.close)
+
+    assert {:error, :mcp_remote_error} =
+             dir
+             |> manifest(["remote.structured"])
+             |> RunBuilder.load_and_build(registry(discovery_error.endpoint))
+
+    invocation_error = fixture(parent, rpc_error_tool: "structured")
+    on_exit(invocation_error.close)
+
+    {:ok, built} =
+      dir
+      |> manifest(Map.keys(public_mappings()))
+      |> RunBuilder.load_and_build(registry(invocation_error.endpoint))
+
+    assert {:ok, result} = Kernel.run(built.entry_source, built.config)
+
+    assert %{status: :error, kind: :provider_error, reason: :domain_error, retryable?: false} =
+             get_in(result.value, [:value, :value, "structured"])
+
+    EventSink.stop(built.config.event_sink)
   end
 
   test "lease close drains active request callers before deleting the session" do
@@ -387,9 +418,9 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
       end)
 
     owner_ref = Process.monitor(owner)
-    assert_receive {:owner_build, {:ok, abandoned}}
-    assert_receive {:DOWN, ^owner_ref, :process, ^owner, :normal}
-    assert_receive :mcp_deleted
+    assert_receive {:owner_build, {:ok, abandoned}}, @owner_lifecycle_timeout_ms
+    assert_receive {:DOWN, ^owner_ref, :process, ^owner, :normal}, @owner_lifecycle_timeout_ms
+    assert_receive :mcp_deleted, @owner_lifecycle_timeout_ms
     refute Process.alive?(abandoned.config.event_sink.pid)
   end
 
@@ -606,15 +637,20 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
   end
 
   defp response(%{body: %{"method" => "initialize", "id" => id}}, opts) do
-    if opts[:duplicate_json?] do
-      body =
-        ~s|{"jsonrpc":"2.0","id":#{id},"result":{"protocolVersion":"2025-11-25","protocolVersion":"2025-11-25","capabilities":{"tools":{}}}}|
+    cond do
+      opts[:initialize_error?] ->
+        rpc_error(id, -32_603, "initialization rejected")
 
-      {200, [{"mcp-session-id", "fixture-session"}, {"content-type", "application/json"}], body}
-    else
-      json(id, %{"protocolVersion" => "2025-11-25", "capabilities" => %{"tools" => %{}}},
-        headers: [{"mcp-session-id", "fixture-session"}]
-      )
+      opts[:duplicate_json?] ->
+        body =
+          ~s|{"jsonrpc":"2.0","id":#{id},"result":{"protocolVersion":"2025-11-25","protocolVersion":"2025-11-25","capabilities":{"tools":{}}}}|
+
+        {200, [{"mcp-session-id", "fixture-session"}, {"content-type", "application/json"}], body}
+
+      true ->
+        json(id, %{"protocolVersion" => "2025-11-25", "capabilities" => %{"tools" => %{}}},
+          headers: [{"mcp-session-id", "fixture-session"}]
+        )
     end
   end
 
@@ -643,19 +679,23 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
        ) do
     case params["name"] do
       "structured" ->
-        value = Keyword.get(opts, :structured_value, 42)
-
-        if opts[:result_and_error?] do
-          body = %{
-            "jsonrpc" => "2.0",
-            "id" => id,
-            "result" => %{"structuredContent" => %{"value" => value}, "content" => []},
-            "error" => %{"code" => -32_000, "message" => "must not coexist"}
-          }
-
-          {200, [{"content-type", "application/json"}], Jason.encode!(body)}
+        if opts[:rpc_error_tool] == "structured" do
+          rpc_error(id, -32_602, "invalid parameters")
         else
-          json(id, %{"structuredContent" => %{"value" => value}, "content" => []})
+          value = Keyword.get(opts, :structured_value, 42)
+
+          if opts[:result_and_error?] do
+            body = %{
+              "jsonrpc" => "2.0",
+              "id" => id,
+              "result" => %{"structuredContent" => %{"value" => value}, "content" => []},
+              "error" => %{"code" => -32_000, "message" => "must not coexist"}
+            }
+
+            {200, [{"content-type", "application/json"}], Jason.encode!(body)}
+          else
+            json(id, %{"structuredContent" => %{"value" => value}, "content" => []})
+          end
         end
 
       "text" ->
@@ -715,6 +755,17 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     body = Jason.encode!(%{"jsonrpc" => "2.0", "id" => id, "result" => result})
     headers = Keyword.get(opts, :headers, []) ++ [{"content-type", "application/json"}]
     {200, headers, body}
+  end
+
+  defp rpc_error(id, code, message) do
+    body =
+      Jason.encode!(%{
+        "jsonrpc" => "2.0",
+        "id" => id,
+        "error" => %{"code" => code, "message" => message}
+      })
+
+    {200, [{"content-type", "application/json"}], body}
   end
 
   defp maybe_sse({200, headers, body}, opts) do

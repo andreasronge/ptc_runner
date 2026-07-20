@@ -1137,8 +1137,7 @@ defmodule PtcRunner.Lisp do
 
   def format_error({:grant_filtered_prelude_export, ref, reason}) do
     "#{ref} is public in an attached prelude but was removed from this session by " <>
-      "the role grant (#{grant_filter_reason(reason)}); see prelude_projection " <>
-      "in the session start result."
+      "the environment grant (#{grant_filter_reason(reason)})."
   end
 
   def format_error({:runtime_error, msg}), do: "Runtime error: #{msg}"
@@ -1152,11 +1151,6 @@ defmodule PtcRunner.Lisp do
   def format_error(other), do: "Error: #{inspect(other, limit: 5)}"
 
   defp grant_filter_reason(:ptc_tool_denied), do: "ptc_tool_denied"
-  defp grant_filter_reason(:upstream_tool_denied), do: "upstream_tool_denied"
-
-  defp grant_filter_reason(:dynamic_upstream_requires_broad_grant),
-    do: "dynamic_upstream_requires_broad_grant"
-
   defp grant_filter_reason(reason) when is_atom(reason), do: Atom.to_string(reason)
   defp grant_filter_reason(_reason), do: "grant_filtered"
 
@@ -1354,8 +1348,8 @@ defmodule PtcRunner.Lisp do
   # yields the bounded atom for vocabulary names and the plain binary for
   # everything else. This never consults the global atom table, so the
   # externalized representation no longer depends on VM state (#964), and it
-  # matches the parser's canonicalization plus the string-keyed SubAgent
-  # boundary contract (signature validation, mustache, chaining).
+  # matches the parser's canonicalization and the string-keyed component
+  # signature boundary.
   defp externalize_lisp_values(%LispKeyword{name: name}), do: SourceAtoms.intern(name)
 
   defp externalize_lisp_values({:closure, _params, _body, _env, _turn_history, _metadata}),

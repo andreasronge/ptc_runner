@@ -28,8 +28,8 @@ defmodule PtcRunner.Lisp.Eval.Context do
   `:result_truncated`. Only the LEDGER copy is bounded — the value returned to
   the program and any `effects.tool_cache` entry keep the full result (they are built
   separately in `record_tool_call`). `:args` is left intact (it is tiny in the
-  fold case and `TurnEvent.tool_call_summary/1` needs the raw map for upstream
-  identity + the canonical args hash), as are `:child_trace_id`/`:child_step`.
+  fold case and later effect consumers need the raw map for capability identity
+  and canonical argument hashing), as are `:child_trace_id`/`:child_step`.
   """
 
   alias PtcRunner.Lisp.Eval.Capture
@@ -91,9 +91,8 @@ defmodule PtcRunner.Lisp.Eval.Context do
     tools_meta: %{},
     locals: MapSet.new(),
     # When true, accessing `data/<key>` for a key that was not provided
-    # in the context raises a runtime error naming the binding instead
-    # of returning `nil`. Off by default (preserves existing in-process
-    # behaviour); MCP requests pass `strict_data: true` per § 9.3.
+    # in the context raises a runtime error naming the binding instead of
+    # returning `nil`. It is off by default for permissive embedded execution.
     strict_data: false,
     # When true, session-authored code may only name prelude namespaces that
     # were directly attached. Prelude-internal calls remain allowed because the
@@ -127,7 +126,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
   - `error`: Error message if tool failed
   - `timestamp`: When tool was called
   - `duration_ms`: How long tool took
-  - `child_trace_id`: Trace ID of nested SubAgentTool execution (if any)
+  - `child_trace_id`: Trace ID of a nested tool execution, when supplied
   """
   @type tool_call :: %{
           required(:name) => String.t(),
@@ -147,7 +146,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
   Fields:
   - `type`: `:pmap` or `:pcalls`
   - `count`: Number of parallel tasks
-  - `child_trace_ids`: List of trace IDs from SubAgentTool executions
+  - `child_trace_ids`: Trace IDs supplied by nested tool executions
   - `timestamp`: When execution started
   - `duration_ms`: Total execution time
   - `success_count`: Number of successful executions
@@ -397,9 +396,9 @@ defmodule PtcRunner.Lisp.Eval.Context do
   # Bound the LEDGER copy of :result only. Preserves every other field,
   # including a nil :result (failed call), :child_trace_id / :child_step
   # (trace-hierarchy metadata), and — critically — the raw :args map.
-  # `:args` is NOT truncated: `TurnEvent.tool_call_summary/1` reads it to
-  # extract the upstream server/tool and compute the canonical args hash for
-  # duplicate-fetch detection, and args are tiny in the fold use case anyway.
+  # `:args` is NOT truncated: effect consumers read it to identify the
+  # capability and compute a canonical arguments hash, and arguments are small
+  # in the paginated-fold use case.
   # Small results pass through identically so existing entries are byte-for-
   # byte unchanged.
   defp compact_ledger_entry(%{result: result} = tool_call, cap)

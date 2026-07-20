@@ -68,6 +68,11 @@ defmodule PtcRunner.Lisp.Eval do
   @type tool_executor ::
           (String.t(), map() -> term()) | (String.t(), map(), map() | nil -> term())
 
+  @type outcome ::
+          {:ok, term(), EvalContext.t()}
+          | {:error, term(), EvalContext.t()}
+          | {:control, :return | :fail | :recur, term(), EvalContext.t()}
+
   @type value ::
           nil
           | boolean()
@@ -113,7 +118,7 @@ defmodule PtcRunner.Lisp.Eval do
   end
 
   @spec eval_with_context(CoreAST.t(), map(), map(), env(), tool_executor(), list(), keyword()) ::
-          Outcome.t()
+          outcome()
   def eval_with_context(ast, ctx, memory, env, tool_executor, turn_history \\ [], opts \\ []) do
     case eval_with_context_captured(ast, ctx, memory, env, tool_executor, turn_history, opts) do
       {:raise, kind, reason, stacktrace, _final_ctx} ->
@@ -133,7 +138,7 @@ defmodule PtcRunner.Lisp.Eval do
           tool_executor(),
           list(),
           keyword()
-        ) :: Outcome.t() | Capture.value_result()
+        ) :: outcome() | Capture.value_result()
   def eval_with_context_captured(
         ast,
         ctx,
@@ -281,10 +286,9 @@ defmodule PtcRunner.Lisp.Eval do
 
   # Data access: data/input → ctx[:input]
   #
-  # When `strict_data: true` (set by the MCP request handler per § 9.3),
-  # accessing a key that was not supplied raises a runtime error naming
-  # the binding. In permissive mode (the default for in-process callers)
-  # the lookup returns `nil` for unknown keys.
+  # When `strict_data: true`, accessing a key that was not supplied raises a
+  # runtime error naming the binding. In permissive mode the lookup returns
+  # `nil` for unknown keys.
   defp do_eval({:data, key}, %EvalContext{ctx: ctx, strict_data: true} = eval_ctx) do
     if data_key_present?(ctx, key) do
       {:ok, flex_get(ctx, key), eval_ctx}
@@ -1088,8 +1092,8 @@ defmodule PtcRunner.Lisp.Eval do
   # Cache hits return immediately with `duration_ms: 0` and `cached: true`.
   # Only successful results are cached; errors are not stored.
   #
-  # Also handles SubAgentTool results that may be wrapped with child_trace_id metadata.
-  # The wrapper is unwrapped here so the Lisp interpreter only sees the actual value.
+  # Nested host tools may wrap results with private trace-hierarchy metadata.
+  # The wrapper is removed here so Lisp sees only the actual value.
   defp record_tool_call(
          tool_name,
          args_map,
@@ -1228,11 +1232,10 @@ defmodule PtcRunner.Lisp.Eval do
 
     duration_ms = System.monotonic_time(:millisecond) - start_time
 
-    # Unwrap SubAgentTool results that include child_trace_id/child_step metadata
-    # This prevents internal trace metadata from leaking to the Lisp interpreter
+    # Remove nested trace-hierarchy metadata before the result reaches Lisp.
     {result, child_trace_id, child_step} = unwrap_tool_result(raw_result)
 
-    # Merge in child info from error path (failed SubAgent tools)
+    # Preserve nested metadata carried by a failed tool result.
     child_trace_id = child_trace_id || error_child_trace_id
     child_step = child_step || error_child_step
 
@@ -1250,7 +1253,7 @@ defmodule PtcRunner.Lisp.Eval do
       }
       |> maybe_put_tool_origin(origin, private_tool?)
 
-    # Add child_trace_id if present (from SubAgentTool execution)
+    # Retain an optional nested trace identity in the private effect ledger.
     tool_call =
       if child_trace_id do
         Map.put(tool_call, :child_trace_id, child_trace_id)
@@ -1362,7 +1365,7 @@ defmodule PtcRunner.Lisp.Eval do
     }
   end
 
-  # Unwrap SubAgentTool results that contain child_trace_id and child_step metadata.
+  # Unwrap tool results containing private trace-hierarchy metadata.
   # Returns {actual_result, child_trace_id, child_step} or {result, nil, nil} if not wrapped.
   defp unwrap_tool_result(%{__child_trace_id__: trace_id, __child_step__: step, value: value}) do
     {value, trace_id, step}

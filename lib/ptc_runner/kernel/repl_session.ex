@@ -64,11 +64,13 @@ defmodule PtcRunner.Kernel.ReplSession do
   @spec eval(t(), binary()) :: {:ok, Native.t(), t()} | {:error, Native.t(), t()}
   @doc "Evaluates one bounded source form and returns the updated session."
   def eval(%__MODULE__{} = session, source) when is_binary(source) do
-    if sink_alive?(session) do
+    if sink_alive?(session) and RunState.open?(session.state) do
       eval_open(session, source)
     else
       session_closed(session)
     end
+  catch
+    :exit, _reason -> session_closed(session)
   end
 
   defp eval_open(session, source) do
@@ -407,8 +409,7 @@ defmodule PtcRunner.Kernel.ReplSession do
         next = %{
           session
           | memory: step.memory,
-            history: candidate_history,
-            attempts: session.attempts + 1
+            history: candidate_history
         }
 
         case emit_evaluation_stopped(
@@ -419,8 +420,8 @@ defmodule PtcRunner.Kernel.ReplSession do
                :ok,
                nil
              ) do
-          :ok -> {:ok, step, next}
-          {:error, :event_sink_error} -> event_sink_failure(session)
+          :ok -> {:ok, step, %{next | attempts: next.attempts + 1}}
+          {:error, :event_sink_error} -> event_sink_failure(next)
         end
 
       {:error, reason} ->
@@ -457,6 +458,7 @@ defmodule PtcRunner.Kernel.ReplSession do
   end
 
   defp event_sink_failure(session) do
+    _ = RunState.fail(session.state, :event_sink_error, :event_sink_error)
     step = Native.error(:event_sink_error, "canonical event sink failed", session.memory)
     {:error, step, increment_error(session)}
   end

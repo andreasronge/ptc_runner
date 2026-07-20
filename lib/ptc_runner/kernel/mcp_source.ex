@@ -72,7 +72,8 @@ defmodule PtcRunner.Kernel.MCPSource do
   `{:error, :invalid_mcp_selection}`. Assembly returns
   `{:ok, %{capabilities: list, snapshot: map, close: zero_arity_function}}` or a
   stable atom error: `:mcp_authentication_failed`, `:mcp_timeout`,
-  `:mcp_transport_error`, `:mcp_protocol_error`, `:mcp_response_exceeded`,
+  `:mcp_transport_error`, `:mcp_protocol_error`, `:mcp_remote_error`,
+  `:mcp_response_exceeded`,
   `:mcp_session_expired`, `:mcp_catalog_exceeded`, `:mcp_invalid_catalog`,
   `:mcp_invalid_tool_schema`, `:mcp_tool_task_required`, or
   `:mcp_mapped_tool_missing`.
@@ -515,14 +516,33 @@ defmodule PtcRunner.Kernel.MCPSource do
            {:ok, response} <- http(:post, lease, request, headers, payload, max_bytes),
            :ok <- maybe_capture_session(lease, response),
            {:ok, body} <- response_body(response, request.id) do
-        case {Map.fetch(body, "result"), Map.fetch(body, "error")} do
-          {{:ok, result}, :error} when is_map(result) -> {:ok, result}
-          {:error, {:ok, error}} when is_map(error) -> {:error, :mcp_remote_error}
-          _invalid -> {:error, :mcp_protocol_error}
-        end
+        rpc_outcome(body)
       end
     end)
   end
+
+  defp rpc_outcome(body) do
+    case {Map.fetch(body, "result"), Map.fetch(body, "error")} do
+      {{:ok, result}, :error} when is_map(result) ->
+        {:ok, result}
+
+      {:error, {:ok, error}} when is_map(error) ->
+        if valid_rpc_error?(error),
+          do: {:error, :mcp_remote_error},
+          else: {:error, :mcp_protocol_error}
+
+      _invalid ->
+        {:error, :mcp_protocol_error}
+    end
+  end
+
+  defp valid_rpc_error?(%{"code" => code, "message" => message} = error) do
+    Map.keys(error) -- ~w(code message data) == [] and is_integer(code) and
+      is_binary(message) and byte_size(message) <= 4_096 and String.valid?(message) and
+      (not Map.has_key?(error, "data") or JSONValue.value?(error["data"]))
+  end
+
+  defp valid_rpc_error?(_error), do: false
 
   defp notification(lease, method, params) do
     with_request(lease, fn request ->
@@ -730,6 +750,9 @@ defmodule PtcRunner.Kernel.MCPSource do
 
   defp provider_error(:mcp_protocol_error),
     do: ProviderError.new(:invalid_result, "mcp_protocol_error")
+
+  defp provider_error(:mcp_remote_error),
+    do: ProviderError.new(:domain_error, "mcp_remote_error")
 
   defp provider_error(_reason),
     do: ProviderError.new(:transport_error, "mcp_transport_error", retryable?: true)

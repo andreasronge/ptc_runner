@@ -1,7 +1,10 @@
 defmodule PtcRunner.Kernel.EventSinkState do
   @moduledoc false
 
+  alias PtcRunner.Kernel.JSONValue
   alias PtcRunner.Lisp.RetainedSize
+
+  @event_type ~r/\A[a-z][a-z0-9-]{0,127}\z/
 
   @doc false
   def new(policy, limits, token, run_id, trace_id, terminal_reserve) do
@@ -22,8 +25,8 @@ defmodule PtcRunner.Kernel.EventSinkState do
 
   @doc false
   def handle({token, {:emit, type, data}}, %{token: token} = state) do
-    case event_bytes(data, state.limits.event_payload_bytes) do
-      {:ok, bytes} -> enqueue(state, type, data, bytes)
+    case event_with_bytes(state, type, data) do
+      {:ok, event, bytes} -> enqueue(state, event, bytes)
       :error -> sink_failure(state, type)
     end
   end
@@ -74,7 +77,7 @@ defmodule PtcRunner.Kernel.EventSinkState do
   @doc false
   def ready?(state), do: not state.finalized?
 
-  defp enqueue(state, type, data, bytes) do
+  defp enqueue(state, event, bytes) do
     reserve = state.terminal_reserve
 
     full? =
@@ -83,10 +86,8 @@ defmodule PtcRunner.Kernel.EventSinkState do
         state.bytes + bytes > state.limits.normal_event_bytes - reserve.bytes
 
     if full? do
-      sink_failure(state, type)
+      sink_failure(state, event.type)
     else
-      event = event(state, type, data)
-
       {:ok,
        %{
          state
@@ -105,9 +106,23 @@ defmodule PtcRunner.Kernel.EventSinkState do
     {:ok, %{state | dropped: dropped}}
   end
 
-  defp event_bytes(data, cap) do
-    case RetainedSize.bytes_with_cap(data, cap) do
-      bytes when is_integer(bytes) and bytes <= cap -> {:ok, bytes}
+  defp event_with_bytes(state, type, data) do
+    payload_cap = state.limits.event_payload_bytes
+    event_cap = state.limits.normal_event_bytes
+
+    with true <- is_binary(type) and type =~ @event_type,
+         {:ok, normalized_data} <- normalize_json(data),
+         true <- JSONValue.map?(normalized_data),
+         payload_bytes when is_integer(payload_bytes) <-
+           RetainedSize.bytes_with_cap(normalized_data, payload_cap),
+         true <- payload_bytes <= payload_cap,
+         event = event(state, type, data),
+         accounted_event = event(state, type, normalized_data),
+         event_bytes when is_integer(event_bytes) <-
+           RetainedSize.bytes_with_cap(accounted_event, event_cap),
+         true <- event_bytes <= event_cap do
+      {:ok, event, event_bytes}
+    else
       _ -> :error
     end
   end
@@ -137,14 +152,14 @@ defmodule PtcRunner.Kernel.EventSinkState do
   defp enqueue_terminal_events(state, []), do: {:ok, state}
 
   defp enqueue_terminal_events(state, [{type, data} | rest]) do
-    with {:ok, bytes} <- event_bytes(data, state.limits.event_payload_bytes),
+    with {:ok, event, bytes} <- event_with_bytes(state, type, data),
          true <- length(state.events) < state.limits.normal_event_count,
          true <- state.bytes + bytes <= state.limits.normal_event_bytes do
       next = %{
         state
         | sequence: state.sequence + 1,
           bytes: state.bytes + bytes,
-          events: [event(state, type, data) | state.events]
+          events: [event | state.events]
       }
 
       enqueue_terminal_events(next, rest)
@@ -164,4 +179,39 @@ defmodule PtcRunner.Kernel.EventSinkState do
       data: data
     }
   end
+
+  defp normalize_json(nil), do: {:ok, nil}
+  defp normalize_json(value) when is_boolean(value) or is_number(value), do: {:ok, value}
+  defp normalize_json(value) when is_binary(value), do: {:ok, value}
+  defp normalize_json(value) when is_atom(value), do: {:ok, Atom.to_string(value)}
+
+  defp normalize_json(value) when is_list(value) do
+    Enum.reduce_while(value, {:ok, []}, fn item, {:ok, normalized} ->
+      case normalize_json(item) do
+        {:ok, item} -> {:cont, {:ok, [item | normalized]}}
+        :error -> {:halt, :error}
+      end
+    end)
+    |> case do
+      {:ok, normalized} -> {:ok, Enum.reverse(normalized)}
+      :error -> :error
+    end
+  end
+
+  defp normalize_json(value) when is_map(value) and not is_struct(value) do
+    Enum.reduce_while(value, {:ok, %{}}, fn {key, item}, {:ok, normalized} ->
+      with {:ok, key} <- normalize_key(key),
+           false <- Map.has_key?(normalized, key),
+           {:ok, item} <- normalize_json(item) do
+        {:cont, {:ok, Map.put(normalized, key, item)}}
+      else
+        _ -> {:halt, :error}
+      end
+    end)
+  end
+
+  defp normalize_json(_value), do: :error
+  defp normalize_key(key) when is_binary(key), do: {:ok, key}
+  defp normalize_key(key) when is_atom(key), do: {:ok, Atom.to_string(key)}
+  defp normalize_key(_key), do: :error
 end

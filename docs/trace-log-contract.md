@@ -103,6 +103,13 @@ Malformed or unsupported canonical events fail closed by default. A debugging
 mode may report bounded per-file errors, but it never silently reinterprets
 malformed data as valid runs.
 
+Ordinary host-selected append uses an OS-released advisory lease before it
+validates the existing prefix and writes a batch. Existing files are keyed by
+device and inode, so hard-link aliases share the lease across BEAM processes
+and separate local runtimes. An unlocked lease file may remain after exit, but
+cannot wedge later appenders. Two appenders therefore cannot both approve the
+same prefix and then race the byte or sequence checks.
+
 Complete analysis-session batches use atomic no-clobber publication rather than
 append. TraceLog validates and deterministically encodes the whole batch, writes
 and syncs an exclusive same-directory temporary sibling whose name is not a
@@ -119,8 +126,8 @@ is for host-selected destinations only and does not grant Lisp write authority.
 
 ### Immutable normal-directory captures
 
-An internal `PtcRunner.Kernel.TraceSnapshot` owner can pin one host-selected
-normal directory for a bounded analysis session. It is not an additional public
+An internal trace-snapshot owner can pin one host-selected normal directory for
+a bounded analysis session. It is not an additional public
 `PtcRunner.Kernel.TraceLog.source()` form and cannot capture a file, private
 directory, or inspection artifact.
 

@@ -80,6 +80,44 @@ defmodule PtcRunner.Kernel.FileCapabilityTest do
     assert {:error, %{kind: :invalid_request}} = capability.callback.(%{"path" => "large.txt"})
   end
 
+  @tag :tmp_dir
+  test "file grants freeze contents before roots or parents can be replaced", %{
+    tmp_dir: directory
+  } do
+    grant = Path.join(directory, "grant")
+    moved_grant = Path.join(directory, "moved-grant")
+    outside = Path.join(directory, "outside")
+    File.mkdir!(grant)
+    File.mkdir!(outside)
+    File.write!(Path.join(grant, "inside.txt"), "inside")
+    File.write!(Path.join(outside, "inside.txt"), "outside")
+
+    {:ok, root_capability} = FileCapability.new(root: grant, max_bytes: 1_024)
+    File.rename!(grant, moved_grant)
+    File.ln_s!(outside, grant)
+
+    assert {:ok, %{"content" => "inside"}} =
+             root_capability.callback.(%{"path" => "inside.txt"})
+
+    parent_grant = Path.join(directory, "parent-grant")
+    parent = Path.join(parent_grant, "nested")
+    moved_parent = Path.join(parent_grant, "moved-nested")
+    File.mkdir_p!(parent)
+    File.write!(Path.join(parent, "inside.txt"), "inside")
+
+    {:ok, parent_capability} = FileCapability.new(root: parent_grant, max_bytes: 1_024)
+    File.rename!(parent, moved_parent)
+    File.ln_s!(outside, parent)
+
+    assert {:ok, %{"content" => "inside"}} =
+             parent_capability.callback.(%{"path" => "nested/inside.txt"})
+
+    File.write!(Path.join(moved_parent, "inside.txt"), "changed after construction")
+
+    assert {:ok, %{"content" => "inside"}} =
+             parent_capability.callback.(%{"path" => "nested/inside.txt"})
+  end
+
   test "the fs library requires an explicitly granted file capability" do
     {:ok, fs_component} = Library.component("fs")
     {:ok, bundle} = Kernel.compile_bundle([fs_component])

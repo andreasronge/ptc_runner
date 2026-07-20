@@ -198,6 +198,86 @@ defmodule PtcRunner.Kernel.TraceCapabilityTest do
   end
 
   @tag :tmp_dir
+  test "concurrent same-path appends retain every canonical batch", %{tmp_dir: directory} do
+    path = Path.join(directory, "concurrent.jsonl")
+    parent = self()
+
+    tasks =
+      for index <- 1..8 do
+        Task.async(fn ->
+          send(parent, {:append_ready, self()})
+
+          receive do
+            :append ->
+              event =
+                decoded_event("concurrent-#{index}", 1, "run-started", %{
+                  "padding" => String.duplicate("x", 4_096)
+                })
+
+              TraceLog.append_jsonl(path, [event])
+          end
+        end)
+      end
+
+    Enum.each(tasks, fn _task ->
+      assert_receive {:append_ready, task_pid}
+      assert Enum.any?(tasks, &(&1.pid == task_pid))
+    end)
+
+    Enum.each(tasks, &send(&1.pid, :append))
+    assert Enum.all?(Task.await_many(tasks, 30_000), &(&1 == :ok))
+
+    assert {:ok, trace_log} = TraceLog.new(source: {:file, path})
+    assert {:ok, %{"items" => runs}} = TraceLog.query(trace_log, :list_runs, %{"limit" => 100})
+    assert length(runs) == 8
+  end
+
+  @tag :tmp_dir
+  test "hard-link aliases share the same cross-runtime append lease", %{tmp_dir: directory} do
+    path = Path.join(directory, "aliased.jsonl")
+    alias_path = Path.join(directory, "aliased-hard-link.jsonl")
+    File.write!(path, "")
+    File.ln!(path, alias_path)
+    parent = self()
+
+    tasks =
+      for index <- 1..8 do
+        Task.async(fn ->
+          send(parent, {:aliased_append_ready, self()})
+
+          receive do
+            :append ->
+              selected_path = if rem(index, 2) == 0, do: alias_path, else: path
+
+              event =
+                decoded_event("aliased-#{index}", 1, "run-started", %{
+                  "padding" => String.duplicate("x", 4_096)
+                })
+
+              TraceLog.append_jsonl(selected_path, [event])
+          end
+        end)
+      end
+
+    Enum.each(tasks, fn _task -> assert_receive {:aliased_append_ready, _pid} end)
+    Enum.each(tasks, &send(&1.pid, :append))
+    assert Enum.all?(Task.await_many(tasks, 30_000), &(&1 == :ok))
+
+    assert {:ok, trace_log} = TraceLog.new(source: {:file, path})
+    assert {:ok, %{"items" => runs}} = TraceLog.query(trace_log, :list_runs, %{"limit" => 100})
+    assert length(runs) == 8
+  end
+
+  @tag :tmp_dir
+  test "successful appends consume their helper exit messages", %{tmp_dir: directory} do
+    path = Path.join(directory, "mailbox.jsonl")
+    event = decoded_event("mailbox", 1, "run-started")
+
+    assert :ok = TraceLog.append_jsonl(path, [event])
+    refute_receive {_port, {:exit_status, _status}}, 100
+  end
+
+  @tag :tmp_dir
   test "atomic publication is no-clobber, retry-safe, and cleans partial temporaries", %{
     tmp_dir: directory
   } do

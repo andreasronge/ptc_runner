@@ -18,10 +18,9 @@ defmodule PtcRunner.Kernel.TraceLog do
   result has an aggregate byte ceiling. Normal directory sources exclude the
   reserved private filename suffix; private files require an explicit source.
 
-  The internal `PtcRunner.Kernel.TraceSnapshot` capture owner uses this module's
-  canonical validation and query execution against one immutable normal
-  directory capture. A snapshot is deliberately not another public
-  `t:source/0` variant.
+  The internal trace-snapshot owner uses this module's canonical validation and
+  query execution against one immutable normal directory capture. A snapshot
+  is deliberately not another public `t:source/0` variant.
   """
 
   alias Jason.OrderedObject
@@ -42,6 +41,19 @@ defmodule PtcRunner.Kernel.TraceLog do
   @max_string_bytes 256
   @event_type ~r/\A[a-z][a-z0-9-]{0,127}\z/
   @event_keys ~w(schema_version run_id trace_id sequence timestamp type data)
+  @append_lock_timeout_ms 30_000
+  @append_lock_helper ~S"""
+  set -eu
+  lock_file=$1
+  lock_body='printf "READY\n"; IFS= read -r command; [ "$command" = X ]; printf "DONE\n"'
+  if command -v lockf >/dev/null 2>&1; then
+    exec lockf -k -t 30 "$lock_file" sh -c "$lock_body"
+  elif command -v flock >/dev/null 2>&1; then
+    exec flock -w 30 "$lock_file" sh -c "$lock_body"
+  else
+    exit 1
+  fi
+  """
   @bound_publication_helper ~S"""
   set -eu
   final_name=$1
@@ -204,7 +216,9 @@ defmodule PtcRunner.Kernel.TraceLog do
   @doc """
   Appends canonical events to one admin-selected JSONL file under a total byte
   cap. `private: true` restricts the empty/new or existing file to mode `0600`
-  before event bytes are appended.
+  before event bytes are appended. An OS-released advisory lease keyed by the
+  existing file's device and inode serializes hard-link aliases across BEAM
+  processes and separate local runtimes.
   """
   @spec append_jsonl(binary(), [map()], keyword()) :: :ok | {:error, atom()}
   def append_jsonl(path, events, opts \\ [])
@@ -218,8 +232,10 @@ defmodule PtcRunner.Kernel.TraceLog do
          true <- private_path?(path) == private? do
       path = Path.expand(path)
 
-      :global.trans({__MODULE__, path}, fn ->
-        append_locked(path, normalize(events), max_bytes, private?)
+      :global.trans({{__MODULE__, {:append, path}}, self()}, fn ->
+        with_append_lock(path, fn ->
+          append_locked(path, normalize(events), max_bytes, private?)
+        end)
       end)
     else
       _ -> {:error, :invalid_trace_log}
@@ -227,6 +243,152 @@ defmodule PtcRunner.Kernel.TraceLog do
   end
 
   def append_jsonl(_path, _events, _opts), do: {:error, :invalid_trace_log}
+
+  defp with_append_lock(path, callback, attempts \\ 3)
+
+  defp with_append_lock(_path, _callback, 0), do: {:error, :source_unavailable}
+
+  defp with_append_lock(path, callback, attempts) do
+    with {:ok, scope} <- append_lock_scope(path),
+         {:ok, port} <- start_append_lock(scope) do
+      result =
+        try do
+          case append_lock_scope(path) do
+            {:ok, ^scope} -> callback.()
+            _changed -> :retry_append_lock
+          end
+        after
+          release_append_lock(port)
+        end
+
+      if result == :retry_append_lock,
+        do: with_append_lock(path, callback, attempts - 1),
+        else: result
+    else
+      _ -> {:error, :source_unavailable}
+    end
+  end
+
+  defp start_append_lock(scope) do
+    with {:ok, lock_root} <- append_lock_root(),
+         executable when is_binary(executable) <- System.find_executable("sh"),
+         lock_file = Path.join(lock_root, append_lock_name(scope)),
+         port <-
+           Port.open(
+             {:spawn_executable, executable},
+             [
+               :binary,
+               :exit_status,
+               :use_stdio,
+               :stderr_to_stdout,
+               {:line, 64},
+               args: ["-c", @append_lock_helper, "ptc-trace-append-lock", lock_file]
+             ]
+           ),
+         :ok <- await_append_lock(port) do
+      {:ok, port}
+    else
+      _ -> {:error, :source_unavailable}
+    end
+  rescue
+    _exception -> {:error, :source_unavailable}
+  end
+
+  defp await_append_lock(port) do
+    receive do
+      {^port, {:data, {:eol, "READY"}}} -> :ok
+      {^port, {:data, _diagnostic}} -> await_append_lock(port)
+      {^port, {:exit_status, _status}} -> {:error, :source_unavailable}
+    after
+      @append_lock_timeout_ms ->
+        if Port.info(port), do: Port.close(port)
+        {:error, :source_unavailable}
+    end
+  end
+
+  defp release_append_lock(port) do
+    if Port.info(port) do
+      _ = Port.command(port, "X\n")
+      drain_append_lock(port)
+    end
+
+    :ok
+  rescue
+    _exception -> :ok
+  end
+
+  defp drain_append_lock(port) do
+    receive do
+      {^port, {:data, _diagnostic}} -> drain_append_lock(port)
+      {^port, {:exit_status, _status}} -> :ok
+    after
+      2_000 ->
+        if Port.info(port), do: Port.close(port)
+        drain_closed_append_lock(port)
+    end
+  end
+
+  defp drain_closed_append_lock(port) do
+    receive do
+      {^port, {:data, _diagnostic}} -> drain_closed_append_lock(port)
+      {^port, {:exit_status, _status}} -> :ok
+    after
+      100 -> :ok
+    end
+  end
+
+  defp append_lock_scope(path) do
+    case File.lstat(path) do
+      {:ok,
+       %File.Stat{
+         type: :regular,
+         major_device: major,
+         minor_device: minor,
+         inode: inode
+       }} ->
+        {:ok, {:inode, major, minor, inode}}
+
+      {:error, :enoent} ->
+        parent = Path.dirname(path)
+
+        case File.lstat(parent) do
+          {:ok,
+           %File.Stat{
+             type: :directory,
+             major_device: major,
+             minor_device: minor,
+             inode: inode
+           }} ->
+            {:ok, {:new_path, major, minor, inode, Path.basename(path)}}
+
+          _ ->
+            {:error, :source_unavailable}
+        end
+
+      _ ->
+        {:error, :source_unavailable}
+    end
+  end
+
+  defp append_lock_root do
+    root = Path.join(System.tmp_dir!(), "ptc-runner-trace-append-locks")
+
+    with :ok <- File.mkdir_p(root),
+         :ok <- File.chmod(root, 0o700),
+         {:ok, %File.Stat{type: :directory}} <- File.lstat(root) do
+      {:ok, root}
+    end
+  end
+
+  defp append_lock_name(scope) do
+    digest =
+      scope
+      |> :erlang.term_to_binary()
+      |> then(&:crypto.hash(:sha256, &1))
+      |> Base.encode16(case: :lower)
+
+    "#{digest}.lock"
+  end
 
   @doc false
   @spec publish_jsonl(binary(), [map()], keyword()) :: :ok | {:error, atom()}

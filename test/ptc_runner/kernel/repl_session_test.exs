@@ -120,6 +120,37 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
     assert {:error, _step, _session} = ReplSession.eval(session, "leaked")
   end
 
+  test "a terminal sink failure cannot hide already committed continuation state" do
+    {:ok, workflow} = WorkflowEnvironment.new([])
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, limits} = Limits.new(normal_event_count: 2)
+    {:ok, sink} = EventSink.start(:private, limits, run_id: "repl-commit-sink-failure")
+
+    {:ok, config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        mission_environment: mission,
+        input: %{},
+        limits: limits,
+        event_sink: sink
+      )
+
+    {:ok, session} = ReplSession.new(config: config)
+
+    assert {:error, %{fail: %{reason: :event_sink_error}}, returned} =
+             ReplSession.eval(session, "(def committed 42)")
+
+    assert returned.memory == %{"committed" => 42}
+    assert length(returned.history) == 1
+    assert %{attempts: 1, errors: 1} = returned
+
+    assert %{defined_count: 1, history_count: 1} =
+             RunState.evaluation_memory_summary(returned.state)
+
+    assert {:error, %{fail: %{reason: :session_closed}}, ^returned} =
+             ReplSession.eval(returned, "committed")
+  end
+
   test "explicit failure rolls back memory and turn history" do
     {:ok, session} = ReplSession.new()
     assert {:ok, _step, session} = ReplSession.eval(session, "(def retained 42)")

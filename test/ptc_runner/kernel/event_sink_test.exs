@@ -3,6 +3,7 @@ defmodule PtcRunner.Kernel.EventSinkTest do
 
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.Limits
+  alias PtcRunner.Kernel.TraceLog
 
   test "default run identifiers have fixed entropy format and remain unique" do
     {:ok, limits} = Limits.new(normal_event_count: 4, normal_event_bytes: 10_000)
@@ -59,7 +60,7 @@ defmodule PtcRunner.Kernel.EventSinkTest do
     {:ok, limits} =
       Limits.new(
         normal_event_count: 10,
-        normal_event_bytes: 3_000,
+        normal_event_bytes: 4_000,
         event_payload_bytes: 1_000
       )
 
@@ -69,8 +70,11 @@ defmodule PtcRunner.Kernel.EventSinkTest do
         terminal_reserve: %{count: 2, bytes: 2_000}
       )
 
-    assert :ok = EventSink.emit(sink, "run-started", %{value: String.duplicate("x", 400)})
-    assert :ok = EventSink.emit(sink, "evaluation-started", %{value: String.duplicate("x", 400)})
+    assert :ok = EventSink.emit(sink, "run-started", %{value: String.duplicate("x", 800)})
+
+    assert :ok =
+             EventSink.emit(sink, "evaluation-started", %{value: String.duplicate("x", 800)})
+
     assert %{"evaluation-started" => 1} = EventSink.dropped(sink)
 
     assert :ok = EventSink.finalize(sink, %{}, %{outcome: :ok, usage: %{}})
@@ -113,5 +117,42 @@ defmodule PtcRunner.Kernel.EventSinkTest do
     EventSink.stop(sink)
     assert_receive {:DOWN, ^ref, :process, _pid, :normal}
     assert {:error, :event_sink_error} = EventSink.emit(sink, "evaluation-started", %{})
+  end
+
+  test "canonical identifiers and event values are validated before retention" do
+    {:ok, limits} = Limits.new()
+
+    assert {:error, :invalid_event_sink} =
+             EventSink.start(:normal, limits, run_id: String.duplicate("x", 257))
+
+    assert {:error, :invalid_event_sink} =
+             EventSink.start(:normal, limits, trace_id: <<255>>)
+
+    {:ok, sink} = EventSink.start(:private, limits, run_id: "canonical-events")
+
+    assert {:error, :event_sink_error} =
+             EventSink.emit(sink, "run-started", %{invalid: {1, 2}})
+
+    assert {:error, :event_sink_error} = EventSink.emit(sink, "Not Canonical", %{})
+    assert EventSink.events(sink) == []
+
+    assert {:ok, trace_log} = TraceLog.new(source: {:private, sink})
+    assert {:ok, %{"items" => []}} = TraceLog.query(trace_log, :list_runs, %{})
+  end
+
+  test "event limits account for the normalized JSON payload" do
+    {:ok, limits} =
+      Limits.new(
+        event_payload_bytes: 20_000,
+        normal_event_bytes: 100_000
+      )
+
+    {:ok, sink} = EventSink.start(:private, limits, run_id: "normalized-accounting")
+
+    expanding_atom = :event_normalization_expands_this_atom_value
+    payload = %{"values" => List.duplicate(expanding_atom, 1_000)}
+
+    assert {:error, :event_sink_error} = EventSink.emit(sink, "run-started", payload)
+    assert EventSink.events(sink) == []
   end
 end

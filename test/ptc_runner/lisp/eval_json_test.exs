@@ -2,9 +2,8 @@ defmodule PtcRunner.Lisp.EvalJsonTest do
   @moduledoc """
   End-to-end PTC-Lisp tests for `json/parse-string` and `json/generate-string`.
 
-  Covers OQ-5 dispatch (analyzer routes namespaced calls to their qualified
-  env keys), the threaded-pipeline use case, and the analyzer's redirect
-  from `cheshire.core/...` (Plans/json-support.md §10.4).
+  Covers namespaced dispatch, the threaded-pipeline use case, and the
+  analyzer's `cheshire.core/...` compatibility redirect.
   """
   use ExUnit.Case, async: true
 

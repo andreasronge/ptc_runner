@@ -211,10 +211,10 @@ Plain Elixir callbacks cannot return a threaded evaluator context.
 `PtcRunner.Lisp.Eval.Capture` is the single nestable process-local effect
 stack, while `PtcRunner.Lisp.Eval.HostContext` is the adapter that binds an
 active evaluator context around host callbacks and selects value or outcome
-capture. `PtcRunner.Lisp.Eval.Outcome` represents expected success, error, and
-`return`/`fail`/`recur` control with one normalized context. When such an
-outcome must cross a value-only host callback, `PtcRunner.Lisp.Eval.Abort` is
-the only private carrier. Callable dispatch restores caller lexical,
+capture. The internal outcome representation carries expected success, error,
+and `return`/`fail`/`recur` control with one normalized context. When such an
+outcome must cross a value-only host callback, the private abort carrier is the
+only transport. Callable dispatch restores caller lexical,
 namespace, and prelude-authority state before capture replaces the outcome's
 effects.
 
@@ -273,7 +273,9 @@ deadline for pool checkout, connection establishment, response receipt, and
 elapsed request work. Its lease drains active requests before a bounded
 session DELETE. MCP JSON rejects duplicate object keys before protocol
 validation, and discovered schemas are compiled once during assembly rather
-than on each result.
+than on each result. A valid remote JSON-RPC error is a closed
+`:mcp_remote_error` during discovery and a non-retryable `:domain_error` at an
+installed capability boundary; it is never reclassified as a transport retry.
 
 Subordinate evaluation is serialized because it owns the transactional
 continuation. Reservation returns memory, history, and the lease token in one
@@ -352,10 +354,10 @@ from an in-memory sink, one JSONL file, or a directory. The viewer and
 than maintaining another event model. The detailed storage and authorization
 contract remains in the retained [TraceLog contract](../trace-log-contract.md).
 
-`PtcRunner.Kernel.TraceSnapshot` is the internal primitive available to
-log-analysis session builders for validating and retaining one immutable normal-
-directory capture. Its tokenized owner keeps no path, exits with its owner, and
-serves the same four TraceLog query operations from the captured digest. Capture
+The internal trace-snapshot owner is available to log-analysis session builders
+for validating and retaining one immutable normal-directory capture. Its
+tokenized owner keeps no path, exits with its owner, and serves the same four
+TraceLog query operations from the captured digest. Capture
 applies bounded pre/post file inventories, identity and byte verification, the
 existing 8 MB source ceiling, and a separate 32 MB decoded retained-size ceiling
 before snapshot-backed capabilities are constructed.
@@ -522,9 +524,10 @@ ceilings. Manifest configuration is an `allow` list of mapped public names,
 an optional `model_visible` subset (defaulting to all allowed names), and
 optional lower `timeout_ms` and `max_result_bytes`; endpoints, headers,
 upstream names, effects, and retries are not manifest fields. The built-in
-`file-read` provider likewise accepts optional boolean `model_visible`.
-Visibility affects discovery and prompt context, not the authority granted by
-the environment.
+`file-read` provider likewise accepts optional boolean `model_visible`. It
+freezes the granted directory into a bounded immutable snapshot during provider
+assembly; callbacks never reopen host paths. Visibility affects discovery and
+prompt context, not the authority granted by the environment.
 
 Every build owns one monitored MCP 2025-11-25 session across initialization,
 bounded paginated discovery, and calls. Discovered schemas pass the Kernel's

@@ -8,9 +8,8 @@ defmodule PtcRunner.Lisp.Runtime.Json do
   `docs/clojure-conformance-gaps.md` DIV-23, DIV-24): no try/catch
   in the sandbox means raising = unrecoverable program crash.
 
-  See `Plans/json-support.md` §4 for the full spec, including the
-  string-keyed-only round-trip property and the integer-key /
-  special-float carve-outs (§4.3).
+  Generated JSON objects use string keys. Integer map keys and non-finite
+  floats are not valid JSON boundary values.
   """
 
   @doc """

@@ -8,9 +8,9 @@ defmodule PtcRunner.Kernel.TraceCapability do
   does not grant ambient filesystem or cross-environment access.
 
   Internal log-analysis sessions may instead construct the same four
-  capabilities from a tokenized `PtcRunner.Kernel.TraceSnapshot`. Capability
-  closures retain only that opaque handle and still delegate to the canonical
-  TraceLog query implementation.
+  capabilities from a tokenized snapshot handle. Capability closures retain
+  only that opaque handle and still delegate to the canonical TraceLog query
+  implementation.
   """
 
   alias PtcRunner.Kernel.Capability

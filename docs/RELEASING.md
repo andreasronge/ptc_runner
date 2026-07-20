@@ -11,8 +11,13 @@ mix prepush
 mix hex.build
 ```
 
-After the release workflow is green, create and push `vX.Y.Z`. The tag workflow
-re-runs the package gates and publishes Hex and HexDocs using `HEX_API_KEY`.
-Verify the published package, documentation, changelog, and tag afterwards.
+Dispatch the release gate from the versioned commit on `main`. After it is
+green and release approval is explicit, create and push `vX.Y.Z`. The tag
+workflow re-runs the package and documentation gates; it does not publish.
 
-Do not create or push a release tag without explicit user confirmation.
+Hex and HexDocs publication is a separate, explicit maintainer action performed
+from the tagged `main` commit. Verify the package, documentation, changelog,
+artifacts, and tag after publication.
+
+Do not create or push a release tag, publish a package, or publish documentation
+without explicit user confirmation.

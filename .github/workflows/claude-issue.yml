@@ -335,8 +335,8 @@ jobs:
             - Use branch naming: `claude/${{ steps.pick.outputs.issue }}-short-description`
 
             **Protected files - changes require justification:**
-            - `docs/specs/*.md` - Specifications (source of truth)
-            - `docs/guidelines/*.md` - Process documentation
+            - `docs/ptc-lisp-specification.md`, `docs/trace-log-contract.md` - Retained contracts
+            - `docs/guides/*.md`, `docs/plans/*.md` - Guides and active plans
             - `.github/workflows/*.yml` - Automation workflows
             - `.credo.exs`, `.formatter.exs` - Linter configs
             If you MUST change these, explain why in the PR description.

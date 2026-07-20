@@ -300,7 +300,7 @@ defmodule PtcRunner.Lisp.Runtime.Builtins do
       {:"parse-boolean", {:normal, &Runtime.parse_boolean/1}},
 
       # ============================================================
-      # JSON builtins (Plans/json-support.md §4)
+      # JSON builtins
       # ============================================================
       {:"json/parse-string", {:normal, &Runtime.Json.parse_string/1}},
       {:"json/parse-lines", {:normal, &Runtime.Json.parse_lines/1}},

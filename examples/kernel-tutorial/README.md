@@ -1,7 +1,10 @@
 # Kernel tutorial examples
 
-Run these examples from the repository root. The accompanying walkthrough is
-[`docs/guides/kernel-tutorial.md`](../../docs/guides/kernel-tutorial.md).
+Run these examples from the repository root. Start with the credential-free
+walkthrough in
+[`docs/guides/getting-started.md`](../../docs/guides/getting-started.md), then
+use [`docs/guides/building-agents.md`](../../docs/guides/building-agents.md)
+for the live model examples.
 
 ```bash
 mix ptc.run examples/kernel-tutorial/01-orders/ptc.json

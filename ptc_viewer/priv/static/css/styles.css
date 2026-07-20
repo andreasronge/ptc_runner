@@ -627,9 +627,6 @@ button:focus-visible, textarea:focus-visible, summary:focus-visible {
   color: var(--muted);
   font-family: 'SF Mono', 'Consolas', 'Monaco', monospace;
 }
-.turn-pill .turn-badge.sub-agent {
-  color: var(--warning);
-}
 .turn-badge.compaction {
   font-size: 10px;
   font-family: 'SF Mono', 'Consolas', 'Monaco', monospace;
@@ -666,9 +663,6 @@ button:focus-visible, textarea:focus-visible, summary:focus-visible {
 .turn-timeline-item.active {
   background: rgba(86, 156, 214, 0.2);
   color: var(--accent);
-}
-.turn-timeline-item.sub-agent {
-  color: var(--warning);
 }
 .turn-timeline-sep {
   color: var(--border);

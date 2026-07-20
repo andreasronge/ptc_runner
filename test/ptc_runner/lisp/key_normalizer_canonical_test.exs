@@ -2,8 +2,7 @@ defmodule PtcRunner.Lisp.KeyNormalizerCanonicalTest do
   @moduledoc """
   Edge-case tests for `KeyNormalizer.canonical_cache_key/2`.
 
-  See `Plans/text-mode-ptc-compute-tool.md` "Canonical Cache Key —
-  Implementation Rule" for the normative rule list. This file pins each
+  The rule list is owned by `PtcRunner.Lisp.KeyNormalizer`. This file pins each
   rule with a deliberate edge case so future drift is caught.
 
   Doctests on the module cover the happy-path examples; this file covers

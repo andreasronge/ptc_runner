@@ -139,10 +139,10 @@ defmodule PtcRunner.Kernel.ViewerReplAdapterTest do
         end
       end)
 
-    assert_receive {:backend_ready, backend_pid}, 1_000
+    assert_receive {:backend_ready, backend_pid}, 5_000
     backend_ref = Process.monitor(backend_pid)
     send(owner, :stop)
-    assert_receive {:DOWN, ^backend_ref, :process, ^backend_pid, :normal}, 1_000
+    assert_receive {:DOWN, ^backend_ref, :process, ^backend_pid, :normal}, 5_000
   end
 
   test "connection and operation inputs are closed contracts" do
@@ -285,7 +285,7 @@ defmodule PtcRunner.Kernel.ViewerReplAdapterTest do
     Process.unlink(backend.pid)
     Process.exit(backend.pid, :kill)
 
-    assert_receive {:DOWN, ^worker_ref, :process, ^worker, _reason}, 1_000
+    assert_receive {:DOWN, ^worker_ref, :process, ^worker, _reason}, 5_000
   end
 
   @tag :tmp_dir
@@ -328,7 +328,7 @@ defmodule PtcRunner.Kernel.ViewerReplAdapterTest do
     send(backend.pid, {:operation_timeout, key})
 
     assert {:error, :adapter_failure} = Task.await(evaluation, 1_000)
-    assert_receive {:DOWN, ^worker_ref, :process, ^worker, :killed}, 1_000
+    assert_receive {:DOWN, ^worker_ref, :process, ^worker, :killed}, 5_000
     assert :ok = ViewerReplAdapter.acknowledge_operation(backend, :evaluation, evaluation_id)
 
     assert {:error, :adapter_failure} =

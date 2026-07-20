@@ -1,8 +1,8 @@
 defmodule PtcRunner.Lisp.Signature do
   @moduledoc """
-  Signature parsing and validation for SubAgents.
+  Signature parsing and validation for PTC-Lisp component exports.
 
-  Signatures define the contract between agents and tools:
+  Signatures define the public contract of a prompt-visible function:
   - Input parameters - What the caller must provide
   - Output type - What the callee will return
 

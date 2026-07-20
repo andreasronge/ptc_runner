@@ -3,7 +3,10 @@ defmodule PtcRunner.Kernel.EventSink do
   Bounded in-memory owner for canonical Kernel events.
 
   The sink assigns schema version, run/trace identity, monotonic sequence, and
-  UTC timestamp. Producers supply only event type and bounded data.
+  UTC timestamp. Producers supply only a canonical bounded event type and data
+  that normalize to JSON without key collisions. Per-event payload accounting
+  and aggregate accounting cover the payload and complete retained envelope,
+  respectively, so every retained event is consumable by `TraceLog`.
 
   Under `:normal` policy, a full or unavailable sink ordinarily records or
   projects loss without changing workflow execution. An internal normal sink
@@ -35,8 +38,9 @@ defmodule PtcRunner.Kernel.EventSink do
   Starts a sink with one policy and the event bounds from `limits`.
 
   Options are `:run_id`, `:trace_id`, `:owner`, and the internal normal-policy
-  `:terminal_reserve` and `:fail_closed`. IDs must be binaries; a unique run ID
-  is generated when omitted and is also the default trace ID.
+  `:terminal_reserve` and `:fail_closed`. IDs must be valid UTF-8 binaries from
+  1 through 256 bytes; a unique run ID is generated when omitted and is also
+  the default trace ID.
   """
   def start(policy, %Limits{} = limits, opts \\ []) when policy in [:normal, :private] do
     with {:ok, sink_state, handle} <- prepare(policy, limits, opts) do
@@ -55,7 +59,7 @@ defmodule PtcRunner.Kernel.EventSink do
     fail_closed? = Keyword.get(opts, :fail_closed, false)
 
     if Keyword.keys(opts) -- [:run_id, :trace_id, :owner, :terminal_reserve, :fail_closed] == [] and
-         is_binary(run_id) and is_binary(trace_id) and is_boolean(fail_closed?) and
+         valid_id?(run_id) and valid_id?(trace_id) and is_boolean(fail_closed?) and
          valid_terminal_reserve?(policy, terminal_reserve, limits) do
       state = EventSinkState.new(policy, limits, token, run_id, trace_id, terminal_reserve)
       {:ok, state, %{token: token, policy: policy, fail_closed?: fail_closed?}}
@@ -164,6 +168,9 @@ defmodule PtcRunner.Kernel.EventSink do
 
   defp valid_terminal_reserve?(:private, %{count: 0, bytes: 0}, _limits), do: true
   defp valid_terminal_reserve?(_policy, _reserve, _limits), do: false
+
+  defp valid_id?(value),
+    do: is_binary(value) and byte_size(value) in 1..256 and String.valid?(value)
 
   defp call(%__MODULE__{pid: pid, token: token}, request) do
     GenServer.call(pid, {token, request})

@@ -271,7 +271,7 @@ defmodule PtcRunner.Lisp.Analyze do
   # Clojure-style namespaces: normalize to built-in or provide helpful error.
   # `json/` uses namespace-qualified env keys (e.g., `:"json/parse-string"`)
   # so they need per-namespace lookup tables — see `normalize_clojure_namespace/3`
-  # and `qualified_namespace_lookup/2` (Plans/json-support.md §4.4 OQ-5 option (a)).
+  # and `qualified_namespace_lookup/2`.
   defp do_analyze({:ns_symbol, ns, key}, _tail?) do
     case PreludeScope.fetch_export(ns, key) do
       {:ok, export} ->
@@ -1154,8 +1154,6 @@ defmodule PtcRunner.Lisp.Analyze do
   # Per-namespace lookup tables for namespace-qualified env keys (OQ-5 option (a)).
   # Namespaces listed here use qualified atoms in `Env.initial()` (e.g.
   # `:"json/parse-string"`) rather than aliasing the unqualified name.
-  # See Plans/json-support.md §4.4 step 4.
-  #
   # Tables are computed at compile time from `Env.initial()` so the lookup is
   # a plain map access at runtime, and so the qualified atoms are guaranteed
   # interned before any user input reaches the analyzer (avoids the

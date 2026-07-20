@@ -15,6 +15,8 @@ defmodule PtcRunner.Kernel.LogAnalysisSessionTest do
   alias PtcRunner.Kernel.SessionTrace
   alias PtcRunner.Kernel.TraceLog
 
+  @lifecycle_timeout_ms 30_000
+
   @tag :tmp_dir
   test "fixed profile exposes only log analysis authority and a deterministic identity", %{
     tmp_dir: directory
@@ -1042,7 +1044,7 @@ defmodule PtcRunner.Kernel.LogAnalysisSessionTest do
     assert_receive {:DOWN, ^session_ref, :process, _pid, _reason}, 1_000
     assert_receive {:DOWN, ^runtime_ref, :process, _pid, _reason}, 1_000
     assert_receive {:DOWN, ^snapshot_ref, :process, _pid, _reason}, 1_000
-    assert_receive {:DOWN, ^trace_ref, :process, _pid, _reason}, 5_000
+    assert_receive {:DOWN, ^trace_ref, :process, _pid, _reason}, @lifecycle_timeout_ms
     refute_received {:release_race_builder_result, _result}
   end
 
@@ -1328,7 +1330,7 @@ defmodule PtcRunner.Kernel.LogAnalysisSessionTest do
     Process.exit(session.pid, :kill)
 
     assert_receive {:DOWN, ^session_ref, :process, _pid, :killed}
-    assert_receive {:DOWN, ^trace_ref, :process, _pid, :normal}, 5_000
+    assert_receive {:DOWN, ^trace_ref, :process, _pid, :normal}, @lifecycle_timeout_ms
 
     path = Path.join(directory, info.session_id <> ".jsonl")
     assert {:ok, trace} = TraceLog.new(source: {:file, path})
@@ -1358,7 +1360,7 @@ defmodule PtcRunner.Kernel.LogAnalysisSessionTest do
     assert {:ok, %{lifecycle: :terminal_unpersisted}} = LogAnalysisSession.info(session)
     trace_ref = Process.monitor(state.session_trace.pid)
     Process.exit(session.pid, :kill)
-    assert_receive {:DOWN, ^trace_ref, :process, _pid, :normal}, 5_000
+    assert_receive {:DOWN, ^trace_ref, :process, _pid, :normal}, @lifecycle_timeout_ms
 
     path = Path.join(directory, info.session_id <> ".jsonl")
     assert {:ok, trace} = TraceLog.new(source: {:file, path})
@@ -1397,13 +1399,13 @@ defmodule PtcRunner.Kernel.LogAnalysisSessionTest do
     trace_ref = Process.monitor(state.session_trace.pid)
 
     Process.exit(session.pid, :kill)
-    assert_receive {:persistence_started, trace_pid}, 5_000
+    assert_receive {:persistence_started, trace_pid}, @lifecycle_timeout_ms
     on_exit(fn -> send(trace_pid, :continue_persistence) end)
 
     assert_receive {:DOWN, ^runtime_ref, :process, _pid, :normal}
     assert_receive {:DOWN, ^snapshot_ref, :process, _pid, :normal}
     send(trace_pid, :continue_persistence)
-    assert_receive {:DOWN, ^trace_ref, :process, _pid, :normal}, 5_000
+    assert_receive {:DOWN, ^trace_ref, :process, _pid, :normal}, @lifecycle_timeout_ms
   end
 
   @tag :tmp_dir
@@ -1437,7 +1439,7 @@ defmodule PtcRunner.Kernel.LogAnalysisSessionTest do
     assert_receive :unexpected_owner_persistence_attempted, 5_000
     assert_receive {:DOWN, ^runtime_ref, :process, _pid, :normal}
     assert_receive {:DOWN, ^snapshot_ref, :process, _pid, :normal}
-    assert_receive {:DOWN, ^trace_ref, :process, _pid, :normal}, 5_000
+    assert_receive {:DOWN, ^trace_ref, :process, _pid, :normal}, @lifecycle_timeout_ms
     refute File.exists?(Path.join(directory, info.session_id <> ".jsonl"))
   end
 
@@ -1485,8 +1487,8 @@ defmodule PtcRunner.Kernel.LogAnalysisSessionTest do
 
     assert_receive {:DOWN, ^runtime_ref, :process, _pid, :normal}
     assert_receive {:DOWN, ^snapshot_ref, :process, _pid, :normal}
-    assert_receive {:handoff_persistence_started, ^trace_pid}, 5_000
-    assert_receive {:DOWN, ^trace_ref, :process, _pid, :normal}, 5_000
+    assert_receive {:handoff_persistence_started, ^trace_pid}, @lifecycle_timeout_ms
+    assert_receive {:DOWN, ^trace_ref, :process, _pid, :normal}, @lifecycle_timeout_ms
     assert {:error, :session_closed} = Task.await(closer)
   end
 

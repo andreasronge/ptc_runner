@@ -140,9 +140,8 @@ defmodule PtcRunner.Lisp.Eval.ContextTest do
     end
 
     test "args are left intact even when large for canonical summarization" do
-      # TurnEvent.tool_call_summary/1 reads :args for upstream server/tool and
-      # the canonical args hash; truncating it would break duplicate-fetch
-      # detection. So :args is preserved raw regardless of size.
+      # Effect consumers retain :args for capability identity and canonical
+      # argument hashing, so :args is preserved raw regardless of size.
       ctx = ctx_with_cap(100)
       big_args = %{"server" => "fs", "tool" => "call", "blob" => String.duplicate("x", 5_000)}
       tc = tool_call(%{args: big_args, result: 42})

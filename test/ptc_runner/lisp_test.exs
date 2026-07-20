@@ -495,7 +495,7 @@ defmodule PtcRunner.LispTest do
     end
 
     test "memory vars from previous turns are allowed" do
-      # In multi-turn SubAgent, def'd vars from turn 1 are in memory for turn 2
+      # Definitions committed by an earlier turn are available to the next turn.
       assert {:ok, %{return: 11}} =
                Lisp.run("(+ counter 1)", memory: %{counter: 10})
     end

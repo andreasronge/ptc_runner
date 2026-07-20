@@ -847,4 +847,3 @@
      "presence" (get folded "presence")
      "string_counts" (get folded "string_counts")
      "collision_count" (get folded "collision_count")}))
-

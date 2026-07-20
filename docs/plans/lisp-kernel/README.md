@@ -9,6 +9,10 @@ records for recently completed cross-cutting work.
 - [`product-readiness.md`](product-readiness.md) assesses what is usable now,
   current limitations, prioritized improvements, and release gates for a
   non-Elixir developer experience.
+- [`merge-to-main-product-cutover.md`](merge-to-main-product-cutover.md)
+  defines the proposed merge gates for making the bounded meta-agentic Kernel
+  the canonical product, followed by one shared command contract delivered
+  through Hex/Mix, a standalone macOS artifact, and Docker.
 - [`profile-backed-ptc-repl-plan.md`](profile-backed-ptc-repl-plan.md) records
   the implemented local terminal frontend for the server-owned
   `log-analysis-v1` mission

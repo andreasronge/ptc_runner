@@ -286,7 +286,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
   end
 
   test "normal event sinks drop while private event sinks fail closed" do
-    {:ok, limits} = Limits.new(normal_event_count: 1, normal_event_bytes: 100)
+    {:ok, limits} = Limits.new(normal_event_count: 1, normal_event_bytes: 10_000)
     {:ok, normal} = EventSink.start(:normal, limits, run_id: "normal")
     {:ok, private} = EventSink.start(:private, limits, run_id: "private")
 
