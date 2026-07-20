@@ -21,6 +21,9 @@ out of generated code.
   credentials, arbitrary files, network access, or host functions.
 - **Useful failures.** Successful definitions remain available on the next
   turn; failed attempts roll back and return clear correction errors.
+- **Evidence for improvement.** Structured traces record outcomes, errors,
+  tool use, evaluations, and resource use. Exact prompts and generated code can
+  be captured separately during development.
 
 PtcRunner is most useful when a task needs several tool calls plus local data
 work, or when you want to experiment with agent behavior without changing the
@@ -52,10 +55,34 @@ transformations, functions, branching, loops, and multiple tool calls. The
 model is shown the exact task API it may call; arbitrary host access, macros,
 `eval`, lazy or infinite sequences, and general Java interop are left out.
 
-Optional function signatures make correction errors more specific. The same
-language defines the agent's prompt, feedback, retry, delegation, and
-completion policies, so those policies can change without extending the
-trusted runtime.
+### Preludes: reusable agent code
+
+Skills usually tell a model how to approach work. A prelude preserves working
+behavior as executable PTC-Lisp. Preludes can depend on one another and compile
+together into the fixed workflow or mission bundle used by a run. They
+typically work at three levels:
+
+- **Runtime:** safe wrappers for models, tools, results, and evaluation.
+- **Agent:** prompt, feedback, retry, memory, delegation, and workflow policy.
+- **Domain:** task-specific functions that combine lower-level tools into a
+  smaller API for the model.
+
+Preludes can also shape model instructions. `agent.prompt` builds the system
+prompt, while prompt-visible domain functions appear in the model's available
+API with documentation and optional signatures. The model sees that rendered
+interface, not the prelude source by default.
+
+Prelude versions are selected explicitly today. A future promotion flow could
+use trace evidence to turn repeated successful programs into tested domain
+preludes for later runs. That code could improve how existing tools are used,
+but could not grant itself new tools or credentials.
+
+Trace analysis is itself programmable in PTC-Lisp. The shipped `log.core`
+prelude provides `log/runs`, `log/run`, `log/turns`, and `log/counters` over an
+unchanging trace capture. An investigation can start as a REPL function and
+later become a reusable analysis prelude. Logging does not improve the system
+automatically today; it provides the evidence and programmable analysis layer
+needed for a future improvement loop.
 
 ## Why the BEAM?
 
