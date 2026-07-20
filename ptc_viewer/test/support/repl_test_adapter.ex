@@ -58,13 +58,20 @@ defmodule PtcViewer.TestReplAdapter do
           {result, state}
 
         %{session: nil} ->
-          session = {:test_session, make_ref()}
-          info = info(public_session_id, :open, 0)
-          result = {:ok, session, info}
+          if state.next_start_error do
+            result = {:error, state.next_start_error}
 
-          {result,
-           %{state | session: session, public_session_id: public_session_id}
-           |> put_in([:operations, key, :result], result)}
+            {result,
+             %{state | next_start_error: nil} |> put_in([:operations, key, :result], result)}
+          else
+            session = {:test_session, make_ref()}
+            info = info(public_session_id, :open, 0)
+            result = {:ok, session, info}
+
+            {result,
+             %{state | session: session, public_session_id: public_session_id}
+             |> put_in([:operations, key, :result], result)}
+          end
 
         _missing ->
           {{:error, :operation_not_prepared}, state}
@@ -98,19 +105,21 @@ defmodule PtcViewer.TestReplAdapter do
                   do: Map.put(usage(count), :padding, String.duplicate("x", 300_000)),
                   else: usage(count)
 
+              {status, outcome, effect, error} = outcome(source)
+
               {:ok,
                %{
                  evaluation_id: "evaluation-#{count}",
-                 status: :ok,
-                 outcome: :continued,
-                 continuation_effect: :committed_with_history,
+                 status: status,
+                 outcome: outcome,
+                 continuation_effect: effect,
                  value: count,
                  value_available?: true,
                  formatted: Integer.to_string(count),
                  formatted_truncated?: false,
                  prints: [],
                  prints_truncated?: false,
-                 error: nil,
+                 error: error,
                  duration_ms:
                    if(source == "oversized-duration", do: Integer.pow(10, 150_000), else: 1),
                  usage: usage
@@ -207,6 +216,9 @@ defmodule PtcViewer.TestReplAdapter do
   def set_prepare_error(backend, enabled),
     do: Agent.update(backend, &%{&1 | prepare_error?: enabled})
 
+  def set_next_start_error(backend, reason),
+    do: Agent.update(backend, &%{&1 | next_start_error: reason})
+
   defp operation_result(backend, kind, operation_id) do
     Agent.get(backend, fn state ->
       case Map.get(state.operations, {kind, operation_id}) do
@@ -227,6 +239,22 @@ defmodule PtcViewer.TestReplAdapter do
 
   defp maybe_block(_backend, _source), do: :ok
 
+  defp outcome("recoverable-error"),
+    do:
+      {:error, :evaluation_error, :preserved,
+       %{kind: :invalid_form, reason: :unknown_namespace, message: "recoverable"}}
+
+  defp outcome("memory-exceeded"),
+    do: {:error, :memory_exceeded, :preserved, %{kind: :memory_exceeded}}
+
+  defp outcome("history-exceeded"),
+    do: {:error, :history_exceeded, :preserved, %{kind: :history_exceeded}}
+
+  defp outcome("result-exceeded"),
+    do: {:error, :result_exceeded, :committed_with_history, %{kind: :result_exceeded}}
+
+  defp outcome(_source), do: {:ok, :continued, :committed_with_history, nil}
+
   defp initial_state(config) do
     %{
       test_pid: config.test_pid,
@@ -236,7 +264,8 @@ defmodule PtcViewer.TestReplAdapter do
       lifecycle: :open,
       evaluation_count: 0,
       ack_failures_remaining: Map.get(config, :ack_failures, 0),
-      prepare_error?: false
+      prepare_error?: false,
+      next_start_error: nil
     }
   end
 
@@ -270,7 +299,13 @@ defmodule PtcViewer.TestReplAdapter do
       evaluations: %{used: count, limit: 64, remaining: 64 - count},
       mission_calls: %{used: 0, limit: 512, remaining: 512},
       trace_calls: %{},
-      continuation: %{defined_count: 0, retained_bytes: 0, history_count: count}
+      continuation: %{
+        defined_count: 0,
+        memory_bytes: 0,
+        history_count: count,
+        history_bytes: count,
+        bytes: count
+      }
     }
   end
 end

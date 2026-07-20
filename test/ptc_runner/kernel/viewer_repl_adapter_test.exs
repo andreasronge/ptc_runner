@@ -308,6 +308,9 @@ defmodule PtcRunner.Kernel.ViewerReplAdapterTest do
     evaluation_id = random_id()
     assert :ok = ViewerReplAdapter.prepare_operation(backend, session, :evaluation, evaluation_id)
 
+    %{sessions: %{^session => %{worker: worker}}} = :sys.get_state(backend.pid)
+    true = :erlang.suspend_process(worker)
+
     evaluation =
       Task.async(fn ->
         ViewerReplAdapter.evaluate(backend, session, evaluation_id, "(loop [] (recur))")
@@ -320,7 +323,7 @@ defmodule PtcRunner.Kernel.ViewerReplAdapterTest do
         match?(%{status: :running}, state.operations[key])
       end)
 
-    worker = state.sessions[session].worker
+    assert state.sessions[session].worker == worker
     worker_ref = Process.monitor(worker)
     send(backend.pid, {:operation_timeout, key})
 

@@ -5,7 +5,8 @@ defmodule PtcViewer.ReplStore do
   Adapter callbacks always run below the Viewer task supervisor. This process
   owns only opaque handles, public projections, operation bookkeeping, and a
   bounded transcript; continuation state and trace resources remain backend
-  owned.
+  owned. Evaluation timeouts are projected by Core as `:evaluation_error`;
+  deadline expiry is a session lifecycle transition, not an evaluation outcome.
   """
 
   use GenServer
@@ -834,7 +835,7 @@ defmodule PtcViewer.ReplStore do
   defp lifecycle_from_info(_info), do: :backend_failed
 
   defp lifecycle_from_result(%{outcome: outcome}, _current)
-       when outcome in [:limit_exceeded, :deadline_expired],
+       when outcome in [:limit_exceeded],
        do: :terminal
 
   defp lifecycle_from_result(_result, _current), do: :open
@@ -1019,7 +1020,16 @@ defmodule PtcViewer.ReplStore do
          true <- String.valid?(id),
          status when status in [:ok, :error] <- Map.get(projected, :status),
          outcome
-         when outcome in [:continued, :returned, :failed, :limit_exceeded, :deadline_expired] <-
+         when outcome in [
+                :continued,
+                :returned,
+                :failed,
+                :evaluation_error,
+                :memory_exceeded,
+                :history_exceeded,
+                :result_exceeded,
+                :limit_exceeded
+              ] <-
            Map.get(projected, :outcome),
          effect when effect in [:committed_with_history, :committed_without_history, :preserved] <-
            Map.get(projected, :continuation_effect),

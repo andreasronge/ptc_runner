@@ -69,6 +69,19 @@ defmodule PtcViewer.ReplStoreTest do
     assert map_size(TestReplAdapter.state(backend).operations) == 0
   end
 
+  test "failed replacement start exposes the persisted predecessor as closed" do
+    %{store: store, backend: backend} = start_store()
+    assert {:ok, bootstrap} = ReplStore.bootstrap(store)
+    session_id = bootstrap["session_id"]
+    TestReplAdapter.set_next_start_error(backend, :repl_start_failed)
+
+    assert {:error, :repl_start_failed} = ReplStore.reset(store, session_id)
+    assert {:ok, authoritative} = ReplStore.bootstrap(store)
+    assert authoritative["session_id"] == session_id
+    assert authoritative["lifecycle"] == "closed"
+    assert authoritative["transcript"] == bootstrap["transcript"]
+  end
+
   test "a transient acknowledgement failure is retried before replying" do
     %{store: store, backend: backend} = start_store(ack_failures: 1)
 
@@ -147,6 +160,25 @@ defmodule PtcViewer.ReplStoreTest do
 
     assert {:ok, response} = ReplStore.bootstrap(store)
     assert response["transcript"] == []
+  end
+
+  test "the complete Core evaluator outcome vocabulary remains visible and recoverable" do
+    %{store: store} = start_store()
+    assert {:ok, bootstrap} = ReplStore.bootstrap(store)
+
+    for {source, outcome, effect} <- [
+          {"recoverable-error", :evaluation_error, :preserved},
+          {"memory-exceeded", :memory_exceeded, :preserved},
+          {"history-exceeded", :history_exceeded, :preserved},
+          {"result-exceeded", :result_exceeded, :committed_with_history}
+        ] do
+      assert {:ok, response} = ReplStore.evaluate(store, bootstrap["session_id"], source)
+      assert response["evaluation"].status == :error
+      assert response["evaluation"].outcome == outcome
+      assert response["evaluation"].continuation_effect == effect
+      assert List.last(response["transcript"]).result.outcome == outcome
+      assert response["lifecycle"] == "open"
+    end
   end
 
   test "OTP status redacts opaque backend and transcript state" do

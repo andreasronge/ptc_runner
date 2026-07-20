@@ -77,6 +77,18 @@ defmodule PtcRunner.Kernel.ViewerReplHttpTest do
     assert evaluated.body["evaluation"]["value_available?"] == true
     assert length(evaluated.body["transcript"]) == 1
 
+    recoverable_error =
+      Req.post!(origin <> "/api/repl/evaluations",
+        json: %{"source" => "(missing/function)"},
+        headers: mutation_headers(origin, session_id, nonce)
+      )
+
+    assert recoverable_error.status == 200
+    assert recoverable_error.body["evaluation"]["status"] == "error"
+    assert recoverable_error.body["evaluation"]["outcome"] == "evaluation_error"
+    assert recoverable_error.body["evaluation"]["continuation_effect"] == "preserved"
+    assert length(recoverable_error.body["transcript"]) == 2
+
     closed =
       Req.delete!(origin <> "/api/repl",
         headers: mutation_headers(origin, session_id, nonce)
@@ -86,7 +98,7 @@ defmodule PtcRunner.Kernel.ViewerReplHttpTest do
     assert closed.body["lifecycle"] == "closed"
 
     telemetry = collect_telemetry([])
-    assert length(telemetry) == 8
+    assert length(telemetry) == 10
 
     telemetry_text =
       telemetry |> Enum.filter(&(elem(&1, 0) == [:bandit, :request, :stop])) |> inspect()

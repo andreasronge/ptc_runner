@@ -9,11 +9,94 @@
 <body>
   <header>
     <h1>PTC Kernel Viewer</h1>
+    <div id="primary-tabs" class="primary-tabs" role="tablist" aria-label="Viewer sections" hidden>
+      <button id="runs-tab" class="primary-tab active" type="button" role="tab"
+              aria-selected="true" aria-controls="runs-panel">Runs</button>
+      <button id="repl-tab" class="primary-tab" type="button" role="tab"
+              aria-selected="false" aria-controls="repl-panel" tabindex="-1">REPL</button>
+    </div>
     <nav id="breadcrumb" class="breadcrumb"></nav>
   </header>
 
-  <div id="file-picker" class="file-picker"></div>
-  <div id="view-container"></div>
+  <main>
+    <section id="runs-panel" role="tabpanel" aria-labelledby="runs-tab">
+      <div id="file-picker" class="file-picker"></div>
+      <div id="view-container"></div>
+    </section>
+
+    <section id="repl-panel" class="repl-panel" role="tabpanel" aria-labelledby="repl-tab" hidden>
+      <div id="repl-status" class="repl-status" role="status" aria-live="polite"></div>
+
+      <div class="repl-provenance">
+        PTC-Lisp executes only against an immutable normal-trace snapshot using the
+        <span id="repl-profile-banner">server-selected analysis profile</span>.
+      </div>
+
+      <div id="repl-session-strip" class="repl-session-strip" aria-label="Session summary">
+        <span id="repl-lifecycle" class="repl-state">Connecting</span>
+        <span id="repl-captured-at">snapshot —</span>
+        <span id="repl-run-count">— runs</span>
+        <span id="repl-evaluations-left">— evaluations left</span>
+        <span id="repl-time-left">— left</span>
+      </div>
+
+      <details class="repl-session-details">
+        <summary>Session details</summary>
+        <dl id="repl-session-metadata" class="repl-metadata"></dl>
+      </details>
+
+      <div class="repl-workspace">
+        <div class="repl-editor-panel">
+          <label for="repl-editor">PTC-Lisp editor</label>
+          <textarea id="repl-editor" spellcheck="false" autocomplete="off"
+                    aria-describedby="repl-editor-hint"></textarea>
+          <div id="repl-editor-hint" class="repl-hint">Cmd/Ctrl+Enter evaluates. Source stays local until you submit.</div>
+        </div>
+        <aside class="repl-examples" aria-labelledby="repl-examples-heading">
+          <h2 id="repl-examples-heading">Examples &amp; help</h2>
+          <p>Selecting an example inserts editable source and never executes it.</p>
+          <div id="repl-example-buttons" class="repl-example-buttons"></div>
+          <p><code>def</code>/<code>defn</code> and <code>*1</code> continue across evaluations. Each result card reports whether that evaluation committed or preserved the prior continuation.</p>
+        </aside>
+      </div>
+
+      <div id="repl-template-ready" class="repl-template-ready" hidden>
+        <strong>Template ready</strong>
+        <span>Your draft changed while the server formatted this source.</span>
+        <button id="repl-template-insert" class="btn secondary" type="button">Insert</button>
+        <button id="repl-template-replace" class="btn secondary" type="button">Replace draft</button>
+      </div>
+
+      <div class="repl-actions">
+        <button id="repl-evaluate" class="btn" type="button" disabled>Evaluate</button>
+        <button id="repl-reset" class="btn secondary" type="button" disabled>Reset / Refresh</button>
+        <button id="repl-close" class="btn secondary" type="button" disabled>Close and persist</button>
+        <button id="repl-retry" class="btn secondary" type="button" hidden>Retry capture</button>
+      </div>
+      <p class="repl-reset-note">Reset first persists this analysis trace, then captures and installs a fresh session. It is not a rollback.</p>
+
+      <div class="repl-transcript-heading">
+        <h2>Transcript</h2>
+        <button id="repl-jump-latest" class="btn secondary compact" type="button" hidden>Jump to latest</button>
+      </div>
+      <div id="repl-empty" class="repl-empty">
+        Query the frozen trace with PTC-Lisp. Start with an example, inspect the bounded feedback, then define helpers for follow-up analysis.
+      </div>
+      <div id="repl-transcript" class="repl-transcript"></div>
+      <div id="repl-omitted" class="repl-omitted" hidden></div>
+
+      <dialog id="repl-reset-dialog" class="repl-dialog" aria-labelledby="repl-reset-title">
+        <form method="dialog">
+          <h2 id="repl-reset-title">Persist and start a fresh session?</h2>
+          <p>The current analysis trace will be persisted and its session closed before a new immutable snapshot is captured. If replacement capture or startup fails, the visible transcript remains for reference, but its definitions cannot evaluate until Retry succeeds.</p>
+          <div class="repl-dialog-actions">
+            <button value="cancel" class="btn secondary" type="submit">Cancel</button>
+            <button id="repl-reset-confirm" value="confirm" class="btn" type="submit">Confirm reset</button>
+          </div>
+        </form>
+      </dialog>
+    </section>
+  </main>
 
   <script type="module" src="/js/app.js"></script>
 </body>
