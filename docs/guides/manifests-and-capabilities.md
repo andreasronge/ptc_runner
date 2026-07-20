@@ -2,7 +2,7 @@
 
 A version 1 JSON manifest is the deployable boundary for a PTC-Lisp project. It
 selects code, data, installed providers, requested limits, event policy, and
-safe labels. Loading is strict and performs no workflow execution.
+optional trace labels. Loading is strict and performs no workflow execution.
 
 ## Smallest useful manifest
 
@@ -47,6 +47,63 @@ Installed dependencies expand deterministically and enter the same immutable
 bundle compiler as local components. Missing dependencies, cycles, duplicate
 selections, undeclared cross-component calls, and local/library ID collisions
 fail assembly.
+
+## Test a signed mission function without a model
+
+Public PTC-Lisp functions may declare input and output contracts. This mission
+function accepts one integer and promises one integer:
+
+```clojure
+(ns tutorial.signatures "Small signed mission functions." {:visibility :prompt})
+
+(defn double
+  "Double one integer."
+  {:signature "(value :int) -> :int"}
+  [value]
+  (* value 2))
+```
+
+The complete credential-free
+[`05-signature-feedback`](../../examples/kernel-tutorial/05-signature-feedback/ptc.json)
+example first evaluates the invalid model-style program
+`(tutorial.signatures/double "21")`. The signature rejects the string before
+the function body runs. Its workflow uses the same `agent.feedback` PTC-Lisp
+library as `agent.core` to render the correction, then evaluates the corrected
+program `(return (tutorial.signatures/double 21))`.
+
+Run it from the repository root:
+
+```console
+mix ptc.run examples/kernel-tutorial/05-signature-feedback/ptc.json
+```
+
+The result contains the failed evaluation, the exact feedback an agent model
+would receive, and the successful correction. The important fields are:
+
+```json
+{
+  "invalid_evaluation": {
+    "outcome": "evaluation_error",
+    "kind": "prelude_contract_error",
+    "retryable?": true,
+    "details": {
+      "ref": "tutorial.signatures/double",
+      "phase": "input",
+      "path": ["value"],
+      "message": "prelude_contract_error: tutorial.signatures/double input value: expected int, got string"
+    }
+  },
+  "model_feedback": "The PTC-Lisp evaluation did not return successfully. outcome=:evaluation_error; error_code=:prelude_contract_error; message=prelude_contract_error: tutorial.signatures/double input value: expected int, got string. Send one corrected run_ptc_lisp call.",
+  "corrected_evaluation": {"outcome": "returned", "value": 42}
+}
+```
+
+This correction is retryable because validation failed before the function
+body and before any capability activity. A signed function also validates its
+successful output. The agent loop does not automatically retry a contract
+failure after capability activity, because repeating external effects may be
+unsafe. See [Kernel component bundles](capability-prelude.md) for the complete
+signature grammar and runtime rules.
 
 ## Input and mission data
 
@@ -146,9 +203,20 @@ Exact model exchanges, generated programs, and connector payloads require the
 separate host-selected inspection artifact. The manifest cannot enable or
 choose that destination.
 
-## Safe labels
+## Optional labels for trace queries
 
-Labels are restricted to a closed metadata shape:
+Labels do not affect execution, authority, prompts, results, or provider
+selection. Most small manifests should omit them. Add labels when one trace
+directory contains many runs and you need to group or filter those runs in the
+log-analysis REPL or Viewer.
+
+Labels are supplied by the manifest author; they are not inferred from the
+selected providers and the Kernel does not treat them as authoritative. Use
+the actual provider configuration and canonical capability events for runtime
+accounting or security decisions.
+
+Labels live at the manifest's top level. The loader validates them once and
+copies their normalized form into the canonical `run-started` event:
 
 ```json
 "labels": {
@@ -159,9 +227,25 @@ Labels are restricted to a closed metadata shape:
 }
 ```
 
-Identifier fields are fingerprinted and tags use finite values before entering
-canonical events. Do not use labels for prompts, results, credentials, or
-arbitrary user text.
+The fields have different purposes:
+
+- `tags` are readable, queryable categories from a fixed vocabulary, such as
+  `mode=agent`, `mode=deterministic`, or `environment=staging`;
+- `name`, `model`, and `provider` let trusted tooling correlate equal
+  identifiers without publishing them as plain text. The trace stores only
+  their SHA-256 fingerprints.
+
+For example, this query selects deterministic runs by their readable tag:
+
+```clojure
+(log/runs {"tags" {"mode" "deterministic"}})
+```
+
+Use labels when operational trace classification is useful; omit them when it
+is not. They are deliberately not a general metadata map: keys and tag values
+come from a finite vocabulary, identifier strings are bounded and
+fingerprinted, and prompts, results, credentials, paths, and arbitrary user
+text do not belong there.
 
 Exact field and failure contracts live in the
 `PtcRunner.Kernel.Manifest` module documentation. The

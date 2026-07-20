@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "workflow": {
+    "components": [
+      {
+        "id": "tutorial.signature-feedback",
+        "path": "feedback.lisp",
+        "dependencies": ["agent.feedback", "kernel"]
+      },
+      {"library": "agent.feedback"},
+      {"library": "kernel"}
+    ],
+    "entry": "tutorial.signature-feedback/run"
+  },
+  "mission": {
+    "components": [
+      {"id": "tutorial.signatures", "path": "signatures.lisp"}
+    ]
+  },
+  "input": {"value": {}}
+}

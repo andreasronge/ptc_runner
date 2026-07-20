@@ -4,6 +4,13 @@ This guide runs a complete credential-free PtcRunner workflow. The workflow is
 written in PTC-Lisp, receives JSON input, and returns a bounded JSON value plus
 runtime usage. No model key or Elixir source code is required.
 
+PTC-Lisp is a small, eager, bounded subset of Clojure, with a few additions for
+agent execution such as `return`, `fail`, `tool/...` capability calls, and the
+`*1`/`*2`/`*3` continuation history. Most supported collection and data
+expressions are ordinary Clojure; arbitrary JVM access, macros, lazy or
+infinite sequences, and unsupported Clojure APIs are not part of the language.
+The [language specification](../ptc-lisp-specification.md) is authoritative.
+
 The Kernel product is currently run from a source checkout with Elixir and Mix.
 A standalone macOS command and Docker image are planned for a later 0.x release
 from `main`.
@@ -55,11 +62,7 @@ input file:
     ],
     "entry": "tutorial.orders/summarize"
   },
-  "input": {"path": "orders.json"},
-  "labels": {
-    "name": "tutorial-orders",
-    "tags": {"mode": "deterministic"}
-  }
+  "input": {"path": "orders.json"}
 }
 ```
 

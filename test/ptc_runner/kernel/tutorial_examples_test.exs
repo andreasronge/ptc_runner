@@ -31,5 +31,32 @@ defmodule PtcRunner.Kernel.TutorialExamplesTest do
     end
   end
 
+  test "the signature tutorial renders retryable model feedback without a provider" do
+    {:ok, registry} = ProviderRegistry.new()
+
+    assert {:ok, result} = RunBuilder.run(path("05-signature-feedback"), registry)
+
+    assert %{
+             "invalid_evaluation" => %{
+               kind: :prelude_contract_error,
+               outcome: :evaluation_error,
+               retryable?: true,
+               details: %{
+                 ref: "tutorial.signatures/double",
+                 phase: :input,
+                 path: ["value"]
+               }
+             },
+             "model_feedback" => feedback,
+             "corrected_evaluation" => %{outcome: :returned, value: 42}
+           } = result.value
+
+    assert feedback =~ "tutorial.signatures/double input value: expected int, got string"
+    assert feedback =~ "Send one corrected run_ptc_lisp call"
+    assert result.usage.subordinate_evaluations == 2
+    assert result.usage.capability_calls.workflow == %{}
+    assert result.usage.capability_calls.mission == %{}
+  end
+
   defp path(example), do: Path.join([@examples, example, "ptc.json"])
 end

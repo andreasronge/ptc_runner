@@ -6,9 +6,5 @@
     ],
     "entry": "tutorial.orders/summarize"
   },
-  "input": {"path": "orders.json"},
-  "labels": {
-    "name": "tutorial-orders",
-    "tags": {"mode": "deterministic"}
-  }
+  "input": {"path": "orders.json"}
 }

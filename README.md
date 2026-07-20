@@ -1,9 +1,20 @@
 # PtcRunner
 
 PtcRunner is a bounded meta-agentic harness. Agent orchestration, prompts,
-retries, delegation, memory policy, and task logic are written in PTC-Lisp.
-The BEAM-native Kernel supplies confinement, explicit capabilities, hard
-resource limits, execution, and observable results.
+retries, delegation, memory policy, and task logic are written in PTC-Lisp: a
+small, eager, bounded subset of Clojure with a few PTC-specific forms and
+namespaces. The BEAM-native Kernel supplies confinement, explicit capabilities,
+hard resource limits, execution, and observable results.
+
+PTC-Lisp includes a small runtime contract system for public functions and
+values. Signatures validate inputs and successful outputs and produce
+structured, path-aware errors. Agent workflows can turn a pure contract or
+evaluation failure into bounded correction feedback, giving an LLM a concrete
+reason to revise its program and retry. Programs are not blindly retried after
+capability activity, where repeating an external effect may be unsafe. The
+credential-free
+[`05-signature-feedback`](examples/kernel-tutorial/05-signature-feedback/ptc.json)
+example demonstrates the complete failure, feedback, and correction cycle.
 
 > PtcRunner is a 0.x project under active development. Breaking changes are
 > expected. The Kernel line is a clean replacement for the earlier product.
@@ -23,6 +34,60 @@ One run has two intentionally different environments:
 PTC-Lisp may use authority but cannot manufacture it. Credentials, transports,
 filesystem roots, network destinations, process ownership, and hard limits
 remain outside the language boundary.
+
+## Why PTC-Lisp and the BEAM?
+
+An agent harness needs two different things: a language that an LLM can write
+and correct, and a runtime that can enforce what the generated program is
+allowed to do. PtcRunner keeps those responsibilities separate.
+
+### Why PTC-Lisp?
+
+- **Compact and model-friendly.** Clojure-shaped code is regular and
+  data-oriented. One generated program can transform data, branch, loop, and
+  call several granted capabilities instead of requiring a model round trip
+  for every small operation.
+- **Small enough to bound.** PTC-Lisp is eager and deliberately excludes
+  arbitrary host access, macros, `eval`, lazy or infinite sequences, and
+  general Java interop. The model receives the exact mission API it may call.
+- **Built for correction.** Public signatures, structured errors, and
+  transactional definition memory give an agent concrete feedback after a
+  pure failure. It can revise the program without publishing definitions from
+  the failed attempt.
+- **Policy stays portable.** Prompts, retries, planning, delegation, and
+  completion rules are ordinary versioned PTC-Lisp components rather than
+  changes to trusted Elixir host code or one fixed framework loop.
+
+Safety does not come from Lisp syntax alone. The Kernel compiles a closed
+component bundle, grants explicit capabilities, validates their schemas, and
+enforces time, heap, source, memory, call, result, and event ceilings.
+
+### Why the BEAM virtual machine?
+
+- **Lightweight concurrency.** Independent runs, evaluations, and capability
+  work can use lightweight BEAM processes under preemptive scheduling.
+- **Isolation and ownership.** Processes have separate heaps and communicate
+  by messages. Monitors and single-owner state make cancellation, cleanup, and
+  atomic resource accounting explicit.
+- **Enforceable failure boundaries.** The Kernel can run work in monitored,
+  heap-capped processes, terminate timed-out work, and reject results that
+  arrive after a run has closed.
+- **Low per-run infrastructure overhead.** A BEAM process is materially lighter
+  than starting an OS process or container for every small evaluation, making
+  many concurrent bounded evaluations practical inside one host runtime.
+
+The BEAM is usefully thought of as a small process operating system inside the
+host: it provides schedulers, processes, mailboxes, monitors, and per-process
+heaps. It is not an OS security sandbox for deliberately hostile native BEAM
+code. Trusted providers and the host still own external authority, and an OS
+process or container may remain the outer deployment boundary.
+
+Together, the model proposes PTC-Lisp, the language contracts make mistakes
+actionable, the Kernel mediates every effect, and the BEAM contains and
+accounts for execution. This aims to reduce model/tool round trips and runtime
+overhead without moving credentials or unrestricted host access into generated
+code. PtcRunner does not yet claim a benchmark-backed speed or cost multiplier;
+those results depend on the workload and will need published measurements.
 
 ## Availability
 
