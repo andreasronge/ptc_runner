@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Added
+
+- Added the code-owned `log-analysis-v1` profile to `mix ptc.repl`, with
+  bounded multi-turn mission evaluation over an immutable trace capture,
+  deterministic JSONL output for coding agents, safe profile discovery, and
+  separate atomic analysis-trace persistence.
+
 ### Changed
 
 - Replaced the legacy SubAgent, MCP, upstream, mutable-prelude, and trace

@@ -1,7 +1,8 @@
 # Viewer Log-Analysis REPL
 
-Status: implementation-ready; large/high-risk change with lifecycle, security,
-and persistence review gates
+Status: implemented and verified; retained implementation record. The later
+terminal profile frontend is recorded in
+[`profile-backed-ptc-repl-plan.md`](profile-backed-ptc-repl-plan.md).
 
 Scope: `ptc_runner` plus the standalone `ptc_viewer`
 
@@ -132,7 +133,9 @@ workflow scratchpad, not the model-equivalent mission boundary.
   pinning remains a Viewer-only feature and will receive a separate plan if
   model- or Lisp-query access is required.
 - Durable per-event streaming or recovery after a BEAM/OS crash.
-- Migrating `mix ptc.repl` to mission semantics.
+- Changing the ordinary direct or manifest-backed `ReplSession` to mission
+  semantics. A later change added a separate `log-analysis-v1` profile mode to
+  `mix ptc.repl` without changing those workflow sessions.
 
 ## Authoritative Boundaries
 
@@ -558,8 +561,10 @@ Add `PtcRunner.Kernel.LogAnalysisSessionBuilder`:
 14. Return only an opaque session handle plus safe `info/1` metadata, including
     the profile descriptor.
 
-Do not add a trace provider to the default manifest registry. Do not migrate
-`ReplSession` or `mix ptc.repl` in this change.
+This Viewer-scoped change did not add a trace provider to the default manifest
+registry or migrate the workflow `ReplSession`. The later
+[`profile-backed-ptc-repl-plan.md`](profile-backed-ptc-repl-plan.md) added an
+independent terminal frontend over the same mission session owner.
 
 ## Session Trace and Persistence Lifecycle
 

@@ -33,6 +33,19 @@ mix ptc.run path/to/manifest.json --trace traces/run.jsonl \
 Use `mix ptc.repl --manifest path/to/manifest.json` for an interactive
 session over the same frozen environments and provider registry.
 
+For a bounded mission session over an immutable capture of canonical traces,
+select the code-owned log-analysis profile:
+
+```console
+mix ptc.repl \
+  --profile log-analysis-v1 \
+  --resource traces=path/to/traces
+```
+
+The [Kernel REPL guide](docs/guides/kernel-repl.md) covers direct,
+manifest-backed, and profile-backed sessions, including JSONL output for coding
+agents and separate analysis-trace persistence.
+
 Start with the
 [Kernel tutorial](docs/guides/kernel-tutorial.md) for complete deterministic,
 DeepSeek, model-authored program, feedback, logging, and Viewer examples that

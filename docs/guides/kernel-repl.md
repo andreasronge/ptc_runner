@@ -89,7 +89,7 @@ One session can build up an investigation interactively:
 ```
 
 Loaded files, repeated `--eval` forms, positional scripts, stdin, and
-interactive forms all use the same mission continuation and aggregate budget:
+interactive forms all use the same mission continuation and aggregate budget.
 
 Each of those source inputs is bounded by the profile's
 `subordinate_source_bytes` limit before evaluation. Oversized load files,
