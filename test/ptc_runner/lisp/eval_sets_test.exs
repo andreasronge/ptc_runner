@@ -245,7 +245,6 @@ defmodule PtcRunner.Lisp.EvalSetsTest do
     case PtcRunner.Lisp.run(source) do
       {:ok, %Step{return: result}} -> {:ok, result, %{}}
       {:error, %Step{} = step} -> {:error, step}
-      {:error, reason} -> {:error, reason}
     end
   end
 end
