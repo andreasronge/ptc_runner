@@ -187,9 +187,7 @@ defmodule PtcRunner.Lisp.CoreAST do
   defp do_validate({:java_ref, reference_id} = node, path) when is_atom(reference_id) do
     case JavaSurface.fetch_reference(reference_id) do
       {:ok, %{callable?: true}} ->
-        if JavaSurface.closed_dispatch_reference?(reference_id),
-          do: :ok,
-          else: invalid(path, node)
+        :ok
 
       _ ->
         invalid(path, node)
@@ -226,9 +224,7 @@ defmodule PtcRunner.Lisp.CoreAST do
   defp validate_java_reference(node, reference_id, expected_kind, path) do
     case JavaSurface.fetch_reference(reference_id) do
       {:ok, %{kind: ^expected_kind}} ->
-        if JavaSurface.closed_dispatch_reference?(reference_id),
-          do: :ok,
-          else: invalid(path, node)
+        :ok
 
       _ ->
         invalid(path, node)

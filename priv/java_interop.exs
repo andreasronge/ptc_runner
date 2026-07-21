@@ -1243,302 +1243,92 @@
       namespace: :Math,
       class_id: :java_lang_math,
       members: [
-        %{
-          source_name: :abs,
-          reference_id: :math_abs,
-          classification: :admitted
-        },
-        %{
-          source_name: :"bit-and",
-          reference_id: nil,
-          classification: :incorrect_non_java_alias,
-          legacy_binding: :"bit-and"
-        },
-        %{
-          source_name: :"bit-and-not",
-          reference_id: nil,
-          classification: :incorrect_non_java_alias,
-          legacy_binding: :"bit-and-not"
-        },
-        %{
-          source_name: :"bit-clear",
-          reference_id: nil,
-          classification: :incorrect_non_java_alias,
-          legacy_binding: :"bit-clear"
-        },
-        %{
-          source_name: :"bit-flip",
-          reference_id: nil,
-          classification: :incorrect_non_java_alias,
-          legacy_binding: :"bit-flip"
-        },
-        %{
-          source_name: :"bit-not",
-          reference_id: nil,
-          classification: :incorrect_non_java_alias,
-          legacy_binding: :"bit-not"
-        },
-        %{
-          source_name: :"bit-or",
-          reference_id: nil,
-          classification: :incorrect_non_java_alias,
-          legacy_binding: :"bit-or"
-        },
-        %{
-          source_name: :"bit-set",
-          reference_id: nil,
-          classification: :incorrect_non_java_alias,
-          legacy_binding: :"bit-set"
-        },
-        %{
-          source_name: :"bit-shift-left",
-          reference_id: nil,
-          classification: :incorrect_non_java_alias,
-          legacy_binding: :"bit-shift-left"
-        },
-        %{
-          source_name: :"bit-shift-right",
-          reference_id: nil,
-          classification: :incorrect_non_java_alias,
-          legacy_binding: :"bit-shift-right"
-        },
-        %{
-          source_name: :"bit-test",
-          reference_id: nil,
-          classification: :incorrect_non_java_alias,
-          legacy_binding: :"bit-test"
-        },
-        %{
-          source_name: :"bit-xor",
-          reference_id: nil,
-          classification: :incorrect_non_java_alias,
-          legacy_binding: :"bit-xor"
-        },
-        %{
-          source_name: :ceil,
-          reference_id: :math_ceil,
-          classification: :admitted
-        },
-        %{
-          source_name: :double,
-          reference_id: nil,
-          classification: :incorrect_non_java_alias,
-          legacy_binding: :double
-        },
-        %{
-          source_name: :float,
-          reference_id: nil,
-          classification: :incorrect_non_java_alias,
-          legacy_binding: :float
-        },
-        %{
-          source_name: :floor,
-          reference_id: :math_floor,
-          classification: :admitted
-        },
-        %{
-          source_name: :int,
-          reference_id: nil,
-          classification: :incorrect_non_java_alias,
-          legacy_binding: :int
-        },
-        %{
-          source_name: :max,
-          reference_id: :math_max,
-          classification: :admitted
-        },
-        %{
-          source_name: :min,
-          reference_id: :math_min,
-          classification: :admitted
-        },
-        %{
-          source_name: :pow,
-          reference_id: :math_pow,
-          classification: :admitted
-        },
-        %{
-          source_name: :quot,
-          reference_id: nil,
-          classification: :incorrect_non_java_alias,
-          legacy_binding: :quot
-        },
-        %{
-          source_name: :round,
-          reference_id: :math_round,
-          classification: :admitted
-        },
-        %{
-          source_name: :sqrt,
-          reference_id: :math_sqrt,
-          classification: :admitted
-        },
-        %{
-          source_name: :trunc,
-          reference_id: nil,
-          classification: :incorrect_non_java_alias,
-          legacy_binding: :trunc
-        }
+        %{source_name: :abs, reference_id: :math_abs},
+        %{source_name: :ceil, reference_id: :math_ceil},
+        %{source_name: :floor, reference_id: :math_floor},
+        %{source_name: :max, reference_id: :math_max},
+        %{source_name: :min, reference_id: :math_min},
+        %{source_name: :pow, reference_id: :math_pow},
+        %{source_name: :round, reference_id: :math_round},
+        %{source_name: :sqrt, reference_id: :math_sqrt}
       ]
     },
     %{
       category: :interop,
       namespace: :System,
       class_id: :java_lang_system,
-      members: [
-        %{
-          source_name: :currentTimeMillis,
-          reference_id: :system_current_time_millis,
-          classification: :admitted
-        }
-      ]
+      members: [%{source_name: :currentTimeMillis, reference_id: :system_current_time_millis}]
     },
     %{
       category: :interop,
       namespace: :Boolean,
       class_id: :java_lang_boolean,
-      members: [
-        %{
-          source_name: "parseBoolean",
-          reference_id: :boolean_parse_boolean,
-          classification: :admitted
-        }
-      ]
+      members: [%{source_name: "parseBoolean", reference_id: :boolean_parse_boolean}]
     },
     %{
       category: :interop,
       namespace: :Double,
       class_id: :java_lang_double,
       members: [
-        %{
-          source_name: "parseDouble",
-          reference_id: :double_parse_double,
-          classification: :admitted
-        },
-        %{
-          source_name: :POSITIVE_INFINITY,
-          reference_id: :double_positive_infinity,
-          classification: :admitted
-        },
-        %{
-          source_name: :NEGATIVE_INFINITY,
-          reference_id: :double_negative_infinity,
-          classification: :admitted
-        },
-        %{
-          source_name: :NaN,
-          reference_id: :double_nan,
-          classification: :admitted
-        }
+        %{source_name: "parseDouble", reference_id: :double_parse_double},
+        %{source_name: :POSITIVE_INFINITY, reference_id: :double_positive_infinity},
+        %{source_name: :NEGATIVE_INFINITY, reference_id: :double_negative_infinity},
+        %{source_name: :NaN, reference_id: :double_nan}
       ]
     },
     %{
       category: :interop,
       namespace: :Float,
       class_id: :java_lang_float,
-      members: [
-        %{
-          source_name: "parseFloat",
-          reference_id: :float_parse_float,
-          classification: :admitted
-        }
-      ]
+      members: [%{source_name: "parseFloat", reference_id: :float_parse_float}]
     },
     %{
       category: :interop,
       namespace: :Integer,
       class_id: :java_lang_integer,
-      members: [
-        %{
-          source_name: "parseInt",
-          reference_id: :integer_parse_int,
-          classification: :admitted
-        }
-      ]
+      members: [%{source_name: "parseInt", reference_id: :integer_parse_int}]
     },
     %{
       category: :interop,
       namespace: :Long,
       class_id: :java_lang_long,
-      members: [
-        %{
-          source_name: "parseLong",
-          reference_id: :long_parse_long,
-          classification: :admitted
-        }
-      ]
+      members: [%{source_name: "parseLong", reference_id: :long_parse_long}]
     },
     %{
       category: :interop,
       namespace: :LocalDate,
       class_id: :java_time_local_date,
-      members: [
-        %{
-          source_name: :parse,
-          reference_id: :local_date_parse,
-          classification: :admitted
-        }
-      ]
+      members: [%{source_name: :parse, reference_id: :local_date_parse}]
     },
     %{
       category: :interop,
       namespace: :"java.time.LocalDate",
       class_id: :java_time_local_date,
-      members: [
-        %{
-          source_name: :parse,
-          reference_id: :local_date_parse,
-          classification: :admitted
-        }
-      ]
+      members: [%{source_name: :parse, reference_id: :local_date_parse}]
     },
     %{
       category: :interop,
       namespace: :Instant,
       class_id: :java_time_instant,
-      members: [
-        %{
-          source_name: :parse,
-          reference_id: :instant_parse,
-          classification: :admitted
-        }
-      ]
+      members: [%{source_name: :parse, reference_id: :instant_parse}]
     },
     %{
       category: :interop,
       namespace: :"java.time.Instant",
       class_id: :java_time_instant,
-      members: [
-        %{
-          source_name: :parse,
-          reference_id: :instant_parse,
-          classification: :admitted
-        }
-      ]
+      members: [%{source_name: :parse, reference_id: :instant_parse}]
     },
     %{
       category: :interop,
       namespace: :Duration,
       class_id: :java_time_duration,
-      members: [
-        %{
-          source_name: :between,
-          reference_id: :duration_between,
-          classification: :admitted
-        }
-      ]
+      members: [%{source_name: :between, reference_id: :duration_between}]
     },
     %{
       category: :interop,
       namespace: :"java.time.Duration",
       class_id: :java_time_duration,
-      members: [
-        %{
-          source_name: :between,
-          reference_id: :duration_between,
-          classification: :admitted
-        }
-      ]
+      members: [%{source_name: :between, reference_id: :duration_between}]
     }
   ],
   audit_specs: [

@@ -38,7 +38,7 @@ defmodule PtcRunner.Lisp.Registry do
   @external_resource @audit_path
   @registry Code.eval_file(@registry_path) |> elem(0)
   @audit Code.eval_file(@audit_path) |> elem(0)
-  :ok = Surface.validate_legacy_sources!(@registry, @audit)
+  :ok = Surface.validate_authoritative_sources!(@registry, @audit)
   @implemented Surface.replace_function_entries(@registry.implemented)
   @doc_namespaces Map.merge(
                     %{

@@ -26,7 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   constructor, or receiver-first instance invocation from manifest identity.
   Numeric index/count projection is overload-arity aware, comparator callbacks
   share callable dispatch and numeric projection, and constructor/direct-dot
-  source spellings resolve through the manifest before their migration route.
+  source spellings resolve through the manifest before closed dispatch.
   Java and ordinary struct-shaped maps must contain their exact declared fields.
   Java class spellings are reserved against prelude shadowing, and rejected
   tool results retain their executed callback ledger entry.
@@ -62,6 +62,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Completed the Java interop migration cleanup. Every admitted overload now
+  uses closed dispatch; the temporary `legacy_env` schema, empty Java binding
+  catalog, Phase-0 attestation snapshot, and non-Java `Math/` namespace aliases
+  were removed. Ordinary PTC functions such as `bit-and` and `trunc` remain
+  available only under their non-Java names.
 - Replaced the legacy SubAgent, MCP, upstream, mutable-prelude, and trace
   products with the owner-based `PtcRunner.Kernel` runtime.
 - Added immutable component bundles, structurally separate workflow and mission

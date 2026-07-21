@@ -57,7 +57,7 @@ defmodule PtcRunner.Lisp.Analyze.Patterns do
   @doc false
   @spec validate_binding_name(atom() | String.t()) :: :ok | {:error, term()}
   def validate_binding_name(name) do
-    if JavaSurface.closed_member_family_spelling?(name) do
+    if JavaSurface.member_family_spelling?(name) do
       {:error,
        {:invalid_form, "Java member spelling #{to_string(name)} is reserved and cannot be bound"}}
     else

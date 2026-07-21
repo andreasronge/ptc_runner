@@ -948,10 +948,7 @@ defmodule PtcRunner.Lisp.Eval do
     if String.starts_with?(name_str, ".") do
       available =
         JavaSurface.references()
-        |> Enum.filter(
-          &(&1.kind == :instance and
-              JavaSurface.closed_dispatch_reference?(&1.reference_id))
-        )
+        |> Enum.filter(&(&1.kind == :instance))
         |> Enum.flat_map(& &1.spellings)
         |> Enum.uniq()
         |> Enum.sort()

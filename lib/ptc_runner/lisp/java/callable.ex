@@ -19,9 +19,7 @@ defmodule PtcRunner.Lisp.Java.Callable do
   def new(reference_id) when is_atom(reference_id) do
     case Surface.fetch_reference(reference_id) do
       {:ok, %{callable?: true}} ->
-        if Surface.closed_dispatch_reference?(reference_id),
-          do: {:ok, %__MODULE__{reference_id: reference_id}},
-          else: :error
+        {:ok, %__MODULE__{reference_id: reference_id}}
 
       _ ->
         :error
@@ -31,8 +29,7 @@ defmodule PtcRunner.Lisp.Java.Callable do
   @spec valid?(term()) :: boolean()
   def valid?(%__MODULE__{reference_id: reference_id} = callable) do
     map_size(callable) == 2 and
-      match?({:ok, %{callable?: true}}, Surface.fetch_reference(reference_id)) and
-      Surface.closed_dispatch_reference?(reference_id)
+      match?({:ok, %{callable?: true}}, Surface.fetch_reference(reference_id))
   end
 
   def valid?(_), do: false

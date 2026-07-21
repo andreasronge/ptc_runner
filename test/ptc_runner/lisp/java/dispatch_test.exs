@@ -44,14 +44,26 @@ defmodule PtcRunner.Lisp.Java.DispatchTest do
       assert {:error, {:unsupported_java_member, :Boolean, "missing"}} = Analyze.analyze(raw)
     end
 
-    test "keeps inventoried non-Java Math namespace helpers reachable" do
-      assert {:ok, %{return: 3}} = Lisp.run("(Math/bit-and 7 3)")
-      assert {:ok, %{return: 3}} = Lisp.run("(Math/trunc 3.9)")
+    test "rejects removed non-Java Math namespace aliases" do
+      for {source, member} <- [
+            {"(Math/bit-and 7 3)", :"bit-and"},
+            {"(java.lang.Math/bit-and 7 3)", :"bit-and"},
+            {"(Math/trunc 3.9)", :trunc},
+            {"(java.lang.Math/trunc 3.9)", :trunc}
+          ] do
+        assert {:ok, raw} = Parser.parse(source)
+
+        assert {:error, {:unsupported_java_member, _class, ^member}} =
+                 Analyze.analyze(raw)
+      end
+
+      assert {:ok, %{return: 3}} = Lisp.run("(bit-and 7 3)")
+      assert {:ok, %{return: 3}} = Lisp.run("(trunc 3.9)")
     end
   end
 
   describe "closed Boolean dispatch" do
-    test "constructs callables only for references on closed dispatch" do
+    test "constructs callables only for admitted references" do
       assert {:ok, %Callable{reference_id: :boolean_parse_boolean}} =
                Callable.new(:boolean_parse_boolean)
 

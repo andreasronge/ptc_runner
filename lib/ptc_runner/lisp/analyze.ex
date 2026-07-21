@@ -243,11 +243,11 @@ defmodule PtcRunner.Lisp.Analyze do
   # ============================================================
 
   defp do_analyze({:symbol, name}, _tail?) do
-    case closed_java_value_reference(name) do
+    case java_value_reference(name) do
       {:ok, reference} ->
         analyze_java_reference(reference)
 
-      :legacy_or_non_java ->
+      :not_java ->
         if Placeholder.placeholder?(name) do
           {:error, {:invalid_placeholder, name}}
         else
@@ -284,11 +284,11 @@ defmodule PtcRunner.Lisp.Analyze do
   # so they need per-namespace lookup tables — see `normalize_clojure_namespace/3`
   # and `qualified_namespace_lookup/2`.
   defp do_analyze({:ns_symbol, ns, key}, _tail?) do
-    case closed_java_reference(ns, key) do
+    case java_reference(ns, key) do
       {:ok, reference} ->
         analyze_java_reference(reference)
 
-      :legacy_or_non_java ->
+      :not_java ->
         analyze_namespaced_value(ns, key)
 
       {:error, _reason} = error ->
@@ -430,11 +430,11 @@ defmodule PtcRunner.Lisp.Analyze do
 
   # Clojure-style namespaces in call position: (clojure.string/join "," items)
   defp dispatch_list_form({:ns_symbol, ns, func}, rest, list, tail?) do
-    case closed_java_reference(ns, func) do
+    case java_reference(ns, func) do
       {:ok, reference} ->
         analyze_java_call(reference, rest)
 
-      :legacy_or_non_java ->
+      :not_java ->
         analyze_namespaced_call(ns, func, rest, list, tail?)
 
       {:error, _reason} = error ->
@@ -443,10 +443,10 @@ defmodule PtcRunner.Lisp.Analyze do
   end
 
   defp dispatch_list_form({:symbol, name}, rest, list, tail?) do
-    case closed_java_source_call(name) do
+    case java_source_call(name) do
       {:reference, reference} -> analyze_java_call(reference, rest)
       {:member_family, member_family_id} -> analyze_java_dot(member_family_id, rest)
-      :legacy_or_non_java -> analyze_call(list, tail?)
+      :not_java -> analyze_call(list, tail?)
     end
   end
 
@@ -1046,72 +1046,63 @@ defmodule PtcRunner.Lisp.Analyze do
     end
   end
 
-  defp closed_java_reference(namespace, member) do
+  defp java_reference(namespace, member) do
     case JavaSurface.resolve_reference(namespace, member) do
       {:ok, reference} ->
-        if JavaSurface.closed_dispatch_reference?(reference.reference_id),
-          do: {:ok, reference},
-          else: :legacy_or_non_java
+        {:ok, reference}
 
       :unknown_member ->
-        case JavaSurface.legacy_binding(namespace, member) do
-          {:ok, _binding} -> :legacy_or_non_java
-          :error -> {:error, {:unsupported_java_member, namespace, member}}
-        end
+        {:error, {:unsupported_java_member, namespace, member}}
 
       :not_java_class ->
         if java_class_syntax?(namespace),
           do: {:error, {:unsupported_java_class, namespace}},
-          else: :legacy_or_non_java
+          else: :not_java
     end
   end
 
-  defp closed_java_plain_reference(name) do
+  defp java_plain_reference(name) do
     case JavaSurface.resolve_plain_reference(name) do
       {:ok, reference} ->
-        if JavaSurface.closed_dispatch_reference?(reference.reference_id),
-          do: {:ok, reference},
-          else: :legacy_or_non_java
+        {:ok, reference}
 
       :error ->
-        :legacy_or_non_java
+        :not_java
     end
   end
 
-  defp closed_java_value_reference(name) do
-    case closed_java_plain_reference(name) do
+  defp java_value_reference(name) do
+    case java_plain_reference(name) do
       {:ok, _reference} = resolved -> resolved
-      :legacy_or_non_java -> closed_java_member_family_reference(name)
+      :not_java -> java_member_family_reference(name)
     end
   end
 
-  defp closed_java_member_family_reference(name) do
+  defp java_member_family_reference(name) do
     with {:ok, member_family_id} <- JavaSurface.resolve_member_family(name),
-         [reference] <- JavaSurface.member_family_references(member_family_id),
-         true <- JavaSurface.closed_dispatch_reference?(reference.reference_id) do
+         [reference] <- JavaSurface.member_family_references(member_family_id) do
       {:ok, reference}
     else
-      _ambiguous_open_or_missing -> :legacy_or_non_java
+      _ambiguous_or_missing -> :not_java
     end
   end
 
-  defp closed_java_source_call(name) do
-    case closed_java_plain_reference(name) do
+  defp java_source_call(name) do
+    case java_plain_reference(name) do
       {:ok, reference} ->
         {:reference, reference}
 
-      :legacy_or_non_java ->
+      :not_java ->
         case JavaSurface.resolve_member_family(name) do
           {:ok, member_family_id} ->
             references = JavaSurface.member_family_references(member_family_id)
 
-            if references != [] and
-                 Enum.all?(references, &JavaSurface.closed_dispatch_reference?(&1.reference_id)),
-               do: {:member_family, member_family_id},
-               else: :legacy_or_non_java
+            if references != [],
+              do: {:member_family, member_family_id},
+              else: :not_java
 
           :error ->
-            :legacy_or_non_java
+            :not_java
         end
     end
   end
@@ -1401,20 +1392,14 @@ defmodule PtcRunner.Lisp.Analyze do
   #   - `:not_qualified` when `<ns>` is not in the qualified namespace set
   #     (caller falls through to the legacy `normalize_clojure_namespace/3` path)
   defp qualified_namespace_lookup(ns, func) do
-    case JavaSurface.qualified_legacy_alias(ns, func) do
-      {:ok, binding} ->
-        {:ok, binding}
+    case Map.get(@qualified_namespace_tables, ns) do
+      nil ->
+        :not_qualified
 
-      :not_qualified ->
-        case Map.get(@qualified_namespace_tables, ns) do
-          nil ->
-            :not_qualified
-
-          table ->
-            case Map.get(table, func) do
-              nil -> :unknown_member
-              qualified -> {:ok, qualified}
-            end
+      table ->
+        case Map.get(table, func) do
+          nil -> :unknown_member
+          qualified -> {:ok, qualified}
         end
     end
   end

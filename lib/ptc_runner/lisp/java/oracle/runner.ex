@@ -67,12 +67,7 @@ defmodule PtcRunner.Lisp.Java.Oracle.Runner do
   end
 
   defp ptc_cases(:closed_dispatch) do
-    overloads = Map.new(Surface.overloads(), &{&1.overload_id, &1})
-
-    Enum.filter(Fixtures.cases(), fn fixture ->
-      overload = Map.fetch!(overloads, fixture.overload_id)
-      Surface.closed_dispatch_reference?(overload.reference_id)
-    end)
+    Fixtures.cases()
   end
 
   @doc false
@@ -293,10 +288,9 @@ defmodule PtcRunner.Lisp.Java.Oracle.Runner do
         expected: expected
       }
 
-      if oracle == :ptc and Surface.closed_dispatch_reference?(overload.reference_id) and
-           not Map.get(fixture, :boundary_probe, false),
-         do: Map.put(outcome, :selected_overload_id, Atom.to_string(fixture.overload_id)),
-         else: outcome
+      if oracle == :ptc and not Map.get(fixture, :boundary_probe, false),
+        do: Map.put(outcome, :selected_overload_id, Atom.to_string(fixture.overload_id)),
+        else: outcome
     end)
   end
 

@@ -209,12 +209,16 @@ result. Index/count positions are keyed by builtin arity so collection-bearing
 positions retain native values. Native formatting
 keeps distinct primitive kinds tagged with identity-preserving display wrappers,
 so equal payloads and literal strings cannot collapse map keys or set members.
-Only references whose complete overload family is on closed dispatch may become
-native callables; each overload may name its own code-owned implementation.
+Every admitted reference uses closed dispatch, with no Java fallback through
+the ordinary Lisp environment; each overload names a code-owned implementation.
+Only manifest references may become native Java callables. Java-looking aliases
+that are not actual admitted members are rejected and remain available, where
+applicable, only under their ordinary PTC names.
 Java numeric parsers, Double fields, selected `java.lang.Math` overloads,
-`System/currentTimeMillis`, and the complete admitted temporal profile use this
-path, preserving exact primitive or class identity natively while mapping
-declared Java failures to bounded conditions. Temporal instance selection is
+`System/currentTimeMillis`, the complete admitted temporal profile, and the
+admitted Java String methods use this path, preserving exact primitive or class
+identity natively while mapping declared Java failures to bounded conditions.
+Temporal instance selection is
 receiver-owned: LocalDate and Instant comparisons, Duration accessors, and Date
 methods cannot cross classes or accept ordinary host temporal structs. Math overload families
 select exact primitive profiles; only references with one declared double
@@ -226,8 +230,8 @@ a native Java `long` before ordinary public projection.
 Callable application derives the invocation kind from that reference: instance
 callables consume the receiver as their first application argument. Java class
 constructor heads and direct-dot member families resolve from source spellings
-through the manifest, but enter Java CoreAST only when the complete applicable
-reference family is closed. Closed direct-dot spellings are reserved Java syntax
+through the manifest and enter Java CoreAST only through closed dispatch.
+Direct-dot spellings are reserved Java syntax
 and the analyzer rejects attempts to introduce them as local or user-namespace
 bindings. Java values and recursively projected BEAM structs
 must have exactly their declared fields; projection never fills missing fields

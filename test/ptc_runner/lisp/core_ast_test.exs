@@ -38,7 +38,7 @@ defmodule PtcRunner.Lisp.CoreASTTest do
              CoreAST.validate({:java_ref, :unknown_reference})
   end
 
-  test "accepts migrated Java String nodes and references" do
+  test "accepts admitted Java String nodes and references" do
     node = {:java_instance, :string_contains, {:var, :s}, [{:string, "x"}]}
 
     assert :ok = CoreAST.validate(node)

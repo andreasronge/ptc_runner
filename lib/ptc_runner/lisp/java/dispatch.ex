@@ -88,10 +88,7 @@ defmodule PtcRunner.Lisp.Java.Dispatch do
   @spec invoke_family(atom(), term(), [term()]) :: result()
   def invoke_family(member_family_id, receiver, arguments)
       when is_atom(member_family_id) and is_list(arguments) do
-    references =
-      member_family_id
-      |> Surface.member_family_references()
-      |> Enum.filter(&Surface.closed_dispatch_reference?(&1.reference_id))
+    references = Surface.member_family_references(member_family_id)
 
     case references do
       [reference] ->
