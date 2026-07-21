@@ -106,7 +106,8 @@ defmodule PtcRunner.Lisp.Env do
   @doc """
   Get the category for a Clojure-style namespace.
 
-  Returns `:string`, `:set`, or `:core`.
+  Returns the category atom for the namespace (e.g. `:string`, `:set`,
+  `:core`, `:walk`, `:regex`, `:json`), or `nil` if the namespace is unknown.
 
   ## Examples
 

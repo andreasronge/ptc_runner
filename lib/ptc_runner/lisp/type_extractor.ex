@@ -226,8 +226,7 @@ defmodule PtcRunner.Lisp.TypeExtractor do
     end
   end
 
-  # Convert Elixir type to Signature type
-  # Based on type-coercion-matrix.md mapping
+  # Convert Elixir typespec AST to a PTC Signature type string
   # depth: current recursion depth for custom type expansion (max 3)
   # module: module context for resolving user types
   defp convert_type(type_ast, depth, module)

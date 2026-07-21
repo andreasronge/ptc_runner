@@ -1,14 +1,14 @@
 defmodule PtcRunner.Lisp.ProtectedNamespaces do
   @moduledoc """
-  Single consult point for namespace protection in Capability Prelude V1.
+  Single consult point for namespace protection for deployment preludes.
 
   Reserved namespaces are host-owned and may never be declared by a
   deployment prelude, redefined by user code, or shadowed. V1 reserves
-  exactly: `tool`, `data`, and `ptc.core` (plan §2). The future
+  exactly: `tool`, `data`, and `ptc.core`. The future
   "catalog" namespace name is deliberately deferred.
 
-  Namespace names are string-backed at the host boundary (plan §3,
-  Implementation Notes), so this module operates on binaries.
+  Namespace names are string-backed at the host boundary, so this
+  module operates on binaries.
 
   `protected/1` unions the reserved set with a compiled prelude's declared
   namespaces — the full set of namespace names that user code must not write
@@ -18,11 +18,11 @@ defmodule PtcRunner.Lisp.ProtectedNamespaces do
 
   alias PtcRunner.Lisp.Prelude
 
-  # Reserved host namespace NAMES (plan §2). Kept as a plain list and turned
+  # Reserved host namespace NAMES. Kept as a plain list and turned
   # into a MapSet at runtime so the public functions return a `MapSet.t()`
   # (an opaque type), not a compile-time literal with a concrete internal
   # shape. String-backed; NOT added to SourceAtoms @bounded_namespaces —
-  # that would leak atoms and broaden the global vocabulary (plan §4).
+  # that would leak atoms and broaden the global vocabulary.
   #
   @reserved_names ~w(tool data ptc.core)
 

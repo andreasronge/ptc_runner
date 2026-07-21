@@ -5,19 +5,19 @@ defmodule PtcRunner.Lisp.Prelude.Export do
 
   An export record is **derived** from compiled prelude facts plus host
   policy. It is not an independent source of authority — host policy and
-  runtime facts win (see plan §10 Metadata Precedence). Only `:prompt` and
+  runtime facts win. Only `:prompt` and
   `:discoverable` exports get records here; private prelude helpers
-  (`defn-`) do not (plan §8).
+  (`defn-`) do not.
 
   ## Host-boundary string-backing
 
   `ref`, `namespace`, and `symbol` are kept as binaries to avoid leaking
-  atoms from deployment-authored prelude source (plan §3, Implementation
-  Notes). Each `requires` entry is a canonical tool id (also a binary).
+  atoms from deployment-authored prelude source. Each `requires` entry is a
+  canonical tool id (also a binary).
   Only the curated, bounded fields `visibility` and
   `effect` are atoms.
 
-  ## Minimal shape (plan §3)
+  ## Minimal shape
 
     * `ref` — Lisp-facing export ref, e.g. `"crm/get-user"`.
     * `namespace` — declaring namespace, e.g. `"crm"`.

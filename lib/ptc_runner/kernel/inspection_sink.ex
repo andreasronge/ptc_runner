@@ -3,11 +3,11 @@ defmodule PtcRunner.Kernel.InspectionSink do
   Required, bounded in-memory owner for sensitive developer inspection records.
 
   Capture is host-enabled and fail-closed. The sink accepts only the version 1
-  capability-input, capability-output, and subordinate evaluation-source
-  shapes. It normalizes atom keys and enum values to JSON strings, assigns the
-  run identity, sequence, and UTC timestamp, and rejects a record before
-  retention when either its retained or encoded size exceeds the installed
-  bounds.
+  capability-input, capability-output, subordinate evaluation-source, and
+  prelude-source shapes. It normalizes atom keys and enum values to JSON
+  strings, assigns the run identity, sequence, and UTC timestamp, and rejects a
+  record before retention when either its retained or encoded size exceeds the
+  installed bounds.
 
   This sink is independent of Logger, Telemetry, EventSink policy, manifests,
   and Lisp. Records remain private until the host explicitly persists them as

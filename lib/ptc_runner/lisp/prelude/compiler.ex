@@ -1,7 +1,7 @@
 defmodule PtcRunner.Lisp.Prelude.Compiler do
   @moduledoc """
   Compiles deployment prelude SOURCE into a `%PtcRunner.Lisp.Prelude{}`
-  artifact (Capability Prelude V1, plan §1 / §3).
+  artifact.
 
   ## What this does
 
@@ -24,10 +24,9 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
        evaluator's lexical closure capture does NOT fold sibling top-level
        defs into each closure's `captured_env` — sibling helpers resolve by
        name through `user_ns` at CALL time. The whole `private_env` map IS
-       that namespace, so P2 must thread `private_env` as the user_ns layer
-       when invoking an export for siblings to resolve (fact #6 capture seam,
-       proven end-to-end during P0).
-    6. Computes a sha256 source hash (plan §12).
+       that namespace, so `private_env` must be threaded as the user_ns layer
+       when invoking an export for siblings to resolve (the capture seam).
+    6. Computes a sha256 source hash.
 
   Attach-time `requires` validation against granted tools is a separate phase.
   """
@@ -286,7 +285,7 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
   # evaluate at prelude COMPILE time in a bare context with a no-op tool
   # executor (`eval_runtime/1`), where a dep call would fail as unbound — or
   # worse, silently compute garbage if it were made resolvable. Fail closed;
-  # `defn` bodies cover composition (plan decision 3).
+  # `defn` bodies cover composition.
   defp reject_dep_refs_in_defs(specs, dep_ctx) do
     specs
     |> Enum.filter(&(&1.params_form == nil))
@@ -770,7 +769,7 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
 
   defp build_export(%Spec{} = spec, ns_meta, form_graph, dep_lookup) do
     # Visibility precedence: explicit export metadata, then the declaring
-    # namespace's default, then the global default (plan §10).
+    # namespace's default, then the global default.
     ns_default =
       ns_meta
       |> Map.get(spec.namespace, %{})
@@ -791,7 +790,7 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
         })
 
       # Union the referenced dep exports' FINAL requires/tool_refs into this
-      # export's transitive sets (the fail-open fix, plan Phase 1 item 6):
+      # export's transitive sets (the fail-open fix):
       # without it, pre-execution surfaces (`check_undefined_tools`,
       # capability grants) would silently omit everything reached through the
       # dep. Refs that miss the lookup (a private or nonexistent dep symbol)
@@ -1033,15 +1032,14 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
   end
 
   # ============================================================
-  # Form graph — shared per-namespace sibling call graph (plan Phase 1)
+  # Form graph — shared per-namespace sibling call graph
   # ============================================================
 
   # `%{namespace => %{symbol => entry}}`, ONE construction pass over the
   # scope-aware sibling call graph (`collect_refs`, direct tool
   # literals) shared by export validation and bundle compilation. Stored on
-  # `%Prelude{}` as `form_graph` (plan §Phase
-  # 1) so it is guaranteed consistent with write-time validation instead of
-  # being an inline idiom recomputed ad hoc.
+  # `%Prelude{}` as `form_graph` so it is guaranteed consistent with
+  # write-time validation instead of being an inline idiom recomputed ad hoc.
   defp build_form_graph(specs, dep_ctx) do
     specs
     |> Enum.group_by(& &1.namespace)
@@ -1406,7 +1404,7 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
   end
 
   # ============================================================
-  # Metadata normalization (host boundary, plan §3)
+  # Metadata normalization (host boundary)
   # ============================================================
 
   # Normalize a parsed metadata map's keyword keys to binary strings and
@@ -1518,7 +1516,7 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
   end
 
   # Explicit `:requires` metadata must be a list of canonical string ids. Invalid
-  # entries FAIL compilation (plan §10: bad export metadata fails fast at load
+  # entries FAIL compilation (bad export metadata fails fast at load
   # time) rather than being silently dropped — a silently-emptied `requires`
   # would skip attach-time validation and hide a missing/typo'd backing id.
   defp validate_requires(nil), do: {:ok, nil}
@@ -1550,7 +1548,7 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
   defp valid_tool_requirement?(_other), do: false
 
   # ============================================================
-  # Private env capture (fact #6)
+  # Private env capture
   # ============================================================
 
   # Build the captured runtime tables, namespace by namespace. Each namespace is
@@ -1588,7 +1586,7 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
   # this compile — the fold guarantees sibling exports are final). The scope
   # EXCLUDES the namespace itself, preserving the qualified-self-reference
   # rejection, and excludes undeclared siblings, so an undeclared
-  # cross-namespace ref keeps failing `unknown namespace` (plan decision 5).
+  # cross-namespace ref keeps failing `unknown namespace`.
   # With no declared deps the scope is nil — exactly today's behavior.
   defp dep_scope_prelude(ns, exports_by_ns, dep_ctx) do
     case declared_deps(dep_ctx, ns) do
@@ -1693,7 +1691,7 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
   end
 
   # ============================================================
-  # Source hash (plan §12)
+  # Source hash
   # ============================================================
 
   defp source_hash(source) do

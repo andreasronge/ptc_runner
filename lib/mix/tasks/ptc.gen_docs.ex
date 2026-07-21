@@ -8,6 +8,7 @@ defmodule Mix.Tasks.Ptc.GenDocs do
   1. `docs/function-reference.md` — all implemented functions grouped by section
   2. `docs/conformance/index.md` — namespace coverage dashboard
   3. `docs/conformance/*-audit.md` — Clojure and Java compatibility audits
+  4. `docs/java-interop.md` — bounded Java interop reference
 
   ## Usage
 

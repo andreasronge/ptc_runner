@@ -1,7 +1,7 @@
 defmodule PtcRunner.Lisp.Runtime.Collection.Transform do
   @moduledoc """
   Transformation operations for PTC-Lisp collections: map, mapv, mapcat,
-  keep, map_indexed.
+  keep, map_indexed, keep_indexed.
 
   Each function is collapsed from many type-dispatch clauses to 2-4 by
   delegating normalization to `Collection.Normalize`.

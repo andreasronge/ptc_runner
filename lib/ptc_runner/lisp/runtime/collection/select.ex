@@ -1,7 +1,7 @@
 defmodule PtcRunner.Lisp.Runtime.Collection.Select do
   @moduledoc """
   Selection operations for PTC-Lisp collections: filter, remove, find,
-  some, every?, not_any?, take_while, drop_while.
+  some, every?, not_any?, not_every?, take_while, drop_while.
 
   Each function is collapsed from ~10 type-dispatch clauses to 2-3 by
   delegating predicate/collection normalization to `Collection.Normalize`.

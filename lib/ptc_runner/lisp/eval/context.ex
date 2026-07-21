@@ -101,9 +101,9 @@ defmodule PtcRunner.Lisp.Eval.Context do
     direct_namespaces: MapSet.new(),
     transitive_namespace_requirers: %{},
     prelude_export_mask: nil,
-    # Capability Prelude V1 (plan §5): the attached compiled prelude's PUBLIC
+    # The attached compiled prelude's PUBLIC
     # export table, a map from string ref (e.g. "crm/get-user") to a
-    # `{callable, ns_env}` tuple — the callable captured from `private_env` plus
+    # `{callable, ns_env, export}` tuple — the callable captured from `private_env` plus
     # its OWN namespace's private env. Qualified prelude calls
     # (`{:prelude_call, ref, args}`) resolve here — inserted in resolver order
     # AFTER the mutable `user` namespace and BEFORE builtins. The paired
@@ -534,7 +534,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
 
   Sub-contexts built with `new/6` for closure/thunk evaluation start with empty
   prelude tables; this re-installs them so a qualified prelude call made from
-  inside a user closure still resolves (Capability Prelude V1, plan §5).
+  inside a user closure still resolves.
   """
   @spec inherit_prelude(t(), t()) :: t()
   def inherit_prelude(%__MODULE__{} = context, %__MODULE__{} = source) do

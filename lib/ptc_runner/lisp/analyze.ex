@@ -385,7 +385,7 @@ defmodule PtcRunner.Lisp.Analyze do
   defp dispatch_list_form({:symbol, :fail}, rest, _list, tail?), do: analyze_fail(rest, tail?)
   # Qualified definition targets: `(def crm/x ...)` / `(defn crm/get-user ...)`.
   # V1 supports these only to REJECT writes into protected namespaces with a
-  # protection programmer fault (plan §2), not to enable general qualified defs.
+  # protection programmer fault, not to enable general qualified defs.
   defp dispatch_list_form({:symbol, head}, [{:ns_symbol, ns, sym} | _], _list, _tail?)
        when head in [:def, :defonce, :defn] do
     analyze_qualified_definition(head, ns, sym)
@@ -1152,7 +1152,7 @@ defmodule PtcRunner.Lisp.Analyze do
   # Clojure namespace normalization
   # ============================================================
 
-  # Per-namespace lookup tables for namespace-qualified env keys (OQ-5 option (a)).
+  # Per-namespace lookup tables for namespace-qualified env keys.
   # Namespaces listed here use qualified atoms in `Env.initial()` (e.g.
   # `:"json/parse-string"`) rather than aliasing the unqualified name.
   # Tables are computed at compile time from `Env.initial()` so the lookup is
@@ -1234,7 +1234,7 @@ defmodule PtcRunner.Lisp.Analyze do
   # analyze the args, and emit a {:prelude_call, ref, args} node the evaluator
   # resolves from the export table (invoking the captured closure against the
   # captured private prelude env). Private helpers have no export record, so
-  # this path is unreachable for them — they stay user-invisible (plan §5/§8).
+  # this path is unreachable for them — they stay user-invisible.
   # A `def` constant export: `(cfg/answer)` YIELDS the value (it is not applied),
   # even when that value is a function. Calling it with arguments is an error.
   defp analyze_prelude_call(%{ref: ref, kind: :constant}, [], _tail?),
@@ -1274,8 +1274,7 @@ defmodule PtcRunner.Lisp.Analyze do
   # their existing normalization. A KNOWN prelude namespace whose member is not
   # a public export (an unknown export, or a private helper with no export
   # record) becomes an actionable unknown-export programmer fault pointing at
-  # discovery forms (plan acceptance: "Reject Unknown Namespaced Call",
-  # "Private Helper Is Not User-visible"). Everything else keeps the generic
+  # discovery forms. Everything else keeps the generic
   # unknown-namespace message.
   defp prelude_or_clojure_namespace(ns, func, on_success) do
     cond do
@@ -1307,15 +1306,14 @@ defmodule PtcRunner.Lisp.Analyze do
   # A qualified definition target `(def ns/sym ...)` / `(defn ns/sym ...)`.
   # Writing into a PROTECTED namespace (reserved or prelude-declared) or onto a
   # public prelude EXPORT is a protection programmer fault naming the
-  # namespace/symbol (plan §2). A qualified definition outside any protected
+  # namespace/symbol. A qualified definition outside any protected
   # namespace is an explicit unsupported-qualified-definition error (V1 does
   # not support general qualified defs).
   defp analyze_qualified_definition(_head, ns, sym) do
     cond do
       # The target IS a public prelude export: say so explicitly so the user
       # learns they are attempting to shadow a curated capability, not just
-      # writing into a protected namespace (plan §2 "OR the symbol is a public
-      # prelude export").
+      # writing into a protected namespace.
       match?({:ok, _}, PreludeScope.fetch_export(ns, sym)) ->
         {:error,
          {:invalid_form,

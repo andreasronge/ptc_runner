@@ -29,8 +29,8 @@ defmodule PtcRunner.Lisp.SourceAtoms do
     3. Bounded keyword modifiers used by `for`/`doseq`/destructuring —
        `:else`, `:keys`, `:as`, `:or`, etc.
     4. Bounded namespaces — `data`, `tool`, `json`, plus Clojure aliases (`clojure.string`),
-       and fully-qualified Java namespaces from `Env.clojure_namespaces`
-       (`java.time.LocalDate`, etc.).
+       and fully-qualified Java namespaces from `BuiltinNames.java_namespace_atoms/0`
+       (projected from `priv/java_interop.exs`) (`java.time.LocalDate`, etc.).
     5. Qualified analyzer keys such as JSON member names plus atom-named Java
        namespace members projected from `priv/java_interop.exs`.
     6. Short-fn param atoms `:p1`..`:p20` synthesized by the

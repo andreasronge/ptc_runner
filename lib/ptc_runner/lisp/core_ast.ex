@@ -53,7 +53,7 @@ defmodule PtcRunner.Lisp.CoreAST do
           | {:fail, t()}
           # Tool invocation via tool/ namespace: (tool/name args...)
           | {:tool_call, name(), [t()]}
-          # Public prelude export reference / call (Capability Prelude V1).
+          # Public prelude export reference / call.
           # `ref` is the host-boundary string ref, e.g. "crm/get-user". The
           # evaluator resolves it from the attached prelude's export table and
           # invokes the captured closure against the captured private prelude

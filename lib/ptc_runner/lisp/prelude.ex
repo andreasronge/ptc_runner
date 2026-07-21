@@ -1,6 +1,6 @@
 defmodule PtcRunner.Lisp.Prelude do
   @moduledoc """
-  Compiled, stateless deployment prelude artifact (Capability Prelude V1).
+  Compiled, stateless deployment prelude artifact.
 
   A deployment loads curated PTC-Lisp prelude source that declares protected
   namespaces (e.g. `crm`) and exports functions/constants. The compiler
@@ -20,13 +20,12 @@ defmodule PtcRunner.Lisp.Prelude do
       definitions in different namespaces distinct (e.g. `crm/who` vs
       `hr/who`). Public exports call their own namespace's private helpers
       through this env; user code cannot resolve private helpers by qualified
-      symbol (plan §5). The CALLABLE values are the contract slice 2
-      (evaluator threading) depends on.
-    * `source_hash` — sha256 hex digest of the prelude source (plan §12
-      traceability).
+      symbol. The CALLABLE values are what evaluator threading depends on.
+    * `source_hash` — sha256 hex digest of the prelude source, for
+      traceability.
     * `form_graph` — `%{namespace => %{symbol => entry}}`, the compiled
-      per-namespace sibling call graph (prelude form-edit/introspection plan,
-      Phase 1). Each entry carries `visibility` (`:public`/`:private`, this
+      per-namespace sibling call graph. Each entry carries `visibility`
+      (`:public`/`:private`, this
       form's own definition kind — distinct from `Export.visibility`'s
       `:prompt`/`:discoverable`), `kind`, `arity`, `doc`, direct `calls` (sibling
       symbol references only), and `requires`/`tool_refs` each split into
@@ -37,20 +36,20 @@ defmodule PtcRunner.Lisp.Prelude do
     * `metadata` — small map of namespace-level facts for traces/debugging,
       e.g. per-namespace docstring and default visibility.
 
-  ## Private-env capture seam (fact #6)
+  ## Private-env capture seam
 
   `defn`/`defn-` in the prelude desugar through the existing analyze+eval
   pipeline to `{:closure, params, body, captured_env, turn_history, meta}`
   tuples stored under their bare symbol in a `user_ns`-shaped map. The
   compiler captures that whole map as `private_env`. Sibling helpers are NOT
   folded into each closure's `captured_env` — they resolve by name through
-  `user_ns` at call time, and `private_env` is exactly that namespace. P2
-  therefore threads `private_env` as the user_ns layer (resolver position
+  `user_ns` at call time, and `private_env` is exactly that namespace. The
+  runtime therefore threads `private_env` as the user_ns layer (resolver position
   between the mutable `user` namespace and built-ins) when invoking exports:
   a public export resolves qualified (`crm/get-user`) to
   `private_env[symbol]` and runs its body against `private_env`, so private
   helpers resolve, while private symbols stay absent from `exports` and so
-  are unreachable by qualified user calls. Proven end-to-end during P0.
+  are unreachable by qualified user calls.
 
   ## Validation errors
 
@@ -61,7 +60,7 @@ defmodule PtcRunner.Lisp.Prelude do
   alias PtcRunner.Lisp.Prelude.Export
 
   @typedoc """
-  A `form_graph` entry: one compiled top-level definition (plan Phase 1).
+  A `form_graph` entry: one compiled top-level definition.
 
   `calls` is DIRECT same-namespace references only; `requires`/`tool_refs`/`effects`
   split `direct` (this form's own body) from `transitive` (the closure over
@@ -123,7 +122,7 @@ defmodule PtcRunner.Lisp.Prelude do
   helpers), or `[]` when `ref` is not a public export.
 
   The pre-execution tool guard unions these in so a prelude-wrapped
-  `(tool/call ...)` is validated before any side effect runs (plan §6/§7).
+  `(tool/call ...)` is validated before any side effect runs.
   """
   @spec export_tool_refs(t(), String.t()) :: [String.t()]
   def export_tool_refs(%__MODULE__{exports: exports}, ref) when is_binary(ref) do
@@ -134,7 +133,7 @@ defmodule PtcRunner.Lisp.Prelude do
   end
 
   @typedoc """
-  Trace/debug summary of a compiled prelude (plan §12 Traceability).
+  Trace/debug summary of a compiled prelude, for traceability.
 
   String/atom/list-only, JSON-serializable, and credential-free: it carries
   enough to REPRODUCE the V1 capability environment without leaking captured
@@ -178,7 +177,7 @@ defmodule PtcRunner.Lisp.Prelude do
         }
 
   @doc """
-  Builds the trace/debug summary for `prelude` (plan §12).
+  Builds the trace/debug summary for `prelude`.
 
   Returns `nil` for `nil` (no prelude attached). The result is JSON-serializable
   and contains NO captured closures, private prelude env, or credentials — only

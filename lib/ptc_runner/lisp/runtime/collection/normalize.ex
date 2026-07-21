@@ -44,8 +44,8 @@ defmodule PtcRunner.Lisp.Runtime.Collection.Normalize do
   @doc """
   Normalize a predicate to a 1-arity function.
 
-  Mode `:truthy` returns a boolean-coercing function (for filter, remove, find,
-  every?, not_any?, take_while, drop_while).
+  Mode `:truthy` returns a boolean-coercing function (for filter, remove,
+  every?, not_any?, not_every?, take_while, drop_while).
   Mode `:value` returns a value-extracting function (for some, keep).
   """
   def normalize_pred(key, :truthy) when is_atom(key),

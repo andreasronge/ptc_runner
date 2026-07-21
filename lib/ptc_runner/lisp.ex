@@ -161,9 +161,9 @@ defmodule PtcRunner.Lisp do
     - `:filter_context` - Filter context to only include accessed data keys (default: true)
     - `:prelude` - A compiled `%PtcRunner.Lisp.Prelude{}` artifact, a prelude
       SOURCE string, or a list of source-bearing selection maps accepted by
-      `PtcRunner.Lisp.Prelude.Bundle.compile/1` to attach before user code
-      (Capability Prelude V1). Source selections are concatenated and compiled
-      once in explicit order after duplicate namespace rejection. The attached
+      `PtcRunner.Lisp.Prelude.Bundle.compile/1` to attach before user code.
+      Source selections are concatenated and compiled once in explicit order
+      after duplicate namespace rejection. The attached
       prelude's protected namespaces and public export table are consulted by
       the analyzer/evaluator so qualified prelude calls (e.g. `crm/get-user`)
       resolve, while private helpers stay user-invisible. Compile/attach
@@ -479,8 +479,8 @@ defmodule PtcRunner.Lisp do
     end
   end
 
-  # Stamp the prelude trace summary (plan §12) onto the result Step so trace
-  # consumers can reproduce the V1 capability environment. Applied to BOTH the
+  # Stamp the prelude trace summary onto the result Step so trace
+  # consumers can reproduce the capability environment. Applied to BOTH the
   # success and error Step; `nil` prelude leaves `prelude_trace` nil.
   defp stamp_prelude_trace(result, nil), do: result
 

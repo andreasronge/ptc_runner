@@ -1,7 +1,6 @@
 defmodule PtcRunner.Lisp.Prelude.ValidationError do
   @moduledoc """
-  Compile-time validation failure for a deployment prelude (Capability
-  Prelude V1, plan §3 / §10).
+  Compile-time validation failure for a deployment prelude.
 
   Returned as `{:error, %ValidationError{}}` from
   `PtcRunner.Lisp.Prelude.Compiler.compile/1` when the prelude SOURCE is
@@ -10,27 +9,27 @@ defmodule PtcRunner.Lisp.Prelude.ValidationError do
   invalid arity/signature metadata, and similar facts), and from
   `PtcRunner.Lisp.Prelude.Attach.validate_requires/2` with the
   `:prelude_attach_failed` reason when a public export requires a tool
-  operation the selected runtime does not provide (plan §3 / §6A).
+  operation the selected runtime does not provide.
 
   ## Fields
 
     * `reason` — a stable, matchable atom. Compile-time reasons:
-      `:reserved_namespace`, `:reserved_name`, `:duplicate_ref`,
+      `:reserved_namespace`, `:duplicate_ref`,
       `:invalid_visibility`, `:invalid_requires`, `:invalid_metadata`,
       `:qualified_self_reference`, `:missing_namespace`, `:invalid_namespace`,
-      `:invalid_signature`, `:parse_error`, `:compile_error`. Dependency
+      `:invalid_signature`, `:parse_error`, `:compile_error`,
+      `:unrecognized_node`. Dependency
       reasons (declared prelude-to-prelude deps): `:unknown_dependency`,
       `:dep_ref_in_def`, `:dependency_cycle`. Attach-time reason:
       `:prelude_attach_failed`.
     * `message` — human-readable detail naming the offending namespace,
-      symbol, or value. Must not contain secrets (plan §12).
+      symbol, or value. Must not contain secrets.
     * `namespace` — the declaring namespace when known, else `nil`.
     * `ref` — the offending export ref when known, else `nil`.
   """
 
   @type reason ::
           :reserved_namespace
-          | :reserved_name
           | :duplicate_ref
           | :invalid_visibility
           | :invalid_requires

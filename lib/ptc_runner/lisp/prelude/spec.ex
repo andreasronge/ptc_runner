@@ -7,7 +7,7 @@ defmodule PtcRunner.Lisp.Prelude.Spec do
 
   Not part of the public prelude artifact — it carries the raw parser forms
   (`params_form`, `body_form`) that the compiler needs to both build export
-  metadata and reconstruct definition forms for env capture (fact #6).
+  metadata and reconstruct definition forms for env capture.
 
   `metadata_form` is the **raw** `{:map, pairs}` parser node captured from a
   `def`, `defn`, or `defn-` before `normalize_meta/1` flattens it into the (lossy,

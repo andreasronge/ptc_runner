@@ -48,7 +48,7 @@ defmodule PtcRunner.Lisp.Runtime.Json do
     end
   rescue
     # Defensive: Jason.decode/1 should not raise on string input, but
-    # the sandbox boundary requires a hard guarantee per DIV-23 / §4.4.
+    # the sandbox boundary requires a hard guarantee per DIV-23.
     _ -> nil
   end
 
@@ -91,14 +91,14 @@ defmodule PtcRunner.Lisp.Runtime.Json do
   Encode an Elixir value as a JSON string.
 
   Returns the encoded string on success; `nil` on any failure
-  (non-encodable input). Encoder pre-validation (per spec §4.4) runs
+  (non-encodable input). Encoder pre-validation runs
   *before* `Jason.encode/1` is invoked — without it, `Jason` would
   silently coerce non-boolean atoms (e.g. PTC-Lisp keywords like
   `:fs`) into JSON strings, eroding the wire-boundary type signal.
 
   Map keys are restricted to strings and integers — atoms (including
   `true` / `false` / `nil`), floats, and other key types fail the
-  walk and produce `nil` (§4.2 / §4.3).
+  walk and produce `nil`.
 
   ## Examples
 
@@ -140,7 +140,7 @@ defmodule PtcRunner.Lisp.Runtime.Json do
   end
 
   # ----------------------------------------------------------------
-  # Pre-validation walk (§4.4)
+  # Pre-validation walk
   #
   # Map-key validation is STRICTER than value validation: JSON only
   # accepts string keys, so atoms (including true/false/nil), floats,
