@@ -117,7 +117,7 @@ the file-agent fixture confines file reads to one manifest-relative directory:
   "mission": [
     {
       "name": "file-read",
-      "config": {"root": "files", "max_bytes": 65536, "model_visible": true}
+      "config": {"root": "files", "max_bytes": 65536}
     }
   ]
 }

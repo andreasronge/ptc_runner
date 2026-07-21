@@ -116,6 +116,9 @@ development/test path dependency and is not included in the published Hex
 package. Treat this command as source-checkout tooling until standalone Viewer
 packaging is released.
 
+See [`ptc_viewer/README.md`](../../ptc_viewer/README.md) for the Viewer's HTTP
+API, configuration, and programmatic start/stop.
+
 ## Test a workflow
 
 Keep a deterministic fixture in normal tests. Compare the stable business

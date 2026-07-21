@@ -175,7 +175,7 @@ facades.
 
 ### Breaking Changes
 
-- **MetaPlanner, PlanExecutor, PlanRunner, PlanTracer, PlanCritic removed** — The autonomous planning system with JSON task graphs, verification predicates, and replanning has been removed. Use [Composition Patterns](docs/guides/subagent-patterns.md) (`with` chains, `Task.async_stream`, subagents-as-tools) for orchestration instead.
+- **MetaPlanner, PlanExecutor, PlanRunner, PlanTracer, PlanCritic removed** — The autonomous planning system with JSON task graphs, verification predicates, and replanning has been removed. Put orchestration and agent policy in PTC-Lisp instead — see [Building agents](docs/guides/building-agents.md).
 - Planning prompt templates removed (`planning-examples.md`, `verification-predicate-guide.md`, `verification-predicate-reminder.md`, `signature-guide.md`)
 - PlanExecutor telemetry events removed
 - Internal `llm_client` package removed — use `PtcRunner.LLM` behaviour directly
@@ -837,6 +837,11 @@ facades.
 - Improve LLM schema descriptions and use Haiku 4.5 (#73) ([#73](https://github.com/andreasronge/ptc_runner/pull/73))
 - Store last_result in Agent state to avoid regenerating random data (#79) ([#79](https://github.com/andreasronge/ptc_runner/pull/79))
 - Add test_coverage configuration to exclude test support modules (#89) ([#89](https://github.com/andreasronge/ptc_runner/pull/89))
+[0.13.0]: https://github.com/andreasronge/ptc_runner/compare/v0.12.0...v0.13.0
+[0.12.0]: https://github.com/andreasronge/ptc_runner/compare/v0.11.0...v0.12.0
+[0.11.0]: https://github.com/andreasronge/ptc_runner/compare/v0.10.1...v0.11.0
+[0.10.1]: https://github.com/andreasronge/ptc_runner/compare/v0.10.0...v0.10.1
+[0.10.0]: https://github.com/andreasronge/ptc_runner/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/andreasronge/ptc_runner/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/andreasronge/ptc_runner/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/andreasronge/ptc_runner/compare/v0.6.0...v0.7.0
@@ -852,3 +857,4 @@ facades.
 [0.3.1]: https://github.com/andreasronge/ptc_runner/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/andreasronge/ptc_runner/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/andreasronge/ptc_runner/compare/v0.1.0...v0.2.0
+[0.1.0]: https://github.com/andreasronge/ptc_runner/releases/tag/v0.1.0

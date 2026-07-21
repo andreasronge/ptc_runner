@@ -53,19 +53,16 @@ callback fallbacks and constant redacted OTP status, including abnormal-exit
 reports. Erlang VM tracing (`:erlang.trace`, `:dbg`, or `:sys.trace`) is an
 operator debugging facility, not a product trace source.
 
-After the Phase 0 cleanup, the existing Lisp execution Telemetry prefix remains
-`[:ptc_runner, :lisp, :execute]`. Its closed `caller` values are `:direct`,
-`:kernel`, and `:repl`; the obsolete `profile` tag is removed. Stop metadata
-adds the semantic `outcome` (`:ok` or `:error`) while measurements retain
+The Lisp execution Telemetry prefix is `[:ptc_runner, :lisp, :execute]`. Its
+closed `caller` values are `:direct`, `:kernel`, and `:repl`. Stop metadata
+carries the semantic `outcome` (`:ok` or `:error`) while measurements carry
 duration, program/result byte counts, and print count. Exception telemetry may
 identify the exception class but does not attach the raw reason, stacktrace,
 source, arguments, or result. These events are metrics for embedders, not the
 source used to reconstruct a run.
 
-The Viewer must have one canonical event model. Its temporary legacy raw-JSONL
-routes and `trace.start`/`run.start` parser are removed before the inspection
-loader lands, once no supported producer remains. The inspection loader is not
-a replacement legacy trace schema; it joins private records to canonical IDs.
+The Viewer has one canonical event model. The inspection loader is not a
+replacement trace schema; it joins private records to canonical IDs.
 
 ## Canonical authority
 
@@ -300,7 +297,7 @@ a run without loading its turns:
 - model and provider identifiers when recorded by a provider;
 - subordinate-evaluation count;
 - workflow and mission capability-call counts;
-- LLM-call summary derived from named `llm/request` events when applicable;
+- LLM-call summary derived from named `llm-request` events when applicable;
 - error count and duration summary;
 - one-way fingerprints of caller-supplied name/model/provider labels, plus
   finite canonical tag keys and enumerated values;
@@ -580,16 +577,11 @@ wait for that broader work and does not change `Kernel.TraceLog` ownership.
 
 ## Failure algebra
 
-Trace failures use the standard capability envelope with stable kinds such as:
-
-- `:not-found`;
-- `:denied`;
-- `:invalid-query`;
-- `:unsupported-version`;
-- `:malformed-source`;
-- `:source-limit-exceeded`;
-- `:result-limit-exceeded`;
-- `:source-changed`.
+Trace queries surface two capability-envelope kinds — `:not_found` and
+`:invalid_request` (plus `:internal` for unexpected failures). The specific
+condition is carried in the bounded details string. `:invalid_request` covers
+`:invalid_query`, `:unsupported_version`, `:malformed_source`,
+`:source_limit_exceeded`, `:result_limit_exceeded`, and `:source_changed`.
 
 Details are bounded and sanitized. Host paths are not exposed beyond safe
 grant-relative identifiers.

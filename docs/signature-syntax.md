@@ -277,11 +277,11 @@ Validation errors include paths for precise debugging:
 
 ```
 Tool validation errors:
-- results[0].customer.id: expected int, got string "abc"
-- results[2].amount: expected float, got nil
+- results.0.customer.id: expected int, got string
+- results.2.amount: expected float, got nil
 
 Tool validation warnings:
-- limit: coerced string "10" to int
+- limit: coerced string "10" to integer
 ```
 
 Errors are fed back to the LLM for self-correction.
@@ -360,7 +360,7 @@ When auto-extracting from Elixir specs:
 
 Types that require explicit signatures:
 - `pid()`, `reference()` - No JSON equivalent
-- Complex unions - `{:ok, t} | {:error, term}`
+- Complex unions - most `a | b` unions fall back to `:any` (though `{:ok, t} | {:error, term}` and `t | nil` are auto-mapped)
 - Custom `@type` definitions
 
 ---
@@ -514,7 +514,7 @@ Coercion applies recursively to nested types:
 ```elixir
 # Signature: [{id :int, name :string}]
 # Input: [%{"id" => "42", "name" => "Alice"}]
-# Result: [%{id: 42, name: "Alice"}] (with coercion warning for id)
+# Result: [%{"id" => 42, "name" => "Alice"}] (with coercion warning for id)
 ```
 
 ---

@@ -104,7 +104,6 @@ PTC-Lisp extends standard Clojure with features designed for data transformation
 | `re-pattern`, `#"..."` | Compile string to regex (§8.10) |
 | `floor`, `ceil`, `round`, `trunc` | Integer rounding |
 | `float`, `double`, `int` | Type coercion (to float / to integer) |
-| `call` | Tool invocation special form (§9) |
 | `return`, `fail` | Control flow for multi-turn agentic loops (§5.22, §5.23) |
 | `doseq` | Side-effecting iteration (§5.21) |
 
@@ -249,7 +248,7 @@ Supported escapes: `\\`, `\"`, `\n`, `\t`, `\r`
 
 **Regex literals:** `#"..."` is shorthand for `(re-pattern "...")`. Both forms produce compiled regex values.
 
-**String operations:** Strings support `count`, `empty?`, `seq`, `str`, `pr-str`, `subs`, `join`, `split`, `trim`, `replace`, `index-of`, `last-index-of`, `format`, `name`, `re-find`, and `re-matches`. The `seq` function converts a string to a sequence of characters (graphemes), enabling character iteration. See Section 8.3 and 8.8 for details.
+**String operations:** Strings support `count`, `empty?`, `seq`, `str`, `pr-str`, `subs`, `join`, `split`, `trim`, `replace`, `index-of`, `last-index-of`, `format`, `name`, `re-find`, and `re-matches`. The `seq` function converts a string to a sequence of characters (graphemes), enabling character iteration. See Section 8.1 and 8.3 for details.
 
 **String as sequence:** Strings can be used as sequences in many collection operations. Functions like `filter`, `map`, `first`, `last`, `take`, `drop`, `reverse`, `sort`, and others work directly on strings, treating them as sequences of characters (graphemes). These operations return lists of single-character strings:
 
@@ -810,7 +809,7 @@ Binds a value from an expression and evaluates the body only if the value is tru
 **Semantics:**
 - `if-let` evaluates `condition-expr`, binds result to `name`, then evaluates `then-expr` if truthy, otherwise `else-expr`
 - `when-let` is like `if-let` but returns `nil` instead of an else branch
-- Both only support single symbol bindings, no destructuring (see [DIV-14](clojure-conformance-gaps.md#div-14-if-let-when-let-only-support-single-symbol-bindings))
+- Both only support single symbol bindings, no destructuring (see [DIV-14](clojure-conformance-gaps.md#div-14-conditional-binding-forms-only-support-single-symbol-bindings))
 - Desugars at analysis time: `(if-let [x expr] then else)` → `(let [x expr] (if x then else))`
 
 **Examples:**
@@ -1077,7 +1076,7 @@ Syntactic sugar for defining named functions in the user namespace:
 ```
 
 
-**Not supported:** Multi-arity `defn` ([DIV-15](clojure-conformance-gaps.md#div-15-no-multi-arity-defn)), pre/post conditions ([DIV-16](clojure-conformance-gaps.md#div-16-no-pre-post-conditions-in-defn)).
+**Not supported:** Multi-arity `defn` ([DIV-15](clojure-conformance-gaps.md#div-15-no-multi-arity-fndefn)), pre/post conditions ([DIV-16](clojure-conformance-gaps.md#div-16-no-prepost-conditions-in-defn)).
 
 ---
 
@@ -2499,7 +2498,7 @@ Integer-only bit manipulation, mirroring `clojure.core`. All arguments must be i
 | `fn?` | Is function? |
 | `false?` | Is exactly `false`? |
 | `true?` | Is exactly `true`? |
-| `symbol?` | Always false — PTC-Lisp uses keywords, not symbols (see [DIV-19](clojure-conformance-gaps.md#div-19-symbol-always-returns-false)) |
+| `symbol?` | Always false — PTC-Lisp uses keywords, not symbols (see [DIV-19](clojure-conformance-gaps.md#div-19-no-first-class-symbol-runtime-values)) |
 | `decimal?` | Always false — BEAM has no BigDecimal (see [DIV-20](clojure-conformance-gaps.md#div-20-decimal-and-ratio-always-return-false)) |
 | `ratio?` | Always false — BEAM has no ratio type (see [DIV-20](clojure-conformance-gaps.md#div-20-decimal-and-ratio-always-return-false)) |
 | `rational?` | Is integer? — integers are the only BEAM rationals (see [DIV-20](clojure-conformance-gaps.md#div-20-decimal-and-ratio-always-return-false)) |
@@ -2617,7 +2616,7 @@ To iterate over just keys or values, extract them first:
 - All predicates (including `zero?`) return `false` for `Double/NaN`.
 - `Double/NaN` is not equal to itself: `(= Double/NaN Double/NaN)` is `false`.
 
-**Integer predicates on floats:** `even?` and `odd?` accept whole-number floats like `4.0` (treating them as integers), and return `false` for non-whole floats like `4.5`. This diverges from Clojure, which throws on float arguments (see [GAP-S08](clojure-conformance-gaps.md#gap-s08-even-odd-handle-floats-gracefully)).
+**Integer predicates on floats:** `even?` and `odd?` accept whole-number floats like `4.0` (treating them as integers), and return `false` for non-whole floats like `4.5`. This diverges from Clojure, which throws on float arguments (see [GAP-S08](clojure-conformance-gaps.md#gap-s08-evenodd-handle-floats-gracefully)).
 
 ```clojure
 (even? 4)     ; => true
@@ -2723,7 +2722,7 @@ Regex functions provide validation and extraction capabilities. To ensure system
 ```
 
 **Type checking:**
-Both functions accept strings and return `nil` for non-string input (see [DIV-18](clojure-conformance-gaps.md#div-18-parse-long-parse-double-parse-boolean-return-nil-for-non-string-input)).
+Both functions accept strings and return `nil` for non-string input (see [DIV-18](clojure-conformance-gaps.md#div-18-parse-longparse-doubleparse-boolean-return-nil-for-non-string-input)).
 
 ```clojure
 (parse-long 42)            ; => ...
@@ -3888,7 +3887,7 @@ heap is therefore bounded by `Max Parallel Workers × Worker Max Heap`.
 
 Programs should produce identical results when run in:
 1. PTC-Lisp interpreter (Elixir)
-2. Clojure (with stub implementations for `data/`, `tool/`, `call`, and other PTC-specific forms)
+2. Clojure (with stub implementations for `data/`, `tool/`, and other PTC-specific forms)
 
 ---
 
@@ -4135,7 +4134,7 @@ Every execution produces a log entry:
   timestamp: ~U[2024-01-15 10:30:00Z],
 
   # Input
-  program_source: "(do (def orders (call \"get-orders\" {:ids (map :id high-paid)})) ...)",
+  program_source: "(do (def orders (tool/get-orders {:ids (map :id high-paid)})) ...)",
   memory_before: %{high_paid: [...]},
   ctx: %{user_id: "user-123"},
 
