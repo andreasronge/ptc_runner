@@ -199,8 +199,9 @@ history, or metadata. Canonical events likewise carry only bounded status and
 accounting metadata; exact values remain outside ordinary observability.
 
 Bounded Java values follow the same native-versus-observable split. Native
-continuation state may retain validated Java primitive provenance and admitted
-Java callables. Identity, closures, and collection transforms retain primitive
+continuation state may retain validated Java primitive provenance, admitted
+Java callables, and LocalDate, Instant, Duration, or Date wrappers. Identity,
+closures, and collection transforms retain primitive
 provenance; ordinary numeric consumers deliberately erase it, including integer
 index/count arguments, collection aggregation, and numeric sort/min/max keys,
 whether invoked directly, through a higher-order call, or as a comparator
@@ -210,9 +211,12 @@ keeps distinct primitive kinds tagged with identity-preserving display wrappers,
 so equal payloads and literal strings cannot collapse map keys or set members.
 Only references whose complete overload family is on closed dispatch may become
 native callables; each overload may name its own code-owned implementation.
-Java numeric parsers, Double fields, selected `java.lang.Math` overloads, and
-`System/currentTimeMillis` use this path, preserving exact primitive identity
-natively while mapping declared Java failures to bounded conditions. Math overload families
+Java numeric parsers, Double fields, selected `java.lang.Math` overloads,
+`System/currentTimeMillis`, and the complete admitted temporal profile use this
+path, preserving exact primitive or class identity natively while mapping
+declared Java failures to bounded conditions. Temporal instance selection is
+receiver-owned: LocalDate and Instant comparisons, Duration accessors, and Date
+methods cannot cross classes or accept ordinary host temporal structs. Math overload families
 select exact primitive profiles; only references with one declared double
 overload apply bounded numeric-to-double conversion. Qualified Math semantics
 remain separate from the ordinary bare PTC math helpers. Unqualified Clojure
@@ -229,10 +233,13 @@ from struct defaults. Java class
 spellings are host-owned namespaces and cannot be
 declared by a capability prelude. Public
 projection recursively traverses collections and struct fields, erases valid
-primitive tags to inert numeric payloads, and labels a callable by its fixed
-manifest class/member identity. Tool-argument projection additionally follows
+primitive tags to inert numeric payloads, projects temporal wrappers to
+class-canonical strings, and labels a callable by its fixed manifest
+class/member identity. Tool-argument projection additionally follows
 the declared signature through nested maps and lists before invoking the callback
-when a Java primitive needs contract-aware projection; primitive-free arguments
+when a Java value needs contract-aware projection. Exact, host-representable
+Instant and Date values may enter declared datetime fields; LocalDate, Duration,
+and nanosecond Instants that would lose precision are rejected. Java-free arguments
 do not make Java projection parse otherwise-unused tool metadata.
 Return-signature validation observes that same public projection.
 Direct capability and Kernel JSON boundaries reject callable
@@ -604,16 +611,16 @@ jars with `mix ptc.install_clojure`, then run:
 mix ptc.java_conformance --oracle jvm --subset implemented
 mix ptc.java_fixtures --oracle jvm --check
 mix ptc.java_conformance --oracle babashka --subset fast
-mix ptc.java_conformance --oracle ptc --subset ptc-only
+mix ptc.java_conformance --oracle ptc --subset closed-dispatch
 ```
 
 Use `mix ptc.java_fixtures --oracle jvm --write` only after reviewing an
 intentional behavior change on the pinned toolchain. The JVM run is the
 descriptor and behavior authority. Babashka covers only cases marked `fast`
 and cannot attest overload selection. Both runners use bounded source, output,
-and runtime limits with an observed `en_US` locale and UTC timezone. PTC-only
-aliases and extensions run through the bounded PTC evaluator but are not
-presented as JVM behavior.
+and runtime limits with an observed `en_US` locale and UTC timezone. The PTC
+closed-dispatch run also attests the selected overload identity so equal return
+values cannot conceal a dispatch mismatch.
 
 `RunConfig` freezes two bounded deterministic mission projections. The
 authoritative V2 inventory contains prompt-visible exports, model-visible

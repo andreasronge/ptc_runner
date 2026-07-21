@@ -7,6 +7,10 @@ defmodule PtcRunner.Lisp.Java.ProjectTest do
   alias PtcRunner.Lisp.Java.Callable
   alias PtcRunner.Lisp.Java.Primitive
   alias PtcRunner.Lisp.Java.Project
+  alias PtcRunner.Lisp.Java.Time.Duration
+  alias PtcRunner.Lisp.Java.Time.Instant
+  alias PtcRunner.Lisp.Java.Time.LocalDate
+  alias PtcRunner.Lisp.Java.Util.Date, as: JavaDate
   alias PtcRunner.Lisp.Result
 
   test "projects valid Java leaves and retains them only at the native boundary" do
@@ -32,6 +36,195 @@ defmodule PtcRunner.Lisp.Java.ProjectTest do
     assert {:error,
             {:unsupported_java_boundary_value, [], :tool_argument, :boolean_parse_boolean}} =
              Project.project(callable, :tool_argument)
+  end
+
+  test "projects temporal wrappers according to public and direct-tool contracts" do
+    {:ok, local_date} = LocalDate.parse(["2024-01-02"])
+    {:ok, instant} = Instant.parse(["2024-01-02T03:04:05.123456Z"])
+    {:ok, precise_instant} = Instant.parse(["2024-01-02T03:04:05.123456789Z"])
+    {:ok, duration} = Duration.new(1, 500_000_000)
+    {:ok, date} = JavaDate.new(1)
+
+    native = [local_date, instant, duration, date]
+
+    assert {:ok, ^native} = Project.project(native, :native)
+
+    assert {:ok,
+            [
+              "2024-01-02",
+              "2024-01-02T03:04:05.123456Z",
+              "PT1.5S",
+              "1970-01-01T00:00:00.001Z"
+            ]} = Project.project(native, :public)
+
+    assert {:ok, "2024-01-02T03:04:05.123456Z"} =
+             Project.project(instant, :tool_argument, :string)
+
+    assert {:ok, %DateTime{} = datetime} =
+             Project.project(instant, :tool_argument, :datetime)
+
+    assert DateTime.to_iso8601(datetime) == "2024-01-02T03:04:05.123456Z"
+
+    assert {:ok, ~U[1970-01-01 00:00:00.001000Z]} =
+             Project.project(date, :tool_argument, :datetime)
+
+    assert {:error, {:inexact_java_boundary_conversion, [], :tool_argument, :instant}} =
+             Project.project(precise_instant, :tool_argument, :datetime)
+
+    for value <- [local_date, duration] do
+      assert {:error, {:unsupported_java_boundary_value, [], :tool_argument, _profile}} =
+               Project.project(value, :tool_argument, :datetime)
+    end
+
+    for value <- native do
+      assert {:error, {:unsupported_java_boundary_value, [], :tool_result, _profile}} =
+               Project.project(value, :tool_result)
+    end
+  end
+
+  test "temporal projection rejects forged values and detects canonical collisions" do
+    {:ok, local_date} = LocalDate.parse(["2024-01-02"])
+    forged = %Instant{epoch_second: 0, nano: -1}
+
+    assert {:error, {:invalid_java_value, [], :instant}} =
+             Project.project(forged, :public)
+
+    assert {:error, {:java_projection_collision, [], :map}} =
+             Project.project(%{local_date => :native, "2024-01-02" => :text}, :public)
+
+    assert {:error, {:java_projection_collision, [], :set}} =
+             Project.project(MapSet.new([local_date, "2024-01-02"]), :kernel_json)
+  end
+
+  test "direct tools receive prepared temporal values and reject temporal results" do
+    {:ok, instant} = Instant.parse(["2024-01-02T03:04:05.123456Z"])
+    parent = self()
+
+    tool = fn args ->
+      send(parent, {:temporal_called, args})
+      :ok
+    end
+
+    assert {:ok, %{return: :ok}} =
+             Lisp.run_native("(tool/echo {:at instant})",
+               memory: %{"instant" => instant},
+               tools: %{"echo" => {tool, "(at :datetime) -> :any"}}
+             )
+
+    assert_receive {:temporal_called, %{"at" => %DateTime{} = callback_instant}}
+    assert DateTime.to_iso8601(callback_instant) == "2024-01-02T03:04:05.123456Z"
+
+    returning_tool = {fn _args -> instant end, :skip}
+
+    assert {:error, %{fail: %{reason: :tool_error}}} =
+             Lisp.run("(tool/echo {})", tools: %{"echo" => returning_tool})
+  end
+
+  test "signed tool projection scans Java values nested in ordinary structs" do
+    {:ok, instant} = Instant.parse(["2024-01-02T03:04:05.123456Z"])
+    parent = self()
+
+    tool = fn args ->
+      send(parent, {:struct_temporal_args, args})
+      :ok
+    end
+
+    assert {:ok, %{return: :ok}} =
+             Lisp.run_native("(tool/echo {:payload data/result})",
+               context: %{"result" => %Result{return: instant}},
+               tools: %{"echo" => {tool, "(payload :any) -> :any"}}
+             )
+
+    assert_receive {:struct_temporal_args,
+                    %{"payload" => %Result{return: "2024-01-02T03:04:05.123456Z"}}}
+  end
+
+  test "untyped map tool contracts project nested Java values as any" do
+    {:ok, instant} = Instant.parse(["2024-01-02T03:04:05.123456Z"])
+    parent = self()
+
+    tool = fn args ->
+      send(parent, {:untyped_map_args, args})
+      :ok
+    end
+
+    assert {:ok, %{return: :ok}} =
+             Lisp.run_native("(tool/echo {:payload {:at instant}})",
+               memory: %{"instant" => instant},
+               tools: %{"echo" => {tool, "(payload :map) -> :any"}}
+             )
+
+    assert_receive {:untyped_map_args, %{"payload" => %{"at" => "2024-01-02T03:04:05.123456Z"}}}
+  end
+
+  test "direct tool map keys remain Java values until boundary projection" do
+    {:ok, local_date} = LocalDate.parse(["2024-01-02"])
+    {:ok, int} = Primitive.new(:int, 1)
+    forged = %Instant{epoch_second: 0, nano: -1}
+    parent = self()
+
+    tool = fn args ->
+      send(parent, {:java_key_args, args})
+      :ok
+    end
+
+    assert {:ok, %{return: :ok}} =
+             Lisp.run_native("(tool/echo data/args)",
+               context: %{"args" => %{local_date => :native}},
+               tools: %{"echo" => {tool, :skip}}
+             )
+
+    assert_receive {:java_key_args, %{"2024_01_02" => :native}}
+
+    assert {:ok, %{return: :ok}} =
+             Lisp.run_native("(tool/echo data/args)",
+               context: %{"args" => %{int => :java}},
+               tools: %{"echo" => {tool, :skip}}
+             )
+
+    assert_receive {:java_key_args, %{"1" => :java}}
+
+    for args <- [
+          %{forged => :forged},
+          %{local_date => :native, "2024-01-02" => :text},
+          %{int => :java, 1 => :ordinary}
+        ] do
+      assert {:error, %{fail: %{reason: :tool_error}}} =
+               Lisp.run_native("(tool/echo data/args)",
+                 context: %{"args" => args},
+                 tools: %{"echo" => {tool, :skip}}
+               )
+
+      refute_received {:java_key_args, _args}
+    end
+  end
+
+  test "normalized signature field names retain temporal contracts recursively" do
+    {:ok, instant} = Instant.parse(["2024-01-02T03:04:05.123456Z"])
+    parent = self()
+
+    tool = fn args ->
+      send(parent, {:normalized_temporal_args, args})
+      :ok
+    end
+
+    signature = "(event-time :datetime, payload {items [{event-time :datetime}]}) -> :any"
+
+    assert {:ok, %{return: :ok}} =
+             Lisp.run_native(
+               "(tool/echo {:event-time instant :payload {:items [{:event-time instant}]}})",
+               memory: %{"instant" => instant},
+               tools: %{"echo" => {tool, signature}}
+             )
+
+    assert_receive {:normalized_temporal_args,
+                    %{
+                      "event_time" => %DateTime{} = top_level,
+                      "payload" => %{"items" => [%{"event_time" => %DateTime{} = nested}]}
+                    }}
+
+    assert DateTime.to_iso8601(top_level) == "2024-01-02T03:04:05.123456Z"
+    assert DateTime.to_iso8601(nested) == "2024-01-02T03:04:05.123456Z"
   end
 
   test "rejects forged primitives and projection collisions" do

@@ -17,6 +17,10 @@ defmodule PtcRunner.Lisp.CoreToSource do
   alias PtcRunner.Lisp.Java.Callable, as: JavaCallable
   alias PtcRunner.Lisp.Java.Primitive, as: JavaPrimitive
   alias PtcRunner.Lisp.Java.Surface, as: JavaSurface
+  alias PtcRunner.Lisp.Java.Time.Duration, as: JavaDuration
+  alias PtcRunner.Lisp.Java.Time.Instant, as: JavaInstant
+  alias PtcRunner.Lisp.Java.Time.LocalDate, as: JavaLocalDate
+  alias PtcRunner.Lisp.Java.Util.Date, as: JavaDate
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
 
   @doc """
@@ -80,7 +84,8 @@ defmodule PtcRunner.Lisp.CoreToSource do
 
   def format({:java_instance, reference_id, receiver, arguments}) do
     {:ok, reference} = JavaSurface.fetch_reference(reference_id)
-    "(.#{reference.member} #{format_list([receiver | arguments])})"
+    {:ok, class} = JavaSurface.fetch_class(reference.class_id)
+    "(#{class.name}/#{reference.member} #{format_list([receiver | arguments])})"
   end
 
   def format({:java_dot, member_family_id, receiver, arguments}) do
@@ -293,6 +298,18 @@ defmodule PtcRunner.Lisp.CoreToSource do
   defp find_java_value(%{__struct__: JavaPrimitive} = primitive, path),
     do: {:error, {:non_exportable_java_value, path, Map.get(primitive, :kind)}}
 
+  defp find_java_value(%{__struct__: JavaLocalDate}, path),
+    do: {:error, {:non_exportable_java_value, path, :local_date}}
+
+  defp find_java_value(%{__struct__: JavaInstant}, path),
+    do: {:error, {:non_exportable_java_value, path, :instant}}
+
+  defp find_java_value(%{__struct__: JavaDuration}, path),
+    do: {:error, {:non_exportable_java_value, path, :duration}}
+
+  defp find_java_value(%{__struct__: JavaDate}, path),
+    do: {:error, {:non_exportable_java_value, path, :date}}
+
   defp find_java_value(value, path) when is_list(value), do: find_java_list(value, path)
 
   defp find_java_value(value, path) when is_tuple(value) do
@@ -390,8 +407,15 @@ defmodule PtcRunner.Lisp.CoreToSource do
 
   defp java_reference_source(reference_id) do
     case JavaSurface.fetch_reference(reference_id) do
-      {:ok, %{spellings: [source | _]}} -> source
-      _ -> raise ArgumentError, "unknown Java reference #{inspect(reference_id)}"
+      {:ok, %{kind: :instance, class_id: class_id, member: member}} ->
+        {:ok, class} = JavaSurface.fetch_class(class_id)
+        "#{class.name}/#{member}"
+
+      {:ok, %{spellings: [source | _]}} ->
+        source
+
+      _ ->
+        raise ArgumentError, "unknown Java reference #{inspect(reference_id)}"
     end
   end
 

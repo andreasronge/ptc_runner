@@ -115,8 +115,11 @@ defmodule PtcRunner.Lisp.Format do
   alias PtcRunner.Lisp.Java.Callable, as: JavaCallable
   alias PtcRunner.Lisp.Java.Primitive, as: JavaPrimitive
   alias PtcRunner.Lisp.Java.Surface, as: JavaSurface
+  alias PtcRunner.Lisp.Java.Time.Duration, as: JavaDuration
+  alias PtcRunner.Lisp.Java.Time.Instant, as: JavaInstant
+  alias PtcRunner.Lisp.Java.Time.LocalDate, as: JavaLocalDate
+  alias PtcRunner.Lisp.Java.Util.Date, as: JavaDate
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
-  alias PtcRunner.Lisp.Runtime.Interop.Duration
   alias PtcRunner.Lisp.RuntimeCallable
 
   @doc """
@@ -293,10 +296,6 @@ defmodule PtcRunner.Lisp.Format do
 
   defp format_clojure(%Time{} = t, _opts) do
     {"\"#{Time.to_iso8601(t)}\"", false}
-  end
-
-  defp format_clojure(%Duration{milliseconds: milliseconds}, _opts) do
-    {"#duration[#{milliseconds}ms]", false}
   end
 
   defp format_clojure(%_{} = struct, opts), do: inspect_struct(struct, opts)
@@ -476,6 +475,22 @@ defmodule PtcRunner.Lisp.Format do
     end
   end
 
+  defp sanitize(%JavaLocalDate{} = value),
+    do: sanitize_java_object(value, JavaLocalDate, :local_date, "java.time.LocalDate")
+
+  defp sanitize(%JavaInstant{} = value),
+    do: sanitize_java_object(value, JavaInstant, :instant, "java.time.Instant")
+
+  defp sanitize(%JavaDuration{} = value),
+    do: sanitize_java_object(value, JavaDuration, :duration, "java.time.Duration")
+
+  defp sanitize(%JavaDate{} = value),
+    do: sanitize_java_object(value, JavaDate, :date, "java.util.Date")
+
+  defp sanitize(%{__struct__: module})
+       when module in [JavaLocalDate, JavaInstant, JavaDuration, JavaDate],
+       do: "#<invalid-java-value>"
+
   defp sanitize({:normal, fun}) when is_function(fun), do: %Builtin{}
   defp sanitize({:variadic, fun, _identity}) when is_function(fun), do: %Builtin{}
 
@@ -535,6 +550,17 @@ defmodule PtcRunner.Lisp.Format do
   defp format_java_value(:negative_infinity), do: "##-Inf"
   defp format_java_value(:nan), do: "##NaN"
   defp format_java_value(value), do: Kernel.to_string(value)
+
+  defp sanitize_java_object(value, module, profile, class_name) do
+    if module.valid?(value) do
+      %JavaDisplay{
+        identity: {:object, profile, value},
+        label: "#java[#{class_name} #{module.canonical(value)}]"
+      }
+    else
+      "#<invalid-java-value>"
+    end
+  end
 
   # Extract parameter name from pattern AST
   defp extract_param_name({:var, name}), do: Kernel.to_string(name)

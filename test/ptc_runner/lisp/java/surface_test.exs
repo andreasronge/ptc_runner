@@ -77,7 +77,7 @@ defmodule PtcRunner.Lisp.Java.SurfaceTest do
              "Java overload route points at missing Env binding #{inspect(binding)}"
     end
 
-    assert Enum.count(Surface.overloads(), &match?({:dispatch, _}, &1.route)) == 27
+    assert Enum.count(Surface.overloads(), &match?({:dispatch, _}, &1.route)) == 46
 
     assert %{route: {:dispatch, :boolean_parse_boolean}} =
              Enum.find(Surface.overloads(), &(&1.overload_id == :boolean_parse_boolean_string))
@@ -116,7 +116,20 @@ defmodule PtcRunner.Lisp.Java.SurfaceTest do
                  :math_pow,
                  :math_round,
                  :math_sqrt,
-                 :system_current_time_millis
+                 :system_current_time_millis,
+                 :local_date_parse,
+                 :local_date_to_epoch_day,
+                 :local_date_plus_days,
+                 :local_date_minus_days,
+                 :local_date_is_before,
+                 :local_date_is_after,
+                 :instant_parse,
+                 :instant_is_before,
+                 :instant_is_after,
+                 :instant_to_epoch_milli,
+                 :duration_between,
+                 :duration_to_millis,
+                 :duration_to_days
                ] ->
             assert Surface.closed_dispatch_reference?(reference.reference_id)
             assert :error = Surface.legacy_binding(namespace, member)
@@ -307,26 +320,6 @@ defmodule PtcRunner.Lisp.Java.SurfaceTest do
 
     assert {:error, errors} = validate(invalid_namespace)
     assert Enum.any?(errors, &String.contains?(&1, "legacy binding :missing does not exist"))
-
-    duration_index = Enum.find_index(manifest.namespaces, &(&1.namespace == :Duration))
-    duration = Enum.at(manifest.namespaces, duration_index)
-    [between] = duration.members
-    wrong_route = %{between | legacy_binding: :sqrt}
-
-    invalid_existing =
-      put_in(
-        manifest.namespaces,
-        List.replace_at(manifest.namespaces, duration_index, %{
-          duration
-          | members: [wrong_route]
-        })
-      )
-
-    assert {:error, errors} = validate(invalid_existing)
-
-    assert Enum.any?(errors, fn error ->
-             String.contains?(error, "reference route must be :\"Duration/between\", got :sqrt")
-           end)
 
     wrong_existing_route =
       replace_overload(manifest, :duration_between_temporal, fn overload ->
@@ -800,22 +793,6 @@ defmodule PtcRunner.Lisp.Java.SurfaceTest do
 
     assert {:error, errors} = validate(coordinated_downgrade)
     assert Enum.any?(errors, &String.contains?(&1, "JVM descriptor coverage"))
-
-    missing_alias_rationale =
-      replace_overload(manifest, :instant_get_time_alias_0, fn overload ->
-        %{overload | divergence_ids: []}
-      end)
-
-    assert {:error, errors} = validate(missing_alias_rationale)
-    assert Enum.any?(errors, &String.contains?(&1, "requires divergence IDs"))
-
-    missing_extension_rationale =
-      replace_overload(manifest, :date_new_ptc_temporal, fn overload ->
-        %{overload | divergence_ids: []}
-      end)
-
-    assert {:error, errors} = validate(missing_extension_rationale)
-    assert Enum.any?(errors, &String.contains?(&1, "requires divergence IDs"))
   end
 
   test "coordinated manifest edits cannot erase independent Phase-0 attestations" do
@@ -843,7 +820,7 @@ defmodule PtcRunner.Lisp.Java.SurfaceTest do
     coordinated_divergence_removal =
       manifest
       |> replace_overload(
-        :date_new_long,
+        :date_new_string,
         &%{&1 | divergence_ids: []}
       )
       |> replace_audit_target(
@@ -853,7 +830,7 @@ defmodule PtcRunner.Lisp.Java.SurfaceTest do
           %{
             target
             | admitted_overload_divergences:
-                Map.put(target.admitted_overload_divergences, :date_new_long, [])
+                Map.put(target.admitted_overload_divergences, :date_new_string, [])
           }
         end
       )
@@ -874,7 +851,7 @@ defmodule PtcRunner.Lisp.Java.SurfaceTest do
     assert Enum.any?(errors, &String.contains?(&1, "audit rationale"))
 
     removed_known_divergence =
-      replace_overload(manifest, :date_new_long, fn overload ->
+      replace_overload(manifest, :date_new_string, fn overload ->
         %{overload | divergence_ids: []}
       end)
 
@@ -938,50 +915,6 @@ defmodule PtcRunner.Lisp.Java.SurfaceTest do
                Atom.to_string(overload.overload_id)
              })
     end
-  end
-
-  test "PTC-only overloads have unique semantic identities" do
-    manifest = Surface.manifest()
-    original = Enum.find(manifest.overloads, &(&1.overload_id == :instant_get_time_alias_0))
-    duplicate = %{original | overload_id: :instant_get_time_alias_duplicate}
-
-    references =
-      Enum.map(manifest.references, fn reference ->
-        if reference.reference_id == :instant_get_time_alias do
-          %{reference | overload_ids: reference.overload_ids ++ [duplicate.overload_id]}
-        else
-          reference
-        end
-      end)
-
-    audits =
-      Map.update!(manifest.audits, :java_time_instant_audit, fn rows ->
-        Enum.map(rows, fn row ->
-          if row.reference_id == :instant_get_time_alias do
-            %{
-              row
-              | admitted_overload_divergences:
-                  Map.put(
-                    row.admitted_overload_divergences,
-                    duplicate.overload_id,
-                    duplicate.divergence_ids
-                  )
-            }
-          else
-            row
-          end
-        end)
-      end)
-
-    invalid = %{
-      manifest
-      | references: references,
-        overloads: manifest.overloads ++ [duplicate],
-        audits: audits
-    }
-
-    assert {:error, errors} = validate(invalid)
-    assert Enum.any?(errors, &String.contains?(&1, "duplicate Java overload identity"))
   end
 
   @tag :tmp_dir
@@ -1058,17 +991,14 @@ defmodule PtcRunner.Lisp.Java.SurfaceTest do
     end
   end
 
-  test "interop documentation identifies intentional PTC aliases" do
+  test "interop documentation identifies class-owned temporal methods" do
     get_time = Enum.find(Surface.interop_entries(), &(&1.name == ".getTime"))
     is_before = Enum.find(Surface.interop_entries(), &(&1.name == ".isBefore"))
     is_after = Enum.find(Surface.interop_entries(), &(&1.name == ".isAfter"))
 
-    assert get_time.notes =~ "PTC compatibility alias"
-    assert get_time.notes =~ "GAP-J04"
-    assert is_before.notes =~ "PTC compatibility alias"
-    assert is_before.notes =~ "GAP-J20"
-    assert is_after.notes =~ "PTC compatibility alias"
-    assert is_after.notes =~ "GAP-J20"
+    assert get_time.notes == "Owned only by java.util.Date."
+    assert is_before.notes =~ "LocalDate and Instant"
+    assert is_after.notes =~ "LocalDate and Instant"
   end
 
   test "presentation rows cannot omit references from a shared Java spelling or route" do

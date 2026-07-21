@@ -646,7 +646,7 @@
     %{
       name: "compare",
       description:
-        "Numeric comparison: `-1` if `x < y`, `0` if `x == y`, `1` if `x > y`. Only supports numbers in PTC-Lisp.",
+        "Total comparison: `-1` if `x < y`, `0` if `x == y`, `1` if `x > y`; same-class Java temporal values use their Java natural order, and NaN is unordered.",
       binding: :normal,
       category: :core,
       dispatch: :env,

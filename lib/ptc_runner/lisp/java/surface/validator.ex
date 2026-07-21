@@ -842,6 +842,11 @@ defmodule PtcRunner.Lisp.Java.Surface.Validator do
        do: true
 
   defp descriptor_type_matches?(:instant, {:object, "java/time/Instant"}), do: true
+
+  # Duration.between is admitted for Instant values only even though the JVM
+  # declaration accepts the wider Temporal interface.
+  defp descriptor_type_matches?(:instant, {:object, "java/time/temporal/Temporal"}), do: true
+
   defp descriptor_type_matches?(:duration, {:object, "java/time/Duration"}), do: true
 
   defp descriptor_type_matches?(:temporal, {:object, "java/time/temporal/Temporal"}),
@@ -1701,11 +1706,33 @@ defmodule PtcRunner.Lisp.Java.Surface.Validator do
       end)
       |> MapSet.new()
 
+    closed_source_routes =
+      manifest.references
+      |> Enum.filter(fn reference ->
+        Enum.all?(reference.overload_ids, fn overload_id ->
+          Enum.any?(manifest.overloads, fn overload ->
+            overload.overload_id == overload_id and match?({:dispatch, _}, overload.route)
+          end)
+        end)
+      end)
+      |> Enum.flat_map(fn
+        %{kind: :instance, member: member, reference_id: reference_id} ->
+          [{".#{member}", reference_id}]
+
+        %{kind: :constructor, spellings: spellings, reference_id: reference_id} ->
+          Enum.map(spellings, &{&1, reference_id})
+
+        _reference ->
+          []
+      end)
+      |> MapSet.new()
+
     Enum.reduce(manifest.references, errors, fn reference, acc ->
       Enum.reduce(reference.spellings, acc, fn spelling, inner ->
         routes = if String.contains?(spelling, "/"), do: namespace_routes, else: legacy_routes
 
-        if MapSet.member?(routes, {spelling, reference.reference_id}) do
+        if MapSet.member?(routes, {spelling, reference.reference_id}) or
+             MapSet.member?(closed_source_routes, {spelling, reference.reference_id}) do
           inner
         else
           [

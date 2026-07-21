@@ -6,23 +6,22 @@
       divergence_ids: []
     },
     date_get_time_0: %{attestation: :jvm, descriptor: "()J", divergence_ids: []},
-    date_is_after_alias_date: %{
-      attestation: :ptc_only,
-      descriptor: nil,
-      divergence_ids: ["GAP-J20"]
+    date_after_date: %{
+      attestation: :jvm,
+      descriptor: "(Ljava/util/Date;)Z",
+      divergence_ids: []
     },
-    date_is_before_alias_date: %{
-      attestation: :ptc_only,
-      descriptor: nil,
-      divergence_ids: ["GAP-J20"]
+    date_before_date: %{
+      attestation: :jvm,
+      descriptor: "(Ljava/util/Date;)Z",
+      divergence_ids: []
     },
     date_new_0: %{attestation: :jvm, descriptor: "()V", divergence_ids: []},
-    date_new_long: %{attestation: :jvm, descriptor: "(J)V", divergence_ids: ["GAP-J03"]},
-    date_new_ptc_temporal: %{attestation: :ptc_only, descriptor: nil, divergence_ids: ["GAP-J21"]},
+    date_new_long: %{attestation: :jvm, descriptor: "(J)V", divergence_ids: []},
     date_new_string: %{
       attestation: :jvm,
       descriptor: "(Ljava/lang/String;)V",
-      divergence_ids: ["GAP-J06", "GAP-J11"]
+      divergence_ids: ["DIV-51"]
     },
     double_nan_field: %{attestation: :jvm, descriptor: "D", divergence_ids: []},
     double_negative_infinity_field: %{attestation: :jvm, descriptor: "D", divergence_ids: []},
@@ -36,7 +35,7 @@
       attestation: :jvm,
       descriptor:
         "(Ljava/time/temporal/Temporal;Ljava/time/temporal/Temporal;)Ljava/time/Duration;",
-      divergence_ids: ["GAP-J19"]
+      divergence_ids: ["DIV-52"]
     },
     duration_to_days_0: %{attestation: :jvm, descriptor: "()J", divergence_ids: []},
     duration_to_millis_0: %{attestation: :jvm, descriptor: "()J", divergence_ids: []},
@@ -45,11 +44,7 @@
       descriptor: "(Ljava/lang/String;)F",
       divergence_ids: []
     },
-    instant_get_time_alias_0: %{
-      attestation: :ptc_only,
-      descriptor: nil,
-      divergence_ids: ["GAP-J04"]
-    },
+    instant_to_epoch_milli_0: %{attestation: :jvm, descriptor: "()J", divergence_ids: []},
     instant_is_after_instant: %{
       attestation: :jvm,
       descriptor: "(Ljava/time/Instant;)Z",
@@ -63,7 +58,7 @@
     instant_parse_char_sequence: %{
       attestation: :jvm,
       descriptor: "(Ljava/lang/CharSequence;)Ljava/time/Instant;",
-      divergence_ids: ["GAP-J06"]
+      divergence_ids: []
     },
     integer_parse_int_string: %{
       attestation: :jvm,
@@ -83,17 +78,17 @@
     local_date_minus_days_long: %{
       attestation: :jvm,
       descriptor: "(J)Ljava/time/LocalDate;",
-      divergence_ids: ["GAP-J12"]
+      divergence_ids: []
     },
     local_date_parse_char_sequence: %{
       attestation: :jvm,
       descriptor: "(Ljava/lang/CharSequence;)Ljava/time/LocalDate;",
-      divergence_ids: ["GAP-J06"]
+      divergence_ids: []
     },
     local_date_plus_days_long: %{
       attestation: :jvm,
       descriptor: "(J)Ljava/time/LocalDate;",
-      divergence_ids: ["GAP-J12"]
+      divergence_ids: []
     },
     local_date_to_epoch_day_0: %{attestation: :jvm, descriptor: "()J", divergence_ids: []},
     long_parse_long_string: %{

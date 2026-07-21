@@ -14,6 +14,59 @@ Tracked differences between PTC-Lisp and Clojure semantics, discovered via confo
 | **P1** | Missing feature that limits expressiveness; workarounds exist |
 | **P2** | Edge case or minor divergence; rarely encountered in practice |
 
+### DIV-51: `java.util.Date(String)` uses deterministic bounded parsing
+
+| Field | Value |
+|-------|-------|
+| **Priority** | n/a |
+| **Status** | by design |
+| **Source** | Manual conformance case `java/util-date-deterministic-two-digit-year-001` |
+
+```clojure
+;; JVM Clojure (result changes with Date's moving 80-year window)
+(java.util.Date. "Jan 1 00:00:00 GMT 20") ;=> a java.util.Date
+
+;; PTC-Lisp
+(java.util.Date. "Jan 1 00:00:00 GMT 20") ;=> java_domain_error
+```
+
+**Rationale:** Java's deprecated string constructor uses the host default time
+zone when no zone is present and interprets two-digit years through a moving
+80-year window. PTC-Lisp admits a bounded legacy English grammar, requires an
+explicit year with at least four digits, validates weekday and month tokens as
+recognized English names, admits only dates on or after Java's Gregorian cutover
+(`1582-10-15`), and interprets an omitted zone as UTC. Excluding the historical
+hybrid Julian/Gregorian range keeps parsing deterministic without implementing
+the deprecated parser's calendar cutover rules. The admitted post-cutover forms
+preserve Java behavior.
+
+### DIV-52: `Duration/between` admits only `Instant` temporal values
+
+| Field | Value |
+|-------|-------|
+| **Priority** | n/a |
+| **Status** | by design |
+| **Source** | JVM/PTC oracle case `duration-between-local-date-boundary` |
+
+```clojure
+;; JVM Clojure selects Duration.between(Temporal, Temporal), then LocalDate
+;; cannot supply seconds and the method raises UnsupportedTemporalTypeException.
+(Duration/between (LocalDate/parse "2024-01-01")
+                  (LocalDate/parse "2024-01-02"))
+
+;; PTC-Lisp rejects the values during closed overload selection.
+(Duration/between (LocalDate/parse "2024-01-01")
+                  (LocalDate/parse "2024-01-02")) ;=> java_type_error
+```
+
+**Rationale:** PTC-Lisp exposes a bounded temporal profile rather than Java's
+open `Temporal` interface. `Duration/between` admits native `Instant` values,
+the only supported temporal class in this profile that supplies the seconds
+and nanoseconds required by `Duration`. Rejecting `LocalDate` during closed
+selection avoids pretending that every future `Temporal` implementation is
+automatically authorized while preserving exact behavior for admitted
+`Instant` calls.
+
 ---
 
 ## 1. Semantics — Supported features with incorrect behavior
@@ -538,168 +591,70 @@ and returns a bounded Java type error for non-string, non-nil inputs.
 overload is a normal finite Java parser surface and should not be rejected as
 an unsupported arity while the one-argument parse methods are marked supported.
 
-### GAP-J03: `java.util.Date.` numeric constructor treats milliseconds as seconds
+### GAP-J03: Date numeric construction used seconds heuristics
 
 | Field | Value |
 |-------|-------|
 | **Priority** | P1 |
-| **Status** | open |
-| **Source** | Manual conformance cases `java/util-date-numeric-constructor-bug-001`, `java/util-date-single-millisecond-constructor-bug-001`, `java/util-date-negative-single-millisecond-constructor-bug-001`, `java/util-date-negative-numeric-constructor-bug-001` |
+| **Status** | **fixed** |
+| **Source** | Manual conformance cases java/util-date-*-constructor-bug-001 |
 
-```clojure
-;; Java / Clojure
-(.getTime (java.util.Date. 1000))   ;=> 1000
-(.getTime (java.util.Date. 1))      ;=> 1
-(.getTime (java.util.Date. -1))     ;=> -1
-(.getTime (java.util.Date. -1000))  ;=> -1000
-
-;; PTC-Lisp current behavior
-(.getTime (java.util.Date. 1000))   ;=> 1000000
-(.getTime (java.util.Date. 1))      ;=> 1000
-(.getTime (java.util.Date. -1))     ;=> -1000
-(.getTime (java.util.Date. -1000))  ;=> -1000000
-```
-
-**Decision:** BUG. `java.util.Date.` is a Java-shaped constructor; numeric
-arguments should be epoch milliseconds.
-
-### GAP-J04: `.getTime` is exposed on `Instant/parse` results
+Date(long) now interprets every admitted signed Java long as exact epoch
+milliseconds, including small and negative values. The seconds/milliseconds
+heuristic was deleted.
+### GAP-J04: getTime was exposed on Instant values
 
 | Field | Value |
 |-------|-------|
 | **Priority** | P1 |
-| **Status** | open |
-| **Source** | Manual conformance cases `java/instant-get-time-bug-001`, `java/instant-get-time-millis-bug-001`, `java/instant-get-time-offset-bug-001`, `java/instant-get-time-negative-bug-001`, `java/instant-get-time-nanos-bug-001` |
+| **Status** | **fixed** |
+| **Source** | Manual conformance cases java/instant-get-time-*-bug-001 |
 
-```clojure
-;; Java / Clojure
-(.getTime (java.time.Instant/parse "1970-01-01T00:00:01Z"))
-;=> NoSuchFieldException
-(.getTime (java.time.Instant/parse "1970-01-01T00:00:00.123Z"))
-;=> NoSuchFieldException
-(.getTime (java.time.Instant/parse "1970-01-01T01:00:00+01:00"))
-;=> NoSuchFieldException
-(.getTime (java.time.Instant/parse "1969-12-31T23:59:59Z"))
-;=> NoSuchFieldException
-(.getTime (java.time.Instant/parse "1970-01-01T00:00:00.999999999Z"))
-;=> NoSuchFieldException
-
-;; PTC-Lisp current behavior
-(.getTime (java.time.Instant/parse "1970-01-01T00:00:01Z")) ;=> 1000
-(.getTime (java.time.Instant/parse "1970-01-01T00:00:00.123Z")) ;=> 123
-(.getTime (java.time.Instant/parse "1970-01-01T01:00:00+01:00")) ;=> 0
-(.getTime (java.time.Instant/parse "1969-12-31T23:59:59Z")) ;=> -1000
-(.getTime (java.time.Instant/parse "1970-01-01T00:00:00.999999999Z")) ;=> 999
-```
-
-**Decision:** BUG/audit mismatch. Java `Instant` uses `toEpochMilli`, not
-`getTime`. If PTC keeps `.getTime` as a convenience on DateTime values, it
-should be documented as a PTC extension or Java `Date` compatibility helper,
-not as `java.time.Instant` compatibility.
-
-### GAP-J20: `java.util.Date` exposes non-Java `.isBefore`/`.isAfter` methods
+Instant and Date now retain distinct native classes. getTime is owned only by
+java.util.Date; Instant owns toEpochMilli. Calling getTime on an Instant is
+rejected by receiver-class dispatch.
+### GAP-J20: Date exposed non-Java isBefore and isAfter methods
 
 | Field | Value |
 |-------|-------|
 | **Priority** | P2 |
-| **Status** | **by design (DIV)** |
-| **Source** | Manual conformance cases `java/util-date-is-before-method-bug-001`, `java/util-date-is-after-method-bug-001` |
+| **Status** | **fixed** |
+| **Source** | Manual conformance cases java/util-date-is-*-method-bug-001 |
 
-**Reclassified (2026-06-01 classification audit):** BUG → **DIV**. PTC models `java.util.Date`/`Instant`/`LocalDateTime` as a single DateTime value, so `.isBefore`/`.isAfter` are exposed across them by design (the temporal-value-unification value model), not a Java per-class artifact.
-
-```clojure
-;; Java / Clojure
-(.isBefore (java.util.Date. 0) (java.util.Date. 1000))
-;=> IllegalArgumentException
-(.isAfter (java.util.Date. 1000) (java.util.Date. 0))
-;=> IllegalArgumentException
-
-;; PTC-Lisp current behavior
-(.isBefore (java.util.Date. 0) (java.util.Date. 1000)) ;=> true
-(.isAfter (java.util.Date. 1000) (java.util.Date. 0)) ;=> true
-```
-
-**Decision:** BUG. `java.util.Date` uses `.before` and `.after`; `.isBefore`
-and `.isAfter` are `java.time` method names. Java-shaped dot calls should keep
-Java receiver semantics unless explicitly reclassified as PTC extensions.
-
-### GAP-J21: `java.util.Date.` accepts existing PTC temporal values
+Date now owns the Java before and after methods. isBefore and isAfter are owned
+only by LocalDate and Instant, and cannot be selected for a Date receiver.
+### GAP-J21: Date accepted native temporal constructor extensions
 
 | Field | Value |
 |-------|-------|
 | **Priority** | P2 |
-| **Status** | **by design (extension)** |
-| **Source** | Manual conformance case `java/util-date-native-temporal-extension-001` and runtime interop tests for `DateTime`, `NaiveDateTime`, and `Date` arguments |
+| **Status** | **fixed** |
+| **Source** | Manual conformance case java/util-date-native-temporal-extension-001 |
 
-Java has no `java.util.Date` constructor overload for PTC-Lisp's native
-temporal values. PTC-Lisp accepts those values directly so tool-provided dates
-and timestamps can be used without a stringify-and-parse round trip.
-
-**Decision:** Keep as a bounded PTC extension. It has no JVM descriptor and
-must remain explicitly classified so it cannot be mistaken for an attested
-Java constructor overload.
-
-### GAP-J18: `Instant.toEpochMilli` is unsupported
+The descriptorless Date constructor extension for host and PTC temporal values
+was removed. Date construction now has only the admitted JVM constructors:
+zero arguments, one long millisecond value, or one bounded legacy string.
+### GAP-J18: Instant.toEpochMilli was unsupported
 
 | Field | Value |
 |-------|-------|
 | **Priority** | P1 |
-| **Status** | **unsupported** |
-| **Source** | Manual conformance case `java/instant-to-epoch-milli-unsupported-bug-001` |
+| **Status** | **fixed** |
+| **Source** | Manual conformance case java/instant-to-epoch-milli-unsupported-bug-001 |
 
-**Reclassified (2026-06-01 classification audit):** BUG → **UNSUPPORTED**. `Instant.toEpochMilli` is simply not in PTC's implemented Java-method set (PTC raises `:unsupported_method` listing what it does support) — an unimplemented feature, not a wrong behavior on a supported one.
-
-```clojure
-;; Java / Clojure
-(.toEpochMilli (java.time.Instant/parse "1970-01-01T00:00:01Z")) ;=> 1000
-
-;; PTC-Lisp current behavior
-(.toEpochMilli (java.time.Instant/parse "1970-01-01T00:00:01Z")) ;=> unsupported_method
-```
-
-**Decision:** BUG/candidate gap. PTC-Lisp exposes `Instant/parse` and a
-non-Java `.getTime` convenience, but the actual Java `Instant` epoch-millisecond
-method is missing. Java-shaped temporal APIs should prefer Java's method names
-and semantics.
-
-### GAP-J19: `Duration.between` accepts `java.util.Date` inputs
+Instant.toEpochMilli is now a closed, descriptor-attested operation. It returns
+a Java long primitive and produces a bounded arithmetic condition when the
+result cannot fit in a signed Java long.
+### GAP-J19: Duration.between accepted Date inputs
 
 | Field | Value |
 |-------|-------|
 | **Priority** | P1 |
-| **Status** | open |
-| **Source** | Manual conformance cases `java/duration-between-date-instant-bug-001`, `java/duration-between-dates-bug-001` |
+| **Status** | **fixed** |
+| **Source** | Manual conformance cases java/duration-between-date-*-bug-001 |
 
-```clojure
-;; Java / Clojure
-(.toMillis (java.time.Duration/between
-  (java.util.Date. 0)
-  (java.time.Instant/parse "1970-01-01T00:00:01Z")))
-;=> ClassCastException
-
-(.toMillis (java.time.Duration/between
-  (java.util.Date. 0)
-  (java.util.Date. 0)))
-;=> ClassCastException
-
-;; PTC-Lisp current behavior
-(.toMillis (java.time.Duration/between
-  (java.util.Date. 0)
-  (java.time.Instant/parse "1970-01-01T00:00:01Z")))
-;=> 1000
-
-(.toMillis (java.time.Duration/between
-  (java.util.Date. 0)
-  (java.util.Date. 0)))
-;=> 0
-```
-
-**Decision:** BUG. `Duration/between` is a Java-shaped class call, so Java
-type semantics should apply. Java `Duration.between` operates on
-`java.time.temporal.Temporal` values; `java.util.Date` is not a `Temporal` and
-raises through Clojure Java interop. PTC-Lisp should not silently coerce Date
-values in a Java-named API.
-
+Duration.between now accepts two native Instants only. Date, LocalDate, host
+DateTime, and mixed-class inputs fail type selection before handler invocation.
 ### GAP-J05: Supported Java string methods miss overloads
 
 | Field | Value |
@@ -829,101 +784,42 @@ raise — the divergence only covers values PTC-Lisp genuinely models as strings
 The UTF-16-vs-grapheme index-unit difference is a separate axis tracked under
 GAP-J09.
 
-### GAP-J06: Java temporal parsers/constructors accept date strings Java rejects
+### GAP-J06: Temporal parsers accepted inputs outside their Java classes
 
 | Field | Value |
 |-------|-------|
 | **Priority** | P1 |
-| **Status** | open |
-| **Source** | Manual conformance cases `java/instant-parse-date-only-bug-001`, `java/instant-parse-no-zone-bug-001`, `java/instant-parse-no-zone-non-midnight-bug-001`, `java/local-date-parse-datetime-bug-001`, `java/local-date-parse-datetime-non-midnight-bug-001`, `java/util-date-string-constructor-bug-001` |
+| **Status** | **fixed** |
+| **Source** | Manual Instant, LocalDate, and Date parser regression cases |
 
-```clojure
-;; Java / Clojure
-(java.time.Instant/parse "2024-01-02")      ;=> DateTimeParseException
-(java.time.Instant/parse "2024-01-02T00:00:00") ;=> DateTimeParseException
-(java.time.Instant/parse "2024-01-02T03:04:05") ;=> DateTimeParseException
-(java.time.LocalDate/parse "2024-01-02T00:00:00") ;=> DateTimeParseException
-(java.time.LocalDate/parse "2024-01-02T03:04:05") ;=> DateTimeParseException
-(.getTime (java.util.Date. "2024-01-02"))   ;=> IllegalArgumentException
-
-;; PTC-Lisp current behavior
-(java.time.Instant/parse "2024-01-02")      ;=> LocalDate value
-(java.time.Instant/parse "2024-01-02T00:00:00") ;=> DateTime value
-(java.time.Instant/parse "2024-01-02T03:04:05") ;=> DateTime value
-(java.time.LocalDate/parse "2024-01-02T00:00:00") ;=> DateTime value
-(java.time.LocalDate/parse "2024-01-02T03:04:05") ;=> DateTime value
-(.getTime (java.util.Date. "2024-01-02"))   ;=> 1704153600000
-```
-
-**Decision:** BUG. These are Java-shaped constructor/parser calls. Java
-semantics should win, including rejection of inputs outside the Java method's
-accepted format.
-
-### GAP-J11: `java.util.Date.` rejects Java-accepted legacy date strings
+LocalDate.parse now returns LocalDate only and rejects date-time text.
+Instant.parse now returns Instant only and requires an offset or UTC marker.
+The bare parse auto-dispatch alias was removed. Date string construction no
+longer accepts ISO LocalDate or host temporal shortcut forms.
+### GAP-J11: Date rejected an admitted Java legacy string form
 
 | Field | Value |
 |-------|-------|
 | **Priority** | P2 |
-| **Status** | open |
-| **Source** | Manual conformance case `java/util-date-legacy-string-constructor-bug-001` |
+| **Status** | **fixed** |
+| **Source** | Manual case java/util-date-legacy-string-constructor-bug-001 |
 
-```clojure
-;; Java / Clojure
-(.getTime (java.util.Date. "Thu Jan 01 00:00:01 UTC 1970")) ;=> 1000
-
-;; PTC-Lisp current behavior
-(.getTime (java.util.Date. "Thu Jan 01 00:00:01 UTC 1970")) ;=> type_error
-```
-
-**Decision:** BUG. `java.util.Date.` is exposed as a Java-shaped constructor,
-so Java constructor semantics should win for accepted finite inputs. The
-constructor is deprecated on the JVM, but while it remains in the supported
-audit surface it should either match Java's accepted legacy string forms or be
-reclassified away from exact Java compatibility.
-
-### GAP-J12: `LocalDate` day arithmetic rejects numeric day counts Clojure accepts
+The bounded Date string constructor now accepts the attested legacy English
+form, including weekday, month name, clock time with optional seconds, recognized zone, and
+four-digit year. Java's host-dependent default timezone and moving two-digit
+year window remain intentionally excluded under DIV-51.
+### GAP-J12: LocalDate day arithmetic rejected Clojure numeric coercion
 
 | Field | Value |
 |-------|-------|
 | **Priority** | P2 |
-| **Status** | open |
-| **Source** | Manual conformance cases `java/local-date-plus-days-float-bug-001`, `java/local-date-plus-days-fractional-bug-001`, `java/local-date-plus-days-nan-bug-001`, `java/local-date-minus-days-float-bug-001`, `java/local-date-minus-days-fractional-bug-001`, `java/local-date-minus-days-nan-bug-001` |
+| **Status** | **fixed** |
+| **Source** | Manual LocalDate plusDays and minusDays numeric cases |
 
-```clojure
-;; Java / Clojure
-(.toEpochDay (.plusDays (java.time.LocalDate/parse "2024-01-02") 1.0))
-;=> 19725
-(.toEpochDay (.plusDays (java.time.LocalDate/parse "2024-01-01") 1.9))
-;=> 19724
-(.toEpochDay (.plusDays (java.time.LocalDate/parse "2024-01-01") ##NaN))
-;=> 19723
-(.toEpochDay (.minusDays (java.time.LocalDate/parse "2024-01-02") 1.0))
-;=> 19723
-(.toEpochDay (.minusDays (java.time.LocalDate/parse "2024-01-01") 1.9))
-;=> 19722
-(.toEpochDay (.minusDays (java.time.LocalDate/parse "2024-01-01") ##NaN))
-;=> 19723
-
-;; PTC-Lisp current behavior
-(.toEpochDay (.plusDays (java.time.LocalDate/parse "2024-01-02") 1.0))
-;=> type_error
-(.toEpochDay (.plusDays (java.time.LocalDate/parse "2024-01-01") 1.9))
-;=> type_error
-(.toEpochDay (.plusDays (java.time.LocalDate/parse "2024-01-01") ##NaN))
-;=> type_error
-(.toEpochDay (.minusDays (java.time.LocalDate/parse "2024-01-02") 1.0))
-;=> type_error
-(.toEpochDay (.minusDays (java.time.LocalDate/parse "2024-01-01") 1.9))
-;=> type_error
-(.toEpochDay (.minusDays (java.time.LocalDate/parse "2024-01-01") ##NaN))
-;=> type_error
-```
-
-**Decision:** BUG. `.plusDays` and `.minusDays` are exposed as Java-shaped
-methods and Clojure's Java interop coerces finite numeric arguments for the
-`long` parameter. PTC-Lisp should either match that invocation behavior or
-document a deliberate narrower numeric contract.
-
+The single admitted Java long overload now applies Clojure Java-interoperability
+coercion for floating numeric values. In-range fractional values truncate toward
+zero and NaN becomes zero. Infinities and finite doubles outside the signed-long
+range are rejected during overload selection.
 ### GAP-J09: Java string methods use grapheme indexes for non-BMP characters
 
 | Field | Value |

@@ -339,15 +339,6 @@ defmodule PtcRunner.Lisp.Runtime.Builtins do
       # ============================================================
       # Interop
       # ============================================================
-      {:"java.util.Date.",
-       {:multi_arity, :"java.util.Date.", {&Runtime.java_util_date/0, &Runtime.java_util_date/1}}},
-      {:".getTime", {:normal, &Runtime.dot_get_time/1}},
-      {:".toEpochDay", {:normal, &Runtime.dot_to_epoch_day/1}},
-      {:".plusDays", {:normal, &Runtime.dot_plus_days/2}},
-      {:".minusDays", {:normal, &Runtime.dot_minus_days/2}},
-      {:"Duration/between", {:normal, &Runtime.duration_between/2}},
-      {:".toMillis", {:normal, &Runtime.dot_to_millis/1}},
-      {:".toDays", {:normal, &Runtime.dot_to_days/1}},
       {:".contains", {:normal, &Runtime.dot_contains/2}},
       {:".indexOf",
        {:multi_arity, :".indexOf", {&Runtime.dot_index_of/2, &Runtime.dot_index_of/3}}},
@@ -358,10 +349,7 @@ defmodule PtcRunner.Lisp.Runtime.Builtins do
       {:".substring",
        {:multi_arity, :".substring", {&Runtime.dot_substring/2, &Runtime.dot_substring/3}}},
       {:".startsWith", {:normal, &Runtime.dot_starts_with/2}},
-      {:".endsWith", {:normal, &Runtime.dot_ends_with/2}},
-      {:".isBefore", {:normal, &Runtime.dot_is_before/2}},
-      {:".isAfter", {:normal, &Runtime.dot_is_after/2}},
-      {:parse, {:normal, &Runtime.parse_temporal/1}}
+      {:".endsWith", {:normal, &Runtime.dot_ends_with/2}}
     ]
   end
 end

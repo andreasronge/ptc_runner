@@ -1,8 +1,11 @@
 defmodule PtcRunner.Lisp.CoreToSourceTest do
   use ExUnit.Case, async: true
 
+  alias PtcRunner.Lisp
   alias PtcRunner.Lisp.{Analyze, CoreToSource, Result}
   alias PtcRunner.Lisp.Java.Callable, as: JavaCallable
+  alias PtcRunner.Lisp.Java.Time.Instant, as: JavaInstant
+  alias PtcRunner.Lisp.Java.Time.LocalDate, as: JavaLocalDate
   alias PtcRunner.Lisp.Parser
 
   doctest PtcRunner.Lisp.CoreToSource
@@ -386,6 +389,21 @@ defmodule PtcRunner.Lisp.CoreToSourceTest do
                CoreToSource.export_namespace(%{"result" => %Result{return: callable}})
     end
 
+    test "rejects native Java temporal values" do
+      {:ok, local_date} =
+        JavaLocalDate.parse(["2024-01-02"])
+
+      {:ok, instant} =
+        JavaInstant.parse(["2024-01-02T03:04:05Z"])
+
+      assert {:error,
+              {:non_exportable_java_value, [{:binding, "dates"}, {:index, 0}], :local_date}} =
+               CoreToSource.export_namespace(%{"dates" => [local_date]})
+
+      assert {:error, {:non_exportable_java_value, [{:binding, "instant"}], :instant}} =
+               CoreToSource.export_namespace(%{"instant" => instant})
+    end
+
     test "rejects malformed Java struct-shaped maps without destructuring them" do
       malformed_callable = %{__struct__: JavaCallable}
       malformed_primitive = %{__struct__: PtcRunner.Lisp.Java.Primitive, kind: :int}
@@ -401,9 +419,41 @@ defmodule PtcRunner.Lisp.CoreToSourceTest do
   test "formats closed Java instance and direct-dot nodes with Java source spelling" do
     assert CoreToSource.format(
              {:java_instance, :string_contains, {:var, :text}, [{:string, "x"}]}
-           ) == ~S|(.contains text "x")|
+           ) == ~S|(java.lang.String/contains text "x")|
 
     assert CoreToSource.format({:java_dot, :is_before, {:var, :value}, [{:var, :other}]}) ==
              ~S|(.isBefore value other)|
+  end
+
+  test "export and hydration preserve a fixed Java receiver class" do
+    assert {:ok, first} =
+             Lisp.run(~S|(def local-before (fn [left right] (LocalDate/isBefore left right)))|)
+
+    assert {:ok, source} = CoreToSource.export_namespace(first.memory)
+    assert source =~ "LocalDate/isBefore"
+
+    assert {:ok, hydrated} = Lisp.run(source)
+
+    assert {:error, %{fail: %{reason: :java_type_error}}} =
+             Lisp.run(
+               ~S|(local-before (Instant/parse "2024-01-01T00:00:00Z") (Instant/parse "2024-01-02T00:00:00Z"))|,
+               memory: hydrated.memory
+             )
+  end
+
+  test "export and hydration preserve the receiver class of a first-class Java instance method" do
+    assert {:ok, first} =
+             Lisp.run(~S|(def get-local-before (fn [] LocalDate/isBefore))|)
+
+    assert {:ok, source} = CoreToSource.export_namespace(first.memory)
+    assert source =~ "LocalDate/isBefore"
+
+    assert {:ok, hydrated} = Lisp.run(source)
+
+    assert {:ok, %{return: true}} =
+             Lisp.run(
+               ~S|(let [before (get-local-before)] (before (LocalDate/parse "2024-01-01") (LocalDate/parse "2024-01-02")))|,
+               memory: hydrated.memory
+             )
   end
 end

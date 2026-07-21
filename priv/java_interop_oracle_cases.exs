@@ -29,10 +29,6 @@ fast = fn overload_id, receiver, arguments, expected, divergence_ids ->
   )
 end
 
-ptc_only = fn overload_id, receiver, arguments, expected, divergence_ids ->
-  fixture.(overload_id, :ptc_only, [:ptc_only], receiver, arguments, expected, divergence_ids)
-end
-
 string = fn text -> value.(:string, text) end
 
 repeated_string = fn prefix, repeated, count, suffix ->
@@ -441,8 +437,24 @@ date = fn milliseconds -> value.(:date, milliseconds) end
     nil,
     [string.("2024-01-02")],
     value.(:local_date, "2024-01-02"),
-    ["GAP-J06"]
+    []
   ),
+  jvm.(
+    :local_date_parse_char_sequence,
+    nil,
+    [string.("+00000-01-01")],
+    value.(:local_date, "0000-01-01"),
+    []
+  )
+  |> Map.put(:case_id, "local-date-parse-positive-zero-extended-year"),
+  jvm.(
+    :local_date_parse_char_sequence,
+    nil,
+    [string.("not-a-date")],
+    error.("java.time.format.DateTimeParseException"),
+    []
+  )
+  |> Map.put(:case_id, "local-date-parse-invalid"),
   jvm.(
     :local_date_to_epoch_day_0,
     local_date.("1970-01-02"),
@@ -455,15 +467,23 @@ date = fn milliseconds -> value.(:date, milliseconds) end
     local_date.("2024-01-02"),
     [long.(2)],
     value.(:local_date, "2024-01-04"),
-    ["GAP-J12"]
+    []
   ),
   jvm.(
     :local_date_minus_days_long,
     local_date.("2024-01-02"),
     [long.(2)],
     value.(:local_date, "2023-12-31"),
-    ["GAP-J12"]
+    []
   ),
+  jvm.(
+    :local_date_minus_days_long,
+    local_date.("1970-01-01"),
+    [long.(-9_223_372_036_854_775_808)],
+    error.("java.time.DateTimeException"),
+    []
+  )
+  |> Map.put(:case_id, "local-date-minus-days-long-min-at-epoch"),
   jvm.(
     :local_date_is_before_chrono_local_date,
     local_date.("2024-01-01"),
@@ -483,8 +503,56 @@ date = fn milliseconds -> value.(:date, milliseconds) end
     nil,
     [string.("2024-01-02T03:04:05.006Z")],
     value.(:instant, "2024-01-02T03:04:05.006Z"),
-    ["GAP-J06"]
+    []
   ),
+  jvm.(
+    :instant_parse_char_sequence,
+    nil,
+    [string.("+00000-01-01T00:00:00Z")],
+    value.(:instant, "0000-01-01T00:00:00Z"),
+    []
+  )
+  |> Map.put(:case_id, "instant-parse-positive-zero-extended-year"),
+  jvm.(
+    :instant_parse_char_sequence,
+    nil,
+    [string.("1970-01-01T00:00:00.Z")],
+    value.(:instant, "1970-01-01T00:00:00Z"),
+    []
+  )
+  |> Map.put(:case_id, "instant-parse-empty-fraction"),
+  jvm.(
+    :instant_parse_char_sequence,
+    nil,
+    [string.("1970-01-01T00:00:00+00")],
+    error.("java.time.format.DateTimeParseException"),
+    []
+  )
+  |> Map.put(:case_id, "instant-parse-hour-offset"),
+  jvm.(
+    :instant_parse_char_sequence,
+    nil,
+    [string.("1970-01-01T00:00:00+0000")],
+    error.("java.time.format.DateTimeParseException"),
+    []
+  )
+  |> Map.put(:case_id, "instant-parse-compact-minute-offset"),
+  jvm.(
+    :instant_parse_char_sequence,
+    nil,
+    [string.("1970-01-01T00:00:00+000000")],
+    error.("java.time.format.DateTimeParseException"),
+    []
+  )
+  |> Map.put(:case_id, "instant-parse-compact-second-offset"),
+  jvm.(
+    :instant_parse_char_sequence,
+    nil,
+    [string.("not-an-instant")],
+    error.("java.time.format.DateTimeParseException"),
+    []
+  )
+  |> Map.put(:case_id, "instant-parse-invalid"),
   jvm.(
     :instant_is_before_instant,
     instant.("2024-01-01T00:00:00Z"),
@@ -499,20 +567,30 @@ date = fn milliseconds -> value.(:date, milliseconds) end
     value.(:boolean, "true"),
     []
   ),
-  ptc_only.(
-    :instant_get_time_alias_0,
+  jvm.(
+    :instant_to_epoch_milli_0,
     instant.("1970-01-01T00:00:01Z"),
     [],
     value.(:long, "1000"),
-    ["GAP-J04"]
+    []
   ),
   jvm.(
     :duration_between_temporal,
     nil,
     [instant.("2024-01-01T00:00:00Z"), instant.("2024-01-01T00:00:01.500Z")],
     value.(:duration, "PT1.5S"),
-    ["GAP-J19"]
+    ["DIV-52"]
   ),
+  jvm.(
+    :duration_between_temporal,
+    nil,
+    [local_date.("2024-01-01"), local_date.("2024-01-02")],
+    error.("java.time.temporal.UnsupportedTemporalTypeException"),
+    ["DIV-52"]
+  )
+  |> Map.put(:case_id, "duration-between-local-date-boundary")
+  |> Map.put(:ptc_expected, error.("java_type_error"))
+  |> Map.put(:boundary_probe, true),
   jvm.(
     :duration_to_millis_0,
     duration.("PT36H"),
@@ -520,38 +598,87 @@ date = fn milliseconds -> value.(:date, milliseconds) end
     value.(:long, "129600000"),
     []
   ),
+  jvm.(
+    :duration_to_millis_0,
+    duration.("PT-0.000000001S"),
+    [],
+    value.(:long, "0"),
+    []
+  )
+  |> Map.put(:case_id, "duration-to-millis-negative-submillisecond"),
+  jvm.(
+    :duration_to_millis_0,
+    duration.("PT2562047788015215H30M7S"),
+    [],
+    error.("java.lang.ArithmeticException"),
+    []
+  )
+  |> Map.put(:case_id, "duration-to-millis-overflow"),
   jvm.(:duration_to_days_0, duration.("PT36H"), [], value.(:long, "1"), []),
   jvm.(:date_new_0, nil, [], value.(:date, "<dynamic>"), [])
   |> Map.put(:normalizer, :type_only),
-  jvm.(:date_new_long, nil, [long.(1)], value.(:date, "1"), ["GAP-J03"]),
+  jvm.(:date_new_long, nil, [long.(1)], value.(:date, "1"), []),
   jvm.(
     :date_new_string,
     nil,
     [string.("Thu Jan 01 00:00:01 GMT 1970")],
     value.(:date, "1000"),
-    ["GAP-J06", "GAP-J11"]
+    ["DIV-51"]
   ),
-  ptc_only.(
-    :date_new_ptc_temporal,
+  jvm.(
+    :date_new_string,
     nil,
-    [local_date.("1970-01-02")],
-    value.(:date, "86400000"),
-    ["GAP-J21"]
-  ),
+    [string.(nil)],
+    error.("java.lang.IllegalArgumentException"),
+    ["DIV-51"]
+  )
+  |> Map.put(:case_id, "date-new-string-null"),
+  jvm.(
+    :date_new_string,
+    nil,
+    [string.("Wed, 8 Jan 2026 14:30 UTC")],
+    value.(:date, "1767882600000"),
+    ["DIV-51"]
+  )
+  |> Map.put(:case_id, "date-new-string-without-seconds"),
+  jvm.(
+    :date_new_string,
+    nil,
+    [string.("Thu Jan 01 00:00:01 1970")],
+    value.(:date, "1000"),
+    ["DIV-51"]
+  )
+  |> Map.put(:case_id, "date-new-string-without-zone"),
+  jvm.(
+    :date_new_string,
+    nil,
+    [string.("Nonsense Jan 01 1970")],
+    error.("java.lang.IllegalArgumentException"),
+    ["DIV-51"]
+  )
+  |> Map.put(:case_id, "date-new-string-invalid-weekday"),
+  jvm.(
+    :date_new_string,
+    nil,
+    [string.("Junk 01 1970")],
+    error.("java.lang.IllegalArgumentException"),
+    ["DIV-51"]
+  )
+  |> Map.put(:case_id, "date-new-string-invalid-month"),
   jvm.(:date_get_time_0, date.(1234), [], value.(:long, "1234"), []),
-  ptc_only.(
-    :date_is_before_alias_date,
+  jvm.(
+    :date_before_date,
     date.(0),
     [date.(1)],
     value.(:boolean, "true"),
-    ["GAP-J20"]
+    []
   ),
-  ptc_only.(
-    :date_is_after_alias_date,
+  jvm.(
+    :date_after_date,
     date.(1),
     [date.(0)],
     value.(:boolean, "true"),
-    ["GAP-J20"]
+    []
   ),
   jvm.(:math_abs_int, nil, [int.(-7)], value.(:int, "7"), []),
   jvm.(:math_abs_int, nil, [int.(-2_147_483_648)], value.(:int, "-2147483648"), [])

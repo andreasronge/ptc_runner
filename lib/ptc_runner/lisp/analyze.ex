@@ -1361,16 +1361,12 @@ defmodule PtcRunner.Lisp.Analyze do
   # Lookup a `(namespace/func)` form against the qualified-env-key namespaces.
   # Returns:
   #   - `{:ok, qualified_atom}` when `<ns>/<func>` resolves to an env entry
-  #   - `:unknown_member` when `<ns>` is qualified but `<func>` isn't a member
   #   - `:not_qualified` when `<ns>` is not in the qualified namespace set
   #     (caller falls through to the legacy `normalize_clojure_namespace/3` path)
   defp qualified_namespace_lookup(ns, func) do
     case JavaSurface.qualified_legacy_alias(ns, func) do
       {:ok, binding} ->
         {:ok, binding}
-
-      :unknown_member ->
-        :unknown_member
 
       :not_qualified ->
         case Map.get(@qualified_namespace_tables, ns) do
@@ -1387,11 +1383,7 @@ defmodule PtcRunner.Lisp.Analyze do
   end
 
   defp namespaced_unknown_member_error(ns, func) do
-    available =
-      case JavaSurface.qualified_legacy_members(ns) do
-        [] -> Map.get(@qualified_namespace_members, ns, "")
-        members -> members |> Enum.sort() |> Enum.join(", ")
-      end
+    available = Map.get(@qualified_namespace_members, ns, "")
 
     category_name = Env.category_name(Env.namespace_category(ns))
 

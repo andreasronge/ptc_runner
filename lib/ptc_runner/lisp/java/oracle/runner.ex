@@ -17,6 +17,10 @@ defmodule PtcRunner.Lisp.Java.Oracle.Runner do
   alias PtcRunner.Lisp.Java.Oracle.Subprocess
   alias PtcRunner.Lisp.Java.Primitive
   alias PtcRunner.Lisp.Java.Surface
+  alias PtcRunner.Lisp.Java.Time.Duration
+  alias PtcRunner.Lisp.Java.Time.Instant
+  alias PtcRunner.Lisp.Java.Time.LocalDate
+  alias PtcRunner.Lisp.Java.Util.Date, as: JavaDate
 
   @source_limit 256_000
   @expanded_string_limit 256_000
@@ -33,15 +37,18 @@ defmodule PtcRunner.Lisp.Java.Oracle.Runner do
   @spec run(oracle(), atom(), keyword()) :: {:ok, map()} | {:error, term()}
   def run(oracle, subset, opts \\ [])
 
-  def run(:ptc, subset, opts) when is_atom(subset) do
-    cases = ptc_cases(subset)
+  def run(:ptc, :closed_dispatch, opts) do
+    cases = ptc_cases(:closed_dispatch)
 
-    with :ok <- ensure_cases(cases, subset),
+    with :ok <- ensure_cases(cases, :closed_dispatch),
          {:ok, outcomes} <- run_ptc_cases(cases, opts),
          :ok <- validate_outcomes(outcomes, cases, :ptc) do
       {:ok, %{outcomes: outcomes}}
     end
   end
+
+  def run(:ptc, subset, _opts) when is_atom(subset),
+    do: {:error, {:unsupported_subset, :ptc, subset}}
 
   def run(oracle, subset, opts) when oracle in [:jvm, :babashka] and is_atom(subset) do
     cases =
@@ -67,9 +74,6 @@ defmodule PtcRunner.Lisp.Java.Oracle.Runner do
       Surface.closed_dispatch_reference?(overload.reference_id)
     end)
   end
-
-  defp ptc_cases(subset),
-    do: Enum.filter(Fixtures.cases(), &(&1.oracle == :ptc_only and subset in &1.subsets))
 
   @doc false
   @spec parse_output(String.t()) :: {:ok, map()} | {:error, term()}
@@ -279,20 +283,25 @@ defmodule PtcRunner.Lisp.Java.Oracle.Runner do
 
     Enum.map(cases, fn fixture ->
       overload = Map.fetch!(overloads, fixture.overload_id)
+      expected = expected_for_oracle(fixture, oracle)
 
       outcome = %{
         case_id: fixture.case_id,
         overload_id: Atom.to_string(fixture.overload_id),
         descriptor: overload.descriptor,
-        status: Atom.to_string(fixture.expected.status),
-        expected: fixture.expected
+        status: Atom.to_string(expected.status),
+        expected: expected
       }
 
-      if oracle == :ptc and Surface.closed_dispatch_reference?(overload.reference_id),
-        do: Map.put(outcome, :selected_overload_id, Atom.to_string(fixture.overload_id)),
-        else: outcome
+      if oracle == :ptc and Surface.closed_dispatch_reference?(overload.reference_id) and
+           not Map.get(fixture, :boundary_probe, false),
+         do: Map.put(outcome, :selected_overload_id, Atom.to_string(fixture.overload_id)),
+         else: outcome
     end)
   end
+
+  defp expected_for_oracle(%{ptc_expected: expected}, :ptc), do: expected
+  defp expected_for_oracle(fixture, _oracle), do: fixture.expected
 
   defp run_ptc_cases(cases, opts) do
     cases
@@ -437,15 +446,25 @@ defmodule PtcRunner.Lisp.Java.Oracle.Runner do
     primitive
   end
 
-  defp decode_ptc_value(%{type: :local_date, value: value}), do: Date.from_iso8601!(value)
+  defp decode_ptc_value(%{type: :local_date, value: value}) do
+    {:ok, local_date} = LocalDate.parse([value])
+    local_date
+  end
 
   defp decode_ptc_value(%{type: :instant, value: value}) do
-    {:ok, instant, _offset} = DateTime.from_iso8601(value)
+    {:ok, instant} = Instant.parse([value])
     instant
   end
 
-  defp decode_ptc_value(%{type: :date, value: value}),
-    do: DateTime.from_unix!(value, :millisecond)
+  defp decode_ptc_value(%{type: :duration, value: value}) do
+    {:ok, duration} = Duration.from_iso8601(value)
+    duration
+  end
+
+  defp decode_ptc_value(%{type: :date, value: value}) do
+    {:ok, date} = JavaDate.new(value)
+    date
+  end
 
   defp decode_primitive_value("NaN"), do: :nan
   defp decode_primitive_value("Infinity"), do: :infinity
@@ -492,6 +511,7 @@ defmodule PtcRunner.Lisp.Java.Oracle.Runner do
   defp canonical_ptc_value(:type_only, _type, _value), do: "<dynamic>"
 
   defp canonical_ptc_value(:exact, :boolean, value) when is_boolean(value), do: to_string(value)
+  defp canonical_ptc_value(:exact, :string, value) when is_binary(value), do: value
 
   defp canonical_ptc_value(:exact, type, %Primitive{kind: type, value: value})
        when type in [:int, :long],
@@ -505,14 +525,36 @@ defmodule PtcRunner.Lisp.Java.Oracle.Runner do
        when type in [:int, :long] and is_integer(value),
        do: Integer.to_string(value)
 
-  defp canonical_ptc_value(:exact, :date, %DateTime{} = value),
-    do: value |> DateTime.to_unix(:millisecond) |> Integer.to_string()
+  defp canonical_ptc_value(:exact, :local_date, %LocalDate{} = value),
+    do: LocalDate.canonical(value)
+
+  defp canonical_ptc_value(:exact, :instant, %Instant{} = value),
+    do: Instant.canonical(value)
+
+  defp canonical_ptc_value(:exact, :duration, %Duration{} = value),
+    do: Duration.canonical(value)
+
+  defp canonical_ptc_value(:exact, :date, %JavaDate{epoch_millis: epoch_millis} = value) do
+    if JavaDate.valid?(value), do: Integer.to_string(epoch_millis), else: "<invalid>"
+  end
 
   defp canonical_ptc_error(%{details: %{java_exception: :number_format_exception}}),
     do: "java.lang.NumberFormatException"
 
   defp canonical_ptc_error(%{details: %{java_exception: :null_pointer_exception}}),
     do: "java.lang.NullPointerException"
+
+  defp canonical_ptc_error(%{details: %{java_exception: :date_time_exception}}),
+    do: "java.time.DateTimeException"
+
+  defp canonical_ptc_error(%{details: %{java_exception: :date_time_parse_exception}}),
+    do: "java.time.format.DateTimeParseException"
+
+  defp canonical_ptc_error(%{details: %{java_exception: :arithmetic_exception}}),
+    do: "java.lang.ArithmeticException"
+
+  defp canonical_ptc_error(%{details: %{java_exception: :illegal_argument_exception}}),
+    do: "java.lang.IllegalArgumentException"
 
   defp canonical_ptc_error(%{reason: reason}), do: Atom.to_string(reason)
 

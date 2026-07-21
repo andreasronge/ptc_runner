@@ -468,7 +468,8 @@ defmodule PtcRunner.Lisp.Eval.Apply do
 
   # Map as function: (map key) → Map.get(map, key)
   # Supports any key type (atoms, strings, integers, etc.) like Clojure
-  defp do_apply_fun(m, args, %EvalContext{} = eval_ctx, _do_eval_fn) when is_map(m) do
+  defp do_apply_fun(m, args, %EvalContext{} = eval_ctx, _do_eval_fn)
+       when is_map(m) and not is_struct(m) do
     case args do
       [k] ->
         {:ok, flex_get(m, k), eval_ctx}
@@ -498,10 +499,10 @@ defmodule PtcRunner.Lisp.Eval.Apply do
 
   defp apply_keyword(k, args, %EvalContext{} = eval_ctx) do
     case args do
-      [m] when is_map(m) ->
+      [m] when is_map(m) and not is_struct(m) ->
         {:ok, flex_get(m, k), eval_ctx}
 
-      [m, default] when is_map(m) ->
+      [m, default] when is_map(m) and not is_struct(m) ->
         case flex_fetch(m, k) do
           {:ok, val} -> {:ok, val, eval_ctx}
           :error -> {:ok, default, eval_ctx}
@@ -881,7 +882,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   defp last_arg_to_list(list) when is_list(list), do: {:ok, list}
   defp last_arg_to_list(%MapSet{} = s), do: {:ok, MapSet.to_list(s)}
 
-  defp last_arg_to_list(m) when is_map(m) do
+  defp last_arg_to_list(m) when is_map(m) and not is_struct(m) do
     # Convert map to [key, value] pairs per Clojure seqable semantics
     {:ok, Enum.map(m, fn {k, v} -> [k, v] end)}
   end

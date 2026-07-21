@@ -5520,20 +5520,6 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         ["Period/parse"],
         ~S|(java.time.Period/parse "P2D")|,
         "java.time.Period is outside the current minimal interop surface."
-      ),
-      unsupported_case(
-        "candidate/java-date-before-001",
-        "java.util.Date",
-        [".before"],
-        "(.before (java.util.Date. 0) (java.util.Date. 1000))",
-        "Java Date comparison candidate outside the current minimal interop surface."
-      ),
-      unsupported_case(
-        "candidate/java-date-after-001",
-        "java.util.Date",
-        [".after"],
-        "(.after (java.util.Date. 1000) (java.util.Date. 0))",
-        "Java Date comparison candidate outside the current minimal interop surface."
       )
     ]
   end
@@ -5674,6 +5660,13 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         [:java]
       ),
       c(
+        "java/instant-to-epoch-milli-001",
+        "java.time.Instant",
+        [".toEpochMilli"],
+        ~S|(.toEpochMilli (java.time.Instant/parse "1970-01-01T00:00:01Z"))|,
+        [:java]
+      ),
+      c(
         "java/duration-to-millis-001",
         "java.time.Duration",
         ["Duration/between", ".toMillis"],
@@ -5685,6 +5678,27 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "java.time.Duration",
         [".toDays"],
         ~S|(.toDays (java.time.Duration/between (java.time.Instant/parse "1970-01-01T00:00:00Z") (java.time.Instant/parse "1970-01-03T00:00:00Z")))|,
+        [:java]
+      ),
+      c(
+        "java/util-date-get-time-001",
+        "java.util.Date",
+        ["java.util.Date.", ".getTime"],
+        ~S|(.getTime (java.util.Date. 1))|,
+        [:java]
+      ),
+      c(
+        "java/util-date-before-001",
+        "java.util.Date",
+        [".before"],
+        ~S|(.before (java.util.Date. 0) (java.util.Date. 1))|,
+        [:java]
+      ),
+      c(
+        "java/util-date-after-001",
+        "java.util.Date",
+        [".after"],
+        ~S|(.after (java.util.Date. 1) (java.util.Date. 0))|,
         [:java]
       ),
       c(
@@ -5947,7 +5961,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-J02",
         "Java parseBoolean has no boolean overload; PTC-Lisp previously returned nil instead of raising."
       ),
-      bug_case(
+      fixed_bug_case(
         "java/util-date-numeric-constructor-bug-001",
         "java.util.Date",
         ["java.util.Date.", ".getTime"],
@@ -5955,7 +5969,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-J03",
         "Java Date numeric constructor uses milliseconds; PTC-Lisp currently treats 1000 as seconds."
       ),
-      bug_case(
+      fixed_bug_case(
         "java/util-date-single-millisecond-constructor-bug-001",
         "java.util.Date",
         ["java.util.Date.", ".getTime"],
@@ -5963,7 +5977,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-J03",
         "Java Date numeric constructor treats 1 as one millisecond after epoch; PTC-Lisp currently treats it as one second."
       ),
-      bug_case(
+      fixed_bug_case(
         "java/util-date-negative-single-millisecond-constructor-bug-001",
         "java.util.Date",
         ["java.util.Date.", ".getTime"],
@@ -5971,7 +5985,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-J03",
         "Java Date numeric constructor treats -1 as one millisecond before epoch; PTC-Lisp currently treats it as one second before epoch."
       ),
-      bug_case(
+      fixed_bug_case(
         "java/util-date-negative-numeric-constructor-bug-001",
         "java.util.Date",
         ["java.util.Date.", ".getTime"],
@@ -5979,25 +5993,23 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-J03",
         "Java Date numeric constructor uses milliseconds for negative epochs too; PTC-Lisp currently treats -1000 as seconds."
       ),
-      div_case(
+      fixed_bug_case(
         "java/util-date-is-before-method-bug-001",
         "java.util.Date",
         ["java.util.Date.", ".isBefore"],
         ~S|(.isBefore (java.util.Date. 0) (java.util.Date. 1000))|,
         "GAP-J20",
-        true,
         "Java Date uses .before, not .isBefore; PTC-Lisp currently exposes a java.time-style alias on Date values."
       ),
-      div_case(
+      fixed_bug_case(
         "java/util-date-is-after-method-bug-001",
         "java.util.Date",
         ["java.util.Date.", ".isAfter"],
         ~S|(.isAfter (java.util.Date. 1000) (java.util.Date. 0))|,
         "GAP-J20",
-        true,
         "Java Date uses .after, not .isAfter; PTC-Lisp currently exposes a java.time-style alias on Date values."
       ),
-      bug_case(
+      fixed_bug_case(
         "java/instant-get-time-bug-001",
         "java.time.Instant",
         [".getTime"],
@@ -6005,7 +6017,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-J04",
         "Java Instant has toEpochMilli, not getTime; PTC-Lisp currently exposes getTime on Instant results."
       ),
-      bug_case(
+      fixed_bug_case(
         "java/instant-get-time-millis-bug-001",
         "java.time.Instant",
         [".getTime"],
@@ -6013,7 +6025,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-J04",
         "Java Instant has no getTime method even for fractional-second instants; PTC-Lisp currently exposes millisecond getTime on Instant results."
       ),
-      bug_case(
+      fixed_bug_case(
         "java/instant-get-time-offset-bug-001",
         "java.time.Instant",
         [".getTime"],
@@ -6021,7 +6033,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-J04",
         "Java Instant has no getTime method even for offset-parsed instants; PTC-Lisp currently exposes getTime on Instant results."
       ),
-      bug_case(
+      fixed_bug_case(
         "java/instant-get-time-negative-bug-001",
         "java.time.Instant",
         [".getTime"],
@@ -6029,7 +6041,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-J04",
         "Java Instant has no getTime method for pre-epoch instants; PTC-Lisp currently exposes getTime on Instant results."
       ),
-      bug_case(
+      fixed_bug_case(
         "java/instant-get-time-nanos-bug-001",
         "java.time.Instant",
         [".getTime"],
@@ -6037,15 +6049,15 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-J04",
         "Java Instant has no getTime method even for nanosecond-precision instants; PTC-Lisp currently exposes millisecond getTime on Instant results."
       ),
-      unsupported_case(
+      fixed_bug_case(
         "java/instant-to-epoch-milli-unsupported-bug-001",
         "java.time.Instant",
         [".toEpochMilli"],
         ~S|(.toEpochMilli (java.time.Instant/parse "1970-01-01T00:00:01Z"))|,
-        "Java Instant exposes toEpochMilli; PTC-Lisp currently rejects the method while exposing getTime instead.",
-        ["GAP-J18"]
+        "GAP-J18",
+        "Java Instant exposes toEpochMilli; PTC-Lisp previously rejected the method while exposing getTime instead."
       ),
-      bug_case(
+      fixed_bug_case(
         "java/duration-between-date-instant-bug-001",
         "java.time.Duration",
         ["Duration/between"],
@@ -6053,7 +6065,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-J19",
         "Java Duration.between requires Temporal inputs and rejects java.util.Date; PTC-Lisp currently accepts Date values."
       ),
-      bug_case(
+      fixed_bug_case(
         "java/duration-between-dates-bug-001",
         "java.time.Duration",
         ["Duration/between"],
@@ -6061,7 +6073,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-J19",
         "Java Duration.between requires Temporal inputs and rejects java.util.Date; PTC-Lisp currently accepts Date values."
       ),
-      bug_case(
+      fixed_bug_case(
         "java/local-date-plus-days-float-bug-001",
         "java.time.LocalDate",
         [".plusDays"],
@@ -6069,7 +6081,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-J12",
         "Clojure Java interop coerces floating day counts for plusDays; PTC-Lisp currently rejects floats."
       ),
-      bug_case(
+      fixed_bug_case(
         "java/local-date-plus-days-fractional-bug-001",
         "java.time.LocalDate",
         [".plusDays"],
@@ -6077,7 +6089,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-J12",
         "Clojure Java interop coerces fractional day counts for plusDays; PTC-Lisp currently rejects floats."
       ),
-      bug_case(
+      fixed_bug_case(
         "java/local-date-plus-days-nan-bug-001",
         "java.time.LocalDate",
         [".plusDays"],
@@ -6085,7 +6097,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-J12",
         "Clojure Java interop coerces NaN day counts to zero for plusDays; PTC-Lisp currently rejects NaN."
       ),
-      bug_case(
+      fixed_bug_case(
         "java/local-date-minus-days-float-bug-001",
         "java.time.LocalDate",
         [".minusDays"],
@@ -6093,7 +6105,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-J12",
         "Clojure Java interop coerces floating day counts for minusDays; PTC-Lisp currently rejects floats."
       ),
-      bug_case(
+      fixed_bug_case(
         "java/local-date-minus-days-fractional-bug-001",
         "java.time.LocalDate",
         [".minusDays"],
@@ -6101,7 +6113,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-J12",
         "Clojure Java interop coerces fractional day counts for minusDays; PTC-Lisp currently rejects floats."
       ),
-      bug_case(
+      fixed_bug_case(
         "java/local-date-minus-days-nan-bug-001",
         "java.time.LocalDate",
         [".minusDays"],
@@ -6377,7 +6389,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-J09",
         "Java String.lastIndexOf returns UTF-16 code-unit offsets; PTC-Lisp currently returns grapheme offsets."
       ),
-      bug_case(
+      fixed_bug_case(
         "java/instant-parse-date-only-bug-001",
         "java.time.Instant",
         ["Instant/parse"],
@@ -6385,7 +6397,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-J06",
         "Java Instant.parse rejects date-only strings; PTC-Lisp currently accepts them as LocalDate values."
       ),
-      bug_case(
+      fixed_bug_case(
         "java/instant-parse-no-zone-bug-001",
         "java.time.Instant",
         ["Instant/parse"],
@@ -6393,7 +6405,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-J06",
         "Java Instant.parse rejects date-time strings without an offset or zone; PTC-Lisp currently accepts them as UTC DateTime values."
       ),
-      bug_case(
+      fixed_bug_case(
         "java/instant-parse-no-zone-non-midnight-bug-001",
         "java.time.Instant",
         ["Instant/parse"],
@@ -6401,7 +6413,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-J06",
         "Java Instant.parse rejects date-time strings without an offset or zone; PTC-Lisp currently accepts them as UTC DateTime values."
       ),
-      bug_case(
+      fixed_bug_case(
         "java/local-date-parse-datetime-bug-001",
         "java.time.LocalDate",
         ["LocalDate/parse"],
@@ -6409,7 +6421,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-J06",
         "Java LocalDate.parse rejects date-time strings; PTC-Lisp currently accepts them as DateTime values."
       ),
-      bug_case(
+      fixed_bug_case(
         "java/local-date-parse-datetime-non-midnight-bug-001",
         "java.time.LocalDate",
         ["LocalDate/parse"],
@@ -6417,7 +6429,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-J06",
         "Java LocalDate.parse rejects date-time strings; PTC-Lisp currently accepts them as DateTime values."
       ),
-      bug_case(
+      fixed_bug_case(
         "java/util-date-string-constructor-bug-001",
         "java.util.Date",
         ["java.util.Date.", ".getTime"],
@@ -6425,7 +6437,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-J06",
         "Java Date string constructor rejects this ISO date in the oracle; PTC-Lisp currently accepts it."
       ),
-      bug_case(
+      fixed_bug_case(
         "java/util-date-legacy-string-constructor-bug-001",
         "java.util.Date",
         ["java.util.Date.", ".getTime"],
@@ -6638,12 +6650,29 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
   defp divergence_cases do
     [
       div_case(
+        "java/util-date-deterministic-two-digit-year-001",
+        "java.util.Date",
+        ["java.util.Date."],
+        ~S|(java.util.Date. "Jan 1 00:00:00 GMT 20")|,
+        "DIV-51",
+        {:error, :java_domain_error},
+        "PTC-Lisp rejects Date's moving two-digit-year window so parsing is deterministic across wall-clock years."
+      ),
+      div_case(
+        "java/util-date-historical-calendar-cutover-001",
+        "java.util.Date",
+        ["java.util.Date."],
+        ~S|(java.util.Date. "Jan 1 00:00:00 UTC 1500")|,
+        "DIV-51",
+        {:error, :java_domain_error},
+        "PTC-Lisp excludes Date's historical hybrid Julian/Gregorian range and admits string dates from 1582-10-15 onward."
+      ),
+      fixed_bug_case(
         "java/util-date-native-temporal-extension-001",
         "java.util.Date",
         ["java.util.Date.", ".getTime", "LocalDate/parse"],
         ~S|(.getTime (java.util.Date. (LocalDate/parse "1970-01-02")))|,
         "GAP-J21",
-        86_400_000,
         "PTC-Lisp accepts its native LocalDate value directly although Java Date has no matching constructor overload."
       ),
       div_case(

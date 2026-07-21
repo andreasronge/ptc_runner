@@ -43,24 +43,13 @@ defmodule PtcRunner.Lisp.BuiltinNames do
   @legacy_java_binding_kinds %{
     :".contains" => :normal,
     :".endsWith" => :normal,
-    :".getTime" => :normal,
     :".indexOf" => :multi_arity,
-    :".isAfter" => :normal,
-    :".isBefore" => :normal,
     :".lastIndexOf" => :normal,
     :".length" => :normal,
-    :".minusDays" => :normal,
-    :".plusDays" => :normal,
     :".startsWith" => :normal,
     :".substring" => :multi_arity,
-    :".toDays" => :normal,
-    :".toEpochDay" => :normal,
     :".toLowerCase" => :normal,
-    :".toMillis" => :normal,
-    :".toUpperCase" => :normal,
-    :"Duration/between" => :normal,
-    :"java.util.Date." => :multi_arity,
-    :parse => :normal
+    :".toUpperCase" => :normal
   }
 
   @env_binding_kinds Map.merge(@ordinary_env_binding_kinds, @legacy_java_binding_kinds)
@@ -84,6 +73,11 @@ defmodule PtcRunner.Lisp.BuiltinNames do
                      |> Enum.map(& &1.source_name)
                      |> Enum.filter(&is_atom/1)
                      |> Enum.uniq()
+  @java_constructor_atoms @java_surface.references
+                          |> Enum.filter(&(&1.kind == :constructor))
+                          |> Enum.flat_map(& &1.spellings)
+                          |> Enum.map(&String.to_atom/1)
+                          |> Enum.uniq()
 
   @doc """
   Returns the env-dispatched builtin names as atoms.
@@ -113,4 +107,8 @@ defmodule PtcRunner.Lisp.BuiltinNames do
   @doc "Returns atom-named Java namespace members from the bounded surface manifest."
   @spec java_member_atoms() :: [atom()]
   def java_member_atoms, do: @java_member_atoms
+
+  @doc "Returns Java constructor source atoms from the bounded surface manifest."
+  @spec java_constructor_atoms() :: [atom()]
+  def java_constructor_atoms, do: @java_constructor_atoms
 end

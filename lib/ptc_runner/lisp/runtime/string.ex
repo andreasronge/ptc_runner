@@ -6,8 +6,11 @@ defmodule PtcRunner.Lisp.Runtime.String do
   """
 
   alias PtcRunner.Lisp.Format
+  alias PtcRunner.Lisp.Java.Time.Duration, as: JavaDuration
+  alias PtcRunner.Lisp.Java.Time.Instant, as: JavaInstant
+  alias PtcRunner.Lisp.Java.Time.LocalDate, as: JavaLocalDate
+  alias PtcRunner.Lisp.Java.Util.Date, as: JavaDate
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
-  alias PtcRunner.Lisp.Runtime.Interop.Duration
 
   @doc """
   Convert zero or more values to string and concatenate.
@@ -47,20 +50,25 @@ defmodule PtcRunner.Lisp.Runtime.String do
   def to_str(atom) when is_atom(atom), do: inspect(atom)
   def to_str(%LispKeyword{name: name}), do: ":" <> name
 
-  # Temporal structs: render as ISO 8601 so `(java.util.Date. (str dt))` works
-  # and the LLM never sees the Elixir sigil form. Must precede the generic map
-  # clause below since these are %DateTime{} etc. structs.
+  # Temporal structs use stable text and must precede the generic map clause.
   def to_str(%DateTime{} = dt), do: DateTime.to_iso8601(dt)
   def to_str(%NaiveDateTime{} = dt), do: NaiveDateTime.to_iso8601(dt)
   def to_str(%Date{} = d), do: Date.to_iso8601(d)
   def to_str(%Time{} = t), do: Time.to_iso8601(t)
-  def to_str(%Duration{milliseconds: milliseconds}), do: "#duration[#{milliseconds}ms]"
+  def to_str(%JavaLocalDate{} = value), do: java_object_string(JavaLocalDate, value)
+  def to_str(%JavaInstant{} = value), do: java_object_string(JavaInstant, value)
+  def to_str(%JavaDuration{} = value), do: java_object_string(JavaDuration, value)
+  def to_str(%JavaDate{} = value), do: java_object_string(JavaDate, value)
 
   def to_str(x) when is_map(x) or is_list(x) do
     Format.to_clojure(x) |> elem(0)
   end
 
   def to_str(x), do: inspect(x)
+
+  defp java_object_string(module, value) do
+    if module.valid?(value), do: module.canonical(value), else: "#<invalid-java-value>"
+  end
 
   @doc """
   Return substring starting at index (2-arity) or from start to end (3-arity).

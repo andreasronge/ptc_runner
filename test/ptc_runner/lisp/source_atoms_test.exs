@@ -180,6 +180,16 @@ defmodule PtcRunner.Lisp.SourceAtomsTest do
   end
 
   describe "BuiltinNames drift guard" do
+    test "constructor vocabulary is projected from the Java manifest" do
+      constructor_atoms = BuiltinNames.java_constructor_atoms()
+
+      assert constructor_atoms == [:"java.util.Date."]
+
+      for atom <- constructor_atoms do
+        assert SourceAtoms.intern(Atom.to_string(atom)) == atom
+      end
+    end
+
     test "leaf env_names equals Env.initial keys" do
       # `SourceAtoms` derives builtin names from the compile-time
       # registry via `BuiltinNames` instead of `Env.initial/0` (issue

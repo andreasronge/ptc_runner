@@ -99,11 +99,13 @@ defmodule PtcRunner.Lisp.Runtime.Callable do
 
   def call({:fnil_fn, f, default}, args), do: call(f, substitute_nil(args, default))
 
-  def call(%LispKeyword{} = k, [m]) when is_map(m), do: FlexAccess.flex_get(m, k)
+  def call(%LispKeyword{} = k, [m]) when is_map(m) and not is_struct(m),
+    do: FlexAccess.flex_get(m, k)
+
   def call(%LispKeyword{}, [nil]), do: nil
   def call(%LispKeyword{}, [_]), do: nil
 
-  def call(%LispKeyword{} = k, [m, default]) when is_map(m) do
+  def call(%LispKeyword{} = k, [m, default]) when is_map(m) and not is_struct(m) do
     case FlexAccess.flex_fetch(m, k) do
       {:ok, val} -> val
       :error -> default
@@ -123,11 +125,13 @@ defmodule PtcRunner.Lisp.Runtime.Callable do
   end
 
   # Keyword as function: (:key map) → map lookup
-  def call(k, [m]) when is_keyword(k) and is_map(m), do: FlexAccess.flex_get(m, k)
+  def call(k, [m]) when is_keyword(k) and is_map(m) and not is_struct(m),
+    do: FlexAccess.flex_get(m, k)
+
   def call(k, [nil]) when is_keyword(k), do: nil
   def call(k, [_]) when is_keyword(k), do: nil
 
-  def call(k, [m, default]) when is_keyword(k) and is_map(m) do
+  def call(k, [m, default]) when is_keyword(k) and is_map(m) and not is_struct(m) do
     case FlexAccess.flex_fetch(m, k) do
       {:ok, val} -> val
       :error -> default

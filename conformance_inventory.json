@@ -1663,14 +1663,14 @@
     "symbol": "inst-ms",
     "namespace": "clojure.core",
     "compatibility_target": "Clojure",
-    "notes": "covered by existing temporal interop .getTime"
+    "notes": "Use .toEpochMilli on a native java.time.Instant or .getTime on java.util.Date."
   },
   {
     "status": "not_relevant",
     "symbol": "inst?",
     "namespace": "clojure.core",
     "compatibility_target": "Clojure",
-    "notes": "Clojure instant predicate; PTC-Lisp temporal interop uses host date structs"
+    "notes": "Native Java temporal wrappers retain class identity; no general JVM instance predicate."
   },
   {
     "status": "not_relevant",
@@ -4729,7 +4729,7 @@
     "symbol": "LocalDate/parse",
     "namespace": "java.time.LocalDate",
     "compatibility_target": "Java",
-    "notes": "Also available as java.time.LocalDate/parse and parse. BUG GAP-J06: date-time strings are accepted instead of rejected."
+    "notes": "Also available as java.time.LocalDate/parse; parsing is class-specific and strict."
   },
   {
     "status": "candidate",
@@ -4743,14 +4743,14 @@
     "symbol": ".isBefore",
     "namespace": "java.time.LocalDate",
     "compatibility_target": "Java",
-    "notes": "Works for same-type Date or DateTime values."
+    "notes": "Works for native LocalDate values only."
   },
   {
     "status": "supported",
     "symbol": ".isAfter",
     "namespace": "java.time.LocalDate",
     "compatibility_target": "Java",
-    "notes": "Works for same-type Date or DateTime values."
+    "notes": "Works for native LocalDate values only."
   },
   {
     "status": "candidate",
@@ -4778,21 +4778,21 @@
     "symbol": ".plusDays",
     "namespace": "java.time.LocalDate",
     "compatibility_target": "Java",
-    "notes": "Requested in issue #1019 for date arithmetic. BUG GAP-J12: floating and NaN day counts are rejected instead of following Clojure Java interop coercion."
+    "notes": "Requested in issue #1019 for date arithmetic."
   },
   {
     "status": "supported",
     "symbol": ".minusDays",
     "namespace": "java.time.LocalDate",
     "compatibility_target": "Java",
-    "notes": "Requested in issue #1019 for date arithmetic. BUG GAP-J12: floating and NaN day counts are rejected instead of following Clojure Java interop coercion."
+    "notes": "Requested in issue #1019 for date arithmetic."
   },
   {
     "status": "supported",
     "symbol": "Instant/parse",
     "namespace": "java.time.Instant",
     "compatibility_target": "Java",
-    "notes": "Also available as java.time.Instant/parse and parse. BUG GAP-J06: date-only and no-zone date-time strings are accepted instead of rejected."
+    "notes": "Also available as java.time.Instant/parse; parsing requires an offset."
   },
   {
     "status": "candidate",
@@ -4806,42 +4806,42 @@
     "symbol": ".isBefore",
     "namespace": "java.time.Instant",
     "compatibility_target": "Java",
-    "notes": "Works for same-type Date or DateTime values."
+    "notes": "Works for native Instant values only."
   },
   {
     "status": "supported",
     "symbol": ".isAfter",
     "namespace": "java.time.Instant",
     "compatibility_target": "Java",
-    "notes": "Works for same-type Date or DateTime values."
+    "notes": "Works for native Instant values only."
   },
   {
-    "status": "supported",
+    "status": "not_relevant",
     "symbol": ".getTime",
     "namespace": "java.time.Instant",
     "compatibility_target": "Java",
-    "notes": "BUG GAP-J04: Java Instant has toEpochMilli, not getTime; current behavior is a PTC convenience."
+    "notes": "Removed from Instant when class-aware temporal dispatch landed."
   },
   {
-    "status": "candidate",
+    "status": "supported",
     "symbol": ".toEpochMilli",
     "namespace": "java.time.Instant",
     "compatibility_target": "Java",
-    "notes": "BUG GAP-J18: Java Instant.toEpochMilli is unsupported while .getTime is exposed."
+    "notes": "Raises a bounded arithmetic condition when the result exceeds Java long."
   },
   {
     "status": "candidate",
     "symbol": "Instant/ofEpochMilli",
     "namespace": "java.time.Instant",
     "compatibility_target": "Java",
-    "notes": "java.util.Date. already accepts seconds or milliseconds."
+    "notes": "java.util.Date. accepts exact epoch milliseconds but returns a Date, not an Instant."
   },
   {
     "status": "supported",
     "symbol": "Duration/between",
     "namespace": "java.time.Duration",
     "compatibility_target": "Java",
-    "notes": "Requested in issue #1019 for millisecond/day differences. BUG GAP-J19: java.util.Date inputs are accepted instead of rejected."
+    "notes": "Requested in issue #1019 for millisecond/day differences. DIV-52: the admitted profile accepts Instants only rather than every Temporal implementation."
   },
   {
     "status": "supported",
@@ -4904,42 +4904,42 @@
     "symbol": "java.util.Date.",
     "namespace": "java.util.Date",
     "compatibility_target": "Java",
-    "notes": "BUG GAP-J03: numeric constructor currently treats milliseconds as seconds. BUG GAP-J06: ISO date strings are accepted by PTC-Lisp but rejected by the Java oracle. BUG GAP-J11: Java-accepted legacy date strings are rejected. EXTENSION GAP-J21: existing PTC temporal values are accepted directly."
+    "notes": "Numeric input is exact epoch milliseconds. DIV-51: string input uses a deterministic bounded legacy English grammar, admits dates on or after 1582-10-15, and uses UTC when no zone is present."
   },
   {
     "status": "supported",
     "symbol": ".getTime",
     "namespace": "java.util.Date",
     "compatibility_target": "Java",
-    "notes": "Works on DateTime values."
+    "notes": "Works only on native java.util.Date values."
   },
   {
-    "status": "supported",
+    "status": "not_relevant",
     "symbol": ".isBefore",
     "namespace": "java.util.Date",
     "compatibility_target": "Java",
-    "notes": "BUG GAP-J20: java.util.Date uses .before, not .isBefore; current behavior exposes a non-Java alias."
+    "notes": "Removed from Date when class-aware temporal dispatch landed."
   },
   {
-    "status": "supported",
+    "status": "not_relevant",
     "symbol": ".isAfter",
     "namespace": "java.util.Date",
     "compatibility_target": "Java",
-    "notes": "BUG GAP-J20: java.util.Date uses .after, not .isAfter; current behavior exposes a non-Java alias."
+    "notes": "Removed from Date when class-aware temporal dispatch landed."
   },
   {
-    "status": "candidate",
+    "status": "supported",
     "symbol": ".before",
     "namespace": "java.util.Date",
     "compatibility_target": "Java",
-    "notes": ".isBefore covers the current PTC-Lisp spelling."
+    "notes": "Class-owned java.util.Date comparison."
   },
   {
-    "status": "candidate",
+    "status": "supported",
     "symbol": ".after",
     "namespace": "java.util.Date",
     "compatibility_target": "Java",
-    "notes": ".isAfter covers the current PTC-Lisp spelling."
+    "notes": "Class-owned java.util.Date comparison."
   },
   {
     "status": "not_relevant",

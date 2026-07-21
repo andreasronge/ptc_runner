@@ -3,6 +3,10 @@ defmodule PtcRunner.Lisp.TypeVocabulary do
 
   alias PtcRunner.Lisp.Java.Callable, as: JavaCallable
   alias PtcRunner.Lisp.Java.Primitive, as: JavaPrimitive
+  alias PtcRunner.Lisp.Java.Time.Duration, as: JavaDuration
+  alias PtcRunner.Lisp.Java.Time.Instant, as: JavaInstant
+  alias PtcRunner.Lisp.Java.Time.LocalDate, as: JavaLocalDate
+  alias PtcRunner.Lisp.Java.Util.Date, as: JavaDate
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
 
   @doc """
@@ -82,6 +86,17 @@ defmodule PtcRunner.Lisp.TypeVocabulary do
     end
   end
 
+  def type_of(%JavaLocalDate{} = value),
+    do: java_object_type(JavaLocalDate, value, "java.time.LocalDate")
+
+  def type_of(%JavaInstant{} = value),
+    do: java_object_type(JavaInstant, value, "java.time.Instant")
+
+  def type_of(%JavaDuration{} = value),
+    do: java_object_type(JavaDuration, value, "java.time.Duration")
+
+  def type_of(%JavaDate{} = value), do: java_object_type(JavaDate, value, "java.util.Date")
+
   def type_of(map) when is_map(map) and not is_struct(map), do: "map[#{map_size(map)}]"
   def type_of(s) when is_binary(s), do: "string"
   def type_of(n) when is_integer(n), do: "integer"
@@ -101,4 +116,8 @@ defmodule PtcRunner.Lisp.TypeVocabulary do
   def type_of({:fnil_fn, _f, _default}), do: "fn"
   def type_of(f) when is_function(f), do: "fn"
   def type_of(_), do: "unknown"
+
+  defp java_object_type(module, value, label) do
+    if module.valid?(value), do: label, else: "invalid-java-value"
+  end
 end

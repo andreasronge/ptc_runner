@@ -566,6 +566,26 @@
       }
     },
     {
+      "case_id": "local-date-parse-positive-zero-extended-year",
+      "overload_id": "local_date_parse_char_sequence",
+      "descriptor": "(Ljava/lang/CharSequence;)Ljava/time/LocalDate;",
+      "expected": {
+        "status": "ok",
+        "type": "local_date",
+        "value": "0000-01-01"
+      }
+    },
+    {
+      "case_id": "local-date-parse-invalid",
+      "overload_id": "local_date_parse_char_sequence",
+      "descriptor": "(Ljava/lang/CharSequence;)Ljava/time/LocalDate;",
+      "expected": {
+        "status": "error",
+        "type": "error",
+        "value": "java.time.format.DateTimeParseException"
+      }
+    },
+    {
       "case_id": "local-date-to-epoch-day-0",
       "overload_id": "local_date_to_epoch_day_0",
       "descriptor": "()J",
@@ -593,6 +613,16 @@
         "status": "ok",
         "type": "local_date",
         "value": "2023-12-31"
+      }
+    },
+    {
+      "case_id": "local-date-minus-days-long-min-at-epoch",
+      "overload_id": "local_date_minus_days_long",
+      "descriptor": "(J)Ljava/time/LocalDate;",
+      "expected": {
+        "status": "error",
+        "type": "error",
+        "value": "java.time.DateTimeException"
       }
     },
     {
@@ -626,6 +656,66 @@
       }
     },
     {
+      "case_id": "instant-parse-positive-zero-extended-year",
+      "overload_id": "instant_parse_char_sequence",
+      "descriptor": "(Ljava/lang/CharSequence;)Ljava/time/Instant;",
+      "expected": {
+        "status": "ok",
+        "type": "instant",
+        "value": "0000-01-01T00:00:00Z"
+      }
+    },
+    {
+      "case_id": "instant-parse-empty-fraction",
+      "overload_id": "instant_parse_char_sequence",
+      "descriptor": "(Ljava/lang/CharSequence;)Ljava/time/Instant;",
+      "expected": {
+        "status": "ok",
+        "type": "instant",
+        "value": "1970-01-01T00:00:00Z"
+      }
+    },
+    {
+      "case_id": "instant-parse-hour-offset",
+      "overload_id": "instant_parse_char_sequence",
+      "descriptor": "(Ljava/lang/CharSequence;)Ljava/time/Instant;",
+      "expected": {
+        "status": "error",
+        "type": "error",
+        "value": "java.time.format.DateTimeParseException"
+      }
+    },
+    {
+      "case_id": "instant-parse-compact-minute-offset",
+      "overload_id": "instant_parse_char_sequence",
+      "descriptor": "(Ljava/lang/CharSequence;)Ljava/time/Instant;",
+      "expected": {
+        "status": "error",
+        "type": "error",
+        "value": "java.time.format.DateTimeParseException"
+      }
+    },
+    {
+      "case_id": "instant-parse-compact-second-offset",
+      "overload_id": "instant_parse_char_sequence",
+      "descriptor": "(Ljava/lang/CharSequence;)Ljava/time/Instant;",
+      "expected": {
+        "status": "error",
+        "type": "error",
+        "value": "java.time.format.DateTimeParseException"
+      }
+    },
+    {
+      "case_id": "instant-parse-invalid",
+      "overload_id": "instant_parse_char_sequence",
+      "descriptor": "(Ljava/lang/CharSequence;)Ljava/time/Instant;",
+      "expected": {
+        "status": "error",
+        "type": "error",
+        "value": "java.time.format.DateTimeParseException"
+      }
+    },
+    {
       "case_id": "instant-is-before-instant",
       "overload_id": "instant_is_before_instant",
       "descriptor": "(Ljava/time/Instant;)Z",
@@ -646,6 +736,16 @@
       }
     },
     {
+      "case_id": "instant-to-epoch-milli-0",
+      "overload_id": "instant_to_epoch_milli_0",
+      "descriptor": "()J",
+      "expected": {
+        "status": "ok",
+        "type": "long",
+        "value": "1000"
+      }
+    },
+    {
       "case_id": "duration-between-temporal",
       "overload_id": "duration_between_temporal",
       "descriptor": "(Ljava/time/temporal/Temporal;Ljava/time/temporal/Temporal;)Ljava/time/Duration;",
@@ -656,6 +756,16 @@
       }
     },
     {
+      "case_id": "duration-between-local-date-boundary",
+      "overload_id": "duration_between_temporal",
+      "descriptor": "(Ljava/time/temporal/Temporal;Ljava/time/temporal/Temporal;)Ljava/time/Duration;",
+      "expected": {
+        "status": "error",
+        "type": "error",
+        "value": "java.time.temporal.UnsupportedTemporalTypeException"
+      }
+    },
+    {
       "case_id": "duration-to-millis-0",
       "overload_id": "duration_to_millis_0",
       "descriptor": "()J",
@@ -663,6 +773,26 @@
         "status": "ok",
         "type": "long",
         "value": "129600000"
+      }
+    },
+    {
+      "case_id": "duration-to-millis-negative-submillisecond",
+      "overload_id": "duration_to_millis_0",
+      "descriptor": "()J",
+      "expected": {
+        "status": "ok",
+        "type": "long",
+        "value": "0"
+      }
+    },
+    {
+      "case_id": "duration-to-millis-overflow",
+      "overload_id": "duration_to_millis_0",
+      "descriptor": "()J",
+      "expected": {
+        "status": "error",
+        "type": "error",
+        "value": "java.lang.ArithmeticException"
       }
     },
     {
@@ -706,6 +836,56 @@
       }
     },
     {
+      "case_id": "date-new-string-null",
+      "overload_id": "date_new_string",
+      "descriptor": "(Ljava/lang/String;)V",
+      "expected": {
+        "status": "error",
+        "type": "error",
+        "value": "java.lang.IllegalArgumentException"
+      }
+    },
+    {
+      "case_id": "date-new-string-without-seconds",
+      "overload_id": "date_new_string",
+      "descriptor": "(Ljava/lang/String;)V",
+      "expected": {
+        "status": "ok",
+        "type": "date",
+        "value": "1767882600000"
+      }
+    },
+    {
+      "case_id": "date-new-string-without-zone",
+      "overload_id": "date_new_string",
+      "descriptor": "(Ljava/lang/String;)V",
+      "expected": {
+        "status": "ok",
+        "type": "date",
+        "value": "1000"
+      }
+    },
+    {
+      "case_id": "date-new-string-invalid-weekday",
+      "overload_id": "date_new_string",
+      "descriptor": "(Ljava/lang/String;)V",
+      "expected": {
+        "status": "error",
+        "type": "error",
+        "value": "java.lang.IllegalArgumentException"
+      }
+    },
+    {
+      "case_id": "date-new-string-invalid-month",
+      "overload_id": "date_new_string",
+      "descriptor": "(Ljava/lang/String;)V",
+      "expected": {
+        "status": "error",
+        "type": "error",
+        "value": "java.lang.IllegalArgumentException"
+      }
+    },
+    {
       "case_id": "date-get-time-0",
       "overload_id": "date_get_time_0",
       "descriptor": "()J",
@@ -713,6 +893,26 @@
         "status": "ok",
         "type": "long",
         "value": "1234"
+      }
+    },
+    {
+      "case_id": "date-before-date",
+      "overload_id": "date_before_date",
+      "descriptor": "(Ljava/util/Date;)Z",
+      "expected": {
+        "status": "ok",
+        "type": "boolean",
+        "value": "true"
+      }
+    },
+    {
+      "case_id": "date-after-date",
+      "overload_id": "date_after_date",
+      "descriptor": "(Ljava/util/Date;)Z",
+      "expected": {
+        "status": "ok",
+        "type": "boolean",
+        "value": "true"
       }
     },
     {

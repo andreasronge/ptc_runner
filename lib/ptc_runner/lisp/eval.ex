@@ -59,7 +59,12 @@ defmodule PtcRunner.Lisp.Eval do
   alias PtcRunner.Lisp.Java.Callable, as: JavaCallable
   alias PtcRunner.Lisp.Java.Condition, as: JavaCondition
   alias PtcRunner.Lisp.Java.Dispatch, as: JavaDispatch
+  alias PtcRunner.Lisp.Java.Primitive, as: JavaPrimitive
   alias PtcRunner.Lisp.Java.Project, as: JavaProject
+  alias PtcRunner.Lisp.Java.Time.Duration, as: JavaDuration
+  alias PtcRunner.Lisp.Java.Time.Instant, as: JavaInstant
+  alias PtcRunner.Lisp.Java.Time.LocalDate, as: JavaLocalDate
+  alias PtcRunner.Lisp.Java.Util.Date, as: JavaDate
   alias PtcRunner.Lisp.KeyNormalizer
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
   alias PtcRunner.Lisp.Metadata
@@ -1152,6 +1157,18 @@ defmodule PtcRunner.Lisp.Eval do
   defp stringify_key(k) when is_atom(k), do: KeyNormalizer.normalize_key(k)
   defp stringify_key(%LispKeyword{name: name}), do: KeyNormalizer.normalize_key(name)
   defp stringify_key(k) when is_binary(k), do: KeyNormalizer.normalize_key(k)
+
+  defp stringify_key(%{__struct__: module} = key)
+       when module in [
+              JavaCallable,
+              JavaPrimitive,
+              JavaLocalDate,
+              JavaInstant,
+              JavaDuration,
+              JavaDate
+            ],
+       do: key
+
   defp stringify_key(k), do: inspect(k)
 
   # Record a tool call with timing, execution, error capture, and evaluation context update.

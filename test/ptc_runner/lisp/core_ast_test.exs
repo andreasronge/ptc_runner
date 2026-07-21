@@ -10,6 +10,7 @@ defmodule PtcRunner.Lisp.CoreASTTest do
          {:java_static, :boolean_parse_boolean, [{:string, "true"}]},
          {:java_static, :double_parse_double, [{:string, "1.0"}]},
          {:java_field, :double_nan},
+         {:java_new, :date_new, [0]},
          {:java_dot, :is_before, {:var, :value}, [{:var, :other}]},
          {:java_ref, :boolean_parse_boolean},
          {:java_ref, :double_parse_double}
@@ -38,11 +39,8 @@ defmodule PtcRunner.Lisp.CoreASTTest do
   end
 
   test "rejects Java nodes for references that remain on legacy Env routes" do
-    for node <- [
-          {:java_new, :date_new, [0]},
-          {:java_instance, :string_contains, {:var, :s}, [{:string, "x"}]}
-        ] do
-      assert {:error, {:invalid_core_ast, [], ^node}} = CoreAST.validate(node)
-    end
+    node = {:java_instance, :string_contains, {:var, :s}, [{:string, "x"}]}
+
+    assert {:error, {:invalid_core_ast, [], ^node}} = CoreAST.validate(node)
   end
 end

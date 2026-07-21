@@ -156,6 +156,7 @@ defmodule PtcRunner.Lisp.SourceAtoms do
         @bounded_namespaces ++
         BuiltinNames.java_namespace_atoms() ++
         BuiltinNames.java_member_atoms() ++
+        BuiltinNames.java_constructor_atoms() ++
         @qualified_keys ++
         @special_symbols ++
         @short_fn_params

@@ -1714,7 +1714,13 @@ missing key: `(find {:a nil} :a)` => `[:a nil]` while `(find {:a 1} :b)` =>
 | `sort-by` | `(sort-by keyfn comp coll)` | Sort with comparator |
 | `reverse` | `(reverse coll)` | Reverse order |
 
-**Sortable types:** Numbers, strings, and map entries can be sorted. Numbers use numeric order; strings use lexicographic (alphabetical) order. Sorting mixed types or unsortable types (such as nil) raises a type error.
+**Sortable types:** All ordinary values use the runtime's deterministic total
+term order, including mixed values and `nil`. Numbers therefore use numeric
+order and strings use lexicographic (alphabetical) order. Two validated native
+Java temporal values use their natural Java order when they belong to the same
+admitted class (`LocalDate`, `Instant`, `Duration`, or `Date`); cross-class
+temporal values fall back to the ordinary total term order. Malformed Java
+wrappers raise a recoverable invalid-value error.
 
 ```clojure
 (sort [3 1 2])                ; => [1 2 3]
@@ -2518,7 +2524,7 @@ Integer-only bit manipulation, mirroring `clojure.core`. All arguments must be i
 | `seqable?` | Can produce a seq? (collections, strings, nil) |
 | `ifn?` | Is invokable via direct call? (functions, keywords, maps, sets — NOT vectors). Note: maps/sets are invokable as `(my-map :key)` but cannot be passed directly to HOFs like `mapv`; wrap in a lambda: `(mapv #(my-map %) coll)` |
 | `map-entry?` | Always false — no MapEntry type on BEAM |
-| `type` | Returns the type as a keyword: `:boolean`, `:number`, `:string`, `:vector`, `:map`, `:set`, `:keyword`, `:regex`, `:function`. For `nil`, returns `nil` (not `:nil`). |
+| `type` | Returns the type as a keyword: `:boolean`, `:number`, `:string`, `:vector`, `:map`, `:set`, `:keyword`, `:regex`, `:function`, or `:java_object` for a validated native Java wrapper. For `nil`, returns `nil` (not `:nil`). |
 | `describe` | Returns a bounded map summary for data shape, type histograms, key coverage, examples, and optional nested paths. Forms: `(describe x)`, `(describe x opts)`. Options: `{:paths true :depth 2 :sample 3}`. |
 
 ```clojure
@@ -2937,108 +2943,103 @@ completion order. Output from the selected worker error envelope is retained;
 concurrently returned secondary errors are not retained, and detailed output
 may be unavailable when a worker is killed before it can return an envelope.
 
-### 8.14 Date and Time (Minimal Java Interop)
+### 8.14 Date and Time (Bounded Java Interop)
 
-PTC-Lisp supports a minimal subset of Java interop for date and time handling, simulating bounded behavior from `java.util.Date`, `java.time.LocalDate`, `java.time.Instant`, `java.time.Duration`, and `java.lang.System`.
+PTC-Lisp admits a closed, class-aware temporal profile. LocalDate, Instant,
+Duration, and legacy Date values retain their Java class identity while they
+remain inside native evaluation. Raw host Date and DateTime structs are never
+promoted implicitly to Java values.
 
-| Symbol | Signature | Description |
-|--------|-----------|-------------|
-| `java.util.Date.` | `(java.util.Date.)` | Current UTC time |
-| | `(java.util.Date. arg)` | Construct from timestamp (ms/sec), ISO-8601/RFC 2822 string, or an existing DateTime/NaiveDateTime/Date |
-| `java.time.LocalDate/parse` | `(java.time.LocalDate/parse s)` | Parse ISO-8601 date string (`YYYY-MM-DD`) into a Date; if the string contains a time component (`...T...`), returns a DateTime instead |
-| `Instant/parse` | `(Instant/parse iso-string)` | Parse an ISO-8601 instant/date-time string to a DateTime (offsetless `...T...` strings treated as UTC; bare `YYYY-MM-DD` returns a Date instead); also available as `(parse iso-string)` |
-| `parse` | `(parse iso-string)` | Alias for `Instant/parse` / `LocalDate/parse` auto-dispatch — same as `(Instant/parse ...)` |
-| `.getTime` | `(.getTime date)` | Return Unix timestamp in milliseconds (**DateTime only** — works on results from `java.util.Date.`, `Instant/parse`, and `LocalDate/parse` when the input had a time component; does NOT work on bare Date objects, e.g. `LocalDate/parse` of a `YYYY-MM-DD` string) |
-| `.toEpochDay` | `(.toEpochDay local-date)` | Return a LocalDate's epoch-day integer (`1970-01-01` is `0`) |
-| `.plusDays` | `(.plusDays local-date n)` | Add integer days to a LocalDate |
-| `.minusDays` | `(.minusDays local-date n)` | Subtract integer days from a LocalDate |
-| `Duration/between` | `(Duration/between start end)` | Return a Duration between two DateTime instants; also available as `(java.time.Duration/between start end)` |
-| `.toMillis` | `(.toMillis duration)` | Return a Duration length in milliseconds |
-| `.toDays` | `(.toDays duration)` | Return a Duration length in whole days, truncating partial days toward zero |
-| `.isBefore` | `(.isBefore a b)` | Returns true if `a` comes strictly before `b` (same-type only) |
-| `.isAfter` | `(.isAfter a b)` | Returns true if `a` comes strictly after `b` (same-type only) |
-| `System/currentTimeMillis` | `(System/currentTimeMillis)` | Return current Unix milliseconds |
+| Symbol | Signature | Native result or behavior |
+|--------|-----------|---------------------------|
+| LocalDate/parse | (LocalDate/parse text) | Strict ISO LocalDate |
+| Instant/parse | (Instant/parse text) | Strict ISO Instant with nanosecond precision |
+| Duration/between | (Duration/between start end) | Duration between two Instants |
+| java.util.Date. | (java.util.Date.) | Date at the current epoch millisecond |
+| | (java.util.Date. epoch-millis) | Date from one exact signed Java long millisecond value |
+| | (java.util.Date. legacy-text) | Date from the bounded legacy English grammar |
+| .toEpochDay | (.toEpochDay local-date) | Java long epoch-day |
+| .plusDays / .minusDays | (.plusDays local-date n) | Shift LocalDate using Java long coercion |
+| .isBefore / .isAfter | (.isBefore value other) | Same-class LocalDate or Instant comparison |
+| .toEpochMilli | (.toEpochMilli instant) | Java long epoch milliseconds |
+| .toMillis / .toDays | (.toMillis duration) | Java long Duration projections |
+| .getTime | (.getTime date) | Exact Date epoch milliseconds |
+| .before / .after | (.before date other) | Legacy Date comparison |
+| System/currentTimeMillis | (System/currentTimeMillis) | Current Java long epoch milliseconds |
 
-#### Constructor `java.util.Date.`
+Both shorthand and fully qualified static spellings are admitted:
+LocalDate/parse and java.time.LocalDate/parse, Instant/parse and
+java.time.Instant/parse, and Duration/between and
+java.time.Duration/between. There is no bare parse or between alias.
 
-- **No arguments**: Returns a `DateTime` object for the current UTC time.
-- **Integer argument**: Smart unit detection.
-    - If `abs(ts) < 1,000,000,000,000`: Treated as **Unix seconds**.
-    - Otherwise: Treated as **Unix milliseconds**.
-- **String argument**: Attempts to parse in the following order:
-    1. **ISO-8601 with offset** (e.g., `"2026-01-08T14:30:00Z"`)
-    2. **ISO-8601 without offset** (e.g., `"2026-01-08T14:30:00"` — what `(str ~N[...])` produces; treated as UTC)
-    3. **Date-only ISO** (e.g., `"2026-01-08"`, defaults to midnight UTC)
-    4. **RFC 2822** (e.g., `"Wed, 8 Jan 2026 14:30:00 +0000"`, common in email headers)
-- **Temporal struct argument**: Pass-through for `DateTime`; `Date` and `NaiveDateTime` upgrade to UTC (midnight for Date). `Time` alone raises (no date component). Lets generated programs write `(java.util.Date. (:opened_at t))` directly when a tool returns Elixir temporal values.
+#### Native identity and display
 
-#### `java.time.LocalDate/parse`
+Native execution and continuation memory retain validated wrappers:
 
-- **Shorthand**: `(LocalDate/parse s)` is also supported; also available as the bare `(parse s)` builtin.
-- **Behavior**: Auto-dispatches on the input string:
-  - `YYYY-MM-DD` (date-only): Returns an opaque **Date** object representing just the date (no time).
-  - `...T...` (string containing a time component): Returns a **DateTime** instead (divergence from Java's strict `LocalDate.parse`; see `Instant/parse`).
-- **Format**: When displayed or returned to an LLM, a Date is formatted as an ISO string: `"2023-10-27"`.
+- LocalDate stores one Java-range epoch day.
+- Instant stores epoch seconds plus a nanosecond adjustment.
+- Duration stores signed seconds plus a normalized nanosecond adjustment.
+- Date stores one signed Java long epoch-millisecond value.
 
-#### `Instant/parse`
+The runtime str function emits Java-compatible canonical text. Diagnostic
+formatting uses inert class-labelled forms rather than exposing Elixir struct
+fields. Public and Kernel results recursively project the wrappers to strings:
+ISO local date, Java Instant text, Java Duration text, and a UTC instant derived
+from exact Date milliseconds.
 
-- **Shorthand**: `(Instant/parse s)` and the bare `(parse s)` are both supported (all three share the same auto-dispatch implementation).
-- **Behavior**: Parses an ISO-8601 instant or date-time string to a **DateTime**:
-  - Accepts an explicit offset (`Z`, `+02:00`, …).
-  - An offsetless `...T...` string (e.g., `"2026-01-08T14:30:00"`) is treated as UTC.
-  - A bare `YYYY-MM-DD` string (no time component) returns a **Date** instead (same as `LocalDate/parse`).
-- **Methods**: `.isBefore`, `.isAfter`, and `.getTime` all work on the returned DateTime.
+#### Parsing and construction
 
-#### LocalDate Methods
+LocalDate/parse accepts only the Java ISO local-date grammar and full Java
+LocalDate range. Date-time text is rejected.
 
-- **`.toEpochDay`**: Takes a **Date** object and returns the number of days since `1970-01-01`.
-- **`.plusDays` / `.minusDays`**: Take a **Date** object and an integer day count, returning a shifted **Date**.
-- These methods do not work on DateTime values. Use `Duration/between` for instant differences.
+Instant/parse requires a UTC marker or numeric offset, retains up to nine
+fractional digits, and follows Java ISO Instant normalization, including 24:00
+rollover and the parser's leap-second normalization. Offsetless date-times and
+date-only strings are rejected.
 
-#### `Duration/between`
+Duration/between accepts two native Instants only. LocalDate, Date, host
+DateTime, and mixed-class arguments are type errors. This is the bounded
+`Temporal`-profile divergence recorded as DIV-52. Partial units in toDays
+truncate according to Java Duration semantics.
 
-- **Shorthand**: `(Duration/between start end)` and `(java.time.Duration/between start end)` are both supported.
-- **Behavior**: Takes two **DateTime** values and returns an opaque **Duration** object representing `end - start`.
-- **Methods**:
-  - `(.toMillis duration)` returns the signed millisecond difference.
-  - `(.toDays duration)` returns signed whole days; partial days truncate toward zero, including negative partial days.
-- **Display**: When displayed or returned to an LLM, a Duration is formatted as `#duration[<milliseconds>ms]`.
-- **No bare alias**: `(between start end)` is not supported.
-- **LocalDate differences**: Use `(.toEpochDay date)` and subtraction for total day differences between LocalDate values.
+Ordinary comparison, min/max selection, and natural sorting compare two values
+of the same admitted temporal class by their Java temporal value, never by the
+field order of the native wrapper.
 
-#### Methods and Utilities
+Date(long) always means milliseconds. It performs no seconds-versus-milliseconds
+heuristic. The Date temporal-struct constructor extension has been removed.
+Date(String) accepts a deterministic bounded subset of the deprecated Java
+legacy English grammar. It requires an explicit year with at least four digits
+and a date on or after Java's Gregorian cutover (`1582-10-15`), and treats a
+missing zone as UTC; see DIV-51.
 
-- **`.getTime`**: Takes a **DateTime** object and returns its value as Unix milliseconds (integer). Works on results from `java.util.Date.`, `Instant/parse`, and `LocalDate/parse` when the input contained a time component. **Does NOT work on Date objects** (bare `YYYY-MM-DD` results).
-- **`.toEpochDay`**: Takes a **Date** object and returns its epoch-day integer. This is the preferred way to compute total LocalDate day differences: `(- (.toEpochDay b) (.toEpochDay a))`.
-- **`.toMillis` / `.toDays`**: Take a **Duration** object returned by `Duration/between`.
-- **`System/currentTimeMillis`**: Returns the current system time in milliseconds.
+#### Receiver ownership
 
-#### Errors and Type Safety
-- Passing `nil` to `java.util.Date.`, `LocalDate/parse`, or `.getTime` raises an error.
-- Invalid strings or types raise descriptive errors.
-- Java-shaped namespace membership is bounded. For example, `Duration/between` is supported but bare `(between ...)` and unrelated members such as `LocalDate/currentTimeMillis` are not.
-- **Unsupported Methods**: Calling unregistered dot-methods (e.g., `(.toString date)`) provides a hint listing supported interop functions.
+Dot methods are selected by the receiver's admitted class:
 
-#### Comparison
+- LocalDate owns toEpochDay, plusDays, minusDays, isBefore, and isAfter.
+- Instant owns toEpochMilli, isBefore, and isAfter.
+- Duration owns toMillis and toDays.
+- Date owns getTime, before, and after.
 
-Date and DateTime objects support `.isBefore` and `.isAfter` for direct comparison:
-```clojure
-(.isBefore (LocalDate/parse "2023-01-01") (LocalDate/parse "2023-12-31"))  ; => true
-(.isAfter (java.util.Date. "2024-01-01T00:00:00Z") (java.util.Date. "2023-01-01T00:00:00Z"))  ; => true
-```
+Instant does not own getTime, and Date does not own isBefore or isAfter.
+Mixed temporal classes and ordinary host temporal structs cannot bypass this
+selection.
 
-Both arguments must be the same type. Comparing a `LocalDate` with a `DateTime` raises an error:
-```clojure
-(.isBefore (LocalDate/parse "2023-01-01") (java.util.Date. "2023-01-01T00:00:00Z"))
-; => Error: cannot compare LocalDate with DateTime — use same types
-```
+#### Boundary rules
 
-**Legacy alternatives** (still work, but `.isBefore`/`.isAfter` are preferred):
-```clojure
-(< (.getTime d1) (.getTime d2))  ; DateTime millisecond comparison
-(< (str d1) (str d2))            ; LocalDate lexicographic comparison (ISO-8601)
-```
+run_native and run/2 continuation memory retain wrappers. Observable public
+result fields and Kernel boundaries emit canonical inert strings. Direct tool
+arguments use the declared field type only for Java
+leaves: string and any receive canonical text; datetime accepts Instant or Date
+only when the conversion is exact and host-representable. LocalDate and Duration
+are rejected for datetime, as are nanosecond Instants that would lose precision.
+Direct tool results reject Java wrappers. Namespace export also rejects native
+Java wrappers so class authority cannot be serialized as ordinary Lisp data.
 
+Malformed or forged wrappers, projection collisions, invalid strings, null
+object arguments, wrong classes, and arithmetic overflow become bounded Lisp
+errors rather than host exceptions.
 ### 8.15 String Methods (Java Interop)
 
 PTC-Lisp supports Java-style string methods for common operations.
@@ -3279,7 +3280,7 @@ built-ins or reserved runtime operations at analysis time.
 (Math/sqrt 9)                      ; Java double result, distinct from bare sqrt
 (Math/max 1 2.0)                  ; Java type error: no exact mixed overload
 (System/currentTimeMillis)         ; closed Java static call; no bare alias
-(Instant/parse "2026-05-18T12:00:00Z") ; → (parse "2026-05-18T12:00:00Z")
+(Instant/parse "2026-05-18T12:00:00Z") ; closed static call returning a native Instant
 ```
 
 The admitted qualified `Math` references preserve Java primitive identity and
@@ -3549,7 +3550,12 @@ Filter by nested field:
 
 ### 11.3 Recoverable Ordered Comparisons
 
-Ordering comparisons (`>`, `<`, `>=`, `<=`) are recoverable in PTC-Lisp. They return booleans rather than raising for `nil`, strings, keywords, maps, and mixed scalar values. For non-NaN values they use the runtime's total term ordering; `NaN` comparisons return false.
+Ordering comparisons (`>`, `<`, `>=`, `<=`) are recoverable in PTC-Lisp. They
+return booleans rather than raising for `nil`, strings, keywords, maps, and mixed
+scalar values. Same-class validated Java temporal values use their Java natural
+order; other non-NaN values, including cross-class temporal values, use the
+runtime's total term ordering. `NaN` comparisons return false, and malformed
+Java wrappers raise a recoverable invalid-value error.
 
 ```clojure
 ;; Numeric comparisons

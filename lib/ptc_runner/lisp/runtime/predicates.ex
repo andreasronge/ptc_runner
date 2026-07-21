@@ -48,6 +48,10 @@ defmodule PtcRunner.Lisp.Runtime.Predicates do
   alias PtcRunner.Lisp.Env.Builtin
   alias PtcRunner.Lisp.Java.Callable, as: JavaCallable
   alias PtcRunner.Lisp.Java.Primitive, as: JavaPrimitive
+  alias PtcRunner.Lisp.Java.Time.Duration, as: JavaDuration
+  alias PtcRunner.Lisp.Java.Time.Instant, as: JavaInstant
+  alias PtcRunner.Lisp.Java.Time.LocalDate, as: JavaLocalDate
+  alias PtcRunner.Lisp.Java.Util.Date, as: JavaDate
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
   alias PtcRunner.Lisp.RuntimeCallable
   alias PtcRunner.Lisp.SourceAtoms
@@ -338,6 +342,11 @@ defmodule PtcRunner.Lisp.Runtime.Predicates do
   def type_of(%JavaPrimitive{} = primitive),
     do: if(JavaPrimitive.valid?(primitive), do: :number, else: :unknown)
 
+  def type_of(%JavaLocalDate{} = value), do: java_object_type(JavaLocalDate, value)
+  def type_of(%JavaInstant{} = value), do: java_object_type(JavaInstant, value)
+  def type_of(%JavaDuration{} = value), do: java_object_type(JavaDuration, value)
+  def type_of(%JavaDate{} = value), do: java_object_type(JavaDate, value)
+
   def type_of(x) when is_atom(x) do
     if SpecialValues.special?(x), do: :number, else: :keyword
   end
@@ -360,6 +369,10 @@ defmodule PtcRunner.Lisp.Runtime.Predicates do
   def type_of(x) when is_map(x) and not is_struct(x), do: :map
   def type_of(x) when is_function(x), do: :function
   def type_of(_), do: :unknown
+
+  defp java_object_type(module, value) do
+    if module.valid?(value), do: :java_object, else: :unknown
+  end
 
   # ============================================================
   # Type Coercion

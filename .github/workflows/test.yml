@@ -93,5 +93,5 @@ jobs:
       - name: Verify Babashka fast subset
         run: mix ptc.java_conformance --oracle babashka --subset fast
 
-      - name: Verify PTC-only Java compatibility cases
-        run: mix ptc.java_conformance --oracle ptc --subset ptc-only
+      - name: Verify closed-dispatch Java compatibility cases
+        run: mix ptc.java_conformance --oracle ptc --subset closed-dispatch

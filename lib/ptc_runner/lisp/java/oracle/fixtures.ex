@@ -152,6 +152,8 @@ defmodule PtcRunner.Lisp.Java.Oracle.Fixtures do
     end
 
     validate_expected!(fixture, overload)
+    validate_ptc_expected!(fixture, overload)
+    validate_boundary_probe!(fixture)
 
     unless length(fixture.invocation.arguments) == overload.arity do
       raise ArgumentError,
@@ -166,7 +168,8 @@ defmodule PtcRunner.Lisp.Java.Oracle.Fixtures do
     fixture.invocation.arguments
     |> Enum.zip(overload.arguments)
     |> Enum.each(fn {%{type: actual} = argument, expected} ->
-      unless compatible_argument_type?(actual, expected) do
+      unless compatible_argument_type?(actual, expected) or
+               compatible_boundary_probe_argument_type?(fixture, actual, expected) do
         raise ArgumentError,
               "fixture #{fixture.case_id} argument type #{inspect(actual)} " <>
                 "does not match #{inspect(expected)}"
@@ -226,6 +229,15 @@ defmodule PtcRunner.Lisp.Java.Oracle.Fixtures do
   defp compatible_argument_type?(type, type), do: true
   defp compatible_argument_type?(_actual, _expected), do: false
 
+  defp compatible_boundary_probe_argument_type?(
+         %{boundary_probe: true, divergence_ids: divergence_ids},
+         :local_date,
+         :instant
+       ),
+       do: "DIV-52" in divergence_ids
+
+  defp compatible_boundary_probe_argument_type?(_fixture, _actual, _expected), do: false
+
   defp validate_expected!(%{expected: %{status: :ok, type: type}}, %{return: type}), do: :ok
 
   defp validate_expected!(%{expected: %{status: :error, type: :error, value: value}}, _overload)
@@ -236,6 +248,26 @@ defmodule PtcRunner.Lisp.Java.Oracle.Fixtures do
     raise ArgumentError,
           "fixture #{fixture.case_id} expected status/type does not match its manifest contract"
   end
+
+  defp validate_ptc_expected!(%{ptc_expected: expected} = fixture, overload) do
+    validate_expected!(Map.put(fixture, :expected, expected), overload)
+  end
+
+  defp validate_ptc_expected!(_fixture, _overload), do: :ok
+
+  defp validate_boundary_probe!(%{
+         boundary_probe: true,
+         ptc_expected: %{status: :error, type: :error},
+         divergence_ids: [_ | _]
+       }),
+       do: :ok
+
+  defp validate_boundary_probe!(%{boundary_probe: true} = fixture) do
+    raise ArgumentError,
+          "fixture #{fixture.case_id} boundary probe requires a divergent PTC error expectation"
+  end
+
+  defp validate_boundary_probe!(_fixture), do: :ok
 
   defp validate_subsets!(%{subsets: subsets} = fixture, :jvm) do
     unless :implemented in subsets and Enum.all?(subsets, &(&1 in [:implemented, :fast])) do

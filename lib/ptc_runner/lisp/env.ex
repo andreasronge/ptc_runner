@@ -158,9 +158,12 @@ defmodule PtcRunner.Lisp.Env do
        %{2 => [:associative_or_nil, :seqable], 3 => [:associative_or_nil, :seqable, :any]}}
 
   defp args_spec(:assoc), do: {:min, 1, [:map_or_list_or_nil], {:rest, :any}}
-  defp args_spec(:"assoc-in"), do: [:any, :seqable, :any]
+  defp args_spec(:"assoc-in"), do: [:associative_or_nil, :seqable, :any]
   defp args_spec(:update), do: {:min, 3, [:map_or_list, :any, :callable], {:rest, :any}}
-  defp args_spec(:"update-in"), do: {:min, 3, [:any, :seqable, :callable], {:rest, :any}}
+
+  defp args_spec(:"update-in"),
+    do: {:min, 3, [:associative_or_nil, :seqable, :callable], {:rest, :any}}
+
   defp args_spec(:dissoc), do: {:min, 1, [:map_or_nil], {:rest, :any}}
   defp args_spec(:"select-keys"), do: [:map_or_nil, :seqable]
   defp args_spec(:keys), do: [:map_or_nil]
@@ -168,6 +171,9 @@ defmodule PtcRunner.Lisp.Env do
   defp args_spec(:"update-vals"), do: [:map_or_nil, :callable]
   defp args_spec(:"update-keys"), do: [:map_or_nil, :callable]
   defp args_spec(:"reduce-kv"), do: [:callable, :any, :map_or_nil]
+  defp args_spec(:entries), do: [:map]
+  defp args_spec(:empty), do: [:seqable]
+  defp args_spec(:cons), do: [:any, :seqable]
   defp args_spec(:zipmap), do: [:seqable, :seqable]
 
   defp args_spec(:filter), do: [:predicate, :seqable]

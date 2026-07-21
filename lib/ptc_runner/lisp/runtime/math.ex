@@ -8,6 +8,7 @@ defmodule PtcRunner.Lisp.Runtime.Math do
 
   alias PtcRunner.Lisp.Eval.Helpers
   alias PtcRunner.Lisp.Eval.HostContext
+  alias PtcRunner.Lisp.Java.Ordering, as: JavaOrdering
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
   alias PtcRunner.Lisp.Runtime.JavaMathSemantics
   alias PtcRunner.Lisp.Runtime.SpecialValues
@@ -415,6 +416,83 @@ defmodule PtcRunner.Lisp.Runtime.Math do
   end
 
   def eq(x, y) do
+    case JavaOrdering.compare(x, y) do
+      {:ok, comparison} -> comparison == :eq
+      {:error, :invalid_java_value} -> invalid_java_ordering!()
+      :not_java -> ordinary_eq(x, y)
+    end
+  end
+
+  def lt(x, y) do
+    case JavaOrdering.compare(x, y) do
+      {:ok, comparison} -> comparison == :lt
+      {:error, :invalid_java_value} -> invalid_java_ordering!()
+      :not_java -> ordinary_lt(x, y)
+    end
+  end
+
+  def gt(x, y), do: lt(y, x)
+
+  def lte(x, y) do
+    case JavaOrdering.compare(x, y) do
+      {:ok, comparison} ->
+        comparison != :gt
+
+      {:error, :invalid_java_value} ->
+        invalid_java_ordering!()
+
+      :not_java ->
+        if SpecialValues.nan?(x) or SpecialValues.nan?(y),
+          do: false,
+          else: not ordinary_lt(y, x)
+    end
+  end
+
+  def gte(x, y) do
+    case JavaOrdering.compare(x, y) do
+      {:ok, comparison} ->
+        comparison != :lt
+
+      {:error, :invalid_java_value} ->
+        invalid_java_ordering!()
+
+      :not_java ->
+        if SpecialValues.nan?(x) or SpecialValues.nan?(y),
+          do: false,
+          else: not ordinary_lt(x, y)
+    end
+  end
+
+  def compare(x, y) do
+    case JavaOrdering.compare(x, y) do
+      {:ok, :lt} ->
+        -1
+
+      {:ok, :eq} ->
+        0
+
+      {:ok, :gt} ->
+        1
+
+      {:error, :invalid_java_value} ->
+        invalid_java_ordering!()
+
+      :not_java when x == :nan or y == :nan ->
+        # Standard IEEE 754: comparison with NaN is false/unordered.
+        # but compare/2 usually returns -1, 0, 1.
+        # For sort consistency, we raise.
+        raise "type_error: compare: unordered comparison with NaN"
+
+      :not_java ->
+        cond do
+          ordinary_eq(x, y) -> 0
+          ordinary_lt(x, y) -> -1
+          true -> 1
+        end
+    end
+  end
+
+  defp ordinary_eq(x, y) do
     cond do
       SpecialValues.nan?(x) or SpecialValues.nan?(y) ->
         false
@@ -427,7 +505,7 @@ defmodule PtcRunner.Lisp.Runtime.Math do
     end
   end
 
-  def lt(x, y) do
+  defp ordinary_lt(x, y) do
     cond do
       SpecialValues.nan?(x) or SpecialValues.nan?(y) -> false
       SpecialValues.neg_infinite?(x) -> not SpecialValues.neg_infinite?(y)
@@ -438,34 +516,9 @@ defmodule PtcRunner.Lisp.Runtime.Math do
     end
   end
 
-  def gt(x, y), do: lt(y, x)
-
-  def lte(x, y) do
-    if SpecialValues.nan?(x) or SpecialValues.nan?(y), do: false, else: not gt(x, y)
-  end
-
-  def gte(x, y) do
-    if SpecialValues.nan?(x) or SpecialValues.nan?(y), do: false, else: not lt(x, y)
-  end
-
-  def compare(x, y) do
-    cond do
-      SpecialValues.nan?(x) or SpecialValues.nan?(y) ->
-        # Standard IEEE 754: comparison with NaN is false/unordered.
-        # but compare/2 usually returns -1, 0, 1.
-        # For sort consistency, we raise.
-        raise "type_error: compare: unordered comparison with NaN"
-
-      eq(x, y) ->
-        0
-
-      lt(x, y) ->
-        -1
-
-      true ->
-        1
-    end
-  end
+  @spec invalid_java_ordering!() :: no_return()
+  defp invalid_java_ordering!,
+    do: HostContext.error!({:invalid_java_value, :java_object})
 
   @doc false
   def unary_variadic(fun2, x) do

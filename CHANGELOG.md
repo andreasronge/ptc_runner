@@ -11,8 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added a bounded Java interop oracle baseline with pinned Temurin and JVM
   Clojure versions, typed fixtures for every admitted overload, exact descriptor
-  attestation for every JVM overload, executable PTC-only compatibility cases,
-  a Babashka fast subset, and a dedicated CI conformance job.
+  attestation for every JVM overload, executable closed-dispatch compatibility
+  cases, a Babashka fast subset, and a dedicated CI conformance job.
 - Added closed manifest dispatch, structured Java failures, native Java
   callables and primitive provenance, bounded boundary projection, and complete
   Java CoreAST nodes; migrated `Boolean/parseBoolean` off its legacy Env route.
@@ -43,6 +43,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Java `long` identity. The qualified call projects to an ordinary integer at
   public boundaries, and the bare `(currentTimeMillis)` compatibility alias was
   removed.
+- Migrated LocalDate, Instant, Duration, and legacy Date to validated native
+  wrappers and class-owned closed dispatch. Temporal precision and Java ranges
+  survive native evaluation; Date integers are exact milliseconds; public,
+  Kernel, formatting, export, retained-size, and signature-aware tool
+  boundaries handle every wrapper explicitly. Removed the bare `parse` alias,
+  Instant `getTime`, Date `isBefore`/`isAfter`, the Date temporal constructor
+  extension, host temporal promotion, and the global temporal dispatcher.
 - Added the code-owned `log-analysis-v1` profile to `mix ptc.repl`, with
   bounded multi-turn mission evaluation over an immutable trace capture,
   deterministic JSONL output for coding agents, safe profile discovery, and

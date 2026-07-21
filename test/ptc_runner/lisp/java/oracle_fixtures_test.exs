@@ -64,13 +64,29 @@ defmodule PtcRunner.Lisp.Java.OracleFixturesTest do
     assert File.regular?(Fixtures.baseline_path())
   end
 
-  test "PTC-only cases are executable behavior checks" do
-    assert {:ok, result} = Runner.run(:ptc, :ptc_only)
+  test "Duration/between records and executes its excluded LocalDate boundary" do
+    {:ok, overload} = Surface.fetch_overload(:duration_between_temporal)
+    fixture = Enum.find(Fixtures.cases(), &(&1.case_id == "duration-between-local-date-boundary"))
 
-    assert MapSet.new(result.outcomes, & &1.case_id) ==
-             MapSet.new(Fixtures.cases() |> Enum.filter(&(&1.oracle == :ptc_only)), & &1.case_id)
+    assert overload.divergence_ids == ["DIV-52"]
+    assert fixture.divergence_ids == ["DIV-52"]
 
-    assert Enum.all?(result.outcomes, &(&1.status == "ok"))
+    assert fixture.invocation.arguments == [
+             %{status: :ok, type: :local_date, value: "2024-01-01"},
+             %{status: :ok, type: :local_date, value: "2024-01-02"}
+           ]
+
+    assert fixture.expected == %{
+             status: :error,
+             type: :error,
+             value: "java.time.temporal.UnsupportedTemporalTypeException"
+           }
+
+    assert fixture.ptc_expected == %{
+             status: :error,
+             type: :error,
+             value: "java_type_error"
+           }
   end
 
   test "closed dispatch cases attest the selected PTC overload" do
@@ -156,9 +172,52 @@ defmodule PtcRunner.Lisp.Java.OracleFixturesTest do
                  math-sqrt-double-negative
                  math-sqrt-double-negative-zero
                  system-current-time-millis-0
+                 local-date-parse-char-sequence
+                 local-date-parse-positive-zero-extended-year
+                 local-date-parse-invalid
+                 local-date-to-epoch-day-0
+                 local-date-plus-days-long
+                 local-date-minus-days-long
+                 local-date-minus-days-long-min-at-epoch
+                 local-date-is-before-chrono-local-date
+                 local-date-is-after-chrono-local-date
+                 instant-parse-char-sequence
+                 instant-parse-positive-zero-extended-year
+                 instant-parse-empty-fraction
+                 instant-parse-hour-offset
+                 instant-parse-compact-minute-offset
+                 instant-parse-compact-second-offset
+                 instant-parse-invalid
+                 instant-is-before-instant
+                 instant-is-after-instant
+                 instant-to-epoch-milli-0
+                 duration-between-temporal
+                 duration-between-local-date-boundary
+                 duration-to-millis-0
+                 duration-to-millis-negative-submillisecond
+                 duration-to-millis-overflow
+                 duration-to-days-0
+                 date-new-0
+                 date-new-long
+                         date-new-string
+                         date-new-string-null
+                         date-new-string-without-seconds
+                         date-new-string-without-zone
+                 date-new-string-invalid-weekday
+                 date-new-string-invalid-month
+                 date-get-time-0
+                 date-before-date
+                 date-after-date
                ))
 
-    assert Enum.all?(outcomes, &(&1.selected_overload_id == &1.overload_id))
+    {boundary_probes, admitted_cases} =
+      Enum.split_with(outcomes, &(&1.case_id == "duration-between-local-date-boundary"))
+
+    assert [%{status: "error", expected: %{value: "java_type_error"}} = boundary] =
+             boundary_probes
+
+    refute Map.has_key?(boundary, :selected_overload_id)
+    assert Enum.all?(admitted_cases, &(&1.selected_overload_id == &1.overload_id))
   end
 
   test "dispatch attestation ignores unrelated Java references" do

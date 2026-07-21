@@ -397,7 +397,9 @@ defmodule PtcRunner.Lisp do
       [:return, :fail, :memory, :tool_calls, :pmap_calls, :child_steps, :tool_cache],
       {:ok, step},
       fn field, {:ok, projected_step} ->
-        case JavaProject.project(Map.fetch!(projected_step, field), :public) do
+        boundary = if field == :memory, do: :continuation, else: :public
+
+        case JavaProject.project(Map.fetch!(projected_step, field), boundary) do
           {:ok, value} -> {:cont, {:ok, Map.put(projected_step, field, value)}}
           {:error, reason} -> {:halt, {:error, reason}}
         end
@@ -424,7 +426,7 @@ defmodule PtcRunner.Lisp do
     %{
       step
       | return: nil,
-        memory: safely_project_public(step.memory, %{}),
+        memory: safely_project_continuation(step.memory, %{}),
         tool_calls: safely_project_public(step.tool_calls, []),
         pmap_calls: safely_project_public(step.pmap_calls, []),
         child_steps: safely_project_public(step.child_steps, []),
@@ -440,6 +442,13 @@ defmodule PtcRunner.Lisp do
 
   defp safely_project_public(value, fallback) do
     case JavaProject.project(value, :public) do
+      {:ok, projected} -> projected
+      {:error, _reason} -> fallback
+    end
+  end
+
+  defp safely_project_continuation(value, fallback) do
+    case JavaProject.project(value, :continuation) do
       {:ok, projected} -> projected
       {:error, _reason} -> fallback
     end
@@ -1154,6 +1163,18 @@ defmodule PtcRunner.Lisp do
 
   def format_error({:memory_exceeded, info}),
     do: "Memory exceeded: #{memory_exceeded_message(info)}"
+
+  def format_error({category, message, details})
+      when category in [
+             :unsupported_java_class,
+             :unsupported_java_member,
+             :java_arity_error,
+             :java_type_error,
+             :java_domain_error,
+             :invalid_java_string,
+             :java_handler_contract_error
+           ] and is_binary(message) and is_map(details),
+      do: "Java interop error: #{message}"
 
   # Handle Analyze errors: {:invalid_arity, atom, message}
   def format_error({:invalid_arity, _atom, msg}) when is_binary(msg), do: "Analysis error: #{msg}"

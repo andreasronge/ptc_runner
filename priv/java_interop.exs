@@ -250,12 +250,12 @@
       callable?: true
     },
     %{
-      member: "getTime",
+      member: "toEpochMilli",
       kind: :instance,
       class_id: :java_time_instant,
-      spellings: [".getTime"],
-      overload_ids: [:instant_get_time_alias_0],
-      reference_id: :instant_get_time_alias,
+      spellings: [".toEpochMilli"],
+      overload_ids: [:instant_to_epoch_milli_0],
+      reference_id: :instant_to_epoch_milli,
       callable?: true
     },
     %{
@@ -290,7 +290,7 @@
       kind: :constructor,
       class_id: :java_util_date,
       spellings: ["java.util.Date."],
-      overload_ids: [:date_new_0, :date_new_long, :date_new_string, :date_new_ptc_temporal],
+      overload_ids: [:date_new_0, :date_new_long, :date_new_string],
       reference_id: :date_new,
       callable?: true
     },
@@ -304,21 +304,21 @@
       callable?: true
     },
     %{
-      member: "isBefore",
+      member: "before",
       kind: :instance,
       class_id: :java_util_date,
-      spellings: [".isBefore"],
-      overload_ids: [:date_is_before_alias_date],
-      reference_id: :date_is_before_alias,
+      spellings: [".before"],
+      overload_ids: [:date_before_date],
+      reference_id: :date_before,
       callable?: true
     },
     %{
-      member: "isAfter",
+      member: "after",
       kind: :instance,
       class_id: :java_util_date,
-      spellings: [".isAfter"],
-      overload_ids: [:date_is_after_alias_date],
-      reference_id: :date_is_after_alias,
+      spellings: [".after"],
+      overload_ids: [:date_after_date],
+      reference_id: :date_after,
       callable?: true
     },
     %{
@@ -761,11 +761,11 @@
       arguments: [:char_sequence],
       errors: [:date_time_parse_exception, :null_pointer_exception],
       receiver: nil,
-      route: {:legacy_env, :parse},
+      route: {:dispatch, :local_date_parse},
       reference_id: :local_date_parse,
       descriptor: "(Ljava/lang/CharSequence;)Ljava/time/LocalDate;",
       overload_id: :local_date_parse_char_sequence,
-      divergence_ids: ["GAP-J06"],
+      divergence_ids: [],
       classification: :exact,
       attestation: :jvm
     },
@@ -773,9 +773,9 @@
       return: :long,
       arity: 0,
       arguments: [],
-      errors: [],
+      errors: [:null_pointer_exception],
       receiver: :local_date,
-      route: {:legacy_env, :".toEpochDay"},
+      route: {:dispatch, :local_date_to_epoch_day},
       reference_id: :local_date_to_epoch_day,
       descriptor: "()J",
       overload_id: :local_date_to_epoch_day_0,
@@ -787,13 +787,13 @@
       return: :local_date,
       arity: 1,
       arguments: [:long],
-      errors: [:date_time_exception, :arithmetic_exception],
+      errors: [:date_time_exception, :arithmetic_exception, :null_pointer_exception],
       receiver: :local_date,
-      route: {:legacy_env, :".plusDays"},
+      route: {:dispatch, :local_date_plus_days},
       reference_id: :local_date_plus_days,
       descriptor: "(J)Ljava/time/LocalDate;",
       overload_id: :local_date_plus_days_long,
-      divergence_ids: ["GAP-J12"],
+      divergence_ids: [],
       classification: :exact,
       attestation: :jvm
     },
@@ -801,13 +801,13 @@
       return: :local_date,
       arity: 1,
       arguments: [:long],
-      errors: [:date_time_exception, :arithmetic_exception],
+      errors: [:date_time_exception, :arithmetic_exception, :null_pointer_exception],
       receiver: :local_date,
-      route: {:legacy_env, :".minusDays"},
+      route: {:dispatch, :local_date_minus_days},
       reference_id: :local_date_minus_days,
       descriptor: "(J)Ljava/time/LocalDate;",
       overload_id: :local_date_minus_days_long,
-      divergence_ids: ["GAP-J12"],
+      divergence_ids: [],
       classification: :exact,
       attestation: :jvm
     },
@@ -817,7 +817,7 @@
       arguments: [:local_date],
       errors: [:null_pointer_exception],
       receiver: :local_date,
-      route: {:legacy_env, :".isBefore"},
+      route: {:dispatch, :local_date_is_before},
       reference_id: :local_date_is_before,
       descriptor: "(Ljava/time/chrono/ChronoLocalDate;)Z",
       overload_id: :local_date_is_before_chrono_local_date,
@@ -831,7 +831,7 @@
       arguments: [:local_date],
       errors: [:null_pointer_exception],
       receiver: :local_date,
-      route: {:legacy_env, :".isAfter"},
+      route: {:dispatch, :local_date_is_after},
       reference_id: :local_date_is_after,
       descriptor: "(Ljava/time/chrono/ChronoLocalDate;)Z",
       overload_id: :local_date_is_after_chrono_local_date,
@@ -845,11 +845,11 @@
       arguments: [:char_sequence],
       errors: [:date_time_parse_exception, :null_pointer_exception],
       receiver: nil,
-      route: {:legacy_env, :parse},
+      route: {:dispatch, :instant_parse},
       reference_id: :instant_parse,
       descriptor: "(Ljava/lang/CharSequence;)Ljava/time/Instant;",
       overload_id: :instant_parse_char_sequence,
-      divergence_ids: ["GAP-J06"],
+      divergence_ids: [],
       classification: :exact,
       attestation: :jvm
     },
@@ -859,7 +859,7 @@
       arguments: [:instant],
       errors: [:null_pointer_exception],
       receiver: :instant,
-      route: {:legacy_env, :".isBefore"},
+      route: {:dispatch, :instant_is_before},
       reference_id: :instant_is_before,
       descriptor: "(Ljava/time/Instant;)Z",
       overload_id: :instant_is_before_instant,
@@ -873,7 +873,7 @@
       arguments: [:instant],
       errors: [:null_pointer_exception],
       receiver: :instant,
-      route: {:legacy_env, :".isAfter"},
+      route: {:dispatch, :instant_is_after},
       reference_id: :instant_is_after,
       descriptor: "(Ljava/time/Instant;)Z",
       overload_id: :instant_is_after_instant,
@@ -885,28 +885,28 @@
       return: :long,
       arity: 0,
       arguments: [],
-      errors: [],
+      errors: [:arithmetic_exception, :null_pointer_exception],
       receiver: :instant,
-      route: {:legacy_env, :".getTime"},
-      reference_id: :instant_get_time_alias,
-      descriptor: nil,
-      overload_id: :instant_get_time_alias_0,
-      divergence_ids: ["GAP-J04"],
-      classification: :intentional_ptc_alias,
-      attestation: :ptc_only
+      route: {:dispatch, :instant_to_epoch_milli},
+      reference_id: :instant_to_epoch_milli,
+      descriptor: "()J",
+      overload_id: :instant_to_epoch_milli_0,
+      divergence_ids: [],
+      classification: :exact,
+      attestation: :jvm
     },
     %{
       return: :duration,
       arity: 2,
-      arguments: [:temporal, :temporal],
+      arguments: [:instant, :instant],
       errors: [:date_time_exception, :arithmetic_exception, :null_pointer_exception],
       receiver: nil,
-      route: {:legacy_env, :"Duration/between"},
+      route: {:dispatch, :duration_between},
       reference_id: :duration_between,
       descriptor:
         "(Ljava/time/temporal/Temporal;Ljava/time/temporal/Temporal;)Ljava/time/Duration;",
       overload_id: :duration_between_temporal,
-      divergence_ids: ["GAP-J19"],
+      divergence_ids: ["DIV-52"],
       classification: :exact,
       attestation: :jvm
     },
@@ -914,9 +914,9 @@
       return: :long,
       arity: 0,
       arguments: [],
-      errors: [],
+      errors: [:arithmetic_exception, :null_pointer_exception],
       receiver: :duration,
-      route: {:legacy_env, :".toMillis"},
+      route: {:dispatch, :duration_to_millis},
       reference_id: :duration_to_millis,
       descriptor: "()J",
       overload_id: :duration_to_millis_0,
@@ -928,9 +928,9 @@
       return: :long,
       arity: 0,
       arguments: [],
-      errors: [],
+      errors: [:null_pointer_exception],
       receiver: :duration,
-      route: {:legacy_env, :".toDays"},
+      route: {:dispatch, :duration_to_days},
       reference_id: :duration_to_days,
       descriptor: "()J",
       overload_id: :duration_to_days_0,
@@ -944,7 +944,7 @@
       arguments: [],
       errors: [],
       receiver: nil,
-      route: {:legacy_env, :"java.util.Date."},
+      route: {:dispatch, :date_new},
       reference_id: :date_new,
       descriptor: "()V",
       overload_id: :date_new_0,
@@ -958,11 +958,11 @@
       arguments: [:long],
       errors: [],
       receiver: nil,
-      route: {:legacy_env, :"java.util.Date."},
+      route: {:dispatch, :date_new},
       reference_id: :date_new,
       descriptor: "(J)V",
       overload_id: :date_new_long,
-      divergence_ids: ["GAP-J03"],
+      divergence_ids: [],
       classification: :exact,
       attestation: :jvm
     },
@@ -970,37 +970,23 @@
       return: :date,
       arity: 1,
       arguments: [:string],
-      errors: [:illegal_argument_exception, :null_pointer_exception],
+      errors: [:illegal_argument_exception],
       receiver: nil,
-      route: {:legacy_env, :"java.util.Date."},
+      route: {:dispatch, :date_new},
       reference_id: :date_new,
       descriptor: "(Ljava/lang/String;)V",
       overload_id: :date_new_string,
-      divergence_ids: ["GAP-J06", "GAP-J11"],
+      divergence_ids: ["DIV-51"],
       classification: :exact,
       attestation: :jvm
-    },
-    %{
-      return: :date,
-      arity: 1,
-      arguments: [:ptc_temporal],
-      errors: [],
-      receiver: nil,
-      route: {:legacy_env, :"java.util.Date."},
-      reference_id: :date_new,
-      descriptor: nil,
-      overload_id: :date_new_ptc_temporal,
-      divergence_ids: ["GAP-J21"],
-      classification: :ptc_extension,
-      attestation: :ptc_only
     },
     %{
       return: :long,
       arity: 0,
       arguments: [],
-      errors: [],
+      errors: [:null_pointer_exception],
       receiver: :date,
-      route: {:legacy_env, :".getTime"},
+      route: {:dispatch, :date_get_time},
       reference_id: :date_get_time,
       descriptor: "()J",
       overload_id: :date_get_time_0,
@@ -1014,13 +1000,13 @@
       arguments: [:date],
       errors: [:null_pointer_exception],
       receiver: :date,
-      route: {:legacy_env, :".isBefore"},
-      reference_id: :date_is_before_alias,
-      descriptor: nil,
-      overload_id: :date_is_before_alias_date,
-      divergence_ids: ["GAP-J20"],
-      classification: :intentional_ptc_alias,
-      attestation: :ptc_only
+      route: {:dispatch, :date_before},
+      reference_id: :date_before,
+      descriptor: "(Ljava/util/Date;)Z",
+      overload_id: :date_before_date,
+      divergence_ids: [],
+      classification: :exact,
+      attestation: :jvm
     },
     %{
       return: :boolean,
@@ -1028,13 +1014,13 @@
       arguments: [:date],
       errors: [:null_pointer_exception],
       receiver: :date,
-      route: {:legacy_env, :".isAfter"},
-      reference_id: :date_is_after_alias,
-      descriptor: nil,
-      overload_id: :date_is_after_alias_date,
-      divergence_ids: ["GAP-J20"],
-      classification: :intentional_ptc_alias,
-      attestation: :ptc_only
+      route: {:dispatch, :date_after},
+      reference_id: :date_after,
+      descriptor: "(Ljava/util/Date;)Z",
+      overload_id: :date_after_date,
+      divergence_ids: [],
+      classification: :exact,
+      attestation: :jvm
     },
     %{
       return: :int,
@@ -1528,8 +1514,7 @@
         %{
           source_name: :parse,
           reference_id: :local_date_parse,
-          classification: :admitted,
-          legacy_binding: :parse
+          classification: :admitted
         }
       ]
     },
@@ -1541,8 +1526,7 @@
         %{
           source_name: :parse,
           reference_id: :local_date_parse,
-          classification: :admitted,
-          legacy_binding: :parse
+          classification: :admitted
         }
       ]
     },
@@ -1554,8 +1538,7 @@
         %{
           source_name: :parse,
           reference_id: :instant_parse,
-          classification: :admitted,
-          legacy_binding: :parse
+          classification: :admitted
         }
       ]
     },
@@ -1567,8 +1550,7 @@
         %{
           source_name: :parse,
           reference_id: :instant_parse,
-          classification: :admitted,
-          legacy_binding: :parse
+          classification: :admitted
         }
       ]
     },
@@ -1576,13 +1558,11 @@
       category: :interop,
       namespace: :Duration,
       class_id: :java_time_duration,
-      legacy_lookup: :qualified_table,
       members: [
         %{
           source_name: :between,
           reference_id: :duration_between,
-          classification: :admitted,
-          legacy_binding: :"Duration/between"
+          classification: :admitted
         }
       ]
     },
@@ -1594,8 +1574,7 @@
         %{
           source_name: :between,
           reference_id: :duration_between,
-          classification: :admitted,
-          legacy_binding: :"Duration/between"
+          classification: :admitted
         }
       ]
     }
@@ -2679,12 +2658,12 @@
         status: :supported,
         description: "Parse ISO-8601 date string",
         notes:
-          "Also available as java.time.LocalDate/parse and parse. BUG GAP-J06: date-time strings are accepted instead of rejected.",
+          "Also available as java.time.LocalDate/parse; parsing is class-specific and strict.",
         reference_id: :local_date_parse,
         jvm_descriptor_attestations: %{
           local_date_parse_char_sequence: "(Ljava/lang/CharSequence;)Ljava/time/LocalDate;"
         },
-        admitted_overload_divergences: %{local_date_parse_char_sequence: ["GAP-J06"]},
+        admitted_overload_divergences: %{local_date_parse_char_sequence: []},
         target_id: :java_time_local_date_audit_localdate_parse
       },
       %{
@@ -2700,7 +2679,7 @@
         upstream: [{"java.time.LocalDate", :instance, "isBefore"}],
         status: :supported,
         description: "Date ordering predicate",
-        notes: "Works for same-type Date or DateTime values.",
+        notes: "Works for native LocalDate values only.",
         reference_id: :local_date_is_before,
         jvm_descriptor_attestations: %{
           local_date_is_before_chrono_local_date: "(Ljava/time/chrono/ChronoLocalDate;)Z"
@@ -2713,7 +2692,7 @@
         upstream: [{"java.time.LocalDate", :instance, "isAfter"}],
         status: :supported,
         description: "Date ordering predicate",
-        notes: "Works for same-type Date or DateTime values.",
+        notes: "Works for native LocalDate values only.",
         reference_id: :local_date_is_after,
         jvm_descriptor_attestations: %{
           local_date_is_after_chrono_local_date: "(Ljava/time/chrono/ChronoLocalDate;)Z"
@@ -2751,22 +2730,20 @@
         name: ".plusDays",
         status: :supported,
         description: "Add days to a LocalDate",
-        notes:
-          "Requested in issue #1019 for date arithmetic. BUG GAP-J12: floating and NaN day counts are rejected instead of following Clojure Java interop coercion.",
+        notes: "Requested in issue #1019 for date arithmetic.",
         reference_id: :local_date_plus_days,
         jvm_descriptor_attestations: %{local_date_plus_days_long: "(J)Ljava/time/LocalDate;"},
-        admitted_overload_divergences: %{local_date_plus_days_long: ["GAP-J12"]},
+        admitted_overload_divergences: %{local_date_plus_days_long: []},
         target_id: :java_time_local_date_audit_plusdays
       },
       %{
         name: ".minusDays",
         status: :supported,
         description: "Subtract days from a LocalDate",
-        notes:
-          "Requested in issue #1019 for date arithmetic. BUG GAP-J12: floating and NaN day counts are rejected instead of following Clojure Java interop coercion.",
+        notes: "Requested in issue #1019 for date arithmetic.",
         reference_id: :local_date_minus_days,
         jvm_descriptor_attestations: %{local_date_minus_days_long: "(J)Ljava/time/LocalDate;"},
-        admitted_overload_divergences: %{local_date_minus_days_long: ["GAP-J12"]},
+        admitted_overload_divergences: %{local_date_minus_days_long: []},
         target_id: :java_time_local_date_audit_minusdays
       }
     ],
@@ -2775,13 +2752,12 @@
         name: "Instant/parse",
         status: :supported,
         description: "Parse ISO-8601 instant string",
-        notes:
-          "Also available as java.time.Instant/parse and parse. BUG GAP-J06: date-only and no-zone date-time strings are accepted instead of rejected.",
+        notes: "Also available as java.time.Instant/parse; parsing requires an offset.",
         reference_id: :instant_parse,
         jvm_descriptor_attestations: %{
           instant_parse_char_sequence: "(Ljava/lang/CharSequence;)Ljava/time/Instant;"
         },
-        admitted_overload_divergences: %{instant_parse_char_sequence: ["GAP-J06"]},
+        admitted_overload_divergences: %{instant_parse_char_sequence: []},
         target_id: :java_time_instant_audit_instant_parse
       },
       %{
@@ -2797,7 +2773,7 @@
         upstream: [{"java.time.Instant", :instance, "isBefore"}],
         status: :supported,
         description: "Instant ordering predicate",
-        notes: "Works for same-type Date or DateTime values.",
+        notes: "Works for native Instant values only.",
         reference_id: :instant_is_before,
         jvm_descriptor_attestations: %{instant_is_before_instant: "(Ljava/time/Instant;)Z"},
         admitted_overload_divergences: %{instant_is_before_instant: []},
@@ -2808,7 +2784,7 @@
         upstream: [{"java.time.Instant", :instance, "isAfter"}],
         status: :supported,
         description: "Instant ordering predicate",
-        notes: "Works for same-type Date or DateTime values.",
+        notes: "Works for native Instant values only.",
         reference_id: :instant_is_after,
         jvm_descriptor_attestations: %{instant_is_after_instant: "(Ljava/time/Instant;)Z"},
         admitted_overload_divergences: %{instant_is_after_instant: []},
@@ -2817,28 +2793,28 @@
       %{
         name: ".getTime",
         upstream: [{"java.util.Date", :instance, "getTime"}],
-        status: :supported,
-        description: "Unix timestamp in milliseconds",
-        notes:
-          "BUG GAP-J04: Java Instant has toEpochMilli, not getTime; current behavior is a PTC convenience.",
-        reference_id: :instant_get_time_alias,
-        jvm_descriptor_attestations: %{},
-        admitted_overload_divergences: %{instant_get_time_alias_0: ["GAP-J04"]},
+        status: :not_relevant,
+        description: "Method belongs to java.util.Date, not Instant",
+        notes: "Removed from Instant when class-aware temporal dispatch landed.",
+        reference_id: nil,
         target_id: :java_time_instant_audit_gettime
       },
       %{
         name: ".toEpochMilli",
-        status: :candidate,
+        status: :supported,
         description: "Return Instant epoch millisecond",
-        notes: "BUG GAP-J18: Java Instant.toEpochMilli is unsupported while .getTime is exposed.",
-        reference_id: nil,
+        notes: "Raises a bounded arithmetic condition when the result exceeds Java long.",
+        reference_id: :instant_to_epoch_milli,
+        jvm_descriptor_attestations: %{instant_to_epoch_milli_0: "()J"},
+        admitted_overload_divergences: %{instant_to_epoch_milli_0: []},
         target_id: :java_time_instant_audit_toepochmilli
       },
       %{
         name: "Instant/ofEpochMilli",
         status: :candidate,
         description: "Construct instant from epoch milliseconds",
-        notes: "java.util.Date. already accepts seconds or milliseconds.",
+        notes:
+          "java.util.Date. accepts exact epoch milliseconds but returns a Date, not an Instant.",
         reference_id: nil,
         target_id: :java_time_instant_audit_instant_ofepochmilli
       }
@@ -2849,13 +2825,13 @@
         status: :supported,
         description: "Duration between two instants",
         notes:
-          "Requested in issue #1019 for millisecond/day differences. BUG GAP-J19: java.util.Date inputs are accepted instead of rejected.",
+          "Requested in issue #1019 for millisecond/day differences. DIV-52: the admitted profile accepts Instants only rather than every Temporal implementation.",
         reference_id: :duration_between,
         jvm_descriptor_attestations: %{
           duration_between_temporal:
             "(Ljava/time/temporal/Temporal;Ljava/time/temporal/Temporal;)Ljava/time/Duration;"
         },
-        admitted_overload_divergences: %{duration_between_temporal: ["GAP-J19"]},
+        admitted_overload_divergences: %{duration_between_temporal: ["DIV-52"]},
         target_id: :java_time_duration_audit_duration_between
       },
       %{
@@ -2935,9 +2911,9 @@
       %{
         name: "java.util.Date.",
         status: :supported,
-        description: "Construct DateTime value",
+        description: "Construct a legacy Date value",
         notes:
-          "BUG GAP-J03: numeric constructor currently treats milliseconds as seconds. BUG GAP-J06: ISO date strings are accepted by PTC-Lisp but rejected by the Java oracle. BUG GAP-J11: Java-accepted legacy date strings are rejected. EXTENSION GAP-J21: existing PTC temporal values are accepted directly.",
+          "Numeric input is exact epoch milliseconds. DIV-51: string input uses a deterministic bounded legacy English grammar, admits dates on or after 1582-10-15, and uses UTC when no zone is present.",
         reference_id: :date_new,
         jvm_descriptor_attestations: %{
           date_new_0: "()V",
@@ -2946,9 +2922,8 @@
         },
         admitted_overload_divergences: %{
           date_new_0: [],
-          date_new_long: ["GAP-J03"],
-          date_new_string: ["GAP-J06", "GAP-J11"],
-          date_new_ptc_temporal: ["GAP-J21"]
+          date_new_long: [],
+          date_new_string: ["DIV-51"]
         },
         target_id: :java_util_date_audit_java_util_date
       },
@@ -2956,8 +2931,8 @@
         name: ".getTime",
         upstream: [{"java.util.Date", :instance, "getTime"}],
         status: :supported,
-        description: "Unix timestamp in milliseconds",
-        notes: "Works on DateTime values.",
+        description: "Exact epoch timestamp in milliseconds",
+        notes: "Works only on native java.util.Date values.",
         reference_id: :date_get_time,
         jvm_descriptor_attestations: %{date_get_time_0: "()J"},
         admitted_overload_divergences: %{date_get_time_0: []},
@@ -2965,44 +2940,48 @@
       },
       %{
         name: ".isBefore",
-        upstream: [{"java.util.Date", :instance, "before"}],
-        status: :supported,
-        description: "Date ordering predicate",
-        notes:
-          "BUG GAP-J20: java.util.Date uses .before, not .isBefore; current behavior exposes a non-Java alias.",
-        reference_id: :date_is_before_alias,
-        jvm_descriptor_attestations: %{},
-        admitted_overload_divergences: %{date_is_before_alias_date: ["GAP-J20"]},
+        upstream: [
+          {"java.time.LocalDate", :instance, "isBefore"},
+          {"java.time.Instant", :instance, "isBefore"}
+        ],
+        status: :not_relevant,
+        description: "Method belongs to java.time classes, not java.util.Date",
+        notes: "Removed from Date when class-aware temporal dispatch landed.",
+        reference_id: nil,
         target_id: :java_util_date_audit_isbefore
       },
       %{
         name: ".isAfter",
-        upstream: [{"java.util.Date", :instance, "after"}],
-        status: :supported,
-        description: "Date ordering predicate",
-        notes:
-          "BUG GAP-J20: java.util.Date uses .after, not .isAfter; current behavior exposes a non-Java alias.",
-        reference_id: :date_is_after_alias,
-        jvm_descriptor_attestations: %{},
-        admitted_overload_divergences: %{date_is_after_alias_date: ["GAP-J20"]},
+        upstream: [
+          {"java.time.LocalDate", :instance, "isAfter"},
+          {"java.time.Instant", :instance, "isAfter"}
+        ],
+        status: :not_relevant,
+        description: "Method belongs to java.time classes, not java.util.Date",
+        notes: "Removed from Date when class-aware temporal dispatch landed.",
+        reference_id: nil,
         target_id: :java_util_date_audit_isafter
       },
       %{
         name: ".before",
         upstream: [{"java.util.Date", :instance, "before"}],
-        status: :candidate,
+        status: :supported,
         description: "Date ordering predicate",
-        notes: ".isBefore covers the current PTC-Lisp spelling.",
-        reference_id: nil,
+        notes: "Class-owned java.util.Date comparison.",
+        reference_id: :date_before,
+        jvm_descriptor_attestations: %{date_before_date: "(Ljava/util/Date;)Z"},
+        admitted_overload_divergences: %{date_before_date: []},
         target_id: :java_util_date_audit_before
       },
       %{
         name: ".after",
         upstream: [{"java.util.Date", :instance, "after"}],
-        status: :candidate,
+        status: :supported,
         description: "Date ordering predicate",
-        notes: ".isAfter covers the current PTC-Lisp spelling.",
-        reference_id: nil,
+        notes: "Class-owned java.util.Date comparison.",
+        reference_id: :date_after,
+        jvm_descriptor_attestations: %{date_after_date: "(Ljava/util/Date;)Z"},
+        admitted_overload_divergences: %{date_after_date: []},
         target_id: :java_util_date_audit_after
       },
       %{
@@ -3091,27 +3070,35 @@
     %{
       name: "java.util.Date.",
       description:
-        "Construct current UTC time, from a timestamp / ISO-8601 / RFC-2822 string, or pass through an existing temporal value",
+        "Construct a native legacy Date from current time, exact milliseconds, or legacy text",
       kind: :constructor,
       signatures: [
         "(java.util.Date.)",
-        "(java.util.Date. timestamp-or-string)",
-        "(java.util.Date. datetime-or-date)"
+        "(java.util.Date. epoch-milliseconds)",
+        "(java.util.Date. legacy-date-string)"
       ],
       notes:
-        "Returns Elixir DateTime. Accepts integer (seconds or ms auto-detected), ISO-8601 (with or without offset — offsetless is treated as UTC), RFC 2822, or an existing DateTime/NaiveDateTime/Date (Date and NaiveDateTime upgrade to UTC; DateTime returns as-is). Time alone is not accepted (no date component).",
+        "Integer input is always Java epoch milliseconds. ISO-8601 strings and raw host temporal structs are not Date constructor overloads.",
       class: "java.util.Date",
       reference_ids: [:date_new]
     },
     %{
       name: ".getTime",
-      description: "Return Unix timestamp in milliseconds from DateTime",
+      description: "Return exact epoch milliseconds from a legacy Date",
       kind: :method,
       signatures: ["(.getTime date)"],
-      notes:
-        "PTC compatibility alias for java.time.Instant; Java Instant declares `.toEpochMilli`, not `.getTime` (GAP-J04).",
-      class: "java.util.Date / java.time.Instant",
-      reference_ids: [:date_get_time, :instant_get_time_alias]
+      notes: "Owned only by java.util.Date.",
+      class: "java.util.Date",
+      reference_ids: [:date_get_time]
+    },
+    %{
+      name: ".toEpochMilli",
+      description: "Return epoch milliseconds from an Instant",
+      kind: :method,
+      signatures: ["(.toEpochMilli instant)"],
+      notes: "Preserves nanoseconds natively and raises on Java long overflow.",
+      class: "java.time.Instant",
+      reference_ids: [:instant_to_epoch_milli]
     },
     %{
       name: ".toEpochDay",
@@ -3127,7 +3114,7 @@
       description: "Add days to a LocalDate",
       kind: :method,
       signatures: ["(.plusDays local-date n)"],
-      notes: "`n` must be an integer.",
+      notes: "Java long coercion is applied to `n`.",
       class: "java.time.LocalDate",
       reference_ids: [:local_date_plus_days]
     },
@@ -3136,7 +3123,7 @@
       description: "Subtract days from a LocalDate",
       kind: :method,
       signatures: ["(.minusDays local-date n)"],
-      notes: "`n` must be an integer.",
+      notes: "Java long coercion is applied to `n`.",
       class: "java.time.LocalDate",
       reference_ids: [:local_date_minus_days]
     },
@@ -3163,59 +3150,71 @@
       description: "Returns true if receiver comes strictly before argument (same-type only)",
       kind: :method,
       signatures: ["(.isBefore a b)"],
-      notes:
-        "Works on both LocalDate and DateTime. Mixed types raise an error. PTC compatibility alias for java.util.Date; Java Date declares `.before`, not `.isBefore` (GAP-J20).",
-      class: "java.time.LocalDate / java.time.Instant / java.util.Date",
-      reference_ids: [:local_date_is_before, :instant_is_before, :date_is_before_alias]
+      notes: "Receiver-owned for LocalDate and Instant; mixed classes are rejected.",
+      class: "java.time.LocalDate / java.time.Instant",
+      reference_ids: [:local_date_is_before, :instant_is_before]
     },
     %{
       name: ".isAfter",
       description: "Returns true if receiver comes strictly after argument (same-type only)",
       kind: :method,
       signatures: ["(.isAfter a b)"],
-      notes:
-        "Works on both LocalDate and DateTime. Mixed types raise an error. PTC compatibility alias for java.util.Date; Java Date declares `.after`, not `.isAfter` (GAP-J20).",
-      class: "java.time.LocalDate / java.time.Instant / java.util.Date",
-      reference_ids: [:local_date_is_after, :instant_is_after, :date_is_after_alias]
+      notes: "Receiver-owned for LocalDate and Instant; mixed classes are rejected.",
+      class: "java.time.LocalDate / java.time.Instant",
+      reference_ids: [:local_date_is_after, :instant_is_after]
+    },
+    %{
+      name: ".before",
+      description: "Returns true if a legacy Date precedes another",
+      kind: :method,
+      signatures: ["(.before date other-date)"],
+      notes: "Owned only by java.util.Date.",
+      class: "java.util.Date",
+      reference_ids: [:date_before]
+    },
+    %{
+      name: ".after",
+      description: "Returns true if a legacy Date follows another",
+      kind: :method,
+      signatures: ["(.after date other-date)"],
+      notes: "Owned only by java.util.Date.",
+      class: "java.util.Date",
+      reference_ids: [:date_after]
     },
     %{
       name: "LocalDate/parse",
-      description: "Parse an ISO-8601 date string (YYYY-MM-DD) to a Date",
+      description: "Parse strict ISO-8601 text to a native LocalDate",
       kind: :static,
       signatures: [
         "(LocalDate/parse date-string)",
-        "(java.time.LocalDate/parse date-string)",
-        "(parse date-string)"
+        "(java.time.LocalDate/parse date-string)"
       ],
-      notes:
-        "Returns an Elixir Date for `YYYY-MM-DD`. If the string carries a time component (`...T...`) it returns a DateTime instead (see `Instant/parse`) — a divergence from Java's strict `LocalDate.parse`. Also available as the bare `parse` builtin.",
+      notes: "Date-time text is rejected; class identity is retained natively.",
       class: "java.time.LocalDate",
       reference_ids: [:local_date_parse]
     },
     %{
       name: "Instant/parse",
-      description: "Parse an ISO-8601 instant/date-time string to a DateTime",
+      description: "Parse strict ISO-8601 text to a native Instant",
       kind: :static,
       signatures: [
         "(Instant/parse iso-string)",
-        "(java.time.Instant/parse iso-string)",
-        "(parse iso-string)"
+        "(java.time.Instant/parse iso-string)"
       ],
-      notes:
-        "Returns an Elixir DateTime. Accepts an offset (`Z`, `+02:00`, …); an offsetless `...T...` string is treated as UTC. `.isBefore` / `.isAfter` / `.getTime` work on the result. A bare `YYYY-MM-DD` string returns a Date instead (see `LocalDate/parse`). Also available as the bare `parse` builtin.",
+      notes: "An explicit UTC or numeric offset is required; nanoseconds are retained.",
       class: "java.time.Instant",
       reference_ids: [:instant_parse]
     },
     %{
       name: "Duration/between",
-      description: "Return a Duration between two DateTime instants",
+      description: "Return a native Duration between two Instants",
       kind: :static,
       signatures: [
         "(Duration/between start-instant end-instant)",
         "(java.time.Duration/between start-instant end-instant)"
       ],
       notes:
-        "Requires DateTime values, such as results from `Instant/parse`; LocalDate values are intentionally rejected.",
+        "Requires native Instant values; LocalDate, Date, and raw host temporal structs are rejected.",
       class: "java.time.Duration",
       reference_ids: [:duration_between]
     },
@@ -3528,19 +3527,36 @@
     },
     %{
       name: ".getTime",
-      description: "Return Unix timestamp in milliseconds (**DateTime only**)",
+      description: "Return exact epoch milliseconds from a legacy Date",
       binding: :normal,
-      reference_ids: [:instant_get_time_alias, :date_get_time],
+      reference_ids: [:date_get_time],
       category: :interop,
-      dispatch: :env,
+      dispatch: :java,
       signatures: ["(.getTime date)"],
       since: nil,
       examples: [],
-      notes: nil,
+      notes: "Owned only by java.util.Date.",
       section: "Interop",
       ptc_extension?: false,
       see_also: [],
-      clojure_var: ".getTime",
+      clojure_var: nil,
+      divergences: nil
+    },
+    %{
+      name: ".toEpochMilli",
+      description: "Return epoch milliseconds from an Instant",
+      binding: :normal,
+      reference_ids: [:instant_to_epoch_milli],
+      category: :interop,
+      dispatch: :java,
+      signatures: ["(.toEpochMilli instant)"],
+      since: nil,
+      examples: [],
+      notes: "Raises when the result exceeds Java long.",
+      section: "Interop",
+      ptc_extension?: false,
+      see_also: ["Instant/parse", ".getTime"],
+      clojure_var: nil,
       divergences: nil
     },
     %{
@@ -3549,7 +3565,7 @@
       binding: :normal,
       reference_ids: [:local_date_to_epoch_day],
       category: :interop,
-      dispatch: :env,
+      dispatch: :java,
       signatures: ["(.toEpochDay local-date)"],
       since: nil,
       examples: [],
@@ -3557,7 +3573,7 @@
       section: "Interop",
       ptc_extension?: false,
       see_also: ["LocalDate/parse", ".plusDays", ".minusDays"],
-      clojure_var: ".toEpochDay",
+      clojure_var: nil,
       divergences: nil
     },
     %{
@@ -3566,15 +3582,16 @@
       binding: :normal,
       reference_ids: [:local_date_plus_days],
       category: :interop,
-      dispatch: :env,
+      dispatch: :java,
       signatures: ["(.plusDays local-date n)"],
       since: nil,
       examples: [],
-      notes: "Works on LocalDate values returned by `LocalDate/parse`; `n` must be an integer.",
+      notes:
+        "Works on LocalDate values returned by `LocalDate/parse`; Java long coercion applies.",
       section: "Interop",
       ptc_extension?: false,
       see_also: ["LocalDate/parse", ".minusDays", ".toEpochDay"],
-      clojure_var: ".plusDays",
+      clojure_var: nil,
       divergences: nil
     },
     %{
@@ -3583,15 +3600,16 @@
       binding: :normal,
       reference_ids: [:local_date_minus_days],
       category: :interop,
-      dispatch: :env,
+      dispatch: :java,
       signatures: ["(.minusDays local-date n)"],
       since: nil,
       examples: [],
-      notes: "Works on LocalDate values returned by `LocalDate/parse`; `n` must be an integer.",
+      notes:
+        "Works on LocalDate values returned by `LocalDate/parse`; Java long coercion applies.",
       section: "Interop",
       ptc_extension?: false,
       see_also: ["LocalDate/parse", ".plusDays", ".toEpochDay"],
-      clojure_var: ".minusDays",
+      clojure_var: nil,
       divergences: nil
     },
     %{
@@ -3600,7 +3618,7 @@
       binding: :normal,
       reference_ids: [:duration_to_millis],
       category: :interop,
-      dispatch: :env,
+      dispatch: :java,
       signatures: ["(.toMillis duration)"],
       since: nil,
       examples: [],
@@ -3608,7 +3626,7 @@
       section: "Interop",
       ptc_extension?: false,
       see_also: ["Duration/between", ".toDays"],
-      clojure_var: ".toMillis",
+      clojure_var: nil,
       divergences: nil
     },
     %{
@@ -3617,7 +3635,7 @@
       binding: :normal,
       reference_ids: [:duration_to_days],
       category: :interop,
-      dispatch: :env,
+      dispatch: :java,
       signatures: ["(.toDays duration)"],
       since: nil,
       examples: [],
@@ -3626,7 +3644,7 @@
       section: "Interop",
       ptc_extension?: false,
       see_also: ["Duration/between", ".toMillis"],
-      clojure_var: ".toDays",
+      clojure_var: nil,
       divergences: nil
     },
     %{
@@ -3786,36 +3804,70 @@
     },
     %{
       name: ".isBefore",
-      description: "Returns true if date/datetime comes strictly before another (same-type only)",
+      description: "Compare native LocalDate or Instant values within their owning class",
       binding: :normal,
-      reference_ids: [:local_date_is_before, :instant_is_before, :date_is_before_alias],
+      reference_ids: [:local_date_is_before, :instant_is_before],
       category: :interop,
-      dispatch: :env,
+      dispatch: :java,
       signatures: ["(.isBefore a b)"],
       since: nil,
       examples: [],
-      notes: "Works on both LocalDate and DateTime. Mixed types raise an error.",
+      notes: "Mixed Java classes and raw host temporal structs are rejected.",
       section: "Interop",
       ptc_extension?: false,
       see_also: [".isAfter"],
-      clojure_var: ".isBefore",
+      clojure_var: nil,
       divergences: nil
     },
     %{
       name: ".isAfter",
-      description: "Returns true if date/datetime comes strictly after another (same-type only)",
+      description: "Compare native LocalDate or Instant values within their owning class",
       binding: :normal,
-      reference_ids: [:local_date_is_after, :instant_is_after, :date_is_after_alias],
+      reference_ids: [:local_date_is_after, :instant_is_after],
       category: :interop,
-      dispatch: :env,
+      dispatch: :java,
       signatures: ["(.isAfter a b)"],
       since: nil,
       examples: [],
-      notes: "Works on both LocalDate and DateTime. Mixed types raise an error.",
+      notes: "Mixed Java classes and raw host temporal structs are rejected.",
       section: "Interop",
       ptc_extension?: false,
       see_also: [".isBefore"],
-      clojure_var: ".isAfter",
+      clojure_var: nil,
+      divergences: nil
+    },
+    %{
+      name: ".before",
+      description: "Return true when a legacy Date precedes another",
+      binding: :normal,
+      reference_ids: [:date_before],
+      category: :interop,
+      dispatch: :java,
+      signatures: ["(.before date other-date)"],
+      since: nil,
+      examples: [],
+      notes: "Owned only by java.util.Date.",
+      section: "Interop",
+      ptc_extension?: false,
+      see_also: [".after", ".getTime"],
+      clojure_var: nil,
+      divergences: nil
+    },
+    %{
+      name: ".after",
+      description: "Return true when a legacy Date follows another",
+      binding: :normal,
+      reference_ids: [:date_after],
+      category: :interop,
+      dispatch: :java,
+      signatures: ["(.after date other-date)"],
+      since: nil,
+      examples: [],
+      notes: "Owned only by java.util.Date.",
+      section: "Interop",
+      ptc_extension?: false,
+      see_also: [".before", ".getTime"],
+      clojure_var: nil,
       divergences: nil
     },
     %{
@@ -3837,23 +3889,22 @@
     },
     %{
       name: "Duration/between",
-      description: "Return a Duration between two DateTime instants",
+      description: "Return a native Duration between two Instants",
       binding: :normal,
       reference_ids: [:duration_between],
       category: :interop,
-      dispatch: :env,
+      dispatch: :java,
       signatures: [
         "(Duration/between start-instant end-instant)",
         "(java.time.Duration/between start-instant end-instant)"
       ],
       since: nil,
       examples: [],
-      notes:
-        "Requires DateTime values, such as results from `Instant/parse`; LocalDate values are intentionally rejected.",
+      notes: "Requires native Instant values; other temporal classes are rejected.",
       section: "Interop",
       ptc_extension?: false,
       see_also: ["Instant/parse", ".toMillis", ".toDays"],
-      clojure_var: "Duration/between",
+      clojure_var: nil,
       divergences: nil
     },
     %{
@@ -4007,51 +4058,64 @@
     },
     %{
       name: "java.util.Date.",
-      description:
-        "Construct DateTime: no-arg returns current UTC, integer is Unix seconds/ms, string is ISO-8601 (offset optional, treated as UTC if absent) or RFC-2822, existing DateTime/NaiveDateTime/Date passes through",
-      binding: :multi_arity,
+      description: "Construct a native legacy Date with exact Java millisecond identity",
+      binding: :normal,
       reference_ids: [:date_new],
       category: :interop,
-      dispatch: :env,
+      dispatch: :java,
       signatures: [
         "(java.util.Date.)",
-        "(java.util.Date. millis-or-string)",
-        "(java.util.Date. datetime-or-date)"
+        "(java.util.Date. epoch-milliseconds)",
+        "(java.util.Date. legacy-date-string)"
       ],
       since: nil,
       examples: [],
-      notes: nil,
+      notes: "Numeric input is always milliseconds; raw host temporal structs are not promoted.",
       section: "Interop",
       ptc_extension?: false,
       see_also: [],
-      clojure_var: "java.util.Date.",
+      clojure_var: nil,
       divergences: nil
     },
     %{
-      name: "parse",
-      description:
-        "Parse an ISO-8601 temporal string: `YYYY-MM-DD` → Date, a string with a time component (`...T...`) → DateTime (offsetless treated as UTC)",
+      name: "LocalDate/parse",
+      description: "Parse strict ISO-8601 local-date text to a native LocalDate",
       binding: :normal,
-      reference_ids: [:local_date_parse, :instant_parse],
+      reference_ids: [:local_date_parse],
       category: :interop,
-      dispatch: :env,
+      dispatch: :java,
       signatures: [
-        "(parse iso-string)",
         "(LocalDate/parse date-str)",
-        "(java.time.LocalDate/parse date-str)",
-        "(java.time.Instant/parse iso-string)",
-        "(Instant/parse iso-string)"
+        "(java.time.LocalDate/parse date-str)"
       ],
       since: nil,
       examples: [],
-      notes:
-        "Reachable as the bare `parse` builtin or via the `LocalDate/` and `Instant/` namespaces — all three dispatch on the string shape. `.isBefore`/`.isAfter`/`.getTime` work on both Date and DateTime results.",
+      notes: "Date-time strings are rejected; the bare `parse` alias was removed.",
       section: "Interop",
       ptc_extension?: false,
-      see_also: [".isBefore", ".isAfter", ".getTime", "java.util.Date."],
-      clojure_var: "parse",
-      divergences:
-        "Unlike Java's LocalDate.parse, accepts strings with a time component and returns a DateTime instead of raising — more useful for LLM timestamp comparisons. See docs/java-interop.md."
+      see_also: ["Instant/parse", ".toEpochDay", ".plusDays", ".minusDays"],
+      clojure_var: nil,
+      divergences: nil
+    },
+    %{
+      name: "Instant/parse",
+      description: "Parse strict ISO-8601 instant text to a native Instant",
+      binding: :normal,
+      reference_ids: [:instant_parse],
+      category: :interop,
+      dispatch: :java,
+      signatures: [
+        "(Instant/parse iso-string)",
+        "(java.time.Instant/parse iso-string)"
+      ],
+      since: nil,
+      examples: [],
+      notes: "An explicit UTC or numeric offset is required; nanoseconds are retained.",
+      section: "Interop",
+      ptc_extension?: false,
+      see_also: ["LocalDate/parse", ".toEpochMilli", "Duration/between"],
+      clojure_var: nil,
+      divergences: nil
     }
   ]
 }

@@ -6,7 +6,7 @@
 
 PTC-Lisp emulates a subset of Java interop for LLM compatibility. These are **not** real JVM calls — they are BEAM-native implementations that mirror the Java API surface LLMs are trained on.
 
-38 interop entries covering 12 Java classes in 14 presentation groups.
+41 interop entries covering 12 Java classes in 13 presentation groups.
 
 See also: [Function Reference](function-reference.md) | [PTC-Lisp Specification](ptc-lisp-specification.md) | [Namespace Coverage](conformance/index.md)
 
@@ -90,44 +90,41 @@ See also: [Function Reference](function-reference.md) | [PTC-Lisp Specification]
 |------|------|-----------|-------------|-------|
 | `.toDays` | Method | `(.toDays duration)` | Return duration length in whole days | Partial days truncate toward zero. |
 | `.toMillis` | Method | `(.toMillis duration)` | Return duration length in milliseconds | Works on Duration values returned by `Duration/between`. |
-| `Duration/between` | Static | `(Duration/between start-instant end-instant), (java.time.Duration/between start-instant end-instant)` | Return a Duration between two DateTime instants | Requires DateTime values, such as results from `Instant/parse`; LocalDate values are intentionally rejected. |
+| `Duration/between` | Static | `(Duration/between start-instant end-instant), (java.time.Duration/between start-instant end-instant)` | Return a native Duration between two Instants | Requires native Instant values; LocalDate, Date, and raw host temporal structs are rejected. |
 
 
 ### java.time.Instant
 
 | Name | Kind | Signature | Description | Notes |
 |------|------|-----------|-------------|-------|
-| `Instant/parse` | Static | `(Instant/parse iso-string), (java.time.Instant/parse iso-string), (parse iso-string)` | Parse an ISO-8601 instant/date-time string to a DateTime | Returns an Elixir DateTime. Accepts an offset (`Z`, `+02:00`, …); an offsetless `...T...` string is treated as UTC. `.isBefore` / `.isAfter` / `.getTime` work on the result. A bare `YYYY-MM-DD` string returns a Date instead (see `LocalDate/parse`). Also available as the bare `parse` builtin. |
+| `.toEpochMilli` | Method | `(.toEpochMilli instant)` | Return epoch milliseconds from an Instant | Preserves nanoseconds natively and raises on Java long overflow. |
+| `Instant/parse` | Static | `(Instant/parse iso-string), (java.time.Instant/parse iso-string)` | Parse strict ISO-8601 text to a native Instant | An explicit UTC or numeric offset is required; nanoseconds are retained. |
 
 
 ### java.time.LocalDate
 
 | Name | Kind | Signature | Description | Notes |
 |------|------|-----------|-------------|-------|
-| `.minusDays` | Method | `(.minusDays local-date n)` | Subtract days from a LocalDate | `n` must be an integer. |
-| `.plusDays` | Method | `(.plusDays local-date n)` | Add days to a LocalDate | `n` must be an integer. |
+| `.minusDays` | Method | `(.minusDays local-date n)` | Subtract days from a LocalDate | Java long coercion is applied to `n`. |
+| `.plusDays` | Method | `(.plusDays local-date n)` | Add days to a LocalDate | Java long coercion is applied to `n`. |
 | `.toEpochDay` | Method | `(.toEpochDay local-date)` | Return LocalDate epoch-day integer | Works on LocalDate values returned by `LocalDate/parse`. |
-| `LocalDate/parse` | Static | `(LocalDate/parse date-string), (java.time.LocalDate/parse date-string), (parse date-string)` | Parse an ISO-8601 date string (YYYY-MM-DD) to a Date | Returns an Elixir Date for `YYYY-MM-DD`. If the string carries a time component (`...T...`) it returns a DateTime instead (see `Instant/parse`) — a divergence from Java's strict `LocalDate.parse`. Also available as the bare `parse` builtin. |
+| `LocalDate/parse` | Static | `(LocalDate/parse date-string), (java.time.LocalDate/parse date-string)` | Parse strict ISO-8601 text to a native LocalDate | Date-time text is rejected; class identity is retained natively. |
 
 
-### java.time.LocalDate / java.time.Instant / java.util.Date
+### java.time.LocalDate / java.time.Instant
 
 | Name | Kind | Signature | Description | Notes |
 |------|------|-----------|-------------|-------|
-| `.isAfter` | Method | `(.isAfter a b)` | Returns true if receiver comes strictly after argument (same-type only) | Works on both LocalDate and DateTime. Mixed types raise an error. PTC compatibility alias for java.util.Date; Java Date declares `.after`, not `.isAfter` (GAP-J20). |
-| `.isBefore` | Method | `(.isBefore a b)` | Returns true if receiver comes strictly before argument (same-type only) | Works on both LocalDate and DateTime. Mixed types raise an error. PTC compatibility alias for java.util.Date; Java Date declares `.before`, not `.isBefore` (GAP-J20). |
+| `.isAfter` | Method | `(.isAfter a b)` | Returns true if receiver comes strictly after argument (same-type only) | Receiver-owned for LocalDate and Instant; mixed classes are rejected. |
+| `.isBefore` | Method | `(.isBefore a b)` | Returns true if receiver comes strictly before argument (same-type only) | Receiver-owned for LocalDate and Instant; mixed classes are rejected. |
 
 
 ### java.util.Date
 
 | Name | Kind | Signature | Description | Notes |
 |------|------|-----------|-------------|-------|
-| `java.util.Date.` | Constructor | `(java.util.Date.), (java.util.Date. timestamp-or-string), (java.util.Date. datetime-or-date)` | Construct current UTC time, from a timestamp / ISO-8601 / RFC-2822 string, or pass through an existing temporal value | Returns Elixir DateTime. Accepts integer (seconds or ms auto-detected), ISO-8601 (with or without offset — offsetless is treated as UTC), RFC 2822, or an existing DateTime/NaiveDateTime/Date (Date and NaiveDateTime upgrade to UTC; DateTime returns as-is). Time alone is not accepted (no date component). |
-
-
-### java.util.Date / java.time.Instant
-
-| Name | Kind | Signature | Description | Notes |
-|------|------|-----------|-------------|-------|
-| `.getTime` | Method | `(.getTime date)` | Return Unix timestamp in milliseconds from DateTime | PTC compatibility alias for java.time.Instant; Java Instant declares `.toEpochMilli`, not `.getTime` (GAP-J04). |
+| `.after` | Method | `(.after date other-date)` | Returns true if a legacy Date follows another | Owned only by java.util.Date. |
+| `.before` | Method | `(.before date other-date)` | Returns true if a legacy Date precedes another | Owned only by java.util.Date. |
+| `.getTime` | Method | `(.getTime date)` | Return exact epoch milliseconds from a legacy Date | Owned only by java.util.Date. |
+| `java.util.Date.` | Constructor | `(java.util.Date.), (java.util.Date. epoch-milliseconds), (java.util.Date. legacy-date-string)` | Construct a native legacy Date from current time, exact milliseconds, or legacy text | Integer input is always Java epoch milliseconds. ISO-8601 strings and raw host temporal structs are not Date constructor overloads. |
 

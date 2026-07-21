@@ -107,6 +107,10 @@ defmodule PtcRunner.Lisp.Java.Surface do
   @spec fetch_overload(atom()) :: {:ok, map()} | :error
   def fetch_overload(overload_id), do: Map.fetch(@overload_table, overload_id)
 
+  @doc "Fetches one admitted or inventory Java class by stable ID."
+  @spec fetch_class(atom()) :: {:ok, map()} | :error
+  def fetch_class(class_id), do: Map.fetch(@class_table, class_id)
+
   @doc "Resolves a bounded Java class/member source identity."
   @spec resolve_reference(atom() | String.t(), atom() | String.t()) ::
           {:ok, map()} | :unknown_member | :not_java_class
@@ -232,34 +236,14 @@ defmodule PtcRunner.Lisp.Java.Surface do
 
   @doc "Resolves only spellings whose source member differs from the Env binding name."
   @spec qualified_legacy_alias(atom(), atom() | String.t()) ::
-          {:ok, atom()} | :unknown_member | :not_qualified
+          {:ok, atom()} | :not_qualified
   def qualified_legacy_alias(namespace, member) do
     case legacy_binding(namespace, member) do
       {:ok, binding} ->
         if Atom.to_string(binding) == to_string(member), do: :not_qualified, else: {:ok, binding}
 
       :error ->
-        case Map.get(@namespace_table, namespace) do
-          %{legacy_lookup: :qualified_table} -> :unknown_member
-          _ -> :not_qualified
-        end
-    end
-  end
-
-  @doc "Returns qualified legacy binding labels for compatibility diagnostics."
-  @spec qualified_legacy_members(atom()) :: [String.t()]
-  def qualified_legacy_members(namespace) do
-    case Map.get(@namespace_table, namespace) do
-      %{legacy_lookup: :qualified_table, members: members} ->
-        Enum.flat_map(members, fn member ->
-          case Map.fetch(member, :legacy_binding) do
-            {:ok, binding} -> [Atom.to_string(binding)]
-            :error -> []
-          end
-        end)
-
-      _ ->
-        []
+        :not_qualified
     end
   end
 

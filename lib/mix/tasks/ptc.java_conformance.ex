@@ -5,8 +5,8 @@ defmodule Mix.Tasks.Ptc.JavaConformance do
 
       mix ptc.java_conformance --oracle jvm --subset implemented
       mix ptc.java_conformance --oracle babashka --subset fast
-      mix ptc.java_conformance --oracle ptc --subset ptc-only
       mix ptc.java_conformance --oracle ptc --subset closed-dispatch
+      mix ptc.java_conformance --oracle ptc
 
   JVM Clojure is authoritative for descriptors. Babashka is a fast secondary
   signal and cannot grant overload coverage.
@@ -46,11 +46,10 @@ defmodule Mix.Tasks.Ptc.JavaConformance do
 
   defp parse_subset("implemented"), do: :implemented
   defp parse_subset("fast"), do: :fast
-  defp parse_subset("ptc-only"), do: :ptc_only
   defp parse_subset("closed-dispatch"), do: :closed_dispatch
   defp parse_subset(value), do: Mix.raise("Unknown Java conformance subset #{inspect(value)}")
 
   defp default_subset(:jvm), do: "implemented"
   defp default_subset(:babashka), do: "fast"
-  defp default_subset(:ptc), do: "ptc-only"
+  defp default_subset(:ptc), do: "closed-dispatch"
 end
