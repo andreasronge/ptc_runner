@@ -468,6 +468,7 @@ defmodule Mix.Tasks.Ptc.ReplTest do
   end
 
   @tag :tmp_dir
+  @tag :slow
   test "profile files, stdin, and interactive input are bounded before evaluation", %{
     tmp_dir: directory
   } do
@@ -497,6 +498,7 @@ defmodule Mix.Tasks.Ptc.ReplTest do
   end
 
   @tag :tmp_dir
+  @tag :slow
   test "profile JSONL works through an actual Mix subprocess", %{tmp_dir: directory} do
     source = Path.join(directory, "source")
     output_directory = Path.join(directory, "output")

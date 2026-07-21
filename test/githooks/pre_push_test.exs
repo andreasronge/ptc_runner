@@ -32,6 +32,7 @@ defmodule PtcRunner.GitHooks.PrePushTest do
     refute File.exists?(mix_marker)
   end
 
+  @tag :slow
   test "full gate reports test and dialyzer timings" do
     %{repo: repo, path: path} = git_repo_with_change("lib/example.ex")
 

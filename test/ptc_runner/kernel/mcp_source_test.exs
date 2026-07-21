@@ -551,11 +551,11 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     parent = self()
     fixture = fixture(parent, block_tool: "structured")
     on_exit(fixture.close)
-    registry = registry(fixture.endpoint, timeout_ms: 1_500)
+    registry = registry(fixture.endpoint, timeout_ms: 500)
 
     {:ok, built} =
       dir
-      |> manifest(Map.keys(public_mappings()), timeout_ms: 1_500, evaluation_timeout_ms: 1_500)
+      |> manifest(Map.keys(public_mappings()), timeout_ms: 500, evaluation_timeout_ms: 500)
       |> RunBuilder.load_and_build(registry)
 
     task = Task.async(fn -> Kernel.run(built.entry_source, built.config) end)
