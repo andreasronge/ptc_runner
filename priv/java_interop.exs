@@ -2,18 +2,8 @@
   version: 1,
   projection_policy: %{
     audit_reference_coverage: :all,
-    interop_omitted_reference_ids: [
-      :math_abs,
-      :math_ceil,
-      :math_floor,
-      :math_max,
-      :math_min,
-      :math_pow,
-      :math_round,
-      :math_sqrt
-    ],
-    interop_omission_reason:
-      "Math members use the ordinary function reference plus the generated Java Math audit instead of duplicate Java interop rows."
+    interop_omitted_reference_ids: [],
+    interop_omission_reason: "Every admitted Java reference has an interop presentation row."
   },
   references: [
     %{
@@ -1052,11 +1042,11 @@
       arguments: [:int],
       errors: [],
       receiver: nil,
-      route: {:legacy_env, :abs},
+      route: {:dispatch, :math_abs_int},
       reference_id: :math_abs,
       descriptor: "(I)I",
       overload_id: :math_abs_int,
-      divergence_ids: ["DIV-45"],
+      divergence_ids: [],
       classification: :exact,
       attestation: :jvm
     },
@@ -1066,11 +1056,11 @@
       arguments: [:long],
       errors: [],
       receiver: nil,
-      route: {:legacy_env, :abs},
+      route: {:dispatch, :math_abs_long},
       reference_id: :math_abs,
       descriptor: "(J)J",
       overload_id: :math_abs_long,
-      divergence_ids: ["DIV-45"],
+      divergence_ids: [],
       classification: :exact,
       attestation: :jvm
     },
@@ -1080,11 +1070,11 @@
       arguments: [:float],
       errors: [],
       receiver: nil,
-      route: {:legacy_env, :abs},
+      route: {:dispatch, :math_abs_float},
       reference_id: :math_abs,
       descriptor: "(F)F",
       overload_id: :math_abs_float,
-      divergence_ids: ["DIV-45"],
+      divergence_ids: [],
       classification: :exact,
       attestation: :jvm
     },
@@ -1094,11 +1084,11 @@
       arguments: [:double],
       errors: [],
       receiver: nil,
-      route: {:legacy_env, :abs},
+      route: {:dispatch, :math_abs_double},
       reference_id: :math_abs,
       descriptor: "(D)D",
       overload_id: :math_abs_double,
-      divergence_ids: ["DIV-45"],
+      divergence_ids: [],
       classification: :exact,
       attestation: :jvm
     },
@@ -1108,11 +1098,11 @@
       arguments: [:double],
       errors: [],
       receiver: nil,
-      route: {:legacy_env, :ceil},
+      route: {:dispatch, :math_ceil_double},
       reference_id: :math_ceil,
       descriptor: "(D)D",
       overload_id: :math_ceil_double,
-      divergence_ids: ["DIV-42"],
+      divergence_ids: [],
       classification: :exact,
       attestation: :jvm
     },
@@ -1122,11 +1112,11 @@
       arguments: [:double],
       errors: [],
       receiver: nil,
-      route: {:legacy_env, :floor},
+      route: {:dispatch, :math_floor_double},
       reference_id: :math_floor,
       descriptor: "(D)D",
       overload_id: :math_floor_double,
-      divergence_ids: ["DIV-42"],
+      divergence_ids: [],
       classification: :exact,
       attestation: :jvm
     },
@@ -1136,11 +1126,11 @@
       arguments: [:int, :int],
       errors: [],
       receiver: nil,
-      route: {:legacy_env, :max},
+      route: {:dispatch, :math_max_int},
       reference_id: :math_max,
       descriptor: "(II)I",
       overload_id: :math_max_int,
-      divergence_ids: ["DIV-44", "DIV-45"],
+      divergence_ids: [],
       classification: :exact,
       attestation: :jvm
     },
@@ -1150,11 +1140,11 @@
       arguments: [:long, :long],
       errors: [],
       receiver: nil,
-      route: {:legacy_env, :max},
+      route: {:dispatch, :math_max_long},
       reference_id: :math_max,
       descriptor: "(JJ)J",
       overload_id: :math_max_long,
-      divergence_ids: ["DIV-44", "DIV-45"],
+      divergence_ids: [],
       classification: :exact,
       attestation: :jvm
     },
@@ -1164,11 +1154,11 @@
       arguments: [:float, :float],
       errors: [],
       receiver: nil,
-      route: {:legacy_env, :max},
+      route: {:dispatch, :math_max_float},
       reference_id: :math_max,
       descriptor: "(FF)F",
       overload_id: :math_max_float,
-      divergence_ids: ["DIV-44", "DIV-45"],
+      divergence_ids: [],
       classification: :exact,
       attestation: :jvm
     },
@@ -1178,11 +1168,11 @@
       arguments: [:double, :double],
       errors: [],
       receiver: nil,
-      route: {:legacy_env, :max},
+      route: {:dispatch, :math_max_double},
       reference_id: :math_max,
       descriptor: "(DD)D",
       overload_id: :math_max_double,
-      divergence_ids: ["DIV-44", "DIV-45"],
+      divergence_ids: [],
       classification: :exact,
       attestation: :jvm
     },
@@ -1192,11 +1182,11 @@
       arguments: [:int, :int],
       errors: [],
       receiver: nil,
-      route: {:legacy_env, :min},
+      route: {:dispatch, :math_min_int},
       reference_id: :math_min,
       descriptor: "(II)I",
       overload_id: :math_min_int,
-      divergence_ids: ["DIV-44", "DIV-45"],
+      divergence_ids: [],
       classification: :exact,
       attestation: :jvm
     },
@@ -1206,11 +1196,11 @@
       arguments: [:long, :long],
       errors: [],
       receiver: nil,
-      route: {:legacy_env, :min},
+      route: {:dispatch, :math_min_long},
       reference_id: :math_min,
       descriptor: "(JJ)J",
       overload_id: :math_min_long,
-      divergence_ids: ["DIV-44", "DIV-45"],
+      divergence_ids: [],
       classification: :exact,
       attestation: :jvm
     },
@@ -1220,11 +1210,11 @@
       arguments: [:float, :float],
       errors: [],
       receiver: nil,
-      route: {:legacy_env, :min},
+      route: {:dispatch, :math_min_float},
       reference_id: :math_min,
       descriptor: "(FF)F",
       overload_id: :math_min_float,
-      divergence_ids: ["DIV-44", "DIV-45"],
+      divergence_ids: [],
       classification: :exact,
       attestation: :jvm
     },
@@ -1234,11 +1224,11 @@
       arguments: [:double, :double],
       errors: [],
       receiver: nil,
-      route: {:legacy_env, :min},
+      route: {:dispatch, :math_min_double},
       reference_id: :math_min,
       descriptor: "(DD)D",
       overload_id: :math_min_double,
-      divergence_ids: ["DIV-44", "DIV-45"],
+      divergence_ids: [],
       classification: :exact,
       attestation: :jvm
     },
@@ -1248,7 +1238,7 @@
       arguments: [:double, :double],
       errors: [],
       receiver: nil,
-      route: {:legacy_env, :pow},
+      route: {:dispatch, :math_pow_double},
       reference_id: :math_pow,
       descriptor: "(DD)D",
       overload_id: :math_pow_double,
@@ -1262,11 +1252,11 @@
       arguments: [:float],
       errors: [],
       receiver: nil,
-      route: {:legacy_env, :round},
+      route: {:dispatch, :math_round_float},
       reference_id: :math_round,
       descriptor: "(F)I",
       overload_id: :math_round_float,
-      divergence_ids: ["DIV-43", "DIV-45"],
+      divergence_ids: [],
       classification: :exact,
       attestation: :jvm
     },
@@ -1276,11 +1266,11 @@
       arguments: [:double],
       errors: [],
       receiver: nil,
-      route: {:legacy_env, :round},
+      route: {:dispatch, :math_round_double},
       reference_id: :math_round,
       descriptor: "(D)J",
       overload_id: :math_round_double,
-      divergence_ids: ["DIV-43", "DIV-45"],
+      divergence_ids: [],
       classification: :exact,
       attestation: :jvm
     },
@@ -1290,7 +1280,7 @@
       arguments: [:double],
       errors: [],
       receiver: nil,
-      route: {:legacy_env, :sqrt},
+      route: {:dispatch, :math_sqrt_double},
       reference_id: :math_sqrt,
       descriptor: "(D)D",
       overload_id: :math_sqrt_double,
@@ -1308,8 +1298,7 @@
         %{
           source_name: :abs,
           reference_id: :math_abs,
-          classification: :admitted,
-          legacy_binding: :abs
+          classification: :admitted
         },
         %{
           source_name: :"bit-and",
@@ -1380,8 +1369,7 @@
         %{
           source_name: :ceil,
           reference_id: :math_ceil,
-          classification: :admitted,
-          legacy_binding: :ceil
+          classification: :admitted
         },
         %{
           source_name: :double,
@@ -1398,8 +1386,7 @@
         %{
           source_name: :floor,
           reference_id: :math_floor,
-          classification: :admitted,
-          legacy_binding: :floor
+          classification: :admitted
         },
         %{
           source_name: :int,
@@ -1410,20 +1397,17 @@
         %{
           source_name: :max,
           reference_id: :math_max,
-          classification: :admitted,
-          legacy_binding: :max
+          classification: :admitted
         },
         %{
           source_name: :min,
           reference_id: :math_min,
-          classification: :admitted,
-          legacy_binding: :min
+          classification: :admitted
         },
         %{
           source_name: :pow,
           reference_id: :math_pow,
-          classification: :admitted,
-          legacy_binding: :pow
+          classification: :admitted
         },
         %{
           source_name: :quot,
@@ -1434,14 +1418,12 @@
         %{
           source_name: :round,
           reference_id: :math_round,
-          classification: :admitted,
-          legacy_binding: :round
+          classification: :admitted
         },
         %{
           source_name: :sqrt,
           reference_id: :math_sqrt,
-          classification: :admitted,
-          legacy_binding: :sqrt
+          classification: :admitted
         },
         %{
           source_name: :trunc,
@@ -1784,8 +1766,7 @@
         name: "abs",
         status: :supported,
         description: "Returns the absolute value",
-        notes:
-          "DIV-45: uses PTC-Lisp arbitrary-precision integers, so abs returns the mathematically correct positive value and accepts BigInt input rather than reproducing Java long-overflow/overload artifacts",
+        notes: "Uses the selected Java primitive overload, including int/long minimum overflow.",
         reference_id: :math_abs,
         jvm_descriptor_attestations: %{
           math_abs_int: "(I)I",
@@ -1794,10 +1775,10 @@
           math_abs_double: "(D)D"
         },
         admitted_overload_divergences: %{
-          math_abs_int: ["DIV-45"],
-          math_abs_long: ["DIV-45"],
-          math_abs_float: ["DIV-45"],
-          math_abs_double: ["DIV-45"]
+          math_abs_int: [],
+          math_abs_long: [],
+          math_abs_float: [],
+          math_abs_double: []
         },
         target_id: :java_math_audit_abs
       },
@@ -1853,11 +1834,10 @@
         name: "ceil",
         status: :supported,
         description: "Returns the smallest integer >= argument",
-        notes:
-          "DIV-42: integer-returning PTC-Lisp extension, so finite results render as integers rather than Java's double shape",
+        notes: "Returns a Java double, preserving signed zero and non-finite values.",
         reference_id: :math_ceil,
         jvm_descriptor_attestations: %{math_ceil_double: "(D)D"},
-        admitted_overload_divergences: %{math_ceil_double: ["DIV-42"]},
+        admitted_overload_divergences: %{math_ceil_double: []},
         target_id: :java_math_audit_ceil
       },
       %{
@@ -1912,11 +1892,10 @@
         name: "floor",
         status: :supported,
         description: "Returns the largest integer <= argument",
-        notes:
-          "DIV-42: integer-returning PTC-Lisp extension, so finite results render as integers rather than Java's double shape",
+        notes: "Returns a Java double, preserving signed zero and non-finite values.",
         reference_id: :math_floor,
         jvm_descriptor_attestations: %{math_floor_double: "(D)D"},
-        admitted_overload_divergences: %{math_floor_double: ["DIV-42"]},
+        admitted_overload_divergences: %{math_floor_double: []},
         target_id: :java_math_audit_floor
       },
       %{
@@ -2004,7 +1983,7 @@
         status: :supported,
         description: "Returns the greater of two values",
         notes:
-          "DIV-44: max is the Clojure-named variadic helper (Math/max is an alias), not Java's two-argument primitive. DIV-45: mixed numeric and total-ordering comparisons are accepted via PTC-Lisp's generic value model rather than Java's primitive overloads",
+          "Uses Java's two-argument primitive overloads, including NaN and signed-zero behavior.",
         reference_id: :math_max,
         jvm_descriptor_attestations: %{
           math_max_int: "(II)I",
@@ -2013,10 +1992,10 @@
           math_max_double: "(DD)D"
         },
         admitted_overload_divergences: %{
-          math_max_int: ["DIV-44", "DIV-45"],
-          math_max_long: ["DIV-44", "DIV-45"],
-          math_max_float: ["DIV-44", "DIV-45"],
-          math_max_double: ["DIV-44", "DIV-45"]
+          math_max_int: [],
+          math_max_long: [],
+          math_max_float: [],
+          math_max_double: []
         },
         target_id: :java_math_audit_max
       },
@@ -2025,7 +2004,7 @@
         status: :supported,
         description: "Returns the smaller of two values",
         notes:
-          "DIV-44: min is the Clojure-named variadic helper (Math/min is an alias), not Java's two-argument primitive. DIV-45: mixed numeric and total-ordering comparisons are accepted via PTC-Lisp's generic value model rather than Java's primitive overloads",
+          "Uses Java's two-argument primitive overloads, including NaN and signed-zero behavior.",
         reference_id: :math_min,
         jvm_descriptor_attestations: %{
           math_min_int: "(II)I",
@@ -2034,10 +2013,10 @@
           math_min_double: "(DD)D"
         },
         admitted_overload_divergences: %{
-          math_min_int: ["DIV-44", "DIV-45"],
-          math_min_long: ["DIV-44", "DIV-45"],
-          math_min_float: ["DIV-44", "DIV-45"],
-          math_min_double: ["DIV-44", "DIV-45"]
+          math_min_int: [],
+          math_min_long: [],
+          math_min_float: [],
+          math_min_double: []
         },
         target_id: :java_math_audit_min
       },
@@ -2121,12 +2100,12 @@
         status: :supported,
         description: "Returns the closest long/int to the argument",
         notes:
-          "DIV-43: round-half-away-from-zero, integer result, and special values (NaN/infinity) are preserved rather than Java's floor(x+0.5) and long saturation. DIV-45: integer and BigInt arguments are accepted (returned unchanged) via PTC-Lisp's value model rather than Java's float/double-only overloads",
+          "Uses Java float/double overloads, ties toward positive infinity, and Java NaN/infinity saturation.",
         reference_id: :math_round,
         jvm_descriptor_attestations: %{math_round_float: "(F)I", math_round_double: "(D)J"},
         admitted_overload_divergences: %{
-          math_round_float: ["DIV-43", "DIV-45"],
-          math_round_double: ["DIV-43", "DIV-45"]
+          math_round_float: [],
+          math_round_double: []
         },
         target_id: :java_math_audit_round
       },
@@ -3039,6 +3018,78 @@
   },
   interop_entries: [
     %{
+      name: "Math/abs",
+      description: "Return the absolute value using a selected Java primitive overload",
+      kind: :static,
+      signatures: ["(Math/abs x)"],
+      notes: "Preserves int, long, float, or double identity and Java minimum-value overflow.",
+      class: "java.lang.Math",
+      reference_ids: [:math_abs]
+    },
+    %{
+      name: "Math/ceil",
+      description: "Return the smallest double value not less than the argument",
+      kind: :static,
+      signatures: ["(Math/ceil x)"],
+      notes: "Returns a Java double and preserves signed zero and non-finite values.",
+      class: "java.lang.Math",
+      reference_ids: [:math_ceil]
+    },
+    %{
+      name: "Math/floor",
+      description: "Return the largest double value not greater than the argument",
+      kind: :static,
+      signatures: ["(Math/floor x)"],
+      notes: "Returns a Java double and preserves signed zero and non-finite values.",
+      class: "java.lang.Math",
+      reference_ids: [:math_floor]
+    },
+    %{
+      name: "Math/max",
+      description: "Return the greater of two Java primitive values",
+      kind: :static,
+      signatures: ["(Math/max x y)"],
+      notes: "Uses exact primitive overload selection plus Java NaN and signed-zero behavior.",
+      class: "java.lang.Math",
+      reference_ids: [:math_max]
+    },
+    %{
+      name: "Math/min",
+      description: "Return the smaller of two Java primitive values",
+      kind: :static,
+      signatures: ["(Math/min x y)"],
+      notes: "Uses exact primitive overload selection plus Java NaN and signed-zero behavior.",
+      class: "java.lang.Math",
+      reference_ids: [:math_min]
+    },
+    %{
+      name: "Math/pow",
+      description: "Return the first argument raised to the power of the second",
+      kind: :static,
+      signatures: ["(Math/pow base exponent)"],
+      notes: "Uses the Java double overload and its IEEE 754 special-case table.",
+      class: "java.lang.Math",
+      reference_ids: [:math_pow]
+    },
+    %{
+      name: "Math/round",
+      description: "Round a float to int or double to long with ties toward positive infinity",
+      kind: :static,
+      signatures: ["(Math/round x)"],
+      notes: "NaN becomes zero and infinities saturate to the selected integer primitive range.",
+      class: "java.lang.Math",
+      reference_ids: [:math_round]
+    },
+    %{
+      name: "Math/sqrt",
+      description: "Return the positive double square root",
+      kind: :static,
+      signatures: ["(Math/sqrt x)"],
+      notes: "Uses Java double semantics for negative, signed-zero, NaN, and infinite inputs.",
+      class: "java.lang.Math",
+      reference_ids: [:math_sqrt]
+    },
+    %{
       name: "java.util.Date.",
       description:
         "Construct current UTC time, from a timestamp / ISO-8601 / RFC-2822 string, or pass through an existing temporal value",
@@ -3340,6 +3391,142 @@
     }
   ],
   function_entries: [
+    %{
+      name: "Math/abs",
+      description: "Java primitive absolute value",
+      binding: :normal,
+      reference_ids: [:math_abs],
+      category: :interop,
+      dispatch: :java,
+      signatures: ["(Math/abs x)"],
+      since: nil,
+      examples: [{"(Math/abs -7)", "7"}],
+      notes: "Preserves the selected Java primitive kind and minimum-value overflow.",
+      section: "Interop",
+      ptc_extension?: false,
+      see_also: ["abs"],
+      clojure_var: nil,
+      divergences: nil
+    },
+    %{
+      name: "Math/ceil",
+      description: "Java double ceiling",
+      binding: :normal,
+      reference_ids: [:math_ceil],
+      category: :interop,
+      dispatch: :java,
+      signatures: ["(Math/ceil x)"],
+      since: nil,
+      examples: [{"(Math/ceil 1.2)", "2.0"}],
+      notes: "Returns a Java double rather than the integer returned by bare `ceil`.",
+      section: "Interop",
+      ptc_extension?: false,
+      see_also: ["ceil"],
+      clojure_var: nil,
+      divergences: nil
+    },
+    %{
+      name: "Math/floor",
+      description: "Java double floor",
+      binding: :normal,
+      reference_ids: [:math_floor],
+      category: :interop,
+      dispatch: :java,
+      signatures: ["(Math/floor x)"],
+      since: nil,
+      examples: [{"(Math/floor -1.2)", "-2.0"}],
+      notes: "Returns a Java double rather than the integer returned by bare `floor`.",
+      section: "Interop",
+      ptc_extension?: false,
+      see_also: ["floor"],
+      clojure_var: nil,
+      divergences: nil
+    },
+    %{
+      name: "Math/max",
+      description: "Java two-argument primitive maximum",
+      binding: :normal,
+      reference_ids: [:math_max],
+      category: :interop,
+      dispatch: :java,
+      signatures: ["(Math/max x y)"],
+      since: nil,
+      examples: [{"(Math/max 1 2)", "2"}],
+      notes: "Requires one admitted primitive overload; bare `max` remains variadic.",
+      section: "Interop",
+      ptc_extension?: false,
+      see_also: ["max"],
+      clojure_var: nil,
+      divergences: nil
+    },
+    %{
+      name: "Math/min",
+      description: "Java two-argument primitive minimum",
+      binding: :normal,
+      reference_ids: [:math_min],
+      category: :interop,
+      dispatch: :java,
+      signatures: ["(Math/min x y)"],
+      since: nil,
+      examples: [{"(Math/min 1 2)", "1"}],
+      notes: "Requires one admitted primitive overload; bare `min` remains variadic.",
+      section: "Interop",
+      ptc_extension?: false,
+      see_also: ["min"],
+      clojure_var: nil,
+      divergences: nil
+    },
+    %{
+      name: "Math/pow",
+      description: "Java double exponentiation",
+      binding: :normal,
+      reference_ids: [:math_pow],
+      category: :interop,
+      dispatch: :java,
+      signatures: ["(Math/pow base exponent)"],
+      since: nil,
+      examples: [{"(Math/pow 2 3)", "8.0"}],
+      notes: "Uses Java's IEEE 754 `double` special-case table.",
+      section: "Interop",
+      ptc_extension?: false,
+      see_also: ["pow"],
+      clojure_var: nil,
+      divergences: nil
+    },
+    %{
+      name: "Math/round",
+      description: "Java float/double rounding to int/long",
+      binding: :normal,
+      reference_ids: [:math_round],
+      category: :interop,
+      dispatch: :java,
+      signatures: ["(Math/round x)"],
+      since: nil,
+      examples: [{"(Math/round -1.5)", "-1"}],
+      notes: "Ties go toward positive infinity; NaN and infinities use Java saturation.",
+      section: "Interop",
+      ptc_extension?: false,
+      see_also: ["round"],
+      clojure_var: nil,
+      divergences: nil
+    },
+    %{
+      name: "Math/sqrt",
+      description: "Java double square root",
+      binding: :normal,
+      reference_ids: [:math_sqrt],
+      category: :interop,
+      dispatch: :java,
+      signatures: ["(Math/sqrt x)"],
+      since: nil,
+      examples: [{"(Math/sqrt 25)", "5.0"}],
+      notes: "Uses Java double signed-zero, NaN, and infinity behavior.",
+      section: "Interop",
+      ptc_extension?: false,
+      see_also: ["sqrt"],
+      clojure_var: nil,
+      divergences: nil
+    },
     %{
       name: ".getTime",
       description: "Return Unix timestamp in milliseconds (**DateTime only**)",
@@ -3793,7 +3980,8 @@
       signatures: ["(Integer/parseInt s)"],
       since: nil,
       examples: [{"(Integer/parseInt \"42\")", "42"}],
-      notes: "Matches Java decimal syntax, int range, and bounded NumberFormatException semantics.",
+      notes:
+        "Matches Java decimal syntax, int range, and bounded NumberFormatException semantics.",
       section: "Interop",
       ptc_extension?: false,
       see_also: ["parse-long"],
@@ -3810,7 +3998,8 @@
       signatures: ["(Long/parseLong s)"],
       since: nil,
       examples: [{"(Long/parseLong \"42\")", "42"}],
-      notes: "Matches Java decimal syntax, long range, and bounded NumberFormatException semantics.",
+      notes:
+        "Matches Java decimal syntax, long range, and bounded NumberFormatException semantics.",
       section: "Interop",
       ptc_extension?: false,
       see_also: ["parse-long"],

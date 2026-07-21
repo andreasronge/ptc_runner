@@ -553,76 +553,172 @@ date = fn milliseconds -> value.(:date, milliseconds) end
     value.(:boolean, "true"),
     ["GAP-J20"]
   ),
-  jvm.(:math_abs_int, nil, [int.(-7)], value.(:int, "7"), ["DIV-45"]),
-  jvm.(:math_abs_long, nil, [long.(-9)], value.(:long, "9"), ["DIV-45"]),
-  jvm.(:math_abs_float, nil, [float.(-1.5)], value.(:float, "0x1.8p0"), ["DIV-45"]),
+  jvm.(:math_abs_int, nil, [int.(-7)], value.(:int, "7"), []),
+  jvm.(:math_abs_int, nil, [int.(-2_147_483_648)], value.(:int, "-2147483648"), [])
+  |> Map.put(:case_id, "math-abs-int-min-value"),
+  jvm.(:math_abs_long, nil, [long.(-9)], value.(:long, "9"), []),
+  jvm.(
+    :math_abs_long,
+    nil,
+    [long.(-9_223_372_036_854_775_808)],
+    value.(:long, "-9223372036854775808"),
+    []
+  )
+  |> Map.put(:case_id, "math-abs-long-min-value"),
+  jvm.(:math_abs_float, nil, [float.(-1.5)], value.(:float, "0x1.8p0"), []),
+  jvm.(:math_abs_float, nil, [float.(-0.0)], value.(:float, "0x0.0p0"), [])
+  |> Map.put(:case_id, "math-abs-float-negative-zero"),
   jvm.(
     :math_abs_double,
     nil,
     [double.(-1.5)],
     value.(:double, "0x1.8p0"),
-    ["DIV-45"]
+    []
   ),
-  jvm.(:math_ceil_double, nil, [double.(1.2)], value.(:double, "0x1.0p1"), ["DIV-42"]),
+  jvm.(:math_abs_double, nil, [double.("NaN")], value.(:double, "NaN"), [])
+  |> Map.put(:case_id, "math-abs-double-nan"),
+  jvm.(:math_ceil_double, nil, [double.(1.2)], value.(:double, "0x1.0p1"), []),
+  jvm.(:math_ceil_double, nil, [double.(-0.3)], value.(:double, "-0x0.0p0"), [])
+  |> Map.put(:case_id, "math-ceil-double-negative-zero"),
   jvm.(
     :math_floor_double,
     nil,
     [double.(-1.2)],
     value.(:double, "-0x1.0p1"),
-    ["DIV-42"]
+    []
   ),
-  jvm.(:math_max_int, nil, [int.(1), int.(2)], value.(:int, "2"), ["DIV-44", "DIV-45"]),
+  jvm.(:math_floor_double, nil, [double.(0.3)], value.(:double, "0x0.0p0"), [])
+  |> Map.put(:case_id, "math-floor-double-positive-zero"),
+  jvm.(:math_max_int, nil, [int.(1), int.(2)], value.(:int, "2"), []),
+  jvm.(
+    :math_max_int,
+    nil,
+    [int.(-2_147_483_648), int.(2_147_483_647)],
+    value.(:int, "2147483647"),
+    []
+  )
+  |> Map.put(:case_id, "math-max-int-boundaries"),
   jvm.(
     :math_max_long,
     nil,
     [long.(8), long.(9)],
     value.(:long, "9"),
-    ["DIV-44", "DIV-45"]
+    []
   ),
+  jvm.(
+    :math_max_float,
+    nil,
+    [float.(-0.0), float.(0.0)],
+    value.(:float, "0x0.0p0"),
+    []
+  )
+  |> Map.put(:case_id, "math-max-float-signed-zero"),
   jvm.(
     :math_max_float,
     nil,
     [float.(1.25), float.(2.5)],
     value.(:float, "0x1.4p1"),
-    ["DIV-44", "DIV-45"]
+    []
   ),
   jvm.(
     :math_max_double,
     nil,
     [double.(1.25), double.(2.5)],
     value.(:double, "0x1.4p1"),
-    ["DIV-44", "DIV-45"]
+    []
   ),
-  jvm.(:math_min_int, nil, [int.(1), int.(2)], value.(:int, "1"), ["DIV-44", "DIV-45"]),
+  jvm.(
+    :math_max_double,
+    nil,
+    [double.("NaN"), double.(1.0)],
+    value.(:double, "NaN"),
+    []
+  )
+  |> Map.put(:case_id, "math-max-double-nan"),
+  jvm.(:math_min_int, nil, [int.(1), int.(2)], value.(:int, "1"), []),
   jvm.(
     :math_min_long,
     nil,
     [long.(8), long.(9)],
     value.(:long, "8"),
-    ["DIV-44", "DIV-45"]
+    []
   ),
+  jvm.(
+    :math_min_float,
+    nil,
+    [float.(0.0), float.(-0.0)],
+    value.(:float, "-0x0.0p0"),
+    []
+  )
+  |> Map.put(:case_id, "math-min-float-signed-zero"),
   jvm.(
     :math_min_float,
     nil,
     [float.(1.25), float.(2.5)],
     value.(:float, "0x1.4p0"),
-    ["DIV-44", "DIV-45"]
+    []
   ),
   jvm.(
     :math_min_double,
     nil,
     [double.(1.25), double.(2.5)],
     value.(:double, "0x1.4p0"),
-    ["DIV-44", "DIV-45"]
+    []
   ),
+  jvm.(
+    :math_min_double,
+    nil,
+    [double.("NaN"), double.(1.0)],
+    value.(:double, "NaN"),
+    []
+  )
+  |> Map.put(:case_id, "math-min-double-nan"),
   fast.(:math_pow_double, nil, [double.(2.0), double.(3.0)], value.(:double, "0x1.0p3"), []),
-  jvm.(:math_round_float, nil, [float.(-1.5)], value.(:int, "-1"), ["DIV-43", "DIV-45"]),
+  jvm.(
+    :math_pow_double,
+    nil,
+    [double.(-2.0), double.(0.5)],
+    value.(:double, "NaN"),
+    []
+  )
+  |> Map.put(:case_id, "math-pow-double-negative-fractional"),
+  jvm.(:math_round_float, nil, [float.(-1.5)], value.(:int, "-1"), []),
+  jvm.(:math_round_float, nil, [float.("NaN")], value.(:int, "0"), [])
+  |> Map.put(:case_id, "math-round-float-nan"),
+  jvm.(
+    :math_round_float,
+    nil,
+    [float.("Infinity")],
+    value.(:int, "2147483647"),
+    []
+  )
+  |> Map.put(:case_id, "math-round-float-positive-infinity"),
   jvm.(
     :math_round_double,
     nil,
     [double.(-1.5)],
     value.(:long, "-1"),
-    ["DIV-43", "DIV-45"]
+    []
   ),
-  fast.(:math_sqrt_double, nil, [double.(9.0)], value.(:double, "0x1.8p1"), [])
+  jvm.(
+    :math_round_double,
+    nil,
+    [double.(4_503_599_627_370_497.0)],
+    value.(:long, "4503599627370497"),
+    []
+  )
+  |> Map.put(:case_id, "math-round-double-exact-integer-above-two-to-the-52"),
+  jvm.(
+    :math_round_double,
+    nil,
+    [double.("-Infinity")],
+    value.(:long, "-9223372036854775808"),
+    []
+  )
+  |> Map.put(:case_id, "math-round-double-negative-infinity"),
+  fast.(:math_sqrt_double, nil, [double.(9.0)], value.(:double, "0x1.8p1"), []),
+  jvm.(:math_sqrt_double, nil, [double.(-1.0)], value.(:double, "NaN"), [])
+  |> Map.put(:case_id, "math-sqrt-double-negative"),
+  jvm.(:math_sqrt_double, nil, [double.(-0.0)], value.(:double, "-0x0.0p0"), [])
+  |> Map.put(:case_id, "math-sqrt-double-negative-zero")
 ]

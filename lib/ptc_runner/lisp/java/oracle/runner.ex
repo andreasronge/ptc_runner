@@ -430,8 +430,13 @@ defmodule PtcRunner.Lisp.Java.Oracle.Runner do
   end
 
   defp decode_ptc_value(%{type: :string, value: value}), do: value
-  defp decode_ptc_value(%{type: type, value: value}) when type in [:int, :long], do: value
-  defp decode_ptc_value(%{type: type, value: value}) when type in [:float, :double], do: value
+
+  defp decode_ptc_value(%{type: type, value: value})
+       when type in [:int, :long, :float, :double] do
+    {:ok, primitive} = Primitive.new(type, decode_primitive_value(value))
+    primitive
+  end
+
   defp decode_ptc_value(%{type: :local_date, value: value}), do: Date.from_iso8601!(value)
 
   defp decode_ptc_value(%{type: :instant, value: value}) do
@@ -441,6 +446,11 @@ defmodule PtcRunner.Lisp.Java.Oracle.Runner do
 
   defp decode_ptc_value(%{type: :date, value: value}),
     do: DateTime.from_unix!(value, :millisecond)
+
+  defp decode_primitive_value("NaN"), do: :nan
+  defp decode_primitive_value("Infinity"), do: :infinity
+  defp decode_primitive_value("-Infinity"), do: :negative_infinity
+  defp decode_primitive_value(value), do: value
 
   defp ptc_outcome({:ok, step}, fixture, overload) do
     %{

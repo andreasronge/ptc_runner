@@ -142,20 +142,20 @@ defmodule PtcRunner.Lisp.AnalyzeClojureCompatTest do
     end
   end
 
-  describe "Math namespace normalization" do
-    test "Math/sqrt normalizes to sqrt" do
+  describe "Math namespace dispatch" do
+    test "Math/sqrt preserves Java reference identity" do
       raw = {:ns_symbol, :Math, :sqrt}
-      assert {:ok, {:var, :sqrt}} = Analyze.analyze(raw)
+      assert {:ok, {:java_ref, :math_sqrt}} = Analyze.analyze(raw)
     end
 
-    test "Math/pow normalizes to pow" do
+    test "Math/pow preserves Java reference identity" do
       raw = {:ns_symbol, :Math, :pow}
-      assert {:ok, {:var, :pow}} = Analyze.analyze(raw)
+      assert {:ok, {:java_ref, :math_pow}} = Analyze.analyze(raw)
     end
 
-    test "Math/abs normalizes to abs" do
+    test "Math/abs preserves Java reference identity" do
       raw = {:ns_symbol, :Math, :abs}
-      assert {:ok, {:var, :abs}} = Analyze.analyze(raw)
+      assert {:ok, {:java_ref, :math_abs}} = Analyze.analyze(raw)
     end
   end
 

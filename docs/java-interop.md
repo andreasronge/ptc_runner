@@ -6,7 +6,7 @@
 
 PTC-Lisp emulates a subset of Java interop for LLM compatibility. These are **not** real JVM calls — they are BEAM-native implementations that mirror the Java API surface LLMs are trained on.
 
-30 interop entries covering 11 Java classes in 13 presentation groups.
+38 interop entries covering 12 Java classes in 14 presentation groups.
 
 See also: [Function Reference](function-reference.md) | [PTC-Lisp Specification](ptc-lisp-specification.md) | [Namespace Coverage](conformance/index.md)
 
@@ -46,6 +46,20 @@ See also: [Function Reference](function-reference.md) | [PTC-Lisp Specification]
 | Name | Kind | Signature | Description | Notes |
 |------|------|-----------|-------------|-------|
 | `Long/parseLong` | Static | `(Long/parseLong s)` | Parse string to integer | Uses Java decimal syntax, long range checks, and bounded NumberFormatException semantics. |
+
+
+### java.lang.Math
+
+| Name | Kind | Signature | Description | Notes |
+|------|------|-----------|-------------|-------|
+| `Math/abs` | Static | `(Math/abs x)` | Return the absolute value using a selected Java primitive overload | Preserves int, long, float, or double identity and Java minimum-value overflow. |
+| `Math/ceil` | Static | `(Math/ceil x)` | Return the smallest double value not less than the argument | Returns a Java double and preserves signed zero and non-finite values. |
+| `Math/floor` | Static | `(Math/floor x)` | Return the largest double value not greater than the argument | Returns a Java double and preserves signed zero and non-finite values. |
+| `Math/max` | Static | `(Math/max x y)` | Return the greater of two Java primitive values | Uses exact primitive overload selection plus Java NaN and signed-zero behavior. |
+| `Math/min` | Static | `(Math/min x y)` | Return the smaller of two Java primitive values | Uses exact primitive overload selection plus Java NaN and signed-zero behavior. |
+| `Math/pow` | Static | `(Math/pow base exponent)` | Return the first argument raised to the power of the second | Uses the Java double overload and its IEEE 754 special-case table. |
+| `Math/round` | Static | `(Math/round x)` | Round a float to int or double to long with ties toward positive infinity | NaN becomes zero and infinities saturate to the selected integer primitive range. |
+| `Math/sqrt` | Static | `(Math/sqrt x)` | Return the positive double square root | Uses Java double semantics for negative, signed-zero, NaN, and infinite inputs. |
 
 
 ### java.lang.String

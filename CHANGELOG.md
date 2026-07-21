@@ -35,6 +35,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   enforce int/long ranges, use direct IEEE float/double rounding, accept Java
   decimal and hexadecimal syntax, and return bounded Java parse conditions;
   unqualified Clojure parsers keep their safe `nil` behavior.
+- Migrated selected `java.lang.Math` methods to closed manifest dispatch with
+  exact primitive overload selection, Java overflow, signed-zero, NaN,
+  infinity, rounding, and saturation behavior. Qualified Math calls are now
+  distinct from the generic bare PTC-Lisp math helpers.
 - Added the code-owned `log-analysis-v1` profile to `mix ptc.repl`, with
   bounded multi-turn mission evaluation over an immutable trace capture,
   deterministic JSONL output for coding agents, safe profile discovery, and

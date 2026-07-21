@@ -726,6 +726,16 @@
       }
     },
     {
+      "case_id": "math-abs-int-min-value",
+      "overload_id": "math_abs_int",
+      "descriptor": "(I)I",
+      "expected": {
+        "status": "ok",
+        "type": "int",
+        "value": "-2147483648"
+      }
+    },
+    {
       "case_id": "math-abs-long",
       "overload_id": "math_abs_long",
       "descriptor": "(J)J",
@@ -733,6 +743,16 @@
         "status": "ok",
         "type": "long",
         "value": "9"
+      }
+    },
+    {
+      "case_id": "math-abs-long-min-value",
+      "overload_id": "math_abs_long",
+      "descriptor": "(J)J",
+      "expected": {
+        "status": "ok",
+        "type": "long",
+        "value": "-9223372036854775808"
       }
     },
     {
@@ -746,6 +766,16 @@
       }
     },
     {
+      "case_id": "math-abs-float-negative-zero",
+      "overload_id": "math_abs_float",
+      "descriptor": "(F)F",
+      "expected": {
+        "status": "ok",
+        "type": "float",
+        "value": "0x0.0p0"
+      }
+    },
+    {
       "case_id": "math-abs-double",
       "overload_id": "math_abs_double",
       "descriptor": "(D)D",
@@ -753,6 +783,16 @@
         "status": "ok",
         "type": "double",
         "value": "0x1.8p0"
+      }
+    },
+    {
+      "case_id": "math-abs-double-nan",
+      "overload_id": "math_abs_double",
+      "descriptor": "(D)D",
+      "expected": {
+        "status": "ok",
+        "type": "double",
+        "value": "NaN"
       }
     },
     {
@@ -766,6 +806,16 @@
       }
     },
     {
+      "case_id": "math-ceil-double-negative-zero",
+      "overload_id": "math_ceil_double",
+      "descriptor": "(D)D",
+      "expected": {
+        "status": "ok",
+        "type": "double",
+        "value": "-0x0.0p0"
+      }
+    },
+    {
       "case_id": "math-floor-double",
       "overload_id": "math_floor_double",
       "descriptor": "(D)D",
@@ -773,6 +823,16 @@
         "status": "ok",
         "type": "double",
         "value": "-0x1.0p1"
+      }
+    },
+    {
+      "case_id": "math-floor-double-positive-zero",
+      "overload_id": "math_floor_double",
+      "descriptor": "(D)D",
+      "expected": {
+        "status": "ok",
+        "type": "double",
+        "value": "0x0.0p0"
       }
     },
     {
@@ -786,6 +846,16 @@
       }
     },
     {
+      "case_id": "math-max-int-boundaries",
+      "overload_id": "math_max_int",
+      "descriptor": "(II)I",
+      "expected": {
+        "status": "ok",
+        "type": "int",
+        "value": "2147483647"
+      }
+    },
+    {
       "case_id": "math-max-long",
       "overload_id": "math_max_long",
       "descriptor": "(JJ)J",
@@ -793,6 +863,16 @@
         "status": "ok",
         "type": "long",
         "value": "9"
+      }
+    },
+    {
+      "case_id": "math-max-float-signed-zero",
+      "overload_id": "math_max_float",
+      "descriptor": "(FF)F",
+      "expected": {
+        "status": "ok",
+        "type": "float",
+        "value": "0x0.0p0"
       }
     },
     {
@@ -816,6 +896,16 @@
       }
     },
     {
+      "case_id": "math-max-double-nan",
+      "overload_id": "math_max_double",
+      "descriptor": "(DD)D",
+      "expected": {
+        "status": "ok",
+        "type": "double",
+        "value": "NaN"
+      }
+    },
+    {
       "case_id": "math-min-int",
       "overload_id": "math_min_int",
       "descriptor": "(II)I",
@@ -833,6 +923,16 @@
         "status": "ok",
         "type": "long",
         "value": "8"
+      }
+    },
+    {
+      "case_id": "math-min-float-signed-zero",
+      "overload_id": "math_min_float",
+      "descriptor": "(FF)F",
+      "expected": {
+        "status": "ok",
+        "type": "float",
+        "value": "-0x0.0p0"
       }
     },
     {
@@ -856,6 +956,16 @@
       }
     },
     {
+      "case_id": "math-min-double-nan",
+      "overload_id": "math_min_double",
+      "descriptor": "(DD)D",
+      "expected": {
+        "status": "ok",
+        "type": "double",
+        "value": "NaN"
+      }
+    },
+    {
       "case_id": "math-pow-double",
       "overload_id": "math_pow_double",
       "descriptor": "(DD)D",
@@ -863,6 +973,16 @@
         "status": "ok",
         "type": "double",
         "value": "0x1.0p3"
+      }
+    },
+    {
+      "case_id": "math-pow-double-negative-fractional",
+      "overload_id": "math_pow_double",
+      "descriptor": "(DD)D",
+      "expected": {
+        "status": "ok",
+        "type": "double",
+        "value": "NaN"
       }
     },
     {
@@ -876,6 +996,26 @@
       }
     },
     {
+      "case_id": "math-round-float-nan",
+      "overload_id": "math_round_float",
+      "descriptor": "(F)I",
+      "expected": {
+        "status": "ok",
+        "type": "int",
+        "value": "0"
+      }
+    },
+    {
+      "case_id": "math-round-float-positive-infinity",
+      "overload_id": "math_round_float",
+      "descriptor": "(F)I",
+      "expected": {
+        "status": "ok",
+        "type": "int",
+        "value": "2147483647"
+      }
+    },
+    {
       "case_id": "math-round-double",
       "overload_id": "math_round_double",
       "descriptor": "(D)J",
@@ -886,6 +1026,26 @@
       }
     },
     {
+      "case_id": "math-round-double-exact-integer-above-two-to-the-52",
+      "overload_id": "math_round_double",
+      "descriptor": "(D)J",
+      "expected": {
+        "status": "ok",
+        "type": "long",
+        "value": "4503599627370497"
+      }
+    },
+    {
+      "case_id": "math-round-double-negative-infinity",
+      "overload_id": "math_round_double",
+      "descriptor": "(D)J",
+      "expected": {
+        "status": "ok",
+        "type": "long",
+        "value": "-9223372036854775808"
+      }
+    },
+    {
       "case_id": "math-sqrt-double",
       "overload_id": "math_sqrt_double",
       "descriptor": "(D)D",
@@ -893,6 +1053,26 @@
         "status": "ok",
         "type": "double",
         "value": "0x1.8p1"
+      }
+    },
+    {
+      "case_id": "math-sqrt-double-negative",
+      "overload_id": "math_sqrt_double",
+      "descriptor": "(D)D",
+      "expected": {
+        "status": "ok",
+        "type": "double",
+        "value": "NaN"
+      }
+    },
+    {
+      "case_id": "math-sqrt-double-negative-zero",
+      "overload_id": "math_sqrt_double",
+      "descriptor": "(D)D",
+      "expected": {
+        "status": "ok",
+        "type": "double",
+        "value": "-0x0.0p0"
       }
     }
   ]

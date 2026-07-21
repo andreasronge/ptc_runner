@@ -119,6 +119,42 @@ defmodule PtcRunner.Lisp.Java.OracleFixturesTest do
                  long-parse-long-string-underflow
                  long-parse-long-string-null
                  long-parse-long-string-unicode-digits
+                 math-abs-int
+                 math-abs-int-min-value
+                 math-abs-long
+                 math-abs-long-min-value
+                 math-abs-float
+                 math-abs-float-negative-zero
+                 math-abs-double
+                 math-abs-double-nan
+                 math-ceil-double
+                 math-ceil-double-negative-zero
+                 math-floor-double
+                 math-floor-double-positive-zero
+                 math-max-int
+                 math-max-int-boundaries
+                 math-max-long
+                 math-max-float
+                 math-max-float-signed-zero
+                 math-max-double
+                 math-max-double-nan
+                 math-min-int
+                 math-min-long
+                 math-min-float
+                 math-min-float-signed-zero
+                 math-min-double
+                 math-min-double-nan
+                 math-pow-double
+                 math-pow-double-negative-fractional
+                 math-round-float
+                 math-round-float-nan
+                 math-round-float-positive-infinity
+                 math-round-double
+                 math-round-double-exact-integer-above-two-to-the-52
+                 math-round-double-negative-infinity
+                 math-sqrt-double
+                 math-sqrt-double-negative
+                 math-sqrt-double-negative-zero
                ))
 
     assert Enum.all?(outcomes, &(&1.selected_overload_id == &1.overload_id))

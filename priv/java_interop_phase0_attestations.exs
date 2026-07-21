@@ -101,46 +101,46 @@
       descriptor: "(Ljava/lang/String;)J",
       divergence_ids: []
     },
-    math_abs_double: %{attestation: :jvm, descriptor: "(D)D", divergence_ids: ["DIV-45"]},
-    math_abs_float: %{attestation: :jvm, descriptor: "(F)F", divergence_ids: ["DIV-45"]},
-    math_abs_int: %{attestation: :jvm, descriptor: "(I)I", divergence_ids: ["DIV-45"]},
-    math_abs_long: %{attestation: :jvm, descriptor: "(J)J", divergence_ids: ["DIV-45"]},
-    math_ceil_double: %{attestation: :jvm, descriptor: "(D)D", divergence_ids: ["DIV-42"]},
-    math_floor_double: %{attestation: :jvm, descriptor: "(D)D", divergence_ids: ["DIV-42"]},
+    math_abs_double: %{attestation: :jvm, descriptor: "(D)D", divergence_ids: []},
+    math_abs_float: %{attestation: :jvm, descriptor: "(F)F", divergence_ids: []},
+    math_abs_int: %{attestation: :jvm, descriptor: "(I)I", divergence_ids: []},
+    math_abs_long: %{attestation: :jvm, descriptor: "(J)J", divergence_ids: []},
+    math_ceil_double: %{attestation: :jvm, descriptor: "(D)D", divergence_ids: []},
+    math_floor_double: %{attestation: :jvm, descriptor: "(D)D", divergence_ids: []},
     math_max_double: %{
       attestation: :jvm,
       descriptor: "(DD)D",
-      divergence_ids: ["DIV-44", "DIV-45"]
+      divergence_ids: []
     },
     math_max_float: %{
       attestation: :jvm,
       descriptor: "(FF)F",
-      divergence_ids: ["DIV-44", "DIV-45"]
+      divergence_ids: []
     },
-    math_max_int: %{attestation: :jvm, descriptor: "(II)I", divergence_ids: ["DIV-44", "DIV-45"]},
-    math_max_long: %{attestation: :jvm, descriptor: "(JJ)J", divergence_ids: ["DIV-44", "DIV-45"]},
+    math_max_int: %{attestation: :jvm, descriptor: "(II)I", divergence_ids: []},
+    math_max_long: %{attestation: :jvm, descriptor: "(JJ)J", divergence_ids: []},
     math_min_double: %{
       attestation: :jvm,
       descriptor: "(DD)D",
-      divergence_ids: ["DIV-44", "DIV-45"]
+      divergence_ids: []
     },
     math_min_float: %{
       attestation: :jvm,
       descriptor: "(FF)F",
-      divergence_ids: ["DIV-44", "DIV-45"]
+      divergence_ids: []
     },
-    math_min_int: %{attestation: :jvm, descriptor: "(II)I", divergence_ids: ["DIV-44", "DIV-45"]},
-    math_min_long: %{attestation: :jvm, descriptor: "(JJ)J", divergence_ids: ["DIV-44", "DIV-45"]},
+    math_min_int: %{attestation: :jvm, descriptor: "(II)I", divergence_ids: []},
+    math_min_long: %{attestation: :jvm, descriptor: "(JJ)J", divergence_ids: []},
     math_pow_double: %{attestation: :jvm, descriptor: "(DD)D", divergence_ids: []},
     math_round_double: %{
       attestation: :jvm,
       descriptor: "(D)J",
-      divergence_ids: ["DIV-43", "DIV-45"]
+      divergence_ids: []
     },
     math_round_float: %{
       attestation: :jvm,
       descriptor: "(F)I",
-      divergence_ids: ["DIV-43", "DIV-45"]
+      divergence_ids: []
     },
     math_sqrt_double: %{attestation: :jvm, descriptor: "(D)D", divergence_ids: []},
     string_contains_char_sequence: %{

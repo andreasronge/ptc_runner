@@ -60,16 +60,8 @@ defmodule PtcRunner.Lisp.BuiltinNames do
     :".toUpperCase" => :normal,
     :"Duration/between" => :normal,
     :"java.util.Date." => :multi_arity,
-    :abs => :normal,
-    :ceil => :normal,
     :currentTimeMillis => :normal,
-    :floor => :normal,
-    :max => :variadic_nonempty,
-    :min => :variadic_nonempty,
-    :parse => :normal,
-    :pow => :normal,
-    :round => :normal,
-    :sqrt => :normal
+    :parse => :normal
   }
 
   @env_binding_kinds Map.merge(@ordinary_env_binding_kinds, @legacy_java_binding_kinds)

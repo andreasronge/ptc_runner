@@ -4050,7 +4050,7 @@
     "symbol": "Math/abs",
     "namespace": "java.lang.Math",
     "compatibility_target": "Java",
-    "notes": "DIV-45: uses PTC-Lisp arbitrary-precision integers, so abs returns the mathematically correct positive value and accepts BigInt input rather than reproducing Java long-overflow/overload artifacts"
+    "notes": "Uses the selected Java primitive overload, including int/long minimum overflow."
   },
   {
     "status": "candidate",
@@ -4099,7 +4099,7 @@
     "symbol": "Math/ceil",
     "namespace": "java.lang.Math",
     "compatibility_target": "Java",
-    "notes": "DIV-42: integer-returning PTC-Lisp extension, so finite results render as integers rather than Java's double shape"
+    "notes": "Returns a Java double, preserving signed zero and non-finite values."
   },
   {
     "status": "not_relevant",
@@ -4148,7 +4148,7 @@
     "symbol": "Math/floor",
     "namespace": "java.lang.Math",
     "compatibility_target": "Java",
-    "notes": "DIV-42: integer-returning PTC-Lisp extension, so finite results render as integers rather than Java's double shape"
+    "notes": "Returns a Java double, preserving signed zero and non-finite values."
   },
   {
     "status": "not_relevant",
@@ -4225,14 +4225,14 @@
     "symbol": "Math/max",
     "namespace": "java.lang.Math",
     "compatibility_target": "Java",
-    "notes": "DIV-44: max is the Clojure-named variadic helper (Math/max is an alias), not Java's two-argument primitive. DIV-45: mixed numeric and total-ordering comparisons are accepted via PTC-Lisp's generic value model rather than Java's primitive overloads"
+    "notes": "Uses Java's two-argument primitive overloads, including NaN and signed-zero behavior."
   },
   {
     "status": "supported",
     "symbol": "Math/min",
     "namespace": "java.lang.Math",
     "compatibility_target": "Java",
-    "notes": "DIV-44: min is the Clojure-named variadic helper (Math/min is an alias), not Java's two-argument primitive. DIV-45: mixed numeric and total-ordering comparisons are accepted via PTC-Lisp's generic value model rather than Java's primitive overloads"
+    "notes": "Uses Java's two-argument primitive overloads, including NaN and signed-zero behavior."
   },
   {
     "status": "not_relevant",
@@ -4302,7 +4302,7 @@
     "symbol": "Math/round",
     "namespace": "java.lang.Math",
     "compatibility_target": "Java",
-    "notes": "DIV-43: round-half-away-from-zero, integer result, and special values (NaN/infinity) are preserved rather than Java's floor(x+0.5) and long saturation. DIV-45: integer and BigInt arguments are accepted (returned unchanged) via PTC-Lisp's value model rather than Java's float/double-only overloads"
+    "notes": "Uses Java float/double overloads, ties toward positive infinity, and Java NaN/infinity saturation."
   },
   {
     "status": "not_relevant",

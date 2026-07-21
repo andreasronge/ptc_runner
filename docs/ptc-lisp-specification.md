@@ -3242,7 +3242,7 @@ built-ins or reserved runtime operations at analysis time.
 | Clojure compatibility | `clojure.set`, `set` | Set functions |
 | Clojure compatibility | `clojure.walk`, `walk` | Tree traversal functions |
 | Clojure compatibility | `regex` | Regex helpers (`re-find`, `re-pattern`, etc.; underlying vars are audited as `clojure.core`) |
-| Java compatibility | `Math` | Math functions |
+| Java compatibility | `Math` | Closed Java primitive overloads for `abs`, `ceil`, `floor`, `max`, `min`, `pow`, `round`, and `sqrt`; other inventoried members remain PTC namespace helpers |
 | Java compatibility | `System` | Java System time helper |
 | Java compatibility | `Boolean` | Boolean parse alias |
 | Java compatibility | `Double` | Double constants and parse alias |
@@ -3275,11 +3275,24 @@ built-ins or reserved runtime operations at analysis time.
 ;; Regex helpers can be qualified when that improves clarity:
 (regex/re-find #"error" line)      ; → (re-find #"error" line)
 
-;; Java compatibility namespaces:
-(Math/sqrt 9)                      ; → (sqrt 9)
+;; Java compatibility namespaces use bounded Java dispatch:
+(Math/sqrt 9)                      ; Java double result, distinct from bare sqrt
+(Math/max 1 2.0)                  ; Java type error: no exact mixed overload
 (System/currentTimeMillis)         ; → (currentTimeMillis)
 (Instant/parse "2026-05-18T12:00:00Z") ; → (parse "2026-05-18T12:00:00Z")
 ```
+
+The admitted qualified `Math` references preserve Java primitive identity and
+overload behavior. Untagged in-range integer literals select `long`; untagged
+floating literals and special numeric values select `double`. Results retain
+their selected `int`, `long`, `float`, or `double` provenance while native.
+Overloaded families require exact primitive agreement, so mixed `long` and
+`double` arguments do not silently widen. A sole double overload (`ceil`,
+`floor`, `pow`, or `sqrt`) accepts a bounded numeric argument using Java's
+double conversion. `Math/round` keeps its float and double overloads distinct,
+including Java NaN and infinity conversion. Bare `abs`, `ceil`, `floor`, `max`,
+`min`, `pow`, `round`, and `sqrt` remain ordinary PTC-Lisp helpers with their
+documented generic semantics.
 
 **Error handling:**
 

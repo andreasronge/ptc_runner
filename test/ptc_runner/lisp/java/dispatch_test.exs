@@ -44,7 +44,7 @@ defmodule PtcRunner.Lisp.Java.DispatchTest do
       assert {:error, {:unsupported_java_member, :Boolean, "missing"}} = Analyze.analyze(raw)
     end
 
-    test "keeps inventoried legacy Math aliases reachable" do
+    test "keeps inventoried non-Java Math namespace helpers reachable" do
       assert {:ok, %{return: 3}} = Lisp.run("(Math/bit-and 7 3)")
       assert {:ok, %{return: 3}} = Lisp.run("(Math/trunc 3.9)")
     end
@@ -58,8 +58,8 @@ defmodule PtcRunner.Lisp.Java.DispatchTest do
       assert {:ok, %Callable{reference_id: :double_parse_double}} =
                Callable.new(:double_parse_double)
 
-      assert :error = Callable.new(:math_abs)
-      refute Callable.valid?(%Callable{reference_id: :math_abs})
+      assert {:ok, %Callable{reference_id: :math_abs}} = Callable.new(:math_abs)
+      assert Callable.valid?(%Callable{reference_id: :math_abs})
     end
 
     test "reports the selected manifest overload without exposing it as Lisp data" do

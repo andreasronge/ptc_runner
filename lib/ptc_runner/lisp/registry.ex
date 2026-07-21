@@ -133,7 +133,7 @@ defmodule PtcRunner.Lisp.Registry do
   Returns the available curated Java compatibility audit keys.
   """
   @spec java_compat_audit_keys() :: [atom()]
-  def java_compat_audit_keys, do: Surface.audit_keys() -- [:java_math_audit]
+  def java_compat_audit_keys, do: Surface.audit_keys()
 
   @doc """
   Returns a curated Java compatibility audit by key.

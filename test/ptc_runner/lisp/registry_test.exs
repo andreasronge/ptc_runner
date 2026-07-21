@@ -199,14 +199,17 @@ defmodule PtcRunner.Lisp.RegistryTest do
     test "curated Java compatibility audits cover all documented interop entries" do
       supported_java_targets =
         Registry.java_compat_audit_keys()
-        |> Enum.flat_map(&Registry.java_compat_audit/1)
+        |> Enum.flat_map(&Registry.java_audit_targets/1)
         |> Enum.filter(&(&1.status == :supported))
-        |> MapSet.new(& &1.name)
+        |> MapSet.new(& &1.reference_id)
 
-      interop_names = Registry.java_interop() |> MapSet.new(& &1.name)
+      interop_references =
+        Registry.java_interop()
+        |> Enum.flat_map(& &1.reference_ids)
+        |> MapSet.new()
 
-      missing_from_audit = MapSet.difference(interop_names, supported_java_targets)
-      missing_from_interop = MapSet.difference(supported_java_targets, interop_names)
+      missing_from_audit = MapSet.difference(interop_references, supported_java_targets)
+      missing_from_interop = MapSet.difference(supported_java_targets, interop_references)
 
       assert MapSet.to_list(missing_from_audit) == [],
              "Java interop entries missing from curated audit: #{inspect(MapSet.to_list(missing_from_audit))}"

@@ -77,7 +77,7 @@ defmodule PtcRunner.Lisp.Java.SurfaceTest do
              "Java overload route points at missing Env binding #{inspect(binding)}"
     end
 
-    assert Enum.count(Surface.overloads(), &match?({:dispatch, _}, &1.route)) == 8
+    assert Enum.count(Surface.overloads(), &match?({:dispatch, _}, &1.route)) == 26
 
     assert %{route: {:dispatch, :boolean_parse_boolean}} =
              Enum.find(Surface.overloads(), &(&1.overload_id == :boolean_parse_boolean_string))
@@ -107,7 +107,15 @@ defmodule PtcRunner.Lisp.Java.SurfaceTest do
                  :double_nan,
                  :float_parse_float,
                  :integer_parse_int,
-                 :long_parse_long
+                 :long_parse_long,
+                 :math_abs,
+                 :math_ceil,
+                 :math_floor,
+                 :math_max,
+                 :math_min,
+                 :math_pow,
+                 :math_round,
+                 :math_sqrt
                ] ->
             assert Surface.closed_dispatch_reference?(reference.reference_id)
             assert :error = Surface.legacy_binding(namespace, member)
@@ -273,18 +281,26 @@ defmodule PtcRunner.Lisp.Java.SurfaceTest do
     manifest = Surface.manifest()
 
     invalid_route =
-      replace_overload(manifest, :math_abs_int, &%{&1 | route: {:legacy_env, :missing}})
+      replace_overload(manifest, :system_current_time_millis_0, fn overload ->
+        %{overload | route: {:legacy_env, :missing}}
+      end)
 
     assert {:error, errors} = validate(invalid_route)
     assert Enum.any?(errors, &String.contains?(&1, "legacy Env binding :missing does not exist"))
 
     [math | namespaces] = manifest.namespaces
-    [abs | members] = math.members
+
+    members =
+      Enum.map(math.members, fn member ->
+        if member.source_name == :"bit-and",
+          do: %{member | legacy_binding: :missing},
+          else: member
+      end)
 
     invalid_namespace = %{
       manifest
       | namespaces: [
-          %{math | members: [%{abs | legacy_binding: :missing} | members]} | namespaces
+          %{math | members: members} | namespaces
         ]
     }
 
@@ -312,10 +328,12 @@ defmodule PtcRunner.Lisp.Java.SurfaceTest do
            end)
 
     wrong_existing_route =
-      replace_overload(manifest, :math_abs_int, &%{&1 | route: {:legacy_env, :sqrt}})
+      replace_overload(manifest, :system_current_time_millis_0, fn overload ->
+        %{overload | route: {:legacy_env, :sqrt}}
+      end)
 
     assert {:error, errors} = validate(wrong_existing_route)
-    assert Enum.any?(errors, &String.contains?(&1, "invalid reference routes"))
+    assert Enum.any?(errors, &String.contains?(&1, "reference route does not match dispatch"))
   end
 
   test "validator rejects cross-class audit and presentation links" do
@@ -332,7 +350,8 @@ defmodule PtcRunner.Lisp.Java.SurfaceTest do
     assert {:error, errors} = validate(%{manifest | audits: audits})
     assert Enum.any?(errors, &String.contains?(&1, "reference class"))
 
-    [date_entry | entries] = manifest.interop_entries
+    date_entry = Enum.find(manifest.interop_entries, &(&1.class == "java.util.Date"))
+    entries = List.delete(manifest.interop_entries, date_entry)
     invalid_entry = %{date_entry | reference_ids: [:math_abs]}
 
     assert {:error, errors} = validate(%{manifest | interop_entries: [invalid_entry | entries]})
@@ -823,17 +842,17 @@ defmodule PtcRunner.Lisp.Java.SurfaceTest do
     coordinated_divergence_removal =
       manifest
       |> replace_overload(
-        :math_abs_int,
+        :date_new_long,
         &%{&1 | divergence_ids: []}
       )
       |> replace_audit_target(
-        :java_math_audit,
-        :math_abs,
+        :java_util_date_audit,
+        :date_new,
         fn target ->
           %{
             target
             | admitted_overload_divergences:
-                Map.put(target.admitted_overload_divergences, :math_abs_int, [])
+                Map.put(target.admitted_overload_divergences, :date_new_long, [])
           }
         end
       )
@@ -854,7 +873,7 @@ defmodule PtcRunner.Lisp.Java.SurfaceTest do
     assert Enum.any?(errors, &String.contains?(&1, "audit rationale"))
 
     removed_known_divergence =
-      replace_overload(manifest, :math_abs_int, fn overload ->
+      replace_overload(manifest, :date_new_long, fn overload ->
         %{overload | divergence_ids: []}
       end)
 
@@ -862,8 +881,8 @@ defmodule PtcRunner.Lisp.Java.SurfaceTest do
     assert Enum.any?(errors, &String.contains?(&1, "divergence coverage"))
 
     removed_secondary_divergence =
-      replace_overload(manifest, :math_max_int, fn overload ->
-        %{overload | divergence_ids: ["DIV-44"]}
+      replace_overload(manifest, :string_contains_char_sequence, fn overload ->
+        %{overload | divergence_ids: ["DIV-40"]}
       end)
 
     assert {:error, errors} = validate(removed_secondary_divergence)

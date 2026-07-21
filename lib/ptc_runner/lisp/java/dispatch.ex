@@ -143,9 +143,62 @@ defmodule PtcRunner.Lisp.Java.Dispatch do
         end
 
       [] ->
-        type_error(reference, candidates, receiver, arguments)
+        select_single_numeric_fallback(reference, candidates, receiver, arguments)
     end
   end
+
+  defp select_single_numeric_fallback(reference, [overload], nil, arguments) do
+    case coerce_single_numeric_arguments(overload.arguments, arguments) do
+      {:ok, coerced} ->
+        {:ok, overload, coerced}
+
+      :error ->
+        type_error(reference, [overload], nil, arguments, &coerce_single_numeric/2)
+    end
+  end
+
+  defp select_single_numeric_fallback(reference, candidates, receiver, arguments),
+    do: type_error(reference, candidates, receiver, arguments)
+
+  defp coerce_single_numeric_arguments(profiles, arguments) do
+    profiles
+    |> Enum.zip(arguments)
+    |> Enum.reduce_while({:ok, []}, fn {profile, value}, {:ok, acc} ->
+      case coerce_single_numeric(profile, value) do
+        {:ok, coerced} -> {:cont, {:ok, [coerced | acc]}}
+        :error -> {:halt, :error}
+      end
+    end)
+    |> case do
+      {:ok, reversed} -> {:ok, Enum.reverse(reversed)}
+      :error -> :error
+    end
+  end
+
+  defp coerce_single_numeric(:double, value) when is_integer(value) do
+    if Primitive.in_range?(:long, value), do: {:ok, value * 1.0}, else: :error
+  end
+
+  defp coerce_single_numeric(:double, value) when is_float(value), do: {:ok, value}
+
+  defp coerce_single_numeric(:double, value)
+       when value in [:infinity, :negative_infinity, :nan],
+       do: {:ok, value}
+
+  defp coerce_single_numeric(:double, %Primitive{} = primitive) do
+    with true <- Primitive.valid?(primitive),
+         {:ok, value} <- Primitive.unwrap(primitive) do
+      widen_to_double(primitive.kind, value)
+    else
+      _invalid -> :error
+    end
+  end
+
+  defp coerce_single_numeric(_profile, _value), do: :error
+
+  defp widen_to_double(kind, value) when kind in [:int, :long], do: {:ok, value * 1.0}
+  defp widen_to_double(kind, value) when kind in [:float, :double], do: {:ok, value}
+  defp widen_to_double(_kind, _value), do: :error
 
   defp coerce_overload(%{receiver: nil, arguments: profiles}, nil, arguments),
     do: coerce_arguments(profiles, arguments)
@@ -198,6 +251,10 @@ defmodule PtcRunner.Lisp.Java.Dispatch do
   end
 
   defp coerce(:double, value) when is_float(value), do: {:ok, value, 2}
+
+  defp coerce(:double, value) when value in [:infinity, :negative_infinity, :nan],
+    do: {:ok, value, 2}
+
   defp coerce(_profile, _value), do: :error
 
   defp receiver_profile(value) when is_binary(value), do: :string
@@ -304,7 +361,10 @@ defmodule PtcRunner.Lisp.Java.Dispatch do
      )}
   end
 
-  defp type_error(reference, candidates, receiver, arguments) do
+  defp type_error(reference, candidates, receiver, arguments),
+    do: type_error(reference, candidates, receiver, arguments, &coerce/2)
+
+  defp type_error(reference, candidates, receiver, arguments, argument_coercer) do
     receiver_profiles =
       candidates |> Enum.map(& &1.receiver) |> Enum.reject(&is_nil/1) |> Enum.uniq()
 
@@ -318,28 +378,46 @@ defmodule PtcRunner.Lisp.Java.Dispatch do
          %{receiver: true, expected: receiver_profiles, actual: value_type(receiver)}
        )}
     else
-      {argument, actual, expected} = first_mismatch(candidates, arguments)
-
-      {:error,
-       Condition.new(
-         :java_type_error,
-         reference.reference_id,
-         nil,
-         "Java member argument #{argument} does not match an admitted overload",
-         %{argument: argument, expected: expected, actual: value_type(actual)}
-       )}
+      argument_type_error(reference, candidates, arguments, argument_coercer)
     end
   end
 
-  defp first_mismatch(candidates, arguments) do
+  defp argument_type_error(reference, candidates, arguments, argument_coercer) do
+    case first_mismatch(candidates, arguments, argument_coercer) do
+      {:argument, argument, actual, expected} ->
+        {:error,
+         Condition.new(
+           :java_type_error,
+           reference.reference_id,
+           nil,
+           "Java member argument #{argument} does not match an admitted overload",
+           %{argument: argument, expected: expected, actual: value_type(actual)}
+         )}
+
+      :overload_combination ->
+        {:error,
+         Condition.new(
+           :java_type_error,
+           reference.reference_id,
+           nil,
+           "Java member argument types do not match a single admitted overload",
+           %{
+             expected: Enum.map(candidates, & &1.arguments),
+             actual: Enum.map(arguments, &value_type/1)
+           }
+         )}
+    end
+  end
+
+  defp first_mismatch(candidates, arguments, argument_coercer) do
     arguments
     |> Enum.with_index()
-    |> Enum.find_value({0, List.first(arguments), []}, fn {value, index} ->
+    |> Enum.find_value(:overload_combination, fn {value, index} ->
       profiles = candidates |> Enum.map(&Enum.at(&1.arguments, index)) |> Enum.uniq()
 
-      if Enum.any?(profiles, &(coerce(&1, value) != :error)),
+      if Enum.any?(profiles, &(argument_coercer.(&1, value) != :error)),
         do: nil,
-        else: {index, value, profiles}
+        else: {:argument, index, value, profiles}
     end)
   end
 
@@ -352,6 +430,7 @@ defmodule PtcRunner.Lisp.Java.Dispatch do
   defp value_type(value) when is_boolean(value), do: :boolean
   defp value_type(value) when is_integer(value), do: :integer
   defp value_type(value) when is_float(value), do: :float
+  defp value_type(value) when value in [:infinity, :negative_infinity, :nan], do: :double
   defp value_type(%Primitive{kind: kind}), do: kind
   defp value_type(_value), do: :other
 
