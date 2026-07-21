@@ -198,6 +198,7 @@ defmodule PtcRunner.MixProject do
           "docs/clojure-conformance-gaps.md",
           "docs/function-reference.md",
           "docs/java-interop.md",
+          "docs/signature-syntax.md",
           "docs/trace-log-contract.md",
           "docs/conformance/index.md",
           "docs/guides/capability-prelude.md",
@@ -215,7 +216,7 @@ defmodule PtcRunner.MixProject do
         Maintainers: ~r/docs\/guides\/kernel-maintainer\.md/,
         Contracts: ~r/docs\/trace-log-contract\.md/,
         Guides: ~r/docs\/guides\/.+\.md/,
-        Reference: ~r/docs\/(ptc-lisp|clojure|function-reference|java-).+\.md/,
+        Reference: ~r/docs\/(ptc-lisp|clojure|function-reference|java-|signature-).+\.md/,
         Conformance: ~r/docs\/conformance\/.+\.md/
       ]
     ]
