@@ -1,7 +1,8 @@
 defmodule PtcRunner.Lisp.CoreToSourceTest do
   use ExUnit.Case, async: true
 
-  alias PtcRunner.Lisp.{Analyze, CoreToSource}
+  alias PtcRunner.Lisp.{Analyze, CoreToSource, Result}
+  alias PtcRunner.Lisp.Java.Callable, as: JavaCallable
   alias PtcRunner.Lisp.Parser
 
   doctest PtcRunner.Lisp.CoreToSource
@@ -283,7 +284,7 @@ defmodule PtcRunner.Lisp.CoreToSourceTest do
           (defn recall [] (str "threshold=" threshold)))
         """)
 
-      source = CoreToSource.export_namespace(step.memory)
+      assert {:ok, source} = CoreToSource.export_namespace(step.memory)
 
       # Should contain defs for all three: the constant AND the functions
       assert source =~ "def threshold"
@@ -310,7 +311,7 @@ defmodule PtcRunner.Lisp.CoreToSourceTest do
             (def visited (conj visited (get data/task "location")))))
         """)
 
-      source = CoreToSource.export_namespace(step.memory)
+      assert {:ok, source} = CoreToSource.export_namespace(step.memory)
       assert source =~ "def visited"
       assert source =~ "def stats"
       assert source =~ "def label"
@@ -329,7 +330,7 @@ defmodule PtcRunner.Lisp.CoreToSourceTest do
           (defn _helper [] _scratch))
         """)
 
-      source = CoreToSource.export_namespace(step.memory)
+      assert {:ok, source} = CoreToSource.export_namespace(step.memory)
 
       assert source =~ "def _scratch"
       assert source =~ "def _helper"
@@ -347,7 +348,7 @@ defmodule PtcRunner.Lisp.CoreToSourceTest do
           (defn compute [] (twice 21)))
         """)
 
-      source = CoreToSource.export_namespace(step.memory)
+      assert {:ok, source} = CoreToSource.export_namespace(step.memory)
       {:ok, step2} = PtcRunner.Lisp.run(source)
 
       # After hydrating, compute should still be able to call twice
@@ -356,5 +357,53 @@ defmodule PtcRunner.Lisp.CoreToSourceTest do
 
       assert result.return == 42
     end
+
+    test "round-trips closures containing Java syntax and rejects stored Java authority" do
+      assert {:ok, step} =
+               PtcRunner.Lisp.run_native(
+                 ~S|(do (defn parse-bool [s] (Boolean/parseBoolean s)) (def parser Boolean/parseBoolean))|
+               )
+
+      assert {:error,
+              {:non_exportable_java_value, [{:binding, "parser"}], :boolean_parse_boolean}} =
+               CoreToSource.export_namespace(step.memory)
+
+      memory = Map.delete(step.memory, "parser")
+      assert {:ok, source} = CoreToSource.export_namespace(memory)
+      assert source =~ "Boolean/parseBoolean"
+
+      assert {:ok, hydrated} = PtcRunner.Lisp.run(source)
+      assert {:ok, result} = PtcRunner.Lisp.run(~S|(parse-bool "true")|, memory: hydrated.memory)
+      assert result.return == true
+    end
+
+    test "rejects Java authority nested in struct fields" do
+      assert {:ok, callable} = JavaCallable.new(:boolean_parse_boolean)
+
+      assert {:error,
+              {:non_exportable_java_value, [{:binding, "result"}, {:struct_field, :return}],
+               :boolean_parse_boolean}} =
+               CoreToSource.export_namespace(%{"result" => %Result{return: callable}})
+    end
+
+    test "rejects malformed Java struct-shaped maps without destructuring them" do
+      malformed_callable = %{__struct__: JavaCallable}
+      malformed_primitive = %{__struct__: PtcRunner.Lisp.Java.Primitive, kind: :int}
+
+      assert {:error, {:non_exportable_java_value, [{:binding, "parser"}], nil}} =
+               CoreToSource.export_namespace(%{"parser" => malformed_callable})
+
+      assert {:error, {:non_exportable_java_value, [{:binding, "value"}], :int}} =
+               CoreToSource.export_namespace(%{"value" => malformed_primitive})
+    end
+  end
+
+  test "formats closed Java instance and direct-dot nodes with Java source spelling" do
+    assert CoreToSource.format(
+             {:java_instance, :string_contains, {:var, :text}, [{:string, "x"}]}
+           ) == ~S|(.contains text "x")|
+
+    assert CoreToSource.format({:java_dot, :is_before, {:var, :value}, [{:var, :other}]}) ==
+             ~S|(.isBefore value other)|
   end
 end

@@ -491,7 +491,7 @@
       arguments: [:string],
       errors: [],
       receiver: nil,
-      route: {:legacy_env, :"Boolean/parseBoolean"},
+      route: {:dispatch, :boolean_parse_boolean},
       reference_id: :boolean_parse_boolean,
       descriptor: "(Ljava/lang/String;)Z",
       overload_id: :boolean_parse_boolean_string,
@@ -1472,8 +1472,7 @@
         %{
           source_name: "parseBoolean",
           reference_id: :boolean_parse_boolean,
-          classification: :admitted,
-          legacy_binding: :"Boolean/parseBoolean"
+          classification: :admitted
         }
       ]
     },
@@ -3736,7 +3735,7 @@
       binding: :normal,
       reference_ids: [:boolean_parse_boolean],
       category: :interop,
-      dispatch: :env,
+      dispatch: :java,
       signatures: ["(Boolean/parseBoolean s)"],
       since: nil,
       examples: [

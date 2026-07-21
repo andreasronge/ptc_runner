@@ -198,6 +198,38 @@ implementations nor closure parameters, bodies, captured environments,
 history, or metadata. Canonical events likewise carry only bounded status and
 accounting metadata; exact values remain outside ordinary observability.
 
+Bounded Java values follow the same native-versus-observable split. Native
+continuation state may retain validated Java primitive provenance and admitted
+Java callables. Identity, closures, and collection transforms retain primitive
+provenance; ordinary numeric consumers deliberately erase it, including integer
+index/count arguments, collection aggregation, and numeric sort/min/max keys,
+whether invoked directly, through a higher-order call, or as a comparator
+result. Index/count positions are keyed by builtin arity so collection-bearing
+positions retain native values. Native formatting
+keeps distinct primitive kinds tagged with identity-preserving display wrappers,
+so equal payloads and literal strings cannot collapse map keys or set members.
+Only references whose complete overload family is on closed dispatch may become
+native callables; each overload may name its own code-owned implementation.
+Callable application derives the invocation kind from that reference: instance
+callables consume the receiver as their first application argument. Java class
+constructor heads and direct-dot member families resolve from source spellings
+through the manifest, but enter Java CoreAST only when the complete applicable
+reference family is closed. Java values and recursively projected BEAM structs
+must have exactly their declared fields; projection never fills missing fields
+from struct defaults. Java class
+spellings are host-owned namespaces and cannot be
+declared by a capability prelude. Public
+projection recursively traverses collections and struct fields, erases valid
+primitive tags to inert numeric payloads, and labels a callable by its fixed
+manifest class/member identity. Tool-argument projection additionally follows
+the declared signature through nested maps and lists before invoking the callback
+when a Java primitive needs contract-aware projection; primitive-free arguments
+do not make Java projection parse otherwise-unused tool metadata.
+Return-signature validation observes that same public projection.
+Direct capability and Kernel JSON boundaries reject callable
+authority, forged Java values, incompatible declared leaves, and projection
+collisions before publication or callback invocation.
+
 ## Evaluator effects, outcomes, and parallel work
 
 `PtcRunner.Lisp.Eval` recursively evaluates analyzed expressions and leaves

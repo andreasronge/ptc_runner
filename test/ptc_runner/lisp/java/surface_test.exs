@@ -4,10 +4,13 @@ defmodule PtcRunner.Lisp.Java.SurfaceTest do
   alias Mix.Tasks.Ptc.AuditUpstream
   alias Mix.Tasks.Ptc.GenDocs
   alias PtcRunner.Lisp
+  alias PtcRunner.Lisp.Analyze
   alias PtcRunner.Lisp.BuiltinNames
+  alias PtcRunner.Lisp.CoreToSource
   alias PtcRunner.Lisp.Env
   alias PtcRunner.Lisp.Java.Surface
   alias PtcRunner.Lisp.Java.Surface.Validator
+  alias PtcRunner.Lisp.Parser
   alias PtcRunner.Lisp.Registry
   alias PtcRunner.Lisp.SourceAtoms
   alias PtcRunner.TestSupport.LispConformanceCases.Manual
@@ -53,7 +56,7 @@ defmodule PtcRunner.Lisp.Java.SurfaceTest do
     :"java.time.Duration" => [:between]
   }
 
-  test "the checked-in manifest validates as a closed Phase-0 surface" do
+  test "the checked-in manifest validates with one route per overload" do
     assert :ok = validate(Surface.manifest())
 
     env = Env.initial()
@@ -74,7 +77,10 @@ defmodule PtcRunner.Lisp.Java.SurfaceTest do
              "Java overload route points at missing Env binding #{inspect(binding)}"
     end
 
-    assert Enum.all?(Surface.overloads(), &match?({:legacy_env, _}, &1.route))
+    assert Enum.count(Surface.overloads(), &match?({:dispatch, _}, &1.route)) == 1
+
+    assert %{route: {:dispatch, :boolean_parse_boolean}} =
+             Enum.find(Surface.overloads(), &(&1.overload_id == :boolean_parse_boolean_string))
   end
 
   test "namespace projection preserves the pre-manifest compatibility surface" do
@@ -91,9 +97,34 @@ defmodule PtcRunner.Lisp.Java.SurfaceTest do
       assert Registry.builtins_by_namespace(namespace) == members
 
       for member <- members do
-        assert {:ok, binding} = Surface.legacy_binding(namespace, member)
-        assert Map.has_key?(Env.initial(), binding)
+        case Surface.resolve_reference(namespace, member) do
+          {:ok, reference} when reference.reference_id == :boolean_parse_boolean ->
+            assert Surface.closed_dispatch_reference?(reference.reference_id)
+            assert :error = Surface.legacy_binding(namespace, member)
+
+          _ ->
+            assert {:ok, binding} = Surface.legacy_binding(namespace, member)
+            assert Map.has_key?(Env.initial(), binding)
+        end
       end
+    end
+  end
+
+  test "resolves constructor and direct-dot source spellings independently of migration route" do
+    assert {:ok, %{reference_id: :date_new, kind: :constructor}} =
+             Surface.resolve_plain_reference(:"java.util.Date.")
+
+    assert {:ok, :contains} = Surface.resolve_member_family(:".contains")
+
+    assert Enum.any?(
+             Surface.member_family_references(:contains),
+             &(&1.reference_id == :string_contains)
+           )
+
+    for source <- ["(java.util.Date. 1)", ~S|(.contains text "x")|] do
+      assert {:ok, raw} = Parser.parse(source)
+      assert {:ok, core} = Analyze.analyze(raw)
+      assert CoreToSource.format(core) == source
     end
   end
 
@@ -173,13 +204,49 @@ defmodule PtcRunner.Lisp.Java.SurfaceTest do
     end
   end
 
-  test "validator rejects a route that bypasses the Phase-0 legacy boundary" do
+  test "validator rejects a dispatch route without a code-owned implementation" do
     manifest = Surface.manifest()
     [first | rest] = manifest.overloads
     invalid = %{manifest | overloads: [%{first | route: {:dispatch, :open_host_call}} | rest]}
 
     assert {:error, errors} = validate(invalid)
-    assert Enum.any?(errors, &String.contains?(&1, "invalid Phase-0 route"))
+
+    assert Enum.any?(
+             errors,
+             &String.contains?(&1, "implementation :open_host_call does not exist")
+           )
+  end
+
+  test "validator permits distinct closed implementations per overload" do
+    manifest = Surface.manifest()
+    reference = Enum.find(manifest.references, &(&1.reference_id == :boolean_parse_boolean))
+    overload = Enum.find(manifest.overloads, &(&1.overload_id == :boolean_parse_boolean_string))
+
+    second = %{
+      overload
+      | overload_id: :boolean_parse_boolean_second,
+        route: {:dispatch, :missing_second_handler}
+    }
+
+    references =
+      Enum.map(manifest.references, fn
+        %{reference_id: :boolean_parse_boolean} = row ->
+          %{row | overload_ids: reference.overload_ids ++ [second.overload_id]}
+
+        row ->
+          row
+      end)
+
+    assert {:error, errors} =
+             validate(%{
+               manifest
+               | references: references,
+                 overloads: manifest.overloads ++ [second]
+             })
+
+    assert Enum.any?(errors, &String.contains?(&1, "implementation :missing_second_handler"))
+    refute Enum.any?(errors, &String.contains?(&1, "overload routes disagree"))
+    refute Enum.any?(errors, &String.contains?(&1, "invalid reference routes"))
   end
 
   test "instance receiver profiles must belong to their Java class" do
@@ -229,13 +296,16 @@ defmodule PtcRunner.Lisp.Java.SurfaceTest do
       )
 
     assert {:error, errors} = validate(invalid_existing)
-    assert Enum.any?(errors, &String.contains?(&1, "reference route :sqrt does not exist"))
+
+    assert Enum.any?(errors, fn error ->
+             String.contains?(error, "reference route must be :\"parse-double\", got :sqrt")
+           end)
 
     wrong_existing_route =
       replace_overload(manifest, :math_abs_int, &%{&1 | route: {:legacy_env, :sqrt}})
 
     assert {:error, errors} = validate(wrong_existing_route)
-    assert Enum.any?(errors, &String.contains?(&1, "routes disagree"))
+    assert Enum.any?(errors, &String.contains?(&1, "invalid reference routes"))
   end
 
   test "validator rejects cross-class audit and presentation links" do

@@ -7,6 +7,8 @@ defmodule PtcRunner.Lisp.Eval.Helpers do
 
   alias PtcRunner.Lisp.Env
   alias PtcRunner.Lisp.Env.Builtin
+  alias PtcRunner.Lisp.Java.Callable, as: JavaCallable
+  alias PtcRunner.Lisp.Java.Primitive, as: JavaPrimitive
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
 
   @stable_parallel_errors [:memory_exceeded, :timeout, :parallel_capacity_exceeded]
@@ -121,6 +123,13 @@ defmodule PtcRunner.Lisp.Eval.Helpers do
   @spec describe_type(term()) :: String.t()
   def describe_type(nil), do: "nil"
   def describe_type(%Builtin{}), do: "function"
+
+  def describe_type(%JavaCallable{} = callable),
+    do: if(JavaCallable.valid?(callable), do: "function", else: "invalid Java value")
+
+  def describe_type(%JavaPrimitive{} = primitive),
+    do: if(JavaPrimitive.valid?(primitive), do: "number", else: "invalid Java value")
+
   def describe_type(%MapSet{}), do: "set"
   def describe_type(%LispKeyword{}), do: "keyword"
   def describe_type(x) when is_list(x), do: "list"

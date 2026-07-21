@@ -30,7 +30,7 @@ defmodule PtcRunner.Lisp.Java.Oracle.Runner do
   def run(oracle, subset, opts \\ [])
 
   def run(:ptc, subset, opts) when is_atom(subset) do
-    cases = Enum.filter(Fixtures.cases(), &(&1.oracle == :ptc_only and subset in &1.subsets))
+    cases = ptc_cases(subset)
 
     with :ok <- ensure_cases(cases, subset),
          {:ok, outcomes} <- run_ptc_cases(cases, opts),
@@ -54,6 +54,18 @@ defmodule PtcRunner.Lisp.Java.Oracle.Runner do
       {:ok, result}
     end
   end
+
+  defp ptc_cases(:closed_dispatch) do
+    overloads = Map.new(Surface.overloads(), &{&1.overload_id, &1})
+
+    Enum.filter(Fixtures.cases(), fn fixture ->
+      overload = Map.fetch!(overloads, fixture.overload_id)
+      Surface.closed_dispatch_reference?(overload.reference_id)
+    end)
+  end
+
+  defp ptc_cases(subset),
+    do: Enum.filter(Fixtures.cases(), &(&1.oracle == :ptc_only and subset in &1.subsets))
 
   @doc false
   @spec parse_output(String.t()) :: {:ok, map()} | {:error, term()}
@@ -241,7 +253,7 @@ defmodule PtcRunner.Lisp.Java.Oracle.Runner do
   end
 
   defp validate_outcomes(outcomes, cases, oracle) do
-    expected = expected_outcomes(cases)
+    expected = expected_outcomes(cases, oracle)
 
     comparable =
       if oracle in [:jvm, :ptc],
@@ -258,19 +270,23 @@ defmodule PtcRunner.Lisp.Java.Oracle.Runner do
       else: {:error, {:outcome_mismatch, expected, comparable}}
   end
 
-  defp expected_outcomes(cases) do
+  defp expected_outcomes(cases, oracle) do
     overloads = Map.new(Surface.overloads(), &{&1.overload_id, &1})
 
     Enum.map(cases, fn fixture ->
       overload = Map.fetch!(overloads, fixture.overload_id)
 
-      %{
+      outcome = %{
         case_id: fixture.case_id,
         overload_id: Atom.to_string(fixture.overload_id),
         descriptor: overload.descriptor,
         status: Atom.to_string(fixture.expected.status),
         expected: fixture.expected
       }
+
+      if oracle == :ptc and Surface.closed_dispatch_reference?(overload.reference_id),
+        do: Map.put(outcome, :selected_overload_id, Atom.to_string(fixture.overload_id)),
+        else: outcome
     end)
   end
 
@@ -295,17 +311,65 @@ defmodule PtcRunner.Lisp.Java.Oracle.Runner do
     reference = Map.fetch!(references, overload.reference_id)
     {source, context} = ptc_invocation(fixture, reference)
 
-    result =
-      PtcRunner.Lisp.run_native(source,
-        context: context,
-        filter_context: false,
-        timeout: Keyword.get(opts, :timeout_ms, @timeout_ms)
-      )
+    {result, selected_overload_id} =
+      run_with_dispatch_attestation(source, context, opts, reference.reference_id)
 
-    {:ok, ptc_outcome(result, fixture, overload)}
+    outcome = ptc_outcome(result, fixture, overload)
+
+    outcome =
+      if is_atom(selected_overload_id) and not is_nil(selected_overload_id),
+        do: Map.put(outcome, :selected_overload_id, Atom.to_string(selected_overload_id)),
+        else: outcome
+
+    {:ok, outcome}
   rescue
     error -> {:error, {:ptc_case_failed, fixture.case_id, Exception.message(error)}}
   end
+
+  defp run_with_dispatch_attestation(source, context, opts, reference_id) do
+    owner = self()
+    handler_id = {__MODULE__, owner, make_ref()}
+
+    :ok =
+      :telemetry.attach(
+        handler_id,
+        [:ptc_runner, :lisp, :java, :dispatch],
+        &__MODULE__.handle_dispatch_attestation/4,
+        {owner, handler_id, reference_id}
+      )
+
+    try do
+      result =
+        PtcRunner.Lisp.run_native(source,
+          context: context,
+          filter_context: false,
+          timeout: Keyword.get(opts, :timeout_ms, @timeout_ms)
+        )
+
+      selected =
+        receive do
+          {:java_dispatch_attestation, ^handler_id, overload_id} -> overload_id
+        after
+          0 -> nil
+        end
+
+      {result, selected}
+    after
+      :telemetry.detach(handler_id)
+    end
+  end
+
+  @doc false
+  def handle_dispatch_attestation(
+        _event,
+        _measurements,
+        %{reference_id: reference_id, overload_id: overload_id},
+        {owner, handler_id, reference_id}
+      ) do
+    send(owner, {:java_dispatch_attestation, handler_id, overload_id})
+  end
+
+  def handle_dispatch_attestation(_event, _measurements, _metadata, _state), do: :ok
 
   defp ptc_invocation(fixture, reference) do
     receiver = fixture.invocation.receiver

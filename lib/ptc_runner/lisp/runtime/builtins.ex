@@ -339,7 +339,6 @@ defmodule PtcRunner.Lisp.Runtime.Builtins do
       # ============================================================
       # Interop
       # ============================================================
-      {:"Boolean/parseBoolean", {:normal, &Runtime.boolean_parse_boolean/1}},
       {:"java.util.Date.",
        {:multi_arity, :"java.util.Date.", {&Runtime.java_util_date/0, &Runtime.java_util_date/1}}},
       {:".getTime", {:normal, &Runtime.dot_get_time/1}},

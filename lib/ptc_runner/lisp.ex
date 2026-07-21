@@ -32,6 +32,7 @@ defmodule PtcRunner.Lisp do
 
   alias PtcRunner.Lisp.{
     Analyze,
+    CoreAST,
     DataKeys,
     Env,
     Eval,
@@ -63,6 +64,8 @@ defmodule PtcRunner.Lisp do
   alias PtcRunner.Lisp.AmbiguousArguments
   alias PtcRunner.Lisp.Env.Builtin, as: EnvBuiltin
   alias PtcRunner.Lisp.Format.Var
+  alias PtcRunner.Lisp.Java.Project, as: JavaProject
+  alias PtcRunner.Lisp.Java.Surface, as: JavaSurface
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
   alias PtcRunner.Lisp.Result, as: Step
   alias PtcRunner.Lisp.Signature
@@ -105,8 +108,13 @@ defmodule PtcRunner.Lisp do
   are retained with opaque inert key wrappers so boundary projections can reject
   ambiguous JSON while human formatting preserves the original distinction.
   """
-  @spec externalize_value(term()) :: term()
-  def externalize_value(value), do: externalize_lisp_values(value)
+  @spec externalize_value(term()) :: term() | {:error, {:java_projection_error, term()}}
+  def externalize_value(value) do
+    case JavaProject.project(value, :public) do
+      {:ok, projected} -> externalize_lisp_values(projected)
+      {:error, reason} -> {:error, {:java_projection_error, reason}}
+    end
+  end
 
   @doc """
   Converts a PTC-Lisp memory map into the public memory representation.
@@ -114,13 +122,20 @@ defmodule PtcRunner.Lisp do
   Unlike `externalize_value/1`, this also normalizes top-level `def` binding
   keys through the bounded source vocabulary.
   """
-  @spec externalize_memory(map()) :: map()
+  @spec externalize_memory(map()) ::
+          map() | {:error, {:java_projection_error, term()}}
   def externalize_memory(memory) when is_map(memory) do
-    memory
-    |> Enum.reject(fn {_k, v} -> match?(%PtcRunner.Lisp.RuntimeCallable{}, v) end)
-    |> Map.new(fn {k, v} ->
-      {externalize_memory_key(k), externalize_lisp_values(v)}
-    end)
+    case JavaProject.project(memory, :public) do
+      {:ok, projected} ->
+        projected
+        |> Enum.reject(fn {_k, v} -> match?(%PtcRunner.Lisp.RuntimeCallable{}, v) end)
+        |> Map.new(fn {k, v} ->
+          {externalize_memory_key(k), externalize_lisp_values(v)}
+        end)
+
+      {:error, reason} ->
+        {:error, {:java_projection_error, reason}}
+    end
   end
 
   @doc """
@@ -371,16 +386,63 @@ defmodule PtcRunner.Lisp do
   defp telemetry_outcome({:error, %Step{}}), do: :error
 
   defp public_result({tag, %Step{} = step}) when tag in [:ok, :error] do
-    {tag,
-     %{
-       step
-       | return: public_result_value(step.return),
-         fail: public_result_value(step.fail),
-         tool_calls: public_result_value(step.tool_calls),
-         pmap_calls: public_result_value(step.pmap_calls),
-         child_steps: public_result_value(step.child_steps),
-         tool_cache: public_result_value(step.tool_cache)
-     }}
+    case project_public_step(step) do
+      {:ok, projected} -> {tag, externalize_public_step(projected)}
+      {:error, reason} -> {:error, java_projection_error_step(step, reason)}
+    end
+  end
+
+  defp project_public_step(%Step{} = step) do
+    Enum.reduce_while(
+      [:return, :fail, :memory, :tool_calls, :pmap_calls, :child_steps, :tool_cache],
+      {:ok, step},
+      fn field, {:ok, projected_step} ->
+        case JavaProject.project(Map.fetch!(projected_step, field), :public) do
+          {:ok, value} -> {:cont, {:ok, Map.put(projected_step, field, value)}}
+          {:error, reason} -> {:halt, {:error, reason}}
+        end
+      end
+    )
+  end
+
+  defp externalize_public_step(%Step{} = step) do
+    %{
+      step
+      | return: public_result_value(step.return),
+        fail: public_result_value(step.fail),
+        memory: step.memory,
+        tool_calls: public_result_value(step.tool_calls),
+        pmap_calls: public_result_value(step.pmap_calls),
+        child_steps: public_result_value(step.child_steps),
+        tool_cache: public_result_value(step.tool_cache)
+    }
+  end
+
+  defp java_projection_error_step(%Step{} = step, reason) do
+    details = %{projection_error: inspect(reason, limit: 10)}
+
+    %{
+      step
+      | return: nil,
+        memory: safely_project_public(step.memory, %{}),
+        tool_calls: safely_project_public(step.tool_calls, []),
+        pmap_calls: safely_project_public(step.pmap_calls, []),
+        child_steps: safely_project_public(step.child_steps, []),
+        tool_cache: safely_project_public(step.tool_cache, %{}),
+        fail: %{
+          reason: :java_projection_error,
+          message: "Java value could not be projected at the public boundary",
+          details: details
+        }
+    }
+    |> externalize_public_step()
+  end
+
+  defp safely_project_public(value, fallback) do
+    case JavaProject.project(value, :public) do
+      {:ok, projected} -> projected
+      {:error, _reason} -> fallback
+    end
   end
 
   defp public_result_value({:closure, _params, _body, _env, _history, _metadata}),
@@ -561,7 +623,7 @@ defmodule PtcRunner.Lisp do
 
       tools_meta =
         Map.new(normalized_tools, fn {name, tool} ->
-          {name, %{cache: tool.cache, visibility: tool.visibility}}
+          {name, %{cache: tool.cache, visibility: tool.visibility, signature: tool.signature}}
         end)
 
       opts =
@@ -653,7 +715,8 @@ defmodule PtcRunner.Lisp do
   defp validate_bounded(source, compile_timeout, max_heap) do
     compile_fn = fn ->
       with {:ok, raw_ast} <- Parser.parse(source),
-           {:ok, core_ast} <- Analyze.analyze(raw_ast) do
+           {:ok, core_ast} <- Analyze.analyze(raw_ast),
+           :ok <- CoreAST.validate(core_ast) do
         case collect_undefined_vars(core_ast, MapSet.new()) do
           [] -> :ok
           undefined -> {:error, Enum.uniq(undefined)}
@@ -712,6 +775,7 @@ defmodule PtcRunner.Lisp do
       with {:ok, raw_ast} <- Parser.parse(source),
            :ok <- check_symbol_limit(raw_ast, max_symbols),
            {:ok, core_ast} <- Analyze.analyze(raw_ast, prelude, prelude_filtered_exports),
+           :ok <- CoreAST.validate(core_ast),
            :ok <- check_undefined_vars(core_ast, memory_keys),
            :ok <- check_undefined_tools(core_ast, public_tool_names, tool_names, prelude) do
         {:ok, core_ast}
@@ -1050,6 +1114,18 @@ defmodule PtcRunner.Lisp do
   defp error_details({:prelude_contract_error, _message, details}) when is_map(details),
     do: details
 
+  defp error_details({category, _message, details})
+       when category in [
+              :unsupported_java_class,
+              :unsupported_java_member,
+              :java_arity_error,
+              :java_type_error,
+              :java_domain_error,
+              :invalid_java_string,
+              :java_handler_contract_error
+            ] and is_map(details),
+       do: details
+
   defp error_details(_reason), do: %{}
 
   @doc """
@@ -1081,6 +1157,17 @@ defmodule PtcRunner.Lisp do
 
   # Handle Analyze errors: {:invalid_arity, atom, message}
   def format_error({:invalid_arity, _atom, msg}) when is_binary(msg), do: "Analysis error: #{msg}"
+
+  def format_error({:unsupported_java_member, namespace, member}),
+    do: unsupported_java_member_message(namespace, member)
+
+  def format_error({:unsupported_java_class, class}),
+    do: "Analysis error: unsupported Java class #{class}"
+
+  def format_error({:java_arity_error, reference_id, details}),
+    do:
+      "Analysis error: Java reference #{reference_id} expects arity #{inspect(details.expected)}, got #{details.actual}"
+
   # Handle Eval errors with specific types
   def format_error({:unbound_var, name}) do
     msg = Helpers.format_closure_error({:unbound_var, name})
@@ -1593,6 +1680,17 @@ defmodule PtcRunner.Lisp do
     Enum.reduce(args, acc, &collect_tool_names/2)
   end
 
+  defp collect_tool_names({tag, _reference_id, args}, acc)
+       when tag in [:java_static, :java_new],
+       do: Enum.reduce(args, acc, &collect_tool_names/2)
+
+  defp collect_tool_names({tag, _reference_id, receiver, args}, acc)
+       when tag in [:java_instance, :java_dot] do
+    Enum.reduce(args, collect_tool_names(receiver, acc), &collect_tool_names/2)
+  end
+
+  defp collect_tool_names({tag, _reference_id}, acc) when tag in [:java_field, :java_ref], do: acc
+
   defp collect_tool_names({:if, c, t, e}, acc) do
     acc = collect_tool_names(c, acc)
     acc = collect_tool_names(t, acc)
@@ -1824,16 +1922,22 @@ defmodule PtcRunner.Lisp do
   defp validate_return_value(nil, _signature_str, step), do: {:ok, step}
 
   defp validate_return_value(parsed_signature, signature_str, step) do
-    case Signature.validate(parsed_signature, externalize_lisp_values(step.return)) do
-      :ok ->
-        # Store the original signature string in the step
-        {:ok, %{step | signature: signature_str}}
+    case JavaProject.project(step.return, :public) do
+      {:ok, projected_return} ->
+        case Signature.validate(parsed_signature, externalize_lisp_values(projected_return)) do
+          :ok ->
+            # Store the original signature string in the step
+            {:ok, %{step | signature: signature_str}}
 
-      {:error, errors} ->
-        msg = format_validation_errors(errors)
+          {:error, errors} ->
+            msg = format_validation_errors(errors)
 
-        {:error,
-         Step.error(:validation_error, msg, step.memory, %{}, tool_cache: step.tool_cache)}
+            {:error,
+             Step.error(:validation_error, msg, step.memory, %{}, tool_cache: step.tool_cache)}
+        end
+
+      {:error, reason} ->
+        {:error, java_projection_error_step(step, reason)}
     end
   end
 
@@ -1920,6 +2024,20 @@ defmodule PtcRunner.Lisp do
     collect_undefined_vars(target, scope) ++
       Enum.flat_map(args, &collect_undefined_vars(&1, scope))
   end
+
+  defp collect_undefined_vars({tag, _reference_id, args}, scope)
+       when tag in [:java_static, :java_new],
+       do: Enum.flat_map(args, &collect_undefined_vars(&1, scope))
+
+  defp collect_undefined_vars({tag, _reference_id, receiver, args}, scope)
+       when tag in [:java_instance, :java_dot] do
+    collect_undefined_vars(receiver, scope) ++
+      Enum.flat_map(args, &collect_undefined_vars(&1, scope))
+  end
+
+  defp collect_undefined_vars({tag, _reference_id}, _scope)
+       when tag in [:java_field, :java_ref],
+       do: []
 
   # Tool call
   defp collect_undefined_vars({:tool_call, _name, args}, scope) do
@@ -2116,8 +2234,30 @@ defmodule PtcRunner.Lisp do
     do:
       "Analysis error: placeholder '#{name}' can only be used inside #() anonymous function syntax"
 
+  defp format_validate_error({:unsupported_java_member, namespace, member}),
+    do: unsupported_java_member_message(namespace, member)
+
+  defp format_validate_error({:unsupported_java_class, class}),
+    do: "Analysis error: unsupported Java class #{class}"
+
+  defp format_validate_error({:java_arity_error, reference_id, details}),
+    do:
+      "Analysis error: Java reference #{reference_id} expects arity #{inspect(details.expected)}, got #{details.actual}"
+
   defp format_validate_error({type, msg}) when is_atom(type) and is_binary(msg),
     do: "#{type}: #{msg}"
 
   defp format_validate_error(other), do: "Error: #{inspect(other)}"
+
+  defp unsupported_java_member_message(namespace, member) do
+    members = JavaSurface.namespace_members(namespace)
+    member_labels = Enum.map(members, &"#{namespace}/#{&1}")
+
+    suffix =
+      if member_labels == [],
+        do: "",
+        else: " Interop functions: #{Enum.join(member_labels, ", ")}"
+
+    "Analysis error: #{namespace}/#{member} is not available.#{suffix}"
+  end
 end

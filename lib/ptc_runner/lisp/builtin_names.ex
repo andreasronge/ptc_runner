@@ -58,7 +58,6 @@ defmodule PtcRunner.Lisp.BuiltinNames do
     :".toLowerCase" => :normal,
     :".toMillis" => :normal,
     :".toUpperCase" => :normal,
-    :"Boolean/parseBoolean" => :normal,
     :"Duration/between" => :normal,
     :"java.util.Date." => :multi_arity,
     :NEGATIVE_INFINITY => :constant,
@@ -88,7 +87,12 @@ defmodule PtcRunner.Lisp.BuiltinNames do
   :ok =
     Validator.validate!(@java_surface, @env_binding_kinds, @java_phase0_attestations)
 
-  @java_namespace_atoms @java_surface.namespaces |> Enum.map(& &1.namespace) |> Enum.uniq()
+  @java_namespace_atoms ((@java_surface.namespaces |> Enum.map(& &1.namespace)) ++
+                           (@java_surface.classes
+                            |> Enum.flat_map(&[&1.name | &1.spellings])
+                            |> Enum.reject(&String.ends_with?(&1, "."))
+                            |> Enum.map(&String.to_atom/1)))
+                        |> Enum.uniq()
   @java_member_atoms @java_surface.namespaces
                      |> Enum.flat_map(& &1.members)
                      |> Enum.map(& &1.source_name)

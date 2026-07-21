@@ -2634,7 +2634,21 @@ To iterate over just keys or values, extract them first:
 | `parse-boolean` | Parse `"true"`/`"false"`, returns nil on failure |
 
 String parsing functions provide safe conversion from strings to numbers, compatible with Clojure 1.11+. These functions return `nil` on parse failure rather than throwing exceptions.
-Java-shaped numeric aliases are also accepted for LLM compatibility: `Integer/parseInt` and `Long/parseLong` map to `parse-long`, and `Double/parseDouble` and `Float/parseFloat` map to `parse-double`. These aliases keep PTC-Lisp's safe `nil`-on-failure behavior; they are not exact Java throwing semantics. `Boolean/parseBoolean` is a Java-compatible interop builtin: it returns `true` only for case-insensitive `"true"`, returns `false` for nil/null and every other string, and raises for non-string, non-nil inputs.
+Java-shaped numeric aliases are also accepted for LLM compatibility: `Integer/parseInt` and `Long/parseLong` map to `parse-long`, and `Double/parseDouble` and `Float/parseFloat` map to `parse-double`. These aliases keep PTC-Lisp's safe `nil`-on-failure behavior; they are not exact Java throwing semantics. Inventoried `Math/` compatibility aliases that are not Java members, such as `Math/bit-and` and `Math/trunc`, remain routed to their documented PTC builtins rather than entering Java dispatch. `Boolean/parseBoolean` is resolved by the bounded Java manifest and closed dispatch: it returns `true` only for case-insensitive `"true"`, returns `false` for nil/null and every other string, and raises a bounded Java type error for non-string, non-nil inputs. In value position it is a native Java callable; public results render that authority as the inert label `#java[java.lang.Boolean/parseBoolean]`.
+
+First-class Java callables always recover their invocation kind from the bounded
+manifest. Static and constructor callables consume their ordinary arguments;
+instance callables consume the receiver as the first application argument.
+Tagged Java numeric values retain their overload identity through ordinary data
+operations, but PTC arithmetic and numeric index/count positions unwrap the
+payload and end that provenance, including when the builtin is called through a
+higher-order function. Numeric positions depend on the selected builtin arity:
+collection arguments in shorter `drop-last`, `partition`, and `partition-all`
+forms remain data rather than being unwrapped as numeric steps. Comparator
+callbacks use the same callable path and erase primitive provenance from numeric
+comparison results. Constructor heads such as `java.util.Date.` and direct-dot
+families such as `.contains` are manifest-resolved source identities; they move
+to Java CoreAST only once their complete reference family uses closed dispatch.
 
 **Parsing behavior:**
 - Both functions require the entire string to be consumed by the parse. Partial parses are rejected.

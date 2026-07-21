@@ -19,6 +19,9 @@ defmodule PtcRunner.Lisp.Runtime.Callable do
   alias PtcRunner.Lisp.Env.Builtin
   alias PtcRunner.Lisp.Eval.Helpers
   alias PtcRunner.Lisp.Eval.HostContext
+  alias PtcRunner.Lisp.Java.Callable, as: JavaCallable
+  alias PtcRunner.Lisp.Java.Condition, as: JavaCondition
+  alias PtcRunner.Lisp.Java.Primitive, as: JavaPrimitive
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
   alias PtcRunner.Lisp.Runtime.Args
   alias PtcRunner.Lisp.Runtime.FlexAccess
@@ -31,6 +34,7 @@ defmodule PtcRunner.Lisp.Runtime.Callable do
 
   @spec call(term(), [term()]) :: term()
   def call(%Builtin{binding: {:multi_arity, _name, funs}} = builtin, args) do
+    args = prepare_builtin_arguments!(builtin, args)
     arity = length(args)
     min_arity = :erlang.fun_info(elem(funs, 0), :arity) |> elem(1)
     idx = arity - min_arity
@@ -43,15 +47,25 @@ defmodule PtcRunner.Lisp.Runtime.Callable do
   end
 
   def call(%Builtin{} = builtin, args) do
+    args = prepare_builtin_arguments!(builtin, args)
     Args.validate!(builtin, args)
     call(Builtin.unwrap(builtin), args)
   end
 
   def call(%RuntimeCallable{} = callable, args), do: RuntimeCallable.call(callable, args)
 
+  def call(%JavaCallable{} = callable, args) do
+    case JavaCallable.invoke(callable, args) do
+      {:ok, value, _overload_id} -> value
+      {:error, condition} -> HostContext.error!(JavaCondition.evaluator_error(condition))
+    end
+  end
+
   def call(f, args) when is_function(f), do: apply(f, args)
 
-  def call(%MapSet{} = set, [arg]), do: if(MapSet.member?(set, arg), do: arg, else: nil)
+  def call(%MapSet{} = set, [arg]) do
+    if(MapSet.member?(set, arg), do: arg, else: nil)
+  end
 
   def call({:juxt_fn, fns}, args) when is_list(fns) do
     Enum.map(fns, &call(&1, args))
@@ -98,7 +112,8 @@ defmodule PtcRunner.Lisp.Runtime.Callable do
 
   def call(%LispKeyword{}, [nil, default]), do: default
 
-  def call(m, [k]) when is_map(m) and not is_struct(m), do: FlexAccess.flex_get(m, k)
+  def call(m, [k]) when is_map(m) and not is_struct(m),
+    do: FlexAccess.flex_get(m, k)
 
   def call(m, [k, default]) when is_map(m) and not is_struct(m) do
     case FlexAccess.flex_fetch(m, k) do
@@ -160,6 +175,13 @@ defmodule PtcRunner.Lisp.Runtime.Callable do
   end
 
   def call({:collect, fun}, args), do: fun.(args)
+
+  defp prepare_builtin_arguments!(%Builtin{name: name}, args) do
+    case JavaPrimitive.prepare_arguments(name, args) do
+      {:ok, values} -> values
+      {:error, :invalid_java_value} -> HostContext.error!({:invalid_java_value, :primitive})
+    end
+  end
 
   defp substitute_nil([nil | rest], default), do: [default | rest]
   defp substitute_nil(args, _default), do: args

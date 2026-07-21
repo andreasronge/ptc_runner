@@ -56,6 +56,10 @@ defmodule PtcRunner.Lisp.Eval do
 
   alias PtcRunner.Lisp.Eval.Context, as: EvalContext
   alias PtcRunner.Lisp.Format.Var
+  alias PtcRunner.Lisp.Java.Callable, as: JavaCallable
+  alias PtcRunner.Lisp.Java.Condition, as: JavaCondition
+  alias PtcRunner.Lisp.Java.Dispatch, as: JavaDispatch
+  alias PtcRunner.Lisp.Java.Project, as: JavaProject
   alias PtcRunner.Lisp.KeyNormalizer
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
   alias PtcRunner.Lisp.Metadata
@@ -305,6 +309,63 @@ defmodule PtcRunner.Lisp.Eval do
 
   defp do_eval({:runtime_callable, namespace, name}, %EvalContext{} = eval_ctx) do
     {:ok, RuntimeCallable.new(namespace, name), eval_ctx}
+  end
+
+  defp do_eval({:java_ref, reference_id}, %EvalContext{} = eval_ctx) do
+    case JavaCallable.new(reference_id) do
+      {:ok, callable} ->
+        {:ok, callable, eval_ctx}
+
+      :error ->
+        condition =
+          JavaCondition.new(
+            :unsupported_java_member,
+            reference_id,
+            nil,
+            "unsupported Java callable reference"
+          )
+
+        {:error, JavaCondition.evaluator_error(condition)}
+    end
+  end
+
+  defp do_eval({:java_static, reference_id, argument_asts}, %EvalContext{} = eval_ctx) do
+    with {:ok, arguments, eval_ctx2} <- eval_all(argument_asts, eval_ctx) do
+      eval_java_dispatch(reference_id, :static, nil, arguments, eval_ctx2)
+    end
+  end
+
+  defp do_eval({:java_new, reference_id, argument_asts}, %EvalContext{} = eval_ctx) do
+    with {:ok, arguments, eval_ctx2} <- eval_all(argument_asts, eval_ctx) do
+      eval_java_dispatch(reference_id, :constructor, nil, arguments, eval_ctx2)
+    end
+  end
+
+  defp do_eval({:java_field, reference_id}, %EvalContext{} = eval_ctx) do
+    eval_java_dispatch(reference_id, :field, nil, [], eval_ctx)
+  end
+
+  defp do_eval(
+         {:java_instance, reference_id, receiver_ast, argument_asts},
+         %EvalContext{} = eval_ctx
+       ) do
+    with {:ok, receiver, eval_ctx2} <- eval_child(receiver_ast, eval_ctx),
+         {:ok, arguments, eval_ctx3} <- eval_all(argument_asts, eval_ctx2) do
+      eval_java_dispatch(reference_id, :instance, receiver, arguments, eval_ctx3)
+    end
+  end
+
+  defp do_eval(
+         {:java_dot, member_family_id, receiver_ast, argument_asts},
+         %EvalContext{} = eval_ctx
+       ) do
+    with {:ok, receiver, eval_ctx2} <- eval_child(receiver_ast, eval_ctx),
+         {:ok, arguments, eval_ctx3} <- eval_all(argument_asts, eval_ctx2) do
+      case JavaDispatch.invoke_family(member_family_id, receiver, arguments) do
+        {:ok, value, _overload_id} -> {:ok, value, eval_ctx3}
+        {:error, condition} -> {:error, JavaCondition.evaluator_error(condition)}
+      end
+    end
   end
 
   # Define binding in user namespace: (def name value opts)
@@ -600,15 +661,21 @@ defmodule PtcRunner.Lisp.Eval do
             origin = EvalContext.current_origin(eval_ctx2)
             private_tool? = Map.get(tool_meta, :visibility) == :private
 
-            record_tool_call(
-              tool_name_str,
-              args_map,
-              tool_exec,
-              eval_ctx2,
-              cacheable?,
-              origin,
-              private_tool?
-            )
+            case JavaProject.project(args_map, :tool_argument, Map.get(tool_meta, :signature)) do
+              {:ok, prepared_args} ->
+                record_tool_call(
+                  tool_name_str,
+                  prepared_args,
+                  tool_exec,
+                  eval_ctx2,
+                  cacheable?,
+                  origin,
+                  private_tool?
+                )
+
+              {:error, reason} ->
+                {:error, {:tool_error, tool_name_str, {:java_projection_error, reason}}}
+            end
 
           {:error, _} = err ->
             err
@@ -616,6 +683,13 @@ defmodule PtcRunner.Lisp.Eval do
 
       {:error, _} = err ->
         err
+    end
+  end
+
+  defp eval_java_dispatch(reference_id, kind, receiver, arguments, eval_ctx) do
+    case JavaDispatch.invoke(reference_id, kind, receiver, arguments) do
+      {:ok, value, _overload_id} -> {:ok, value, eval_ctx}
+      {:error, condition} -> {:error, JavaCondition.evaluator_error(condition)}
     end
   end
 
@@ -1193,47 +1267,27 @@ defmodule PtcRunner.Lisp.Eval do
     timestamp = DateTime.utc_now()
     failure_token = eval_ctx.tool_failure_token
 
-    provider_result =
-      try do
-        {:ok,
-         HostContext.without_context(fn ->
-           tool_exec.(tool_name, args_map, origin)
-         end)}
-      rescue
-        error -> {:error, error}
-      end
+    provider_result = execute_tool_provider(tool_exec, tool_name, args_map, origin)
 
     {raw_result, error, error_child_step, error_child_trace_id, tool_error_reason} =
-      case provider_result do
-        {:ok, result} ->
-          case result do
-            {:__ptc_tool_failure__, ^failure_token, reason, message, data, false}
-            when is_reference(failure_token) ->
-              Abort.error!({reason, message, data}, eval_ctx)
-
-            {:__ptc_tool_failure__, ^failure_token, :tool_error, name, data, true, child_trace_id,
-             child_step}
-            when is_reference(failure_token) ->
-              {nil, format_tool_failure(name, data), child_step, child_trace_id,
-               {:tool_error, name, data}}
-
-            {:__ptc_tool_failure__, ^failure_token, :tool_error, name, data, true}
-            when is_reference(failure_token) ->
-              {nil, format_tool_failure(name, data), nil, nil, {:tool_error, name, data}}
-
-            result ->
-              {result, nil, nil, nil, nil}
-          end
-
-        {:error, error} ->
-          # Catch unexpected exceptions and record the error
-          {nil, Exception.message(error), nil, nil, nil}
-      end
+      normalize_tool_provider_result(provider_result, failure_token, eval_ctx)
 
     duration_ms = System.monotonic_time(:millisecond) - start_time
 
     # Remove nested trace-hierarchy metadata before the result reaches Lisp.
     {result, child_trace_id, child_step} = unwrap_tool_result(raw_result)
+
+    {result, error, tool_error_reason} =
+      case JavaProject.project(result, :tool_result) do
+        {:ok, projected} ->
+          {projected, error, tool_error_reason}
+
+        {:error, reason} ->
+          projection_error = {:java_projection_error, reason}
+
+          {nil, format_tool_failure(tool_name, projection_error),
+           {:tool_error, tool_name, projection_error}}
+      end
 
     # Preserve nested metadata carried by a failed tool result.
     child_trace_id = child_trace_id || error_child_trace_id
@@ -1291,6 +1345,40 @@ defmodule PtcRunner.Lisp.Eval do
 
       {:ok, result, eval_ctx3}
     end
+  end
+
+  defp execute_tool_provider(tool_exec, tool_name, args_map, origin) do
+    {:ok,
+     HostContext.without_context(fn ->
+       tool_exec.(tool_name, args_map, origin)
+     end)}
+  rescue
+    error -> {:error, error}
+  end
+
+  defp normalize_tool_provider_result({:ok, result}, failure_token, eval_ctx) do
+    case result do
+      {:__ptc_tool_failure__, ^failure_token, reason, message, data, false}
+      when is_reference(failure_token) ->
+        Abort.error!({reason, message, data}, eval_ctx)
+
+      {:__ptc_tool_failure__, ^failure_token, :tool_error, name, data, true, child_trace_id,
+       child_step}
+      when is_reference(failure_token) ->
+        {nil, format_tool_failure(name, data), child_step, child_trace_id,
+         {:tool_error, name, data}}
+
+      {:__ptc_tool_failure__, ^failure_token, :tool_error, name, data, true}
+      when is_reference(failure_token) ->
+        {nil, format_tool_failure(name, data), nil, nil, {:tool_error, name, data}}
+
+      result ->
+        {result, nil, nil, nil, nil}
+    end
+  end
+
+  defp normalize_tool_provider_result({:error, error}, _failure_token, _eval_ctx) do
+    {nil, Exception.message(error), nil, nil, nil}
   end
 
   defp format_tool_failure(name, data) do

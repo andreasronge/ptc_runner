@@ -7,6 +7,7 @@ defmodule PtcRunner.Lisp.Runtime.Args do
   alias PtcRunner.Lisp.Eval.Helpers
   alias PtcRunner.Lisp.Eval.HostContext
   alias PtcRunner.Lisp.Format
+  alias PtcRunner.Lisp.Java.Callable, as: JavaCallable
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
   alias PtcRunner.Lisp.RuntimeCallable
 
@@ -38,6 +39,7 @@ defmodule PtcRunner.Lisp.Runtime.Args do
   @spec valid_callable?(term()) :: boolean()
   def valid_callable?(x) when is_function(x), do: true
   def valid_callable?(%RuntimeCallable{}), do: true
+  def valid_callable?(%JavaCallable{} = callable), do: JavaCallable.valid?(callable)
   def valid_callable?({:juxt_fn, fns}) when is_list(fns), do: true
   def valid_callable?({tag, _}) when tag in [:complement_fn, :constantly_fn], do: true
 

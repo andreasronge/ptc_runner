@@ -111,6 +111,10 @@ defmodule PtcRunner.Lisp.Format do
 
   alias PtcRunner.Lisp.Env.Builtin, as: EnvBuiltin
   alias PtcRunner.Lisp.ExternalizedMapKey
+  alias PtcRunner.Lisp.Format.JavaDisplay
+  alias PtcRunner.Lisp.Java.Callable, as: JavaCallable
+  alias PtcRunner.Lisp.Java.Primitive, as: JavaPrimitive
+  alias PtcRunner.Lisp.Java.Surface, as: JavaSurface
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
   alias PtcRunner.Lisp.Runtime.Interop.Duration
   alias PtcRunner.Lisp.RuntimeCallable
@@ -145,9 +149,7 @@ defmodule PtcRunner.Lisp.Format do
   """
   @spec to_string(term(), keyword()) :: String.t()
   def to_string(value, opts \\ []) do
-    value
-    |> sanitize()
-    |> inspect(opts)
+    value |> sanitize() |> inspect(opts)
   end
 
   @doc """
@@ -206,7 +208,16 @@ defmodule PtcRunner.Lisp.Format do
       ~s[{:_body "secret" :title "Hello"}]
   """
   @spec to_clojure(term(), keyword()) :: {String.t(), boolean()}
-  def to_clojure(value, opts \\ []) do
+  def to_clojure(value, opts \\ [])
+
+  def to_clojure(%JavaPrimitive{} = primitive, opts) do
+    case JavaPrimitive.unwrap(primitive) do
+      {:ok, value} -> format_clojure(value, opts)
+      {:error, :invalid_java_value} -> {"#<invalid-java-value>", false}
+    end
+  end
+
+  def to_clojure(value, opts) do
     value
     |> sanitize()
     |> format_clojure(opts)
@@ -236,6 +247,8 @@ defmodule PtcRunner.Lisp.Format do
   defp format_clojure(%Var{name: name}, _opts), do: {"#'#{name}", false}
   defp format_clojure(%SymbolRef{name: name}, _opts), do: {"'#{name}", false}
   defp format_clojure(%RegexLiteral{source: source}, _opts), do: {"#\"#{source}\"", false}
+
+  defp format_clojure(%JavaDisplay{label: label}, _opts), do: {label, false}
 
   # Plain Elixir functions (e.g., returned by fnil with normal builtins)
   defp format_clojure(f, _opts) when is_function(f), do: {"#<fn>", false}
@@ -437,6 +450,32 @@ defmodule PtcRunner.Lisp.Format do
   defp sanitize(%EnvBuiltin{}), do: %Builtin{}
   defp sanitize(%RuntimeCallable{}), do: %Fn{params: "..."}
 
+  defp sanitize(%JavaCallable{reference_id: reference_id} = callable) do
+    if JavaCallable.valid?(callable) do
+      case JavaSurface.reference_label(reference_id) do
+        {:ok, label} -> %JavaDisplay{identity: {:reference, reference_id}, label: label}
+        :error -> "#<invalid-java-value>"
+      end
+    else
+      "#<invalid-java-value>"
+    end
+  end
+
+  defp sanitize(%{__struct__: JavaCallable}), do: "#<invalid-java-value>"
+
+  defp sanitize(%JavaPrimitive{} = primitive) do
+    case JavaPrimitive.unwrap(primitive) do
+      {:ok, value} ->
+        %JavaDisplay{
+          identity: {:primitive, primitive.kind, value},
+          label: java_primitive_label(primitive.kind, value)
+        }
+
+      {:error, :invalid_java_value} ->
+        "#<invalid-java-value>"
+    end
+  end
+
   defp sanitize({:normal, fun}) when is_function(fun), do: %Builtin{}
   defp sanitize({:variadic, fun, _identity}) when is_function(fun), do: %Builtin{}
 
@@ -467,9 +506,11 @@ defmodule PtcRunner.Lisp.Format do
   defp sanitize(%Fn{} = f), do: f
   defp sanitize(%Builtin{} = b), do: b
 
+  defp sanitize(%MapSet{} = set), do: set |> Enum.map(&sanitize/1) |> MapSet.new()
+
   # Exclude structs (MapSet, DateTime, etc.) - they enumerate differently
   defp sanitize(map) when is_map(map) and not is_struct(map) do
-    Map.new(map, fn {k, v} -> {k, sanitize(v)} end)
+    Map.new(map, fn {k, v} -> {sanitize(k), sanitize(v)} end)
   end
 
   # Structs pass through unchanged here; inspect_struct/2 sanitizes their fields.
@@ -487,6 +528,13 @@ defmodule PtcRunner.Lisp.Format do
   end
 
   defp sanitize(value), do: value
+
+  defp java_primitive_label(kind, value), do: "#java[#{kind} #{format_java_value(value)}]"
+
+  defp format_java_value(:infinity), do: "##Inf"
+  defp format_java_value(:negative_infinity), do: "##-Inf"
+  defp format_java_value(:nan), do: "##NaN"
+  defp format_java_value(value), do: Kernel.to_string(value)
 
   # Extract parameter name from pattern AST
   defp extract_param_name({:var, name}), do: Kernel.to_string(name)

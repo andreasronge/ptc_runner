@@ -512,6 +512,40 @@ defmodule PtcRunner.Kernel.CoreContractTest do
              Enum.map(EventSink.events(sink), & &1.type)
   end
 
+  test "Kernel JSON boundaries reject Java callable authority before commit" do
+    {:ok, workflow} = WorkflowEnvironment.new([])
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, limits} = Limits.new()
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "java-projection")
+
+    {:ok, config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        mission_environment: mission,
+        input: %{},
+        limits: limits,
+        event_sink: sink
+      )
+
+    assert {:error, %{kind: :workflow_failed, reason: :java_projection_error}} =
+             Kernel.run("(return Boolean/parseBoolean)", config)
+
+    {:ok, state} = RunState.start(limits)
+
+    assert %{
+             outcome: :evaluation_error,
+             kind: :java_projection_error
+           } =
+             Evaluation.evaluate_source(
+               state,
+               mission,
+               "(do (def parser Boolean/parseBoolean) parser)",
+               100
+             )
+
+    assert %{defined_count: 0, history_count: 0} = RunState.evaluation_memory_summary(state)
+  end
+
   test "explicit workflow failure returns the outer error algebra" do
     {:ok, workflow} = WorkflowEnvironment.new([])
     {:ok, mission} = MissionEnvironment.new([])

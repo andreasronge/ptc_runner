@@ -1,6 +1,8 @@
 defmodule PtcRunner.Lisp.TypeVocabulary do
   @moduledoc "Converts Elixir values to human-readable type labels."
 
+  alias PtcRunner.Lisp.Java.Callable, as: JavaCallable
+  alias PtcRunner.Lisp.Java.Primitive, as: JavaPrimitive
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
 
   @doc """
@@ -68,6 +70,18 @@ defmodule PtcRunner.Lisp.TypeVocabulary do
   def type_of(%Date{}), do: "date"
   def type_of(%Time{}), do: "time"
   def type_of(%LispKeyword{}), do: "keyword"
+
+  def type_of(%JavaCallable{} = callable),
+    do: if(JavaCallable.valid?(callable), do: "fn", else: "invalid-java-value")
+
+  def type_of(%JavaPrimitive{kind: kind} = primitive) do
+    cond do
+      not JavaPrimitive.valid?(primitive) -> "invalid-java-value"
+      kind in [:int, :long] -> "integer"
+      true -> "float"
+    end
+  end
+
   def type_of(map) when is_map(map) and not is_struct(map), do: "map[#{map_size(map)}]"
   def type_of(s) when is_binary(s), do: "string"
   def type_of(n) when is_integer(n), do: "integer"

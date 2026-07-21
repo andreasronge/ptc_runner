@@ -524,10 +524,10 @@ that includes Java's accepted leading/trailing whitespace.
 (Boolean/parseBoolean true) ;=> error
 ```
 
-**Fix:** `Boolean/parseBoolean` now uses a Java-shaped interop builtin instead
-of aliasing PTC-Lisp `parse-boolean`. It returns `true` only for
+**Fix:** `Boolean/parseBoolean` now uses its manifest reference and code-owned
+closed Java dispatch instead of aliasing PTC-Lisp `parse-boolean`. It returns `true` only for
 case-insensitive `"true"`, returns `false` for nil/null and all other strings,
-and raises for non-string, non-nil inputs.
+and returns a bounded Java type error for non-string, non-nil inputs.
 
 ### GAP-J15: Java integer parse radix overloads are unsupported
 

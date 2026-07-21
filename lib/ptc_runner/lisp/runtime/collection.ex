@@ -16,12 +16,15 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   alias PtcRunner.Lisp.Eval.Helpers
   alias PtcRunner.Lisp.Eval.HostContext
   alias PtcRunner.Lisp.Format
+  alias PtcRunner.Lisp.Java.Callable, as: JavaCallable
+  alias PtcRunner.Lisp.Java.Primitive, as: JavaPrimitive
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
   alias PtcRunner.Lisp.Runtime.Callable
   alias PtcRunner.Lisp.Runtime.Collection.Normalize
   alias PtcRunner.Lisp.Runtime.Collection.Select
   alias PtcRunner.Lisp.Runtime.Collection.Transform
   alias PtcRunner.Lisp.Runtime.FlexAccess
+  alias PtcRunner.Lisp.Runtime.Math
 
   @hof_callback_error :__ptc_hof_callback_error__
 
@@ -65,37 +68,37 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   defp wrap_comparator(:desc), do: :desc
 
   defp wrap_comparator(comp) when is_function(comp, 2) do
-    fn a, b ->
-      case comp.(a, b) do
-        n when is_integer(n) -> n <= 0
-        bool -> bool
-      end
-    end
+    comparator_fun(comp)
   end
 
   defp wrap_comparator(comp) when is_tuple(comp) do
-    fn a, b ->
-      case Callable.call(comp, [a, b]) do
-        n when is_integer(n) -> n <= 0
-        bool -> bool
-      end
-    end
+    comparator_fun(comp)
   end
 
   defp wrap_comparator(%Builtin{} = comp) do
-    fn a, b ->
-      case Callable.call(comp, [a, b]) do
-        n when is_integer(n) -> n <= 0
-        bool -> bool
-      end
-    end
+    comparator_fun(comp)
+  end
+
+  defp wrap_comparator(%JavaCallable{} = comp) do
+    comparator_fun(comp)
   end
 
   defp wrap_comparator(other) do
     raise "type_error: invalid comparator: #{inspect(other)}. Expected :asc, :desc, or a function of 2 arguments."
   end
 
-  defp sort_keyfn(key) when is_sort_key(key), do: &FlexAccess.flex_get(&1, key)
+  defp comparator_fun(comp) do
+    fn a, b ->
+      case comp |> Callable.call([a, b]) |> ordinary_numeric_value!() do
+        n when is_integer(n) -> n <= 0
+        bool -> bool
+      end
+    end
+  end
+
+  defp sort_keyfn(key) when is_sort_key(key),
+    do: &ordinary_numeric_value!(FlexAccess.flex_get(&1, key))
+
   defp safe_sort_keyfn(key) when is_sort_key(key), do: sort_keyfn(key)
 
   defp safe_sort_keyfn(keyfn) do
@@ -107,7 +110,7 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
 
     fn item ->
       try do
-        key_fun.(item)
+        item |> key_fun.() |> ordinary_numeric_value!()
       rescue
         e in FunctionClauseError ->
           hof_callback_error!(sort_key_error_message(keyfn, item, e))
@@ -181,9 +184,40 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   # ============================================================
 
   def sort(nil), do: []
-  def sort(coll) when is_list(coll), do: Enum.sort(coll)
+  def sort(coll) when is_list(coll), do: Enum.sort(coll, &default_sort_before?/2)
   def sort(coll) when is_binary(coll), do: Enum.sort(Normalize.graphemes(coll))
   def sort(coll) when is_map(coll) and not is_struct(coll), do: Enum.sort(Normalize.to_seq(coll))
+
+  defp default_sort_before?(left, right) do
+    case {ordinary_sort_value(left), ordinary_sort_value(right)} do
+      {{left_value, true}, {right_value, _primitive?}} ->
+        Math.lte(left_value, right_value)
+
+      {{left_value, _primitive?}, {right_value, true}} ->
+        Math.lte(left_value, right_value)
+
+      {{left_value, false}, {right_value, false}} ->
+        left_value <= right_value
+    end
+  end
+
+  defp ordinary_sort_value(%JavaPrimitive{} = primitive) do
+    case JavaPrimitive.unwrap(primitive) do
+      {:ok, value} -> {value, true}
+      {:error, :invalid_java_value} -> HostContext.error!({:invalid_java_value, :java_primitive})
+    end
+  end
+
+  defp ordinary_sort_value(value), do: {value, false}
+
+  defp ordinary_numeric_value!(value) do
+    case JavaPrimitive.ordinary_numeric_value(value) do
+      {:ok, projected} -> projected
+      {:error, :invalid_java_value} -> HostContext.error!({:invalid_java_value, :java_primitive})
+    end
+  end
+
+  defp ordinary_numeric_values!(values), do: Enum.map(values, &ordinary_numeric_value!/1)
 
   def sort(_comp, nil), do: []
 
@@ -878,13 +912,13 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   # ============================================================
 
   def sum(coll) when is_list(coll) do
-    coll |> Enum.reject(&is_nil/1) |> Enum.sum()
+    coll |> Enum.reject(&is_nil/1) |> ordinary_numeric_values!() |> Enum.sum()
   end
 
   def sum(nil), do: 0
 
   def avg(coll) when is_list(coll) do
-    values = Enum.reject(coll, &is_nil/1)
+    values = coll |> Enum.reject(&is_nil/1) |> ordinary_numeric_values!()
 
     case values do
       [] -> nil
@@ -899,6 +933,7 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
     coll
     |> Enum.map(&FlexAccess.flex_get(&1, key))
     |> Enum.reject(&is_nil/1)
+    |> ordinary_numeric_values!()
     |> Enum.sum()
   end
 
@@ -907,6 +942,7 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
     coll
     |> Enum.map(&FlexAccess.flex_get_in(&1, path))
     |> Enum.reject(&is_nil/1)
+    |> ordinary_numeric_values!()
     |> Enum.sum()
   end
 
@@ -915,6 +951,7 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
     coll
     |> Enum.map(&Callable.call(keyfn, [&1]))
     |> Enum.reject(&is_nil/1)
+    |> ordinary_numeric_values!()
     |> Enum.sum()
   end
 
@@ -927,7 +964,11 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
 
   # avg_by: atom or string keys
   def avg_by(key, coll) when is_list(coll) and (is_atom(key) or is_binary(key)) do
-    values = coll |> Enum.map(&FlexAccess.flex_get(&1, key)) |> Enum.reject(&is_nil/1)
+    values =
+      coll
+      |> Enum.map(&FlexAccess.flex_get(&1, key))
+      |> Enum.reject(&is_nil/1)
+      |> ordinary_numeric_values!()
 
     case values do
       [] -> nil
@@ -937,7 +978,11 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
 
   # avg_by: vector path keys
   def avg_by(path, coll) when is_list(path) and is_list(coll) do
-    values = coll |> Enum.map(&FlexAccess.flex_get_in(&1, path)) |> Enum.reject(&is_nil/1)
+    values =
+      coll
+      |> Enum.map(&FlexAccess.flex_get_in(&1, path))
+      |> Enum.reject(&is_nil/1)
+      |> ordinary_numeric_values!()
 
     case values do
       [] -> nil
@@ -947,7 +992,11 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
 
   # avg_by: function/builtin
   def avg_by(keyfn, coll) when is_list(coll) do
-    values = coll |> Enum.map(&Callable.call(keyfn, [&1])) |> Enum.reject(&is_nil/1)
+    values =
+      coll
+      |> Enum.map(&Callable.call(keyfn, [&1]))
+      |> Enum.reject(&is_nil/1)
+      |> ordinary_numeric_values!()
 
     case values do
       [] -> nil
@@ -966,15 +1015,18 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   def min_by(key, coll) when is_list(coll) and (is_atom(key) or is_binary(key)) do
     case Enum.reject(coll, &is_nil(FlexAccess.flex_get(&1, key))) do
       [] -> nil
-      filtered -> Enum.min_by(filtered, &FlexAccess.flex_get(&1, key))
+      filtered -> Enum.min_by(filtered, &ordinary_numeric_value!(FlexAccess.flex_get(&1, key)))
     end
   end
 
   # min_by: vector path keys
   def min_by(path, coll) when is_list(path) and is_list(coll) do
     case Enum.reject(coll, &is_nil(FlexAccess.flex_get_in(&1, path))) do
-      [] -> nil
-      filtered -> Enum.min_by(filtered, &FlexAccess.flex_get_in(&1, path))
+      [] ->
+        nil
+
+      filtered ->
+        Enum.min_by(filtered, &ordinary_numeric_value!(FlexAccess.flex_get_in(&1, path)))
     end
   end
 
@@ -982,7 +1034,7 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   def min_by(keyfn, coll) when is_list(coll) do
     case Enum.reject(coll, &is_nil(Callable.call(keyfn, [&1]))) do
       [] -> nil
-      filtered -> Enum.min_by(filtered, &Callable.call(keyfn, [&1]))
+      filtered -> Enum.min_by(filtered, &ordinary_numeric_value!(Callable.call(keyfn, [&1])))
     end
   end
 
@@ -997,15 +1049,18 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   def max_by(key, coll) when is_list(coll) and (is_atom(key) or is_binary(key)) do
     case Enum.reject(coll, &is_nil(FlexAccess.flex_get(&1, key))) do
       [] -> nil
-      filtered -> Enum.max_by(filtered, &FlexAccess.flex_get(&1, key))
+      filtered -> Enum.max_by(filtered, &ordinary_numeric_value!(FlexAccess.flex_get(&1, key)))
     end
   end
 
   # max_by: vector path keys
   def max_by(path, coll) when is_list(path) and is_list(coll) do
     case Enum.reject(coll, &is_nil(FlexAccess.flex_get_in(&1, path))) do
-      [] -> nil
-      filtered -> Enum.max_by(filtered, &FlexAccess.flex_get_in(&1, path))
+      [] ->
+        nil
+
+      filtered ->
+        Enum.max_by(filtered, &ordinary_numeric_value!(FlexAccess.flex_get_in(&1, path)))
     end
   end
 
@@ -1013,7 +1068,7 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   def max_by(keyfn, coll) when is_list(coll) do
     case Enum.reject(coll, &is_nil(Callable.call(keyfn, [&1]))) do
       [] -> nil
-      filtered -> Enum.max_by(filtered, &Callable.call(keyfn, [&1]))
+      filtered -> Enum.max_by(filtered, &ordinary_numeric_value!(Callable.call(keyfn, [&1])))
     end
   end
 
@@ -1061,7 +1116,7 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   def max_key_variadic([_f, x]), do: x
 
   def max_key_variadic([f | args]) when args != [] do
-    Enum.max_by(args, &Callable.call(f, [&1]))
+    Enum.max_by(args, &ordinary_numeric_value!(Callable.call(f, [&1])))
   end
 
   @doc """
@@ -1079,7 +1134,7 @@ defmodule PtcRunner.Lisp.Runtime.Collection do
   def min_key_variadic([_f, x]), do: x
 
   def min_key_variadic([f | args]) when args != [] do
-    Enum.min_by(args, &Callable.call(f, [&1]))
+    Enum.min_by(args, &ordinary_numeric_value!(Callable.call(f, [&1])))
   end
 
   @doc """

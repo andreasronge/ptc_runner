@@ -73,6 +73,35 @@ defmodule PtcRunner.Lisp.Java.OracleFixturesTest do
     assert Enum.all?(result.outcomes, &(&1.status == "ok"))
   end
 
+  test "closed dispatch cases attest the selected PTC overload" do
+    assert {:ok, %{outcomes: [outcome]}} = Runner.run(:ptc, :closed_dispatch)
+    assert outcome.overload_id == "boolean_parse_boolean_string"
+    assert outcome.selected_overload_id == outcome.overload_id
+  end
+
+  test "dispatch attestation ignores unrelated Java references" do
+    handler_id = make_ref()
+    state = {self(), handler_id, :boolean_parse_boolean}
+
+    Runner.handle_dispatch_attestation(
+      [:ptc_runner, :lisp, :java, :dispatch],
+      %{},
+      %{reference_id: :double_parse_double, overload_id: :double_parse_double_string},
+      state
+    )
+
+    refute_receive {:java_dispatch_attestation, ^handler_id, _overload_id}
+
+    Runner.handle_dispatch_attestation(
+      [:ptc_runner, :lisp, :java, :dispatch],
+      %{},
+      %{reference_id: :boolean_parse_boolean, overload_id: :boolean_parse_boolean_string},
+      state
+    )
+
+    assert_receive {:java_dispatch_attestation, ^handler_id, :boolean_parse_boolean_string}
+  end
+
   @tag :clojure
   test "Babashka reports the locale and timezone it actually observes" do
     assert {:ok, result} = Runner.run(:babashka, :fast)

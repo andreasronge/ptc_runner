@@ -71,6 +71,10 @@ defmodule PtcRunner.Lisp.Analyze do
           | {:invalid_thread_form, atom(), String.t()}
           | {:unsupported_pattern, term()}
           | {:invalid_placeholder, atom()}
+          | {:unsupported_java_class, atom() | String.t()}
+          | {:unsupported_java_member, atom() | String.t(), atom() | String.t()}
+          | {:java_arity_error, atom(),
+             %{expected: [non_neg_integer()], actual: non_neg_integer()}}
 
   @doc """
   Returns the canonical list of all forms handled by the analyzer.
@@ -239,10 +243,16 @@ defmodule PtcRunner.Lisp.Analyze do
   # ============================================================
 
   defp do_analyze({:symbol, name}, _tail?) do
-    if Placeholder.placeholder?(name) do
-      {:error, {:invalid_placeholder, name}}
-    else
-      {:ok, {:var, name}}
+    case closed_java_plain_reference(name) do
+      {:ok, reference} ->
+        analyze_java_reference(reference)
+
+      :legacy_or_non_java ->
+        if Placeholder.placeholder?(name) do
+          {:error, {:invalid_placeholder, name}}
+        else
+          {:ok, {:var, name}}
+        end
     end
   end
 
@@ -274,18 +284,15 @@ defmodule PtcRunner.Lisp.Analyze do
   # so they need per-namespace lookup tables — see `normalize_clojure_namespace/3`
   # and `qualified_namespace_lookup/2`.
   defp do_analyze({:ns_symbol, ns, key}, _tail?) do
-    case PreludeScope.fetch_export(ns, key) do
-      {:ok, export} ->
-        # Value-position prelude export ref: resolves to the callable export
-        # value at eval time. Arity is enforced at call position.
-        {:ok, {:prelude_ref, export.ref}}
+    case closed_java_reference(ns, key) do
+      {:ok, reference} ->
+        analyze_java_reference(reference)
 
-      :error ->
-        case qualified_namespace_lookup(ns, key) do
-          {:ok, qualified} -> {:ok, {:var, qualified}}
-          :not_qualified -> prelude_or_clojure_namespace(ns, key, fn -> {:ok, {:var, key}} end)
-          :unknown_member -> namespaced_unknown_member_error(ns, key)
-        end
+      :legacy_or_non_java ->
+        analyze_namespaced_value(ns, key)
+
+      {:error, _reason} = error ->
+        error
     end
   end
 
@@ -423,23 +430,23 @@ defmodule PtcRunner.Lisp.Analyze do
 
   # Clojure-style namespaces in call position: (clojure.string/join "," items)
   defp dispatch_list_form({:ns_symbol, ns, func}, rest, list, tail?) do
-    case PreludeScope.fetch_export(ns, func) do
-      {:ok, export} ->
-        analyze_prelude_call(export, rest, tail?)
+    case closed_java_reference(ns, func) do
+      {:ok, reference} ->
+        analyze_java_call(reference, rest)
 
-      :error ->
-        case qualified_namespace_lookup(ns, func) do
-          {:ok, qualified} ->
-            dispatch_list_form({:symbol, qualified}, rest, list, tail?)
+      :legacy_or_non_java ->
+        analyze_namespaced_call(ns, func, rest, list, tail?)
 
-          :not_qualified ->
-            prelude_or_clojure_namespace(ns, func, fn ->
-              dispatch_list_form({:symbol, func}, rest, list, tail?)
-            end)
+      {:error, _reason} = error ->
+        error
+    end
+  end
 
-          :unknown_member ->
-            namespaced_unknown_member_error(ns, func)
-        end
+  defp dispatch_list_form({:symbol, name}, rest, list, tail?) do
+    case closed_java_source_call(name) do
+      {:reference, reference} -> analyze_java_call(reference, rest)
+      {:member_family, member_family_id} -> analyze_java_dot(member_family_id, rest)
+      :legacy_or_non_java -> analyze_call(list, tail?)
     end
   end
 
@@ -1016,6 +1023,167 @@ defmodule PtcRunner.Lisp.Analyze do
     with {:ok, f} <- do_analyze(f_ast, false),
          {:ok, args} <- analyze_list(arg_asts) do
       {:ok, {:call, f, args}}
+    end
+  end
+
+  defp closed_java_reference(namespace, member) do
+    case JavaSurface.resolve_reference(namespace, member) do
+      {:ok, reference} ->
+        if JavaSurface.closed_dispatch_reference?(reference.reference_id),
+          do: {:ok, reference},
+          else: :legacy_or_non_java
+
+      :unknown_member ->
+        case JavaSurface.legacy_binding(namespace, member) do
+          {:ok, _binding} -> :legacy_or_non_java
+          :error -> {:error, {:unsupported_java_member, namespace, member}}
+        end
+
+      :not_java_class ->
+        if java_class_syntax?(namespace),
+          do: {:error, {:unsupported_java_class, namespace}},
+          else: :legacy_or_non_java
+    end
+  end
+
+  defp closed_java_plain_reference(name) do
+    case JavaSurface.resolve_plain_reference(name) do
+      {:ok, reference} ->
+        if JavaSurface.closed_dispatch_reference?(reference.reference_id),
+          do: {:ok, reference},
+          else: :legacy_or_non_java
+
+      :error ->
+        :legacy_or_non_java
+    end
+  end
+
+  defp closed_java_source_call(name) do
+    case closed_java_plain_reference(name) do
+      {:ok, reference} ->
+        {:reference, reference}
+
+      :legacy_or_non_java ->
+        case JavaSurface.resolve_member_family(name) do
+          {:ok, member_family_id} ->
+            references = JavaSurface.member_family_references(member_family_id)
+
+            if references != [] and
+                 Enum.all?(references, &JavaSurface.closed_dispatch_reference?(&1.reference_id)),
+               do: {:member_family, member_family_id},
+               else: :legacy_or_non_java
+
+          :error ->
+            :legacy_or_non_java
+        end
+    end
+  end
+
+  defp java_class_syntax?(namespace) do
+    name = to_string(namespace)
+    String.starts_with?(name, "java.")
+  end
+
+  defp analyze_java_reference(%{kind: :field, reference_id: reference_id}),
+    do: {:ok, {:java_field, reference_id}}
+
+  defp analyze_java_reference(%{callable?: true, reference_id: reference_id}),
+    do: {:ok, {:java_ref, reference_id}}
+
+  defp analyze_java_reference(reference),
+    do: {:error, {:unsupported_java_member, reference.class_id, reference.member}}
+
+  defp analyze_java_call(reference, argument_asts) do
+    actual = length(argument_asts)
+    expected = reference_arities(reference)
+
+    if actual in expected do
+      with {:ok, arguments} <- analyze_list(argument_asts) do
+        {:ok, java_call_node(reference, arguments)}
+      end
+    else
+      {:error, {:java_arity_error, reference.reference_id, %{expected: expected, actual: actual}}}
+    end
+  end
+
+  defp analyze_java_dot(member_family_id, argument_asts) do
+    expected = member_family_arities(member_family_id)
+    actual = length(argument_asts)
+
+    if actual in expected do
+      with {:ok, [receiver | arguments]} <- analyze_list(argument_asts) do
+        {:ok, {:java_dot, member_family_id, receiver, arguments}}
+      end
+    else
+      {:error, {:java_arity_error, member_family_id, %{expected: expected, actual: actual}}}
+    end
+  end
+
+  defp java_call_node(%{kind: :static, reference_id: reference_id}, arguments),
+    do: {:java_static, reference_id, arguments}
+
+  defp java_call_node(%{kind: :constructor, reference_id: reference_id}, arguments),
+    do: {:java_new, reference_id, arguments}
+
+  defp java_call_node(
+         %{kind: :instance, reference_id: reference_id},
+         [receiver | arguments]
+       ),
+       do: {:java_instance, reference_id, receiver, arguments}
+
+  defp java_call_node(%{kind: :field, reference_id: reference_id}, []),
+    do: {:java_field, reference_id}
+
+  defp reference_arities(reference) do
+    reference.overload_ids
+    |> Enum.map(fn overload_id ->
+      {:ok, overload} = JavaSurface.fetch_overload(overload_id)
+      if reference.kind == :instance, do: overload.arity + 1, else: overload.arity
+    end)
+    |> Enum.uniq()
+    |> Enum.sort()
+  end
+
+  defp member_family_arities(member_family_id) do
+    member_family_id
+    |> JavaSurface.member_family_references()
+    |> Enum.flat_map(&reference_arities/1)
+    |> Enum.uniq()
+    |> Enum.sort()
+  end
+
+  defp analyze_namespaced_value(ns, key) do
+    case PreludeScope.fetch_export(ns, key) do
+      {:ok, export} ->
+        {:ok, {:prelude_ref, export.ref}}
+
+      :error ->
+        case qualified_namespace_lookup(ns, key) do
+          {:ok, qualified} -> {:ok, {:var, qualified}}
+          :not_qualified -> prelude_or_clojure_namespace(ns, key, fn -> {:ok, {:var, key}} end)
+          :unknown_member -> namespaced_unknown_member_error(ns, key)
+        end
+    end
+  end
+
+  defp analyze_namespaced_call(ns, func, rest, list, tail?) do
+    case PreludeScope.fetch_export(ns, func) do
+      {:ok, export} ->
+        analyze_prelude_call(export, rest, tail?)
+
+      :error ->
+        case qualified_namespace_lookup(ns, func) do
+          {:ok, qualified} ->
+            dispatch_list_form({:symbol, qualified}, rest, list, tail?)
+
+          :not_qualified ->
+            prelude_or_clojure_namespace(ns, func, fn ->
+              dispatch_list_form({:symbol, func}, rest, list, tail?)
+            end)
+
+          :unknown_member ->
+            namespaced_unknown_member_error(ns, func)
+        end
     end
   end
 

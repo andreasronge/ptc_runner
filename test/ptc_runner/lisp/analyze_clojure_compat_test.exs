@@ -184,7 +184,7 @@ defmodule PtcRunner.Lisp.AnalyzeClojureCompatTest do
     test "Java time namespaces do not expose unrelated interop helpers" do
       assert {:error, step} = PtcRunner.Lisp.run("(LocalDate/currentTimeMillis)")
       assert step.fail.message =~ "currentTimeMillis is not available"
-      assert step.fail.message =~ "Interop functions: parse"
+      assert step.fail.message =~ "Interop functions: LocalDate/parse"
 
       assert {:error, step} = PtcRunner.Lisp.run("(Duration/parse \"PT1S\")")
       assert step.fail.message =~ "Duration/parse is not available"

@@ -5905,7 +5905,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         ["Boolean/parseBoolean"],
         ~S|(Boolean/parseBoolean "x")|,
         "GAP-J02",
-        "Java parseBoolean returns false for non-true strings, but PTC-Lisp currently returns nil."
+        "Java parseBoolean returns false for non-true strings; PTC-Lisp previously returned nil."
       ),
       fixed_bug_case(
         "java/boolean-parse-boolean-case-bug-001",
@@ -5913,7 +5913,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         ["Boolean/parseBoolean"],
         ~S|(Boolean/parseBoolean "TRUE")|,
         "GAP-J02",
-        "Java parseBoolean is case-insensitive for true, but PTC-Lisp currently returns nil."
+        "Java parseBoolean is case-insensitive for true; PTC-Lisp previously returned nil."
       ),
       fixed_bug_case(
         "java/boolean-parse-boolean-mixed-case-bug-001",
@@ -5921,7 +5921,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         ["Boolean/parseBoolean"],
         ~S|(Boolean/parseBoolean "TrUe")|,
         "GAP-J02",
-        "Java parseBoolean is case-insensitive for mixed-case true, but PTC-Lisp currently returns nil."
+        "Java parseBoolean is case-insensitive for mixed-case true; PTC-Lisp previously returned nil."
       ),
       fixed_bug_case(
         "java/boolean-parse-boolean-empty-bug-001",
@@ -5929,7 +5929,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         ["Boolean/parseBoolean"],
         ~S|(Boolean/parseBoolean "")|,
         "GAP-J02",
-        "Java parseBoolean returns false for the empty string, but PTC-Lisp currently returns nil."
+        "Java parseBoolean returns false for the empty string; PTC-Lisp previously returned nil."
       ),
       fixed_bug_case(
         "java/boolean-parse-boolean-nil-bug-001",
@@ -5937,7 +5937,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         ["Boolean/parseBoolean"],
         "(Boolean/parseBoolean nil)",
         "GAP-J02",
-        "Java parseBoolean returns false for nil; PTC-Lisp currently returns nil."
+        "Java parseBoolean returns false for nil; PTC-Lisp previously returned nil."
       ),
       fixed_bug_case(
         "java/boolean-parse-boolean-boolean-bug-001",
@@ -5945,7 +5945,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         ["Boolean/parseBoolean"],
         "(Boolean/parseBoolean true)",
         "GAP-J02",
-        "Java parseBoolean has no boolean overload; PTC-Lisp currently returns nil instead of raising."
+        "Java parseBoolean has no boolean overload; PTC-Lisp previously returned nil instead of raising."
       ),
       bug_case(
         "java/util-date-numeric-constructor-bug-001",

@@ -4,6 +4,7 @@ defmodule PtcRunner.Lisp.RegistryTest do
   alias PtcRunner.Lisp.Analyze
   alias PtcRunner.Lisp.Env
   alias PtcRunner.Lisp.Env.Builtin
+  alias PtcRunner.Lisp.Java.Surface, as: JavaSurface
   alias PtcRunner.Lisp.Registry
 
   describe "sync validation" do
@@ -30,7 +31,14 @@ defmodule PtcRunner.Lisp.RegistryTest do
     test "no orphaned registry entries (in registry but not in code)" do
       env_names = Env.initial() |> Map.keys() |> Enum.map(&Atom.to_string/1) |> MapSet.new()
       analyze_names = Analyze.supported_forms() |> Enum.map(&Atom.to_string/1) |> MapSet.new()
-      code_names = MapSet.union(env_names, analyze_names)
+
+      java_names =
+        JavaSurface.function_entries()
+        |> Enum.filter(&(&1.dispatch == :java))
+        |> Enum.map(& &1.name)
+        |> MapSet.new()
+
+      code_names = env_names |> MapSet.union(analyze_names) |> MapSet.union(java_names)
 
       registry_names = Registry.implemented() |> Enum.map(& &1.name) |> MapSet.new()
 
@@ -81,7 +89,7 @@ defmodule PtcRunner.Lisp.RegistryTest do
       for entry <- Registry.implemented() do
         assert is_binary(entry.name), "Entry missing name"
 
-        assert entry.dispatch in [:env, :analyze],
+        assert entry.dispatch in [:env, :analyze, :java],
                "Entry '#{entry.name}' has invalid dispatch: #{inspect(entry.dispatch)}"
 
         assert entry.category in [

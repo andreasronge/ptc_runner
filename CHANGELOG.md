@@ -13,6 +13,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Clojure versions, typed fixtures for every admitted overload, exact descriptor
   attestation for every JVM overload, executable PTC-only compatibility cases,
   a Babashka fast subset, and a dedicated CI conformance job.
+- Added closed manifest dispatch, structured Java failures, native Java
+  callables and primitive provenance, bounded boundary projection, and complete
+  Java CoreAST nodes; migrated `Boolean/parseBoolean` off its legacy Env route.
+  Primitive provenance survives non-numeric Lisp operations, while
+  signature-aware recursive projection prevents Java authority from hiding in
+  tool arguments, tool results, return validation, or struct fields. Numeric
+  arithmetic, numeric index/count, aggregate, and ordering consumers erase
+  primitive provenance consistently, including higher-order invocation, while
+  native formatting preserves distinct primitive kinds without collapsing
+  literal-label map keys or set members. Java callables derive static,
+  constructor, or receiver-first instance invocation from manifest identity.
+  Numeric index/count projection is overload-arity aware, comparator callbacks
+  share callable dispatch and numeric projection, and constructor/direct-dot
+  source spellings resolve through the manifest before their migration route.
+  Java and ordinary struct-shaped maps must contain their exact declared fields.
+  Java class spellings are reserved against prelude shadowing, and rejected
+  tool results retain their executed callback ledger entry.
 - Added the code-owned `log-analysis-v1` profile to `mix ptc.repl`, with
   bounded multi-turn mission evaluation over an immutable trace capture,
   deterministic JSONL output for coding agents, safe profile discovery, and

@@ -14,6 +14,9 @@ defmodule PtcRunner.Lisp.CoreToSource do
   """
 
   alias PtcRunner.Lisp.Formatter
+  alias PtcRunner.Lisp.Java.Callable, as: JavaCallable
+  alias PtcRunner.Lisp.Java.Primitive, as: JavaPrimitive
+  alias PtcRunner.Lisp.Java.Surface, as: JavaSurface
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
 
   @doc """
@@ -68,6 +71,22 @@ defmodule PtcRunner.Lisp.CoreToSource do
   def format({:symbol_ref, name}) when is_binary(name), do: "'#{name}"
   def format({:data, key}), do: "data/#{key}"
   def format({:runtime_callable, namespace, name}), do: "#{namespace}/#{name}"
+  def format({:java_ref, reference_id}), do: java_reference_source(reference_id)
+  def format({:java_field, reference_id}), do: java_reference_source(reference_id)
+
+  def format({tag, reference_id, arguments}) when tag in [:java_static, :java_new] do
+    "(#{java_reference_source(reference_id)} #{format_list(arguments)})"
+  end
+
+  def format({:java_instance, reference_id, receiver, arguments}) do
+    {:ok, reference} = JavaSurface.fetch_reference(reference_id)
+    "(.#{reference.member} #{format_list([receiver | arguments])})"
+  end
+
+  def format({:java_dot, member_family_id, receiver, arguments}) do
+    {:ok, source} = JavaSurface.member_family_source(member_family_id)
+    "(#{source} #{format_list([receiver | arguments])})"
+  end
 
   # Collections
   def format({:vector, elems}) do
@@ -227,27 +246,97 @@ defmodule PtcRunner.Lisp.CoreToSource do
   ## Examples
 
       iex> memory = %{x: 5, f: {:closure, [{:var, :n}], {:call, {:var, :+}, [{:var, :n}, 1]}, %{}, [], %{}}}
-      iex> source = PtcRunner.Lisp.CoreToSource.export_namespace(memory)
+      iex> {:ok, source} = PtcRunner.Lisp.CoreToSource.export_namespace(memory)
       iex> source =~ "def x"
       true
       iex> source =~ "def f"
       true
   """
-  @spec export_namespace(map()) :: String.t()
+  @spec export_namespace(map()) ::
+          {:ok, String.t()} | {:error, {:non_exportable_java_value, list(), atom()}}
   def export_namespace(memory) when is_map(memory) do
-    entries =
-      memory
-      |> Enum.reject(fn {k, _v} -> internal_key?(k) end)
-      |> Enum.to_list()
+    with :ok <- validate_exportable_memory(memory) do
+      entries =
+        memory
+        |> Enum.reject(fn {k, _v} -> internal_key?(k) end)
+        |> Enum.to_list()
 
-    sorted = topo_sort_entries(entries)
+      sorted = topo_sort_entries(entries)
 
-    Enum.map_join(sorted, "\n", fn
-      {k, {:closure, _, _, _, _, _} = closure} ->
-        "(def #{k} #{serialize_closure(closure)})"
+      source =
+        Enum.map_join(sorted, "\n", fn
+          {k, {:closure, _, _, _, _, _} = closure} ->
+            "(def #{k} #{serialize_closure(closure)})"
 
-      {k, v} ->
-        "(def #{k} #{format(v)})"
+          {k, v} ->
+            "(def #{k} #{format(v)})"
+        end)
+
+      {:ok, source}
+    end
+  end
+
+  defp validate_exportable_memory(memory) do
+    memory
+    |> Enum.reject(fn {key, _value} -> internal_key?(key) end)
+    |> Enum.reduce_while(:ok, fn {key, value}, :ok ->
+      case find_java_value(value, [{:binding, to_string(key)}]) do
+        :ok -> {:cont, :ok}
+        {:error, _reason} = error -> {:halt, error}
+      end
+    end)
+  end
+
+  defp find_java_value(%{__struct__: JavaCallable} = callable, path),
+    do: {:error, {:non_exportable_java_value, path, Map.get(callable, :reference_id)}}
+
+  defp find_java_value(%{__struct__: JavaPrimitive} = primitive, path),
+    do: {:error, {:non_exportable_java_value, path, Map.get(primitive, :kind)}}
+
+  defp find_java_value(value, path) when is_list(value), do: find_java_list(value, path)
+
+  defp find_java_value(value, path) when is_tuple(value) do
+    value |> Tuple.to_list() |> find_java_list(path)
+  end
+
+  defp find_java_value(%MapSet{} = value, path),
+    do: value |> Enum.to_list() |> find_java_list(path)
+
+  defp find_java_value(value, path) when is_struct(value) do
+    value
+    |> Map.from_struct()
+    |> Enum.reduce_while(:ok, fn {field, item}, :ok ->
+      case find_java_value(item, path ++ [{:struct_field, field}]) do
+        :ok -> {:cont, :ok}
+        {:error, _reason} = error -> {:halt, error}
+      end
+    end)
+  end
+
+  defp find_java_value(value, path) when is_map(value) and not is_struct(value) do
+    value
+    |> Enum.to_list()
+    |> Enum.with_index()
+    |> Enum.reduce_while(:ok, fn {{key, item}, index}, :ok ->
+      with :ok <- find_java_value(key, path ++ [{:map_key, index}]),
+           :ok <- find_java_value(item, path ++ [{:map_value, index}]) do
+        {:cont, :ok}
+      else
+        {:error, _reason} = error -> {:halt, error}
+      end
+    end)
+  end
+
+  defp find_java_value(_value, _path), do: :ok
+
+  defp find_java_list(values, path) do
+    values
+    |> Enum.with_index()
+    |> Enum.reduce_while(:ok, fn {value, index}, :ok ->
+      case find_java_value(value, path ++ [{:index, index}]) do
+        :ok -> {:cont, :ok}
+        {:error, _reason} = error -> {:halt, error}
+      end
     end)
   end
 
@@ -299,6 +388,13 @@ defmodule PtcRunner.Lisp.CoreToSource do
   defp source_name(name) when is_atom(name), do: Atom.to_string(name)
   defp source_name(name) when is_binary(name), do: name
 
+  defp java_reference_source(reference_id) do
+    case JavaSurface.fetch_reference(reference_id) do
+      {:ok, %{spellings: [source | _]}} -> source
+      _ -> raise ArgumentError, "unknown Java reference #{inspect(reference_id)}"
+    end
+  end
+
   defp collect_var_refs(ast, acc \\ MapSet.new())
   defp collect_var_refs({:var, name}, acc), do: MapSet.put(acc, name)
   defp collect_var_refs({:data, _key}, acc), do: acc
@@ -314,6 +410,17 @@ defmodule PtcRunner.Lisp.CoreToSource do
   defp collect_var_refs({:tool_call, _name, args}, acc) do
     Enum.reduce(args, acc, &collect_var_refs/2)
   end
+
+  defp collect_var_refs({tag, _reference_id, arguments}, acc)
+       when tag in [:java_static, :java_new],
+       do: Enum.reduce(arguments, acc, &collect_var_refs/2)
+
+  defp collect_var_refs({tag, _reference_id, receiver, arguments}, acc)
+       when tag in [:java_instance, :java_dot] do
+    Enum.reduce(arguments, collect_var_refs(receiver, acc), &collect_var_refs/2)
+  end
+
+  defp collect_var_refs({tag, _reference_id}, acc) when tag in [:java_field, :java_ref], do: acc
 
   defp collect_var_refs({:fn, _params, body}, acc), do: collect_var_refs(body, acc)
   defp collect_var_refs({:fn, _params, _guards, body}, acc), do: collect_var_refs(body, acc)
