@@ -77,7 +77,7 @@ defmodule PtcRunner.Lisp.Java.SurfaceTest do
              "Java overload route points at missing Env binding #{inspect(binding)}"
     end
 
-    assert Enum.count(Surface.overloads(), &match?({:dispatch, _}, &1.route)) == 26
+    assert Enum.count(Surface.overloads(), &match?({:dispatch, _}, &1.route)) == 27
 
     assert %{route: {:dispatch, :boolean_parse_boolean}} =
              Enum.find(Surface.overloads(), &(&1.overload_id == :boolean_parse_boolean_string))
@@ -115,7 +115,8 @@ defmodule PtcRunner.Lisp.Java.SurfaceTest do
                  :math_min,
                  :math_pow,
                  :math_round,
-                 :math_sqrt
+                 :math_sqrt,
+                 :system_current_time_millis
                ] ->
             assert Surface.closed_dispatch_reference?(reference.reference_id)
             assert :error = Surface.legacy_binding(namespace, member)
@@ -281,7 +282,7 @@ defmodule PtcRunner.Lisp.Java.SurfaceTest do
     manifest = Surface.manifest()
 
     invalid_route =
-      replace_overload(manifest, :system_current_time_millis_0, fn overload ->
+      replace_overload(manifest, :string_contains_char_sequence, fn overload ->
         %{overload | route: {:legacy_env, :missing}}
       end)
 
@@ -307,16 +308,16 @@ defmodule PtcRunner.Lisp.Java.SurfaceTest do
     assert {:error, errors} = validate(invalid_namespace)
     assert Enum.any?(errors, &String.contains?(&1, "legacy binding :missing does not exist"))
 
-    system_index = Enum.find_index(manifest.namespaces, &(&1.namespace == :System))
-    system = Enum.at(manifest.namespaces, system_index)
-    [current_time_millis] = system.members
-    wrong_route = %{current_time_millis | legacy_binding: :sqrt}
+    duration_index = Enum.find_index(manifest.namespaces, &(&1.namespace == :Duration))
+    duration = Enum.at(manifest.namespaces, duration_index)
+    [between] = duration.members
+    wrong_route = %{between | legacy_binding: :sqrt}
 
     invalid_existing =
       put_in(
         manifest.namespaces,
-        List.replace_at(manifest.namespaces, system_index, %{
-          system
+        List.replace_at(manifest.namespaces, duration_index, %{
+          duration
           | members: [wrong_route]
         })
       )
@@ -324,11 +325,11 @@ defmodule PtcRunner.Lisp.Java.SurfaceTest do
     assert {:error, errors} = validate(invalid_existing)
 
     assert Enum.any?(errors, fn error ->
-             String.contains?(error, "reference route must be :currentTimeMillis, got :sqrt")
+             String.contains?(error, "reference route must be :\"Duration/between\", got :sqrt")
            end)
 
     wrong_existing_route =
-      replace_overload(manifest, :system_current_time_millis_0, fn overload ->
+      replace_overload(manifest, :duration_between_temporal, fn overload ->
         %{overload | route: {:legacy_env, :sqrt}}
       end)
 

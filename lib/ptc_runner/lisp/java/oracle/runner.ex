@@ -461,7 +461,12 @@ defmodule PtcRunner.Lisp.Java.Oracle.Runner do
       expected: %{
         status: :ok,
         type: fixture.expected.type,
-        value: canonical_ptc_value(fixture.expected.type, step.return)
+        value:
+          canonical_ptc_value(
+            Map.get(fixture, :normalizer, :exact),
+            fixture.expected.type,
+            step.return
+          )
       }
     }
   end
@@ -480,20 +485,27 @@ defmodule PtcRunner.Lisp.Java.Oracle.Runner do
     }
   end
 
-  defp canonical_ptc_value(:boolean, value) when is_boolean(value), do: to_string(value)
+  defp canonical_ptc_value(:non_negative, :long, %Primitive{kind: :long, value: value})
+       when is_integer(value) and value >= 0,
+       do: "<non-negative>"
 
-  defp canonical_ptc_value(type, %Primitive{kind: type, value: value})
+  defp canonical_ptc_value(:type_only, _type, _value), do: "<dynamic>"
+
+  defp canonical_ptc_value(:exact, :boolean, value) when is_boolean(value), do: to_string(value)
+
+  defp canonical_ptc_value(:exact, type, %Primitive{kind: type, value: value})
        when type in [:int, :long],
        do: Integer.to_string(value)
 
-  defp canonical_ptc_value(type, %Primitive{kind: type, value: value})
+  defp canonical_ptc_value(:exact, type, %Primitive{kind: type, value: value})
        when type in [:float, :double],
        do: canonical_float(type, value)
 
-  defp canonical_ptc_value(type, value) when type in [:int, :long] and is_integer(value),
-    do: Integer.to_string(value)
+  defp canonical_ptc_value(:exact, type, value)
+       when type in [:int, :long] and is_integer(value),
+       do: Integer.to_string(value)
 
-  defp canonical_ptc_value(:date, %DateTime{} = value),
+  defp canonical_ptc_value(:exact, :date, %DateTime{} = value),
     do: value |> DateTime.to_unix(:millisecond) |> Integer.to_string()
 
   defp canonical_ptc_error(%{details: %{java_exception: :number_format_exception}}),

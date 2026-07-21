@@ -39,6 +39,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   exact primitive overload selection, Java overflow, signed-zero, NaN,
   infinity, rounding, and saturation behavior. Qualified Math calls are now
   distinct from the generic bare PTC-Lisp math helpers.
+- Migrated `System/currentTimeMillis` to closed manifest dispatch with native
+  Java `long` identity. The qualified call projects to an ordinary integer at
+  public boundaries, and the bare `(currentTimeMillis)` compatibility alias was
+  removed.
 - Added the code-owned `log-analysis-v1` profile to `mix ptc.repl`, with
   bounded multi-turn mission evaluation over an immutable trace capture,
   deterministic JSONL output for coding agents, safe profile discovery, and

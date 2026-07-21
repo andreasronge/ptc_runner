@@ -380,7 +380,6 @@ defmodule PtcRunner.Lisp.Runtime do
   defdelegate duration_between(start_dt, end_dt), to: Interop
   defdelegate dot_to_millis(duration), to: Interop
   defdelegate dot_to_days(duration), to: Interop
-  defdelegate current_time_millis, to: Interop
   defdelegate parse_temporal(s), to: Interop
   defdelegate dot_contains(s, substring), to: Interop
   defdelegate dot_index_of(s, substring), to: Interop

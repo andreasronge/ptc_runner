@@ -202,13 +202,6 @@ defmodule PtcRunner.Lisp.Runtime.Interop do
   end
 
   @doc """
-  Simulates System/currentTimeMillis.
-  """
-  def current_time_millis do
-    System.system_time(:millisecond)
-  end
-
-  @doc """
   Parse an ISO-8601 temporal string. Backs the `parse` builtin (also
   reachable as `LocalDate/parse`).
 

@@ -27,7 +27,8 @@ defmodule PtcRunner.Lisp.Java.Implementations do
     math_pow_double: {PtcRunner.Lisp.Java.Lang.Math, :pow_double},
     math_round_double: {PtcRunner.Lisp.Java.Lang.Math, :round_double},
     math_round_float: {PtcRunner.Lisp.Java.Lang.Math, :round_float},
-    math_sqrt_double: {PtcRunner.Lisp.Java.Lang.Math, :sqrt_double}
+    math_sqrt_double: {PtcRunner.Lisp.Java.Lang.Math, :sqrt_double},
+    system_current_time_millis: {PtcRunner.Lisp.Java.Lang.System, :current_time_millis}
   }
 
   @spec keys() :: %{atom() => true}

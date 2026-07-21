@@ -593,7 +593,7 @@
       arguments: [],
       errors: [],
       receiver: nil,
-      route: {:legacy_env, :currentTimeMillis},
+      route: {:dispatch, :system_current_time_millis},
       reference_id: :system_current_time_millis,
       descriptor: "()J",
       overload_id: :system_current_time_millis_0,
@@ -1441,8 +1441,7 @@
         %{
           source_name: :currentTimeMillis,
           reference_id: :system_current_time_millis,
-          classification: :admitted,
-          legacy_binding: :currentTimeMillis
+          classification: :admitted
         }
       ]
     },
@@ -3224,7 +3223,7 @@
       name: "System/currentTimeMillis",
       description: "Return current time in milliseconds since Unix epoch",
       kind: :static,
-      signatures: ["(System/currentTimeMillis)", "(currentTimeMillis)"],
+      signatures: ["(System/currentTimeMillis)"],
       notes: "",
       class: "java.lang.System",
       reference_ids: [:system_current_time_millis]
@@ -3820,12 +3819,12 @@
       divergences: nil
     },
     %{
-      name: "currentTimeMillis",
+      name: "System/currentTimeMillis",
       description: "Return current time in milliseconds since epoch",
       binding: :normal,
       reference_ids: [:system_current_time_millis],
       category: :interop,
-      dispatch: :env,
+      dispatch: :java,
       signatures: ["(System/currentTimeMillis)"],
       since: nil,
       examples: [],
@@ -3833,7 +3832,7 @@
       section: "Interop",
       ptc_extension?: false,
       see_also: [],
-      clojure_var: "currentTimeMillis",
+      clojure_var: nil,
       divergences: nil
     },
     %{

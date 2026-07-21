@@ -361,7 +361,6 @@ defmodule PtcRunner.Lisp.Runtime.Builtins do
       {:".endsWith", {:normal, &Runtime.dot_ends_with/2}},
       {:".isBefore", {:normal, &Runtime.dot_is_before/2}},
       {:".isAfter", {:normal, &Runtime.dot_is_after/2}},
-      {:currentTimeMillis, {:normal, &Runtime.current_time_millis/0}},
       {:parse, {:normal, &Runtime.parse_temporal/1}}
     ]
   end

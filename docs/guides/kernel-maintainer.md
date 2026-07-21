@@ -210,13 +210,15 @@ keeps distinct primitive kinds tagged with identity-preserving display wrappers,
 so equal payloads and literal strings cannot collapse map keys or set members.
 Only references whose complete overload family is on closed dispatch may become
 native callables; each overload may name its own code-owned implementation.
-Java numeric parsers, Double fields, and selected `java.lang.Math` overloads use
-this path, preserving exact int/long/float/double identity natively while
-mapping declared Java failures to bounded conditions. Math overload families
+Java numeric parsers, Double fields, selected `java.lang.Math` overloads, and
+`System/currentTimeMillis` use this path, preserving exact primitive identity
+natively while mapping declared Java failures to bounded conditions. Math overload families
 select exact primitive profiles; only references with one declared double
 overload apply bounded numeric-to-double conversion. Qualified Math semantics
 remain separate from the ordinary bare PTC math helpers. Unqualified Clojure
 parsing counterparts likewise remain separate safe signal-value helpers.
+System time is available only through its qualified Java spelling and returns
+a native Java `long` before ordinary public projection.
 Callable application derives the invocation kind from that reference: instance
 callables consume the receiver as their first application argument. Java class
 constructor heads and direct-dot member families resolve from source spellings

@@ -81,7 +81,7 @@ See also: [Function Reference](function-reference.md) | [PTC-Lisp Specification]
 
 | Name | Kind | Signature | Description | Notes |
 |------|------|-----------|-------------|-------|
-| `System/currentTimeMillis` | Static | `(System/currentTimeMillis), (currentTimeMillis)` | Return current time in milliseconds since Unix epoch |  |
+| `System/currentTimeMillis` | Static | `(System/currentTimeMillis)` | Return current time in milliseconds since Unix epoch |  |
 
 
 ### java.time.Duration

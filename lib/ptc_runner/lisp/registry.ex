@@ -250,7 +250,7 @@ defmodule PtcRunner.Lisp.Registry do
   Looks up documentation for a function by exact name.
 
   Handles namespace-qualified names (e.g., `"LocalDate/parse"` → `"parse"`,
-  `"System/currentTimeMillis"` → `"currentTimeMillis"`,
+  preserves closed Java names such as `"System/currentTimeMillis"`, and maps
   `"java.time.Duration/between"` → `"Duration/between"`).
 
   ## Examples

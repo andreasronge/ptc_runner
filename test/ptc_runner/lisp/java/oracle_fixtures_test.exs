@@ -155,6 +155,7 @@ defmodule PtcRunner.Lisp.Java.OracleFixturesTest do
                  math-sqrt-double
                  math-sqrt-double-negative
                  math-sqrt-double-negative-zero
+                 system-current-time-millis-0
                ))
 
     assert Enum.all?(outcomes, &(&1.selected_overload_id == &1.overload_id))

@@ -3278,7 +3278,7 @@ built-ins or reserved runtime operations at analysis time.
 ;; Java compatibility namespaces use bounded Java dispatch:
 (Math/sqrt 9)                      ; Java double result, distinct from bare sqrt
 (Math/max 1 2.0)                  ; Java type error: no exact mixed overload
-(System/currentTimeMillis)         ; → (currentTimeMillis)
+(System/currentTimeMillis)         ; closed Java static call; no bare alias
 (Instant/parse "2026-05-18T12:00:00Z") ; → (parse "2026-05-18T12:00:00Z")
 ```
 
@@ -3293,6 +3293,11 @@ double conversion. `Math/round` keeps its float and double overloads distinct,
 including Java NaN and infinity conversion. Bare `abs`, `ceil`, `floor`, `max`,
 `min`, `pow`, `round`, and `sqrt` remain ordinary PTC-Lisp helpers with their
 documented generic semantics.
+
+`System/currentTimeMillis` is a closed zero-argument Java static call. It
+retains Java `long` identity in native execution and projects to an ordinary
+integer at the public boundary; bare `currentTimeMillis` is not a compatibility
+alias.
 
 **Error handling:**
 
