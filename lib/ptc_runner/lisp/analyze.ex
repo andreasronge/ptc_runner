@@ -1093,6 +1093,10 @@ defmodule PtcRunner.Lisp.Analyze do
   defp analyze_java_reference(reference),
     do: {:error, {:unsupported_java_member, reference.class_id, reference.member}}
 
+  defp analyze_java_call(%{kind: :field, reference_id: reference_id}, argument_asts) do
+    {:error, {:java_arity_error, reference_id, %{expected: [], actual: length(argument_asts)}}}
+  end
+
   defp analyze_java_call(reference, argument_asts) do
     actual = length(argument_asts)
     expected = reference_arities(reference)
@@ -1130,9 +1134,6 @@ defmodule PtcRunner.Lisp.Analyze do
          [receiver | arguments]
        ),
        do: {:java_instance, reference_id, receiver, arguments}
-
-  defp java_call_node(%{kind: :field, reference_id: reference_id}, []),
-    do: {:java_field, reference_id}
 
   defp reference_arities(reference) do
     reference.overload_ids

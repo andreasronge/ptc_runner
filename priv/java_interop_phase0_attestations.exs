@@ -29,7 +29,7 @@
     double_parse_double_string: %{
       attestation: :jvm,
       descriptor: "(Ljava/lang/String;)D",
-      divergence_ids: ["GAP-J01"]
+      divergence_ids: []
     },
     double_positive_infinity_field: %{attestation: :jvm, descriptor: "D", divergence_ids: []},
     duration_between_temporal: %{
@@ -43,7 +43,7 @@
     float_parse_float_string: %{
       attestation: :jvm,
       descriptor: "(Ljava/lang/String;)F",
-      divergence_ids: ["GAP-J01"]
+      divergence_ids: []
     },
     instant_get_time_alias_0: %{
       attestation: :ptc_only,
@@ -68,7 +68,7 @@
     integer_parse_int_string: %{
       attestation: :jvm,
       descriptor: "(Ljava/lang/String;)I",
-      divergence_ids: ["GAP-J01"]
+      divergence_ids: []
     },
     local_date_is_after_chrono_local_date: %{
       attestation: :jvm,
@@ -99,7 +99,7 @@
     long_parse_long_string: %{
       attestation: :jvm,
       descriptor: "(Ljava/lang/String;)J",
-      divergence_ids: ["GAP-J01"]
+      divergence_ids: []
     },
     math_abs_double: %{attestation: :jvm, descriptor: "(D)D", divergence_ids: ["DIV-45"]},
     math_abs_float: %{attestation: :jvm, descriptor: "(F)F", divergence_ids: ["DIV-45"]},

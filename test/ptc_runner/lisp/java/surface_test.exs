@@ -77,7 +77,7 @@ defmodule PtcRunner.Lisp.Java.SurfaceTest do
              "Java overload route points at missing Env binding #{inspect(binding)}"
     end
 
-    assert Enum.count(Surface.overloads(), &match?({:dispatch, _}, &1.route)) == 1
+    assert Enum.count(Surface.overloads(), &match?({:dispatch, _}, &1.route)) == 8
 
     assert %{route: {:dispatch, :boolean_parse_boolean}} =
              Enum.find(Surface.overloads(), &(&1.overload_id == :boolean_parse_boolean_string))
@@ -98,7 +98,17 @@ defmodule PtcRunner.Lisp.Java.SurfaceTest do
 
       for member <- members do
         case Surface.resolve_reference(namespace, member) do
-          {:ok, reference} when reference.reference_id == :boolean_parse_boolean ->
+          {:ok, reference}
+          when reference.reference_id in [
+                 :boolean_parse_boolean,
+                 :double_parse_double,
+                 :double_positive_infinity,
+                 :double_negative_infinity,
+                 :double_nan,
+                 :float_parse_float,
+                 :integer_parse_int,
+                 :long_parse_long
+               ] ->
             assert Surface.closed_dispatch_reference?(reference.reference_id)
             assert :error = Surface.legacy_binding(namespace, member)
 
@@ -281,24 +291,24 @@ defmodule PtcRunner.Lisp.Java.SurfaceTest do
     assert {:error, errors} = validate(invalid_namespace)
     assert Enum.any?(errors, &String.contains?(&1, "legacy binding :missing does not exist"))
 
-    double_index = Enum.find_index(manifest.namespaces, &(&1.namespace == :Double))
-    double = Enum.at(manifest.namespaces, double_index)
-    [parse_double | constants] = double.members
-    wrong_route = %{parse_double | legacy_binding: :sqrt}
+    system_index = Enum.find_index(manifest.namespaces, &(&1.namespace == :System))
+    system = Enum.at(manifest.namespaces, system_index)
+    [current_time_millis] = system.members
+    wrong_route = %{current_time_millis | legacy_binding: :sqrt}
 
     invalid_existing =
       put_in(
         manifest.namespaces,
-        List.replace_at(manifest.namespaces, double_index, %{
-          double
-          | members: [wrong_route | constants]
+        List.replace_at(manifest.namespaces, system_index, %{
+          system
+          | members: [wrong_route]
         })
       )
 
     assert {:error, errors} = validate(invalid_existing)
 
     assert Enum.any?(errors, fn error ->
-             String.contains?(error, "reference route must be :\"parse-double\", got :sqrt")
+             String.contains?(error, "reference route must be :currentTimeMillis, got :sqrt")
            end)
 
     wrong_existing_route =
@@ -551,8 +561,8 @@ defmodule PtcRunner.Lisp.Java.SurfaceTest do
     assert {:error, errors} = validate(%{manifest | references: invalid_references})
     assert Enum.any?(errors, &String.contains?(&1, "callable policy"))
 
-    assert {:ok, %{return: [1.5, nil]}} =
-             Lisp.run(~S|(map Double/parseDouble ["1.5" "not-a-number"])|)
+    assert {:ok, %{return: [1.5, 2.5]}} =
+             Lisp.run(~S|(map Double/parseDouble ["1.5" "2.5"])|)
 
     assert {:ok, %{return: [1, 2]}} = Lisp.run(~S|(map .length ["a" "bb"])|)
   end
@@ -813,17 +823,17 @@ defmodule PtcRunner.Lisp.Java.SurfaceTest do
     coordinated_divergence_removal =
       manifest
       |> replace_overload(
-        :double_parse_double_string,
+        :math_abs_int,
         &%{&1 | divergence_ids: []}
       )
       |> replace_audit_target(
-        :java_lang_double_audit,
-        :double_parse_double,
+        :java_math_audit,
+        :math_abs,
         fn target ->
           %{
             target
-            | admitted_overload_divergences: %{double_parse_double_string: []},
-              notes: String.replace(target.notes, "GAP-J01", "")
+            | admitted_overload_divergences:
+                Map.put(target.admitted_overload_divergences, :math_abs_int, [])
           }
         end
       )
@@ -844,7 +854,7 @@ defmodule PtcRunner.Lisp.Java.SurfaceTest do
     assert Enum.any?(errors, &String.contains?(&1, "audit rationale"))
 
     removed_known_divergence =
-      replace_overload(manifest, :double_parse_double_string, fn overload ->
+      replace_overload(manifest, :math_abs_int, fn overload ->
         %{overload | divergence_ids: []}
       end)
 

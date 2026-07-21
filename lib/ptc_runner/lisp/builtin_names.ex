@@ -60,9 +60,6 @@ defmodule PtcRunner.Lisp.BuiltinNames do
     :".toUpperCase" => :normal,
     :"Duration/between" => :normal,
     :"java.util.Date." => :multi_arity,
-    :NEGATIVE_INFINITY => :constant,
-    :NaN => :constant,
-    :POSITIVE_INFINITY => :constant,
     :abs => :normal,
     :ceil => :normal,
     :currentTimeMillis => :normal,
@@ -70,8 +67,6 @@ defmodule PtcRunner.Lisp.BuiltinNames do
     :max => :variadic_nonempty,
     :min => :variadic_nonempty,
     :parse => :normal,
-    :"parse-double" => :normal,
-    :"parse-long" => :normal,
     :pow => :normal,
     :round => :normal,
     :sqrt => :normal

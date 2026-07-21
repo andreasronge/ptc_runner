@@ -2565,7 +2565,8 @@
       section: "String Functions",
       ptc_extension?: false,
       examples: [],
-      notes: "Also available as `Double/parseDouble` and `Float/parseFloat`.",
+      notes:
+        "The Java-named `Double/parseDouble` and `Float/parseFloat` functions are distinct: they preserve primitive identity and use Java grammar, rounding, and failure semantics.",
       see_also: [],
       clojure_var: "parse-double",
       divergences:
@@ -2583,7 +2584,7 @@
       ptc_extension?: false,
       examples: [],
       notes:
-        "Alias for `parse-long`; Java-shaped aliases are `Integer/parseInt` and `Long/parseLong`.",
+        "Alias for `parse-long`. The Java-named `Integer/parseInt` and `Long/parseLong` functions are distinct and use Java primitive ranges and failure semantics.",
       see_also: [],
       clojure_var: "parse-int",
       divergences: nil
@@ -2599,7 +2600,8 @@
       section: "String Functions",
       ptc_extension?: false,
       examples: [],
-      notes: "Also available as `Integer/parseInt` and `Long/parseLong`.",
+      notes:
+        "The Java-named `Integer/parseInt` and `Long/parseLong` functions are distinct: they preserve primitive identity and use Java primitive ranges and failure semantics.",
       see_also: [],
       clojure_var: "parse-long",
       divergences:

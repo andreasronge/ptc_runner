@@ -121,8 +121,10 @@ defmodule PtcRunner.Lisp.RegistryTest do
       assert Registry.doc("Duration/between").name == "Duration/between"
       assert Registry.doc("java.time.Duration/between").name == "Duration/between"
       assert Registry.doc("Boolean/parseBoolean").name == "Boolean/parseBoolean"
-      assert Registry.doc("Double/parseDouble").name == "parse-double"
-      assert Registry.doc("Integer/parseInt").name == "parse-long"
+      assert Registry.doc("Double/parseDouble").name == "Double/parseDouble"
+      assert Registry.doc("Float/parseFloat").name == "Float/parseFloat"
+      assert Registry.doc("Integer/parseInt").name == "Integer/parseInt"
+      assert Registry.doc("Long/parseLong").name == "Long/parseLong"
     end
 
     test "doc/1 rejects unsupported namespaced Java members" do

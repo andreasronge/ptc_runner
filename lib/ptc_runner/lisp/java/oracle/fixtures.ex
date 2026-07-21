@@ -12,6 +12,7 @@ defmodule PtcRunner.Lisp.Java.Oracle.Fixtures do
 
   @cases_resource "priv/java_interop_oracle_cases.exs"
   @baseline_resource "priv/java_interop_oracle_baseline.json"
+  @max_expanded_string_bytes 256_000
   @external_resource @cases_resource
   @external_resource @baseline_resource
 
@@ -164,14 +165,56 @@ defmodule PtcRunner.Lisp.Java.Oracle.Fixtures do
   defp validate_arguments!(fixture, overload) do
     fixture.invocation.arguments
     |> Enum.zip(overload.arguments)
-    |> Enum.each(fn {%{type: actual}, expected} ->
+    |> Enum.each(fn {%{type: actual} = argument, expected} ->
       unless compatible_argument_type?(actual, expected) do
         raise ArgumentError,
               "fixture #{fixture.case_id} argument type #{inspect(actual)} " <>
                 "does not match #{inspect(expected)}"
       end
+
+      validate_argument_value!(fixture, argument)
     end)
   end
+
+  defp validate_argument_value!(
+         fixture,
+         %{
+           type: :string,
+           value:
+             %{
+               "encoding" => "repeat",
+               "prefix" => prefix,
+               "repeated" => repeated,
+               "count" => count,
+               "suffix" => suffix
+             } = encoding
+         }
+       ) do
+    valid_shape? =
+      map_size(encoding) == 5 and is_binary(prefix) and is_binary(repeated) and
+        is_integer(count) and count >= 0 and count <= @max_expanded_string_bytes and
+        is_binary(suffix)
+
+    expanded_bytes =
+      if valid_shape?,
+        do: byte_size(prefix) + byte_size(repeated) * count + byte_size(suffix),
+        else: @max_expanded_string_bytes + 1
+
+    unless valid_shape? and expanded_bytes <= @max_expanded_string_bytes do
+      raise ArgumentError,
+            "fixture #{fixture.case_id} has an invalid or oversized repeated string encoding"
+    end
+  end
+
+  defp validate_argument_value!(_fixture, %{type: :string, value: value})
+       when is_nil(value) or is_binary(value),
+       do: :ok
+
+  defp validate_argument_value!(fixture, %{type: :string}) do
+    raise ArgumentError, "fixture #{fixture.case_id} has an invalid string value"
+  end
+
+  defp validate_argument_value!(_fixture, _argument), do: :ok
 
   defp compatible_argument_type?(:string, :char_sequence), do: true
   defp compatible_argument_type?(type, :temporal) when type in [:instant, :local_date], do: true

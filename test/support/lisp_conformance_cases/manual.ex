@@ -5699,7 +5699,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
 
   defp java_bug_cases do
     [
-      bug_case(
+      fixed_bug_case(
         "java/integer-parse-int-bug-001",
         "java.lang.Integer",
         ["Integer/parseInt"],
@@ -5707,7 +5707,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-J01",
         "Java parseInt raises NumberFormatException, but PTC-Lisp currently returns nil."
       ),
-      bug_case(
+      fixed_bug_case(
         "java/integer-parse-int-empty-bug-001",
         "java.lang.Integer",
         ["Integer/parseInt"],
@@ -5715,7 +5715,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-J01",
         "Java parseInt raises NumberFormatException for an empty string, but PTC-Lisp currently returns nil."
       ),
-      bug_case(
+      fixed_bug_case(
         "java/integer-parse-int-whitespace-bug-001",
         "java.lang.Integer",
         ["Integer/parseInt"],
@@ -5723,7 +5723,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-J01",
         "Java parseInt rejects leading whitespace, but PTC-Lisp currently returns nil instead of raising."
       ),
-      bug_case(
+      fixed_bug_case(
         "java/integer-parse-int-overflow-bug-001",
         "java.lang.Integer",
         ["Integer/parseInt"],
@@ -5731,7 +5731,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-J01",
         "Java parseInt raises NumberFormatException for values above Integer/MAX_VALUE; PTC-Lisp currently returns an arbitrary-precision integer."
       ),
-      bug_case(
+      fixed_bug_case(
         "java/integer-parse-int-plus-overflow-bug-001",
         "java.lang.Integer",
         ["Integer/parseInt"],
@@ -5739,7 +5739,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-J01",
         "Java parseInt raises NumberFormatException for signed values above Integer/MAX_VALUE; PTC-Lisp currently returns an arbitrary-precision integer."
       ),
-      bug_case(
+      fixed_bug_case(
         "java/integer-parse-int-underflow-bug-001",
         "java.lang.Integer",
         ["Integer/parseInt"],
@@ -5747,7 +5747,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-J01",
         "Java parseInt raises NumberFormatException for values below Integer/MIN_VALUE; PTC-Lisp currently returns an arbitrary-precision integer."
       ),
-      bug_case(
+      fixed_bug_case(
         "java/integer-parse-int-nil-bug-001",
         "java.lang.Integer",
         ["Integer/parseInt"],
@@ -5763,7 +5763,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-J15",
         "Java parseInt supports a radix overload; PTC-Lisp currently raises an arity error."
       ),
-      bug_case(
+      fixed_bug_case(
         "java/long-parse-long-bug-001",
         "java.lang.Long",
         ["Long/parseLong"],
@@ -5771,7 +5771,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-J01",
         "Java parseLong raises NumberFormatException, but PTC-Lisp currently returns nil."
       ),
-      bug_case(
+      fixed_bug_case(
         "java/long-parse-long-empty-bug-001",
         "java.lang.Long",
         ["Long/parseLong"],
@@ -5779,7 +5779,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-J01",
         "Java parseLong raises NumberFormatException for an empty string, but PTC-Lisp currently returns nil."
       ),
-      bug_case(
+      fixed_bug_case(
         "java/long-parse-long-whitespace-bug-001",
         "java.lang.Long",
         ["Long/parseLong"],
@@ -5787,7 +5787,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-J01",
         "Java parseLong rejects leading whitespace, but PTC-Lisp currently returns nil instead of raising."
       ),
-      bug_case(
+      fixed_bug_case(
         "java/long-parse-long-overflow-bug-001",
         "java.lang.Long",
         ["Long/parseLong"],
@@ -5795,7 +5795,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-J01",
         "Java parseLong raises NumberFormatException for values above Long/MAX_VALUE; PTC-Lisp currently returns an arbitrary-precision integer."
       ),
-      bug_case(
+      fixed_bug_case(
         "java/long-parse-long-plus-overflow-bug-001",
         "java.lang.Long",
         ["Long/parseLong"],
@@ -5803,7 +5803,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-J01",
         "Java parseLong raises NumberFormatException for signed values above Long/MAX_VALUE; PTC-Lisp currently returns an arbitrary-precision integer."
       ),
-      bug_case(
+      fixed_bug_case(
         "java/long-parse-long-underflow-bug-001",
         "java.lang.Long",
         ["Long/parseLong"],
@@ -5811,7 +5811,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-J01",
         "Java parseLong raises NumberFormatException for values below Long/MIN_VALUE; PTC-Lisp currently returns an arbitrary-precision integer."
       ),
-      bug_case(
+      fixed_bug_case(
         "java/long-parse-long-nil-bug-001",
         "java.lang.Long",
         ["Long/parseLong"],
@@ -5827,7 +5827,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-J15",
         "Java parseLong supports a radix overload; PTC-Lisp currently raises an arity error."
       ),
-      bug_case(
+      fixed_bug_case(
         "java/double-parse-double-bug-001",
         "java.lang.Double",
         ["Double/parseDouble"],
@@ -5835,7 +5835,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-J01",
         "Java parseDouble raises NumberFormatException, but PTC-Lisp currently returns nil."
       ),
-      bug_case(
+      fixed_bug_case(
         "java/double-parse-double-empty-bug-001",
         "java.lang.Double",
         ["Double/parseDouble"],
@@ -5843,7 +5843,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-J01",
         "Java parseDouble raises NumberFormatException for an empty string, but PTC-Lisp currently returns nil."
       ),
-      bug_case(
+      fixed_bug_case(
         "java/double-parse-double-whitespace-bug-001",
         "java.lang.Double",
         ["Double/parseDouble"],
@@ -5851,7 +5851,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-J01",
         "Java parseDouble accepts surrounding whitespace, but PTC-Lisp currently returns nil."
       ),
-      bug_case(
+      fixed_bug_case(
         "java/double-parse-double-hex-float-bug-001",
         "java.lang.Double",
         ["Double/parseDouble"],
@@ -5859,7 +5859,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-J01",
         "Java parseDouble accepts hexadecimal floating-point syntax, but PTC-Lisp currently returns nil."
       ),
-      bug_case(
+      fixed_bug_case(
         "java/double-parse-double-nil-bug-001",
         "java.lang.Double",
         ["Double/parseDouble"],
@@ -5867,7 +5867,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-J01",
         "Java parseDouble raises NullPointerException for nil; PTC-Lisp currently returns nil."
       ),
-      bug_case(
+      fixed_bug_case(
         "java/float-parse-float-bug-001",
         "java.lang.Float",
         ["Float/parseFloat"],
@@ -5875,7 +5875,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-J01",
         "Java parseFloat raises NumberFormatException, but PTC-Lisp currently returns nil."
       ),
-      bug_case(
+      fixed_bug_case(
         "java/float-parse-float-empty-bug-001",
         "java.lang.Float",
         ["Float/parseFloat"],
@@ -5883,7 +5883,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-J01",
         "Java parseFloat raises NumberFormatException for an empty string, but PTC-Lisp currently returns nil."
       ),
-      bug_case(
+      fixed_bug_case(
         "java/float-parse-float-whitespace-bug-001",
         "java.lang.Float",
         ["Float/parseFloat"],
@@ -5891,7 +5891,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-J01",
         "Java parseFloat accepts surrounding whitespace, but PTC-Lisp currently returns nil."
       ),
-      bug_case(
+      fixed_bug_case(
         "java/float-parse-float-nil-bug-001",
         "java.lang.Float",
         ["Float/parseFloat"],

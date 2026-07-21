@@ -168,7 +168,7 @@ defmodule PtcRunner.Lisp.Runtime.JsonTest do
     end
 
     test "returns nil for special-float carve-out (§4.3)" do
-      # POSITIVE_INFINITY / NEGATIVE_INFINITY / NaN constants resolve to atoms.
+      # Special numeric literals resolve to bounded signal atoms.
       assert Json.generate_string(:infinity) == nil
       assert Json.generate_string(:negative_infinity) == nil
       assert Json.generate_string(:nan) == nil

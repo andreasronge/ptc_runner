@@ -21,31 +21,31 @@ See also: [Function Reference](function-reference.md) | [PTC-Lisp Specification]
 
 | Name | Kind | Signature | Description | Notes |
 |------|------|-----------|-------------|-------|
-| `Double/NEGATIVE_INFINITY` | Constant | `Double/NEGATIVE_INFINITY, NEGATIVE_INFINITY` | Negative infinity constant (##-Inf) |  |
-| `Double/NaN` | Constant | `Double/NaN, NaN` | Not-a-Number constant (##NaN) |  |
-| `Double/POSITIVE_INFINITY` | Constant | `Double/POSITIVE_INFINITY, POSITIVE_INFINITY` | Positive infinity constant (##Inf) |  |
-| `Double/parseDouble` | Static | `(Double/parseDouble s)` | Parse string to double | Compatibility alias for `(parse-double s)`. Invalid or non-string input returns nil instead of throwing. |
+| `Double/NEGATIVE_INFINITY` | Constant | `Double/NEGATIVE_INFINITY` | Negative infinity constant (##-Inf) |  |
+| `Double/NaN` | Constant | `Double/NaN` | Not-a-Number constant (##NaN) |  |
+| `Double/POSITIVE_INFINITY` | Constant | `Double/POSITIVE_INFINITY` | Positive infinity constant (##Inf) |  |
+| `Double/parseDouble` | Static | `(Double/parseDouble s)` | Parse string to double | Uses Java syntax, whitespace, range, rounding, and bounded NumberFormatException/NullPointerException semantics. |
 
 
 ### java.lang.Float
 
 | Name | Kind | Signature | Description | Notes |
 |------|------|-----------|-------------|-------|
-| `Float/parseFloat` | Static | `(Float/parseFloat s)` | Parse string to float | Compatibility alias for `(parse-double s)`; PTC-Lisp uses one floating type. Invalid or non-string input returns nil instead of throwing. |
+| `Float/parseFloat` | Static | `(Float/parseFloat s)` | Parse string to float | Uses Java syntax, whitespace, range, direct float rounding, and bounded NumberFormatException/NullPointerException semantics. |
 
 
 ### java.lang.Integer
 
 | Name | Kind | Signature | Description | Notes |
 |------|------|-----------|-------------|-------|
-| `Integer/parseInt` | Static | `(Integer/parseInt s)` | Parse string to integer | Compatibility alias for `(parse-long s)`. Invalid or non-string input returns nil instead of throwing. |
+| `Integer/parseInt` | Static | `(Integer/parseInt s)` | Parse string to integer | Uses Java decimal syntax, int range checks, and bounded NumberFormatException semantics. |
 
 
 ### java.lang.Long
 
 | Name | Kind | Signature | Description | Notes |
 |------|------|-----------|-------------|-------|
-| `Long/parseLong` | Static | `(Long/parseLong s)` | Parse string to integer | Compatibility alias for `(parse-long s)`. Invalid or non-string input returns nil instead of throwing. |
+| `Long/parseLong` | Static | `(Long/parseLong s)` | Parse string to integer | Uses Java decimal syntax, long range checks, and bounded NumberFormatException semantics. |
 
 
 ### java.lang.String

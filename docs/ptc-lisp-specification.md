@@ -2634,7 +2634,7 @@ To iterate over just keys or values, extract them first:
 | `parse-boolean` | Parse `"true"`/`"false"`, returns nil on failure |
 
 String parsing functions provide safe conversion from strings to numbers, compatible with Clojure 1.11+. These functions return `nil` on parse failure rather than throwing exceptions.
-Java-shaped numeric aliases are also accepted for LLM compatibility: `Integer/parseInt` and `Long/parseLong` map to `parse-long`, and `Double/parseDouble` and `Float/parseFloat` map to `parse-double`. These aliases keep PTC-Lisp's safe `nil`-on-failure behavior; they are not exact Java throwing semantics. Inventoried `Math/` compatibility aliases that are not Java members, such as `Math/bit-and` and `Math/trunc`, remain routed to their documented PTC builtins rather than entering Java dispatch. `Boolean/parseBoolean` is resolved by the bounded Java manifest and closed dispatch: it returns `true` only for case-insensitive `"true"`, returns `false` for nil/null and every other string, and raises a bounded Java type error for non-string, non-nil inputs. In value position it is a native Java callable; public results render that authority as the inert label `#java[java.lang.Boolean/parseBoolean]`.
+Java-named numeric parsers use closed manifest dispatch and Java semantics instead: `Integer/parseInt` and `Long/parseLong` accept decimal strings within their exact primitive ranges, while `Double/parseDouble` and `Float/parseFloat` accept Java decimal, hexadecimal, suffix, special-value, and surrounding Java-whitespace syntax and round directly to the declared IEEE 754 kind. Invalid Java-named parses produce bounded `NumberFormatException` or `NullPointerException` conditions. Inventoried `Math/` compatibility aliases that are not Java members, such as `Math/bit-and` and `Math/trunc`, remain routed to their documented PTC builtins rather than entering Java dispatch. `Boolean/parseBoolean` is also resolved by the bounded Java manifest and closed dispatch: it returns `true` only for case-insensitive `"true"`, returns `false` for nil/null and every other string, and raises a bounded Java type error for non-string, non-nil inputs. In value position each Java parser is a native Java callable; public results render that authority as an inert `#java[...]` label.
 
 First-class Java callables always recover their invocation kind from the bounded
 manifest. Static and constructor callables consume their ordinary arguments;
@@ -2654,6 +2654,9 @@ to Java CoreAST only once their complete reference family uses closed dispatch.
 - Both functions require the entire string to be consumed by the parse. Partial parses are rejected.
 - Leading/trailing whitespace is not stripped—the string must be in exact numeric form.
 - Invalid input returns `nil` rather than an error.
+
+These three rules apply to the unqualified Clojure-named helpers. Java-named
+numeric parsers follow the class-specific behavior described above.
 
 ```clojure
 ;; Successful parses

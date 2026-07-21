@@ -16,6 +16,12 @@ defmodule PtcRunner.Lisp.DoubleConstantsTest do
       assert {:ok, %{return: :nan}} = Lisp.run("##NaN")
     end
 
+    test "does not retain replaced unqualified Java field aliases" do
+      for source <- ~w(POSITIVE_INFINITY NEGATIVE_INFINITY NaN) do
+        assert {:error, %{fail: %{reason: :unbound_var}}} = Lisp.run(source)
+      end
+    end
+
     test "arithmetic with constants" do
       assert {:ok, %{return: :infinity}} = Lisp.run("(+ Double/POSITIVE_INFINITY 1)")
 
@@ -43,9 +49,11 @@ defmodule PtcRunner.Lisp.DoubleConstantsTest do
       assert {:ok, %{return: :infinity}} = Lisp.run("(parse-double \"+Infinity\")")
     end
 
-    test "Double/parseDouble aliases parse-double" do
+    test "Double/parseDouble uses Java parsing semantics" do
       assert {:ok, %{return: 11.76}} = Lisp.run(~S|(Double/parseDouble "11.760000")|)
-      assert {:ok, %{return: nil}} = Lisp.run(~S|(Double/parseDouble "not-a-number")|)
+
+      assert {:error, %{fail: %{reason: :java_domain_error}}} =
+               Lisp.run(~S|(Double/parseDouble "not-a-number")|)
     end
 
     test "Java parse aliases use parse semantics for their target classes" do
@@ -60,14 +68,21 @@ defmodule PtcRunner.Lisp.DoubleConstantsTest do
       assert {:error, %{fail: %{reason: :java_type_error}}} =
                Lisp.run(~S|(Boolean/parseBoolean true)|)
 
-      assert {:ok, %{return: 11.76}} = Lisp.run(~S|(Float/parseFloat "11.760000")|)
-      assert {:ok, %{return: nil}} = Lisp.run(~S|(Float/parseFloat "not-a-number")|)
+      assert {:ok, %{return: 11.760000228881836}} =
+               Lisp.run(~S|(Float/parseFloat "11.760000")|)
+
+      assert {:error, %{fail: %{reason: :java_domain_error}}} =
+               Lisp.run(~S|(Float/parseFloat "not-a-number")|)
 
       assert {:ok, %{return: 42}} = Lisp.run(~S|(Integer/parseInt "42")|)
-      assert {:ok, %{return: nil}} = Lisp.run(~S|(Integer/parseInt "42.5")|)
+
+      assert {:error, %{fail: %{reason: :java_domain_error}}} =
+               Lisp.run(~S|(Integer/parseInt "42.5")|)
 
       assert {:ok, %{return: 42}} = Lisp.run(~S|(Long/parseLong "42")|)
-      assert {:ok, %{return: nil}} = Lisp.run(~S|(Long/parseLong "bad")|)
+
+      assert {:error, %{fail: %{reason: :java_domain_error}}} =
+               Lisp.run(~S|(Long/parseLong "bad")|)
     end
 
     test "Java parse alias namespaces are known for diagnostics" do

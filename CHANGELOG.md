@@ -30,6 +30,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Java and ordinary struct-shaped maps must contain their exact declared fields.
   Java class spellings are reserved against prelude shadowing, and rejected
   tool results retain their executed callback ledger entry.
+- Migrated Java numeric parsers and Double special-value fields to closed
+  manifest dispatch. Java-named parsers now preserve exact primitive identity,
+  enforce int/long ranges, use direct IEEE float/double rounding, accept Java
+  decimal and hexadecimal syntax, and return bounded Java parse conditions;
+  unqualified Clojure parsers keep their safe `nil` behavior.
 - Added the code-owned `log-analysis-v1` profile to `mix ptc.repl`, with
   bounded multi-turn mission evaluation over an immutable trace capture,
   deterministic JSONL output for coding agents, safe profile discovery, and

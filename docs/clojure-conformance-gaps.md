@@ -437,12 +437,12 @@ above. Java-shaped parse aliases are tracked separately under `GAP-J01` and
 
 **Rationale:** No exception handling (DIV-10). Returning `nil` is safer for LLM-generated code.
 
-### GAP-J01: Java numeric parse aliases return nil instead of raising on invalid input
+### GAP-J01: Java numeric parse aliases returned nil instead of raising on invalid input
 
 | Field | Value |
 |-------|-------|
 | **Priority** | P1 |
-| **Status** | open |
+| **Status** | fixed |
 | **Source** | Manual conformance cases `java/integer-parse-int-bug-001`, `java/integer-parse-int-empty-bug-001`, `java/integer-parse-int-whitespace-bug-001`, `java/integer-parse-int-overflow-bug-001`, `java/integer-parse-int-plus-overflow-bug-001`, `java/integer-parse-int-underflow-bug-001`, `java/integer-parse-int-nil-bug-001`, `java/long-parse-long-bug-001`, `java/long-parse-long-empty-bug-001`, `java/long-parse-long-whitespace-bug-001`, `java/long-parse-long-overflow-bug-001`, `java/long-parse-long-plus-overflow-bug-001`, `java/long-parse-long-underflow-bug-001`, `java/long-parse-long-nil-bug-001`, `java/double-parse-double-bug-001`, `java/double-parse-double-empty-bug-001`, `java/double-parse-double-whitespace-bug-001`, `java/double-parse-double-hex-float-bug-001`, `java/double-parse-double-nil-bug-001`, `java/float-parse-float-bug-001`, `java/float-parse-float-empty-bug-001`, `java/float-parse-float-whitespace-bug-001`, `java/float-parse-float-nil-bug-001` |
 
 ```clojure
@@ -469,34 +469,21 @@ above. Java-shaped parse aliases are tracked separately under `GAP-J01` and
 (Double/parseDouble "0x1.0p0") ;=> 1.0
 (Float/parseFloat "1.5 ")  ;=> 1.5
 
-;; PTC-Lisp current behavior
-(Integer/parseInt "x")    ;=> nil
-(Integer/parseInt "")     ;=> nil
-(Integer/parseInt " 1")   ;=> nil
-(Integer/parseInt "2147483648") ;=> 2147483648
-(Integer/parseInt "+2147483648") ;=> 2147483648
-(Integer/parseInt nil)    ;=> nil
-(Long/parseLong "x")      ;=> nil
-(Long/parseLong "")       ;=> nil
-(Long/parseLong " 1")     ;=> nil
-(Long/parseLong "9223372036854775808") ;=> 9223372036854775808
-(Long/parseLong "+9223372036854775808") ;=> 9223372036854775808
-(Long/parseLong nil)      ;=> nil
-(Double/parseDouble "x")  ;=> nil
-(Double/parseDouble "")   ;=> nil
-(Double/parseDouble nil)  ;=> nil
-(Float/parseFloat "x")    ;=> nil
-(Float/parseFloat "")     ;=> nil
-(Float/parseFloat nil)    ;=> nil
-(Double/parseDouble " 1.5") ;=> nil
-(Double/parseDouble "0x1.0p0") ;=> nil
-(Float/parseFloat "1.5 ")  ;=> nil
+;; PTC-Lisp
+;; The same successful values and bounded Java error categories as above.
 ```
 
 **Decision:** BUG. These are Java-shaped class calls, so Java semantics should
 win even when the safer Clojure-named helpers return signal values. For
 integer parsers that includes Java primitive range checks; for floating parsers
 that includes Java's accepted leading/trailing whitespace.
+
+**Fix:** Numeric class calls now use closed manifest dispatch. Integer and Long
+parsers enforce their primitive decimal ranges. Float and Double parsers accept
+Java decimal, hexadecimal, suffix, special-value, and Java-whitespace syntax
+and round directly to their declared IEEE 754 kind. Invalid values produce
+bounded `NumberFormatException` or `NullPointerException` conditions; the
+unqualified Clojure-named helpers retain their safe `nil` behavior.
 
 ### GAP-J02: `Boolean/parseBoolean` returns nil for non-true strings
 
@@ -1527,7 +1514,7 @@ The `nil` return for both real JSON `null` and parse failure is a known ambiguit
 (json/generate-string {:server "fs"})       ;=> nil      (atom key)
 (json/generate-string {"server" :fs})       ;=> nil      (atom value)
 (json/generate-string {1 "a"})              ;=> "{\"1\":\"a\"}"   (integer keys allowed; carve-out, no round-trip)
-(json/generate-string POSITIVE_INFINITY)    ;=> nil      (special-float carve-out)
+(json/generate-string ##Inf)                ;=> nil      (special-float carve-out)
 (json/generate-string {:tuple [{:ok 1}]})   ;=> nil      (any tuple, anywhere)
 
 ;; Programs that want strings on the wire convert explicitly:
@@ -1535,7 +1522,7 @@ The `nil` return for both real JSON `null` and parse failure is a known ambiguit
 ;=> "{\"server\":\"fs\"}"
 ```
 
-**Rationale:** Silently auto-stringifying keywords would erode PTC-Lisp's type signal at the wire boundary. The implementation runs a pre-validation walk (`encodable_value?` / `encodable_key?`) over the value tree *before* invoking `Jason.encode/1` — any non-boolean atom, atom-keyed map entry, tuple, PID, reference, or function short-circuits to `nil`. Special floats (`POSITIVE_INFINITY`, `NEGATIVE_INFINITY`, `NaN` — which resolve to atoms `:infinity` / `:negative_infinity` / `:nan`) are also rejected because they aren't valid JSON scalars.
+**Rationale:** Silently auto-stringifying keywords would erode PTC-Lisp's type signal at the wire boundary. The implementation runs a pre-validation walk (`encodable_value?` / `encodable_key?`) over the value tree *before* invoking `Jason.encode/1` — any non-boolean atom, atom-keyed map entry, tuple, PID, reference, or function short-circuits to `nil`. Special numeric literals (`##Inf`, `##-Inf`, and `##NaN`, represented by the bounded atoms `:infinity`, `:negative_infinity`, and `:nan`) are also rejected because they aren't valid JSON scalars.
 
 Map-key validation is **stricter** than value validation: JSON only accepts string keys. Once stringified, atom and float keys preserve no type signal across a round-trip and would break the §4.3 round-trip property, so they are rejected at the key position even when acceptable as values. Integer keys are allowed (Jason's default stringifies them) but **do not round-trip** — `{1 "a"}` parses back as `%{"1" => "a"}`.
 

@@ -505,11 +505,11 @@
       arguments: [:string],
       errors: [:number_format_exception, :null_pointer_exception],
       receiver: nil,
-      route: {:legacy_env, :"parse-double"},
+      route: {:dispatch, :double_parse_double},
       reference_id: :double_parse_double,
       descriptor: "(Ljava/lang/String;)D",
       overload_id: :double_parse_double_string,
-      divergence_ids: ["GAP-J01"],
+      divergence_ids: [],
       classification: :exact,
       attestation: :jvm
     },
@@ -519,7 +519,7 @@
       arguments: [],
       errors: [],
       receiver: nil,
-      route: {:legacy_env, :POSITIVE_INFINITY},
+      route: {:dispatch, :double_positive_infinity},
       reference_id: :double_positive_infinity,
       descriptor: "D",
       overload_id: :double_positive_infinity_field,
@@ -533,7 +533,7 @@
       arguments: [],
       errors: [],
       receiver: nil,
-      route: {:legacy_env, :NEGATIVE_INFINITY},
+      route: {:dispatch, :double_negative_infinity},
       reference_id: :double_negative_infinity,
       descriptor: "D",
       overload_id: :double_negative_infinity_field,
@@ -547,7 +547,7 @@
       arguments: [],
       errors: [],
       receiver: nil,
-      route: {:legacy_env, :NaN},
+      route: {:dispatch, :double_nan},
       reference_id: :double_nan,
       descriptor: "D",
       overload_id: :double_nan_field,
@@ -561,11 +561,11 @@
       arguments: [:string],
       errors: [:number_format_exception, :null_pointer_exception],
       receiver: nil,
-      route: {:legacy_env, :"parse-double"},
+      route: {:dispatch, :float_parse_float},
       reference_id: :float_parse_float,
       descriptor: "(Ljava/lang/String;)F",
       overload_id: :float_parse_float_string,
-      divergence_ids: ["GAP-J01"],
+      divergence_ids: [],
       classification: :exact,
       attestation: :jvm
     },
@@ -575,11 +575,11 @@
       arguments: [:string],
       errors: [:number_format_exception],
       receiver: nil,
-      route: {:legacy_env, :"parse-long"},
+      route: {:dispatch, :integer_parse_int},
       reference_id: :integer_parse_int,
       descriptor: "(Ljava/lang/String;)I",
       overload_id: :integer_parse_int_string,
-      divergence_ids: ["GAP-J01"],
+      divergence_ids: [],
       classification: :exact,
       attestation: :jvm
     },
@@ -589,11 +589,11 @@
       arguments: [:string],
       errors: [:number_format_exception],
       receiver: nil,
-      route: {:legacy_env, :"parse-long"},
+      route: {:dispatch, :long_parse_long},
       reference_id: :long_parse_long,
       descriptor: "(Ljava/lang/String;)J",
       overload_id: :long_parse_long_string,
-      divergence_ids: ["GAP-J01"],
+      divergence_ids: [],
       classification: :exact,
       attestation: :jvm
     },
@@ -1484,26 +1484,22 @@
         %{
           source_name: "parseDouble",
           reference_id: :double_parse_double,
-          classification: :admitted,
-          legacy_binding: :"parse-double"
+          classification: :admitted
         },
         %{
           source_name: :POSITIVE_INFINITY,
           reference_id: :double_positive_infinity,
-          classification: :admitted,
-          legacy_binding: :POSITIVE_INFINITY
+          classification: :admitted
         },
         %{
           source_name: :NEGATIVE_INFINITY,
           reference_id: :double_negative_infinity,
-          classification: :admitted,
-          legacy_binding: :NEGATIVE_INFINITY
+          classification: :admitted
         },
         %{
           source_name: :NaN,
           reference_id: :double_nan,
-          classification: :admitted,
-          legacy_binding: :NaN
+          classification: :admitted
         }
       ]
     },
@@ -1515,8 +1511,7 @@
         %{
           source_name: "parseFloat",
           reference_id: :float_parse_float,
-          classification: :admitted,
-          legacy_binding: :"parse-double"
+          classification: :admitted
         }
       ]
     },
@@ -1528,8 +1523,7 @@
         %{
           source_name: "parseInt",
           reference_id: :integer_parse_int,
-          classification: :admitted,
-          legacy_binding: :"parse-long"
+          classification: :admitted
         }
       ]
     },
@@ -1541,8 +1535,7 @@
         %{
           source_name: "parseLong",
           reference_id: :long_parse_long,
-          classification: :admitted,
-          legacy_binding: :"parse-long"
+          classification: :admitted
         }
       ]
     },
@@ -2289,10 +2282,10 @@
         status: :supported,
         description: "Parse string to double",
         notes:
-          "BUG GAP-J01: currently aliases parse-double, returns nil on invalid input, and rejects surrounding whitespace that Java accepts.",
+          "Matches Java parsing, including bounded NumberFormatException/NullPointerException failures, surrounding Java whitespace, hexadecimal syntax, and exact double rounding.",
         reference_id: :double_parse_double,
         jvm_descriptor_attestations: %{double_parse_double_string: "(Ljava/lang/String;)D"},
-        admitted_overload_divergences: %{double_parse_double_string: ["GAP-J01"]},
+        admitted_overload_divergences: %{double_parse_double_string: []},
         target_id: :java_lang_double_audit_double_parsedouble
       },
       %{
@@ -2365,10 +2358,10 @@
         status: :supported,
         description: "Parse string to float",
         notes:
-          "BUG GAP-J01: currently aliases parse-double, returns nil on invalid input, and rejects surrounding whitespace that Java accepts. PTC-Lisp uses one floating type.",
+          "Matches Java parsing, including bounded NumberFormatException/NullPointerException failures, surrounding Java whitespace, hexadecimal syntax, and exact float rounding.",
         reference_id: :float_parse_float,
         jvm_descriptor_attestations: %{float_parse_float_string: "(Ljava/lang/String;)F"},
-        admitted_overload_divergences: %{float_parse_float_string: ["GAP-J01"]},
+        admitted_overload_divergences: %{float_parse_float_string: []},
         target_id: :java_lang_float_audit_float_parsefloat
       },
       %{
@@ -2411,10 +2404,10 @@
         status: :supported,
         description: "Parse string to integer",
         notes:
-          "BUG GAP-J01: currently aliases parse-long, returns nil on invalid input, and accepts values outside Java int range; Java raises NumberFormatException. BUG GAP-J15: radix overload is unsupported.",
+          "Matches Java decimal parsing and int range failures. BUG GAP-J15: radix overload is unsupported.",
         reference_id: :integer_parse_int,
         jvm_descriptor_attestations: %{integer_parse_int_string: "(Ljava/lang/String;)I"},
-        admitted_overload_divergences: %{integer_parse_int_string: ["GAP-J01"]},
+        admitted_overload_divergences: %{integer_parse_int_string: []},
         target_id: :java_lang_integer_audit_integer_parseint
       },
       %{
@@ -2456,10 +2449,10 @@
         status: :supported,
         description: "Parse string to integer",
         notes:
-          "BUG GAP-J01: currently aliases parse-long, returns nil on invalid input, and accepts values outside Java long range; Java raises NumberFormatException. BUG GAP-J15: radix overload is unsupported.",
+          "Matches Java decimal parsing and long range failures. BUG GAP-J15: radix overload is unsupported.",
         reference_id: :long_parse_long,
         jvm_descriptor_attestations: %{long_parse_long_string: "(Ljava/lang/String;)J"},
-        admitted_overload_divergences: %{long_parse_long_string: ["GAP-J01"]},
+        admitted_overload_divergences: %{long_parse_long_string: []},
         target_id: :java_lang_long_audit_long_parselong
       },
       %{
@@ -3199,7 +3192,7 @@
       name: "Double/POSITIVE_INFINITY",
       description: "Positive infinity constant (##Inf)",
       kind: :constant,
-      signatures: ["Double/POSITIVE_INFINITY", "POSITIVE_INFINITY"],
+      signatures: ["Double/POSITIVE_INFINITY"],
       notes: "",
       class: "java.lang.Double",
       reference_ids: [:double_positive_infinity]
@@ -3210,7 +3203,7 @@
       kind: :static,
       signatures: ["(Double/parseDouble s)"],
       notes:
-        "Compatibility alias for `(parse-double s)`. Invalid or non-string input returns nil instead of throwing.",
+        "Uses Java syntax, whitespace, range, rounding, and bounded NumberFormatException/NullPointerException semantics.",
       class: "java.lang.Double",
       reference_ids: [:double_parse_double]
     },
@@ -3218,7 +3211,7 @@
       name: "Double/NEGATIVE_INFINITY",
       description: "Negative infinity constant (##-Inf)",
       kind: :constant,
-      signatures: ["Double/NEGATIVE_INFINITY", "NEGATIVE_INFINITY"],
+      signatures: ["Double/NEGATIVE_INFINITY"],
       notes: "",
       class: "java.lang.Double",
       reference_ids: [:double_negative_infinity]
@@ -3227,7 +3220,7 @@
       name: "Double/NaN",
       description: "Not-a-Number constant (##NaN)",
       kind: :constant,
-      signatures: ["Double/NaN", "NaN"],
+      signatures: ["Double/NaN"],
       notes: "",
       class: "java.lang.Double",
       reference_ids: [:double_nan]
@@ -3238,7 +3231,7 @@
       kind: :static,
       signatures: ["(Float/parseFloat s)"],
       notes:
-        "Compatibility alias for `(parse-double s)`; PTC-Lisp uses one floating type. Invalid or non-string input returns nil instead of throwing.",
+        "Uses Java syntax, whitespace, range, direct float rounding, and bounded NumberFormatException/NullPointerException semantics.",
       class: "java.lang.Float",
       reference_ids: [:float_parse_float]
     },
@@ -3248,7 +3241,7 @@
       kind: :static,
       signatures: ["(Integer/parseInt s)"],
       notes:
-        "Compatibility alias for `(parse-long s)`. Invalid or non-string input returns nil instead of throwing.",
+        "Uses Java decimal syntax, int range checks, and bounded NumberFormatException semantics.",
       class: "java.lang.Integer",
       reference_ids: [:integer_parse_int]
     },
@@ -3258,7 +3251,7 @@
       kind: :static,
       signatures: ["(Long/parseLong s)"],
       notes:
-        "Compatibility alias for `(parse-long s)`. Invalid or non-string input returns nil instead of throwing.",
+        "Uses Java decimal syntax, long range checks, and bounded NumberFormatException semantics.",
       class: "java.lang.Long",
       reference_ids: [:long_parse_long]
     },
@@ -3640,57 +3633,6 @@
       divergences: nil
     },
     %{
-      name: "NEGATIVE_INFINITY",
-      description: "Negative infinity constant (Double/NEGATIVE_INFINITY)",
-      binding: :constant,
-      reference_ids: [:double_negative_infinity],
-      category: :interop,
-      dispatch: :env,
-      signatures: ["NEGATIVE_INFINITY"],
-      since: nil,
-      examples: [],
-      notes: nil,
-      section: "Interop",
-      ptc_extension?: false,
-      see_also: [],
-      clojure_var: "NEGATIVE_INFINITY",
-      divergences: nil
-    },
-    %{
-      name: "NaN",
-      description: "Not-a-Number constant (Double/NaN)",
-      binding: :constant,
-      reference_ids: [:double_nan],
-      category: :interop,
-      dispatch: :env,
-      signatures: ["NaN"],
-      since: nil,
-      examples: [],
-      notes: nil,
-      section: "Interop",
-      ptc_extension?: false,
-      see_also: [],
-      clojure_var: "NaN",
-      divergences: nil
-    },
-    %{
-      name: "POSITIVE_INFINITY",
-      description: "Positive infinity constant (Double/POSITIVE_INFINITY)",
-      binding: :constant,
-      reference_ids: [:double_positive_infinity],
-      category: :interop,
-      dispatch: :env,
-      signatures: ["POSITIVE_INFINITY"],
-      since: nil,
-      examples: [],
-      notes: nil,
-      section: "Interop",
-      ptc_extension?: false,
-      see_also: [],
-      clojure_var: "POSITIVE_INFINITY",
-      divergences: nil
-    },
-    %{
       name: "currentTimeMillis",
       description: "Return current time in milliseconds since epoch",
       binding: :normal,
@@ -3748,6 +3690,130 @@
       section: "Interop",
       ptc_extension?: false,
       see_also: ["parse-boolean"],
+      clojure_var: nil,
+      divergences: nil
+    },
+    %{
+      name: "Double/parseDouble",
+      description: "Java-compatible double parser",
+      binding: :normal,
+      reference_ids: [:double_parse_double],
+      category: :interop,
+      dispatch: :java,
+      signatures: ["(Double/parseDouble s)"],
+      since: nil,
+      examples: [
+        {"(Double/parseDouble \"1.5\")", "1.5"},
+        {"(Double/parseDouble \"0x1.8p0\")", "1.5"}
+      ],
+      notes:
+        "Matches Java syntax, whitespace, range, rounding, and bounded NumberFormatException/NullPointerException semantics.",
+      section: "Interop",
+      ptc_extension?: false,
+      see_also: ["parse-double"],
+      clojure_var: nil,
+      divergences: nil
+    },
+    %{
+      name: "Double/POSITIVE_INFINITY",
+      description: "Java positive-infinity double field",
+      binding: :normal,
+      reference_ids: [:double_positive_infinity],
+      category: :interop,
+      dispatch: :java,
+      signatures: ["Double/POSITIVE_INFINITY"],
+      since: nil,
+      examples: [],
+      notes: nil,
+      section: "Interop",
+      ptc_extension?: false,
+      see_also: [],
+      clojure_var: nil,
+      divergences: nil
+    },
+    %{
+      name: "Double/NEGATIVE_INFINITY",
+      description: "Java negative-infinity double field",
+      binding: :normal,
+      reference_ids: [:double_negative_infinity],
+      category: :interop,
+      dispatch: :java,
+      signatures: ["Double/NEGATIVE_INFINITY"],
+      since: nil,
+      examples: [],
+      notes: nil,
+      section: "Interop",
+      ptc_extension?: false,
+      see_also: [],
+      clojure_var: nil,
+      divergences: nil
+    },
+    %{
+      name: "Double/NaN",
+      description: "Java not-a-number double field",
+      binding: :normal,
+      reference_ids: [:double_nan],
+      category: :interop,
+      dispatch: :java,
+      signatures: ["Double/NaN"],
+      since: nil,
+      examples: [],
+      notes: nil,
+      section: "Interop",
+      ptc_extension?: false,
+      see_also: [],
+      clojure_var: nil,
+      divergences: nil
+    },
+    %{
+      name: "Float/parseFloat",
+      description: "Java-compatible float parser",
+      binding: :normal,
+      reference_ids: [:float_parse_float],
+      category: :interop,
+      dispatch: :java,
+      signatures: ["(Float/parseFloat s)"],
+      since: nil,
+      examples: [{"(Float/parseFloat \"1.5\")", "1.5"}],
+      notes:
+        "Matches Java syntax, whitespace, range, direct float rounding, and bounded NumberFormatException/NullPointerException semantics.",
+      section: "Interop",
+      ptc_extension?: false,
+      see_also: ["parse-double"],
+      clojure_var: nil,
+      divergences: nil
+    },
+    %{
+      name: "Integer/parseInt",
+      description: "Java-compatible decimal int parser",
+      binding: :normal,
+      reference_ids: [:integer_parse_int],
+      category: :interop,
+      dispatch: :java,
+      signatures: ["(Integer/parseInt s)"],
+      since: nil,
+      examples: [{"(Integer/parseInt \"42\")", "42"}],
+      notes: "Matches Java decimal syntax, int range, and bounded NumberFormatException semantics.",
+      section: "Interop",
+      ptc_extension?: false,
+      see_also: ["parse-long"],
+      clojure_var: nil,
+      divergences: nil
+    },
+    %{
+      name: "Long/parseLong",
+      description: "Java-compatible decimal long parser",
+      binding: :normal,
+      reference_ids: [:long_parse_long],
+      category: :interop,
+      dispatch: :java,
+      signatures: ["(Long/parseLong s)"],
+      since: nil,
+      examples: [{"(Long/parseLong \"42\")", "42"}],
+      notes: "Matches Java decimal syntax, long range, and bounded NumberFormatException semantics.",
+      section: "Interop",
+      ptc_extension?: false,
+      see_also: ["parse-long"],
       clojure_var: nil,
       divergences: nil
     },

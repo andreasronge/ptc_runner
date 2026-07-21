@@ -55,8 +55,11 @@ defmodule PtcRunner.Lisp.Java.DispatchTest do
       assert {:ok, %Callable{reference_id: :boolean_parse_boolean}} =
                Callable.new(:boolean_parse_boolean)
 
-      assert :error = Callable.new(:double_parse_double)
-      refute Callable.valid?(%Callable{reference_id: :double_parse_double})
+      assert {:ok, %Callable{reference_id: :double_parse_double}} =
+               Callable.new(:double_parse_double)
+
+      assert :error = Callable.new(:math_abs)
+      refute Callable.valid?(%Callable{reference_id: :math_abs})
     end
 
     test "reports the selected manifest overload without exposing it as Lisp data" do

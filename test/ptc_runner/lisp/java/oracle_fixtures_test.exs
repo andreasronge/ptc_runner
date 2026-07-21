@@ -74,9 +74,54 @@ defmodule PtcRunner.Lisp.Java.OracleFixturesTest do
   end
 
   test "closed dispatch cases attest the selected PTC overload" do
-    assert {:ok, %{outcomes: [outcome]}} = Runner.run(:ptc, :closed_dispatch)
-    assert outcome.overload_id == "boolean_parse_boolean_string"
-    assert outcome.selected_overload_id == outcome.overload_id
+    assert {:ok, %{outcomes: outcomes}} = Runner.run(:ptc, :closed_dispatch)
+
+    assert MapSet.new(outcomes, & &1.case_id) ==
+             MapSet.new(~w(
+                 boolean-parse-boolean-string
+                 double-parse-double-string
+                 double-parse-double-string-direct-rounding
+                 double-parse-double-string-max-finite
+                 double-parse-double-string-overflow-tie
+                 double-parse-double-string-underflow-tie
+                 double-parse-double-string-subnormal
+                 double-parse-double-string-signed-zero-whitespace-suffix
+                 double-parse-double-string-zero-padded-decimal-exponent
+                 double-parse-double-string-zero-padded-hex-negative-exponent
+                 double-parse-double-string-large-exponent-cancellation
+                 double-parse-double-string-negative-infinity
+                 double-parse-double-string-signed-nan
+                 double-parse-double-string-invalid
+                 double-parse-double-string-null
+                 double-positive-infinity-field
+                 double-negative-infinity-field
+                 double-nan-field
+                 float-parse-float-string
+                 float-parse-float-string-direct-rounding
+                 float-parse-float-string-max-finite
+                 float-parse-float-string-overflow-tie
+                 float-parse-float-string-underflow-tie
+                 float-parse-float-string-subnormal
+                 float-parse-float-string-signed-zero-whitespace-suffix
+                 float-parse-float-string-zero-padded-decimal-exponent
+                 float-parse-float-string-zero-padded-hex-negative-exponent
+                 float-parse-float-string-positive-infinity
+                 float-parse-float-string-signed-nan
+                 float-parse-float-string-invalid
+                 float-parse-float-string-null
+                 integer-parse-int-string
+                 integer-parse-int-string-min-value
+                 integer-parse-int-string-overflow
+                 integer-parse-int-string-null
+                 integer-parse-int-string-unicode-digits
+                 long-parse-long-string
+                 long-parse-long-string-min-value
+                 long-parse-long-string-underflow
+                 long-parse-long-string-null
+                 long-parse-long-string-unicode-digits
+               ))
+
+    assert Enum.all?(outcomes, &(&1.selected_overload_id == &1.overload_id))
   end
 
   test "dispatch attestation ignores unrelated Java references" do
@@ -147,6 +192,58 @@ defmodule PtcRunner.Lisp.Java.OracleFixturesTest do
 
     assert_raise ArgumentError, ~r/provenance/, fn ->
       Fixtures.validate_baseline!(invalid_baseline, fixtures, Surface.manifest())
+    end
+  end
+
+  test "fixture validation bounds compact repeated string expansion" do
+    fixtures = Fixtures.cases()
+    fixture = Enum.find(fixtures, &(&1.overload_id == :double_parse_double_string))
+
+    oversized =
+      put_in(fixture, [:invocation, :arguments], [
+        %{
+          type: :string,
+          value: %{
+            "encoding" => "repeat",
+            "prefix" => "",
+            "repeated" => "",
+            "count" => 256_001,
+            "suffix" => ""
+          }
+        }
+      ])
+
+    assert_raise ArgumentError, ~r/invalid or oversized repeated string encoding/, fn ->
+      Fixtures.validate_cases!(
+        [oversized | List.delete(fixtures, fixture)],
+        Surface.manifest()
+      )
+    end
+  end
+
+  test "fixture validation rejects malformed compact string encodings" do
+    fixtures = Fixtures.cases()
+    fixture = Enum.find(fixtures, &(&1.overload_id == :double_parse_double_string))
+
+    for value <- [
+          %{"encoding" => "repeat", "prefix" => "", "repeated" => "1", "count" => 1},
+          %{
+            "encoding" => "unknown",
+            "prefix" => "",
+            "repeated" => "1",
+            "count" => 1,
+            "suffix" => ""
+          },
+          1
+        ] do
+      invalid = put_in(fixture, [:invocation, :arguments], [%{type: :string, value: value}])
+
+      assert_raise ArgumentError, ~r/invalid string value/, fn ->
+        Fixtures.validate_cases!(
+          [invalid | List.delete(fixtures, fixture)],
+          Surface.manifest()
+        )
+      end
     end
   end
 

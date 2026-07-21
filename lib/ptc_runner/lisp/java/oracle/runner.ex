@@ -8,14 +8,18 @@ defmodule PtcRunner.Lisp.Java.Oracle.Runner do
   results never count as authoritative descriptor coverage.
   """
 
+  import Bitwise
+
   alias PtcRunner.Lisp.ClojureValidator
   alias PtcRunner.Lisp.Java.Oracle.ClojureRuntime
   alias PtcRunner.Lisp.Java.Oracle.Config
   alias PtcRunner.Lisp.Java.Oracle.Fixtures
   alias PtcRunner.Lisp.Java.Oracle.Subprocess
+  alias PtcRunner.Lisp.Java.Primitive
   alias PtcRunner.Lisp.Java.Surface
 
   @source_limit 256_000
+  @expanded_string_limit 256_000
   @timeout_ms 30_000
   @output_limit 1_000_000
   @result_value_limit 16_384
@@ -406,6 +410,25 @@ defmodule PtcRunner.Lisp.Java.Oracle.Runner do
     Map.put(context, "receiver", decode_ptc_value(receiver))
   end
 
+  defp decode_ptc_value(%{
+         type: :string,
+         value: %{
+           "encoding" => "repeat",
+           "prefix" => prefix,
+           "repeated" => repeated,
+           "count" => count,
+           "suffix" => suffix
+         }
+       })
+       when is_binary(prefix) and is_binary(repeated) and is_integer(count) and count >= 0 and
+              is_binary(suffix) do
+    expanded_bytes = byte_size(prefix) + byte_size(repeated) * count + byte_size(suffix)
+
+    if count <= @expanded_string_limit and expanded_bytes <= @expanded_string_limit,
+      do: prefix <> String.duplicate(repeated, count) <> suffix,
+      else: raise(ArgumentError, "oversized repeated Java oracle string")
+  end
+
   defp decode_ptc_value(%{type: :string, value: value}), do: value
   defp decode_ptc_value(%{type: type, value: value}) when type in [:int, :long], do: value
   defp decode_ptc_value(%{type: type, value: value}) when type in [:float, :double], do: value
@@ -439,17 +462,85 @@ defmodule PtcRunner.Lisp.Java.Oracle.Runner do
       overload_id: Atom.to_string(fixture.overload_id),
       descriptor: overload.descriptor,
       status: "error",
-      expected: %{status: :error, type: :error, value: Atom.to_string(step.fail.reason)}
+      expected: %{
+        status: :error,
+        type: :error,
+        value: canonical_ptc_error(step.fail)
+      }
     }
   end
 
   defp canonical_ptc_value(:boolean, value) when is_boolean(value), do: to_string(value)
+
+  defp canonical_ptc_value(type, %Primitive{kind: type, value: value})
+       when type in [:int, :long],
+       do: Integer.to_string(value)
+
+  defp canonical_ptc_value(type, %Primitive{kind: type, value: value})
+       when type in [:float, :double],
+       do: canonical_float(type, value)
 
   defp canonical_ptc_value(type, value) when type in [:int, :long] and is_integer(value),
     do: Integer.to_string(value)
 
   defp canonical_ptc_value(:date, %DateTime{} = value),
     do: value |> DateTime.to_unix(:millisecond) |> Integer.to_string()
+
+  defp canonical_ptc_error(%{details: %{java_exception: :number_format_exception}}),
+    do: "java.lang.NumberFormatException"
+
+  defp canonical_ptc_error(%{details: %{java_exception: :null_pointer_exception}}),
+    do: "java.lang.NullPointerException"
+
+  defp canonical_ptc_error(%{reason: reason}), do: Atom.to_string(reason)
+
+  defp canonical_float(_kind, :infinity), do: "Infinity"
+  defp canonical_float(_kind, :negative_infinity), do: "-Infinity"
+  defp canonical_float(_kind, :nan), do: "NaN"
+
+  defp canonical_float(:double, value) do
+    <<bits::unsigned-64>> = <<value::float-64>>
+    sign = if bits >>> 63 == 1, do: "-", else: ""
+    exponent = bits >>> 52 &&& 0x7FF
+    fraction = bits &&& 0xFFFFFFFFFFFFF
+    canonical_finite_float(sign, exponent, fraction, 1023, 52)
+  end
+
+  defp canonical_float(:float, value) do
+    <<bits::unsigned-32>> = <<value::float-32>>
+    sign = if bits >>> 31 == 1, do: "-", else: ""
+    exponent = bits >>> 23 &&& 0xFF
+    fraction = (bits &&& 0x7FFFFF) <<< 1
+    canonical_finite_float(sign, exponent, fraction, 127, 24)
+  end
+
+  defp canonical_finite_float(sign, 0, 0, _bias, _fraction_bits), do: sign <> "0x0.0p0"
+
+  defp canonical_finite_float(sign, 0, fraction, bias, fraction_bits) do
+    sign <> "0x0." <> hexadecimal_fraction(fraction, fraction_bits) <> "p" <> to_string(1 - bias)
+  end
+
+  defp canonical_finite_float(sign, exponent, fraction, bias, fraction_bits) do
+    sign <>
+      "0x1." <>
+      hexadecimal_fraction(fraction, fraction_bits) <>
+      "p" <>
+      to_string(exponent - bias)
+  end
+
+  defp hexadecimal_fraction(fraction, fraction_bits) do
+    width = div(fraction_bits + 3, 4)
+
+    fraction
+    |> Integer.to_string(16)
+    |> String.downcase()
+    |> String.pad_leading(width, "0")
+    |> String.trim_trailing("0")
+    |> case do
+      "" -> "0"
+      digits -> digits
+    end
+  end
 
   defp case_specs(cases) do
     overloads = Map.new(Surface.overloads(), &{&1.overload_id, &1})
@@ -598,12 +689,47 @@ defmodule PtcRunner.Lisp.Java.Oracle.Runner do
           (throw (NoSuchFieldException. (str (.getName klass) "." member " " descriptor))))
         field))
 
+    (def repeat-encoding-keys
+      \#{"encoding" "prefix" "repeated" "count" "suffix"})
+
+    (defn utf8-size [^String value]
+      (alength (.getBytes value "UTF-8")))
+
+    (defn valid-repeat-encoding? [raw]
+      (let [prefix (get raw "prefix")
+            repeated (get raw "repeated")
+            repetitions (get raw "count")
+            suffix (get raw "suffix")]
+        (and (= repeat-encoding-keys (set (keys raw)))
+             (= "repeat" (get raw "encoding"))
+             (string? prefix)
+             (string? repeated)
+             (integer? repetitions)
+             (<= 0 repetitions #{@expanded_string_limit})
+             (string? suffix)
+             (<= (+' (utf8-size prefix)
+                      (*' (utf8-size repeated) repetitions)
+                      (utf8-size suffix))
+                 #{@expanded_string_limit}))))
+
+    (defn decode-string [raw]
+      (if (map? raw)
+        (if (valid-repeat-encoding? raw)
+          (let [^StringBuilder builder (StringBuilder.)]
+            (.append builder (get raw "prefix"))
+            (dotimes [_ (get raw "count")]
+              (.append builder (get raw "repeated")))
+            (.append builder (get raw "suffix"))
+            (.toString builder))
+          (throw (IllegalArgumentException. "invalid repeated string encoding")))
+        raw))
+
     (defn decode-value [value]
       (when value
         (let [type (get value "type")
               raw (get value "value")]
           (case type
-            "string" raw
+            "string" (decode-string raw)
             "int" (Integer/valueOf (str raw))
             "long" (Long/valueOf (str raw))
             "float" (Float/valueOf (str raw))

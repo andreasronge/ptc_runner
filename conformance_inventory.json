@@ -4428,7 +4428,7 @@
     "symbol": "Double/parseDouble",
     "namespace": "java.lang.Double",
     "compatibility_target": "Java",
-    "notes": "BUG GAP-J01: currently aliases parse-double, returns nil on invalid input, and rejects surrounding whitespace that Java accepts."
+    "notes": "Matches Java parsing, including bounded NumberFormatException/NullPointerException failures, surrounding Java whitespace, hexadecimal syntax, and exact double rounding."
   },
   {
     "status": "supported",
@@ -4484,7 +4484,7 @@
     "symbol": "Float/parseFloat",
     "namespace": "java.lang.Float",
     "compatibility_target": "Java",
-    "notes": "BUG GAP-J01: currently aliases parse-double, returns nil on invalid input, and rejects surrounding whitespace that Java accepts. PTC-Lisp uses one floating type."
+    "notes": "Matches Java parsing, including bounded NumberFormatException/NullPointerException failures, surrounding Java whitespace, hexadecimal syntax, and exact float rounding."
   },
   {
     "status": "candidate",
@@ -4519,7 +4519,7 @@
     "symbol": "Integer/parseInt",
     "namespace": "java.lang.Integer",
     "compatibility_target": "Java",
-    "notes": "BUG GAP-J01: currently aliases parse-long, returns nil on invalid input, and accepts values outside Java int range; Java raises NumberFormatException. BUG GAP-J15: radix overload is unsupported."
+    "notes": "Matches Java decimal parsing and int range failures. BUG GAP-J15: radix overload is unsupported."
   },
   {
     "status": "candidate",
@@ -4554,7 +4554,7 @@
     "symbol": "Long/parseLong",
     "namespace": "java.lang.Long",
     "compatibility_target": "Java",
-    "notes": "BUG GAP-J01: currently aliases parse-long, returns nil on invalid input, and accepts values outside Java long range; Java raises NumberFormatException. BUG GAP-J15: radix overload is unsupported."
+    "notes": "Matches Java decimal parsing and long range failures. BUG GAP-J15: radix overload is unsupported."
   },
   {
     "status": "candidate",

@@ -34,6 +34,17 @@ ptc_only = fn overload_id, receiver, arguments, expected, divergence_ids ->
 end
 
 string = fn text -> value.(:string, text) end
+
+repeated_string = fn prefix, repeated, count, suffix ->
+  value.(:string, %{
+    "encoding" => "repeat",
+    "prefix" => prefix,
+    "repeated" => repeated,
+    "count" => count,
+    "suffix" => suffix
+  })
+end
+
 int = fn number -> value.(:int, number) end
 long = fn number -> value.(:long, number) end
 float = fn number -> value.(:float, number) end
@@ -50,16 +61,112 @@ date = fn milliseconds -> value.(:date, milliseconds) end
     nil,
     [string.("1.5")],
     value.(:double, "0x1.8p0"),
-    ["GAP-J01"]
+    []
   ),
+  jvm.(
+    :double_parse_double_string,
+    nil,
+    [string.("11.760000")],
+    value.(:double, "0x1.7851eb851eb85p3"),
+    []
+  )
+  |> Map.put(:case_id, "double-parse-double-string-direct-rounding"),
+  jvm.(
+    :double_parse_double_string,
+    nil,
+    [string.("1.7976931348623157e308")],
+    value.(:double, "0x1.fffffffffffffp1023"),
+    []
+  )
+  |> Map.put(:case_id, "double-parse-double-string-max-finite"),
+  jvm.(
+    :double_parse_double_string,
+    nil,
+    [string.("0x1.fffffffffffff8p1023")],
+    value.(:double, "Infinity"),
+    []
+  )
+  |> Map.put(:case_id, "double-parse-double-string-overflow-tie"),
+  jvm.(
+    :double_parse_double_string,
+    nil,
+    [string.("0x0.00000000000008p-1022")],
+    value.(:double, "0x0.0p0"),
+    []
+  )
+  |> Map.put(:case_id, "double-parse-double-string-underflow-tie"),
+  jvm.(
+    :double_parse_double_string,
+    nil,
+    [string.("0x0.0000000000001p-1022")],
+    value.(:double, "0x0.0000000000001p-1022"),
+    []
+  )
+  |> Map.put(:case_id, "double-parse-double-string-subnormal"),
+  jvm.(
+    :double_parse_double_string,
+    nil,
+    [string.(" -0.0D ")],
+    value.(:double, "-0x0.0p0"),
+    []
+  )
+  |> Map.put(:case_id, "double-parse-double-string-signed-zero-whitespace-suffix"),
+  jvm.(
+    :double_parse_double_string,
+    nil,
+    [string.("1e0000001")],
+    value.(:double, "0x1.4p3"),
+    []
+  )
+  |> Map.put(:case_id, "double-parse-double-string-zero-padded-decimal-exponent"),
+  jvm.(
+    :double_parse_double_string,
+    nil,
+    [string.("0x1p-0000001")],
+    value.(:double, "0x1.0p-1"),
+    []
+  )
+  |> Map.put(:case_id, "double-parse-double-string-zero-padded-hex-negative-exponent"),
+  jvm.(
+    :double_parse_double_string,
+    nil,
+    [repeated_string.("0x0.", "0", 250_000, "1p1000004")],
+    value.(:double, "0x1.0p0"),
+    []
+  )
+  |> Map.put(:case_id, "double-parse-double-string-large-exponent-cancellation"),
+  jvm.(
+    :double_parse_double_string,
+    nil,
+    [string.("-Infinity")],
+    value.(:double, "-Infinity"),
+    []
+  )
+  |> Map.put(:case_id, "double-parse-double-string-negative-infinity"),
+  jvm.(
+    :double_parse_double_string,
+    nil,
+    [string.("+NaN")],
+    value.(:double, "NaN"),
+    []
+  )
+  |> Map.put(:case_id, "double-parse-double-string-signed-nan"),
   jvm.(
     :double_parse_double_string,
     nil,
     [string.("not-a-double")],
     error.("java.lang.NumberFormatException"),
-    ["GAP-J01"]
+    []
   )
   |> Map.put(:case_id, "double-parse-double-string-invalid"),
+  jvm.(
+    :double_parse_double_string,
+    nil,
+    [string.(nil)],
+    error.("java.lang.NullPointerException"),
+    []
+  )
+  |> Map.put(:case_id, "double-parse-double-string-null"),
   jvm.(:double_positive_infinity_field, nil, [], value.(:double, "Infinity"), []),
   jvm.(:double_negative_infinity_field, nil, [], value.(:double, "-Infinity"), []),
   jvm.(:double_nan_field, nil, [], value.(:double, "NaN"), []),
@@ -68,22 +175,182 @@ date = fn milliseconds -> value.(:date, milliseconds) end
     nil,
     [string.("1.5")],
     value.(:float, "0x1.8p0"),
-    ["GAP-J01"]
+    []
   ),
+  jvm.(
+    :float_parse_float_string,
+    nil,
+    [string.("11.760000")],
+    value.(:float, "0x1.7851ecp3"),
+    []
+  )
+  |> Map.put(:case_id, "float-parse-float-string-direct-rounding"),
+  jvm.(
+    :float_parse_float_string,
+    nil,
+    [string.("3.4028235e38f")],
+    value.(:float, "0x1.fffffep127"),
+    []
+  )
+  |> Map.put(:case_id, "float-parse-float-string-max-finite"),
+  jvm.(
+    :float_parse_float_string,
+    nil,
+    [string.("0x1.ffffffp127f")],
+    value.(:float, "Infinity"),
+    []
+  )
+  |> Map.put(:case_id, "float-parse-float-string-overflow-tie"),
+  jvm.(
+    :float_parse_float_string,
+    nil,
+    [string.("0x0.000001p-126f")],
+    value.(:float, "0x0.0p0"),
+    []
+  )
+  |> Map.put(:case_id, "float-parse-float-string-underflow-tie"),
+  jvm.(
+    :float_parse_float_string,
+    nil,
+    [string.("1.4e-45")],
+    value.(:float, "0x0.000002p-126"),
+    []
+  )
+  |> Map.put(:case_id, "float-parse-float-string-subnormal"),
+  jvm.(
+    :float_parse_float_string,
+    nil,
+    [string.(" -0.0F ")],
+    value.(:float, "-0x0.0p0"),
+    []
+  )
+  |> Map.put(:case_id, "float-parse-float-string-signed-zero-whitespace-suffix"),
+  jvm.(
+    :float_parse_float_string,
+    nil,
+    [string.("1e0000001")],
+    value.(:float, "0x1.4p3"),
+    []
+  )
+  |> Map.put(:case_id, "float-parse-float-string-zero-padded-decimal-exponent"),
+  jvm.(
+    :float_parse_float_string,
+    nil,
+    [string.("0x1p-0000001")],
+    value.(:float, "0x1.0p-1"),
+    []
+  )
+  |> Map.put(:case_id, "float-parse-float-string-zero-padded-hex-negative-exponent"),
+  jvm.(
+    :float_parse_float_string,
+    nil,
+    [string.("+Infinity")],
+    value.(:float, "Infinity"),
+    []
+  )
+  |> Map.put(:case_id, "float-parse-float-string-positive-infinity"),
+  jvm.(
+    :float_parse_float_string,
+    nil,
+    [string.("-NaN")],
+    value.(:float, "NaN"),
+    []
+  )
+  |> Map.put(:case_id, "float-parse-float-string-signed-nan"),
+  jvm.(
+    :float_parse_float_string,
+    nil,
+    [string.("")],
+    error.("java.lang.NumberFormatException"),
+    []
+  )
+  |> Map.put(:case_id, "float-parse-float-string-invalid"),
+  jvm.(
+    :float_parse_float_string,
+    nil,
+    [string.(nil)],
+    error.("java.lang.NullPointerException"),
+    []
+  )
+  |> Map.put(:case_id, "float-parse-float-string-null"),
   jvm.(
     :integer_parse_int_string,
     nil,
     [string.("-42")],
     value.(:int, "-42"),
-    ["GAP-J01"]
+    []
   ),
+  jvm.(
+    :integer_parse_int_string,
+    nil,
+    [string.("-2147483648")],
+    value.(:int, "-2147483648"),
+    []
+  )
+  |> Map.put(:case_id, "integer-parse-int-string-min-value"),
+  jvm.(
+    :integer_parse_int_string,
+    nil,
+    [string.("2147483648")],
+    error.("java.lang.NumberFormatException"),
+    []
+  )
+  |> Map.put(:case_id, "integer-parse-int-string-overflow"),
+  jvm.(
+    :integer_parse_int_string,
+    nil,
+    [string.(nil)],
+    error.("java.lang.NumberFormatException"),
+    []
+  )
+  |> Map.put(:case_id, "integer-parse-int-string-null"),
+  jvm.(
+    :integer_parse_int_string,
+    nil,
+    [string.("١٢")],
+    value.(:int, "12"),
+    []
+  )
+  |> Map.put(:case_id, "integer-parse-int-string-unicode-digits"),
   jvm.(
     :long_parse_long_string,
     nil,
     [string.("9223372036854775807")],
     value.(:long, "9223372036854775807"),
-    ["GAP-J01"]
+    []
   ),
+  jvm.(
+    :long_parse_long_string,
+    nil,
+    [string.("-9223372036854775808")],
+    value.(:long, "-9223372036854775808"),
+    []
+  )
+  |> Map.put(:case_id, "long-parse-long-string-min-value"),
+  jvm.(
+    :long_parse_long_string,
+    nil,
+    [string.("-9223372036854775809")],
+    error.("java.lang.NumberFormatException"),
+    []
+  )
+  |> Map.put(:case_id, "long-parse-long-string-underflow"),
+  jvm.(
+    :long_parse_long_string,
+    nil,
+    [string.(nil)],
+    error.("java.lang.NumberFormatException"),
+    []
+  )
+  |> Map.put(:case_id, "long-parse-long-string-null"),
+  jvm.(
+    :long_parse_long_string,
+    nil,
+    [string.("１２")],
+    value.(:long, "12"),
+    []
+  )
+  |> Map.put(:case_id, "long-parse-long-string-unicode-digits"),
   jvm.(
     :system_current_time_millis_0,
     nil,

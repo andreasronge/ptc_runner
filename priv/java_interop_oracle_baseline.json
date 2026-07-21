@@ -46,6 +46,116 @@
       }
     },
     {
+      "case_id": "double-parse-double-string-direct-rounding",
+      "overload_id": "double_parse_double_string",
+      "descriptor": "(Ljava/lang/String;)D",
+      "expected": {
+        "status": "ok",
+        "type": "double",
+        "value": "0x1.7851eb851eb85p3"
+      }
+    },
+    {
+      "case_id": "double-parse-double-string-max-finite",
+      "overload_id": "double_parse_double_string",
+      "descriptor": "(Ljava/lang/String;)D",
+      "expected": {
+        "status": "ok",
+        "type": "double",
+        "value": "0x1.fffffffffffffp1023"
+      }
+    },
+    {
+      "case_id": "double-parse-double-string-overflow-tie",
+      "overload_id": "double_parse_double_string",
+      "descriptor": "(Ljava/lang/String;)D",
+      "expected": {
+        "status": "ok",
+        "type": "double",
+        "value": "Infinity"
+      }
+    },
+    {
+      "case_id": "double-parse-double-string-underflow-tie",
+      "overload_id": "double_parse_double_string",
+      "descriptor": "(Ljava/lang/String;)D",
+      "expected": {
+        "status": "ok",
+        "type": "double",
+        "value": "0x0.0p0"
+      }
+    },
+    {
+      "case_id": "double-parse-double-string-subnormal",
+      "overload_id": "double_parse_double_string",
+      "descriptor": "(Ljava/lang/String;)D",
+      "expected": {
+        "status": "ok",
+        "type": "double",
+        "value": "0x0.0000000000001p-1022"
+      }
+    },
+    {
+      "case_id": "double-parse-double-string-signed-zero-whitespace-suffix",
+      "overload_id": "double_parse_double_string",
+      "descriptor": "(Ljava/lang/String;)D",
+      "expected": {
+        "status": "ok",
+        "type": "double",
+        "value": "-0x0.0p0"
+      }
+    },
+    {
+      "case_id": "double-parse-double-string-zero-padded-decimal-exponent",
+      "overload_id": "double_parse_double_string",
+      "descriptor": "(Ljava/lang/String;)D",
+      "expected": {
+        "status": "ok",
+        "type": "double",
+        "value": "0x1.4p3"
+      }
+    },
+    {
+      "case_id": "double-parse-double-string-zero-padded-hex-negative-exponent",
+      "overload_id": "double_parse_double_string",
+      "descriptor": "(Ljava/lang/String;)D",
+      "expected": {
+        "status": "ok",
+        "type": "double",
+        "value": "0x1.0p-1"
+      }
+    },
+    {
+      "case_id": "double-parse-double-string-large-exponent-cancellation",
+      "overload_id": "double_parse_double_string",
+      "descriptor": "(Ljava/lang/String;)D",
+      "expected": {
+        "status": "ok",
+        "type": "double",
+        "value": "0x1.0p0"
+      }
+    },
+    {
+      "case_id": "double-parse-double-string-negative-infinity",
+      "overload_id": "double_parse_double_string",
+      "descriptor": "(Ljava/lang/String;)D",
+      "expected": {
+        "status": "ok",
+        "type": "double",
+        "value": "-Infinity"
+      }
+    },
+    {
+      "case_id": "double-parse-double-string-signed-nan",
+      "overload_id": "double_parse_double_string",
+      "descriptor": "(Ljava/lang/String;)D",
+      "expected": {
+        "status": "ok",
+        "type": "double",
+        "value": "NaN"
+      }
+    },
+    {
       "case_id": "double-parse-double-string-invalid",
       "overload_id": "double_parse_double_string",
       "descriptor": "(Ljava/lang/String;)D",
@@ -53,6 +163,16 @@
         "status": "error",
         "type": "error",
         "value": "java.lang.NumberFormatException"
+      }
+    },
+    {
+      "case_id": "double-parse-double-string-null",
+      "overload_id": "double_parse_double_string",
+      "descriptor": "(Ljava/lang/String;)D",
+      "expected": {
+        "status": "error",
+        "type": "error",
+        "value": "java.lang.NullPointerException"
       }
     },
     {
@@ -96,6 +216,126 @@
       }
     },
     {
+      "case_id": "float-parse-float-string-direct-rounding",
+      "overload_id": "float_parse_float_string",
+      "descriptor": "(Ljava/lang/String;)F",
+      "expected": {
+        "status": "ok",
+        "type": "float",
+        "value": "0x1.7851ecp3"
+      }
+    },
+    {
+      "case_id": "float-parse-float-string-max-finite",
+      "overload_id": "float_parse_float_string",
+      "descriptor": "(Ljava/lang/String;)F",
+      "expected": {
+        "status": "ok",
+        "type": "float",
+        "value": "0x1.fffffep127"
+      }
+    },
+    {
+      "case_id": "float-parse-float-string-overflow-tie",
+      "overload_id": "float_parse_float_string",
+      "descriptor": "(Ljava/lang/String;)F",
+      "expected": {
+        "status": "ok",
+        "type": "float",
+        "value": "Infinity"
+      }
+    },
+    {
+      "case_id": "float-parse-float-string-underflow-tie",
+      "overload_id": "float_parse_float_string",
+      "descriptor": "(Ljava/lang/String;)F",
+      "expected": {
+        "status": "ok",
+        "type": "float",
+        "value": "0x0.0p0"
+      }
+    },
+    {
+      "case_id": "float-parse-float-string-subnormal",
+      "overload_id": "float_parse_float_string",
+      "descriptor": "(Ljava/lang/String;)F",
+      "expected": {
+        "status": "ok",
+        "type": "float",
+        "value": "0x0.000002p-126"
+      }
+    },
+    {
+      "case_id": "float-parse-float-string-signed-zero-whitespace-suffix",
+      "overload_id": "float_parse_float_string",
+      "descriptor": "(Ljava/lang/String;)F",
+      "expected": {
+        "status": "ok",
+        "type": "float",
+        "value": "-0x0.0p0"
+      }
+    },
+    {
+      "case_id": "float-parse-float-string-zero-padded-decimal-exponent",
+      "overload_id": "float_parse_float_string",
+      "descriptor": "(Ljava/lang/String;)F",
+      "expected": {
+        "status": "ok",
+        "type": "float",
+        "value": "0x1.4p3"
+      }
+    },
+    {
+      "case_id": "float-parse-float-string-zero-padded-hex-negative-exponent",
+      "overload_id": "float_parse_float_string",
+      "descriptor": "(Ljava/lang/String;)F",
+      "expected": {
+        "status": "ok",
+        "type": "float",
+        "value": "0x1.0p-1"
+      }
+    },
+    {
+      "case_id": "float-parse-float-string-positive-infinity",
+      "overload_id": "float_parse_float_string",
+      "descriptor": "(Ljava/lang/String;)F",
+      "expected": {
+        "status": "ok",
+        "type": "float",
+        "value": "Infinity"
+      }
+    },
+    {
+      "case_id": "float-parse-float-string-signed-nan",
+      "overload_id": "float_parse_float_string",
+      "descriptor": "(Ljava/lang/String;)F",
+      "expected": {
+        "status": "ok",
+        "type": "float",
+        "value": "NaN"
+      }
+    },
+    {
+      "case_id": "float-parse-float-string-invalid",
+      "overload_id": "float_parse_float_string",
+      "descriptor": "(Ljava/lang/String;)F",
+      "expected": {
+        "status": "error",
+        "type": "error",
+        "value": "java.lang.NumberFormatException"
+      }
+    },
+    {
+      "case_id": "float-parse-float-string-null",
+      "overload_id": "float_parse_float_string",
+      "descriptor": "(Ljava/lang/String;)F",
+      "expected": {
+        "status": "error",
+        "type": "error",
+        "value": "java.lang.NullPointerException"
+      }
+    },
+    {
       "case_id": "integer-parse-int-string",
       "overload_id": "integer_parse_int_string",
       "descriptor": "(Ljava/lang/String;)I",
@@ -106,6 +346,46 @@
       }
     },
     {
+      "case_id": "integer-parse-int-string-min-value",
+      "overload_id": "integer_parse_int_string",
+      "descriptor": "(Ljava/lang/String;)I",
+      "expected": {
+        "status": "ok",
+        "type": "int",
+        "value": "-2147483648"
+      }
+    },
+    {
+      "case_id": "integer-parse-int-string-overflow",
+      "overload_id": "integer_parse_int_string",
+      "descriptor": "(Ljava/lang/String;)I",
+      "expected": {
+        "status": "error",
+        "type": "error",
+        "value": "java.lang.NumberFormatException"
+      }
+    },
+    {
+      "case_id": "integer-parse-int-string-null",
+      "overload_id": "integer_parse_int_string",
+      "descriptor": "(Ljava/lang/String;)I",
+      "expected": {
+        "status": "error",
+        "type": "error",
+        "value": "java.lang.NumberFormatException"
+      }
+    },
+    {
+      "case_id": "integer-parse-int-string-unicode-digits",
+      "overload_id": "integer_parse_int_string",
+      "descriptor": "(Ljava/lang/String;)I",
+      "expected": {
+        "status": "ok",
+        "type": "int",
+        "value": "12"
+      }
+    },
+    {
       "case_id": "long-parse-long-string",
       "overload_id": "long_parse_long_string",
       "descriptor": "(Ljava/lang/String;)J",
@@ -113,6 +393,46 @@
         "status": "ok",
         "type": "long",
         "value": "9223372036854775807"
+      }
+    },
+    {
+      "case_id": "long-parse-long-string-min-value",
+      "overload_id": "long_parse_long_string",
+      "descriptor": "(Ljava/lang/String;)J",
+      "expected": {
+        "status": "ok",
+        "type": "long",
+        "value": "-9223372036854775808"
+      }
+    },
+    {
+      "case_id": "long-parse-long-string-underflow",
+      "overload_id": "long_parse_long_string",
+      "descriptor": "(Ljava/lang/String;)J",
+      "expected": {
+        "status": "error",
+        "type": "error",
+        "value": "java.lang.NumberFormatException"
+      }
+    },
+    {
+      "case_id": "long-parse-long-string-null",
+      "overload_id": "long_parse_long_string",
+      "descriptor": "(Ljava/lang/String;)J",
+      "expected": {
+        "status": "error",
+        "type": "error",
+        "value": "java.lang.NumberFormatException"
+      }
+    },
+    {
+      "case_id": "long-parse-long-string-unicode-digits",
+      "overload_id": "long_parse_long_string",
+      "descriptor": "(Ljava/lang/String;)J",
+      "expected": {
+        "status": "ok",
+        "type": "long",
+        "value": "12"
       }
     },
     {
