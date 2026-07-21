@@ -1076,7 +1076,7 @@ Syntactic sugar for defining named functions in the user namespace:
 ```
 
 
-**Not supported:** Multi-arity `defn` ([DIV-15](clojure-conformance-gaps.md#div-15-no-multi-arity-fndefn)), pre/post conditions ([DIV-16](clojure-conformance-gaps.md#div-16-no-prepost-conditions-in-defn)).
+**Not supported:** Multi-arity `defn` ([DIV-15](clojure-conformance-gaps.md#div-15-no-multi-arity-fn-defn)), pre/post conditions ([DIV-16](clojure-conformance-gaps.md#div-16-no-pre-post-conditions-in-defn)).
 
 ---
 
@@ -2616,7 +2616,7 @@ To iterate over just keys or values, extract them first:
 - All predicates (including `zero?`) return `false` for `Double/NaN`.
 - `Double/NaN` is not equal to itself: `(= Double/NaN Double/NaN)` is `false`.
 
-**Integer predicates on floats:** `even?` and `odd?` accept whole-number floats like `4.0` (treating them as integers), and return `false` for non-whole floats like `4.5`. This diverges from Clojure, which throws on float arguments (see [GAP-S08](clojure-conformance-gaps.md#gap-s08-evenodd-handle-floats-gracefully)).
+**Integer predicates on floats:** `even?` and `odd?` accept whole-number floats like `4.0` (treating them as integers), and return `false` for non-whole floats like `4.5`. This diverges from Clojure, which throws on float arguments (see [GAP-S08](clojure-conformance-gaps.md#gap-s08-even-odd-handle-floats-gracefully)).
 
 ```clojure
 (even? 4)     ; => true
@@ -2722,7 +2722,7 @@ Regex functions provide validation and extraction capabilities. To ensure system
 ```
 
 **Type checking:**
-Both functions accept strings and return `nil` for non-string input (see [DIV-18](clojure-conformance-gaps.md#div-18-parse-longparse-doubleparse-boolean-return-nil-for-non-string-input)).
+Both functions accept strings and return `nil` for non-string input (see [DIV-18](clojure-conformance-gaps.md#div-18-parse-long-parse-double-parse-boolean-return-nil-for-non-string-input)).
 
 ```clojure
 (parse-long 42)            ; => ...
