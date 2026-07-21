@@ -136,6 +136,7 @@ complete.
 
 Advanced references include the [PTC-Lisp specification](docs/ptc-lisp-specification.md),
 [function reference](docs/function-reference.md),
+[signature syntax](docs/signature-syntax.md),
 [conformance report](docs/conformance/index.md), and
 [Kernel maintainer guide](docs/guides/kernel-maintainer.md).
 

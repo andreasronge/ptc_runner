@@ -102,8 +102,9 @@ This correction is retryable because validation failed before the function
 body and before any capability activity. A signed function also validates its
 successful output. The agent loop does not automatically retry a contract
 failure after capability activity, because repeating external effects may be
-unsafe. See [Kernel component bundles](capability-prelude.md) for the complete
-signature grammar and runtime rules.
+unsafe. See [Signature syntax](../signature-syntax.md) for the complete
+signature grammar and [Kernel component bundles](capability-prelude.md) for the
+runtime rules.
 
 ## Input and mission data
 

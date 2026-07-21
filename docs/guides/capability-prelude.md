@@ -2,7 +2,7 @@
 
 Kernel components are immutable PTC-Lisp modules compiled by
 `PtcRunner.Kernel.compile_bundle/1`. A component declares one namespace and
-may depend only on component IDs explicitly listed in its `requires` field.
+may depend only on component IDs explicitly listed in its `dependencies` field.
 
 ```elixir
 alias PtcRunner.Kernel
@@ -53,7 +53,7 @@ metadata such as `^{:signature ...}` is not supported. `:int?` accepts an
 integer or `nil`; it does not make a positional argument omittable. In shaped
 maps, an optional field may be omitted or `nil`. Function signatures currently
 apply only to fixed-arity exports; the grammar has no rest-parameter contract.
-See the
+See [Signature syntax](../signature-syntax.md) for the complete grammar and the
 [PTC-Lisp specification](../ptc-lisp-specification.md#910-public-component-contracts).
 
 Tool authority is explicit. Every `tool/name` used by an export is recorded
