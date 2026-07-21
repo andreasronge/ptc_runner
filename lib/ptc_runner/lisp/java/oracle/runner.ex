@@ -229,7 +229,9 @@ defmodule PtcRunner.Lisp.Java.Oracle.Runner do
   defp outcome_status("error"), do: {:ok, :error}
   defp outcome_status(_status), do: {:error, :unknown_outcome_status}
 
-  defp validate_metadata(result, :jvm) do
+  @doc false
+  @spec validate_metadata(map(), :jvm | :babashka) :: :ok | {:error, term()}
+  def validate_metadata(result, :jvm) do
     versions = Config.versions()
     environment = Config.environment()
     java_version = versions.java.runtime |> String.split("+") |> hd()
@@ -246,11 +248,12 @@ defmodule PtcRunner.Lisp.Java.Oracle.Runner do
     end
   end
 
-  defp validate_metadata(result, :babashka) do
+  def validate_metadata(result, :babashka) do
     environment = Config.environment()
 
     if result.babashka_version == Config.versions().babashka and
-         result.locale == environment.locale and result.timezone == environment.timezone,
+         result.locale in Config.babashka_locales() and
+         result.timezone == environment.timezone,
        do: :ok,
        else: {:error, {:oracle_environment_mismatch, Map.drop(result, [:outcomes])}}
   end

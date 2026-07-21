@@ -624,9 +624,12 @@ Use `mix ptc.java_fixtures --oracle jvm --write` only after reviewing an
 intentional behavior change on the pinned toolchain. The JVM run is the
 descriptor and behavior authority. Babashka covers only cases marked `fast`
 and cannot attest overload selection. Both runners use bounded source, output,
-and runtime limits with an observed `en_US` locale and UTC timezone. The PTC
-closed-dispatch run also attests the selected overload identity so equal return
-values cannot conceal a dispatch mismatch.
+and runtime limits with an `en_US` process locale and UTC timezone. The JVM
+must observe `en_US`; platform-specific Babashka native images may report the
+equivalent language-only `en`. Locale-sensitive operations are excluded from
+Babashka's non-authoritative fast subset. The PTC closed-dispatch run also
+attests the selected overload identity so equal return values cannot conceal a
+dispatch mismatch.
 
 `RunConfig` freezes two bounded deterministic mission projections. The
 authoritative V2 inventory contains prompt-visible exports, model-visible

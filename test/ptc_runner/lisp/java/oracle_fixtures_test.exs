@@ -255,8 +255,19 @@ defmodule PtcRunner.Lisp.Java.OracleFixturesTest do
   @tag :clojure
   test "Babashka reports the locale and timezone it actually observes" do
     assert {:ok, result} = Runner.run(:babashka, :fast)
-    assert result.locale == Config.environment().locale
+    assert result.locale in Config.babashka_locales()
     assert result.timezone == Config.environment().timezone
+  end
+
+  test "Babashka accepts the language-only English locale from its Linux native image" do
+    result = %{
+      babashka_version: Config.versions().babashka,
+      locale: "en",
+      timezone: Config.environment().timezone,
+      outcomes: []
+    }
+
+    assert :ok = Runner.validate_metadata(result, :babashka)
   end
 
   test "fixture validation rejects drift from manifest descriptors and divergence IDs" do
@@ -380,6 +391,7 @@ defmodule PtcRunner.Lisp.Java.OracleFixturesTest do
     setup = File.read!(".github/actions/setup-elixir/action.yml")
 
     assert mise =~ ~s|java = "#{versions.java.mise}"|
+    assert test_workflow =~ ~r/^permissions:\n  contents: read$/m
 
     assert setup_java_pins(test_workflow) ==
              List.duplicate(

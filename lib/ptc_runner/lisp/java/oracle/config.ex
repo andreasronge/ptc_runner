@@ -15,12 +15,24 @@ defmodule PtcRunner.Lisp.Java.Oracle.Config do
     locale: "en_US",
     timezone: "UTC"
   }
+  @babashka_locales [@environment.locale, @environment.locale |> String.split("_") |> hd()]
 
   @doc "Returns the pinned Java, JVM Clojure, and Babashka releases."
   @spec versions() :: map()
   def versions, do: @versions
 
-  @doc "Returns the deterministic locale and timezone used by every oracle."
+  @doc "Returns the deterministic process locale and timezone requested for every oracle."
   @spec environment() :: %{locale: String.t(), timezone: String.t()}
   def environment, do: @environment
+
+  @doc """
+  Returns the accepted English locale labels from pinned Babashka native images.
+
+  Babashka is a non-authoritative fast oracle. Its platform-specific native
+  images may omit the region from Java's default locale even when the process
+  environment requests en_US; locale-sensitive Java operations are excluded
+  from its fixture subset.
+  """
+  @spec babashka_locales() :: [String.t()]
+  def babashka_locales, do: @babashka_locales
 end
