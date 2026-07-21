@@ -37,6 +37,23 @@ if Code.ensure_loaded?(ReqLLM) do
     # --- Behaviour Callbacks ---
 
     @impl true
+    @doc """
+    Loads the `llm_db` model catalog into its VM-global `:persistent_term`
+    store so per-request provider workers read it copy-free instead of
+    triggering a large one-time decode inside their bounded heap. Idempotent;
+    called once at capability-build time in the unbounded builder process.
+    """
+    @spec ensure_ready() :: :ok
+    def ensure_ready do
+      if Code.ensure_loaded?(LLMDB.Catalog) and
+           function_exported?(LLMDB.Catalog, :ensure_loaded, 0) do
+        _ = LLMDB.Catalog.ensure_loaded()
+      end
+
+      :ok
+    end
+
+    @impl true
     @spec call(String.t(), map()) :: {:ok, map()} | {:error, term()}
     def call(model, %{schema: schema} = req) when is_map(schema) do
       messages = build_messages(req)

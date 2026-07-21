@@ -28,6 +28,20 @@ defmodule PtcRunner.LLMTest do
     end
   end
 
+  # Records whether its ensure_ready/0 warmup ran (build-time preload test).
+  defmodule ReadyProbe do
+    @behaviour PtcRunner.LLM
+
+    @impl true
+    def ensure_ready do
+      Process.put({__MODULE__, :called}, true)
+      :ok
+    end
+
+    @impl true
+    def call(_model, _req), do: {:ok, %{content: "", tokens: %{}}}
+  end
+
   setup do
     prev = Application.get_env(:ptc_runner, :llm_adapter)
     Application.put_env(:ptc_runner, :llm_adapter, MockAdapter)
@@ -39,6 +53,20 @@ defmodule PtcRunner.LLMTest do
     end)
 
     :ok
+  end
+
+  describe "callback/2 adapter warmup" do
+    test "invokes the adapter's ensure_ready/0 at build time, before the request runs" do
+      Process.delete({ReadyProbe, :called})
+      closure = PtcRunner.LLM.callback("ollama:test-model", adapter: ReadyProbe)
+      assert is_function(closure, 1)
+      assert Process.get({ReadyProbe, :called}) == true
+    end
+
+    test "is a no-op for adapters that do not implement ensure_ready/0" do
+      # MockAdapter (installed by setup) defines no ensure_ready/0.
+      assert is_function(PtcRunner.LLM.callback("ollama:test-model"), 1)
+    end
   end
 
   describe "callback/2" do
