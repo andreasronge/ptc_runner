@@ -198,6 +198,7 @@ defmodule PtcRunner.Kernel.TraceCapabilityTest do
   end
 
   @tag :tmp_dir
+  @tag :slow
   test "concurrent same-path appends retain every canonical batch", %{tmp_dir: directory} do
     path = Path.join(directory, "concurrent.jsonl")
     parent = self()
@@ -233,6 +234,7 @@ defmodule PtcRunner.Kernel.TraceCapabilityTest do
   end
 
   @tag :tmp_dir
+  @tag :slow
   test "hard-link aliases share the same cross-runtime append lease", %{tmp_dir: directory} do
     path = Path.join(directory, "aliased.jsonl")
     alias_path = Path.join(directory, "aliased-hard-link.jsonl")

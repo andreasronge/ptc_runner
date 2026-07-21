@@ -18,9 +18,9 @@ runs:
         path: |
           deps
           _build
-        key: ${{ runner.os }}-mix-otp29.0.3-elixir1.20.2-${{ hashFiles('**/mix.lock') }}
+        key: ${{ runner.os }}-mix-otp${{ steps.setup-beam.outputs.otp-version }}-elixir${{ steps.setup-beam.outputs.elixir-version }}-${{ hashFiles('**/mix.lock') }}
         restore-keys: |
-          ${{ runner.os }}-mix-otp29.0.3-elixir1.20.2-
+          ${{ runner.os }}-mix-otp${{ steps.setup-beam.outputs.otp-version }}-elixir${{ steps.setup-beam.outputs.elixir-version }}-
 
     - name: Get dependencies
       run: mix deps.get
@@ -30,9 +30,9 @@ runs:
       uses: actions/cache@v5
       with:
         path: priv/plts
-        key: plt-${{ runner.os }}-otp29.0.3-elixir1.20.2-${{ hashFiles('**/mix.lock') }}
+        key: plt-${{ runner.os }}-otp${{ steps.setup-beam.outputs.otp-version }}-elixir${{ steps.setup-beam.outputs.elixir-version }}-${{ hashFiles('**/mix.lock') }}
         restore-keys: |
-          plt-${{ runner.os }}-otp29.0.3-elixir1.20.2-
+          plt-${{ runner.os }}-otp${{ steps.setup-beam.outputs.otp-version }}-elixir${{ steps.setup-beam.outputs.elixir-version }}-
 
     - name: Cache Babashka
       uses: actions/cache@v5

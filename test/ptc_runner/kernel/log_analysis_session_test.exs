@@ -1232,7 +1232,10 @@ defmodule PtcRunner.Kernel.LogAnalysisSessionTest do
     evaluation = Task.async(fn -> LogAnalysisSession.evaluate(session, "42") end)
     assert_receive {:evaluation_barrier, session_pid}
     info = Task.async(fn -> LogAnalysisSession.info(session) end)
-    yielded = Task.yield(info, 5_100)
+    # The evaluation is deterministically parked at the barrier (`:finish_evaluation`
+    # is sent below, only AFTER this yield), so `info` can never complete within the
+    # window regardless of its length — a short window keeps `is_nil(yielded)` true.
+    yielded = Task.yield(info, 200)
     send(session_pid, :finish_evaluation)
 
     assert {:ok, %{status: :ok, value: 42}} = Task.await(evaluation)

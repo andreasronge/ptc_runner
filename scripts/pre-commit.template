@@ -71,45 +71,36 @@ run_project_gates() {
     mix deps.compile > /dev/null 2>&1 || true
   fi
 
+  # Static checks share ONE mix invocation (one BEAM boot) instead of a
+  # separate `mix` process per check. `mix do a + b + c` fails fast on the
+  # first non-zero task. (cwd is the project dir, so `project_has_dep "."`.)
+  local checks=""
   if [ -n "$has_elixir" ]; then
-    echo "  ⏳ Checking format..."
-    if ! mix format --check-formatted > /dev/null 2>&1; then
-      echo "  ❌ Code not formatted in $label. Run: (cd $proj && mix format)"
-      popd > /dev/null
-      exit 1
-    fi
-    echo "  ✅ Format OK"
+    checks="format --check-formatted"
   fi
-
   if [ -n "$has_elixir" ] || [ -n "$has_config" ] || [ -n "$has_mix" ]; then
-    echo "  ⏳ Compiling --warnings-as-errors..."
-    if ! mix compile --warnings-as-errors > /dev/null 2>&1; then
-      echo "  ❌ Compilation failed in $label. Run: (cd $proj && mix compile)"
+    checks="${checks:+$checks + }compile --warnings-as-errors"
+  fi
+  if [ -n "$has_elixir" ] && project_has_dep "." "credo"; then
+    checks="${checks:+$checks + }credo --strict"
+  fi
+
+  if [ -n "$checks" ]; then
+    echo "  ⏳ mix do $checks"
+    # shellcheck disable=SC2086  # $checks is a controlled task list to word-split
+    if ! static_out=$(mix do $checks 2>&1); then
+      echo "  ❌ Static checks failed in $label:"
+      echo "$static_out" | tail -40
+      echo "  Re-run: (cd $proj && mix do $checks)"
       popd > /dev/null
       exit 1
     fi
-    echo "  ✅ Compile OK"
+    echo "  ✅ Static checks passed (format / compile / credo)"
   fi
 
-  popd > /dev/null
-
-  if [ -n "$has_elixir" ]; then
-    if project_has_dep "$proj" "credo"; then
-      pushd "$proj" > /dev/null
-      echo "  ⏳ Running Credo..."
-      if ! mix credo --strict > /dev/null 2>&1; then
-        echo "  ❌ Credo issues in $label. Run: (cd $proj && mix credo --strict)"
-        popd > /dev/null
-        exit 1
-      fi
-      echo "  ✅ Credo OK"
-      popd > /dev/null
-    else
-      echo "  ⏭️  Credo not declared in ${label}mix.exs"
-    fi
-  fi
-
-  # Scoped test run for changed test files (per project).
+  # Scoped tests for changed test files — a single `mix test` invocation for
+  # all of them. `:slow` (heavy subprocess/integration) tests are skipped on
+  # the fast pre-commit path; they still run in `mix precommit`, pre-push, and CI.
   local changed_tests
   if [ "$proj" = "." ]; then
     changed_tests=$(echo "$staged" | grep -E '^test/.*_test\.exs$' || true)
@@ -119,18 +110,18 @@ run_project_gates() {
   fi
 
   if [ -n "$changed_tests" ]; then
-    pushd "$proj" > /dev/null
-    echo "  ⏳ Running scoped tests..."
-    for f in $changed_tests; do
-      if ! mix test "$f" --exclude clojure > /dev/null 2>&1; then
-        echo "  ❌ Tests failed for $f in $label"
-        popd > /dev/null
-        exit 1
-      fi
-    done
+    echo "  ⏳ Running scoped tests (excluding :slow)..."
+    # shellcheck disable=SC2086  # word-split the space-separated file list
+    if ! test_out=$(mix test $changed_tests --exclude clojure --exclude slow 2>&1); then
+      echo "  ❌ Tests failed in $label:"
+      echo "$test_out" | tail -40
+      popd > /dev/null
+      exit 1
+    fi
     echo "  ✅ Scoped tests pass"
-    popd > /dev/null
   fi
+
+  popd > /dev/null
 }
 
 for proj in "${PROJECTS[@]}"; do

@@ -13,6 +13,7 @@ defmodule PtcRunner.Kernel.InspectionLabTest do
   alias PtcRunner.Kernel.ViewerAdapter
 
   @tag :tmp_dir
+  @tag :slow
   test "scripted file, native, and MCP journeys produce inspectable Viewer artifacts", %{
     tmp_dir: dir
   } do

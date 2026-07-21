@@ -196,7 +196,10 @@ defmodule PtcRunner.Lisp.Runtime.DescribeTest do
     end
 
     test "merges cap metadata from root and nested summaries" do
-      rows = Enum.map(1..1001, fn _index -> Map.new(1..105, &{"k#{&1}", &1}) end)
+      # One nested map with >@max_map_keys (100) keys fires "max_keys"; 1001 total
+      # rows (>@max_root_items 1000) fires "max_items". Keeping only a single wide
+      # map avoids the O(k^2)-per-map summarization cost of 1000 wide maps.
+      rows = [Map.new(1..105, &{"k#{&1}", &1}) | List.duplicate(%{"a" => 1}, 1000)]
 
       result = Describe.describe(rows)
 
