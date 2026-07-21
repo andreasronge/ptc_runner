@@ -45,6 +45,13 @@ defmodule PtcRunner.Lisp.Java.Implementations do
     math_round_double: {PtcRunner.Lisp.Java.Lang.Math, :round_double},
     math_round_float: {PtcRunner.Lisp.Java.Lang.Math, :round_float},
     math_sqrt_double: {PtcRunner.Lisp.Java.Lang.Math, :sqrt_double},
+    string_contains: {PtcRunner.Lisp.Java.Lang.String, :contains},
+    string_ends_with: {PtcRunner.Lisp.Java.Lang.String, :ends_with},
+    string_index_of: {PtcRunner.Lisp.Java.Lang.String, :index_of},
+    string_last_index_of: {PtcRunner.Lisp.Java.Lang.String, :last_index_of},
+    string_length: {PtcRunner.Lisp.Java.Lang.String, :length},
+    string_starts_with: {PtcRunner.Lisp.Java.Lang.String, :starts_with},
+    string_substring: {PtcRunner.Lisp.Java.Lang.String, :substring},
     system_current_time_millis: {PtcRunner.Lisp.Java.Lang.System, :current_time_millis}
   }
 

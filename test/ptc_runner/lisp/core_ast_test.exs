@@ -38,9 +38,10 @@ defmodule PtcRunner.Lisp.CoreASTTest do
              CoreAST.validate({:java_ref, :unknown_reference})
   end
 
-  test "rejects Java nodes for references that remain on legacy Env routes" do
+  test "accepts migrated Java String nodes and references" do
     node = {:java_instance, :string_contains, {:var, :s}, [{:string, "x"}]}
 
-    assert {:error, {:invalid_core_ast, [], ^node}} = CoreAST.validate(node)
+    assert :ok = CoreAST.validate(node)
+    assert :ok = CoreAST.validate({:java_ref, :string_contains})
   end
 end

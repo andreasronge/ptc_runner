@@ -5564,19 +5564,19 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         ~S|(.substring "abcdef" 1 4)|,
         [:java, :string]
       ),
-      c(
+      unsupported_case(
         "java/string-lower-001",
         "java.lang.String",
         [".toLowerCase"],
         ~S|(.toLowerCase "AbC")|,
-        [:java, :string]
+        "Locale-sensitive no-argument Java casing is deferred until a deterministic locale and Unicode-data contract are selected."
       ),
-      c(
+      unsupported_case(
         "java/string-upper-001",
         "java.lang.String",
         [".toUpperCase"],
         ~S|(.toUpperCase "AbC")|,
-        [:java, :string]
+        "Locale-sensitive no-argument Java casing is deferred until a deterministic locale and Unicode-data contract are selected."
       ),
       c(
         "java/string-starts-001",
@@ -6269,23 +6269,19 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         1,
         "PTC-Lisp has no Character type; \\a is the one-char string \"a\", so .length returns 1 instead of raising."
       ),
-      div_case(
+      unsupported_case(
         "java/string-to-lower-case-char-receiver-001",
         "java.lang.String",
         [".toLowerCase"],
         ~S|(.toLowerCase \A)|,
-        "DIV-41",
-        "a",
-        "PTC-Lisp has no Character type; \\A is the one-char string \"A\", so .toLowerCase returns \"a\" instead of raising."
+        "Locale-sensitive no-argument Java casing is deferred until a deterministic locale and Unicode-data contract are selected."
       ),
-      div_case(
+      unsupported_case(
         "java/string-to-upper-case-char-receiver-001",
         "java.lang.String",
         [".toUpperCase"],
         ~S|(.toUpperCase \a)|,
-        "DIV-41",
-        "A",
-        "PTC-Lisp has no Character type; \\a is the one-char string \"a\", so .toUpperCase returns \"A\" instead of raising."
+        "Locale-sensitive no-argument Java casing is deferred until a deterministic locale and Unicode-data contract are selected."
       ),
       div_case(
         "java/string-contains-char-receiver-001",
@@ -6341,21 +6337,30 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "a",
         "PTC-Lisp has no Character type; the \\a receiver is the one-char string \"a\", so .substring operates on it as a String."
       ),
-      bug_case(
+      fixed_bug_case(
         "java/string-length-utf16-bug-001",
         "java.lang.String",
         [".length"],
         ~S|(.length "😀a")|,
         "GAP-J09",
-        "Java String.length returns UTF-16 code units; PTC-Lisp currently returns grapheme count."
+        "Java String.length returns UTF-16 code units; the former Java alias returned a grapheme count."
       ),
-      bug_case(
+      fixed_bug_case(
         "java/string-substring-utf16-bug-001",
         "java.lang.String",
         [".substring"],
-        ~S|(.substring "😀a" 0 1)|,
+        ~S|(.substring "😀a" 2)|,
         "GAP-J09",
-        "Java String.substring indexes UTF-16 code units; PTC-Lisp currently indexes graphemes."
+        "Java String.substring indexes UTF-16 code units; the former Java alias indexed graphemes."
+      ),
+      div_case(
+        "java/string-substring-unpaired-surrogate-001",
+        "java.lang.String",
+        [".substring"],
+        ~S|(.substring "😀a" 0 1)|,
+        "DIV-53",
+        {:error, :invalid_java_string},
+        "Java can return a String containing an unpaired surrogate, but PTC strings must remain valid UTF-8."
       ),
       regression_case(
         "java/string-substring-float-start-001",
@@ -6373,21 +6378,21 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         ["GAP-J14"],
         [:edge]
       ),
-      bug_case(
+      fixed_bug_case(
         "java/string-index-of-utf16-bug-001",
         "java.lang.String",
         [".indexOf"],
         ~S|(.indexOf "😀a" "a")|,
         "GAP-J09",
-        "Java String.indexOf returns UTF-16 code-unit offsets; PTC-Lisp currently returns grapheme offsets."
+        "Java String.indexOf returns UTF-16 code-unit offsets; the former Java alias returned grapheme offsets."
       ),
-      bug_case(
+      fixed_bug_case(
         "java/string-last-index-of-utf16-bug-001",
         "java.lang.String",
         [".lastIndexOf"],
         ~S|(.lastIndexOf "😀a😀" "😀")|,
         "GAP-J09",
-        "Java String.lastIndexOf returns UTF-16 code-unit offsets; PTC-Lisp currently returns grapheme offsets."
+        "Java String.lastIndexOf returns UTF-16 code-unit offsets; the former Java alias returned grapheme offsets."
       ),
       fixed_bug_case(
         "java/instant-parse-date-only-bug-001",

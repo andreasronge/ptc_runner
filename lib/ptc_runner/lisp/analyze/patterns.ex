@@ -7,6 +7,8 @@ defmodule PtcRunner.Lisp.Analyze.Patterns do
   with :keys, :or defaults, :as bindings, and renamed keys.
   """
 
+  alias PtcRunner.Lisp.Java.Surface, as: JavaSurface
+
   @doc """
   Analyzes a pattern AST for use in bindings.
 
@@ -20,7 +22,11 @@ defmodule PtcRunner.Lisp.Analyze.Patterns do
 
   """
   @spec analyze_pattern(term()) :: {:ok, term()} | {:error, term()}
-  def analyze_pattern({:symbol, name}), do: {:ok, {:var, name}}
+  def analyze_pattern({:symbol, name}) do
+    with :ok <- validate_binding_name(name) do
+      {:ok, {:var, name}}
+    end
+  end
 
   def analyze_pattern({:vector, elements}) do
     case split_at_ampersand(elements) do
@@ -46,6 +52,17 @@ defmodule PtcRunner.Lisp.Analyze.Patterns do
 
   def analyze_pattern(other) do
     {:error, {:unsupported_pattern, other}}
+  end
+
+  @doc false
+  @spec validate_binding_name(atom() | String.t()) :: :ok | {:error, term()}
+  def validate_binding_name(name) do
+    if JavaSurface.closed_member_family_spelling?(name) do
+      {:error,
+       {:invalid_form, "Java member spelling #{to_string(name)} is reserved and cannot be bound"}}
+    else
+      :ok
+    end
   end
 
   defp analyze_pattern_list(elements), do: collect_results(elements, &analyze_pattern/1)
@@ -184,10 +201,10 @@ defmodule PtcRunner.Lisp.Analyze.Patterns do
   defp extract_keys(key_asts) do
     Enum.reduce_while(key_asts, {:ok, []}, fn
       {:symbol, name}, {:ok, acc} ->
-        {:cont, {:ok, [name | acc]}}
+        continue_with_binding_name(name, acc)
 
       {:keyword, k}, {:ok, acc} ->
-        {:cont, {:ok, [k | acc]}}
+        continue_with_binding_name(k, acc)
 
       _other, _acc ->
         {:halt, {:error, {:invalid_form, "expected keyword or symbol in destructuring key"}}}
@@ -195,6 +212,13 @@ defmodule PtcRunner.Lisp.Analyze.Patterns do
     |> case do
       {:ok, rev} -> {:ok, Enum.reverse(rev)}
       other -> other
+    end
+  end
+
+  defp continue_with_binding_name(name, acc) do
+    case validate_binding_name(name) do
+      :ok -> {:cont, {:ok, [name | acc]}}
+      {:error, _} = error -> {:halt, error}
     end
   end
 
@@ -266,7 +290,9 @@ defmodule PtcRunner.Lisp.Analyze.Patterns do
   defp maybe_wrap_as(base_pattern, as_pair) do
     case as_pair do
       {{:keyword, :as}, {:symbol, as_name}} ->
-        {:ok, {:destructure, {:as, as_name, base_pattern}}}
+        with :ok <- validate_binding_name(as_name) do
+          {:ok, {:destructure, {:as, as_name, base_pattern}}}
+        end
 
       nil ->
         {:ok, base_pattern}

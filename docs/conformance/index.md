@@ -13,12 +13,12 @@ Rows marked `PTC extension` are intentionally outside Clojure/Java standard comp
 
 | Metric | Count |
 |--------|-------|
-| Supported | 300 |
-| Candidate | 79 |
+| Supported | 298 |
+| Candidate | 81 |
 | Not Relevant | 328 |
 | Not Classified | 0 |
 | Relevant Target | 379 |
-| Coverage | 300/379 (79.2%) |
+| Coverage | 298/379 (78.6%) |
 
 ## Namespace Index
 
@@ -34,7 +34,7 @@ Rows marked `PTC extension` are intentionally outside Clojure/Java standard comp
 | `Float/`, `java.lang.Float` | Java standard | curated Java standard methods (5) | 1 | 3 | 1 | 1/4 (25.0%) | [audit](java-lang-float-audit.md) |
 | `Integer/`, `java.lang.Integer` | Java standard | curated Java standard methods/constants (5) | 1 | 2 | 2 | 1/3 (33.3%) | [audit](java-lang-integer-audit.md) |
 | `Long/`, `java.lang.Long` | Java standard | curated Java standard methods/constants (5) | 1 | 2 | 2 | 1/3 (33.3%) | [audit](java-lang-long-audit.md) |
-| `java.lang.String` dot methods | Java standard | curated Java standard methods (15) | 9 | 4 | 2 | 9/13 (69.2%) | [audit](java-lang-string-audit.md) |
+| `java.lang.String` dot methods | Java standard | curated Java standard methods (15) | 7 | 6 | 2 | 7/13 (53.8%) | [audit](java-lang-string-audit.md) |
 | `System/`, `java.lang.System` | Java standard | curated Java standard methods (5) | 1 | 1 | 3 | 1/2 (50.0%) | [audit](java-lang-system-audit.md) |
 | `LocalDate/`, `java.time.LocalDate/` | Java standard | curated Java standard methods (9) | 6 | 3 | 0 | 6/9 (66.7%) | [audit](java-time-local-date-audit.md) |
 | `Instant/`, `java.time.Instant/` | Java standard | curated Java standard methods (7) | 4 | 2 | 1 | 4/6 (66.7%) | [audit](java-time-instant-audit.md) |

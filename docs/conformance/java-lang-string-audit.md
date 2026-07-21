@@ -14,30 +14,30 @@ Coverage excludes `not_relevant` entries: `supported / (supported + candidate + 
 
 | Status | Count |
 |--------|-------|
-| Supported | 9 |
-| Candidate | 4 |
+| Supported | 7 |
+| Candidate | 6 |
 | Not Relevant | 2 |
 | Not Classified | 0 |
 | Relevant Target | 13 |
-| Coverage | 9/13 (69.2%) |
+| Coverage | 7/13 (53.8%) |
 | **Total** | **15** |
 
 ## Details
 
 | Var | Status | Description | Notes |
 |-----|--------|-------------|-------|
-| `.charAt` | 🔲 candidate | Return character at index | Potentially useful, but PTC-Lisp must define grapheme semantics. |
-| `.contains` | ✅ supported | Substring containment | DIV-40: character literals are accepted as arguments (PTC-Lisp has no Character type). DIV-41: character-literal receivers behave as one-character strings |
-| `.endsWith` | ✅ supported | Suffix test | DIV-40: character literals are accepted as arguments (PTC-Lisp has no Character type). DIV-41: character-literal receivers behave as one-character strings |
+| `.charAt` | 🔲 candidate | Return character at index | Potentially useful, but PTC-Lisp must define how a Java UTF-16 char, including an isolated surrogate, is represented. |
+| `.contains` | ✅ supported | Substring containment | DIV-40: character literals are accepted as arguments (PTC-Lisp has no Character type). DIV-41: character-literal receivers behave as one-character strings. DIV-53: the bounded UTF-16 view rejects String inputs larger than 256,000 bytes. |
+| `.endsWith` | ✅ supported | Suffix test | DIV-40: character literals are accepted as arguments (PTC-Lisp has no Character type). DIV-41: character-literal receivers behave as one-character strings. DIV-53: the bounded UTF-16 view rejects String inputs larger than 256,000 bytes. |
 | `.equalsIgnoreCase` | 🔲 candidate | Case-insensitive string equality | Common Java idiom in generated code. |
 | `.getBytes` | ❌ not_relevant | Encode string to bytes | Byte arrays and charsets are outside the sandbox data model. |
-| `.indexOf` | ✅ supported | First substring index | BUG GAP-J05: integer character-code overloads are unsupported. BUG GAP-J09: non-BMP offsets are grapheme-based instead of Java UTF-16 code-unit based. DIV-41: character-literal receivers behave as one-character strings (PTC-Lisp has no Character type) |
+| `.indexOf` | ✅ supported | First substring index | BUG GAP-J05: integer character-code overloads are unsupported. Indexes use Java UTF-16 code units. DIV-41: character-literal receivers behave as one-character strings (PTC-Lisp has no Character type). DIV-53: the bounded UTF-16 view rejects String inputs larger than 256,000 bytes. |
 | `.intern` | ❌ not_relevant | Intern a Java string | JVM string pool operation; not meaningful on BEAM. |
 | `.isEmpty` | 🔲 candidate | Return true for empty string | empty? covers the common PTC-Lisp need. |
-| `.lastIndexOf` | ✅ supported | Last substring index | BUG GAP-J05: substring/from-index and integer character-code overloads are unsupported. BUG GAP-J09: non-BMP offsets are grapheme-based instead of Java UTF-16 code-unit based. DIV-41: character-literal receivers behave as one-character strings (PTC-Lisp has no Character type) |
-| `.length` | ✅ supported | String length | BUG GAP-J09: non-BMP length is grapheme-based instead of Java UTF-16 code-unit based. DIV-41: character-literal receivers behave as one-character strings (PTC-Lisp has no Character type) |
-| `.startsWith` | ✅ supported | Prefix test | BUG GAP-J05: prefix/offset overload is unsupported. DIV-40: character literals are accepted as arguments (PTC-Lisp has no Character type). DIV-41: character-literal receivers behave as one-character strings |
-| `.substring` | ✅ supported | Extract substring | BUG GAP-J09: non-BMP indexes are grapheme-based instead of Java UTF-16 code-unit based. DIV-41: character-literal receivers behave as one-character strings (PTC-Lisp has no Character type) |
-| `.toLowerCase` | ✅ supported | Lowercase string | DIV-41: character-literal receivers behave as one-character strings (PTC-Lisp has no Character type) |
-| `.toUpperCase` | ✅ supported | Uppercase string | DIV-41: character-literal receivers behave as one-character strings (PTC-Lisp has no Character type) |
+| `.lastIndexOf` | ✅ supported | Last substring index | BUG GAP-J05: substring/from-index and integer character-code overloads are unsupported. Indexes use Java UTF-16 code units. DIV-41: character-literal receivers behave as one-character strings (PTC-Lisp has no Character type). DIV-53: the bounded UTF-16 view rejects String inputs larger than 256,000 bytes. |
+| `.length` | ✅ supported | String length | Returns Java UTF-16 code-unit length. DIV-41: character-literal receivers behave as one-character strings (PTC-Lisp has no Character type). DIV-53: the bounded UTF-16 view rejects String inputs larger than 256,000 bytes. |
+| `.startsWith` | ✅ supported | Prefix test | BUG GAP-J05: prefix/offset overload is unsupported. DIV-40: character literals are accepted as arguments (PTC-Lisp has no Character type). DIV-41: character-literal receivers behave as one-character strings. DIV-53: the bounded UTF-16 view rejects String inputs larger than 256,000 bytes. |
+| `.substring` | ✅ supported | Extract substring | Uses Java UTF-16 code-unit indexes. DIV-41: character-literal receivers behave as one-character strings. DIV-53: ranges containing an unpaired surrogate and inputs larger than 256,000 bytes produce invalid_java_string. |
+| `.toLowerCase` | 🔲 candidate | Lowercase string | Deferred until a deterministic locale and pinned Unicode-data contract are selected. |
+| `.toUpperCase` | 🔲 candidate | Uppercase string | Deferred until a deterministic locale and pinned Unicode-data contract are selected. |
 | `.trim` | 🔲 candidate | Trim leading and trailing whitespace | Common LLM spelling; clojure.string/trim is not currently implemented. |

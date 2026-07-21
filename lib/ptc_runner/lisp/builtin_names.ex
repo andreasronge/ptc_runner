@@ -37,20 +37,9 @@ defmodule PtcRunner.Lisp.BuiltinNames do
                                 &{String.to_atom(&1.name), &1.binding}
                               )
 
-  # Independent implementation attestation for the temporary Phase-0 routes.
-  # Do not derive this from priv/java_interop.exs: the validator must reject a
-  # manifest route that has no separately owned runtime binding.
-  @legacy_java_binding_kinds %{
-    :".contains" => :normal,
-    :".endsWith" => :normal,
-    :".indexOf" => :multi_arity,
-    :".lastIndexOf" => :normal,
-    :".length" => :normal,
-    :".startsWith" => :normal,
-    :".substring" => :multi_arity,
-    :".toLowerCase" => :normal,
-    :".toUpperCase" => :normal
-  }
+  # Retained until the final migration-cleanup slice removes the legacy route
+  # schema itself. Every Java overload now uses closed dispatch.
+  @legacy_java_binding_kinds %{}
 
   @env_binding_kinds Map.merge(@ordinary_env_binding_kinds, @legacy_java_binding_kinds)
   @env_names Map.keys(@env_binding_kinds)
@@ -68,10 +57,14 @@ defmodule PtcRunner.Lisp.BuiltinNames do
                             |> Enum.reject(&String.ends_with?(&1, "."))
                             |> Enum.map(&String.to_atom/1)))
                         |> Enum.uniq()
-  @java_member_atoms @java_surface.namespaces
-                     |> Enum.flat_map(& &1.members)
-                     |> Enum.map(& &1.source_name)
-                     |> Enum.filter(&is_atom/1)
+  @java_member_atoms ((@java_surface.namespaces
+                       |> Enum.flat_map(& &1.members)
+                       |> Enum.map(& &1.source_name)
+                       |> Enum.filter(&is_atom/1)) ++
+                        (@java_surface.references
+                         |> Enum.filter(&(&1.kind == :instance))
+                         |> Enum.flat_map(& &1.spellings)
+                         |> Enum.map(&String.to_atom/1)))
                      |> Enum.uniq()
   @java_constructor_atoms @java_surface.references
                           |> Enum.filter(&(&1.kind == :constructor))

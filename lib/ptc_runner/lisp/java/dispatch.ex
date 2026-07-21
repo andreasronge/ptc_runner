@@ -9,6 +9,7 @@ defmodule PtcRunner.Lisp.Java.Dispatch do
 
   alias PtcRunner.Lisp.Java.Condition
   alias PtcRunner.Lisp.Java.Implementations
+  alias PtcRunner.Lisp.Java.Lang.String, as: JavaString
   alias PtcRunner.Lisp.Java.Primitive
   alias PtcRunner.Lisp.Java.Surface
   alias PtcRunner.Lisp.Java.Time.Duration
@@ -29,11 +30,59 @@ defmodule PtcRunner.Lisp.Java.Dispatch do
          :ok <- validate_kind(reference, kind),
          {:ok, overload, coerced} <- select_overload(reference, receiver, arguments),
          :ok <- attest_selection(reference_id, overload.overload_id),
+         :ok <- validate_instance_receiver(reference, overload, kind, receiver),
+         :ok <- validate_string_inputs(reference, overload, receiver, arguments),
          {:ok, outcome} <- invoke_handler(overload, coerced),
          {:ok, value} <- validate_handler_outcome(overload.overload_id, outcome) do
       {:ok, value, overload.overload_id}
     end
   end
+
+  defp validate_instance_receiver(reference, overload, :instance, nil) do
+    {:error,
+     Condition.new(
+       :java_domain_error,
+       reference.reference_id,
+       overload.overload_id,
+       "Java instance receiver is null",
+       %{java_exception: :null_pointer_exception, receiver_profile: :null}
+     )}
+  end
+
+  defp validate_instance_receiver(_reference, _overload, _kind, _receiver), do: :ok
+
+  defp validate_string_inputs(reference, %{receiver: :string} = overload, receiver, arguments) do
+    values =
+      maybe_string_input(overload.receiver, receiver) ++
+        (overload.arguments
+         |> Enum.zip(arguments)
+         |> Enum.flat_map(fn {profile, value} -> maybe_string_input(profile, value) end))
+
+    case Enum.find_value(values, fn value ->
+           case JavaString.validate_input(value) do
+             :ok -> nil
+             {:error, reason} -> reason
+           end
+         end) do
+      nil ->
+        :ok
+
+      reason ->
+        {:error,
+         Condition.new(
+           :invalid_java_string,
+           reference.reference_id,
+           overload.overload_id,
+           "Java String input cannot be represented by the bounded UTF-16 view",
+           %{java_exception: :invalid_java_string, reason: reason}
+         )}
+    end
+  end
+
+  defp validate_string_inputs(_reference, _overload, _receiver, _arguments), do: :ok
+
+  defp maybe_string_input(profile, value) when profile in [:string, :char_sequence], do: [value]
+  defp maybe_string_input(_profile, _value), do: []
 
   @doc "Selects one closed instance reference from a finite manifest member family."
   @spec invoke_family(atom(), term(), [term()]) :: result()
@@ -44,33 +93,44 @@ defmodule PtcRunner.Lisp.Java.Dispatch do
       |> Surface.member_family_references()
       |> Enum.filter(&Surface.closed_dispatch_reference?(&1.reference_id))
 
-    if is_nil(receiver) and references != [] do
-      {:error,
-       Condition.new(
-         :java_domain_error,
-         member_family_id,
-         nil,
-         "Java instance receiver is null",
-         %{java_exception: :null_pointer_exception, receiver_profile: :null}
-       )}
-    else
-      profile = receiver_profile(receiver)
-      candidates = Enum.filter(references, &reference_accepts_receiver?(&1, profile))
+    case references do
+      [reference] ->
+        invoke(reference.reference_id, :instance, receiver, arguments)
 
-      case candidates do
-        [reference] ->
-          invoke(reference.reference_id, :instance, receiver, arguments)
+      _ ->
+        invoke_ambiguous_family(member_family_id, references, receiver, arguments)
+    end
+  end
 
-        _ ->
-          {:error,
-           Condition.new(
-             :unsupported_java_member,
-             member_family_id,
-             nil,
-             "unsupported Java member for receiver class",
-             %{receiver_profile: profile}
-           )}
-      end
+  defp invoke_ambiguous_family(member_family_id, references, nil, _arguments)
+       when references != [] do
+    {:error,
+     Condition.new(
+       :java_domain_error,
+       member_family_id,
+       nil,
+       "Java instance receiver is null",
+       %{java_exception: :null_pointer_exception, receiver_profile: :null}
+     )}
+  end
+
+  defp invoke_ambiguous_family(member_family_id, references, receiver, arguments) do
+    profile = receiver_profile(receiver)
+    candidates = Enum.filter(references, &reference_accepts_receiver?(&1, profile))
+
+    case candidates do
+      [reference] ->
+        invoke(reference.reference_id, :instance, receiver, arguments)
+
+      _ ->
+        {:error,
+         Condition.new(
+           :unsupported_java_member,
+           member_family_id,
+           nil,
+           "unsupported Java member for receiver class",
+           %{receiver_profile: profile}
+         )}
     end
   end
 
@@ -171,7 +231,7 @@ defmodule PtcRunner.Lisp.Java.Dispatch do
       {:ok, overload, coerced}
     else
       :error ->
-        type_error(reference, [overload], receiver, arguments, &coerce_single_numeric/2)
+        type_error(reference, [overload], receiver, arguments, &coerce_single_numeric_fallback/2)
     end
   end
 
@@ -191,7 +251,7 @@ defmodule PtcRunner.Lisp.Java.Dispatch do
     profiles
     |> Enum.zip(arguments)
     |> Enum.reduce_while({:ok, []}, fn {profile, value}, {:ok, acc} ->
-      case coerce_single_numeric(profile, value) do
+      case coerce_single_numeric_fallback(profile, value) do
         {:ok, coerced} -> {:cont, {:ok, [coerced | acc]}}
         :error -> {:halt, :error}
       end
@@ -199,6 +259,13 @@ defmodule PtcRunner.Lisp.Java.Dispatch do
     |> case do
       {:ok, reversed} -> {:ok, Enum.reverse(reversed)}
       :error -> :error
+    end
+  end
+
+  defp coerce_single_numeric_fallback(profile, value) do
+    case coerce(profile, value) do
+      {:ok, coerced, _score} -> {:ok, coerced}
+      :error -> coerce_single_numeric(profile, value)
     end
   end
 
@@ -216,6 +283,39 @@ defmodule PtcRunner.Lisp.Java.Dispatch do
     with true <- Primitive.valid?(primitive),
          {:ok, value} <- Primitive.unwrap(primitive) do
       widen_to_double(primitive.kind, value)
+    else
+      _invalid -> :error
+    end
+  end
+
+  defp coerce_single_numeric(:int, value) when is_integer(value) do
+    if Primitive.in_range?(:int, value), do: {:ok, value}, else: :error
+  end
+
+  defp coerce_single_numeric(:int, value) when is_float(value) do
+    integer = trunc(value)
+    if Primitive.in_range?(:int, integer), do: {:ok, integer}, else: :error
+  end
+
+  defp coerce_single_numeric(:int, :nan), do: {:ok, 0}
+
+  defp coerce_single_numeric(:int, %Primitive{} = primitive) do
+    with true <- Primitive.valid?(primitive),
+         {:ok, value} <- Primitive.unwrap(primitive) do
+      cond do
+        is_integer(value) and Primitive.in_range?(:int, value) ->
+          {:ok, value}
+
+        is_float(value) ->
+          integer = trunc(value)
+          if Primitive.in_range?(:int, integer), do: {:ok, integer}, else: :error
+
+        value == :nan and primitive.kind in [:float, :double] ->
+          {:ok, 0}
+
+        true ->
+          :error
+      end
     else
       _invalid -> :error
     end
@@ -468,7 +568,7 @@ defmodule PtcRunner.Lisp.Java.Dispatch do
   end
 
   defp return_value?(:boolean, value), do: is_boolean(value)
-  defp return_value?(:string, value), do: is_binary(value)
+  defp return_value?(:string, value), do: is_binary(value) and Elixir.String.valid?(value)
   defp return_value?(:local_date, value), do: LocalDate.valid?(value)
   defp return_value?(:instant, value), do: Instant.valid?(value)
   defp return_value?(:duration, value), do: Duration.valid?(value)

@@ -50,8 +50,8 @@ rules decide:
    (`.substring` raises on out-of-range; `.length`/`.indexOf` raise on
    non-string-like receivers). They do **not** preserve Java
    object/type distinctions PTC-Lisp intentionally does not model — e.g.
-   `Character` vs one-character `String`, so `(.toUpperCase \a)` returns
-   `"A"` rather than raising (see DIV-40/DIV-41). Java is a compatibility
+   `Character` vs one-character `String`, so `(.length \a)` returns `1`
+   rather than raising (see DIV-40/DIV-41). Java is a compatibility
    heuristic, not the design owner. `subs`, `parse-long`, `get` follow
    the safer-for-sandbox signal pattern.
 4. **Properties of input data may signal; properties of the program
@@ -2645,6 +2645,10 @@ Java-named numeric parsers use closed manifest dispatch and Java semantics inste
 First-class Java callables always recover their invocation kind from the bounded
 manifest. Static and constructor callables consume their ordinary arguments;
 instance callables consume the receiver as the first application argument.
+Manifest-admitted direct-dot spellings are host-owned Java syntax, not ordinary
+user names. They cannot be introduced by local bindings, function parameters,
+or `def`/`defonce`/`defn`; attempting to bind one is an invalid form. This keeps
+call and value positions on the same closed-dispatch path.
 Tagged Java numeric values retain their overload identity through ordinary data
 operations, but PTC arithmetic and numeric index/count positions unwrap the
 payload and end that provenance, including when the builtin is called through a
@@ -3040,6 +3044,7 @@ Java wrappers so class authority cannot be serialized as ordinary Lisp data.
 Malformed or forged wrappers, projection collisions, invalid strings, null
 object arguments, wrong classes, and arithmetic overflow become bounded Lisp
 errors rather than host exceptions.
+
 ### 8.15 String Methods (Java Interop)
 
 PTC-Lisp supports Java-style string methods for common operations.
@@ -3049,37 +3054,43 @@ PTC-Lisp supports Java-style string methods for common operations.
 | `.indexOf` | `(.indexOf s substr)` | Index of first occurrence, or -1 if not found |
 | `.indexOf` | `(.indexOf s substr from)` | Index of first occurrence starting from position |
 | `.lastIndexOf` | `(.lastIndexOf s substr)` | Index of last occurrence, or -1 if not found |
-| `.toLowerCase` | `(.toLowerCase s)` | Convert string to lower case |
-| `.toUpperCase` | `(.toUpperCase s)` | Convert string to upper case |
 | `.startsWith` | `(.startsWith s prefix)` | Returns true if string starts with prefix |
 | `.endsWith` | `(.endsWith s suffix)` | Returns true if string ends with suffix |
 | `.contains` | `(.contains s substr)` | Returns true if string contains substring; raises on non-string |
-| `.length` | `(.length s)` | Grapheme count of string; raises on non-string |
-| `.substring` | `(.substring s start)` | Suffix from grapheme index `start`; raises on out-of-range index |
-| `.substring` | `(.substring s start end)` | Graphemes in `[start, end)`; raises on out-of-range index |
+| `.length` | `(.length s)` | UTF-16 code-unit length; raises on non-string |
+| `.substring` | `(.substring s start)` | Suffix from UTF-16 code-unit index `start`; raises on out-of-range index |
+| `.substring` | `(.substring s start end)` | UTF-16 code units in `[start, end)`; raises on out-of-range index |
 
 ```clojure
 (.indexOf "hello" "ll")      ; => 2
 (.indexOf "hello" "x")       ; => -1
 (.indexOf "hello" "l" 3)     ; => 3 (finds second 'l')
 (.lastIndexOf "hello" "l")   ; => 3 (last 'l')
-(.toLowerCase "Hello")       ; => "hello"
-(.toUpperCase "Hello")       ; => "HELLO"
 (.startsWith "hello" "he")   ; => true
 (.endsWith "hello" "lo")     ; => true
 (.contains "hello" "ell")    ; => true
 (.length "hello")            ; => 5
 (.substring "hello" 2)       ; => "llo"
 (.substring "hello" 1 3)     ; => "el"
+(.length "😀a")               ; => 3
+(.substring "😀a" 2)          ; => "a"
 ```
 
-Unlike the Clojure-named string functions (which return signal values), these Java-named methods **raise** on bad input — `.substring` raises when `start < 0`, `start > length`, `end > length`, or `start > end`.
+Unlike ordinary PTC string functions, Java-named indexes and lengths use UTF-16
+code units. PTC strings remain valid UTF-8, so a substring selecting only one
+half of a surrogate pair returns the bounded `invalid_java_string` divergence.
+The temporary UTF-16 view accepts at most 256,000 input bytes.
+
+These Java-named methods **raise** on bad input — `.substring` raises when
+`start < 0`, `start > length`, `end > length`, or `start > end`.
+Locale-sensitive no-argument `.toLowerCase` and `.toUpperCase` are not admitted
+until a deterministic locale and pinned Unicode-data contract are selected.
 
 **Return Value**: These methods return -1 when the substring is not found (Java semantics). **Prefer `index-of` / `last-index-of`** (§8.3) which return `nil` when not found (Clojure semantics).
 
 **Errors**: Passing a non-string raises a descriptive error:
 ```clojure
-(.indexOf 123 "x")  ; => error: .indexOf: expected string, got integer
+(.indexOf 123 "x")  ; => Java interop error: receiver does not match an admitted class
 ```
 
 ---
@@ -4256,13 +4267,15 @@ The LLM receives this error and can generate a corrected program.
 
 ### Resolution Order
 
-When the interpreter encounters a plain symbol, it resolves in this order:
+When the interpreter encounters an ordinary plain symbol, it resolves in this order:
 
 1. **Local bindings** — `let`-/`loop`-bound variables in current scope
 2. **`def` bindings** — values stored via `def`/`defn` (the User Namespace; persists across turns and shadows builtins)
 3. **Built-in functions** — `filter`, `map`, `count`, etc.
 
 Namespaced accesses (`data/y`, `tool/z`) are *not* part of this plain-symbol chain — they are dispatched by a separate AST path before plain-symbol lookup is reached.
+Manifest-admitted Java direct-dot spellings are likewise host-owned syntax and
+are excluded from this chain; they cannot be rebound.
 
 ### Namespace Symbols
 

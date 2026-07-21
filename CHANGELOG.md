@@ -50,6 +50,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   boundaries handle every wrapper explicitly. Removed the bare `parse` alias,
   Instant `getTime`, Date `isBefore`/`isAfter`, the Date temporal constructor
   extension, host temporal promotion, and the global temporal dispatcher.
+- Migrated admitted `java.lang.String` methods to closed dispatch with bounded
+  UTF-16 code-unit semantics while ordinary PTC string helpers remain
+  grapheme-based. Oversized or unrepresentable String operations now return the
+  documented bounded condition; locale-sensitive `.toLowerCase` and
+  `.toUpperCase` and all legacy Java String aliases were removed.
 - Added the code-owned `log-analysis-v1` profile to `mix ptc.repl`, with
   bounded multi-turn mission evaluation over an immutable trace capture,
   deterministic JSONL output for coding agents, safe profile discovery, and

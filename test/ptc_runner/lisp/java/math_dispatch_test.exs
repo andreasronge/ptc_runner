@@ -36,6 +36,16 @@ defmodule PtcRunner.Lisp.Java.MathDispatchTest do
     assert <<0::1, 0::63>> = <<float_zero::float-64>>
   end
 
+  test "untagged integer literals retain the documented Java long default" do
+    assert {:ok,
+            %{
+              return: [
+                %Primitive{kind: :long, value: 1},
+                %Primitive{kind: :long, value: 2}
+              ]
+            }} = Lisp.run_native("[(Math/abs 1) (Math/max 1 2)]")
+  end
+
   test "Math overload identity survives storage, collections, apply, and map" do
     assert {:ok,
             %{

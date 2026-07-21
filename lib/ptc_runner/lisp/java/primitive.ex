@@ -115,10 +115,7 @@ defmodule PtcRunner.Lisp.Java.Primitive do
     {:"extract-int", 4} => [2],
     {:"java.util.Date.", 1} => [0],
     {:".plusDays", 2} => [1],
-    {:".minusDays", 2} => [1],
-    {:".indexOf", 3} => [2],
-    {:".substring", 2} => [1],
-    {:".substring", 3} => [1, 2]
+    {:".minusDays", 2} => [1]
   }
 
   @spec new(kind(), term()) :: {:ok, t()} | {:error, :invalid_java_value}

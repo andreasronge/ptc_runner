@@ -77,7 +77,7 @@ defmodule PtcRunner.Lisp.Java.SurfaceTest do
              "Java overload route points at missing Env binding #{inspect(binding)}"
     end
 
-    assert Enum.count(Surface.overloads(), &match?({:dispatch, _}, &1.route)) == 46
+    assert Enum.count(Surface.overloads(), &match?({:dispatch, _}, &1.route)) == 55
 
     assert %{route: {:dispatch, :boolean_parse_boolean}} =
              Enum.find(Surface.overloads(), &(&1.overload_id == :boolean_parse_boolean_string))

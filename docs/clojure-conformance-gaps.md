@@ -748,13 +748,11 @@ object/type distinctions PTC-Lisp intentionally does not model.
 |-------|-------|
 | **Priority** | n/a |
 | **Status** | by design |
-| **Source** | Manual conformance cases `java/string-length-char-receiver-001`, `java/string-to-lower-case-char-receiver-001`, `java/string-to-upper-case-char-receiver-001`, `java/string-contains-char-receiver-001`, `java/string-index-of-char-receiver-001`, `java/string-last-index-of-char-receiver-001`, `java/string-starts-with-char-receiver-001`, `java/string-ends-with-char-receiver-001`, `java/string-substring-char-receiver-001` |
+| **Source** | Manual conformance cases `java/string-length-char-receiver-001`, `java/string-contains-char-receiver-001`, `java/string-index-of-char-receiver-001`, `java/string-last-index-of-char-receiver-001`, `java/string-starts-with-char-receiver-001`, `java/string-ends-with-char-receiver-001`, `java/string-substring-char-receiver-001` |
 
 ```clojure
 ;; Java / Clojure
 (.length \a)          ;=> NoSuchFieldException
-(.toLowerCase \A)     ;=> NoSuchFieldException
-(.toUpperCase \a)     ;=> NoSuchFieldException
 (.contains \a "a")    ;=> IllegalArgumentException
 (.indexOf \a "a")     ;=> IllegalArgumentException
 (.lastIndexOf \a "a") ;=> IllegalArgumentException
@@ -764,8 +762,6 @@ object/type distinctions PTC-Lisp intentionally does not model.
 
 ;; PTC-Lisp
 (.length \a)          ;=> 1
-(.toLowerCase \A)     ;=> "a"
-(.toUpperCase \a)     ;=> "A"
 (.contains \a "a")    ;=> true
 (.indexOf \a "a")     ;=> 0
 (.lastIndexOf \a "a") ;=> 0
@@ -825,7 +821,7 @@ range are rejected during overload selection.
 | Field | Value |
 |-------|-------|
 | **Priority** | P2 |
-| **Status** | open |
+| **Status** | **fixed** |
 | **Source** | Manual conformance cases `java/string-length-utf16-bug-001`, `java/string-substring-utf16-bug-001`, `java/string-index-of-utf16-bug-001`, `java/string-last-index-of-utf16-bug-001` |
 
 ```clojure
@@ -835,17 +831,41 @@ range are rejected during overload selection.
 (.indexOf "😀a" "a")        ;=> 2
 (.lastIndexOf "😀a😀" "😀") ;=> 3
 
-;; PTC-Lisp current behavior
-(.length "😀a")              ;=> 2
-(.substring "😀a" 0 1)      ;=> "😀"
-(.indexOf "😀a" "a")        ;=> 1
-(.lastIndexOf "😀a😀" "😀") ;=> 2
+;; PTC-Lisp fixed behavior
+(.length "😀a")              ;=> 3
+(.substring "😀a" 2)         ;=> "a"
+(.indexOf "😀a" "a")        ;=> 2
+(.lastIndexOf "😀a😀" "😀") ;=> 3
 ```
 
 **Decision:** BUG. PTC-Lisp's Clojure-named string helpers intentionally use
 Unicode grapheme indexes (see `DIV-36`), but these are Java-shaped method calls.
 Java `String` indexes and lengths are UTF-16 code units, so Java semantics
 should win here.
+
+**Fix:** The admitted Java String methods now use a bounded UTF-16 code-unit
+view. Ordinary PTC functions such as `count`, `subs`, and
+`clojure.string/index-of` retain their grapheme semantics under `DIV-36`.
+
+### DIV-53: Bounded Java UTF-16 views cannot represent every Java String operation
+
+| Field | Value |
+|-------|-------|
+| **Priority** | n/a |
+| **Status** | by design |
+| **Source** | Manual conformance case `java/string-substring-unpaired-surrogate-001` |
+
+Java `String.substring` can select one half of a surrogate pair and return a
+Java String containing that unpaired surrogate. PTC strings are valid UTF-8
+binaries, so the closed Java handler returns the bounded recoverable
+`:invalid_java_string` condition instead of repairing the index or exposing an
+invalid binary. All admitted Java String methods also reject receiver and
+String/CharSequence argument values larger than 256,000 input bytes before
+building their temporary UTF-16 view; the JVM has no corresponding bound.
+
+Java no-argument
+`toLowerCase` and `toUpperCase` remain outside the admitted surface until a
+deterministic locale and pinned Unicode-data contract are selected.
 
 ### GAP-J14: Java `String.substring` rejects finite numeric indexes
 
@@ -870,12 +890,11 @@ Clojure's Java interop coerces finite numeric index arguments for Java `int`
 parameters. This is separate from PTC-Lisp's intentional grapheme indexing
 policy for Clojure-named string helpers such as `subs`.
 
-**Fix:** `dot_substring/2` and `dot_substring/3` now coerce finite float indexes
-to the Java `int` parameter by truncating toward zero, then delegate to the
-existing integer logic — `(.substring "abcd" 1.9)` behaves like `1`, matching
-Babashka and the JVM. Non-finite floats (NaN, Infinity) are PTC-Lisp signal
-atoms (`:nan` / `:infinity`), not `is_float` values, so they keep raising a
-recoverable type error rather than entering the coercion path.
+**Fix:** Closed Java dispatch now coerces finite numeric values to the admitted
+Java `int` parameter by truncating toward zero — `(.substring "abcd" 1.9)`
+behaves like index `1`, matching Babashka and the JVM. NaN coerces to zero;
+positive and negative infinity remain outside the coercion path and produce a
+recoverable Java type error.
 
 ### ~~GAP-J07~~: Fixed with DIV-44
 

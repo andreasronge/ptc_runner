@@ -6,7 +6,7 @@
 
 PTC-Lisp emulates a subset of Java interop for LLM compatibility. These are **not** real JVM calls — they are BEAM-native implementations that mirror the Java API surface LLMs are trained on.
 
-41 interop entries covering 12 Java classes in 13 presentation groups.
+39 interop entries covering 12 Java classes in 13 presentation groups.
 
 See also: [Function Reference](function-reference.md) | [PTC-Lisp Specification](ptc-lisp-specification.md) | [Namespace Coverage](conformance/index.md)
 
@@ -68,13 +68,11 @@ See also: [Function Reference](function-reference.md) | [PTC-Lisp Specification]
 |------|------|-----------|-------------|-------|
 | `.contains` | Method | `(.contains s substr)` | Returns true if string contains substring |  |
 | `.endsWith` | Method | `(.endsWith s suffix)` | Returns true if string ends with suffix |  |
-| `.indexOf` | Method | `(.indexOf s substr), (.indexOf s substr from-index)` | Index of first occurrence of substring, or -1 if not found | Uses grapheme indices (not byte offsets). |
-| `.lastIndexOf` | Method | `(.lastIndexOf s substr)` | Index of last occurrence of substring, or -1 if not found | Uses grapheme indices (not byte offsets). |
-| `.length` | Method | `(.length s)` | Return the grapheme count of a string | Returns grapheme count (not byte length), matching `count` and `.indexOf` index semantics. |
+| `.indexOf` | Method | `(.indexOf s substr), (.indexOf s substr from-index)` | Index of first occurrence of substring, or -1 if not found | Returns Java UTF-16 code-unit indexes. |
+| `.lastIndexOf` | Method | `(.lastIndexOf s substr)` | Index of last occurrence of substring, or -1 if not found | Returns Java UTF-16 code-unit indexes. |
+| `.length` | Method | `(.length s)` | Return the UTF-16 code-unit length of a string | Uses Java UTF-16 code units; ordinary PTC `count` remains grapheme-based. |
 | `.startsWith` | Method | `(.startsWith s prefix)` | Returns true if string starts with prefix |  |
-| `.substring` | Method | `(.substring s start), (.substring s start end)` | Extract a substring by grapheme index | Indices are grapheme-based (not byte offsets). Two-arg form returns graphemes in [start, end). Raises on out-of-range indices (matches Java's StringIndexOutOfBoundsException) — note that (.substring s -1) raises rather than silently returning the last grapheme, which matters when chaining .indexOf. |
-| `.toLowerCase` | Method | `(.toLowerCase s)` | Convert string to lower case |  |
-| `.toUpperCase` | Method | `(.toUpperCase s)` | Convert string to upper case |  |
+| `.substring` | Method | `(.substring s start), (.substring s start end)` | Extract a substring by UTF-16 code-unit index | Uses Java UTF-16 code-unit indexes. A range containing an unpaired surrogate returns invalid_java_string because PTC strings require valid UTF-8. |
 
 
 ### java.lang.System

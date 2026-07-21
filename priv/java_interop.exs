@@ -115,24 +115,6 @@
       callable?: true
     },
     %{
-      member: "toLowerCase",
-      kind: :instance,
-      class_id: :java_lang_string,
-      spellings: [".toLowerCase"],
-      overload_ids: [:string_to_lower_case_0],
-      reference_id: :string_to_lower_case,
-      callable?: true
-    },
-    %{
-      member: "toUpperCase",
-      kind: :instance,
-      class_id: :java_lang_string,
-      spellings: [".toUpperCase"],
-      overload_ids: [:string_to_upper_case_0],
-      reference_id: :string_to_upper_case,
-      callable?: true
-    },
-    %{
       member: "startsWith",
       kind: :instance,
       class_id: :java_lang_string,
@@ -605,13 +587,13 @@
       return: :boolean,
       arity: 1,
       arguments: [:char_sequence],
-      errors: [:null_pointer_exception],
+      errors: [:invalid_java_string, :null_pointer_exception],
       receiver: :string,
-      route: {:legacy_env, :".contains"},
+      route: {:dispatch, :string_contains},
       reference_id: :string_contains,
       descriptor: "(Ljava/lang/CharSequence;)Z",
       overload_id: :string_contains_char_sequence,
-      divergence_ids: ["DIV-40", "DIV-41"],
+      divergence_ids: ["DIV-40", "DIV-41", "DIV-53"],
       classification: :exact,
       attestation: :jvm
     },
@@ -619,13 +601,13 @@
       return: :int,
       arity: 1,
       arguments: [:string],
-      errors: [:null_pointer_exception],
+      errors: [:invalid_java_string, :null_pointer_exception],
       receiver: :string,
-      route: {:legacy_env, :".indexOf"},
+      route: {:dispatch, :string_index_of},
       reference_id: :string_index_of,
       descriptor: "(Ljava/lang/String;)I",
       overload_id: :string_index_of_string,
-      divergence_ids: ["GAP-J09", "DIV-41"],
+      divergence_ids: ["DIV-41", "DIV-53"],
       classification: :exact,
       attestation: :jvm
     },
@@ -633,13 +615,13 @@
       return: :int,
       arity: 2,
       arguments: [:string, :int],
-      errors: [:null_pointer_exception],
+      errors: [:invalid_java_string, :null_pointer_exception],
       receiver: :string,
-      route: {:legacy_env, :".indexOf"},
+      route: {:dispatch, :string_index_of},
       reference_id: :string_index_of,
       descriptor: "(Ljava/lang/String;I)I",
       overload_id: :string_index_of_string_from,
-      divergence_ids: ["GAP-J09", "DIV-41"],
+      divergence_ids: ["DIV-41", "DIV-53"],
       classification: :exact,
       attestation: :jvm
     },
@@ -647,41 +629,13 @@
       return: :int,
       arity: 1,
       arguments: [:string],
-      errors: [:null_pointer_exception],
+      errors: [:invalid_java_string, :null_pointer_exception],
       receiver: :string,
-      route: {:legacy_env, :".lastIndexOf"},
+      route: {:dispatch, :string_last_index_of},
       reference_id: :string_last_index_of,
       descriptor: "(Ljava/lang/String;)I",
       overload_id: :string_last_index_of_string,
-      divergence_ids: ["GAP-J09", "DIV-41"],
-      classification: :exact,
-      attestation: :jvm
-    },
-    %{
-      return: :string,
-      arity: 0,
-      arguments: [],
-      errors: [],
-      receiver: :string,
-      route: {:legacy_env, :".toLowerCase"},
-      reference_id: :string_to_lower_case,
-      descriptor: "()Ljava/lang/String;",
-      overload_id: :string_to_lower_case_0,
-      divergence_ids: ["DIV-41"],
-      classification: :exact,
-      attestation: :jvm
-    },
-    %{
-      return: :string,
-      arity: 0,
-      arguments: [],
-      errors: [],
-      receiver: :string,
-      route: {:legacy_env, :".toUpperCase"},
-      reference_id: :string_to_upper_case,
-      descriptor: "()Ljava/lang/String;",
-      overload_id: :string_to_upper_case_0,
-      divergence_ids: ["DIV-41"],
+      divergence_ids: ["DIV-41", "DIV-53"],
       classification: :exact,
       attestation: :jvm
     },
@@ -689,13 +643,13 @@
       return: :boolean,
       arity: 1,
       arguments: [:string],
-      errors: [:null_pointer_exception],
+      errors: [:invalid_java_string, :null_pointer_exception],
       receiver: :string,
-      route: {:legacy_env, :".startsWith"},
+      route: {:dispatch, :string_starts_with},
       reference_id: :string_starts_with,
       descriptor: "(Ljava/lang/String;)Z",
       overload_id: :string_starts_with_string,
-      divergence_ids: ["DIV-40", "DIV-41"],
+      divergence_ids: ["DIV-40", "DIV-41", "DIV-53"],
       classification: :exact,
       attestation: :jvm
     },
@@ -703,13 +657,13 @@
       return: :boolean,
       arity: 1,
       arguments: [:string],
-      errors: [:null_pointer_exception],
+      errors: [:invalid_java_string, :null_pointer_exception],
       receiver: :string,
-      route: {:legacy_env, :".endsWith"},
+      route: {:dispatch, :string_ends_with},
       reference_id: :string_ends_with,
       descriptor: "(Ljava/lang/String;)Z",
       overload_id: :string_ends_with_string,
-      divergence_ids: ["DIV-40", "DIV-41"],
+      divergence_ids: ["DIV-40", "DIV-41", "DIV-53"],
       classification: :exact,
       attestation: :jvm
     },
@@ -717,13 +671,13 @@
       return: :int,
       arity: 0,
       arguments: [],
-      errors: [],
+      errors: [:invalid_java_string, :null_pointer_exception],
       receiver: :string,
-      route: {:legacy_env, :".length"},
+      route: {:dispatch, :string_length},
       reference_id: :string_length,
       descriptor: "()I",
       overload_id: :string_length_0,
-      divergence_ids: ["GAP-J09", "DIV-41"],
+      divergence_ids: ["DIV-41", "DIV-53"],
       classification: :exact,
       attestation: :jvm
     },
@@ -731,13 +685,17 @@
       return: :string,
       arity: 1,
       arguments: [:int],
-      errors: [:string_index_out_of_bounds_exception],
+      errors: [
+        :invalid_java_string,
+        :null_pointer_exception,
+        :string_index_out_of_bounds_exception
+      ],
       receiver: :string,
-      route: {:legacy_env, :".substring"},
+      route: {:dispatch, :string_substring},
       reference_id: :string_substring,
       descriptor: "(I)Ljava/lang/String;",
       overload_id: :string_substring_begin,
-      divergence_ids: ["GAP-J09", "DIV-41"],
+      divergence_ids: ["DIV-41", "DIV-53"],
       classification: :exact,
       attestation: :jvm
     },
@@ -745,13 +703,17 @@
       return: :string,
       arity: 2,
       arguments: [:int, :int],
-      errors: [:string_index_out_of_bounds_exception],
+      errors: [
+        :invalid_java_string,
+        :null_pointer_exception,
+        :string_index_out_of_bounds_exception
+      ],
       receiver: :string,
-      route: {:legacy_env, :".substring"},
+      route: {:dispatch, :string_substring},
       reference_id: :string_substring,
       descriptor: "(II)Ljava/lang/String;",
       overload_id: :string_substring_begin_end,
-      divergence_ids: ["GAP-J09", "DIV-41"],
+      divergence_ids: ["DIV-41", "DIV-53"],
       classification: :exact,
       attestation: :jvm
     },
@@ -2451,12 +2413,14 @@
         status: :supported,
         description: "Substring containment",
         notes:
-          "DIV-40: character literals are accepted as arguments (PTC-Lisp has no Character type). DIV-41: character-literal receivers behave as one-character strings",
+          "DIV-40: character literals are accepted as arguments (PTC-Lisp has no Character type). DIV-41: character-literal receivers behave as one-character strings. DIV-53: the bounded UTF-16 view rejects String inputs larger than 256,000 bytes.",
         reference_id: :string_contains,
         jvm_descriptor_attestations: %{
           string_contains_char_sequence: "(Ljava/lang/CharSequence;)Z"
         },
-        admitted_overload_divergences: %{string_contains_char_sequence: ["DIV-40", "DIV-41"]},
+        admitted_overload_divergences: %{
+          string_contains_char_sequence: ["DIV-40", "DIV-41", "DIV-53"]
+        },
         target_id: :java_lang_string_audit_contains
       },
       %{
@@ -2464,15 +2428,15 @@
         status: :supported,
         description: "First substring index",
         notes:
-          "BUG GAP-J05: integer character-code overloads are unsupported. BUG GAP-J09: non-BMP offsets are grapheme-based instead of Java UTF-16 code-unit based. DIV-41: character-literal receivers behave as one-character strings (PTC-Lisp has no Character type)",
+          "BUG GAP-J05: integer character-code overloads are unsupported. Indexes use Java UTF-16 code units. DIV-41: character-literal receivers behave as one-character strings (PTC-Lisp has no Character type). DIV-53: the bounded UTF-16 view rejects String inputs larger than 256,000 bytes.",
         reference_id: :string_index_of,
         jvm_descriptor_attestations: %{
           string_index_of_string: "(Ljava/lang/String;)I",
           string_index_of_string_from: "(Ljava/lang/String;I)I"
         },
         admitted_overload_divergences: %{
-          string_index_of_string: ["GAP-J09", "DIV-41"],
-          string_index_of_string_from: ["GAP-J09", "DIV-41"]
+          string_index_of_string: ["DIV-41", "DIV-53"],
+          string_index_of_string_from: ["DIV-41", "DIV-53"]
         },
         target_id: :java_lang_string_audit_indexof
       },
@@ -2481,10 +2445,12 @@
         status: :supported,
         description: "Last substring index",
         notes:
-          "BUG GAP-J05: substring/from-index and integer character-code overloads are unsupported. BUG GAP-J09: non-BMP offsets are grapheme-based instead of Java UTF-16 code-unit based. DIV-41: character-literal receivers behave as one-character strings (PTC-Lisp has no Character type)",
+          "BUG GAP-J05: substring/from-index and integer character-code overloads are unsupported. Indexes use Java UTF-16 code units. DIV-41: character-literal receivers behave as one-character strings (PTC-Lisp has no Character type). DIV-53: the bounded UTF-16 view rejects String inputs larger than 256,000 bytes.",
         reference_id: :string_last_index_of,
         jvm_descriptor_attestations: %{string_last_index_of_string: "(Ljava/lang/String;)I"},
-        admitted_overload_divergences: %{string_last_index_of_string: ["GAP-J09", "DIV-41"]},
+        admitted_overload_divergences: %{
+          string_last_index_of_string: ["DIV-41", "DIV-53"]
+        },
         target_id: :java_lang_string_audit_lastindexof
       },
       %{
@@ -2492,10 +2458,10 @@
         status: :supported,
         description: "String length",
         notes:
-          "BUG GAP-J09: non-BMP length is grapheme-based instead of Java UTF-16 code-unit based. DIV-41: character-literal receivers behave as one-character strings (PTC-Lisp has no Character type)",
+          "Returns Java UTF-16 code-unit length. DIV-41: character-literal receivers behave as one-character strings (PTC-Lisp has no Character type). DIV-53: the bounded UTF-16 view rejects String inputs larger than 256,000 bytes.",
         reference_id: :string_length,
         jvm_descriptor_attestations: %{string_length_0: "()I"},
-        admitted_overload_divergences: %{string_length_0: ["GAP-J09", "DIV-41"]},
+        admitted_overload_divergences: %{string_length_0: ["DIV-41", "DIV-53"]},
         target_id: :java_lang_string_audit_length
       },
       %{
@@ -2503,38 +2469,34 @@
         status: :supported,
         description: "Extract substring",
         notes:
-          "BUG GAP-J09: non-BMP indexes are grapheme-based instead of Java UTF-16 code-unit based. DIV-41: character-literal receivers behave as one-character strings (PTC-Lisp has no Character type)",
+          "Uses Java UTF-16 code-unit indexes. DIV-41: character-literal receivers behave as one-character strings. DIV-53: ranges containing an unpaired surrogate and inputs larger than 256,000 bytes produce invalid_java_string.",
         reference_id: :string_substring,
         jvm_descriptor_attestations: %{
           string_substring_begin: "(I)Ljava/lang/String;",
           string_substring_begin_end: "(II)Ljava/lang/String;"
         },
         admitted_overload_divergences: %{
-          string_substring_begin: ["GAP-J09", "DIV-41"],
-          string_substring_begin_end: ["GAP-J09", "DIV-41"]
+          string_substring_begin: ["DIV-41", "DIV-53"],
+          string_substring_begin_end: ["DIV-41", "DIV-53"]
         },
         target_id: :java_lang_string_audit_substring
       },
       %{
         name: ".toLowerCase",
-        status: :supported,
+        status: :candidate,
         description: "Lowercase string",
         notes:
-          "DIV-41: character-literal receivers behave as one-character strings (PTC-Lisp has no Character type)",
-        reference_id: :string_to_lower_case,
-        jvm_descriptor_attestations: %{string_to_lower_case_0: "()Ljava/lang/String;"},
-        admitted_overload_divergences: %{string_to_lower_case_0: ["DIV-41"]},
+          "Deferred until a deterministic locale and pinned Unicode-data contract are selected.",
+        reference_id: nil,
         target_id: :java_lang_string_audit_tolowercase
       },
       %{
         name: ".toUpperCase",
-        status: :supported,
+        status: :candidate,
         description: "Uppercase string",
         notes:
-          "DIV-41: character-literal receivers behave as one-character strings (PTC-Lisp has no Character type)",
-        reference_id: :string_to_upper_case,
-        jvm_descriptor_attestations: %{string_to_upper_case_0: "()Ljava/lang/String;"},
-        admitted_overload_divergences: %{string_to_upper_case_0: ["DIV-41"]},
+          "Deferred until a deterministic locale and pinned Unicode-data contract are selected.",
+        reference_id: nil,
         target_id: :java_lang_string_audit_touppercase
       },
       %{
@@ -2542,10 +2504,12 @@
         status: :supported,
         description: "Prefix test",
         notes:
-          "BUG GAP-J05: prefix/offset overload is unsupported. DIV-40: character literals are accepted as arguments (PTC-Lisp has no Character type). DIV-41: character-literal receivers behave as one-character strings",
+          "BUG GAP-J05: prefix/offset overload is unsupported. DIV-40: character literals are accepted as arguments (PTC-Lisp has no Character type). DIV-41: character-literal receivers behave as one-character strings. DIV-53: the bounded UTF-16 view rejects String inputs larger than 256,000 bytes.",
         reference_id: :string_starts_with,
         jvm_descriptor_attestations: %{string_starts_with_string: "(Ljava/lang/String;)Z"},
-        admitted_overload_divergences: %{string_starts_with_string: ["DIV-40", "DIV-41"]},
+        admitted_overload_divergences: %{
+          string_starts_with_string: ["DIV-40", "DIV-41", "DIV-53"]
+        },
         target_id: :java_lang_string_audit_startswith
       },
       %{
@@ -2553,10 +2517,12 @@
         status: :supported,
         description: "Suffix test",
         notes:
-          "DIV-40: character literals are accepted as arguments (PTC-Lisp has no Character type). DIV-41: character-literal receivers behave as one-character strings",
+          "DIV-40: character literals are accepted as arguments (PTC-Lisp has no Character type). DIV-41: character-literal receivers behave as one-character strings. DIV-53: the bounded UTF-16 view rejects String inputs larger than 256,000 bytes.",
         reference_id: :string_ends_with,
         jvm_descriptor_attestations: %{string_ends_with_string: "(Ljava/lang/String;)Z"},
-        admitted_overload_divergences: %{string_ends_with_string: ["DIV-40", "DIV-41"]},
+        admitted_overload_divergences: %{
+          string_ends_with_string: ["DIV-40", "DIV-41", "DIV-53"]
+        },
         target_id: :java_lang_string_audit_endswith
       },
       %{
@@ -2587,7 +2553,8 @@
         name: ".charAt",
         status: :candidate,
         description: "Return character at index",
-        notes: "Potentially useful, but PTC-Lisp must define grapheme semantics.",
+        notes:
+          "Potentially useful, but PTC-Lisp must define how a Java UTF-16 char, including an isolated surrogate, is represented.",
         reference_id: nil,
         target_id: :java_lang_string_audit_charat
       },
@@ -3318,7 +3285,7 @@
       description: "Index of first occurrence of substring, or -1 if not found",
       kind: :method,
       signatures: ["(.indexOf s substr)", "(.indexOf s substr from-index)"],
-      notes: "Uses grapheme indices (not byte offsets).",
+      notes: "Returns Java UTF-16 code-unit indexes.",
       class: "java.lang.String",
       reference_ids: [:string_index_of]
     },
@@ -3327,27 +3294,9 @@
       description: "Index of last occurrence of substring, or -1 if not found",
       kind: :method,
       signatures: ["(.lastIndexOf s substr)"],
-      notes: "Uses grapheme indices (not byte offsets).",
+      notes: "Returns Java UTF-16 code-unit indexes.",
       class: "java.lang.String",
       reference_ids: [:string_last_index_of]
-    },
-    %{
-      name: ".toLowerCase",
-      description: "Convert string to lower case",
-      kind: :method,
-      signatures: ["(.toLowerCase s)"],
-      notes: "",
-      class: "java.lang.String",
-      reference_ids: [:string_to_lower_case]
-    },
-    %{
-      name: ".toUpperCase",
-      description: "Convert string to upper case",
-      kind: :method,
-      signatures: ["(.toUpperCase s)"],
-      notes: "",
-      class: "java.lang.String",
-      reference_ids: [:string_to_upper_case]
     },
     %{
       name: ".startsWith",
@@ -3369,21 +3318,20 @@
     },
     %{
       name: ".length",
-      description: "Return the grapheme count of a string",
+      description: "Return the UTF-16 code-unit length of a string",
       kind: :method,
       signatures: ["(.length s)"],
-      notes:
-        "Returns grapheme count (not byte length), matching `count` and `.indexOf` index semantics.",
+      notes: "Uses Java UTF-16 code units; ordinary PTC `count` remains grapheme-based.",
       class: "java.lang.String",
       reference_ids: [:string_length]
     },
     %{
       name: ".substring",
-      description: "Extract a substring by grapheme index",
+      description: "Extract a substring by UTF-16 code-unit index",
       kind: :method,
       signatures: ["(.substring s start)", "(.substring s start end)"],
       notes:
-        "Indices are grapheme-based (not byte offsets). Two-arg form returns graphemes in [start, end). Raises on out-of-range indices (matches Java's StringIndexOutOfBoundsException) — note that (.substring s -1) raises rather than silently returning the last grapheme, which matters when chaining .indexOf.",
+        "Uses Java UTF-16 code-unit indexes. A range containing an unpaired surrogate returns invalid_java_string because PTC strings require valid UTF-8.",
       class: "java.lang.String",
       reference_ids: [:string_substring]
     }
@@ -3653,7 +3601,7 @@
       binding: :normal,
       reference_ids: [:string_contains],
       category: :interop,
-      dispatch: :env,
+      dispatch: :java,
       signatures: ["(.contains s substr)"],
       since: nil,
       examples: [],
@@ -3661,24 +3609,24 @@
       section: "Interop",
       ptc_extension?: false,
       see_also: [],
-      clojure_var: ".contains",
+      clojure_var: nil,
       divergences: nil
     },
     %{
       name: ".indexOf",
       description: "Index of first occurrence starting from position",
-      binding: :multi_arity,
+      binding: :normal,
       reference_ids: [:string_index_of],
       category: :interop,
-      dispatch: :env,
+      dispatch: :java,
       signatures: ["(.indexOf s substr)", "(.indexOf s substr from)"],
       since: nil,
       examples: [],
-      notes: nil,
+      notes: "Returns Java UTF-16 code-unit indexes.",
       section: "Interop",
       ptc_extension?: false,
       see_also: [],
-      clojure_var: ".indexOf",
+      clojure_var: nil,
       divergences: nil
     },
     %{
@@ -3687,85 +3635,50 @@
       binding: :normal,
       reference_ids: [:string_last_index_of],
       category: :interop,
-      dispatch: :env,
+      dispatch: :java,
       signatures: ["(.lastIndexOf s substr)"],
       since: nil,
       examples: [],
-      notes: nil,
+      notes: "Returns Java UTF-16 code-unit indexes.",
       section: "Interop",
       ptc_extension?: false,
       see_also: [],
-      clojure_var: ".lastIndexOf",
-      divergences: nil
-    },
-    %{
-      name: ".toLowerCase",
-      description: "Convert string to lower case",
-      binding: :normal,
-      reference_ids: [:string_to_lower_case],
-      category: :interop,
-      dispatch: :env,
-      signatures: ["(.toLowerCase s)"],
-      since: nil,
-      examples: [],
-      notes: nil,
-      section: "Interop",
-      ptc_extension?: false,
-      see_also: [],
-      clojure_var: ".toLowerCase",
+      clojure_var: nil,
       divergences: nil
     },
     %{
       name: ".length",
-      description: "Return the grapheme count of a string",
+      description: "Return the UTF-16 code-unit length of a string",
       binding: :normal,
       reference_ids: [:string_length],
       category: :interop,
-      dispatch: :env,
+      dispatch: :java,
       signatures: ["(.length s)"],
       since: nil,
       examples: [],
-      notes:
-        "Returns grapheme count (not byte length), matching `count` on a string and `.indexOf` index semantics.",
+      notes: "Uses Java UTF-16 code units; ordinary PTC `count` remains grapheme-based.",
       section: "Interop",
       ptc_extension?: false,
       see_also: ["count"],
-      clojure_var: ".length",
+      clojure_var: nil,
       divergences: nil
     },
     %{
       name: ".substring",
-      description: "Extract a substring by grapheme index",
-      binding: :multi_arity,
+      description: "Extract a substring by UTF-16 code-unit index",
+      binding: :normal,
       reference_ids: [:string_substring],
       category: :interop,
-      dispatch: :env,
+      dispatch: :java,
       signatures: ["(.substring s start)", "(.substring s start end)"],
       since: nil,
       examples: [],
       notes:
-        "Indices are grapheme-based (not byte offsets). Two-arg form returns graphemes in [start, end). Raises on out-of-range indices (matches Java's StringIndexOutOfBoundsException): start < 0, start > length, end > length, or start > end. Notably, (.substring s -1) raises rather than silently returning the last grapheme — important when chaining .indexOf, which returns -1 on miss.",
+        "Uses Java UTF-16 code-unit indexes. A range containing an unpaired surrogate returns invalid_java_string because PTC strings require valid UTF-8.",
       section: "Interop",
       ptc_extension?: false,
       see_also: [".indexOf", ".length"],
-      clojure_var: ".substring",
-      divergences: nil
-    },
-    %{
-      name: ".toUpperCase",
-      description: "Convert string to upper case",
-      binding: :normal,
-      reference_ids: [:string_to_upper_case],
-      category: :interop,
-      dispatch: :env,
-      signatures: ["(.toUpperCase s)"],
-      since: nil,
-      examples: [],
-      notes: nil,
-      section: "Interop",
-      ptc_extension?: false,
-      see_also: [],
-      clojure_var: ".toUpperCase",
+      clojure_var: nil,
       divergences: nil
     },
     %{
@@ -3774,7 +3687,7 @@
       binding: :normal,
       reference_ids: [:string_starts_with],
       category: :interop,
-      dispatch: :env,
+      dispatch: :java,
       signatures: ["(.startsWith s prefix)"],
       since: nil,
       examples: [],
@@ -3782,7 +3695,7 @@
       section: "Interop",
       ptc_extension?: false,
       see_also: [],
-      clojure_var: ".startsWith",
+      clojure_var: nil,
       divergences: nil
     },
     %{
@@ -3791,7 +3704,7 @@
       binding: :normal,
       reference_ids: [:string_ends_with],
       category: :interop,
-      dispatch: :env,
+      dispatch: :java,
       signatures: ["(.endsWith s suffix)"],
       since: nil,
       examples: [],
@@ -3799,7 +3712,7 @@
       section: "Interop",
       ptc_extension?: false,
       see_also: [],
-      clojure_var: ".endsWith",
+      clojure_var: nil,
       divergences: nil
     },
     %{

@@ -4589,63 +4589,63 @@
     "symbol": ".contains",
     "namespace": "java.lang.String",
     "compatibility_target": "Java",
-    "notes": "DIV-40: character literals are accepted as arguments (PTC-Lisp has no Character type). DIV-41: character-literal receivers behave as one-character strings"
+    "notes": "DIV-40: character literals are accepted as arguments (PTC-Lisp has no Character type). DIV-41: character-literal receivers behave as one-character strings. DIV-53: the bounded UTF-16 view rejects String inputs larger than 256,000 bytes."
   },
   {
     "status": "supported",
     "symbol": ".indexOf",
     "namespace": "java.lang.String",
     "compatibility_target": "Java",
-    "notes": "BUG GAP-J05: integer character-code overloads are unsupported. BUG GAP-J09: non-BMP offsets are grapheme-based instead of Java UTF-16 code-unit based. DIV-41: character-literal receivers behave as one-character strings (PTC-Lisp has no Character type)"
+    "notes": "BUG GAP-J05: integer character-code overloads are unsupported. Indexes use Java UTF-16 code units. DIV-41: character-literal receivers behave as one-character strings (PTC-Lisp has no Character type). DIV-53: the bounded UTF-16 view rejects String inputs larger than 256,000 bytes."
   },
   {
     "status": "supported",
     "symbol": ".lastIndexOf",
     "namespace": "java.lang.String",
     "compatibility_target": "Java",
-    "notes": "BUG GAP-J05: substring/from-index and integer character-code overloads are unsupported. BUG GAP-J09: non-BMP offsets are grapheme-based instead of Java UTF-16 code-unit based. DIV-41: character-literal receivers behave as one-character strings (PTC-Lisp has no Character type)"
+    "notes": "BUG GAP-J05: substring/from-index and integer character-code overloads are unsupported. Indexes use Java UTF-16 code units. DIV-41: character-literal receivers behave as one-character strings (PTC-Lisp has no Character type). DIV-53: the bounded UTF-16 view rejects String inputs larger than 256,000 bytes."
   },
   {
     "status": "supported",
     "symbol": ".length",
     "namespace": "java.lang.String",
     "compatibility_target": "Java",
-    "notes": "BUG GAP-J09: non-BMP length is grapheme-based instead of Java UTF-16 code-unit based. DIV-41: character-literal receivers behave as one-character strings (PTC-Lisp has no Character type)"
+    "notes": "Returns Java UTF-16 code-unit length. DIV-41: character-literal receivers behave as one-character strings (PTC-Lisp has no Character type). DIV-53: the bounded UTF-16 view rejects String inputs larger than 256,000 bytes."
   },
   {
     "status": "supported",
     "symbol": ".substring",
     "namespace": "java.lang.String",
     "compatibility_target": "Java",
-    "notes": "BUG GAP-J09: non-BMP indexes are grapheme-based instead of Java UTF-16 code-unit based. DIV-41: character-literal receivers behave as one-character strings (PTC-Lisp has no Character type)"
+    "notes": "Uses Java UTF-16 code-unit indexes. DIV-41: character-literal receivers behave as one-character strings. DIV-53: ranges containing an unpaired surrogate and inputs larger than 256,000 bytes produce invalid_java_string."
   },
   {
-    "status": "supported",
+    "status": "candidate",
     "symbol": ".toLowerCase",
     "namespace": "java.lang.String",
     "compatibility_target": "Java",
-    "notes": "DIV-41: character-literal receivers behave as one-character strings (PTC-Lisp has no Character type)"
+    "notes": "Deferred until a deterministic locale and pinned Unicode-data contract are selected."
   },
   {
-    "status": "supported",
+    "status": "candidate",
     "symbol": ".toUpperCase",
     "namespace": "java.lang.String",
     "compatibility_target": "Java",
-    "notes": "DIV-41: character-literal receivers behave as one-character strings (PTC-Lisp has no Character type)"
+    "notes": "Deferred until a deterministic locale and pinned Unicode-data contract are selected."
   },
   {
     "status": "supported",
     "symbol": ".startsWith",
     "namespace": "java.lang.String",
     "compatibility_target": "Java",
-    "notes": "BUG GAP-J05: prefix/offset overload is unsupported. DIV-40: character literals are accepted as arguments (PTC-Lisp has no Character type). DIV-41: character-literal receivers behave as one-character strings"
+    "notes": "BUG GAP-J05: prefix/offset overload is unsupported. DIV-40: character literals are accepted as arguments (PTC-Lisp has no Character type). DIV-41: character-literal receivers behave as one-character strings. DIV-53: the bounded UTF-16 view rejects String inputs larger than 256,000 bytes."
   },
   {
     "status": "supported",
     "symbol": ".endsWith",
     "namespace": "java.lang.String",
     "compatibility_target": "Java",
-    "notes": "DIV-40: character literals are accepted as arguments (PTC-Lisp has no Character type). DIV-41: character-literal receivers behave as one-character strings"
+    "notes": "DIV-40: character literals are accepted as arguments (PTC-Lisp has no Character type). DIV-41: character-literal receivers behave as one-character strings. DIV-53: the bounded UTF-16 view rejects String inputs larger than 256,000 bytes."
   },
   {
     "status": "candidate",
@@ -4673,7 +4673,7 @@
     "symbol": ".charAt",
     "namespace": "java.lang.String",
     "compatibility_target": "Java",
-    "notes": "Potentially useful, but PTC-Lisp must define grapheme semantics."
+    "notes": "Potentially useful, but PTC-Lisp must define how a Java UTF-16 char, including an isolated surrogate, is represented."
   },
   {
     "status": "not_relevant",

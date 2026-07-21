@@ -7,6 +7,8 @@ defmodule PtcRunner.Lisp.Analyze.Conditionals do
   using callback functions for analyzing sub-expressions and wrapping bodies.
   """
 
+  alias PtcRunner.Lisp.Analyze.Patterns
+
   # ============================================================
   # if
   # ============================================================
@@ -397,7 +399,8 @@ defmodule PtcRunner.Lisp.Analyze.Conditionals do
   # ============================================================
 
   # Helper: only allow simple symbol bindings (no destructuring)
-  defp analyze_simple_binding({:symbol, name}), do: {:ok, {:var, name}}
+  defp analyze_simple_binding({:symbol, _name} = pattern),
+    do: Patterns.analyze_pattern(pattern)
 
   defp analyze_simple_binding(_) do
     {:error, {:invalid_form, "binding must be a simple symbol, not a destructuring pattern"}}

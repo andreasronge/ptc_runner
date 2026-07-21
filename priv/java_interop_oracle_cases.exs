@@ -360,77 +360,63 @@ date = fn milliseconds -> value.(:date, milliseconds) end
     string.("alpha-beta"),
     [string.("beta")],
     value.(:boolean, "true"),
-    ["DIV-40", "DIV-41"]
+    ["DIV-40", "DIV-41", "DIV-53"]
   ),
   jvm.(
     :string_index_of_string,
     string.("😀a"),
     [string.("a")],
     value.(:int, "2"),
-    ["GAP-J09", "DIV-41"]
+    ["DIV-41", "DIV-53"]
   ),
   jvm.(
     :string_index_of_string_from,
     string.("ababa"),
     [string.("ba"), int.(2)],
     value.(:int, "3"),
-    ["GAP-J09", "DIV-41"]
+    ["DIV-41", "DIV-53"]
   ),
   jvm.(
     :string_last_index_of_string,
     string.("😀a😀"),
     [string.("😀")],
     value.(:int, "3"),
-    ["GAP-J09", "DIV-41"]
-  ),
-  jvm.(
-    :string_to_lower_case_0,
-    string.("ABC"),
-    [],
-    value.(:string, "abc"),
-    ["DIV-41"]
-  ),
-  jvm.(
-    :string_to_upper_case_0,
-    string.("abc"),
-    [],
-    value.(:string, "ABC"),
-    ["DIV-41"]
+    ["DIV-41", "DIV-53"]
   ),
   jvm.(
     :string_starts_with_string,
     string.("alpha"),
     [string.("al")],
     value.(:boolean, "true"),
-    ["DIV-40", "DIV-41"]
+    ["DIV-40", "DIV-41", "DIV-53"]
   ),
   jvm.(
     :string_ends_with_string,
     string.("alpha"),
     [string.("ha")],
     value.(:boolean, "true"),
-    ["DIV-40", "DIV-41"]
+    ["DIV-40", "DIV-41", "DIV-53"]
   ),
   jvm.(
     :string_length_0,
     string.("😀a"),
     [],
     value.(:int, "3"),
-    ["GAP-J09", "DIV-41"]
+    ["DIV-41", "DIV-53"]
   ),
   jvm.(
     :string_substring_begin,
     string.("😀a"),
     [int.(2)],
     value.(:string, "a"),
-    ["GAP-J09", "DIV-41"]
+    ["DIV-41", "DIV-53"]
   ),
   jvm.(
     :string_substring_begin_end,
     string.("😀a"),
     [int.(0), int.(2)],
     value.(:string, "😀"),
-    ["GAP-J09", "DIV-41"]
+    ["DIV-41", "DIV-53"]
   ),
   jvm.(
     :local_date_parse_char_sequence,

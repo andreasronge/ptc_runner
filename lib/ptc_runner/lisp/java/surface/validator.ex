@@ -20,7 +20,7 @@ defmodule PtcRunner.Lisp.Java.Surface.Validator do
   @argument_types ~w(char_sequence date double float instant int local_date long ptc_temporal string temporal)a
   @receiver_types ~w(string local_date instant duration date)a
   @return_types ~w(boolean double float int long string local_date instant duration date)a
-  @error_types ~w(arithmetic_exception date_time_exception date_time_parse_exception illegal_argument_exception null_pointer_exception number_format_exception string_index_out_of_bounds_exception)a
+  @error_types ~w(arithmetic_exception date_time_exception date_time_parse_exception illegal_argument_exception invalid_java_string null_pointer_exception number_format_exception string_index_out_of_bounds_exception)a
   @constructor_return_types %{java_util_date: :date}
   @divergence_id_pattern ~r/\A(?:GAP-[A-Z]\d+|DIV-\d+)\z/
   @reserved_non_java_namespaces [

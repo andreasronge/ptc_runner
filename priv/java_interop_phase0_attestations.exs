@@ -141,57 +141,47 @@
     string_contains_char_sequence: %{
       attestation: :jvm,
       descriptor: "(Ljava/lang/CharSequence;)Z",
-      divergence_ids: ["DIV-40", "DIV-41"]
+      divergence_ids: ["DIV-40", "DIV-41", "DIV-53"]
     },
     string_ends_with_string: %{
       attestation: :jvm,
       descriptor: "(Ljava/lang/String;)Z",
-      divergence_ids: ["DIV-40", "DIV-41"]
+      divergence_ids: ["DIV-40", "DIV-41", "DIV-53"]
     },
     string_index_of_string: %{
       attestation: :jvm,
       descriptor: "(Ljava/lang/String;)I",
-      divergence_ids: ["GAP-J09", "DIV-41"]
+      divergence_ids: ["DIV-41", "DIV-53"]
     },
     string_index_of_string_from: %{
       attestation: :jvm,
       descriptor: "(Ljava/lang/String;I)I",
-      divergence_ids: ["GAP-J09", "DIV-41"]
+      divergence_ids: ["DIV-41", "DIV-53"]
     },
     string_last_index_of_string: %{
       attestation: :jvm,
       descriptor: "(Ljava/lang/String;)I",
-      divergence_ids: ["GAP-J09", "DIV-41"]
+      divergence_ids: ["DIV-41", "DIV-53"]
     },
     string_length_0: %{
       attestation: :jvm,
       descriptor: "()I",
-      divergence_ids: ["GAP-J09", "DIV-41"]
+      divergence_ids: ["DIV-41", "DIV-53"]
     },
     string_starts_with_string: %{
       attestation: :jvm,
       descriptor: "(Ljava/lang/String;)Z",
-      divergence_ids: ["DIV-40", "DIV-41"]
+      divergence_ids: ["DIV-40", "DIV-41", "DIV-53"]
     },
     string_substring_begin: %{
       attestation: :jvm,
       descriptor: "(I)Ljava/lang/String;",
-      divergence_ids: ["GAP-J09", "DIV-41"]
+      divergence_ids: ["DIV-41", "DIV-53"]
     },
     string_substring_begin_end: %{
       attestation: :jvm,
       descriptor: "(II)Ljava/lang/String;",
-      divergence_ids: ["GAP-J09", "DIV-41"]
-    },
-    string_to_lower_case_0: %{
-      attestation: :jvm,
-      descriptor: "()Ljava/lang/String;",
-      divergence_ids: ["DIV-41"]
-    },
-    string_to_upper_case_0: %{
-      attestation: :jvm,
-      descriptor: "()Ljava/lang/String;",
-      divergence_ids: ["DIV-41"]
+      divergence_ids: ["DIV-41", "DIV-53"]
     },
     system_current_time_millis_0: %{attestation: :jvm, descriptor: "()J", divergence_ids: []}
   }

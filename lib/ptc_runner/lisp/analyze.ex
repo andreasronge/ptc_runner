@@ -243,7 +243,7 @@ defmodule PtcRunner.Lisp.Analyze do
   # ============================================================
 
   defp do_analyze({:symbol, name}, _tail?) do
-    case closed_java_plain_reference(name) do
+    case closed_java_value_reference(name) do
       {:ok, reference} ->
         analyze_java_reference(reference)
 
@@ -617,7 +617,8 @@ defmodule PtcRunner.Lisp.Analyze do
   # Named fn: (fn name [params] body ...)
   defp analyze_fn([{:symbol, name}, params_ast | body_asts])
        when is_atom(name) or is_binary(name) do
-    with {:ok, params} <- analyze_fn_params(params_ast) do
+    with :ok <- Patterns.validate_binding_name(name),
+         {:ok, params} <- analyze_fn_params(params_ast) do
       shadowed = compute_shadowed_names(params)
       body_asts = mark_shadowed_asts(body_asts, shadowed)
 
@@ -789,7 +790,8 @@ defmodule PtcRunner.Lisp.Analyze do
   end
 
   defp analyze_as_thread_impl([expr_ast, {:symbol, name} | forms], tail?) do
-    with {:ok, acc} <- do_analyze(expr_ast, false) do
+    with :ok <- Patterns.validate_binding_name(name),
+         {:ok, acc} <- do_analyze(expr_ast, false) do
       as_thread_steps(name, acc, forms, tail?)
     end
   end
@@ -1003,13 +1005,31 @@ defmodule PtcRunner.Lisp.Analyze do
   # Delegated to PtcRunner.Lisp.Analyze.Definitions
   # ============================================================
 
-  defp analyze_def(args, _tail?),
-    do: Definitions.analyze_def(args, &analyze_value/1)
+  defp analyze_def([{:symbol, name} | _] = args, _tail?) do
+    with :ok <- Patterns.validate_binding_name(name) do
+      Definitions.analyze_def(args, &analyze_value/1)
+    end
+  end
 
-  defp analyze_defonce(args, _tail?),
-    do: Definitions.analyze_defonce(args, &analyze_value/1)
+  defp analyze_def(args, _tail?), do: Definitions.analyze_def(args, &analyze_value/1)
 
-  defp analyze_defn(args, _tail?) do
+  defp analyze_defonce([{:symbol, name} | _] = args, _tail?) do
+    with :ok <- Patterns.validate_binding_name(name) do
+      Definitions.analyze_defonce(args, &analyze_value/1)
+    end
+  end
+
+  defp analyze_defonce(args, _tail?), do: Definitions.analyze_defonce(args, &analyze_value/1)
+
+  defp analyze_defn([{:symbol, name} | _] = args, _tail?) do
+    with :ok <- Patterns.validate_binding_name(name) do
+      do_analyze_defn(args)
+    end
+  end
+
+  defp analyze_defn(args, _tail?), do: do_analyze_defn(args)
+
+  defp do_analyze_defn(args) do
     Definitions.analyze_defn(args, &analyze_fn_params/1, fn body_asts, tail?, params ->
       shadowed = compute_shadowed_names(params)
       body_asts = mark_shadowed_asts(body_asts, shadowed)
@@ -1055,6 +1075,23 @@ defmodule PtcRunner.Lisp.Analyze do
 
       :error ->
         :legacy_or_non_java
+    end
+  end
+
+  defp closed_java_value_reference(name) do
+    case closed_java_plain_reference(name) do
+      {:ok, _reference} = resolved -> resolved
+      :legacy_or_non_java -> closed_java_member_family_reference(name)
+    end
+  end
+
+  defp closed_java_member_family_reference(name) do
+    with {:ok, member_family_id} <- JavaSurface.resolve_member_family(name),
+         [reference] <- JavaSurface.member_family_references(member_family_id),
+         true <- JavaSurface.closed_dispatch_reference?(reference.reference_id) do
+      {:ok, reference}
+    else
+      _ambiguous_open_or_missing -> :legacy_or_non_java
     end
   end
 

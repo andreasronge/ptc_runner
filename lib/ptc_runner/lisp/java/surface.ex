@@ -146,6 +146,21 @@ defmodule PtcRunner.Lisp.Java.Surface do
     Map.fetch(@member_source_table, to_string(spelling))
   end
 
+  @doc "Returns true when a direct-dot spelling names a fully migrated member family."
+  @spec closed_member_family_spelling?(atom() | String.t()) :: boolean()
+  def closed_member_family_spelling?(spelling) do
+    case resolve_member_family(spelling) do
+      {:ok, member_family_id} ->
+        references = member_family_references(member_family_id)
+
+        references != [] and
+          Enum.all?(references, &closed_dispatch_reference?(&1.reference_id))
+
+      :error ->
+        false
+    end
+  end
+
   @doc "Returns true when every overload for a reference uses closed dispatch."
   @spec closed_dispatch_reference?(atom()) :: boolean()
   def closed_dispatch_reference?(reference_id) do

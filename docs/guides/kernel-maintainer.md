@@ -227,7 +227,9 @@ Callable application derives the invocation kind from that reference: instance
 callables consume the receiver as their first application argument. Java class
 constructor heads and direct-dot member families resolve from source spellings
 through the manifest, but enter Java CoreAST only when the complete applicable
-reference family is closed. Java values and recursively projected BEAM structs
+reference family is closed. Closed direct-dot spellings are reserved Java syntax
+and the analyzer rejects attempts to introduce them as local or user-namespace
+bindings. Java values and recursively projected BEAM structs
 must have exactly their declared fields; projection never fills missing fields
 from struct defaults. Java class
 spellings are host-owned namespaces and cannot be

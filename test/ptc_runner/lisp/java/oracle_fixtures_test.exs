@@ -1,5 +1,5 @@
 defmodule PtcRunner.Lisp.Java.OracleFixturesTest do
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
 
   alias PtcRunner.Lisp.Java.Oracle.Config
   alias PtcRunner.Lisp.Java.Oracle.Fixtures
@@ -172,6 +172,15 @@ defmodule PtcRunner.Lisp.Java.OracleFixturesTest do
                  math-sqrt-double-negative
                  math-sqrt-double-negative-zero
                  system-current-time-millis-0
+                 string-contains-char-sequence
+                 string-index-of-string
+                 string-index-of-string-from
+                 string-last-index-of-string
+                 string-starts-with-string
+                 string-ends-with-string
+                 string-length-0
+                 string-substring-begin
+                 string-substring-begin-end
                  local-date-parse-char-sequence
                  local-date-parse-positive-zero-extended-year
                  local-date-parse-invalid

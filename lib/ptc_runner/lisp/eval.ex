@@ -61,6 +61,7 @@ defmodule PtcRunner.Lisp.Eval do
   alias PtcRunner.Lisp.Java.Dispatch, as: JavaDispatch
   alias PtcRunner.Lisp.Java.Primitive, as: JavaPrimitive
   alias PtcRunner.Lisp.Java.Project, as: JavaProject
+  alias PtcRunner.Lisp.Java.Surface, as: JavaSurface
   alias PtcRunner.Lisp.Java.Time.Duration, as: JavaDuration
   alias PtcRunner.Lisp.Java.Time.Instant, as: JavaInstant
   alias PtcRunner.Lisp.Java.Time.LocalDate, as: JavaLocalDate
@@ -946,7 +947,14 @@ defmodule PtcRunner.Lisp.Eval do
 
     if String.starts_with?(name_str, ".") do
       available =
-        Env.builtins_by_category(:interop)
+        JavaSurface.references()
+        |> Enum.filter(
+          &(&1.kind == :instance and
+              JavaSurface.closed_dispatch_reference?(&1.reference_id))
+        )
+        |> Enum.flat_map(& &1.spellings)
+        |> Enum.uniq()
+        |> Enum.sort()
         |> Enum.map_join(", ", &to_string/1)
 
       {:error, {:unsupported_method, name_str, available}}

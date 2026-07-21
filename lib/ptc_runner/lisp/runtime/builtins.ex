@@ -334,22 +334,7 @@ defmodule PtcRunner.Lisp.Runtime.Builtins do
       # ============================================================
       {:intersection, {:variadic_nonempty, :intersection, &Runtime.intersection/2}},
       {:union, {:variadic, &Runtime.union/2, MapSet.new()}},
-      {:difference, {:variadic_nonempty, :difference, &Runtime.difference/2}},
-
-      # ============================================================
-      # Interop
-      # ============================================================
-      {:".contains", {:normal, &Runtime.dot_contains/2}},
-      {:".indexOf",
-       {:multi_arity, :".indexOf", {&Runtime.dot_index_of/2, &Runtime.dot_index_of/3}}},
-      {:".lastIndexOf", {:normal, &Runtime.dot_last_index_of/2}},
-      {:".toLowerCase", {:normal, &Runtime.dot_to_lower_case/1}},
-      {:".toUpperCase", {:normal, &Runtime.dot_to_upper_case/1}},
-      {:".length", {:normal, &Runtime.dot_length/1}},
-      {:".substring",
-       {:multi_arity, :".substring", {&Runtime.dot_substring/2, &Runtime.dot_substring/3}}},
-      {:".startsWith", {:normal, &Runtime.dot_starts_with/2}},
-      {:".endsWith", {:normal, &Runtime.dot_ends_with/2}}
+      {:difference, {:variadic_nonempty, :difference, &Runtime.difference/2}}
     ]
   end
 end

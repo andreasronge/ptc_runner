@@ -486,26 +486,6 @@
       }
     },
     {
-      "case_id": "string-to-lower-case-0",
-      "overload_id": "string_to_lower_case_0",
-      "descriptor": "()Ljava/lang/String;",
-      "expected": {
-        "status": "ok",
-        "type": "string",
-        "value": "abc"
-      }
-    },
-    {
-      "case_id": "string-to-upper-case-0",
-      "overload_id": "string_to_upper_case_0",
-      "descriptor": "()Ljava/lang/String;",
-      "expected": {
-        "status": "ok",
-        "type": "string",
-        "value": "ABC"
-      }
-    },
-    {
       "case_id": "string-starts-with-string",
       "overload_id": "string_starts_with_string",
       "descriptor": "(Ljava/lang/String;)Z",
