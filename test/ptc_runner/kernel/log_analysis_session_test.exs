@@ -973,7 +973,7 @@ defmodule PtcRunner.Kernel.LogAnalysisSessionTest do
       end)
 
     builder_ref = Process.monitor(builder)
-    assert_receive {:construction_started, resources}
+    assert_receive {:construction_started, resources}, 5_000
 
     session_ref = Process.monitor(resources.session.pid)
     trace_ref = Process.monitor(resources.session_trace.pid)

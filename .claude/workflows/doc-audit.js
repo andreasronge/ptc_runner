@@ -159,7 +159,7 @@ ${GUIDELINES}
 Do this:
 1. Read the ENTIRE file \`${doc}\` (read in chunks if it is long — do not skim).
 2. Identify its layer (README / repo-instructions / guide / specification / generated-reference) and hold it to the matching rules above.
-3. BROKEN REFERENCES — for every relative link \`[text](target)\`, image, and inline path (including example paths like \`examples/...\` in code fences and \`mix ptc.run <path>\` commands), resolve it RELATIVE TO THIS DOC'S OWN DIRECTORY and confirm it exists on disk with Bash (\`test -e\`, \`ls\`). For anchor links (\`#heading\` or \`file.md#heading\`), confirm the heading actually exists in the target file. Report every dangling target.
+3. BROKEN REFERENCES — for every relative Markdown link \`[text](target)\` and image, resolve the target relative to this doc's directory and confirm it exists on disk with Bash (\`test -e\`, \`ls\`). For inline repository paths (including example paths like \`examples/...\` in code fences and \`mix ptc.run <path>\` commands), use the working directory stated by the surrounding documentation; if none is stated, test the intended repository-root or source-relative context before reporting a dangling target. For anchor links (\`#heading\` or \`file.md#heading\`), confirm the heading actually exists in the target file. Report every dangling target.
 4. GUIDELINE VIOLATIONS — flag any link into \`docs/plans/\` from this doc; any planned/speculative API described as if it already exists (verify against lib/**); any migration/deprecation narrative; any duplicated contract that should be a link.
 5. CORRECTNESS — verify concrete claims against the implementation with Bash/grep: mix task names (\`mix ptc.run\`, \`mix ptc.repl\`, \`mix ptc.gen_docs\`, \`mix precommit\`, \`mix prepush\`), module names (e.g. \`PtcRunner.Kernel\`), function names/arities, option keys, error atoms, config/manifest keys, prelude names and namespaces (e.g. \`log.core\`, \`log/runs\`), CLI flags, and quoted code snippets. If the doc names something that does not exist or contradicts the source, report it with the source location.
 6. LEGACY / STALE — status tables that mislabel shipped vs planned, obsolete counts, renamed/removed modules, dead feature references, outdated version/availability claims.
@@ -185,7 +185,7 @@ Suggested fix: ${f.suggested_fix}
 ${CONTEXT}
 
 Independently re-check against disk/source (do not trust the evidence text):
-- broken-reference: resolve the target relative to \`${doc}\`'s directory and test existence yourself (\`test -e\`, \`ls\`); for anchors, grep the target file for the heading. CONFIRMED only if it is genuinely missing.
+- broken-reference: for Markdown links and images, resolve the target relative to \`${doc}\`'s directory and test existence yourself (\`test -e\`, \`ls\`); for inline repository paths and command arguments, use the working directory stated by the doc rather than treating a repository-root path as doc-relative. For anchors, grep the target file for the heading. CONFIRMED only if it is genuinely missing.
 - correctness / legacy-stale: grep lib/**, priv/**, mix.exs, examples/** to confirm the doc truly contradicts the implementation. A thing defined via macro/metaprogramming still exists — check before rejecting.
 - guideline-violation: confirm the rule is actually broken (e.g. an actual \`docs/plans/\` link, or planned behavior stated as current).
 - completeness: CONFIRM only if the omission is real and important for this doc's layer.
