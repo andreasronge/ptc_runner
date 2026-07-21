@@ -1663,14 +1663,14 @@
     "symbol": "inst-ms",
     "namespace": "clojure.core",
     "compatibility_target": "Clojure",
-    "notes": "covered by existing temporal interop .getTime"
+    "notes": "Use .toEpochMilli on a native java.time.Instant or .getTime on java.util.Date."
   },
   {
     "status": "not_relevant",
     "symbol": "inst?",
     "namespace": "clojure.core",
     "compatibility_target": "Clojure",
-    "notes": "Clojure instant predicate; PTC-Lisp temporal interop uses host date structs"
+    "notes": "Native Java temporal wrappers retain class identity; no general JVM instance predicate."
   },
   {
     "status": "not_relevant",
@@ -4050,7 +4050,7 @@
     "symbol": "Math/abs",
     "namespace": "java.lang.Math",
     "compatibility_target": "Java",
-    "notes": "DIV-45: uses PTC-Lisp arbitrary-precision integers, so abs returns the mathematically correct positive value and accepts BigInt input rather than reproducing Java long-overflow/overload artifacts"
+    "notes": "Uses the selected Java primitive overload, including int/long minimum overflow."
   },
   {
     "status": "candidate",
@@ -4099,7 +4099,7 @@
     "symbol": "Math/ceil",
     "namespace": "java.lang.Math",
     "compatibility_target": "Java",
-    "notes": "DIV-42: integer-returning PTC-Lisp extension, so finite results render as integers rather than Java's double shape"
+    "notes": "Returns a Java double, preserving signed zero and non-finite values."
   },
   {
     "status": "not_relevant",
@@ -4148,7 +4148,7 @@
     "symbol": "Math/floor",
     "namespace": "java.lang.Math",
     "compatibility_target": "Java",
-    "notes": "DIV-42: integer-returning PTC-Lisp extension, so finite results render as integers rather than Java's double shape"
+    "notes": "Returns a Java double, preserving signed zero and non-finite values."
   },
   {
     "status": "not_relevant",
@@ -4225,14 +4225,14 @@
     "symbol": "Math/max",
     "namespace": "java.lang.Math",
     "compatibility_target": "Java",
-    "notes": "DIV-44: max is the Clojure-named variadic helper (Math/max is an alias), not Java's two-argument primitive. DIV-45: mixed numeric and total-ordering comparisons are accepted via PTC-Lisp's generic value model rather than Java's primitive overloads"
+    "notes": "Uses Java's two-argument primitive overloads, including NaN and signed-zero behavior."
   },
   {
     "status": "supported",
     "symbol": "Math/min",
     "namespace": "java.lang.Math",
     "compatibility_target": "Java",
-    "notes": "DIV-44: min is the Clojure-named variadic helper (Math/min is an alias), not Java's two-argument primitive. DIV-45: mixed numeric and total-ordering comparisons are accepted via PTC-Lisp's generic value model rather than Java's primitive overloads"
+    "notes": "Uses Java's two-argument primitive overloads, including NaN and signed-zero behavior."
   },
   {
     "status": "not_relevant",
@@ -4302,7 +4302,7 @@
     "symbol": "Math/round",
     "namespace": "java.lang.Math",
     "compatibility_target": "Java",
-    "notes": "DIV-43: round-half-away-from-zero, integer result, and special values (NaN/infinity) are preserved rather than Java's floor(x+0.5) and long saturation. DIV-45: integer and BigInt arguments are accepted (returned unchanged) via PTC-Lisp's value model rather than Java's float/double-only overloads"
+    "notes": "Uses Java float/double overloads, ties toward positive infinity, and Java NaN/infinity saturation."
   },
   {
     "status": "not_relevant",
@@ -4428,7 +4428,7 @@
     "symbol": "Double/parseDouble",
     "namespace": "java.lang.Double",
     "compatibility_target": "Java",
-    "notes": "BUG GAP-J01: currently aliases parse-double, returns nil on invalid input, and rejects surrounding whitespace that Java accepts."
+    "notes": "Matches Java parsing, including bounded NumberFormatException/NullPointerException failures, surrounding Java whitespace, hexadecimal syntax, and exact double rounding."
   },
   {
     "status": "supported",
@@ -4484,7 +4484,7 @@
     "symbol": "Float/parseFloat",
     "namespace": "java.lang.Float",
     "compatibility_target": "Java",
-    "notes": "BUG GAP-J01: currently aliases parse-double, returns nil on invalid input, and rejects surrounding whitespace that Java accepts. PTC-Lisp uses one floating type."
+    "notes": "Matches Java parsing, including bounded NumberFormatException/NullPointerException failures, surrounding Java whitespace, hexadecimal syntax, and exact float rounding."
   },
   {
     "status": "candidate",
@@ -4519,7 +4519,7 @@
     "symbol": "Integer/parseInt",
     "namespace": "java.lang.Integer",
     "compatibility_target": "Java",
-    "notes": "BUG GAP-J01: currently aliases parse-long, returns nil on invalid input, and accepts values outside Java int range; Java raises NumberFormatException. BUG GAP-J15: radix overload is unsupported."
+    "notes": "Matches Java decimal parsing and int range failures. BUG GAP-J15: radix overload is unsupported."
   },
   {
     "status": "candidate",
@@ -4554,7 +4554,7 @@
     "symbol": "Long/parseLong",
     "namespace": "java.lang.Long",
     "compatibility_target": "Java",
-    "notes": "BUG GAP-J01: currently aliases parse-long, returns nil on invalid input, and accepts values outside Java long range; Java raises NumberFormatException. BUG GAP-J15: radix overload is unsupported."
+    "notes": "Matches Java decimal parsing and long range failures. BUG GAP-J15: radix overload is unsupported."
   },
   {
     "status": "candidate",
@@ -4589,63 +4589,63 @@
     "symbol": ".contains",
     "namespace": "java.lang.String",
     "compatibility_target": "Java",
-    "notes": "DIV-40: character literals are accepted as arguments (PTC-Lisp has no Character type). DIV-41: character-literal receivers behave as one-character strings"
+    "notes": "DIV-40: character literals are accepted as arguments (PTC-Lisp has no Character type). DIV-41: character-literal receivers behave as one-character strings. DIV-53: the bounded UTF-16 view rejects String inputs larger than 256,000 bytes."
   },
   {
     "status": "supported",
     "symbol": ".indexOf",
     "namespace": "java.lang.String",
     "compatibility_target": "Java",
-    "notes": "BUG GAP-J05: integer character-code overloads are unsupported. BUG GAP-J09: non-BMP offsets are grapheme-based instead of Java UTF-16 code-unit based. DIV-41: character-literal receivers behave as one-character strings (PTC-Lisp has no Character type)"
+    "notes": "BUG GAP-J05: integer character-code overloads are unsupported. Indexes use Java UTF-16 code units. DIV-41: character-literal receivers behave as one-character strings (PTC-Lisp has no Character type). DIV-53: the bounded UTF-16 view rejects String inputs larger than 256,000 bytes."
   },
   {
     "status": "supported",
     "symbol": ".lastIndexOf",
     "namespace": "java.lang.String",
     "compatibility_target": "Java",
-    "notes": "BUG GAP-J05: substring/from-index and integer character-code overloads are unsupported. BUG GAP-J09: non-BMP offsets are grapheme-based instead of Java UTF-16 code-unit based. DIV-41: character-literal receivers behave as one-character strings (PTC-Lisp has no Character type)"
+    "notes": "BUG GAP-J05: substring/from-index and integer character-code overloads are unsupported. Indexes use Java UTF-16 code units. DIV-41: character-literal receivers behave as one-character strings (PTC-Lisp has no Character type). DIV-53: the bounded UTF-16 view rejects String inputs larger than 256,000 bytes."
   },
   {
     "status": "supported",
     "symbol": ".length",
     "namespace": "java.lang.String",
     "compatibility_target": "Java",
-    "notes": "BUG GAP-J09: non-BMP length is grapheme-based instead of Java UTF-16 code-unit based. DIV-41: character-literal receivers behave as one-character strings (PTC-Lisp has no Character type)"
+    "notes": "Returns Java UTF-16 code-unit length. DIV-41: character-literal receivers behave as one-character strings (PTC-Lisp has no Character type). DIV-53: the bounded UTF-16 view rejects String inputs larger than 256,000 bytes."
   },
   {
     "status": "supported",
     "symbol": ".substring",
     "namespace": "java.lang.String",
     "compatibility_target": "Java",
-    "notes": "BUG GAP-J09: non-BMP indexes are grapheme-based instead of Java UTF-16 code-unit based. DIV-41: character-literal receivers behave as one-character strings (PTC-Lisp has no Character type)"
+    "notes": "Uses Java UTF-16 code-unit indexes. DIV-41: character-literal receivers behave as one-character strings. DIV-53: ranges containing an unpaired surrogate and inputs larger than 256,000 bytes produce invalid_java_string."
   },
   {
-    "status": "supported",
+    "status": "candidate",
     "symbol": ".toLowerCase",
     "namespace": "java.lang.String",
     "compatibility_target": "Java",
-    "notes": "DIV-41: character-literal receivers behave as one-character strings (PTC-Lisp has no Character type)"
+    "notes": "Deferred until a deterministic locale and pinned Unicode-data contract are selected."
   },
   {
-    "status": "supported",
+    "status": "candidate",
     "symbol": ".toUpperCase",
     "namespace": "java.lang.String",
     "compatibility_target": "Java",
-    "notes": "DIV-41: character-literal receivers behave as one-character strings (PTC-Lisp has no Character type)"
+    "notes": "Deferred until a deterministic locale and pinned Unicode-data contract are selected."
   },
   {
     "status": "supported",
     "symbol": ".startsWith",
     "namespace": "java.lang.String",
     "compatibility_target": "Java",
-    "notes": "BUG GAP-J05: prefix/offset overload is unsupported. DIV-40: character literals are accepted as arguments (PTC-Lisp has no Character type). DIV-41: character-literal receivers behave as one-character strings"
+    "notes": "BUG GAP-J05: prefix/offset overload is unsupported. DIV-40: character literals are accepted as arguments (PTC-Lisp has no Character type). DIV-41: character-literal receivers behave as one-character strings. DIV-53: the bounded UTF-16 view rejects String inputs larger than 256,000 bytes."
   },
   {
     "status": "supported",
     "symbol": ".endsWith",
     "namespace": "java.lang.String",
     "compatibility_target": "Java",
-    "notes": "DIV-40: character literals are accepted as arguments (PTC-Lisp has no Character type). DIV-41: character-literal receivers behave as one-character strings"
+    "notes": "DIV-40: character literals are accepted as arguments (PTC-Lisp has no Character type). DIV-41: character-literal receivers behave as one-character strings. DIV-53: the bounded UTF-16 view rejects String inputs larger than 256,000 bytes."
   },
   {
     "status": "candidate",
@@ -4673,7 +4673,7 @@
     "symbol": ".charAt",
     "namespace": "java.lang.String",
     "compatibility_target": "Java",
-    "notes": "Potentially useful, but PTC-Lisp must define grapheme semantics."
+    "notes": "Potentially useful, but PTC-Lisp must define how a Java UTF-16 char, including an isolated surrogate, is represented."
   },
   {
     "status": "not_relevant",
@@ -4729,7 +4729,7 @@
     "symbol": "LocalDate/parse",
     "namespace": "java.time.LocalDate",
     "compatibility_target": "Java",
-    "notes": "Also available as java.time.LocalDate/parse and parse. BUG GAP-J06: date-time strings are accepted instead of rejected."
+    "notes": "Also available as java.time.LocalDate/parse; parsing is class-specific and strict."
   },
   {
     "status": "candidate",
@@ -4743,14 +4743,14 @@
     "symbol": ".isBefore",
     "namespace": "java.time.LocalDate",
     "compatibility_target": "Java",
-    "notes": "Works for same-type Date or DateTime values."
+    "notes": "Works for native LocalDate values only."
   },
   {
     "status": "supported",
     "symbol": ".isAfter",
     "namespace": "java.time.LocalDate",
     "compatibility_target": "Java",
-    "notes": "Works for same-type Date or DateTime values."
+    "notes": "Works for native LocalDate values only."
   },
   {
     "status": "candidate",
@@ -4778,21 +4778,21 @@
     "symbol": ".plusDays",
     "namespace": "java.time.LocalDate",
     "compatibility_target": "Java",
-    "notes": "Requested in issue #1019 for date arithmetic. BUG GAP-J12: floating and NaN day counts are rejected instead of following Clojure Java interop coercion."
+    "notes": "Requested in issue #1019 for date arithmetic."
   },
   {
     "status": "supported",
     "symbol": ".minusDays",
     "namespace": "java.time.LocalDate",
     "compatibility_target": "Java",
-    "notes": "Requested in issue #1019 for date arithmetic. BUG GAP-J12: floating and NaN day counts are rejected instead of following Clojure Java interop coercion."
+    "notes": "Requested in issue #1019 for date arithmetic."
   },
   {
     "status": "supported",
     "symbol": "Instant/parse",
     "namespace": "java.time.Instant",
     "compatibility_target": "Java",
-    "notes": "Also available as java.time.Instant/parse and parse. BUG GAP-J06: date-only and no-zone date-time strings are accepted instead of rejected."
+    "notes": "Also available as java.time.Instant/parse; parsing requires an offset."
   },
   {
     "status": "candidate",
@@ -4806,42 +4806,42 @@
     "symbol": ".isBefore",
     "namespace": "java.time.Instant",
     "compatibility_target": "Java",
-    "notes": "Works for same-type Date or DateTime values."
+    "notes": "Works for native Instant values only."
   },
   {
     "status": "supported",
     "symbol": ".isAfter",
     "namespace": "java.time.Instant",
     "compatibility_target": "Java",
-    "notes": "Works for same-type Date or DateTime values."
+    "notes": "Works for native Instant values only."
   },
   {
-    "status": "supported",
+    "status": "not_relevant",
     "symbol": ".getTime",
     "namespace": "java.time.Instant",
     "compatibility_target": "Java",
-    "notes": "BUG GAP-J04: Java Instant has toEpochMilli, not getTime; current behavior is a PTC convenience."
+    "notes": "Removed from Instant when class-aware temporal dispatch landed."
   },
   {
-    "status": "candidate",
+    "status": "supported",
     "symbol": ".toEpochMilli",
     "namespace": "java.time.Instant",
     "compatibility_target": "Java",
-    "notes": "BUG GAP-J18: Java Instant.toEpochMilli is unsupported while .getTime is exposed."
+    "notes": "Raises a bounded arithmetic condition when the result exceeds Java long."
   },
   {
     "status": "candidate",
     "symbol": "Instant/ofEpochMilli",
     "namespace": "java.time.Instant",
     "compatibility_target": "Java",
-    "notes": "java.util.Date. already accepts seconds or milliseconds."
+    "notes": "java.util.Date. accepts exact epoch milliseconds but returns a Date, not an Instant."
   },
   {
     "status": "supported",
     "symbol": "Duration/between",
     "namespace": "java.time.Duration",
     "compatibility_target": "Java",
-    "notes": "Requested in issue #1019 for millisecond/day differences. BUG GAP-J19: java.util.Date inputs are accepted instead of rejected."
+    "notes": "Requested in issue #1019 for millisecond/day differences. DIV-52: the admitted profile accepts Instants only rather than every Temporal implementation."
   },
   {
     "status": "supported",
@@ -4904,42 +4904,42 @@
     "symbol": "java.util.Date.",
     "namespace": "java.util.Date",
     "compatibility_target": "Java",
-    "notes": "BUG GAP-J03: numeric constructor currently treats milliseconds as seconds. BUG GAP-J06: ISO date strings are accepted by PTC-Lisp but rejected by the Java oracle. BUG GAP-J11: Java-accepted legacy date strings are rejected. EXTENSION GAP-J21: existing PTC temporal values are accepted directly."
+    "notes": "Numeric input is exact epoch milliseconds. DIV-51: string input uses a deterministic bounded legacy English grammar, admits dates on or after 1582-10-15, and uses UTC when no zone is present."
   },
   {
     "status": "supported",
     "symbol": ".getTime",
     "namespace": "java.util.Date",
     "compatibility_target": "Java",
-    "notes": "Works on DateTime values."
+    "notes": "Works only on native java.util.Date values."
   },
   {
-    "status": "supported",
+    "status": "not_relevant",
     "symbol": ".isBefore",
     "namespace": "java.util.Date",
     "compatibility_target": "Java",
-    "notes": "BUG GAP-J20: java.util.Date uses .before, not .isBefore; current behavior exposes a non-Java alias."
+    "notes": "Removed from Date when class-aware temporal dispatch landed."
   },
   {
-    "status": "supported",
+    "status": "not_relevant",
     "symbol": ".isAfter",
     "namespace": "java.util.Date",
     "compatibility_target": "Java",
-    "notes": "BUG GAP-J20: java.util.Date uses .after, not .isAfter; current behavior exposes a non-Java alias."
+    "notes": "Removed from Date when class-aware temporal dispatch landed."
   },
   {
-    "status": "candidate",
+    "status": "supported",
     "symbol": ".before",
     "namespace": "java.util.Date",
     "compatibility_target": "Java",
-    "notes": ".isBefore covers the current PTC-Lisp spelling."
+    "notes": "Class-owned java.util.Date comparison."
   },
   {
-    "status": "candidate",
+    "status": "supported",
     "symbol": ".after",
     "namespace": "java.util.Date",
     "compatibility_target": "Java",
-    "notes": ".isAfter covers the current PTC-Lisp spelling."
+    "notes": "Class-owned java.util.Date comparison."
   },
   {
     "status": "not_relevant",

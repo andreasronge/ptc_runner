@@ -5520,20 +5520,6 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         ["Period/parse"],
         ~S|(java.time.Period/parse "P2D")|,
         "java.time.Period is outside the current minimal interop surface."
-      ),
-      unsupported_case(
-        "candidate/java-date-before-001",
-        "java.util.Date",
-        [".before"],
-        "(.before (java.util.Date. 0) (java.util.Date. 1000))",
-        "Java Date comparison candidate outside the current minimal interop surface."
-      ),
-      unsupported_case(
-        "candidate/java-date-after-001",
-        "java.util.Date",
-        [".after"],
-        "(.after (java.util.Date. 1000) (java.util.Date. 0))",
-        "Java Date comparison candidate outside the current minimal interop surface."
       )
     ]
   end
@@ -5578,19 +5564,19 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         ~S|(.substring "abcdef" 1 4)|,
         [:java, :string]
       ),
-      c(
+      unsupported_case(
         "java/string-lower-001",
         "java.lang.String",
         [".toLowerCase"],
         ~S|(.toLowerCase "AbC")|,
-        [:java, :string]
+        "Locale-sensitive no-argument Java casing is deferred until a deterministic locale and Unicode-data contract are selected."
       ),
-      c(
+      unsupported_case(
         "java/string-upper-001",
         "java.lang.String",
         [".toUpperCase"],
         ~S|(.toUpperCase "AbC")|,
-        [:java, :string]
+        "Locale-sensitive no-argument Java casing is deferred until a deterministic locale and Unicode-data contract are selected."
       ),
       c(
         "java/string-starts-001",
@@ -5674,6 +5660,13 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         [:java]
       ),
       c(
+        "java/instant-to-epoch-milli-001",
+        "java.time.Instant",
+        [".toEpochMilli"],
+        ~S|(.toEpochMilli (java.time.Instant/parse "1970-01-01T00:00:01Z"))|,
+        [:java]
+      ),
+      c(
         "java/duration-to-millis-001",
         "java.time.Duration",
         ["Duration/between", ".toMillis"],
@@ -5688,6 +5681,27 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         [:java]
       ),
       c(
+        "java/util-date-get-time-001",
+        "java.util.Date",
+        ["java.util.Date.", ".getTime"],
+        ~S|(.getTime (java.util.Date. 1))|,
+        [:java]
+      ),
+      c(
+        "java/util-date-before-001",
+        "java.util.Date",
+        [".before"],
+        ~S|(.before (java.util.Date. 0) (java.util.Date. 1))|,
+        [:java]
+      ),
+      c(
+        "java/util-date-after-001",
+        "java.util.Date",
+        [".after"],
+        ~S|(.after (java.util.Date. 1) (java.util.Date. 0))|,
+        [:java]
+      ),
+      c(
         "java/system-current-time-millis-001",
         "java.lang.System",
         ["System/currentTimeMillis"],
@@ -5699,7 +5713,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
 
   defp java_bug_cases do
     [
-      bug_case(
+      fixed_bug_case(
         "java/integer-parse-int-bug-001",
         "java.lang.Integer",
         ["Integer/parseInt"],
@@ -5707,7 +5721,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-J01",
         "Java parseInt raises NumberFormatException, but PTC-Lisp currently returns nil."
       ),
-      bug_case(
+      fixed_bug_case(
         "java/integer-parse-int-empty-bug-001",
         "java.lang.Integer",
         ["Integer/parseInt"],
@@ -5715,7 +5729,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-J01",
         "Java parseInt raises NumberFormatException for an empty string, but PTC-Lisp currently returns nil."
       ),
-      bug_case(
+      fixed_bug_case(
         "java/integer-parse-int-whitespace-bug-001",
         "java.lang.Integer",
         ["Integer/parseInt"],
@@ -5723,7 +5737,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-J01",
         "Java parseInt rejects leading whitespace, but PTC-Lisp currently returns nil instead of raising."
       ),
-      bug_case(
+      fixed_bug_case(
         "java/integer-parse-int-overflow-bug-001",
         "java.lang.Integer",
         ["Integer/parseInt"],
@@ -5731,7 +5745,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-J01",
         "Java parseInt raises NumberFormatException for values above Integer/MAX_VALUE; PTC-Lisp currently returns an arbitrary-precision integer."
       ),
-      bug_case(
+      fixed_bug_case(
         "java/integer-parse-int-plus-overflow-bug-001",
         "java.lang.Integer",
         ["Integer/parseInt"],
@@ -5739,7 +5753,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-J01",
         "Java parseInt raises NumberFormatException for signed values above Integer/MAX_VALUE; PTC-Lisp currently returns an arbitrary-precision integer."
       ),
-      bug_case(
+      fixed_bug_case(
         "java/integer-parse-int-underflow-bug-001",
         "java.lang.Integer",
         ["Integer/parseInt"],
@@ -5747,7 +5761,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-J01",
         "Java parseInt raises NumberFormatException for values below Integer/MIN_VALUE; PTC-Lisp currently returns an arbitrary-precision integer."
       ),
-      bug_case(
+      fixed_bug_case(
         "java/integer-parse-int-nil-bug-001",
         "java.lang.Integer",
         ["Integer/parseInt"],
@@ -5763,7 +5777,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-J15",
         "Java parseInt supports a radix overload; PTC-Lisp currently raises an arity error."
       ),
-      bug_case(
+      fixed_bug_case(
         "java/long-parse-long-bug-001",
         "java.lang.Long",
         ["Long/parseLong"],
@@ -5771,7 +5785,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-J01",
         "Java parseLong raises NumberFormatException, but PTC-Lisp currently returns nil."
       ),
-      bug_case(
+      fixed_bug_case(
         "java/long-parse-long-empty-bug-001",
         "java.lang.Long",
         ["Long/parseLong"],
@@ -5779,7 +5793,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-J01",
         "Java parseLong raises NumberFormatException for an empty string, but PTC-Lisp currently returns nil."
       ),
-      bug_case(
+      fixed_bug_case(
         "java/long-parse-long-whitespace-bug-001",
         "java.lang.Long",
         ["Long/parseLong"],
@@ -5787,7 +5801,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-J01",
         "Java parseLong rejects leading whitespace, but PTC-Lisp currently returns nil instead of raising."
       ),
-      bug_case(
+      fixed_bug_case(
         "java/long-parse-long-overflow-bug-001",
         "java.lang.Long",
         ["Long/parseLong"],
@@ -5795,7 +5809,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-J01",
         "Java parseLong raises NumberFormatException for values above Long/MAX_VALUE; PTC-Lisp currently returns an arbitrary-precision integer."
       ),
-      bug_case(
+      fixed_bug_case(
         "java/long-parse-long-plus-overflow-bug-001",
         "java.lang.Long",
         ["Long/parseLong"],
@@ -5803,7 +5817,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-J01",
         "Java parseLong raises NumberFormatException for signed values above Long/MAX_VALUE; PTC-Lisp currently returns an arbitrary-precision integer."
       ),
-      bug_case(
+      fixed_bug_case(
         "java/long-parse-long-underflow-bug-001",
         "java.lang.Long",
         ["Long/parseLong"],
@@ -5811,7 +5825,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-J01",
         "Java parseLong raises NumberFormatException for values below Long/MIN_VALUE; PTC-Lisp currently returns an arbitrary-precision integer."
       ),
-      bug_case(
+      fixed_bug_case(
         "java/long-parse-long-nil-bug-001",
         "java.lang.Long",
         ["Long/parseLong"],
@@ -5827,7 +5841,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-J15",
         "Java parseLong supports a radix overload; PTC-Lisp currently raises an arity error."
       ),
-      bug_case(
+      fixed_bug_case(
         "java/double-parse-double-bug-001",
         "java.lang.Double",
         ["Double/parseDouble"],
@@ -5835,7 +5849,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-J01",
         "Java parseDouble raises NumberFormatException, but PTC-Lisp currently returns nil."
       ),
-      bug_case(
+      fixed_bug_case(
         "java/double-parse-double-empty-bug-001",
         "java.lang.Double",
         ["Double/parseDouble"],
@@ -5843,7 +5857,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-J01",
         "Java parseDouble raises NumberFormatException for an empty string, but PTC-Lisp currently returns nil."
       ),
-      bug_case(
+      fixed_bug_case(
         "java/double-parse-double-whitespace-bug-001",
         "java.lang.Double",
         ["Double/parseDouble"],
@@ -5851,7 +5865,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-J01",
         "Java parseDouble accepts surrounding whitespace, but PTC-Lisp currently returns nil."
       ),
-      bug_case(
+      fixed_bug_case(
         "java/double-parse-double-hex-float-bug-001",
         "java.lang.Double",
         ["Double/parseDouble"],
@@ -5859,7 +5873,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-J01",
         "Java parseDouble accepts hexadecimal floating-point syntax, but PTC-Lisp currently returns nil."
       ),
-      bug_case(
+      fixed_bug_case(
         "java/double-parse-double-nil-bug-001",
         "java.lang.Double",
         ["Double/parseDouble"],
@@ -5867,7 +5881,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-J01",
         "Java parseDouble raises NullPointerException for nil; PTC-Lisp currently returns nil."
       ),
-      bug_case(
+      fixed_bug_case(
         "java/float-parse-float-bug-001",
         "java.lang.Float",
         ["Float/parseFloat"],
@@ -5875,7 +5889,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-J01",
         "Java parseFloat raises NumberFormatException, but PTC-Lisp currently returns nil."
       ),
-      bug_case(
+      fixed_bug_case(
         "java/float-parse-float-empty-bug-001",
         "java.lang.Float",
         ["Float/parseFloat"],
@@ -5883,7 +5897,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-J01",
         "Java parseFloat raises NumberFormatException for an empty string, but PTC-Lisp currently returns nil."
       ),
-      bug_case(
+      fixed_bug_case(
         "java/float-parse-float-whitespace-bug-001",
         "java.lang.Float",
         ["Float/parseFloat"],
@@ -5891,7 +5905,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-J01",
         "Java parseFloat accepts surrounding whitespace, but PTC-Lisp currently returns nil."
       ),
-      bug_case(
+      fixed_bug_case(
         "java/float-parse-float-nil-bug-001",
         "java.lang.Float",
         ["Float/parseFloat"],
@@ -5905,7 +5919,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         ["Boolean/parseBoolean"],
         ~S|(Boolean/parseBoolean "x")|,
         "GAP-J02",
-        "Java parseBoolean returns false for non-true strings, but PTC-Lisp currently returns nil."
+        "Java parseBoolean returns false for non-true strings; PTC-Lisp previously returned nil."
       ),
       fixed_bug_case(
         "java/boolean-parse-boolean-case-bug-001",
@@ -5913,7 +5927,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         ["Boolean/parseBoolean"],
         ~S|(Boolean/parseBoolean "TRUE")|,
         "GAP-J02",
-        "Java parseBoolean is case-insensitive for true, but PTC-Lisp currently returns nil."
+        "Java parseBoolean is case-insensitive for true; PTC-Lisp previously returned nil."
       ),
       fixed_bug_case(
         "java/boolean-parse-boolean-mixed-case-bug-001",
@@ -5921,7 +5935,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         ["Boolean/parseBoolean"],
         ~S|(Boolean/parseBoolean "TrUe")|,
         "GAP-J02",
-        "Java parseBoolean is case-insensitive for mixed-case true, but PTC-Lisp currently returns nil."
+        "Java parseBoolean is case-insensitive for mixed-case true; PTC-Lisp previously returned nil."
       ),
       fixed_bug_case(
         "java/boolean-parse-boolean-empty-bug-001",
@@ -5929,7 +5943,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         ["Boolean/parseBoolean"],
         ~S|(Boolean/parseBoolean "")|,
         "GAP-J02",
-        "Java parseBoolean returns false for the empty string, but PTC-Lisp currently returns nil."
+        "Java parseBoolean returns false for the empty string; PTC-Lisp previously returned nil."
       ),
       fixed_bug_case(
         "java/boolean-parse-boolean-nil-bug-001",
@@ -5937,7 +5951,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         ["Boolean/parseBoolean"],
         "(Boolean/parseBoolean nil)",
         "GAP-J02",
-        "Java parseBoolean returns false for nil; PTC-Lisp currently returns nil."
+        "Java parseBoolean returns false for nil; PTC-Lisp previously returned nil."
       ),
       fixed_bug_case(
         "java/boolean-parse-boolean-boolean-bug-001",
@@ -5945,9 +5959,9 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         ["Boolean/parseBoolean"],
         "(Boolean/parseBoolean true)",
         "GAP-J02",
-        "Java parseBoolean has no boolean overload; PTC-Lisp currently returns nil instead of raising."
+        "Java parseBoolean has no boolean overload; PTC-Lisp previously returned nil instead of raising."
       ),
-      bug_case(
+      fixed_bug_case(
         "java/util-date-numeric-constructor-bug-001",
         "java.util.Date",
         ["java.util.Date.", ".getTime"],
@@ -5955,7 +5969,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-J03",
         "Java Date numeric constructor uses milliseconds; PTC-Lisp currently treats 1000 as seconds."
       ),
-      bug_case(
+      fixed_bug_case(
         "java/util-date-single-millisecond-constructor-bug-001",
         "java.util.Date",
         ["java.util.Date.", ".getTime"],
@@ -5963,7 +5977,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-J03",
         "Java Date numeric constructor treats 1 as one millisecond after epoch; PTC-Lisp currently treats it as one second."
       ),
-      bug_case(
+      fixed_bug_case(
         "java/util-date-negative-single-millisecond-constructor-bug-001",
         "java.util.Date",
         ["java.util.Date.", ".getTime"],
@@ -5971,7 +5985,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-J03",
         "Java Date numeric constructor treats -1 as one millisecond before epoch; PTC-Lisp currently treats it as one second before epoch."
       ),
-      bug_case(
+      fixed_bug_case(
         "java/util-date-negative-numeric-constructor-bug-001",
         "java.util.Date",
         ["java.util.Date.", ".getTime"],
@@ -5979,25 +5993,23 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-J03",
         "Java Date numeric constructor uses milliseconds for negative epochs too; PTC-Lisp currently treats -1000 as seconds."
       ),
-      div_case(
+      fixed_bug_case(
         "java/util-date-is-before-method-bug-001",
         "java.util.Date",
         ["java.util.Date.", ".isBefore"],
         ~S|(.isBefore (java.util.Date. 0) (java.util.Date. 1000))|,
         "GAP-J20",
-        true,
         "Java Date uses .before, not .isBefore; PTC-Lisp currently exposes a java.time-style alias on Date values."
       ),
-      div_case(
+      fixed_bug_case(
         "java/util-date-is-after-method-bug-001",
         "java.util.Date",
         ["java.util.Date.", ".isAfter"],
         ~S|(.isAfter (java.util.Date. 1000) (java.util.Date. 0))|,
         "GAP-J20",
-        true,
         "Java Date uses .after, not .isAfter; PTC-Lisp currently exposes a java.time-style alias on Date values."
       ),
-      bug_case(
+      fixed_bug_case(
         "java/instant-get-time-bug-001",
         "java.time.Instant",
         [".getTime"],
@@ -6005,7 +6017,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-J04",
         "Java Instant has toEpochMilli, not getTime; PTC-Lisp currently exposes getTime on Instant results."
       ),
-      bug_case(
+      fixed_bug_case(
         "java/instant-get-time-millis-bug-001",
         "java.time.Instant",
         [".getTime"],
@@ -6013,7 +6025,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-J04",
         "Java Instant has no getTime method even for fractional-second instants; PTC-Lisp currently exposes millisecond getTime on Instant results."
       ),
-      bug_case(
+      fixed_bug_case(
         "java/instant-get-time-offset-bug-001",
         "java.time.Instant",
         [".getTime"],
@@ -6021,7 +6033,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-J04",
         "Java Instant has no getTime method even for offset-parsed instants; PTC-Lisp currently exposes getTime on Instant results."
       ),
-      bug_case(
+      fixed_bug_case(
         "java/instant-get-time-negative-bug-001",
         "java.time.Instant",
         [".getTime"],
@@ -6029,7 +6041,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-J04",
         "Java Instant has no getTime method for pre-epoch instants; PTC-Lisp currently exposes getTime on Instant results."
       ),
-      bug_case(
+      fixed_bug_case(
         "java/instant-get-time-nanos-bug-001",
         "java.time.Instant",
         [".getTime"],
@@ -6037,15 +6049,15 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-J04",
         "Java Instant has no getTime method even for nanosecond-precision instants; PTC-Lisp currently exposes millisecond getTime on Instant results."
       ),
-      unsupported_case(
+      fixed_bug_case(
         "java/instant-to-epoch-milli-unsupported-bug-001",
         "java.time.Instant",
         [".toEpochMilli"],
         ~S|(.toEpochMilli (java.time.Instant/parse "1970-01-01T00:00:01Z"))|,
-        "Java Instant exposes toEpochMilli; PTC-Lisp currently rejects the method while exposing getTime instead.",
-        ["GAP-J18"]
+        "GAP-J18",
+        "Java Instant exposes toEpochMilli; PTC-Lisp previously rejected the method while exposing getTime instead."
       ),
-      bug_case(
+      fixed_bug_case(
         "java/duration-between-date-instant-bug-001",
         "java.time.Duration",
         ["Duration/between"],
@@ -6053,7 +6065,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-J19",
         "Java Duration.between requires Temporal inputs and rejects java.util.Date; PTC-Lisp currently accepts Date values."
       ),
-      bug_case(
+      fixed_bug_case(
         "java/duration-between-dates-bug-001",
         "java.time.Duration",
         ["Duration/between"],
@@ -6061,7 +6073,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-J19",
         "Java Duration.between requires Temporal inputs and rejects java.util.Date; PTC-Lisp currently accepts Date values."
       ),
-      bug_case(
+      fixed_bug_case(
         "java/local-date-plus-days-float-bug-001",
         "java.time.LocalDate",
         [".plusDays"],
@@ -6069,7 +6081,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-J12",
         "Clojure Java interop coerces floating day counts for plusDays; PTC-Lisp currently rejects floats."
       ),
-      bug_case(
+      fixed_bug_case(
         "java/local-date-plus-days-fractional-bug-001",
         "java.time.LocalDate",
         [".plusDays"],
@@ -6077,7 +6089,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-J12",
         "Clojure Java interop coerces fractional day counts for plusDays; PTC-Lisp currently rejects floats."
       ),
-      bug_case(
+      fixed_bug_case(
         "java/local-date-plus-days-nan-bug-001",
         "java.time.LocalDate",
         [".plusDays"],
@@ -6085,7 +6097,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-J12",
         "Clojure Java interop coerces NaN day counts to zero for plusDays; PTC-Lisp currently rejects NaN."
       ),
-      bug_case(
+      fixed_bug_case(
         "java/local-date-minus-days-float-bug-001",
         "java.time.LocalDate",
         [".minusDays"],
@@ -6093,7 +6105,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-J12",
         "Clojure Java interop coerces floating day counts for minusDays; PTC-Lisp currently rejects floats."
       ),
-      bug_case(
+      fixed_bug_case(
         "java/local-date-minus-days-fractional-bug-001",
         "java.time.LocalDate",
         [".minusDays"],
@@ -6101,7 +6113,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-J12",
         "Clojure Java interop coerces fractional day counts for minusDays; PTC-Lisp currently rejects floats."
       ),
-      bug_case(
+      fixed_bug_case(
         "java/local-date-minus-days-nan-bug-001",
         "java.time.LocalDate",
         [".minusDays"],
@@ -6257,23 +6269,19 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         1,
         "PTC-Lisp has no Character type; \\a is the one-char string \"a\", so .length returns 1 instead of raising."
       ),
-      div_case(
+      unsupported_case(
         "java/string-to-lower-case-char-receiver-001",
         "java.lang.String",
         [".toLowerCase"],
         ~S|(.toLowerCase \A)|,
-        "DIV-41",
-        "a",
-        "PTC-Lisp has no Character type; \\A is the one-char string \"A\", so .toLowerCase returns \"a\" instead of raising."
+        "Locale-sensitive no-argument Java casing is deferred until a deterministic locale and Unicode-data contract are selected."
       ),
-      div_case(
+      unsupported_case(
         "java/string-to-upper-case-char-receiver-001",
         "java.lang.String",
         [".toUpperCase"],
         ~S|(.toUpperCase \a)|,
-        "DIV-41",
-        "A",
-        "PTC-Lisp has no Character type; \\a is the one-char string \"a\", so .toUpperCase returns \"A\" instead of raising."
+        "Locale-sensitive no-argument Java casing is deferred until a deterministic locale and Unicode-data contract are selected."
       ),
       div_case(
         "java/string-contains-char-receiver-001",
@@ -6329,21 +6337,30 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "a",
         "PTC-Lisp has no Character type; the \\a receiver is the one-char string \"a\", so .substring operates on it as a String."
       ),
-      bug_case(
+      fixed_bug_case(
         "java/string-length-utf16-bug-001",
         "java.lang.String",
         [".length"],
         ~S|(.length "😀a")|,
         "GAP-J09",
-        "Java String.length returns UTF-16 code units; PTC-Lisp currently returns grapheme count."
+        "Java String.length returns UTF-16 code units; the former Java alias returned a grapheme count."
       ),
-      bug_case(
+      fixed_bug_case(
         "java/string-substring-utf16-bug-001",
         "java.lang.String",
         [".substring"],
-        ~S|(.substring "😀a" 0 1)|,
+        ~S|(.substring "😀a" 2)|,
         "GAP-J09",
-        "Java String.substring indexes UTF-16 code units; PTC-Lisp currently indexes graphemes."
+        "Java String.substring indexes UTF-16 code units; the former Java alias indexed graphemes."
+      ),
+      div_case(
+        "java/string-substring-unpaired-surrogate-001",
+        "java.lang.String",
+        [".substring"],
+        ~S|(.substring "😀a" 0 1)|,
+        "DIV-53",
+        {:error, :invalid_java_string},
+        "Java can return a String containing an unpaired surrogate, but PTC strings must remain valid UTF-8."
       ),
       regression_case(
         "java/string-substring-float-start-001",
@@ -6361,23 +6378,23 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         ["GAP-J14"],
         [:edge]
       ),
-      bug_case(
+      fixed_bug_case(
         "java/string-index-of-utf16-bug-001",
         "java.lang.String",
         [".indexOf"],
         ~S|(.indexOf "😀a" "a")|,
         "GAP-J09",
-        "Java String.indexOf returns UTF-16 code-unit offsets; PTC-Lisp currently returns grapheme offsets."
+        "Java String.indexOf returns UTF-16 code-unit offsets; the former Java alias returned grapheme offsets."
       ),
-      bug_case(
+      fixed_bug_case(
         "java/string-last-index-of-utf16-bug-001",
         "java.lang.String",
         [".lastIndexOf"],
         ~S|(.lastIndexOf "😀a😀" "😀")|,
         "GAP-J09",
-        "Java String.lastIndexOf returns UTF-16 code-unit offsets; PTC-Lisp currently returns grapheme offsets."
+        "Java String.lastIndexOf returns UTF-16 code-unit offsets; the former Java alias returned grapheme offsets."
       ),
-      bug_case(
+      fixed_bug_case(
         "java/instant-parse-date-only-bug-001",
         "java.time.Instant",
         ["Instant/parse"],
@@ -6385,7 +6402,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-J06",
         "Java Instant.parse rejects date-only strings; PTC-Lisp currently accepts them as LocalDate values."
       ),
-      bug_case(
+      fixed_bug_case(
         "java/instant-parse-no-zone-bug-001",
         "java.time.Instant",
         ["Instant/parse"],
@@ -6393,7 +6410,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-J06",
         "Java Instant.parse rejects date-time strings without an offset or zone; PTC-Lisp currently accepts them as UTC DateTime values."
       ),
-      bug_case(
+      fixed_bug_case(
         "java/instant-parse-no-zone-non-midnight-bug-001",
         "java.time.Instant",
         ["Instant/parse"],
@@ -6401,7 +6418,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-J06",
         "Java Instant.parse rejects date-time strings without an offset or zone; PTC-Lisp currently accepts them as UTC DateTime values."
       ),
-      bug_case(
+      fixed_bug_case(
         "java/local-date-parse-datetime-bug-001",
         "java.time.LocalDate",
         ["LocalDate/parse"],
@@ -6409,7 +6426,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-J06",
         "Java LocalDate.parse rejects date-time strings; PTC-Lisp currently accepts them as DateTime values."
       ),
-      bug_case(
+      fixed_bug_case(
         "java/local-date-parse-datetime-non-midnight-bug-001",
         "java.time.LocalDate",
         ["LocalDate/parse"],
@@ -6417,7 +6434,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-J06",
         "Java LocalDate.parse rejects date-time strings; PTC-Lisp currently accepts them as DateTime values."
       ),
-      bug_case(
+      fixed_bug_case(
         "java/util-date-string-constructor-bug-001",
         "java.util.Date",
         ["java.util.Date.", ".getTime"],
@@ -6425,7 +6442,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-J06",
         "Java Date string constructor rejects this ISO date in the oracle; PTC-Lisp currently accepts it."
       ),
-      bug_case(
+      fixed_bug_case(
         "java/util-date-legacy-string-constructor-bug-001",
         "java.util.Date",
         ["java.util.Date.", ".getTime"],
@@ -6433,149 +6450,133 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-J11",
         "Java Date string constructor accepts legacy date strings; PTC-Lisp currently rejects this Java-accepted format."
       ),
-      div_case(
+      fixed_bug_case(
         "java/math-min-three-args-001",
         "java.lang.Math",
         ["Math/min"],
         "(Math/min 3 2 1)",
         "DIV-44",
-        1,
-        "PTC-Lisp min/max are Clojure-variadic; Math/min and Math/max are aliases that stay variadic rather than reproducing Java's two-argument-only overloads."
+        "Qualified Math/min now enforces Java's two-argument overload family."
       ),
-      div_case(
+      fixed_bug_case(
         "java/math-min-one-arg-001",
         "java.lang.Math",
         ["Math/min"],
         "(Math/min 1)",
         "DIV-44",
-        1,
-        "PTC-Lisp min/max are Clojure-variadic; one argument returns that argument rather than raising as Java's two-argument-only overloads would."
+        "Qualified Math/min now rejects one argument like Java."
       ),
-      div_case(
+      fixed_bug_case(
         "java/math-max-three-args-001",
         "java.lang.Math",
         ["Math/max"],
         "(Math/max 1 2 3)",
         "DIV-44",
-        3,
-        "PTC-Lisp min/max are Clojure-variadic; Math/max stays variadic rather than reproducing Java's two-argument-only overloads."
+        "Qualified Math/max now enforces Java's two-argument overload family."
       ),
-      div_case(
+      fixed_bug_case(
         "java/math-max-one-arg-001",
         "java.lang.Math",
         ["Math/max"],
         "(Math/max 1)",
         "DIV-44",
-        1,
-        "PTC-Lisp min/max are Clojure-variadic; one argument returns that argument rather than raising as Java's two-argument-only overloads would."
+        "Qualified Math/max now rejects one argument like Java."
       ),
-      div_case(
+      fixed_bug_case(
         "java/math-abs-long-min-001",
         "java.lang.Math",
         ["Math/abs"],
         "(Math/abs -9223372036854775808)",
         "DIV-45",
-        9_223_372_036_854_775_808,
-        "PTC-Lisp uses arbitrary-precision integers, so Math/abs returns the mathematically correct positive value rather than reproducing Java's Long/MIN_VALUE two's-complement overflow."
+        "Qualified Math/abs now preserves Java Long/MIN_VALUE overflow."
       ),
-      div_case(
+      fixed_bug_case(
         "java/math-abs-bigint-001",
         "java.lang.Math",
         ["Math/abs"],
         "(Math/abs 9223372036854775808)",
         "DIV-45",
-        9_223_372_036_854_775_808,
-        "PTC-Lisp uses arbitrary-precision integers, so Math/abs accepts values beyond the Java long range rather than failing Java's primitive overload selection."
+        "Qualified Math/abs now rejects integers outside Java's primitive range."
       ),
-      div_case(
+      fixed_bug_case(
         "java/math-max-mixed-numeric-001",
         "java.lang.Math",
         ["Math/max"],
         "(Math/max 1 2.0)",
         "DIV-45",
-        2.0,
-        "PTC-Lisp min/max compare generically across the numeric tower, so mixed integer/float arguments are accepted rather than failing Java's primitive overload selection."
+        "Qualified Math/max now requires an exact Java primitive overload."
       ),
-      div_case(
+      fixed_bug_case(
         "java/math-min-mixed-numeric-001",
         "java.lang.Math",
         ["Math/min"],
         "(Math/min 1 2.0)",
         "DIV-45",
-        1,
-        "PTC-Lisp min/max compare generically across the numeric tower, so mixed integer/float arguments are accepted rather than failing Java's primitive overload selection."
+        "Qualified Math/min now requires an exact Java primitive overload."
       ),
-      div_case(
+      fixed_bug_case(
         "java/math-min-nil-001",
         "java.lang.Math",
         ["Math/min"],
         "(Math/min nil 1)",
         "DIV-45",
-        1,
-        "PTC-Lisp min/max use total ordering, so nil sorts as the smallest value rather than raising as Java's primitive overloads would."
+        "Qualified Math/min now rejects nil for Java primitive overloads."
       ),
-      div_case(
+      fixed_bug_case(
         "java/math-max-string-001",
         "java.lang.Math",
         ["Math/max"],
         ~S|(Math/max "a" 1)|,
         "DIV-45",
-        "a",
-        "PTC-Lisp min/max use total ordering across types, so a string compares against a number rather than raising as Java's primitive overloads would."
+        "Qualified Math/max now rejects strings for Java primitive overloads."
       ),
-      div_case(
+      fixed_bug_case(
         "java/math-round-negative-half-001",
         "java.lang.Math",
         ["Math/round"],
         "(Math/round -1.5)",
         "DIV-43",
-        -2,
-        "PTC-Lisp round uses round-half-away-from-zero, so -1.5 rounds to -2 rather than Java's floor(x + 0.5) result of -1."
+        "Qualified Math/round now uses Java's floor(x + 0.5) rule."
       ),
-      div_case(
+      fixed_bug_case(
         "java/math-round-nan-001",
         "java.lang.Math",
         ["Math/round", "str"],
         "(str (Math/round ##NaN))",
         "DIV-43",
-        "NaN",
-        "PTC-Lisp round preserves the NaN signal value rather than reproducing Java's NaN -> 0 long conversion."
+        "Qualified Math/round now converts NaN to zero like Java."
       ),
-      div_case(
+      fixed_bug_case(
         "java/math-round-pos-inf-001",
         "java.lang.Math",
         ["Math/round", "str"],
         "(str (Math/round ##Inf))",
         "DIV-43",
-        "Infinity",
-        "PTC-Lisp round preserves the infinity signal value rather than reproducing Java's saturation to Long/MAX_VALUE."
+        "Qualified Math/round now saturates positive infinity like Java."
       ),
-      div_case(
+      fixed_bug_case(
         "java/math-round-neg-inf-001",
         "java.lang.Math",
         ["Math/round", "str"],
         "(str (Math/round ##-Inf))",
         "DIV-43",
-        "-Infinity",
-        "PTC-Lisp round preserves the negative-infinity signal value rather than reproducing Java's saturation to Long/MIN_VALUE."
+        "Qualified Math/round now saturates negative infinity like Java."
       ),
-      div_case(
+      fixed_bug_case(
         "java/math-round-integer-overload-001",
         "java.lang.Math",
         ["Math/round"],
         "(Math/round 1)",
         "DIV-45",
-        1,
-        "PTC-Lisp round accepts integers (returning them unchanged) rather than failing Java's float/double-only overload selection."
+        "Qualified Math/round now rejects ambiguous integer overload selection like Clojure."
       ),
-      div_case(
+      fixed_bug_case(
         "java/math-round-bigint-overload-001",
         "java.lang.Math",
         ["Math/round"],
         "(Math/round 9223372036854775808)",
         "DIV-45",
-        9_223_372_036_854_775_808,
-        "PTC-Lisp round accepts arbitrary-precision integers (returning them unchanged) rather than failing Java's float/double-only overload selection."
+        "Qualified Math/round now rejects BigInt values outside Java primitive selection."
       ),
       regression_case(
         "java/math-pow-negative-fractional-001",
@@ -6632,23 +6633,21 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "(Math/sqrt 25)",
         [:java, :numeric]
       ),
-      div_case(
+      fixed_bug_case(
         "java/math-ceil-double-rendering-001",
         "java.lang.Math",
         ["Math/ceil", "str"],
         "(str (Math/ceil 1.2))",
         "DIV-42",
-        "2",
-        "PTC-Lisp ceil/floor are integer-returning extensions, so the result renders as 2 rather than reproducing Java's double 2.0 shape."
+        "Qualified Math/ceil now returns Java's double-shaped result."
       ),
-      div_case(
+      fixed_bug_case(
         "java/math-floor-double-rendering-001",
         "java.lang.Math",
         ["Math/floor", "str"],
         "(str (Math/floor -1.2))",
         "DIV-42",
-        "-2",
-        "PTC-Lisp ceil/floor are integer-returning extensions, so the result renders as -2 rather than reproducing Java's double -2.0 shape."
+        "Qualified Math/floor now returns Java's double-shaped result."
       )
     ]
   end
@@ -6656,12 +6655,29 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
   defp divergence_cases do
     [
       div_case(
+        "java/util-date-deterministic-two-digit-year-001",
+        "java.util.Date",
+        ["java.util.Date."],
+        ~S|(java.util.Date. "Jan 1 00:00:00 GMT 20")|,
+        "DIV-51",
+        {:error, :java_domain_error},
+        "PTC-Lisp rejects Date's moving two-digit-year window so parsing is deterministic across wall-clock years."
+      ),
+      div_case(
+        "java/util-date-historical-calendar-cutover-001",
+        "java.util.Date",
+        ["java.util.Date."],
+        ~S|(java.util.Date. "Jan 1 00:00:00 UTC 1500")|,
+        "DIV-51",
+        {:error, :java_domain_error},
+        "PTC-Lisp excludes Date's historical hybrid Julian/Gregorian range and admits string dates from 1582-10-15 onward."
+      ),
+      fixed_bug_case(
         "java/util-date-native-temporal-extension-001",
         "java.util.Date",
         ["java.util.Date.", ".getTime", "LocalDate/parse"],
         ~S|(.getTime (java.util.Date. (LocalDate/parse "1970-01-02")))|,
         "GAP-J21",
-        86_400_000,
         "PTC-Lisp accepts its native LocalDate value directly although Java Date has no matching constructor overload."
       ),
       div_case(

@@ -3,14 +3,10 @@ defmodule PtcRunner.Lisp.Java.Surface do
   Compile-time authority for the bounded PTC-Lisp Java compatibility surface.
 
   The surface is data, not reflection. `priv/java_interop.exs` owns admitted
-  classes and references, JVM descriptors, temporary legacy Env routes, audit
-  targets, and documentation projections. The separately owned
-  `priv/java_interop_phase0_attestations.exs` baseline prevents coordinated
-  manifest edits from silently weakening descriptor or divergence coverage.
-  During the Phase-0 migration every overload still routes to a binding in the
-  compile-independent builtin catalog; runtime parity tests ensure those
-  bindings match `Env.initial/0`. Later phases replace the routes
-  family-by-family with closed Java dispatch handlers.
+  classes and references, JVM descriptors, closed dispatch routes, audit
+  targets, and documentation projections. Every admitted overload resolves to
+  a code-owned Java handler. Pinned JVM oracle fixtures independently attest
+  the executable descriptor inventory.
   """
 
   alias PtcRunner.Lisp.BuiltinNames
@@ -19,9 +15,7 @@ defmodule PtcRunner.Lisp.Java.Surface do
   @manifest_path "priv/java_interop.exs"
   @external_resource @manifest_path
   @manifest Code.eval_file(@manifest_path) |> elem(0)
-  @legacy_bindings BuiltinNames.env_binding_kinds()
-  @phase0_attestations BuiltinNames.java_phase0_attestations()
-  :ok = Validator.validate!(@manifest, @legacy_bindings, @phase0_attestations)
+  :ok = Validator.validate!(@manifest, BuiltinNames.env_names())
 
   @classes @manifest.classes
   @references @manifest.references
@@ -36,8 +30,32 @@ defmodule PtcRunner.Lisp.Java.Surface do
   @namespace_table Map.new(@namespaces, &{&1.namespace, &1})
   @reference_table Map.new(@references, &{&1.reference_id, &1})
   @overload_table Map.new(@overloads, &{&1.overload_id, &1})
+  @class_table Map.new(@classes, &{&1.class_id, &1})
+  @class_spelling_table for(
+                          class <- @classes,
+                          spelling <- Enum.uniq([class.name | class.spellings]),
+                          into: %{},
+                          do: {spelling, class}
+                        )
   @audit_spec_table Map.new(@audit_specs, &{&1.key, &1})
   @function_entry_table Map.new(@projected_function_entries, &{&1.name, &1})
+  @member_family_table @references
+                       |> Enum.filter(&(&1.kind == :instance))
+                       |> Enum.group_by(fn reference ->
+                         reference.member |> Macro.underscore() |> String.to_atom()
+                       end)
+  @plain_reference_table for(
+                           reference <- @references,
+                           reference.kind == :constructor,
+                           spelling <- reference.spellings,
+                           into: %{},
+                           do: {spelling, reference}
+                         )
+  @member_source_table for(
+                         {member_family_id, [reference | _]} <- @member_family_table,
+                         into: %{},
+                         do: {".#{reference.member}", member_family_id}
+                       )
 
   @doc "Returns the validated manifest version."
   @spec version() :: pos_integer()
@@ -47,23 +65,23 @@ defmodule PtcRunner.Lisp.Java.Surface do
   @spec manifest() :: map()
   def manifest, do: @manifest
 
-  @doc false
-  @spec legacy_bindings() :: %{atom() => atom()}
-  def legacy_bindings, do: @legacy_bindings
-
-  @doc false
-  @spec phase0_attestations() :: map()
-  def phase0_attestations, do: @phase0_attestations
-
   @doc "Returns admitted and inventory-only Java class records."
   @spec classes() :: [map()]
   def classes, do: @classes
+
+  @doc "Returns every admitted source spelling owned by a Java class."
+  @spec class_spellings() :: [String.t()]
+  def class_spellings do
+    @classes
+    |> Enum.flat_map(&[&1.name | &1.spellings])
+    |> Enum.uniq()
+  end
 
   @doc "Returns admitted Java reference records."
   @spec references() :: [map()]
   def references, do: @references
 
-  @doc "Returns admitted overload records, all on validated legacy routes in Phase 0."
+  @doc "Returns admitted overload records on validated closed dispatch routes."
   @spec overloads() :: [map()]
   def overloads, do: @overloads
 
@@ -75,66 +93,130 @@ defmodule PtcRunner.Lisp.Java.Surface do
   @spec fetch_overload(atom()) :: {:ok, map()} | :error
   def fetch_overload(overload_id), do: Map.fetch(@overload_table, overload_id)
 
-  @doc "Returns Java compatibility namespace categories for Env diagnostics."
-  @spec namespace_categories() :: %{atom() => atom()}
-  def namespace_categories, do: Map.new(@namespaces, &{&1.namespace, &1.category})
+  @doc "Fetches one admitted or inventory Java class by stable ID."
+  @spec fetch_class(atom()) :: {:ok, map()} | :error
+  def fetch_class(class_id), do: Map.fetch(@class_table, class_id)
 
-  @doc "Returns true when `namespace` is owned by the Java surface."
-  @spec namespace?(atom()) :: boolean()
-  def namespace?(namespace), do: Map.has_key?(@namespace_table, namespace)
+  @doc "Resolves a bounded Java class/member source identity."
+  @spec resolve_reference(atom() | String.t(), atom() | String.t()) ::
+          {:ok, map()} | :unknown_member | :not_java_class
+  def resolve_reference(namespace, member) do
+    class = Map.get(@class_spelling_table, to_string(namespace))
 
-  @doc "Returns the currently accepted source members of a Java namespace."
-  @spec namespace_members(atom()) :: [atom() | String.t()]
-  def namespace_members(namespace) do
-    case Map.get(@namespace_table, namespace) do
-      nil -> []
-      entry -> Enum.map(entry.members, & &1.source_name)
+    case class do
+      nil ->
+        :not_java_class
+
+      class ->
+        case Enum.find(@references, fn reference ->
+               reference.class_id == class.class_id and reference.member == to_string(member)
+             end) do
+          nil -> :unknown_member
+          reference -> {:ok, reference}
+        end
     end
   end
 
-  @doc "Resolves a current Java namespace/member spelling to its legacy Env binding."
-  @spec legacy_binding(atom(), atom() | String.t()) :: {:ok, atom()} | :error
-  def legacy_binding(namespace, member) do
-    with %{members: members} <- Map.get(@namespace_table, namespace),
-         %{legacy_binding: binding} <-
-           Enum.find(members, &same_source_name?(&1.source_name, member)) do
-      {:ok, binding}
+  @doc "Resolves a plain constructor source spelling to its admitted reference."
+  @spec resolve_plain_reference(atom() | String.t()) :: {:ok, map()} | :error
+  def resolve_plain_reference(spelling) do
+    case Map.fetch(@plain_reference_table, to_string(spelling)) do
+      {:ok, reference} -> {:ok, reference}
+      :error -> :error
+    end
+  end
+
+  @doc "Resolves a direct-dot source spelling to its finite instance member family."
+  @spec resolve_member_family(atom() | String.t()) :: {:ok, atom()} | :error
+  def resolve_member_family(spelling) do
+    Map.fetch(@member_source_table, to_string(spelling))
+  end
+
+  @doc "Returns true when a direct-dot spelling names an admitted member family."
+  @spec member_family_spelling?(atom() | String.t()) :: boolean()
+  def member_family_spelling?(spelling) do
+    case resolve_member_family(spelling) do
+      {:ok, member_family_id} ->
+        member_family_references(member_family_id) != []
+
+      :error ->
+        false
+    end
+  end
+
+  @doc "Returns true when an ID names a finite manifest-derived instance member family."
+  @spec member_family?(atom()) :: boolean()
+  def member_family?(member_family_id), do: Map.has_key?(@member_family_table, member_family_id)
+
+  @doc false
+  @spec member_family_references(atom()) :: [map()]
+  def member_family_references(member_family_id),
+    do: Map.get(@member_family_table, member_family_id, [])
+
+  @doc false
+  @spec member_family_source(atom()) :: {:ok, String.t()} | :error
+  def member_family_source(member_family_id) do
+    case member_family_references(member_family_id) do
+      [%{member: member} | _] -> {:ok, ".#{member}"}
+      [] -> :error
+    end
+  end
+
+  @doc "Returns the canonical inert label for a Java reference."
+  @spec reference_label(atom()) :: {:ok, String.t()} | :error
+  def reference_label(reference_id) do
+    with %{class_id: class_id, member: member} <- Map.get(@reference_table, reference_id),
+         %{name: class_name} <- Map.get(@class_table, class_id) do
+      {:ok, "#java[#{class_name}/#{member}]"}
     else
       _ -> :error
     end
   end
 
-  @doc "Resolves only spellings whose source member differs from the Env binding name."
-  @spec qualified_legacy_alias(atom(), atom() | String.t()) ::
-          {:ok, atom()} | :unknown_member | :not_qualified
-  def qualified_legacy_alias(namespace, member) do
-    case legacy_binding(namespace, member) do
-      {:ok, binding} ->
-        if Atom.to_string(binding) == to_string(member), do: :not_qualified, else: {:ok, binding}
+  @doc "Returns Java compatibility namespace categories for Env diagnostics."
+  @spec namespace_categories() :: %{atom() => atom()}
+  def namespace_categories, do: Map.new(@namespaces, &{&1.namespace, &1.category})
 
-      :error ->
-        case Map.get(@namespace_table, namespace) do
-          %{legacy_lookup: :qualified_table} -> :unknown_member
-          _ -> :not_qualified
-        end
-    end
+  @doc "Returns true when `namespace` is owned by the Java surface."
+  @spec namespace?(atom() | String.t()) :: boolean()
+  def namespace?(namespace) do
+    Map.has_key?(@namespace_table, namespace) or
+      Map.has_key?(@class_spelling_table, to_string(namespace))
   end
 
-  @doc "Returns qualified legacy binding labels for compatibility diagnostics."
-  @spec qualified_legacy_members(atom()) :: [String.t()]
-  def qualified_legacy_members(namespace) do
+  @doc "Returns the currently accepted source members of a Java namespace."
+  @spec namespace_members(atom() | String.t()) :: [atom() | String.t()]
+  def namespace_members(namespace) do
     case Map.get(@namespace_table, namespace) do
-      %{legacy_lookup: :qualified_table, members: members} ->
-        Enum.map(members, &Atom.to_string(&1.legacy_binding))
+      nil ->
+        case Map.get(@class_spelling_table, to_string(namespace)) do
+          nil ->
+            []
 
-      _ ->
-        []
+          class ->
+            @references
+            |> Enum.filter(&(&1.class_id == class.class_id))
+            |> Enum.map(& &1.member)
+            |> Enum.uniq()
+            |> Enum.sort()
+        end
+
+      entry ->
+        Enum.map(entry.members, & &1.source_name)
     end
   end
 
   @doc "Returns all Java namespace atoms admitted by the source vocabulary."
   @spec source_namespace_atoms() :: [atom()]
-  def source_namespace_atoms, do: Map.keys(@namespace_table)
+  def source_namespace_atoms do
+    class_atoms =
+      @classes
+      |> Enum.flat_map(&[&1.name | &1.spellings])
+      |> Enum.reject(&String.ends_with?(&1, "."))
+      |> Enum.map(&String.to_atom/1)
+
+    Enum.uniq(Map.keys(@namespace_table) ++ class_atoms)
+  end
 
   @doc "Returns Java namespace labels for analyzer diagnostics."
   @spec available_namespace_labels() :: [String.t()]
@@ -144,29 +226,38 @@ defmodule PtcRunner.Lisp.Java.Surface do
         entry.namespace |> Atom.to_string() |> String.contains?(".") |> Kernel.not()
       end)
 
-    Enum.map(short ++ qualified, &"#{&1.namespace}/")
+    namespace_labels = Enum.map(short ++ qualified, &"#{&1.namespace}/")
+
+    class_labels =
+      @classes
+      |> Enum.flat_map(&[&1.name | &1.spellings])
+      |> Enum.reject(&String.ends_with?(&1, "."))
+      |> Enum.map(&"#{&1}/")
+
+    Enum.uniq(namespace_labels ++ class_labels)
   end
 
   @doc "Returns string-to-atom Java namespace mappings used by Registry documentation lookup."
   @spec doc_namespaces() :: %{String.t() => atom()}
-  def doc_namespaces, do: Map.new(@namespaces, &{Atom.to_string(&1.namespace), &1.namespace})
+  def doc_namespaces do
+    namespace_docs = Map.new(@namespaces, &{Atom.to_string(&1.namespace), &1.namespace})
 
-  @doc "Returns the canonical implemented-function name for one accepted namespace member."
-  @spec canonical_function_name(atom(), atom() | String.t()) :: String.t() | nil
-  def canonical_function_name(namespace, member) do
-    case legacy_binding(namespace, member) do
-      {:ok, binding} -> Atom.to_string(binding)
-      :error -> nil
-    end
+    class_docs =
+      @classes
+      |> Enum.flat_map(fn class -> [class.name | class.spellings] end)
+      |> Enum.reject(&String.ends_with?(&1, "."))
+      |> Map.new(&{&1, String.to_atom(&1)})
+
+    Map.merge(class_docs, namespace_docs)
   end
 
-  @doc "Returns all closed legacy Env binding IDs referenced by overloads."
-  @spec legacy_binding_ids() :: [atom()]
-  def legacy_binding_ids do
-    @overloads
-    |> Enum.map(fn %{route: {:legacy_env, binding}} -> binding end)
-    |> Enum.uniq()
-    |> Enum.sort()
+  @doc "Returns the canonical implemented-function name for one accepted namespace member."
+  @spec canonical_function_name(atom() | String.t(), atom() | String.t()) :: String.t() | nil
+  def canonical_function_name(namespace, member) do
+    case resolve_reference(namespace, member) do
+      {:ok, reference} -> List.first(reference.spellings)
+      _ -> nil
+    end
   end
 
   @doc "Returns Java-owned implemented-function presentation rows."
@@ -189,13 +280,13 @@ defmodule PtcRunner.Lisp.Java.Surface do
         names = Enum.map_join(rows, ", ", &inspect(&1[:name]))
 
         raise ArgumentError,
-              "legacy Java function metadata must be removed from priv/functions.exs: #{names}"
+              "duplicate Java function metadata must be removed from priv/functions.exs: #{names}"
     end
   end
 
   @doc false
-  @spec validate_legacy_sources!(map(), map()) :: :ok
-  def validate_legacy_sources!(function_registry, audit_registry) do
+  @spec validate_authoritative_sources!(map(), map()) :: :ok
+  def validate_authoritative_sources!(function_registry, audit_registry) do
     stale_function_keys = Map.keys(function_registry) -- [:implemented]
 
     stale_audit_keys =
@@ -208,7 +299,7 @@ defmodule PtcRunner.Lisp.Java.Surface do
 
       _stale ->
         raise ArgumentError,
-              "legacy Java top-level metadata must be removed: " <>
+              "duplicate Java top-level metadata must be removed: " <>
                 "functions=#{inspect(stale_function_keys)}, audits=#{inspect(stale_audit_keys)}"
     end
   end
@@ -248,6 +339,4 @@ defmodule PtcRunner.Lisp.Java.Surface do
   @doc "Returns one Java audit including stable manifest identities."
   @spec audit_targets(atom()) :: [map()]
   def audit_targets(key), do: Map.fetch!(@audits, key)
-
-  defp same_source_name?(left, right), do: to_string(left) == to_string(right)
 end

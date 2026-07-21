@@ -1,9 +1,8 @@
 defmodule PtcRunner.Lisp.BuiltinNames do
   @moduledoc """
   Leaf source of env-dispatched builtin names and binding kinds, loaded from
-  `priv/functions.exs` and a code-owned Phase-0 Java binding catalog at compile
-  time. It also loads the separately owned Java overload attestation baseline
-  used to validate the surface manifest.
+  `priv/functions.exs` at compile time. It also projects the bounded source
+  vocabulary from the validated Java surface manifest.
 
   Exists so `PtcRunner.Lisp.SourceAtoms` can derive the builtin-name
   half of its bounded vocabulary without calling
@@ -20,12 +19,10 @@ defmodule PtcRunner.Lisp.BuiltinNames do
 
   @registry_path "priv/functions.exs"
   @java_surface_path "priv/java_interop.exs"
-  @java_phase0_attestations_path "priv/java_interop_phase0_attestations.exs"
 
   # Compile-time loading (no runtime file I/O), mirroring Registry.
   @external_resource @registry_path
   @external_resource @java_surface_path
-  @external_resource @java_phase0_attestations_path
   @registry Code.eval_file(@registry_path) |> elem(0)
   # Ordinary builtin names come from the existing closed registry.
   @ordinary_env_entries @registry.implemented
@@ -37,63 +34,34 @@ defmodule PtcRunner.Lisp.BuiltinNames do
                                 &{String.to_atom(&1.name), &1.binding}
                               )
 
-  # Independent implementation attestation for the temporary Phase-0 routes.
-  # Do not derive this from priv/java_interop.exs: the validator must reject a
-  # manifest route that has no separately owned runtime binding.
-  @legacy_java_binding_kinds %{
-    :".contains" => :normal,
-    :".endsWith" => :normal,
-    :".getTime" => :normal,
-    :".indexOf" => :multi_arity,
-    :".isAfter" => :normal,
-    :".isBefore" => :normal,
-    :".lastIndexOf" => :normal,
-    :".length" => :normal,
-    :".minusDays" => :normal,
-    :".plusDays" => :normal,
-    :".startsWith" => :normal,
-    :".substring" => :multi_arity,
-    :".toDays" => :normal,
-    :".toEpochDay" => :normal,
-    :".toLowerCase" => :normal,
-    :".toMillis" => :normal,
-    :".toUpperCase" => :normal,
-    :"Boolean/parseBoolean" => :normal,
-    :"Duration/between" => :normal,
-    :"java.util.Date." => :multi_arity,
-    :NEGATIVE_INFINITY => :constant,
-    :NaN => :constant,
-    :POSITIVE_INFINITY => :constant,
-    :abs => :normal,
-    :ceil => :normal,
-    :currentTimeMillis => :normal,
-    :floor => :normal,
-    :max => :variadic_nonempty,
-    :min => :variadic_nonempty,
-    :parse => :normal,
-    :"parse-double" => :normal,
-    :"parse-long" => :normal,
-    :pow => :normal,
-    :round => :normal,
-    :sqrt => :normal
-  }
-
-  @env_binding_kinds Map.merge(@ordinary_env_binding_kinds, @legacy_java_binding_kinds)
+  @env_binding_kinds @ordinary_env_binding_kinds
   @env_names Map.keys(@env_binding_kinds)
 
   # Validate before projecting any raw manifest collection. This keeps malformed
   # top-level data on the validator's structured error path.
   @java_surface Code.eval_file(@java_surface_path) |> elem(0)
-  @java_phase0_attestations Code.eval_file(@java_phase0_attestations_path) |> elem(0)
-  :ok =
-    Validator.validate!(@java_surface, @env_binding_kinds, @java_phase0_attestations)
+  :ok = Validator.validate!(@java_surface, @env_names)
 
-  @java_namespace_atoms @java_surface.namespaces |> Enum.map(& &1.namespace) |> Enum.uniq()
-  @java_member_atoms @java_surface.namespaces
-                     |> Enum.flat_map(& &1.members)
-                     |> Enum.map(& &1.source_name)
-                     |> Enum.filter(&is_atom/1)
+  @java_namespace_atoms ((@java_surface.namespaces |> Enum.map(& &1.namespace)) ++
+                           (@java_surface.classes
+                            |> Enum.flat_map(&[&1.name | &1.spellings])
+                            |> Enum.reject(&String.ends_with?(&1, "."))
+                            |> Enum.map(&String.to_atom/1)))
+                        |> Enum.uniq()
+  @java_member_atoms ((@java_surface.namespaces
+                       |> Enum.flat_map(& &1.members)
+                       |> Enum.map(& &1.source_name)
+                       |> Enum.filter(&is_atom/1)) ++
+                        (@java_surface.references
+                         |> Enum.filter(&(&1.kind == :instance))
+                         |> Enum.flat_map(& &1.spellings)
+                         |> Enum.map(&String.to_atom/1)))
                      |> Enum.uniq()
+  @java_constructor_atoms @java_surface.references
+                          |> Enum.filter(&(&1.kind == :constructor))
+                          |> Enum.flat_map(& &1.spellings)
+                          |> Enum.map(&String.to_atom/1)
+                          |> Enum.uniq()
 
   @doc """
   Returns the env-dispatched builtin names as atoms.
@@ -108,14 +76,6 @@ defmodule PtcRunner.Lisp.BuiltinNames do
   @spec env_binding_kinds() :: %{atom() => atom()}
   def env_binding_kinds, do: @env_binding_kinds
 
-  @doc false
-  @spec legacy_java_binding_kinds() :: %{atom() => atom()}
-  def legacy_java_binding_kinds, do: @legacy_java_binding_kinds
-
-  @doc false
-  @spec java_phase0_attestations() :: map()
-  def java_phase0_attestations, do: @java_phase0_attestations
-
   @doc "Returns Java namespace atoms from the bounded surface manifest."
   @spec java_namespace_atoms() :: [atom()]
   def java_namespace_atoms, do: @java_namespace_atoms
@@ -123,4 +83,8 @@ defmodule PtcRunner.Lisp.BuiltinNames do
   @doc "Returns atom-named Java namespace members from the bounded surface manifest."
   @spec java_member_atoms() :: [atom()]
   def java_member_atoms, do: @java_member_atoms
+
+  @doc "Returns Java constructor source atoms from the bounded surface manifest."
+  @spec java_constructor_atoms() :: [atom()]
+  def java_constructor_atoms, do: @java_constructor_atoms
 end

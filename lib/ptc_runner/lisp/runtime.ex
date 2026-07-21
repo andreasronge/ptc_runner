@@ -16,7 +16,6 @@ defmodule PtcRunner.Lisp.Runtime do
 
   alias PtcRunner.Lisp.Runtime.Collection
   alias PtcRunner.Lisp.Runtime.FlexAccess
-  alias PtcRunner.Lisp.Runtime.Interop
   alias PtcRunner.Lisp.Runtime.MapOps
   alias PtcRunner.Lisp.Runtime.Math
   alias PtcRunner.Lisp.Runtime.Predicates
@@ -366,34 +365,4 @@ defmodule PtcRunner.Lisp.Runtime do
   defdelegate intersection(s1, s2), to: Collection
   defdelegate union(s1, s2), to: Collection
   defdelegate difference(s1, s2), to: Collection
-
-  # ============================================================
-  # Interop
-  # ============================================================
-
-  defdelegate java_util_date(), to: Interop
-  defdelegate java_util_date(ms), to: Interop
-  defdelegate boolean_parse_boolean(s), to: Interop
-  defdelegate dot_get_time(dt), to: Interop
-  defdelegate dot_to_epoch_day(date), to: Interop
-  defdelegate dot_plus_days(date, days), to: Interop
-  defdelegate dot_minus_days(date, days), to: Interop
-  defdelegate duration_between(start_dt, end_dt), to: Interop
-  defdelegate dot_to_millis(duration), to: Interop
-  defdelegate dot_to_days(duration), to: Interop
-  defdelegate current_time_millis, to: Interop
-  defdelegate parse_temporal(s), to: Interop
-  defdelegate dot_contains(s, substring), to: Interop
-  defdelegate dot_index_of(s, substring), to: Interop
-  defdelegate dot_index_of(s, substring, from), to: Interop
-  defdelegate dot_last_index_of(s, substring), to: Interop
-  defdelegate dot_to_lower_case(s), to: Interop
-  defdelegate dot_to_upper_case(s), to: Interop
-  defdelegate dot_length(s), to: Interop
-  defdelegate dot_substring(s, start), to: Interop
-  defdelegate dot_substring(s, start, stop), to: Interop
-  defdelegate dot_starts_with(s, prefix), to: Interop
-  defdelegate dot_ends_with(s, suffix), to: Interop
-  defdelegate dot_is_before(a, b), to: Interop
-  defdelegate dot_is_after(a, b), to: Interop
 end

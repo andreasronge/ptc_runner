@@ -9,6 +9,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added a bounded Java interop oracle baseline with pinned Temurin and JVM
+  Clojure versions, typed fixtures for every admitted overload, exact descriptor
+  attestation for every JVM overload, executable closed-dispatch compatibility
+  cases, a Babashka fast subset, and a dedicated CI conformance job.
+- Added closed manifest dispatch, structured Java failures, native Java
+  callables and primitive provenance, bounded boundary projection, and complete
+  Java CoreAST nodes; migrated `Boolean/parseBoolean` off its legacy Env route.
+  Primitive provenance survives non-numeric Lisp operations, while
+  signature-aware recursive projection prevents Java authority from hiding in
+  tool arguments, tool results, return validation, or struct fields. Numeric
+  arithmetic, numeric index/count, aggregate, and ordering consumers erase
+  primitive provenance consistently, including higher-order invocation, while
+  native formatting preserves distinct primitive kinds without collapsing
+  literal-label map keys or set members. Java callables derive static,
+  constructor, or receiver-first instance invocation from manifest identity.
+  Numeric index/count projection is overload-arity aware, comparator callbacks
+  share callable dispatch and numeric projection, and constructor/direct-dot
+  source spellings resolve through the manifest before closed dispatch.
+  Java and ordinary struct-shaped maps must contain their exact declared fields.
+  Java class spellings are reserved against prelude shadowing, and rejected
+  tool results retain their executed callback ledger entry.
+- Migrated Java numeric parsers and Double special-value fields to closed
+  manifest dispatch. Java-named parsers now preserve exact primitive identity,
+  enforce int/long ranges, use direct IEEE float/double rounding, accept Java
+  decimal and hexadecimal syntax, and return bounded Java parse conditions;
+  unqualified Clojure parsers keep their safe `nil` behavior.
+- Migrated selected `java.lang.Math` methods to closed manifest dispatch with
+  exact primitive overload selection, Java overflow, signed-zero, NaN,
+  infinity, rounding, and saturation behavior. Qualified Math calls are now
+  distinct from the generic bare PTC-Lisp math helpers.
+- Migrated `System/currentTimeMillis` to closed manifest dispatch with native
+  Java `long` identity. The qualified call projects to an ordinary integer at
+  public boundaries, and the bare `(currentTimeMillis)` compatibility alias was
+  removed.
+- Migrated LocalDate, Instant, Duration, and legacy Date to validated native
+  wrappers and class-owned closed dispatch. Temporal precision and Java ranges
+  survive native evaluation; Date integers are exact milliseconds; public,
+  Kernel, formatting, export, retained-size, and signature-aware tool
+  boundaries handle every wrapper explicitly. Removed the bare `parse` alias,
+  Instant `getTime`, Date `isBefore`/`isAfter`, the Date temporal constructor
+  extension, host temporal promotion, and the global temporal dispatcher.
+- Migrated admitted `java.lang.String` methods to closed dispatch with bounded
+  UTF-16 code-unit semantics while ordinary PTC string helpers remain
+  grapheme-based. Oversized or unrepresentable String operations now return the
+  documented bounded condition; locale-sensitive `.toLowerCase` and
+  `.toUpperCase` and all legacy Java String aliases were removed.
 - Added the code-owned `log-analysis-v1` profile to `mix ptc.repl`, with
   bounded multi-turn mission evaluation over an immutable trace capture,
   deterministic JSONL output for coding agents, safe profile discovery, and
@@ -16,6 +62,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Completed the Java interop migration cleanup. Every admitted overload now
+  uses closed dispatch; the temporary `legacy_env` schema, empty Java binding
+  catalog, Phase-0 attestation snapshot, and non-Java `Math/` namespace aliases
+  were removed. Ordinary PTC functions such as `bit-and` and `trunc` remain
+  available only under their non-Java names.
 - Replaced the legacy SubAgent, MCP, upstream, mutable-prelude, and trace
   products with the owner-based `PtcRunner.Kernel` runtime.
 - Added immutable component bundles, structurally separate workflow and mission

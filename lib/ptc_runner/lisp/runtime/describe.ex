@@ -5,6 +5,10 @@ defmodule PtcRunner.Lisp.Runtime.Describe do
 
   alias PtcRunner.Lisp.Env.Builtin
   alias PtcRunner.Lisp.Format
+  alias PtcRunner.Lisp.Java.Time.Duration, as: JavaDuration
+  alias PtcRunner.Lisp.Java.Time.Instant, as: JavaInstant
+  alias PtcRunner.Lisp.Java.Time.LocalDate, as: JavaLocalDate
+  alias PtcRunner.Lisp.Java.Util.Date, as: JavaDate
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
 
   @default_depth 1
@@ -551,8 +555,19 @@ defmodule PtcRunner.Lisp.Runtime.Describe do
   defp type_name(value) when is_list(value), do: "vector"
   defp type_name(%MapSet{}), do: "set"
   defp type_name(%Builtin{}), do: "function"
+
+  defp type_name(%JavaLocalDate{} = value),
+    do: java_type_name(JavaLocalDate, value, "java.time.LocalDate")
+
+  defp type_name(%JavaInstant{} = value),
+    do: java_type_name(JavaInstant, value, "java.time.Instant")
+
+  defp type_name(%JavaDuration{} = value),
+    do: java_type_name(JavaDuration, value, "java.time.Duration")
+
+  defp type_name(%JavaDate{} = value), do: java_type_name(JavaDate, value, "java.util.Date")
   defp type_name(value) when is_function(value), do: "function"
-  defp type_name(value) when is_map(value), do: "map"
+  defp type_name(value) when is_map(value) and not is_struct(value), do: "map"
   defp type_name({:closure, _, _, _, _, _}), do: "function"
   defp type_name({tag, _}) when tag in [:normal, :collect], do: "function"
 
@@ -561,6 +576,10 @@ defmodule PtcRunner.Lisp.Runtime.Describe do
        do: "function"
 
   defp type_name(_), do: "unknown"
+
+  defp java_type_name(module, value, name) do
+    if module.valid?(value), do: name, else: "unknown"
+  end
 
   defp render_key(key) when is_binary(key), do: truncate_string(key, @max_example_chars)
 

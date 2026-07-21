@@ -115,7 +115,8 @@ defmodule PtcRunner.Lisp.Runtime.MapOps do
     assoc_variadic([%{} | pairs])
   end
 
-  def assoc_variadic([m | pairs]) when is_map(m) and pairs != [] and rem(length(pairs), 2) == 0 do
+  def assoc_variadic([m | pairs])
+      when is_map(m) and not is_struct(m) and pairs != [] and rem(length(pairs), 2) == 0 do
     pairs
     |> Enum.chunk_every(2)
     |> Enum.reduce(m, fn [k, v], acc -> Map.put(acc, k, v) end)
@@ -144,7 +145,7 @@ defmodule PtcRunner.Lisp.Runtime.MapOps do
 
   # Keep the 3-arg version for direct calls
   def assoc(nil, k, v), do: %{k => v}
-  def assoc(m, k, v) when is_map(m), do: Map.put(m, k, v)
+  def assoc(m, k, v) when is_map(m) and not is_struct(m), do: Map.put(m, k, v)
 
   # List support - Clojure allows index == length for appending
   def assoc(l, k, v) when is_list(l) and is_integer(k) and k >= 0 do
@@ -181,13 +182,13 @@ defmodule PtcRunner.Lisp.Runtime.MapOps do
       iex> PtcRunner.Lisp.Runtime.MapOps.update_variadic([%{n: nil}, :n, &PtcRunner.Lisp.Runtime.Predicates.fnil(&Kernel.+/2, 0), 5])
       %{n: 5}
   """
-  def update_variadic([m, k, f]) when is_map(m) do
+  def update_variadic([m, k, f]) when is_map(m) and not is_struct(m) do
     old_val = Map.get(m, k)
     new_val = apply_with_arity_check(f, [old_val], "update")
     Map.put(m, k, new_val)
   end
 
-  def update_variadic([m, k, f | extra_args]) when is_map(m) do
+  def update_variadic([m, k, f | extra_args]) when is_map(m) and not is_struct(m) do
     old_val = Map.get(m, k)
     new_val = apply_with_arity_check(f, [old_val | extra_args], "update")
     Map.put(m, k, new_val)
@@ -205,7 +206,7 @@ defmodule PtcRunner.Lisp.Runtime.MapOps do
   end
 
   # Keep 3-arg version for direct calls
-  def update(m, k, f) when is_map(m) do
+  def update(m, k, f) when is_map(m) and not is_struct(m) do
     old_val = Map.get(m, k)
     new_val = apply_with_arity_check(f, [old_val], "update")
     Map.put(m, k, new_val)
@@ -351,7 +352,7 @@ defmodule PtcRunner.Lisp.Runtime.MapOps do
   @doc """
   Convert map to a list of [key, value] pairs, sorted by key.
   """
-  def entries(m) when is_map(m) do
+  def entries(m) when is_map(m) and not is_struct(m) do
     m |> Enum.sort_by(fn {k, _v} -> k end) |> Enum.map(fn {k, v} -> [k, v] end)
   end
 
@@ -367,7 +368,7 @@ defmodule PtcRunner.Lisp.Runtime.MapOps do
       iex> PtcRunner.Lisp.Runtime.MapOps.update_vals(%{}, &length/1)
       %{}
   """
-  def update_vals(m, f) when is_map(m) do
+  def update_vals(m, f) when is_map(m) and not is_struct(m) do
     Map.new(m, fn {k, v} -> {k, Callable.call(f, [v])} end)
   end
 

@@ -7,6 +7,12 @@ defmodule PtcRunner.Lisp.Eval.Helpers do
 
   alias PtcRunner.Lisp.Env
   alias PtcRunner.Lisp.Env.Builtin
+  alias PtcRunner.Lisp.Java.Callable, as: JavaCallable
+  alias PtcRunner.Lisp.Java.Primitive, as: JavaPrimitive
+  alias PtcRunner.Lisp.Java.Time.Duration, as: JavaDuration
+  alias PtcRunner.Lisp.Java.Time.Instant, as: JavaInstant
+  alias PtcRunner.Lisp.Java.Time.LocalDate, as: JavaLocalDate
+  alias PtcRunner.Lisp.Java.Util.Date, as: JavaDate
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
 
   @stable_parallel_errors [:memory_exceeded, :timeout, :parallel_capacity_exceeded]
@@ -121,6 +127,25 @@ defmodule PtcRunner.Lisp.Eval.Helpers do
   @spec describe_type(term()) :: String.t()
   def describe_type(nil), do: "nil"
   def describe_type(%Builtin{}), do: "function"
+
+  def describe_type(%JavaCallable{} = callable),
+    do: if(JavaCallable.valid?(callable), do: "function", else: "invalid Java value")
+
+  def describe_type(%JavaPrimitive{} = primitive),
+    do: if(JavaPrimitive.valid?(primitive), do: "number", else: "invalid Java value")
+
+  def describe_type(%JavaLocalDate{} = value),
+    do: java_object_description(JavaLocalDate, value, "java.time.LocalDate")
+
+  def describe_type(%JavaInstant{} = value),
+    do: java_object_description(JavaInstant, value, "java.time.Instant")
+
+  def describe_type(%JavaDuration{} = value),
+    do: java_object_description(JavaDuration, value, "java.time.Duration")
+
+  def describe_type(%JavaDate{} = value),
+    do: java_object_description(JavaDate, value, "java.util.Date")
+
   def describe_type(%MapSet{}), do: "set"
   def describe_type(%LispKeyword{}), do: "keyword"
   def describe_type(x) when is_list(x), do: "list"
@@ -330,6 +355,10 @@ defmodule PtcRunner.Lisp.Eval.Helpers do
 
   defp sorted_chars(str) do
     str |> String.graphemes() |> Enum.sort()
+  end
+
+  defp java_object_description(module, value, label) do
+    if module.valid?(value), do: label, else: "invalid Java value"
   end
 
   # Extract function name from function reference

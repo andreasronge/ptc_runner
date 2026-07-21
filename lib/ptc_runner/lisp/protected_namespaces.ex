@@ -3,9 +3,11 @@ defmodule PtcRunner.Lisp.ProtectedNamespaces do
   Single consult point for namespace protection for deployment preludes.
 
   Reserved namespaces are host-owned and may never be declared by a
-  deployment prelude, redefined by user code, or shadowed. V1 reserves
-  exactly: `tool`, `data`, and `ptc.core`. The future
-  "catalog" namespace name is deliberately deferred.
+  deployment prelude, redefined by user code, or shadowed. The fixed host
+  namespaces are `tool`, `data`, and `ptc.core`; the bounded Java surface additionally owns
+  every admitted Java class spelling so prelude exports cannot be silently
+  replaced by Java dispatch. The future "catalog" namespace name is deliberately
+  deferred.
 
   Namespace names are string-backed at the host boundary, so this
   module operates on binaries.
@@ -16,10 +18,11 @@ defmodule PtcRunner.Lisp.ProtectedNamespaces do
   consult.
   """
 
+  alias PtcRunner.Lisp.Java.Surface, as: JavaSurface
   alias PtcRunner.Lisp.Prelude
 
-  # Reserved host namespace NAMES. Kept as a plain list and turned
-  # into a MapSet at runtime so the public functions return a `MapSet.t()`
+  # Fixed reserved host namespace names. Combined with the manifest's
+  # Java class spellings and turned into a MapSet at runtime so public functions return a `MapSet.t()`
   # (an opaque type), not a compile-time literal with a concrete internal
   # shape. String-backed; NOT added to SourceAtoms @bounded_namespaces —
   # that would leak atoms and broaden the global vocabulary.
@@ -32,7 +35,9 @@ defmodule PtcRunner.Lisp.ProtectedNamespaces do
     # Fold into an empty MapSet (rather than `MapSet.new(literal_list)`) so
     # dialyzer infers the opaque `MapSet.t()` instead of a concrete literal
     # subtype that would trip `contract_with_opaque`.
-    Enum.into(@reserved_names, MapSet.new())
+    @reserved_names
+    |> Kernel.++(JavaSurface.class_spellings())
+    |> Enum.into(MapSet.new())
   end
 
   @doc """
@@ -41,7 +46,7 @@ defmodule PtcRunner.Lisp.ProtectedNamespaces do
   Accepts a binary or an atom; atoms are stringified at the boundary.
   """
   @spec reserved?(String.t() | atom()) :: boolean()
-  def reserved?(name) when is_binary(name), do: name in @reserved_names
+  def reserved?(name) when is_binary(name), do: MapSet.member?(reserved(), name)
   def reserved?(name) when is_atom(name), do: reserved?(Atom.to_string(name))
 
   @doc """

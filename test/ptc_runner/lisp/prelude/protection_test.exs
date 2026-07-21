@@ -25,6 +25,7 @@ defmodule PtcRunner.Lisp.Prelude.ProtectionTest do
   use ExUnit.Case, async: true
 
   alias PtcRunner.Lisp.Analyze
+  alias PtcRunner.Lisp.Java.Surface, as: JavaSurface
   alias PtcRunner.Lisp.Parser
   alias PtcRunner.Lisp.Prelude
   alias PtcRunner.Lisp.Prelude.Compiler
@@ -201,9 +202,9 @@ defmodule PtcRunner.Lisp.Prelude.ProtectionTest do
       end
     end
 
-    test "the reserved set is exactly tool/data/ptc.core" do
+    test "the reserved set combines fixed host names and Java class spellings" do
       assert ProtectedNamespaces.reserved() ==
-               MapSet.new(["tool", "data", "ptc.core"])
+               MapSet.new(["tool", "data", "ptc.core"] ++ JavaSurface.class_spellings())
     end
   end
 end

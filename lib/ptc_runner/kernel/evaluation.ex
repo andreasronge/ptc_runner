@@ -21,6 +21,7 @@ defmodule PtcRunner.Kernel.Evaluation do
   alias PtcRunner.Kernel.RunState
   alias PtcRunner.Kernel.RuntimeTools
   alias PtcRunner.Lisp
+  alias PtcRunner.Lisp.Java.Project, as: JavaProject
   alias PtcRunner.Lisp.TrustedTool
 
   @doc "Evaluates bounded subordinate source with optional canonical event collection."
@@ -267,12 +268,18 @@ defmodule PtcRunner.Kernel.Evaluation do
       {:ok, %{return: {:__ptc_fail__, value}} = step} ->
         :ok = RunState.release_evaluation(state, lease)
 
-        %{
-          outcome: :failed,
-          value: Lisp.externalize_value(value),
-          prints: Map.get(step, :prints, []),
-          continuation_effect: :preserved
-        }
+        case JavaProject.project(value, :kernel_json) do
+          {:ok, projected} ->
+            %{
+              outcome: :failed,
+              value: Lisp.externalize_value(projected),
+              prints: Map.get(step, :prints, []),
+              continuation_effect: :preserved
+            }
+
+          {:error, reason} ->
+            java_projection_failure(step, reason)
+        end
 
       {:ok, step} ->
         commit_result(state, lease, history, step)
@@ -283,12 +290,23 @@ defmodule PtcRunner.Kernel.Evaluation do
   end
 
   defp commit_result(state, lease, history, step) do
+    case JavaProject.project(step.return, :kernel_json) do
+      {:ok, projected_return} ->
+        commit_projected_result(state, lease, history, step, projected_return)
+
+      {:error, reason} ->
+        :ok = RunState.release_evaluation(state, lease)
+        java_projection_failure(step, reason)
+    end
+  end
+
+  defp commit_projected_result(state, lease, history, step, projected_return) do
     candidate_history = history_after_success(history, step.return)
 
     case RunState.commit_evaluation(state, lease, step.memory, candidate_history) do
       :ok ->
         step
-        |> classify_success()
+        |> classify_success(projected_return)
         |> Map.put(
           :continuation_effect,
           if(match?({:__ptc_return__, _value}, step.return),
@@ -343,7 +361,7 @@ defmodule PtcRunner.Kernel.Evaluation do
     end
   end
 
-  defp classify_success(%{return: {:__ptc_return__, value}} = step) do
+  defp classify_success(step, {:__ptc_return__, value}) do
     %{
       outcome: :returned,
       value: Lisp.externalize_value(value),
@@ -351,11 +369,22 @@ defmodule PtcRunner.Kernel.Evaluation do
     }
   end
 
-  defp classify_success(step) do
+  defp classify_success(step, value) do
     %{
       outcome: :continued,
-      value: Lisp.externalize_value(step.return),
+      value: Lisp.externalize_value(value),
       prints: step.prints
+    }
+  end
+
+  defp java_projection_failure(step, reason) do
+    %{
+      outcome: :evaluation_error,
+      kind: :java_projection_error,
+      details: %{projection_error: inspect(reason, limit: 10)},
+      prints: Map.get(step, :prints, []),
+      continuation_effect: :preserved,
+      retryable?: false
     }
   end
 

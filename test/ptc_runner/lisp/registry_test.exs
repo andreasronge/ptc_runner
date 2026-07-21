@@ -4,6 +4,7 @@ defmodule PtcRunner.Lisp.RegistryTest do
   alias PtcRunner.Lisp.Analyze
   alias PtcRunner.Lisp.Env
   alias PtcRunner.Lisp.Env.Builtin
+  alias PtcRunner.Lisp.Java.Surface, as: JavaSurface
   alias PtcRunner.Lisp.Registry
 
   describe "sync validation" do
@@ -30,7 +31,14 @@ defmodule PtcRunner.Lisp.RegistryTest do
     test "no orphaned registry entries (in registry but not in code)" do
       env_names = Env.initial() |> Map.keys() |> Enum.map(&Atom.to_string/1) |> MapSet.new()
       analyze_names = Analyze.supported_forms() |> Enum.map(&Atom.to_string/1) |> MapSet.new()
-      code_names = MapSet.union(env_names, analyze_names)
+
+      java_names =
+        JavaSurface.function_entries()
+        |> Enum.filter(&(&1.dispatch == :java))
+        |> Enum.map(& &1.name)
+        |> MapSet.new()
+
+      code_names = env_names |> MapSet.union(analyze_names) |> MapSet.union(java_names)
 
       registry_names = Registry.implemented() |> Enum.map(& &1.name) |> MapSet.new()
 
@@ -81,7 +89,7 @@ defmodule PtcRunner.Lisp.RegistryTest do
       for entry <- Registry.implemented() do
         assert is_binary(entry.name), "Entry missing name"
 
-        assert entry.dispatch in [:env, :analyze],
+        assert entry.dispatch in [:env, :analyze, :java],
                "Entry '#{entry.name}' has invalid dispatch: #{inspect(entry.dispatch)}"
 
         assert entry.category in [
@@ -113,8 +121,10 @@ defmodule PtcRunner.Lisp.RegistryTest do
       assert Registry.doc("Duration/between").name == "Duration/between"
       assert Registry.doc("java.time.Duration/between").name == "Duration/between"
       assert Registry.doc("Boolean/parseBoolean").name == "Boolean/parseBoolean"
-      assert Registry.doc("Double/parseDouble").name == "parse-double"
-      assert Registry.doc("Integer/parseInt").name == "parse-long"
+      assert Registry.doc("Double/parseDouble").name == "Double/parseDouble"
+      assert Registry.doc("Float/parseFloat").name == "Float/parseFloat"
+      assert Registry.doc("Integer/parseInt").name == "Integer/parseInt"
+      assert Registry.doc("Long/parseLong").name == "Long/parseLong"
     end
 
     test "doc/1 rejects unsupported namespaced Java members" do
@@ -189,14 +199,17 @@ defmodule PtcRunner.Lisp.RegistryTest do
     test "curated Java compatibility audits cover all documented interop entries" do
       supported_java_targets =
         Registry.java_compat_audit_keys()
-        |> Enum.flat_map(&Registry.java_compat_audit/1)
+        |> Enum.flat_map(&Registry.java_audit_targets/1)
         |> Enum.filter(&(&1.status == :supported))
-        |> MapSet.new(& &1.name)
+        |> MapSet.new(& &1.reference_id)
 
-      interop_names = Registry.java_interop() |> MapSet.new(& &1.name)
+      interop_references =
+        Registry.java_interop()
+        |> Enum.flat_map(& &1.reference_ids)
+        |> MapSet.new()
 
-      missing_from_audit = MapSet.difference(interop_names, supported_java_targets)
-      missing_from_interop = MapSet.difference(supported_java_targets, interop_names)
+      missing_from_audit = MapSet.difference(interop_references, supported_java_targets)
+      missing_from_interop = MapSet.difference(supported_java_targets, interop_references)
 
       assert MapSet.to_list(missing_from_audit) == [],
              "Java interop entries missing from curated audit: #{inspect(MapSet.to_list(missing_from_audit))}"

@@ -14,6 +14,59 @@ Tracked differences between PTC-Lisp and Clojure semantics, discovered via confo
 | **P1** | Missing feature that limits expressiveness; workarounds exist |
 | **P2** | Edge case or minor divergence; rarely encountered in practice |
 
+### DIV-51: `java.util.Date(String)` uses deterministic bounded parsing
+
+| Field | Value |
+|-------|-------|
+| **Priority** | n/a |
+| **Status** | by design |
+| **Source** | Manual conformance case `java/util-date-deterministic-two-digit-year-001` |
+
+```clojure
+;; JVM Clojure (result changes with Date's moving 80-year window)
+(java.util.Date. "Jan 1 00:00:00 GMT 20") ;=> a java.util.Date
+
+;; PTC-Lisp
+(java.util.Date. "Jan 1 00:00:00 GMT 20") ;=> java_domain_error
+```
+
+**Rationale:** Java's deprecated string constructor uses the host default time
+zone when no zone is present and interprets two-digit years through a moving
+80-year window. PTC-Lisp admits a bounded legacy English grammar, requires an
+explicit year with at least four digits, validates weekday and month tokens as
+recognized English names, admits only dates on or after Java's Gregorian cutover
+(`1582-10-15`), and interprets an omitted zone as UTC. Excluding the historical
+hybrid Julian/Gregorian range keeps parsing deterministic without implementing
+the deprecated parser's calendar cutover rules. The admitted post-cutover forms
+preserve Java behavior.
+
+### DIV-52: `Duration/between` admits only `Instant` temporal values
+
+| Field | Value |
+|-------|-------|
+| **Priority** | n/a |
+| **Status** | by design |
+| **Source** | JVM/PTC oracle case `duration-between-local-date-boundary` |
+
+```clojure
+;; JVM Clojure selects Duration.between(Temporal, Temporal), then LocalDate
+;; cannot supply seconds and the method raises UnsupportedTemporalTypeException.
+(Duration/between (LocalDate/parse "2024-01-01")
+                  (LocalDate/parse "2024-01-02"))
+
+;; PTC-Lisp rejects the values during closed overload selection.
+(Duration/between (LocalDate/parse "2024-01-01")
+                  (LocalDate/parse "2024-01-02")) ;=> java_type_error
+```
+
+**Rationale:** PTC-Lisp exposes a bounded temporal profile rather than Java's
+open `Temporal` interface. `Duration/between` admits native `Instant` values,
+the only supported temporal class in this profile that supplies the seconds
+and nanoseconds required by `Duration`. Rejecting `LocalDate` during closed
+selection avoids pretending that every future `Temporal` implementation is
+automatically authorized while preserving exact behavior for admitted
+`Instant` calls.
+
 ---
 
 ## 1. Semantics — Supported features with incorrect behavior
@@ -437,12 +490,12 @@ above. Java-shaped parse aliases are tracked separately under `GAP-J01` and
 
 **Rationale:** No exception handling (DIV-10). Returning `nil` is safer for LLM-generated code.
 
-### GAP-J01: Java numeric parse aliases return nil instead of raising on invalid input
+### GAP-J01: Java numeric parse aliases returned nil instead of raising on invalid input
 
 | Field | Value |
 |-------|-------|
 | **Priority** | P1 |
-| **Status** | open |
+| **Status** | fixed |
 | **Source** | Manual conformance cases `java/integer-parse-int-bug-001`, `java/integer-parse-int-empty-bug-001`, `java/integer-parse-int-whitespace-bug-001`, `java/integer-parse-int-overflow-bug-001`, `java/integer-parse-int-plus-overflow-bug-001`, `java/integer-parse-int-underflow-bug-001`, `java/integer-parse-int-nil-bug-001`, `java/long-parse-long-bug-001`, `java/long-parse-long-empty-bug-001`, `java/long-parse-long-whitespace-bug-001`, `java/long-parse-long-overflow-bug-001`, `java/long-parse-long-plus-overflow-bug-001`, `java/long-parse-long-underflow-bug-001`, `java/long-parse-long-nil-bug-001`, `java/double-parse-double-bug-001`, `java/double-parse-double-empty-bug-001`, `java/double-parse-double-whitespace-bug-001`, `java/double-parse-double-hex-float-bug-001`, `java/double-parse-double-nil-bug-001`, `java/float-parse-float-bug-001`, `java/float-parse-float-empty-bug-001`, `java/float-parse-float-whitespace-bug-001`, `java/float-parse-float-nil-bug-001` |
 
 ```clojure
@@ -469,34 +522,21 @@ above. Java-shaped parse aliases are tracked separately under `GAP-J01` and
 (Double/parseDouble "0x1.0p0") ;=> 1.0
 (Float/parseFloat "1.5 ")  ;=> 1.5
 
-;; PTC-Lisp current behavior
-(Integer/parseInt "x")    ;=> nil
-(Integer/parseInt "")     ;=> nil
-(Integer/parseInt " 1")   ;=> nil
-(Integer/parseInt "2147483648") ;=> 2147483648
-(Integer/parseInt "+2147483648") ;=> 2147483648
-(Integer/parseInt nil)    ;=> nil
-(Long/parseLong "x")      ;=> nil
-(Long/parseLong "")       ;=> nil
-(Long/parseLong " 1")     ;=> nil
-(Long/parseLong "9223372036854775808") ;=> 9223372036854775808
-(Long/parseLong "+9223372036854775808") ;=> 9223372036854775808
-(Long/parseLong nil)      ;=> nil
-(Double/parseDouble "x")  ;=> nil
-(Double/parseDouble "")   ;=> nil
-(Double/parseDouble nil)  ;=> nil
-(Float/parseFloat "x")    ;=> nil
-(Float/parseFloat "")     ;=> nil
-(Float/parseFloat nil)    ;=> nil
-(Double/parseDouble " 1.5") ;=> nil
-(Double/parseDouble "0x1.0p0") ;=> nil
-(Float/parseFloat "1.5 ")  ;=> nil
+;; PTC-Lisp
+;; The same successful values and bounded Java error categories as above.
 ```
 
 **Decision:** BUG. These are Java-shaped class calls, so Java semantics should
 win even when the safer Clojure-named helpers return signal values. For
 integer parsers that includes Java primitive range checks; for floating parsers
 that includes Java's accepted leading/trailing whitespace.
+
+**Fix:** Numeric class calls now use closed manifest dispatch. Integer and Long
+parsers enforce their primitive decimal ranges. Float and Double parsers accept
+Java decimal, hexadecimal, suffix, special-value, and Java-whitespace syntax
+and round directly to their declared IEEE 754 kind. Invalid values produce
+bounded `NumberFormatException` or `NullPointerException` conditions; the
+unqualified Clojure-named helpers retain their safe `nil` behavior.
 
 ### GAP-J02: `Boolean/parseBoolean` returns nil for non-true strings
 
@@ -524,10 +564,10 @@ that includes Java's accepted leading/trailing whitespace.
 (Boolean/parseBoolean true) ;=> error
 ```
 
-**Fix:** `Boolean/parseBoolean` now uses a Java-shaped interop builtin instead
-of aliasing PTC-Lisp `parse-boolean`. It returns `true` only for
+**Fix:** `Boolean/parseBoolean` now uses its manifest reference and code-owned
+closed Java dispatch instead of aliasing PTC-Lisp `parse-boolean`. It returns `true` only for
 case-insensitive `"true"`, returns `false` for nil/null and all other strings,
-and raises for non-string, non-nil inputs.
+and returns a bounded Java type error for non-string, non-nil inputs.
 
 ### GAP-J15: Java integer parse radix overloads are unsupported
 
@@ -551,168 +591,70 @@ and raises for non-string, non-nil inputs.
 overload is a normal finite Java parser surface and should not be rejected as
 an unsupported arity while the one-argument parse methods are marked supported.
 
-### GAP-J03: `java.util.Date.` numeric constructor treats milliseconds as seconds
+### GAP-J03: Date numeric construction used seconds heuristics
 
 | Field | Value |
 |-------|-------|
 | **Priority** | P1 |
-| **Status** | open |
-| **Source** | Manual conformance cases `java/util-date-numeric-constructor-bug-001`, `java/util-date-single-millisecond-constructor-bug-001`, `java/util-date-negative-single-millisecond-constructor-bug-001`, `java/util-date-negative-numeric-constructor-bug-001` |
+| **Status** | **fixed** |
+| **Source** | Manual conformance cases java/util-date-*-constructor-bug-001 |
 
-```clojure
-;; Java / Clojure
-(.getTime (java.util.Date. 1000))   ;=> 1000
-(.getTime (java.util.Date. 1))      ;=> 1
-(.getTime (java.util.Date. -1))     ;=> -1
-(.getTime (java.util.Date. -1000))  ;=> -1000
-
-;; PTC-Lisp current behavior
-(.getTime (java.util.Date. 1000))   ;=> 1000000
-(.getTime (java.util.Date. 1))      ;=> 1000
-(.getTime (java.util.Date. -1))     ;=> -1000
-(.getTime (java.util.Date. -1000))  ;=> -1000000
-```
-
-**Decision:** BUG. `java.util.Date.` is a Java-shaped constructor; numeric
-arguments should be epoch milliseconds.
-
-### GAP-J04: `.getTime` is exposed on `Instant/parse` results
+Date(long) now interprets every admitted signed Java long as exact epoch
+milliseconds, including small and negative values. The seconds/milliseconds
+heuristic was deleted.
+### GAP-J04: getTime was exposed on Instant values
 
 | Field | Value |
 |-------|-------|
 | **Priority** | P1 |
-| **Status** | open |
-| **Source** | Manual conformance cases `java/instant-get-time-bug-001`, `java/instant-get-time-millis-bug-001`, `java/instant-get-time-offset-bug-001`, `java/instant-get-time-negative-bug-001`, `java/instant-get-time-nanos-bug-001` |
+| **Status** | **fixed** |
+| **Source** | Manual conformance cases java/instant-get-time-*-bug-001 |
 
-```clojure
-;; Java / Clojure
-(.getTime (java.time.Instant/parse "1970-01-01T00:00:01Z"))
-;=> NoSuchFieldException
-(.getTime (java.time.Instant/parse "1970-01-01T00:00:00.123Z"))
-;=> NoSuchFieldException
-(.getTime (java.time.Instant/parse "1970-01-01T01:00:00+01:00"))
-;=> NoSuchFieldException
-(.getTime (java.time.Instant/parse "1969-12-31T23:59:59Z"))
-;=> NoSuchFieldException
-(.getTime (java.time.Instant/parse "1970-01-01T00:00:00.999999999Z"))
-;=> NoSuchFieldException
-
-;; PTC-Lisp current behavior
-(.getTime (java.time.Instant/parse "1970-01-01T00:00:01Z")) ;=> 1000
-(.getTime (java.time.Instant/parse "1970-01-01T00:00:00.123Z")) ;=> 123
-(.getTime (java.time.Instant/parse "1970-01-01T01:00:00+01:00")) ;=> 0
-(.getTime (java.time.Instant/parse "1969-12-31T23:59:59Z")) ;=> -1000
-(.getTime (java.time.Instant/parse "1970-01-01T00:00:00.999999999Z")) ;=> 999
-```
-
-**Decision:** BUG/audit mismatch. Java `Instant` uses `toEpochMilli`, not
-`getTime`. If PTC keeps `.getTime` as a convenience on DateTime values, it
-should be documented as a PTC extension or Java `Date` compatibility helper,
-not as `java.time.Instant` compatibility.
-
-### GAP-J20: `java.util.Date` exposes non-Java `.isBefore`/`.isAfter` methods
+Instant and Date now retain distinct native classes. getTime is owned only by
+java.util.Date; Instant owns toEpochMilli. Calling getTime on an Instant is
+rejected by receiver-class dispatch.
+### GAP-J20: Date exposed non-Java isBefore and isAfter methods
 
 | Field | Value |
 |-------|-------|
 | **Priority** | P2 |
-| **Status** | **by design (DIV)** |
-| **Source** | Manual conformance cases `java/util-date-is-before-method-bug-001`, `java/util-date-is-after-method-bug-001` |
+| **Status** | **fixed** |
+| **Source** | Manual conformance cases java/util-date-is-*-method-bug-001 |
 
-**Reclassified (2026-06-01 classification audit):** BUG → **DIV**. PTC models `java.util.Date`/`Instant`/`LocalDateTime` as a single DateTime value, so `.isBefore`/`.isAfter` are exposed across them by design (the temporal-value-unification value model), not a Java per-class artifact.
-
-```clojure
-;; Java / Clojure
-(.isBefore (java.util.Date. 0) (java.util.Date. 1000))
-;=> IllegalArgumentException
-(.isAfter (java.util.Date. 1000) (java.util.Date. 0))
-;=> IllegalArgumentException
-
-;; PTC-Lisp current behavior
-(.isBefore (java.util.Date. 0) (java.util.Date. 1000)) ;=> true
-(.isAfter (java.util.Date. 1000) (java.util.Date. 0)) ;=> true
-```
-
-**Decision:** BUG. `java.util.Date` uses `.before` and `.after`; `.isBefore`
-and `.isAfter` are `java.time` method names. Java-shaped dot calls should keep
-Java receiver semantics unless explicitly reclassified as PTC extensions.
-
-### GAP-J21: `java.util.Date.` accepts existing PTC temporal values
+Date now owns the Java before and after methods. isBefore and isAfter are owned
+only by LocalDate and Instant, and cannot be selected for a Date receiver.
+### GAP-J21: Date accepted native temporal constructor extensions
 
 | Field | Value |
 |-------|-------|
 | **Priority** | P2 |
-| **Status** | **by design (extension)** |
-| **Source** | Manual conformance case `java/util-date-native-temporal-extension-001` and runtime interop tests for `DateTime`, `NaiveDateTime`, and `Date` arguments |
+| **Status** | **fixed** |
+| **Source** | Manual conformance case java/util-date-native-temporal-extension-001 |
 
-Java has no `java.util.Date` constructor overload for PTC-Lisp's native
-temporal values. PTC-Lisp accepts those values directly so tool-provided dates
-and timestamps can be used without a stringify-and-parse round trip.
-
-**Decision:** Keep as a bounded PTC extension. It has no JVM descriptor and
-must remain explicitly classified so it cannot be mistaken for an attested
-Java constructor overload.
-
-### GAP-J18: `Instant.toEpochMilli` is unsupported
+The descriptorless Date constructor extension for host and PTC temporal values
+was removed. Date construction now has only the admitted JVM constructors:
+zero arguments, one long millisecond value, or one bounded legacy string.
+### GAP-J18: Instant.toEpochMilli was unsupported
 
 | Field | Value |
 |-------|-------|
 | **Priority** | P1 |
-| **Status** | **unsupported** |
-| **Source** | Manual conformance case `java/instant-to-epoch-milli-unsupported-bug-001` |
+| **Status** | **fixed** |
+| **Source** | Manual conformance case java/instant-to-epoch-milli-unsupported-bug-001 |
 
-**Reclassified (2026-06-01 classification audit):** BUG → **UNSUPPORTED**. `Instant.toEpochMilli` is simply not in PTC's implemented Java-method set (PTC raises `:unsupported_method` listing what it does support) — an unimplemented feature, not a wrong behavior on a supported one.
-
-```clojure
-;; Java / Clojure
-(.toEpochMilli (java.time.Instant/parse "1970-01-01T00:00:01Z")) ;=> 1000
-
-;; PTC-Lisp current behavior
-(.toEpochMilli (java.time.Instant/parse "1970-01-01T00:00:01Z")) ;=> unsupported_method
-```
-
-**Decision:** BUG/candidate gap. PTC-Lisp exposes `Instant/parse` and a
-non-Java `.getTime` convenience, but the actual Java `Instant` epoch-millisecond
-method is missing. Java-shaped temporal APIs should prefer Java's method names
-and semantics.
-
-### GAP-J19: `Duration.between` accepts `java.util.Date` inputs
+Instant.toEpochMilli is now a closed, descriptor-attested operation. It returns
+a Java long primitive and produces a bounded arithmetic condition when the
+result cannot fit in a signed Java long.
+### GAP-J19: Duration.between accepted Date inputs
 
 | Field | Value |
 |-------|-------|
 | **Priority** | P1 |
-| **Status** | open |
-| **Source** | Manual conformance cases `java/duration-between-date-instant-bug-001`, `java/duration-between-dates-bug-001` |
+| **Status** | **fixed** |
+| **Source** | Manual conformance cases java/duration-between-date-*-bug-001 |
 
-```clojure
-;; Java / Clojure
-(.toMillis (java.time.Duration/between
-  (java.util.Date. 0)
-  (java.time.Instant/parse "1970-01-01T00:00:01Z")))
-;=> ClassCastException
-
-(.toMillis (java.time.Duration/between
-  (java.util.Date. 0)
-  (java.util.Date. 0)))
-;=> ClassCastException
-
-;; PTC-Lisp current behavior
-(.toMillis (java.time.Duration/between
-  (java.util.Date. 0)
-  (java.time.Instant/parse "1970-01-01T00:00:01Z")))
-;=> 1000
-
-(.toMillis (java.time.Duration/between
-  (java.util.Date. 0)
-  (java.util.Date. 0)))
-;=> 0
-```
-
-**Decision:** BUG. `Duration/between` is a Java-shaped class call, so Java
-type semantics should apply. Java `Duration.between` operates on
-`java.time.temporal.Temporal` values; `java.util.Date` is not a `Temporal` and
-raises through Clojure Java interop. PTC-Lisp should not silently coerce Date
-values in a Java-named API.
-
+Duration.between now accepts two native Instants only. Date, LocalDate, host
+DateTime, and mixed-class inputs fail type selection before handler invocation.
 ### GAP-J05: Supported Java string methods miss overloads
 
 | Field | Value |
@@ -806,13 +748,11 @@ object/type distinctions PTC-Lisp intentionally does not model.
 |-------|-------|
 | **Priority** | n/a |
 | **Status** | by design |
-| **Source** | Manual conformance cases `java/string-length-char-receiver-001`, `java/string-to-lower-case-char-receiver-001`, `java/string-to-upper-case-char-receiver-001`, `java/string-contains-char-receiver-001`, `java/string-index-of-char-receiver-001`, `java/string-last-index-of-char-receiver-001`, `java/string-starts-with-char-receiver-001`, `java/string-ends-with-char-receiver-001`, `java/string-substring-char-receiver-001` |
+| **Source** | Manual conformance cases `java/string-length-char-receiver-001`, `java/string-contains-char-receiver-001`, `java/string-index-of-char-receiver-001`, `java/string-last-index-of-char-receiver-001`, `java/string-starts-with-char-receiver-001`, `java/string-ends-with-char-receiver-001`, `java/string-substring-char-receiver-001` |
 
 ```clojure
 ;; Java / Clojure
 (.length \a)          ;=> NoSuchFieldException
-(.toLowerCase \A)     ;=> NoSuchFieldException
-(.toUpperCase \a)     ;=> NoSuchFieldException
 (.contains \a "a")    ;=> IllegalArgumentException
 (.indexOf \a "a")     ;=> IllegalArgumentException
 (.lastIndexOf \a "a") ;=> IllegalArgumentException
@@ -822,8 +762,6 @@ object/type distinctions PTC-Lisp intentionally does not model.
 
 ;; PTC-Lisp
 (.length \a)          ;=> 1
-(.toLowerCase \A)     ;=> "a"
-(.toUpperCase \a)     ;=> "A"
 (.contains \a "a")    ;=> true
 (.indexOf \a "a")     ;=> 0
 (.lastIndexOf \a "a") ;=> 0
@@ -842,107 +780,48 @@ raise — the divergence only covers values PTC-Lisp genuinely models as strings
 The UTF-16-vs-grapheme index-unit difference is a separate axis tracked under
 GAP-J09.
 
-### GAP-J06: Java temporal parsers/constructors accept date strings Java rejects
+### GAP-J06: Temporal parsers accepted inputs outside their Java classes
 
 | Field | Value |
 |-------|-------|
 | **Priority** | P1 |
-| **Status** | open |
-| **Source** | Manual conformance cases `java/instant-parse-date-only-bug-001`, `java/instant-parse-no-zone-bug-001`, `java/instant-parse-no-zone-non-midnight-bug-001`, `java/local-date-parse-datetime-bug-001`, `java/local-date-parse-datetime-non-midnight-bug-001`, `java/util-date-string-constructor-bug-001` |
+| **Status** | **fixed** |
+| **Source** | Manual Instant, LocalDate, and Date parser regression cases |
 
-```clojure
-;; Java / Clojure
-(java.time.Instant/parse "2024-01-02")      ;=> DateTimeParseException
-(java.time.Instant/parse "2024-01-02T00:00:00") ;=> DateTimeParseException
-(java.time.Instant/parse "2024-01-02T03:04:05") ;=> DateTimeParseException
-(java.time.LocalDate/parse "2024-01-02T00:00:00") ;=> DateTimeParseException
-(java.time.LocalDate/parse "2024-01-02T03:04:05") ;=> DateTimeParseException
-(.getTime (java.util.Date. "2024-01-02"))   ;=> IllegalArgumentException
-
-;; PTC-Lisp current behavior
-(java.time.Instant/parse "2024-01-02")      ;=> LocalDate value
-(java.time.Instant/parse "2024-01-02T00:00:00") ;=> DateTime value
-(java.time.Instant/parse "2024-01-02T03:04:05") ;=> DateTime value
-(java.time.LocalDate/parse "2024-01-02T00:00:00") ;=> DateTime value
-(java.time.LocalDate/parse "2024-01-02T03:04:05") ;=> DateTime value
-(.getTime (java.util.Date. "2024-01-02"))   ;=> 1704153600000
-```
-
-**Decision:** BUG. These are Java-shaped constructor/parser calls. Java
-semantics should win, including rejection of inputs outside the Java method's
-accepted format.
-
-### GAP-J11: `java.util.Date.` rejects Java-accepted legacy date strings
+LocalDate.parse now returns LocalDate only and rejects date-time text.
+Instant.parse now returns Instant only and requires an offset or UTC marker.
+The bare parse auto-dispatch alias was removed. Date string construction no
+longer accepts ISO LocalDate or host temporal shortcut forms.
+### GAP-J11: Date rejected an admitted Java legacy string form
 
 | Field | Value |
 |-------|-------|
 | **Priority** | P2 |
-| **Status** | open |
-| **Source** | Manual conformance case `java/util-date-legacy-string-constructor-bug-001` |
+| **Status** | **fixed** |
+| **Source** | Manual case java/util-date-legacy-string-constructor-bug-001 |
 
-```clojure
-;; Java / Clojure
-(.getTime (java.util.Date. "Thu Jan 01 00:00:01 UTC 1970")) ;=> 1000
-
-;; PTC-Lisp current behavior
-(.getTime (java.util.Date. "Thu Jan 01 00:00:01 UTC 1970")) ;=> type_error
-```
-
-**Decision:** BUG. `java.util.Date.` is exposed as a Java-shaped constructor,
-so Java constructor semantics should win for accepted finite inputs. The
-constructor is deprecated on the JVM, but while it remains in the supported
-audit surface it should either match Java's accepted legacy string forms or be
-reclassified away from exact Java compatibility.
-
-### GAP-J12: `LocalDate` day arithmetic rejects numeric day counts Clojure accepts
+The bounded Date string constructor now accepts the attested legacy English
+form, including weekday, month name, clock time with optional seconds, recognized zone, and
+four-digit year. Java's host-dependent default timezone and moving two-digit
+year window remain intentionally excluded under DIV-51.
+### GAP-J12: LocalDate day arithmetic rejected Clojure numeric coercion
 
 | Field | Value |
 |-------|-------|
 | **Priority** | P2 |
-| **Status** | open |
-| **Source** | Manual conformance cases `java/local-date-plus-days-float-bug-001`, `java/local-date-plus-days-fractional-bug-001`, `java/local-date-plus-days-nan-bug-001`, `java/local-date-minus-days-float-bug-001`, `java/local-date-minus-days-fractional-bug-001`, `java/local-date-minus-days-nan-bug-001` |
+| **Status** | **fixed** |
+| **Source** | Manual LocalDate plusDays and minusDays numeric cases |
 
-```clojure
-;; Java / Clojure
-(.toEpochDay (.plusDays (java.time.LocalDate/parse "2024-01-02") 1.0))
-;=> 19725
-(.toEpochDay (.plusDays (java.time.LocalDate/parse "2024-01-01") 1.9))
-;=> 19724
-(.toEpochDay (.plusDays (java.time.LocalDate/parse "2024-01-01") ##NaN))
-;=> 19723
-(.toEpochDay (.minusDays (java.time.LocalDate/parse "2024-01-02") 1.0))
-;=> 19723
-(.toEpochDay (.minusDays (java.time.LocalDate/parse "2024-01-01") 1.9))
-;=> 19722
-(.toEpochDay (.minusDays (java.time.LocalDate/parse "2024-01-01") ##NaN))
-;=> 19723
-
-;; PTC-Lisp current behavior
-(.toEpochDay (.plusDays (java.time.LocalDate/parse "2024-01-02") 1.0))
-;=> type_error
-(.toEpochDay (.plusDays (java.time.LocalDate/parse "2024-01-01") 1.9))
-;=> type_error
-(.toEpochDay (.plusDays (java.time.LocalDate/parse "2024-01-01") ##NaN))
-;=> type_error
-(.toEpochDay (.minusDays (java.time.LocalDate/parse "2024-01-02") 1.0))
-;=> type_error
-(.toEpochDay (.minusDays (java.time.LocalDate/parse "2024-01-01") 1.9))
-;=> type_error
-(.toEpochDay (.minusDays (java.time.LocalDate/parse "2024-01-01") ##NaN))
-;=> type_error
-```
-
-**Decision:** BUG. `.plusDays` and `.minusDays` are exposed as Java-shaped
-methods and Clojure's Java interop coerces finite numeric arguments for the
-`long` parameter. PTC-Lisp should either match that invocation behavior or
-document a deliberate narrower numeric contract.
-
+The single admitted Java long overload now applies Clojure Java-interoperability
+coercion for floating numeric values. In-range fractional values truncate toward
+zero and NaN becomes zero. Infinities and finite doubles outside the signed-long
+range are rejected during overload selection.
 ### GAP-J09: Java string methods use grapheme indexes for non-BMP characters
 
 | Field | Value |
 |-------|-------|
 | **Priority** | P2 |
-| **Status** | open |
+| **Status** | **fixed** |
 | **Source** | Manual conformance cases `java/string-length-utf16-bug-001`, `java/string-substring-utf16-bug-001`, `java/string-index-of-utf16-bug-001`, `java/string-last-index-of-utf16-bug-001` |
 
 ```clojure
@@ -952,17 +831,41 @@ document a deliberate narrower numeric contract.
 (.indexOf "😀a" "a")        ;=> 2
 (.lastIndexOf "😀a😀" "😀") ;=> 3
 
-;; PTC-Lisp current behavior
-(.length "😀a")              ;=> 2
-(.substring "😀a" 0 1)      ;=> "😀"
-(.indexOf "😀a" "a")        ;=> 1
-(.lastIndexOf "😀a😀" "😀") ;=> 2
+;; PTC-Lisp fixed behavior
+(.length "😀a")              ;=> 3
+(.substring "😀a" 2)         ;=> "a"
+(.indexOf "😀a" "a")        ;=> 2
+(.lastIndexOf "😀a😀" "😀") ;=> 3
 ```
 
 **Decision:** BUG. PTC-Lisp's Clojure-named string helpers intentionally use
 Unicode grapheme indexes (see `DIV-36`), but these are Java-shaped method calls.
 Java `String` indexes and lengths are UTF-16 code units, so Java semantics
 should win here.
+
+**Fix:** The admitted Java String methods now use a bounded UTF-16 code-unit
+view. Ordinary PTC functions such as `count`, `subs`, and
+`clojure.string/index-of` retain their grapheme semantics under `DIV-36`.
+
+### DIV-53: Bounded Java UTF-16 views cannot represent every Java String operation
+
+| Field | Value |
+|-------|-------|
+| **Priority** | n/a |
+| **Status** | by design |
+| **Source** | Manual conformance case `java/string-substring-unpaired-surrogate-001` |
+
+Java `String.substring` can select one half of a surrogate pair and return a
+Java String containing that unpaired surrogate. PTC strings are valid UTF-8
+binaries, so the closed Java handler returns the bounded recoverable
+`:invalid_java_string` condition instead of repairing the index or exposing an
+invalid binary. All admitted Java String methods also reject receiver and
+String/CharSequence argument values larger than 256,000 input bytes before
+building their temporary UTF-16 view; the JVM has no corresponding bound.
+
+Java no-argument
+`toLowerCase` and `toUpperCase` remain outside the admitted surface until a
+deterministic locale and pinned Unicode-data contract are selected.
 
 ### GAP-J14: Java `String.substring` rejects finite numeric indexes
 
@@ -987,34 +890,34 @@ Clojure's Java interop coerces finite numeric index arguments for Java `int`
 parameters. This is separate from PTC-Lisp's intentional grapheme indexing
 policy for Clojure-named string helpers such as `subs`.
 
-**Fix:** `dot_substring/2` and `dot_substring/3` now coerce finite float indexes
-to the Java `int` parameter by truncating toward zero, then delegate to the
-existing integer logic — `(.substring "abcd" 1.9)` behaves like `1`, matching
-Babashka and the JVM. Non-finite floats (NaN, Infinity) are PTC-Lisp signal
-atoms (`:nan` / `:infinity`), not `is_float` values, so they keep raising a
-recoverable type error rather than entering the coercion path.
+**Fix:** Closed Java dispatch now coerces finite numeric values to the admitted
+Java `int` parameter by truncating toward zero — `(.substring "abcd" 1.9)`
+behaves like index `1`, matching Babashka and the JVM. NaN coerces to zero;
+positive and negative infinity remain outside the coercion path and produce a
+recoverable Java type error.
 
-### ~~GAP-J07~~: Reclassified as DIV-44 (intentional divergence)
+### ~~GAP-J07~~: Fixed with DIV-44
 
-`Math/min` / `Math/max` are variadic aliases of the Clojure-named helpers — see
-**DIV-44**.
+Qualified `Math/min` / `Math/max` now use closed Java overload dispatch — see
+the fixed historical record **DIV-44**.
 
-### ~~GAP-J08~~: Reclassified as DIV-43 (intentional divergence)
+### ~~GAP-J08~~: Fixed with DIV-43
 
-`Math/round` keeps PTC-Lisp's round semantics (half-away, integer result,
-preserves special values) — see **DIV-43**.
+Qualified `Math/round` now implements the Java float/double overloads — see the
+fixed historical record **DIV-43**.
 
-### ~~GAP-J10~~: Reclassified as DIV-45 (intentional divergence)
+### ~~GAP-J10~~: Fixed with DIV-45
 
-`Math/abs` / `Math/min` / `Math/max` / `Math/round` follow PTC-Lisp's
-arbitrary-precision, generic-comparison value model — see **DIV-45**.
+Qualified `Math/abs` / `Math/min` / `Math/max` / `Math/round` now preserve Java
+primitive selection and range behavior — see the fixed historical record
+**DIV-45**.
 
-### DIV-44: Java `Math/min` / `Math/max` are variadic
+### DIV-44: Java `Math/min` / `Math/max` were variadic
 
 | Field | Value |
 |-------|-------|
 | **Priority** | n/a |
-| **Status** | by design |
+| **Status** | **fixed** |
 | **Source** | Manual conformance cases `java/math-min-three-args-001`, `java/math-min-one-arg-001`, `java/math-max-three-args-001`, `java/math-max-one-arg-001` |
 
 ```clojure
@@ -1022,26 +925,21 @@ arbitrary-precision, generic-comparison value model — see **DIV-45**.
 (Math/min 3 2 1)   ;=> IllegalArgumentException
 (Math/max 1)       ;=> IllegalArgumentException
 
-;; PTC-Lisp
-(Math/min 3 2 1)   ;=> 1
-(Math/min 1)       ;=> 1
-(Math/max 1 2 3)   ;=> 3
-(Math/max 1)       ;=> 1
+;; PTC-Lisp (fixed)
+(Math/min 3 2 1)   ;=> IllegalArgumentException
+(Math/max 1)       ;=> IllegalArgumentException
 ```
 
-**Rationale:** PTC-Lisp's `min`/`max` are the Clojure-named variadic helpers,
-and `Math/min`/`Math/max` are aliases for them — they are not separate
-two-argument Java primitives. Restricting them to Java's two-argument overloads
-would mean manufacturing a `Math/`-namespace distinction solely to raise an
-unrecoverable error (no `try`/`catch`) on a well-defined variadic call. Java is
-a compatibility heuristic here, not the design owner.
+**Fix:** Qualified `Math/min` and `Math/max` are closed Java references with
+four exact two-argument primitive overloads each. The ordinary bare `min` and
+`max` helpers remain variadic PTC-Lisp functions.
 
-### DIV-43: `Math/round` keeps PTC-Lisp round semantics
+### DIV-43: `Math/round` used PTC-Lisp round semantics
 
 | Field | Value |
 |-------|-------|
 | **Priority** | n/a |
-| **Status** | by design |
+| **Status** | **fixed** |
 | **Source** | Manual conformance cases `java/math-round-negative-half-001`, `java/math-round-nan-001`, `java/math-round-pos-inf-001`, `java/math-round-neg-inf-001` |
 
 ```clojure
@@ -1051,29 +949,24 @@ a compatibility heuristic here, not the design owner.
 (Math/round ##Inf)  ;=> 9223372036854775807
 (Math/round ##-Inf) ;=> -9223372036854775808
 
-;; PTC-Lisp
-(Math/round -1.5)   ;=> -2
-(Math/round ##NaN)  ;=> ##NaN
-(Math/round ##Inf)  ;=> ##Inf
-(Math/round ##-Inf) ;=> ##-Inf
+;; PTC-Lisp (fixed)
+(Math/round -1.5)   ;=> -1
+(Math/round ##NaN)  ;=> 0
+(Math/round ##Inf)  ;=> 9223372036854775807
+(Math/round ##-Inf) ;=> -9223372036854775808
 ```
 
-**Rationale:** PTC-Lisp's `round` is an integer-returning extension that uses
-round-half-away-from-zero and **preserves** the special signal values
-(`:nan`, `:infinity`, `:negative_infinity`). Java's `Math.round` instead uses
-`floor(x + 0.5)` for negative halves and converts NaN/infinity to long values
-(`0` / `Long/MAX_VALUE` / `Long/MIN_VALUE`). Preserving the special value is
-more useful in the agent loop (it stays recoverable and informative) than
-saturating to a long bound, and matching Java would require a `Math/`-namespace
-distinction from the bare `round` extension (pinned to half-away integer
-results). The `Math/round` integer/bignum argument cases live under DIV-45.
+**Fix:** Qualified `Math/round` has distinct float-to-int and double-to-long
+overloads with Java's `floor(x + 0.5)` rule, NaN conversion, and saturation.
+The bare `round` extension retains round-half-away-from-zero and recoverable
+special values.
 
-### DIV-45: Java `Math` uses PTC-Lisp's arbitrary-precision / generic value model
+### DIV-45: Java `Math` used PTC-Lisp's generic numeric value model
 
 | Field | Value |
 |-------|-------|
 | **Priority** | n/a |
-| **Status** | by design |
+| **Status** | **fixed** |
 | **Source** | Manual conformance cases `java/math-abs-long-min-001`, `java/math-abs-bigint-001`, `java/math-max-mixed-numeric-001`, `java/math-min-mixed-numeric-001`, `java/math-min-nil-001`, `java/math-max-string-001`, `java/math-round-integer-overload-001`, `java/math-round-bigint-overload-001` |
 
 ```clojure
@@ -1086,27 +979,21 @@ results). The `Math/round` integer/bignum argument cases live under DIV-45.
 (Math/round 1)                  ;=> IllegalArgumentException
 (Math/round 9223372036854775808);=> IllegalArgumentException
 
-;; PTC-Lisp
-(Math/abs -9223372036854775808) ;=> 9223372036854775808  (mathematically correct)
-(Math/abs 9223372036854775808)  ;=> 9223372036854775808
-(Math/max 1 2.0)                ;=> 2.0
-(Math/min 1 2.0)                ;=> 1
-(Math/min nil 1)                ;=> 1
-(Math/max "a" 1)                ;=> "a"
-(Math/round 1)                  ;=> 1
-(Math/round 9223372036854775808);=> 9223372036854775808
+;; PTC-Lisp (fixed)
+(Math/abs -9223372036854775808) ;=> -9223372036854775808
+(Math/abs 9223372036854775808)  ;=> IllegalArgumentException
+(Math/max 1 2.0)                ;=> IllegalArgumentException
+(Math/min nil 1)                ;=> IllegalArgumentException
+(Math/max "a" 1)                ;=> IllegalArgumentException
+(Math/round 1)                  ;=> IllegalArgumentException
+(Math/round 9223372036854775808);=> IllegalArgumentException
 ```
 
-**Rationale:** PTC-Lisp numbers are arbitrary-precision integers and floats,
-and `min`/`max` compare generically across the numeric tower (and via total
-ordering across types). The `Math/*` aliases inherit that value model. Java's
-behaviors here are *primitive* artifacts — 64-bit two's-complement overflow
-(`Math/abs` of `Long/MIN_VALUE`), no mixed `long`/`double` overload, and
-exceptions for out-of-range or non-numeric arguments — that PTC-Lisp
-intentionally does not model. Reproducing them would manufacture a
-`Math/`-namespace distinction purely to emit overflow values or unrecoverable
-errors; PTC-Lisp's answers (e.g. the correct positive `abs`) are more useful in
-the agent loop.
+**Fix:** Qualified `Math/*` references now carry primitive provenance through
+closed overload dispatch. Out-of-range BigInt values, mixed primitive overloads,
+and non-numeric arguments produce bounded Java type failures; integer minimum
+values retain Java's two's-complement overflow. Bare `abs`, `min`, `max`, and
+`round` keep PTC-Lisp's generic numeric behavior.
 
 ### DIV-46: `select-keys` with a string keyseq matches keyword keys
 
@@ -1267,16 +1154,17 @@ for any base; `|base| == 1` with an infinite exponent yields `NaN`; a negative
 base with a non-integer exponent yields `NaN`; a zero base with a negative
 exponent yields signed infinity.
 
-### ~~GAP-J21~~: Reclassified as DIV-42 (intentional divergence)
+### ~~GAP-J21~~: Fixed with DIV-42
 
-`Math/ceil` / `Math/floor` are integer-returning extensions — see **DIV-42**.
+Qualified `Math/ceil` / `Math/floor` now return Java double values — see the
+fixed historical record **DIV-42**.
 
-### DIV-42: Java `Math/ceil` / `Math/floor` return integer-shaped values
+### DIV-42: Java `Math/ceil` / `Math/floor` returned integer-shaped values
 
 | Field | Value |
 |-------|-------|
 | **Priority** | n/a |
-| **Status** | by design |
+| **Status** | **fixed** |
 | **Source** | Manual conformance cases `java/math-ceil-double-rendering-001`, `java/math-floor-double-rendering-001` |
 
 ```clojure
@@ -1284,19 +1172,14 @@ exponent yields signed infinity.
 (str (Math/ceil 1.2))   ;=> "2.0"
 (str (Math/floor -1.2)) ;=> "-2.0"
 
-;; PTC-Lisp
-(str (Math/ceil 1.2))   ;=> "2"
-(str (Math/floor -1.2)) ;=> "-2"
+;; PTC-Lisp (fixed)
+(str (Math/ceil 1.2))   ;=> "2.0"
+(str (Math/floor -1.2)) ;=> "-2.0"
 ```
 
-**Rationale:** PTC-Lisp's `ceil` and `floor` are integer-returning extensions
-(pinned as such; see the function reference), so an integral result renders as
-`2`, not Java's `double` `2.0`. The `Math/ceil`/`Math/floor` aliases inherit
-that. The int-vs-double *shape* is the only difference (the numeric value is
-equal), and matching Java's `.0` rendering would require manufacturing a
-`Math/`-namespace distinction from the bare integer-returning extensions solely
-for that rendering. Java is a compatibility heuristic here, not the design
-owner.
+**Fix:** Qualified `Math/ceil` and `Math/floor` are closed Java double
+overloads, preserving double shape, signed zero, and non-finite values. Bare
+`ceil` and `floor` remain integer-returning PTC-Lisp extensions.
 
 ### DIV-34: Empty keyword names are not supported
 
@@ -1527,7 +1410,7 @@ The `nil` return for both real JSON `null` and parse failure is a known ambiguit
 (json/generate-string {:server "fs"})       ;=> nil      (atom key)
 (json/generate-string {"server" :fs})       ;=> nil      (atom value)
 (json/generate-string {1 "a"})              ;=> "{\"1\":\"a\"}"   (integer keys allowed; carve-out, no round-trip)
-(json/generate-string POSITIVE_INFINITY)    ;=> nil      (special-float carve-out)
+(json/generate-string ##Inf)                ;=> nil      (special-float carve-out)
 (json/generate-string {:tuple [{:ok 1}]})   ;=> nil      (any tuple, anywhere)
 
 ;; Programs that want strings on the wire convert explicitly:
@@ -1535,7 +1418,7 @@ The `nil` return for both real JSON `null` and parse failure is a known ambiguit
 ;=> "{\"server\":\"fs\"}"
 ```
 
-**Rationale:** Silently auto-stringifying keywords would erode PTC-Lisp's type signal at the wire boundary. The implementation runs a pre-validation walk (`encodable_value?` / `encodable_key?`) over the value tree *before* invoking `Jason.encode/1` — any non-boolean atom, atom-keyed map entry, tuple, PID, reference, or function short-circuits to `nil`. Special floats (`POSITIVE_INFINITY`, `NEGATIVE_INFINITY`, `NaN` — which resolve to atoms `:infinity` / `:negative_infinity` / `:nan`) are also rejected because they aren't valid JSON scalars.
+**Rationale:** Silently auto-stringifying keywords would erode PTC-Lisp's type signal at the wire boundary. The implementation runs a pre-validation walk (`encodable_value?` / `encodable_key?`) over the value tree *before* invoking `Jason.encode/1` — any non-boolean atom, atom-keyed map entry, tuple, PID, reference, or function short-circuits to `nil`. Special numeric literals (`##Inf`, `##-Inf`, and `##NaN`, represented by the bounded atoms `:infinity`, `:negative_infinity`, and `:nan`) are also rejected because they aren't valid JSON scalars.
 
 Map-key validation is **stricter** than value validation: JSON only accepts string keys. Once stringified, atom and float keys preserve no type signal across a round-trip and would break the §4.3 round-trip property, so they are rejected at the key position even when acceptable as values. Integer keys are allowed (Jason's default stringifies them) but **do not round-trip** — `{1 "a"}` parses back as `%{"1" => "a"}`.
 

@@ -334,43 +334,7 @@ defmodule PtcRunner.Lisp.Runtime.Builtins do
       # ============================================================
       {:intersection, {:variadic_nonempty, :intersection, &Runtime.intersection/2}},
       {:union, {:variadic, &Runtime.union/2, MapSet.new()}},
-      {:difference, {:variadic_nonempty, :difference, &Runtime.difference/2}},
-
-      # ============================================================
-      # Interop
-      # ============================================================
-      {:"Boolean/parseBoolean", {:normal, &Runtime.boolean_parse_boolean/1}},
-      {:"java.util.Date.",
-       {:multi_arity, :"java.util.Date.", {&Runtime.java_util_date/0, &Runtime.java_util_date/1}}},
-      {:".getTime", {:normal, &Runtime.dot_get_time/1}},
-      {:".toEpochDay", {:normal, &Runtime.dot_to_epoch_day/1}},
-      {:".plusDays", {:normal, &Runtime.dot_plus_days/2}},
-      {:".minusDays", {:normal, &Runtime.dot_minus_days/2}},
-      {:"Duration/between", {:normal, &Runtime.duration_between/2}},
-      {:".toMillis", {:normal, &Runtime.dot_to_millis/1}},
-      {:".toDays", {:normal, &Runtime.dot_to_days/1}},
-      {:".contains", {:normal, &Runtime.dot_contains/2}},
-      {:".indexOf",
-       {:multi_arity, :".indexOf", {&Runtime.dot_index_of/2, &Runtime.dot_index_of/3}}},
-      {:".lastIndexOf", {:normal, &Runtime.dot_last_index_of/2}},
-      {:".toLowerCase", {:normal, &Runtime.dot_to_lower_case/1}},
-      {:".toUpperCase", {:normal, &Runtime.dot_to_upper_case/1}},
-      {:".length", {:normal, &Runtime.dot_length/1}},
-      {:".substring",
-       {:multi_arity, :".substring", {&Runtime.dot_substring/2, &Runtime.dot_substring/3}}},
-      {:".startsWith", {:normal, &Runtime.dot_starts_with/2}},
-      {:".endsWith", {:normal, &Runtime.dot_ends_with/2}},
-      {:".isBefore", {:normal, &Runtime.dot_is_before/2}},
-      {:".isAfter", {:normal, &Runtime.dot_is_after/2}},
-      {:currentTimeMillis, {:normal, &Runtime.current_time_millis/0}},
-      {:parse, {:normal, &Runtime.parse_temporal/1}},
-
-      # ============================================================
-      # Double Constants
-      # ============================================================
-      {:POSITIVE_INFINITY, {:constant, :infinity}},
-      {:NEGATIVE_INFINITY, {:constant, :negative_infinity}},
-      {:NaN, {:constant, :nan}}
+      {:difference, {:variadic_nonempty, :difference, &Runtime.difference/2}}
     ]
   end
 end

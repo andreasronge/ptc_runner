@@ -4,10 +4,12 @@ defmodule PtcRunner.Lisp.Java.SurfaceTest do
   alias Mix.Tasks.Ptc.AuditUpstream
   alias Mix.Tasks.Ptc.GenDocs
   alias PtcRunner.Lisp
+  alias PtcRunner.Lisp.Analyze
   alias PtcRunner.Lisp.BuiltinNames
-  alias PtcRunner.Lisp.Env
+  alias PtcRunner.Lisp.CoreToSource
   alias PtcRunner.Lisp.Java.Surface
   alias PtcRunner.Lisp.Java.Surface.Validator
+  alias PtcRunner.Lisp.Parser
   alias PtcRunner.Lisp.Registry
   alias PtcRunner.Lisp.SourceAtoms
   alias PtcRunner.TestSupport.LispConformanceCases.Manual
@@ -15,29 +17,13 @@ defmodule PtcRunner.Lisp.Java.SurfaceTest do
   @namespace_members %{
     :Math => [
       :abs,
-      :"bit-and",
-      :"bit-and-not",
-      :"bit-clear",
-      :"bit-flip",
-      :"bit-not",
-      :"bit-or",
-      :"bit-set",
-      :"bit-shift-left",
-      :"bit-shift-right",
-      :"bit-test",
-      :"bit-xor",
       :ceil,
-      :double,
-      :float,
       :floor,
-      :int,
       :max,
       :min,
       :pow,
-      :quot,
       :round,
-      :sqrt,
-      :trunc
+      :sqrt
     ],
     :System => [:currentTimeMillis],
     :Boolean => ["parseBoolean"],
@@ -53,31 +39,16 @@ defmodule PtcRunner.Lisp.Java.SurfaceTest do
     :"java.time.Duration" => [:between]
   }
 
-  test "the checked-in manifest validates as a closed Phase-0 surface" do
+  test "the checked-in manifest validates with one route per overload" do
     assert :ok = validate(Surface.manifest())
+    assert Enum.all?(Surface.overloads(), &match?({:dispatch, _}, &1.route))
+    assert length(Surface.overloads()) == 55
 
-    env = Env.initial()
-
-    expected_java_bindings =
-      Map.new(Surface.legacy_binding_ids(), fn name ->
-        {name, runtime_binding_kind(Map.fetch!(env, name))}
-      end)
-
-    assert BuiltinNames.legacy_java_binding_kinds() == expected_java_bindings
-
-    for {name, expected_kind} <- Surface.legacy_bindings() do
-      assert runtime_binding_kind(Map.fetch!(env, name)) == expected_kind
-    end
-
-    for binding <- Surface.legacy_binding_ids() do
-      assert Map.has_key?(env, binding),
-             "Java overload route points at missing Env binding #{inspect(binding)}"
-    end
-
-    assert Enum.all?(Surface.overloads(), &match?({:legacy_env, _}, &1.route))
+    assert %{route: {:dispatch, :boolean_parse_boolean}} =
+             Enum.find(Surface.overloads(), &(&1.overload_id == :boolean_parse_boolean_string))
   end
 
-  test "namespace projection preserves the pre-manifest compatibility surface" do
+  test "namespace projection contains only admitted Java references" do
     expected_categories =
       Map.new(@namespace_members, fn
         {:Math, _members} -> {:Math, :math}
@@ -91,9 +62,29 @@ defmodule PtcRunner.Lisp.Java.SurfaceTest do
       assert Registry.builtins_by_namespace(namespace) == members
 
       for member <- members do
-        assert {:ok, binding} = Surface.legacy_binding(namespace, member)
-        assert Map.has_key?(Env.initial(), binding)
+        assert {:ok, %{reference_id: reference_id}} =
+                 Surface.resolve_reference(namespace, member)
+
+        assert is_atom(reference_id)
       end
+    end
+  end
+
+  test "resolves constructor and direct-dot source spellings through closed dispatch" do
+    assert {:ok, %{reference_id: :date_new, kind: :constructor}} =
+             Surface.resolve_plain_reference(:"java.util.Date.")
+
+    assert {:ok, :contains} = Surface.resolve_member_family(:".contains")
+
+    assert Enum.any?(
+             Surface.member_family_references(:contains),
+             &(&1.reference_id == :string_contains)
+           )
+
+    for source <- ["(java.util.Date. 1)", ~S|(.contains text "x")|] do
+      assert {:ok, raw} = Parser.parse(source)
+      assert {:ok, core} = Analyze.analyze(raw)
+      assert CoreToSource.format(core) == source
     end
   end
 
@@ -115,15 +106,15 @@ defmodule PtcRunner.Lisp.Java.SurfaceTest do
 
     ordinary_entry = %{stale_generic_entry | name: "ordinary", category: :core}
 
-    assert_raise ArgumentError, ~r/legacy Java function metadata/, fn ->
+    assert_raise ArgumentError, ~r/duplicate Java function metadata/, fn ->
       Surface.replace_function_entries([ordinary_entry, stale_generic_entry])
     end
 
     assert Surface.replace_function_entries([ordinary_entry]) ==
              [ordinary_entry | Surface.function_entries()]
 
-    assert_raise ArgumentError, ~r/legacy Java top-level metadata/, fn ->
-      Surface.validate_legacy_sources!(%{implemented: [], java_interop: []}, %{
+    assert_raise ArgumentError, ~r/duplicate Java top-level metadata/, fn ->
+      Surface.validate_authoritative_sources!(%{implemented: [], java_interop: []}, %{
         clojure_core_audit: [],
         clojure_string_audit: [],
         clojure_set_audit: [],
@@ -131,8 +122,8 @@ defmodule PtcRunner.Lisp.Java.SurfaceTest do
       })
     end
 
-    assert_raise ArgumentError, ~r/legacy Java top-level metadata/, fn ->
-      Surface.validate_legacy_sources!(%{implemented: []}, %{
+    assert_raise ArgumentError, ~r/duplicate Java top-level metadata/, fn ->
+      Surface.validate_authoritative_sources!(%{implemented: []}, %{
         clojure_core_audit: [],
         clojure_string_audit: [],
         clojure_set_audit: [],
@@ -173,13 +164,49 @@ defmodule PtcRunner.Lisp.Java.SurfaceTest do
     end
   end
 
-  test "validator rejects a route that bypasses the Phase-0 legacy boundary" do
+  test "validator rejects a dispatch route without a code-owned implementation" do
     manifest = Surface.manifest()
     [first | rest] = manifest.overloads
     invalid = %{manifest | overloads: [%{first | route: {:dispatch, :open_host_call}} | rest]}
 
     assert {:error, errors} = validate(invalid)
-    assert Enum.any?(errors, &String.contains?(&1, "invalid Phase-0 route"))
+
+    assert Enum.any?(
+             errors,
+             &String.contains?(&1, "implementation :open_host_call does not exist")
+           )
+  end
+
+  test "validator permits distinct closed implementations per overload" do
+    manifest = Surface.manifest()
+    reference = Enum.find(manifest.references, &(&1.reference_id == :boolean_parse_boolean))
+    overload = Enum.find(manifest.overloads, &(&1.overload_id == :boolean_parse_boolean_string))
+
+    second = %{
+      overload
+      | overload_id: :boolean_parse_boolean_second,
+        route: {:dispatch, :missing_second_handler}
+    }
+
+    references =
+      Enum.map(manifest.references, fn
+        %{reference_id: :boolean_parse_boolean} = row ->
+          %{row | overload_ids: reference.overload_ids ++ [second.overload_id]}
+
+        row ->
+          row
+      end)
+
+    assert {:error, errors} =
+             validate(%{
+               manifest
+               | references: references,
+                 overloads: manifest.overloads ++ [second]
+             })
+
+    assert Enum.any?(errors, &String.contains?(&1, "implementation :missing_second_handler"))
+    refute Enum.any?(errors, &String.contains?(&1, "overload routes disagree"))
+    refute Enum.any?(errors, &String.contains?(&1, "invalid reference routes"))
   end
 
   test "instance receiver profiles must belong to their Java class" do
@@ -192,50 +219,35 @@ defmodule PtcRunner.Lisp.Java.SurfaceTest do
     assert Enum.any?(errors, &String.contains?(&1, "class receiver profile"))
   end
 
-  test "validator rejects missing runtime bindings in routes and namespaces" do
+  test "validator rejects migration-only routes and namespace metadata" do
     manifest = Surface.manifest()
 
     invalid_route =
-      replace_overload(manifest, :math_abs_int, &%{&1 | route: {:legacy_env, :missing}})
+      replace_overload(manifest, :string_contains_char_sequence, fn overload ->
+        %{overload | route: {:legacy_env, :missing}}
+      end)
 
     assert {:error, errors} = validate(invalid_route)
-    assert Enum.any?(errors, &String.contains?(&1, "legacy Env binding :missing does not exist"))
+    assert Enum.any?(errors, &String.contains?(&1, "must use closed Java dispatch"))
 
     [math | namespaces] = manifest.namespaces
-    [abs | members] = math.members
+
+    members =
+      Enum.map(math.members, fn member ->
+        if member.source_name == :abs,
+          do: Map.put(member, :legacy_binding, :abs),
+          else: member
+      end)
 
     invalid_namespace = %{
       manifest
       | namespaces: [
-          %{math | members: [%{abs | legacy_binding: :missing} | members]} | namespaces
+          %{math | members: members} | namespaces
         ]
     }
 
     assert {:error, errors} = validate(invalid_namespace)
-    assert Enum.any?(errors, &String.contains?(&1, "legacy binding :missing does not exist"))
-
-    double_index = Enum.find_index(manifest.namespaces, &(&1.namespace == :Double))
-    double = Enum.at(manifest.namespaces, double_index)
-    [parse_double | constants] = double.members
-    wrong_route = %{parse_double | legacy_binding: :sqrt}
-
-    invalid_existing =
-      put_in(
-        manifest.namespaces,
-        List.replace_at(manifest.namespaces, double_index, %{
-          double
-          | members: [wrong_route | constants]
-        })
-      )
-
-    assert {:error, errors} = validate(invalid_existing)
-    assert Enum.any?(errors, &String.contains?(&1, "reference route :sqrt does not exist"))
-
-    wrong_existing_route =
-      replace_overload(manifest, :math_abs_int, &%{&1 | route: {:legacy_env, :sqrt}})
-
-    assert {:error, errors} = validate(wrong_existing_route)
-    assert Enum.any?(errors, &String.contains?(&1, "routes disagree"))
+    assert Enum.any?(errors, &String.contains?(&1, "cannot contain legacy binding metadata"))
   end
 
   test "validator rejects cross-class audit and presentation links" do
@@ -252,7 +264,8 @@ defmodule PtcRunner.Lisp.Java.SurfaceTest do
     assert {:error, errors} = validate(%{manifest | audits: audits})
     assert Enum.any?(errors, &String.contains?(&1, "reference class"))
 
-    [date_entry | entries] = manifest.interop_entries
+    date_entry = Enum.find(manifest.interop_entries, &(&1.class == "java.util.Date"))
+    entries = List.delete(manifest.interop_entries, date_entry)
     invalid_entry = %{date_entry | reference_ids: [:math_abs]}
 
     assert {:error, errors} = validate(%{manifest | interop_entries: [invalid_entry | entries]})
@@ -481,8 +494,8 @@ defmodule PtcRunner.Lisp.Java.SurfaceTest do
     assert {:error, errors} = validate(%{manifest | references: invalid_references})
     assert Enum.any?(errors, &String.contains?(&1, "callable policy"))
 
-    assert {:ok, %{return: [1.5, nil]}} =
-             Lisp.run(~S|(map Double/parseDouble ["1.5" "not-a-number"])|)
+    assert {:ok, %{return: [1.5, 2.5]}} =
+             Lisp.run(~S|(map Double/parseDouble ["1.5" "2.5"])|)
 
     assert {:ok, %{return: [1, 2]}} = Lisp.run(~S|(map .length ["a" "bb"])|)
   end
@@ -700,66 +713,6 @@ defmodule PtcRunner.Lisp.Java.SurfaceTest do
 
     assert {:error, errors} = validate(coordinated_downgrade)
     assert Enum.any?(errors, &String.contains?(&1, "JVM descriptor coverage"))
-
-    missing_alias_rationale =
-      replace_overload(manifest, :instant_get_time_alias_0, fn overload ->
-        %{overload | divergence_ids: []}
-      end)
-
-    assert {:error, errors} = validate(missing_alias_rationale)
-    assert Enum.any?(errors, &String.contains?(&1, "requires divergence IDs"))
-
-    missing_extension_rationale =
-      replace_overload(manifest, :date_new_ptc_temporal, fn overload ->
-        %{overload | divergence_ids: []}
-      end)
-
-    assert {:error, errors} = validate(missing_extension_rationale)
-    assert Enum.any?(errors, &String.contains?(&1, "requires divergence IDs"))
-  end
-
-  test "coordinated manifest edits cannot erase independent Phase-0 attestations" do
-    manifest = Surface.manifest()
-
-    coordinated_descriptor_downgrade =
-      manifest
-      |> replace_overload(:double_parse_double_string, fn overload ->
-        %{
-          overload
-          | classification: :intentional_ptc_alias,
-            attestation: :ptc_only,
-            descriptor: nil
-        }
-      end)
-      |> replace_audit_target(
-        :java_lang_double_audit,
-        :double_parse_double,
-        &%{&1 | jvm_descriptor_attestations: %{}}
-      )
-
-    assert {:error, errors} = validate(coordinated_descriptor_downgrade)
-    assert Enum.any?(errors, &String.contains?(&1, "independent Phase-0 attestation"))
-
-    coordinated_divergence_removal =
-      manifest
-      |> replace_overload(
-        :double_parse_double_string,
-        &%{&1 | divergence_ids: []}
-      )
-      |> replace_audit_target(
-        :java_lang_double_audit,
-        :double_parse_double,
-        fn target ->
-          %{
-            target
-            | admitted_overload_divergences: %{double_parse_double_string: []},
-              notes: String.replace(target.notes, "GAP-J01", "")
-          }
-        end
-      )
-
-    assert {:error, errors} = validate(coordinated_divergence_removal)
-    assert Enum.any?(errors, &String.contains?(&1, "independent Phase-0 attestation"))
   end
 
   test "overload divergence IDs are durable and linked to audit rationale" do
@@ -774,7 +727,7 @@ defmodule PtcRunner.Lisp.Java.SurfaceTest do
     assert Enum.any?(errors, &String.contains?(&1, "audit rationale"))
 
     removed_known_divergence =
-      replace_overload(manifest, :double_parse_double_string, fn overload ->
+      replace_overload(manifest, :date_new_string, fn overload ->
         %{overload | divergence_ids: []}
       end)
 
@@ -782,8 +735,8 @@ defmodule PtcRunner.Lisp.Java.SurfaceTest do
     assert Enum.any?(errors, &String.contains?(&1, "divergence coverage"))
 
     removed_secondary_divergence =
-      replace_overload(manifest, :math_max_int, fn overload ->
-        %{overload | divergence_ids: ["DIV-44"]}
+      replace_overload(manifest, :string_contains_char_sequence, fn overload ->
+        %{overload | divergence_ids: ["DIV-40"]}
       end)
 
     assert {:error, errors} = validate(removed_secondary_divergence)
@@ -838,50 +791,6 @@ defmodule PtcRunner.Lisp.Java.SurfaceTest do
                Atom.to_string(overload.overload_id)
              })
     end
-  end
-
-  test "PTC-only overloads have unique semantic identities" do
-    manifest = Surface.manifest()
-    original = Enum.find(manifest.overloads, &(&1.overload_id == :instant_get_time_alias_0))
-    duplicate = %{original | overload_id: :instant_get_time_alias_duplicate}
-
-    references =
-      Enum.map(manifest.references, fn reference ->
-        if reference.reference_id == :instant_get_time_alias do
-          %{reference | overload_ids: reference.overload_ids ++ [duplicate.overload_id]}
-        else
-          reference
-        end
-      end)
-
-    audits =
-      Map.update!(manifest.audits, :java_time_instant_audit, fn rows ->
-        Enum.map(rows, fn row ->
-          if row.reference_id == :instant_get_time_alias do
-            %{
-              row
-              | admitted_overload_divergences:
-                  Map.put(
-                    row.admitted_overload_divergences,
-                    duplicate.overload_id,
-                    duplicate.divergence_ids
-                  )
-            }
-          else
-            row
-          end
-        end)
-      end)
-
-    invalid = %{
-      manifest
-      | references: references,
-        overloads: manifest.overloads ++ [duplicate],
-        audits: audits
-    }
-
-    assert {:error, errors} = validate(invalid)
-    assert Enum.any?(errors, &String.contains?(&1, "duplicate Java overload identity"))
   end
 
   @tag :tmp_dir
@@ -958,17 +867,14 @@ defmodule PtcRunner.Lisp.Java.SurfaceTest do
     end
   end
 
-  test "interop documentation identifies intentional PTC aliases" do
+  test "interop documentation identifies class-owned temporal methods" do
     get_time = Enum.find(Surface.interop_entries(), &(&1.name == ".getTime"))
     is_before = Enum.find(Surface.interop_entries(), &(&1.name == ".isBefore"))
     is_after = Enum.find(Surface.interop_entries(), &(&1.name == ".isAfter"))
 
-    assert get_time.notes =~ "PTC compatibility alias"
-    assert get_time.notes =~ "GAP-J04"
-    assert is_before.notes =~ "PTC compatibility alias"
-    assert is_before.notes =~ "GAP-J20"
-    assert is_after.notes =~ "PTC compatibility alias"
-    assert is_after.notes =~ "GAP-J20"
+    assert get_time.notes == "Owned only by java.util.Date."
+    assert is_before.notes =~ "LocalDate and Instant"
+    assert is_after.notes =~ "LocalDate and Instant"
   end
 
   test "presentation rows cannot omit references from a shared Java spelling or route" do
@@ -1071,9 +977,7 @@ defmodule PtcRunner.Lisp.Java.SurfaceTest do
         members: [
           %{
             source_name: :abs,
-            legacy_binding: :abs,
-            classification: :incorrect_non_java_alias,
-            reference_id: nil
+            reference_id: :math_abs
           }
         ]
       }
@@ -1094,13 +998,7 @@ defmodule PtcRunner.Lisp.Java.SurfaceTest do
     assert SourceAtoms.intern("between") == :between
   end
 
-  defp validate(manifest) do
-    Validator.validate(
-      manifest,
-      Surface.legacy_bindings(),
-      Surface.phase0_attestations()
-    )
-  end
+  defp validate(manifest), do: Validator.validate(manifest, BuiltinNames.env_names())
 
   defp replace_overload(manifest, overload_id, update) do
     overloads =
@@ -1113,17 +1011,6 @@ defmodule PtcRunner.Lisp.Java.SurfaceTest do
 
   defp replace_entry(entries, name, update) do
     Enum.map(entries, fn entry -> if entry.name == name, do: update.(entry), else: entry end)
-  end
-
-  defp replace_audit_target(manifest, audit_key, reference_id, update) do
-    audits =
-      Map.update!(manifest.audits, audit_key, fn targets ->
-        Enum.map(targets, fn target ->
-          if target.reference_id == reference_id, do: update.(target), else: target
-        end)
-      end)
-
-    %{manifest | audits: audits}
   end
 
   defp replace_reference_links(manifest, old_reference_id, new_reference_id) do
@@ -1167,7 +1054,4 @@ defmodule PtcRunner.Lisp.Java.SurfaceTest do
         interop_entries: replace_entries.(manifest.interop_entries)
     }
   end
-
-  defp runtime_binding_kind(%Env.Builtin{binding: binding}), do: elem(binding, 0)
-  defp runtime_binding_kind(binding) when is_tuple(binding), do: elem(binding, 0)
 end

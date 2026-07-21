@@ -6,6 +6,8 @@ defmodule PtcRunner.Lisp.FormatTest do
   alias PtcRunner.Lisp.Format.RegexLiteral
   alias PtcRunner.Lisp.Format.SymbolRef
   alias PtcRunner.Lisp.Format.Var
+  alias PtcRunner.Lisp.Java.Callable
+  alias PtcRunner.Lisp.Java.Primitive
 
   doctest PtcRunner.Lisp.Format
 
@@ -228,6 +230,52 @@ defmodule PtcRunner.Lisp.FormatTest do
       assert result =~ ":path #fn[x]"
       refute result =~ ":closure"
       refute result =~ "secret_body"
+    end
+  end
+
+  describe "Java primitive formatting" do
+    test "preserves distinct overload identities in map keys and set members" do
+      assert {:ok, int} = Primitive.new(:int, 1)
+      assert {:ok, long} = Primitive.new(:long, 1)
+
+      map_output = Format.to_string(%{int => :int, long => :long})
+      {set_output, false} = Format.to_clojure(MapSet.new([int, long]))
+
+      assert map_output =~ "#java[int 1]"
+      assert map_output =~ "#java[long 1]"
+      assert set_output =~ "#java[int 1]"
+      assert set_output =~ "#java[long 1]"
+    end
+
+    test "does not collapse literal strings that equal Java display labels" do
+      assert {:ok, primitive} = Primitive.new(:int, 1)
+      assert {:ok, callable} = Callable.new(:boolean_parse_boolean)
+
+      primitive_label = "#java[int 1]"
+      callable_label = "#java[java.lang.Boolean/parseBoolean]"
+
+      map_output =
+        Format.to_string(%{
+          primitive => :primitive,
+          primitive_label => :literal,
+          callable => :callable,
+          callable_label => :literal
+        })
+
+      set_output =
+        Format.to_string(MapSet.new([primitive, primitive_label, callable, callable_label]))
+
+      assert length(Regex.scan(~r/=>/, map_output)) == 4
+      assert map_output =~ inspect(primitive_label)
+      assert map_output =~ "#{primitive_label} =>"
+      assert map_output =~ inspect(callable_label)
+      assert map_output =~ "#{callable_label} =>"
+      assert set_output =~ inspect(primitive_label)
+      assert set_output =~ primitive_label
+      assert set_output =~ inspect(callable_label)
+      assert set_output =~ callable_label
+      assert length(:binary.matches(set_output, primitive_label)) == 2
+      assert length(:binary.matches(set_output, callable_label)) == 2
     end
   end
 

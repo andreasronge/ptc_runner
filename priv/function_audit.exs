@@ -1436,13 +1436,14 @@
       name: "inst-ms",
       status: :not_relevant,
       description: "Milliseconds since epoch for instant",
-      notes: "covered by existing temporal interop .getTime"
+      notes: "Use .toEpochMilli on a native java.time.Instant or .getTime on java.util.Date."
     },
     %{
       name: "inst?",
       status: :not_relevant,
       description: "Returns true if instant",
-      notes: "Clojure instant predicate; PTC-Lisp temporal interop uses host date structs"
+      notes:
+        "Native Java temporal wrappers retain class identity; no general JVM instance predicate."
     },
     %{
       name: "instance?",

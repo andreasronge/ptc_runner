@@ -15,21 +15,21 @@ Coverage excludes `not_relevant` entries: `supported / (supported + candidate + 
 | Status | Count |
 |--------|-------|
 | Supported | 4 |
-| Candidate | 2 |
-| Not Relevant | 1 |
+| Candidate | 0 |
+| Not Relevant | 3 |
 | Not Classified | 0 |
-| Relevant Target | 6 |
-| Coverage | 4/6 (66.7%) |
+| Relevant Target | 4 |
+| Coverage | 4/4 (100.0%) |
 | **Total** | **7** |
 
 ## Details
 
 | Var | Status | Description | Notes |
 |-----|--------|-------------|-------|
-| `.after` | 🔲 candidate | Date ordering predicate | .isAfter covers the current PTC-Lisp spelling. |
-| `.before` | 🔲 candidate | Date ordering predicate | .isBefore covers the current PTC-Lisp spelling. |
-| `.getTime` | ✅ supported | Unix timestamp in milliseconds | Works on DateTime values. |
-| `.isAfter` | ✅ supported | Date ordering predicate | BUG GAP-J20: java.util.Date uses .after, not .isAfter; current behavior exposes a non-Java alias. |
-| `.isBefore` | ✅ supported | Date ordering predicate | BUG GAP-J20: java.util.Date uses .before, not .isBefore; current behavior exposes a non-Java alias. |
+| `.after` | ✅ supported | Date ordering predicate | Class-owned java.util.Date comparison. |
+| `.before` | ✅ supported | Date ordering predicate | Class-owned java.util.Date comparison. |
+| `.getTime` | ✅ supported | Exact epoch timestamp in milliseconds | Works only on native java.util.Date values. |
+| `.isAfter` | ❌ not_relevant | Method belongs to java.time classes, not java.util.Date | Removed from Date when class-aware temporal dispatch landed. |
+| `.isBefore` | ❌ not_relevant | Method belongs to java.time classes, not java.util.Date | Removed from Date when class-aware temporal dispatch landed. |
 | `.setTime` | ❌ not_relevant | Mutate Date timestamp | Mutable Java object operations are outside the sandbox model. |
-| `java.util.Date.` | ✅ supported | Construct DateTime value | BUG GAP-J03: numeric constructor currently treats milliseconds as seconds. BUG GAP-J06: ISO date strings are accepted by PTC-Lisp but rejected by the Java oracle. BUG GAP-J11: Java-accepted legacy date strings are rejected. EXTENSION GAP-J21: existing PTC temporal values are accepted directly. |
+| `java.util.Date.` | ✅ supported | Construct a legacy Date value | Numeric input is exact epoch milliseconds. DIV-51: string input uses a deterministic bounded legacy English grammar, admits dates on or after 1582-10-15, and uses UTC when no zone is present. |

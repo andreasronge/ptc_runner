@@ -76,12 +76,12 @@ defmodule PtcRunner.Lisp.EvalJsonTest do
                Lisp.run(~S|(json/generate-string {"server" (name :fs)})|)
     end
 
-    test "returns nil for special-float carve-out (POSITIVE_INFINITY)" do
-      assert {:ok, %{return: nil}} = Lisp.run("(json/generate-string POSITIVE_INFINITY)")
+    test "returns nil for positive infinity" do
+      assert {:ok, %{return: nil}} = Lisp.run("(json/generate-string ##Inf)")
     end
 
     test "returns nil for NaN" do
-      assert {:ok, %{return: nil}} = Lisp.run("(json/generate-string NaN)")
+      assert {:ok, %{return: nil}} = Lisp.run("(json/generate-string ##NaN)")
     end
   end
 

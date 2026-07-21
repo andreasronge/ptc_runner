@@ -263,8 +263,8 @@ Coverage excludes `not_relevant` entries: `supported / (supported + candidate + 
 | `inc'` | ✅ supported | Increments with arbitrary precision | alias for inc; BEAM integers are already arbitrary precision |
 | `indexed?` | ✅ supported | Returns true if supports indexed access | BUG GAP-S70: strings currently return true but Clojure returns false |
 | `infinite?` | ✅ supported | Returns true if number infinite | DIV-31: returns false for nil/non-numeric inputs instead of raising |
-| `inst-ms` | ❌ not_relevant | Milliseconds since epoch for instant | covered by existing temporal interop .getTime |
-| `inst?` | ❌ not_relevant | Returns true if instant | Clojure instant predicate; PTC-Lisp temporal interop uses host date structs |
+| `inst-ms` | ❌ not_relevant | Milliseconds since epoch for instant | Use .toEpochMilli on a native java.time.Instant or .getTime on java.util.Date. |
+| `inst?` | ❌ not_relevant | Returns true if instant | Native Java temporal wrappers retain class identity; no general JVM instance predicate. |
 | `instance?` | ❌ not_relevant | Returns true if instance of class | relies on Java class system |
 | `int` | ✅ supported | Coerces to int |  |
 | `int-array` | ❌ not_relevant | Creates int Java array | relies on Java array/mutability |

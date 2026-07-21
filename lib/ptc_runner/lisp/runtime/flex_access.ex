@@ -22,6 +22,7 @@ defmodule PtcRunner.Lisp.Runtime.FlexAccess do
   """
   def flex_get(%MapSet{}, _key), do: nil
   def flex_get(%LispKeyword{}, _key), do: nil
+  def flex_get(%_{} = _struct, _key), do: nil
 
   def flex_get(map, %LispKeyword{name: name} = key) when is_map(map) and not is_struct(map) do
     case Map.fetch(map, key) do
@@ -100,6 +101,7 @@ defmodule PtcRunner.Lisp.Runtime.FlexAccess do
   """
   def flex_fetch(%MapSet{}, _key), do: :error
   def flex_fetch(%LispKeyword{}, _key), do: :error
+  def flex_fetch(%_{} = _struct, _key), do: :error
 
   def flex_fetch(map, %LispKeyword{name: name} = key) when is_map(map) and not is_struct(map) do
     case Map.fetch(map, key) do
@@ -179,7 +181,7 @@ defmodule PtcRunner.Lisp.Runtime.FlexAccess do
   def flex_get_in(data, nil), do: data
   def flex_get_in(nil, _path), do: nil
 
-  def flex_get_in(data, [key | rest]) when is_map(data) do
+  def flex_get_in(data, [key | rest]) when is_map(data) and not is_struct(data) do
     case flex_fetch(data, key) do
       {:ok, value} -> flex_get_in(value, rest)
       :error -> nil
@@ -202,7 +204,7 @@ defmodule PtcRunner.Lisp.Runtime.FlexAccess do
   def flex_fetch_in(data, nil), do: {:ok, data}
   def flex_fetch_in(nil, _path), do: :error
 
-  def flex_fetch_in(data, [key | rest]) when is_map(data) do
+  def flex_fetch_in(data, [key | rest]) when is_map(data) and not is_struct(data) do
     case flex_fetch(data, key) do
       {:ok, value} -> flex_fetch_in(value, rest)
       :error -> :error
@@ -227,7 +229,7 @@ defmodule PtcRunner.Lisp.Runtime.FlexAccess do
   def flex_put_in(_data, [], v), do: v
   def flex_put_in(nil, path, v), do: flex_put_in(%{}, path, v)
 
-  def flex_put_in(data, [key | rest], v) when is_map(data) do
+  def flex_put_in(data, [key | rest], v) when is_map(data) and not is_struct(data) do
     case rest do
       [] ->
         # Last key in path: put the value
@@ -236,7 +238,7 @@ defmodule PtcRunner.Lisp.Runtime.FlexAccess do
       _ ->
         # More path to traverse: get or create intermediate map
         case flex_fetch(data, key) do
-          {:ok, nested} when is_map(nested) ->
+          {:ok, nested} when is_map(nested) and not is_struct(nested) ->
             # Key exists with a map value: recurse
             nested_result = flex_put_in(nested, rest, v)
             Map.put(data, key, nested_result)
@@ -288,7 +290,7 @@ defmodule PtcRunner.Lisp.Runtime.FlexAccess do
   def flex_update_in(data, [], f), do: f.(data)
   def flex_update_in(nil, path, f), do: flex_update_in(%{}, path, f)
 
-  def flex_update_in(data, [key | rest], f) when is_map(data) do
+  def flex_update_in(data, [key | rest], f) when is_map(data) and not is_struct(data) do
     case rest do
       [] ->
         # Last key in path: update the value at this key
@@ -299,7 +301,7 @@ defmodule PtcRunner.Lisp.Runtime.FlexAccess do
       _ ->
         # More path to traverse: get or create intermediate map
         case flex_fetch(data, key) do
-          {:ok, nested} when is_map(nested) ->
+          {:ok, nested} when is_map(nested) and not is_struct(nested) ->
             # Key exists with a map value: recurse
             nested_result = flex_update_in(nested, rest, f)
             Map.put(data, key, nested_result)

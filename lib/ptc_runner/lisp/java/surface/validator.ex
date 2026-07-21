@@ -1,12 +1,13 @@
 defmodule PtcRunner.Lisp.Java.Surface.Validator do
   @moduledoc false
 
+  alias PtcRunner.Lisp.Java.Implementations
+
   @required_keys ~w(version projection_policy classes references overloads namespaces audit_specs audits function_entries interop_entries)a
   @reference_kinds ~w(static constructor instance field)a
   @audit_statuses ~w(supported candidate not_relevant not_classified)a
   @classifications ~w(exact intentional_ptc_alias ptc_extension)a
   @attestations ~w(jvm ptc_only)a
-  @namespace_classifications ~w(admitted incorrect_non_java_alias)a
   @namespace_categories ~w(math interop)a
   @interop_presentation_kinds ~w(constructor method static constant)a
   @interop_kind_for_reference %{
@@ -18,7 +19,7 @@ defmodule PtcRunner.Lisp.Java.Surface.Validator do
   @argument_types ~w(char_sequence date double float instant int local_date long ptc_temporal string temporal)a
   @receiver_types ~w(string local_date instant duration date)a
   @return_types ~w(boolean double float int long string local_date instant duration date)a
-  @error_types ~w(arithmetic_exception date_time_exception date_time_parse_exception illegal_argument_exception null_pointer_exception number_format_exception string_index_out_of_bounds_exception)a
+  @error_types ~w(arithmetic_exception date_time_exception date_time_parse_exception illegal_argument_exception invalid_java_string null_pointer_exception number_format_exception string_index_out_of_bounds_exception)a
   @constructor_return_types %{java_util_date: :date}
   @divergence_id_pattern ~r/\A(?:GAP-[A-Z]\d+|DIV-\d+)\z/
   @reserved_non_java_namespaces [
@@ -38,13 +39,13 @@ defmodule PtcRunner.Lisp.Java.Surface.Validator do
     :regex
   ]
 
-  @spec validate(map(), %{atom() => atom()}, map()) :: :ok | {:error, [String.t()]}
-  def validate(manifest, legacy_bindings, phase0_attestations) when is_map(manifest) do
-    structural_errors = validate_structure(manifest, legacy_bindings, phase0_attestations)
+  @spec validate(map(), [atom()]) :: :ok | {:error, [String.t()]}
+  def validate(manifest, builtin_names) when is_map(manifest) and is_list(builtin_names) do
+    structural_errors = validate_structure(manifest)
 
     errors =
       if structural_errors == [] do
-        validate_semantics(manifest, legacy_bindings, phase0_attestations)
+        validate_semantics(manifest, builtin_names)
       else
         structural_errors
       end
@@ -55,26 +56,24 @@ defmodule PtcRunner.Lisp.Java.Surface.Validator do
     end
   end
 
-  def validate(_manifest, _legacy_bindings, _phase0_attestations),
-    do: {:error, ["manifest must be a map"]}
+  def validate(_manifest, _builtin_names), do: {:error, ["manifest must be a map"]}
 
-  defp validate_semantics(manifest, legacy_bindings, phase0_attestations) do
+  defp validate_semantics(manifest, builtin_names) do
     []
     |> validate_version(manifest)
     |> validate_ids(manifest)
     |> validate_classes(manifest)
     |> validate_references(manifest)
-    |> validate_overloads(manifest, legacy_bindings)
-    |> validate_namespaces(manifest, legacy_bindings)
+    |> validate_overloads(manifest)
+    |> validate_namespaces(manifest)
     |> validate_audits(manifest)
-    |> validate_phase0_attestations(manifest, phase0_attestations)
     |> validate_descriptor_audit_links(manifest)
     |> validate_divergence_audit_links(manifest)
-    |> validate_presentations(manifest, legacy_bindings)
+    |> validate_presentations(manifest, builtin_names)
     |> validate_projection_coverage(manifest)
   end
 
-  defp validate_structure(manifest, legacy_bindings, phase0_attestations) do
+  defp validate_structure(manifest) do
     errors =
       []
       |> require_keys(manifest)
@@ -87,8 +86,6 @@ defmodule PtcRunner.Lisp.Java.Surface.Validator do
       |> require_audit_collection(manifest[:audits])
       |> require_row_collection(manifest[:function_entries], "function_entries")
       |> require_row_collection(manifest[:interop_entries], "interop_entries")
-      |> require_binding_map(legacy_bindings)
-      |> require_phase0_attestation_catalog(phase0_attestations)
 
     errors
     |> validate_class_structure(manifest[:classes])
@@ -177,14 +174,21 @@ defmodule PtcRunner.Lisp.Java.Surface.Validator do
       validate_rows(acc, row[:members], fn member, member_index, inner ->
         member_label = "#{label} member #{member_index}"
 
-        inner
-        |> require_fields(
-          member,
-          [:source_name, :legacy_binding, :classification, :reference_id],
-          member_label
-        )
-        |> require_atom_or_binary_field(member, :source_name, member_label)
-        |> require_optional_id_field(member, :reference_id, member_label)
+        inner =
+          inner
+          |> require_fields(
+            member,
+            [:source_name, :reference_id],
+            member_label
+          )
+          |> require_atom_or_binary_field(member, :source_name, member_label)
+          |> require_id_field(member, :reference_id, member_label)
+
+        if Map.has_key?(member, :legacy_binding) do
+          ["#{member_label} cannot contain legacy binding metadata" | inner]
+        else
+          inner
+        end
       end)
     end)
   end
@@ -309,9 +313,9 @@ defmodule PtcRunner.Lisp.Java.Surface.Validator do
     end)
   end
 
-  @spec validate!(map(), %{atom() => atom()}, map()) :: :ok
-  def validate!(manifest, legacy_bindings, phase0_attestations) do
-    case validate(manifest, legacy_bindings, phase0_attestations) do
+  @spec validate!(map(), [atom()]) :: :ok
+  def validate!(manifest, builtin_names) do
+    case validate(manifest, builtin_names) do
       :ok ->
         :ok
 
@@ -321,31 +325,6 @@ defmodule PtcRunner.Lisp.Java.Surface.Validator do
                 Enum.map_join(errors, "\n", &"  - #{&1}")
     end
   end
-
-  defp require_phase0_attestation_catalog(errors, %{overloads: overloads})
-       when is_map(overloads) do
-    Enum.reduce(overloads, errors, fn {overload_id, attestation}, acc ->
-      label = "independent Phase-0 attestation #{inspect(overload_id)}"
-
-      acc =
-        if valid_atom_id?(overload_id),
-          do: acc,
-          else: ["#{label} overload ID must be a non-nil atom" | acc]
-
-      if is_map(attestation) do
-        acc
-        |> require_fields(attestation, [:attestation, :descriptor, :divergence_ids], label)
-        |> require_enum(attestation[:attestation], @attestations, "#{label} kind")
-        |> require_optional_binary_field(attestation, :descriptor, label)
-        |> require_binary_list_field(attestation, :divergence_ids, label)
-      else
-        ["#{label} must be a map" | acc]
-      end
-    end)
-  end
-
-  defp require_phase0_attestation_catalog(errors, _attestations),
-    do: ["independent Phase-0 attestation catalog must contain an overload map" | errors]
 
   defp require_keys(errors, manifest) do
     Enum.reduce(@required_keys, errors, fn key, acc ->
@@ -508,7 +487,7 @@ defmodule PtcRunner.Lisp.Java.Surface.Validator do
     end)
   end
 
-  defp validate_overloads(errors, manifest, legacy_bindings) do
+  defp validate_overloads(errors, manifest) do
     references = Map.new(manifest[:references] || [], &{&1.reference_id, &1})
     classes = Map.new(manifest[:classes] || [], &{&1.class_id, &1})
 
@@ -520,7 +499,7 @@ defmodule PtcRunner.Lisp.Java.Surface.Validator do
 
         acc
         |> require_reference_link(reference, overload)
-        |> require_route(overload[:route], id, legacy_bindings)
+        |> require_route(overload[:route], id)
         |> require_enum(
           overload[:classification],
           @classifications,
@@ -547,26 +526,11 @@ defmodule PtcRunner.Lisp.Java.Surface.Validator do
 
       expected = MapSet.new(reference.overload_ids)
 
-      acc =
-        if actual == expected do
-          acc
-        else
-          [
-            "reference #{inspect(reference.reference_id)} overload links disagree with overload rows"
-            | acc
-          ]
-        end
-
-      routes =
-        manifest[:overloads]
-        |> Enum.filter(&(&1.reference_id == reference.reference_id))
-        |> MapSet.new(& &1.route)
-
-      if MapSet.size(routes) <= 1 do
+      if actual == expected do
         acc
       else
         [
-          "reference #{inspect(reference.reference_id)} overload routes disagree: #{inspect(MapSet.to_list(routes))}"
+          "reference #{inspect(reference.reference_id)} overload links disagree with overload rows"
           | acc
         ]
       end
@@ -646,13 +610,15 @@ defmodule PtcRunner.Lisp.Java.Surface.Validator do
       else: ["overload #{inspect(overload.overload_id)} is missing from its reference" | errors]
   end
 
-  defp require_route(errors, {:legacy_env, binding}, _id, legacy_bindings)
-       when is_atom(binding) do
-    require_member(errors, legacy_bindings, binding, "legacy Env binding")
+  defp require_route(errors, {:dispatch, implementation_key}, _id)
+       when is_atom(implementation_key) do
+    require_member(errors, Implementations.keys(), implementation_key, "Java implementation")
   end
 
-  defp require_route(errors, route, id, _legacy_bindings),
-    do: ["overload #{inspect(id)} has invalid Phase-0 route #{inspect(route)}" | errors]
+  defp require_route(errors, route, id),
+    do: [
+      "overload #{inspect(id)} must use closed Java dispatch, got #{inspect(route)}" | errors
+    ]
 
   defp validate_signature_metadata(errors, overload, reference, class) do
     id = overload[:overload_id]
@@ -831,6 +797,11 @@ defmodule PtcRunner.Lisp.Java.Surface.Validator do
        do: true
 
   defp descriptor_type_matches?(:instant, {:object, "java/time/Instant"}), do: true
+
+  # Duration.between is admitted for Instant values only even though the JVM
+  # declaration accepts the wider Temporal interface.
+  defp descriptor_type_matches?(:instant, {:object, "java/time/temporal/Temporal"}), do: true
+
   defp descriptor_type_matches?(:duration, {:object, "java/time/Duration"}), do: true
 
   defp descriptor_type_matches?(:temporal, {:object, "java/time/temporal/Temporal"}),
@@ -918,13 +889,13 @@ defmodule PtcRunner.Lisp.Java.Surface.Validator do
       class_name |> String.split("/") |> Enum.all?(&(&1 != ""))
   end
 
-  defp validate_namespaces(errors, manifest, legacy_bindings) do
+  defp validate_namespaces(errors, manifest) do
     references = Map.new(manifest[:references] || [], &{&1.reference_id, &1})
 
-    route_bindings =
+    routes =
       Enum.reduce(manifest[:overloads] || [], %{}, fn
-        %{reference_id: reference_id, route: {:legacy_env, binding}}, acc ->
-          Map.update(acc, reference_id, [binding], &[binding | &1])
+        %{reference_id: reference_id, route: route}, acc ->
+          Map.update(acc, reference_id, MapSet.new([route]), &MapSet.put(&1, route))
 
         _overload, acc ->
           acc
@@ -962,29 +933,43 @@ defmodule PtcRunner.Lisp.Java.Surface.Validator do
         end
 
       acc =
-        require_enum(
-          acc,
-          Map.get(namespace, :legacy_lookup, :aliases),
-          [:aliases, :qualified_table],
-          "namespace #{inspect(namespace_id)} legacy lookup"
-        )
+        if Map.has_key?(namespace, :legacy_lookup) do
+          ["namespace #{inspect(namespace_id)} cannot contain legacy lookup metadata" | acc]
+        else
+          acc
+        end
 
       Enum.reduce(members || [], acc, fn member, inner ->
         inner
-        |> require_member(
-          legacy_bindings,
-          member[:legacy_binding],
-          "namespace #{inspect(namespace_id)} legacy binding"
-        )
-        |> require_enum(
-          member[:classification],
-          @namespace_classifications,
-          "namespace member classification"
-        )
-        |> validate_namespace_reference(namespace, member, references, route_bindings)
+        |> validate_namespace_runtime_route(namespace, member, routes)
+        |> validate_namespace_reference(namespace, member, references)
       end)
     end)
   end
+
+  defp validate_namespace_runtime_route(
+         errors,
+         namespace,
+         %{reference_id: reference_id} = member,
+         routes
+       ) do
+    qualified = "#{namespace.namespace}/#{member.source_name}"
+
+    reference_routes = routes |> Map.get(reference_id, MapSet.new()) |> MapSet.to_list()
+
+    if reference_routes != [] and
+         Enum.all?(reference_routes, &match?({:dispatch, _implementation_key}, &1)) do
+      errors
+    else
+      [
+        "namespace member #{qualified} has invalid reference routes #{inspect(reference_routes)}"
+        | errors
+      ]
+    end
+  end
+
+  defp validate_namespace_runtime_route(errors, _namespace, _member, _routes),
+    do: errors
 
   defp validate_reserved_namespace(errors, namespace)
        when namespace in @reserved_non_java_namespaces do
@@ -1004,9 +989,9 @@ defmodule PtcRunner.Lisp.Java.Surface.Validator do
       ]
   end
 
-  defp validate_namespace_reference(errors, namespace, member, references, route_bindings) do
-    case {member[:classification], Map.get(references, member[:reference_id])} do
-      {:admitted, %{class_id: class_id} = reference} ->
+  defp validate_namespace_reference(errors, namespace, member, references) do
+    case Map.get(references, member[:reference_id]) do
+      %{class_id: class_id} = reference ->
         qualified = "#{namespace.namespace}/#{member.source_name}"
 
         errors
@@ -1020,29 +1005,12 @@ defmodule PtcRunner.Lisp.Java.Surface.Validator do
           qualified,
           "namespace member spelling"
         )
-        |> require_member(
-          Map.new(Map.get(route_bindings, reference.reference_id, []), &{&1, true}),
-          member.legacy_binding,
-          "namespace member #{qualified} reference route"
-        )
 
-      {:admitted, nil} ->
+      nil ->
         [
           "admitted namespace member #{namespace.namespace}/#{member.source_name} has no reference"
           | errors
         ]
-
-      {:incorrect_non_java_alias, nil} ->
-        errors
-
-      {:incorrect_non_java_alias, _reference} ->
-        [
-          "incorrect Java alias #{namespace.namespace}/#{member.source_name} must not link a reference"
-          | errors
-        ]
-
-      {_classification, _reference} ->
-        errors
     end
   end
 
@@ -1226,45 +1194,6 @@ defmodule PtcRunner.Lisp.Java.Surface.Validator do
       else: ["audit target #{inspect(row.target_id)} does not name its linked reference" | errors]
   end
 
-  defp validate_phase0_attestations(errors, manifest, phase0_attestations) do
-    actual =
-      Map.new(manifest.overloads, fn overload ->
-        {overload.overload_id, Map.take(overload, [:attestation, :descriptor, :divergence_ids])}
-      end)
-
-    expected = phase0_attestations.overloads
-
-    (Map.keys(actual) ++ Map.keys(expected))
-    |> Enum.uniq()
-    |> Enum.sort()
-    |> Enum.reduce(errors, fn overload_id, acc ->
-      case {Map.fetch(expected, overload_id), Map.fetch(actual, overload_id)} do
-        {{:ok, expected_attestation}, {:ok, actual_attestation}}
-        when expected_attestation == actual_attestation ->
-          acc
-
-        {{:ok, expected_attestation}, {:ok, actual_attestation}} ->
-          [
-            "overload #{inspect(overload_id)} disagrees with its independent Phase-0 attestation: " <>
-              "expected #{inspect(expected_attestation)}, got #{inspect(actual_attestation)}"
-            | acc
-          ]
-
-        {:error, {:ok, _actual_attestation}} ->
-          [
-            "overload #{inspect(overload_id)} has no independent Phase-0 attestation"
-            | acc
-          ]
-
-        {{:ok, _expected_attestation}, :error} ->
-          [
-            "independent Phase-0 attestation #{inspect(overload_id)} has no manifest overload"
-            | acc
-          ]
-      end
-    end)
-  end
-
   defp validate_descriptor_audit_links(errors, manifest) do
     admitted_by_reference =
       manifest.overloads
@@ -1339,49 +1268,28 @@ defmodule PtcRunner.Lisp.Java.Surface.Validator do
     end)
   end
 
-  defp validate_presentations(errors, manifest, legacy_bindings) do
+  defp validate_presentations(errors, manifest, builtin_names) do
     reference_ids = id_set(manifest[:references], :reference_id)
     references = Map.new(manifest[:references] || [], &{&1.reference_id, &1})
     classes = Map.new(manifest[:classes] || [], &{&1.class_id, &1.name})
     overloads = Map.new(manifest[:overloads] || [], &{&1.overload_id, &1})
-    see_also_targets = presentation_target_names(manifest, legacy_bindings)
-
-    legacy_bindings_by_name =
-      Map.new(legacy_bindings, fn {name, binding_kind} ->
-        {Atom.to_string(name), binding_kind}
-      end)
+    see_also_targets = presentation_target_names(manifest, builtin_names)
 
     errors =
       Enum.reduce(manifest[:function_entries] || [], errors, fn entry, acc ->
-        binding_name = entry[:name]
-
         acc
         |> require_value(
           entry[:category],
           :interop,
           "function entry #{inspect(entry[:name])} category"
         )
-        |> require_value(
-          entry[:dispatch],
-          :env,
-          "function entry #{inspect(entry[:name])} dispatch"
-        )
-        |> require_member(
-          legacy_bindings_by_name,
-          binding_name,
-          "function entry #{inspect(entry[:name])} Env binding"
-        )
-        |> require_value(
-          entry[:binding],
-          Map.get(legacy_bindings_by_name, binding_name),
-          "function entry #{inspect(entry[:name])} binding kind"
-        )
+        |> validate_function_dispatch(entry)
         |> require_nonempty_ids(
           entry[:reference_ids],
           reference_ids,
           "function entry #{inspect(entry[:name])} reference"
         )
-        |> validate_function_identity(entry, references, overloads, binding_name)
+        |> validate_function_identity(entry, references, overloads)
         |> validate_see_also(entry, see_also_targets)
       end)
 
@@ -1402,6 +1310,21 @@ defmodule PtcRunner.Lisp.Java.Surface.Validator do
       )
     end)
   end
+
+  defp validate_function_dispatch(errors, %{dispatch: :java} = entry) do
+    require_value(
+      errors,
+      entry[:binding],
+      :normal,
+      "function entry #{inspect(entry[:name])} binding kind"
+    )
+  end
+
+  defp validate_function_dispatch(errors, entry),
+    do: [
+      "function entry #{inspect(entry[:name])} has invalid dispatch #{inspect(entry[:dispatch])}"
+      | errors
+    ]
 
   defp validate_interop_kind(errors, entry, references) do
     Enum.reduce(entry[:reference_ids] || [], errors, fn reference_id, acc ->
@@ -1426,7 +1349,7 @@ defmodule PtcRunner.Lisp.Java.Surface.Validator do
     end)
   end
 
-  defp validate_function_identity(errors, entry, references, overloads, binding_name) do
+  defp validate_function_identity(errors, entry, references, overloads) do
     linked = Enum.map(entry[:reference_ids] || [], &Map.get(references, &1))
 
     errors =
@@ -1435,33 +1358,20 @@ defmodule PtcRunner.Lisp.Java.Surface.Validator do
           acc
 
         reference, acc ->
-          route_bindings =
-            reference.overload_ids
-            |> Enum.map(&Map.get(overloads, &1))
-            |> Enum.reject(&is_nil/1)
-            |> Enum.flat_map(fn
-              %{route: {:legacy_env, binding}} -> [Atom.to_string(binding)]
-              _overload -> []
-            end)
-            |> Map.new(&{&1, true})
-
-          require_member(
-            acc,
-            route_bindings,
-            binding_name,
-            "function entry #{inspect(entry[:name])} reference route"
-          )
+          if reference_matches_function_entry?(reference, entry, overloads) do
+            acc
+          else
+            [
+              "function entry #{inspect(entry[:name])} reference route does not match dispatch"
+              | acc
+            ]
+          end
       end)
 
     expected_reference_ids =
       references
       |> Enum.filter(fn {_reference_id, reference} ->
-        Enum.any?(reference.overload_ids, fn overload_id ->
-          case Map.get(overloads, overload_id) do
-            %{route: {:legacy_env, binding}} -> Atom.to_string(binding) == binding_name
-            _overload -> false
-          end
-        end)
+        reference_matches_function_entry?(reference, entry, overloads)
       end)
       |> MapSet.new(&elem(&1, 0))
 
@@ -1473,6 +1383,15 @@ defmodule PtcRunner.Lisp.Java.Surface.Validator do
     )
     |> validate_presentation_signatures(entry, references, overloads)
   end
+
+  defp reference_matches_function_entry?(reference, %{dispatch: :java, name: name}, overloads) do
+    name in reference.spellings and
+      Enum.all?(reference.overload_ids, fn overload_id ->
+        match?(%{route: {:dispatch, _}}, Map.get(overloads, overload_id))
+      end)
+  end
+
+  defp reference_matches_function_entry?(_reference, _entry, _overloads), do: false
 
   defp validate_interop_identity(errors, entry, references, classes) do
     linked = Enum.map(entry[:reference_ids] || [], &Map.get(references, &1))
@@ -1518,13 +1437,13 @@ defmodule PtcRunner.Lisp.Java.Surface.Validator do
     )
   end
 
-  defp presentation_target_names(manifest, legacy_bindings) do
-    legacy_names = Enum.map(Map.keys(legacy_bindings), &Atom.to_string/1)
+  defp presentation_target_names(manifest, builtin_names) do
+    builtin_names = Enum.map(builtin_names, &Atom.to_string/1)
     function_names = Enum.map(manifest[:function_entries], & &1.name)
     interop_names = Enum.map(manifest[:interop_entries], & &1.name)
     reference_spellings = Enum.flat_map(manifest[:references], & &1.spellings)
 
-    Map.new(legacy_names ++ function_names ++ interop_names ++ reference_spellings, &{&1, true})
+    Map.new(builtin_names ++ function_names ++ interop_names ++ reference_spellings, &{&1, true})
   end
 
   defp validate_see_also(errors, entry, targets) do
@@ -1598,31 +1517,39 @@ defmodule PtcRunner.Lisp.Java.Surface.Validator do
     namespace_routes =
       for namespace <- manifest.namespaces,
           member <- namespace.members,
-          member.classification == :admitted,
           into: MapSet.new() do
         {"#{namespace.namespace}/#{member.source_name}", member.reference_id}
       end
 
-    legacy_routes =
-      manifest.overloads
+    closed_source_routes =
+      manifest.references
+      |> Enum.filter(fn reference ->
+        Enum.all?(reference.overload_ids, fn overload_id ->
+          Enum.any?(manifest.overloads, fn overload ->
+            overload.overload_id == overload_id and match?({:dispatch, _}, overload.route)
+          end)
+        end)
+      end)
       |> Enum.flat_map(fn
-        %{route: {:legacy_env, binding}, reference_id: reference_id} ->
-          [{Atom.to_string(binding), reference_id}]
+        %{kind: :instance, member: member, reference_id: reference_id} ->
+          [{".#{member}", reference_id}]
 
-        _overload ->
+        %{kind: :constructor, spellings: spellings, reference_id: reference_id} ->
+          Enum.map(spellings, &{&1, reference_id})
+
+        _reference ->
           []
       end)
       |> MapSet.new()
 
     Enum.reduce(manifest.references, errors, fn reference, acc ->
       Enum.reduce(reference.spellings, acc, fn spelling, inner ->
-        routes = if String.contains?(spelling, "/"), do: namespace_routes, else: legacy_routes
-
-        if MapSet.member?(routes, {spelling, reference.reference_id}) do
+        if MapSet.member?(namespace_routes, {spelling, reference.reference_id}) or
+             MapSet.member?(closed_source_routes, {spelling, reference.reference_id}) do
           inner
         else
           [
-            "reference #{inspect(reference.reference_id)} runtime spelling #{inspect(spelling)} has no matching namespace or legacy route"
+            "reference #{inspect(reference.reference_id)} runtime spelling #{inspect(spelling)} has no matching closed route"
             | inner
           ]
         end
@@ -1702,20 +1629,12 @@ defmodule PtcRunner.Lisp.Java.Surface.Validator do
     end
   end
 
-  defp validate_presentation_signature_heads(errors, entry, signatures, linked, overloads) do
+  defp validate_presentation_signature_heads(errors, entry, signatures, linked, _overloads) do
     heads = MapSet.new(signatures, &elem(&1, 0))
 
     allowed_by_reference =
       Map.new(linked, fn reference ->
-        route_heads =
-          reference.overload_ids
-          |> Enum.map(&Map.get(overloads, &1))
-          |> Enum.flat_map(fn
-            %{route: {:legacy_env, binding}} -> [Atom.to_string(binding)]
-            _overload -> []
-          end)
-
-        {reference.reference_id, MapSet.new(reference.spellings ++ route_heads)}
+        {reference.reference_id, MapSet.new(reference.spellings)}
       end)
 
     allowed_heads =
@@ -1819,11 +1738,6 @@ defmodule PtcRunner.Lisp.Java.Surface.Validator do
 
   defp require_projection_policy(errors, policy),
     do: ["projection policy must be a map, got #{inspect(policy)}" | errors]
-
-  defp require_binding_map(errors, bindings) when is_map(bindings), do: errors
-
-  defp require_binding_map(errors, bindings),
-    do: ["legacy bindings must be a map, got #{inspect(bindings)}" | errors]
 
   defp validate_rows(errors, rows, validate) when is_list(rows) do
     rows

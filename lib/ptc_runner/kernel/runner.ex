@@ -17,6 +17,7 @@ defmodule PtcRunner.Kernel.Runner do
   alias PtcRunner.Kernel.RunState
   alias PtcRunner.Kernel.RuntimeTools
   alias PtcRunner.Lisp
+  alias PtcRunner.Lisp.Java.Project, as: JavaProject
   alias PtcRunner.Lisp.RetainedSize
   alias PtcRunner.Lisp.TrustedTool
 
@@ -117,23 +118,35 @@ defmodule PtcRunner.Kernel.Runner do
          }}
 
       {:ok, step} ->
-        value = step.return |> kernel_return_value() |> project_kernel_value()
+        case JavaProject.project(kernel_return_value(step.return), :kernel_json) do
+          {:ok, projected_java} ->
+            value = project_kernel_value(projected_java)
 
-        if terminal_result_within_limit?(value, config.limits.terminal_result_bytes) do
-          {:ok,
-           %Result{
-             value: value,
-             usage: RunState.usage(state),
-             evaluation_memory: RunState.evaluation_memory_summary(state)
-           }}
-        else
-          {:error,
-           %Error{
-             kind: :limit_exceeded,
-             reason: :terminal_result_exceeded,
-             details: %{},
-             usage: RunState.usage(state)
-           }}
+            if terminal_result_within_limit?(value, config.limits.terminal_result_bytes) do
+              {:ok,
+               %Result{
+                 value: value,
+                 usage: RunState.usage(state),
+                 evaluation_memory: RunState.evaluation_memory_summary(state)
+               }}
+            else
+              {:error,
+               %Error{
+                 kind: :limit_exceeded,
+                 reason: :terminal_result_exceeded,
+                 details: %{},
+                 usage: RunState.usage(state)
+               }}
+            end
+
+          {:error, reason} ->
+            {:error,
+             %Error{
+               kind: :workflow_failed,
+               reason: :java_projection_error,
+               details: %{projection_error: inspect(reason, limit: 10)},
+               usage: RunState.usage(state)
+             }}
         end
 
       {:error, step} ->

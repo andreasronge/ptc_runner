@@ -198,6 +198,60 @@ implementations nor closure parameters, bodies, captured environments,
 history, or metadata. Canonical events likewise carry only bounded status and
 accounting metadata; exact values remain outside ordinary observability.
 
+Bounded Java values follow the same native-versus-observable split. Native
+continuation state may retain validated Java primitive provenance, admitted
+Java callables, and LocalDate, Instant, Duration, or Date wrappers. Identity,
+closures, and collection transforms retain primitive
+provenance; ordinary numeric consumers deliberately erase it, including integer
+index/count arguments, collection aggregation, and numeric sort/min/max keys,
+whether invoked directly, through a higher-order call, or as a comparator
+result. Index/count positions are keyed by builtin arity so collection-bearing
+positions retain native values. Native formatting
+keeps distinct primitive kinds tagged with identity-preserving display wrappers,
+so equal payloads and literal strings cannot collapse map keys or set members.
+Every admitted reference uses closed dispatch, with no Java fallback through
+the ordinary Lisp environment; each overload names a code-owned implementation.
+Only manifest references may become native Java callables. Java-looking aliases
+that are not actual admitted members are rejected and remain available, where
+applicable, only under their ordinary PTC names.
+Java numeric parsers, Double fields, selected `java.lang.Math` overloads,
+`System/currentTimeMillis`, the complete admitted temporal profile, and the
+admitted Java String methods use this path, preserving exact primitive or class
+identity natively while mapping declared Java failures to bounded conditions.
+Temporal instance selection is
+receiver-owned: LocalDate and Instant comparisons, Duration accessors, and Date
+methods cannot cross classes or accept ordinary host temporal structs. Math overload families
+select exact primitive profiles; only references with one declared double
+overload apply bounded numeric-to-double conversion. Qualified Math semantics
+remain separate from the ordinary bare PTC math helpers. Unqualified Clojure
+parsing counterparts likewise remain separate safe signal-value helpers.
+System time is available only through its qualified Java spelling and returns
+a native Java `long` before ordinary public projection.
+Callable application derives the invocation kind from that reference: instance
+callables consume the receiver as their first application argument. Java class
+constructor heads and direct-dot member families resolve from source spellings
+through the manifest and enter Java CoreAST only through closed dispatch.
+Direct-dot spellings are reserved Java syntax
+and the analyzer rejects attempts to introduce them as local or user-namespace
+bindings. Java values and recursively projected BEAM structs
+must have exactly their declared fields; projection never fills missing fields
+from struct defaults. Java class
+spellings are host-owned namespaces and cannot be
+declared by a capability prelude. Public
+projection recursively traverses collections and struct fields, erases valid
+primitive tags to inert numeric payloads, projects temporal wrappers to
+class-canonical strings, and labels a callable by its fixed manifest
+class/member identity. Tool-argument projection additionally follows
+the declared signature through nested maps and lists before invoking the callback
+when a Java value needs contract-aware projection. Exact, host-representable
+Instant and Date values may enter declared datetime fields; LocalDate, Duration,
+and nanosecond Instants that would lose precision are rejected. Java-free arguments
+do not make Java projection parse otherwise-unused tool metadata.
+Return-signature validation observes that same public projection.
+Direct capability and Kernel JSON boundaries reject callable
+authority, forged Java values, incompatible declared leaves, and projection
+collisions before publication or callback invocation.
+
 ## Evaluator effects, outcomes, and parallel work
 
 `PtcRunner.Lisp.Eval` recursively evaluates analyzed expressions and leaves
@@ -549,6 +603,34 @@ than in the Kernel execution modules. Manifest `{"library": id}` selections
 expand their installed dependency closure deterministically and are compiled
 with local components; local IDs cannot shadow installed IDs.
 
+To change the admitted Java-shaped Lisp surface, update the authoritative
+`priv/java_interop.exs` manifest and the structured cases in
+`priv/java_interop_oracle_cases.exs` together. Every admitted overload has at
+least one case; case IDs are unique while overload and divergence identities
+remain stable. JVM-attested
+cases resolve and invoke the exact manifest descriptor through Clojure 1.12.5
+on Temurin 21.0.11+10; the checked-in typed outcomes live in
+`priv/java_interop_oracle_baseline.json`. Install the checksum-pinned Clojure
+jars with `mix ptc.install_clojure`, then run:
+
+```console
+mix ptc.java_conformance --oracle jvm --subset implemented
+mix ptc.java_fixtures --oracle jvm --check
+mix ptc.java_conformance --oracle babashka --subset fast
+mix ptc.java_conformance --oracle ptc --subset closed-dispatch
+```
+
+Use `mix ptc.java_fixtures --oracle jvm --write` only after reviewing an
+intentional behavior change on the pinned toolchain. The JVM run is the
+descriptor and behavior authority. Babashka covers only cases marked `fast`
+and cannot attest overload selection. Both runners use bounded source, output,
+and runtime limits with an `en_US` process locale and UTC timezone. The JVM
+must observe `en_US`; platform-specific Babashka native images may report the
+equivalent language-only `en`. Locale-sensitive operations are excluded from
+Babashka's non-authoritative fast subset. The PTC closed-dispatch run also
+attests the selected overload identity so equal return values cannot conceal a
+dispatch mismatch.
+
 `RunConfig` freezes two bounded deterministic mission projections. The
 authoritative V2 inventory contains prompt-visible exports, model-visible
 capability schemas, and mission limits and is exposed through
@@ -584,6 +666,8 @@ The main contract-level tests are intentionally integration-oriented:
 - `event_sink_test.exs`, `trace_capability_test.exs`, and
   `viewer_adapter_test.exs` — canonical event and query boundaries;
 - `agent_library_test.exs` — shipped Lisp workflow policy;
+- `java/oracle_fixtures_test.exs` — Java overload fixture completeness,
+  descriptor identity, typed outcomes, and toolchain pin drift;
 - `tutorial_examples_test.exs` — checked-in user journeys;
 - `deepseek_e2e_test.exs`, `mcp_remote_e2e_test.exs`, and
   `mcp_remote_agent_e2e_test.exs` — live provider and remote MCP

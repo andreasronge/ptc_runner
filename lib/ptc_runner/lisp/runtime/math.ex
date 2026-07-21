@@ -8,7 +8,9 @@ defmodule PtcRunner.Lisp.Runtime.Math do
 
   alias PtcRunner.Lisp.Eval.Helpers
   alias PtcRunner.Lisp.Eval.HostContext
+  alias PtcRunner.Lisp.Java.Ordering, as: JavaOrdering
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
+  alias PtcRunner.Lisp.Runtime.JavaMathSemantics
   alias PtcRunner.Lisp.Runtime.SpecialValues
 
   def add(args) when is_list(args) do
@@ -273,15 +275,7 @@ defmodule PtcRunner.Lisp.Runtime.Math do
     end
   end
 
-  def sqrt(x) do
-    cond do
-      SpecialValues.nan?(x) -> :nan
-      SpecialValues.neg_infinite?(x) -> :nan
-      SpecialValues.pos_infinite?(x) -> :infinity
-      x < 0 -> :nan
-      true -> :math.sqrt(x)
-    end
-  end
+  def sqrt(x), do: JavaMathSemantics.sqrt(x)
 
   # `pow` follows java.lang.Math.pow's IEEE 754 special-case table. PTC-Lisp
   # has no `try`/`catch`, so the IEEE results (`:nan`, `:infinity`,
@@ -292,109 +286,7 @@ defmodule PtcRunner.Lisp.Runtime.Math do
   # within double range (including one just past Double.MAX, which rounds back to
   # Double.MAX) stays finite, while one whose magnitude overflows the double
   # range becomes a signed infinity. The clause order mirrors Java's precedence.
-  def pow(x, y), do: do_pow(pow_coerce(x), pow_coerce(y))
-
-  defp pow_coerce(n) when is_integer(n) do
-    n * 1.0
-  rescue
-    ArithmeticError -> if n > 0, do: :infinity, else: :negative_infinity
-  end
-
-  defp pow_coerce(n), do: n
-
-  # An exponent of (positive or negative) zero always yields 1.0, even for a
-  # NaN or infinite base.
-  defp do_pow(_x, y) when y == 0, do: 1.0
-
-  defp do_pow(x, y) do
-    cond do
-      # A NaN exponent (the zero-exponent case is handled above) -> NaN.
-      SpecialValues.nan?(y) -> :nan
-      # A NaN base with a non-zero exponent -> NaN.
-      SpecialValues.nan?(x) -> :nan
-      # |base| == 1 with an infinite exponent -> NaN (Java-specific rule).
-      SpecialValues.infinite?(y) and abs_one?(x) -> :nan
-      SpecialValues.pos_infinite?(y) -> pow_pos_inf_exp(x)
-      SpecialValues.neg_infinite?(y) -> pow_neg_inf_exp(x)
-      SpecialValues.pos_infinite?(x) -> pow_pos_inf_base(y)
-      SpecialValues.neg_infinite?(x) -> pow_neg_inf_base(y)
-      # Zero base with a negative exponent -> signed infinity (would raise in
-      # Erlang's :math.pow): +0.0 -> +Inf; -0.0 with a negative odd integer
-      # exponent -> -Inf.
-      x == 0 and y < 0 -> pow_zero_base_neg_exp(x, y)
-      # Negative base with a non-integer exponent has no real result -> NaN
-      # (would raise in Erlang's :math.pow).
-      x < 0 and not integer_valued?(y) -> :nan
-      true -> pow_finite(x, y)
-    end
-  end
-
-  # Finite base and exponent. Erlang's :math.pow raises on overflow (BEAM has
-  # no float infinity) whereas java.lang.Math.pow returns a signed infinity, so
-  # convert the overflow to the appropriately-signed infinity. Underflow returns
-  # 0.0 without raising, so any ArithmeticError here is an overflow. A negative
-  # base reaching this point always has an integer-valued exponent (a non-integer
-  # exponent was already mapped to :nan), so the result sign follows exponent
-  # parity.
-  defp pow_finite(x, y) do
-    :math.pow(x, y)
-  rescue
-    ArithmeticError ->
-      if x < 0 and odd_exponent?(y), do: :negative_infinity, else: :infinity
-  end
-
-  # Exponent parity as Java computes it: the exponent is coerced to a double, so
-  # integer magnitudes beyond 2^53 (not exactly representable) become
-  # even-valued. Non-integer exponents are never odd.
-  defp odd_exponent?(y) do
-    yf = y * 1.0
-    Kernel.trunc(yf) == yf and rem(Kernel.trunc(yf), 2) != 0
-  end
-
-  defp abs_one?(x), do: is_number(x) and Kernel.abs(x) == 1
-
-  defp integer_valued?(y) when is_integer(y), do: true
-  defp integer_valued?(y) when is_float(y), do: Kernel.trunc(y) == y
-  defp integer_valued?(_y), do: false
-
-  defp pow_zero_base_neg_exp(x, y) do
-    if negative_zero?(x) and odd_exponent?(y),
-      do: :negative_infinity,
-      else: :infinity
-  end
-
-  defp negative_zero?(x), do: x === -0.0
-
-  defp pow_pos_inf_base(y) when y > 0, do: :infinity
-  defp pow_pos_inf_base(_y), do: 0.0
-
-  # base == -Inf (exponent is finite and non-zero here). Java preserves the
-  # odd-exponent sign for both integer and integer-valued double exponents:
-  #   y > 0: odd -> -Inf, else +Inf
-  #   y < 0: odd -> -0.0, else +0.0
-  defp pow_neg_inf_base(y) do
-    odd? = odd_exponent?(y)
-
-    cond do
-      y > 0 and odd? -> :negative_infinity
-      y > 0 -> :infinity
-      odd? -> -0.0
-      true -> 0.0
-    end
-  end
-
-  # An infinite base has magnitude > 1, so it follows the |base| > 1 rule. The
-  # |base| == 1 fallback is pre-empted by the abs_one?/infinite-exponent guard
-  # in pow/2 (it yields NaN there), so it is unreachable from pow/2.
-  defp pow_pos_inf_exp(x) when x in [:infinity, :negative_infinity], do: :infinity
-  defp pow_pos_inf_exp(x) when Kernel.abs(x) > 1, do: :infinity
-  defp pow_pos_inf_exp(x) when Kernel.abs(x) < 1, do: 0.0
-  defp pow_pos_inf_exp(_x), do: :nan
-
-  defp pow_neg_inf_exp(x) when x in [:infinity, :negative_infinity], do: 0.0
-  defp pow_neg_inf_exp(x) when Kernel.abs(x) > 1, do: 0.0
-  defp pow_neg_inf_exp(x) when Kernel.abs(x) < 1, do: :infinity
-  defp pow_neg_inf_exp(_x), do: :nan
+  def pow(x, y), do: JavaMathSemantics.pow(x, y)
 
   # ============================================================
   # Bitwise operations (integers only)
@@ -524,6 +416,83 @@ defmodule PtcRunner.Lisp.Runtime.Math do
   end
 
   def eq(x, y) do
+    case JavaOrdering.compare(x, y) do
+      {:ok, comparison} -> comparison == :eq
+      {:error, :invalid_java_value} -> invalid_java_ordering!()
+      :not_java -> ordinary_eq(x, y)
+    end
+  end
+
+  def lt(x, y) do
+    case JavaOrdering.compare(x, y) do
+      {:ok, comparison} -> comparison == :lt
+      {:error, :invalid_java_value} -> invalid_java_ordering!()
+      :not_java -> ordinary_lt(x, y)
+    end
+  end
+
+  def gt(x, y), do: lt(y, x)
+
+  def lte(x, y) do
+    case JavaOrdering.compare(x, y) do
+      {:ok, comparison} ->
+        comparison != :gt
+
+      {:error, :invalid_java_value} ->
+        invalid_java_ordering!()
+
+      :not_java ->
+        if SpecialValues.nan?(x) or SpecialValues.nan?(y),
+          do: false,
+          else: not ordinary_lt(y, x)
+    end
+  end
+
+  def gte(x, y) do
+    case JavaOrdering.compare(x, y) do
+      {:ok, comparison} ->
+        comparison != :lt
+
+      {:error, :invalid_java_value} ->
+        invalid_java_ordering!()
+
+      :not_java ->
+        if SpecialValues.nan?(x) or SpecialValues.nan?(y),
+          do: false,
+          else: not ordinary_lt(x, y)
+    end
+  end
+
+  def compare(x, y) do
+    case JavaOrdering.compare(x, y) do
+      {:ok, :lt} ->
+        -1
+
+      {:ok, :eq} ->
+        0
+
+      {:ok, :gt} ->
+        1
+
+      {:error, :invalid_java_value} ->
+        invalid_java_ordering!()
+
+      :not_java when x == :nan or y == :nan ->
+        # Standard IEEE 754: comparison with NaN is false/unordered.
+        # but compare/2 usually returns -1, 0, 1.
+        # For sort consistency, we raise.
+        raise "type_error: compare: unordered comparison with NaN"
+
+      :not_java ->
+        cond do
+          ordinary_eq(x, y) -> 0
+          ordinary_lt(x, y) -> -1
+          true -> 1
+        end
+    end
+  end
+
+  defp ordinary_eq(x, y) do
     cond do
       SpecialValues.nan?(x) or SpecialValues.nan?(y) ->
         false
@@ -536,7 +505,7 @@ defmodule PtcRunner.Lisp.Runtime.Math do
     end
   end
 
-  def lt(x, y) do
+  defp ordinary_lt(x, y) do
     cond do
       SpecialValues.nan?(x) or SpecialValues.nan?(y) -> false
       SpecialValues.neg_infinite?(x) -> not SpecialValues.neg_infinite?(y)
@@ -547,34 +516,9 @@ defmodule PtcRunner.Lisp.Runtime.Math do
     end
   end
 
-  def gt(x, y), do: lt(y, x)
-
-  def lte(x, y) do
-    if SpecialValues.nan?(x) or SpecialValues.nan?(y), do: false, else: not gt(x, y)
-  end
-
-  def gte(x, y) do
-    if SpecialValues.nan?(x) or SpecialValues.nan?(y), do: false, else: not lt(x, y)
-  end
-
-  def compare(x, y) do
-    cond do
-      SpecialValues.nan?(x) or SpecialValues.nan?(y) ->
-        # Standard IEEE 754: comparison with NaN is false/unordered.
-        # but compare/2 usually returns -1, 0, 1.
-        # For sort consistency, we raise.
-        raise "type_error: compare: unordered comparison with NaN"
-
-      eq(x, y) ->
-        0
-
-      lt(x, y) ->
-        -1
-
-      true ->
-        1
-    end
-  end
+  @spec invalid_java_ordering!() :: no_return()
+  defp invalid_java_ordering!,
+    do: HostContext.error!({:invalid_java_value, :java_object})
 
   @doc false
   def unary_variadic(fun2, x) do

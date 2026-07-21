@@ -38,7 +38,7 @@ defmodule PtcRunner.Lisp.Registry do
   @external_resource @audit_path
   @registry Code.eval_file(@registry_path) |> elem(0)
   @audit Code.eval_file(@audit_path) |> elem(0)
-  :ok = Surface.validate_legacy_sources!(@registry, @audit)
+  :ok = Surface.validate_authoritative_sources!(@registry, @audit)
   @implemented Surface.replace_function_entries(@registry.implemented)
   @doc_namespaces Map.merge(
                     %{
@@ -133,7 +133,7 @@ defmodule PtcRunner.Lisp.Registry do
   Returns the available curated Java compatibility audit keys.
   """
   @spec java_compat_audit_keys() :: [atom()]
-  def java_compat_audit_keys, do: Surface.audit_keys() -- [:java_math_audit]
+  def java_compat_audit_keys, do: Surface.audit_keys()
 
   @doc """
   Returns a curated Java compatibility audit by key.
@@ -250,7 +250,7 @@ defmodule PtcRunner.Lisp.Registry do
   Looks up documentation for a function by exact name.
 
   Handles namespace-qualified names (e.g., `"LocalDate/parse"` → `"parse"`,
-  `"System/currentTimeMillis"` → `"currentTimeMillis"`,
+  preserves closed Java names such as `"System/currentTimeMillis"`, and maps
   `"java.time.Duration/between"` → `"Duration/between"`).
 
   ## Examples

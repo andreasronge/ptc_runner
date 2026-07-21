@@ -469,6 +469,18 @@ defmodule PtcRunner.Lisp.Prelude.CompilerTest do
                Compiler.compile(source)
     end
 
+    test "rejects namespaces that shadow Java class spellings" do
+      for namespace <- ["Boolean", "java.lang.Boolean", "java.util.Date."] do
+        source = """
+        (ns #{namespace} "nope" {:visibility :prompt})
+        (defn parseBoolean [x] x)
+        """
+
+        assert {:error, %Prelude.ValidationError{reason: :reserved_namespace}} =
+                 Compiler.compile(source)
+      end
+    end
+
     test "rejects duplicate export refs" do
       source = """
       (ns crm "CRM helpers." {:visibility :prompt})

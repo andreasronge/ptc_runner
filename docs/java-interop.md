@@ -6,7 +6,7 @@
 
 PTC-Lisp emulates a subset of Java interop for LLM compatibility. These are **not** real JVM calls — they are BEAM-native implementations that mirror the Java API surface LLMs are trained on.
 
-30 interop entries covering 11 Java classes in 13 presentation groups.
+39 interop entries covering 12 Java classes in 13 presentation groups.
 
 See also: [Function Reference](function-reference.md) | [PTC-Lisp Specification](ptc-lisp-specification.md) | [Namespace Coverage](conformance/index.md)
 
@@ -21,31 +21,45 @@ See also: [Function Reference](function-reference.md) | [PTC-Lisp Specification]
 
 | Name | Kind | Signature | Description | Notes |
 |------|------|-----------|-------------|-------|
-| `Double/NEGATIVE_INFINITY` | Constant | `Double/NEGATIVE_INFINITY, NEGATIVE_INFINITY` | Negative infinity constant (##-Inf) |  |
-| `Double/NaN` | Constant | `Double/NaN, NaN` | Not-a-Number constant (##NaN) |  |
-| `Double/POSITIVE_INFINITY` | Constant | `Double/POSITIVE_INFINITY, POSITIVE_INFINITY` | Positive infinity constant (##Inf) |  |
-| `Double/parseDouble` | Static | `(Double/parseDouble s)` | Parse string to double | Compatibility alias for `(parse-double s)`. Invalid or non-string input returns nil instead of throwing. |
+| `Double/NEGATIVE_INFINITY` | Constant | `Double/NEGATIVE_INFINITY` | Negative infinity constant (##-Inf) |  |
+| `Double/NaN` | Constant | `Double/NaN` | Not-a-Number constant (##NaN) |  |
+| `Double/POSITIVE_INFINITY` | Constant | `Double/POSITIVE_INFINITY` | Positive infinity constant (##Inf) |  |
+| `Double/parseDouble` | Static | `(Double/parseDouble s)` | Parse string to double | Uses Java syntax, whitespace, range, rounding, and bounded NumberFormatException/NullPointerException semantics. |
 
 
 ### java.lang.Float
 
 | Name | Kind | Signature | Description | Notes |
 |------|------|-----------|-------------|-------|
-| `Float/parseFloat` | Static | `(Float/parseFloat s)` | Parse string to float | Compatibility alias for `(parse-double s)`; PTC-Lisp uses one floating type. Invalid or non-string input returns nil instead of throwing. |
+| `Float/parseFloat` | Static | `(Float/parseFloat s)` | Parse string to float | Uses Java syntax, whitespace, range, direct float rounding, and bounded NumberFormatException/NullPointerException semantics. |
 
 
 ### java.lang.Integer
 
 | Name | Kind | Signature | Description | Notes |
 |------|------|-----------|-------------|-------|
-| `Integer/parseInt` | Static | `(Integer/parseInt s)` | Parse string to integer | Compatibility alias for `(parse-long s)`. Invalid or non-string input returns nil instead of throwing. |
+| `Integer/parseInt` | Static | `(Integer/parseInt s)` | Parse string to integer | Uses Java decimal syntax, int range checks, and bounded NumberFormatException semantics. |
 
 
 ### java.lang.Long
 
 | Name | Kind | Signature | Description | Notes |
 |------|------|-----------|-------------|-------|
-| `Long/parseLong` | Static | `(Long/parseLong s)` | Parse string to integer | Compatibility alias for `(parse-long s)`. Invalid or non-string input returns nil instead of throwing. |
+| `Long/parseLong` | Static | `(Long/parseLong s)` | Parse string to integer | Uses Java decimal syntax, long range checks, and bounded NumberFormatException semantics. |
+
+
+### java.lang.Math
+
+| Name | Kind | Signature | Description | Notes |
+|------|------|-----------|-------------|-------|
+| `Math/abs` | Static | `(Math/abs x)` | Return the absolute value using a selected Java primitive overload | Preserves int, long, float, or double identity and Java minimum-value overflow. |
+| `Math/ceil` | Static | `(Math/ceil x)` | Return the smallest double value not less than the argument | Returns a Java double and preserves signed zero and non-finite values. |
+| `Math/floor` | Static | `(Math/floor x)` | Return the largest double value not greater than the argument | Returns a Java double and preserves signed zero and non-finite values. |
+| `Math/max` | Static | `(Math/max x y)` | Return the greater of two Java primitive values | Uses exact primitive overload selection plus Java NaN and signed-zero behavior. |
+| `Math/min` | Static | `(Math/min x y)` | Return the smaller of two Java primitive values | Uses exact primitive overload selection plus Java NaN and signed-zero behavior. |
+| `Math/pow` | Static | `(Math/pow base exponent)` | Return the first argument raised to the power of the second | Uses the Java double overload and its IEEE 754 special-case table. |
+| `Math/round` | Static | `(Math/round x)` | Round a float to int or double to long with ties toward positive infinity | NaN becomes zero and infinities saturate to the selected integer primitive range. |
+| `Math/sqrt` | Static | `(Math/sqrt x)` | Return the positive double square root | Uses Java double semantics for negative, signed-zero, NaN, and infinite inputs. |
 
 
 ### java.lang.String
@@ -54,20 +68,18 @@ See also: [Function Reference](function-reference.md) | [PTC-Lisp Specification]
 |------|------|-----------|-------------|-------|
 | `.contains` | Method | `(.contains s substr)` | Returns true if string contains substring |  |
 | `.endsWith` | Method | `(.endsWith s suffix)` | Returns true if string ends with suffix |  |
-| `.indexOf` | Method | `(.indexOf s substr), (.indexOf s substr from-index)` | Index of first occurrence of substring, or -1 if not found | Uses grapheme indices (not byte offsets). |
-| `.lastIndexOf` | Method | `(.lastIndexOf s substr)` | Index of last occurrence of substring, or -1 if not found | Uses grapheme indices (not byte offsets). |
-| `.length` | Method | `(.length s)` | Return the grapheme count of a string | Returns grapheme count (not byte length), matching `count` and `.indexOf` index semantics. |
+| `.indexOf` | Method | `(.indexOf s substr), (.indexOf s substr from-index)` | Index of first occurrence of substring, or -1 if not found | Returns Java UTF-16 code-unit indexes. |
+| `.lastIndexOf` | Method | `(.lastIndexOf s substr)` | Index of last occurrence of substring, or -1 if not found | Returns Java UTF-16 code-unit indexes. |
+| `.length` | Method | `(.length s)` | Return the UTF-16 code-unit length of a string | Uses Java UTF-16 code units; ordinary PTC `count` remains grapheme-based. |
 | `.startsWith` | Method | `(.startsWith s prefix)` | Returns true if string starts with prefix |  |
-| `.substring` | Method | `(.substring s start), (.substring s start end)` | Extract a substring by grapheme index | Indices are grapheme-based (not byte offsets). Two-arg form returns graphemes in [start, end). Raises on out-of-range indices (matches Java's StringIndexOutOfBoundsException) — note that (.substring s -1) raises rather than silently returning the last grapheme, which matters when chaining .indexOf. |
-| `.toLowerCase` | Method | `(.toLowerCase s)` | Convert string to lower case |  |
-| `.toUpperCase` | Method | `(.toUpperCase s)` | Convert string to upper case |  |
+| `.substring` | Method | `(.substring s start), (.substring s start end)` | Extract a substring by UTF-16 code-unit index | Uses Java UTF-16 code-unit indexes. A range containing an unpaired surrogate returns invalid_java_string because PTC strings require valid UTF-8. |
 
 
 ### java.lang.System
 
 | Name | Kind | Signature | Description | Notes |
 |------|------|-----------|-------------|-------|
-| `System/currentTimeMillis` | Static | `(System/currentTimeMillis), (currentTimeMillis)` | Return current time in milliseconds since Unix epoch |  |
+| `System/currentTimeMillis` | Static | `(System/currentTimeMillis)` | Return current time in milliseconds since Unix epoch |  |
 
 
 ### java.time.Duration
@@ -76,44 +88,41 @@ See also: [Function Reference](function-reference.md) | [PTC-Lisp Specification]
 |------|------|-----------|-------------|-------|
 | `.toDays` | Method | `(.toDays duration)` | Return duration length in whole days | Partial days truncate toward zero. |
 | `.toMillis` | Method | `(.toMillis duration)` | Return duration length in milliseconds | Works on Duration values returned by `Duration/between`. |
-| `Duration/between` | Static | `(Duration/between start-instant end-instant), (java.time.Duration/between start-instant end-instant)` | Return a Duration between two DateTime instants | Requires DateTime values, such as results from `Instant/parse`; LocalDate values are intentionally rejected. |
+| `Duration/between` | Static | `(Duration/between start-instant end-instant), (java.time.Duration/between start-instant end-instant)` | Return a native Duration between two Instants | Requires native Instant values; LocalDate, Date, and raw host temporal structs are rejected. |
 
 
 ### java.time.Instant
 
 | Name | Kind | Signature | Description | Notes |
 |------|------|-----------|-------------|-------|
-| `Instant/parse` | Static | `(Instant/parse iso-string), (java.time.Instant/parse iso-string), (parse iso-string)` | Parse an ISO-8601 instant/date-time string to a DateTime | Returns an Elixir DateTime. Accepts an offset (`Z`, `+02:00`, …); an offsetless `...T...` string is treated as UTC. `.isBefore` / `.isAfter` / `.getTime` work on the result. A bare `YYYY-MM-DD` string returns a Date instead (see `LocalDate/parse`). Also available as the bare `parse` builtin. |
+| `.toEpochMilli` | Method | `(.toEpochMilli instant)` | Return epoch milliseconds from an Instant | Preserves nanoseconds natively and raises on Java long overflow. |
+| `Instant/parse` | Static | `(Instant/parse iso-string), (java.time.Instant/parse iso-string)` | Parse strict ISO-8601 text to a native Instant | An explicit UTC or numeric offset is required; nanoseconds are retained. |
 
 
 ### java.time.LocalDate
 
 | Name | Kind | Signature | Description | Notes |
 |------|------|-----------|-------------|-------|
-| `.minusDays` | Method | `(.minusDays local-date n)` | Subtract days from a LocalDate | `n` must be an integer. |
-| `.plusDays` | Method | `(.plusDays local-date n)` | Add days to a LocalDate | `n` must be an integer. |
+| `.minusDays` | Method | `(.minusDays local-date n)` | Subtract days from a LocalDate | Java long coercion is applied to `n`. |
+| `.plusDays` | Method | `(.plusDays local-date n)` | Add days to a LocalDate | Java long coercion is applied to `n`. |
 | `.toEpochDay` | Method | `(.toEpochDay local-date)` | Return LocalDate epoch-day integer | Works on LocalDate values returned by `LocalDate/parse`. |
-| `LocalDate/parse` | Static | `(LocalDate/parse date-string), (java.time.LocalDate/parse date-string), (parse date-string)` | Parse an ISO-8601 date string (YYYY-MM-DD) to a Date | Returns an Elixir Date for `YYYY-MM-DD`. If the string carries a time component (`...T...`) it returns a DateTime instead (see `Instant/parse`) — a divergence from Java's strict `LocalDate.parse`. Also available as the bare `parse` builtin. |
+| `LocalDate/parse` | Static | `(LocalDate/parse date-string), (java.time.LocalDate/parse date-string)` | Parse strict ISO-8601 text to a native LocalDate | Date-time text is rejected; class identity is retained natively. |
 
 
-### java.time.LocalDate / java.time.Instant / java.util.Date
+### java.time.LocalDate / java.time.Instant
 
 | Name | Kind | Signature | Description | Notes |
 |------|------|-----------|-------------|-------|
-| `.isAfter` | Method | `(.isAfter a b)` | Returns true if receiver comes strictly after argument (same-type only) | Works on both LocalDate and DateTime. Mixed types raise an error. PTC compatibility alias for java.util.Date; Java Date declares `.after`, not `.isAfter` (GAP-J20). |
-| `.isBefore` | Method | `(.isBefore a b)` | Returns true if receiver comes strictly before argument (same-type only) | Works on both LocalDate and DateTime. Mixed types raise an error. PTC compatibility alias for java.util.Date; Java Date declares `.before`, not `.isBefore` (GAP-J20). |
+| `.isAfter` | Method | `(.isAfter a b)` | Returns true if receiver comes strictly after argument (same-type only) | Receiver-owned for LocalDate and Instant; mixed classes are rejected. |
+| `.isBefore` | Method | `(.isBefore a b)` | Returns true if receiver comes strictly before argument (same-type only) | Receiver-owned for LocalDate and Instant; mixed classes are rejected. |
 
 
 ### java.util.Date
 
 | Name | Kind | Signature | Description | Notes |
 |------|------|-----------|-------------|-------|
-| `java.util.Date.` | Constructor | `(java.util.Date.), (java.util.Date. timestamp-or-string), (java.util.Date. datetime-or-date)` | Construct current UTC time, from a timestamp / ISO-8601 / RFC-2822 string, or pass through an existing temporal value | Returns Elixir DateTime. Accepts integer (seconds or ms auto-detected), ISO-8601 (with or without offset — offsetless is treated as UTC), RFC 2822, or an existing DateTime/NaiveDateTime/Date (Date and NaiveDateTime upgrade to UTC; DateTime returns as-is). Time alone is not accepted (no date component). |
-
-
-### java.util.Date / java.time.Instant
-
-| Name | Kind | Signature | Description | Notes |
-|------|------|-----------|-------------|-------|
-| `.getTime` | Method | `(.getTime date)` | Return Unix timestamp in milliseconds from DateTime | PTC compatibility alias for java.time.Instant; Java Instant declares `.toEpochMilli`, not `.getTime` (GAP-J04). |
+| `.after` | Method | `(.after date other-date)` | Returns true if a legacy Date follows another | Owned only by java.util.Date. |
+| `.before` | Method | `(.before date other-date)` | Returns true if a legacy Date precedes another | Owned only by java.util.Date. |
+| `.getTime` | Method | `(.getTime date)` | Return exact epoch milliseconds from a legacy Date | Owned only by java.util.Date. |
+| `java.util.Date.` | Constructor | `(java.util.Date.), (java.util.Date. epoch-milliseconds), (java.util.Date. legacy-date-string)` | Construct a native legacy Date from current time, exact milliseconds, or legacy text | Integer input is always Java epoch milliseconds. ISO-8601 strings and raw host temporal structs are not Date constructor overloads. |
 

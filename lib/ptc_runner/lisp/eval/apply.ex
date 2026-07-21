@@ -22,6 +22,9 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   alias PtcRunner.Lisp.Eval.HostContext
   alias PtcRunner.Lisp.Eval.Patterns
   alias PtcRunner.Lisp.Format
+  alias PtcRunner.Lisp.Java.Callable, as: JavaCallable
+  alias PtcRunner.Lisp.Java.Condition, as: JavaCondition
+  alias PtcRunner.Lisp.Java.Primitive, as: JavaPrimitive
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
   alias PtcRunner.Lisp.Prelude.Contract
   alias PtcRunner.Lisp.Runtime.Args
@@ -83,8 +86,9 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   end
 
   defp do_apply_fun(%Builtin{} = builtin, args, %EvalContext{} = eval_ctx, do_eval_fn) do
-    with :ok <- validate_builtin_args!(builtin, args, eval_ctx, do_eval_fn) do
-      do_apply_fun(Builtin.unwrap(builtin), args, eval_ctx, do_eval_fn)
+    with {:ok, prepared_args} <- prepare_builtin_arguments(builtin, args),
+         :ok <- validate_builtin_args!(builtin, prepared_args, eval_ctx, do_eval_fn) do
+      do_apply_fun(Builtin.unwrap(builtin), prepared_args, eval_ctx, do_eval_fn)
     end
   end
 
@@ -92,6 +96,18 @@ defmodule PtcRunner.Lisp.Eval.Apply do
     callable
     |> RuntimeCallable.bind(eval_ctx, do_eval_fn)
     |> RuntimeCallable.invoke(args, eval_ctx)
+  end
+
+  defp do_apply_fun(
+         %JavaCallable{} = callable,
+         args,
+         %EvalContext{} = eval_ctx,
+         _do_eval_fn
+       ) do
+    case JavaCallable.invoke(callable, args) do
+      {:ok, value, _overload_id} -> {:ok, value, eval_ctx}
+      {:error, condition} -> {:error, JavaCondition.evaluator_error(condition)}
+    end
   end
 
   # nil is not callable: (nil x), (apply nil ...), and ((comp nil) x) raise
@@ -452,7 +468,8 @@ defmodule PtcRunner.Lisp.Eval.Apply do
 
   # Map as function: (map key) → Map.get(map, key)
   # Supports any key type (atoms, strings, integers, etc.) like Clojure
-  defp do_apply_fun(m, args, %EvalContext{} = eval_ctx, _do_eval_fn) when is_map(m) do
+  defp do_apply_fun(m, args, %EvalContext{} = eval_ctx, _do_eval_fn)
+       when is_map(m) and not is_struct(m) do
     case args do
       [k] ->
         {:ok, flex_get(m, k), eval_ctx}
@@ -473,12 +490,19 @@ defmodule PtcRunner.Lisp.Eval.Apply do
     {:error, {:not_callable, other}}
   end
 
+  defp prepare_builtin_arguments(%Builtin{name: name}, args) do
+    case JavaPrimitive.prepare_arguments(name, args) do
+      {:ok, values} -> {:ok, values}
+      {:error, :invalid_java_value} -> {:error, {:invalid_java_value, :primitive}}
+    end
+  end
+
   defp apply_keyword(k, args, %EvalContext{} = eval_ctx) do
     case args do
-      [m] when is_map(m) ->
+      [m] when is_map(m) and not is_struct(m) ->
         {:ok, flex_get(m, k), eval_ctx}
 
-      [m, default] when is_map(m) ->
+      [m, default] when is_map(m) and not is_struct(m) ->
         case flex_fetch(m, k) do
           {:ok, val} -> {:ok, val, eval_ctx}
           :error -> {:ok, default, eval_ctx}
@@ -716,6 +740,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   def closure_to_fun(%Builtin{} = builtin, %EvalContext{}, _do_eval_fn), do: builtin
 
   def closure_to_fun(%RuntimeCallable{} = callable, %EvalContext{}, _do_eval_fn), do: callable
+  def closure_to_fun(%JavaCallable{} = callable, %EvalContext{}, _do_eval_fn), do: callable
 
   def closure_to_fun({:juxt_fn, fns}, %EvalContext{} = eval_ctx, do_eval_fn) when is_list(fns) do
     {:juxt_fn, Enum.map(fns, &closure_to_fun(&1, eval_ctx, do_eval_fn))}
@@ -857,7 +882,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   defp last_arg_to_list(list) when is_list(list), do: {:ok, list}
   defp last_arg_to_list(%MapSet{} = s), do: {:ok, MapSet.to_list(s)}
 
-  defp last_arg_to_list(m) when is_map(m) do
+  defp last_arg_to_list(m) when is_map(m) and not is_struct(m) do
     # Convert map to [key, value] pairs per Clojure seqable semantics
     {:ok, Enum.map(m, fn {k, v} -> [k, v] end)}
   end

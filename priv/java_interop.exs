@@ -2,18 +2,8 @@
   version: 1,
   projection_policy: %{
     audit_reference_coverage: :all,
-    interop_omitted_reference_ids: [
-      :math_abs,
-      :math_ceil,
-      :math_floor,
-      :math_max,
-      :math_min,
-      :math_pow,
-      :math_round,
-      :math_sqrt
-    ],
-    interop_omission_reason:
-      "Math members use the ordinary function reference plus the generated Java Math audit instead of duplicate Java interop rows."
+    interop_omitted_reference_ids: [],
+    interop_omission_reason: "Every admitted Java reference has an interop presentation row."
   },
   references: [
     %{
@@ -122,24 +112,6 @@
       spellings: [".lastIndexOf"],
       overload_ids: [:string_last_index_of_string],
       reference_id: :string_last_index_of,
-      callable?: true
-    },
-    %{
-      member: "toLowerCase",
-      kind: :instance,
-      class_id: :java_lang_string,
-      spellings: [".toLowerCase"],
-      overload_ids: [:string_to_lower_case_0],
-      reference_id: :string_to_lower_case,
-      callable?: true
-    },
-    %{
-      member: "toUpperCase",
-      kind: :instance,
-      class_id: :java_lang_string,
-      spellings: [".toUpperCase"],
-      overload_ids: [:string_to_upper_case_0],
-      reference_id: :string_to_upper_case,
       callable?: true
     },
     %{
@@ -260,12 +232,12 @@
       callable?: true
     },
     %{
-      member: "getTime",
+      member: "toEpochMilli",
       kind: :instance,
       class_id: :java_time_instant,
-      spellings: [".getTime"],
-      overload_ids: [:instant_get_time_alias_0],
-      reference_id: :instant_get_time_alias,
+      spellings: [".toEpochMilli"],
+      overload_ids: [:instant_to_epoch_milli_0],
+      reference_id: :instant_to_epoch_milli,
       callable?: true
     },
     %{
@@ -300,7 +272,7 @@
       kind: :constructor,
       class_id: :java_util_date,
       spellings: ["java.util.Date."],
-      overload_ids: [:date_new_0, :date_new_long, :date_new_string, :date_new_ptc_temporal],
+      overload_ids: [:date_new_0, :date_new_long, :date_new_string],
       reference_id: :date_new,
       callable?: true
     },
@@ -314,21 +286,21 @@
       callable?: true
     },
     %{
-      member: "isBefore",
+      member: "before",
       kind: :instance,
       class_id: :java_util_date,
-      spellings: [".isBefore"],
-      overload_ids: [:date_is_before_alias_date],
-      reference_id: :date_is_before_alias,
+      spellings: [".before"],
+      overload_ids: [:date_before_date],
+      reference_id: :date_before,
       callable?: true
     },
     %{
-      member: "isAfter",
+      member: "after",
       kind: :instance,
       class_id: :java_util_date,
-      spellings: [".isAfter"],
-      overload_ids: [:date_is_after_alias_date],
-      reference_id: :date_is_after_alias,
+      spellings: [".after"],
+      overload_ids: [:date_after_date],
+      reference_id: :date_after,
       callable?: true
     },
     %{
@@ -491,7 +463,7 @@
       arguments: [:string],
       errors: [],
       receiver: nil,
-      route: {:legacy_env, :"Boolean/parseBoolean"},
+      route: {:dispatch, :boolean_parse_boolean},
       reference_id: :boolean_parse_boolean,
       descriptor: "(Ljava/lang/String;)Z",
       overload_id: :boolean_parse_boolean_string,
@@ -505,11 +477,11 @@
       arguments: [:string],
       errors: [:number_format_exception, :null_pointer_exception],
       receiver: nil,
-      route: {:legacy_env, :"parse-double"},
+      route: {:dispatch, :double_parse_double},
       reference_id: :double_parse_double,
       descriptor: "(Ljava/lang/String;)D",
       overload_id: :double_parse_double_string,
-      divergence_ids: ["GAP-J01"],
+      divergence_ids: [],
       classification: :exact,
       attestation: :jvm
     },
@@ -519,7 +491,7 @@
       arguments: [],
       errors: [],
       receiver: nil,
-      route: {:legacy_env, :POSITIVE_INFINITY},
+      route: {:dispatch, :double_positive_infinity},
       reference_id: :double_positive_infinity,
       descriptor: "D",
       overload_id: :double_positive_infinity_field,
@@ -533,7 +505,7 @@
       arguments: [],
       errors: [],
       receiver: nil,
-      route: {:legacy_env, :NEGATIVE_INFINITY},
+      route: {:dispatch, :double_negative_infinity},
       reference_id: :double_negative_infinity,
       descriptor: "D",
       overload_id: :double_negative_infinity_field,
@@ -547,7 +519,7 @@
       arguments: [],
       errors: [],
       receiver: nil,
-      route: {:legacy_env, :NaN},
+      route: {:dispatch, :double_nan},
       reference_id: :double_nan,
       descriptor: "D",
       overload_id: :double_nan_field,
@@ -561,11 +533,11 @@
       arguments: [:string],
       errors: [:number_format_exception, :null_pointer_exception],
       receiver: nil,
-      route: {:legacy_env, :"parse-double"},
+      route: {:dispatch, :float_parse_float},
       reference_id: :float_parse_float,
       descriptor: "(Ljava/lang/String;)F",
       overload_id: :float_parse_float_string,
-      divergence_ids: ["GAP-J01"],
+      divergence_ids: [],
       classification: :exact,
       attestation: :jvm
     },
@@ -575,11 +547,11 @@
       arguments: [:string],
       errors: [:number_format_exception],
       receiver: nil,
-      route: {:legacy_env, :"parse-long"},
+      route: {:dispatch, :integer_parse_int},
       reference_id: :integer_parse_int,
       descriptor: "(Ljava/lang/String;)I",
       overload_id: :integer_parse_int_string,
-      divergence_ids: ["GAP-J01"],
+      divergence_ids: [],
       classification: :exact,
       attestation: :jvm
     },
@@ -589,11 +561,11 @@
       arguments: [:string],
       errors: [:number_format_exception],
       receiver: nil,
-      route: {:legacy_env, :"parse-long"},
+      route: {:dispatch, :long_parse_long},
       reference_id: :long_parse_long,
       descriptor: "(Ljava/lang/String;)J",
       overload_id: :long_parse_long_string,
-      divergence_ids: ["GAP-J01"],
+      divergence_ids: [],
       classification: :exact,
       attestation: :jvm
     },
@@ -603,7 +575,7 @@
       arguments: [],
       errors: [],
       receiver: nil,
-      route: {:legacy_env, :currentTimeMillis},
+      route: {:dispatch, :system_current_time_millis},
       reference_id: :system_current_time_millis,
       descriptor: "()J",
       overload_id: :system_current_time_millis_0,
@@ -615,13 +587,13 @@
       return: :boolean,
       arity: 1,
       arguments: [:char_sequence],
-      errors: [:null_pointer_exception],
+      errors: [:invalid_java_string, :null_pointer_exception],
       receiver: :string,
-      route: {:legacy_env, :".contains"},
+      route: {:dispatch, :string_contains},
       reference_id: :string_contains,
       descriptor: "(Ljava/lang/CharSequence;)Z",
       overload_id: :string_contains_char_sequence,
-      divergence_ids: ["DIV-40", "DIV-41"],
+      divergence_ids: ["DIV-40", "DIV-41", "DIV-53"],
       classification: :exact,
       attestation: :jvm
     },
@@ -629,13 +601,13 @@
       return: :int,
       arity: 1,
       arguments: [:string],
-      errors: [:null_pointer_exception],
+      errors: [:invalid_java_string, :null_pointer_exception],
       receiver: :string,
-      route: {:legacy_env, :".indexOf"},
+      route: {:dispatch, :string_index_of},
       reference_id: :string_index_of,
       descriptor: "(Ljava/lang/String;)I",
       overload_id: :string_index_of_string,
-      divergence_ids: ["GAP-J09", "DIV-41"],
+      divergence_ids: ["DIV-41", "DIV-53"],
       classification: :exact,
       attestation: :jvm
     },
@@ -643,13 +615,13 @@
       return: :int,
       arity: 2,
       arguments: [:string, :int],
-      errors: [:null_pointer_exception],
+      errors: [:invalid_java_string, :null_pointer_exception],
       receiver: :string,
-      route: {:legacy_env, :".indexOf"},
+      route: {:dispatch, :string_index_of},
       reference_id: :string_index_of,
       descriptor: "(Ljava/lang/String;I)I",
       overload_id: :string_index_of_string_from,
-      divergence_ids: ["GAP-J09", "DIV-41"],
+      divergence_ids: ["DIV-41", "DIV-53"],
       classification: :exact,
       attestation: :jvm
     },
@@ -657,41 +629,13 @@
       return: :int,
       arity: 1,
       arguments: [:string],
-      errors: [:null_pointer_exception],
+      errors: [:invalid_java_string, :null_pointer_exception],
       receiver: :string,
-      route: {:legacy_env, :".lastIndexOf"},
+      route: {:dispatch, :string_last_index_of},
       reference_id: :string_last_index_of,
       descriptor: "(Ljava/lang/String;)I",
       overload_id: :string_last_index_of_string,
-      divergence_ids: ["GAP-J09", "DIV-41"],
-      classification: :exact,
-      attestation: :jvm
-    },
-    %{
-      return: :string,
-      arity: 0,
-      arguments: [],
-      errors: [],
-      receiver: :string,
-      route: {:legacy_env, :".toLowerCase"},
-      reference_id: :string_to_lower_case,
-      descriptor: "()Ljava/lang/String;",
-      overload_id: :string_to_lower_case_0,
-      divergence_ids: ["DIV-41"],
-      classification: :exact,
-      attestation: :jvm
-    },
-    %{
-      return: :string,
-      arity: 0,
-      arguments: [],
-      errors: [],
-      receiver: :string,
-      route: {:legacy_env, :".toUpperCase"},
-      reference_id: :string_to_upper_case,
-      descriptor: "()Ljava/lang/String;",
-      overload_id: :string_to_upper_case_0,
-      divergence_ids: ["DIV-41"],
+      divergence_ids: ["DIV-41", "DIV-53"],
       classification: :exact,
       attestation: :jvm
     },
@@ -699,13 +643,13 @@
       return: :boolean,
       arity: 1,
       arguments: [:string],
-      errors: [:null_pointer_exception],
+      errors: [:invalid_java_string, :null_pointer_exception],
       receiver: :string,
-      route: {:legacy_env, :".startsWith"},
+      route: {:dispatch, :string_starts_with},
       reference_id: :string_starts_with,
       descriptor: "(Ljava/lang/String;)Z",
       overload_id: :string_starts_with_string,
-      divergence_ids: ["DIV-40", "DIV-41"],
+      divergence_ids: ["DIV-40", "DIV-41", "DIV-53"],
       classification: :exact,
       attestation: :jvm
     },
@@ -713,13 +657,13 @@
       return: :boolean,
       arity: 1,
       arguments: [:string],
-      errors: [:null_pointer_exception],
+      errors: [:invalid_java_string, :null_pointer_exception],
       receiver: :string,
-      route: {:legacy_env, :".endsWith"},
+      route: {:dispatch, :string_ends_with},
       reference_id: :string_ends_with,
       descriptor: "(Ljava/lang/String;)Z",
       overload_id: :string_ends_with_string,
-      divergence_ids: ["DIV-40", "DIV-41"],
+      divergence_ids: ["DIV-40", "DIV-41", "DIV-53"],
       classification: :exact,
       attestation: :jvm
     },
@@ -727,13 +671,13 @@
       return: :int,
       arity: 0,
       arguments: [],
-      errors: [],
+      errors: [:invalid_java_string, :null_pointer_exception],
       receiver: :string,
-      route: {:legacy_env, :".length"},
+      route: {:dispatch, :string_length},
       reference_id: :string_length,
       descriptor: "()I",
       overload_id: :string_length_0,
-      divergence_ids: ["GAP-J09", "DIV-41"],
+      divergence_ids: ["DIV-41", "DIV-53"],
       classification: :exact,
       attestation: :jvm
     },
@@ -741,13 +685,17 @@
       return: :string,
       arity: 1,
       arguments: [:int],
-      errors: [:string_index_out_of_bounds_exception],
+      errors: [
+        :invalid_java_string,
+        :null_pointer_exception,
+        :string_index_out_of_bounds_exception
+      ],
       receiver: :string,
-      route: {:legacy_env, :".substring"},
+      route: {:dispatch, :string_substring},
       reference_id: :string_substring,
       descriptor: "(I)Ljava/lang/String;",
       overload_id: :string_substring_begin,
-      divergence_ids: ["GAP-J09", "DIV-41"],
+      divergence_ids: ["DIV-41", "DIV-53"],
       classification: :exact,
       attestation: :jvm
     },
@@ -755,13 +703,17 @@
       return: :string,
       arity: 2,
       arguments: [:int, :int],
-      errors: [:string_index_out_of_bounds_exception],
+      errors: [
+        :invalid_java_string,
+        :null_pointer_exception,
+        :string_index_out_of_bounds_exception
+      ],
       receiver: :string,
-      route: {:legacy_env, :".substring"},
+      route: {:dispatch, :string_substring},
       reference_id: :string_substring,
       descriptor: "(II)Ljava/lang/String;",
       overload_id: :string_substring_begin_end,
-      divergence_ids: ["GAP-J09", "DIV-41"],
+      divergence_ids: ["DIV-41", "DIV-53"],
       classification: :exact,
       attestation: :jvm
     },
@@ -771,11 +723,11 @@
       arguments: [:char_sequence],
       errors: [:date_time_parse_exception, :null_pointer_exception],
       receiver: nil,
-      route: {:legacy_env, :parse},
+      route: {:dispatch, :local_date_parse},
       reference_id: :local_date_parse,
       descriptor: "(Ljava/lang/CharSequence;)Ljava/time/LocalDate;",
       overload_id: :local_date_parse_char_sequence,
-      divergence_ids: ["GAP-J06"],
+      divergence_ids: [],
       classification: :exact,
       attestation: :jvm
     },
@@ -783,9 +735,9 @@
       return: :long,
       arity: 0,
       arguments: [],
-      errors: [],
+      errors: [:null_pointer_exception],
       receiver: :local_date,
-      route: {:legacy_env, :".toEpochDay"},
+      route: {:dispatch, :local_date_to_epoch_day},
       reference_id: :local_date_to_epoch_day,
       descriptor: "()J",
       overload_id: :local_date_to_epoch_day_0,
@@ -797,13 +749,13 @@
       return: :local_date,
       arity: 1,
       arguments: [:long],
-      errors: [:date_time_exception, :arithmetic_exception],
+      errors: [:date_time_exception, :arithmetic_exception, :null_pointer_exception],
       receiver: :local_date,
-      route: {:legacy_env, :".plusDays"},
+      route: {:dispatch, :local_date_plus_days},
       reference_id: :local_date_plus_days,
       descriptor: "(J)Ljava/time/LocalDate;",
       overload_id: :local_date_plus_days_long,
-      divergence_ids: ["GAP-J12"],
+      divergence_ids: [],
       classification: :exact,
       attestation: :jvm
     },
@@ -811,13 +763,13 @@
       return: :local_date,
       arity: 1,
       arguments: [:long],
-      errors: [:date_time_exception, :arithmetic_exception],
+      errors: [:date_time_exception, :arithmetic_exception, :null_pointer_exception],
       receiver: :local_date,
-      route: {:legacy_env, :".minusDays"},
+      route: {:dispatch, :local_date_minus_days},
       reference_id: :local_date_minus_days,
       descriptor: "(J)Ljava/time/LocalDate;",
       overload_id: :local_date_minus_days_long,
-      divergence_ids: ["GAP-J12"],
+      divergence_ids: [],
       classification: :exact,
       attestation: :jvm
     },
@@ -827,7 +779,7 @@
       arguments: [:local_date],
       errors: [:null_pointer_exception],
       receiver: :local_date,
-      route: {:legacy_env, :".isBefore"},
+      route: {:dispatch, :local_date_is_before},
       reference_id: :local_date_is_before,
       descriptor: "(Ljava/time/chrono/ChronoLocalDate;)Z",
       overload_id: :local_date_is_before_chrono_local_date,
@@ -841,7 +793,7 @@
       arguments: [:local_date],
       errors: [:null_pointer_exception],
       receiver: :local_date,
-      route: {:legacy_env, :".isAfter"},
+      route: {:dispatch, :local_date_is_after},
       reference_id: :local_date_is_after,
       descriptor: "(Ljava/time/chrono/ChronoLocalDate;)Z",
       overload_id: :local_date_is_after_chrono_local_date,
@@ -855,11 +807,11 @@
       arguments: [:char_sequence],
       errors: [:date_time_parse_exception, :null_pointer_exception],
       receiver: nil,
-      route: {:legacy_env, :parse},
+      route: {:dispatch, :instant_parse},
       reference_id: :instant_parse,
       descriptor: "(Ljava/lang/CharSequence;)Ljava/time/Instant;",
       overload_id: :instant_parse_char_sequence,
-      divergence_ids: ["GAP-J06"],
+      divergence_ids: [],
       classification: :exact,
       attestation: :jvm
     },
@@ -869,7 +821,7 @@
       arguments: [:instant],
       errors: [:null_pointer_exception],
       receiver: :instant,
-      route: {:legacy_env, :".isBefore"},
+      route: {:dispatch, :instant_is_before},
       reference_id: :instant_is_before,
       descriptor: "(Ljava/time/Instant;)Z",
       overload_id: :instant_is_before_instant,
@@ -883,7 +835,7 @@
       arguments: [:instant],
       errors: [:null_pointer_exception],
       receiver: :instant,
-      route: {:legacy_env, :".isAfter"},
+      route: {:dispatch, :instant_is_after},
       reference_id: :instant_is_after,
       descriptor: "(Ljava/time/Instant;)Z",
       overload_id: :instant_is_after_instant,
@@ -895,28 +847,28 @@
       return: :long,
       arity: 0,
       arguments: [],
-      errors: [],
+      errors: [:arithmetic_exception, :null_pointer_exception],
       receiver: :instant,
-      route: {:legacy_env, :".getTime"},
-      reference_id: :instant_get_time_alias,
-      descriptor: nil,
-      overload_id: :instant_get_time_alias_0,
-      divergence_ids: ["GAP-J04"],
-      classification: :intentional_ptc_alias,
-      attestation: :ptc_only
+      route: {:dispatch, :instant_to_epoch_milli},
+      reference_id: :instant_to_epoch_milli,
+      descriptor: "()J",
+      overload_id: :instant_to_epoch_milli_0,
+      divergence_ids: [],
+      classification: :exact,
+      attestation: :jvm
     },
     %{
       return: :duration,
       arity: 2,
-      arguments: [:temporal, :temporal],
+      arguments: [:instant, :instant],
       errors: [:date_time_exception, :arithmetic_exception, :null_pointer_exception],
       receiver: nil,
-      route: {:legacy_env, :"Duration/between"},
+      route: {:dispatch, :duration_between},
       reference_id: :duration_between,
       descriptor:
         "(Ljava/time/temporal/Temporal;Ljava/time/temporal/Temporal;)Ljava/time/Duration;",
       overload_id: :duration_between_temporal,
-      divergence_ids: ["GAP-J19"],
+      divergence_ids: ["DIV-52"],
       classification: :exact,
       attestation: :jvm
     },
@@ -924,9 +876,9 @@
       return: :long,
       arity: 0,
       arguments: [],
-      errors: [],
+      errors: [:arithmetic_exception, :null_pointer_exception],
       receiver: :duration,
-      route: {:legacy_env, :".toMillis"},
+      route: {:dispatch, :duration_to_millis},
       reference_id: :duration_to_millis,
       descriptor: "()J",
       overload_id: :duration_to_millis_0,
@@ -938,9 +890,9 @@
       return: :long,
       arity: 0,
       arguments: [],
-      errors: [],
+      errors: [:null_pointer_exception],
       receiver: :duration,
-      route: {:legacy_env, :".toDays"},
+      route: {:dispatch, :duration_to_days},
       reference_id: :duration_to_days,
       descriptor: "()J",
       overload_id: :duration_to_days_0,
@@ -954,7 +906,7 @@
       arguments: [],
       errors: [],
       receiver: nil,
-      route: {:legacy_env, :"java.util.Date."},
+      route: {:dispatch, :date_new},
       reference_id: :date_new,
       descriptor: "()V",
       overload_id: :date_new_0,
@@ -968,11 +920,11 @@
       arguments: [:long],
       errors: [],
       receiver: nil,
-      route: {:legacy_env, :"java.util.Date."},
+      route: {:dispatch, :date_new},
       reference_id: :date_new,
       descriptor: "(J)V",
       overload_id: :date_new_long,
-      divergence_ids: ["GAP-J03"],
+      divergence_ids: [],
       classification: :exact,
       attestation: :jvm
     },
@@ -980,37 +932,23 @@
       return: :date,
       arity: 1,
       arguments: [:string],
-      errors: [:illegal_argument_exception, :null_pointer_exception],
+      errors: [:illegal_argument_exception],
       receiver: nil,
-      route: {:legacy_env, :"java.util.Date."},
+      route: {:dispatch, :date_new},
       reference_id: :date_new,
       descriptor: "(Ljava/lang/String;)V",
       overload_id: :date_new_string,
-      divergence_ids: ["GAP-J06", "GAP-J11"],
+      divergence_ids: ["DIV-51"],
       classification: :exact,
       attestation: :jvm
-    },
-    %{
-      return: :date,
-      arity: 1,
-      arguments: [:ptc_temporal],
-      errors: [],
-      receiver: nil,
-      route: {:legacy_env, :"java.util.Date."},
-      reference_id: :date_new,
-      descriptor: nil,
-      overload_id: :date_new_ptc_temporal,
-      divergence_ids: ["GAP-J21"],
-      classification: :ptc_extension,
-      attestation: :ptc_only
     },
     %{
       return: :long,
       arity: 0,
       arguments: [],
-      errors: [],
+      errors: [:null_pointer_exception],
       receiver: :date,
-      route: {:legacy_env, :".getTime"},
+      route: {:dispatch, :date_get_time},
       reference_id: :date_get_time,
       descriptor: "()J",
       overload_id: :date_get_time_0,
@@ -1024,13 +962,13 @@
       arguments: [:date],
       errors: [:null_pointer_exception],
       receiver: :date,
-      route: {:legacy_env, :".isBefore"},
-      reference_id: :date_is_before_alias,
-      descriptor: nil,
-      overload_id: :date_is_before_alias_date,
-      divergence_ids: ["GAP-J20"],
-      classification: :intentional_ptc_alias,
-      attestation: :ptc_only
+      route: {:dispatch, :date_before},
+      reference_id: :date_before,
+      descriptor: "(Ljava/util/Date;)Z",
+      overload_id: :date_before_date,
+      divergence_ids: [],
+      classification: :exact,
+      attestation: :jvm
     },
     %{
       return: :boolean,
@@ -1038,13 +976,13 @@
       arguments: [:date],
       errors: [:null_pointer_exception],
       receiver: :date,
-      route: {:legacy_env, :".isAfter"},
-      reference_id: :date_is_after_alias,
-      descriptor: nil,
-      overload_id: :date_is_after_alias_date,
-      divergence_ids: ["GAP-J20"],
-      classification: :intentional_ptc_alias,
-      attestation: :ptc_only
+      route: {:dispatch, :date_after},
+      reference_id: :date_after,
+      descriptor: "(Ljava/util/Date;)Z",
+      overload_id: :date_after_date,
+      divergence_ids: [],
+      classification: :exact,
+      attestation: :jvm
     },
     %{
       return: :int,
@@ -1052,11 +990,11 @@
       arguments: [:int],
       errors: [],
       receiver: nil,
-      route: {:legacy_env, :abs},
+      route: {:dispatch, :math_abs_int},
       reference_id: :math_abs,
       descriptor: "(I)I",
       overload_id: :math_abs_int,
-      divergence_ids: ["DIV-45"],
+      divergence_ids: [],
       classification: :exact,
       attestation: :jvm
     },
@@ -1066,11 +1004,11 @@
       arguments: [:long],
       errors: [],
       receiver: nil,
-      route: {:legacy_env, :abs},
+      route: {:dispatch, :math_abs_long},
       reference_id: :math_abs,
       descriptor: "(J)J",
       overload_id: :math_abs_long,
-      divergence_ids: ["DIV-45"],
+      divergence_ids: [],
       classification: :exact,
       attestation: :jvm
     },
@@ -1080,11 +1018,11 @@
       arguments: [:float],
       errors: [],
       receiver: nil,
-      route: {:legacy_env, :abs},
+      route: {:dispatch, :math_abs_float},
       reference_id: :math_abs,
       descriptor: "(F)F",
       overload_id: :math_abs_float,
-      divergence_ids: ["DIV-45"],
+      divergence_ids: [],
       classification: :exact,
       attestation: :jvm
     },
@@ -1094,11 +1032,11 @@
       arguments: [:double],
       errors: [],
       receiver: nil,
-      route: {:legacy_env, :abs},
+      route: {:dispatch, :math_abs_double},
       reference_id: :math_abs,
       descriptor: "(D)D",
       overload_id: :math_abs_double,
-      divergence_ids: ["DIV-45"],
+      divergence_ids: [],
       classification: :exact,
       attestation: :jvm
     },
@@ -1108,11 +1046,11 @@
       arguments: [:double],
       errors: [],
       receiver: nil,
-      route: {:legacy_env, :ceil},
+      route: {:dispatch, :math_ceil_double},
       reference_id: :math_ceil,
       descriptor: "(D)D",
       overload_id: :math_ceil_double,
-      divergence_ids: ["DIV-42"],
+      divergence_ids: [],
       classification: :exact,
       attestation: :jvm
     },
@@ -1122,11 +1060,11 @@
       arguments: [:double],
       errors: [],
       receiver: nil,
-      route: {:legacy_env, :floor},
+      route: {:dispatch, :math_floor_double},
       reference_id: :math_floor,
       descriptor: "(D)D",
       overload_id: :math_floor_double,
-      divergence_ids: ["DIV-42"],
+      divergence_ids: [],
       classification: :exact,
       attestation: :jvm
     },
@@ -1136,11 +1074,11 @@
       arguments: [:int, :int],
       errors: [],
       receiver: nil,
-      route: {:legacy_env, :max},
+      route: {:dispatch, :math_max_int},
       reference_id: :math_max,
       descriptor: "(II)I",
       overload_id: :math_max_int,
-      divergence_ids: ["DIV-44", "DIV-45"],
+      divergence_ids: [],
       classification: :exact,
       attestation: :jvm
     },
@@ -1150,11 +1088,11 @@
       arguments: [:long, :long],
       errors: [],
       receiver: nil,
-      route: {:legacy_env, :max},
+      route: {:dispatch, :math_max_long},
       reference_id: :math_max,
       descriptor: "(JJ)J",
       overload_id: :math_max_long,
-      divergence_ids: ["DIV-44", "DIV-45"],
+      divergence_ids: [],
       classification: :exact,
       attestation: :jvm
     },
@@ -1164,11 +1102,11 @@
       arguments: [:float, :float],
       errors: [],
       receiver: nil,
-      route: {:legacy_env, :max},
+      route: {:dispatch, :math_max_float},
       reference_id: :math_max,
       descriptor: "(FF)F",
       overload_id: :math_max_float,
-      divergence_ids: ["DIV-44", "DIV-45"],
+      divergence_ids: [],
       classification: :exact,
       attestation: :jvm
     },
@@ -1178,11 +1116,11 @@
       arguments: [:double, :double],
       errors: [],
       receiver: nil,
-      route: {:legacy_env, :max},
+      route: {:dispatch, :math_max_double},
       reference_id: :math_max,
       descriptor: "(DD)D",
       overload_id: :math_max_double,
-      divergence_ids: ["DIV-44", "DIV-45"],
+      divergence_ids: [],
       classification: :exact,
       attestation: :jvm
     },
@@ -1192,11 +1130,11 @@
       arguments: [:int, :int],
       errors: [],
       receiver: nil,
-      route: {:legacy_env, :min},
+      route: {:dispatch, :math_min_int},
       reference_id: :math_min,
       descriptor: "(II)I",
       overload_id: :math_min_int,
-      divergence_ids: ["DIV-44", "DIV-45"],
+      divergence_ids: [],
       classification: :exact,
       attestation: :jvm
     },
@@ -1206,11 +1144,11 @@
       arguments: [:long, :long],
       errors: [],
       receiver: nil,
-      route: {:legacy_env, :min},
+      route: {:dispatch, :math_min_long},
       reference_id: :math_min,
       descriptor: "(JJ)J",
       overload_id: :math_min_long,
-      divergence_ids: ["DIV-44", "DIV-45"],
+      divergence_ids: [],
       classification: :exact,
       attestation: :jvm
     },
@@ -1220,11 +1158,11 @@
       arguments: [:float, :float],
       errors: [],
       receiver: nil,
-      route: {:legacy_env, :min},
+      route: {:dispatch, :math_min_float},
       reference_id: :math_min,
       descriptor: "(FF)F",
       overload_id: :math_min_float,
-      divergence_ids: ["DIV-44", "DIV-45"],
+      divergence_ids: [],
       classification: :exact,
       attestation: :jvm
     },
@@ -1234,11 +1172,11 @@
       arguments: [:double, :double],
       errors: [],
       receiver: nil,
-      route: {:legacy_env, :min},
+      route: {:dispatch, :math_min_double},
       reference_id: :math_min,
       descriptor: "(DD)D",
       overload_id: :math_min_double,
-      divergence_ids: ["DIV-44", "DIV-45"],
+      divergence_ids: [],
       classification: :exact,
       attestation: :jvm
     },
@@ -1248,7 +1186,7 @@
       arguments: [:double, :double],
       errors: [],
       receiver: nil,
-      route: {:legacy_env, :pow},
+      route: {:dispatch, :math_pow_double},
       reference_id: :math_pow,
       descriptor: "(DD)D",
       overload_id: :math_pow_double,
@@ -1262,11 +1200,11 @@
       arguments: [:float],
       errors: [],
       receiver: nil,
-      route: {:legacy_env, :round},
+      route: {:dispatch, :math_round_float},
       reference_id: :math_round,
       descriptor: "(F)I",
       overload_id: :math_round_float,
-      divergence_ids: ["DIV-43", "DIV-45"],
+      divergence_ids: [],
       classification: :exact,
       attestation: :jvm
     },
@@ -1276,11 +1214,11 @@
       arguments: [:double],
       errors: [],
       receiver: nil,
-      route: {:legacy_env, :round},
+      route: {:dispatch, :math_round_double},
       reference_id: :math_round,
       descriptor: "(D)J",
       overload_id: :math_round_double,
-      divergence_ids: ["DIV-43", "DIV-45"],
+      divergence_ids: [],
       classification: :exact,
       attestation: :jvm
     },
@@ -1290,7 +1228,7 @@
       arguments: [:double],
       errors: [],
       receiver: nil,
-      route: {:legacy_env, :sqrt},
+      route: {:dispatch, :math_sqrt_double},
       reference_id: :math_sqrt,
       descriptor: "(D)D",
       overload_id: :math_sqrt_double,
@@ -1305,326 +1243,92 @@
       namespace: :Math,
       class_id: :java_lang_math,
       members: [
-        %{
-          source_name: :abs,
-          reference_id: :math_abs,
-          classification: :admitted,
-          legacy_binding: :abs
-        },
-        %{
-          source_name: :"bit-and",
-          reference_id: nil,
-          classification: :incorrect_non_java_alias,
-          legacy_binding: :"bit-and"
-        },
-        %{
-          source_name: :"bit-and-not",
-          reference_id: nil,
-          classification: :incorrect_non_java_alias,
-          legacy_binding: :"bit-and-not"
-        },
-        %{
-          source_name: :"bit-clear",
-          reference_id: nil,
-          classification: :incorrect_non_java_alias,
-          legacy_binding: :"bit-clear"
-        },
-        %{
-          source_name: :"bit-flip",
-          reference_id: nil,
-          classification: :incorrect_non_java_alias,
-          legacy_binding: :"bit-flip"
-        },
-        %{
-          source_name: :"bit-not",
-          reference_id: nil,
-          classification: :incorrect_non_java_alias,
-          legacy_binding: :"bit-not"
-        },
-        %{
-          source_name: :"bit-or",
-          reference_id: nil,
-          classification: :incorrect_non_java_alias,
-          legacy_binding: :"bit-or"
-        },
-        %{
-          source_name: :"bit-set",
-          reference_id: nil,
-          classification: :incorrect_non_java_alias,
-          legacy_binding: :"bit-set"
-        },
-        %{
-          source_name: :"bit-shift-left",
-          reference_id: nil,
-          classification: :incorrect_non_java_alias,
-          legacy_binding: :"bit-shift-left"
-        },
-        %{
-          source_name: :"bit-shift-right",
-          reference_id: nil,
-          classification: :incorrect_non_java_alias,
-          legacy_binding: :"bit-shift-right"
-        },
-        %{
-          source_name: :"bit-test",
-          reference_id: nil,
-          classification: :incorrect_non_java_alias,
-          legacy_binding: :"bit-test"
-        },
-        %{
-          source_name: :"bit-xor",
-          reference_id: nil,
-          classification: :incorrect_non_java_alias,
-          legacy_binding: :"bit-xor"
-        },
-        %{
-          source_name: :ceil,
-          reference_id: :math_ceil,
-          classification: :admitted,
-          legacy_binding: :ceil
-        },
-        %{
-          source_name: :double,
-          reference_id: nil,
-          classification: :incorrect_non_java_alias,
-          legacy_binding: :double
-        },
-        %{
-          source_name: :float,
-          reference_id: nil,
-          classification: :incorrect_non_java_alias,
-          legacy_binding: :float
-        },
-        %{
-          source_name: :floor,
-          reference_id: :math_floor,
-          classification: :admitted,
-          legacy_binding: :floor
-        },
-        %{
-          source_name: :int,
-          reference_id: nil,
-          classification: :incorrect_non_java_alias,
-          legacy_binding: :int
-        },
-        %{
-          source_name: :max,
-          reference_id: :math_max,
-          classification: :admitted,
-          legacy_binding: :max
-        },
-        %{
-          source_name: :min,
-          reference_id: :math_min,
-          classification: :admitted,
-          legacy_binding: :min
-        },
-        %{
-          source_name: :pow,
-          reference_id: :math_pow,
-          classification: :admitted,
-          legacy_binding: :pow
-        },
-        %{
-          source_name: :quot,
-          reference_id: nil,
-          classification: :incorrect_non_java_alias,
-          legacy_binding: :quot
-        },
-        %{
-          source_name: :round,
-          reference_id: :math_round,
-          classification: :admitted,
-          legacy_binding: :round
-        },
-        %{
-          source_name: :sqrt,
-          reference_id: :math_sqrt,
-          classification: :admitted,
-          legacy_binding: :sqrt
-        },
-        %{
-          source_name: :trunc,
-          reference_id: nil,
-          classification: :incorrect_non_java_alias,
-          legacy_binding: :trunc
-        }
+        %{source_name: :abs, reference_id: :math_abs},
+        %{source_name: :ceil, reference_id: :math_ceil},
+        %{source_name: :floor, reference_id: :math_floor},
+        %{source_name: :max, reference_id: :math_max},
+        %{source_name: :min, reference_id: :math_min},
+        %{source_name: :pow, reference_id: :math_pow},
+        %{source_name: :round, reference_id: :math_round},
+        %{source_name: :sqrt, reference_id: :math_sqrt}
       ]
     },
     %{
       category: :interop,
       namespace: :System,
       class_id: :java_lang_system,
-      members: [
-        %{
-          source_name: :currentTimeMillis,
-          reference_id: :system_current_time_millis,
-          classification: :admitted,
-          legacy_binding: :currentTimeMillis
-        }
-      ]
+      members: [%{source_name: :currentTimeMillis, reference_id: :system_current_time_millis}]
     },
     %{
       category: :interop,
       namespace: :Boolean,
       class_id: :java_lang_boolean,
-      members: [
-        %{
-          source_name: "parseBoolean",
-          reference_id: :boolean_parse_boolean,
-          classification: :admitted,
-          legacy_binding: :"Boolean/parseBoolean"
-        }
-      ]
+      members: [%{source_name: "parseBoolean", reference_id: :boolean_parse_boolean}]
     },
     %{
       category: :interop,
       namespace: :Double,
       class_id: :java_lang_double,
       members: [
-        %{
-          source_name: "parseDouble",
-          reference_id: :double_parse_double,
-          classification: :admitted,
-          legacy_binding: :"parse-double"
-        },
-        %{
-          source_name: :POSITIVE_INFINITY,
-          reference_id: :double_positive_infinity,
-          classification: :admitted,
-          legacy_binding: :POSITIVE_INFINITY
-        },
-        %{
-          source_name: :NEGATIVE_INFINITY,
-          reference_id: :double_negative_infinity,
-          classification: :admitted,
-          legacy_binding: :NEGATIVE_INFINITY
-        },
-        %{
-          source_name: :NaN,
-          reference_id: :double_nan,
-          classification: :admitted,
-          legacy_binding: :NaN
-        }
+        %{source_name: "parseDouble", reference_id: :double_parse_double},
+        %{source_name: :POSITIVE_INFINITY, reference_id: :double_positive_infinity},
+        %{source_name: :NEGATIVE_INFINITY, reference_id: :double_negative_infinity},
+        %{source_name: :NaN, reference_id: :double_nan}
       ]
     },
     %{
       category: :interop,
       namespace: :Float,
       class_id: :java_lang_float,
-      members: [
-        %{
-          source_name: "parseFloat",
-          reference_id: :float_parse_float,
-          classification: :admitted,
-          legacy_binding: :"parse-double"
-        }
-      ]
+      members: [%{source_name: "parseFloat", reference_id: :float_parse_float}]
     },
     %{
       category: :interop,
       namespace: :Integer,
       class_id: :java_lang_integer,
-      members: [
-        %{
-          source_name: "parseInt",
-          reference_id: :integer_parse_int,
-          classification: :admitted,
-          legacy_binding: :"parse-long"
-        }
-      ]
+      members: [%{source_name: "parseInt", reference_id: :integer_parse_int}]
     },
     %{
       category: :interop,
       namespace: :Long,
       class_id: :java_lang_long,
-      members: [
-        %{
-          source_name: "parseLong",
-          reference_id: :long_parse_long,
-          classification: :admitted,
-          legacy_binding: :"parse-long"
-        }
-      ]
+      members: [%{source_name: "parseLong", reference_id: :long_parse_long}]
     },
     %{
       category: :interop,
       namespace: :LocalDate,
       class_id: :java_time_local_date,
-      members: [
-        %{
-          source_name: :parse,
-          reference_id: :local_date_parse,
-          classification: :admitted,
-          legacy_binding: :parse
-        }
-      ]
+      members: [%{source_name: :parse, reference_id: :local_date_parse}]
     },
     %{
       category: :interop,
       namespace: :"java.time.LocalDate",
       class_id: :java_time_local_date,
-      members: [
-        %{
-          source_name: :parse,
-          reference_id: :local_date_parse,
-          classification: :admitted,
-          legacy_binding: :parse
-        }
-      ]
+      members: [%{source_name: :parse, reference_id: :local_date_parse}]
     },
     %{
       category: :interop,
       namespace: :Instant,
       class_id: :java_time_instant,
-      members: [
-        %{
-          source_name: :parse,
-          reference_id: :instant_parse,
-          classification: :admitted,
-          legacy_binding: :parse
-        }
-      ]
+      members: [%{source_name: :parse, reference_id: :instant_parse}]
     },
     %{
       category: :interop,
       namespace: :"java.time.Instant",
       class_id: :java_time_instant,
-      members: [
-        %{
-          source_name: :parse,
-          reference_id: :instant_parse,
-          classification: :admitted,
-          legacy_binding: :parse
-        }
-      ]
+      members: [%{source_name: :parse, reference_id: :instant_parse}]
     },
     %{
       category: :interop,
       namespace: :Duration,
       class_id: :java_time_duration,
-      legacy_lookup: :qualified_table,
-      members: [
-        %{
-          source_name: :between,
-          reference_id: :duration_between,
-          classification: :admitted,
-          legacy_binding: :"Duration/between"
-        }
-      ]
+      members: [%{source_name: :between, reference_id: :duration_between}]
     },
     %{
       category: :interop,
       namespace: :"java.time.Duration",
       class_id: :java_time_duration,
-      members: [
-        %{
-          source_name: :between,
-          reference_id: :duration_between,
-          classification: :admitted,
-          legacy_binding: :"Duration/between"
-        }
-      ]
+      members: [%{source_name: :between, reference_id: :duration_between}]
     }
   ],
   audit_specs: [
@@ -1792,8 +1496,7 @@
         name: "abs",
         status: :supported,
         description: "Returns the absolute value",
-        notes:
-          "DIV-45: uses PTC-Lisp arbitrary-precision integers, so abs returns the mathematically correct positive value and accepts BigInt input rather than reproducing Java long-overflow/overload artifacts",
+        notes: "Uses the selected Java primitive overload, including int/long minimum overflow.",
         reference_id: :math_abs,
         jvm_descriptor_attestations: %{
           math_abs_int: "(I)I",
@@ -1802,10 +1505,10 @@
           math_abs_double: "(D)D"
         },
         admitted_overload_divergences: %{
-          math_abs_int: ["DIV-45"],
-          math_abs_long: ["DIV-45"],
-          math_abs_float: ["DIV-45"],
-          math_abs_double: ["DIV-45"]
+          math_abs_int: [],
+          math_abs_long: [],
+          math_abs_float: [],
+          math_abs_double: []
         },
         target_id: :java_math_audit_abs
       },
@@ -1861,11 +1564,10 @@
         name: "ceil",
         status: :supported,
         description: "Returns the smallest integer >= argument",
-        notes:
-          "DIV-42: integer-returning PTC-Lisp extension, so finite results render as integers rather than Java's double shape",
+        notes: "Returns a Java double, preserving signed zero and non-finite values.",
         reference_id: :math_ceil,
         jvm_descriptor_attestations: %{math_ceil_double: "(D)D"},
-        admitted_overload_divergences: %{math_ceil_double: ["DIV-42"]},
+        admitted_overload_divergences: %{math_ceil_double: []},
         target_id: :java_math_audit_ceil
       },
       %{
@@ -1920,11 +1622,10 @@
         name: "floor",
         status: :supported,
         description: "Returns the largest integer <= argument",
-        notes:
-          "DIV-42: integer-returning PTC-Lisp extension, so finite results render as integers rather than Java's double shape",
+        notes: "Returns a Java double, preserving signed zero and non-finite values.",
         reference_id: :math_floor,
         jvm_descriptor_attestations: %{math_floor_double: "(D)D"},
-        admitted_overload_divergences: %{math_floor_double: ["DIV-42"]},
+        admitted_overload_divergences: %{math_floor_double: []},
         target_id: :java_math_audit_floor
       },
       %{
@@ -2012,7 +1713,7 @@
         status: :supported,
         description: "Returns the greater of two values",
         notes:
-          "DIV-44: max is the Clojure-named variadic helper (Math/max is an alias), not Java's two-argument primitive. DIV-45: mixed numeric and total-ordering comparisons are accepted via PTC-Lisp's generic value model rather than Java's primitive overloads",
+          "Uses Java's two-argument primitive overloads, including NaN and signed-zero behavior.",
         reference_id: :math_max,
         jvm_descriptor_attestations: %{
           math_max_int: "(II)I",
@@ -2021,10 +1722,10 @@
           math_max_double: "(DD)D"
         },
         admitted_overload_divergences: %{
-          math_max_int: ["DIV-44", "DIV-45"],
-          math_max_long: ["DIV-44", "DIV-45"],
-          math_max_float: ["DIV-44", "DIV-45"],
-          math_max_double: ["DIV-44", "DIV-45"]
+          math_max_int: [],
+          math_max_long: [],
+          math_max_float: [],
+          math_max_double: []
         },
         target_id: :java_math_audit_max
       },
@@ -2033,7 +1734,7 @@
         status: :supported,
         description: "Returns the smaller of two values",
         notes:
-          "DIV-44: min is the Clojure-named variadic helper (Math/min is an alias), not Java's two-argument primitive. DIV-45: mixed numeric and total-ordering comparisons are accepted via PTC-Lisp's generic value model rather than Java's primitive overloads",
+          "Uses Java's two-argument primitive overloads, including NaN and signed-zero behavior.",
         reference_id: :math_min,
         jvm_descriptor_attestations: %{
           math_min_int: "(II)I",
@@ -2042,10 +1743,10 @@
           math_min_double: "(DD)D"
         },
         admitted_overload_divergences: %{
-          math_min_int: ["DIV-44", "DIV-45"],
-          math_min_long: ["DIV-44", "DIV-45"],
-          math_min_float: ["DIV-44", "DIV-45"],
-          math_min_double: ["DIV-44", "DIV-45"]
+          math_min_int: [],
+          math_min_long: [],
+          math_min_float: [],
+          math_min_double: []
         },
         target_id: :java_math_audit_min
       },
@@ -2129,12 +1830,12 @@
         status: :supported,
         description: "Returns the closest long/int to the argument",
         notes:
-          "DIV-43: round-half-away-from-zero, integer result, and special values (NaN/infinity) are preserved rather than Java's floor(x+0.5) and long saturation. DIV-45: integer and BigInt arguments are accepted (returned unchanged) via PTC-Lisp's value model rather than Java's float/double-only overloads",
+          "Uses Java float/double overloads, ties toward positive infinity, and Java NaN/infinity saturation.",
         reference_id: :math_round,
         jvm_descriptor_attestations: %{math_round_float: "(F)I", math_round_double: "(D)J"},
         admitted_overload_divergences: %{
-          math_round_float: ["DIV-43", "DIV-45"],
-          math_round_double: ["DIV-43", "DIV-45"]
+          math_round_float: [],
+          math_round_double: []
         },
         target_id: :java_math_audit_round
       },
@@ -2290,10 +1991,10 @@
         status: :supported,
         description: "Parse string to double",
         notes:
-          "BUG GAP-J01: currently aliases parse-double, returns nil on invalid input, and rejects surrounding whitespace that Java accepts.",
+          "Matches Java parsing, including bounded NumberFormatException/NullPointerException failures, surrounding Java whitespace, hexadecimal syntax, and exact double rounding.",
         reference_id: :double_parse_double,
         jvm_descriptor_attestations: %{double_parse_double_string: "(Ljava/lang/String;)D"},
-        admitted_overload_divergences: %{double_parse_double_string: ["GAP-J01"]},
+        admitted_overload_divergences: %{double_parse_double_string: []},
         target_id: :java_lang_double_audit_double_parsedouble
       },
       %{
@@ -2366,10 +2067,10 @@
         status: :supported,
         description: "Parse string to float",
         notes:
-          "BUG GAP-J01: currently aliases parse-double, returns nil on invalid input, and rejects surrounding whitespace that Java accepts. PTC-Lisp uses one floating type.",
+          "Matches Java parsing, including bounded NumberFormatException/NullPointerException failures, surrounding Java whitespace, hexadecimal syntax, and exact float rounding.",
         reference_id: :float_parse_float,
         jvm_descriptor_attestations: %{float_parse_float_string: "(Ljava/lang/String;)F"},
-        admitted_overload_divergences: %{float_parse_float_string: ["GAP-J01"]},
+        admitted_overload_divergences: %{float_parse_float_string: []},
         target_id: :java_lang_float_audit_float_parsefloat
       },
       %{
@@ -2412,10 +2113,10 @@
         status: :supported,
         description: "Parse string to integer",
         notes:
-          "BUG GAP-J01: currently aliases parse-long, returns nil on invalid input, and accepts values outside Java int range; Java raises NumberFormatException. BUG GAP-J15: radix overload is unsupported.",
+          "Matches Java decimal parsing and int range failures. BUG GAP-J15: radix overload is unsupported.",
         reference_id: :integer_parse_int,
         jvm_descriptor_attestations: %{integer_parse_int_string: "(Ljava/lang/String;)I"},
-        admitted_overload_divergences: %{integer_parse_int_string: ["GAP-J01"]},
+        admitted_overload_divergences: %{integer_parse_int_string: []},
         target_id: :java_lang_integer_audit_integer_parseint
       },
       %{
@@ -2457,10 +2158,10 @@
         status: :supported,
         description: "Parse string to integer",
         notes:
-          "BUG GAP-J01: currently aliases parse-long, returns nil on invalid input, and accepts values outside Java long range; Java raises NumberFormatException. BUG GAP-J15: radix overload is unsupported.",
+          "Matches Java decimal parsing and long range failures. BUG GAP-J15: radix overload is unsupported.",
         reference_id: :long_parse_long,
         jvm_descriptor_attestations: %{long_parse_long_string: "(Ljava/lang/String;)J"},
-        admitted_overload_divergences: %{long_parse_long_string: ["GAP-J01"]},
+        admitted_overload_divergences: %{long_parse_long_string: []},
         target_id: :java_lang_long_audit_long_parselong
       },
       %{
@@ -2502,12 +2203,14 @@
         status: :supported,
         description: "Substring containment",
         notes:
-          "DIV-40: character literals are accepted as arguments (PTC-Lisp has no Character type). DIV-41: character-literal receivers behave as one-character strings",
+          "DIV-40: character literals are accepted as arguments (PTC-Lisp has no Character type). DIV-41: character-literal receivers behave as one-character strings. DIV-53: the bounded UTF-16 view rejects String inputs larger than 256,000 bytes.",
         reference_id: :string_contains,
         jvm_descriptor_attestations: %{
           string_contains_char_sequence: "(Ljava/lang/CharSequence;)Z"
         },
-        admitted_overload_divergences: %{string_contains_char_sequence: ["DIV-40", "DIV-41"]},
+        admitted_overload_divergences: %{
+          string_contains_char_sequence: ["DIV-40", "DIV-41", "DIV-53"]
+        },
         target_id: :java_lang_string_audit_contains
       },
       %{
@@ -2515,15 +2218,15 @@
         status: :supported,
         description: "First substring index",
         notes:
-          "BUG GAP-J05: integer character-code overloads are unsupported. BUG GAP-J09: non-BMP offsets are grapheme-based instead of Java UTF-16 code-unit based. DIV-41: character-literal receivers behave as one-character strings (PTC-Lisp has no Character type)",
+          "BUG GAP-J05: integer character-code overloads are unsupported. Indexes use Java UTF-16 code units. DIV-41: character-literal receivers behave as one-character strings (PTC-Lisp has no Character type). DIV-53: the bounded UTF-16 view rejects String inputs larger than 256,000 bytes.",
         reference_id: :string_index_of,
         jvm_descriptor_attestations: %{
           string_index_of_string: "(Ljava/lang/String;)I",
           string_index_of_string_from: "(Ljava/lang/String;I)I"
         },
         admitted_overload_divergences: %{
-          string_index_of_string: ["GAP-J09", "DIV-41"],
-          string_index_of_string_from: ["GAP-J09", "DIV-41"]
+          string_index_of_string: ["DIV-41", "DIV-53"],
+          string_index_of_string_from: ["DIV-41", "DIV-53"]
         },
         target_id: :java_lang_string_audit_indexof
       },
@@ -2532,10 +2235,12 @@
         status: :supported,
         description: "Last substring index",
         notes:
-          "BUG GAP-J05: substring/from-index and integer character-code overloads are unsupported. BUG GAP-J09: non-BMP offsets are grapheme-based instead of Java UTF-16 code-unit based. DIV-41: character-literal receivers behave as one-character strings (PTC-Lisp has no Character type)",
+          "BUG GAP-J05: substring/from-index and integer character-code overloads are unsupported. Indexes use Java UTF-16 code units. DIV-41: character-literal receivers behave as one-character strings (PTC-Lisp has no Character type). DIV-53: the bounded UTF-16 view rejects String inputs larger than 256,000 bytes.",
         reference_id: :string_last_index_of,
         jvm_descriptor_attestations: %{string_last_index_of_string: "(Ljava/lang/String;)I"},
-        admitted_overload_divergences: %{string_last_index_of_string: ["GAP-J09", "DIV-41"]},
+        admitted_overload_divergences: %{
+          string_last_index_of_string: ["DIV-41", "DIV-53"]
+        },
         target_id: :java_lang_string_audit_lastindexof
       },
       %{
@@ -2543,10 +2248,10 @@
         status: :supported,
         description: "String length",
         notes:
-          "BUG GAP-J09: non-BMP length is grapheme-based instead of Java UTF-16 code-unit based. DIV-41: character-literal receivers behave as one-character strings (PTC-Lisp has no Character type)",
+          "Returns Java UTF-16 code-unit length. DIV-41: character-literal receivers behave as one-character strings (PTC-Lisp has no Character type). DIV-53: the bounded UTF-16 view rejects String inputs larger than 256,000 bytes.",
         reference_id: :string_length,
         jvm_descriptor_attestations: %{string_length_0: "()I"},
-        admitted_overload_divergences: %{string_length_0: ["GAP-J09", "DIV-41"]},
+        admitted_overload_divergences: %{string_length_0: ["DIV-41", "DIV-53"]},
         target_id: :java_lang_string_audit_length
       },
       %{
@@ -2554,38 +2259,34 @@
         status: :supported,
         description: "Extract substring",
         notes:
-          "BUG GAP-J09: non-BMP indexes are grapheme-based instead of Java UTF-16 code-unit based. DIV-41: character-literal receivers behave as one-character strings (PTC-Lisp has no Character type)",
+          "Uses Java UTF-16 code-unit indexes. DIV-41: character-literal receivers behave as one-character strings. DIV-53: ranges containing an unpaired surrogate and inputs larger than 256,000 bytes produce invalid_java_string.",
         reference_id: :string_substring,
         jvm_descriptor_attestations: %{
           string_substring_begin: "(I)Ljava/lang/String;",
           string_substring_begin_end: "(II)Ljava/lang/String;"
         },
         admitted_overload_divergences: %{
-          string_substring_begin: ["GAP-J09", "DIV-41"],
-          string_substring_begin_end: ["GAP-J09", "DIV-41"]
+          string_substring_begin: ["DIV-41", "DIV-53"],
+          string_substring_begin_end: ["DIV-41", "DIV-53"]
         },
         target_id: :java_lang_string_audit_substring
       },
       %{
         name: ".toLowerCase",
-        status: :supported,
+        status: :candidate,
         description: "Lowercase string",
         notes:
-          "DIV-41: character-literal receivers behave as one-character strings (PTC-Lisp has no Character type)",
-        reference_id: :string_to_lower_case,
-        jvm_descriptor_attestations: %{string_to_lower_case_0: "()Ljava/lang/String;"},
-        admitted_overload_divergences: %{string_to_lower_case_0: ["DIV-41"]},
+          "Deferred until a deterministic locale and pinned Unicode-data contract are selected.",
+        reference_id: nil,
         target_id: :java_lang_string_audit_tolowercase
       },
       %{
         name: ".toUpperCase",
-        status: :supported,
+        status: :candidate,
         description: "Uppercase string",
         notes:
-          "DIV-41: character-literal receivers behave as one-character strings (PTC-Lisp has no Character type)",
-        reference_id: :string_to_upper_case,
-        jvm_descriptor_attestations: %{string_to_upper_case_0: "()Ljava/lang/String;"},
-        admitted_overload_divergences: %{string_to_upper_case_0: ["DIV-41"]},
+          "Deferred until a deterministic locale and pinned Unicode-data contract are selected.",
+        reference_id: nil,
         target_id: :java_lang_string_audit_touppercase
       },
       %{
@@ -2593,10 +2294,12 @@
         status: :supported,
         description: "Prefix test",
         notes:
-          "BUG GAP-J05: prefix/offset overload is unsupported. DIV-40: character literals are accepted as arguments (PTC-Lisp has no Character type). DIV-41: character-literal receivers behave as one-character strings",
+          "BUG GAP-J05: prefix/offset overload is unsupported. DIV-40: character literals are accepted as arguments (PTC-Lisp has no Character type). DIV-41: character-literal receivers behave as one-character strings. DIV-53: the bounded UTF-16 view rejects String inputs larger than 256,000 bytes.",
         reference_id: :string_starts_with,
         jvm_descriptor_attestations: %{string_starts_with_string: "(Ljava/lang/String;)Z"},
-        admitted_overload_divergences: %{string_starts_with_string: ["DIV-40", "DIV-41"]},
+        admitted_overload_divergences: %{
+          string_starts_with_string: ["DIV-40", "DIV-41", "DIV-53"]
+        },
         target_id: :java_lang_string_audit_startswith
       },
       %{
@@ -2604,10 +2307,12 @@
         status: :supported,
         description: "Suffix test",
         notes:
-          "DIV-40: character literals are accepted as arguments (PTC-Lisp has no Character type). DIV-41: character-literal receivers behave as one-character strings",
+          "DIV-40: character literals are accepted as arguments (PTC-Lisp has no Character type). DIV-41: character-literal receivers behave as one-character strings. DIV-53: the bounded UTF-16 view rejects String inputs larger than 256,000 bytes.",
         reference_id: :string_ends_with,
         jvm_descriptor_attestations: %{string_ends_with_string: "(Ljava/lang/String;)Z"},
-        admitted_overload_divergences: %{string_ends_with_string: ["DIV-40", "DIV-41"]},
+        admitted_overload_divergences: %{
+          string_ends_with_string: ["DIV-40", "DIV-41", "DIV-53"]
+        },
         target_id: :java_lang_string_audit_endswith
       },
       %{
@@ -2638,7 +2343,8 @@
         name: ".charAt",
         status: :candidate,
         description: "Return character at index",
-        notes: "Potentially useful, but PTC-Lisp must define grapheme semantics.",
+        notes:
+          "Potentially useful, but PTC-Lisp must define how a Java UTF-16 char, including an isolated surrogate, is represented.",
         reference_id: nil,
         target_id: :java_lang_string_audit_charat
       },
@@ -2709,12 +2415,12 @@
         status: :supported,
         description: "Parse ISO-8601 date string",
         notes:
-          "Also available as java.time.LocalDate/parse and parse. BUG GAP-J06: date-time strings are accepted instead of rejected.",
+          "Also available as java.time.LocalDate/parse; parsing is class-specific and strict.",
         reference_id: :local_date_parse,
         jvm_descriptor_attestations: %{
           local_date_parse_char_sequence: "(Ljava/lang/CharSequence;)Ljava/time/LocalDate;"
         },
-        admitted_overload_divergences: %{local_date_parse_char_sequence: ["GAP-J06"]},
+        admitted_overload_divergences: %{local_date_parse_char_sequence: []},
         target_id: :java_time_local_date_audit_localdate_parse
       },
       %{
@@ -2730,7 +2436,7 @@
         upstream: [{"java.time.LocalDate", :instance, "isBefore"}],
         status: :supported,
         description: "Date ordering predicate",
-        notes: "Works for same-type Date or DateTime values.",
+        notes: "Works for native LocalDate values only.",
         reference_id: :local_date_is_before,
         jvm_descriptor_attestations: %{
           local_date_is_before_chrono_local_date: "(Ljava/time/chrono/ChronoLocalDate;)Z"
@@ -2743,7 +2449,7 @@
         upstream: [{"java.time.LocalDate", :instance, "isAfter"}],
         status: :supported,
         description: "Date ordering predicate",
-        notes: "Works for same-type Date or DateTime values.",
+        notes: "Works for native LocalDate values only.",
         reference_id: :local_date_is_after,
         jvm_descriptor_attestations: %{
           local_date_is_after_chrono_local_date: "(Ljava/time/chrono/ChronoLocalDate;)Z"
@@ -2781,22 +2487,20 @@
         name: ".plusDays",
         status: :supported,
         description: "Add days to a LocalDate",
-        notes:
-          "Requested in issue #1019 for date arithmetic. BUG GAP-J12: floating and NaN day counts are rejected instead of following Clojure Java interop coercion.",
+        notes: "Requested in issue #1019 for date arithmetic.",
         reference_id: :local_date_plus_days,
         jvm_descriptor_attestations: %{local_date_plus_days_long: "(J)Ljava/time/LocalDate;"},
-        admitted_overload_divergences: %{local_date_plus_days_long: ["GAP-J12"]},
+        admitted_overload_divergences: %{local_date_plus_days_long: []},
         target_id: :java_time_local_date_audit_plusdays
       },
       %{
         name: ".minusDays",
         status: :supported,
         description: "Subtract days from a LocalDate",
-        notes:
-          "Requested in issue #1019 for date arithmetic. BUG GAP-J12: floating and NaN day counts are rejected instead of following Clojure Java interop coercion.",
+        notes: "Requested in issue #1019 for date arithmetic.",
         reference_id: :local_date_minus_days,
         jvm_descriptor_attestations: %{local_date_minus_days_long: "(J)Ljava/time/LocalDate;"},
-        admitted_overload_divergences: %{local_date_minus_days_long: ["GAP-J12"]},
+        admitted_overload_divergences: %{local_date_minus_days_long: []},
         target_id: :java_time_local_date_audit_minusdays
       }
     ],
@@ -2805,13 +2509,12 @@
         name: "Instant/parse",
         status: :supported,
         description: "Parse ISO-8601 instant string",
-        notes:
-          "Also available as java.time.Instant/parse and parse. BUG GAP-J06: date-only and no-zone date-time strings are accepted instead of rejected.",
+        notes: "Also available as java.time.Instant/parse; parsing requires an offset.",
         reference_id: :instant_parse,
         jvm_descriptor_attestations: %{
           instant_parse_char_sequence: "(Ljava/lang/CharSequence;)Ljava/time/Instant;"
         },
-        admitted_overload_divergences: %{instant_parse_char_sequence: ["GAP-J06"]},
+        admitted_overload_divergences: %{instant_parse_char_sequence: []},
         target_id: :java_time_instant_audit_instant_parse
       },
       %{
@@ -2827,7 +2530,7 @@
         upstream: [{"java.time.Instant", :instance, "isBefore"}],
         status: :supported,
         description: "Instant ordering predicate",
-        notes: "Works for same-type Date or DateTime values.",
+        notes: "Works for native Instant values only.",
         reference_id: :instant_is_before,
         jvm_descriptor_attestations: %{instant_is_before_instant: "(Ljava/time/Instant;)Z"},
         admitted_overload_divergences: %{instant_is_before_instant: []},
@@ -2838,7 +2541,7 @@
         upstream: [{"java.time.Instant", :instance, "isAfter"}],
         status: :supported,
         description: "Instant ordering predicate",
-        notes: "Works for same-type Date or DateTime values.",
+        notes: "Works for native Instant values only.",
         reference_id: :instant_is_after,
         jvm_descriptor_attestations: %{instant_is_after_instant: "(Ljava/time/Instant;)Z"},
         admitted_overload_divergences: %{instant_is_after_instant: []},
@@ -2847,28 +2550,28 @@
       %{
         name: ".getTime",
         upstream: [{"java.util.Date", :instance, "getTime"}],
-        status: :supported,
-        description: "Unix timestamp in milliseconds",
-        notes:
-          "BUG GAP-J04: Java Instant has toEpochMilli, not getTime; current behavior is a PTC convenience.",
-        reference_id: :instant_get_time_alias,
-        jvm_descriptor_attestations: %{},
-        admitted_overload_divergences: %{instant_get_time_alias_0: ["GAP-J04"]},
+        status: :not_relevant,
+        description: "Method belongs to java.util.Date, not Instant",
+        notes: "Removed from Instant when class-aware temporal dispatch landed.",
+        reference_id: nil,
         target_id: :java_time_instant_audit_gettime
       },
       %{
         name: ".toEpochMilli",
-        status: :candidate,
+        status: :supported,
         description: "Return Instant epoch millisecond",
-        notes: "BUG GAP-J18: Java Instant.toEpochMilli is unsupported while .getTime is exposed.",
-        reference_id: nil,
+        notes: "Raises a bounded arithmetic condition when the result exceeds Java long.",
+        reference_id: :instant_to_epoch_milli,
+        jvm_descriptor_attestations: %{instant_to_epoch_milli_0: "()J"},
+        admitted_overload_divergences: %{instant_to_epoch_milli_0: []},
         target_id: :java_time_instant_audit_toepochmilli
       },
       %{
         name: "Instant/ofEpochMilli",
         status: :candidate,
         description: "Construct instant from epoch milliseconds",
-        notes: "java.util.Date. already accepts seconds or milliseconds.",
+        notes:
+          "java.util.Date. accepts exact epoch milliseconds but returns a Date, not an Instant.",
         reference_id: nil,
         target_id: :java_time_instant_audit_instant_ofepochmilli
       }
@@ -2879,13 +2582,13 @@
         status: :supported,
         description: "Duration between two instants",
         notes:
-          "Requested in issue #1019 for millisecond/day differences. BUG GAP-J19: java.util.Date inputs are accepted instead of rejected.",
+          "Requested in issue #1019 for millisecond/day differences. DIV-52: the admitted profile accepts Instants only rather than every Temporal implementation.",
         reference_id: :duration_between,
         jvm_descriptor_attestations: %{
           duration_between_temporal:
             "(Ljava/time/temporal/Temporal;Ljava/time/temporal/Temporal;)Ljava/time/Duration;"
         },
-        admitted_overload_divergences: %{duration_between_temporal: ["GAP-J19"]},
+        admitted_overload_divergences: %{duration_between_temporal: ["DIV-52"]},
         target_id: :java_time_duration_audit_duration_between
       },
       %{
@@ -2965,9 +2668,9 @@
       %{
         name: "java.util.Date.",
         status: :supported,
-        description: "Construct DateTime value",
+        description: "Construct a legacy Date value",
         notes:
-          "BUG GAP-J03: numeric constructor currently treats milliseconds as seconds. BUG GAP-J06: ISO date strings are accepted by PTC-Lisp but rejected by the Java oracle. BUG GAP-J11: Java-accepted legacy date strings are rejected. EXTENSION GAP-J21: existing PTC temporal values are accepted directly.",
+          "Numeric input is exact epoch milliseconds. DIV-51: string input uses a deterministic bounded legacy English grammar, admits dates on or after 1582-10-15, and uses UTC when no zone is present.",
         reference_id: :date_new,
         jvm_descriptor_attestations: %{
           date_new_0: "()V",
@@ -2976,9 +2679,8 @@
         },
         admitted_overload_divergences: %{
           date_new_0: [],
-          date_new_long: ["GAP-J03"],
-          date_new_string: ["GAP-J06", "GAP-J11"],
-          date_new_ptc_temporal: ["GAP-J21"]
+          date_new_long: [],
+          date_new_string: ["DIV-51"]
         },
         target_id: :java_util_date_audit_java_util_date
       },
@@ -2986,8 +2688,8 @@
         name: ".getTime",
         upstream: [{"java.util.Date", :instance, "getTime"}],
         status: :supported,
-        description: "Unix timestamp in milliseconds",
-        notes: "Works on DateTime values.",
+        description: "Exact epoch timestamp in milliseconds",
+        notes: "Works only on native java.util.Date values.",
         reference_id: :date_get_time,
         jvm_descriptor_attestations: %{date_get_time_0: "()J"},
         admitted_overload_divergences: %{date_get_time_0: []},
@@ -2995,44 +2697,48 @@
       },
       %{
         name: ".isBefore",
-        upstream: [{"java.util.Date", :instance, "before"}],
-        status: :supported,
-        description: "Date ordering predicate",
-        notes:
-          "BUG GAP-J20: java.util.Date uses .before, not .isBefore; current behavior exposes a non-Java alias.",
-        reference_id: :date_is_before_alias,
-        jvm_descriptor_attestations: %{},
-        admitted_overload_divergences: %{date_is_before_alias_date: ["GAP-J20"]},
+        upstream: [
+          {"java.time.LocalDate", :instance, "isBefore"},
+          {"java.time.Instant", :instance, "isBefore"}
+        ],
+        status: :not_relevant,
+        description: "Method belongs to java.time classes, not java.util.Date",
+        notes: "Removed from Date when class-aware temporal dispatch landed.",
+        reference_id: nil,
         target_id: :java_util_date_audit_isbefore
       },
       %{
         name: ".isAfter",
-        upstream: [{"java.util.Date", :instance, "after"}],
-        status: :supported,
-        description: "Date ordering predicate",
-        notes:
-          "BUG GAP-J20: java.util.Date uses .after, not .isAfter; current behavior exposes a non-Java alias.",
-        reference_id: :date_is_after_alias,
-        jvm_descriptor_attestations: %{},
-        admitted_overload_divergences: %{date_is_after_alias_date: ["GAP-J20"]},
+        upstream: [
+          {"java.time.LocalDate", :instance, "isAfter"},
+          {"java.time.Instant", :instance, "isAfter"}
+        ],
+        status: :not_relevant,
+        description: "Method belongs to java.time classes, not java.util.Date",
+        notes: "Removed from Date when class-aware temporal dispatch landed.",
+        reference_id: nil,
         target_id: :java_util_date_audit_isafter
       },
       %{
         name: ".before",
         upstream: [{"java.util.Date", :instance, "before"}],
-        status: :candidate,
+        status: :supported,
         description: "Date ordering predicate",
-        notes: ".isBefore covers the current PTC-Lisp spelling.",
-        reference_id: nil,
+        notes: "Class-owned java.util.Date comparison.",
+        reference_id: :date_before,
+        jvm_descriptor_attestations: %{date_before_date: "(Ljava/util/Date;)Z"},
+        admitted_overload_divergences: %{date_before_date: []},
         target_id: :java_util_date_audit_before
       },
       %{
         name: ".after",
         upstream: [{"java.util.Date", :instance, "after"}],
-        status: :candidate,
+        status: :supported,
         description: "Date ordering predicate",
-        notes: ".isAfter covers the current PTC-Lisp spelling.",
-        reference_id: nil,
+        notes: "Class-owned java.util.Date comparison.",
+        reference_id: :date_after,
+        jvm_descriptor_attestations: %{date_after_date: "(Ljava/util/Date;)Z"},
+        admitted_overload_divergences: %{date_after_date: []},
         target_id: :java_util_date_audit_after
       },
       %{
@@ -3047,29 +2753,109 @@
   },
   interop_entries: [
     %{
+      name: "Math/abs",
+      description: "Return the absolute value using a selected Java primitive overload",
+      kind: :static,
+      signatures: ["(Math/abs x)"],
+      notes: "Preserves int, long, float, or double identity and Java minimum-value overflow.",
+      class: "java.lang.Math",
+      reference_ids: [:math_abs]
+    },
+    %{
+      name: "Math/ceil",
+      description: "Return the smallest double value not less than the argument",
+      kind: :static,
+      signatures: ["(Math/ceil x)"],
+      notes: "Returns a Java double and preserves signed zero and non-finite values.",
+      class: "java.lang.Math",
+      reference_ids: [:math_ceil]
+    },
+    %{
+      name: "Math/floor",
+      description: "Return the largest double value not greater than the argument",
+      kind: :static,
+      signatures: ["(Math/floor x)"],
+      notes: "Returns a Java double and preserves signed zero and non-finite values.",
+      class: "java.lang.Math",
+      reference_ids: [:math_floor]
+    },
+    %{
+      name: "Math/max",
+      description: "Return the greater of two Java primitive values",
+      kind: :static,
+      signatures: ["(Math/max x y)"],
+      notes: "Uses exact primitive overload selection plus Java NaN and signed-zero behavior.",
+      class: "java.lang.Math",
+      reference_ids: [:math_max]
+    },
+    %{
+      name: "Math/min",
+      description: "Return the smaller of two Java primitive values",
+      kind: :static,
+      signatures: ["(Math/min x y)"],
+      notes: "Uses exact primitive overload selection plus Java NaN and signed-zero behavior.",
+      class: "java.lang.Math",
+      reference_ids: [:math_min]
+    },
+    %{
+      name: "Math/pow",
+      description: "Return the first argument raised to the power of the second",
+      kind: :static,
+      signatures: ["(Math/pow base exponent)"],
+      notes: "Uses the Java double overload and its IEEE 754 special-case table.",
+      class: "java.lang.Math",
+      reference_ids: [:math_pow]
+    },
+    %{
+      name: "Math/round",
+      description: "Round a float to int or double to long with ties toward positive infinity",
+      kind: :static,
+      signatures: ["(Math/round x)"],
+      notes: "NaN becomes zero and infinities saturate to the selected integer primitive range.",
+      class: "java.lang.Math",
+      reference_ids: [:math_round]
+    },
+    %{
+      name: "Math/sqrt",
+      description: "Return the positive double square root",
+      kind: :static,
+      signatures: ["(Math/sqrt x)"],
+      notes: "Uses Java double semantics for negative, signed-zero, NaN, and infinite inputs.",
+      class: "java.lang.Math",
+      reference_ids: [:math_sqrt]
+    },
+    %{
       name: "java.util.Date.",
       description:
-        "Construct current UTC time, from a timestamp / ISO-8601 / RFC-2822 string, or pass through an existing temporal value",
+        "Construct a native legacy Date from current time, exact milliseconds, or legacy text",
       kind: :constructor,
       signatures: [
         "(java.util.Date.)",
-        "(java.util.Date. timestamp-or-string)",
-        "(java.util.Date. datetime-or-date)"
+        "(java.util.Date. epoch-milliseconds)",
+        "(java.util.Date. legacy-date-string)"
       ],
       notes:
-        "Returns Elixir DateTime. Accepts integer (seconds or ms auto-detected), ISO-8601 (with or without offset — offsetless is treated as UTC), RFC 2822, or an existing DateTime/NaiveDateTime/Date (Date and NaiveDateTime upgrade to UTC; DateTime returns as-is). Time alone is not accepted (no date component).",
+        "Integer input is always Java epoch milliseconds. ISO-8601 strings and raw host temporal structs are not Date constructor overloads.",
       class: "java.util.Date",
       reference_ids: [:date_new]
     },
     %{
       name: ".getTime",
-      description: "Return Unix timestamp in milliseconds from DateTime",
+      description: "Return exact epoch milliseconds from a legacy Date",
       kind: :method,
       signatures: ["(.getTime date)"],
-      notes:
-        "PTC compatibility alias for java.time.Instant; Java Instant declares `.toEpochMilli`, not `.getTime` (GAP-J04).",
-      class: "java.util.Date / java.time.Instant",
-      reference_ids: [:date_get_time, :instant_get_time_alias]
+      notes: "Owned only by java.util.Date.",
+      class: "java.util.Date",
+      reference_ids: [:date_get_time]
+    },
+    %{
+      name: ".toEpochMilli",
+      description: "Return epoch milliseconds from an Instant",
+      kind: :method,
+      signatures: ["(.toEpochMilli instant)"],
+      notes: "Preserves nanoseconds natively and raises on Java long overflow.",
+      class: "java.time.Instant",
+      reference_ids: [:instant_to_epoch_milli]
     },
     %{
       name: ".toEpochDay",
@@ -3085,7 +2871,7 @@
       description: "Add days to a LocalDate",
       kind: :method,
       signatures: ["(.plusDays local-date n)"],
-      notes: "`n` must be an integer.",
+      notes: "Java long coercion is applied to `n`.",
       class: "java.time.LocalDate",
       reference_ids: [:local_date_plus_days]
     },
@@ -3094,7 +2880,7 @@
       description: "Subtract days from a LocalDate",
       kind: :method,
       signatures: ["(.minusDays local-date n)"],
-      notes: "`n` must be an integer.",
+      notes: "Java long coercion is applied to `n`.",
       class: "java.time.LocalDate",
       reference_ids: [:local_date_minus_days]
     },
@@ -3121,59 +2907,71 @@
       description: "Returns true if receiver comes strictly before argument (same-type only)",
       kind: :method,
       signatures: ["(.isBefore a b)"],
-      notes:
-        "Works on both LocalDate and DateTime. Mixed types raise an error. PTC compatibility alias for java.util.Date; Java Date declares `.before`, not `.isBefore` (GAP-J20).",
-      class: "java.time.LocalDate / java.time.Instant / java.util.Date",
-      reference_ids: [:local_date_is_before, :instant_is_before, :date_is_before_alias]
+      notes: "Receiver-owned for LocalDate and Instant; mixed classes are rejected.",
+      class: "java.time.LocalDate / java.time.Instant",
+      reference_ids: [:local_date_is_before, :instant_is_before]
     },
     %{
       name: ".isAfter",
       description: "Returns true if receiver comes strictly after argument (same-type only)",
       kind: :method,
       signatures: ["(.isAfter a b)"],
-      notes:
-        "Works on both LocalDate and DateTime. Mixed types raise an error. PTC compatibility alias for java.util.Date; Java Date declares `.after`, not `.isAfter` (GAP-J20).",
-      class: "java.time.LocalDate / java.time.Instant / java.util.Date",
-      reference_ids: [:local_date_is_after, :instant_is_after, :date_is_after_alias]
+      notes: "Receiver-owned for LocalDate and Instant; mixed classes are rejected.",
+      class: "java.time.LocalDate / java.time.Instant",
+      reference_ids: [:local_date_is_after, :instant_is_after]
+    },
+    %{
+      name: ".before",
+      description: "Returns true if a legacy Date precedes another",
+      kind: :method,
+      signatures: ["(.before date other-date)"],
+      notes: "Owned only by java.util.Date.",
+      class: "java.util.Date",
+      reference_ids: [:date_before]
+    },
+    %{
+      name: ".after",
+      description: "Returns true if a legacy Date follows another",
+      kind: :method,
+      signatures: ["(.after date other-date)"],
+      notes: "Owned only by java.util.Date.",
+      class: "java.util.Date",
+      reference_ids: [:date_after]
     },
     %{
       name: "LocalDate/parse",
-      description: "Parse an ISO-8601 date string (YYYY-MM-DD) to a Date",
+      description: "Parse strict ISO-8601 text to a native LocalDate",
       kind: :static,
       signatures: [
         "(LocalDate/parse date-string)",
-        "(java.time.LocalDate/parse date-string)",
-        "(parse date-string)"
+        "(java.time.LocalDate/parse date-string)"
       ],
-      notes:
-        "Returns an Elixir Date for `YYYY-MM-DD`. If the string carries a time component (`...T...`) it returns a DateTime instead (see `Instant/parse`) — a divergence from Java's strict `LocalDate.parse`. Also available as the bare `parse` builtin.",
+      notes: "Date-time text is rejected; class identity is retained natively.",
       class: "java.time.LocalDate",
       reference_ids: [:local_date_parse]
     },
     %{
       name: "Instant/parse",
-      description: "Parse an ISO-8601 instant/date-time string to a DateTime",
+      description: "Parse strict ISO-8601 text to a native Instant",
       kind: :static,
       signatures: [
         "(Instant/parse iso-string)",
-        "(java.time.Instant/parse iso-string)",
-        "(parse iso-string)"
+        "(java.time.Instant/parse iso-string)"
       ],
-      notes:
-        "Returns an Elixir DateTime. Accepts an offset (`Z`, `+02:00`, …); an offsetless `...T...` string is treated as UTC. `.isBefore` / `.isAfter` / `.getTime` work on the result. A bare `YYYY-MM-DD` string returns a Date instead (see `LocalDate/parse`). Also available as the bare `parse` builtin.",
+      notes: "An explicit UTC or numeric offset is required; nanoseconds are retained.",
       class: "java.time.Instant",
       reference_ids: [:instant_parse]
     },
     %{
       name: "Duration/between",
-      description: "Return a Duration between two DateTime instants",
+      description: "Return a native Duration between two Instants",
       kind: :static,
       signatures: [
         "(Duration/between start-instant end-instant)",
         "(java.time.Duration/between start-instant end-instant)"
       ],
       notes:
-        "Requires DateTime values, such as results from `Instant/parse`; LocalDate values are intentionally rejected.",
+        "Requires native Instant values; LocalDate, Date, and raw host temporal structs are rejected.",
       class: "java.time.Duration",
       reference_ids: [:duration_between]
     },
@@ -3181,7 +2979,7 @@
       name: "System/currentTimeMillis",
       description: "Return current time in milliseconds since Unix epoch",
       kind: :static,
-      signatures: ["(System/currentTimeMillis)", "(currentTimeMillis)"],
+      signatures: ["(System/currentTimeMillis)"],
       notes: "",
       class: "java.lang.System",
       reference_ids: [:system_current_time_millis]
@@ -3200,7 +2998,7 @@
       name: "Double/POSITIVE_INFINITY",
       description: "Positive infinity constant (##Inf)",
       kind: :constant,
-      signatures: ["Double/POSITIVE_INFINITY", "POSITIVE_INFINITY"],
+      signatures: ["Double/POSITIVE_INFINITY"],
       notes: "",
       class: "java.lang.Double",
       reference_ids: [:double_positive_infinity]
@@ -3211,7 +3009,7 @@
       kind: :static,
       signatures: ["(Double/parseDouble s)"],
       notes:
-        "Compatibility alias for `(parse-double s)`. Invalid or non-string input returns nil instead of throwing.",
+        "Uses Java syntax, whitespace, range, rounding, and bounded NumberFormatException/NullPointerException semantics.",
       class: "java.lang.Double",
       reference_ids: [:double_parse_double]
     },
@@ -3219,7 +3017,7 @@
       name: "Double/NEGATIVE_INFINITY",
       description: "Negative infinity constant (##-Inf)",
       kind: :constant,
-      signatures: ["Double/NEGATIVE_INFINITY", "NEGATIVE_INFINITY"],
+      signatures: ["Double/NEGATIVE_INFINITY"],
       notes: "",
       class: "java.lang.Double",
       reference_ids: [:double_negative_infinity]
@@ -3228,7 +3026,7 @@
       name: "Double/NaN",
       description: "Not-a-Number constant (##NaN)",
       kind: :constant,
-      signatures: ["Double/NaN", "NaN"],
+      signatures: ["Double/NaN"],
       notes: "",
       class: "java.lang.Double",
       reference_ids: [:double_nan]
@@ -3239,7 +3037,7 @@
       kind: :static,
       signatures: ["(Float/parseFloat s)"],
       notes:
-        "Compatibility alias for `(parse-double s)`; PTC-Lisp uses one floating type. Invalid or non-string input returns nil instead of throwing.",
+        "Uses Java syntax, whitespace, range, direct float rounding, and bounded NumberFormatException/NullPointerException semantics.",
       class: "java.lang.Float",
       reference_ids: [:float_parse_float]
     },
@@ -3249,7 +3047,7 @@
       kind: :static,
       signatures: ["(Integer/parseInt s)"],
       notes:
-        "Compatibility alias for `(parse-long s)`. Invalid or non-string input returns nil instead of throwing.",
+        "Uses Java decimal syntax, int range checks, and bounded NumberFormatException semantics.",
       class: "java.lang.Integer",
       reference_ids: [:integer_parse_int]
     },
@@ -3259,7 +3057,7 @@
       kind: :static,
       signatures: ["(Long/parseLong s)"],
       notes:
-        "Compatibility alias for `(parse-long s)`. Invalid or non-string input returns nil instead of throwing.",
+        "Uses Java decimal syntax, long range checks, and bounded NumberFormatException semantics.",
       class: "java.lang.Long",
       reference_ids: [:long_parse_long]
     },
@@ -3277,7 +3075,7 @@
       description: "Index of first occurrence of substring, or -1 if not found",
       kind: :method,
       signatures: ["(.indexOf s substr)", "(.indexOf s substr from-index)"],
-      notes: "Uses grapheme indices (not byte offsets).",
+      notes: "Returns Java UTF-16 code-unit indexes.",
       class: "java.lang.String",
       reference_ids: [:string_index_of]
     },
@@ -3286,27 +3084,9 @@
       description: "Index of last occurrence of substring, or -1 if not found",
       kind: :method,
       signatures: ["(.lastIndexOf s substr)"],
-      notes: "Uses grapheme indices (not byte offsets).",
+      notes: "Returns Java UTF-16 code-unit indexes.",
       class: "java.lang.String",
       reference_ids: [:string_last_index_of]
-    },
-    %{
-      name: ".toLowerCase",
-      description: "Convert string to lower case",
-      kind: :method,
-      signatures: ["(.toLowerCase s)"],
-      notes: "",
-      class: "java.lang.String",
-      reference_ids: [:string_to_lower_case]
-    },
-    %{
-      name: ".toUpperCase",
-      description: "Convert string to upper case",
-      kind: :method,
-      signatures: ["(.toUpperCase s)"],
-      notes: "",
-      class: "java.lang.String",
-      reference_ids: [:string_to_upper_case]
     },
     %{
       name: ".startsWith",
@@ -3328,41 +3108,193 @@
     },
     %{
       name: ".length",
-      description: "Return the grapheme count of a string",
+      description: "Return the UTF-16 code-unit length of a string",
       kind: :method,
       signatures: ["(.length s)"],
-      notes:
-        "Returns grapheme count (not byte length), matching `count` and `.indexOf` index semantics.",
+      notes: "Uses Java UTF-16 code units; ordinary PTC `count` remains grapheme-based.",
       class: "java.lang.String",
       reference_ids: [:string_length]
     },
     %{
       name: ".substring",
-      description: "Extract a substring by grapheme index",
+      description: "Extract a substring by UTF-16 code-unit index",
       kind: :method,
       signatures: ["(.substring s start)", "(.substring s start end)"],
       notes:
-        "Indices are grapheme-based (not byte offsets). Two-arg form returns graphemes in [start, end). Raises on out-of-range indices (matches Java's StringIndexOutOfBoundsException) — note that (.substring s -1) raises rather than silently returning the last grapheme, which matters when chaining .indexOf.",
+        "Uses Java UTF-16 code-unit indexes. A range containing an unpaired surrogate returns invalid_java_string because PTC strings require valid UTF-8.",
       class: "java.lang.String",
       reference_ids: [:string_substring]
     }
   ],
   function_entries: [
     %{
-      name: ".getTime",
-      description: "Return Unix timestamp in milliseconds (**DateTime only**)",
+      name: "Math/abs",
+      description: "Java primitive absolute value",
       binding: :normal,
-      reference_ids: [:instant_get_time_alias, :date_get_time],
+      reference_ids: [:math_abs],
       category: :interop,
-      dispatch: :env,
+      dispatch: :java,
+      signatures: ["(Math/abs x)"],
+      since: nil,
+      examples: [{"(Math/abs -7)", "7"}],
+      notes: "Preserves the selected Java primitive kind and minimum-value overflow.",
+      section: "Interop",
+      ptc_extension?: false,
+      see_also: ["abs"],
+      clojure_var: nil,
+      divergences: nil
+    },
+    %{
+      name: "Math/ceil",
+      description: "Java double ceiling",
+      binding: :normal,
+      reference_ids: [:math_ceil],
+      category: :interop,
+      dispatch: :java,
+      signatures: ["(Math/ceil x)"],
+      since: nil,
+      examples: [{"(Math/ceil 1.2)", "2.0"}],
+      notes: "Returns a Java double rather than the integer returned by bare `ceil`.",
+      section: "Interop",
+      ptc_extension?: false,
+      see_also: ["ceil"],
+      clojure_var: nil,
+      divergences: nil
+    },
+    %{
+      name: "Math/floor",
+      description: "Java double floor",
+      binding: :normal,
+      reference_ids: [:math_floor],
+      category: :interop,
+      dispatch: :java,
+      signatures: ["(Math/floor x)"],
+      since: nil,
+      examples: [{"(Math/floor -1.2)", "-2.0"}],
+      notes: "Returns a Java double rather than the integer returned by bare `floor`.",
+      section: "Interop",
+      ptc_extension?: false,
+      see_also: ["floor"],
+      clojure_var: nil,
+      divergences: nil
+    },
+    %{
+      name: "Math/max",
+      description: "Java two-argument primitive maximum",
+      binding: :normal,
+      reference_ids: [:math_max],
+      category: :interop,
+      dispatch: :java,
+      signatures: ["(Math/max x y)"],
+      since: nil,
+      examples: [{"(Math/max 1 2)", "2"}],
+      notes: "Requires one admitted primitive overload; bare `max` remains variadic.",
+      section: "Interop",
+      ptc_extension?: false,
+      see_also: ["max"],
+      clojure_var: nil,
+      divergences: nil
+    },
+    %{
+      name: "Math/min",
+      description: "Java two-argument primitive minimum",
+      binding: :normal,
+      reference_ids: [:math_min],
+      category: :interop,
+      dispatch: :java,
+      signatures: ["(Math/min x y)"],
+      since: nil,
+      examples: [{"(Math/min 1 2)", "1"}],
+      notes: "Requires one admitted primitive overload; bare `min` remains variadic.",
+      section: "Interop",
+      ptc_extension?: false,
+      see_also: ["min"],
+      clojure_var: nil,
+      divergences: nil
+    },
+    %{
+      name: "Math/pow",
+      description: "Java double exponentiation",
+      binding: :normal,
+      reference_ids: [:math_pow],
+      category: :interop,
+      dispatch: :java,
+      signatures: ["(Math/pow base exponent)"],
+      since: nil,
+      examples: [{"(Math/pow 2 3)", "8.0"}],
+      notes: "Uses Java's IEEE 754 `double` special-case table.",
+      section: "Interop",
+      ptc_extension?: false,
+      see_also: ["pow"],
+      clojure_var: nil,
+      divergences: nil
+    },
+    %{
+      name: "Math/round",
+      description: "Java float/double rounding to int/long",
+      binding: :normal,
+      reference_ids: [:math_round],
+      category: :interop,
+      dispatch: :java,
+      signatures: ["(Math/round x)"],
+      since: nil,
+      examples: [{"(Math/round -1.5)", "-1"}],
+      notes: "Ties go toward positive infinity; NaN and infinities use Java saturation.",
+      section: "Interop",
+      ptc_extension?: false,
+      see_also: ["round"],
+      clojure_var: nil,
+      divergences: nil
+    },
+    %{
+      name: "Math/sqrt",
+      description: "Java double square root",
+      binding: :normal,
+      reference_ids: [:math_sqrt],
+      category: :interop,
+      dispatch: :java,
+      signatures: ["(Math/sqrt x)"],
+      since: nil,
+      examples: [{"(Math/sqrt 25)", "5.0"}],
+      notes: "Uses Java double signed-zero, NaN, and infinity behavior.",
+      section: "Interop",
+      ptc_extension?: false,
+      see_also: ["sqrt"],
+      clojure_var: nil,
+      divergences: nil
+    },
+    %{
+      name: ".getTime",
+      description: "Return exact epoch milliseconds from a legacy Date",
+      binding: :normal,
+      reference_ids: [:date_get_time],
+      category: :interop,
+      dispatch: :java,
       signatures: ["(.getTime date)"],
       since: nil,
       examples: [],
-      notes: nil,
+      notes: "Owned only by java.util.Date.",
       section: "Interop",
       ptc_extension?: false,
       see_also: [],
-      clojure_var: ".getTime",
+      clojure_var: nil,
+      divergences: nil
+    },
+    %{
+      name: ".toEpochMilli",
+      description: "Return epoch milliseconds from an Instant",
+      binding: :normal,
+      reference_ids: [:instant_to_epoch_milli],
+      category: :interop,
+      dispatch: :java,
+      signatures: ["(.toEpochMilli instant)"],
+      since: nil,
+      examples: [],
+      notes: "Raises when the result exceeds Java long.",
+      section: "Interop",
+      ptc_extension?: false,
+      see_also: ["Instant/parse", ".getTime"],
+      clojure_var: nil,
       divergences: nil
     },
     %{
@@ -3371,7 +3303,7 @@
       binding: :normal,
       reference_ids: [:local_date_to_epoch_day],
       category: :interop,
-      dispatch: :env,
+      dispatch: :java,
       signatures: ["(.toEpochDay local-date)"],
       since: nil,
       examples: [],
@@ -3379,7 +3311,7 @@
       section: "Interop",
       ptc_extension?: false,
       see_also: ["LocalDate/parse", ".plusDays", ".minusDays"],
-      clojure_var: ".toEpochDay",
+      clojure_var: nil,
       divergences: nil
     },
     %{
@@ -3388,15 +3320,16 @@
       binding: :normal,
       reference_ids: [:local_date_plus_days],
       category: :interop,
-      dispatch: :env,
+      dispatch: :java,
       signatures: ["(.plusDays local-date n)"],
       since: nil,
       examples: [],
-      notes: "Works on LocalDate values returned by `LocalDate/parse`; `n` must be an integer.",
+      notes:
+        "Works on LocalDate values returned by `LocalDate/parse`; Java long coercion applies.",
       section: "Interop",
       ptc_extension?: false,
       see_also: ["LocalDate/parse", ".minusDays", ".toEpochDay"],
-      clojure_var: ".plusDays",
+      clojure_var: nil,
       divergences: nil
     },
     %{
@@ -3405,15 +3338,16 @@
       binding: :normal,
       reference_ids: [:local_date_minus_days],
       category: :interop,
-      dispatch: :env,
+      dispatch: :java,
       signatures: ["(.minusDays local-date n)"],
       since: nil,
       examples: [],
-      notes: "Works on LocalDate values returned by `LocalDate/parse`; `n` must be an integer.",
+      notes:
+        "Works on LocalDate values returned by `LocalDate/parse`; Java long coercion applies.",
       section: "Interop",
       ptc_extension?: false,
       see_also: ["LocalDate/parse", ".plusDays", ".toEpochDay"],
-      clojure_var: ".minusDays",
+      clojure_var: nil,
       divergences: nil
     },
     %{
@@ -3422,7 +3356,7 @@
       binding: :normal,
       reference_ids: [:duration_to_millis],
       category: :interop,
-      dispatch: :env,
+      dispatch: :java,
       signatures: ["(.toMillis duration)"],
       since: nil,
       examples: [],
@@ -3430,7 +3364,7 @@
       section: "Interop",
       ptc_extension?: false,
       see_also: ["Duration/between", ".toDays"],
-      clojure_var: ".toMillis",
+      clojure_var: nil,
       divergences: nil
     },
     %{
@@ -3439,7 +3373,7 @@
       binding: :normal,
       reference_ids: [:duration_to_days],
       category: :interop,
-      dispatch: :env,
+      dispatch: :java,
       signatures: ["(.toDays duration)"],
       since: nil,
       examples: [],
@@ -3448,7 +3382,7 @@
       section: "Interop",
       ptc_extension?: false,
       see_also: ["Duration/between", ".toMillis"],
-      clojure_var: ".toDays",
+      clojure_var: nil,
       divergences: nil
     },
     %{
@@ -3457,7 +3391,7 @@
       binding: :normal,
       reference_ids: [:string_contains],
       category: :interop,
-      dispatch: :env,
+      dispatch: :java,
       signatures: ["(.contains s substr)"],
       since: nil,
       examples: [],
@@ -3465,24 +3399,24 @@
       section: "Interop",
       ptc_extension?: false,
       see_also: [],
-      clojure_var: ".contains",
+      clojure_var: nil,
       divergences: nil
     },
     %{
       name: ".indexOf",
       description: "Index of first occurrence starting from position",
-      binding: :multi_arity,
+      binding: :normal,
       reference_ids: [:string_index_of],
       category: :interop,
-      dispatch: :env,
+      dispatch: :java,
       signatures: ["(.indexOf s substr)", "(.indexOf s substr from)"],
       since: nil,
       examples: [],
-      notes: nil,
+      notes: "Returns Java UTF-16 code-unit indexes.",
       section: "Interop",
       ptc_extension?: false,
       see_also: [],
-      clojure_var: ".indexOf",
+      clojure_var: nil,
       divergences: nil
     },
     %{
@@ -3491,85 +3425,50 @@
       binding: :normal,
       reference_ids: [:string_last_index_of],
       category: :interop,
-      dispatch: :env,
+      dispatch: :java,
       signatures: ["(.lastIndexOf s substr)"],
       since: nil,
       examples: [],
-      notes: nil,
+      notes: "Returns Java UTF-16 code-unit indexes.",
       section: "Interop",
       ptc_extension?: false,
       see_also: [],
-      clojure_var: ".lastIndexOf",
-      divergences: nil
-    },
-    %{
-      name: ".toLowerCase",
-      description: "Convert string to lower case",
-      binding: :normal,
-      reference_ids: [:string_to_lower_case],
-      category: :interop,
-      dispatch: :env,
-      signatures: ["(.toLowerCase s)"],
-      since: nil,
-      examples: [],
-      notes: nil,
-      section: "Interop",
-      ptc_extension?: false,
-      see_also: [],
-      clojure_var: ".toLowerCase",
+      clojure_var: nil,
       divergences: nil
     },
     %{
       name: ".length",
-      description: "Return the grapheme count of a string",
+      description: "Return the UTF-16 code-unit length of a string",
       binding: :normal,
       reference_ids: [:string_length],
       category: :interop,
-      dispatch: :env,
+      dispatch: :java,
       signatures: ["(.length s)"],
       since: nil,
       examples: [],
-      notes:
-        "Returns grapheme count (not byte length), matching `count` on a string and `.indexOf` index semantics.",
+      notes: "Uses Java UTF-16 code units; ordinary PTC `count` remains grapheme-based.",
       section: "Interop",
       ptc_extension?: false,
       see_also: ["count"],
-      clojure_var: ".length",
+      clojure_var: nil,
       divergences: nil
     },
     %{
       name: ".substring",
-      description: "Extract a substring by grapheme index",
-      binding: :multi_arity,
+      description: "Extract a substring by UTF-16 code-unit index",
+      binding: :normal,
       reference_ids: [:string_substring],
       category: :interop,
-      dispatch: :env,
+      dispatch: :java,
       signatures: ["(.substring s start)", "(.substring s start end)"],
       since: nil,
       examples: [],
       notes:
-        "Indices are grapheme-based (not byte offsets). Two-arg form returns graphemes in [start, end). Raises on out-of-range indices (matches Java's StringIndexOutOfBoundsException): start < 0, start > length, end > length, or start > end. Notably, (.substring s -1) raises rather than silently returning the last grapheme — important when chaining .indexOf, which returns -1 on miss.",
+        "Uses Java UTF-16 code-unit indexes. A range containing an unpaired surrogate returns invalid_java_string because PTC strings require valid UTF-8.",
       section: "Interop",
       ptc_extension?: false,
       see_also: [".indexOf", ".length"],
-      clojure_var: ".substring",
-      divergences: nil
-    },
-    %{
-      name: ".toUpperCase",
-      description: "Convert string to upper case",
-      binding: :normal,
-      reference_ids: [:string_to_upper_case],
-      category: :interop,
-      dispatch: :env,
-      signatures: ["(.toUpperCase s)"],
-      since: nil,
-      examples: [],
-      notes: nil,
-      section: "Interop",
-      ptc_extension?: false,
-      see_also: [],
-      clojure_var: ".toUpperCase",
+      clojure_var: nil,
       divergences: nil
     },
     %{
@@ -3578,7 +3477,7 @@
       binding: :normal,
       reference_ids: [:string_starts_with],
       category: :interop,
-      dispatch: :env,
+      dispatch: :java,
       signatures: ["(.startsWith s prefix)"],
       since: nil,
       examples: [],
@@ -3586,7 +3485,7 @@
       section: "Interop",
       ptc_extension?: false,
       see_also: [],
-      clojure_var: ".startsWith",
+      clojure_var: nil,
       divergences: nil
     },
     %{
@@ -3595,7 +3494,7 @@
       binding: :normal,
       reference_ids: [:string_ends_with],
       category: :interop,
-      dispatch: :env,
+      dispatch: :java,
       signatures: ["(.endsWith s suffix)"],
       since: nil,
       examples: [],
@@ -3603,101 +3502,84 @@
       section: "Interop",
       ptc_extension?: false,
       see_also: [],
-      clojure_var: ".endsWith",
+      clojure_var: nil,
       divergences: nil
     },
     %{
       name: ".isBefore",
-      description: "Returns true if date/datetime comes strictly before another (same-type only)",
+      description: "Compare native LocalDate or Instant values within their owning class",
       binding: :normal,
-      reference_ids: [:local_date_is_before, :instant_is_before, :date_is_before_alias],
+      reference_ids: [:local_date_is_before, :instant_is_before],
       category: :interop,
-      dispatch: :env,
+      dispatch: :java,
       signatures: ["(.isBefore a b)"],
       since: nil,
       examples: [],
-      notes: "Works on both LocalDate and DateTime. Mixed types raise an error.",
+      notes: "Mixed Java classes and raw host temporal structs are rejected.",
       section: "Interop",
       ptc_extension?: false,
       see_also: [".isAfter"],
-      clojure_var: ".isBefore",
+      clojure_var: nil,
       divergences: nil
     },
     %{
       name: ".isAfter",
-      description: "Returns true if date/datetime comes strictly after another (same-type only)",
+      description: "Compare native LocalDate or Instant values within their owning class",
       binding: :normal,
-      reference_ids: [:local_date_is_after, :instant_is_after, :date_is_after_alias],
+      reference_ids: [:local_date_is_after, :instant_is_after],
       category: :interop,
-      dispatch: :env,
+      dispatch: :java,
       signatures: ["(.isAfter a b)"],
       since: nil,
       examples: [],
-      notes: "Works on both LocalDate and DateTime. Mixed types raise an error.",
+      notes: "Mixed Java classes and raw host temporal structs are rejected.",
       section: "Interop",
       ptc_extension?: false,
       see_also: [".isBefore"],
-      clojure_var: ".isAfter",
+      clojure_var: nil,
       divergences: nil
     },
     %{
-      name: "NEGATIVE_INFINITY",
-      description: "Negative infinity constant (Double/NEGATIVE_INFINITY)",
-      binding: :constant,
-      reference_ids: [:double_negative_infinity],
+      name: ".before",
+      description: "Return true when a legacy Date precedes another",
+      binding: :normal,
+      reference_ids: [:date_before],
       category: :interop,
-      dispatch: :env,
-      signatures: ["NEGATIVE_INFINITY"],
+      dispatch: :java,
+      signatures: ["(.before date other-date)"],
       since: nil,
       examples: [],
-      notes: nil,
+      notes: "Owned only by java.util.Date.",
       section: "Interop",
       ptc_extension?: false,
-      see_also: [],
-      clojure_var: "NEGATIVE_INFINITY",
+      see_also: [".after", ".getTime"],
+      clojure_var: nil,
       divergences: nil
     },
     %{
-      name: "NaN",
-      description: "Not-a-Number constant (Double/NaN)",
-      binding: :constant,
-      reference_ids: [:double_nan],
+      name: ".after",
+      description: "Return true when a legacy Date follows another",
+      binding: :normal,
+      reference_ids: [:date_after],
       category: :interop,
-      dispatch: :env,
-      signatures: ["NaN"],
+      dispatch: :java,
+      signatures: ["(.after date other-date)"],
       since: nil,
       examples: [],
-      notes: nil,
+      notes: "Owned only by java.util.Date.",
       section: "Interop",
       ptc_extension?: false,
-      see_also: [],
-      clojure_var: "NaN",
+      see_also: [".before", ".getTime"],
+      clojure_var: nil,
       divergences: nil
     },
     %{
-      name: "POSITIVE_INFINITY",
-      description: "Positive infinity constant (Double/POSITIVE_INFINITY)",
-      binding: :constant,
-      reference_ids: [:double_positive_infinity],
-      category: :interop,
-      dispatch: :env,
-      signatures: ["POSITIVE_INFINITY"],
-      since: nil,
-      examples: [],
-      notes: nil,
-      section: "Interop",
-      ptc_extension?: false,
-      see_also: [],
-      clojure_var: "POSITIVE_INFINITY",
-      divergences: nil
-    },
-    %{
-      name: "currentTimeMillis",
+      name: "System/currentTimeMillis",
       description: "Return current time in milliseconds since epoch",
       binding: :normal,
       reference_ids: [:system_current_time_millis],
       category: :interop,
-      dispatch: :env,
+      dispatch: :java,
       signatures: ["(System/currentTimeMillis)"],
       since: nil,
       examples: [],
@@ -3705,28 +3587,27 @@
       section: "Interop",
       ptc_extension?: false,
       see_also: [],
-      clojure_var: "currentTimeMillis",
+      clojure_var: nil,
       divergences: nil
     },
     %{
       name: "Duration/between",
-      description: "Return a Duration between two DateTime instants",
+      description: "Return a native Duration between two Instants",
       binding: :normal,
       reference_ids: [:duration_between],
       category: :interop,
-      dispatch: :env,
+      dispatch: :java,
       signatures: [
         "(Duration/between start-instant end-instant)",
         "(java.time.Duration/between start-instant end-instant)"
       ],
       since: nil,
       examples: [],
-      notes:
-        "Requires DateTime values, such as results from `Instant/parse`; LocalDate values are intentionally rejected.",
+      notes: "Requires native Instant values; other temporal classes are rejected.",
       section: "Interop",
       ptc_extension?: false,
       see_also: ["Instant/parse", ".toMillis", ".toDays"],
-      clojure_var: "Duration/between",
+      clojure_var: nil,
       divergences: nil
     },
     %{
@@ -3736,7 +3617,7 @@
       binding: :normal,
       reference_ids: [:boolean_parse_boolean],
       category: :interop,
-      dispatch: :env,
+      dispatch: :java,
       signatures: ["(Boolean/parseBoolean s)"],
       since: nil,
       examples: [
@@ -3753,52 +3634,191 @@
       divergences: nil
     },
     %{
-      name: "java.util.Date.",
-      description:
-        "Construct DateTime: no-arg returns current UTC, integer is Unix seconds/ms, string is ISO-8601 (offset optional, treated as UTC if absent) or RFC-2822, existing DateTime/NaiveDateTime/Date passes through",
-      binding: :multi_arity,
-      reference_ids: [:date_new],
+      name: "Double/parseDouble",
+      description: "Java-compatible double parser",
+      binding: :normal,
+      reference_ids: [:double_parse_double],
       category: :interop,
-      dispatch: :env,
-      signatures: [
-        "(java.util.Date.)",
-        "(java.util.Date. millis-or-string)",
-        "(java.util.Date. datetime-or-date)"
+      dispatch: :java,
+      signatures: ["(Double/parseDouble s)"],
+      since: nil,
+      examples: [
+        {"(Double/parseDouble \"1.5\")", "1.5"},
+        {"(Double/parseDouble \"0x1.8p0\")", "1.5"}
       ],
+      notes:
+        "Matches Java syntax, whitespace, range, rounding, and bounded NumberFormatException/NullPointerException semantics.",
+      section: "Interop",
+      ptc_extension?: false,
+      see_also: ["parse-double"],
+      clojure_var: nil,
+      divergences: nil
+    },
+    %{
+      name: "Double/POSITIVE_INFINITY",
+      description: "Java positive-infinity double field",
+      binding: :normal,
+      reference_ids: [:double_positive_infinity],
+      category: :interop,
+      dispatch: :java,
+      signatures: ["Double/POSITIVE_INFINITY"],
       since: nil,
       examples: [],
       notes: nil,
       section: "Interop",
       ptc_extension?: false,
       see_also: [],
-      clojure_var: "java.util.Date.",
+      clojure_var: nil,
       divergences: nil
     },
     %{
-      name: "parse",
-      description:
-        "Parse an ISO-8601 temporal string: `YYYY-MM-DD` → Date, a string with a time component (`...T...`) → DateTime (offsetless treated as UTC)",
+      name: "Double/NEGATIVE_INFINITY",
+      description: "Java negative-infinity double field",
       binding: :normal,
-      reference_ids: [:local_date_parse, :instant_parse],
+      reference_ids: [:double_negative_infinity],
       category: :interop,
-      dispatch: :env,
+      dispatch: :java,
+      signatures: ["Double/NEGATIVE_INFINITY"],
+      since: nil,
+      examples: [],
+      notes: nil,
+      section: "Interop",
+      ptc_extension?: false,
+      see_also: [],
+      clojure_var: nil,
+      divergences: nil
+    },
+    %{
+      name: "Double/NaN",
+      description: "Java not-a-number double field",
+      binding: :normal,
+      reference_ids: [:double_nan],
+      category: :interop,
+      dispatch: :java,
+      signatures: ["Double/NaN"],
+      since: nil,
+      examples: [],
+      notes: nil,
+      section: "Interop",
+      ptc_extension?: false,
+      see_also: [],
+      clojure_var: nil,
+      divergences: nil
+    },
+    %{
+      name: "Float/parseFloat",
+      description: "Java-compatible float parser",
+      binding: :normal,
+      reference_ids: [:float_parse_float],
+      category: :interop,
+      dispatch: :java,
+      signatures: ["(Float/parseFloat s)"],
+      since: nil,
+      examples: [{"(Float/parseFloat \"1.5\")", "1.5"}],
+      notes:
+        "Matches Java syntax, whitespace, range, direct float rounding, and bounded NumberFormatException/NullPointerException semantics.",
+      section: "Interop",
+      ptc_extension?: false,
+      see_also: ["parse-double"],
+      clojure_var: nil,
+      divergences: nil
+    },
+    %{
+      name: "Integer/parseInt",
+      description: "Java-compatible decimal int parser",
+      binding: :normal,
+      reference_ids: [:integer_parse_int],
+      category: :interop,
+      dispatch: :java,
+      signatures: ["(Integer/parseInt s)"],
+      since: nil,
+      examples: [{"(Integer/parseInt \"42\")", "42"}],
+      notes:
+        "Matches Java decimal syntax, int range, and bounded NumberFormatException semantics.",
+      section: "Interop",
+      ptc_extension?: false,
+      see_also: ["parse-long"],
+      clojure_var: nil,
+      divergences: nil
+    },
+    %{
+      name: "Long/parseLong",
+      description: "Java-compatible decimal long parser",
+      binding: :normal,
+      reference_ids: [:long_parse_long],
+      category: :interop,
+      dispatch: :java,
+      signatures: ["(Long/parseLong s)"],
+      since: nil,
+      examples: [{"(Long/parseLong \"42\")", "42"}],
+      notes:
+        "Matches Java decimal syntax, long range, and bounded NumberFormatException semantics.",
+      section: "Interop",
+      ptc_extension?: false,
+      see_also: ["parse-long"],
+      clojure_var: nil,
+      divergences: nil
+    },
+    %{
+      name: "java.util.Date.",
+      description: "Construct a native legacy Date with exact Java millisecond identity",
+      binding: :normal,
+      reference_ids: [:date_new],
+      category: :interop,
+      dispatch: :java,
       signatures: [
-        "(parse iso-string)",
-        "(LocalDate/parse date-str)",
-        "(java.time.LocalDate/parse date-str)",
-        "(java.time.Instant/parse iso-string)",
-        "(Instant/parse iso-string)"
+        "(java.util.Date.)",
+        "(java.util.Date. epoch-milliseconds)",
+        "(java.util.Date. legacy-date-string)"
       ],
       since: nil,
       examples: [],
-      notes:
-        "Reachable as the bare `parse` builtin or via the `LocalDate/` and `Instant/` namespaces — all three dispatch on the string shape. `.isBefore`/`.isAfter`/`.getTime` work on both Date and DateTime results.",
+      notes: "Numeric input is always milliseconds; raw host temporal structs are not promoted.",
       section: "Interop",
       ptc_extension?: false,
-      see_also: [".isBefore", ".isAfter", ".getTime", "java.util.Date."],
-      clojure_var: "parse",
-      divergences:
-        "Unlike Java's LocalDate.parse, accepts strings with a time component and returns a DateTime instead of raising — more useful for LLM timestamp comparisons. See docs/java-interop.md."
+      see_also: [],
+      clojure_var: nil,
+      divergences: nil
+    },
+    %{
+      name: "LocalDate/parse",
+      description: "Parse strict ISO-8601 local-date text to a native LocalDate",
+      binding: :normal,
+      reference_ids: [:local_date_parse],
+      category: :interop,
+      dispatch: :java,
+      signatures: [
+        "(LocalDate/parse date-str)",
+        "(java.time.LocalDate/parse date-str)"
+      ],
+      since: nil,
+      examples: [],
+      notes: "Date-time strings are rejected; the bare `parse` alias was removed.",
+      section: "Interop",
+      ptc_extension?: false,
+      see_also: ["Instant/parse", ".toEpochDay", ".plusDays", ".minusDays"],
+      clojure_var: nil,
+      divergences: nil
+    },
+    %{
+      name: "Instant/parse",
+      description: "Parse strict ISO-8601 instant text to a native Instant",
+      binding: :normal,
+      reference_ids: [:instant_parse],
+      category: :interop,
+      dispatch: :java,
+      signatures: [
+        "(Instant/parse iso-string)",
+        "(java.time.Instant/parse iso-string)"
+      ],
+      since: nil,
+      examples: [],
+      notes: "An explicit UTC or numeric offset is required; nanoseconds are retained.",
+      section: "Interop",
+      ptc_extension?: false,
+      see_also: ["LocalDate/parse", ".toEpochMilli", "Duration/between"],
+      clojure_var: nil,
+      divergences: nil
     }
   ]
 }
