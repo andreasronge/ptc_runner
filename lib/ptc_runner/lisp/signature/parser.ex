@@ -3,7 +3,7 @@ defmodule PtcRunner.Lisp.Signature.Parser do
   NimbleParsec-based parser for signature strings.
 
   Transforms signature syntax into AST:
-  - Primitives: :string, :int, :float, :bool, :keyword, :any
+  - Primitives: :string, :int, :float, :bool (alias :boolean), :keyword, :datetime, :any
   - Collections: [:type], {field :type}, :map
   - Optional fields: :type?
   - Full format: (params) -> output or shorthand: output

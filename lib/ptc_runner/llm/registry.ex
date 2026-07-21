@@ -3,7 +3,7 @@ defmodule PtcRunner.LLM.Registry do
   Resolves trusted model aliases to provider model identifiers.
 
   The standard Kernel LLM provider builder uses this registry while assembling
-  an explicit `llm/request` capability. Manifests cannot replace the registry
+  an explicit `llm-request` capability. Manifests cannot replace the registry
   or name adapter modules.
   """
 

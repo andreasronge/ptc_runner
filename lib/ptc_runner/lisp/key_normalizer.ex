@@ -78,7 +78,7 @@ defmodule PtcRunner.Lisp.KeyNormalizer do
 
   This function intentionally widens equivalence classes vs naive
   `{tool_name, args}` keying. It is the single source of truth for cache
-  identity across Tier 2b native calls and PTC-Lisp's `(tool/...)` cache
+  identity across native app-tool calls and PTC-Lisp's `(tool/...)` cache
   path; both layers reach the same cache entry whenever the call is
   semantically identical.
 
@@ -109,7 +109,7 @@ defmodule PtcRunner.Lisp.KeyNormalizer do
      unchanged for values. Atom-keyed maps are converted by rule 1; atom
      **values** stay atoms.
 
-  ## Non-map args (Tier 3.5 Fix 3b)
+  ## Non-map args
 
   When `args` is not a map (e.g., a list or scalar from a misbehaving
   tool plumbing path), the result is `{tool_name, {:non_map, args}}`.
@@ -161,7 +161,7 @@ defmodule PtcRunner.Lisp.KeyNormalizer do
     {tool_name, canonicalize(args)}
   end
 
-  # Tier 3.5 Fix 3b: non-map args (list, scalar, nil, etc.) get a sentinel
+  # Non-map args (list, scalar, nil, etc.) get a sentinel
   # cache key rather than raising. Keeps the cache path chaos-resilient.
   def canonical_cache_key(tool_name, args) when is_binary(tool_name) do
     {tool_name, {:non_map, args}}
@@ -177,7 +177,7 @@ defmodule PtcRunner.Lisp.KeyNormalizer do
     Enum.map(value, &canonicalize/1)
   end
 
-  # Tier 3.5 Fix 3c: tuples canonicalize to lists for PTC-Lisp parity.
+  # Tuples canonicalize to lists for PTC-Lisp parity.
   # PTC-Lisp's `[1 2]` vector evaluates to a list; a native cache write
   # using `{1, 2}` would otherwise miss when PTC-Lisp follows the
   # cache_hint.
@@ -201,7 +201,7 @@ defmodule PtcRunner.Lisp.KeyNormalizer do
 
   defp canonicalize(value), do: value
 
-  # Tier 3.5 Fix 3a: re-use `normalize_key/1` so hyphenated and underscored
+  # Re-use `normalize_key/1` so hyphenated and underscored
   # keys collapse together, matching `Lisp.Eval.stringify_key/1` at the
   # PTC-Lisp tool boundary. Without this, a native cache write with
   # `"was-improved"` and a PTC-Lisp lookup with `"was_improved"` miss.

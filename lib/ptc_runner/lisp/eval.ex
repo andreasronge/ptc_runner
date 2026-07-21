@@ -565,7 +565,7 @@ defmodule PtcRunner.Lisp.Eval do
   # Public prelude export call: `(crm/get-user id)`. Resolve the captured
   # closure from the export table and invoke it with the captured PRIVATE
   # prelude env as its `user_ns` layer so the export body's private sibling
-  # helpers resolve (plan §5). Side-effecting accumulators (tool_calls/ledger,
+  # helpers resolve. Side-effecting accumulators (tool_calls/ledger,
   # prints, cache, ...) are carried IN from and OUT to the caller's context so
   # the wrapped `(tool/call ...)` records exactly once in the existing ledger.
   defp do_eval({:prelude_call, ref, arg_asts}, %EvalContext{prelude_exports: exports} = eval_ctx) do
@@ -1123,7 +1123,7 @@ defmodule PtcRunner.Lisp.Eval do
          origin,
          private_tool?
        ) do
-    # Tier 3.5 Fix 3d: only compute the canonical cache key when the call
+    # Only compute the canonical cache key when the call
     # is actually cacheable. Avoids the cost of canonicalization for
     # every non-cacheable tool call.
     cache_key = if cacheable?, do: KeyNormalizer.canonical_cache_key(tool_name, args_map)

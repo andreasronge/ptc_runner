@@ -3,7 +3,7 @@ defmodule PtcRunner.Lisp.Signature.TypeResolver do
   Resolve paths against parsed signature types.
 
   Given a parsed signature and a path (like ["items", "name"]), determines the expected
-  type at that path. Used for validating section fields in Mustache templates.
+  type at that path.
   """
 
   @doc """
@@ -73,7 +73,7 @@ defmodule PtcRunner.Lisp.Signature.TypeResolver do
   end
 
   @doc """
-  Check if a type is a scalar (can be used with {{.}} in sections).
+  Check if a type is a scalar.
 
   ## Examples
 
@@ -95,15 +95,14 @@ defmodule PtcRunner.Lisp.Signature.TypeResolver do
   def scalar_type?(:keyword), do: true
   def scalar_type?(:any), do: true
   # `:datetime` is scalar from the LLM's perspective even though it carries a
-  # `%DateTime{}` struct in Elixir. Without this, Mustache would try to walk
-  # into it as nested data (same shape as the silent-prompt-failure bug we
-  # fixed earlier in `PromptExpander`).
+  # `%DateTime{}` struct in Elixir; without this a consumer would try to walk
+  # into it as nested data.
   def scalar_type?(:datetime), do: true
   def scalar_type?({:optional, inner}), do: scalar_type?(inner)
   def scalar_type?(_), do: false
 
   @doc """
-  Check if a type is iterable (can be used with {{#section}}).
+  Check if a type is iterable.
 
   ## Examples
 

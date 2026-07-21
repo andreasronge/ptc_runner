@@ -56,15 +56,6 @@ defmodule PtcRunner.Lisp.Signature.Coercion do
 
   Output validation is strict - no coercion applied.
 
-  ## Coercion Modes
-
-  | Mode | Input Coercion | Output Validation | Use Case |
-  |------|----------------|-------------------|----------|
-  | `:enabled` (default) | Apply with warnings | Strict | Production |
-  | `:warn_only` | Apply with warnings | Log warnings only | Development |
-  | `:strict` | No coercion | Strict, reject extra fields | Testing |
-  | `:disabled` | Skip | Skip | Debugging |
-
   ## Examples
 
       iex> PtcRunner.Lisp.Signature.Coercion.coerce("42", :int)
@@ -108,9 +99,6 @@ defmodule PtcRunner.Lisp.Signature.Coercion do
 
   @doc """
   Coerce a value to the expected type with options.
-
-  Options:
-  - `:nested` - whether this is a nested coercion (default: false)
 
   Returns `{:ok, coerced_value, warnings}` or `{:error, reason}`.
   """

@@ -1,7 +1,7 @@
 defmodule PtcRunner.Lisp.Analyze.PreludeScope do
   @moduledoc """
   Process-local scope for the compiled prelude consulted during a single
-  analysis pass (Capability Prelude V1, plan §4 / §2).
+  analysis pass.
 
   The analyzer's `do_analyze/2` is deeply mutually-recursive across ~80
   clauses; threading the prelude artifact through every clause would be a
@@ -14,15 +14,15 @@ defmodule PtcRunner.Lisp.Analyze.PreludeScope do
 
   Two questions this module answers for qualified names like `crm/get-user`,
   where `ns`/`symbol` arrive STRING-backed (unknown namespaces are not in
-  `SourceAtoms` so they intern as `{:ns_symbol, "crm", "get-user"}` — fact #1):
+  `SourceAtoms` so they intern as `{:ns_symbol, "crm", "get-user"}`):
 
     * `fetch_export/2` — is `ns/symbol` a PUBLIC prelude export, and what is its
       arity? Private helpers (`defn-`) have no export record, so they are
-      absent here and stay unreachable by qualified user calls (plan §5 / §8).
+      absent here and stay unreachable by qualified user calls.
     * `protected_namespace?/1` — is `ns` a protected namespace (a reserved host
       namespace or one declared by the attached prelude)? Used to reject
       `(def ns/x ...)` / `(defn ns/f ...)` writes with a protection fault rather
-      than a generic invalid-qualified-name syntax error (plan §2).
+      than a generic invalid-qualified-name syntax error.
   """
 
   alias PtcRunner.Lisp.Prelude
@@ -95,7 +95,7 @@ defmodule PtcRunner.Lisp.Analyze.PreludeScope do
   @doc """
   Whether `ns` is a protected namespace for the current analysis pass: a
   reserved host namespace, or one declared by the attached prelude. Used to
-  reject writes (`def`/`defn`) into protected namespaces (plan §2).
+  reject writes (`def`/`defn`) into protected namespaces.
   """
   @spec protected_namespace?(term()) :: boolean()
   def protected_namespace?(ns) do
