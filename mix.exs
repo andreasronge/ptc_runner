@@ -38,7 +38,7 @@ defmodule PtcRunner.MixProject do
       dialyzer: [
         plt_core_path: "priv/plts",
         plt_file: {:no_warn, "priv/plts/project.plt"},
-        plt_add_apps: [:ex_unit, :mix, :req, :req_llm, :recon],
+        plt_add_apps: [:ex_unit, :mix, :req, :req_llm, :llm_db, :recon],
         ignore_warnings: ".dialyzer_ignore.exs",
         list_unused_filters: true
       ]
