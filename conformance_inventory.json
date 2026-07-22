@@ -3749,7 +3749,7 @@
     "symbol": "blank?",
     "namespace": "clojure.string",
     "compatibility_target": "Clojure",
-    "notes": "BUG GAP-S50: Unicode whitespace classification differs from Clojure for U+00A0 and U+2003; BUG GAP-S116: character inputs are accepted instead of raising"
+    "notes": "GAP-S50 fixed: uses the pinned Clojure Character.isWhitespace set; BUG GAP-S116: character inputs are accepted instead of raising"
   },
   {
     "status": "candidate",
@@ -3861,7 +3861,7 @@
     "symbol": "trim",
     "namespace": "clojure.string",
     "compatibility_target": "Clojure",
-    "notes": "BUG GAP-S50: Unicode whitespace classification differs from Clojure for U+00A0 and U+2003"
+    "notes": "GAP-S50 fixed: uses the pinned Clojure Character.isWhitespace set"
   },
   {
     "status": "supported",
@@ -3875,14 +3875,14 @@
     "symbol": "triml",
     "namespace": "clojure.string",
     "compatibility_target": "Clojure",
-    "notes": "BUG GAP-S50: Unicode whitespace classification differs from Clojure for U+00A0 and U+2003"
+    "notes": "GAP-S50 fixed: uses the pinned Clojure Character.isWhitespace set"
   },
   {
     "status": "supported",
     "symbol": "trimr",
     "namespace": "clojure.string",
     "compatibility_target": "Clojure",
-    "notes": "BUG GAP-S50: Unicode whitespace classification differs from Clojure for U+00A0 and U+2003"
+    "notes": "GAP-S50 fixed: uses the pinned Clojure Character.isWhitespace set"
   },
   {
     "status": "supported",
@@ -4648,11 +4648,11 @@
     "notes": "DIV-40: character literals are accepted as arguments (PTC-Lisp has no Character type). DIV-41: character-literal receivers behave as one-character strings. DIV-53: the bounded UTF-16 view rejects String inputs larger than 256,000 bytes."
   },
   {
-    "status": "candidate",
+    "status": "supported",
     "symbol": ".trim",
     "namespace": "java.lang.String",
     "compatibility_target": "Java",
-    "notes": "Common LLM spelling; clojure.string/trim is not currently implemented."
+    "notes": "Uses Java String.trim semantics, which differ from clojure.string/trim. DIV-41: character-literal receivers behave as one-character strings. DIV-53: String inputs larger than 256,000 bytes produce invalid_java_string."
   },
   {
     "status": "candidate",

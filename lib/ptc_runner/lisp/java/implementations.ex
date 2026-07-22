@@ -52,6 +52,7 @@ defmodule PtcRunner.Lisp.Java.Implementations do
     string_length: {PtcRunner.Lisp.Java.Lang.String, :length},
     string_starts_with: {PtcRunner.Lisp.Java.Lang.String, :starts_with},
     string_substring: {PtcRunner.Lisp.Java.Lang.String, :substring},
+    string_trim: {PtcRunner.Lisp.Java.Lang.String, :trim},
     system_current_time_millis: {PtcRunner.Lisp.Java.Lang.System, :current_time_millis}
   }
 

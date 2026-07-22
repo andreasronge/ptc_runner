@@ -151,6 +151,15 @@
       callable?: true
     },
     %{
+      member: "trim",
+      kind: :instance,
+      class_id: :java_lang_string,
+      spellings: [".trim"],
+      overload_ids: [:string_trim_0],
+      reference_id: :string_trim,
+      callable?: true
+    },
+    %{
       member: "parse",
       kind: :static,
       class_id: :java_time_local_date,
@@ -713,6 +722,20 @@
       reference_id: :string_substring,
       descriptor: "(II)Ljava/lang/String;",
       overload_id: :string_substring_begin_end,
+      divergence_ids: ["DIV-41", "DIV-53"],
+      classification: :exact,
+      attestation: :jvm
+    },
+    %{
+      return: :string,
+      arity: 0,
+      arguments: [],
+      errors: [:invalid_java_string, :null_pointer_exception],
+      receiver: :string,
+      route: {:dispatch, :string_trim},
+      reference_id: :string_trim,
+      descriptor: "()Ljava/lang/String;",
+      overload_id: :string_trim_0,
       divergence_ids: ["DIV-41", "DIV-53"],
       classification: :exact,
       attestation: :jvm
@@ -2317,10 +2340,13 @@
       },
       %{
         name: ".trim",
-        status: :candidate,
-        description: "Trim leading and trailing whitespace",
-        notes: "Common LLM spelling; clojure.string/trim is not currently implemented.",
-        reference_id: nil,
+        status: :supported,
+        description: "Remove leading and trailing code units from U+0000 through U+0020",
+        notes:
+          "Uses Java String.trim semantics, which differ from clojure.string/trim. DIV-41: character-literal receivers behave as one-character strings. DIV-53: String inputs larger than 256,000 bytes produce invalid_java_string.",
+        reference_id: :string_trim,
+        jvm_descriptor_attestations: %{string_trim_0: "()Ljava/lang/String;"},
+        admitted_overload_divergences: %{string_trim_0: ["DIV-41", "DIV-53"]},
         target_id: :java_lang_string_audit_trim
       },
       %{
@@ -3124,6 +3150,15 @@
         "Uses Java UTF-16 code-unit indexes. A range containing an unpaired surrogate returns invalid_java_string because PTC strings require valid UTF-8.",
       class: "java.lang.String",
       reference_ids: [:string_substring]
+    },
+    %{
+      name: ".trim",
+      description: "Remove leading and trailing code units from U+0000 through U+0020",
+      kind: :method,
+      signatures: ["(.trim s)"],
+      notes: "Uses Java String.trim semantics, not clojure.string/trim whitespace semantics.",
+      class: "java.lang.String",
+      reference_ids: [:string_trim]
     }
   ],
   function_entries: [
@@ -3468,6 +3503,24 @@
       section: "Interop",
       ptc_extension?: false,
       see_also: [".indexOf", ".length"],
+      clojure_var: nil,
+      divergences: nil
+    },
+    %{
+      name: ".trim",
+      description: "Remove Java String.trim boundary code units",
+      binding: :normal,
+      reference_ids: [:string_trim],
+      category: :interop,
+      dispatch: :java,
+      signatures: ["(.trim s)"],
+      since: nil,
+      examples: [{"(.trim \"  Ada  \")", "\"Ada\""}],
+      notes:
+        "Removes leading and trailing UTF-16 code units from U+0000 through U+0020; clojure.string/trim uses Character.isWhitespace instead.",
+      section: "Interop",
+      ptc_extension?: false,
+      see_also: ["trim"],
       clojure_var: nil,
       divergences: nil
     },

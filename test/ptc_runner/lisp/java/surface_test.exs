@@ -42,7 +42,7 @@ defmodule PtcRunner.Lisp.Java.SurfaceTest do
   test "the checked-in manifest validates with one route per overload" do
     assert :ok = validate(Surface.manifest())
     assert Enum.all?(Surface.overloads(), &match?({:dispatch, _}, &1.route))
-    assert length(Surface.overloads()) == 55
+    assert length(Surface.overloads()) == 56
 
     assert %{route: {:dispatch, :boolean_parse_boolean}} =
              Enum.find(Surface.overloads(), &(&1.overload_id == :boolean_parse_boolean_string))

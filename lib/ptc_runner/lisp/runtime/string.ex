@@ -174,12 +174,12 @@ defmodule PtcRunner.Lisp.Runtime.String do
   end
 
   @doc """
-  Trim leading and trailing whitespace.
+  Trim leading and trailing Clojure whitespace.
   - (trim "  hello  ") returns "hello"
   - (trim "\n\t text \r\n") returns "text"
   """
   def trim(s) when is_binary(s) do
-    String.trim(s)
+    s |> trim_clojure_leading() |> trim_clojure_trailing()
   end
 
   @doc """
@@ -190,7 +190,7 @@ defmodule PtcRunner.Lisp.Runtime.String do
   - (blank? "hello") returns false
   """
   def blank?(nil), do: true
-  def blank?(s) when is_binary(s), do: String.trim(s) == ""
+  def blank?(s) when is_binary(s), do: clojure_whitespace_only?(s)
 
   @doc """
   Remove all trailing newline (`\\n`) or carriage-return (`\\r`) characters.
@@ -203,16 +203,56 @@ defmodule PtcRunner.Lisp.Runtime.String do
   end
 
   @doc """
-  Trim leading whitespace.
+  Trim leading Clojure whitespace.
   - (triml "  hello  ") returns "hello  "
   """
-  def triml(s) when is_binary(s), do: String.trim_leading(s)
+  def triml(s) when is_binary(s), do: trim_clojure_leading(s)
 
   @doc """
-  Trim trailing whitespace.
+  Trim trailing Clojure whitespace.
   - (trimr "  hello  ") returns "  hello"
   """
-  def trimr(s) when is_binary(s), do: String.trim_trailing(s)
+  def trimr(s) when is_binary(s), do: trim_clojure_trailing(s)
+
+  # Pinned to java.lang.Character.isWhitespace on the supported JVM profile.
+  # Java-named String.trim has a different U+0000..U+0020 contract.
+  defp clojure_whitespace?(codepoint)
+       when codepoint in 0x0009..0x000D or codepoint in 0x001C..0x0020 or
+              codepoint == 0x1680 or codepoint in 0x2000..0x2006 or
+              codepoint in 0x2008..0x200A or codepoint in [0x2028, 0x2029, 0x205F, 0x3000],
+       do: true
+
+  defp clojure_whitespace?(_codepoint), do: false
+
+  defp clojure_whitespace_only?(<<>>), do: true
+
+  defp clojure_whitespace_only?(<<codepoint::utf8, rest::binary>>),
+    do: clojure_whitespace?(codepoint) and clojure_whitespace_only?(rest)
+
+  defp trim_clojure_leading(<<codepoint::utf8, rest::binary>> = value) do
+    if clojure_whitespace?(codepoint), do: trim_clojure_leading(rest), else: value
+  end
+
+  defp trim_clojure_leading(<<>>), do: <<>>
+
+  defp trim_clojure_trailing(value) do
+    trailing_bytes = trailing_clojure_whitespace_bytes(value, 0)
+    binary_part(value, 0, byte_size(value) - trailing_bytes)
+  end
+
+  defp trailing_clojure_whitespace_bytes(<<>>, trailing_bytes), do: trailing_bytes
+
+  defp trailing_clojure_whitespace_bytes(
+         <<codepoint::utf8, rest::binary>> = value,
+         trailing_bytes
+       ) do
+    codepoint_bytes = byte_size(value) - byte_size(rest)
+
+    next_trailing_bytes =
+      if clojure_whitespace?(codepoint), do: trailing_bytes + codepoint_bytes, else: 0
+
+    trailing_clojure_whitespace_bytes(rest, next_trailing_bytes)
+  end
 
   @doc """
   Replace all occurrences of a pattern in a string.

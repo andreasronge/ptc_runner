@@ -419,6 +419,21 @@ date = fn milliseconds -> value.(:date, milliseconds) end
     ["DIV-41", "DIV-53"]
   ),
   jvm.(
+    :string_trim_0,
+    string.(<<0, 9, 31, 32>> <> "Ada" <> <<32, 0>>),
+    [],
+    value.(:string, "Ada"),
+    ["DIV-41", "DIV-53"]
+  ),
+  jvm.(
+    :string_trim_0,
+    string.("\u00A0\u2003Ada\u2003\u00A0"),
+    [],
+    value.(:string, "\u00A0\u2003Ada\u2003\u00A0"),
+    ["DIV-41", "DIV-53"]
+  )
+  |> Map.put(:case_id, "string-trim-preserves-unicode-whitespace"),
+  jvm.(
     :local_date_parse_char_sequence,
     nil,
     [string.("2024-01-02")],

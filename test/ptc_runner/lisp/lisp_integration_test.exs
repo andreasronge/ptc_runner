@@ -301,6 +301,9 @@ defmodule PtcRunner.Lisp.IntegrationTest do
     end
 
     test "clojure.string trim helpers work end-to-end" do
+      assert {:ok, %{return: "Ada"}} =
+               Lisp.run(~S|(clojure.string/trim "  Ada  ")|)
+
       assert {:ok, %{return: "a"}} = Lisp.run(~S|(clojure.string/trim-newline "a\r\n")|)
       assert {:ok, %{return: "a  "}} = Lisp.run(~S|(str/triml "  a  ")|)
       assert {:ok, %{return: "  a"}} = Lisp.run(~S|(string/trimr "  a  ")|)

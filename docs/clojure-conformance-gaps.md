@@ -2425,8 +2425,8 @@ coercion gap tracked for core helpers.
 | Field | Value |
 |-------|-------|
 | **Priority** | P2 |
-| **Status** | open |
-| **Source** | Manual conformance cases `string/blank-nbsp-bug-001`, `string/blank-em-space-bug-001`, `string/trim-nbsp-bug-001`, `string/trim-em-space-bug-001`, `string/triml-nbsp-bug-001`, `string/triml-em-space-bug-001`, `string/trimr-nbsp-bug-001`, `string/trimr-em-space-bug-001` |
+| **Status** | fixed |
+| **Source** | Generated manual regression cases `string/whitespace-u*-001` |
 
 ```clojure
 ;; Clojure
@@ -2439,20 +2439,14 @@ coercion gap tracked for core helpers.
 (clojure.string/trimr "x\u00A0")     ;=> "x\u00A0"
 (clojure.string/trimr "x\u2003")     ;=> "x"
 
-;; PTC-Lisp current behavior
-(clojure.string/blank? "\u00A0")      ;=> true
-(clojure.string/blank? "\u2003")      ;=> false
-(clojure.string/trim "\u00A0x\u00A0") ;=> "x"
-(clojure.string/trim "\u2003x\u2003") ;=> "\u2003x\u2003"
-(clojure.string/triml "\u00A0x")     ;=> "x"
-(clojure.string/triml "\u2003x")     ;=> "\u2003x"
-(clojure.string/trimr "x\u00A0")     ;=> "x"
-(clojure.string/trimr "x\u2003")     ;=> "x\u2003"
+;; PTC-Lisp now returns the same values.
 ```
 
-**Decision:** BUG. The audit marks these Clojure-named string helpers
-supported. Clojure uses Java whitespace semantics here, where non-breaking
-space is not removed by these helpers but EM SPACE is considered whitespace.
+**Decision:** FIXED. `blank?`, `trim`, `triml`, and `trimr` share an explicit
+classifier pinned to the supported JVM's `Character.isWhitespace` set. It
+includes U+001C through U+001F and excludes U+0085, U+00A0, U+2007, and
+U+202F. Java-named `.trim` remains distinct: Java `String.trim()` removes only
+leading and trailing UTF-16 code units from U+0000 through U+0020.
 
 ### GAP-S51: `clojure.string/split-lines` on empty string returns an empty vector
 

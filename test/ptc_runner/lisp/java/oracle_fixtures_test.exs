@@ -181,6 +181,8 @@ defmodule PtcRunner.Lisp.Java.OracleFixturesTest do
                  string-length-0
                  string-substring-begin
                  string-substring-begin-end
+                 string-trim-0
+                 string-trim-preserves-unicode-whitespace
                  local-date-parse-char-sequence
                  local-date-parse-positive-zero-extended-year
                  local-date-parse-invalid

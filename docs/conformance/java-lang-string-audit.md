@@ -14,12 +14,12 @@ Coverage excludes `not_relevant` entries: `supported / (supported + candidate + 
 
 | Status | Count |
 |--------|-------|
-| Supported | 7 |
-| Candidate | 6 |
+| Supported | 8 |
+| Candidate | 5 |
 | Not Relevant | 2 |
 | Not Classified | 0 |
 | Relevant Target | 13 |
-| Coverage | 7/13 (53.8%) |
+| Coverage | 8/13 (61.5%) |
 | **Total** | **15** |
 
 ## Details
@@ -40,4 +40,4 @@ Coverage excludes `not_relevant` entries: `supported / (supported + candidate + 
 | `.substring` | ✅ supported | Extract substring | Uses Java UTF-16 code-unit indexes. DIV-41: character-literal receivers behave as one-character strings. DIV-53: ranges containing an unpaired surrogate and inputs larger than 256,000 bytes produce invalid_java_string. |
 | `.toLowerCase` | 🔲 candidate | Lowercase string | Deferred until a deterministic locale and pinned Unicode-data contract are selected. |
 | `.toUpperCase` | 🔲 candidate | Uppercase string | Deferred until a deterministic locale and pinned Unicode-data contract are selected. |
-| `.trim` | 🔲 candidate | Trim leading and trailing whitespace | Common LLM spelling; clojure.string/trim is not currently implemented. |
+| `.trim` | ✅ supported | Remove leading and trailing code units from U+0000 through U+0020 | Uses Java String.trim semantics, which differ from clojure.string/trim. DIV-41: character-literal receivers behave as one-character strings. DIV-53: String inputs larger than 256,000 bytes produce invalid_java_string. |
