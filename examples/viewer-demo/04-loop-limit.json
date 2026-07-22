@@ -4,7 +4,7 @@
     "components": [
       {
         "id": "demo.agent",
-        "path": "agent.lisp",
+        "path": "agent.clj",
         "dependencies": [
           "agent.core"
         ]
@@ -19,7 +19,7 @@
     "components": [
       {
         "id": "demo.files",
-        "path": "files.lisp"
+        "path": "files.clj"
       }
     ],
     "data": {}

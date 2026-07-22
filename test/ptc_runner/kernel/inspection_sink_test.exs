@@ -432,7 +432,7 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
          tmp_dir: dir
        } do
     File.write!(
-      Path.join(dir, "workflow.lisp"),
+      Path.join(dir, "workflow.clj"),
       ~S|(ns app) (defn run [input] (return (tool/kernel-eval {"kind" :source "source" (get input "program")})))|
     )
 
@@ -441,7 +441,7 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
     manifest = %{
       "version" => 1,
       "workflow" => %{
-        "components" => [%{"id" => "app", "path" => "workflow.lisp"}],
+        "components" => [%{"id" => "app", "path" => "workflow.clj"}],
         "entry" => "app/run"
       },
       "input" => %{"value" => %{"program" => program}},

@@ -37,12 +37,12 @@ defmodule PtcRunner.Examples.KernelInspectionLab do
     files = Path.join(directory, "files")
     :ok = File.mkdir(files)
     :ok = File.write(Path.join(files, "value.txt"), "fixture-file")
-    :ok = File.write(Path.join(directory, "workflow.lisp"), workflow_source())
+    :ok = File.write(Path.join(directory, "workflow.clj"), workflow_source())
 
     mission_components =
       if wrapper? do
-        :ok = File.write(Path.join(directory, "mission.lisp"), mission_source())
-        [%{"id" => "lab.tools", "path" => "mission.lisp"}]
+        :ok = File.write(Path.join(directory, "mission.clj"), mission_source())
+        [%{"id" => "lab.tools", "path" => "mission.clj"}]
       else
         []
       end
@@ -140,7 +140,7 @@ defmodule PtcRunner.Examples.KernelInspectionLab do
       "workflow" => %{
         "components" => [
           %{"library" => "agent.core"},
-          %{"id" => "lab.workflow", "path" => "workflow.lisp", "dependencies" => ["agent.core"]}
+          %{"id" => "lab.workflow", "path" => "workflow.clj", "dependencies" => ["agent.core"]}
         ],
         "entry" => "lab.workflow/run"
       },

@@ -43,7 +43,7 @@ defmodule Mix.Tasks.Ptc.ReplTest do
 
   @tag :tmp_dir
   test "a strict manifest supplies the REPL workflow bundle", %{tmp_dir: directory} do
-    component_path = Path.join(directory, "helpers.lisp")
+    component_path = Path.join(directory, "helpers.clj")
     manifest_path = Path.join(directory, "ptc.json")
     File.write!(component_path, "(ns helpers) (defn answer [] 42)")
 
@@ -52,7 +52,7 @@ defmodule Mix.Tasks.Ptc.ReplTest do
       Jason.encode!(%{
         "version" => 1,
         "workflow" => %{
-          "components" => [%{"id" => "helpers", "path" => "helpers.lisp"}],
+          "components" => [%{"id" => "helpers", "path" => "helpers.clj"}],
           "entry" => "helpers/answer"
         },
         "input" => %{"value" => %{}}
@@ -86,7 +86,7 @@ defmodule Mix.Tasks.Ptc.ReplTest do
 
   @tag :tmp_dir
   test "a private manifest restricts the trace before appending events", %{tmp_dir: directory} do
-    component_path = Path.join(directory, "helpers.lisp")
+    component_path = Path.join(directory, "helpers.clj")
     manifest_path = Path.join(directory, "private.json")
     trace_path = Path.join(directory, "private.private.jsonl")
     File.write!(component_path, "(ns helpers) (defn answer [] 42)")
@@ -96,7 +96,7 @@ defmodule Mix.Tasks.Ptc.ReplTest do
       Jason.encode!(%{
         "version" => 1,
         "workflow" => %{
-          "components" => [%{"id" => "helpers", "path" => "helpers.lisp"}],
+          "components" => [%{"id" => "helpers", "path" => "helpers.clj"}],
           "entry" => "helpers/answer"
         },
         "input" => %{"value" => %{}},
@@ -115,7 +115,7 @@ defmodule Mix.Tasks.Ptc.ReplTest do
 
   @tag :tmp_dir
   test "-l evaluates setup before entering the REPL", %{tmp_dir: directory} do
-    path = Path.join(directory, "setup.lisp")
+    path = Path.join(directory, "setup.clj")
     File.write!(path, "(def loaded 41)")
     output = capture_io("(+ loaded 1)\n", fn -> Repl.run(["-l", path]) end)
     assert output =~ "Loaded #{path}"
@@ -130,7 +130,7 @@ defmodule Mix.Tasks.Ptc.ReplTest do
 
   test "eval and positional script modes are mutually exclusive" do
     assert_raise Mix.Error, ~r/cannot combine --eval with a script/, fn ->
-      Repl.run(["-e", "42", "script.lisp"])
+      Repl.run(["-e", "42", "script.clj"])
     end
   end
 
@@ -214,12 +214,12 @@ defmodule Mix.Tasks.Ptc.ReplTest do
           {"load", "",
            [
              "--load",
-             write_file(directory, "setup.lisp", "(def loaded 41)"),
+             write_file(directory, "setup.clj", "(def loaded 41)"),
              "-e",
              "(+ loaded 1)"
            ], "42"},
           {"script", "",
-           [write_file(directory, "script.lisp", "(count (get (log/runs {}) \"items\"))")], "1"},
+           [write_file(directory, "script.clj", "(count (get (log/runs {}) \"items\"))")], "1"},
           {"stdin", "(count (get (log/runs {}) \"items\"))", ["-"], "1"},
           {"interactive", "(count (get (log/runs {}) \"items\"))\n", [], "1"}
         ] do
@@ -415,7 +415,7 @@ defmodule Mix.Tasks.Ptc.ReplTest do
 
     capture_io(fn ->
       assert_raise Mix.Error, ~r/could not read the profile script/, fn ->
-        Repl.run(profile_args(source, input_output) ++ [Path.join(directory, "missing.lisp")])
+        Repl.run(profile_args(source, input_output) ++ [Path.join(directory, "missing.clj")])
       end
     end)
 
@@ -475,7 +475,7 @@ defmodule Mix.Tasks.Ptc.ReplTest do
     File.mkdir!(source)
     seed_trace(source, "seed")
     oversized = String.duplicate("x", 65_537)
-    oversized_file = write_file(directory, "oversized.lisp", oversized)
+    oversized_file = write_file(directory, "oversized.clj", oversized)
 
     for {input, suffix, args} <- [
           {"", "load", ["--load", oversized_file, "-e", "42"]},

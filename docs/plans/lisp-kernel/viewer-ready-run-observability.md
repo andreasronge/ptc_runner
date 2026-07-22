@@ -70,7 +70,7 @@ omitted.
 
 ### The shipped agent emits an annotation the Kernel rejects
 
-`priv/preludes/kernel/agent.core.lisp` emits an `"agent-action"` annotation on
+`priv/preludes/kernel/agent.core.clj` emits an `"agent-action"` annotation on
 every turn. `PtcRunner.Kernel.SafeMetadata.annotation?/2` currently accepts
 only `"progress"` with one enumerated stage. The annotation capability itself
 works, but the shipped agent's call does not belong to its accepted vocabulary.

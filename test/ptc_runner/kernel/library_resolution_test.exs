@@ -29,7 +29,7 @@ defmodule PtcRunner.Kernel.LibraryResolutionTest do
              Library.resolve_components([{:library, "not-installed"}])
 
     {:ok, local_kernel} =
-      Component.new(id: "kernel", source: "(ns local.kernel)", origin: "local.lisp")
+      Component.new(id: "kernel", source: "(ns local.kernel)", origin: "local.clj")
 
     assert {:error, :local_library_collision} =
              Library.resolve_components([local_kernel, {:library, "kernel"}])

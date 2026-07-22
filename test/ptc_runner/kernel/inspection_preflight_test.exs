@@ -97,14 +97,14 @@ defmodule PtcRunner.Kernel.InspectionPreflightTest do
 
   defp write_manifest(dir, providers) do
     File.write!(
-      Path.join(dir, "main.lisp"),
+      Path.join(dir, "main.clj"),
       ~S|(ns main) (defn run [input] (return 42))|
     )
 
     manifest = %{
       "version" => 1,
       "workflow" => %{
-        "components" => [%{"id" => "main", "path" => "main.lisp"}],
+        "components" => [%{"id" => "main", "path" => "main.clj"}],
         "entry" => "main/run"
       },
       "input" => %{"value" => %{}},

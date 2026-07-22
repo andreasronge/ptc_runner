@@ -11,7 +11,7 @@ optional trace labels. Loading is strict and performs no workflow execution.
   "version": 1,
   "workflow": {
     "components": [
-      {"id": "my.workflow", "path": "workflow.lisp"}
+      {"id": "my.workflow", "path": "workflow.clj"}
     ],
     "entry": "my.workflow/run"
   },
@@ -32,7 +32,7 @@ A local component names its source and sorted, unique dependencies:
 ```json
 {
   "id": "my.workflow",
-  "path": "workflow.lisp",
+  "path": "workflow.clj",
   "dependencies": ["my.helpers"]
 }
 ```

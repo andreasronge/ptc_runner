@@ -46,7 +46,7 @@ The example has three files:
 ```text
 examples/kernel-tutorial/01-orders/
 ├── ptc.json
-├── orders.lisp
+├── orders.clj
 └── orders.json
 ```
 
@@ -58,7 +58,7 @@ input file:
   "version": 1,
   "workflow": {
     "components": [
-      {"id": "tutorial.orders", "path": "orders.lisp"}
+      {"id": "tutorial.orders", "path": "orders.clj"}
     ],
     "entry": "tutorial.orders/summarize"
   },

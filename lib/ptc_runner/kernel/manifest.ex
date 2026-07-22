@@ -8,7 +8,7 @@ defmodule PtcRunner.Kernel.Manifest do
         "version": 1,
         "workflow": {
           "components": [
-            {"id": "workflow.main", "path": "workflow.lisp", "dependencies": ["agent.core"]},
+            {"id": "workflow.main", "path": "workflow.clj", "dependencies": ["agent.core"]},
             {"library": "agent.core"}
           ],
           "entry": "workflow.main/run"

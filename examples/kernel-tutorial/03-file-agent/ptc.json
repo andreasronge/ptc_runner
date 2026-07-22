@@ -2,14 +2,14 @@
   "version": 1,
   "workflow": {
     "components": [
-      {"id": "tutorial.agent", "path": "agent.lisp", "dependencies": ["agent.core"]},
+      {"id": "tutorial.agent", "path": "agent.clj", "dependencies": ["agent.core"]},
       {"library": "agent.core"}
     ],
     "entry": "tutorial.agent/run"
   },
   "mission": {
     "components": [
-      {"id": "tutorial.files", "path": "files.lisp"}
+      {"id": "tutorial.files", "path": "files.clj"}
     ],
     "data": {}
   },

@@ -6,8 +6,8 @@ defmodule Mix.Tasks.Ptc.Repl do
 
       mix ptc.repl
       mix ptc.repl -e "(+ 1 2)" -e "(+ *1 3)"
-      mix ptc.repl -l setup.lisp
-      mix ptc.repl script.lisp
+      mix ptc.repl -l setup.clj
+      mix ptc.repl script.clj
       mix ptc.repl -
       mix ptc.repl --manifest ptc.json
       mix ptc.repl --manifest ptc.json --trace trace.jsonl
