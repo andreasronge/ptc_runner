@@ -18,17 +18,17 @@ defmodule PtcRunner.Kernel.ManifestTest do
     File.mkdir_p!(Path.join(dir, "workflow"))
 
     File.write!(
-      Path.join(dir, "workflow/main.lisp"),
+      Path.join(dir, "workflow/main.clj"),
       ~S|(ns workflow.main) (defn run [input] (return (get input "value")))|
     )
 
     File.write!(Path.join(dir, "input.json"), Jason.encode!(%{"value" => 42}))
-    File.ln_s!("main.lisp", Path.join(dir, "workflow/link.lisp"))
+    File.ln_s!("main.clj", Path.join(dir, "workflow/link.clj"))
 
     manifest = %{
       "version" => 1,
       "workflow" => %{
-        "components" => [%{"id" => "workflow.main", "path" => "workflow/link.lisp"}],
+        "components" => [%{"id" => "workflow.main", "path" => "workflow/link.clj"}],
         "entry" => "workflow.main/run"
       },
       "input" => %{"path" => "input.json"},
@@ -53,12 +53,12 @@ defmodule PtcRunner.Kernel.ManifestTest do
 
   @tag :tmp_dir
   test "one-shot manifest runs stop their owned event sink", %{tmp_dir: dir} do
-    File.write!(Path.join(dir, "main.lisp"), "(ns main) (defn run [_] (return 42))")
+    File.write!(Path.join(dir, "main.clj"), "(ns main) (defn run [_] (return 42))")
 
     manifest = %{
       "version" => 1,
       "workflow" => %{
-        "components" => [%{"id" => "main", "path" => "main.lisp"}],
+        "components" => [%{"id" => "main", "path" => "main.clj"}],
         "entry" => "main/run"
       },
       "input" => %{"value" => %{}},
@@ -77,8 +77,8 @@ defmodule PtcRunner.Kernel.ManifestTest do
   test "manifest rejects unknown keys, duplicate JSON keys, versions, and path escape", %{
     tmp_dir: dir
   } do
-    File.write!(Path.join(dir, "source.lisp"), "(ns safe) (defn run [_] (return 1))")
-    outside = dir <> "-outside.lisp"
+    File.write!(Path.join(dir, "source.clj"), "(ns safe) (defn run [_] (return 1))")
+    outside = dir <> "-outside.clj"
     File.write!(outside, "(ns outside) (defn run [_] (return 1))")
     on_exit(fn -> File.rm(outside) end)
 
@@ -94,8 +94,8 @@ defmodule PtcRunner.Kernel.ManifestTest do
     end
 
     for manifest <- [
-          Map.put(base.("source.lisp"), "unknown", true),
-          Map.put(base.("source.lisp"), "version", 2),
+          Map.put(base.("source.clj"), "unknown", true),
+          Map.put(base.("source.clj"), "version", 2),
           base.("../#{Path.basename(outside)}")
         ] do
       path = Path.join(dir, "invalid-#{System.unique_integer([:positive])}.json")
@@ -113,12 +113,12 @@ defmodule PtcRunner.Kernel.ManifestTest do
 
   @tag :tmp_dir
   test "manifest labels accept only bounded safe metadata", %{tmp_dir: dir} do
-    File.write!(Path.join(dir, "main.lisp"), "(ns main) (defn run [_] (return 1))")
+    File.write!(Path.join(dir, "main.clj"), "(ns main) (defn run [_] (return 1))")
 
     base = %{
       "version" => 1,
       "workflow" => %{
-        "components" => [%{"id" => "main", "path" => "main.lisp"}],
+        "components" => [%{"id" => "main", "path" => "main.clj"}],
         "entry" => "main/run"
       },
       "input" => %{"value" => %{}}
@@ -159,12 +159,12 @@ defmodule PtcRunner.Kernel.ManifestTest do
 
   @tag :tmp_dir
   test "inspection capture cannot be enabled by manifest data", %{tmp_dir: dir} do
-    File.write!(Path.join(dir, "main.lisp"), "(ns main) (defn run [_] (return 1))")
+    File.write!(Path.join(dir, "main.clj"), "(ns main) (defn run [_] (return 1))")
 
     manifest = %{
       "version" => 1,
       "workflow" => %{
-        "components" => [%{"id" => "main", "path" => "main.lisp"}],
+        "components" => [%{"id" => "main", "path" => "main.clj"}],
         "entry" => "main/run"
       },
       "input" => %{"value" => %{"inspect" => "requested.inspection.jsonl"}},
@@ -186,12 +186,12 @@ defmodule PtcRunner.Kernel.ManifestTest do
 
   @tag :tmp_dir
   test "manifest limits are narrowed independently from host-installed ceilings", %{tmp_dir: dir} do
-    File.write!(Path.join(dir, "main.lisp"), "(ns main) (defn run [_] (return 1))")
+    File.write!(Path.join(dir, "main.clj"), "(ns main) (defn run [_] (return 1))")
 
     manifest = %{
       "version" => 1,
       "workflow" => %{
-        "components" => [%{"id" => "main", "path" => "main.lisp"}],
+        "components" => [%{"id" => "main", "path" => "main.clj"}],
         "entry" => "main/run"
       },
       "input" => %{"value" => %{}},
@@ -263,7 +263,7 @@ defmodule PtcRunner.Kernel.ManifestTest do
   test "manifest component union rejects duplicates, collisions, and ambiguous entries", %{
     tmp_dir: dir
   } do
-    File.write!(Path.join(dir, "kernel.lisp"), "(ns local.kernel)")
+    File.write!(Path.join(dir, "kernel.clj"), "(ns local.kernel)")
 
     base = %{
       "version" => 1,
@@ -274,9 +274,9 @@ defmodule PtcRunner.Kernel.ManifestTest do
     invalid_component_lists = [
       [%{"library" => "agent.core"}, %{"library" => "agent.core"}],
       [%{"library" => "missing"}],
-      [%{"library" => "kernel"}, %{"id" => "kernel", "path" => "kernel.lisp"}],
-      [%{"library" => "kernel", "path" => "kernel.lisp"}],
-      [%{"id" => "kernel", "path" => "kernel.lisp", "extra" => true}]
+      [%{"library" => "kernel"}, %{"id" => "kernel", "path" => "kernel.clj"}],
+      [%{"library" => "kernel", "path" => "kernel.clj"}],
+      [%{"id" => "kernel", "path" => "kernel.clj", "extra" => true}]
     ]
 
     for {components, index} <- Enum.with_index(invalid_component_lists) do
@@ -291,12 +291,12 @@ defmodule PtcRunner.Kernel.ManifestTest do
   test "provider registry rejects authority expansion and only calls host builders", %{
     tmp_dir: dir
   } do
-    File.write!(Path.join(dir, "main.lisp"), "(ns main) (defn run [_] (return 1))")
+    File.write!(Path.join(dir, "main.clj"), "(ns main) (defn run [_] (return 1))")
 
     manifest = %{
       "version" => 1,
       "workflow" => %{
-        "components" => [%{"id" => "main", "path" => "main.lisp"}],
+        "components" => [%{"id" => "main", "path" => "main.clj"}],
         "entry" => "main/run"
       },
       "input" => %{"value" => %{}},

@@ -2,7 +2,7 @@
   "version": 1,
   "workflow": {
     "components": [
-      {"id": "tutorial.orders", "path": "orders.lisp"}
+      {"id": "tutorial.orders", "path": "orders.clj"}
     ],
     "entry": "tutorial.orders/summarize"
   },

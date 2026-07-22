@@ -23,9 +23,9 @@ one script:
 ```bash
 mix ptc.repl
 mix ptc.repl -e '(def x 40)' -e '(+ x 2)' -e '(+ *1 1)'
-mix ptc.repl -l setup.lisp
-mix ptc.repl script.lisp
-mix ptc.repl - < script.lisp
+mix ptc.repl -l setup.clj
+mix ptc.repl script.clj
+mix ptc.repl - < script.clj
 ```
 
 Use the same strict manifest as `mix ptc.run` to attach a frozen workflow

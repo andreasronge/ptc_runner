@@ -31,7 +31,7 @@ separate explicit component-slot design and is not needed for this work.
 
 ### The current agent prompt does not teach the language
 
-`priv/preludes/kernel/agent.core.lisp` currently tells the model to call
+`priv/preludes/kernel/agent.core.clj` currently tells the model to call
 `run_ptc_lisp`, end with `return` or `fail`, avoid prose, and then appends the
 frozen mission-inventory JSON. The V2 inventory teaches exact call forms for
 prompt-visible exports and bare capabilities, but it does not teach the general
@@ -49,7 +49,7 @@ PTC-Lisp language:
 
 This guidance existed before the minimal Kernel cutover in two forms. The
 legacy SubAgent composed `priv/prompts/reference.md` into its system prompt,
-and an earlier Kernel experiment shipped `priv/preludes/agent/prompt.lisp` as
+and an earlier Kernel experiment shipped `priv/preludes/agent/prompt.clj` as
 prompt policy. Those surfaces were deleted with the legacy agent/discovery
 systems. The new `agent.core` restored the loop and later added the mission
 inventory, but did not restore a compact language reference.

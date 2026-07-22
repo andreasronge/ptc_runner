@@ -10,7 +10,7 @@ defmodule Mix.Tasks.Ptc.RunTest do
   @tag :tmp_dir
   test "runs the shared manifest path and accepts a confined mission override", %{tmp_dir: dir} do
     File.write!(
-      Path.join(dir, "main.lisp"),
+      Path.join(dir, "main.clj"),
       ~S|(ns main) (defn run [input] (return (get input "value")))|
     )
 
@@ -19,7 +19,7 @@ defmodule Mix.Tasks.Ptc.RunTest do
     manifest = %{
       "version" => 1,
       "workflow" => %{
-        "components" => [%{"id" => "main", "path" => "main.lisp"}],
+        "components" => [%{"id" => "main", "path" => "main.clj"}],
         "entry" => "main/run"
       },
       "input" => %{"value" => %{"value" => 1}}
@@ -40,14 +40,14 @@ defmodule Mix.Tasks.Ptc.RunTest do
   @tag :tmp_dir
   test "rejects an occupied inspection destination before execution", %{tmp_dir: dir} do
     File.write!(
-      Path.join(dir, "main.lisp"),
+      Path.join(dir, "main.clj"),
       ~S|(ns main) (defn run [input] (return 1))|
     )
 
     manifest = %{
       "version" => 1,
       "workflow" => %{
-        "components" => [%{"id" => "main", "path" => "main.lisp"}],
+        "components" => [%{"id" => "main", "path" => "main.clj"}],
         "entry" => "main/run"
       },
       "input" => %{"value" => %{}}
@@ -71,14 +71,14 @@ defmodule Mix.Tasks.Ptc.RunTest do
   @tag :tmp_dir
   test "persists canonical run events when --trace is selected", %{tmp_dir: dir} do
     File.write!(
-      Path.join(dir, "main.lisp"),
+      Path.join(dir, "main.clj"),
       ~S|(ns main) (defn run [input] (return (get input "value")))|
     )
 
     manifest = %{
       "version" => 1,
       "workflow" => %{
-        "components" => [%{"id" => "main", "path" => "main.lisp"}],
+        "components" => [%{"id" => "main", "path" => "main.clj"}],
         "entry" => "main/run"
       },
       "input" => %{"value" => %{"value" => 42}},
@@ -107,14 +107,14 @@ defmodule Mix.Tasks.Ptc.RunTest do
   @tag :tmp_dir
   test "traces from separate runs remain a valid shared directory source", %{tmp_dir: dir} do
     File.write!(
-      Path.join(dir, "main.lisp"),
+      Path.join(dir, "main.clj"),
       ~S|(ns main) (defn run [input] (return (get input "value")))|
     )
 
     manifest = %{
       "version" => 1,
       "workflow" => %{
-        "components" => [%{"id" => "main", "path" => "main.lisp"}],
+        "components" => [%{"id" => "main", "path" => "main.clj"}],
         "entry" => "main/run"
       },
       "input" => %{"value" => %{"value" => 7}}

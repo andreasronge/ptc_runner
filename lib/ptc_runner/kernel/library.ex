@@ -13,19 +13,19 @@ defmodule PtcRunner.Kernel.Library do
 
   alias PtcRunner.Kernel.Component
 
-  @kernel_path Path.expand("../../../priv/preludes/kernel/kernel.lisp", __DIR__)
-  @runtime_path Path.expand("../../../priv/preludes/kernel/runtime.lisp", __DIR__)
-  @cap_path Path.expand("../../../priv/preludes/kernel/cap.lisp", __DIR__)
-  @workflow_event_path Path.expand("../../../priv/preludes/kernel/workflow.event.lisp", __DIR__)
-  @fs_path Path.expand("../../../priv/preludes/kernel/fs.lisp", __DIR__)
-  @llm_path Path.expand("../../../priv/preludes/kernel/llm.lisp", __DIR__)
-  @agent_native_path Path.expand("../../../priv/preludes/kernel/agent.native.lisp", __DIR__)
-  @agent_prompt_path Path.expand("../../../priv/preludes/kernel/agent.prompt.lisp", __DIR__)
-  @agent_core_path Path.expand("../../../priv/preludes/kernel/agent.core.lisp", __DIR__)
-  @agent_feedback_path Path.expand("../../../priv/preludes/kernel/agent.feedback.lisp", __DIR__)
-  @agent_retry_path Path.expand("../../../priv/preludes/kernel/agent.retry.lisp", __DIR__)
-  @result_path Path.expand("../../../priv/preludes/kernel/result.lisp", __DIR__)
-  @log_core_path Path.expand("../../../priv/preludes/kernel/log.core.lisp", __DIR__)
+  @kernel_path Path.expand("../../../priv/preludes/kernel/kernel.clj", __DIR__)
+  @runtime_path Path.expand("../../../priv/preludes/kernel/runtime.clj", __DIR__)
+  @cap_path Path.expand("../../../priv/preludes/kernel/cap.clj", __DIR__)
+  @workflow_event_path Path.expand("../../../priv/preludes/kernel/workflow.event.clj", __DIR__)
+  @fs_path Path.expand("../../../priv/preludes/kernel/fs.clj", __DIR__)
+  @llm_path Path.expand("../../../priv/preludes/kernel/llm.clj", __DIR__)
+  @agent_native_path Path.expand("../../../priv/preludes/kernel/agent.native.clj", __DIR__)
+  @agent_prompt_path Path.expand("../../../priv/preludes/kernel/agent.prompt.clj", __DIR__)
+  @agent_core_path Path.expand("../../../priv/preludes/kernel/agent.core.clj", __DIR__)
+  @agent_feedback_path Path.expand("../../../priv/preludes/kernel/agent.feedback.clj", __DIR__)
+  @agent_retry_path Path.expand("../../../priv/preludes/kernel/agent.retry.clj", __DIR__)
+  @result_path Path.expand("../../../priv/preludes/kernel/result.clj", __DIR__)
+  @log_core_path Path.expand("../../../priv/preludes/kernel/log.core.clj", __DIR__)
   @external_resource @kernel_path
   @external_resource @runtime_path
   @external_resource @cap_path
@@ -77,7 +77,7 @@ defmodule PtcRunner.Kernel.Library do
           id: name,
           source: source,
           dependencies: Map.get(@dependencies, name, []),
-          origin: "priv/preludes/kernel/#{name}.lisp"
+          origin: "priv/preludes/kernel/#{name}.clj"
         )
 
       :error ->

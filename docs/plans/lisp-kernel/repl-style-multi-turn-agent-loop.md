@@ -303,7 +303,7 @@ Files:
 
 ### 3. Continue after an ordinary successful evaluation
 
-Add a `:continued` branch to `priv/preludes/kernel/agent.core.lisp`.
+Add a `:continued` branch to `priv/preludes/kernel/agent.core.clj`.
 
 That branch must:
 
@@ -379,9 +379,9 @@ exposing or externalizing the complete native memory map.
 
 Files:
 
-- `priv/preludes/kernel/agent.core.lisp`
-- `priv/preludes/kernel/agent.feedback.lisp`
-- `priv/preludes/kernel/agent.retry.lisp` only if turn-budget helpers can be
+- `priv/preludes/kernel/agent.core.clj`
+- `priv/preludes/kernel/agent.feedback.clj`
+- `priv/preludes/kernel/agent.retry.clj` only if turn-budget helpers can be
   simplified there
 
 ### 3b. Bound the complete accumulated model request
@@ -428,8 +428,8 @@ call per model turn.
 
 Files:
 
-- `priv/preludes/kernel/agent.prompt.lisp`
-- `priv/preludes/kernel/agent.native.lisp`
+- `priv/preludes/kernel/agent.prompt.clj`
+- `priv/preludes/kernel/agent.native.clj`
 
 #### Reuse the proven prompt policy from `main`
 

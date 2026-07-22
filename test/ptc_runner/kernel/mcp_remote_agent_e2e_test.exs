@@ -46,7 +46,7 @@ defmodule PtcRunner.Kernel.MCPRemoteAgentE2ETest do
 
     {:ok, registry} = ProviderRegistry.new(%{"remote-docs" => builder})
 
-    File.write!(Path.join(dir, "agent.lisp"), ~S"""
+    File.write!(Path.join(dir, "agent.clj"), ~S"""
     (ns e2e.agent "Remote MCP e2e entry." {:visibility :prompt})
 
     (defn run [input]
@@ -58,7 +58,7 @@ defmodule PtcRunner.Kernel.MCPRemoteAgentE2ETest do
     # supported agent pattern is a prompt-visible mission wrapper whose
     # export advertises its exact call shape, mirroring the kernel tutorial
     # and inspection-lab wrapper journeys.
-    File.write!(Path.join(dir, "mission.lisp"), ~S"""
+    File.write!(Path.join(dir, "mission.clj"), ~S"""
     (ns e2e.tools "Remote documentation lookups." {:visibility :prompt})
 
     (defn resolve-library [name query]
@@ -69,13 +69,13 @@ defmodule PtcRunner.Kernel.MCPRemoteAgentE2ETest do
       "version" => 1,
       "workflow" => %{
         "components" => [
-          %{"id" => "e2e.agent", "path" => "agent.lisp", "dependencies" => ["agent.core"]},
+          %{"id" => "e2e.agent", "path" => "agent.clj", "dependencies" => ["agent.core"]},
           %{"library" => "agent.core"}
         ],
         "entry" => "e2e.agent/run"
       },
       "mission" => %{
-        "components" => [%{"id" => "e2e.tools", "path" => "mission.lisp"}],
+        "components" => [%{"id" => "e2e.tools", "path" => "mission.clj"}],
         "data" => %{}
       },
       "input" => %{

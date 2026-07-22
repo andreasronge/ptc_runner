@@ -80,7 +80,7 @@ Select the installed library and declare the dependency in the manifest:
   "components": [
     {
       "id": "my.agent",
-      "path": "agent.lisp",
+      "path": "agent.clj",
       "dependencies": ["agent.core"]
     },
     {"library": "agent.core"}
@@ -235,8 +235,8 @@ The checked-in file agent joins every piece above:
 ```text
 examples/kernel-tutorial/03-file-agent/
 ├── ptc.json       manifest and provider grants
-├── agent.lisp     workflow entry over agent.core
-├── files.lisp     prompt-visible mission API
+├── agent.clj      workflow entry over agent.core
+├── files.clj      prompt-visible mission API
 └── files/
     └── brief.txt  frozen mission input
 ```

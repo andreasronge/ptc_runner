@@ -77,7 +77,7 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
   @tag :tmp_dir
   test "assembly failure closes successful providers in reverse order", %{tmp_dir: dir} do
     parent = self()
-    File.write!(Path.join(dir, "workflow.lisp"), "(ns app) (defn run [x] (tool/missing {}))")
+    File.write!(Path.join(dir, "workflow.clj"), "(ns app) (defn run [x] (tool/missing {}))")
 
     manifest =
       manifest(
@@ -114,7 +114,7 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
   @tag :tmp_dir
   test "normal run and REPL closure release provider resources", %{tmp_dir: dir} do
     parent = self()
-    File.write!(Path.join(dir, "workflow.lisp"), "(ns app) (defn run [x] (return x))")
+    File.write!(Path.join(dir, "workflow.clj"), "(ns app) (defn run [x] (return x))")
 
     manifest = manifest(dir, [provider("owned", %{"id" => "run"})], [])
     {:ok, registry} = registry_with_close(parent)
@@ -223,7 +223,7 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
     body = %{
       "version" => 1,
       "workflow" => %{
-        "components" => [%{"id" => "app", "path" => "workflow.lisp"}],
+        "components" => [%{"id" => "app", "path" => "workflow.clj"}],
         "entry" => "app/run"
       },
       "input" => %{"value" => %{}},

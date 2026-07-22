@@ -2,14 +2,14 @@
   "version": 1,
   "workflow": {
     "components": [
-      {"id": "demo.agent", "path": "agent.lisp", "dependencies": ["agent.core"]},
+      {"id": "demo.agent", "path": "agent.clj", "dependencies": ["agent.core"]},
       {"library": "agent.core"}
     ],
     "entry": "demo.agent/run"
   },
   "mission": {
     "components": [
-      {"id": "demo.files", "path": "files.lisp"}
+      {"id": "demo.files", "path": "files.clj"}
     ],
     "data": {}
   },

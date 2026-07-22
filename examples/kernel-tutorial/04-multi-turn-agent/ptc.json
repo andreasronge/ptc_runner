@@ -2,7 +2,7 @@
   "version": 1,
   "workflow": {
     "components": [
-      {"id": "tutorial.multi-turn", "path": "agent.lisp", "dependencies": ["agent.core"]},
+      {"id": "tutorial.multi-turn", "path": "agent.clj", "dependencies": ["agent.core"]},
       {"library": "agent.core"}
     ],
     "entry": "tutorial.multi-turn/run"

@@ -129,7 +129,7 @@ This is the smallest useful shape:
   "version": 1,
   "workflow": {
     "components": [
-      {"id": "my.workflow", "path": "workflow.lisp"}
+      {"id": "my.workflow", "path": "workflow.clj"}
     ],
     "entry": "my.workflow/run"
   },
@@ -153,7 +153,7 @@ another component only when its manifest entry lists the dependency:
 ```json
 {
   "id": "my.workflow",
-  "path": "workflow.lisp",
+  "path": "workflow.clj",
   "dependencies": ["my.helpers"]
 }
 ```
@@ -164,7 +164,7 @@ project. For example, a local entry can depend on the complete installed
 
 ```json
 "components": [
-  {"id": "my.workflow", "path": "workflow.lisp", "dependencies": ["agent.core"]},
+  {"id": "my.workflow", "path": "workflow.clj", "dependencies": ["agent.core"]},
   {"library": "agent.core"}
 ]
 ```
@@ -180,7 +180,7 @@ limit values above the host ceiling are rejected before execution.
 ## Use case 1: deterministic data transformation
 
 The human creates
-[`orders.lisp`](https://github.com/andreasronge/ptc_runner/blob/main/examples/kernel-tutorial/01-orders/orders.lisp), a normal
+[`orders.clj`](https://github.com/andreasronge/ptc_runner/blob/main/examples/kernel-tutorial/01-orders/orders.clj), a normal
 Clojure-style aggregation:
 
 ```clojure
@@ -249,7 +249,7 @@ and post-processing where an LLM would add cost and uncertainty.
 ## Use case 2: DeepSeek as one bounded capability
 
 In
-[`extract.lisp`](https://github.com/andreasronge/ptc_runner/blob/main/examples/kernel-tutorial/02-deepseek-extract/extract.lisp),
+[`extract.clj`](https://github.com/andreasronge/ptc_runner/blob/main/examples/kernel-tutorial/02-deepseek-extract/extract.clj),
 the human creates the request and owns its output policy. The manifest grants
 the workflow one provider named `llm` configured with the `deepseek` alias:
 
@@ -677,7 +677,7 @@ mission input, file content, and provider output as untrusted data.
 | `mix ptc.run MANIFEST --mission INPUT.json` | Run with a confined alternate input object |
 | `mix ptc.run MANIFEST --trace TRACE.jsonl` | Persist bounded canonical events after the run |
 | `mix ptc.repl` | Start the direct transactional PTC-Lisp REPL |
-| `mix ptc.repl -e EXPR -l SETUP.lisp` | Run repeatable REPL expressions with optional setup |
+| `mix ptc.repl -e EXPR -l SETUP.clj` | Run repeatable REPL expressions with optional setup |
 | `mix ptc.repl --manifest MANIFEST` | Reuse a manifest workflow bundle/capability set interactively |
 | `mix ptc.viewer --trace-dir DIR` | Browse public canonical JSONL traces locally |
 | `mix ptc.validate_spec` | Validate generated language/spec artifacts |

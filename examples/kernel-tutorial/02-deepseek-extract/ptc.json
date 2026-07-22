@@ -2,7 +2,7 @@
   "version": 1,
   "workflow": {
     "components": [
-      {"id": "tutorial.extract", "path": "extract.lisp"}
+      {"id": "tutorial.extract", "path": "extract.clj"}
     ],
     "entry": "tutorial.extract/extract"
   },
