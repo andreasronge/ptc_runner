@@ -1062,6 +1062,11 @@ so it is the value model, not a per-function quirk. Tradeoff (acknowledged): a
 keyword lookup can return a string-keyed value, which can mask a data-shape
 mismatch at a map boundary — guard explicitly when exact-key semantics matter.
 This value model takes precedence over Clojure-compat where they conflict.
+When a map contains both a keyword key and its string alias, flexible lookup
+still prefers the exact key. Public Elixir projection preserves both entries
+with inert collision wrappers rather than choosing one during externalization;
+JSON-facing Kernel boundaries reject the ambiguity with
+`:public_projection_collision`.
 
 ### DIV-48: `find` on a non-associative collection returns a `:type_error` signal
 
@@ -2672,23 +2677,25 @@ value while `hash-map`/`array-map` kept the *last*).
 (and element forms in a set literal) and raises a recoverable `:duplicate_key`
 error before evaluation, matching Clojure's reader. This is a static read-time
 check on the key *forms*, so keys that only collide at **runtime** (distinct
-forms, e.g. `{:a 1 (keyword "a") 9}`, or keyword/string flex-collisions per
-[DIV-47](#div-47-flexible-keywordstring-key-access-keynormalizer)) are not
-affected — they remain the intentional silent dedupe of
+forms, e.g. `{:a 1 (keyword "a") 9}`) are not affected — they remain the
+intentional silent dedupe of
 [DIV-06](#div-06-silent-deduplication-of-computed-duplicate-keys-in-mapset-literals).
+Keyword/string flex-collisions from
+[DIV-47](#div-47-flexible-keywordstring-key-access-keynormalizer) remain
+distinct runtime keys and are preserved by public Elixir projection.
 The map-literal evaluator was also changed to keep the **last** colliding value
 (was first) for collisions that surface at map *construction* — i.e. distinct
 forms that evaluate to the same key, like `{:a 1 (keyword "a") 9} ;=> {:a 9}` —
 so `{}`, `hash-map`, and `array-map` all agree with Clojure there.
 
-Keyword/string *flex*-collisions ([DIV-47](#div-47-flexible-keywordstring-key-access-keynormalizer))
-are a separate case: the keys stay distinct at construction and only merge when
-the map is externalized to string keys, so the winner is decided by
-externalization order, not source order. This is **not** source-order-last, but
-it is consistent across all three constructors — `{"a" 1 :a 9}`,
-`(hash-map "a" 1 :a 9)`, and the `array-map` form all yield `{"a" 1}`. The
-read-time form check and the construction-time last-wins rule are what GAP-S147
-covers; the flex-collision tiebreak is governed by DIV-47.
+Keyword/string *flex*-collisions
+([DIV-47](#div-47-flexible-keywordstring-key-access-keynormalizer)) are a
+separate case: the keys stay distinct at construction and in public Elixir
+results. If both keys share one display or JSON representation, inert wrappers
+preserve both entries for direct observation and strict Kernel boundaries
+reject the ambiguous collection. The read-time form check and the
+construction-time last-wins rule are what GAP-S147 covers; flexible lookup is
+governed by DIV-47.
 
 The read-time check is best-effort *structural* form-equality, not full Clojure
 reader parity: it normalizes nested collection shape (vector ≡ list as ordered

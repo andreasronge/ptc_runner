@@ -1,10 +1,10 @@
 # Kernel publication and boundary hardening
 
-**Status:** triaged; first slice implemented
+**Status:** triaged; first two slices implemented
 
 **Origin:** extracted from the Java interop investigation on 2026-07-20
 
-**Last audited:** 2026-07-22 against `origin/main` at `6be08d9f`
+**Last audited:** 2026-07-22 against `origin/main` at `fe10efd9`
 
 ## Decision
 
@@ -28,7 +28,7 @@ This plan now separates:
 | Area | Current state | Decision |
 | --- | --- | --- |
 | Tool cache | Every evaluation now owns an empty, evaluation-local cache. Caller-supplied state is rejected and Results omit cache entries. | Complete. |
-| Public projection | Java collisions are rejected, but a later generic Result projection can still collapse distinct non-Java keys. | Fix next. |
+| Public projection | Direct and Kernel results use one collision-aware projection. Direct Elixir results preserve entries; Kernel boundaries reject ambiguity. | Complete. |
 | Ordinary terminal publication | Atomic finalization, terminal reserve, and frozen batch handoff exist, but ordinary Runner and standalone REPL do not use them. | Migrate in a separate lifecycle slice. |
 | Drop accounting and inspection | Drop buckets are unbounded by event-type count, and several payload-bearing structs use derived `Inspect`. | Fix with the owning boundary slices. |
 | Viewer persistence | SessionTrace owns finalization and retry; TraceLog publication is synced, no-clobber, and byte-identical on retry. | Remove from the active backlog. |
@@ -145,13 +145,13 @@ public contract with schema versioning, explicit tool generation, result
 validation, bounds, and redacted inspection. Do not reopen the boundary by
 accepting the old plain-map representation.
 
-## Second slice: collision-safe public projection
+## Completed second slice: collision-safe public projection
 
-Java projection is collision-aware, and `PtcRunner.Lisp.externalize_value/1`
-preserves distinct generic map keys with inert wrappers. The final public
-`PtcRunner.Lisp.Result` path nevertheless applies another recursive projector
-that can silently collapse two different function keys to one `"#fn[...]"`
-key.
+Java projection was already collision-aware, and
+`PtcRunner.Lisp.externalize_value/1` preserved distinct generic map keys with
+inert wrappers. The former public `PtcRunner.Lisp.Result` path nevertheless
+applied another recursive projector that could silently collapse two different
+function keys to one `"#fn[...]"` key.
 
 A reproduced example is:
 
@@ -160,15 +160,21 @@ A reproduced example is:
  (fn [x] (+ x 1)) 2}
 ```
 
-The current public result contains only `%{"#fn[...]" => 2}`.
+The old public result contained only `%{"#fn[...]" => 2}`.
 
-This slice should choose one authoritative public projector, migrate direct
-Result and Kernel terminal projection to it, and delete competing recursive
-walkers. Public Elixir projection may preserve ambiguous keys with inert
-wrappers; strict JSON boundaries must reject ambiguity with a stable bounded
-error. Add equivalent map and set tests for direct Lisp and Kernel results.
+Direct Results, subordinate Kernel results, and workflow terminal results now
+use the same recursive Lisp-value projector after boundary-specific Java
+projection. The duplicate Result and Kernel walkers were removed. Direct
+Elixir observations, including log analysis, retain every colliding map key and
+set member through inert collision wrappers. JSON-facing runtime-tool and
+workflow boundaries reject both equal projected values and distinct values
+with the same strict JSON representation using the stable
+`:public_projection_collision` reason before continuation commit or workflow
+publication.
 
-Do not expand this slice into validation of every host-supplied BEAM term.
+Boundary tests cover maps and sets containing distinct callables as well as a
+callable beside its literal display string. The implementation does not add
+generic validation for every host-supplied BEAM term.
 
 ## Third slice: ordinary terminal finalization
 

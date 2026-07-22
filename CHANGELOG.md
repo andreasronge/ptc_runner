@@ -62,6 +62,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Unified direct and Kernel public-value projection. Direct results preserve
+  colliding map keys and set members with inert wrappers, while Kernel JSON
+  boundaries reject ambiguous projections with
+  `:public_projection_collision` instead of silently dropping values.
 - Made tool caching evaluator-local: every PTC-Lisp evaluation starts empty,
   caller-supplied `:tool_cache` state is rejected, and
   `PtcRunner.Lisp.Result` no longer exposes internal cache entries.

@@ -2,6 +2,7 @@ defmodule PtcRunner.Lisp.IntegrationTest do
   use ExUnit.Case, async: true
 
   alias PtcRunner.Lisp
+  alias PtcRunner.Lisp.Format
 
   describe "explicit storage via def" do
     test "def stores value in user_ns, accessible in same expression" do
@@ -704,7 +705,7 @@ defmodule PtcRunner.Lisp.IntegrationTest do
 
       assert length(step.child_steps) == 2
       assert Enum.map(step.child_steps, & &1.trace_id) == ["worker_1", "reviewer_1"]
-      assert hd(step.child_steps).return == {:wrapped, "#fn[...]"}
+      assert hd(step.child_steps).return == {:wrapped, %Format.Fn{params: "..."}}
       refute inspect(step.child_steps) =~ "must-not-leak"
     end
   end

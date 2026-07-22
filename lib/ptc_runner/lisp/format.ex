@@ -110,7 +110,7 @@ defmodule PtcRunner.Lisp.Format do
   end
 
   alias PtcRunner.Lisp.Env.Builtin, as: EnvBuiltin
-  alias PtcRunner.Lisp.ExternalizedMapKey
+  alias PtcRunner.Lisp.ExternalizedCollision
   alias PtcRunner.Lisp.Format.JavaDisplay
   alias PtcRunner.Lisp.Java.Callable, as: JavaCallable
   alias PtcRunner.Lisp.Java.Primitive, as: JavaPrimitive
@@ -253,6 +253,9 @@ defmodule PtcRunner.Lisp.Format do
 
   defp format_clojure(%JavaDisplay{label: label}, _opts), do: {label, false}
 
+  defp format_clojure(%ExternalizedCollision{value: value}, opts),
+    do: format_clojure(value, opts)
+
   # Plain Elixir functions (e.g., returned by fnil with normal builtins)
   defp format_clojure(f, _opts) when is_function(f), do: {"#<fn>", false}
 
@@ -390,7 +393,7 @@ defmodule PtcRunner.Lisp.Format do
   defp format_clojure_key(%LispKeyword{name: name}), do: ":#{name}"
   defp format_clojure_key(k) when is_binary(k), do: inspect(k)
 
-  defp format_clojure_key(%ExternalizedMapKey{value: value}),
+  defp format_clojure_key(%ExternalizedCollision{value: value}),
     do: format_clojure_key(value)
 
   defp format_clojure_key(k) do

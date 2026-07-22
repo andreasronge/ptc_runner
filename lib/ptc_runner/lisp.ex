@@ -41,7 +41,7 @@ defmodule PtcRunner.Lisp do
     DataKeys,
     Env,
     Eval,
-    ExternalizedMapKey,
+    ExternalizedCollision,
     Format,
     Parser,
     RuntimeCallable,
@@ -49,6 +49,7 @@ defmodule PtcRunner.Lisp do
     SymbolCounter
   }
 
+  alias PtcRunner.Kernel.Program
   alias PtcRunner.Lisp.Eval.Context, as: EvalContext
   alias PtcRunner.Lisp.Eval.Effects
   alias PtcRunner.Lisp.Eval.Helpers
@@ -101,7 +102,7 @@ defmodule PtcRunner.Lisp do
   end
 
   @doc """
-  Converts native PTC-Lisp runtime values into an inert public Elixir/JSON-facing
+  Converts native PTC-Lisp runtime values into an inert public Elixir
   representation.
 
   Stateful hosts may keep native values internally between turns, but should use
@@ -109,15 +110,26 @@ defmodule PtcRunner.Lisp do
   Executable closures, builtins, composed callables, runtime callables, and
   plain BEAM functions are replaced recursively with deterministic display
   labels that cannot retain callable state, captured environments, or metadata.
-  If distinct map keys collapse to the same inert representation, both entries
-  are retained with opaque inert key wrappers so boundary projections can reject
-  ambiguous JSON while human formatting preserves the original distinction.
+  If distinct map keys or set members collapse to the same inert representation,
+  every entry is retained with an opaque inert collision wrapper. Strict Kernel
+  boundaries use the same projection and reject those collisions instead.
   """
   @spec externalize_value(term()) :: term() | {:error, {:java_projection_error, term()}}
   def externalize_value(value) do
-    case JavaProject.project(value, :public) do
-      {:ok, projected} -> externalize_lisp_values(projected)
+    case project_boundary_value(value, :public) do
+      {:ok, projected} -> projected
       {:error, reason} -> {:error, {:java_projection_error, reason}}
+    end
+  end
+
+  @doc false
+  @spec project_boundary_value(term(), :public | :kernel_json) ::
+          {:ok, term()} | {:error, term()}
+  def project_boundary_value(value, boundary) when boundary in [:public, :kernel_json] do
+    with {:ok, projected_java} <- JavaProject.project(value, boundary),
+         projected = externalize_lisp_values(projected_java),
+         :ok <- validate_projection_collisions(projected, boundary) do
+      {:ok, projected}
     end
   end
 
@@ -226,7 +238,10 @@ defmodule PtcRunner.Lisp do
 
   On success, returns:
    - `{:ok, PtcRunner.Lisp.Result.t()}` with:
-     - `step.return`: The value returned to the caller
+     - `step.return`: An inert public projection of the evaluated value.
+       Executable values become typed display wrappers. Distinct map keys and
+       set members that share one display form remain distinct through inert
+       collision wrappers.
      - `step.memory`: Data memory after execution. Direct Lisp callers can pass
        it back through the `:memory` option on a later eval; use
        `externalize_memory/1` when you need a purely public observation shape.
@@ -251,10 +266,11 @@ defmodule PtcRunner.Lisp do
 
   ## Memory Contract
 
-  The top-level program value passes through to `step.return` **unchanged** —
-  there is no implicit map merge and no special `:return` key handling. Storage
-  is **explicit**: `(def x v)` persists `v` in memory (`step.memory["x"]`), and
-  that memory can survive across explicitly managed evaluations.
+  The top-level program value determines `step.return` without an implicit map
+  merge or special `:return` key handling. `run/2` then projects that value to
+  its inert public representation. Storage is **explicit**: `(def x v)`
+  persists native `v` in memory (`step.memory["x"]`), and that memory can
+  survive across explicitly managed evaluations.
 
   There are two deliberate host memory projections. Ordinary embedders may use
   `run/2` to continue data definitions, `defn` closures, and composed
@@ -428,12 +444,12 @@ defmodule PtcRunner.Lisp do
   defp externalize_public_step(%Step{} = step) do
     %{
       step
-      | return: public_result_value(step.return),
-        fail: public_result_value(step.fail),
+      | return: externalize_lisp_values(step.return),
+        fail: externalize_lisp_values(step.fail),
         memory: step.memory,
-        tool_calls: public_result_value(step.tool_calls),
-        pmap_calls: public_result_value(step.pmap_calls),
-        child_steps: public_result_value(step.child_steps)
+        tool_calls: externalize_lisp_values(step.tool_calls),
+        pmap_calls: externalize_lisp_values(step.pmap_calls),
+        child_steps: externalize_lisp_values(step.child_steps)
     }
   end
 
@@ -469,34 +485,6 @@ defmodule PtcRunner.Lisp do
       {:error, _reason} -> fallback
     end
   end
-
-  defp public_result_value({:closure, _params, _body, _env, _history, _metadata}),
-    do: "#fn[...]"
-
-  defp public_result_value({:juxt_fn, _fns}), do: "#fn[...]"
-  defp public_result_value({:partial_fn, _function, _fixed}), do: "#fn[...]"
-  defp public_result_value({:comp_fn, _fns}), do: "#fn[...]"
-  defp public_result_value({:complement_fn, _function}), do: "#fn[...]"
-  defp public_result_value({:constantly_fn, _value}), do: "#fn[...]"
-  defp public_result_value({:every_pred_fn, _predicates}), do: "#fn[...]"
-  defp public_result_value({:some_fn, _functions}), do: "#fn[...]"
-  defp public_result_value({:fnil_fn, _function, _default}), do: "#fn[...]"
-
-  defp public_result_value(%Step{} = step), do: public_result({:ok, step}) |> elem(1)
-
-  defp public_result_value(value) when is_tuple(value),
-    do: value |> Tuple.to_list() |> Enum.map(&public_result_value/1) |> List.to_tuple()
-
-  defp public_result_value(value) when is_list(value), do: Enum.map(value, &public_result_value/1)
-
-  defp public_result_value(%MapSet{} = value),
-    do: value |> Enum.map(&public_result_value/1) |> MapSet.new()
-
-  defp public_result_value(value) when is_map(value) and not is_struct(value),
-    do:
-      Map.new(value, fn {key, item} -> {public_result_value(key), public_result_value(item)} end)
-
-  defp public_result_value(value), do: externalize_lisp_values(value)
 
   # Closed atom set for :caller telemetry tag. Validated at entry to
   # `run/2` so out-of-set values fail fast and don't reach instrumentation.
@@ -1476,6 +1464,12 @@ defmodule PtcRunner.Lisp do
   # externalized representation no longer depends on VM state (#964), and it
   # matches the parser's canonicalization and the string-keyed component
   # signature boundary.
+  defp externalize_lisp_values(%Program{} = program) do
+    %{program?: true, byte_size: program.byte_size, digest: program.digest}
+  end
+
+  defp externalize_lisp_values(%Step{} = step), do: public_result({:ok, step}) |> elem(1)
+
   defp externalize_lisp_values(%LispKeyword{name: name}), do: SourceAtoms.intern(name)
 
   defp externalize_lisp_values({:closure, _params, _body, _env, _turn_history, _metadata}),
@@ -1535,8 +1529,19 @@ defmodule PtcRunner.Lisp do
   end
 
   defp externalize_lisp_values(%MapSet{} = set) do
-    set
-    |> Enum.map(&externalize_lisp_values/1)
+    items = Enum.map(set, &externalize_lisp_values/1)
+    frequencies = Enum.frequencies(items)
+    next_ordinal = next_collision_ordinal(items, :set)
+
+    items
+    |> Enum.map_reduce(next_ordinal, fn item, ordinal ->
+      if Map.fetch!(frequencies, item) > 1 do
+        {%ExternalizedCollision{collection: :set, value: item, ordinal: ordinal}, ordinal + 1}
+      else
+        {item, ordinal}
+      end
+    end)
+    |> elem(0)
     |> MapSet.new()
   end
 
@@ -1549,14 +1554,22 @@ defmodule PtcRunner.Lisp do
       end)
 
     frequencies = Enum.frequencies_by(pairs, &elem(&1, 0))
+    next_ordinal = pairs |> Enum.map(&elem(&1, 0)) |> next_collision_ordinal(:map)
 
     pairs
-    |> Enum.with_index()
-    |> Map.new(fn {{key, display_key, item}, ordinal} ->
-      if Map.fetch!(frequencies, key) > 1,
-        do: {%ExternalizedMapKey{value: display_key, ordinal: ordinal}, item},
-        else: {key, item}
+    |> Enum.map_reduce(next_ordinal, fn {key, display_key, item}, ordinal ->
+      if Map.fetch!(frequencies, key) > 1 do
+        {{%ExternalizedCollision{
+            collection: :map,
+            value: display_key,
+            ordinal: ordinal
+          }, item}, ordinal + 1}
+      else
+        {{key, item}, ordinal}
+      end
     end)
+    |> elem(0)
+    |> Map.new()
   end
 
   defp externalize_lisp_values(value) when is_tuple(value) do
@@ -1567,6 +1580,95 @@ defmodule PtcRunner.Lisp do
   end
 
   defp externalize_lisp_values(value), do: value
+
+  defp next_collision_ordinal(values, collection) do
+    values
+    |> Enum.reduce(-1, fn
+      %ExternalizedCollision{collection: ^collection, ordinal: ordinal}, highest
+      when is_integer(ordinal) and ordinal >= 0 ->
+        max(ordinal, highest)
+
+      _value, highest ->
+        highest
+    end)
+    |> Kernel.+(1)
+  end
+
+  defp validate_projection_collisions(_value, :public), do: :ok
+
+  defp validate_projection_collisions(value, :kernel_json) do
+    case projection_collision(value, []) do
+      nil -> :ok
+      {path, collection} -> {:error, {:public_projection_collision, path, collection}}
+    end
+  end
+
+  defp projection_collision(%ExternalizedCollision{collection: collection}, path),
+    do: {Enum.reverse(path), collection}
+
+  defp projection_collision(value, path) when is_list(value) do
+    find_projection_collision(value, path, :list)
+  end
+
+  defp projection_collision(value, path) when is_tuple(value) do
+    value
+    |> Tuple.to_list()
+    |> find_projection_collision(path, :tuple)
+  end
+
+  defp projection_collision(%MapSet{} = set, path) do
+    items = MapSet.to_list(set)
+
+    if encoded_projection_collision?(items, &Jason.encode(&1, maps: :strict)) do
+      {Enum.reverse(path), :set}
+    else
+      find_projection_collision(items, path, :set)
+    end
+  end
+
+  defp projection_collision(value, path) when is_map(value) and not is_struct(value) do
+    entries = Map.to_list(value)
+
+    if encoded_projection_collision?(entries, fn {key, _item} ->
+         Jason.encode(%{key => nil}, maps: :strict)
+       end) do
+      {Enum.reverse(path), :map}
+    else
+      Enum.with_index(entries)
+      |> Enum.reduce_while(nil, fn {{key, item}, index}, nil ->
+        case projection_collision(key, [{:map_key, index} | path]) ||
+               projection_collision(item, [{:map_value, index} | path]) do
+          nil -> {:cont, nil}
+          collision -> {:halt, collision}
+        end
+      end)
+    end
+  end
+
+  defp projection_collision(_value, _path), do: nil
+
+  defp find_projection_collision(values, path, collection) do
+    values
+    |> Enum.with_index()
+    |> Enum.reduce_while(nil, fn {item, index}, nil ->
+      case projection_collision(item, [{collection, index} | path]) do
+        nil -> {:cont, nil}
+        collision -> {:halt, collision}
+      end
+    end)
+  end
+
+  defp encoded_projection_collision?(values, encoder) do
+    identities =
+      Enum.flat_map(values, fn value ->
+        case encoder.(value) do
+          {:ok, encoded} -> [encoded]
+          {:error, _reason} -> []
+        end
+      end)
+
+    length(identities) != MapSet.size(MapSet.new(identities))
+  end
 
   # Memory keys are `def`-bound variable names. Externalize them through the
   # same bounded vocabulary as parsed symbols: builtin names remain atoms,

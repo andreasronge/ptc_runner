@@ -546,6 +546,63 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     assert %{defined_count: 0, history_count: 0} = RunState.evaluation_memory_summary(state)
   end
 
+  test "Kernel rejects public projection collisions instead of losing entries" do
+    {:ok, workflow} = WorkflowEnvironment.new([])
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, limits} = Limits.new()
+
+    expressions = [
+      ~S|{(fn [x] x) 1 (fn [x] (+ x 1)) 2}|,
+      ~S|#{(fn [x] x) (fn [x] (+ x 1))}|,
+      ~S|{(fn [x] x) 1 "#fn[...]" 2}|,
+      ~S|#{(fn [x] x) "#fn[...]"}|
+    ]
+
+    for {expression, index} <- Enum.with_index(expressions) do
+      {:ok, sink} = EventSink.start(:normal, limits, run_id: "projection-collision-#{index}")
+
+      {:ok, config} =
+        RunConfig.new(
+          workflow_environment: workflow,
+          mission_environment: mission,
+          input: %{},
+          limits: limits,
+          event_sink: sink
+        )
+
+      assert {:error,
+              %{
+                kind: :workflow_failed,
+                reason: :public_projection_collision,
+                details: %{projection_error: projection_error}
+              }} = Kernel.run("(return #{expression})", config)
+
+      assert projection_error =~ "public_projection_collision"
+    end
+
+    for expression <- expressions do
+      {:ok, state} = RunState.start(limits)
+
+      assert %{
+               outcome: :evaluation_error,
+               kind: :public_projection_collision,
+               continuation_effect: :preserved,
+               retryable?: false
+             } =
+               Evaluation.evaluate_source_detailed(
+                 state,
+                 mission,
+                 expression,
+                 100,
+                 nil,
+                 nil
+               )
+
+      assert %{defined_count: 0, history_count: 0} =
+               RunState.evaluation_memory_summary(state)
+    end
+  end
+
   test "explicit workflow failure returns the outer error algebra" do
     {:ok, workflow} = WorkflowEnvironment.new([])
     {:ok, mission} = MissionEnvironment.new([])
