@@ -9,7 +9,6 @@ defmodule PtcRunner.Kernel.LogAnalysisSessionTest do
   alias PtcRunner.Kernel.LogAnalysisSession
   alias PtcRunner.Kernel.LogAnalysisSessionBuilder
   alias PtcRunner.Kernel.MissionEnvironment
-  alias PtcRunner.Kernel.RunConfig
   alias PtcRunner.Kernel.RunState
   alias PtcRunner.Kernel.RuntimeTools
   alias PtcRunner.Kernel.SessionTrace
@@ -128,22 +127,7 @@ defmodule PtcRunner.Kernel.LogAnalysisSessionTest do
                data: %{}
              )
 
-    assert {:ok, config} =
-             RunConfig.new(
-               workflow_environment: state.config.workflow_environment,
-               mission_environment: mission,
-               input: %{},
-               limits: state.config.limits,
-               event_sink: state.config.event_sink,
-               labels: %{
-                 "name" => "ptc.log-analysis.repl",
-                 "tags" => %{"mode" => "repl"}
-               },
-               session_profile: %{
-                 "id" => state.profile.id,
-                 "digest" => state.profile.digest
-               }
-             )
+    config = %{state.config | mission_environment: mission}
 
     assembly =
       LogAnalysisAssembly.seal(
@@ -196,7 +180,7 @@ defmodule PtcRunner.Kernel.LogAnalysisSessionTest do
     tmp_dir: directory
   } do
     limits = LogAnalysisProfile.limits()
-    reserve = %{count: 2, bytes: limits.event_payload_bytes * 2}
+    reserve = EventSink.terminal_reserve(:normal, limits)
 
     assert {:ok, run_state, sink} =
              RunState.start_with_event_sink(
@@ -253,13 +237,15 @@ defmodule PtcRunner.Kernel.LogAnalysisSessionTest do
     tmp_dir: directory
   } do
     limits = LogAnalysisProfile.limits()
-    reserve = %{count: 2, bytes: limits.event_payload_bytes * 2}
+    reserve = EventSink.terminal_reserve(:normal, limits)
 
     starts = [
-      {"zero-reserve", [fail_closed: true], fn _run_state, _sink -> :ok end},
+      {"zero-reserve", [fail_closed: true, terminal_reserve: %{count: 0, bytes: 0}],
+       fn _run_state, _sink -> :ok end},
       {"finalized", [fail_closed: true, terminal_reserve: reserve],
        fn _run_state, sink ->
-         EventSink.finalize(sink, %{}, %{outcome: :error})
+         assert {:ok, _batch} = EventSink.finalize_and_events(sink, %{outcome: :error})
+         :ok
        end},
       {"closed", [fail_closed: true, terminal_reserve: reserve],
        fn run_state, _sink ->

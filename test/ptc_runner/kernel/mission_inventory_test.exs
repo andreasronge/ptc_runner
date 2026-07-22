@@ -45,24 +45,28 @@ defmodule PtcRunner.Kernel.MissionInventoryTest do
     {:ok, kernel_component} = Library.component("kernel")
     {:ok, workflow_bundle} = Kernel.compile_bundle([kernel_component])
     {:ok, workflow} = WorkflowEnvironment.new(bundle: workflow_bundle)
-    {:ok, sink} = EventSink.start(:normal, limits, run_id: "mission-inventory")
 
-    {:ok, config} =
-      RunConfig.new(
-        workflow_environment: workflow,
-        mission_environment: mission,
-        input: %{},
-        limits: limits,
-        event_sink: sink
-      )
+    config_for = fn run_id ->
+      {:ok, sink} = EventSink.start(:normal, limits, run_id: run_id)
+
+      {:ok, config} =
+        RunConfig.new(
+          workflow_environment: workflow,
+          mission_environment: mission,
+          input: %{},
+          limits: limits,
+          event_sink: sink
+        )
+
+      {config, sink}
+    end
+
+    {config, sink} = config_for.("mission-inventory")
 
     assert config.mission_inventory.rendered == @expected
 
     assert {:ok, %{value: @expected}} =
              Kernel.run("(return (kernel/mission-inventory))", config)
-
-    assert {:ok, %{value: @expected_model}} =
-             Kernel.run("(return (kernel/mission-model-context))", config)
 
     started = Enum.find(EventSink.events(sink), &(&1.type == "run-started"))
     assert started.data.mission_inventory_hash == config.mission_inventory.hash
@@ -80,7 +84,13 @@ defmodule PtcRunner.Kernel.MissionInventoryTest do
 
     assert started.data == config.run_started_metadata
 
-    {:ok, repl} = ReplSession.new(config: config)
+    {model_config, _model_sink} = config_for.("mission-model-context")
+
+    assert {:ok, %{value: @expected_model}} =
+             Kernel.run("(return (kernel/mission-model-context))", model_config)
+
+    {repl_config, _repl_sink} = config_for.("mission-inventory-repl")
+    {:ok, repl} = ReplSession.new(config: repl_config)
 
     assert {:ok, %{return: @expected}, repl} =
              ReplSession.eval(repl, "(kernel/mission-inventory)")

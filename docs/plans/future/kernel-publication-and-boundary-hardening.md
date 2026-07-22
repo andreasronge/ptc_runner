@@ -1,10 +1,10 @@
 # Kernel publication and boundary hardening
 
-**Status:** triaged; first two slices implemented
+**Status:** triaged; first three slices implemented
 
 **Origin:** extracted from the Java interop investigation on 2026-07-20
 
-**Last audited:** 2026-07-22 against `origin/main` at `fe10efd9`
+**Last audited:** 2026-07-22 against `origin/main` at `35005bf7`
 
 ## Decision
 
@@ -29,8 +29,8 @@ This plan now separates:
 | --- | --- | --- |
 | Tool cache | Every evaluation now owns an empty, evaluation-local cache. Caller-supplied state is rejected and Results omit cache entries. | Complete. |
 | Public projection | Direct and Kernel results use one collision-aware projection. Direct Elixir results preserve entries; Kernel boundaries reject ambiguity. | Complete. |
-| Ordinary terminal publication | Atomic finalization, terminal reserve, and frozen batch handoff exist, but ordinary Runner and standalone REPL do not use them. | Migrate in a separate lifecycle slice. |
-| Drop accounting and inspection | Drop buckets are unbounded by event-type count, and several payload-bearing structs use derived `Inspect`. | Fix with the owning boundary slices. |
+| Ordinary terminal publication | Runner and standalone REPL now reserve terminal capacity, finalize atomically, and hand one frozen batch to persistence. | Complete. |
+| Drop accounting and inspection | Event loss uses sixteen fixed type buckets plus a saturating overflow count. Several payload-bearing structs still use derived `Inspect`. | Address inspection with each owning boundary. |
 | Viewer persistence | SessionTrace owns finalization and retry; TraceLog publication is synced, no-clobber, and byte-identical on retry. | Remove from the active backlog. |
 | Standalone REPL ownership | A transferred ReplSession becomes closed when its creator exits. | Decide whether sessions are process-affine or transferable before changing ownership. |
 | Oracle supervision | The current subprocess-per-run harness has timeout, output, and temporary-directory bounds. | Keep the reusable service deferred until a leak or throughput problem is measured. |
@@ -176,28 +176,43 @@ Boundary tests cover maps and sets containing distinct callables as well as a
 callable beside its literal display string. The implementation does not add
 generic validation for every host-supplied BEAM term.
 
-## Third slice: ordinary terminal finalization
+## Completed third slice: ordinary terminal finalization
 
-`PtcRunner.Kernel.EventSink.finalize_and_events/3` already performs atomic
+`PtcRunner.Kernel.EventSink.finalize_and_events/2` already performs atomic
 terminal finalization and returns a frozen batch. Log-analysis SessionTrace
 uses a two-event terminal reserve, persists the frozen batch, and retries
 publication without appending another terminal event.
 
-Ordinary Runner and standalone ReplSession still read dropped counts, emit
-`events-dropped`, emit `run-stopped`, and read events in separate operations.
-RunBuilder then reads the mutable sink independently for trace and inspection
-persistence. Existing tests explicitly allow `run-stopped` to be dropped by a
-full normal sink.
+Ordinary Runner and standalone ReplSession previously read dropped counts,
+emitted `events-dropped`, emitted `run-stopped`, and read events in separate
+operations. RunBuilder then read the mutable sink independently for trace and
+inspection persistence. A full normal sink could drop `run-stopped` entirely.
 
-For a system that treats logs as future improvement evidence, ordinary traces
-should have the same terminal integrity as Viewer traces. A separate slice
-should:
+Normal EventSinks now reserve two terminal slots and their worst-case measured
+envelopes by default. RunConfig requires that exact reserve, the sink's exact
+`Limits`, enough ordinary capacity for the assembled `run-started` event, and a
+payload ceiling that can retain the bounded worst-case loss summary.
+The startup operation atomically claims the fresh recorder while retaining
+`run-started`; a focused concurrent-reuse test demonstrated that a separate
+readiness check let two runs execute against one sink, so the claim closes that
+race without introducing a general producer-lease protocol. Only a successful
+claimant owns shared cleanup, so a rejected runner or REPL constructor cannot
+tear down provider or recorder resources used by the winner.
+Runner and ReplSession close RunState before one atomic finalization call. The
+EventSink owner adds the exact frozen loss snapshot to terminal usage, appends
+`events-dropped` when needed and exactly one `run-stopped`, freezes the sink,
+and returns both the events and loss snapshot. Later emits are contained without
+mutating either. RunBuilder passes that returned event list directly to trace
+and inspection persistence rather than rereading the sink.
 
-- reserve terminal capacity for ordinary normal sinks;
-- give Runner and standalone REPL one terminal finalization operation;
-- return one frozen batch for trace and inspection persistence;
-- compute public event-loss usage from that same terminal state; and
-- cap drop accounting to fixed event-type buckets plus an overflow count.
+Drop accounting retains sixteen named event-type buckets. Additional names and
+invalid event types increment one `$overflow` bucket, and every counter
+saturates at the unsigned 32-bit ceiling. This bounds both key cardinality and
+integer growth while preserving useful common loss evidence.
+
+Boundary tests saturate ordinary count capacity for Runner and ReplSession,
+prove terminal events and returned usage agree, prove post-finalization emits
+cannot change the batch, and exercise overflow accounting.
 
 Do not add producer leases or split EventSink capabilities unless a focused
 test first demonstrates that current RunState/provider cleanup permits an

@@ -2,6 +2,10 @@ defmodule PtcRunner.Kernel.RunConfig do
   @moduledoc """
   The complete host-constructed configuration for one Kernel run.
 
+  A configuration is one-shot: terminal publication finalizes its event sink,
+  and a later `PtcRunner.Kernel.run/2` with the same value fails with
+  `:event_sink_error`. Build a fresh configuration and sink for every run.
+
   The required fields are:
 
   - `workflow_environment` — trusted outer workflow code and capabilities;
@@ -9,6 +13,11 @@ defmodule PtcRunner.Kernel.RunConfig do
   - `input` — a JSON-like map exposed as the workflow evaluation context;
   - `limits` — normalized positive runtime ceilings;
   - `event_sink` — the bounded owner of canonical run events.
+
+  An event sink must be open and use these exact limits. A normal sink carries
+  the standard two-event measured terminal reserve, must leave room for the
+  assembled `run-started` event, and must have a payload ceiling large enough
+  for the bounded loss summary. Private sinks reserve no lossy terminal slots.
 
   Construction derives and freezes `mission_inventory` from the mission
   environment and limits. It contains both the authoritative versioned
@@ -26,8 +35,9 @@ defmodule PtcRunner.Kernel.RunConfig do
   `session_profile` is an optional closed profile ID and SHA-256 digest used by
   server-owned interactive mission sessions; it grants no authority and is
   copied only into safe `run-started` metadata.
-  Constructing a config validates shape and ownership objects but performs no
-  execution and grants no authority beyond the supplied environments.
+  Constructing a config validates shape, recorder readiness, and ownership
+  objects but performs no execution and grants no authority beyond the supplied
+  environments.
   """
 
   alias PtcRunner.Kernel.EventSink
@@ -110,6 +120,7 @@ defmodule PtcRunner.Kernel.RunConfig do
          true <- JSONValue.map?(Keyword.get(opts, :input)),
          %Limits{} = limits <- Keyword.get(opts, :limits),
          %EventSink{} = sink <- Keyword.get(opts, :event_sink),
+         true <- valid_event_sink_contract?(sink, limits),
          true <-
            inspection?(Keyword.get(opts, :inspection_sink), Keyword.get(opts, :inspection_path)),
          true <- provider_resources?(Keyword.get(opts, :provider_resources, [])),
@@ -126,7 +137,8 @@ defmodule PtcRunner.Kernel.RunConfig do
              session_profile,
              labels,
              limits
-           ) do
+           ),
+         true <- EventSink.begin_capacity?(sink, run_started_metadata) do
       {:ok,
        %__MODULE__{
          workflow_environment: workflow,
@@ -148,6 +160,41 @@ defmodule PtcRunner.Kernel.RunConfig do
       {:error, :run_started_metadata_exceeded} = error -> error
       _ -> {:error, :invalid_run_config}
     end
+  end
+
+  defp valid_event_sink_contract?(%EventSink{policy: :normal} = sink, limits) do
+    reserve = EventSink.terminal_reserve(:normal, limits)
+
+    limits.normal_event_count > reserve.count and limits.normal_event_bytes > reserve.bytes and
+      match?(
+        {:ok,
+         %{
+           terminal_reserve: ^reserve,
+           limits: ^limits,
+           ready?: true,
+           begun?: false,
+           event_count: 0,
+           event_bytes: 0,
+           dropped?: false
+         }},
+        EventSink.session_contract(sink)
+      )
+  end
+
+  defp valid_event_sink_contract?(%EventSink{policy: :private} = sink, limits) do
+    match?(
+      {:ok,
+       %{
+         terminal_reserve: %{count: 0, bytes: 0},
+         limits: ^limits,
+         ready?: true,
+         begun?: false,
+         event_count: 0,
+         event_bytes: 0,
+         dropped?: false
+       }},
+      EventSink.session_contract(sink)
+    )
   end
 
   # One owner assembles the complete static `run-started` payload — labels,

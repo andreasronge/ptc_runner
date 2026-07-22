@@ -14,6 +14,7 @@ defmodule PtcRunner.Kernel.LogAnalysisSessionBuilder do
   owner rather than in a disposable request task.
   """
 
+  alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.LogAnalysisAssembly
   alias PtcRunner.Kernel.LogAnalysisProfile
   alias PtcRunner.Kernel.LogAnalysisSession
@@ -123,7 +124,7 @@ defmodule PtcRunner.Kernel.LogAnalysisSessionBuilder do
     limits = LogAnalysisProfile.limits()
     run_id = "log-analysis-" <> Base.encode16(:crypto.strong_rand_bytes(8), case: :lower)
     destination = Path.join(trace_directory, run_id <> ".jsonl")
-    terminal_reserve = %{count: 2, bytes: limits.event_payload_bytes * 2}
+    terminal_reserve = EventSink.terminal_reserve(:normal, limits)
 
     case RunState.start_with_event_sink(
            limits,

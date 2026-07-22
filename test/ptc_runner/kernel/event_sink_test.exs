@@ -10,7 +10,9 @@ defmodule PtcRunner.Kernel.EventSinkTest do
 
     ids =
       for _ <- 1..64 do
-        {:ok, sink} = EventSink.start(:normal, limits)
+        {:ok, sink} =
+          EventSink.start(:normal, limits, terminal_reserve: %{count: 0, bytes: 0})
+
         :ok = EventSink.emit(sink, "run-started", %{})
         [event] = EventSink.events(sink)
         event.run_id
@@ -20,18 +22,55 @@ defmodule PtcRunner.Kernel.EventSinkTest do
     assert Enum.all?(ids, &Regex.match?(~r/\Arun-[0-9a-f]{12}\z/, &1))
   end
 
+  test "normal sinks reserve the ordinary terminal envelope by default" do
+    limits = Limits.defaults()
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "default-terminal-reserve")
+
+    assert {:ok, %{terminal_reserve: reserve, ready?: true}} =
+             EventSink.session_contract(sink)
+
+    assert reserve == EventSink.terminal_reserve(:normal, limits)
+    assert reserve.bytes > limits.event_payload_bytes * 2
+  end
+
+  test "drop accounting has fixed type buckets and one saturating overflow bucket" do
+    {:ok, limits} =
+      Limits.new(
+        normal_event_count: 2,
+        normal_event_bytes: 2_000,
+        event_payload_bytes: 100
+      )
+
+    {:ok, sink} =
+      EventSink.start(:normal, limits,
+        run_id: "bounded-drops",
+        terminal_reserve: %{count: 0, bytes: 0}
+      )
+
+    assert :ok = EventSink.emit(sink, "seed-one", %{})
+    assert :ok = EventSink.emit(sink, "seed-two", %{})
+
+    for index <- 1..40 do
+      assert :ok = EventSink.emit(sink, "custom-#{index}", %{})
+    end
+
+    dropped = EventSink.dropped(sink)
+    assert map_size(dropped) == 17
+    assert dropped["$overflow"] == 24
+  end
+
   test "terminal reserve retains one dropped summary and one run-stopped event" do
     {:ok, limits} =
       Limits.new(
         normal_event_count: 4,
         normal_event_bytes: 20_000,
-        event_payload_bytes: 1_000
+        event_payload_bytes: 5_000
       )
 
     {:ok, sink} =
       EventSink.start(:normal, limits,
         run_id: "reserved",
-        terminal_reserve: %{count: 2, bytes: 2_000}
+        terminal_reserve: EventSink.terminal_reserve(:normal, limits)
       )
 
     assert :ok = EventSink.emit(sink, "run-started", %{})
@@ -39,16 +78,16 @@ defmodule PtcRunner.Kernel.EventSinkTest do
     assert :ok = EventSink.emit(sink, "evaluation-stopped", %{})
     assert %{"evaluation-stopped" => 1} = EventSink.dropped(sink)
 
-    assert :ok =
-             EventSink.finalize(sink, %{}, %{
+    assert {:ok, first_batch} =
+             EventSink.finalize_and_events(sink, %{
                outcome: :ok,
                reason: nil,
                usage: %{}
              })
 
-    assert :ok = EventSink.finalize(sink, %{}, %{outcome: :error})
+    assert {:ok, ^first_batch} = EventSink.finalize_and_events(sink, %{outcome: :error})
 
-    events = EventSink.events(sink)
+    events = first_batch.events
 
     assert Enum.map(events, & &1.type) ==
              ["run-started", "evaluation-started", "events-dropped", "run-stopped"]
@@ -60,26 +99,29 @@ defmodule PtcRunner.Kernel.EventSinkTest do
     {:ok, limits} =
       Limits.new(
         normal_event_count: 10,
-        normal_event_bytes: 4_000,
-        event_payload_bytes: 1_000
+        normal_event_bytes: 20_000,
+        event_payload_bytes: 5_000
       )
 
     {:ok, sink} =
       EventSink.start(:normal, limits,
         run_id: "byte-reserved",
-        terminal_reserve: %{count: 2, bytes: 2_000}
+        terminal_reserve: EventSink.terminal_reserve(:normal, limits)
       )
 
-    assert :ok = EventSink.emit(sink, "run-started", %{value: String.duplicate("x", 800)})
+    assert :ok = EventSink.emit(sink, "run-started", %{value: String.duplicate("x", 3_500)})
 
     assert :ok =
-             EventSink.emit(sink, "evaluation-started", %{value: String.duplicate("x", 800)})
+             EventSink.emit(sink, "evaluation-started", %{
+               value: String.duplicate("x", 3_500)
+             })
 
     assert %{"evaluation-started" => 1} = EventSink.dropped(sink)
 
-    assert :ok = EventSink.finalize(sink, %{}, %{outcome: :ok, usage: %{}})
+    assert {:ok, %{events: events}} =
+             EventSink.finalize_and_events(sink, %{outcome: :ok, usage: %{}})
 
-    assert Enum.map(EventSink.events(sink), & &1.type) ==
+    assert Enum.map(events, & &1.type) ==
              ["run-started", "events-dropped", "run-stopped"]
   end
 
@@ -88,20 +130,20 @@ defmodule PtcRunner.Kernel.EventSinkTest do
       Limits.new(
         normal_event_count: 4,
         normal_event_bytes: 20_000,
-        event_payload_bytes: 1_000
+        event_payload_bytes: 5_000
       )
 
     {:ok, sink} =
       EventSink.start(:normal, limits,
         run_id: "atomic-finalize",
         fail_closed: true,
-        terminal_reserve: %{count: 2, bytes: limits.event_payload_bytes * 2}
+        terminal_reserve: EventSink.terminal_reserve(:normal, limits)
       )
 
     assert :ok = EventSink.emit(sink, "run-started", %{})
 
-    assert {:ok, events} =
-             EventSink.finalize_and_events(sink, %{}, %{outcome: :ok, reason: nil})
+    assert {:ok, %{events: events}} =
+             EventSink.finalize_and_events(sink, %{outcome: :ok, reason: nil})
 
     EventSink.stop(sink)
 
@@ -117,6 +159,16 @@ defmodule PtcRunner.Kernel.EventSinkTest do
     EventSink.stop(sink)
     assert_receive {:DOWN, ^ref, :process, _pid, :normal}
     assert {:error, :event_sink_error} = EventSink.emit(sink, "evaluation-started", %{})
+  end
+
+  test "invalid terminal usage is contained without destroying the recorder" do
+    limits = Limits.defaults()
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "invalid-terminal")
+
+    assert :ok = EventSink.begin(sink, %{})
+    assert {:error, :event_sink_error} = EventSink.finalize_and_events(sink, %{usage: nil})
+    assert Process.alive?(sink.pid)
+    assert Enum.map(EventSink.events(sink), & &1.type) == ["run-started"]
   end
 
   test "canonical identifiers and event values are validated before retention" do

@@ -32,9 +32,10 @@ defmodule PtcRunner.Kernel.FileCapabilityTest do
     {:ok, workflow} = WorkflowEnvironment.new(bundle: workflow_bundle)
     {:ok, mission} = MissionEnvironment.new(bundle: mission_bundle, capabilities: [capability])
     {:ok, limits} = Limits.new(evaluation_timeout_ms: 5_000)
-    {:ok, sink} = EventSink.start(:normal, limits, run_id: "file-capability")
 
-    {:ok, config} =
+    config_for = fn run_id ->
+      {:ok, sink} = EventSink.start(:normal, limits, run_id: run_id)
+
       RunConfig.new(
         workflow_environment: workflow,
         mission_environment: mission,
@@ -42,6 +43,9 @@ defmodule PtcRunner.Kernel.FileCapabilityTest do
         limits: limits,
         event_sink: sink
       )
+    end
+
+    {:ok, read_config} = config_for.("file-capability-read")
 
     source = "(return (kernel/eval (program (return (fs/read \"inside.txt\")))))"
 
@@ -51,15 +55,18 @@ defmodule PtcRunner.Kernel.FileCapabilityTest do
                 outcome: :returned,
                 value: %{"bytes" => 15, "content" => "bounded fixture", "path" => "inside.txt"}
               }
-            }} = Kernel.run(source, config)
+            }} = Kernel.run(source, read_config)
+
+    {:ok, workflow_config} = config_for.("file-capability-workflow")
 
     assert {:error, %{kind: :workflow_failed}} =
-             Kernel.run("(return (tool/fs-read {:path \"inside.txt\"}))", config)
+             Kernel.run("(return (tool/fs-read {:path \"inside.txt\"}))", workflow_config)
 
     discovery_source = "(return (kernel/eval (program (return (cap/list)))))"
+    {:ok, discovery_config} = config_for.("file-capability-discovery")
 
     assert {:ok, %{value: %{outcome: :returned, value: [%{name: "fs-read"}]}}} =
-             Kernel.run(discovery_source, config)
+             Kernel.run(discovery_source, discovery_config)
   end
 
   @tag :tmp_dir
@@ -169,43 +176,46 @@ defmodule PtcRunner.Kernel.FileCapabilityTest do
     {:ok, mission} =
       MissionEnvironment.new(bundle: mission_bundle, capabilities: [capability])
 
-    {:ok, sink} = EventSink.start(:normal, limits, run_id: "hidden-file-authority")
+    config_for = fn selected_mission, run_id ->
+      {:ok, sink} = EventSink.start(:normal, limits, run_id: run_id)
 
-    {:ok, config} =
       RunConfig.new(
         workflow_environment: workflow,
-        mission_environment: mission,
+        mission_environment: selected_mission,
         input: %{},
         limits: limits,
         event_sink: sink
       )
+    end
+
+    {:ok, inventory_config} = config_for.(mission, "hidden-file-inventory")
 
     assert {:ok, %{value: %{outcome: :returned, value: []}}} =
-             Kernel.run("(return (kernel/eval-source \"(return (cap/list))\"))", config)
+             Kernel.run(
+               "(return (kernel/eval-source \"(return (cap/list))\"))",
+               inventory_config
+             )
+
+    {:ok, library_config} = config_for.(mission, "hidden-file-library")
 
     assert {:ok, %{value: %{outcome: :returned, value: %{"content" => "still callable"}}}} =
              Kernel.run(
                ~S|(return (kernel/eval-source "(return (fs/read \"visible.txt\"))"))|,
-               config
+               library_config
              )
+
+    {:ok, tool_config} = config_for.(mission, "hidden-file-tool")
 
     assert {:ok, %{value: %{outcome: :returned, value: %{status: :ok}}}} =
              Kernel.run(
                ~S|(return (kernel/eval-source "(return (tool/fs-read {\"path\" \"visible.txt\"}))"))|,
-               config
+               tool_config
              )
 
     {:ok, empty_mission_bundle} = Kernel.compile_bundle([cap_component])
     {:ok, empty_mission} = MissionEnvironment.new(bundle: empty_mission_bundle)
 
-    {:ok, missing_config} =
-      RunConfig.new(
-        workflow_environment: workflow,
-        mission_environment: empty_mission,
-        input: %{},
-        limits: limits,
-        event_sink: sink
-      )
+    {:ok, missing_config} = config_for.(empty_mission, "hidden-file-missing")
 
     assert {:ok, %{value: %{outcome: :evaluation_error, kind: :unknown_tool}}} =
              Kernel.run(

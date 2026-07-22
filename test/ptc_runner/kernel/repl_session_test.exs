@@ -256,23 +256,51 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
     failed_ref = Process.monitor(failed_pid)
     :ok = EventSink.emit(private_sink, "run-started", %{})
 
+    assert {:error, :invalid_run_config} =
+             RunConfig.new(
+               workflow_environment: workflow,
+               mission_environment: mission,
+               input: %{},
+               limits: limits,
+               event_sink: private_sink
+             )
+
+    EventSink.stop(private_sink)
+    assert_receive {:DOWN, ^failed_ref, :process, ^failed_pid, :normal}
+  end
+
+  test "a rejected reused config cannot tear down the live session" do
+    parent = self()
+    {:ok, workflow} = WorkflowEnvironment.new([])
+    {:ok, mission} = MissionEnvironment.new([])
+    limits = Limits.defaults()
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "repl-one-shot-owner")
+
     {:ok, config} =
       RunConfig.new(
         workflow_environment: workflow,
         mission_environment: mission,
         input: %{},
         limits: limits,
-        event_sink: private_sink
+        event_sink: sink,
+        provider_resources: [fn -> send(parent, :resource_closed) end]
       )
 
+    {:ok, session} = ReplSession.new(config: config)
     assert {:error, :event_sink_error} = ReplSession.new(config: config)
-    assert_receive {:DOWN, ^failed_ref, :process, ^failed_pid, :normal}
+    refute_receive :resource_closed
+    assert Process.alive?(sink.pid)
+
+    assert {:ok, %{return: 42}, session} = ReplSession.eval(session, "42")
+    assert {:ok, _events} = ReplSession.close(session)
+    assert_receive :resource_closed
   end
 
   test "configuration assembly rejects a run-started payload above the event ceiling" do
     {:ok, workflow} = WorkflowEnvironment.new([])
     {:ok, mission} = MissionEnvironment.new([])
-    {:ok, limits} = Limits.new(event_payload_bytes: 1)
+    {:ok, limits} = Limits.new(event_payload_bytes: 5_000)
+    connector_snapshots = [%{"value" => String.duplicate("x", 10_000)}]
     {:ok, sink} = EventSink.start(:normal, limits, run_id: "repl-metadata-ceiling")
 
     assert {:error, :run_started_metadata_exceeded} =
@@ -281,21 +309,20 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
                mission_environment: mission,
                input: %{},
                limits: limits,
-               event_sink: sink
+               event_sink: sink,
+               connector_snapshots: connector_snapshots
              )
 
-    {:ok, private_limits} = Limits.new(event_payload_bytes: 1)
-
-    {:ok, private_sink} =
-      EventSink.start(:private, private_limits, run_id: "repl-private-ceiling")
+    {:ok, private_sink} = EventSink.start(:private, limits, run_id: "repl-private-ceiling")
 
     assert {:error, :run_started_metadata_exceeded} =
              RunConfig.new(
                workflow_environment: workflow,
                mission_environment: mission,
                input: %{},
-               limits: private_limits,
-               event_sink: private_sink
+               limits: limits,
+               event_sink: private_sink,
+               connector_snapshots: connector_snapshots
              )
 
     EventSink.stop(sink)
@@ -309,6 +336,38 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
     stopped = List.last(events)
     assert stopped.type == "run-stopped"
     assert stopped.data.usage.errors == 1
+  end
+
+  test "close atomically returns a reserved terminal batch and exact drop usage" do
+    {:ok, workflow} = WorkflowEnvironment.new([])
+    {:ok, mission} = MissionEnvironment.new([])
+
+    {:ok, limits} =
+      Limits.new(
+        normal_event_count: 4,
+        normal_event_bytes: 100_000,
+        event_payload_bytes: 5_000
+      )
+
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "repl-terminal-reserve")
+
+    {:ok, config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        mission_environment: mission,
+        input: %{},
+        limits: limits,
+        event_sink: sink
+      )
+
+    {:ok, session} = ReplSession.new(config: config)
+    assert {:ok, %{return: 42}, session} = ReplSession.eval(session, "42")
+    assert {:ok, events} = ReplSession.close(session)
+
+    assert Enum.map(events, & &1.type) ==
+             ["run-started", "evaluation-started", "events-dropped", "run-stopped"]
+
+    assert List.last(events).data.usage.events_dropped == %{"evaluation-stopped" => 1}
   end
 
   test "configured workflow capabilities use the bounded dispatcher and canonical events" do
