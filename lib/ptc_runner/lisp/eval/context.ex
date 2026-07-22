@@ -26,10 +26,11 @@ defmodule PtcRunner.Lisp.Eval.Context do
   state, `append_tool_call/2` bounds each entry's `:result` to a preview once
   it exceeds `max_tool_call_result_bytes`, marking the entry with
   `:result_truncated`. Only the LEDGER copy is bounded — the value returned to
-  the program and any `effects.tool_cache` entry keep the full result (they are built
-  separately in `record_tool_call`). `:args` is left intact (it is tiny in the
-  fold case and later effect consumers need the raw map for capability identity
-  and canonical argument hashing), as are `:child_trace_id`/`:child_step`.
+  the program and any evaluation-local `effects.tool_cache` entry keep the full
+  result (they are built separately in `record_tool_call`). `:args` is left
+  intact (it is tiny in the fold case and later effect consumers need the raw
+  map for capability identity and canonical argument hashing), as are
+  `:child_trace_id`/`:child_step`.
   """
 
   alias PtcRunner.Lisp.Eval.Capture
@@ -257,7 +258,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
       worker_max_heap: Keyword.get(opts, :worker_max_heap, Keyword.get(opts, :max_heap)),
       parallel_budget: Keyword.get(opts, :parallel_budget),
       tool_activity: Keyword.get_lazy(opts, :tool_activity, fn -> :atomics.new(1, []) end),
-      effects: Effects.with_cache(Keyword.get(opts, :tool_cache, %{})),
+      effects: Effects.empty(),
       tools_meta: Keyword.get(opts, :tools_meta, %{}),
       strict_data: Keyword.get(opts, :strict_data, false),
       strict_transitive_calls: Keyword.get(opts, :strict_transitive_calls, false),

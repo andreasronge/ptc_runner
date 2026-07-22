@@ -25,10 +25,6 @@ defmodule PtcRunner.Lisp.Eval.Effects do
   @spec empty() :: t()
   def empty, do: %__MODULE__{}
 
-  @doc "Returns an effect value whose cache contains the supplied run baseline."
-  @spec with_cache(map()) :: t()
-  def with_cache(cache) when is_map(cache), do: %__MODULE__{tool_cache: cache}
-
   @doc "Records one already-bounded print in newest-first order."
   @spec record_print(t(), String.t()) :: t()
   def record_print(%__MODULE__{} = effects, message) when is_binary(message) do

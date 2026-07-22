@@ -62,6 +62,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Made tool caching evaluator-local: every PTC-Lisp evaluation starts empty,
+  caller-supplied `:tool_cache` state is rejected, and
+  `PtcRunner.Lisp.Result` no longer exposes internal cache entries.
 - Completed the Java interop migration cleanup. Every admitted overload now
   uses closed dispatch; the temporary `legacy_env` schema, empty Java binding
   catalog, Phase-0 attestation snapshot, and non-Java `Math/` namespace aliases

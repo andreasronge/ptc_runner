@@ -20,7 +20,6 @@ defmodule PtcRunner.Lisp.EffectOutcomeRegressionTest do
       assert step.fail.reason == :arithmetic_error
       assert step.prints == ["before error"]
       assert [%{name: "cached", args: %{"x" => 1}}] = step.tool_calls
-      assert map_size(step.tool_cache) == 1
     end
 
     test "an ordinary HOF error retains effects from earlier and failing callbacks" do

@@ -257,9 +257,11 @@ collisions before publication or callback invocation.
 `PtcRunner.Lisp.Eval` recursively evaluates analyzed expressions and leaves
 public result assembly to `PtcRunner.Lisp`. Its context contains one canonical
 `PtcRunner.Lisp.Eval.Effects` value for tool calls, parallel-call records,
-prints, public prelude counts, and the tool cache. Effect lists use an internal
-newest-first representation; `Effects` alone owns merge direction, cache
-precedence, deltas, and conversion to chronological output.
+prints, public prelude counts, and an evaluation-local tool cache. Every
+top-level evaluation starts with an empty cache; callers cannot import entries,
+and results do not expose them. Effect lists use an internal newest-first
+representation; `Effects` alone owns merge direction, cache precedence,
+deltas, and conversion to chronological output.
 
 Plain Elixir callbacks cannot return a threaded evaluator context.
 `PtcRunner.Lisp.Eval.Capture` is the single nestable process-local effect

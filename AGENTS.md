@@ -21,9 +21,6 @@ Explore the codebase before proposing changes — never claim a feature is
 missing without evidence from the source files. When you find a problem, fix
 the code and the docs together.
 
-For changes spanning multiple modules, execution paths, owners, or public
-contracts, follow `docs/guides/large-change-guidelines.md`.
-
 Code documentation must not link to `docs/plans/`; plans are disposable. Move
 durable contracts into module docs, guides, or retained specifications first.
 

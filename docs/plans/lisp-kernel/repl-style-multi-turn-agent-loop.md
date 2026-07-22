@@ -38,16 +38,13 @@ message history.
 Those features may later build on a separate long-lived session owner. They
 must not complicate this single-run loop.
 
-## Risk classification and authoritative boundaries
+## Authoritative boundaries
 
-This is a large/high-risk change under
-`docs/guides/large-change-guidelines.md`, even for the memory-only milestone.
-It crosses the evaluator/Kernel process boundary, changes a public subordinate
-outcome, retains provider-correlated transcript state, broadens retry policy,
-and depends on redaction, quotas, owner state, and cleanup remaining correct.
-Implementation must therefore use vertically complete slices and semantic
-review checkpoints rather than landing all Kernel changes before their agent,
-Viewer, test, and documentation consumers.
+Even the memory-only milestone crosses the evaluator/Kernel process boundary,
+changes a public subordinate outcome, retains provider-correlated transcript
+state, broadens retry policy, and depends on redaction, quotas, owner state,
+and cleanup remaining correct. Update each behavior through its agent, Viewer,
+test, and documentation consumers in one complete slice.
 
 The authoritative representations are:
 

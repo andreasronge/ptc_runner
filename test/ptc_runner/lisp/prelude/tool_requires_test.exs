@@ -533,5 +533,30 @@ defmodule PtcRunner.Lisp.Prelude.ToolRequiresTest do
 
       assert step.fail.reason == :private_tool_unauthorized
     end
+
+    test "private tools ignore the cache setting within a prelude workflow" do
+      provider_calls = :atomics.new(1, [])
+
+      prelude =
+        compile!("""
+        (ns cap "Cap." {:visibility :prompt})
+        (defn fetch-twice "doc" [id]
+          [(tool/private_fetch {:id id})
+           (tool/private_fetch {:id id})])
+        """)
+
+      tools = %{
+        "private_fetch" =>
+          {fn _args -> :atomics.add_get(provider_calls, 1, 1) end,
+           visibility: :private, cache: true}
+      }
+
+      assert {:ok, %Step{} = step} =
+               Lisp.run(~S|(cap/fetch-twice "x")|, prelude: prelude, tools: tools)
+
+      assert step.return == [1, 2]
+      assert Enum.all?(step.tool_calls, &(Map.get(&1, :cached, false) == false))
+      assert :atomics.get(provider_calls, 1) == 2
+    end
   end
 end
