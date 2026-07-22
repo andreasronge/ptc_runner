@@ -3,7 +3,7 @@ defmodule PtcRunner.Lisp.ParallelEffectsTest do
 
   alias PtcRunner.Lisp
 
-  test "successful pmap workers preserve tool calls, prints, and cache entries" do
+  test "successful pmap workers preserve tool calls, prints, and cache reuse" do
     provider_calls = :atomics.new(1, [])
 
     tools = %{
@@ -26,7 +26,6 @@ defmodule PtcRunner.Lisp.ParallelEffectsTest do
     assert Enum.sort(step.prints) == ["1", "2"]
     assert Enum.sort(Enum.map(step.tool_calls, & &1.args["x"])) == [1, 1, 2]
     assert Enum.count(step.tool_calls, &Map.get(&1, :cached, false)) == 1
-    assert map_size(step.tool_cache) == 2
     assert :atomics.get(provider_calls, 1) == 2
   end
 
@@ -198,7 +197,7 @@ defmodule PtcRunner.Lisp.ParallelEffectsTest do
     assert Enum.map(step.tool_calls, & &1.args["x"]) == [1]
   end
 
-  test "lower-index failure preserves input-order effects and higher-index cache precedence" do
+  test "lower-index failure preserves input-order effects" do
     coordinator = spawn_link(fn -> coordinate_parallel_release(nil, false) end)
 
     tools = %{
@@ -235,8 +234,6 @@ defmodule PtcRunner.Lisp.ParallelEffectsTest do
 
     assert lower_cache.result == wait_call.result
     assert higher_cache.result == release_call.result
-    assert [%{result: cached_result}] = Map.values(step.tool_cache)
-    assert cached_result == higher_cache.result
   end
 
   test "generic pmap failure retains effects from the failing worker itself" do

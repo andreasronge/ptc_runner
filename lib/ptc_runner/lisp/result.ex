@@ -1,5 +1,10 @@
 defmodule PtcRunner.Lisp.Result do
-  @moduledoc "Native continuation result returned by the neutral PTC-Lisp evaluator."
+  @moduledoc """
+  Native continuation result returned by the neutral PTC-Lisp evaluator.
+
+  Evaluation-local tool cache entries are private evaluator state and are not
+  retained in this result.
+  """
 
   defstruct [
     :return,
@@ -22,8 +27,7 @@ defmodule PtcRunner.Lisp.Result do
     :original_prompt,
     :tools,
     :prelude_trace,
-    prelude_call_counts: %{},
-    tool_cache: %{}
+    prelude_call_counts: %{}
   ]
 
   @type t :: %__MODULE__{
@@ -45,8 +49,7 @@ defmodule PtcRunner.Lisp.Result do
           prompt: String.t() | nil,
           tools: map() | nil,
           prelude_trace: PtcRunner.Lisp.Prelude.trace_summary() | nil,
-          prelude_call_counts: %{optional(String.t()) => non_neg_integer()},
-          tool_cache: map()
+          prelude_call_counts: %{optional(String.t()) => non_neg_integer()}
         }
 
   @spec ok(term(), map()) :: t()
@@ -73,15 +76,11 @@ defmodule PtcRunner.Lisp.Result do
   def error(reason, message, memory), do: error(reason, message, memory, %{})
 
   @spec error(atom(), String.t(), map(), map()) :: t()
-  def error(reason, message, memory, details), do: error(reason, message, memory, details, [])
-
-  @spec error(atom(), String.t(), map(), map(), keyword()) :: t()
-  def error(reason, message, memory, details, opts) do
+  def error(reason, message, memory, details) do
     %__MODULE__{
       return: nil,
       fail: %{reason: reason, message: message, details: details},
       memory: memory,
-      tool_cache: Keyword.get(opts, :tool_cache, %{}),
       signature: nil,
       usage: nil,
       turns: nil,

@@ -26,6 +26,11 @@ defmodule PtcRunner.Lisp do
   - Receives: `map()` of arguments (may be empty `%{}`)
   - Returns: Any Elixir term (maps, lists, primitives)
   - Should not raise (return `{:error, reason}` for errors)
+
+  Public tools declared with `cache: true` reuse successful results only within
+  the current evaluation; private tools never cache. Every `run/2` starts with
+  an empty evaluator-owned cache, and cache entries are neither accepted from
+  callers nor returned in `PtcRunner.Lisp.Result`.
   """
 
   require Logger
@@ -205,6 +210,18 @@ defmodule PtcRunner.Lisp do
     `signature_supplied?`, and `exception_class`. Exception reasons,
     stacktraces, source, arguments, and results are never attached.
 
+  ## Tool Cache Lifetime
+
+  A public tool configured with `cache: true` reuses successful results during
+  one evaluation. The evaluator derives cache identity from the arguments
+  prepared for the callback, including Java projection. Sequential and
+  higher-order calls observe earlier entries. Parallel workers start from the
+  same pre-parallel cache and do not observe sibling writes; their entries merge
+  in input order and become reusable after the parallel operation. Every
+  top-level call starts empty, and private tools never cache. Passing a
+  `:tool_cache` option raises `ArgumentError`, and cache entries are not included
+  in the returned `Result`.
+
   ## Return Value
 
   On success, returns:
@@ -323,6 +340,7 @@ defmodule PtcRunner.Lisp do
   @spec run_native(String.t(), keyword()) ::
           {:ok, Step.t()} | {:error, Step.t()}
   def run_native(source, opts \\ []) do
+    reject_imported_tool_cache!(opts)
     caller = validate_caller!(Keyword.get(opts, :caller, :direct))
     # Strip instrumentation options so they cannot affect execution semantics
     # or be re-read by downstream code.
@@ -394,7 +412,7 @@ defmodule PtcRunner.Lisp do
 
   defp project_public_step(%Step{} = step) do
     Enum.reduce_while(
-      [:return, :fail, :memory, :tool_calls, :pmap_calls, :child_steps, :tool_cache],
+      [:return, :fail, :memory, :tool_calls, :pmap_calls, :child_steps],
       {:ok, step},
       fn field, {:ok, projected_step} ->
         boundary = if field == :memory, do: :continuation, else: :public
@@ -415,8 +433,7 @@ defmodule PtcRunner.Lisp do
         memory: step.memory,
         tool_calls: public_result_value(step.tool_calls),
         pmap_calls: public_result_value(step.pmap_calls),
-        child_steps: public_result_value(step.child_steps),
-        tool_cache: public_result_value(step.tool_cache)
+        child_steps: public_result_value(step.child_steps)
     }
   end
 
@@ -430,7 +447,6 @@ defmodule PtcRunner.Lisp do
         tool_calls: safely_project_public(step.tool_calls, []),
         pmap_calls: safely_project_public(step.pmap_calls, []),
         child_steps: safely_project_public(step.child_steps, []),
-        tool_cache: safely_project_public(step.tool_cache, %{}),
         fail: %{
           reason: :java_projection_error,
           message: "Java value could not be projected at the public boundary",
@@ -490,6 +506,13 @@ defmodule PtcRunner.Lisp do
     raise ArgumentError,
           "invalid :caller option #{inspect(other)}; expected one of " <>
             inspect(@valid_callers)
+  end
+
+  defp reject_imported_tool_cache!(opts) do
+    if Keyword.has_key?(opts, :tool_cache) do
+      raise ArgumentError,
+            ":tool_cache option is not supported; tool caches are evaluator-owned and last for one evaluation"
+    end
   end
 
   # Compute telemetry stop measurements from the run result.
@@ -588,7 +611,6 @@ defmodule PtcRunner.Lisp do
       filter_context: Keyword.get(opts, :filter_context, true),
       pmap_timeout: Keyword.get(opts, :pmap_timeout),
       pmap_max_concurrency: Keyword.get(opts, :pmap_max_concurrency),
-      tool_cache: Keyword.get(opts, :tool_cache, %{}),
       max_tool_calls: Keyword.get(opts, :max_tool_calls),
       max_tool_call_result_bytes: Keyword.get(opts, :max_tool_call_result_bytes),
       strict_data: Keyword.get(opts, :strict_data, false),
@@ -869,7 +891,6 @@ defmodule PtcRunner.Lisp do
       filter_context: filter_context,
       pmap_timeout: pmap_timeout,
       pmap_max_concurrency: pmap_max_concurrency,
-      tool_cache: tool_cache,
       tools_meta: tools_meta,
       max_tool_calls: max_tool_calls,
       max_tool_call_result_bytes: max_tool_call_result_bytes,
@@ -903,7 +924,6 @@ defmodule PtcRunner.Lisp do
         parallel_budget: parallel_budget,
         pmap_timeout: pmap_timeout,
         pmap_max_concurrency: pmap_max_concurrency,
-        tool_cache: tool_cache,
         tools_meta: tools_meta,
         tool_failure_token: Map.fetch!(opts, :tool_failure_token),
         max_tool_calls: max_tool_calls,
@@ -1113,8 +1133,7 @@ defmodule PtcRunner.Lisp do
       pmap_calls: cleaned_pmap_calls,
       prelude_call_counts: effects.prelude_call_counts,
       child_traces: child_traces,
-      child_steps: child_steps,
-      tool_cache: effects.tool_cache
+      child_steps: child_steps
     }
 
     {:error, step}
@@ -1334,7 +1353,6 @@ defmodule PtcRunner.Lisp do
       return: round_floats(value, precision),
       fail: nil,
       memory: native_memory(ctx.user_ns, preserve_runtime_callables),
-      tool_cache: effects.tool_cache,
       signature: nil,
       usage: nil,
       turns: nil,
@@ -1953,8 +1971,7 @@ defmodule PtcRunner.Lisp do
           {:error, errors} ->
             msg = format_validation_errors(errors)
 
-            {:error,
-             Step.error(:validation_error, msg, step.memory, %{}, tool_cache: step.tool_cache)}
+            {:error, Step.error(:validation_error, msg, step.memory, %{})}
         end
 
       {:error, reason} ->

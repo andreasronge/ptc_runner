@@ -1,472 +1,282 @@
 # Kernel publication and boundary hardening
 
-**Status:** future investigation
+**Status:** triaged; first slice implemented
 
 **Origin:** extracted from the Java interop investigation on 2026-07-20
 
-## Summary
+**Last audited:** 2026-07-22 against `origin/main` at `6be08d9f`
+
+## Decision
+
+Bounded class-aware Java interop is implemented. The implementation now has a
+closed dispatch surface, native Java values, recursive Java projection, Java
+projection-collision detection, and pinned conformance runners. The current
+contract is documented in
+[`../../java-interop.md`](../../java-interop.md).
+
+The Java work exposed several broader boundary questions, but they should not
+be treated as unfinished Java work or implemented as one hardening project.
+This plan now separates:
+
+- reproduced defects that justify small independent changes;
+- infrastructure that exists but is not used by every execution path;
+- product-contract decisions that need an explicit answer; and
+- speculative designs that remain evidence-gated.
+
+## Current triage
+
+| Area | Current state | Decision |
+| --- | --- | --- |
+| Tool cache | Every evaluation now owns an empty, evaluation-local cache. Caller-supplied state is rejected and Results omit cache entries. | Complete. |
+| Public projection | Java collisions are rejected, but a later generic Result projection can still collapse distinct non-Java keys. | Fix next. |
+| Ordinary terminal publication | Atomic finalization, terminal reserve, and frozen batch handoff exist, but ordinary Runner and standalone REPL do not use them. | Migrate in a separate lifecycle slice. |
+| Drop accounting and inspection | Drop buckets are unbounded by event-type count, and several payload-bearing structs use derived `Inspect`. | Fix with the owning boundary slices. |
+| Viewer persistence | SessionTrace owns finalization and retry; TraceLog publication is synced, no-clobber, and byte-identical on retry. | Remove from the active backlog. |
+| Standalone REPL ownership | A transferred ReplSession becomes closed when its creator exits. | Decide whether sessions are process-affine or transferable before changing ownership. |
+| Oracle supervision | The current subprocess-per-run harness has timeout, output, and temporary-directory bounds. | Keep the reusable service deferred until a leak or throughput problem is measured. |
+
+## Completed by Java interop
+
+The following concerns from the original investigation are implemented and do
+not need another generic mechanism merely because Java values exist:
+
+- valid Java values remain native only at native and continuation boundaries;
+- public and Kernel boundaries project Java values to inert values;
+- direct tool arguments are projected before the cache key is calculated, so
+  the key describes the value observed by the callback;
+- newly returned tool results reject Java callables and other unsupported Java
+  values;
+- recursive Java projection detects map and set collisions; and
+- the JVM and Babashka conformance runners enforce source, time, output, and
+  result bounds.
+
+These guarantees are Java-specific. They do not validate every possible BEAM
+term or make the generic publication paths authoritative.
+
+## Completed first slice: imported tool-cache boundary
+
+### Defects removed
+
+The former imported-cache path had two reproduced defects:
+
+1. `PtcRunner.Lisp.run/2` accepted any map as `:tool_cache`. A matching malformed
+   entry was read through `cached.result` and failed later with a `KeyError`
+   instead of a stable cache-boundary error.
+2. A fresh tool result containing a Java callable was rejected by the
+   `:tool_result` projection, while the same value in a matching imported cache
+   entry was accepted and returned as a successful hit.
+
+The `:tool_cache` option was not documented by `PtcRunner.Lisp.run/2`, and the
+repository had no production caller outside the Lisp evaluator and its tests.
+Kernel and standalone REPL evaluations already started with an empty cache.
+Cross-run reuse therefore had cost and authority but no established product
+contract.
+
+The implementation removed imported cache state without designing a public
+cache protocol.
+
+### Implemented contract
+
+The first slice established these invariants:
+
+- every top-level direct, Kernel, and standalone REPL evaluation starts with an
+  empty tool cache;
+- only a successful result projected through the current `:tool_result`
+  boundary can create an entry;
+- entries live for one evaluation; sequential and higher-order paths see
+  earlier entries, while parallel worker entries merge in input order after
+  the parallel operation;
+- private and non-cacheable tools never create or consume entries;
+- cache identity continues to derive from prepared callback-visible arguments;
+  and
+- public and native `PtcRunner.Lisp.Result` values do not expose cache entries.
+
+Top-level `:tool_cache` input raises `ArgumentError` before telemetry or
+evaluation rather than being silently ignored. No compatibility shim retains
+the old map shape.
+
+### Implementation
+
+The slice:
+
+1. added a regression test showing that caller-supplied cache state could turn
+   a rejected Java result into a successful hit;
+2. rejects top-level `:tool_cache` input before evaluation;
+3. creates an empty cache in each evaluator context;
+4. removes the cache field and payloads from `PtcRunner.Lisp.Result`;
+5. retains within-evaluation cache behavior for sequential,
+   higher-order, and parallel calls; and
+6. documents the evaluation-local lifetime in `PtcRunner.Lisp`,
+   `PtcRunner.Lisp.Result`, and the Kernel maintainer guide.
+
+### Non-goals
+
+Do not include these in the first slice:
+
+- a reusable cross-run cache API;
+- opaque cache records, schema versions, or tool generations;
+- a cache owner process;
+- Kernel JSON-tool caching;
+- EventSink or trace finalization changes;
+- a universal BEAM-value boundary algebra;
+- option-list preflight for every public API;
+- standalone REPL lifecycle ownership; or
+- a reusable oracle worker service.
+
+### Verification
+
+Focused tests prove:
+
+- top-level `:tool_cache` input is rejected and never invokes the provider;
+- a fresh Java callable result remains rejected with no imported-hit bypass;
+- repeated valid calls within one evaluation reuse the result without invoking
+  the provider again;
+- separate evaluations invoke the provider separately;
+- private and non-cacheable tools do not cache;
+- callback-visible key normalization remains unchanged;
+- parallel cache merges preserve deterministic existing precedence; and
+- public and native results have no cache field.
 
-This document retains cross-cutting hardening ideas discovered while reviewing
-Java interop. They are not required to implement bounded class-aware Java
-interop and must not be bundled into that migration without a separately
-approved objective.
+The owning module documentation is updated with the implementation. Both
+`mix precommit` and `mix prepush` pass on the completed slice.
+
+If a real cross-run reuse requirement appears later, design it as a separate
+public contract with schema versioning, explicit tool generation, result
+validation, bounds, and redacted inspection. Do not reopen the boundary by
+accepting the old plain-map representation.
+
+## Second slice: collision-safe public projection
+
+Java projection is collision-aware, and `PtcRunner.Lisp.externalize_value/1`
+preserves distinct generic map keys with inert wrappers. The final public
+`PtcRunner.Lisp.Result` path nevertheless applies another recursive projector
+that can silently collapse two different function keys to one `"#fn[...]"`
+key.
 
-The focused interop work remains in
-[`../lisp-kernel/bounded-class-aware-java-interop.md`](../lisp-kernel/bounded-class-aware-java-interop.md).
-
-The ideas fall into four independent areas:
-
-1. generic host-value ingress, validation, projection, and redaction;
-2. tool result and cache identity hardening;
-3. Kernel event publication, terminal finalization, and trace persistence; and
-4. long-lived REPL/Viewer lifecycle ownership and reusable oracle-process
-   supervision.
-
-Each area needs its own current-code audit, problem statement, implementation
-plan, and acceptance gate. This document is a research backlog rather than one
-large implementation proposal.
-
-## Why this is separate from Java interop
-
-Java tagged values make existing boundary behavior easier to inspect, but they
-do not create most of the generic issues listed here. The Java plan needs only
-to retain valid Java values at native boundaries and project or reject them at
-existing public boundaries.
-
-It does not require:
-
-- a new EventSink capability protocol;
-- changing how all runs finalize and persist traces;
-- a new REPL owner process;
-- changing Viewer close/retry semantics;
-- replacing the complete tool cache representation;
-- validating every possible BEAM term through one global algebra;
-- changing all telemetry transactions; or
-- a reusable multi-process conformance worker service.
-
-Combining those projects would make the Java migration difficult to review,
-test, land, or revert. It would also make unrelated Kernel behavior a blocker
-for fixing known Java semantics.
-
-## Area A: generic host ingress and public projection
-
-### Observed concerns
-
-Public Lisp APIs accept option lists and nested host values through context,
-memory, history, tools, Prelude artifacts, evaluator entry points, and caches.
-Several consumers recursively traverse those values for validation,
-externalization, formatting, error reporting, retained-size accounting, or
-static analysis.
-
-Potential generic risks include:
-
-- improper or very long keyword lists being traversed before rejection;
-- duplicated option keys silently receiving last-write behavior;
-- deep/cyclic-looking or very large acyclic terms consuming excessive caller
-  work before a sandbox boundary;
-- unrelated structs, functions, PIDs, ports, or references reaching code that
-  assumes inert Lisp data;
-- different public boundaries using slightly different recursive projectors;
-- map/set collisions after key or leaf projection;
-- eager `inspect/2` or string interpolation revealing a native payload before a
-  later redaction step; and
-- retained-size and encoded-size limits being applied in different orders.
-
-These are broader than Java values and should be evaluated independently.
-
-### Candidate direction: bounded option preflight
-
-Consider a small `OptionPreflight` used by public execution/compiler entry
-points before ordinary `Keyword` access.
-
-Possible contract:
-
-- bounded outer-list length;
-- proper two-element keyword entries only;
-- closed allowed atom keys;
-- duplicate-key rejection;
-- no traversal or inspection of option values during the outer pass; and
-- stable invalid-options errors before telemetry or sandbox creation.
-
-Do not apply this automatically to presentation APIs such as formatting. Their
-option vocabularies and error contracts are different.
-
-### Candidate direction: named validation episodes
-
-If generic recursive validation is needed, avoid one deadline spanning unrelated
-parsing, waiting, evaluation, and publication work.
-
-Potential episode kinds:
-
-- `:host_ingress` for caller-supplied nested host values;
-- `:source_static` for RawAST analysis, CoreAST validation, and static walks;
-- `:tool_result` for one newly returned callback value;
-- `:continuation_candidate` before committing memory/history; and
-- `:publication` for one public/event/inspection projection.
-
-An episode could share depth, node, byte, and deadline counters among the
-validators participating in that one contiguous operation. Nested validators
-must not reset the counters. Parsing/evaluation/tool waiting should retain their
-existing independent limits.
-
-Before adopting this design, measure current worst-case behavior and prove that
-the additional deadline does not reject valid bounded compilation on slower CI
-hosts.
-
-### Candidate direction: closed boundary policies
-
-A shared traversal could apply named leaf/container policies without feeding the
-lossy output of one policy into another. Candidate policies include:
-
-- inert public Elixir values;
-- strict canonical JSON;
-- type-preserving private ledger encoding; and
-- the current `json/generate-string` contract.
-
-Any design must explicitly define:
-
-- ordinary atoms and Lisp keywords;
-- special numeric values;
-- arbitrary binaries and UTF-8 requirements;
-- tuple, set, and map-key behavior;
-- Program/source opacity;
-- callable values;
-- host temporal structs;
-- projection collision detection; and
-- stable bounded errors.
-
-This is substantially larger than adding Java leaf clauses to current
-projection and should not be smuggled into an interop feature.
-
-### Candidate direction: bounded inspection/redaction
-
-Review structs that may retain source, closures, tool arguments/results,
-continuations, or cache entries. Candidates for custom bounded `Inspect`
-implementations include Result/Step, ToolCache, Program, callable wrappers, and
-other authority-bearing values.
-
-Potential rules:
-
-- display counts and safe type labels, not payloads;
-- never enumerate nested child results merely for `inspect/2`;
-- forged/malformed structs remain safe to inspect;
-- Logger and `format_status` never expose retained secrets; and
-- user-visible formatting remains a deliberate API separate from debugging
-  inspection.
-
-Tests should use unique sentinel values across successful/failing results,
-memory, closures, prompts/messages, child steps, tools, and cache entries.
-
-## Area B: tool projection and cache identity
-
-### Observed concerns
-
-Direct-host tools and Kernel JSON tools have different callback contracts. Tool
-arguments, private ledgers, encoded-size checks, result validation, and cache
-keys can drift if each derives its own projection from the native value.
-
-Potential generic issues:
-
-- cache identity built from a value different from what the callback observes;
-- atom/string or hyphen/underscore key normalization collisions;
-- direct-host and Kernel JSON calls accidentally sharing a cache entry;
-- callbacks returning unsupported BEAM authority-bearing values;
-- cache hits bypassing validation applied to fresh results;
-- forged cache entries or stale entries surviving a tool contract change;
-- private/non-cacheable tools entering a cache; and
-- cache/result inspection exposing arguments or results.
-
-### Candidate direction: prepared tool views
-
-Consider one preparation step that validates the native value against the
-declared signature and produces explicitly owned views:
-
-- callback arguments;
-- JSON-safe size/ledger representation;
-- cache identity; and
-- redacted observability metadata.
-
-Cache identity must be derived from the selected callback-visible value. A
-direct Elixir callback and a Kernel JSON callback should not share an entry just
-because their native inputs describe the same semantic object.
-
-### Candidate direction: opaque cache records
-
-If current evidence justifies a cache redesign, consider entries containing:
-
-- normalized tool name;
-- boundary mode;
-- explicit tool generation/version;
-- tool contract digest;
-- collision-safe argument identity;
-- validated native result for direct-host mode; and
-- bounded ledger/size metadata.
-
-Questions requiring an explicit decision:
-
-- whether cache-enabled public tools must provide a generation and result
-  contract;
-- whether Kernel tools remain non-cacheable;
-- whether cache hits rerun native result validation;
-- how old plain-map cache state is rejected in this 0.x library; and
-- whether cache contents remain in-process structs or move behind an owner.
-
-This should be a standalone tool/cache change with representation-sensitive
-callbacks and fresh-versus-hit parity tests.
-
-## Area C: Kernel event publication and terminal finalization
-
-### Observed concerns
-
-Current event publication and terminal assembly use several read-then-act paths.
-Potential races or drift include:
-
-- reading dropped-event state and then emitting a summary separately;
-- ordinary event capacity suppressing `run-stopped`;
-- computing final usage before terminal event loss is known;
-- owner death being mistaken for proof that all unlinked producers are quiet;
-- persistence reading a mutable sink after execution;
-- trace and inspection persistence receiving different event batches;
-- failure telemetry recursively replacing the original failure with a sink
-  error; and
-- no-clobber retry behavior after publication succeeds but acknowledgement is
-  lost.
-
-These concerns affect every Kernel run, not Java interop.
-
-### Candidate direction: split capabilities
-
-Investigate replacing an all-purpose EventSink handle with distinct internal
-capabilities:
-
-- producer capability/lease for ordinary emission;
-- lifecycle capability for exactly one terminal finalizer; and
-- read capability for bounded observation and persistence.
-
-Do not adopt this until all current consumers are inventoried, including:
-
-- `Runner`;
-- `RunBuilder`;
-- `ReplSession`;
-- `TraceLog` and `TraceCapability`;
-- `InspectionArtifact`;
-- Viewer/session trace code; and
-- tests or embedding hosts that read an in-memory sink.
-
-The design must state how a finalized immutable batch reaches every persistence
-and query consumer. Removing a broad handle without a replacement read path
-would break current trace behavior.
-
-### Candidate direction: producer leases
-
-If terminal ordering requires proving producer quiescence, track every process
-that can emit:
-
-- evaluation owner;
-- sandbox worker;
-- provider task; and
-- spawned descendants that receive emission authority.
-
-A spawn path would acquire or transfer a monitored lease before the child can
-emit. Finalization closes new lease admission and waits for all accepted leases
-and synchronous emission calls to drain. An evaluation-owner `:DOWN` initiates
-cleanup but does not prove an unlinked provider/sandbox is finished.
-
-This adds meaningful complexity and should be justified with concrete current
-races and focused failure tests.
-
-### Candidate direction: atomic terminal finalization
-
-One owner operation could:
-
-1. close producer admission;
-2. wait for producer quiescence;
-3. snapshot bounded drop accounting;
-4. append `events-dropped` when required;
-5. compute final event-aware usage;
-6. append exactly one `run-stopped`; and
-7. freeze/return the immutable terminal batch.
-
-The sink would reserve count/byte capacity for its maximum code-owned terminal
-records. Ordinary producer events could not consume that reserve.
-
-Questions that must be answered before implementation:
-
-- who owns finalization for ordinary Runner, standalone REPL, and Viewer
-  sessions;
-- how invalid or repeated finalization is rejected;
-- whether private sinks emit a drop summary;
-- how the public Result receives the identical final usage;
-- how a finalized batch reaches RunBuilder and TraceLog;
-- when sink/read owners terminate; and
-- how construction failures before `run-started` are represented.
-
-### Candidate direction: bounded drop accounting
-
-Normal-policy loss state should have a fixed maximum number of event-type
-buckets plus an overflow counter. Unique attacker-controlled event types must
-not grow sink state without bound or collide with a real event name.
-
-An atomic failure-event admission returning `:dropped` must also update normal
-drop accounting in the same owner operation. Otherwise finalization can omit
-`events-dropped` and `TraceLog.truncated` will be false despite known loss.
-
-### Candidate direction: failure-envelope floors
-
-If public projection failures are recorded through bounded Results, events, and
-inspection records, each containing boundary needs a minimum capacity for its
-complete envelope, not only for an inner payload.
-
-A future plan should distinguish:
-
-- direct public result limit;
-- Kernel terminal result limit;
-- ordinary event payload/record limit;
-- inspection record limit;
-- aggregate event/inspection storage limits; and
-- TraceLog source/query-result limits.
-
-Use generated maximum fixtures and production encoding rather than representative
-examples. Do not repurpose TraceLog query limits as event-production limits.
-
-### Candidate direction: no-clobber trace publication
-
-For Viewer/session persistence, a complete batch could be:
-
-1. encoded and validated before opening the destination;
-2. written and synced to an exclusive same-directory temporary file;
-3. published with an atomic no-replace operation;
-4. considered successful on retry only when an existing destination is
-   byte-identical; and
-5. cleaned up without exposing a partial discoverable trace.
-
-Fault injection should cover failure before write, during write, after sync,
-after publication but before acknowledgement, and during cleanup.
-
-## Area D: REPL and Viewer lifecycle ownership
-
-### Standalone ReplSession
-
-`ReplSession` is currently an immutable transferable value rather than a process
-owner. If a future EventSink lifecycle capability is PID-bound, it must not be
-bound casually to the process that called `ReplSession.new/1`; that process may
-hand the session to another process and exit.
-
-One possible design is a supervised run-scoped `ReplLifecycle` process:
-
-- the session value stores an opaque handle;
-- the process owns finalization and deadline cleanup;
-- evaluation/sandbox/provider processes receive producer leases only;
-- `ReplSession.close/1` and admitted abort operations delegate to it;
-- creator death does not invalidate a transferred session; and
-- repeated/stale close cannot finalize twice.
-
-This is not required merely to retain Java wrappers in REPL memory. Adopt it
-only as part of an approved lifecycle redesign.
-
-### Viewer SessionTrace
-
-The existing Viewer log-analysis plan already has its own session and persistence
-ownership design. If the shared EventSink lifecycle changes later, reconcile
-that plan then rather than editing it as part of Java interop.
-
-Potential future properties:
-
-- `SessionTrace`, not standalone `ReplLifecycle`, owns Viewer finalization;
-- explicit abort reasons use a closed public enum;
-- unexpected owner death derives an internal reason rather than trusting
-  caller input;
-- orderly close, recoverable owner death, and Viewer shutdown use one
-  drain/finalize/persist path;
-- persistence failure retains only the immutable batch/destination/retry state;
-- successful persistence retains at most a lightweight bounded tombstone when
-  `info/1` or idempotent `close` must survive a lost response; and
-- Reset retires the prior handle only after persistence/start reconciliation.
-
-These requirements belong in the Viewer plan when that work is implemented.
-
-## Area E: reusable conformance process supervision
-
-The Java plan needs a bounded pinned JVM/Babashka subprocess harness. A more
-general long-lived oracle service may be useful later if subprocess cleanup,
-parallel case throughput, or telemetry attestation becomes unreliable.
-
-Possible components:
-
-- bounded adapter-level concurrency;
-- one case owner and one execution worker per case;
-- a surviving reaper that owns OS ports and temporary directories;
-- registration of compile/evaluation sandbox descendants before execution;
-- callback barriers before detaching telemetry handlers;
-- process-tree termination on timeout, cancellation, owner death, or adapter
-  shutdown; and
-- no case-slot release until handlers, BEAM children, OS children, ports, and
-  temporary files are quiescent.
-
-This design should be triggered by measured harness problems. The initial Java
-conformance implementation should prefer a simple bounded subprocess per case
-or batch.
-
-## Suggested decomposition
-
-Do not implement this file as one change. If evidence supports the work, split
-it into independent plans:
-
-1. **Host ingress and boundary algebra**
-   - option preflight;
-   - named validation episodes;
-   - projection policies/collision handling; and
-   - bounded inspection/redaction.
-
-2. **Tool projection and cache identity**
-   - prepared callback/ledger/cache views;
-   - cache schema/versioning; and
-   - fresh/hit parity.
-
-3. **EventSink and terminal publication**
-   - capability ownership;
-   - producer leases;
-   - terminal reserve/finalization;
-   - frozen batch routing; and
-   - drop/failure accounting.
-
-4. **Trace/Viewer persistence lifecycle**
-   - no-clobber publication;
-   - retry/tombstone semantics;
-   - owner-death cleanup; and
-   - Reset reconciliation.
-
-5. **Reusable conformance worker supervision**
-   - only if the simple oracle harness proves insufficient.
-
-Each plan must begin by reproducing a concrete defect or documenting a clear
-contract gap in current code.
-
-## Decision gates
-
-Before promoting an area from future research to implementation:
-
-- identify the current production path and consumers;
-- demonstrate the bug, race, leak, drift, or unbounded behavior;
-- state the smallest contract that fixes it;
-- show why existing ownership/limits cannot be extended locally;
-- keep Viewer, REPL, Runner, direct Lisp, and Kernel differences explicit;
-- define migration and deletion of the replaced path;
-- add focused success/failure/timeout/owner-death tests in proportion to risk;
-- update durable module docs/guides rather than linking implemented code to this
-  future plan; and
-- pass `mix precommit` before committing and `mix prepush` before pushing.
-
-## Relationship to bounded Java interop
-
-The Java plan may proceed independently using these narrow rules:
-
-- validate Java wrappers where they enter or are consumed;
-- retain them only at native/continuation boundaries;
-- add focused Java leaf handling to current public/tool/Kernel projection;
-- reject or inertly render Java callables at non-native boundaries; and
-- test nested values and projection collisions.
-
-If that implementation exposes a concrete generic boundary defect, record it
-here and propose the smallest separate fix. Do not make the entire future
-hardening backlog a prerequisite for correcting Java semantics.
+A reproduced example is:
+
+```clojure
+{(fn [x] x) 1
+ (fn [x] (+ x 1)) 2}
+```
+
+The current public result contains only `%{"#fn[...]" => 2}`.
+
+This slice should choose one authoritative public projector, migrate direct
+Result and Kernel terminal projection to it, and delete competing recursive
+walkers. Public Elixir projection may preserve ambiguous keys with inert
+wrappers; strict JSON boundaries must reject ambiguity with a stable bounded
+error. Add equivalent map and set tests for direct Lisp and Kernel results.
+
+Do not expand this slice into validation of every host-supplied BEAM term.
+
+## Third slice: ordinary terminal finalization
+
+`PtcRunner.Kernel.EventSink.finalize_and_events/3` already performs atomic
+terminal finalization and returns a frozen batch. Log-analysis SessionTrace
+uses a two-event terminal reserve, persists the frozen batch, and retries
+publication without appending another terminal event.
+
+Ordinary Runner and standalone ReplSession still read dropped counts, emit
+`events-dropped`, emit `run-stopped`, and read events in separate operations.
+RunBuilder then reads the mutable sink independently for trace and inspection
+persistence. Existing tests explicitly allow `run-stopped` to be dropped by a
+full normal sink.
+
+For a system that treats logs as future improvement evidence, ordinary traces
+should have the same terminal integrity as Viewer traces. A separate slice
+should:
+
+- reserve terminal capacity for ordinary normal sinks;
+- give Runner and standalone REPL one terminal finalization operation;
+- return one frozen batch for trace and inspection persistence;
+- compute public event-loss usage from that same terminal state; and
+- cap drop accounting to fixed event-type buckets plus an overflow count.
+
+Do not add producer leases or split EventSink capabilities unless a focused
+test first demonstrates that current RunState/provider cleanup permits an
+event after finalization begins.
+
+## Inspection and redaction follow-up
+
+Review payload-bearing structs when their owning boundary changes. The current
+high-value candidates are:
+
+- `PtcRunner.Lisp.Result`, which can retain memory, tool calls, prompts,
+  messages, and child steps;
+- `PtcRunner.Kernel.Program`, which retains source; and
+- `PtcRunner.Lisp.RuntimeCallable`, which can retain evaluator context and a
+  function.
+
+Custom `Inspect` implementations should show safe identity, counts, and byte
+metadata without enumerating payloads. Tests should use unique sentinels in
+success, failure, memory, prompt, tool, and child-result fields. Logger and
+`format_status` paths must not expose those sentinels.
+
+## Product decision: standalone REPL ownership
+
+Standalone ReplSession currently contains handles owned by the process that
+created the session. Sending the immutable session value to another process
+does not transfer ownership; when the creator exits, later evaluation returns
+`:session_closed`.
+
+Choose one contract before implementing a new lifecycle process:
+
+- **Process-affine session:** document the creator/owner constraint and reject
+  use from another process with a stable error.
+- **Transferable session:** add a supervised lifecycle owner independent of the
+  creator and define transfer, close, abort, timeout, and owner-death behavior.
+
+Do not infer the larger transferable design merely because the session is an
+Elixir struct.
+
+## Deferred investigations
+
+The following ideas still require a reproduced defect or measured limit before
+they become implementation work:
+
+- bounded preflight shared by selected option-list APIs;
+- named depth/node/byte/deadline episodes for generic host values;
+- one universal public/private/JSON boundary algebra;
+- a reusable cross-run tool-cache protocol;
+- producer leases and split EventSink capabilities;
+- generated minimum-capacity proofs for complete failure envelopes; and
+- a reusable multi-process conformance worker and OS-process reaper.
+
+For the Java oracle, first add focused timeout and child-cleanup tests. Build a
+long-lived service only if those tests expose leaks or measured execution time
+shows that subprocess startup is a material bottleneck.
+
+## Completed work to remove from future planning
+
+Viewer/session trace work already provides:
+
+- SessionTrace-owned finalization;
+- terminal capacity reservation;
+- immutable terminal batch retention;
+- owner-death cleanup;
+- persistence retry from the same batch;
+- encode-before-open publication;
+- exclusive same-directory temporary files;
+- synced no-clobber publication;
+- byte-identical retry success; and
+- fault coverage before, during, and after publication.
+
+Do not propose another Viewer persistence redesign without a new reproduced
+defect. One smaller API question remains: public abort reasons currently accept
+any atom and may need a closed enum if callers outside the trusted frontend are
+supported.
+
+## Decision gates for later slices
+
+Before promoting another item from this plan:
+
+- identify every current production entry and exit path;
+- reproduce the bug, race, disclosure, leak, drift, or unbounded state;
+- state the smallest invariant that fixes it;
+- choose one authoritative representation or owner;
+- migrate all paths in one vertically complete slice;
+- delete the replaced mechanism instead of adding a compatibility layer;
+- add boundary-level tests for success and relevant failures; and
+- move the implemented contract into module documentation, a guide, or a
+  retained specification before deleting the completed plan section.
