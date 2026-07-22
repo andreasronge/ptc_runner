@@ -402,6 +402,25 @@ Runtime observability has separate planes with separate data contracts:
 `PtcRunner.Kernel.EventSink` owns canonical event sequence numbers, timestamps,
 queue bounds, and loss accounting. Normal policy is lossy and reports dropped
 events. Private policy fails closed when it cannot retain the required event.
+Normal sinks used by `RunConfig` reserve count and measured envelope capacity
+for one `events-dropped` summary and one `run-stopped` event. Construction also
+requires the sink's exact `Limits`, verifies that `run-started` fits outside the
+reserve, and rejects payload ceilings too small for the bounded worst-case loss
+summary. Runner and standalone `ReplSession` close
+their `RunState` first, then finalize the recorder in one owner operation. That
+operation injects the exact drop snapshot into terminal usage, appends both
+terminal events when loss occurred, freezes the event list, and returns the
+same batch used by trace and inspection persistence. Emits after finalization
+cannot change events or loss usage. Loss accounting retains at most sixteen
+individual event-type keys; further types increment the saturating
+`$overflow` bucket, so arbitrary valid event names cannot create unbounded
+owner state. A `RunConfig` is consequently one-shot: reuse after terminal
+publication fails with `:event_sink_error` instead of executing against an old
+frozen recorder. Startup retains `run-started` and claims that one-shot recorder
+in the same owner operation, so concurrent callers cannot both pass a separate
+readiness check and execute. Only the successful claimant owns provider and
+recorder cleanup; a rejected concurrent runner or REPL constructor cannot tear
+down the live winner.
 Run labels and workflow annotations use `PtcRunner.Kernel.SafeMetadata`.
 Caller-supplied `name`, `model`, and `provider` label strings become one-way
 SHA-256 fingerprints. Tags use fixed `environment`, `mode`, `stage`, and
@@ -450,7 +469,7 @@ mission callback is therefore rejected.
 The trace owner is additionally bound to the exact combined runtime/sink,
 limits, sink run/trace identity, and `<run-id>.jsonl` destination at
 construction, and assembly validation rechecks that binding. Construction also
-requires the exact two-event terminal reserve, an unfinalized empty recorder,
+requires the exact two-event measured-envelope reserve, an unfinalized empty recorder,
 and an open `RunState`. The sole session attaches before `run-started` is
 emitted, so replaying a previously attached assembly cannot append a duplicate
 start event.
@@ -478,7 +497,7 @@ closes or reports backend failure and releases the snapshot rather than
 silently evaluating without canonical events.
 
 `PtcRunner.Kernel.SessionTrace` lifecycle-owns the combined runtime and monitors
-the session. The event state's opt-in terminal reserve keeps capacity for one
+the session. The event state's opt-in measured terminal reserve keeps capacity for one
 bounded `events-dropped` summary and exactly one `run-stopped` event inside the
 normal hard count/byte ceilings. One owner call finalizes and returns the
 complete batch before the runtime is stopped; `SessionTrace` then publishes it

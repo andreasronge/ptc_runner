@@ -59,7 +59,6 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     {:ok, workflow} = WorkflowEnvironment.new(bundle: bundle)
     {:ok, mission} = MissionEnvironment.new([])
     {:ok, limits} = Limits.new()
-    {:ok, sink} = EventSink.start(:normal, limits, run_id: "native-action")
 
     valid = %{
       "content" => nil,
@@ -78,7 +77,9 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
        "wrong-tool-name"}
     ]
 
-    for {response, expected_kind, expected_reason} <- cases do
+    for {{response, expected_kind, expected_reason}, index} <- Enum.with_index(cases) do
+      {:ok, sink} = EventSink.start(:normal, limits, run_id: "native-action-#{index}")
+
       {:ok, config} =
         RunConfig.new(
           workflow_environment: workflow,

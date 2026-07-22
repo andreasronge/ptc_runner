@@ -45,12 +45,20 @@ defmodule PtcRunner.Kernel do
   in `config`. Calls across the reserved subordinate-evaluation boundary use
   only the mission environment. The run owns its resource counters,
   transactional native evaluation memory/history, deadline, and canonical
-  events.
+  events. Terminal publication is one atomic recorder operation: normal sinks
+  reserve the loss summary and `run-stopped`, and no event can mutate the batch
+  after finalization.
 
   Returns a bounded `PtcRunner.Kernel.Result` or
   `PtcRunner.Kernel.Error`. Capability failures normally remain recoverable
-  Lisp values; workflow policy decides whether to retry, degrade, or fail.
+  Lisp values; workflow policy decides whether to retry, degrade, or fail. The
+  supplied configuration is one-shot because this call finalizes its event
+  sink; construct a fresh configuration for another run.
   """
   @spec run(binary(), RunConfig.t()) :: {:ok, Result.t()} | {:error, Error.t()}
   def run(entry_source, %RunConfig{} = config), do: Runner.run(entry_source, config)
+
+  @doc false
+  def run_and_events(entry_source, %RunConfig{} = config),
+    do: Runner.run_and_events(entry_source, config)
 end

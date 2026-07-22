@@ -62,6 +62,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Ordinary Kernel runs and standalone REPL sessions now reserve terminal event
+  count and measured envelope capacity and atomically freeze one canonical
+  batch for result usage, trace, and inspection persistence. Drop accounting is
+  capped at sixteen event types plus a saturating overflow bucket, each
+  `RunConfig` atomically claims its recorder for one execution, and rejected
+  claimants cannot close resources owned by the winning run or REPL session.
 - Unified direct and Kernel public-value projection. Direct results preserve
   colliding map keys and set members with inert wrappers, while Kernel JSON
   boundaries reject ambiguous projections with

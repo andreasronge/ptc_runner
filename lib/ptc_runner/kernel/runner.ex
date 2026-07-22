@@ -22,6 +22,14 @@ defmodule PtcRunner.Kernel.Runner do
   @spec run(binary(), RunConfig.t()) :: {:ok, Result.t()} | {:error, Error.t()}
   @doc "Executes one validated run configuration and always tears down run state."
   def run(entry_source, %RunConfig{} = config) when is_binary(entry_source) do
+    {result, _terminal_batch} = run_and_events(entry_source, config)
+    result
+  end
+
+  @doc false
+  @spec run_and_events(binary(), RunConfig.t()) ::
+          {{:ok, Result.t()} | {:error, Error.t()}, {:ok, [map()]} | {:error, atom()}}
+  def run_and_events(entry_source, %RunConfig{} = config) when is_binary(entry_source) do
     with :ok <- entry_source_within_limit(entry_source, config.limits),
          {:ok, state} <- RunState.start(config.limits) do
       try do
@@ -31,34 +39,45 @@ defmodule PtcRunner.Kernel.Runner do
         RunState.stop(state)
       end
     else
-      {:error, reason} -> configuration_error(reason, %{})
+      {:error, reason} ->
+        {configuration_error(reason, %{}), {:error, :terminal_batch_unavailable}}
     end
-  after
-    RunConfig.close_provider_resources(config)
   end
 
   defp run_with_events(entry_source, config, state) do
-    case Events.emit(state, config.event_sink, "run-started", config.run_started_metadata) do
+    case EventSink.begin(config.event_sink, config.run_started_metadata) do
       :ok ->
-        result = run_workflow(entry_source, config, state)
-        result = apply_terminal_failure(result, state)
-        _ = emit_dropped_summary(state, config.event_sink)
-        usage = usage_with_events(state, config.event_sink)
-
-        case Events.emit(state, config.event_sink, "run-stopped", %{
-               outcome: outcome(result),
-               reason: terminal_reason(result),
-               usage: usage
-             }) do
-          :ok ->
-            put_result_usage(result, usage_with_events(state, config.event_sink))
-
-          {:error, :event_sink_error} ->
-            event_sink_error(usage_with_events(state, config.event_sink))
+        try do
+          result = run_workflow(entry_source, config, state)
+          result = apply_terminal_failure(result, state)
+          :ok = RunState.close(state)
+          finalize_run(result, state, config.event_sink)
+        after
+          RunConfig.close_provider_resources(config)
         end
 
       {:error, :event_sink_error} ->
-        event_sink_error(RunState.usage(state))
+        {event_sink_error(RunState.usage(state)), {:error, :event_sink_error}}
+    end
+  end
+
+  defp finalize_run(result, state, sink) do
+    usage = RunState.usage(state)
+
+    stopped_data = %{
+      outcome: outcome(result),
+      reason: terminal_reason(result),
+      usage: usage
+    }
+
+    case EventSink.finalize_and_events(sink, stopped_data) do
+      {:ok, %{events: events, dropped: dropped}} ->
+        final_usage = Map.put(usage, :events_dropped, dropped)
+        {put_result_usage(result, final_usage), {:ok, events}}
+
+      {:error, :event_sink_error} ->
+        failed_usage = Map.put(usage, :events_dropped, %{"event-sink" => 1})
+        {event_sink_error(failed_usage), {:error, :event_sink_error}}
     end
   end
 
@@ -252,9 +271,6 @@ defmodule PtcRunner.Kernel.Runner do
   defp terminal_reason({:ok, _result}), do: nil
   defp terminal_reason({:error, %Error{reason: reason}}), do: reason
 
-  defp usage_with_events(state, sink),
-    do: Map.put(RunState.usage(state), :events_dropped, EventSink.dropped(sink))
-
   defp put_result_usage({:ok, %Result{} = result}, usage), do: {:ok, %{result | usage: usage}}
   defp put_result_usage({:error, %Error{} = error}, usage), do: {:error, %{error | usage: usage}}
 
@@ -284,13 +300,6 @@ defmodule PtcRunner.Kernel.Runner do
            details: %{},
            usage: RunState.usage(state)
          }}
-    end
-  end
-
-  defp emit_dropped_summary(state, sink) do
-    case EventSink.dropped(sink) do
-      dropped when map_size(dropped) == 0 -> :ok
-      dropped -> Events.emit(state, sink, "events-dropped", %{counts: dropped})
     end
   end
 

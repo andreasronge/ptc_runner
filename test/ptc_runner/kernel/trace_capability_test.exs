@@ -146,8 +146,20 @@ defmodule PtcRunner.Kernel.TraceCapabilityTest do
 
     assert metadata["run_id"] == "source-run"
 
+    {:ok, workflow_only_sink} =
+      EventSink.start(:normal, limits, run_id: "query-run-workflow-only")
+
+    {:ok, workflow_only_config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        mission_environment: mission,
+        input: %{},
+        limits: limits,
+        event_sink: workflow_only_sink
+      )
+
     assert {:error, %{kind: :workflow_failed}} =
-             Kernel.run("(return (tool/trace-list-runs {}))", config)
+             Kernel.run("(return (tool/trace-list-runs {}))", workflow_only_config)
   end
 
   @tag :tmp_dir

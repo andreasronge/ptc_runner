@@ -5,6 +5,9 @@ defmodule PtcRunner.Kernel.EventSinkState do
   alias PtcRunner.Lisp.RetainedSize
 
   @event_type ~r/\A[a-z][a-z0-9-]{0,127}\z/
+  @drop_type_buckets 16
+  @drop_overflow "$overflow"
+  @drop_count_limit 4_294_967_295
 
   @doc false
   def new(policy, limits, token, run_id, trace_id, terminal_reserve) do
@@ -19,11 +22,31 @@ defmodule PtcRunner.Kernel.EventSinkState do
       events: [],
       dropped: %{},
       terminal_reserve: terminal_reserve,
+      begun?: false,
       finalized?: false
     }
   end
 
   @doc false
+  def handle(
+        {token, {:begin, data}},
+        %{token: token, begun?: false, finalized?: false} = state
+      ) do
+    with {:ok, event, bytes} <- event_with_bytes(state, "run-started", data),
+         true <- ordinary_capacity?(state, bytes) do
+      next = retain_event(%{state | begun?: true}, event, bytes)
+      {:ok, next}
+    else
+      _error -> {{:error, :event_sink_error}, state}
+    end
+  end
+
+  def handle(
+        {token, {:emit, _type, _data}},
+        %{token: token, finalized?: true} = state
+      ),
+      do: {{:error, :event_sink_error}, state}
+
   def handle({token, {:emit, type, data}}, %{token: token} = state) do
     case event_with_bytes(state, type, data) do
       {:ok, event, bytes} -> enqueue(state, event, bytes)
@@ -32,22 +55,16 @@ defmodule PtcRunner.Kernel.EventSinkState do
   end
 
   def handle(
-        {token, {:finalize, dropped_data, stopped_data}},
-        %{token: token, policy: :normal} = state
+        {token, {:finalize_and_events, stopped_data}},
+        %{token: token} = state
       ) do
-    case finalize_state(state, dropped_data, stopped_data) do
-      {:ok, next} -> {:ok, next}
-      :error -> {{:error, :event_sink_error}, state}
-    end
-  end
+    case finalize_state(state, stopped_data) do
+      {:ok, next} ->
+        batch = %{events: Enum.reverse(next.events), dropped: next.dropped}
+        {{:ok, batch}, next}
 
-  def handle(
-        {token, {:finalize_and_events, dropped_data, stopped_data}},
-        %{token: token, policy: :normal} = state
-      ) do
-    case finalize_state(state, dropped_data, stopped_data) do
-      {:ok, next} -> {{:ok, Enum.reverse(next.events)}, next}
-      :error -> {{:error, :event_sink_error}, state}
+      :error ->
+        {{:error, :event_sink_error}, state}
     end
   end
 
@@ -60,12 +77,21 @@ defmodule PtcRunner.Kernel.EventSinkState do
   def handle({token, :identity}, %{token: token} = state),
     do: {%{run_id: state.run_id, trace_id: state.trace_id}, state}
 
+  def handle({token, {:begin_capacity?, data}}, %{token: token} = state) do
+    fits? =
+      match?({:ok, _event, _bytes}, event_with_ordinary_capacity(state, "run-started", data))
+
+    {fits?, state}
+  end
+
   def handle({token, :session_contract}, %{token: token} = state) do
     contract = %{
       terminal_reserve: state.terminal_reserve,
+      limits: state.limits,
       ready?: ready?(state),
       event_count: length(state.events),
       event_bytes: state.bytes,
+      begun?: state.begun?,
       dropped?: map_size(state.dropped) != 0
     }
 
@@ -78,33 +104,64 @@ defmodule PtcRunner.Kernel.EventSinkState do
   def ready?(state), do: not state.finalized?
 
   defp enqueue(state, event, bytes) do
+    if ordinary_capacity?(state, bytes) do
+      {:ok, retain_event(state, event, bytes)}
+    else
+      sink_failure(state, event.type)
+    end
+  end
+
+  defp event_with_ordinary_capacity(state, type, data) do
+    with {:ok, event, bytes} <- event_with_bytes(state, type, data),
+         true <- ordinary_capacity?(state, bytes) do
+      {:ok, event, bytes}
+    else
+      _ -> :error
+    end
+  end
+
+  defp ordinary_capacity?(state, bytes) do
     reserve = state.terminal_reserve
 
-    full? =
-      state.finalized? or
-        length(state.events) >= state.limits.normal_event_count - reserve.count or
-        state.bytes + bytes > state.limits.normal_event_bytes - reserve.bytes
+    not state.finalized? and
+      length(state.events) < state.limits.normal_event_count - reserve.count and
+      state.bytes + bytes <= state.limits.normal_event_bytes - reserve.bytes
+  end
 
-    if full? do
-      sink_failure(state, event.type)
-    else
-      {:ok,
-       %{
-         state
-         | sequence: state.sequence + 1,
-           bytes: state.bytes + bytes,
-           events: [event | state.events]
-       }}
-    end
+  defp retain_event(state, event, bytes) do
+    %{
+      state
+      | sequence: state.sequence + 1,
+        bytes: state.bytes + bytes,
+        events: [event | state.events]
+    }
   end
 
   defp sink_failure(%{policy: :private} = state, _type),
     do: {{:error, :event_sink_error}, state}
 
   defp sink_failure(state, type) do
-    dropped = Map.update(state.dropped, type, 1, &(&1 + 1))
+    bucket = drop_bucket(state.dropped, type)
+    dropped = Map.update(state.dropped, bucket, 1, &increment_drop_count/1)
     {:ok, %{state | dropped: dropped}}
   end
+
+  defp drop_bucket(dropped, type) do
+    cond do
+      Map.has_key?(dropped, type) -> type
+      valid_drop_type?(type) and drop_type_bucket_count(dropped) < @drop_type_buckets -> type
+      true -> @drop_overflow
+    end
+  end
+
+  defp valid_drop_type?(type), do: is_binary(type) and type =~ @event_type
+
+  defp drop_type_bucket_count(dropped) do
+    map_size(dropped) - if(Map.has_key?(dropped, @drop_overflow), do: 1, else: 0)
+  end
+
+  defp increment_drop_count(count) when count < @drop_count_limit, do: count + 1
+  defp increment_drop_count(_count), do: @drop_count_limit
 
   defp event_with_bytes(state, type, data) do
     payload_cap = state.limits.event_payload_bytes
@@ -127,27 +184,40 @@ defmodule PtcRunner.Kernel.EventSinkState do
     end
   end
 
-  defp finalize_state(%{finalized?: true} = state, _dropped_data, _stopped_data),
+  defp finalize_state(%{finalized?: true} = state, _stopped_data),
     do: {:ok, state}
 
-  defp finalize_state(state, dropped_data, stopped_data) do
-    terminal =
-      if map_size(state.dropped) == 0 do
-        [{"run-stopped", stopped_data}]
-      else
-        [
-          {"events-dropped", Map.put(dropped_data, :counts, state.dropped)},
-          {"run-stopped", stopped_data}
-        ]
-      end
-
-    with true <- length(terminal) <= state.terminal_reserve.count,
+  defp finalize_state(state, stopped_data) do
+    with {:ok, stopped_data} <- put_dropped_usage(stopped_data, state.dropped),
+         terminal = terminal_events(stopped_data, state.dropped),
+         true <- terminal_capacity?(state, terminal),
          {:ok, next} <- enqueue_terminal_events(%{state | finalized?: true}, terminal) do
       {:ok, next}
     else
       _ -> :error
     end
   end
+
+  defp put_dropped_usage(stopped_data, dropped) do
+    case Map.get(stopped_data, :usage, %{}) do
+      usage when is_map(usage) and not is_struct(usage) ->
+        {:ok, Map.put(stopped_data, :usage, Map.put(usage, :events_dropped, dropped))}
+
+      _invalid ->
+        :error
+    end
+  end
+
+  defp terminal_events(stopped_data, dropped) when map_size(dropped) == 0,
+    do: [{"run-stopped", stopped_data}]
+
+  defp terminal_events(stopped_data, dropped),
+    do: [{"events-dropped", %{counts: dropped}}, {"run-stopped", stopped_data}]
+
+  defp terminal_capacity?(%{policy: :normal} = state, terminal),
+    do: length(terminal) <= state.terminal_reserve.count
+
+  defp terminal_capacity?(%{policy: :private}, _terminal), do: true
 
   defp enqueue_terminal_events(state, []), do: {:ok, state}
 

@@ -287,7 +287,13 @@ defmodule PtcRunner.Kernel.CoreContractTest do
 
   test "normal event sinks drop while private event sinks fail closed" do
     {:ok, limits} = Limits.new(normal_event_count: 1, normal_event_bytes: 10_000)
-    {:ok, normal} = EventSink.start(:normal, limits, run_id: "normal")
+
+    {:ok, normal} =
+      EventSink.start(:normal, limits,
+        run_id: "normal",
+        terminal_reserve: %{count: 0, bytes: 0}
+      )
+
     {:ok, private} = EventSink.start(:private, limits, run_id: "private")
 
     assert :ok = EventSink.emit(normal, "run-started", %{"safe" => true})
@@ -316,7 +322,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
 
     EventSink.stop(normal)
 
-    assert {:ok, %{value: 42, usage: %{events_dropped: %{"event-sink" => 1}}}} =
+    assert {:error, %{kind: :event_sink_error, reason: :event_sink_error}} =
              Kernel.run("(return 42)", normal_config)
 
     {:ok, private} = EventSink.start(:private, limits, run_id: "stopped-private")
@@ -355,10 +361,17 @@ defmodule PtcRunner.Kernel.CoreContractTest do
              Kernel.run("(return 42)", config)
   end
 
-  test "normal sink terminal drops are included in returned usage" do
+  test "normal Runner finalization reserves and freezes the terminal envelope" do
     {:ok, workflow} = WorkflowEnvironment.new([])
     {:ok, mission} = MissionEnvironment.new([])
-    {:ok, limits} = Limits.new(normal_event_count: 1, normal_event_bytes: 10_000)
+
+    {:ok, limits} =
+      Limits.new(
+        normal_event_count: 4,
+        normal_event_bytes: 100_000,
+        event_payload_bytes: 5_000
+      )
+
     {:ok, sink} = EventSink.start(:normal, limits, run_id: "normal-run")
 
     {:ok, config} =
@@ -371,7 +384,153 @@ defmodule PtcRunner.Kernel.CoreContractTest do
       )
 
     assert {:ok, %{usage: %{events_dropped: dropped}}} = Kernel.run("(return 42)", config)
-    assert dropped["run-stopped"] == 1
+    assert dropped == %{"evaluation-stopped" => 1}
+
+    events = EventSink.events(sink)
+
+    assert Enum.map(events, & &1.type) ==
+             ["run-started", "evaluation-started", "events-dropped", "run-stopped"]
+
+    assert List.last(events).data.usage.events_dropped == dropped
+
+    assert :ok = EventSink.emit(sink, "late-event", %{})
+    assert EventSink.events(sink) == events
+    assert EventSink.dropped(sink) == dropped
+  end
+
+  test "run configuration rejects a normal sink without terminal capacity" do
+    {:ok, workflow} = WorkflowEnvironment.new([])
+    {:ok, mission} = MissionEnvironment.new([])
+
+    {:ok, limits} =
+      Limits.new(
+        normal_event_count: 4,
+        normal_event_bytes: 20_000,
+        event_payload_bytes: 1_000
+      )
+
+    {:ok, sink} =
+      EventSink.start(:normal, limits,
+        run_id: "missing-terminal-reserve",
+        terminal_reserve: %{count: 0, bytes: 0}
+      )
+
+    assert {:error, :invalid_run_config} =
+             RunConfig.new(
+               workflow_environment: workflow,
+               mission_environment: mission,
+               input: %{},
+               limits: limits,
+               event_sink: sink
+             )
+  end
+
+  test "run configuration requires exact sink limits and room for run-started" do
+    {:ok, workflow} = WorkflowEnvironment.new([])
+    {:ok, mission} = MissionEnvironment.new([])
+    sink_limits = Limits.defaults()
+    {:ok, normal} = EventSink.start(:normal, sink_limits, run_id: "mismatched-normal")
+    {:ok, private} = EventSink.start(:private, sink_limits, run_id: "mismatched-private")
+    config_limits = %{sink_limits | run_duration_ms: sink_limits.run_duration_ms + 1}
+
+    for sink <- [normal, private] do
+      assert {:error, :invalid_run_config} =
+               RunConfig.new(
+                 workflow_environment: workflow,
+                 mission_environment: mission,
+                 input: %{},
+                 limits: config_limits,
+                 event_sink: sink
+               )
+    end
+
+    {:ok, base_limits} = Limits.new(normal_event_count: 3, event_payload_bytes: 5_000)
+    reserve = EventSink.terminal_reserve(:normal, base_limits)
+
+    {:ok, tight_limits} =
+      Limits.new(
+        normal_event_count: 3,
+        normal_event_bytes: reserve.bytes + 1,
+        event_payload_bytes: 5_000
+      )
+
+    {:ok, tight} = EventSink.start(:normal, tight_limits, run_id: "tight-run-started")
+
+    assert {:error, :invalid_run_config} =
+             RunConfig.new(
+               workflow_environment: workflow,
+               mission_environment: mission,
+               input: %{},
+               limits: tight_limits,
+               event_sink: tight
+             )
+  end
+
+  test "a finalized run configuration is one-shot" do
+    {:ok, workflow} = WorkflowEnvironment.new([])
+    {:ok, mission} = MissionEnvironment.new([])
+    limits = Limits.defaults()
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "one-shot-config")
+
+    {:ok, config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        mission_environment: mission,
+        input: %{},
+        limits: limits,
+        event_sink: sink
+      )
+
+    assert {:ok, %{value: 42}} = Kernel.run("(return 42)", config)
+
+    assert {:error, %{kind: :event_sink_error, reason: :event_sink_error}} =
+             Kernel.run("(return 43)", config)
+  end
+
+  test "a shared run configuration is claimed atomically before execution" do
+    parent = self()
+
+    {:ok, blocking} =
+      Capability.new(
+        name: "blocking",
+        input_schema: @input_schema,
+        callback: fn _arguments ->
+          send(parent, {:provider_started, self()})
+
+          receive do
+            :continue -> {:ok, 42}
+          end
+        end
+      )
+
+    {:ok, workflow} = WorkflowEnvironment.new(capabilities: [blocking])
+    {:ok, mission} = MissionEnvironment.new([])
+    limits = Limits.defaults()
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "atomic-run-claim")
+
+    {:ok, config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        mission_environment: mission,
+        input: %{},
+        limits: limits,
+        event_sink: sink,
+        provider_resources: [fn -> send(parent, :resource_closed) end]
+      )
+
+    first = Task.async(fn -> Kernel.run("(return (tool/blocking {}))", config) end)
+    assert_receive {:provider_started, provider}
+
+    assert {:error, %{kind: :event_sink_error, reason: :event_sink_error}} =
+             Kernel.run("(return 43)", config)
+
+    refute_receive :resource_closed
+
+    send(provider, :continue)
+    assert {:ok, %{value: %{status: :ok, value: 42}}} = Task.await(first)
+    assert_receive :resource_closed
+
+    assert Enum.count(EventSink.events(sink), &(&1.type == "run-started")) == 1
   end
 
   test "run owners provide explicit teardown and stop with their creating process" do
@@ -1180,8 +1339,19 @@ defmodule PtcRunner.Kernel.CoreContractTest do
 
     assert {:ok, %{value: %{outcome: :returned, value: 42}}} = Kernel.run(source, config)
 
+    {:ok, second_sink} = EventSink.start(:normal, limits, run_id: "kernel-library-invalid")
+
+    {:ok, second_config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        mission_environment: mission,
+        input: %{},
+        limits: limits,
+        event_sink: second_sink
+      )
+
     assert {:ok, %{value: %{kind: :protocol_error, reason: :invalid_kernel_eval_request}}} =
-             Kernel.run("(return (kernel/eval \"(return 42)\"))", config)
+             Kernel.run("(return (kernel/eval \"(return 42)\"))", second_config)
   end
 
   test "runtime discovery and workflow annotation helpers expose bounded host facts" do
@@ -1228,26 +1398,47 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     assert %{type: "workflow-annotation", data: %{annotation_type: "progress"}} =
              Enum.find(EventSink.events(sink), &(&1.type == "workflow-annotation"))
 
+    config_for = fn run_id ->
+      {:ok, next_sink} = EventSink.start(:normal, limits, run_id: run_id)
+
+      {:ok, next_config} =
+        RunConfig.new(
+          workflow_environment: workflow,
+          mission_environment: mission,
+          input: %{},
+          limits: limits,
+          event_sink: next_sink
+        )
+
+      {next_config, next_sink}
+    end
+
     private = "PRIVATE_GENERATED_SOURCE_(return_42)"
+    {private_config, private_sink} = config_for.("runtime-library-private")
 
     assert {:ok, %{value: %{status: :error, reason: :invalid_workflow_annotation}}} =
              Kernel.run(
                ~s|(return (workflow.event/annotate "progress" {"source" "#{private}"}))|,
-               config
+               private_config
              )
 
     prompt = "SECRET_PROMPT"
     session = "session-123"
+    {prompt_config, prompt_sink} = config_for.("runtime-library-prompt")
 
     assert {:ok, %{value: %{status: :error, reason: :invalid_workflow_annotation}}} =
              Kernel.run(
                ~s|(return (workflow.event/annotate "progress" {"prompt" "#{prompt}" "session_id" "#{session}"}))|,
-               config
+               prompt_config
              )
 
-    refute EventSink.events(sink) |> Jason.encode!() |> String.contains?(private)
-    refute EventSink.events(sink) |> Jason.encode!() |> String.contains?(prompt)
-    refute EventSink.events(sink) |> Jason.encode!() |> String.contains?(session)
+    public_events =
+      EventSink.events(sink) ++ EventSink.events(private_sink) ++ EventSink.events(prompt_sink)
+
+    encoded_events = Jason.encode!(public_events)
+    refute String.contains?(encoded_events, private)
+    refute String.contains?(encoded_events, prompt)
+    refute String.contains?(encoded_events, session)
   end
 
   test "terminal workflow results and retained mission memory use Kernel limits and state" do

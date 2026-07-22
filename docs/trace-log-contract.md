@@ -204,7 +204,7 @@ handoff failure explicitly stops the partial session even when the trace owner
 has already died. Session information requests serialize behind an accepted
 evaluation and do not mistake that bounded wait for owner death.
 The trace owner is constructed only when its limits, combined runtime/sink,
-normal fail-closed policy, exact two-event terminal reserve, empty unfinalized
+normal fail-closed policy, exact two-event measured-envelope terminal reserve, empty unfinalized
 recorder, open RunState, sink run/trace identity, and `<run-id>.jsonl`
 destination agree. Assembly validation rechecks the runtime binding. The sole
 session attaches before `run-started`, so rejected assembly replay is side-effect
@@ -237,7 +237,7 @@ Public evaluation prints are projected in one pass under both a 128-entry
 ceiling and a 65,536-byte encoded JSON-array ceiling. The truncation flag is
 authoritative even when omitted entries are empty strings.
 
-The session EventSink opts into a terminal reserve. Ordinary events stop before
+The session EventSink opts into a measured terminal reserve. Ordinary events stop before
 the count and byte ceilings would consume capacity for one bounded
 `events-dropped` summary and exactly one `run-stopped`; atomic finalization also
 returns the frozen terminal batch in that same owner call, without exceeding

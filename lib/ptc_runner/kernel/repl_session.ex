@@ -8,8 +8,9 @@ defmodule PtcRunner.Kernel.ReplSession do
   labels, and event policy from an optional `PtcRunner.Kernel.RunConfig` but
   does not execute the manifest entry function.
 
-  The session owns one internal run state and event sink. Call `close/1` for a
-  normal terminal event or `abort/2` when the frontend terminates early.
+  The session owns one internal run state and event sink. Call `close/1` for an
+  atomically frozen terminal batch or `abort/2` when the frontend terminates
+  early. Both paths use the recorder's reserved terminal capacity.
   """
 
   alias PtcRunner.Kernel.Dispatcher
@@ -88,24 +89,16 @@ defmodule PtcRunner.Kernel.ReplSession do
   end
 
   @spec close(t()) :: {:ok, [map()]} | {:error, :event_sink_error | :session_closed}
-  @doc "Closes a session normally and returns its retained canonical events."
+  @doc "Closes a session normally and returns its atomically frozen canonical events."
   def close(%__MODULE__{} = session) do
     if sink_alive?(session) do
       try do
         :ok = RunState.close(session.state)
-        _ = emit_dropped_summary(session)
+        outcome = if session.errors == 0, do: :ok, else: :error
+        reason = if session.errors == 0, do: nil, else: :repl_evaluation_error
 
-        result =
-          emit_run_stopped(
-            session,
-            if(session.errors == 0, do: :ok, else: :error),
-            if(session.errors == 0, do: nil, else: :repl_evaluation_error)
-          )
-
-        events = if result == :ok, do: EventSink.events(session.config.event_sink), else: []
-
-        case result do
-          :ok -> {:ok, events}
+        case finalize(session, outcome, reason) do
+          {:ok, events} -> {:ok, events}
           {:error, :event_sink_error} -> {:error, :event_sink_error}
         end
       catch
@@ -124,9 +117,11 @@ defmodule PtcRunner.Kernel.ReplSession do
     if sink_alive?(session) do
       try do
         :ok = RunState.close(session.state)
-        _ = emit_dropped_summary(session)
-        _ = emit_run_stopped(session, :error, reason)
-        {:ok, EventSink.events(session.config.event_sink)}
+
+        case finalize(session, :error, reason) do
+          {:ok, events} -> {:ok, events}
+          {:error, :event_sink_error} -> :ok
+        end
       after
         stop_owners(session)
       end
@@ -164,7 +159,7 @@ defmodule PtcRunner.Kernel.ReplSession do
   defp config(_config), do: {:error, :invalid_repl_session}
 
   defp emit_run_started(config) do
-    EventSink.emit(config.event_sink, "run-started", config.run_started_metadata)
+    EventSink.begin(config.event_sink, config.run_started_metadata)
   end
 
   defp start_session(config) do
@@ -186,27 +181,26 @@ defmodule PtcRunner.Kernel.ReplSession do
       {:error, :event_sink_error} = error ->
         RunState.close(state)
         RunState.stop(state)
-        RunConfig.close_provider_resources(config)
-        if config.inspection_sink, do: InspectionSink.stop(config.inspection_sink)
-        EventSink.stop(config.event_sink)
         error
     end
   end
 
-  defp emit_run_stopped(session, outcome, reason) do
+  defp finalize(session, outcome, reason) do
     errors = max(session.errors, observed_errors(session))
 
     usage =
       session.state
       |> RunState.usage()
       |> Map.put(:errors, errors)
-      |> Map.put(:events_dropped, EventSink.dropped(session.config.event_sink))
 
-    EventSink.emit(session.config.event_sink, "run-stopped", %{
-      outcome: outcome,
-      reason: reason,
-      usage: usage
-    })
+    case EventSink.finalize_and_events(session.config.event_sink, %{
+           outcome: outcome,
+           reason: reason,
+           usage: usage
+         }) do
+      {:ok, %{events: events}} -> {:ok, events}
+      {:error, :event_sink_error} = error -> error
+    end
   end
 
   defp observed_errors(session) do
@@ -497,13 +491,6 @@ defmodule PtcRunner.Kernel.ReplSession do
     case RetainedSize.bytes_with_cap(value, limit) do
       bytes when is_integer(bytes) and bytes <= limit -> true
       _ -> false
-    end
-  end
-
-  defp emit_dropped_summary(session) do
-    case EventSink.dropped(session.config.event_sink) do
-      dropped when map_size(dropped) == 0 -> :ok
-      dropped -> EventSink.emit(session.config.event_sink, "events-dropped", %{counts: dropped})
     end
   end
 

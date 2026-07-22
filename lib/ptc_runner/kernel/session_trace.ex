@@ -307,8 +307,8 @@ defmodule PtcRunner.Kernel.SessionTrace do
   defp finalize_state(%{persistence: :open} = state, outcome, reason, usage) do
     stopped = %{outcome: outcome, reason: reason, usage: usage}
 
-    case EventSink.finalize_and_events(state.sink, %{}, stopped) do
-      {:ok, events} when events != [] ->
+    case EventSink.finalize_and_events(state.sink, stopped) do
+      {:ok, %{events: events}} when events != [] ->
         {:ok,
          %{
            state
@@ -328,7 +328,7 @@ defmodule PtcRunner.Kernel.SessionTrace do
   defp finalize_state(state, _outcome, _reason, _usage), do: {:ok, state}
 
   defp valid_trace_contract?(limits, destination, run_id, run_state, sink) do
-    expected_reserve = %{count: 2, bytes: limits.event_payload_bytes * 2}
+    expected_reserve = EventSink.terminal_reserve(:normal, limits)
 
     String.valid?(destination) and String.valid?(run_id) and run_id != "" and
       Path.basename(destination) == run_id <> ".jsonl" and sink.policy == :normal and
@@ -339,7 +339,9 @@ defmodule PtcRunner.Kernel.SessionTrace do
         {:ok,
          %{
            terminal_reserve: expected_reserve,
+           limits: limits,
            ready?: true,
+           begun?: false,
            event_count: 0,
            event_bytes: 0,
            dropped?: false

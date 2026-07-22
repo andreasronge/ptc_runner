@@ -216,20 +216,26 @@ defmodule PtcRunner.Kernel.RunBuilder do
     :ok
   end
 
-  # Provider resources are already closed by `Kernel.run/2`; the event sink
-  # remains live long enough for optional post-run canonical trace persistence.
+  # Provider resources are already closed by `Kernel.run_and_events/2`; the
+  # returned terminal batch is the sole input to both persistence paths.
   defp execute_built(built, opts) do
-    result = Kernel.run(built.entry_source, built.config)
+    {result, terminal_batch} = Kernel.run_and_events(built.entry_source, built.config)
 
-    with :ok <- persist_trace(Keyword.get(opts, :trace), built.config.event_sink),
-         :ok <- persist_inspection(built.config) do
-      result
-    else
-      {:error, {:trace, reason}} ->
-        {:error, {:trace_persistence_failed, reason, result}}
+    case terminal_batch do
+      {:ok, events} ->
+        with :ok <- persist_trace(Keyword.get(opts, :trace), built.config.event_sink, events),
+             :ok <- persist_inspection(built.config, events) do
+          result
+        else
+          {:error, {:trace, reason}} ->
+            {:error, {:trace_persistence_failed, reason, result}}
 
-      {:error, {:inspection, reason}} ->
-        {:error, {:inspection_persistence_failed, reason, result}}
+          {:error, {:inspection, reason}} ->
+            {:error, {:inspection_persistence_failed, reason, result}}
+        end
+
+      {:error, _reason} ->
+        result
     end
   end
 
@@ -298,28 +304,28 @@ defmodule PtcRunner.Kernel.RunBuilder do
     end
   end
 
-  defp persist_trace(nil, _sink), do: :ok
+  defp persist_trace(nil, _sink, _events), do: :ok
 
-  defp persist_trace(path, sink) when is_binary(path) do
+  defp persist_trace(path, sink, events) when is_binary(path) do
     private? = EventSink.policy(sink) == :private
 
-    case TraceLog.append_jsonl(path, EventSink.events(sink), private: private?) do
+    case TraceLog.append_jsonl(path, events, private: private?) do
       :ok -> :ok
       {:error, reason} -> {:error, {:trace, reason}}
     end
   end
 
-  defp persist_trace(_path, _sink), do: {:error, {:trace, :invalid_trace_log}}
+  defp persist_trace(_path, _sink, _events), do: {:error, {:trace, :invalid_trace_log}}
 
-  defp persist_inspection(%RunConfig{inspection_sink: nil}), do: :ok
+  defp persist_inspection(%RunConfig{inspection_sink: nil}, _events), do: :ok
 
-  defp persist_inspection(%RunConfig{} = config) do
+  defp persist_inspection(%RunConfig{} = config, events) do
     with {:ok, records} <- InspectionSink.records(config.inspection_sink),
          :ok <-
            InspectionArtifact.persist(
              config.inspection_path,
              records,
-             EventSink.events(config.event_sink)
+             events
            ) do
       :ok
     else
