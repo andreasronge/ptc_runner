@@ -1,10 +1,10 @@
 # Kernel publication and boundary hardening
 
-**Status:** triaged; first three slices implemented
+**Status:** triaged; first four slices implemented
 
 **Origin:** extracted from the Java interop investigation on 2026-07-20
 
-**Last audited:** 2026-07-22 against `origin/main` at `35005bf7`
+**Last audited:** 2026-07-22 against `origin/main` at `af64a3ea`
 
 ## Decision
 
@@ -30,7 +30,7 @@ This plan now separates:
 | Tool cache | Every evaluation now owns an empty, evaluation-local cache. Caller-supplied state is rejected and Results omit cache entries. | Complete. |
 | Public projection | Direct and Kernel results use one collision-aware projection. Direct Elixir results preserve entries; Kernel boundaries reject ambiguity. | Complete. |
 | Ordinary terminal publication | Runner and standalone REPL now reserve terminal capacity, finalize atomically, and hand one frozen batch to persistence. | Complete. |
-| Drop accounting and inspection | Event loss uses sixteen fixed type buckets plus a saturating overflow count. Several payload-bearing structs still use derived `Inspect`. | Address inspection with each owning boundary. |
+| Drop accounting and inspection | Event loss is bounded. Result, Program, and RuntimeCallable use payload-free custom `Inspect`; owner status is constant-redacted. | Complete for the identified high-value boundaries. |
 | Viewer persistence | SessionTrace owns finalization and retry; TraceLog publication is synced, no-clobber, and byte-identical on retry. | Remove from the active backlog. |
 | Standalone REPL ownership | A transferred ReplSession becomes closed when its creator exits. | Decide whether sessions are process-affine or transferable before changing ownership. |
 | Oracle supervision | The current subprocess-per-run harness has timeout, output, and temporary-directory bounds. | Keep the reusable service deferred until a leak or throughput problem is measured. |
@@ -218,21 +218,29 @@ Do not add producer leases or split EventSink capabilities unless a focused
 test first demonstrates that current RunState/provider cleanup permits an
 event after finalization begins.
 
-## Inspection and redaction follow-up
+## Completed fourth slice: payload-free inspection
 
-Review payload-bearing structs when their owning boundary changes. The current
-high-value candidates are:
+Derived inspection of `PtcRunner.Lisp.Result`, `PtcRunner.Kernel.Program`, and
+`PtcRunner.Lisp.RuntimeCallable` reproduced direct disclosure of return and
+failure values, continuation memory, prompts, messages, tool arguments and
+results, child steps, program source, evaluator context, and callback identity.
+Logger messages explicitly constructed from derived inspection copied the same
+retained payloads.
 
-- `PtcRunner.Lisp.Result`, which can retain memory, tool calls, prompts,
-  messages, and child steps;
-- `PtcRunner.Kernel.Program`, which retains source; and
-- `PtcRunner.Lisp.RuntimeCallable`, which can retain evaluator context and a
-  function.
+Each owning type now has a custom `Inspect` implementation:
 
-Custom `Inspect` implementations should show safe identity, counts, and byte
-metadata without enumerating payloads. Tests should use unique sentinels in
-success, failure, memory, prompt, tool, and child-result fields. Logger and
-`format_status` paths must not expose those sentinels.
+- Result shows only outcome, field counts, and retained memory bytes;
+- Program shows only source byte size and its validated SHA-256 digest; and
+- RuntimeCallable shows only its qualified label and whether it is bound.
+
+The implementations never recursively inspect the retained payload fields.
+Boundary tests place unique sentinels in success, failure, memory, prompt,
+message, tool, child-result, source, and evaluator-context fields, then prove
+that direct inspection and Logger messages built from it contain none of them.
+The durable contract also records that direct Logger struct reports bypass
+`Inspect` and are prohibited in runtime code. A RunState
+status test also retains sensitive continuation values and proves the existing
+constant-redacted `format_status` boundary does not enumerate them.
 
 ## Product decision: standalone REPL ownership
 

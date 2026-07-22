@@ -62,6 +62,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Redacted `Inspect` output for payload-bearing Lisp results, opaque Kernel
+  programs, and runtime callables. Logger messages explicitly built from these
+  inspected values now retain only bounded outcome/count/byte metadata, program
+  digest identity, and callable bound state instead of source, prompts, memory,
+  tool payloads, child steps, or evaluator context.
 - Ordinary Kernel runs and standalone REPL sessions now reserve terminal event
   count and measured envelope capacity and atomically freeze one canonical
   batch for result usage, trace, and inspection persistence. Drop accounting is

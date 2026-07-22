@@ -399,6 +399,18 @@ Runtime observability has separate planes with separate data contracts:
   run-owned inspection sink; Logger, Telemetry, and canonical events never
   receive them.
 
+Payload-bearing values follow the same boundary when explicitly inspected for
+operator output. Custom `Inspect`
+implementations for `PtcRunner.Lisp.Result`, `PtcRunner.Kernel.Program`, and
+`PtcRunner.Lisp.RuntimeCallable` expose only safe outcome, count, byte, digest,
+label, and bound-state metadata. They do not enumerate result values,
+continuation memory, prompts, messages, tool records, child steps, program
+source, evaluator context, or callbacks. Owner `format_status` callbacks remain
+constant-redacted rather than relying on nested value inspection. Passing a
+struct directly to Logger as a report bypasses Elixir's `Inspect` protocol and
+is prohibited in runtime code; log only sparse diagnostics or a value already
+rendered through its redacted inspection boundary.
+
 `PtcRunner.Kernel.EventSink` owns canonical event sequence numbers, timestamps,
 queue bounds, and loss accounting. Normal policy is lossy and reports dropped
 events. Private policy fails closed when it cannot retain the required event.
