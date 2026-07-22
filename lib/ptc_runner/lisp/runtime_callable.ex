@@ -6,6 +6,9 @@ defmodule PtcRunner.Lisp.RuntimeCallable do
   context to enforce limits, record traces, and call the configured runtime
   executor. The persisted value only carries the qualified name. A short-lived
   bound form is created at application time for higher-order runtime calls.
+
+  `Inspect` exposes only the qualified label and whether the callable is bound.
+  It never renders the evaluator context or callback.
   """
 
   alias PtcRunner.Lisp.Eval.Abort
@@ -18,14 +21,14 @@ defmodule PtcRunner.Lisp.RuntimeCallable do
   @type namespace :: :tool
   @type t :: %__MODULE__{
           namespace: namespace(),
-          name: atom(),
+          name: atom() | binary(),
           eval_ctx: EvalContext.t() | nil,
           do_eval:
             (term(), EvalContext.t() -> {:ok, term(), EvalContext.t()} | {:error, term()})
             | nil
         }
 
-  @spec new(namespace(), atom()) :: t()
+  @spec new(namespace(), atom() | binary()) :: t()
   def new(namespace, name) do
     %__MODULE__{namespace: namespace, name: name}
   end

@@ -6,6 +6,9 @@ defmodule PtcRunner.Kernel.Program do
   evaluating it in the workflow environment. Only bounded identity metadata is
   projected through public results; the source is evaluated later against the
   mission environment and current native evaluation continuation.
+
+  `Inspect` exposes only the source byte size and SHA-256 digest. It never
+  renders the retained source.
   """
   @enforce_keys [:source, :byte_size, :digest]
   defstruct [:source, :byte_size, :digest]

@@ -3,7 +3,9 @@ defmodule PtcRunner.Lisp.Result do
   Native continuation result returned by the neutral PTC-Lisp evaluator.
 
   Evaluation-local tool cache entries are private evaluator state and are not
-  retained in this result.
+  retained in this result. `Inspect` reports only the outcome, bounded field
+  counts, and retained memory size; it never renders return/failure values,
+  memory, prompts, messages, tool records, or child steps.
   """
 
   defstruct [
