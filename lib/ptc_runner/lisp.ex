@@ -133,6 +133,19 @@ defmodule PtcRunner.Lisp do
     end
   end
 
+  @doc false
+  @spec project_native_result({:ok | :error, Step.t()}) ::
+          {:ok | :error, Step.t()}
+  def project_native_result({tag, %Step{} = step}) when tag in [:ok, :error] do
+    case externalize_memory(step.memory) do
+      memory when is_map(memory) ->
+        public_result({tag, %{step | memory: memory}})
+
+      {:error, {:java_projection_error, reason}} ->
+        {:error, java_projection_error_step(%{step | memory: %{}}, reason)}
+    end
+  end
+
   @doc """
   Converts a PTC-Lisp memory map into the public memory representation.
 
@@ -251,8 +264,10 @@ defmodule PtcRunner.Lisp do
        runtime callables as labels. Do not serialize `step.memory` (JSON,
        ETF-to-disk, database) between evals —
        serialization silently converts native values such as keywords into
-       plain strings. For persistent or cross-process REPL state, use
-       `PtcRunner.Kernel.ReplSession`, which owns continuation memory.
+       plain strings. For a bounded persistent REPL continuation, use
+       `PtcRunner.Kernel.ReplSession` from one stable owner process. It is
+       process-affine; a separate supervised abstraction must serialize any
+       multi-process frontend.
      - `step.usage`: Execution metrics (`duration_ms`, `memory_bytes`,
        `eval_reductions`)
 
@@ -804,7 +819,11 @@ defmodule PtcRunner.Lisp do
     compile_max_heap =
       Application.get_env(:ptc_runner, :default_max_heap, 1_250_000)
 
-    compile_opts = [timeout: compile_timeout, max_heap: compile_max_heap]
+    compile_opts = [
+      timeout: compile_timeout,
+      max_heap: compile_max_heap,
+      link: Map.get(opts, :link, false)
+    ]
 
     case PtcRunner.Sandbox.run_bounded(compile_fn, compile_opts) do
       {:ok, {:ok, core_ast}} ->

@@ -8,9 +8,21 @@ defmodule PtcRunner.Kernel.ReplSession do
   labels, and event policy from an optional `PtcRunner.Kernel.RunConfig` but
   does not execute the manifest entry function.
 
-  The session owns one internal run state and event sink. Call `close/1` for an
-  atomically frozen terminal batch or `abort/2` when the frontend terminates
-  early. Both paths use the recorder's reserved terminal capacity.
+  A session is process-affine: the process that calls `new/1` is its owner and
+  must perform every `eval/2`, `close/1`, and `abort/2` call. Passing the struct
+  to another process does not transfer ownership; those calls return
+  `{:error, :session_owner_mismatch}` without touching continuation or lifecycle
+  state. The public value contains only an opaque ID, one shared
+  creator-private lookup table, and bounded attempt counters—not an owner PID or
+  token. Closed lookup entries are removed. Continuation values and raw
+  run-state, sink, provider, and configuration capabilities remain inside the
+  internal owner process. Watchdogs couple compilation and evaluation sandboxes
+  to the creator; all owned resources and in-flight work are stopped if it
+  exits.
+
+  Call `close/1` for an atomically frozen terminal batch or `abort/2` when the
+  frontend terminates early. Both paths use the recorder's reserved terminal
+  capacity.
   """
 
   alias PtcRunner.Kernel.Dispatcher
@@ -19,6 +31,7 @@ defmodule PtcRunner.Kernel.ReplSession do
   alias PtcRunner.Kernel.InspectionSink
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.MissionEnvironment
+  alias PtcRunner.Kernel.ReplSessionOwner
   alias PtcRunner.Kernel.RunConfig
   alias PtcRunner.Kernel.RunState
   alias PtcRunner.Kernel.RuntimeTools
@@ -28,14 +41,14 @@ defmodule PtcRunner.Kernel.ReplSession do
   alias PtcRunner.Lisp.RetainedSize
   alias PtcRunner.Lisp.TrustedTool
 
-  @enforce_keys [:config, :state, :memory, :history]
-  defstruct [:config, :state, :memory, :history, attempts: 0, errors: 0]
+  @access_table_key {__MODULE__, :access_table}
+
+  @enforce_keys [:access, :id]
+  defstruct [:access, :id, attempts: 0, errors: 0]
 
   @type t :: %__MODULE__{
-          config: RunConfig.t(),
-          state: RunState.t(),
-          memory: map(),
-          history: [term()],
+          access: :ets.tid(),
+          id: reference(),
           attempts: non_neg_integer(),
           errors: non_neg_integer()
         }
@@ -47,6 +60,10 @@ defmodule PtcRunner.Kernel.ReplSession do
   Without a config, the session creates empty environments, default limits,
   and a normal in-memory event sink. Exact native history has the fixed language
   depth of three and is owned by RunState with continuation memory.
+
+  A supplied config's event and optional inspection sinks must belong to the
+  calling process. A mismatch returns `{:error, :session_owner_mismatch}` before
+  the recorder is claimed or a run state is started.
   """
   def new(opts \\ [])
 
@@ -62,13 +79,64 @@ defmodule PtcRunner.Kernel.ReplSession do
 
   def new(_opts), do: {:error, :invalid_repl_session}
 
-  @spec eval(t(), binary()) :: {:ok, Native.t(), t()} | {:error, Native.t(), t()}
-  @doc "Evaluates one bounded source form and returns the updated session."
+  @doc false
+  @spec event_policy(t()) :: EventSink.policy() | {:error, atom()}
+  def event_policy(%__MODULE__{} = session) do
+    with {:ok, owned} <- owned_session(session),
+         do: EventSink.policy(owned.config.event_sink)
+  catch
+    :exit, _reason -> {:error, :session_closed}
+  end
+
+  @doc false
+  @spec evaluation_memory_summary(t()) :: map() | {:error, atom()}
+  def evaluation_memory_summary(%__MODULE__{} = session) do
+    with {:ok, owned} <- owned_session(session),
+         do: RunState.evaluation_memory_summary(owned.state)
+  catch
+    :exit, _reason -> {:error, :session_closed}
+  end
+
+  @doc false
+  @spec usage(t()) :: map() | {:error, atom()}
+  def usage(%__MODULE__{} = session) do
+    with {:ok, owned} <- owned_session(session),
+         do: RunState.usage(owned.state)
+  catch
+    :exit, _reason -> {:error, :session_closed}
+  end
+
+  @spec eval(t(), binary()) ::
+          {:ok, Native.t(), t()}
+          | {:error, Native.t(), t()}
+          | {:error, :session_owner_mismatch}
+  @doc """
+  Evaluates one bounded source form and returns the updated session.
+
+  The returned result is an observation-only public projection. The exact
+  native memory and history used by later forms remain inside the session
+  owner; callers must not thread the result's memory back into the session.
+
+  Returns `{:error, :session_owner_mismatch}` without evaluating when called
+  outside the process that created the session.
+  """
   def eval(%__MODULE__{} = session, source) when is_binary(source) do
-    if sink_alive?(session) and RunState.open?(session.state) do
-      eval_open(session, source)
-    else
-      session_closed(session)
+    case owned_session(session) do
+      {:ok, owned} ->
+        result =
+          if sink_alive?(owned) and RunState.open?(owned.state) do
+            eval_open(owned, source)
+          else
+            session_closed(owned)
+          end
+
+        public_result(result)
+
+      {:error, :session_closed} ->
+        session_closed(session)
+
+      {:error, :session_owner_mismatch} = error ->
+        error
     end
   catch
     :exit, _reason -> session_closed(session)
@@ -76,21 +144,45 @@ defmodule PtcRunner.Kernel.ReplSession do
 
   defp eval_open(session, source) do
     case RunState.reserve_evaluation(session.state) do
-      {:ok, memory, history, lease} -> eval_reserved(session, source, memory, history, lease)
-      {:error, reason} -> evaluation_reservation_failure(session, reason)
+      {:ok, memory, history, lease} ->
+        session = Map.merge(session, %{memory: memory, history: history})
+        eval_reserved(session, source, memory, history, lease)
+
+      {:error, reason} ->
+        evaluation_reservation_failure(session, reason)
     end
   catch
     :exit, _reason -> session_closed(session)
   end
 
   defp session_closed(session) do
-    step = Native.error(:session_closed, "REPL session is closed", session.memory)
+    step = Native.error(:session_closed, "REPL session is closed", observed_memory(session))
     {:error, step, session}
   end
 
-  @spec close(t()) :: {:ok, [map()]} | {:error, :event_sink_error | :session_closed}
-  @doc "Closes a session normally and returns its atomically frozen canonical events."
+  @spec close(t()) ::
+          {:ok, [map()]}
+          | {:error, :event_sink_error | :session_closed | :session_owner_mismatch}
+  @doc """
+  Closes a session normally and returns its atomically frozen canonical events.
+
+  Returns `{:error, :session_owner_mismatch}` without closing anything when
+  called outside the process that created the session.
+  """
   def close(%__MODULE__{} = session) do
+    with {:ok, owned} <- owned_session(session) do
+      try do
+        close_owned(owned)
+      after
+        ReplSessionOwner.release(owned.owner_pid, owned.owner_token)
+        close_access(session)
+      end
+    end
+  catch
+    :exit, _reason -> {:error, :session_closed}
+  end
+
+  defp close_owned(session) do
     if sink_alive?(session) do
       try do
         :ok = RunState.close(session.state)
@@ -103,27 +195,47 @@ defmodule PtcRunner.Kernel.ReplSession do
         end
       catch
         :exit, _reason -> {:error, :session_closed}
-      after
-        stop_owners(session)
       end
     else
       {:error, :session_closed}
     end
   end
 
-  @spec abort(t(), atom()) :: {:ok, [map()]} | :ok
-  @doc "Closes a session with an error reason and returns retained events when available."
-  def abort(%__MODULE__{} = session, reason) when is_atom(reason) do
-    if sink_alive?(session) do
-      try do
-        :ok = RunState.close(session.state)
+  @spec abort(t(), atom()) ::
+          {:ok, [map()]} | :ok | {:error, :session_owner_mismatch}
+  @doc """
+  Closes a session with an error reason and returns retained events when available.
 
-        case finalize(session, :error, reason) do
-          {:ok, events} -> {:ok, events}
-          {:error, :event_sink_error} -> :ok
+  Returns `{:error, :session_owner_mismatch}` without closing anything when
+  called outside the process that created the session.
+  """
+  def abort(%__MODULE__{} = session, reason) when is_atom(reason) do
+    case owned_session(session) do
+      {:ok, owned} ->
+        try do
+          abort_owned(owned, reason)
+        after
+          ReplSessionOwner.release(owned.owner_pid, owned.owner_token)
+          close_access(session)
         end
-      after
-        stop_owners(session)
+
+      {:error, :session_closed} ->
+        :ok
+
+      {:error, :session_owner_mismatch} = error ->
+        error
+    end
+  catch
+    :exit, _reason -> :ok
+  end
+
+  defp abort_owned(session, reason) do
+    if sink_alive?(session) do
+      :ok = RunState.close(session.state)
+
+      case finalize(session, :error, reason) do
+        {:ok, events} -> {:ok, events}
+        {:error, :event_sink_error} -> :ok
       end
     else
       :ok
@@ -155,28 +267,39 @@ defmodule PtcRunner.Kernel.ReplSession do
     end
   end
 
-  defp config(%RunConfig{} = config), do: {:ok, config}
+  defp config(%RunConfig{} = config) do
+    if EventSink.owner?(config.event_sink) and inspection_owner?(config.inspection_sink),
+      do: {:ok, config},
+      else: {:error, :session_owner_mismatch}
+  end
+
   defp config(_config), do: {:error, :invalid_repl_session}
+
+  defp inspection_owner?(nil), do: true
+  defp inspection_owner?(sink), do: InspectionSink.owner?(sink)
 
   defp emit_run_started(config) do
     EventSink.begin(config.event_sink, config.run_started_metadata)
   end
 
   defp start_session(config) do
-    {:ok, state} = RunState.start(config.limits)
-    start_session_with_state(config, state)
+    case RunState.start_repl(config.limits, config.event_sink, config.inspection_sink) do
+      {:ok, state} -> start_session_with_state(config, state)
+      {:error, _reason} = error -> error
+    end
   end
 
   defp start_session_with_state(config, state) do
     case emit_run_started(config) do
       :ok ->
-        {:ok,
-         %__MODULE__{
-           config: config,
-           state: state,
-           memory: %{},
-           history: []
-         }}
+        case ReplSessionOwner.start(config, state, self()) do
+          {:ok, pid, token} ->
+            register_access(pid, token)
+
+          {:error, reason} ->
+            stop_owners(%{config: config, state: state})
+            {:error, reason}
+        end
 
       {:error, :event_sink_error} = error ->
         RunState.close(state)
@@ -253,7 +376,8 @@ defmodule PtcRunner.Kernel.ReplSession do
       max_program_bytes: limits.subordinate_source_bytes,
       max_tool_call_result_bytes: limits.capability_result_bytes,
       preserve_runtime_callables: true,
-      filter_context: false
+      filter_context: false,
+      link: true
     )
   end
 
@@ -366,9 +490,25 @@ defmodule PtcRunner.Kernel.ReplSession do
        ) do
     limits = session.config.limits
 
-    if result_within_limit?(step.return, limits.terminal_result_bytes),
-      do: commit_success(session, step, history, lease, evaluation_id, started_ms),
-      else: reject_success(session, lease, evaluation_id, started_ms, :result_exceeded)
+    if result_within_limit?(step.return, limits.terminal_result_bytes) do
+      case Lisp.project_native_result({:ok, step}) do
+        {:ok, public_step} ->
+          commit_success(
+            session,
+            step,
+            public_step,
+            history,
+            lease,
+            evaluation_id,
+            started_ms
+          )
+
+        {:error, public_error} ->
+          reject_projection(session, public_error, lease, evaluation_id, started_ms)
+      end
+    else
+      reject_success(session, lease, evaluation_id, started_ms, :result_exceeded)
+    end
   end
 
   defp finish_evaluation(
@@ -395,14 +535,27 @@ defmodule PtcRunner.Kernel.ReplSession do
     end
   end
 
-  defp commit_success(session, step, history, lease, evaluation_id, started_ms) do
-    candidate_history = history_after_success(history, step.return)
+  defp commit_success(
+         session,
+         native_step,
+         public_step,
+         history,
+         lease,
+         evaluation_id,
+         started_ms
+       ) do
+    candidate_history = history_after_success(history, native_step.return)
 
-    case RunState.commit_evaluation(session.state, lease, step.memory, candidate_history) do
+    case RunState.commit_evaluation(
+           session.state,
+           lease,
+           native_step.memory,
+           candidate_history
+         ) do
       :ok ->
         next = %{
           session
-          | memory: step.memory,
+          | memory: native_step.memory,
             history: candidate_history
         }
 
@@ -414,12 +567,30 @@ defmodule PtcRunner.Kernel.ReplSession do
                :ok,
                nil
              ) do
-          :ok -> {:ok, step, %{next | attempts: next.attempts + 1}}
+          :ok -> {:ok, public_step, %{next | attempts: next.attempts + 1}}
           {:error, :event_sink_error} -> event_sink_failure(next)
         end
 
       {:error, reason} ->
         reject_committed_failure(session, evaluation_id, started_ms, reason)
+    end
+  end
+
+  defp reject_projection(session, public_error, lease, evaluation_id, started_ms) do
+    _ = RunState.release_evaluation(session.state, lease)
+    public_error = %{public_error | memory: observed_memory(session)}
+    next = increment_error(session)
+
+    case emit_evaluation_stopped(
+           session,
+           session.state,
+           evaluation_id,
+           started_ms,
+           :error,
+           public_error.fail.reason
+         ) do
+      :ok -> {:error, public_error, next}
+      {:error, :event_sink_error} -> event_sink_failure(session)
     end
   end
 
@@ -466,7 +637,10 @@ defmodule PtcRunner.Kernel.ReplSession do
       end
 
     _ = EventSink.emit(session.config.event_sink, "limit-exceeded", %{reason: normalized})
-    step = Native.error(:limit_exceeded, "REPL evaluation limit exceeded", session.memory)
+
+    step =
+      Native.error(:limit_exceeded, "REPL evaluation limit exceeded", observed_memory(session))
+
     {:error, step, increment_error(session)}
   end
 
@@ -505,6 +679,103 @@ defmodule PtcRunner.Kernel.ReplSession do
 
   defp sink_alive?(session),
     do: Process.alive?(session.config.event_sink.pid) and Process.alive?(session.state.pid)
+
+  defp owned_session(session) do
+    with {:ok, pid, token} <- access_resources(session),
+         {:ok, config, state} <- ReplSessionOwner.resources(pid, token) do
+      {:ok,
+       Map.merge(Map.from_struct(session), %{
+         owner_pid: pid,
+         owner_token: token,
+         config: config,
+         state: state,
+         memory: %{},
+         history: []
+       })}
+    end
+  end
+
+  defp register_access(pid, token) do
+    access = access_table()
+    id = make_ref()
+    true = :ets.insert(access, {id, {pid, token}})
+    {:ok, %__MODULE__{access: access, id: id}}
+  rescue
+    exception ->
+      _ = ReplSessionOwner.release(pid, token)
+      {:error, {:session_access_error, Exception.message(exception)}}
+  end
+
+  defp access_resources(%__MODULE__{access: access, id: id}) do
+    case :ets.lookup(access, id) do
+      [{^id, {pid, token}}] when is_pid(pid) and is_reference(token) ->
+        {:ok, pid, token}
+
+      [{^id, :closed}] ->
+        {:error, :session_closed}
+
+      [] ->
+        if :ets.info(access, :owner) == self(),
+          do: {:error, :session_closed},
+          else: {:error, :session_owner_mismatch}
+
+      _other ->
+        {:error, :session_owner_mismatch}
+    end
+  rescue
+    ArgumentError -> {:error, :session_owner_mismatch}
+  end
+
+  defp close_access(%__MODULE__{access: access, id: id}) do
+    :ets.delete(access, id)
+    :ok
+  rescue
+    ArgumentError -> :ok
+  end
+
+  defp access_table do
+    case Process.get(@access_table_key) do
+      nil -> new_access_table()
+      access -> existing_access_table(access)
+    end
+  end
+
+  defp existing_access_table(access) do
+    if :ets.info(access, :owner) == self(), do: access, else: new_access_table()
+  rescue
+    ArgumentError -> new_access_table()
+  end
+
+  defp new_access_table do
+    access = :ets.new(__MODULE__, [:set, :private])
+    Process.put(@access_table_key, access)
+    access
+  end
+
+  defp observed_memory(%{state: state} = session) do
+    case RunState.evaluation_memory_observation(state) do
+      memory when is_map(memory) -> memory
+      {:error, _reason} -> Map.get(session, :memory, %{})
+    end
+  catch
+    :exit, _reason -> Map.get(session, :memory, %{})
+  end
+
+  defp observed_memory(session), do: Map.get(session, :memory, %{})
+
+  defp public_result({status, step, session}) when status in [:ok, :error] do
+    {public_status, public_step} = Lisp.project_native_result({status, step})
+    {public_status, public_step, public_session(session)}
+  end
+
+  defp public_session(session) do
+    %__MODULE__{
+      access: session.access,
+      id: session.id,
+      attempts: session.attempts,
+      errors: session.errors
+    }
+  end
 
   defp prelude(%{bundle: nil}), do: nil
   defp prelude(%{bundle: bundle}), do: bundle.prelude

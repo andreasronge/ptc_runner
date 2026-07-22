@@ -281,7 +281,8 @@ defmodule PtcRunner.Kernel.Evaluation do
       max_program_bytes: limits.subordinate_source_bytes,
       filter_context: false,
       caller: :kernel,
-      preserve_runtime_callables: true
+      preserve_runtime_callables: true,
+      link: true
     ]
 
     mission_calls_before = mission_capability_call_count(state)

@@ -55,7 +55,6 @@ defmodule Mix.Tasks.Ptc.Repl do
   use Mix.Task
 
   alias PtcRunner.Kernel.DeterministicJSON
-  alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.LogAnalysisProfile
   alias PtcRunner.Kernel.LogAnalysisSession
   alias PtcRunner.Kernel.LogAnalysisSessionBuilder
@@ -1040,7 +1039,7 @@ defmodule Mix.Tasks.Ptc.Repl do
   end
 
   defp persist_and_stop(session, trace_path) do
-    private? = EventSink.policy(session.config.event_sink) == :private
+    private? = ReplSession.event_policy(session) == :private
 
     with {:ok, events} <- ReplSession.close(session),
          :ok <- persist_trace(trace_path, events, private?) do

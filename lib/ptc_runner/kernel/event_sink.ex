@@ -166,6 +166,10 @@ defmodule PtcRunner.Kernel.EventSink do
     end
   end
 
+  @doc false
+  @spec owner?(t()) :: boolean()
+  def owner?(sink), do: call(sink, :owner?) == true
+
   @spec stop(t()) :: :ok
   @doc "Stops the sink. Calling it after owner-driven shutdown is harmless."
   def stop(sink) do
@@ -176,10 +180,16 @@ defmodule PtcRunner.Kernel.EventSink do
 
   @impl GenServer
   def init({sink_state, owner}) do
-    {:ok, Map.put(sink_state, :owner_ref, Process.monitor(owner))}
+    {:ok,
+     sink_state
+     |> Map.put(:owner, owner)
+     |> Map.put(:owner_ref, Process.monitor(owner))}
   end
 
   @impl GenServer
+  def handle_call({token, :owner?}, {caller, _tag}, %{token: token} = state),
+    do: {:reply, caller == state.owner, state}
+
   def handle_call(request, _from, state) do
     {reply, next} = EventSinkState.handle(request, state)
     {:reply, reply, next}

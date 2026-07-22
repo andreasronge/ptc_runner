@@ -11,7 +11,9 @@ defmodule PtcRunner.Kernel.RunState do
   must not recreate them as separate read and update steps. The opaque token
   prevents messages that did not originate through the returned handle from
   mutating state. The process monitors the run owner and automatically exits
-  with it.
+  with it. Owner checks compare the actual `GenServer.call/3` caller inside this
+  process. Ordinary and standalone-REPL state cannot transfer ownership; only
+  co-hosted session construction receives a one-shot transfer.
 
   Each capability reservation also monitors the dispatching process. If that
   process dies mid-call (heap kill, timeout kill), the reservation is
@@ -27,7 +29,9 @@ defmodule PtcRunner.Kernel.RunState do
 
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.EventSinkState
+  alias PtcRunner.Kernel.InspectionSink
   alias PtcRunner.Kernel.Limits
+  alias PtcRunner.Lisp
   alias PtcRunner.Lisp.RetainedSize
 
   @history_depth 3
@@ -43,8 +47,25 @@ defmodule PtcRunner.Kernel.RunState do
   def start(%Limits{} = limits, opts \\ []) do
     token = make_ref()
     owner = Keyword.get(opts, :owner, self())
-    {:ok, pid} = GenServer.start(__MODULE__, {limits, token, owner, nil})
+    {:ok, pid} = GenServer.start(__MODULE__, {limits, token, owner, nil, false, nil})
     {:ok, %__MODULE__{pid: pid, token: token}}
+  end
+
+  @doc false
+  def start_repl(%Limits{} = limits, %EventSink{} = event_sink, inspection_sink) do
+    with true <- EventSink.owner?(event_sink),
+         true <- inspection_owner?(inspection_sink),
+         token = make_ref(),
+         owner = self(),
+         {:ok, pid} <-
+           GenServer.start(
+             __MODULE__,
+             {limits, token, owner, nil, false, {event_sink, inspection_sink}}
+           ) do
+      {:ok, %__MODULE__{pid: pid, token: token}}
+    else
+      _ -> {:error, :session_owner_mismatch}
+    end
   end
 
   @doc false
@@ -54,7 +75,8 @@ defmodule PtcRunner.Kernel.RunState do
 
     with true <- Keyword.keys(opts) -- [:owner] == [],
          {:ok, event_sink, handle} <- EventSink.prepare(:normal, limits, sink_opts),
-         {:ok, pid} <- GenServer.start(__MODULE__, {limits, token, owner, event_sink}) do
+         {:ok, pid} <-
+           GenServer.start(__MODULE__, {limits, token, owner, event_sink, true, nil}) do
       {:ok, %__MODULE__{pid: pid, token: token}, struct!(EventSink, Map.put(handle, :pid, pid))}
     else
       _ -> {:error, :invalid_run_state}
@@ -129,22 +151,39 @@ defmodule PtcRunner.Kernel.RunState do
   @doc "Returns whether the run is open and its deadline has not elapsed."
   def open?(state), do: call(state, :open?)
 
+  @doc false
+  @spec owner?(t()) :: boolean()
+  def owner?(state), do: call(state, :owner?) == true
+
+  @doc false
+  @spec repl_owner?(t(), EventSink.t(), InspectionSink.t() | nil, Limits.t()) :: boolean()
+  def repl_owner?(state, event_sink, inspection_sink, limits),
+    do: call(state, {:repl_owner?, event_sink, inspection_sink, limits}) == true
+
   @spec evaluation_memory_summary(t()) :: map()
   @doc "Returns bounded definition, history, and retained continuation byte counts."
   def evaluation_memory_summary(state), do: call(state, :evaluation_memory_summary)
 
   @doc false
+  @spec evaluation_memory_observation(t()) ::
+          map() | {:error, :session_owner_mismatch | {:java_projection_error, term()}}
+  def evaluation_memory_observation(state), do: call(state, :evaluation_memory_observation)
+
+  @doc false
   def transfer_owner(state, owner) when is_pid(owner), do: call(state, {:transfer_owner, owner})
 
   @impl GenServer
-  def init({limits, token, owner, event_sink}) do
+  def init({limits, token, owner, event_sink, owner_transferable?, repl_resources}) do
     now = System.monotonic_time(:millisecond)
 
     {:ok,
      %{
        token: token,
+       owner: owner,
        owner_ref: Process.monitor(owner),
+       owner_transferable?: owner_transferable?,
        event_sink: event_sink,
+       repl_resources: repl_resources,
        limits: limits,
        deadline_ms: now + limits.run_duration_ms,
        closed?: false,
@@ -162,6 +201,13 @@ defmodule PtcRunner.Kernel.RunState do
   end
 
   @impl GenServer
+  def handle_call(
+        {event_token, :owner?},
+        {caller, _tag},
+        %{event_sink: %{token: event_token}, owner: owner} = state
+      ),
+      do: {:reply, caller == owner, state}
+
   def handle_call(
         {event_token, _request} = request,
         _from,
@@ -344,20 +390,64 @@ defmodule PtcRunner.Kernel.RunState do
   def handle_call({token, :open?}, _from, %{token: token} = state),
     do: {:reply, not unavailable?(state), state}
 
+  def handle_call({token, :owner?}, {caller, _tag}, %{token: token} = state),
+    do: {:reply, caller == state.owner, state}
+
+  def handle_call(
+        {token, {:repl_owner?, event_sink, inspection_sink, limits}},
+        {caller, _tag},
+        %{token: token} = state
+      ) do
+    owner? =
+      caller == state.owner and
+        state.repl_resources === {event_sink, inspection_sink} and
+        state.limits === limits
+
+    {:reply, owner?, state}
+  end
+
   def handle_call({token, :evaluation_memory_summary}, _from, %{token: token} = state),
     do: {:reply, continuation_summary(state), state}
 
-  def handle_call({token, {:transfer_owner, owner}}, _from, %{token: token} = state)
+  def handle_call(
+        {token, :evaluation_memory_observation},
+        {caller, _tag},
+        %{token: token, owner: caller} = state
+      ),
+      do: {:reply, Lisp.externalize_memory(state.memory), state}
+
+  def handle_call(
+        {token, :evaluation_memory_observation},
+        _from,
+        %{token: token} = state
+      ),
+      do: {:reply, {:error, :session_owner_mismatch}, state}
+
+  def handle_call(
+        {token, {:transfer_owner, owner}},
+        {caller, _tag},
+        %{token: token, owner: caller, owner_transferable?: true} = state
+      )
       when is_pid(owner) do
     if Process.alive?(owner) do
       Process.demonitor(state.owner_ref, [:flush])
-      {:reply, :ok, %{state | owner_ref: Process.monitor(owner)}}
+
+      {:reply, :ok,
+       %{
+         state
+         | owner: owner,
+           owner_ref: Process.monitor(owner),
+           owner_transferable?: false
+       }}
     else
       {:reply, {:error, :closed}, state}
     end
   end
 
   def handle_call(_request, _from, state), do: {:reply, {:error, :closed}, state}
+
+  defp inspection_owner?(nil), do: true
+  defp inspection_owner?(sink), do: InspectionSink.owner?(sink)
 
   @impl GenServer
   def handle_cast(_request, state), do: {:noreply, state}

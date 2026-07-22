@@ -62,6 +62,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Made standalone `PtcRunner.Kernel.ReplSession` values process-affine. Only
+  the process that creates a session may evaluate, close, or abort it; calls
+  from another process now return `:session_owner_mismatch` without mutating
+  the continuation or stopping its owners. Public session values no longer
+  expose continuation values or raw run-state, sink, provider, or configuration
+  capabilities or owner process identifiers. An opaque ID resolves through a
+  creator-private table to one internal owner; closed entries are removed and
+  the owner closes all resources if the creator exits. Evaluation results now
+  use the inert public projection instead of returning native callable
+  continuation authority, preflight errors preserve the committed public memory
+  view, projection failures roll back before commit, owner construction
+  validates the exact run-state/sink/limit binding, and monitor-based watchdogs
+  cancel compile and evaluation workers if the creator exits without changing
+  its trap-exit flag or retaining an unbounded copy of the workload.
 - Redacted `Inspect` output for payload-bearing Lisp results, opaque Kernel
   programs, and runtime callables. Logger messages explicitly built from these
   inspected values now retain only bounded outcome/count/byte metadata, program

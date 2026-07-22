@@ -4,11 +4,13 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
   alias PtcRunner.Kernel
   alias PtcRunner.Kernel.Capability
   alias PtcRunner.Kernel.EventSink
+  alias PtcRunner.Kernel.InspectionSink
   alias PtcRunner.Kernel.Library
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.LLMCapability
   alias PtcRunner.Kernel.MissionEnvironment
   alias PtcRunner.Kernel.ReplSession
+  alias PtcRunner.Kernel.ReplSessionOwner
   alias PtcRunner.Kernel.RunConfig
   alias PtcRunner.Kernel.RunState
   alias PtcRunner.Kernel.WorkflowEnvironment
@@ -72,9 +74,246 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
     assert third.return == 43
 
     assert %{history_count: 3, history_bytes: history_bytes} =
-             RunState.evaluation_memory_summary(session.state)
+             ReplSession.evaluation_memory_summary(session)
 
     assert history_bytes > 0
+  end
+
+  test "sessions reject evaluation and teardown outside their creating process" do
+    {:ok, eval_session} = ReplSession.new()
+    refute Enum.any?(Map.values(Map.from_struct(eval_session)), &is_pid/1)
+    refute Map.has_key?(eval_session, :pid)
+    refute Map.has_key?(eval_session, :token)
+    refute Map.has_key?(eval_session, :owner)
+    refute Map.has_key?(eval_session, :state)
+    refute Map.has_key?(eval_session, :config)
+    refute Map.has_key?(eval_session, :memory)
+    refute Map.has_key?(eval_session, :history)
+
+    assert :private = :ets.info(eval_session.access, :protection)
+
+    assert {:error, ArgumentError} =
+             from_other_process(fn ->
+               try do
+                 :ets.lookup(eval_session.access, eval_session.id)
+               rescue
+                 exception -> {:error, exception.__struct__}
+               end
+             end)
+
+    assert {:error, :session_owner_mismatch} =
+             from_other_process(fn -> ReplSession.eval(eval_session, "(def leaked 1)") end)
+
+    assert {:error, %{fail: %{reason: :unbound_var}}, _session} =
+             ReplSession.eval(eval_session, "leaked")
+
+    assert %{defined_count: 0} = ReplSession.evaluation_memory_summary(eval_session)
+
+    assert {:ok, _events} = ReplSession.close(eval_session)
+
+    {:ok, close_session} = ReplSession.new()
+
+    malformed = %{close_session | id: make_ref()}
+
+    assert {:error, :session_owner_mismatch} =
+             from_other_process(fn -> ReplSession.close(malformed) end)
+
+    assert {:error, :session_owner_mismatch} =
+             from_other_process(fn -> ReplSession.close(close_session) end)
+
+    assert {:ok, %{return: 42}, close_session} = ReplSession.eval(close_session, "42")
+    assert {:ok, _events} = ReplSession.close(close_session)
+
+    {:ok, abort_session} = ReplSession.new()
+
+    assert {:error, :session_owner_mismatch} =
+             from_other_process(fn -> ReplSession.abort(abort_session, :frontend_exit) end)
+
+    assert {:ok, %{return: 42}, abort_session} = ReplSession.eval(abort_session, "42")
+    assert {:ok, _events} = ReplSession.abort(abort_session, :frontend_exit)
+  end
+
+  test "configured sessions require event and inspection sinks owned by their creator" do
+    parent = self()
+
+    config_owner =
+      Task.async(fn ->
+        {:ok, workflow} = WorkflowEnvironment.new([])
+        {:ok, mission} = MissionEnvironment.new([])
+        limits = Limits.defaults()
+        {:ok, sink} = EventSink.start(:normal, limits, run_id: "foreign-repl-config")
+
+        {:ok, config} =
+          RunConfig.new(
+            workflow_environment: workflow,
+            mission_environment: mission,
+            input: %{},
+            limits: limits,
+            event_sink: sink
+          )
+
+        send(parent, {:foreign_config, config})
+        receive do: (:finish -> :ok)
+      end)
+
+    assert_receive {:foreign_config, foreign_config}, 2_000
+    foreign_sink_ref = Process.monitor(foreign_config.event_sink.pid)
+    assert {:error, :session_owner_mismatch} = ReplSession.new(config: foreign_config)
+    assert Process.alive?(foreign_config.event_sink.pid)
+    send(config_owner.pid, :finish)
+    assert :ok = Task.await(config_owner)
+    assert_receive {:DOWN, ^foreign_sink_ref, :process, _, _reason}, 2_000
+
+    inspection_owner =
+      Task.async(fn ->
+        {:ok, sink} =
+          InspectionSink.start(run_id: "foreign-inspection", trace_id: "foreign-inspection")
+
+        send(parent, {:foreign_inspection_sink, sink})
+        receive do: (:finish -> :ok)
+      end)
+
+    assert_receive {:foreign_inspection_sink, foreign_inspection}, 2_000
+    inspection_ref = Process.monitor(foreign_inspection.pid)
+
+    {:ok, workflow} = WorkflowEnvironment.new([])
+    {:ok, mission} = MissionEnvironment.new([])
+    limits = Limits.defaults()
+    {:ok, local_sink} = EventSink.start(:normal, limits, run_id: "local-repl-config")
+
+    {:ok, mixed_config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        mission_environment: mission,
+        input: %{},
+        limits: limits,
+        event_sink: local_sink,
+        inspection_sink: foreign_inspection,
+        inspection_path: "foreign.inspection.jsonl"
+      )
+
+    assert {:error, :session_owner_mismatch} = ReplSession.new(config: mixed_config)
+    assert Process.alive?(local_sink.pid)
+    assert :ok = EventSink.stop(local_sink)
+    send(inspection_owner.pid, :finish)
+    assert :ok = Task.await(inspection_owner)
+    assert_receive {:DOWN, ^inspection_ref, :process, _, _reason}, 2_000
+  end
+
+  test "owner exit closes hidden session resources" do
+    parent = self()
+
+    creator =
+      Task.async(fn ->
+        {:ok, workflow} = WorkflowEnvironment.new([])
+        {:ok, mission} = MissionEnvironment.new([])
+        limits = Limits.defaults()
+        {:ok, sink} = EventSink.start(:normal, limits, run_id: "owner-exit-repl")
+
+        {:ok, config} =
+          RunConfig.new(
+            workflow_environment: workflow,
+            mission_environment: mission,
+            input: %{},
+            limits: limits,
+            event_sink: sink,
+            provider_resources: [fn -> send(parent, :owner_exit_resource_closed) end]
+          )
+
+        {:ok, _session} = ReplSession.new(config: config)
+        send(parent, {:owner_exit_session, sink.pid, self()})
+        receive do: (:finish -> :ok)
+        :ok
+      end)
+
+    assert_receive {:owner_exit_session, sink_pid, creator_pid}
+    sink_ref = Process.monitor(sink_pid)
+    send(creator_pid, :finish)
+    assert :ok = Task.await(creator)
+    assert_receive {:DOWN, ^sink_ref, :process, ^sink_pid, :normal}
+    assert_receive :owner_exit_resource_closed
+  end
+
+  test "owner exit cancels an in-flight evaluation sandbox" do
+    parent = self()
+
+    {creator, creator_ref} =
+      spawn_monitor(fn ->
+        {:ok, workflow} = WorkflowEnvironment.new([])
+        {:ok, mission} = MissionEnvironment.new([])
+
+        {:ok, limits} =
+          Limits.new(
+            evaluation_timeout_ms: 30_000,
+            evaluation_heap_words: 1_250_000,
+            run_duration_ms: 30_000
+          )
+
+        {:ok, sink} = EventSink.start(:normal, limits, run_id: "owner-exit-evaluation")
+
+        {:ok, config} =
+          RunConfig.new(
+            workflow_environment: workflow,
+            mission_environment: mission,
+            input: %{},
+            limits: limits,
+            event_sink: sink
+          )
+
+        {:ok, session} = ReplSession.new(config: config)
+        send(parent, {:owner_exit_evaluation_ready, self()})
+
+        receive do
+          :evaluate -> ReplSession.eval(session, "(loop [x 0] (recur (inc x)))")
+        end
+      end)
+
+    assert_receive {:owner_exit_evaluation_ready, ^creator}, 2_000
+    assert {:trap_exit, false} = Process.info(creator, :trap_exit)
+    assert 1 = :erlang.trace(creator, true, [:procs])
+    send(creator, :evaluate)
+
+    assert_receive {:trace, ^creator, :spawn, compile_worker, _mfa}, 2_000
+    compile_ref = Process.monitor(compile_worker)
+    assert_receive {:DOWN, ^compile_ref, :process, ^compile_worker, _reason}, 2_000
+
+    assert_receive {:trace, ^creator, :spawn, evaluation_worker, _mfa}, 2_000
+    evaluation_ref = Process.monitor(evaluation_worker)
+    assert Process.alive?(evaluation_worker)
+    assert {:trap_exit, false} = Process.info(creator, :trap_exit)
+
+    on_exit(fn ->
+      if Process.alive?(evaluation_worker), do: Process.exit(evaluation_worker, :kill)
+    end)
+
+    Process.exit(creator, :shutdown)
+    assert_receive {:DOWN, ^creator_ref, :process, ^creator, :shutdown}, 2_000
+    assert_receive {:DOWN, ^evaluation_ref, :process, ^evaluation_worker, _reason}, 2_000
+  end
+
+  test "session owner rejects a run state not bound to its configured sinks" do
+    {:ok, workflow} = WorkflowEnvironment.new([])
+    {:ok, mission} = MissionEnvironment.new([])
+    limits = Limits.defaults()
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "repl-owner-binding")
+
+    {:ok, config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        mission_environment: mission,
+        input: %{},
+        limits: limits,
+        event_sink: sink
+      )
+
+    {:ok, ordinary_state} = RunState.start(limits)
+
+    assert {:error, :session_owner_mismatch} =
+             ReplSessionOwner.start(config, ordinary_state, self())
+
+    :ok = RunState.close(ordinary_state)
+    :ok = RunState.stop(ordinary_state)
+    :ok = EventSink.stop(sink)
   end
 
   test "history has a separate ceiling and rejects a candidate continuation atomically" do
@@ -97,18 +336,18 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
 
     {:ok, session} = ReplSession.new(config: config)
     assert {:ok, _step, session} = ReplSession.eval(session, "(def retained 42)")
-    retained_history = session.history
+    retained = ReplSession.evaluation_memory_summary(session)
 
     source = ~s|"#{String.duplicate("x", 512)}"|
 
     assert {:error, %{fail: %{reason: :history_exceeded}}, session} =
              ReplSession.eval(session, source)
 
-    assert session.history == retained_history
+    assert ReplSession.evaluation_memory_summary(session) == retained
 
     assert {:ok, step, session} = ReplSession.eval(session, "retained")
     assert step.return == 42
-    assert session.history == retained_history ++ [42]
+    assert %{history_count: 2} = ReplSession.evaluation_memory_summary(session)
   end
 
   test "failed evaluations roll back continuation memory and emit canonical status" do
@@ -140,12 +379,10 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
     assert {:error, %{fail: %{reason: :event_sink_error}}, returned} =
              ReplSession.eval(session, "(def committed 42)")
 
-    assert returned.memory == %{"committed" => 42}
-    assert length(returned.history) == 1
     assert %{attempts: 1, errors: 1} = returned
 
     assert %{defined_count: 1, history_count: 1} =
-             RunState.evaluation_memory_summary(returned.state)
+             ReplSession.evaluation_memory_summary(returned)
 
     assert {:error, %{fail: %{reason: :session_closed}}, ^returned} =
              ReplSession.eval(returned, "committed")
@@ -154,12 +391,12 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
   test "explicit failure rolls back memory and turn history" do
     {:ok, session} = ReplSession.new()
     assert {:ok, _step, session} = ReplSession.eval(session, "(def retained 42)")
-    retained_history = session.history
+    retained = ReplSession.evaluation_memory_summary(session)
 
     assert {:error, %{fail: %{reason: :explicit_failure}}, session} =
              ReplSession.eval(session, ~s|(do (def leaked 1) (fail "stop"))|)
 
-    assert session.history == retained_history
+    assert ReplSession.evaluation_memory_summary(session) == retained
     assert {:ok, %{return: 42}, session} = ReplSession.eval(session, "retained")
     assert {:error, _step, _session} = ReplSession.eval(session, "leaked")
   end
@@ -227,23 +464,44 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
       )
 
     {:ok, session} = ReplSession.new(config: config)
-    assert {:ok, _step, session} = ReplSession.eval(session, "41")
+    assert {:ok, _step, session} = ReplSession.eval(session, "(def retained 41)")
 
-    assert {:error, %{fail: %{reason: :limit_exceeded}}, _session} =
+    assert {:error, %{fail: %{reason: :limit_exceeded}, memory: memory}, _session} =
              ReplSession.eval(session, "42")
+
+    assert memory["retained"] == 41
   end
 
   test "closed and constructor-failed sessions leave no live sink" do
-    {:ok, session} = ReplSession.new()
-    sink_pid = session.config.event_sink.pid
+    {:ok, workflow} = WorkflowEnvironment.new([])
+    {:ok, mission} = MissionEnvironment.new([])
+    limits = Limits.defaults()
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "closed-repl")
+
+    {:ok, config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        mission_environment: mission,
+        input: %{},
+        limits: limits,
+        event_sink: sink
+      )
+
+    {:ok, session} = ReplSession.new(config: config)
+    sink_pid = sink.pid
     ref = Process.monitor(sink_pid)
     assert {:ok, _events} = ReplSession.close(session)
     assert_receive {:DOWN, ^ref, :process, ^sink_pid, :normal}
+    assert :ets.lookup(session.access, session.id) == []
 
     assert {:error, %{fail: %{reason: :session_closed}}, ^session} =
              ReplSession.eval(session, "42")
 
     assert {:error, :session_closed} = ReplSession.close(session)
+
+    {:ok, replacement} = ReplSession.new()
+    assert replacement.access == session.access
+    assert {:ok, _events} = ReplSession.close(replacement)
 
     # Build-time validation now rejects a payload the configured sink could
     # not accept, so the runtime constructor failure is triggered by a full
@@ -407,6 +665,73 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
            ] == Enum.map(events, & &1.type)
   end
 
+  test "evaluation results do not expose callable continuation authority" do
+    {:ok, echo} =
+      Capability.new(
+        name: "echo",
+        input_schema: @input_schema,
+        callback: fn args -> {:ok, args} end
+      )
+
+    {:ok, workflow} = WorkflowEnvironment.new(capabilities: [echo])
+    {:ok, mission} = MissionEnvironment.new([])
+    limits = Limits.defaults()
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "repl-result-boundary")
+
+    {:ok, config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        mission_environment: mission,
+        input: %{},
+        limits: limits,
+        event_sink: sink
+      )
+
+    {:ok, session} = ReplSession.new(config: config)
+
+    assert {:ok, first, session} = ReplSession.eval(session, "(def saved tool/echo)")
+    refute Map.has_key?(first.memory, "saved")
+
+    assert {:ok, second, session} =
+             ReplSession.eval(session, ~S|(saved {"value" 42})|)
+
+    assert second.return == %{status: :ok, value: %{"value" => 42}}
+
+    assert {:ok, third, session} = ReplSession.eval(session, "tool/echo")
+    assert third.return == "tool/echo"
+    assert {:ok, _events} = ReplSession.close(session)
+  end
+
+  test "public projection failure rolls back continuation and records an error" do
+    {:ok, session} = ReplSession.new()
+    assert {:ok, _step, session} = ReplSession.eval(session, "(def retained 42)")
+
+    source =
+      ~S|(do (def leaked 1) {(Integer/parseInt "1") :int (Long/parseLong "1") :long})|
+
+    assert {:error, %{fail: %{reason: :java_projection_error}, memory: memory}, session} =
+             ReplSession.eval(session, source)
+
+    assert memory["retained"] == 42
+    refute Map.has_key?(memory, "leaked")
+
+    assert %{defined_count: 1, history_count: 1} =
+             ReplSession.evaluation_memory_summary(session)
+
+    assert {:error, %{fail: %{reason: :unbound_var}}, session} =
+             ReplSession.eval(session, "leaked")
+
+    assert {:ok, events} = ReplSession.close(session)
+
+    assert Enum.any?(events, fn event ->
+             event.type == "evaluation-stopped" and
+               event.data.status == :error and
+               event.data.reason == :java_projection_error
+           end)
+
+    assert List.last(events).data.outcome == :error
+  end
+
   test "ambiguous capability arguments are counted without REPL provider dispatch" do
     parent = self()
 
@@ -439,7 +764,13 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
     assert {:ok, %{return: %{kind: :protocol_error, reason: :ambiguous_arguments}}, session} =
              ReplSession.eval(session, ~S|(tool/capture {"path" "a" :path "b"})|)
 
-    assert %{protocol_errors: 1} = RunState.usage(session.state)
+    assert %{protocol_errors: 1} = ReplSession.usage(session)
     refute_receive {:repl_provider_called, _arguments}
+  end
+
+  defp from_other_process(fun) do
+    fun
+    |> Task.async()
+    |> Task.await()
   end
 end
