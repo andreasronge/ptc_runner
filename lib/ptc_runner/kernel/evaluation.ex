@@ -12,7 +12,10 @@ defmodule PtcRunner.Kernel.Evaluation do
   as `:failed`. Continued and returned evaluations atomically commit native
   memory and exact bounded history before exposing only an inert public value.
   Continued results additionally expose bounded chronological prints for the
-  next agent turn.
+  next agent turn. Runtime-tool results use the strict `:kernel_json`
+  projection and reject ambiguous collections. The log-analysis session opts
+  into the preserving `:public` projection because it formats an Elixir
+  observation rather than returning JSON to workflow Lisp.
   """
 
   alias PtcRunner.Kernel.Dispatcher
@@ -21,7 +24,6 @@ defmodule PtcRunner.Kernel.Evaluation do
   alias PtcRunner.Kernel.RunState
   alias PtcRunner.Kernel.RuntimeTools
   alias PtcRunner.Lisp
-  alias PtcRunner.Lisp.Java.Project, as: JavaProject
   alias PtcRunner.Lisp.TrustedTool
 
   @doc "Evaluates bounded subordinate source with optional canonical event collection."
@@ -84,6 +86,11 @@ defmodule PtcRunner.Kernel.Evaluation do
     evaluation_id = Events.id("mission-evaluation")
     started_ms = System.monotonic_time(:millisecond)
 
+    projection_boundary =
+      opts
+      |> Keyword.get(:projection_boundary, :kernel_json)
+      |> validate_projection_boundary!()
+
     result =
       evaluate_detailed(
         state,
@@ -91,7 +98,12 @@ defmodule PtcRunner.Kernel.Evaluation do
         source,
         timeout_ms,
         %{event_sink: event_sink, inspection_sink: inspection_sink},
-        {evaluation_id, started_ms, Keyword.get(opts, :after_started_hook)}
+        {
+          evaluation_id,
+          started_ms,
+          Keyword.get(opts, :after_started_hook),
+          projection_boundary
+        }
       )
 
     result
@@ -144,7 +156,7 @@ defmodule PtcRunner.Kernel.Evaluation do
          timeout_ms,
          {memory, history, lease},
          capture,
-         {evaluation_id, started_ms, after_started_hook}
+         {evaluation_id, started_ms, after_started_hook, projection_boundary}
        ) do
     limits = RunState.limits(state)
 
@@ -180,7 +192,8 @@ defmodule PtcRunner.Kernel.Evaluation do
           timeout_ms,
           {memory, history, lease},
           capture,
-          deadline_ms
+          deadline_ms,
+          projection_boundary
         )
 
       _ = maybe_emit_limit(state, capture.event_sink, result)
@@ -228,6 +241,14 @@ defmodule PtcRunner.Kernel.Evaluation do
 
   defp after_started(_hook), do: {:error, :evaluation_hook_error}
 
+  defp validate_projection_boundary!(boundary) when boundary in [:public, :kernel_json],
+    do: boundary
+
+  defp validate_projection_boundary!(boundary) do
+    raise ArgumentError,
+          "invalid projection boundary #{inspect(boundary)}; expected :public or :kernel_json"
+  end
+
   defp execute_with_lease(
          state,
          environment,
@@ -235,7 +256,8 @@ defmodule PtcRunner.Kernel.Evaluation do
          timeout_ms,
          {memory, history, lease},
          capture,
-         deadline_ms
+         deadline_ms,
+         projection_boundary
        ) do
     limits = RunState.limits(state)
 
@@ -268,35 +290,35 @@ defmodule PtcRunner.Kernel.Evaluation do
       {:ok, %{return: {:__ptc_fail__, value}} = step} ->
         :ok = RunState.release_evaluation(state, lease)
 
-        case JavaProject.project(value, :kernel_json) do
+        case Lisp.project_boundary_value(value, projection_boundary) do
           {:ok, projected} ->
             %{
               outcome: :failed,
-              value: Lisp.externalize_value(projected),
+              value: projected,
               prints: Map.get(step, :prints, []),
               continuation_effect: :preserved
             }
 
           {:error, reason} ->
-            java_projection_failure(step, reason)
+            projection_failure(step, reason)
         end
 
       {:ok, step} ->
-        commit_result(state, lease, history, step)
+        commit_result(state, lease, history, step, projection_boundary)
 
       {:error, step} ->
         release_failure(state, lease, step, mission_calls_before)
     end
   end
 
-  defp commit_result(state, lease, history, step) do
-    case JavaProject.project(step.return, :kernel_json) do
+  defp commit_result(state, lease, history, step, projection_boundary) do
+    case Lisp.project_boundary_value(step.return, projection_boundary) do
       {:ok, projected_return} ->
         commit_projected_result(state, lease, history, step, projected_return)
 
       {:error, reason} ->
         :ok = RunState.release_evaluation(state, lease)
-        java_projection_failure(step, reason)
+        projection_failure(step, reason)
     end
   end
 
@@ -364,7 +386,7 @@ defmodule PtcRunner.Kernel.Evaluation do
   defp classify_success(step, {:__ptc_return__, value}) do
     %{
       outcome: :returned,
-      value: Lisp.externalize_value(value),
+      value: value,
       prints: Map.get(step, :prints, [])
     }
   end
@@ -372,21 +394,28 @@ defmodule PtcRunner.Kernel.Evaluation do
   defp classify_success(step, value) do
     %{
       outcome: :continued,
-      value: Lisp.externalize_value(value),
+      value: value,
       prints: step.prints
     }
   end
 
-  defp java_projection_failure(step, reason) do
+  defp projection_failure(step, reason) do
+    failure_kind = projection_failure_kind(reason)
+
     %{
       outcome: :evaluation_error,
-      kind: :java_projection_error,
+      kind: failure_kind,
       details: %{projection_error: inspect(reason, limit: 10)},
       prints: Map.get(step, :prints, []),
       continuation_effect: :preserved,
       retryable?: false
     }
   end
+
+  defp projection_failure_kind({:public_projection_collision, _path, _collection}),
+    do: :public_projection_collision
+
+  defp projection_failure_kind(_reason), do: :java_projection_error
 
   defp history_after_success(history, {:__ptc_return__, _value}), do: history
   defp history_after_success(history, value), do: Enum.take(history ++ [value], -3)

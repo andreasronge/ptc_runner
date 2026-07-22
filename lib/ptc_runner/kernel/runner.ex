@@ -11,13 +11,11 @@ defmodule PtcRunner.Kernel.Runner do
   alias PtcRunner.Kernel.Error
   alias PtcRunner.Kernel.Events
   alias PtcRunner.Kernel.EventSink
-  alias PtcRunner.Kernel.Program
   alias PtcRunner.Kernel.Result
   alias PtcRunner.Kernel.RunConfig
   alias PtcRunner.Kernel.RunState
   alias PtcRunner.Kernel.RuntimeTools
   alias PtcRunner.Lisp
-  alias PtcRunner.Lisp.Java.Project, as: JavaProject
   alias PtcRunner.Lisp.RetainedSize
   alias PtcRunner.Lisp.TrustedTool
 
@@ -118,10 +116,8 @@ defmodule PtcRunner.Kernel.Runner do
          }}
 
       {:ok, step} ->
-        case JavaProject.project(kernel_return_value(step.return), :kernel_json) do
-          {:ok, projected_java} ->
-            value = project_kernel_value(projected_java)
-
+        case Lisp.project_boundary_value(kernel_return_value(step.return), :kernel_json) do
+          {:ok, value} ->
             if terminal_result_within_limit?(value, config.limits.terminal_result_bytes) do
               {:ok,
                %Result{
@@ -143,7 +139,7 @@ defmodule PtcRunner.Kernel.Runner do
             {:error,
              %Error{
                kind: :workflow_failed,
-               reason: :java_projection_error,
+               reason: projection_failure_kind(reason),
                details: %{projection_error: inspect(reason, limit: 10)},
                usage: RunState.usage(state)
              }}
@@ -233,17 +229,10 @@ defmodule PtcRunner.Kernel.Runner do
   defp kernel_return_value({:__ptc_return__, value}), do: value
   defp kernel_return_value(value), do: value
 
-  defp project_kernel_value(%Program{} = program),
-    do: %{program?: true, byte_size: program.byte_size, digest: program.digest}
+  defp projection_failure_kind({:public_projection_collision, _path, _collection}),
+    do: :public_projection_collision
 
-  defp project_kernel_value(value) when is_list(value),
-    do: Enum.map(value, &project_kernel_value/1)
-
-  defp project_kernel_value(value) when is_map(value) and not is_struct(value) do
-    Map.new(value, fn {key, item} -> {project_kernel_value(key), project_kernel_value(item)} end)
-  end
-
-  defp project_kernel_value(value), do: Lisp.externalize_value(value)
+  defp projection_failure_kind(_reason), do: :java_projection_error
 
   defp terminal_result_within_limit?(value, limit) do
     case {RetainedSize.bytes_with_cap(value, limit), safe_encoded_size(value)} do

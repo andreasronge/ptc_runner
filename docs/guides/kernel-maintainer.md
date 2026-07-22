@@ -191,12 +191,18 @@ before the agent reports that no model turn remains.
 
 Native continuation memory and exact history never cross back into workflow Lisp. Subordinate
 values and the workflow's terminal value pass through
-`PtcRunner.Lisp.externalize_value/1`, which recursively replaces closures,
+the same public projector as `PtcRunner.Lisp.externalize_value/1`, which
+recursively replaces closures,
 builtins, composed callables, runtime callables, and plain BEAM functions with
 inert deterministic display values. These projections retain neither callable
 implementations nor closure parameters, bodies, captured environments,
-history, or metadata. Canonical events likewise carry only bounded status and
-accounting metadata; exact values remain outside ordinary observability.
+history, or metadata. Direct Elixir observations, including the human-facing
+log-analysis session, preserve colliding map keys and set members with inert
+wrappers. JSON-facing runtime-tool and workflow boundaries reject collisions
+with `:public_projection_collision` before committing subordinate state or
+publishing a workflow result. Canonical events likewise carry only bounded
+status and accounting metadata; exact values remain outside ordinary
+observability.
 
 Bounded Java values follow the same native-versus-observable split. Native
 continuation state may retain validated Java primitive provenance, admitted

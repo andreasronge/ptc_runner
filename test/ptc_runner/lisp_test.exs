@@ -19,7 +19,7 @@ defmodule PtcRunner.LispTest do
     end
 
     test "public results hide native closures" do
-      assert {:ok, %{return: "#fn[...]"}} = Lisp.run("(fn [x] x)")
+      assert {:ok, %{return: %Format.Fn{params: "..."}}} = Lisp.run("(fn [x] x)")
     end
   end
 
@@ -80,6 +80,50 @@ defmodule PtcRunner.LispTest do
       refute encoded =~ "secret_body"
       refute encoded =~ "closure"
       assert encoded =~ "#fn[...]"
+    end
+
+    test "public results preserve distinct map keys and set members after projection" do
+      assert {:ok, %{return: projected_map}} =
+               Lisp.run(~S|{(fn [x] x) 1 (fn [x] (+ x 1)) 2}|)
+
+      assert map_size(projected_map) == 2
+      assert Enum.sort(Map.values(projected_map)) == [1, 2]
+      assert Enum.all?(Map.keys(projected_map), &(Kernel.to_string(&1) == "#fn[...]"))
+
+      assert {:ok, %{return: projected_set}} =
+               Lisp.run(~S|#{(fn [x] x) (fn [x] (+ x 1))}|)
+
+      assert MapSet.size(projected_set) == 2
+      assert Enum.all?(projected_set, &(Kernel.to_string(&1) == "#fn[...]"))
+
+      assert {:ok, %{return: callable_and_literal}} =
+               Lisp.run(~S|{(fn [x] x) 1 "#fn[...]" 2}|)
+
+      assert map_size(callable_and_literal) == 2
+      assert Enum.sort(Map.values(callable_and_literal)) == [1, 2]
+    end
+
+    test "collision-preserving results remain lossless after a turn-history round trip" do
+      assert {:ok, %{return: first_map}} =
+               Lisp.run(~S|{(fn [x] x) 1 (fn [x] (+ x 1)) 2}|)
+
+      assert {:ok, %{return: second_map}} =
+               Lisp.run(~S|(assoc *1 (fn [x] (- x 1)) 3 (fn [x] (* x 2)) 4)|,
+                 turn_history: [first_map]
+               )
+
+      assert map_size(second_map) == 4
+      assert Enum.sort(Map.values(second_map)) == [1, 2, 3, 4]
+
+      assert {:ok, %{return: first_set}} =
+               Lisp.run(~S|#{(fn [x] x) (fn [x] (+ x 1))}|)
+
+      assert {:ok, %{return: second_set}} =
+               Lisp.run(~S|(conj *1 (fn [x] (- x 1)) (fn [x] (* x 2)))|,
+                 turn_history: [first_set]
+               )
+
+      assert MapSet.size(second_set) == 4
     end
   end
 

@@ -162,7 +162,8 @@ defmodule PtcRunner.Kernel.LogAnalysisSession do
           state.config.limits.evaluation_timeout_ms,
           state.config.event_sink,
           state.config.inspection_sink,
-          after_started_hook: evaluation_hook(state.evaluation_hook)
+          after_started_hook: evaluation_hook(state.evaluation_hook),
+          projection_boundary: :public
         )
 
       projection = project_result(detailed, state)

@@ -210,13 +210,20 @@ defmodule PtcRunner.Lisp.Integration.ErrorHandlingTest do
       assert {:ok, %Step{return: %{"a" => 9}}} = Lisp.run(~S|{:a 1 (keyword "a") 9}|)
     end
 
-    test "keyword/string flex-collisions resolve consistently across constructors (DIV-47)" do
-      # "a" and :a are distinct at construction and only merge at externalization,
-      # so the winner is decided by externalization order, not source-order-last.
-      # The rule isn't last-wins, but it IS identical for {} / hash-map / array-map.
-      assert {:ok, %Step{return: %{"a" => 1}}} = Lisp.run(~S|{"a" 1 :a 9}|)
-      assert {:ok, %Step{return: %{"a" => 1}}} = Lisp.run(~S|(hash-map "a" 1 :a 9)|)
-      assert {:ok, %Step{return: %{"a" => 1}}} = Lisp.run(~S|(array-map "a" 1 :a 9)|)
+    test "keyword/string flex-collisions remain distinct in public results (DIV-47)" do
+      # Flexible lookup treats "a" and :a as aliases, but the keys are distinct
+      # values. Public projection must not discard either entry when both render
+      # as the same JSON object key.
+      for source <- [
+            ~S|{"a" 1 :a 9}|,
+            ~S|(hash-map "a" 1 :a 9)|,
+            ~S|(array-map "a" 1 :a 9)|
+          ] do
+        assert {:ok, %Step{return: result}} = Lisp.run(source)
+        assert map_size(result) == 2
+        assert Enum.sort(Map.values(result)) == [1, 9]
+        assert Enum.all?(Map.keys(result), &(Kernel.to_string(&1) == "a"))
+      end
     end
 
     test "hash-map / array-map keep last and never raise (function forms, not literals)" do
