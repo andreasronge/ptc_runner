@@ -343,8 +343,29 @@ Subordinate evaluation is serialized because it owns the transactional
 continuation. Reservation returns memory, history, and the lease token in one
 owner operation; commit validates and installs the complete candidate in one
 owner operation. A concurrent attempt receives a recoverable busy result rather
-than waiting in an unbounded queue. ReplSession projects memory and history for
-its caller but does not own a competing copy for evaluation decisions.
+than waiting in an unbounded queue. ReplSession keeps exact memory and history
+only in RunState; evaluation results expose an inert observation projection.
+Projection is validated before commit, so an unrepresentable result rolls back
+the candidate continuation and records an evaluation error.
+
+Standalone `PtcRunner.Kernel.ReplSession` is process-affine. The process that
+constructs it is the only process allowed to call `eval/2`, `close/1`, or
+`abort/2`; a foreign caller receives `:session_owner_mismatch` before any
+continuation, event, provider, or lifecycle operation. Passing the session
+struct in a message does not transfer ownership. The public value contains only
+an opaque ID, one shared creator-private lookup table, and bounded attempt
+counters; it contains no owner PID or token. Closed entries are deleted, while
+the empty private table lasts only for the creator process. Continuation values
+and raw run-state, configuration, sink, and provider capabilities remain inside
+the internal owner. Its non-transferable run state is bound to the configured
+sinks and limits. Preflight failures return the committed public memory
+observation without exposing native continuation authority. Each bounded worker
+starts a small monitor-only watchdog before running the workload, so creator
+shutdown stops compilation and evaluation without changing the creator's
+trap-exit behavior or copying the workload into an unbounded process. Keep
+construction, the input loop, and terminal cleanup in one stable frontend
+process; use a separate supervised session abstraction if a product later
+requires transferable or multi-client ownership.
 
 `evaluation_memory_bytes` continues to charge definitions only.
 `evaluation_history_bytes` independently bounds every exact history value and

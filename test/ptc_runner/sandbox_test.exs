@@ -153,6 +153,32 @@ defmodule PtcRunner.SandboxTest do
     end
   end
 
+  describe "Sandbox.run_bounded/2 - linked cancellation" do
+    test "linked workers stop when their caller exits" do
+      parent = self()
+
+      {owner, owner_ref} =
+        spawn_monitor(fn ->
+          PtcRunner.Sandbox.run_bounded(
+            fn ->
+              send(parent, {:bounded_worker, self()})
+              receive do: (:finish -> :ok)
+            end,
+            link: true,
+            timeout: 30_000
+          )
+        end)
+
+      assert_receive {:bounded_worker, worker}, 2_000
+      worker_ref = Process.monitor(worker)
+      assert {:trap_exit, false} = Process.info(owner, :trap_exit)
+
+      Process.exit(owner, :shutdown)
+      assert_receive {:DOWN, ^owner_ref, :process, ^owner, :shutdown}, 2_000
+      assert_receive {:DOWN, ^worker_ref, :process, ^worker, _reason}, 2_000
+    end
+  end
+
   # Regression tests for #993: binary-heavy programs must respect max_heap
   describe "shared binary memory accounting (#993)" do
     test "run_bounded kills binary-heavy function under tight heap cap" do

@@ -1,10 +1,10 @@
 # Kernel publication and boundary hardening
 
-**Status:** triaged; first four slices implemented
+**Status:** triaged; first five slices implemented
 
 **Origin:** extracted from the Java interop investigation on 2026-07-20
 
-**Last audited:** 2026-07-22 against `origin/main` at `af64a3ea`
+**Last audited:** 2026-07-22 against `origin/main` at `70b3745a`
 
 ## Decision
 
@@ -32,7 +32,7 @@ This plan now separates:
 | Ordinary terminal publication | Runner and standalone REPL now reserve terminal capacity, finalize atomically, and hand one frozen batch to persistence. | Complete. |
 | Drop accounting and inspection | Event loss is bounded. Result, Program, and RuntimeCallable use payload-free custom `Inspect`; owner status is constant-redacted. | Complete for the identified high-value boundaries. |
 | Viewer persistence | SessionTrace owns finalization and retry; TraceLog publication is synced, no-clobber, and byte-identical on retry. | Remove from the active backlog. |
-| Standalone REPL ownership | A transferred ReplSession becomes closed when its creator exits. | Decide whether sessions are process-affine or transferable before changing ownership. |
+| Standalone REPL ownership | ReplSession records its creator and rejects foreign evaluation or teardown before touching owner state. | Complete: sessions are process-affine and run state is bound to its configured sinks. |
 | Oracle supervision | The current subprocess-per-run harness has timeout, output, and temporary-directory bounds. | Keep the reusable service deferred until a leak or throughput problem is measured. |
 
 ## Completed by Java interop
@@ -242,22 +242,46 @@ The durable contract also records that direct Logger struct reports bypass
 status test also retains sensitive continuation values and proves the existing
 constant-redacted `format_status` boundary does not enumerate them.
 
-## Product decision: standalone REPL ownership
+## Completed fifth slice: process-affine standalone REPL
 
-Standalone ReplSession currently contains handles owned by the process that
-created the session. Sending the immutable session value to another process
-does not transfer ownership; when the creator exits, later evaluation returns
-`:session_closed`.
+Standalone ReplSession already contained run-state and event-sink handles tied
+to the process that created the session. Sending the immutable session value to
+another process did not transfer those owners, but while the creator remained
+alive a foreign process could still evaluate against the continuation or close
+and abort the creator's resources.
 
-Choose one contract before implementing a new lifecycle process:
+RunState now retains the canonical creator identity. `eval/2`, `close/1`, and
+`abort/2` compare their actual caller inside that owner before consulting or
+mutating any continuation, event, provider, or lifecycle state. Standalone
+REPL state is non-transferable and bound to the exact configured event and
+optional inspection sinks. The public session value contains only an opaque ID,
+one shared creator-private lookup table, and bounded attempt counters—not an
+owner PID or token. Closed lookup entries are deleted, and the empty table dies
+with the creator. Continuation values and raw run-state, configuration, sink,
+and provider capabilities remain inside that owner. Evaluation results use the
+inert public projection while exact native memory and history stay internal;
+preflight errors preserve the committed public memory view, and projection
+failure rolls back before commit. A foreign caller receives the stable
+`{:error, :session_owner_mismatch}` result, and the creator can continue using
+and terminating the session normally. Construction also rejects a supplied
+config whose event or optional inspection sink belongs to another process
+before claiming either resource. The co-hosted log-analysis construction path
+retains only its owner-only, one-shot transfer. Monitor-based watchdogs couple
+REPL compile and evaluation sandboxes to the creator without changing its
+trap-exit behavior. Each bounded worker starts its own tiny monitor-only
+watchdog, so no unbounded process retains the workload closure; owner death
+cancels in-flight work before the owner closes the remaining resources.
 
-- **Process-affine session:** document the creator/owner constraint and reject
-  use from another process with a stable error.
-- **Transferable session:** add a supervised lifecycle owner independent of the
-  creator and define transfer, close, abort, timeout, and owner-death behavior.
-
-Do not infer the larger transferable design merely because the session is an
-Elixir struct.
+Boundary tests reproduce the former foreign evaluation and teardown, prove the
+public value carries no raw resource handles or owner process identifier, prove
+creator-private resource lookup and every session operation reject a foreign
+process, prove a rejected evaluation commits no definition, reject foreign
+configured sinks without tearing them down, reject mismatched run-state/config
+construction, cancel an in-flight evaluator on owner death, and prove the
+creator retains evaluation and cleanup authority. This intentionally does not
+add a REPL transfer API. If a real multi-client use case appears, it requires a
+separate supervised abstraction with explicit transfer, serialization, close,
+abort, timeout, and owner-death behavior.
 
 ## Deferred investigations
 

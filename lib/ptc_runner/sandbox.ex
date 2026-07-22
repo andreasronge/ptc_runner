@@ -159,11 +159,9 @@ defmodule PtcRunner.Sandbox do
     max_heap = Keyword.get(opts, :max_heap, default_max_heap)
     setup_max_heap = Keyword.get(opts, :setup_max_heap, 4 * max_heap)
     eval_fn = Keyword.fetch!(opts, :eval_fn)
-    # When `link: true`, the spawned sandbox process is linked to the caller in
-    # addition to being monitored. If a disposable caller is killed, the link
-    # terminates the sandbox child promptly instead of leaving it to run until
-    # its own heap or timeout limit fires. The default is `false` for callers
-    # whose lifetime is independent of the sandbox worker.
+    # When `link: true`, the bounded worker starts a tiny watchdog that monitors
+    # both worker and caller. Caller shutdown therefore kills the sandbox
+    # without changing the caller's trap-exit behavior.
     link? = Keyword.get(opts, :link, false)
 
     # Spawn isolated process with resource limits
@@ -171,25 +169,13 @@ defmodule PtcRunner.Sandbox do
 
     parent = self()
 
-    spawn_opts =
-      [
-        {:max_heap_size,
-         %{size: setup_max_heap, kill: true, error_logger: false, include_shared_binaries: true}},
-        :monitor
-      ] ++
-        if link?, do: [:link], else: []
-
-    # When linking, the parent must trap exits so that an abnormal
-    # child termination (heap_kill, eval_fn raise, etc.) is delivered
-    # as a `{:EXIT, _, _}` message — already handled by the existing
-    # `{:DOWN, ...}` monitor clause — instead of taking the parent
-    # down via the link. We restore the prior trap-exit flag before
-    # returning so this is invisible to non-linking callers.
-    prior_trap_exit =
-      if link?, do: Process.flag(:trap_exit, true), else: nil
+    spawn_opts = [
+      {:max_heap_size,
+       %{size: setup_max_heap, kill: true, error_logger: false, include_shared_binaries: true}}
+    ]
 
     {pid, ref} =
-      Process.spawn(
+      spawn_worker(
         fn ->
           # Set process priority to normal within the process
           Process.flag(:priority, :normal)
@@ -207,7 +193,8 @@ defmodule PtcRunner.Sandbox do
           memory = get_process_memory()
           send(parent, {:result, self(), result, memory, eval_reductions})
         end,
-        spawn_opts
+        spawn_opts,
+        link?
       )
 
     await = %{
@@ -216,29 +203,12 @@ defmodule PtcRunner.Sandbox do
       deadline: start_time + timeout,
       start_time: start_time,
       timeout: timeout,
-      link?: link?,
       max_heap: max_heap,
       setup_max_heap: setup_max_heap,
       baseline_words: nil
     }
 
-    try do
-      await_result(await)
-    after
-      if link? do
-        # Defense-in-depth: even with `unlink/1` above, we may have
-        # been linked but not yet killed (success / DOWN paths). Flush
-        # any straggler `{:EXIT, pid, _}` signal that may have arrived
-        # before we restore `trap_exit`.
-        receive do
-          {:EXIT, ^pid, _} -> :ok
-        after
-          0 -> :ok
-        end
-
-        Process.flag(:trap_exit, prior_trap_exit)
-      end
-    end
+    await_result(await)
   end
 
   # Wait for the sandbox child: consumes the `{:baseline, _, _}` message the
@@ -286,13 +256,7 @@ defmodule PtcRunner.Sandbox do
         {:error, {:execution_error, "Process terminated: #{inspect(reason)}"}}
     after
       remaining ->
-        # Timeout path: kill the child WITHOUT letting its link signal
-        # race with the trap_exit restore (codex review of 0fe4c78).
-        # `Process.unlink/1` atomically discards any pending exit
-        # signal from `pid` on the link, so the EXIT message cannot
-        # reach our mailbox after we restore the prior `trap_exit`.
         Process.demonitor(ref, [:flush])
-        if await.link?, do: Process.unlink(pid)
         Process.exit(pid, :kill)
 
         # Flush stragglers the child may have sent right as the timeout
@@ -386,6 +350,9 @@ defmodule PtcRunner.Sandbox do
 
     * `:timeout` - Timeout in milliseconds (default: 1000)
     * `:max_heap` - Max heap size in words (default: 1_250_000)
+    * `:link` - Couple the bounded worker to its caller through a linked
+      watchdog (default: false). Caller shutdown cancels the worker without
+      changing the caller's trap-exit flag.
 
   ## Returns
 
@@ -414,21 +381,24 @@ defmodule PtcRunner.Sandbox do
 
     timeout = Keyword.get(opts, :timeout, default_timeout)
     max_heap = Keyword.get(opts, :max_heap, default_max_heap)
+    link? = Keyword.get(opts, :link, false)
 
     parent = self()
 
+    spawn_opts = [
+      {:max_heap_size,
+       %{size: max_heap, kill: true, error_logger: false, include_shared_binaries: true}}
+    ]
+
     {pid, ref} =
-      Process.spawn(
+      spawn_worker(
         fn ->
           Process.flag(:priority, :normal)
           result = fun.()
           send(parent, {:bounded_result, self(), result})
         end,
-        [
-          {:max_heap_size,
-           %{size: max_heap, kill: true, error_logger: false, include_shared_binaries: true}},
-          :monitor
-        ]
+        spawn_opts,
+        link?
       )
 
     receive do
@@ -454,6 +424,44 @@ defmodule PtcRunner.Sandbox do
 
         {:error, {:timeout, timeout}}
     end
+  end
+
+  defp spawn_worker(fun, spawn_opts, false),
+    do: Process.spawn(fun, [:monitor | spawn_opts])
+
+  defp spawn_worker(fun, spawn_opts, true) do
+    owner = self()
+
+    worker_fun = fn ->
+      worker = self()
+      ready = make_ref()
+
+      {watchdog, watchdog_ref} =
+        spawn_monitor(fn ->
+          owner_ref = Process.monitor(owner)
+          worker_ref = Process.monitor(worker)
+          send(worker, {ready, self()})
+
+          receive do
+            {:DOWN, ^owner_ref, :process, ^owner, _reason} ->
+              Process.exit(worker, :kill)
+
+            {:DOWN, ^worker_ref, :process, ^worker, _reason} ->
+              Process.demonitor(owner_ref, [:flush])
+          end
+        end)
+
+      receive do
+        {^ready, ^watchdog} ->
+          Process.demonitor(watchdog_ref, [:flush])
+          fun.()
+
+        {:DOWN, ^watchdog_ref, :process, ^watchdog, reason} ->
+          exit({:watchdog_start_failed, reason})
+      end
+    end
+
+    Process.spawn(worker_fun, [:monitor | spawn_opts])
   end
 
   defp get_process_memory do

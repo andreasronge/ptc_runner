@@ -73,6 +73,10 @@ defmodule PtcRunner.Kernel.InspectionSink do
   @doc "Returns retained records in sequence order while the required sink is healthy."
   def records(%__MODULE__{} = sink), do: call(sink, :records)
 
+  @doc false
+  @spec owner?(t()) :: boolean()
+  def owner?(sink), do: call(sink, :owner?) == true
+
   @spec stop(t()) :: :ok
   @doc "Stops the sink; repeated or owner-driven stops are harmless."
   def stop(%__MODULE__{pid: pid}) do
@@ -86,6 +90,7 @@ defmodule PtcRunner.Kernel.InspectionSink do
     {:ok,
      %{
        token: token,
+       owner: owner,
        owner_ref: Process.monitor(owner),
        run_id: run_id,
        trace_id: trace_id,
@@ -99,6 +104,9 @@ defmodule PtcRunner.Kernel.InspectionSink do
   end
 
   @impl GenServer
+  def handle_call({token, :owner?}, {caller, _tag}, %{token: token} = state),
+    do: {:reply, caller == state.owner, state}
+
   def handle_call({token, :records}, _from, %{token: token, failed?: false} = state),
     do: {:reply, {:ok, Enum.reverse(state.records)}, state}
 
