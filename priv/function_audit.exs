@@ -3234,7 +3234,7 @@
       status: :supported,
       description: "True if s is nil, empty, or contains only whitespace",
       notes:
-        "BUG GAP-S50: Unicode whitespace classification differs from Clojure for U+00A0 and U+2003; BUG GAP-S116: character inputs are accepted instead of raising"
+        "GAP-S50 fixed: uses the pinned Clojure Character.isWhitespace set; BUG GAP-S116: character inputs are accepted instead of raising"
     },
     %{
       name: "capitalize",
@@ -3338,8 +3338,7 @@
       name: "trim",
       status: :supported,
       description: "Removes whitespace from both ends of string",
-      notes:
-        "BUG GAP-S50: Unicode whitespace classification differs from Clojure for U+00A0 and U+2003"
+      notes: "GAP-S50 fixed: uses the pinned Clojure Character.isWhitespace set"
     },
     %{
       name: "trim-newline",
@@ -3351,15 +3350,13 @@
       name: "triml",
       status: :supported,
       description: "Removes whitespace from the left side of string",
-      notes:
-        "BUG GAP-S50: Unicode whitespace classification differs from Clojure for U+00A0 and U+2003"
+      notes: "GAP-S50 fixed: uses the pinned Clojure Character.isWhitespace set"
     },
     %{
       name: "trimr",
       status: :supported,
       description: "Removes whitespace from the right side of string",
-      notes:
-        "BUG GAP-S50: Unicode whitespace classification differs from Clojure for U+00A0 and U+2003"
+      notes: "GAP-S50 fixed: uses the pinned Clojure Character.isWhitespace set"
     },
     %{
       name: "upper-case",

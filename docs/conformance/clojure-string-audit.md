@@ -26,7 +26,7 @@ Coverage excludes `not_relevant` entries: `supported / (supported + candidate + 
 
 | Var | Status | Description | Notes |
 |-----|--------|-------------|-------|
-| `blank?` | ✅ supported | True if s is nil, empty, or contains only whitespace | BUG GAP-S50: Unicode whitespace classification differs from Clojure for U+00A0 and U+2003; BUG GAP-S116: character inputs are accepted instead of raising |
+| `blank?` | ✅ supported | True if s is nil, empty, or contains only whitespace | GAP-S50 fixed: uses the pinned Clojure Character.isWhitespace set; BUG GAP-S116: character inputs are accepted instead of raising |
 | `capitalize` | 🔲 candidate | Converts first character to upper-case, rest to lower-case | pure string transformation |
 | `ends-with?` | ✅ supported | True if s ends with substr | BUG GAP-S116: character substring arguments are accepted instead of raising. BUG GAP-S139: numeric receivers raise instead of being stringified |
 | `escape` | 🔲 candidate | Return a new string applying cmap to each character | pure character mapping |
@@ -42,8 +42,8 @@ Coverage excludes `not_relevant` entries: `supported / (supported + candidate + 
 | `split` | ✅ supported | Splits string on regex | BUG GAP-S15: empty regex currently keeps a trailing empty element; BUG GAP-S25: 3-arity limit form is not implemented; BUG GAP-S95: trailing empty fields and empty input differ from Clojure split. BUG GAP-S116: character delimiters are accepted instead of raising |
 | `split-lines` | ✅ supported | Splits string on \n or \r\n | GAP-S51 fixed: empty string returns [""] |
 | `starts-with?` | ✅ supported | True if s starts with substr | BUG GAP-S116: character substring arguments are accepted instead of raising. BUG GAP-S139: numeric receivers raise instead of being stringified |
-| `trim` | ✅ supported | Removes whitespace from both ends of string | BUG GAP-S50: Unicode whitespace classification differs from Clojure for U+00A0 and U+2003 |
+| `trim` | ✅ supported | Removes whitespace from both ends of string | GAP-S50 fixed: uses the pinned Clojure Character.isWhitespace set |
 | `trim-newline` | ✅ supported | Removes all trailing newline or return characters | BUG GAP-S116: character inputs are accepted instead of raising |
-| `triml` | ✅ supported | Removes whitespace from the left side of string | BUG GAP-S50: Unicode whitespace classification differs from Clojure for U+00A0 and U+2003 |
-| `trimr` | ✅ supported | Removes whitespace from the right side of string | BUG GAP-S50: Unicode whitespace classification differs from Clojure for U+00A0 and U+2003 |
+| `triml` | ✅ supported | Removes whitespace from the left side of string | GAP-S50 fixed: uses the pinned Clojure Character.isWhitespace set |
+| `trimr` | ✅ supported | Removes whitespace from the right side of string | GAP-S50 fixed: uses the pinned Clojure Character.isWhitespace set |
 | `upper-case` | ✅ supported | Converts string to all upper-case | BUG GAP-S139: numeric inputs raise instead of being stringified |

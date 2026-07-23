@@ -13,6 +13,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
   def all do
     core_cases() ++
       string_cases() ++
+      gap_s50_regression_cases() ++
       set_walk_cases() ++
       core_predicate_numeric_cases() ++
       core_sequence_map_cases() ++
@@ -531,70 +532,6 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-S124",
         "Clojure string/last-index-of coerces finite numeric from-index arguments; PTC-Lisp currently rejects floats."
       ),
-      bug_case(
-        "string/blank-nbsp-bug-001",
-        "clojure.string",
-        ["blank?"],
-        "(clojure.string/blank? \"\u00A0\")",
-        "GAP-S50",
-        "Clojure blank? does not treat non-breaking space as blank; PTC-Lisp currently does."
-      ),
-      bug_case(
-        "string/blank-em-space-bug-001",
-        "clojure.string",
-        ["blank?"],
-        ~S|(clojure.string/blank? "\u2003")|,
-        "GAP-S50",
-        "Clojure blank? treats EM SPACE as blank; PTC-Lisp currently does not."
-      ),
-      bug_case(
-        "string/trim-nbsp-bug-001",
-        "clojure.string",
-        ["trim"],
-        "(clojure.string/trim \"\u00A0x\u00A0\")",
-        "GAP-S50",
-        "Clojure trim does not remove non-breaking space; PTC-Lisp currently does."
-      ),
-      bug_case(
-        "string/trim-em-space-bug-001",
-        "clojure.string",
-        ["trim"],
-        ~S|(clojure.string/trim "\u2003x\u2003")|,
-        "GAP-S50",
-        "Clojure trim removes EM SPACE; PTC-Lisp currently leaves it unchanged."
-      ),
-      bug_case(
-        "string/triml-nbsp-bug-001",
-        "clojure.string",
-        ["triml"],
-        "(clojure.string/triml \"\u00A0x\")",
-        "GAP-S50",
-        "Clojure triml does not remove non-breaking space; PTC-Lisp currently does."
-      ),
-      bug_case(
-        "string/triml-em-space-bug-001",
-        "clojure.string",
-        ["triml"],
-        ~S|(clojure.string/triml "\u2003x")|,
-        "GAP-S50",
-        "Clojure triml removes leading EM SPACE; PTC-Lisp currently leaves it unchanged."
-      ),
-      bug_case(
-        "string/trimr-nbsp-bug-001",
-        "clojure.string",
-        ["trimr"],
-        "(clojure.string/trimr \"x\u00A0\")",
-        "GAP-S50",
-        "Clojure trimr does not remove non-breaking space; PTC-Lisp currently does."
-      ),
-      bug_case(
-        "string/trimr-em-space-bug-001",
-        "clojure.string",
-        ["trimr"],
-        ~S|(clojure.string/trimr "x\u2003")|,
-        "GAP-S50",
-        "Clojure trimr removes trailing EM SPACE; PTC-Lisp currently leaves it unchanged."
-      ),
       fixed_bug_case(
         "string/split-lines-empty-bug-001",
         "clojure.string",
@@ -712,6 +649,43 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "Clojure stringifies numeric index-of receivers; PTC-Lisp currently raises a type error."
       )
     ]
+  end
+
+  defp gap_s50_regression_cases do
+    clojure_whitespace =
+      Enum.to_list(0x0009..0x000D) ++
+        Enum.to_list(0x001C..0x0020) ++
+        [0x1680] ++
+        Enum.to_list(0x2000..0x2006) ++
+        Enum.to_list(0x2008..0x200A) ++ [0x2028, 0x2029, 0x205F, 0x3000]
+
+    non_clojure_whitespace = [0x0085, 0x00A0, 0x2007, 0x202F]
+
+    Enum.map(clojure_whitespace ++ non_clojure_whitespace, fn codepoint ->
+      whitespace = <<codepoint::utf8>>
+
+      label =
+        codepoint |> Integer.to_string(16) |> String.downcase() |> String.pad_leading(4, "0")
+
+      form =
+        ~s"""
+        (let [w "#{whitespace}" s (str w "x" w)]
+          [(clojure.string/blank? w)
+           (= "x" (clojure.string/trim s))
+           (= (str "x" w) (clojure.string/triml s))
+           (= (str w "x") (clojure.string/trimr s))])
+        """
+        |> String.trim()
+
+      regression_case(
+        "string/whitespace-u#{label}-001",
+        "clojure.string",
+        ["blank?", "trim", "triml", "trimr"],
+        form,
+        ["GAP-S50"],
+        [:edge, :string]
+      )
+    end)
   end
 
   defp set_walk_cases do
@@ -5410,13 +5384,6 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "Java candidate outside the current minimal interop surface."
       ),
       unsupported_case(
-        "candidate/java-string-trim-001",
-        "java.lang.String",
-        [".trim"],
-        ~S|(.trim " abc ")|,
-        "Java string candidate outside the current minimal interop surface; use clojure.string/trim."
-      ),
-      unsupported_case(
         "candidate/java-string-is-empty-001",
         "java.lang.String",
         [".isEmpty"],
@@ -5562,6 +5529,13 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "java.lang.String",
         [".substring"],
         ~S|(.substring "abcdef" 1 4)|,
+        [:java, :string]
+      ),
+      c(
+        "java/string-trim-001",
+        "java.lang.String",
+        [".trim"],
+        ~S|(.trim " abc ")|,
         [:java, :string]
       ),
       unsupported_case(

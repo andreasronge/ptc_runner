@@ -111,6 +111,13 @@ defmodule PtcRunner.Lisp.Java.Lang.String do
     end
   end
 
+  @spec trim([term()]) :: {:ok, binary()} | {:error, Condition.t()}
+  def trim([receiver]) do
+    with {:ok, _receiver_view} <- view(receiver) do
+      {:ok, receiver |> trim_java_leading() |> trim_java_trailing()}
+    end
+  end
+
   defp view(value) do
     case validate_input(value) do
       :ok ->
@@ -397,6 +404,23 @@ defmodule PtcRunner.Lisp.Java.Lang.String do
 
   defp code_unit_length(view), do: div(byte_size(view), 2)
   defp int_result(value), do: Primitive.new(:int, value)
+
+  defp trim_java_leading(<<codepoint, rest::binary>>) when codepoint <= 0x20,
+    do: trim_java_leading(rest)
+
+  defp trim_java_leading(value), do: value
+
+  defp trim_java_trailing(value) do
+    trailing_bytes = trailing_java_whitespace_bytes(value, 0)
+    binary_part(value, 0, byte_size(value) - trailing_bytes)
+  end
+
+  defp trailing_java_whitespace_bytes(<<>>, trailing_bytes), do: trailing_bytes
+
+  defp trailing_java_whitespace_bytes(<<codepoint, rest::binary>>, trailing_bytes) do
+    next_trailing_bytes = if codepoint <= 0x20, do: trailing_bytes + 1, else: 0
+    trailing_java_whitespace_bytes(rest, next_trailing_bytes)
+  end
 
   defp null_argument(message), do: domain_error(:null_pointer_exception, message)
 

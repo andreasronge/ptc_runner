@@ -6,7 +6,7 @@
 
 PTC-Lisp emulates a subset of Java interop for LLM compatibility. These are **not** real JVM calls — they are BEAM-native implementations that mirror the Java API surface LLMs are trained on.
 
-39 interop entries covering 12 Java classes in 13 presentation groups.
+40 interop entries covering 12 Java classes in 13 presentation groups.
 
 See also: [Function Reference](function-reference.md) | [PTC-Lisp Specification](ptc-lisp-specification.md) | [Namespace Coverage](conformance/index.md)
 
@@ -73,6 +73,7 @@ See also: [Function Reference](function-reference.md) | [PTC-Lisp Specification]
 | `.length` | Method | `(.length s)` | Return the UTF-16 code-unit length of a string | Uses Java UTF-16 code units; ordinary PTC `count` remains grapheme-based. |
 | `.startsWith` | Method | `(.startsWith s prefix)` | Returns true if string starts with prefix |  |
 | `.substring` | Method | `(.substring s start), (.substring s start end)` | Extract a substring by UTF-16 code-unit index | Uses Java UTF-16 code-unit indexes. A range containing an unpaired surrogate returns invalid_java_string because PTC strings require valid UTF-8. |
+| `.trim` | Method | `(.trim s)` | Remove leading and trailing code units from U+0000 through U+0020 | Uses Java String.trim semantics, not clojure.string/trim whitespace semantics. |
 
 
 ### java.lang.System

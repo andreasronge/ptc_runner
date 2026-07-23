@@ -19,6 +19,35 @@ defmodule PtcRunner.Lisp.Java.StringDispatchTest do
     assert {:ok, %{return: "😀"}} = Lisp.run(~S|(.substring "😀a" 0 2)|)
   end
 
+  test "Java String trim removes only code units from U+0000 through U+0020" do
+    assert {:ok, %{return: "Ada"}} = Lisp.run(~S|(.trim "  Ada  ")|)
+
+    assert {:ok, "Ada", :string_trim_0} =
+             Dispatch.invoke(:string_trim, :instance, <<0, 9, 31, 32>> <> "Ada" <> <<32, 0>>, [])
+
+    for codepoint <- [0x0085, 0x00A0, 0x1680, 0x2003, 0x2007, 0x202F] do
+      boundary = <<codepoint::utf8>>
+      value = boundary <> "Ada" <> boundary
+
+      assert {:ok, ^value, :string_trim_0} =
+               Dispatch.invoke(:string_trim, :instance, value, [])
+    end
+  end
+
+  test "Java String trim retains the shared bounded receiver failures" do
+    assert {:error, null_condition} = Dispatch.invoke(:string_trim, :instance, nil, [])
+    assert null_condition.category == :java_domain_error
+    assert null_condition.details.java_exception == :null_pointer_exception
+    assert null_condition.overload_id == :string_trim_0
+
+    assert {:error, invalid_condition} =
+             Dispatch.invoke(:string_trim, :instance, <<0xFF>>, [])
+
+    assert invalid_condition.category == :invalid_java_string
+    assert invalid_condition.details.java_exception == :invalid_java_string
+    assert invalid_condition.overload_id == :string_trim_0
+  end
+
   test "indexOf fromIndex uses UTF-16 units and Java clamping" do
     assert {:ok, %{return: 3}} = Lisp.run(~S|(.indexOf "😀a😀" "😀" 1)|)
     assert {:ok, %{return: 0}} = Lisp.run(~S|(.indexOf "abc" "" -10)|)
@@ -289,7 +318,7 @@ defmodule PtcRunner.Lisp.Java.StringDispatchTest do
     assert step.fail.reason == :unsupported_method
 
     assert step.fail.message ==
-             "Unsupported method '.toLowerCase'. Supported interop methods: .after, .before, .contains, .endsWith, .getTime, .indexOf, .isAfter, .isBefore, .lastIndexOf, .length, .minusDays, .plusDays, .startsWith, .substring, .toDays, .toEpochDay, .toEpochMilli, .toMillis. Use (.method obj) syntax."
+             "Unsupported method '.toLowerCase'. Supported interop methods: .after, .before, .contains, .endsWith, .getTime, .indexOf, .isAfter, .isBefore, .lastIndexOf, .length, .minusDays, .plusDays, .startsWith, .substring, .toDays, .toEpochDay, .toEpochMilli, .toMillis, .trim. Use (.method obj) syntax."
 
     assert {:error, step} = Lisp.run(~S|(.toUpperCase "abc")|)
     assert step.fail.reason == :unsupported_method

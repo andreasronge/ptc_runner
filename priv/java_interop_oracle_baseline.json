@@ -536,6 +536,26 @@
       }
     },
     {
+      "case_id": "string-trim-0",
+      "overload_id": "string_trim_0",
+      "descriptor": "()Ljava/lang/String;",
+      "expected": {
+        "status": "ok",
+        "type": "string",
+        "value": "Ada"
+      }
+    },
+    {
+      "case_id": "string-trim-preserves-unicode-whitespace",
+      "overload_id": "string_trim_0",
+      "descriptor": "()Ljava/lang/String;",
+      "expected": {
+        "status": "ok",
+        "type": "string",
+        "value": "  Ada  "
+      }
+    },
+    {
       "case_id": "local-date-parse-char-sequence",
       "overload_id": "local_date_parse_char_sequence",
       "descriptor": "(Ljava/lang/CharSequence;)Ljava/time/LocalDate;",
