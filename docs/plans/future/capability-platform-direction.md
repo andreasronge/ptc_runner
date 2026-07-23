@@ -351,6 +351,28 @@ Trust-bearing config (endpoints, commands, `base_url`, credentials) is
 - Sources: `env`, `file`, `literal`. Secrets materialize inside the host/owner,
   are exposed only through the per-request headers callback (P7), and are
   scrubbed from every trace and error.
+- **Bindings are validated at config load**: a provider referencing an unknown
+  binding, or a binding whose `env`/`file` source cannot be resolved, fails
+  before any provider is built or model called. Because the document holds
+  only pointers, host JSON is safe to commit and share.
+- **Schemes render the resolved value into a header** at the moment of each
+  exchange: `bearer` → `Authorization: Bearer <secret>`, `basic` →
+  `Authorization: Basic <secret>`, `api_key` → the header named by the entry's
+  `header` field. The capability itself stores a header-producing *callback*,
+  never a header — which is why snapshots, serialized errors, telemetry, and
+  crash dumps are structurally unable to leak it, and why short-lived or
+  rotated credentials need no downstream changes.
+- **`mcp_stdio` is the one different channel**: there is no request to put a
+  header on, so a binding materializes into the subprocess environment at
+  spawn:
+
+  ```json
+  "env": { "GITHUB_TOKEN": { "binding": "gh_token" } }
+  ```
+
+  The env map is redacted from logs and `format_status`, and the
+  owner-monitored lease guarantees the subprocess — and the secret in its
+  memory — dies with the run.
 - The **manifest may never carry** an endpoint, command, `base_url`, header, or
   credential. It selects an installed provider by name and narrows it (II.4).
 - The **prelude is not a config channel** — it is frozen source resolving to

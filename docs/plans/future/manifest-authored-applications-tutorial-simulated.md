@@ -94,15 +94,22 @@ it is the allowlist, not ceremony:
 "github": {
   "source": "mcp_stdio",
   "command": "gh-mcp", "args": ["serve"],
+  "env": { "GITHUB_TOKEN": { "binding": "gh_token" } },
   "tools": {
     "get_pull_request": { "as": "github.get-pr", "effect": "read" }
   }
 }
 ```
 
-The registry key never leaves this file's rung. It materializes inside the
-owner process, flows only through the per-request header callback, and is
-scrubbed from every capability, snapshot, trace, error, and crash dump.
+(`gh_token` would be declared under `credentials` like `registry_key`.
+`mcp_stdio` has no request to put a header on, so its binding materializes
+into the subprocess environment at spawn instead.)
+
+The registry key never leaves this file's rung. At each call the `bearer`
+scheme renders it as an `Authorization: Bearer …` header — the capability
+stores a header-producing callback, never the header itself — so it is
+structurally absent from every capability, snapshot, trace, error, and crash
+dump. A typo'd binding name fails at config load, before anything runs.
 
 ## Step 2 — Select: the manifest
 
