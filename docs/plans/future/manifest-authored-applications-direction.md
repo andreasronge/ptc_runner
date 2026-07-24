@@ -1,249 +1,380 @@
 # Manifest-authored applications — direction
 
-> **Status:** direction / discussion material. This document describes the
-> platform changes needed before applications such as a repository Code Scout
-> can be authored with configuration, manifests, PTC-Lisp, and data only. It is
-> not a single implementation plan, and every API shown below is proposed.
+> **Status:** future direction. This document describes the generic runner and
+> application contracts needed after the MCP-first capability platform. Every
+> API shown below is planned unless explicitly described as current behavior.
 
-## 0. What this document is
+## 1. Goal
 
-**Goal.** Keep `mix ptc.run` as the generic top-level runner while making the
-following authoring test pass:
+Keep `mix ptc.run` as the generic top-level runner while making this authoring
+test pass:
 
-> After PtcRunner has installed a bounded family of generic provider types, an
-> application author can add a new task by writing host configuration, a
-> manifest, PTC-Lisp components, and evaluation data. They do not add an
-> Elixir module, edit `ProviderRegistry`, or create a task-specific Mix task.
+> Once PtcRunner implements MCP and a small set of PTC-specific local sources,
+> an application author can add a substantial task using host configuration, a
+> manifest, PTC-Lisp, and data. They do not add an Elixir module, edit
+> `ProviderRegistry`, or create a task-specific Mix command.
 
-A Code Scout is the proving application because it needs several capabilities
-at once: repository discovery and bounded reads, canonical trace analysis, an
-LLM-backed agent loop, structured candidate output, and eventually evaluation
-of proposed prelude changes. The Kernel must not acquire a `scout` concept.
+A repository Code Scout is the proving application. It must navigate unknown
+nested files, analyze canonical traces and explicitly granted private
+conversations, propose a prelude improvement as inert data, and evaluate that
+candidate in a separate run. The Kernel must never acquire `scout`,
+`repository`, or `self-improvement` policy.
 
-This direction is downstream of
-[`capability-platform-direction.md`](capability-platform-direction.md). That
-document defines the capability/provider grammar and the planned host-owned
-JSON installation channel. This document asks what additional generic
-resources and runner behavior are needed to use that platform for substantial
-applications without Elixir changes.
+This direction depends on
+[`mcp-capability-platform-direction.md`](mcp-capability-platform-direction.md):
+MCP is the generic integration mechanism, stdio is the first local transport,
+and host JSON is the trusted installation channel. This document adds the
+generic application and artifact behavior around it.
 
-**In scope:**
+## 2. Scope
 
-- the generic `mix ptc.run` authoring path;
-- host-owned, data-driven provider installation;
-- immutable repository and trace resources;
-- local PTC-Lisp application components;
-- structured candidate and evaluation artifacts;
-- the boundary between proposing, evaluating, and promoting a change; and
-- a read-only Code Scout as the first end-to-end acceptance case.
+In scope:
 
-**Out of scope:**
+- one generic `mix ptc.run` application path;
+- host-owned, data-driven MCP installation;
+- a non-production read-only filesystem MCP server for the tutorial;
+- PtcRunner-owned canonical trace and private inspection snapshots;
+- local PTC-Lisp application components and preludes;
+- bounded input, candidate, and evaluation contracts;
+- public and private result artifacts;
+- proposal, evaluation, and explicit promotion as separate phases; and
+- a read-only Code Scout acceptance application.
 
-- a `mix ptc.scout` command or any other task-specific frontend;
-- teaching the Kernel what a repository, bug, pull request, or improvement is;
-- arbitrary Elixir modules, shell commands, endpoints, or credentials in a
-  manifest;
-- allowing a running bundle to replace itself;
-- automatic promotion of generated code into a shipped prelude;
-- designing the agent's detailed planning or reflection strategy; and
-- promising that every future capability kind can be invented without Elixir.
-  The runtime still implements and audits generic provider types once; the
-  no-Elixir promise applies to application instances assembled from them.
+Out of scope:
 
----
+- `mix ptc.scout` or another domain-specific frontend;
+- a raw HTTP/OpenAPI provider in the first platform;
+- an ambient shell capability;
+- arbitrary modules, commands, endpoints, roots, or credentials in a manifest;
+- allowing a run to replace its own active bundle;
+- automatic promotion of generated code;
+- a second PTC trace/inspection parser in the sample MCP server;
+- detailed agent planning/reflection policy; and
+- a promise that entirely new protocol primitives never require PtcRunner
+  changes. The no-Elixir promise applies to new applications assembled from
+  installed generic capabilities.
 
-## Part I — Verified current state
+## 3. Verified current state
 
-The starting point is already close to the desired shape.
+| Surface | Current behavior | Missing for this direction |
+| --- | --- | --- |
+| `mix ptc.run` | Loads one strict manifest and runs it through `RunBuilder` | host config, validation-only assembly, result artifact options |
+| Local components | Loads confined PTC-Lisp files and declared dependencies | no application-specific runtime work required |
+| `agent.core` | Supplies the provider/evaluation loop | a small generic entry wrapper would remove repeated workflow boilerplate |
+| Provider registry | Built-ins are `llm` and `file-read`; extra builders require Elixir | closed host JSON installation |
+| `file-read` | Freezes a directory but reads one whole already-known UTF-8 path | unknown-file navigation, search, and ranged reads through MCP |
+| MCP | Trusted Elixir can install a read-only sessionful HTTP source | modern stateless protocol, stdio, host JSON |
+| Canonical trace | `TraceSnapshot` and `TraceCapability` provide four bounded queries in a fixed analysis profile | ordinary manifest-selectable source |
+| Private inspection | `--inspect` writes exact provider-neutral model, source, and capability records to a bounded `0600` artifact | ordinary explicitly classified snapshot source and MCP wire records |
+| Terminal output | Prints public `Result`; trace and inspection persist separately | atomic public/private result artifacts and result schema |
+| Bundle lifecycle | Bundles compile and freeze before execution | already prevents in-place self-replacement |
 
-| Surface | Current behavior | Consequence |
-|---------|------------------|-------------|
-| `mix ptc.run` | Loads one strict manifest through `RunBuilder` and the default `ProviderRegistry` | The generic execution path already exists and should remain authoritative |
-| Local components | A manifest can load path-confined PTC-Lisp files and declare dependencies | Application-specific behavior already requires no Elixir |
-| Shipped libraries | A manifest can select fixed libraries such as `agent.core` and `log.core` | Generic agent behavior can be reused, but installing a new shared library still changes `Library` |
-| Provider registry | The default registry installs only `llm` and `file-read`; additional builders are Elixir functions | New provider instances or MCP sources cannot currently be installed from the CLI without Elixir |
-| `file-read` | Freezes one bounded directory and reads a whole UTF-8 file by an already-known relative path | It is safe and deterministic, but insufficient for repository discovery and context-efficient reads |
-| MCP HTTP | `MCPSource.builder/1` can produce ordinary capabilities when trusted Elixir installs a fixed source | The protocol path exists, but its installation channel is not yet data-driven |
-| Trace analysis | `TraceSnapshot` and `TraceCapability` expose four bounded queries; `log-analysis-v1` assembles them in a fixed REPL profile | The query engine exists, but a normal manifest cannot select a trace snapshot provider |
-| Output | `ptc.run` prints the public result and can separately persist canonical trace and private inspection artifacts | A candidate can be returned, but there is no explicit atomic public-result artifact option |
-| Bundles | Workflow and mission bundles are compiled and frozen before execution | A run can propose a new prelude, but must not mutate or replace its active bundle |
+The missing feature is not a task framework. It is the ability to install
+bounded MCP servers and PTC-specific snapshots through trusted data, then pass
+typed artifacts between ordinary runs.
 
-The missing feature is not a task framework. It is a data-driven way to
-install bounded resource providers and select them from an ordinary manifest.
+## 4. Design decisions
 
----
+### 4.1 One runner, application names in files
 
-## Part II — Design principles
-
-### A1. One generic runner
-
-`mix ptc.run` remains the only non-interactive application runner. Application
-names belong in files, labels, and component namespaces, not Mix task names.
-
-Planned generic invocation:
+The complete application runs through:
 
 ```console
-mix ptc.run ptc-code-scout.json \
-  --host-config ptc-code-scout.host.json \
+umask 077
+mkdir -p code-scout/private tmp
+mix ptc.run code-scout.json \
+  --host-config code-scout.host.json \
   --mission code-scout/input.json \
-  --output tmp/code-scout-result.json \
+  --private-output code-scout/private/candidate.private.json \
   --trace tmp/code-scout-trace.jsonl
 ```
 
-`--host-config` and `--output` are generic runner concerns. Neither option
-knows that the application is a scout.
+Generic options may know about manifests, host installation, validation,
+classified outputs, traces, inspection, and trusted component overrides. They
+must not know that the application is a scout.
 
-### A2. Preserve the authority ladder
+Planned validation:
 
-The four roles from the capability-platform direction remain distinct:
+```console
+mix ptc.run code-scout.json \
+  --host-config code-scout.host.json \
+  --check
+```
+
+`--check` strictly loads components and contracts and performs static
+data-class/egress compatibility before provider activity. It then assembles
+providers, performs MCP discovery, emits only bounded redacted hashes, and
+closes every resource. It invokes neither the workflow entry nor an LLM. After
+the static phase succeeds, it is deliberately allowed to start a configured
+stdio server or contact a configured remote MCP endpoint.
+
+### 4.2 The authority ladder remains visible
 
 | Layer | Owns | Code Scout example |
-|-------|------|--------------------|
-| Host config | Authority and installed ceilings | Repository root, trace directory, MCP command/endpoint, credentials |
-| Manifest | Selection and narrowing | Which installed repository/trace tools enter the mission and their lower quotas |
-| PTC-Lisp components | Application behavior | Search strategy, evidence collection, candidate format, retry policy |
-| Generated program | One bounded action sequence | Calls `repo.search`, `repo.read`, and trace queries |
+| --- | --- | --- |
+| Host config | authority and outer ceilings | MCP executable/args, filesystem root, trace directories, credentials, tool effects |
+| Manifest | selection and narrowing | which public workspace/history tools enter the mission, lower quotas |
+| PTC-Lisp | application behavior | search strategy, evidence collection, candidate/evaluation policy |
+| Generated program | one bounded action sequence | calls `repo/search`, `repo/read-range`, and trace queries |
 
-The manifest must not contain a repository path outside its own confined local
-files, an MCP command, a remote endpoint, or a credential. The host-config
-document is explicit trusted input supplied by the operator to `ptc.run`; it
-is not referenced transitively by model-authored input.
+The manifest cannot contain an MCP command, remote endpoint, filesystem root,
+credential, or effect. It can only select names installed by the host.
 
-Inside the manifest, provider destinations preserve a second split: **the
-model that plans (workflow) is never the environment that touches data
-(mission)**. That one sentence carries most of the architecture; guides and
-tutorials should lead with it.
+Host installation replaces the current implicit provider registry; it does not
+augment it. Once Slice B lands, manifests can no longer instantiate the
+legacy `llm` or `file-read` built-ins by supplying provider-specific config.
+Every selected provider name must come from the host document. A
+provider-free manifest, such as the pure aggregate run below, may omit host
+config. Existing manifests, examples, and tests move to installed aliases;
+legacy model, root, and file lists are rejected rather than retained as a
+fallback path.
 
-### A3. Capabilities expose resources; Lisp defines tasks
+Inside a manifest, the workflow/mission split stays central:
 
-The runtime may know how to freeze and query a repository snapshot. It must not
-know how to diagnose a failing test, decide that a prelude should change, or
-write a review summary. Those policies are PTC-Lisp.
+> The model that plans is in the workflow environment; the generated program
+> that touches data is in the mission environment.
 
-The same repository primitives must support unrelated applications such as a
-documentation auditor, migration assistant, dependency investigator, or
-security review. The same trace primitives must support operational analysis
-without a repository.
+### 4.3 MCP provides generic external tools
 
-### A4. Freeze read authority before execution
+Do not add a native `repository_snapshot` provider. Repository access is a
+filesystem capability, not a PtcRunner data format. The sample MCP server
+proves that a server written outside Elixir can provide:
 
-Repository and trace inputs are captured before workflow execution or model
-calls. Capability callbacks query only the captured representation. Files that
-change after capture cannot alter the run, and a path cannot escape the
-host-granted root through traversal, symlinks, replacement, or aliases.
+- nested directory listing;
+- path/glob discovery;
+- literal text search with line evidence;
+- bounded ranged UTF-8 reads; and
+- a deterministic snapshot identity.
 
-The snapshot is one authoritative representation for list, search, and read.
-Those operations must not independently revisit the live filesystem and
-observe different versions.
+The same MCP client later connects Git, GitHub, databases, test runners, or a
+production filesystem server. Application-specific wrappers and search policy
+remain PTC-Lisp.
 
-### A5. Search and ranged reads are primitives
+### 4.4 PTC-owned formats keep native snapshot sources
 
-Whole-file reads are not enough for serious code exploration. Requiring the
-model to know every path in advance or load complete files wastes model
-context and capability-result budget.
+Canonical trace and private inspection are different. PtcRunner owns their
+schemas, correlation rules, redaction boundary, versioning, and exact query
+semantics. They remain dedicated local source kinds:
 
-The smallest useful repository surface is:
+- `ptc_trace_snapshot`
+- `ptc_inspection_snapshot`
 
-- list bounded paths beneath a prefix;
-- search bounded text with path and line evidence; and
-- read a bounded line range from one file.
+Both produce ordinary capabilities through the same provider build contract,
+but they do not go through MCP merely for architectural symmetry. The existing
+`TraceSnapshot`, `TraceCapability`, `TraceLog`, and `InspectionArtifact`
+implementations remain authoritative.
 
-Traversal policy, decoding, indexing, result ordering, truncation, and bounds
-belong to the provider. Higher-level exploration belongs to Lisp.
+An external trace MCP server may be useful later for foreign traces or remote
+storage. It is not allowed to become a second parser for PtcRunner's canonical
+formats.
 
-### A6. No ambient shell as a shortcut
+### 4.5 Freeze evidence before model activity
 
-No-Elixir authoring must not be achieved by adding a universal shell
-capability to the default registry. Commands are authority and remain
-host-installed. If an application needs GitHub, builds, test execution, or
-patch application, it may use a specifically mapped MCP stdio/HTTP source or a
-future audited provider whose command and allowed operations are frozen in
-host config.
+The filesystem MCP sample captures its root before discovery completes.
+Native trace and inspection providers capture their directories before the
+workflow starts. Every operation for one provider queries the same captured
+representation.
 
-The manifest selects named operations; it does not supply a command string.
+Changing a file or artifact during the run cannot change evidence. Traversal,
+symlinks, replacement, aliases, oversized inputs, malformed records, and
+invalid UTF-8 fail under provider-owned rules, not prompt instructions.
 
-### A7. Improvement is proposal plus evaluation, not mutation
+This is a proving-server constraint, not a claim that every MCP server is
+immutable. Host configuration and provider metadata must state when an MCP
+source is live. Applications requiring reproducible evidence should select
+only servers whose installed contract supplies a stable snapshot.
 
-A running program cannot modify its active immutable bundle. A scout emits a
-candidate as data. A later run evaluates that candidate against motivating and
-held-out cases. Promotion is a separate host or human decision.
+### 4.6 Logs, source, and tool output are untrusted data
+
+Repository text, issues, CI logs, trace payloads, MCP results, and MCP tool
+errors never gain instruction authority. The host freezes authority; a string
+cannot add a tool, change an effect, widen a root, or approve egress.
+
+An LLM can still follow a malicious instruction embedded in data. That is a
+behavioral failure measured by held-out cases, not something a prompt can make
+impossible. System prompts and agent libraries remain domain-blind; fixture
+answers and benchmark patterns stay in evaluation data.
+
+### 4.7 Exact diagnostics are explicit private authority
+
+Canonical traces intentionally omit prompts, responses, generated source,
+capability payloads, and MCP bodies. Behavioral diagnosis uses a separately
+requested private inspection artifact.
+
+The planned private snapshot exposes bounded queries over:
+
+- exact provider-neutral LLM requests and results;
+- generated and effective PTC-Lisp source;
+- capability inputs and outputs; and
+- correlated MCP JSON-RPC request/response bodies, without credentials or
+  rendered authorization headers.
+
+Selecting `ptc_inspection_snapshot` gives generated code access to private
+application data. Assembly therefore treats every selected remote or write
+provider, including the workflow LLM and any MCP server, as a possible egress
+sink. Each must be host-installed and explicitly accept
+`private_inspection`. The manifest cannot change that declaration.
+
+Terminal publication is also a sink. A private run suppresses its value on
+stdout, cannot use normal `--output`, and requires an explicit no-clobber
+`0600` private result.
+
+A later run preserves that class through a planned trusted
+`--private-mission PATH` option. It is mutually exclusive with `--mission`,
+uses the same bounded manifest-confined JSON loading rules, and marks the
+entire input `private_inspection` before provider assembly. That classification
+forces static sink compatibility and private-only publication; neither the
+manifest nor input content can lower it. Deliberate declassification is a
+separate trusted host transformation followed by ordinary `--mission`, not a
+field inside the artifact.
+
+This is a coarse run-level information-flow rule, not dynamic taint tracking
+for arbitrary Lisp values.
+
+### 4.8 Improvement means propose, evaluate, promote
+
+A running program never mutates its active bundle:
 
 ```text
-immutable traces + repository snapshot
-                 |
-                 v
-          analysis run
-                 |
-          candidate artifact
-                 |
-                 v
-          evaluation run
-                 |
-          evidence report
-                 |
-                 v
-       explicit promotion decision
+frozen repository + traces + private inspection
+                       |
+                       v
+                 analysis run
+                       |
+               candidate artifact
+                       |
+                       v
+        isolated baseline/candidate runs
+                       |
+              private trial artifacts
+                       |
+                       v
+                aggregate run
+                       |
+              evaluation evidence
+                       |
+                       v
+          explicit human/host promotion
 ```
 
-This is controlled iterative improvement. It does not create a second mutable
-code owner inside the Kernel.
+`no-change` and `insufficient-evidence` are successful decisions. Producing
+code on every run is a failure mode.
 
-### A8. Logs and source are untrusted data
+## 5. Application package
 
-Repository text, issue text, CI output, tool output, and trace payloads never
-gain instruction authority. The application prompt and prelude must keep data
-and instructions structurally separate. A log line that asks the model to
-change policy is evidence to analyze, not a command to follow.
-
-System prompts and shipped agent configuration remain domain-blind. Fixture
-names, benchmark answers, and expected failure patterns belong only in test
-data and tool-owned descriptions.
-
----
-
-## Part III — The authoring package
-
-A complete application should be ordinary data and PTC-Lisp. For an
-application that intentionally reads the containing repository, its manifest
-and host config can live at the repository root while its behavior and fixtures
-remain grouped in a directory:
+The example application may live inside the repository it analyzes:
 
 ```text
-ptc-code-scout.host.json     # trusted provider installation
-ptc-code-scout.json          # capability selection, components, limits
+code-scout.host.json             trusted installation
+code-scout.json                  selection, components, limits, contracts
 code-scout/
-  workflow.lisp             # orchestration and terminal result
-  scout.lisp                # repository/trace analysis behavior
-  input.json                # one mission request
+  repo.clj                       MCP filesystem wrappers
+  runs.clj                       trace/private-inspection wrappers
+  evaluate.clj                   exactly one isolated evaluation trial
+  aggregate.clj                  pure aggregation of trial artifacts
+  input.json                     one task
+  candidate.schema.json          Result.value contract
+  evaluation.schema.json         aggregate Result.value contract
+  evaluate-replay.json           one replay-backed trial
+  evaluate-live.json             one live-model trial
+  aggregate.json                 provider-free result aggregation
   evaluation/
     motivating.json
+    regression.json
     held-out.json
+    replay.jsonl
 ```
 
-None of these files registers Elixir callbacks. `host.json` may instantiate
-only provider source kinds compiled into the installed PtcRunner release.
+No file registers an Elixir callback. Host JSON can instantiate only source
+and transport kinds built into the installed PtcRunner release.
+`code-scout/private/` is a generated `0700` host-artifact directory, not a
+versioned application input and not part of the filesystem MCP include set.
 
-### III.1 Planned host configuration
+## 6. Planned host installation
 
-The host-config work should implement Track D of the capability-platform
-direction rather than create a scout-specific loader. One explicit file is
-loaded before the manifest, resolves credentials and provider resources, and
-builds a `ProviderRegistry`.
-
-Illustrative configuration:
+Illustrative target configuration:
 
 ```json
 {
-  "credentials": {},
+  "credentials": {
+    "analysis_llm_key": {"env": "ANALYSIS_LLM_API_KEY"}
+  },
   "install": {
+    "analysis-llm": {
+      "source": "llm",
+      "installation_revision": "analysis-model-profile-v1",
+      "model": "operator-approved-model",
+      "auth": [{"scheme": "bearer", "binding": "analysis_llm_key"}],
+      "accepts_data": ["normal", "private_inspection"]
+    },
     "workspace": {
-      "source": "repository_snapshot",
-      "root": ".",
-      "include": ["lib/**", "test/**", "docs/**", "priv/**"],
-      "exclude": ["docs/plans/**"],
+      "source": "mcp",
+      "installation_revision": "filesystem-sample-v1",
+      "transport": {
+        "type": "stdio",
+        "command": "node",
+        "cwd": ".",
+        "args": [
+          "examples/mcp/filesystem/dist/server.js",
+          "--root",
+          ".",
+          "--include",
+          "lib/**",
+          "--include",
+          "priv/**",
+          "--include",
+          "docs/**",
+          "--include",
+          "test/**",
+          "--include",
+          "examples/**",
+          "--include",
+          "config/**",
+          "--include",
+          "mix.exs",
+          "--include",
+          "mix.lock",
+          "--max-source-bytes",
+          "32000000"
+        ],
+        "env": {}
+      },
+      "tools": {
+        "list_directory": {
+          "as": "workspace.list",
+          "effect": "read",
+          "model_visible": false
+        },
+        "search_files": {
+          "as": "workspace.find",
+          "effect": "read",
+          "model_visible": false
+        },
+        "search_text": {
+          "as": "workspace.search",
+          "effect": "read",
+          "model_visible": false,
+          "error_feedback": "bounded"
+        },
+        "read_text_file": {
+          "as": "workspace.read",
+          "effect": "read",
+          "model_visible": false,
+          "error_feedback": "bounded"
+        },
+        "snapshot_info": {
+          "as": "workspace.info",
+          "effect": "read",
+          "model_visible": false
+        }
+      },
+      "snapshot_identity": {
+        "tool": "snapshot_info",
+        "field": "snapshot_hash"
+      },
+      "accepts_data": ["normal", "private_inspection"],
       "ceilings": {
-        "max_entries": 12000,
-        "max_source_bytes": 32000000,
+        "timeout_ms": 5000,
         "max_result_bytes": 250000
       }
     },
@@ -254,473 +385,624 @@ Illustrative configuration:
         "max_source_bytes": 8000000,
         "max_result_bytes": 250000
       }
+    },
+    "private-history": {
+      "source": "ptc_inspection_snapshot",
+      "directory": "tmp/inspection",
+      "ceilings": {
+        "max_files": 100,
+        "max_source_bytes": 64000000,
+        "max_result_bytes": 500000
+      }
+    },
+    "replay-llm": {
+      "source": "llm_replay",
+      "installation_revision": "replay-fixtures-v1",
+      "fixtures": "code-scout/evaluation/replay.jsonl",
+      "data_class": "private_inspection",
+      "accepts_data": ["normal", "private_inspection"],
+      "ceilings": {
+        "max_entries": 1000,
+        "max_result_bytes": 250000
+      }
     }
   }
 }
 ```
 
-The top-level key is `install`, per the capability-platform grammar: the host
-*installs*, the manifest *selects*. Both sources above are fixed-shape, so
-their operations surface under default dotted public names —
-`workspace.list`, `workspace.search`, `workspace.read`, `history.list-runs`,
-`history.get-run`, `history.list-turns`, `history.counters`. An explicit
-`tools` map with `as` renames remains available, and stays mandatory for
-discovery sources such as MCP, where the map is the security allowlist.
+The filesystem root is an argument to a trusted installed command. The
+manifest never sees or changes it. The configured `cwd` and path fields in
+host config resolve relative to the canonical host-config directory unless a
+source explicitly requires an absolute operator path. The executable is
+resolved once under host policy and frozen before spawn.
 
-The exact schema is a decision for the capability-platform plan. The important
-contract here is that local resource paths and inclusion policy are host-owned,
-resolved relative to the canonical host-config directory, and absent from the
-manifest and public provider snapshot.
+The repeated `--include` arguments are a default-deny host allowlist, not
+search hints. The sample server does not open or inventory anything else.
+Consequently `.env`, `.git`, `deps`, `_build`, `tmp`, replay fixtures, and the
+generated private-result directory remain outside ordinary workspace data.
 
-### III.2 Planned manifest selection
+The stdio child receives an explicit allowlisted environment. Erlang Port
+`{env, ...}` extends the ambient environment and is not by itself a clean
+environment guarantee, so implementation needs a reviewed launcher and
+process-group ownership.
 
-The application manifest uses the same narrowing grammar as remote providers:
+`workspace.tools` is mandatory because it is the security allowlist and effect
+classification. The sample server may advertise additional tools; PtcRunner
+does not expose them.
+
+There are no implicitly installed `llm` or `file-read` names alongside this
+document. The host document is the complete provider registry for the run.
+This prevents a manifest from bypassing an operator-installed alias by falling
+back to the current manifest-configured built-ins.
+
+`llm` is another closed host-installable source owned by the generic
+application platform, not by MCP. It wraps the existing provider-neutral LLM
+adapter and emits exactly the standard workflow `llm-request` capability.
+Host config owns model ID, credential binding, cache policy, accepted data
+classes, installation revision, and the provider alias (`analysis-llm` here).
+A manifest may select that alias and lower generic ceilings; it cannot change
+the model, credential, cache policy, or identity. `llm_replay` emits the same
+capability contract from frozen fixtures, so a run chooses one or the other at
+assembly rather than switching providers while executing. Both safe snapshots
+include the installation-revision hash; replay additionally includes the
+fixture-set hash, while a live LLM snapshot includes the effective model and
+non-secret request-policy identity.
+
+## 7. Planned manifest
 
 ```json
 {
   "version": 1,
   "workflow": {
-    "components": [
-      {"library": "agent.core"},
-      {"id": "code-scout.workflow", "path": "code-scout/workflow.lisp", "dependencies": ["agent.core"]}
-    ],
-    "entry": "code-scout.workflow/run"
+    "components": [{"library": "agent.main"}],
+    "entry": "agent.main/run"
   },
   "mission": {
     "components": [
-      {"id": "code-scout", "path": "code-scout/scout.lisp"}
+      {"library": "cap"},
+      {"id": "repo", "path": "code-scout/repo.clj", "dependencies": ["cap"]},
+      {"id": "runs", "path": "code-scout/runs.clj", "dependencies": ["cap"]}
     ],
     "data": {}
   },
   "providers": {
-    "workflow": [
-      {"name": "llm", "config": {"model": "deepseek", "cache": false}}
-    ],
+    "workflow": [{"name": "analysis-llm"}],
     "mission": [
-      {"name": "workspace"},
-      {"name": "history"}
+      {
+        "name": "workspace",
+        "config": {
+          "model_visible": []
+        }
+      },
+      {"name": "history", "config": {"model_visible": []}},
+      {"name": "private-history", "config": {"model_visible": []}}
     ]
   },
-  "input": {"path": "code-scout/input.json"}
+  "input": {"path": "code-scout/input.json"},
+  "contracts": {
+    "result_schema": {"path": "code-scout/candidate.schema.json"}
+  },
+  "limits": {
+    "run_duration_ms": 120000,
+    "mission_capability_calls": 64
+  }
 }
 ```
 
-Selecting a provider without `config` exposes every name the host installed
-for it — safe, because selection can only narrow. `allow`, `model_visible`,
-and ceiling keys appear only when the application wants less than it was
-granted.
+`agent.main` is a proposed small domain-blind shipped library that forwards
+task and loop configuration from input to `agent.core`. It removes a repeated
+four-line workflow component but adds no grammar or authority. Code Scout
+policy lives in task data, result schemas, evaluation fixtures, and the
+application's repository prelude rather than a runtime module.
 
-This example reflects the current built-in `llm` selection. The capability
-platform direction must decide whether LLM model installation also moves into
-host config; that decision should apply to every application, not be made for
-Code Scout alone.
+The raw workspace, trace, and inspection capabilities are hidden from the
+model catalog because the `repo` and `runs` preludes supply cleaner functions.
+They remain callable by frozen prelude code. The planned `cap` helper library
+becomes composition-only rather than prompt-visible, so it does not pollute
+that facade. `allow`, if present, may only be a subset of the host tool map.
 
-Local components are sufficient for application behavior. A separate
-data-driven shared-library catalog is useful for distribution, but is not a
-prerequisite for no-Elixir application authoring. For the common case where
-the workflow only forwards the input task to the installed agent loop, a
-shipped generic `agent.main` library removes even that file: the manifest
-selects `{"library": "agent.main"}`, sets `"entry": "agent.main/run"`, and
-ships no workflow component. `agent.main` is ordinary installed PTC-Lisp — no
-new grammar — and stays domain-blind: task text and loop configuration come
-from the input object.
+Selecting `private-history` requires `analysis-llm` and every other selected
+egress provider to accept `private_inspection`. This manifest intentionally
+selects no remote mission provider besides the local stdio workspace server.
+If private trace text may flow to that server through tool arguments, the host
+must also declare its accepted data classes; read-only does not mean
+non-egress.
 
-### III.3 Candidate result contract
+## 8. Generic provider contracts
 
-The initial scout is read-only. It returns a bounded JSON-like proposal:
+### 8.1 Filesystem MCP server
+
+The sample server contract is defined by the MCP-first plan. For this
+application, the important operations are:
+
+| Public capability | Behavior |
+| --- | --- |
+| `workspace.list` | sorted, paginated relative entries under a prefix |
+| `workspace.find` | sorted, paginated path/glob matches |
+| `workspace.search` | literal text matches with path, line, bounded context, cursor, and truncation |
+| `workspace.read` | one bounded UTF-8 line range with stable line numbers and EOF/truncation |
+| `workspace.info` | safe snapshot hash and counts |
+
+PTC-Lisp should expose the familiar application API:
+
+```clojure
+(ns repo "Bounded source exploration." {:visibility :prompt})
+
+(defn search
+  "Read one search page. Pass nil first, then the returned next_cursor."
+  {:signature "(text :string, cursor :string?) -> :map"}
+  [text cursor]
+  (cap/unwrap!
+    (tool/workspace.search
+      (merge {"text" text "limit" 20}
+             (if cursor {"cursor" cursor} {})))))
+
+(defn read-range
+  "Read inclusive lines from one relative UTF-8 path."
+  {:signature "(path :string, from :int, to :int) -> :map"}
+  [path from to]
+  (cap/unwrap!
+    (tool/workspace.read {"path" path "from" from "to" to})))
+```
+
+The prelude decides search strategy, exposes an opaque cursor without
+interpreting it, shapes evidence, and reacts to empty results. Every
+collection wrapper accepts `nil` for its first page and the prior
+`next_cursor` for a later page. The server owns filesystem confinement,
+immutable capture, ordering, cursor validation, byte limits, and tool schemas.
+Every data-bearing server result also carries `snapshot_hash`, binding cited
+paths and line ranges to the captured bytes.
+
+### 8.2 Canonical trace snapshot
+
+`ptc_trace_snapshot` reads only canonical PtcRunner trace JSONL. It adapts the
+existing trace owner and four operations:
+
+- `history.list-runs`;
+- `history.get-run`;
+- `history.list-turns`; and
+- `history.counters`.
+
+Profile-backed and manifest-backed trace analysis must reuse the same query
+implementation and return equivalent results. Paths, source bytes, private
+payloads, and owner handles stay out of public metadata.
+
+### 8.3 Private inspection snapshot
+
+`ptc_inspection_snapshot` reads only versioned
+`.inspection.jsonl` artifacts. It remains separate from canonical trace
+discovery and exposes:
+
+- `private-history.list-runs` for completeness without payloads;
+- `private-history.model-exchanges`;
+- `private-history.capability-calls`;
+- `private-history.generated-sources`;
+- `private-history.effective-preludes`; and
+- `private-history.provider-exchanges` when that private record type lands.
+
+It reuses the authoritative `InspectionArtifact` validation and capture rules:
+exact schema/version, duplicate-key rejection, fixed vocabulary, identities,
+sequence/correlation validation, symlink/replacement protection, and bounded
+files/records. Because V1 has a closed record vocabulary, provider wire
+exchanges require a new artifact version rather than an unrecognized V1
+record.
+
+Exact provider-neutral records are not necessarily byte-identical to a remote
+provider wire format. MCP wire records deliberately add the bounded JSON-RPC
+body needed for MCP diagnosis while still excluding credentials and transport
+headers.
+
+`code-scout/runs.clj` is the prompt-visible facade over both native sources. It
+exports cursor-aware `runs/list`, `runs/turns`, `runs/model-exchanges`,
+`runs/capability-calls`, `runs/generated-sources`,
+`runs/effective-preludes`, and `runs/provider-exchanges`. This is required by
+the current prompt policy: once any prompt-visible prelude facade exists, raw
+`tool/...` entries are suppressed. Trace analysis must not depend on the model
+guessing hidden capability names or discovering them through `cap/list`.
+Native collection operations use the same opaque `next_cursor` convention as
+the filesystem server.
+
+### 8.4 LLM replay
+
+Deterministic evaluation needs an installed `llm_replay` source rather than an
+Elixir-only test callback. It freezes a bounded fixture file/directory and maps
+an exact normalized request hash to one response or explicit ordered response
+sequence.
+
+It rejects duplicate keys, missing matches, exhausted sequences, malformed
+responses, and limit violations. Its safe snapshot records the format version,
+fixture-set hash, entry counts, and ceilings without payloads or paths. It
+performs no network activity.
+
+## 9. Candidate and result contracts
+
+The analysis run returns one bounded decision:
 
 ```json
 {
   "decision": "propose-change",
-  "target": "priv/preludes/kernel/agent.core.lisp",
+  "target": "agent.core",
+  "generalized_failure": "...",
   "evidence": [
     {"run_id": "...", "event_sequences": [12, 18]},
-    {"path": "priv/preludes/kernel/agent.core.lisp", "lines": [70, 96]}
+    {
+      "path": "priv/preludes/kernel/agent.core.clj",
+      "lines": [70, 96],
+      "snapshot_hash": "sha256:..."
+    }
   ],
-  "generalized_failure": "...",
   "candidate": {
-    "format": "unified-diff",
-    "content": "..."
+    "format": "component-source",
+    "component_id": "agent.core",
+    "base_source_hash": "sha256:...",
+    "source_hash": "sha256:...",
+    "content": "(ns agent.core ...)"
   },
+  "review_diff": "...",
   "evaluation_plan": {
     "motivating_cases": ["..."],
+    "regression_cases": ["..."],
     "held_out_cases": ["..."],
-    "regression_metrics": ["success", "tool_calls", "tokens"]
+    "metrics": ["success", "tool_calls", "tokens"]
   },
   "risks": ["..."]
 }
 ```
 
-The result must distinguish a generalized behavior gap from a one-off product
-bug or bad input. `no-change` and `insufficient-evidence` are first-class
-decisions; continual code production is not success.
+Complete component source is authoritative because it can be hashed and
+compiled exactly. A diff may accompany it for review but is not executable
+truth.
 
-An optional generic `--output PATH` should atomically persist exactly the
-public terminal result with no clobber. Until that exists, stdout remains a
-valid but less ergonomic channel. Trace and inspection artifacts retain
-their existing separate trust policies.
+Manifest-local bounded schemas validate input before workflow execution and
+`Result.value` before publication. They constrain shape, not confidentiality.
+The result-contract compiler supports a narrow tagged union: bounded `oneOf`
+object branches with the same required string discriminator and distinct
+`const` values. It does not enable arbitrary remote references, regexes, or
+general composition in MCP callable schemas.
 
----
+Planned output channels:
 
-## Part IV — Generic provider contracts
+- `--output PATH` atomically creates, without clobbering, exactly the same
+  public `Result` projection written to stdout;
+- `--private-output PATH` atomically creates a no-clobber `0600` classified
+  result and suppresses the value on stdout;
+- `--private-mission PATH` loads a manifest-confined JSON object as trusted
+  private input and carries that classification into assembly; and
+- trace and private inspection remain separate artifacts with their own
+  contracts.
 
-### IV.1 Repository snapshot provider
+Do not invent a second result envelope. The persisted V1 projection remains
+`value`, `usage`, and `evaluation_memory`.
 
-One host-installed repository snapshot emits three ordinary capabilities.
-Operations surface publicly as `<provider>.<operation>` by default (e.g.
-`workspace.search`); `as` renames stay available and are not reserved Kernel
-names.
+## 10. Improvement and evaluation workflow
 
-| Operation | Required behavior |
-|-----------|-------------------|
-| `list` | Sorted, paginated relative paths beneath an optional prefix |
-| `search` | Literal text search with sorted path/line matches, bounded context, pagination, and explicit truncation |
-| `read` | One UTF-8 file line range with stable line numbers, byte counts, and explicit EOF/truncation |
+### 10.1 Analysis
 
-The first implementation should prefer literal search. User-authored regular
-expressions can introduce scheduler-level `:re` risk and are not necessary for
-the acceptance application. Regex search requires a separately proven bounded
-engine or the same hard guard adopted by the schema work.
+The scout may:
 
-Snapshot invariants:
+1. classify relevant canonical runs;
+2. inspect exact bounded private exchanges;
+3. search and read the source owning the behavior;
+4. distinguish a one-off defect from a reusable agent-behavior gap;
+5. cite evidence that exists in the captured providers; and
+6. return `no-change`, `insufficient-evidence`, or one candidate.
 
-- paths are normalized relative paths and never reveal the host root;
-- traversal, absolute paths, NULs, devices, and symlinks are rejected;
-- include/exclude policy is frozen by the host, not supplied per call;
-- all operations query the same captured bytes and path inventory;
-- files are bounded individually and in aggregate;
-- invalid UTF-8 and oversized files have stable closed classifications;
-- result ordering and cursors are deterministic;
-- provider metadata contains only safe policy summaries and content hashes;
-- callback closures or owners retain the authority-bearing root privately; and
-- cleanup releases indexes or snapshot owners exactly once.
+Unsupported claims fail evaluation even when the patch appears plausible.
 
-Whether the provider uses Git's tracked-file inventory is a host policy. A
-plain directory capture must remain possible for non-Git inputs. If Git-aware
-capture exists, it must not launch a manifest-selected command or silently
-change the meaning of the same configured source.
+### 10.2 Materialization
 
-### IV.2 PTC trace snapshot provider
+The candidate is inert when the run ends. A trusted host step writes it to a
+new private file or disposable worktree, verifies `base_source_hash` and
+`source_hash`, and never alters the evidence snapshots. File materialization
+uses restrictive permissions such as a `077` umask.
 
-The source kind is named `ptc_trace_snapshot`, not `trace_snapshot`: it reads
-exactly one format — the canonical trace JSONL that `ptc.run --trace` writes —
-the way `openapi` names a spec format rather than "any API". It is not a
-generic log/trace ingester; OTel spans, application logs, or foreign trace
-formats would be a different source kind (or arrive via MCP), not a widening
-of this one.
+Materialization is not hidden in result persistence, trace writing, an MCP
+read tool, or the active bundle.
 
-The existing `TraceSnapshot`, `TraceCapability`, and canonical `TraceLog`
-query layer remain authoritative. The new work is a host-config provider
-builder that exposes that same implementation to ordinary manifests.
+For the paths used above:
 
-Do not implement a second JSONL parser or parallel query algebra. The fixed
-`log-analysis-v1` profile may continue to use the same builder/assembly
-internally; profile mode and manifest mode should differ only in who selects
-the already-frozen provider.
+```console
+umask 077
+mkdir -p code-scout/private
+jq -jr '.value.candidate.content' \
+  code-scout/private/candidate.private.json \
+  > code-scout/private/agent.core.candidate.clj
+jq '.value.candidate |
+    {component_id, base_source_hash, source_hash,
+     path: "agent.core.candidate.clj"}' \
+  code-scout/private/candidate.private.json \
+  > code-scout/private/agent.core.override.json
+```
 
-Trace paths, snapshot handles, private payloads, and source bytes remain absent
-from public metadata. Normal trace snapshots expose sanitized canonical data
-only. Private inspection artifacts are not accepted as normal trace resources.
+### 10.3 Evaluation
 
-### IV.3 Richer local tools through MCP
+Evaluation uses ordinary isolated runs against:
 
-Repository list/search/read and canonical trace queries justify native generic
-providers because PtcRunner already owns their safety and data contracts.
-Higher-risk operations should initially come from explicitly installed MCP
-sources:
-
-- Git status and diff operations;
-- GitHub issue, pull request, and CI-log retrieval;
-- running named test or formatting commands;
-- applying a candidate patch to a disposable worktree; and
-- publishing an evaluation artifact.
-
-The host config freezes the MCP command or endpoint and maps a finite set of
-public tools. The manifest can only narrow that set. This exercises the common
-capability platform instead of growing a Code Scout subsystem.
-
-### IV.4 Write effects remain a separate gate
-
-The proving Code Scout is read-only and proposes a patch as its terminal
-result. Applying a patch, changing a prelude file, starting a process, or
-publishing externally is a write effect and depends on the capability-platform
-decision for write-capable providers.
-
-If later enabled, the first write target should be a disposable candidate
-workspace, never the active source tree or shipped bundle. The provider must
-freeze the target, allowed operations, and ceilings; record capability
-activity; expose deterministic post-operation evidence; and make retries after
-partial effects explicit rather than automatic.
-
----
-
-## Part V — Improvement and evaluation workflow
-
-### V.1 Analysis run
-
-The scout receives a bounded objective and queries immutable evidence. It may:
-
-1. list and classify relevant runs;
-2. inspect bounded turns and counters;
-3. search the repository for the owning contract;
-4. read only the necessary source ranges;
-5. distinguish application defects from reusable agent-behavior gaps; and
-6. return one structured decision.
-
-It must cite evidence that a deterministic evaluator can verify exists in the
-granted snapshots. Unsupported assertions are a failed result even if the
-proposed patch appears plausible.
-
-### V.2 Candidate materialization
-
-The candidate is inert data when the analysis run ends. A trusted host step
-may materialize it into a new file or disposable worktree. Materialization is
-not hidden inside trace persistence or result formatting.
-
-The active bundle, repository snapshot, and trace snapshot remain unchanged.
-This preserves reproducibility and prevents a run from changing the evidence
-against which it is reasoning.
-
-### V.3 Evaluation run
-
-A separate generic manifest evaluates the candidate. Its inputs include:
-
-- the candidate artifact and its source hash;
-- motivating cases that should improve;
+- motivating cases;
 - previously successful regression cases;
 - held-out cases not cited by the scout; and
-- metric ceilings such as tool calls, model calls, duration, and tokens.
+- resource ceilings for calls, turns, duration, and tokens.
 
-The evaluator returns evidence, not a promotion side effect. At minimum it
-classifies:
+Do not switch providers or reset trial state inside one Kernel run. A run has
+one frozen workflow environment. `evaluate.clj` therefore executes exactly one
+subject/case trial, and separate manifests choose exactly one workflow
+provider:
 
-- candidate compiles or is rejected;
-- motivating behavior improves, regresses, or is unchanged;
-- held-out behavior improves, regresses, or is unchanged;
-- resource use stays within policy or regresses; and
-- the candidate is recommended, rejected, or inconclusive.
+- `evaluate-replay.json` selects `replay-llm` for deterministic compilation,
+  schema, capability-contract, bounded-control-flow, and known-regression
+  fixtures;
+- `evaluate-live.json` selects `analysis-llm` for one live trial; and
+- baseline and candidate, every case, and every repetition run in fresh Kernel
+  invocations with unique no-clobber outputs.
 
-Exact prelude-component compilation may require a generic candidate-bundle
-evaluation facility. Do not approximate that contract with `kernel/eval-source`
-if doing so would bypass component dependencies, exports, capability
-requirements, or bundle validation. This is a decision gate to investigate
-before claiming automated prelude evaluation.
+The evaluator component depends explicitly on `agent.core`, is the workflow
+entry, and calls its `run` export once with the bounded case. An override
+replaces that dependency before bundle compilation. `aggregate.clj` is a
+separate pure workflow component with no LLM or mission providers.
 
-Recommended shape: a runner-level `--component-override ID=PATH` option on
-`ptc.run`. It is trusted CLI input (host rung), substitutes exactly one
-component's source before bundle compilation, and runs the result under full
-bundle validation — dependencies, exports, capability requirements,
-signatures. Materializing `candidate.content` into that file is the explicit
-trusted step of V.2, visible in the invoking shell rather than hidden in the
-runtime. No new capability kind is introduced, and the running bundle still
-cannot modify itself.
+Frozen inputs make live results attributable, not deterministic.
 
-### V.4 Promotion
+The host prepares a bounded private trial input containing only the candidate
+identity (`component_id`, `base_source_hash`, and `source_hash`), one frozen
+case, the subject (`baseline` or `candidate`), and trial configuration. It
+does not put candidate source in either trial input; only the trusted override
+descriptor supplies those bytes to a candidate run. A replay
+baseline/candidate pair is:
 
-Promotion is outside the initial application contract. A human or trusted host
-workflow reviews the candidate and evaluation artifact, applies the change,
-and runs repository quality gates. A future promotion capability must be
-explicitly installed as write authority and must never be implied merely by
-possessing repository read access.
+```console
+mkdir -p code-scout/private/trials
+mix ptc.run code-scout/evaluate-replay.json \
+  --host-config code-scout.host.json \
+  --private-mission private/replay-baseline.private.json \
+  --private-output code-scout/private/trials/replay-baseline.private.json
+mix ptc.run code-scout/evaluate-replay.json \
+  --host-config code-scout.host.json \
+  --private-mission private/replay-candidate.private.json \
+  --component-override-descriptor code-scout/private/agent.core.override.json \
+  --private-output code-scout/private/trials/replay-candidate.private.json
+```
 
----
+The host repeats the same baseline/candidate shape with `evaluate-live.json`
+for each motivating, regression, and held-out case. There is no in-run
+provider routing and no mission state is shared across trials.
 
-## Part VI — Vertically complete roadmap
+`--component-override-descriptor` is host CLI authority. The exact descriptor
+contains `component_id`, `base_source_hash`, `source_hash`, and a path confined
+to the descriptor directory. The runner opens the source once, hashes those
+bytes, verifies the base against the currently installed component, and
+compiles the same opened bytes under normal dependency, export, signature, and
+capability validation. It never reopens a replacement path and adds no runtime
+write capability.
 
-Each slice must land with focused contract tests, durable documentation for
-implemented behavior, and no parallel authoritative path.
+After the host combines the still-private trial `Result` projections into one
+bounded array, a provider-free `aggregate.json` invokes `aggregate.clj` to
+validate counts and produce distributions:
 
-### Slice A — Generic host-config installation
+```console
+jq -s '{"trials": .}' code-scout/private/trials/*.private.json \
+  > code-scout/private/trials.private.json
+mix ptc.run code-scout/aggregate.json \
+  --private-mission private/trials.private.json \
+  --private-output code-scout/private/evaluation.private.json
+```
 
-- Complete Track D from the capability-platform direction.
-- Add a generic `ptc.run --host-config PATH` option.
-- Strictly parse one bounded, duplicate-key-rejecting host document.
-- Resolve its paths relative to its canonical directory.
-- Build one registry from built-ins plus configured provider instances.
-- Reject duplicate provider names and attempts to replace built-ins.
-- Close all resources on load, build, run, persistence, and cancellation
-  failures.
-- Prove that omitting `--host-config` preserves current `ptc.run` behavior.
+Every trial and aggregate binds the subject, candidate/base hashes, case and
+fixture-set hashes, effective bundle hash, host installation-revision hash,
+provider snapshot, and filesystem/content snapshot identities. A schema-only
+provider hash is not evidence that the evaluated server or dataset was the
+same.
 
-**Gate:** a configured MCP provider can be selected and narrowed by an
-ordinary manifest with no Elixir registration change.
+### 10.4 Promotion
 
-### Slice B — Repository snapshot capabilities
+Evaluation returns evidence only. A human or trusted CI gate reviews
+confidentiality and behavior, applies an approved candidate, and runs normal
+repository gates.
 
-- Define the list/search/read schemas, pagination, truncation, and stable
-  errors first.
-- Implement one immutable captured representation shared by all operations.
-- Add the provider type to host config and ordinary capability snapshots.
-- Add adversarial path, replacement, symlink, UTF-8, size, cursor, and
-  deterministic-order tests.
-- Document the implemented provider contract outside `docs/plans/`.
+A future write-capable MCP tool should first target a disposable candidate
+workspace. It needs explicit host effect classification, manifest selection,
+approval policy, partial-effect semantics, and cancellation behavior. Read
+access never implies write authority.
 
-**Gate:** a manifest-authored agent can discover an unknown file, locate a
-literal, and read its surrounding range without whole-repository or live-file
-access.
+## 11. Implementation sequence
 
-### Slice C — Manifest-selectable trace snapshots
+### Slice A — MCP prerequisites
 
-- Adapt the existing trace snapshot owner into a provider builder.
-- Reuse the existing four trace capabilities and query implementation.
-- Install trace directories only through host config.
-- Align resource ownership and cleanup between profile-backed and
-  manifest-backed entry paths.
-- Prove equivalent queries return equivalent public results in both paths.
+Complete Slices 1 and 2 of the MCP-first plan:
 
-**Gate:** one ordinary manifest can query both repository and canonical trace
-snapshots without a special profile or Elixir assembly.
+- modern stateless protocol;
+- one MCP source;
+- Streamable HTTP retained as an MCP transport;
+- owner-monitored stdio; and
+- no legacy sessions.
 
-### Slice D — Public result artifacts
+**Gate:** the same mapped read tool works through both standard transports.
 
-- Define `--output PATH` as an optional generic `ptc.run` destination.
-- Persist only the bounded public terminal result.
-- Use atomic no-clobber publication and stable errors.
-- Keep public result, canonical trace, and private inspection artifacts
-  separate.
-- Test success and every failure after meaningful capability activity.
-- Land this slice early: nothing in it depends on Slices B or C, and every
-  multi-run story (evaluation, cron, CI) is otherwise scraping stdout.
+### Slice B — Host installation and `--check`
 
-**Gate:** a candidate proposal can be passed to a later run without scraping
-human console output.
+Complete MCP-first Slice 3:
 
-### Slice E — Read-only Code Scout acceptance application
+- `--host-config`;
+- closed source/transport decoders;
+- closed host-installed `llm` aliases over the existing LLM adapter;
+- replace the implicit default provider registry with exactly the installed
+  aliases for provider-bearing runs;
+- remove legacy manifest-configured `llm` and `file-read` authority and
+  migrate existing examples/tests instead of keeping a fallback;
+- credentials;
+- manifest-only narrowing;
+- data-class compatibility; and
+- validation-only assembly.
 
-- Add only host JSON, manifest JSON, local PTC-Lisp, and fixture data.
-- Use `agent.core`; do not add a scout-specific Kernel or Mix module.
-- Analyze representative failed traces and repository sources.
-- Return `no-change`, `insufficient-evidence`, or a structured proposal with
-  verifiable citations.
-- Include prompt-injection text in logs/source and prove it remains data.
-- Keep prompts domain-blind and evaluation cases outside shipped prompts.
+**Gate:** an ordinary manifest selects the sample stdio server with no Elixir
+registration.
+
+Static source, selection, and data-class checks happen before credentials are
+resolved, sensitive snapshots are opened, stdio is spawned, or remote MCP is
+contacted. Discovery is a later dynamic validation phase.
+
+### Slice C — Sample filesystem server
+
+- implement immutable list/find/search/read/info tools;
+- require a non-empty default-deny host include set;
+- use familiar MCP naming and bounded object schemas;
+- add path, symlink, replacement, UTF-8, cursor, ordering, size, stderr,
+  cancellation, owner-death, and excluded-secret/build/private-path tests; and
+- map only read tools in the tutorial host config.
+
+**Gate:** the agent can discover an unknown nested file, find a literal, and
+read its surrounding lines without a prelisted answer.
+
+### Slice D — Manifest-selectable PTC snapshots
+
+- adapt the existing trace owner into a provider builder;
+- add the private inspection snapshot without changing its file format;
+- reuse authoritative parsers/query code;
+- enforce private data compatibility before opening sensitive sources; and
+- prove fixed-profile and manifest paths return equivalent queries.
+
+**Gate:** one ordinary manifest can correlate source, canonical trace, and
+exact private inspection.
+
+### Slice E — MCP feedback and private exchange records
+
+Complete MCP-first Slice 4:
+
+- preserve safe bounded tool-error feedback;
+- add private JSON-RPC exchange evidence;
+- retain closed public errors; and
+- propagate safe trace context.
+
+**Gate:** the scout can see why a filesystem call failed and a private reviewer
+can reconstruct the complete tool exchange.
+
+### Slice F — Result artifacts and contracts
+
+- add `--output` and `--private-output`;
+- add mutually exclusive `--mission` and trusted `--private-mission`;
+- add input and `Result.value` schemas;
+- support the bounded tagged-union profile needed by candidate decisions;
+- preserve the existing result projection;
+- ensure no-clobber atomic persistence;
+- keep private values off stdout and public artifacts; and
+- cover failures after meaningful provider activity.
+
+**Gate:** a candidate becomes typed input to a later run without scraping
+stdout.
+
+### Slice G — Read-only Code Scout
+
+- extend the shipped `cap` library with an envelope-aware `unwrap!` helper;
+- make that helper library composition-only rather than prompt-visible;
+- add the domain-blind `agent.main` library and its explicit dependencies;
+- add prompt-visible `repo` and `runs` facades over every selected raw source;
+- expose opaque pagination cursors through every collection facade and test
+  evidence that occurs only after the first page;
+- cover the helpers, facade-only model catalog, and agent through a real
+  manifest integration path;
+- add only host JSON, manifests, PTC-Lisp, schemas, and fixtures;
+- use the sample MCP server and PTC-specific snapshots;
+- keep prompts domain-blind;
+- return verifiable decisions, including declining a change; and
+- include prompt-injection data in held-out evaluation.
 
 **Gate:** deleting the application files removes the entire Code Scout; no
-runtime file contains its domain vocabulary.
+runtime module contains its domain vocabulary.
 
-### Slice F — Candidate evaluation
+### Slice H — Candidate evaluation
 
-- Decide and implement the minimum generic facility for evaluating a candidate
-  component under the same bundle contracts as production (recommended:
-  `--component-override`, V.3).
-- Separate motivating, regression, and held-out corpora.
-- Compare outcomes and resource usage under fixed limits.
-- Emit a structured evaluation artifact with hashes binding candidate,
-  fixtures, provider snapshots, and effective bundles.
-- Keep promotion external.
+- implement the trusted, hash-bearing component override descriptor;
+- implement `llm_replay`;
+- add the one-trial evaluator and provider-free aggregate components;
+- run replay/live and baseline/candidate in separate fresh invocations;
+- prove no trial shares Kernel state or switches workflow providers;
+- bind artifacts to candidate, fixture, installation revision, provider,
+  content snapshot, and bundle hashes; and
+- keep promotion external.
 
-**Gate:** an improvement claim is reproducible from frozen inputs and cannot
-pass solely by fixing its cited training cases while regressing held-out cases.
+**Gate:** a candidate cannot pass solely by fixing cited cases while regressing
+held-out cases.
 
-### Slice G — Optional guarded writes
+### Later — Tasks and guarded writes
 
-- Resolve the platform-wide write-capability policy first.
-- Prefer a mapped MCP tool or narrowly audited candidate-workspace provider.
-- Never grant writes merely because a read provider is selected.
-- Define partial-effect, retry, cancellation, and cleanup semantics.
-- Require explicit host installation and manifest selection.
+MCP Tasks are a natural fit for long test suites, indexing, CI, and approval
+gates, but require the lifecycle and accounting design in the MCP-first plan.
+Write tools remain a separate authority milestone.
 
-**Gate:** a candidate may be materialized in a disposable workspace without
-granting authority over the active source tree or allowing arbitrary commands.
-
----
-
-## Part VII — Acceptance matrix
+## 12. Acceptance matrix
 
 | Case | Expected result |
-|------|-----------------|
-| No host config | Current `ptc.run` behavior remains unchanged |
-| Unknown configured source | Fails before provider activity or model calls |
-| Manifest selects an uninstalled provider | `:unknown_provider`-class failure |
-| Manifest tries to widen `allow`, roots, timeout, or result ceiling | Fails during assembly |
-| Repository changes after capture | The run continues to observe the frozen snapshot |
-| Repository path traverses or crosses a symlink | Closed denied/invalid request; no escaped data |
-| Search exceeds match/result bounds | Deterministic truncated page or closed limit error, as specified |
-| Trace source is malformed or changes during capture | Existing stable trace-source failure |
-| Model follows an instruction embedded in a log | Evaluation failure; embedded text has no authority |
-| Scout finds only a one-off defect | Structured `no-change`, not a forced prelude patch |
-| Candidate fails component compilation | Evaluation rejects before running cases |
-| Candidate improves cited cases but regresses held-out cases | Evaluation rejects or marks inconclusive |
-| Run fails after resource creation | Every provider resource closes exactly once |
-| Public result/trace/error is inspected | Host paths, credentials, private payloads, and snapshot handles are absent |
+| --- | --- |
+| No host config and no selected providers | Provider-free run remains valid |
+| A manifest selects a provider without host config | Strict failure; there is no implicit `llm` or `file-read` fallback |
+| A manifest uses legacy model/root/file provider config | Strict failure before provider activity |
+| Unknown host source/transport | Fails before provider or model activity |
+| Manifest supplies a command, endpoint, root, credential, or effect | Strict manifest failure |
+| Manifest selects an uninstalled provider/tool or raises a ceiling | Assembly failure |
+| Sample filesystem changes after capture | Run continues to observe the frozen snapshot |
+| Installation revision or content snapshot identity changes | Trial/provider identity changes |
+| Secret, dependency, build, trace, or private-result path is not included | Workspace never opens or exposes it |
+| Path traverses or crosses a symlink | Bounded tool error; no escaped data or host root |
+| MCP server emits a malformed/oversized response | Closed provider failure and owned cleanup |
+| MCP tool returns safe bounded argument feedback | Agent may correct it; public trace/error remains payload-free |
+| Canonical trace source is malformed or changes during capture | Existing stable trace-source failure |
+| Private artifact is malformed, replaced, oversized, or crosses a symlink | Closed private-source failure; no partial catalog |
+| Private source has an unapproved selected egress sink | Assembly fails before sensitive capture, MCP activity, or model calls |
+| `--private-mission` selects an unapproved sink or public output | Fails before provider activity; input remains private |
+| Input or result violates its schema | Invalid value is not executed/published |
+| Private run requests stdout value or public output | Closed failure; private value reaches only explicit private output |
+| Scout sees one isolated defect | `no-change` or `insufficient-evidence`, not forced code |
+| Candidate hash/base/compilation fails | Evaluation rejects before behavioral cases |
+| Override source changes between verification and compilation | Rejected or irrelevant because the same opened bytes are hashed and compiled |
+| A trial attempts to select both replay and live LLMs | Strict provider/capability failure; each run has one workflow LLM |
+| Baseline/candidate repetitions are requested | Each is a fresh Kernel run with a distinct no-clobber artifact |
+| Required source or run evidence occurs after the first page | The model-visible facade can follow the opaque cursor and retrieve it |
+| Candidate improves motivating but regresses held-out cases | Reject or mark inconclusive |
+| Run fails after starting stdio/native snapshot resources | Every resource is cancelled, observed, and closed exactly once |
 
----
+## 13. Open decisions
 
-## Part VIII — Open questions
+1. **Private data and local stdio.** A local MCP server is still a separate
+   process and generated code may send private text in tool arguments.
+   Recommendation: treat every selected MCP provider as an egress sink unless
+   a future installed contract proves a no-egress local mode.
+2. **Filesystem snapshot mechanism.** In-memory bytes, a content-addressed
+   temporary tree, or an indexed store? Recommendation: start with bounded
+   in-memory UTF-8 text for the sample; it is easiest to make immutable and
+   deterministic.
+3. **Search language.** Recommendation: literal content search plus glob path
+   filters. Regex is unnecessary for acceptance and can create runtime hazards.
+4. **Live evaluation policy.** Decide minimum repetitions, confidence
+   reporting, and acceptable regression thresholds per application. The
+   platform only guarantees pinned configuration, fresh runs, and attributable
+   artifacts; it does not declare statistical significance.
+5. **Reusable application distribution.** Manifest-relative components are
+   enough for the first application. Defer a component catalog until copying
+   local PTC-Lisp is a demonstrated problem.
+6. **Evaluation orchestration.** Prove two explicit `ptc.run` invocations
+   before designing a pipeline language.
+7. **Tasks.** Decide whether a durable MCP task may outlive its PtcRunner run
+   before advertising the extension.
+8. **Writes.** Decide approval, retry, partial-effect, and disposable-workspace
+   rules before mapping the first `effect: write` tool.
 
-1. **Host-config CLI contract.** Is one explicit `--host-config` file enough
-   for v1? Recommendation: yes. Avoid implicit discovery, includes, merging,
-   and precedence rules until a demonstrated application requires them.
-2. **Provider grammar for local snapshots.** Resolved: one `source`
-   discriminator field covers both families under the same outer provider and
-   manifest-narrowing grammar. Connector sources (`mcp_*`, `http_get`,
-   `openapi`) are *reached* and implement the `Transport` exchange seam;
-   snapshot sources (`repository_snapshot`, `ptc_trace_snapshot`) are *captured*
-   at build and implement the Capability contract directly — local queries are
-   never forced through a remote-shaped abstraction.
-3. **Repository inventory.** Plain directory snapshot, Git-tracked snapshot,
-   or an explicit host choice? Recommendation: make the mode host-owned and
-   explicit; never silently depend on repository state.
-4. **Search language.** Literal-only initially, glob plus literal, or safe
-   regex? Recommendation: glob path filters plus literal text in v1. Regex is
-   not required for the proving application and carries node-level risk.
-5. **Result artifact.** Is stdout sufficient, or should `--output` be part of
-   the generic runner? Recommendation: add atomic public-result output before
-   building a multi-run evaluation workflow.
-6. **LLM installation.** Should model selection remain in the manifest or move
-   behind the same host-installed provider grammar? This belongs to the
-   capability-platform direction and must remain consistent across all tasks.
-7. **Candidate representation.** Unified diff, complete component source, or a
-   closed tagged union? Recommendation: require complete source for exact
-   component evaluation; a diff may accompany it for review but must not be
-   the sole authoritative candidate.
-8. **Reusable application distribution.** Are manifest-relative local
-   components sufficient, or is a data-driven installed component catalog
-   needed? Recommendation: defer the catalog until copying local components is
-   a demonstrated problem; it is not required for the first no-Elixir task.
-9. **Evaluation orchestration.** Should a human/shell invoke analysis and
-   evaluation runs separately, or should a future generic pipeline manifest
-   compose runs? Recommendation: prove the two explicit runs first. Do not add
-   a workflow engine before the artifact and evaluation contracts stabilize.
-10. **Write authority.** Which destination may receive write capabilities, and
-    how are partial effects retried or surfaced? This remains blocked on the
-    platform-wide write decision; the read-only scout does not need it.
+## 14. No-Elixir completion test
 
----
-
-## Appendix A — The no-Elixir consistency checklist
-
-An application qualifies as manifest-authored when all answers below are yes:
-
-1. Does it run through `mix ptc.run`, not a domain-specific Mix task?
-2. Are endpoints, commands, credentials, local roots, and installed ceilings
-   declared only by the trusted host channel?
-3. Does the manifest only select installed names and narrow authority?
-4. Is application behavior entirely local or installed PTC-Lisp?
-5. Are all effects ordinary capabilities with schemas, effects, bounds,
-   accounting, traces, and deterministic safe snapshots?
-6. Can the application be removed without deleting domain-specific Elixir?
-7. Can its fixtures and prompts change without recompiling PtcRunner?
-8. Are generated changes inert candidates until a separate evaluation and
-   promotion decision?
-
-If a proposed application fails because it needs a new generally useful
-primitive, add and audit that provider type as platform work. If it fails
-because it needs task policy in Elixir, move that policy into PTC-Lisp.
-
-## Appendix B — Code Scout completion test
-
-The direction is proven when a clean installed PtcRunner can execute a Code
-Scout supplied as application files and satisfy all of the following:
+The direction is proven when a clean installed PtcRunner can run the Code
+Scout files and satisfy all of the following:
 
 - the command is ordinary `mix ptc.run`;
-- no `.ex` or Mix task file is added or modified for the application;
-- the host grants one repository snapshot and one canonical trace snapshot;
-- the manifest narrows those grants and selects generic agent behavior;
-- local PTC-Lisp discovers relevant files and traces without prelisted answers;
-- the result cites bounded evidence and may decline to propose a change;
-- a proposed prelude is emitted as an inert, content-addressed candidate;
-- a separate generic run evaluates the exact candidate bundle against
-  motivating, regression, and held-out cases; and
-- applying or promoting the candidate remains an explicit write-authority
-  decision outside the analysis run.
+- no `.ex` or task-specific Mix file changes for the application;
+- host JSON installs the MCP filesystem server, PTC snapshots, and approved
+  LLM;
+- the manifest only selects and narrows those grants;
+- local PTC-Lisp discovers relevant files and traces without prelisted
+  answers;
+- exact private conversation and MCP evidence is available only under explicit
+  private authority;
+- the bounded result may decline a change or emit an inert content-addressed
+  candidate;
+- separate generic invocations evaluate baseline and exact candidate with
+  replay fixtures and fresh held-out live trials, then aggregate their
+  artifacts; and
+- applying or promoting the candidate remains an explicit host/human write
+  decision.
