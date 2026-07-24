@@ -70,15 +70,19 @@ From a repository root, create:
 
 ```text
 repo-analyst.host.json
-repo-analyst.json
+repo-analyst-answer.json
+repo-analyst-review.json
+repo-analyst-improve.json
 repo-analyst/
   repo.clj
   runs.clj
   evaluate.clj
   aggregate.clj
-  input.json
+  answer-input.json
   review-input.json
   improve-input.json
+  answer.schema.json
+  review.schema.json
   candidate.schema.json
   evaluation.schema.json
   evaluate-replay.json
@@ -236,7 +240,7 @@ model-accessible filesystem capabilities, not runtime bootstrap.
 }
 ```
 
-Seven details are deliberate:
+Eight details are deliberate:
 
 1. `source` is `mcp`; `stdio` is a transport field, not a separate provider
    kind.
@@ -251,6 +255,10 @@ Seven details are deliberate:
 7. Exact private trace text may influence a filesystem search term, so the
    local MCP process is still conservatively treated as a possible egress
    sink and explicitly approved for that data class.
+8. `analysis_llm_key` is a host credential binding. Static source and
+   data-class checks happen before it is resolved; its bearer header is
+   rendered only for the provider exchange and is absent from snapshots,
+   traces, inspection, errors, and process status.
 
 The server captures the bounded UTF-8 tree before replying to discovery.
 Every later list, search, and read observes that same snapshot. It exposes no
@@ -277,6 +285,12 @@ chooses that alias but cannot retarget it. `replay-llm` presents the same
 `llm-request` contract from frozen fixtures; separate evaluation manifests
 choose one provider per run.
 
+The complete binding sources, `bearer`/`basic`/`api_key` rendering, protected
+header rules, and stdio environment mapping are defined once in
+[MCP plan §5.1](mcp-capability-platform-direction.md#51-credential-bindings).
+This filesystem server needs no secret; a different stdio server would receive
+only explicitly bound environment variables.
+
 This host document is the complete provider registry for the run. It does not
 augment implicitly installed `llm` or `file-read` entries: those
 manifest-configured built-ins are removed when the Slices B–C filesystem
@@ -289,6 +303,11 @@ The closed target source set is `mcp`, `llm`, `llm_replay`,
 merely an upstream MCP tool mapped to `workspace.read`; it is not a
 PtcRunner source kind or compatibility spelling for `file-read`.
 
+Native snapshot sources derive public capabilities as
+`<installed-alias>.<fixed-operation>`: `history.list-runs` comes from the
+installed alias `history` and the trace source's fixed `list-runs` operation.
+MCP mappings instead choose each public `as` name explicitly.
+
 The tool names are intentionally familiar. They follow the official MCP
 filesystem server where possible (`list_directory`, `search_files`,
 `read_text_file`) and add only the content-search operation needed for large
@@ -298,9 +317,9 @@ Canonical PTC traces do not go through this generic server. `history` and
 `private-history` use PtcRunner's authoritative parsers because those formats
 have PTC-specific correlation and confidentiality rules.
 
-## 3. Select capabilities in the manifest
+## 3. Select capabilities in task-specific manifests
 
-`repo-analyst.json`:
+`repo-analyst-answer.json`:
 
 ```json
 {
@@ -347,9 +366,9 @@ have PTC-specific correlation and confidentiality rules.
       {"name": "private-history", "config": {"model_visible": []}}
     ]
   },
-  "input": {"path": "repo-analyst/input.json"},
+  "input": {"path": "repo-analyst/answer-input.json"},
   "contracts": {
-    "result_schema": {"path": "repo-analyst/candidate.schema.json"}
+    "result_schema": {"path": "repo-analyst/answer.schema.json"}
   },
   "limits": {
     "run_duration_ms": 120000,
@@ -357,6 +376,19 @@ have PTC-specific correlation and confidentiality rules.
   }
 }
 ```
+
+The other two analysis manifests reuse the same components, providers, and
+limits while binding task-specific input and output contracts:
+
+| Manifest | Input | `Result.value` schema |
+| --- | --- | --- |
+| `repo-analyst-answer.json` | `repo-analyst/answer-input.json` | `repo-analyst/answer.schema.json` |
+| `repo-analyst-review.json` | `repo-analyst/review-input.json` | `repo-analyst/review.schema.json` |
+| `repo-analyst-improve.json` | `repo-analyst/improve-input.json` | `repo-analyst/candidate.schema.json` |
+
+A source answer, a prior-run review, and an improvement decision are different
+result types. Keeping three small manifests avoids a misleading union without
+adding a task-specific runner or manifest-inheritance feature.
 
 The manifest narrows the installed time and result limits. It cannot increase
 them or add an upstream tool. `allow` could be omitted to select the complete
@@ -378,7 +410,7 @@ The planned `cap` library is composition-only rather than prompt-visible.
 task and loop settings from input. It avoids every agent application repeating
 the same workflow entry file.
 
-`repo-analyst/input.json`:
+`repo-analyst/answer-input.json`:
 
 ```json
 {
@@ -386,6 +418,19 @@ the same workflow entry file.
   "agent": {"max_turns": 6}
 }
 ```
+
+Path bases are fixed rather than inferred from the file being opened:
+
+| Path surface | Relative base |
+| --- | --- |
+| Manifest path, `--host-config`, trace/inspection destinations, public/private output, override descriptor | invoking working directory |
+| Paths and `cwd` inside host config | canonical host-config directory |
+| Component, input, and contract paths inside a manifest | canonical manifest directory |
+| `--mission` and `--private-mission` | canonical manifest directory |
+| Candidate source path inside an override descriptor | canonical descriptor directory |
+
+Every path is canonicalized and confined under its owning boundary before it
+is opened.
 
 ## 4. Compose raw MCP tools into a clean prelude
 
@@ -405,7 +450,7 @@ the same workflow entry file.
     (tool/workspace.list
       (with-cursor {"path" path "limit" 100} cursor))))
 
-(defn find
+(defn find-files
   "Read one glob page. Pass nil first, then the returned next_cursor."
   {:signature "(glob :string, cursor :string?) -> :map"}
   [glob cursor]
@@ -441,7 +486,7 @@ formats:
 (defn- with-cursor [arguments cursor]
   (merge arguments (if cursor {"cursor" cursor} {})))
 
-(defn list
+(defn list-runs
   "Read one public run page. Pass nil first, then the returned next_cursor."
   {:signature "(limit :int, cursor :string?) -> :map"}
   [limit cursor]
@@ -518,10 +563,10 @@ What the model sees:
 
 ```text
 repo/ls          (path :string, cursor :string?) -> :map
-repo/find        (glob :string, cursor :string?) -> :map
+repo/find-files  (glob :string, cursor :string?) -> :map
 repo/search      (text :string, cursor :string?) -> :map
 repo/read-range  (path :string, from :int, to :int) -> :map
-runs/list        (limit :int, cursor :string?) -> :map
+runs/list-runs   (limit :int, cursor :string?) -> :map
 runs/turns       (run-id :string, cursor :string?) -> :map
 runs/model-exchanges   (run-id :string, cursor :string?) -> :map
 runs/capability-calls  (run-id :string, cursor :string?) -> :map
@@ -529,6 +574,11 @@ runs/generated-sources (run-id :string, cursor :string?) -> :map
 runs/effective-preludes (run-id :string, cursor :string?) -> :map
 runs/provider-exchanges (run-id :string, cursor :string?) -> :map
 ```
+
+The facade uses `find-files` and `list-runs` rather than defining plain `find`
+or `list`. PTC-Lisp permits namespace definitions to shadow builtins, but a
+tutorial-facing API need not make readers or generated programs distinguish
+those otherwise familiar names.
 
 It does not need to know JSON-RPC, stdio framing, `tools/call`, hidden native
 capability names, the host root, or the server executable.
@@ -538,7 +588,7 @@ capability names, the host root, or the server executable.
 Planned command:
 
 ```console
-mix ptc.run repo-analyst.json \
+mix ptc.run repo-analyst-answer.json \
   --host-config repo-analyst.host.json \
   --check
 ```
@@ -568,6 +618,11 @@ selection fails.
 
 ## 6. Run and inspect the MCP path
 
+`repo-analyst/answer.schema.json` accepts an answer and one or more
+source-backed citations. Each citation carries its source alias and snapshot
+hash beside its path/range, so evidence remains attributable when one result
+combines multiple immutable sources.
+
 Prepare destinations:
 
 ```console
@@ -578,7 +633,7 @@ mkdir -p tmp/traces tmp/inspection repo-analyst/private
 Planned run:
 
 ```console
-mix ptc.run repo-analyst.json \
+mix ptc.run repo-analyst-answer.json \
   --host-config repo-analyst.host.json \
   --trace tmp/traces/analyst.jsonl \
   --inspect tmp/inspection/analyst.inspection.jsonl \
@@ -597,15 +652,17 @@ created atomically at the explicit `0600` destination:
 ```json
 {
   "value": {
-    "decision": "no-change",
     "answer": "The deadline owner cancels attached provider work before connector resources close.",
-    "workspace_snapshot_hash": "sha256:...",
     "evidence": [
       {
+        "source": "workspace",
+        "snapshot_hash": "sha256:...",
         "path": "lib/ptc_runner/kernel/run_state.ex",
         "lines": [250, 282]
       },
       {
+        "source": "workspace",
+        "snapshot_hash": "sha256:...",
         "path": "lib/ptc_runner/kernel/run_builder.ex",
         "lines": [310, 329]
       }
@@ -666,7 +723,8 @@ that server's error-data contract.
 
 ## 7. Study complete prior runs
 
-Change only the input:
+The review manifest keeps the same installed authority and facade while
+binding a review-specific input and result schema:
 
 ```json
 {
@@ -678,11 +736,15 @@ Change only the input:
 Then run:
 
 ```console
-mix ptc.run repo-analyst.json \
+mix ptc.run repo-analyst-review.json \
   --host-config repo-analyst.host.json \
-  --mission repo-analyst/review-input.json \
   --private-output repo-analyst/private/review.private.json
 ```
+
+`repo-analyst/review.schema.json` validates a bounded review report with a
+summary, recurring findings, source/run evidence, and a recommended next
+action. It does not use candidate-decision tags for what is still an evidence
+report.
 
 `history` answers safe operational questions: outcomes, turns, counters, and
 capability timing. `private-history` reconstructs what the model saw and what
@@ -707,12 +769,11 @@ support: closed object branches share the required `decision` string and use
 distinct `const` values. It does not widen MCP's callable-schema profile or
 permit remote references and regexes.
 
-Run the improvement input through the same manifest:
+Run the improvement task through its candidate-specific manifest:
 
 ```console
-mix ptc.run repo-analyst.json \
+mix ptc.run repo-analyst-improve.json \
   --host-config repo-analyst.host.json \
-  --mission repo-analyst/improve-input.json \
   --private-output repo-analyst/private/candidate.private.json
 ```
 
@@ -725,13 +786,16 @@ An illustrative proposal value:
   "generalized_failure": "The loop repeats an identical empty search instead of changing evidence strategy.",
   "evidence": [
     {
+      "source": "history",
+      "snapshot_hash": "sha256:...",
       "run_id": "r-2026-07-21-0413",
       "event_sequences": [12, 18, 24]
     },
     {
+      "source": "workspace",
+      "snapshot_hash": "sha256:...",
       "path": "priv/preludes/kernel/agent.core.clj",
-      "lines": [40, 53],
-      "snapshot_hash": "sha256:..."
+      "lines": [40, 53]
     }
   ],
   "candidate": {

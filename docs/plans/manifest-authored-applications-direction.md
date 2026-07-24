@@ -83,9 +83,8 @@ The complete application runs through:
 ```console
 umask 077
 mkdir -p code-scout/private tmp
-mix ptc.run code-scout.json \
+mix ptc.run code-scout-improve.json \
   --host-config code-scout.host.json \
-  --mission code-scout/input.json \
   --private-output code-scout/private/candidate.private.json \
   --trace tmp/code-scout-trace.jsonl
 ```
@@ -97,7 +96,7 @@ must not know that the application is a scout.
 Planned validation:
 
 ```console
-mix ptc.run code-scout.json \
+mix ptc.run code-scout-answer.json \
   --host-config code-scout.host.json \
   --check
 ```
@@ -286,14 +285,20 @@ The example application may live inside the repository it analyzes:
 
 ```text
 code-scout.host.json             trusted installation
-code-scout.json                  selection, components, limits, contracts
+code-scout-answer.json           source-question selection and contract
+code-scout-review.json           prior-run review selection and contract
+code-scout-improve.json          candidate proposal selection and contract
 code-scout/
   repo.clj                       MCP filesystem wrappers
   runs.clj                       trace/private-inspection wrappers
   evaluate.clj                   exactly one isolated evaluation trial
   aggregate.clj                  pure aggregation of trial artifacts
-  input.json                     one task
-  candidate.schema.json          Result.value contract
+  answer-input.json              one source question
+  review-input.json              one prior-run review task
+  improve-input.json             one improvement task
+  answer.schema.json             source-answer Result.value contract
+  review.schema.json             review Result.value contract
+  candidate.schema.json          improvement Result.value contract
   evaluation.schema.json         aggregate Result.value contract
   evaluate-replay.json           one replay-backed trial
   evaluate-live.json             one live-model trial
@@ -315,6 +320,12 @@ The initial closed source identifiers are `mcp`, `llm`, `llm_replay`,
 deliberately absent. The `workspace` installation below uses `source: "mcp"`;
 its alias and upstream `read_text_file` tool do not create another source
 kind.
+
+Native PtcRunner snapshot sources derive public names as
+`<installed-alias>.<fixed-operation>`. The host chooses the installed alias
+(`history` or `private-history` below); the source implementation owns its
+closed operation names. MCP is different because its explicit host tool map
+chooses each public `as` name.
 
 ## 6. Planned host installation
 
@@ -436,6 +447,13 @@ Illustrative target configuration:
 }
 ```
 
+The shared host credential grammar is defined once in
+[MCP plan §5.1](mcp-capability-platform-direction.md#51-credential-bindings).
+The `analysis-llm` HTTP exchange renders its bearer binding per request. This
+sample filesystem process has no credential, but a stdio MCP installation may
+map an allowlisted child environment variable to a binding. Neither manifests
+nor PTC-Lisp can name or inspect those bindings.
+
 The filesystem root is an argument to a trusted installed command. The
 manifest never sees or changes it. The configured `cwd` and path fields in
 host config resolve relative to the canonical host-config directory unless a
@@ -479,7 +497,9 @@ include the installation-revision hash; replay additionally includes the
 fixture-set hash, while a live LLM snapshot includes the effective model and
 non-secret request-policy identity.
 
-## 7. Planned manifest
+## 7. Planned task-specific manifests
+
+The source-question manifest is:
 
 ```json
 {
@@ -509,9 +529,9 @@ non-secret request-policy identity.
       {"name": "private-history", "config": {"model_visible": []}}
     ]
   },
-  "input": {"path": "code-scout/input.json"},
+  "input": {"path": "code-scout/answer-input.json"},
   "contracts": {
-    "result_schema": {"path": "code-scout/candidate.schema.json"}
+    "result_schema": {"path": "code-scout/answer.schema.json"}
   },
   "limits": {
     "run_duration_ms": 120000,
@@ -519,6 +539,20 @@ non-secret request-policy identity.
   }
 }
 ```
+
+The review and improvement manifests share the same components, providers,
+and limits but bind different inputs and result contracts:
+
+| Manifest | Input | `Result.value` contract |
+| --- | --- | --- |
+| `code-scout-answer.json` | `code-scout/answer-input.json` | `code-scout/answer.schema.json` |
+| `code-scout-review.json` | `code-scout/review-input.json` | `code-scout/review.schema.json` |
+| `code-scout-improve.json` | `code-scout/improve-input.json` | `code-scout/candidate.schema.json` |
+
+The manifests remain small and may share ordinary JSON-generation tooling, but
+the runtime does not introduce manifest inheritance. A question, a run review,
+and an improvement decision are different output types and must not be forced
+through one broad union.
 
 `agent.main` is a proposed small domain-blind shipped library that forwards
 task and loop configuration from input to `agent.core`. It removes a repeated
@@ -624,7 +658,7 @@ body needed for MCP diagnosis while still excluding credentials and transport
 headers.
 
 `code-scout/runs.clj` is the prompt-visible facade over both native sources. It
-exports cursor-aware `runs/list`, `runs/turns`, `runs/model-exchanges`,
+exports cursor-aware `runs/list-runs`, `runs/turns`, `runs/model-exchanges`,
 `runs/capability-calls`, `runs/generated-sources`,
 `runs/effective-preludes`, and `runs/provider-exchanges`. This is required by
 the current prompt policy: once any prompt-visible prelude facade exists, raw
@@ -647,7 +681,15 @@ performs no network activity.
 
 ## 9. Candidate and result contracts
 
-The analysis run returns one bounded decision:
+Each task has a narrow result:
+
+- `answer.schema.json` requires an answer plus source-backed citations;
+- `review.schema.json` requires a bounded review summary, recurring findings,
+  cited run/source evidence, and a recommended next action; and
+- `candidate.schema.json` is the tagged decision union used only by the
+  improvement task.
+
+The improvement run returns one bounded decision:
 
 ```json
 {
@@ -655,11 +697,17 @@ The analysis run returns one bounded decision:
   "target": "agent.core",
   "generalized_failure": "...",
   "evidence": [
-    {"run_id": "...", "event_sequences": [12, 18]},
     {
+      "source": "history",
+      "snapshot_hash": "sha256:...",
+      "run_id": "...",
+      "event_sequences": [12, 18]
+    },
+    {
+      "source": "workspace",
+      "snapshot_hash": "sha256:...",
       "path": "priv/preludes/kernel/agent.core.clj",
-      "lines": [70, 96],
-      "snapshot_hash": "sha256:..."
+      "lines": [70, 96]
     }
   ],
   "candidate": {
@@ -701,6 +749,21 @@ Planned output channels:
   private input and carries that classification into assembly; and
 - trace and private inspection remain separate artifacts with their own
   contracts.
+
+Path resolution is intentionally explicit:
+
+| Path surface | Base for a relative path |
+| --- | --- |
+| Manifest path, `--host-config`, `--trace`, `--inspect`, `--output`, `--private-output`, or `--component-override-descriptor` | invoking process working directory |
+| A path or `cwd` stored inside host config | canonical host-config directory |
+| Component, input, or contract path stored inside a manifest | canonical manifest directory |
+| `--mission` or `--private-mission` | canonical manifest directory |
+| Candidate source path stored inside an override descriptor | canonical descriptor directory |
+
+The runner canonicalizes and confines each path under its owning boundary
+before opening it. Moving a manifest or host document therefore moves its
+relative configuration as a unit, while output destinations remain explicit
+operator paths.
 
 Do not invent a second result envelope. The persisted V1 projection remains
 `value`, `usage`, and `evaluation_memory`.
@@ -869,6 +932,11 @@ registration.
 Static source, selection, and data-class checks happen before credentials are
 resolved, sensitive snapshots are opened, stdio is spawned, or remote MCP is
 contacted. Discovery is a later dynamic validation phase.
+
+MCP-first Slices 4 and 5 are independent after this foundation. The sequence
+below intentionally takes the filesystem sample/cutover (MCP Slice 5) before
+private MCP exchange capture (MCP Slice 4) so useful file navigation lands
+early. The complete Code Scout acceptance flow requires both.
 
 ### Slice C — Sample filesystem server
 

@@ -3,8 +3,9 @@
 > **Status:** active implementation plan, promoted from `future/` on
 > 2026-07-24. Every API below remains planned unless explicitly described as
 > current behavior. The protocol target is the locked `2026-07-28` release
-> candidate reviewed on 2026-07-23; confirm the final specification and stable
-> SDK releases after 2026-07-28 before pinning dependencies.
+> candidate reviewed on 2026-07-23. Implementation may target that candidate
+> before final publication; reconcile any final specification or stable-SDK
+> deltas as an ordinary follow-up rather than blocking the first slices.
 
 ## 1. Outcome
 
@@ -142,6 +143,9 @@ Planned remote installation uses the same outer grammar:
 
 ```json
 {
+  "credentials": {
+    "issues_token": {"env": "ISSUES_TOKEN"}
+  },
   "install": {
     "issues": {
       "source": "mcp",
@@ -551,6 +555,57 @@ The manifest uses the same narrowing keys for every installed provider:
 }
 ```
 
+### 5.1 Credential bindings
+
+The outer host grammar owns one credential-binding mechanism shared by closed
+host-installed sources. A credential declaration has exactly one source:
+
+- `{"env": "NAME"}` reads one environment variable;
+- `{"file": "relative/or/absolute/path"}` reads one bounded secret file, with
+  relative paths based at the canonical host-config directory; or
+- `{"literal": "value"}` stores the secret in the host document itself and
+  therefore makes that document sensitive and unsuitable for source control.
+
+Providers and transports refer to a declared credential by binding name; they
+never carry an inline secret. Unknown bindings fail strict host-config loading.
+Static source, selection, and data-class/egress checks run before secret
+materialization. A missing environment variable, unreadable secret file, or
+otherwise invalid binding then fails before provider construction, subprocess
+spawn, remote contact, or model activity.
+
+Streamable HTTP and other request/response sources render bindings through a
+closed `auth` entry at the moment of each exchange:
+
+| Scheme | Required fields | Rendered header |
+| --- | --- | --- |
+| `bearer` | `binding` | `Authorization: Bearer <secret>` |
+| `basic` | `binding` | `Authorization: Basic <secret>` |
+| `api_key` | `binding`, `header` | `<header>: <secret>` |
+
+Header names are strictly validated. An `api_key` entry cannot override
+framing, routing, MCP protocol, proxy, or other reserved headers. The provider
+retains a header-producing callback, never a rendered header or secret-bearing
+map. This keeps credentials structurally absent from capabilities, snapshots,
+inspection records, serialized errors, telemetry, and owner status, and lets
+a credential resolver refresh or rotate values without rebuilding downstream
+capability metadata.
+
+Stdio has no request header channel. Its transport maps an allowlisted
+subprocess variable to a binding:
+
+```json
+{
+  "env": {
+    "GITHUB_TOKEN": {"binding": "issues_token"}
+  }
+}
+```
+
+Only the explicit environment map reaches the child; it is redacted from logs
+and process status. The owner-monitored transport terminates and observes the
+subprocess before run cleanup completes. Manifests and PTC-Lisp can neither
+name bindings nor read, replace, or render credentials.
+
 `allow` defaults to all host-installed public names. That is not escalation:
 the host's `tools` map is the authority allowlist. The host mapping also sets
 the maximum model-visible set and may replace an untrusted remote description
@@ -588,9 +643,18 @@ the already-authorized installation in a later dynamic phase.
 
 ## 6. Implementation sequence
 
+Slices 1–3 are the shared protocol and installation foundation. After they
+land, Slice 4 (feedback/private inspection) and Slice 5 (the filesystem sample
+and `file-read` cutover) are independent and may land in either order. The
+application plan deliberately uses the filesystem slice first; the complete
+private-inspection tutorial requires both.
+
 ### Slice 1 — Modern stateless Streamable HTTP
 
-- Recheck the final `2026-07-28` specification.
+- Implement against the locked `2026-07-28` release candidate now and keep
+  protocol constants and parsing seams localized.
+- After final publication, reconcile any specification, conformance-fixture,
+  or stable-SDK delta without treating publication as a prerequisite.
 - Replace initialization/session behavior with per-request `_meta` and
   `server/discover`.
 - remove `Mcp-Session-Id`, expiry, session DELETE, and old task-support fields;
@@ -647,9 +711,10 @@ Elixir registration change.
 private reviewer can reconstruct the full exchange and public artifacts reveal
 neither payload nor credentials.
 
-### Slice 5 — Sample server and tutorial acceptance
+### Slice 5 — Sample server and filesystem acceptance
 
-- Pin the stable official TypeScript SDK generation.
+- Pin one RC-compatible official TypeScript SDK generation for initial work,
+  then move to the stable generation after publication.
 - Implement the immutable read-only filesystem sample.
 - Require an explicit default-deny include set and prove excluded files are
   never opened or listed.
