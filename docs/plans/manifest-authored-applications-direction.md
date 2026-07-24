@@ -67,7 +67,7 @@ Out of scope:
 | `file-read` | Freezes a directory but reads one whole already-known UTF-8 path | temporary current behavior; migrate to MCP filesystem tools and delete it rather than adding it to host config |
 | MCP | Trusted Elixir can install a read-only sessionful HTTP source | modern stateless protocol, stdio, host JSON |
 | Canonical trace | `TraceSnapshot` and `TraceCapability` provide four bounded queries in the fixed `log-analysis-v1` profile | ordinary manifest-selectable source |
-| Private inspection | `--inspect` writes exact provider-neutral model, source, and capability records to a bounded `0600` artifact; the Viewer can pin one artifact against its canonical run | ordinary explicitly classified snapshot source, a private human-analysis REPL profile, and MCP wire records |
+| Private inspection | `--inspect` writes exact provider-neutral capability, evaluation-source, and prelude-source records to a bounded `0600` artifact — LLM exchanges are the workflow `llm-request` capability records; the Viewer can pin one artifact against its canonical run | ordinary explicitly classified snapshot source, a private human-analysis REPL profile, and MCP wire records |
 | `ptc.repl` profiles | the frontend, resource parser, assembly, session, and help text are hard-coded to `log-analysis-v1` | a closed profile registry and shared analysis-session machinery before adding `inspection-analysis-v1` |
 | Terminal output | Prints public `Result`; trace and inspection persist separately | atomic public/private result artifacts and result schema |
 | Bundle lifecycle | Bundles compile and freeze before execution | already prevents in-place self-replacement |
@@ -165,8 +165,10 @@ cutover lands, manifests can no longer instantiate the legacy `llm` or
 `file-read` built-ins by supplying provider-specific config. Every selected
 provider name must come from the host document. A provider-free manifest,
 such as the pure aggregate run below, may omit host config. Existing
-manifests, examples, and tests move to installed aliases; legacy model, root,
-and file lists are rejected rather than retained as a fallback path.
+manifests, examples, and tests move to installed aliases; the legacy inline
+config keys (`model` and `cache` for `llm`; `root`, `max_bytes`, and
+`model_visible` for `file-read`) are rejected rather than retained as a
+fallback path.
 
 Trusted direct Elixir embedding remains able to construct and pass an
 explicit `ProviderRegistry`, including custom builders. That programmatic host
@@ -383,6 +385,7 @@ code-scout/
   review.schema.json             review Result.value contract
   candidate.schema.json          improvement Result.value contract
   evaluation.schema.json         aggregate Result.value contract
+  trial-input.schema.json        per-trial subject/case input contract
   evaluate-replay.json           one replay-backed trial
   evaluate-live.json             one live-model trial
   aggregate.json                 provider-free result aggregation
@@ -680,7 +683,10 @@ application's repository prelude rather than a runtime module.
 The host mappings keep every raw capability model-invisible by relying on the
 safe false default. The prompt policy then presents `repo` as the answer facade
 and `repo` plus `runs` as the review/improvement facade. Frozen prelude code can
-still call the mapped raw capabilities. The planned `cap` helper library
+still call the mapped raw capabilities, and visibility is discovery-only: a
+selected, model-invisible capability also remains callable by generated code
+that names it directly, because authority comes from host installation and
+manifest selection rather than the prompt catalog. The planned `cap` helper library
 becomes composition-only rather than prompt-visible. A manifest may further
 narrow an installed model-visible set, but these examples do not repeat an
 empty narrowing when the host ceiling is already false. `allow`, if present,
@@ -807,8 +813,12 @@ Every collection is deterministically ordered, paged under a result-byte
 ceiling, and uses an opaque cursor bound to the snapshot identity, operation,
 filters, and offset.
 
-Because V1 has a closed record vocabulary, provider wire exchanges require a
-new artifact version rather than an unrecognized V1 record.
+`model-exchanges` needs no new record type: the V1 vocabulary already
+captures each LLM exchange as the `capability-input`/`capability-output`
+records of the workflow `llm-request` capability, so the query is a filtered
+pairing of existing records. Provider wire exchanges have no V1 record type;
+because the vocabulary is closed, they require a new artifact version rather
+than an unrecognized V1 record.
 
 Exact provider-neutral records are not necessarily byte-identical to a remote
 provider wire format. MCP wire records deliberately add the bounded JSON-RPC
@@ -1049,7 +1059,10 @@ The host prepares a bounded private trial input containing only the candidate
 identity (`component_id`, `base_source_hash`, and `source_hash`), one frozen
 case, the subject (`baseline` or `candidate`), and trial configuration. It
 does not put candidate source in either trial input; only the trusted override
-descriptor supplies those bytes to a candidate run. A replay
+descriptor supplies those bytes to a candidate run. A trusted host step
+generates each trial-input file consumed below from the candidate artifact
+and one frozen case before any trial runs; `evaluate-replay.json` and
+`evaluate-live.json` validate it against `trial-input.schema.json`. A replay
 baseline/candidate pair is:
 
 ```console
@@ -1198,7 +1211,8 @@ read its surrounding lines without a prelisted answer, while no public
 ### Slice D — Classified inputs, result artifacts, and contracts
 
 - add `--output` and `--private-output`;
-- add mutually exclusive `--mission` and trusted `--private-mission`;
+- keep the existing manifest-relative `--mission` input override and add the
+  mutually exclusive trusted `--private-mission`;
 - add input and `Result.value` schemas;
 - implement the coarse effective run-class and sink-compatibility rule from
   §4.7;
@@ -1327,6 +1341,7 @@ Write tools remain a separate authority milestone.
 | Manifest selects an uninstalled provider/tool or raises a ceiling | Assembly failure |
 | Any selected provider fails pure preparation | No credential, sensitive snapshot, subprocess, network endpoint, or model is touched |
 | An ordinary provider omits `data_class`/`accepts_data`, a mapped tool omits `model_visible`, or stdio omits `env` | Resolves to normal-only, model-invisible, and no child credential bindings |
+| Generated code names a selected model-invisible capability directly | Call succeeds; visibility filters the prompt catalog, not authority |
 | First-slice manifest selects an MCP alias into workflow | Strict unsupported-environment failure; workflow-side MCP remains undecided |
 | `--check` succeeds | Prints the resolved environment/alias/source view and safe identities, never raw secrets, roots, or private payloads |
 | Sample filesystem changes after capture | Run continues to observe the frozen snapshot |

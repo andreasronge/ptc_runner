@@ -43,7 +43,7 @@ The current implementation already establishes useful boundaries:
 
 | Current surface | Verified behavior | Consequence |
 | --- | --- | --- |
-| `PtcRunner.Kernel.Capability` | Normalizes a name, host-declared effect, bounded schemas, visibility, callback, and provider errors | MCP tools should become ordinary capabilities; the Kernel should not learn MCP tool semantics |
+| `PtcRunner.Kernel.Capability` | Validates a name (dots allowed), host-declared effect, bounded schemas, visibility, and a callback that returns `ProviderError` values on failure | MCP tools should become ordinary capabilities; the Kernel should not learn MCP tool semantics |
 | `PtcRunner.Kernel.ProviderRegistry` | Accepts trusted builders and normalizes `{capabilities, snapshot, close}` | Host JSON should decode into existing builders, not create another provider framework |
 | `PtcRunner.Kernel.MCPSource` | Implements read-only Streamable HTTP for MCP `2025-11-25`; installation requires Elixir | The adapter exists, but its session protocol and installation channel must change |
 | `PtcRunner.Kernel.MCPLease` | Owns a protocol session, request IDs, expiry, active requests, and session DELETE | Most of this disappears when protocol sessions disappear |
@@ -613,6 +613,13 @@ These are local field defaults, not a shared defaults block or merge rule.
 `as` and `effect` remain required for every mapped tool because they define
 the public name and authority.
 
+`ceilings` is a closed key set owned by each source's decoder; unknown
+ceiling keys fail strict loading. An omitted key or an empty `ceilings`
+object selects that source's documented safe default, never "unlimited". For
+the V1 `mcp` source the keys are exactly `timeout_ms`, `max_catalog_tools`,
+and `max_result_bytes`. Slice 3 documents every source's ceiling keys and
+defaults in the generated schemas.
+
 The manifest uses the same narrowing keys for every installed provider:
 
 ```json
@@ -718,8 +725,13 @@ acquired. This is a small internal boundary in `ProviderRegistry` and
 `allow` defaults to all host-installed public names. That is not escalation:
 the host's `tools` map is the authority allowlist. Mapped tools are
 model-invisible by default; an explicit host `model_visible: true` adds one to
-the maximum model-visible set. The host may also replace an untrusted remote
-description with host-owned text. Manifest `model_visible` may only reduce
+the maximum model-visible set. Visibility is prompt-catalog discovery only,
+never authority: a selected but model-invisible capability remains callable
+by prelude and generated code that names it directly, matching the Kernel's
+current `model_visible` semantics. The invisible default is applied by the
+host tool-map decoder; the `Capability` struct keeps its current
+`model_visible: true` default for other builders. The host may also replace
+an untrusted remote description with host-owned text. Manifest `model_visible` may only reduce
 that installed set. The manifest may lower ceilings but cannot change
 transport, upstream names, effects, descriptions, error visibility,
 credentials, or data classes.
@@ -729,7 +741,8 @@ complete provider registry for a provider-bearing run, not an overlay on the
 current implicit `llm` and `file-read` built-ins. Slice 3 defines the closed
 host schema without a `file-read` source; Slice 5 activates the host-only
 registry while deleting legacy manifest-owned provider construction and its
-model, root, and file-list config shapes. Provider-free manifests may still
+inline config shapes (`model` and `cache` for `llm`; `root`, `max_bytes`, and
+`model_visible` for `file-read`). Provider-free manifests may still
 run without a host document. This keeps one authority path: a provider alias
 exists only because the operator installed it.
 
@@ -748,6 +761,11 @@ The V1 host schema and decoder accept only `effect: "read"`. The wider internal
 capability effect enum is a future contract, not accepted host grammar.
 `write` and `unknown` remain structurally invalid until guarded-write policy
 lands.
+
+V1 placement is restricted the same way: an installed `mcp` provider may be
+selected only into the mission environment. Selecting an MCP alias into
+`providers.workflow` fails prepare-phase placement validation. Workflow-side
+MCP remains an explicit open decision in the application plan.
 
 For an installed provider that accepts private inspection data, assembly
 conservatively treats every selected remote or write capability as a possible
@@ -836,7 +854,8 @@ emits equivalent capabilities and safe snapshots.
 - Add the pure prepare/acquire provider boundary from §5.2 and resolve each
   referenced credential exactly once per run between those phases.
 - Decode only closed built-in source and transport identifiers.
-- Do not add a `file-read` host source or accept its legacy root/file config.
+- Do not add a `file-read` host source or accept its legacy `root`,
+  `max_bytes`, or `model_visible` config.
 - Prepare the run registry to contain exclusively host-installed aliases at
   the filesystem cutover in Slice 5.
 - Check selected data classes and possible egress sinks before resolving
@@ -906,7 +925,7 @@ advertise what PtcRunner cannot honor.
 | --- | --- |
 | Legacy sessionful server | Deterministic unsupported-protocol failure; no fallback |
 | Provider-bearing manifest has no host config | Strict missing-installation failure; no implicit built-in registry |
-| Manifest supplies legacy model/root/file provider config | Strict load failure before provider activity |
+| Manifest supplies legacy inline `llm` or `file-read` provider config | Strict load failure before provider activity |
 | Editor validates a host config or manifest | Shipped schema supplies completion and structural errors without running PtcRunner |
 | `$schema` is omitted or names a local/version-matched copy | Runtime behavior and effective identity are unchanged |
 | Structurally valid config violates a cross-file or runtime rule | `--check` reports the bounded semantic error; schema success is not treated as assembly success |
@@ -919,6 +938,8 @@ advertise what PtcRunner cannot honor.
 | Mapped tool is absent or its schema is unsupported | Provider assembly fails before model activity |
 | Manifest names an unmapped tool or changes an effect | Strict selection failure |
 | Mapping omits `model_visible`, ordinary provider omits normal data fields, or stdio omits `env` | Tool is model-invisible, provider is normal-only, and no child credential binding is added |
+| Generated code calls a selected model-invisible mapped tool by name | Call succeeds; visibility filters the prompt catalog, not authority |
+| Manifest selects an MCP alias into workflow | Strict unsupported-environment failure; workflow-side MCP is deferred |
 | Tool list changes after assembly | Active run keeps its frozen catalog |
 | Stdio is requested on an unsupported platform | Deterministic pre-spawn configuration failure |
 | Stdio server writes non-protocol stdout | Closed protocol failure; process is terminated |
