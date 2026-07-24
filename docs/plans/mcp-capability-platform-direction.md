@@ -1,10 +1,10 @@
-# MCP-first capability platform — direction
+# MCP-first capability platform — implementation plan
 
-> **Status:** future direction and implementation guide. Every API below is
-> planned unless explicitly described as current behavior. The protocol target
-> is the locked `2026-07-28` release candidate reviewed on 2026-07-23; confirm
-> the final specification and stable SDK releases after 2026-07-28 before
-> pinning dependencies.
+> **Status:** active implementation plan, promoted from `future/` on
+> 2026-07-24. Every API below remains planned unless explicitly described as
+> current behavior. The protocol target is the locked `2026-07-28` release
+> candidate reviewed on 2026-07-23; confirm the final specification and stable
+> SDK releases after 2026-07-28 before pinning dependencies.
 
 ## 1. Outcome
 
@@ -21,6 +21,7 @@ The first platform target is intentionally small:
 - tools as the first model-callable MCP primitive;
 - strict host-owned tool mappings, effects, credentials, and ceilings;
 - modern stateless MCP `2026-07-28`, without a legacy compatibility layer;
+- no host-configurable `file-read` source or second generic filesystem API;
 - a non-production read-only filesystem sample server; and
 - generic `mix ptc.run`, not task-specific Mix commands.
 
@@ -45,6 +46,7 @@ The current implementation already establishes useful boundaries:
 | `PtcRunner.Kernel.ProviderRegistry` | Accepts trusted builders and normalizes `{capabilities, snapshot, close}` | Host JSON should decode into existing builders, not create another provider framework |
 | `PtcRunner.Kernel.MCPSource` | Implements read-only Streamable HTTP for MCP `2025-11-25`; installation requires Elixir | The adapter exists, but its session protocol and installation channel must change |
 | `PtcRunner.Kernel.MCPLease` | Owns a protocol session, request IDs, expiry, active requests, and session DELETE | Most of this disappears when protocol sessions disappear |
+| `PtcRunner.Kernel.FileCapability` | Freezes configured files and reads one already-known whole UTF-8 path | Keep only until the MCP filesystem replacement passes acceptance, then delete the public provider instead of extending it |
 | `PtcRunner.Kernel.JSONSchema` | Compiles a bounded 2020-12 subset and currently requires object roots for inputs and outputs | Input and output compilation need distinct root rules; full remote schemas must not bypass the bounded callable profile |
 | `mix ptc.run` | Uses the default registry and has no host-config option | A generic trusted installation channel is the missing CLI capability |
 | Private inspection | Captures exact provider-neutral LLM and capability activity in a separate bounded artifact | MCP-specific wire evidence can extend the private plane without entering canonical traces |
@@ -170,7 +172,31 @@ HTTP headers; Streamable HTTP does not accept a command or subprocess
 environment. `source: "mcp"` is the application concept. Transport modules are
 internal adapters.
 
-### 3.3 Target modern stateless MCP only
+### 3.3 Replace public `file-read`, not trusted artifact loading
+
+The target host grammar has no `source: "file-read"`. Model-accessible
+navigation, discovery, search, and ranged reads come from a host-installed MCP
+server. Do not make the current provider host-configurable and do not grow it
+into a parallel filesystem API.
+
+This does not route PtcRunner's own trusted loading through MCP. The runner
+continues to open host config, manifests, PTC-Lisp components, schemas, input
+artifacts, and other explicitly selected platform files through their
+dedicated confined loaders. Those files establish a run; they are not ambient
+filesystem capabilities granted to generated code.
+
+The filesystem server may advertise an upstream tool named
+`read_text_file`. That is an MCP tool selected and renamed by the host, not the
+legacy PtcRunner source kind. The distinction keeps bootstrap simple while
+leaving one extensible boundary for agent-visible filesystem access.
+
+Removal is one breaking cutover: first make the sample MCP server pass
+filesystem acceptance, then migrate current examples and tests and delete the
+`file-read` builder, manifest config, and capability implementation in the
+same release. Do not publish a target state in which both public filesystem
+paths remain supported.
+
+### 3.4 Target modern stateless MCP only
 
 The first config-driven source should implement MCP `2026-07-28` and reject
 legacy servers. PtcRunner is a 0.x library and the controlled sample server
@@ -213,7 +239,7 @@ session DELETE. For Streamable HTTP, immutable request configuration plus the
 Kernel's existing bounded provider worker may be sufficient; retain a
 dedicated owner only where it owns a real resource.
 
-### 3.4 Stdio owns an OS process, not a protocol session
+### 3.5 Stdio owns an OS process, not a protocol session
 
 Stdio still needs a resource owner because PtcRunner launches a subprocess.
 The owner must:
@@ -237,7 +263,7 @@ Unexpected server exit loses in-flight requests. V1 should return a bounded
 transport failure rather than automatically retry a potentially effectful
 tool. Restart-and-retry can be added only with an effect/idempotence policy.
 
-### 3.5 Discover once, freeze once
+### 3.6 Discover once, freeze once
 
 Provider assembly performs `server/discover` and paginated `tools/list`,
 selects only host-mapped upstream names, compiles their schemas, sorts the
@@ -279,7 +305,7 @@ state handles, tool arguments, and ordinary results remain excluded. A schema
 hash alone is never described as proof that two providers or datasets behave
 identically.
 
-### 3.6 Keep a bounded callable schema profile
+### 3.7 Keep a bounded callable schema profile
 
 MCP now permits full JSON Schema 2020-12, but PtcRunner should not allow an
 arbitrary remote schema to weaken its callable boundary.
@@ -302,7 +328,7 @@ Text, images, embedded resources, and resource links need explicit bounded
 normalization policies before exposure. Unknown content must not be silently
 converted into a string.
 
-### 3.7 Preserve useful tool errors and exact private evidence
+### 3.8 Preserve useful tool errors and exact private evidence
 
 MCP tool-execution errors are intended to help a model correct a call. The
 current adapter reduces every `isError` result to `mcp_domain_error`, which is
@@ -336,7 +362,7 @@ The current inspection format has an exact V1 record vocabulary, so MCP
 exchange records require a new versioned vocabulary; they must not be emitted
 as unknown records in a V1 artifact.
 
-### 3.8 Tools first; do not mirror all of MCP into the Kernel
+### 3.9 Tools first; do not mirror all of MCP into the Kernel
 
 MCP Resources are application-controlled context, while Tools are
 model-controlled operations. PtcRunner's current capability boundary maps
@@ -361,7 +387,7 @@ Logging:
 Prompts and MCP Apps are also outside the first capability source. PTC-Lisp
 preludes remain the trusted composition and instruction layer.
 
-### 3.9 Explicit application state
+### 3.10 Explicit application state
 
 The protocol is stateless even when an application is not. A server that
 creates a browser, transaction, candidate workspace, or long-lived snapshot
@@ -378,7 +404,7 @@ The filesystem sample avoids a handle: its read-only snapshot is fixed server
 configuration created at process startup, not state created by an earlier tool
 call.
 
-### 3.10 Defer MRTR and Tasks until the synchronous boundary is explicit
+### 3.11 Defer MRTR and Tasks until the synchronous boundary is explicit
 
 `resultType: "input_required"` and the Tasks extension are important but do not
 belong in the first synchronous tool adapter.
@@ -401,7 +427,7 @@ retention policy, poll accounting, `tasks/get`, `tasks/update`,
 may outlive its creating run. Polling is the default; subscriptions are an
 optimization.
 
-### 3.11 Propagate trace context, not private baggage
+### 3.12 Propagate trace context, not private baggage
 
 PtcRunner should propagate W3C `traceparent` and, when safe, `tracestate`
 through MCP `_meta` so a capability call can correlate with spans in the MCP
@@ -534,10 +560,18 @@ names, effects, descriptions, error visibility, credentials, or data classes.
 
 Host installation is the complete provider registry for a provider-bearing
 run, not an overlay on the current implicit `llm` and `file-read` built-ins.
-Slice 3 removes manifest-owned provider construction and rejects the legacy
-model, root, and file-list config shapes. Provider-free manifests may still
-run without a host document. This keeps one authority path: a provider alias
-exists only because the operator installed it.
+Slice 3 defines the closed host schema without a `file-read` source; Slice 5
+activates the host-only registry while deleting legacy manifest-owned
+provider construction and its model, root, and file-list config shapes.
+Provider-free manifests may still run without a host document. This keeps one
+authority path: a provider alias exists only because the operator installed
+it.
+
+For generic external integrations, the only source identifier in this plan is
+`mcp`. In particular, `source: "file-read"` is an unknown source and fails
+strict decoding. The application direction separately defines the closed
+host-owned `llm`, replay, trace, and private-inspection sources; none is a
+second generic filesystem provider.
 
 The first read-only slices reject host mappings whose effect is not `read`.
 The wider enum records the eventual normalized capability contract, not
@@ -590,10 +624,9 @@ emits equivalent capabilities and safe snapshots.
 - Require and hash a bounded non-secret `installation_revision`.
 - Resolve credential bindings without storing values in snapshots.
 - Decode only closed built-in source and transport identifiers.
-- Build the run registry exclusively from host-installed aliases; remove the
-  implicit manifest-configured `llm` and `file-read` fallback.
-- Migrate existing provider-bearing examples and tests to host config rather
-  than maintaining two authority paths.
+- Do not add a `file-read` host source or accept its legacy root/file config.
+- Prepare the run registry to contain exclusively host-installed aliases at
+  the filesystem cutover in Slice 5.
 - Check selected data classes and possible egress sinks before resolving
   credentials or opening any provider.
 - Add `--check` to assemble, discover, hash, and close without invoking the
@@ -623,6 +656,11 @@ neither payload nor credentials.
 - Freeze its `snapshot_info` identity during provider assembly.
 - Add protocol and deterministic filesystem fixtures.
 - Run it through the generic host-config and manifest path.
+- Migrate every current `file-read` example and test to the mapped MCP tools.
+- Delete the implicit `file-read` builder, manifest config, and
+  `FileCapability` only after the MCP filesystem acceptance suite passes.
+- Activate the host-only provider registry in the same breaking cutover, so
+  no released target supports both filesystem authority paths.
 - Keep application behavior in PTC-Lisp and the generic runner.
 
 **Gate:** the repository-analysis tutorial can navigate unknown nested files,
@@ -648,6 +686,8 @@ advertise what PtcRunner cannot honor.
 | Legacy sessionful server | Deterministic unsupported-protocol failure; no fallback |
 | Provider-bearing manifest has no host config | Strict missing-installation failure; no implicit built-in registry |
 | Manifest supplies legacy model/root/file provider config | Strict load failure before provider activity |
+| Host config declares `source: "file-read"` | Strict unknown-source failure; filesystem capabilities use `source: "mcp"` |
+| PtcRunner loads its host config, manifest, component, schema, or input | Dedicated confined loader is used; no MCP bootstrap dependency |
 | Server catalog contains an unmapped tool | Tool is not exposed and does not need a callable schema |
 | Mapped tool is absent or its schema is unsupported | Provider assembly fails before model activity |
 | Manifest names an unmapped tool or changes an effect | Strict selection failure |

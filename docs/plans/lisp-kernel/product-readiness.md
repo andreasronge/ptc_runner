@@ -1,6 +1,6 @@
 # Lisp Kernel product readiness
 
-Status: active roadmap, reviewed 2026-07-17.
+**Status:** active roadmap, partially implemented; reviewed 2026-07-24.
 
 This document records the current limitations of the implemented minimal
 Kernel and the work that would make it usable as a developer-facing product.
@@ -11,12 +11,13 @@ product surface develops.
 
 ## Assessment
 
-The Kernel is implementable and its bounded-runtime foundation is working. It
-is already useful for deterministic manifest workflows, focused LLM/file
-experiments, and one installed read-only MCP route from a repository checkout.
-The separation of
-workflow and mission authority, immutable bundles, owner-process accounting,
-hard limits, confined file access, and canonical events form a credible base.
+The bounded-runtime foundation is implemented. It is useful for deterministic
+manifest workflows, multi-turn model/program loops, profile-backed local
+analysis, focused LLM/file experiments, and one host-installed read-only MCP
+route from a repository checkout. Workflow/mission authority, immutable
+bundles, owner-process accounting, hard limits, transactional continuation,
+confined file access, and separated canonical/private observability form the
+current base.
 
 It is not yet a general agent framework that a developer with basic Clojure or
 agent-framework knowledge can adopt without Elixir expertise. The largest gap
@@ -25,9 +26,12 @@ discovering trusted libraries, adding useful capabilities, diagnosing invalid
 manifests, configuring realistic model runs, packaging the runtime, and
 operating it outside a Mix project.
 
-The recommended next milestone is therefore **manifest-first
-productization**, not a broader evaluator rewrite or a return to the deleted
-SubAgent architecture.
+The next implementation milestone is the active
+[MCP-first capability plan](../mcp-capability-platform-direction.md) and
+[manifest-authored application plan](../manifest-authored-applications-direction.md):
+make host installation data-driven, replace the narrow public filesystem
+provider with MCP, and pass typed/classified artifacts between ordinary runs.
+This is product-boundary work, not another evaluator rewrite.
 
 ## What works today
 
@@ -53,6 +57,15 @@ SubAgent architecture.
   development payloads separately.
 - Provider-valid agent correction history retains the bounded assistant tool
   call and paired tool result.
+- Public prelude contracts are compiled and enforced, prompt construction is a
+  replaceable shipped Lisp component, and ordinary successful subordinate
+  evaluations support transactional multi-turn definitions and exact
+  `*1`/`*2`/`*3` history.
+- Manifest-backed REPL execution receives the normal reserved workflow tools;
+  the fixed log-analysis profile is available through both Viewer and terminal
+  frontends.
+- The admitted Java surface uses closed class/member dispatch with pinned JVM,
+  Babashka, and PTC conformance evidence.
 - Default run identifiers now use cryptographic entropy. This closes the
   cross-OS-process collision discovered while repeatedly running the CLI.
 - Deterministic examples and focused Kernel contracts are covered by normal
@@ -72,17 +85,16 @@ Kernel execution boundary.
 | Priority | Area | Current limitation | Consequence |
 | --- | --- | --- | --- |
 | P0 | CLI diagnostics | `mix ptc.run` reports many failures through `Mix.raise/1` and inspected Elixir terms; manifest failures often collapse to broad atoms such as `invalid_manifest`, `invalid_component`, or `invalid_limits`. | Scripts and non-Elixir users cannot reliably identify the failing file, field, phase, or repair. |
-| P0 | REPL parity | The REPL does not assemble the same reserved runtime tools as a normal workflow and uses the evaluation timeout for both the whole form and provider dispatch. | A manifest may work through `ptc.run` but fail or expose a different tool surface in `ptc.repl`; remote LLM calls are especially fragile. |
-| P1 | Capability ecosystem | One host-installed read-only MCP source is implemented, but installation still requires an Elixir host; HTTP, OpenAPI, databases, writes, and catalog refresh remain intentionally absent. | The safe connector path is usable by embedders but is not yet a no-code packaged product. |
+| P1 | Capability ecosystem | One host-installed read-only MCP source is implemented, but installation still requires Elixir and the current public `file-read` provider is too narrow for navigation. The active MCP plan adds host JSON, stdio, and a generic filesystem server while deliberately deferring raw HTTP/OpenAPI and writes. | The safe connector seam exists, but application authors cannot yet install useful providers without runtime changes. |
 | P1 | Model protocol | The Kernel LLM adapter exposes a narrow request shape and does not carry structured-output schema, token limits, temperature/reasoning choices, or explicit provider timeout through the public manifest surface. | Model behavior is harder to constrain and operational budgets are incomplete. |
 | P1 | Output contracts | A manifest cannot declare and enforce an input or terminal-result JSON Schema. Direct LLM calls return untrusted model text. | Hosts must add validation outside the manifest and successful runs may still return unusable data. |
 | P1 | Trace operation | A malformed, duplicate, or oversized trace can make a directory source fail as a whole, and trace persistence remains post-run. Generated source is hash-correlated and sensitive payloads have a separate bounded local inspection path. | One damaged file can still hide healthy runs and crashes can lose buffered events, although completed connector/program runs are diagnosable. |
 | P1 | Distribution | The user workflow currently assumes a source checkout, Erlang/Elixir, and Mix. The viewer is a development/test path dependency rather than a production artifact. | Installation and deployment are too heavy for the intended non-Elixir audience. |
-| P1 | End-to-end evidence | Normal tests cover the deterministic tutorial, while model examples mainly prove compilation/assembly and the live E2E check is intentionally small. There is no packaged-install or full CLI file-agent smoke test. | The most important user journey can regress across CLI, manifest, agent loop, provider, trace, and viewer boundaries without one test failing. |
-| P2 | Language expectations | PTC-Lisp is Clojure-oriented, not a full Clojure implementation. The conformance report currently records 300 of 382 audited functions as supported, with notable gaps in `clojure.set` and `clojure.walk`. | Familiar-looking programs can encounter missing functions or semantic differences unless the supported profile is made explicit. |
+| P1 | End-to-end evidence | Scheduled live provider/MCP flows and deterministic inspection-lab journeys exist. Packaged-install, private-sink/loss, real multi-page Viewer, and full CLI Code Scout journeys remain absent. | Large-artifact and distribution regressions can still escape the normal gates. |
+| P2 | Language expectations | PTC-Lisp is Clojure-oriented, not a full Clojure implementation; the generated conformance report is the authority for the supported surface and intentional divergences. | Familiar-looking programs can still encounter missing functions or deliberate recoverable-signal differences. |
 | P2 | Viewer pagination evidence | The viewer's cursor API and event-accumulation code are tested and reviewed, but `Load more events` has not been exercised end to end in a browser with one valid run containing more than 100 events. | A pagination-only rendering, ordering, or interaction defect could remain despite the API checks. |
 | P2 | Diagnostics | Parser/compiler/runtime failures do not consistently carry precise source spans through every boundary. | Larger component bundles are slower to repair than they need to be. |
-| P2 | Reference quality | Some generated function-reference entries have minimal descriptions, and closed migration language remains in a few normative planning sections. | The documentation is accurate enough to implement against but not uniformly polished for first-time users. |
+| P2 | Reference quality | Some generated function-reference entries still have minimal descriptions, and active target-state tutorial material is not yet current user documentation. | The implemented surface is documented, but first-time application authors still lack the finished MCP-era journey. |
 
 ## Improvement details
 
@@ -171,17 +183,14 @@ both requested limits and the usage that was charged against them.
 This change must preserve the single atomic owner operations used for leases,
 usage, closure, and late-result rejection.
 
-### 4. Make REPL execution match normal execution
+### 4. Preserve REPL execution parity
 
-The REPL should reuse the normal workflow tool-assembly path, including
-reserved Kernel tools for capability listing, descriptions, usage, remaining
-budget, subordinate evaluation, and annotations. It should distinguish the
-short Lisp evaluation budget from the longer bounded provider-call deadline.
-
-Parity tests should load one manifest and assert that `ptc.run` and `ptc.repl`
-see the same workflow libraries, capabilities, schemas, and confinement. The
-REPL may retain session memory and history, but that is the only intentional
-semantic difference.
+The manifest-backed REPL now receives the normal reserved workflow runtime
+tools, and focused tests keep its libraries, capabilities, schemas, and
+confinement aligned with ordinary runs. Session memory/history and the fact
+that the manifest entry is not invoked remain intentional frontend
+differences. New runtime tools or provider lifecycle changes must continue to
+exercise both paths rather than reopening a separate REPL assembly contract.
 
 ### 5. Improve model reliability at the boundary
 
@@ -241,6 +250,13 @@ One administrator-installed MCP Streamable HTTP tools route is implemented as
 the first external-tools path. It deliberately remains an embedding API rather
 than a process-global or manifest-configured endpoint catalog.
 
+The active [MCP-first plan](../mcp-capability-platform-direction.md) replaces
+that Elixir-only installation step with strict host JSON, modern stateless
+Streamable HTTP, stdio, and a mapped filesystem server. The related
+[application plan](../manifest-authored-applications-direction.md) keeps
+manifests limited to selection and narrowing. Raw HTTP/OpenAPI, writes, and
+ambient shell access remain outside this milestone.
+
 The implemented source seam and security boundary are defined in the
 [Kernel maintainer guide](../../guides/kernel-maintainer.md) and owning module
 documentation.
@@ -267,8 +283,8 @@ Keep the canonical normal trace sanitized. Its current omission of sensitive
 prompts, model responses, arguments, results, and generated source is a useful
 security default, not a bug.
 
-Add `source_hash`, `source_bytes`, and program kind/environment to subordinate
-evaluation metadata so sanitized events can correlate failures without
+Subordinate evaluation metadata now carries `source_hash`, `source_bytes`, and
+program kind/environment so sanitized events can correlate failures without
 containing source. Exact model exchanges, generated PTC-Lisp, and connector
 payloads belong in a separate private inspection artifact keyed by run,
 capability, and evaluation ID; they must never be embedded in an event returned
@@ -300,8 +316,9 @@ files individually while continuing to expose healthy traces.
 A later, separately installed capability may let a model read exact source from
 completed immutable artifacts under its own result and source ceilings. It is
 not implied by `trace-list-turns`, private event policy, the local Viewer mode,
-or access to the active run. Effective prelude-source capture waits for a real
-workflow that cannot inspect repository source.
+or access to the active run. The Code Scout acceptance application now supplies
+the concrete workflow for bounded effective-prelude and provider-exchange
+inspection; its implementation belongs to the active application plan.
 
 Live progress and streaming can build on the event-consumer boundary later;
 they are not required to stabilize the first CLI product. Live trace
@@ -390,7 +407,8 @@ Remaining productization work:
 - Add `ptc init`, `ptc validate`, `ptc models`, and `ptc doctor` equivalents.
 - Add manifest input/output schemas.
 - Rename `--mission` to `--input`.
-- Make REPL tool assembly and timeouts match normal workflow execution.
+- Add strict host JSON installation and the mapped MCP filesystem source
+  without a public `file-read` compatibility path.
 - Add full scripted CLI and optional live DeepSeek manifest-agent tests.
 
 Exit gate: a developer can create, validate, run, debug, and trace a bounded
@@ -402,6 +420,10 @@ Implemented in the current 0.x line:
 
 - Mission export/capability inventories are frozen with schemas and safe
   fingerprints.
+- Public prelude signatures and types are compiled and enforced at the
+  model-facing API boundary.
+- `agent.prompt` owns bounded deterministic prompt construction separately
+  from the multi-turn control loop.
 - Provider-valid correction history retains the exact bounded prior program,
   paired tool result, bounded diagnostics, and retry policy.
 - Sanitized evaluation events carry generated-source hash/byte correlation;
@@ -424,30 +446,36 @@ program, and connector call by correlated IDs; schema-invalid terminal output
 cannot report success; and the supported DeepSeek E2E agent completes the
 documented file workflow within declared budgets.
 
-### Phase 3: one external capability route
+### Phase 3: MCP-first capability installation
 
-The pre-production vertical slice in this phase is implemented, including the
-credential-free file/native/MCP agent lab and local inspection path. Production
-packaging and any demand-triggered connector expansion remain later work.
+The initial Streamable HTTP seam, credential-free file/native/MCP agent lab,
+and local inspection path are implemented. The active phase is the breaking
+MCP-first cutover:
 
-- Retain the single implemented vertical connector: one safe, read-only,
-  host-installed MCP Streamable HTTP tools source.
-- Discover tools during run assembly in the same run-owned session used for
-  calls; freeze the selected schemas and metadata for that run. Do not build a
-  catalog cache, refresh subsystem, generic adapter hierarchy, or shared IAM.
+- implement the pinned stateless protocol through Streamable HTTP and stdio;
+- install mapped tools, effects, credentials, classifications, and ceilings
+  from strict host JSON;
+- ship the non-production immutable filesystem MCP server;
+- migrate current `file-read` examples/tests and delete that public provider
+  in the same cutover;
+- expose PTC-owned trace/private snapshots through their authoritative native
+  parsers; and
+- keep catalogs frozen per run without a shared refresh service or IAM layer.
+
+Continue to:
+
 - Make provider callback processes run-owned so timeout, caller death, and run
   closure cancel and drain external work before resource cleanup.
-- Keep endpoints and credentials in the exact host-supplied registry, and
+- Keep endpoints, commands, roots, and credentials in the exact host-supplied
+  registry, and
   freeze schemas, quotas, effects, and visibility into the run configuration.
 - Add contract tests for timeout, cancellation, late results, oversized
   responses, credential redaction, and destination confinement.
-- Check in the scripted file/native/MCP lab matrix and load its real output in
-  Viewer API/rendering tests.
 
-Exit gate: a manifest can select a real external tool without adding Elixir or
-gaining ambient host/network authority, a model-authored mission program uses
-it, and a developer can inspect exactly what the model received and generated
-through the explicit local Viewer mode.
+Exit gate: host JSON can install a real MCP server without an Elixir
+registration change; a manifest only selects and narrows it; a model-authored
+mission program uses it; and a developer can inspect the exact private
+conversation and mapped tool exchanges through explicit authority.
 
 ### Phase 4: distribution and operation
 
@@ -511,10 +539,9 @@ mutation, and broad Clojure coverage are useful later improvements. None should
 block the manifest-first milestone.
 
 Authenticated host IAM, remotely bound or directory-wide private Viewer access,
-effective-prelude source capture, prelude proposal/workspace services, runtime
-promotion, connector catalog caching, generic connector adapters, configured
-database connectors, and inbound service frontends are also demand-triggered
-work. They are not 0.x release gates.
+runtime promotion, shared connector catalog caching, additional protocol
+adapters, production database connectors, and inbound service frontends are
+also demand-triggered work. They are not 0.x release gates.
 
 ## Related documents
 
@@ -528,3 +555,9 @@ work. They are not 0.x release gates.
 - [Kernel REPL](../../guides/kernel-repl.md) — current interactive interface.
 - [PTC-Lisp conformance](../../conformance/index.md) — audited language
   coverage and known gaps.
+- [MCP-first capability plan](../mcp-capability-platform-direction.md) — active
+  protocol, transport, host-installation, and filesystem migration work.
+- [Manifest-authored applications](../manifest-authored-applications-direction.md)
+  — active generic runner, classified artifact, and Code Scout work.
+- [Real-flow E2E hardening](real-flow-e2e-hardening.md) — remaining
+  private-sink/overflow/pagination journeys and cache-usage diagnosis.

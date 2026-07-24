@@ -1,7 +1,7 @@
 # Tutorial design probe — build a Code Scout with MCP
 
-> **Status:** target-state tutorial, not current user documentation. It is an
-> API design probe for
+> **Status:** target-state acceptance tutorial for active implementation, not
+> current user documentation. It is an API design probe for
 > [`mcp-capability-platform-direction.md`](mcp-capability-platform-direction.md)
 > and
 > [`manifest-authored-applications-direction.md`](manifest-authored-applications-direction.md).
@@ -47,12 +47,12 @@ that touches data is in the mission environment.
 | Tutorial surface | Status |
 | --- | --- |
 | `mix ptc.run`, strict manifests, local PTC-Lisp, `agent.core` | current |
-| immutable whole-file `file-read` | current, used only as a stepping stone |
+| immutable whole-file `file-read` | current only; deleted at the MCP filesystem cutover and never added to host config |
 | MCP Streamable HTTP installed from Elixir | current, pinned to sessionful `2025-11-25` |
 | `--trace` and exact `--inspect` capture | current |
 | stateless MCP `2026-07-28` and stdio | planned MCP Slices 1–2 |
 | `--host-config` and `--check` | planned MCP Slice 3 |
-| host-installed aliases replacing manifest-configured `llm`/`file-read` | planned application Slice B |
+| host-installed aliases replacing manifest-configured providers | planned application Slices B–C; filesystem access uses `source: "mcp"` |
 | immutable filesystem sample MCP server | planned MCP Slice 5 |
 | manifest-selectable PTC trace/private snapshots | planned application Slice D |
 | private MCP request/response inspection | planned MCP Slice 4 |
@@ -108,6 +108,14 @@ The planned repository sample server uses the official TypeScript MCP SDK and
 the modern stateless protocol. PtcRunner launches it over stdio. The root is
 server configuration supplied by the host, not an MCP Root and not a manifest
 field.
+
+There is intentionally no `source: "file-read"` form in the target host
+grammar. The current whole-file provider remains only until this sample passes
+its acceptance suite; the same cutover migrates its examples/tests and deletes
+the old builder, manifest config, and capability module. PtcRunner still reads
+this host document, the application manifest, local PTC-Lisp, contracts, and
+selected input through dedicated confined loaders. MCP is for
+model-accessible filesystem capabilities, not runtime bootstrap.
 
 `repo-analyst.host.json`:
 
@@ -271,9 +279,15 @@ choose one provider per run.
 
 This host document is the complete provider registry for the run. It does not
 augment implicitly installed `llm` or `file-read` entries: those
-manifest-configured built-ins are removed when host installation lands. A
-provider-free manifest may omit `--host-config`, but a provider-bearing
-manifest cannot fall back to legacy model, root, or file-list configuration.
+manifest-configured built-ins are removed when the Slices B–C filesystem
+cutover lands. A provider-free manifest may omit `--host-config`, but a
+provider-bearing manifest cannot fall back to legacy model, root, or file-list
+configuration.
+
+The closed target source set is `mcp`, `llm`, `llm_replay`,
+`ptc_trace_snapshot`, and `ptc_inspection_snapshot`. `read_text_file` below is
+merely an upstream MCP tool mapped to `workspace.read`; it is not a
+PtcRunner source kind or compatibility spelling for `file-read`.
 
 The tool names are intentionally familiar. They follow the official MCP
 filesystem server where possible (`list_directory`, `search_files`,
@@ -895,6 +909,7 @@ rejects task results.
 | Server returns `input_required` or `task` | unsupported result because the client did not advertise those features |
 | Private history is selected with an unapproved model/MCP sink | assembly fails before sensitive data is opened |
 | Provider-bearing manifest omits host config or uses legacy model/root/file config | strict failure; no implicit provider fallback |
+| Host config declares `source: "file-read"` | strict unknown-source failure; install an MCP filesystem provider instead |
 | Private candidate is supplied through `--private-mission` with a public sink/output | fails before provider activity; input stays private |
 | Private run requests normal stdout value or `--output` | closed failure; only explicit private output may receive it |
 | Log/source text asks for more authority | text cannot change installed capabilities |
@@ -914,8 +929,10 @@ Writing the tutorial resolves several API questions:
    public rename, and effect declaration.
 3. **Raw HTTP distracts from the proof.** It is deferred; a future external
    API can be exposed by an MCP server.
-4. **Generic filesystem access belongs in MCP.** Native PtcRunner code should
-   not grow a repository-shaped provider.
+4. **Generic model-accessible filesystem access belongs in MCP.** The current
+   `file-read` provider is migrated and deleted, not added to host config or
+   expanded into a second API. Trusted manifest/component/contract/input
+   loading remains direct and confined.
 5. **PTC traces remain native.** Their fixed schema and private correlation
    rules are product contracts, not generic filesystem behavior.
 6. **Useful tool errors and exact private exchanges are required for

@@ -1,8 +1,9 @@
-# Manifest-authored applications — direction
+# Manifest-authored applications — implementation plan
 
-> **Status:** future direction. This document describes the generic runner and
-> application contracts needed after the MCP-first capability platform. Every
-> API shown below is planned unless explicitly described as current behavior.
+> **Status:** active implementation plan, promoted from `future/` on
+> 2026-07-24. This document describes the generic runner and application
+> contracts built on the MCP-first capability platform. Every API shown below
+> remains planned unless explicitly described as current behavior.
 
 ## 1. Goal
 
@@ -62,7 +63,7 @@ Out of scope:
 | Local components | Loads confined PTC-Lisp files and declared dependencies | no application-specific runtime work required |
 | `agent.core` | Supplies the provider/evaluation loop | a small generic entry wrapper would remove repeated workflow boilerplate |
 | Provider registry | Built-ins are `llm` and `file-read`; extra builders require Elixir | closed host JSON installation |
-| `file-read` | Freezes a directory but reads one whole already-known UTF-8 path | unknown-file navigation, search, and ranged reads through MCP |
+| `file-read` | Freezes a directory but reads one whole already-known UTF-8 path | temporary current behavior; migrate to MCP filesystem tools and delete it rather than adding it to host config |
 | MCP | Trusted Elixir can install a read-only sessionful HTTP source | modern stateless protocol, stdio, host JSON |
 | Canonical trace | `TraceSnapshot` and `TraceCapability` provide four bounded queries in a fixed analysis profile | ordinary manifest-selectable source |
 | Private inspection | `--inspect` writes exact provider-neutral model, source, and capability records to a bounded `0600` artifact | ordinary explicitly classified snapshot source and MCP wire records |
@@ -121,13 +122,20 @@ The manifest cannot contain an MCP command, remote endpoint, filesystem root,
 credential, or effect. It can only select names installed by the host.
 
 Host installation replaces the current implicit provider registry; it does not
-augment it. Once Slice B lands, manifests can no longer instantiate the
-legacy `llm` or `file-read` built-ins by supplying provider-specific config.
-Every selected provider name must come from the host document. A
-provider-free manifest, such as the pure aggregate run below, may omit host
-config. Existing manifests, examples, and tests move to installed aliases;
-legacy model, root, and file lists are rejected rather than retained as a
-fallback path.
+augment it. When the combined Slices B–C cutover lands, manifests can no
+longer instantiate the legacy `llm` or `file-read` built-ins by supplying
+provider-specific config. Every selected provider name must come from the
+host document. A provider-free manifest, such as the pure aggregate run
+below, may omit host config. Existing manifests, examples, and tests move to
+installed aliases; legacy model, root, and file lists are rejected rather
+than retained as a fallback path.
+
+That is the target contract, activated only when the filesystem MCP server and
+its migration are ready. `file-read` is not made host-configurable during the
+transition. Slices B and C form one release gate: host installation can be
+built first, but the public registry cutover, example migration, and deletion
+of `FileCapability` land together after the MCP filesystem acceptance suite
+passes.
 
 Inside a manifest, the workflow/mission split stays central:
 
@@ -145,6 +153,18 @@ proves that a server written outside Elixir can provide:
 - literal text search with line evidence;
 - bounded ranged UTF-8 reads; and
 - a deterministic snapshot identity.
+
+The current `file-read` provider is not the seed of this API. It is a
+temporary whole-file capability removed at the filesystem MCP cutover. In
+particular, the host grammar never accepts `source: "file-read"`, its legacy
+root/file configuration is not translated into a compatibility shape, and
+the target runtime has no second public filesystem path.
+
+Trusted platform loading remains direct and confined. PtcRunner does not use
+MCP to read the host document, manifest, local component sources, contracts,
+or selected input artifacts. Those are run-construction inputs, not
+filesystem capabilities available to generated programs. An MCP tool named
+`read_text_file` is therefore not the legacy PtcRunner provider.
 
 The same MCP client later connects Git, GitHub, databases, test runners, or a
 production filesystem server. Application-specific wrappers and search policy
@@ -290,6 +310,12 @@ and transport kinds built into the installed PtcRunner release.
 `code-scout/private/` is a generated `0700` host-artifact directory, not a
 versioned application input and not part of the filesystem MCP include set.
 
+The initial closed source identifiers are `mcp`, `llm`, `llm_replay`,
+`ptc_trace_snapshot`, and `ptc_inspection_snapshot`. `file-read` is
+deliberately absent. The `workspace` installation below uses `source: "mcp"`;
+its alias and upstream `read_text_file` tool do not create another source
+kind.
+
 ## 6. Planned host installation
 
 Illustrative target configuration:
@@ -434,6 +460,11 @@ There are no implicitly installed `llm` or `file-read` names alongside this
 document. The host document is the complete provider registry for the run.
 This prevents a manifest from bypassing an operator-installed alias by falling
 back to the current manifest-configured built-ins.
+
+There is also no host-configurable `file-read` source. At the cutover, current
+whole-file examples move to the filesystem MCP server and the old builder,
+manifest schema, and capability module are deleted. PtcRunner's dedicated
+loaders for its own configuration and artifacts are unaffected.
 
 `llm` is another closed host-installable source owned by the generic
 application platform, not by MCP. It wraps the existing provider-neutral LLM
@@ -824,10 +855,9 @@ Complete MCP-first Slice 3:
 - `--host-config`;
 - closed source/transport decoders;
 - closed host-installed `llm` aliases over the existing LLM adapter;
-- replace the implicit default provider registry with exactly the installed
-  aliases for provider-bearing runs;
-- remove legacy manifest-configured `llm` and `file-read` authority and
-  migrate existing examples/tests instead of keeping a fallback;
+- reject `source: "file-read"` and all legacy model/root/file provider config;
+- prepare the provider registry to contain exactly the host-installed aliases
+  when Slice C activates the cutover;
 - credentials;
 - manifest-only narrowing;
 - data-class compatibility; and
@@ -847,10 +877,15 @@ contacted. Discovery is a later dynamic validation phase.
 - use familiar MCP naming and bounded object schemas;
 - add path, symlink, replacement, UTF-8, cursor, ordering, size, stderr,
   cancellation, owner-death, and excluded-secret/build/private-path tests; and
-- map only read tools in the tutorial host config.
+- map only read tools in the tutorial host config;
+- migrate all current `file-read` examples and tests to those mapped tools;
+- delete the implicit `file-read` builder, its manifest config, and
+  `FileCapability`; and
+- activate the host-only provider registry in the same breaking change.
 
 **Gate:** the agent can discover an unknown nested file, find a literal, and
-read its surrounding lines without a prelisted answer.
+read its surrounding lines without a prelisted answer, while no public
+`file-read` provider remains.
 
 ### Slice D — Manifest-selectable PTC snapshots
 
@@ -935,6 +970,8 @@ Write tools remain a separate authority milestone.
 | No host config and no selected providers | Provider-free run remains valid |
 | A manifest selects a provider without host config | Strict failure; there is no implicit `llm` or `file-read` fallback |
 | A manifest uses legacy model/root/file provider config | Strict failure before provider activity |
+| Host config declares `source: "file-read"` | Strict unknown-source failure; model-accessible filesystem operations require `source: "mcp"` |
+| PtcRunner reads host config, a manifest, component, contract, or selected input | Dedicated confined loader remains direct; MCP is not a bootstrap dependency |
 | Unknown host source/transport | Fails before provider or model activity |
 | Manifest supplies a command, endpoint, root, credential, or effect | Strict manifest failure |
 | Manifest selects an uninstalled provider/tool or raises a ceiling | Assembly failure |
@@ -994,6 +1031,7 @@ Scout files and satisfy all of the following:
 - no `.ex` or task-specific Mix file changes for the application;
 - host JSON installs the MCP filesystem server, PTC snapshots, and approved
   LLM;
+- no public `file-read` provider or host source remains;
 - the manifest only selects and narrows those grants;
 - local PTC-Lisp discovers relevant files and traces without prelisted
   answers;

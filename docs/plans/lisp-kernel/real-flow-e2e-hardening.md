@@ -1,287 +1,99 @@
-# Real-flow e2e hardening
+# Real-flow E2E hardening
 
-Status: largely included in the current change set — the remote MCP e2e
-tests and the MCP interop fixes they forced (items 1), the
-instrumentation-clean agent e2e and scheduled workflow with the
-maintainer-guide tag contract (item 3), the REPL manifest runtime-tool
-grants (item 2), and the inventory V2 call forms with the
-prompt-inspecting scripted-model proof (item 6). The inspection-destination
-preflight sequenced here landed under its owning plan. Remaining: the
-pre-production release-hardening journeys (item 4) and cache diagnosis
-(item 5). Created 2026-07-17 from a real-flow audit of the branch (live
-provider runs, generated traces and inspection artifacts, and live Viewer
-checks).
+**Status:** active, partially implemented; reviewed 2026-07-24.
 
-This plan closes the gap between the branch's boundary-heavy unit/property
-coverage and what actually happens in end-to-end flows with real providers.
-The audit found two defects that only real flows expose, plus several
-boundaries that have never been exercised outside fixtures.
+This plan retains only the real-flow gaps that remain after the Kernel
+integration work. Deterministic unit and integration tests remain the
+authority for confinement and lifecycle correctness; these journeys prove that
+the same boundaries survive realistic artifact sizes, Viewer pagination, and
+provider metadata.
 
-## Findings driving this plan
+## Implemented baseline
 
-### The REPL cannot load any manifest that uses the shipped agent stack
+The following former slices are complete and documented by their owning
+modules, tests, workflows, and the
+[Kernel maintainer guide](../../guides/kernel-maintainer.md):
 
-`mix ptc.repl --manifest ptc.json` is a documented flow. It fails with
-`prelude_attach_failed: export workflow.event/annotate requires granted tool
-workflow-annotate` for every manifest whose workflow bundle includes
-`agent.core` — which includes every kernel-tutorial and viewer-demo manifest.
-`PtcRunner.Kernel.RuntimeTools` grants `workflow-annotate` only on the
-Runner's workflow path; the REPL session assembles the same bundle without
-that grant, and fail-closed prelude attach (correctly) rejects the missing
-requirement.
+- credential-free direct and provider-backed remote MCP E2E flows;
+- REPL manifest assembly with the same reserved workflow runtime tools as
+  normal runs;
+- the scheduled/manual `:e2e` workflow and its skip/instrumentation contract;
+- strict inspection-destination preflight before provider activity;
+- V2 mission-inventory call forms, shared by Runner and REPL and exercised by
+  a prompt-inspecting scripted provider; and
+- clean shipped-agent annotations with zero protocol errors.
 
-The fix belongs in the REPL's manifest mode: when reusing a manifest's
-workflow bundle, grant the same workflow runtime tools the Runner grants, so
-one bundle has one meaning. Weakening fail-closed attach is not an option.
+These are no longer active planning items.
 
-### Excluded e2e tests rot silently
+## Remaining gap 1: private sinks, overflow, and real pagination
 
-`test/ptc_runner/kernel/deepseek_e2e_test.exs` was broken by the provider
-resource-lifecycle change (`ProviderRegistry.build/4` now returns
-`%{capabilities, snapshot, close}`, not a bare capability) and nobody noticed:
-`:e2e` is excluded by CI, `mix precommit`, and `mix prepush`. The call-shape
-fix landed during the audit; the process gap remains. Real-provider tests
-need a scheduled or pre-release execution path, or they will rot again.
+The private canonical event policy, bounded loss accounting, and Viewer cursor
+logic have focused coverage, but the repository still lacks one realistic
+journey connecting each complete path.
 
-### Real remote MCP transport was never exercised — and rejected every server
+Add deterministic host-driven journeys that:
 
-The branch rewrote MCP transport lifecycle (`MCPSource`, `MCPLease`) and its
-only executions were the protocol-faithful loopback fixture and
-`mcp_source_test.exs`. Building the remote e2e revealed that the source could
-not connect to **any** probed public server:
+1. run with the private event policy, prove the `.private.jsonl` destination
+   is mode `0600` before content, prove ordinary directory discovery and the
+   normal Viewer omit it, and prove only an explicit private grant can read
+   it;
+2. lower the normal event budget enough for terminal usage to contain
+   non-empty `events_dropped`, then prove the Viewer presents those counts
+   instead of implying a complete trace; and
+3. spread calls across several bounded capability names to retain more than
+   200 canonical events under installed defaults, then prove eager multi-page
+   fetch is complete and a separately lowered Viewer page budget produces
+   explicit partial labeling.
 
-- DeepWiki: schemas rejected (`x-fastmcp-wrap-result` vendor key from the
-  FastMCP framework);
-- Cloudflare docs: schemas rejected (`$schema` dialect marker, emitted by the
-  official SDKs by default);
-- Context7: schemas rejected (`$schema`), tool entries rejected
-  (spec-standard `title` and `execution` fields);
-- Microsoft Learn: correctly rejected — it negotiates protocol `2025-06-18`
-  against the pinned `2025-11-25`.
+Pagination must not be tested by raising production ceilings or by accepting
+invalid fixtures. The run must pass the same canonical validation and query
+path as normal traces.
 
-The interop fixes included in the current change set, all test-first:
+## Remaining gap 2: cache-usage diagnosis
 
-- `PtcRunner.Kernel.JSONSchema` treats a root `$schema` as what it is — the
-  dialect selector. Absence means the MCP default (2020-12); the allowlisted
-  2020-12 and draft-07 URIs are accepted (the bounded profile is a common
-  subset of both) and removed; unknown, malformed, and nested markers are
-  rejected. Vendor `x-…` extension keys are discarded from every level as a
-  deliberate client policy. Neither reaches normalized output, encodings, or
-  hashes, and semantic keywords such as `anyOf` and `default` remain
-  rejected.
-- `MCPSource` ignores genuinely unknown tool-entry fields (`title`, `_meta`,
-  vendor metadata) per MCP forward compatibility, but parses the known
-  `execution` field: absent, `"forbidden"`, and `"optional"` task support
-  execute as ordinary calls, `"required"` fails assembly with the stable
-  `:mcp_tool_task_required` error (this synchronous client does not
-  implement task invocation), and malformed pinned-protocol values are
-  rejected as `:mcp_invalid_catalog`.
+Live runs with `"cache": true` have so far reported `cache_read: 0`. A zero may
+be legitimate, but the current normalization does not yet prove the nested
+OpenRouter-style
+`usage.prompt_tokens_details.cached_tokens` path. Top-level
+`cached_tokens` and nested cache-write metadata have separate focused
+coverage.
 
-Version pinning is intentionally unchanged.
+Complete this in order:
 
-### Bare capabilities advertise no invocation syntax
+1. add a focused adapter regression for nested
+   `usage.prompt_tokens_details.cached_tokens` and normalize it into
+   `cache_read`;
+2. issue two bounded live requests sharing a sufficiently large prompt prefix
+   and record the normalized provider result; and
+3. if the provider reports non-zero reads, extend the Viewer journey to render
+   them from real data; otherwise document that a legitimate zero is
+   provider/model dependent and do not retry indefinitely.
 
-The live agent flow exposed a prompt-content gap: the frozen mission
-inventory lists capability names and schemas but no call form, and prelude
-exports are the only entries carrying a `call` shape. A live model given a
-bare `docs.resolve` capability invented `(tool-call …)`, `(call …)`, and
-`(json-object …)` across turns and never produced `(tool/docs.resolve …)` —
-even when the task spelled it out. The supported pattern is a prompt-visible
-mission wrapper export (as the tutorial and inspection lab use), which the
-delivered agent e2e follows. Closing this is planned work item 6.
+## Recorded non-defect
 
-### Boundaries never exercised with real data
+Pure PTC-Lisp computation normally reaches deterministic loop or evaluator
+heap limits before the outer capability-worker `timeout` or process-level
+`memory_exceeded` statuses. Reaching those outer statuses requires a
+deliberately slow or allocation-heavy capability. This is expected boundary
+ordering, not a missing pure-computation test.
 
-- The private canonical event policy (`.private.jsonl` writing: `0600`
-  restriction, fail-closed sink behavior) has unit coverage but no end-to-end
-  journey; only read-side discovery omission was verified live.
-- `events_dropped` accounting has never been observed in a real trace; no
-  flow lowers the event budget far enough.
-- No real run exceeds 100 canonical events, so the Viewer's multi-page turn
-  fetch and partial-run labeling rest solely on synthetic fixtures. A single
-  capability name is capped at 32 mission calls, but installed defaults
-  allow 128 mission calls across names and 256 retained normal events, so a
-  deterministic journey spreading calls over four bounded capability names
-  can cross 200 events under supported production configuration — no raised
-  ceilings required.
+## Delivery and acceptance
 
-### Observed non-defects worth recording
+The private/overflow/pagination journeys are the release-hardening priority.
+Cache diagnosis may follow independently because a provider returning zero
+cache reads is not a correctness failure.
 
-- Pure computation cannot reach the canonical `timeout` or process-level
-  `memory_exceeded` evaluation statuses: the deterministic loop bound and the
-  in-evaluator heap budget fire first as `evaluation_error`. Reaching those
-  statuses requires a deliberately slow or allocation-heavy capability. This
-  is by design and belongs in the maintainer guide, not a bug list.
-- `"cache": true` on the `llm` provider yielded `cache_read: 0` across all
-  live DeepSeek runs. Whether the alias, the provider, or the upstream lacks
-  prompt caching is undiagnosed; until it is, Viewer cache display is covered
-  only by synthetic fixtures.
+This plan is complete when:
 
-## Planned work
+- a private-policy journey proves permissions, omission, and explicit access;
+- one real trace contains non-empty loss accounting rendered by the Viewer;
+- one valid run above 200 events renders completely across pages and is
+  clearly labeled partial under a lower page budget;
+- nested cached-token normalization has a regression test; and
+- the live cache outcome is either rendered from real non-zero metadata or
+  documented as a legitimate provider limitation.
 
-### 1. Remote MCP e2e flows (included in the current change set)
-
-Two `:e2e`-tagged tests run against a fixed public read-only MCP endpoint
-(default `https://mcp.context7.com/mcp`, overridable via
-`PTC_TEST_MCP_ENDPOINT`):
-
-- `mcp_remote_e2e_test.exs` — a direct Kernel run granting one discovered
-  remote tool to the workflow environment and calling it from a fixed
-  program: real session initialization and echo, discovery, schema
-  compilation of real SDK output, SSE result handling, and lease cleanup;
-- `mcp_remote_agent_e2e_test.exs` — a full manifest agent flow
-  (`RunBuilder.run` with an injected registry): live DeepSeek plans a
-  program that calls the remote MCP tool through a prompt-visible mission
-  wrapper, with `--trace`/`--inspect` artifacts written and audited in-test
-  for endpoint-host and transport field-name absence. Exact secret and
-  session-value scrubbing stays with the deterministic loopback fixture,
-  where those values are known.
-
-Assertions cover the connector snapshot (provider, protocol, public tool
-names, schema hashes), capability start/stop events, and scrubbing of
-transport facts from canonical events and inspection records. The tests skip
-without the required environment (API key for the agent flow) and fail loudly
-on protocol or lifecycle regressions.
-
-### 2. REPL manifest runtime-tool grants
-
-1. Failing regression test: `mix ptc.repl --manifest` (or the underlying
-   `ReplSession` manifest mode) with a workflow bundle including `agent.core`
-   must attach successfully and evaluate one expression.
-2. Grant the Runner's workflow runtime tools in the REPL's manifest mode from
-   one shared definition, so Runner and REPL cannot drift.
-3. Keep mission-side assembly unchanged; the REPL gains no annotation
-   authority beyond what a Runner-executed manifest already has.
-4. Verify the REPL trace still renders in the Viewer.
-
-### 3. Scheduled e2e execution
-
-This item depends on the shipped-agent annotation vocabulary fix owned by
-`viewer-ready-run-observability.md`: today every agent turn records a failed
-`workflow-annotate` call and one protocol error, so the agent e2e cannot yet
-assert clean instrumentation. That fix must land first; the agent e2e then
-adds `usage.protocol_errors == 0` and no-failed-instrumentation assertions
-before the schedule becomes the rot guard.
-
-1. Add a CI workflow (scheduled and manually dispatchable) running
-   `mix test --include e2e` with the provider key from repository secrets.
-2. Keep e2e excluded from push/PR pipelines; the schedule is the rot guard.
-3. Document the tag's contract in the testing section of the maintainer
-   guide: anything tagged `:e2e` must skip cleanly without its environment
-   and must not depend on fixture-only state.
-
-### 4. Private-sink and overflow journeys
-
-1. Extend the inspection lab (or add a sibling host script) with one journey
-   that runs under the private event policy: assert the `.private.jsonl`
-   destination is `0600` before content, normal directory discovery and the
-   live Viewer omit it, and a separate explicit private grant reads it.
-2. Add one journey with a deliberately small event budget so `run-stopped`
-   reports non-empty `events_dropped`, and assert the Viewer renders the
-   drop counts rather than presenting a silently truncated run.
-3. Add one deterministic journey spreading calls across four bounded
-   capability names to produce a run above 200 canonical events under
-   installed default limits, and verify the Viewer's eager multi-page fetch
-   and (with a lowered page budget) its partial labeling against real data.
-   Staying under the 256 retained normal events keeps the run complete;
-   pagination must not be conflated with custom ceilings.
-
-### 5. Cache-usage diagnosis
-
-1. Unit-test the normalized token seam first: OpenRouter reports cache reads
-   under `usage.prompt_tokens_details.cached_tokens`, and the provider
-   normalization must map that field into the normalized `cache_read` count.
-2. Then run two live requests sharing one sufficiently large prompt prefix
-   and compare reported cache reads. A legitimate zero remains an acceptable
-   outcome and is documented with the `llm` provider rather than retried
-   indefinitely.
-3. When real cache counts exist, extend the viewer-demo journeys so cache
-   tiles and columns render from real data.
-
-### 6. Capability invocation syntax in the frozen inventory
-
-1. Bump the frozen mission inventory schema from V1 to V2, adding a `call`
-   field to every bare capability entry, mirroring the `call` field prelude
-   exports already carry. The rendering is frozen exactly: the value is the
-   literal string `(tool/<name> arguments)`, where `<name>` is the
-   capability's already-validated public name (`[a-z][a-z0-9._-]{0,127}`)
-   inserted verbatim and `arguments` is a fixed placeholder token; no other
-   whitespace, casing, or formatting varies, and the field participates in
-   the existing deterministic inventory encoding.
-2. Add golden and hash tests: the rendered inventory, its byte count, and
-   `mission_inventory_hash` change together and deterministically.
-3. Prove Runner and REPL emit the identical V2 inventory from one shared
-   renderer.
-4. Add a scripted-model journey that drives a bare capability directly from
-   the advertised `call` form — no prompt-visible wrapper. The scripted
-   provider must inspect the captured system prompt and return its program
-   only when the exact V2 call form is present, proving the inventory itself
-   carries the enabling information rather than the fixture assuming it.
-
-## Non-goals
-
-- Weakening fail-closed prelude attach, sanitization, or scrubbing to make
-  flows pass.
-- Making e2e tests part of push/PR gates.
-- Building a general MCP conformance suite or supporting non-pinned protocol
-  versions; version negotiation policy is out of scope here.
-- Forcing canonical `timeout`/`memory_exceeded` statuses from pure
-  computation.
-- Standing up authenticated MCP servers; the public read-only endpoint is
-  deliberate so the suite stays credential-free.
-
-## Delivery sequence
-
-1. Remote MCP e2e tests and interop fixes (the current change set).
-2. Agent-e2e instrumentation assertions immediately after the annotation
-   vocabulary fix from `viewer-ready-run-observability.md`, then the
-   scheduled e2e CI workflow and maintainer-guide testing contract — closing
-   the rot window before larger work begins.
-3. REPL manifest runtime-tool grants with its regression test.
-4. Inspection-destination preflight (owned by
-   `viewer-ready-run-observability.md`; sequenced here as the quick win
-   before the inventory change).
-5. Capability invocation syntax in the frozen inventory (V2).
-6. Private-sink, events-dropped, and multi-page journeys — pre-production
-   release hardening: they do not block the correctness and product work
-   above, but the private-file security contract and the synthetic-only
-   eager pagination path must be proven before the vertical slice is called
-   production-ready.
-7. Cache-usage diagnosis and demo extension.
-
-## Acceptance gate
-
-- Both remote MCP e2e tests pass against the default public endpoint; the
-  agent flow additionally skips cleanly without its provider API key, while
-  the credential-free direct flow needs only network access.
-- `mix ptc.repl --manifest examples/kernel-tutorial/03-file-agent/ptc.json`
-  starts, evaluates an expression, and its trace renders in the Viewer.
-- After the annotation vocabulary fix lands, the agent e2e asserts
-  `usage.protocol_errors == 0` and no failed workflow instrumentation calls.
-- A scripted-model journey invokes a bare capability correctly from the V2
-  inventory `call` form alone, with matching inventory golden and hash tests
-  and identical Runner/REPL rendering.
-- The scheduled e2e workflow has at least one green run including the
-  DeepSeek and MCP flows.
-- A private-policy journey produces a `0600` `.private.jsonl` invisible to
-  normal discovery and the live Viewer.
-- A real trace shows non-empty `events_dropped` and the Viewer surfaces it.
-- A real run above 200 events renders completely through the Viewer's eager
-  page fetch, and partial labeling appears when the page budget is lowered.
-- Cache display either renders real nonzero counts or the limitation is
-  documented where the `llm` provider is documented.
-
-## Documentation migration when implemented
-
-This file is a disposable plan. Before deleting it:
-
-- move the REPL runtime-tool grant contract into the REPL task/module docs
-  and the maintainer guide;
-- move the `:e2e` tag contract and schedule into the maintainer guide's
-  testing section;
-- record the pure-computation limit-status behavior in the maintainer guide;
-- record the cache-usage outcome with the `llm` provider documentation; and
-- keep remote-endpoint details only in the e2e test and its module doc.
-
-Remove this plan and its plans-index entry once those retained contracts and
-their tests are in place.
+Before deleting this plan, keep exact normalization behavior in
+`PtcRunner.LLM.ReqLLMAdapter` documentation, keep event policy and loss
+semantics in their owning Kernel module docs, and retain only the high-level
+E2E contract in the maintainer guide.
