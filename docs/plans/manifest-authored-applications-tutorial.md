@@ -55,14 +55,14 @@ that touches data is in the mission environment.
 | immutable whole-file `file-read` | current only; deleted at the MCP filesystem cutover and never added to host config |
 | MCP Streamable HTTP installed from Elixir | current, pinned to sessionful `2025-11-25` |
 | `--trace` and exact `--inspect` capture | current |
-| stateless MCP `2026-07-28` and stdio | planned MCP Slices 1–2 |
+| stateless MCP `2026-07-28` and stdio | planned MCP Slices 0–2 |
 | `--host-config` and `--check` | planned MCP Slice 3 |
 | host-installed aliases replacing manifest-configured providers | planned application Slices B–C; filesystem access uses `source: "mcp"` |
 | immutable filesystem sample MCP server | planned MCP Slice 5 |
-| manifest-selectable PTC trace/private snapshots | planned application Slice D1 |
-| private human investigation in `ptc.repl` | planned application Slice D2 |
+| manifest-selectable PTC trace/private snapshots | planned application Slice E1 |
+| private human investigation in `ptc.repl` | planned application Slice E2 |
 | private MCP request/response inspection | planned MCP Slice 4 |
-| result schemas, `--output`, `--private-output`, `--private-mission` | planned application Slice F |
+| result schemas, `--output`, `--private-output`, `--private-mission` | planned application Slice D |
 | `cap/unwrap!`, `cap/with-cursor`, and `agent.main` libraries | planned application Slice G |
 | component override and LLM replay evaluation | planned application Slice H |
 
@@ -123,7 +123,8 @@ external authority belongs in host config.
 The planned repository sample server uses the official TypeScript MCP SDK and
 the modern stateless protocol. PtcRunner launches it over stdio. The root is
 server configuration supplied by the host, not an MCP Root and not a manifest
-field.
+field. The tutorial invokes the committed reproducible server bundle; it does
+not run `npm install` or download code.
 
 There is intentionally no `source: "file-read"` form in the target host
 grammar. The current whole-file provider remains only until this sample passes
@@ -762,7 +763,18 @@ Start with the public evidence and retain the selected run ID:
 (log/runs {"limit" 20})
 (def run-id "r-2026-07-21-0413")
 (log/run run-id)
-(log/turns run-id {"limit" 100})
+(def turns-page (log/turns run-id {"limit" 100}))
+
+;; A payload-free index over the validated canonical page.
+(->> (get turns-page "items")
+     (map (fn [event]
+            [(get event "sequence")
+             (get event "type")
+             (get-in event ["data" "environment"])
+             (or (get-in event ["data" "name"])
+                 (get-in event ["data" "component_id"])
+                 (get-in event ["data" "evaluation_id"]))]))
+     (map #(str/join "\t" %)))
 ```
 
 Then inspect only the correlated private pages needed for the question:
@@ -794,22 +806,32 @@ evaluation/component identities and source hashes. The human therefore
 explores the same shaped evidence that `private-history` later gives the
 automated reviewer.
 
-Raw `jq` remains useful for diagnosing the artifact format itself. It is the
-fallback when the profile rejects a malformed artifact, not the normal
-behavior-analysis interface. For example, this payload-free index can help
-locate the failing record:
+Raw `jq` remains useful on the host for diagnosing the artifact format itself.
+It is the fallback when the profile rejects a malformed artifact, not the
+normal behavior-analysis interface. Keep its output encoded and bounded
+because rejected fields have not passed PtcRunner validation. For example,
+this index can help locate an early failing record without printing private
+payload bodies:
 
 ```console
-jq -r '
-  [.sequence,
-   .record_type,
-   .payload.environment,
-   (.payload.name //
-    .correlation.component_id //
-    .correlation.evaluation_id)] |
-  @tsv
-' tmp/inspection/analyst.inspection.jsonl
+head -n 100 tmp/inspection/analyst.inspection.jsonl |
+  jq -c '{
+    sequence,
+    record_type,
+    environment: (.payload.environment // null),
+    identity:
+      ((.payload.name //
+        .correlation.component_id //
+        .correlation.evaluation_id //
+        null) |
+       if type == "string" then .[0:160] else . end)
+  }'
 ```
+
+This is operator-side diagnosis, not an alternative validator. `jq` must not
+repair a rejected artifact, decide that it is safe, or feed its records back
+into PTC-Lisp. The authoritative snapshot loader either exposes the complete
+validated catalog or exposes nothing.
 
 The exact native capability names in an existing V1 artifact may differ from
 the planned MCP aliases above. Profile query results, correlation IDs, and
@@ -1118,7 +1140,12 @@ after `deepseek`, keeping workflow entries before mission entries:
 frozen fixtures. Separate manifests select one or the other; the host entry
 does not choose a destination or route between them.
 
-Materialization is a visible trusted step:
+The remaining `jq` commands have a different role: trusted host orchestration
+between isolated runs. PTC-Lisp deliberately has no arbitrary filesystem or
+write authority, so using it here would require a new sink merely to replace
+visible host glue.
+
+Materialization is a visible trusted host step:
 
 ```console
 umask 077
@@ -1144,8 +1171,8 @@ therefore changes the implementation used by that one trial before the bundle
 freezes. `aggregate.clj` is a separate pure workflow with no LLM or mission
 provider.
 
-The host combines only the candidate identity with one frozen case into
-bounded private baseline and candidate inputs. Candidate source is absent
+The trusted host combines only the candidate identity with one frozen case
+into bounded private baseline and candidate inputs. Candidate source is absent
 from both inputs and reaches only the candidate run through the trusted
 override descriptor. With each case file defined as a bounded JSON array, the
 first motivating case can be prepared as:
@@ -1197,8 +1224,8 @@ The host repeats baseline and candidate invocations with
 Every repetition is a fresh Kernel run with one frozen LLM provider and a
 unique no-clobber artifact. Nothing shares mission memory between trials.
 
-Finally, the host combines the still-private trial `Result` projections and a
-provider-free aggregate run invokes `aggregate.clj`:
+Finally, the trusted host combines the still-private trial `Result`
+projections and a provider-free aggregate run invokes `aggregate.clj`:
 
 ```console
 jq -s '{"trials": .}' repo-analyst/private/trials/*.private.json \
