@@ -548,7 +548,6 @@ The manifest uses the same narrowing keys for every installed provider:
   "name": "workspace",
   "config": {
     "allow": ["workspace.search", "workspace.read"],
-    "model_visible": [],
     "timeout_ms": 3000,
     "max_result_bytes": 100000
   }
@@ -595,8 +594,14 @@ subprocess variable to a binding:
 
 ```json
 {
-  "env": {
-    "GITHUB_TOKEN": {"binding": "issues_token"}
+  "credentials": {
+    "github_token": {"env": "GITHUB_TOKEN"}
+  },
+  "transport": {
+    "type": "stdio",
+    "env": {
+      "GITHUB_TOKEN": {"binding": "github_token"}
+    }
   }
 }
 ```

@@ -511,23 +511,13 @@ The source-question manifest is:
   "mission": {
     "components": [
       {"library": "cap"},
-      {"id": "repo", "path": "code-scout/repo.clj", "dependencies": ["cap"]},
-      {"id": "runs", "path": "code-scout/runs.clj", "dependencies": ["cap"]}
+      {"id": "repo", "path": "code-scout/repo.clj", "dependencies": ["cap"]}
     ],
     "data": {}
   },
   "providers": {
     "workflow": [{"name": "analysis-llm"}],
-    "mission": [
-      {
-        "name": "workspace",
-        "config": {
-          "model_visible": []
-        }
-      },
-      {"name": "history", "config": {"model_visible": []}},
-      {"name": "private-history", "config": {"model_visible": []}}
-    ]
+    "mission": [{"name": "workspace"}]
   },
   "input": {"path": "code-scout/answer-input.json"},
   "contracts": {
@@ -540,19 +530,22 @@ The source-question manifest is:
 }
 ```
 
-The review and improvement manifests share the same components, providers,
-and limits but bind different inputs and result contracts:
+The review and improvement manifests retain the same workflow and limits but
+add only the mission surface their tasks require:
 
-| Manifest | Input | `Result.value` contract |
-| --- | --- | --- |
-| `code-scout-answer.json` | `code-scout/answer-input.json` | `code-scout/answer.schema.json` |
-| `code-scout-review.json` | `code-scout/review-input.json` | `code-scout/review.schema.json` |
-| `code-scout-improve.json` | `code-scout/improve-input.json` | `code-scout/candidate.schema.json` |
+| Manifest | Input and `Result.value` contract | Mission surface | Result class |
+| --- | --- | --- | --- |
+| `code-scout-answer.json` | `answer-input.json` / `answer.schema.json` | `cap` + `repo`; `workspace` | public |
+| `code-scout-review.json` | `review-input.json` / `review.schema.json` | add `runs`; add `history` + `private-history` | private |
+| `code-scout-improve.json` | `improve-input.json` / `candidate.schema.json` | same evidence surface as review | private |
 
 The manifests remain small and may share ordinary JSON-generation tooling, but
 the runtime does not introduce manifest inheritance. A question, a run review,
 and an improvement decision are different output types and must not be forced
-through one broad union.
+through one broad union. Do not add a manifest-level `tasks` map or `--task`
+selector for these three cases; revisit that grammar only when a fourth real
+task demonstrates that separate manifests are the dominant remaining
+duplication.
 
 `agent.main` is a proposed small domain-blind shipped library that forwards
 task and loop configuration from input to `agent.core`. It removes a repeated
@@ -560,18 +553,22 @@ four-line workflow component but adds no grammar or authority. Code Scout
 policy lives in task data, result schemas, evaluation fixtures, and the
 application's repository prelude rather than a runtime module.
 
-The raw workspace, trace, and inspection capabilities are hidden from the
-model catalog because the `repo` and `runs` preludes supply cleaner functions.
-They remain callable by frozen prelude code. The planned `cap` helper library
-becomes composition-only rather than prompt-visible, so it does not pollute
-that facade. `allow`, if present, may only be a subset of the host tool map.
+The host mappings keep every raw capability model-invisible. The prompt policy
+then presents `repo` as the answer facade and `repo` plus `runs` as the
+review/improvement facade. Frozen prelude code can still call the mapped raw
+capabilities. The planned `cap` helper library becomes composition-only rather
+than prompt-visible. A manifest may further narrow an installed model-visible
+set, but these examples do not repeat an empty narrowing when the host ceiling
+is already false. `allow`, if present, may only be a subset of the host tool
+map.
 
-Selecting `private-history` requires `analysis-llm` and every other selected
-egress provider to accept `private_inspection`. This manifest intentionally
-selects no remote mission provider besides the local stdio workspace server.
-If private trace text may flow to that server through tool arguments, the host
-must also declare its accepted data classes; read-only does not mean
-non-egress.
+The answer manifest never selects or opens prior-run sources. Selecting
+`private-history` in the review and improvement manifests requires
+`analysis-llm` and every other selected egress provider to accept
+`private_inspection`. Those manifests select no remote mission provider
+besides the local stdio workspace server. Private trace text may flow to that
+server through tool arguments, so the host must explicitly accept the class;
+read-only does not mean non-egress.
 
 ## 8. Generic provider contracts
 
@@ -617,6 +614,15 @@ collection wrapper accepts `nil` for its first page and the prior
 immutable capture, ordering, cursor validation, byte limits, and tool schemas.
 Every data-bearing server result also carries `snapshot_hash`, binding cited
 paths and line ranges to the captured bytes.
+
+The composition-only `cap/with-cursor` helper owns the repeated conditional
+merge of an opaque cursor into a string-keyed argument map. It neither follows
+nor interprets the cursor. A general `cap/paginate` helper is deliberately
+absent from the first slice: generated code can loop explicitly, stop when it
+has enough evidence, and keep every page call visible to Kernel budgets
+without accumulating an unbounded all-pages result. Revisit automatic
+pagination only after several applications demonstrate the same bounded
+all-pages policy.
 
 ### 8.2 Canonical trace snapshot
 
@@ -698,13 +704,13 @@ The improvement run returns one bounded decision:
   "generalized_failure": "...",
   "evidence": [
     {
-      "source": "history",
+      "provider": "history",
       "snapshot_hash": "sha256:...",
       "run_id": "...",
       "event_sequences": [12, 18]
     },
     {
-      "source": "workspace",
+      "provider": "workspace",
       "snapshot_hash": "sha256:...",
       "path": "priv/preludes/kernel/agent.core.clj",
       "lines": [70, 96]
@@ -994,12 +1000,14 @@ stdout.
 
 ### Slice G — Read-only Code Scout
 
-- extend the shipped `cap` library with an envelope-aware `unwrap!` helper;
+- extend the shipped `cap` library with envelope-aware `unwrap!` and
+  opaque-cursor `with-cursor` helpers;
 - make that helper library composition-only rather than prompt-visible;
 - add the domain-blind `agent.main` library and its explicit dependencies;
 - add prompt-visible `repo` and `runs` facades over every selected raw source;
 - expose opaque pagination cursors through every collection facade and test
   evidence that occurs only after the first page;
+- keep page traversal explicit rather than adding `cap/paginate`;
 - cover the helpers, facade-only model catalog, and agent through a real
   manifest integration path;
 - add only host JSON, manifests, PTC-Lisp, schemas, and fixtures;
@@ -1083,8 +1091,12 @@ Write tools remain a separate authority milestone.
 5. **Reusable application distribution.** Manifest-relative components are
    enough for the first application. Defer a component catalog until copying
    local PTC-Lisp is a demonstrated problem.
-6. **Evaluation orchestration.** Prove two explicit `ptc.run` invocations
-   before designing a pipeline language.
+6. **Evaluation orchestration.** Keep the visible shell recipe while it passes
+   candidate, override, and trial artifacts between explicit `ptc.run`
+   invocations. Revisit generic orchestration when the recipe needs a fourth
+   distinct intermediate artifact type or another repeated
+   synthesis/aggregation stage; that is the tripwire, not the current command
+   count.
 7. **Tasks.** Decide whether a durable MCP task may outlive its PtcRunner run
    before advertising the extension.
 8. **Writes.** Decide approval, retry, partial-effect, and disposable-workspace

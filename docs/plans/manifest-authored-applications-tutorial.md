@@ -57,7 +57,7 @@ that touches data is in the mission environment.
 | manifest-selectable PTC trace/private snapshots | planned application Slice D |
 | private MCP request/response inspection | planned MCP Slice 4 |
 | result schemas, `--output`, `--private-output`, `--private-mission` | planned application Slice F |
-| `cap/unwrap!` and `agent.main` libraries | planned application Slice G |
+| `cap/unwrap!`, `cap/with-cursor`, and `agent.main` libraries | planned application Slice G |
 | component override and LLM replay evaluation | planned application Slice H |
 
 This single page replaces separate “draft” and “simulated” tutorials. The
@@ -240,7 +240,7 @@ model-accessible filesystem capabilities, not runtime bootstrap.
 }
 ```
 
-Eight details are deliberate:
+Seven details are deliberate:
 
 1. `source` is `mcp`; `stdio` is a transport field, not a separate provider
    kind.
@@ -252,10 +252,7 @@ Eight details are deliberate:
 5. The `tools` map is the allowlist. The server can advertise other tools,
    but the application cannot call them.
 6. Effects come from the host map, never MCP annotations.
-7. Exact private trace text may influence a filesystem search term, so the
-   local MCP process is still conservatively treated as a possible egress
-   sink and explicitly approved for that data class.
-8. `analysis_llm_key` is a host credential binding. Static source and
+7. `analysis_llm_key` is a host credential binding. Static source and
    data-class checks happen before it is resolved; its bearer header is
    rendered only for the provider exchange and is absent from snapshots,
    traces, inspection, errors, and process status.
@@ -335,11 +332,6 @@ have PTC-specific correlation and confidentiality rules.
         "id": "repo",
         "path": "repo-analyst/repo.clj",
         "dependencies": ["cap"]
-      },
-      {
-        "id": "runs",
-        "path": "repo-analyst/runs.clj",
-        "dependencies": ["cap"]
       }
     ],
     "data": {}
@@ -357,13 +349,10 @@ have PTC-specific correlation and confidentiality rules.
             "workspace.read",
             "workspace.info"
           ],
-          "model_visible": [],
           "timeout_ms": 3000,
           "max_result_bytes": 100000
         }
-      },
-      {"name": "history", "config": {"model_visible": []}},
-      {"name": "private-history", "config": {"model_visible": []}}
+      }
     ]
   },
   "input": {"path": "repo-analyst/answer-input.json"},
@@ -377,18 +366,20 @@ have PTC-specific correlation and confidentiality rules.
 }
 ```
 
-The other two analysis manifests reuse the same components, providers, and
-limits while binding task-specific input and output contracts:
+The other two analysis manifests reuse the workflow and limits while adding
+only the private evidence surface their tasks require:
 
-| Manifest | Input | `Result.value` schema |
-| --- | --- | --- |
-| `repo-analyst-answer.json` | `repo-analyst/answer-input.json` | `repo-analyst/answer.schema.json` |
-| `repo-analyst-review.json` | `repo-analyst/review-input.json` | `repo-analyst/review.schema.json` |
-| `repo-analyst-improve.json` | `repo-analyst/improve-input.json` | `repo-analyst/candidate.schema.json` |
+| Manifest | Input and `Result.value` schema | Mission surface | Result |
+| --- | --- | --- | --- |
+| `repo-analyst-answer.json` | `answer-input.json` / `answer.schema.json` | `cap` + `repo`; `workspace` | public |
+| `repo-analyst-review.json` | `review-input.json` / `review.schema.json` | add `runs`; add `history` + `private-history` | private |
+| `repo-analyst-improve.json` | `improve-input.json` / `candidate.schema.json` | same evidence surface as review | private |
 
 A source answer, a prior-run review, and an improvement decision are different
 result types. Keeping three small manifests avoids a misleading union without
-adding a task-specific runner or manifest-inheritance feature.
+adding a task-specific runner or manifest-inheritance feature. There is no
+`tasks` map or `--task` selector at this scale; revisit that grammar if a
+fourth real task shows that the separate manifests are the main duplication.
 
 The manifest narrows the installed time and result limits. It cannot increase
 them or add an upstream tool. `allow` could be omitted to select the complete
@@ -398,10 +389,11 @@ Provider `config` is a closed, source-independent narrowing object. Legacy
 fields that create a model or choose files/roots are not accepted here; every
 provider name must resolve in the host document before any provider activity.
 
-The host mappings set the maximum model-visible set. Their value is already
-`false`; the manifest's explicit `model_visible: []` documents the same
-narrowing and could never widen it. Frozen prelude code can still call the raw
-capabilities. The model sees the smaller `repo`/`runs` API in the next step.
+The host mappings set the maximum model-visible set and already mark every raw
+tool false. The manifests therefore do not repeat `model_visible: []`.
+Manifest narrowing remains available when a host installed a visible tool.
+Frozen prelude code can still call the mapped capabilities. The answer model
+sees only `repo`; review and improvement see `repo` plus `runs`.
 
 The planned `cap` library is composition-only rather than prompt-visible.
 `repo` and `runs` form the complete model-facing facade.
@@ -439,16 +431,13 @@ is opened.
 ```clojure
 (ns repo "Bounded repository exploration." {:visibility :prompt})
 
-(defn- with-cursor [arguments cursor]
-  (merge arguments (if cursor {"cursor" cursor} {})))
-
 (defn ls
   "Read one directory page. Pass nil first, then the returned next_cursor."
   {:signature "(path :string, cursor :string?) -> :map"}
   [path cursor]
   (cap/unwrap!
     (tool/workspace.list
-      (with-cursor {"path" path "limit" 100} cursor))))
+      (cap/with-cursor {"path" path "limit" 100} cursor))))
 
 (defn find-files
   "Read one glob page. Pass nil first, then the returned next_cursor."
@@ -456,7 +445,7 @@ is opened.
   [glob cursor]
   (cap/unwrap!
     (tool/workspace.find
-      (with-cursor {"glob" glob "limit" 100} cursor))))
+      (cap/with-cursor {"glob" glob "limit" 100} cursor))))
 
 (defn search
   "Read one literal-search page. Pass nil first, then next_cursor."
@@ -464,7 +453,7 @@ is opened.
   [text cursor]
   (cap/unwrap!
     (tool/workspace.search
-      (with-cursor
+      (cap/with-cursor
         {"text" text "limit" 20 "context_lines" 2}
         cursor))))
 
@@ -483,16 +472,13 @@ formats:
 ```clojure
 (ns runs "Bounded evidence from completed PtcRunner runs." {:visibility :prompt})
 
-(defn- with-cursor [arguments cursor]
-  (merge arguments (if cursor {"cursor" cursor} {})))
-
 (defn list-runs
   "Read one public run page. Pass nil first, then the returned next_cursor."
   {:signature "(limit :int, cursor :string?) -> :map"}
   [limit cursor]
   (cap/unwrap!
     (tool/history.list-runs
-      (with-cursor {"limit" limit} cursor))))
+      (cap/with-cursor {"limit" limit} cursor))))
 
 (defn turns
   "Read one sanitized-turn page for a run."
@@ -500,7 +486,7 @@ formats:
   [run-id cursor]
   (cap/unwrap!
     (tool/history.list-turns
-      (with-cursor {"run_id" run-id "limit" 100} cursor))))
+      (cap/with-cursor {"run_id" run-id "limit" 100} cursor))))
 
 (defn model-exchanges
   "Read one private model-exchange page for an explicitly granted run."
@@ -508,7 +494,7 @@ formats:
   [run-id cursor]
   (cap/unwrap!
     (tool/private-history.model-exchanges
-      (with-cursor {"run_id" run-id "limit" 100} cursor))))
+      (cap/with-cursor {"run_id" run-id "limit" 100} cursor))))
 
 (defn capability-calls
   "Read one private capability-exchange page."
@@ -516,7 +502,7 @@ formats:
   [run-id cursor]
   (cap/unwrap!
     (tool/private-history.capability-calls
-      (with-cursor {"run_id" run-id "limit" 100} cursor))))
+      (cap/with-cursor {"run_id" run-id "limit" 100} cursor))))
 
 (defn generated-sources
   "Read one generated-program page for an explicitly granted run."
@@ -524,7 +510,7 @@ formats:
   [run-id cursor]
   (cap/unwrap!
     (tool/private-history.generated-sources
-      (with-cursor {"run_id" run-id "limit" 100} cursor))))
+      (cap/with-cursor {"run_id" run-id "limit" 100} cursor))))
 
 (defn effective-preludes
   "Read one effective-prelude page for an explicitly granted run."
@@ -532,7 +518,7 @@ formats:
   [run-id cursor]
   (cap/unwrap!
     (tool/private-history.effective-preludes
-      (with-cursor {"run_id" run-id "limit" 100} cursor))))
+      (cap/with-cursor {"run_id" run-id "limit" 100} cursor))))
 
 (defn provider-exchanges
   "Read one private provider-wire page for an explicitly granted run."
@@ -540,7 +526,7 @@ formats:
   [run-id cursor]
   (cap/unwrap!
     (tool/private-history.provider-exchanges
-      (with-cursor {"run_id" run-id "limit" 100} cursor))))
+      (cap/with-cursor {"run_id" run-id "limit" 100} cursor))))
 ```
 
 The prelude is the composition layer:
@@ -558,6 +544,12 @@ For every collection function, the model passes `nil` on the first call and
 the response's opaque `next_cursor` on the next. A null `next_cursor` means
 the collection is complete. Cursors are bound to the frozen source and are
 never parsed or synthesized by PTC-Lisp.
+
+`cap/with-cursor` only performs the shared conditional merge into a
+string-keyed argument map. The first slice deliberately has no
+`cap/paginate`: generated code loops over pages explicitly, can stop once it
+has enough evidence, and keeps every page call visible to Kernel budgets
+without building an implicit all-pages result.
 
 What the model sees:
 
@@ -608,9 +600,6 @@ The runner:
 10. prints only effective hashes and safe summaries; and
 11. cancels/drains work and closes the server without invoking the workflow.
 
-An unapproved private-data sink fails during step 4: before credentials,
-sensitive snapshots, stdio, remote MCP, or model activity.
-
 Try putting `"command": "bash"` in the manifest or raising
 `timeout_ms` to `6000`. Strict loading/assembly rejects both before a model
 call. Try adding an upstream tool to `allow`; it was never installed, so
@@ -619,7 +608,7 @@ selection fails.
 ## 6. Run and inspect the MCP path
 
 `repo-analyst/answer.schema.json` accepts an answer and one or more
-source-backed citations. Each citation carries its source alias and snapshot
+source-backed citations. Each citation carries its provider alias and snapshot
 hash beside its path/range, so evidence remains attributable when one result
 combines multiple immutable sources.
 
@@ -627,7 +616,7 @@ Prepare destinations:
 
 ```console
 umask 077
-mkdir -p tmp/traces tmp/inspection repo-analyst/private
+mkdir -p tmp/traces tmp/inspection tmp/results
 ```
 
 Planned run:
@@ -637,17 +626,18 @@ mix ptc.run repo-analyst-answer.json \
   --host-config repo-analyst.host.json \
   --trace tmp/traces/analyst.jsonl \
   --inspect tmp/inspection/analyst.inspection.jsonl \
-  --private-output repo-analyst/private/answer.private.json
+  --output tmp/results/answer.json
 ```
 
-Before workflow execution, the server and both PTC snapshot providers freeze
-their inputs. The active run cannot read the inspection artifact it is
-currently producing.
+Before workflow execution, the filesystem server freezes the workspace
+snapshot. This manifest does not open either PTC snapshot provider. The active
+run also has no capability that can read the separate inspection artifact it
+is currently producing.
 
 The model searches for a literal, reads only the relevant ranges, and returns
-a schema-validated result. Because this manifest selects private history,
-stdout reports status without the value. The complete `Result` projection is
-created atomically at the explicit `0600` destination:
+a schema-validated public result. The complete `Result` projection is printed
+to stdout and atomically persisted with the same shape at the explicit
+`--output` destination:
 
 ```json
 {
@@ -655,13 +645,13 @@ created atomically at the explicit `0600` destination:
     "answer": "The deadline owner cancels attached provider work before connector resources close.",
     "evidence": [
       {
-        "source": "workspace",
+        "provider": "workspace",
         "snapshot_hash": "sha256:...",
         "path": "lib/ptc_runner/kernel/run_state.ex",
         "lines": [250, 282]
       },
       {
-        "source": "workspace",
+        "provider": "workspace",
         "snapshot_hash": "sha256:...",
         "path": "lib/ptc_runner/kernel/run_builder.ex",
         "lines": [310, 329]
@@ -723,8 +713,9 @@ that server's error-data contract.
 
 ## 7. Study complete prior runs
 
-The review manifest keeps the same installed authority and facade while
-binding a review-specific input and result schema:
+The review manifest adds the `runs` component and selects the `history` and
+`private-history` providers alongside `workspace`, then binds a
+review-specific input and result schema:
 
 ```json
 {
@@ -740,6 +731,15 @@ mix ptc.run repo-analyst-review.json \
   --host-config repo-analyst.host.json \
   --private-output repo-analyst/private/review.private.json
 ```
+
+Selecting `private-history` classifies the workflow input and result as
+`private_inspection`. Every possible selected egress sink must therefore
+declare that it accepts that class. This includes the analysis model and any
+MCP server whose tool arguments can carry private text; a local read-only
+stdio server is still an egress sink. An unapproved sink fails during static
+assembly before credentials, sensitive snapshots, stdio, remote MCP, or model
+activity. Private results use `--private-output` rather than stdout or
+`--output`.
 
 `repo-analyst/review.schema.json` validates a bounded review report with a
 summary, recurring findings, source/run evidence, and a recommended next
@@ -786,13 +786,13 @@ An illustrative proposal value:
   "generalized_failure": "The loop repeats an identical empty search instead of changing evidence strategy.",
   "evidence": [
     {
-      "source": "history",
+      "provider": "history",
       "snapshot_hash": "sha256:...",
       "run_id": "r-2026-07-21-0413",
       "event_sequences": [12, 18, 24]
     },
     {
-      "source": "workspace",
+      "provider": "workspace",
       "snapshot_hash": "sha256:...",
       "path": "priv/preludes/kernel/agent.core.clj",
       "lines": [40, 53]
