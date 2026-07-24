@@ -13,7 +13,7 @@ end
 # - :clojure tests require Babashka and are excluded by default, run with --include clojure
 # - :soak tests are long-running memory soak tests, excluded by default.
 #   Run with: `mix test --only soak` (see test/soak/README.md)
-exclusions = [:skip, :e2e, :clojure, :soak]
+exclusions = [:skip, :e2e, :clojure, :soak, :mcp_stdio_launcher_proof]
 
 # Run clojure conformance tests: mix test --include clojure
 #

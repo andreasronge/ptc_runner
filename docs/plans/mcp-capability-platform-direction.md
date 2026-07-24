@@ -239,38 +239,82 @@ dedicated owner only where it owns a real resource.
 ### 3.5 Stdio owns an OS process, not a protocol session
 
 Stdio still needs a resource owner because PtcRunner launches a subprocess.
-V1 supports macOS and Linux. Windows process-tree ownership is deferred until
-there is an equally strong Job Object design.
+V1 supports macOS and Linux. Windows process ownership is deferred until there
+is an equally strong Job Object design.
 
-Before the stdio slice starts, a focused launcher proof must demonstrate:
+Slice 0 selects the launcher boundary; it does not add a native subsystem to
+the core library. The `ptc_runner` Hex package remains native-free and declares
+`ptc_runner_launcher` only as an optional dependency. Stdio normally uses that
+companion package's versioned launcher. The companion publishes checksummed
+precompiled port executables for supported macOS and Linux targets through
+`elixir_make` and `cc_precompiler`, so supported users do not need a C
+toolchain. Source compilation remains an explicit fallback for maintainers and
+unsupported targets, not the normal installation path. A standalone
+distribution or container bundles the same companion artifact.
 
-- a genuinely clean child environment rather than Erlang Port environment
-  extension;
+The source tree keeps a test-only POSIX reference proof. It is compiled only
+by the focused macOS/Linux proof tests and is not packaged as application code.
+The proof demonstrates:
+
+- a new child environment built from the versioned MCP compatibility allowlist
+  plus explicit host bindings rather than Erlang Port environment extension;
 - canonical executable and working-directory handling without shell command
   construction;
 - a new process group with stdin, stdout, and bounded stderr wired separately;
   and
-- EOF followed by bounded TERM-to-KILL escalation for the complete descendant
-  tree.
+- EOF followed by bounded TERM-to-KILL escalation for the launched process
+  group. Host-installed MCP servers are trusted not to escape that group with
+  `setpgid` or `setsid`; V1 is not a hostile-code sandbox.
 
-Use either a small reviewed POSIX launcher or a focused dependency that
-provides those properties. Do not build process ownership from a shell wrapper
-plus an observed OS PID.
+The mechanism comparison is:
+
+| Mechanism | Decision |
+| --- | --- |
+| Erlang `Port` alone | Reject: explicit argv is available, but environment options overlay the ambient environment and stderr cannot be consumed as a separate bounded stream without another process boundary |
+| Shell wrapper plus observed PID | Reject: shell parsing and a PID observation do not provide the required authority or containment |
+| `MuonTrap` | Reject for this boundary: strong supervision is useful, but its documented interface is not intended for interactive full-duplex subprocesses |
+| `ExCmd` | Reject as the complete boundary: its precompiled middleware proves the distribution model, and demand-driven I/O is attractive, but its public contract cannot expose stderr as a separate consumable bounded stream and does not document same-group descendant cleanup |
+| `erlexec` | Reject for V1: it is the closest behavioral fit, including clean environment, separate streams, and process-group controls, but exposes a much broader process manager and does not provide PtcRunner's narrow framed backpressure, bounded-stderr, and close-result contract |
+| Optional `ptc_runner_launcher` companion | Select: owns the narrow audited protocol and lifecycle contract, reuses the Slice 0 proof, ships checksummed precompiled artifacts without burdening HTTP-only users, and remains replaceable independently of the core library |
+| Operator-supplied compatible launcher | Retain only as an explicit host override for hardened or unsupported deployments; it is not the ordinary stdio installation path |
+
+Slice 2 must freeze the launcher protocol version, configuration locator,
+framing, exit classifications, and conformance suite before integrating stdio.
+It moves the reference implementation into the optional companion package,
+adds precompile/release/checksum verification, and makes the core adapter
+resolve the companion artifact without a host-config path. An optional
+`runtime.stdio_launcher` path overrides it for a trusted custom deployment; the
+core freezes the canonical executable and its SHA-256 identity before provider
+acquisition. The launcher handshake must match the protocol version. The
+override is operator authority, like the selected MCP server executable, not a
+claim that PtcRunner certified an arbitrary binary's implementation.
+Manifests and PTC-Lisp cannot select either launcher path. Do not build process
+ownership directly from a shell wrapper or an observed OS PID.
+
+The core starts the launcher by canonical path, so the trusted launcher
+installation hierarchy must remain immutable from preflight through launcher
+spawn. The launcher receives the preflighted server SHA-256 in its bootstrap,
+hashes the executable it opens, and rejects a mismatch before starting it.
+Linux verifies and executes the same held descriptor. macOS verifies and then
+executes the canonical path, so its trusted server installation hierarchy must
+remain immutable through that second boundary as well.
 
 The owner must:
 
-- start only a host-installed executable with frozen arguments;
-- construct an explicit minimal environment plus declared credential
-  bindings rather than inherit arbitrary ambient secrets;
-- resolve the executable once under host policy, freeze the canonical target,
-  and run from the configured canonical `cwd`;
+- start only a host-installed regular executable whose bytes are readable for
+  frozen SHA-256 identity, with frozen arguments;
+- construct an explicit minimal environment plus declared credential bindings
+  rather than inherit arbitrary ambient secrets;
+- resolve the executable once under host policy and run from the configured
+  canonical `cwd`; Linux holds the opened executable through `fexecve`, while
+  macOS executes the canonical path and therefore relies on the trusted
+  installation hierarchy remaining immutable during launch;
 - frame one newline-delimited UTF-8 JSON-RPC message per line;
 - treat stdout as protocol-only and capture bounded stderr as diagnostics;
 - correlate concurrent requests by ID;
 - send `notifications/cancelled` for an abandoned request;
 - close stdin, wait, then escalate termination within a fixed deadline;
-- terminate the process group or platform-equivalent descendants on timeout,
-  close, and owner death; and
+- terminate the launched process group on timeout, close, and owner death; and
 - redact command arguments marked sensitive, environment values, and private
   payloads from status and public observations.
 
@@ -537,6 +581,9 @@ The host document uses one outer installation grammar:
 ```json
 {
   "$schema": "./priv/schemas/ptc-host-config.schema.json",
+  "runtime": {
+    "stdio_launcher": "<optional absolute custom-launcher path>"
+  },
   "credentials": {
     "issues_token": {"env": "ISSUES_TOKEN"}
   },
@@ -562,6 +609,17 @@ The host document uses one outer installation grammar:
   }
 }
 ```
+
+`runtime.stdio_launcher` is an optional custom-deployment override shared by
+every stdio installation in the document. Without it, stdio selects the
+optional `ptc_runner_launcher` companion. Pure preparation validates that
+selection syntactically. A later non-secret local preflight resolves and hashes
+the selected artifact before any credential is resolved or process is spawned;
+it fails when neither implementation is available. The launcher protocol
+version, package version when applicable, and frozen executable SHA-256 are
+part of the safe provider snapshot; the deployment path is not. A programmatic
+host builder may supply the equivalent trusted override directly. Manifests
+and generated programs have no field for it.
 
 PtcRunner ships two JSON Schema 2020-12 documents in its release:
 
@@ -607,7 +665,8 @@ Three safe omission defaults keep ordinary read installations compact:
 - provider `data_class` is `"normal"` unless its closed source kind fixes a
   stricter class, and `accepts_data` is `["normal"]` unless explicitly
   widened; and
-- an omitted stdio `env` is an empty binding map.
+- an omitted stdio `env` is an empty binding map, while the closed transport
+  still supplies its versioned compatibility environment.
 
 These are local field defaults, not a shared defaults block or merge rule.
 `as` and `effect` remain required for every mapped tool because they define
@@ -647,11 +706,12 @@ host-installed sources. A credential declaration has exactly one source:
 Providers and transports refer to a declared credential by binding name; they
 never carry an inline secret. Unknown bindings fail strict host-config loading.
 Static source, selection, and data-class/egress checks run before secret
-materialization. Each referenced secret is then resolved exactly once per run,
-after static authorization and before provider acquisition, subprocess spawn,
-remote contact, or model activity. A missing environment variable, unreadable
-secret file, or otherwise invalid binding fails at that boundary. Rotation
-takes effect on the next run.
+materialization. Each referenced secret is then resolved exactly once per run
+as the first acquisition step, after static authorization and non-secret
+preflight but before sensitive snapshots, subprocess spawn, remote contact, or
+model activity. A missing environment variable, unreadable secret file, or
+otherwise invalid binding fails at that boundary. Rotation takes effect on the
+next run.
 
 Streamable HTTP and other request/response sources render the retained
 per-run value through a closed `auth` entry at the moment of each exchange:
@@ -696,31 +756,64 @@ subprocess variable to a binding:
 }
 ```
 
-Only the explicit environment map reaches the child; it is redacted from logs
-and process status. It is rendered at spawn from the once-resolved per-run
-values, not re-read by the child owner. The owner-monitored transport
-terminates and observes the subprocess before run cleanup completes.
-Manifests and PTC-Lisp can neither name bindings nor read, replace, or render
+The child environment starts from a closed compatibility profile modeled on
+the official TypeScript and Python SDKs' sudo-inspired policy. On macOS and
+Linux its inherited names are exactly `HOME`, `LOGNAME`, `PATH`, `SHELL`,
+`TERM`, and `USER`; missing names stay absent and shell-function values are
+rejected. These six names are reserved and cannot appear in the stdio
+credential-binding map. Explicit bindings for other names then extend that
+base. No other ambient variable reaches the child. A stdio transport may set
+`"inherit_environment": false` to request a genuinely empty base when its
+canonical command and arguments need no wrapper/runtime discovery.
+
+The profile name/version and inherited variable names are safe snapshot
+metadata. Values are never recorded: paths and user names may be private, and
+credential-like values must never enter this allowlist. Operators use
+`installation_revision` when a behavior-defining ambient value changes without
+another safe identity. Windows gets its own revalidated profile only with the
+deferred Job Object design; do not copy today's SDK list into V1.
+
+`command`, `args`, and `cwd` deliberately match common MCP client
+configuration, so those fields paste directly. Existing literal `env` entries
+must be promoted into host credential declarations and binding references
+rather than creating a second inline-secret grammar.
+
+A bare command such as `node` is resolved during the same non-secret local
+preflight through the closed, unoverlaid compatibility `PATH`. The resulting
+canonical executable must be a readable regular file; its SHA-256, not the
+unresolved name, is frozen before acquisition. An absolute command bypasses
+`PATH` lookup but has the same readability and identity requirement.
+
+The effective environment is redacted from logs and process status. Binding
+values are rendered at spawn from the once-resolved per-run values, not re-read
+by the child owner. The owner-monitored transport terminates and observes the
+subprocess before run cleanup completes. Manifests and PTC-Lisp can neither
+name bindings nor read, replace, or render
 credentials.
 
 ### 5.2 Prepare before acquire
 
-Provider installation needs an internal two-phase contract:
+Provider installation needs an internal preparation barrier:
 
 1. **Prepare** is pure. It decodes closed source configuration, resolves
    aliases and manifest narrowing, validates ceilings, effects, placement, and
    data-flow compatibility, and returns an inert prepared provider
    description.
-2. **Acquire** runs only after every selected provider has prepared
-   successfully. It resolves the already-authorized credential bindings,
-   captures sensitive snapshots, starts owned processes, contacts remote
-   endpoints, performs discovery, and returns the frozen capabilities,
-   snapshots, and cleanup ownership.
+2. **Preflight** runs only after every selected provider has prepared
+   successfully. It performs bounded non-secret local checks needed to freeze
+   installation identity, including launcher/server executable resolution and
+   hashing. It does not resolve credentials, spawn, open sensitive snapshots,
+   or contact remote endpoints.
+3. **Acquire** runs only after every selected provider has passed preflight. It
+   resolves the already-authorized credential bindings, captures sensitive
+   snapshots, starts owned processes, contacts remote endpoints, performs
+   discovery, and returns the frozen capabilities, snapshots, and cleanup
+   ownership.
 
-If any prepare step fails, no credential is read and no provider performs I/O.
-If acquisition later fails, the run builder closes every resource already
-acquired. This is a small internal boundary in `ProviderRegistry` and
-`RunBuilder`, not a public provider framework.
+If preparation or preflight fails, no credential is read and no provider
+performs remote or process I/O. If acquisition later fails, the run builder
+closes every resource already acquired. This is a small internal boundary in
+`ProviderRegistry` and `RunBuilder`, not a public provider framework.
 
 `allow` defaults to all host-installed public names. That is not escalation:
 the host's `tools` map is the authority allowlist. Mapped tools are
@@ -795,12 +888,14 @@ private-inspection tutorial requires both.
 - Do not generalize `MCPLease`: Slice 1 removes the obsolete session lifecycle
   rather than refactoring it into a new abstraction.
 - Complete the macOS/Linux stdio launcher proof from §3.5 and select the
-  reviewed launcher or dependency before Slice 2 implementation.
+  launcher boundary before Slice 2 implementation. Keep the proof outside the
+  Hex application and compile it only in focused tests.
 
 **Gate:** current MCP tests pass unchanged through the extracted pure seams,
-and the chosen launcher mechanism proves clean environment, separate streams,
-process-group ownership, and descendant termination on both supported
-platforms.
+the Hex package has no native build requirement, and the test-only reference
+proves the closed compatibility environment and strict-empty override,
+separate streams, process-group ownership, and same-group descendant
+termination on both supported platforms.
 
 ### Slice 1 — Modern stateless Streamable HTTP
 
@@ -826,13 +921,29 @@ one real modern server.
 
 - Reuse the Slice 0 protocol parsing and normalization seams.
 - Add the owner-monitored stdio subprocess transport.
+- Define and version the narrow external-launcher framing and termination
+  contract, plus a conformance suite reusable by alternative implementations.
+- Move the proven launcher into the optional `ptc_runner_launcher` package.
+- Publish mandatory checksums and precompiled macOS/Linux artifacts with
+  release CI; test artifact download, checksum verification, source fallback,
+  and the packaged executable on each supported target.
+- Resolve the companion by default and permit only a trusted host-level custom
+  launcher override; freeze its binary identity and do not expose the choice
+  to manifests or PTC-Lisp.
 - Use one `source: "mcp"` builder with typed transport configuration.
 - Prove cancellation, timeout, owner death, stderr bounds, malformed framing,
-  process-tree termination, and exact-once close behavior.
+  launched-process-group termination, and exact-once close behavior.
+- Include regressions for an `npx`-shaped wrapper plus nested descendants,
+  repeated connect/disconnect without Port or pipe growth, junk on protocol
+  stdout, and startup with every compatibility-environment name independently
+  absent.
 - Fail unsupported platforms deterministically before spawning.
 
 **Gate:** the same tool fixture passes through stdio and Streamable HTTP and
-emits equivalent capabilities and safe snapshots.
+emits equivalent capabilities and safe snapshots, and the packaged Hex library
+contains no native artifact or native build hook. Installing the companion on
+a supported target downloads and verifies a precompiled launcher without
+requiring a compiler.
 
 ### Slice 3 — Generic host-config installation
 
@@ -851,8 +962,9 @@ emits equivalent capabilities and safe snapshots.
 - Accept an optional bounded non-secret `installation_revision` and include it
   in the provider snapshot when present.
 - Resolve credential bindings without storing values in snapshots.
-- Add the pure prepare/acquire provider boundary from §5.2 and resolve each
-  referenced credential exactly once per run between those phases.
+- Add the prepare/preflight/acquire provider barrier from §5.2 and resolve each
+  referenced credential exactly once per run only after every provider passes
+  non-secret local preflight.
 - Decode only closed built-in source and transport identifiers.
 - Do not add a `file-read` host source or accept its legacy `root`,
   `max_bytes`, or `model_visible` config.
@@ -938,12 +1050,16 @@ advertise what PtcRunner cannot honor.
 | Mapped tool is absent or its schema is unsupported | Provider assembly fails before model activity |
 | Manifest names an unmapped tool or changes an effect | Strict selection failure |
 | Mapping omits `model_visible`, ordinary provider omits normal data fields, or stdio omits `env` | Tool is model-invisible, provider is normal-only, and no child credential binding is added |
+| Stdio credential map names a reserved compatibility variable | Strict host-config failure before preflight |
 | Generated code calls a selected model-invisible mapped tool by name | Call succeeds; visibility filters the prompt catalog, not authority |
 | Manifest selects an MCP alias into workflow | Strict unsupported-environment failure; workflow-side MCP is deferred |
 | Tool list changes after assembly | Active run keeps its frozen catalog |
 | Stdio is requested on an unsupported platform | Deterministic pre-spawn configuration failure |
+| Stdio is installed without the companion or a trusted custom override | Non-secret local preflight failure before credentials are resolved or a process is spawned |
+| Custom launcher bytes change | The next run freezes a different launcher identity in its provider snapshot; changing only the non-recorded deployment path to identical bytes does not |
+| Launcher protocol handshake does not match | Deterministic pre-server-spawn compatibility failure after the launcher starts |
 | Stdio server writes non-protocol stdout | Closed protocol failure; process is terminated |
-| Stdio server or descendant survives close deadline | Escalated process-tree termination and closed cleanup result |
+| Stdio server or same-group descendant survives close deadline | Escalated launched-process-group termination and closed cleanup result; `setpgid`/`setsid` escape is outside V1 |
 | HTTP headers disagree with the body | Closed protocol failure |
 | Valid mapped `x-mcp-header` parameter is present | Required `Mcp-Param-*` header mirrors the body using specified encoding |
 | `x-mcp-header` definition is invalid | Tool is excluded; a host mapping to it fails assembly |
@@ -987,4 +1103,16 @@ advertise what PtcRunner cannot honor.
 - [MCP Tasks](https://modelcontextprotocol.io/extensions/tasks/overview)
 - [Deprecated Roots](https://modelcontextprotocol.io/specification/draft/client/roots)
 - [Official filesystem server](https://github.com/modelcontextprotocol/servers/tree/main/src/filesystem)
-- [Official TypeScript SDK v2](https://github.com/modelcontextprotocol/typescript-sdk)
+- [Official TypeScript SDK stdio client](https://github.com/modelcontextprotocol/typescript-sdk/blob/v1.x/src/client/stdio.ts)
+- [Official Python SDK stdio client](https://github.com/modelcontextprotocol/python-sdk/blob/main/src/mcp/client/stdio.py)
+- [TypeScript SDK process-tree cleanup issue](https://github.com/modelcontextprotocol/typescript-sdk/issues/2023)
+- [Python SDK process-tree cleanup change](https://github.com/modelcontextprotocol/python-sdk/pull/850)
+- [Codex MCP descriptor/orphan regression](https://github.com/openai/codex/issues/26984)
+- [Codex inherited-environment compatibility regression](https://github.com/openai/codex/issues/4180)
+- [Erlang ports](https://www.erlang.org/doc/apps/erts/erlang.html#open_port/2)
+- [Erlang Ecosystem Foundation external-executable hardening](https://security.erlef.org/secure_coding_and_deployment_hardening/external_executables.html)
+- [`erlexec`](https://hexdocs.pm/erlexec/readme.html)
+- [`ExCmd.Process`](https://hexdocs.pm/ex_cmd/ExCmd.Process.html)
+- [`MuonTrap`](https://hexdocs.pm/muontrap/readme.html)
+- [`elixir_make` precompilation guide](https://elixir-make.hexdocs.pm/precompilation_guide.html)
+- [`cc_precompiler` checksum guide](https://cc-precompiler.hexdocs.pm/precompilation_guide.html#generate-checksum-file)

@@ -572,8 +572,14 @@ data.
 
 The stdio child receives an explicit allowlisted environment. Erlang Port
 `{env, ...}` extends the ambient environment and is not by itself a clean
-environment guarantee, so implementation needs a reviewed launcher and
-process-group ownership.
+environment guarantee, so implementation uses the MCP plan's versioned,
+optional companion launcher and process-group ownership. Supported stdio users
+receive a checksummed precompiled artifact rather than a compiler requirement.
+A trusted runtime-level custom path is an explicit deployment override, not
+another manifest-selectable provider or a native build requirement of the core
+Hex library. The default macOS/Linux compatibility profile inherits only the
+six sudo-inspired MCP SDK variables; operators can select a strict-empty base,
+and credentials remain explicit bindings.
 
 `workspace.tools` is mandatory because it is the security allowlist and effect
 classification. The sample server may advertise additional tools; PtcRunner
@@ -1149,8 +1155,9 @@ Complete MCP-first Slice 3:
 - prepare the provider registry to contain exactly the host-installed aliases
   when Slice C activates the cutover;
 - credentials;
-- pure provider preparation followed by credential/resource acquisition only
-  after every selected provider prepares successfully;
+- pure provider preparation, then non-secret local preflight, followed by
+  credential/resource acquisition only after every selected provider passes
+  both barriers;
 - manifest-only narrowing;
 - data-class compatibility;
 - safe local omission defaults without a shared merge/defaults block;

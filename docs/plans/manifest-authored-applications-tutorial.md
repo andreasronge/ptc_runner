@@ -56,6 +56,7 @@ that touches data is in the mission environment.
 | MCP Streamable HTTP installed from Elixir | current, pinned to sessionful `2025-11-25` |
 | `--trace` and exact `--inspect` capture | current |
 | stateless MCP `2026-07-28` and stdio | planned MCP Slices 0–2 |
+| compatible stdio launcher, normally the optional precompiled `ptc_runner_launcher` companion | planned MCP Slice 2; required for stdio, not by HTTP-only users |
 | `--host-config` and `--check` | planned MCP Slice 3 |
 | host-installed aliases replacing manifest-configured providers | planned application Slices B–C; filesystem access uses `source: "mcp"` |
 | immutable filesystem sample MCP server | planned MCP Slice 5 |
@@ -125,6 +126,14 @@ the modern stateless protocol. PtcRunner launches it over stdio. The root is
 server configuration supplied by the host, not an MCP Root and not a manifest
 field. The tutorial invokes the committed reproducible server bundle; it does
 not run `npm install` or download code.
+
+The runtime distribution used by this tutorial enables the optional
+`ptc_runner_launcher` companion once. On supported macOS and Linux targets the
+companion installs a checksummed precompiled port executable, so application
+authors do not compile native code or acquire an out-of-band launcher. That is
+platform packaging, not application policy: new applications still need only
+host JSON, manifests, and PTC-Lisp. A host-level custom-launcher path exists
+only as an explicit override for hardened or unsupported deployments.
 
 There is intentionally no `source: "file-read"` form in the target host
 grammar. The current whole-file provider remains only until this sample passes
@@ -252,7 +261,11 @@ need those grants. Six details are deliberate:
 Mapped tools are model-invisible by default. Ordinary sources produce and
 accept only normal data by default; a closed source such as private inspection
 may fix a stricter produced class. An omitted stdio `env` is an empty binding
-map. Those safe local defaults remove repeated fields without introducing a
+map. The transport still constructs its closed macOS/Linux compatibility
+environment from `HOME`, `LOGNAME`, `PATH`, `SHELL`, `TERM`, and `USER`; it
+does not inherit arbitrary ambient variables. Set
+`"inherit_environment": false` only for a server that supports a strict-empty
+base. Those safe local defaults remove repeated fields without introducing a
 shared defaults block or precedence rule. `as` and `effect` remain explicit
 because they define the public name and authority.
 
@@ -274,8 +287,10 @@ held-out answers therefore cannot silently reappear as ordinary workspace
 search results.
 
 Relative host-config paths and `cwd` resolve from the canonical host-config
-directory. PtcRunner resolves the executable once under host policy and
-freezes the canonical target before spawning it.
+directory. PtcRunner resolves the executable once under host policy. Linux
+holds the opened executable through launch; macOS executes the canonical path
+and relies on the trusted installation hierarchy remaining immutable during
+that short boundary.
 
 `deepseek` uses the planned closed host-installed `llm` source over the
 existing provider-neutral adapter. The fully qualified
@@ -616,14 +631,17 @@ The runner:
 2. loads and compiles local components and input/result contracts;
 3. statically selects installed names and lower ceilings;
 4. derives input/source data classes and checks every possible egress sink;
-5. only after those checks, resolves credentials without snapshotting values;
-6. starts the stdio server under an owner;
-7. calls modern stateless `server/discover`;
-8. retrieves and pages `tools/list`;
-9. selects the five host-mapped tools, compiles their bounded schemas, and
+5. only after those checks, performs non-secret local preflight and freezes
+   launcher/server executable identities;
+6. only after every preflight passes, resolves credentials without
+   snapshotting values;
+7. starts the stdio server under an owner;
+8. calls modern stateless `server/discover`;
+9. retrieves and pages `tools/list`;
+10. selects the five host-mapped tools, compiles their bounded schemas, and
    freezes provider/content identities;
-10. prints only effective hashes and safe summaries; and
-11. cancels/drains work and closes the server without invoking the workflow.
+11. prints only effective hashes and safe summaries; and
+12. cancels/drains work and closes the server without invoking the workflow.
 
 The useful output is the resolved selection, not a repetition of raw JSON:
 

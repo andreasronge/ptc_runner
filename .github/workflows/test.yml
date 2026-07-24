@@ -10,6 +10,27 @@ permissions:
   contents: read
 
 jobs:
+  mcp-stdio-launcher-proof:
+    runs-on: ${{ matrix.os }}
+    name: MCP stdio launcher proof (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    env:
+      MIX_ENV: test
+      HEX_SPONSOR: false
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Setup Elixir environment
+        uses: ./.github/actions/setup-elixir
+
+      - name: Prove stdio process containment
+        run: mix test test/ptc_runner/kernel/mcp_stdio_launcher_proof_test.exs --include mcp_stdio_launcher_proof --warnings-as-errors
+
   ci:
     runs-on: ubuntu-latest
     name: Compile, test, format, credo, dialyzer & deps check
