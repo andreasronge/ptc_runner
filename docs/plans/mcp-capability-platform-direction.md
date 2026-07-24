@@ -85,7 +85,6 @@ Planned stdio installation:
   "install": {
     "workspace": {
       "source": "mcp",
-      "installation_revision": "filesystem-sample-v1",
       "transport": {
         "type": "stdio",
         "command": "node",
@@ -100,29 +99,24 @@ Planned stdio installation:
           "priv/**",
           "--include",
           "docs/**"
-        ],
-        "env": {}
+        ]
       },
       "tools": {
         "list_directory": {
           "as": "workspace.list",
-          "effect": "read",
-          "model_visible": false
+          "effect": "read"
         },
         "search_text": {
           "as": "workspace.search",
-          "effect": "read",
-          "model_visible": false
+          "effect": "read"
         },
         "read_text_file": {
           "as": "workspace.read",
-          "effect": "read",
-          "model_visible": false
+          "effect": "read"
         },
         "snapshot_info": {
           "as": "workspace.info",
-          "effect": "read",
-          "model_visible": false
+          "effect": "read"
         }
       },
       "snapshot_identity": {
@@ -143,13 +137,13 @@ Planned remote installation uses the same outer grammar:
 
 ```json
 {
+  "$schema": "./priv/schemas/ptc-host-config.schema.json",
   "credentials": {
     "issues_token": {"env": "ISSUES_TOKEN"}
   },
   "install": {
     "issues": {
       "source": "mcp",
-      "installation_revision": "issues-service-2026-07-23",
       "transport": {
         "type": "streamable_http",
         "endpoint": "https://mcp.example.org/mcp",
@@ -158,8 +152,7 @@ Planned remote installation uses the same outer grammar:
       "tools": {
         "search_issues": {
           "as": "issues.search",
-          "effect": "read",
-          "model_visible": false
+          "effect": "read"
         }
       },
       "ceilings": {
@@ -289,15 +282,20 @@ the run.
 The safe provider snapshot contains the selected protocol, transport kind,
 public names, host effects, normalized schema hashes, hashes of effective
 model-visible descriptions, hashes of mapped upstream names, normalized
-`x-mcp-header` behavior, server implementation identity, a hash of the
-host-supplied `installation_revision`, any validated content snapshot identity,
-and an overall content hash. A prompt-visible remote description is behavioral
-input and must affect the snapshot even when the text itself is not published.
+`x-mcp-header` behavior, server implementation identity, an optional hash of
+the host-supplied `installation_revision`, any validated content snapshot
+identity, and an overall content hash. A prompt-visible
+remote description is behavioral input and must affect the snapshot even when
+the text itself is not published.
 
-`installation_revision` is a required bounded non-secret host value. The
-operator changes it whenever the endpoint deployment, executable, arguments,
-credential scope, or other behavior-defining installation changes. This binds
-behavior without exposing or dictionary-hashing private paths and endpoints.
+`installation_revision` is an optional bounded non-secret host value. Use it
+only when the operator needs to distinguish behavior not otherwise captured
+by safe configuration, discovery, or content identities—for example a remote
+deployment, executable build, private arguments, or credential scope. When
+present it affects the provider snapshot. Safe decoded fields and discovered
+identities already affect that snapshot directly; ordinary installations do
+not need a ceremonial `"v1"`. This deliberately does not hash private paths,
+endpoints, arguments, or credentials merely to manufacture an identity.
 For an immutable data server, optional `snapshot_identity` names one
 host-mapped read tool and one safe SHA-256 result field. PtcRunner invokes it
 once after discovery/schema validation and freezes the returned identity.
@@ -512,19 +510,18 @@ The host document uses one outer installation grammar:
 
 ```json
 {
+  "$schema": "./priv/schemas/ptc-host-config.schema.json",
   "credentials": {
     "issues_token": {"env": "ISSUES_TOKEN"}
   },
   "install": {
     "<provider-name>": {
       "source": "mcp",
-      "installation_revision": "<non-secret operator revision>",
       "transport": {"type": "stdio | streamable_http"},
       "tools": {
         "<upstream-name>": {
           "as": "<public-name>",
           "effect": "read | write | unknown",
-          "model_visible": false,
           "description": "<optional host-owned override>",
           "error_feedback": "closed | bounded"
         }
@@ -533,13 +530,53 @@ The host document uses one outer installation grammar:
         "tool": "<optional mapped read tool>",
         "field": "<safe sha256 field>"
       },
-      "data_class": "normal",
-      "accepts_data": ["normal"],
+      "installation_revision": "<optional non-secret opaque-behavior revision>",
       "ceilings": {}
     }
   }
 }
 ```
+
+PtcRunner ships two JSON Schema 2020-12 documents in its release:
+
+```text
+priv/schemas/ptc-host-config.schema.json
+priv/schemas/ptc-application-manifest.schema.json
+```
+
+`$schema` is an optional editor annotation accepted in either document. The
+tutorial uses a path relative to the repository root; another project may
+point at the copy in its installed PtcRunner dependency or a version-matched
+published copy. PtcRunner never dereferences this URI at runtime and excludes
+it from provider and run identities.
+
+The schemas are generated by `mix ptc.gen_docs` from the same closed structural
+descriptors used by the runtime decoders and are checked into the release.
+`mix precommit` fails when regeneration changes either file. They use
+discriminated source and transport unions, reject unknown properties, document
+required fields and omission defaults, and carry descriptions and small
+examples so editors can provide completion, hover help, and structural errors
+before `mix ptc.run`.
+
+JSON Schema is intentionally only the structural front door. The strict
+runtime loader remains authoritative for duplicate keys, bounded loading,
+path confinement, reference resolution, host-ceiling narrowing, data-class
+and egress compatibility, MCP discovery, and lifecycle checks. Defaults shown
+in schema annotations describe decoder behavior; validation does not mutate
+the input document.
+
+Three safe omission defaults keep ordinary read installations compact:
+
+- a mapped tool is not model-visible unless it explicitly sets
+  `"model_visible": true`;
+- provider `data_class` is `"normal"` unless its closed source kind fixes a
+  stricter class, and `accepts_data` is `["normal"]` unless explicitly
+  widened; and
+- an omitted stdio `env` is an empty binding map.
+
+These are local field defaults, not a shared defaults block or merge rule.
+`as` and `effect` remain required for every mapped tool because they define
+the public name and authority.
 
 The manifest uses the same narrowing keys for every installed provider:
 
@@ -589,6 +626,15 @@ inspection records, serialized errors, telemetry, and owner status, and lets
 a credential resolver refresh or rotate values without rebuilding downstream
 capability metadata.
 
+Closed sources may expose a narrower source-specific reference when the
+adapter already owns the wire convention. In particular, an `llm`
+installation uses `"credential": "<binding>"`; the selected model adapter
+decides whether that binding becomes a bearer token, API-key header, or another
+fixed supported form. This keeps a known LLM configuration compact without
+letting the manifest choose headers. Generic MCP HTTP endpoints still use the
+explicit closed `auth` scheme because their wire convention is not implied by
+the source.
+
 Stdio has no request header channel. Its transport maps an allowlisted
 subprocess variable to a binding:
 
@@ -612,11 +658,13 @@ subprocess before run cleanup completes. Manifests and PTC-Lisp can neither
 name bindings nor read, replace, or render credentials.
 
 `allow` defaults to all host-installed public names. That is not escalation:
-the host's `tools` map is the authority allowlist. The host mapping also sets
-the maximum model-visible set and may replace an untrusted remote description
-with host-owned text. Manifest `model_visible` may only reduce that installed
-set. The manifest may lower ceilings but cannot change transport, upstream
-names, effects, descriptions, error visibility, credentials, or data classes.
+the host's `tools` map is the authority allowlist. Mapped tools are
+model-invisible by default; an explicit host `model_visible: true` adds one to
+the maximum model-visible set. The host may also replace an untrusted remote
+description with host-owned text. Manifest `model_visible` may only reduce
+that installed set. The manifest may lower ceilings but cannot change
+transport, upstream names, effects, descriptions, error visibility,
+credentials, or data classes.
 
 Host installation is the complete provider registry for a provider-bearing
 run, not an overlay on the current implicit `llm` and `file-read` built-ins.
@@ -689,8 +737,16 @@ emits equivalent capabilities and safe snapshots.
 
 - Add `mix ptc.run --host-config PATH`.
 - Strictly decode bounded JSON with duplicate-key rejection.
+- Add one canonical closed structural descriptor for host config and
+  application manifests; use it to generate the two shipped JSON Schema
+  2020-12 documents.
+- Accept optional non-semantic `$schema` annotations without fetching them,
+  and exclude them from effective identities.
+- Extend `mix ptc.gen_docs` and the precommit generated-file check so schema
+  artifacts cannot drift from the runtime vocabulary.
 - Resolve paths relative to the canonical host-config directory.
-- Require and hash a bounded non-secret `installation_revision`.
+- Accept an optional bounded non-secret `installation_revision` and include it
+  in the provider snapshot when present.
 - Resolve credential bindings without storing values in snapshots.
 - Decode only closed built-in source and transport identifiers.
 - Do not add a `file-read` host source or accept its legacy root/file config.
@@ -700,9 +756,14 @@ emits equivalent capabilities and safe snapshots.
   credentials or opening any provider.
 - Add `--check` to assemble, discover, hash, and close without invoking the
   workflow or model.
+- Print a bounded resolved view ordered by environment and alias, including
+  source/transport, selected tool counts, accepted data classes, and safe
+  snapshot identities rather than echoing heterogeneous raw config.
 
 **Gate:** an ordinary manifest selects a configured MCP server without any
-Elixir registration change.
+Elixir registration change; every plan/tutorial configuration example
+validates against the shipped schema, and a shared valid/invalid fixture corpus
+agrees between schema validation and the structural runtime decoder.
 
 ### Slice 4 — Useful feedback and private MCP inspection
 
@@ -756,11 +817,15 @@ advertise what PtcRunner cannot honor.
 | Legacy sessionful server | Deterministic unsupported-protocol failure; no fallback |
 | Provider-bearing manifest has no host config | Strict missing-installation failure; no implicit built-in registry |
 | Manifest supplies legacy model/root/file provider config | Strict load failure before provider activity |
+| Editor validates a host config or manifest | Shipped schema supplies completion and structural errors without running PtcRunner |
+| `$schema` is omitted or names a local/version-matched copy | Runtime behavior and effective identity are unchanged |
+| Structurally valid config violates a cross-file or runtime rule | `--check` reports the bounded semantic error; schema success is not treated as assembly success |
 | Host config declares `source: "file-read"` | Strict unknown-source failure; filesystem capabilities use `source: "mcp"` |
 | PtcRunner loads its host config, manifest, component, schema, or input | Dedicated confined loader is used; no MCP bootstrap dependency |
 | Server catalog contains an unmapped tool | Tool is not exposed and does not need a callable schema |
 | Mapped tool is absent or its schema is unsupported | Provider assembly fails before model activity |
 | Manifest names an unmapped tool or changes an effect | Strict selection failure |
+| Mapping omits `model_visible`, ordinary provider omits normal data fields, or stdio omits `env` | Tool is model-invisible, provider is normal-only, and no child credential binding is added |
 | Tool list changes after assembly | Active run keeps its frozen catalog |
 | Stdio server writes non-protocol stdout | Closed protocol failure; process is terminated |
 | Stdio server or descendant survives close deadline | Escalated process-tree termination and closed cleanup result |
@@ -773,7 +838,8 @@ advertise what PtcRunner cannot honor.
 | Private inspection is not requested | No MCP payload-bearing diagnostic artifact is retained |
 | Private inspection is requested | Correlated bounded bodies are captured; credentials and rendered auth headers are absent |
 | Filesystem changes after sample-server capture | All calls continue to observe the frozen snapshot |
-| Installation revision or frozen content identity changes | Effective provider snapshot hash changes |
+| Installation revision is omitted | Provider snapshot uses its other safe identities; no synthetic revision is added |
+| Present installation revision or frozen content identity changes | Effective provider snapshot hash changes |
 | Secret, private-output, dependency, or build path is outside the include set | It is neither opened nor visible through inventory/search/read |
 | Generated code requests traversal or a write tool | Server rejects traversal; no write tool was installed or advertised |
 | Run terminates with an MCP call in flight | Request/process work is cancelled and observed before resources close |

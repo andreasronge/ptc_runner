@@ -14,14 +14,19 @@ You will assemble `repo-analyst`, an agent that:
 
 1. navigates a repository through a read-only MCP filesystem server;
 2. answers a source question with path and line evidence;
-3. studies canonical traces and complete private conversations from prior
-   runs; and
-4. proposes a PTC-Lisp improvement that a second run evaluates.
+3. leaves a canonical trace and a complete private conversation for a human
+   to inspect through a fixed private `ptc.repl` profile;
+4. lets that human record an evidence-backed possible improvement;
+5. automates the same review through bounded prior-run capabilities; and
+6. proposes a PTC-Lisp improvement that isolated runs evaluate.
 
-The interesting result is not the repository domain. It is that the external
-filesystem implementation is TypeScript, the application behavior is
-PTC-Lisp, and the runner remains generic. No application-specific Elixir or
-`mix ptc.scout` command appears.
+The tutorial exposes the evidence manually before automating it. The reader
+first sees the same model requests, generated programs, tool calls, results,
+and effective preludes that the later scout receives. The interesting result
+is not the repository domain. It is that the external filesystem
+implementation is TypeScript, the application and improvement policy are
+ordinary files, and the runner remains generic. No application-specific
+Elixir or `mix ptc.scout` command appears.
 
 The target stack is:
 
@@ -54,7 +59,8 @@ that touches data is in the mission environment.
 | `--host-config` and `--check` | planned MCP Slice 3 |
 | host-installed aliases replacing manifest-configured providers | planned application Slices B–C; filesystem access uses `source: "mcp"` |
 | immutable filesystem sample MCP server | planned MCP Slice 5 |
-| manifest-selectable PTC trace/private snapshots | planned application Slice D |
+| manifest-selectable PTC trace/private snapshots | planned application Slice D1 |
+| private human investigation in `ptc.repl` | planned application Slice D2 |
 | private MCP request/response inspection | planned MCP Slice 4 |
 | result schemas, `--output`, `--private-output`, `--private-mission` | planned application Slice F |
 | `cap/unwrap!`, `cap/with-cursor`, and `agent.main` libraries | planned application Slice G |
@@ -64,12 +70,18 @@ This single page replaces separate “draft” and “simulated” tutorials. Th
 status table carries implementation truth; the steps below show one coherent
 target API.
 
+`inspection-analysis-v1` is one generic PtcRunner feature and therefore
+requires Elixir implementation once. It is not Code Scout policy. After that
+source/profile slice lands, the tutorial's task, review method, candidate
+policy, and evaluation loop evolve entirely through host JSON, manifests,
+PTC-Lisp, schemas, fixtures, and ordinary scripts.
+
 ## 1. Create the application files
 
 From a repository root, create:
 
 ```text
-repo-analyst.host.json
+repo-analyst.host.json              expanded at review and evaluation
 repo-analyst-answer.json
 repo-analyst-review.json
 repo-analyst-improve.json
@@ -121,24 +133,30 @@ this host document, the application manifest, local PTC-Lisp, contracts, and
 selected input through dedicated confined loaders. MCP is for
 model-accessible filesystem capabilities, not runtime bootstrap.
 
+The host file stays flat: it says what the operator installed, while each
+manifest says where a selected alias enters one run. Examples order
+credentials first, then workflow-side installations, then mission-side
+installations. For this tutorial, `llm` and `llm_replay` are workflow-only,
+the PTC snapshots are mission-only, and MCP is used in mission. Whether a
+future planning-time MCP provider may enter workflow remains deliberately
+open.
+
 `repo-analyst.host.json`:
 
 ```json
 {
+  "$schema": "./priv/schemas/ptc-host-config.schema.json",
   "credentials": {
-    "analysis_llm_key": {"env": "ANALYSIS_LLM_API_KEY"}
+    "openrouter_key": {"env": "OPENROUTER_API_KEY"}
   },
   "install": {
-    "analysis-llm": {
+    "deepseek": {
       "source": "llm",
-      "installation_revision": "analysis-model-profile-v1",
-      "model": "operator-approved-model",
-      "auth": [{"scheme": "bearer", "binding": "analysis_llm_key"}],
-      "accepts_data": ["normal", "private_inspection"]
+      "model": "openrouter:deepseek/deepseek-v4-flash",
+      "credential": "openrouter_key"
     },
     "workspace": {
       "source": "mcp",
-      "installation_revision": "filesystem-sample-v1",
       "transport": {
         "type": "stdio",
         "command": "node",
@@ -163,76 +181,47 @@ model-accessible filesystem capabilities, not runtime bootstrap.
           "mix.exs",
           "--include",
           "mix.lock",
+          "--include",
+          "repo-analyst/*.clj",
+          "--include",
+          "repo-analyst/*-input.json",
+          "--include",
+          "repo-analyst/*.schema.json",
           "--max-source-bytes",
           "32000000"
-        ],
-        "env": {}
+        ]
       },
       "tools": {
         "list_directory": {
           "as": "workspace.list",
-          "effect": "read",
-          "model_visible": false
+          "effect": "read"
         },
         "search_files": {
           "as": "workspace.find",
-          "effect": "read",
-          "model_visible": false
+          "effect": "read"
         },
         "search_text": {
           "as": "workspace.search",
           "effect": "read",
-          "model_visible": false,
           "error_feedback": "bounded"
         },
         "read_text_file": {
           "as": "workspace.read",
           "effect": "read",
-          "model_visible": false,
           "error_feedback": "bounded"
         },
         "snapshot_info": {
           "as": "workspace.info",
-          "effect": "read",
-          "model_visible": false
+          "effect": "read"
         }
       },
       "snapshot_identity": {
         "tool": "snapshot_info",
         "field": "snapshot_hash"
       },
-      "accepts_data": ["normal", "private_inspection"],
       "ceilings": {
         "timeout_ms": 5000,
         "max_catalog_tools": 32,
-        "max_result_bytes": 250000
-      }
-    },
-    "history": {
-      "source": "ptc_trace_snapshot",
-      "directory": "tmp/traces",
-      "ceilings": {
-        "max_source_bytes": 8000000,
-        "max_result_bytes": 250000
-      }
-    },
-    "private-history": {
-      "source": "ptc_inspection_snapshot",
-      "directory": "tmp/inspection",
-      "ceilings": {
-        "max_files": 100,
-        "max_source_bytes": 64000000,
-        "max_result_bytes": 500000
-      }
-    },
-    "replay-llm": {
-      "source": "llm_replay",
-      "installation_revision": "replay-fixtures-v1",
-      "fixtures": "repo-analyst/evaluation/replay.jsonl",
-      "data_class": "private_inspection",
-      "accepts_data": ["normal", "private_inspection"],
-      "ceilings": {
-        "max_entries": 1000,
         "max_result_bytes": 250000
       }
     }
@@ -240,22 +229,31 @@ model-accessible filesystem capabilities, not runtime bootstrap.
 }
 ```
 
-Seven details are deliberate:
+This is the complete host authority needed for the first public answer. Later
+sections widen the same file only when private review and replay evaluation
+need those grants. Six details are deliberate:
 
 1. `source` is `mcp`; `stdio` is a transport field, not a separate provider
    kind.
-2. `installation_revision` is a non-secret host identity that changes whenever
-   behavior-defining installation details change.
-3. The command, root, include set, and executable arguments are host authority.
-4. Inclusion is default-deny. The server never opens paths outside the
+2. The command, root, include set, and executable arguments are host authority.
+3. Inclusion is default-deny. The server never opens paths outside the
    repeated `--include` patterns, even when they exist below the root.
-5. The `tools` map is the allowlist. The server can advertise other tools,
+4. The `tools` map is the allowlist. The server can advertise other tools,
    but the application cannot call them.
-6. Effects come from the host map, never MCP annotations.
-7. `analysis_llm_key` is a host credential binding. Static source and
-   data-class checks happen before it is resolved; its bearer header is
-   rendered only for the provider exchange and is absent from snapshots,
-   traces, inspection, errors, and process status.
+5. Effects come from the host map, never MCP annotations.
+6. `openrouter_key` is a host credential binding. The LLM-specific
+   `credential` field authorizes it for this installation, and the known
+   OpenRouter adapter owns bearer-header rendering. Static source and
+   data-class checks happen before the binding is resolved; its value and
+   rendered header are absent from snapshots, traces, inspection, errors, and
+   process status.
+
+Mapped tools are model-invisible by default. Ordinary sources produce and
+accept only normal data by default; a closed source such as private inspection
+may fix a stricter produced class. An omitted stdio `env` is an empty binding
+map. Those safe local defaults remove repeated fields without introducing a
+shared defaults block or precedence rule. `as` and `effect` remain explicit
+because they define the public name and authority.
 
 The server captures the bounded UTF-8 tree before replying to discovery.
 Every later list, search, and read observes that same snapshot. It exposes no
@@ -264,26 +262,37 @@ Every data-bearing result includes the snapshot hash, so a later citation can
 be tied to the exact captured bytes.
 
 During provider assembly, `snapshot_identity` invokes the mapped read-only
-`snapshot_info` tool once and includes its SHA-256 identity, alongside the
-installation-revision hash, in the effective provider snapshot.
+`snapshot_info` tool once and includes its SHA-256 identity in the effective
+provider snapshot.
 
-The host allowlist deliberately excludes `.env`, `.git`, `deps`, `_build`,
-`tmp`, the evaluation fixtures, and `repo-analyst/private`. Private artifacts
-therefore cannot silently reappear as ordinary workspace search results.
+The host allowlist deliberately exposes application-local PTC-Lisp, task
+inputs, and result schemas so the scout can inspect its own policy. It excludes
+the host document, root manifests, `.env`, `.git`, `deps`, `_build`, `tmp`,
+evaluation fixtures, and `repo-analyst/private`. Private artifacts and
+held-out answers therefore cannot silently reappear as ordinary workspace
+search results.
 
 Relative host-config paths and `cwd` resolve from the canonical host-config
 directory. PtcRunner resolves the executable once under host policy and
 freezes the canonical target before spawning it.
 
-`analysis-llm` uses the planned closed host-installed `llm` source over the
-existing provider-neutral adapter. The host fixes model, credential, cache
-policy, alias, accepted data classes, and installation revision. A manifest
-chooses that alias but cannot retarget it. `replay-llm` presents the same
-`llm-request` contract from frozen fixtures; separate evaluation manifests
-choose one provider per run.
+`deepseek` uses the planned closed host-installed `llm` source over the
+existing provider-neutral adapter. The fully qualified
+`openrouter:deepseek/deepseek-v4-flash` value pins both the provider and its
+upstream model ID instead of relying on a catalog alias. The host fixes model,
+credential, cache policy, alias, accepted data classes, and installation
+identity. A manifest chooses that alias but cannot retarget it. Caching retains
+its current `false` default and is therefore omitted.
 
-The complete binding sources, `bearer`/`basic`/`api_key` rendering, protected
-header rules, and stdio environment mapping are defined once in
+`installation_revision` is optional. An operator may add a bounded non-secret
+value when an opaque deployment, executable build, private argument, or
+credential scope changes without producing another safe identity. When
+present, it affects the provider snapshot. The tutorial omits it because a
+ceremonial `"v1"` would add no evidence.
+
+The complete binding sources, the LLM-specific `credential` reference,
+generic MCP `bearer`/`basic`/`api_key` rendering, protected header rules, and
+stdio environment mapping are defined once in
 [MCP plan §5.1](mcp-capability-platform-direction.md#51-credential-bindings).
 This filesystem server needs no secret; a different stdio server would receive
 only explicitly bound environment variables.
@@ -320,6 +329,7 @@ have PTC-specific correlation and confidentiality rules.
 
 ```json
 {
+  "$schema": "./priv/schemas/ptc-application-manifest.schema.json",
   "version": 1,
   "workflow": {
     "components": [{"library": "agent.main"}],
@@ -337,7 +347,7 @@ have PTC-specific correlation and confidentiality rules.
     "data": {}
   },
   "providers": {
-    "workflow": [{"name": "analysis-llm"}],
+    "workflow": [{"name": "deepseek"}],
     "mission": [
       {
         "name": "workspace",
@@ -389,11 +399,12 @@ Provider `config` is a closed, source-independent narrowing object. Legacy
 fields that create a model or choose files/roots are not accepted here; every
 provider name must resolve in the host document before any provider activity.
 
-The host mappings set the maximum model-visible set and already mark every raw
-tool false. The manifests therefore do not repeat `model_visible: []`.
-Manifest narrowing remains available when a host installed a visible tool.
-Frozen prelude code can still call the mapped capabilities. The answer model
-sees only `repo`; review and improvement see `repo` plus `runs`.
+The host mappings set the maximum model-visible set. Raw tools default to
+model-invisible, so neither the host entries nor manifests repeat false/empty
+visibility lists. Manifest narrowing remains available when a host explicitly
+installed a visible tool. Frozen prelude code can still call the mapped
+capabilities. The answer model sees only `repo`; review and improvement see
+`repo` plus `runs`.
 
 The planned `cap` library is composition-only rather than prompt-visible.
 `repo` and `runs` form the complete model-facing facade.
@@ -577,6 +588,19 @@ capability names, the host root, or the server executable.
 
 ## 5. Validate before spending model calls
 
+The `$schema` properties point at the JSON Schema 2020-12 files shipped with
+PtcRunner. In this repository the relative paths resolve directly; a consuming
+project can point its editor at the version-matched copies in the installed
+dependency. A schema-aware editor can now complete source/transport variants,
+show field and default documentation, and reject unknown or structurally
+invalid fields before invoking Mix.
+
+This is early structural feedback, not an authorization result. PtcRunner
+never fetches the `$schema` URI. Duplicate keys, bounded file loading, path
+rules, credential and provider references, ceiling narrowing, environment
+placement, private-data egress, MCP discovery, and resource lifecycle remain
+the responsibility of the strict loader and `--check`.
+
 Planned command:
 
 ```console
@@ -600,12 +624,23 @@ The runner:
 10. prints only effective hashes and safe summaries; and
 11. cancels/drains work and closes the server without invoking the workflow.
 
+The useful output is the resolved selection, not a repetition of raw JSON:
+
+```text
+workflow  deepseek   llm        model openrouter:deepseek/deepseek-v4-flash  accepts normal
+mission   workspace  mcp/stdio  5 tools  snapshot sha256:...
+```
+
+Rows are ordered by environment and alias. The view comes from the assembled
+run, so it cannot disagree with placement or narrowing rules. It never prints
+the credential, authorization header, host root, or private payload.
+
 Try putting `"command": "bash"` in the manifest or raising
 `timeout_ms` to `6000`. Strict loading/assembly rejects both before a model
 call. Try adding an upstream tool to `allow`; it was never installed, so
 selection fails.
 
-## 6. Run and inspect the MCP path
+## 6. Run, inspect, and form a human hypothesis
 
 `repo-analyst/answer.schema.json` accepts an answer and one or more
 source-backed citations. Each citation carries its provider alias and snapshot
@@ -616,8 +651,17 @@ Prepare destinations:
 
 ```console
 umask 077
-mkdir -p tmp/traces tmp/inspection tmp/results
+mkdir -p \
+  tmp/traces \
+  tmp/inspection \
+  tmp/results \
+  tmp/analysis-traces \
+  repo-analyst/private
 ```
+
+Add `tmp/` and `repo-analyst/private/` to the repository's `.gitignore`
+before the first run. With the restrictive umask, the private directory is
+created as `0700` and its files are created without group/other access.
 
 Planned run:
 
@@ -669,8 +713,8 @@ answers.
 The canonical trace remains payload-free:
 
 ```jsonl
-{"event":"capability-call","name":"workspace.search","effect":"read","duration_ms":9,"result_bytes":2114}
-{"event":"capability-call","name":"workspace.read","effect":"read","duration_ms":3,"result_bytes":1687}
+{"event":"capability-call","capability_id":"cap-7","name":"workspace.search","effect":"read","duration_ms":9,"result_bytes":2114}
+{"event":"capability-call","capability_id":"cap-8","name":"workspace.read","effect":"read","duration_ms":3,"result_bytes":1687}
 ```
 
 The private inspection artifact contains correlated:
@@ -683,6 +727,142 @@ The private inspection artifact contains correlated:
 
 It excludes the analysis-model secret, stdio environment values, and any
 future rendered HTTP authorization headers.
+
+Do not automate the first investigation. Start by seeing what the agent saw.
+The public result answers whether the run completed its task. The canonical
+trace shows timing, effects, and bounded sizes without payloads. The private
+inspection explains how the result was produced.
+
+Use the planned fixed private profile rather than making the human reconstruct
+correlations with shell filters:
+
+```console
+mix ptc.repl \
+  --profile inspection-analysis-v1 \
+  --resource traces=tmp/traces \
+  --resource inspection=tmp/inspection \
+  --session-trace-dir tmp/analysis-traces \
+  --private-terminal
+```
+
+`--private-terminal` explicitly authorizes this attached terminal as a private
+sink. It does not make the source public: terminal scrollback, recording, and
+screen sharing can retain the rendered values. The first profile version is
+interactive-only and rejects `--eval`, script, stdin, or JSONL output. Without
+the flag or an attached terminal it fails before opening either resource.
+
+At startup the profile freezes both directories and validates each inspection
+artifact against the exact captured canonical run. It grants no LLM,
+filesystem, network, MCP, write, or new inspection capability. Its own trace
+under `tmp/analysis-traces` is canonical and payload-free.
+
+Start with the public evidence and retain the selected run ID:
+
+```clojure
+(log/runs {"limit" 20})
+(def run-id "r-2026-07-21-0413")
+(log/run run-id)
+(log/turns run-id {"limit" 100})
+```
+
+Then inspect only the correlated private pages needed for the question:
+
+```clojure
+(inspection/capability-calls run-id nil)
+(inspection/generated-sources run-id nil)
+(inspection/model-exchanges run-id nil)
+(inspection/effective-preludes run-id nil)
+(inspection/provider-exchanges run-id nil)
+```
+
+Each function returns a bounded page and opaque `next_cursor`; pass that cursor
+instead of `nil` to continue. Persistent REPL definitions make a long
+investigation easier:
+
+```clojure
+(def calls-page (inspection/capability-calls run-id nil))
+(def calls-cursor (get calls-page "next_cursor"))
+(if calls-cursor
+  (inspection/capability-calls run-id calls-cursor)
+  nil)
+```
+
+Capability inputs and outputs are already paired by `capability_id`. Model
+pages pair the complete provider-neutral `llm-request` input and output.
+Generated programs and effective components carry their canonical
+evaluation/component identities and source hashes. The human therefore
+explores the same shaped evidence that `private-history` later gives the
+automated reviewer.
+
+Raw `jq` remains useful for diagnosing the artifact format itself. It is the
+fallback when the profile rejects a malformed artifact, not the normal
+behavior-analysis interface. For example, this payload-free index can help
+locate the failing record:
+
+```console
+jq -r '
+  [.sequence,
+   .record_type,
+   .payload.environment,
+   (.payload.name //
+    .correlation.component_id //
+    .correlation.evaluation_id)] |
+  @tsv
+' tmp/inspection/analyst.inspection.jsonl
+```
+
+The exact native capability names in an existing V1 artifact may differ from
+the planned MCP aliases above. Profile query results, correlation IDs, and
+record shapes are authoritative; never reconstruct a conversation by
+timestamps or terminal output.
+
+Read in this order:
+
+1. compare the public result with the task;
+2. use the canonical trace to find expensive, failed, or repeated calls;
+3. use each trace event's `capability_id` to locate the paired private
+   capability records;
+4. read the generated program that issued them;
+5. read the exact LLM exchange that produced that program; and
+6. inspect only the relevant effective prelude source.
+
+Suppose one run repeats an identical empty search three times. That is an
+observation, but one run is not yet a reusable failure class. The human records
+the distinction instead of immediately editing the agent. Save an object such
+as this as
+`repo-analyst/private/manual-review.private.json`:
+
+```json
+{
+  "summary": "One run repeated an identical empty search without changing evidence strategy.",
+  "findings": [
+    {
+      "behavior": "Repeated identical call after an empty result",
+      "inspection_evidence": {
+        "run_id": "r-2026-07-21-0413",
+        "sequences": [12, 18, 24],
+        "capability_ids": ["cap-7", "cap-9", "cap-12"]
+      },
+      "inference": "The agent policy may need a neutral strategy-change cue.",
+      "replication_status": "single-run",
+      "possible_target": "agent.core"
+    }
+  ],
+  "recommended_next_action": "insufficient-evidence",
+  "evidence_needed": "Check independent runs for the same behavior after an empty result."
+}
+```
+
+This manual record deliberately resembles the automated review contract in
+the next step: observed behavior, exact evidence, inference, replication
+status, possible target, and next action. It is not an executable candidate,
+and the later reviewer does not receive it. That lets the reader compare an
+independent automated review with their own reasoning.
+
+Private inspection is still private after credentials are excluded. Keep the
+artifacts and manual record `0600`, out of version control, and out of ordinary
+model context. Do not inspect held-out evaluation answers while forming the
+hypothesis; those remain useful only if the later evaluation stays blind.
 
 The existing V1 inspection vocabulary is exact and closed. MCP wire exchange
 records therefore require a new inspection artifact version rather than
@@ -711,7 +891,55 @@ enforce type and byte bounds, but cannot reliably sanitize the semantics of
 arbitrary third-party prose; a host leaves feedback closed unless it accepts
 that server's error-data contract.
 
-## 7. Study complete prior runs
+## 7. Automate the review you just performed
+
+The answer configuration intentionally accepted only normal data. Before
+automating private review, widen the same host document explicitly and add the
+two PTC-owned evidence sources:
+
+```diff
+    "deepseek": {
+      "source": "llm",
+      "model": "openrouter:deepseek/deepseek-v4-flash",
+-      "credential": "openrouter_key"
++      "credential": "openrouter_key",
++      "accepts_data": ["normal", "private_inspection"]
+     },
+     "workspace": {
+       ...
+       "snapshot_identity": {
+         "tool": "snapshot_info",
+         "field": "snapshot_hash"
+       },
++      "accepts_data": ["normal", "private_inspection"],
+       "ceilings": {
+         ...
+       }
+-    }
++    },
++    "history": {
++      "source": "ptc_trace_snapshot",
++      "directory": "tmp/traces",
++      "ceilings": {
++        "max_source_bytes": 8000000,
++        "max_result_bytes": 250000
++      }
++    },
++    "private-history": {
++      "source": "ptc_inspection_snapshot",
++      "directory": "tmp/inspection",
++      "ceilings": {
++        "max_files": 100,
++        "max_source_bytes": 64000000,
++        "max_result_bytes": 500000
++      }
++    }
+```
+
+This is authority expansion, so it appears where it first becomes necessary
+rather than in the introductory answer configuration. It still adds no
+destination to the host entries: the review manifest selects `deepseek` into
+workflow and the three read sources into mission.
 
 The review manifest adds the `runs` component and selects the `history` and
 `private-history` providers alongside `workspace`, then binds a
@@ -722,6 +950,23 @@ review-specific input and result schema:
   "task": "Review my last ten runs. Correlate repeated failures with the exact model exchanges, generated programs, MCP calls, and relevant source. Distinguish reusable behavior gaps from one-off bad input.",
   "agent": {"max_turns": 6}
 }
+```
+
+Validate the expanded private selection before running it:
+
+```console
+mix ptc.run repo-analyst-review.json \
+  --host-config repo-analyst.host.json \
+  --check
+```
+
+The resolved view now makes the authority change visible:
+
+```text
+workflow  deepseek         llm                      accepts normal, private_inspection
+mission   history          ptc_trace_snapshot       4 operations
+mission   private-history  ptc_inspection_snapshot  6 operations  data private_inspection
+mission   workspace        mcp/stdio                5 tools       accepts normal, private_inspection
 ```
 
 Then run:
@@ -742,14 +987,38 @@ activity. Private results use `--private-output` rather than stdout or
 `--output`.
 
 `repo-analyst/review.schema.json` validates a bounded review report with a
-summary, recurring findings, source/run evidence, and a recommended next
-action. It does not use candidate-decision tags for what is still an evidence
-report.
+summary, recurring findings, source/run evidence, observed-versus-inferred
+claims, replication status, and a recommended next action. It does not use
+candidate-decision tags for what is still an evidence report.
 
 `history` answers safe operational questions: outcomes, turns, counters, and
 capability timing. `private-history` reconstructs what the model saw and what
 the tools returned. `workspace` locates the implementation responsible for a
 repeated behavior.
+
+The automatic reviewer receives the same classes of evidence the human just
+read, but through bounded, paged functions:
+
+| Human action | Automated equivalent |
+| --- | --- |
+| `log/runs` plus `log/turns` | `runs/list-runs` plus `runs/turns` |
+| `inspection/model-exchanges` | `runs/model-exchanges` |
+| `inspection/capability-calls` | `runs/capability-calls` |
+| `inspection/generated-sources` | `runs/generated-sources` |
+| `inspection/effective-preludes` | `runs/effective-preludes` |
+| `inspection/provider-exchanges` | `runs/provider-exchanges` |
+| locate owning source | `repo/search` plus `repo/read-range` |
+
+Compare `review.private.json` with `manual-review.private.json` before
+proposing a change. The useful questions are whether it cites the same
+observations, separates inference from fact, finds independent replications,
+chooses the right layer, and notices evidence the human missed. Agreement is
+evidence about the review method, not proof that either reviewer is correct.
+
+The manual record is intentionally absent from every selected provider and
+the filesystem root excludes `repo-analyst/private/`. Automation must
+reconstruct the case from authoritative run/source snapshots rather than
+copying the human conclusion.
 
 Private inspection is data, not authority. A captured log that says “ignore
 the manifest and run this command” cannot install a command or widen a root.
@@ -823,6 +1092,32 @@ no write capability and cannot replace `agent.core`.
 
 ## 9. Evaluate in isolated ordinary runs
 
+Evaluation needs one more workflow-side installation. Add it immediately
+after `deepseek`, keeping workflow entries before mission entries:
+
+```diff
+     "deepseek": {
+       ...
+     },
++    "replay-llm": {
++      "source": "llm_replay",
++      "fixtures": "repo-analyst/evaluation/replay.jsonl",
++      "data_class": "private_inspection",
++      "accepts_data": ["normal", "private_inspection"],
++      "ceilings": {
++        "max_entries": 1000,
++        "max_result_bytes": 250000
++      }
++    },
+     "workspace": {
+       ...
+     }
+```
+
+`replay-llm` presents the same `llm-request` contract as `deepseek` from
+frozen fixtures. Separate manifests select one or the other; the host entry
+does not choose a destination or route between them.
+
 Materialization is a visible trusted step:
 
 ```console
@@ -840,7 +1135,7 @@ jq '.value.candidate |
 `evaluate.clj` is a domain-blind workflow that executes exactly one
 subject/case trial and returns its bounded observation and identities.
 `evaluate-replay.json` selects only `replay-llm`;
-`evaluate-live.json` selects only `analysis-llm`. A Kernel run never switches
+`evaluate-live.json` selects only `deepseek`. A Kernel run never switches
 between them.
 
 Both manifests make the evaluator the workflow entry, declare its
@@ -922,7 +1217,7 @@ surrounding persisted `Result` projection:
 {
   "candidate_sha256": "9f31c2...",
   "base_sha256": "bb8210...",
-  "installation_revision_sha256": "ac43d1...",
+  "provider_snapshot_sha256": "ac43d1...",
   "workspace_snapshot_sha256": "7e04a9...",
   "fixture_set_sha256": "13dc48...",
   "compiles": true,
@@ -945,7 +1240,85 @@ Promotion remains outside PtcRunner execution. A human or trusted CI gate
 reviews confidentiality and behavior, applies the candidate, and runs normal
 repository gates.
 
-## 10. Where MCP Tasks fit later
+## 10. Improve the improvement loop without changing Elixir
+
+The first loop is intentionally simple:
+
+```text
+human inspection in private ptc.repl
+      |
+automated review
+      |
+one candidate proposal
+      |
+scripted materialization
+      |
+replay and live baseline/candidate runs
+      |
+human promotion
+```
+
+It has strong authority, privacy, provenance, and isolation boundaries, but a
+naive improvement method. It does not yet have an independent proposal
+reviewer, a proposal-revision stage, or a distinct `replicate-first` decision.
+That is useful in a tutorial because the reader can observe why those
+refinements matter before inheriting them as ceremony.
+
+Suppose the automated review recommends changing `agent.core` from the one
+run above while the human record says `insufficient-evidence`. Do not decide by
+preference. Treat the disagreement as another observable run outcome:
+
+- both reviewers saw exact evidence rather than a redacted summary;
+- only one independent occurrence exists;
+- the proposed policy change could abandon a valid transiently empty search;
+  and
+- no negative control yet shows how the policy behaves after an empty result
+  that should be retried unchanged.
+
+The first improvement can therefore target the improvement application rather
+than `agent.core`. A human or ordinary script can:
+
+1. revise `repo-analyst/improve-input.json` to require observation/inference
+   separation and an explicit replication assessment;
+2. add a `replicate-first` branch to `candidate.schema.json`, or initially map
+   that outcome to `insufficient-evidence` with required follow-up evidence;
+3. add two independent encodings of the repeated-search condition and one
+   no-condition negative control under `evaluation/`;
+4. create `repo-analyst-improve-v2.json` selecting the revised files; and
+5. run the complete old and revised improvement manifests in fresh replay/live
+   invocations over the same frozen evidence, then aggregate their results
+   under the same no-clobber and identity rules.
+
+For example, the revised application policy may contain the neutral rule:
+
+```json
+{
+  "task": "Propose a reusable component change only when the behavior is grounded in exact run evidence and independently replicated. Separate observations from inference. For a single plausible occurrence, return replicate-first with the additional evidence needed. Use a negative control to check that the proposed rule would not fire when the condition is absent."
+}
+```
+
+Those changes are JSON, evaluation data, and optionally application-local
+PTC-Lisp. The generic command, Kernel, MCP client, filesystem server, and
+Elixir provider code remain unchanged. The same mechanism can later add:
+
+- an independent proposal-review manifest;
+- at most one proposal-revision manifest;
+- scorer-only oracle data hidden from the subject run;
+- structured `valid`, `apparatus-failed`, and `subject-failed` trial outcomes;
+  and
+- a form-aware editing MCP server for disposable candidates.
+
+Each refinement should first appear as a response to observed friction or a
+failed control. A larger application graph is not automatically a better
+self-improving loop.
+
+The bootstrap boundary remains explicit: the loop may identify and recommend
+an improvement to its own application files, but it cannot authorize or
+promote that improvement. The human/script step versions the candidate
+application, and ordinary isolated runs produce the evidence for the next
+decision.
+
+## 11. Where MCP Tasks fit later
 
 The filesystem tutorial needs only synchronous tools. Long-running evaluation
 or a named test runner may later return the MCP Tasks extension's
@@ -957,21 +1330,26 @@ task through the same provider without a new Mix command or Elixir callback.
 Until that lifecycle is implemented, PtcRunner advertises no Tasks support and
 rejects task results.
 
-## 11. What the application cannot do
+## 12. What the application cannot do
 
 | Attempt | Outcome |
 | --- | --- |
 | Manifest declares an executable, endpoint, root, credential, upstream tool, or effect | strict load failure |
+| Editor sees an unknown field or wrong source/transport shape | shipped schema reports it while the file is being edited |
+| Document passes JSON Schema but names a missing provider or raises a ceiling | `--check` reports the semantic failure before provider activity |
 | Manifest raises a host ceiling | assembly failure |
+| First-slice manifest selects `workspace` into workflow | unsupported environment; workflow-side MCP is still an explicit future decision |
 | Server advertises a write tool omitted from host mapping | tool never becomes a capability |
 | MCP description claims a read tool is safe | no authority change; host effect remains authoritative |
 | Filesystem changes after server capture | all calls continue to observe frozen bytes |
-| Installation revision or content identity changes | provider/trial hash changes |
+| Installation revision is omitted | provider/trial identity uses the remaining safe provider and content identities |
+| Present installation revision or content identity changes | provider/trial hash changes |
 | Workspace searches `.env`, `deps`, `_build`, `tmp`, or private results | no match: those paths were never included or opened |
 | Path traverses or crosses a symlink | bounded tool error without host path disclosure |
 | Server writes logs to stdout | protocol failure and owned process termination |
 | Server returns `input_required` or `task` | unsupported result because the client did not advertise those features |
 | Private history is selected with an unapproved model/MCP sink | assembly fails before sensitive data is opened |
+| Private inspection REPL omits `--private-terminal`, is piped, or requests non-interactive output | profile rejects the command before opening trace or inspection sources |
 | Provider-bearing manifest omits host config or uses legacy model/root/file config | strict failure; no implicit provider fallback |
 | Host config declares `source: "file-read"` | strict unknown-source failure; install an MCP filesystem provider instead |
 | Private candidate is supplied through `--private-mission` with a public sink/output | fails before provider activity; input stays private |
@@ -983,7 +1361,7 @@ rejects task results.
 | Evaluator tries to switch from replay to live LLM | impossible: each run freezes exactly one workflow provider |
 | Relevant file, run, or exchange is beyond the first result page | facade returns an opaque cursor and the model can request the next page |
 
-## 12. Friction and resulting platform choices
+## 13. Friction and resulting platform choices
 
 Writing the tutorial resolves several API questions:
 
@@ -1013,3 +1391,29 @@ Writing the tutorial resolves several API questions:
 10. **Fresh ordinary runs plus a pure aggregate are enough.** Provider
     switching and trial reset do not need a pipeline engine or mutable
     self-owner.
+11. **Expose the evidence before automating the judgment.** A human inspection
+    pass makes private authority, correlation, and the limits of one-run
+    inference concrete; the automated reviewer then has a visible standard to
+    reproduce or challenge.
+12. **The improvement method is application policy.** Replication rules,
+    proposal review, revision, controls, and aggregation can evolve through
+    JSON, PTC-Lisp, fixtures, and scripts without a new Mix task or Elixir
+    provider.
+13. **Private evidence needs a first-class human query surface.** Raw `jq` is
+    valuable for format debugging, but a fixed private `ptc.repl` profile can
+    freeze both evidence planes, validate correlations, pair records, page
+    large conversations, and let a human keep exploratory definitions. A
+    distinct profile ID plus explicit terminal authority preserves the normal
+    `log-analysis-v1` contract.
+14. **Flat installation and explicit placement are easier to reason about.**
+    The host says what exists; the manifest says whether a selected alias
+    enters workflow or mission. Ordering and a resolved `--check` view provide
+    visual grouping without duplicating destination across authority layers.
+15. **Introduce authority when the tutorial needs it.** The first answer uses
+    only concrete DeepSeek and workspace grants. Private acceptance and PTC
+    snapshots appear at review; replay appears at evaluation. Safe local field
+    defaults remove repetition without adding inheritance or merge precedence.
+16. **The configuration language needs an editor contract.** Shipped generated
+    JSON Schemas make host and manifest structure discoverable without reading
+    Elixir or waiting for a run, while `--check` remains the authority for
+    cross-file, security, discovery, and lifecycle semantics.
