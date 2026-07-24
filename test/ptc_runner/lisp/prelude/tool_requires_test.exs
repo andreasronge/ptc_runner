@@ -276,6 +276,77 @@ defmodule PtcRunner.Lisp.Prelude.ToolRequiresTest do
       assert [%{private: true, origin: %{ref: "cap/fetch"}}] = step.tool_calls
     end
 
+    test "private prelude tool ledgers redact source and metadata at the public boundary" do
+      input_source = "PRIVATE_INPUT_SOURCE"
+      result_source = "PRIVATE_RESULT_SOURCE"
+
+      prelude =
+        compile!("""
+        (ns cap "Cap." {:visibility :prompt})
+        (defn fetch "doc" []
+          (do
+            (tool/private_fetch
+              {"source" "#{input_source}"
+               "metadata"
+               {"reason" "sync"
+                "requires_preludes" ["base" 7]
+                "prelude_deps"
+                [{"id" "base" "version" 2 "checksum" "checksum-base"}
+                 {"id" "invalid" "version" 0 "checksum" "ignored"}]
+                "nested" {"token" "PRIVATE_INPUT_SECRET"}}})
+            "ok"))
+        """)
+
+      tools = %{
+        "private_fetch" =>
+          {fn _args ->
+             %{
+               "source" => result_source,
+               "metadata" => %{
+                 "created_by" => "prelude",
+                 "api_key" => "PRIVATE_RESULT_SECRET"
+               }
+             }
+           end, visibility: :private}
+      }
+
+      assert {:ok, %Step{} = step} = Lisp.run(~S|(cap/fetch)|, prelude: prelude, tools: tools)
+      assert step.return == "ok"
+
+      assert [
+               %{
+                 private: true,
+                 origin: %{type: :prelude_export, ref: "cap/fetch"},
+                 args: %{"source" => input_summary, "metadata" => input_metadata},
+                 result: %{"source" => result_summary, "metadata" => result_metadata}
+               }
+             ] = step.tool_calls
+
+      assert %{"redacted" => true, "bytes" => input_bytes, "sha256" => input_hash} = input_summary
+      assert input_bytes == byte_size(input_source)
+      assert input_hash =~ ~r/\A[0-9a-f]{64}\z/
+
+      assert %{"redacted" => true, "bytes" => result_bytes, "sha256" => result_hash} =
+               result_summary
+
+      assert result_bytes == byte_size(result_source)
+      assert result_hash =~ ~r/\A[0-9a-f]{64}\z/
+      refute input_hash == result_hash
+
+      assert input_metadata == %{
+               "reason" => "sync",
+               "requires_preludes" => ["base"],
+               "prelude_deps" => [
+                 %{"id" => "base", "version" => 2, "checksum" => "checksum-base"}
+               ]
+             }
+
+      assert result_metadata == %{"created_by" => "prelude"}
+
+      encoded_ledger = inspect(step.tool_calls)
+      refute encoded_ledger =~ "PRIVATE_"
+    end
+
     test "a value-position HOF use of an export may call its declared private tools" do
       tools = %{
         "private_fetch" =>

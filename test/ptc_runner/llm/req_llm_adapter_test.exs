@@ -2,8 +2,65 @@ defmodule PtcRunner.LLM.ReqLLMAdapterTest do
   use ExUnit.Case, async: true
 
   alias PtcRunner.LLM.ReqLLMAdapter
+  alias PtcRunner.TestSupport.MCPHTTPFixture
   alias ReqLLM.Message
   alias ReqLLM.ToolCall
+
+  describe "OpenAI-compatible HTTP integration" do
+    test "sends the production request over HTTP and decodes the provider response" do
+      parent = self()
+
+      fixture =
+        MCPHTTPFixture.start(fn request ->
+          send(parent, {:openai_compat_request, request})
+
+          response = %{
+            "choices" => [%{"message" => %{"content" => "loopback response"}}],
+            "usage" => %{"prompt_tokens" => 13, "completion_tokens" => 5}
+          }
+
+          {200, [{"content-type", "application/json"}], Jason.encode!(response)}
+        end)
+
+      on_exit(fixture.close)
+
+      assert {:ok, response} =
+               ReqLLMAdapter.generate_text(
+                 "openai-compat:#{fixture.endpoint}|loopback-model",
+                 [
+                   %{role: :system, content: "Be concise."},
+                   %{role: :user, content: "Summarize this."}
+                 ],
+                 max_tokens: 32,
+                 temperature: 0.25,
+                 receive_timeout: 1_000
+               )
+
+      assert response == %{
+               content: "loopback response",
+               tokens: %{
+                 input: 13,
+                 output: 5,
+                 cache_read: 0,
+                 cache_creation: 0
+               }
+             }
+
+      assert_receive {:openai_compat_request, request}
+      assert request.method == "POST"
+      assert request.path == "/mcp/chat/completions"
+
+      assert request.body == %{
+               "model" => "loopback-model",
+               "messages" => [
+                 %{"role" => "system", "content" => "Be concise."},
+                 %{"role" => "user", "content" => "Summarize this."}
+               ],
+               "max_tokens" => 32,
+               "temperature" => 0.25
+             }
+    end
+  end
 
   describe "generate_object/4" do
     test "returns structured_output_not_supported for ollama" do
