@@ -25,18 +25,15 @@ defmodule PtcRunner.Kernel.MCPSource do
 
   alias PtcRunner.Kernel.Capability
   alias PtcRunner.Kernel.DeterministicJSON
-  alias PtcRunner.Kernel.JSONSchema
-  alias PtcRunner.Kernel.JSONValue
   alias PtcRunner.Kernel.MCPLease
+  alias PtcRunner.Kernel.MCPProtocol
   alias PtcRunner.Kernel.ProviderError
-  alias PtcRunner.Kernel.StrictJSON
 
   @protocol "2025-11-25"
   @max_discovery_bytes 1_048_576
   @max_headers 32
   @max_header_bytes 16_384
   @name ~r/\A[a-z][a-z0-9._-]{0,127}\z/
-  @upstream_name ~r/\A[^\s\x00-\x1f\x7f]{1,256}\z/u
 
   @type builder :: PtcRunner.Kernel.ProviderRegistry.builder()
 
@@ -162,7 +159,7 @@ defmodule PtcRunner.Kernel.MCPSource do
     Enum.reduce_while(tools, {:ok, %{}, MapSet.new()}, fn
       {upstream, %{as: public, effect: :read} = mapping}, {:ok, normalized, public_names}
       when is_binary(upstream) and is_binary(public) ->
-        if Map.keys(mapping) -- [:as, :effect] == [] and upstream =~ @upstream_name and
+        if Map.keys(mapping) -- [:as, :effect] == [] and MCPProtocol.valid_tool_name?(upstream) and
              public =~ @name and not MapSet.member?(public_names, public) do
           {:cont,
            {:ok, Map.put(normalized, upstream, %{as: public, effect: :read}),
@@ -282,44 +279,24 @@ defmodule PtcRunner.Kernel.MCPSource do
   defp list_tools(lease, installed, cursor, seen, tools, pages) do
     params = if is_nil(cursor), do: %{}, else: %{"cursor" => cursor}
 
-    with {:ok, result} <- rpc(lease, "tools/list", params, @max_discovery_bytes),
-         page when is_list(page) <- result["tools"],
-         true <- length(page) + map_size(tools) <= installed.max_catalog_tools,
-         {:ok, tools} <- merge_tools(tools, page),
-         next <- result["nextCursor"],
-         true <- is_nil(next) or (is_binary(next) and byte_size(next) in 1..1_024),
-         false <- is_binary(next) and Map.has_key?(seen, next) do
-      if is_nil(next) do
-        bounded_catalog(tools)
-      else
-        list_tools(lease, installed, next, Map.put(seen, next, true), tools, pages + 1)
-      end
-    else
-      {:error, _reason} = error -> error
-      _reason -> {:error, :mcp_invalid_catalog}
-    end
-  end
+    with {:ok, result} <- rpc(lease, "tools/list", params, @max_discovery_bytes) do
+      case MCPProtocol.catalog_page(
+             result,
+             tools,
+             seen,
+             installed.max_catalog_tools,
+             @max_discovery_bytes
+           ) do
+        {:done, tools} ->
+          {:ok, tools}
 
-  defp bounded_catalog(tools) do
-    with {:ok, encoded} <- DeterministicJSON.encode(Map.values(tools)),
-         true <- byte_size(encoded) <= @max_discovery_bytes do
-      {:ok, tools}
-    else
-      _reason -> {:error, :mcp_catalog_exceeded}
-    end
-  end
+        {:continue, next, seen, tools} ->
+          list_tools(lease, installed, next, seen, tools, pages + 1)
 
-  defp merge_tools(existing, page) do
-    Enum.reduce_while(page, {:ok, existing}, fn tool, {:ok, tools} ->
-      with true <- is_map(tool) and not is_struct(tool),
-           name when is_binary(name) <- tool["name"],
-           true <- name =~ @upstream_name,
-           false <- Map.has_key?(tools, name) do
-        {:cont, {:ok, Map.put(tools, name, tool)}}
-      else
-        _reason -> {:halt, {:error, :mcp_invalid_catalog}}
+        {:error, _reason} = error ->
+          error
       end
-    end)
+    end
   end
 
   defp capabilities(lease, installed, selected, discovered) do
@@ -344,48 +321,24 @@ defmodule PtcRunner.Kernel.MCPSource do
   defp capability(_lease, _upstream, _mapping, nil, _selected),
     do: {:error, :mcp_mapped_tool_missing}
 
-  # Genuinely unknown tool-entry fields (title, _meta, icons, vendor
-  # metadata) are ignored per MCP forward compatibility: never rejected,
-  # never read, never forwarded. `execution` is a known field that changes
-  # invocation semantics under the pinned protocol, so it is parsed rather
-  # than ignored.
   defp capability(lease, upstream, mapping, tool, selected) do
-    case task_support(tool) do
-      :ok -> assemble_capability(lease, upstream, mapping, tool, selected)
-      {:error, _reason} = error -> error
+    case MCPProtocol.selected_tool(tool) do
+      {:ok, contract} ->
+        assemble_capability(lease, upstream, mapping, contract, selected)
+
+      {:error, _reason} = error ->
+        error
     end
   end
 
-  # A tool declaring `execution.taskSupport: "required"` must be invoked
-  # through the task primitives, which this synchronous client does not
-  # implement; exposing it as an ordinary capability would be incorrect, so
-  # assembly fails with a stable error. Absent, "forbidden", and "optional"
-  # execute as ordinary calls. Malformed pinned-protocol values are rejected.
-  defp task_support(%{"execution" => execution}) when is_map(execution) do
-    case Map.fetch(execution, "taskSupport") do
-      :error -> :ok
-      {:ok, support} when support in ["forbidden", "optional"] -> :ok
-      {:ok, "required"} -> {:error, :mcp_tool_task_required}
-      {:ok, _invalid} -> {:error, :mcp_invalid_catalog}
-    end
-  end
-
-  defp task_support(%{"execution" => _invalid}), do: {:error, :mcp_invalid_catalog}
-  defp task_support(_tool), do: :ok
-
-  defp assemble_capability(lease, upstream, mapping, tool, selected) do
-    with description <- Map.get(tool, "description"),
-         true <-
-           is_nil(description) or (is_binary(description) and byte_size(description) <= 4_096),
-         input when is_map(input) <- tool["inputSchema"],
-         {:ok, output} <- optional_output_schema(tool),
-         {:ok, capability} <-
+  defp assemble_capability(lease, upstream, mapping, contract, selected) do
+    with {:ok, capability} <-
            Capability.new(
              name: mapping.as,
-             description: description,
+             description: contract.description,
              model_visible: MapSet.member?(selected.model_visible, mapping.as),
-             input_schema: input,
-             output_schema: output,
+             input_schema: contract.input_schema,
+             output_schema: contract.output_schema,
              effect: :read,
              callback: fn _arguments -> {:error, :uninstalled_mcp_callback} end
            ),
@@ -407,16 +360,6 @@ defmodule PtcRunner.Kernel.MCPSource do
     end
   end
 
-  defp optional_output_schema(%{"outputSchema" => output}) when is_map(output) do
-    {:ok, output}
-  end
-
-  defp optional_output_schema(tool) do
-    if Map.has_key?(tool, "outputSchema"),
-      do: {:error, :mcp_invalid_tool_schema},
-      else: {:ok, nil}
-  end
-
   defp callback(lease, upstream, output_validator, selected) do
     fn arguments ->
       case rpc(
@@ -431,41 +374,16 @@ defmodule PtcRunner.Kernel.MCPSource do
     end
   end
 
-  defp normalize_result(%{"isError" => true}, _output_validator),
-    do: {:error, ProviderError.new(:domain_error, "mcp_domain_error")}
+  defp normalize_result(result, output_validator) do
+    case MCPProtocol.normalize_tool_result(result, output_validator) do
+      {:ok, value} ->
+        {:ok, value}
 
-  defp normalize_result(%{"structuredContent" => structured} = result, output_validator)
-       when is_map(structured) and not is_nil(output_validator) do
-    content = Map.get(result, "content", [])
+      {:error, :mcp_domain_error} ->
+        {:error, ProviderError.new(:domain_error, "mcp_domain_error")}
 
-    if content in [nil, []] and JSONSchema.valid?(output_validator, structured),
-      do: {:ok, structured},
-      else: {:error, ProviderError.new(:invalid_result, "mcp_invalid_result")}
-  end
-
-  defp normalize_result(%{"content" => content} = result, nil) when is_list(content) do
-    if Map.has_key?(result, "structuredContent") do
-      {:error, ProviderError.new(:invalid_result, "mcp_invalid_result")}
-    else
-      text_result(content)
-    end
-  end
-
-  defp normalize_result(_result, _output_validator),
-    do: {:error, ProviderError.new(:invalid_result, "mcp_invalid_result")}
-
-  defp text_result(content) do
-    Enum.reduce_while(content, {:ok, []}, fn
-      %{"type" => "text", "text" => text} = block, {:ok, texts}
-      when is_binary(text) and map_size(block) == 2 ->
-        {:cont, {:ok, [text | texts]}}
-
-      _block, _acc ->
-        {:halt, {:error, ProviderError.new(:invalid_result, "mcp_invalid_result")}}
-    end)
-    |> case do
-      {:ok, texts} -> {:ok, %{"text" => Enum.reverse(texts)}}
-      error -> error
+      {:error, :mcp_invalid_result} ->
+        {:error, ProviderError.new(:invalid_result, "mcp_invalid_result")}
     end
   end
 
@@ -507,47 +425,19 @@ defmodule PtcRunner.Kernel.MCPSource do
   defp rpc(lease, method, params, max_bytes) do
     with_request(lease, fn request ->
       with {:ok, headers} <- request_headers(request),
-           payload = %{
-             "jsonrpc" => "2.0",
-             "id" => request.id,
-             "method" => method,
-             "params" => params
-           },
+           payload = MCPProtocol.request(request.id, method, params),
            {:ok, response} <- http(:post, lease, request, headers, payload, max_bytes),
            :ok <- maybe_capture_session(lease, response),
            {:ok, body} <- response_body(response, request.id) do
-        rpc_outcome(body)
+        MCPProtocol.outcome(body)
       end
     end)
   end
 
-  defp rpc_outcome(body) do
-    case {Map.fetch(body, "result"), Map.fetch(body, "error")} do
-      {{:ok, result}, :error} when is_map(result) ->
-        {:ok, result}
-
-      {:error, {:ok, error}} when is_map(error) ->
-        if valid_rpc_error?(error),
-          do: {:error, :mcp_remote_error},
-          else: {:error, :mcp_protocol_error}
-
-      _invalid ->
-        {:error, :mcp_protocol_error}
-    end
-  end
-
-  defp valid_rpc_error?(%{"code" => code, "message" => message} = error) do
-    Map.keys(error) -- ~w(code message data) == [] and is_integer(code) and
-      is_binary(message) and byte_size(message) <= 4_096 and String.valid?(message) and
-      (not Map.has_key?(error, "data") or JSONValue.value?(error["data"]))
-  end
-
-  defp valid_rpc_error?(_error), do: false
-
   defp notification(lease, method, params) do
     with_request(lease, fn request ->
       with {:ok, headers} <- request_headers(request),
-           payload = %{"jsonrpc" => "2.0", "method" => method, "params" => params},
+           payload = MCPProtocol.notification(method, params),
            {:ok, response} <- http(:post, lease, request, headers, payload, 65_536) do
         if response.status in [200, 202, 204], do: :ok, else: {:error, :mcp_transport_error}
       end
@@ -696,7 +586,7 @@ defmodule PtcRunner.Kernel.MCPSource do
 
     cond do
       Enum.any?(content_types, &String.starts_with?(&1, "application/json")) ->
-        decode_json(body, id)
+        MCPProtocol.decode_response(body, id)
 
       Enum.any?(content_types, &String.starts_with?(&1, "text/event-stream")) ->
         decode_sse(body, id)
@@ -708,17 +598,6 @@ defmodule PtcRunner.Kernel.MCPSource do
 
   defp response_body(_response, _id), do: {:error, :mcp_response_exceeded}
 
-  defp decode_json(body, id) do
-    with {:ok, decoded} <- StrictJSON.decode(body),
-         true <- JSONValue.map?(decoded),
-         ^id <- decoded["id"],
-         "2.0" <- decoded["jsonrpc"] do
-      {:ok, decoded}
-    else
-      _reason -> {:error, :mcp_protocol_error}
-    end
-  end
-
   defp decode_sse(body, id) do
     body
     |> String.split(~r/\r?\n\r?\n/, trim: true)
@@ -729,7 +608,7 @@ defmodule PtcRunner.Kernel.MCPSource do
         |> Enum.filter(&String.starts_with?(&1, "data:"))
         |> Enum.map_join("\n", &String.trim_leading(&1, "data:"))
 
-      case decode_json(data, id) do
+      case MCPProtocol.decode_response(data, id) do
         {:ok, decoded} -> {:halt, {:ok, decoded}}
         {:error, :mcp_protocol_error} -> {:cont, {:error, :mcp_protocol_error}}
       end

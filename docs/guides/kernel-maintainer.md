@@ -225,8 +225,10 @@ manifest guide.
 The current MCP adapter is a host-installed read-only Streamable HTTP source.
 Endpoint, credentials, upstream mapping, and installed ceilings are host
 authority; a manifest may only select mapped names and narrow visibility or
-limits. `PtcRunner.Kernel.MCPSource` and its lease module document the exact
-protocol and close behavior.
+limits. `PtcRunner.Kernel.MCPSource` owns transport and capability assembly,
+`PtcRunner.Kernel.MCPProtocol` owns pure protocol validation and normalization,
+and the lease module owns session/request lifecycle. Their module docs define
+the exact behavior.
 
 The local log-analysis path is a fixed product profile shared by the Viewer
 and terminal REPL. `PtcRunner.Kernel.LogAnalysisSessionBuilder` is the host
@@ -245,7 +247,7 @@ not supply profile internals or paths.
 | Mutable resources | `Limits`, `RunState`, `BoundedWorker`, `Dispatcher` |
 | Subordinate execution | `Runner`, `Evaluation`, `RuntimeTools` |
 | Lisp internals | `Lisp.Eval`, `Lisp.Eval.Effects`, `Lisp.Eval.Capture`, `Lisp.Eval.Parallel`, `Lisp.Eval.ParallelRunner` |
-| Providers | `FileCapability`, `LLMCapability`, `MCPSource`, `TraceCapability` |
+| Providers | `FileCapability`, `LLMCapability`, `MCPSource`, `MCPProtocol`, `TraceCapability` |
 | Canonical/private evidence | `EventSink`, `TraceLog`, `InspectionSink`, `InspectionArtifact`, `SafeMetadata` |
 | Interactive evaluation | `ReplSession`, `LogAnalysisSessionBuilder`, `LogAnalysisSession`, `SessionTrace` |
 

@@ -166,6 +166,7 @@ defmodule PtcRunner.MixProject do
           PtcRunner.Kernel.Events,
           PtcRunner.Kernel.JSONValue,
           PtcRunner.Kernel.JSONSchema,
+          PtcRunner.Kernel.MCPProtocol,
           PtcRunner.Kernel.Program,
           PtcRunner.Kernel.RunState,
           PtcRunner.Kernel.Runner,
