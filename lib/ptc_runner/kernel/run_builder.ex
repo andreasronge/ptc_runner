@@ -18,6 +18,8 @@ defmodule PtcRunner.Kernel.RunBuilder do
   alias PtcRunner.Kernel.MissionEnvironment
   alias PtcRunner.Kernel.ProviderRegistry
   alias PtcRunner.Kernel.ProviderResources
+  alias PtcRunner.Kernel.Result
+  alias PtcRunner.Kernel.ResultArtifact
   alias PtcRunner.Kernel.RunConfig
   alias PtcRunner.Kernel.TraceLog
   alias PtcRunner.Kernel.WorkflowEnvironment
@@ -215,7 +217,8 @@ defmodule PtcRunner.Kernel.RunBuilder do
     case terminal_batch do
       {:ok, events} ->
         with :ok <- persist_trace(Keyword.get(opts, :trace), built.config.event_sink, events),
-             :ok <- persist_inspection(built.config, events) do
+             :ok <- persist_inspection(built.config, events),
+             :ok <- persist_result(result, built.config.event_sink, opts) do
           result
         else
           {:error, {:trace, reason}} ->
@@ -223,6 +226,9 @@ defmodule PtcRunner.Kernel.RunBuilder do
 
           {:error, {:inspection, reason}} ->
             {:error, {:inspection_persistence_failed, reason, result}}
+
+          {:error, {:result, reason}} ->
+            {:error, {:result_persistence_failed, reason, result}}
         end
 
       {:error, _reason} ->
@@ -294,6 +300,85 @@ defmodule PtcRunner.Kernel.RunBuilder do
       path -> Manifest.override_input(manifest, path)
     end
   end
+
+  @doc """
+  Returns the effective result class declared by a manifest, without running it.
+
+  A caller that must decide whether a value may be printed needs the class
+  before the run produces one. Loading is cheap and confined; an unreadable
+  manifest reports `:normal` because the run itself fails first and reports the
+  real error.
+  """
+  @spec manifest_class(binary()) :: :normal | :private
+  def manifest_class(path) when is_binary(path) do
+    case Manifest.load(path) do
+      {:ok, %Manifest{events: %{policy: :private}}} -> :private
+      _other -> :normal
+    end
+  end
+
+  def manifest_class(_path), do: :normal
+
+  @doc """
+  Returns the effective class of a run's result.
+
+  V1 derives it from the event policy alone: a private-event run produces a
+  private value. The §4.7 rule that also classifies a private mission input or
+  a provider that emits private inspection data needs host-installed data
+  classes and widens this once host configuration lands.
+  """
+  @spec result_class(EventSink.t()) :: :normal | :private
+  def result_class(sink) do
+    if EventSink.policy(sink) == :private, do: :private, else: :normal
+  end
+
+  defp persist_result({:ok, %Result{} = result}, sink, opts) do
+    class = result_class(sink)
+
+    case result_destination(opts) do
+      {:ok, nil} ->
+        :ok
+
+      {:ok, {path, destination}} ->
+        case ResultArtifact.persist(path, public_value(result.value), class, destination) do
+          :ok -> :ok
+          {:error, reason} -> {:error, {:result, reason}}
+        end
+
+      {:error, reason} ->
+        {:error, {:result, reason}}
+    end
+  end
+
+  defp persist_result(_result, _sink, _opts), do: :ok
+
+  defp result_destination(opts) do
+    case {Keyword.get(opts, :output), Keyword.get(opts, :private_output)} do
+      {nil, nil} ->
+        {:ok, nil}
+
+      {path, nil} when is_binary(path) ->
+        {:ok, {path, :normal}}
+
+      {nil, path} when is_binary(path) ->
+        {:ok, {path, :private}}
+
+      {path, private} when is_binary(path) and is_binary(private) ->
+        {:error, :conflicting_result_destinations}
+
+      _invalid ->
+        {:error, :invalid_result_destination}
+    end
+  end
+
+  defp public_value(value) when is_struct(value),
+    do: value |> Map.from_struct() |> public_value()
+
+  defp public_value(value) when is_map(value),
+    do: Map.new(value, fn {key, nested} -> {key, public_value(nested)} end)
+
+  defp public_value(value) when is_list(value), do: Enum.map(value, &public_value/1)
+  defp public_value(value), do: value
 
   defp persist_trace(nil, _sink, _events), do: :ok
 

@@ -1299,6 +1299,17 @@ read its surrounding lines without a prelisted answer, while no public
 
 ### Slice D — Classified inputs, result artifacts, and contracts
 
+**Partially implemented.** `--output`, `--private-output`, atomic no-clobber
+persistence, and terminal suppression for a private run are in
+`PtcRunner.Kernel.ResultArtifact` and `RunBuilder.persist_result/3`, alongside
+the existing trace and inspection persistence. `RunBuilder.result_class/1`
+currently derives the class from the event policy alone. The §4.7 rule that
+also classifies a private mission input or a provider emitting private
+inspection data needs host-installed data classes, so the remaining
+sink-compatibility work waits on Slice B rather than guessing a provider
+vocabulary that does not exist yet. Result schemas and the tagged-union
+profile are likewise still open.
+
 - add `--output` and `--private-output`;
 - keep the existing manifest-relative `--mission` input override and add the
   mutually exclusive trusted `--private-mission`;
