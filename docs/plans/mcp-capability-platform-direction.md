@@ -337,6 +337,29 @@ Unexpected server exit loses in-flight requests. V1 should return a bounded
 transport failure rather than automatically retry a potentially effectful
 tool. Restart-and-retry can be added only with an effect/idempotence policy.
 
+Interoperability evidence has three deliberately different roles:
+
+- the pinned official Go SDK HTTP example is the small credential-free Slice 1
+  proof that the Streamable HTTP adapter speaks to an independent
+  implementation;
+- the controlled tool fixture is the Slice 2 conformance and fault-injection
+  target for transport equivalence, malformed framing, cancellation,
+  backpressure, descendant termination, and descriptor regressions; and
+- GitHub MCP Server `v1.7.0` is the first production third-party stdio
+  application acceptance target. Its release includes the `2026-07-28`
+  protocol through the official Go SDK, and its documented local
+  configuration exercises the ecosystem-shaped `command`/`args`/`env`
+  boundary.
+
+The real server does not replace the fixture: a third-party service is the
+wrong place to force crashes, malformed stdout, or stubborn descendants. The
+fixture does not replace the real server: software maintained with the client
+cannot expose ecosystem assumptions in discovery schemas, startup conventions,
+or credential wiring. The GitHub journey lands with Slice 3 because that is
+where it can prove the application-level claim — host JSON, manifest, and
+PTC-Lisp install and use a new server without Elixir registration — while
+reusing the stdio transport completed in Slice 2.
+
 ### 3.6 Discover once, freeze once
 
 Provider assembly performs `server/discover` and paginated `tools/list`,
@@ -928,10 +951,11 @@ termination on both supported platforms.
   conversion and Base64-sentinel encoding;
 - preserve current deadlines, byte bounds, duplicate-key rejection,
   redaction, and deterministic snapshots; and
-- update the live MCP E2E target to a server supporting the pinned version.
+- pin the official Go SDK HTTP example as the small credential-free live E2E
+  target for the selected version.
 
 **Gate:** the HTTP adapter has no protocol-session state and interoperates with
-one real modern server.
+the pinned official Go SDK HTTP example.
 
 ### Slice 2 — One protocol client and stdio transport
 
@@ -993,11 +1017,21 @@ requiring a compiler.
 - Print a bounded resolved view ordered by environment and alias, including
   source/transport, selected tool counts, accepted data classes, and safe
   snapshot identities rather than echoing heterogeneous raw config.
+- Add a scheduled/manual ecosystem E2E using GitHub MCP Server `v1.7.0` over
+  its documented stdio launch shape. Pin the Docker image by immutable digest
+  or the native release by checksum, enable read-only mode, expose one
+  read-only tool, bind a minimally scoped credential through the host config,
+  and read a fixed path at an immutable public repository commit.
+- Run that journey through `--check` and an ordinary manifest/PTC-Lisp call.
+  Assert bounded discovery and snapshots, credential exclusion from public
+  artifacts, successful invocation, and clean process/container teardown.
 
-**Gate:** an ordinary manifest selects a configured MCP server without any
-Elixir registration change; every concrete plan/tutorial configuration
-validates against the shipped schema, and a shared valid/invalid fixture
-corpus agrees between schema validation and the structural runtime decoder.
+**Gate:** host JSON and an ordinary manifest select the pinned GitHub MCP
+Server over stdio, complete `--check`, and call one read-only tool from
+PTC-Lisp without an Elixir registration change. Every concrete plan/tutorial
+configuration validates against the shipped schema, and a shared valid/invalid
+fixture corpus agrees between schema validation and the structural runtime
+decoder.
 
 ### Slice 4 — Useful feedback and private MCP inspection
 
@@ -1076,6 +1110,8 @@ advertise what PtcRunner cannot honor.
 | Launcher protocol handshake does not match | Deterministic pre-server-spawn compatibility failure after the launcher starts |
 | Stdio server writes non-protocol stdout | Closed protocol failure; process is terminated |
 | Stdio server or same-group descendant survives close deadline | Escalated launched-process-group termination and closed cleanup result; `setpgid`/`setsid` escape is outside V1 |
+| Pinned GitHub MCP Server is installed through host JSON over stdio | `--check` discovers the selected read-only tool and a manifest calls it without Elixir registration |
+| GitHub MCP Server journey completes or fails | Credential text is absent from public artifacts and the launched process/container is gone after bounded close |
 | Generated HTTP routing/version headers would disagree with the request body | Impossible by construction; both derive from the same frozen request |
 | Valid mapped `x-mcp-header` parameter is present | Required `Mcp-Param-*` header mirrors the body using specified encoding |
 | `x-mcp-header` definition is invalid | Tool is excluded; a host mapping to it fails assembly |
@@ -1124,6 +1160,9 @@ advertise what PtcRunner cannot honor.
 - [Official filesystem server](https://github.com/modelcontextprotocol/servers/tree/main/src/filesystem)
 - [Official TypeScript SDK stdio client](https://github.com/modelcontextprotocol/typescript-sdk/blob/v1.x/src/client/stdio.ts)
 - [Official Python SDK stdio client](https://github.com/modelcontextprotocol/python-sdk/blob/main/src/mcp/client/stdio.py)
+- [GitHub MCP Server supports the next MCP specification](https://github.blog/changelog/2026-07-23-github-mcp-server-supports-the-next-mcp-specification/)
+- [GitHub MCP Server `v1.7.0`](https://github.com/github/github-mcp-server/releases/tag/v1.7.0)
+- [GitHub MCP Server local stdio configuration](https://github.com/github/github-mcp-server/tree/v1.7.0)
 - [TypeScript SDK process-tree cleanup issue](https://github.com/modelcontextprotocol/typescript-sdk/issues/2023)
 - [Python SDK process-tree cleanup change](https://github.com/modelcontextprotocol/python-sdk/pull/850)
 - [Codex MCP descriptor/orphan regression](https://github.com/openai/codex/issues/26984)
