@@ -207,22 +207,19 @@ defmodule PtcRunner.Examples.KernelInspectionLab do
     }
   end
 
-  defp mcp_response(%{method: "DELETE"}),
-    do: {200, [{"content-type", "application/json"}], "{}"}
-
-  defp mcp_response(%{body: %{"method" => "initialize", "id" => id}}) do
-    json(
-      id,
-      %{"protocolVersion" => "2025-11-25", "capabilities" => %{"tools" => %{}}},
-      [{"mcp-session-id", "inspection-lab-session"}]
-    )
+  defp mcp_response(%{body: %{"method" => "server/discover", "id" => id}}) do
+    json(id, %{
+      "resultType" => "complete",
+      "supportedVersions" => ["2026-07-28"],
+      "capabilities" => %{"tools" => %{}},
+      "ttlMs" => 0,
+      "cacheScope" => "private"
+    })
   end
-
-  defp mcp_response(%{body: %{"method" => "notifications/initialized"}}),
-    do: {202, [{"content-type", "application/json"}], ""}
 
   defp mcp_response(%{body: %{"method" => "tools/list", "id" => id}}) do
     json(id, %{
+      "resultType" => "complete",
       "tools" => [
         %{
           "name" => "structured",
@@ -248,24 +245,35 @@ defmodule PtcRunner.Examples.KernelInspectionLab do
           "description" => "Return one MCP domain error",
           "inputSchema" => input_schema()
         }
-      ]
+      ],
+      "ttlMs" => 0,
+      "cacheScope" => "private"
     })
   end
 
   defp mcp_response(%{
          body: %{"method" => "tools/call", "id" => id, "params" => %{"name" => "structured"}}
        }),
-       do: json(id, %{"structuredContent" => %{"value" => 42}, "content" => []})
+       do:
+         json(id, %{
+           "resultType" => "complete",
+           "structuredContent" => %{"value" => 42},
+           "content" => []
+         })
 
   defp mcp_response(%{
          body: %{"method" => "tools/call", "id" => id, "params" => %{"name" => "text"}}
        }),
-       do: json(id, %{"content" => [%{"type" => "text", "text" => "fixture-text"}]})
+       do:
+         json(id, %{
+           "resultType" => "complete",
+           "content" => [%{"type" => "text", "text" => "fixture-text"}]
+         })
 
   defp mcp_response(%{
          body: %{"method" => "tools/call", "id" => id, "params" => %{"name" => "fail"}}
        }),
-       do: json(id, %{"isError" => true, "content" => []})
+       do: json(id, %{"resultType" => "complete", "isError" => true, "content" => []})
 
   defp input_schema do
     %{

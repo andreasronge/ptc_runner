@@ -690,7 +690,8 @@ mission input, file content, and provider output as untrusted data.
 The checked-in inspection lab exercises the complete local development path
 without a model credential. A scripted model receives the frozen mission
 inventory and generates a mission program that calls the existing file
-provider, a host-native capability, and a loopback MCP 2025-11-25 source. Two
+provider, a host-native capability, and a stateless loopback MCP 2026-07-28
+source. Two
 runs compare direct capability exposure with a small prompt-visible wrapper.
 
 ```bash

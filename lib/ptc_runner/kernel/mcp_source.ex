@@ -5,35 +5,39 @@ defmodule PtcRunner.Kernel.MCPSource do
   The host freezes the endpoint, credential/header callback, upstream-to-public
   tool mapping, and installed ceilings in `builder/1`. A manifest can only
   select mapped public names and lower the request timeout or result ceiling.
-  Each run build initializes one MCP 2025-11-25 session, discovers tools in
-  that session, compiles their bounded schemas, and returns ordinary frozen
+  Each run build discovers one stateless MCP 2026-07-28 server and its tools,
+  compiles their bounded schemas, and returns ordinary frozen
   Kernel capabilities plus a safe deterministic snapshot. Request deadlines
   bound connection checkout, connection establishment, response receipt, and
   total elapsed work. Responses reject duplicate JSON object keys before
   protocol validation. Input and output schemas are compiled once during
   assembly and the compiled validators are reused for every invocation.
 
-  The session lease owns every active request. Closing the lease first kills
-  and drains request owners, then issues a separately bounded session DELETE,
-  establishing the required request-termination-before-session-close order.
-
   This pre-production source supports JSON and SSE responses to POST requests,
-  structured object results, and text-only results. It rejects mixed or
-  unsupported content, redirects, remote endpoint changes, writes, and
-  manifest-supplied connection or credential configuration.
+  schema-valid structured object results with exact text companions, and
+  text-only results. It rejects unsupported content block types, redirects,
+  remote endpoint changes, writes, and manifest-supplied connection or
+  credential configuration.
   """
 
   alias PtcRunner.Kernel.Capability
   alias PtcRunner.Kernel.DeterministicJSON
-  alias PtcRunner.Kernel.MCPLease
   alias PtcRunner.Kernel.MCPProtocol
+  alias PtcRunner.Kernel.MCPRequestContext
   alias PtcRunner.Kernel.ProviderError
+  alias PtcRunner.Kernel.StrictJSON
 
-  @protocol "2025-11-25"
+  @protocol "2026-07-28"
+  @client_info %{"name" => "ptc_runner", "version" => "0.x"}
+  @client_capabilities %{}
   @max_discovery_bytes 1_048_576
   @max_headers 32
   @max_header_bytes 16_384
+  @max_outbound_headers 64
+  @max_outbound_header_bytes 32_768
+  @header_token ~r/\A[!#$%&'*+\-.^_`|~0-9A-Za-z]+\z/
   @name ~r/\A[a-z][a-z0-9._-]{0,127}\z/
+  @sse_event_separator ~r/(?:\r\n|\r|\n)(?:\r\n|\r|\n)/
 
   @type builder :: PtcRunner.Kernel.ProviderRegistry.builder()
 
@@ -46,15 +50,17 @@ defmodule PtcRunner.Kernel.MCPSource do
     * `:endpoint` - required fixed HTTPS URL. Loopback HTTP is accepted only
       when `:allow_insecure_loopback` is `true` (default `false`). Userinfo and
       fragments are rejected.
-    * `:headers` - zero-argument credential/header callback, evaluated inside
-      each request deadline (default `fn -> [] end`). At most 32 valid headers
-      totaling 16,384 bytes are accepted. Values never enter capabilities,
-      snapshots, errors, Logger, Telemetry, or canonical events.
+    * `:headers` - zero-argument credential/header callback, evaluated once
+      inside the provider-acquisition deadline and reused for the built
+      provider (default `fn -> [] end`). At most 32 valid headers totaling
+      16,384 bytes are accepted; client-owned `mcp-*` names are rejected.
+      Values never enter capabilities, snapshots, errors, Logger, Telemetry,
+      or canonical events.
     * `:tools` - required map from fixed upstream names to
       `%{as: public_name, effect: :read}`. Both names are unique and bounded;
       only the public name crosses the capability boundary.
     * `:timeout_ms` - installed end-to-end ceiling for discovery, calls, and
-      session cleanup (default `5_000`). A manifest may only lower it.
+      requests (default `5_000`). A manifest may only lower it.
     * `:max_result_bytes` - installed response ceiling (default `1_000_000`).
     * `:max_catalog_tools` - discovery catalog ceiling from 1 through 128
       (default `128`).
@@ -70,28 +76,33 @@ defmodule PtcRunner.Kernel.MCPSource do
   `{:ok, %{capabilities: list, snapshot: map, close: zero_arity_function}}` or a
   stable atom error: `:mcp_authentication_failed`, `:mcp_timeout`,
   `:mcp_transport_error`, `:mcp_protocol_error`, `:mcp_remote_error`,
-  `:mcp_response_exceeded`,
-  `:mcp_session_expired`, `:mcp_catalog_exceeded`, `:mcp_invalid_catalog`,
-  `:mcp_invalid_tool_schema`, `:mcp_tool_task_required`, or
+  `:mcp_response_exceeded`, `:mcp_catalog_exceeded`, `:mcp_invalid_catalog`,
+  `:mcp_invalid_tool_schema`, `:mcp_unsupported_result`, or
   `:mcp_mapped_tool_missing`.
 
   ## Frozen result and snapshot contracts
 
   Discovery produces ordinary read-only `PtcRunner.Kernel.Capability` values.
   An advertised object output schema accepts only schema-valid
-  `structuredContent` with absent or empty `content`. A tool without an output
-  schema accepts only exact text blocks and returns `%{"text" => [string()]}`.
+  `structuredContent` accompanied by exact text blocks (which are validated
+  and discarded). A tool without an output schema accepts only exact text
+  blocks and returns `%{"text" => [string()]}`.
   MCP `isError`, malformed/mixed content, invalid JSON-RPC envelopes, and
   schema failures become bounded `PtcRunner.Kernel.ProviderError` values with
-  closed reasons. Authentication, timeout, session-expiry, invalid-result, and
-  transport failures never include remote messages or payloads.
+  closed reasons. Authentication, timeout, unsupported-result, invalid-result,
+  and transport failures never include remote messages or payloads.
 
-  The safe connector snapshot has exact top-level fields `provider`,
-  `protocol`, `snapshot_hash`, and `tools`. Each sorted tool entry contains
-  only its public `name`, fixed `"read"` effect, `input_schema_hash`, and
-  nullable `output_schema_hash`. Hashes are lowercase SHA-256; endpoints,
-  upstream names, descriptions, headers, credentials, session IDs, arguments,
-  and results are excluded.
+  The safe connector snapshot has top-level fields `provider`, `protocol`,
+  `transport`, `server_info_hash`, `snapshot_hash`, and `tools`. The transport
+  is `"streamable_http"` for this source. The nullable server hash fingerprints
+  bounded self-reported implementation identity without exposing its untrusted
+  text. Each sorted tool entry contains
+  only its public `name`, fixed `"read"` effect, model-visibility flag, one-way
+  upstream-name and nullable prompt-visible description hashes,
+  `input_schema_hash`, nullable
+  `output_schema_hash`, and nullable `http_headers_hash`. Hashes are lowercase
+  SHA-256; endpoints, raw upstream names and descriptions, headers,
+  credentials, arguments, and results are excluded.
   """
   def builder(opts) when is_list(opts) do
     case installed_config(opts) do
@@ -181,24 +192,25 @@ defmodule PtcRunner.Kernel.MCPSource do
 
   defp build(installed, selection, context) do
     with {:ok, selected} <- selection(installed, selection, context),
-         {:ok, lease} <-
-           MCPLease.start(
+         {:ok, headers} <- resolve_headers(installed.headers, selected.timeout_ms),
+         {:ok, request_context} <-
+           MCPRequestContext.start(
              owner: context.owner,
              endpoint: installed.endpoint,
-             headers: installed.headers,
+             headers: headers,
              timeout_ms: selected.timeout_ms
            ) do
-      case discover(lease, installed, selected, context.provider) do
+      case discover(request_context, installed, selected, context.provider) do
         {:ok, capabilities, snapshot} ->
           {:ok,
            %{
              capabilities: capabilities,
              snapshot: snapshot,
-             close: fn -> MCPLease.close(lease) end
+             close: fn -> MCPRequestContext.close(request_context) end
            }}
 
         {:error, reason} ->
-          MCPLease.close(lease)
+          MCPRequestContext.close(request_context)
           {:error, reason}
       end
     end
@@ -245,23 +257,19 @@ defmodule PtcRunner.Kernel.MCPSource do
   defp destination_timeout(%{destination: :mission, limits: limits}),
     do: limits.evaluation_timeout_ms
 
-  defp discover(lease, installed, selected, provider) do
-    with {:ok, initialized} <-
+  defp discover(request, installed, selected, provider) do
+    with {:ok, discovery} <-
            rpc(
-             lease,
-             "initialize",
-             %{
-               "protocolVersion" => @protocol,
-               "capabilities" => %{},
-               "clientInfo" => %{"name" => "ptc_runner", "version" => "0.x"}
-             },
+             request,
+             "server/discover",
+             %{},
              @max_discovery_bytes
            ),
-         @protocol <- initialized["protocolVersion"],
-         :ok <- notification(lease, "notifications/initialized", %{}),
-         {:ok, discovered} <- list_tools(lease, installed),
-         {:ok, capabilities, tools} <- capabilities(lease, installed, selected, discovered),
-         {:ok, snapshot} <- snapshot(provider, tools) do
+         {:ok, server} <- MCPProtocol.discover_result(discovery, @protocol),
+         true <- Map.has_key?(server.capabilities, "tools"),
+         {:ok, discovered} <- list_tools(request, installed),
+         {:ok, capabilities, tools} <- capabilities(request, installed, selected, discovered),
+         {:ok, snapshot} <- snapshot(provider, tools, server.server_info) do
       {:ok, capabilities, snapshot}
     else
       {:error, _reason} = error -> error
@@ -269,29 +277,30 @@ defmodule PtcRunner.Kernel.MCPSource do
     end
   end
 
-  defp list_tools(lease, installed),
-    do: list_tools(lease, installed, nil, %{}, %{}, 0)
+  defp list_tools(request, installed) do
+    state = %{tools: %{}, names: %{}, seen: %{}, received_tools: 0, received_bytes: 0}
+    list_tools(request, installed, nil, state, 0)
+  end
 
-  defp list_tools(_lease, installed, _cursor, _seen, tools, pages)
-       when pages >= installed.max_pages or map_size(tools) > installed.max_catalog_tools,
+  defp list_tools(_request, installed, _cursor, state, pages)
+       when pages >= installed.max_pages or state.received_tools > installed.max_catalog_tools,
        do: {:error, :mcp_catalog_exceeded}
 
-  defp list_tools(lease, installed, cursor, seen, tools, pages) do
+  defp list_tools(request, installed, cursor, state, pages) do
     params = if is_nil(cursor), do: %{}, else: %{"cursor" => cursor}
 
-    with {:ok, result} <- rpc(lease, "tools/list", params, @max_discovery_bytes) do
+    with {:ok, result} <- rpc(request, "tools/list", params, @max_discovery_bytes) do
       case MCPProtocol.catalog_page(
              result,
-             tools,
-             seen,
+             state,
              installed.max_catalog_tools,
              @max_discovery_bytes
            ) do
         {:done, tools} ->
           {:ok, tools}
 
-        {:continue, next, seen, tools} ->
-          list_tools(lease, installed, next, seen, tools, pages + 1)
+        {:continue, next, state} ->
+          list_tools(request, installed, next, state, pages + 1)
 
         {:error, _reason} = error ->
           error
@@ -299,12 +308,12 @@ defmodule PtcRunner.Kernel.MCPSource do
     end
   end
 
-  defp capabilities(lease, installed, selected, discovered) do
+  defp capabilities(request, installed, selected, discovered) do
     installed.tools
     |> Enum.filter(fn {_upstream, mapping} -> MapSet.member?(selected.allow, mapping.as) end)
     |> Enum.sort_by(fn {_upstream, mapping} -> mapping.as end)
     |> Enum.reduce_while({:ok, [], []}, fn {upstream, mapping}, {:ok, capabilities, tools} ->
-      case capability(lease, upstream, mapping, discovered[upstream], selected) do
+      case capability(request, upstream, mapping, discovered[upstream], selected) do
         {:ok, capability, snapshot_tool} ->
           {:cont, {:ok, [capability | capabilities], [snapshot_tool | tools]}}
 
@@ -318,20 +327,20 @@ defmodule PtcRunner.Kernel.MCPSource do
     end
   end
 
-  defp capability(_lease, _upstream, _mapping, nil, _selected),
+  defp capability(_request, _upstream, _mapping, nil, _selected),
     do: {:error, :mcp_mapped_tool_missing}
 
-  defp capability(lease, upstream, mapping, tool, selected) do
+  defp capability(request, upstream, mapping, tool, selected) do
     case MCPProtocol.selected_tool(tool) do
       {:ok, contract} ->
-        assemble_capability(lease, upstream, mapping, contract, selected)
+        assemble_capability(request, upstream, mapping, contract, selected)
 
       {:error, _reason} = error ->
         error
     end
   end
 
-  defp assemble_capability(lease, upstream, mapping, contract, selected) do
+  defp assemble_capability(request, upstream, mapping, contract, selected) do
     with {:ok, capability} <-
            Capability.new(
              name: mapping.as,
@@ -344,29 +353,47 @@ defmodule PtcRunner.Kernel.MCPSource do
            ),
          capability = %{
            capability
-           | callback: callback(lease, upstream, capability.output_validator, selected)
+           | callback:
+               callback(
+                 request,
+                 upstream,
+                 contract.header_parameters,
+                 capability.output_validator,
+                 selected
+               )
          },
          {:ok, input_hash} <- schema_hash(capability.input_schema),
-         {:ok, output_hash} <- optional_schema_hash(capability.output_schema) do
+         {:ok, output_hash} <- optional_schema_hash(capability.output_schema),
+         {:ok, headers_hash} <- header_parameters_hash(contract.header_parameters) do
+      upstream_name_hash = sha256(upstream)
+
+      description_hash =
+        if capability.model_visible, do: optional_text_hash(contract.description), else: nil
+
       {:ok, capability,
        %{
          "name" => mapping.as,
          "effect" => "read",
+         "model_visible" => capability.model_visible,
+         "upstream_name_hash" => upstream_name_hash,
+         "description_hash" => description_hash,
          "input_schema_hash" => input_hash,
-         "output_schema_hash" => output_hash
+         "output_schema_hash" => output_hash,
+         "http_headers_hash" => headers_hash
        }}
     else
       _reason -> {:error, :mcp_invalid_tool_schema}
     end
   end
 
-  defp callback(lease, upstream, output_validator, selected) do
+  defp callback(request, upstream, header_parameters, output_validator, selected) do
     fn arguments ->
       case rpc(
-             lease,
+             request,
              "tools/call",
              %{"name" => upstream, "arguments" => arguments},
-             selected.max_result_bytes
+             selected.max_result_bytes,
+             header_parameters
            ) do
         {:ok, result} -> normalize_result(result, output_validator)
         {:error, reason} -> {:error, provider_error(reason)}
@@ -387,28 +414,36 @@ defmodule PtcRunner.Kernel.MCPSource do
     end
   end
 
-  defp snapshot(provider, tools) when is_binary(provider) do
-    projection =
-      {:object,
-       [
-         {"protocol", "mcp-#{@protocol}"},
-         {"tools",
-          Enum.map(tools, fn tool ->
-            {:object,
-             [
-               {"name", tool["name"]},
-               {"effect", tool["effect"]},
-               {"input_schema_hash", tool["input_schema_hash"]},
-               {"output_schema_hash", tool["output_schema_hash"]}
-             ]}
-          end)}
-       ]}
-
-    with {:ok, encoded} <- DeterministicJSON.encode(projection) do
+  defp snapshot(provider, tools, server_info) when is_binary(provider) do
+    with {:ok, server_info_hash} <- optional_server_info_hash(server_info),
+         projection =
+           {:object,
+            [
+              {"protocol", "mcp-#{@protocol}"},
+              {"transport", "streamable_http"},
+              {"server_info_hash", server_info_hash},
+              {"tools",
+               Enum.map(tools, fn tool ->
+                 {:object,
+                  [
+                    {"name", tool["name"]},
+                    {"effect", tool["effect"]},
+                    {"model_visible", tool["model_visible"]},
+                    {"upstream_name_hash", tool["upstream_name_hash"]},
+                    {"description_hash", tool["description_hash"]},
+                    {"input_schema_hash", tool["input_schema_hash"]},
+                    {"output_schema_hash", tool["output_schema_hash"]},
+                    {"http_headers_hash", tool["http_headers_hash"]}
+                  ]}
+               end)}
+            ]},
+         {:ok, encoded} <- DeterministicJSON.encode(projection) do
       {:ok,
        %{
          "provider" => provider,
          "protocol" => "mcp-#{@protocol}",
+         "transport" => "streamable_http",
+         "server_info_hash" => server_info_hash,
          "snapshot_hash" => sha256(encoded),
          "tools" => tools
        }}
@@ -422,73 +457,92 @@ defmodule PtcRunner.Kernel.MCPSource do
   defp optional_schema_hash(nil), do: {:ok, nil}
   defp optional_schema_hash(schema), do: schema_hash(schema)
 
-  defp rpc(lease, method, params, max_bytes) do
-    with_request(lease, fn request ->
-      with {:ok, headers} <- request_headers(request),
-           payload = MCPProtocol.request(request.id, method, params),
-           {:ok, response} <- http(:post, lease, request, headers, payload, max_bytes),
-           :ok <- maybe_capture_session(lease, response),
+  defp optional_server_info_hash(nil), do: {:ok, nil}
+  defp optional_server_info_hash(server_info), do: schema_hash(server_info)
+  defp optional_text_hash(nil), do: nil
+  defp optional_text_hash(value), do: sha256(value)
+
+  defp header_parameters_hash([]), do: {:ok, nil}
+
+  defp header_parameters_hash(parameters) do
+    parameters
+    |> Enum.map(fn parameter ->
+      %{
+        "name" => String.downcase(parameter.name),
+        "path" => parameter.path,
+        "type" => parameter.type
+      }
+    end)
+    |> schema_hash()
+  end
+
+  defp rpc(request_context, method, params, max_bytes, header_parameters \\ []) do
+    with_request(request_context, fn request ->
+      with {:ok, parameter_headers} <-
+             MCPProtocol.header_values(header_parameters, Map.get(params, "arguments", %{})),
+           {:ok, headers} <- request_headers(request, method, params, parameter_headers),
+           payload = MCPProtocol.request(request.id, method, params, request_metadata()),
+           {:ok, response} <- http(request, headers, payload, max_bytes),
            {:ok, body} <- response_body(response, request.id) do
-        MCPProtocol.outcome(body)
+        MCPProtocol.outcome(body, method)
       end
     end)
   end
 
-  defp notification(lease, method, params) do
-    with_request(lease, fn request ->
-      with {:ok, headers} <- request_headers(request),
-           payload = MCPProtocol.notification(method, params),
-           {:ok, response} <- http(:post, lease, request, headers, payload, 65_536) do
-        if response.status in [200, 202, 204], do: :ok, else: {:error, :mcp_transport_error}
-      end
-    end)
-  end
-
-  defp with_request(lease, callback) do
-    case MCPLease.begin_request(lease) do
+  defp with_request(request_context, callback) do
+    case MCPRequestContext.begin_request(request_context) do
       {:ok, request} ->
         try do
-          task =
-            Task.async(fn ->
-              try do
-                callback.(request)
-              rescue
-                _exception -> {:error, :mcp_transport_error}
-              catch
-                _kind, _reason -> {:error, :mcp_transport_error}
-              end
-            end)
-
-          case Task.yield(task, request.timeout_ms) || Task.shutdown(task, :brutal_kill) do
-            {:ok, result} -> result
-            {:exit, _reason} -> {:error, :mcp_transport_error}
-            nil -> {:error, :mcp_timeout}
-          end
+          within_deadline(request.timeout_ms, fn -> callback.(request) end)
         after
-          MCPLease.finish_request(lease)
+          MCPRequestContext.finish_request(request_context)
         end
 
-      {:error, reason} ->
-        {:error, reason}
+      {:error, :closed} ->
+        {:error, :mcp_transport_error}
     end
   end
 
-  defp request_headers(request) do
-    with {:ok, installed} <- safe_headers(request.headers),
-         :ok <- validate_headers(installed) do
-      protocol_headers =
-        [
-          {"accept", "application/json, text/event-stream"},
-          {"content-type", "application/json"}
-        ] ++
-          if(request.id > 1, do: [{"mcp-protocol-version", request.protocol}], else: []) ++
-          if(is_binary(request.session_id),
-            do: [{"mcp-session-id", request.session_id}],
-            else: []
-          )
+  defp resolve_headers(callback, timeout_ms) do
+    within_deadline(timeout_ms, fn ->
+      with {:ok, headers} <- safe_headers(callback),
+           :ok <- validate_headers(headers) do
+        {:ok, headers}
+      end
+    end)
+  end
 
-      {:ok, installed ++ protocol_headers}
+  defp within_deadline(timeout_ms, callback) do
+    task =
+      Task.async(fn ->
+        try do
+          callback.()
+        rescue
+          _exception -> {:error, :mcp_transport_error}
+        catch
+          _kind, _reason -> {:error, :mcp_transport_error}
+        end
+      end)
+
+    case Task.yield(task, timeout_ms) || Task.shutdown(task, :brutal_kill) do
+      {:ok, result} -> result
+      {:exit, _reason} -> {:error, :mcp_transport_error}
+      nil -> {:error, :mcp_timeout}
     end
+  end
+
+  defp request_headers(request, method, params, parameter_headers) do
+    protocol_headers =
+      [
+        {"accept", "application/json, text/event-stream"},
+        {"content-type", "application/json"},
+        {"mcp-protocol-version", @protocol},
+        {"mcp-method", method}
+      ] ++ applicable_name_header(method, params) ++ parameter_headers
+
+    headers = request.headers ++ protocol_headers
+
+    with :ok <- validate_outbound_headers(headers), do: {:ok, headers}
   end
 
   defp safe_headers(callback) do
@@ -503,35 +557,53 @@ defmodule PtcRunner.Kernel.MCPSource do
   end
 
   defp validate_headers(headers) do
-    reserved = ~w(accept content-type mcp-protocol-version mcp-session-id)
+    reserved = ~w(accept content-type)
 
     valid? =
       length(headers) <= @max_headers and
         Enum.all?(headers, fn
           {name, value} when is_binary(name) and is_binary(value) ->
             name =~ ~r/\A[a-z0-9-]+\z/ and name not in reserved and
+              not String.starts_with?(name, "mcp-") and
               not String.contains?(value, ["\r", "\n"])
 
           _header ->
             false
-        end) and byte_size(:erlang.term_to_binary(headers)) <= @max_header_bytes
+        end) and header_wire_bytes(headers) <= @max_header_bytes
 
     if valid?, do: :ok, else: {:error, :mcp_authentication_failed}
   end
 
-  defp http(method, lease, request, headers, payload, max_bytes) do
-    into = fn {:data, data}, {req, response} ->
-      body = if is_binary(response.body), do: response.body, else: ""
+  defp validate_outbound_headers(headers) do
+    valid? =
+      length(headers) <= @max_outbound_headers and
+        Enum.all?(headers, fn
+          {name, value} when is_binary(name) and is_binary(value) ->
+            name =~ @header_token and not String.contains?(value, ["\r", "\n"])
 
-      if byte_size(body) + byte_size(data) <= max_bytes do
-        {:cont, {req, %{response | body: body <> data}}}
-      else
-        {:halt, {req, %{response | body: :body_exceeded}}}
+          _header ->
+            false
+        end) and header_wire_bytes(headers) <= @max_outbound_header_bytes
+
+    if valid?, do: :ok, else: {:error, :mcp_protocol_error}
+  end
+
+  defp header_wire_bytes(headers) do
+    Enum.reduce(headers, 0, fn {name, value}, total ->
+      total + byte_size(name) + byte_size(value) + 4
+    end)
+  end
+
+  defp http(request, headers, payload, max_bytes) do
+    into = fn {:data, data}, {req, response} ->
+      case accumulate_response(response, data, payload["id"], max_bytes) do
+        {:cont, response} -> {:cont, {req, response}}
+        {:halt, response} -> {:halt, {req, response}}
       end
     end
 
     case Req.request(
-           method: method,
+           method: :post,
            url: request.endpoint,
            headers: headers,
            json: payload,
@@ -544,17 +616,19 @@ defmodule PtcRunner.Kernel.MCPSource do
            into: into
          ) do
       {:ok, %{status: 404}} ->
-        MCPLease.expire(lease)
-        {:error, :mcp_session_expired}
+        {:error, :mcp_protocol_error}
+
+      {:ok, %{status: 400} = response} ->
+        http_protocol_error(response, payload)
+
+      {:ok, %{status: status}} when status in [401, 403] ->
+        {:error, :mcp_authentication_failed}
 
       {:ok, %{status: status, body: :body_exceeded}} when status in 200..299 ->
         {:error, :mcp_response_exceeded}
 
       {:ok, %{status: status} = response} when status in 200..299 ->
         {:ok, response}
-
-      {:ok, %{status: status}} when status in [401, 403] ->
-        {:error, :mcp_authentication_failed}
 
       {:ok, _response} ->
         {:error, :mcp_transport_error}
@@ -567,56 +641,171 @@ defmodule PtcRunner.Kernel.MCPSource do
     end
   end
 
-  defp maybe_capture_session(lease, response) do
-    case Req.Response.get_header(response, "mcp-session-id") do
-      [] ->
-        :ok
-
-      [session_id]
-      when is_binary(session_id) and byte_size(session_id) in 1..1_024 ->
-        MCPLease.set_session(lease, session_id)
-
-      _headers ->
-        {:error, :mcp_protocol_error}
+  defp accumulate_response(response, data, id, max_bytes) do
+    if response_content_type(response) == "text/event-stream" do
+      accumulate_sse(response, data, id, max_bytes)
+    else
+      accumulate_body(response, data, max_bytes)
     end
   end
 
-  defp response_body(%{body: body} = response, id) when is_binary(body) do
-    content_types = Req.Response.get_header(response, "content-type")
+  defp accumulate_body(response, data, max_bytes) do
+    body = if is_binary(response.body), do: response.body, else: ""
 
-    cond do
-      Enum.any?(content_types, &String.starts_with?(&1, "application/json")) ->
+    if byte_size(body) + byte_size(data) <= max_bytes,
+      do: {:cont, %{response | body: body <> data}},
+      else: {:halt, %{response | body: :body_exceeded}}
+  end
+
+  defp accumulate_sse(response, data, id, max_bytes) do
+    state =
+      case response.body do
+        {:mcp_sse, state} -> state
+        _empty -> %{buffer: "", response: nil, bytes: 0, at_start?: true}
+      end
+
+    combined = state.buffer <> data
+    processed_bytes = state.bytes - byte_size(state.buffer)
+    remaining_bytes = max(max_bytes - processed_bytes, 0)
+    candidate_bytes = min(byte_size(combined), remaining_bytes)
+    candidate = binary_part(combined, 0, candidate_bytes)
+
+    case consume_sse_events(candidate, state.response, id, state.at_start?) do
+      {:ok, buffer, decoded, at_start?} ->
+        if is_map(decoded) do
+          {:halt, %{response | body: {:mcp_sse_response, decoded}}}
+        else
+          if byte_size(combined) <= remaining_bytes do
+            state = %{
+              buffer: buffer,
+              response: nil,
+              bytes: state.bytes + byte_size(data),
+              at_start?: at_start?
+            }
+
+            {:cont, %{response | body: {:mcp_sse, state}}}
+          else
+            {:halt, %{response | body: :body_exceeded}}
+          end
+        end
+
+      {:error, :mcp_protocol_error} ->
+        {:halt, %{response | body: :mcp_protocol_error}}
+    end
+  end
+
+  defp consume_sse_events(buffer, response, id, at_start?) do
+    case Regex.run(@sse_event_separator, buffer, return: :index) do
+      [{index, separator_bytes}] ->
+        event = binary_part(buffer, 0, index)
+        offset = index + separator_bytes
+        rest = binary_part(buffer, offset, byte_size(buffer) - offset)
+        event = strip_sse_bom(event, at_start?)
+
+        with {:ok, response} <- decode_sse_event(event, response, id) do
+          if is_map(response),
+            do: {:ok, rest, response, false},
+            else: consume_sse_events(rest, response, id, false)
+        end
+
+      nil ->
+        {:ok, buffer, response, at_start?}
+    end
+  end
+
+  defp response_body(%{body: {:mcp_sse_response, response}}, _id), do: {:ok, response}
+  defp response_body(%{body: :mcp_protocol_error}, _id), do: {:error, :mcp_protocol_error}
+  defp response_body(%{body: {:mcp_sse, _state}}, _id), do: {:error, :mcp_protocol_error}
+
+  defp response_body(%{body: body} = response, id) when is_binary(body) do
+    case response_content_type(response) do
+      "application/json" ->
         MCPProtocol.decode_response(body, id)
 
-      Enum.any?(content_types, &String.starts_with?(&1, "text/event-stream")) ->
+      "text/event-stream" ->
         decode_sse(body, id)
 
-      true ->
+      _unsupported ->
         {:error, :mcp_protocol_error}
     end
   end
 
   defp response_body(_response, _id), do: {:error, :mcp_response_exceeded}
 
-  defp decode_sse(body, id) do
-    body
-    |> String.split(~r/\r?\n\r?\n/, trim: true)
-    |> Enum.reduce_while({:error, :mcp_protocol_error}, fn event, _acc ->
-      data =
-        event
-        |> String.split(~r/\r?\n/)
-        |> Enum.filter(&String.starts_with?(&1, "data:"))
-        |> Enum.map_join("\n", &String.trim_leading(&1, "data:"))
-
-      case MCPProtocol.decode_response(data, id) do
-        {:ok, decoded} -> {:halt, {:ok, decoded}}
-        {:error, :mcp_protocol_error} -> {:cont, {:error, :mcp_protocol_error}}
-      end
-    end)
+  defp http_protocol_error(response, %{"id" => id, "method" => method}) do
+    with {:ok, body} <- response_body(response, id),
+         {:error, :mcp_remote_error} <- MCPProtocol.outcome(body, method) do
+      {:error, :mcp_protocol_error}
+    else
+      _invalid -> {:error, :mcp_protocol_error}
+    end
   end
 
-  defp provider_error(:mcp_session_expired),
-    do: ProviderError.new(:session_expired, "mcp_session_expired")
+  defp response_content_type(response) do
+    case Req.Response.get_header(response, "content-type") do
+      [value] when is_binary(value) ->
+        value
+        |> String.split(";", parts: 2)
+        |> hd()
+        |> String.trim()
+        |> String.downcase()
+
+      _headers ->
+        nil
+    end
+  end
+
+  defp decode_sse(body, id) do
+    case consume_sse_events(body, nil, id, true) do
+      {:ok, _rest, response, _at_start?} when is_map(response) -> {:ok, response}
+      _result -> {:error, :mcp_protocol_error}
+    end
+  end
+
+  defp decode_sse_event(event, response, id) when is_binary(event) do
+    if String.valid?(event) do
+      data_lines =
+        event
+        |> String.replace("\r\n", "\n")
+        |> String.replace("\r", "\n")
+        |> :binary.split("\n", [:global])
+        |> Enum.reduce([], fn
+          "data", lines -> ["" | lines]
+          "data:" <> value, lines -> [strip_sse_space(value) | lines]
+          _other, lines -> lines
+        end)
+        |> Enum.reverse()
+
+      case data_lines do
+        [] -> {:ok, response}
+        lines -> lines |> Enum.join("\n") |> decode_sse_data(response, id)
+      end
+    else
+      {:error, :mcp_protocol_error}
+    end
+  end
+
+  defp decode_sse_data(data, response, id) do
+    case StrictJSON.decode(data) do
+      {:ok, %{"jsonrpc" => "2.0", "method" => method} = notification}
+      when is_binary(method) and not is_map_key(notification, "id") and is_nil(response) ->
+        {:ok, nil}
+
+      {:ok, _decoded} when not is_nil(response) ->
+        {:error, :mcp_protocol_error}
+
+      {:ok, _decoded} ->
+        MCPProtocol.decode_response(data, id)
+
+      {:error, _reason} ->
+        {:error, :mcp_protocol_error}
+    end
+  end
+
+  defp strip_sse_space(" " <> value), do: value
+  defp strip_sse_space(value), do: value
+  defp strip_sse_bom(<<0xEF, 0xBB, 0xBF, rest::binary>>, true), do: rest
+  defp strip_sse_bom(event, _at_start?), do: event
 
   defp provider_error(:mcp_authentication_failed),
     do: ProviderError.new(:authentication_failed, "mcp_authentication_failed")
@@ -633,8 +822,24 @@ defmodule PtcRunner.Kernel.MCPSource do
   defp provider_error(:mcp_remote_error),
     do: ProviderError.new(:domain_error, "mcp_remote_error")
 
+  defp provider_error(:mcp_unsupported_result),
+    do: ProviderError.new(:invalid_result, "mcp_unsupported_result")
+
   defp provider_error(_reason),
     do: ProviderError.new(:transport_error, "mcp_transport_error", retryable?: true)
 
   defp sha256(value), do: :crypto.hash(:sha256, value) |> Base.encode16(case: :lower)
+
+  defp request_metadata do
+    %{
+      "io.modelcontextprotocol/protocolVersion" => @protocol,
+      "io.modelcontextprotocol/clientInfo" => @client_info,
+      "io.modelcontextprotocol/clientCapabilities" => @client_capabilities
+    }
+  end
+
+  defp applicable_name_header("tools/call", %{"name" => name}) when is_binary(name),
+    do: [{"mcp-name", MCPProtocol.encode_header(name)}]
+
+  defp applicable_name_header(_method, _params), do: []
 end

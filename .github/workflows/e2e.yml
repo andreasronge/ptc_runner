@@ -22,6 +22,7 @@ jobs:
     name: Integration Tests
     env:
       MIX_ENV: test
+      PTC_TEST_MCP_2026_ENDPOINT: http://127.0.0.1:8000
 
     steps:
       - name: Checkout repository
@@ -30,8 +31,44 @@ jobs:
       - name: Setup Elixir environment
         uses: ./.github/actions/setup-elixir
 
+      - name: Checkout pinned MCP Go SDK
+        if: github.event_name == 'schedule' || inputs.test_type == 'e2e'
+        uses: actions/checkout@v6
+        with:
+          repository: modelcontextprotocol/go-sdk
+          ref: e761950d9795d120ce9b00e5ba87b93c30a7be90
+          path: .mcp-go-sdk
+
+      - name: Setup Go for MCP interoperability server
+        if: github.event_name == 'schedule' || inputs.test_type == 'e2e'
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: .mcp-go-sdk/go.mod
+          cache-dependency-path: .mcp-go-sdk/go.sum
+
+      - name: Start pinned MCP interoperability server
+        if: github.event_name == 'schedule' || inputs.test_type == 'e2e'
+        run: |
+          go -C .mcp-go-sdk build -o /tmp/ptc-mcp-http-server ./examples/http
+          /tmp/ptc-mcp-http-server -host 127.0.0.1 -port 8000 server \
+            >/tmp/ptc-mcp-http-server.log 2>&1 &
+          for _attempt in {1..60}; do
+            if curl --silent --output /dev/null "$PTC_TEST_MCP_2026_ENDPOINT"; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/ptc-mcp-http-server.log
+          exit 1
+
       - name: Compile
         run: mix compile
+
+      - name: Verify E2E configuration
+        if: github.event_name == 'schedule' || inputs.test_type == 'e2e'
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: test -n "$OPENROUTER_API_KEY"
 
       - name: Run tagged tests
         env:

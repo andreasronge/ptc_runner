@@ -24,11 +24,10 @@ defmodule PtcRunner.Kernel.InspectionLabTest do
 
     for journey <- [direct, wrapper] do
       assert {:ok, records} = InspectionArtifact.load(journey.inspection)
-      assert File.read!(journey.trace) =~ "mcp-2025-11-25"
+      assert File.read!(journey.trace) =~ "mcp-2026-07-28"
 
       inspection_body = File.read!(journey.inspection)
       refute inspection_body =~ "127.0.0.1"
-      refute inspection_body =~ "inspection-lab-session"
       refute inspection_body =~ "mcp-session-id"
 
       assert Enum.any?(records, fn record ->

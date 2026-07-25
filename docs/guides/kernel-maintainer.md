@@ -227,8 +227,8 @@ Endpoint, credentials, upstream mapping, and installed ceilings are host
 authority; a manifest may only select mapped names and narrow visibility or
 limits. `PtcRunner.Kernel.MCPSource` owns transport and capability assembly,
 `PtcRunner.Kernel.MCPProtocol` owns pure protocol validation and normalization,
-and the lease module owns session/request lifecycle. Their module docs define
-the exact behavior.
+and each stateless request is independently bounded and correlated. Their
+module docs define the exact behavior.
 
 The local log-analysis path is a fixed product profile shared by the Viewer
 and terminal REPL. `PtcRunner.Kernel.LogAnalysisSessionBuilder` is the host

@@ -65,9 +65,9 @@ code.
 
 Builders receive the canonical manifest directory, target environment,
 construction owner, effective limits, and installed ceilings. They may return
-capabilities, a safe connector snapshot, and an idempotent close function. The
-Kernel owns cleanup across success, failure, timeout, cancellation, and owner
-death.
+capabilities and a safe connector snapshot, plus an idempotent close function
+when the provider owns live resources. The Kernel owns cleanup across success,
+failure, timeout, cancellation, and owner death.
 
 Keep credentials, endpoints, native handles, and close functions out of
 capability results, PTC-Lisp data, prompts, canonical events, and inspection

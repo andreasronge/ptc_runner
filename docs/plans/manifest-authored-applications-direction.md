@@ -65,7 +65,7 @@ Out of scope:
 | `agent.core` | Supplies the provider/evaluation loop | a small generic entry wrapper would remove repeated workflow boilerplate |
 | Provider registry | Built-ins are `llm` and `file-read`; extra builders require Elixir | closed host JSON installation |
 | `file-read` | Freezes a directory but reads one whole already-known UTF-8 path | temporary current behavior; migrate to MCP filesystem tools and delete it rather than adding it to host config |
-| MCP | Trusted Elixir can install a read-only sessionful HTTP source | modern stateless protocol, stdio, host JSON |
+| MCP | Trusted Elixir can install a read-only stateless HTTP `2026-07-28` source | stdio and host JSON |
 | Canonical trace | `TraceSnapshot` and `TraceCapability` provide four bounded queries in the fixed `log-analysis-v1` profile | ordinary manifest-selectable source |
 | Private inspection | `--inspect` writes exact provider-neutral capability, evaluation-source, and prelude-source records to a bounded `0600` artifact — LLM exchanges are the workflow `llm-request` capability records; the Viewer can pin one artifact against its canonical run | ordinary explicitly classified snapshot source, a private human-analysis REPL profile, and MCP wire records |
 | `ptc.repl` profiles | the frontend, resource parser, assembly, session, and help text are hard-coded to `log-analysis-v1` | a closed profile registry and shared analysis-session machinery before adding `inspection-analysis-v1` |

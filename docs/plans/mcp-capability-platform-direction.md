@@ -45,15 +45,15 @@ The current implementation already establishes useful boundaries:
 | --- | --- | --- |
 | `PtcRunner.Kernel.Capability` | Validates a name (dots allowed), host-declared effect, bounded schemas, visibility, and a callback that returns `ProviderError` values on failure | MCP tools should become ordinary capabilities; the Kernel should not learn MCP tool semantics |
 | `PtcRunner.Kernel.ProviderRegistry` | Accepts trusted builders and normalizes `{capabilities, snapshot, close}` | Host JSON should decode into existing builders, not create another provider framework |
-| `PtcRunner.Kernel.MCPSource` | Implements read-only Streamable HTTP for MCP `2025-11-25`; installation requires Elixir | The adapter exists, but its session protocol and installation channel must change |
-| `PtcRunner.Kernel.MCPLease` | Owns a protocol session, request IDs, expiry, active requests, and session DELETE | Most of this disappears when protocol sessions disappear |
+| `PtcRunner.Kernel.MCPSource` | Implements read-only stateless Streamable HTTP for MCP `2026-07-28`; installation still requires Elixir | The modern HTTP core exists; data-driven installation and stdio remain |
+| `PtcRunner.Kernel.MCPLease` | Removed with the obsolete protocol-session lifecycle | Stdio needs transport ownership, not a protocol lease |
 | `PtcRunner.Kernel.FileCapability` | Freezes configured files and reads one already-known whole UTF-8 path | Keep only until the MCP filesystem replacement passes acceptance, then delete the public provider instead of extending it |
 | `PtcRunner.Kernel.JSONSchema` | Compiles a bounded 2020-12 subset and currently requires object roots for inputs and outputs | Input and output compilation need distinct root rules; full remote schemas must not bypass the bounded callable profile |
 | `mix ptc.run` | Uses the default registry and has no host-config option | A generic trusted installation channel is the missing CLI capability |
 | Private inspection | Captures exact provider-neutral LLM and capability activity in a separate bounded artifact | MCP-specific wire evidence can extend the private plane without entering canonical traces |
 
-No new top-level runtime or task abstraction is needed. The missing work is a
-modern MCP client, stdio ownership, and data-driven installation.
+No new top-level runtime or task abstraction is needed. The missing work is
+stdio ownership and data-driven installation of the modern MCP client.
 
 ## 3. Decisions
 
@@ -205,7 +205,8 @@ Every request must:
 1. include protocol version, client identity, and client capabilities in
    `_meta`;
 2. use a new JSON-RPC request ID;
-3. validate exactly one correlated response or bounded request-scoped stream;
+3. validate the first correlated final response in a bounded request-scoped
+   stream, then stop consuming that stream;
 4. classify `resultType` before interpreting the result; and
 5. remain bounded by one end-to-end deadline and byte ceiling.
 
@@ -358,8 +359,9 @@ the run.
 The safe provider snapshot contains the selected protocol, transport kind,
 public names, host effects, normalized schema hashes, hashes of effective
 model-visible descriptions, hashes of mapped upstream names, normalized
-`x-mcp-header` behavior, server implementation identity, an optional hash of
-the host-supplied `installation_revision`, any validated content snapshot
+`x-mcp-header` behavior, a hash of bounded self-reported server implementation
+identity, an optional hash of the host-supplied `installation_revision`, any
+validated content snapshot
 identity, and an overall content hash. A prompt-visible
 remote description is behavioral input and must affect the snapshot even when
 the text itself is not published.
@@ -1074,10 +1076,13 @@ advertise what PtcRunner cannot honor.
 | Launcher protocol handshake does not match | Deterministic pre-server-spawn compatibility failure after the launcher starts |
 | Stdio server writes non-protocol stdout | Closed protocol failure; process is terminated |
 | Stdio server or same-group descendant survives close deadline | Escalated launched-process-group termination and closed cleanup result; `setpgid`/`setsid` escape is outside V1 |
-| HTTP headers disagree with the body | Closed protocol failure |
+| Generated HTTP routing/version headers would disagree with the request body | Impossible by construction; both derive from the same frozen request |
 | Valid mapped `x-mcp-header` parameter is present | Required `Mcp-Param-*` header mirrors the body using specified encoding |
 | `x-mcp-header` definition is invalid | Tool is excluded; a host mapping to it fails assembly |
+| Projected parameter headers exceed count, name, or wire-byte ceilings | Closed protocol failure before transport |
+| `resultType` is omitted | Closed protocol failure under the modern-only contract |
 | `resultType` is unknown, `input_required`, or `task` without support | Stable unsupported-result failure |
+| Structured result includes its canonical serialized text companion | Text blocks are validated and discarded; schema-valid `structuredContent` is returned |
 | Tool returns an oversized or schema-invalid value | Closed invalid-result failure before Lisp receives it |
 | Tool returns bounded actionable `isError` content | Public error stays closed; model receives it only under installed bounded-feedback policy |
 | Private inspection is not requested | No MCP payload-bearing diagnostic artifact is retained |

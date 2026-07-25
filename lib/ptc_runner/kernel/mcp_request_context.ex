@@ -1,9 +1,7 @@
-defmodule PtcRunner.Kernel.MCPLease do
+defmodule PtcRunner.Kernel.MCPRequestContext do
   @moduledoc false
 
   use GenServer
-
-  @protocol "2025-11-25"
 
   @enforce_keys [:pid]
   defstruct [:pid]
@@ -20,7 +18,7 @@ defmodule PtcRunner.Kernel.MCPLease do
     {:ok, %__MODULE__{pid: pid}}
   end
 
-  @spec begin_request(t()) :: {:ok, map()} | {:error, :session_expired | :closed}
+  @spec begin_request(t()) :: {:ok, map()} | {:error, :closed}
   def begin_request(%__MODULE__{pid: pid}), do: safe_call(pid, :begin_request)
 
   @spec finish_request(t()) :: :ok
@@ -31,23 +29,18 @@ defmodule PtcRunner.Kernel.MCPLease do
     end
   end
 
-  @spec set_session(t(), binary() | nil) :: :ok | {:error, :closed}
-  def set_session(%__MODULE__{pid: pid}, session_id),
-    do: safe_call(pid, {:set_session, session_id})
-
-  @spec expire(t()) :: :ok
-  def expire(%__MODULE__{pid: pid}) do
-    case safe_call(pid, :expire) do
-      :ok -> :ok
-      {:error, :closed} -> :ok
-    end
-  end
-
   @spec close(t()) :: :ok
   def close(%__MODULE__{pid: pid}) do
-    case safe_call(pid, :close) do
-      :ok -> :ok
-      {:error, :closed} -> :ok
+    ref = Process.monitor(pid)
+
+    try do
+      _ = safe_call(pid, :close)
+
+      receive do
+        {:DOWN, ^ref, :process, ^pid, _reason} -> :ok
+      end
+    after
+      Process.demonitor(ref, [:flush])
     end
   end
 
@@ -59,18 +52,13 @@ defmodule PtcRunner.Kernel.MCPLease do
        endpoint: endpoint,
        headers: headers,
        timeout_ms: timeout_ms,
-       session_id: nil,
        next_id: 1,
-       expired?: false,
        active: %{},
        closing: nil
      }}
   end
 
   @impl GenServer
-  def handle_call(:begin_request, _from, %{expired?: true} = state),
-    do: {:reply, {:error, :session_expired}, state}
-
   def handle_call(:begin_request, _from, %{closing: closing} = state)
       when not is_nil(closing),
       do: {:reply, {:error, :closed}, state}
@@ -80,8 +68,6 @@ defmodule PtcRunner.Kernel.MCPLease do
       endpoint: state.endpoint,
       headers: state.headers,
       timeout_ms: state.timeout_ms,
-      session_id: state.session_id,
-      protocol: @protocol,
       id: state.next_id
     }
 
@@ -94,31 +80,16 @@ defmodule PtcRunner.Kernel.MCPLease do
     finish_or_continue(state, :ok)
   end
 
-  def handle_call({:set_session, session_id}, _from, state)
-      when is_nil(session_id) do
-    {:reply, :ok, %{state | session_id: session_id}}
+  def handle_call(:close, from, %{closing: {reason, waiters}} = state) do
+    {:noreply, %{state | closing: {reason, [from | waiters]}}}
   end
-
-  def handle_call({:set_session, session_id}, _from, state) when is_binary(session_id) do
-    if valid_session_id?(session_id),
-      do: {:reply, :ok, %{state | session_id: session_id}},
-      else: {:reply, {:error, :invalid_session}, state}
-  end
-
-  def handle_call(:expire, _from, state) do
-    state = %{state | expired?: true, closing: state.closing || :expired}
-    finish_or_continue(state, :ok)
-  end
-
-  def handle_call(:close, _from, %{closing: {:close, _pending_from}} = state),
-    do: {:reply, :ok, state}
 
   def handle_call(:close, from, state) do
-    state = %{state | closing: {:close, from}}
+    state = %{state | closing: {:close, [from]}}
     kill_active(state.active)
 
     if map_size(state.active) == 0,
-      do: {:stop, :normal, :ok, state},
+      do: stop_and_reply(state),
       else: {:noreply, state}
   end
 
@@ -129,11 +100,11 @@ defmodule PtcRunner.Kernel.MCPLease do
 
   @impl GenServer
   def handle_info({:DOWN, ref, :process, _pid, _reason}, %{owner_ref: ref} = state) do
-    state = %{state | closing: state.closing || :owner_down}
+    state = %{state | closing: state.closing || {:owner_down, []}}
     kill_active(state.active)
 
     if map_size(state.active) == 0,
-      do: {:stop, :normal, state},
+      do: stop_and_reply(state),
       else: {:noreply, state}
   end
 
@@ -156,55 +127,6 @@ defmodule PtcRunner.Kernel.MCPLease do
   @impl GenServer
   def format_status(_reason, _status), do: [data: [{~c"State", :redacted}]]
 
-  @impl GenServer
-  def terminate(_reason, state) do
-    if is_binary(state.session_id), do: terminate_session(state)
-    :ok
-  end
-
-  defp terminate_session(state) do
-    timeout_ms = min(state.timeout_ms, 1_000)
-
-    task =
-      Task.async(fn ->
-        with {:ok, installed_headers} <- safe_headers(state.headers) do
-          headers =
-            installed_headers ++
-              [
-                {"mcp-protocol-version", @protocol},
-                {"mcp-session-id", state.session_id}
-              ]
-
-          Req.delete(state.endpoint,
-            headers: headers,
-            connect_options: [timeout: timeout_ms],
-            pool_timeout: timeout_ms,
-            receive_timeout: timeout_ms,
-            retry: false,
-            redirect: false,
-            decode_body: false
-          )
-        end
-      end)
-
-    _ = Task.yield(task, timeout_ms) || Task.shutdown(task, :brutal_kill)
-  rescue
-    _exception -> :ok
-  catch
-    _kind, _reason -> :ok
-  end
-
-  defp safe_headers(headers) do
-    case headers.() do
-      values when is_list(values) -> {:ok, values}
-      _values -> {:error, :invalid_headers}
-    end
-  rescue
-    _exception -> {:error, :invalid_headers}
-  catch
-    _kind, _reason -> {:error, :invalid_headers}
-  end
-
   defp safe_call(pid, request) do
     GenServer.call(pid, request)
   catch
@@ -219,34 +141,36 @@ defmodule PtcRunner.Kernel.MCPLease do
     end)
   end
 
-  defp valid_session_id?(session_id),
-    do: String.valid?(session_id) and session_id =~ ~r/\A[!-~]{1,1024}\z/
-
   defp release_active(state, caller, demonitor? \\ true) do
     {ref, active} = Map.pop(state.active, caller)
     if demonitor? and is_reference(ref), do: Process.demonitor(ref, [:flush])
     %{state | active: active}
   end
 
-  defp finish_or_continue(%{active: active, closing: closing} = state, reply)
-       when map_size(active) == 0 and not is_nil(closing),
-       do: {:stop, :normal, reply, state}
+  defp finish_or_continue(%{active: active, closing: {_reason, _waiters}} = state, reply)
+       when map_size(active) == 0 do
+    reply_waiters(state)
+    {:stop, :normal, reply, state}
+  end
 
   defp finish_or_continue(state, reply), do: {:reply, reply, state}
 
   defp close_or_continue(%{active: active, closing: nil} = state) when map_size(active) == 0,
     do: {:noreply, state}
 
-  defp close_or_continue(%{active: active, closing: {:close, from}} = state)
-       when map_size(active) == 0 do
-    GenServer.reply(from, :ok)
+  defp close_or_continue(%{active: active, closing: {_reason, _waiters}} = state)
+       when map_size(active) == 0,
+       do: stop_and_reply(state)
+
+  defp close_or_continue(state), do: {:noreply, state}
+
+  defp stop_and_reply(state) do
+    reply_waiters(state)
     {:stop, :normal, state}
   end
 
-  defp close_or_continue(%{active: active} = state) when map_size(active) == 0,
-    do: {:stop, :normal, state}
-
-  defp close_or_continue(state), do: {:noreply, state}
+  defp reply_waiters(%{closing: {_reason, waiters}}),
+    do: Enum.each(waiters, &GenServer.reply(&1, :ok))
 
   defp kill_active(active),
     do: Enum.each(Map.keys(active), &Process.exit(&1, :kill))

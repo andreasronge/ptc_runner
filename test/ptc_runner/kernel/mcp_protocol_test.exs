@@ -16,28 +16,24 @@ defmodule PtcRunner.Kernel.MCPProtocolTest do
   }
 
   test "builds JSON-RPC requests and notifications" do
-    assert MCPProtocol.request(7, "tools/call", %{"name" => "lookup"}) == %{
+    metadata = %{"io.modelcontextprotocol/protocolVersion" => "2026-07-28"}
+
+    assert MCPProtocol.request(7, "tools/call", %{"name" => "lookup"}, metadata) == %{
              "jsonrpc" => "2.0",
              "id" => 7,
              "method" => "tools/call",
-             "params" => %{"name" => "lookup"}
-           }
-
-    assert MCPProtocol.notification("notifications/initialized", %{}) == %{
-             "jsonrpc" => "2.0",
-             "method" => "notifications/initialized",
-             "params" => %{}
+             "params" => %{"name" => "lookup", "_meta" => metadata}
            }
   end
 
   test "validates bounded upstream tool names for installation and discovery" do
     assert MCPProtocol.valid_tool_name?("vendor.lookup-v2")
-    assert MCPProtocol.valid_tool_name?(String.duplicate("x", 256))
+    assert MCPProtocol.valid_tool_name?(String.duplicate("x", 128))
 
     refute MCPProtocol.valid_tool_name?("")
     refute MCPProtocol.valid_tool_name?("bad name")
     refute MCPProtocol.valid_tool_name?("bad\nname")
-    refute MCPProtocol.valid_tool_name?(String.duplicate("x", 257))
+    refute MCPProtocol.valid_tool_name?(String.duplicate("x", 129))
     refute MCPProtocol.valid_tool_name?(<<0xFF>>)
     refute MCPProtocol.valid_tool_name?(:lookup)
   end
@@ -61,13 +57,39 @@ defmodule PtcRunner.Kernel.MCPProtocolTest do
   end
 
   test "accepts exactly one valid JSON-RPC outcome" do
-    assert {:ok, %{"tools" => []}} =
-             MCPProtocol.outcome(%{"result" => %{"tools" => []}})
+    assert {:ok, %{"resultType" => "complete", "tools" => []}} =
+             MCPProtocol.outcome(
+               %{
+                 "result" => %{
+                   "resultType" => "complete",
+                   "tools" => [],
+                   "ttlMs" => 0,
+                   "cacheScope" => "private"
+                 }
+               },
+               "tools/list"
+             )
+
+    assert {:error, :mcp_protocol_error} =
+             MCPProtocol.outcome(
+               %{"result" => %{"tools" => [], "ttlMs" => 0, "cacheScope" => "private"}},
+               "tools/list"
+             )
+
+    assert {:error, :mcp_protocol_error} =
+             MCPProtocol.outcome(%{"result" => %{"content" => []}}, "tools/call")
 
     assert {:error, :mcp_remote_error} =
-             MCPProtocol.outcome(%{
-               "error" => %{"code" => -32_001, "message" => "not available", "data" => nil}
-             })
+             MCPProtocol.outcome(
+               %{
+                 "error" => %{
+                   "code" => -32_001,
+                   "message" => "not available",
+                   "data" => nil
+                 }
+               },
+               "tools/call"
+             )
 
     for response <- [
           %{},
@@ -77,23 +99,50 @@ defmodule PtcRunner.Kernel.MCPProtocolTest do
           %{"error" => %{"code" => -1, "message" => "bad", "unknown" => true}},
           %{"error" => %{"code" => -1, "message" => String.duplicate("x", 4_097)}}
         ] do
-      assert {:error, :mcp_protocol_error} = MCPProtocol.outcome(response)
+      assert {:error, :mcp_protocol_error} = MCPProtocol.outcome(response, "tools/call")
     end
+
+    assert {:error, :mcp_unsupported_result} =
+             MCPProtocol.outcome(
+               %{"result" => %{"resultType" => "input_required"}},
+               "tools/call"
+             )
+
+    assert {:error, :mcp_unsupported_result} =
+             MCPProtocol.outcome(%{"result" => %{"resultType" => "future"}}, "tools/call")
+
+    for malformed <- [nil, 42, %{}, []] do
+      assert {:error, :mcp_protocol_error} =
+               MCPProtocol.outcome(
+                 %{"result" => %{"resultType" => malformed}},
+                 "tools/call"
+               )
+    end
+
+    assert {:error, :mcp_protocol_error} =
+             MCPProtocol.outcome(
+               %{"result" => %{"resultType" => "complete", "tools" => []}},
+               "tools/list"
+             )
   end
 
   test "reduces catalog pages without interpreting unmapped tool contracts" do
     incomplete_tool = %{
       "name" => "vendor.lookup",
       "inputSchema" => "validated only if selected",
-      "execution" => %{"taskSupport" => "required"},
       "unknown" => %{"future" => true}
     }
 
-    assert {:continue, "next", %{"next" => true}, %{"vendor.lookup" => ^incomplete_tool}} =
+    state = %{tools: %{}, names: %{}, seen: %{}, received_tools: 0, received_bytes: 0}
+
+    assert {:continue, "next",
+            %{
+              seen: %{"next" => true},
+              tools: %{"vendor.lookup" => ^incomplete_tool}
+            } = state} =
              MCPProtocol.catalog_page(
                %{"tools" => [incomplete_tool], "nextCursor" => "next"},
-               %{},
-               %{},
+               state,
                10,
                10_000
              )
@@ -103,8 +152,7 @@ defmodule PtcRunner.Kernel.MCPProtocolTest do
     assert {:done, tools} =
              MCPProtocol.catalog_page(
                %{"tools" => [valid_tool]},
-               %{"vendor.lookup" => incomplete_tool},
-               %{"next" => true},
+               state,
                10,
                10_000
              )
@@ -114,13 +162,17 @@ defmodule PtcRunner.Kernel.MCPProtocolTest do
 
   test "rejects duplicate tools, looping cursors, invalid names, and exceeded bounds" do
     tool = %{"name" => "vendor.lookup"}
+    state = %{tools: %{}, names: %{}, seen: %{}, received_tools: 0, received_bytes: 0}
 
     cases = [
-      {%{"tools" => [tool]}, %{"vendor.lookup" => tool}, %{}, 10, 10_000},
-      {%{"tools" => [tool], "nextCursor" => "seen"}, %{}, %{"seen" => true}, 10, 10_000},
-      {%{"tools" => [%{"name" => "bad name"}]}, %{}, %{}, 10, 10_000},
-      {%{"tools" => [tool]}, %{}, %{}, 0, 10_000},
-      {%{"tools" => [tool]}, %{}, %{}, 10, 0}
+      {%{"tools" => [tool]},
+       %{state | tools: %{"vendor.lookup" => tool}, names: %{"vendor.lookup" => true}}, 10,
+       10_000},
+      {%{"tools" => [tool], "nextCursor" => "seen"}, %{state | seen: %{"seen" => true}}, 10,
+       10_000},
+      {%{"tools" => [%{"name" => "bad name"}]}, state, 10, 10_000},
+      {%{"tools" => [tool]}, state, 0, 10_000},
+      {%{"tools" => [tool]}, state, 10, 0}
     ]
 
     for arguments <- cases do
@@ -129,7 +181,67 @@ defmodule PtcRunner.Kernel.MCPProtocolTest do
     end
 
     assert {:error, :mcp_catalog_exceeded} =
-             MCPProtocol.catalog_page(%{"tools" => [tool]}, %{}, %{}, 10, 1)
+             MCPProtocol.catalog_page(%{"tools" => [tool]}, state, 10, 1)
+  end
+
+  test "counts discarded invalid header tools toward catalog ceilings across pages" do
+    invalid = %{
+      "name" => "vendor.invalid",
+      "inputSchema" => %{
+        "type" => "object",
+        "properties" => %{
+          "query" => %{"type" => "string", "x-mcp-header" => "bad header"}
+        }
+      }
+    }
+
+    state = %{tools: %{}, names: %{}, seen: %{}, received_tools: 0, received_bytes: 0}
+
+    assert {:continue, "next", state} =
+             MCPProtocol.catalog_page(
+               %{"tools" => [invalid], "nextCursor" => "next"},
+               state,
+               1,
+               10_000
+             )
+
+    assert {:error, :mcp_catalog_exceeded} =
+             MCPProtocol.catalog_page(
+               %{"tools" => [%{"name" => "vendor.valid"}]},
+               state,
+               1,
+               10_000
+             )
+  end
+
+  test "rejects a valid tool that repeats a discarded tool name on a later page" do
+    invalid = %{
+      "name" => "vendor.lookup",
+      "inputSchema" => %{
+        "type" => "object",
+        "properties" => %{
+          "query" => %{"type" => "string", "x-mcp-header" => "bad header"}
+        }
+      }
+    }
+
+    state = %{tools: %{}, names: %{}, seen: %{}, received_tools: 0, received_bytes: 0}
+
+    assert {:continue, "next", state} =
+             MCPProtocol.catalog_page(
+               %{"tools" => [invalid], "nextCursor" => "next"},
+               state,
+               10,
+               10_000
+             )
+
+    assert {:error, :mcp_invalid_catalog} =
+             MCPProtocol.catalog_page(
+               %{"tools" => [%{"name" => "vendor.lookup"}]},
+               state,
+               10,
+               10_000
+             )
   end
 
   test "validates only the selected tool contract and preserves forward-compatible fields" do
@@ -138,7 +250,7 @@ defmodule PtcRunner.Kernel.MCPProtocolTest do
       "description" => "Look up a value",
       "inputSchema" => @input_schema,
       "outputSchema" => @output_schema,
-      "execution" => %{"taskSupport" => "optional"},
+      "execution" => %{"taskSupport" => "removed-and-ignored"},
       "icons" => [%{"src" => "data:image/png;base64,"}],
       "_meta" => %{"vendor" => true}
     }
@@ -150,21 +262,163 @@ defmodule PtcRunner.Kernel.MCPProtocolTest do
               output_schema: @output_schema
             }} = MCPProtocol.selected_tool(tool)
 
-    assert {:error, :mcp_tool_task_required} =
-             MCPProtocol.selected_tool(%{
-               tool
-               | "execution" => %{"taskSupport" => "required"}
-             })
-
     for invalid <- [
           %{tool | "description" => 42},
           %{tool | "inputSchema" => []},
-          %{tool | "outputSchema" => []},
-          %{tool | "execution" => %{"taskSupport" => "future"}},
-          %{tool | "execution" => []}
+          %{tool | "outputSchema" => []}
         ] do
       assert {:error, _reason} = MCPProtocol.selected_tool(invalid)
     end
+  end
+
+  test "validates and projects x-mcp-header parameters" do
+    schema = %{
+      "type" => "object",
+      "const" => %{"x-mcp-header" => "instance-data"},
+      "enum" => [%{"x-mcp-header" => "instance-data"}],
+      "x-vendor" => %{"x-mcp-header" => "vendor-data"},
+      "properties" => %{
+        "region" => %{"type" => "string", "x-mcp-header" => "Region"},
+        "nested" => %{
+          "type" => "object",
+          "properties" => %{
+            "attempt" => %{"type" => "integer", "x-mcp-header" => "Attempt"},
+            "enabled" => %{"type" => "boolean", "x-mcp-header" => "Enabled"}
+          }
+        }
+      }
+    }
+
+    assert {:ok, parameters} = MCPProtocol.header_parameters(schema)
+
+    assert {:ok, headers} =
+             MCPProtocol.header_values(parameters, %{
+               "region" => " north ",
+               "nested" => %{"attempt" => 7, "enabled" => false}
+             })
+
+    assert headers == [
+             {"mcp-param-Attempt", "7"},
+             {"mcp-param-Enabled", "false"},
+             {"mcp-param-Region", "=?base64?IG5vcnRoIA==?="}
+           ]
+
+    for {value, encoded} <- [
+          {7.0, "7"},
+          {-0.0, "0"},
+          {9_007_199_254_740_991.0, "9007199254740991"}
+        ] do
+      assert {:ok, [{"mcp-param-Attempt", ^encoded}]} =
+               MCPProtocol.header_values(
+                 [%{name: "Attempt", path: ["attempt"], type: "integer"}],
+                 %{"attempt" => value}
+               )
+    end
+
+    assert {:error, :mcp_protocol_error} =
+             MCPProtocol.header_values(
+               [%{name: "Attempt", path: ["attempt"], type: "integer"}],
+               %{"attempt" => 9_007_199_254_740_992.0}
+             )
+
+    assert MCPProtocol.encode_header("=?base64?literal?=") ==
+             "=?base64?PT9iYXNlNjQ/bGl0ZXJhbD89?="
+
+    assert MCPProtocol.encode_header("") == ""
+
+    assert {:error, :mcp_protocol_error} =
+             MCPProtocol.header_values(
+               parameters,
+               %{"region" => String.duplicate("x", 20_000)}
+             )
+
+    too_many_headers =
+      Map.put(
+        schema,
+        "properties",
+        Map.new(1..25, fn index ->
+          name = "field_#{index}"
+          {name, %{"type" => "string", "x-mcp-header" => "Field-#{index}"}}
+        end)
+      )
+
+    deeply_nested =
+      Enum.reduce(1..17, %{"type" => "string"}, fn _index, nested ->
+        %{"items" => nested}
+      end)
+
+    deeply_nested_annotation =
+      Enum.reduce(1..17, "leaf", fn _index, nested ->
+        %{"ignored" => nested}
+      end)
+
+    for invalid <- [
+          too_many_headers,
+          deeply_nested,
+          Map.put(schema, "const", deeply_nested_annotation),
+          put_in(schema, ["properties", "region", "x-mcp-header"], ""),
+          put_in(
+            schema,
+            ["properties", "region", "x-mcp-header"],
+            String.duplicate("x", 129)
+          ),
+          put_in(schema, ["properties", "region", "type"], "number"),
+          put_in(
+            schema,
+            ["properties", "nested", "properties", "attempt", "x-mcp-header"],
+            "region"
+          ),
+          Map.put(schema, "x-mcp-header", "Root"),
+          Map.put(schema, "items", %{"x-mcp-header" => "Hidden", "type" => "string"}),
+          Map.put(schema, "oneOf", [%{"x-mcp-header" => "Hidden", "type" => "string"}]),
+          Map.put(schema, "oneOf", [
+            %{
+              "properties" => %{
+                "hidden" => %{"x-mcp-header" => "Hidden", "type" => "string"}
+              }
+            }
+          ])
+        ] do
+      assert {:error, :mcp_invalid_tool_schema} = MCPProtocol.header_parameters(invalid)
+    end
+  end
+
+  test "header scanning follows schema depth and ignores discarded vendor annotations" do
+    nested =
+      Enum.reduce(1..8, %{"type" => "string"}, fn index, child ->
+        %{
+          "type" => "object",
+          "properties" => %{"level_#{index}" => child}
+        }
+      end)
+
+    schema = %{
+      "type" => "object",
+      "properties" => %{"root" => nested},
+      "x-vendor-payload" => String.duplicate("x", 70_000)
+    }
+
+    assert {:ok, _normalized, _validator} = JSONSchema.compile(schema)
+    assert {:ok, []} = MCPProtocol.header_parameters(schema)
+  end
+
+  test "header scanning accepts canonical depth-16 scalar schema keywords" do
+    leaf = %{
+      "type" => "string",
+      "const" => "value"
+    }
+
+    schema =
+      Enum.reduce(1..15, leaf, fn index, child ->
+        %{
+          "type" => "object",
+          "properties" => %{"level_#{index}" => child},
+          "additionalProperties" => false
+        }
+      end)
+
+    assert {:ok, _normalized, _validator} = JSONSchema.compile(schema)
+    assert {:ok, []} = MCPProtocol.header_parameters(schema)
   end
 
   test "normalizes structured, text, and domain-error tool results" do
@@ -173,6 +427,15 @@ defmodule PtcRunner.Kernel.MCPProtocolTest do
     assert {:ok, %{"value" => 42}} =
              MCPProtocol.normalize_tool_result(
                %{"structuredContent" => %{"value" => 42}, "content" => []},
+               validator
+             )
+
+    assert {:ok, %{"value" => 42}} =
+             MCPProtocol.normalize_tool_result(
+               %{
+                 "structuredContent" => %{"value" => 42},
+                 "content" => [%{"type" => "text", "text" => ~s|{"value":42}|}]
+               },
                validator
              )
 
@@ -188,14 +451,19 @@ defmodule PtcRunner.Kernel.MCPProtocolTest do
              )
 
     assert {:error, :mcp_domain_error} =
-             MCPProtocol.normalize_tool_result(%{"isError" => true}, validator)
+             MCPProtocol.normalize_tool_result(%{"isError" => true, "content" => []}, validator)
 
     for {result, output_validator} <- [
+          {%{"structuredContent" => %{"value" => 42}}, validator},
+          {%{"isError" => true}, validator},
           {%{"structuredContent" => %{"value" => "wrong"}}, validator},
           {%{"structuredContent" => %{"value" => 42}, "content" => [%{}]}, validator},
           {%{"structuredContent" => %{"value" => 42}, "content" => []}, nil},
           {%{"content" => [%{"type" => "image", "data" => "..."}]}, nil},
-          {%{"content" => [%{"type" => "text", "text" => "ok", "extra" => true}]}, nil}
+          {%{"content" => [%{"type" => "text", "text" => "ok", "extra" => true}]}, nil},
+          {%{"isError" => "true", "content" => [%{"type" => "text", "text" => "ok"}]}, nil},
+          {%{"isError" => nil, "structuredContent" => %{"value" => 42}, "content" => []},
+           validator}
         ] do
       assert {:error, :mcp_invalid_result} =
                MCPProtocol.normalize_tool_result(result, output_validator)

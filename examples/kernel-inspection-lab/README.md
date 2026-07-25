@@ -2,7 +2,7 @@
 
 This credential-free developer lab runs the shipped `agent.core` loop against
 a scripted model, the installed `file-read` provider, one host-native read
-capability, and a protocol-faithful loopback MCP 2025-11-25 server. The MCP
+capability, and a protocol-faithful stateless MCP 2026-07-28 server. The MCP
 fixture exposes structured, text, and `isError: true` results. The scripted
 model first emits an invalid PTC-Lisp program, receives evaluation feedback,
 then calls every fixture successfully. Each journey produces both a sanitized

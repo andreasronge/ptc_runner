@@ -53,9 +53,9 @@ that touches data is in the mission environment.
 | --- | --- |
 | `mix ptc.run`, strict manifests, local PTC-Lisp, `agent.core` | current |
 | immutable whole-file `file-read` | current only; deleted at the MCP filesystem cutover and never added to host config |
-| MCP Streamable HTTP installed from Elixir | current, pinned to sessionful `2025-11-25` |
+| MCP Streamable HTTP installed from Elixir | current, pinned to stateless `2026-07-28` |
 | `--trace` and exact `--inspect` capture | current |
-| stateless MCP `2026-07-28` and stdio | planned MCP Slices 0–2 |
+| stdio MCP transport | planned MCP Slice 2; stateless `2026-07-28` HTTP is current |
 | compatible stdio launcher, normally the optional precompiled `ptc_runner_launcher` companion | planned MCP Slice 2; required for stdio, not by HTTP-only users |
 | `--host-config` and `--check` | planned MCP Slice 3 |
 | host-installed aliases replacing manifest-configured providers | planned application Slices B–C; filesystem access uses `source: "mcp"` |

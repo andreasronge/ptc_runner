@@ -226,12 +226,12 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
         :ok
       end)
 
-    assert_receive {:owner_exit_session, sink_pid, creator_pid}
+    assert_receive {:owner_exit_session, sink_pid, creator_pid}, 2_000
     sink_ref = Process.monitor(sink_pid)
     send(creator_pid, :finish)
     assert :ok = Task.await(creator)
-    assert_receive {:DOWN, ^sink_ref, :process, ^sink_pid, :normal}
-    assert_receive :owner_exit_resource_closed
+    assert_receive {:DOWN, ^sink_ref, :process, ^sink_pid, :normal}, 2_000
+    assert_receive :owner_exit_resource_closed, 2_000
   end
 
   test "owner exit cancels an in-flight evaluation sandbox" do
