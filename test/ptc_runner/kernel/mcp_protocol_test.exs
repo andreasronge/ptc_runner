@@ -24,6 +24,16 @@ defmodule PtcRunner.Kernel.MCPProtocolTest do
              "method" => "tools/call",
              "params" => %{"name" => "lookup", "_meta" => metadata}
            }
+
+    assert MCPProtocol.notification(
+             "notifications/cancelled",
+             %{"requestId" => 7},
+             metadata
+           ) == %{
+             "jsonrpc" => "2.0",
+             "method" => "notifications/cancelled",
+             "params" => %{"requestId" => 7, "_meta" => metadata}
+           }
   end
 
   test "validates bounded upstream tool names for installation and discovery" do
@@ -53,6 +63,40 @@ defmodule PtcRunner.Kernel.MCPProtocolTest do
           "[]"
         ] do
       assert {:error, :mcp_protocol_error} = MCPProtocol.decode_response(body, 3)
+    end
+  end
+
+  test "routes stdio responses and accepts protocol notifications" do
+    assert {:ok, {:response, 7, %{"result" => %{"ok" => true}} = response}} =
+             MCPProtocol.decode_message(~s({"jsonrpc":"2.0","id":7,"result":{"ok":true}}))
+
+    assert response["jsonrpc"] == "2.0"
+
+    assert {:ok, {:notification, notification}} =
+             MCPProtocol.decode_message(
+               ~s({"jsonrpc":"2.0","method":"notifications/progress","params":{"progress":1}})
+             )
+
+    assert notification["method"] == "notifications/progress"
+
+    assert {:ok, {:notification, %{"method" => "notifications/tools/list_changed"}}} =
+             MCPProtocol.decode_message(
+               ~s({"jsonrpc":"2.0","method":"notifications/tools/list_changed"})
+             )
+
+    for body <- [
+          ~s({"jsonrpc":"2.0","id":"7","result":{}}),
+          ~s({"jsonrpc":"2.0","id":7}),
+          ~s({"jsonrpc":"2.0","id":7,"method":"tools/list","params":{}}),
+          ~s({"jsonrpc":"2.0","id":7,"result":{},"error":{"code":-1,"message":"bad"}}),
+          ~s({"jsonrpc":"2.0","method":"tools/list","params":{}}),
+          ~s({"jsonrpc":"2.0","method":"notifications/","params":{}}),
+          ~s({"jsonrpc":"2.0","method":"notifications/progress","params":[]}),
+          ~s({"jsonrpc":"2.0","method":"notifications/progress","params":{},"result":{}}),
+          ~s({"jsonrpc":"2.0","method":"notifications/progress","params":{},"error":{}}),
+          ~s({"jsonrpc":"2.0","id":7,"id":8,"result":{}})
+        ] do
+      assert {:error, :mcp_protocol_error} = MCPProtocol.decode_message(body)
     end
   end
 

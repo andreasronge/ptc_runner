@@ -46,9 +46,9 @@ defmodule PtcRunnerLauncher.TestSupport.LauncherPort do
   after it is opened; macOS executes the canonical path and therefore also
   requires its executable path hierarchy to stay immutable.
 
-  This module is deliberately test-only. It exercises the packet protocol that
-  the future core transport will consume without making that transport part of
-  the native companion package.
+  This module is deliberately test-only. It exercises the packet protocol
+  consumed by the core transport without making that transport part of the
+  native companion package.
   """
 
   @enforce_keys [:port, :owner, :close_timeout_ms]

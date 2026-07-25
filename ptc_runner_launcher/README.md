@@ -23,7 +23,9 @@ compatible with the Ubuntu 22.04 glibc 2.35 baseline. CI builds and executes
 the artifacts on those pinned baseline images rather than floating
 `*-latest` images.
 
-The package is not yet connected to the core transport.
+The core package uses this companion through its internal owner-monitored stdio
+transport. Data-driven stdio installation remains part of MCP source
+unification.
 
 This is process containment for trusted host-installed MCP servers, not a
 hostile-code sandbox. A trusted child can deliberately leave its process group.

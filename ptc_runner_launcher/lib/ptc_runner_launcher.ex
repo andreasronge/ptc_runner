@@ -6,8 +6,8 @@ defmodule PtcRunnerLauncher do
   The package owns the native process boundary and its artifact locator.
   Supported release targets restore a mandatory-checksum precompiled
   executable; other macOS and Linux targets compile the included source. The
-  core `ptc_runner` package will own MCP framing, request correlation,
-  deadlines, and transport supervision when stdio integration lands.
+  core `ptc_runner` package owns MCP framing, request correlation, deadlines,
+  and transport supervision.
   """
 
   @protocol_version 1

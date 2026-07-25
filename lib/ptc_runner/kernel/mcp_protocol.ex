@@ -51,6 +51,9 @@ defmodule PtcRunner.Kernel.MCPProtocol do
           {:done, map()}
           | {:continue, binary(), map()}
           | {:error, :mcp_catalog_exceeded | :mcp_invalid_catalog}
+  @type inbound_message ::
+          {:response, pos_integer(), map()}
+          | {:notification, map()}
 
   @spec request(pos_integer(), binary(), map(), map()) :: map()
   def request(id, method, params, metadata)
@@ -64,19 +67,70 @@ defmodule PtcRunner.Kernel.MCPProtocol do
     }
   end
 
+  @spec notification(binary(), map(), map()) :: map()
+  def notification(method, params, metadata)
+      when is_binary(method) and is_map(params) and is_map(metadata) do
+    %{
+      "jsonrpc" => "2.0",
+      "method" => method,
+      "params" => Map.put(params, "_meta", metadata)
+    }
+  end
+
   @spec valid_tool_name?(term()) :: boolean()
   def valid_tool_name?(name),
     do: is_binary(name) and String.valid?(name) and name =~ @upstream_name
 
   @spec decode_response(binary(), pos_integer()) :: {:ok, map()} | {:error, :mcp_protocol_error}
   def decode_response(body, id) when is_binary(body) and is_integer(id) and id > 0 do
+    case decode_message(body) do
+      {:ok, {:response, ^id, decoded}} -> {:ok, decoded}
+      _invalid -> {:error, :mcp_protocol_error}
+    end
+  end
+
+  @spec decode_message(binary()) ::
+          {:ok, inbound_message()} | {:error, :mcp_protocol_error}
+  def decode_message(body) when is_binary(body) do
     with {:ok, decoded} <- StrictJSON.decode(body),
          true <- JSONValue.map?(decoded),
-         ^id <- decoded["id"],
          "2.0" <- decoded["jsonrpc"] do
-      {:ok, decoded}
+      classify_message(decoded)
     else
       _reason -> {:error, :mcp_protocol_error}
+    end
+  end
+
+  def decode_message(_body), do: {:error, :mcp_protocol_error}
+
+  defp classify_message(%{"id" => id} = decoded) when is_integer(id) and id > 0 do
+    case {
+      Map.has_key?(decoded, "method"),
+      Map.has_key?(decoded, "result"),
+      Map.has_key?(decoded, "error")
+    } do
+      {false, true, false} -> {:ok, {:response, id, decoded}}
+      {false, false, true} -> {:ok, {:response, id, decoded}}
+      _invalid -> {:error, :mcp_protocol_error}
+    end
+  end
+
+  defp classify_message(decoded) do
+    case {
+      Map.has_key?(decoded, "id"),
+      decoded["method"],
+      Map.fetch(decoded, "params"),
+      Map.has_key?(decoded, "result") or Map.has_key?(decoded, "error")
+    } do
+      {false, "notifications/" <> name, :error, false} when byte_size(name) > 0 ->
+        {:ok, {:notification, decoded}}
+
+      {false, "notifications/" <> name, {:ok, params}, false}
+      when byte_size(name) > 0 and is_map(params) and not is_struct(params) ->
+        {:ok, {:notification, decoded}}
+
+      _invalid ->
+        {:error, :mcp_protocol_error}
     end
   end
 

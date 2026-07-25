@@ -25,7 +25,6 @@ defmodule PtcRunner.Kernel.MCPSource do
   alias PtcRunner.Kernel.MCPProtocol
   alias PtcRunner.Kernel.MCPRequestContext
   alias PtcRunner.Kernel.ProviderError
-  alias PtcRunner.Kernel.StrictJSON
 
   @protocol "2026-07-28"
   @client_info %{"name" => "ptc_runner", "version" => "0.x"}
@@ -786,18 +785,14 @@ defmodule PtcRunner.Kernel.MCPSource do
   end
 
   defp decode_sse_data(data, response, id) do
-    case StrictJSON.decode(data) do
-      {:ok, %{"jsonrpc" => "2.0", "method" => method} = notification}
-      when is_binary(method) and not is_map_key(notification, "id") and is_nil(response) ->
+    case MCPProtocol.decode_message(data) do
+      {:ok, {:notification, _notification}} when is_nil(response) ->
         {:ok, nil}
 
-      {:ok, _decoded} when not is_nil(response) ->
-        {:error, :mcp_protocol_error}
+      {:ok, {:response, ^id, decoded}} when is_nil(response) ->
+        {:ok, decoded}
 
-      {:ok, _decoded} ->
-        MCPProtocol.decode_response(data, id)
-
-      {:error, _reason} ->
+      _invalid ->
         {:error, :mcp_protocol_error}
     end
   end
