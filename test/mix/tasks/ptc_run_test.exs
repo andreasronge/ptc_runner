@@ -229,11 +229,32 @@ defmodule Mix.Tasks.Ptc.RunTest do
 
       Mix.Task.reenable("ptc.run")
 
-      assert_raise Mix.Error, ~r/private_result_requires_private_destination/, fn ->
-        capture_io(fn -> Run.run([manifest_path, "--output", output]) end)
-      end
+      error =
+        assert_raise Mix.Error, ~r/private_result_requires_private_destination/, fn ->
+          capture_io(fn -> Run.run([manifest_path, "--output", output]) end)
+        end
 
+      # The refusal must not itself publish what it refused to write.
+      refute error.message =~ "confidential"
       refute File.exists?(output)
+    end
+
+    @tag :tmp_dir
+    test "an occupied private destination does not disclose the value", %{tmp_dir: dir} do
+      manifest_path =
+        write_manifest(dir, %{"value" => %{"secret" => "confidential"}}, private?: true)
+
+      output = Path.join(dir, "answer.private.json")
+      File.write!(output, "occupied")
+
+      Mix.Task.reenable("ptc.run")
+
+      error =
+        assert_raise Mix.Error, ~r/result_destination_exists/, fn ->
+          capture_io(fn -> Run.run([manifest_path, "--private-output", output]) end)
+        end
+
+      refute error.message =~ "confidential"
     end
 
     @tag :tmp_dir

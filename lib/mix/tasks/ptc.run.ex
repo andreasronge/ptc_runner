@@ -64,12 +64,8 @@ defmodule Mix.Tasks.Ptc.Run do
     end
   end
 
-  defp run_with_class(manifest, registry, opts) do
-    case RunBuilder.run(manifest, registry, opts) do
-      {:ok, result} -> {:ok, result, RunBuilder.manifest_class(manifest)}
-      {:error, _reason} = error -> error
-    end
-  end
+  defp run_with_class(manifest, registry, opts),
+    do: RunBuilder.run_with_class(manifest, registry, opts)
 
   # A private value never reaches the terminal. Publishing it there would
   # declassify it just as surely as writing it to a normal artifact.

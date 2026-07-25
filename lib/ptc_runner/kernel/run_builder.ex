@@ -221,14 +221,9 @@ defmodule PtcRunner.Kernel.RunBuilder do
              :ok <- persist_result(result, built.config.event_sink, opts) do
           result
         else
-          {:error, {:trace, reason}} ->
-            {:error, {:trace_persistence_failed, reason, result}}
-
-          {:error, {:inspection, reason}} ->
-            {:error, {:inspection_persistence_failed, reason, result}}
-
-          {:error, {:result, reason}} ->
-            {:error, {:result_persistence_failed, reason, result}}
+          {:error, {stage, reason}} ->
+            {:error,
+             {persistence_failure(stage), reason, disclosable(result, built.config.event_sink)}}
         end
 
       {:error, _reason} ->
@@ -282,9 +277,29 @@ defmodule PtcRunner.Kernel.RunBuilder do
   result so callers do not mistake persistence failure for workflow failure.
   """
   def run(path, registry, opts \\ []) do
+    case run_with_class(path, registry, opts) do
+      {:ok, result, _class} -> {:ok, result}
+      other -> other
+    end
+  end
+
+  @spec run_with_class(binary(), ProviderRegistry.t(), keyword()) ::
+          {:ok, term(), :normal | :private} | {:error, term()}
+  @doc """
+  Runs a manifest and also returns the effective class of its result.
+
+  A caller that decides whether a value may be printed must not re-derive the
+  class from the manifest file: that is a second read of a path the run no
+  longer controls, and any failure of it would have to guess. The class comes
+  from the same event sink the run itself used.
+  """
+  def run_with_class(path, registry, opts \\ []) do
     with {:ok, built} <- load_and_build(path, registry, opts) do
       try do
-        execute_built(built, opts)
+        case execute_built(built, opts) do
+          {:ok, result} -> {:ok, result, result_class(built.config.event_sink)}
+          other -> other
+        end
       after
         if built.config.inspection_sink, do: InspectionSink.stop(built.config.inspection_sink)
 
@@ -301,23 +316,21 @@ defmodule PtcRunner.Kernel.RunBuilder do
     end
   end
 
-  @doc """
-  Returns the effective result class declared by a manifest, without running it.
+  defp persistence_failure(:trace), do: :trace_persistence_failed
+  defp persistence_failure(:inspection), do: :inspection_persistence_failed
+  defp persistence_failure(:result), do: :result_persistence_failed
 
-  A caller that must decide whether a value may be printed needs the class
-  before the run produces one. Loading is cheap and confined; an unreadable
-  manifest reports `:normal` because the run itself fails first and reports the
-  real error.
-  """
-  @spec manifest_class(binary()) :: :normal | :private
-  def manifest_class(path) when is_binary(path) do
-    case Manifest.load(path) do
-      {:ok, %Manifest{events: %{policy: :private}}} -> :private
-      _other -> :normal
+  # A persistence failure is reported by a caller that renders the error, so a
+  # private value must not travel inside it. Refusing to write a private value
+  # and then printing it in the refusal would defeat the check entirely.
+  defp disclosable({:ok, %Result{} = result}, sink) do
+    case result_class(sink) do
+      :private -> {:ok, %Result{result | value: :redacted}}
+      :normal -> {:ok, result}
     end
   end
 
-  def manifest_class(_path), do: :normal
+  defp disclosable(result, _sink), do: result
 
   @doc """
   Returns the effective class of a run's result.
@@ -326,10 +339,17 @@ defmodule PtcRunner.Kernel.RunBuilder do
   private value. The §4.7 rule that also classifies a private mission input or
   a provider that emits private inspection data needs host-installed data
   classes and widens this once host configuration lands.
+
+  Fails closed. Only an explicit `:normal` policy yields a normal class, so a
+  sink that has exited — `EventSink.policy/1` then returns an error tuple —
+  classifies its value private rather than publishable.
   """
   @spec result_class(EventSink.t()) :: :normal | :private
   def result_class(sink) do
-    if EventSink.policy(sink) == :private, do: :private, else: :normal
+    case EventSink.policy(sink) do
+      :normal -> :normal
+      _other -> :private
+    end
   end
 
   defp persist_result({:ok, %Result{} = result}, sink, opts) do

@@ -83,20 +83,17 @@ defmodule PtcRunner.Kernel.ConfinedFile do
 
   def resolve_absolute(_path), do: {:error, :invalid_path}
 
-  @doc """
-  Resolves `relative_path` beneath `root` and returns it relative to that root,
-  without reading any content.
-  """
-  @spec resolve_relative(binary(), binary()) :: {:ok, binary()} | {:error, error()}
-  def resolve_relative(root, relative_path)
-      when is_binary(root) and is_binary(relative_path) do
+  # Deliberately private. Resolution alone does not confine: it follows links
+  # and reports where they land, and only `read/3`'s surrounding
+  # `validate_relative/1` and `within_root?/2` re-check make the result safe.
+  # Exposing it would invite a caller to treat a resolved path as a confined
+  # one.
+  defp resolve_relative(root, relative_path) do
     case resolve_segments(root, Path.split(relative_path), 0) do
       {:ok, resolved} -> {:ok, resolved}
       {:error, reason} -> {:error, normalize(reason)}
     end
   end
-
-  def resolve_relative(_root, _relative_path), do: {:error, :invalid_path}
 
   # A `..` segment must fail rather than resolve: the previous implementation
   # relied on a frozen-snapshot lookup missing to contain it, which a direct
