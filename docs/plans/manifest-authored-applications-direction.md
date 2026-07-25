@@ -15,11 +15,34 @@ test pass:
 > manifest, PTC-Lisp, and data. They do not add an Elixir module, edit
 > `ProviderRegistry`, or create a task-specific Mix command.
 
-A repository Code Scout is the proving application. It must navigate unknown
-nested files, analyze canonical traces and explicitly granted private
-conversations, propose a prelude improvement as inert data, and evaluate that
-candidate in a separate run. The Kernel must never acquire `scout`,
-`repository`, or `self-improvement` policy.
+### 1.1 Two claims, proven separately
+
+This document carries two claims of very different confidence, and they must
+not share a completion test.
+
+**Claim A — applications are assembled from data, not Elixir.** A third-party
+MCP server becomes an application capability through host JSON, a manifest,
+and PTC-Lisp. This is the platform thesis, it is broadly valuable, and it is
+provable as soon as host installation exists.
+
+**Claim B — an agent can improve its own preludes from its own evidence.** A
+scout reads canonical traces and explicitly granted private conversations,
+proposes a prelude change as inert data, and separate runs evaluate it. This
+is a research claim. It may not pay off, and §13.1 already concedes the
+platform guarantees pinned configuration and attributable artifacts rather
+than statistical significance.
+
+Claim A must not wait on Claim B. Earlier revisions of this plan proved both
+only at the final slice, which meant the platform thesis stayed untested until
+the most speculative work was finished. Claim A is now settled by the MCP-first
+Slice 3 GitHub acceptance and the ordinary application in Slice C; Claim B is
+settled by the Code Scout flow in Slices E–H. §14 states each test separately.
+
+A repository Code Scout remains the proving application for Claim B. It must
+navigate unknown nested files, analyze canonical traces and explicitly granted
+private conversations, propose a prelude improvement as inert data, and
+evaluate that candidate in a separate run. The Kernel must never acquire
+`scout`, `repository`, or `self-improvement` policy.
 
 This direction depends on
 [`mcp-capability-platform-direction.md`](mcp-capability-platform-direction.md):
@@ -41,6 +64,9 @@ In scope:
 - public and private result artifacts;
 - proposal, evaluation, and explicit promotion as separate phases; and
 - a read-only Code Scout acceptance application.
+
+Claim A (§1.1) is in scope for Slices A–C and is not conditional on any of the
+self-improvement work below it.
 
 Out of scope:
 
@@ -1127,6 +1153,24 @@ access never implies write authority.
 
 ## 11. Implementation sequence
 
+Slices A–C settle Claim A: after them, a third-party MCP server is an
+application capability reachable from host JSON, a manifest, and PTC-Lisp.
+Slices D–H settle Claim B and are enrichment on a validated foundation rather
+than prerequisites for an unvalidated one. If Claim B stalls, Claim A is
+already proven and shippable.
+
+| Slice | Serves | Settles |
+| --- | --- | --- |
+| A — MCP prerequisites | A | one client, both transports |
+| B — Host installation and `--check` | A | **Claim A**: real third-party server, no Elixir |
+| Pre-C — Confined trusted file loading | A | trusted loading independent of the public provider |
+| C — Sample filesystem server | A | an ordinary application on an owned server |
+| D — Classified inputs and result artifacts | B | typed artifacts between runs |
+| E — PTC snapshots and private inspection | B | evidence a reviewer can read |
+| F — MCP feedback and exchange records | B | why a call failed |
+| G — Read-only Code Scout | B | the scout itself |
+| H — Candidate evaluation | B | **Claim B**: propose, evaluate, promote |
+
 ### Slice A — MCP prerequisites
 
 Complete Slices 0–2 of the MCP-first plan:
@@ -1164,10 +1208,24 @@ Complete MCP-first Slice 3:
 - resolved `--check` rows ordered by environment and alias; and
 - validation-only assembly.
 
-**Gate:** an ordinary manifest selects a configured stdio fixture with no
-Elixir registration. Every concrete documented configuration validates
-against the shipped schemas, and schema/runtime structural fixtures cannot
-drift.
+**Gate (Claim A):** host JSON and an ordinary manifest select the pinned
+GitHub MCP Server over stdio, complete `--check`, and call one read-only tool
+from PTC-Lisp with no Elixir registration change — the MCP-first Slice 3 gate.
+Every concrete documented configuration validates against the shipped schemas,
+and schema/runtime structural fixtures cannot drift.
+
+A published third-party server is the gate rather than a local fixture on
+purpose. A fixture and the client are written against the same reading of the
+protocol, so they agree even when that reading is wrong; and the friction that
+decides whether this platform is usable — wrapper process trees, servers that
+chatter on stderr, tool descriptions and schemas outside the bounded callable
+profile — only appears against a server this project did not write. The same
+argument applies one level down: the Slice 1 HTTP interoperability target is
+an independent SDK implementation for exactly this reason.
+
+Reaching this gate means Claim A holds. An author can connect a new server
+without Elixir, which is the platform thesis, independent of whether any
+self-improvement work ever lands.
 
 Static source, selection, and data-class checks happen before credentials are
 resolved, sensitive snapshots are opened, stdio is spawned, or remote MCP is
@@ -1356,8 +1414,12 @@ Write tools remain a separate authority milestone.
 
 ## 12. Acceptance matrix
 
+Rows that decide Claim A are reachable from Slice B; the rest belong to Claim
+B and do not gate it.
+
 | Case | Expected result |
 | --- | --- |
+| A pinned third-party MCP server is installed from host JSON and called from PTC-Lisp | Succeeds with no Elixir registration change — **Claim A** |
 | No host config and no selected providers | Provider-free run remains valid |
 | A manifest selects a provider without host config | Strict failure; there is no implicit `llm` or `file-read` fallback |
 | A manifest uses legacy model/root/file provider config | Strict failure before provider activity |
@@ -1428,17 +1490,36 @@ Write tools remain a separate authority milestone.
    enter workflow; do not collapse the two manifest lists or derive placement
    from source kind before that decision.
 
-## 14. No-Elixir completion test
+## 14. No-Elixir completion tests
 
-The direction is proven when a clean installed PtcRunner can run the Code
-Scout files and satisfy all of the following:
+### 14.1 Claim A — assembled from data
 
-- the command is ordinary `mix ptc.run`;
-- no `.ex` or task-specific Mix file changes for the application;
-- host JSON installs the MCP filesystem server, PTC snapshots, and approved
-  LLM;
+Settled at Slice B, confirmed at Slice C. A clean installed PtcRunner must:
+
+- run ordinary `mix ptc.run` with no `.ex` or task-specific Mix file change
+  for the application;
+- install a published third-party MCP server — the pinned GitHub MCP Server
+  over stdio — entirely through host JSON;
+- resolve its credential through a host binding, keeping it out of every
+  public artifact;
+- pass `--check` before any credential is resolved or process spawned;
+- select and narrow that server from an ordinary manifest;
+- call one read-only tool from PTC-Lisp; and
+- tear down the process tree cleanly.
+
+Nothing in this test requires a trace snapshot, private inspection profile,
+candidate contract, or evaluation loop. It is the platform thesis on its own,
+and it is the point after which new applications are an authoring exercise
+rather than an Elixir exercise.
+
+### 14.2 Claim B — improves itself from evidence
+
+Settled at Slice H. The Code Scout files must additionally satisfy all of the
+following:
+
+- everything in §14.1 still holds, now with host JSON installing the MCP
+  filesystem server, PTC snapshots, and approved LLM;
 - no public `file-read` provider or host source remains;
-- the manifest only selects and narrows those grants;
 - local PTC-Lisp discovers relevant files and traces without prelisted
   answers;
 - exact private conversation and MCP evidence is available only under explicit
