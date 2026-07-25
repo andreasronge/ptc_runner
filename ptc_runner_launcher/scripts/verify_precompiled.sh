@@ -43,7 +43,7 @@ CC_PRECOMPILER_PRECOMPILE_ONLY_LOCAL=true \
   mix elixir_make.precompile
 
 address_file="$verification_tmp_dir/server-address"
-python3 test/support/artifact_server.py \
+elixir test/support/artifact_server.exs \
   "$published_directory" \
   "$address_file" \
   >"$verification_tmp_dir/server.log" 2>&1 &

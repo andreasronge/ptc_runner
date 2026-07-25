@@ -53,7 +53,7 @@ tar -xzf "$release_tmp_dir/package/contents.tar.gz" -C "$release_tmp_dir/source"
 cmp "$checksum_path" "$release_tmp_dir/source/checksum.exs"
 
 address_file="$release_tmp_dir/server-address"
-python3 test/support/artifact_server.py \
+elixir test/support/artifact_server.exs \
   "$artifact_directory" \
   "$address_file" \
   >"$release_tmp_dir/server.log" 2>&1 &
@@ -74,6 +74,12 @@ done
 
 test -s "$address_file"
 base_url="$(tr -d '\r\n' <"$address_file")"
+clear_proxy=(
+  HTTP_PROXY=
+  HTTPS_PROXY=
+  http_proxy=
+  https_proxy=
+)
 
 cd "$release_tmp_dir/source"
 mix deps.get
@@ -81,8 +87,9 @@ PTC_RUNNER_LAUNCHER_PRECOMPILED_URL="$base_url/@{artefact_filename}" \
   ELIXIR_MAKE_CACHE_DIR="$release_tmp_dir/precompiled-cache" \
   MIX_BUILD_PATH="$release_tmp_dir/precompiled-build" \
   MIX_ENV=prod \
+  env "${clear_proxy[@]}" \
   mix compile --force --warnings-as-errors \
-  >"$release_tmp_dir/precompiled.log" 2>&1
+  2>&1 | tee "$release_tmp_dir/precompiled.log"
 grep -q "Downloading precompiled NIF" "$release_tmp_dir/precompiled.log"
 if grep -q "Attempting to compile ptc_runner_launcher from source" \
   "$release_tmp_dir/precompiled.log"; then
