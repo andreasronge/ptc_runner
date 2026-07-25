@@ -5,11 +5,11 @@ defmodule PtcRunner.Kernel.MCPRemoteAgentE2ETest do
   Full agent flow against real providers: a live model (default `deepseek`)
   plans a PTC-Lisp program that calls the configured modern MCP endpoint from
   the mission environment through a manifest run. CI uses the same pinned
-  official Go SDK `cityTime` server as `MCPRemoteE2ETest`. The written
-  `--trace`/`--inspect` artifacts are audited for endpoint-host and transport
-  field-name absence; exact credential exclusion from retained capability
-  closures is proven by the deterministic loopback fixture in
-  `mcp_source_test.exs`.
+  official Go SDK-backed stateless `cityTime` harness as
+  `MCPRemoteE2ETest`. The written `--trace`/`--inspect` artifacts are audited
+  for endpoint-host and transport field-name absence; exact credential
+  exclusion from retained capability closures is proven by the deterministic
+  loopback fixture in `mcp_source_test.exs`.
   """
 
   @moduletag :e2e

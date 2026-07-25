@@ -5,12 +5,14 @@ defmodule PtcRunner.Kernel.MCPRemoteE2ETest do
   Exercises the read-only MCP Streamable HTTP source against a real
   2026-07-28 server selected with `PTC_TEST_MCP_2026_ENDPOINT`.
 
-  The interoperability baseline is the official Go SDK HTTP example at commit
-  `e761950d9795d120ce9b00e5ba87b93c30a7be90`, configured with
-  `StreamableHTTPOptions{Stateless: true}`. It exposes the `cityTime` tool.
-  Unlike the loopback fixture, this covers an independent protocol
-  implementation and real SDK schemas. Public credential-free servers still
-  speaking a sessionful revision are intentionally not fallback targets.
+  The interoperability baseline is the checked-in
+  `test/support/mcp_go_stateless` harness. Its Go module pins the official SDK
+  revision `e761950d9795d120ce9b00e5ba87b93c30a7be90`, explicitly configures
+  `StreamableHTTPOptions{Stateless: true}`, and exposes the `cityTime` tool.
+  Unlike the loopback fixture, this covers an independently maintained
+  protocol implementation and real SDK schemas. Public credential-free
+  servers speaking a sessionful revision are intentionally not fallback
+  targets.
   """
 
   @moduletag :e2e

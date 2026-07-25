@@ -36,6 +36,11 @@ SPDX-FileCopyrightText = "2025 Andreas Ronge"
 SPDX-License-Identifier = "MIT"
 
 [[annotations]]
+path = ["test/support/mcp_go_stateless/go.mod", "test/support/mcp_go_stateless/go.sum"]
+SPDX-FileCopyrightText = "2025 Andreas Ronge"
+SPDX-License-Identifier = "MIT"
+
+[[annotations]]
 path = ["**/*.sh", "**/*.txt", "**/*.log", "**/*.clj"]
 SPDX-FileCopyrightText = "2025 Andreas Ronge"
 SPDX-License-Identifier = "MIT"

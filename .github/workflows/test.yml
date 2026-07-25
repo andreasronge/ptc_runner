@@ -31,6 +31,33 @@ jobs:
       - name: Prove stdio process containment
         run: mix test test/ptc_runner/kernel/mcp_stdio_launcher_proof_test.exs --include mcp_stdio_launcher_proof --warnings-as-errors
 
+  mcp-http-interop:
+    runs-on: ubuntu-latest
+    name: MCP stateless HTTP interoperability
+    env:
+      MIX_ENV: test
+      HEX_SPONSOR: false
+      PTC_TEST_MCP_2026_ENDPOINT: http://127.0.0.1:8000
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Setup Elixir environment
+        uses: ./.github/actions/setup-elixir
+
+      - name: Setup pinned Go toolchain
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: test/support/mcp_go_stateless/go.mod
+          cache-dependency-path: test/support/mcp_go_stateless/go.sum
+
+      - name: Verify stateless HTTP interoperability
+        run: |
+          bash test/support/mcp_go_stateless/with_server.sh \
+            mix test test/ptc_runner/kernel/mcp_remote_e2e_test.exs \
+              --include e2e --trace --warnings-as-errors
+
   ci:
     runs-on: ubuntu-latest
     name: Compile, test, format, credo, dialyzer & deps check

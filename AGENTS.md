@@ -42,26 +42,28 @@ how it was verified.
 
 ### Local MCP E2E server
 
-The MCP E2E tests target the official Go SDK HTTP example at the same pinned
-revision used by `.github/workflows/e2e.yml`. Start it in one terminal:
+The MCP E2E tests use the stateless harness in
+`test/support/mcp_go_stateless`. Its `go.mod` pins the official Go SDK
+protocol implementation. Start it in one terminal:
 
 ```bash
-mcp_sdk_dir="$(mktemp -d)"
-git clone https://github.com/modelcontextprotocol/go-sdk.git "$mcp_sdk_dir"
-git -C "$mcp_sdk_dir" checkout e761950d9795d120ce9b00e5ba87b93c30a7be90
-go -C "$mcp_sdk_dir" build -o "$mcp_sdk_dir/ptc-mcp-http-server" ./examples/http
-"$mcp_sdk_dir/ptc-mcp-http-server" -host 127.0.0.1 -port 8000 server
+mcp_server_dir="$(mktemp -d)"
+go -C test/support/mcp_go_stateless build \
+  -o "$mcp_server_dir/ptc-mcp-http-server" .
+"$mcp_server_dir/ptc-mcp-http-server" -host 127.0.0.1 -port 8000
 ```
 
-Then run the tagged tests from another terminal:
+The credential-free interoperability test runs as a dedicated PR check and can
+be run from another terminal:
 
 ```bash
 PTC_TEST_MCP_2026_ENDPOINT=http://127.0.0.1:8000 \
-  mix test --include e2e --trace
+  mix test test/ptc_runner/kernel/mcp_remote_e2e_test.exs \
+    --include e2e --trace
 ```
 
-The direct interoperability test needs only the server. The model-driven test
-also loads `OPENROUTER_API_KEY` and the optional `PTC_TEST_MODEL` from `.env`.
+The scheduled/manual model-driven test uses the same server and additionally
+loads `OPENROUTER_API_KEY` and the optional `PTC_TEST_MODEL` from `.env`.
 
 ## Project Structure
 

@@ -315,9 +315,11 @@ Prefer contract-level integration tests over tests that mirror implementation:
 
 Run `mix precommit` before every commit and `mix prepush` before pushing.
 
-The `:e2e` tag remains excluded from push and pull-request pipelines and runs
-through the scheduled/manual Integration Tests workflow. Tagged tests must
-skip cleanly when required credentials or network are absent, avoid
-fixture-only assumptions, and assert clean instrumentation for agent flows.
-Live providers are nondeterministic; deterministic tests remain the authority
-for confinement, ownership, accounting, rollback, and cleanup.
+Credential-free interoperability tests may run as focused push and
+pull-request jobs even when tagged `:e2e`. Secret-dependent and model-driven
+`:e2e` tests remain excluded from those pipelines and run through the
+scheduled/manual Integration Tests workflow. Tagged tests must skip cleanly
+when required credentials or network are absent, avoid fixture-only
+assumptions, and assert clean instrumentation for agent flows. Live providers
+are nondeterministic; deterministic tests remain the authority for confinement,
+ownership, accounting, rollback, and cleanup.

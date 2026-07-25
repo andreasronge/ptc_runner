@@ -339,9 +339,9 @@ tool. Restart-and-retry can be added only with an effect/idempotence policy.
 
 Interoperability evidence has three deliberately different roles:
 
-- the pinned official Go SDK HTTP example is the small credential-free Slice 1
-  proof that the Streamable HTTP adapter speaks to an independent
-  implementation;
+- the checked-in stateless harness backed by a pinned official Go SDK revision
+  is the small credential-free Slice 1 proof that the Streamable HTTP adapter
+  speaks to an independently maintained implementation;
 - the controlled tool fixture is the Slice 2 conformance and fault-injection
   target for transport equivalence, malformed framing, cancellation,
   backpressure, descendant termination, and descriptor regressions; and
@@ -951,11 +951,12 @@ termination on both supported platforms.
   conversion and Base64-sentinel encoding;
 - preserve current deadlines, byte bounds, duplicate-key rejection,
   redaction, and deterministic snapshots; and
-- pin the official Go SDK HTTP example as the small credential-free live E2E
-  target for the selected version.
+- pin the official Go SDK-backed stateless harness as the small
+  credential-free live E2E target for the selected version, and run it as a
+  required PR check rather than only on the schedule.
 
 **Gate:** the HTTP adapter has no protocol-session state and interoperates with
-the pinned official Go SDK HTTP example.
+the pinned official Go SDK-backed stateless harness in a required PR job.
 
 ### Slice 2 — One protocol client and stdio transport
 
