@@ -69,12 +69,23 @@ precompiled_url="$base_url/@{artefact_filename}"
 download_build="$verification_tmp_dir/download-build"
 download_cache="$verification_tmp_dir/download-cache"
 
+# ElixirMake's :httpc downloader honors HTTP_PROXY but not NO_PROXY. GitHub's
+# macOS runners define a proxy, which would route this loopback-only fixture
+# through the proxy and make the download fail after its network timeout.
+clear_proxy=(
+  HTTP_PROXY=
+  HTTPS_PROXY=
+  http_proxy=
+  https_proxy=
+)
+
 PTC_RUNNER_LAUNCHER_PRECOMPILED_URL="$precompiled_url" \
   ELIXIR_MAKE_CACHE_DIR="$download_cache" \
   MIX_BUILD_PATH="$download_build" \
   MIX_ENV=prod \
+  env "${clear_proxy[@]}" \
   mix compile --force --warnings-as-errors \
-  >"$verification_tmp_dir/download.log" 2>&1
+  2>&1 | tee "$verification_tmp_dir/download.log"
 
 grep -q "Downloading precompiled NIF" "$verification_tmp_dir/download.log"
 if grep -q "Attempting to compile ptc_runner_launcher from source" \
@@ -121,8 +132,9 @@ PTC_RUNNER_LAUNCHER_PRECOMPILED_URL="$precompiled_url" \
   ELIXIR_MAKE_CACHE_DIR="$download_cache" \
   MIX_BUILD_PATH="$download_build" \
   MIX_ENV=prod \
+  env "${clear_proxy[@]}" \
   mix compile --force --warnings-as-errors \
-  >"$verification_tmp_dir/tampered.log" 2>&1
+  2>&1 | tee "$verification_tmp_dir/tampered.log"
 
 grep -q "does not match its checksum" "$verification_tmp_dir/tampered.log"
 grep -q "Attempting to compile ptc_runner_launcher from source" \
