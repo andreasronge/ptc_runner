@@ -1,0 +1,89 @@
+name: Publish PtcRunner Launcher to Hex
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Published launcher GitHub release tag
+        required: true
+        type: string
+
+permissions:
+  attestations: read
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-22.04
+    environment: hex-publish
+    env:
+      GH_TOKEN: ${{ github.token }}
+      HEX_SPONSOR: false
+      RELEASE_TAG: ${{ inputs.tag }}
+
+    steps:
+      - name: Checkout requested release tag
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.tag }}
+          fetch-depth: 0
+
+      - name: Setup Elixir for release metadata
+        uses: erlef/setup-beam@v1
+        with:
+          elixir-version: "1.20.2"
+          otp-version: "29.0.3"
+
+      - name: Require a published release from main
+        run: |
+          git fetch --no-tags origin main:refs/remotes/origin/main
+
+          tag_commit="$(git rev-parse "$RELEASE_TAG^{commit}")"
+          test "$tag_commit" = "$(git rev-parse HEAD)"
+          git merge-base --is-ancestor "$tag_commit" origin/main
+
+          expected_tag="$(
+            elixir -e '
+              {config, _bindings} =
+                Code.eval_file("ptc_runner_launcher/release_config.exs")
+              IO.write(config.tag_prefix <> config.version)
+            '
+          )"
+          test "$RELEASE_TAG" = "$expected_tag"
+          release_state="$(
+            gh release view "$expected_tag" \
+              --json isDraft,isImmutable \
+              --jq '[.isDraft, .isImmutable] | @tsv'
+          )"
+          test "$release_state" = $'false\ttrue'
+          gh release verify "$expected_tag"
+
+      - name: Download the verified Hex package
+        run: |
+          mkdir "$RUNNER_TEMP/launcher-release"
+          gh release download \
+            "$RELEASE_TAG" \
+            --dir "$RUNNER_TEMP/launcher-release" \
+            --pattern "ptc_runner_launcher-*.tar"
+
+          test "$(
+            find "$RUNNER_TEMP/launcher-release" -type f -name '*.tar' | wc -l
+          )" -eq 1
+
+          package_path="$(find "$RUNNER_TEMP/launcher-release" -type f -name '*.tar')"
+          gh release verify-asset "$RELEASE_TAG" "$package_path"
+          gh attestation verify "$package_path" \
+            --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow \
+              "$GITHUB_REPOSITORY/.github/workflows/launcher-release.yml" \
+            --source-digest "$(git rev-parse "$RELEASE_TAG^{commit}")" \
+            --source-ref "refs/tags/$RELEASE_TAG" \
+            --deny-self-hosted-runners
+
+      - name: Publish the exact release package
+        working-directory: ptc_runner_launcher
+        env:
+          HEX_API_KEY: ${{ secrets.HEX_API_KEY }}
+        run: |
+          package_path="$(find "$RUNNER_TEMP/launcher-release" -type f -name '*.tar')"
+          bash scripts/publish_release_package.sh "$package_path"

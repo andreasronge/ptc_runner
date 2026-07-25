@@ -3,14 +3,11 @@ defmodule PtcRunnerLauncher do
   Locates the native launcher being prepared for PtcRunner's MCP stdio
   transport.
 
-  This first package slice owns the source-built native process boundary and
-  its artifact locator. The core `ptc_runner` package will own MCP framing,
-  request correlation, deadlines, and transport supervision when stdio
-  integration lands.
-
-  The current package builds from source on macOS and Linux. A following Slice
-  2 change adds checksummed precompiled artifacts before the companion becomes
-  the normal stdio installation path.
+  The package owns the native process boundary and its artifact locator.
+  Supported release targets restore a mandatory-checksum precompiled
+  executable; other macOS and Linux targets compile the included source. The
+  core `ptc_runner` package will own MCP framing, request correlation,
+  deadlines, and transport supervision when stdio integration lands.
   """
 
   @protocol_version 1

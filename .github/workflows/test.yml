@@ -16,7 +16,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-22.04, macos-15]
     env:
       MIX_ENV: test
       HEX_SPONSOR: false
@@ -35,6 +35,56 @@ jobs:
       - name: Verify launcher package and process containment
         working-directory: ptc_runner_launcher
         run: mix precommit
+
+      - name: Verify precompiled download, checksum, and source fallback
+        working-directory: ptc_runner_launcher
+        run: bash scripts/verify_precompiled.sh "$RUNNER_TEMP/launcher-artifacts"
+
+      - name: Retain verified launcher artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: launcher-${{ runner.os }}-${{ runner.arch }}
+          path: ${{ runner.temp }}/launcher-artifacts/*
+          if-no-files-found: error
+
+  mcp-stdio-launcher-package:
+    needs: mcp-stdio-launcher
+    runs-on: ubuntu-latest
+    name: MCP stdio launcher release package
+    env:
+      MIX_ENV: prod
+      HEX_SPONSOR: false
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Setup Elixir environment
+        uses: ./.github/actions/setup-elixir
+
+      - name: Get launcher dependencies
+        working-directory: ptc_runner_launcher
+        run: mix deps.get
+
+      - name: Collect verified launcher artifacts
+        uses: actions/download-artifact@v7
+        with:
+          pattern: launcher-*
+          path: ${{ runner.temp }}/launcher-artifacts
+          merge-multiple: true
+
+      - name: Assemble checksums and verify the release package
+        working-directory: ptc_runner_launcher
+        run: bash scripts/build_release_package.sh "$RUNNER_TEMP/launcher-artifacts"
+
+      - name: Retain verified release package
+        uses: actions/upload-artifact@v6
+        with:
+          name: launcher-release-package
+          path: |
+            ${{ runner.temp }}/launcher-artifacts/checksum.exs
+            ${{ runner.temp }}/launcher-artifacts/ptc_runner_launcher-*.tar
+          if-no-files-found: error
 
   mcp-http-interop:
     runs-on: ubuntu-latest

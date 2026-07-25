@@ -3,6 +3,6 @@
 /doc/
 /cover/
 /erl_crash.dump
-/mix.lock
+/checksum.exs
 /ptc_runner_launcher-*.tar
 /tmp/

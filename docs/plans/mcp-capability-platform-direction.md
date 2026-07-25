@@ -1,7 +1,7 @@
 # MCP-first capability platform — implementation plan
 
 > **Status:** active implementation plan, promoted from `future/` on
-> 2026-07-24. Slices 0 and 1 are complete; Slice 2 is in progress. Every API
+> 2026-07-25. Slices 0 and 1 are complete; Slice 2 is in progress. Every API
 > below remains planned unless explicitly described as current behavior. The
 > protocol target is the locked `2026-07-28` release
 > candidate reviewed on 2026-07-23. Implementation may target that candidate
@@ -254,6 +254,13 @@ toolchain. Source compilation remains an explicit fallback for maintainers and
 unsupported targets, not the normal installation path. A standalone
 distribution or container bundles the same companion artifact.
 
+The first continuously executed artifact set is
+`aarch64-apple-darwin` and `x86_64-linux-gnu`. Intel macOS and other Linux
+architectures retain source fallback until CI can execute their precompiled
+artifacts rather than merely cross-compile them. Release CI pins macOS 15 and
+Ubuntu 22.04/glibc 2.35 as the first executable compatibility floors; it does
+not derive public binary compatibility from floating `*-latest` images.
+
 The separate `ptc_runner_launcher` source tree keeps the POSIX reference
 implementation and its reusable macOS/Linux conformance suite. The native
 artifact belongs only to that companion package and is absent from the core
@@ -284,15 +291,22 @@ The mechanism comparison is:
 Slice 2 must freeze the launcher protocol version, configuration locator,
 framing, exit classifications, and conformance suite before integrating stdio.
 It moves the reference implementation into the optional companion package,
-adds precompile/release/checksum verification, and makes the core adapter
-resolve the companion artifact without a host-config path. An optional
-`runtime.stdio_launcher` path overrides it for a trusted custom deployment; the
-core freezes the canonical executable and its SHA-256 identity before provider
-acquisition. The launcher handshake must match the protocol version. The
-override is operator authority, like the selected MCP server executable, not a
-claim that PtcRunner certified an arbitrary binary's implementation.
-Manifests and PTC-Lisp cannot select either launcher path. Do not build process
-ownership directly from a shell wrapper or an observed OS PID.
+adds precompile/release/checksum verification, tests the exact assembled Hex
+tarball through both precompiled and source installation paths, and makes the
+core adapter resolve the companion artifact without a host-config path. Hex
+publication is a separately approved workflow that uploads those verified
+tarball bytes directly instead of rebuilding them. The tag workflow attests
+the built asset digests before creating its draft release; the protected
+publication workflow verifies that build provenance as well as the immutable
+release attestation before uploading the package. An optional
+`runtime.stdio_launcher` path overrides the companion for a trusted custom
+deployment; the core freezes the canonical executable and its SHA-256 identity
+before provider acquisition. The launcher handshake must match the protocol
+version. The override is operator authority, like the selected MCP server
+executable, not a claim that PtcRunner certified an arbitrary binary's
+implementation. Manifests and PTC-Lisp cannot select either launcher path. Do
+not build process ownership directly from a shell wrapper or an observed OS
+PID.
 
 The core starts the launcher by canonical path, so the trusted launcher
 installation hierarchy must remain immutable from preflight through launcher
