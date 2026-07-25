@@ -27,6 +27,8 @@
 #define MAX_CONFIG_STRING (128U * 1024U)
 #define IO_CHUNK_BYTES 8192U
 #define MIN_FINAL_KILL_WAIT_MS 1000U
+#define SHA256_BYTES 32U
+#define SHA256_BLOCK_BYTES 64U
 
 enum shutdown_phase {
   PHASE_RUNNING = 0,
@@ -63,6 +65,7 @@ struct launcher_config {
   char *cwd;
   int executable_fd;
   int cwd_fd;
+  uint8_t executable_sha256[SHA256_BYTES];
   char **argv;
   size_t argc;
   char **envp;
@@ -80,7 +83,29 @@ struct byte_queue {
   bool ack_pending;
 };
 
+struct sha256_context {
+  uint32_t state[8];
+  uint64_t bytes;
+  uint8_t block[SHA256_BLOCK_BYTES];
+  size_t block_length;
+};
+
 static volatile sig_atomic_t launcher_signal = 0;
+
+static const uint32_t sha256_constants[64] = {
+    0x428a2f98U, 0x71374491U, 0xb5c0fbcfU, 0xe9b5dba5U, 0x3956c25bU,
+    0x59f111f1U, 0x923f82a4U, 0xab1c5ed5U, 0xd807aa98U, 0x12835b01U,
+    0x243185beU, 0x550c7dc3U, 0x72be5d74U, 0x80deb1feU, 0x9bdc06a7U,
+    0xc19bf174U, 0xe49b69c1U, 0xefbe4786U, 0x0fc19dc6U, 0x240ca1ccU,
+    0x2de92c6fU, 0x4a7484aaU, 0x5cb0a9dcU, 0x76f988daU, 0x983e5152U,
+    0xa831c66dU, 0xb00327c8U, 0xbf597fc7U, 0xc6e00bf3U, 0xd5a79147U,
+    0x06ca6351U, 0x14292967U, 0x27b70a85U, 0x2e1b2138U, 0x4d2c6dfcU,
+    0x53380d13U, 0x650a7354U, 0x766a0abbU, 0x81c2c92eU, 0x92722c85U,
+    0xa2bfe8a1U, 0xa81a664bU, 0xc24b8b70U, 0xc76c51a3U, 0xd192e819U,
+    0xd6990624U, 0xf40e3585U, 0x106aa070U, 0x19a4c116U, 0x1e376c08U,
+    0x2748774cU, 0x34b0bcb5U, 0x391c0cb3U, 0x4ed8aa4aU, 0x5b9cca4fU,
+    0x682e6ff3U, 0x748f82eeU, 0x78a5636fU, 0x84c87814U, 0x8cc70208U,
+    0x90befffaU, 0xa4506cebU, 0xbef9a3f7U, 0xc67178f2U};
 
 static void record_signal(int signal_number) { launcher_signal = signal_number; }
 
@@ -113,6 +138,159 @@ static void write_u64_be(uint8_t *bytes, uint64_t value) {
   for (index = 0; index < 8; index++) {
     bytes[7U - index] = (uint8_t)value;
     value >>= 8U;
+  }
+}
+
+static uint32_t rotate_right(uint32_t value, unsigned int bits) {
+  return (value >> bits) | (value << (32U - bits));
+}
+
+static void sha256_transform(struct sha256_context *context,
+                             const uint8_t block[SHA256_BLOCK_BYTES]) {
+  uint32_t schedule[64];
+  uint32_t a;
+  uint32_t b;
+  uint32_t c;
+  uint32_t d;
+  uint32_t e;
+  uint32_t f;
+  uint32_t g;
+  uint32_t h;
+  size_t index;
+
+  for (index = 0; index < 16U; index++) {
+    size_t offset = index * 4U;
+    schedule[index] = ((uint32_t)block[offset] << 24U) |
+                      ((uint32_t)block[offset + 1U] << 16U) |
+                      ((uint32_t)block[offset + 2U] << 8U) |
+                      (uint32_t)block[offset + 3U];
+  }
+
+  for (index = 16U; index < 64U; index++) {
+    uint32_t previous = schedule[index - 15U];
+    uint32_t before_previous = schedule[index - 2U];
+    uint32_t sigma0 = rotate_right(previous, 7U) ^
+                      rotate_right(previous, 18U) ^ (previous >> 3U);
+    uint32_t sigma1 = rotate_right(before_previous, 17U) ^
+                      rotate_right(before_previous, 19U) ^
+                      (before_previous >> 10U);
+    schedule[index] = schedule[index - 16U] + sigma0 +
+                      schedule[index - 7U] + sigma1;
+  }
+
+  a = context->state[0];
+  b = context->state[1];
+  c = context->state[2];
+  d = context->state[3];
+  e = context->state[4];
+  f = context->state[5];
+  g = context->state[6];
+  h = context->state[7];
+
+  for (index = 0; index < 64U; index++) {
+    uint32_t sum1 =
+        rotate_right(e, 6U) ^ rotate_right(e, 11U) ^ rotate_right(e, 25U);
+    uint32_t choice = (e & f) ^ ((~e) & g);
+    uint32_t temporary1 =
+        h + sum1 + choice + sha256_constants[index] + schedule[index];
+    uint32_t sum0 =
+        rotate_right(a, 2U) ^ rotate_right(a, 13U) ^ rotate_right(a, 22U);
+    uint32_t majority = (a & b) ^ (a & c) ^ (b & c);
+    uint32_t temporary2 = sum0 + majority;
+
+    h = g;
+    g = f;
+    f = e;
+    e = d + temporary1;
+    d = c;
+    c = b;
+    b = a;
+    a = temporary1 + temporary2;
+  }
+
+  context->state[0] += a;
+  context->state[1] += b;
+  context->state[2] += c;
+  context->state[3] += d;
+  context->state[4] += e;
+  context->state[5] += f;
+  context->state[6] += g;
+  context->state[7] += h;
+}
+
+static void sha256_init(struct sha256_context *context) {
+  static const uint32_t initial_state[8] = {
+      0x6a09e667U, 0xbb67ae85U, 0x3c6ef372U, 0xa54ff53aU,
+      0x510e527fU, 0x9b05688cU, 0x1f83d9abU, 0x5be0cd19U};
+
+  memcpy(context->state, initial_state, sizeof(initial_state));
+  context->bytes = 0;
+  context->block_length = 0;
+}
+
+static void sha256_update(struct sha256_context *context,
+                          const uint8_t *bytes, size_t length) {
+  size_t offset = 0;
+
+  context->bytes += (uint64_t)length;
+
+  while (offset < length) {
+    size_t available = SHA256_BLOCK_BYTES - context->block_length;
+    size_t remaining = length - offset;
+    size_t copied = remaining < available ? remaining : available;
+
+    memcpy(context->block + context->block_length, bytes + offset, copied);
+    context->block_length += copied;
+    offset += copied;
+
+    if (context->block_length == SHA256_BLOCK_BYTES) {
+      sha256_transform(context, context->block);
+      context->block_length = 0;
+    }
+  }
+}
+
+static void sha256_final(struct sha256_context *context,
+                         uint8_t digest[SHA256_BYTES]) {
+  uint64_t bit_length = context->bytes * 8U;
+  size_t index;
+
+  context->block[context->block_length++] = 0x80U;
+
+  if (context->block_length > 56U) {
+    memset(context->block + context->block_length, 0,
+           SHA256_BLOCK_BYTES - context->block_length);
+    sha256_transform(context, context->block);
+    context->block_length = 0;
+  }
+
+  memset(context->block + context->block_length, 0,
+         56U - context->block_length);
+  write_u64_be(context->block + 56U, bit_length);
+  sha256_transform(context, context->block);
+
+  for (index = 0; index < 8U; index++) {
+    write_u32_be(digest + index * 4U, context->state[index]);
+  }
+}
+
+static bool sha256_fd(int fd, uint8_t digest[SHA256_BYTES]) {
+  struct sha256_context context;
+  uint8_t buffer[IO_CHUNK_BYTES];
+
+  sha256_init(&context);
+
+  for (;;) {
+    ssize_t count = read(fd, buffer, sizeof(buffer));
+
+    if (count > 0) {
+      sha256_update(&context, buffer, (size_t)count);
+    } else if (count == 0) {
+      sha256_final(&context, digest);
+      return true;
+    } else if (errno != EINTR) {
+      return false;
+    }
   }
 }
 
@@ -311,7 +489,7 @@ static bool valid_env_name(const char *name) {
 
 static int open_executable(const char *path) {
 #if defined(__linux__)
-  return open(path, O_PATH | O_CLOEXEC);
+  return open(path, O_RDONLY | O_CLOEXEC);
 #else
   return open(path, O_EXEC | O_CLOEXEC);
 #endif
@@ -365,6 +543,7 @@ static bool parse_config(const uint8_t *bytes, size_t length,
   size_t index;
   char *raw_executable = NULL;
   char *raw_cwd = NULL;
+  const uint8_t *executable_sha256 = NULL;
 
   memset(config, 0, sizeof(*config));
   config->executable_fd = -1;
@@ -377,6 +556,7 @@ static bool parse_config(const uint8_t *bytes, size_t length,
       config->start_timeout_ms < 1U || config->start_timeout_ms > 60000U ||
       !cursor_u64(&cursor, &config->stderr_limit) ||
       config->stderr_limit > MAX_FRAME_BYTES ||
+      !cursor_take(&cursor, SHA256_BYTES, &executable_sha256) ||
       !cursor_string(&cursor, &raw_executable) ||
       !cursor_string(&cursor, &raw_cwd) || !cursor_u32(&cursor, &argc) ||
       argc > MAX_ARGUMENTS) {
@@ -384,6 +564,8 @@ static bool parse_config(const uint8_t *bytes, size_t length,
     free(raw_cwd);
     return false;
   }
+
+  memcpy(config->executable_sha256, executable_sha256, SHA256_BYTES);
 
   config->argc = argc;
   config->argv = calloc((size_t)argc + 2U, sizeof(char *));
@@ -474,22 +656,46 @@ static bool parse_config(const uint8_t *bytes, size_t length,
 static bool resolve_config_paths(struct launcher_config *config) {
   char *canonical_executable = realpath(config->executable, NULL);
   char *canonical_cwd = realpath(config->cwd, NULL);
+  int readable_executable_fd = -1;
   struct stat executable_stat;
+  struct stat readable_executable_stat;
   struct stat cwd_stat;
+  uint8_t executable_sha256[SHA256_BYTES];
+  bool valid = false;
 
   if (canonical_executable != NULL) {
     config->executable_fd = open_executable(canonical_executable);
+#if defined(__linux__)
+    readable_executable_fd = config->executable_fd;
+#else
+    readable_executable_fd = open(canonical_executable, O_RDONLY | O_CLOEXEC);
+#endif
   }
   if (canonical_cwd != NULL) {
     config->cwd_fd = open_working_directory(canonical_cwd);
   }
 
-  if (canonical_executable == NULL || canonical_cwd == NULL ||
-      config->executable_fd < 0 || config->cwd_fd < 0 ||
-      fstat(config->executable_fd, &executable_stat) != 0 ||
-      !S_ISREG(executable_stat.st_mode) ||
-      access(canonical_executable, X_OK) != 0 ||
-      fstat(config->cwd_fd, &cwd_stat) != 0 || !S_ISDIR(cwd_stat.st_mode)) {
+  if (canonical_executable != NULL && canonical_cwd != NULL &&
+      config->executable_fd >= 0 && readable_executable_fd >= 0 &&
+      config->cwd_fd >= 0 &&
+      fstat(config->executable_fd, &executable_stat) == 0 &&
+      fstat(readable_executable_fd, &readable_executable_stat) == 0 &&
+      S_ISREG(executable_stat.st_mode) &&
+      executable_stat.st_dev == readable_executable_stat.st_dev &&
+      executable_stat.st_ino == readable_executable_stat.st_ino &&
+      access(canonical_executable, X_OK) == 0 &&
+      fstat(config->cwd_fd, &cwd_stat) == 0 && S_ISDIR(cwd_stat.st_mode) &&
+      sha256_fd(readable_executable_fd, executable_sha256) &&
+      memcmp(executable_sha256, config->executable_sha256, SHA256_BYTES) == 0) {
+    valid = true;
+  }
+
+  if (readable_executable_fd >= 0 &&
+      readable_executable_fd != config->executable_fd) {
+    (void)close(readable_executable_fd);
+  }
+
+  if (!valid) {
     free(canonical_executable);
     free(canonical_cwd);
     return false;

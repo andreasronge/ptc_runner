@@ -168,6 +168,7 @@ defmodule PtcRunnerLauncher.ConformanceTest do
     assert {:error, :invalid_mcp_stdio_launch} =
              MCPStdioLauncher.open(
                executable: shell(),
+               executable_sha256: executable_sha256(shell()),
                cwd: File.cwd!(),
                args: ["environment"],
                env: explicit
@@ -373,6 +374,7 @@ defmodule PtcRunnerLauncher.ConformanceTest do
     {:ok, launcher} =
       MCPStdioLauncher.open(
         executable: executable_alias,
+        executable_sha256: executable_sha256(executable_alias),
         cwd: dir,
         args: ["-c", "printf 'argv0=%s\\n' \"$0\""],
         env: %{}
@@ -396,6 +398,7 @@ defmodule PtcRunnerLauncher.ConformanceTest do
     {:ok, launcher} =
       MCPStdioLauncher.open(
         executable: shell(),
+        executable_sha256: executable_sha256(shell()),
         cwd: cwd,
         args: ["-c", "printf 'cwd=%s\\n' \"$PWD\""],
         env: %{}
@@ -424,6 +427,7 @@ defmodule PtcRunnerLauncher.ConformanceTest do
       {:ok, launcher} =
         MCPStdioLauncher.open(
           executable: shell(),
+          executable_sha256: executable_sha256(shell()),
           cwd: File.cwd!(),
           args: ["-c", command, canonical_shell],
           env: %{}
@@ -517,10 +521,46 @@ defmodule PtcRunnerLauncher.ConformanceTest do
     refute os_process_alive?(leaf)
   end
 
+  test "rejects an executable whose frozen SHA-256 does not match" do
+    assert {:error, :mcp_stdio_spawn_failed} =
+             MCPStdioLauncher.open(
+               executable: shell(),
+               executable_sha256: :binary.copy(<<0>>, 32),
+               cwd: File.cwd!(),
+               args: [],
+               env: %{}
+             )
+  end
+
+  @tag :tmp_dir
+  test "matches SHA-256 padding-boundary known answers", %{tmp_dir: dir} do
+    prefix = "#!/bin/sh\nread _ || true\nexit 0\n#"
+
+    for byte_size <- [55, 56, 63, 64, 65] do
+      executable = Path.join(dir, "sha256-#{byte_size}")
+      contents = prefix <> String.duplicate("x", byte_size - byte_size(prefix))
+      File.write!(executable, contents)
+      File.chmod!(executable, 0o700)
+
+      assert {:ok, launcher} =
+               MCPStdioLauncher.open(
+                 executable: executable,
+                 executable_sha256: :crypto.hash(:sha256, contents),
+                 cwd: dir,
+                 args: [],
+                 env: %{},
+                 inherit_environment: false
+               )
+
+      assert {:ok, %{reason: :close}} = MCPStdioLauncher.close(launcher, 2_000)
+    end
+  end
+
   test "rejects invalid launch configuration before opening a target" do
     assert {:error, :invalid_mcp_stdio_launch} =
              MCPStdioLauncher.open(
                executable: "relative/sh",
+               executable_sha256: :binary.copy(<<0>>, 32),
                cwd: File.cwd!(),
                args: [],
                env: %{}
@@ -529,6 +569,7 @@ defmodule PtcRunnerLauncher.ConformanceTest do
     assert {:error, :invalid_mcp_stdio_launch} =
              MCPStdioLauncher.open(
                executable: shell(),
+               executable_sha256: executable_sha256(shell()),
                cwd: File.cwd!(),
                args: [],
                env: %{"BAD-NAME" => "secret"}
@@ -537,6 +578,7 @@ defmodule PtcRunnerLauncher.ConformanceTest do
     assert {:error, :invalid_mcp_stdio_launch} =
              MCPStdioLauncher.open(
                executable: shell(),
+               executable_sha256: executable_sha256(shell()),
                cwd: File.cwd!(),
                args: [],
                env: %URI{}
@@ -545,10 +587,20 @@ defmodule PtcRunnerLauncher.ConformanceTest do
     assert {:error, :invalid_mcp_stdio_launch} =
              MCPStdioLauncher.open(
                executable: shell(),
+               executable_sha256: executable_sha256(shell()),
                cwd: File.cwd!(),
                args: [],
                env: %{},
                start_timeout_ms: 60_001
+             )
+
+    assert {:error, :invalid_mcp_stdio_launch} =
+             MCPStdioLauncher.open(
+               executable: shell(),
+               executable_sha256: <<0>>,
+               cwd: File.cwd!(),
+               args: [],
+               env: %{}
              )
 
     large_argument = String.duplicate("x", 131_072)
@@ -556,6 +608,7 @@ defmodule PtcRunnerLauncher.ConformanceTest do
     assert {:error, :invalid_mcp_stdio_launch} =
              MCPStdioLauncher.open(
                executable: shell(),
+               executable_sha256: executable_sha256(shell()),
                cwd: File.cwd!(),
                args: List.duplicate(large_argument, 9),
                env: %{}
@@ -568,6 +621,7 @@ defmodule PtcRunnerLauncher.ConformanceTest do
     assert {:error, :mcp_stdio_spawn_failed} =
              MCPStdioLauncher.open(
                executable: "/definitely/not/a/real/executable",
+               executable_sha256: :binary.copy(<<0>>, 32),
                cwd: File.cwd!(),
                args: [],
                env: %{}
@@ -586,6 +640,7 @@ defmodule PtcRunnerLauncher.ConformanceTest do
       {:ok, launcher} =
         MCPStdioLauncher.open(
           executable: executable,
+          executable_sha256: executable_sha256(executable),
           cwd: File.cwd!(),
           args: ["basic", "direct-script"],
           env: %{"PTC_ALLOWED" => "visible"},
@@ -663,6 +718,7 @@ defmodule PtcRunnerLauncher.ConformanceTest do
         Keyword.merge(
           [
             executable: executable,
+            executable_sha256: executable_sha256(executable),
             cwd: File.cwd!(),
             args: [@fixture | args],
             env: %{},
@@ -685,6 +741,7 @@ defmodule PtcRunnerLauncher.ConformanceTest do
         Keyword.merge(
           [
             executable: executable,
+            executable_sha256: executable_sha256(executable),
             cwd: File.cwd!(),
             args: ["environment"],
             env: %{},
@@ -696,6 +753,12 @@ defmodule PtcRunnerLauncher.ConformanceTest do
       )
 
     launcher
+  end
+
+  defp executable_sha256(executable) do
+    executable
+    |> File.read!()
+    |> then(&:crypto.hash(:sha256, &1))
   end
 
   defp environment_names(stdout) do

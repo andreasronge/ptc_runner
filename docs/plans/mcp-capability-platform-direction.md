@@ -312,9 +312,14 @@ The core starts the launcher by canonical path, so the trusted launcher
 installation hierarchy must remain immutable from preflight through launcher
 spawn. The launcher receives the preflighted server SHA-256 in its bootstrap,
 hashes the executable it opens, and rejects a mismatch before starting it.
-Linux verifies and executes the same held descriptor. macOS verifies and then
+Linux verifies and executes the same held readable descriptor, which prevents
+path replacement but cannot prevent an operator with write authority from
+changing that inode in place. Trusted operators must therefore keep executable
+contents immutable through spawn on both platforms. macOS verifies and then
 executes the canonical path, so its trusted server installation hierarchy must
-remain immutable through that second boundary as well.
+remain immutable through that second boundary as well. V1 detects changes
+between core preflight and launcher verification; it is not a hostile-writer
+filesystem sandbox.
 
 The owner must:
 

@@ -5,6 +5,8 @@ stdio transport. It provides one small packet-framed executable that launches
 a host-authorized server with:
 
 - an explicit compatibility environment plus configured bindings;
+- a caller-frozen SHA-256 identity checked against the executable opened by
+  the launcher before spawn;
 - separate stdin, stdout, and bounded stderr streams;
 - acknowledged backpressure;
 - a new process group; and
@@ -25,6 +27,10 @@ The package is not yet connected to the core transport.
 
 This is process containment for trusted host-installed MCP servers, not a
 hostile-code sandbox. A trusted child can deliberately leave its process group.
+The trusted operator must not modify executable contents during startup.
+Linux hashes and executes the same held readable descriptor, which prevents a
+path replacement but not an in-place write. macOS additionally relies on the
+canonical executable path hierarchy remaining immutable through `execve`.
 
 The Elixir API is intentionally small:
 

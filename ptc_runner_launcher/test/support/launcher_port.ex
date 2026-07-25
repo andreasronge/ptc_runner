@@ -5,13 +5,17 @@ defmodule PtcRunnerLauncher.TestSupport.LauncherPort do
   The reference launcher supports only macOS and Linux. It receives the target
   executable, arguments, working directory, and explicit environment over a
   packet-framed private channel; none are placed in a shell command or in the
-  launcher's OS argument list. The target is started after canonical path
-  resolution, in a new session/process group, with only the supplied
-  environment. Linux executes a held descriptor. macOS executes the canonical
-  host-installed path and therefore requires its operator-managed path
-  hierarchy not to be mutated during launch. Linux script interpreters
-  intentionally inherit the held, non-readable executable descriptor because
-  the kernel uses it for the interpreter handoff; native executables do not.
+  launcher's OS argument list. The bootstrap includes the caller's frozen
+  executable SHA-256. The target is started only after the launcher opens the
+  canonical executable, hashes it, and confirms that identity. It then starts
+  a new session/process group with only the supplied environment. Linux hashes
+  and executes the same held readable descriptor. macOS hashes a readable
+  descriptor for the same file and executes the canonical host-installed path.
+  The trusted operator must not modify executable contents during startup on
+  either platform; macOS additionally requires its installation hierarchy to
+  remain immutable. Linux script interpreters intentionally inherit the held
+  executable descriptor because the kernel uses it for the interpreter
+  handoff; native executables do not.
 
   Launcher output is framed as separate stdout and bounded-stderr events.
   At most one stdout frame is in flight; consuming it acknowledges the frame
@@ -37,9 +41,10 @@ defmodule PtcRunnerLauncher.TestSupport.LauncherPort do
   hostile-code sandbox.
 
   Canonicalization and descriptor opening are separate POSIX operations.
-  Operators must not mutate the executable or working-directory path hierarchy
-  during startup on either platform. Linux executes the held object after it is
-  opened; macOS executes the canonical path.
+  Operators must not mutate executable contents or the working-directory path
+  hierarchy during startup on either platform. Linux executes the held object
+  after it is opened; macOS executes the canonical path and therefore also
+  requires its executable path hierarchy to stay immutable.
 
   This module is deliberately test-only. It exercises the packet protocol that
   the future core transport will consume without making that transport part of
@@ -244,7 +249,8 @@ defmodule PtcRunnerLauncher.TestSupport.LauncherPort do
       :inherit_environment,
       :grace_ms,
       :stderr_bytes,
-      :start_timeout_ms
+      :start_timeout_ms,
+      :executable_sha256
     ]
 
     with true <- Keyword.keyword?(opts),
@@ -273,10 +279,14 @@ defmodule PtcRunnerLauncher.TestSupport.LauncherPort do
            Keyword.get(opts, :stderr_bytes, @default_stderr_bytes),
          start_timeout_ms
          when is_integer(start_timeout_ms) and start_timeout_ms in 1..@max_start_timeout_ms <-
-           Keyword.get(opts, :start_timeout_ms, @default_start_timeout_ms) do
+           Keyword.get(opts, :start_timeout_ms, @default_start_timeout_ms),
+         executable_sha256
+         when is_binary(executable_sha256) and byte_size(executable_sha256) == 32 <-
+           Keyword.get(opts, :executable_sha256) do
       {:ok,
        %{
          executable: executable,
+         executable_sha256: executable_sha256,
          cwd: cwd,
          args: args,
          env: effective_env,
@@ -328,7 +338,7 @@ defmodule PtcRunnerLauncher.TestSupport.LauncherPort do
 
     body = [
       <<1, config.grace_ms::unsigned-big-32, config.start_timeout_ms::unsigned-big-32,
-        config.stderr_bytes::unsigned-big-64>>,
+        config.stderr_bytes::unsigned-big-64, config.executable_sha256::binary-size(32)>>,
       encode_string(config.executable),
       encode_string(config.cwd),
       <<length(config.args)::unsigned-big-32>>,
