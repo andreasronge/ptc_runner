@@ -56,7 +56,7 @@ defmodule PtcRunner.Kernel.Manifest do
 
   alias Jason.OrderedObject
   alias PtcRunner.Kernel.Component
-  alias PtcRunner.Kernel.FileCapability
+  alias PtcRunner.Kernel.ConfinedFile
   alias PtcRunner.Kernel.JSONValue
   alias PtcRunner.Kernel.Library
   alias PtcRunner.Kernel.Limits
@@ -103,7 +103,7 @@ defmodule PtcRunner.Kernel.Manifest do
   def load(path, installed_limits \\ Limits.installed_defaults())
 
   def load(path, %Limits{} = installed_limits) when is_binary(path) do
-    with {:ok, path} <- resolve_absolute(Path.expand(path)),
+    with {:ok, path} <- ConfinedFile.resolve_absolute(Path.expand(path)),
          directory = Path.dirname(path),
          {:ok, source} <- read_relative(directory, Path.basename(path), @max_manifest_bytes),
          {:ok, decoded} <- Jason.decode(source, objects: :ordered_objects),
@@ -382,65 +382,9 @@ defmodule PtcRunner.Kernel.Manifest do
   defp ordered_map(value), do: {:ok, value}
 
   defp read_relative(directory, path, max_bytes) do
-    with true <- is_binary(path),
-         true <- String.valid?(path),
-         true <- byte_size(path) in 1..1_024,
-         {:ok, path} <- resolve_relative(directory, path),
-         {:ok, capability} <- FileCapability.new(root: directory, max_bytes: max_bytes),
-         {:ok, %{"content" => content}} <- capability.callback.(%{"path" => path}) do
-      {:ok, content}
-    else
-      _ -> {:error, :unsafe_or_unreadable_path}
+    case ConfinedFile.read(directory, path, max_bytes) do
+      {:ok, content} -> {:ok, content}
+      {:error, _reason} -> {:error, :unsafe_or_unreadable_path}
     end
-  end
-
-  defp resolve_absolute(path) do
-    relative = Path.relative_to(path, "/")
-
-    case resolve_segments("/", Path.split(relative), 0) do
-      {:ok, relative} -> {:ok, Path.join("/", relative)}
-      error -> error
-    end
-  end
-
-  defp resolve_relative(directory, path),
-    do: resolve_segments(directory, Path.split(path), 0)
-
-  defp resolve_segments(_root, _segments, depth) when depth > 16,
-    do: {:error, :symlink_depth_exceeded}
-
-  defp resolve_segments(root, segments, depth) do
-    Enum.reduce_while(segments, {:ok, {root, []}}, fn segment, {:ok, {parent, consumed}} ->
-      candidate = Path.join(parent, segment)
-
-      case File.lstat(candidate) do
-        {:ok, %{type: :symlink}} ->
-          with {:ok, target} <- File.read_link(candidate),
-               target = Path.expand(target, parent),
-               true <- within_root?(root, target) do
-            remaining = Enum.drop(segments, length(consumed) + 1)
-            target_segments = target |> Path.relative_to(root) |> Path.split()
-            {:halt, resolve_segments(root, target_segments ++ remaining, depth + 1)}
-          else
-            _ -> {:halt, {:error, :symlink_escape}}
-          end
-
-        {:ok, _stat} ->
-          {:cont, {:ok, {candidate, consumed ++ [segment]}}}
-
-        {:error, reason} ->
-          {:halt, {:error, reason}}
-      end
-    end)
-    |> case do
-      {:ok, {resolved, _consumed}} -> {:ok, Path.relative_to(resolved, root)}
-      error -> error
-    end
-  end
-
-  defp within_root?("/", target), do: Path.type(target) == :absolute
-
-  defp within_root?(root, target) do
-    if target == root, do: true, else: String.starts_with?(target, root <> "/")
   end
 end

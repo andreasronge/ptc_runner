@@ -1180,6 +1180,11 @@ early. The complete Code Scout acceptance flow requires both.
 
 ### Pre-C prerequisite — Confined trusted file loading
 
+**Status:** implemented. `PtcRunner.Kernel.ConfinedFile` owns path resolution
+and the bounded read; `Manifest` uses it for the manifest, components,
+contracts, and selected input and no longer references `FileCapability`. Host
+config joins the same primitive when Slice B adds it.
+
 - Extract a dedicated internal
   `ConfinedFile.read(root, relative_path, max_bytes)` primitive from the
   confinement logic currently reused through `FileCapability`.
@@ -1190,9 +1195,28 @@ early. The complete Code Scout acceptance flow requires both.
 - Migrate `Manifest.read_relative` and equivalent trusted artifact reads
   before deleting `FileCapability`.
 
+Two properties were previously incidental rather than enforced, and the
+extraction makes them explicit:
+
+- **Traversal was contained only because the frozen-snapshot lookup missed.**
+  `resolve_relative` did not reject a `..` segment; the resulting key simply
+  failed to match a snapshot entry. A primitive that reads directly has no
+  such backstop, so `ConfinedFile` rejects empty, `.`, and `..` segments
+  before resolving and re-checks the resolved absolute path against the root.
+- **Reading one trusted file froze the whole root.** `Manifest.read_relative`
+  built a `FileCapability`, which snapshots up to 4,096 entries and 32 MB, to
+  return a single manifest. The primitive reads one file.
+
+Trusted loading and the public provider also had different symlink policies:
+`FileCapability` rejects links outright, while trusted loading follows them
+while they stay inside the root. `ConfinedFile` keeps the trusted-loading
+policy; `FileCapability` is unchanged until its deletion at the Slice C
+cutover.
+
 **Gate:** trusted artifact loading has no dependency on a model-visible
 filesystem capability, and confinement tests pass against the extracted
-primitive.
+primitive. Met: 24 focused confinement tests cover traversal, symlink escape
+and cycles, size, UTF-8, replacement, and error distinctness.
 
 ### Slice C — Sample filesystem server
 
