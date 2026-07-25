@@ -17,7 +17,7 @@
 #include <sys/prctl.h>
 #endif
 
-/* Test-only reference implementation of the MCP stdio launcher contract. */
+/* Reference implementation of the PtcRunner MCP stdio launcher contract. */
 
 #define BOOT_VERSION 1U
 #define MAX_FRAME_BYTES (1024U * 1024U)

@@ -1,6 +1,6 @@
-defmodule PtcRunner.TestSupport.MCPStdioLauncherProof do
+defmodule PtcRunnerLauncher.TestSupport.LauncherPort do
   @moduledoc """
-  Test-only POSIX subprocess proof for the planned MCP stdio transport.
+  Test client for the versioned PtcRunner stdio launcher protocol.
 
   The reference launcher supports only macOS and Linux. It receives the target
   executable, arguments, working directory, and explicit environment over a
@@ -41,11 +41,9 @@ defmodule PtcRunner.TestSupport.MCPStdioLauncherProof do
   during startup on either platform. Linux executes the held object after it is
   opened; macOS executes the canonical path.
 
-  This is a conformance experiment, not a shipped runtime module. It validates
-  the launcher contract selected by the MCP capability plan without making a C
-  toolchain or this implementation part of the core `ptc_runner` Hex package.
-  Slice 2 may move the proven implementation into the separately versioned,
-  precompiled `ptc_runner_launcher` companion.
+  This module is deliberately test-only. It exercises the packet protocol that
+  the future core transport will consume without making that transport part of
+  the native companion package.
   """
 
   @enforce_keys [:port, :owner, :close_timeout_ms]
@@ -323,15 +321,7 @@ defmodule PtcRunner.TestSupport.MCPStdioLauncherProof do
     Map.merge(inherited, explicit)
   end
 
-  defp launcher_path do
-    with path when is_binary(path) <-
-           Application.get_env(:ptc_runner, :mcp_stdio_launcher_proof_path),
-         true <- File.regular?(path) do
-      {:ok, path}
-    else
-      _reason -> {:error, :mcp_stdio_launcher_unavailable}
-    end
-  end
+  defp launcher_path, do: PtcRunnerLauncher.executable_path()
 
   defp bootstrap(config) do
     environment = Enum.sort_by(config.env, &elem(&1, 0))

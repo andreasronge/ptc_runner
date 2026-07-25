@@ -46,6 +46,11 @@ SPDX-FileCopyrightText = "2025 Andreas Ronge"
 SPDX-License-Identifier = "MIT"
 
 [[annotations]]
+path = ["**/*.c", "**/Makefile"]
+SPDX-FileCopyrightText = "2025 Andreas Ronge"
+SPDX-License-Identifier = "MIT"
+
+[[annotations]]
 path = ["**/*.hex", "**/hex_metadata.config", "**/NOTICE"]
 SPDX-FileCopyrightText = "2025 Andreas Ronge"
 SPDX-License-Identifier = "MIT"

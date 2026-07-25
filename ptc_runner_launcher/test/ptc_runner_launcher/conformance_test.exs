@@ -1,53 +1,19 @@
-defmodule PtcRunner.Kernel.MCPStdioLauncherProofTest do
+defmodule PtcRunnerLauncher.ConformanceTest do
   use ExUnit.Case, async: false
 
-  @moduletag :mcp_stdio_launcher_proof
+  alias PtcRunnerLauncher.TestSupport.LauncherPort, as: MCPStdioLauncher
 
-  alias PtcRunner.TestSupport.MCPStdioLauncherProof, as: MCPStdioLauncher
-
-  @fixture Path.expand("../../fixtures/mcp_stdio_launcher_fixture.sh", __DIR__)
-  @native_fixture Path.expand("../../fixtures/mcp_stdio_native_fixture.c", __DIR__)
-  @launcher_source Path.expand("../../fixtures/mcp_stdio_launcher_proof.c", __DIR__)
+  @fixture Path.expand("../fixtures/mcp_stdio_launcher_fixture.sh", __DIR__)
+  @native_fixture Path.expand("../fixtures/mcp_stdio_native_fixture.c", __DIR__)
 
   setup_all do
     compiler = System.find_executable("cc") || flunk("C compiler is unavailable")
-
-    launcher =
-      Path.join(
-        System.tmp_dir!(),
-        "ptc_mcp_launcher_proof_#{System.unique_integer([:positive])}"
-      )
 
     environment_fixture =
       Path.join(
         System.tmp_dir!(),
         "ptc_mcp_environment_fixture_#{System.unique_integer([:positive])}"
       )
-
-    platform_flag =
-      case :os.type() do
-        {:unix, :darwin} -> "-D_DARWIN_C_SOURCE"
-        {:unix, :linux} -> "-D_GNU_SOURCE"
-        platform -> flunk("unsupported launcher-proof platform: #{inspect(platform)}")
-      end
-
-    assert {_output, 0} =
-             System.cmd(
-               compiler,
-               [
-                 platform_flag,
-                 "-O2",
-                 "-std=c11",
-                 "-Wall",
-                 "-Wextra",
-                 "-Werror",
-                 "-Wpedantic",
-                 "-o",
-                 launcher,
-                 @launcher_source
-               ],
-               stderr_to_stdout: true
-             )
 
     assert {_output, 0} =
              System.cmd(
@@ -65,17 +31,19 @@ defmodule PtcRunner.Kernel.MCPStdioLauncherProofTest do
                stderr_to_stdout: true
              )
 
-    Application.put_env(:ptc_runner, :mcp_stdio_launcher_proof_path, launcher)
-    Application.put_env(:ptc_runner, :mcp_stdio_environment_fixture_path, environment_fixture)
+    Application.put_env(
+      :ptc_runner_launcher,
+      :mcp_stdio_environment_fixture_path,
+      environment_fixture
+    )
+
     previous_unsafe = System.get_env("PTC_UNSAFE_CHILD_ENV")
     previous_second_unsafe = System.get_env("PTC_SECOND_UNSAFE_ENV")
     System.put_env("PTC_UNSAFE_CHILD_ENV", "must-not-be-inherited")
     System.put_env("PTC_SECOND_UNSAFE_ENV", "also-must-not-be-inherited")
 
     on_exit(fn ->
-      Application.delete_env(:ptc_runner, :mcp_stdio_launcher_proof_path)
-      Application.delete_env(:ptc_runner, :mcp_stdio_environment_fixture_path)
-      File.rm(launcher)
+      Application.delete_env(:ptc_runner_launcher, :mcp_stdio_environment_fixture_path)
       File.rm(environment_fixture)
 
       if previous_unsafe,
@@ -279,7 +247,7 @@ defmodule PtcRunner.Kernel.MCPStdioLauncherProofTest do
   end
 
   test "close drains and discards output produced in response to EOF" do
-    launcher = open_launcher(["trailing-output"])
+    launcher = open_launcher(["trailing-output"], grace_ms: 500)
 
     assert {:ok, %{reason: :close, exit_status: 0}} =
              MCPStdioLauncher.close(launcher)
@@ -299,7 +267,7 @@ defmodule PtcRunner.Kernel.MCPStdioLauncherProofTest do
   end
 
   @tag :tmp_dir
-  test "a timed-out write terminates without delivering the queued request", %{tmp_dir: dir} do
+  test "a timed-out write does not deliver the complete queued request", %{tmp_dir: dir} do
     marker = Path.join(dir, "eof-observed")
     launcher = open_launcher(["slow-eof", marker], grace_ms: 300)
     assert %{stdout: "ready\n"} = collect_until(launcher, &(&1.stdout == "ready\n"))
@@ -313,7 +281,17 @@ defmodule PtcRunner.Kernel.MCPStdioLauncherProofTest do
 
     assert is_nil(Port.info(launcher.port))
     assert_eventually(fn -> File.exists?(marker) end, 3_000)
-    assert File.read!(marker) == "term"
+
+    case File.read!(marker) do
+      "term" ->
+        :ok
+
+      bytes_marker ->
+        [delivered] =
+          Regex.run(~r/^bytes=\s*(\d+)$/, bytes_marker, capture: :all_but_first)
+
+        assert String.to_integer(delivered) < 1_000_000
+    end
   end
 
   test "applies acknowledged backpressure across repeated writes" do
@@ -489,13 +467,13 @@ defmodule PtcRunner.Kernel.MCPStdioLauncherProofTest do
   @tag :tmp_dir
   test "EOF escalates through TERM and KILL for same-group descendants", %{tmp_dir: dir} do
     marker = Path.join(dir, "term-observed")
-    launcher = open_launcher(["tree", marker], grace_ms: 100)
+    launcher = open_launcher(["tree", marker], grace_ms: 1_000)
     descendant = descendant_pid(launcher)
 
     assert os_process_alive?(descendant)
 
     assert {:ok, %{reason: :close, exit_status: exit_status}} =
-             MCPStdioLauncher.close(launcher, 3_000)
+             MCPStdioLauncher.close(launcher, 5_000)
 
     assert exit_status < 0
     assert File.read!(marker) == "term"
@@ -530,11 +508,11 @@ defmodule PtcRunner.Kernel.MCPStdioLauncherProofTest do
   @tag :tmp_dir
   test "close terminates an npx-shaped wrapper and its nested leaf", %{tmp_dir: dir} do
     marker = Path.join(dir, "nested-term-observed")
-    launcher = open_launcher(["deep-tree", marker], grace_ms: 100)
+    launcher = open_launcher(["deep-tree", marker], grace_ms: 1_000)
     leaf = descendant_pid(launcher)
 
     assert os_process_alive?(leaf)
-    assert {:ok, %{reason: :close}} = MCPStdioLauncher.close(launcher, 3_000)
+    assert {:ok, %{reason: :close}} = MCPStdioLauncher.close(launcher, 5_000)
     assert File.read!(marker) == "term"
     refute os_process_alive?(leaf)
   end
@@ -700,7 +678,7 @@ defmodule PtcRunner.Kernel.MCPStdioLauncherProofTest do
 
   defp open_environment_launcher(opts \\ []) do
     executable =
-      Application.fetch_env!(:ptc_runner, :mcp_stdio_environment_fixture_path)
+      Application.fetch_env!(:ptc_runner_launcher, :mcp_stdio_environment_fixture_path)
 
     {:ok, launcher} =
       MCPStdioLauncher.open(

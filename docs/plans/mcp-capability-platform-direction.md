@@ -1,8 +1,9 @@
 # MCP-first capability platform — implementation plan
 
 > **Status:** active implementation plan, promoted from `future/` on
-> 2026-07-24. Every API below remains planned unless explicitly described as
-> current behavior. The protocol target is the locked `2026-07-28` release
+> 2026-07-24. Slices 0 and 1 are complete; Slice 2 is in progress. Every API
+> below remains planned unless explicitly described as current behavior. The
+> protocol target is the locked `2026-07-28` release
 > candidate reviewed on 2026-07-23. Implementation may target that candidate
 > before final publication; reconcile any final specification or stable-SDK
 > deltas as an ordinary follow-up rather than blocking the first slices.
@@ -253,9 +254,10 @@ toolchain. Source compilation remains an explicit fallback for maintainers and
 unsupported targets, not the normal installation path. A standalone
 distribution or container bundles the same companion artifact.
 
-The source tree keeps a test-only POSIX reference proof. It is compiled only
-by the focused macOS/Linux proof tests and is not packaged as application code.
-The proof demonstrates:
+The separate `ptc_runner_launcher` source tree keeps the POSIX reference
+implementation and its reusable macOS/Linux conformance suite. The native
+artifact belongs only to that companion package and is absent from the core
+`ptc_runner` package. The conformance suite demonstrates:
 
 - a new child environment built from the versioned MCP compatibility allowlist
   plus explicit host bindings rather than Erlang Port environment extension;

@@ -10,9 +10,9 @@ permissions:
   contents: read
 
 jobs:
-  mcp-stdio-launcher-proof:
+  mcp-stdio-launcher:
     runs-on: ${{ matrix.os }}
-    name: MCP stdio launcher proof (${{ matrix.os }})
+    name: MCP stdio launcher companion (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
@@ -28,8 +28,13 @@ jobs:
       - name: Setup Elixir environment
         uses: ./.github/actions/setup-elixir
 
-      - name: Prove stdio process containment
-        run: mix test test/ptc_runner/kernel/mcp_stdio_launcher_proof_test.exs --include mcp_stdio_launcher_proof --warnings-as-errors
+      - name: Get launcher dependencies
+        working-directory: ptc_runner_launcher
+        run: mix deps.get
+
+      - name: Verify launcher package and process containment
+        working-directory: ptc_runner_launcher
+        run: mix precommit
 
   mcp-http-interop:
     runs-on: ubuntu-latest

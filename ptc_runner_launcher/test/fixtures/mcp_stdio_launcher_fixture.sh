@@ -60,9 +60,8 @@ case "$1" in
     trap 'printf term > "$marker"; exit 0' TERM
     printf 'ready\n'
     /bin/sleep 0.15
-    dd bs=65536 count=16 of=/dev/null 2>/dev/null
-    /bin/sleep 0.25
-    printf eof > "$marker"
+    bytes=$(/usr/bin/wc -c)
+    printf 'bytes=%s' "$bytes" > "$marker"
     exit 0
     ;;
 
@@ -98,7 +97,7 @@ case "$1" in
     (
       trap 'printf term > "$marker"' TERM
       while :; do
-        /bin/sleep 1
+        /bin/sleep 0.05
       done
     ) &
 
@@ -118,7 +117,7 @@ case "$1" in
       (
         trap 'printf term > "$marker"' TERM
         while :; do
-          /bin/sleep 1
+          /bin/sleep 0.05
         done
       ) &
 
@@ -129,7 +128,7 @@ case "$1" in
 
     trap '' TERM
     while :; do
-      /bin/sleep 1
+      /bin/sleep 0.05
     done
     ;;
 

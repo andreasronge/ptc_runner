@@ -1,0 +1,8 @@
+/_build/
+/deps/
+/doc/
+/cover/
+/erl_crash.dump
+/mix.lock
+/ptc_runner_launcher-*.tar
+/tmp/

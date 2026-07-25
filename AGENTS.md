@@ -34,6 +34,8 @@ how it was verified.
 
 - `mix precommit` — fast quality gate (format, compile, credo, schema, spec,
   tests); run before every commit.
+- `cd ptc_runner_launcher && mix precommit` — launcher package, conformance,
+  and unpacked-Hex verification; also run before commits that touch it.
 - `mix prepush` — slower checks (upstream API audit, dialyzer, unused-deps) before `git push`;
   PR CI runs the same checks as individual steps.
 - `mix test --include e2e` — E2E tests (requires `OPENROUTER_API_KEY`;
@@ -68,6 +70,7 @@ loads `OPENROUTER_API_KEY` and the optional `PTC_TEST_MODEL` from `.env`.
 ## Project Structure
 
 - `lib/ptc_runner/` — the library (`kernel/`, `lisp/`, `sandbox.ex`, …).
+- `ptc_runner_launcher/` — optional macOS/Linux MCP stdio launcher companion.
 - `docs/` — specifications, guides, and implementation records.
   `priv/preludes/kernel/` — shipped Lisp libraries; recompile after editing.
 - `docs/function-reference.md`, `docs/java-interop.md`, and `docs/conformance/`
