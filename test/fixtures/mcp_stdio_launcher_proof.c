@@ -13,6 +13,10 @@
 #include <time.h>
 #include <unistd.h>
 
+#if defined(__linux__)
+#include <sys/prctl.h>
+#endif
+
 /* Test-only reference implementation of the MCP stdio launcher contract. */
 
 #define BOOT_VERSION 1U
@@ -618,6 +622,40 @@ static bool reap_child(pid_t child_pid, int *child_status) {
   return waited == child_pid;
 }
 
+/*
+ * Retire descendants that outlived the leader. `process_group_alive` probes
+ * the group with kill(2), which still succeeds for un-reaped zombies, so a
+ * killed group only becomes observably empty once every member's status has
+ * been collected. Orphaned descendants are reparented away from the leader,
+ * so the launcher declares itself a child subreaper on Linux and adopts them
+ * instead. macOS has no subreaper interface, but launchd reaps orphans
+ * promptly, so the group empties there without launcher involvement.
+ *
+ * Only safe once the leader has been reaped: before that, an untargeted wait
+ * could consume the leader's status and release its PID while group-directed
+ * signals are still outstanding.
+ */
+static void reap_orphaned_descendants(void) {
+  for (;;) {
+    pid_t waited = waitpid(-1, NULL, WNOHANG);
+
+    if (waited > 0) {
+      continue;
+    }
+    if (waited < 0 && errno == EINTR) {
+      continue;
+    }
+
+    return;
+  }
+}
+
+static void request_child_subreaper(void) {
+#if defined(__linux__)
+  (void)prctl(PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0);
+#endif
+}
+
 static void queue_compact(struct byte_queue *queue) {
   if (queue->offset > 0 && queue->length > 0) {
     memmove(queue->bytes, queue->bytes + queue->offset, queue->length);
@@ -1045,6 +1083,10 @@ static int supervise(const struct launcher_config *config, pid_t child_pid,
       child_reaped = reap_child(child_pid, &child_status);
     }
 
+    if (phase == PHASE_KILL_WAIT && child_reaped) {
+      reap_orphaned_descendants();
+    }
+
     if (phase == PHASE_RUNNING && input_length > 0) {
       (void)consume_input_frames(
           input, &input_length, &pending, &stdout_ack_pending, &phase,
@@ -1247,6 +1289,7 @@ int main(int argc, char **argv) {
   (void)sigaction(SIGINT, &action, NULL);
   (void)sigaction(SIGHUP, &action, NULL);
   (void)signal(SIGPIPE, SIG_IGN);
+  request_child_subreaper();
 
   if (!load_bootstrap(&config)) {
     (void)emit_frame('F', NULL, 0);

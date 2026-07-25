@@ -314,9 +314,23 @@ The owner must:
 - correlate concurrent requests by ID;
 - send `notifications/cancelled` for an abandoned request;
 - close stdin, wait, then escalate termination within a fixed deadline;
-- terminate the launched process group on timeout, close, and owner death; and
+- terminate the launched process group on timeout, close, and owner death;
+- collect the status of every terminated descendant before reporting a clean
+  shutdown, adopting orphans through `PR_SET_CHILD_SUBREAPER` on Linux; and
 - redact command arguments marked sensitive, environment values, and private
   payloads from status and public observations.
+
+Descendant reaping is a correctness requirement, not housekeeping. A process
+group is probed with `kill(2)`, which still succeeds for un-reaped zombies, so
+a killed group only becomes observably empty once every member's status has
+been collected. Descendants orphaned by the leader's death are reparented away
+from the launcher, and an init that does not reap them — the default for a
+container PID 1 — leaves the group permanently non-empty. Without adoption the
+launcher then charges every escalated shutdown its full final kill wait and
+reports `termination_timeout` instead of `close`, downgrading an orderly
+teardown into a transport failure. macOS has no subreaper interface; launchd
+reaps orphans promptly, so the group empties there without launcher
+involvement.
 
 Unexpected server exit loses in-flight requests. V1 should return a bounded
 transport failure rather than automatically retry a potentially effectful

@@ -631,6 +631,21 @@ defmodule PtcRunner.Kernel.MCPStdioLauncherProofTest do
     end)
   end
 
+  # Closing the BEAM port and releasing the OS pipe descriptors are separate
+  # facts. A launcher that exits without closing its ends still satisfies the
+  # port and mailbox assertions above while accumulating descriptors until the
+  # VM hits EMFILE, so account for them directly across repeated cycles.
+  test "repeated launches release their descriptors" do
+    baseline = open_descriptor_count()
+
+    Enum.each(1..20, fn _iteration ->
+      launcher = open_launcher(["basic", "descriptors"])
+      assert {:ok, %{reason: :close}} = MCPStdioLauncher.close(launcher)
+    end)
+
+    assert_eventually(fn -> open_descriptor_count() <= baseline + 8 end, 2_000)
+  end
+
   test "failed close discards events preserved by an interrupted write" do
     launcher = open_launcher(["exit-no-read"], grace_ms: 50)
 
@@ -833,6 +848,20 @@ defmodule PtcRunner.Kernel.MCPStdioLauncherProofTest do
   defp mailbox_messages do
     {:messages, messages} = Process.info(self(), :messages)
     messages
+  end
+
+  defp open_descriptor_count do
+    directory =
+      case :os.type() do
+        {:unix, :linux} -> "/proc/self/fd"
+        {:unix, :darwin} -> "/dev/fd"
+        platform -> flunk("unsupported descriptor-count platform: #{inspect(platform)}")
+      end
+
+    case File.ls(directory) do
+      {:ok, entries} -> length(entries)
+      {:error, reason} -> flunk("cannot enumerate #{directory}: #{inspect(reason)}")
+    end
   end
 
   defp port_message?({port, _message}, expected_port), do: port == expected_port

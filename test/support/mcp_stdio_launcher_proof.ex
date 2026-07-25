@@ -27,7 +27,12 @@ defmodule PtcRunner.TestSupport.MCPStdioLauncherProof do
   after shutdown begins; request output must be consumed before closing.
   Losing the owning BEAM process closes the Port and triggers the same cleanup.
   POSIX process groups contain descendants that remain in the launched group;
-  a deliberately trusted child can escape with `setpgid` or `setsid`.
+  a deliberately trusted child can escape with `setpgid` or `setsid`. A killed
+  group is only observably empty once every member has been reaped, so the
+  launcher adopts orphaned descendants as a Linux child subreaper and collects
+  them before reporting a clean shutdown. A host whose init does not reap
+  orphans would otherwise turn every escalated teardown into
+  `:termination_timeout`.
   MCP executables remain host-installed trusted dependencies rather than a
   hostile-code sandbox.
 
