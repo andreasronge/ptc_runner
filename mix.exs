@@ -109,7 +109,8 @@ defmodule PtcRunner.MixProject do
         "ptc.gen_docs --check",
         "ptc.conformance_report --check-inventory",
         "test --warnings-as-errors",
-        "cmd --cd ptc_viewer mix test --color"
+        "cmd --cd ptc_viewer mix test --color",
+        "cmd --cd ptc_runner_launcher mix precommit"
       ],
       # Slower checks kept out of the per-commit loop; run before pushing.
       # PR CI runs these as individual steps. The upstream audit attests all

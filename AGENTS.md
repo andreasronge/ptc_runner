@@ -33,9 +33,8 @@ how it was verified.
 ## Commands
 
 - `mix precommit` — fast quality gate (format, compile, credo, schema, spec,
-  tests); run before every commit.
-- `cd ptc_runner_launcher && mix precommit` — launcher package, conformance,
-  and unpacked-Hex verification; also run before commits that touch it.
+  root/Viewer tests, and launcher package/conformance/archive verification);
+  run before every commit.
 - `mix prepush` — slower checks (upstream API audit, dialyzer, unused-deps) before `git push`;
   PR CI runs the same checks as individual steps.
 - `mix test --include e2e` — E2E tests (requires `OPENROUTER_API_KEY`;

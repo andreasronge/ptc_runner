@@ -682,7 +682,7 @@ mission input, file content, and provider output as untrusted data.
 | `mix ptc.viewer --trace-dir DIR` | Browse public canonical JSONL traces locally |
 | `mix ptc.validate_spec` | Validate generated language/spec artifacts |
 | `mix ptc.smoke` | Compare shared `.clj` smoke cases with Babashka |
-| `mix precommit` | Run format, compile, Credo, spec, tests, and viewer tests |
+| `mix precommit` | Run format, compile, Credo, spec, root/Viewer tests, and launcher package/conformance checks |
 | `mix prepush` | Audit upstream API metadata, then run Dialyzer and unused-dependency checks |
 
 ## Inspect a credential-free connector run
