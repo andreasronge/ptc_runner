@@ -16,9 +16,11 @@ defmodule PtcRunner.Kernel.MCPProtocol do
   `execution.taskSupport` field has no semantics in the pinned modern core.
 
   Structured results require a frozen object-output validator and explicit
-  content containing only exact text blocks; those companion blocks are
-  validated and discarded. Tools without output schemas return exact text
-  blocks only. The functions return closed MCP reason atoms and never
+  content containing only exact text or embedded text-resource blocks; those
+  companion blocks are validated and discarded. Tools without output schemas
+  return a map containing ordered `"text"` values and, when present, ordered
+  embedded text `"resources"`. Binary resources and all other content types
+  remain unsupported. The functions return closed MCP reason atoms and never
   construct provider errors or expose remote error data.
   """
 
@@ -417,19 +419,54 @@ defmodule PtcRunner.Kernel.MCPProtocol do
   end
 
   defp text_result(content) do
-    Enum.reduce_while(content, {:ok, []}, fn
-      %{"type" => "text", "text" => text} = block, {:ok, texts}
+    Enum.reduce_while(content, {:ok, [], []}, fn
+      %{"type" => "text", "text" => text} = block, {:ok, texts, resources}
       when is_binary(text) and map_size(block) == 2 ->
-        {:cont, {:ok, [text | texts]}}
+        {:cont, {:ok, [text | texts], resources}}
+
+      %{"type" => "resource", "resource" => resource} = block, {:ok, texts, resources}
+      when map_size(block) == 2 ->
+        case text_resource(resource) do
+          {:ok, normalized} -> {:cont, {:ok, texts, [normalized | resources]}}
+          :error -> {:halt, {:error, :mcp_invalid_result}}
+        end
 
       _block, _acc ->
         {:halt, {:error, :mcp_invalid_result}}
     end)
     |> case do
-      {:ok, texts} -> {:ok, %{"text" => Enum.reverse(texts)}}
-      error -> error
+      {:ok, texts, []} ->
+        {:ok, %{"text" => Enum.reverse(texts)}}
+
+      {:ok, texts, resources} ->
+        {:ok,
+         %{
+           "text" => Enum.reverse(texts),
+           "resources" => Enum.reverse(resources)
+         }}
+
+      error ->
+        error
     end
   end
+
+  defp text_resource(%{"uri" => uri, "text" => text} = resource)
+       when is_binary(uri) and byte_size(uri) > 0 and is_binary(text) do
+    allowed = ~w(uri mimeType text)
+
+    case {Map.keys(resource) -- allowed, Map.get(resource, "mimeType")} do
+      {[], nil} ->
+        {:ok, Map.take(resource, allowed)}
+
+      {[], mime_type} when is_binary(mime_type) and byte_size(mime_type) > 0 ->
+        {:ok, Map.take(resource, allowed)}
+
+      _invalid ->
+        :error
+    end
+  end
+
+  defp text_resource(_resource), do: :error
 
   defp classify_result(%{"resultType" => "complete"} = result, method) do
     if cacheable_method?(method), do: validate_cache_hints(result), else: {:ok, result}

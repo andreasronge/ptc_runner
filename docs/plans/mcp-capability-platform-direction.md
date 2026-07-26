@@ -452,10 +452,13 @@ arbitrary remote schema to weaken its callable boundary.
   current bounded profile, so arbitrary output roots are not a prerequisite
   for the first tutorial.
 
-PtcRunner should validate `structuredContent` against the frozen output schema.
-Text, images, embedded resources, and resource links need explicit bounded
-normalization policies before exposure. Unknown content must not be silently
-converted into a string.
+PtcRunner validates `structuredContent` against the frozen output schema.
+Slice 3 also accepts exact text blocks and embedded text resources, retaining
+only `uri`, `text`, and optional `mimeType` under the decoded-result ceiling;
+this is the minimum result surface required by the pinned GitHub acceptance
+journey. Images, audio, binary embedded resources, resource links, annotations,
+and unknown content still need explicit bounded normalization policies before
+exposure and must not be silently converted into strings.
 
 ### 3.8 Preserve useful tool errors and exact private evidence
 

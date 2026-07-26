@@ -13,9 +13,11 @@ defmodule PtcRunner.Kernel.MCPSource do
 
   Streamable HTTP supports JSON and SSE responses to POST requests and rejects
   redirects and remote endpoint changes. Both transports support schema-valid
-  structured object results with exact text companions and text-only results.
-  The source rejects unsupported content block types, writes, and
-  manifest-supplied connection or credential configuration.
+  structured object results with exact text or embedded text-resource
+  companions. Unstructured results expose ordered text plus bounded embedded
+  text resources; binary resources and other content block types remain
+  unsupported. The source rejects writes and manifest-supplied connection or
+  credential configuration.
   """
 
   alias PtcRunner.Kernel.Capability
@@ -131,8 +133,13 @@ defmodule PtcRunner.Kernel.MCPSource do
   `transport`, `server_info_hash`, `snapshot_hash`, and `tools`. Stdio
   snapshots additionally contain the launcher protocol, launcher digest, and
   server-executable digest. The nullable server hash fingerprints bounded self-reported
-  implementation identity without exposing its untrusted text. Each sorted
-  tool entry contains only its public `name`, fixed `"read"` effect,
+  implementation identity without exposing its untrusted text. Successful
+  tools without an output schema return `%{"text" => [string()]}` and add a
+  `"resources"` list only when the result contains exact embedded text
+  resources. Each resource retains only `uri`, `text`, and optional
+  `mimeType`; response ceilings bound the complete decoded result before
+  normalization. Each sorted tool entry contains only its public `name`, fixed
+  `"read"` effect,
   model-visibility flag, one-way upstream-name and nullable prompt-visible
   description hashes, `input_schema_hash`, nullable `output_schema_hash`, and
   nullable `http_headers_hash`. Hashes are lowercase SHA-256; endpoints, raw

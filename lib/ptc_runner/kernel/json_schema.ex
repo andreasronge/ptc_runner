@@ -3,7 +3,7 @@ defmodule PtcRunner.Kernel.JSONSchema do
   Internal compiler for the bounded capability JSON Schema profile.
 
   The accepted profile is a strict subset of JSON Schema 2020-12 containing
-  `type`, `title`, `description`, `properties`, `required`,
+  `type`, `title`, `description`, `default`, `properties`, `required`,
   `additionalProperties`, `items`, `enum`, `const`, `minimum`, `maximum`,
   `minLength`, `maxLength`, `minItems`, and `maxItems`. Types are scalar rather
   than unions, roots are objects, and a missing `additionalProperties` on an
@@ -14,9 +14,10 @@ defmodule PtcRunner.Kernel.JSONSchema do
   allowlisted dialects, a supported root `$schema` URI (2020-12, or draft-07
   as a deliberate compatibility translation) is accepted and removed, while
   unknown, malformed, and nested dialect markers are rejected. Vendor `x-…`
-  extension keys are discarded from every level as a deliberate client
-  policy — mainstream MCP SDKs emit them by default. Neither reaches
-  normalized output, encodings, or hashes. All other unknown keywords remain
+  extension keys and the standard non-validating `default` annotation are
+  discarded from every level as a deliberate client policy — mainstream MCP
+  SDKs emit them by default. They do not reach normalized output, encodings,
+  hashes, or runtime argument construction. All other unknown keywords remain
   rejected.
 
   Each normalized schema is at most 64 KiB with maximum depth 16, 128
@@ -111,11 +112,14 @@ defmodule PtcRunner.Kernel.JSONSchema do
     end
   end
 
-  # Vendor "x-…" extension keys are discarded as deliberate client policy;
-  # mainstream MCP SDKs emit them by default and this profile assigns them
-  # no semantics. Unsupported semantic keywords remain rejected.
+  # Vendor "x-…" extension keys and JSON Schema's non-validating "default"
+  # annotation are discarded as deliberate client policy; mainstream MCP SDKs
+  # emit them by default and this profile assigns them no runtime semantics.
+  # Unsupported semantic keywords remain rejected.
   defp drop_ignored_annotations(schema) do
-    Map.reject(schema, fn {key, _value} -> String.starts_with?(key, "x-") end)
+    Map.reject(schema, fn {key, _value} ->
+      key == "default" or String.starts_with?(key, "x-")
+    end)
   end
 
   defp normalize_properties(schema, "object", depth) do

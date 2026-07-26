@@ -494,6 +494,34 @@ defmodule PtcRunner.Kernel.MCPProtocolTest do
                nil
              )
 
+    assert {:ok,
+            %{
+              "text" => ["downloaded"],
+              "resources" => [
+                %{
+                  "uri" => "repo://owner/project/sha/abc/contents/README.md",
+                  "mimeType" => "text/plain; charset=utf-8",
+                  "text" => "# Project"
+                }
+              ]
+            }} =
+             MCPProtocol.normalize_tool_result(
+               %{
+                 "content" => [
+                   %{"type" => "text", "text" => "downloaded"},
+                   %{
+                     "type" => "resource",
+                     "resource" => %{
+                       "uri" => "repo://owner/project/sha/abc/contents/README.md",
+                       "mimeType" => "text/plain; charset=utf-8",
+                       "text" => "# Project"
+                     }
+                   }
+                 ]
+               },
+               nil
+             )
+
     assert {:error, :mcp_domain_error} =
              MCPProtocol.normalize_tool_result(%{"isError" => true, "content" => []}, validator)
 
@@ -504,6 +532,11 @@ defmodule PtcRunner.Kernel.MCPProtocolTest do
           {%{"structuredContent" => %{"value" => 42}, "content" => [%{}]}, validator},
           {%{"structuredContent" => %{"value" => 42}, "content" => []}, nil},
           {%{"content" => [%{"type" => "image", "data" => "..."}]}, nil},
+          {%{
+             "content" => [
+               %{"type" => "resource", "resource" => %{"uri" => "repo://x", "blob" => "AA=="}}
+             ]
+           }, nil},
           {%{"content" => [%{"type" => "text", "text" => "ok", "extra" => true}]}, nil},
           {%{"isError" => "true", "content" => [%{"type" => "text", "text" => "ok"}]}, nil},
           {%{"isError" => nil, "structuredContent" => %{"value" => 42}, "content" => []},

@@ -4,12 +4,13 @@ defmodule PtcRunner.Kernel.JSONSchemaAnnotationTest do
   alias PtcRunner.Kernel.JSONSchema
 
   # Mainstream MCP SDKs emit a root "$schema" dialect marker and "x-…" vendor
-  # keys by default (probed live against DeepWiki, Cloudflare, and Context7).
+  # keys and standard "default" annotations by default (probed live against
+  # DeepWiki, Cloudflare, Context7, and GitHub MCP Server).
   # "$schema" selects the dialect, so only explicitly supported dialect URIs
   # are accepted at the root; unknown, malformed, and nested markers are
-  # rejected. Bounded "x-…" extension metadata is discarded as a deliberate
-  # client policy. Semantic keywords the profile does not implement stay
-  # rejected.
+  # rejected. Bounded "x-…" extension metadata and valid JSON "default"
+  # annotations are discarded as a deliberate client policy. Semantic
+  # keywords the profile does not implement stay rejected.
 
   test "accepts supported root dialects and drops vendor extension keys" do
     for dialect <- [
@@ -59,13 +60,32 @@ defmodule PtcRunner.Kernel.JSONSchemaAnnotationTest do
     assert {:error, :invalid_schema} = JSONSchema.compile(nested)
   end
 
+  test "accepts and drops default annotations without applying them" do
+    schema = %{
+      "type" => "object",
+      "properties" => %{
+        "path" => %{"type" => "string", "default" => "/"}
+      }
+    }
+
+    assert {:ok, normalized, compiled} = JSONSchema.compile(schema)
+    refute get_in(normalized, ["properties", "path"]) |> Map.has_key?("default")
+    assert JSONSchema.valid?(compiled, %{})
+    assert JSONSchema.valid?(compiled, %{"path" => "README.md"})
+    refute JSONSchema.valid?(compiled, %{"path" => 42})
+
+    invalid =
+      put_in(schema, ["properties", "path", "default"], %{self() => "not JSON"})
+
+    assert {:error, :invalid_schema} = JSONSchema.compile(invalid)
+  end
+
   test "still rejects unsupported semantic keywords" do
-    for extra <- [
-          %{"anyOf" => [%{"type" => "string"}]},
-          %{"properties" => %{"q" => %{"type" => "string", "default" => "x"}}}
-        ] do
-      schema = Map.merge(%{"type" => "object"}, extra)
-      assert {:error, :invalid_schema} = JSONSchema.compile(schema)
-    end
+    schema = %{
+      "type" => "object",
+      "properties" => %{"q" => %{"anyOf" => [%{"type" => "string"}]}}
+    }
+
+    assert {:error, :invalid_schema} = JSONSchema.compile(schema)
   end
 end
