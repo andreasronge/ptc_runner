@@ -113,6 +113,49 @@ jobs:
             mix test test/ptc_runner/kernel/mcp_remote_e2e_test.exs \
               --include e2e --trace --warnings-as-errors
 
+  mcp-filesystem-sample:
+    runs-on: ubuntu-latest
+    name: MCP filesystem sample server
+
+    defaults:
+      run:
+        working-directory: examples/mcp/filesystem
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Setup pinned Node toolchain
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22.22.2'
+          cache: npm
+          cache-dependency-path: examples/mcp/filesystem/package-lock.json
+
+      # `npm ci` installs the lockfile exactly and fails when package.json and
+      # the lockfile disagree, so a hand-edited dependency cannot reach CI.
+      - name: Install pinned dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      # The bundle is committed so a clean checkout can run the server without
+      # installing anything. Regenerate it and fail on any difference, so the
+      # artifact can never drift from the source that supposedly produced it.
+      - name: Rebuild the committed bundle
+        run: npm run build
+
+      - name: Fail if the committed bundle is stale
+        run: |
+          if ! git diff --exit-code -- dist/server.js; then
+            echo "::error::dist/server.js does not match a rebuild from src/. Run 'npm run build' in examples/mcp/filesystem and commit the result." >&2
+            exit 1
+          fi
+
+      - name: Run server conformance tests
+        run: npm test
+
   ci:
     runs-on: ubuntu-latest
     name: Compile, test, format, credo, dialyzer & deps check
