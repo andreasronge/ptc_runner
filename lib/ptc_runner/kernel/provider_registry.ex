@@ -86,6 +86,7 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
           accepts_data: [:normal | :private_inspection],
           requires: [atom()],
           provides: [atom()],
+          workflow_llm?: boolean(),
           preflight: (-> {:ok, acquire()} | {:error, term()})
         }
   @type preflighted :: %{
@@ -182,6 +183,7 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
            accepts_data: [:normal],
            requires: [],
            provides: [],
+           workflow_llm?: false,
            preflight: fn ->
              {:ok, fn %{}, %{} -> builder.(config, full_context) end}
            end
@@ -261,9 +263,19 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
       |> Map.put_new(:accepts_data, [:normal])
       |> Map.put_new(:requires, [])
       |> Map.put_new(:provides, [])
+      |> Map.put_new(:workflow_llm?, false)
 
     if Map.keys(prepared) --
-         [:credential_names, :preflight, :data_class, :accepts_data, :requires, :provides] == [] and
+         [
+           :credential_names,
+           :preflight,
+           :data_class,
+           :accepts_data,
+           :requires,
+           :provides,
+           :workflow_llm?
+         ] == [] and
+         is_boolean(prepared.workflow_llm?) and
          valid_data_policy?(prepared.data_class, prepared.accepts_data) and
          length(names) <= 128 and Enum.uniq(names) == names and Enum.all?(names, &valid_name?/1) and
          valid_services?(prepared.requires) and valid_services?(prepared.provides) and

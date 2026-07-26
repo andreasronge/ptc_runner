@@ -54,6 +54,7 @@ defmodule Mix.Tasks.Ptc.Run do
                output: :string,
                private_output: :string,
                host_config: :string,
+               component_override_descriptor: :string,
                check: :boolean
              ],
              aliases: [m: :mission, t: :trace]
@@ -168,6 +169,17 @@ defmodule Mix.Tasks.Ptc.Run do
       "environment" => "workflow",
       "name" => snapshot["provider"],
       "summary" => "llm  model #{snapshot["model"]}",
+      "accepts_data" => Enum.map(installation.accepts_data, &Atom.to_string/1),
+      "snapshot_hash" => snapshot["snapshot_hash"]
+    }
+  end
+
+  defp resolved_provider(snapshot, %{source: :llm_replay} = installation) do
+    %{
+      "environment" => "workflow",
+      "name" => snapshot["provider"],
+      "summary" =>
+        "llm_replay  #{snapshot["entry_count"]} entries  #{snapshot["response_count"]} responses",
       "accepts_data" => Enum.map(installation.accepts_data, &Atom.to_string/1),
       "snapshot_hash" => snapshot["snapshot_hash"]
     }

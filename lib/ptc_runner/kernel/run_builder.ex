@@ -10,6 +10,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
   """
 
   alias PtcRunner.Kernel
+  alias PtcRunner.Kernel.ComponentOverride
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.InspectionArtifact
   alias PtcRunner.Kernel.InspectionSink
@@ -185,6 +186,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
        when input_class in [:normal, :private_inspection] do
     with {:ok, prepared} <- prepare_providers(manifest, registry),
          :ok <- validate_provider_dependencies(prepared),
+         :ok <- validate_single_workflow_llm(prepared),
          effective_class <- effective_data_class(input_class, prepared),
          :ok <- providers_accept(prepared, effective_class),
          {:ok, preflighted} <- preflight_providers(prepared),
@@ -235,6 +237,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
             accepts_data: provider.accepts_data,
             requires: provider.requires,
             provides: provider.provides,
+            workflow_llm?: provider.workflow_llm?,
             prepared: provider
           }
 
@@ -380,6 +383,21 @@ defmodule PtcRunner.Kernel.RunBuilder do
     end
   end
 
+  # A run has one frozen workflow environment, so it has one language model.
+  # Selecting a live alias and a replay alias together would otherwise be
+  # decided by whichever capability won the duplicate-name check during
+  # environment construction — after fixtures were opened and credentials
+  # resolved. An evaluation trial has to be attributable to its configured
+  # provider, so this fails while every provider is still inert.
+  defp validate_single_workflow_llm(prepared) do
+    workflow_llms =
+      Enum.count(prepared, fn entry ->
+        entry.destination == :workflow and entry.workflow_llm?
+      end)
+
+    if workflow_llms > 1, do: {:error, :ambiguous_workflow_llm}, else: :ok
+  end
+
   defp provider_specs(manifest) do
     for destination <- [:workflow, :mission],
         spec <- Map.fetch!(manifest.providers, destination),
@@ -484,8 +502,36 @@ defmodule PtcRunner.Kernel.RunBuilder do
 
     with {:ok, manifest} <- Manifest.load(path, installed_limits),
          {:ok, manifest, input_class} <- maybe_override_input(manifest, opts),
+         {:ok, manifest} <- maybe_override_component(manifest, opts),
          :ok <- preflight_inspection(opts),
          do: build(manifest, registry, Keyword.put(opts, :input_class, input_class))
+  end
+
+  # Applied after the manifest is loaded and before any bundle is compiled, so
+  # the candidate goes through the same dependency, export, signature, and
+  # capability validation as the source it replaces. An override changes which
+  # source compiles, never what compilation permits.
+  #
+  # The candidate reaches the run only here. It is never manifest input and
+  # never mission data, so a generated program cannot introduce or observe one.
+  defp maybe_override_component(%Manifest{} = manifest, opts) do
+    case Keyword.get(opts, :component_override_descriptor) do
+      nil ->
+        {:ok, manifest}
+
+      path ->
+        with {:ok, override} <- ComponentOverride.load(path),
+             {:ok, workflow, workflow_applied?} <-
+               ComponentOverride.apply(manifest.workflow_components, override),
+             {:ok, mission, mission_applied?} <-
+               ComponentOverride.apply(manifest.mission_components, override),
+             true <- workflow_applied? or mission_applied? do
+          {:ok, %Manifest{manifest | workflow_components: workflow, mission_components: mission}}
+        else
+          false -> {:error, :override_component_not_selected}
+          {:error, reason} -> {:error, reason}
+        end
+    end
   end
 
   # A deterministic destination conflict is reported after manifest and input
