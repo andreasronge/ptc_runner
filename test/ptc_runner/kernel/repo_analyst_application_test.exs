@@ -1,5 +1,5 @@
 defmodule PtcRunner.Kernel.RepoAnalystApplicationTest do
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
 
   @moduledoc """
   Covers the `repo-analyst` application package as files rather than runtime.
@@ -466,12 +466,26 @@ defmodule PtcRunner.Kernel.RepoAnalystApplicationTest do
   defp path(name), do: Path.join(@root, name)
 
   defp write_host_fixture(root, paths) do
+    workspace_directory = Path.join(root, "workspace")
+    File.mkdir_p!(workspace_directory)
+    File.write!(Path.join(workspace_directory, "fixture.txt"), "bounded fixture\n")
+
     host =
       @host
       |> File.read!()
       |> Jason.decode!()
       |> put_in(["credentials", "openrouter_key", "env"], "PATH")
       |> put_in(["install", "workspace", "transport", "cwd"], @root)
+      |> put_in(
+        ["install", "workspace", "transport", "args"],
+        [
+          "examples/mcp/filesystem/dist/server.js",
+          "--root",
+          workspace_directory,
+          "--include",
+          "**"
+        ]
+      )
       |> put_in(["install", "history", "directory"], paths[:trace_directory])
       |> put_in(
         ["install", "private-history", "directory"],

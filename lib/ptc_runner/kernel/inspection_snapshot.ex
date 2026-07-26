@@ -48,7 +48,7 @@ defmodule PtcRunner.Kernel.InspectionSnapshot do
   Declared locally so the public inspection API does not borrow a type from the
   internal trace-snapshot implementation.
   """
-  @type trace_snapshot :: struct()
+  @type trace_snapshot :: term()
 
   @opaque t :: %__MODULE__{pid: pid(), token: reference()}
 
