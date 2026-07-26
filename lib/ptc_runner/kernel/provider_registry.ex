@@ -31,6 +31,22 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
   aliases in their host installation, while trusted Elixir embedding can pass
   any explicit builder map. Builder exceptions are contained at their current
   lifecycle phase.
+
+  ## Adding a field to the prepared contract
+
+  A prepared map is built in two places: `normalize_prepared/1` defaults and
+  validates the staged form, and `prepare/4`'s legacy-builder branch
+  constructs one inline without passing through it. A new key must be added to
+  both, and to the `t:prepared/0` typespec — that type is exact, so a runtime
+  key it does not declare makes every later `preflight/1` clause unmatchable.
+  Adding a key to only one construction site compiles cleanly and then fails
+  at run time with `KeyError` in whatever reads it.
+
+  `provides` is not a general marker. It names an acquisition service, and
+  `normalize_build/2` requires the acquired build to export exactly the
+  services declared here, so a provider that declares one without exporting it
+  fails with `:invalid_provider_build`. Use a dedicated field for
+  provider-kind facts, as `workflow_llm?` does.
   """
 
   alias PtcRunner.Kernel.Capability
