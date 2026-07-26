@@ -65,7 +65,7 @@ defmodule PtcRunner.Kernel.Manifest do
   @max_manifest_bytes 1_000_000
   @max_input_bytes 2_000_000
   @entry ~r/\A[a-z][a-z0-9._-]{0,127}\/[a-z][a-z0-9._?!-]{0,127}\z/
-  @top_keys ~w(version workflow mission input providers limits events labels)
+  @top_keys ~w($schema version workflow mission input providers limits events labels)
 
   @enforce_keys [
     :path,
@@ -109,6 +109,7 @@ defmodule PtcRunner.Kernel.Manifest do
          {:ok, decoded} <- Jason.decode(source, objects: :ordered_objects),
          {:ok, manifest} <- ordered_map(decoded),
          :ok <- exact_keys(manifest, @top_keys, ~w(version workflow input)),
+         :ok <- optional_schema(manifest["$schema"]),
          1 <- manifest["version"],
          {:ok, workflow} <- workflow(manifest["workflow"], directory),
          {:ok, mission} <- mission(Map.get(manifest, "mission", %{}), directory),
@@ -140,6 +141,14 @@ defmodule PtcRunner.Kernel.Manifest do
   end
 
   def load(_path, _installed_limits), do: {:error, :invalid_manifest}
+
+  defp optional_schema(nil), do: :ok
+
+  defp optional_schema(value)
+       when is_binary(value) and byte_size(value) in 1..2_048,
+       do: if(String.valid?(value), do: :ok, else: {:error, :invalid_manifest})
+
+  defp optional_schema(_value), do: {:error, :invalid_manifest}
 
   @doc """
   Replaces the decoded input with a manifest-relative JSON object file.
@@ -380,6 +389,154 @@ defmodule PtcRunner.Kernel.Manifest do
   end
 
   defp ordered_map(value), do: {:ok, value}
+
+  @doc "Returns the generated JSON Schema 2020-12 structural manifest contract."
+  @spec schema() :: map()
+  def schema do
+    %{
+      "$schema" => "https://json-schema.org/draft/2020-12/schema",
+      "$id" => "https://ptc-runner.dev/schemas/ptc-application-manifest.schema.json",
+      "title" => "PtcRunner application manifest",
+      "description" =>
+        "Model-authorable application selection. Runtime loading remains authoritative.",
+      "type" => "object",
+      "additionalProperties" => false,
+      "required" => ["version", "workflow", "input"],
+      "properties" => %{
+        "$schema" => bounded_string(2_048),
+        "version" => %{"const" => 1},
+        "workflow" => workflow_schema(),
+        "mission" => mission_schema(),
+        "input" => input_schema(),
+        "providers" => providers_schema(),
+        "limits" => limits_schema(),
+        "events" => events_schema(),
+        "labels" => labels_schema()
+      }
+    }
+  end
+
+  defp workflow_schema do
+    required_object(
+      %{
+        "components" => components_schema(),
+        "entry" => %{
+          "type" => "string",
+          "pattern" => "^[a-z][a-z0-9._-]{0,127}/[a-z][a-z0-9._?!-]{0,127}$"
+        }
+      },
+      ["components", "entry"]
+    )
+  end
+
+  defp mission_schema do
+    closed_object(%{
+      "components" => components_schema(),
+      "data" => %{"type" => "object"}
+    })
+  end
+
+  defp components_schema do
+    %{
+      "type" => "array",
+      "maxItems" => 128,
+      "items" => %{
+        "oneOf" => [
+          required_object(%{"library" => component_id_schema()}, ["library"]),
+          required_object(
+            %{
+              "id" => component_id_schema(),
+              "path" => bounded_string(1_024),
+              "dependencies" => %{
+                "type" => "array",
+                "maxItems" => 128,
+                "uniqueItems" => true,
+                "items" => component_id_schema()
+              }
+            },
+            ["id", "path"]
+          )
+        ]
+      }
+    }
+  end
+
+  defp input_schema do
+    %{
+      "oneOf" => [
+        required_object(%{"value" => %{"type" => "object"}}, ["value"]),
+        required_object(%{"path" => bounded_string(1_024)}, ["path"])
+      ]
+    }
+  end
+
+  defp providers_schema do
+    provider =
+      required_object(%{"name" => component_id_schema(), "config" => %{"type" => "object"}}, [
+        "name"
+      ])
+
+    closed_object(%{
+      "workflow" => %{"type" => "array", "maxItems" => 32, "items" => provider},
+      "mission" => %{"type" => "array", "maxItems" => 32, "items" => provider}
+    })
+  end
+
+  defp limits_schema do
+    properties =
+      Limits.defaults()
+      |> Map.from_struct()
+      |> Map.new(fn {name, _value} ->
+        {Atom.to_string(name), %{"type" => "integer", "minimum" => 1}}
+      end)
+
+    closed_object(properties)
+  end
+
+  defp events_schema do
+    closed_object(%{
+      "policy" => %{"enum" => ["normal", "private"], "default" => "normal"},
+      "run_id" => bounded_string(256),
+      "trace_id" => bounded_string(256)
+    })
+  end
+
+  defp labels_schema do
+    identifier = %{
+      "type" => "string",
+      "pattern" => "^(?:[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,255}|sha256:[0-9a-f]{64})$"
+    }
+
+    tags =
+      closed_object(%{
+        "environment" => %{"enum" => ~w(development test staging production)},
+        "mode" => %{"enum" => ~w(agent deterministic direct wrapper repl)},
+        "stage" => %{"enum" => ~w(started planning executing validating completed failed)},
+        "suite" => %{"enum" => ~w(unit integration e2e conformance privacy)}
+      })
+
+    closed_object(%{
+      "name" => identifier,
+      "model" => identifier,
+      "provider" => identifier,
+      "tags" => tags
+    })
+  end
+
+  defp required_object(properties, required) do
+    properties
+    |> closed_object()
+    |> Map.put("required", required)
+  end
+
+  defp closed_object(properties),
+    do: %{"type" => "object", "additionalProperties" => false, "properties" => properties}
+
+  defp bounded_string(max_length),
+    do: %{"type" => "string", "minLength" => 1, "maxLength" => max_length}
+
+  defp component_id_schema,
+    do: %{"type" => "string", "pattern" => "^[a-z][a-z0-9._-]{0,127}$"}
 
   defp read_relative(directory, path, max_bytes) do
     case ConfinedFile.read(directory, path, max_bytes) do

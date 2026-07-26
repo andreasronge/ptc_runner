@@ -9,6 +9,8 @@ defmodule Mix.Tasks.Ptc.GenDocs do
   2. `docs/conformance/index.md` — namespace coverage dashboard
   3. `docs/conformance/*-audit.md` — Clojure and Java compatibility audits
   4. `docs/java-interop.md` — bounded Java interop reference
+  5. `priv/schemas/ptc-host-config.schema.json` — host-installation JSON Schema
+  6. `priv/schemas/ptc-application-manifest.schema.json` — manifest JSON Schema
 
   ## Usage
 
@@ -19,11 +21,16 @@ defmodule Mix.Tasks.Ptc.GenDocs do
   """
   use Mix.Task
 
+  alias PtcRunner.Kernel.DeterministicJSON
+  alias PtcRunner.Kernel.HostConfig
+  alias PtcRunner.Kernel.Manifest
   alias PtcRunner.Lisp.Java.Surface
   alias PtcRunner.Lisp.Registry
 
   @function_ref_path "docs/function-reference.md"
   @audit_index_path "docs/conformance/index.md"
+  @host_schema_path "priv/schemas/ptc-host-config.schema.json"
+  @manifest_schema_path "priv/schemas/ptc-application-manifest.schema.json"
 
   @audits [
     %{
@@ -108,6 +115,20 @@ defmodule Mix.Tasks.Ptc.GenDocs do
     Enum.each(all_audits(), &generate_audit(&1, check?))
     generate_audit_index(check?)
     generate_java_interop(check?)
+    generate_host_schema(check?)
+    generate_manifest_schema(check?)
+  end
+
+  defp generate_host_schema(check?) do
+    {:ok, encoded} = HostConfig.schema() |> DeterministicJSON.encode()
+    write_or_check!(@host_schema_path, encoded <> "\n", check?)
+    report_generation(@host_schema_path, 1, "schema", check?)
+  end
+
+  defp generate_manifest_schema(check?) do
+    {:ok, encoded} = Manifest.schema() |> DeterministicJSON.encode()
+    write_or_check!(@manifest_schema_path, encoded <> "\n", check?)
+    report_generation(@manifest_schema_path, 1, "schema", check?)
   end
 
   defp check_java_audit_path_set! do
@@ -533,8 +554,8 @@ defmodule Mix.Tasks.Ptc.GenDocs do
   defp write_or_check!(path, expected, true) do
     case File.read(path) do
       {:ok, ^expected} -> :ok
-      {:ok, _stale} -> Mix.raise("Generated documentation is stale: #{path}")
-      {:error, reason} -> Mix.raise("Cannot verify generated documentation #{path}: #{reason}")
+      {:ok, _stale} -> Mix.raise("Generated file is stale: #{path}")
+      {:error, reason} -> Mix.raise("Cannot verify generated file #{path}: #{reason}")
     end
   end
 

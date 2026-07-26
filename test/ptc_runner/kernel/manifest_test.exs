@@ -288,6 +288,35 @@ defmodule PtcRunner.Kernel.ManifestTest do
   end
 
   @tag :tmp_dir
+  test "manifest schema annotation is inert and the generated schema is closed", %{tmp_dir: dir} do
+    File.write!(Path.join(dir, "main.clj"), "(ns main) (defn run [_] (return 1))")
+
+    manifest = %{
+      "$schema" => "./ptc-application-manifest.schema.json",
+      "version" => 1,
+      "workflow" => %{
+        "components" => [%{"id" => "main", "path" => "main.clj"}],
+        "entry" => "main/run"
+      },
+      "input" => %{"value" => %{}}
+    }
+
+    path = Path.join(dir, "schema.json")
+    File.write!(path, Jason.encode!(manifest))
+    assert {:ok, _loaded} = Manifest.load(path)
+
+    root = JSV.build!(Manifest.schema(), atoms: false, formats: false, warnings: :silent)
+    assert {:ok, _validated} = JSV.validate(manifest, root, cast: false)
+
+    refute match?(
+             {:ok, _validated},
+             manifest
+             |> Map.put("unknown", true)
+             |> JSV.validate(root, cast: false)
+           )
+  end
+
+  @tag :tmp_dir
   test "provider registry rejects authority expansion and only calls host builders", %{
     tmp_dir: dir
   } do
