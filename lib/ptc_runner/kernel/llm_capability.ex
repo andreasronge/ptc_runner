@@ -75,6 +75,13 @@ defmodule PtcRunner.Kernel.LLMCapability do
       {:ok, response} ->
         normalize_response(response, response_limit)
 
+      # A requester that already classified its own failure keeps that
+      # classification. Relabelling everything `:unavailable` and retryable is
+      # right for a transport that may recover, but wrong for a provider whose
+      # answer set is frozen: retrying a miss there can only burn turns.
+      {:error, %ProviderError{} = error} ->
+        {:error, error}
+
       {:error, _reason} ->
         {:error, ProviderError.new(:unavailable, "LLM provider unavailable", retryable?: true)}
 

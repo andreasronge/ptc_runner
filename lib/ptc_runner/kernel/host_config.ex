@@ -15,8 +15,8 @@ defmodule PtcRunner.Kernel.HostConfig do
   are not started, and remote endpoints are not contacted. Those operations
   belong to the later preflight and acquisition phases.
 
-  The closed V1 source identifiers are `mcp`, `llm`, `ptc_trace_snapshot`, and
-  `ptc_inspection_snapshot`. LLM credentials are explicit bindings passed to
+  The closed V1 source identifiers are `mcp`, `llm`, `llm_replay`,
+  `ptc_trace_snapshot`, and `ptc_inspection_snapshot`. LLM credentials are explicit bindings passed to
   the adapter per request rather than ambient provider-specific environment
   lookup. The native snapshot sources fix host-relative directories and
   expose only PtcRunner's canonical or private inspection query vocabularies.
@@ -40,6 +40,7 @@ defmodule PtcRunner.Kernel.HostConfig do
   @max_trace_source_bytes 8_000_000
   @max_inspection_source_bytes 64_000_000
   @max_inspection_files 1_024
+  @max_replay_entries 10_000
   @max_timeout_ms 300_000
   @name ~r/\A[a-z][a-z0-9._-]{0,127}\z/
   @environment_name ~r/\A[A-Za-z_][A-Za-z0-9_]*\z/
@@ -117,6 +118,14 @@ defmodule PtcRunner.Kernel.HostConfig do
                 max_request_bytes: pos_integer(),
                 max_response_bytes: pos_integer()
               },
+              data_class: :normal | :private_inspection,
+              accepts_data: [:normal | :private_inspection]
+            }
+          | %{
+              source: :llm_replay,
+              fixtures: binary(),
+              installation_revision: binary() | nil,
+              ceilings: %{max_entries: pos_integer(), max_result_bytes: pos_integer()},
               data_class: :normal | :private_inspection,
               accepts_data: [:normal | :private_inspection]
             }
@@ -264,6 +273,7 @@ defmodule PtcRunner.Kernel.HostConfig do
         "llm" -> llm_installation(value, credentials)
         "ptc_trace_snapshot" -> trace_snapshot_installation(value)
         "ptc_inspection_snapshot" -> inspection_snapshot_installation(value)
+        "llm_replay" -> llm_replay_installation(value)
         _unknown -> {:error, :invalid_installation}
       end
     else
@@ -369,6 +379,47 @@ defmodule PtcRunner.Kernel.HostConfig do
   end
 
   defp trace_snapshot_ceilings(_value), do: {:error, :invalid_ceilings}
+
+  defp llm_replay_installation(value) do
+    allowed = ~w(source fixtures installation_revision ceilings data_class accepts_data)
+
+    with :ok <- exact_keys(value, allowed, ~w(source fixtures)),
+         fixtures when is_binary(fixtures) <- value["fixtures"],
+         true <- valid_path_string?(fixtures),
+         {:ok, installation_revision} <-
+           optional_revision(Map.get(value, "installation_revision")),
+         {:ok, ceilings} <- llm_replay_ceilings(Map.get(value, "ceilings", %{})),
+         {:ok, data_class} <- data_class(Map.get(value, "data_class", "normal")),
+         {:ok, accepts_data} <- accepts_data(Map.get(value, "accepts_data", ["normal"])) do
+      {:ok,
+       %{
+         source: :llm_replay,
+         fixtures: fixtures,
+         installation_revision: installation_revision,
+         ceilings: ceilings,
+         data_class: data_class,
+         accepts_data: accepts_data
+       }}
+    else
+      _reason -> {:error, :invalid_installation}
+    end
+  end
+
+  defp llm_replay_ceilings(value) when is_map(value) do
+    with :ok <- exact_keys(value, ~w(max_entries max_result_bytes), []),
+         max_entries when is_integer(max_entries) and max_entries > 0 <-
+           Map.get(value, "max_entries", @max_replay_entries),
+         true <- max_entries <= @max_replay_entries,
+         max_result_bytes when is_integer(max_result_bytes) and max_result_bytes > 0 <-
+           Map.get(value, "max_result_bytes", @max_result_bytes),
+         true <- max_result_bytes <= @max_result_bytes do
+      {:ok, %{max_entries: max_entries, max_result_bytes: max_result_bytes}}
+    else
+      _reason -> {:error, :invalid_ceilings}
+    end
+  end
+
+  defp llm_replay_ceilings(_value), do: {:error, :invalid_ceilings}
 
   defp inspection_snapshot_installation(value) do
     with :ok <- exact_keys(value, ~w(source directory ceilings), ~w(source directory)),
@@ -780,7 +831,8 @@ defmodule PtcRunner.Kernel.HostConfig do
         mcp_installation_schema(),
         llm_installation_schema(),
         trace_snapshot_installation_schema(),
-        inspection_snapshot_installation_schema()
+        inspection_snapshot_installation_schema(),
+        llm_replay_installation_schema()
       ]
     }
   end
@@ -843,6 +895,34 @@ defmodule PtcRunner.Kernel.HostConfig do
           })
       },
       ["source", "directory"]
+    )
+  end
+
+  defp llm_replay_installation_schema do
+    required_object(
+      %{
+        "source" => %{"const" => "llm_replay"},
+        "fixtures" => path_schema(),
+        "installation_revision" => bounded_string(256),
+        "ceilings" =>
+          closed_object(%{
+            "max_entries" => %{
+              "type" => "integer",
+              "minimum" => 1,
+              "maximum" => @max_replay_entries,
+              "default" => @max_replay_entries
+            },
+            "max_result_bytes" => %{
+              "type" => "integer",
+              "minimum" => 1,
+              "maximum" => @max_result_bytes,
+              "default" => @max_result_bytes
+            }
+          }),
+        "data_class" => data_class_schema(),
+        "accepts_data" => accepts_data_schema()
+      },
+      ["source", "fixtures"]
     )
   end
 

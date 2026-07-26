@@ -22,6 +22,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
   alias PtcRunner.Kernel.InspectionCapability
   alias PtcRunner.Kernel.InspectionSnapshot
   alias PtcRunner.Kernel.LLMCapability
+  alias PtcRunner.Kernel.LLMReplay
   alias PtcRunner.Kernel.MCPSource
   alias PtcRunner.Kernel.ProviderRegistry
   alias PtcRunner.Kernel.TraceCapability
@@ -97,6 +98,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
          credential_names: credential_names,
          data_class: installation.data_class,
          accepts_data: installation.accepts_data,
+         workflow_llm?: true,
          preflight: fn ->
            with {:ok, model, adapter} <- preflight_llm(installation.model) do
              {:ok,
@@ -111,6 +113,22 @@ defmodule PtcRunner.Kernel.HostInstallation do
                 )
               end}
            end
+         end
+       }}
+    end
+  end
+
+  defp prepare(host, %{source: :llm_replay} = installation, selection, context) do
+    with :ok <- placement(installation, context.destination),
+         {:ok, selected} <- llm_replay_selection(installation, selection, context) do
+      {:ok,
+       %{
+         credential_names: [],
+         data_class: installation.data_class,
+         accepts_data: installation.accepts_data,
+         workflow_llm?: true,
+         preflight: fn ->
+           {:ok, fn _credentials -> acquire_llm_replay(host, installation, selected, context) end}
          end
        }}
     end
@@ -176,6 +194,11 @@ defmodule PtcRunner.Kernel.HostInstallation do
   defp placement(%{source: :mcp}, _destination), do: {:error, :provider_destination_denied}
   defp placement(%{source: :llm}, :workflow), do: :ok
   defp placement(%{source: :llm}, _destination), do: {:error, :provider_destination_denied}
+  defp placement(%{source: :llm_replay}, :workflow), do: :ok
+
+  defp placement(%{source: :llm_replay}, _destination),
+    do: {:error, :provider_destination_denied}
+
   defp placement(%{source: :ptc_trace_snapshot}, :mission), do: :ok
 
   defp placement(%{source: :ptc_trace_snapshot}, _destination),
@@ -274,6 +297,30 @@ defmodule PtcRunner.Kernel.HostInstallation do
   end
 
   defp llm_selection(_installation, _value, _context), do: {:error, :invalid_llm_selection}
+
+  defp llm_replay_selection(installation, value, context)
+       when is_map(value) and not is_struct(value) do
+    with true <- Map.keys(value) -- ~w(max_result_bytes) == [],
+         max_result_bytes when is_integer(max_result_bytes) and max_result_bytes > 0 <-
+           Map.get(
+             value,
+             "max_result_bytes",
+             min(installation.ceilings.max_result_bytes, context.limits.capability_result_bytes)
+           ),
+         true <- max_result_bytes <= installation.ceilings.max_result_bytes,
+         true <- max_result_bytes <= context.limits.capability_result_bytes do
+      {:ok,
+       %{
+         max_entries: installation.ceilings.max_entries,
+         max_result_bytes: max_result_bytes
+       }}
+    else
+      _reason -> {:error, :invalid_llm_replay_selection}
+    end
+  end
+
+  defp llm_replay_selection(_installation, _value, _context),
+    do: {:error, :invalid_llm_replay_selection}
 
   defp trace_snapshot_selection(installation, value, context)
        when is_map(value) and not is_struct(value) do
@@ -501,6 +548,44 @@ defmodule PtcRunner.Kernel.HostInstallation do
     end
   rescue
     _exception -> {:error, :invalid_llm_provider}
+  end
+
+  defp acquire_llm_replay(host, installation, selected, context) do
+    with {:ok, replay} <-
+           LLMReplay.start(host.directory, installation.fixtures,
+             max_entries: selected.max_entries,
+             max_result_bytes: selected.max_result_bytes,
+             owner: context.owner
+           ),
+         {:ok, capability} <-
+           LLMCapability.new(
+             requester: LLMReplay.requester(replay),
+             max_response_bytes: selected.max_result_bytes
+           ),
+         {:ok, snapshot} <- llm_replay_snapshot(replay, installation, context.provider) do
+      {:ok,
+       %{
+         capabilities: [capability],
+         snapshot: snapshot,
+         close: fn -> LLMReplay.stop(replay) end,
+         data_class: installation.data_class,
+         accepts_data: installation.accepts_data
+       }}
+    end
+  end
+
+  defp llm_replay_snapshot(replay, installation, provider) do
+    identity =
+      replay
+      |> LLMReplay.snapshot()
+      |> maybe_put("installation_revision", installation.installation_revision)
+
+    with {:ok, encoded} <- DeterministicJSON.encode(identity) do
+      {:ok,
+       identity
+       |> Map.put("provider", provider)
+       |> Map.put("snapshot_hash", sha256(encoded))}
+    end
   end
 
   defp acquire_trace_snapshot(directory, selected, context) do
