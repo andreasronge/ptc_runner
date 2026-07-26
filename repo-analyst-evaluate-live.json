@@ -1,0 +1,58 @@
+{
+  "$schema": "./priv/schemas/ptc-application-manifest.schema.json",
+  "version": 1,
+  "workflow": {
+    "components": [
+      {
+        "library": "agent.core"
+      },
+      {
+        "id": "evaluate",
+        "path": "repo-analyst/evaluate.clj",
+        "dependencies": [
+          "agent.core"
+        ]
+      }
+    ],
+    "entry": "evaluate/run"
+  },
+  "mission": {
+    "components": [
+      {
+        "library": "cap"
+      },
+      {
+        "id": "repo",
+        "path": "repo-analyst/repo.clj",
+        "dependencies": [
+          "cap"
+        ]
+      }
+    ],
+    "data": {}
+  },
+  "input": {
+    "path": "repo-analyst/trial-input.json"
+  },
+  "providers": {
+    "workflow": [
+      {
+        "name": "deepseek"
+      }
+    ],
+    "mission": [
+      {
+        "name": "workspace"
+      }
+    ]
+  },
+  "contracts": {
+    "input_schema": {
+      "path": "repo-analyst/trial-input.schema.json"
+    }
+  },
+  "limits": {
+    "run_duration_ms": 120000,
+    "mission_capability_calls": 64
+  }
+}

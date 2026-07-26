@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "repo-analyst joined evaluation trial",
+  "description": "One trial as the aggregate consumes it. This is NOT a manifest result contract: a trial run cannot validate against it, because a workflow program cannot see its own effective bundle hash, provider snapshot, or verified override identity. Those exist only in the run-started metadata the run itself emits. The trial writes what it can observe, a trusted host step joins the run identity from that run's trace, and the joined record is what aggregate.json validates. Splitting it this way keeps the identities attributable to the run that produced them rather than to a value the workflow could have invented.",
+  "type": "object",
+  "properties": {
+    "subject": {"type": "string", "enum": ["baseline", "candidate"]},
+    "repetition": {"type": "integer", "minimum": 1, "maximum": 64},
+    "candidate": {
+      "type": "object",
+      "properties": {
+        "component_id": {"type": "string", "minLength": 1, "maxLength": 128},
+        "base_source_hash": {"type": "string", "minLength": 1, "maxLength": 128},
+        "source_hash": {"type": "string", "minLength": 1, "maxLength": 128}
+      },
+      "required": ["component_id", "base_source_hash", "source_hash"]
+    },
+    "case": {
+      "type": "object",
+      "properties": {
+        "id": {"type": "string", "minLength": 1, "maxLength": 128},
+        "set": {
+          "type": "string",
+          "enum": ["motivating", "regression", "held-out", "negative-control"]
+        },
+        "case_hash": {"type": "string", "minLength": 1, "maxLength": 128}
+      },
+      "required": ["id", "set", "case_hash"]
+    },
+    "passed": {
+      "type": "boolean",
+      "description": "Whether the frozen expectation held. A trial that cannot decide is a failure, never a pass."
+    },
+    "detail": {
+      "type": "string",
+      "description": "Why the expectation held or did not. Bounded and payload-free.",
+      "maxLength": 2000
+    },
+    "run_identity": {
+      "type": "object",
+      "description": "Filled by the trusted host step from this run's own run-started metadata. A schema-only hash would not prove the evaluated component or provider was the same, so these are the identities that make a trial attributable.",
+      "properties": {
+        "workflow_bundle_hash": {"type": "string", "minLength": 1, "maxLength": 128},
+        "mission_bundle_hash": {"type": "string", "maxLength": 128},
+        "provider_snapshot_hashes": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {"type": "string", "minLength": 1, "maxLength": 128}
+        },
+        "fixture_set_hash": {"type": "string", "maxLength": 128},
+        "override_source_hash": {
+          "type": "string",
+          "description": "Present only on a candidate trial. Absent on a baseline, which is how the aggregate tells the two apart without trusting the declared subject.",
+          "maxLength": 128
+        }
+      },
+      "required": ["workflow_bundle_hash", "provider_snapshot_hashes"]
+    }
+  },
+  "required": ["subject", "repetition", "candidate", "case", "passed", "detail", "run_identity"]
+}

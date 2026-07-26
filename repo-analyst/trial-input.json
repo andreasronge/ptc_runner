@@ -1,0 +1,23 @@
+{
+  "subject": "baseline",
+  "repetition": 1,
+  "candidate": {
+    "component_id": "agent.core",
+    "base_source_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "source_hash": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+  },
+  "case": {
+    "id": "motivating.paged-evidence",
+    "set": "motivating",
+    "task": "Report every file whose contents mention the literal string \"needle\". The list must be complete. Return a JSON object with an \"answer\" string and a \"citations\" array citing each file you read.",
+    "expect": {
+      "kind": "cites-path",
+      "path": "lib/zz_beacon.ex",
+      "reason": "Twenty-two matches against a twenty-result page means the last file is reachable only by following next_cursor."
+    },
+    "case_hash": "sha256:de987d1abd6cc46d92b7ecf1c4982a9e1e9d7bd7593d5df847c53285f3c28bae"
+  },
+  "agent": {
+    "max_turns": 8
+  }
+}

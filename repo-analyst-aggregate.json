@@ -1,0 +1,30 @@
+{
+  "$schema": "./priv/schemas/ptc-application-manifest.schema.json",
+  "version": 1,
+  "workflow": {
+    "components": [
+      {
+        "id": "aggregate",
+        "path": "repo-analyst/aggregate.clj"
+      }
+    ],
+    "entry": "aggregate/run"
+  },
+  "mission": {
+    "components": [],
+    "data": {}
+  },
+  "input": {
+    "value": {
+      "trials": []
+    }
+  },
+  "contracts": {
+    "result_schema": {
+      "path": "repo-analyst/evaluation.schema.json"
+    }
+  },
+  "limits": {
+    "run_duration_ms": 60000
+  }
+}
