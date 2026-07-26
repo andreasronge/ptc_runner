@@ -202,6 +202,89 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
   end
 
   @tag :tmp_dir
+  test "installs one immutable trace snapshot under alias-derived mission operations", %{
+    tmp_dir: dir
+  } do
+    trace_directory = Path.join(dir, "traces")
+    File.mkdir_p!(trace_directory)
+
+    File.write!(
+      Path.join(trace_directory, "run.jsonl"),
+      Jason.encode!(trace_event("captured", 1, "run-started")) <>
+        "\n" <>
+        Jason.encode!(trace_event("captured", 2, "run-stopped")) <> "\n"
+    )
+
+    config = %{
+      "install" => %{
+        "history" => %{
+          "source" => "ptc_trace_snapshot",
+          "directory" => "traces",
+          "ceilings" => %{
+            "max_source_bytes" => 2_000_000,
+            "max_result_bytes" => 250_000
+          }
+        }
+      }
+    }
+
+    host = load_host(dir, config)
+    assert {:ok, registry} = HostInstallation.registry(host)
+    mission = context(dir, :mission)
+
+    assert {:error, :provider_destination_denied} =
+             ProviderRegistry.prepare(registry, "history", %{}, %{
+               mission
+               | destination: :workflow
+             })
+
+    assert {:error, :invalid_trace_snapshot_selection} =
+             ProviderRegistry.prepare(
+               registry,
+               "history",
+               %{"max_result_bytes" => 250_001},
+               mission
+             )
+
+    assert {:ok, built} =
+             ProviderRegistry.build(
+               registry,
+               "history",
+               %{"max_result_bytes" => 100_000},
+               mission
+             )
+
+    assert Enum.map(built.capabilities, & &1.name) == [
+             "history.list-runs",
+             "history.get-run",
+             "history.list-turns",
+             "history.counters"
+           ]
+
+    callbacks = Map.new(built.capabilities, &{&1.name, &1.callback})
+
+    assert {:ok, %{"items" => [%{"run_id" => "captured"}]}} =
+             callbacks["history.list-runs"].(%{})
+
+    File.write!(
+      Path.join(trace_directory, "run.jsonl"),
+      Jason.encode!(trace_event("changed", 1, "run-started")) <> "\n"
+    )
+
+    assert {:ok, %{"items" => [%{"run_id" => "captured"}]}} =
+             callbacks["history.list-runs"].(%{})
+
+    assert built.data_class == :normal
+    assert built.accepts_data == [:normal, :private_inspection]
+    assert built.snapshot["provider"] == "history"
+    assert built.snapshot["source"] == "ptc_trace_snapshot"
+    assert built.snapshot["run_count"] == 1
+    assert built.snapshot["snapshot_hash"] =~ ~r/\A[0-9a-f]{64}\z/
+    refute inspect(built.snapshot) =~ dir
+    assert :ok = built.close.()
+  end
+
+  @tag :tmp_dir
   test "preparation exposes an installation that accepts only private data for run-level checks",
        %{
          tmp_dir: dir
@@ -291,4 +374,16 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
 
   defp restore_env(key, nil), do: Application.delete_env(:ptc_runner, key)
   defp restore_env(key, value), do: Application.put_env(:ptc_runner, key, value)
+
+  defp trace_event(run_id, sequence, type) do
+    %{
+      "schema_version" => 1,
+      "run_id" => run_id,
+      "trace_id" => "trace-#{run_id}",
+      "sequence" => sequence,
+      "timestamp" => "2026-07-26T12:00:00Z",
+      "type" => type,
+      "data" => if(type == "run-stopped", do: %{"outcome" => "ok"}, else: %{})
+    }
+  end
 end

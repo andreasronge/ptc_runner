@@ -238,6 +238,11 @@ mapping may opt into exact validated feedback bounded to 1,024 bytes. Runtime
 calls propagate only a derived W3C `traceparent`, with no baggage or
 operator-supplied trace value crossing the provider boundary.
 
+PtcRunner-owned canonical traces remain native rather than passing through
+MCP. A host-installed `ptc_trace_snapshot` uses `TraceSnapshot` to capture one
+directory and `TraceCapability` to expose the same four canonical `TraceLog`
+queries used by `log-analysis-v1`.
+
 The local log-analysis path is a fixed product profile shared by the Viewer
 and terminal REPL. `PtcRunner.Kernel.LogAnalysisSessionBuilder` is the host
 entry, and `LogAnalysisSession`, `SessionTrace`, and `TraceSnapshot` own the

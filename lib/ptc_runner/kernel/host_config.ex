@@ -15,9 +15,11 @@ defmodule PtcRunner.Kernel.HostConfig do
   are not started, and remote endpoints are not contacted. Those operations
   belong to the later preflight and acquisition phases.
 
-  The closed V1 source identifiers are `mcp` and `llm`. LLM credentials are
-  explicit bindings passed to the adapter per request rather than ambient
-  provider-specific environment lookup.
+  The closed V1 source identifiers are `mcp`, `llm`, and
+  `ptc_trace_snapshot`. LLM credentials are explicit bindings passed to the
+  adapter per request rather than ambient provider-specific environment
+  lookup. The native trace source fixes one host-relative directory and
+  exposes only PtcRunner's four canonical trace queries.
 
   `schema/0` is the canonical structural description shipped for editor and
   human feedback. Runtime decoding remains authoritative for semantic checks
@@ -35,6 +37,7 @@ defmodule PtcRunner.Kernel.HostConfig do
   @max_string_bytes 131_072
   @max_secret_bytes 65_536
   @max_result_bytes 1_048_576
+  @max_trace_source_bytes 8_000_000
   @max_timeout_ms 300_000
   @name ~r/\A[a-z][a-z0-9._-]{0,127}\z/
   @environment_name ~r/\A[A-Za-z_][A-Za-z0-9_]*\z/
@@ -114,6 +117,14 @@ defmodule PtcRunner.Kernel.HostConfig do
               },
               data_class: :normal | :private_inspection,
               accepts_data: [:normal | :private_inspection]
+            }
+          | %{
+              source: :ptc_trace_snapshot,
+              directory: binary(),
+              ceilings: %{
+                max_source_bytes: pos_integer(),
+                max_result_bytes: pos_integer()
+              }
             }
 
   @type t :: %__MODULE__{
@@ -240,6 +251,7 @@ defmodule PtcRunner.Kernel.HostConfig do
       case value["source"] do
         "mcp" -> mcp_installation(value, credentials)
         "llm" -> llm_installation(value, credentials)
+        "ptc_trace_snapshot" -> trace_snapshot_installation(value)
         _unknown -> {:error, :invalid_installation}
       end
     else
@@ -309,6 +321,42 @@ defmodule PtcRunner.Kernel.HostConfig do
       _reason -> {:error, :invalid_installation}
     end
   end
+
+  defp trace_snapshot_installation(value) do
+    with :ok <- exact_keys(value, ~w(source directory ceilings), ~w(source directory)),
+         directory when is_binary(directory) <- value["directory"],
+         true <- valid_path_string?(directory),
+         {:ok, ceilings} <- trace_snapshot_ceilings(Map.get(value, "ceilings", %{})) do
+      {:ok,
+       %{
+         source: :ptc_trace_snapshot,
+         directory: directory,
+         ceilings: ceilings
+       }}
+    else
+      _reason -> {:error, :invalid_installation}
+    end
+  end
+
+  defp trace_snapshot_ceilings(value) when is_map(value) do
+    with :ok <- exact_keys(value, ~w(max_source_bytes max_result_bytes), []),
+         max_source_bytes when is_integer(max_source_bytes) and max_source_bytes > 0 <-
+           Map.get(value, "max_source_bytes", @max_trace_source_bytes),
+         true <- max_source_bytes <= @max_trace_source_bytes,
+         max_result_bytes when is_integer(max_result_bytes) and max_result_bytes > 0 <-
+           Map.get(value, "max_result_bytes", @max_result_bytes),
+         true <- max_result_bytes <= @max_result_bytes do
+      {:ok,
+       %{
+         max_source_bytes: max_source_bytes,
+         max_result_bytes: max_result_bytes
+       }}
+    else
+      _reason -> {:error, :invalid_ceilings}
+    end
+  end
+
+  defp trace_snapshot_ceilings(_value), do: {:error, :invalid_ceilings}
 
   defp transport(%{"type" => "stdio"} = value, credentials),
     do: stdio_transport(value, credentials)
@@ -660,7 +708,13 @@ defmodule PtcRunner.Kernel.HostConfig do
   end
 
   defp installation_schema do
-    %{"oneOf" => [mcp_installation_schema(), llm_installation_schema()]}
+    %{
+      "oneOf" => [
+        mcp_installation_schema(),
+        llm_installation_schema(),
+        trace_snapshot_installation_schema()
+      ]
+    }
   end
 
   defp mcp_installation_schema do
@@ -696,6 +750,31 @@ defmodule PtcRunner.Kernel.HostConfig do
         "accepts_data" => accepts_data_schema()
       },
       ["source", "model", "credential"]
+    )
+  end
+
+  defp trace_snapshot_installation_schema do
+    required_object(
+      %{
+        "source" => %{"const" => "ptc_trace_snapshot"},
+        "directory" => path_schema(),
+        "ceilings" =>
+          closed_object(%{
+            "max_source_bytes" => %{
+              "type" => "integer",
+              "minimum" => 1,
+              "maximum" => @max_trace_source_bytes,
+              "default" => @max_trace_source_bytes
+            },
+            "max_result_bytes" => %{
+              "type" => "integer",
+              "minimum" => 1,
+              "maximum" => @max_result_bytes,
+              "default" => @max_result_bytes
+            }
+          })
+      },
+      ["source", "directory"]
     )
   end
 

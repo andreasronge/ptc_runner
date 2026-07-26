@@ -1343,6 +1343,12 @@ neither persisted nor attached to the error.
 
 #### E1 — Shared snapshot/query sources
 
+**Status:** in progress. The canonical half has landed:
+`ptc_trace_snapshot` is a mission-only host installation, captures through the
+existing `TraceSnapshot` owner, derives four fixed operations from its alias,
+and delegates every query to `TraceLog`. The paired private inspection
+snapshot/query layer and profile/manifest parity remain.
+
 - adapt the existing trace owner into a provider builder;
 - add `InspectionSnapshot` and fixed inspection query/capability modules
   without changing the inspection file format;

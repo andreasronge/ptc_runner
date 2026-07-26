@@ -94,6 +94,33 @@ defmodule PtcRunner.Kernel.HostConfigTest do
   end
 
   @tag :tmp_dir
+  test "loads one native canonical trace snapshot installation", %{tmp_dir: dir} do
+    config = %{
+      "install" => %{
+        "history" => %{
+          "source" => "ptc_trace_snapshot",
+          "directory" => "traces",
+          "ceilings" => %{
+            "max_source_bytes" => 2_000_000,
+            "max_result_bytes" => 250_000
+          }
+        }
+      }
+    }
+
+    assert {:ok, host} = dir |> write_config(config) |> HostConfig.load()
+
+    assert host.install["history"] == %{
+             source: :ptc_trace_snapshot,
+             directory: "traces",
+             ceilings: %{
+               max_source_bytes: 2_000_000,
+               max_result_bytes: 250_000
+             }
+           }
+  end
+
+  @tag :tmp_dir
   test "loads closed HTTP authentication and safe installation metadata", %{tmp_dir: dir} do
     config = %{
       "$schema" => "./ptc-host-config.schema.json",
@@ -223,6 +250,19 @@ defmodule PtcRunner.Kernel.HostConfigTest do
     assert {:ok, _validated} = JSV.validate(llm, root, cast: false)
     assert {:ok, host} = HostConfig.decode(llm, "/tmp")
     assert host.install["deepseek"].source == :llm
+
+    trace = %{
+      "install" => %{
+        "history" => %{
+          "source" => "ptc_trace_snapshot",
+          "directory" => "traces"
+        }
+      }
+    }
+
+    assert {:ok, _validated} = JSV.validate(trace, root, cast: false)
+    assert {:ok, host} = HostConfig.decode(trace, "/tmp")
+    assert host.install["history"].source == :ptc_trace_snapshot
 
     refute match?(
              {:ok, _validated},

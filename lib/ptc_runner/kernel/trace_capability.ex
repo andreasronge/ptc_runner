@@ -37,17 +37,45 @@ defmodule PtcRunner.Kernel.TraceCapability do
   @doc false
   @spec from_snapshot(TraceSnapshot.t()) ::
           {:ok, [Capability.t()]} | {:error, :invalid_trace_capability}
-  def from_snapshot(snapshot) do
+  def from_snapshot(snapshot), do: assemble_snapshot(snapshot, :profile)
+
+  @doc false
+  @spec from_snapshot(TraceSnapshot.t(), binary()) ::
+          {:ok, [Capability.t()]} | {:error, :invalid_trace_capability}
+  def from_snapshot(snapshot, provider) when is_binary(provider) do
+    if provider =~ ~r/\A[a-z][a-z0-9._-]{0,127}\z/ do
+      assemble_snapshot(snapshot, {:provider, provider})
+    else
+      {:error, :invalid_trace_capability}
+    end
+  end
+
+  def from_snapshot(_snapshot, _provider), do: {:error, :invalid_trace_capability}
+
+  defp assemble_snapshot(snapshot, naming) do
     with true <- TraceSnapshot.valid?(snapshot),
-         {:ok, list_runs} <- snapshot_capability(snapshot, "trace-list-runs", :list_runs),
-         {:ok, get_run} <- snapshot_capability(snapshot, "trace-get-run", :get_run),
-         {:ok, list_turns} <- snapshot_capability(snapshot, "trace-list-turns", :list_turns),
-         {:ok, counters} <- snapshot_capability(snapshot, "trace-counters", :counters) do
+         {:ok, list_runs} <-
+           snapshot_capability(snapshot, capability_name(naming, :list_runs), :list_runs),
+         {:ok, get_run} <-
+           snapshot_capability(snapshot, capability_name(naming, :get_run), :get_run),
+         {:ok, list_turns} <-
+           snapshot_capability(snapshot, capability_name(naming, :list_turns), :list_turns),
+         {:ok, counters} <-
+           snapshot_capability(snapshot, capability_name(naming, :counters), :counters) do
       {:ok, [list_runs, get_run, list_turns, counters]}
     else
       _ -> {:error, :invalid_trace_capability}
     end
   end
+
+  defp capability_name(:profile, :list_runs), do: "trace-list-runs"
+  defp capability_name(:profile, :get_run), do: "trace-get-run"
+  defp capability_name(:profile, :list_turns), do: "trace-list-turns"
+  defp capability_name(:profile, :counters), do: "trace-counters"
+  defp capability_name({:provider, provider}, :list_runs), do: provider <> ".list-runs"
+  defp capability_name({:provider, provider}, :get_run), do: provider <> ".get-run"
+  defp capability_name({:provider, provider}, :list_turns), do: provider <> ".list-turns"
+  defp capability_name({:provider, provider}, :counters), do: provider <> ".counters"
 
   defp capability(trace_log, name, operation) do
     Capability.new(

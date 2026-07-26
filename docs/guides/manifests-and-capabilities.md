@@ -216,10 +216,32 @@ configuration:
 
 Only builders installed by the host may be selected; no provider names are
 implicit. The separate host JSON fixes models, commands, credentials,
-endpoints, tool mappings, data classes, and outer ceilings. A manifest cannot
-name an Elixir module or callback, launch a command, include credentials, or
-choose an arbitrary endpoint. Placement is enforced: LLM sources are
-workflow-only and MCP sources are mission-only.
+endpoints, tool mappings, native PtcRunner sources, data classes, and outer
+ceilings. A manifest cannot name an Elixir module or callback, launch a
+command, include credentials, or choose an arbitrary endpoint. Placement is
+enforced: LLM sources are workflow-only; MCP and native snapshot sources are
+mission-only.
+
+Canonical PtcRunner traces use a native immutable source rather than MCP:
+
+```json
+"history": {
+  "source": "ptc_trace_snapshot",
+  "directory": "traces",
+  "ceilings": {
+    "max_source_bytes": 8000000,
+    "max_result_bytes": 250000
+  }
+}
+```
+
+The manifest selects `{"name": "history"}` in its mission providers. The
+installed alias derives four fixed capabilities:
+`history.list-runs`, `history.get-run`, `history.list-turns`, and
+`history.counters`. Acquisition reads and validates the directory once;
+subsequent queries use the frozen capture even if path contents change. The
+safe provider snapshot includes counts, byte ceilings, and content identity,
+but no path.
 
 `model_visible` controls whether a capability appears in model context. It
 does not grant or remove execution authority.

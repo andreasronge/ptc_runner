@@ -270,6 +270,49 @@ defmodule Mix.Tasks.Ptc.RunTest do
   end
 
   @tag :tmp_dir
+  test "--check captures a host-installed canonical trace snapshot", %{tmp_dir: dir} do
+    manifest_path = write_manifest(dir, %{"value" => 1})
+    trace_directory = Path.join(dir, "traces")
+    File.mkdir_p!(trace_directory)
+
+    capture_io(fn ->
+      Mix.Task.reenable("ptc.run")
+      Run.run([manifest_path, "--trace", Path.join(trace_directory, "seed.jsonl")])
+    end)
+
+    manifest =
+      manifest_path
+      |> File.read!()
+      |> Jason.decode!()
+      |> Map.put("providers", %{"mission" => [%{"name" => "history"}]})
+
+    File.write!(manifest_path, Jason.encode!(manifest))
+
+    host = %{
+      "install" => %{
+        "history" => %{
+          "source" => "ptc_trace_snapshot",
+          "directory" => "traces",
+          "ceilings" => %{"max_result_bytes" => 250_000}
+        }
+      }
+    }
+
+    host_path = Path.join(dir, "host.json")
+    File.write!(host_path, Jason.encode!(host))
+
+    output =
+      capture_io(fn ->
+        Mix.Task.reenable("ptc.run")
+        Run.run([manifest_path, "--host-config", host_path, "--check"])
+      end)
+
+    assert output =~ "mission  history  ptc_trace_snapshot  4 operations"
+    assert output =~ "accepts: normal, private_inspection"
+    assert output =~ "snapshot "
+  end
+
+  @tag :tmp_dir
   test "rejects an occupied inspection destination before execution", %{tmp_dir: dir} do
     File.write!(
       Path.join(dir, "main.clj"),

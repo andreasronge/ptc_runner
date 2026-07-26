@@ -67,6 +67,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   profile and root-only tagged decision unions. Input overrides now validate
   before provider activity, and successful result values validate after
   evidence capture but before terminal or artifact publication.
+- Added a host-installed `ptc_trace_snapshot` source that freezes one canonical
+  trace directory and exposes the existing four bounded `TraceLog` queries
+  under alias-derived mission capability names.
 
 ### Changed
 
