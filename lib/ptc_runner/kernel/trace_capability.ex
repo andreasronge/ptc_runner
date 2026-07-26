@@ -7,7 +7,7 @@ defmodule PtcRunner.Kernel.TraceCapability do
   capabilities exposes only the selected source and bounded query results; it
   does not grant ambient filesystem or cross-environment access.
 
-  Internal log-analysis sessions may instead construct the same four
+  Internal analysis profiles may instead construct the same four
   capabilities from a tokenized snapshot handle. Capability closures retain
   only that opaque handle and still delegate to the canonical TraceLog query
   implementation.

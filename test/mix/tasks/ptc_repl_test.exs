@@ -202,6 +202,32 @@ defmodule Mix.Tasks.Ptc.ReplTest do
     refute output =~ File.cwd!()
   end
 
+  test "private profile frontend policy fails before opening declared sources" do
+    missing_resources = [
+      "--profile",
+      "inspection-analysis-v1",
+      "--resource",
+      "traces=/definitely/missing/private-traces",
+      "--resource",
+      "inspection=/definitely/missing/private-inspection",
+      "--session-trace-dir",
+      "/definitely/missing/private-output"
+    ]
+
+    for {suffix, message} <- [
+          {[], ~r/requires --private-terminal/},
+          {["--private-terminal"], ~r/requires attached stdin and stdout terminals/},
+          {["--private-terminal", "-e", "42"], ~r/interactive-only/},
+          {["--private-terminal", "--format", "jsonl"], ~r/does not allow this output format/}
+        ] do
+      capture_io(fn ->
+        assert_raise Mix.Error, message, fn -> Repl.run(missing_resources ++ suffix) end
+      end)
+
+      Mix.Task.reenable("ptc.repl")
+    end
+  end
+
   @tag :tmp_dir
   test "profile evals share mission state and persist outside the source", %{tmp_dir: directory} do
     source = Path.join(directory, "source")
@@ -622,7 +648,7 @@ defmodule Mix.Tasks.Ptc.ReplTest do
     |> Enum.filter(fn pid ->
       case Process.info(pid, :dictionary) do
         {:dictionary, dictionary} ->
-          dictionary[:"$initial_call"] == {PtcRunner.Kernel.LogAnalysisSession, :init, 1}
+          dictionary[:"$initial_call"] == {PtcRunner.Kernel.AnalysisSession, :init, 1}
 
         nil ->
           false

@@ -13,9 +13,9 @@ defmodule PtcRunner.Kernel.Evaluation do
   memory and exact bounded history before exposing only an inert public value.
   Continued results additionally expose bounded chronological prints for the
   next agent turn. Runtime-tool results use the strict `:kernel_json`
-  projection and reject ambiguous collections. The log-analysis session opts
-  into the preserving `:public` projection because it formats an Elixir
-  observation rather than returning JSON to workflow Lisp.
+  projection and reject ambiguous collections. Code-owned analysis sessions
+  opt into the preserving `:public` projection because their trusted frontend
+  formats an Elixir observation rather than returning JSON to workflow Lisp.
   """
 
   alias PtcRunner.Kernel.Dispatcher
