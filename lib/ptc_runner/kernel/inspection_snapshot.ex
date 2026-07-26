@@ -42,9 +42,17 @@ defmodule PtcRunner.Kernel.InspectionSnapshot do
   @enforce_keys [:pid, :token]
   defstruct [:pid, :token]
 
+  @typedoc """
+  Opaque handle to the canonical trace snapshot this capture is correlated with.
+
+  Declared locally so the public inspection API does not borrow a type from the
+  internal trace-snapshot implementation.
+  """
+  @type trace_snapshot :: struct()
+
   @opaque t :: %__MODULE__{pid: pid(), token: reference()}
 
-  @spec start({:directory, binary()}, TraceSnapshot.t(), keyword()) ::
+  @spec start({:directory, binary()}, trace_snapshot(), keyword()) ::
           {:ok, t()} | {:error, atom()}
   def start(source, trace_snapshot, opts \\ [])
 
