@@ -404,7 +404,11 @@ defmodule PtcRunner.Lisp.Java.OracleFixturesTest do
     assert setup_java_pins(release_workflow) ==
              [{versions.java.distribution, versions.java.setup_java}]
 
-    assert setup =~ "babashka-${{ runner.os }}-#{versions.babashka}-sha256-v1"
+    assert setup =~
+             "babashka-${{ runner.os }}-${{ runner.arch }}-#{versions.babashka}-sha256-v1"
+
+    assert setup =~ "${{ runner.os }}-${{ runner.arch }}-mix-otp"
+    assert setup =~ "plt-${{ runner.os }}-${{ runner.arch }}-otp"
   end
 
   test "oracle subprocesses enforce their output bound" do

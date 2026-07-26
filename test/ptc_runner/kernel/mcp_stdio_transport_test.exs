@@ -9,6 +9,11 @@ defmodule PtcRunner.Kernel.MCPStdioTransportTest do
   @root Path.expand("../../..", __DIR__)
   @inherited_environment ~w(HOME LOGNAME PATH SHELL TERM USER)
 
+  # Generous on purpose: this covers child VM startup on a saturated machine,
+  # not transport behavior. Tests that assert on timeouts set their own.
+  @readiness_timeout_ms 30_000
+  @fixture_start_timeout_ms 35_000
+
   @tag :tmp_dir
   test "correlates concurrent responses that arrive out of order", %{tmp_dir: tmp_dir} do
     transport = start_transport(tmp_dir)
@@ -86,8 +91,7 @@ defmodule PtcRunner.Kernel.MCPStdioTransportTest do
   test "malformed protocol stdout fails the transport closed", %{tmp_dir: tmp_dir} do
     transport = start_transport(tmp_dir)
 
-    assert {:error, :mcp_protocol_error} =
-             MCPStdioTransport.request(transport, "junk", %{}, %{}, 8_192, 5_000)
+    assert {:error, :mcp_protocol_error} = request(transport, "junk")
 
     assert {:error, :closed} = request(transport, "after-junk")
   end
@@ -116,7 +120,11 @@ defmodule PtcRunner.Kernel.MCPStdioTransportTest do
     tmp_dir: tmp_dir
   } do
     marker = Path.join(tmp_dir, "cancelled")
-    transport = start_transport(tmp_dir, marker)
+
+    # Not warmed: this asserts the absolute request id below, and a warm-up
+    # request would shift it. Safe to skip, because the first request here
+    # expects a timeout and so cannot lose a race against server startup.
+    transport = start_transport(tmp_dir, marker, "read", warm?: false)
 
     assert {:error, :mcp_timeout} =
              MCPStdioTransport.request(transport, "never", %{}, %{}, 8_192, 25)
@@ -224,7 +232,9 @@ defmodule PtcRunner.Kernel.MCPStdioTransportTest do
         end
       end)
 
-    assert_receive {:transport, %MCPStdioTransport{pid: transport_pid}}, 5_000
+    assert_receive {:transport, %MCPStdioTransport{pid: transport_pid}},
+                   @fixture_start_timeout_ms
+
     ref = Process.monitor(transport_pid)
     send(owner, :stop)
     assert_receive {:DOWN, ^ref, :process, ^transport_pid, _reason}, 5_000
@@ -477,13 +487,39 @@ defmodule PtcRunner.Kernel.MCPStdioTransportTest do
     end
   end
 
-  defp start_transport(tmp_dir, marker \\ nil, fixture_mode \\ "read") do
+  # `start/1` returns once the launcher reports a successful exec, which is not
+  # the same as the server being ready to answer. The fixture server is a full
+  # Elixir VM: booting one costs roughly 400 ms idle but over 3 s under CPU
+  # contention, so a test's own deadline was racing BEAM startup rather than
+  # measuring the transport. Prove the server is serving first; per-test
+  # deadlines then mean what they say.
+  #
+  # Only the request/response fixture can be warmed. `no-read`, `delayed-read`,
+  # and `close-output` deliberately withhold or defer a response, and their
+  # tests depend on that.
+  defp start_transport(tmp_dir, marker \\ nil, fixture_mode \\ "read", opts \\ []) do
     marker = marker || Path.join(tmp_dir, "unused")
 
     assert {:ok, transport} =
              MCPStdioTransport.start(launch_options(tmp_dir, marker, fixture_mode))
 
+    if Keyword.get(opts, :warm?, fixture_mode == "read"), do: await_serving(transport)
+
     transport
+  end
+
+  defp await_serving(transport) do
+    assert {:ok, %{"result" => %{"method" => "ready"}}} =
+             MCPStdioTransport.request(
+               transport,
+               "ready",
+               %{},
+               %{},
+               8_192,
+               @readiness_timeout_ms
+             )
+
+    :ok
   end
 
   defp launch_options(tmp_dir, marker \\ nil, fixture_mode \\ "read") do

@@ -36,9 +36,10 @@ create and push the matching companion tag.
 
 The launcher tag workflow first proves that the tagged commit is on `main` and
 passes the root release gates. It then builds and executes the configured
-macOS and Linux artifacts on the pinned macOS 15 and Ubuntu 22.04 baselines,
-exercises download and mandatory SHA-256 verification, proves source fallback,
-and creates a draft GitHub release containing:
+artifacts on the pinned macOS 15 ARM64 and x86-64, Ubuntu 22.04 x86-64, and
+Ubuntu 24.04 ARM64 baselines, exercises download and mandatory SHA-256
+verification, proves source fallback, and creates a draft GitHub release
+containing:
 
 - each precompiled port archive and its adjacent `.sha256` file;
 - the complete `checksum.exs`; and

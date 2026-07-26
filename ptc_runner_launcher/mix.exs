@@ -28,7 +28,7 @@ defmodule PtcRunnerLauncher.MixProject do
       make_force_build: System.get_env("PTC_RUNNER_LAUNCHER_BUILD_FROM_SOURCE") == "1",
       make_env: %{"MACOSX_DEPLOYMENT_TARGET" => @release_config.macos_deployment_target},
       cc_precompiler: [
-        compilers: @release_config.precompiled_targets
+        compilers: precompiled_targets()
       ]
     ]
   end
@@ -66,6 +66,21 @@ defmodule PtcRunnerLauncher.MixProject do
   defp precompiled_url do
     System.get_env("PTC_RUNNER_LAUNCHER_PRECOMPILED_URL") ||
       "#{@release_url}/@{artefact_filename}"
+  end
+
+  defp precompiled_targets do
+    case System.get_env("PTC_RUNNER_LAUNCHER_PRECOMPILE_TARGET") do
+      nil ->
+        @release_config.precompiled_targets
+
+      selected ->
+        case for {os, targets} <- @release_config.precompiled_targets,
+                 {:ok, compiler} <- [Map.fetch(targets, selected)],
+                 do: {os, %{selected => compiler}} do
+          [target] -> Map.new([target])
+          [] -> raise "unsupported precompile target"
+        end
+    end
   end
 
   defp package do

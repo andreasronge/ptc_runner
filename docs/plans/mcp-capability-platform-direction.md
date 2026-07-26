@@ -211,6 +211,11 @@ Every request must:
 4. classify `resultType` before interpreting the result; and
 5. remain bounded by one end-to-end deadline and byte ceiling.
 
+The transport keeps a fixed hard cap on wire bytes so it never buffers an
+unbounded response. The selected `max_result_bytes` is transport-independent:
+the shared MCP client applies it to the deterministic JSON encoding of the
+decoded JSON-RPC `result`, excluding JSON-RPC, SSE, and stdio framing overhead.
+
 The client should call `server/discover` before `tools/list`. Discovery verifies
 the selected version and records supported server capabilities. It is not a
 security identity: server name, instructions, descriptions, icons, and
@@ -254,12 +259,12 @@ toolchain. Source compilation remains an explicit fallback for maintainers and
 unsupported targets, not the normal installation path. A standalone
 distribution or container bundles the same companion artifact.
 
-The first continuously executed artifact set is
-`aarch64-apple-darwin` and `x86_64-linux-gnu`. Intel macOS and other Linux
-architectures retain source fallback until CI can execute their precompiled
-artifacts rather than merely cross-compile them. Release CI pins macOS 15 and
-Ubuntu 22.04/glibc 2.35 as the first executable compatibility floors; it does
-not derive public binary compatibility from floating `*-latest` images.
+The continuously executed artifact set is `aarch64-apple-darwin`,
+`x86_64-apple-darwin`, `aarch64-linux-gnu`, and `x86_64-linux-gnu`. Release CI
+builds and executes each artifact on a native runner rather than merely
+cross-compiling it. It pins macOS 15 for both architectures, Ubuntu 22.04/glibc
+2.35 for x86-64 Linux, and Ubuntu 24.04 for ARM64 Linux; it does not derive
+public binary compatibility from floating `*-latest` images.
 
 The separate `ptc_runner_launcher` source tree keeps the POSIX reference
 implementation and its reusable macOS/Linux conformance suite. The native

@@ -12,16 +12,16 @@ a host-authorized server with:
 - a new process group; and
 - bounded EOF, TERM, and KILL cleanup, including descendant reaping on Linux.
 
-The package restores a mandatory-checksum precompiled executable on
-`aarch64-apple-darwin` and `x86_64-linux-gnu`. Installation on those targets
-does not require a C compiler. Other macOS and Linux targets fall back to the
-included source and require a POSIX C compiler and `make`; other operating
-systems are unsupported.
+The package restores mandatory-checksum precompiled executables on
+`aarch64-apple-darwin`, `x86_64-apple-darwin`, `aarch64-linux-gnu`, and
+`x86_64-linux-gnu`. Installation on those targets does not require a C
+compiler. Other macOS and Linux targets fall back to the included source and
+require a POSIX C compiler and `make`; other operating systems are unsupported.
 
-Release artifacts target macOS 15 or newer and GNU/Linux distributions
-compatible with the Ubuntu 22.04 glibc 2.35 baseline. CI builds and executes
-the artifacts on those pinned baseline images rather than floating
-`*-latest` images.
+Release artifacts target macOS 15 or newer. x86-64 GNU/Linux artifacts target
+the Ubuntu 22.04 glibc 2.35 baseline; ARM64 GNU/Linux artifacts target the
+Ubuntu 24.04 ARM baseline. CI builds and executes each artifact on its pinned
+native image rather than floating `*-latest` images.
 
 The core package uses this companion through its internal owner-monitored stdio
 transport. Data-driven stdio installation remains part of MCP source

@@ -13,6 +13,27 @@ checksum_path="$launcher_root/checksum.exs"
 checksum_backup="$verification_tmp_dir/checksum.exs.backup"
 server_pid=""
 
+fail_with_log() {
+  message=$1
+  log=$2
+
+  echo "$message" >&2
+  if [ -f "$log" ]; then
+    cat "$log" >&2
+  fi
+  exit 1
+}
+
+require_log_text() {
+  text=$1
+  log=$2
+  message=$3
+
+  if ! grep -q "$text" "$log"; then
+    fail_with_log "$message" "$log"
+  fi
+}
+
 cleanup() {
   if [ -n "$server_pid" ]; then
     kill "$server_pid" 2>/dev/null || true
@@ -37,7 +58,18 @@ fi
 published_directory="$verification_tmp_dir/published"
 mkdir -p "$published_directory"
 
-CC_PRECOMPILER_PRECOMPILE_ONLY_LOCAL=true \
+case "$(uname -s):$(uname -m)" in
+  Darwin:arm64) precompile_target="aarch64-apple-darwin" ;;
+  Darwin:x86_64) precompile_target="x86_64-apple-darwin" ;;
+  Linux:aarch64 | Linux:arm64) precompile_target="aarch64-linux-gnu" ;;
+  Linux:x86_64) precompile_target="x86_64-linux-gnu" ;;
+  *)
+    echo "unsupported precompile host: $(uname -s) $(uname -m)" >&2
+    exit 1
+    ;;
+esac
+
+PTC_RUNNER_LAUNCHER_PRECOMPILE_TARGET="$precompile_target" \
   ELIXIR_MAKE_CACHE_DIR="$published_directory" \
   MIX_ENV=prod \
   mix elixir_make.precompile
@@ -62,7 +94,12 @@ for _attempt in $(seq 1 100); do
   sleep 0.05
 done
 
-test -s "$address_file"
+if [ ! -s "$address_file" ]; then
+  fail_with_log \
+    "artifact server did not publish its listening address" \
+    "$verification_tmp_dir/server.log"
+fi
+
 base_url="$(tr -d '\r\n' <"$address_file")"
 precompiled_url="$base_url/@{artefact_filename}"
 
@@ -87,12 +124,17 @@ PTC_RUNNER_LAUNCHER_PRECOMPILED_URL="$precompiled_url" \
   mix compile --force --warnings-as-errors \
   2>&1 | tee "$verification_tmp_dir/download.log"
 
-grep -q "Downloading precompiled NIF" "$verification_tmp_dir/download.log"
 if grep -q "Attempting to compile ptc_runner_launcher from source" \
   "$verification_tmp_dir/download.log"; then
-  cat "$verification_tmp_dir/download.log" >&2
-  exit 1
+  fail_with_log \
+    "precompiled verification silently fell back to a source build" \
+    "$verification_tmp_dir/download.log"
 fi
+
+require_log_text \
+  "Downloading precompiled NIF" \
+  "$verification_tmp_dir/download.log" \
+  "precompiled verification did not download an artifact"
 
 PTC_RUNNER_LAUNCHER_PRECOMPILED_URL="$precompiled_url" \
   ELIXIR_MAKE_CACHE_DIR="$download_cache" \
@@ -120,9 +162,17 @@ case PtcRunnerLauncher.executable_path() do
 end
 '
 
-archive="$(find "$published_directory" -maxdepth 1 -type f -name '*.tar.gz' -print)"
-test -n "$archive"
-test "$(printf '%s\n' "$archive" | wc -l | tr -d ' ')" -eq 1
+shopt -s nullglob
+archives=("$published_directory"/*.tar.gz)
+shopt -u nullglob
+
+if [ "${#archives[@]}" -ne 1 ]; then
+  echo "expected exactly one precompiled archive, found ${#archives[@]}" >&2
+  find "$published_directory" -maxdepth 1 -type f -print >&2
+  exit 1
+fi
+
+archive="${archives[0]}"
 cp "$published_directory"/* "$output_directory/"
 printf '\0' >>"$archive"
 
@@ -136,9 +186,14 @@ PTC_RUNNER_LAUNCHER_PRECOMPILED_URL="$precompiled_url" \
   mix compile --force --warnings-as-errors \
   2>&1 | tee "$verification_tmp_dir/tampered.log"
 
-grep -q "does not match its checksum" "$verification_tmp_dir/tampered.log"
-grep -q "Attempting to compile ptc_runner_launcher from source" \
-  "$verification_tmp_dir/tampered.log"
+require_log_text \
+  "does not match its checksum" \
+  "$verification_tmp_dir/tampered.log" \
+  "tampered artifact was not rejected by its checksum"
+require_log_text \
+  "Attempting to compile ptc_runner_launcher from source" \
+  "$verification_tmp_dir/tampered.log" \
+  "checksum rejection did not fall back to an audited source build"
 
 source_build="$verification_tmp_dir/source-build"
 PTC_RUNNER_LAUNCHER_BUILD_FROM_SOURCE=1 \

@@ -4,6 +4,15 @@ marker=$1
 mode=${2:-serve}
 seen_ids=" "
 
+write_text_result() {
+  response_id=$1
+  text_bytes=$2
+
+  printf '{"jsonrpc":"2.0","id":%s,"result":{"resultType":"complete","content":[{"type":"text","text":"' "$response_id"
+  awk -v count="$text_bytes" 'BEGIN { for (i = 0; i < count; i++) printf "x" }'
+  printf '"}]}}\n'
+}
+
 while IFS= read -r line
 do
   id=$(printf '%s\n' "$line" | sed -n 's/.*"id":\([1-9][0-9]*\).*/\1/p')
@@ -63,7 +72,12 @@ do
     *'"method":"tools/call"'*'"name":"text"'*)
       case "$line" in *'"query":"x"'*) ;; *) exit 65 ;; esac
       printf '%s:%s\n' "$id" 'tools/call' >> "$marker"
-      printf '{"jsonrpc":"2.0","id":%s,"result":{"resultType":"complete","content":[{"type":"text","text":"hello"}]}}\n' "$id"
+      case "$mode" in
+        text-logical-max) write_text_result "$id" 1048513 ;;
+        text-1000) write_text_result "$id" 1000 ;;
+        large-text) write_text_result "$id" 40000 ;;
+        *) printf '{"jsonrpc":"2.0","id":%s,"result":{"resultType":"complete","content":[{"type":"text","text":"hello"}]}}\n' "$id" ;;
+      esac
       ;;
     *'"method":"tools/call"'*'"name":"fail"'*)
       case "$line" in *'"query":"x"'*) ;; *) exit 65 ;; esac

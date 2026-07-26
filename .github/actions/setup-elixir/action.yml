@@ -18,9 +18,9 @@ runs:
         path: |
           deps
           _build
-        key: ${{ runner.os }}-mix-otp${{ steps.setup-beam.outputs.otp-version }}-elixir${{ steps.setup-beam.outputs.elixir-version }}-${{ hashFiles('**/mix.lock') }}
+        key: ${{ runner.os }}-${{ runner.arch }}-mix-otp${{ steps.setup-beam.outputs.otp-version }}-elixir${{ steps.setup-beam.outputs.elixir-version }}-${{ hashFiles('**/mix.lock') }}
         restore-keys: |
-          ${{ runner.os }}-mix-otp${{ steps.setup-beam.outputs.otp-version }}-elixir${{ steps.setup-beam.outputs.elixir-version }}-
+          ${{ runner.os }}-${{ runner.arch }}-mix-otp${{ steps.setup-beam.outputs.otp-version }}-elixir${{ steps.setup-beam.outputs.elixir-version }}-
 
     - name: Get dependencies
       run: mix deps.get
@@ -30,16 +30,16 @@ runs:
       uses: actions/cache@v5
       with:
         path: priv/plts
-        key: plt-${{ runner.os }}-otp${{ steps.setup-beam.outputs.otp-version }}-elixir${{ steps.setup-beam.outputs.elixir-version }}-${{ hashFiles('**/mix.lock') }}
+        key: plt-${{ runner.os }}-${{ runner.arch }}-otp${{ steps.setup-beam.outputs.otp-version }}-elixir${{ steps.setup-beam.outputs.elixir-version }}-${{ hashFiles('**/mix.lock') }}
         restore-keys: |
-          plt-${{ runner.os }}-otp${{ steps.setup-beam.outputs.otp-version }}-elixir${{ steps.setup-beam.outputs.elixir-version }}-
+          plt-${{ runner.os }}-${{ runner.arch }}-otp${{ steps.setup-beam.outputs.otp-version }}-elixir${{ steps.setup-beam.outputs.elixir-version }}-
 
     - name: Cache Babashka
       uses: actions/cache@v5
       id: cache-babashka
       with:
         path: _build/tools
-        key: babashka-${{ runner.os }}-1.4.192-sha256-v1
+        key: babashka-${{ runner.os }}-${{ runner.arch }}-1.4.192-sha256-v1
 
     - name: Install Babashka
       if: steps.cache-babashka.outputs.cache-hit != 'true'

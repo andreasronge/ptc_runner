@@ -29,6 +29,11 @@ defmodule PtcRunner.Kernel.MCPSource do
   @protocol "2026-07-28"
   @client_info %{"name" => "ptc_runner", "version" => "0.x"}
   @client_capabilities %{}
+  @max_result_bytes 1_048_576
+  # The wire response also contains its JSON-RPC envelope and may contain
+  # transport-level formatting. Keep this hard safety bound independent from
+  # the canonical decoded-result ceiling exposed to operators.
+  @max_transport_response_bytes 2_097_152
   @max_discovery_bytes 1_048_576
   @max_headers 32
   @max_header_bytes 16_384
@@ -81,8 +86,10 @@ defmodule PtcRunner.Kernel.MCPSource do
     * `:timeout_ms` - installed end-to-end ceiling for discovery, calls, and
       requests (default `5_000`; stdio maximum `300_000`). A manifest may only
       lower it.
-    * `:max_result_bytes` - installed response ceiling (default `1_000_000`;
-      stdio maximum `1_048_576`).
+    * `:max_result_bytes` - installed decoded MCP result ceiling (default
+      `1_000_000`; maximum `1_048_576`). The same canonical JSON measurement
+      applies to both transports independently of JSON-RPC and framing
+      overhead.
     * `:max_catalog_tools` - discovery catalog ceiling from 1 through 128
       (default `128`).
     * `:max_pages` - discovery pagination ceiling from 1 through 64
@@ -217,14 +224,19 @@ defmodule PtcRunner.Kernel.MCPSource do
     end
   end
 
-  defp transport_ceilings(%{type: :streamable_http}, _timeout_ms, _max_result_bytes), do: :ok
+  defp transport_ceilings(%{type: :streamable_http}, _timeout_ms, max_result_bytes) do
+    if max_result_bytes <= @max_result_bytes,
+      do: :ok,
+      else: {:error, :invalid_transport}
+  end
 
   defp transport_ceilings(%{type: :stdio}, timeout_ms, max_result_bytes) do
     ceilings = MCPStdioTransport.request_ceilings()
 
-    if timeout_ms <= ceilings.timeout_ms and max_result_bytes <= ceilings.result_bytes,
-      do: :ok,
-      else: {:error, :invalid_transport}
+    if timeout_ms <= ceilings.timeout_ms and max_result_bytes <= @max_result_bytes and
+         @max_transport_response_bytes <= ceilings.result_bytes,
+       do: :ok,
+       else: {:error, :invalid_transport}
   end
 
   defp endpoint(endpoint, allow_loopback?) do
@@ -869,9 +881,10 @@ defmodule PtcRunner.Kernel.MCPSource do
              MCPProtocol.header_values(header_parameters, Map.get(params, "arguments", %{})),
            {:ok, headers} <- request_headers(request, method, params, parameter_headers),
            payload = MCPProtocol.request(request.id, method, params, request_metadata()),
-           {:ok, response} <- http(request, headers, payload, max_bytes),
+           {:ok, response} <-
+             http(request, headers, payload, @max_transport_response_bytes),
            {:ok, body} <- response_body(response, request.id) do
-        MCPProtocol.outcome(body, method)
+        bounded_outcome(body, method, max_bytes)
       end
     end)
   end
@@ -888,11 +901,24 @@ defmodule PtcRunner.Kernel.MCPSource do
            method,
            params,
            request_metadata(),
-           max_bytes,
+           @max_transport_response_bytes,
            timeout_ms
          ) do
-      {:ok, body} -> MCPProtocol.outcome(body, method)
+      {:ok, body} -> bounded_outcome(body, method, max_bytes)
       {:error, :closed} -> {:error, :mcp_transport_error}
+      {:error, _reason} = error -> error
+    end
+  end
+
+  defp bounded_outcome(body, method, max_result_bytes) do
+    with {:ok, result} <- MCPProtocol.outcome(body, method),
+         {:ok, encoded} <- DeterministicJSON.encode(result),
+         true <- byte_size(encoded) <= max_result_bytes do
+      {:ok, result}
+    else
+      false -> {:error, :mcp_response_exceeded}
+      {:error, :invalid_json} -> {:error, :mcp_protocol_error}
+      {:error, :duplicate_key} -> {:error, :mcp_protocol_error}
       {:error, _reason} = error -> error
     end
   end

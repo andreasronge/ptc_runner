@@ -7,13 +7,16 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
 
   alias PtcRunner.Kernel
   alias PtcRunner.Kernel.Capability
+  alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.EventSink
+  alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.MCPSource
   alias PtcRunner.Kernel.ProviderRegistry
   alias PtcRunner.Kernel.RunBuilder
   alias PtcRunner.TestSupport.MCPHTTPFixture
 
   @owner_lifecycle_timeout_ms 30_000
+  @max_logical_result_bytes 1_048_576
   @stdio_fixture Path.expand("../../support/mcp_stdio_source_fixture.sh", __DIR__)
   @root Path.expand("../../..", __DIR__)
   @inherited_environment ~w(HOME LOGNAME PATH SHELL TERM USER)
@@ -170,6 +173,93 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
                {5, "tools/call"},
                {6, "tools/call"}
              ]
+  end
+
+  @tag :tmp_dir
+  test "both transports measure the selected ceiling on the decoded MCP result", %{tmp_dir: dir} do
+    empty_result = %{
+      "resultType" => "complete",
+      "content" => [%{"type" => "text", "text" => ""}]
+    }
+
+    assert {:ok, encoded_empty_result} = DeterministicJSON.encode(empty_result)
+    text_bytes = @max_logical_result_bytes - byte_size(encoded_empty_result)
+    text = String.duplicate("x", text_bytes)
+
+    mcp_result = %{
+      "resultType" => "complete",
+      "content" => [%{"type" => "text", "text" => text}]
+    }
+
+    assert {:ok, encoded_result} = DeterministicJSON.encode(mcp_result)
+    assert byte_size(encoded_result) == @max_logical_result_bytes
+
+    wire_response =
+      Jason.encode!(%{"jsonrpc" => "2.0", "id" => 1, "result" => mcp_result})
+
+    assert byte_size(wire_response) > @max_logical_result_bytes
+
+    fixture = fixture(self(), text_bytes: text_bytes)
+    on_exit(fixture.close)
+
+    marker = Path.join(dir, "stdio-logical-result-ceiling")
+
+    registries = [
+      registry(fixture.endpoint,
+        timeout_ms: 5_000,
+        max_result_bytes: @max_logical_result_bytes
+      ),
+      stdio_registry(dir, marker, "text-logical-max", max_result_bytes: @max_logical_result_bytes)
+    ]
+
+    {:ok, installed_limits} =
+      Limits.installed_defaults()
+      |> Map.from_struct()
+      |> Map.merge(%{
+        capability_result_bytes: 1_200_000,
+        event_payload_bytes: 1_200_000,
+        terminal_result_bytes: 1_200_000
+      })
+      |> Limits.new()
+
+    run_limits = %{
+      "capability_result_bytes" => 1_200_000,
+      "event_payload_bytes" => 1_200_000,
+      "terminal_result_bytes" => 1_200_000
+    }
+
+    for {max_result_bytes, expected_status} <- [
+          {@max_logical_result_bytes, :ok},
+          {@max_logical_result_bytes - 1, :error}
+        ],
+        registry <- registries do
+      manifest =
+        manifest(dir, ~w(remote.structured remote.text remote.fail),
+          timeout_ms: 5_000,
+          evaluation_timeout_ms: 5_000,
+          max_result_bytes: max_result_bytes,
+          limits: run_limits
+        )
+
+      assert {:ok, built} =
+               RunBuilder.load_and_build(manifest, registry, installed_limits: installed_limits)
+
+      assert {:ok, result} = Kernel.run(built.entry_source, built.config)
+
+      case expected_status do
+        :ok ->
+          assert %{status: :ok, value: %{"text" => [returned_text]}} =
+                   get_in(result.value, [:value, :value, "text"])
+
+          assert returned_text == text
+
+        :error ->
+          assert %{status: :error, reason: :invalid_result} =
+                   get_in(result.value, [:value, :value, "text"])
+      end
+
+      assert :ok = RunBuilder.close(built)
+    end
   end
 
   @tag :tmp_dir
@@ -465,7 +555,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     end
   end
 
-  test "stdio installation enforces its transport timeout and response ceilings" do
+  test "installation enforces transport timeout and shared response ceilings" do
     options = stdio_transport_options("/tmp/unused")
 
     assert is_function(
@@ -489,6 +579,14 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     assert_raise ArgumentError, fn ->
       MCPSource.builder(
         transport: {:stdio, options},
+        tools: mappings(),
+        max_result_bytes: 1_048_577
+      )
+    end
+
+    assert_raise ArgumentError, fn ->
+      MCPSource.builder(
+        transport: {:streamable_http, endpoint: "https://example.com/mcp"},
         tools: mappings(),
         max_result_bytes: 1_048_577
       )
@@ -1097,7 +1195,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
              )},
         tools: Keyword.get(opts, :tools, mappings()),
         timeout_ms: Keyword.get(opts, :timeout_ms, 2_000),
-        max_result_bytes: 64_000,
+        max_result_bytes: Keyword.get(opts, :max_result_bytes, 64_000),
         max_pages: Keyword.get(opts, :max_pages, 16)
       )
 
@@ -1105,13 +1203,13 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     registry
   end
 
-  defp stdio_registry(_dir, marker, mode \\ nil) do
+  defp stdio_registry(_dir, marker, mode \\ nil, opts \\ []) do
     builder =
       MCPSource.builder(
         transport: {:stdio, stdio_transport_options(marker, mode)},
         tools: mappings(),
         timeout_ms: 5_000,
-        max_result_bytes: 64_000
+        max_result_bytes: Keyword.get(opts, :max_result_bytes, 64_000)
       )
 
     {:ok, registry} = ProviderRegistry.new(%{"fixture-mcp" => builder})
@@ -1351,7 +1449,12 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
         end
 
       "text" ->
-        text = if opts[:large_text?], do: String.duplicate("x", 40_000), else: "hello"
+        text =
+          cond do
+            text_bytes = opts[:text_bytes] -> String.duplicate("x", text_bytes)
+            opts[:large_text?] -> String.duplicate("x", 40_000)
+            true -> "hello"
+          end
 
         json(id, %{
           "resultType" => "complete",
@@ -1453,7 +1556,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
 
       leading =
         if opts[:sse_oversized_prefix?],
-          do: ":" <> String.duplicate("x", 1_100_000) <> "\n\ndata: {\n\n",
+          do: ":" <> String.duplicate("x", 2_100_000) <> "\n\ndata: {\n\n",
           else: ""
 
       prefix = "#{before_comment}#{notification}#{empty_data}data: #{body}\n\n#{after_comment}"
@@ -1500,7 +1603,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
         %{
           "allow" => allow,
           "timeout_ms" => Keyword.get(opts, :timeout_ms, 1_000),
-          "max_result_bytes" => 32_000
+          "max_result_bytes" => Keyword.get(opts, :max_result_bytes, 32_000)
         },
         Keyword.get(opts, :config_extra, %{})
       )
@@ -1521,9 +1624,12 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
         ]
       },
       "limits" =>
-        if(opts[:evaluation_timeout_ms],
-          do: %{"evaluation_timeout_ms" => opts[:evaluation_timeout_ms]},
-          else: %{}
+        Map.merge(
+          if(opts[:evaluation_timeout_ms],
+            do: %{"evaluation_timeout_ms" => opts[:evaluation_timeout_ms]},
+            else: %{}
+          ),
+          Keyword.get(opts, :limits, %{})
         )
     }
 

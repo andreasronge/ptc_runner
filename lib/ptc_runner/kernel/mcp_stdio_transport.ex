@@ -13,6 +13,7 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
   @protocol_version 1
   @protocol_metadata %{"io.modelcontextprotocol/protocolVersion" => "2026-07-28"}
   @max_frame_bytes 1_048_576
+  @max_response_bytes 2_097_152
   @max_arguments 256
   @max_environment 256
   @max_config_string 131_072
@@ -55,7 +56,7 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
   @doc false
   @spec request_ceilings() :: %{timeout_ms: pos_integer(), result_bytes: pos_integer()}
   def request_ceilings do
-    %{timeout_ms: @max_request_timeout_ms, result_bytes: @max_frame_bytes}
+    %{timeout_ms: @max_request_timeout_ms, result_bytes: @max_response_bytes}
   end
 
   @spec request(t(), binary(), map(), map(), pos_integer(), pos_integer()) ::
@@ -446,7 +447,7 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
   defp validate_request(method, params, metadata, max_bytes, timeout_ms) do
     if is_binary(method) and byte_size(method) in 1..256 and is_map(params) and
          not is_struct(params) and is_map(metadata) and not is_struct(metadata) and
-         is_integer(max_bytes) and max_bytes in 1..@max_frame_bytes and
+         is_integer(max_bytes) and max_bytes in 1..@max_response_bytes and
          is_integer(timeout_ms) and timeout_ms in 1..@max_request_timeout_ms,
        do: :ok,
        else: {:error, :mcp_protocol_error}
@@ -693,7 +694,7 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
             do: binary_part(line, 0, byte_size(line) - 1),
             else: line
 
-        if byte_size(line) <= @max_frame_bytes do
+        if byte_size(line) <= @max_response_bytes do
           case consume_line(line, %{state | stdout: rest}) do
             {:ok, state} -> consume_stdout(state)
             {:error, reason, state} -> {:error, reason, state}
@@ -710,8 +711,8 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
   end
 
   defp partial_stdout_within_limit?(stdout) do
-    byte_size(stdout) <= @max_frame_bytes or
-      (byte_size(stdout) == @max_frame_bytes + 1 and String.ends_with?(stdout, "\r"))
+    byte_size(stdout) <= @max_response_bytes or
+      (byte_size(stdout) == @max_response_bytes + 1 and String.ends_with?(stdout, "\r"))
   end
 
   defp consume_line(line, state) do
@@ -763,7 +764,7 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
       :unscoped ->
         bytes = state.unscoped_notification_bytes + bytes
 
-        if bytes <= @max_frame_bytes,
+        if bytes <= @max_response_bytes,
           do: {:ok, %{state | unscoped_notification_bytes: bytes}},
           else: {:error, :mcp_response_exceeded, state}
     end
