@@ -13,13 +13,16 @@ defmodule PtcRunner.Kernel.MCPLauncherStagingTest do
         receive do: (:stop -> :ok)
       end)
 
-    assert_receive {:staging, staging}
+    # The owner starts a GenServer and creates/chmods a private directory
+    # before acknowledging readiness. Under the full parallel suite that can
+    # legitimately exceed ExUnit's 100 ms mailbox default.
+    assert_receive {:staging, staging}, 5_000
     staging_ref = Process.monitor(staging.pid)
     File.write!(staging.path, "fixture")
     assert File.exists?(staging.path)
 
     send(owner, :stop)
-    assert_receive {:DOWN, ^staging_ref, :process, _, :normal}
+    assert_receive {:DOWN, ^staging_ref, :process, _, :normal}, 5_000
     refute File.exists?(staging.path)
     refute File.exists?(Path.dirname(staging.path))
   end

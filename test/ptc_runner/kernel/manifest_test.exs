@@ -339,7 +339,7 @@ defmodule PtcRunner.Kernel.ManifestTest do
     {:ok, registry} = ProviderRegistry.new()
     assert {:error, :unknown_provider} = RunBuilder.load_and_build(path, registry)
 
-    assert {:error, :invalid_provider_registry} =
+    assert {:ok, _explicit_registry} =
              ProviderRegistry.new(%{"llm" => fn _config, _context -> :ok end})
 
     parent = self()
@@ -371,7 +371,7 @@ defmodule PtcRunner.Kernel.ManifestTest do
       ])
 
     File.write!(path, Jason.encode!(denied_manifest))
-    assert {:error, :provider_destination_denied} = RunBuilder.load_and_build(path, registry)
+    assert {:error, :unknown_provider} = RunBuilder.load_and_build(path, registry)
   end
 
   defp event_sink_pids(run_id) do

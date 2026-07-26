@@ -52,18 +52,18 @@ that touches data is in the mission environment.
 | Tutorial surface | Status |
 | --- | --- |
 | `mix ptc.run`, strict manifests, local PTC-Lisp, `agent.core` | current |
-| immutable whole-file `file-read` | current only; deleted at the MCP filesystem cutover and never added to host config |
+| immutable filesystem access | current through the non-production MCP sample; the old whole-file provider is deleted |
 | MCP Streamable HTTP installed from Elixir | current, pinned to stateless `2026-07-28` |
 | `--trace` and exact `--inspect` capture | current |
 | stdio MCP transport | current, pinned to `2026-07-28` |
 | compatible stdio launcher, normally the optional precompiled `ptc_runner_launcher` companion | current; required for stdio, not by HTTP-only users |
 | `--host-config` and `--check` | current |
-| host-installed MCP and live-LLM aliases | current; the filesystem cutover in MCP Slice 5 removes the remaining implicit manifest providers |
-| immutable filesystem sample MCP server | planned MCP Slice 5 |
+| host-installed MCP and live-LLM aliases | current and exclusive; manifests have no implicit provider fallback |
+| immutable filesystem sample MCP server | current, pinned beta pending the stable SDK release |
 | manifest-selectable PTC trace/private snapshots | planned application Slice E1 |
 | private human investigation in `ptc.repl` | planned application Slice E2 |
 | bounded MCP error feedback, safe trace context, and private request/response inspection | current |
-| result schemas, `--output`, `--private-output`, `--private-mission` | planned application Slice D |
+| `--output`, `--private-output`, `--private-mission`, and run classification | current; input/result schemas remain planned Slice D |
 | `cap/unwrap!`, `cap/with-cursor`, and `agent.main` libraries | planned application Slice G |
 | component override and LLM replay evaluation | planned application Slice H |
 
@@ -314,11 +314,10 @@ This filesystem server needs no secret; a different stdio server would receive
 only explicitly bound environment variables.
 
 This host document is the complete provider registry for the run. It does not
-augment implicitly installed `llm` or `file-read` entries: those
-manifest-configured built-ins are removed when the Slices B–C filesystem
-cutover lands. A provider-free manifest may omit `--host-config`, but a
-provider-bearing manifest cannot fall back to legacy model, root, or file-list
-configuration.
+augment implicit entries: the former manifest-configured `llm` and `file-read`
+built-ins were removed in the Slices B–C cutover. A provider-free manifest may
+omit `--host-config`, but a provider-bearing manifest cannot fall back to
+legacy model, root, or file-list configuration.
 
 The closed target source set is `mcp`, `llm`, `llm_replay`,
 `ptc_trace_snapshot`, and `ptc_inspection_snapshot`. `read_text_file` below is

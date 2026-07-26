@@ -32,6 +32,7 @@ run_journey() {
 
   local status=0
   mix ptc.run "$demo_dir/$journey.json" \
+    --host-config "$demo_dir/ptc-host.json" \
     --trace "$out/$journey.jsonl" \
     --inspect "$out/$journey.inspection.jsonl" || status=$?
 

@@ -117,13 +117,12 @@ jobs:
     runs-on: ubuntu-latest
     name: MCP filesystem sample server
 
-    defaults:
-      run:
-        working-directory: examples/mcp/filesystem
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
+
+      - name: Setup Elixir environment
+        uses: ./.github/actions/setup-elixir
 
       - name: Setup pinned Node toolchain
         uses: actions/setup-node@v6
@@ -135,18 +134,22 @@ jobs:
       # `npm ci` installs the lockfile exactly and fails when package.json and
       # the lockfile disagree, so a hand-edited dependency cannot reach CI.
       - name: Install pinned dependencies
+        working-directory: examples/mcp/filesystem
         run: npm ci --no-audit --no-fund
 
       - name: Typecheck
+        working-directory: examples/mcp/filesystem
         run: npm run typecheck
 
       # The bundle is committed so a clean checkout can run the server without
       # installing anything. Regenerate it and fail on any difference, so the
       # artifact can never drift from the source that supposedly produced it.
       - name: Rebuild the committed bundle
+        working-directory: examples/mcp/filesystem
         run: npm run build
 
       - name: Fail if the committed bundle is stale
+        working-directory: examples/mcp/filesystem
         run: |
           if ! git diff --exit-code -- dist/server.js; then
             echo "::error::dist/server.js does not match a rebuild from src/. Run 'npm run build' in examples/mcp/filesystem and commit the result." >&2
@@ -154,7 +157,13 @@ jobs:
           fi
 
       - name: Run server conformance tests
+        working-directory: examples/mcp/filesystem
         run: npm test
+
+      - name: Verify host JSON, manifest, stdio, and PTC-Lisp integration
+        run: |
+          mix test test/ptc_runner/kernel/filesystem_mcp_e2e_test.exs \
+            --include e2e --trace --warnings-as-errors
 
   ci:
     runs-on: ubuntu-latest

@@ -3,7 +3,7 @@ defmodule PtcRunner.Kernel.Library do
   Shipped PTC-Lisp libraries as explicit Kernel components.
 
   Available component IDs are `kernel`, `runtime`, `cap`, `workflow.event`,
-  `fs`, `llm`, `agent.native`, `agent.core`, `agent.feedback`, `agent.retry`,
+  `llm`, `agent.native`, `agent.core`, `agent.feedback`, `agent.retry`,
   `agent.prompt`, `result`, and `log.core`.
 
   Fetching a component grants no capability. The host still compiles the
@@ -17,7 +17,6 @@ defmodule PtcRunner.Kernel.Library do
   @runtime_path Path.expand("../../../priv/preludes/kernel/runtime.clj", __DIR__)
   @cap_path Path.expand("../../../priv/preludes/kernel/cap.clj", __DIR__)
   @workflow_event_path Path.expand("../../../priv/preludes/kernel/workflow.event.clj", __DIR__)
-  @fs_path Path.expand("../../../priv/preludes/kernel/fs.clj", __DIR__)
   @llm_path Path.expand("../../../priv/preludes/kernel/llm.clj", __DIR__)
   @agent_native_path Path.expand("../../../priv/preludes/kernel/agent.native.clj", __DIR__)
   @agent_prompt_path Path.expand("../../../priv/preludes/kernel/agent.prompt.clj", __DIR__)
@@ -30,7 +29,6 @@ defmodule PtcRunner.Kernel.Library do
   @external_resource @runtime_path
   @external_resource @cap_path
   @external_resource @workflow_event_path
-  @external_resource @fs_path
   @external_resource @llm_path
   @external_resource @agent_native_path
   @external_resource @agent_prompt_path
@@ -44,7 +42,6 @@ defmodule PtcRunner.Kernel.Library do
     "runtime" => File.read!(@runtime_path),
     "cap" => File.read!(@cap_path),
     "workflow.event" => File.read!(@workflow_event_path),
-    "fs" => File.read!(@fs_path),
     "llm" => File.read!(@llm_path),
     "agent.native" => File.read!(@agent_native_path),
     "agent.prompt" => File.read!(@agent_prompt_path),

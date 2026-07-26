@@ -95,7 +95,7 @@ defmodule PtcRunner.Kernel.LogAnalysisSessionTest do
     assert is_integer(usage["remaining_ms"])
 
     for source <- [
-          "(tool/fs-read {})",
+          "(tool/workspace.read {})",
           "(tool/llm-request {})",
           "(tool/kernel-eval {})",
           "(tool/workflow-annotate {})"

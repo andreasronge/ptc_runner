@@ -215,10 +215,10 @@ logging payload-bearing structures directly.
 
 ## Providers and interactive frontends
 
-The current registry has built-in workflow `llm` and mission `file-read`
-providers. Additional host builders can install sources such as
-`PtcRunner.Kernel.MCPSource`. This guide describes the current implementation;
-future source grammar belongs in active plans until it lands.
+The registry has no implicit providers. CLI runs receive exactly the aliases
+declared by a strict host installation; trusted Elixir embedding may construct
+an explicit registry of custom builders. Host installations currently provide
+workflow LLM and mission MCP sources.
 
 Provider builders return capabilities plus optional safe connector metadata
 and an idempotent closer. `RunBuilder` owns construction cleanup and transfers
@@ -255,7 +255,7 @@ not supply profile internals or paths.
 | Mutable resources | `Limits`, `RunState`, `BoundedWorker`, `Dispatcher` |
 | Subordinate execution | `Runner`, `Evaluation`, `RuntimeTools` |
 | Lisp internals | `Lisp.Eval`, `Lisp.Eval.Effects`, `Lisp.Eval.Capture`, `Lisp.Eval.Parallel`, `Lisp.Eval.ParallelRunner` |
-| Providers | `FileCapability`, `LLMCapability`, `MCPSource`, `MCPProtocol`, `TraceCapability` |
+| Providers | `HostConfig`, `HostInstallation`, `LLMCapability`, `MCPSource`, `MCPProtocol`, `TraceCapability` |
 | Canonical/private evidence | `EventSink`, `TraceLog`, `InspectionSink`, `InspectionArtifact`, `SafeMetadata` |
 | Interactive evaluation | `ReplSession`, `LogAnalysisSessionBuilder`, `LogAnalysisSession`, `SessionTrace` |
 

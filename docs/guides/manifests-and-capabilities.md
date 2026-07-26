@@ -130,10 +130,10 @@ Optional mission data is separate from workflow input:
 Paths are resolved under the canonical manifest directory. Absolute paths,
 traversal, devices, non-regular files, and symlink escapes are rejected.
 
-The built-in `file-read` provider freezes a bounded UTF-8 file snapshot during
-manifest assembly. Agent calls read that immutable snapshot and perform no
-runtime filesystem access, so later file, directory, or root replacement
-cannot change the granted contents.
+Model-accessible filesystem operations use an MCP server installed by the
+host. The shipped non-production sample freezes a bounded UTF-8 snapshot at
+startup and serves list, search, and ranged-read tools without later
+filesystem access.
 
 ## Providers are installed authority
 
@@ -143,21 +143,22 @@ configuration:
 ```json
 "providers": {
   "workflow": [
-    {"name": "llm", "config": {"model": "deepseek", "cache": false}}
+    {"name": "deepseek"}
   ],
   "mission": [
     {
-      "name": "file-read",
-      "config": {"root": "files", "max_bytes": 65536}
+      "name": "workspace"
     }
   ]
 }
 ```
 
-Only builders installed by the host may be selected. A manifest cannot name an
-Elixir module or callback, launch a command, include credentials, or choose an
-arbitrary endpoint. Provider placement is also enforced: the built-in model
-provider is workflow-only and file access is mission-only.
+Only builders installed by the host may be selected; no provider names are
+implicit. The separate host JSON fixes models, commands, credentials,
+endpoints, tool mappings, data classes, and outer ceilings. A manifest cannot
+name an Elixir module or callback, launch a command, include credentials, or
+choose an arbitrary endpoint. Placement is enforced: LLM sources are
+workflow-only and MCP sources are mission-only.
 
 `model_visible` controls whether a capability appears in model context. It
 does not grant or remove execution authority.

@@ -16,19 +16,21 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
   Trusted staged builders enforce a global preparation barrier. Every selected
   provider first performs pure selection checks, then every provider completes
   non-secret local preflight, then the registry resolves the union of declared
-  credentials once before any provider is acquired. Legacy Elixir builders
-  remain supported and are deferred to the acquisition phase.
+  credentials once before any provider is acquired. Preparation also freezes
+  the provider's `data_class` and `accepts_data` policy so run assembly can
+  reject an incompatible information flow before preflight or credentials.
+  Legacy Elixir builders remain supported as normal-data-only providers and
+  are deferred to the acquisition phase; a classified custom provider must use
+  the staged form.
 
-  The built-ins are `llm`, permitted only in the workflow environment, and
-  `file-read`, permitted only in the mission environment. Additional builders
-  cannot replace built-in names. Builder exceptions are contained at their
-  current lifecycle phase.
+  There are no implicit built-ins. CLI applications receive exactly the
+  aliases in their host installation, while trusted Elixir embedding can pass
+  any explicit builder map. Builder exceptions are contained at their current
+  lifecycle phase.
   """
 
   alias PtcRunner.Kernel.Capability
-  alias PtcRunner.Kernel.FileCapability
   alias PtcRunner.Kernel.JSONValue
-  alias PtcRunner.Kernel.LLMCapability
 
   @enforce_keys [:builders, :credential_resolver]
   defstruct [:builders, :credential_resolver]
@@ -64,6 +66,8 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
              {:ok, Capability.t() | built_provider()} | {:error, term()})
   @type prepared :: %{
           credential_names: [binary()],
+          data_class: :normal | :private_inspection,
+          accepts_data: [:normal | :private_inspection],
           preflight: (-> {:ok, acquire()} | {:error, term()})
         }
   @type staged_builder ::
@@ -79,28 +83,19 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
         }
 
   @spec new(map(), keyword()) :: {:ok, t()} | {:error, :invalid_provider_registry}
-  @doc """
-  Creates a registry with the built-ins and optional additional builder
-  functions keyed by provider name.
-  """
+  @doc "Creates a registry from explicit builder functions keyed by provider name."
   def new(additional_builders \\ %{}, opts \\ [])
 
   def new(additional_builders, opts) when is_map(additional_builders) and is_list(opts) do
-    builtins =
-      if Keyword.get(opts, :builtins, true),
-        do: %{"file-read" => &build_file/2, "llm" => &build_llm/2},
-        else: %{}
-
     resolver = Keyword.get(opts, :credential_resolver, &default_credential_resolver/1)
 
     if Enum.all?(additional_builders, fn {name, builder} ->
-         valid_name?(name) and valid_builder?(builder) and not Map.has_key?(builtins, name)
+         valid_name?(name) and valid_builder?(builder)
        end) and is_function(resolver, 1) and
-         is_boolean(Keyword.get(opts, :builtins, true)) and
-         Keyword.keys(opts) -- [:credential_resolver, :builtins] == [] do
+         Keyword.keys(opts) -- [:credential_resolver] == [] do
       {:ok,
        %__MODULE__{
-         builders: Map.merge(builtins, additional_builders),
+         builders: additional_builders,
          credential_resolver: resolver
        }}
     else
@@ -118,6 +113,8 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
   The preparation callback must be side-effect free. Its returned preflight
   callback may perform only non-secret local checks; the acquire callback is
   the first phase allowed to use resolved credentials or open a provider.
+  Optional `:data_class` and `:accepts_data` fields default to normal-only and
+  must exactly match the acquired build.
   """
   def staged(prepare) when is_function(prepare, 2), do: {:staged, prepare}
 
@@ -156,6 +153,8 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
         {:ok,
          %{
            credential_names: [],
+           data_class: :normal,
+           accepts_data: [:normal],
            preflight: fn ->
              {:ok, fn %{} -> builder.(config, full_context) end}
            end
@@ -166,12 +165,24 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
     end
   end
 
-  @spec preflight(prepared()) :: {:ok, %{acquire: acquire()}} | {:error, term()}
+  @spec preflight(prepared()) ::
+          {:ok,
+           %{
+             acquire: acquire(),
+             data_class: :normal | :private_inspection,
+             accepts_data: [:normal | :private_inspection]
+           }}
+          | {:error, term()}
   @doc false
-  def preflight(%{preflight: preflight}) when is_function(preflight, 0) do
+  def preflight(%{
+        preflight: preflight,
+        data_class: data_class,
+        accepts_data: accepts_data
+      })
+      when is_function(preflight, 0) do
     preflight
     |> invoke(:provider_preflight_failed)
-    |> normalize_preflight()
+    |> normalize_preflight(data_class, accepts_data)
   end
 
   def preflight(_prepared), do: {:error, :invalid_provider_preparation}
@@ -204,7 +215,13 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
 
   defp normalize_prepared({:ok, %{credential_names: names, preflight: preflight} = prepared})
        when is_list(names) and is_function(preflight, 0) do
-    if Map.keys(prepared) -- [:credential_names, :preflight] == [] and
+    prepared =
+      prepared
+      |> Map.put_new(:data_class, :normal)
+      |> Map.put_new(:accepts_data, [:normal])
+
+    if Map.keys(prepared) -- [:credential_names, :preflight, :data_class, :accepts_data] == [] and
+         valid_data_policy?(prepared.data_class, prepared.accepts_data) and
          length(names) <= 128 and Enum.uniq(names) == names and Enum.all?(names, &valid_name?/1) do
       {:ok, prepared}
     else
@@ -215,11 +232,14 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
   defp normalize_prepared({:error, _reason} = error), do: error
   defp normalize_prepared(_result), do: {:error, :invalid_provider_preparation}
 
-  defp normalize_preflight({:ok, acquire}) when is_function(acquire, 1),
-    do: {:ok, %{acquire: acquire}}
+  defp normalize_preflight({:ok, acquire}, data_class, accepts_data)
+       when is_function(acquire, 1),
+       do: {:ok, %{acquire: acquire, data_class: data_class, accepts_data: accepts_data}}
 
-  defp normalize_preflight({:error, _reason} = error), do: error
-  defp normalize_preflight(_result), do: {:error, :invalid_provider_preflight}
+  defp normalize_preflight({:error, _reason} = error, _data_class, _accepts_data), do: error
+
+  defp normalize_preflight(_result, _data_class, _accepts_data),
+    do: {:error, :invalid_provider_preflight}
 
   defp normalize_credentials({:ok, credentials}, names) when is_map(credentials) do
     if Enum.sort(Map.keys(credentials)) == names and
@@ -293,34 +313,11 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
   defp valid_builder?({:staged, prepare}) when is_function(prepare, 2), do: true
   defp valid_builder?(_builder), do: false
 
-  defp build_file(config, %{directory: directory, destination: :mission}) do
-    with :ok <- exact_keys(config, ~w(root max_bytes model_visible), ~w(root)),
-         root when is_binary(root) <- config["root"],
-         {:ok, root} <- safe_directory(directory, root),
-         max_bytes when is_integer(max_bytes) and max_bytes > 0 <-
-           Map.get(config, "max_bytes", 1_000_000),
-         model_visible when is_boolean(model_visible) <-
-           Map.get(config, "model_visible", true) do
-      FileCapability.new(root: root, max_bytes: max_bytes, model_visible: model_visible)
-    else
-      _ -> {:error, :invalid_file_provider}
-    end
+  defp valid_data_policy?(data_class, accepts_data) do
+    data_class in [:normal, :private_inspection] and
+      accepts_data != [] and accepts_data == Enum.uniq(accepts_data) and
+      Enum.all?(accepts_data, &(&1 in [:normal, :private_inspection]))
   end
-
-  defp build_file(_config, _context), do: {:error, :provider_destination_denied}
-
-  defp build_llm(config, %{destination: :workflow}) do
-    with :ok <- exact_keys(config, ~w(model cache), ~w(model)),
-         model when is_binary(model) and byte_size(model) in 1..256 <- config["model"],
-         cache when is_boolean(cache) <- Map.get(config, "cache", false) do
-      requester = PtcRunner.LLM.callback(model, cache: cache)
-      LLMCapability.new(requester: fn request -> requester.(adapter_request(request)) end)
-    else
-      _ -> {:error, :invalid_llm_provider}
-    end
-  end
-
-  defp build_llm(_config, _context), do: {:error, :provider_destination_denied}
 
   @doc false
   def adapter_request(request) do
@@ -384,34 +381,6 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
   defp role("assistant"), do: :assistant
   defp role("tool"), do: :tool
   defp role(role), do: role
-
-  defp safe_directory(directory, relative) do
-    cond do
-      not String.valid?(relative) or byte_size(relative) not in 1..1_024 ->
-        {:error, :unsafe_provider_path}
-
-      Path.type(relative) != :relative or
-          Enum.any?(Path.split(relative), &(&1 in ["", ".", ".."])) ->
-        {:error, :unsafe_provider_path}
-
-      true ->
-        relative
-        |> Path.split()
-        |> Enum.reduce_while({:ok, directory}, fn segment, {:ok, parent} ->
-          path = Path.join(parent, segment)
-
-          case File.lstat(path) do
-            {:ok, %{type: :directory}} -> {:cont, {:ok, path}}
-            _ -> {:halt, {:error, :unsafe_provider_path}}
-          end
-        end)
-    end
-  end
-
-  defp exact_keys(map, allowed, required) do
-    keys = Map.keys(map)
-    if keys -- allowed == [] and required -- keys == [], do: :ok, else: {:error, :invalid_config}
-  end
 
   defp valid_name?(name),
     do: is_binary(name) and name =~ ~r/\A[a-z][a-z0-9._-]{0,127}\z/

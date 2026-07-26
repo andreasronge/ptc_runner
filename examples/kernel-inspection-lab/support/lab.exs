@@ -10,8 +10,9 @@ defmodule PtcRunner.Examples.KernelInspectionLab do
   alias PtcRunner.Kernel.RunBuilder
 
   @task "Use every available read-only fixture and return their results in one map."
+  @filesystem_server Path.expand("../../mcp/filesystem/dist/server.js", __DIR__)
 
-  @direct_program ~S|(let [file (tool/fs-read {"path" "value.txt"}) native (tool/native-echo {"value" "fixture"}) structured (tool/remote.structured {"query" "fixture"}) text (tool/remote.text {"query" "fixture"}) failed (tool/remote.fail {"query" "fixture"})] (return {"file" file "native" native "structured" structured "text" text "failed" failed}))|
+  @direct_program ~S|(let [file (tool/filesystem.read {"path" "value.txt"}) native (tool/native-echo {"value" "fixture"}) structured (tool/remote.structured {"query" "fixture"}) text (tool/remote.text {"query" "fixture"}) failed (tool/remote.fail {"query" "fixture"})] (return {"file" file "native" native "structured" structured "text" text "failed" failed}))|
   @wrapper_program ~S|(return {"file" (lab.tools/read-file) "native" (lab.tools/echo) "structured" (lab.tools/remote-structured) "text" (lab.tools/remote-text) "failed" (lab.tools/remote-failure)})|
 
   def run(output_dir) when is_binary(output_dir) do
@@ -52,7 +53,7 @@ defmodule PtcRunner.Examples.KernelInspectionLab do
     trace_path = Path.join(directory, "run.jsonl")
     inspection_path = Path.join(directory, "run.inspection.jsonl")
     :ok = File.write(manifest_path, Jason.encode!(manifest))
-    registry = registry(endpoint, program, wrapper?)
+    registry = registry(endpoint, program, wrapper?, directory)
 
     {:ok, result} =
       RunBuilder.run(manifest_path, registry, trace: trace_path, inspect: inspection_path)
@@ -68,7 +69,7 @@ defmodule PtcRunner.Examples.KernelInspectionLab do
     }
   end
 
-  defp registry(endpoint, program, _wrapper?) do
+  defp registry(endpoint, program, wrapper?, directory) do
     turn = :atomics.new(1, signed: false)
 
     scripted = fn config, _context ->
@@ -121,9 +122,34 @@ defmodule PtcRunner.Examples.KernelInspectionLab do
         max_result_bytes: 64_000
       )
 
+    node = System.find_executable("node") || raise "Node.js is required for the inspection lab"
+    {:ok, executable} = File.read(node)
+
+    filesystem =
+      MCPSource.builder(
+        transport:
+          {:stdio,
+           executable: node,
+           executable_sha256: :crypto.hash(:sha256, executable),
+           cwd: directory,
+           args: [@filesystem_server, "--root", "files", "--include", "**"],
+           env: %{},
+           start_timeout_ms: 15_000},
+        tools: %{
+          "read_text_file" => %{
+            as: "filesystem.read",
+            effect: :read,
+            model_visible: not wrapper?
+          }
+        },
+        timeout_ms: 15_000,
+        max_result_bytes: 64_000
+      )
+
     {:ok, registry} =
       ProviderRegistry.new(%{
         "fixture-model" => scripted,
+        "filesystem" => filesystem,
         "fixture-native" => native,
         "fixture-mcp" => mcp
       })
@@ -148,10 +174,7 @@ defmodule PtcRunner.Examples.KernelInspectionLab do
       "providers" => %{
         "workflow" => [%{"name" => "fixture-model", "config" => %{}}],
         "mission" => [
-          %{
-            "name" => "file-read",
-            "config" => Map.merge(%{"root" => "files", "max_bytes" => 8_192}, visibility)
-          },
+          %{"name" => "filesystem", "config" => %{}},
           %{"name" => "fixture-native", "config" => visibility},
           %{
             "name" => "fixture-mcp",
@@ -184,7 +207,7 @@ defmodule PtcRunner.Examples.KernelInspectionLab do
   defp mission_source do
     ~S|(ns lab.tools "Small prompt-visible wrapper over unchanged mission capabilities." {:visibility :prompt})
 
-(defn read-file [] (tool/fs-read {"path" "value.txt"}))
+(defn read-file [] (tool/filesystem.read {"path" "value.txt"}))
 (defn echo [] (tool/native-echo {"value" "fixture"}))
 (defn remote-structured [] (tool/remote.structured {"query" "fixture"}))
 (defn remote-text [] (tool/remote.text {"query" "fixture"}))

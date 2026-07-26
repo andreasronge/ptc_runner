@@ -1,10 +1,10 @@
 # Manifest-authored applications — implementation plan
 
 > **Status:** active implementation plan, promoted from `future/` on
-> 2026-07-24. Slices A, B, and Pre-C are complete; Slice C is proceeding
-> independently. The result-artifact portion of Slice D has landed, while its
-> classified-input work and Slices E, G, and H remain planned. Slice F is
-> complete. This document
+> 2026-07-24. Slices A, B, Pre-C, C, and F are complete. Slice D now includes
+> result artifacts, private mission input, and centralized run classification;
+> its input/result schema work remains. Slices E, G, and H remain planned.
+> This document
 > describes the generic runner and application contracts built on the
 > MCP-first capability platform.
 
@@ -1239,10 +1239,9 @@ Static source, selection, and data-class checks happen before credentials are
 resolved, sensitive snapshots are opened, stdio is spawned, or remote MCP is
 contacted. Discovery is a later dynamic validation phase.
 
-MCP-first Slices 4 and 5 are independent after this foundation. Private MCP
-feedback and exchange capture (MCP Slice 4) is complete; the filesystem
-sample/cutover (MCP Slice 5) remains. The complete Code Scout acceptance flow
-requires both.
+MCP-first Slices 4 and 5 are complete: private MCP feedback/exchange capture
+and the filesystem sample/cutover are now shared foundations for the remaining
+Code Scout flow.
 
 ### Pre-C prerequisite — Confined trusted file loading
 
@@ -1276,8 +1275,7 @@ extraction makes them explicit:
 Trusted loading and the public provider also had different symlink policies:
 `FileCapability` rejects links outright, while trusted loading follows them
 while they stay inside the root. `ConfinedFile` keeps the trusted-loading
-policy; `FileCapability` is unchanged until its deletion at the Slice C
-cutover.
+policy; Slice C later deleted `FileCapability`.
 
 **Gate:** trusted artifact loading has no dependency on a model-visible
 filesystem capability, and confinement tests pass against the extracted
@@ -1285,6 +1283,12 @@ primitive. Met: 24 focused confinement tests cover traversal, symlink escape
 and cycles, size, UTF-8, replacement, and error distinctness.
 
 ### Slice C — Sample filesystem server
+
+**Status:** implemented. The immutable TypeScript sample and reproducible
+bundle have 18 conformance tests; a cross-language acceptance test exercises
+all five tools through host JSON, manifest selection, stdio, and PTC-Lisp. The
+implicit providers and `FileCapability` are removed, and examples use
+host-installed aliases.
 
 - implement immutable list/find/search/read/info tools;
 - use one bounded in-memory UTF-8 snapshot, glob path filters, and literal
@@ -1307,16 +1311,12 @@ read its surrounding lines without a prelisted answer, while no public
 
 ### Slice D — Classified inputs, result artifacts, and contracts
 
-**Partially implemented.** `--output`, `--private-output`, atomic no-clobber
-persistence, and terminal suppression for a private run are in
-`PtcRunner.Kernel.ResultArtifact` and `RunBuilder.persist_result/3`, alongside
-the existing trace and inspection persistence. `RunBuilder.result_class/1`
-currently derives the class from the event policy alone. The §4.7 rule that
-also classifies a private mission input or a provider emitting private
-inspection data needs host-installed data classes, so the remaining
-sink-compatibility work waits on Slice B rather than guessing a provider
-vocabulary that does not exist yet. Result schemas and the tagged-union
-profile are likewise still open.
+**Partially implemented.** `--output`, `--private-output`, `--private-mission`,
+atomic no-clobber persistence, terminal suppression, and the §4.7 effective
+run-class rule have landed. Provider policy is frozen during preparation;
+sink incompatibility fails before preflight, credential resolution, process
+spawn, or remote discovery, and the same class drives event and publication
+policy. Input/result schemas and the tagged-union profile remain open.
 
 - add `--output` and `--private-output`;
 - keep the existing manifest-relative `--mission` input override and add the

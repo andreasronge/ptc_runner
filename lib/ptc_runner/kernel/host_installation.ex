@@ -40,7 +40,6 @@ defmodule PtcRunner.Kernel.HostInstallation do
       end)
 
     case ProviderRegistry.new(builders,
-           builtins: false,
            credential_resolver: &resolve_credentials(host, &1)
          ) do
       {:ok, registry} -> {:ok, registry}
@@ -52,13 +51,14 @@ defmodule PtcRunner.Kernel.HostInstallation do
 
   defp prepare(host, %{source: :mcp} = installation, selection, context) do
     with :ok <- placement(installation, context.destination),
-         :ok <- accepts_normal_data(installation.accepts_data),
          {:ok, selected} <- mcp_selection(installation, selection, context) do
       credential_names = credential_names(installation.transport)
 
       {:ok,
        %{
          credential_names: credential_names,
+         data_class: installation.data_class,
+         accepts_data: installation.accepts_data,
          preflight: fn ->
            with {:ok, transport} <- preflight_transport(host, installation.transport),
                 {:ok, installed_options} <-
@@ -84,11 +84,12 @@ defmodule PtcRunner.Kernel.HostInstallation do
     credential_names = [installation.credential]
 
     with :ok <- placement(installation, context.destination),
-         :ok <- accepts_normal_data(installation.accepts_data),
          {:ok, selected} <- llm_selection(installation, selection, context) do
       {:ok,
        %{
          credential_names: credential_names,
+         data_class: installation.data_class,
+         accepts_data: installation.accepts_data,
          preflight: fn ->
            with {:ok, model, adapter} <- preflight_llm(installation.model) do
              {:ok,
@@ -112,15 +113,6 @@ defmodule PtcRunner.Kernel.HostInstallation do
   defp placement(%{source: :mcp}, _destination), do: {:error, :provider_destination_denied}
   defp placement(%{source: :llm}, :workflow), do: :ok
   defp placement(%{source: :llm}, _destination), do: {:error, :provider_destination_denied}
-
-  # V1 host-installed MCP receives ordinary generated mission arguments.
-  # Private snapshot inputs land with the application-source slices; until
-  # then, an installation that refuses normal data is statically incompatible.
-  defp accepts_normal_data(accepts_data) do
-    if :normal in accepts_data,
-      do: :ok,
-      else: {:error, :provider_data_class_denied}
-  end
 
   defp mcp_selection(installation, value, context)
        when is_map(value) and not is_struct(value) do

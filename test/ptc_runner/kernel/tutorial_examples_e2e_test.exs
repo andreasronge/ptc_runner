@@ -4,10 +4,12 @@ defmodule PtcRunner.Kernel.TutorialExamplesE2ETest do
   @moduletag :e2e
   @moduletag timeout: 180_000
 
-  alias PtcRunner.Kernel.ProviderRegistry
+  alias PtcRunner.Kernel.HostConfig
+  alias PtcRunner.Kernel.HostInstallation
   alias PtcRunner.Kernel.RunBuilder
 
   @examples Path.expand("../../../examples/kernel-tutorial", __DIR__)
+  @host Path.join(@examples, "ptc-host.json")
 
   setup_all do
     :ok = PtcRunner.Dotenv.load()
@@ -41,7 +43,7 @@ defmodule PtcRunner.Kernel.TutorialExamplesE2ETest do
     assert result.value == %{"ok" => true, "value" => expected}
     assert result.usage.subordinate_evaluations in 1..4
     assert result.usage.capability_calls.workflow["llm-request"] in 1..4
-    assert result.usage.capability_calls.mission["fs-read"] == 1
+    assert result.usage.capability_calls.mission["workspace.read"] == 1
   end
 
   test "the multi-turn tutorial commits a helper before explicit completion" do
@@ -54,7 +56,8 @@ defmodule PtcRunner.Kernel.TutorialExamplesE2ETest do
   end
 
   defp run(example) do
-    {:ok, registry} = ProviderRegistry.new()
+    {:ok, host} = HostConfig.load(@host)
+    {:ok, registry} = HostInstallation.registry(host)
     RunBuilder.run(path(example), registry)
   end
 

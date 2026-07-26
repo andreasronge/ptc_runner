@@ -94,45 +94,67 @@ construction, provider-valid feedback, retries, native result handling, and
 mission evaluation. The host freezes their exact source hashes into the
 workflow bundle before execution.
 
-## Grant model access separately from task access
+## Select model access separately from task access
 
-An agent workflow normally receives the built-in model provider:
-
-```json
-"providers": {
-  "workflow": [
-    {"name": "llm", "config": {"model": "deepseek", "cache": false}}
-  ]
-}
-```
-
-The mission receives only the capabilities needed for the task. For example,
-the file-agent fixture confines file reads to one manifest-relative directory:
+The manifest selects host-installed aliases and may narrow their grants:
 
 ```json
 "providers": {
   "workflow": [
-    {"name": "llm", "config": {"model": "deepseek", "cache": false}}
+    {"name": "deepseek"}
   ],
   "mission": [
-    {
-      "name": "file-read",
-      "config": {"root": "files", "max_bytes": 65536}
-    }
+    {"name": "workspace", "config": {"allow": ["workspace.read"]}}
   ]
 }
 ```
 
-The host resolves and validates the root. A manifest cannot choose an absolute
-path, traverse out of its directory, register a callback, or invent a network
-destination.
+The separate trusted host document says what those names mean:
+
+```json
+"credentials": {
+  "openrouter_key": {"env": "OPENROUTER_API_KEY"}
+},
+"install": {
+  "deepseek": {
+    "source": "llm",
+    "model": "openrouter:deepseek/deepseek-v4-flash",
+    "credential": "openrouter_key"
+  },
+  "workspace": {
+    "source": "mcp",
+    "transport": {
+      "type": "stdio",
+      "command": "node",
+      "cwd": ".",
+      "args": [
+        "../mcp/filesystem/dist/server.js",
+        "--root", "03-file-agent/files",
+        "--include", "**"
+      ],
+      "inherit_environment": true,
+      "env": {}
+    },
+    "tools": {
+      "read_text_file": {
+        "as": "workspace.read",
+        "effect": "read"
+      }
+    }
+  }
+}
+```
+
+The host resolves and freezes the model, executable, working directory,
+snapshot include rules, credential binding, and tool mapping. The manifest
+cannot invent a model, callback, command, credential, or network destination.
 
 ## Supply model credentials from the host
 
 Credentials never belong in PTC-Lisp, a manifest, a canonical trace, or a
-committed project file. The built-in source-checkout adapter reads provider
-environment variables. For the tutorial's `deepseek` alias, use an OpenRouter
-key:
+committed project file. The host document binds its `openrouter_key` credential
+to the operator's environment. For the tutorial's `deepseek` alias, use an
+OpenRouter key:
 
 ```console
 cp .env.example .env
@@ -145,16 +167,15 @@ application startup. An already exported shell variable takes precedence:
 
 ```console
 export OPENROUTER_API_KEY="..."
-mix ptc.run examples/kernel-tutorial/03-file-agent/ptc.json
+mix ptc.run examples/kernel-tutorial/03-file-agent/ptc.json \
+  --host-config examples/kernel-tutorial/ptc-host.json
 ```
 
 `.env` is ignored by Git, but it is still a plaintext local secret; use the
-shell, `direnv`, or a secret manager where appropriate. The trusted model
-registry currently resolves `deepseek` to
-`openrouter:deepseek/deepseek-v4-flash`. Other built-in provider routes use
-their normal host variables, such as `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`,
-`GOOGLE_API_KEY`, `GROQ_API_KEY`, or AWS credentials. The manifest selects a
-trusted model alias, but cannot carry or override its credential.
+shell, `direnv`, or a secret manager where appropriate. The host fixes the
+full `openrouter:deepseek/deepseek-v4-flash` model identifier, so the manifest's
+short alias contains no provider-resolution magic and cannot carry or override
+its credential.
 
 ## Give the model a small mission API
 
@@ -168,9 +189,11 @@ clear:
   "Read one UTF-8 file beneath the configured root."
   {:signature "(path :string) -> :string"}
   [path]
-  (let [response (tool/fs-read {"path" path})]
+  (let [response (tool/workspace.read {"path" path})]
     (if (= :ok (get response :status))
-      (get-in response [:value "content"])
+      (str (str/join "\n"
+             (map #(get % "text") (get-in response [:value "lines"])))
+           "\n")
       (fail response))))
 ```
 
@@ -234,6 +257,7 @@ The checked-in file agent joins every piece above:
 
 ```text
 examples/kernel-tutorial/03-file-agent/
+├── ../ptc-host.json shared host installation
 ├── ptc.json       manifest and provider grants
 ├── agent.clj      workflow entry over agent.core
 ├── files.clj      prompt-visible mission API
@@ -248,16 +272,17 @@ Its input asks the model to read `brief.txt`. A typical model action is:
 ```
 
 `ptc.json` connects the pieces: `tutorial.agent/run` is the workflow entry,
-`agent.core` is its shipped PTC-Lisp dependency, `llm` is installed only in the
-workflow, and `file-read` is installed only in the mission. The model sees the
-documented `tutorial.files/read-text` mission function, not the host credential
-or an unrestricted file API.
+`agent.core` is its shipped PTC-Lisp dependency, `deepseek` is installed only
+in the workflow, and the mapped `workspace.read` MCP tool is installed only in
+the mission. The model sees the documented `tutorial.files/read-text` facade,
+not the host credential or an unrestricted file API.
 
 Run it from the repository root and retain its sanitized trace:
 
 ```console
 mkdir -p tmp/file-agent-traces
 mix ptc.run examples/kernel-tutorial/03-file-agent/ptc.json \
+  --host-config examples/kernel-tutorial/ptc-host.json \
   --trace tmp/file-agent-traces/file-agent.jsonl
 ```
 
@@ -273,7 +298,7 @@ The public result has this stable shape (duration and remaining budgets vary):
     "subordinate_evaluations": 1,
     "capability_calls": {
       "workflow": {"llm-request": 1},
-      "mission": {"fs-read": 1}
+      "mission": {"workspace.read": 1}
     }
   },
   "evaluation_memory": {
@@ -315,7 +340,7 @@ One verified DeepSeek run produced 17 canonical events and this flow:
 | 5–6 | workflow `llm-request`, status `ok` | DeepSeek received the task, language context, and `run_ptc_lisp` schema. |
 | 7–9 | `workflow-annotation`, kind `tool-call`, turn `0` | The model returned one valid `run_ptc_lisp` action. |
 | 10–11 | `kernel-eval`, mission `evaluation-started` | The Kernel accepted a 47-byte PTC-Lisp program; the trace retained its hash and size, not its source. |
-| 12–13 | mission `fs-read`, status `ok` | The program used the one granted task capability. |
+| 12–13 | mission `workspace.read`, status `ok` | The program used the one granted task capability. |
 | 14–15 | mission status `returned`, `kernel-eval` status `ok` | The mission completed on its first turn, with zero history values. |
 | 16–17 | workflow `evaluation-stopped`, `run-stopped` | The public result and bounded usage were finalized successfully. |
 
@@ -334,6 +359,7 @@ inspection artifact to answer *what the model saw and wrote*:
 ```console
 mkdir -p tmp/file-agent-private
 mix ptc.run examples/kernel-tutorial/03-file-agent/ptc.json \
+  --host-config examples/kernel-tutorial/ptc-host.json \
   --trace tmp/file-agent-private/file-agent.jsonl \
   --inspect tmp/file-agent-private/file-agent.inspection.jsonl
 ```

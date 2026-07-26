@@ -219,6 +219,8 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
       {:ok,
        %{
          credential_names: [],
+         data_class: :private_inspection,
+         accepts_data: [:normal, :private_inspection],
          preflight: fn ->
            {:ok,
             fn %{} ->
@@ -226,7 +228,7 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
                %{
                  capabilities: [capability],
                  data_class: :private_inspection,
-                 accepts_data: [:normal]
+                 accepts_data: [:normal, :private_inspection]
                }}
             end}
          end
@@ -242,6 +244,46 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
     assert built.config.event_sink.policy == :private
     assert RunBuilder.result_class(built.config.event_sink) == :private
     assert :ok = RunBuilder.close(built)
+  end
+
+  @tag :tmp_dir
+  test "effective data-class denial happens before preflight, credentials, or acquisition", %{
+    tmp_dir: dir
+  } do
+    parent = self()
+    File.write!(Path.join(dir, "workflow.clj"), "(ns app) (defn run [x] (return x))")
+
+    staged = fn _config, _context ->
+      {:ok,
+       %{
+         credential_names: ["secret"],
+         data_class: :private_inspection,
+         accepts_data: [:normal],
+         preflight: fn ->
+           send(parent, :provider_preflighted)
+           {:ok, fn _credentials -> send(parent, :provider_acquired) end}
+         end
+       }}
+    end
+
+    resolver = fn _names ->
+      send(parent, :credentials_resolved)
+      {:ok, %{"secret" => "secret"}}
+    end
+
+    {:ok, registry} =
+      ProviderRegistry.new(%{"private" => ProviderRegistry.staged(staged)},
+        credential_resolver: resolver
+      )
+
+    path = manifest(dir, [], [provider("private", %{})])
+
+    assert {:error, :provider_data_class_denied} =
+             RunBuilder.load_and_build(path, registry)
+
+    refute_received :provider_preflighted
+    refute_received :credentials_resolved
+    refute_received :provider_acquired
   end
 
   test "built-in LLM adaptation preserves provider-valid correction history" do

@@ -1,0 +1,42 @@
+{
+  "credentials": {
+    "openrouter_key": {"env": "OPENROUTER_API_KEY"}
+  },
+  "install": {
+    "deepseek": {
+      "source": "llm",
+      "model": "openrouter:deepseek/deepseek-v4-flash",
+      "credential": "openrouter_key",
+      "cache": true
+    },
+    "workspace": {
+      "source": "mcp",
+      "transport": {
+        "type": "stdio",
+        "command": "node",
+        "cwd": ".",
+        "args": [
+          "../mcp/filesystem/dist/server.js",
+          "--root",
+          "files",
+          "--include",
+          "**"
+        ],
+        "inherit_environment": true,
+        "env": {}
+      },
+      "tools": {
+        "read_text_file": {
+          "as": "workspace.read",
+          "effect": "read"
+        }
+      },
+      "installation_revision": "filesystem-sample-0.1.0",
+      "ceilings": {
+        "timeout_ms": 15000,
+        "max_catalog_tools": 8,
+        "max_result_bytes": 262144
+      }
+    }
+  }
+}

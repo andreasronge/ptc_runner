@@ -1,8 +1,7 @@
 # MCP-first capability platform — implementation plan
 
 > **Status:** active implementation plan, promoted from `future/` on
-> 2026-07-25. Slices 0 through 4 are complete; Slice 5 is the remaining
-> implementation step. Every API
+> 2026-07-25. Slices 0 through 5 are complete. Every API
 > below remains planned unless explicitly described as current behavior. The
 > protocol target is the locked `2026-07-28` release
 > candidate reviewed on 2026-07-23. Implementation may target that candidate
@@ -49,13 +48,14 @@ The current implementation already establishes useful boundaries:
 | `PtcRunner.Kernel.ProviderRegistry` | Accepts trusted builders and normalizes `{capabilities, snapshot, close}` | Host JSON should decode into existing builders, not create another provider framework |
 | `PtcRunner.Kernel.MCPSource` | Implements read-only MCP `2026-07-28` over typed stateless Streamable HTTP and owned stdio transports; installation still requires Elixir | The common protocol and transport ownership core exists; data-driven installation remains |
 | `PtcRunner.Kernel.MCPLease` | Removed with the obsolete protocol-session lifecycle | Stdio needs transport ownership, not a protocol lease |
-| `PtcRunner.Kernel.FileCapability` | Freezes configured files and reads one already-known whole UTF-8 path | Keep only until the MCP filesystem replacement passes acceptance, then delete the public provider instead of extending it |
+| Public filesystem provider | The former `FileCapability` and implicit `file-read` builder were deleted after MCP filesystem acceptance | Keep model-accessible filesystem authority on the single MCP path |
 | `PtcRunner.Kernel.JSONSchema` | Compiles a bounded 2020-12 subset and currently requires object roots for inputs and outputs | Input and output compilation need distinct root rules; full remote schemas must not bypass the bounded callable profile |
-| `mix ptc.run` | Uses the default registry and has no host-config option | A generic trusted installation channel is the missing CLI capability |
+| `mix ptc.run` | Accepts strict host config, `--check`, host-only aliases, and provider-free runs without a host document | The generic trusted installation channel is implemented |
 | Private inspection | Captures exact provider-neutral LLM and capability activity in a separate bounded artifact | MCP-specific wire evidence can extend the private plane without entering canonical traces |
 
-No new top-level runtime or task abstraction is needed. The remaining client
-work is data-driven installation of the implemented MCP transports.
+No new top-level runtime or task abstraction was needed. The remaining work in
+this plan is limited to later optional protocol features and final SDK/spec
+reconciliation.
 
 ## 3. Decisions
 
@@ -940,10 +940,8 @@ the already-authorized installation in a later dynamic phase.
 
 ## 6. Implementation sequence
 
-Slices 0–4 are complete. Slice 5 (the filesystem sample and `file-read`
-cutover) remains independently implementable on top of the shared protocol
-and installation foundation. The complete private-inspection tutorial requires
-both Slices 4 and 5.
+Slices 0–5 are complete. The complete private-inspection tutorial can now build
+on both the private MCP evidence plane and the filesystem sample.
 
 ### Slice 0 — Behavior-preserving seams and launcher proof
 
@@ -1076,6 +1074,10 @@ private reviewer can reconstruct the full exchange and public artifacts reveal
 neither payload nor credentials.
 
 ### Slice 5 — Sample server and filesystem acceptance
+
+**Status:** implemented. The pinned TypeScript sample, reproducible bundle,
+license metadata, 18 server conformance tests, cross-language host/manifest
+E2E, host-only registry cutover, and removal of `FileCapability` have landed.
 
 - Pin one RC-compatible official TypeScript SDK generation for initial work,
   then move to the stable generation after publication.

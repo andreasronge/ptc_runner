@@ -5,6 +5,7 @@ defmodule Mix.Tasks.Ptc.Run do
 
       mix ptc.run MANIFEST
       mix ptc.run MANIFEST --mission alternate-input.json
+      mix ptc.run MANIFEST --private-mission private-input.json --private-output result.json
       mix ptc.run MANIFEST --trace traces/run.jsonl
       mix ptc.run MANIFEST --trace traces/run.jsonl --inspect traces/run.inspection.jsonl
       mix ptc.run MANIFEST --output results/answer.json
@@ -15,6 +16,9 @@ defmodule Mix.Tasks.Ptc.Run do
   `--output` and `--private-output` write the result value as a standalone
   JSON artifact so a later run can consume it without scraping stdout. Both
   refuse to overwrite an existing destination and are mutually exclusive.
+  `--private-mission` is mutually exclusive with `--mission`, loads the same
+  manifest-confined JSON shape, and classifies the entire run before provider
+  activity.
 
   A private-event run may not publish. It suppresses its value on stdout,
   rejects `--output`, and requires `--private-output` to keep the value at all.
@@ -22,7 +26,8 @@ defmodule Mix.Tasks.Ptc.Run do
   `--host-config` installs the exact provider aliases declared by one strict,
   bounded host document. `--check` assembles and discovers those providers,
   prints a safe resolved view, and closes every resource without invoking the
-  workflow or a model.
+  workflow or a model. A provider-bearing manifest requires `--host-config`;
+  provider-free manifests continue to run without one.
   """
   use Mix.Task
 
@@ -31,7 +36,8 @@ defmodule Mix.Tasks.Ptc.Run do
   alias PtcRunner.Kernel.ProviderRegistry
   alias PtcRunner.Kernel.RunBuilder
 
-  @usage "usage: mix ptc.run MANIFEST [--mission PATH] [--trace PATH] [--inspect PATH] " <>
+  @usage "usage: mix ptc.run MANIFEST [--mission PATH | --private-mission PATH] " <>
+           "[--trace PATH] [--inspect PATH] " <>
            "[--output PATH | --private-output PATH] [--host-config PATH] [--check]"
 
   @impl Mix.Task
@@ -42,6 +48,7 @@ defmodule Mix.Tasks.Ptc.Run do
            OptionParser.parse(args,
              strict: [
                mission: :string,
+               private_mission: :string,
                trace: :string,
                inspect: :string,
                output: :string,
@@ -52,6 +59,7 @@ defmodule Mix.Tasks.Ptc.Run do
              aliases: [m: :mission, t: :trace]
            ),
          :ok <- exclusive_destinations(opts),
+         :ok <- exclusive_mission_inputs(opts),
          :ok <- check_options(opts),
          {:ok, registry, host} <- registry(opts) do
       result =
@@ -88,6 +96,14 @@ defmodule Mix.Tasks.Ptc.Run do
   defp exclusive_destinations(opts) do
     if Keyword.has_key?(opts, :output) and Keyword.has_key?(opts, :private_output) do
       {:error, :conflicting_result_destinations}
+    else
+      :ok
+    end
+  end
+
+  defp exclusive_mission_inputs(opts) do
+    if Keyword.has_key?(opts, :mission) and Keyword.has_key?(opts, :private_mission) do
+      {:error, :conflicting_mission_inputs}
     else
       :ok
     end

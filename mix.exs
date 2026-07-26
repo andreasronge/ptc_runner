@@ -151,7 +151,6 @@ defmodule PtcRunner.MixProject do
           PtcRunner.Kernel.Component,
           PtcRunner.Kernel.Error,
           PtcRunner.Kernel.EventSink,
-          PtcRunner.Kernel.FileCapability,
           PtcRunner.Kernel.FrozenBundle,
           PtcRunner.Kernel.InspectionArtifact,
           PtcRunner.Kernel.InspectionSink,

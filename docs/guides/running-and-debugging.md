@@ -90,6 +90,7 @@ Pass both output paths when exact development diagnostics are required:
 ```console
 mkdir -p tmp/inspection
 mix ptc.run examples/kernel-tutorial/03-file-agent/ptc.json \
+  --host-config examples/kernel-tutorial/ptc-host.json \
   --trace tmp/inspection/run.jsonl \
   --inspect tmp/inspection/run.inspection.jsonl
 ```

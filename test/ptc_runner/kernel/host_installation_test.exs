@@ -202,9 +202,10 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
   end
 
   @tag :tmp_dir
-  test "normal mission data is rejected by an installation that only accepts private data", %{
-    tmp_dir: dir
-  } do
+  test "preparation exposes an installation that accepts only private data for run-level checks",
+       %{
+         tmp_dir: dir
+       } do
     config =
       http_config()
       |> put_in(["install", "remote", "accepts_data"], ["private_inspection"])
@@ -212,8 +213,11 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
     host = load_host(dir, config)
     assert {:ok, registry} = HostInstallation.registry(host)
 
-    assert {:error, :provider_data_class_denied} =
+    assert {:ok, prepared} =
              ProviderRegistry.prepare(registry, "remote", %{}, context(dir, :mission))
+
+    assert prepared.data_class == :normal
+    assert prepared.accepts_data == [:private_inspection]
   end
 
   defp context(directory, destination) do

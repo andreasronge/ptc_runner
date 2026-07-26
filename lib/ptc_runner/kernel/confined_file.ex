@@ -20,12 +20,10 @@ defmodule PtcRunner.Kernel.ConfinedFile do
   opening, and again after reading, so a file replaced mid-read fails instead
   of returning a mixture of two files.
 
-  Trusted loading previously borrowed this behavior by constructing the
-  model-visible `fs-read` capability and invoking its callback, which froze the
-  entire root — up to thousands of entries and tens of megabytes — to return a
-  single manifest. This primitive owns the confinement contract directly, so
-  the public provider can be deleted at the MCP filesystem cutover without
-  taking trusted loading with it.
+  Trusted loading previously borrowed this behavior from the removed public
+  file capability, freezing the entire root to return one manifest. This
+  primitive now owns the trusted-loading contract independently; generated
+  programs use explicitly installed MCP filesystem tools instead.
   """
 
   @max_path_bytes 1_024

@@ -8,9 +8,10 @@ visible by requiring DeepSeek to define a helper in one evaluation and call it
 from the next.
 
 You do not need to write Elixir for the main tutorial. You need a PtcRunner
-checkout, Elixir/Mix to run its command-line tasks, basic Clojure syntax, and
-an OpenRouter key for the two live-model examples. The final section shows the
-equivalent Elixir embedding boundary for host-application authors.
+checkout, Elixir/Mix to run its command-line tasks, basic Clojure syntax, an
+OpenRouter key for the live-model examples, and Node.js for the filesystem MCP
+sample. The final section shows the equivalent Elixir embedding boundary for
+host-application authors.
 
 The complete files are under
 [`examples/kernel-tutorial/`](https://github.com/andreasronge/ptc_runner/tree/main/examples/kernel-tutorial/).
@@ -41,7 +42,7 @@ human manifest + workflow Lisp
              |
              | model-produced PTC-Lisp source
              v
-      bounded mission   ---- fs-read --------> granted directory only
+      bounded mission   -- workspace.read --> immutable MCP snapshot
              |
              v
  public result/error + usage + canonical events
@@ -250,13 +251,13 @@ and post-processing where an LLM would add cost and uncertainty.
 
 In
 [`extract.clj`](https://github.com/andreasronge/ptc_runner/blob/main/examples/kernel-tutorial/02-deepseek-extract/extract.clj),
-the human creates the request and owns its output policy. The manifest grants
-the workflow one provider named `llm` configured with the `deepseek` alias:
+the human creates the request and owns its output policy. The manifest selects
+the host-installed `deepseek` alias:
 
 ```json
 "providers": {
   "workflow": [
-    {"name": "llm", "config": {"model": "deepseek", "cache": false}}
+    {"name": "deepseek"}
   ]
 }
 ```
@@ -284,7 +285,8 @@ model content.
 Run the example:
 
 ```bash
-mix ptc.run examples/kernel-tutorial/02-deepseek-extract/ptc.json
+mix ptc.run examples/kernel-tutorial/02-deepseek-extract/ptc.json \
+  --host-config examples/kernel-tutorial/ptc-host.json
 ```
 
 One live DeepSeek run produced:
@@ -321,7 +323,8 @@ The file-agent example separates orchestration from task authority:
   render a compact PTC-Lisp language card and mission context, gives the model
   one `run_ptc_lisp` tool schema, then receives a program;
 - that program executes in the mission environment;
-- only the mission environment has `file-read`, rooted at
+- only the mission environment has the mapped `workspace.read` tool, served
+  from an immutable snapshot of
   `examples/kernel-tutorial/03-file-agent/files/`;
 - the model cannot call the workflow's LLM capability or escape the file root.
 
@@ -334,9 +337,11 @@ The human creates the mission helper:
   "Read one UTF-8 file beneath the configured mission root."
   {:signature "(path :string) -> :string"}
   [path]
-  (let [response (tool/fs-read {"path" path})]
+  (let [response (tool/workspace.read {"path" path})]
     (if (= :ok (get response :status))
-      (get-in response [:value "content"])
+      (str (str/join "\n"
+             (map #(get % "text") (get-in response [:value "lines"])))
+           "\n")
       (fail response))))
 ```
 
@@ -429,7 +434,8 @@ apply a lower byte ceiling.
 Run it:
 
 ```bash
-mix ptc.run examples/kernel-tutorial/03-file-agent/ptc.json
+mix ptc.run examples/kernel-tutorial/03-file-agent/ptc.json \
+  --host-config examples/kernel-tutorial/ptc-host.json
 ```
 
 In a verified live run, DeepSeek created:
@@ -450,7 +456,7 @@ The human received:
     "protocol_errors": 0,
     "subordinate_evaluations": 1,
     "capability_calls": {
-      "mission": {"fs-read": 1},
+      "mission": {"workspace.read": 1},
       "workflow": {"llm-request": 1}
     }
   }
@@ -496,7 +502,8 @@ to two turns:
 Run it with:
 
 ```bash
-mix ptc.run examples/kernel-tutorial/04-multi-turn-agent/ptc.json
+mix ptc.run examples/kernel-tutorial/04-multi-turn-agent/ptc.json \
+  --host-config examples/kernel-tutorial/ptc-host.json
 ```
 
 The successful result contains `{"ok":true,"value":42}`. Its usage reports
@@ -517,6 +524,7 @@ Persist the canonical events for any manifest entry run with `--trace`:
 mkdir -p tmp/tutorial-traces
 
 mix ptc.run examples/kernel-tutorial/03-file-agent/ptc.json \
+  --host-config examples/kernel-tutorial/ptc-host.json \
   --trace tmp/tutorial-traces/file-agent.jsonl
 ```
 
@@ -539,8 +547,8 @@ workflow-annotation       agent-action
 capability-stopped         workflow-annotate
 capability-started        kernel-eval
 evaluation-started        mission
-capability-started        fs-read
-capability-stopped         fs-read
+capability-started        workspace.read
+capability-stopped         workspace.read
 evaluation-stopped         mission
 capability-stopped         kernel-eval
 evaluation-stopped         workflow
@@ -652,10 +660,10 @@ never silently dropped to fit the transcript bound.
 
 Authority is equally explicit:
 
-- `llm` is allowed only in the workflow provider list;
-- `file-read` is allowed only in the mission provider list;
-- `file-read` configuration may set `"model_visible": false`; MCP selection
-  may provide a `model_visible` list that is a subset of `allow`;
+- the host-installed `deepseek` LLM is allowed only in the workflow list;
+- the host-installed `workspace` MCP source is allowed only in the mission list;
+- MCP selection may provide a `model_visible` list that is a subset of
+  `allow`;
 - visibility removes discovery/model-context metadata only. A granted hidden
   capability remains callable by exact name, while an ungranted capability
   remains denied;

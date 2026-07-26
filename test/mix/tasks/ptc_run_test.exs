@@ -41,6 +41,50 @@ defmodule Mix.Tasks.Ptc.RunTest do
   end
 
   @tag :tmp_dir
+  test "--private-mission classifies the value before assembly and requires a private sink", %{
+    tmp_dir: dir
+  } do
+    manifest_path = write_manifest(dir, %{"value" => 1})
+    File.write!(Path.join(dir, "private.json"), Jason.encode!(%{"value" => "confidential"}))
+    private_output = Path.join(dir, "answer.private.json")
+
+    terminal =
+      capture_io(fn ->
+        Mix.Task.reenable("ptc.run")
+
+        Run.run([
+          manifest_path,
+          "--private-mission",
+          "private.json",
+          "--private-output",
+          private_output
+        ])
+      end)
+
+    refute terminal =~ "confidential"
+    assert %{"class" => "private"} = Jason.decode!(terminal)
+    assert "confidential" == private_output |> File.read!() |> Jason.decode!()
+  end
+
+  @tag :tmp_dir
+  test "rejects selecting ordinary and private mission inputs together", %{tmp_dir: dir} do
+    manifest_path = write_manifest(dir, %{"value" => 1})
+    File.write!(Path.join(dir, "input.json"), "{}")
+
+    Mix.Task.reenable("ptc.run")
+
+    assert_raise Mix.Error, ~r/conflicting_mission_inputs/, fn ->
+      Run.run([
+        manifest_path,
+        "--mission",
+        "input.json",
+        "--private-mission",
+        "input.json"
+      ])
+    end
+  end
+
+  @tag :tmp_dir
   test "--check reports a host-installed workflow LLM without invoking it", %{tmp_dir: dir} do
     File.write!(
       Path.join(dir, "main.clj"),
@@ -115,7 +159,7 @@ defmodule Mix.Tasks.Ptc.RunTest do
   end
 
   @tag :tmp_dir
-  test "--host-config replaces the implicit provider registry", %{tmp_dir: dir} do
+  test "a provider-bearing manifest has no implicit registry fallback", %{tmp_dir: dir} do
     File.write!(
       Path.join(dir, "main.clj"),
       ~S|(ns main) (defn run [input] (return input))|

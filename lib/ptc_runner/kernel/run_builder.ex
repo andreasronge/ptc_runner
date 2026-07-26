@@ -30,7 +30,9 @@ defmodule PtcRunner.Kernel.RunBuilder do
   def build(manifest, registry, opts \\ [])
 
   def build(%Manifest{} = manifest, %ProviderRegistry{} = registry, opts) when is_list(opts) do
-    case providers(manifest, registry) do
+    input_class = Keyword.get(opts, :input_class, :normal)
+
+    case providers(manifest, registry, input_class) do
       {:ok, providers} -> build_with_providers(manifest, providers, opts)
       {:error, _reason} = error -> error
     end
@@ -167,15 +169,20 @@ defmodule PtcRunner.Kernel.RunBuilder do
     end)
   end
 
-  defp providers(manifest, registry) do
+  defp providers(manifest, registry, input_class)
+       when input_class in [:normal, :private_inspection] do
     with {:ok, prepared} <- prepare_providers(manifest, registry),
+         effective_class <- effective_data_class(input_class, prepared),
+         :ok <- providers_accept(prepared, effective_class),
          {:ok, preflighted} <- preflight_providers(prepared),
          {:ok, credentials} <-
            ProviderRegistry.resolve_credentials(registry, credential_names(prepared)),
-         {:ok, acquired} <- acquire_providers(preflighted, credentials) do
+         {:ok, acquired} <- acquire_providers(preflighted, credentials, effective_class) do
       {:ok, %{acquired | snapshots: sort_snapshots(acquired.snapshots)}}
     end
   end
+
+  defp providers(_manifest, _registry, _input_class), do: {:error, :invalid_input_class}
 
   defp sort_snapshots(snapshots), do: Enum.sort_by(snapshots, &Map.get(&1, "provider", ""))
 
@@ -201,6 +208,8 @@ defmodule PtcRunner.Kernel.RunBuilder do
           entry = %{
             destination: destination,
             credential_names: provider.credential_names,
+            data_class: provider.data_class,
+            accepts_data: provider.accepts_data,
             prepared: provider
           }
 
@@ -232,20 +241,22 @@ defmodule PtcRunner.Kernel.RunBuilder do
     |> reverse_success()
   end
 
-  defp acquire_providers(preflighted, credentials) do
+  defp acquire_providers(preflighted, credentials, effective_class) do
     initial = %{
       workflow: %{capabilities: []},
       mission: %{capabilities: []},
       resources: [],
       snapshots: [],
-      data_class: :normal
+      data_class: effective_class
     }
 
     Enum.reduce_while(preflighted, {:ok, initial}, fn provider, {:ok, accumulated} ->
       provider_credentials = Map.take(credentials, provider.credential_names)
 
       case ProviderRegistry.acquire(provider.preflighted, provider_credentials) do
-        {:ok, built} ->
+        {:ok, built}
+        when built.data_class == provider.data_class and
+               built.accepts_data == provider.accepts_data ->
           environment = Map.fetch!(accumulated, provider.destination)
 
           next =
@@ -255,9 +266,17 @@ defmodule PtcRunner.Kernel.RunBuilder do
             })
             |> Map.update!(:snapshots, &maybe_append(&1, built.snapshot))
             |> Map.update!(:resources, &maybe_prepend(&1, built.close))
-            |> Map.update!(:data_class, &strictest_data_class(&1, built.data_class))
 
           {:cont, {:ok, next}}
+
+        {:ok, built} ->
+          result =
+            prefer_cleanup_error(
+              {:error, :provider_data_policy_changed},
+              close_resources(maybe_prepend(accumulated.resources, built.close))
+            )
+
+          {:halt, result}
 
         {:error, _reason} = error ->
           result = prefer_cleanup_error(error, close_resources(accumulated.resources))
@@ -285,6 +304,18 @@ defmodule PtcRunner.Kernel.RunBuilder do
   defp strictest_data_class(:private_inspection, _next), do: :private_inspection
   defp strictest_data_class(_current, :private_inspection), do: :private_inspection
   defp strictest_data_class(:normal, :normal), do: :normal
+
+  defp effective_data_class(input_class, prepared) do
+    Enum.reduce(prepared, input_class, fn provider, current ->
+      strictest_data_class(current, provider.data_class)
+    end)
+  end
+
+  defp providers_accept(prepared, effective_class) do
+    if Enum.all?(prepared, &(effective_class in &1.accepts_data)),
+      do: :ok,
+      else: {:error, :provider_data_class_denied}
+  end
 
   @spec close(%{config: RunConfig.t()} | RunConfig.t()) ::
           :ok | {:error, :provider_cleanup_failed}
@@ -331,17 +362,20 @@ defmodule PtcRunner.Kernel.RunBuilder do
   @doc """
   Loads a manifest and builds its run.
 
-  The optional `:mission` path replaces the manifest input using the same
-  manifest-relative confinement rules. The name is retained from the CLI
-  option; it changes top-level workflow input, not mission-environment data.
+  The optional `:mission` or `:private_mission` path replaces the manifest
+  input using the same manifest-relative confinement rules. They are mutually
+  exclusive. A private mission marks the complete run value private before
+  provider preflight or acquisition. The option names refer to CLI input
+  authority; they change top-level workflow input, not mission-environment
+  data.
   """
   def load_and_build(path, registry, opts \\ []) do
     installed_limits = Keyword.get(opts, :installed_limits, Limits.installed_defaults())
 
     with {:ok, manifest} <- Manifest.load(path, installed_limits),
-         {:ok, manifest} <- maybe_override_input(manifest, opts),
+         {:ok, manifest, input_class} <- maybe_override_input(manifest, opts),
          :ok <- preflight_inspection(opts),
-         do: build(manifest, registry, opts)
+         do: build(manifest, registry, Keyword.put(opts, :input_class, input_class))
   end
 
   # A deterministic destination conflict is reported after manifest and input
@@ -405,9 +439,23 @@ defmodule PtcRunner.Kernel.RunBuilder do
   end
 
   defp maybe_override_input(manifest, opts) do
-    case Keyword.get(opts, :mission) do
-      nil -> {:ok, manifest}
-      path -> Manifest.override_input(manifest, path)
+    case {Keyword.get(opts, :mission), Keyword.get(opts, :private_mission)} do
+      {nil, nil} ->
+        {:ok, manifest, :normal}
+
+      {path, nil} when is_binary(path) ->
+        with {:ok, manifest} <- Manifest.override_input(manifest, path),
+             do: {:ok, manifest, :normal}
+
+      {nil, path} when is_binary(path) ->
+        with {:ok, manifest} <- Manifest.override_input(manifest, path),
+             do: {:ok, manifest, :private_inspection}
+
+      {path, private} when is_binary(path) and is_binary(private) ->
+        {:error, :conflicting_mission_inputs}
+
+      _invalid ->
+        {:error, :invalid_input}
     end
   end
 

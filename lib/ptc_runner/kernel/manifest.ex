@@ -35,12 +35,10 @@ defmodule PtcRunner.Kernel.Manifest do
   file in `path`.
 
   Provider entries contain a bounded `name` and JSON `config`. The manifest can
-  select only builders installed in `PtcRunner.Kernel.ProviderRegistry`.
-  Built-in `file-read` accepts `root`, optional `max_bytes`, and optional
-  `model_visible`, and freezes a bounded immutable file snapshot during
-  assembly; installed MCP providers may accept a `model_visible` subset of
-  their authorized `allow` names. Visibility controls discovery and model
-  context only, never authority.
+  select only builders installed in `PtcRunner.Kernel.ProviderRegistry`; there
+  are no implicit provider names. Installed MCP providers may accept a
+  `model_visible` subset of their authorized `allow` names. Visibility
+  controls discovery and model context only, never authority.
   Limit names match `PtcRunner.Kernel.Limits`; version 1 accepts values no
   greater than the host-supplied installed ceilings. Omitted values use the
   normal runtime defaults, capped by a lower host ceiling. Event policy is
