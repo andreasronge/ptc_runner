@@ -63,6 +63,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   owned stdio transports. Stdio uses the optional precompiled
   `ptc_runner_launcher` companion, freezes launcher and server digests, and
   provides bounded process-group cleanup.
+- Added manifest-relative input and result contracts with a bounded object
+  profile and root-only tagged decision unions. Input overrides now validate
+  before provider activity, and successful result values validate after
+  evidence capture but before terminal or artifact publication.
 
 ### Changed
 

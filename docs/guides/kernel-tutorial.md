@@ -178,6 +178,24 @@ Dependency IDs must be sorted and unique. Unknown manifest keys, duplicate
 JSON keys, undeclared component calls, missing capabilities, unsafe paths, and
 limit values above the host ceiling are rejected before execution.
 
+For a workflow whose input or result is consumed by another run, add
+manifest-relative contracts:
+
+```json
+"contracts": {
+  "input_schema": {"path": "task.schema.json"},
+  "result_schema": {"path": "answer.schema.json"}
+}
+```
+
+Input is validated before any provider activity. A successful workflow's
+`Result.value` is validated before it can reach stdout or an output artifact.
+`mix ptc.run MANIFEST --output answer.json` writes that validated value
+atomically, and a later run can consume it directly with
+`--mission answer.json`. The bounded schema profile and its root tagged-union
+form are documented in
+[Manifests and capabilities](manifests-and-capabilities.md#input-and-result-contracts).
+
 ## Use case 1: deterministic data transformation
 
 The human creates

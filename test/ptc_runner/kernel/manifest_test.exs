@@ -8,6 +8,7 @@ defmodule PtcRunner.Kernel.ManifestTest do
   alias PtcRunner.Kernel.ProviderRegistry
   alias PtcRunner.Kernel.RunBuilder
   alias PtcRunner.Kernel.SafeMetadata
+  alias PtcRunner.Kernel.ValueContract
 
   @input_schema %{"type" => "object", "additionalProperties" => true}
 
@@ -109,6 +110,183 @@ defmodule PtcRunner.Kernel.ManifestTest do
     duplicate_path = Path.join(dir, "duplicate.json")
     File.write!(duplicate_path, duplicate)
     assert {:error, :duplicate_json_key} = Manifest.load(duplicate_path)
+  end
+
+  @tag :tmp_dir
+  test "manifest contracts compile once and validate initial and overridden input before providers",
+       %{tmp_dir: dir} do
+    File.write!(Path.join(dir, "main.clj"), "(ns main) (defn run [input] (return input))")
+
+    schema = %{
+      "type" => "object",
+      "additionalProperties" => false,
+      "required" => ["question"],
+      "properties" => %{"question" => %{"type" => "string", "maxLength" => 100}}
+    }
+
+    File.write!(Path.join(dir, "input.schema.json"), Jason.encode!(schema))
+    File.write!(Path.join(dir, "valid.json"), Jason.encode!(%{"question" => "valid"}))
+    File.write!(Path.join(dir, "invalid.json"), Jason.encode!(%{"other" => "invalid"}))
+
+    manifest = %{
+      "version" => 1,
+      "workflow" => %{
+        "components" => [%{"id" => "main", "path" => "main.clj"}],
+        "entry" => "main/run"
+      },
+      "input" => %{"value" => %{"question" => "initial"}},
+      "contracts" => %{"input_schema" => %{"path" => "input.schema.json"}},
+      "providers" => %{"workflow" => [%{"name" => "probe"}]}
+    }
+
+    path = Path.join(dir, "contracts.json")
+    File.write!(path, Jason.encode!(manifest))
+    parent = self()
+
+    {:ok, registry} =
+      ProviderRegistry.new(%{
+        "probe" => fn _config, _context ->
+          send(parent, :provider_prepared)
+
+          Capability.new(
+            name: "probe",
+            input_schema: @input_schema,
+            callback: fn _arguments -> {:ok, true} end
+          )
+        end
+      })
+
+    assert {:ok, loaded} = Manifest.load(path)
+    assert %ValueContract{} = loaded.contracts.input
+    assert nil == loaded.contracts.result
+
+    assert {:error, :input_contract_failed} =
+             RunBuilder.load_and_build(path, registry, mission: "invalid.json")
+
+    refute_receive :provider_prepared
+
+    assert {:ok, built} = RunBuilder.load_and_build(path, registry, mission: "valid.json")
+    assert_receive :provider_prepared
+    assert :ok = RunBuilder.close(built)
+
+    invalid_initial = put_in(manifest, ["input", "value"], %{"other" => "invalid"})
+    File.write!(path, Jason.encode!(invalid_initial))
+    assert {:error, :input_contract_failed} = RunBuilder.load_and_build(path, registry)
+    refute_receive :provider_prepared
+  end
+
+  @tag :tmp_dir
+  test "contract files reject duplicate keys and remain manifest-confined", %{tmp_dir: dir} do
+    File.write!(Path.join(dir, "main.clj"), "(ns main) (defn run [input] (return input))")
+
+    manifest = %{
+      "version" => 1,
+      "workflow" => %{
+        "components" => [%{"id" => "main", "path" => "main.clj"}],
+        "entry" => "main/run"
+      },
+      "input" => %{"value" => %{}},
+      "contracts" => %{"input_schema" => %{"path" => "input.schema.json"}}
+    }
+
+    path = Path.join(dir, "contracts.json")
+    File.write!(path, Jason.encode!(manifest))
+    File.write!(Path.join(dir, "input.schema.json"), ~S|{"type":"object","type":"object"}|)
+
+    assert {:error, :duplicate_json_key} = Manifest.load(path)
+
+    File.write!(
+      Path.join(dir, "input.schema.json"),
+      Jason.encode!(%{"type" => "object", "additionalProperties" => false})
+    )
+
+    escaped = put_in(manifest, ["contracts", "input_schema", "path"], "../input.schema.json")
+    File.write!(path, Jason.encode!(escaped))
+    assert {:error, :invalid_contracts} = Manifest.load(path)
+  end
+
+  @tag :tmp_dir
+  test "result contracts allow a tagged decision and fail closed after provider activity",
+       %{tmp_dir: dir} do
+    File.write!(
+      Path.join(dir, "main.clj"),
+      ~S|(ns main) (defn run [input] (do (tool/probe {}) (return input)))|
+    )
+
+    result_schema = %{
+      "oneOf" => [
+        %{
+          "type" => "object",
+          "additionalProperties" => false,
+          "required" => ["decision", "reason"],
+          "properties" => %{
+            "decision" => %{"type" => "string", "const" => "no-change"},
+            "reason" => %{"type" => "string", "maxLength" => 100}
+          }
+        },
+        %{
+          "type" => "object",
+          "additionalProperties" => false,
+          "required" => ["decision", "content"],
+          "properties" => %{
+            "decision" => %{"type" => "string", "const" => "propose-change"},
+            "content" => %{"type" => "string", "maxLength" => 100}
+          }
+        }
+      ]
+    }
+
+    File.write!(Path.join(dir, "result.schema.json"), Jason.encode!(result_schema))
+    parent = self()
+
+    {:ok, registry} =
+      ProviderRegistry.new(%{
+        "probe" => fn _config, _context ->
+          Capability.new(
+            name: "probe",
+            input_schema: @input_schema,
+            callback: fn _arguments ->
+              send(parent, :provider_called)
+              {:ok, true}
+            end
+          )
+        end
+      })
+
+    manifest = %{
+      "version" => 1,
+      "workflow" => %{
+        "components" => [%{"id" => "main", "path" => "main.clj"}],
+        "entry" => "main/run"
+      },
+      "input" => %{"value" => %{"decision" => "no-change", "reason" => "stable"}},
+      "contracts" => %{"result_schema" => %{"path" => "result.schema.json"}},
+      "providers" => %{"workflow" => [%{"name" => "probe"}]}
+    }
+
+    path = Path.join(dir, "contracts.json")
+    File.write!(path, Jason.encode!(manifest))
+    valid_output = Path.join(dir, "valid.json")
+
+    assert {:ok, %{value: %{"decision" => "no-change"}}} =
+             RunBuilder.run(path, registry, output: valid_output)
+
+    assert_receive :provider_called
+    assert %{"decision" => "no-change"} = valid_output |> File.read!() |> Jason.decode!()
+
+    secret = "must-not-escape"
+    invalid = put_in(manifest, ["input", "value"], %{"decision" => "unknown", "secret" => secret})
+    File.write!(path, Jason.encode!(invalid))
+    invalid_output = Path.join(dir, "invalid.json")
+    trace = Path.join(dir, "invalid.jsonl")
+
+    error = RunBuilder.run(path, registry, output: invalid_output, trace: trace)
+    assert {:error, :result_contract_failed} = error
+
+    assert_receive :provider_called
+    assert File.exists?(trace)
+    refute File.exists?(invalid_output)
+    refute inspect(error) =~ secret
   end
 
   @tag :tmp_dir

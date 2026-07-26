@@ -135,6 +135,67 @@ host. The shipped non-production sample freezes a bounded UTF-8 snapshot at
 startup and serves list, search, and ranged-read tools without later
 filesystem access.
 
+## Input and result contracts
+
+A manifest may validate its input and successful `Result.value` against
+manifest-relative JSON Schema files:
+
+```json
+"contracts": {
+  "input_schema": {"path": "task.schema.json"},
+  "result_schema": {"path": "candidate.schema.json"}
+}
+```
+
+The input contract covers inline input, an input file, and any `--mission` or
+`--private-mission` override. It is compiled and checked before provider
+preflight, credential resolution, process launch, or remote discovery. The
+result contract is checked after execution and evidence capture, but before
+stdout or `--output`/`--private-output` publication. A mismatch returns
+`input_contract_failed` or `result_contract_failed`; a rejected result value is
+not attached to the error.
+
+Ordinary contracts are closed, bounded object schemas. The supported keywords
+are `type`, `title`, `description`, `properties`, `required`,
+`additionalProperties`, `items`, `enum`, `const`, numeric and length bounds.
+Application contracts also allow one root `oneOf` containing 2–16 closed
+object branches. Every branch must require the same single string
+discriminator and give it a distinct `const` value:
+
+```json
+{
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["decision", "reason"],
+      "properties": {
+        "decision": {"type": "string", "const": "no-change"},
+        "reason": {"type": "string", "maxLength": 1000}
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["decision", "content"],
+      "properties": {
+        "decision": {"type": "string", "const": "propose-change"},
+        "content": {"type": "string", "maxLength": 32000}
+      }
+    }
+  ]
+}
+```
+
+Contracts are at most 64 KiB after normalization. References, regexes, nested
+composition, union types, and general-purpose `oneOf` are rejected. This
+application profile does not widen MCP capability schemas.
+
+`--output PATH` atomically writes only the validated `Result.value`, never
+clobbers an existing file, and can be passed directly to a later run with
+`--mission`. Use `--private-output` for a private run; it creates a `0600`
+artifact and keeps the value off stdout.
+
 ## Providers are installed authority
 
 The manifest selects providers by a bounded public name and JSON

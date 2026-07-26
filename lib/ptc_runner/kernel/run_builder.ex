@@ -22,10 +22,17 @@ defmodule PtcRunner.Kernel.RunBuilder do
   alias PtcRunner.Kernel.ResultArtifact
   alias PtcRunner.Kernel.RunConfig
   alias PtcRunner.Kernel.TraceLog
+  alias PtcRunner.Kernel.ValueContract
   alias PtcRunner.Kernel.WorkflowEnvironment
 
   @spec build(Manifest.t(), ProviderRegistry.t(), keyword()) ::
-          {:ok, %{entry_source: binary(), config: RunConfig.t()}} | {:error, term()}
+          {:ok,
+           %{
+             entry_source: binary(),
+             config: RunConfig.t(),
+             result_contract: ValueContract.t() | nil
+           }}
+          | {:error, term()}
   @doc "Builds an entry expression and complete run configuration from a loaded manifest."
   def build(manifest, registry, opts \\ [])
 
@@ -98,7 +105,12 @@ defmodule PtcRunner.Kernel.RunBuilder do
            labels: manifest.labels
          ) do
       {:ok, config} ->
-        {:ok, %{entry_source: "(#{manifest.entry} data/input)", config: config}}
+        {:ok,
+         %{
+           entry_source: "(#{manifest.entry} data/input)",
+           config: config,
+           result_contract: manifest.contracts.result
+         }}
 
       {:error, _reason} = error ->
         if inspection_sink, do: InspectionSink.stop(inspection_sink)
@@ -339,26 +351,41 @@ defmodule PtcRunner.Kernel.RunBuilder do
   # returned terminal batch is the sole input to both persistence paths.
   defp execute_built(built, opts) do
     {result, terminal_batch} = Kernel.run_and_events(built.entry_source, built.config)
+    result_contract = validate_result(result, built.result_contract)
 
     case terminal_batch do
       {:ok, events} ->
         with :ok <- persist_trace(Keyword.get(opts, :trace), built.config.event_sink, events),
              :ok <- persist_inspection(built.config, events),
+             :ok <- result_contract,
              :ok <- persist_result(result, built.config.event_sink, opts) do
           result
         else
+          {:error, :result_contract_failed} = error ->
+            error
+
           {:error, {stage, reason}} ->
             {:error,
-             {persistence_failure(stage), reason, disclosable(result, built.config.event_sink)}}
+             {persistence_failure(stage), reason,
+              disclosable(result, built.config.event_sink, result_contract)}}
         end
 
       {:error, _reason} ->
-        result
+        case result_contract do
+          :ok -> result
+          {:error, :result_contract_failed} = error -> error
+        end
     end
   end
 
   @spec load_and_build(binary(), ProviderRegistry.t()) ::
-          {:ok, %{entry_source: binary(), config: RunConfig.t()}} | {:error, term()}
+          {:ok,
+           %{
+             entry_source: binary(),
+             config: RunConfig.t(),
+             result_contract: ValueContract.t() | nil
+           }}
+          | {:error, term()}
   @doc """
   Loads a manifest and builds its run.
 
@@ -466,14 +493,26 @@ defmodule PtcRunner.Kernel.RunBuilder do
   # A persistence failure is reported by a caller that renders the error, so a
   # private value must not travel inside it. Refusing to write a private value
   # and then printing it in the refusal would defeat the check entirely.
-  defp disclosable({:ok, %Result{} = result}, sink) do
+  defp disclosable(_result, _sink, {:error, :result_contract_failed} = error), do: error
+
+  defp disclosable({:ok, %Result{} = result}, sink, :ok) do
     case result_class(sink) do
       :private -> {:ok, %Result{result | value: :redacted}}
       :normal -> {:ok, result}
     end
   end
 
-  defp disclosable(result, _sink), do: result
+  defp disclosable(result, _sink, :ok), do: result
+
+  defp validate_result(_result, nil), do: :ok
+
+  defp validate_result({:ok, %Result{value: value}}, %ValueContract{} = contract) do
+    if ValueContract.valid?(contract, public_value(value)),
+      do: :ok,
+      else: {:error, :result_contract_failed}
+  end
+
+  defp validate_result(_result, %ValueContract{}), do: :ok
 
   @doc """
   Returns the effective class of a run's result.

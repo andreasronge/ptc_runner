@@ -1,9 +1,8 @@
 # Manifest-authored applications — implementation plan
 
 > **Status:** active implementation plan, promoted from `future/` on
-> 2026-07-24. Slices A, B, Pre-C, C, and F are complete. Slice D now includes
-> result artifacts, private mission input, and centralized run classification;
-> its input/result schema work remains. Slices E, G, and H remain planned.
+> 2026-07-24. Slices A, B, Pre-C, C, D, and F are complete. Slices E, G, and H
+> remain planned.
 > This document
 > describes the generic runner and application contracts built on the
 > MCP-first capability platform.
@@ -998,10 +997,10 @@ object branches with the same required string discriminator and distinct
 `const` values. It does not enable arbitrary remote references, regexes, or
 general composition in MCP callable schemas.
 
-Planned output channels:
+Output channels:
 
-- `--output PATH` atomically creates, without clobbering, exactly the same
-  public `Result` projection written to stdout;
+- `--output PATH` atomically creates, without clobbering, the validated
+  `Result.value`;
 - `--private-output PATH` atomically creates a no-clobber `0600` classified
   result and suppresses the value on stdout;
 - `--private-mission PATH` loads a manifest-confined JSON object as trusted
@@ -1311,12 +1310,16 @@ read its surrounding lines without a prelisted answer, while no public
 
 ### Slice D — Classified inputs, result artifacts, and contracts
 
-**Partially implemented.** `--output`, `--private-output`, `--private-mission`,
+**Status:** implemented. `--output`, `--private-output`, `--private-mission`,
 atomic no-clobber persistence, terminal suppression, and the §4.7 effective
 run-class rule have landed. Provider policy is frozen during preparation;
 sink incompatibility fails before preflight, credential resolution, process
 spawn, or remote discovery, and the same class drives event and publication
-policy. Input/result schemas and the tagged-union profile remain open.
+policy. Manifest-relative input/result contracts compile once through a
+bounded application profile. Input and overrides fail before provider
+activity; successful `Result.value` validation runs after trace/private
+inspection capture and before any result publication. The root-only tagged
+decision union remains separate from MCP callable schemas.
 
 - add `--output` and `--private-output`;
 - keep the existing manifest-relative `--mission` input override and add the
@@ -1330,9 +1333,11 @@ policy. Input/result schemas and the tagged-union profile remain open.
 - keep private values off stdout and public artifacts; and
 - cover failures after meaningful provider activity.
 
-**Gate:** normal values can be published explicitly, private values can reach
-only an authorized private sink, and a typed candidate can become input to a
-later run without scraping stdout.
+**Gate:** met. Normal values can be published explicitly, private values can
+reach only an authorized private sink, and a typed candidate becomes validated
+input to a later run without scraping stdout. Contract-failure coverage also
+proves that provider activity remains traceable while the rejected value is
+neither persisted nor attached to the error.
 
 ### Slice E — PTC snapshots and private human inspection
 

@@ -15,6 +15,10 @@ defmodule PtcRunner.Kernel.Manifest do
         },
         "mission": {"components": [], "data": {}},
         "input": {"value": {}},
+        "contracts": {
+          "input_schema": {"path": "input.schema.json"},
+          "result_schema": {"path": "result.schema.json"}
+        },
         "providers": {"workflow": [], "mission": []},
         "limits": {},
         "events": {"policy": "normal"},
@@ -32,7 +36,9 @@ defmodule PtcRunner.Kernel.Manifest do
   collisions fail loading. The workflow `entry` is a qualified function name;
   `PtcRunner.Kernel.RunBuilder` renders the executable entry expression. Input
   contains exactly one of a JSON object in `value` or a manifest-relative JSON
-  file in `path`.
+  file in `path`. Optional manifest-local contracts validate input before
+  provider activity and `Result.value` before publication. Contract schemas
+  use the bounded `PtcRunner.Kernel.ValueContract` profile.
 
   Provider entries contain a bounded `name` and JSON `config`. The manifest can
   select only builders installed in `PtcRunner.Kernel.ProviderRegistry`; there
@@ -59,11 +65,13 @@ defmodule PtcRunner.Kernel.Manifest do
   alias PtcRunner.Kernel.Library
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.SafeMetadata
+  alias PtcRunner.Kernel.ValueContract
 
   @max_manifest_bytes 1_000_000
   @max_input_bytes 2_000_000
+  @max_contract_bytes 65_536
   @entry ~r/\A[a-z][a-z0-9._-]{0,127}\/[a-z][a-z0-9._?!-]{0,127}\z/
-  @top_keys ~w($schema version workflow mission input providers limits events labels)
+  @top_keys ~w($schema version workflow mission input contracts providers limits events labels)
 
   @enforce_keys [
     :path,
@@ -72,6 +80,7 @@ defmodule PtcRunner.Kernel.Manifest do
     :mission_components,
     :entry,
     :input,
+    :contracts,
     :mission_data,
     :providers,
     :limits,
@@ -88,6 +97,7 @@ defmodule PtcRunner.Kernel.Manifest do
           mission_components: [Component.t()],
           entry: binary(),
           input: map(),
+          contracts: %{input: ValueContract.t() | nil, result: ValueContract.t() | nil},
           mission_data: map(),
           providers: %{workflow: [map()], mission: [map()]},
           limits: Limits.t(),
@@ -111,7 +121,9 @@ defmodule PtcRunner.Kernel.Manifest do
          1 <- manifest["version"],
          {:ok, workflow} <- workflow(manifest["workflow"], directory),
          {:ok, mission} <- mission(Map.get(manifest, "mission", %{}), directory),
+         {:ok, contracts} <- contracts(Map.get(manifest, "contracts", %{}), directory),
          {:ok, input} <- input(manifest["input"], directory),
+         :ok <- validate_input(contracts.input, input),
          {:ok, providers} <- providers(Map.get(manifest, "providers", %{})),
          {:ok, limits} <- limits(Map.get(manifest, "limits", %{}), installed_limits),
          {:ok, events} <- events(Map.get(manifest, "events", %{})),
@@ -124,6 +136,7 @@ defmodule PtcRunner.Kernel.Manifest do
          mission_components: mission.components,
          entry: workflow.entry,
          input: input,
+         contracts: contracts,
          mission_data: mission.data,
          providers: providers,
          limits: limits,
@@ -156,6 +169,7 @@ defmodule PtcRunner.Kernel.Manifest do
   @spec override_input(t(), binary()) :: {:ok, t()} | {:error, term()}
   def override_input(%__MODULE__{} = manifest, path) when is_binary(path) do
     with {:ok, value} <- input(%{"path" => path}, manifest.directory),
+         :ok <- validate_input(manifest.contracts.input, value),
          do: {:ok, %{manifest | input: value}}
   end
 
@@ -255,6 +269,41 @@ defmodule PtcRunner.Kernel.Manifest do
   end
 
   defp input(_input, _directory), do: {:error, :invalid_input}
+
+  defp contracts(value, directory) when is_map(value) do
+    with :ok <- exact_keys(value, ~w(input_schema result_schema), []),
+         {:ok, input} <- contract(Map.get(value, "input_schema"), directory),
+         {:ok, result} <- contract(Map.get(value, "result_schema"), directory) do
+      {:ok, %{input: input, result: result}}
+    else
+      {:error, :duplicate_json_key} = error -> error
+      _invalid -> {:error, :invalid_contracts}
+    end
+  end
+
+  defp contracts(_value, _directory), do: {:error, :invalid_contracts}
+
+  defp contract(nil, _directory), do: {:ok, nil}
+
+  defp contract(%{"path" => path} = reference, directory) when is_binary(path) do
+    with :ok <- exact_keys(reference, ~w(path), ~w(path)),
+         {:ok, source} <- read_relative(directory, path, @max_contract_bytes),
+         {:ok, decoded} <- Jason.decode(source, objects: :ordered_objects),
+         {:ok, schema} <- ordered_map(decoded),
+         true <- is_map(schema) and not is_struct(schema) do
+      ValueContract.compile(schema)
+    end
+  end
+
+  defp contract(_reference, _directory), do: {:error, :invalid_contracts}
+
+  defp validate_input(nil, _input), do: :ok
+
+  defp validate_input(%ValueContract{} = contract, input) do
+    if ValueContract.valid?(contract, input),
+      do: :ok,
+      else: {:error, :input_contract_failed}
+  end
 
   defp providers(value) when is_map(value) do
     with :ok <- exact_keys(value, ~w(workflow mission), []),
@@ -406,6 +455,7 @@ defmodule PtcRunner.Kernel.Manifest do
         "workflow" => workflow_schema(),
         "mission" => mission_schema(),
         "input" => input_schema(),
+        "contracts" => contracts_schema(),
         "providers" => providers_schema(),
         "limits" => limits_schema(),
         "events" => events_schema(),
@@ -466,6 +516,15 @@ defmodule PtcRunner.Kernel.Manifest do
         required_object(%{"path" => bounded_string(1_024)}, ["path"])
       ]
     }
+  end
+
+  defp contracts_schema do
+    reference = required_object(%{"path" => bounded_string(1_024)}, ["path"])
+
+    closed_object(%{
+      "input_schema" => reference,
+      "result_schema" => reference
+    })
   end
 
   defp providers_schema do

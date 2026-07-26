@@ -375,8 +375,34 @@ defmodule Mix.Tasks.Ptc.RunTest do
     # assert the round trip rather than only the bytes on disk.
     @tag :tmp_dir
     test "writes a value a later run consumes without scraping stdout", %{tmp_dir: dir} do
-      manifest_path = write_manifest(dir, %{"value" => %{"value" => 42}})
+      manifest_path = write_manifest(dir, %{"value" => 42})
       output = Path.join(dir, "candidate.json")
+      schema_path = Path.join(dir, "candidate.schema.json")
+
+      File.write!(
+        Path.join(dir, "main.clj"),
+        ~S|(ns main) (defn run [input] (return input))|
+      )
+
+      schema = %{
+        "type" => "object",
+        "additionalProperties" => false,
+        "required" => ["value"],
+        "properties" => %{"value" => %{"type" => "integer"}}
+      }
+
+      File.write!(schema_path, Jason.encode!(schema))
+
+      manifest =
+        manifest_path
+        |> File.read!()
+        |> Jason.decode!()
+        |> Map.put("contracts", %{
+          "input_schema" => %{"path" => Path.basename(schema_path)},
+          "result_schema" => %{"path" => Path.basename(schema_path)}
+        })
+
+      File.write!(manifest_path, Jason.encode!(manifest))
 
       terminal =
         capture_io(fn ->
@@ -394,7 +420,7 @@ defmodule Mix.Tasks.Ptc.RunTest do
           Run.run([manifest_path, "--mission", Path.basename(output)])
         end)
 
-      assert %{"value" => 42} = Jason.decode!(second)
+      assert %{"value" => %{"value" => 42}} = Jason.decode!(second)
     end
 
     @tag :tmp_dir
