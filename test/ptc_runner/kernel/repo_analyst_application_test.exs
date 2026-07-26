@@ -13,10 +13,12 @@ defmodule PtcRunner.Kernel.RepoAnalystApplicationTest do
   alias PtcRunner.Kernel.Capability
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.HostConfig
+  alias PtcRunner.Kernel.HostInstallation
   alias PtcRunner.Kernel.Library
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.Manifest
   alias PtcRunner.Kernel.MissionEnvironment
+  alias PtcRunner.Kernel.RunBuilder
   alias PtcRunner.Kernel.RunConfig
   alias PtcRunner.Kernel.ValueContract
   alias PtcRunner.Kernel.WorkflowEnvironment
@@ -25,8 +27,8 @@ defmodule PtcRunner.Kernel.RepoAnalystApplicationTest do
   @root Path.expand("../../..", __DIR__)
   @host Path.join(@root, "repo-analyst.host.json")
 
-  # Frozen by direction plan section 8.3. A stub that renames one of these to
-  # make a Wave 1 test pass would silently diverge from the source E1 installs.
+  # Frozen by direction plan section 8.3. A stub that renames one of these
+  # would silently diverge from the native inspection source.
   @private_operations ~w(
     private-history.capability-calls
     private-history.effective-preludes
@@ -39,11 +41,12 @@ defmodule PtcRunner.Kernel.RepoAnalystApplicationTest do
     test "installs the aliases the manifests select, and no implicit provider" do
       assert {:ok, host} = HostConfig.load(@host)
 
-      # private-history is absent until the inspection source lands; see the
-      # deferred-installation test below.
-      assert host.install |> Map.keys() |> Enum.sort() == ["deepseek", "history", "workspace"]
+      assert host.install |> Map.keys() |> Enum.sort() ==
+               ["deepseek", "history", "private-history", "workspace"]
+
       assert host.install["workspace"].source == :mcp
       assert host.install["history"].source == :ptc_trace_snapshot
+      assert host.install["private-history"].source == :ptc_inspection_snapshot
       assert host.install["deepseek"].source == :llm
     end
 
@@ -105,18 +108,32 @@ defmodule PtcRunner.Kernel.RepoAnalystApplicationTest do
       assert length(Enum.uniq(contracts)) == 3
     end
 
-    test "selecting private-history fails until the inspection source is installed" do
-      {:ok, host} = HostConfig.load(@host)
+    @tag :tmp_dir
+    test "review and improve assemble against the installed private source", %{tmp_dir: root} do
+      trace_directory = Path.join(root, "traces")
+      inspection_directory = Path.join(root, "inspection")
+      File.mkdir_p!(trace_directory)
+      File.mkdir_p!(inspection_directory)
 
-      refute Map.has_key?(host.install, "private-history"),
-             """
-             This test is the Wave 1 boundary marker for issue #1128.
+      host_path =
+        write_host_fixture(root,
+          trace_directory: trace_directory,
+          inspection_directory: inspection_directory
+        )
 
-             When #1127 lands ptc_inspection_snapshot, add the private-history
-             installation to repo-analyst.host.json and replace this test with
-             one that asserts the review manifest assembles. Real assembly and
-             execution of the review and improve manifests is owned by #1132.
-             """
+      assert {:ok, host} = HostConfig.load(host_path)
+      assert {:ok, registry} = HostInstallation.registry(host)
+
+      for name <- ~w(repo-analyst-review.json repo-analyst-improve.json) do
+        assert {:ok, built} = RunBuilder.load_and_build(path(name), registry)
+        assert built.config.event_sink.policy == :private
+
+        assert built.config.connector_snapshots
+               |> Enum.map(& &1["provider"])
+               |> Enum.sort() == ["deepseek", "history", "private-history", "workspace"]
+
+        assert :ok = RunBuilder.close(built)
+      end
     end
   end
 
@@ -448,6 +465,24 @@ defmodule PtcRunner.Kernel.RepoAnalystApplicationTest do
 
   defp path(name), do: Path.join(@root, name)
 
+  defp write_host_fixture(root, paths) do
+    host =
+      @host
+      |> File.read!()
+      |> Jason.decode!()
+      |> put_in(["credentials", "openrouter_key", "env"], "PATH")
+      |> put_in(["install", "workspace", "transport", "cwd"], @root)
+      |> put_in(["install", "history", "directory"], paths[:trace_directory])
+      |> put_in(
+        ["install", "private-history", "directory"],
+        paths[:inspection_directory]
+      )
+
+    path = Path.join(root, "repo-analyst.host.json")
+    File.write!(path, Jason.encode!(host))
+    path
+  end
+
   defp case_set(name) do
     @root |> Path.join("repo-analyst/evaluation/#{name}.json") |> File.read!() |> Jason.decode!()
   end
@@ -506,11 +541,9 @@ defmodule PtcRunner.Kernel.RepoAnalystApplicationTest do
     config
   end
 
-  # Bounded stubs standing in for the capabilities issue #1127 installs. They
-  # carry the frozen names and the paged envelope shape and nothing else. When a
-  # recorder is supplied each call is logged, so a test can prove which
-  # operation a facade function actually reached rather than only that the name
-  # resolved at assembly.
+  # Bounded recording stubs isolate facade argument/envelope behavior from
+  # native provider acquisition. The assembly test above exercises the real
+  # trace and private-inspection sources.
   defp stubs(names, recorder \\ nil) do
     Enum.map(names, fn name ->
       callback = fn args ->
