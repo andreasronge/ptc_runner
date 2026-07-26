@@ -144,8 +144,12 @@ Advanced references include the [PTC-Lisp specification](docs/ptc-lisp-specifica
 
 ```console
 mix precommit
-mix prepush
+git push
 ```
+
+The tracked pre-push hook runs the complete push gate, including
+`mix prepush`. Run that Mix alias directly only to diagnose its slower audit,
+Dialyzer, and unused-dependency checks or when hooks are unavailable.
 
 ## License
 
