@@ -13,10 +13,16 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
   every registered close function and may replace the run outcome with
   `:provider_cleanup_error`.
 
+  Trusted staged builders enforce a global preparation barrier. Every selected
+  provider first performs pure selection checks, then every provider completes
+  non-secret local preflight, then the registry resolves the union of declared
+  credentials once before any provider is acquired. Legacy Elixir builders
+  remain supported and are deferred to the acquisition phase.
+
   The built-ins are `llm`, permitted only in the workflow environment, and
   `file-read`, permitted only in the mission environment. Additional builders
-  cannot replace built-in names. Builder exceptions are contained as
-  `:provider_build_failed` during construction.
+  cannot replace built-in names. Builder exceptions are contained at their
+  current lifecycle phase.
   """
 
   alias PtcRunner.Kernel.Capability
@@ -24,8 +30,8 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
   alias PtcRunner.Kernel.JSONValue
   alias PtcRunner.Kernel.LLMCapability
 
-  @enforce_keys [:builders]
-  defstruct [:builders]
+  @enforce_keys [:builders, :credential_resolver]
+  defstruct [:builders, :credential_resolver]
 
   @type build_context :: %{
           directory: binary(),
@@ -45,62 +51,222 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
   @type built_provider :: %{
           capabilities: [Capability.t()],
           snapshot: map() | nil,
-          close: PtcRunner.Kernel.ProviderResources.close() | nil
+          close: PtcRunner.Kernel.ProviderResources.close() | nil,
+          data_class: :normal | :private_inspection,
+          accepts_data: [:normal | :private_inspection]
         }
   @type builder ::
           (map(), context() ->
              {:ok, Capability.t() | built_provider()} | {:error, term()})
-  @type t :: %__MODULE__{builders: %{binary() => builder()}}
+  @type credential_values :: %{binary() => binary()}
+  @type acquire ::
+          (credential_values() ->
+             {:ok, Capability.t() | built_provider()} | {:error, term()})
+  @type prepared :: %{
+          credential_names: [binary()],
+          preflight: (-> {:ok, acquire()} | {:error, term()})
+        }
+  @type staged_builder ::
+          {:staged,
+           (map(), context() ->
+              {:ok, prepared()} | {:error, term()})}
+  @type registry_builder :: builder() | staged_builder()
+  @type credential_resolver ::
+          ([binary()] -> {:ok, credential_values()} | {:error, term()})
+  @type t :: %__MODULE__{
+          builders: %{binary() => registry_builder()},
+          credential_resolver: credential_resolver()
+        }
 
-  @spec new(map()) :: {:ok, t()} | {:error, :invalid_provider_registry}
+  @spec new(map(), keyword()) :: {:ok, t()} | {:error, :invalid_provider_registry}
   @doc """
   Creates a registry with the built-ins and optional additional builder
   functions keyed by provider name.
   """
-  def new(additional_builders \\ %{})
+  def new(additional_builders \\ %{}, opts \\ [])
 
-  def new(additional_builders) when is_map(additional_builders) do
-    builtins = %{"file-read" => &build_file/2, "llm" => &build_llm/2}
+  def new(additional_builders, opts) when is_map(additional_builders) and is_list(opts) do
+    builtins =
+      if Keyword.get(opts, :builtins, true),
+        do: %{"file-read" => &build_file/2, "llm" => &build_llm/2},
+        else: %{}
+
+    resolver = Keyword.get(opts, :credential_resolver, &default_credential_resolver/1)
 
     if Enum.all?(additional_builders, fn {name, builder} ->
-         valid_name?(name) and is_function(builder, 2) and not Map.has_key?(builtins, name)
-       end) do
-      {:ok, %__MODULE__{builders: Map.merge(builtins, additional_builders)}}
+         valid_name?(name) and valid_builder?(builder) and not Map.has_key?(builtins, name)
+       end) and is_function(resolver, 1) and
+         is_boolean(Keyword.get(opts, :builtins, true)) and
+         Keyword.keys(opts) -- [:credential_resolver, :builtins] == [] do
+      {:ok,
+       %__MODULE__{
+         builders: Map.merge(builtins, additional_builders),
+         credential_resolver: resolver
+       }}
     else
       {:error, :invalid_provider_registry}
     end
   end
 
-  def new(_builders), do: {:error, :invalid_provider_registry}
+  def new(_builders, _opts), do: {:error, :invalid_provider_registry}
+
+  @spec staged((map(), context() -> {:ok, prepared()} | {:error, term()})) ::
+          staged_builder()
+  @doc """
+  Marks a trusted builder as staged.
+
+  The preparation callback must be side-effect free. Its returned preflight
+  callback may perform only non-secret local checks; the acquire callback is
+  the first phase allowed to use resolved credentials or open a provider.
+  """
+  def staged(prepare) when is_function(prepare, 2), do: {:staged, prepare}
 
   @spec build(t(), binary(), map(), build_context()) ::
           {:ok, built_provider()} | {:error, term()}
-  @doc "Builds and normalizes one trusted registry entry."
-  def build(%__MODULE__{builders: builders}, name, config, context) do
-    case Map.fetch(builders, name) do
-      {:ok, builder} -> builder.(config, Map.put(context, :provider, name)) |> normalize_build()
-      :error -> {:error, :unknown_provider}
-    end
-  rescue
-    _exception -> {:error, :provider_build_failed}
-  catch
-    _kind, _reason -> {:error, :provider_build_failed}
+  @doc """
+  Builds one entry through all three lifecycle phases.
+
+  Run assembly uses the individual phase functions so the barrier spans every
+  selected provider. This convenience path remains useful for embedding and
+  focused provider tests.
+  """
+  def build(%__MODULE__{} = registry, name, config, context) do
+    with {:ok, prepared} <- prepare(registry, name, config, context),
+         {:ok, preflighted} <- preflight(prepared),
+         {:ok, credentials} <-
+           resolve_credentials(registry, prepared.credential_names),
+         do: acquire(preflighted, credentials)
   end
 
+  @spec prepare(t(), binary(), map(), build_context()) ::
+          {:ok, prepared()} | {:error, term()}
+  @doc false
+  def prepare(%__MODULE__{builders: builders}, name, config, context) do
+    case Map.fetch(builders, name) do
+      {:ok, {:staged, prepare}} ->
+        invoke(
+          fn -> prepare.(config, Map.put(context, :provider, name)) end,
+          :provider_prepare_failed
+        )
+        |> normalize_prepared()
+
+      {:ok, builder} when is_function(builder, 2) ->
+        full_context = Map.put(context, :provider, name)
+
+        {:ok,
+         %{
+           credential_names: [],
+           preflight: fn ->
+             {:ok, fn %{} -> builder.(config, full_context) end}
+           end
+         }}
+
+      :error ->
+        {:error, :unknown_provider}
+    end
+  end
+
+  @spec preflight(prepared()) :: {:ok, %{acquire: acquire()}} | {:error, term()}
+  @doc false
+  def preflight(%{preflight: preflight}) when is_function(preflight, 0) do
+    preflight
+    |> invoke(:provider_preflight_failed)
+    |> normalize_preflight()
+  end
+
+  def preflight(_prepared), do: {:error, :invalid_provider_preparation}
+
+  @spec resolve_credentials(t(), [binary()]) ::
+          {:ok, credential_values()} | {:error, term()}
+  @doc false
+  def resolve_credentials(%__MODULE__{credential_resolver: resolver}, names)
+      when is_list(names) do
+    names = Enum.sort(Enum.uniq(names))
+
+    resolver
+    |> invoke_with(names, :credential_resolution_failed)
+    |> normalize_credentials(names)
+  end
+
+  def resolve_credentials(_registry, _names), do: {:error, :invalid_credential_names}
+
+  @spec acquire(%{acquire: acquire()}, credential_values()) ::
+          {:ok, built_provider()} | {:error, term()}
+  @doc false
+  def acquire(%{acquire: acquire}, credentials)
+      when is_function(acquire, 1) and is_map(credentials) do
+    acquire
+    |> invoke_with(credentials, :provider_acquisition_failed)
+    |> normalize_build()
+  end
+
+  def acquire(_preflighted, _credentials), do: {:error, :invalid_provider_preflight}
+
+  defp normalize_prepared({:ok, %{credential_names: names, preflight: preflight} = prepared})
+       when is_list(names) and is_function(preflight, 0) do
+    if Map.keys(prepared) -- [:credential_names, :preflight] == [] and
+         length(names) <= 128 and Enum.uniq(names) == names and Enum.all?(names, &valid_name?/1) do
+      {:ok, prepared}
+    else
+      {:error, :invalid_provider_preparation}
+    end
+  end
+
+  defp normalize_prepared({:error, _reason} = error), do: error
+  defp normalize_prepared(_result), do: {:error, :invalid_provider_preparation}
+
+  defp normalize_preflight({:ok, acquire}) when is_function(acquire, 1),
+    do: {:ok, %{acquire: acquire}}
+
+  defp normalize_preflight({:error, _reason} = error), do: error
+  defp normalize_preflight(_result), do: {:error, :invalid_provider_preflight}
+
+  defp normalize_credentials({:ok, credentials}, names) when is_map(credentials) do
+    if Enum.sort(Map.keys(credentials)) == names and
+         Enum.all?(credentials, fn {name, value} -> valid_name?(name) and is_binary(value) end) do
+      {:ok, credentials}
+    else
+      {:error, :invalid_credential_values}
+    end
+  end
+
+  defp normalize_credentials({:error, _reason} = error, _names), do: error
+  defp normalize_credentials(_result, _names), do: {:error, :invalid_credential_values}
+
   defp normalize_build({:ok, %Capability{} = capability}) do
-    {:ok, %{capabilities: [capability], snapshot: nil, close: nil}}
+    {:ok,
+     %{
+       capabilities: [capability],
+       snapshot: nil,
+       close: nil,
+       data_class: :normal,
+       accepts_data: [:normal]
+     }}
   end
 
   defp normalize_build({:ok, %{capabilities: capabilities} = built}) do
     snapshot = Map.get(built, :snapshot)
     close = Map.get(built, :close)
+    data_class = Map.get(built, :data_class, :normal)
+    accepts_data = Map.get(built, :accepts_data, [:normal])
 
-    if Map.keys(built) -- [:capabilities, :snapshot, :close] == [] and
+    if Map.keys(built) --
+         [:capabilities, :snapshot, :close, :data_class, :accepts_data] == [] and
          capabilities != [] and length(capabilities) <= 128 and
          Enum.all?(capabilities, &match?(%Capability{}, &1)) and
          (is_nil(snapshot) or JSONValue.map?(snapshot)) and
-         (is_nil(close) or is_function(close, 0)) do
-      {:ok, %{capabilities: capabilities, snapshot: snapshot, close: close}}
+         (is_nil(close) or is_function(close, 0)) and
+         data_class in [:normal, :private_inspection] and
+         accepts_data != [] and accepts_data == Enum.uniq(accepts_data) and
+         Enum.all?(accepts_data, &(&1 in [:normal, :private_inspection])) do
+      {:ok,
+       %{
+         capabilities: capabilities,
+         snapshot: snapshot,
+         close: close,
+         data_class: data_class,
+         accepts_data: accepts_data
+       }}
     else
       {:error, :invalid_provider_build}
     end
@@ -108,6 +274,24 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
 
   defp normalize_build({:error, _reason} = error), do: error
   defp normalize_build(_result), do: {:error, :invalid_provider_build}
+
+  defp invoke(function, failure) do
+    function.()
+  rescue
+    _exception -> {:error, failure}
+  catch
+    _kind, _reason -> {:error, failure}
+  end
+
+  defp invoke_with(function, argument, failure),
+    do: invoke(fn -> function.(argument) end, failure)
+
+  defp default_credential_resolver([]), do: {:ok, %{}}
+  defp default_credential_resolver(_names), do: {:error, :credential_resolver_missing}
+
+  defp valid_builder?(builder) when is_function(builder, 2), do: true
+  defp valid_builder?({:staged, prepare}) when is_function(prepare, 2), do: true
+  defp valid_builder?(_builder), do: false
 
   defp build_file(config, %{directory: directory, destination: :mission}) do
     with :ok <- exact_keys(config, ~w(root max_bytes model_visible), ~w(root)),

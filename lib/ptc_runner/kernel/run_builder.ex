@@ -51,7 +51,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
                capabilities: providers.mission.capabilities,
                data: manifest.mission_data
              ),
-           {:ok, sink} <- event_sink(manifest),
+           {:ok, sink} <- event_sink(manifest, providers),
            {:ok, inspection_sink, inspection_path} <- inspection_sink(sink, opts),
            :ok <- capture_prelude_sources(inspection_sink, sink, {workflow, mission}, manifest) do
         build_config(
@@ -168,28 +168,123 @@ defmodule PtcRunner.Kernel.RunBuilder do
   end
 
   defp providers(manifest, registry) do
-    case capabilities(manifest, registry, :workflow) do
-      {:ok, workflow} ->
-        case capabilities(manifest, registry, :mission) do
-          {:ok, mission} ->
-            {:ok,
-             %{
-               workflow: workflow,
-               mission: mission,
-               resources: mission.resources ++ workflow.resources,
-               snapshots: sort_snapshots(workflow.snapshots ++ mission.snapshots)
-             }}
-
-          {:error, _reason} = error ->
-            prefer_cleanup_error(error, close_resources(workflow.resources))
-        end
-
-      {:error, _reason} = error ->
-        error
+    with {:ok, prepared} <- prepare_providers(manifest, registry),
+         {:ok, preflighted} <- preflight_providers(prepared),
+         {:ok, credentials} <-
+           ProviderRegistry.resolve_credentials(registry, credential_names(prepared)),
+         {:ok, acquired} <- acquire_providers(preflighted, credentials) do
+      {:ok, %{acquired | snapshots: sort_snapshots(acquired.snapshots)}}
     end
   end
 
   defp sort_snapshots(snapshots), do: Enum.sort_by(snapshots, &Map.get(&1, "provider", ""))
+
+  defp prepare_providers(manifest, registry) do
+    manifest
+    |> provider_specs()
+    |> Enum.reduce_while({:ok, []}, fn {destination, spec}, {:ok, prepared} ->
+      context = %{
+        directory: manifest.directory,
+        destination: destination,
+        owner: self(),
+        limits: manifest.limits,
+        installed_limits: manifest.installed_limits
+      }
+
+      case ProviderRegistry.prepare(
+             registry,
+             spec["name"],
+             Map.get(spec, "config", %{}),
+             context
+           ) do
+        {:ok, provider} ->
+          entry = %{
+            destination: destination,
+            credential_names: provider.credential_names,
+            prepared: provider
+          }
+
+          {:cont, {:ok, [entry | prepared]}}
+
+        {:error, _reason} = error ->
+          {:halt, error}
+      end
+    end)
+    |> reverse_success()
+  end
+
+  defp preflight_providers(prepared) do
+    prepared
+    |> Enum.reduce_while({:ok, []}, fn provider, {:ok, preflighted} ->
+      case ProviderRegistry.preflight(provider.prepared) do
+        {:ok, phase} ->
+          entry =
+            provider
+            |> Map.delete(:prepared)
+            |> Map.put(:preflighted, phase)
+
+          {:cont, {:ok, [entry | preflighted]}}
+
+        {:error, _reason} = error ->
+          {:halt, error}
+      end
+    end)
+    |> reverse_success()
+  end
+
+  defp acquire_providers(preflighted, credentials) do
+    initial = %{
+      workflow: %{capabilities: []},
+      mission: %{capabilities: []},
+      resources: [],
+      snapshots: [],
+      data_class: :normal
+    }
+
+    Enum.reduce_while(preflighted, {:ok, initial}, fn provider, {:ok, accumulated} ->
+      provider_credentials = Map.take(credentials, provider.credential_names)
+
+      case ProviderRegistry.acquire(provider.preflighted, provider_credentials) do
+        {:ok, built} ->
+          environment = Map.fetch!(accumulated, provider.destination)
+
+          next =
+            accumulated
+            |> Map.put(provider.destination, %{
+              capabilities: environment.capabilities ++ built.capabilities
+            })
+            |> Map.update!(:snapshots, &maybe_append(&1, built.snapshot))
+            |> Map.update!(:resources, &maybe_prepend(&1, built.close))
+            |> Map.update!(:data_class, &strictest_data_class(&1, built.data_class))
+
+          {:cont, {:ok, next}}
+
+        {:error, _reason} = error ->
+          result = prefer_cleanup_error(error, close_resources(accumulated.resources))
+          {:halt, result}
+      end
+    end)
+  end
+
+  defp provider_specs(manifest) do
+    for destination <- [:workflow, :mission],
+        spec <- Map.fetch!(manifest.providers, destination),
+        do: {destination, spec}
+  end
+
+  defp credential_names(prepared) do
+    prepared
+    |> Enum.flat_map(& &1.credential_names)
+    |> Enum.uniq()
+    |> Enum.sort()
+  end
+
+  defp reverse_success({:ok, values}), do: {:ok, Enum.reverse(values)}
+  defp reverse_success({:error, _reason} = error), do: error
+
+  defp strictest_data_class(:private_inspection, _next), do: :private_inspection
+  defp strictest_data_class(_current, :private_inspection), do: :private_inspection
+  defp strictest_data_class(:normal, :normal), do: :normal
 
   @spec close(%{config: RunConfig.t()} | RunConfig.t()) ::
           :ok | {:error, :provider_cleanup_failed}
@@ -335,10 +430,9 @@ defmodule PtcRunner.Kernel.RunBuilder do
   @doc """
   Returns the effective class of a run's result.
 
-  V1 derives it from the event policy alone: a private-event run produces a
-  private value. The §4.7 rule that also classifies a private mission input or
-  a provider that emits private inspection data needs host-installed data
-  classes and widens this once host configuration lands.
+  The effective event policy includes both the manifest policy and the
+  strictest selected provider data class. A private-event run or a provider
+  that emits private inspection data therefore produces a private value.
 
   Fails closed. Only an explicit `:normal` policy yields a normal class, so a
   sink that has exited — `EventSink.policy/1` then returns an error tuple —
@@ -429,43 +523,6 @@ defmodule PtcRunner.Kernel.RunBuilder do
     end
   end
 
-  defp capabilities(manifest, registry, destination) do
-    manifest.providers
-    |> Map.fetch!(destination)
-    |> Enum.reduce_while(
-      {:ok, %{capabilities: [], snapshots: [], resources: []}},
-      fn spec, {:ok, accumulated} ->
-        context = %{
-          directory: manifest.directory,
-          destination: destination,
-          owner: self(),
-          limits: manifest.limits,
-          installed_limits: manifest.installed_limits
-        }
-
-        case ProviderRegistry.build(
-               registry,
-               spec["name"],
-               Map.get(spec, "config", %{}),
-               context
-             ) do
-          {:ok, built} ->
-            next = %{
-              capabilities: accumulated.capabilities ++ built.capabilities,
-              snapshots: maybe_append(accumulated.snapshots, built.snapshot),
-              resources: maybe_prepend(accumulated.resources, built.close)
-            }
-
-            {:cont, {:ok, next}}
-
-          {:error, _reason} = error ->
-            result = prefer_cleanup_error(error, close_resources(accumulated.resources))
-            {:halt, result}
-        end
-      end
-    )
-  end
-
   defp maybe_append(values, nil), do: values
   defp maybe_append(values, value), do: values ++ [value]
   defp maybe_prepend(values, nil), do: values
@@ -474,13 +531,18 @@ defmodule PtcRunner.Kernel.RunBuilder do
   defp bundle([]), do: {:ok, nil}
   defp bundle(components), do: Kernel.compile_bundle(components)
 
-  defp event_sink(manifest) do
+  defp event_sink(manifest, providers) do
     opts =
       []
       |> maybe_put(:run_id, manifest.events.run_id)
       |> maybe_put(:trace_id, manifest.events.trace_id)
 
-    EventSink.start(manifest.events.policy, manifest.limits, opts)
+    policy =
+      if manifest.events.policy == :private or providers.data_class == :private_inspection,
+        do: :private,
+        else: :normal
+
+    EventSink.start(policy, manifest.limits, opts)
   end
 
   defp inspection_sink(event_sink, opts) do

@@ -55,6 +55,195 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
     assert is_function(close, 0)
   end
 
+  @tag :tmp_dir
+  test "all providers preflight before credentials resolve or any provider acquires", %{
+    tmp_dir: dir
+  } do
+    parent = self()
+    File.write!(Path.join(dir, "workflow.clj"), "(ns app) (defn run [x] (return x))")
+
+    staged = fn %{"id" => id}, _context ->
+      send(parent, {:provider_phase, :prepare, id})
+
+      {:ok,
+       %{
+         credential_names: ["shared"],
+         preflight: fn ->
+           send(parent, {:provider_phase, :preflight, id})
+
+           {:ok,
+            fn %{"shared" => "secret"} ->
+              send(parent, {:provider_phase, :acquire, id})
+              {:ok, capability} = capability("provided.#{id}")
+              {:ok, capability}
+            end}
+         end
+       }}
+    end
+
+    resolver = fn ["shared"] ->
+      send(parent, {:provider_phase, :resolve, "shared"})
+      {:ok, %{"shared" => "secret"}}
+    end
+
+    {:ok, registry} =
+      ProviderRegistry.new(%{"staged" => ProviderRegistry.staged(staged)},
+        credential_resolver: resolver
+      )
+
+    manifest =
+      manifest(
+        dir,
+        [provider("staged", %{"id" => "workflow"})],
+        [provider("staged", %{"id" => "mission"})]
+      )
+
+    {:ok, loaded} = Manifest.load(manifest)
+    assert {:ok, built} = RunBuilder.build(loaded, registry)
+    assert :ok = RunBuilder.close(built)
+
+    assert_receive {:provider_phase, :prepare, "workflow"}
+    assert_receive {:provider_phase, :prepare, "mission"}
+    assert_receive {:provider_phase, :preflight, "workflow"}
+    assert_receive {:provider_phase, :preflight, "mission"}
+    assert_receive {:provider_phase, :resolve, "shared"}
+    assert_receive {:provider_phase, :acquire, "workflow"}
+    assert_receive {:provider_phase, :acquire, "mission"}
+  end
+
+  @tag :tmp_dir
+  test "preflight failure touches neither credentials nor provider acquisition", %{tmp_dir: dir} do
+    parent = self()
+    File.write!(Path.join(dir, "workflow.clj"), "(ns app) (defn run [x] (return x))")
+
+    staged = fn %{"id" => id}, _context ->
+      {:ok,
+       %{
+         credential_names: ["secret"],
+         preflight: fn ->
+           send(parent, {:preflight, id})
+
+           if id == "bad" do
+             {:error, :fixture_preflight_failed}
+           else
+             {:ok, fn _credentials -> send(parent, {:acquired, id}) end}
+           end
+         end
+       }}
+    end
+
+    resolver = fn _names ->
+      send(parent, :credentials_resolved)
+      {:ok, %{"secret" => "secret"}}
+    end
+
+    {:ok, registry} =
+      ProviderRegistry.new(%{"staged" => ProviderRegistry.staged(staged)},
+        credential_resolver: resolver
+      )
+
+    manifest =
+      manifest(
+        dir,
+        [provider("staged", %{"id" => "ok"})],
+        [provider("staged", %{"id" => "bad"})]
+      )
+
+    {:ok, loaded} = Manifest.load(manifest)
+    assert {:error, :fixture_preflight_failed} = RunBuilder.build(loaded, registry)
+    assert_receive {:preflight, "ok"}
+    assert_receive {:preflight, "bad"}
+    refute_received :credentials_resolved
+    refute_received {:acquired, _id}
+  end
+
+  @tag :tmp_dir
+  test "acquisition failure closes already acquired providers", %{tmp_dir: dir} do
+    parent = self()
+    File.write!(Path.join(dir, "workflow.clj"), "(ns app) (defn run [x] (return x))")
+
+    staged = fn %{"id" => id}, _context ->
+      {:ok,
+       %{
+         credential_names: [],
+         preflight: fn ->
+           {:ok,
+            fn %{} ->
+              if id == "bad" do
+                {:error, :fixture_acquisition_failed}
+              else
+                {:ok, capability} = capability("provided.#{id}")
+
+                {:ok,
+                 %{
+                   capabilities: [capability],
+                   snapshot: nil,
+                   close: fn ->
+                     send(parent, {:closed_after_acquisition_failure, id})
+                     :ok
+                   end
+                 }}
+              end
+            end}
+         end
+       }}
+    end
+
+    {:ok, registry} =
+      ProviderRegistry.new(%{
+        "staged" => ProviderRegistry.staged(staged),
+        "staged-bad" => ProviderRegistry.staged(staged)
+      })
+
+    manifest =
+      manifest(
+        dir,
+        [
+          provider("staged", %{"id" => "first"}),
+          provider("staged-bad", %{"id" => "bad"})
+        ],
+        []
+      )
+
+    {:ok, loaded} = Manifest.load(manifest)
+    assert {:error, :fixture_acquisition_failed} = RunBuilder.build(loaded, registry)
+    assert_receive {:closed_after_acquisition_failure, "first"}
+  end
+
+  @tag :tmp_dir
+  test "a private provider makes the effective run and result class private", %{tmp_dir: dir} do
+    File.write!(Path.join(dir, "workflow.clj"), "(ns app) (defn run [x] (return x))")
+    {:ok, capability} = capability("provided.private")
+
+    staged = fn _config, _context ->
+      {:ok,
+       %{
+         credential_names: [],
+         preflight: fn ->
+           {:ok,
+            fn %{} ->
+              {:ok,
+               %{
+                 capabilities: [capability],
+                 data_class: :private_inspection,
+                 accepts_data: [:normal]
+               }}
+            end}
+         end
+       }}
+    end
+
+    {:ok, registry} =
+      ProviderRegistry.new(%{"private" => ProviderRegistry.staged(staged)})
+
+    path = manifest(dir, [], [provider("private", %{})])
+    {:ok, built} = RunBuilder.load_and_build(path, registry)
+
+    assert built.config.event_sink.policy == :private
+    assert RunBuilder.result_class(built.config.event_sink) == :private
+    assert :ok = RunBuilder.close(built)
+  end
+
   test "built-in LLM adaptation preserves provider-valid correction history" do
     request = %{
       "messages" => [

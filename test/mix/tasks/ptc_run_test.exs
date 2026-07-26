@@ -7,6 +7,9 @@ defmodule Mix.Tasks.Ptc.RunTest do
   alias PtcRunner.Kernel.SafeMetadata
   alias PtcRunner.Kernel.TraceLog
 
+  @root Path.expand("../../..", __DIR__)
+  @stdio_fixture Path.expand("../../support/mcp_stdio_source_fixture.sh", __DIR__)
+
   @tag :tmp_dir
   test "runs the shared manifest path and accepts a confined mission override", %{tmp_dir: dir} do
     File.write!(
@@ -35,6 +38,145 @@ defmodule Mix.Tasks.Ptc.RunTest do
       end)
 
     assert %{"value" => 42} = Jason.decode!(output)
+  end
+
+  @tag :tmp_dir
+  test "--check assembles and closes without invoking the workflow", %{tmp_dir: dir} do
+    File.write!(
+      Path.join(dir, "main.clj"),
+      ~S|(ns main) (defn run [input] (/ 1 0))|
+    )
+
+    manifest = %{
+      "version" => 1,
+      "workflow" => %{
+        "components" => [%{"id" => "main", "path" => "main.clj"}],
+        "entry" => "main/run"
+      },
+      "input" => %{"value" => %{}}
+    }
+
+    path = Path.join(dir, "ptc.json")
+    File.write!(path, Jason.encode!(manifest))
+
+    output =
+      capture_io(fn ->
+        Mix.Task.reenable("ptc.run")
+        Run.run([path, "--check"])
+      end)
+
+    assert output == "check ok: no providers\n"
+  end
+
+  @tag :tmp_dir
+  test "--host-config replaces the implicit provider registry", %{tmp_dir: dir} do
+    File.write!(
+      Path.join(dir, "main.clj"),
+      ~S|(ns main) (defn run [input] (return input))|
+    )
+
+    manifest = %{
+      "version" => 1,
+      "workflow" => %{
+        "components" => [%{"id" => "main", "path" => "main.clj"}],
+        "entry" => "main/run"
+      },
+      "input" => %{"value" => %{}},
+      "providers" => %{
+        "workflow" => [%{"name" => "llm", "config" => %{"model" => "deepseek"}}]
+      }
+    }
+
+    host = %{
+      "install" => %{
+        "remote" => %{
+          "source" => "mcp",
+          "transport" => %{
+            "type" => "streamable_http",
+            "endpoint" => "https://example.test/mcp"
+          },
+          "tools" => %{"read" => %{"as" => "remote.read", "effect" => "read"}}
+        }
+      }
+    }
+
+    manifest_path = Path.join(dir, "ptc.json")
+    host_path = Path.join(dir, "host.json")
+    File.write!(manifest_path, Jason.encode!(manifest))
+    File.write!(host_path, Jason.encode!(host))
+
+    Mix.Task.reenable("ptc.run")
+
+    assert_raise Mix.Error, ~r/unknown_provider/, fn ->
+      Run.run([manifest_path, "--host-config", host_path, "--check"])
+    end
+  end
+
+  @tag :tmp_dir
+  test "--check discovers and closes a host-installed stdio MCP server", %{tmp_dir: dir} do
+    File.write!(
+      Path.join(dir, "main.clj"),
+      ~S|(ns main) (defn run [input] (return input))|
+    )
+
+    marker = Path.join(dir, "methods")
+
+    manifest = %{
+      "version" => 1,
+      "workflow" => %{
+        "components" => [%{"id" => "main", "path" => "main.clj"}],
+        "entry" => "main/run"
+      },
+      "input" => %{"value" => %{}},
+      "providers" => %{
+        "mission" => [
+          %{
+            "name" => "workspace",
+            "config" => %{"allow" => ["workspace.structured"], "timeout_ms" => 5_000}
+          }
+        ]
+      },
+      "limits" => %{"evaluation_timeout_ms" => 5_000}
+    }
+
+    host = %{
+      "install" => %{
+        "workspace" => %{
+          "source" => "mcp",
+          "transport" => %{
+            "type" => "stdio",
+            "command" => System.find_executable("sh"),
+            "cwd" => @root,
+            "args" => [@stdio_fixture, marker],
+            "start_timeout_ms" => 5_000
+          },
+          "tools" => %{
+            "structured" => %{
+              "as" => "workspace.structured",
+              "effect" => "read",
+              "model_visible" => true
+            }
+          },
+          "ceilings" => %{"timeout_ms" => 5_000}
+        }
+      }
+    }
+
+    manifest_path = Path.join(dir, "ptc.json")
+    host_path = Path.join(dir, "host.json")
+    File.write!(manifest_path, Jason.encode!(manifest))
+    File.write!(host_path, Jason.encode!(host))
+
+    output =
+      capture_io(fn ->
+        Mix.Task.reenable("ptc.run")
+        Run.run([manifest_path, "--host-config", host_path, "--check"])
+      end)
+
+    assert output =~ "mission  workspace  mcp/stdio  1 tools"
+    assert output =~ "snapshot "
+    assert File.read!(marker) =~ "server/discover"
+    assert File.read!(marker) =~ "tools/list"
   end
 
   @tag :tmp_dir

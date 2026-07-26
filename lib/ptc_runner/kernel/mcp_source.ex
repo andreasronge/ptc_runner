@@ -81,8 +81,12 @@ defmodule PtcRunner.Kernel.MCPSource do
       The configured server executable and working-directory hierarchies must
       remain trusted and immutable through launcher preflight and spawn.
     * `:tools` - required map from fixed upstream names to
-      `%{as: public_name, effect: :read}`. Both names are unique and bounded;
-      only the public name crosses the capability boundary.
+      `%{as: public_name, effect: :read}`. A mapping may also carry a bounded
+      host-owned `:description`, `:model_visible` (default `true` for direct
+      embedding), and the reserved `:error_feedback` policy. Both names are
+      unique and bounded; only the public name crosses the capability
+      boundary. The host JSON decoder supplies its stricter model-invisible
+      default explicitly.
     * `:timeout_ms` - installed end-to-end ceiling for discovery, calls, and
       requests (default `5_000`; stdio maximum `300_000`). A manifest may only
       lower it.
@@ -94,11 +98,14 @@ defmodule PtcRunner.Kernel.MCPSource do
       (default `128`).
     * `:max_pages` - discovery pagination ceiling from 1 through 64
       (default `16`).
+    * `:installation_revision` - optional bounded non-secret behavior revision
+      included in the safe provider snapshot.
 
   Unknown or invalid installation options raise `ArgumentError` without
   including option values. The returned registry builder accepts an `"allow"`
-  list of installed public names, an optional `"model_visible"` subset
-  (defaulting to the full allow list), and optional lower `"timeout_ms"` and
+  list of installed public names (defaulting to every mapped public name), an
+  optional `"model_visible"` subset (defaulting to the selected names whose
+  host mapping is model-visible), and optional lower `"timeout_ms"` and
   `"max_result_bytes"` values; invalid selections return
   `{:error, :invalid_mcp_selection}`. Assembly returns
   `{:ok, %{capabilities: list, snapshot: map, close: zero_arity_function}}` or a
@@ -148,7 +155,8 @@ defmodule PtcRunner.Kernel.MCPSource do
       :timeout_ms,
       :max_result_bytes,
       :max_catalog_tools,
-      :max_pages
+      :max_pages,
+      :installation_revision
     ]
 
     with true <- Keyword.keyword?(opts),
@@ -163,7 +171,9 @@ defmodule PtcRunner.Kernel.MCPSource do
          :ok <- transport_ceilings(transport, timeout_ms, max_result_bytes),
          max_catalog_tools when max_catalog_tools in 1..128 <-
            Keyword.get(opts, :max_catalog_tools, 128),
-         max_pages when max_pages in 1..64 <- Keyword.get(opts, :max_pages, 16) do
+         max_pages when max_pages in 1..64 <- Keyword.get(opts, :max_pages, 16),
+         {:ok, installation_revision} <-
+           optional_installation_revision(Keyword.get(opts, :installation_revision)) do
       {:ok,
        %{
          transport: transport,
@@ -171,7 +181,8 @@ defmodule PtcRunner.Kernel.MCPSource do
          timeout_ms: timeout_ms,
          max_result_bytes: max_result_bytes,
          max_catalog_tools: max_catalog_tools,
-         max_pages: max_pages
+         max_pages: max_pages,
+         installation_revision: installation_revision
        }}
     else
       _reason -> {:error, :invalid_installation}
@@ -257,11 +268,25 @@ defmodule PtcRunner.Kernel.MCPSource do
     Enum.reduce_while(tools, {:ok, %{}, MapSet.new()}, fn
       {upstream, %{as: public, effect: :read} = mapping}, {:ok, normalized, public_names}
       when is_binary(upstream) and is_binary(public) ->
-        if Map.keys(mapping) -- [:as, :effect] == [] and MCPProtocol.valid_tool_name?(upstream) and
-             public =~ @name and not MapSet.member?(public_names, public) do
+        description = Map.get(mapping, :description)
+        model_visible = Map.get(mapping, :model_visible, true)
+        error_feedback = Map.get(mapping, :error_feedback, :closed)
+
+        if Map.keys(mapping) --
+             [:as, :effect, :description, :model_visible, :error_feedback] == [] and
+             MCPProtocol.valid_tool_name?(upstream) and public =~ @name and
+             not MapSet.member?(public_names, public) and
+             (is_nil(description) or valid_string?(description, 4_096)) and
+             is_boolean(model_visible) and error_feedback in [:closed, :bounded] do
           {:cont,
-           {:ok, Map.put(normalized, upstream, %{as: public, effect: :read}),
-            MapSet.put(public_names, public)}}
+           {:ok,
+            Map.put(normalized, upstream, %{
+              as: public,
+              effect: :read,
+              description: description,
+              model_visible: model_visible,
+              error_feedback: error_feedback
+            }), MapSet.put(public_names, public)}}
         else
           {:halt, {:error, :invalid_tools}}
         end
@@ -276,6 +301,19 @@ defmodule PtcRunner.Kernel.MCPSource do
   end
 
   defp installed_tools(_tools), do: {:error, :invalid_tools}
+
+  defp optional_installation_revision(nil), do: {:ok, nil}
+
+  defp optional_installation_revision(value) do
+    if valid_string?(value, 256),
+      do: {:ok, value},
+      else: {:error, :invalid_installation_revision}
+  end
+
+  defp valid_string?(value, max_bytes),
+    do:
+      is_binary(value) and byte_size(value) in 1..max_bytes and String.valid?(value) and
+        not String.contains?(value, <<0>>)
 
   defp build(installed, selection, context) do
     with {:ok, selected} <- selection(installed, selection, context),
@@ -572,23 +610,34 @@ defmodule PtcRunner.Kernel.MCPSource do
     with true <- is_map(selection) and not is_struct(selection),
          true <-
            Map.keys(selection) -- ~w(allow model_visible timeout_ms max_result_bytes) == [],
-         allow when is_list(allow) and length(allow) in 1..128 <- selection["allow"],
-         true <- Enum.all?(allow, &is_binary/1) and Enum.uniq(allow) == allow,
          public_names =
-           Map.new(installed.tools, fn {_upstream, mapping} -> {mapping.as, true} end),
+           Map.new(installed.tools, fn {_upstream, mapping} -> {mapping.as, mapping} end),
+         allow when is_list(allow) and length(allow) in 1..128 <-
+           Map.get(selection, "allow", public_names |> Map.keys() |> Enum.sort()),
+         true <- Enum.all?(allow, &is_binary/1) and Enum.uniq(allow) == allow,
          true <- Enum.all?(allow, &Map.has_key?(public_names, &1)),
+         installed_visible =
+           Enum.filter(allow, fn name -> Map.fetch!(public_names, name).model_visible end),
          model_visible when is_list(model_visible) and length(model_visible) <= 128 <-
-           Map.get(selection, "model_visible", allow),
+           Map.get(selection, "model_visible", installed_visible),
          true <-
            Enum.all?(model_visible, &is_binary/1) and
              Enum.uniq(model_visible) == model_visible,
-         true <- Enum.all?(model_visible, &(&1 in allow)),
+         true <- Enum.all?(model_visible, &(&1 in installed_visible)),
          timeout_ms when is_integer(timeout_ms) and timeout_ms > 0 <-
-           Map.get(selection, "timeout_ms", installed.timeout_ms),
+           Map.get(
+             selection,
+             "timeout_ms",
+             min(installed.timeout_ms, destination_timeout(context))
+           ),
          true <- timeout_ms <= installed.timeout_ms,
          true <- timeout_ms <= destination_timeout(context),
          max_result_bytes when is_integer(max_result_bytes) and max_result_bytes > 0 <-
-           Map.get(selection, "max_result_bytes", installed.max_result_bytes),
+           Map.get(
+             selection,
+             "max_result_bytes",
+             min(installed.max_result_bytes, context.limits.capability_result_bytes)
+           ),
          true <- max_result_bytes <= installed.max_result_bytes,
          true <- max_result_bytes <= context.limits.capability_result_bytes do
       {:ok,
@@ -623,7 +672,7 @@ defmodule PtcRunner.Kernel.MCPSource do
          {:ok, capabilities, tools} <-
            capabilities(transport, installed, selected, discovered),
          {:ok, snapshot} <-
-           snapshot(provider, transport, tools, server.server_info) do
+           snapshot(provider, transport, tools, server.server_info, installed) do
       {:ok, capabilities, snapshot}
     else
       {:error, _reason} = error -> error
@@ -698,7 +747,7 @@ defmodule PtcRunner.Kernel.MCPSource do
     with {:ok, capability} <-
            Capability.new(
              name: mapping.as,
-             description: contract.description,
+             description: mapping.description || contract.description,
              model_visible: MapSet.member?(selected.model_visible, mapping.as),
              input_schema: contract.input_schema,
              output_schema: contract.output_schema,
@@ -723,12 +772,13 @@ defmodule PtcRunner.Kernel.MCPSource do
       upstream_name_hash = sha256(upstream)
 
       description_hash =
-        if capability.model_visible, do: optional_text_hash(contract.description), else: nil
+        if capability.model_visible, do: optional_text_hash(capability.description), else: nil
 
       {:ok, capability,
        %{
          "name" => mapping.as,
          "effect" => "read",
+         "error_feedback" => Atom.to_string(mapping.error_feedback),
          "model_visible" => capability.model_visible,
          "upstream_name_hash" => upstream_name_hash,
          "description_hash" => description_hash,
@@ -769,7 +819,7 @@ defmodule PtcRunner.Kernel.MCPSource do
     end
   end
 
-  defp snapshot(provider, %{type: type} = transport, tools, server_info)
+  defp snapshot(provider, %{type: type} = transport, tools, server_info, installed)
        when is_binary(provider) and type in [:streamable_http, :stdio] do
     transport_name = Atom.to_string(type)
     identity_projection = transport_identity_projection(transport)
@@ -783,6 +833,10 @@ defmodule PtcRunner.Kernel.MCPSource do
               {"transport", transport_name}
             ] ++
               identity_projection ++
+              optional_projection(
+                "installation_revision",
+                installed.installation_revision
+              ) ++
               [
                 {"server_info_hash", server_info_hash},
                 {"tools",
@@ -791,6 +845,7 @@ defmodule PtcRunner.Kernel.MCPSource do
                     [
                       {"name", tool["name"]},
                       {"effect", tool["effect"]},
+                      {"error_feedback", tool["error_feedback"]},
                       {"model_visible", tool["model_visible"]},
                       {"upstream_name_hash", tool["upstream_name_hash"]},
                       {"description_hash", tool["description_hash"]},
@@ -801,20 +856,32 @@ defmodule PtcRunner.Kernel.MCPSource do
                  end)}
               ]},
          {:ok, encoded} <- DeterministicJSON.encode(projection) do
-      {:ok,
-       Map.merge(
-         %{
-           "provider" => provider,
-           "protocol" => "mcp-#{@protocol}",
-           "transport" => transport_name,
-           "server_info_hash" => server_info_hash,
-           "snapshot_hash" => sha256(encoded),
-           "tools" => tools
-         },
-         identity_fields
-       )}
+      snapshot =
+        Map.merge(
+          %{
+            "provider" => provider,
+            "protocol" => "mcp-#{@protocol}",
+            "transport" => transport_name,
+            "server_info_hash" => server_info_hash,
+            "snapshot_hash" => sha256(encoded),
+            "tools" => tools
+          },
+          identity_fields
+        )
+        |> maybe_put_snapshot(
+          "installation_revision",
+          installed.installation_revision
+        )
+
+      {:ok, snapshot}
     end
   end
+
+  defp optional_projection(_key, nil), do: []
+  defp optional_projection(key, value), do: [{key, value}]
+
+  defp maybe_put_snapshot(snapshot, _key, nil), do: snapshot
+  defp maybe_put_snapshot(snapshot, key, value), do: Map.put(snapshot, key, value)
 
   defp transport_identity_projection(%{type: :streamable_http}), do: []
 
