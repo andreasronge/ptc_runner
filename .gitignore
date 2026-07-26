@@ -54,3 +54,6 @@ MEMORY/
 
 # Generated viewer-demo data root
 /examples/viewer-demo/files/
+
+# Generated private results for the repo-analyst example application.
+repo-analyst/private/

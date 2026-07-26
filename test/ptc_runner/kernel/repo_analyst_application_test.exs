@@ -11,11 +11,15 @@ defmodule PtcRunner.Kernel.RepoAnalystApplicationTest do
 
   alias PtcRunner.Kernel
   alias PtcRunner.Kernel.Capability
+  alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.HostConfig
   alias PtcRunner.Kernel.Library
+  alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.Manifest
   alias PtcRunner.Kernel.MissionEnvironment
+  alias PtcRunner.Kernel.RunConfig
   alias PtcRunner.Kernel.ValueContract
+  alias PtcRunner.Kernel.WorkflowEnvironment
   alias PtcRunner.Lisp.Prelude
 
   @root Path.expand("../../..", __DIR__)
@@ -203,6 +207,47 @@ defmodule PtcRunner.Kernel.RepoAnalystApplicationTest do
                MissionEnvironment.new(bundle: bundle, capabilities: stubs(granted))
     end
 
+    test "each runs function calls its own operation and unwraps the envelope" do
+      {:ok, bundle} = compile_facade("runs")
+      granted = ["history.list-runs", "history.list-turns"] ++ @private_operations
+      {:ok, calls} = Agent.start_link(fn -> [] end)
+
+      {:ok, mission} =
+        MissionEnvironment.new(bundle: bundle, capabilities: stubs(granted, calls))
+
+      # Assembly alone proves only that the names resolve. Calling each function
+      # proves the facade reaches the operation it claims and that cap/unwrap!
+      # returns the value rather than the envelope.
+      for {function, operation} <- [
+            {~s|(runs/list-runs 10 nil)|, "history.list-runs"},
+            {~s|(runs/turns "run-1" nil)|, "history.list-turns"},
+            {~s|(runs/model-exchanges "run-1" nil)|, "private-history.model-exchanges"},
+            {~s|(runs/capability-calls "run-1" nil)|, "private-history.capability-calls"},
+            {~s|(runs/generated-sources "run-1" nil)|, "private-history.generated-sources"},
+            {~s|(runs/effective-preludes "run-1" nil)|, "private-history.effective-preludes"},
+            {~s|(runs/provider-exchanges "run-1" nil)|, "private-history.provider-exchanges"}
+          ] do
+        Agent.update(calls, fn _previous -> [] end)
+
+        assert {:ok, %{value: %{outcome: :returned, value: value}}} =
+                 Kernel.run(
+                   "(return (kernel/eval (program (return #{function}))))",
+                   run_config(mission)
+                 ),
+               "#{function} did not evaluate"
+
+        assert [{^operation, args}] = Agent.get(calls, & &1),
+               "#{function} must call exactly #{operation}"
+
+        # cap/unwrap! returns the value; an unwrapped envelope would still carry :status.
+        assert value["snapshot_hash"] == "sha256:stub"
+        refute Map.has_key?(value, :status)
+
+        # A nil cursor is the first page and must not appear in the arguments.
+        refute Map.has_key?(args, "cursor")
+      end
+    end
+
     test "repo assembles against the four mapped workspace tools" do
       {:ok, bundle} = compile_facade("repo")
 
@@ -235,14 +280,24 @@ defmodule PtcRunner.Kernel.RepoAnalystApplicationTest do
                "citations" => [citation]
              })
 
-      refute ValueContract.valid?(contract, %{"answer" => "It is bounded.", "citations" => []}),
-             "an uncited answer must not validate"
+      # Reporting that nothing in the snapshot supports a claim is a real
+      # answer. Requiring a citation for it would only reward inventing one.
+      assert ValueContract.valid?(contract, %{
+               "answer" => "No file in the snapshot contains that literal.",
+               "citations" => []
+             })
 
       refute ValueContract.valid?(contract, %{
                "answer" => "It is bounded.",
                "citations" => [Map.delete(citation, "snapshot_hash")]
              }),
              "a citation with no snapshot hash is not bound to any bytes"
+
+      refute ValueContract.valid?(contract, %{
+               "answer" => "It is bounded.",
+               "citations" => [Map.delete(citation, "lines")]
+             }),
+             "a citation with no line range does not say what was read"
     end
 
     test "declining a change is a first-class improvement decision" do
@@ -400,6 +455,19 @@ defmodule PtcRunner.Kernel.RepoAnalystApplicationTest do
 
       assert "repo-analyst/*.clj" in includes,
              "the scout must be able to inspect its own policy"
+
+      excludes =
+        args
+        |> Enum.zip(Enum.drop(args, 1))
+        |> Enum.filter(fn {flag, _value} -> flag == "--exclude" end)
+        |> Enum.map(fn {_flag, value} -> value end)
+
+      # examples/** and priv/** otherwise pull in dependency trees. The server
+      # snapshots the working tree rather than git, so a gitignored
+      # node_modules still counts against the source ceiling.
+      assert "**/node_modules/**" in excludes
+      assert "**/_build/**" in excludes
+      assert "**/deps/**" in excludes
     end
   end
 
@@ -444,17 +512,43 @@ defmodule PtcRunner.Kernel.RepoAnalystApplicationTest do
     |> Enum.sort()
   end
 
-  # Bounded stubs standing in for capabilities issue #1127 installs. They carry
-  # the frozen names and the paged envelope shape and nothing else; they exist
-  # to prove the facade selects the right names, not to model the source.
-  defp stubs(names) do
+  defp run_config(mission) do
+    {:ok, limits} = Limits.new(evaluation_timeout_ms: 5_000)
+    {:ok, kernel_component} = Library.component("kernel")
+    {:ok, workflow_bundle} = Kernel.compile_bundle([kernel_component])
+    {:ok, workflow} = WorkflowEnvironment.new(bundle: workflow_bundle)
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "facade-call")
+
+    {:ok, config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        mission_environment: mission,
+        input: %{},
+        limits: limits,
+        event_sink: sink
+      )
+
+    config
+  end
+
+  # Bounded stubs standing in for the capabilities issue #1127 installs. They
+  # carry the frozen names and the paged envelope shape and nothing else. When a
+  # recorder is supplied each call is logged, so a test can prove which
+  # operation a facade function actually reached rather than only that the name
+  # resolved at assembly.
+  defp stubs(names, recorder \\ nil) do
     Enum.map(names, fn name ->
+      callback = fn args ->
+        if recorder, do: Agent.update(recorder, &(&1 ++ [{name, args}]))
+        {:ok, %{"items" => [], "snapshot_hash" => "sha256:stub"}}
+      end
+
       {:ok, capability} =
         Capability.new(
           name: name,
           effect: :read,
           input_schema: %{"type" => "object", "additionalProperties" => true},
-          callback: fn _args -> {:ok, %{"items" => [], "snapshot_hash" => "sha256:stub"}} end
+          callback: callback
         )
 
       capability

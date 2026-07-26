@@ -106,6 +106,69 @@ defmodule PtcRunner.Kernel.RepoAnalystE2ETest do
            "cap is composition-only and must not enter the catalog"
   end
 
+  @tag :tmp_dir
+  test "the shipped host config captures this repository without its dependency trees", %{
+    tmp_dir: dir
+  } do
+    # The other tests build a host document, so they prove the facade rather
+    # than the file an operator actually runs. This one spawns the server from
+    # the committed repo-analyst.host.json, which is the only way to catch a
+    # command that will not resolve or an argument the server rejects.
+    File.write!(
+      Path.join(dir, "workflow.clj"),
+      ~S|(ns app) (defn run [input] (return (tool/kernel-eval {"kind" :source "source" (get input "program")})))|
+    )
+
+    program = """
+    (return {"info" (repo-probe/info) "dependency_hits" (repo-probe/find "node_modules")})
+    """
+
+    File.write!(Path.join(dir, "probe.clj"), """
+    (ns repo-probe "Bounded snapshot probe." {:visibility :prompt})
+    (defn info [] (cap/unwrap! (tool/workspace.info {})))
+    (defn find [query] (cap/unwrap! (tool/workspace.find {"query" query "limit" 10})))
+    """)
+
+    manifest = %{
+      "$schema" => Path.join(@root, "priv/schemas/ptc-application-manifest.schema.json"),
+      "version" => 1,
+      "workflow" => %{
+        "components" => [%{"id" => "app", "path" => "workflow.clj"}],
+        "entry" => "app/run"
+      },
+      "mission" => %{
+        "components" => [
+          %{"library" => "cap"},
+          %{"id" => "repo-probe", "path" => "probe.clj", "dependencies" => ["cap"]}
+        ],
+        "data" => %{}
+      },
+      "input" => %{"value" => %{"program" => program}},
+      "providers" => %{"mission" => [%{"name" => "workspace"}]},
+      "limits" => %{"evaluation_timeout_ms" => 60_000, "run_duration_ms" => 180_000}
+    }
+
+    manifest_path = Path.join(dir, "ptc.json")
+    File.write!(manifest_path, Jason.encode!(manifest))
+
+    {:ok, host} = HostConfig.load(Path.join(@root, "repo-analyst.host.json"))
+    {:ok, registry} = HostInstallation.registry(host)
+
+    assert {:ok, result} = RunBuilder.run(manifest_path, registry)
+    assert %{status: :ok, value: %{outcome: :returned, value: value}} = result.value
+
+    info = value["info"]
+    assert info["file_count"] > 300, "the include set should reach most of the source tree"
+
+    assert info["truncated"] == %{"bytes" => false, "depth" => false, "files" => false},
+           "a truncated capture means the include set outgrew the server's ceilings"
+
+    # examples/** and priv/** would otherwise pull in a dependency tree: the
+    # server snapshots the working tree, not git, so a gitignored node_modules
+    # still lands in the capture and in the model's reach.
+    assert value["dependency_hits"]["items"] == []
+  end
+
   # Pages repo/search explicitly, exactly as generated code would: nil first,
   # then the previous next_cursor, stopping as soon as the evidence appears.
   defp search_program do
