@@ -126,7 +126,6 @@ defmodule PtcRunner.Kernel.HostConfig do
       {:error, :duplicate_json_key} -> {:error, :duplicate_host_config_key}
       {:error, :invalid_json} -> {:error, :invalid_host_config_json}
       {:error, _reason} = error -> error
-      _other -> {:error, :invalid_host_config}
     end
   end
 

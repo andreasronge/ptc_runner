@@ -121,7 +121,7 @@ defmodule Mix.Tasks.Ptc.Run do
     with {:ok, built} <- RunBuilder.load_and_build(manifest, registry, opts) do
       view = resolved_view(built, host)
 
-      case RunBuilder.close(built) do
+      case RunBuilder.close(built.config) do
         :ok -> {:ok, view}
         {:error, _reason} = error -> error
       end
