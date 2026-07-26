@@ -60,6 +60,40 @@ defmodule PtcRunner.Kernel.HostConfigTest do
   end
 
   @tag :tmp_dir
+  test "loads one closed live LLM installation with an explicit credential", %{tmp_dir: dir} do
+    config = %{
+      "credentials" => %{"openrouter_key" => %{"env" => "OPENROUTER_API_KEY"}},
+      "install" => %{
+        "deepseek" => %{
+          "source" => "llm",
+          "model" => "openrouter:deepseek/deepseek-v4-flash",
+          "credential" => "openrouter_key",
+          "cache" => false,
+          "installation_revision" => "model-policy-v2",
+          "accepts_data" => ["normal", "private_inspection"],
+          "ceilings" => %{
+            "max_request_bytes" => 200_000,
+            "max_response_bytes" => 300_000
+          }
+        }
+      }
+    }
+
+    assert {:ok, host} = dir |> write_config(config) |> HostConfig.load()
+
+    assert host.install["deepseek"] == %{
+             source: :llm,
+             model: "openrouter:deepseek/deepseek-v4-flash",
+             credential: "openrouter_key",
+             cache: false,
+             installation_revision: "model-policy-v2",
+             ceilings: %{max_request_bytes: 200_000, max_response_bytes: 300_000},
+             data_class: :normal,
+             accepts_data: [:normal, :private_inspection]
+           }
+  end
+
+  @tag :tmp_dir
   test "loads closed HTTP authentication and safe installation metadata", %{tmp_dir: dir} do
     config = %{
       "$schema" => "./ptc-host-config.schema.json",
@@ -175,6 +209,21 @@ defmodule PtcRunner.Kernel.HostConfigTest do
 
     assert {:ok, _validated} = JSV.validate(http, root, cast: false)
 
+    llm = %{
+      "credentials" => %{"key" => %{"env" => "OPENROUTER_API_KEY"}},
+      "install" => %{
+        "deepseek" => %{
+          "source" => "llm",
+          "model" => "openrouter:deepseek/deepseek-v4-flash",
+          "credential" => "key"
+        }
+      }
+    }
+
+    assert {:ok, _validated} = JSV.validate(llm, root, cast: false)
+    assert {:ok, host} = HostConfig.decode(llm, "/tmp")
+    assert host.install["deepseek"].source == :llm
+
     refute match?(
              {:ok, _validated},
              valid_config()
@@ -188,6 +237,11 @@ defmodule PtcRunner.Kernel.HostConfigTest do
              |> put_in(["install", "workspace", "source"], "file-read")
              |> JSV.validate(root, cast: false)
            )
+
+    dangling_llm = put_in(llm, ["install", "deepseek", "credential"], "missing")
+
+    assert {:ok, _validated} = JSV.validate(dangling_llm, root, cast: false)
+    assert {:error, :invalid_host_config} = HostConfig.decode(dangling_llm, "/tmp")
   end
 
   defp valid_config do

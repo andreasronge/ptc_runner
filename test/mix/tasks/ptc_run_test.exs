@@ -41,6 +41,52 @@ defmodule Mix.Tasks.Ptc.RunTest do
   end
 
   @tag :tmp_dir
+  test "--check reports a host-installed workflow LLM without invoking it", %{tmp_dir: dir} do
+    File.write!(
+      Path.join(dir, "main.clj"),
+      ~S|(ns main) (defn run [input] (return input))|
+    )
+
+    manifest = %{
+      "version" => 1,
+      "workflow" => %{
+        "components" => [%{"id" => "main", "path" => "main.clj"}],
+        "entry" => "main/run"
+      },
+      "input" => %{"value" => %{}},
+      "providers" => %{"workflow" => [%{"name" => "deepseek"}]}
+    }
+
+    host = %{
+      "credentials" => %{"openrouter_key" => %{"literal" => "test-only-secret"}},
+      "install" => %{
+        "deepseek" => %{
+          "source" => "llm",
+          "model" => "openrouter:deepseek/deepseek-v4-flash",
+          "credential" => "openrouter_key"
+        }
+      }
+    }
+
+    manifest_path = Path.join(dir, "ptc.json")
+    host_path = Path.join(dir, "host.json")
+    File.write!(manifest_path, Jason.encode!(manifest))
+    File.write!(host_path, Jason.encode!(host))
+
+    output =
+      capture_io(fn ->
+        Mix.Task.reenable("ptc.run")
+        Run.run([manifest_path, "--host-config", host_path, "--check"])
+      end)
+
+    assert output =~
+             "workflow  deepseek  llm  model openrouter:deepseek/deepseek-v4-flash"
+
+    assert output =~ "snapshot "
+    refute output =~ "test-only-secret"
+  end
+
+  @tag :tmp_dir
   test "--check assembles and closes without invoking the workflow", %{tmp_dir: dir} do
     File.write!(
       Path.join(dir, "main.clj"),

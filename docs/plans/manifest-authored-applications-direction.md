@@ -1,9 +1,11 @@
 # Manifest-authored applications — implementation plan
 
 > **Status:** active implementation plan, promoted from `future/` on
-> 2026-07-24. This document describes the generic runner and application
-> contracts built on the MCP-first capability platform. Every API shown below
-> remains planned unless explicitly described as current behavior.
+> 2026-07-24. Slices A, B, and Pre-C are complete; Slice C is proceeding
+> independently. The result-artifact portion of Slice D has landed, while its
+> classified-input work and Slices E through H remain planned. This document
+> describes the generic runner and application contracts built on the
+> MCP-first capability platform.
 
 ## 1. Goal
 
@@ -140,8 +142,8 @@ Its main output is the resolved, manifest-selected picture rather than the raw
 heterogeneous host entries:
 
 ```text
-workflow  deepseek   llm        model openrouter:deepseek/deepseek-v4-flash  accepts normal, private_inspection
-mission   workspace  mcp/stdio  5 tools  snapshot sha256:...
+workflow  deepseek   llm        model openrouter:deepseek/deepseek-v4-flash  accepts: normal, private_inspection  snapshot ...
+mission   workspace  mcp/stdio  5 tools  accepts: normal, private_inspection  snapshot ...
 ```
 
 Rows are ordered by environment and alias. Source-specific safe metadata may
@@ -646,6 +648,11 @@ assembly rather than switching providers while executing. An optional
 installation revision affects either safe snapshot when present. Replay also
 includes the fixture-set hash, while a live LLM snapshot includes the effective
 model and non-secret request-policy identity.
+
+For the live `llm` source, the optional host `ceilings` fields are
+`max_request_bytes` and `max_response_bytes`, both defaulting to the Kernel's
+bounded capability limits. A manifest selection may repeat either field only
+to lower it. The tutorial omits them because the safe defaults are sufficient.
 
 The example pins the upstream model directly with the existing registry
 grammar. The effective resolved model enters the safe snapshot. The
@@ -1513,7 +1520,9 @@ Settled at Slice B, confirmed at Slice C. A clean installed PtcRunner must:
   over stdio — entirely through host JSON;
 - resolve its credential through a host binding, keeping it out of every
   public artifact;
-- pass `--check` before any credential is resolved or process spawned;
+- complete every static `--check` validation before any credential is
+  resolved or process spawned, then allow the checked acquisition/discovery
+  phase to use the declared binding;
 - select and narrow that server from an ordinary manifest;
 - call one read-only tool from PTC-Lisp; and
 - tear down the process tree cleanly.

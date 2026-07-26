@@ -129,23 +129,42 @@ defmodule Mix.Tasks.Ptc.Run do
   end
 
   defp resolved_view(built, host) do
-    Enum.map(built.config.connector_snapshots, fn snapshot ->
+    built.config.connector_snapshots
+    |> Enum.map(fn snapshot ->
       installation = if host, do: host.install[snapshot["provider"]]
-
-      %{
-        "environment" => "mission",
-        "name" => snapshot["provider"],
-        "source" => "mcp",
-        "transport" => snapshot["transport"],
-        "selected_tools" => length(snapshot["tools"]),
-        "accepts_data" =>
-          if(installation,
-            do: Enum.map(installation.accepts_data, &Atom.to_string/1),
-            else: ["normal"]
-          ),
-        "snapshot_hash" => snapshot["snapshot_hash"]
-      }
+      resolved_provider(snapshot, installation)
     end)
+    |> Enum.sort_by(&{&1["environment"], &1["name"]})
+  end
+
+  defp resolved_provider(snapshot, %{source: :mcp} = installation) do
+    %{
+      "environment" => "mission",
+      "name" => snapshot["provider"],
+      "summary" => "mcp/#{snapshot["transport"]}  #{length(snapshot["tools"])} tools",
+      "accepts_data" => Enum.map(installation.accepts_data, &Atom.to_string/1),
+      "snapshot_hash" => snapshot["snapshot_hash"]
+    }
+  end
+
+  defp resolved_provider(snapshot, %{source: :llm} = installation) do
+    %{
+      "environment" => "workflow",
+      "name" => snapshot["provider"],
+      "summary" => "llm  model #{snapshot["model"]}",
+      "accepts_data" => Enum.map(installation.accepts_data, &Atom.to_string/1),
+      "snapshot_hash" => snapshot["snapshot_hash"]
+    }
+  end
+
+  defp resolved_provider(snapshot, _installation) do
+    %{
+      "environment" => "mission",
+      "name" => snapshot["provider"],
+      "summary" => "provider  1 capabilities",
+      "accepts_data" => ["normal"],
+      "snapshot_hash" => snapshot["snapshot_hash"]
+    }
   end
 
   defp report_check([]), do: Mix.shell().info("check ok: no providers")
@@ -154,8 +173,7 @@ defmodule Mix.Tasks.Ptc.Run do
     Enum.each(view, fn provider ->
       Mix.shell().info(
         "#{provider["environment"]}  #{provider["name"]}  " <>
-          "#{provider["source"]}/#{provider["transport"]}  " <>
-          "#{provider["selected_tools"]} tools  " <>
+          "#{provider["summary"]}  " <>
           "accepts: #{Enum.join(provider["accepts_data"], ", ")}  " <>
           "snapshot #{provider["snapshot_hash"]}"
       )

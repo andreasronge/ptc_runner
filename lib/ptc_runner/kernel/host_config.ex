@@ -3,16 +3,21 @@ defmodule PtcRunner.Kernel.HostConfig do
   Strict loader for host-installed provider authority.
 
   The host document is operator-owned and separate from an application
-  manifest. It fixes provider sources, transports, credentials, tool mappings,
-  effects, data classes, and outer ceilings. A manifest may later select an
-  installed alias and narrow its authority; it cannot introduce or replace any
-  field decoded here.
+  manifest. It fixes provider sources, credentials, data classes, and outer
+  ceilings. MCP installations additionally fix transports, tool mappings, and
+  effects; live LLM installations fix the model and cache policy. A manifest
+  may later select an installed alias and narrow its authority; it cannot
+  introduce or replace any field decoded here.
 
   Loading is bounded, path-confined, duplicate-key rejecting, and side-effect
   free. In particular, credential declarations are validated but environment
   variables and files are not read. Executables are not resolved, processes
   are not started, and remote endpoints are not contacted. Those operations
   belong to the later preflight and acquisition phases.
+
+  The closed V1 source identifiers are `mcp` and `llm`. LLM credentials are
+  explicit bindings passed to the adapter per request rather than ambient
+  provider-specific environment lookup.
 
   `schema/0` is the canonical structural description shipped for editor and
   human feedback. Runtime decoding remains authoritative for semantic checks
@@ -82,20 +87,34 @@ defmodule PtcRunner.Kernel.HostConfig do
               auth: [map()]
             }
 
-  @type installation :: %{
-          source: :mcp,
-          transport: transport(),
-          tools: %{binary() => tool()},
-          snapshot_identity: %{tool: binary(), field: binary()} | nil,
-          installation_revision: binary() | nil,
-          ceilings: %{
-            timeout_ms: pos_integer(),
-            max_catalog_tools: pos_integer(),
-            max_result_bytes: pos_integer()
-          },
-          data_class: :normal | :private_inspection,
-          accepts_data: [:normal | :private_inspection]
-        }
+  @type installation ::
+          %{
+            source: :mcp,
+            transport: transport(),
+            tools: %{binary() => tool()},
+            snapshot_identity: %{tool: binary(), field: binary()} | nil,
+            installation_revision: binary() | nil,
+            ceilings: %{
+              timeout_ms: pos_integer(),
+              max_catalog_tools: pos_integer(),
+              max_result_bytes: pos_integer()
+            },
+            data_class: :normal | :private_inspection,
+            accepts_data: [:normal | :private_inspection]
+          }
+          | %{
+              source: :llm,
+              model: binary(),
+              credential: binary(),
+              cache: boolean(),
+              installation_revision: binary() | nil,
+              ceilings: %{
+                max_request_bytes: pos_integer(),
+                max_response_bytes: pos_integer()
+              },
+              data_class: :normal | :private_inspection,
+              accepts_data: [:normal | :private_inspection]
+            }
 
   @type t :: %__MODULE__{
           path: binary(),
@@ -216,13 +235,23 @@ defmodule PtcRunner.Kernel.HostConfig do
   defp installations(_value, _credentials), do: {:error, :invalid_installations}
 
   defp installation(name, value, credentials) do
+    with true <- valid_name?(name),
+         true <- is_map(value) do
+      case value["source"] do
+        "mcp" -> mcp_installation(value, credentials)
+        "llm" -> llm_installation(value, credentials)
+        _unknown -> {:error, :invalid_installation}
+      end
+    else
+      _reason -> {:error, :invalid_installation}
+    end
+  end
+
+  defp mcp_installation(value, credentials) do
     allowed =
       ~w(source transport tools snapshot_identity installation_revision ceilings data_class accepts_data)
 
-    with true <- valid_name?(name),
-         true <- is_map(value),
-         :ok <- exact_keys(value, allowed, ~w(source transport tools)),
-         "mcp" <- value["source"],
+    with :ok <- exact_keys(value, allowed, ~w(source transport tools)),
          {:ok, transport} <- transport(value["transport"], credentials),
          {:ok, tools} <- tools(value["tools"]),
          {:ok, snapshot_identity} <-
@@ -239,6 +268,38 @@ defmodule PtcRunner.Kernel.HostConfig do
          transport: transport,
          tools: tools,
          snapshot_identity: snapshot_identity,
+         installation_revision: installation_revision,
+         ceilings: ceilings,
+         data_class: data_class,
+         accepts_data: accepts_data
+       }}
+    else
+      _reason -> {:error, :invalid_installation}
+    end
+  end
+
+  defp llm_installation(value, credentials) do
+    allowed =
+      ~w(source model credential cache installation_revision ceilings data_class accepts_data)
+
+    with :ok <- exact_keys(value, allowed, ~w(source model credential)),
+         model when is_binary(model) <- value["model"],
+         true <- valid_string?(model, 256),
+         credential when is_binary(credential) <- value["credential"],
+         true <- Map.has_key?(credentials, credential),
+         cache when is_boolean(cache) <- Map.get(value, "cache", false),
+         {:ok, installation_revision} <-
+           optional_revision(Map.get(value, "installation_revision")),
+         {:ok, ceilings} <- llm_ceilings(Map.get(value, "ceilings", %{})),
+         {:ok, data_class} <- data_class(Map.get(value, "data_class", "normal")),
+         {:ok, accepts_data} <-
+           accepts_data(Map.get(value, "accepts_data", ["normal"])) do
+      {:ok,
+       %{
+         source: :llm,
+         model: model,
+         credential: credential,
+         cache: cache,
          installation_revision: installation_revision,
          ceilings: ceilings,
          data_class: data_class,
@@ -456,6 +517,26 @@ defmodule PtcRunner.Kernel.HostConfig do
 
   defp ceilings(_value), do: {:error, :invalid_ceilings}
 
+  defp llm_ceilings(value) when is_map(value) do
+    with :ok <- exact_keys(value, ~w(max_request_bytes max_response_bytes), []),
+         max_request_bytes
+         when is_integer(max_request_bytes) and max_request_bytes in 1..@max_result_bytes <-
+           Map.get(value, "max_request_bytes", 1_000_000),
+         max_response_bytes
+         when is_integer(max_response_bytes) and max_response_bytes in 1..@max_result_bytes <-
+           Map.get(value, "max_response_bytes", 1_000_000) do
+      {:ok,
+       %{
+         max_request_bytes: max_request_bytes,
+         max_response_bytes: max_response_bytes
+       }}
+    else
+      _reason -> {:error, :invalid_ceilings}
+    end
+  end
+
+  defp llm_ceilings(_value), do: {:error, :invalid_ceilings}
+
   defp data_class("normal"), do: {:ok, :normal}
   defp data_class("private_inspection"), do: {:ok, :private_inspection}
   defp data_class(_value), do: {:error, :invalid_data_class}
@@ -579,6 +660,10 @@ defmodule PtcRunner.Kernel.HostConfig do
   end
 
   defp installation_schema do
+    %{"oneOf" => [mcp_installation_schema(), llm_installation_schema()]}
+  end
+
+  defp mcp_installation_schema do
     required_object(
       %{
         "source" => %{"const" => "mcp"},
@@ -591,22 +676,46 @@ defmodule PtcRunner.Kernel.HostConfig do
           ),
         "installation_revision" => bounded_string(256),
         "ceilings" => ceilings_schema(),
-        "data_class" => %{
-          "type" => "string",
-          "enum" => ["normal", "private_inspection"],
-          "default" => "normal"
-        },
-        "accepts_data" => %{
-          "type" => "array",
-          "minItems" => 1,
-          "maxItems" => 2,
-          "uniqueItems" => true,
-          "items" => %{"enum" => ["normal", "private_inspection"]},
-          "default" => ["normal"]
-        }
+        "data_class" => data_class_schema(),
+        "accepts_data" => accepts_data_schema()
       },
       ["source", "transport", "tools"]
     )
+  end
+
+  defp llm_installation_schema do
+    required_object(
+      %{
+        "source" => %{"const" => "llm"},
+        "model" => bounded_string(256),
+        "credential" => name_schema(),
+        "cache" => %{"type" => "boolean", "default" => false},
+        "installation_revision" => bounded_string(256),
+        "ceilings" => llm_ceilings_schema(),
+        "data_class" => data_class_schema(),
+        "accepts_data" => accepts_data_schema()
+      },
+      ["source", "model", "credential"]
+    )
+  end
+
+  defp data_class_schema do
+    %{
+      "type" => "string",
+      "enum" => ["normal", "private_inspection"],
+      "default" => "normal"
+    }
+  end
+
+  defp accepts_data_schema do
+    %{
+      "type" => "array",
+      "minItems" => 1,
+      "maxItems" => 2,
+      "uniqueItems" => true,
+      "items" => %{"enum" => ["normal", "private_inspection"]},
+      "default" => ["normal"]
+    }
   end
 
   defp transport_schema do
@@ -704,6 +813,13 @@ defmodule PtcRunner.Kernel.HostConfig do
       "timeout_ms" => integer_schema(1, @max_timeout_ms, 5_000),
       "max_catalog_tools" => integer_schema(1, 128, 128),
       "max_result_bytes" => integer_schema(1, @max_result_bytes, 1_000_000)
+    })
+  end
+
+  defp llm_ceilings_schema do
+    closed_object(%{
+      "max_request_bytes" => integer_schema(1, @max_result_bytes, 1_000_000),
+      "max_response_bytes" => integer_schema(1, @max_result_bytes, 1_000_000)
     })
   end
 

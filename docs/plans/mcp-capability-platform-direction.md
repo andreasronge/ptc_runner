@@ -1,7 +1,8 @@
 # MCP-first capability platform — implementation plan
 
 > **Status:** active implementation plan, promoted from `future/` on
-> 2026-07-25. Slices 0 through 2 are complete; Slice 3 is next. Every API
+> 2026-07-25. Slices 0 through 3 are complete; Slices 4 and 5 are independent
+> next steps. Every API
 > below remains planned unless explicitly described as current behavior. The
 > protocol target is the locked `2026-07-28` release
 > candidate reviewed on 2026-07-23. Implementation may target that candidate

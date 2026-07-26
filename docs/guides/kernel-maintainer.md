@@ -244,7 +244,7 @@ not supply profile internals or paths.
 | Public run boundary | `Kernel`, `RunConfig`, `Result`, `Error` |
 | Components and libraries | `Component`, `FrozenBundle`, `Library`, `BundleCompiler` |
 | Environment authority | `Capability`, `WorkflowEnvironment`, `MissionEnvironment`, `Environment` |
-| Manifest assembly | `Manifest`, `ProviderRegistry`, `RunBuilder`, `MissionInventory` |
+| Host/manifest assembly | `HostConfig`, `HostInstallation`, `Manifest`, `ProviderRegistry`, `RunBuilder`, `MissionInventory` |
 | Mutable resources | `Limits`, `RunState`, `BoundedWorker`, `Dispatcher` |
 | Subordinate execution | `Runner`, `Evaluation`, `RuntimeTools` |
 | Lisp internals | `Lisp.Eval`, `Lisp.Eval.Effects`, `Lisp.Eval.Capture`, `Lisp.Eval.Parallel`, `Lisp.Eval.ParallelRunner` |

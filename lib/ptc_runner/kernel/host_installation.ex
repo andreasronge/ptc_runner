@@ -7,11 +7,16 @@ defmodule PtcRunner.Kernel.HostInstallation do
   built-ins. MCP installations prepare selection and placement without I/O,
   preflight local executable and launcher identity without reading
   credentials, and only then render the once-resolved credentials while
-  acquiring the transport and catalog.
+  acquiring the transport and catalog. Live LLM installations use the same
+  barrier: model resolution precedes credential access, while the acquired
+  capability receives its key explicitly and records only non-secret model
+  policy in a deterministic provider snapshot.
   """
 
   alias PtcRunner.Kernel.ConfinedFile
+  alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.HostConfig
+  alias PtcRunner.Kernel.LLMCapability
   alias PtcRunner.Kernel.MCPSource
   alias PtcRunner.Kernel.ProviderRegistry
 
@@ -45,10 +50,10 @@ defmodule PtcRunner.Kernel.HostInstallation do
 
   def registry(_host), do: {:error, :invalid_host_installation}
 
-  defp prepare(host, installation, selection, context) do
+  defp prepare(host, %{source: :mcp} = installation, selection, context) do
     with :ok <- placement(installation, context.destination),
          :ok <- accepts_normal_data(installation.accepts_data),
-         {:ok, selected} <- selection(installation, selection, context) do
+         {:ok, selected} <- mcp_selection(installation, selection, context) do
       credential_names = credential_names(installation.transport)
 
       {:ok,
@@ -75,8 +80,38 @@ defmodule PtcRunner.Kernel.HostInstallation do
     end
   end
 
+  defp prepare(_host, %{source: :llm} = installation, selection, context) do
+    credential_names = [installation.credential]
+
+    with :ok <- placement(installation, context.destination),
+         :ok <- accepts_normal_data(installation.accepts_data),
+         {:ok, selected} <- llm_selection(installation, selection, context) do
+      {:ok,
+       %{
+         credential_names: credential_names,
+         preflight: fn ->
+           with {:ok, model, adapter} <- preflight_llm(installation.model) do
+             {:ok,
+              fn credentials ->
+                acquire_llm(
+                  installation,
+                  selected,
+                  context,
+                  model,
+                  adapter,
+                  credentials
+                )
+              end}
+           end
+         end
+       }}
+    end
+  end
+
   defp placement(%{source: :mcp}, :mission), do: :ok
   defp placement(%{source: :mcp}, _destination), do: {:error, :provider_destination_denied}
+  defp placement(%{source: :llm}, :workflow), do: :ok
+  defp placement(%{source: :llm}, _destination), do: {:error, :provider_destination_denied}
 
   # V1 host-installed MCP receives ordinary generated mission arguments.
   # Private snapshot inputs land with the application-source slices; until
@@ -87,7 +122,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
       else: {:error, :provider_data_class_denied}
   end
 
-  defp selection(installation, value, context)
+  defp mcp_selection(installation, value, context)
        when is_map(value) and not is_struct(value) do
     public =
       Map.new(installation.tools, fn {_upstream, mapping} ->
@@ -137,7 +172,44 @@ defmodule PtcRunner.Kernel.HostInstallation do
     end
   end
 
-  defp selection(_installation, _value, _context), do: {:error, :invalid_mcp_selection}
+  defp mcp_selection(_installation, _value, _context), do: {:error, :invalid_mcp_selection}
+
+  defp llm_selection(installation, value, context)
+       when is_map(value) and not is_struct(value) do
+    with true <- Map.keys(value) -- ~w(max_request_bytes max_response_bytes) == [],
+         max_request_bytes when is_integer(max_request_bytes) and max_request_bytes > 0 <-
+           Map.get(
+             value,
+             "max_request_bytes",
+             min(
+               installation.ceilings.max_request_bytes,
+               context.limits.capability_argument_bytes
+             )
+           ),
+         true <- max_request_bytes <= installation.ceilings.max_request_bytes,
+         true <- max_request_bytes <= context.limits.capability_argument_bytes,
+         max_response_bytes when is_integer(max_response_bytes) and max_response_bytes > 0 <-
+           Map.get(
+             value,
+             "max_response_bytes",
+             min(
+               installation.ceilings.max_response_bytes,
+               context.limits.capability_result_bytes
+             )
+           ),
+         true <- max_response_bytes <= installation.ceilings.max_response_bytes,
+         true <- max_response_bytes <= context.limits.capability_result_bytes do
+      {:ok,
+       %{
+         max_request_bytes: max_request_bytes,
+         max_response_bytes: max_response_bytes
+       }}
+    else
+      _reason -> {:error, :invalid_llm_selection}
+    end
+  end
+
+  defp llm_selection(_installation, _value, _context), do: {:error, :invalid_llm_selection}
 
   defp credential_names(%{type: :stdio, env: env}),
     do: env |> Map.values() |> Enum.uniq() |> Enum.sort()
@@ -254,6 +326,71 @@ defmodule PtcRunner.Kernel.HostInstallation do
       |> MCPSource.builder()
       |> then(& &1.(selected, context))
       |> classify(installation)
+    end
+  end
+
+  defp preflight_llm(model) do
+    with {:ok, resolved} <- PtcRunner.LLM.Registry.resolve(model),
+         true <- is_binary(resolved) and byte_size(resolved) in 1..256,
+         adapter when is_atom(adapter) <- PtcRunner.LLM.adapter!(),
+         true <- Code.ensure_loaded?(adapter) do
+      {:ok, resolved, adapter}
+    else
+      _invalid -> {:error, :invalid_llm_model}
+    end
+  rescue
+    _exception -> {:error, :invalid_llm_model}
+  end
+
+  defp acquire_llm(installation, selected, context, model, adapter, credentials) do
+    with {:ok, credential} <- Map.fetch(credentials, installation.credential),
+         requester =
+           PtcRunner.LLM.callback(
+             model,
+             adapter: adapter,
+             cache: installation.cache,
+             api_key: credential
+           ),
+         {:ok, capability} <-
+           LLMCapability.new(
+             requester: fn request ->
+               requester.(ProviderRegistry.adapter_request(request))
+             end,
+             max_request_bytes: selected.max_request_bytes,
+             max_response_bytes: selected.max_response_bytes
+           ),
+         {:ok, snapshot} <- llm_snapshot(installation, selected, context.provider, model) do
+      {:ok,
+       %{
+         capabilities: [capability],
+         snapshot: snapshot,
+         close: nil,
+         data_class: installation.data_class,
+         accepts_data: installation.accepts_data
+       }}
+    else
+      _reason -> {:error, :invalid_llm_provider}
+    end
+  rescue
+    _exception -> {:error, :invalid_llm_provider}
+  end
+
+  defp llm_snapshot(installation, selected, provider, model) do
+    identity =
+      %{
+        "source" => "llm",
+        "model" => model,
+        "cache" => installation.cache,
+        "max_request_bytes" => selected.max_request_bytes,
+        "max_response_bytes" => selected.max_response_bytes
+      }
+      |> maybe_put("installation_revision", installation.installation_revision)
+
+    with {:ok, encoded} <- DeterministicJSON.encode(identity) do
+      {:ok,
+       identity
+       |> Map.put("provider", provider)
+       |> Map.put("snapshot_hash", sha256(encoded))}
     end
   end
 
@@ -479,4 +616,10 @@ defmodule PtcRunner.Kernel.HostInstallation do
       {:error, _reason} = error -> error
     end
   end
+
+  defp maybe_put(map, _key, nil), do: map
+  defp maybe_put(map, key, value), do: Map.put(map, key, value)
+
+  defp sha256(value),
+    do: value |> then(&:crypto.hash(:sha256, &1)) |> Base.encode16(case: :lower)
 end
