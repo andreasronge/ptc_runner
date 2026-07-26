@@ -4,7 +4,24 @@ defmodule PtcRunner.Kernel.Library do
 
   Available component IDs are `kernel`, `runtime`, `cap`, `workflow.event`,
   `fs`, `llm`, `agent.native`, `agent.core`, `agent.feedback`, `agent.retry`,
-  `agent.prompt`, `result`, and `log.core`.
+  `agent.prompt`, `agent.main`, `result`, and `log.core`.
+
+  `agent.main` is a generic entry wrapper: a manifest names `agent.main/run`
+  and supplies `task` and `agent` through input, instead of every application
+  repeating the same `agent.core` call. It is domain-blind by construction —
+  it forwards two input keys and never learns what the task is about.
+
+  `cap` is `:discoverable` rather than `:prompt`. Its `unwrap!` and
+  `with-cursor` helpers compose capability envelopes for other libraries and
+  are not something a generated program should be prompted to call, so they
+  stay out of the prompt inventory. `unwrap!` fails the program on an error
+  envelope rather than returning it, so a forgotten check cannot turn a
+  provider error into ordinary data; `with-cursor` shapes one page and leaves
+  traversal to the caller.
+
+  Fetching a component does not expand its dependencies. `PtcRunner.Kernel`
+  refuses to compile an incomplete set, so a manifest selecting `agent.main`
+  must also carry the `agent.core` closure.
 
   Fetching a component grants no capability. The host still compiles the
   selected closed component set and supplies the capabilities required by its
@@ -22,6 +39,7 @@ defmodule PtcRunner.Kernel.Library do
   @agent_native_path Path.expand("../../../priv/preludes/kernel/agent.native.clj", __DIR__)
   @agent_prompt_path Path.expand("../../../priv/preludes/kernel/agent.prompt.clj", __DIR__)
   @agent_core_path Path.expand("../../../priv/preludes/kernel/agent.core.clj", __DIR__)
+  @agent_main_path Path.expand("../../../priv/preludes/kernel/agent.main.clj", __DIR__)
   @agent_feedback_path Path.expand("../../../priv/preludes/kernel/agent.feedback.clj", __DIR__)
   @agent_retry_path Path.expand("../../../priv/preludes/kernel/agent.retry.clj", __DIR__)
   @result_path Path.expand("../../../priv/preludes/kernel/result.clj", __DIR__)
@@ -35,6 +53,7 @@ defmodule PtcRunner.Kernel.Library do
   @external_resource @agent_native_path
   @external_resource @agent_prompt_path
   @external_resource @agent_core_path
+  @external_resource @agent_main_path
   @external_resource @agent_feedback_path
   @external_resource @agent_retry_path
   @external_resource @result_path
@@ -49,6 +68,7 @@ defmodule PtcRunner.Kernel.Library do
     "agent.native" => File.read!(@agent_native_path),
     "agent.prompt" => File.read!(@agent_prompt_path),
     "agent.core" => File.read!(@agent_core_path),
+    "agent.main" => File.read!(@agent_main_path),
     "agent.feedback" => File.read!(@agent_feedback_path),
     "agent.retry" => File.read!(@agent_retry_path),
     "result" => File.read!(@result_path),
@@ -65,7 +85,8 @@ defmodule PtcRunner.Kernel.Library do
       "llm",
       "result",
       "workflow.event"
-    ]
+    ],
+    "agent.main" => ["agent.core"]
   }
 
   @spec component(binary()) :: {:ok, Component.t()} | {:error, :unknown_library}
