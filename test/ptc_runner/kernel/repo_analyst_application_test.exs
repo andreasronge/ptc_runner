@@ -42,12 +42,13 @@ defmodule PtcRunner.Kernel.RepoAnalystApplicationTest do
       assert {:ok, host} = HostConfig.load(@host)
 
       assert host.install |> Map.keys() |> Enum.sort() ==
-               ["deepseek", "history", "private-history", "workspace"]
+               ["deepseek", "history", "private-history", "replay-llm", "workspace"]
 
       assert host.install["workspace"].source == :mcp
       assert host.install["history"].source == :ptc_trace_snapshot
       assert host.install["private-history"].source == :ptc_inspection_snapshot
       assert host.install["deepseek"].source == :llm
+      assert host.install["replay-llm"].source == :llm_replay
     end
 
     test "maps exactly the five read tools and keeps every one model-invisible" do
