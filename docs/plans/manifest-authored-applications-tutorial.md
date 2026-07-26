@@ -64,7 +64,7 @@ that touches data is in the mission environment.
 | private human investigation in `ptc.repl` | planned application Slice E2 |
 | bounded MCP error feedback, safe trace context, and private request/response inspection | current |
 | `--output`, `--private-output`, `--private-mission`, and run classification | current; input/result schemas remain planned Slice D |
-| `cap/unwrap!`, `cap/with-cursor`, and `agent.main` libraries | planned application Slice G |
+| `cap/unwrap!`, `cap/with-cursor`, and `agent.main` libraries | current; remaining Code Scout facades are planned application Slice G |
 | component override and LLM replay evaluation | planned application Slice H |
 
 This single page replaces separate “draft” and “simulated” tutorials. The
@@ -421,10 +421,10 @@ installed a visible tool. Frozen prelude code can still call the mapped
 capabilities. The answer model sees only `repo`; review and improvement see
 `repo` plus `runs`.
 
-The planned `cap` library is composition-only rather than prompt-visible.
+The `cap` library is composition-only rather than prompt-visible.
 `repo` and `runs` form the complete model-facing facade.
 
-`agent.main` is a planned domain-blind wrapper around `agent.core`: it reads a
+`agent.main` is a domain-blind wrapper around `agent.core`: it reads a
 task and loop settings from input. It avoids every agent application repeating
 the same workflow entry file.
 

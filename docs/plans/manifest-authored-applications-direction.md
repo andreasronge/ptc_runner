@@ -714,7 +714,7 @@ selector for these three cases; revisit that grammar only when a fourth real
 task demonstrates that separate manifests are the dominant remaining
 duplication.
 
-`agent.main` is a proposed small domain-blind shipped library that forwards
+`agent.main` is a small domain-blind shipped library that forwards
 task and loop configuration from input to `agent.core`. It removes a repeated
 four-line workflow component but adds no grammar or authority. Code Scout
 policy lives in task data, result schemas, evaluation fixtures, and the
@@ -726,7 +726,7 @@ and `repo` plus `runs` as the review/improvement facade. Frozen prelude code can
 still call the mapped raw capabilities, and visibility is discovery-only: a
 selected, model-invisible capability also remains callable by generated code
 that names it directly, because authority comes from host installation and
-manifest selection rather than the prompt catalog. The planned `cap` helper library
+manifest selection rather than the prompt catalog. The `cap` helper library
 becomes composition-only rather than prompt-visible. A manifest may further
 narrow an installed model-visible set, but these examples do not repeat an
 empty narrowing when the host ceiling is already false. `allow`, if present,
@@ -1392,6 +1392,10 @@ Complete MCP-first Slice 4:
 can reconstruct the complete tool exchange.
 
 ### Slice G — Read-only Code Scout
+
+**Status:** partly implemented. The shipped `cap` helpers and domain-blind
+`agent.main` entry are complete; the application facades, schemas, fixtures,
+and held-out evaluation remain.
 
 - extend the shipped `cap` library with envelope-aware `unwrap!` and
   opaque-cursor `with-cursor` helpers;

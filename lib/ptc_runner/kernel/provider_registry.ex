@@ -70,6 +70,11 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
           accepts_data: [:normal | :private_inspection],
           preflight: (-> {:ok, acquire()} | {:error, term()})
         }
+  @type preflighted :: %{
+          acquire: acquire(),
+          data_class: :normal | :private_inspection,
+          accepts_data: [:normal | :private_inspection]
+        }
   @type staged_builder ::
           {:staged,
            (map(), context() ->
@@ -165,14 +170,7 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
     end
   end
 
-  @spec preflight(prepared()) ::
-          {:ok,
-           %{
-             acquire: acquire(),
-             data_class: :normal | :private_inspection,
-             accepts_data: [:normal | :private_inspection]
-           }}
-          | {:error, term()}
+  @spec preflight(prepared()) :: {:ok, preflighted()} | {:error, term()}
   @doc false
   def preflight(%{
         preflight: preflight,
@@ -201,7 +199,7 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
 
   def resolve_credentials(_registry, _names), do: {:error, :invalid_credential_names}
 
-  @spec acquire(%{acquire: acquire()}, credential_values()) ::
+  @spec acquire(preflighted(), credential_values()) ::
           {:ok, built_provider()} | {:error, term()}
   @doc false
   def acquire(%{acquire: acquire}, credentials)
