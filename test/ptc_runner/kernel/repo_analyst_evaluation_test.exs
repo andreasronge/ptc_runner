@@ -174,6 +174,71 @@ defmodule PtcRunner.Kernel.RepoAnalystEvaluationTest do
       assert Enum.any?(reasons, &(&1 =~ "more than one candidate"))
     end
 
+    test "a repeated case on one side is unpaired rather than counted twice" do
+      # Membership is not enough: re-running a case until it passes is exactly
+      # the manipulation this aggregate exists to refuse.
+      assert %{"verdict" => "invalid", "reasons" => reasons} =
+               aggregate([
+                 trial("baseline", "cited.1", "motivating", false),
+                 trial("candidate", "cited.1", "motivating", false),
+                 trial("candidate", "cited.1", "motivating", true)
+               ])
+
+      assert Enum.any?(reasons, &(&1 =~ "unpaired"))
+    end
+
+    test "a trial declaring no recognised subject invalidates the set" do
+      orphan =
+        "baseline"
+        |> trial("cited.1", "motivating", true)
+        |> Map.put("subject", "neither")
+
+      assert %{"verdict" => "invalid", "reasons" => reasons} = aggregate([orphan])
+      assert Enum.any?(reasons, &(&1 =~ "no recognised subject"))
+    end
+
+    test "a candidate that regresses a motivating case is rejected even as the rate rises" do
+      # The shipped contract says accept means no regression anywhere, so an
+      # aggregate rate that hides a lost case must not reach accept.
+      assert %{"verdict" => "reject"} =
+               aggregate([
+                 trial("baseline", "m1", "motivating", true),
+                 trial("candidate", "m1", "motivating", false),
+                 trial("baseline", "m2", "motivating", false),
+                 trial("candidate", "m2", "motivating", true),
+                 trial("baseline", "m3", "motivating", false),
+                 trial("candidate", "m3", "motivating", true)
+               ])
+    end
+
+    test "a failing negative control invalidates the run it belongs to" do
+      assert %{"verdict" => "invalid", "reasons" => reasons} =
+               aggregate([
+                 trial("baseline", "cited.1", "motivating", false),
+                 trial("candidate", "cited.1", "motivating", true),
+                 trial("baseline", "negative-control.always-fails", "negative-control", true),
+                 trial("candidate", "negative-control.always-fails", "negative-control", true)
+               ])
+
+      assert Enum.any?(reasons, &(&1 =~ "negative control"))
+    end
+
+    test "a large unpaired batch still validates against the result contract" do
+      {:ok, contract} = contract("evaluation.schema.json")
+
+      trials =
+        for index <- 1..40 do
+          trial("candidate", "orphan.#{index}", "motivating", true)
+        end
+
+      value = aggregate(trials)
+
+      # An unbounded reason string would breach the contract exactly when the
+      # aggregate has the most to report, so no artifact would be written.
+      assert value["verdict"] == "invalid"
+      assert ValueContract.valid?(contract, value)
+    end
+
     test "an empty trial set fails rather than reporting an empty success" do
       assert {:error, _reason} = run_aggregate([])
     end

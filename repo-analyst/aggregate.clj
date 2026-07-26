@@ -47,12 +47,16 @@
 ;; Every case must appear on both sides. A pair missing its baseline cannot show
 ;; an improvement, and a pair missing its candidate hides a trial that failed to
 ;; produce an artifact at all.
+(defn- occurrences [trials k]
+  (count (filterv #(= k (key-of %)) trials)))
+
+;; Membership is not enough. A candidate side that ran one case twice is
+;; "paired" under set semantics, and re-running a case until it passes is
+;; exactly the manipulation this aggregate exists to refuse, so each key must
+;; appear the same number of times on both sides.
 (defn- unpaired [baseline candidate]
-  (let [baseline-keys (mapv key-of baseline)
-        candidate-keys (mapv key-of candidate)]
-    (into
-      (filterv (fn [k] (not (some #(= % k) candidate-keys))) baseline-keys)
-      (filterv (fn [k] (not (some #(= % k) baseline-keys))) candidate-keys))))
+  (let [keys (distinct (into (mapv key-of baseline) (mapv key-of candidate)))]
+    (filterv (fn [k] (not= (occurrences baseline k) (occurrences candidate k))) keys)))
 
 (defn- regressions [baseline candidate set-name]
   (let [before (by-set baseline set-name)
@@ -63,12 +67,39 @@
           (and (passed? trial) (or (nil? match) (not (passed? match))))))
       before)))
 
+;; Negative controls check the harness, not the candidate. If the case every
+;; subject must pass fails, or the case every subject must fail passes, the
+;; scoring itself is untrustworthy and no verdict about the candidate can be
+;; drawn from the same run.
+(defn- control-problems [baseline candidate]
+  (let [controls (into (by-set baseline "negative-control")
+                       (by-set candidate "negative-control"))
+        must-pass (filterv #(includes? (get-in % ["case" "id"]) "always-passes") controls)
+        must-fail (filterv #(includes? (get-in % ["case" "id"]) "always-fails") controls)]
+    (into
+      (if (some #(not (passed? %)) must-pass)
+        ["negative control that every subject must pass did not pass"]
+        [])
+      (if (some passed? must-fail)
+        ["negative control that every subject must fail passed"]
+        []))))
+
+;; Bounded: `reasons` caps each entry at 500 characters, and an unbounded join
+;; would make the aggregate fail its own contract exactly when it has the most
+;; to report.
+(defn- unpaired-reason [missing]
+  (let [shown (take 8 missing)]
+    (str "unpaired trials (" (count missing) "): " (join ", " shown)
+         (if (> (count missing) 8) ", …" ""))))
+
 (defn- decide [problems held-out-regressions gained]
   (cond
     (seq problems) {"verdict" "invalid" "reasons" problems}
     (seq held-out-regressions)
     {"verdict" "reject"
-     "reasons" ["candidate regresses held-out cases it did not cite"]}
+     "reasons" [(str "candidate regresses "
+                     (count held-out-regressions)
+                     " case(s) that passed before")]}
     (not gained) {"verdict" "inconclusive" "reasons" ["candidate improves no cited case"]}
     :else {"verdict" "accept" "reasons" []}))
 
@@ -83,17 +114,26 @@
             missing (unpaired baseline candidate)
             drift (identity-drift trials)
             mislabelled (filterv #(not (subject-consistent? %)) trials)
+            unrecognised (- (count trials) (+ (count baseline) (count candidate)))
             held-out (regressions baseline candidate "held-out")
-            regression-set (regressions baseline candidate "regression")
+            regression-set (into (regressions baseline candidate "regression")
+                                 (regressions baseline candidate "motivating"))
+            controls (control-problems baseline candidate)
             problems (into
                        (into
                          (if drift [drift] [])
                          (if (empty? missing)
                            []
-                           [(str "unpaired trials: " (join ", " missing))]))
-                       (if (empty? mislabelled)
-                         []
-                         [(str (count mislabelled) " trial(s) disagree with their run identity")]))
+                           [(unpaired-reason missing)]))
+                       (into
+                         (if (empty? mislabelled)
+                           []
+                           [(str (count mislabelled) " trial(s) disagree with their run identity")])
+                         (into
+                           (if (> unrecognised 0)
+                             [(str unrecognised " trial(s) declare no recognised subject")]
+                             [])
+                           controls)))
             motivating-before (rate (by-set baseline "motivating"))
             motivating-after (rate (by-set candidate "motivating"))
             gained (> motivating-after motivating-before)
@@ -111,5 +151,5 @@
                     "regression_after" (rate (by-set candidate "regression"))
                     "held_out_before" (rate (by-set baseline "held-out"))
                     "held_out_after" (rate (by-set candidate "held-out"))}
-           "regressed_cases" (mapv #(get-in % ["case" "id"])
-                                   (into held-out regression-set))})))))
+           "regressed_cases" (distinct (mapv #(get-in % ["case" "id"])
+                                             (into held-out regression-set)))})))))
