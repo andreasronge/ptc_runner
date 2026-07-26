@@ -250,11 +250,15 @@ provider acquisition service, validates all artifacts and correlations before
 publication, and exposes the shared `InspectionQuery` layer through
 `InspectionCapability`.
 
-The local log-analysis path is a fixed product profile shared by the Viewer
-and terminal REPL. `PtcRunner.Kernel.LogAnalysisSessionBuilder` is the host
-entry, and `LogAnalysisSession`, `SessionTrace`, and `TraceSnapshot` own the
-session, persistence, and immutable source capture. Browser or Lisp input does
-not supply profile internals or paths.
+Local analysis profiles are fixed, code-owned recipes selected through the
+closed `AnalysisProfileRegistry`. `AnalysisSessionBuilder` is the host entry;
+`AnalysisSession`, `SessionTrace`, and `AnalysisResources` share continuation,
+publication, and cleanup without letting a caller supply modules,
+capabilities, limits, or sink policy. `log-analysis-v1` remains the Viewer and
+ordinary terminal profile. `inspection-analysis-v1` adds correlated
+`TraceSnapshot` and `InspectionSnapshot` captures behind a private
+interactive-terminal gate. Browser or Lisp input does not supply profile
+internals or paths.
 
 ## Code map
 
@@ -269,7 +273,7 @@ not supply profile internals or paths.
 | Lisp internals | `Lisp.Eval`, `Lisp.Eval.Effects`, `Lisp.Eval.Capture`, `Lisp.Eval.Parallel`, `Lisp.Eval.ParallelRunner` |
 | Providers | `HostConfig`, `HostInstallation`, `LLMCapability`, `MCPSource`, `MCPProtocol`, `TraceCapability`, `InspectionCapability` |
 | Canonical/private evidence | `EventSink`, `TraceLog`, `TraceSnapshot`, `InspectionSink`, `InspectionArtifact`, `InspectionSnapshot`, `InspectionQuery`, `SafeMetadata` |
-| Interactive evaluation | `ReplSession`, `LogAnalysisSessionBuilder`, `LogAnalysisSession`, `SessionTrace` |
+| Interactive evaluation | `ReplSession`, `AnalysisProfileRegistry`, `AnalysisSessionBuilder`, `AnalysisSession`, `SessionTrace` |
 
 Modules grouped as Kernel internals in ExDoc remain documented for maintenance
 and review. They are not alternative supported entry points.

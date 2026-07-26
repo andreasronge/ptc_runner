@@ -1,7 +1,7 @@
 defmodule Mix.Tasks.Ptc.Repl do
   @shortdoc "Bounded direct or profile-backed PTC-Lisp REPL"
   @moduledoc """
-  Starts a direct workflow PTC-Lisp REPL or the fixed log-analysis mission
+  Starts a direct workflow PTC-Lisp REPL or a fixed code-owned analysis
   profile.
 
       mix ptc.repl
@@ -12,6 +12,10 @@ defmodule Mix.Tasks.Ptc.Repl do
       mix ptc.repl --manifest ptc.json
       mix ptc.repl --manifest ptc.json --trace trace.jsonl
       mix ptc.repl --profile log-analysis-v1 --resource traces=tmp/traces
+      mix ptc.repl --profile inspection-analysis-v1 \
+        --resource traces=tmp/traces \
+        --resource inspection=tmp/inspection \
+        --private-terminal
       mix ptc.repl --describe-profile log-analysis-v1
 
   Options:
@@ -26,6 +30,8 @@ defmodule Mix.Tasks.Ptc.Repl do
     * `--resource NAME=VALUE` — supply a required profile resource; repeatable;
     * `--session-trace-dir` — existing output directory for a profile session's
       separate canonical trace;
+    * `--private-terminal` — explicitly authorize an attached terminal as the
+      private output sink required by `inspection-analysis-v1`;
     * `--format clojure|jsonl` — choose human output or non-interactive
       profile-mode JSON Lines;
     * `--continue-on-error` — evaluate later repeated `--eval` forms after a
@@ -38,10 +44,10 @@ defmodule Mix.Tasks.Ptc.Repl do
   REPL. Ctrl+D exits.
 
   Direct and manifest sessions evaluate the workflow environment. Profile mode
-  evaluates one serialized mission continuation and requires exactly
-  `--resource traces=DIR`. Its analysis trace is atomically published outside
-  that captured directory; without `--session-trace-dir`, the task creates and
-  reports a private temporary output directory.
+  evaluates one serialized mission continuation over the exact resources
+  declared by its closed profile. Its analysis trace is atomically published
+  outside captured private resources; without `--session-trace-dir`, the task
+  creates and reports a private temporary output directory.
 
   JSONL mode is non-interactive and conditionally emits schema-version-1
   `session-started`, `evaluation`, and successfully persisted `session-closed`
@@ -54,10 +60,12 @@ defmodule Mix.Tasks.Ptc.Repl do
 
   use Mix.Task
 
+  alias PtcRunner.Kernel.AnalysisDirectory
+  alias PtcRunner.Kernel.AnalysisProfileRegistry
+  alias PtcRunner.Kernel.AnalysisSession
+  alias PtcRunner.Kernel.AnalysisSessionBuilder
+  alias PtcRunner.Kernel.AnalysisTerminal
   alias PtcRunner.Kernel.DeterministicJSON
-  alias PtcRunner.Kernel.LogAnalysisProfile
-  alias PtcRunner.Kernel.LogAnalysisSession
-  alias PtcRunner.Kernel.LogAnalysisSessionBuilder
   alias PtcRunner.Kernel.ProviderRegistry
   alias PtcRunner.Kernel.ReplSession
   alias PtcRunner.Kernel.RunBuilder
@@ -75,6 +83,7 @@ defmodule Mix.Tasks.Ptc.Repl do
     session_trace_dir: :string,
     format: :string,
     continue_on_error: :boolean,
+    private_terminal: :boolean,
     describe_profile: :string,
     help: :boolean
   ]
@@ -138,7 +147,8 @@ defmodule Mix.Tasks.Ptc.Repl do
         {:error, "profile resources require --profile"}
 
       resources != [] or not is_nil(opts[:session_trace_dir]) or
-          Keyword.has_key?(opts, :continue_on_error) ->
+        Keyword.has_key?(opts, :continue_on_error) or
+          Keyword.has_key?(opts, :private_terminal) ->
         {:error, "profile options require --profile"}
 
       format == "jsonl" ->
@@ -159,46 +169,42 @@ defmodule Mix.Tasks.Ptc.Repl do
       disallowed != [] ->
         {:error, "--describe-profile cannot be combined with runtime options"}
 
-      opts[:describe_profile] != LogAnalysisProfile.id() ->
-        {:error, "unsupported session profile"}
-
       true ->
-        {:ok, :describe}
+        case AnalysisProfileRegistry.fetch(opts[:describe_profile]) do
+          {:ok, _recipe} -> {:ok, :describe}
+          {:error, _reason} -> {:error, "unsupported session profile"}
+        end
     end
   end
 
   defp validate_profile_command(opts, arguments, evals, resources, format) do
-    cond do
-      opts[:profile] != LogAnalysisProfile.id() ->
-        {:error, "unsupported session profile"}
-
-      opts[:manifest] ->
-        {:error, "cannot combine --profile with --manifest"}
-
-      opts[:trace] ->
-        {:error, "use --session-trace-dir instead of --trace with --profile"}
-
-      resources == [] ->
-        {:error, "--profile log-analysis-v1 requires --resource traces=DIR"}
-
-      format == "jsonl" and evals == [] and arguments == [] ->
-        {:error, "--format jsonl requires non-interactive profile input"}
-
-      opts[:continue_on_error] && length(evals) < 2 ->
-        {:error, "--continue-on-error requires repeated --eval in profile mode"}
-
-      true ->
-        {:ok, :profile}
+    with {:ok, recipe} <- AnalysisProfileRegistry.fetch(opts[:profile]),
+         :ok <-
+           validate_profile_combinations(
+             recipe,
+             opts,
+             arguments,
+             evals,
+             resources,
+             format
+           ),
+         :ok <-
+           AnalysisProfileRegistry.authorize_frontend(recipe, %{
+             input_mode: profile_input_mode(opts, arguments, evals),
+             output_format: output_format(opts),
+             continue_on_error: Keyword.get(opts, :continue_on_error, false),
+             private_terminal: Keyword.get(opts, :private_terminal, false),
+             terminal_attached: AnalysisTerminal.attached?()
+           }) do
+      {:ok, :profile}
+    else
+      {:error, :unsupported_analysis_profile} -> {:error, "unsupported session profile"}
+      {:error, reason} when is_atom(reason) -> {:error, profile_frontend_error(reason)}
     end
   end
 
   defp describe_profile(opts) do
-    description =
-      Map.put(LogAnalysisProfile.description(), "frontend", %{
-        "input_modes" => ["interactive", "eval", "load", "script", "stdin"],
-        "output_formats" => ["clojure", "jsonl"],
-        "continue_on_error" => "repeated-eval-only"
-      })
+    {:ok, description} = AnalysisProfileRegistry.description(opts[:describe_profile])
 
     if output_format(opts) == :jsonl do
       emit_jsonl(Map.merge(description, %{"schema_version" => 1, "type" => "profile"}))
@@ -208,15 +214,84 @@ defmodule Mix.Tasks.Ptc.Repl do
     end
   end
 
+  defp validate_profile_combinations(recipe, opts, arguments, evals, resources, format) do
+    cond do
+      opts[:manifest] ->
+        {:error, :profile_with_manifest}
+
+      opts[:trace] ->
+        {:error, :profile_with_trace}
+
+      resources == [] ->
+        {:error, :profile_resources_required}
+
+      format == "jsonl" and :jsonl in recipe.frontend().output_formats and evals == [] and
+          arguments == [] ->
+        {:error, :jsonl_requires_input}
+
+      opts[:continue_on_error] && length(evals) < 2 ->
+        {:error, :continue_requires_repeated_eval}
+
+      true ->
+        :ok
+    end
+  end
+
+  defp profile_input_mode(opts, arguments, evals) do
+    cond do
+      opts[:load] -> :load
+      evals != [] -> :eval
+      arguments == ["-"] -> :stdin
+      arguments != [] -> :script
+      true -> :interactive
+    end
+  end
+
+  defp profile_frontend_error(:profile_with_manifest),
+    do: "cannot combine --profile with --manifest"
+
+  defp profile_frontend_error(:profile_with_trace),
+    do: "use --session-trace-dir instead of --trace with --profile"
+
+  defp profile_frontend_error(:profile_resources_required),
+    do: "--profile requires its declared --resource values"
+
+  defp profile_frontend_error(:jsonl_requires_input),
+    do: "--format jsonl requires non-interactive profile input"
+
+  defp profile_frontend_error(:continue_requires_repeated_eval),
+    do: "--continue-on-error requires repeated --eval in profile mode"
+
+  defp profile_frontend_error(:unsupported_profile_input),
+    do: "selected profile is interactive-only"
+
+  defp profile_frontend_error(:unsupported_profile_output),
+    do: "selected profile does not allow this output format"
+
+  defp profile_frontend_error(:unsupported_profile_continuation),
+    do: "selected profile does not allow --continue-on-error"
+
+  defp profile_frontend_error(:private_terminal_required),
+    do: "inspection-analysis-v1 requires --private-terminal"
+
+  defp profile_frontend_error(:interactive_terminal_required),
+    do: "inspection-analysis-v1 requires attached stdin and stdout terminals"
+
+  defp profile_frontend_error(:private_terminal_unsupported),
+    do: "--private-terminal is supported only by a private analysis profile"
+
+  defp profile_frontend_error(_reason), do: "invalid profile command"
+
   defp run_profile_session(opts, arguments) do
-    with {:ok, input_directory} <- profile_resource(opts),
+    with {:ok, recipe} <- AnalysisProfileRegistry.fetch(opts[:profile]),
+         {:ok, resources} <- profile_resources(opts, recipe),
          {:ok, output_directory, temporary?} <- profile_output_directory(opts) do
-      case separate_directories(input_directory, output_directory) do
+      case separate_directories(Map.values(resources), output_directory) do
         {:ok, output_identity} ->
           start_profile_session(
             opts,
             arguments,
-            input_directory,
+            resources,
             output_directory,
             temporary?,
             output_identity
@@ -231,36 +306,46 @@ defmodule Mix.Tasks.Ptc.Repl do
     end
   end
 
-  defp profile_resource(opts) do
+  defp profile_resources(opts, recipe) do
     resources = Keyword.get_values(opts, :resource)
 
-    with {:ok, parsed} <- parse_resources(resources),
-         %{"traces" => directory} when map_size(parsed) == 1 <- parsed,
-         true <- String.valid?(directory),
-         expanded = Path.expand(directory),
-         {:ok, %File.Stat{type: :directory}} <- File.lstat(expanded) do
+    with {:ok, parsed} <- parse_resources(resources, recipe.resource_names()),
+         true <- Map.keys(parsed) |> Enum.sort() == recipe.resource_names(),
+         {:ok, expanded} <- expand_resource_directories(parsed) do
       {:ok, expanded}
     else
       {:error, message} -> {:error, :cli, message}
-      _ -> {:error, :cli, "log-analysis-v1 requires one normal traces directory"}
+      _ -> {:error, :cli, "#{recipe.id()} requires its declared directory resources"}
     end
   rescue
-    _exception -> {:error, :cli, "log-analysis-v1 requires one normal traces directory"}
+    _exception -> {:error, :cli, "#{recipe.id()} requires its declared directory resources"}
   end
 
-  defp parse_resources(resources) do
+  defp parse_resources(resources, allowed_names) do
     Enum.reduce_while(resources, {:ok, %{}}, fn resource, {:ok, parsed} ->
       with true <- is_binary(resource) and String.valid?(resource),
            [name, value] <- String.split(resource, "=", parts: 2),
            true <- name =~ ~r/\A[A-Za-z][A-Za-z0-9_-]{0,63}\z/,
            true <- value != "" and String.valid?(value),
            false <- Map.has_key?(parsed, name),
-           true <- name == "traces" do
+           true <- name in allowed_names do
         {:cont, {:ok, Map.put(parsed, name, value)}}
       else
         true -> {:halt, {:error, "duplicate profile resource"}}
         false -> {:halt, {:error, "invalid or unsupported profile resource"}}
         _ -> {:halt, {:error, "invalid profile resource; expected NAME=VALUE"}}
+      end
+    end)
+  end
+
+  defp expand_resource_directories(resources) do
+    Enum.reduce_while(resources, {:ok, %{}}, fn {name, directory}, {:ok, expanded} ->
+      case AnalysisDirectory.resolve(directory) do
+        {:ok, %{path: resolved}} ->
+          {:cont, {:ok, Map.put(expanded, name, resolved)}}
+
+        _ ->
+          {:halt, {:error, "profile resources must be existing directories"}}
       end
     end)
   end
@@ -273,12 +358,12 @@ defmodule Mix.Tasks.Ptc.Repl do
   end
 
   defp existing_output_directory(directory) do
-    with true <- is_binary(directory) and String.valid?(directory),
-         expanded = Path.expand(directory),
-         {:ok, %File.Stat{type: :directory}} <- File.lstat(expanded) do
-      {:ok, expanded, false}
-    else
-      _ -> {:error, :cli, "--session-trace-dir must be an existing normal directory"}
+    case AnalysisDirectory.resolve(directory) do
+      {:ok, %{path: expanded}} ->
+        {:ok, expanded, false}
+
+      {:error, _reason} ->
+        {:error, :cli, "--session-trace-dir must be an existing normal directory"}
     end
   rescue
     _exception -> {:error, :cli, "--session-trace-dir must be an existing normal directory"}
@@ -313,106 +398,42 @@ defmodule Mix.Tasks.Ptc.Repl do
     _exception -> {:error, :setup, "could not create a private session trace directory"}
   end
 
-  defp separate_directories(input_directory, output_directory) do
-    with {:ok, input_identity, input_lineage} <- directory_lineage(input_directory),
-         {:ok, output_identity, output_lineage} <- directory_lineage(output_directory),
-         false <- MapSet.member?(output_lineage, input_identity),
-         false <- MapSet.member?(input_lineage, output_identity) do
-      {:ok, output_identity}
+  defp separate_directories(input_directories, output_directory) do
+    with {:ok, output} <- AnalysisDirectory.resolve(output_directory),
+         {:ok, inputs} <- resolve_directories(input_directories),
+         true <- AnalysisDirectory.pairwise_separate?([output | inputs]) do
+      {:ok, output.identity}
     else
       _ -> {:error, "input and session trace directories must be physically separate"}
     end
   end
 
-  defp directory_lineage(directory) do
-    with {:ok, physical} <- physical_directory_path(directory),
-         {:ok, identity} <- directory_identity(physical),
-         {:ok, lineage} <- collect_directory_lineage(physical, []) do
-      {:ok, identity, MapSet.new(lineage)}
-    end
-  end
-
-  defp physical_directory_path(directory) do
-    expanded = Path.expand(directory)
-    relative = Path.relative_to(expanded, "/")
-    resolve_physical_segments(Path.split(relative), 0)
-  end
-
-  defp resolve_physical_segments(_segments, depth) when depth > 32,
-    do: {:error, :directory_identity_unavailable}
-
-  defp resolve_physical_segments(segments, depth) do
-    segments
-    |> Enum.with_index()
-    |> Enum.reduce_while({:ok, "/"}, fn {segment, index}, {:ok, parent} ->
-      candidate = Path.join(parent, segment)
-
-      case File.lstat(candidate) do
-        {:ok, %File.Stat{type: :symlink}} ->
-          case File.read_link(candidate) do
-            {:ok, target} ->
-              target_segments =
-                target
-                |> Path.expand(parent)
-                |> Path.relative_to("/")
-                |> Path.split()
-
-              remaining = Enum.drop(segments, index + 1)
-              {:halt, resolve_physical_segments(target_segments ++ remaining, depth + 1)}
-
-            _ ->
-              {:halt, {:error, :directory_identity_unavailable}}
-          end
-
-        {:ok, _stat} ->
-          {:cont, {:ok, candidate}}
-
-        {:error, _reason} ->
-          {:halt, {:error, :directory_identity_unavailable}}
+  defp resolve_directories(directories) do
+    Enum.reduce_while(directories, {:ok, []}, fn directory, {:ok, resolved} ->
+      case AnalysisDirectory.resolve(directory) do
+        {:ok, value} -> {:cont, {:ok, [value | resolved]}}
+        {:error, _reason} = error -> {:halt, error}
       end
     end)
-  end
-
-  defp collect_directory_lineage(directory, identities) do
-    with {:ok, identity} <- directory_identity(directory) do
-      next = [identity | identities]
-      parent = Path.dirname(directory)
-
-      if parent == directory,
-        do: {:ok, next},
-        else: collect_directory_lineage(parent, next)
-    end
-  end
-
-  defp directory_identity(directory) do
-    case File.stat(directory) do
-      {:ok,
-       %File.Stat{
-         type: :directory,
-         major_device: major,
-         minor_device: minor,
-         inode: inode
-       }}
-      when is_integer(major) and is_integer(minor) and is_integer(inode) ->
-        {:ok, {major, minor, inode}}
-
-      _ ->
-        {:error, :directory_identity_unavailable}
-    end
   end
 
   defp start_profile_session(
          opts,
          arguments,
-         input_directory,
+         resources,
          output_directory,
          temporary?,
          output_identity
        ) do
-    case LogAnalysisSessionBuilder.start(
-           {:directory, input_directory},
+    builder_options =
+      [expected_destination_identity: output_identity]
+      |> maybe_private_terminal(opts)
+
+    case AnalysisSessionBuilder.start(
+           opts[:profile],
+           resources,
            {:directory, output_directory},
-           expected_destination_identity: output_identity
+           builder_options
          ) do
       {:ok, session, info} ->
         trace_path = Path.join(output_directory, info.session_id <> ".jsonl")
@@ -430,13 +451,19 @@ defmodule Mix.Tasks.Ptc.Repl do
             safe_profile_abort(session, :frontend_exit)
             :erlang.raise(kind, reason, __STACKTRACE__)
         after
-          LogAnalysisSession.stop(session)
+          AnalysisSession.stop(session)
         end
 
       {:error, reason} ->
         cleanup_temporary_directory(output_directory, temporary?)
         command_error(opts, :setup, "ptc.repl profile setup failed: #{reason}")
     end
+  end
+
+  defp maybe_private_terminal(builder_options, opts) do
+    if Keyword.get(opts, :private_terminal, false),
+      do: Keyword.put(builder_options, :private_terminal, true),
+      else: builder_options
   end
 
   defp evaluate_profile_mode(session, opts, arguments) do
@@ -459,7 +486,7 @@ defmodule Mix.Tasks.Ptc.Repl do
   end
 
   defp read_profile_load(session, opts, path, state) do
-    case read_bounded_profile_file(path) do
+    case read_bounded_profile_file(path, opts) do
       {:ok, source} ->
         case evaluate_profile_source(session, opts, source, :load, state) do
           {:ok, next} ->
@@ -475,7 +502,7 @@ defmodule Mix.Tasks.Ptc.Repl do
          put_failure(
            state,
            :setup,
-           "profile load exceeds the #{profile_source_bytes()}-byte source limit"
+           "profile load exceeds the #{profile_source_bytes(opts)}-byte source limit"
          )}
 
       {:error, _reason} ->
@@ -513,7 +540,7 @@ defmodule Mix.Tasks.Ptc.Repl do
   end
 
   defp read_profile_stdin(session, opts, state) do
-    case read_bounded_profile_stdin() do
+    case read_bounded_profile_stdin(opts) do
       {:ok, source} ->
         profile_single_source(session, opts, source, :stdin, state)
 
@@ -521,7 +548,7 @@ defmodule Mix.Tasks.Ptc.Repl do
         put_failure(
           state,
           :frontend,
-          "profile stdin exceeds the #{profile_source_bytes()}-byte source limit"
+          "profile stdin exceeds the #{profile_source_bytes(opts)}-byte source limit"
         )
 
       {:error, _reason} ->
@@ -530,7 +557,7 @@ defmodule Mix.Tasks.Ptc.Repl do
   end
 
   defp run_profile_file(session, opts, file, state) do
-    case read_bounded_profile_file(file) do
+    case read_bounded_profile_file(file, opts) do
       {:ok, source} ->
         profile_single_source(session, opts, source, :script, state)
 
@@ -538,7 +565,7 @@ defmodule Mix.Tasks.Ptc.Repl do
         put_failure(
           state,
           :setup,
-          "profile script exceeds the #{profile_source_bytes()}-byte source limit"
+          "profile script exceeds the #{profile_source_bytes(opts)}-byte source limit"
         )
 
       {:error, _reason} ->
@@ -555,12 +582,13 @@ defmodule Mix.Tasks.Ptc.Repl do
   end
 
   defp interactive_profile(session, opts, state) do
-    Mix.shell().info("PTC-Lisp REPL [log-analysis-v1] (Ctrl+D to exit; :help for commands)\n")
+    Mix.shell().info("PTC-Lisp REPL [#{opts[:profile]}] (Ctrl+D to exit; :help for commands)\n")
+
     profile_loop(session, opts, state)
   end
 
   defp profile_loop(session, opts, state) do
-    case read_profile_expression("ptc> ", "") do
+    case read_profile_expression("ptc> ", "", opts) do
       :eof ->
         Mix.shell().info("\nGoodbye!")
         ensure_evaluation_failure(state)
@@ -569,14 +597,14 @@ defmodule Mix.Tasks.Ptc.Repl do
         put_failure(
           state,
           :frontend,
-          "profile interactive input exceeds the #{profile_source_bytes()}-byte source limit"
+          "profile interactive input exceeds the #{profile_source_bytes(opts)}-byte source limit"
         )
 
       "" ->
         profile_loop(session, opts, state)
 
       ":" <> command ->
-        handle_profile_command(String.trim(command))
+        handle_profile_command(String.trim(command), opts[:profile])
         profile_loop(session, opts, state)
 
       source ->
@@ -591,7 +619,7 @@ defmodule Mix.Tasks.Ptc.Repl do
   defp evaluate_profile_source(session, opts, source, input_kind, state) do
     index = state.next_index
 
-    case LogAnalysisSession.evaluate(session, source) do
+    case AnalysisSession.evaluate(session, source) do
       {:ok, result} ->
         present_profile_result(opts, index, input_kind, result)
         next = %{state | next_index: index + 1}
@@ -601,7 +629,7 @@ defmodule Mix.Tasks.Ptc.Repl do
         else
           next = %{next | failed_indexes: [index | next.failed_indexes]}
 
-          case LogAnalysisSession.info(session) do
+          case AnalysisSession.info(session) do
             {:ok, %{lifecycle: :open}} -> {:error, next}
             _ -> {:terminal, next}
           end
@@ -643,9 +671,9 @@ defmodule Mix.Tasks.Ptc.Repl do
   end
 
   defp close_profile_session(session) do
-    case LogAnalysisSession.close(session) do
+    case AnalysisSession.close(session) do
       {:ok, _info} = success -> success
-      {:error, _first_reason} -> LogAnalysisSession.close(session)
+      {:error, _first_reason} -> AnalysisSession.close(session)
     end
   end
 
@@ -702,19 +730,23 @@ defmodule Mix.Tasks.Ptc.Repl do
     "Error (#{kind}): #{message} [continuation #{result.continuation_effect}]"
   end
 
-  defp handle_profile_command("help") do
+  defp handle_profile_command("help", profile_id) do
+    {:ok, description} = AnalysisProfileRegistry.description(profile_id)
+    components = Enum.join(description["components"], ", ")
+    namespaces = Enum.map_join(description["namespaces"], ", ", &(&1 <> "."))
+
     Mix.shell().info("""
     Commands:
       :doc <name>      Show core function documentation
       :find <pattern>  Search core functions
       :help            Show this help
 
-    Profile: log-analysis-v1; component: log.core; exported namespace: log.
+    Profile: #{profile_id}; components: #{components}; exported namespaces: #{namespaces}
     Use (tool/runtime-usage {}) to inspect remaining bounded usage.
     """)
   end
 
-  defp handle_profile_command(command), do: handle_command(command, nil)
+  defp handle_profile_command(command, _profile_id), do: handle_command(command, nil)
 
   @spec command_error(keyword(), atom(), binary()) :: no_return()
   defp command_error(opts, category, message), do: command_error(opts, category, message, %{})
@@ -761,13 +793,13 @@ defmodule Mix.Tasks.Ptc.Repl do
   defp json_key(key) when is_binary(key), do: key
 
   defp safe_profile_abort(session, reason) do
-    case LogAnalysisSession.info(session) do
+    case AnalysisSession.info(session) do
       {:ok, %{lifecycle: lifecycle}}
       when lifecycle in [:closed, :persistence_failed, :backend_failed] ->
         :ok
 
       _ ->
-        _ = LogAnalysisSession.abort(session, reason)
+        _ = AnalysisSession.abort(session, reason)
         :ok
     end
 
@@ -783,16 +815,16 @@ defmodule Mix.Tasks.Ptc.Repl do
 
   defp cleanup_temporary_directory(_directory, false), do: :ok
 
-  defp read_bounded_profile_file(path) do
-    max_bytes = profile_source_bytes()
+  defp read_bounded_profile_file(path, opts) do
+    max_bytes = profile_source_bytes(opts)
 
     path
     |> File.open([:read, :binary], &IO.binread(&1, max_bytes + 1))
     |> bounded_profile_source(max_bytes)
   end
 
-  defp read_bounded_profile_stdin do
-    max_bytes = profile_source_bytes()
+  defp read_bounded_profile_stdin(opts) do
+    max_bytes = profile_source_bytes(opts)
 
     :stdio
     |> IO.read(max_bytes + 1)
@@ -813,10 +845,13 @@ defmodule Mix.Tasks.Ptc.Repl do
 
   defp bounded_profile_source({:error, reason}, _max_bytes), do: {:error, reason}
 
-  defp profile_source_bytes, do: LogAnalysisProfile.limits().subordinate_source_bytes
+  defp profile_source_bytes(opts) do
+    {:ok, recipe} = AnalysisProfileRegistry.fetch(opts[:profile])
+    recipe.limits().subordinate_source_bytes
+  end
 
-  defp read_profile_expression(prompt, buffer) do
-    remaining = profile_source_bytes() - byte_size(buffer)
+  defp read_profile_expression(prompt, buffer, opts) do
+    remaining = profile_source_bytes(opts) - byte_size(buffer)
 
     case read_bounded_line(prompt, max(remaining, 0)) do
       {:ok, line} ->
@@ -824,7 +859,7 @@ defmodule Mix.Tasks.Ptc.Repl do
 
         if balanced?(source),
           do: String.trim(source),
-          else: read_profile_expression("...> ", source)
+          else: read_profile_expression("...> ", source, opts)
 
       :eof ->
         :eof

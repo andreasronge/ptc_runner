@@ -1,6 +1,6 @@
-defmodule PtcRunner.Kernel.LogAnalysisSession do
+defmodule PtcRunner.Kernel.AnalysisSession do
   @moduledoc """
-  Owner of one bounded local log-analysis mission continuation.
+  Owner of one bounded code-owned analysis mission continuation.
 
   Sessions are created only from a builder-attested, independently validated
   assembly. One GenServer serializes evaluations, owns the deadline transition,
@@ -13,22 +13,21 @@ defmodule PtcRunner.Kernel.LogAnalysisSession do
   """
   use GenServer
 
+  alias PtcRunner.Kernel.AnalysisAssembly
+  alias PtcRunner.Kernel.AnalysisProfileRegistry
+  alias PtcRunner.Kernel.AnalysisResources
   alias PtcRunner.Kernel.BoundedWorker
   alias PtcRunner.Kernel.Evaluation
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.JSONValue
-  alias PtcRunner.Kernel.LogAnalysisAssembly
-  alias PtcRunner.Kernel.LogAnalysisProfile
   alias PtcRunner.Kernel.RunState
   alias PtcRunner.Kernel.SessionTrace
-  alias PtcRunner.Kernel.TraceSnapshot
   alias PtcRunner.Lisp.Format
 
   @formatted_bytes 65_536
   @prints_bytes 65_536
   @prints_count 128
   @json_projection_timeout_ms 1_000
-  @trace_names LogAnalysisProfile.explicit_capabilities()
 
   @enforce_keys [:pid, :token]
   defstruct [:pid, :token]
@@ -39,14 +38,14 @@ defmodule PtcRunner.Kernel.LogAnalysisSession do
   def start(assembly), do: start(assembly, [])
 
   @doc false
-  def start(%LogAnalysisAssembly{} = assembly, opts) when is_list(opts) do
+  def start(%AnalysisAssembly{} = assembly, opts) when is_list(opts) do
     evaluation_hook = Keyword.get(opts, :evaluation_hook)
     initialization_hook = Keyword.get(opts, :initialization_hook)
 
     if Keyword.keys(opts) -- [:evaluation_hook, :initialization_hook] == [] and
          (is_nil(evaluation_hook) or is_function(evaluation_hook, 1)) and
          (is_nil(initialization_hook) or is_function(initialization_hook, 2)) and
-         LogAnalysisAssembly.valid?(assembly) do
+         AnalysisAssembly.valid?(assembly) do
       token = make_ref()
 
       case GenServer.start(__MODULE__, {assembly, token, evaluation_hook, initialization_hook}) do
@@ -54,11 +53,11 @@ defmodule PtcRunner.Kernel.LogAnalysisSession do
         {:error, reason} -> {:error, reason}
       end
     else
-      {:error, :invalid_log_analysis_assembly}
+      {:error, invalid_assembly_error(assembly)}
     end
   end
 
-  def start(_assembly, _opts), do: {:error, :invalid_log_analysis_assembly}
+  def start(_assembly, _opts), do: {:error, :invalid_analysis_assembly}
 
   @spec evaluate(t(), binary()) :: {:ok, map()} | {:error, atom()}
   def evaluate(session, source) when is_binary(source),
@@ -95,7 +94,7 @@ defmodule PtcRunner.Kernel.LogAnalysisSession do
              assembly.session_trace,
              self(),
              run_state,
-             assembly.snapshot
+             assembly.resources
            ),
          :ok <-
            EventSink.claim(
@@ -104,13 +103,20 @@ defmodule PtcRunner.Kernel.LogAnalysisSession do
              assembly.config.run_started_metadata
            ),
          :ok <-
-           initialization_hook(initialization_hook, :after_session_attach, %{
-             snapshot: assembly.snapshot,
-             session_trace: assembly.session_trace,
-             run_state: run_state,
-             event_sink: assembly.config.event_sink
-           }),
-         {:ok, snapshot_info} <- TraceSnapshot.info(assembly.snapshot),
+           initialization_hook(
+             initialization_hook,
+             :after_session_attach,
+             %{
+               resources: assembly.resources,
+               snapshot: AnalysisResources.handle(assembly.resources, :traces),
+               inspection_snapshot: AnalysisResources.handle(assembly.resources, :inspection),
+               session_trace: assembly.session_trace,
+               run_state: run_state,
+               event_sink: assembly.config.event_sink
+             },
+             assembly.profile.id
+           ),
+         {:ok, snapshot_info} <- AnalysisResources.info(assembly.resources),
          {:ok, identity} <- EventSink.identity(assembly.config.event_sink) do
       deadline_token = make_ref()
 
@@ -125,7 +131,8 @@ defmodule PtcRunner.Kernel.LogAnalysisSession do
         token: token,
         config: assembly.config,
         profile: assembly.profile,
-        snapshot: assembly.snapshot,
+        resources: assembly.resources,
+        snapshot: AnalysisResources.handle(assembly.resources, :traces),
         session_trace: assembly.session_trace,
         trace_ref: Process.monitor(assembly.session_trace.pid),
         sink_ref: Process.monitor(assembly.config.event_sink.pid),
@@ -145,7 +152,7 @@ defmodule PtcRunner.Kernel.LogAnalysisSession do
       {:ok, %{state | cached_usage: usage_projection(state)}}
     else
       {:error, reason} -> {:stop, reason}
-      false -> {:stop, :invalid_log_analysis_assembly}
+      false -> {:stop, :invalid_analysis_assembly}
     end
   end
 
@@ -209,7 +216,7 @@ defmodule PtcRunner.Kernel.LogAnalysisSession do
   end
 
   def handle_call(_request, _from, state),
-    do: {:reply, {:error, :log_analysis_session_closed}, state}
+    do: {:reply, {:error, session_closed_error(state.profile.id)}, state}
 
   @impl GenServer
   def handle_cast(_request, state), do: {:noreply, state}
@@ -313,7 +320,7 @@ defmodule PtcRunner.Kernel.LogAnalysisSession do
   end
 
   defp cleanup_resource_fallback(state) do
-    TraceSnapshot.stop(state.snapshot)
+    AnalysisResources.stop(state.resources)
 
     try do
       RunState.close(state.run_state)
@@ -346,17 +353,23 @@ defmodule PtcRunner.Kernel.LogAnalysisSession do
 
     projection =
       if Map.has_key?(detailed, :value),
-        do: put_value_projection(projection, detailed.value, state.config.limits),
+        do: put_value_projection(projection, detailed.value, state),
         else: projection
 
-    enforce_result_limit(projection, state.config.limits.terminal_result_bytes)
+    enforce_result_limit(
+      projection,
+      state.config.limits.terminal_result_bytes,
+      state.profile.id
+    )
   end
 
-  defp put_value_projection(projection, nil, _limits) do
+  defp put_value_projection(projection, nil, _state) do
     Map.merge(projection, %{value: nil, value_available?: true, formatted: "nil"})
   end
 
-  defp put_value_projection(projection, value, limits) do
+  defp put_value_projection(projection, value, state) do
+    limits = state.config.limits
+
     case bounded_json_value(value, limits) do
       {:ok, normalized} ->
         {formatted, truncated?} = bounded_format(value, limits)
@@ -373,7 +386,7 @@ defmodule PtcRunner.Kernel.LogAnalysisSession do
         unavailable_value(projection, formatted, truncated?)
 
       :result_exceeded ->
-        result_exceeded_projection(projection)
+        result_exceeded_projection(projection, state.profile.id)
     end
   end
 
@@ -469,17 +482,17 @@ defmodule PtcRunner.Kernel.LogAnalysisSession do
   defp bounded_message(message) when is_binary(message), do: elem(clip_utf8(message, 4_096), 0)
   defp bounded_message(_message), do: nil
 
-  defp enforce_result_limit(projection, limit) do
+  defp enforce_result_limit(projection, limit, profile_id) do
     case Jason.encode(projection) do
       {:ok, encoded} when byte_size(encoded) <= limit ->
         projection
 
       _ ->
-        result_exceeded_projection(projection)
+        result_exceeded_projection(projection, profile_id)
     end
   end
 
-  defp result_exceeded_projection(projection) do
+  defp result_exceeded_projection(projection, profile_id) do
     %{
       status: :error,
       outcome: :result_exceeded,
@@ -493,7 +506,7 @@ defmodule PtcRunner.Kernel.LogAnalysisSession do
       error: %{
         kind: :result_exceeded,
         reason: :terminal_result_bytes,
-        message: "public evaluation result exceeded its byte limit",
+        message: result_limit_message(profile_id),
         capability_activity?: nil,
         retryable?: nil
       },
@@ -501,6 +514,11 @@ defmodule PtcRunner.Kernel.LogAnalysisSession do
       duration_ms: projection.duration_ms,
       usage: projection.usage
     }
+  end
+
+  defp result_limit_message(profile_id) do
+    {:ok, recipe} = AnalysisProfileRegistry.fetch(profile_id)
+    recipe.result_limit_message()
   end
 
   defp info_projection(state) do
@@ -536,8 +554,8 @@ defmodule PtcRunner.Kernel.LogAnalysisSession do
     total_used = calls |> Map.values() |> Enum.sum()
     aggregate_remaining = max(limits.mission_capability_calls - total_used, 0)
 
-    trace_calls =
-      Map.new(@trace_names, fn name ->
+    capability_calls =
+      Map.new(state.profile.identity["explicit_capabilities"], fn name ->
         used = Map.get(calls, name, 0)
         per_name_remaining = max(limits.mission_capability_calls_per_name - used, 0)
 
@@ -549,7 +567,7 @@ defmodule PtcRunner.Kernel.LogAnalysisSession do
          }}
       end)
 
-    %{
+    usage_projection = %{
       remaining_ms: usage.remaining_ms,
       evaluations: %{
         used: usage.subordinate_evaluations,
@@ -561,9 +579,25 @@ defmodule PtcRunner.Kernel.LogAnalysisSession do
         limit: limits.mission_capability_calls,
         remaining: aggregate_remaining
       },
-      trace_calls: trace_calls,
       continuation: RunState.evaluation_memory_summary(state.run_state)
     }
+
+    Map.put(usage_projection, usage_capability_key(state.profile.id), capability_calls)
+  end
+
+  defp usage_capability_key(profile_id) do
+    {:ok, recipe} = AnalysisProfileRegistry.fetch(profile_id)
+    recipe.usage_capability_key()
+  end
+
+  defp session_failed_error(profile_id) do
+    {:ok, recipe} = AnalysisProfileRegistry.fetch(profile_id)
+    recipe.session_failed_error()
+  end
+
+  defp session_closed_error(profile_id) do
+    {:ok, recipe} = AnalysisProfileRegistry.fetch(profile_id)
+    recipe.session_closed_error()
   end
 
   defp maybe_mark_terminal(state, nil), do: state
@@ -614,17 +648,17 @@ defmodule PtcRunner.Kernel.LogAnalysisSession do
   defp evaluation_hook(nil), do: nil
   defp evaluation_hook(hook), do: fn -> hook.(:after_evaluation_started) end
 
-  defp initialization_hook(nil, _stage, _resources), do: :ok
+  defp initialization_hook(nil, _stage, _resources, _profile_id), do: :ok
 
-  defp initialization_hook(hook, stage, resources) do
+  defp initialization_hook(hook, stage, resources, profile_id) do
     case hook.(stage, resources) do
       :ok -> :ok
-      _other -> {:error, :log_analysis_session_failed}
+      _other -> {:error, session_failed_error(profile_id)}
     end
   rescue
-    _exception -> {:error, :log_analysis_session_failed}
+    _exception -> {:error, session_failed_error(profile_id)}
   catch
-    _kind, _reason -> {:error, :log_analysis_session_failed}
+    _kind, _reason -> {:error, session_failed_error(profile_id)}
   end
 
   defp result_status(outcome) when outcome in [:continued, :returned], do: :ok
@@ -661,4 +695,13 @@ defmodule PtcRunner.Kernel.LogAnalysisSession do
   catch
     :exit, _reason -> {:error, :session_closed}
   end
+
+  defp invalid_assembly_error(%AnalysisAssembly{profile: %{id: id}}) do
+    case AnalysisProfileRegistry.fetch(id) do
+      {:ok, recipe} -> recipe.invalid_assembly_error()
+      {:error, _reason} -> :invalid_analysis_assembly
+    end
+  end
+
+  defp invalid_assembly_error(_assembly), do: :invalid_analysis_assembly
 end

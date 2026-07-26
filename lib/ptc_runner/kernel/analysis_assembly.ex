@@ -1,20 +1,20 @@
-defmodule PtcRunner.Kernel.LogAnalysisAssembly do
+defmodule PtcRunner.Kernel.AnalysisAssembly do
   @moduledoc false
 
   import Bitwise, only: [bor: 2, bxor: 2]
 
-  alias PtcRunner.Kernel.LogAnalysisProfile
+  alias PtcRunner.Kernel.AnalysisProfileRegistry
   alias PtcRunner.Kernel.SessionTrace
 
-  @enforce_keys [:config, :profile, :snapshot, :session_trace, :run_state, :attestation]
-  defstruct [:config, :profile, :snapshot, :session_trace, :run_state, :attestation]
+  @enforce_keys [:config, :profile, :resources, :session_trace, :run_state, :attestation]
+  defstruct [:config, :profile, :resources, :session_trace, :run_state, :attestation]
 
   @doc false
-  def seal(config, profile, snapshot, session_trace, run_state) do
+  def seal(config, profile, resources, session_trace, run_state) do
     assembly = %__MODULE__{
       config: config,
       profile: profile,
-      snapshot: snapshot,
+      resources: resources,
       session_trace: session_trace,
       run_state: run_state,
       attestation: nil
@@ -32,15 +32,27 @@ defmodule PtcRunner.Kernel.LogAnalysisAssembly do
         assembly.config.event_sink,
         assembly.config.limits
       ) and
-      LogAnalysisProfile.valid_assembly?(
-        assembly.config,
-        assembly.profile,
-        assembly.snapshot,
-        assembly.session_trace
-      )
+      valid_profile_assembly?(assembly)
   end
 
   def valid?(_assembly), do: false
+
+  defp valid_profile_assembly?(%__MODULE__{profile: %{id: id}} = assembly) do
+    case AnalysisProfileRegistry.fetch(id) do
+      {:ok, recipe} ->
+        recipe.valid_assembly?(
+          assembly.config,
+          assembly.profile,
+          assembly.resources,
+          assembly.session_trace
+        )
+
+      {:error, _reason} ->
+        false
+    end
+  end
+
+  defp valid_profile_assembly?(_assembly), do: false
 
   defp attest(assembly) do
     :crypto.mac(
@@ -51,7 +63,7 @@ defmodule PtcRunner.Kernel.LogAnalysisAssembly do
         {
           assembly.config,
           assembly.profile,
-          assembly.snapshot,
+          assembly.resources,
           assembly.session_trace,
           assembly.run_state
         },

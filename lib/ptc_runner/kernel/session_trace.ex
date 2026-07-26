@@ -1,6 +1,7 @@
 defmodule PtcRunner.Kernel.SessionTrace do
   @moduledoc """
-  Owner of one log-analysis session's canonical event batch and publication.
+  Owner of one code-owned analysis session's canonical event batch and
+  publication.
 
   The trace owner supervises a combined run-state/event owner, guards
   construction until the builder marks it complete, retains the calling process
@@ -16,11 +17,11 @@ defmodule PtcRunner.Kernel.SessionTrace do
   """
   use GenServer
 
+  alias PtcRunner.Kernel.AnalysisResources
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.RunState
   alias PtcRunner.Kernel.TraceLog
-  alias PtcRunner.Kernel.TraceSnapshot
 
   @enforce_keys [:pid, :token]
   defstruct [:pid, :token]
@@ -67,9 +68,9 @@ defmodule PtcRunner.Kernel.SessionTrace do
   def sink(trace), do: call(trace, :sink)
 
   @doc false
-  def attach(trace, session_pid, run_state, snapshot)
+  def attach(trace, session_pid, run_state, resources)
       when is_pid(session_pid),
-      do: call(trace, {:attach, session_pid, run_state, snapshot})
+      do: call(trace, {:attach, session_pid, run_state, resources})
 
   @doc false
   def finalize(trace, outcome, reason, usage),
@@ -134,7 +135,7 @@ defmodule PtcRunner.Kernel.SessionTrace do
        session_ref: nil,
        session_pid: nil,
        run_state: run_state,
-       snapshot: nil
+       resources: nil
      }}
   end
 
@@ -152,7 +153,7 @@ defmodule PtcRunner.Kernel.SessionTrace do
   end
 
   def handle_call(
-        {token, {:attach, session_pid, run_state, snapshot}},
+        {token, {:attach, session_pid, run_state, resources}},
         _from,
         %{token: token, session_ref: nil, run_state: run_state} = state
       ) do
@@ -161,7 +162,7 @@ defmodule PtcRunner.Kernel.SessionTrace do
        state
        | session_ref: Process.monitor(session_pid),
          session_pid: session_pid,
-         snapshot: snapshot
+         resources: resources
      }}
   end
 
@@ -211,7 +212,7 @@ defmodule PtcRunner.Kernel.SessionTrace do
     run_resource_cleanup_hook(state.resource_cleanup_hook)
     next = cleanup_resources(state)
 
-    if is_nil(next.run_state) and is_nil(next.snapshot) do
+    if is_nil(next.run_state) and is_nil(next.resources) do
       if is_reference(next.sink_ref), do: Process.demonitor(next.sink_ref, [:flush])
       {:reply, :ok, %{next | sink_ref: nil}}
     else
@@ -477,7 +478,7 @@ defmodule PtcRunner.Kernel.SessionTrace do
   defp cleanup_resources(state) do
     state
     |> cleanup_run_state()
-    |> cleanup_snapshot()
+    |> cleanup_analysis_resources()
   end
 
   defp cleanup_run_state(%{run_state: %RunState{} = run_state} = state) do
@@ -504,12 +505,16 @@ defmodule PtcRunner.Kernel.SessionTrace do
 
   defp cleanup_run_state(state), do: state
 
-  defp cleanup_snapshot(%{snapshot: snapshot} = state) when not is_nil(snapshot) do
-    TraceSnapshot.stop(snapshot)
-    if TraceSnapshot.alive?(snapshot), do: state, else: %{state | snapshot: nil}
+  defp cleanup_analysis_resources(%{resources: resources} = state)
+       when not is_nil(resources) do
+    AnalysisResources.stop(resources)
+
+    if AnalysisResources.alive?(resources),
+      do: state,
+      else: %{state | resources: nil}
   end
 
-  defp cleanup_snapshot(state), do: state
+  defp cleanup_analysis_resources(state), do: state
 
   defp run_resource_cleanup_hook(nil), do: :ok
 

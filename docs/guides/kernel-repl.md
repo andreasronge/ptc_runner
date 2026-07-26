@@ -1,12 +1,14 @@
 # Kernel REPL
 
-`mix ptc.repl` provides two deliberately different PTC-Lisp session modes:
+`mix ptc.repl` provides deliberately different PTC-Lisp session modes:
 
 - direct and manifest-backed sessions are workflow scratchpads;
 - `log-analysis-v1` is a fixed mission session for querying an immutable
-  capture of canonical traces.
+  capture of canonical traces; and
+- `inspection-analysis-v1` is a fixed private mission session for correlating
+  canonical traces with exact private inspection evidence.
 
-Both modes retain successful definitions and exact `*1`, `*2`, and `*3`
+All modes retain successful definitions and exact `*1`, `*2`, and `*3`
 history for one command. Failed forms preserve the previously committed state.
 A successful evaluation is installed before its terminal event is recorded; if
 that fail-closed event write fails, the returned session reflects the committed
@@ -134,6 +136,60 @@ mix ptc.repl \
 close it. A terminal deadline or Kernel budget prevents later forms; normal
 close still finalizes the session trace with the authoritative terminal reason.
 
+## Private inspection mission sessions
+
+Use the private profile only on an attached terminal, and explicitly authorize
+that terminal as the private result sink:
+
+```bash
+mix ptc.repl \
+  --profile inspection-analysis-v1 \
+  --resource traces=tmp/tutorial-traces \
+  --resource inspection=tmp/tutorial-inspection \
+  --session-trace-dir tmp/analysis-traces \
+  --private-terminal
+```
+
+The profile checks both terminal attachment and `--private-terminal` before it
+opens either source directory. Its `traces`, `inspection`, and analysis-trace
+directories must be physically separate, including through ancestors and
+symlink aliases. Inspection capture validates every private artifact against
+the corresponding run in the immutable canonical trace capture; malformed,
+replaced, uncorrelated, or oversized input rejects the whole private source.
+
+`inspection-analysis-v1` installs only `log.core` and `inspection.core`.
+Alongside the ordinary `log/*` functions, it exports:
+
+- `inspection/runs`;
+- `inspection/model-exchanges`;
+- `inspection/capability-calls`;
+- `inspection/generated-sources`;
+- `inspection/effective-preludes`; and
+- `inspection/provider-exchanges`.
+
+All collection functions are bounded and return an opaque `next_cursor` for a
+later page. For example:
+
+```clojure
+(def runs (inspection/runs {"limit" 20}))
+(def run-id (get (first (get runs "items")) "run_id"))
+(inspection/model-exchanges run-id nil)
+(inspection/generated-sources run-id nil)
+(inspection/provider-exchanges run-id nil)
+```
+
+Exact model messages, generated source, capability arguments/results,
+effective preludes, and MCP request/response bodies may appear on the
+authorized terminal. They are private data: do not paste or redirect them to a
+public sink.
+
+The initial private frontend is intentionally interactive-only. It rejects
+`--eval`, `--load`, positional scripts, stdin, `--format jsonl`, and
+`--continue-on-error`. Its separate canonical analysis trace records only safe
+profile identity, hashes, sizes, timing, outcomes, and usage. It never records
+the evaluated REPL source, returned private value, prints, or retained REPL
+history.
+
 ### Separate analysis traces
 
 Terminal profile sessions never write their analysis trace into the captured
@@ -176,7 +232,7 @@ and, when their corresponding lifecycle stage is reached, appear in this order:
 
 1. one `session-started` record after successful session construction;
 2. one `evaluation` record per accepted source, containing `index`,
-   `input_kind`, and the bounded `LogAnalysisSession` result projection;
+   `input_kind`, and the bounded `AnalysisSession` result projection;
 3. one `session-closed` record only after successful close and persistence,
    containing the persisted `trace_path`;
 4. a final `command-error` for an unsuccessful command, with category `cli`, `setup`,

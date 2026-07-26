@@ -1,13 +1,18 @@
 defmodule PtcRunner.Kernel.ViewerReplSessionWorker do
   @moduledoc false
 
-  alias PtcRunner.Kernel.LogAnalysisSession
-  alias PtcRunner.Kernel.LogAnalysisSessionBuilder
+  alias PtcRunner.Kernel.AnalysisSession
+  alias PtcRunner.Kernel.AnalysisSessionBuilder
+  alias PtcRunner.Kernel.LogAnalysisProfile
 
   def run(backend, trace_dir, public_session_id) when is_pid(backend) do
     Process.link(backend)
 
-    case LogAnalysisSessionBuilder.start({:directory, trace_dir}, {:directory, trace_dir}) do
+    case AnalysisSessionBuilder.start(
+           LogAnalysisProfile.id(),
+           %{"traces" => trace_dir},
+           {:directory, trace_dir}
+         ) do
       {:ok, session, info} ->
         session_ref = Process.monitor(session.pid)
         send(backend, {:viewer_repl_started, self(), {:ok, public_info(info, public_session_id)}})
@@ -21,28 +26,28 @@ defmodule PtcRunner.Kernel.ViewerReplSessionWorker do
   defp loop(backend, session, session_ref, public_session_id) do
     receive do
       {:operation, key, {:evaluate, source}} ->
-        result = LogAnalysisSession.evaluate(session, source)
+        result = AnalysisSession.evaluate(session, source)
         send(backend, {:viewer_repl_operation, self(), key, result})
         loop(backend, session, session_ref, public_session_id)
 
       {:operation, key, :close} ->
-        result = session |> LogAnalysisSession.close() |> rewrite_info(public_session_id)
+        result = session |> AnalysisSession.close() |> rewrite_info(public_session_id)
         send(backend, {:viewer_repl_operation, self(), key, result})
         loop(backend, session, session_ref, public_session_id)
 
       {:control, control_ref, :info} ->
-        result = session |> LogAnalysisSession.info() |> rewrite_info(public_session_id)
+        result = session |> AnalysisSession.info() |> rewrite_info(public_session_id)
         send(backend, {:viewer_repl_control, self(), control_ref, result})
         loop(backend, session, session_ref, public_session_id)
 
       {:control, control_ref, {:abort, reason}} ->
-        result = session |> LogAnalysisSession.abort(reason) |> rewrite_info(public_session_id)
+        result = session |> AnalysisSession.abort(reason) |> rewrite_info(public_session_id)
         send(backend, {:viewer_repl_control, self(), control_ref, result})
-        LogAnalysisSession.stop(session)
+        AnalysisSession.stop(session)
 
       {:stop, reason} ->
-        _ = LogAnalysisSession.abort(session, reason)
-        LogAnalysisSession.stop(session)
+        _ = AnalysisSession.abort(session, reason)
+        AnalysisSession.stop(session)
 
       {:DOWN, ^session_ref, :process, _pid, reason} ->
         exit({:core_session_down, reason})
