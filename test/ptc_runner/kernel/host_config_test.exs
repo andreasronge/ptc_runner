@@ -169,6 +169,30 @@ defmodule PtcRunner.Kernel.HostConfigTest do
     assert installation.tools["search_issues"].error_feedback == :bounded
   end
 
+  test "every enumerated value decodes to an atom this module owns" do
+    # The assertions above check the decoded values but not where the atoms came
+    # from. They previously came from `String.to_existing_atom/1`, which only
+    # succeeds once some other module has interned the atom: `:bounded` and
+    # `:closed` appear in MCPProtocol and MCPSource guards, `:bearer` and
+    # `:basic` nowhere else at all. Decoding a valid host document therefore
+    # raised ArgumentError rather than returning a result whenever HostConfig
+    # ran first, and the tests above passed only because the surrounding suite
+    # happened to load MCP first.
+    #
+    # Reading the compiled atom chunk is the one check that does not depend on
+    # what else the VM has loaded: an atom in this list is a literal of this
+    # module and exists as soon as the module does.
+    {:ok, {_module, [atoms: atoms]}} =
+      PtcRunner.Kernel.HostConfig |> :code.which() |> :beam_lib.chunks([:atoms])
+
+    owned = MapSet.new(atoms, fn {_index, atom} -> atom end)
+
+    for atom <- [:bearer, :basic, :closed, :bounded, :normal, :private_inspection] do
+      assert MapSet.member?(owned, atom),
+             "#{inspect(atom)} must be a literal in HostConfig, not borrowed from another module"
+    end
+  end
+
   @tag :tmp_dir
   test "rejects duplicate keys, unknown sources, dangling bindings, and authority-bearing extras",
        %{

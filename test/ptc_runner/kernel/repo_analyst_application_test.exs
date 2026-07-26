@@ -35,31 +35,6 @@ defmodule PtcRunner.Kernel.RepoAnalystApplicationTest do
     private-history.provider-exchanges
   )
 
-  # Works around a defect in the host decoder, not in this application.
-  #
-  # `HostConfig` turns three enumerated string fields into atoms with
-  # `String.to_existing_atom/1`: `error_feedback` (host_config.ex:513), the
-  # transport auth `scheme` (:461), and `data_class`/`accepts_data` (:595).
-  # None of those atoms is interned by `HostConfig` itself — `:bounded` and
-  # `:private_inspection` exist only once `MCPProtocol` or `MCPSource` has been
-  # loaded. Decoding a valid host document therefore raises ArgumentError
-  # instead of returning a result whenever `HostConfig` is exercised first.
-  #
-  # `host_config_test.exs:142` already covers `"error_feedback": "bounded"` and
-  # passes only because the surrounding suite happens to load those modules
-  # first. This file decodes a host document that uses both `bounded` feedback
-  # and `private_inspection` before anything else touches MCP, so it fails on
-  # every seed without this.
-  #
-  # The fix belongs to the host-decoder owner (#1130), not to Slice G: issue
-  # #1128 owns application files only. Remove this block once the decoder maps
-  # its own enumerated values instead of borrowing another module's atom table.
-  setup_all do
-    Code.ensure_loaded!(PtcRunner.Kernel.MCPSource)
-    Code.ensure_loaded!(PtcRunner.Kernel.MCPProtocol)
-    :ok
-  end
-
   describe "host installation" do
     test "installs the aliases the manifests select, and no implicit provider" do
       assert {:ok, host} = HostConfig.load(@host)

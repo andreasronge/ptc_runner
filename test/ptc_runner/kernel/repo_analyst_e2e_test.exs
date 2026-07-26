@@ -30,17 +30,6 @@ defmodule PtcRunner.Kernel.RepoAnalystE2ETest do
   # only be reached by following next_cursor.
   @filler 24
 
-  # See the identical note in repo_analyst_application_test.exs: `HostConfig`
-  # decodes `error_feedback` with `String.to_existing_atom/1` and never interns
-  # `:bounded` itself, so a host document that maps a tool with bounded feedback
-  # raises unless an MCP module has already been loaded. The defect belongs to
-  # the host decoder (#1130); remove this once it maps its own enumerated values.
-  setup_all do
-    Code.ensure_loaded!(PtcRunner.Kernel.MCPSource)
-    Code.ensure_loaded!(PtcRunner.Kernel.MCPProtocol)
-    :ok
-  end
-
   @tag :tmp_dir
   test "the shipped facade reaches evidence that exists only after the first page", %{
     tmp_dir: dir
