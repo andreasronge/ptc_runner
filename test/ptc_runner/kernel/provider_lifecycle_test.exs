@@ -112,6 +112,121 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
   end
 
   @tag :tmp_dir
+  test "provider services order acquisition without changing manifest capability order", %{
+    tmp_dir: dir
+  } do
+    parent = self()
+    export = make_ref()
+    File.write!(Path.join(dir, "workflow.clj"), "(ns app) (defn run [x] (return x))")
+
+    consumer = fn %{}, _context ->
+      {:ok,
+       %{
+         credential_names: [],
+         requires: [:canonical_trace_snapshot],
+         preflight: fn ->
+           {:ok,
+            fn %{}, %{canonical_trace_snapshot: ^export} ->
+              send(parent, :consumer_acquired)
+              {:ok, capability} = capability("consumer")
+
+              {:ok,
+               %{
+                 capabilities: [capability],
+                 close: fn ->
+                   send(parent, :consumer_closed)
+                   :ok
+                 end
+               }}
+            end}
+         end
+       }}
+    end
+
+    producer = fn %{}, _context ->
+      {:ok,
+       %{
+         credential_names: [],
+         provides: [:canonical_trace_snapshot],
+         preflight: fn ->
+           {:ok,
+            fn %{}, %{} ->
+              send(parent, :producer_acquired)
+              {:ok, capability} = capability("producer")
+
+              {:ok,
+               %{
+                 capabilities: [capability],
+                 exports: %{canonical_trace_snapshot: export},
+                 close: fn ->
+                   send(parent, :producer_closed)
+                   :ok
+                 end
+               }}
+            end}
+         end
+       }}
+    end
+
+    {:ok, registry} =
+      ProviderRegistry.new(%{
+        "consumer" => ProviderRegistry.staged(consumer),
+        "producer" => ProviderRegistry.staged(producer)
+      })
+
+    path = manifest(dir, [], [provider("consumer", %{}), provider("producer", %{})])
+    {:ok, built} = RunBuilder.load_and_build(path, registry)
+
+    assert built.config.mission_environment.capabilities
+           |> Map.values()
+           |> Enum.map(& &1.name)
+           |> Enum.sort() == ["consumer", "producer"]
+
+    assert_receive :producer_acquired
+    assert_receive :consumer_acquired
+
+    assert :ok = RunBuilder.close(built)
+    assert_receive :consumer_closed
+    assert_receive :producer_closed
+  end
+
+  @tag :tmp_dir
+  test "missing provider services fail before preflight and credentials", %{tmp_dir: dir} do
+    parent = self()
+    File.write!(Path.join(dir, "workflow.clj"), "(ns app) (defn run [x] (return x))")
+
+    consumer = fn %{}, _context ->
+      {:ok,
+       %{
+         credential_names: ["secret"],
+         requires: [:canonical_trace_snapshot],
+         preflight: fn ->
+           send(parent, :dependency_preflighted)
+           {:ok, fn _credentials, _services -> {:error, :unexpected_acquisition} end}
+         end
+       }}
+    end
+
+    resolver = fn _names ->
+      send(parent, :dependency_credentials_resolved)
+      {:ok, %{"secret" => "secret"}}
+    end
+
+    {:ok, registry} =
+      ProviderRegistry.new(%{"consumer" => ProviderRegistry.staged(consumer)},
+        credential_resolver: resolver
+      )
+
+    path = manifest(dir, [], [provider("consumer", %{})])
+
+    assert {:error, :provider_dependency_unavailable} =
+             RunBuilder.load_and_build(path, registry)
+
+    refute_received :dependency_preflighted
+    refute_received :dependency_credentials_resolved
+  end
+
+  @tag :tmp_dir
   test "preflight failure touches neither credentials nor provider acquisition", %{tmp_dir: dir} do
     parent = self()
     File.write!(Path.join(dir, "workflow.clj"), "(ns app) (defn run [x] (return x))")

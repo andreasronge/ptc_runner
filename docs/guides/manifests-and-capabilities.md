@@ -243,6 +243,40 @@ subsequent queries use the frozen capture even if path contents change. The
 safe provider snapshot includes counts, byte ceilings, and content identity,
 but no path.
 
+Private inspection artifacts use a separate paired native source:
+
+```json
+"private-history": {
+  "source": "ptc_inspection_snapshot",
+  "directory": "inspection",
+  "ceilings": {
+    "max_files": 100,
+    "max_source_bytes": 64000000,
+    "max_result_bytes": 500000
+  }
+}
+```
+
+A manifest selecting `private-history` must also select exactly one
+`ptc_trace_snapshot` provider. Provider acquisition captures that canonical
+trace first, then loads each regular `.inspection.jsonl` artifact once through
+the authoritative inspection parser and validates every identity and
+correlation against the captured trace. An orphan, duplicate run, malformed or
+replaced artifact, incomplete input/output pair, ambiguous trace source, or
+limit violation rejects the whole private snapshot. No partial catalog is
+exposed.
+
+The installed alias derives `list-runs`, `model-exchanges`,
+`capability-calls`, `generated-sources`, `effective-preludes`, and
+`provider-exchanges`. Collection results pair related records by their
+correlation IDs and use deterministic bounded pages with source-bound opaque
+cursors. V1 and V2 artifacts may share a directory: a V1 run has an empty
+provider-exchange page, while V2 exposes each paired MCP request and response.
+The source classifies the run as `private_inspection`, so every selected
+provider must accept private data before either snapshot directory is opened.
+Safe connector metadata contains only counts, byte ceilings, trace/content
+identities, and hashes—not paths or private payloads.
+
 `model_visible` controls whether a capability appears in model context. It
 does not grant or remove execution authority.
 

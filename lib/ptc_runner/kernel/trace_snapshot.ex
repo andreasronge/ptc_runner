@@ -3,6 +3,7 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
 
   use GenServer
 
+  alias PtcRunner.Kernel.InspectionArtifact
   alias PtcRunner.Kernel.TraceLog
   alias PtcRunner.Lisp.RetainedSize
 
@@ -82,6 +83,13 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
   def info(_snapshot), do: {:error, :invalid_snapshot}
 
   @doc false
+  @spec validate_inspection(t(), [map()]) :: :ok | {:error, atom()}
+  def validate_inspection(%__MODULE__{} = snapshot, records) when is_list(records),
+    do: call(snapshot, {:validate_inspection, records})
+
+  def validate_inspection(_snapshot, _records), do: {:error, :invalid_snapshot}
+
+  @doc false
   @spec transfer_owner(t(), pid()) :: :ok | {:error, atom()}
   def transfer_owner(%__MODULE__{} = snapshot, owner) when is_pid(owner),
     do: call(snapshot, {:transfer_owner, owner})
@@ -155,6 +163,29 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
 
     {:reply, result, state}
   end
+
+  def handle_call(
+        {token,
+         {:validate_inspection, [%{"run_id" => run_id, "trace_id" => trace_id} | _] = records}},
+        _from,
+        %{token: token} = state
+      ) do
+    matching_identity? =
+      Enum.any?(
+        state.events,
+        &(&1["run_id"] == run_id and &1["trace_id"] == trace_id)
+      )
+
+    result =
+      if matching_identity?,
+        do: InspectionArtifact.validate_correlations(records, state.events),
+        else: {:error, :inspection_correlation_missing}
+
+    {:reply, result, state}
+  end
+
+  def handle_call({token, {:validate_inspection, _records}}, _from, %{token: token} = state),
+    do: {:reply, {:error, :inspection_correlation_missing}, state}
 
   def handle_call({token, :stop}, _from, %{token: token} = state),
     do: {:stop, :normal, :ok, state}

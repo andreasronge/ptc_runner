@@ -313,6 +313,73 @@ defmodule Mix.Tasks.Ptc.RunTest do
   end
 
   @tag :tmp_dir
+  test "--check correlates a host-installed private inspection snapshot", %{tmp_dir: dir} do
+    manifest_path = write_manifest(dir, %{"value" => 1})
+    trace_directory = Path.join(dir, "traces")
+    inspection_directory = Path.join(dir, "inspection")
+    File.mkdir_p!(trace_directory)
+    File.mkdir_p!(inspection_directory)
+
+    capture_io(fn ->
+      Mix.Task.reenable("ptc.run")
+
+      Run.run([
+        manifest_path,
+        "--trace",
+        Path.join(trace_directory, "seed.jsonl"),
+        "--inspect",
+        Path.join(inspection_directory, "seed.inspection.jsonl")
+      ])
+    end)
+
+    manifest =
+      manifest_path
+      |> File.read!()
+      |> Jason.decode!()
+      |> Map.put("providers", %{
+        "mission" => [%{"name" => "private-history"}, %{"name" => "history"}]
+      })
+
+    File.write!(manifest_path, Jason.encode!(manifest))
+
+    host = %{
+      "install" => %{
+        "history" => %{
+          "source" => "ptc_trace_snapshot",
+          "directory" => "traces"
+        },
+        "private-history" => %{
+          "source" => "ptc_inspection_snapshot",
+          "directory" => "inspection",
+          "ceilings" => %{
+            "max_files" => 100,
+            "max_source_bytes" => 64_000_000,
+            "max_result_bytes" => 500_000
+          }
+        }
+      }
+    }
+
+    host_path = Path.join(dir, "host.json")
+    File.write!(host_path, Jason.encode!(host))
+
+    output =
+      capture_io(fn ->
+        Mix.Task.reenable("ptc.run")
+        Run.run([manifest_path, "--host-config", host_path, "--check"])
+      end)
+
+    assert output =~ "mission  history  ptc_trace_snapshot  4 operations"
+
+    assert output =~
+             "mission  private-history  ptc_inspection_snapshot  6 operations  " <>
+               "data private_inspection"
+
+    assert output =~ "accepts: normal, private_inspection"
+    refute output =~ inspection_directory
+  end
+
+  @tag :tmp_dir
   test "rejects an occupied inspection destination before execution", %{tmp_dir: dir} do
     File.write!(
       Path.join(dir, "main.clj"),

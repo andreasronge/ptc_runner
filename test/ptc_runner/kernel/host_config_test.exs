@@ -121,6 +121,35 @@ defmodule PtcRunner.Kernel.HostConfigTest do
   end
 
   @tag :tmp_dir
+  test "loads one private inspection snapshot installation", %{tmp_dir: dir} do
+    config = %{
+      "install" => %{
+        "private-history" => %{
+          "source" => "ptc_inspection_snapshot",
+          "directory" => "inspection",
+          "ceilings" => %{
+            "max_files" => 100,
+            "max_source_bytes" => 64_000_000,
+            "max_result_bytes" => 500_000
+          }
+        }
+      }
+    }
+
+    assert {:ok, host} = dir |> write_config(config) |> HostConfig.load()
+
+    assert host.install["private-history"] == %{
+             source: :ptc_inspection_snapshot,
+             directory: "inspection",
+             ceilings: %{
+               max_files: 100,
+               max_source_bytes: 64_000_000,
+               max_result_bytes: 500_000
+             }
+           }
+  end
+
+  @tag :tmp_dir
   test "loads closed HTTP authentication and safe installation metadata", %{tmp_dir: dir} do
     config = %{
       "$schema" => "./ptc-host-config.schema.json",
@@ -263,6 +292,19 @@ defmodule PtcRunner.Kernel.HostConfigTest do
     assert {:ok, _validated} = JSV.validate(trace, root, cast: false)
     assert {:ok, host} = HostConfig.decode(trace, "/tmp")
     assert host.install["history"].source == :ptc_trace_snapshot
+
+    inspection = %{
+      "install" => %{
+        "private-history" => %{
+          "source" => "ptc_inspection_snapshot",
+          "directory" => "inspection"
+        }
+      }
+    }
+
+    assert {:ok, _validated} = JSV.validate(inspection, root, cast: false)
+    assert {:ok, host} = HostConfig.decode(inspection, "/tmp")
+    assert host.install["private-history"].source == :ptc_inspection_snapshot
 
     refute match?(
              {:ok, _validated},

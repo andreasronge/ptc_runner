@@ -217,14 +217,17 @@ logging payload-bearing structures directly.
 
 The registry has no implicit providers. CLI runs receive exactly the aliases
 declared by a strict host installation; trusted Elixir embedding may construct
-an explicit registry of custom builders. Host installations currently provide
-workflow LLM and mission MCP sources.
+an explicit registry of custom builders. Host installations provide workflow
+LLM plus mission MCP and native snapshot sources.
 
 Provider builders return capabilities plus optional safe connector metadata
-and an idempotent closer. `RunBuilder` owns construction cleanup and transfers
-successful resources into the run lifecycle. Exact selection grammar and
-transport behavior belong in `ProviderRegistry`, each provider module, and the
-manifest guide.
+and an idempotent closer. Staged builders may also exchange bounded code-owned
+acquisition services after the global preflight and credential barrier; these
+opaque values never enter environments or artifacts. `RunBuilder` resolves
+those dependencies, owns construction cleanup, and transfers successful
+resources into the run lifecycle. Exact selection grammar and transport
+behavior belong in `ProviderRegistry`, each provider module, and the manifest
+guide.
 
 The current MCP adapter is one host-installed read-only source with typed
 Streamable HTTP and stdio transports. Endpoints or process launch details,
@@ -241,7 +244,11 @@ operator-supplied trace value crossing the provider boundary.
 PtcRunner-owned canonical traces remain native rather than passing through
 MCP. A host-installed `ptc_trace_snapshot` uses `TraceSnapshot` to capture one
 directory and `TraceCapability` to expose the same four canonical `TraceLog`
-queries used by `log-analysis-v1`.
+queries used by `log-analysis-v1`. A paired private
+`ptc_inspection_snapshot` receives that already captured trace through the
+provider acquisition service, validates all artifacts and correlations before
+publication, and exposes the shared `InspectionQuery` layer through
+`InspectionCapability`.
 
 The local log-analysis path is a fixed product profile shared by the Viewer
 and terminal REPL. `PtcRunner.Kernel.LogAnalysisSessionBuilder` is the host
@@ -260,8 +267,8 @@ not supply profile internals or paths.
 | Mutable resources | `Limits`, `RunState`, `BoundedWorker`, `Dispatcher` |
 | Subordinate execution | `Runner`, `Evaluation`, `RuntimeTools` |
 | Lisp internals | `Lisp.Eval`, `Lisp.Eval.Effects`, `Lisp.Eval.Capture`, `Lisp.Eval.Parallel`, `Lisp.Eval.ParallelRunner` |
-| Providers | `HostConfig`, `HostInstallation`, `LLMCapability`, `MCPSource`, `MCPProtocol`, `TraceCapability` |
-| Canonical/private evidence | `EventSink`, `TraceLog`, `InspectionSink`, `InspectionArtifact`, `SafeMetadata` |
+| Providers | `HostConfig`, `HostInstallation`, `LLMCapability`, `MCPSource`, `MCPProtocol`, `TraceCapability`, `InspectionCapability` |
+| Canonical/private evidence | `EventSink`, `TraceLog`, `TraceSnapshot`, `InspectionSink`, `InspectionArtifact`, `InspectionSnapshot`, `InspectionQuery`, `SafeMetadata` |
 | Interactive evaluation | `ReplSession`, `LogAnalysisSessionBuilder`, `LogAnalysisSession`, `SessionTrace` |
 
 Modules grouped as Kernel internals in ExDoc remain documented for maintenance

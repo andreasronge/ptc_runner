@@ -19,6 +19,10 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
   credentials once before any provider is acquired. Preparation also freezes
   the provider's `data_class` and `accepts_data` policy so run assembly can
   reject an incompatible information flow before preflight or credentials.
+  A staged provider may additionally require or provide a bounded, code-owned
+  acquisition service. Services pass opaque values only between selected
+  trusted providers after the barrier; they never enter Lisp environments,
+  connector snapshots, traces, or result artifacts.
   Legacy Elixir builders remain supported as normal-data-only providers and
   are deferred to the acquisition phase; a classified custom provider must use
   the staged form.
@@ -63,25 +67,33 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
           snapshot: map() | nil,
           close: close() | nil,
           data_class: :normal | :private_inspection,
-          accepts_data: [:normal | :private_inspection]
+          accepts_data: [:normal | :private_inspection],
+          exports: %{optional(atom()) => term()}
         }
   @type builder ::
           (map(), context() ->
              {:ok, Capability.t() | built_provider()} | {:error, term()})
   @type credential_values :: %{binary() => binary()}
+  @type acquisition_services :: %{optional(atom()) => term()}
   @type acquire ::
           (credential_values() ->
              {:ok, Capability.t() | built_provider()} | {:error, term()})
+          | (credential_values(), acquisition_services() ->
+               {:ok, Capability.t() | built_provider()} | {:error, term()})
   @type prepared :: %{
           credential_names: [binary()],
           data_class: :normal | :private_inspection,
           accepts_data: [:normal | :private_inspection],
+          requires: [atom()],
+          provides: [atom()],
           preflight: (-> {:ok, acquire()} | {:error, term()})
         }
   @type preflighted :: %{
           acquire: acquire(),
           data_class: :normal | :private_inspection,
-          accepts_data: [:normal | :private_inspection]
+          accepts_data: [:normal | :private_inspection],
+          requires: [atom()],
+          provides: [atom()]
         }
   @type staged_builder ::
           {:staged,
@@ -145,7 +157,7 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
          {:ok, preflighted} <- preflight(prepared),
          {:ok, credentials} <-
            resolve_credentials(registry, prepared.credential_names),
-         do: acquire(preflighted, credentials)
+         do: acquire(preflighted, credentials, %{})
   end
 
   @spec prepare(t(), binary(), map(), build_context()) ::
@@ -168,8 +180,10 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
            credential_names: [],
            data_class: :normal,
            accepts_data: [:normal],
+           requires: [],
+           provides: [],
            preflight: fn ->
-             {:ok, fn %{} -> builder.(config, full_context) end}
+             {:ok, fn %{}, %{} -> builder.(config, full_context) end}
            end
          }}
 
@@ -183,12 +197,14 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
   def preflight(%{
         preflight: preflight,
         data_class: data_class,
-        accepts_data: accepts_data
+        accepts_data: accepts_data,
+        requires: requires,
+        provides: provides
       })
       when is_function(preflight, 0) do
     preflight
     |> invoke(:provider_preflight_failed)
-    |> normalize_preflight(data_class, accepts_data)
+    |> normalize_preflight(data_class, accepts_data, requires, provides)
   end
 
   def preflight(_prepared), do: {:error, :invalid_provider_preparation}
@@ -207,17 +223,35 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
 
   def resolve_credentials(_registry, _names), do: {:error, :invalid_credential_names}
 
-  @spec acquire(preflighted(), credential_values()) ::
+  @spec acquire(preflighted(), credential_values(), acquisition_services()) ::
           {:ok, built_provider()} | {:error, term()}
   @doc false
-  def acquire(%{acquire: acquire}, credentials)
+  def acquire(%{requires: []} = preflighted, credentials),
+    do: acquire(preflighted, credentials, %{})
+
+  def acquire(_preflighted, _credentials), do: {:error, :provider_dependency_unavailable}
+
+  @doc false
+  def acquire(%{acquire: acquire, requires: requires, provides: provides}, credentials, services)
+      when is_function(acquire, 2) and is_map(credentials) and is_map(services) do
+    if Enum.sort(Map.keys(services)) == Enum.sort(requires) do
+      acquire
+      |> invoke_with_two(credentials, services, :provider_acquisition_failed)
+      |> normalize_build(provides)
+    else
+      {:error, :provider_dependency_unavailable}
+    end
+  end
+
+  def acquire(%{acquire: acquire, requires: [], provides: provides}, credentials, %{})
       when is_function(acquire, 1) and is_map(credentials) do
     acquire
     |> invoke_with(credentials, :provider_acquisition_failed)
-    |> normalize_build()
+    |> normalize_build(provides)
   end
 
-  def acquire(_preflighted, _credentials), do: {:error, :invalid_provider_preflight}
+  def acquire(_preflighted, _credentials, _services),
+    do: {:error, :invalid_provider_preflight}
 
   defp normalize_prepared({:ok, %{credential_names: names, preflight: preflight} = prepared})
        when is_list(names) and is_function(preflight, 0) do
@@ -225,10 +259,15 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
       prepared
       |> Map.put_new(:data_class, :normal)
       |> Map.put_new(:accepts_data, [:normal])
+      |> Map.put_new(:requires, [])
+      |> Map.put_new(:provides, [])
 
-    if Map.keys(prepared) -- [:credential_names, :preflight, :data_class, :accepts_data] == [] and
+    if Map.keys(prepared) --
+         [:credential_names, :preflight, :data_class, :accepts_data, :requires, :provides] == [] and
          valid_data_policy?(prepared.data_class, prepared.accepts_data) and
-         length(names) <= 128 and Enum.uniq(names) == names and Enum.all?(names, &valid_name?/1) do
+         length(names) <= 128 and Enum.uniq(names) == names and Enum.all?(names, &valid_name?/1) and
+         valid_services?(prepared.requires) and valid_services?(prepared.provides) and
+         MapSet.disjoint?(MapSet.new(prepared.requires), MapSet.new(prepared.provides)) do
       {:ok, prepared}
     else
       {:error, :invalid_provider_preparation}
@@ -238,13 +277,40 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
   defp normalize_prepared({:error, _reason} = error), do: error
   defp normalize_prepared(_result), do: {:error, :invalid_provider_preparation}
 
-  defp normalize_preflight({:ok, acquire}, data_class, accepts_data)
-       when is_function(acquire, 1),
-       do: {:ok, %{acquire: acquire, data_class: data_class, accepts_data: accepts_data}}
+  defp normalize_preflight({:ok, acquire}, data_class, accepts_data, requires, provides)
+       when is_function(acquire, 1) and requires == [] do
+    {:ok,
+     %{
+       acquire: acquire,
+       data_class: data_class,
+       accepts_data: accepts_data,
+       requires: requires,
+       provides: provides
+     }}
+  end
 
-  defp normalize_preflight({:error, _reason} = error, _data_class, _accepts_data), do: error
+  defp normalize_preflight({:ok, acquire}, data_class, accepts_data, requires, provides)
+       when is_function(acquire, 2) do
+    {:ok,
+     %{
+       acquire: acquire,
+       data_class: data_class,
+       accepts_data: accepts_data,
+       requires: requires,
+       provides: provides
+     }}
+  end
 
-  defp normalize_preflight(_result, _data_class, _accepts_data),
+  defp normalize_preflight(
+         {:error, _reason} = error,
+         _data_class,
+         _accepts_data,
+         _requires,
+         _provides
+       ),
+       do: error
+
+  defp normalize_preflight(_result, _data_class, _accepts_data, _requires, _provides),
     do: {:error, :invalid_provider_preflight}
 
   defp normalize_credentials({:ok, credentials}, names) when is_map(credentials) do
@@ -259,47 +325,51 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
   defp normalize_credentials({:error, _reason} = error, _names), do: error
   defp normalize_credentials(_result, _names), do: {:error, :invalid_credential_values}
 
-  defp normalize_build({:ok, %Capability{} = capability}) do
+  defp normalize_build({:ok, %Capability{} = capability}, []) do
     {:ok,
      %{
        capabilities: [capability],
        snapshot: nil,
        close: nil,
        data_class: :normal,
-       accepts_data: [:normal]
+       accepts_data: [:normal],
+       exports: %{}
      }}
   end
 
-  defp normalize_build({:ok, %{capabilities: capabilities} = built}) do
+  defp normalize_build({:ok, %{capabilities: capabilities} = built}, provides) do
     snapshot = Map.get(built, :snapshot)
     close = Map.get(built, :close)
     data_class = Map.get(built, :data_class, :normal)
     accepts_data = Map.get(built, :accepts_data, [:normal])
+    exports = Map.get(built, :exports, %{})
 
     if Map.keys(built) --
-         [:capabilities, :snapshot, :close, :data_class, :accepts_data] == [] and
+         [:capabilities, :snapshot, :close, :data_class, :accepts_data, :exports] == [] and
          capabilities != [] and length(capabilities) <= 128 and
          Enum.all?(capabilities, &match?(%Capability{}, &1)) and
          (is_nil(snapshot) or JSONValue.map?(snapshot)) and
          (is_nil(close) or is_function(close, 0)) and
          data_class in [:normal, :private_inspection] and
          accepts_data != [] and accepts_data == Enum.uniq(accepts_data) and
-         Enum.all?(accepts_data, &(&1 in [:normal, :private_inspection])) do
+         Enum.all?(accepts_data, &(&1 in [:normal, :private_inspection])) and
+         is_map(exports) and Enum.sort(Map.keys(exports)) == Enum.sort(provides) do
       {:ok,
        %{
          capabilities: capabilities,
          snapshot: snapshot,
          close: close,
          data_class: data_class,
-         accepts_data: accepts_data
+         accepts_data: accepts_data,
+         exports: exports
        }}
     else
       {:error, :invalid_provider_build}
     end
   end
 
-  defp normalize_build({:error, _reason} = error), do: error
-  defp normalize_build(_result), do: {:error, :invalid_provider_build}
+  defp normalize_build({:error, _reason} = error, _provides), do: error
+  defp normalize_build(_result, _provides), do: {:error, :invalid_provider_build}
 
   defp invoke(function, failure) do
     function.()
@@ -312,6 +382,9 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
   defp invoke_with(function, argument, failure),
     do: invoke(fn -> function.(argument) end, failure)
 
+  defp invoke_with_two(function, first, second, failure),
+    do: invoke(fn -> function.(first, second) end, failure)
+
   defp default_credential_resolver([]), do: {:ok, %{}}
   defp default_credential_resolver(_names), do: {:error, :credential_resolver_missing}
 
@@ -323,6 +396,11 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
     data_class in [:normal, :private_inspection] and
       accepts_data != [] and accepts_data == Enum.uniq(accepts_data) and
       Enum.all?(accepts_data, &(&1 in [:normal, :private_inspection]))
+  end
+
+  defp valid_services?(services) do
+    is_list(services) and length(services) <= 32 and Enum.uniq(services) == services and
+      Enum.all?(services, &is_atom/1)
   end
 
   @doc false

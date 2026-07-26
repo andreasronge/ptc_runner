@@ -183,6 +183,16 @@ defmodule Mix.Tasks.Ptc.Run do
     }
   end
 
+  defp resolved_provider(snapshot, %{source: :ptc_inspection_snapshot}) do
+    %{
+      "environment" => "mission",
+      "name" => snapshot["provider"],
+      "summary" => "ptc_inspection_snapshot  6 operations  data private_inspection",
+      "accepts_data" => ["normal", "private_inspection"],
+      "snapshot_hash" => snapshot["snapshot_hash"]
+    }
+  end
+
   defp resolved_provider(snapshot, _installation) do
     %{
       "environment" => "mission",

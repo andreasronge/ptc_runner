@@ -184,13 +184,21 @@ defmodule PtcRunner.Kernel.RunBuilder do
   defp providers(manifest, registry, input_class)
        when input_class in [:normal, :private_inspection] do
     with {:ok, prepared} <- prepare_providers(manifest, registry),
+         :ok <- validate_provider_dependencies(prepared),
          effective_class <- effective_data_class(input_class, prepared),
          :ok <- providers_accept(prepared, effective_class),
          {:ok, preflighted} <- preflight_providers(prepared),
          {:ok, credentials} <-
            ProviderRegistry.resolve_credentials(registry, credential_names(prepared)),
          {:ok, acquired} <- acquire_providers(preflighted, credentials, effective_class) do
-      {:ok, %{acquired | snapshots: sort_snapshots(acquired.snapshots)}}
+      {:ok,
+       %{
+         acquired
+         | workflow: finalize_capabilities(acquired.workflow),
+           mission: finalize_capabilities(acquired.mission),
+           snapshots: sort_snapshots(acquired.snapshots)
+       }
+       |> Map.delete(:exports)}
     end
   end
 
@@ -201,7 +209,8 @@ defmodule PtcRunner.Kernel.RunBuilder do
   defp prepare_providers(manifest, registry) do
     manifest
     |> provider_specs()
-    |> Enum.reduce_while({:ok, []}, fn {destination, spec}, {:ok, prepared} ->
+    |> Enum.with_index()
+    |> Enum.reduce_while({:ok, []}, fn {{destination, spec}, index}, {:ok, prepared} ->
       context = %{
         directory: manifest.directory,
         destination: destination,
@@ -218,10 +227,14 @@ defmodule PtcRunner.Kernel.RunBuilder do
            ) do
         {:ok, provider} ->
           entry = %{
+            index: index,
+            provider: spec["name"],
             destination: destination,
             credential_names: provider.credential_names,
             data_class: provider.data_class,
             accepts_data: provider.accepts_data,
+            requires: provider.requires,
+            provides: provider.provides,
             prepared: provider
           }
 
@@ -259,25 +272,53 @@ defmodule PtcRunner.Kernel.RunBuilder do
       mission: %{capabilities: []},
       resources: [],
       snapshots: [],
+      exports: %{},
       data_class: effective_class
     }
 
-    Enum.reduce_while(preflighted, {:ok, initial}, fn provider, {:ok, accumulated} ->
-      provider_credentials = Map.take(credentials, provider.credential_names)
+    acquire_ready_providers(preflighted, credentials, initial)
+  end
 
-      case ProviderRegistry.acquire(provider.preflighted, provider_credentials) do
+  defp acquire_ready_providers([], _credentials, accumulated), do: {:ok, accumulated}
+
+  defp acquire_ready_providers(pending, credentials, accumulated) do
+    case Enum.split_with(pending, &services_available?(&1, accumulated.exports)) do
+      {[], _blocked} ->
+        prefer_cleanup_error(
+          {:error, :provider_dependency_unavailable},
+          close_resources(accumulated.resources)
+        )
+
+      {ready, blocked} ->
+        case acquire_provider_batch(ready, credentials, accumulated) do
+          {:ok, next} -> acquire_ready_providers(blocked, credentials, next)
+          {:error, _reason} = error -> error
+        end
+    end
+  end
+
+  defp acquire_provider_batch(providers, credentials, accumulated) do
+    Enum.reduce_while(providers, {:ok, accumulated}, fn provider, {:ok, current} ->
+      provider_credentials = Map.take(credentials, provider.credential_names)
+      services = selected_services(current.exports, provider.requires)
+
+      case ProviderRegistry.acquire(provider.preflighted, provider_credentials, services) do
         {:ok, built}
         when built.data_class == provider.data_class and
                built.accepts_data == provider.accepts_data ->
-          environment = Map.fetch!(accumulated, provider.destination)
+          environment = Map.fetch!(current, provider.destination)
 
           next =
-            accumulated
+            current
             |> Map.put(provider.destination, %{
-              capabilities: environment.capabilities ++ built.capabilities
+              capabilities: [{provider.index, built.capabilities} | environment.capabilities]
             })
             |> Map.update!(:snapshots, &maybe_append(&1, built.snapshot))
             |> Map.update!(:resources, &maybe_prepend(&1, built.close))
+            |> Map.update!(
+              :exports,
+              &merge_provider_exports(&1, provider.provider, built.exports)
+            )
 
           {:cont, {:ok, next}}
 
@@ -285,16 +326,58 @@ defmodule PtcRunner.Kernel.RunBuilder do
           result =
             prefer_cleanup_error(
               {:error, :provider_data_policy_changed},
-              close_resources(maybe_prepend(accumulated.resources, built.close))
+              close_resources(maybe_prepend(current.resources, built.close))
             )
 
           {:halt, result}
 
         {:error, _reason} = error ->
-          result = prefer_cleanup_error(error, close_resources(accumulated.resources))
+          result = prefer_cleanup_error(error, close_resources(current.resources))
           {:halt, result}
       end
     end)
+  end
+
+  defp services_available?(provider, exports),
+    do: Enum.all?(provider.requires, &match?([{_provider, _value}], Map.get(exports, &1)))
+
+  defp merge_provider_exports(exports, provider, built_exports) do
+    Enum.reduce(built_exports, exports, fn {service, value}, accumulated ->
+      Map.update(accumulated, service, [{provider, value}], &[{provider, value} | &1])
+    end)
+  end
+
+  defp selected_services(exports, requires) do
+    Map.new(requires, fn service ->
+      [{_provider, value}] = Map.fetch!(exports, service)
+      {service, value}
+    end)
+  end
+
+  defp finalize_capabilities(%{capabilities: capabilities}) do
+    %{
+      capabilities:
+        capabilities
+        |> Enum.sort_by(&elem(&1, 0))
+        |> Enum.flat_map(&elem(&1, 1))
+    }
+  end
+
+  defp validate_provider_dependencies(prepared) do
+    provided = Enum.flat_map(prepared, & &1.provides)
+    required = Enum.flat_map(prepared, & &1.requires) |> Enum.uniq()
+    counts = Enum.frequencies(provided)
+
+    cond do
+      Enum.any?(required, &(Map.get(counts, &1, 0) == 0)) ->
+        {:error, :provider_dependency_unavailable}
+
+      Enum.any?(required, &(Map.fetch!(counts, &1) > 1)) ->
+        {:error, :ambiguous_provider_dependency}
+
+      true ->
+        :ok
+    end
   end
 
   defp provider_specs(manifest) do

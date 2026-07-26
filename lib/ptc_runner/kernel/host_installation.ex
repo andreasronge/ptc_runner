@@ -10,12 +10,17 @@ defmodule PtcRunner.Kernel.HostInstallation do
   acquiring the transport and catalog. Live LLM installations use the same
   barrier: model resolution precedes credential access, while the acquired
   capability receives its key explicitly and records only non-secret model
-  policy in a deterministic provider snapshot.
+  policy in a deterministic provider snapshot. Native trace acquisition
+  exports its opaque frozen handle only to a selected inspection source, so
+  private artifacts validate against the exact already-captured canonical
+  source without reopening trace paths or exposing owner handles in metadata.
   """
 
   alias PtcRunner.Kernel.ConfinedFile
   alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.HostConfig
+  alias PtcRunner.Kernel.InspectionCapability
+  alias PtcRunner.Kernel.InspectionSnapshot
   alias PtcRunner.Kernel.LLMCapability
   alias PtcRunner.Kernel.MCPSource
   alias PtcRunner.Kernel.ProviderRegistry
@@ -119,6 +124,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
          credential_names: [],
          data_class: :normal,
          accepts_data: [:normal, :private_inspection],
+         provides: [:canonical_trace_snapshot],
          preflight: fn ->
            with {:ok, directory} <-
                   canonical_snapshot_directory(host.directory, installation.directory) do
@@ -136,6 +142,36 @@ defmodule PtcRunner.Kernel.HostInstallation do
     end
   end
 
+  defp prepare(host, %{source: :ptc_inspection_snapshot} = installation, selection, context) do
+    with :ok <- placement(installation, context.destination),
+         {:ok, selected} <- inspection_snapshot_selection(installation, selection, context) do
+      {:ok,
+       %{
+         credential_names: [],
+         data_class: :private_inspection,
+         accepts_data: [:normal, :private_inspection],
+         requires: [:canonical_trace_snapshot],
+         preflight: fn ->
+           with {:ok, directory} <-
+                  canonical_inspection_snapshot_directory(
+                    host.directory,
+                    installation.directory
+                  ) do
+             {:ok,
+              fn %{}, %{canonical_trace_snapshot: trace_snapshot} ->
+                acquire_inspection_snapshot(
+                  directory,
+                  trace_snapshot,
+                  selected,
+                  context
+                )
+              end}
+           end
+         end
+       }}
+    end
+  end
+
   defp placement(%{source: :mcp}, :mission), do: :ok
   defp placement(%{source: :mcp}, _destination), do: {:error, :provider_destination_denied}
   defp placement(%{source: :llm}, :workflow), do: :ok
@@ -143,6 +179,11 @@ defmodule PtcRunner.Kernel.HostInstallation do
   defp placement(%{source: :ptc_trace_snapshot}, :mission), do: :ok
 
   defp placement(%{source: :ptc_trace_snapshot}, _destination),
+    do: {:error, :provider_destination_denied}
+
+  defp placement(%{source: :ptc_inspection_snapshot}, :mission), do: :ok
+
+  defp placement(%{source: :ptc_inspection_snapshot}, _destination),
     do: {:error, :provider_destination_denied}
 
   defp mcp_selection(installation, value, context)
@@ -263,6 +304,40 @@ defmodule PtcRunner.Kernel.HostInstallation do
 
   defp trace_snapshot_selection(_installation, _value, _context),
     do: {:error, :invalid_trace_snapshot_selection}
+
+  defp inspection_snapshot_selection(installation, value, context)
+       when is_map(value) and not is_struct(value) do
+    with true <- Map.keys(value) -- ~w(max_files max_source_bytes max_result_bytes) == [],
+         max_files when is_integer(max_files) and max_files > 0 <-
+           Map.get(value, "max_files", installation.ceilings.max_files),
+         true <- max_files <= installation.ceilings.max_files,
+         max_source_bytes when is_integer(max_source_bytes) and max_source_bytes > 0 <-
+           Map.get(value, "max_source_bytes", installation.ceilings.max_source_bytes),
+         true <- max_source_bytes <= installation.ceilings.max_source_bytes,
+         max_result_bytes when is_integer(max_result_bytes) and max_result_bytes > 0 <-
+           Map.get(
+             value,
+             "max_result_bytes",
+             min(
+               installation.ceilings.max_result_bytes,
+               context.limits.capability_result_bytes
+             )
+           ),
+         true <- max_result_bytes <= installation.ceilings.max_result_bytes,
+         true <- max_result_bytes <= context.limits.capability_result_bytes do
+      {:ok,
+       %{
+         max_files: max_files,
+         max_source_bytes: max_source_bytes,
+         max_result_bytes: max_result_bytes
+       }}
+    else
+      _reason -> {:error, :invalid_inspection_snapshot_selection}
+    end
+  end
+
+  defp inspection_snapshot_selection(_installation, _value, _context),
+    do: {:error, :invalid_inspection_snapshot_selection}
 
   defp credential_names(%{type: :stdio, env: env}),
     do: env |> Map.values() |> Enum.uniq() |> Enum.sort()
@@ -452,12 +527,69 @@ defmodule PtcRunner.Kernel.HostInstallation do
            :ok
          end,
          data_class: :normal,
-         accepts_data: [:normal, :private_inspection]
+         accepts_data: [:normal, :private_inspection],
+         exports: %{canonical_trace_snapshot: snapshot}
        }}
     else
       {:error, _reason} = error ->
         TraceSnapshot.stop(snapshot)
         error
+    end
+  end
+
+  defp acquire_inspection_snapshot(directory, trace_snapshot, selected, context) do
+    case InspectionSnapshot.start({:directory, directory}, trace_snapshot,
+           owner: context.owner,
+           max_files: selected.max_files,
+           max_source_bytes: selected.max_source_bytes,
+           max_result_bytes: selected.max_result_bytes
+         ) do
+      {:ok, snapshot} -> finish_inspection_snapshot(snapshot, selected, context.provider)
+      {:error, _reason} = error -> error
+    end
+  end
+
+  defp finish_inspection_snapshot(snapshot, selected, provider) do
+    with {:ok, capabilities} <- InspectionCapability.from_snapshot(snapshot, provider),
+         {:ok, info} <- InspectionSnapshot.info(snapshot),
+         {:ok, provider_snapshot} <- inspection_provider_snapshot(info, selected, provider) do
+      {:ok,
+       %{
+         capabilities: capabilities,
+         snapshot: provider_snapshot,
+         close: fn ->
+           InspectionSnapshot.stop(snapshot)
+           :ok
+         end,
+         data_class: :private_inspection,
+         accepts_data: [:normal, :private_inspection]
+       }}
+    else
+      {:error, _reason} = error ->
+        InspectionSnapshot.stop(snapshot)
+        error
+    end
+  end
+
+  defp inspection_provider_snapshot(info, selected, provider) do
+    identity = %{
+      "source" => "ptc_inspection_snapshot",
+      "capture_id" => info.capture_id,
+      "trace_capture_id" => info.trace_capture_id,
+      "file_count" => info.file_count,
+      "run_count" => info.run_count,
+      "source_bytes" => info.source_bytes,
+      "retained_bytes" => info.retained_bytes,
+      "max_files" => selected.max_files,
+      "max_source_bytes" => selected.max_source_bytes,
+      "max_result_bytes" => selected.max_result_bytes
+    }
+
+    with {:ok, encoded} <- DeterministicJSON.encode(identity) do
+      {:ok,
+       identity
+       |> Map.put("provider", provider)
+       |> Map.put("snapshot_hash", sha256(encoded))}
     end
   end
 
@@ -548,6 +680,17 @@ defmodule PtcRunner.Kernel.HostInstallation do
       {:ok, canonical}
     else
       _reason -> {:error, :invalid_trace_snapshot_directory}
+    end
+  end
+
+  defp canonical_inspection_snapshot_directory(base, path) do
+    candidate = if Path.type(path) == :absolute, do: path, else: Path.expand(path, base)
+
+    with {:ok, canonical} <- ConfinedFile.resolve_absolute(candidate),
+         {:ok, %{type: :directory}} <- File.stat(canonical) do
+      {:ok, canonical}
+    else
+      _reason -> {:error, :invalid_inspection_snapshot_directory}
     end
   end
 
