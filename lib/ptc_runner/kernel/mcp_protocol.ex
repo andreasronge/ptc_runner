@@ -105,6 +105,34 @@ defmodule PtcRunner.Kernel.MCPProtocol do
 
   def decode_message(_body), do: {:error, :mcp_protocol_error}
 
+  @doc false
+  @spec valid_exchange_request?(term(), term()) :: boolean()
+  def valid_exchange_request?(
+        %{
+          "jsonrpc" => "2.0",
+          "id" => id,
+          "method" => method,
+          "params" => params
+        } = request,
+        id
+      )
+      when is_integer(id) and id > 0 and is_binary(method) and byte_size(method) in 1..128 and
+             is_map(params) and not is_struct(params) do
+    Map.keys(request) |> Enum.sort() == ~w(id jsonrpc method params) and JSONValue.map?(request)
+  end
+
+  def valid_exchange_request?(_request, _id), do: false
+
+  @doc false
+  @spec valid_exchange_response?(term(), term()) :: boolean()
+  def valid_exchange_response?(response, id)
+      when is_map(response) and is_integer(id) and id > 0 do
+    match?({:ok, {:response, ^id, _decoded}}, classify_message(response)) and
+      response["jsonrpc"] == "2.0" and JSONValue.map?(response)
+  end
+
+  def valid_exchange_response?(_response, _id), do: false
+
   defp classify_message(%{"id" => id} = decoded) when is_integer(id) and id > 0 do
     case {
       Map.has_key?(decoded, "method"),
@@ -308,24 +336,35 @@ defmodule PtcRunner.Kernel.MCPProtocol do
 
   @spec normalize_tool_result(map(), map() | nil) ::
           {:ok, term()} | {:error, :mcp_domain_error | :mcp_invalid_result}
-  def normalize_tool_result(result, output_validator) when is_map(result) do
+  def normalize_tool_result(result, output_validator),
+    do: normalize_tool_result(result, output_validator, :closed)
+
+  @spec normalize_tool_result(map(), map() | nil, :closed | :bounded) ::
+          {:ok, term()}
+          | {:error, :mcp_domain_error | :mcp_invalid_result}
+          | {:error, {:mcp_domain_error, binary()}}
+  def normalize_tool_result(result, output_validator, feedback_policy)
+      when is_map(result) and feedback_policy in [:closed, :bounded] do
     if valid_is_error?(result),
-      do: normalize_valid_tool_result(result, output_validator),
+      do: normalize_valid_tool_result(result, output_validator, feedback_policy),
       else: {:error, :mcp_invalid_result}
   end
 
-  def normalize_tool_result(_result, _output_validator), do: {:error, :mcp_invalid_result}
+  def normalize_tool_result(_result, _output_validator, _feedback_policy),
+    do: {:error, :mcp_invalid_result}
 
   defp normalize_valid_tool_result(
          %{"isError" => true, "content" => content} = result,
-         _output_validator
+         _output_validator,
+         feedback_policy
        )
        when is_list(content) do
     if Map.has_key?(result, "structuredContent") do
       {:error, :mcp_invalid_result}
     else
-      case text_result(content) do
-        {:ok, _text} -> {:error, :mcp_domain_error}
+      case error_feedback(content, feedback_policy) do
+        {:ok, nil} -> {:error, :mcp_domain_error}
+        {:ok, feedback} -> {:error, {:mcp_domain_error, feedback}}
         {:error, :mcp_invalid_result} -> {:error, :mcp_invalid_result}
       end
     end
@@ -333,7 +372,8 @@ defmodule PtcRunner.Kernel.MCPProtocol do
 
   defp normalize_valid_tool_result(
          %{"structuredContent" => structured, "content" => content},
-         output_validator
+         output_validator,
+         _feedback_policy
        )
        when not is_nil(output_validator) and is_list(content) do
     with true <- JSONSchema.valid?(output_validator, structured),
@@ -344,14 +384,14 @@ defmodule PtcRunner.Kernel.MCPProtocol do
     end
   end
 
-  defp normalize_valid_tool_result(%{"content" => content} = result, nil)
+  defp normalize_valid_tool_result(%{"content" => content} = result, nil, _feedback_policy)
        when is_list(content) do
     if Map.has_key?(result, "structuredContent"),
       do: {:error, :mcp_invalid_result},
       else: text_result(content)
   end
 
-  defp normalize_valid_tool_result(_result, _output_validator),
+  defp normalize_valid_tool_result(_result, _output_validator, _feedback_policy),
     do: {:error, :mcp_invalid_result}
 
   defp valid_rpc_error?(%{"code" => code, "message" => message} = error) do
@@ -467,6 +507,46 @@ defmodule PtcRunner.Kernel.MCPProtocol do
   end
 
   defp text_resource(_resource), do: :error
+
+  defp error_feedback(content, policy) do
+    Enum.reduce_while(content, {:ok, []}, fn
+      %{"type" => "text", "text" => text} = block, {:ok, texts}
+      when is_binary(text) and map_size(block) == 2 ->
+        {:cont, {:ok, [text | texts]}}
+
+      _block, _acc ->
+        {:halt, {:error, :mcp_invalid_result}}
+    end)
+    |> case do
+      {:ok, _texts} when policy == :closed ->
+        {:ok, nil}
+
+      {:ok, texts} ->
+        case texts |> Enum.reverse() |> Enum.join("\n") do
+          "" -> {:ok, nil}
+          feedback -> {:ok, truncate_utf8(feedback, 1_024)}
+        end
+
+      error ->
+        error
+    end
+  end
+
+  defp truncate_utf8(value, max_bytes) when byte_size(value) <= max_bytes, do: value
+
+  defp truncate_utf8(value, max_bytes) do
+    value
+    |> binary_part(0, max_bytes)
+    |> valid_utf8_prefix()
+  end
+
+  defp valid_utf8_prefix(value) do
+    if String.valid?(value) do
+      value
+    else
+      valid_utf8_prefix(binary_part(value, 0, byte_size(value) - 1))
+    end
+  end
 
   defp classify_result(%{"resultType" => "complete"} = result, method) do
     if cacheable_method?(method), do: validate_cache_hints(result), else: {:ok, result}

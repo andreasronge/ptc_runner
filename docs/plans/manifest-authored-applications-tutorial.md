@@ -55,14 +55,14 @@ that touches data is in the mission environment.
 | immutable whole-file `file-read` | current only; deleted at the MCP filesystem cutover and never added to host config |
 | MCP Streamable HTTP installed from Elixir | current, pinned to stateless `2026-07-28` |
 | `--trace` and exact `--inspect` capture | current |
-| stdio MCP transport | planned MCP Slice 2; stateless `2026-07-28` HTTP is current |
-| compatible stdio launcher, normally the optional precompiled `ptc_runner_launcher` companion | planned MCP Slice 2; required for stdio, not by HTTP-only users |
-| `--host-config` and `--check` | planned MCP Slice 3 |
-| host-installed aliases replacing manifest-configured providers | planned application Slices B–C; filesystem access uses `source: "mcp"` |
+| stdio MCP transport | current, pinned to `2026-07-28` |
+| compatible stdio launcher, normally the optional precompiled `ptc_runner_launcher` companion | current; required for stdio, not by HTTP-only users |
+| `--host-config` and `--check` | current |
+| host-installed MCP and live-LLM aliases | current; the filesystem cutover in MCP Slice 5 removes the remaining implicit manifest providers |
 | immutable filesystem sample MCP server | planned MCP Slice 5 |
 | manifest-selectable PTC trace/private snapshots | planned application Slice E1 |
 | private human investigation in `ptc.repl` | planned application Slice E2 |
-| private MCP request/response inspection | planned MCP Slice 4 |
+| bounded MCP error feedback, safe trace context, and private request/response inspection | current |
 | result schemas, `--output`, `--private-output`, `--private-mission` | planned application Slice D |
 | `cap/unwrap!`, `cap/with-cursor`, and `agent.main` libraries | planned application Slice G |
 | component override and LLM replay evaluation | planned application Slice H |
@@ -904,9 +904,11 @@ artifacts and manual record `0600`, out of version control, and out of ordinary
 model context. Do not inspect held-out evaluation answers while forming the
 hypothesis; those remain useful only if the later evaluation stays blind.
 
-The existing V1 inspection vocabulary is exact and closed. MCP wire exchange
-records therefore require a new inspection artifact version rather than
-unrecognized record types added to V1.
+The V1 inspection vocabulary remains exact and closed. Runs created through
+the current manifest path use inspection V2, which adds paired `mcp-request`
+and `mcp-response` records correlated to an existing capability attempt.
+Artifact validation rejects mixed versions, unpaired exchanges, and MCP
+records smuggled into V1.
 
 This distinction matters when the server returns:
 

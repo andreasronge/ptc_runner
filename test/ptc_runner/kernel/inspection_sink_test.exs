@@ -80,6 +80,57 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
     assert :ok = InspectionSink.stop(sink)
   end
 
+  test "V2 retains paired MCP exchange records while V1 rejects them" do
+    request = %{
+      "jsonrpc" => "2.0",
+      "id" => 7,
+      "method" => "tools/call",
+      "params" => %{"name" => "read", "arguments" => %{"path" => "README.md"}}
+    }
+
+    response = %{
+      "jsonrpc" => "2.0",
+      "id" => 7,
+      "result" => %{"content" => [%{"type" => "text", "text" => "hello"}]}
+    }
+
+    correlation = %{capability_id: "cap-1", request_id: 7}
+
+    {:ok, v1} = InspectionSink.start(run_id: "run-1", trace_id: "trace-1")
+
+    assert {:error, :inspection_sink_error} =
+             InspectionSink.emit(
+               v1,
+               "mcp-request",
+               correlation,
+               %{transport: :stdio, body: request}
+             )
+
+    {:ok, v2} =
+      InspectionSink.start(run_id: "run-1", trace_id: "trace-1", schema_version: 2)
+
+    assert :ok =
+             InspectionSink.emit(
+               v2,
+               "mcp-request",
+               correlation,
+               %{transport: :stdio, body: request}
+             )
+
+    assert :ok =
+             InspectionSink.emit(
+               v2,
+               "mcp-response",
+               correlation,
+               %{transport: :stdio, body: response}
+             )
+
+    assert {:ok, [request_record, response_record]} = InspectionSink.records(v2)
+    assert request_record["schema_version"] == 2
+    assert request_record["payload"]["body"] == request
+    assert response_record["payload"]["body"] == response
+  end
+
   test "enforces installed per-record and aggregate encoded byte ceilings" do
     {:ok, record_limited} =
       InspectionSink.start(

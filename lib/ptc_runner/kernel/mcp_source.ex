@@ -11,6 +11,13 @@ defmodule PtcRunner.Kernel.MCPSource do
   output schemas are compiled once during assembly and the compiled validators
   are reused for every invocation.
 
+  Runtime calls propagate a W3C `traceparent` derived from the private Kernel
+  trace and capability-attempt identities. When private inspection is
+  explicitly enabled, version 2 inspection records retain paired exact decoded
+  JSON-RPC request and response bodies correlated to that attempt. Transport
+  credentials and environment values are never part of those bodies or
+  records.
+
   Streamable HTTP supports JSON and SSE responses to POST requests and rejects
   redirects and remote endpoint changes. Both transports support schema-valid
   structured object results with exact text or embedded text-resource
@@ -22,6 +29,7 @@ defmodule PtcRunner.Kernel.MCPSource do
 
   alias PtcRunner.Kernel.Capability
   alias PtcRunner.Kernel.DeterministicJSON
+  alias PtcRunner.Kernel.InspectionSink
   alias PtcRunner.Kernel.MCPLauncherStaging
   alias PtcRunner.Kernel.MCPProtocol
   alias PtcRunner.Kernel.MCPRequestContext
@@ -85,10 +93,14 @@ defmodule PtcRunner.Kernel.MCPSource do
     * `:tools` - required map from fixed upstream names to
       `%{as: public_name, effect: :read}`. A mapping may also carry a bounded
       host-owned `:description`, `:model_visible` (default `true` for direct
-      embedding), and the reserved `:error_feedback` policy. Both names are
-      unique and bounded; only the public name crosses the capability
-      boundary. The host JSON decoder supplies its stricter model-invisible
-      default explicitly.
+      embedding), and `:error_feedback` (`:closed`, the default, or
+      `:bounded`). Bounded feedback exposes at most 1,024 bytes of exact,
+      validated text from an MCP `isError` result as untrusted recoverable
+      capability-error details. Enabling it trusts the installed server not
+      to place secrets, paths, or stack traces in that text. Public canonical
+      events remain closed. Both names are unique and bounded; only the public
+      name crosses the capability boundary. The host JSON decoder supplies its
+      stricter model-invisible default explicitly.
     * `:timeout_ms` - installed end-to-end ceiling for discovery, calls, and
       requests (default `5_000`; stdio maximum `300_000`). A manifest may only
       lower it.
@@ -759,7 +771,7 @@ defmodule PtcRunner.Kernel.MCPSource do
              input_schema: contract.input_schema,
              output_schema: contract.output_schema,
              effect: :read,
-             callback: fn _arguments -> {:error, :uninstalled_mcp_callback} end
+             callback: fn _arguments, _context -> {:error, :uninstalled_mcp_callback} end
            ),
          capability = %{
            capability
@@ -769,6 +781,7 @@ defmodule PtcRunner.Kernel.MCPSource do
                  upstream,
                  contract.header_parameters,
                  capability.output_validator,
+                 mapping.error_feedback,
                  selected
                )
          },
@@ -798,28 +811,39 @@ defmodule PtcRunner.Kernel.MCPSource do
     end
   end
 
-  defp callback(transport, upstream, header_parameters, output_validator, selected) do
-    fn arguments ->
+  defp callback(
+         transport,
+         upstream,
+         header_parameters,
+         output_validator,
+         error_feedback,
+         selected
+       ) do
+    fn arguments, context ->
       case rpc(
              transport,
              "tools/call",
              %{"name" => upstream, "arguments" => arguments},
              selected.max_result_bytes,
-             header_parameters
+             header_parameters,
+             context
            ) do
-        {:ok, result} -> normalize_result(result, output_validator)
+        {:ok, result} -> normalize_result(result, output_validator, error_feedback)
         {:error, reason} -> {:error, provider_error(reason)}
       end
     end
   end
 
-  defp normalize_result(result, output_validator) do
-    case MCPProtocol.normalize_tool_result(result, output_validator) do
+  defp normalize_result(result, output_validator, error_feedback) do
+    case MCPProtocol.normalize_tool_result(result, output_validator, error_feedback) do
       {:ok, value} ->
         {:ok, value}
 
       {:error, :mcp_domain_error} ->
         {:error, ProviderError.new(:domain_error, "mcp_domain_error")}
+
+      {:error, {:mcp_domain_error, feedback}} ->
+        {:error, ProviderError.new(:domain_error, feedback)}
 
       {:error, :mcp_invalid_result} ->
         {:error, ProviderError.new(:invalid_result, "mcp_invalid_result")}
@@ -941,23 +965,26 @@ defmodule PtcRunner.Kernel.MCPSource do
 
   defp transport_header_parameters_hash(:stdio, _parameters), do: {:ok, nil}
 
-  defp rpc(transport, method, params, max_bytes, header_parameters \\ [])
+  defp rpc(transport, method, params, max_bytes),
+    do: rpc(transport, method, params, max_bytes, [], nil)
 
   defp rpc(
          %{type: :streamable_http, handle: request_context},
          method,
          params,
          max_bytes,
-         header_parameters
+         header_parameters,
+         context
        ) do
     with_request(request_context, fn request ->
       with {:ok, parameter_headers} <-
              MCPProtocol.header_values(header_parameters, Map.get(params, "arguments", %{})),
            {:ok, headers} <- request_headers(request, method, params, parameter_headers),
-           payload = MCPProtocol.request(request.id, method, params, request_metadata()),
+           payload = MCPProtocol.request(request.id, method, params, request_metadata(context)),
            {:ok, response} <-
              http(request, headers, payload, @max_transport_response_bytes),
-           {:ok, body} <- response_body(response, request.id) do
+           {:ok, body} <- response_body(response, request.id),
+           :ok <- capture_exchange(context, :streamable_http, payload, body) do
         bounded_outcome(body, method, max_bytes)
       end
     end)
@@ -968,21 +995,78 @@ defmodule PtcRunner.Kernel.MCPSource do
          method,
          params,
          max_bytes,
-         _header_parameters
+         _header_parameters,
+         context
        ) do
-    case MCPStdioTransport.request(
-           handle,
-           method,
-           params,
-           request_metadata(),
-           @max_transport_response_bytes,
-           timeout_ms
-         ) do
-      {:ok, body} -> bounded_outcome(body, method, max_bytes)
-      {:error, :closed} -> {:error, :mcp_transport_error}
-      {:error, _reason} = error -> error
+    request =
+      if match?(%{inspection_sink: %InspectionSink{}}, context) do
+        MCPStdioTransport.request_exchange(
+          handle,
+          method,
+          params,
+          request_metadata(context),
+          @max_transport_response_bytes,
+          timeout_ms
+        )
+      else
+        MCPStdioTransport.request(
+          handle,
+          method,
+          params,
+          request_metadata(nil),
+          @max_transport_response_bytes,
+          timeout_ms
+        )
+      end
+
+    case request do
+      {:ok, %{request: payload, response: body}} ->
+        with :ok <- capture_exchange(context, :stdio, payload, body),
+             do: bounded_outcome(body, method, max_bytes)
+
+      {:ok, body} ->
+        bounded_outcome(body, method, max_bytes)
+
+      {:error, :closed} ->
+        {:error, :mcp_transport_error}
+
+      {:error, _reason} = error ->
+        error
     end
   end
+
+  defp capture_exchange(nil, _transport, _request, _response), do: :ok
+
+  defp capture_exchange(
+         %{inspection_sink: nil},
+         _transport,
+         _request,
+         _response
+       ),
+       do: :ok
+
+  defp capture_exchange(
+         %{capability_id: capability_id, inspection_sink: sink},
+         transport,
+         %{"id" => request_id} = request,
+         %{"id" => request_id} = response
+       ) do
+    correlation = %{capability_id: capability_id, request_id: request_id}
+    payload = fn body -> %{transport: transport, body: body} end
+
+    case InspectionSink.emit(sink, "mcp-request", correlation, payload.(request)) do
+      :ok -> InspectionSink.emit(sink, "mcp-response", correlation, payload.(response))
+      {:error, :inspection_sink_error} = error -> error
+    end
+  end
+
+  defp capture_exchange(
+         %{inspection_sink: sink},
+         _transport,
+         _request,
+         _response
+       ),
+       do: InspectionSink.emit(sink, "mcp-request", %{}, %{})
 
   defp bounded_outcome(body, method, max_result_bytes) do
     with {:ok, result} <- MCPProtocol.outcome(body, method),
@@ -1334,12 +1418,20 @@ defmodule PtcRunner.Kernel.MCPSource do
 
   defp sha256(value), do: :crypto.hash(:sha256, value) |> Base.encode16(case: :lower)
 
-  defp request_metadata do
-    %{
+  defp request_metadata(context) do
+    metadata = %{
       "io.modelcontextprotocol/protocolVersion" => @protocol,
       "io.modelcontextprotocol/clientInfo" => @client_info,
       "io.modelcontextprotocol/clientCapabilities" => @client_capabilities
     }
+
+    case context do
+      %{traceparent: traceparent} when is_binary(traceparent) ->
+        Map.put(metadata, "traceparent", traceparent)
+
+      _context ->
+        metadata
+    end
   end
 
   defp applicable_name_header("tools/call", %{"name" => name}) when is_binary(name),

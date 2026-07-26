@@ -3,7 +3,8 @@
 > **Status:** active implementation plan, promoted from `future/` on
 > 2026-07-24. Slices A, B, and Pre-C are complete; Slice C is proceeding
 > independently. The result-artifact portion of Slice D has landed, while its
-> classified-input work and Slices E through H remain planned. This document
+> classified-input work and Slices E, G, and H remain planned. Slice F is
+> complete. This document
 > describes the generic runner and application contracts built on the
 > MCP-first capability platform.
 
@@ -1238,10 +1239,10 @@ Static source, selection, and data-class checks happen before credentials are
 resolved, sensitive snapshots are opened, stdio is spawned, or remote MCP is
 contacted. Discovery is a later dynamic validation phase.
 
-MCP-first Slices 4 and 5 are independent after this foundation. The sequence
-below intentionally takes the filesystem sample/cutover (MCP Slice 5) before
-private MCP exchange capture (MCP Slice 4) so useful file navigation lands
-early. The complete Code Scout acceptance flow requires both.
+MCP-first Slices 4 and 5 are independent after this foundation. Private MCP
+feedback and exchange capture (MCP Slice 4) is complete; the filesystem
+sample/cutover (MCP Slice 5) remains. The complete Code Scout acceptance flow
+requires both.
 
 ### Pre-C prerequisite — Confined trusted file loading
 
@@ -1377,6 +1378,8 @@ arguments/results, and effective prelude, while no private payload appears in
 the profile's own analysis trace.
 
 ### Slice F — MCP feedback and private exchange records
+
+**Status:** implemented.
 
 Complete MCP-first Slice 4:
 

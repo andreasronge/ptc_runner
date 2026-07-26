@@ -201,6 +201,10 @@ terminal finalization, and the immutable terminal batch.
 `PtcRunner.Kernel.TraceLog` owns canonical validation, persistence, discovery,
 and queries. `PtcRunner.Kernel.InspectionArtifact` owns the exact private
 artifact grammar, exclusive persistence, loading, and correlation checks.
+Inspection V1 covers provider-neutral capability, source, and model evidence;
+V2 additionally admits paired decoded MCP request/response bodies correlated
+to an existing capability attempt. MCP inspection records never include
+rendered headers or subprocess environment values.
 `PtcRunner.Kernel.SafeMetadata` owns the closed labels and annotation
 vocabulary.
 
@@ -229,7 +233,10 @@ manifest may only select mapped names and narrow visibility or limits.
 `PtcRunner.Kernel.MCPSource` owns common discovery and capability assembly,
 `PtcRunner.Kernel.MCPProtocol` owns pure protocol validation and normalization,
 and the transport owners bound and correlate each request. Their module docs
-define the exact behavior.
+define the exact behavior. MCP tool errors are closed by default; a host
+mapping may opt into exact validated feedback bounded to 1,024 bytes. Runtime
+calls propagate only a derived W3C `traceparent`, with no baggage or
+operator-supplied trace value crossing the provider boundary.
 
 The local log-analysis path is a fixed product profile shared by the Viewer
 and terminal REPL. `PtcRunner.Kernel.LogAnalysisSessionBuilder` is the host

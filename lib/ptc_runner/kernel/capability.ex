@@ -7,6 +7,10 @@ defmodule PtcRunner.Kernel.Capability do
   budget reservation, and provider invocation. `output_schema`, when present,
   checks successful values before they return to Lisp. `callback` returns
   `{:ok, json_value}` or `{:error, %PtcRunner.Kernel.ProviderError{}}`.
+  One-argument callbacks receive only normalized arguments. Trusted
+  two-argument callbacks additionally receive a dispatcher-owned invocation
+  context for private observation and safe trace propagation; that context
+  never crosses into Lisp.
 
   `description` and `model_visible` control bounded discovery metadata only.
   They do not grant authority. A capability can be invoked only when the host
@@ -38,7 +42,14 @@ defmodule PtcRunner.Kernel.Capability do
     effect: :unknown
   ]
 
-  @type callback :: (map() -> {:ok, term()} | {:error, PtcRunner.Kernel.ProviderError.t()})
+  @type callback_result :: {:ok, term()} | {:error, PtcRunner.Kernel.ProviderError.t()}
+  @type invocation_context :: %{
+          capability_id: binary(),
+          inspection_sink: PtcRunner.Kernel.InspectionSink.t() | nil,
+          traceparent: binary() | nil
+        }
+  @type callback ::
+          (map() -> callback_result()) | (map(), invocation_context() -> callback_result())
   @type t :: %__MODULE__{
           name: binary(),
           callback: callback(),
@@ -68,7 +79,8 @@ defmodule PtcRunner.Kernel.Capability do
   def new(opts) when is_list(opts) do
     with true <- Keyword.keys(opts) -- @options == [],
          {:ok, name} <- valid_name(Keyword.get(opts, :name)),
-         callback when is_function(callback, 1) <- Keyword.get(opts, :callback),
+         callback when is_function(callback, 1) or is_function(callback, 2) <-
+           Keyword.get(opts, :callback),
          :ok <- valid_validator(Keyword.get(opts, :validate)),
          {:ok, description} <- valid_description(Keyword.get(opts, :description)),
          visible when is_boolean(visible) <- Keyword.get(opts, :model_visible, true),

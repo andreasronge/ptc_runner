@@ -8,16 +8,19 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
   written. The create fails when the destination already exists; unlike a
   rename, it cannot replace an existing artifact. Loading rejects symlinks,
   changed files, content above 16 MB, any record above 2,000,000 encoded bytes,
-  malformed lines, mixed identities, non-contiguous sequences, and records
-  outside the exact V1 vocabulary.
+  malformed lines, mixed identities or schema versions, non-contiguous
+  sequences, and records outside the exact V1 or V2 vocabulary. V2 adds paired
+  MCP request/response bodies correlated to an existing capability attempt.
   """
 
   alias Jason.OrderedObject
+  alias PtcRunner.Kernel.MCPProtocol
 
   @max_bytes 16_000_000
   @max_record_bytes 2_000_000
   @suffix ".inspection.jsonl"
-  @record_types ~w(capability-input capability-output evaluation-source prelude-source)
+  @record_types_v1 ~w(capability-input capability-output evaluation-source prelude-source)
+  @record_types_v2 @record_types_v1 ++ ~w(mcp-request mcp-response)
   @envelope_keys ~w(schema_version run_id trace_id sequence timestamp record_type correlation payload)
 
   @spec preflight_destination(term()) ::
@@ -186,12 +189,13 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
   defp validate_records([first | _rest] = records) do
     run_id = first["run_id"]
     trace_id = first["trace_id"]
+    schema_version = first["schema_version"]
 
     result =
       records
       |> Enum.with_index(1)
       |> Enum.reduce_while(:ok, fn {record, sequence}, :ok ->
-        if valid_record?(record, run_id, trace_id, sequence),
+        if valid_record?(record, run_id, trace_id, schema_version, sequence),
           do: {:cont, :ok},
           else: {:halt, {:error, :invalid_inspection_artifact}}
       end)
@@ -206,72 +210,121 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
     initial = %{
       inputs: %{},
       outputs: MapSet.new(),
+      mcp_requests: %{},
+      mcp_responses: MapSet.new(),
       evaluations: MapSet.new(),
       preludes: MapSet.new()
     }
 
     records
     |> Enum.reduce_while({:ok, initial}, fn record, {:ok, state} ->
-      case record do
-        %{
-          "record_type" => "capability-input",
-          "correlation" => %{"capability_id" => id},
-          "payload" => %{"environment" => environment, "name" => name}
-        } ->
-          if Map.has_key?(state.inputs, id) do
-            {:halt, {:error, :invalid_inspection_artifact}}
-          else
-            {:cont, {:ok, put_in(state, [:inputs, id], {environment, name})}}
-          end
-
-        %{
-          "record_type" => "capability-output",
-          "correlation" => %{"capability_id" => id},
-          "payload" => %{"environment" => environment, "name" => name}
-        } ->
-          if Map.get(state.inputs, id) == {environment, name} and
-               not MapSet.member?(state.outputs, id) do
-            {:cont, {:ok, %{state | outputs: MapSet.put(state.outputs, id)}}}
-          else
-            {:halt, {:error, :invalid_inspection_artifact}}
-          end
-
-        %{
-          "record_type" => "evaluation-source",
-          "correlation" => %{"evaluation_id" => id}
-        } ->
-          unique_record(state, :evaluations, id)
-
-        %{
-          "record_type" => "prelude-source",
-          "correlation" => %{"component_id" => id},
-          "payload" => %{"environment" => environment}
-        } ->
-          unique_record(state, :preludes, {environment, id})
-      end
+      validate_record_join(record, state)
     end)
     |> case do
-      {:ok, _state} -> :ok
-      {:error, _reason} = error -> error
+      {:ok, state} ->
+        if Map.keys(state.mcp_requests) |> MapSet.new() == state.mcp_responses,
+          do: :ok,
+          else: {:error, :invalid_inspection_artifact}
+
+      {:error, _reason} = error ->
+        error
     end
   end
+
+  defp validate_record_join(
+         %{
+           "record_type" => "capability-input",
+           "correlation" => %{"capability_id" => id},
+           "payload" => %{"environment" => environment, "name" => name}
+         },
+         state
+       ) do
+    if Map.has_key?(state.inputs, id),
+      do: invalid_record_join(),
+      else: {:cont, {:ok, put_in(state, [:inputs, id], {environment, name})}}
+  end
+
+  defp validate_record_join(
+         %{
+           "record_type" => "capability-output",
+           "correlation" => %{"capability_id" => id},
+           "payload" => %{"environment" => environment, "name" => name}
+         },
+         state
+       ) do
+    if Map.get(state.inputs, id) == {environment, name} and
+         not MapSet.member?(state.outputs, id),
+       do: {:cont, {:ok, %{state | outputs: MapSet.put(state.outputs, id)}}},
+       else: invalid_record_join()
+  end
+
+  defp validate_record_join(
+         %{
+           "record_type" => "mcp-request",
+           "correlation" => %{"capability_id" => capability_id, "request_id" => request_id},
+           "payload" => %{"transport" => transport}
+         },
+         state
+       ) do
+    key = {capability_id, request_id}
+
+    if Map.has_key?(state.inputs, capability_id) and
+         not Map.has_key?(state.mcp_requests, key),
+       do: {:cont, {:ok, put_in(state, [:mcp_requests, key], transport)}},
+       else: invalid_record_join()
+  end
+
+  defp validate_record_join(
+         %{
+           "record_type" => "mcp-response",
+           "correlation" => %{"capability_id" => capability_id, "request_id" => request_id},
+           "payload" => %{"transport" => transport}
+         },
+         state
+       ) do
+    key = {capability_id, request_id}
+
+    if Map.get(state.mcp_requests, key) == transport and
+         not MapSet.member?(state.mcp_responses, key),
+       do: {:cont, {:ok, %{state | mcp_responses: MapSet.put(state.mcp_responses, key)}}},
+       else: invalid_record_join()
+  end
+
+  defp validate_record_join(
+         %{"record_type" => "evaluation-source", "correlation" => %{"evaluation_id" => id}},
+         state
+       ),
+       do: unique_record(state, :evaluations, id)
+
+  defp validate_record_join(
+         %{
+           "record_type" => "prelude-source",
+           "correlation" => %{"component_id" => id},
+           "payload" => %{"environment" => environment}
+         },
+         state
+       ),
+       do: unique_record(state, :preludes, {environment, id})
+
+  defp invalid_record_join, do: {:halt, {:error, :invalid_inspection_artifact}}
 
   defp unique_record(state, field, key) do
     seen = Map.fetch!(state, field)
 
     if MapSet.member?(seen, key) do
-      {:halt, {:error, :invalid_inspection_artifact}}
+      invalid_record_join()
     else
       {:cont, {:ok, Map.put(state, field, MapSet.put(seen, key))}}
     end
   end
 
-  defp valid_record?(record, run_id, trace_id, sequence) do
+  defp valid_record?(record, run_id, trace_id, schema_version, sequence) do
     is_map(record) and Map.keys(record) |> Enum.sort() == Enum.sort(@envelope_keys) and
-      record["schema_version"] == 1 and record["run_id"] == run_id and
+      schema_version in [1, 2] and record["schema_version"] == schema_version and
+      record["run_id"] == run_id and
       record["trace_id"] == trace_id and is_binary(run_id) and is_binary(trace_id) and
       record["sequence"] == sequence and valid_timestamp?(record["timestamp"]) and
-      record["record_type"] in @record_types and valid_shape?(record)
+      record["record_type"] in record_types(schema_version) and valid_shape?(record)
   end
 
   defp valid_shape?(%{
@@ -302,6 +355,32 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
       payload["program_kind"] == "ptc-lisp" and is_binary(payload["source"]) and
       payload["source_bytes"] == byte_size(payload["source"]) and
       payload["source_hash"] == sha256(payload["source"])
+  end
+
+  defp valid_shape?(%{
+         "record_type" => "mcp-request",
+         "correlation" =>
+           %{"capability_id" => capability_id, "request_id" => request_id} =
+             correlation,
+         "payload" => payload
+       }) do
+    exact_keys?(correlation, ~w(capability_id request_id)) and
+      exact_keys?(payload, ~w(transport body)) and valid_id?(capability_id) and
+      valid_request_id?(request_id) and payload["transport"] in ["stdio", "streamable_http"] and
+      MCPProtocol.valid_exchange_request?(payload["body"], request_id)
+  end
+
+  defp valid_shape?(%{
+         "record_type" => "mcp-response",
+         "correlation" =>
+           %{"capability_id" => capability_id, "request_id" => request_id} =
+             correlation,
+         "payload" => payload
+       }) do
+    exact_keys?(correlation, ~w(capability_id request_id)) and
+      exact_keys?(payload, ~w(transport body)) and valid_id?(capability_id) and
+      valid_request_id?(request_id) and payload["transport"] in ["stdio", "streamable_http"] and
+      MCPProtocol.valid_exchange_response?(payload["body"], request_id)
   end
 
   defp valid_shape?(%{
@@ -352,6 +431,13 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
              "payload" => %{"environment" => environment, "name" => name}
            } ->
              Map.get(capabilities, id) == {environment, name}
+
+           %{
+             "record_type" => record_type,
+             "correlation" => %{"capability_id" => id, "request_id" => request_id}
+           }
+           when record_type in ["mcp-request", "mcp-response"] ->
+             Map.has_key?(capabilities, id) and valid_request_id?(request_id)
 
            %{
              "correlation" => %{"evaluation_id" => id},
@@ -473,6 +559,9 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
     do: match?({:ok, _datetime, 0}, DateTime.from_iso8601(timestamp))
 
   defp valid_timestamp?(_timestamp), do: false
+  defp record_types(1), do: @record_types_v1
+  defp record_types(2), do: @record_types_v2
+  defp valid_request_id?(id), do: is_integer(id) and id > 0
   defp valid_id?(id), do: is_binary(id) and byte_size(id) in 1..256 and String.valid?(id)
   defp sha256(value), do: :crypto.hash(:sha256, value) |> Base.encode16(case: :lower)
 end

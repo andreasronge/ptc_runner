@@ -9,6 +9,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
   alias PtcRunner.Kernel.Capability
   alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.EventSink
+  alias PtcRunner.Kernel.InspectionArtifact
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.MCPSource
   alias PtcRunner.Kernel.ProviderRegistry
@@ -100,6 +101,89 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     refute_receive :mcp_deleted
 
     EventSink.stop(built.config.event_sink)
+  end
+
+  @tag :tmp_dir
+  test "bounded tool-error feedback is recoverable while canonical events stay closed", %{
+    tmp_dir: dir
+  } do
+    feedback = "unknown path; retry with x"
+    fixture = fixture(self(), error_text: feedback, recoverable_error?: true)
+    on_exit(fixture.close)
+
+    tools =
+      Map.update!(mappings(), "fail", fn mapping ->
+        Map.put(mapping, :error_feedback, :bounded)
+      end)
+
+    program =
+      ~S|(let [first (tool/remote.fail {"query" "bad"}) second (if (= "unknown path; retry with x" (get first :details)) (tool/remote.fail {"query" "x"}) first)] (return {"first" first "second" second}))|
+
+    {:ok, built} =
+      dir
+      |> manifest(["remote.fail"], program: program)
+      |> RunBuilder.load_and_build(registry(fixture.endpoint, tools: tools))
+
+    assert {:ok, result} = Kernel.run(built.entry_source, built.config)
+
+    assert %{
+             status: :error,
+             kind: :provider_error,
+             reason: :domain_error,
+             details: ^feedback,
+             retryable?: false
+           } = get_in(result.value, [:value, :value, "first"])
+
+    assert %{status: :ok, value: %{"text" => ["recovered"]}} =
+             get_in(result.value, [:value, :value, "second"])
+
+    events = EventSink.events(built.config.event_sink)
+    refute inspect(events) =~ feedback
+
+    EventSink.stop(built.config.event_sink)
+  end
+
+  @tag :tmp_dir
+  test "private inspection captures correlated MCP bodies and safe trace context", %{
+    tmp_dir: dir
+  } do
+    fixture = fixture(self(), capture_body?: true)
+    on_exit(fixture.close)
+
+    inspection_path = Path.join(dir, "mcp.inspection.jsonl")
+    trace_path = Path.join(dir, "mcp.trace.jsonl")
+    manifest_path = manifest(dir, Map.keys(public_mappings()))
+
+    assert {:ok, _result} =
+             RunBuilder.run(manifest_path, registry(fixture.endpoint),
+               inspect: inspection_path,
+               trace: trace_path
+             )
+
+    assert_receive {:mcp_body, "tools/call", request_body}
+
+    assert get_in(request_body, ["params", "_meta", "traceparent"]) =~
+             ~r/\A00-[0-9a-f]{32}-[0-9a-f]{16}-01\z/
+
+    assert {:ok, records} = InspectionArtifact.load(inspection_path)
+
+    requests = Enum.filter(records, &(&1["record_type"] == "mcp-request"))
+    responses = Enum.filter(records, &(&1["record_type"] == "mcp-response"))
+    assert length(requests) == 3
+    assert length(responses) == 3
+
+    assert Enum.map(requests, & &1["correlation"]) |> MapSet.new() ==
+             Enum.map(responses, & &1["correlation"]) |> MapSet.new()
+
+    assert Enum.all?(requests ++ responses, &(&1["schema_version"] == 2))
+
+    encoded_inspection = File.read!(inspection_path)
+    refute encoded_inspection =~ "Bearer fixture-secret"
+
+    encoded_trace = File.read!(trace_path)
+    refute encoded_trace =~ ~s("arguments")
+    refute encoded_trace =~ ~s("structuredContent")
+    refute encoded_trace =~ "Bearer fixture-secret"
   end
 
   @tag :tmp_dir
@@ -1292,6 +1376,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     MCPHTTPFixture.start(fn request ->
       method = request.body["method"]
       send(parent, {:mcp_request, method, request.headers})
+      if opts[:capture_body?], do: send(parent, {:mcp_body, method, request.body})
 
       if opts[:block_discover?] && method == "server/discover" do
         send(parent, {:mcp_blocked, self()})
@@ -1332,11 +1417,11 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
 
     request.method == "POST" and request.headers["mcp-protocol-version"] == "2026-07-28" and
       request.headers["mcp-method"] == method and
-      metadata == %{
+      Map.drop(metadata, ["traceparent"]) == %{
         "io.modelcontextprotocol/protocolVersion" => "2026-07-28",
         "io.modelcontextprotocol/clientInfo" => %{"name" => "ptc_runner", "version" => "0.x"},
         "io.modelcontextprotocol/clientCapabilities" => %{}
-      } and
+      } and valid_traceparent?(metadata["traceparent"], method) and
       case method do
         "tools/call" ->
           request.headers["mcp-name"] == name and
@@ -1346,6 +1431,13 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
           not Map.has_key?(request.headers, "mcp-name")
       end
   end
+
+  defp valid_traceparent?(nil, method), do: method != "tools/call"
+
+  defp valid_traceparent?(traceparent, "tools/call") when is_binary(traceparent),
+    do: traceparent =~ ~r/\A00-[0-9a-f]{32}-[0-9a-f]{16}-01\z/
+
+  defp valid_traceparent?(_traceparent, _method), do: false
 
   defp response(%{body: %{"method" => "server/discover", "id" => id}}, opts) do
     cond do
@@ -1462,7 +1554,20 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
         })
 
       "fail" ->
-        json(id, %{"resultType" => "complete", "isError" => true, "content" => []})
+        if opts[:recoverable_error?] && params["arguments"]["query"] == "x" do
+          json(id, %{
+            "resultType" => "complete",
+            "content" => [%{"type" => "text", "text" => "recovered"}]
+          })
+        else
+          content =
+            case opts[:error_text] do
+              text when is_binary(text) -> [%{"type" => "text", "text" => text}]
+              _missing -> []
+            end
+
+          json(id, %{"resultType" => "complete", "isError" => true, "content" => content})
+        end
     end
   end
 
@@ -1596,7 +1701,11 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     )
 
     program =
-      ~S|(let [structured (tool/remote.structured {"query" "x"}) text (tool/remote.text {"query" "x"}) failed (tool/remote.fail {"query" "x"})] (return {"structured" structured "text" text "failed" failed}))|
+      Keyword.get(
+        opts,
+        :program,
+        ~S|(let [structured (tool/remote.structured {"query" "x"}) text (tool/remote.text {"query" "x"}) failed (tool/remote.fail {"query" "x"})] (return {"structured" structured "text" text "failed" failed}))|
+      )
 
     config =
       Map.merge(

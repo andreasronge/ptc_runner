@@ -27,6 +27,44 @@ defmodule PtcRunner.Kernel.MCPStdioTransportTest do
   end
 
   @tag :tmp_dir
+  test "returns the exact decoded request and response for private capture", %{tmp_dir: tmp_dir} do
+    transport = start_transport(tmp_dir)
+
+    metadata = %{
+      "traceparent" =>
+        "00-" <> String.duplicate("1", 32) <> "-" <> String.duplicate("2", 16) <> "-01"
+    }
+
+    assert {:ok, %{request: request, response: response}} =
+             MCPStdioTransport.request_exchange(
+               transport,
+               "captured",
+               %{"value" => 7},
+               metadata,
+               8_192,
+               1_000
+             )
+
+    assert %{
+             "jsonrpc" => "2.0",
+             "id" => request_id,
+             "method" => "captured",
+             "params" => %{
+               "value" => 7,
+               "_meta" => %{
+                 "progressToken" => request_id,
+                 "traceparent" => _
+               }
+             }
+           } = request
+
+    assert %{"jsonrpc" => "2.0", "id" => ^request_id, "result" => %{"method" => "captured"}} =
+             response
+
+    assert :ok = MCPStdioTransport.close(transport)
+  end
+
+  @tag :tmp_dir
   test "ignores valid server notifications while waiting for a response", %{tmp_dir: tmp_dir} do
     transport = start_transport(tmp_dir)
 

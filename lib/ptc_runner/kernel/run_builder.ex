@@ -556,7 +556,8 @@ defmodule PtcRunner.Kernel.RunBuilder do
                {:ok, inspection_sink} <-
                  InspectionSink.start(
                    run_id: identity.run_id,
-                   trace_id: identity.trace_id
+                   trace_id: identity.trace_id,
+                   schema_version: 2
                  ) do
             {:ok, inspection_sink, Path.expand(path)}
           end

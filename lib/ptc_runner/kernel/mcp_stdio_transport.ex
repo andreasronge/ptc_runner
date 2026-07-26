@@ -75,7 +75,27 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
         max_bytes,
         timeout_ms
       ) do
-    safe_call(pid, {:request, method, params, metadata, max_bytes, timeout_ms})
+    safe_call(pid, {:request, method, params, metadata, max_bytes, timeout_ms, false})
+  end
+
+  @doc false
+  @spec request_exchange(t(), binary(), map(), map(), pos_integer(), pos_integer()) ::
+          {:ok, %{request: map(), response: map()}}
+          | {:error,
+             :closed
+             | :mcp_protocol_error
+             | :mcp_response_exceeded
+             | :mcp_timeout
+             | :mcp_transport_error}
+  def request_exchange(
+        %__MODULE__{pid: pid},
+        method,
+        params,
+        metadata,
+        max_bytes,
+        timeout_ms
+      ) do
+    safe_call(pid, {:request, method, params, metadata, max_bytes, timeout_ms, true})
   end
 
   @spec close(t()) :: :ok | {:error, :mcp_transport_error}
@@ -139,14 +159,14 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
 
   @impl GenServer
   def handle_call(
-        {:request, _method, _params, _metadata, _max_bytes, _timeout_ms},
+        {:request, _method, _params, _metadata, _max_bytes, _timeout_ms, _exchange?},
         _from,
         %{terminal_pending?: true} = state
       ),
       do: {:reply, {:error, :mcp_transport_error}, state}
 
   def handle_call(
-        {:request, _method, _params, _metadata, _max_bytes, _timeout_ms},
+        {:request, _method, _params, _metadata, _max_bytes, _timeout_ms, _exchange?},
         _from,
         %{closing: closing} = state
       )
@@ -154,16 +174,20 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
       do: {:reply, {:error, :closed}, state}
 
   def handle_call(
-        {:request, _method, _params, _metadata, _max_bytes, _timeout_ms},
+        {:request, _method, _params, _metadata, _max_bytes, _timeout_ms, _exchange?},
         _from,
         %{pending: pending} = state
       )
       when map_size(pending) >= @max_pending_requests,
       do: {:reply, {:error, :mcp_transport_error}, state}
 
-  def handle_call({:request, method, params, metadata, max_bytes, timeout_ms}, from, state) do
+  def handle_call(
+        {:request, method, params, metadata, max_bytes, timeout_ms, exchange?},
+        from,
+        state
+      ) do
     with :ok <- validate_request(method, params, metadata, max_bytes, timeout_ms),
-         {:ok, bytes} <- encode_request(state.next_id, method, params, metadata) do
+         {:ok, request, bytes} <- encode_request(state.next_id, method, params, metadata) do
       id = state.next_id
       {caller, _tag} = from
       monitor = Process.monitor(caller)
@@ -177,6 +201,8 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
         max_bytes: max_bytes,
         response_bytes: 0,
         write_timeout_ms: timeout_ms,
+        exchange?: exchange?,
+        request: if(exchange?, do: request),
         sent?: false
       }
 
@@ -569,11 +595,12 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
 
   defp encode_request(id, method, params, metadata) do
     metadata = Map.put(metadata, "progressToken", id)
+    request = MCPProtocol.request(id, method, params, metadata)
 
-    with {:ok, encoded} <- Jason.encode(MCPProtocol.request(id, method, params, metadata)),
+    with {:ok, encoded} <- Jason.encode(request),
          bytes = encoded <> "\n",
          true <- byte_size(bytes) <= @max_frame_bytes - 9 do
-      {:ok, bytes}
+      {:ok, request, bytes}
     else
       _reason -> {:error, :mcp_protocol_error}
     end
@@ -732,9 +759,13 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
     case Map.fetch(state.pending, id) do
       {:ok, %{sent?: true} = pending} ->
         result =
-          if pending.response_bytes + bytes <= pending.max_bytes,
-            do: {:ok, response},
-            else: {:error, :mcp_response_exceeded}
+          if pending.response_bytes + bytes <= pending.max_bytes do
+            if pending.exchange?,
+              do: {:ok, %{request: pending.request, response: response}},
+              else: {:ok, response}
+          else
+            {:error, :mcp_response_exceeded}
+          end
 
         {:ok, reply_pending(state, id, result)}
 

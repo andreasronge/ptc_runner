@@ -1,8 +1,8 @@
 # MCP-first capability platform — implementation plan
 
 > **Status:** active implementation plan, promoted from `future/` on
-> 2026-07-25. Slices 0 through 3 are complete; Slices 4 and 5 are independent
-> next steps. Every API
+> 2026-07-25. Slices 0 through 4 are complete; Slice 5 is the remaining
+> implementation step. Every API
 > below remains planned unless explicitly described as current behavior. The
 > protocol target is the locked `2026-07-28` release
 > candidate reviewed on 2026-07-23. Implementation may target that candidate
@@ -940,11 +940,10 @@ the already-authorized installation in a later dynamic phase.
 
 ## 6. Implementation sequence
 
-Slices 0–3 are the shared protocol and installation foundation. After they
-land, Slice 4 (feedback/private inspection) and Slice 5 (the filesystem sample
-and `file-read` cutover) are independent and may land in either order. The
-application plan deliberately uses the filesystem slice first; the complete
-private-inspection tutorial requires both.
+Slices 0–4 are complete. Slice 5 (the filesystem sample and `file-read`
+cutover) remains independently implementable on top of the shared protocol
+and installation foundation. The complete private-inspection tutorial requires
+both Slices 4 and 5.
 
 ### Slice 0 — Behavior-preserving seams and launcher proof
 

@@ -525,6 +525,46 @@ defmodule PtcRunner.Kernel.MCPProtocolTest do
     assert {:error, :mcp_domain_error} =
              MCPProtocol.normalize_tool_result(%{"isError" => true, "content" => []}, validator)
 
+    assert {:error, {:mcp_domain_error, "unknown path\ntry another path"}} =
+             MCPProtocol.normalize_tool_result(
+               %{
+                 "isError" => true,
+                 "content" => [
+                   %{"type" => "text", "text" => "unknown path"},
+                   %{"type" => "text", "text" => "try another path"}
+                 ]
+               },
+               validator,
+               :bounded
+             )
+
+    assert {:error, {:mcp_domain_error, bounded_feedback}} =
+             MCPProtocol.normalize_tool_result(
+               %{
+                 "isError" => true,
+                 "content" => [
+                   %{"type" => "text", "text" => String.duplicate("å", 1_024)}
+                 ]
+               },
+               validator,
+               :bounded
+             )
+
+    assert byte_size(bounded_feedback) == 1_024
+    assert String.valid?(bounded_feedback)
+
+    assert {:error, :mcp_invalid_result} =
+             MCPProtocol.normalize_tool_result(
+               %{
+                 "isError" => true,
+                 "content" => [
+                   %{"type" => "text", "text" => "not exact", "annotations" => %{}}
+                 ]
+               },
+               validator,
+               :bounded
+             )
+
     for {result, output_validator} <- [
           {%{"structuredContent" => %{"value" => 42}}, validator},
           {%{"isError" => true}, validator},
