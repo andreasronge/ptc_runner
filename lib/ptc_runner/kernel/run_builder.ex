@@ -71,7 +71,8 @@ defmodule PtcRunner.Kernel.RunBuilder do
           mission,
           sink,
           inspection_sink,
-          inspection_path
+          inspection_path,
+          Keyword.get(opts, :component_overrides, [])
         )
       end
 
@@ -91,7 +92,8 @@ defmodule PtcRunner.Kernel.RunBuilder do
          mission,
          sink,
          inspection_sink,
-         inspection_path
+         inspection_path,
+         component_overrides
        ) do
     case RunConfig.new(
            workflow_environment: workflow,
@@ -103,6 +105,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
            inspection_path: inspection_path,
            provider_resources: providers.resources,
            connector_snapshots: providers.snapshots,
+           component_overrides: component_overrides,
            labels: manifest.labels
          ) do
       {:ok, config} ->
@@ -502,9 +505,16 @@ defmodule PtcRunner.Kernel.RunBuilder do
 
     with {:ok, manifest} <- Manifest.load(path, installed_limits),
          {:ok, manifest, input_class} <- maybe_override_input(manifest, opts),
-         {:ok, manifest} <- maybe_override_component(manifest, opts),
-         :ok <- preflight_inspection(opts),
-         do: build(manifest, registry, Keyword.put(opts, :input_class, input_class))
+         {:ok, manifest, override} <- maybe_override_component(manifest, opts),
+         :ok <- preflight_inspection(opts) do
+      build(
+        manifest,
+        registry,
+        opts
+        |> Keyword.put(:input_class, input_class)
+        |> Keyword.put(:component_overrides, List.wrap(override))
+      )
+    end
   end
 
   # Applied after the manifest is loaded and before any bundle is compiled, so
@@ -517,7 +527,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
   defp maybe_override_component(%Manifest{} = manifest, opts) do
     case Keyword.get(opts, :component_override_descriptor) do
       nil ->
-        {:ok, manifest}
+        {:ok, manifest, nil}
 
       path ->
         with {:ok, override} <- ComponentOverride.load(path),
@@ -525,14 +535,20 @@ defmodule PtcRunner.Kernel.RunBuilder do
                ComponentOverride.apply(manifest.workflow_components, override),
              {:ok, mission, mission_applied?} <-
                ComponentOverride.apply(manifest.mission_components, override),
-             true <- workflow_applied? or mission_applied? do
-          {:ok, %Manifest{manifest | workflow_components: workflow, mission_components: mission}}
-        else
-          false -> {:error, :override_component_not_selected}
-          {:error, reason} -> {:error, reason}
+             :ok <- exactly_one_target(workflow_applied?, mission_applied?) do
+          {:ok, %Manifest{manifest | workflow_components: workflow, mission_components: mission},
+           ComponentOverride.identity(override)}
         end
     end
   end
+
+  # The descriptor names one component, so it must resolve to one. The same ID
+  # can legitimately be selected into both environments, and replacing both
+  # from a single descriptor would evaluate a candidate in a place the operator
+  # never named.
+  defp exactly_one_target(true, true), do: {:error, :ambiguous_override_target}
+  defp exactly_one_target(false, false), do: {:error, :override_component_not_selected}
+  defp exactly_one_target(_workflow, _mission), do: :ok
 
   # A deterministic destination conflict is reported after manifest and input
   # validation (so a bad output path never masks a more useful error) but

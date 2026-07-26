@@ -10,9 +10,12 @@ defmodule PtcRunner.Kernel.LLMReplay do
   nothing about the application changes between them.
 
   A fixture file is JSON Lines. Each entry names the `request_hash` it answers
-  and carries either one `response` or an ordered `responses` sequence, which
-  is how a multi-turn agent loop is replayed — the first call with that hash
-  gets the first element, the next call the next.
+  and carries either one `response` or an ordered `responses` sequence. The
+  sequence form exists for a request that repeats *identically* — a retry, or a
+  loop that rebuilds the same prompt — where the first call gets the first
+  element and the next call the next. An ordinary multi-turn agent loop does
+  not need it: each turn carries the accumulated transcript, so each request
+  hashes differently and gets its own entry.
 
   The hash is over the deterministic encoding of the provider-neutral request
   the workflow actually built, before any provider adapter sees it, so a
@@ -20,6 +23,10 @@ defmodule PtcRunner.Kernel.LLMReplay do
   exact by construction: a run whose prompt, messages, or tools differ at all
   produces a different hash and fails rather than silently replaying a response
   recorded for a different question.
+
+  The provider is owned. Its response cursor lives in a process that monitors
+  the run that acquired it, so a run failing between acquisition and cleanup
+  cannot leave a replay owner behind.
 
   Every failure is closed. An unknown hash, an exhausted sequence, a malformed
   or oversized response, a duplicate entry, or a fixture past its ceilings all
@@ -31,6 +38,7 @@ defmodule PtcRunner.Kernel.LLMReplay do
   alias PtcRunner.Kernel.ConfinedFile
   alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.JSONValue
+  alias PtcRunner.Kernel.LLMReplayOwner
   alias PtcRunner.Kernel.ProviderError
   alias PtcRunner.Kernel.StrictJSON
   alias PtcRunner.Lisp.RetainedSize
@@ -97,12 +105,7 @@ defmodule PtcRunner.Kernel.LLMReplay do
 
   @doc "Stops the owner. Safe to call more than once."
   @spec stop(t()) :: :ok
-  def stop(%__MODULE__{pid: pid}) do
-    if Process.alive?(pid), do: Agent.stop(pid, :normal, 5_000)
-    :ok
-  catch
-    :exit, _reason -> :ok
-  end
+  def stop(%__MODULE__{pid: pid}), do: LLMReplayOwner.stop(pid)
 
   @doc """
   Safe provider identity. Carries counts and ceilings, never payloads or paths.
@@ -151,15 +154,19 @@ defmodule PtcRunner.Kernel.LLMReplay do
   end
 
   defp take(%__MODULE__{pid: pid}, key) do
-    Agent.get_and_update(pid, fn entries ->
-      case Map.get(entries, key) do
-        [response | rest] -> {{:ok, response}, Map.put(entries, key, rest)}
-        [] -> {{:error, failure("replay sequence for this request is exhausted")}, entries}
-        nil -> {{:error, failure("no replay fixture matches this request")}, entries}
-      end
-    end)
-  catch
-    :exit, _reason -> {:error, ProviderError.new(:unavailable, "replay provider is unavailable")}
+    case LLMReplayOwner.take(pid, key) do
+      {:ok, response} ->
+        {:ok, response}
+
+      {:error, :exhausted} ->
+        {:error, failure("replay sequence for this request is exhausted")}
+
+      {:error, :unmatched} ->
+        {:error, failure("no replay fixture matches this request")}
+
+      {:error, :unavailable} ->
+        {:error, ProviderError.new(:unavailable, "replay provider is unavailable")}
+    end
   end
 
   defp bounded(response, limit) do
@@ -245,17 +252,9 @@ defmodule PtcRunner.Kernel.LLMReplay do
   end
 
   defp start_owner(entries, owner) do
-    case Agent.start_link(fn ->
-           Process.flag(:trap_exit, false)
-           entries
-         end) do
-      {:ok, pid} ->
-        # The provider dies with its run rather than outliving it.
-        if owner != self(), do: Process.unlink(pid)
-        {:ok, pid}
-
-      _reason ->
-        {:error, :invalid_replay_fixtures}
+    case LLMReplayOwner.start(entries, owner) do
+      {:ok, pid} -> {:ok, pid}
+      _reason -> {:error, :invalid_replay_fixtures}
     end
   end
 

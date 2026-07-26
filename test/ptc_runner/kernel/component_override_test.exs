@@ -106,6 +106,53 @@ defmodule PtcRunner.Kernel.ComponentOverrideTest do
     end
   end
 
+  describe "run identity" do
+    @tag :tmp_dir
+    test "the verified override identity is bound into run-started metadata", context do
+      paths = write_application(context, context.base)
+
+      assert {:ok, built} =
+               RunBuilder.load_and_build(paths.manifest, context.registry,
+                 component_override_descriptor: paths.descriptor
+               )
+
+      # The effective bundle hash changes whenever source changes, but it
+      # cannot say which component was overridden or what base the candidate
+      # was verified against. Without this an evaluation artifact could not
+      # distinguish a candidate trial from an ordinary run.
+      assert [identity] = built.config.run_started_metadata.component_overrides
+
+      assert identity == %{
+               "component_id" => "agent.retry",
+               "base_source_hash" => hash(context.base.source),
+               "source_hash" => hash(File.read!(paths.candidate))
+             }
+
+      refute inspect(built.config.run_started_metadata) =~ "candidate-marker"
+      assert :ok = RunBuilder.close(built)
+    end
+
+    @tag :tmp_dir
+    test "an ordinary run records no override", context do
+      paths = write_application(context, context.base)
+      File.write!(Path.join(paths.dir, "w.clj"), ~S|(ns app) (defn run [_i] (return 1))|)
+
+      assert {:ok, built} = RunBuilder.load_and_build(paths.manifest, context.registry)
+      refute Map.has_key?(built.config.run_started_metadata, :component_overrides)
+      assert :ok = RunBuilder.close(built)
+    end
+
+    @tag :tmp_dir
+    test "one descriptor may not replace the same id in two environments", context do
+      paths = write_application(context, context.base, both_environments: true)
+
+      assert {:error, :ambiguous_override_target} =
+               RunBuilder.load_and_build(paths.manifest, context.registry,
+                 component_override_descriptor: paths.descriptor
+               )
+    end
+  end
+
   describe "candidate confinement" do
     @tag :tmp_dir
     test "replacing the source file after verification cannot substitute bytes", context do
@@ -194,18 +241,27 @@ defmodule PtcRunner.Kernel.ComponentOverrideTest do
       ~S|(ns app) (defn run [_i] (return (agent.retry/candidate-marker)))|
     )
 
-    manifest = %{
-      "version" => 1,
-      "workflow" => %{
-        "components" => [
-          %{"library" => "agent.retry"},
-          %{"id" => "app", "path" => "w.clj", "dependencies" => ["agent.retry"]}
-        ],
-        "entry" => "app/run"
-      },
-      "input" => %{"value" => %{}},
-      "limits" => %{"run_duration_ms" => 30_000}
-    }
+    mission =
+      if Keyword.get(opts, :both_environments, false),
+        do: %{"mission" => %{"components" => [%{"library" => "agent.retry"}], "data" => %{}}},
+        else: %{}
+
+    manifest =
+      Map.merge(
+        %{
+          "version" => 1,
+          "workflow" => %{
+            "components" => [
+              %{"library" => "agent.retry"},
+              %{"id" => "app", "path" => "w.clj", "dependencies" => ["agent.retry"]}
+            ],
+            "entry" => "app/run"
+          },
+          "input" => %{"value" => %{}},
+          "limits" => %{"run_duration_ms" => 30_000}
+        },
+        mission
+      )
 
     manifest_path = Path.join(dir, "ptc.json")
     File.write!(manifest_path, Jason.encode!(manifest))

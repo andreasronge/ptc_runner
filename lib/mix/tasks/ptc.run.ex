@@ -12,6 +12,7 @@ defmodule Mix.Tasks.Ptc.Run do
       mix ptc.run MANIFEST --private-output results/answer.private.json
       mix ptc.run MANIFEST --host-config ptc-host.json
       mix ptc.run MANIFEST --host-config ptc-host.json --check
+      mix ptc.run MANIFEST --component-override-descriptor private/agent.core.override.json
 
   `--output` and `--private-output` write the result value as a standalone
   JSON artifact so a later run can consume it without scraping stdout. Both
@@ -22,6 +23,14 @@ defmodule Mix.Tasks.Ptc.Run do
 
   A private-event run may not publish. It suppresses its value on stdout,
   rejects `--output`, and requires `--private-output` to keep the value at all.
+
+  `--component-override-descriptor` is host authority for candidate
+  evaluation. It names one already-selected component, the hash of the base it
+  was derived from, and the hash of replacement source confined to the
+  descriptor's own directory. Both hashes are verified before the source
+  reaches the compiler, and the verified identity is recorded in run-started
+  metadata so a trial artifact names the base as well as the candidate. A
+  manifest cannot request one and a generated program cannot observe one.
 
   `--host-config` installs the exact provider aliases declared by one strict,
   bounded host document. `--check` assembles and discovers those providers,
@@ -38,7 +47,8 @@ defmodule Mix.Tasks.Ptc.Run do
 
   @usage "usage: mix ptc.run MANIFEST [--mission PATH | --private-mission PATH] " <>
            "[--trace PATH] [--inspect PATH] " <>
-           "[--output PATH | --private-output PATH] [--host-config PATH] [--check]"
+           "[--output PATH | --private-output PATH] [--host-config PATH] " <>
+           "[--component-override-descriptor PATH] [--check]"
 
   @impl Mix.Task
   def run(args) do

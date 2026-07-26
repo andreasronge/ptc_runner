@@ -575,12 +575,14 @@ defmodule PtcRunner.Kernel.HostInstallation do
   end
 
   defp llm_replay_snapshot(replay, installation, provider) do
-    identity = LLMReplay.snapshot(replay)
+    identity =
+      replay
+      |> LLMReplay.snapshot()
+      |> maybe_put("installation_revision", installation.installation_revision)
 
     with {:ok, encoded} <- DeterministicJSON.encode(identity) do
       {:ok,
        identity
-       |> maybe_put("installation_revision", Map.get(installation, :installation_revision))
        |> Map.put("provider", provider)
        |> Map.put("snapshot_hash", sha256(encoded))}
     end

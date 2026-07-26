@@ -126,7 +126,8 @@ defmodule PtcRunner.Kernel.RunConfig do
                :provider_resources,
                :connector_snapshots,
                :session_profile,
-               :labels
+               :labels,
+               :component_overrides
              ] !=
              [],
          %WorkflowEnvironment{} = workflow <- Keyword.get(opts, :workflow_environment),
@@ -144,6 +145,8 @@ defmodule PtcRunner.Kernel.RunConfig do
          true <- connector_snapshots?(Keyword.get(opts, :connector_snapshots, [])),
          {:ok, session_profile} <- session_profile(Keyword.get(opts, :session_profile)),
          {:ok, labels} <- SafeMetadata.normalize_labels(Keyword.get(opts, :labels, %{})),
+         {:ok, component_overrides} <-
+           component_overrides(Keyword.get(opts, :component_overrides, [])),
          {:ok, mission_inventory} <- MissionInventory.build(mission, limits),
          {:ok, run_started_metadata} <-
            run_started_metadata(
@@ -153,6 +156,7 @@ defmodule PtcRunner.Kernel.RunConfig do
              Keyword.get(opts, :connector_snapshots, []),
              session_profile,
              labels,
+             component_overrides,
              limits
            ),
          true <- EventSink.begin_capacity?(sink, run_started_metadata),
@@ -236,6 +240,7 @@ defmodule PtcRunner.Kernel.RunConfig do
          snapshots,
          session_profile,
          labels,
+         component_overrides,
          limits
        ) do
     with {:ok, workflow_prelude} <- FrozenBundle.trace_metadata(workflow.bundle),
@@ -252,6 +257,7 @@ defmodule PtcRunner.Kernel.RunConfig do
           connector_snapshots: snapshots
         }
         |> maybe_put_session_profile(session_profile)
+        |> maybe_put_component_overrides(component_overrides)
 
       limit = limits.event_payload_bytes
       bytes = RetainedSize.bytes_with_cap(payload, limit)
@@ -274,6 +280,25 @@ defmodule PtcRunner.Kernel.RunConfig do
   def close_provider_resources(%__MODULE__{provider_resources: resources}) do
     ProviderResources.close(resources)
   end
+
+  # A trial artifact has to name the base a candidate replaced, not only the
+  # candidate itself. The effective bundle hash already changes when source
+  # changes, but it cannot say which component was overridden or what base the
+  # candidate was verified against, so an evaluation could not tell a
+  # candidate run from an ordinary one. Hashes and the component ID are safe;
+  # candidate source is not and never appears here.
+  defp maybe_put_component_overrides(payload, []), do: payload
+
+  defp maybe_put_component_overrides(payload, overrides),
+    do: Map.put(payload, :component_overrides, overrides)
+
+  defp component_overrides(overrides) when is_list(overrides) and length(overrides) <= 16 do
+    if Enum.all?(overrides, &JSONValue.map?/1),
+      do: {:ok, overrides},
+      else: {:error, :invalid_run_config}
+  end
+
+  defp component_overrides(_overrides), do: {:error, :invalid_run_config}
 
   defp provider_resources?(resources),
     do: is_list(resources) and Enum.all?(resources, &is_function(&1, 0))

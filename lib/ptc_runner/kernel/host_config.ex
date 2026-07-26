@@ -124,6 +124,7 @@ defmodule PtcRunner.Kernel.HostConfig do
           | %{
               source: :llm_replay,
               fixtures: binary(),
+              installation_revision: binary() | nil,
               ceilings: %{max_entries: pos_integer(), max_result_bytes: pos_integer()},
               data_class: :normal | :private_inspection,
               accepts_data: [:normal | :private_inspection]
@@ -380,11 +381,13 @@ defmodule PtcRunner.Kernel.HostConfig do
   defp trace_snapshot_ceilings(_value), do: {:error, :invalid_ceilings}
 
   defp llm_replay_installation(value) do
-    allowed = ~w(source fixtures ceilings data_class accepts_data)
+    allowed = ~w(source fixtures installation_revision ceilings data_class accepts_data)
 
     with :ok <- exact_keys(value, allowed, ~w(source fixtures)),
          fixtures when is_binary(fixtures) <- value["fixtures"],
          true <- valid_path_string?(fixtures),
+         {:ok, installation_revision} <-
+           optional_revision(Map.get(value, "installation_revision")),
          {:ok, ceilings} <- llm_replay_ceilings(Map.get(value, "ceilings", %{})),
          {:ok, data_class} <- data_class(Map.get(value, "data_class", "normal")),
          {:ok, accepts_data} <- accepts_data(Map.get(value, "accepts_data", ["normal"])) do
@@ -392,6 +395,7 @@ defmodule PtcRunner.Kernel.HostConfig do
        %{
          source: :llm_replay,
          fixtures: fixtures,
+         installation_revision: installation_revision,
          ceilings: ceilings,
          data_class: data_class,
          accepts_data: accepts_data
@@ -899,6 +903,7 @@ defmodule PtcRunner.Kernel.HostConfig do
       %{
         "source" => %{"const" => "llm_replay"},
         "fixtures" => path_schema(),
+        "installation_revision" => bounded_string(256),
         "ceilings" =>
           closed_object(%{
             "max_entries" => %{

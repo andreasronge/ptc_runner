@@ -12,8 +12,10 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
 
   alias PtcRunner.Kernel.HostConfig
   alias PtcRunner.Kernel.HostInstallation
+  alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.LLMReplay
   alias PtcRunner.Kernel.ProviderError
+  alias PtcRunner.Kernel.ProviderRegistry
   alias PtcRunner.Kernel.RunBuilder
 
   @request %{"system" => "bounded", "messages" => [%{"role" => "user", "content" => "hi"}]}
@@ -177,6 +179,60 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
     end
 
     @tag :tmp_dir
+    test "an optional installation revision changes provider identity", %{tmp_dir: dir} do
+      {:ok, key} = LLMReplay.request_hash(@request)
+      write(dir, [%{"request_hash" => key, "response" => %{"n" => 1}}])
+
+      snapshot = fn revision ->
+        paths = write_application(dir, installation_revision: revision)
+        {:ok, host} = HostConfig.load(paths.host)
+        {:ok, registry} = HostInstallation.registry(host)
+        {:ok, limits} = Limits.new()
+
+        context = %{
+          directory: dir,
+          destination: :workflow,
+          owner: self(),
+          limits: limits,
+          installed_limits: limits
+        }
+
+        {:ok, built} = ProviderRegistry.build(registry, "replay-llm", %{}, context)
+        if built.close, do: built.close.()
+        built.snapshot
+      end
+
+      absent = snapshot.(nil)
+      third = snapshot.("deployment-3")
+      fourth = snapshot.("deployment-4")
+
+      assert third["installation_revision"] == "deployment-3"
+      refute Map.has_key?(absent, "installation_revision")
+
+      # The revision has to enter the identity before it is hashed, or a
+      # revision change would leave trial attribution unchanged.
+      refute absent["snapshot_hash"] == third["snapshot_hash"]
+      refute third["snapshot_hash"] == fourth["snapshot_hash"]
+    end
+
+    @tag :tmp_dir
+    test "the owner dies with the process that acquired it", %{tmp_dir: dir} do
+      {:ok, key} = LLMReplay.request_hash(@request)
+      write(dir, [%{"request_hash" => key, "response" => %{"n" => 1}}])
+
+      owner = spawn(fn -> receive do: (:release -> :ok) end)
+      {:ok, replay} = LLMReplay.start(dir, "replay.jsonl", opts(owner: owner))
+
+      assert Process.alive?(replay.pid)
+      reference = Process.monitor(replay.pid)
+
+      # A run that fails between acquisition and cleanup must not leave a
+      # replay owner behind holding its fixture set.
+      send(owner, :release)
+      assert_receive {:DOWN, ^reference, :process, _pid, _reason}, 2_000
+    end
+
+    @tag :tmp_dir
     test "stopping the owner is idempotent and releases the process", %{tmp_dir: dir} do
       {:ok, key} = LLMReplay.request_hash(@request)
       write(dir, [%{"request_hash" => key, "response" => %{"n" => 1}}])
@@ -265,11 +321,19 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
     end
   end
 
-  defp start(dir, opts \\ []) do
-    LLMReplay.start(dir, "replay.jsonl",
+  defp start(dir, opts \\ []), do: LLMReplay.start(dir, "replay.jsonl", opts(opts))
+
+  defp opts(opts) do
+    [
       max_entries: Keyword.get(opts, :max_entries, 100),
       max_result_bytes: Keyword.get(opts, :max_result_bytes, 250_000)
-    )
+    ]
+    |> then(fn base ->
+      case Keyword.get(opts, :owner) do
+        nil -> base
+        owner -> Keyword.put(base, :owner, owner)
+      end
+    end)
   end
 
   defp write(dir, entries) do
@@ -297,6 +361,12 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
         "fixtures" => fixtures,
         "ceilings" => %{"max_entries" => 100, "max_result_bytes" => 250_000}
       }
+      |> then(fn installation ->
+        case Keyword.get(opts, :installation_revision) do
+          nil -> installation
+          revision -> Map.put(installation, "installation_revision", revision)
+        end
+      end)
 
     install =
       if Keyword.get(opts, :both_llms, false) do
