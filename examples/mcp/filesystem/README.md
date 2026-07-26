@@ -61,6 +61,13 @@ npm test
 tutorial can run the server without installing or downloading anything. CI
 regenerates the bundle and fails on a diff.
 
+## Licensing
+
+The sample's own source is MIT, matching the repository. `dist/server.js` is a
+bundle that inlines its dependencies, so `NOTICE` reproduces their upstream
+license texts and travels with the artifact. `REUSE.toml` annotates the bundle
+as a combined work.
+
 ## Dependency pin
 
 `@modelcontextprotocol/server` is pinned to an exact version, and the lockfile
