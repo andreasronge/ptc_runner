@@ -40,8 +40,10 @@ defmodule PtcRunner.Kernel.MCPStdioTransportTest do
     unrelated = Task.async(fn -> request(transport, "slow", 128) end)
 
     assert_eventually(fn ->
-      state = :sys.get_state(transport.pid)
-      Enum.count(state.pending, fn {_id, pending} -> pending.sent? end) == 1
+      case safe_state(transport.pid) do
+        nil -> false
+        state -> Enum.count(state.pending, fn {_id, pending} -> pending.sent? end) == 1
+      end
     end)
 
     assert {:error, :mcp_response_exceeded} =
@@ -175,7 +177,7 @@ defmodule PtcRunner.Kernel.MCPStdioTransportTest do
       end)
 
     assert_eventually(fn ->
-      match?(%{2 => %{sent?: false}}, :sys.get_state(transport.pid).pending)
+      match?(%{pending: %{2 => %{sent?: false}}}, safe_state(transport.pid))
     end)
 
     assert {:error, :mcp_protocol_error} = Task.await(first, 5_000)
@@ -197,10 +199,14 @@ defmodule PtcRunner.Kernel.MCPStdioTransportTest do
     assert_receive :caller_started
 
     assert_eventually(fn ->
-      state = :sys.get_state(transport.pid)
+      case safe_state(transport.pid) do
+        nil ->
+          false
 
-      state.writing == nil and
-        Enum.any?(state.pending, fn {_id, pending} -> pending.sent? end)
+        state ->
+          state.writing == nil and
+            Enum.any?(state.pending, fn {_id, pending} -> pending.sent? end)
+      end
     end)
 
     Process.exit(caller, :kill)
@@ -395,15 +401,23 @@ defmodule PtcRunner.Kernel.MCPStdioTransportTest do
 
   @tag :tmp_dir
   test "close waits for a clean finish already draining after port exit", %{tmp_dir: tmp_dir} do
-    transport = start_transport(tmp_dir)
+    # The drain window has to outlast this test's own reaction time. With the
+    # default 50 ms grace, a saturated scheduler lets the transport reach its
+    # termination deadline before the terminal frame below is injected, and
+    # `close/1` then correctly reports a timeout rather than a clean finish —
+    # failing a test that is about the clean path.
+    transport = start_transport(tmp_dir, nil, "read", grace_ms: 5_000)
     state = :sys.get_state(transport.pid)
     send(transport.pid, {state.port, {:exit_status, 0}})
-    assert_eventually(fn -> :sys.get_state(transport.pid).terminal_pending? end)
+    assert_eventually(fn -> match?(%{terminal_pending?: true}, safe_state(transport.pid)) end)
 
     close = Task.async(fn -> MCPStdioTransport.close(transport) end)
 
     assert_eventually(fn ->
-      :sys.get_state(transport.pid).closing |> is_list()
+      case safe_state(transport.pid) do
+        nil -> false
+        state -> is_list(state.closing)
+      end
     end)
 
     send(transport.pid, {state.port, {:data, <<"X", 1, 0::signed-big-32, 0>>}})
@@ -421,13 +435,15 @@ defmodule PtcRunner.Kernel.MCPStdioTransportTest do
       end)
 
     assert_eventually(fn ->
-      state = :sys.get_state(transport.pid)
-      state.writing == nil and map_size(state.pending) == 1
+      match?(
+        %{writing: nil, pending: pending} when map_size(pending) == 1,
+        safe_state(transport.pid)
+      )
     end)
 
     state = :sys.get_state(transport.pid)
     send(transport.pid, {state.port, {:exit_status, 0}})
-    assert_eventually(fn -> :sys.get_state(transport.pid).terminal_pending? end)
+    assert_eventually(fn -> match?(%{terminal_pending?: true}, safe_state(transport.pid)) end)
 
     assert {:error, :mcp_transport_error} = Task.await(active, 5_000)
     assert {:error, :mcp_transport_error} = request(transport, "after-exit")
@@ -472,7 +488,7 @@ defmodule PtcRunner.Kernel.MCPStdioTransportTest do
   end
 
   defp unacknowledged_request?(transport) do
-    match?(%{request_id: id} when is_integer(id), :sys.get_state(transport.pid).writing)
+    match?(%{writing: %{request_id: id}} when is_integer(id), safe_state(transport.pid))
   end
 
   defp assert_partial_delivery(marker) do
@@ -501,7 +517,7 @@ defmodule PtcRunner.Kernel.MCPStdioTransportTest do
     marker = marker || Path.join(tmp_dir, "unused")
 
     assert {:ok, transport} =
-             MCPStdioTransport.start(launch_options(tmp_dir, marker, fixture_mode))
+             MCPStdioTransport.start(launch_options(tmp_dir, marker, fixture_mode, opts))
 
     if Keyword.get(opts, :warm?, fixture_mode == "read"), do: await_serving(transport)
 
@@ -522,7 +538,7 @@ defmodule PtcRunner.Kernel.MCPStdioTransportTest do
     :ok
   end
 
-  defp launch_options(tmp_dir, marker \\ nil, fixture_mode \\ "read") do
+  defp launch_options(tmp_dir, marker \\ nil, fixture_mode \\ "read", opts \\ []) do
     marker = marker || Path.join(tmp_dir, "unused")
     {:ok, launcher} = PtcRunnerLauncher.executable_path()
     executable = System.find_executable("elixir")
@@ -535,7 +551,7 @@ defmodule PtcRunner.Kernel.MCPStdioTransportTest do
       cwd: @root,
       args: [@fixture, marker, fixture_mode],
       env: inherited_environment(),
-      grace_ms: 50,
+      grace_ms: Keyword.get(opts, :grace_ms, 50),
       start_timeout_ms: 5_000
     ]
   end
@@ -588,7 +604,21 @@ defmodule PtcRunner.Kernel.MCPStdioTransportTest do
     end)
   end
 
-  defp assert_eventually(predicate, attempts \\ 300)
+  # A polling predicate must survive the owner exiting mid-poll. `:sys.get_state/1`
+  # exits when its target is gone, which would crash the test rather than let the
+  # predicate report a state it can no longer observe.
+  defp safe_state(pid) do
+    :sys.get_state(pid)
+  catch
+    :exit, _reason -> nil
+  end
+
+  # 10 ms polls, so this is a ceiling on patience rather than a cost: a healthy
+  # machine satisfies these predicates in milliseconds and the budget is never
+  # spent. It has to cover the worst scheduling case instead of the median,
+  # because a saturated runner can starve a transport well past three seconds
+  # and the only symptom is an unreproducible failure.
+  defp assert_eventually(predicate, attempts \\ 1_500)
 
   defp assert_eventually(predicate, attempts) when attempts > 0 do
     if predicate.() do
