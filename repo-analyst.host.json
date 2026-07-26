@@ -1,0 +1,107 @@
+{
+  "$schema": "./priv/schemas/ptc-host-config.schema.json",
+  "credentials": {
+    "openrouter_key": {
+      "env": "OPENROUTER_API_KEY"
+    }
+  },
+  "install": {
+    "deepseek": {
+      "source": "llm",
+      "model": "openrouter:deepseek/deepseek-v4-flash",
+      "credential": "openrouter_key",
+      "accepts_data": [
+        "normal",
+        "private_inspection"
+      ]
+    },
+    "workspace": {
+      "source": "mcp",
+      "transport": {
+        "type": "stdio",
+        "command": "node",
+        "cwd": ".",
+        "args": [
+          "examples/mcp/filesystem/dist/server.js",
+          "--root",
+          ".",
+          "--include",
+          "lib/**",
+          "--include",
+          "priv/**",
+          "--include",
+          "docs/**",
+          "--include",
+          "test/**",
+          "--include",
+          "examples/**",
+          "--include",
+          "config/**",
+          "--include",
+          "mix.exs",
+          "--include",
+          "mix.lock",
+          "--include",
+          "repo-analyst/*.clj",
+          "--include",
+          "repo-analyst/*-input.json",
+          "--include",
+          "repo-analyst/*.schema.json",
+          "--exclude",
+          "**/node_modules/**",
+          "--exclude",
+          "**/_build/**",
+          "--exclude",
+          "**/deps/**"
+        ],
+        "start_timeout_ms": 15000
+      },
+      "tools": {
+        "list_directory": {
+          "as": "workspace.list",
+          "effect": "read"
+        },
+        "search_files": {
+          "as": "workspace.find",
+          "effect": "read"
+        },
+        "search_text": {
+          "as": "workspace.search",
+          "effect": "read",
+          "error_feedback": "bounded"
+        },
+        "read_text_file": {
+          "as": "workspace.read",
+          "effect": "read",
+          "error_feedback": "bounded"
+        },
+        "snapshot_info": {
+          "as": "workspace.info",
+          "effect": "read"
+        }
+      },
+      "snapshot_identity": {
+        "tool": "snapshot_info",
+        "field": "snapshot_hash"
+      },
+      "installation_revision": "filesystem-sample-0.1.0",
+      "accepts_data": [
+        "normal",
+        "private_inspection"
+      ],
+      "ceilings": {
+        "timeout_ms": 15000,
+        "max_catalog_tools": 32,
+        "max_result_bytes": 250000
+      }
+    },
+    "history": {
+      "source": "ptc_trace_snapshot",
+      "directory": "tmp/traces",
+      "ceilings": {
+        "max_source_bytes": 8000000,
+        "max_result_bytes": 250000
+      }
+    }
+  }
+}

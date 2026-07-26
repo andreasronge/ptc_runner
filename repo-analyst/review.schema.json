@@ -1,0 +1,101 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "repo-analyst prior-run review",
+  "description": "A bounded review of completed runs, with cited run and source evidence and one recommended next action.",
+  "type": "object",
+  "properties": {
+    "summary": {
+      "type": "string",
+      "description": "What the reviewed runs did and where they went wrong.",
+      "minLength": 1,
+      "maxLength": 4000
+    },
+    "findings": {
+      "type": "array",
+      "description": "Recurring findings. A finding seen in exactly one run is still reported, with occurrences of 1, so a reader can tell an isolated defect from a pattern.",
+      "minItems": 0,
+      "maxItems": 32,
+      "items": {
+        "type": "object",
+        "properties": {
+          "finding": {
+            "type": "string",
+            "description": "The generalized behavior, not the individual symptom.",
+            "minLength": 1,
+            "maxLength": 1000
+          },
+          "occurrences": {
+            "type": "integer",
+            "description": "How many reviewed runs exhibited it.",
+            "minimum": 1
+          },
+          "evidence": {
+            "type": "array",
+            "description": "Run or source evidence supporting this finding.",
+            "minItems": 1,
+            "maxItems": 16,
+            "items": {
+              "type": "object",
+              "properties": {
+                "provider": {
+                  "type": "string",
+                  "description": "Installed provider alias, such as history, private-history, or workspace.",
+                  "minLength": 1,
+                  "maxLength": 64
+                },
+                "snapshot_hash": {
+                  "type": "string",
+                  "description": "Snapshot hash carried by the result that produced this evidence.",
+                  "minLength": 1,
+                  "maxLength": 128
+                },
+                "run_id": {
+                  "type": "string",
+                  "description": "Run identity, when the evidence came from a run source.",
+                  "maxLength": 128
+                },
+                "event_sequences": {
+                  "type": "array",
+                  "description": "Canonical event sequence numbers, when the evidence came from a run source.",
+                  "maxItems": 32,
+                  "items": {"type": "integer", "minimum": 0}
+                },
+                "path": {
+                  "type": "string",
+                  "description": "Relative path, when the evidence came from a filesystem source.",
+                  "maxLength": 1024
+                },
+                "lines": {
+                  "type": "array",
+                  "description": "Inclusive first and last line number, when the evidence came from a filesystem source.",
+                  "minItems": 2,
+                  "maxItems": 2,
+                  "items": {"type": "integer", "minimum": 1}
+                }
+              },
+              "required": ["provider", "snapshot_hash"]
+            }
+          }
+        },
+        "required": ["finding", "occurrences", "evidence"]
+      }
+    },
+    "recommended_next_action": {
+      "type": "string",
+      "description": "The single next action a maintainer should take. Recommending no action is a valid review outcome.",
+      "enum": [
+        "propose-agent-change",
+        "fix-one-off-defect",
+        "gather-more-evidence",
+        "no-action"
+      ]
+    },
+    "rationale": {
+      "type": "string",
+      "description": "Why that action follows from the cited evidence.",
+      "minLength": 1,
+      "maxLength": 2000
+    }
+  },
+  "required": ["summary", "findings", "recommended_next_action", "rationale"]
+}

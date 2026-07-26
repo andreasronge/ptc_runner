@@ -510,7 +510,7 @@ defmodule PtcRunner.Kernel.HostConfig do
        when scheme in ["bearer", "basic"] do
     with :ok <- exact_keys(value, ~w(scheme binding), ~w(scheme binding)),
          true <- is_binary(binding) and Map.has_key?(credentials, binding) do
-      {:ok, %{scheme: String.to_existing_atom(scheme), binding: binding}}
+      {:ok, %{scheme: auth_scheme(scheme), binding: binding}}
     else
       _reason -> {:error, :invalid_auth}
     end
@@ -562,7 +562,7 @@ defmodule PtcRunner.Kernel.HostConfig do
          as: as,
          effect: :read,
          description: description,
-         error_feedback: String.to_existing_atom(feedback),
+         error_feedback: error_feedback(feedback),
          model_visible: model_visible
        }}
     else
@@ -637,14 +637,29 @@ defmodule PtcRunner.Kernel.HostConfig do
 
   defp llm_ceilings(_value), do: {:error, :invalid_ceilings}
 
+  # Every enumerated string this decoder accepts maps to an atom through an
+  # explicit clause, so the atom is a literal in this module and exists as soon
+  # as it is loaded. `String.to_existing_atom/1` looked equivalent but borrowed
+  # the atom from whichever module happened to intern it first, so decoding a
+  # valid host document raised instead of returning a result whenever this
+  # module ran before that one.
   defp data_class("normal"), do: {:ok, :normal}
   defp data_class("private_inspection"), do: {:ok, :private_inspection}
   defp data_class(_value), do: {:error, :invalid_data_class}
 
+  defp auth_scheme("bearer"), do: :bearer
+  defp auth_scheme("basic"), do: :basic
+
+  defp error_feedback("closed"), do: :closed
+  defp error_feedback("bounded"), do: :bounded
+
+  defp accepts_data_class("normal"), do: :normal
+  defp accepts_data_class("private_inspection"), do: :private_inspection
+
   defp accepts_data(value) when is_list(value) and length(value) in 1..2 do
     with true <- value == Enum.uniq(value),
          true <- Enum.all?(value, &(&1 in ["normal", "private_inspection"])) do
-      {:ok, Enum.map(value, &String.to_existing_atom/1)}
+      {:ok, Enum.map(value, &accepts_data_class/1)}
     else
       _reason -> {:error, :invalid_accepts_data}
     end

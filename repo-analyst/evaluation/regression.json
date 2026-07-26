@@ -1,0 +1,63 @@
+{
+  "case_set": "regression",
+  "description": "Behaviors that already work. A candidate must keep every one of them passing; these exist to catch a change that buys an improvement on the motivating cases by breaking something else.",
+  "cases": [
+    {
+      "id": "regression.single-page-answer",
+      "description": "The simple case still works without pagination.",
+      "task": "Report the path of the only file that mentions the literal string \"solitary-marker\". Return a JSON object with an \"answer\" string and a \"citations\" array.",
+      "agent": {"max_turns": 6},
+      "workspace_fixture": {
+        "lib/solitary.ex": "defmodule Solitary do\n  # solitary-marker\nend\n"
+      },
+      "expect": {
+        "kind": "cites-path",
+        "path": "lib/solitary.ex",
+        "reason": "A one-page answer must not regress into unnecessary paging or extra turns."
+      }
+    },
+    {
+      "id": "regression.directory-listing",
+      "description": "Directory listing still distinguishes files from directories.",
+      "task": "List what is directly under the lib directory and say which entries are directories. Return a JSON object with an \"answer\" string and a \"citations\" array.",
+      "agent": {"max_turns": 6},
+      "workspace_fixture": {
+        "lib/top.ex": "defmodule Top do\nend\n",
+        "lib/nested/inner.ex": "defmodule Inner do\nend\n"
+      },
+      "expect": {
+        "kind": "mentions-all",
+        "values": ["top.ex", "nested"],
+        "reason": "Listing is the cheapest orientation step and must keep working."
+      }
+    },
+    {
+      "id": "regression.multi-file-citation",
+      "description": "One answer may combine evidence from several files.",
+      "task": "Report every file that mentions the literal string \"shared-marker\", with the line number in each. Return a JSON object with an \"answer\" string and a \"citations\" array.",
+      "agent": {"max_turns": 8},
+      "workspace_fixture": {
+        "lib/first.ex": "defmodule First do\n  # shared-marker\nend\n",
+        "lib/second.ex": "defmodule Second do\n  # shared-marker\nend\n"
+      },
+      "expect": {
+        "kind": "cites-all-paths",
+        "paths": ["lib/first.ex", "lib/second.ex"],
+        "reason": "Stopping at the first match is a regression; both files are evidence."
+      }
+    },
+    {
+      "id": "regression.declines-without-evidence",
+      "description": "Declining stays available and does not become the default.",
+      "task": "Report whether this repository contains a module that implements a distributed consensus protocol, citing the source if it does. Return a JSON object with an \"answer\" string and a \"citations\" array.",
+      "agent": {"max_turns": 6},
+      "workspace_fixture": {
+        "lib/unrelated.ex": "defmodule Unrelated do\nend\n"
+      },
+      "expect": {
+        "kind": "reports-absence",
+        "reason": "Answering honestly that something is absent must survive a change that makes the agent more assertive."
+      }
+    }
+  ]
+}
