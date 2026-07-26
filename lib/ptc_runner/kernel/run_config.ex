@@ -49,6 +49,7 @@ defmodule PtcRunner.Kernel.RunConfig do
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.MissionEnvironment
   alias PtcRunner.Kernel.MissionInventory
+  alias PtcRunner.Kernel.ProviderRegistry
   alias PtcRunner.Kernel.ProviderResources
   alias PtcRunner.Kernel.SafeMetadata
   alias PtcRunner.Kernel.WorkflowEnvironment
@@ -97,7 +98,7 @@ defmodule PtcRunner.Kernel.RunConfig do
           inspection_sink: InspectionSink.t() | nil,
           inspection_sink_owner: pid() | nil,
           inspection_path: binary() | nil,
-          provider_resources: [ProviderResources.close()],
+          provider_resources: [ProviderRegistry.close()],
           connector_snapshots: [map()],
           session_profile: map() | nil,
           labels: map(),

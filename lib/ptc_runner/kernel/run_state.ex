@@ -45,10 +45,22 @@ defmodule PtcRunner.Kernel.RunState do
   defstruct [:pid, :token, :provider_tracker]
 
   @type environment :: :workflow | :mission
+
+  @typedoc """
+  Opaque handle to the process tracking this run's provider tasks.
+
+  Its shape is an implementation detail: callers receive it inside `t:t/0` and
+  hand it back to the Kernel rather than inspecting it. Declaring it here keeps
+  the public struct from depending on an internal module's documentation, and
+  `pid()` would be inaccurate because the handle also carries an ownership
+  token.
+  """
+  @type provider_tracker :: struct()
+
   @type t :: %__MODULE__{
           pid: pid(),
           token: reference(),
-          provider_tracker: ProviderTaskTracker.t()
+          provider_tracker: provider_tracker()
         }
 
   @spec start(Limits.t(), keyword()) :: {:ok, t()} | {:error, term()}

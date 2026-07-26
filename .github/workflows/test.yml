@@ -59,8 +59,28 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v6
 
-      - name: Setup Elixir environment
-        uses: ./.github/actions/setup-elixir
+      # Deliberately not the shared setup action. That action resolves the root
+      # project, and under MIX_ENV=prod the root declares the companion as an
+      # unpublished Hex requirement rather than a path, so `mix deps.get` fails
+      # with "No package with name ptc_runner_launcher". It then runs a root Mix
+      # task to install Babashka, which would fail for the same reason. This job
+      # only assembles the launcher subproject, so it sets up Elixir directly.
+      - name: Set up Elixir
+        id: setup-beam
+        uses: erlef/setup-beam@v1
+        with:
+          elixir-version: '1.20.2'
+          otp-version: '29.0.3'
+
+      - name: Cache launcher dependencies
+        uses: actions/cache@v5
+        with:
+          path: |
+            ptc_runner_launcher/deps
+            ptc_runner_launcher/_build
+          key: launcher-pkg-${{ runner.os }}-${{ runner.arch }}-otp${{ steps.setup-beam.outputs.otp-version }}-elixir${{ steps.setup-beam.outputs.elixir-version }}-${{ hashFiles('ptc_runner_launcher/mix.lock') }}
+          restore-keys: |
+            launcher-pkg-${{ runner.os }}-${{ runner.arch }}-otp${{ steps.setup-beam.outputs.otp-version }}-elixir${{ steps.setup-beam.outputs.elixir-version }}-
 
       - name: Get launcher dependencies
         working-directory: ptc_runner_launcher

@@ -50,10 +50,18 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
           installed_limits: PtcRunner.Kernel.Limits.t(),
           provider: binary()
         }
+  @typedoc """
+  A zero-arity cleanup function returned by a provider builder.
+
+  Declared here rather than borrowed from the internal cleanup module, so the
+  public contract does not depend on an implementation detail's documentation.
+  """
+  @type close :: (-> term())
+
   @type built_provider :: %{
           capabilities: [Capability.t()],
           snapshot: map() | nil,
-          close: PtcRunner.Kernel.ProviderResources.close() | nil,
+          close: close() | nil,
           data_class: :normal | :private_inspection,
           accepts_data: [:normal | :private_inspection]
         }
