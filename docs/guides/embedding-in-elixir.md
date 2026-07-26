@@ -67,7 +67,14 @@ Builders receive the canonical manifest directory, target environment,
 construction owner, effective limits, and installed ceilings. They may return
 capabilities and a safe connector snapshot, plus an idempotent close function
 when the provider owns live resources. The Kernel owns cleanup across success,
-failure, timeout, cancellation, and owner death.
+failure, timeout, cancellation, and owner death. Every close function must
+return exactly `:ok`; another return, an exception, or an exit is reported as
+`:provider_cleanup_failed` and can replace a completed run with the terminal
+`:provider_cleanup_error` outcome. Cleanup still attempts every registered
+resource. `ReplSession.close/1` and `abort/2` return
+`{:error, :provider_cleanup_failed, events}` when that failure follows a
+successfully frozen terminal batch; persist those canonical events before
+surfacing the cleanup error.
 
 Keep credentials, endpoints, native handles, and close functions out of
 capability results, PTC-Lisp data, prompts, canonical events, and inspection

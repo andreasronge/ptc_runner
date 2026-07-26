@@ -2,8 +2,10 @@ defmodule PtcRunner.Kernel.EventSinkTest do
   use ExUnit.Case, async: true
 
   alias PtcRunner.Kernel.EventSink
+  alias PtcRunner.Kernel.EventSinkState
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.TraceLog
+  alias PtcRunner.Lisp.RetainedSize
 
   test "default run identifiers have fixed entropy format and remain unique" do
     {:ok, limits} = Limits.new(normal_event_count: 4, normal_event_bytes: 10_000)
@@ -169,6 +171,66 @@ defmodule PtcRunner.Kernel.EventSinkTest do
     assert {:error, :event_sink_error} = EventSink.finalize_and_events(sink, %{usage: nil})
     assert Process.alive?(sink.pid)
     assert Enum.map(EventSink.events(sink), & &1.type) == ["run-started"]
+  end
+
+  test "claim distinguishes an existing owner from an unavailable sink" do
+    {:ok, limits} = Limits.new()
+    {:ok, sink} = EventSink.start(:normal, limits)
+    claim_id = make_ref()
+
+    assert :ok = EventSink.claim(sink, claim_id, %{})
+    assert {:error, :event_sink_already_claimed} = EventSink.claim(sink, claim_id, %{})
+
+    assert {:error, :event_sink_claimed_by_other} =
+             EventSink.claim(sink, make_ref(), %{})
+
+    assert {:error, :event_sink_error} = EventSink.begin(sink, %{})
+
+    EventSink.stop(sink)
+    assert {:error, :event_sink_error} = EventSink.claim(sink, claim_id, %{})
+  end
+
+  test "normal sink preflight measures the normalized cleanup-failure terminal payload" do
+    legacy_payload = %{
+      outcome: :error,
+      reason: :event_sink_error,
+      usage: %{events_dropped: %{}}
+    }
+
+    minimum =
+      Enum.find(1..20_000, fn payload_bytes ->
+        {:ok, limits} = Limits.new(event_payload_bytes: payload_bytes)
+        match?({:ok, _state, _handle}, EventSink.prepare(:normal, limits, []))
+      end)
+
+    assert minimum > RetainedSize.bytes(legacy_payload)
+
+    {:ok, too_tight} = Limits.new(event_payload_bytes: minimum - 1)
+    assert {:error, :invalid_event_sink} = EventSink.prepare(:normal, too_tight, [])
+
+    {:ok, exact} = Limits.new(event_payload_bytes: minimum)
+    assert {:ok, _state, _handle} = EventSink.prepare(:normal, exact, [])
+  end
+
+  test "terminal usage admission exceeds the former cleanup-reason ceiling" do
+    usage = %{}
+
+    former_payload = %{
+      outcome: :error,
+      reason: :provider_cleanup_failed,
+      usage: %{events_dropped: %{}}
+    }
+
+    former_minimum =
+      Enum.find(1..10_000, fn payload_bytes ->
+        EventSinkState.payload_within_limit?(former_payload, payload_bytes)
+      end)
+
+    {:ok, limits} = Limits.new(event_payload_bytes: former_minimum)
+    {:ok, sink} = EventSink.start(:private, limits)
+
+    assert EventSinkState.payload_within_limit?(former_payload, former_minimum)
+    refute EventSink.terminal_usage_capacity?(sink, limits, usage)
   end
 
   test "canonical identifiers and event values are validated before retention" do

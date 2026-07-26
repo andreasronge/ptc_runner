@@ -111,8 +111,7 @@ defmodule PtcRunner.Examples.KernelInspectionLab do
 
     mcp =
       MCPSource.builder(
-        endpoint: endpoint,
-        allow_insecure_loopback: true,
+        transport: {:streamable_http, endpoint: endpoint, allow_insecure_loopback: true},
         tools: %{
           "structured" => %{as: "remote.structured", effect: :read},
           "text" => %{as: "remote.text", effect: :read},

@@ -59,9 +59,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   bounded multi-turn mission evaluation over an immutable trace capture,
   deterministic JSONL output for coding agents, safe profile discovery, and
   separate atomic analysis-trace persistence.
+- Added one typed MCP source with equivalent stateless Streamable HTTP and
+  owned stdio transports. Stdio uses the optional precompiled
+  `ptc_runner_launcher` companion, freezes launcher and server digests, and
+  provides bounded process-group cleanup.
 
 ### Changed
 
+- MCP provider installation now requires a nested `:transport` tuple; the
+  former top-level HTTP `:endpoint`, `:headers`, and
+  `:allow_insecure_loopback` options were removed.
+- Provider resource close functions must now return exactly `:ok`. Any other
+  return, exception, or exit is a cleanup failure; all closers are still
+  attempted, and a failed cleanup can replace a completed Kernel result with
+  `:provider_cleanup_error`. REPL close and abort results retain the frozen
+  terminal event batch alongside a cleanup error so trace persistence can
+  complete before the frontend reports the failure.
 - Made standalone `PtcRunner.Kernel.ReplSession` values process-affine. Only
   the process that creates a session may evaluate, close, or abort it; calls
   from another process now return `:session_owner_mismatch` without mutating

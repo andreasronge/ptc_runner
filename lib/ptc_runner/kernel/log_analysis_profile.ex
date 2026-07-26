@@ -111,13 +111,16 @@ defmodule PtcRunner.Kernel.LogAnalysisProfile do
     with true <- TraceSnapshot.valid?(snapshot),
          {:ok, sink} <- SessionTrace.sink(session_trace),
          {:ok, expected} <- assemble(snapshot, sink) do
-      config === expected.config and profile === expected.profile
+      comparable_config(config) === comparable_config(expected.config) and
+        profile === expected.profile
     else
       _ -> false
     end
   catch
     :exit, _reason -> false
   end
+
+  defp comparable_config(%RunConfig{} = config), do: %{config | claim_id: nil}
 
   @doc false
   @spec descriptor(map(), map(), Limits.t()) :: {:ok, map()} | {:error, atom()}

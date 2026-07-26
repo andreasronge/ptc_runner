@@ -52,6 +52,10 @@ capability. The internal owner binds the run state to the configured event and
 optional inspection sinks. Each `eval/2` result is an inert observation
 projection; its memory is not the authoritative continuation and must not be
 threaded back into the session.
+If provider cleanup fails after terminal finalization, `close/1` and `abort/2`
+return `{:error, :provider_cleanup_failed, events}` so the host can persist the
+frozen batch before reporting the error. The Mix frontend does this for normal
+closure and exception-driven aborts.
 Preflight errors preserve that committed public memory view, and projection is
 validated before continuation commit. Each bounded worker starts a small
 monitor-only watchdog before running the workload. The watchdog cancels the

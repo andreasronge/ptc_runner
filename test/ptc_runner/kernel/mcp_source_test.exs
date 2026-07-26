@@ -6,6 +6,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
   use ExUnit.Case, async: false
 
   alias PtcRunner.Kernel
+  alias PtcRunner.Kernel.Capability
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.MCPSource
   alias PtcRunner.Kernel.ProviderRegistry
@@ -13,6 +14,9 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
   alias PtcRunner.TestSupport.MCPHTTPFixture
 
   @owner_lifecycle_timeout_ms 30_000
+  @stdio_fixture Path.expand("../../support/mcp_stdio_source_fixture.sh", __DIR__)
+  @root Path.expand("../../..", __DIR__)
+  @inherited_environment ~w(HOME LOGNAME PATH SHELL TERM USER)
 
   @input_schema %{
     "type" => "object",
@@ -47,6 +51,9 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     assert snapshot["snapshot_hash"] =~ ~r/\A[0-9a-f]{64}\z/
     assert snapshot["server_info_hash"] =~ ~r/\A[0-9a-f]{64}\z/
     refute Map.has_key?(snapshot, "server")
+    refute Map.has_key?(snapshot, "launcher_protocol_version")
+    refute Map.has_key?(snapshot, "launcher_sha256")
+    refute Map.has_key?(snapshot, "server_executable_sha256")
 
     assert Enum.map(snapshot["tools"], & &1["name"]) ==
              ~w(remote.fail remote.structured remote.text)
@@ -90,6 +97,185 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     refute_receive :mcp_deleted
 
     EventSink.stop(built.config.event_sink)
+  end
+
+  @tag :tmp_dir
+  test "the common MCP source discovers and calls the same tools over stdio", %{tmp_dir: dir} do
+    marker = Path.join(dir, "stdio-methods")
+    fixture = fixture(self())
+    on_exit(fixture.close)
+
+    http_registry = registry(fixture.endpoint, timeout_ms: 5_000)
+    stdio_registry = stdio_registry(dir, marker)
+
+    manifest =
+      manifest(dir, ~w(remote.structured remote.text remote.fail),
+        timeout_ms: 5_000,
+        evaluation_timeout_ms: 5_000
+      )
+
+    assert {:ok, http_built} = RunBuilder.load_and_build(manifest, http_registry)
+    assert {:ok, built} = RunBuilder.load_and_build(manifest, stdio_registry)
+
+    assert capability_contracts(http_built) == capability_contracts(built)
+
+    assert [http_snapshot] = http_built.config.connector_snapshots
+    assert [snapshot] = built.config.connector_snapshots
+    assert common_snapshot(http_snapshot) == common_snapshot(snapshot)
+    assert snapshot["provider"] == "fixture-mcp"
+    assert snapshot["protocol"] == "mcp-2026-07-28"
+    assert snapshot["transport"] == "stdio"
+    assert snapshot["snapshot_hash"] =~ ~r/\A[0-9a-f]{64}\z/
+    assert snapshot["server_info_hash"] =~ ~r/\A[0-9a-f]{64}\z/
+    assert snapshot["launcher_protocol_version"] == 1
+    {:ok, launcher} = PtcRunnerLauncher.executable_path()
+    assert snapshot["launcher_sha256"] == file_sha256(launcher)
+    assert snapshot["server_executable_sha256"] == file_sha256(System.find_executable("sh"))
+
+    assert Enum.map(snapshot["tools"], & &1["name"]) ==
+             ~w(remote.fail remote.structured remote.text)
+
+    assert Enum.all?(snapshot["tools"], &is_nil(&1["http_headers_hash"]))
+
+    assert :ok = RunBuilder.close(http_built)
+    assert {:ok, result} = Kernel.run(built.entry_source, built.config)
+
+    assert %{
+             status: :ok,
+             value: %{
+               outcome: :returned,
+               value: %{
+                 "failed" => %{kind: :provider_error, reason: :domain_error, status: :error},
+                 "structured" => %{status: :ok, value: %{"value" => 42}},
+                 "text" => %{status: :ok, value: %{"text" => ["hello"]}}
+               }
+             }
+           } = result.value
+
+    assert :ok = RunBuilder.close(built)
+
+    assert marker
+           |> File.read!()
+           |> String.split("\n", trim: true)
+           |> Enum.map(fn line ->
+             [id, method] = String.split(line, ":", parts: 2)
+             {String.to_integer(id), method}
+           end)
+           |> Enum.sort() ==
+             [
+               {1, "server/discover"},
+               {2, "tools/list"},
+               {3, "tools/list"},
+               {4, "tools/call"},
+               {5, "tools/call"},
+               {6, "tools/call"}
+             ]
+  end
+
+  @tag :tmp_dir
+  test "a launcher symlink is frozen before its digest and process identity", %{tmp_dir: dir} do
+    marker = Path.join(dir, "stdio-symlink-methods")
+    trusted_tree = Path.join(dir, "trusted")
+    replacement_tree = Path.join(dir, "replacement")
+    launcher_parent = Path.join(dir, "launcher-parent")
+    configured_launcher = Path.join([launcher_parent, "..", "launcher"])
+    {:ok, launcher} = PtcRunnerLauncher.executable_path()
+
+    for tree <- [trusted_tree, replacement_tree] do
+      File.mkdir_p!(Path.join(tree, "nested"))
+    end
+
+    File.ln_s!(launcher, Path.join(trusted_tree, "launcher"))
+    File.ln_s!(@stdio_fixture, Path.join(replacement_tree, "launcher"))
+    File.ln_s!(Path.join(trusted_tree, "nested"), launcher_parent)
+
+    builder =
+      MCPSource.builder(
+        transport:
+          {:stdio,
+           marker
+           |> stdio_transport_options()
+           |> Keyword.put(:launcher, configured_launcher)},
+        tools: mappings(),
+        timeout_ms: 5_000,
+        max_result_bytes: 64_000
+      )
+
+    File.rm!(launcher_parent)
+    File.ln_s!(Path.join(replacement_tree, "nested"), launcher_parent)
+
+    {:ok, registry} = ProviderRegistry.new(%{"fixture-mcp" => builder})
+
+    assert {:ok, built} =
+             dir
+             |> manifest(~w(remote.structured), timeout_ms: 5_000, evaluation_timeout_ms: 5_000)
+             |> RunBuilder.load_and_build(registry)
+
+    assert [snapshot] = built.config.connector_snapshots
+    assert snapshot["launcher_sha256"] == file_sha256(launcher)
+    assert {:ok, _result} = Kernel.run(built.entry_source, built.config)
+    assert :ok = RunBuilder.close(built)
+  end
+
+  @tag :tmp_dir
+  test "a verified server exit remains an operational result rather than a cleanup failure", %{
+    tmp_dir: dir
+  } do
+    for mode <- ["exit-before-response", "exit-after-response"] do
+      marker = Path.join(dir, mode)
+      registry = stdio_registry(dir, marker, mode)
+
+      manifest =
+        manifest(dir, ~w(remote.structured remote.text remote.fail),
+          timeout_ms: 5_000,
+          evaluation_timeout_ms: 5_000
+        )
+
+      assert {:ok, built} = RunBuilder.load_and_build(manifest, registry)
+      assert {:ok, result} = Kernel.run(built.entry_source, built.config)
+
+      assert %{
+               status: :ok,
+               value: %{
+                 outcome: :returned,
+                 value: %{
+                   "structured" => structured,
+                   "text" => %{status: :error, reason: :transport_error},
+                   "failed" => %{status: :error, reason: :transport_error}
+                 }
+               }
+             } = result.value
+
+      case mode do
+        "exit-before-response" ->
+          assert %{status: :error, reason: :transport_error} = structured
+
+        "exit-after-response" ->
+          assert %{status: :ok, value: %{"value" => 42}} = structured
+      end
+
+      assert :ok = RunBuilder.close(built)
+    end
+  end
+
+  @tag :tmp_dir
+  test "normalizes a stdio server exit between discovery requests", %{tmp_dir: dir} do
+    marker = Path.join(dir, "exit-after-discover")
+    registry = stdio_registry(dir, marker, "exit-after-discover")
+
+    assert {:error, :mcp_transport_error} =
+             dir
+             |> manifest(~w(remote.structured),
+               timeout_ms: 5_000,
+               evaluation_timeout_ms: 5_000
+             )
+             |> RunBuilder.load_and_build(registry)
+
+    assert marker
+           |> File.read!()
+           |> String.split("\n", trim: true)
+           |> Enum.map(&String.split(&1, ":", parts: 2))
+           |> Enum.map(&List.last/1) == ["server/discover"]
   end
 
   @tag :tmp_dir
@@ -234,18 +420,129 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
 
   test "installation rejects non-loopback HTTP endpoints and duplicate public mappings" do
     assert_raise ArgumentError, fn ->
-      MCPSource.builder(endpoint: "http://example.com/mcp", tools: mappings())
+      MCPSource.builder(
+        transport: {:streamable_http, endpoint: "http://example.com/mcp"},
+        tools: mappings()
+      )
+    end
+
+    assert_raise ArgumentError, fn ->
+      MCPSource.builder(endpoint: "https://example.com/mcp", tools: mappings())
     end
 
     assert_raise ArgumentError, fn ->
       MCPSource.builder(
-        endpoint: "https://example.com/mcp",
+        transport: {:streamable_http, endpoint: "https://example.com/mcp"},
+        transport: {:streamable_http, endpoint: "https://example.net/mcp"},
+        tools: mappings()
+      )
+    end
+
+    assert_raise ArgumentError, fn ->
+      MCPSource.builder(
+        transport:
+          {:streamable_http, endpoint: "https://example.com/mcp", allow_insecure_loopback: :yes},
+        tools: mappings()
+      )
+    end
+
+    assert_raise ArgumentError, fn ->
+      MCPSource.builder(
+        transport:
+          {:streamable_http, endpoint: "https://example.com/mcp", command: "/inapplicable"},
+        tools: mappings()
+      )
+    end
+
+    assert_raise ArgumentError, fn ->
+      MCPSource.builder(
+        transport: {:streamable_http, endpoint: "https://example.com/mcp"},
         tools: %{
           "one" => %{as: "same", effect: :read},
           "two" => %{as: "same", effect: :read}
         }
       )
     end
+  end
+
+  test "stdio installation enforces its transport timeout and response ceilings" do
+    options = stdio_transport_options("/tmp/unused")
+
+    assert is_function(
+             MCPSource.builder(
+               transport: {:stdio, options},
+               tools: mappings(),
+               timeout_ms: 300_000,
+               max_result_bytes: 1_048_576
+             ),
+             2
+           )
+
+    assert_raise ArgumentError, fn ->
+      MCPSource.builder(
+        transport: {:stdio, options},
+        tools: mappings(),
+        timeout_ms: 300_001
+      )
+    end
+
+    assert_raise ArgumentError, fn ->
+      MCPSource.builder(
+        transport: {:stdio, options},
+        tools: mappings(),
+        max_result_bytes: 1_048_577
+      )
+    end
+
+    assert_raise ArgumentError, fn ->
+      MCPSource.builder(
+        transport: {:stdio, options ++ [launcher: "/duplicate", launcher: "/duplicate"]},
+        tools: mappings()
+      )
+    end
+  end
+
+  @tag :tmp_dir
+  test "stdio acquisition rejects an oversized launcher before spawning", %{tmp_dir: dir} do
+    launcher = Path.join(dir, "oversized-launcher")
+    {:ok, device} = File.open(launcher, [:write, :binary])
+    {:ok, _position} = :file.position(device, 16_777_216)
+    :ok = IO.binwrite(device, <<0>>)
+    :ok = File.close(device)
+    :ok = File.chmod(launcher, 0o755)
+
+    executable = System.find_executable("sh")
+
+    builder =
+      MCPSource.builder(
+        transport:
+          {:stdio,
+           launcher: launcher,
+           executable: executable,
+           executable_sha256: executable |> File.read!() |> then(&:crypto.hash(:sha256, &1)),
+           cwd: @root,
+           args: [@stdio_fixture, Path.join(dir, "unused")],
+           env: inherited_environment()},
+        tools: mappings()
+      )
+
+    {:ok, registry} = ProviderRegistry.new(%{"fixture-mcp" => builder})
+
+    assert {:error, :mcp_transport_error} =
+             dir
+             |> manifest(["remote.structured"])
+             |> RunBuilder.load_and_build(registry)
+  end
+
+  test "stdio rollback cleanup failure overrides the acquisition error" do
+    transport = make_ref()
+
+    assert {:error, :mcp_transport_error} =
+             MCPSource.rollback_acquisition(
+               {:ok, transport},
+               :mcp_timeout,
+               fn ^transport -> {:error, :mcp_transport_error} end
+             )
   end
 
   @tag :tmp_dir
@@ -702,9 +999,11 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
 
     auth_builder =
       MCPSource.builder(
-        endpoint: invalid_output.endpoint,
-        allow_insecure_loopback: true,
-        headers: fn -> raise secret end,
+        transport:
+          {:streamable_http,
+           endpoint: invalid_output.endpoint,
+           allow_insecure_loopback: true,
+           headers: fn -> raise secret end},
         tools: mappings()
       )
 
@@ -734,15 +1033,17 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
 
     header_builder =
       MCPSource.builder(
-        endpoint: invalid_output.endpoint,
-        allow_insecure_loopback: true,
-        headers: fn ->
-          send(parent, {:mcp_header_blocked, self()})
+        transport:
+          {:streamable_http,
+           endpoint: invalid_output.endpoint,
+           allow_insecure_loopback: true,
+           headers: fn ->
+             send(parent, {:mcp_header_blocked, self()})
 
-          receive do
-            :never -> []
-          end
-        end,
+             receive do
+               :never -> []
+             end
+           end},
         tools: mappings(),
         timeout_ms: 500
       )
@@ -784,14 +1085,16 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
   defp registry(endpoint, opts \\ []) do
     builder =
       MCPSource.builder(
-        endpoint: endpoint,
-        allow_insecure_loopback: true,
-        headers:
-          Keyword.get(
-            opts,
-            :headers,
-            fn -> [{"authorization", "Bearer fixture-secret"}] end
-          ),
+        transport:
+          {:streamable_http,
+           endpoint: endpoint,
+           allow_insecure_loopback: true,
+           headers:
+             Keyword.get(
+               opts,
+               :headers,
+               fn -> [{"authorization", "Bearer fixture-secret"}] end
+             )},
         tools: Keyword.get(opts, :tools, mappings()),
         timeout_ms: Keyword.get(opts, :timeout_ms, 2_000),
         max_result_bytes: 64_000,
@@ -800,6 +1103,73 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
 
     {:ok, registry} = ProviderRegistry.new(%{"fixture-mcp" => builder})
     registry
+  end
+
+  defp stdio_registry(_dir, marker, mode \\ nil) do
+    builder =
+      MCPSource.builder(
+        transport: {:stdio, stdio_transport_options(marker, mode)},
+        tools: mappings(),
+        timeout_ms: 5_000,
+        max_result_bytes: 64_000
+      )
+
+    {:ok, registry} = ProviderRegistry.new(%{"fixture-mcp" => builder})
+    registry
+  end
+
+  defp stdio_transport_options(marker, mode \\ nil) do
+    executable = System.find_executable("sh")
+    args = [@stdio_fixture, marker] ++ if(mode, do: [mode], else: [])
+
+    [
+      executable: executable,
+      executable_sha256: executable |> File.read!() |> then(&:crypto.hash(:sha256, &1)),
+      cwd: @root,
+      args: args,
+      env: inherited_environment(),
+      grace_ms: 50,
+      start_timeout_ms: 5_000
+    ]
+  end
+
+  defp inherited_environment do
+    @inherited_environment
+    |> Enum.flat_map(fn name ->
+      case System.get_env(name) do
+        value when is_binary(value) -> [{name, value}]
+        _missing -> []
+      end
+    end)
+    |> Map.new()
+  end
+
+  defp file_sha256(path) do
+    path
+    |> File.read!()
+    |> then(&:crypto.hash(:sha256, &1))
+    |> Base.encode16(case: :lower)
+  end
+
+  defp capability_contracts(built) do
+    built.config.mission_environment.capabilities
+    |> Map.values()
+    |> Enum.map(&Capability.metadata/1)
+    |> Enum.sort_by(& &1.name)
+  end
+
+  defp common_snapshot(snapshot) do
+    snapshot
+    |> Map.drop([
+      "transport",
+      "snapshot_hash",
+      "launcher_protocol_version",
+      "launcher_sha256",
+      "server_executable_sha256"
+    ])
+    |> Map.update!("tools", fn tools ->
+      Enum.map(tools, &Map.drop(&1, ["http_headers_hash"]))
+    end)
   end
 
   defp mappings do

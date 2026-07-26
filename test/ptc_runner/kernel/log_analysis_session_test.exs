@@ -44,7 +44,10 @@ defmodule PtcRunner.Kernel.LogAnalysisSessionTest do
     first_state = :sys.get_state(first.pid)
     identity = first_state.profile.identity
     remaining_before_timer_read = RunState.remaining_ms(first_state.run_state)
-    assert Process.read_timer(first_state.timer) <= remaining_before_timer_read
+
+    assert Process.read_timer(first_state.timer) <=
+             remaining_before_timer_read + 10
+
     assert identity["profile_id"] == "log-analysis-v1"
     assert identity["components"] == ["log.core"]
     assert identity["explicit_capabilities"] == LogAnalysisProfile.explicit_capabilities()

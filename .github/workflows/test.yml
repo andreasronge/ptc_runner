@@ -139,6 +139,9 @@ jobs:
       - name: Run tests
         run: mix test --max-failures 1 --trace --warnings-as-errors
 
+      - name: Verify core release package
+        run: bash scripts/verify_core_package.sh
+
       - name: Check code is formatted
         run: mix format --check-formatted
 

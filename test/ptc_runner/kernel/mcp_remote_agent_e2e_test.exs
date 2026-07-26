@@ -32,8 +32,7 @@ defmodule PtcRunner.Kernel.MCPRemoteAgentE2ETest do
 
     builder =
       MCPSource.builder(
-        endpoint: endpoint,
-        allow_insecure_loopback: true,
+        transport: {:streamable_http, endpoint: endpoint, allow_insecure_loopback: true},
         tools: %{"cityTime" => %{as: "time.city", effect: :read}},
         timeout_ms: 8_000,
         max_result_bytes: 500_000

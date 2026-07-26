@@ -1,29 +1,29 @@
 defmodule PtcRunner.Kernel.MCPSource do
   @moduledoc """
-  Builds one host-installed, read-only MCP Streamable HTTP capability source.
+  Builds one host-installed, read-only MCP capability source.
 
-  The host freezes the endpoint, credential/header callback, upstream-to-public
-  tool mapping, and installed ceilings in `builder/1`. A manifest can only
-  select mapped public names and lower the request timeout or result ceiling.
-  Each run build discovers one stateless MCP 2026-07-28 server and its tools,
-  compiles their bounded schemas, and returns ordinary frozen
-  Kernel capabilities plus a safe deterministic snapshot. Request deadlines
-  bound connection checkout, connection establishment, response receipt, and
-  total elapsed work. Responses reject duplicate JSON object keys before
-  protocol validation. Input and output schemas are compiled once during
-  assembly and the compiled validators are reused for every invocation.
+  The host freezes one typed `:streamable_http` or `:stdio` transport,
+  upstream-to-public tool mappings, and installed ceilings in `builder/1`. A
+  manifest can only select mapped public names and lower the request timeout
+  or result ceiling. Each run build discovers one stateless MCP 2026-07-28
+  server and its tools, compiles their bounded schemas, and returns ordinary
+  frozen Kernel capabilities plus a safe deterministic snapshot. Input and
+  output schemas are compiled once during assembly and the compiled validators
+  are reused for every invocation.
 
-  This pre-production source supports JSON and SSE responses to POST requests,
-  schema-valid structured object results with exact text companions, and
-  text-only results. It rejects unsupported content block types, redirects,
-  remote endpoint changes, writes, and manifest-supplied connection or
-  credential configuration.
+  Streamable HTTP supports JSON and SSE responses to POST requests and rejects
+  redirects and remote endpoint changes. Both transports support schema-valid
+  structured object results with exact text companions and text-only results.
+  The source rejects unsupported content block types, writes, and
+  manifest-supplied connection or credential configuration.
   """
 
   alias PtcRunner.Kernel.Capability
   alias PtcRunner.Kernel.DeterministicJSON
+  alias PtcRunner.Kernel.MCPLauncherStaging
   alias PtcRunner.Kernel.MCPProtocol
   alias PtcRunner.Kernel.MCPRequestContext
+  alias PtcRunner.Kernel.MCPStdioTransport
   alias PtcRunner.Kernel.ProviderError
 
   @protocol "2026-07-28"
@@ -34,6 +34,9 @@ defmodule PtcRunner.Kernel.MCPSource do
   @max_header_bytes 16_384
   @max_outbound_headers 64
   @max_outbound_header_bytes 32_768
+  @max_launcher_bytes 16_777_216
+  @max_launcher_symlinks 40
+  @launcher_protocol_version 1
   @header_token ~r/\A[!#$%&'*+\-.^_`|~0-9A-Za-z]+\z/
   @name ~r/\A[a-z][a-z0-9._-]{0,127}\z/
   @sse_event_separator ~r/(?:\r\n|\r|\n)(?:\r\n|\r|\n)/
@@ -46,21 +49,40 @@ defmodule PtcRunner.Kernel.MCPSource do
 
   ## Options
 
-    * `:endpoint` - required fixed HTTPS URL. Loopback HTTP is accepted only
-      when `:allow_insecure_loopback` is `true` (default `false`). Userinfo and
-      fragments are rejected.
-    * `:headers` - zero-argument credential/header callback, evaluated once
-      inside the provider-acquisition deadline and reused for the built
-      provider (default `fn -> [] end`). At most 32 valid headers totaling
-      16,384 bytes are accepted; client-owned `mcp-*` names are rejected.
-      Values never enter capabilities, snapshots, errors, Logger, Telemetry,
-      or canonical events.
+    * `:transport` - required `{type, options}` tuple. The type is
+      `:streamable_http` or `:stdio`. Streamable HTTP requires a fixed HTTPS
+      `:endpoint`; loopback HTTP is accepted only when
+      `:allow_insecure_loopback` is `true` (default `false`), and userinfo and
+      fragments are rejected. Its zero-argument `:headers` callback defaults
+      to `fn -> [] end`, is evaluated once inside the provider-acquisition
+      deadline, and is reused for the built provider. At most 32 valid headers
+      totaling 16,384 bytes are accepted; client-owned `mcp-*` names are
+      rejected. Header values never enter capabilities, snapshots, errors,
+      Logger, Telemetry, or canonical events. Stdio requires absolute `:executable` and
+      `:cwd` paths plus the executable's raw 32-byte `:executable_sha256`.
+      Optional stdio fields are `:args` (default `[]`), `:env` (default `%{}`),
+      `:grace_ms` (default `250`, maximum `5_000`), `:stderr_bytes` (default
+      `65_536`, maximum `1_048_576`), and `:start_timeout_ms` (default `5_000`,
+      maximum `60_000`). At most 256 arguments and 256 environment bindings
+      are accepted; every configuration string is at most 131,072 bytes.
+      Strings are UTF-8 and NUL-free; environment names use the portable
+      `[A-Za-z_][A-Za-z0-9_]*` form. The launcher is limited to 16 MiB. The
+      optional absolute `:launcher` path is a trusted custom override.
+      Otherwise stdio requires
+      the optional `ptc_runner_launcher ~> 0.1.0` companion dependency. The
+      core owns launcher protocol version 1, copies the canonical launcher into
+      a private mode-0700 staging directory, hashes and executes those same
+      staged bytes, and removes the staged path after the startup handshake.
+      The configured server executable and working-directory hierarchies must
+      remain trusted and immutable through launcher preflight and spawn.
     * `:tools` - required map from fixed upstream names to
       `%{as: public_name, effect: :read}`. Both names are unique and bounded;
       only the public name crosses the capability boundary.
     * `:timeout_ms` - installed end-to-end ceiling for discovery, calls, and
-      requests (default `5_000`). A manifest may only lower it.
-    * `:max_result_bytes` - installed response ceiling (default `1_000_000`).
+      requests (default `5_000`; stdio maximum `300_000`). A manifest may only
+      lower it.
+    * `:max_result_bytes` - installed response ceiling (default `1_000_000`;
+      stdio maximum `1_048_576`).
     * `:max_catalog_tools` - discovery catalog ceiling from 1 through 128
       (default `128`).
     * `:max_pages` - discovery pagination ceiling from 1 through 64
@@ -76,8 +98,8 @@ defmodule PtcRunner.Kernel.MCPSource do
   stable atom error: `:mcp_authentication_failed`, `:mcp_timeout`,
   `:mcp_transport_error`, `:mcp_protocol_error`, `:mcp_remote_error`,
   `:mcp_response_exceeded`, `:mcp_catalog_exceeded`, `:mcp_invalid_catalog`,
-  `:mcp_invalid_tool_schema`, `:mcp_unsupported_result`, or
-  `:mcp_mapped_tool_missing`.
+  `:mcp_invalid_tool_schema`, `:mcp_unsupported_result`,
+  or `:mcp_mapped_tool_missing`.
 
   ## Frozen result and snapshot contracts
 
@@ -92,16 +114,16 @@ defmodule PtcRunner.Kernel.MCPSource do
   and transport failures never include remote messages or payloads.
 
   The safe connector snapshot has top-level fields `provider`, `protocol`,
-  `transport`, `server_info_hash`, `snapshot_hash`, and `tools`. The transport
-  is `"streamable_http"` for this source. The nullable server hash fingerprints
-  bounded self-reported implementation identity without exposing its untrusted
-  text. Each sorted tool entry contains
-  only its public `name`, fixed `"read"` effect, model-visibility flag, one-way
-  upstream-name and nullable prompt-visible description hashes,
-  `input_schema_hash`, nullable
-  `output_schema_hash`, and nullable `http_headers_hash`. Hashes are lowercase
-  SHA-256; endpoints, raw upstream names and descriptions, headers,
-  credentials, arguments, and results are excluded.
+  `transport`, `server_info_hash`, `snapshot_hash`, and `tools`. Stdio
+  snapshots additionally contain the launcher protocol, launcher digest, and
+  server-executable digest. The nullable server hash fingerprints bounded self-reported
+  implementation identity without exposing its untrusted text. Each sorted
+  tool entry contains only its public `name`, fixed `"read"` effect,
+  model-visibility flag, one-way upstream-name and nullable prompt-visible
+  description hashes, `input_schema_hash`, nullable `output_schema_hash`, and
+  nullable `http_headers_hash`. Hashes are lowercase SHA-256; endpoints, raw
+  upstream names and descriptions, headers, credentials, paths, arguments,
+  and results are excluded.
   """
   def builder(opts) when is_list(opts) do
     case installed_config(opts) do
@@ -114,32 +136,30 @@ defmodule PtcRunner.Kernel.MCPSource do
 
   defp installed_config(opts) do
     allowed = [
-      :endpoint,
-      :headers,
+      :transport,
       :tools,
       :timeout_ms,
       :max_result_bytes,
       :max_catalog_tools,
-      :max_pages,
-      :allow_insecure_loopback
+      :max_pages
     ]
 
-    with true <- Keyword.keys(opts) -- allowed == [],
-         endpoint when is_binary(endpoint) <- Keyword.get(opts, :endpoint),
-         :ok <- endpoint(endpoint, Keyword.get(opts, :allow_insecure_loopback, false)),
-         headers when is_function(headers, 0) <- Keyword.get(opts, :headers, fn -> [] end),
+    with true <- Keyword.keyword?(opts),
+         keys = Keyword.keys(opts),
+         true <- keys -- allowed == [] and Enum.uniq(keys) == keys,
+         {:ok, transport} <- installed_transport(Keyword.get(opts, :transport)),
          {:ok, tools} <- installed_tools(Keyword.get(opts, :tools)),
          timeout_ms when is_integer(timeout_ms) and timeout_ms > 0 <-
            Keyword.get(opts, :timeout_ms, 5_000),
          max_result_bytes when is_integer(max_result_bytes) and max_result_bytes > 0 <-
            Keyword.get(opts, :max_result_bytes, 1_000_000),
+         :ok <- transport_ceilings(transport, timeout_ms, max_result_bytes),
          max_catalog_tools when max_catalog_tools in 1..128 <-
            Keyword.get(opts, :max_catalog_tools, 128),
          max_pages when max_pages in 1..64 <- Keyword.get(opts, :max_pages, 16) do
       {:ok,
        %{
-         endpoint: endpoint,
-         headers: headers,
+         transport: transport,
          tools: tools,
          timeout_ms: timeout_ms,
          max_result_bytes: max_result_bytes,
@@ -149,6 +169,62 @@ defmodule PtcRunner.Kernel.MCPSource do
     else
       _reason -> {:error, :invalid_installation}
     end
+  end
+
+  defp installed_transport({:streamable_http, opts}) when is_list(opts) do
+    allowed = [:endpoint, :headers, :allow_insecure_loopback]
+
+    with true <- Keyword.keyword?(opts),
+         true <- Keyword.keys(opts) -- allowed == [],
+         true <- Enum.uniq(Keyword.keys(opts)) == Keyword.keys(opts),
+         endpoint when is_binary(endpoint) <- Keyword.get(opts, :endpoint),
+         allow_insecure_loopback when is_boolean(allow_insecure_loopback) <-
+           Keyword.get(opts, :allow_insecure_loopback, false),
+         :ok <- endpoint(endpoint, allow_insecure_loopback),
+         headers when is_function(headers, 0) <- Keyword.get(opts, :headers, fn -> [] end) do
+      {:ok, %{type: :streamable_http, endpoint: endpoint, headers: headers}}
+    else
+      _reason -> {:error, :invalid_transport}
+    end
+  end
+
+  defp installed_transport({:stdio, opts}) when is_list(opts) do
+    with true <- Keyword.keyword?(opts),
+         true <- Enum.uniq(Keyword.keys(opts)) == Keyword.keys(opts),
+         true <- :launcher_protocol_version not in Keyword.keys(opts),
+         {:ok, opts} <- freeze_launcher_override(opts),
+         validation_options =
+           opts
+           |> Keyword.put_new(:launcher, "/ptc-runner-launcher")
+           |> Keyword.put(:launcher_protocol_version, @launcher_protocol_version),
+         {:ok, _config} <- MCPStdioTransport.validate_options(validation_options) do
+      {:ok, %{type: :stdio, options: opts}}
+    else
+      _reason -> {:error, :invalid_transport}
+    end
+  end
+
+  defp installed_transport(_transport), do: {:error, :invalid_transport}
+
+  defp freeze_launcher_override(opts) do
+    case Keyword.fetch(opts, :launcher) do
+      {:ok, launcher} ->
+        with {:ok, canonical} <- canonical_executable_path(launcher),
+             do: {:ok, Keyword.put(opts, :launcher, canonical)}
+
+      :error ->
+        {:ok, opts}
+    end
+  end
+
+  defp transport_ceilings(%{type: :streamable_http}, _timeout_ms, _max_result_bytes), do: :ok
+
+  defp transport_ceilings(%{type: :stdio}, timeout_ms, max_result_bytes) do
+    ceilings = MCPStdioTransport.request_ceilings()
+
+    if timeout_ms <= ceilings.timeout_ms and max_result_bytes <= ceilings.result_bytes,
+      do: :ok,
+      else: {:error, :invalid_transport}
   end
 
   defp endpoint(endpoint, allow_loopback?) do
@@ -191,7 +267,27 @@ defmodule PtcRunner.Kernel.MCPSource do
 
   defp build(installed, selection, context) do
     with {:ok, selected} <- selection(installed, selection, context),
-         {:ok, headers} <- resolve_headers(installed.headers, selected.timeout_ms),
+         {:ok, transport} <- acquire_transport(installed.transport, context, selected) do
+      case discover(transport, installed, selected, context.provider) do
+        {:ok, capabilities, snapshot} ->
+          {:ok,
+           %{
+             capabilities: capabilities,
+             snapshot: snapshot,
+             close: fn -> close_transport(transport) end
+           }}
+
+        {:error, reason} ->
+          case close_transport(transport) do
+            :ok -> {:error, reason}
+            {:error, :mcp_transport_error} -> {:error, :mcp_transport_error}
+          end
+      end
+    end
+  end
+
+  defp acquire_transport(%{type: :streamable_http} = installed, context, selected) do
+    with {:ok, headers} <- resolve_headers(installed.headers, selected.timeout_ms),
          {:ok, request_context} <-
            MCPRequestContext.start(
              owner: context.owner,
@@ -199,19 +295,264 @@ defmodule PtcRunner.Kernel.MCPSource do
              headers: headers,
              timeout_ms: selected.timeout_ms
            ) do
-      case discover(request_context, installed, selected, context.provider) do
-        {:ok, capabilities, snapshot} ->
-          {:ok,
-           %{
-             capabilities: capabilities,
-             snapshot: snapshot,
-             close: fn -> MCPRequestContext.close(request_context) end
-           }}
+      {:ok, %{type: :streamable_http, handle: request_context}}
+    end
+  end
 
-        {:error, reason} ->
-          MCPRequestContext.close(request_context)
-          {:error, reason}
+  defp acquire_transport(%{type: :stdio, options: options}, context, selected) do
+    deadline_ms = System.monotonic_time(:millisecond) + selected.timeout_ms
+
+    result =
+      case within_deadline(selected.timeout_ms, fn ->
+             prepare_staged_launcher(options, context.owner, selected.timeout_ms)
+           end) do
+        {:ok, staged} ->
+          staged
+          |> start_stdio_transport(options, context, selected, deadline_ms)
+          |> finalize_launcher_staging(staged, deadline_ms)
+
+        error ->
+          error
       end
+
+    normalize_stdio_acquisition(result)
+  end
+
+  defp prepare_staged_launcher(options, owner, lease_ms) do
+    with {:ok, staging} <- MCPLauncherStaging.start(owner, lease_ms) do
+      case with {:ok, launcher} <- resolve_stdio_launcher(options),
+                do: stage_launcher(launcher, staging) do
+        {:ok, _staged} = success ->
+          success
+
+        error ->
+          _ = MCPLauncherStaging.close(staging, lease_ms)
+          error
+      end
+    end
+  end
+
+  defp start_stdio_transport(staged, options, context, selected, deadline_ms) do
+    with remaining_ms when remaining_ms > 0 <-
+           deadline_ms - System.monotonic_time(:millisecond),
+         options =
+           options
+           |> Keyword.put(:launcher, staged.path)
+           |> Keyword.put(:launcher_protocol_version, @launcher_protocol_version)
+           |> Keyword.update(
+             :start_timeout_ms,
+             min(5_000, remaining_ms),
+             &min(&1, remaining_ms)
+           ),
+         {:ok, handle} <- MCPStdioTransport.start(options, context.owner) do
+      {:ok,
+       %{
+         type: :stdio,
+         handle: handle,
+         timeout_ms: selected.timeout_ms,
+         launcher_protocol_version: @launcher_protocol_version,
+         launcher_sha256: Base.encode16(staged.digest, case: :lower),
+         server_executable_sha256:
+           options
+           |> Keyword.fetch!(:executable_sha256)
+           |> Base.encode16(case: :lower)
+       }}
+    end
+  end
+
+  defp normalize_stdio_acquisition(result) do
+    case result do
+      {:ok, _transport} = success ->
+        success
+
+      remaining_ms when is_integer(remaining_ms) and remaining_ms <= 0 ->
+        {:error, :mcp_timeout}
+
+      {:error, :mcp_timeout} ->
+        {:error, :mcp_timeout}
+
+      {:error, :mcp_stdio_spawn_timeout} ->
+        {:error, :mcp_timeout}
+
+      {:error, _reason} ->
+        {:error, :mcp_transport_error}
+    end
+  end
+
+  defp resolve_stdio_launcher(options) do
+    with {:ok, launcher} <- configured_stdio_launcher(options),
+         do: canonical_executable_path(launcher)
+  end
+
+  defp configured_stdio_launcher(options) do
+    case Keyword.fetch(options, :launcher) do
+      {:ok, launcher} -> {:ok, launcher}
+      :error -> companion_launcher()
+    end
+  end
+
+  defp companion_launcher do
+    launcher_module = Module.concat(["PtcRunnerLauncher"])
+
+    if Code.ensure_loaded?(launcher_module) and
+         function_exported?(launcher_module, :protocol_version, 0) and
+         function_exported?(launcher_module, :executable_path, 0) and
+         launcher_module.protocol_version() == @launcher_protocol_version do
+      case launcher_module.executable_path() do
+        {:ok, launcher} -> {:ok, launcher}
+        {:error, :unsupported_platform} -> {:error, :unsupported_mcp_stdio_platform}
+        {:error, _reason} -> {:error, :mcp_stdio_launcher_unavailable}
+      end
+    else
+      {:error, :mcp_stdio_launcher_unavailable}
+    end
+  end
+
+  defp close_transport(%{
+         type: :streamable_http,
+         handle: %MCPRequestContext{} = request_context
+       }),
+       do: MCPRequestContext.close(request_context)
+
+  defp close_transport(%{type: :stdio, handle: %MCPStdioTransport{} = handle}),
+    do: MCPStdioTransport.close(handle)
+
+  defp stage_launcher(source, staging) do
+    with {:ok, stat} <- File.stat(source),
+         true <-
+           stat.type == :regular and stat.size in 1..@max_launcher_bytes and
+             Bitwise.band(stat.mode, 0o111) != 0,
+         {:ok, digest} <- copy_launcher(source, staging.path),
+         :ok <- File.chmod(staging.path, 0o500) do
+      {:ok, Map.put(staging, :digest, digest)}
+    else
+      _invalid -> {:error, :mcp_stdio_launcher_unavailable}
+    end
+  rescue
+    _exception -> {:error, :mcp_stdio_launcher_unavailable}
+  end
+
+  defp copy_launcher(source, target) do
+    with {:ok, input} <- File.open(source, [:read, :binary]) do
+      try do
+        case File.open(target, [:write, :binary, :exclusive], fn output ->
+               copy_launcher_chunks(input, output, :crypto.hash_init(:sha256), 0)
+             end) do
+          {:ok, {:ok, digest}} -> {:ok, digest}
+          _error -> {:error, :mcp_stdio_launcher_unavailable}
+        end
+      after
+        File.close(input)
+      end
+    end
+  end
+
+  defp copy_launcher_chunks(input, output, hash, bytes) do
+    case IO.binread(input, 65_536) do
+      :eof when bytes > 0 ->
+        {:ok, :crypto.hash_final(hash)}
+
+      chunk when is_binary(chunk) and bytes + byte_size(chunk) <= @max_launcher_bytes ->
+        with :ok <- IO.binwrite(output, chunk) do
+          copy_launcher_chunks(
+            input,
+            output,
+            :crypto.hash_update(hash, chunk),
+            bytes + byte_size(chunk)
+          )
+        end
+
+      _empty_exceeded_or_error ->
+        {:error, :mcp_stdio_launcher_unavailable}
+    end
+  end
+
+  defp finalize_launcher_staging(result, staging, deadline_ms) do
+    remaining_ms = max(deadline_ms - System.monotonic_time(:millisecond), 0)
+    cleanup = MCPLauncherStaging.close(staging, remaining_ms)
+    deadline_expired? = System.monotonic_time(:millisecond) >= deadline_ms
+
+    cond do
+      cleanup == :ok and not deadline_expired? ->
+        result
+
+      deadline_expired? ->
+        rollback_acquisition(result, :mcp_timeout, &close_transport/1)
+
+      true ->
+        rollback_acquisition(
+          result,
+          :mcp_stdio_launcher_unavailable,
+          &close_transport/1
+        )
+    end
+  end
+
+  @doc false
+  def rollback_acquisition({:ok, transport}, reason, close)
+      when is_atom(reason) and is_function(close, 1) do
+    case close.(transport) do
+      :ok -> {:error, reason}
+      _cleanup_failed -> {:error, :mcp_transport_error}
+    end
+  rescue
+    _exception -> {:error, :mcp_transport_error}
+  catch
+    _kind, _reason -> {:error, :mcp_transport_error}
+  end
+
+  def rollback_acquisition(_result, reason, close)
+      when is_atom(reason) and is_function(close, 1),
+      do: {:error, reason}
+
+  defp canonical_executable_path(path) when is_binary(path) do
+    case Path.split(path) do
+      ["/" | components] -> resolve_path_components("/", components, 0)
+      _relative_or_invalid -> {:error, :mcp_stdio_launcher_unavailable}
+    end
+  end
+
+  defp canonical_executable_path(_path), do: {:error, :mcp_stdio_launcher_unavailable}
+
+  defp resolve_path_components(_current, [], _symlinks),
+    do: {:error, :mcp_stdio_launcher_unavailable}
+
+  defp resolve_path_components(current, ["." | remaining], symlinks),
+    do: resolve_path_components(current, remaining, symlinks)
+
+  defp resolve_path_components(current, [".." | remaining], symlinks),
+    do: resolve_path_components(Path.dirname(current), remaining, symlinks)
+
+  defp resolve_path_components(current, [component | remaining], symlinks) do
+    candidate = Path.join(current, component)
+
+    case File.lstat(candidate) do
+      {:ok, %File.Stat{type: :directory}} when remaining != [] ->
+        resolve_path_components(candidate, remaining, symlinks)
+
+      {:ok, %File.Stat{type: :regular}} when remaining == [] ->
+        {:ok, candidate}
+
+      {:ok, %File.Stat{type: :symlink}} ->
+        resolve_symlink(current, candidate, remaining, symlinks)
+
+      _missing_or_invalid ->
+        {:error, :mcp_stdio_launcher_unavailable}
+    end
+  end
+
+  defp resolve_symlink(current, candidate, remaining, symlinks) do
+    with true <- symlinks < @max_launcher_symlinks,
+         {:ok, target} <- File.read_link(candidate) do
+      case Path.split(target) do
+        ["/" | target_components] ->
+          resolve_path_components("/", target_components ++ remaining, symlinks + 1)
+
+        target_components ->
+          resolve_path_components(current, target_components ++ remaining, symlinks + 1)
+      end
+    else
+      _missing_or_exceeded -> {:error, :mcp_stdio_launcher_unavailable}
     end
   end
 
@@ -256,19 +597,21 @@ defmodule PtcRunner.Kernel.MCPSource do
   defp destination_timeout(%{destination: :mission, limits: limits}),
     do: limits.evaluation_timeout_ms
 
-  defp discover(request, installed, selected, provider) do
+  defp discover(transport, installed, selected, provider) do
     with {:ok, discovery} <-
            rpc(
-             request,
+             transport,
              "server/discover",
              %{},
              @max_discovery_bytes
            ),
          {:ok, server} <- MCPProtocol.discover_result(discovery, @protocol),
          true <- Map.has_key?(server.capabilities, "tools"),
-         {:ok, discovered} <- list_tools(request, installed),
-         {:ok, capabilities, tools} <- capabilities(request, installed, selected, discovered),
-         {:ok, snapshot} <- snapshot(provider, tools, server.server_info) do
+         {:ok, discovered} <- list_tools(transport, installed),
+         {:ok, capabilities, tools} <-
+           capabilities(transport, installed, selected, discovered),
+         {:ok, snapshot} <-
+           snapshot(provider, transport, tools, server.server_info) do
       {:ok, capabilities, snapshot}
     else
       {:error, _reason} = error -> error
@@ -276,19 +619,19 @@ defmodule PtcRunner.Kernel.MCPSource do
     end
   end
 
-  defp list_tools(request, installed) do
+  defp list_tools(transport, installed) do
     state = %{tools: %{}, names: %{}, seen: %{}, received_tools: 0, received_bytes: 0}
-    list_tools(request, installed, nil, state, 0)
+    list_tools(transport, installed, nil, state, 0)
   end
 
   defp list_tools(_request, installed, _cursor, state, pages)
        when pages >= installed.max_pages or state.received_tools > installed.max_catalog_tools,
        do: {:error, :mcp_catalog_exceeded}
 
-  defp list_tools(request, installed, cursor, state, pages) do
+  defp list_tools(transport, installed, cursor, state, pages) do
     params = if is_nil(cursor), do: %{}, else: %{"cursor" => cursor}
 
-    with {:ok, result} <- rpc(request, "tools/list", params, @max_discovery_bytes) do
+    with {:ok, result} <- rpc(transport, "tools/list", params, @max_discovery_bytes) do
       case MCPProtocol.catalog_page(
              result,
              state,
@@ -299,7 +642,7 @@ defmodule PtcRunner.Kernel.MCPSource do
           {:ok, tools}
 
         {:continue, next, state} ->
-          list_tools(request, installed, next, state, pages + 1)
+          list_tools(transport, installed, next, state, pages + 1)
 
         {:error, _reason} = error ->
           error
@@ -307,12 +650,12 @@ defmodule PtcRunner.Kernel.MCPSource do
     end
   end
 
-  defp capabilities(request, installed, selected, discovered) do
+  defp capabilities(transport, installed, selected, discovered) do
     installed.tools
     |> Enum.filter(fn {_upstream, mapping} -> MapSet.member?(selected.allow, mapping.as) end)
     |> Enum.sort_by(fn {_upstream, mapping} -> mapping.as end)
     |> Enum.reduce_while({:ok, [], []}, fn {upstream, mapping}, {:ok, capabilities, tools} ->
-      case capability(request, upstream, mapping, discovered[upstream], selected) do
+      case capability(transport, upstream, mapping, discovered[upstream], selected) do
         {:ok, capability, snapshot_tool} ->
           {:cont, {:ok, [capability | capabilities], [snapshot_tool | tools]}}
 
@@ -329,17 +672,17 @@ defmodule PtcRunner.Kernel.MCPSource do
   defp capability(_request, _upstream, _mapping, nil, _selected),
     do: {:error, :mcp_mapped_tool_missing}
 
-  defp capability(request, upstream, mapping, tool, selected) do
+  defp capability(transport, upstream, mapping, tool, selected) do
     case MCPProtocol.selected_tool(tool) do
       {:ok, contract} ->
-        assemble_capability(request, upstream, mapping, contract, selected)
+        assemble_capability(transport, upstream, mapping, contract, selected)
 
       {:error, _reason} = error ->
         error
     end
   end
 
-  defp assemble_capability(request, upstream, mapping, contract, selected) do
+  defp assemble_capability(transport, upstream, mapping, contract, selected) do
     with {:ok, capability} <-
            Capability.new(
              name: mapping.as,
@@ -354,7 +697,7 @@ defmodule PtcRunner.Kernel.MCPSource do
            capability
            | callback:
                callback(
-                 request,
+                 transport,
                  upstream,
                  contract.header_parameters,
                  capability.output_validator,
@@ -363,7 +706,8 @@ defmodule PtcRunner.Kernel.MCPSource do
          },
          {:ok, input_hash} <- schema_hash(capability.input_schema),
          {:ok, output_hash} <- optional_schema_hash(capability.output_schema),
-         {:ok, headers_hash} <- header_parameters_hash(contract.header_parameters) do
+         {:ok, headers_hash} <-
+           transport_header_parameters_hash(transport.type, contract.header_parameters) do
       upstream_name_hash = sha256(upstream)
 
       description_hash =
@@ -385,10 +729,10 @@ defmodule PtcRunner.Kernel.MCPSource do
     end
   end
 
-  defp callback(request, upstream, header_parameters, output_validator, selected) do
+  defp callback(transport, upstream, header_parameters, output_validator, selected) do
     fn arguments ->
       case rpc(
-             request,
+             transport,
              "tools/call",
              %{"name" => upstream, "arguments" => arguments},
              selected.max_result_bytes,
@@ -413,40 +757,71 @@ defmodule PtcRunner.Kernel.MCPSource do
     end
   end
 
-  defp snapshot(provider, tools, server_info) when is_binary(provider) do
+  defp snapshot(provider, %{type: type} = transport, tools, server_info)
+       when is_binary(provider) and type in [:streamable_http, :stdio] do
+    transport_name = Atom.to_string(type)
+    identity_projection = transport_identity_projection(transport)
+    identity_fields = transport_identity_fields(transport)
+
     with {:ok, server_info_hash} <- optional_server_info_hash(server_info),
          projection =
            {:object,
             [
               {"protocol", "mcp-#{@protocol}"},
-              {"transport", "streamable_http"},
-              {"server_info_hash", server_info_hash},
-              {"tools",
-               Enum.map(tools, fn tool ->
-                 {:object,
-                  [
-                    {"name", tool["name"]},
-                    {"effect", tool["effect"]},
-                    {"model_visible", tool["model_visible"]},
-                    {"upstream_name_hash", tool["upstream_name_hash"]},
-                    {"description_hash", tool["description_hash"]},
-                    {"input_schema_hash", tool["input_schema_hash"]},
-                    {"output_schema_hash", tool["output_schema_hash"]},
-                    {"http_headers_hash", tool["http_headers_hash"]}
-                  ]}
-               end)}
-            ]},
+              {"transport", transport_name}
+            ] ++
+              identity_projection ++
+              [
+                {"server_info_hash", server_info_hash},
+                {"tools",
+                 Enum.map(tools, fn tool ->
+                   {:object,
+                    [
+                      {"name", tool["name"]},
+                      {"effect", tool["effect"]},
+                      {"model_visible", tool["model_visible"]},
+                      {"upstream_name_hash", tool["upstream_name_hash"]},
+                      {"description_hash", tool["description_hash"]},
+                      {"input_schema_hash", tool["input_schema_hash"]},
+                      {"output_schema_hash", tool["output_schema_hash"]},
+                      {"http_headers_hash", tool["http_headers_hash"]}
+                    ]}
+                 end)}
+              ]},
          {:ok, encoded} <- DeterministicJSON.encode(projection) do
       {:ok,
-       %{
-         "provider" => provider,
-         "protocol" => "mcp-#{@protocol}",
-         "transport" => "streamable_http",
-         "server_info_hash" => server_info_hash,
-         "snapshot_hash" => sha256(encoded),
-         "tools" => tools
-       }}
+       Map.merge(
+         %{
+           "provider" => provider,
+           "protocol" => "mcp-#{@protocol}",
+           "transport" => transport_name,
+           "server_info_hash" => server_info_hash,
+           "snapshot_hash" => sha256(encoded),
+           "tools" => tools
+         },
+         identity_fields
+       )}
     end
+  end
+
+  defp transport_identity_projection(%{type: :streamable_http}), do: []
+
+  defp transport_identity_projection(%{type: :stdio} = transport) do
+    [
+      {"launcher_protocol_version", transport.launcher_protocol_version},
+      {"launcher_sha256", transport.launcher_sha256},
+      {"server_executable_sha256", transport.server_executable_sha256}
+    ]
+  end
+
+  defp transport_identity_fields(%{type: :streamable_http}), do: %{}
+
+  defp transport_identity_fields(%{type: :stdio} = transport) do
+    %{
+      "launcher_protocol_version" => transport.launcher_protocol_version,
+      "launcher_sha256" => transport.launcher_sha256,
+      "server_executable_sha256" => transport.server_executable_sha256
+    }
   end
 
   defp schema_hash(schema) do
@@ -475,7 +850,20 @@ defmodule PtcRunner.Kernel.MCPSource do
     |> schema_hash()
   end
 
-  defp rpc(request_context, method, params, max_bytes, header_parameters \\ []) do
+  defp transport_header_parameters_hash(:streamable_http, parameters),
+    do: header_parameters_hash(parameters)
+
+  defp transport_header_parameters_hash(:stdio, _parameters), do: {:ok, nil}
+
+  defp rpc(transport, method, params, max_bytes, header_parameters \\ [])
+
+  defp rpc(
+         %{type: :streamable_http, handle: request_context},
+         method,
+         params,
+         max_bytes,
+         header_parameters
+       ) do
     with_request(request_context, fn request ->
       with {:ok, parameter_headers} <-
              MCPProtocol.header_values(header_parameters, Map.get(params, "arguments", %{})),
@@ -486,6 +874,27 @@ defmodule PtcRunner.Kernel.MCPSource do
         MCPProtocol.outcome(body, method)
       end
     end)
+  end
+
+  defp rpc(
+         %{type: :stdio, handle: handle, timeout_ms: timeout_ms},
+         method,
+         params,
+         max_bytes,
+         _header_parameters
+       ) do
+    case MCPStdioTransport.request(
+           handle,
+           method,
+           params,
+           request_metadata(),
+           max_bytes,
+           timeout_ms
+         ) do
+      {:ok, body} -> MCPProtocol.outcome(body, method)
+      {:error, :closed} -> {:error, :mcp_transport_error}
+      {:error, _reason} = error -> error
+    end
   end
 
   defp with_request(request_context, callback) do

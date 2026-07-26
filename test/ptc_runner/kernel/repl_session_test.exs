@@ -149,10 +149,23 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
             mission_environment: mission,
             input: %{},
             limits: limits,
-            event_sink: sink
+            event_sink: sink,
+            provider_resources: [
+              fn ->
+                send(parent, :foreign_config_resource_closed)
+                :ok
+              end
+            ]
           )
 
         send(parent, {:foreign_config, config})
+
+        receive do
+          :stop_sink ->
+            EventSink.stop(sink)
+            send(parent, :foreign_sink_stopped)
+        end
+
         receive do: (:finish -> :ok)
       end)
 
@@ -160,9 +173,17 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
     foreign_sink_ref = Process.monitor(foreign_config.event_sink.pid)
     assert {:error, :session_owner_mismatch} = ReplSession.new(config: foreign_config)
     assert Process.alive?(foreign_config.event_sink.pid)
+    refute_receive :foreign_config_resource_closed
+
+    send(config_owner.pid, :stop_sink)
+    assert_receive :foreign_sink_stopped
+    assert_receive {:DOWN, ^foreign_sink_ref, :process, _, :normal}, 2_000
+
+    assert {:error, :session_owner_mismatch} = ReplSession.new(config: foreign_config)
+    refute_receive :foreign_config_resource_closed
+
     send(config_owner.pid, :finish)
     assert :ok = Task.await(config_owner)
-    assert_receive {:DOWN, ^foreign_sink_ref, :process, _, _reason}, 2_000
 
     inspection_owner =
       Task.async(fn ->
@@ -200,6 +221,123 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
     assert_receive {:DOWN, ^inspection_ref, :process, _, _reason}, 2_000
   end
 
+  test "a suspended owned sink fails setup without tearing down the config" do
+    parent = self()
+
+    task =
+      Task.async(fn ->
+        {:ok, workflow} = WorkflowEnvironment.new([])
+        {:ok, mission} = MissionEnvironment.new([])
+        limits = Limits.defaults()
+        {:ok, sink} = EventSink.start(:normal, limits, run_id: "suspended-repl-config")
+
+        {:ok, config} =
+          RunConfig.new(
+            workflow_environment: workflow,
+            mission_environment: mission,
+            input: %{},
+            limits: limits,
+            event_sink: sink,
+            provider_resources: [
+              fn ->
+                send(parent, :suspended_config_resource_closed)
+                :ok
+              end
+            ]
+          )
+
+        :ok = :sys.suspend(sink.pid)
+        result = ReplSession.new(config: config)
+        alive? = Process.alive?(sink.pid)
+        :ok = :sys.resume(sink.pid)
+        :ok = EventSink.stop(sink)
+        {result, alive?}
+      end)
+
+    assert {{:error, :session_owner_mismatch}, true} = Task.await(task, 7_000)
+    refute_receive :suspended_config_resource_closed
+  end
+
+  test "setup cleanup remains bounded when one owned sink is dead and the other is suspended" do
+    parent = self()
+
+    task =
+      Task.async(fn ->
+        {:ok, workflow} = WorkflowEnvironment.new([])
+        {:ok, mission} = MissionEnvironment.new([])
+        limits = Limits.defaults()
+        {:ok, event_sink} = EventSink.start(:private, limits, run_id: "mixed-dead-wedged")
+
+        {:ok, inspection_sink} =
+          InspectionSink.start(run_id: "mixed-dead-wedged", trace_id: "mixed-dead-wedged")
+
+        {:ok, config} =
+          RunConfig.new(
+            workflow_environment: workflow,
+            mission_environment: mission,
+            input: %{},
+            limits: limits,
+            event_sink: event_sink,
+            inspection_sink: inspection_sink,
+            inspection_path: "mixed-dead-wedged.inspection.jsonl",
+            provider_resources: [
+              fn ->
+                send(parent, :mixed_config_resource_closed)
+                :ok
+              end
+            ]
+          )
+
+        :ok = EventSink.stop(event_sink)
+        :ok = :sys.suspend(inspection_sink.pid)
+        result = ReplSession.new(config: config)
+        {result, Process.alive?(inspection_sink.pid)}
+      end)
+
+    assert {{:error, :event_sink_error}, false} = Task.await(task, 3_000)
+    assert_receive :mixed_config_resource_closed
+  end
+
+  test "setup cleanup remains bounded with a dead inspection sink and suspended event sink" do
+    parent = self()
+
+    task =
+      Task.async(fn ->
+        {:ok, workflow} = WorkflowEnvironment.new([])
+        {:ok, mission} = MissionEnvironment.new([])
+        limits = Limits.defaults()
+        {:ok, event_sink} = EventSink.start(:private, limits, run_id: "wedged-dead-mixed")
+
+        {:ok, inspection_sink} =
+          InspectionSink.start(run_id: "wedged-dead-mixed", trace_id: "wedged-dead-mixed")
+
+        {:ok, config} =
+          RunConfig.new(
+            workflow_environment: workflow,
+            mission_environment: mission,
+            input: %{},
+            limits: limits,
+            event_sink: event_sink,
+            inspection_sink: inspection_sink,
+            inspection_path: "wedged-dead-mixed.inspection.jsonl",
+            provider_resources: [
+              fn ->
+                send(parent, :reverse_mixed_config_resource_closed)
+                :ok
+              end
+            ]
+          )
+
+        :ok = InspectionSink.stop(inspection_sink)
+        :ok = :sys.suspend(event_sink.pid)
+        result = ReplSession.new(config: config)
+        {result, Process.alive?(event_sink.pid)}
+      end)
+
+    assert {{:error, :inspection_sink_error}, false} = Task.await(task, 3_000)
+    assert_receive :reverse_mixed_config_resource_closed
+  end
+
   test "owner exit closes hidden session resources" do
     parent = self()
 
@@ -217,7 +355,12 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
             input: %{},
             limits: limits,
             event_sink: sink,
-            provider_resources: [fn -> send(parent, :owner_exit_resource_closed) end]
+            provider_resources: [
+              fn ->
+                send(parent, :owner_exit_resource_closed)
+                :ok
+              end
+            ]
           )
 
         {:ok, _session} = ReplSession.new(config: config)
@@ -541,7 +684,12 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
         input: %{},
         limits: limits,
         event_sink: sink,
-        provider_resources: [fn -> send(parent, :resource_closed) end]
+        provider_resources: [
+          fn ->
+            send(parent, :resource_closed)
+            :ok
+          end
+        ]
       )
 
     {:ok, session} = ReplSession.new(config: config)
@@ -552,6 +700,42 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
     assert {:ok, %{return: 42}, session} = ReplSession.eval(session, "42")
     assert {:ok, _events} = ReplSession.close(session)
     assert_receive :resource_closed
+  end
+
+  test "a distinct config rejected by a live session closes only its resources" do
+    parent = self()
+    {:ok, workflow} = WorkflowEnvironment.new([])
+    {:ok, mission} = MissionEnvironment.new([])
+    limits = Limits.defaults()
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "repl-distinct-owner")
+
+    config = fn close_message ->
+      RunConfig.new(
+        workflow_environment: workflow,
+        mission_environment: mission,
+        input: %{},
+        limits: limits,
+        event_sink: sink,
+        provider_resources: [
+          fn ->
+            send(parent, close_message)
+            :ok
+          end
+        ]
+      )
+    end
+
+    {:ok, winner_config} = config.(:winner_resource_closed)
+    {:ok, loser_config} = config.(:loser_resource_closed)
+
+    {:ok, session} = ReplSession.new(config: winner_config)
+    assert {:error, :event_sink_error} = ReplSession.new(config: loser_config)
+    assert_receive :loser_resource_closed
+    refute_receive :winner_resource_closed
+
+    assert {:ok, %{return: 42}, session} = ReplSession.eval(session, "42")
+    assert {:ok, _events} = ReplSession.close(session)
+    assert_receive :winner_resource_closed
   end
 
   test "configuration assembly rejects a run-started payload above the event ceiling" do
@@ -596,6 +780,19 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
     assert stopped.data.usage.errors == 1
   end
 
+  test "terminal admission bounds caller-held REPL counters" do
+    {:ok, session} = ReplSession.new()
+    oversized = Bitwise.bsl(1, 2_200_000)
+    forged = %{session | attempts: oversized, errors: oversized}
+
+    assert {:ok, events} = ReplSession.close(forged)
+    stopped = List.last(events)
+
+    assert stopped.data.outcome == :error
+    assert stopped.data.reason == :repl_evaluation_error
+    assert stopped.data.usage.errors == 4_294_967_295
+  end
+
   test "close atomically returns a reserved terminal batch and exact drop usage" do
     {:ok, workflow} = WorkflowEnvironment.new([])
     {:ok, mission} = MissionEnvironment.new([])
@@ -604,7 +801,7 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
       Limits.new(
         normal_event_count: 4,
         normal_event_bytes: 100_000,
-        event_payload_bytes: 5_000
+        event_payload_bytes: 10_000
       )
 
     {:ok, sink} = EventSink.start(:normal, limits, run_id: "repl-terminal-reserve")

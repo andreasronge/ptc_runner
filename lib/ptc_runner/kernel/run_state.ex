@@ -15,15 +15,19 @@ defmodule PtcRunner.Kernel.RunState do
   process. Ordinary and standalone-REPL state cannot transfer ownership; only
   co-hosted session construction receives a one-shot transfer.
 
-  Each capability reservation also monitors the dispatching process. If that
-  process dies mid-call (heap kill, timeout kill), the reservation is
-  reclaimed only after the attached provider process has been killed and its
-  `:DOWN` observed. Thus connector cleanup cannot begin while a callback from
-  that run remains live. Shutdown — owner death or explicit stop — likewise
-  kills and drains every still-attached provider before state terminates. A
-  process holds at most one reservation at a time: dispatch is sequential per
-  process, so a second reserve while one is active is a protocol violation and
-  is rejected rather than silently replacing the tracked reservation.
+  Each capability reservation monitors the dispatching process. Every attached
+  provider is also registered with a small monitor-only tracker that
+  untrappably kills the callback if RunState dies, even when `terminate/2`
+  cannot run. If the
+  dispatching process dies mid-call (heap kill, timeout kill), the reservation
+  is reclaimed only after the attached provider process has been killed and
+  its `:DOWN` observed. Thus connector cleanup cannot begin while a callback
+  from that run remains live. Shutdown — owner death or explicit stop —
+  likewise kills and drains every still-attached provider before state
+  terminates. A process holds at most one reservation at a time: dispatch is
+  sequential per process, so a second reserve while one is active is a protocol
+  violation and is rejected rather than silently replacing the tracked
+  reservation.
   """
   use GenServer
 
@@ -31,24 +35,28 @@ defmodule PtcRunner.Kernel.RunState do
   alias PtcRunner.Kernel.EventSinkState
   alias PtcRunner.Kernel.InspectionSink
   alias PtcRunner.Kernel.Limits
+  alias PtcRunner.Kernel.ProviderTaskTracker
   alias PtcRunner.Lisp
   alias PtcRunner.Lisp.RetainedSize
 
   @history_depth 3
 
-  @enforce_keys [:pid, :token]
-  defstruct [:pid, :token]
+  @enforce_keys [:pid, :token, :provider_tracker]
+  defstruct [:pid, :token, :provider_tracker]
 
   @type environment :: :workflow | :mission
-  @type t :: %__MODULE__{pid: pid(), token: reference()}
+  @type t :: %__MODULE__{
+          pid: pid(),
+          token: reference(),
+          provider_tracker: ProviderTaskTracker.t()
+        }
 
-  @spec start(Limits.t(), keyword()) :: {:ok, t()}
+  @spec start(Limits.t(), keyword()) :: {:ok, t()} | {:error, term()}
   @doc "Starts run state with a deadline beginning at construction time."
   def start(%Limits{} = limits, opts \\ []) do
     token = make_ref()
     owner = Keyword.get(opts, :owner, self())
-    {:ok, pid} = GenServer.start(__MODULE__, {limits, token, owner, nil, false, nil})
-    {:ok, %__MODULE__{pid: pid, token: token}}
+    start_state({limits, token, owner, nil, false, nil})
   end
 
   @doc false
@@ -57,12 +65,9 @@ defmodule PtcRunner.Kernel.RunState do
          true <- inspection_owner?(inspection_sink),
          token = make_ref(),
          owner = self(),
-         {:ok, pid} <-
-           GenServer.start(
-             __MODULE__,
-             {limits, token, owner, nil, false, {event_sink, inspection_sink}}
-           ) do
-      {:ok, %__MODULE__{pid: pid, token: token}}
+         {:ok, state} <-
+           start_state({limits, token, owner, nil, false, {event_sink, inspection_sink}}) do
+      {:ok, state}
     else
       _ -> {:error, :session_owner_mismatch}
     end
@@ -75,9 +80,9 @@ defmodule PtcRunner.Kernel.RunState do
 
     with true <- Keyword.keys(opts) -- [:owner] == [],
          {:ok, event_sink, handle} <- EventSink.prepare(:normal, limits, sink_opts),
-         {:ok, pid} <-
-           GenServer.start(__MODULE__, {limits, token, owner, event_sink, true, nil}) do
-      {:ok, %__MODULE__{pid: pid, token: token}, struct!(EventSink, Map.put(handle, :pid, pid))}
+         {:ok, state} <-
+           start_state({limits, token, owner, event_sink, true, nil}) do
+      {:ok, state, struct!(EventSink, Map.put(handle, :pid, state.pid))}
     else
       _ -> {:error, :invalid_run_state}
     end
@@ -90,8 +95,18 @@ defmodule PtcRunner.Kernel.RunState do
 
   @spec attach_provider(t(), pid()) :: :ok | {:error, :closed}
   @doc "Attaches the caller's live provider process to its capability reservation."
-  def attach_provider(state, provider) when is_pid(provider),
-    do: call(state, {:attach_provider, provider})
+  def attach_provider(%__MODULE__{} = state, provider) when is_pid(provider) do
+    with :ok <- ProviderTaskTracker.attach(state.provider_tracker, provider) do
+      case call(state, {:attach_provider, provider}) do
+        :ok ->
+          :ok
+
+        {:error, :closed} = error ->
+          Process.exit(provider, :kill)
+          error
+      end
+    end
+  end
 
   @spec release_provider_slot(t()) :: :ok | {:error, :closed}
   @doc "Releases the caller's live provider slot without accepting a result."
@@ -131,9 +146,21 @@ defmodule PtcRunner.Kernel.RunState do
   @doc "Closes the run against further reservations and result commits."
   def close(state), do: call(state, :close)
 
+  @doc false
+  @spec close_and_drain(t()) :: :ok
+  def close_and_drain(%__MODULE__{} = state) do
+    call(state, :close_and_drain)
+  after
+    ProviderTaskTracker.close(state.provider_tracker)
+  end
+
   @spec stop(t()) :: :ok
   @doc "Stops the owner process after the run has closed."
-  def stop(state), do: GenServer.stop(state.pid, :normal)
+  def stop(%__MODULE__{} = state) do
+    GenServer.stop(state.pid, :normal)
+  after
+    ProviderTaskTracker.close(state.provider_tracker)
+  end
 
   @spec usage(t()) :: map()
   @doc "Returns a read-only bounded usage snapshot."
@@ -201,6 +228,13 @@ defmodule PtcRunner.Kernel.RunState do
   end
 
   @impl GenServer
+  def handle_call(
+        {event_token, :owner},
+        _from,
+        %{event_sink: %{token: event_token}, owner: owner} = state
+      ),
+      do: {:reply, {:ok, owner}, state}
+
   def handle_call(
         {event_token, :owner?},
         {caller, _tag},
@@ -381,6 +415,9 @@ defmodule PtcRunner.Kernel.RunState do
   def handle_call({token, :close}, _from, %{token: token} = state),
     do: {:reply, :ok, %{state | closed?: true}}
 
+  def handle_call({token, :close_and_drain}, _from, %{token: token} = state),
+    do: {:reply, :ok, close_and_drain_state(state)}
+
   def handle_call({token, :usage}, _from, %{token: token} = state),
     do: {:reply, usage_projection(state), state}
 
@@ -515,6 +552,26 @@ defmodule PtcRunner.Kernel.RunState do
     refs = Map.new(providers, fn provider -> {Process.monitor(provider), provider} end)
     Enum.each(providers, &Process.exit(&1, :kill))
     drain_providers(refs)
+  end
+
+  defp close_and_drain_state(state) do
+    state.reservations
+    |> Enum.flat_map(fn
+      {_caller, %{provider: provider}} when is_pid(provider) -> [provider]
+      _reservation -> []
+    end)
+    |> Enum.uniq()
+    |> kill_and_drain()
+
+    Enum.each(state.reservations, fn {_caller, reservation} ->
+      if is_reference(reservation.caller_ref),
+        do: Process.demonitor(reservation.caller_ref, [:flush])
+
+      if is_reference(reservation.provider_ref),
+        do: Process.demonitor(reservation.provider_ref, [:flush])
+    end)
+
+    %{state | closed?: true, provider_tasks: 0, reservations: %{}}
   end
 
   defp redact_status(status) do
@@ -657,6 +714,24 @@ defmodule PtcRunner.Kernel.RunState do
     do: left + right
 
   defp sum_retained_bytes(_left, _right), do: :oversized
+
+  defp start_state(args) do
+    case GenServer.start(__MODULE__, args) do
+      {:ok, pid} ->
+        case ProviderTaskTracker.start(pid) do
+          {:ok, provider_tracker} ->
+            token = elem(args, 1)
+            {:ok, %__MODULE__{pid: pid, token: token, provider_tracker: provider_tracker}}
+
+          {:error, reason} ->
+            GenServer.stop(pid, :normal)
+            {:error, reason}
+        end
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
 
   defp call(%__MODULE__{pid: pid, token: token}, request),
     do: GenServer.call(pid, {token, request})

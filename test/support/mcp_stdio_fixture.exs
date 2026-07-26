@@ -75,13 +75,8 @@ defmodule PtcRunner.TestSupport.MCPStdioFixture do
         padding = String.duplicate("x", 1_048_576 - byte_size(body))
         IO.write(:stdio, [response_body(id, "exact-crlf", padding), "\r\n"])
 
-      {id, "notify"} when is_integer(id) ->
-        IO.write(
-          :stdio,
-          ~s({"jsonrpc":"2.0","method":"notifications/progress","params":{"progress":1}}\n)
-        )
-
-        respond(id, "notify")
+      {id, method} when is_integer(id) and method in ["notify", "notify-flood"] ->
+        emit_notifications(id, method, line)
 
       {id, method} when is_integer(id) and is_binary(method) ->
         respond(id, method)
@@ -103,6 +98,28 @@ defmodule PtcRunner.TestSupport.MCPStdioFixture do
       [method] -> method
       _missing -> nil
     end
+  end
+
+  defp extract_progress_token(line) do
+    case Regex.run(~r/"progressToken"\s*:\s*([1-9][0-9]*)/, line, capture: :all_but_first) do
+      [token] -> String.to_integer(token)
+      _missing -> nil
+    end
+  end
+
+  defp emit_notifications(id, method, line) do
+    token = extract_progress_token(line)
+    count = if method == "notify", do: 1, else: 4
+    padding = if method == "notify", do: "", else: String.duplicate("x", 64)
+
+    for progress <- 1..count do
+      IO.write(
+        :stdio,
+        ~s({"jsonrpc":"2.0","method":"notifications/progress","params":{"padding":"#{padding}","progress":#{progress},"progressToken":#{token}}}\n)
+      )
+    end
+
+    respond(id, method)
   end
 
   defp respond_after(id, method, delay_ms) do

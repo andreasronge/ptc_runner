@@ -41,6 +41,15 @@ defmodule Mix.Tasks.Ptc.ReplTest do
     assert "" = capture_io("", fn -> Repl.run(["-"]) end)
   end
 
+  test "classifies cleanup failure without terminal events as cleanup" do
+    assert {:error, :cleanup, :provider_cleanup_failed} =
+             Repl.persist_terminal_result(
+               {:error, :provider_cleanup_failed},
+               nil,
+               false
+             )
+  end
+
   @tag :tmp_dir
   test "a strict manifest supplies the REPL workflow bundle", %{tmp_dir: directory} do
     component_path = Path.join(directory, "helpers.clj")
@@ -82,6 +91,42 @@ defmodule Mix.Tasks.Ptc.ReplTest do
              TraceLog.query(trace_log, :list_runs, %{})
 
     assert name == SafeMetadata.fingerprint("ptc.repl")
+  end
+
+  @tag :tmp_dir
+  test "--trace persists an abort batch before reraising a frontend exception", %{
+    tmp_dir: directory
+  } do
+    path = Path.join(directory, "frontend-exception.jsonl")
+    previous_shell = Mix.shell()
+
+    try do
+      Mix.shell(PtcRunner.Test.MissingMixShell)
+
+      assert_raise UndefinedFunctionError, fn ->
+        Repl.run(["--trace", path, "-e", "(+ 1 2)"])
+      end
+    after
+      Mix.shell(previous_shell)
+    end
+
+    assert {:ok, _trace_log} = TraceLog.new(source: {:file, path})
+    assert File.read!(path) =~ ~s("reason":"frontend_exception")
+  end
+
+  @tag :tmp_dir
+  test "abort trace failure does not replace the frontend exception", %{tmp_dir: directory} do
+    previous_shell = Mix.shell()
+
+    try do
+      Mix.shell(PtcRunner.Test.MissingMixShell)
+
+      assert_raise UndefinedFunctionError, fn ->
+        Repl.run(["--trace", directory, "-e", "(+ 1 2)"])
+      end
+    after
+      Mix.shell(previous_shell)
+    end
   end
 
   @tag :tmp_dir

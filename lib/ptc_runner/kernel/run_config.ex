@@ -17,7 +17,9 @@ defmodule PtcRunner.Kernel.RunConfig do
   An event sink must be open and use these exact limits. A normal sink carries
   the standard two-event measured terminal reserve, must leave room for the
   assembled `run-started` event, and must have a payload ceiling large enough
-  for the bounded loss summary. Private sinks reserve no lossy terminal slots.
+  for the bounded loss summary and the maximum complete Runner/REPL usage
+  projection. Private sinks reserve no lossy terminal slots but retain the same
+  terminal-payload check.
 
   Construction derives and freezes `mission_inventory` from the mission
   environment and limits. It contains both the authoritative versioned
@@ -47,9 +49,12 @@ defmodule PtcRunner.Kernel.RunConfig do
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.MissionEnvironment
   alias PtcRunner.Kernel.MissionInventory
+  alias PtcRunner.Kernel.ProviderResources
   alias PtcRunner.Kernel.SafeMetadata
   alias PtcRunner.Kernel.WorkflowEnvironment
   alias PtcRunner.Lisp.RetainedSize
+
+  @maximum_repl_errors 4_294_967_295
 
   @enforce_keys [
     :workflow_environment,
@@ -57,7 +62,9 @@ defmodule PtcRunner.Kernel.RunConfig do
     :input,
     :limits,
     :event_sink,
-    :mission_inventory
+    :event_sink_owner,
+    :mission_inventory,
+    :claim_id
   ]
   defstruct [
     :workflow_environment,
@@ -65,8 +72,11 @@ defmodule PtcRunner.Kernel.RunConfig do
     :input,
     :limits,
     :event_sink,
+    :event_sink_owner,
     :mission_inventory,
+    :claim_id,
     inspection_sink: nil,
+    inspection_sink_owner: nil,
     inspection_path: nil,
     provider_resources: [],
     connector_snapshots: [],
@@ -81,10 +91,13 @@ defmodule PtcRunner.Kernel.RunConfig do
           input: map(),
           limits: Limits.t(),
           event_sink: EventSink.t(),
+          event_sink_owner: pid(),
           mission_inventory: MissionInventory.t(),
+          claim_id: reference(),
           inspection_sink: InspectionSink.t() | nil,
+          inspection_sink_owner: pid() | nil,
           inspection_path: binary() | nil,
-          provider_resources: [(-> :ok)],
+          provider_resources: [ProviderResources.close()],
           connector_snapshots: [map()],
           session_profile: map() | nil,
           labels: map(),
@@ -121,8 +134,11 @@ defmodule PtcRunner.Kernel.RunConfig do
          %Limits{} = limits <- Keyword.get(opts, :limits),
          %EventSink{} = sink <- Keyword.get(opts, :event_sink),
          true <- valid_event_sink_contract?(sink, limits),
+         {:ok, event_sink_owner} <- EventSink.owner(sink),
          true <-
            inspection?(Keyword.get(opts, :inspection_sink), Keyword.get(opts, :inspection_path)),
+         {:ok, inspection_sink_owner} <-
+           inspection_owner(Keyword.get(opts, :inspection_sink)),
          true <- provider_resources?(Keyword.get(opts, :provider_resources, [])),
          true <- connector_snapshots?(Keyword.get(opts, :connector_snapshots, [])),
          {:ok, session_profile} <- session_profile(Keyword.get(opts, :session_profile)),
@@ -138,7 +154,13 @@ defmodule PtcRunner.Kernel.RunConfig do
              labels,
              limits
            ),
-         true <- EventSink.begin_capacity?(sink, run_started_metadata) do
+         true <- EventSink.begin_capacity?(sink, run_started_metadata),
+         true <-
+           EventSink.terminal_usage_capacity?(
+             sink,
+             limits,
+             maximum_terminal_usage(workflow, mission, limits)
+           ) do
       {:ok,
        %__MODULE__{
          workflow_environment: workflow,
@@ -146,8 +168,11 @@ defmodule PtcRunner.Kernel.RunConfig do
          input: Keyword.fetch!(opts, :input),
          limits: limits,
          event_sink: sink,
+         event_sink_owner: event_sink_owner,
          mission_inventory: mission_inventory,
+         claim_id: make_ref(),
          inspection_sink: Keyword.get(opts, :inspection_sink),
+         inspection_sink_owner: inspection_sink_owner,
          inspection_path: Keyword.get(opts, :inspection_path),
          provider_resources: Keyword.get(opts, :provider_resources, []),
          connector_snapshots: Keyword.get(opts, :connector_snapshots, []),
@@ -238,20 +263,15 @@ defmodule PtcRunner.Kernel.RunConfig do
     end
   end
 
-  @spec close_provider_resources(t()) :: :ok
-  @doc "Closes opaque provider resources in their stored reverse-build order."
-  def close_provider_resources(%__MODULE__{provider_resources: resources}) do
-    Enum.each(resources, fn close ->
-      try do
-        _ = close.()
-      rescue
-        _exception -> :ok
-      catch
-        _kind, _reason -> :ok
-      end
-    end)
+  @spec close_provider_resources(t()) :: :ok | {:error, :provider_cleanup_failed}
+  @doc """
+  Closes opaque provider resources in their stored reverse-build order.
 
-    :ok
+  Every resource is attempted. Exceptions and non-success results are
+  normalized to `:provider_cleanup_failed` without exposing provider details.
+  """
+  def close_provider_resources(%__MODULE__{provider_resources: resources}) do
+    ProviderResources.close(resources)
   end
 
   defp provider_resources?(resources),
@@ -261,6 +281,52 @@ defmodule PtcRunner.Kernel.RunConfig do
     is_list(snapshots) and length(snapshots) <= 128 and
       Enum.all?(snapshots, &JSONValue.map?/1) and
       byte_size(:erlang.term_to_binary(snapshots)) <= 262_144
+  end
+
+  defp maximum_terminal_usage(workflow, mission, limits) do
+    %{
+      closed?: true,
+      remaining_ms: limits.run_duration_ms,
+      capability_calls: %{
+        workflow:
+          maximum_call_map(
+            workflow.capabilities,
+            limits.workflow_capability_calls,
+            limits.workflow_capability_calls_per_name
+          ),
+        mission:
+          maximum_call_map(
+            mission.capabilities,
+            limits.mission_capability_calls,
+            limits.mission_capability_calls_per_name
+          )
+      },
+      subordinate_evaluations: limits.subordinate_evaluations,
+      protocol_errors: limits.protocol_errors + 1,
+      evaluation_memory_bytes: limits.evaluation_memory_bytes,
+      evaluation_history_bytes: limits.evaluation_history_bytes,
+      evaluation_continuation_bytes:
+        limits.evaluation_memory_bytes + limits.evaluation_history_bytes,
+      evaluation_busy?: true,
+      errors: @maximum_repl_errors
+    }
+  end
+
+  defp maximum_call_map(capabilities, total_limit, per_name_limit) do
+    maximum_count = min(total_limit, per_name_limit)
+
+    capabilities
+    |> Map.keys()
+    |> Enum.sort_by(&{-retained_name_bytes(&1), &1})
+    |> Enum.take(total_limit)
+    |> Map.new(&{&1, maximum_count})
+  end
+
+  defp retained_name_bytes(name) do
+    case RetainedSize.bytes(name) do
+      bytes when is_integer(bytes) -> bytes
+      :oversized -> 9_223_372_036_854_775_807
+    end
   end
 
   defp session_profile(nil), do: {:ok, nil}
@@ -286,4 +352,7 @@ defmodule PtcRunner.Kernel.RunConfig do
     do: is_binary(path) and String.ends_with?(path, ".inspection.jsonl")
 
   defp inspection?(_sink, _path), do: false
+
+  defp inspection_owner(nil), do: {:ok, nil}
+  defp inspection_owner(%InspectionSink{} = sink), do: InspectionSink.owner(sink)
 end

@@ -872,11 +872,11 @@ defmodule Mix.Tasks.Ptc.Repl do
         finish(outcome, opts[:trace])
       rescue
         exception ->
-          ReplSession.abort(session, :frontend_exception)
+          abort_and_persist(session, :frontend_exception, opts[:trace])
           reraise exception, __STACKTRACE__
       catch
         kind, reason ->
-          ReplSession.abort(session, :frontend_exit)
+          abort_and_persist(session, :frontend_exit, opts[:trace])
           :erlang.raise(kind, reason, __STACKTRACE__)
       end
     else
@@ -1041,10 +1041,63 @@ defmodule Mix.Tasks.Ptc.Repl do
   defp persist_and_stop(session, trace_path) do
     private? = ReplSession.event_policy(session) == :private
 
-    with {:ok, events} <- ReplSession.close(session),
-         :ok <- persist_trace(trace_path, events, private?) do
-      :ok
-    else
+    case persist_terminal_result(ReplSession.close(session), trace_path, private?) do
+      :ok ->
+        :ok
+
+      {:error, :cleanup, reason} ->
+        Mix.raise("ptc.repl cleanup failed: #{inspect(reason)}")
+
+      {:error, :terminal, reason} ->
+        Mix.raise("ptc.repl trace failed: #{inspect(reason)}")
+    end
+  end
+
+  defp abort_and_persist(session, reason, trace_path) do
+    private? = ReplSession.event_policy(session) == :private
+    _ = persist_abort_result(ReplSession.abort(session, reason), trace_path, private?)
+    :ok
+  end
+
+  defp persist_abort_result({:ok, events}, trace_path, private?),
+    do: persist_trace(trace_path, events, private?)
+
+  defp persist_abort_result(
+         {:error, :provider_cleanup_failed, events},
+         trace_path,
+         private?
+       ),
+       do: persist_trace(trace_path, events, private?)
+
+  defp persist_abort_result(_result, _trace_path, _private?), do: :ok
+
+  @doc false
+  def persist_terminal_result({:ok, events}, trace_path, private?) do
+    persist_trace!(trace_path, events, private?)
+  end
+
+  def persist_terminal_result(
+        {:error, reason, events},
+        trace_path,
+        private?
+      ) do
+    persist_trace!(trace_path, events, private?)
+    {:error, :cleanup, reason}
+  end
+
+  def persist_terminal_result(
+        {:error, :provider_cleanup_failed},
+        _trace_path,
+        _private?
+      ),
+      do: {:error, :cleanup, :provider_cleanup_failed}
+
+  def persist_terminal_result({:error, reason}, _trace_path, _private?),
+    do: {:error, :terminal, reason}
+
+  defp persist_trace!(trace_path, events, private?) do
+    case persist_trace(trace_path, events, private?) do
+      :ok -> :ok
       {:error, reason} -> Mix.raise("ptc.repl trace failed: #{inspect(reason)}")
     end
   end

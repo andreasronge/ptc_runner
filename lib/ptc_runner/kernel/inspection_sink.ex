@@ -22,6 +22,7 @@ defmodule PtcRunner.Kernel.InspectionSink do
   @default_record_bytes 2_000_000
   @default_total_bytes 16_000_000
   @record_types ~w(capability-input capability-output evaluation-source prelude-source)
+  @stop_timeout_ms 5_000
 
   @enforce_keys [:pid, :token]
   defstruct [:pid, :token]
@@ -77,12 +78,31 @@ defmodule PtcRunner.Kernel.InspectionSink do
   @spec owner?(t()) :: boolean()
   def owner?(sink), do: call(sink, :owner?) == true
 
+  @doc false
+  @spec owner(t()) :: {:ok, pid()} | {:error, :inspection_sink_error}
+  def owner(sink), do: call(sink, :owner)
+
   @spec stop(t()) :: :ok
   @doc "Stops the sink; repeated or owner-driven stops are harmless."
-  def stop(%__MODULE__{pid: pid}) do
-    GenServer.stop(pid, :normal)
-  catch
-    :exit, _reason -> :ok
+  def stop(sink), do: stop(sink, @stop_timeout_ms)
+
+  @doc false
+  @spec stop(t(), timeout()) :: :ok
+  def stop(%__MODULE__{pid: pid}, timeout) do
+    ref = Process.monitor(pid)
+
+    try do
+      try do
+        GenServer.stop(pid, :normal, timeout)
+      catch
+        :exit, _reason -> :ok
+      end
+
+      if Process.alive?(pid), do: Process.exit(pid, :kill)
+      await_stop(ref, pid, timeout)
+    after
+      Process.demonitor(ref, [:flush])
+    end
   end
 
   @impl GenServer
@@ -104,6 +124,9 @@ defmodule PtcRunner.Kernel.InspectionSink do
   end
 
   @impl GenServer
+  def handle_call({token, :owner}, _from, %{token: token} = state),
+    do: {:reply, {:ok, state.owner}, state}
+
   def handle_call({token, :owner?}, {caller, _tag}, %{token: token} = state),
     do: {:reply, caller == state.owner, state}
 
@@ -287,6 +310,14 @@ defmodule PtcRunner.Kernel.InspectionSink do
 
   defp valid_id?(id),
     do: is_binary(id) and String.valid?(id) and byte_size(id) in 1..256
+
+  defp await_stop(ref, pid, timeout) do
+    receive do
+      {:DOWN, ^ref, :process, ^pid, _reason} -> :ok
+    after
+      timeout -> :ok
+    end
+  end
 
   defp redact_status(status) do
     Map.new(status, fn

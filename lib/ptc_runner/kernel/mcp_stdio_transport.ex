@@ -8,7 +8,7 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
   @enforce_keys [:pid, :outcome]
   defstruct [:pid, :outcome]
 
-  @type t :: %__MODULE__{pid: pid(), outcome: reference()}
+  @type t :: %__MODULE__{pid: pid(), outcome: :atomics.atomics_ref()}
 
   @protocol_version 1
   @protocol_metadata %{"io.modelcontextprotocol/protocolVersion" => "2026-07-28"}
@@ -26,19 +26,37 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
   @default_start_timeout_ms 5_000
   @outcome_clean 1
   @outcome_failed 2
+  @verified_cleanup_reasons [:server_exit, :owner_eof, :launcher_signal, :protocol_error]
 
   @spec start(keyword()) :: {:ok, t()} | {:error, atom()}
-  def start(opts) when is_list(opts) do
+  def start(opts), do: start(opts, self())
+
+  @doc false
+  @spec start(keyword(), pid()) :: {:ok, t()} | {:error, atom()}
+  def start(opts, owner) when is_list(opts) and is_pid(owner) do
     outcome = :atomics.new(1, signed: false)
 
-    case GenServer.start(__MODULE__, {self(), opts, outcome}) do
-      {:ok, pid} -> {:ok, %__MODULE__{pid: pid, outcome: outcome}}
-      {:error, reason} when is_atom(reason) -> {:error, reason}
-      {:error, _reason} -> {:error, :mcp_stdio_launcher_unavailable}
+    with {:ok, config} <- validate_options(opts) do
+      case GenServer.start(__MODULE__, {owner, config, outcome}) do
+        {:ok, pid} -> {:ok, %__MODULE__{pid: pid, outcome: outcome}}
+        {:error, reason} when is_atom(reason) -> {:error, reason}
+        {:error, _reason} -> {:error, :mcp_stdio_launcher_unavailable}
+      end
     end
   end
 
-  def start(_opts), do: {:error, :invalid_mcp_stdio_launch}
+  def start(_opts, _owner), do: {:error, :invalid_mcp_stdio_launch}
+
+  @doc false
+  @spec validate_options(keyword()) :: {:ok, map()} | {:error, :invalid_mcp_stdio_launch}
+  def validate_options(opts) when is_list(opts), do: validate_launch_options(opts)
+  def validate_options(_opts), do: {:error, :invalid_mcp_stdio_launch}
+
+  @doc false
+  @spec request_ceilings() :: %{timeout_ms: pos_integer(), result_bytes: pos_integer()}
+  def request_ceilings do
+    %{timeout_ms: @max_request_timeout_ms, result_bytes: @max_frame_bytes}
+  end
 
   @spec request(t(), binary(), map(), map(), pos_integer(), pos_integer()) ::
           {:ok, map()}
@@ -84,12 +102,11 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
   end
 
   @impl GenServer
-  def init({owner, opts, outcome}) do
+  def init({owner, config, outcome}) do
     Process.flag(:trap_exit, true)
     owner_ref = Process.monitor(owner)
 
     with :ok <- supported_platform(),
-         {:ok, config} <- validate_options(opts),
          {:ok, payload} <- bootstrap(config),
          {:ok, port} <- open_port(config.launcher),
          :ok <- start_launcher(port, payload, config.start_timeout_ms, owner_ref) do
@@ -107,6 +124,7 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
          writing: nil,
          retry_scheduled?: false,
          stdout: "",
+         unscoped_notification_bytes: 0,
          closing: nil,
          close_timeout_ms: config.grace_ms * 4 + 2_000,
          close_timer: nil,
@@ -156,6 +174,7 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
         monitor: monitor,
         timer: timer,
         max_bytes: max_bytes,
+        response_bytes: 0,
         write_timeout_ms: timeout_ms,
         sent?: false
       }
@@ -176,8 +195,8 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
   def handle_call(:close, from, %{closing: waiters} = state) when is_list(waiters),
     do: {:noreply, %{state | closing: [from | waiters]}}
 
-  def handle_call(:close, _from, %{terminal_pending?: true} = state),
-    do: {:reply, {:error, :mcp_transport_error}, state}
+  def handle_call(:close, from, %{terminal_pending?: true, closing: nil} = state),
+    do: {:noreply, %{state | closing: [from]}}
 
   def handle_call(:close, from, %{closing: nil} = state) do
     if unacknowledged_request?(state) do
@@ -368,7 +387,7 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
     :ok
   end
 
-  defp validate_options(opts) do
+  defp validate_launch_options(opts) do
     allowed = [
       :launcher,
       :launcher_protocol_version,
@@ -548,6 +567,8 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
   end
 
   defp encode_request(id, method, params, metadata) do
+    metadata = Map.put(metadata, "progressToken", id)
+
     with {:ok, encoded} <- Jason.encode(MCPProtocol.request(id, method, params, metadata)),
          bytes = encoded <> "\n",
          true <- byte_size(bytes) <= @max_frame_bytes - 9 do
@@ -695,8 +716,8 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
 
   defp consume_line(line, state) do
     case MCPProtocol.decode_message(line) do
-      {:ok, {:notification, _notification}} ->
-        {:ok, state}
+      {:ok, {:notification, notification}} ->
+        charge_notification_bytes(state, notification, byte_size(line))
 
       {:ok, {:response, id, response}} ->
         consume_response(id, response, byte_size(line), state)
@@ -710,7 +731,7 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
     case Map.fetch(state.pending, id) do
       {:ok, %{sent?: true} = pending} ->
         result =
-          if bytes <= pending.max_bytes,
+          if pending.response_bytes + bytes <= pending.max_bytes,
             do: {:ok, response},
             else: {:error, :mcp_response_exceeded}
 
@@ -725,6 +746,41 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
           else: {:error, :mcp_protocol_error, state}
     end
   end
+
+  defp charge_notification_bytes(state, notification, bytes) do
+    case notification_request_id(notification, state.pending) do
+      {:ok, id, pending} ->
+        response_bytes = pending.response_bytes + bytes
+        state = put_in(state, [:pending, id, :response_bytes], response_bytes)
+
+        state =
+          if response_bytes > pending.max_bytes,
+            do: cancel_request(state, id, :mcp_response_exceeded, true),
+            else: state
+
+        {:ok, state}
+
+      :unscoped ->
+        bytes = state.unscoped_notification_bytes + bytes
+
+        if bytes <= @max_frame_bytes,
+          do: {:ok, %{state | unscoped_notification_bytes: bytes}},
+          else: {:error, :mcp_response_exceeded, state}
+    end
+  end
+
+  defp notification_request_id(
+         %{"params" => %{"progressToken" => id}},
+         pending_requests
+       )
+       when is_integer(id) and id > 0 do
+    case Map.fetch(pending_requests, id) do
+      {:ok, %{sent?: true} = pending} -> {:ok, id, pending}
+      _missing_or_unsent -> :unscoped
+    end
+  end
+
+  defp notification_request_id(_notification, _pending), do: :unscoped
 
   defp cancel_request(state, id, reason, reply?) do
     case Map.fetch(state.pending, id) do
@@ -861,6 +917,16 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
        when is_list(waiters) do
     reply_close_waiters(waiters, :ok)
     record_outcome(state.outcome, @outcome_clean)
+    {:stop, :normal, state}
+  end
+
+  defp finish_transport(state, %{reason: reason}) when reason in @verified_cleanup_reasons do
+    state = fail_pending(state, :mcp_transport_error)
+
+    if is_list(state.closing), do: reply_close_waiters(state.closing, :ok)
+
+    record_outcome(state.outcome, @outcome_clean)
+    close_port(state.port)
     {:stop, :normal, state}
   end
 

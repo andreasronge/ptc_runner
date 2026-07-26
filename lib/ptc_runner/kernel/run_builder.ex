@@ -17,6 +17,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
   alias PtcRunner.Kernel.Manifest
   alias PtcRunner.Kernel.MissionEnvironment
   alias PtcRunner.Kernel.ProviderRegistry
+  alias PtcRunner.Kernel.ProviderResources
   alias PtcRunner.Kernel.RunConfig
   alias PtcRunner.Kernel.TraceLog
   alias PtcRunner.Kernel.WorkflowEnvironment
@@ -67,8 +68,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
         success
 
       {:error, _reason} = error ->
-        close_resources(providers.resources)
-        error
+        prefer_cleanup_error(error, close_resources(providers.resources))
     end
   end
 
@@ -179,8 +179,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
              }}
 
           {:error, _reason} = error ->
-            close_resources(workflow.resources)
-            error
+            prefer_cleanup_error(error, close_resources(workflow.resources))
         end
 
       {:error, _reason} = error ->
@@ -190,31 +189,23 @@ defmodule PtcRunner.Kernel.RunBuilder do
 
   defp sort_snapshots(snapshots), do: Enum.sort_by(snapshots, &Map.get(&1, "provider", ""))
 
-  @spec close(%{config: RunConfig.t()} | RunConfig.t()) :: :ok
+  @spec close(%{config: RunConfig.t()} | RunConfig.t()) ::
+          :ok | {:error, :provider_cleanup_failed}
   @doc "Closes a built but unexecuted configuration and its event sink."
   def close(%{config: %RunConfig{} = config}), do: close(config)
 
   def close(%RunConfig{} = config) do
-    RunConfig.close_provider_resources(config)
+    result = RunConfig.close_provider_resources(config)
     if config.inspection_sink, do: InspectionSink.stop(config.inspection_sink)
 
     if Process.alive?(config.event_sink.pid), do: EventSink.stop(config.event_sink)
-    :ok
+    result
   end
 
-  defp close_resources(resources) do
-    Enum.each(resources, fn close ->
-      try do
-        _ = close.()
-      rescue
-        _exception -> :ok
-      catch
-        _kind, _reason -> :ok
-      end
-    end)
+  defp close_resources(resources), do: ProviderResources.close(resources)
 
-    :ok
-  end
+  defp prefer_cleanup_error(_original, {:error, :provider_cleanup_failed} = cleanup), do: cleanup
+  defp prefer_cleanup_error(original, :ok), do: original
 
   # Provider resources are already closed by `Kernel.run_and_events/2`; the
   # returned terminal batch is the sole input to both persistence paths.
@@ -363,8 +354,8 @@ defmodule PtcRunner.Kernel.RunBuilder do
             {:cont, {:ok, next}}
 
           {:error, _reason} = error ->
-            close_resources(accumulated.resources)
-            {:halt, error}
+            result = prefer_cleanup_error(error, close_resources(accumulated.resources))
+            {:halt, result}
         end
       end
     )

@@ -22,6 +22,7 @@ defmodule PtcRunner.Kernel.EventSinkState do
       events: [],
       dropped: %{},
       terminal_reserve: terminal_reserve,
+      claimed_by: nil,
       begun?: false,
       finalized?: false
     }
@@ -29,17 +30,31 @@ defmodule PtcRunner.Kernel.EventSinkState do
 
   @doc false
   def handle(
-        {token, {:begin, data}},
+        {token, {:begin, claim_id, data}},
         %{token: token, begun?: false, finalized?: false} = state
-      ) do
+      )
+      when is_reference(claim_id) do
     with {:ok, event, bytes} <- event_with_bytes(state, "run-started", data),
          true <- ordinary_capacity?(state, bytes) do
-      next = retain_event(%{state | begun?: true}, event, bytes)
+      next = retain_event(%{state | begun?: true, claimed_by: claim_id}, event, bytes)
       {:ok, next}
     else
       _error -> {{:error, :event_sink_error}, state}
     end
   end
+
+  def handle(
+        {token, {:begin, claim_id, _data}},
+        %{token: token, begun?: true, claimed_by: claim_id} = state
+      ),
+      do: {{:error, :event_sink_already_claimed}, state}
+
+  def handle(
+        {token, {:begin, claim_id, _data}},
+        %{token: token, begun?: true} = state
+      )
+      when is_reference(claim_id),
+      do: {{:error, :event_sink_claimed_by_other}, state}
 
   def handle(
         {token, {:emit, _type, _data}},
@@ -102,6 +117,16 @@ defmodule PtcRunner.Kernel.EventSinkState do
 
   @doc false
   def ready?(state), do: not state.finalized?
+
+  @doc false
+  def payload_within_limit?(data, limit) when is_map(data) and is_integer(limit) and limit > 0 do
+    with {:ok, normalized_data} <- normalize_json(data),
+         true <- JSONValue.map?(normalized_data),
+         bytes when is_integer(bytes) <- RetainedSize.bytes_with_cap(normalized_data, limit),
+         do: bytes <= limit
+  end
+
+  def payload_within_limit?(_data, _limit), do: false
 
   defp enqueue(state, event, bytes) do
     if ordinary_capacity?(state, bytes) do

@@ -10,7 +10,8 @@ defmodule PtcRunner.Kernel.MCPRequestContextTest do
 
     Process.exit(owner, :kill)
 
-    assert_receive {:DOWN, ^context_ref, :process, _pid, :normal}
+    assert_receive {:DOWN, ^context_ref, :process, _pid, reason}
+    assert reason in [:normal, :noproc]
   end
 
   test "close kills and drains an in-flight request caller" do

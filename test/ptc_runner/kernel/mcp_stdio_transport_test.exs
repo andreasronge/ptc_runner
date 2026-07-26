@@ -30,6 +30,27 @@ defmodule PtcRunner.Kernel.MCPStdioTransportTest do
   end
 
   @tag :tmp_dir
+  test "charges notification frames against the response byte ceiling", %{tmp_dir: tmp_dir} do
+    transport = start_transport(tmp_dir)
+    unrelated = Task.async(fn -> request(transport, "slow", 128) end)
+
+    assert_eventually(fn ->
+      state = :sys.get_state(transport.pid)
+      Enum.count(state.pending, fn {_id, pending} -> pending.sent? end) == 1
+    end)
+
+    assert {:error, :mcp_response_exceeded} =
+             MCPStdioTransport.request(transport, "notify-flood", %{}, %{}, 128, 1_000)
+
+    assert {:ok, %{"result" => %{"method" => "slow"}}} = Task.await(unrelated)
+
+    assert {:ok, %{"result" => %{"method" => "after-notify-flood"}}} =
+             request(transport, "after-notify-flood")
+
+    assert :ok = MCPStdioTransport.close(transport)
+  end
+
+  @tag :tmp_dir
   test "rejects an individual response above its byte ceiling without closing", %{
     tmp_dir: tmp_dir
   } do
@@ -65,7 +86,9 @@ defmodule PtcRunner.Kernel.MCPStdioTransportTest do
   test "malformed protocol stdout fails the transport closed", %{tmp_dir: tmp_dir} do
     transport = start_transport(tmp_dir)
 
-    assert {:error, :mcp_protocol_error} = request(transport, "junk")
+    assert {:error, :mcp_protocol_error} =
+             MCPStdioTransport.request(transport, "junk", %{}, %{}, 8_192, 5_000)
+
     assert {:error, :closed} = request(transport, "after-junk")
   end
 
@@ -222,7 +245,7 @@ defmodule PtcRunner.Kernel.MCPStdioTransportTest do
         end
       end)
 
-    assert_receive {:transport, transport}
+    assert_receive {:transport, transport}, 5_000
 
     request =
       Task.async(fn ->
@@ -361,6 +384,24 @@ defmodule PtcRunner.Kernel.MCPStdioTransportTest do
   end
 
   @tag :tmp_dir
+  test "close waits for a clean finish already draining after port exit", %{tmp_dir: tmp_dir} do
+    transport = start_transport(tmp_dir)
+    state = :sys.get_state(transport.pid)
+    send(transport.pid, {state.port, {:exit_status, 0}})
+    assert_eventually(fn -> :sys.get_state(transport.pid).terminal_pending? end)
+
+    close = Task.async(fn -> MCPStdioTransport.close(transport) end)
+
+    assert_eventually(fn ->
+      :sys.get_state(transport.pid).closing |> is_list()
+    end)
+
+    send(transport.pid, {state.port, {:data, <<"X", 1, 0::signed-big-32, 0>>}})
+
+    assert :ok = Task.await(close, 5_000)
+  end
+
+  @tag :tmp_dir
   test "fails active and new requests while draining terminal status", %{tmp_dir: tmp_dir} do
     transport = start_transport(tmp_dir)
 
@@ -406,8 +447,8 @@ defmodule PtcRunner.Kernel.MCPStdioTransportTest do
     assert :ok = MCPStdioTransport.close(transport)
   end
 
-  defp request(transport, method),
-    do: MCPStdioTransport.request(transport, method, %{}, %{}, 8_192, 1_000)
+  defp request(transport, method, max_bytes \\ 8_192),
+    do: MCPStdioTransport.request(transport, method, %{}, %{}, max_bytes, 1_000)
 
   defp blocked_request(transport) do
     MCPStdioTransport.request(

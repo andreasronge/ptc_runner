@@ -8,7 +8,10 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
   destination, building owner, and installed limits. They return either one
   legacy `PtcRunner.Kernel.Capability` or a normalized provider build with one
   or more capabilities, an optional safe snapshot, and an optional idempotent
-  close function.
+  close function. A close function must return exactly `:ok`; any other return,
+  exception, or exit is a provider-cleanup failure. The Kernel still attempts
+  every registered close function and may replace the run outcome with
+  `:provider_cleanup_error`.
 
   The built-ins are `llm`, permitted only in the workflow environment, and
   `file-read`, permitted only in the mission environment. Additional builders
@@ -42,7 +45,7 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
   @type built_provider :: %{
           capabilities: [Capability.t()],
           snapshot: map() | nil,
-          close: (-> :ok) | nil
+          close: PtcRunner.Kernel.ProviderResources.close() | nil
         }
   @type builder ::
           (map(), context() ->

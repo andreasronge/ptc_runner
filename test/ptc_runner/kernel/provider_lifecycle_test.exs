@@ -3,13 +3,18 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
 
   alias PtcRunner.Kernel.Capability
   alias PtcRunner.Kernel.EventSink
+  alias PtcRunner.Kernel.InspectionSink
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.Manifest
   alias PtcRunner.Kernel.MissionEnvironment
   alias PtcRunner.Kernel.ProviderRegistry
+  alias PtcRunner.Kernel.ProviderResources
   alias PtcRunner.Kernel.ReplSession
+  alias PtcRunner.Kernel.ReplSessionOwner
   alias PtcRunner.Kernel.RunBuilder
   alias PtcRunner.Kernel.RunConfig
+  alias PtcRunner.Kernel.RunState
+  alias PtcRunner.Kernel.TraceLog
   alias PtcRunner.Kernel.WorkflowEnvironment
   alias PtcRunner.LLM.ReqLLMAdapter
   alias ReqLLM.ToolCall
@@ -137,6 +142,307 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
     refute Process.alive?(unused.config.event_sink.pid)
   end
 
+  @tag :tmp_dir
+  test "provider cleanup failure is reported by runs and explicit close", %{tmp_dir: dir} do
+    parent = self()
+    File.write!(Path.join(dir, "workflow.clj"), "(ns app) (defn run [x] (return x))")
+
+    manifest = manifest(dir, [provider("cleanup-fails", %{})], [])
+
+    builder = fn %{}, _context ->
+      {:ok, capability} = capability("provided.cleanup")
+
+      {:ok,
+       %{
+         capabilities: [capability],
+         snapshot: nil,
+         close: fn ->
+           send(parent, :cleanup_attempted)
+           {:error, :fixture_cleanup_failed}
+         end
+       }}
+    end
+
+    {:ok, registry} = ProviderRegistry.new(%{"cleanup-fails" => builder})
+
+    assert {:error,
+            %PtcRunner.Kernel.Error{
+              kind: :provider_cleanup_error,
+              reason: :provider_cleanup_failed
+            }} = RunBuilder.run(manifest, registry)
+
+    assert_receive :cleanup_attempted
+    refute_receive :cleanup_attempted
+
+    assert {:ok, repl_built} = RunBuilder.load_and_build(manifest, registry)
+    assert {:ok, repl} = ReplSession.new(config: repl_built.config)
+
+    assert {:error, :provider_cleanup_failed, close_events} = ReplSession.close(repl)
+    assert List.last(close_events).data.reason == :provider_cleanup_failed
+
+    trace_path = Path.join(dir, "cleanup-failure.jsonl")
+    assert :ok = TraceLog.append_jsonl(trace_path, close_events)
+    assert {:ok, _trace} = TraceLog.new(source: {:file, trace_path})
+    assert File.read!(trace_path) =~ ~s("reason":"provider_cleanup_failed")
+
+    assert_receive :cleanup_attempted
+    refute_receive :cleanup_attempted
+
+    assert {:ok, abort_built} = RunBuilder.load_and_build(manifest, registry)
+    assert {:ok, abort_repl} = ReplSession.new(config: abort_built.config)
+    sink_pid = abort_built.config.event_sink.pid
+    :erlang.trace(sink_pid, true, [:receive])
+
+    assert {:error, :provider_cleanup_failed, abort_events} =
+             ReplSession.abort(abort_repl, :frontend_exit)
+
+    assert List.last(abort_events).data.reason == :provider_cleanup_failed
+
+    assert_receive {:trace, ^sink_pid, :receive,
+                    {:"$gen_call", _from,
+                     {_token,
+                      {:finalize_and_events, %{outcome: :error, reason: :provider_cleanup_failed}}}}}
+
+    assert_receive :cleanup_attempted
+    refute_receive :cleanup_attempted
+
+    assert {:ok, dead_sink_built} = RunBuilder.load_and_build(manifest, registry)
+    assert {:ok, dead_sink_repl} = ReplSession.new(config: dead_sink_built.config)
+    EventSink.stop(dead_sink_built.config.event_sink)
+
+    assert {:error, :provider_cleanup_failed} = ReplSession.close(dead_sink_repl)
+    assert_receive :cleanup_attempted
+    refute_receive :cleanup_attempted
+
+    assert {:ok, dead_state_built} = RunBuilder.load_and_build(manifest, registry)
+    assert {:ok, dead_state_repl} = ReplSession.new(config: dead_state_built.config)
+    [{_, {owner_pid, token}}] = :ets.lookup(dead_state_repl.access, dead_state_repl.id)
+    assert {:ok, _config, run_state} = ReplSessionOwner.resources(owner_pid, token)
+    RunState.stop(run_state)
+
+    assert {:error, :provider_cleanup_failed} =
+             ReplSession.abort(dead_state_repl, :frontend_exit)
+
+    assert_receive :cleanup_attempted
+    refute_receive :cleanup_attempted
+
+    assert {:ok, built} = RunBuilder.load_and_build(manifest, registry)
+    assert {:error, :provider_cleanup_failed} = RunBuilder.close(built)
+    assert_receive :cleanup_attempted
+    refute_receive :cleanup_attempted
+  end
+
+  test "provider cleanup accepts only explicit success and still attempts every resource" do
+    parent = self()
+
+    resources =
+      [:error, false, nil, :unexpected]
+      |> Enum.with_index()
+      |> Enum.map(fn {result, index} ->
+        fn ->
+          send(parent, {:cleanup_attempted, index})
+          result
+        end
+      end)
+
+    assert {:error, :provider_cleanup_failed} = ProviderResources.close(resources)
+
+    for index <- 0..3 do
+      assert_receive {:cleanup_attempted, ^index}
+    end
+  end
+
+  test "Kernel preflight failures close providers and cleanup failure takes precedence" do
+    parent = self()
+    {:ok, workflow} = WorkflowEnvironment.new([])
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, limits} = Limits.new(entry_source_bytes: 1)
+
+    for {close_result, expected_kind} <- [
+          {:ok, :configuration_error},
+          {{:error, :fixture_cleanup_failed}, :provider_cleanup_error}
+        ] do
+      {:ok, sink} = EventSink.start(:normal, limits)
+
+      close = fn ->
+        send(parent, {:preflight_resource_closed, close_result})
+        close_result
+      end
+
+      {:ok, config} =
+        RunConfig.new(
+          workflow_environment: workflow,
+          mission_environment: mission,
+          input: %{},
+          limits: limits,
+          event_sink: sink,
+          provider_resources: [close]
+        )
+
+      assert {:error, %PtcRunner.Kernel.Error{kind: ^expected_kind}} =
+               PtcRunner.Kernel.run("(return 1)", config)
+
+      assert_receive {:preflight_resource_closed, ^close_result}
+      refute_receive {:preflight_resource_closed, ^close_result}
+      EventSink.stop(sink)
+    end
+  end
+
+  test "cleanup failure takes precedence when the closer also stops terminal recording" do
+    {:ok, workflow} = WorkflowEnvironment.new([])
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, limits} = Limits.new()
+
+    {:ok, run_sink} = EventSink.start(:normal, limits)
+
+    run_close = fn ->
+      EventSink.stop(run_sink)
+      {:error, :fixture_cleanup_failed}
+    end
+
+    {:ok, run_config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        mission_environment: mission,
+        input: %{},
+        limits: limits,
+        event_sink: run_sink,
+        provider_resources: [run_close]
+      )
+
+    assert {:error,
+            %PtcRunner.Kernel.Error{
+              kind: :provider_cleanup_error,
+              reason: :provider_cleanup_failed
+            }} = PtcRunner.Kernel.run("(return 1)", run_config)
+
+    {:ok, repl_sink} = EventSink.start(:normal, limits)
+
+    repl_close = fn ->
+      EventSink.stop(repl_sink)
+      {:error, :fixture_cleanup_failed}
+    end
+
+    {:ok, repl_config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        mission_environment: mission,
+        input: %{},
+        limits: limits,
+        event_sink: repl_sink,
+        provider_resources: [repl_close]
+      )
+
+    {:ok, repl} = ReplSession.new(config: repl_config)
+    assert {:error, :provider_cleanup_failed} = ReplSession.close(repl)
+  end
+
+  test "an unavailable unclaimed event sink closes provider resources" do
+    parent = self()
+    {:ok, workflow} = WorkflowEnvironment.new([])
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, limits} = Limits.new()
+    {:ok, sink} = EventSink.start(:normal, limits)
+
+    close = fn ->
+      send(parent, :unclaimed_sink_resource_closed)
+      :ok
+    end
+
+    {:ok, config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        mission_environment: mission,
+        input: %{},
+        limits: limits,
+        event_sink: sink,
+        provider_resources: [close]
+      )
+
+    EventSink.stop(sink)
+
+    assert {:error, %PtcRunner.Kernel.Error{kind: :event_sink_error}} =
+             PtcRunner.Kernel.run("(return 1)", config)
+
+    assert_receive :unclaimed_sink_resource_closed
+    refute_receive :unclaimed_sink_resource_closed
+  end
+
+  test "an unavailable REPL sink closes provider resources and preserves cleanup precedence" do
+    parent = self()
+    {:ok, workflow} = WorkflowEnvironment.new([])
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, limits} = Limits.new()
+
+    for {close_result, expected} <- [
+          {:ok, {:error, :event_sink_error}},
+          {{:error, :fixture_cleanup_failed}, {:error, :provider_cleanup_failed}}
+        ] do
+      {:ok, sink} = EventSink.start(:normal, limits)
+
+      close = fn ->
+        send(parent, {:unavailable_repl_resource_closed, close_result})
+        close_result
+      end
+
+      {:ok, config} =
+        RunConfig.new(
+          workflow_environment: workflow,
+          mission_environment: mission,
+          input: %{},
+          limits: limits,
+          event_sink: sink,
+          provider_resources: [close]
+        )
+
+      EventSink.stop(sink)
+
+      assert ^expected = ReplSession.new(config: config)
+      assert_receive {:unavailable_repl_resource_closed, ^close_result}
+      refute_receive {:unavailable_repl_resource_closed, ^close_result}
+    end
+  end
+
+  test "an owned REPL sink dying during setup still closes provider resources" do
+    parent = self()
+    {:ok, workflow} = WorkflowEnvironment.new([])
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, limits} = Limits.new()
+    {:ok, sink} = EventSink.start(:normal, limits)
+
+    close = fn ->
+      send(parent, :racing_repl_resource_closed)
+      :ok
+    end
+
+    {:ok, config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        mission_environment: mission,
+        input: %{},
+        limits: limits,
+        event_sink: sink,
+        provider_resources: [close]
+      )
+
+    :ok = :sys.suspend(sink.pid)
+    sink_ref = Process.monitor(sink.pid)
+
+    killer =
+      spawn(fn ->
+        receive do
+          :kill -> Process.exit(sink.pid, :kill)
+        end
+      end)
+
+    Process.send_after(killer, :kill, 1)
+
+    assert {:error, :event_sink_error} = ReplSession.new(config: config)
+    assert_receive {:DOWN, ^sink_ref, :process, _, :killed}
+    assert_receive :racing_repl_resource_closed
+    refute_receive :racing_repl_resource_closed
+  end
+
   test "run shutdown kills and drains provider work before closing its resource" do
     parent = self()
 
@@ -188,6 +494,159 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
     EventSink.stop(sink)
   end
 
+  test "runner still closes provider resources when run state dies" do
+    parent = self()
+    provider_table = :ets.new(:state_crash_provider, [:set, :public])
+
+    callback = fn _arguments ->
+      Process.flag(:trap_exit, true)
+      true = :ets.insert(provider_table, {:provider, self()})
+      send(parent, {:state_crash_provider_started, self()})
+
+      receive do
+        :never -> {:ok, %{}}
+      end
+    end
+
+    {:ok, capability} =
+      Capability.new(name: "state_crash", input_schema: @schema, callback: callback)
+
+    {:ok, workflow} = WorkflowEnvironment.new(capabilities: [capability])
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, limits} = Limits.new(workflow_timeout_ms: 5_000, run_duration_ms: 10_000)
+    {:ok, sink} = EventSink.start(:normal, limits)
+
+    close = fn ->
+      [{:provider, provider}] = :ets.lookup(provider_table, :provider)
+      send(parent, {:state_crash_resource_closed, Process.alive?(provider)})
+      :ok
+    end
+
+    {:ok, config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        mission_environment: mission,
+        input: %{},
+        limits: limits,
+        event_sink: sink,
+        provider_resources: [close]
+      )
+
+    {runner, runner_ref} =
+      spawn_monitor(fn -> PtcRunner.Kernel.run("(tool/state_crash {})", config) end)
+
+    assert_receive {:state_crash_provider_started, provider}, 5_000
+    run_state = run_state_monitoring(runner)
+    Process.exit(run_state, :kill)
+
+    assert_receive {:state_crash_resource_closed, false}, 5_000
+    refute Process.alive?(provider)
+    assert_receive {:DOWN, ^runner_ref, :process, ^runner, _reason}, 5_000
+    refute_receive {:state_crash_resource_closed, _alive?}
+    EventSink.stop(sink)
+  end
+
+  test "REPL state-death races preserve provider cleanup failures" do
+    parent = self()
+    {:ok, workflow} = WorkflowEnvironment.new([])
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, limits} = Limits.new()
+
+    for operation <- [:close, :abort] do
+      {:ok, sink} = EventSink.start(:normal, limits)
+
+      close = fn ->
+        send(parent, {:state_race_cleanup_attempted, operation})
+        {:error, :fixture_cleanup_failed}
+      end
+
+      {:ok, config} =
+        RunConfig.new(
+          workflow_environment: workflow,
+          mission_environment: mission,
+          input: %{},
+          limits: limits,
+          event_sink: sink,
+          provider_resources: [close]
+        )
+
+      {:ok, repl} = ReplSession.new(config: config)
+      [{_, {owner_pid, token}}] = :ets.lookup(repl.access, repl.id)
+      assert {:ok, _config, run_state} = ReplSessionOwner.resources(owner_pid, token)
+      :ok = :sys.suspend(run_state.pid)
+
+      killer =
+        spawn(fn ->
+          receive do
+            :kill -> Process.exit(run_state.pid, :kill)
+          end
+        end)
+
+      Process.send_after(killer, :kill, 1)
+
+      result =
+        case operation do
+          :close -> ReplSession.close(repl)
+          :abort -> ReplSession.abort(repl, :frontend_exit)
+        end
+
+      assert {:error, :provider_cleanup_failed} = result
+      assert_receive {:state_race_cleanup_attempted, ^operation}
+      refute_receive {:state_race_cleanup_attempted, ^operation}
+    end
+  end
+
+  test "REPL cleanup may use the provider's bounded shutdown budget beyond five seconds" do
+    parent = self()
+    {:ok, workflow} = WorkflowEnvironment.new([])
+    {:ok, mission} = MissionEnvironment.new([])
+    limits = limits()
+    {:ok, sink} = EventSink.start(:normal, limits)
+
+    close = fn ->
+      send(parent, :delayed_cleanup_started)
+      Process.send_after(self(), :finish_delayed_cleanup, 5_100)
+
+      receive do
+        :finish_delayed_cleanup -> :ok
+      end
+    end
+
+    {:ok, config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        mission_environment: mission,
+        input: %{},
+        limits: limits,
+        event_sink: sink,
+        provider_resources: [close]
+      )
+
+    {:ok, repl} = ReplSession.new(config: config)
+    assert {:ok, _events} = ReplSession.close(repl)
+    assert_receive :delayed_cleanup_started
+  end
+
+  test "default sink shutdown is finite and kills suspended sinks" do
+    {:ok, event_sink} = EventSink.start(:normal, limits())
+
+    {:ok, inspection_sink} =
+      InspectionSink.start(run_id: "finite-stop", trace_id: "finite-stop")
+
+    true = :erlang.suspend_process(event_sink.pid)
+    true = :erlang.suspend_process(inspection_sink.pid)
+    event_ref = Process.monitor(event_sink.pid)
+    inspection_ref = Process.monitor(inspection_sink.pid)
+
+    event_stop = Task.async(fn -> EventSink.stop(event_sink) end)
+    inspection_stop = Task.async(fn -> InspectionSink.stop(inspection_sink) end)
+
+    assert :ok = Task.await(event_stop, 10_000)
+    assert :ok = Task.await(inspection_stop, 10_000)
+    assert_receive {:DOWN, ^event_ref, :process, _, :killed}
+    assert_receive {:DOWN, ^inspection_ref, :process, _, :killed}
+  end
+
   defp registry_with_close(parent) do
     builder = fn %{"id" => id}, _context ->
       {:ok, capability} = capability("provided.#{id}")
@@ -213,6 +672,25 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
   defp limits do
     {:ok, limits} = Limits.new()
     limits
+  end
+
+  defp run_state_monitoring(runner) do
+    {:monitored_by, monitors} = Process.info(runner, :monitored_by)
+
+    Enum.find(monitors, fn
+      pid when pid == self() ->
+        false
+
+      pid ->
+        try do
+          case :sys.get_state(pid, 100) do
+            %{owner: ^runner, reservations: reservations} -> is_map(reservations)
+            _state -> false
+          end
+        catch
+          :exit, _reason -> false
+        end
+    end) || flunk("runner RunState monitor was not found")
   end
 
   defp provider(name, config), do: %{"name" => name, "config" => config}

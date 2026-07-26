@@ -30,40 +30,72 @@ defmodule PtcRunner.Kernel.Runner do
   @spec run_and_events(binary(), RunConfig.t()) ::
           {{:ok, Result.t()} | {:error, Error.t()}, {:ok, [map()]} | {:error, atom()}}
   def run_and_events(entry_source, %RunConfig{} = config) when is_binary(entry_source) do
+    case EventSink.claim(config.event_sink, config.claim_id, config.run_started_metadata) do
+      :ok ->
+        run_claimed_attempt(entry_source, config)
+
+      {:error, :event_sink_already_claimed} ->
+        {event_sink_error(%{}), {:error, :event_sink_error}}
+
+      {:error, reason}
+      when reason in [:event_sink_claimed_by_other, :event_sink_error] ->
+        result =
+          apply_provider_cleanup_failure(
+            event_sink_error(%{}),
+            RunConfig.close_provider_resources(config),
+            %{}
+          )
+
+        {result, {:error, :event_sink_error}}
+    end
+  end
+
+  defp run_claimed_attempt(entry_source, config) do
     with :ok <- entry_source_within_limit(entry_source, config.limits),
          {:ok, state} <- RunState.start(config.limits) do
       try do
-        run_with_events(entry_source, config, state)
+        run_claimed(entry_source, config, state)
       after
-        RunState.close(state)
-        RunState.stop(state)
+        stop_run_state(state)
       end
     else
       {:error, reason} ->
-        {configuration_error(reason, %{}), {:error, :terminal_batch_unavailable}}
+        result =
+          reason
+          |> configuration_error(%{})
+          |> apply_provider_cleanup_failure(RunConfig.close_provider_resources(config), %{})
+
+        finalize_result(result, %{}, config.event_sink)
     end
   end
 
-  defp run_with_events(entry_source, config, state) do
-    case EventSink.begin(config.event_sink, config.run_started_metadata) do
-      :ok ->
-        try do
-          result = run_workflow(entry_source, config, state)
-          result = apply_terminal_failure(result, state)
-          :ok = RunState.close(state)
-          finalize_run(result, state, config.event_sink)
-        after
-          RunConfig.close_provider_resources(config)
-        end
+  defp run_claimed(entry_source, config, state) do
+    execution =
+      try do
+        result = run_workflow(entry_source, config, state)
+        result = apply_terminal_failure(result, state)
+        {:ok, result}
+      catch
+        kind, reason ->
+          {:raised, kind, reason, __STACKTRACE__}
+      after
+        close_run_state(state)
+      end
 
-      {:error, :event_sink_error} ->
-        {event_sink_error(RunState.usage(state)), {:error, :event_sink_error}}
+    usage = run_state_usage(state)
+    cleanup = RunConfig.close_provider_resources(config)
+
+    case execution do
+      {:ok, result} ->
+        result = apply_provider_cleanup_failure(result, cleanup, usage)
+        finalize_result(result, usage, config.event_sink)
+
+      {:raised, kind, reason, stacktrace} ->
+        :erlang.raise(kind, reason, stacktrace)
     end
   end
 
-  defp finalize_run(result, state, sink) do
-    usage = RunState.usage(state)
-
+  defp finalize_result(result, usage, sink) do
     stopped_data = %{
       outcome: outcome(result),
       reason: terminal_reason(result),
@@ -77,7 +109,17 @@ defmodule PtcRunner.Kernel.Runner do
 
       {:error, :event_sink_error} ->
         failed_usage = Map.put(usage, :events_dropped, %{"event-sink" => 1})
-        {event_sink_error(failed_usage), {:error, :event_sink_error}}
+
+        terminal_result =
+          case result do
+            {:error, %Error{kind: :provider_cleanup_error}} ->
+              put_result_usage(result, failed_usage)
+
+            _other ->
+              event_sink_error(failed_usage)
+          end
+
+        {terminal_result, {:error, :event_sink_error}}
     end
   end
 
@@ -282,6 +324,48 @@ defmodule PtcRunner.Kernel.Runner do
        details: %{},
        usage: usage
      }}
+  end
+
+  defp apply_provider_cleanup_failure(
+         result,
+         :ok,
+         _usage
+       ),
+       do: result
+
+  defp apply_provider_cleanup_failure(
+         _result,
+         {:error, :provider_cleanup_failed},
+         usage
+       ) do
+    {:error,
+     %Error{
+       kind: :provider_cleanup_error,
+       reason: :provider_cleanup_failed,
+       details: %{},
+       usage: usage
+     }}
+  end
+
+  defp close_run_state(state) do
+    RunState.close_and_drain(state)
+    :ok
+  catch
+    :exit, _reason -> :ok
+  end
+
+  defp stop_run_state(state) do
+    close_run_state(state)
+    RunState.stop(state)
+    :ok
+  catch
+    :exit, _reason -> :ok
+  end
+
+  defp run_state_usage(state) do
+    RunState.usage(state)
+  catch
+    :exit, _reason -> %{}
   end
 
   defp apply_terminal_failure(result, state) do

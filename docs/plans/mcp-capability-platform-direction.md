@@ -1,7 +1,7 @@
 # MCP-first capability platform — implementation plan
 
 > **Status:** active implementation plan, promoted from `future/` on
-> 2026-07-25. Slices 0 and 1 are complete; Slice 2 is in progress. Every API
+> 2026-07-25. Slices 0 through 2 are complete; Slice 3 is next. Every API
 > below remains planned unless explicitly described as current behavior. The
 > protocol target is the locked `2026-07-28` release
 > candidate reviewed on 2026-07-23. Implementation may target that candidate
@@ -46,15 +46,15 @@ The current implementation already establishes useful boundaries:
 | --- | --- | --- |
 | `PtcRunner.Kernel.Capability` | Validates a name (dots allowed), host-declared effect, bounded schemas, visibility, and a callback that returns `ProviderError` values on failure | MCP tools should become ordinary capabilities; the Kernel should not learn MCP tool semantics |
 | `PtcRunner.Kernel.ProviderRegistry` | Accepts trusted builders and normalizes `{capabilities, snapshot, close}` | Host JSON should decode into existing builders, not create another provider framework |
-| `PtcRunner.Kernel.MCPSource` | Implements read-only stateless Streamable HTTP for MCP `2026-07-28`; installation still requires Elixir | The modern HTTP core exists; data-driven installation and stdio remain |
+| `PtcRunner.Kernel.MCPSource` | Implements read-only MCP `2026-07-28` over typed stateless Streamable HTTP and owned stdio transports; installation still requires Elixir | The common protocol and transport ownership core exists; data-driven installation remains |
 | `PtcRunner.Kernel.MCPLease` | Removed with the obsolete protocol-session lifecycle | Stdio needs transport ownership, not a protocol lease |
 | `PtcRunner.Kernel.FileCapability` | Freezes configured files and reads one already-known whole UTF-8 path | Keep only until the MCP filesystem replacement passes acceptance, then delete the public provider instead of extending it |
 | `PtcRunner.Kernel.JSONSchema` | Compiles a bounded 2020-12 subset and currently requires object roots for inputs and outputs | Input and output compilation need distinct root rules; full remote schemas must not bypass the bounded callable profile |
 | `mix ptc.run` | Uses the default registry and has no host-config option | A generic trusted installation channel is the missing CLI capability |
 | Private inspection | Captures exact provider-neutral LLM and capability activity in a separate bounded artifact | MCP-specific wire evidence can extend the private plane without entering canonical traces |
 
-No new top-level runtime or task abstraction is needed. The missing work is
-stdio ownership and data-driven installation of the modern MCP client.
+No new top-level runtime or task abstraction is needed. The remaining client
+work is data-driven installation of the implemented MCP transports.
 
 ## 3. Decisions
 

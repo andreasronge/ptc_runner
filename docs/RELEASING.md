@@ -8,7 +8,7 @@ versioned `CHANGELOG.md` section. Run:
 ```bash
 mix precommit
 mix prepush
-mix hex.build
+MIX_ENV=prod mix hex.build
 ```
 
 Dispatch the release gate from the versioned commit on `main`. After it is
@@ -16,8 +16,12 @@ green and release approval is explicit, create and push `vX.Y.Z`. The tag
 workflow re-runs the package and documentation gates; it does not publish.
 
 Hex and HexDocs publication is a separate, explicit maintainer action performed
-from the tagged `main` commit. Verify the package, documentation, changelog,
-artifacts, and tag after publication.
+from the tagged `main` commit. Publish the package with
+`MIX_ENV=prod mix hex.publish package` so it uses the same optional Hex
+dependency metadata as the verified archive instead of the local development
+path. Publish documentation separately with
+`MIX_ENV=dev mix hex.publish docs`, where `ex_doc` is installed. Verify the
+package, documentation, changelog, artifacts, and tag after publication.
 
 Do not create or push a release tag, publish a package, or publish documentation
 without explicit user confirmation.

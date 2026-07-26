@@ -91,12 +91,25 @@ defmodule PtcRunner.MixProject do
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
       {:ex_doc, "~> 0.31", only: :dev, runtime: false},
       {:req_llm, "~> 1.8", optional: true},
-      {:ptc_runner_launcher, path: "ptc_runner_launcher", only: [:dev, :test]},
+      launcher_dep(),
       {:ptc_viewer, path: "ptc_viewer", only: [:test, :dev]},
       {:usage_rules, "~> 1.2", only: :dev, runtime: false},
       {:recon, "~> 2.5", only: [:dev, :test], runtime: false},
       {:benchee, "~> 1.3", only: [:dev, :test], runtime: false}
     ]
+  end
+
+  # Local development exercises the companion from this checkout. Published
+  # package metadata instead carries the compatible optional Hex requirement,
+  # so HTTP-only consumers are not forced to install native support.
+  defp launcher_dep do
+    launcher_path = Path.expand("ptc_runner_launcher", __DIR__)
+
+    if Mix.env() in [:dev, :test] and File.dir?(launcher_path) do
+      {:ptc_runner_launcher, "~> 0.1.0", path: "ptc_runner_launcher", optional: true}
+    else
+      {:ptc_runner_launcher, "~> 0.1.0", optional: true}
+    end
   end
 
   defp aliases do
@@ -111,7 +124,8 @@ defmodule PtcRunner.MixProject do
         "ptc.conformance_report --check-inventory",
         "test --warnings-as-errors",
         "cmd --cd ptc_viewer mix test --color",
-        "cmd --cd ptc_runner_launcher mix precommit"
+        "cmd --cd ptc_runner_launcher mix precommit",
+        "cmd bash scripts/verify_core_package.sh"
       ],
       # Slower checks kept out of the per-commit loop; run before pushing.
       # PR CI runs these as individual steps. The upstream audit attests all

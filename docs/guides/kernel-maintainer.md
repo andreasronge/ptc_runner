@@ -222,13 +222,14 @@ successful resources into the run lifecycle. Exact selection grammar and
 transport behavior belong in `ProviderRegistry`, each provider module, and the
 manifest guide.
 
-The current MCP adapter is a host-installed read-only Streamable HTTP source.
-Endpoint, credentials, upstream mapping, and installed ceilings are host
-authority; a manifest may only select mapped names and narrow visibility or
-limits. `PtcRunner.Kernel.MCPSource` owns transport and capability assembly,
+The current MCP adapter is one host-installed read-only source with typed
+Streamable HTTP and stdio transports. Endpoints or process launch details,
+credentials, upstream mapping, and installed ceilings are host authority; a
+manifest may only select mapped names and narrow visibility or limits.
+`PtcRunner.Kernel.MCPSource` owns common discovery and capability assembly,
 `PtcRunner.Kernel.MCPProtocol` owns pure protocol validation and normalization,
-and each stateless request is independently bounded and correlated. Their
-module docs define the exact behavior.
+and the transport owners bound and correlate each request. Their module docs
+define the exact behavior.
 
 The local log-analysis path is a fixed product profile shared by the Viewer
 and terminal REPL. `PtcRunner.Kernel.LogAnalysisSessionBuilder` is the host

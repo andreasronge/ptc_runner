@@ -12,6 +12,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.MissionEnvironment
   alias PtcRunner.Kernel.ProviderError
+  alias PtcRunner.Kernel.ReplSession
   alias PtcRunner.Kernel.RunConfig
   alias PtcRunner.Kernel.RunState
   alias PtcRunner.Kernel.WorkflowEnvironment
@@ -215,6 +216,24 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     assert %{status: :error, kind: :limit_exceeded, reason: :run_closed} = Task.await(task)
   end
 
+  test "closing with drain synchronously terminates attached providers" do
+    {:ok, state} = RunState.start(Limits.defaults())
+    assert :ok = RunState.reserve_capability(state, :workflow, "slow")
+
+    provider =
+      spawn(fn ->
+        receive do
+          :never -> :ok
+        end
+      end)
+
+    provider_ref = Process.monitor(provider)
+    assert :ok = RunState.attach_provider(state, provider)
+    assert :ok = RunState.close_and_drain(state)
+    assert_receive {:DOWN, ^provider_ref, :process, ^provider, :killed}
+    assert %{closed?: true} = RunState.usage(state)
+  end
+
   test "a dispatching process killed mid-call releases its slot and stops its provider" do
     parent = self()
 
@@ -369,7 +388,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
       Limits.new(
         normal_event_count: 4,
         normal_event_bytes: 100_000,
-        event_payload_bytes: 5_000
+        event_payload_bytes: 10_000
       )
 
     {:ok, sink} = EventSink.start(:normal, limits, run_id: "normal-run")
@@ -423,6 +442,230 @@ defmodule PtcRunner.Kernel.CoreContractTest do
                limits: limits,
                event_sink: sink
              )
+  end
+
+  test "tight terminal preflight covers cleanup-failure usage for Runner and REPL" do
+    {:ok, workflow} = WorkflowEnvironment.new([])
+    {:ok, mission} = MissionEnvironment.new([])
+
+    build = fn payload_bytes, close ->
+      {:ok, limits} =
+        Limits.new(
+          event_payload_bytes: payload_bytes,
+          normal_event_count: 4,
+          normal_event_bytes: 200_000
+        )
+
+      case EventSink.start(:normal, limits) do
+        {:ok, sink} ->
+          result =
+            RunConfig.new(
+              workflow_environment: workflow,
+              mission_environment: mission,
+              input: %{},
+              limits: limits,
+              event_sink: sink,
+              provider_resources: [close]
+            )
+
+          {result, sink, limits}
+
+        {:error, :invalid_event_sink} ->
+          {{:error, :invalid_event_sink}, nil, limits}
+      end
+    end
+
+    fits? = fn payload_bytes ->
+      case build.(payload_bytes, fn -> :ok end) do
+        {{:ok, _config}, sink, _limits} ->
+          EventSink.stop(sink)
+          true
+
+        {{:error, :invalid_run_config}, sink, _limits} ->
+          EventSink.stop(sink)
+          false
+
+        {{:error, :invalid_event_sink}, nil, _limits} ->
+          false
+      end
+    end
+
+    search = fn search, low, high ->
+      if low == high do
+        low
+      else
+        middle = div(low + high, 2)
+
+        if fits?.(middle),
+          do: search.(search, low, middle),
+          else: search.(search, middle + 1, high)
+      end
+    end
+
+    minimum = search.(search, 1, 50_000)
+    assert minimum > 1
+
+    {{:ok, accepted}, accepted_sink, _limits} = build.(minimum, fn -> :ok end)
+    EventSink.stop(accepted_sink)
+
+    {{:error, :invalid_run_config}, too_tight_sink, _limits} =
+      build.(minimum - 1, fn -> :ok end)
+
+    assert EventSink.begin_capacity?(too_tight_sink, accepted.run_started_metadata)
+    EventSink.stop(too_tight_sink)
+
+    cleanup_failure = fn -> {:error, :fixture_cleanup_failed} end
+    {{:ok, runner_config}, runner_sink, _limits} = build.(minimum, cleanup_failure)
+
+    assert {:error,
+            %PtcRunner.Kernel.Error{
+              kind: :provider_cleanup_error,
+              reason: :provider_cleanup_failed
+            }} = Kernel.run("(return 42)", runner_config)
+
+    assert List.last(EventSink.events(runner_sink)).data.reason == :provider_cleanup_failed
+
+    {{:ok, repl_config}, _repl_sink, _limits} = build.(minimum, cleanup_failure)
+    {:ok, repl} = ReplSession.new(config: repl_config)
+
+    assert {:error, :provider_cleanup_failed, events} = ReplSession.close(repl)
+    assert List.last(events).data.reason == :provider_cleanup_failed
+
+    {{:ok, abort_config}, _abort_sink, _limits} = build.(minimum, fn -> :ok end)
+    {:ok, abort_repl} = ReplSession.new(config: abort_config)
+
+    long_reason =
+      :frontend_exception_with_a_longer_terminal_reason_than_provider_cleanup_failed
+
+    assert {:ok, abort_events} = ReplSession.abort(abort_repl, long_reason)
+    assert List.last(abort_events).data.reason == long_reason
+  end
+
+  test "terminal preflight covers the protocol error that crosses its ceiling" do
+    {:ok, workflow} = WorkflowEnvironment.new([])
+    {:ok, mission} = MissionEnvironment.new([])
+
+    build = fn payload_bytes ->
+      {:ok, limits} =
+        Limits.new(
+          protocol_errors: 9,
+          event_payload_bytes: payload_bytes,
+          normal_event_count: 4,
+          normal_event_bytes: 100_000
+        )
+
+      case EventSink.start(:normal, limits) do
+        {:ok, sink} ->
+          result =
+            RunConfig.new(
+              workflow_environment: workflow,
+              mission_environment: mission,
+              input: %{},
+              limits: limits,
+              event_sink: sink
+            )
+
+          {result, sink, limits}
+
+        {:error, :invalid_event_sink} ->
+          {{:error, :invalid_event_sink}, nil, limits}
+      end
+    end
+
+    minimum =
+      Enum.find(1..50_000, fn payload_bytes ->
+        case build.(payload_bytes) do
+          {{:ok, _config}, sink, _limits} ->
+            EventSink.stop(sink)
+            true
+
+          {{:error, _reason}, sink, _limits} ->
+            if sink, do: EventSink.stop(sink)
+            false
+        end
+      end)
+
+    {{:ok, config}, sink, limits} = build.(minimum)
+    assert :ok = EventSink.claim(sink, config.claim_id, config.run_started_metadata)
+    {:ok, state} = RunState.start(limits)
+
+    Enum.each(1..limits.protocol_errors, fn _ ->
+      assert :ok = RunState.protocol_error(state)
+    end)
+
+    assert {:error, :protocol_error_limit} = RunState.protocol_error(state)
+    usage = RunState.usage(state)
+    assert usage.protocol_errors == limits.protocol_errors + 1
+
+    assert {:ok, %{events: events}} =
+             EventSink.finalize_and_events(sink, %{
+               outcome: :error,
+               reason: :protocol_errors,
+               usage: usage
+             })
+
+    assert List.last(events).type == "run-stopped"
+    RunState.stop(state)
+    EventSink.stop(sink)
+  end
+
+  test "terminal preflight accounts for retained capability-name parents" do
+    parent = "s" <> String.duplicate("x", 500_000)
+    retained_name = binary_part(parent, 0, 65)
+    assert :binary.referenced_byte_size(retained_name) > byte_size(retained_name)
+
+    {:ok, retained} =
+      Capability.new(
+        name: retained_name,
+        input_schema: @input_schema,
+        callback: fn _ -> {:ok, nil} end
+      )
+
+    {:ok, logical_long} =
+      Capability.new(
+        name: String.duplicate("l", 128),
+        input_schema: @input_schema,
+        callback: fn _ -> {:ok, nil} end
+      )
+
+    {:ok, workflow} = WorkflowEnvironment.new(capabilities: [retained, logical_long])
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, limits} = Limits.new(workflow_capability_calls: 1)
+    {:ok, sink} = EventSink.start(:normal, limits)
+
+    assert {:error, :invalid_run_config} =
+             RunConfig.new(
+               workflow_environment: workflow,
+               mission_environment: mission,
+               input: %{},
+               limits: limits,
+               event_sink: sink
+             )
+  end
+
+  test "terminal preflight counts only metered environment capabilities" do
+    {:ok, workflow} = WorkflowEnvironment.new([])
+    {:ok, mission} = MissionEnvironment.new([])
+
+    {:ok, limits} =
+      Limits.new(
+        event_payload_bytes: 5_900,
+        normal_event_count: 4,
+        normal_event_bytes: 100_000
+      )
+
+    {:ok, sink} = EventSink.start(:normal, limits)
+
+    assert {:ok, _config} =
+             RunConfig.new(
+               workflow_environment: workflow,
+               mission_environment: mission,
+               input: %{},
+               limits: limits,
+               event_sink: sink
+             )
+
+    EventSink.stop(sink)
   end
 
   test "run configuration requires exact sink limits and room for run-started" do
@@ -515,7 +758,12 @@ defmodule PtcRunner.Kernel.CoreContractTest do
         input: %{},
         limits: limits,
         event_sink: sink,
-        provider_resources: [fn -> send(parent, :resource_closed) end]
+        provider_resources: [
+          fn ->
+            send(parent, :resource_closed)
+            :ok
+          end
+        ]
       )
 
     first = Task.async(fn -> Kernel.run("(return (tool/blocking {}))", config) end)
@@ -531,6 +779,64 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     assert_receive :resource_closed
 
     assert Enum.count(EventSink.events(sink), &(&1.type == "run-started")) == 1
+  end
+
+  test "a distinct config losing a concurrent sink claim closes only its resources" do
+    parent = self()
+
+    {:ok, blocking} =
+      Capability.new(
+        name: "distinct-claim",
+        input_schema: @input_schema,
+        callback: fn _arguments ->
+          send(parent, {:distinct_claim_started, self()})
+
+          receive do
+            :continue -> {:ok, 42}
+          end
+        end
+      )
+
+    {:ok, workflow} = WorkflowEnvironment.new(capabilities: [blocking])
+    {:ok, mission} = MissionEnvironment.new([])
+    limits = Limits.defaults()
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "distinct-run-claim")
+
+    config = fn close_message ->
+      RunConfig.new(
+        workflow_environment: workflow,
+        mission_environment: mission,
+        input: %{},
+        limits: limits,
+        event_sink: sink,
+        provider_resources: [
+          fn ->
+            send(parent, close_message)
+            :ok
+          end
+        ]
+      )
+    end
+
+    {:ok, winner_config} = config.(:winner_resource_closed)
+    {:ok, loser_config} = config.(:loser_resource_closed)
+
+    winner =
+      Task.async(fn ->
+        Kernel.run("(return (tool/distinct-claim {}))", winner_config)
+      end)
+
+    assert_receive {:distinct_claim_started, provider}
+
+    assert {:error, %{kind: :event_sink_error, reason: :event_sink_error}} =
+             Kernel.run("(return 43)", loser_config)
+
+    assert_receive :loser_resource_closed
+    refute_receive :winner_resource_closed
+
+    send(provider, :continue)
+    assert {:ok, %{value: %{status: :ok, value: 42}}} = Task.await(winner)
+    assert_receive :winner_resource_closed
   end
 
   test "run owners provide explicit teardown and stop with their creating process" do

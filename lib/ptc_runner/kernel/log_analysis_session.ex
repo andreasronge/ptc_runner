@@ -98,8 +98,9 @@ defmodule PtcRunner.Kernel.LogAnalysisSession do
              assembly.snapshot
            ),
          :ok <-
-           EventSink.begin(
+           EventSink.claim(
              assembly.config.event_sink,
+             assembly.config.claim_id,
              assembly.config.run_started_metadata
            ),
          :ok <-
