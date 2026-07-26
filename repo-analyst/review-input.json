@@ -1,0 +1,7 @@
+{
+  "task": "Review completed runs and report what actually went wrong, not what plausibly could. Use runs/list-runs to find candidate runs and runs/turns to locate slow, repeated, or failing events. For any event worth explaining, read its exact private evidence: runs/model-exchanges for what the model was asked and answered, runs/generated-sources for the program it produced, runs/capability-calls for the arguments and results that program saw, runs/effective-preludes for the code that was actually compiled, and runs/provider-exchanges when a capability failure looks like it came from the provider rather than the agent. Every collection is paged: pass nil for the first page and the returned next_cursor afterwards, and keep paging when the evidence you need has not appeared yet. Return a JSON object with \"summary\", \"findings\", \"recommended_next_action\", and \"rationale\". A finding must cite the run and event evidence it rests on. Report a finding seen in exactly one run with occurrences 1 rather than describing it as a pattern. If the runs show no reusable problem, recommend \"no-action\" and say why; if the captured evidence cannot settle the question, recommend \"gather-more-evidence\" and name what is missing.",
+  "agent": {
+    "max_turns": 12,
+    "max_observation_chars": 8192
+  }
+}

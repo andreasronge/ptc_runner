@@ -1,0 +1,7 @@
+{
+  "task": "Answer this question about the repository you can explore: when a mission program calls a granted capability with arguments that the capability's schema rejects, where in the source is that rejection turned into feedback the agent can act on, and what bounds the size of that feedback? Use repo/search and repo/find-files to locate the relevant source, then repo/read-range to read only the ranges you cite. Return a JSON object with an \"answer\" string and a \"citations\" array; every citation must carry the provider alias \"workspace\", the snapshot_hash from the result you read, the path, and the inclusive [first, last] line numbers you actually read. Do not cite a path or range you did not read.",
+  "agent": {
+    "max_turns": 8,
+    "max_observation_chars": 4096
+  }
+}

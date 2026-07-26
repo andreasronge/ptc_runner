@@ -1,0 +1,7 @@
+{
+  "task": "Decide whether completed runs justify a change to shared agent behavior, and return exactly one decision. Gather evidence the same way a review does: runs/list-runs and runs/turns to find the events, then runs/model-exchanges, runs/generated-sources, runs/capability-calls, runs/effective-preludes, and runs/provider-exchanges for the exact private record behind an event. Use repo/search, repo/find-files, and repo/read-range to read the component that owns the behavior before proposing to change it. Every collection is paged: pass nil for the first page and the returned next_cursor afterwards. Return one of three decisions. Return \"propose-change\" only when the evidence shows a reusable gap in agent behavior that would recur on inputs unlike the ones you examined; it requires a target component, a generalized_failure stated independently of any single run, cited evidence, and a candidate carrying component_id, base_source_hash, source_hash, and complete replacement source. Return \"no-change\" when the evidence is sufficient and shows only an isolated defect. Return \"insufficient-evidence\" when the captured providers cannot settle the question, and name what would have to be captured. A single failing run is not by itself a reusable gap. Do not propose a change you cannot support with evidence that exists in the captured providers; an unsupported proposal fails evaluation even when the patch looks reasonable.",
+  "agent": {
+    "max_turns": 16,
+    "max_observation_chars": 8192
+  }
+}
