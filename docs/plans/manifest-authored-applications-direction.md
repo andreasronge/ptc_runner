@@ -989,7 +989,6 @@ The improvement run returns one bounded decision:
     "format": "component-source",
     "component_id": "agent.core",
     "base_source_hash": "sha256:...",
-    "source_hash": "sha256:...",
     "content": "(ns agent.core ...)"
   },
   "review_diff": "...",
@@ -1003,9 +1002,10 @@ The improvement run returns one bounded decision:
 }
 ```
 
-Complete component source is authoritative because it can be hashed and
-compiled exactly. A diff may accompany it for review but is not executable
-truth.
+Complete component source is authoritative because the trusted host can hash
+and compile its exact bytes. The model supplies the installed base hash but
+does not invent a candidate hash that PTC-Lisp cannot compute. A diff may
+accompany the source for review but is not executable truth.
 
 Manifest-local bounded schemas validate input before workflow execution and
 `Result.value` before publication. They constrain shape, not confidentiality.
@@ -1063,9 +1063,10 @@ Unsupported claims fail evaluation even when the patch appears plausible.
 ### 10.2 Materialization
 
 The candidate is inert when the run ends. A trusted host step writes it to a
-new private file or disposable worktree, verifies `base_source_hash` and
-`source_hash`, and never alters the evidence snapshots. File materialization
-uses restrictive permissions such as a `077` umask.
+new private file or disposable worktree, verifies `base_source_hash`, derives
+`source_hash` from the exact materialized bytes, and never alters the evidence
+snapshots. File materialization uses restrictive permissions such as a `077`
+umask.
 
 Materialization is not hidden in result persistence, trace writing, an MCP
 read tool, or the active bundle.
@@ -1078,9 +1079,11 @@ mkdir -p repo-analyst/private
 jq -jr '.candidate.content' \
   repo-analyst/private/candidate.private.json \
   > repo-analyst/private/agent.core.candidate.clj
-jq '.candidate |
-    {component_id, base_source_hash, source_hash,
-     path: "agent.core.candidate.clj"}' \
+candidate_hash="sha256:$(shasum -a 256 repo-analyst/private/agent.core.candidate.clj | cut -d' ' -f1)"
+jq --arg source_hash "$candidate_hash" \
+  '.candidate |
+   {component_id, base_source_hash, path: "agent.core.candidate.clj"} +
+   {source_hash: $source_hash}' \
   repo-analyst/private/candidate.private.json \
   > repo-analyst/private/agent.core.override.json
 ```

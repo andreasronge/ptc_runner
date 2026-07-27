@@ -354,9 +354,12 @@ the trusted host document may replace them with its own `limits` block:
   "run_duration_ms": 86400000,
   "workflow_timeout_ms": 86400000,
   "subordinate_evaluations": 500,
+  "workflow_capability_calls": 1000,
   "workflow_capability_calls_per_name": 1000,
   "mission_capability_calls": 8000,
-  "normal_event_count": 20000
+  "mission_capability_calls_per_name": 8000,
+  "normal_event_count": 20000,
+  "normal_event_bytes": 2000000000
 }
 ```
 
@@ -371,10 +374,11 @@ operator permits, and the manifest declares what its application needs.
 
 The most common reasons a long agent loop stops early are
 `subordinate_evaluations` (its turn count),
-`workflow_capability_calls_per_name` (its model calls),
-`mission_capability_calls` (its tool calls), and `normal_event_count` (its
-retained trace evidence). Raising `run_duration_ms` alone does not help,
-because the binding deadline for one workflow entry is `workflow_timeout_ms`.
+the workflow total and per-name capability ceilings (its model calls),
+the mission total and per-name capability ceilings (its tool calls), and both
+the count and byte ceilings for normal events (its retained trace evidence).
+Raising `run_duration_ms` alone does not help, because the binding deadline for
+one workflow entry is `workflow_timeout_ms`.
 
 ## Events and inspection
 

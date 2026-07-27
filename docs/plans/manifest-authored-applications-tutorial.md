@@ -1144,7 +1144,6 @@ An illustrative proposal value:
     "format": "component-source",
     "component_id": "agent.core",
     "base_source_hash": "sha256:...",
-    "source_hash": "sha256:...",
     "content": "(ns agent.core ...)"
   },
   "evaluation_plan": {
@@ -1159,9 +1158,10 @@ An illustrative proposal value:
 }
 ```
 
-The complete source, base hash, and source hash make the candidate
-materializable and compilable. The review diff is optional. The run still has
-no write capability and cannot replace `agent.core`.
+The complete source and installed base hash make the candidate materializable.
+The trusted host computes the candidate hash from the exact bytes it writes;
+PTC-Lisp does not ask the model to invent one. The review diff is optional.
+The run still has no write capability and cannot replace `agent.core`.
 
 ## 9. Evaluate in isolated ordinary runs
 
@@ -1203,9 +1203,11 @@ umask 077
 jq -jr '.candidate.content' \
   repo-analyst/private/candidate.private.json \
   > repo-analyst/private/agent.core.candidate.clj
-jq '.candidate |
-    {component_id, base_source_hash, source_hash,
-     path: "agent.core.candidate.clj"}' \
+candidate_hash="sha256:$(shasum -a 256 repo-analyst/private/agent.core.candidate.clj | cut -d' ' -f1)"
+jq --arg source_hash "$candidate_hash" \
+  '.candidate |
+   {component_id, base_source_hash, path: "agent.core.candidate.clj"} +
+   {source_hash: $source_hash}' \
   repo-analyst/private/candidate.private.json \
   > repo-analyst/private/agent.core.override.json
 ```
@@ -1290,13 +1292,13 @@ case_digest=$(
 )
 case_hash="sha256:$case_digest"
 jq -n \
-  --slurpfile result repo-analyst/private/candidate.private.json \
+  --slurpfile override repo-analyst/private/agent.core.override.json \
   --slurpfile case "$trial_dir/case.json" \
   --arg case_hash "$case_hash" \
   '{subject: "baseline",
     repetition: 1,
     candidate:
-      ($result[0].candidate |
+      ($override[0] |
        {component_id, base_source_hash, source_hash}),
     case: {
       id: $case[0].id,

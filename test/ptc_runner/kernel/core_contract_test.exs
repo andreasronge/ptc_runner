@@ -1328,6 +1328,31 @@ defmodule PtcRunner.Kernel.CoreContractTest do
              )
   end
 
+  test "parallel capacity stays retryable after read-only capability activity" do
+    {:ok, reader} =
+      Capability.new(
+        name: "page",
+        input_schema: @input_schema,
+        effect: :read,
+        callback: fn _ -> {:ok, %{"items" => [1, 2, 3]}} end
+      )
+
+    {:ok, mission} = MissionEnvironment.new(capabilities: [reader])
+    {:ok, state} = RunState.start(Limits.defaults())
+
+    assert %{
+             outcome: :evaluation_error,
+             kind: :parallel_capacity_exceeded,
+             retryable?: true
+           } =
+             Evaluation.evaluate_source(
+               state,
+               mission,
+               ~S|(do (tool/page {}) (pmap (fn [_] (pmap inc [1 2])) (range 0 16)))|,
+               5_000
+             )
+  end
+
   test "a resource kill is not retryable after write or undeclared capability activity" do
     for effect <- [:write, :unknown] do
       {:ok, capability} =

@@ -48,7 +48,8 @@ defmodule PtcRunner.Kernel.HostInstallation do
       end)
 
     case ProviderRegistry.new(builders,
-           credential_resolver: &resolve_credentials(host, &1)
+           credential_resolver: &resolve_credentials(host, &1),
+           installed_limits: host.limits
          ) do
       {:ok, registry} -> {:ok, registry}
       {:error, _reason} -> {:error, :invalid_host_installation}

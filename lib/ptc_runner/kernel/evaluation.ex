@@ -434,8 +434,7 @@ defmodule PtcRunner.Kernel.Evaluation do
     # installation, and anything not declared `:read` — including `:unknown` —
     # counts as unsafe, so an undeclared capability keeps the old behaviour.
     unsafe_activity? =
-      unsafe_capability_activity?(state, environment, mission_calls_before) or
-        evaluator_capability_activity?(step)
+      unsafe_capability_activity?(state, environment, mission_calls_before)
 
     :ok = RunState.release_evaluation(state, lease)
 
@@ -453,30 +452,40 @@ defmodule PtcRunner.Kernel.Evaluation do
       continuation_effect: :preserved
     }
 
-    case evaluation_retryable(step, unsafe_activity?) do
+    case evaluation_retryable(step, unsafe_activity?, capability_activity?) do
       retryable? when is_boolean(retryable?) -> Map.put(result, :retryable?, retryable?)
       nil -> result
     end
   end
 
-  defp evaluation_retryable(_step, true), do: false
+  defp evaluation_retryable(_step, true, _capability_activity?), do: false
 
   defp evaluation_retryable(
          %{fail: %{reason: :prelude_contract_error, details: %{phase: phase}}},
+         false,
          false
        )
        when phase in [:input, :output],
        do: true
 
+  defp evaluation_retryable(
+         %{fail: %{reason: :prelude_contract_error, details: %{phase: phase}}},
+         false,
+         true
+       )
+       when phase in [:input, :output],
+       do: false
+
   # A resource kill says the query was too big, not that the world changed. With
   # no unsafe effect committed, the agent's correct next move is a narrower
   # program, so say so explicitly rather than leaving the field unset and making
   # every loop infer it from a missing key.
-  defp evaluation_retryable(%{fail: %{reason: reason}}, false)
+  defp evaluation_retryable(%{fail: %{reason: reason}}, false, _capability_activity?)
        when reason in [:memory_exceeded, :timeout, :parallel_capacity_exceeded],
        do: true
 
-  defp evaluation_retryable(_step, false), do: nil
+  defp evaluation_retryable(_step, false, true), do: false
+  defp evaluation_retryable(_step, false, false), do: nil
 
   defp evaluator_capability_activity?(step) do
     tool_calls = Map.get(step, :tool_calls, [])

@@ -65,12 +65,6 @@
               "minLength": 1,
               "maxLength": 128
             },
-            "source_hash": {
-              "type": "string",
-              "description": "Hash of the candidate source below. Verified against the bytes actually opened and compiled.",
-              "minLength": 1,
-              "maxLength": 128
-            },
             "content": {
               "type": "string",
               "description": "Complete PTC-Lisp component source.",
@@ -82,7 +76,6 @@
             "format",
             "component_id",
             "base_source_hash",
-            "source_hash",
             "content"
           ]
         },

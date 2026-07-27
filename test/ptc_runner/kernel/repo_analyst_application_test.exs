@@ -359,20 +359,19 @@ defmodule PtcRunner.Kernel.RepoAnalystApplicationTest do
              })
     end
 
-    test "a proposed change must carry complete hashed replacement source" do
+    test "a proposed change carries complete source while the trusted host derives its hash" do
       {:ok, contract} = contract("candidate.schema.json")
 
       assert ValueContract.valid?(contract, proposal())
 
+      refute Map.has_key?(proposal()["candidate"], "source_hash"),
+             "PTC-Lisp cannot compute SHA-256; trusted materialization must derive it"
+
       refute ValueContract.valid?(
                contract,
-               put_in(
-                 proposal(),
-                 ["candidate"],
-                 Map.delete(proposal()["candidate"], "source_hash")
-               )
+               put_in(proposal(), ["candidate", "source_hash"], "sha256:model-invented")
              ),
-             "an unhashed candidate cannot be verified before compilation"
+             "a model-authored hash must not enter the trusted override identity"
 
       refute ValueContract.valid?(
                contract,
@@ -643,7 +642,6 @@ defmodule PtcRunner.Kernel.RepoAnalystApplicationTest do
         "format" => "component-source",
         "component_id" => "agent.core",
         "base_source_hash" => "sha256:base",
-        "source_hash" => "sha256:candidate",
         "content" => "(ns agent.core \"…\")"
       },
       "evaluation_plan" => %{

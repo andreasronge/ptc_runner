@@ -5,6 +5,7 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
   alias PtcRunner.Kernel.HostInstallation
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.ProviderRegistry
+  alias PtcRunner.Kernel.RunBuilder
 
   @tag :tmp_dir
   test "installs only declared aliases and enforces MCP mission placement", %{tmp_dir: dir} do
@@ -26,6 +27,35 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
                context
                | destination: :workflow
              })
+  end
+
+  @tag :tmp_dir
+  test "installed host ceilings reach manifest loading through the registry", %{tmp_dir: dir} do
+    File.write!(Path.join(dir, "main.clj"), "(ns main) (defn run [_] (return 1))")
+
+    manifest = %{
+      "version" => 1,
+      "workflow" => %{
+        "components" => [%{"id" => "main", "path" => "main.clj"}],
+        "entry" => "main/run"
+      },
+      "input" => %{"value" => %{}},
+      "limits" => %{"subordinate_evaluations" => 24}
+    }
+
+    manifest_path = Path.join(dir, "manifest.json")
+    File.write!(manifest_path, Jason.encode!(manifest))
+
+    config =
+      http_config()
+      |> Map.put("limits", %{"subordinate_evaluations" => 24})
+
+    host = load_host(dir, config)
+    assert {:ok, registry} = HostInstallation.registry(host)
+
+    assert {:ok, built} = RunBuilder.load_and_build(manifest_path, registry)
+    assert built.config.limits.subordinate_evaluations == 24
+    assert :ok = RunBuilder.close(built.config)
   end
 
   @tag :tmp_dir

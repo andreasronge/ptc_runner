@@ -14,7 +14,6 @@ defmodule PtcRunner.Kernel.RunBuilder do
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.InspectionArtifact
   alias PtcRunner.Kernel.InspectionSink
-  alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.Manifest
   alias PtcRunner.Kernel.MissionEnvironment
   alias PtcRunner.Kernel.ProviderRegistry
@@ -498,10 +497,12 @@ defmodule PtcRunner.Kernel.RunBuilder do
   exclusive. A private mission marks the complete run value private before
   provider preflight or acquisition. The option names refer to CLI input
   authority; they change top-level workflow input, not mission-environment
-  data.
+  data. Manifest limits narrow the installed ceilings frozen in the registry.
+  Trusted embedding may pass `:installed_limits` explicitly to replace that
+  default for one construction.
   """
   def load_and_build(path, registry, opts \\ []) do
-    installed_limits = Keyword.get(opts, :installed_limits, Limits.installed_defaults())
+    installed_limits = Keyword.get(opts, :installed_limits, registry.installed_limits)
 
     with {:ok, manifest} <- Manifest.load(path, installed_limits),
          {:ok, manifest, input_class} <- maybe_override_input(manifest, opts),

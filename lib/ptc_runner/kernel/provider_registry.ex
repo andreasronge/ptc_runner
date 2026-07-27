@@ -29,8 +29,10 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
 
   There are no implicit built-ins. CLI applications receive exactly the
   aliases in their host installation, while trusted Elixir embedding can pass
-  any explicit builder map. Builder exceptions are contained at their current
-  lifecycle phase.
+  any explicit builder map. The registry also freezes the installed limit
+  ceilings used when manifests are loaded, so every frontend applies the same
+  host authority rather than reconstructing it in CLI-specific options.
+  Builder exceptions are contained at their current lifecycle phase.
 
   ## Adding a field to the prepared contract
 
@@ -51,9 +53,10 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
 
   alias PtcRunner.Kernel.Capability
   alias PtcRunner.Kernel.JSONValue
+  alias PtcRunner.Kernel.Limits
 
-  @enforce_keys [:builders, :credential_resolver]
-  defstruct [:builders, :credential_resolver]
+  @enforce_keys [:builders, :credential_resolver, :installed_limits]
+  defstruct [:builders, :credential_resolver, :installed_limits]
 
   @type build_context :: %{
           directory: binary(),
@@ -121,7 +124,8 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
           ([binary()] -> {:ok, credential_values()} | {:error, term()})
   @type t :: %__MODULE__{
           builders: %{binary() => registry_builder()},
-          credential_resolver: credential_resolver()
+          credential_resolver: credential_resolver(),
+          installed_limits: Limits.t()
         }
 
   @spec new(map(), keyword()) :: {:ok, t()} | {:error, :invalid_provider_registry}
@@ -130,15 +134,18 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
 
   def new(additional_builders, opts) when is_map(additional_builders) and is_list(opts) do
     resolver = Keyword.get(opts, :credential_resolver, &default_credential_resolver/1)
+    installed_limits = Keyword.get(opts, :installed_limits, Limits.installed_defaults())
 
     if Enum.all?(additional_builders, fn {name, builder} ->
          valid_name?(name) and valid_builder?(builder)
        end) and is_function(resolver, 1) and
-         Keyword.keys(opts) -- [:credential_resolver] == [] do
+         is_struct(installed_limits, Limits) and
+         Keyword.keys(opts) -- [:credential_resolver, :installed_limits] == [] do
       {:ok,
        %__MODULE__{
          builders: additional_builders,
-         credential_resolver: resolver
+         credential_resolver: resolver,
+         installed_limits: installed_limits
        }}
     else
       {:error, :invalid_provider_registry}
