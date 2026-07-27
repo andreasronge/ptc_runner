@@ -309,10 +309,26 @@ fingerprints. This makes repeated failure classes aggregatable without turning
 the public trace into a payload channel. Exact failure values belong in private
 inspection artifacts.
 
-External effects are not rolled back with Lisp memory. The shipped agent loop
-therefore does not automatically retry an evaluation error after capability
-activity. This policy lives in PTC-Lisp, while the Kernel remains responsible
-for accounting and rejecting late results after closure.
+External effects are not rolled back with Lisp memory, so the shipped agent
+loop does not automatically retry an evaluation error after a capability call
+the Kernel cannot undo. Retryability asks whether repeating the program could
+repeat such an effect, not whether anything happened at all:
+
+| Evaluation failed after | `retryable?` |
+| --- | --- |
+| No capability call, input/output contract rejected | `true` |
+| Only capabilities the installation declared `effect: "read"` | `true` for a resource kill |
+| Any capability declared `write`, or left undeclared | `false` |
+
+A resource kill — heap, timeout, or parallel capacity — reports that the query
+was too large, not that the world changed. When nothing unsafe was committed
+the correct next action is a narrower program, so those failures are reported
+as retryable and the loop gives the model another turn. An undeclared effect
+counts as unsafe, so a capability whose installation omits `effect` keeps the
+conservative behaviour.
+
+This policy lives in PTC-Lisp, while the Kernel remains responsible for
+accounting, effect classification, and rejecting late results after closure.
 
 ## Keep prompts domain-blind
 

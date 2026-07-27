@@ -1302,6 +1302,57 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     refute_receive {:mission_provider_called, _arguments}
   end
 
+  # A resource kill says the query was too big, not that the world changed.
+  # Refusing to retry after a read-only page fetch spends the agent's remaining
+  # turns protecting state nothing mutated, which is what ended a real
+  # investigation at the point it should have narrowed and continued.
+  test "a resource kill stays retryable after read-only capability activity" do
+    {:ok, reader} =
+      Capability.new(
+        name: "page",
+        input_schema: @input_schema,
+        effect: :read,
+        callback: fn _ -> {:ok, %{"items" => Enum.to_list(1..64)}} end
+      )
+
+    {:ok, mission} = MissionEnvironment.new(capabilities: [reader])
+    {:ok, limits} = Limits.new(%{evaluation_heap_words: 200_000})
+    {:ok, state} = RunState.start(limits)
+
+    assert %{outcome: :evaluation_error, retryable?: true} =
+             Evaluation.evaluate_source(
+               state,
+               mission,
+               ~S|(do (tool/page {}) (reduce (fn [acc i] (conj acc (range 0 4096))) [] (range 0 4096)))|,
+               5_000
+             )
+  end
+
+  test "a resource kill is not retryable after write or undeclared capability activity" do
+    for effect <- [:write, :unknown] do
+      {:ok, capability} =
+        Capability.new(
+          name: "commit",
+          input_schema: @input_schema,
+          effect: effect,
+          callback: fn _ -> {:ok, %{"ok" => true}} end
+        )
+
+      {:ok, mission} = MissionEnvironment.new(capabilities: [capability])
+      {:ok, limits} = Limits.new(%{evaluation_heap_words: 200_000})
+      {:ok, state} = RunState.start(limits)
+
+      assert %{outcome: :evaluation_error, retryable?: false} =
+               Evaluation.evaluate_source(
+                 state,
+                 mission,
+                 ~S|(do (tool/commit {}) (reduce (fn [acc i] (conj acc (range 0 4096))) [] (range 0 4096)))|,
+                 5_000
+               ),
+             "effect #{inspect(effect)} must keep a resource kill terminal"
+    end
+  end
+
   test "mission evaluation is serialized, persistent, and cannot use workflow capabilities" do
     {:ok, workflow_capability} =
       Capability.new(

@@ -285,7 +285,7 @@ defmodule PtcRunner.Kernel.Evaluation do
       link: true
     ]
 
-    mission_calls_before = mission_capability_call_count(state)
+    mission_calls_before = mission_capability_calls(state)
 
     case Lisp.run_native(source, options) do
       {:ok, %{return: {:__ptc_fail__, value}} = step} ->
@@ -308,7 +308,7 @@ defmodule PtcRunner.Kernel.Evaluation do
         commit_result(state, lease, history, step, projection_boundary)
 
       {:error, step} ->
-        release_failure(state, lease, step, mission_calls_before)
+        release_failure(state, environment, lease, step, mission_calls_before)
     end
   end
 
@@ -421,9 +421,20 @@ defmodule PtcRunner.Kernel.Evaluation do
   defp history_after_success(history, {:__ptc_return__, _value}), do: history
   defp history_after_success(history, value), do: Enum.take(history ++ [value], -3)
 
-  defp release_failure(state, lease, step, mission_calls_before) do
+  defp release_failure(state, environment, lease, step, mission_calls_before) do
     capability_activity? =
-      mission_capability_call_count(state) > mission_calls_before or
+      mission_capability_call_count(state) > call_total(mission_calls_before) or
+        evaluator_capability_activity?(step)
+
+    # Retryability asks a narrower question than "did anything happen": it asks
+    # whether repeating the program could repeat an effect the Kernel cannot undo.
+    # A program that read three pages and then exhausted its heap committed
+    # nothing, so refusing the retry only spends the agent's remaining turns
+    # protecting state that was never mutated. Effects are declared by the host
+    # installation, and anything not declared `:read` — including `:unknown` —
+    # counts as unsafe, so an undeclared capability keeps the old behaviour.
+    unsafe_activity? =
+      unsafe_capability_activity?(state, environment, mission_calls_before) or
         evaluator_capability_activity?(step)
 
     :ok = RunState.release_evaluation(state, lease)
@@ -442,7 +453,7 @@ defmodule PtcRunner.Kernel.Evaluation do
       continuation_effect: :preserved
     }
 
-    case evaluation_retryable(step, capability_activity?) do
+    case evaluation_retryable(step, unsafe_activity?) do
       retryable? when is_boolean(retryable?) -> Map.put(result, :retryable?, retryable?)
       nil -> result
     end
@@ -457,6 +468,14 @@ defmodule PtcRunner.Kernel.Evaluation do
        when phase in [:input, :output],
        do: true
 
+  # A resource kill says the query was too big, not that the world changed. With
+  # no unsafe effect committed, the agent's correct next move is a narrower
+  # program, so say so explicitly rather than leaving the field unset and making
+  # every loop infer it from a missing key.
+  defp evaluation_retryable(%{fail: %{reason: reason}}, false)
+       when reason in [:memory_exceeded, :timeout, :parallel_capacity_exceeded],
+       do: true
+
   defp evaluation_retryable(_step, false), do: nil
 
   defp evaluator_capability_activity?(step) do
@@ -469,12 +488,33 @@ defmodule PtcRunner.Kernel.Evaluation do
     ledger_activity? or marker_activity?
   end
 
-  defp mission_capability_call_count(state) do
+  defp mission_capability_call_count(state), do: call_total(mission_capability_calls(state))
+
+  defp mission_capability_calls(state) do
     state
     |> RunState.usage()
     |> get_in([:capability_calls, :mission])
-    |> Map.values()
-    |> Enum.sum()
+    |> Kernel.||(%{})
+  end
+
+  defp call_total(calls), do: calls |> Map.values() |> Enum.sum()
+
+  # A capability counts as unsafe unless the installation declared it `:read`.
+  # Names are compared against the frozen environment rather than the call
+  # ledger, so a capability that vanished cannot be assumed harmless.
+  defp unsafe_capability_activity?(state, environment, before) do
+    state
+    |> mission_capability_calls()
+    |> Enum.any?(fn {name, count} ->
+      count > Map.get(before, name, 0) and not read_only_capability?(environment, name)
+    end)
+  end
+
+  defp read_only_capability?(environment, name) do
+    case Map.fetch(environment.capabilities, name) do
+      {:ok, %{effect: :read}} -> true
+      _other -> false
+    end
   end
 
   defp mission_tools(environment, state, timeout_ms, event_sink, inspection_sink) do
