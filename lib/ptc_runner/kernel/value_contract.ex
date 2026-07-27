@@ -64,6 +64,10 @@ defmodule PtcRunner.Kernel.ValueContract do
   A rejected result is deliberately withheld from the public error, so without
   this an operator cannot tell a missing key from a wrong shape without
   re-running under private inspection.
+
+  `violations` locates faults, it does not enumerate them: when several array
+  elements fail the same way, the reported set may name fewer of them than
+  actually failed. It is a diagnosis, not a validation report.
   """
   def classify(%__MODULE__{schema: schema, validator: validator}, value) do
     shape =
@@ -101,11 +105,11 @@ defmodule PtcRunner.Kernel.ValueContract do
       {:ok, _validated} ->
         []
 
-      {:error, %JSV.ValidationError{errors: errors}} ->
-        errors
-        |> Enum.flat_map(&flatten_error(&1, branch_index))
-        |> Enum.map(&violation(&1, declared))
-        |> Enum.reject(&is_nil/1)
+      {:error, error} ->
+        error
+        |> JSV.normalize_error()
+        |> Map.get(:details, [])
+        |> Enum.flat_map(&unit_violations(&1, branch_index, declared))
         |> Enum.uniq_by(&{&1.path, &1.kind})
         |> Enum.take(@max_violations)
     end
@@ -113,63 +117,72 @@ defmodule PtcRunner.Kernel.ValueContract do
     _exception -> []
   end
 
-  # A tagged union reports one `:oneOf` failure whose `invalidated` branches
-  # carry the errors that matter, each as an indexed validation context. Every
-  # branch the discriminator did not select also fails — on its own `const`, and
-  # on required keys it was never given — so reporting all of them would bury
-  # the branch the caller actually meant. With a matched branch, report only its
-  # context; with none, the value fits nowhere and every branch is relevant.
-  defp flatten_error(%JSV.Validator.Error{kind: :oneOf, args: args}, branch_index) do
-    args
-    |> Keyword.get(:invalidated, [])
-    |> Enum.filter(fn
-      {index, _context} -> is_nil(branch_index) or index == branch_index
-      _other -> true
-    end)
-    |> Enum.flat_map(fn
-      {_index, context} -> branch_errors(context, branch_index)
-      context when is_map(context) -> branch_errors(context, branch_index)
-      _other -> []
+  # `normalize_error/1` is JSV's supported projection: nested units carrying an
+  # `instanceLocation` pointer and the keywords that failed there. Walking the
+  # validator's internal error structs instead lost every violation as soon as
+  # more than one array element failed, because applicator keywords nest their
+  # causes differently at depth.
+  defp unit_violations(unit, branch_index, declared) do
+    path = unit |> Map.get(:instanceLocation, "#") |> pointer_path(declared)
+
+    unit
+    |> Map.get(:errors, [])
+    |> Enum.flat_map(fn error ->
+      details = error |> Map.get(:details, []) |> List.wrap()
+
+      cond do
+        Map.get(error, :kind) == :oneOf and details != [] ->
+          details
+          |> selected_branches(branch_index)
+          |> Enum.flat_map(&unit_violations(&1, branch_index, declared))
+
+        details != [] ->
+          Enum.flat_map(details, &unit_violations(&1, branch_index, declared))
+
+        true ->
+          leaf_violation(path, Map.get(error, :kind))
+      end
     end)
   end
 
-  defp flatten_error(%JSV.Validator.Error{} = error, _branch_index), do: [error]
-  defp flatten_error(_other, _branch_index), do: []
+  # `oneOf` alternatives arrive in schema order, so the branch the
+  # discriminator selected is the one at its index. Every other alternative is
+  # rejected by its own `const` and then reports each key it was never given;
+  # reporting those buried the one fault the caller could act on. With no
+  # branch selected the value fits nowhere, and all alternatives are relevant.
+  defp selected_branches(details, nil), do: details
 
-  defp branch_errors(context, branch_index),
-    do: context |> Map.get(:errors, []) |> Enum.flat_map(&flatten_error(&1, branch_index))
+  defp selected_branches(details, branch_index) do
+    case Enum.at(details, branch_index) do
+      nil -> details
+      branch -> [branch]
+    end
+  end
 
-  defp violation(%JSV.Validator.Error{kind: :required, data_path: path, args: args}, declared),
-    do: %{
-      path: violation_path(path, declared),
-      kind: :required,
-      detail: Keyword.get(args, :required, [])
-    }
+  defp leaf_violation(_path, nil), do: []
 
-  defp violation(%JSV.Validator.Error{kind: kind, data_path: path}, declared)
-       when kind not in [:properties, :items, :oneOf],
-       do: %{path: violation_path(path, declared), kind: kind}
+  defp leaf_violation(_path, kind) when kind in [:properties, :items, :oneOf, :allOf, :anyOf],
+    do: []
 
-  defp violation(_error, _declared), do: nil
+  defp leaf_violation(path, kind), do: [%{path: path, kind: kind}]
 
-  # `data_path` arrives innermost-first with integers for array indices. A
-  # violation under `additionalProperties` is located *at the undeclared key*,
-  # so the path can carry a model-authored name — the one kind of content this
-  # whole function exists to keep out of a public error. Rather than special-
-  # casing that keyword, every string segment is checked against the names the
-  # contract declares, and anything else is replaced.
-  defp violation_path([], _declared), do: "(root)"
+  # `#/evidence/0/snapshot_hash` becomes `evidence[0].snapshot_hash`. A segment
+  # naming an undeclared key is caller-authored content, so it is replaced.
+  defp pointer_path("#", _declared), do: "(root)"
 
-  defp violation_path(path, declared) do
-    path
-    |> Enum.reverse()
-    |> Enum.map_join(fn
-      index when is_integer(index) -> "[#{index}]"
-      key when is_binary(key) -> "." <> declared_name(key, declared)
-      _other -> ".(undeclared)"
+  defp pointer_path("#/" <> rest, declared) do
+    rest
+    |> String.split("/")
+    |> Enum.map_join(fn segment ->
+      case Integer.parse(segment) do
+        {index, ""} -> "[#{index}]"
+        _other -> "." <> declared_name(segment, declared)
+      end
     end)
     |> String.trim_leading(".")
   end
+
+  defp pointer_path(_other, _declared), do: "(root)"
 
   defp declared_name(key, declared) do
     if MapSet.member?(declared, key), do: key, else: "(undeclared)"

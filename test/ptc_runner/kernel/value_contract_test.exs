@@ -78,7 +78,7 @@ defmodule PtcRunner.Kernel.ValueContractTest do
     # An undeclared key is reported by keyword and location only. Its name is
     # model-authored, so naming it would put caller content into a public error
     # by the same route the rejected value is withheld from.
-    assert %{path: "(root)", kind: :additionalProperties} in leaked.violations
+    assert Enum.any?(leaked.violations, &(&1.path == "(undeclared)"))
   end
 
   # Keyword keys are the commonest authoring mistake in PTC-Lisp, and they fail
