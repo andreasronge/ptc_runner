@@ -85,6 +85,7 @@ defmodule PtcRunnerLauncher.TestSupport.LauncherPort do
   @default_start_timeout_ms 5_000
   @max_start_timeout_ms 60_000
   @default_send_timeout_ms 5_000
+  @max_close_flush_messages 256
   @default_inherited_env_vars ~w(HOME LOGNAME PATH SHELL TERM USER)
 
   @spec open(keyword()) :: {:ok, t()} | {:error, atom()}
@@ -575,7 +576,7 @@ defmodule PtcRunnerLauncher.TestSupport.LauncherPort do
     if monitor do
       drain_closed_port(port, monitor, deadline_ms)
     else
-      flush_port_messages(port)
+      flush_queued_port_messages(port)
     end
   end
 
@@ -586,22 +587,39 @@ defmodule PtcRunnerLauncher.TestSupport.LauncherPort do
   end
 
   defp drain_closed_port(port, monitor, deadline_ms) do
-    receive do
-      {:DOWN, ^monitor, :port, ^port, _reason} ->
-        flush_port_messages(port)
+    case remaining_ms(deadline_ms) do
+      0 ->
+        :erlang.demonitor(monitor, [:flush])
+        flush_queued_port_messages(port)
 
-      {^port, _message} ->
-        drain_closed_port(port, monitor, deadline_ms)
-    after
-      min(remaining_ms(deadline_ms), 100) ->
-        if monitor, do: :erlang.demonitor(monitor, [:flush])
-        flush_port_messages(port)
+      remaining_ms ->
+        receive do
+          {:DOWN, ^monitor, :port, ^port, _reason} ->
+            flush_queued_port_messages(port)
+
+          {^port, _message} ->
+            drain_closed_port(port, monitor, deadline_ms)
+        after
+          min(remaining_ms, 100) ->
+            drain_closed_port(port, monitor, deadline_ms)
+        end
     end
   end
 
-  defp flush_port_messages(port) do
+  # Snapshot and cap the work so cleanup neither chases newly arriving
+  # messages nor turns a large owner mailbox into an unbounded deadline
+  # overrun. Any residual messages are port-specific and die with the test
+  # owner.
+  defp flush_queued_port_messages(port) do
+    {:message_queue_len, queued} = Process.info(self(), :message_queue_len)
+    flush_queued_port_messages(port, min(queued, @max_close_flush_messages))
+  end
+
+  defp flush_queued_port_messages(_port, 0), do: :ok
+
+  defp flush_queued_port_messages(port, remaining) do
     receive do
-      {^port, _message} -> flush_port_messages(port)
+      {^port, _message} -> flush_queued_port_messages(port, remaining - 1)
     after
       0 -> :ok
     end
