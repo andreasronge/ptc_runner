@@ -219,6 +219,7 @@ defmodule PtcRunner.Kernel.LLMReplay do
 
   defp entry(line, max_result_bytes) do
     with {:ok, value} <- StrictJSON.decode(line),
+         value = RetainedSize.detach_binaries(value),
          true <- is_map(value) and not is_struct(value),
          true <- Map.keys(value) -- @entry_keys == [],
          @format_version <- Map.get(value, "schema_version", @format_version),

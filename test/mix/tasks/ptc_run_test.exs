@@ -447,6 +447,28 @@ defmodule Mix.Tasks.Ptc.RunTest do
   end
 
   @tag :tmp_dir
+  test "rejects a private trace path before executing the run", %{tmp_dir: dir} do
+    manifest_path = write_manifest(dir, %{"secret" => "confidential"}, private?: true)
+    trace_path = Path.join(dir, "wrong.jsonl")
+    output_path = Path.join(dir, "result.private.json")
+
+    Mix.Task.reenable("ptc.run")
+
+    assert_raise Mix.Error, ~r/private_trace_requires_private_suffix/, fn ->
+      Run.run([
+        manifest_path,
+        "--trace",
+        trace_path,
+        "--private-output",
+        output_path
+      ])
+    end
+
+    refute File.exists?(trace_path)
+    refute File.exists?(output_path)
+  end
+
+  @tag :tmp_dir
   test "traces from separate runs remain a valid shared directory source", %{tmp_dir: dir} do
     File.write!(
       Path.join(dir, "main.clj"),

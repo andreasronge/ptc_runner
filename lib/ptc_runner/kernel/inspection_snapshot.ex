@@ -52,8 +52,16 @@ defmodule PtcRunner.Kernel.InspectionSnapshot do
 
   @opaque t :: %__MODULE__{pid: pid(), token: reference()}
 
+  @type retained_limit_error ::
+          {:source_retained_limit_exceeded,
+           %{
+             source: :ptc_inspection_snapshot,
+             measured_bytes: pos_integer(),
+             limit_bytes: pos_integer()
+           }}
+
   @spec start({:directory, binary()}, trace_snapshot(), keyword()) ::
-          {:ok, t()} | {:error, atom()}
+          {:ok, t()} | {:error, atom() | retained_limit_error()}
   def start(source, trace_snapshot, opts \\ [])
 
   def start({:directory, directory}, %TraceSnapshot{} = trace_snapshot, opts)
@@ -97,6 +105,7 @@ defmodule PtcRunner.Kernel.InspectionSnapshot do
               capture_hook, listing_hook}
            ) do
         {:ok, pid} -> {:ok, %__MODULE__{pid: pid, token: token}}
+        {:error, {:source_retained_limit_exceeded, _details} = reason} -> {:error, reason}
         {:error, reason} when is_atom(reason) -> {:error, reason}
         {:error, _reason} -> {:error, :source_unavailable}
       end
@@ -266,11 +275,13 @@ defmodule PtcRunner.Kernel.InspectionSnapshot do
          {:ok, compiled} <- InspectionQuery.compile(artifacts, trace_info.capture_id),
          retained_bytes
          when is_integer(retained_bytes) and retained_bytes <= max_retained_bytes <-
-           RetainedSize.bytes_with_cap(compiled.collections, max_retained_bytes) do
+           RetainedSize.bytes(compiled.collections) do
+      collections = RetainedSize.detach_binaries(compiled.collections)
+
       {:ok,
        %{
          source_id: compiled.source_id,
-         collections: compiled.collections,
+         collections: collections,
          source_bytes: before.source_bytes,
          retained_bytes: retained_bytes,
          file_count: length(before.files),
@@ -282,7 +293,13 @@ defmodule PtcRunner.Kernel.InspectionSnapshot do
         {:error, :source_limit_exceeded}
 
       retained_bytes when is_integer(retained_bytes) ->
-        {:error, :source_retained_limit_exceeded}
+        {:error,
+         {:source_retained_limit_exceeded,
+          %{
+            source: :ptc_inspection_snapshot,
+            measured_bytes: retained_bytes,
+            limit_bytes: max_retained_bytes
+          }}}
 
       :oversized ->
         {:error, :source_retained_limit_exceeded}

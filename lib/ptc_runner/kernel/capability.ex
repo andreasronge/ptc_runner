@@ -25,6 +25,7 @@ defmodule PtcRunner.Kernel.Capability do
   @name ~r|\A[a-z][a-z0-9._/-]{0,127}\z|
   alias PtcRunner.Kernel.JSONSchema
   alias PtcRunner.Lisp.KeyNormalizer
+  alias PtcRunner.Lisp.RetainedSize
 
   @effects [:read, :write, :unknown]
   @options ~w(name callback validate description model_visible input_schema output_schema effect)a
@@ -122,7 +123,9 @@ defmodule PtcRunner.Kernel.Capability do
   end
 
   defp valid_name(name) when is_binary(name) do
-    if name =~ @name, do: {:ok, name}, else: {:error, :invalid_capability}
+    if name =~ @name,
+      do: {:ok, RetainedSize.detach_binaries(name)},
+      else: {:error, :invalid_capability}
   end
 
   defp valid_name(_name), do: {:error, :invalid_capability}
@@ -132,7 +135,8 @@ defmodule PtcRunner.Kernel.Capability do
   defp valid_description(nil), do: {:ok, nil}
 
   defp valid_description(description)
-       when is_binary(description) and byte_size(description) <= 4_096, do: {:ok, description}
+       when is_binary(description) and byte_size(description) <= 4_096,
+       do: {:ok, RetainedSize.detach_binaries(description)}
 
   defp valid_description(_description), do: {:error, :invalid_capability}
 

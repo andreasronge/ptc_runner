@@ -143,7 +143,12 @@ The separate trusted host document says what those names mean:
   "deepseek": {
     "source": "llm",
     "model": "openrouter:deepseek/deepseek-v4-flash",
-    "credential": "openrouter_key"
+    "credential": "openrouter_key",
+    "params": {
+      "temperature": 0.2,
+      "seed": 42,
+      "max_tokens": 4096
+    }
   },
   "workspace": {
     "source": "mcp",
@@ -169,9 +174,42 @@ The separate trusted host document says what those names mean:
 }
 ```
 
-The host resolves and freezes the model, executable, working directory,
-snapshot include rules, credential binding, and tool mapping. The manifest
-cannot invent a model, callback, command, credential, or network destination.
+The host resolves and freezes the model, optional sampling parameters,
+executable, working directory, snapshot include rules, credential binding, and
+tool mapping. The manifest cannot invent a model, sampling policy, callback,
+command, credential, or network destination. `params` is optional and closed;
+the supported host-fixed fields are `temperature` (0–2), `seed` (a
+non-negative signed 32-bit integer), and `max_tokens` (1–1,000,000). Provider support
+still varies, so use parameters the installed model actually implements.
+
+## Call the provider-neutral LLM capability
+
+The shipped `llm/request` wrapper calls the workflow-only `llm-request`
+capability. Programs normally let `agent.core` construct this request, but
+custom workflows can rely on the same closed contract:
+
+| Request key | Shape | Meaning |
+| --- | --- | --- |
+| `system` | string, optional | System instructions placed before the conversation. |
+| `messages` | array | Conversation messages with `role` and `content`. |
+| `tools` | array, optional | Provider-neutral tool definitions. |
+| `cache` | boolean, optional | Request preference; a host-fixed cache policy takes precedence. |
+
+Unknown request keys are not forwarded to the adapter. Model choice,
+credentials, sampling parameters, byte ceilings, and timeouts remain
+host-owned rather than being supplied by PTC-Lisp.
+
+A successful response has `content` and may contain `tool_calls` and `tokens`.
+Each tool call uses `id`, `name`, and `args`; the normalized field is `args`,
+not a provider-specific `arguments` field. An invalid provider argument
+payload may additionally carry the bounded `args_error` classification. The
+token map can contain `input`, `output`, `cache_creation`, `cache_read`, and
+`total_cost`. Unsupported or unavailable metrics are reported as zero or
+omitted according to the adapter.
+
+`llm/request` unwraps successful capability envelopes. A recoverable provider
+failure remains the ordinary bounded error envelope returned by the
+capability, allowing workflow policy to decide whether to retry or fail.
 
 ## Supply model credentials from the host
 
@@ -262,6 +300,14 @@ provider, source, heap, result, history, memory, or event ceilings.
 Capability calls return uniform success or error envelopes. The workflow may
 retry a transient model failure, provide bounded correction feedback after a
 pure evaluation error, degrade to another result, or call `fail`.
+
+An outer `(fail value)` never copies `value` into the public Kernel error or
+canonical trace. If the value is a map with a scalar `kind`, the runner exposes
+only bounded taxonomy: framework-defined categories such as `turn-limit`
+remain readable, while application-defined categories become stable SHA-256
+fingerprints. This makes repeated failure classes aggregatable without turning
+the public trace into a payload channel. Exact failure values belong in private
+inspection artifacts.
 
 External effects are not rolled back with Lisp memory. The shipped agent loop
 therefore does not automatically retry an evaluation error after capability

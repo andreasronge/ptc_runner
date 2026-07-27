@@ -523,9 +523,11 @@ defmodule PtcRunner.Kernel.HostInstallation do
          requester =
            PtcRunner.LLM.callback(
              model,
-             adapter: adapter,
-             cache: installation.cache,
-             api_key: credential
+             [
+               adapter: adapter,
+               cache: installation.cache,
+               api_key: credential
+             ] ++ Map.to_list(installation.params)
            ),
          {:ok, capability} <-
            LLMCapability.new(
@@ -704,6 +706,8 @@ defmodule PtcRunner.Kernel.HostInstallation do
         "source" => "llm",
         "model" => model,
         "cache" => installation.cache,
+        "params" =>
+          Map.new(installation.params, fn {key, value} -> {Atom.to_string(key), value} end),
         "max_request_bytes" => selected.max_request_bytes,
         "max_response_bytes" => selected.max_response_bytes
       }

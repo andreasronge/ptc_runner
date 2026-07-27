@@ -78,6 +78,7 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
           "source" => "llm",
           "model" => "openrouter:deepseek/deepseek-v4-flash",
           "credential" => "openrouter_key",
+          "params" => %{"temperature" => 0.15, "seed" => 73, "max_tokens" => 2_048},
           "installation_revision" => "model-policy-v2",
           "accepts_data" => ["normal", "private_inspection"],
           "ceilings" => %{
@@ -131,6 +132,13 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
     assert built.snapshot["source"] == "llm"
     assert built.snapshot["model"] == "openrouter:deepseek/deepseek-v4-flash"
     assert built.snapshot["cache"] == false
+
+    assert built.snapshot["params"] == %{
+             "temperature" => 0.15,
+             "seed" => 73,
+             "max_tokens" => 2_048
+           }
+
     assert built.snapshot["installation_revision"] == "model-policy-v2"
     assert built.snapshot["max_request_bytes"] == 100_000
     assert built.snapshot["max_response_bytes"] == 300_000
@@ -148,6 +156,9 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
     assert_receive {:host_llm_request, "openrouter:deepseek/deepseek-v4-flash", request}
     assert request.api_key == "test-llm-secret"
     assert request.cache == false
+    assert request.temperature == 0.15
+    assert request.seed == 73
+    assert request.max_tokens == 2_048
   end
 
   @tag :tmp_dir

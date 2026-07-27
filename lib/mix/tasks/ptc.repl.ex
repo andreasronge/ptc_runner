@@ -456,9 +456,24 @@ defmodule Mix.Tasks.Ptc.Repl do
 
       {:error, reason} ->
         cleanup_temporary_directory(output_directory, temporary?)
-        command_error(opts, :setup, "ptc.repl profile setup failed: #{reason}")
+        command_error(opts, :setup, profile_setup_error(reason))
     end
   end
+
+  defp profile_setup_error(
+         {:source_retained_limit_exceeded,
+          %{source: source, measured_bytes: measured_bytes, limit_bytes: limit_bytes}}
+       )
+       when source in [:ptc_trace_snapshot, :ptc_inspection_snapshot] and
+              is_integer(measured_bytes) and is_integer(limit_bytes) do
+    "ptc.repl profile setup failed: #{source} retains #{measured_bytes} bytes " <>
+      "(limit: #{limit_bytes} bytes)"
+  end
+
+  defp profile_setup_error(reason) when is_atom(reason),
+    do: "ptc.repl profile setup failed: #{reason}"
+
+  defp profile_setup_error(_reason), do: "ptc.repl profile setup failed"
 
   defp maybe_private_terminal(builder_options, opts) do
     if Keyword.get(opts, :private_terminal, false),

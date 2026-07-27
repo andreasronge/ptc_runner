@@ -5,9 +5,9 @@ defmodule PtcRunner.Kernel.HostConfig do
   The host document is operator-owned and separate from an application
   manifest. It fixes provider sources, credentials, data classes, and outer
   ceilings. MCP installations additionally fix transports, tool mappings, and
-  effects; live LLM installations fix the model and cache policy. A manifest
-  may later select an installed alias and narrow its authority; it cannot
-  introduce or replace any field decoded here.
+  effects; live LLM installations fix the model, cache policy, and optional
+  sampling parameters. A manifest may later select an installed alias and
+  narrow its authority; it cannot introduce or replace any field decoded here.
 
   Loading is bounded, path-confined, duplicate-key rejecting, and side-effect
   free. In particular, credential declarations are validated but environment
@@ -42,6 +42,8 @@ defmodule PtcRunner.Kernel.HostConfig do
   @max_inspection_files 1_024
   @max_replay_entries 10_000
   @max_timeout_ms 300_000
+  @max_llm_tokens 1_000_000
+  @max_llm_seed 2_147_483_647
   @name ~r/\A[a-z][a-z0-9._-]{0,127}\z/
   @environment_name ~r/\A[A-Za-z_][A-Za-z0-9_]*\z/
   @header_name ~r/\A[!#$%&'*+\-.^_`|~0-9A-Za-z]+\z/
@@ -113,6 +115,11 @@ defmodule PtcRunner.Kernel.HostConfig do
               model: binary(),
               credential: binary(),
               cache: boolean(),
+              params: %{
+                optional(:temperature) => float(),
+                optional(:seed) => non_neg_integer(),
+                optional(:max_tokens) => pos_integer()
+              },
               installation_revision: binary() | nil,
               ceilings: %{
                 max_request_bytes: pos_integer(),
@@ -314,7 +321,7 @@ defmodule PtcRunner.Kernel.HostConfig do
 
   defp llm_installation(value, credentials) do
     allowed =
-      ~w(source model credential cache installation_revision ceilings data_class accepts_data)
+      ~w(source model credential cache params installation_revision ceilings data_class accepts_data)
 
     with :ok <- exact_keys(value, allowed, ~w(source model credential)),
          model when is_binary(model) <- value["model"],
@@ -322,6 +329,7 @@ defmodule PtcRunner.Kernel.HostConfig do
          credential when is_binary(credential) <- value["credential"],
          true <- Map.has_key?(credentials, credential),
          cache when is_boolean(cache) <- Map.get(value, "cache", false),
+         {:ok, params} <- llm_params(Map.get(value, "params", %{})),
          {:ok, installation_revision} <-
            optional_revision(Map.get(value, "installation_revision")),
          {:ok, ceilings} <- llm_ceilings(Map.get(value, "ceilings", %{})),
@@ -334,6 +342,7 @@ defmodule PtcRunner.Kernel.HostConfig do
          model: model,
          credential: credential,
          cache: cache,
+         params: params,
          installation_revision: installation_revision,
          ceilings: ceilings,
          data_class: data_class,
@@ -342,6 +351,32 @@ defmodule PtcRunner.Kernel.HostConfig do
     else
       _reason -> {:error, :invalid_installation}
     end
+  end
+
+  defp llm_params(value) when is_map(value) do
+    with :ok <- exact_keys(value, ~w(temperature seed max_tokens), []),
+         temperature when is_number(temperature) and temperature >= 0 and temperature <= 2 <-
+           Map.get(value, "temperature", 0.0),
+         seed when is_integer(seed) and seed in 0..@max_llm_seed <-
+           Map.get(value, "seed", 0),
+         max_tokens when is_integer(max_tokens) and max_tokens in 1..@max_llm_tokens <-
+           Map.get(value, "max_tokens", 1) do
+      params =
+        %{}
+        |> maybe_put_param(:temperature, value, "temperature", temperature * 1.0)
+        |> maybe_put_param(:seed, value, "seed", seed)
+        |> maybe_put_param(:max_tokens, value, "max_tokens", max_tokens)
+
+      {:ok, params}
+    else
+      _reason -> {:error, :invalid_llm_params}
+    end
+  end
+
+  defp llm_params(_value), do: {:error, :invalid_llm_params}
+
+  defp maybe_put_param(params, atom_key, value, string_key, normalized) do
+    if Map.has_key?(value, string_key), do: Map.put(params, atom_key, normalized), else: params
   end
 
   defp trace_snapshot_installation(value) do
@@ -864,6 +899,24 @@ defmodule PtcRunner.Kernel.HostConfig do
         "model" => bounded_string(256),
         "credential" => name_schema(),
         "cache" => %{"type" => "boolean", "default" => false},
+        "params" =>
+          closed_object(%{
+            "temperature" => %{
+              "type" => "number",
+              "minimum" => 0,
+              "maximum" => 2
+            },
+            "seed" => %{
+              "type" => "integer",
+              "minimum" => 0,
+              "maximum" => @max_llm_seed
+            },
+            "max_tokens" => %{
+              "type" => "integer",
+              "minimum" => 1,
+              "maximum" => @max_llm_tokens
+            }
+          }),
         "installation_revision" => bounded_string(256),
         "ceilings" => llm_ceilings_schema(),
         "data_class" => data_class_schema(),

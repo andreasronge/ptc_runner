@@ -69,6 +69,7 @@ defmodule PtcRunner.Kernel.HostConfigTest do
           "model" => "openrouter:deepseek/deepseek-v4-flash",
           "credential" => "openrouter_key",
           "cache" => false,
+          "params" => %{"temperature" => 0.2, "seed" => 42, "max_tokens" => 4_096},
           "installation_revision" => "model-policy-v2",
           "accepts_data" => ["normal", "private_inspection"],
           "ceilings" => %{
@@ -86,6 +87,7 @@ defmodule PtcRunner.Kernel.HostConfigTest do
              model: "openrouter:deepseek/deepseek-v4-flash",
              credential: "openrouter_key",
              cache: false,
+             params: %{temperature: 0.2, seed: 42, max_tokens: 4_096},
              installation_revision: "model-policy-v2",
              ceilings: %{max_request_bytes: 200_000, max_response_bytes: 300_000},
              data_class: :normal,
@@ -303,6 +305,18 @@ defmodule PtcRunner.Kernel.HostConfigTest do
     assert {:ok, _validated} = JSV.validate(llm, root, cast: false)
     assert {:ok, host} = HostConfig.decode(llm, "/tmp")
     assert host.install["deepseek"].source == :llm
+    assert host.install["deepseek"].params == %{}
+
+    for invalid_params <- [
+          %{"temperature" => 2.1},
+          %{"seed" => -1},
+          %{"max_tokens" => 0},
+          %{"top_p" => 0.9}
+        ] do
+      invalid = put_in(llm, ["install", "deepseek", "params"], invalid_params)
+      assert {:error, :invalid_host_config} = HostConfig.decode(invalid, "/tmp")
+      assert {:error, _details} = JSV.validate(invalid, root, cast: false)
+    end
 
     trace = %{
       "install" => %{

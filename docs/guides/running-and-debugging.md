@@ -14,6 +14,25 @@ mix ptc.run ptc.json \
   --inspect traces/run.inspection.jsonl
 ```
 
+Normal traces use a `.jsonl` suffix. A run whose effective event policy is
+private requires the reserved `.private.jsonl` suffix:
+
+```console
+mix ptc.run private-ptc.json \
+  --trace traces/run.private.jsonl \
+  --private-output results/run.private.json
+```
+
+The command checks this rule after assembly determines the effective run class
+but before workflow execution or model activity. A normal run may not use the
+reserved private suffix.
+
+Snapshot capture failures report the source kind, measured retained bytes, and
+configured retained-byte ceiling when the decoded trace or inspection catalog
+is too large. Workflow timeouts likewise name the effective limit
+(`workflow_timeout_ms` or the remaining `run_duration_ms`), its value, and
+whether compilation or execution exhausted it.
+
 `--inspect` is a host opt-in development feature. It writes a separate bounded
 owner-only artifact containing sensitive execution details. Do not publish it
 with normal traces.

@@ -197,12 +197,14 @@ defmodule PtcRunner.Kernel.InspectionSink do
          bytes = byte_size(encoded) + 1,
          true <- bytes <= state.max_record_bytes,
          true <- state.encoded_bytes + bytes <= state.max_total_bytes do
+      retained_record = RetainedSize.detach_binaries(record)
+
       {:reply, :ok,
        %{
          state
          | sequence: state.sequence + 1,
            encoded_bytes: state.encoded_bytes + bytes,
-           records: [record | state.records]
+           records: [retained_record | state.records]
        }}
     else
       _reason -> {:reply, {:error, :inspection_sink_error}, %{state | failed?: true}}
@@ -343,13 +345,15 @@ defmodule PtcRunner.Kernel.InspectionSink do
   defp normalize(value) when is_atom(value) and value not in [true, false, nil],
     do: {:ok, Atom.to_string(value)}
 
-  defp normalize(value)
-       when is_binary(value) or is_number(value) or is_boolean(value) or is_nil(value),
-       do: {:ok, value}
+  defp normalize(value) when is_binary(value), do: {:ok, value}
+
+  defp normalize(value) when is_number(value) or is_boolean(value) or is_nil(value),
+    do: {:ok, value}
 
   defp normalize(_value), do: {:error, :invalid_record}
 
   defp normalize_key(key) when is_binary(key), do: {:ok, key}
+
   defp normalize_key(key) when is_atom(key), do: {:ok, Atom.to_string(key)}
   defp normalize_key(_key), do: {:error, :invalid_record}
 

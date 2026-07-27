@@ -648,16 +648,18 @@ loaders for its own configuration and artifacts are unaffected.
 `llm` is another closed host-installable source owned by the generic
 application platform, not by MCP. It wraps the existing provider-neutral LLM
 adapter and emits exactly the standard workflow `llm-request` capability.
-Host config owns model ID, credential binding, cache policy, accepted data
+Host config owns model ID, credential binding, cache policy, optional closed
+sampling parameters (`temperature`, `seed`, and `max_tokens`), accepted data
 classes, optional installation revision, and the provider alias (`deepseek`
 here).
 A manifest may select that alias and lower generic ceilings; it cannot change
-the model, credential, cache policy, or identity. `llm_replay` emits the same
-capability contract from frozen fixtures, so a run chooses one or the other at
-assembly rather than switching providers while executing. An optional
-installation revision affects either safe snapshot when present. Replay also
-includes the fixture-set hash, while a live LLM snapshot includes the effective
-model and non-secret request-policy identity.
+the model, credential, cache or sampling policy, or identity. `llm_replay`
+emits the same capability contract from frozen fixtures, so a run chooses one
+or the other at assembly rather than switching providers while executing. An
+optional installation revision affects either safe snapshot when present.
+Replay also includes the fixture-set hash, while a live LLM snapshot includes
+the effective model and non-secret request-policy identity, including sampling
+parameters.
 
 For the live `llm` source, the optional host `ceilings` fields are
 `max_request_bytes` and `max_response_bytes`, both defaulting to the Kernel's

@@ -26,6 +26,13 @@ defmodule PtcRunner.Kernel.AnalysisSessionBuilder do
 
   @type resources :: %{required(binary()) => binary()}
   @type destination :: {:directory, binary()}
+  @type retained_limit_error ::
+          {:source_retained_limit_exceeded,
+           %{
+             source: :ptc_trace_snapshot | :ptc_inspection_snapshot,
+             measured_bytes: pos_integer(),
+             limit_bytes: pos_integer()
+           }}
 
   @common_options [
     :persistence_fault_hook,
@@ -49,7 +56,7 @@ defmodule PtcRunner.Kernel.AnalysisSessionBuilder do
   including through symlinks and ancestor aliases.
   """
   @spec start(binary(), resources(), destination()) ::
-          {:ok, AnalysisSession.t(), map()} | {:error, atom()}
+          {:ok, AnalysisSession.t(), map()} | {:error, atom() | retained_limit_error()}
   def start(profile_id, resources, destination),
     do: start(profile_id, resources, destination, [])
 
@@ -79,7 +86,7 @@ defmodule PtcRunner.Kernel.AnalysisSessionBuilder do
       )
     else
       {:error, :unsupported_analysis_profile} = error -> error
-      {:error, reason} when is_atom(reason) -> {:error, reason}
+      {:error, reason} -> {:error, normalize_profile_error(profile_id, reason)}
     end
   rescue
     _exception ->
@@ -478,7 +485,30 @@ defmodule PtcRunner.Kernel.AnalysisSessionBuilder do
     end
   end
 
+  defp normalize_profile_error(profile_id, reason) do
+    case AnalysisProfileRegistry.fetch(profile_id) do
+      {:ok, recipe} -> normalize_error(reason, recipe)
+      {:error, _reason} -> :invalid_analysis_source
+    end
+  end
+
   defp normalize_error(reason, _recipe) when is_atom(reason), do: reason
+
+  defp normalize_error(
+         {:source_retained_limit_exceeded,
+          %{
+            source: source,
+            measured_bytes: measured_bytes,
+            limit_bytes: limit_bytes
+          } = details} = reason,
+         _recipe
+       )
+       when map_size(details) == 3 and
+              source in [:ptc_trace_snapshot, :ptc_inspection_snapshot] and
+              is_integer(measured_bytes) and measured_bytes > 0 and
+              is_integer(limit_bytes) and limit_bytes > 0,
+       do: reason
+
   defp normalize_error(_reason, recipe), do: recipe.session_failed_error()
   defp random_id, do: Base.encode16(:crypto.strong_rand_bytes(8), case: :lower)
 end

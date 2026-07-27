@@ -246,6 +246,11 @@ open.
 }
 ```
 
+The `deepseek` installation deliberately uses the adapter defaults. A
+controlled live experiment may add the closed host-owned `params` object with
+`temperature`, `seed`, and `max_tokens`; those values enter the provider
+snapshot and cannot be overridden by a manifest or generated program.
+
 This is the complete host authority needed for the first public answer. Later
 sections widen the same file only when private review and replay evaluation
 need those grants. Six details are deliberate:

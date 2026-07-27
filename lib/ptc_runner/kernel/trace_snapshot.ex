@@ -19,7 +19,16 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
 
   @opaque t :: %__MODULE__{pid: pid(), token: reference()}
 
-  @spec start({:directory, binary()}, keyword()) :: {:ok, t()} | {:error, atom()}
+  @type retained_limit_error ::
+          {:source_retained_limit_exceeded,
+           %{
+             source: :ptc_trace_snapshot,
+             measured_bytes: pos_integer(),
+             limit_bytes: pos_integer()
+           }}
+
+  @spec start({:directory, binary()}, keyword()) ::
+          {:ok, t()} | {:error, atom() | retained_limit_error()}
   def start(source, opts \\ [])
 
   def start({:directory, directory}, opts) when is_binary(directory) and is_list(opts) do
@@ -60,6 +69,7 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
               max_directory_entries, max_trace_files, capture_hook, listing_hook}
            ) do
         {:ok, pid} -> {:ok, %__MODULE__{pid: pid, token: token}}
+        {:error, {:source_retained_limit_exceeded, _details} = reason} -> {:error, reason}
         {:error, reason} when is_atom(reason) -> {:error, reason}
         {:error, _reason} -> {:error, :source_unavailable}
       end
@@ -251,11 +261,18 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
              listing_hook: listing_hook
            ),
          retained_bytes when is_integer(retained_bytes) and retained_bytes <= max_retained_bytes <-
-           RetainedSize.bytes_with_cap(capture.events, max_retained_bytes) do
-      {:ok, capture, retained_bytes}
+           RetainedSize.bytes(capture.events) do
+      retained_capture = %{capture | events: RetainedSize.detach_binaries(capture.events)}
+      {:ok, retained_capture, retained_bytes}
     else
       retained_bytes when is_integer(retained_bytes) ->
-        {:error, :source_retained_limit_exceeded}
+        {:error,
+         {:source_retained_limit_exceeded,
+          %{
+            source: :ptc_trace_snapshot,
+            measured_bytes: retained_bytes,
+            limit_bytes: max_retained_bytes
+          }}}
 
       :oversized ->
         {:error, :source_retained_limit_exceeded}

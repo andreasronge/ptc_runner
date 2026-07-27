@@ -198,11 +198,11 @@ defmodule PtcRunner.Kernel.EventSinkState do
          payload_bytes when is_integer(payload_bytes) <-
            RetainedSize.bytes_with_cap(normalized_data, payload_cap),
          true <- payload_bytes <= payload_cap,
-         event = event(state, type, data),
          accounted_event = event(state, type, normalized_data),
          event_bytes when is_integer(event_bytes) <-
            RetainedSize.bytes_with_cap(accounted_event, event_cap),
          true <- event_bytes <= event_cap do
+      event = event(state, type, RetainedSize.detach_binaries(data))
       {:ok, event, event_bytes}
     else
       _ -> :error
@@ -277,7 +277,9 @@ defmodule PtcRunner.Kernel.EventSinkState do
 
   defp normalize_json(nil), do: {:ok, nil}
   defp normalize_json(value) when is_boolean(value) or is_number(value), do: {:ok, value}
+
   defp normalize_json(value) when is_binary(value), do: {:ok, value}
+
   defp normalize_json(value) when is_atom(value), do: {:ok, Atom.to_string(value)}
 
   defp normalize_json(value) when is_list(value) do
@@ -306,7 +308,9 @@ defmodule PtcRunner.Kernel.EventSinkState do
   end
 
   defp normalize_json(_value), do: :error
+
   defp normalize_key(key) when is_binary(key), do: {:ok, key}
+
   defp normalize_key(key) when is_atom(key), do: {:ok, Atom.to_string(key)}
   defp normalize_key(_key), do: :error
 end

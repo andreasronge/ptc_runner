@@ -489,6 +489,45 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
   end
 
   @tag :tmp_dir
+  test "trace preflight failure closes acquired provider resources", %{tmp_dir: dir} do
+    parent = self()
+    File.write!(Path.join(dir, "workflow.clj"), "(ns app) (defn run [x] (return x))")
+
+    manifest = manifest(dir, [provider("owned", %{"id" => "trace-preflight"})], [])
+    {:ok, registry} = registry_with_close(parent)
+
+    assert {:error, {:trace_preflight_failed, :normal_trace_requires_normal_suffix}} =
+             RunBuilder.run(manifest, registry, trace: Path.join(dir, "wrong.private.jsonl"))
+
+    assert_receive {:closed, "trace-preflight"}
+    refute_receive {:closed, "trace-preflight"}
+
+    failing_builder = fn %{}, _context ->
+      {:ok, capability} = capability("provided.cleanup-failure")
+
+      {:ok,
+       %{
+         capabilities: [capability],
+         close: fn ->
+           send(parent, :trace_preflight_cleanup_attempted)
+           {:error, :fixture_cleanup_failed}
+         end
+       }}
+    end
+
+    {:ok, failing_registry} = ProviderRegistry.new(%{"cleanup-fails" => failing_builder})
+    failing_manifest = manifest(dir, [provider("cleanup-fails", %{})], [])
+
+    assert {:error, :provider_cleanup_failed} =
+             RunBuilder.run(failing_manifest, failing_registry,
+               trace: Path.join(dir, "also-wrong.private.jsonl")
+             )
+
+    assert_receive :trace_preflight_cleanup_attempted
+    refute_receive :trace_preflight_cleanup_attempted
+  end
+
+  @tag :tmp_dir
   test "provider cleanup failure is reported by runs and explicit close", %{tmp_dir: dir} do
     parent = self()
     File.write!(Path.join(dir, "workflow.clj"), "(ns app) (defn run [x] (return x))")

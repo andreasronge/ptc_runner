@@ -229,7 +229,7 @@ defmodule PtcRunner.Kernel.TraceLog do
          max_bytes when is_integer(max_bytes) and max_bytes > 0 <-
            Keyword.get(opts, :max_source_bytes, @default_source_bytes),
          private? when is_boolean(private?) <- Keyword.get(opts, :private, false),
-         true <- private_path?(path) == private? do
+         :ok <- validate_append_path(path, private?) do
       path = Path.expand(path)
 
       :global.trans({{__MODULE__, {:append, path}}, self()}, fn ->
@@ -243,6 +243,30 @@ defmodule PtcRunner.Kernel.TraceLog do
   end
 
   def append_jsonl(_path, _events, _opts), do: {:error, :invalid_trace_log}
+
+  @doc false
+  @spec validate_append_path(term(), term()) :: :ok | {:error, atom()}
+  def validate_append_path(path, private?)
+      when is_binary(path) and is_boolean(private?) do
+    cond do
+      not String.valid?(path) ->
+        {:error, :invalid_trace_path}
+
+      not String.ends_with?(path, ".jsonl") or inspection_path?(path) ->
+        {:error, :invalid_trace_path}
+
+      private? and not private_path?(path) ->
+        {:error, :private_trace_requires_private_suffix}
+
+      not private? and private_path?(path) ->
+        {:error, :normal_trace_requires_normal_suffix}
+
+      true ->
+        :ok
+    end
+  end
+
+  def validate_append_path(_path, _private?), do: {:error, :invalid_trace_path}
 
   defp with_append_lock(path, callback, attempts \\ 3)
 

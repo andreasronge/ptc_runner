@@ -406,7 +406,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
        when is_integer(cap) and cap > 0 and not is_nil(result) do
     case retained_size(result, cap) do
       size when is_integer(size) and size <= cap ->
-        tool_call
+        Map.update!(tool_call, :result, &RetainedSize.detach_binaries/1)
 
       size ->
         tool_call
@@ -418,25 +418,21 @@ defmodule PtcRunner.Lisp.Eval.Context do
 
   defp compact_ledger_entry(tool_call, _cap), do: tool_call
 
-  # Retained-HEAP estimate, conservative (never under-counts), in the same units
-  # the sandbox bills (`max_heap`). Two parts:
+  # Logical retained-heap estimate. Two parts:
   #
   #   * the term's flat heap size (`:erts_debug.flat_size/1`, words → bytes):
   #     cons cells, tuples, boxed terms. NOT the serialized encoding —
   #     `:erlang.external_size/1` is ~16× smaller for int-heavy lists (a 16k-int
   #     list encodes to ~16 KB but occupies ~256 KB of heap), which would let it
   #     slip under the cap; and
-  #   * the parent size of any refc binary reachable in the term
-  #     (`:binary.referenced_byte_size/1`). flat_size counts only a binary's
-  #     ProcBin header, not its shared bytes (which the sandbox DOES bill), and a
-  #     sub-binary keeps its whole parent alive.
+  #   * the own extent of every binary reachable in the term. flat_size counts
+  #     only a binary's small header, not its bytes. Ledger values that fit are
+  #     detached before retention so a small slice cannot keep a larger
+  #     transient parent alive.
   #
-  # The two parts are SUMMED, not maxed: the sandbox bills the heap structure
-  # AND the shared binary bytes, so a mixed `{rows, raw_chunk}` result retains
-  # both. (flat_size already includes each binary's small ProcBin header, a
-  # negligible and conservative double-count.) Short-circuit: only walk binaries
-  # when the flat heap is already under the cap — if it alone exceeds the cap we
-  # truncate regardless, and the sum would only be larger.
+  # The two parts are SUMMED, not maxed: a mixed `{rows, raw_chunk}` result
+  # retains both. Short-circuit: only walk binaries when the flat heap is already
+  # under the cap — if it alone exceeds the cap we truncate regardless.
   defp retained_size(value, cap) do
     RetainedSize.bytes_with_cap(value, cap)
   end

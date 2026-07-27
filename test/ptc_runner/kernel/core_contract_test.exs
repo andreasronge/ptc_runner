@@ -15,6 +15,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
   alias PtcRunner.Kernel.ReplSession
   alias PtcRunner.Kernel.RunConfig
   alias PtcRunner.Kernel.RunState
+  alias PtcRunner.Kernel.SafeMetadata
   alias PtcRunner.Kernel.WorkflowEnvironment
   alias PtcRunner.Lisp.Format
   alias PtcRunner.Lisp.RetainedSize
@@ -130,7 +131,32 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     assert :ok = RunState.release_evaluation(state, release_lease)
   end
 
+  test "continuation commit detaches retained values from transient binary parents" do
+    parent = :binary.copy("x", 100_000)
+    slice = binary_part(parent, 0, 1_000)
+
+    {:ok, limits} =
+      Limits.new(
+        subordinate_evaluations: 2,
+        evaluation_memory_bytes: 10_000,
+        evaluation_history_bytes: 10_000
+      )
+
+    {:ok, state} = RunState.start(limits)
+    assert {:ok, %{}, [], lease} = RunState.reserve_evaluation(state)
+    assert :ok = RunState.commit_evaluation(state, lease, %{"slice" => slice}, [slice])
+
+    assert {:ok, %{"slice" => retained}, [history], next_lease} =
+             RunState.reserve_evaluation(state)
+
+    assert :binary.referenced_byte_size(retained) == 1_000
+    assert :binary.referenced_byte_size(history) == 1_000
+    assert :ok = RunState.release_evaluation(state, next_lease)
+  end
+
   test "dispatcher contains provider errors and rejects invalid returns" do
+    missing_struct = Module.concat(__MODULE__, MissingProviderResult)
+
     assert {:ok, unavailable} =
              Capability.new(
                name: "unavailable",
@@ -147,7 +173,16 @@ defmodule PtcRunner.Kernel.CoreContractTest do
                callback: fn _ -> {:ok, self()} end
              )
 
-    assert {:ok, environment} = WorkflowEnvironment.new(capabilities: [unavailable, invalid])
+    assert {:ok, malformed_struct} =
+             Capability.new(
+               name: "malformed-struct",
+               input_schema: @input_schema,
+               callback: fn _ -> {:ok, %{__struct__: missing_struct, value: <<1>>}} end
+             )
+
+    assert {:ok, environment} =
+             WorkflowEnvironment.new(capabilities: [unavailable, invalid, malformed_struct])
+
     {:ok, state} = RunState.start(Limits.defaults())
 
     assert %{status: :error, kind: :provider_error, reason: :unavailable, retryable?: true} =
@@ -155,6 +190,9 @@ defmodule PtcRunner.Kernel.CoreContractTest do
 
     assert %{status: :error, kind: :result_exceeded, reason: :provider_result_limit} =
              Dispatcher.dispatch(state, :workflow, environment, "invalid", %{}, 100)
+
+    assert %{status: :error, kind: :result_exceeded, reason: :provider_result_limit} =
+             Dispatcher.dispatch(state, :workflow, environment, "malformed-struct", %{}, 100)
   end
 
   test "timed-out provider results cannot consume another callback slot after closure" do
@@ -609,7 +647,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     EventSink.stop(sink)
   end
 
-  test "terminal preflight accounts for retained capability-name parents" do
+  test "capability construction detaches names from transient binary parents" do
     parent = "s" <> String.duplicate("x", 500_000)
     retained_name = binary_part(parent, 0, 65)
     assert :binary.referenced_byte_size(retained_name) > byte_size(retained_name)
@@ -620,6 +658,8 @@ defmodule PtcRunner.Kernel.CoreContractTest do
         input_schema: @input_schema,
         callback: fn _ -> {:ok, nil} end
       )
+
+    assert :binary.referenced_byte_size(retained.name) == byte_size(retained.name)
 
     {:ok, logical_long} =
       Capability.new(
@@ -633,7 +673,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     {:ok, limits} = Limits.new(workflow_capability_calls: 1)
     {:ok, sink} = EventSink.start(:normal, limits)
 
-    assert {:error, :invalid_run_config} =
+    assert {:ok, _config} =
              RunConfig.new(
                workflow_environment: workflow,
                mission_environment: mission,
@@ -984,6 +1024,30 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     assert List.last(events).data.result_hash == expected_hash
   end
 
+  test "workflow timeout diagnostics name the effective configured limit" do
+    {:ok, workflow} = WorkflowEnvironment.new([])
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, limits} = Limits.new(workflow_timeout_ms: 1, run_duration_ms: 1_000)
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "workflow-timeout")
+
+    {:ok, config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        mission_environment: mission,
+        input: %{},
+        limits: limits,
+        event_sink: sink
+      )
+
+    assert {:error, error} = Kernel.run("(reduce + (range 1000000))", config)
+    assert error.kind == :limit_exceeded
+    assert error.reason in [:timeout, :compile_timeout]
+    assert error.details.limit == :workflow_timeout_ms
+    assert error.details.limit_ms == 1
+    assert error.details.phase in [:compilation, :execution]
+    assert error.details.message =~ "workflow_timeout_ms exceeded during"
+  end
+
   test "Kernel JSON boundaries reject Java callable authority before commit" do
     {:ok, workflow} = WorkflowEnvironment.new([])
     {:ok, mission} = MissionEnvironment.new([])
@@ -1096,6 +1160,48 @@ defmodule PtcRunner.Kernel.CoreContractTest do
              Kernel.run(~s|(fail "#{private}")|, config)
 
     refute inspect(error) =~ private
+  end
+
+  test "explicit workflow failure exposes only bounded safe taxonomy" do
+    {:ok, workflow} = WorkflowEnvironment.new([])
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, limits} = Limits.new()
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "workflow-failure-taxonomy")
+
+    {:ok, config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        mission_environment: mission,
+        input: %{},
+        limits: limits,
+        event_sink: sink
+      )
+
+    secret = "PRIVATE_FAILURE_DETAIL"
+
+    assert {:error,
+            %{
+              reason: :explicit_failure,
+              details: %{failure_kind: "turn-limit"}
+            }} =
+             Kernel.run(~s|(fail {:kind :turn-limit :reason "#{secret}"})|, config)
+
+    stopped = List.last(EventSink.events(sink))
+    assert stopped.type == "run-stopped"
+    assert stopped.data.failure_kind == "turn-limit"
+    refute inspect(stopped) =~ secret
+  end
+
+  test "application-defined failure kinds are fingerprinted" do
+    taxonomy =
+      SafeMetadata.failure_taxonomy(%{
+        "kind" => "PRIVATE_CUSTOM_FAILURE",
+        "detail" => "PRIVATE_DETAIL"
+      })
+
+    assert %{failure_kind_fingerprint: "sha256:" <> digest} = taxonomy
+    assert byte_size(digest) == 64
+    refute inspect(taxonomy) =~ "PRIVATE"
   end
 
   test "new Kernel workflow routes only granted capabilities through the dispatcher" do

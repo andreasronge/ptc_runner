@@ -4,13 +4,17 @@ defmodule PtcRunner.Lisp.RetainedSize do
   @word_bytes :erlang.system_info(:wordsize)
 
   @doc """
-  Return a retained-heap byte estimate for a term, or `:oversized` if the term
-  cannot be sized safely.
+  Return a logical retained-heap byte estimate for a term, or `:oversized` if
+  the term cannot be sized safely.
 
-  This uses the same units as the sandbox bills: flat heap words plus reachable
-  referenced binary parent sizes. Structs are sized through their fields because
-  native Lisp memory can contain safe data structs such as `MapSet` in closure
-  metadata.
+  This uses flat heap words plus every reachable binary's own extent. Charging
+  `:binary.referenced_byte_size/1` for each sub-binary would multiply one shared
+  parent by the number of slices that reference it. Long-lived owner boundaries
+  detach sub-binaries with `detach_binaries/1`, making the estimate agree with
+  the memory those retained values own.
+
+  Structs are sized through their fields because native Lisp memory can contain
+  safe data structs such as `MapSet` in closure metadata.
   """
   @spec bytes(term()) :: non_neg_integer() | :oversized
   def bytes(value) do
@@ -34,14 +38,56 @@ defmodule PtcRunner.Lisp.RetainedSize do
     _ -> :oversized
   end
 
+  @doc """
+  Copies only sub-binaries that would otherwise retain a larger parent.
+
+  Standalone binaries and non-binary values retain their identity. Collections
+  are rebuilt recursively so an owner can keep the returned value without
+  pinning transient file, transport, or inspect buffers.
+  """
+  @spec detach_binaries(term()) :: term()
+  def detach_binaries(value) when is_binary(value) do
+    if :binary.referenced_byte_size(value) > byte_size(value),
+      do: :binary.copy(value),
+      else: value
+  end
+
+  def detach_binaries([]), do: []
+
+  def detach_binaries([head | tail]),
+    do: [detach_binaries(head) | detach_binaries(tail)]
+
+  def detach_binaries(%module{} = value) do
+    detached =
+      value
+      |> Map.from_struct()
+      |> detach_binaries()
+
+    Map.put(detached, :__struct__, module)
+  end
+
+  def detach_binaries(value) when is_map(value) do
+    Map.new(value, fn {key, item} ->
+      {detach_binaries(key), detach_binaries(item)}
+    end)
+  end
+
+  def detach_binaries(value) when is_tuple(value) do
+    value
+    |> Tuple.to_list()
+    |> Enum.map(&detach_binaries/1)
+    |> List.to_tuple()
+  end
+
+  def detach_binaries(value), do: value
+
   defp heap_size(value) do
     :erts_debug.flat_size(value) * @word_bytes
   rescue
     _ -> :oversized
   end
 
-  defp referenced_binary_size(value) when is_binary(value),
-    do: :binary.referenced_byte_size(value)
+  defp referenced_binary_size(value) when is_binary(value), do: byte_size(value)
 
   defp referenced_binary_size(value) when is_list(value),
     do: Enum.reduce(value, 0, &(referenced_binary_size(&1) + &2))

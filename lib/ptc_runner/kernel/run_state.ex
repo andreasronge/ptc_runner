@@ -377,7 +377,13 @@ defmodule PtcRunner.Kernel.RunState do
             {:reply, {:error, :history_exceeded}, %{state | evaluation_lease: nil}}
 
           true ->
-            {:reply, :ok, %{state | memory: memory, history: history, evaluation_lease: nil}}
+            {:reply, :ok,
+             %{
+               state
+               | memory: RetainedSize.detach_binaries(memory),
+                 history: RetainedSize.detach_binaries(history),
+                 evaluation_lease: nil
+             }}
         end
 
       _ ->

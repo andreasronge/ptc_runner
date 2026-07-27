@@ -568,6 +568,21 @@ defmodule PtcRunner.Kernel.RunBuilder do
     end
   end
 
+  defp preflight_trace(sink, opts) do
+    case Keyword.get(opts, :trace) do
+      nil ->
+        :ok
+
+      path ->
+        private? = result_class(sink) == :private
+
+        case TraceLog.validate_append_path(path, private?) do
+          :ok -> :ok
+          {:error, reason} -> {:error, {:trace_preflight_failed, reason}}
+        end
+    end
+  end
+
   @spec run(binary(), ProviderRegistry.t()) :: {:ok, term()} | {:error, term()}
   @doc """
   Loads, builds, and executes a manifest-backed run.
@@ -597,9 +612,15 @@ defmodule PtcRunner.Kernel.RunBuilder do
   def run_with_class(path, registry, opts \\ []) do
     with {:ok, built} <- load_and_build(path, registry, opts) do
       try do
-        case execute_built(built, opts) do
-          {:ok, result} -> {:ok, result, result_class(built.config.event_sink)}
-          other -> other
+        case preflight_trace(built.config.event_sink, opts) do
+          :ok ->
+            case execute_built(built, opts) do
+              {:ok, result} -> {:ok, result, result_class(built.config.event_sink)}
+              other -> other
+            end
+
+          {:error, _reason} = error ->
+            prefer_cleanup_error(error, RunConfig.close_provider_resources(built.config))
         end
       after
         if built.config.inspection_sink, do: InspectionSink.stop(built.config.inspection_sink)

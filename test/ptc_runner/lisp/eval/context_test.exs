@@ -184,24 +184,20 @@ defmodule PtcRunner.Lisp.Eval.ContextTest do
       assert stored.result_bytes > 5_000
     end
 
-    test "a sub-binary that pins a large parent is truncated even when logically small" do
-      # A 1 KB slice of a 100 KB refc binary stays a sub-binary that keeps the
-      # whole parent alive (the sandbox bills shared binaries). Its logical size
-      # is UNDER the cap, so only the pinned-parent check forces truncation —
-      # otherwise a fold of such slices would accumulate the parents.
+    test "a logically small ledger result is detached from its large binary parent" do
       parent = :binary.copy(String.duplicate("x", 100_000))
       slice = binary_part(parent, 0, 1_000)
       result = %{"line" => slice}
 
-      # the term's flat heap is under the cap; only the pinned parent forces it
       assert :erts_debug.flat_size(result) * :erlang.system_info(:wordsize) < 5_000
 
       ctx = ctx_with_cap(5_000)
       ctx = Context.append_tool_call(ctx, tool_call(%{result: result}))
       [stored] = ctx.effects.tool_calls
 
-      assert stored.result_truncated == true
-      assert stored.result_bytes >= 100_000
+      assert stored.result == result
+      refute Map.has_key?(stored, :result_truncated)
+      assert :binary.referenced_byte_size(stored.result["line"]) == 1_000
     end
 
     test "nil result (failed call) is not truncated" do

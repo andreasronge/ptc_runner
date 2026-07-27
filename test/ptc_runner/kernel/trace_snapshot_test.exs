@@ -118,17 +118,29 @@ defmodule PtcRunner.Kernel.TraceSnapshotTest do
     path = Path.join(directory, "trace.jsonl")
     write_events(path, [event("bounded", 1, "run-started")])
 
+    assert {:ok, snapshot} = TraceSnapshot.start({:directory, directory}, owner: self())
+    assert {:ok, %{retained_bytes: expected_retained_bytes}} = TraceSnapshot.info(snapshot)
+    assert :ok = TraceSnapshot.stop(snapshot)
+
     assert {:error, :source_limit_exceeded} =
              TraceSnapshot.start({:directory, directory},
                owner: self(),
                max_source_bytes: 1
              )
 
-    assert {:error, :source_retained_limit_exceeded} =
+    assert {:error,
+            {:source_retained_limit_exceeded,
+             %{
+               source: :ptc_trace_snapshot,
+               measured_bytes: measured_bytes,
+               limit_bytes: 1
+             }}} =
              TraceSnapshot.start({:directory, directory},
                owner: self(),
                max_retained_bytes: 1
              )
+
+    assert measured_bytes == expected_retained_bytes
   end
 
   @tag :tmp_dir

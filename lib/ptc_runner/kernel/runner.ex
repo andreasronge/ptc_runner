@@ -16,6 +16,7 @@ defmodule PtcRunner.Kernel.Runner do
   alias PtcRunner.Kernel.RunConfig
   alias PtcRunner.Kernel.RunState
   alias PtcRunner.Kernel.RuntimeTools
+  alias PtcRunner.Kernel.SafeMetadata
   alias PtcRunner.Lisp
   alias PtcRunner.Lisp.RetainedSize
   alias PtcRunner.Lisp.TrustedTool
@@ -104,6 +105,7 @@ defmodule PtcRunner.Kernel.Runner do
         usage: usage
       }
       |> maybe_put_result_hash(result)
+      |> maybe_put_failure_taxonomy(result)
 
     case EventSink.finalize_and_events(sink, stopped_data) do
       {:ok, %{events: events, dropped: dropped}} ->
@@ -170,12 +172,12 @@ defmodule PtcRunner.Kernel.Runner do
     ]
 
     case Lisp.run_native(entry_source, opts) do
-      {:ok, %{return: {:__ptc_fail__, _value}}} ->
+      {:ok, %{return: {:__ptc_fail__, value}}} ->
         {:error,
          %Error{
            kind: :workflow_failed,
            reason: :explicit_failure,
-           details: %{},
+           details: SafeMetadata.failure_taxonomy(value),
            usage: RunState.usage(state)
          }}
 
@@ -183,6 +185,8 @@ defmodule PtcRunner.Kernel.Runner do
         case Lisp.project_boundary_value(kernel_return_value(step.return), :kernel_json) do
           {:ok, value} ->
             if terminal_result_within_limit?(value, config.limits.terminal_result_bytes) do
+              value = RetainedSize.detach_binaries(value)
+
               {:ok,
                %Result{
                  value: value,
@@ -214,7 +218,7 @@ defmodule PtcRunner.Kernel.Runner do
          %Error{
            kind: workflow_error_kind(step.fail.reason),
            reason: step.fail.reason,
-           details: %{message: String.slice(step.fail.message || "workflow failed", 0, 4_096)},
+           details: workflow_error_details(step.fail, timeout_ms, config.limits),
            usage: RunState.usage(state)
          }}
     end
@@ -325,6 +329,18 @@ defmodule PtcRunner.Kernel.Runner do
 
   defp maybe_put_result_hash(stopped_data, _result), do: stopped_data
 
+  defp maybe_put_failure_taxonomy(
+         stopped_data,
+         {:error, %Error{reason: :explicit_failure, details: details}}
+       ) do
+    Map.merge(
+      stopped_data,
+      Map.take(details, [:failure_kind, :failure_kind_fingerprint])
+    )
+  end
+
+  defp maybe_put_failure_taxonomy(stopped_data, _result), do: stopped_data
+
   defp sha256(value),
     do: "sha256:" <> Base.encode16(:crypto.hash(:sha256, value), case: :lower)
 
@@ -412,9 +428,30 @@ defmodule PtcRunner.Kernel.Runner do
   defp maybe_emit_workflow_limit(_state, _sink, _result), do: :ok
 
   defp workflow_error_kind(reason)
-       when reason in [:timeout, :memory_exceeded, :program_too_large], do: :limit_exceeded
+       when reason in [:timeout, :compile_timeout, :memory_exceeded, :program_too_large],
+       do: :limit_exceeded
 
   defp workflow_error_kind(_reason), do: :workflow_failed
+
+  defp workflow_error_details(%{reason: reason}, timeout_ms, limits)
+       when reason in [:timeout, :compile_timeout] do
+    limit =
+      if timeout_ms == limits.workflow_timeout_ms,
+        do: :workflow_timeout_ms,
+        else: :run_duration_ms
+
+    phase = if reason == :compile_timeout, do: :compilation, else: :execution
+
+    %{
+      message: "#{limit} exceeded during #{phase} after #{timeout_ms}ms",
+      limit: limit,
+      limit_ms: timeout_ms,
+      phase: phase
+    }
+  end
+
+  defp workflow_error_details(fail, _timeout_ms, _limits),
+    do: %{message: String.slice(fail.message || "workflow failed", 0, 4_096)}
 
   defp configuration_error(reason, usage),
     do: {:error, %Error{kind: :configuration_error, reason: reason, details: %{}, usage: usage}}

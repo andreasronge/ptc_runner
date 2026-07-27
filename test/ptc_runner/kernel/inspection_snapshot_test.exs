@@ -454,15 +454,31 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
     {:ok, trace_snapshot} = TraceSnapshot.start({:directory, trace}, owner: self())
     on_exit(fn -> TraceSnapshot.stop(trace_snapshot) end)
 
+    assert {:ok, retained_snapshot} =
+             InspectionSnapshot.start({:directory, inspection}, trace_snapshot)
+
+    assert {:ok, %{retained_bytes: expected_retained_bytes}} =
+             InspectionSnapshot.info(retained_snapshot)
+
+    assert :ok = InspectionSnapshot.stop(retained_snapshot)
+
     assert {:error, :source_limit_exceeded} =
              InspectionSnapshot.start({:directory, inspection}, trace_snapshot,
                max_source_bytes: 1
              )
 
-    assert {:error, :source_retained_limit_exceeded} =
+    assert {:error,
+            {:source_retained_limit_exceeded,
+             %{
+               source: :ptc_inspection_snapshot,
+               measured_bytes: measured_bytes,
+               limit_bytes: 1
+             }}} =
              InspectionSnapshot.start({:directory, inspection}, trace_snapshot,
                max_retained_bytes: 1
              )
+
+    assert measured_bytes == expected_retained_bytes
 
     duplicate = Path.join(inspection, "second.inspection.jsonl")
     File.cp!(Path.join(inspection, "bounded.inspection.jsonl"), duplicate)

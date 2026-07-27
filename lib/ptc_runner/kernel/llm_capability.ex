@@ -95,7 +95,7 @@ defmodule PtcRunner.Kernel.LLMCapability do
     bytes = RetainedSize.bytes_with_cap(response, limit)
 
     if JSONValue.map?(response) and is_integer(bytes) and bytes <= limit,
-      do: {:ok, response},
+      do: {:ok, RetainedSize.detach_binaries(response)},
       else: {:error, ProviderError.new(:invalid_request, "LLM response exceeded its boundary")}
   end
 

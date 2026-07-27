@@ -363,7 +363,7 @@ defmodule PtcRunner.Kernel.Dispatcher do
         }
 
       true ->
-        %{status: :ok, value: value}
+        %{status: :ok, value: RetainedSize.detach_binaries(value)}
     end
   end
 

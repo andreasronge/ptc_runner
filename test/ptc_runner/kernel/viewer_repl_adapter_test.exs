@@ -5,6 +5,7 @@ defmodule PtcRunner.Kernel.ViewerReplAdapterTest do
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.TraceLog
   alias PtcRunner.Kernel.ViewerReplAdapter
+  alias PtcRunner.Kernel.ViewerReplBackend
 
   @tag :tmp_dir
   test "connected backend owns an idempotent log-analysis session ledger", %{tmp_dir: trace_dir} do
@@ -148,6 +149,18 @@ defmodule PtcRunner.Kernel.ViewerReplAdapterTest do
   test "connection and operation inputs are closed contracts" do
     assert {:error, :invalid_repl_connection} = ViewerReplAdapter.connect(%{})
     assert {:error, :invalid_repl_connection} = ViewerReplAdapter.connect(%{trace_dir: "."})
+  end
+
+  test "structured retained-limit failures keep their public start classification" do
+    assert :source_retained_limit_exceeded =
+             ViewerReplBackend.normalize_start_error(
+               {:source_retained_limit_exceeded,
+                %{
+                  source: :ptc_trace_snapshot,
+                  measured_bytes: 4_096,
+                  limit_bytes: 1_024
+                }}
+             )
   end
 
   @tag :tmp_dir
