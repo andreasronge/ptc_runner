@@ -226,6 +226,7 @@
              "Instructions\n"
              "Use the run_ptc_lisp tool exactly once per turn with one program string.\n"
              "Ordinary expression results are intermediate observations and continue to another turn.\n"
+             "The last expression's value is retained as *1; end a program with nil when you only meant to define something, so a large intermediate is not carried forward.\n"
              "Definitions created by successful programs persist and can be reused by later programs in this run.\n"
              "Failed evaluations roll back every definition created by that failed program.\n"
              "Use (return value) only when the task is complete; (return value) completes successfully.\n"
