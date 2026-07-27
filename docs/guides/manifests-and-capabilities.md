@@ -161,6 +161,22 @@ stdout or `--output`/`--private-output` publication. A mismatch returns
 `input_contract_failed` or `result_contract_failed`; a rejected result value is
 not attached to the error.
 
+A rejection does carry a bounded classification, so a mismatch is diagnosable
+without repeating the run under private inspection:
+
+```elixir
+{:error,
+ {:result_contract_failed,
+  %{value_kind: :string, discriminator: "decision", matched_branch: nil,
+    expected_branches: ["propose-change", "no-change", "insufficient-evidence"]}}}
+```
+
+Every name in it comes from the compiled schema — the discriminator, the branch
+whose `const` the value carried, and that branch's own unmet `required` keys as
+`missing_required`. The value contributes only its JSON kind and
+`undeclared_key_count`, a number. The rejected value, its field values, and the
+names of keys the schema does not declare stay out of the error entirely.
+
 Ordinary contracts are closed, bounded object schemas. The supported keywords
 are `type`, `title`, `description`, `properties`, `required`,
 `additionalProperties`, `items`, `enum`, `const`, numeric and length bounds.

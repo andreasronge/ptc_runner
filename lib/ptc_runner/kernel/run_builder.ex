@@ -465,7 +465,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
              :ok <- persist_result(result, built.config.event_sink, opts) do
           result
         else
-          {:error, :result_contract_failed} = error ->
+          {:error, {:result_contract_failed, _details}} = error ->
             error
 
           {:error, {stage, reason}} ->
@@ -477,7 +477,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
       {:error, _reason} ->
         case result_contract do
           :ok -> result
-          {:error, :result_contract_failed} = error -> error
+          {:error, {:result_contract_failed, _details}} = error -> error
         end
     end
   end
@@ -659,7 +659,8 @@ defmodule PtcRunner.Kernel.RunBuilder do
   # A persistence failure is reported by a caller that renders the error, so a
   # private value must not travel inside it. Refusing to write a private value
   # and then printing it in the refusal would defeat the check entirely.
-  defp disclosable(_result, _sink, {:error, :result_contract_failed} = error), do: error
+  defp disclosable(_result, _sink, {:error, {:result_contract_failed, _details}} = error),
+    do: error
 
   defp disclosable({:ok, %Result{} = result}, sink, :ok) do
     case result_class(sink) do
@@ -673,9 +674,11 @@ defmodule PtcRunner.Kernel.RunBuilder do
   defp validate_result(_result, nil), do: :ok
 
   defp validate_result({:ok, %Result{value: value}}, %ValueContract{} = contract) do
-    if ValueContract.valid?(contract, public_value(value)),
+    public = public_value(value)
+
+    if ValueContract.valid?(contract, public),
       do: :ok,
-      else: {:error, :result_contract_failed}
+      else: {:error, {:result_contract_failed, ValueContract.classify(contract, public)}}
   end
 
   defp validate_result(_result, %ValueContract{}), do: :ok

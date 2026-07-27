@@ -45,6 +45,37 @@ defmodule PtcRunner.Kernel.ValueContractTest do
            })
   end
 
+  # Diagnosing "the model returned the discriminator instead of the map" cost
+  # three live runs, because the rejection named neither the expected shape nor
+  # what arrived. Everything reported here comes from the schema; the value
+  # contributes only its JSON kind and a count.
+  test "explains a rejection without disclosing the rejected value" do
+    assert {:ok, contract} = ValueContract.compile(decision_schema())
+
+    assert %{value_kind: :string, matched_branch: nil, discriminator: "decision"} =
+             bare = ValueContract.classify(contract, "no-change")
+
+    assert "no-change" in bare.expected_branches
+
+    assert %{
+             value_kind: :object,
+             matched_branch: "propose-change",
+             missing_required: ["candidate"]
+           } =
+             ValueContract.classify(contract, %{
+               "decision" => "propose-change",
+               "reason" => "wrong branch"
+             })
+
+    secret = "must-not-escape"
+
+    leaked =
+      ValueContract.classify(contract, %{"decision" => "no-change", "secret" => secret})
+
+    refute inspect(leaked) =~ secret
+    assert leaked.undeclared_key_count == 1
+  end
+
   test "rejects ambiguous, mismatched, repeated, open, and excessive union branches" do
     [no_change, propose] = decision_schema()["oneOf"]
 

@@ -50,6 +50,82 @@ defmodule PtcRunner.Kernel.ValueContract do
 
   def valid?(_contract, _value), do: false
 
+  @spec classify(t(), term()) :: map()
+  @doc """
+  Explains a contract rejection without disclosing the rejected value.
+
+  Every reported name comes from the compiled schema rather than from the
+  value: the discriminator's name, the branch whose `const` the value carries,
+  and the schema-declared required keys that branch did not find. The only
+  facts derived from the value itself are its JSON kind and the count of keys
+  the branch does not declare — a type name and a number, never content.
+
+  A rejected result is deliberately withheld from the public error, so without
+  this an operator cannot tell a missing key from a wrong shape without
+  re-running under private inspection.
+  """
+  def classify(%__MODULE__{schema: schema}, value) do
+    base = %{value_kind: value_kind(value)}
+
+    case Map.fetch(schema, "oneOf") do
+      {:ok, branches} -> Map.merge(base, classify_union(branches, value))
+      :error -> Map.merge(base, classify_object(schema, value))
+    end
+  rescue
+    _exception -> %{value_kind: :unknown}
+  end
+
+  def classify(_contract, _value), do: %{value_kind: :unknown}
+
+  defp classify_union(branches, value) do
+    with {:ok, name} <- shared_discriminator(branches),
+         true <- is_map(value),
+         {:ok, tag} when is_binary(tag) <- Map.fetch(value, name),
+         branch when is_map(branch) <-
+           Enum.find(branches, &(get_in(&1, ["properties", name, "const"]) == tag)) do
+      Map.merge(%{discriminator: name, matched_branch: tag}, classify_object(branch, value))
+    else
+      _other ->
+        %{
+          discriminator: discriminator_name(branches),
+          matched_branch: nil,
+          expected_branches: Enum.map(branches, &branch_tag(&1, discriminator_name(branches)))
+        }
+    end
+  end
+
+  defp classify_object(schema, value) when is_map(value) do
+    required = Map.get(schema, "required", [])
+    declared = schema |> Map.get("properties", %{}) |> Map.keys() |> MapSet.new()
+
+    %{
+      missing_required: Enum.reject(required, &Map.has_key?(value, &1)),
+      undeclared_key_count: Enum.count(Map.keys(value), &(not MapSet.member?(declared, &1)))
+    }
+  end
+
+  defp classify_object(schema, _value),
+    do: %{missing_required: Map.get(schema, "required", []), undeclared_key_count: 0}
+
+  defp discriminator_name(branches) do
+    case shared_discriminator(branches) do
+      {:ok, name} -> name
+      _other -> nil
+    end
+  end
+
+  defp branch_tag(branch, nil), do: get_in(branch, ["properties"]) && nil
+  defp branch_tag(branch, name), do: get_in(branch, ["properties", name, "const"])
+
+  defp value_kind(value) when is_binary(value), do: :string
+  defp value_kind(value) when is_boolean(value), do: :boolean
+  defp value_kind(value) when is_integer(value), do: :integer
+  defp value_kind(value) when is_float(value), do: :number
+  defp value_kind(value) when is_list(value), do: :array
+  defp value_kind(value) when is_map(value) and not is_struct(value), do: :object
+  defp value_kind(nil), do: :null
+  defp value_kind(_value), do: :unknown
+
   defp compile_object(schema) do
     case JSONSchema.compile(schema) do
       {:ok, normalized, validator} ->

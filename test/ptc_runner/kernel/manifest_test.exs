@@ -281,12 +281,22 @@ defmodule PtcRunner.Kernel.ManifestTest do
     trace = Path.join(dir, "invalid.jsonl")
 
     error = RunBuilder.run(path, registry, output: invalid_output, trace: trace)
-    assert {:error, :result_contract_failed} = error
+
+    # The rejected value stays withheld, but the rejection now says enough to
+    # act on: an operator learns the discriminator was unrecognised without
+    # re-running the whole thing under private inspection.
+    assert {:error,
+            {:result_contract_failed,
+             %{value_kind: :object, discriminator: "decision", matched_branch: nil} = details}} =
+             error
+
+    assert "no-change" in details.expected_branches
 
     assert_receive :provider_called
     assert File.exists?(trace)
     refute File.exists?(invalid_output)
     refute inspect(error) =~ secret
+    refute inspect(error) =~ "unknown"
   end
 
   @tag :tmp_dir
