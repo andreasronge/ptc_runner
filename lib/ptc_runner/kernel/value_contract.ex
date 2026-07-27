@@ -25,6 +25,7 @@ defmodule PtcRunner.Kernel.ValueContract do
   @max_branches 16
   @max_contract_bytes 65_536
   @max_discriminator_bytes 128
+  @max_violations 8
 
   @enforce_keys [:schema, :validator]
   defstruct [:schema, :validator]
@@ -64,26 +65,145 @@ defmodule PtcRunner.Kernel.ValueContract do
   this an operator cannot tell a missing key from a wrong shape without
   re-running under private inspection.
   """
-  def classify(%__MODULE__{schema: schema}, value) do
-    base = %{value_kind: value_kind(value)}
+  def classify(%__MODULE__{schema: schema, validator: validator}, value) do
+    shape =
+      case Map.fetch(schema, "oneOf") do
+        {:ok, branches} -> classify_union(branches, value)
+        :error -> classify_object(schema, value)
+      end
 
-    case Map.fetch(schema, "oneOf") do
-      {:ok, branches} -> Map.merge(base, classify_union(branches, value))
-      :error -> Map.merge(base, classify_object(schema, value))
-    end
+    shape
+    |> Map.delete(:branch_index)
+    |> Map.put(:value_kind, value_kind(value))
+    |> Map.put(
+      :violations,
+      violations(validator, value, Map.get(shape, :branch_index), declared_names(schema))
+    )
   rescue
     _exception -> %{value_kind: :unknown}
   end
 
   def classify(_contract, _value), do: %{value_kind: :unknown}
 
+  # The validator reports which schema keyword failed and where, but its error
+  # struct also carries the offending data. Only the structural path and the
+  # keyword travel out; `detail` is emitted for `:required` alone, whose
+  # argument is a list of schema-declared key names. Every other keyword
+  # reports its name and location and nothing more, so a new keyword cannot
+  # start disclosing values by default.
+  defp violations(validator, value, branch_index, declared) do
+    case JSV.validate(value, validator, cast: false) do
+      {:ok, _validated} ->
+        []
+
+      {:error, %JSV.ValidationError{errors: errors}} ->
+        errors
+        |> Enum.flat_map(&flatten_error(&1, branch_index))
+        |> Enum.map(&violation(&1, declared))
+        |> Enum.reject(&is_nil/1)
+        |> Enum.uniq_by(&{&1.path, &1.kind})
+        |> Enum.take(@max_violations)
+    end
+  rescue
+    _exception -> []
+  end
+
+  # A tagged union reports one `:oneOf` failure whose `invalidated` branches
+  # carry the errors that matter, each as an indexed validation context. Every
+  # branch the discriminator did not select also fails — on its own `const`, and
+  # on required keys it was never given — so reporting all of them would bury
+  # the branch the caller actually meant. With a matched branch, report only its
+  # context; with none, the value fits nowhere and every branch is relevant.
+  defp flatten_error(%JSV.Validator.Error{kind: :oneOf, args: args}, branch_index) do
+    args
+    |> Keyword.get(:invalidated, [])
+    |> Enum.filter(fn
+      {index, _context} -> is_nil(branch_index) or index == branch_index
+      _other -> true
+    end)
+    |> Enum.flat_map(fn
+      {_index, context} -> branch_errors(context, branch_index)
+      context when is_map(context) -> branch_errors(context, branch_index)
+      _other -> []
+    end)
+  end
+
+  defp flatten_error(%JSV.Validator.Error{} = error, _branch_index), do: [error]
+  defp flatten_error(_other, _branch_index), do: []
+
+  defp branch_errors(context, branch_index),
+    do: context |> Map.get(:errors, []) |> Enum.flat_map(&flatten_error(&1, branch_index))
+
+  defp violation(%JSV.Validator.Error{kind: :required, data_path: path, args: args}, declared),
+    do: %{
+      path: violation_path(path, declared),
+      kind: :required,
+      detail: Keyword.get(args, :required, [])
+    }
+
+  defp violation(%JSV.Validator.Error{kind: kind, data_path: path}, declared)
+       when kind not in [:properties, :items, :oneOf],
+       do: %{path: violation_path(path, declared), kind: kind}
+
+  defp violation(_error, _declared), do: nil
+
+  # `data_path` arrives innermost-first with integers for array indices. A
+  # violation under `additionalProperties` is located *at the undeclared key*,
+  # so the path can carry a model-authored name — the one kind of content this
+  # whole function exists to keep out of a public error. Rather than special-
+  # casing that keyword, every string segment is checked against the names the
+  # contract declares, and anything else is replaced.
+  defp violation_path([], _declared), do: "(root)"
+
+  defp violation_path(path, declared) do
+    path
+    |> Enum.reverse()
+    |> Enum.map_join(fn
+      index when is_integer(index) -> "[#{index}]"
+      key when is_binary(key) -> "." <> declared_name(key, declared)
+      _other -> ".(undeclared)"
+    end)
+    |> String.trim_leading(".")
+  end
+
+  defp declared_name(key, declared) do
+    if MapSet.member?(declared, key), do: key, else: "(undeclared)"
+  end
+
+  # Every property name the contract mentions, at any depth. Bounded by the
+  # 64 KiB normalized contract, so this stays small.
+  defp declared_names(schema) when is_map(schema) do
+    own =
+      schema
+      |> Map.get("properties", %{})
+      |> Map.keys()
+      |> MapSet.new()
+
+    schema
+    |> Map.drop(["properties"])
+    |> Map.values()
+    |> Enum.concat(Map.values(Map.get(schema, "properties", %{})))
+    |> Enum.reduce(own, fn value, acc -> MapSet.union(acc, declared_names(value)) end)
+  end
+
+  defp declared_names(values) when is_list(values),
+    do:
+      Enum.reduce(values, MapSet.new(), fn value, acc ->
+        MapSet.union(acc, declared_names(value))
+      end)
+
+  defp declared_names(_other), do: MapSet.new()
+
   defp classify_union(branches, value) do
     with {:ok, name} <- shared_discriminator(branches),
          true <- is_map(value),
          {:ok, tag} when is_binary(tag) <- Map.fetch(value, name),
-         branch when is_map(branch) <-
-           Enum.find(branches, &(get_in(&1, ["properties", name, "const"]) == tag)) do
-      Map.merge(%{discriminator: name, matched_branch: tag}, classify_object(branch, value))
+         index when is_integer(index) <-
+           Enum.find_index(branches, &(get_in(&1, ["properties", name, "const"]) == tag)) do
+      Map.merge(
+        %{discriminator: name, matched_branch: tag, branch_index: index},
+        classify_object(Enum.at(branches, index), value)
+      )
     else
       _other ->
         %{

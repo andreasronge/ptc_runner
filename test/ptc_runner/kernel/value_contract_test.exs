@@ -70,10 +70,33 @@ defmodule PtcRunner.Kernel.ValueContractTest do
     secret = "must-not-escape"
 
     leaked =
-      ValueContract.classify(contract, %{"decision" => "no-change", "secret" => secret})
+      ValueContract.classify(contract, %{"decision" => "no-change", secret => secret})
 
     refute inspect(leaked) =~ secret
     assert leaked.undeclared_key_count == 1
+
+    # An undeclared key is reported by keyword and location only. Its name is
+    # model-authored, so naming it would put caller content into a public error
+    # by the same route the rejected value is withheld from.
+    assert %{path: "(root)", kind: :additionalProperties} in leaked.violations
+  end
+
+  test "locates a nested violation by path within the matched branch" do
+    assert {:ok, contract} = ValueContract.compile(decision_schema())
+
+    classification =
+      ValueContract.classify(contract, %{
+        "decision" => "propose-change",
+        "candidate" => %{"content" => 42}
+      })
+
+    assert classification.matched_branch == "propose-change"
+
+    # Only the selected branch is reported. The branches the discriminator did
+    # not choose fail too, on required keys they were never given, and burying
+    # the real fault under those is what made the original error unusable.
+    assert %{path: "candidate.content", kind: :type} in classification.violations
+    refute Enum.any?(classification.violations, &(&1.path == "reason"))
   end
 
   test "rejects ambiguous, mismatched, repeated, open, and excessive union branches" do

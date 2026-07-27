@@ -167,15 +167,25 @@ without repeating the run under private inspection:
 ```elixir
 {:error,
  {:result_contract_failed,
-  %{value_kind: :string, discriminator: "decision", matched_branch: nil,
-    expected_branches: ["propose-change", "no-change", "insufficient-evidence"]}}}
+  %{value_kind: :object, discriminator: "decision", matched_branch: "no-change",
+    missing_required: [], undeclared_key_count: 0,
+    violations: [
+      %{path: "rationale", kind: :maxLength},
+      %{path: "evidence[0]", kind: :required, detail: ["provider", "snapshot_hash"]}
+    ]}}}
 ```
 
-Every name in it comes from the compiled schema — the discriminator, the branch
-whose `const` the value carried, and that branch's own unmet `required` keys as
-`missing_required`. The value contributes only its JSON kind and
-`undeclared_key_count`, a number. The rejected value, its field values, and the
-names of keys the schema does not declare stay out of the error entirely.
+`violations` locates each failure by schema keyword and path within the branch
+the discriminator selected; branches it did not select are omitted, since they
+fail on keys they were never given. Paths are built only from names the
+contract declares and from array indices — a segment naming an undeclared key
+is replaced with `(undeclared)`, because that name is caller-authored content.
+
+Every other name comes from the compiled schema too: the discriminator, the
+branch whose `const` the value carried, and that branch's unmet `required` keys
+as `missing_required`. The value contributes only its JSON kind and
+`undeclared_key_count`, a number. The rejected value and its field values stay
+out of the error entirely.
 
 Ordinary contracts are closed, bounded object schemas. The supported keywords
 are `type`, `title`, `description`, `properties`, `required`,
