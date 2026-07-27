@@ -51,10 +51,14 @@
 
       :else request)))
 
-(defn run [task cfg]
+(defn run-value
+  "Runs the agent loop and returns its model-authored value to the calling
+  PTC-Lisp function. Unlike `run`, this does not terminate the outer program,
+  so an application can validate or score the answer before returning."
+  [task cfg]
   (let [max-turns (positive-int-or (get cfg "max_turns") 4 128)
         max-program-chars (positive-int-or (get cfg "max_program_chars") 64000 1000000)
-        max-observation-chars (positive-int-or (get cfg "max_observation_chars") 2048 16384)
+        max-observation-chars (positive-int-or (get cfg "max_observation_chars") 2048 65536)
         max-transcript-chars (positive-int-or (get cfg "max_transcript_chars") 262144 1000000)
         effective-cfg (assoc cfg
                              "max_turns" max-turns
@@ -80,9 +84,7 @@
               (let [evaluation (kernel/eval-source (get action :program))]
                 (case (get evaluation :outcome)
                   :returned
-                  (if (false? (get effective-cfg "result_envelope"))
-                    (return (get evaluation :value))
-                    (return (result/ok (get evaluation :value))))
+                  (get evaluation :value)
                   :failed (fail (result/error :model-program-failed (get evaluation :value)))
                   :continued
                   (do
@@ -125,3 +127,15 @@
               (fail (result/error :llm-provider-error (get action :error)))
 
               (fail (result/error :unknown-action (get action :kind))))))))))
+
+(defn run
+  "Runs the agent loop as a terminal workflow entry.
+
+  The default result is a success envelope. Set `result_envelope` to false for
+  a raw application value. Use `run-value` when the caller must continue after
+  the model-authored value returns."
+  [task cfg]
+  (let [value (run-value task cfg)]
+    (if (false? (get cfg "result_envelope"))
+      (return value)
+      (return (result/ok value)))))

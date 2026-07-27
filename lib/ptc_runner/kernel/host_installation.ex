@@ -419,6 +419,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
       timeout_ms: installation.ceilings.timeout_ms,
       max_result_bytes: installation.ceilings.max_result_bytes,
       max_catalog_tools: installation.ceilings.max_catalog_tools,
+      snapshot_identity: installation.snapshot_identity,
       installation_revision: installation.installation_revision
     ]
 

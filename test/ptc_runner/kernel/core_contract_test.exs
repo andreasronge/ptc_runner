@@ -973,8 +973,15 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     assert {:ok, %{value: 42, evaluation_memory: %{defined_count: 0}}} =
              Kernel.run("(return (+ 40 2))", config)
 
+    events = EventSink.events(sink)
+
     assert ["run-started", "evaluation-started", "evaluation-stopped", "run-stopped"] ==
-             Enum.map(EventSink.events(sink), & &1.type)
+             Enum.map(events, & &1.type)
+
+    expected_hash =
+      "sha256:" <> Base.encode16(:crypto.hash(:sha256, "42"), case: :lower)
+
+    assert List.last(events).data.result_hash == expected_hash
   end
 
   test "Kernel JSON boundaries reject Java callable authority before commit" do

@@ -42,12 +42,13 @@ defmodule PtcRunner.Kernel.RepoAnalystApplicationTest do
       assert {:ok, host} = HostConfig.load(@host)
 
       assert host.install |> Map.keys() |> Enum.sort() ==
-               ["deepseek", "history", "private-history", "workspace"]
+               ["deepseek", "history", "private-history", "replay-llm", "workspace"]
 
       assert host.install["workspace"].source == :mcp
       assert host.install["history"].source == :ptc_trace_snapshot
       assert host.install["private-history"].source == :ptc_inspection_snapshot
       assert host.install["deepseek"].source == :llm
+      assert host.install["replay-llm"].source == :llm_replay
     end
 
     test "maps exactly the five read tools and keeps every one model-invisible" do
@@ -110,7 +111,7 @@ defmodule PtcRunner.Kernel.RepoAnalystApplicationTest do
 
     test "agent and mission deadlines are explicit rather than inherited defaults" do
       for {name, workflow_timeout_ms} <- [
-            {"repo-analyst-answer.json", 90_000},
+            {"repo-analyst-answer.json", 110_000},
             {"repo-analyst-review.json", 110_000},
             {"repo-analyst-improve.json", 110_000}
           ] do
@@ -169,12 +170,13 @@ defmodule PtcRunner.Kernel.RepoAnalystApplicationTest do
                ~w(workspace.find workspace.list workspace.read workspace.search)
     end
 
-    test "runs exposes the seven documented evidence functions over both sources" do
+    test "runs exposes the documented evidence functions over both sources" do
       assert {:ok, bundle} = compile_facade("runs")
 
       assert facade_names(bundle) ==
                ~w(runs/capability-calls runs/effective-preludes runs/generated-sources
-                  runs/list-runs runs/model-exchanges runs/provider-exchanges runs/turns)
+                  runs/latest-generated-source runs/latest-model-exchange runs/list-runs
+                  runs/model-exchanges runs/provider-exchanges runs/review-seed runs/turns)
 
       assert tool_refs(bundle, "runs") ==
                Enum.sort(["history.list-runs", "history.list-turns"] ++ @private_operations)
@@ -224,14 +226,17 @@ defmodule PtcRunner.Kernel.RepoAnalystApplicationTest do
       # Assembly alone proves only that the names resolve. Calling each function
       # proves the facade reaches the operation it claims and that cap/unwrap!
       # returns the value rather than the envelope.
-      for {function, operation} <- [
-            {~s|(runs/list-runs 10 nil)|, "history.list-runs"},
-            {~s|(runs/turns "run-1" nil)|, "history.list-turns"},
-            {~s|(runs/model-exchanges "run-1" nil)|, "private-history.model-exchanges"},
-            {~s|(runs/capability-calls "run-1" nil)|, "private-history.capability-calls"},
-            {~s|(runs/generated-sources "run-1" nil)|, "private-history.generated-sources"},
-            {~s|(runs/effective-preludes "run-1" nil)|, "private-history.effective-preludes"},
-            {~s|(runs/provider-exchanges "run-1" nil)|, "private-history.provider-exchanges"}
+      for {function, operation, limit} <- [
+            {~s|(runs/list-runs 10 nil)|, "history.list-runs", 10},
+            {~s|(runs/turns "run-1" {"status" "error" "ignored" true} nil)|, "history.list-turns",
+             20},
+            {~s|(runs/model-exchanges "run-1" nil)|, "private-history.model-exchanges", 1},
+            {~s|(runs/latest-model-exchange "run-1")|, "private-history.model-exchanges", 1},
+            {~s|(runs/capability-calls "run-1" nil)|, "private-history.capability-calls", 1},
+            {~s|(runs/generated-sources "run-1" nil)|, "private-history.generated-sources", 1},
+            {~s|(runs/latest-generated-source "run-1")|, "private-history.generated-sources", 1},
+            {~s|(runs/effective-preludes "run-1" nil)|, "private-history.effective-preludes", 1},
+            {~s|(runs/provider-exchanges "run-1" nil)|, "private-history.provider-exchanges", 1}
           ] do
         Agent.update(calls, fn _previous -> [] end)
 
@@ -251,7 +256,37 @@ defmodule PtcRunner.Kernel.RepoAnalystApplicationTest do
 
         # A nil cursor is the first page and must not appear in the arguments.
         refute Map.has_key?(args, "cursor")
+        assert args["limit"] == limit
+
+        if operation == "history.list-turns" do
+          assert args["run_id"] == "run-1"
+          assert args["status"] == "error"
+          refute Map.has_key?(args, "ignored")
+        end
       end
+    end
+
+    test "review-seed composes three audited source reads into one bounded observation" do
+      {:ok, bundle} = compile_facade("runs")
+      granted = ["history.list-runs", "history.list-turns"] ++ @private_operations
+      {:ok, calls} = Agent.start_link(fn -> [] end)
+
+      {:ok, mission} =
+        MissionEnvironment.new(bundle: bundle, capabilities: stubs(granted, calls))
+
+      assert {:ok, %{value: %{outcome: :returned, value: value}}} =
+               Kernel.run(
+                 ~S|(return (kernel/eval (program (return (runs/review-seed "run-1")))))|,
+                 run_config(mission)
+               )
+
+      assert Map.keys(value) |> Enum.sort() == ["model_action", "program", "trace_errors"]
+
+      assert Enum.map(Agent.get(calls, & &1), &elem(&1, 0)) == [
+               "private-history.model-exchanges",
+               "private-history.generated-sources",
+               "history.list-turns"
+             ]
     end
 
     test "repo assembles against the four mapped workspace tools" do

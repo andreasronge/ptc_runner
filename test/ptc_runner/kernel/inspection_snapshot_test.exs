@@ -139,6 +139,25 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
                "limit" => 1
              })
 
+    assert {:ok,
+            %{
+              "items" => [%{"request_id" => 8}],
+              "next_cursor" => descending_cursor
+            }} =
+             InspectionSnapshot.query(snapshot, :provider_exchanges, %{
+               "run_id" => "v2-run",
+               "limit" => 1,
+               "order" => "desc"
+             })
+
+    assert is_binary(descending_cursor)
+
+    assert {:error, :invalid_query} =
+             InspectionSnapshot.query(snapshot, :provider_exchanges, %{
+               "run_id" => "v2-run",
+               "order" => "newest"
+             })
+
     assert request_sequence < response_sequence
 
     assert {:ok, %{"items" => [%{"request_id" => 8}], "next_cursor" => nil}} =

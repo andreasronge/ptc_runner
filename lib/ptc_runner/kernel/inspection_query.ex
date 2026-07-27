@@ -10,7 +10,9 @@ defmodule PtcRunner.Kernel.InspectionQuery do
 
   Every collection uses the same bounded page shape as canonical trace
   queries. Cursors are opaque, bind the immutable source identity, operation,
-  filters, and offset, and cannot be reused against another query or capture.
+  filters, ordering, and offset, and cannot be reused against another query or
+  capture. Run-scoped private collections accept `"order": "asc" | "desc"`;
+  ascending sequence order is the default.
   """
 
   @default_limit 100
@@ -293,13 +295,15 @@ defmodule PtcRunner.Kernel.InspectionQuery do
               :effective_preludes,
               :provider_exchanges
             ] do
-    with :ok <- validate_keys(arguments, ~w(run_id limit cursor)),
+    with :ok <- validate_keys(arguments, ~w(run_id limit cursor order)),
          true <- valid_string?(run_id),
+         :ok <- validate_order(arguments),
          true <- Enum.any?(collections.list_runs, &(&1["run_id"] == run_id)),
          {:ok, page} <- page_options(arguments, source_id, operation) do
       collections
       |> Map.fetch!(operation)
       |> Enum.filter(&(&1["run_id"] == run_id))
+      |> order(Map.get(arguments, "order", "asc"))
       |> paginate(page, source_id, max_bytes)
     else
       false -> {:error, :not_found}
@@ -318,6 +322,13 @@ defmodule PtcRunner.Kernel.InspectionQuery do
 
   defp valid_string?(value),
     do: is_binary(value) and byte_size(value) in 1..4_096 and String.valid?(value)
+
+  defp validate_order(%{"order" => order}) when order in ["asc", "desc"], do: :ok
+  defp validate_order(arguments) when not is_map_key(arguments, "order"), do: :ok
+  defp validate_order(_arguments), do: {:error, :invalid_query}
+
+  defp order(items, "asc"), do: items
+  defp order(items, "desc"), do: Enum.reverse(items)
 
   defp page_options(arguments, source_id, operation) do
     limit = Map.get(arguments, "limit", @default_limit)

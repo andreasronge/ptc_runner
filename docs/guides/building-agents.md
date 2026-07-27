@@ -94,6 +94,13 @@ construction, provider-valid feedback, retries, native result handling, and
 mission evaluation. The host freezes their exact source hashes into the
 workflow bundle before execution.
 
+`agent.core/run` is a terminal workflow entry: it returns from the complete
+PTC-Lisp program once the model produces an application value. A composing
+workflow such as a scorer uses `agent.core/run-value` instead. It runs the
+same bounded loop but gives the model-authored value back to its PTC-Lisp
+caller, which can validate, compare, or score it before the outer workflow
+returns.
+
 ## Select model access separately from task access
 
 The manifest selects host-installed aliases and may narrow their grants:

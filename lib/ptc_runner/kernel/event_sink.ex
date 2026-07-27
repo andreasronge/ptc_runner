@@ -149,13 +149,18 @@ defmodule PtcRunner.Kernel.EventSink do
       when policy in [:normal, :private] and is_map(usage) do
     dropped = if policy == :normal, do: maximum_dropped(), else: %{}
 
-    stopped = %{
-      outcome: :error,
-      reason: @maximum_terminal_reason,
-      usage: Map.put(usage, :events_dropped, dropped)
-    }
+    usage = Map.put(usage, :events_dropped, dropped)
 
-    EventSinkState.payload_within_limit?(stopped, limits.event_payload_bytes)
+    [
+      %{outcome: :error, reason: @maximum_terminal_reason, usage: usage},
+      %{
+        outcome: :ok,
+        reason: nil,
+        result_hash: "sha256:" <> String.duplicate("f", 64),
+        usage: usage
+      }
+    ]
+    |> Enum.all?(&EventSinkState.payload_within_limit?(&1, limits.event_payload_bytes))
   end
 
   def terminal_usage_capacity?(_sink, _limits, _usage), do: false
@@ -289,6 +294,12 @@ defmodule PtcRunner.Kernel.EventSink do
       %{
         "outcome" => "error",
         "reason" => @maximum_terminal_reason,
+        "usage" => %{"events_dropped" => dropped}
+      },
+      %{
+        "outcome" => "ok",
+        "reason" => nil,
+        "result_hash" => "sha256:" <> String.duplicate("f", 64),
         "usage" => %{"events_dropped" => dropped}
       }
     ]

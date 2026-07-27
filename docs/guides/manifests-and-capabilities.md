@@ -133,7 +133,13 @@ traversal, devices, non-regular files, and symlink escapes are rejected.
 Model-accessible filesystem operations use an MCP server installed by the
 host. The shipped non-production sample freezes a bounded UTF-8 snapshot at
 startup and serves list, search, and ranged-read tools without later
-filesystem access.
+filesystem access. An immutable MCP installation may name one mapped
+read-only tool as `snapshot_identity`. PtcRunner calls that tool once during
+provider assembly with an empty argument object, validates its configured
+result field as a lowercase `sha256:` digest, and publishes the digest only as
+`content_snapshot_hash` in the safe provider snapshot. The identity tool need
+not be selected into the mission environment; failure to obtain a valid
+identity closes provider assembly.
 
 ## Input and result contracts
 
@@ -270,12 +276,14 @@ The installed alias derives `list-runs`, `model-exchanges`,
 `capability-calls`, `generated-sources`, `effective-preludes`, and
 `provider-exchanges`. Collection results pair related records by their
 correlation IDs and use deterministic bounded pages with source-bound opaque
-cursors. V1 and V2 artifacts may share a directory: a V1 run has an empty
-provider-exchange page, while V2 exposes each paired MCP request and response.
-The source classifies the run as `private_inspection`, so every selected
-provider must accept private data before either snapshot directory is opened.
-Safe connector metadata contains only counts, byte ceilings, trace/content
-identities, and hashes—not paths or private payloads.
+cursors. Run-scoped private collections accept `"order": "asc" | "desc"`;
+ascending sequence order is the default, and the order is part of the cursor's
+bound query identity. V1 and V2 artifacts may share a directory: a V1 run has
+an empty provider-exchange page, while V2 exposes each paired MCP request and
+response. The source classifies the run as `private_inspection`, so every
+selected provider must accept private data before either snapshot directory is
+opened. Safe connector metadata contains only counts, byte ceilings,
+trace/content identities, and hashes—not paths or private payloads.
 
 `model_visible` controls whether a capability appears in model context. It
 does not grant or remove execution authority.

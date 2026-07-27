@@ -635,12 +635,11 @@ defmodule PtcRunner.Kernel.RepoAnalystLiveE2ETest do
   defp raw_result_evidence(source_text) do
     {condition_line, condition_source} =
       source_line(source_text, fn source ->
-        String.contains?(source, "(if (false?") and
-          String.contains?(source, "effective-cfg")
+        String.contains?(source, ~S|(if (false? (get cfg "result_envelope"))|)
       end)
 
     {return_line, return_source} =
-      source_line(source_text, &String.contains?(&1, "(return (get evaluation :value))"))
+      source_line(source_text, &String.contains?(&1, "(return value)"))
 
     {condition_line, condition_source, return_line, return_source}
   end

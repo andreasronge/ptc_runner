@@ -514,6 +514,44 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
              )
   end
 
+  test "agent.core honors the documented 65536-character observation ceiling" do
+    observation = String.duplicate("x", 30_000)
+
+    responses = [
+      %{
+        content: nil,
+        tool_calls: [
+          %{
+            id: "observe",
+            name: "run_ptc_lisp",
+            args: %{"program" => Jason.encode!(observation)}
+          }
+        ]
+      },
+      %{
+        content: nil,
+        tool_calls: [
+          %{id: "done", name: "run_ptc_lisp", args: %{"program" => "(return 42)"}}
+        ]
+      }
+    ]
+
+    {:ok, config} = agent_config(responses, [], prompt_source: tiny_prompt_source())
+
+    assert {:ok, _result} =
+             Kernel.run(
+               ~S|(agent.core/run "Inspect" {"max_turns" 2 "max_observation_chars" 32768 "max_transcript_chars" 1000000})|,
+               config
+             )
+
+    assert_receive {:agent_request, _first_request}
+    assert_receive {:agent_request, second_request}
+    tool_message = List.last(second_request["messages"])
+
+    assert tool_message["role"] == "tool"
+    assert String.length(tool_message["content"]) > 30_000
+  end
+
   @tag :tmp_dir
   test "agent.core bounds the complete encoded request at the exact character ceiling", %{
     tmp_dir: dir

@@ -1,12 +1,11 @@
 # Tutorial design probe — build a Code Scout with MCP
 
-> **Status:** target-state acceptance tutorial for active implementation, not
-> current user documentation. It is an API design probe for
+> **Status:** implemented acceptance tutorial, retained as an API design probe
+> rather than general user documentation. It records the complete
+> no-application-Elixir workflow built by
 > [`mcp-capability-platform-direction.md`](mcp-capability-platform-direction.md)
 > and
 > [`manifest-authored-applications-direction.md`](manifest-authored-applications-direction.md).
-> Commands and configuration marked planned will not work until their
-> corresponding slices land.
 
 ## What this tutorial tests
 
@@ -47,7 +46,7 @@ generated PTC-Lisp
 The model that plans is in the workflow environment. The generated program
 that touches data is in the mission environment.
 
-## What exists today and what is planned
+## Implementation status
 
 | Tutorial surface | Status |
 | --- | --- |
@@ -60,12 +59,12 @@ that touches data is in the mission environment.
 | `--host-config` and `--check` | current |
 | host-installed MCP and live-LLM aliases | current and exclusive; manifests have no implicit provider fallback |
 | immutable filesystem sample MCP server | current, pinned beta pending the stable SDK release |
-| manifest-selectable PTC trace/private snapshots | planned application Slice E1 |
-| private human investigation in `ptc.repl` | planned application Slice E2 |
+| manifest-selectable PTC trace/private snapshots | current |
+| private human investigation in `ptc.repl` | current through `inspection-analysis-v1` |
 | bounded MCP error feedback, safe trace context, and private request/response inspection | current |
-| `--output`, `--private-output`, `--private-mission`, and run classification | current; input/result schemas remain planned Slice D |
-| `cap/unwrap!`, `cap/with-cursor`, and `agent.main` libraries | current; remaining Code Scout facades are planned application Slice G |
-| component override and LLM replay evaluation | planned application Slice H |
+| `--output`, `--private-output`, `--private-mission`, run classification, and bounded input/result schemas | current |
+| `cap/unwrap!`, `cap/with-cursor`, `agent.main`, and the repo/runs facades | current |
+| component override, LLM replay, isolated evaluation, and pure aggregation | current |
 
 This single page replaces separate “draft” and “simulated” tutorials. The
 status table carries implementation truth; the steps below show one coherent
@@ -86,6 +85,9 @@ repo-analyst.host.json              expanded at review and evaluation
 repo-analyst-answer.json
 repo-analyst-review.json
 repo-analyst-improve.json
+repo-analyst-evaluate-replay.json
+repo-analyst-evaluate-live.json
+repo-analyst-aggregate.json
 repo-analyst/
   repo.clj
   runs.clj
@@ -98,13 +100,16 @@ repo-analyst/
   review.schema.json
   candidate.schema.json
   evaluation.schema.json
-  evaluate-replay.json
-  evaluate-live.json
-  aggregate.json
+  trial-input.schema.json
+  trial-result.schema.json
+  trial.schema.json
+  trials.schema.json
+  join-trial.jq                  trusted result/trace/inspection join
   evaluation/
     motivating.json
     regression.json
     held-out.json
+    negative-control.json
     replay.jsonl
 ```
 
@@ -121,7 +126,7 @@ external authority belongs in host config.
 
 ## 2. Install the MCP server
 
-The planned repository sample server uses the official TypeScript MCP SDK and
+The repository sample server uses the official TypeScript MCP SDK and
 the modern stateless protocol. PtcRunner launches it over stdio. The root is
 server configuration supplied by the host, not an MCP Root and not a manifest
 field. The tutorial invokes the committed reproducible server bundle; it does
@@ -135,12 +140,11 @@ platform packaging, not application policy: new applications still need only
 host JSON, manifests, and PTC-Lisp. A host-level custom-launcher path exists
 only as an explicit override for hardened or unsupported deployments.
 
-There is intentionally no `source: "file-read"` form in the target host
-grammar. The current whole-file provider remains only until this sample passes
-its acceptance suite; the same cutover migrates its examples/tests and deletes
-the old builder, manifest config, and capability module. PtcRunner still reads
-this host document, the application manifest, local PTC-Lisp, contracts, and
-selected input through dedicated confined loaders. MCP is for
+There is intentionally no `source: "file-read"` form in the host grammar. The
+sample passed its acceptance suite and the cutover deleted the old builder,
+manifest config, and capability module. PtcRunner still reads this host
+document, the application manifest, local PTC-Lisp, contracts, and selected
+input through dedicated confined loaders. MCP is for
 model-accessible filesystem capabilities, not runtime bootstrap.
 
 The host file stays flat: it says what the operator installed, while each
@@ -292,7 +296,7 @@ holds the opened executable through launch; macOS executes the canonical path
 and relies on the trusted installation hierarchy remaining immutable during
 that short boundary.
 
-`deepseek` uses the planned closed host-installed `llm` source over the
+`deepseek` uses the closed host-installed `llm` source over the
 existing provider-neutral adapter. The fully qualified
 `openrouter:deepseek/deepseek-v4-flash` value pins both the provider and its
 upstream model ID instead of relying on a catalog alias. The host fixes model,
@@ -433,7 +437,7 @@ the same workflow entry file.
 ```json
 {
   "task": "Where is the run deadline enforced, and what happens to in-flight capability calls when it fires? Cite paths and line ranges.",
-  "agent": {"max_turns": 6}
+  "agent": {"max_turns": 12}
 }
 ```
 
@@ -585,10 +589,13 @@ repo/find-files  (glob :string, cursor :string?) -> :map
 repo/search      (text :string, cursor :string?) -> :map
 repo/read-range  (path :string, from :int, to :int) -> :map
 runs/list-runs   (limit :int, cursor :string?) -> :map
-runs/turns       (run-id :string, cursor :string?) -> :map
+runs/turns       (run-id :string, filters :map?, cursor :string?) -> :map
 runs/model-exchanges   (run-id :string, cursor :string?) -> :map
+runs/latest-model-exchange (run-id :string) -> :map
 runs/capability-calls  (run-id :string, cursor :string?) -> :map
 runs/generated-sources (run-id :string, cursor :string?) -> :map
+runs/latest-generated-source (run-id :string) -> :map
+runs/review-seed    (run-id :string) -> :map
 runs/effective-preludes (run-id :string, cursor :string?) -> :map
 runs/provider-exchanges (run-id :string, cursor :string?) -> :map
 ```
@@ -697,31 +704,27 @@ run also has no capability that can read the separate inspection artifact it
 is currently producing.
 
 The model searches for a literal, reads only the relevant ranges, and returns
-a schema-validated public result. The complete `Result` projection is printed
-to stdout and atomically persisted with the same shape at the explicit
-`--output` destination:
+a schema-validated public result. Stdout prints the complete `Result`
+projection; the explicit `--output` artifact contains its validated
+`Result.value` alone so another manifest can consume it directly:
 
 ```json
 {
-  "value": {
-    "answer": "The deadline owner cancels attached provider work before connector resources close.",
-    "evidence": [
-      {
-        "provider": "workspace",
-        "snapshot_hash": "sha256:...",
-        "path": "lib/ptc_runner/kernel/run_state.ex",
-        "lines": [250, 282]
-      },
-      {
-        "provider": "workspace",
-        "snapshot_hash": "sha256:...",
-        "path": "lib/ptc_runner/kernel/run_builder.ex",
-        "lines": [310, 329]
-      }
-    ]
-  },
-  "usage": {},
-  "evaluation_memory": {}
+  "answer": "The deadline owner cancels attached provider work before connector resources close.",
+  "citations": [
+    {
+      "provider": "workspace",
+      "snapshot_hash": "sha256:...",
+      "path": "lib/ptc_runner/kernel/run_state.ex",
+      "lines": [250, 282]
+    },
+    {
+      "provider": "workspace",
+      "snapshot_hash": "sha256:...",
+      "path": "lib/ptc_runner/kernel/run_builder.ex",
+      "lines": [310, 329]
+    }
+  ]
 }
 ```
 
@@ -751,7 +754,7 @@ The public result answers whether the run completed its task. The canonical
 trace shows timing, effects, and bounded sizes without payloads. The private
 inspection explains how the result was produced.
 
-Use the planned fixed private profile rather than making the human reconstruct
+Use the fixed private profile rather than making the human reconstruct
 correlations with shell filters:
 
 ```console
@@ -851,7 +854,7 @@ into PTC-Lisp. The authoritative snapshot loader either exposes the complete
 validated catalog or exposes nothing.
 
 The exact native capability names in an existing V1 artifact may differ from
-the planned MCP aliases above. Profile query results, correlation IDs, and
+the mapped MCP aliases above. Profile query results, correlation IDs, and
 record shapes are authoritative; never reconstruct a conversation by
 timestamps or terminal output.
 
@@ -988,8 +991,12 @@ review-specific input and result schema:
 
 ```json
 {
-  "task": "Review my last ten runs. Correlate repeated failures with the exact model exchanges, generated programs, MCP calls, and relevant source. Distinguish reusable behavior gaps from one-off bad input.",
-  "agent": {"max_turns": 6}
+  "task": "List completed runs, choose one candidate, collect its bounded review seed, then return a schema-shaped evidence report unless one targeted follow-up is necessary.",
+  "agent": {
+    "max_turns": 16,
+    "max_observation_chars": 32768,
+    "max_transcript_chars": 1000000
+  }
 }
 ```
 
@@ -1042,13 +1049,30 @@ read, but through bounded, paged functions:
 
 | Human action | Automated equivalent |
 | --- | --- |
-| `log/runs` plus `log/turns` | `runs/list-runs` plus `runs/turns` |
-| `inspection/model-exchanges` | `runs/model-exchanges` |
+| `log/runs` plus error-filtered `log/turns` | `runs/list-runs` plus `runs/review-seed` |
+| inspect the final model action | compact response in `runs/review-seed` |
+| inspect the complete final request/response | `runs/latest-model-exchange` |
+| inspect older model exchanges | paged `runs/model-exchanges` |
 | `inspection/capability-calls` | `runs/capability-calls` |
-| `inspection/generated-sources` | `runs/generated-sources` |
+| inspect the final generated source | `runs/latest-generated-source` |
+| inspect older generated sources | paged `runs/generated-sources` |
 | `inspection/effective-preludes` | `runs/effective-preludes` |
 | `inspection/provider-exchanges` | `runs/provider-exchanges` |
 | locate owning source | `repo/search` plus `repo/read-range` |
+
+The seed is intentionally an index, not a lossy replacement for private
+inspection. It carries the exact final model response, exact final program,
+filtered public errors, and their snapshot identities, while leaving the
+cumulative request transcript behind an explicit follow-up. This keeps the
+normal automatic pass small without hiding the complete conversation from a
+human in `ptc.repl` or from a later generated program.
+
+Exploratory live-model runs are not the promotion gate. A model may ignore a
+bounded evidence recipe, emit prose beside its required tool call, or spend its
+turn budget paging records it already summarized. Those are useful behavioral
+observations for the next candidate, but they are stochastic. The replay
+manifest supplies the deterministic acceptance path; live runs check provider
+and application ergonomics.
 
 Compare `review.private.json` with `manual-review.private.json` before
 proposing a change. The useful questions are whether it cites the same
@@ -1074,7 +1098,7 @@ prompt-injection cases record a behavioral regression.
 - `insufficient-evidence`; and
 - `propose-change`.
 
-This uses the planned manifest-contract profile's narrow tagged `oneOf`
+This uses the manifest-contract profile's narrow tagged `oneOf`
 support: closed object branches share the required `decision` string and use
 distinct `const` values. It does not widen MCP's callable-schema profile or
 permit remote references and regexes.
@@ -1168,10 +1192,10 @@ Materialization is a visible trusted host step:
 
 ```console
 umask 077
-jq -jr '.value.candidate.content' \
+jq -jr '.candidate.content' \
   repo-analyst/private/candidate.private.json \
   > repo-analyst/private/agent.core.candidate.clj
-jq '.value.candidate |
+jq '.candidate |
     {component_id, base_source_hash, source_hash,
      path: "agent.core.candidate.clj"}' \
   repo-analyst/private/candidate.private.json \
@@ -1180,52 +1204,100 @@ jq '.value.candidate |
 
 `evaluate.clj` is a domain-blind workflow that executes exactly one
 subject/case trial and returns its bounded observation and identities.
-`evaluate-replay.json` selects only `replay-llm`;
-`evaluate-live.json` selects only `deepseek`. A Kernel run never switches
+`repo-analyst-evaluate-replay.json` selects only `replay-llm`;
+`repo-analyst-evaluate-live.json` selects only `deepseek`. A Kernel run never switches
 between them.
 
 Both manifests make the evaluator the workflow entry, declare its
-`agent.core` dependency, and call the dependency once. The component override
-therefore changes the implementation used by that one trial before the bundle
-freezes. `aggregate.clj` is a separate pure workflow with no LLM or mission
-provider.
+`agent.core` dependency, and call `agent.core/run-value` once. Unlike the
+terminal `agent.core/run`, `run-value` resumes the evaluator with the
+model-authored answer so the frozen expectation can be scored before the outer
+workflow returns. The component override therefore changes the implementation
+used by that one trial before the bundle freezes. `aggregate.clj` is a
+separate pure workflow with no LLM or mission provider.
 
 The trusted host combines only the candidate identity with one frozen case
 into bounded private baseline and candidate inputs. Candidate source is absent
 from both inputs and reaches only the candidate run through the trusted
-override descriptor. With each case file defined as a bounded JSON array, the
-first motivating case can be prepared as:
+override descriptor.
+
+Each case also owns an immutable `workspace_fixture`. Materialize it into a
+fresh private directory and derive a private host-config copy whose
+`workspace` MCP root points there. Do not put the fixture map in trial input:
+the MCP snapshot is the subject's data surface, while the case hash binds the
+trusted fixture and expectation. For the first motivating case, the visible
+host preparation is:
 
 ```console
 umask 077
+repo_root=$(pwd -P)
+trial_dir=repo-analyst/private/trials/motivating-paged-evidence
+mkdir -p "$trial_dir/workspace"
+
+jq '.cases[0] + {set: "motivating"}' \
+  repo-analyst/evaluation/motivating.json > "$trial_dir/case.json"
+
+jq -r '.workspace_fixture | keys[]' "$trial_dir/case.json" |
+while IFS= read -r path; do
+  case "$path" in
+    ""|/*|.|..|../*|*/../*|*/..) exit 1 ;;
+  esac
+  mkdir -p "$trial_dir/workspace/$(dirname "$path")"
+  jq -jr --arg path "$path" '.workspace_fixture[$path]' \
+    "$trial_dir/case.json" > "$trial_dir/workspace/$path"
+done
+
+cp repo-analyst/evaluation/replay.jsonl "$trial_dir/replay.jsonl"
+jq --arg cwd "$repo_root" \
+   --arg workspace "$repo_root/$trial_dir/workspace" '
+  .install.workspace.transport.cwd = $cwd
+  | .install.workspace.transport.args |=
+      ((index("--root") + 1) as $root_index
+       | .[$root_index] = $workspace)
+  | .install."replay-llm".fixtures = "replay.jsonl"
+' repo-analyst.host.json > "$trial_dir/host.json"
+
+case_hash="sha256:$(jq -cS . "$trial_dir/case.json" | shasum -a 256 | cut -d' ' -f1)"
 jq -n \
   --slurpfile result repo-analyst/private/candidate.private.json \
-  --slurpfile cases repo-analyst/evaluation/motivating.json \
+  --slurpfile case "$trial_dir/case.json" \
+  --arg case_hash "$case_hash" \
   '{subject: "baseline",
-    candidate_identity:
-      ($result[0].value.candidate |
+    repetition: 1,
+    candidate:
+      ($result[0].candidate |
        {component_id, base_source_hash, source_hash}),
-    case: $cases[0][0]}' \
-  > repo-analyst/private/replay-baseline.private.json
+    case: {
+      id: $case[0].id,
+      set: $case[0].set,
+      case_hash: $case_hash,
+      task: $case[0].task,
+      expect: $case[0].expect
+    },
+    agent: $case[0].agent}' \
+  > "$trial_dir/replay-baseline.input.private.json"
 jq '.subject = "candidate"' \
-  repo-analyst/private/replay-baseline.private.json \
-  > repo-analyst/private/replay-candidate.private.json
+  "$trial_dir/replay-baseline.input.private.json" \
+  > "$trial_dir/replay-candidate.input.private.json"
 ```
 
 A deterministic replay pair is then:
 
 ```console
-umask 077
-mkdir -p repo-analyst/private/trials
-mix ptc.run repo-analyst/evaluate-replay.json \
-  --host-config repo-analyst.host.json \
-  --private-mission private/replay-baseline.private.json \
-  --private-output repo-analyst/private/trials/replay-baseline.private.json
-mix ptc.run repo-analyst/evaluate-replay.json \
-  --host-config repo-analyst.host.json \
-  --private-mission private/replay-candidate.private.json \
+trial_dir=repo-analyst/private/trials/motivating-paged-evidence
+mix ptc.run repo-analyst-evaluate-replay.json \
+  --host-config "$trial_dir/host.json" \
+  --private-mission "$trial_dir/replay-baseline.input.private.json" \
+  --trace "$trial_dir/replay-baseline.trace.private.jsonl" \
+  --inspect "$trial_dir/replay-baseline.inspection.private.jsonl" \
+  --private-output "$trial_dir/replay-baseline.result.private.json"
+mix ptc.run repo-analyst-evaluate-replay.json \
+  --host-config "$trial_dir/host.json" \
+  --private-mission "$trial_dir/replay-candidate.input.private.json" \
   --component-override-descriptor repo-analyst/private/agent.core.override.json \
-  --private-output repo-analyst/private/trials/replay-candidate.private.json
+  --trace "$trial_dir/replay-candidate.trace.private.jsonl" \
+  --inspect "$trial_dir/replay-candidate.inspection.private.jsonl" \
+  --private-output "$trial_dir/replay-candidate.result.private.json"
 ```
 
 `--private-mission` is host CLI authority and resolves under the evaluation
@@ -1239,41 +1311,69 @@ opens the source once, verifies those same bytes, and compiles those bytes
 under normal dependency, export, signature, capability, and limit checks.
 
 The host repeats baseline and candidate invocations with
-`evaluate-live.json` for every motivating, regression, and held-out case.
+`repo-analyst-evaluate-live.json` for every motivating, regression, held-out,
+and negative-control case.
 Every repetition is a fresh Kernel run with one frozen LLM provider and a
 unique no-clobber artifact. Nothing shares mission memory between trials.
 
-Finally, the trusted host combines the still-private trial `Result`
-projections and a provider-free aggregate run invokes `aggregate.clj`:
+The trial value cannot see its own effective bundle, provider snapshots, or
+verified override. Join its canonical result artifact to that same run's trace
+and private inspection artifact with the committed trusted jq program. The
+result hash proves the artifact is the value recorded by `run-stopped`; the
+inspection join proves each cited path and line was returned by a correlated,
+successful `workspace.read`:
 
 ```console
-jq -s '{"trials": .}' repo-analyst/private/trials/*.private.json \
+trial_dir=repo-analyst/private/trials/motivating-paged-evidence
+for subject in replay-baseline replay-candidate; do
+  result="$trial_dir/$subject.result.private.json"
+  result_hash="sha256:$(shasum -a 256 "$result" | cut -d' ' -f1)"
+  jq -n --arg result_hash "$result_hash" \
+    --slurpfile result "$result" \
+    --slurpfile trace "$trial_dir/$subject.trace.private.jsonl" \
+    --slurpfile inspection "$trial_dir/$subject.inspection.private.jsonl" \
+    -f repo-analyst/join-trial.jq \
+    > "$trial_dir/$subject.joined.json"
+done
+
+jq -s --slurpfile input repo-analyst/aggregate-input.json \
+  '{"trials": ., "plan": $input[0].plan}' \
+  repo-analyst/private/trials/*/*.joined.json \
   > repo-analyst/private/trials.private.json
-mix ptc.run repo-analyst/aggregate.json \
-  --private-mission private/trials.private.json \
+mix ptc.run repo-analyst-aggregate.json \
+  --private-mission repo-analyst/private/trials.private.json \
   --private-output repo-analyst/private/evaluation.private.json
 ```
 
-The pure aggregator rejects missing pairs, inconsistent case/candidate
-identities, duplicate trials, and insufficient sample counts. A useful
-`Result.value` reports counts and distributions. This excerpt omits the
-surrounding persisted `Result` projection:
+The pure aggregator rejects missing or duplicate pairs, inconsistent
+case/candidate identities, reused run IDs, provider/content/fixture drift
+within a pair, negative-control failure, and regression on motivating,
+regression, or held-out cases. The committed aggregate plan names the exact
+allowed case ID, set, hash, and repetition matrix. It cannot return `accept`
+until every planned motivating, regression, held-out, and two negative-control
+case is represented exactly once on both sides; a smaller diagnostic pair can
+still produce the `inconclusive` result below. The private output contains the
+validated aggregate value directly:
 
 ```json
 {
-  "candidate_sha256": "9f31c2...",
-  "base_sha256": "bb8210...",
-  "provider_snapshot_sha256": "ac43d1...",
-  "workspace_snapshot_sha256": "7e04a9...",
-  "fixture_set_sha256": "13dc48...",
-  "compiles": true,
-  "deterministic_contracts": {"passed": 18, "failed": 0},
-  "live_trials_per_case": 5,
-  "motivating": {"improved": 12, "unchanged": 3, "regressed": 0},
-  "regression": {"improved": 1, "unchanged": 53, "regressed": 1},
-  "held_out": {"improved": 8, "unchanged": 17, "regressed": 0},
-  "resources": "within-policy",
-  "recommendation": "review"
+  "verdict": "inconclusive",
+  "reasons": ["candidate improves no cited case"],
+  "candidate": {
+    "component_id": "agent.core",
+    "base_source_hash": "sha256:...",
+    "source_hash": "sha256:..."
+  },
+  "counts": {"trials": 2, "baseline": 1, "candidate": 1},
+  "rates": {
+    "motivating_before": 1,
+    "motivating_after": 1,
+    "regression_before": 0,
+    "regression_after": 0,
+    "held_out_before": 0,
+    "held_out_after": 0
+  },
+  "regressed_cases": []
 }
 ```
 
@@ -1417,7 +1517,7 @@ Writing the tutorial resolves several API questions:
    public rename, and effect declaration.
 3. **Raw HTTP distracts from the proof.** It is deferred; a future external
    API can be exposed by an MCP server.
-4. **Generic model-accessible filesystem access belongs in MCP.** The current
+4. **Generic model-accessible filesystem access belongs in MCP.** The former
    `file-read` provider is migrated and deleted, not added to host config or
    expanded into a second API. Trusted manifest/component/contract/input
    loading remains direct and confined.

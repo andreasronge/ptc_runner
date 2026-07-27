@@ -13,6 +13,9 @@ defmodule PtcRunner.Kernel.Library do
   selects `agent.core`'s raw-result mode so a manifest contract describes the
   application value directly; callers of `agent.core/run` retain its explicit
   `%{"ok" => true, "value" => value}` success envelope by default.
+  `agent.core/run-value` is the composable variant: it returns the same
+  model-authored value to its PTC-Lisp caller without terminating the outer
+  workflow, allowing an evaluator to judge the answer before returning.
 
   `cap` is `:discoverable` rather than `:prompt`. Its `unwrap!` and
   `with-cursor` helpers compose capability envelopes for other libraries and

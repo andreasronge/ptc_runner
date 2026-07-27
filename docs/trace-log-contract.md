@@ -244,6 +244,12 @@ returns the frozen terminal batch in that same owner call, without exceeding
 either hard ceiling. Existing normal and private sinks retain their original
 behavior unless explicitly constructed with the reserve.
 
+A successful `run-stopped` event includes `data.result_hash`: `sha256:` plus
+the lowercase SHA-256 digest of the successful result value's deterministic
+canonical JSON bytes. `ResultArtifact` writes those same bytes, so a trusted
+host can bind an artifact to the run that produced it without exposing the
+result in the public trace. Failed runs omit the field.
+
 ## Source grants and authority
 
 Trace access is authority-bearing and source scoped. A TraceLog capability is

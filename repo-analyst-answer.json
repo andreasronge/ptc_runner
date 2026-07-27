@@ -22,7 +22,7 @@
   },
   "limits": {
     "run_duration_ms": 120000,
-    "workflow_timeout_ms": 90000,
+    "workflow_timeout_ms": 110000,
     "evaluation_timeout_ms": 20000,
     "mission_capability_calls": 64
   }

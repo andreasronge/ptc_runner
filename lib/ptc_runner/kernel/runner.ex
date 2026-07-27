@@ -7,6 +7,7 @@ defmodule PtcRunner.Kernel.Runner do
   projection, and terminal error normalization.
   """
 
+  alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.Dispatcher
   alias PtcRunner.Kernel.Error
   alias PtcRunner.Kernel.Events
@@ -96,11 +97,13 @@ defmodule PtcRunner.Kernel.Runner do
   end
 
   defp finalize_result(result, usage, sink) do
-    stopped_data = %{
-      outcome: outcome(result),
-      reason: terminal_reason(result),
-      usage: usage
-    }
+    stopped_data =
+      %{
+        outcome: outcome(result),
+        reason: terminal_reason(result),
+        usage: usage
+      }
+      |> maybe_put_result_hash(result)
 
     case EventSink.finalize_and_events(sink, stopped_data) do
       {:ok, %{events: events, dropped: dropped}} ->
@@ -312,6 +315,18 @@ defmodule PtcRunner.Kernel.Runner do
   defp outcome({:error, _error}), do: :error
   defp terminal_reason({:ok, _result}), do: nil
   defp terminal_reason({:error, %Error{reason: reason}}), do: reason
+
+  defp maybe_put_result_hash(stopped_data, {:ok, %Result{value: value}}) do
+    case DeterministicJSON.encode(value) do
+      {:ok, encoded} -> Map.put(stopped_data, :result_hash, sha256(encoded))
+      {:error, _reason} -> stopped_data
+    end
+  end
+
+  defp maybe_put_result_hash(stopped_data, _result), do: stopped_data
+
+  defp sha256(value),
+    do: "sha256:" <> Base.encode16(:crypto.hash(:sha256, value), case: :lower)
 
   defp put_result_usage({:ok, %Result{} = result}, usage), do: {:ok, %{result | usage: usage}}
   defp put_result_usage({:error, %Error{} = error}, usage), do: {:error, %{error | usage: usage}}

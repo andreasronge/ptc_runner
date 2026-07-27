@@ -16,9 +16,12 @@ defmodule PtcRunner.Kernel.ConfinedFile do
   than resolving to a path outside the grant.
 
   The bounded read rejects a non-regular file, a file larger than the caller's
-  ceiling, and invalid UTF-8. The target is stat-checked before opening, after
-  opening, and again after reading, so a file replaced mid-read fails instead
-  of returning a mixture of two files.
+  ceiling, and invalid UTF-8. The target and every resolved parent directory
+  are identity-checked around the open and read, so an ordinary path or parent
+  replacement fails instead of redirecting trusted loading. This is a trusted
+  host loader, not a hostile same-user filesystem sandbox: the configured
+  hierarchy must not be concurrently swapped away and restored between those
+  checks.
 
   Trusted loading previously borrowed this behavior from the removed public
   file capability, freezing the entire root to return one manifest. This
@@ -49,21 +52,35 @@ defmodule PtcRunner.Kernel.ConfinedFile do
   @spec read(binary(), binary(), pos_integer()) :: {:ok, binary()} | {:error, error()}
   def read(root, relative_path, max_bytes)
       when is_binary(root) and is_binary(relative_path) and is_integer(max_bytes) and
-             max_bytes > 0 do
+             max_bytes > 0,
+      do: read(root, relative_path, max_bytes, [])
+
+  def read(_root, _relative_path, _max_bytes), do: {:error, :invalid_path}
+
+  @doc false
+  @spec read(binary(), binary(), pos_integer(), keyword()) ::
+          {:ok, binary()} | {:error, error()}
+  def read(root, relative_path, max_bytes, opts)
+      when is_binary(root) and is_binary(relative_path) and is_integer(max_bytes) and
+             max_bytes > 0 and is_list(opts) do
     with :ok <- validate_relative(relative_path),
+         true <- Keyword.keyword?(opts) and Keyword.keys(opts) -- [:before_open] == [],
          canonical_root = Path.expand(root),
          {:ok, %File.Stat{type: :directory}} <- lstat(canonical_root),
          {:ok, resolved} <- resolve_relative(canonical_root, relative_path),
          absolute = Path.expand(Path.join(canonical_root, resolved)),
-         true <- within_root?(canonical_root, absolute) do
-      read_bounded(absolute, max_bytes)
+         true <- within_root?(canonical_root, absolute),
+         {:ok, ancestors} <- snapshot_ancestors(canonical_root, absolute),
+         :ok <- before_open(Keyword.get(opts, :before_open)),
+         :ok <- ancestors_unchanged(ancestors) do
+      read_bounded(absolute, max_bytes, ancestors)
     else
       {:error, reason} when is_atom(reason) -> {:error, normalize(reason)}
       _other -> {:error, :invalid_path}
     end
   end
 
-  def read(_root, _relative_path, _max_bytes), do: {:error, :invalid_path}
+  def read(_root, _relative_path, _max_bytes, _opts), do: {:error, :invalid_path}
 
   @doc """
   Resolves an absolute path, following only symbolic links that stay within the
@@ -147,11 +164,13 @@ defmodule PtcRunner.Kernel.ConfinedFile do
 
   # Stat before opening, after opening, and after reading. A file swapped
   # between those points fails rather than yielding bytes from two files.
-  defp read_bounded(path, max_bytes) do
-    with {:ok, expected} <- lstat(path),
+  defp read_bounded(path, max_bytes, ancestors) do
+    with :ok <- ancestors_unchanged(ancestors),
+         {:ok, expected} <- lstat(path),
          :ok <- regular?(expected),
          :ok <- within_size?(expected, max_bytes),
          {:ok, content} <- read_verified(path, expected, max_bytes),
+         :ok <- ancestors_unchanged(ancestors),
          {:ok, current} <- lstat(path),
          :ok <- same_file(expected, current) do
       if String.valid?(content), do: {:ok, content}, else: {:error, :invalid_utf8}
@@ -210,6 +229,56 @@ defmodule PtcRunner.Kernel.ConfinedFile do
        do: :ok
 
   defp same_file(_expected, _current), do: {:error, :changed_during_read}
+
+  defp snapshot_ancestors(root, absolute) do
+    root
+    |> ancestor_paths(Path.dirname(absolute), [])
+    |> Enum.reduce_while({:ok, []}, fn path, {:ok, snapshots} ->
+      case lstat(path) do
+        {:ok, %File.Stat{type: :directory} = stat} ->
+          {:cont, {:ok, [{path, stat} | snapshots]}}
+
+        _error ->
+          {:halt, {:error, :changed_during_read}}
+      end
+    end)
+  end
+
+  defp ancestor_paths(root, root, acc), do: [root | acc]
+
+  defp ancestor_paths(root, path, acc) do
+    parent = Path.dirname(path)
+
+    if within_root?(root, path) and parent != path,
+      do: ancestor_paths(root, parent, [path | acc]),
+      else: []
+  end
+
+  defp ancestors_unchanged(ancestors) do
+    if Enum.all?(ancestors, fn {path, expected} ->
+         case lstat(path) do
+           {:ok, current} -> same_file(expected, current) == :ok
+           {:error, _reason} -> false
+         end
+       end),
+       do: :ok,
+       else: {:error, :changed_during_read}
+  end
+
+  defp before_open(nil), do: :ok
+
+  defp before_open(callback) when is_function(callback, 0) do
+    case callback.() do
+      :ok -> :ok
+      _other -> {:error, :changed_during_read}
+    end
+  rescue
+    _exception -> {:error, :changed_during_read}
+  catch
+    _kind, _reason -> {:error, :changed_during_read}
+  end
+
+  defp before_open(_callback), do: {:error, :invalid_path}
 
   defp normalize(:enoent), do: :not_found
   defp normalize(:enotdir), do: :not_found

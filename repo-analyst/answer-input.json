@@ -1,7 +1,7 @@
 {
   "task": "Inspect the available source snapshot and explain two behaviors of its agent loop: when it returns a raw model-authored value instead of the standard success envelope, and how it computes the number of turns remaining after a completed turn. Explore the snapshot before answering and base both claims on source ranges you actually read. Use return only for the final value. Return a map with PTC-Lisp string keys \"answer\" and \"citations\", not keyword keys. Every citation must also use string keys and contain exactly \"provider\", \"snapshot_hash\", \"path\", and \"lines\"; use provider \"workspace\", the hash and path returned by the read, and an inclusive two-integer line range contained in that read.",
   "agent": {
-    "max_turns": 8,
+    "max_turns": 12,
     "max_observation_chars": 4096
   }
 }

@@ -1,11 +1,11 @@
 # Manifest-authored applications — implementation plan
 
-> **Status:** active implementation plan, promoted from `future/` on
-> 2026-07-24. Slices A, B, Pre-C, C, D, and F are complete. Slices E, G, and H
-> remain planned.
-> This document
-> describes the generic runner and application contracts built on the
-> MCP-first capability platform.
+> **Status:** implementation complete, retained temporarily as the slice
+> acceptance record. Slices A through H and the Pre-C prerequisite are
+> integrated. The per-application live evaluation policy remains deliberately
+> open.
+> This document describes the generic runner and application contracts built
+> on the MCP-first capability platform.
 
 ## 1. Goal
 
@@ -84,9 +84,11 @@ Out of scope:
   changes. The no-Elixir promise applies to new applications assembled from
   installed generic capabilities.
 
-## 3. Verified current state
+## 3. Verified starting state
 
-| Surface | Current behavior | Missing for this direction |
+This was the verified repository state when the plan began:
+
+| Surface | Before implementation | Direction |
 | --- | --- | --- |
 | `mix ptc.run` | Loads one strict manifest and runs it through `RunBuilder` | host config, validation-only assembly, result artifact options |
 | Local components | Loads confined PTC-Lisp files and declared dependencies | no application-specific runtime work required |
@@ -112,22 +114,22 @@ The complete application runs through:
 
 ```console
 umask 077
-mkdir -p code-scout/private tmp
-mix ptc.run code-scout-improve.json \
-  --host-config code-scout.host.json \
-  --private-output code-scout/private/candidate.private.json \
-  --trace tmp/code-scout-trace.jsonl
+mkdir -p repo-analyst/private tmp
+mix ptc.run repo-analyst-improve.json \
+  --host-config repo-analyst.host.json \
+  --private-output repo-analyst/private/candidate.private.json \
+  --trace tmp/repo-analyst-trace.private.jsonl
 ```
 
 Generic options may know about manifests, host installation, validation,
 classified outputs, traces, inspection, and trusted component overrides. They
 must not know that the application is a scout.
 
-Planned validation:
+Validation:
 
 ```console
-mix ptc.run code-scout-answer.json \
-  --host-config code-scout.host.json \
+mix ptc.run repo-analyst-answer.json \
+  --host-config repo-analyst.host.json \
   --check
 ```
 
@@ -187,9 +189,9 @@ grammar sketches are not fixtures.
 The manifest cannot contain an MCP command, remote endpoint, filesystem root,
 credential, or effect. It can only select names installed by the host.
 
-For manifest/CLI runs, host installation replaces the current implicit
+For manifest/CLI runs, host installation replaces the former implicit
 provider registry; it does not augment it. When the combined Slices B–C
-cutover lands, manifests can no longer instantiate the legacy `llm` or
+cutover landed, manifests could no longer instantiate the legacy `llm` or
 `file-read` built-ins by supplying provider-specific config. Every selected
 provider name must come from the host document. A provider-free manifest,
 such as the pure aggregate run below, may omit host config. Existing
@@ -203,12 +205,12 @@ explicit `ProviderRegistry`, including custom builders. That programmatic host
 API is outside the no-Elixir manifest promise and does not become host-JSON
 only.
 
-That is the target contract, activated only when the filesystem MCP server and
-its migration are ready. `file-read` is not made host-configurable during the
-transition. Slices B and C form one release gate: host installation can be
-built first, but the public registry cutover, example migration, and deletion
-of `FileCapability` land together after the MCP filesystem acceptance suite
-passes.
+That contract activated only after the filesystem MCP server and its migration
+were ready. `file-read` was never made host-configurable during the transition.
+Slices B and C formed one release gate: host installation was built first, then
+the public registry cutover, example migration, and deletion of
+`FileCapability` landed together after the MCP filesystem acceptance suite
+passed.
 
 Inside a manifest, the workflow/mission split stays central:
 
@@ -227,7 +229,7 @@ proves that a server written outside Elixir can provide:
 - bounded ranged UTF-8 reads; and
 - a deterministic snapshot identity.
 
-The current `file-read` provider is not the seed of this API. It is a
+The former `file-read` provider was not the seed of this API. It was a
 temporary whole-file capability removed at the filesystem MCP cutover. In
 particular, the host grammar never accepts `source: "file-read"`, its legacy
 root/file configuration is not translated into a compatibility shape, and
@@ -294,7 +296,7 @@ Canonical traces intentionally omit prompts, responses, generated source,
 capability payloads, and MCP bodies. Behavioral diagnosis uses a separately
 requested private inspection artifact.
 
-The planned private snapshot exposes bounded queries over:
+The private snapshot exposes bounded queries over:
 
 - exact provider-neutral LLM requests and results;
 - generated and effective PTC-Lisp source;
@@ -329,7 +331,7 @@ Terminal publication is also a sink. A private run suppresses its value on
 stdout, cannot use normal `--output`, and requires an explicit no-clobber
 `0600` private result.
 
-Human investigation uses a separate planned
+Human investigation uses the separate
 `inspection-analysis-v1` `ptc.repl` profile. Do not widen
 `log-analysis-v1`: its profile ID attests a normal-data authority recipe. The
 private profile immutably captures both a canonical trace directory and a
@@ -351,7 +353,7 @@ but never queried inspection payloads, evaluated source text, or retained REPL
 history. The profile grants no LLM, filesystem, network, MCP, write, or
 inspection-capture authority.
 
-A later run preserves that class through a planned trusted
+A later run preserves that class through the trusted
 `--private-mission PATH` option. It is mutually exclusive with `--mission`,
 uses the same bounded manifest-confined JSON loading rules, and marks the
 entire input `private_inspection` before provider assembly. That classification
@@ -397,11 +399,14 @@ code on every run is a failure mode.
 The example application may live inside the repository it analyzes:
 
 ```text
-code-scout.host.json             trusted installation
-code-scout-answer.json           source-question selection and contract
-code-scout-review.json           prior-run review selection and contract
-code-scout-improve.json          candidate proposal selection and contract
-code-scout/
+repo-analyst.host.json             trusted installation
+repo-analyst-answer.json           source-question selection and contract
+repo-analyst-review.json           prior-run review selection and contract
+repo-analyst-improve.json          candidate proposal selection and contract
+repo-analyst-evaluate-replay.json  one replay-backed trial
+repo-analyst-evaluate-live.json    one live-model trial
+repo-analyst-aggregate.json        provider-free result aggregation
+repo-analyst/
   repo.clj                       MCP filesystem wrappers
   runs.clj                       trace/private-inspection wrappers
   evaluate.clj                   exactly one isolated evaluation trial
@@ -414,19 +419,21 @@ code-scout/
   candidate.schema.json          improvement Result.value contract
   evaluation.schema.json         aggregate Result.value contract
   trial-input.schema.json        per-trial subject/case input contract
-  evaluate-replay.json           one replay-backed trial
-  evaluate-live.json             one live-model trial
-  aggregate.json                 provider-free result aggregation
+  trial-result.schema.json       observable per-trial Result.value contract
+  trial.schema.json              joined trial/result identity contract
+  trials.schema.json             aggregate input contract
+  join-trial.jq                  trusted result/trace/inspection identity join
   evaluation/
     motivating.json
     regression.json
     held-out.json
+    negative-control.json
     replay.jsonl
 ```
 
 No file registers an Elixir callback. Host JSON can instantiate only source
 and transport kinds built into the installed PtcRunner release.
-`code-scout/private/` is a generated `0700` host-artifact directory, not a
+`repo-analyst/private/` is a generated `0700` host-artifact directory, not a
 versioned application input and not part of the filesystem MCP include set.
 
 The initial closed source identifiers are `mcp`, `llm`, `llm_replay`,
@@ -475,7 +482,7 @@ Illustrative final configuration for every tutorial phase:
     },
     "replay-llm": {
       "source": "llm_replay",
-      "fixtures": "code-scout/evaluation/replay.jsonl",
+      "fixtures": "repo-analyst/evaluation/replay.jsonl",
       "data_class": "private_inspection",
       "accepts_data": ["normal", "private_inspection"],
       "ceilings": {
@@ -510,11 +517,11 @@ Illustrative final configuration for every tutorial phase:
           "--include",
           "mix.lock",
           "--include",
-          "code-scout/*.clj",
+          "repo-analyst/*.clj",
           "--include",
-          "code-scout/*-input.json",
+          "repo-analyst/*-input.json",
           "--include",
-          "code-scout/*.schema.json",
+          "repo-analyst/*.schema.json",
           "--max-source-bytes",
           "32000000"
         ]
@@ -626,13 +633,13 @@ safe field defaults.
 There are no implicitly installed `llm` or `file-read` names alongside this
 document. For `mix ptc.run`, the host document is the complete provider
 registry for the run. This prevents a manifest from bypassing an
-operator-installed alias by falling back to the current manifest-configured
+operator-installed alias by falling back to the former manifest-configured
 built-ins. Trusted Elixir callers may still supply an explicit custom
 `ProviderRegistry`; that embedding API is not manifest authority.
 
-There is also no host-configurable `file-read` source. At the cutover, current
-whole-file examples move to the filesystem MCP server and the old builder,
-manifest schema, and capability module are deleted. PtcRunner's dedicated
+There is also no host-configurable `file-read` source. At the cutover,
+whole-file examples moved to the filesystem MCP server and the old builder,
+manifest schema, and capability module were deleted. PtcRunner's dedicated
 loaders for its own configuration and artifacts are unaffected.
 
 `llm` is another closed host-installable source owned by the generic
@@ -677,7 +684,7 @@ The source-question manifest is:
   "mission": {
     "components": [
       {"library": "cap"},
-      {"id": "repo", "path": "code-scout/repo.clj", "dependencies": ["cap"]}
+      {"id": "repo", "path": "repo-analyst/repo.clj", "dependencies": ["cap"]}
     ],
     "data": {}
   },
@@ -685,9 +692,9 @@ The source-question manifest is:
     "workflow": [{"name": "deepseek"}],
     "mission": [{"name": "workspace"}]
   },
-  "input": {"path": "code-scout/answer-input.json"},
+  "input": {"path": "repo-analyst/answer-input.json"},
   "contracts": {
-    "result_schema": {"path": "code-scout/answer.schema.json"}
+    "result_schema": {"path": "repo-analyst/answer.schema.json"}
   },
   "limits": {
     "run_duration_ms": 120000,
@@ -701,9 +708,9 @@ add only the mission surface their tasks require:
 
 | Manifest | Input and `Result.value` contract | Mission surface | Result class |
 | --- | --- | --- | --- |
-| `code-scout-answer.json` | `answer-input.json` / `answer.schema.json` | `cap` + `repo`; `workspace` | public |
-| `code-scout-review.json` | `review-input.json` / `review.schema.json` | add `runs`; add `history` + `private-history` | private |
-| `code-scout-improve.json` | `improve-input.json` / `candidate.schema.json` | same evidence surface as review | private |
+| `repo-analyst-answer.json` | `answer-input.json` / `answer.schema.json` | `cap` + `repo`; `workspace` | public |
+| `repo-analyst-review.json` | `review-input.json` / `review.schema.json` | add `runs`; add `history` + `private-history` | private |
+| `repo-analyst-improve.json` | `improve-input.json` / `candidate.schema.json` | same evidence surface as review | private |
 
 The manifests remain small and may share ordinary JSON-generation tooling, but
 the runtime does not introduce manifest inheritance. A question, a run review,
@@ -850,7 +857,9 @@ correlation ID and input/output sequences; generated sources and effective
 preludes carry their canonical evaluation/component identity and hashes.
 Every collection is deterministically ordered, paged under a result-byte
 ceiling, and uses an opaque cursor bound to the snapshot identity, operation,
-filters, and offset.
+filters, ordering, and offset. Run-scoped private collections accept ascending
+or descending sequence order, so a facade can request the latest exact record
+without walking every earlier page in one evaluation.
 
 `model-exchanges` needs no new record type: the V1 vocabulary already
 captures each LLM exchange as the `capability-input`/`capability-output`
@@ -864,19 +873,22 @@ provider wire format. MCP wire records deliberately add the bounded JSON-RPC
 body needed for MCP diagnosis while still excluding credentials and transport
 headers.
 
-`code-scout/runs.clj` is the prompt-visible facade over both native sources. It
+`repo-analyst/runs.clj` is the prompt-visible facade over both native sources. It
 exports cursor-aware `runs/list-runs`, `runs/turns`, `runs/model-exchanges`,
 `runs/capability-calls`, `runs/generated-sources`,
-`runs/effective-preludes`, and `runs/provider-exchanges`. This is required by
-the current prompt policy: once any prompt-visible prelude facade exists, raw
-`tool/...` entries are suppressed. Trace analysis must not depend on the model
-guessing hidden capability names or discovering them through `cap/list`.
-Native collection operations use the same opaque `next_cursor` convention as
-the filesystem server.
+`runs/effective-preludes`, and `runs/provider-exchanges`, plus latest-record
+and bounded `runs/review-seed` compositions. The seed combines three audited
+source reads but omits the cumulative LLM request transcript; the full exact
+exchange remains available through `runs/latest-model-exchange`. This is
+required by the current prompt policy: once any prompt-visible prelude facade
+exists, raw `tool/...` entries are suppressed. Trace analysis must not depend
+on the model guessing hidden capability names or discovering them through
+`cap/list`. Native collection operations use the same opaque `next_cursor`
+convention as the filesystem server.
 
 ### 8.4 Private inspection REPL profile
 
-The planned fixed profile is invoked as:
+The fixed profile is invoked as:
 
 ```console
 mix ptc.repl \
@@ -1023,8 +1035,10 @@ before opening it. Moving a manifest or host document therefore moves its
 relative configuration as a unit, while output destinations remain explicit
 operator paths.
 
-Do not invent a second result envelope. The persisted V1 projection remains
-`value`, `usage`, and `evaluation_memory`.
+Do not invent a second result envelope. Stdout retains the V1 `Result`
+projection (`value`, `usage`, and `evaluation_memory`); explicit `--output`
+and `--private-output` artifacts contain the validated `Result.value` alone so
+a later manifest can consume them directly.
 
 ## 10. Improvement and evaluation workflow
 
@@ -1055,15 +1069,15 @@ For the paths used above:
 
 ```console
 umask 077
-mkdir -p code-scout/private
-jq -jr '.value.candidate.content' \
-  code-scout/private/candidate.private.json \
-  > code-scout/private/agent.core.candidate.clj
-jq '.value.candidate |
+mkdir -p repo-analyst/private
+jq -jr '.candidate.content' \
+  repo-analyst/private/candidate.private.json \
+  > repo-analyst/private/agent.core.candidate.clj
+jq '.candidate |
     {component_id, base_source_hash, source_hash,
      path: "agent.core.candidate.clj"}' \
-  code-scout/private/candidate.private.json \
-  > code-scout/private/agent.core.override.json
+  repo-analyst/private/candidate.private.json \
+  > repo-analyst/private/agent.core.override.json
 ```
 
 ### 10.3 Evaluation
@@ -1080,17 +1094,20 @@ one frozen workflow environment. `evaluate.clj` therefore executes exactly one
 subject/case trial, and separate manifests choose exactly one workflow
 provider:
 
-- `evaluate-replay.json` selects `replay-llm` for deterministic compilation,
+- `repo-analyst-evaluate-replay.json` selects `replay-llm` for deterministic compilation,
   schema, capability-contract, bounded-control-flow, and known-regression
   fixtures;
-- `evaluate-live.json` selects `deepseek` for one live trial; and
+- `repo-analyst-evaluate-live.json` selects `deepseek` for one live trial; and
 - baseline and candidate, every case, and every repetition run in fresh Kernel
   invocations with unique no-clobber outputs.
 
 The evaluator component depends explicitly on `agent.core`, is the workflow
-entry, and calls its `run` export once with the bounded case. An override
-replaces that dependency before bundle compilation. `aggregate.clj` is a
-separate pure workflow component with no LLM or mission providers.
+entry, and calls its non-terminal `run-value` export once with the bounded
+case. `run-value` returns the model-authored answer to the evaluator so it can
+score before the outer workflow returns; ordinary `agent.core/run` remains a
+terminal entry. An override replaces that dependency before bundle
+compilation. `aggregate.clj` is a separate pure workflow component with no LLM
+or mission providers.
 
 Frozen inputs make live results attributable, not deterministic.
 
@@ -1100,24 +1117,36 @@ case, the subject (`baseline` or `candidate`), and trial configuration. It
 does not put candidate source in either trial input; only the trusted override
 descriptor supplies those bytes to a candidate run. A trusted host step
 generates each trial-input file consumed below from the candidate artifact
-and one frozen case before any trial runs; `evaluate-replay.json` and
-`evaluate-live.json` validate it against `trial-input.schema.json`. A replay
+and one frozen case before any trial runs; the two evaluation manifests
+validate it against `trial-input.schema.json` and their observable output
+against `trial-result.schema.json`. A replay
 baseline/candidate pair is:
 
+For each case, the same trusted step materializes `workspace_fixture` into a
+fresh private root and derives a private host-config copy whose MCP
+`--root` points there. The fixture map and candidate source are absent from
+trial input. The canonical case hash binds the complete trusted case, and the
+MCP `snapshot_identity` result binds the exact bytes actually exposed.
+
 ```console
-mkdir -p code-scout/private/trials
-mix ptc.run code-scout/evaluate-replay.json \
-  --host-config code-scout.host.json \
-  --private-mission private/replay-baseline.private.json \
-  --private-output code-scout/private/trials/replay-baseline.private.json
-mix ptc.run code-scout/evaluate-replay.json \
-  --host-config code-scout.host.json \
-  --private-mission private/replay-candidate.private.json \
-  --component-override-descriptor code-scout/private/agent.core.override.json \
-  --private-output code-scout/private/trials/replay-candidate.private.json
+mkdir -p repo-analyst/private/trials
+mix ptc.run repo-analyst-evaluate-replay.json \
+  --host-config repo-analyst.host.json \
+  --private-mission repo-analyst/private/replay-baseline.private.json \
+  --trace repo-analyst/private/trials/replay-baseline.trace.private.jsonl \
+  --inspect repo-analyst/private/trials/replay-baseline.inspection.private.jsonl \
+  --private-output repo-analyst/private/trials/replay-baseline.private.json
+mix ptc.run repo-analyst-evaluate-replay.json \
+  --host-config repo-analyst.host.json \
+  --private-mission repo-analyst/private/replay-candidate.private.json \
+  --component-override-descriptor repo-analyst/private/agent.core.override.json \
+  --trace repo-analyst/private/trials/replay-candidate.trace.private.jsonl \
+  --inspect repo-analyst/private/trials/replay-candidate.inspection.private.jsonl \
+  --private-output repo-analyst/private/trials/replay-candidate.private.json
 ```
 
-The host repeats the same baseline/candidate shape with `evaluate-live.json`
+The host repeats the same baseline/candidate shape with
+`repo-analyst-evaluate-live.json`
 for each motivating, regression, and held-out case. There is no in-run
 provider routing and no mission state is shared across trials.
 
@@ -1129,19 +1158,45 @@ compiles the same opened bytes under normal dependency, export, signature, and
 capability validation. It never reopens a replacement path and adds no runtime
 write capability.
 
-After the host combines the still-private trial `Result` projections into one
-bounded array, a provider-free `aggregate.json` invokes `aggregate.clj` to
-validate counts and produce distributions:
+The workflow cannot observe its own effective bundle, provider snapshots, or
+verified override identity. A trusted host join therefore combines each
+validated private trial value with that same run's canonical trace and private
+inspection artifact. The shipped jq program binds the exact result artifact to
+`run-stopped.data.result_hash`, requires every citation to be covered by a
+correlated successful `workspace.read`, verifies baseline/candidate override
+parity, and records distinct run IDs, bundle hashes, provider snapshots,
+replay fixture identity, and filesystem content identity:
 
 ```console
-jq -s '{"trials": .}' code-scout/private/trials/*.private.json \
-  > code-scout/private/trials.private.json
-mix ptc.run code-scout/aggregate.json \
-  --private-mission private/trials.private.json \
-  --private-output code-scout/private/evaluation.private.json
+for subject in replay-baseline replay-candidate; do
+  result="repo-analyst/private/trials/$subject.private.json"
+  result_hash="sha256:$(shasum -a 256 "$result" | cut -d' ' -f1)"
+  jq -n --arg result_hash "$result_hash" \
+    --slurpfile result "$result" \
+    --slurpfile trace "repo-analyst/private/trials/$subject.trace.private.jsonl" \
+    --slurpfile inspection \
+      "repo-analyst/private/trials/$subject.inspection.private.jsonl" \
+    -f repo-analyst/join-trial.jq \
+    > "repo-analyst/private/trials/$subject.joined.json"
+done
+jq -s --slurpfile input repo-analyst/aggregate-input.json \
+  '{"trials": ., "plan": $input[0].plan}' \
+  repo-analyst/private/trials/*.joined.json \
+  > repo-analyst/private/trials.private.json
+mix ptc.run repo-analyst-aggregate.json \
+  --private-mission repo-analyst/private/trials.private.json \
+  --private-output repo-analyst/private/evaluation.private.json
 ```
 
-Every trial and aggregate binds the subject, candidate/base hashes, case and
+`trial.schema.json` validates each joined record and `trials.schema.json`
+validates the aggregate input. The aggregate refuses missing or duplicate
+pairs, reused run IDs, case or candidate/override disagreement, and
+baseline/candidate pairs whose provider, fixture, mission bundle, or content
+identities drift. Its committed plan enumerates every allowed case ID, case
+hash, set, and repetition. An improvement cannot reach `accept` until that
+exact motivating, regression, held-out, and two-negative-control matrix is
+represented once on both sides; a partial matrix remains `inconclusive`.
+Every trial therefore binds the subject, candidate/base hashes, case and
 fixture-set hashes, effective bundle hash, provider snapshot, and
 filesystem/content snapshot identities. When present, an optional installation
 revision contributes to the provider snapshot. A schema-only provider hash is
@@ -1239,8 +1294,8 @@ resolved, sensitive snapshots are opened, stdio is spawned, or remote MCP is
 contacted. Discovery is a later dynamic validation phase.
 
 MCP-first Slices 4 and 5 are complete: private MCP feedback/exchange capture
-and the filesystem sample/cutover are now shared foundations for the remaining
-Code Scout flow.
+and the filesystem sample/cutover are shared foundations for the completed
+repo-analyst flow.
 
 ### Pre-C prerequisite — Confined trusted file loading
 
@@ -1343,11 +1398,11 @@ neither persisted nor attached to the error.
 
 #### E1 — Shared snapshot/query sources
 
-**Status:** in progress. The canonical half has landed:
-`ptc_trace_snapshot` is a mission-only host installation, captures through the
-existing `TraceSnapshot` owner, derives four fixed operations from its alias,
-and delegates every query to `TraceLog`. The paired private inspection
-snapshot/query layer and profile/manifest parity remain.
+**Status:** implemented. `ptc_trace_snapshot` and
+`ptc_inspection_snapshot` are mission-only host installations. Canonical
+capture precedes private capture; the inspection source validates every
+artifact against its captured run before exposing correlated bounded queries.
+Manifest-backed and profile-backed query surfaces have parity coverage.
 
 - adapt the existing trace owner into a provider builder;
 - add `InspectionSnapshot` and fixed inspection query/capability modules
@@ -1367,6 +1422,11 @@ exact private inspection without a second parser or caller-side timestamp
 join.
 
 #### E2 — `inspection-analysis-v1`
+
+**Status:** implemented. The shared analysis-session machinery retains the
+existing `log-analysis-v1` behavior and adds a closed, interactive-only
+private profile. Private values can reach only an explicitly authorized
+terminal, while the analysis trace remains canonical and payload-free.
 
 - extract the current log-specific profile frontend, assembly attestation,
   session lifecycle, evaluation, and persistence into shared internal
@@ -1404,9 +1464,11 @@ can reconstruct the complete tool exchange.
 
 ### Slice G — Read-only Code Scout
 
-**Status:** partly implemented. The shipped `cap` helpers and domain-blind
-`agent.main` entry are complete; the application facades, schemas, fixtures,
-and held-out evaluation remain.
+**Status:** implemented. The shipped `cap` helpers, domain-blind `agent.main`
+entry, prompt-visible `repo` and `runs` facades, application manifests,
+contracts, case sets, and filesystem-MCP acceptance are present. Live
+DeepSeek acceptance proves the public answer path and exact private
+conversation capture without application-specific Elixir registration.
 
 - extend the shipped `cap` library with envelope-aware `unwrap!` and
   opaque-cursor `with-cursor` helpers;
@@ -1428,6 +1490,13 @@ and held-out evaluation remain.
 runtime module contains its domain vocabulary.
 
 ### Slice H — Candidate evaluation
+
+**Status:** implemented; the final live-matrix policy remains an application
+choice. The trusted override and `llm_replay` runtime, composable
+`agent.core/run-value`, one-trial evaluator, negative controls, trace/result
+identity join, and provider-free aggregate are integrated. A deterministic
+fresh-run baseline/candidate E2E exercises a real filesystem fixture and
+verified override.
 
 - implement the trusted, hash-bearing component override descriptor;
 - implement `llm_replay`;

@@ -15,6 +15,19 @@
         "private_inspection"
       ]
     },
+    "replay-llm": {
+      "source": "llm_replay",
+      "fixtures": "repo-analyst/evaluation/replay.jsonl",
+      "data_class": "private_inspection",
+      "accepts_data": [
+        "normal",
+        "private_inspection"
+      ],
+      "ceilings": {
+        "max_entries": 1000,
+        "max_result_bytes": 250000
+      }
+    },
     "workspace": {
       "source": "mcp",
       "transport": {

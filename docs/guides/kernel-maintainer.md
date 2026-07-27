@@ -239,7 +239,9 @@ and the transport owners bound and correlate each request. Their module docs
 define the exact behavior. MCP tool errors are closed by default; a host
 mapping may opt into exact validated feedback bounded to 1,024 bytes. Runtime
 calls propagate only a derived W3C `traceparent`, with no baggage or
-operator-supplied trace value crossing the provider boundary.
+operator-supplied trace value crossing the provider boundary. Immutable MCP
+sources may freeze a host-installed content identity during assembly; this is
+provider provenance, not a mission capability grant.
 
 PtcRunner-owned canonical traces remain native rather than passing through
 MCP. A host-installed `ptc_trace_snapshot` uses `TraceSnapshot` to capture one

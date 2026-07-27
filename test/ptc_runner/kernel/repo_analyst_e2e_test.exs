@@ -40,7 +40,9 @@ defmodule PtcRunner.Kernel.RepoAnalystE2ETest do
     {:ok, host} = HostConfig.load(paths.host)
     {:ok, registry} = HostInstallation.registry(host)
 
-    assert {:ok, result} = RunBuilder.run(paths.manifest, registry)
+    assert {:ok, built} = RunBuilder.load_and_build(paths.manifest, registry)
+    assert [provider_snapshot] = built.config.connector_snapshots
+    assert {:ok, result} = PtcRunner.Kernel.run(built.entry_source, built.config)
     assert %{status: :ok, value: %{outcome: :returned, value: value}} = result.value
 
     # The literal is in every file, so page one is full and cannot contain the
@@ -53,6 +55,7 @@ defmodule PtcRunner.Kernel.RepoAnalystE2ETest do
     # Every citation is bound to the bytes that were queried.
     assert value["snapshot_hash"] =~ ~r/\Asha256:[0-9a-f]{64}\z/
     assert value["read"]["snapshot_hash"] == value["snapshot_hash"]
+    assert provider_snapshot["content_snapshot_hash"] == value["snapshot_hash"]
 
     # read-range asked for inclusive lines 2..3 and must translate that into
     # start_line 2 with line_count 2 rather than reading the whole file.
@@ -93,6 +96,25 @@ defmodule PtcRunner.Kernel.RepoAnalystE2ETest do
 
     refute prompt =~ "cap/unwrap!",
            "cap is composition-only and must not enter the catalog"
+  end
+
+  @tag :tmp_dir
+  test "an invalid content identity closes provider assembly", %{tmp_dir: dir} do
+    node = System.find_executable("node") || flunk("Node.js is required for this E2E")
+    paths = write_application(dir, node, search_program())
+
+    host =
+      paths.host
+      |> File.read!()
+      |> Jason.decode!()
+      |> put_in(["install", "workspace", "snapshot_identity", "field"], "missing_hash")
+
+    File.write!(paths.host, Jason.encode!(host))
+    {:ok, decoded} = HostConfig.load(paths.host)
+    {:ok, registry} = HostInstallation.registry(decoded)
+
+    assert {:error, :mcp_invalid_snapshot_identity} =
+             RunBuilder.load_and_build(paths.manifest, registry)
   end
 
   @tag :tmp_dir
@@ -247,7 +269,21 @@ defmodule PtcRunner.Kernel.RepoAnalystE2ETest do
         "data" => %{}
       },
       "input" => %{"value" => if(program, do: %{"program" => program}, else: %{})},
-      "providers" => %{"mission" => [%{"name" => "workspace"}]},
+      "providers" => %{
+        "mission" => [
+          %{
+            "name" => "workspace",
+            "config" => %{
+              "allow" => [
+                "workspace.list",
+                "workspace.find",
+                "workspace.search",
+                "workspace.read"
+              ]
+            }
+          }
+        ]
+      },
       "limits" => %{"evaluation_timeout_ms" => 20_000, "run_duration_ms" => 90_000}
     }
   end
@@ -281,6 +317,10 @@ defmodule PtcRunner.Kernel.RepoAnalystE2ETest do
               "error_feedback" => "bounded"
             },
             "snapshot_info" => %{"as" => "workspace.info", "effect" => "read"}
+          },
+          "snapshot_identity" => %{
+            "tool" => "snapshot_info",
+            "field" => "snapshot_hash"
           },
           "installation_revision" => "filesystem-sample-0.1.0",
           "ceilings" => %{

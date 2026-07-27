@@ -7,16 +7,20 @@ defmodule PtcRunner.Kernel.ResultArtifact do
   atomicity, and cannot express that a value must never be published. This
   writer gives a run one explicit destination instead.
 
-  Persistence is atomic and refuses to clobber. Content is written to an
-  exclusive temporary sibling, linked into place, and the temporary removed, so
-  a reader never observes a partial artifact and an existing destination fails
-  rather than being overwritten. A private artifact is restricted to `0600`
-  before any content is written, never after.
+  Persistence is atomic and refuses to clobber. Content is deterministic
+  canonical JSON: the SHA-256 digest of the exact artifact bytes is therefore a
+  stable identity for the successful value. Content is written to an exclusive
+  temporary sibling, linked into place, and the temporary removed, so a reader
+  never observes a partial artifact and an existing destination fails rather
+  than being overwritten. A private artifact is restricted to `0600` before
+  any content is written, never after.
 
   The private/normal distinction is authority, not formatting. A private result
   may only reach a private destination; the caller decides the class and this
   module refuses to write a private value to a normal artifact.
   """
+
+  alias PtcRunner.Kernel.DeterministicJSON
 
   @type class :: :normal | :private
 
@@ -59,7 +63,7 @@ defmodule PtcRunner.Kernel.ResultArtifact do
   end
 
   defp encode(value) do
-    case Jason.encode(value) do
+    case DeterministicJSON.encode(value) do
       {:ok, encoded} -> {:ok, encoded}
       {:error, _reason} -> {:error, :result_persistence_failed}
     end

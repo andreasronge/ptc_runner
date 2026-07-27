@@ -1,8 +1,7 @@
 # MCP-first capability platform — implementation plan
 
-> **Status:** active implementation plan, promoted from `future/` on
-> 2026-07-25. Slices 0 through 5 are complete. Every API
-> below remains planned unless explicitly described as current behavior. The
+> **Status:** implementation complete, retained temporarily as the slice
+> acceptance record. Slices 0 through 5 are complete. The
 > protocol target is the locked `2026-07-28` release
 > candidate reviewed on 2026-07-23. Implementation may target that candidate
 > before final publication; reconcile any final specification or stable-SDK
@@ -46,7 +45,7 @@ The current implementation already establishes useful boundaries:
 | --- | --- | --- |
 | `PtcRunner.Kernel.Capability` | Validates a name (dots allowed), host-declared effect, bounded schemas, visibility, and a callback that returns `ProviderError` values on failure | MCP tools should become ordinary capabilities; the Kernel should not learn MCP tool semantics |
 | `PtcRunner.Kernel.ProviderRegistry` | Accepts trusted builders and normalizes `{capabilities, snapshot, close}` | Host JSON should decode into existing builders, not create another provider framework |
-| `PtcRunner.Kernel.MCPSource` | Implements read-only MCP `2026-07-28` over typed stateless Streamable HTTP and owned stdio transports; installation still requires Elixir | The common protocol and transport ownership core exists; data-driven installation remains |
+| `PtcRunner.Kernel.MCPSource` | Implements read-only MCP `2026-07-28` over typed stateless Streamable HTTP and owned stdio transports, including host-installed frozen content identity | Host JSON installs the common source without application-specific Elixir |
 | `PtcRunner.Kernel.MCPLease` | Removed with the obsolete protocol-session lifecycle | Stdio needs transport ownership, not a protocol lease |
 | Public filesystem provider | The former `FileCapability` and implicit `file-read` builder were deleted after MCP filesystem acceptance | Keep model-accessible filesystem authority on the single MCP path |
 | `PtcRunner.Kernel.JSONSchema` | Compiles a bounded 2020-12 subset and currently requires object roots for inputs and outputs | Input and output compilation need distinct root rules; full remote schemas must not bypass the bounded callable profile |
@@ -80,7 +79,7 @@ Do not create public `mcp_stdio` and `mcp_http` source kinds. They speak the
 same protocol and produce the same capabilities; only framing, request
 metadata, cancellation, and process ownership differ.
 
-Planned stdio installation:
+Current stdio installation:
 
 ```json
 {
@@ -135,7 +134,7 @@ Planned stdio installation:
 }
 ```
 
-Planned remote installation uses the same outer grammar:
+Remote installation uses the same outer grammar:
 
 ```json
 {

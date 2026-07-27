@@ -30,6 +30,7 @@ defmodule PtcRunner.Kernel.MCPSource do
   alias PtcRunner.Kernel.Capability
   alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.InspectionSink
+  alias PtcRunner.Kernel.JSONSchema
   alias PtcRunner.Kernel.MCPLauncherStaging
   alias PtcRunner.Kernel.MCPProtocol
   alias PtcRunner.Kernel.MCPRequestContext
@@ -53,6 +54,7 @@ defmodule PtcRunner.Kernel.MCPSource do
   @max_launcher_symlinks 40
   @launcher_protocol_version 1
   @header_token ~r/\A[!#$%&'*+\-.^_`|~0-9A-Za-z]+\z/
+  @sha256 ~r/\Asha256:[0-9a-f]{64}\z/
   @name ~r/\A[a-z][a-z0-9._-]{0,127}\z/
   @sse_event_separator ~r/(?:\r\n|\r|\n)(?:\r\n|\r|\n)/
 
@@ -112,6 +114,10 @@ defmodule PtcRunner.Kernel.MCPSource do
       (default `128`).
     * `:max_pages` - discovery pagination ceiling from 1 through 64
       (default `16`).
+    * `:snapshot_identity` - optional `%{tool: upstream_name, field: name}`.
+      After discovery, the source invokes that mapped read-only tool once with
+      an empty argument object, requires the named field to contain a lowercase
+      `sha256:` digest, and folds it into the frozen provider snapshot.
     * `:installation_revision` - optional bounded non-secret behavior revision
       included in the safe provider snapshot.
 
@@ -127,7 +133,7 @@ defmodule PtcRunner.Kernel.MCPSource do
   `:mcp_transport_error`, `:mcp_protocol_error`, `:mcp_remote_error`,
   `:mcp_response_exceeded`, `:mcp_catalog_exceeded`, `:mcp_invalid_catalog`,
   `:mcp_invalid_tool_schema`, `:mcp_unsupported_result`,
-  or `:mcp_mapped_tool_missing`.
+  `:mcp_mapped_tool_missing`, or `:mcp_invalid_snapshot_identity`.
 
   ## Frozen result and snapshot contracts
 
@@ -142,7 +148,10 @@ defmodule PtcRunner.Kernel.MCPSource do
   and transport failures never include remote messages or payloads.
 
   The safe connector snapshot has top-level fields `provider`, `protocol`,
-  `transport`, `server_info_hash`, `snapshot_hash`, and `tools`. Stdio
+  `transport`, `server_info_hash`, `snapshot_hash`, and `tools`. When the host
+  installs `snapshot_identity`, it also carries the validated
+  `content_snapshot_hash`; changing that identity changes the overall
+  `snapshot_hash`. Stdio
   snapshots additionally contain the launcher protocol, launcher digest, and
   server-executable digest. The nullable server hash fingerprints bounded self-reported
   implementation identity without exposing its untrusted text. Successful
@@ -175,6 +184,7 @@ defmodule PtcRunner.Kernel.MCPSource do
       :max_result_bytes,
       :max_catalog_tools,
       :max_pages,
+      :snapshot_identity,
       :installation_revision
     ]
 
@@ -191,6 +201,8 @@ defmodule PtcRunner.Kernel.MCPSource do
          max_catalog_tools when max_catalog_tools in 1..128 <-
            Keyword.get(opts, :max_catalog_tools, 128),
          max_pages when max_pages in 1..64 <- Keyword.get(opts, :max_pages, 16),
+         {:ok, snapshot_identity} <-
+           installed_snapshot_identity(Keyword.get(opts, :snapshot_identity), tools),
          {:ok, installation_revision} <-
            optional_installation_revision(Keyword.get(opts, :installation_revision)) do
       {:ok,
@@ -201,6 +213,7 @@ defmodule PtcRunner.Kernel.MCPSource do
          max_result_bytes: max_result_bytes,
          max_catalog_tools: max_catalog_tools,
          max_pages: max_pages,
+         snapshot_identity: snapshot_identity,
          installation_revision: installation_revision
        }}
     else
@@ -320,6 +333,18 @@ defmodule PtcRunner.Kernel.MCPSource do
   end
 
   defp installed_tools(_tools), do: {:error, :invalid_tools}
+
+  defp installed_snapshot_identity(nil, _tools), do: {:ok, nil}
+
+  defp installed_snapshot_identity(%{tool: tool, field: field} = identity, tools)
+       when map_size(identity) == 2 and is_binary(tool) and is_binary(field) do
+    if Map.has_key?(tools, tool) and field =~ @name,
+      do: {:ok, identity},
+      else: {:error, :invalid_snapshot_identity}
+  end
+
+  defp installed_snapshot_identity(_identity, _tools),
+    do: {:error, :invalid_snapshot_identity}
 
   defp optional_installation_revision(nil), do: {:ok, nil}
 
@@ -690,8 +715,17 @@ defmodule PtcRunner.Kernel.MCPSource do
          {:ok, discovered} <- list_tools(transport, installed),
          {:ok, capabilities, tools} <-
            capabilities(transport, installed, selected, discovered),
+         {:ok, content_snapshot_hash} <-
+           content_snapshot_hash(transport, installed, selected, discovered),
          {:ok, snapshot} <-
-           snapshot(provider, transport, tools, server.server_info, installed) do
+           snapshot(
+             provider,
+             transport,
+             tools,
+             server.server_info,
+             content_snapshot_hash,
+             installed
+           ) do
       {:ok, capabilities, snapshot}
     else
       {:error, _reason} = error -> error
@@ -850,7 +884,39 @@ defmodule PtcRunner.Kernel.MCPSource do
     end
   end
 
-  defp snapshot(provider, %{type: type} = transport, tools, server_info, installed)
+  defp content_snapshot_hash(_transport, %{snapshot_identity: nil}, _selected, _discovered),
+    do: {:ok, nil}
+
+  defp content_snapshot_hash(
+         transport,
+         %{snapshot_identity: %{tool: upstream, field: field}} = installed,
+         selected,
+         discovered
+       ) do
+    mapping = Map.fetch!(installed.tools, upstream)
+
+    with tool when is_map(tool) <- discovered[upstream],
+         {:ok, contract} <- MCPProtocol.selected_tool(tool),
+         {:ok, capability, _snapshot_tool} <-
+           assemble_capability(transport, upstream, mapping, contract, selected),
+         true <- JSONSchema.valid?(capability.input_validator, %{}),
+         {:ok, value} <- capability.callback.(%{}, nil),
+         hash when is_binary(hash) <- value[field],
+         true <- hash =~ @sha256 do
+      {:ok, hash}
+    else
+      _reason -> {:error, :mcp_invalid_snapshot_identity}
+    end
+  end
+
+  defp snapshot(
+         provider,
+         %{type: type} = transport,
+         tools,
+         server_info,
+         content_snapshot_hash,
+         installed
+       )
        when is_binary(provider) and type in [:streamable_http, :stdio] do
     transport_name = Atom.to_string(type)
     identity_projection = transport_identity_projection(transport)
@@ -868,6 +934,7 @@ defmodule PtcRunner.Kernel.MCPSource do
                 "installation_revision",
                 installed.installation_revision
               ) ++
+              optional_projection("content_snapshot_hash", content_snapshot_hash) ++
               [
                 {"server_info_hash", server_info_hash},
                 {"tools",
@@ -903,6 +970,7 @@ defmodule PtcRunner.Kernel.MCPSource do
           "installation_revision",
           installed.installation_revision
         )
+        |> maybe_put_snapshot("content_snapshot_hash", content_snapshot_hash)
 
       {:ok, snapshot}
     end

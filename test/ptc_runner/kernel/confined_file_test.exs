@@ -99,6 +99,26 @@ defmodule PtcRunner.Kernel.ConfinedFileTest do
                ConfinedFile.read(root, "up/outside-secret", @max_bytes)
     end
 
+    test "rejects replacement of a resolved parent before opening the file",
+         %{root: root, outside: outside} do
+      outside_nested = Path.join(outside, "outside-nested")
+      File.mkdir_p!(outside_nested)
+      File.write!(Path.join(outside_nested, "component.clj"), "outside")
+      original = Path.join(root, "nested")
+      held = Path.join(root, "nested-held")
+
+      replace_parent = fn ->
+        File.rename!(original, held)
+        File.ln_s!(outside_nested, original)
+        :ok
+      end
+
+      assert {:error, :changed_during_read} =
+               ConfinedFile.read(root, "nested/component.clj", @max_bytes,
+                 before_open: replace_parent
+               )
+    end
+
     test "rejects a link cycle", %{root: root} do
       File.ln_s!("b.json", Path.join(root, "a.json"))
       File.ln_s!("a.json", Path.join(root, "b.json"))
