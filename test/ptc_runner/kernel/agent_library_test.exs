@@ -1016,7 +1016,47 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
 
   # The guard is intact for the effect nothing installs yet. An undeclared
   # effect is `:unknown` and counts as unsafe by the same rule.
-  test "agent.core does not retry an ordinary runtime error after a write capability call" do
+  # A closing turn is offered once. It exists so an unsafe failure costs the
+  # last program rather than the whole investigation, and it must not become a
+  # second chance to run anything: the write is called exactly once across both
+  # turns, and a second unsafe failure ends the run.
+  test "agent.core offers exactly one closing turn after an unsafe failure" do
+    parent = self()
+
+    unsafe = %{
+      content: nil,
+      tool_calls: [
+        %{
+          id: "unsafe",
+          name: "run_ptc_lisp",
+          args: %{"program" => ~S|(do (tool/commit {}) (+ {} 1))|}
+        }
+      ]
+    }
+
+    {:ok, commit} =
+      Capability.new(
+        name: "commit",
+        effect: :write,
+        input_schema: %{"type" => "object"},
+        callback: fn _ ->
+          send(parent, :commit_called)
+          {:ok, 42}
+        end
+      )
+
+    {:ok, config} =
+      agent_config([unsafe, unsafe, @recovered], [], mission_capabilities: [commit])
+
+    assert {:error, %{kind: :workflow_failed}} =
+             Kernel.run(~S|(agent.core/run "Close out" {"max_turns" 4})|, config)
+
+    assert_receive {:agent_request, _first}
+    assert_receive {:agent_request, _closing}
+    refute_receive {:agent_request, _third}
+  end
+
+  test "agent.core does not repeat an ordinary runtime error after a write capability call, but closes the run" do
     response = %{
       content: nil,
       tool_calls: [
@@ -1039,14 +1079,14 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     {:ok, config} =
       agent_config([response, @recovered], [], mission_capabilities: [commit])
 
-    assert {:error, %{kind: :workflow_failed}} =
+    assert {:ok, _closing_result} =
              Kernel.run(~S|(agent.core/run "Do not repeat the write" {"max_turns" 3})|, config)
 
     assert_receive {:agent_request, _first}
-    refute_receive {:agent_request, _second}
+    assert_receive {:agent_request, _second}
   end
 
-  test "agent.core does not retry an input contract failure after earlier capability activity" do
+  test "agent.core does not repeat an input contract failure after earlier capability activity, but closes the run" do
     response = %{
       content: nil,
       tool_calls: [
@@ -1072,19 +1112,19 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
       )
 
     {:ok, config} =
-      agent_config([response], [],
+      agent_config([response, @recovered], [],
         mission_source: mission_source,
         mission_capabilities: [touch]
       )
 
-    assert {:error, %{kind: :workflow_failed}} =
+    assert {:ok, _closing_result} =
              Kernel.run(~S|(agent.core/run "Do not repeat the write" {"max_turns" 3})|, config)
 
     assert_receive {:agent_request, _first}
-    refute_receive {:agent_request, _second}
+    assert_receive {:agent_request, _second}
   end
 
-  test "agent.core does not retry a higher-order contract failure after earlier activity" do
+  test "agent.core does not repeat a higher-order contract failure after earlier activity, but closes the run" do
     response = %{
       content: nil,
       tool_calls: [
@@ -1113,16 +1153,16 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
       )
 
     {:ok, config} =
-      agent_config([response], [],
+      agent_config([response, @recovered], [],
         mission_source: mission_source,
         mission_capabilities: [touch]
       )
 
-    assert {:error, %{kind: :workflow_failed}} =
+    assert {:ok, _closing_result} =
              Kernel.run(~S|(agent.core/run "Do not repeat the write" {"max_turns" 3})|, config)
 
     assert_receive {:agent_request, _first}
-    refute_receive {:agent_request, _second}
+    assert_receive {:agent_request, _second}
   end
 
   test "agent.core retries a pure output contract failure" do
@@ -1414,8 +1454,10 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
         callback: fn _ -> {:ok, 42} end
       )
 
+    # The closing turn is offered once. A second unsafe failure ends the run,
+    # which is the outcome run-outcome must attribute to the subject.
     {:ok, non_retryable_config} =
-      agent_config([non_retryable], [], mission_capabilities: [commit])
+      agent_config([non_retryable, non_retryable], [], mission_capabilities: [commit])
 
     assert {:ok,
             %{

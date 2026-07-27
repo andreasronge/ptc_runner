@@ -481,6 +481,13 @@ Today a mission cannot reach anything else: the host document accepts only
 sources declare the same. The `write` row exists for the capability class
 nothing installs yet.
 
+When a failure is genuinely unsafe to retry, the shipped loop still does not
+repeat the program — but it no longer discards the run either. It spends one
+closing turn telling the model that the program cannot be retried and asking for
+a decision from the evidence already gathered. The offer is made once; a second
+unsafe failure ends the run as a subject failure. An investigation that has
+completed eighteen evaluations should not lose all of them to its nineteenth.
+
 This policy lives in PTC-Lisp, while the Kernel remains responsible for
 accounting, effect classification, and rejecting late results after closure.
 

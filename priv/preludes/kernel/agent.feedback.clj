@@ -40,3 +40,10 @@
          "outcome=" outcome "; error_code=" code
          (if message (str "; message=" message) "")
          ". Send one corrected run_ptc_lisp call.")))
+
+(defn non-retryable [evaluation]
+  (str "The PTC-Lisp evaluation did not return successfully and cannot be retried, "
+       "because it already performed an effect this runtime cannot undo. "
+       "error_code=" (or (get evaluation :kind) (get evaluation :outcome))
+       ". Do not repeat that program. Return your best decision from the evidence "
+       "you have already gathered, using return or fail on this turn."))

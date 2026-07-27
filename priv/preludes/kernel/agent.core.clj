@@ -78,7 +78,8 @@
       (fail (result/error :invalid-prompt :invalid-initial-state))
       (loop [turn 0
              messages [{"role" "user" "content" task}]
-             prompt-state initial-prompt-state]
+             prompt-state initial-prompt-state
+             closing? false]
         (if (>= turn max-turns)
           (subject-failure :turn-limit :turn-limit-exceeded)
           (let [request (bounded-request prompt-state messages max-transcript-chars)
@@ -102,10 +103,28 @@
                           observation (agent.feedback/success evaluation max-observation-chars)]
                       (recur (inc turn)
                              (append-correlated messages action observation)
-                             next-prompt-state))
+                             next-prompt-state
+                             closing?))
                     (subject-failure :turn-limit :intermediate-result))
                   (if (false? (get evaluation :retryable?))
-                    (subject-failure :non-retryable-evaluation (get evaluation :kind))
+                    ;; An unsafe failure forbids repeating the program, not
+                    ;; salvaging the run. Spend one closing turn asking for a
+                    ;; decision from evidence already gathered rather than
+                    ;; discarding every prior evaluation; a second unsafe
+                    ;; failure ends it.
+                    (if (or closing? (not (agent.retry/retry? turn max-turns)))
+                      (subject-failure :non-retryable-evaluation (get evaluation :kind))
+                      (let [next-prompt-state
+                            (transition-prompt
+                              prompt-state
+                              (completed-event :evaluation-error turn max-turns))]
+                        (recur (inc turn)
+                               (append-correlated
+                                 messages
+                                 action
+                                 (agent.feedback/non-retryable evaluation))
+                               next-prompt-state
+                               true)))
                     (if (agent.retry/retry? turn max-turns)
                       (let [next-prompt-state
                             (transition-prompt
@@ -116,7 +135,8 @@
                                  messages
                                  action
                                  (agent.feedback/evaluation-error evaluation))
-                               next-prompt-state))
+                               next-prompt-state
+                               closing?))
                       (subject-failure :turn-limit :evaluation-error)))))
 
               :protocol-error
@@ -129,7 +149,8 @@
                          (conj messages
                                {"role" "user"
                                 "content" (agent.feedback/protocol-error action)})
-                         next-prompt-state))
+                         next-prompt-state
+                         closing?))
                 (subject-failure :turn-limit :protocol-error))
 
               :provider-error
