@@ -9,6 +9,12 @@ defmodule PtcRunner.Kernel.HostConfig do
   sampling parameters. A manifest may later select an installed alias and
   narrow its authority; it cannot introduce or replace any field decoded here.
 
+  An optional `limits` block replaces the compiled installed ceilings, so an
+  operator can permit work measured in hours rather than in one bounded run.
+  Omitted names keep their compiled installed default, and a manifest still
+  requests only values at or below whatever is installed here — raising a
+  ceiling permits a longer run without silently producing one.
+
   Loading is bounded, path-confined, duplicate-key rejecting, and side-effect
   free. In particular, credential declarations are validated but environment
   variables and files are not read. Executables are not resolved, processes
@@ -28,10 +34,15 @@ defmodule PtcRunner.Kernel.HostConfig do
   """
 
   alias PtcRunner.Kernel.ConfinedFile
+  alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.StrictJSON
 
   @max_config_bytes 1_000_000
   @max_credentials 128
+  # Thirty days in milliseconds. High enough for a run measured in days and
+  # low enough that a mistyped value fails loading instead of scheduling a timer
+  # nobody will outlive.
+  @max_limit_value 2_592_000_000
   @max_installations 128
   @max_tools 128
   @max_string_bytes 131_072
@@ -61,7 +72,7 @@ defmodule PtcRunner.Kernel.HostConfig do
     transfer-encoding
   )
 
-  @enforce_keys [:path, :directory, :runtime, :credentials, :install]
+  @enforce_keys [:path, :directory, :runtime, :limits, :credentials, :install]
   defstruct @enforce_keys
 
   @type credential ::
@@ -176,6 +187,7 @@ defmodule PtcRunner.Kernel.HostConfig do
          path: canonical,
          directory: directory,
          runtime: normalized.runtime,
+         limits: normalized.limits,
          credentials: normalized.credentials,
          install: normalized.install
        )}
@@ -193,18 +205,20 @@ defmodule PtcRunner.Kernel.HostConfig do
           {:ok,
            %{
              runtime: %{stdio_launcher: binary() | nil},
+             limits: Limits.t(),
              credentials: %{binary() => credential()},
              install: %{binary() => installation()}
            }}
           | {:error, :invalid_host_config}
   def decode(value, directory) when is_map(value) and is_binary(directory) do
     with :ok <-
-           exact_keys(value, ~w($schema runtime credentials install), ~w(install)),
+           exact_keys(value, ~w($schema runtime limits credentials install), ~w(install)),
          :ok <- optional_schema(value["$schema"]),
          {:ok, runtime} <- runtime(Map.get(value, "runtime", %{})),
+         {:ok, limits} <- limits(Map.get(value, "limits", %{})),
          {:ok, credentials} <- credentials(Map.get(value, "credentials", %{})),
          {:ok, install} <- installations(value["install"], credentials) do
-      {:ok, %{runtime: runtime, credentials: credentials, install: install}}
+      {:ok, %{runtime: runtime, limits: limits, credentials: credentials, install: install}}
     else
       _reason -> {:error, :invalid_host_config}
     end
@@ -217,6 +231,38 @@ defmodule PtcRunner.Kernel.HostConfig do
   defp optional_schema(value) do
     if valid_string?(value, 2_048), do: :ok, else: {:error, :invalid_schema_annotation}
   end
+
+  # The installed ceiling belongs to the operator, not the manifest. Pinning it
+  # to one compiled-in table made every ceiling except three timeouts
+  # unraisable, so a long-running agent could not be configured at all: a run
+  # was capped at 16 model calls and 128 tool calls regardless of what its
+  # manifest asked for. An omitted block keeps the previous compiled defaults,
+  # and a manifest may still only narrow whatever ends up installed.
+  defp limits(value) when is_map(value) do
+    installed = Map.from_struct(Limits.installed_defaults())
+
+    with :ok <- exact_keys(value, Limits.names(), []),
+         {:ok, overrides} <- limit_overrides(Map.to_list(value), %{}),
+         {:ok, limits} <- Limits.new(Map.merge(installed, overrides)) do
+      {:ok, limits}
+    else
+      _reason -> {:error, :invalid_limits}
+    end
+  end
+
+  defp limits(_value), do: {:error, :invalid_limits}
+
+  defp limit_overrides([], overrides), do: {:ok, overrides}
+
+  defp limit_overrides([{key, number} | rest], overrides)
+       when is_integer(number) and number > 0 and number <= @max_limit_value do
+    case Limits.name(key) do
+      {:ok, name} -> limit_overrides(rest, Map.put(overrides, name, number))
+      :error -> {:error, :invalid_limits}
+    end
+  end
+
+  defp limit_overrides(_values, _overrides), do: {:error, :invalid_limits}
 
   defp runtime(value) when is_map(value) do
     with :ok <- exact_keys(value, ~w(stdio_launcher), []),
@@ -818,10 +864,31 @@ defmodule PtcRunner.Kernel.HostConfig do
       "properties" => %{
         "$schema" => %{"type" => "string", "minLength" => 1, "maxLength" => 2_048},
         "runtime" => runtime_schema(),
+        "limits" => limits_schema(),
         "credentials" => credentials_schema(),
         "install" => installations_schema()
       }
     }
+  end
+
+  defp limits_schema do
+    properties =
+      Map.new(Limits.names(), fn name ->
+        {name,
+         %{
+           "type" => "integer",
+           "minimum" => 1,
+           "maximum" => @max_limit_value,
+           "description" => "Installed ceiling for #{name}; a manifest may only request less."
+         }}
+      end)
+
+    properties
+    |> closed_object()
+    |> Map.put(
+      "description",
+      "Optional operator-owned installed ceilings. Omitted limits keep the compiled host defaults."
+    )
   end
 
   defp runtime_schema do

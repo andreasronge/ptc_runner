@@ -73,14 +73,15 @@ defmodule Mix.Tasks.Ptc.Run do
          :ok <- exclusive_mission_inputs(opts),
          :ok <- check_options(opts),
          {:ok, registry, host} <- registry(opts) do
+      run_opts = with_installed_limits(run_options(opts), host)
+
       result =
         if Keyword.get(opts, :check, false) do
-          with {:ok, view} <- check(manifest, registry, host, run_options(opts)) do
+          with {:ok, view} <- check(manifest, registry, host, run_opts) do
             report_check(view)
           end
         else
-          with {:ok, result, class} <-
-                 run_with_class(manifest, registry, run_options(opts)) do
+          with {:ok, result, class} <- run_with_class(manifest, registry, run_opts) do
             report(result, class, opts)
           end
         end
@@ -143,6 +144,13 @@ defmodule Mix.Tasks.Ptc.Run do
   end
 
   defp run_options(opts), do: Keyword.drop(opts, [:host_config, :check])
+
+  # A host document that declares ceilings replaces the compiled installed
+  # defaults. Manifests still narrow whatever is installed here.
+  defp with_installed_limits(opts, nil), do: opts
+
+  defp with_installed_limits(opts, %HostConfig{limits: limits}),
+    do: Keyword.put(opts, :installed_limits, limits)
 
   defp check(manifest, registry, host, opts) do
     with {:ok, built} <- RunBuilder.load_and_build(manifest, registry, opts) do

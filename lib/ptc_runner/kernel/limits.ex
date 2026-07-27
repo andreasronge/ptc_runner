@@ -97,6 +97,18 @@ defmodule PtcRunner.Kernel.Limits do
   @doc "Returns practical host ceilings for manifest-backed model and connector runs."
   def installed_defaults, do: struct!(__MODULE__, @installed_defaults)
 
+  @names @defaults |> Map.keys() |> Enum.map(&Atom.to_string/1) |> Enum.sort()
+  @name_index Map.new(Map.keys(@defaults), &{Atom.to_string(&1), &1})
+
+  @spec names() :: [binary()]
+  @doc "Returns every public limit name, sorted, for operator-facing validation."
+  def names, do: @names
+
+  @spec name(term()) :: {:ok, atom()} | :error
+  @doc "Resolves one public limit name to its field, or `:error` when unknown."
+  def name(value) when is_binary(value), do: Map.fetch(@name_index, value)
+  def name(_value), do: :error
+
   @spec new(map() | keyword()) :: {:ok, t()} | {:error, :invalid_limits}
   @doc """
   Builds a complete limit set by applying atom-keyed overrides to the defaults.

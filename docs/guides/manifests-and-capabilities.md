@@ -311,6 +311,39 @@ Limits cover the complete run, workflow and mission evaluations, process heap,
 source, retained continuation memory, provider concurrency and calls,
 capability arguments/results, terminal results, and canonical events.
 
+### Raising a ceiling for long-running work
+
+The compiled ceilings suit one bounded run. An agent that must work for hours
+needs more turns, more model calls, and more trace events than they allow, so
+the trusted host document may replace them with its own `limits` block:
+
+```json
+"limits": {
+  "run_duration_ms": 86400000,
+  "workflow_timeout_ms": 86400000,
+  "subordinate_evaluations": 500,
+  "workflow_capability_calls_per_name": 1000,
+  "mission_capability_calls": 8000,
+  "normal_event_count": 20000
+}
+```
+
+Every limit name is accepted, each value is a positive integer at most
+2,592,000,000, and any omitted name keeps its compiled installed default. The
+manifest rule is unchanged: it may still only request values at or below
+whatever the host installed, so raising a ceiling here does not by itself
+lengthen any run. A manifest that needs the larger budget must ask for it.
+
+Both documents are therefore explicit — the host decides the maximum an
+operator permits, and the manifest declares what its application needs.
+
+The most common reasons a long agent loop stops early are
+`subordinate_evaluations` (its turn count),
+`workflow_capability_calls_per_name` (its model calls),
+`mission_capability_calls` (its tool calls), and `normal_event_count` (its
+retained trace evidence). Raising `run_duration_ms` alone does not help,
+because the binding deadline for one workflow entry is `workflow_timeout_ms`.
+
 ## Events and inspection
 
 Normal canonical events are sanitized and bounded:
