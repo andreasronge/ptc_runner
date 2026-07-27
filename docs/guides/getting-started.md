@@ -2,7 +2,7 @@
 
 This guide runs a complete credential-free PtcRunner workflow. The workflow is
 written in PTC-Lisp, receives JSON input, and returns a bounded JSON value plus
-runtime usage. No model key or Elixir source code is required.
+runtime usage. No model key and no host code are required.
 
 PTC-Lisp is a small, eager, bounded subset of Clojure, with a few additions for
 agent execution such as `return`, `fail`, `tool/...` capability calls, and the
@@ -128,11 +128,15 @@ one session. Failed forms do not publish their candidate definitions.
 
 ## Next steps
 
-- [Building agents](building-agents.md) explains model calls and confined
-  model-authored mission programs.
-- [Manifests and capabilities](manifests-and-capabilities.md) documents the
-  declarative authority boundary.
-- [Running and debugging](running-and-debugging.md) covers traces, private
-  inspection, the REPL, and the development Viewer.
-- [PTC-Lisp specification](../ptc-lisp-specification.md) and
-  [function reference](../function-reference.md) define the language surface.
+Continue in this order:
+
+1. [Manifests and capabilities](manifests-and-capabilities.md) documents the
+   declarative authority boundary — components, input, contracts, providers,
+   limits, and event policy.
+2. [Building agents](building-agents.md) explains model calls and confined
+   model-authored mission programs.
+3. [Running and debugging](running-and-debugging.md) covers commands, traces,
+   private inspection, and the development Viewer.
+
+The [PTC-Lisp specification](../ptc-lisp-specification.md) and
+[function reference](../function-reference.md) define the language surface.

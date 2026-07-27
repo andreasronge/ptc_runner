@@ -885,7 +885,20 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     assert List.last(second["messages"])["content"] =~ "api/double input value"
   end
 
-  test "agent.core does not retry an output contract failure after a capability call" do
+  # Retryability asks whether repeating the program could repeat an effect the
+  # Kernel cannot undo. Every capability a mission can call is declared `:read`
+  # — the host document cannot express anything else — and the reserved runtime
+  # routes read in-process state. Treating those as activity that forbids a
+  # retry made the loop's own correction path unreachable for any agent whose
+  # work begins by reading its evidence.
+  @recovered %{
+    content: nil,
+    tool_calls: [
+      %{id: "recovered", name: "run_ptc_lisp", args: %{"program" => ~S|(return "ok")|}}
+    ]
+  }
+
+  test "agent.core retries an output contract failure after a read-only capability call" do
     response = %{
       content: nil,
       tool_calls: [
@@ -907,19 +920,19 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
       )
 
     {:ok, config} =
-      agent_config([response], [],
+      agent_config([response, @recovered], [],
         mission_source: mission_source,
         mission_capabilities: [touch]
       )
 
-    assert {:error, %{kind: :workflow_failed}} =
-             Kernel.run(~S|(agent.core/run "Do not duplicate" {"max_turns" 3})|, config)
+    assert {:ok, _result} =
+             Kernel.run(~S|(agent.core/run "Correct the shape" {"max_turns" 3})|, config)
 
     assert_receive {:agent_request, _first}
-    refute_receive {:agent_request, _second}
+    assert_receive {:agent_request, _second}
   end
 
-  test "agent.core does not retry after a mission runtime-tool call" do
+  test "agent.core retries after a mission runtime-tool call" do
     response = %{
       content: nil,
       tool_calls: [
@@ -935,19 +948,16 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
       (do (tool/runtime-usage {}) 42))
     """
 
-    {:ok, config} = agent_config([response], [], mission_source: mission_source)
+    {:ok, config} = agent_config([response, @recovered], [], mission_source: mission_source)
 
-    assert {:error, %{kind: :workflow_failed}} =
-             Kernel.run(
-               ~S|(agent.core/run "Do not repeat runtime reads" {"max_turns" 3})|,
-               config
-             )
+    assert {:ok, _result} =
+             Kernel.run(~S|(agent.core/run "Correct the shape" {"max_turns" 3})|, config)
 
     assert_receive {:agent_request, _first}
-    refute_receive {:agent_request, _second}
+    assert_receive {:agent_request, _second}
   end
 
-  test "agent.core does not retry an ordinary runtime error after a capability call" do
+  test "agent.core retries an ordinary runtime error after a read-only capability call" do
     parent = self()
 
     response = %{
@@ -973,23 +983,17 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
       )
 
     {:ok, config} =
-      agent_config([response], [],
-        mission_capabilities: [touch],
-        provider_resources: [close_counter(self(), :non_retryable)]
-      )
+      agent_config([response, @recovered], [], mission_capabilities: [touch])
 
-    assert {:error, %{kind: :workflow_failed}} =
-             Kernel.run(~S|(agent.core/run "Do not repeat the read" {"max_turns" 3})|, config)
+    assert {:ok, _result} =
+             Kernel.run(~S|(agent.core/run "Correct the program" {"max_turns" 3})|, config)
 
     assert_receive :touch_called
     assert_receive {:agent_request, _first}
-    refute_receive :touch_called
-    refute_receive {:agent_request, _second}
-    assert_receive {:provider_closed, :non_retryable}
-    refute_receive {:provider_closed, :non_retryable}
+    assert_receive {:agent_request, _second}
   end
 
-  test "agent.core does not retry an ordinary runtime error after a mission runtime tool" do
+  test "agent.core retries an ordinary runtime error after a mission runtime tool" do
     response = %{
       content: nil,
       tool_calls: [
@@ -1001,13 +1005,42 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
       ]
     }
 
-    {:ok, config} = agent_config([response], [])
+    {:ok, config} = agent_config([response, @recovered], [])
+
+    assert {:ok, _result} =
+             Kernel.run(~S|(agent.core/run "Correct the program" {"max_turns" 3})|, config)
+
+    assert_receive {:agent_request, _first}
+    assert_receive {:agent_request, _second}
+  end
+
+  # The guard is intact for the effect nothing installs yet. An undeclared
+  # effect is `:unknown` and counts as unsafe by the same rule.
+  test "agent.core does not retry an ordinary runtime error after a write capability call" do
+    response = %{
+      content: nil,
+      tool_calls: [
+        %{
+          id: "runtime-error-after-write",
+          name: "run_ptc_lisp",
+          args: %{"program" => ~S|(do (tool/commit {}) (+ {} 1))|}
+        }
+      ]
+    }
+
+    {:ok, commit} =
+      Capability.new(
+        name: "commit",
+        effect: :write,
+        input_schema: %{"type" => "object"},
+        callback: fn _ -> {:ok, 42} end
+      )
+
+    {:ok, config} =
+      agent_config([response, @recovered], [], mission_capabilities: [commit])
 
     assert {:error, %{kind: :workflow_failed}} =
-             Kernel.run(
-               ~S|(agent.core/run "Do not repeat runtime reads" {"max_turns" 3})|,
-               config
-             )
+             Kernel.run(~S|(agent.core/run "Do not repeat the write" {"max_turns" 3})|, config)
 
     assert_receive {:agent_request, _first}
     refute_receive {:agent_request, _second}
@@ -1366,21 +1399,23 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
         %{
           id: "bad-after-read",
           name: "run_ptc_lisp",
-          args: %{"program" => ~S|(do (tool/touch {}) (+ {} 1))|}
+          args: %{"program" => ~S|(do (tool/commit {}) (+ {} 1))|}
         }
       ]
     }
 
-    {:ok, touch} =
+    # A write is the effect that genuinely cannot be repeated, so it is what
+    # still produces a non-retryable evaluation for run-outcome to attribute.
+    {:ok, commit} =
       Capability.new(
-        name: "touch",
-        effect: :read,
+        name: "commit",
+        effect: :write,
         input_schema: %{"type" => "object"},
         callback: fn _ -> {:ok, 42} end
       )
 
     {:ok, non_retryable_config} =
-      agent_config([non_retryable], [], mission_capabilities: [touch])
+      agent_config([non_retryable], [], mission_capabilities: [commit])
 
     assert {:ok,
             %{

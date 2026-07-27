@@ -1612,17 +1612,20 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     assert %{outcome: :continued} =
              Evaluation.evaluate_source(state, mission, "(def retained 42)", 100)
 
-    assert %{
-             outcome: :evaluation_error,
-             retryable?: false,
-             details: %{capability_activity?: true}
-           } =
-             Evaluation.evaluate_source(
-               state,
-               mission,
-               ~S|(do (def leaked 99) (tool/touch {}) (+ {} 1))|,
-               100
-             )
+    # `capability_activity?` is still reported, because a reviewer wants to know
+    # something happened. It no longer decides retryability by itself: `touch`
+    # is declared `:read`, so repeating this program repeats a read and the
+    # loop's correction path stays reachable.
+    activity_result =
+      Evaluation.evaluate_source(
+        state,
+        mission,
+        ~S|(do (def leaked 99) (tool/touch {}) (+ {} 1))|,
+        100
+      )
+
+    assert %{outcome: :evaluation_error, details: %{capability_activity?: true}} = activity_result
+    refute Map.get(activity_result, :retryable?) == false
 
     assert_receive :mission_touch_called
 

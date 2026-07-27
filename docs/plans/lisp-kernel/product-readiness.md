@@ -170,7 +170,7 @@ inbound service frontends require demonstrated demand and separate plans.
   trace, inspection, and failure workflow.
 - [Building agents](../../guides/building-agents.md) — current agent and model
   composition guidance.
-- [Kernel tutorial](../../guides/kernel-tutorial.md) — runnable examples.
+- [Getting started](../../guides/getting-started.md) — runnable examples.
 - [TraceLog contract](../../trace-log-contract.md) — canonical event and source
   contract.
 - [PTC-Lisp conformance](../../conformance/index.md) — audited language

@@ -103,8 +103,9 @@ body and before any capability activity. A signed function also validates its
 successful output. The agent loop does not automatically retry a contract
 failure after capability activity, because repeating external effects may be
 unsafe. See [Signature syntax](../signature-syntax.md) for the complete
-signature grammar and [Kernel component bundles](capability-prelude.md) for the
-runtime rules.
+signature grammar and [Components and preludes](components-and-preludes.md) for
+the runtime rules. [Building agents](building-agents.md) documents the
+correction protocol that renders this feedback for a live model.
 
 ## Input and mission data
 
@@ -162,9 +163,9 @@ stdout or `--output`/`--private-output` publication. A mismatch returns
 not attached to the error.
 
 A rejection does carry a bounded classification, so a mismatch is diagnosable
-without repeating the run under private inspection:
+without repeating the run under private inspection. The command reports it as:
 
-```elixir
+```text
 {:error,
  {:result_contract_failed,
   %{value_kind: :object, discriminator: "decision", matched_branch: "no-change",
@@ -259,9 +260,9 @@ configuration:
 Only builders installed by the host may be selected; no provider names are
 implicit. The separate host JSON fixes models, commands, credentials,
 endpoints, tool mappings, native PtcRunner sources, data classes, and outer
-ceilings. A manifest cannot name an Elixir module or callback, launch a
-command, include credentials, or choose an arbitrary endpoint. Placement is
-enforced: LLM sources are workflow-only; MCP and native snapshot sources are
+ceilings. A manifest cannot name a host module or callback, launch a command,
+include credentials, or choose an arbitrary endpoint. Placement is enforced:
+LLM sources are workflow-only; MCP and native snapshot sources are
 mission-only.
 
 Canonical PtcRunner traces use a native immutable source rather than MCP:
@@ -330,7 +331,12 @@ opened. Safe connector metadata contains only counts, byte ceilings,
 trace/content identities, and hashes—not paths or private payloads.
 
 `model_visible` controls whether a capability appears in model context. It
-does not grant or remove execution authority.
+does not grant or remove execution authority: a granted hidden capability stays
+callable by exact name, and an ungranted one stays denied.
+
+The resulting trust boundary is simple. Treat the workflow bundle and the
+manifest as application code. Treat model-generated source, mission input, file
+content, and provider output as untrusted data.
 
 ## Requested limits narrow host ceilings
 
@@ -454,6 +460,14 @@ is not. They are deliberately not a general metadata map: keys and tag values
 come from a finite vocabulary, identifier strings are bounded and
 fingerprinted, and prompts, results, credentials, paths, and arbitrary user
 text do not belong there.
+
+## Next steps
+
+- [Building agents](building-agents.md) puts model policy behind these grants.
+- [Running and debugging](running-and-debugging.md) runs a manifest and reads
+  the traces, results, and inspection artifacts it declares.
+- [Components and preludes](components-and-preludes.md) covers the bundle
+  rules behind the `components` key.
 
 Exact field and failure contracts live in the
 `PtcRunner.Kernel.Manifest` module documentation. The

@@ -4,6 +4,25 @@ The Kernel line currently runs from a repository checkout through Mix. The
 planned standalone macOS command and Docker image will delegate to the same
 manifest, execution, result, and trace paths.
 
+## Commands
+
+| Command | Purpose |
+| --- | --- |
+| `mix ptc.run MANIFEST` | Run the manifest's qualified entry and print public JSON |
+| `mix ptc.run MANIFEST --host-config HOST.json` | Install the provider aliases a provider-bearing manifest selects |
+| `mix ptc.run MANIFEST --mission INPUT.json` | Run with a confined alternate input object |
+| `mix ptc.run MANIFEST --output VALUE.json` | Write only the validated result value |
+| `mix ptc.run MANIFEST --trace TRACE.jsonl` | Persist bounded canonical events after the run |
+| `mix ptc.run MANIFEST --inspect RUN.inspection.jsonl` | Also write the owner-only private artifact |
+| `mix ptc.repl` | Start the direct transactional PTC-Lisp REPL |
+| `mix ptc.repl -e EXPR -l SETUP.clj` | Run repeatable expressions with optional setup |
+| `mix ptc.repl --manifest MANIFEST` | Reuse a manifest's workflow bundle and capabilities |
+| `mix ptc.repl --profile PROFILE --resource NAME=DIR` | Query an immutable trace or inspection capture |
+| `mix ptc.viewer --trace-dir DIR` | Browse canonical JSONL traces locally |
+
+`mix help ptc.run`, `mix help ptc.repl`, and `mix help ptc.viewer` list the
+installed options for each command.
+
 ## Run a manifest
 
 ```console
@@ -56,8 +75,8 @@ timeout, heap, source, result, quota, provider, and event failures retain
 bounded classifications at the Kernel boundary.
 
 Current Mix failures are intended for people working from the repository and
-may contain inspected Elixir terms. Stable JSON command errors and exit codes
-are release work for the shared standalone `ptc` frontend.
+may contain inspected internal runtime terms. Stable JSON command errors and
+exit codes are release work for the shared standalone `ptc` frontend.
 
 ## Use workflow REPL sessions
 
@@ -102,6 +121,13 @@ The captured files, session code, results, and analysis trace have independent
 byte ceilings. The profile has no access to private inspection data or to the
 active run that produced the traces.
 
+Events pair evaluations by `evaluation_id` and capabilities by `capability_id`,
+and carry environment, status, duration, labels, prelude component IDs and
+hashes, limit events, and aggregate usage. The
+[TraceLog contract](../trace-log-contract.md) defines the event schemas,
+sanitization, filtering, pagination, and private sources. See the
+[Kernel REPL guide](kernel-repl.md) for longer interactive investigations.
+
 ## Use private inspection deliberately
 
 Pass both output paths when exact development diagnostics are required:
@@ -121,6 +147,46 @@ Canonical trace queries never join its payloads into ordinary results.
 The credential-free [Kernel inspection lab](../../examples/kernel-inspection-lab/README.md)
 creates correlated canonical and inspection artifacts without a live model.
 
+### Analyze what the model received and generated
+
+Canonical traces answer *what happened* without retaining private content. The
+inspection artifact answers *what the model saw and wrote*. It is created with
+owner-only permissions and contains the full request, response, generated
+source, and capability payloads. The log-analysis REPL cannot read or join this
+private data by design; use the development Viewer below or the private
+inspection profile in the [Kernel REPL guide](kernel-repl.md).
+
+In one verified `03-file-agent` run, the request contained four relevant parts:
+
+| Feed part | What the model received |
+| --- | --- |
+| System instructions | Call `run_ptc_lisp` exactly once per turn; ordinary results continue; successful definitions persist; failed definitions roll back; `return` completes; `fail` aborts; do not answer in prose. |
+| Language summary | PTC-Lisp described as a bounded Clojure-like language, followed by its common forms, namespaces, JSON-map convention, exclusions, and short examples. |
+| Available mission API | Only `(tutorial.files/read-text path)`, documented as a read effect from a string path to a string result. |
+| User message and model tool | Read `brief.txt` through that wrapper and return its exact contents; one `run_ptc_lisp` tool accepting one required `program` string. |
+
+The request did **not** contain the file contents, the provider credential,
+unrestricted filesystem access, or the workflow's raw `llm-request` capability.
+The model had to express the action through the one advertised mission
+function. The provider reported 895 input tokens for that small feed; token
+counts change with prompt or provider updates.
+
+The model generated exactly this 47-byte program:
+
+```clojure
+(return (tutorial.files/read-text "brief.txt"))
+```
+
+It uses the prompt-visible wrapper rather than guessing a raw capability API,
+passes the requested relative path for the host-confined provider to validate
+beneath the granted root, and makes the first mission evaluation terminal with
+`return`. It creates no definitions and no ordinary intermediate value, which
+matches the public `defined_count: 0` and `history_count: 0`.
+
+More complex agents use the same boundary across several turns, with inspection
+recording each private request, response, and generated program while the
+canonical trace retains only bounded operational evidence.
+
 ## Development Viewer
 
 From the repository root, after creating the trace directory:
@@ -129,6 +195,11 @@ From the repository root, after creating the trace directory:
 mix ptc.viewer --trace-dir tmp/inspection \
   --inspection-file tmp/inspection/run.inspection.jsonl
 ```
+
+The Viewer lists runs and renders paired workflow and mission evaluations,
+capability calls, annotations, limits, usage metrics, and raw canonical event
+metadata. Use `--port` to choose a port instead of the default 4123, and
+`--no-open` when running on a remote machine.
 
 The Viewer binds to loopback, pins the selected inspection file, and can enable
 a bounded log-analysis REPL over an immutable trace capture. It is currently a
@@ -145,10 +216,38 @@ Keep a deterministic fixture in normal tests. Compare the stable business
 value and semantic error classification rather than timestamps, generated run
 IDs, or remaining milliseconds.
 
-Live provider tests are separate and credentialed:
+Build the checks in three layers:
+
+1. Exercise pure transformations in `mix ptc.repl`.
+2. Run fixed manifest inputs with `mix ptc.run` and assert `.value` with `jq`.
+3. Put live-provider checks behind an explicit flag and assert a narrow
+   contract, not prose wording.
+
+Layer 2 needs no test framework:
+
+```console
+actual="$(mix ptc.run examples/kernel-tutorial/01-orders/ptc.json | jq -c '.value')"
+test "$actual" = \
+  '{"order_count":3,"paid_count":2,"paid_total":335.75,"pending_ids":["A-101"]}'
+```
+
+For model workflows, test the protocol parser and feedback loop with scripted
+responses first, then keep the live provider boundary in a small separate
+credentialed test:
 
 ```console
 mix test test/ptc_runner/kernel/tutorial_examples_e2e_test.exs --include e2e
 ```
 
-Do not make correctness depend on an unconstrained natural-language completion.
+That module is tagged `:e2e`, so ordinary runs exclude its live provider calls.
+Do not make correctness depend on an unconstrained natural-language completion
+unless the prompt restricts it to one token or one schema.
+
+## Next steps
+
+- [Kernel REPL](kernel-repl.md) — complete session modes, JSON Lines output,
+  and private inspection analysis.
+- [Manifests and capabilities](manifests-and-capabilities.md) — the event
+  policy, contracts, and limits these commands enforce.
+- [Building agents](building-agents.md) — the agent policy that produces the
+  runs you are debugging.

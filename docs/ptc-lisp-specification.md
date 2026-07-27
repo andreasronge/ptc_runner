@@ -3337,7 +3337,7 @@ Public `defn`/`def` exports are callable by qualified name; `defn-` helpers stay
 private. Every referenced `tool/name` is recorded as a `tool:name` requirement,
 including transitive helper and component-dependency calls. Requirements are
 validated against an explicit workflow or mission environment and never grant
-authority. See [Kernel component bundles](guides/capability-prelude.md).
+authority. See [Components and preludes](guides/components-and-preludes.md).
 
 Manifest component arrays may combine local source objects with exact
 `{"library": id}` selections. Library selections resolve only from the trusted

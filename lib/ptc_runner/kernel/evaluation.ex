@@ -434,7 +434,8 @@ defmodule PtcRunner.Kernel.Evaluation do
     # installation, and anything not declared `:read` — including `:unknown` —
     # counts as unsafe, so an undeclared capability keeps the old behaviour.
     unsafe_activity? =
-      unsafe_capability_activity?(state, environment, mission_calls_before)
+      unsafe_capability_activity?(state, environment, mission_calls_before) or
+        unsafe_ledger_activity?(environment, step)
 
     :ok = RunState.release_evaluation(state, lease)
 
@@ -452,40 +453,52 @@ defmodule PtcRunner.Kernel.Evaluation do
       continuation_effect: :preserved
     }
 
-    case evaluation_retryable(step, unsafe_activity?, capability_activity?) do
+    case evaluation_retryable(step, unsafe_activity?) do
       retryable? when is_boolean(retryable?) -> Map.put(result, :retryable?, retryable?)
       nil -> result
     end
   end
 
-  defp evaluation_retryable(_step, true, _capability_activity?), do: false
+  defp evaluation_retryable(_step, true), do: false
 
   defp evaluation_retryable(
          %{fail: %{reason: :prelude_contract_error, details: %{phase: phase}}},
-         false,
          false
        )
        when phase in [:input, :output],
        do: true
 
-  defp evaluation_retryable(
-         %{fail: %{reason: :prelude_contract_error, details: %{phase: phase}}},
-         false,
-         true
-       )
-       when phase in [:input, :output],
-       do: false
-
-  # A resource kill says the query was too big, not that the world changed. With
-  # no unsafe effect committed, the agent's correct next move is a narrower
-  # program, so say so explicitly rather than leaving the field unset and making
-  # every loop infer it from a missing key.
-  defp evaluation_retryable(%{fail: %{reason: reason}}, false, _capability_activity?)
+  # A resource kill says the query was too big, not that the world changed.
+  defp evaluation_retryable(%{fail: %{reason: reason}}, false)
        when reason in [:memory_exceeded, :timeout, :parallel_capacity_exceeded],
        do: true
 
-  defp evaluation_retryable(_step, false, true), do: false
-  defp evaluation_retryable(_step, false, false), do: nil
+  # Any other failure with no unsafe effect: the program was wrong and nothing
+  # the Kernel cannot undo was committed, so the loop's correction path applies.
+  # Treating a read as activity that forbids a retry made that path unreachable
+  # for any agent whose work begins by reading its evidence.
+  defp evaluation_retryable(_step, false), do: nil
+
+  # The counter path sees installed capabilities; the ledger also sees reserved
+  # runtime routes, which are not capabilities and declare no effect. Both are
+  # reads of frozen or in-process state, so they are named here rather than
+  # falling through to "undeclared, therefore unsafe".
+  defp unsafe_ledger_activity?(environment, step) do
+    step
+    |> Map.get(:tool_calls, [])
+    |> List.wrap()
+    |> Enum.any?(fn call ->
+      case Map.get(call, :name) do
+        name when is_binary(name) -> not read_only_tool?(environment, name)
+        _other -> true
+      end
+    end)
+  end
+
+  defp read_only_tool?(environment, name) do
+    read_only_capability?(environment, name) or
+      name in RuntimeTools.mission_contract_descriptor()["routes"]
+  end
 
   defp evaluator_capability_activity?(step) do
     tool_calls = Map.get(step, :tool_calls, [])

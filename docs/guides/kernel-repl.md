@@ -42,27 +42,17 @@ The direct REPL does not accept an ambient capability catalog or arbitrary
 profile configuration. Providers and component sources are selected only by
 the manifest and trusted provider registry.
 
-Elixir hosts using `PtcRunner.Kernel.ReplSession` directly must keep each
-session in the process that created it. That process performs every evaluation
-and the final close or abort. Sending the struct to another process does not
-transfer its continuation or cleanup authority; `eval/2`, `close/1`, and
-`abort/2` return `{:error, :session_owner_mismatch}` without changing the
-session. The public value contains an opaque ID resolved through a shared table
-only the creator can read; closed entries are deleted. It contains no owner PID,
-token, continuation value, or raw run-state, configuration, sink, or provider
-capability. The internal owner binds the run state to the configured event and
-optional inspection sinks. Each `eval/2` result is an inert observation
-projection; its memory is not the authoritative continuation and must not be
-threaded back into the session.
-If provider cleanup fails after terminal finalization, `close/1` and `abort/2`
-return `{:error, :provider_cleanup_failed, events}` so the host can persist the
-frozen batch before reporting the error. The Mix frontend does this for normal
-closure and exception-driven aborts.
-Preflight errors preserve that committed public memory view, and projection is
-validated before continuation commit. Each bounded worker starts a small
-monitor-only watchdog before running the workload. The watchdog cancels the
-worker when the creator exits, without changing its trap-exit behavior or
-holding an unbounded workload copy, before retained resources are closed.
+An interactive session also accepts a few meta-commands:
+
+```text
+:doc <name>       Show core function documentation
+:find <pattern>   Search the available function surface
+:help             List the session commands
+```
+
+The full language surface is in the
+[PTC-Lisp specification](../ptc-lisp-specification.md) and
+[function reference](../function-reference.md).
 
 Every workflow session emits canonical Kernel events. Persist them as bounded,
 append-only JSONL with:
@@ -277,5 +267,17 @@ The description lists the required resource, component, namespace,
 capabilities, fixed limits, and policies. It contains no path, snapshot,
 callback, process identifier, source, or credential.
 
-For a manifest entry run rather than a REPL session, use
-`mix ptc.run MANIFEST --trace PATH`.
+## Next steps
+
+- [Running and debugging](running-and-debugging.md) owns the run command,
+  result shape, trace capture, private inspection capture, and the Viewer. For
+  a manifest entry run rather than a REPL session, use
+  `mix ptc.run MANIFEST --trace PATH`.
+- [Manifests and capabilities](manifests-and-capabilities.md) documents the
+  manifest that `--manifest` sessions attach to, and the trace and inspection
+  snapshot providers these profiles read.
+- [Components and preludes](components-and-preludes.md) explains the `log.core`
+  and `inspection.core` components these profiles install, and how to package
+  your own analysis functions the same way.
+- Hosts driving `PtcRunner.Kernel.ReplSession` programmatically should read
+  [Embedding in Elixir](embedding-in-elixir.md) for its ownership rules.

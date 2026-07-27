@@ -217,16 +217,15 @@ defmodule PtcRunner.MixProject do
           "docs/signature-syntax.md",
           "docs/trace-log-contract.md",
           "docs/conformance/index.md",
-          "docs/guides/capability-prelude.md",
           "docs/guides/getting-started.md",
-          "docs/guides/building-agents.md",
           "docs/guides/manifests-and-capabilities.md",
+          "docs/guides/building-agents.md",
           "docs/guides/running-and-debugging.md",
+          "docs/guides/kernel-repl.md",
+          "docs/guides/components-and-preludes.md",
           "docs/guides/embedding-in-elixir.md",
           "docs/guides/documentation-guidelines.md",
-          "docs/guides/kernel-maintainer.md",
-          "docs/guides/kernel-tutorial.md",
-          "docs/guides/kernel-repl.md"
+          "docs/guides/kernel-maintainer.md"
         ] ++ Path.wildcard("docs/conformance/*-audit.md"),
       groups_for_extras: [
         Maintainers: ~r/docs\/guides\/kernel-maintainer\.md/,

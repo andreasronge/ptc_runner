@@ -6,9 +6,11 @@ reference. Exact options, return values, limits, state transitions, and error
 atoms belong in the owning `PtcRunner.Kernel.*` or `PtcRunner.Lisp.*` module
 documentation.
 
-For application authoring, start with the
-[Kernel tutorial](kernel-tutorial.md), [manifest guide](manifests-and-capabilities.md),
-and [Kernel REPL guide](kernel-repl.md). PTC-Lisp semantics live in the
+For application authoring, start with
+[Getting started](getting-started.md), the
+[manifest guide](manifests-and-capabilities.md),
+[Building agents](building-agents.md), and the
+[Kernel REPL guide](kernel-repl.md). PTC-Lisp semantics live in the
 [language specification](../ptc-lisp-specification.md); canonical trace
 storage/query semantics live in the
 [TraceLog contract](../trace-log-contract.md); the admitted Java surface is

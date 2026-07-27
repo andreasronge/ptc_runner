@@ -123,21 +123,40 @@ complete.
 
 ## Guides
 
-- [Getting started](docs/guides/getting-started.md) — run a credential-free
-  PTC-Lisp workflow and inspect its result and trace.
-- [Building agents](docs/guides/building-agents.md) — put orchestration and
-  agent policy in PTC-Lisp while keeping mission authority narrow.
-- [Manifests and capabilities](docs/guides/manifests-and-capabilities.md) —
-  assemble components, data, providers, limits, and event policy.
-- [Running and debugging](docs/guides/running-and-debugging.md) — use the run
-  command, REPL, traces, private inspection, and development Viewer.
-- [Embedding in Elixir](docs/guides/embedding-in-elixir.md) — integrate the
-  same Kernel into a host application.
+Read these in order. Each one owns its topic and links onward.
 
-Advanced references include the [PTC-Lisp specification](docs/ptc-lisp-specification.md),
+1. [Getting started](docs/guides/getting-started.md) — run a credential-free
+   PTC-Lisp workflow and inspect its result and trace.
+2. [Manifests and capabilities](docs/guides/manifests-and-capabilities.md) —
+   assemble components, data, providers, limits, contracts, and event policy.
+3. [Building agents](docs/guides/building-agents.md) — put orchestration and
+   agent policy in PTC-Lisp while keeping mission authority narrow.
+4. [Running and debugging](docs/guides/running-and-debugging.md) — the
+   commands, results, traces, private inspection, and development Viewer.
+
+### Going further
+
+- [Kernel REPL](docs/guides/kernel-repl.md) — complete interactive session
+  modes, JSON Lines output, and private inspection analysis.
+- [Components and preludes](docs/guides/components-and-preludes.md) —
+  namespaces, dependencies, exports, signatures, and tool requirements for
+  reusable PTC-Lisp libraries.
+- [Embedding in Elixir](docs/guides/embedding-in-elixir.md) — drive the same
+  Kernel directly from a host application instead of the command line.
+
+### Examples
+
+Runnable projects live under
+[`examples/kernel-tutorial/`](examples/kernel-tutorial/README.md) and
+[`examples/kernel-inspection-lab/`](examples/kernel-inspection-lab/README.md).
+
+### Reference
+
+[PTC-Lisp specification](docs/ptc-lisp-specification.md),
 [function reference](docs/function-reference.md),
 [signature syntax](docs/signature-syntax.md),
-[conformance report](docs/conformance/index.md), and
+[TraceLog contract](docs/trace-log-contract.md),
+[conformance report](docs/conformance/index.md), and the
 [Kernel maintainer guide](docs/guides/kernel-maintainer.md).
 
 ## Development
