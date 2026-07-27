@@ -1835,9 +1835,16 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     private = "PRIVATE_GENERATED_SOURCE_(return_42)"
     {private_config, private_sink} = config_for.("runtime-library-private")
 
-    assert {:ok, %{value: %{status: :error, reason: :invalid_workflow_annotation}}} =
+    assert {:ok,
+            %{
+              value: %{
+                status: :error,
+                kind: :invalid_annotation,
+                reason: :invalid_workflow_annotation
+              }
+            }} =
              Kernel.run(
-               ~s|(return (workflow.event/annotate "progress" {"source" "#{private}"}))|,
+               ~s|(return (workflow.event/annotate "progress" {"stage" "started" "source" "#{private}"}))|,
                private_config
              )
 
@@ -1845,11 +1852,55 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     session = "session-123"
     {prompt_config, prompt_sink} = config_for.("runtime-library-prompt")
 
-    assert {:ok, %{value: %{status: :error, reason: :invalid_workflow_annotation}}} =
+    assert {:ok,
+            %{
+              value: %{
+                status: :error,
+                kind: :invalid_annotation,
+                reason: :invalid_workflow_annotation
+              }
+            }} =
              Kernel.run(
                ~s|(return (workflow.event/annotate "progress" {"prompt" "#{prompt}" "session_id" "#{session}"}))|,
                prompt_config
              )
+
+    {malformed_config, _malformed_sink} = config_for.("runtime-library-malformed")
+
+    assert {:ok,
+            %{
+              value: %{
+                status: :error,
+                kind: :protocol_error,
+                reason: :invalid_workflow_annotation
+              }
+            }} =
+             Kernel.run(
+               ~s|(return (tool/workflow-annotate {}))|,
+               malformed_config
+             )
+
+    {rejection_config, rejection_sink} = config_for.("runtime-library-rejections")
+
+    rejected_calls =
+      Enum.map_join(1..(limits.protocol_errors + 1), "\n", fn _attempt ->
+        ~s|(workflow.event/annotate "progress" {"source" "private"})|
+      end)
+
+    assert {:ok, %{value: %{closed?: false, protocol_errors: 0}}} =
+             Kernel.run(
+               """
+               (do
+                 #{rejected_calls}
+                 (return (runtime/usage)))
+               """,
+               rejection_config
+             )
+
+    refute Enum.any?(
+             EventSink.events(rejection_sink),
+             &(&1.type == "workflow-annotation")
+           )
 
     public_events =
       EventSink.events(sink) ++ EventSink.events(private_sink) ++ EventSink.events(prompt_sink)

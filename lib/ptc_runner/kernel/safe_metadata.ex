@@ -73,7 +73,9 @@ defmodule PtcRunner.Kernel.SafeMetadata do
   those stay in the agent's own history and, when enabled, in private
   inspection records.
   """
-  def annotation?("progress", %{"stage" => stage}) when stage in @progress_stages, do: true
+  def annotation?("progress", %{"stage" => stage} = data)
+      when map_size(data) == 1 and stage in @progress_stages,
+      do: true
 
   def annotation?("agent-action", %{"turn" => turn, "kind" => kind} = data)
       when map_size(data) == 2 and is_integer(turn) and turn >= 0 and turn <= 127 and

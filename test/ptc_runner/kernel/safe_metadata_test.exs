@@ -41,6 +41,12 @@ defmodule PtcRunner.Kernel.SafeMetadataTest do
 
     test "keeps the progress vocabulary and rejects unknown types" do
       assert SafeMetadata.annotation?("progress", %{"stage" => "started"})
+
+      refute SafeMetadata.annotation?("progress", %{
+               "stage" => "started",
+               "source" => "(return 42)"
+             })
+
       refute SafeMetadata.annotation?("progress", %{"turn" => 0, "kind" => "tool-call"})
       refute SafeMetadata.annotation?("agent-step", %{"turn" => 0, "kind" => "tool-call"})
     end
