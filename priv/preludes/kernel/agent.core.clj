@@ -22,11 +22,13 @@
    :turn turn
    :turns-remaining (- max-turns (inc turn))})
 
+;; The model's own narration is its stated plan for the turn. Dropping it left
+;; the next turn seeing a tool result with no record of why it was requested.
 (defn- append-correlated [messages action content]
   (conj
     (conj messages
           {"role" "assistant"
-           "content" nil
+           "content" (get action :rationale)
            "tool_calls" [(get action :public-tool-call)]})
     {"role" "tool"
      "tool_call_id" (get action :tool-call-id)

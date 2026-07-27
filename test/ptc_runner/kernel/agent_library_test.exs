@@ -69,8 +69,8 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
 
     cases = [
       {valid, "tool-call", nil},
-      {%{"content" => "prose", "tool_calls" => valid["tool_calls"]}, "protocol-error",
-       "assistant-text-with-tool-call"},
+      {%{"content" => "prose", "tool_calls" => valid["tool_calls"]}, "tool-call", nil},
+      {%{"content" => "prose"}, "protocol-error", "assistant-text-without-tool-call"},
       {%{"tool_calls" => valid["tool_calls"] ++ valid["tool_calls"]}, "protocol-error",
        "multiple-or-missing-tool-calls"},
       {%{"tool_calls" => [%{"name" => "wrong", "args" => %{"program" => "x"}}]}, "protocol-error",
@@ -789,10 +789,9 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
   end
 
   test "agent.core corrects protocol and evaluation errors" do
-    mixed = %{
-      content: "I will explain",
-      tool_calls: [%{id: "bad", name: "run_ptc_lisp", args: %{"program" => "(return 1)"}}]
-    }
+    # Prose alongside a valid call is now accepted, so the protocol error this
+    # exercises is prose arriving *instead of* a call.
+    mixed = %{content: "I will explain", tool_calls: []}
 
     invalid_program = %{
       content: nil,
