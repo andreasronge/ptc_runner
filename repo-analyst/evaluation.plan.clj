@@ -1,0 +1,68 @@
+(ns evaluation.plan "Frozen repo-analyst evaluation matrix." {:visibility :discoverable})
+
+;; This component, rather than aggregate input, defines the evaluation universe.
+;; A caller may submit the plan alongside its trials for transparent inspection,
+;; but aggregate/run accepts it only when it equals this exact matrix. Keeping
+;; the authority in compiled application source prevents omission of held-out
+;; cases or negative controls from turning a partial run into an acceptance.
+(defn cases []
+  [{"id" "motivating.paged-evidence"
+    "set" "motivating"
+    "case_hash" "sha256:7195927628fe405940c1c4895ff97ed5353a4fe4245d2b87fc3f24b84cb05588"
+    "repetitions" [1]}
+   {"id" "motivating.absent-literal"
+    "set" "motivating"
+    "case_hash" "sha256:ea2a4689647b8d9b1d5f5c537f3a4f3bb8f2b996a24465cf33abcc5ebcb3bc34"
+    "repetitions" [1]}
+   {"id" "motivating.range-before-citing"
+    "set" "motivating"
+    "case_hash" "sha256:c9f91f19d5a12a6aa8f408ec9a71a760fd6e03dead21768d704a7ea473af6999"
+    "repetitions" [1]}
+   {"id" "motivating.bounded-error-recovery"
+    "set" "motivating"
+    "case_hash" "sha256:ae58996710b64ea5087fce00c0b5259ee79cf34718de5e41708fca06cfcd00f5"
+    "repetitions" [1]}
+   {"id" "regression.single-page-answer"
+    "set" "regression"
+    "case_hash" "sha256:79ee37084673efe00eae7eaa78e13f5ead472b909bf09100d20931c1db72b06b"
+    "repetitions" [1]}
+   {"id" "regression.directory-listing"
+    "set" "regression"
+    "case_hash" "sha256:7641d535b7552a75d9d64e9ddcd95df71bbfed098f7cada45fb010a038da04d2"
+    "repetitions" [1]}
+   {"id" "regression.multi-file-citation"
+    "set" "regression"
+    "case_hash" "sha256:05c5d861668f2e297f107a64f955fcc96b20bead5e34308487333e609208f267"
+    "repetitions" [1]}
+   {"id" "regression.declines-without-evidence"
+    "set" "regression"
+    "case_hash" "sha256:0d37295b5e176636d7bc547b4690a45e755940999e6bc8cc3679f76f4560c5c6"
+    "repetitions" [1]}
+   {"id" "held-out.paged-evidence-deeper"
+    "set" "held-out"
+    "case_hash" "sha256:b3663c1fa527d801f93fc1962eb33dcbad49682eaf3a52cdd0bd6ba38e8234a3"
+    "repetitions" [1]}
+   {"id" "held-out.injection-ignore-instructions"
+    "set" "held-out"
+    "case_hash" "sha256:dba4ed611341f4e364c3d63f9a4fb81dd4fc770f7aced002b478619158150869"
+    "repetitions" [1]}
+   {"id" "held-out.injection-fabricate-citation"
+    "set" "held-out"
+    "case_hash" "sha256:4509c63b86daeba948e0ada78abc07efb9a49d096e367d7baa341ef9c1336d19"
+    "repetitions" [1]}
+   {"id" "held-out.injection-escalate-scope"
+    "set" "held-out"
+    "case_hash" "sha256:d520dacc51174a4f1765cc0dd30a54ead5f7b8beb7cbacd46378c48ad2cae7dd"
+    "repetitions" [1]}
+   {"id" "held-out.isolated-defect"
+    "set" "held-out"
+    "case_hash" "sha256:34f0cb93ac7736fe7648ac461f4b12b8d95893879b62f14b8ab20bea308081f1"
+    "repetitions" [1]}
+   {"id" "negative-control.always-passes"
+    "set" "negative-control"
+    "case_hash" "sha256:9c6076c6f8059be8e42636882e5b0fa6179e0458c05f4013171f28ddfc999201"
+    "repetitions" [1]}
+   {"id" "negative-control.always-fails"
+    "set" "negative-control"
+    "case_hash" "sha256:d12e293bcceda8ef5e82ad30ba460847bd13cb72e561b208b0a3f90ebcc438f2"
+    "repetitions" [1]}])

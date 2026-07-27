@@ -85,7 +85,7 @@ def citation_is_backed_by_read($citation; $reads):
   elif $result_hash != $stopped.data.result_hash then
     error("trial result digest does not match run-stopped")
   elif any(
-    $trial.citations[];
+    ($trial.citations // [])[];
     (citation_is_backed_by_read(.; $reads) | not)
   ) then
     error("trial citation is not backed by an exact workspace.read result")

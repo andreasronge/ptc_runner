@@ -25,12 +25,13 @@ defmodule PtcRunner.Kernel.RepoAnalystEvaluationE2ETest do
   @replay_manifest Path.join(@root, "repo-analyst-evaluate-replay.json")
   @aggregate_manifest Path.join(@root, "repo-analyst-aggregate.json")
   @host Path.join(@root, "repo-analyst.host.json")
+  @evaluation_host Path.join(@root, "repo-analyst-evaluation.host.json")
   @base_source Path.join(@root, "priv/preludes/kernel/agent.core.clj")
   @trial_input Path.join(@root, "repo-analyst/trial-input.json")
   @join Path.join(@root, "repo-analyst/join-trial.jq")
 
   test "fresh baseline and candidate replay runs join and aggregate deterministically" do
-    pair = prepare_pair("deterministic replay acceptance candidate")
+    pair = prepare_pair(&(&1 <> "\n;; deterministic replay wiring candidate\n"))
     {baseline_joined, candidate_joined} = run_pair(@replay_manifest, pair)
     assert_pair_contract(pair, baseline_joined, candidate_joined)
     assert baseline_joined["passed"]
@@ -43,13 +44,66 @@ defmodule PtcRunner.Kernel.RepoAnalystEvaluationE2ETest do
     assert_join_rejects_unread_citation(pair)
   end
 
-  defp prepare_pair(candidate_label) do
+  test "deterministic replay detects a behavior-changing candidate" do
+    pair =
+      prepare_pair(fn base ->
+        before = "(returned-outcome (get evaluation :value))"
+        replacement = ~S|(returned-outcome (assoc (get evaluation :value) "citations" []))|
+        assert String.contains?(base, before)
+        String.replace(base, before, replacement)
+      end)
+
+    {baseline_joined, candidate_joined} = run_pair(@replay_manifest, pair)
+    assert_pair_contract(pair, baseline_joined, candidate_joined)
+    assert baseline_joined["passed"]
+    refute candidate_joined["passed"]
+    assert candidate_joined["detail"] == "did not cite lib/zz_beacon.ex"
+
+    evaluation = aggregate_pair(pair.directory, baseline_joined, candidate_joined)
+    assert evaluation.value["verdict"] == "reject"
+    assert evaluation.value["regressed_cases"] == ["motivating.paged-evidence"]
+  end
+
+  test "a candidate subject failure survives result persistence and trusted joining" do
+    pair =
+      prepare_pair(fn base ->
+        before = "(returned-outcome (get evaluation :value))"
+        replacement = "(subject-failure :model-program-failed :candidate-declined)"
+        assert String.contains?(base, before)
+        String.replace(base, before, replacement)
+      end)
+
+    {baseline_joined, candidate_joined} = run_pair(@replay_manifest, pair)
+    assert_pair_contract(pair, baseline_joined, candidate_joined)
+    assert baseline_joined["status"] == "scored"
+    assert baseline_joined["passed"]
+    assert candidate_joined["status"] == "subject-failure"
+    assert candidate_joined["failure"] == %{"kind" => "model-program-failed"}
+    refute candidate_joined["passed"]
+
+    evaluation = aggregate_pair(pair.directory, baseline_joined, candidate_joined)
+    assert evaluation.value["verdict"] == "reject"
+    assert evaluation.value["regressed_cases"] == ["motivating.paged-evidence"]
+  end
+
+  test "the shipped replay manifest and dedicated host config run unchanged" do
+    {:ok, host} = HostConfig.load(@evaluation_host)
+    {:ok, registry} = HostInstallation.registry(host)
+
+    assert {:ok, result} = RunBuilder.run(@replay_manifest, registry)
+    assert result.value["status"] == "scored"
+    assert result.value["passed"]
+    assert result.value["detail"] == "cited lib/zz_beacon.ex"
+  end
+
+  defp prepare_pair(candidate_fun) do
     jq = System.find_executable("jq") || flunk("jq is required for the evaluation tutorial")
     directory = private_directory()
     on_exit(fn -> File.rm_rf!(directory) end)
 
     base = File.read!(@base_source)
-    candidate = base <> "\n;; #{candidate_label}\n"
+    candidate = candidate_fun.(base)
+    refute candidate == base
     base_hash = ComponentOverride.hash(base)
     candidate_hash = ComponentOverride.hash(candidate)
 

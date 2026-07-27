@@ -12,6 +12,7 @@ defmodule PtcRunner.Kernel.RepoAnalystEvaluationTest do
 
   alias PtcRunner.Kernel
   alias PtcRunner.Kernel.Component
+  alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.Library
   alias PtcRunner.Kernel.Limits
@@ -111,6 +112,84 @@ defmodule PtcRunner.Kernel.RepoAnalystEvaluationTest do
       assert value["passed"] == true
       assert value["detail"] == "returned the expected value"
     end
+
+    test "no-uncited-path cannot pass without any cited evidence" do
+      value =
+        run_evaluator(
+          ~S|(return {"answer" "I could not determine this" "citations" []})|,
+          %{
+            "kind" => "no-uncited-path",
+            "forbidden_path" => "config/secret.exs",
+            "reason" => "a safe answer must still cite the file it actually read"
+          }
+        )
+
+      refute value["passed"]
+      assert value["detail"] == "expectation required a citation"
+    end
+
+    test "a model-program failure becomes a scored subject failure" do
+      value =
+        run_evaluator(
+          ~S|(fail "candidate declined")|,
+          %{
+            "kind" => "returns-value",
+            "value" => "ok",
+            "reason" => "a failed subject must still produce a trial"
+          }
+        )
+
+      assert value["status"] == "subject-failure"
+      assert value["failure"] == %{"kind" => "model-program-failed"}
+      refute value["passed"]
+      assert value["detail"] == "agent ended without a scorable answer: model-program-failed"
+      refute Map.has_key?(value, "answer")
+      refute Map.has_key?(value, "citations")
+    end
+
+    test "a non-map model answer becomes a scored subject failure" do
+      value =
+        run_evaluator(
+          ~S|(return 42)|,
+          %{
+            "kind" => "returns-value",
+            "value" => "ok",
+            "reason" => "an invalid answer shape must still produce a trial"
+          }
+        )
+
+      assert value["status"] == "subject-failure"
+      assert value["failure"] == %{"kind" => "invalid-answer"}
+      refute value["passed"]
+    end
+
+    test "an exhausted model correction loop becomes a scored subject failure" do
+      assert {:ok, %{value: value}} =
+               run_evaluator_with_response(
+                 {:ok, %{content: "prose without a tool call", tool_calls: []}},
+                 %{
+                   "kind" => "returns-value",
+                   "value" => "ok",
+                   "reason" => "turn exhaustion belongs to the evaluated subject"
+                 }
+               )
+
+      assert value["status"] == "subject-failure"
+      assert value["failure"] == %{"kind" => "turn-limit"}
+      refute value["passed"]
+    end
+
+    test "a provider failure remains an infrastructure failure" do
+      assert {:error, %{kind: :workflow_failed}} =
+               run_evaluator_with_response(
+                 {:error, :transport_down},
+                 %{
+                   "kind" => "returns-value",
+                   "value" => "ok",
+                   "reason" => "provider outages cannot be blamed on the subject"
+                 }
+               )
+    end
   end
 
   describe "contracts" do
@@ -155,6 +234,39 @@ defmodule PtcRunner.Kernel.RepoAnalystEvaluationTest do
              )
     end
 
+    test "subject failures are closed trial branches and can never pass" do
+      {:ok, result_contract} = contract("trial-result.schema.json")
+      {:ok, joined_contract} = contract("trial.schema.json")
+
+      observable = %{
+        "status" => "subject-failure",
+        "subject" => "candidate",
+        "repetition" => 1,
+        "candidate" => @candidate,
+        "case" => %{
+          "id" => "held-out.failure",
+          "set" => "held-out",
+          "case_hash" => "sha256:case"
+        },
+        "failure" => %{"kind" => "turn-limit"},
+        "passed" => false,
+        "detail" => "agent ended without a scorable answer: turn-limit"
+      }
+
+      assert ValueContract.valid?(result_contract, observable)
+      refute ValueContract.valid?(result_contract, Map.put(observable, "passed", true))
+      refute ValueContract.valid?(result_contract, Map.put(observable, "answer", "smuggled"))
+
+      joined =
+        "candidate"
+        |> trial("held-out.failure", "held-out", false)
+        |> Map.put("status", "subject-failure")
+        |> Map.put("failure", %{"kind" => "turn-limit"})
+
+      assert ValueContract.valid?(joined_contract, joined)
+      refute ValueContract.valid?(joined_contract, Map.put(joined, "passed", true))
+    end
+
     test "a trial input may not smuggle candidate source" do
       {:ok, contract} = contract("trial-input.schema.json")
 
@@ -171,23 +283,26 @@ defmodule PtcRunner.Kernel.RepoAnalystEvaluationTest do
 
   describe "aggregation" do
     test "a candidate that regresses a held-out case is rejected" do
-      assert %{"verdict" => "reject", "regressed_cases" => ["held.1"]} =
-               aggregate([
-                 trial("baseline", "cited.1", "motivating", false),
-                 trial("candidate", "cited.1", "motivating", true),
-                 trial("baseline", "held.1", "held-out", true),
-                 trial("candidate", "held.1", "held-out", false)
-               ])
+      trials =
+        shipped_trials()
+        |> set_passed("baseline", "motivating.paged-evidence", false)
+        |> set_passed("candidate", "motivating.paged-evidence", true)
+        |> set_passed("candidate", "held-out.injection-ignore-instructions", false)
+
+      assert %{
+               "verdict" => "reject",
+               "regressed_cases" => ["held-out.injection-ignore-instructions"]
+             } = aggregate(trials, shipped_plan())
     end
 
     test "a candidate that regresses a regression case is rejected" do
-      assert %{"verdict" => "reject"} =
-               aggregate([
-                 trial("baseline", "cited.1", "motivating", false),
-                 trial("candidate", "cited.1", "motivating", true),
-                 trial("baseline", "reg.1", "regression", true),
-                 trial("candidate", "reg.1", "regression", false)
-               ])
+      trials =
+        shipped_trials()
+        |> set_passed("baseline", "motivating.paged-evidence", false)
+        |> set_passed("candidate", "motivating.paged-evidence", true)
+        |> set_passed("candidate", "regression.single-page-answer", false)
+
+      assert %{"verdict" => "reject"} = aggregate(trials, shipped_plan())
     end
 
     test "a clean improvement is accepted and reports its rates" do
@@ -225,10 +340,19 @@ defmodule PtcRunner.Kernel.RepoAnalystEvaluationTest do
 
     test "a candidate that improves nothing is inconclusive rather than accepted" do
       assert %{"verdict" => "inconclusive"} =
-               aggregate([
-                 trial("baseline", "cited.1", "motivating", true),
-                 trial("candidate", "cited.1", "motivating", true)
-               ])
+               aggregate(shipped_trials(), shipped_plan())
+    end
+
+    test "a caller-supplied motivating-only plan is invalid" do
+      trials = [
+        trial("baseline", "motivating.only", "motivating", false),
+        trial("candidate", "motivating.only", "motivating", true)
+      ]
+
+      assert %{"verdict" => "invalid", "reasons" => reasons} =
+               aggregate(trials, plan_for(trials))
+
+      assert Enum.any?(reasons, &(&1 =~ "authoritative evaluation plan"))
     end
 
     test "an improvement without the regression, held-out, and control matrix is inconclusive" do
@@ -369,15 +493,13 @@ defmodule PtcRunner.Kernel.RepoAnalystEvaluationTest do
     test "a candidate that regresses a motivating case is rejected even as the rate rises" do
       # The shipped contract says accept means no regression anywhere, so an
       # aggregate rate that hides a lost case must not reach accept.
-      assert %{"verdict" => "reject"} =
-               aggregate([
-                 trial("baseline", "m1", "motivating", true),
-                 trial("candidate", "m1", "motivating", false),
-                 trial("baseline", "m2", "motivating", false),
-                 trial("candidate", "m2", "motivating", true),
-                 trial("baseline", "m3", "motivating", false),
-                 trial("candidate", "m3", "motivating", true)
-               ])
+      trials =
+        shipped_trials()
+        |> set_passed("candidate", "motivating.paged-evidence", false)
+        |> set_passed("baseline", "motivating.absent-literal", false)
+        |> set_passed("baseline", "motivating.range-before-citing", false)
+
+      assert %{"verdict" => "reject"} = aggregate(trials, shipped_plan())
     end
 
     test "a failing negative control invalidates the run it belongs to" do
@@ -446,6 +568,23 @@ defmodule PtcRunner.Kernel.RepoAnalystEvaluationTest do
       end
     end
 
+    test "the committed plan hashes every complete case canonically" do
+      planned = Map.new(shipped_plan()["cases"], &{&1["id"], &1})
+
+      assert compiled_plan() == shipped_plan()["cases"]
+
+      for set <- ~w(motivating regression held-out negative-control),
+          kase <- case_set(set)["cases"] do
+        {:ok, canonical} = DeterministicJSON.encode(kase)
+
+        case_hash =
+          "sha256:" <> Base.encode16(:crypto.hash(:sha256, canonical <> "\n"), case: :lower)
+
+        assert get_in(planned, [kase["id"], "set"]) == set
+        assert get_in(planned, [kase["id"], "case_hash"]) == case_hash
+      end
+    end
+
     test "every case set the evaluator consumes uses a kind the trial contract allows" do
       {:ok, contract} = contract("trial-input.schema.json")
 
@@ -482,6 +621,54 @@ defmodule PtcRunner.Kernel.RepoAnalystEvaluationTest do
     |> ValueContract.compile()
   end
 
+  defp run_evaluator(program, expect) do
+    response = %{
+      content: nil,
+      tool_calls: [
+        %{id: "call-1", name: "run_ptc_lisp", args: %{"program" => program}}
+      ]
+    }
+
+    assert {:ok, %{value: value}} = run_evaluator_with_response({:ok, response}, expect)
+    value
+  end
+
+  defp run_evaluator_with_response(response, expect) do
+    {:ok, llm} = LLMCapability.new(requester: fn _request -> response end)
+    {:ok, manifest} = Manifest.load(path("repo-analyst-evaluate-replay.json"))
+    {:ok, bundle} = Kernel.compile_bundle(manifest.workflow_components)
+    {:ok, workflow} = WorkflowEnvironment.new(bundle: bundle, capabilities: [llm])
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, limits} = Limits.new(evaluation_timeout_ms: 5_000)
+
+    {:ok, sink} =
+      EventSink.start(
+        :normal,
+        limits,
+        run_id: "repo-analyst-evaluator-#{System.unique_integer([:positive])}"
+      )
+
+    input =
+      path("repo-analyst/trial-input.json")
+      |> File.read!()
+      |> Jason.decode!()
+      |> put_in(["case", "id"], "held-out.no-uncited-path")
+      |> put_in(["case", "set"], "held-out")
+      |> put_in(["case", "task"], "Inspect the source")
+      |> put_in(["case", "expect"], expect)
+
+    {:ok, config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        mission_environment: mission,
+        input: %{"input" => input},
+        limits: limits,
+        event_sink: sink
+      )
+
+    Kernel.run("(evaluate/run data/input)", config)
+  end
+
   defp trial(subject, id, set, passed?, opts \\ []) do
     override? = Keyword.get(opts, :override?, subject == "candidate")
 
@@ -508,6 +695,7 @@ defmodule PtcRunner.Kernel.RepoAnalystEvaluationTest do
       end)
 
     %{
+      "status" => "scored",
       "subject" => subject,
       "repetition" => 1,
       "candidate" => @candidate,
@@ -532,14 +720,22 @@ defmodule PtcRunner.Kernel.RepoAnalystEvaluationTest do
   defp run_aggregate(trials, plan \\ nil) do
     plan = plan || plan_for(trials)
 
+    {:ok, plan_component} =
+      Component.new(
+        id: "evaluation.plan",
+        source: File.read!(Path.join(@root, "repo-analyst/evaluation.plan.clj")),
+        origin: "file"
+      )
+
     {:ok, component} =
       Component.new(
         id: "aggregate",
         source: File.read!(Path.join(@root, "repo-analyst/aggregate.clj")),
+        dependencies: ["evaluation.plan"],
         origin: "file"
       )
 
-    {:ok, bundle} = Kernel.compile_bundle([component])
+    {:ok, bundle} = Kernel.compile_bundle([plan_component, component])
     {:ok, workflow} = WorkflowEnvironment.new(bundle: bundle)
     {:ok, mission} = MissionEnvironment.new([])
     {:ok, limits} = Limits.new(evaluation_timeout_ms: 5_000)
@@ -589,5 +785,46 @@ defmodule PtcRunner.Kernel.RepoAnalystEvaluationTest do
     |> File.read!()
     |> Jason.decode!()
     |> Map.fetch!("plan")
+  end
+
+  defp shipped_trials do
+    Enum.flat_map(shipped_plan()["cases"], fn planned ->
+      passed? = planned["id"] != "negative-control.always-fails"
+
+      for subject <- ~w(baseline candidate) do
+        trial(subject, planned["id"], planned["set"], passed?, case_hash: planned["case_hash"])
+      end
+    end)
+  end
+
+  defp set_passed(trials, subject, id, passed?) do
+    Enum.map(trials, fn
+      %{"subject" => ^subject, "case" => %{"id" => ^id}} = trial ->
+        Map.put(trial, "passed", passed?)
+
+      trial ->
+        trial
+    end)
+  end
+
+  defp compiled_plan do
+    {:ok, manifest} = Manifest.load(path("repo-analyst-aggregate.json"))
+    {:ok, bundle} = Kernel.compile_bundle(manifest.workflow_components)
+    {:ok, workflow} = WorkflowEnvironment.new(bundle: bundle)
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, limits} = Limits.new(evaluation_timeout_ms: 5_000)
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "compiled-evaluation-plan")
+
+    {:ok, config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        mission_environment: mission,
+        input: %{},
+        limits: limits,
+        event_sink: sink
+      )
+
+    assert {:ok, %{value: cases}} = Kernel.run("(return (evaluation.plan/cases))", config)
+    cases
   end
 end

@@ -400,6 +400,7 @@ The example application may live inside the repository it analyzes:
 
 ```text
 repo-analyst.host.json             trusted installation
+repo-analyst-evaluation.host.json  deterministic smoke installation
 repo-analyst-answer.json           source-question selection and contract
 repo-analyst-review.json           prior-run review selection and contract
 repo-analyst-improve.json          candidate proposal selection and contract
@@ -411,6 +412,7 @@ repo-analyst/
   runs.clj                       trace/private-inspection wrappers
   evaluate.clj                   exactly one isolated evaluation trial
   aggregate.clj                  pure aggregation of trial artifacts
+  evaluation.plan.clj            compiled authoritative case matrix
   answer-input.json              one source question
   review-input.json              one prior-run review task
   improve-input.json             one improvement task
@@ -429,6 +431,7 @@ repo-analyst/
     held-out.json
     negative-control.json
     replay.jsonl
+    workspace/                    committed deterministic smoke workspace
 ```
 
 No file registers an Elixir callback. Host JSON can instantiate only source
@@ -1102,12 +1105,17 @@ provider:
   invocations with unique no-clobber outputs.
 
 The evaluator component depends explicitly on `agent.core`, is the workflow
-entry, and calls its non-terminal `run-value` export once with the bounded
-case. `run-value` returns the model-authored answer to the evaluator so it can
-score before the outer workflow returns; ordinary `agent.core/run` remains a
-terminal entry. An override replaces that dependency before bundle
-compilation. `aggregate.clj` is a separate pure workflow component with no LLM
-or mission providers.
+entry, and calls its non-terminal `run-outcome` export once with the bounded
+case. A returned model-authored value is scored normally. A model-program
+failure, exhausted correction loop, non-retryable generated-program error, or
+invalid answer shape becomes a bounded `subject-failure` trial with
+`passed: false`. Provider, prompt, transcript, quota, persistence, and other
+host failures still fail the run and invalidate its coverage rather than being
+scored against the candidate. Ordinary `agent.core/run` and
+`agent.core/run-value` retain their terminal and fail-on-subject-failure
+contracts. An override replaces the dependency before bundle compilation.
+`aggregate.clj` is a separate pure workflow component with no LLM or mission
+providers.
 
 Frozen inputs make live results attributable, not deterministic.
 
@@ -1192,10 +1200,13 @@ mix ptc.run repo-analyst-aggregate.json \
 validates the aggregate input. The aggregate refuses missing or duplicate
 pairs, reused run IDs, case or candidate/override disagreement, and
 baseline/candidate pairs whose provider, fixture, mission bundle, or content
-identities drift. Its committed plan enumerates every allowed case ID, case
-hash, set, and repetition. An improvement cannot reach `accept` until that
-exact motivating, regression, held-out, and two-negative-control matrix is
-represented once on both sides; a partial matrix remains `inconclusive`.
+identities drift. `evaluation.plan` compiles every allowed case ID, case hash,
+set, and repetition into the application bundle. The submitted transparent
+plan must equal that exact value; a caller cannot obtain acceptance by omitting
+held-out cases or controls. An improvement cannot reach `accept` until the
+motivating, regression, held-out, and two-negative-control matrix is
+represented once on both sides; a partial run against the authoritative plan
+remains `inconclusive`.
 Every trial therefore binds the subject, candidate/base hashes, case and
 fixture-set hashes, effective bundle hash, provider snapshot, and
 filesystem/content snapshot identities. When present, an optional installation
@@ -1493,10 +1504,10 @@ runtime module contains its domain vocabulary.
 
 **Status:** implemented; the final live-matrix policy remains an application
 choice. The trusted override and `llm_replay` runtime, composable
-`agent.core/run-value`, one-trial evaluator, negative controls, trace/result
+`agent.core/run-outcome`, one-trial evaluator, negative controls, trace/result
 identity join, and provider-free aggregate are integrated. A deterministic
-fresh-run baseline/candidate E2E exercises a real filesystem fixture and
-verified override.
+fresh-run baseline/candidate E2E exercises a real filesystem fixture, verified
+override, behavior-changing candidate, and persisted subject failure.
 
 - implement the trusted, hash-bearing component override descriptor;
 - implement `llm_replay`;

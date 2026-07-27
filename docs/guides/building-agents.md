@@ -101,6 +101,23 @@ same bounded loop but gives the model-authored value back to its PTC-Lisp
 caller, which can validate, compare, or score it before the outer workflow
 returns.
 
+An evaluator that must record unsuccessful subjects uses
+`agent.core/run-outcome`. It returns `{:status :returned :value ...}` for a
+model-authored application value and `{:status :subject-failure ...}` for
+model-program failure, a turn limit, or a non-retryable generated-program
+error. Provider, prompt, transcript, quota, and other host failures still fail
+the workflow. This distinction prevents a candidate crash from disappearing
+while also preventing a provider outage from being scored against a candidate.
+`run-value` retains its existing fail-on-subject-failure behavior.
+
+The agent configuration defaults `max_observation_chars` to 2,048 and accepts
+values through 65,536 characters. The larger ceiling exists for bounded
+code/trace analysis where one observation may contain a substantial source
+fragment; it matches the maximum candidate-component source size. It does not
+change the default, transcript ceiling, provider byte limits, or Kernel memory
+limits. Values above 65,536 are invalid and fall back to the 2,048-character
+default.
+
 ## Select model access separately from task access
 
 The manifest selects host-installed aliases and may narrow their grants:

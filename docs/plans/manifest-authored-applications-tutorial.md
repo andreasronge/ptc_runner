@@ -82,6 +82,7 @@ From a repository root, create:
 
 ```text
 repo-analyst.host.json              expanded at review and evaluation
+repo-analyst-evaluation.host.json   runnable deterministic smoke fixture
 repo-analyst-answer.json
 repo-analyst-review.json
 repo-analyst-improve.json
@@ -93,6 +94,7 @@ repo-analyst/
   runs.clj
   evaluate.clj
   aggregate.clj
+  evaluation.plan.clj
   answer-input.json
   review-input.json
   improve-input.json
@@ -111,6 +113,7 @@ repo-analyst/
     held-out.json
     negative-control.json
     replay.jsonl
+    workspace/                    committed deterministic smoke workspace
 ```
 
 The files occupy three trust levels:
@@ -1209,17 +1212,35 @@ subject/case trial and returns its bounded observation and identities.
 between them.
 
 Both manifests make the evaluator the workflow entry, declare its
-`agent.core` dependency, and call `agent.core/run-value` once. Unlike the
-terminal `agent.core/run`, `run-value` resumes the evaluator with the
-model-authored answer so the frozen expectation can be scored before the outer
-workflow returns. The component override therefore changes the implementation
-used by that one trial before the bundle freezes. `aggregate.clj` is a
-separate pure workflow with no LLM or mission provider.
+`agent.core` dependency, and call `agent.core/run-outcome` once. A normal
+model-authored value resumes the evaluator and is scored against the frozen
+expectation. Model-program failure, turn exhaustion, a non-retryable generated
+program, or an invalid answer shape becomes a bounded `subject-failure` trial
+with `passed: false`. Provider, prompt, quota, persistence, and other host
+failures still fail the run, so infrastructure outages are never charged to a
+candidate. The component override therefore changes the implementation used by
+that one trial before the bundle freezes. `aggregate.clj` is a separate pure
+workflow with no LLM or mission provider.
 
 The trusted host combines only the candidate identity with one frozen case
 into bounded private baseline and candidate inputs. Candidate source is absent
 from both inputs and reaches only the candidate run through the trusted
 override descriptor.
+
+Before generating a complete matrix, run the committed deterministic smoke
+case unchanged. Its dedicated host document points at a committed immutable
+workspace fixture; it does not expose the real repository:
+
+```console
+mkdir -p repo-analyst/private
+mix ptc.run repo-analyst-evaluate-replay.json \
+  --host-config repo-analyst-evaluation.host.json \
+  --private-output repo-analyst/private/replay-smoke.private.json
+```
+
+This proves the shipped manifest, replay fixture, filesystem server, and
+default trial input agree. The matrix preparation below derives a fresh private
+workspace per case instead.
 
 Each case also owns an immutable `workspace_fixture`. Materialize it into a
 fresh private directory and derive a private host-config copy whose
@@ -1257,7 +1278,12 @@ jq --arg cwd "$repo_root" \
   | .install."replay-llm".fixtures = "replay.jsonl"
 ' repo-analyst.host.json > "$trial_dir/host.json"
 
-case_hash="sha256:$(jq -cS . "$trial_dir/case.json" | shasum -a 256 | cut -d' ' -f1)"
+case_digest=$(
+  jq -cS 'del(.set)' "$trial_dir/case.json" |
+    shasum -a 256 |
+    cut -d' ' -f1
+)
+case_hash="sha256:$case_digest"
 jq -n \
   --slurpfile result repo-analyst/private/candidate.private.json \
   --slurpfile case "$trial_dir/case.json" \
@@ -1348,12 +1374,14 @@ mix ptc.run repo-analyst-aggregate.json \
 The pure aggregator rejects missing or duplicate pairs, inconsistent
 case/candidate identities, reused run IDs, provider/content/fixture drift
 within a pair, negative-control failure, and regression on motivating,
-regression, or held-out cases. The committed aggregate plan names the exact
-allowed case ID, set, hash, and repetition matrix. It cannot return `accept`
-until every planned motivating, regression, held-out, and two negative-control
-case is represented exactly once on both sides; a smaller diagnostic pair can
-still produce the `inconclusive` result below. The private output contains the
-validated aggregate value directly:
+regression, or held-out cases. `evaluation.plan` compiles the exact allowed
+case ID, set, hash, and repetition matrix into the aggregate bundle. The plan
+submitted for transparent inspection must equal that value, so omission cannot
+shrink the evaluation universe. It cannot return `accept` until every planned
+motivating, regression, held-out, and two negative-control case is represented
+exactly once on both sides; a smaller diagnostic run against the authoritative
+plan can still produce the `inconclusive` result below. The private output
+contains the validated aggregate value directly:
 
 ```json
 {
@@ -1450,8 +1478,8 @@ Elixir provider code remain unchanged. The same mechanism can later add:
 - an independent proposal-review manifest;
 - at most one proposal-revision manifest;
 - scorer-only oracle data hidden from the subject run;
-- structured `valid`, `apparatus-failed`, and `subject-failed` trial outcomes;
-  and
+- a richer host-authored `apparatus-failed` record if orchestration later needs
+  to persist pre-result infrastructure failures separately; and
 - a form-aware editing MCP server for disposable candidates.
 
 Each refinement should first appear as a response to observed friction or a

@@ -4,8 +4,15 @@
   "workflow": {
     "components": [
       {
+        "id": "evaluation.plan",
+        "path": "repo-analyst/evaluation.plan.clj"
+      },
+      {
         "id": "aggregate",
-        "path": "repo-analyst/aggregate.clj"
+        "path": "repo-analyst/aggregate.clj",
+        "dependencies": [
+          "evaluation.plan"
+        ]
       }
     ],
     "entry": "aggregate/run"

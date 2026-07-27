@@ -46,6 +46,10 @@
       "items": {
         "type": "object",
         "properties": {
+          "status": {
+            "type": "string",
+            "enum": ["scored", "subject-failure"]
+          },
           "subject": {
             "type": "string",
             "enum": ["baseline", "candidate"]
@@ -103,6 +107,22 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 2000
+          },
+          "failure": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "turn-limit",
+                  "model-program-failed",
+                  "non-retryable-evaluation",
+                  "invalid-answer"
+                ]
+              }
+            },
+            "required": ["kind"]
           },
           "run_identity": {
             "type": "object",
@@ -175,6 +195,7 @@
           }
         },
         "required": [
+          "status",
           "subject",
           "repetition",
           "candidate",

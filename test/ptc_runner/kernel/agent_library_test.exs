@@ -515,7 +515,15 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
   end
 
   test "agent.core honors the documented 65536-character observation ceiling" do
-    observation = String.duplicate("x", 30_000)
+    observation = String.duplicate("x", 70_000)
+
+    {:ok, large_observation} =
+      Capability.new(
+        name: "large-observation",
+        effect: :read,
+        input_schema: %{"type" => "object"},
+        callback: fn _ -> {:ok, observation} end
+      )
 
     responses = [
       %{
@@ -524,7 +532,7 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
           %{
             id: "observe",
             name: "run_ptc_lisp",
-            args: %{"program" => Jason.encode!(observation)}
+            args: %{"program" => ~S|(tool/large-observation {})|}
           }
         ]
       },
@@ -536,11 +544,15 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
       }
     ]
 
-    {:ok, config} = agent_config(responses, [], prompt_source: tiny_prompt_source())
+    {:ok, config} =
+      agent_config(responses, [],
+        prompt_source: tiny_prompt_source(),
+        mission_capabilities: [large_observation]
+      )
 
     assert {:ok, _result} =
              Kernel.run(
-               ~S|(agent.core/run "Inspect" {"max_turns" 2 "max_observation_chars" 32768 "max_transcript_chars" 1000000})|,
+               ~S|(agent.core/run "Inspect" {"max_turns" 2 "max_observation_chars" 65536 "max_transcript_chars" 1000000})|,
                config
              )
 
@@ -549,7 +561,29 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     tool_message = List.last(second_request["messages"])
 
     assert tool_message["role"] == "tool"
-    assert String.length(tool_message["content"]) > 30_000
+    assert tool_message["content"] =~ "observation truncated"
+    assert tool_message["content"] |> success_feedback_body() |> String.length() == 65_536
+
+    {:ok, fallback_config} =
+      agent_config(responses, [],
+        prompt_source: tiny_prompt_source(),
+        mission_capabilities: [large_observation]
+      )
+
+    assert {:ok, _result} =
+             Kernel.run(
+               ~S|(agent.core/run "Inspect" {"max_turns" 2 "max_observation_chars" 65537 "max_transcript_chars" 1000000})|,
+               fallback_config
+             )
+
+    assert_receive {:agent_request, _first_request}
+    assert_receive {:agent_request, fallback_request}
+
+    assert fallback_request["messages"]
+           |> List.last()
+           |> Map.fetch!("content")
+           |> success_feedback_body()
+           |> String.length() == 2_048
   end
 
   @tag :tmp_dir
@@ -1294,6 +1328,71 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
 
     assert {:error, %{kind: :workflow_failed, reason: :explicit_failure}} =
              Kernel.run(~S|(agent.core/run "Quota" {"max_turns" 2})|, quota_config)
+  end
+
+  test "agent.core run-outcome returns attributable subject failures without hiding provider failures" do
+    explicit = %{
+      content: nil,
+      tool_calls: [
+        %{id: "fail", name: "run_ptc_lisp", args: %{"program" => ~S|(fail "declined")|}}
+      ]
+    }
+
+    {:ok, explicit_config} = agent_config([explicit])
+
+    assert {:ok,
+            %{
+              value: %{
+                "status" => "subject-failure",
+                "kind" => "model-program-failed"
+              }
+            }} =
+             Kernel.run(
+               ~S|(return (agent.core/run-outcome "Fail" {"max_turns" 1}))|,
+               explicit_config
+             )
+
+    {:ok, provider_config} = agent_config([{:error, :transport_down}])
+
+    assert {:error, %{kind: :workflow_failed}} =
+             Kernel.run(
+               ~S|(return (agent.core/run-outcome "Provider" {"max_turns" 1}))|,
+               provider_config
+             )
+
+    non_retryable = %{
+      content: nil,
+      tool_calls: [
+        %{
+          id: "bad-after-read",
+          name: "run_ptc_lisp",
+          args: %{"program" => ~S|(do (tool/touch {}) (+ {} 1))|}
+        }
+      ]
+    }
+
+    {:ok, touch} =
+      Capability.new(
+        name: "touch",
+        effect: :read,
+        input_schema: %{"type" => "object"},
+        callback: fn _ -> {:ok, 42} end
+      )
+
+    {:ok, non_retryable_config} =
+      agent_config([non_retryable], [], mission_capabilities: [touch])
+
+    assert {:ok,
+            %{
+              value: %{
+                "status" => "subject-failure",
+                "kind" => "non-retryable-evaluation"
+              }
+            }} =
+             Kernel.run(
+               ~S|(return (agent.core/run-outcome "Read once" {"max_turns" 3}))|,
+               non_retryable_config
+             )
   end
 
   defp agent_config(responses, limit_overrides \\ [], opts \\ []) do

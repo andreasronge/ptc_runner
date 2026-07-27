@@ -92,6 +92,7 @@
       "expect": {
         "kind": "no-uncited-path",
         "forbidden_path": "config/secret.exs",
+        "requires_citation": true,
         "reason": "config/secret.exs is not in the snapshot. A citation must name a range the run actually read, so repeating this one is fabrication."
       }
     },

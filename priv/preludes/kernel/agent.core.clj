@@ -12,11 +12,6 @@
       next-state
       (fail (result/error :invalid-prompt :invalid-transition)))))
 
-(defn- retry-or-fail [turn max-turns reason]
-  (if (agent.retry/retry? turn max-turns)
-    true
-    (fail (result/error :turn-limit reason))))
-
 (defn- positive-int-or [value default maximum]
   (if (and (integer? value) (pos? value) (<= value maximum))
     value
@@ -51,10 +46,23 @@
 
       :else request)))
 
-(defn run-value
-  "Runs the agent loop and returns its model-authored value to the calling
-  PTC-Lisp function. Unlike `run`, this does not terminate the outer program,
-  so an application can validate or score the answer before returning."
+(defn- returned-outcome [value]
+  {:status :returned :value value})
+
+(defn- subject-failure [kind reason]
+  {:status :subject-failure
+   :kind kind
+   :error (result/error kind reason)})
+
+(defn run-outcome
+  "Runs the agent loop and distinguishes model-authored completion from a
+  bounded subject-attributable failure.
+
+  Provider, prompt, transcript, quota, and other host/infrastructure failures
+  still fail the outer workflow. This function is for evaluators that must
+  score a model program failure, exhausted correction loop, or non-retryable
+  generated-program error without misclassifying provider failure as subject
+  behavior."
   [task cfg]
   (let [max-turns (positive-int-or (get cfg "max_turns") 4 128)
         max-program-chars (positive-int-or (get cfg "max_program_chars") 64000 1000000)
@@ -72,7 +80,7 @@
              messages [{"role" "user" "content" task}]
              prompt-state initial-prompt-state]
         (if (>= turn max-turns)
-          (fail (result/error :turn-limit :turn-limit-exceeded))
+          (subject-failure :turn-limit :turn-limit-exceeded)
           (let [request (bounded-request prompt-state messages max-transcript-chars)
                 response (llm/request request)
                 action (agent.native/normalize response max-program-chars)]
@@ -84,21 +92,21 @@
               (let [evaluation (kernel/eval-source (get action :program))]
                 (case (get evaluation :outcome)
                   :returned
-                  (get evaluation :value)
-                  :failed (fail (result/error :model-program-failed (get evaluation :value)))
+                  (returned-outcome (get evaluation :value))
+                  :failed
+                  (subject-failure :model-program-failed (get evaluation :value))
                   :continued
-                  (do
-                    (retry-or-fail turn max-turns :intermediate-result)
+                  (if (agent.retry/retry? turn max-turns)
                     (let [event (completed-event :evaluation-success turn max-turns)
                           next-prompt-state (transition-prompt prompt-state event)
                           observation (agent.feedback/success evaluation max-observation-chars)]
                       (recur (inc turn)
                              (append-correlated messages action observation)
-                             next-prompt-state)))
+                             next-prompt-state))
+                    (subject-failure :turn-limit :intermediate-result))
                   (if (false? (get evaluation :retryable?))
-                    (fail (result/error :non-retryable-evaluation (get evaluation :kind)))
-                    (do
-                      (retry-or-fail turn max-turns :evaluation-error)
+                    (subject-failure :non-retryable-evaluation (get evaluation :kind))
+                    (if (agent.retry/retry? turn max-turns)
                       (let [next-prompt-state
                             (transition-prompt
                               prompt-state
@@ -108,11 +116,11 @@
                                  messages
                                  action
                                  (agent.feedback/evaluation-error evaluation))
-                               next-prompt-state))))))
+                               next-prompt-state))
+                      (subject-failure :turn-limit :evaluation-error)))))
 
               :protocol-error
-              (do
-                (retry-or-fail turn max-turns :protocol-error)
+              (if (agent.retry/retry? turn max-turns)
                 (let [next-prompt-state
                       (transition-prompt
                         prompt-state
@@ -121,12 +129,26 @@
                          (conj messages
                                {"role" "user"
                                 "content" (agent.feedback/protocol-error action)})
-                         next-prompt-state)))
+                         next-prompt-state))
+                (subject-failure :turn-limit :protocol-error))
 
               :provider-error
               (fail (result/error :llm-provider-error (get action :error)))
 
               (fail (result/error :unknown-action (get action :kind))))))))))
+
+(defn run-value
+  "Runs the agent loop and returns its model-authored value to the calling
+  PTC-Lisp function. Unlike `run`, this does not terminate the outer program,
+  so an application can validate or score the answer before returning.
+
+  Subject failures retain the historical fail behavior. Evaluators that need
+  to record those attempts use `run-outcome`."
+  [task cfg]
+  (let [outcome (run-outcome task cfg)]
+    (if (= :returned (get outcome :status))
+      (get outcome :value)
+      (fail (get outcome :error)))))
 
 (defn run
   "Runs the agent loop as a terminal workflow entry.

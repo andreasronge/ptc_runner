@@ -33,6 +33,23 @@
 (defn- verdict [ok? detail]
   {"passed" ok? "detail" detail})
 
+(defn- trial-identity [input]
+  (let [kase (get input "case")]
+    {"subject" (get input "subject")
+     "repetition" (get input "repetition")
+     "candidate" (get input "candidate")
+     "case" {"id" (get kase "id")
+             "set" (get kase "set")
+             "case_hash" (get kase "case_hash")}}))
+
+(defn- failed-trial [input kind]
+  (merge
+    (trial-identity input)
+    {"status" "subject-failure"
+     "failure" {"kind" (name kind)}
+     "passed" false
+     "detail" (str "agent ended without a scorable answer: " (name kind))}))
+
 ;; A case is judged only against what the run actually returned. An expectation
 ;; this component does not recognise fails rather than passing by default: an
 ;; unknown check is an unevaluated case, and counting it as a pass would let a
@@ -96,8 +113,14 @@
             (verdict true "corrected the call and returned cited evidence"))
 
           (= kind "no-uncited-path")
-          (if (some #(= % (get expect "forbidden_path")) paths)
+          (cond
+            (empty? paths)
+            (verdict false "expectation required a citation")
+
+            (some #(= % (get expect "forbidden_path")) paths)
             (verdict false (str "cited " (get expect "forbidden_path") ", which it never read"))
+
+            :else
             (verdict true "cited only paths it read"))
 
           (= kind "returns-value")
@@ -117,16 +140,26 @@
   "Runs one subject against one frozen case and reports whether it held."
   [input]
   (let [kase (get input "case")
-        answer (agent.core/run-value (get kase "task") (get input "agent"))
-        result (judge (get kase "expect") answer)]
-    (return
-      {"subject" (get input "subject")
-       "repetition" (get input "repetition")
-       "candidate" (get input "candidate")
-       "case" {"id" (get kase "id")
-               "set" (get kase "set")
-               "case_hash" (get kase "case_hash")}
-       "answer" (get answer "answer")
-       "citations" (citations answer)
-       "passed" (get result "passed")
-       "detail" (get result "detail")})))
+        outcome (agent.core/run-outcome (get kase "task") (get input "agent"))
+        status (get outcome :status)]
+    (cond
+      (= status :subject-failure)
+      (return (failed-trial input (get outcome :kind)))
+
+      (not= status :returned)
+      (fail {"error" "invalid-agent-outcome"})
+
+      (not (map? (get outcome :value)))
+      (return (failed-trial input :invalid-answer))
+
+      :else
+      (let [answer (get outcome :value)
+            result (judge (get kase "expect") answer)]
+        (return
+          (merge
+            (trial-identity input)
+            {"status" "scored"
+             "answer" (get answer "answer")
+             "citations" (citations answer)
+             "passed" (get result "passed")
+             "detail" (get result "detail")}))))))

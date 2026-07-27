@@ -18,6 +18,17 @@
 
 (defn- passed? [trial] (true? (get trial "passed")))
 
+(defn- outcome-consistent? [trial]
+  (let [status (get trial "status")
+        failure (get trial "failure")]
+    (cond
+      (= status "scored") (nil? failure)
+      (= status "subject-failure")
+      (and (false? (get trial "passed"))
+           (map? failure)
+           (string? (get failure "kind")))
+      :else false)))
+
 (defn- rate [trials]
   (if (empty? trials)
     0
@@ -104,7 +115,8 @@
     (get plan "cases")))
 
 (defn- plan-problems [plan trials]
-  (let [keys (plan-keys plan)
+  (let [authoritative {"cases" (evaluation.plan/cases)}
+        keys (plan-keys plan)
         index (planned-by-key plan)
         duplicate-plan-keys (- (count keys) (count (distinct keys)))
         unexpected
@@ -116,6 +128,9 @@
                   (not= (get planned "case_hash") (get-in trial ["case" "case_hash"])))))
           trials)]
     (concat
+      (if (= plan authoritative)
+        []
+        ["supplied plan does not equal the authoritative evaluation plan"])
       (if (zero? duplicate-plan-keys)
         []
         [(str duplicate-plan-keys " duplicate evaluation-plan key(s)")])
@@ -205,6 +220,7 @@
             evidence-drifted (evidence-drift baseline candidate)
             repeated-runs (repeated-run-ids trials)
             mislabelled (filterv #(not (subject-consistent? %)) trials)
+            malformed-outcomes (filterv #(not (outcome-consistent? %)) trials)
             unrecognised (- (count trials) (+ (count baseline) (count candidate)))
             plan-errors (plan-problems plan trials)
             held-out (regressions baseline candidate "held-out")
@@ -228,6 +244,10 @@
                            []
                            [(str (count mislabelled)
                                  " trial(s) disagree with their run identity")])
+                         (if (empty? malformed-outcomes)
+                           []
+                           [(str (count malformed-outcomes)
+                                 " trial(s) have inconsistent outcome classification")])
                          (if (> unrecognised 0)
                            [(str unrecognised " trial(s) declare no recognised subject")]
                            [])
