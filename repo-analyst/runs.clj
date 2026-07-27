@@ -17,6 +17,13 @@
 ;; opaque, bound to the captured snapshot, and never parsed here. Each facade
 ;; response labels its installed `provider` alias so a citation can copy both
 ;; that alias and `snapshot_hash` without guessing which native source backed it.
+;;
+;; Authority for historical behaviour: `effective-prelude` returns the exact
+;; source a run compiled, and that is the only source that explains what the run
+;; did. `repo/read-range` shows the repository as it is now. The two disagree
+;; whenever a run replaced a component, which is exactly what candidate
+;; evaluation does, so a review that reads the workspace copy can describe code
+;; that never executed. When the hashes differ, the executed source wins.
 
 (defn- source-page [provider envelope]
   (assoc (cap/unwrap! envelope) "provider" provider))
@@ -41,6 +48,58 @@
           (tool/history.list-runs
             (cap/with-cursor {"limit" limit} cursor)))]
     (assoc page "items" (map compact-run (get page "items")))))
+
+(defn provenance
+  "Read which components a run replaced before compiling, and the bundle hashes
+  it froze.
+
+  The compact catalog cannot carry this: the trace records it once, on the
+  run-started event. A run that replaced a component did not execute the
+  repository's current source, and nothing else in a review distinguishes such a
+  run from a baseline one. An empty `component_overrides` means the run compiled
+  the installed components unchanged."
+  {:signature "(run-id :string) -> :map"}
+  [run-id]
+  (let [page (source-page "history" (tool/history.list-turns {"run_id" run-id "limit" 1}))
+        started (first (get page "items"))
+        data (get started "data")]
+    (if (= "run-started" (get started "type"))
+      {"run_id" run-id
+       "component_overrides" (get data "component_overrides" [])
+       "workflow_prelude" (get data "workflow_prelude")
+       "mission_prelude" (get data "mission_prelude")
+       "provider" (get page "provider")
+       "snapshot_hash" (get page "snapshot_hash")}
+      (fail {"error" "no-run-started-event" "run_id" run-id}))))
+
+(defn effective-prelude
+  "Read the exact source one run compiled for one component.
+
+  Pages the private record set internally and returns only the matching
+  component, so a caller spends one observation instead of a bundle. This is the
+  authoritative source for what the run did; a workspace read of the same path
+  shows current bytes, which may be different ones. Compare `source_hash` before
+  concluding anything about historical behaviour.
+
+  A nil `item` means the run never compiled that component."
+  {:signature "(run-id :string, component-id :string) -> :map"}
+  [run-id component-id]
+  (loop [cursor nil]
+    (let [page (source-page
+                 "private-history"
+                 (tool/private-history.effective-preludes
+                   (cap/with-cursor {"run_id" run-id "limit" 20} cursor)))
+          match (first (filter #(= component-id (get % "component_id"))
+                               (get page "items")))
+          next-cursor (get page "next_cursor")]
+      (cond
+        match {"item" match
+               "provider" (get page "provider")
+               "snapshot_hash" (get page "snapshot_hash")}
+        next-cursor (recur next-cursor)
+        :else {"item" nil
+               "provider" (get page "provider")
+               "snapshot_hash" (get page "snapshot_hash")}))))
 
 (defn turns
   "Read one filtered sanitized-turn page for a run.

@@ -171,13 +171,37 @@ defmodule PtcRunner.Kernel.RepoAnalystApplicationTest do
                ~w(workspace.find workspace.list workspace.read workspace.search)
     end
 
+    # A task prompt that paraphrases its own result schema drifts from it, and
+    # the drift only surfaces as a rejected result after a live run has been
+    # paid for. Four separate prompt defects in this application were exactly
+    # that. The schema is the shape authority; the prompt embeds what it says.
+    test "the improvement prompt embeds the shape its result schema declares" do
+      assert {:ok, contract} =
+               "repo-analyst/candidate.schema.json"
+               |> File.read!()
+               |> Jason.decode!()
+               |> ValueContract.compile()
+
+      task =
+        "repo-analyst/improve-input.json"
+        |> File.read!()
+        |> Jason.decode!()
+        |> Map.fetch!("task")
+
+      for branch <- String.split(ValueContract.describe(contract), "\n") do
+        assert String.contains?(task, branch),
+               "improve-input.json omits a declared branch shape:\n#{branch}"
+      end
+    end
+
     test "runs exposes the documented evidence functions over both sources" do
       assert {:ok, bundle} = compile_facade("runs")
 
       assert facade_names(bundle) ==
-               ~w(runs/capability-calls runs/effective-preludes runs/generated-sources
-                  runs/latest-generated-source runs/latest-model-exchange runs/list-runs
-                  runs/model-exchanges runs/provider-exchanges runs/review-seed runs/turns)
+               ~w(runs/capability-calls runs/effective-prelude runs/effective-preludes
+                  runs/generated-sources runs/latest-generated-source
+                  runs/latest-model-exchange runs/list-runs runs/model-exchanges
+                  runs/provenance runs/provider-exchanges runs/review-seed runs/turns)
 
       assert tool_refs(bundle, "runs") ==
                Enum.sort(["history.list-runs", "history.list-turns"] ++ @private_operations)
