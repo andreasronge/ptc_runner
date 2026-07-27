@@ -13,7 +13,12 @@
 ;; synthesises one.
 ;;
 ;; Every data-bearing response carries `snapshot_hash`, which is what binds a
-;; cited path and line range to the exact bytes that were queried.
+;; cited path and line range to the exact bytes that were queried. The facade
+;; also labels every response with provider `workspace`, so citations copy
+;; source identity rather than reconstructing it.
+
+(defn- workspace-page [envelope]
+  (assoc (cap/unwrap! envelope) "provider" "workspace"))
 
 (defn ls
   "Read one directory page. Pass nil first, then the returned next_cursor.
@@ -22,7 +27,7 @@
   `name`, `kind`, and `path`."
   {:signature "(path :string, cursor :string?) -> :map"}
   [path cursor]
-  (cap/unwrap!
+  (workspace-page
     (tool/workspace.list
       (cap/with-cursor {"path" path "limit" 100} cursor))))
 
@@ -34,7 +39,7 @@
   while \"*.clj\" finds nothing."
   {:signature "(query :string, cursor :string?) -> :map"}
   [query cursor]
-  (cap/unwrap!
+  (workspace-page
     (tool/workspace.find
       (cap/with-cursor {"query" query "limit" 100} cursor))))
 
@@ -46,7 +51,7 @@
   of a later match is not evidence."
   {:signature "(query :string, cursor :string?) -> :map"}
   [query cursor]
-  (cap/unwrap!
+  (workspace-page
     (tool/workspace.search
       (cap/with-cursor {"query" query "limit" 20} cursor))))
 
@@ -54,7 +59,7 @@
   "Read one literal text-search page restricted to one relative path prefix."
   {:signature "(query :string, path :string, cursor :string?) -> :map"}
   [query path cursor]
-  (cap/unwrap!
+  (workspace-page
     (tool/workspace.search
       (cap/with-cursor {"query" query "path" path "limit" 20} cursor))))
 
@@ -67,6 +72,6 @@
   [path from to]
   (if (or (< from 1) (< to from))
     (fail {"error" "invalid-range" "from" from "to" to})
-    (cap/unwrap!
+    (workspace-page
       (tool/workspace.read
         {"path" path "start_line" from "line_count" (inc (- to from))}))))

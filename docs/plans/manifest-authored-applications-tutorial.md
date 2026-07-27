@@ -1108,8 +1108,9 @@ prompt-injection cases record a behavioral regression.
 
 This uses the manifest-contract profile's narrow tagged `oneOf`
 support: closed object branches share the required `decision` string and use
-distinct `const` values. It does not widen MCP's callable-schema profile or
-permit remote references and regexes.
+distinct `const` values. The shared schema profile recognizes the asserted
+`sha256` string format, but does not permit arbitrary formats, remote
+references, or regexes.
 
 Run the improvement task through its candidate-specific manifest:
 
@@ -1130,14 +1131,14 @@ An illustrative proposal value:
     {
       "provider": "history",
       "snapshot_hash": "sha256:...",
-      "run_id": "r-2026-07-21-0413",
-      "event_sequences": [12, 18, 24]
+      "resource": "r-2026-07-21-0413",
+      "positions": [12, 18, 24]
     },
     {
       "provider": "workspace",
       "snapshot_hash": "sha256:...",
-      "path": "priv/preludes/kernel/agent.core.clj",
-      "lines": [40, 53]
+      "resource": "priv/preludes/kernel/agent.core.clj",
+      "positions": [40, 53]
     }
   ],
   "candidate": {
@@ -1157,6 +1158,11 @@ An illustrative proposal value:
   ]
 }
 ```
+
+The uniform evidence locator keeps the result contract closed without adding a
+nested union: `resource` is the run ID or relative path, while `positions`
+contains positive event sequence IDs or positive source line numbers. A
+snapshot hash alone is not evidence.
 
 The complete source and installed base hash make the candidate materializable.
 The trusted host computes the candidate hash from the exact bytes it writes;
@@ -1322,14 +1328,14 @@ mix ptc.run repo-analyst-evaluate-replay.json \
   --host-config "$trial_dir/host.json" \
   --private-mission "$trial_dir/replay-baseline.input.private.json" \
   --trace "$trial_dir/replay-baseline.trace.private.jsonl" \
-  --inspect "$trial_dir/replay-baseline.inspection.private.jsonl" \
+  --inspect "$trial_dir/replay-baseline.inspection.jsonl" \
   --private-output "$trial_dir/replay-baseline.result.private.json"
 mix ptc.run repo-analyst-evaluate-replay.json \
   --host-config "$trial_dir/host.json" \
   --private-mission "$trial_dir/replay-candidate.input.private.json" \
   --component-override-descriptor repo-analyst/private/agent.core.override.json \
   --trace "$trial_dir/replay-candidate.trace.private.jsonl" \
-  --inspect "$trial_dir/replay-candidate.inspection.private.jsonl" \
+  --inspect "$trial_dir/replay-candidate.inspection.jsonl" \
   --private-output "$trial_dir/replay-candidate.result.private.json"
 ```
 
@@ -1364,7 +1370,7 @@ for subject in replay-baseline replay-candidate; do
   jq -n --arg result_hash "$result_hash" \
     --slurpfile result "$result" \
     --slurpfile trace "$trial_dir/$subject.trace.private.jsonl" \
-    --slurpfile inspection "$trial_dir/$subject.inspection.private.jsonl" \
+    --slurpfile inspection "$trial_dir/$subject.inspection.jsonl" \
     -f repo-analyst/join-trial.jq \
     > "$trial_dir/$subject.joined.json"
 done

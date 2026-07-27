@@ -975,14 +975,14 @@ The improvement run returns one bounded decision:
     {
       "provider": "history",
       "snapshot_hash": "sha256:...",
-      "run_id": "...",
-      "event_sequences": [12, 18]
+      "resource": "...",
+      "positions": [12, 18]
     },
     {
       "provider": "workspace",
       "snapshot_hash": "sha256:...",
-      "path": "priv/preludes/kernel/agent.core.clj",
-      "lines": [70, 96]
+      "resource": "priv/preludes/kernel/agent.core.clj",
+      "positions": [70, 96]
     }
   ],
   "candidate": {
@@ -1002,6 +1002,11 @@ The improvement run returns one bounded decision:
 }
 ```
 
+Evidence uses one provider-neutral locator shape: `resource` is a run ID or
+relative path, and `positions` contains positive event sequence IDs or positive
+source line numbers. Requiring both fields prevents a snapshot hash by itself
+from passing as evidence.
+
 Complete component source is authoritative because the trusted host can hash
 and compile its exact bytes. The model supplies the installed base hash but
 does not invent a candidate hash that PTC-Lisp cannot compute. A diff may
@@ -1011,8 +1016,9 @@ Manifest-local bounded schemas validate input before workflow execution and
 `Result.value` before publication. They constrain shape, not confidentiality.
 The result-contract compiler supports a narrow tagged union: bounded `oneOf`
 object branches with the same required string discriminator and distinct
-`const` values. It does not enable arbitrary remote references, regexes, or
-general composition in MCP callable schemas.
+`const` values. The shared bounded schema profile also recognizes only the
+asserted `sha256` string format. It does not enable arbitrary remote
+references, regexes, formats, or general composition in MCP callable schemas.
 
 Output channels:
 
@@ -1147,14 +1153,14 @@ mix ptc.run repo-analyst-evaluate-replay.json \
   --host-config repo-analyst.host.json \
   --private-mission repo-analyst/private/replay-baseline.private.json \
   --trace repo-analyst/private/trials/replay-baseline.trace.private.jsonl \
-  --inspect repo-analyst/private/trials/replay-baseline.inspection.private.jsonl \
+  --inspect repo-analyst/private/trials/replay-baseline.inspection.jsonl \
   --private-output repo-analyst/private/trials/replay-baseline.private.json
 mix ptc.run repo-analyst-evaluate-replay.json \
   --host-config repo-analyst.host.json \
   --private-mission repo-analyst/private/replay-candidate.private.json \
   --component-override-descriptor repo-analyst/private/agent.core.override.json \
   --trace repo-analyst/private/trials/replay-candidate.trace.private.jsonl \
-  --inspect repo-analyst/private/trials/replay-candidate.inspection.private.jsonl \
+  --inspect repo-analyst/private/trials/replay-candidate.inspection.jsonl \
   --private-output repo-analyst/private/trials/replay-candidate.private.json
 ```
 
@@ -1188,7 +1194,7 @@ for subject in replay-baseline replay-candidate; do
     --slurpfile result "$result" \
     --slurpfile trace "repo-analyst/private/trials/$subject.trace.private.jsonl" \
     --slurpfile inspection \
-      "repo-analyst/private/trials/$subject.inspection.private.jsonl" \
+      "repo-analyst/private/trials/$subject.inspection.jsonl" \
     -f repo-analyst/join-trial.jq \
     > "repo-analyst/private/trials/$subject.joined.json"
 done

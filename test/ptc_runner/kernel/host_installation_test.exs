@@ -287,6 +287,14 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
                mission
              )
 
+    assert {:error, :invalid_trace_snapshot_selection} =
+             ProviderRegistry.prepare(
+               registry,
+               "history",
+               %{"max_result_bytes" => HostConfig.minimum_snapshot_result_bytes() - 1},
+               mission
+             )
+
     assert {:ok, built} =
              ProviderRegistry.build(
                registry,
@@ -304,16 +312,22 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
 
     callbacks = Map.new(built.capabilities, &{&1.name, &1.callback})
 
-    assert {:ok, %{"items" => [%{"run_id" => "captured"}]}} =
-             callbacks["history.list-runs"].(%{})
+    assert {:ok,
+            %{
+              "items" => [%{"run_id" => "captured"}],
+              "snapshot_hash" => content_snapshot_hash
+            }} = callbacks["history.list-runs"].(%{})
 
     File.write!(
       Path.join(trace_directory, "run.jsonl"),
       Jason.encode!(trace_event("changed", 1, "run-started")) <> "\n"
     )
 
-    assert {:ok, %{"items" => [%{"run_id" => "captured"}]}} =
-             callbacks["history.list-runs"].(%{})
+    assert {:ok,
+            %{
+              "items" => [%{"run_id" => "captured"}],
+              "snapshot_hash" => ^content_snapshot_hash
+            }} = callbacks["history.list-runs"].(%{})
 
     assert built.data_class == :normal
     assert built.accepts_data == [:normal, :private_inspection]
@@ -321,6 +335,7 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
     assert built.snapshot["source"] == "ptc_trace_snapshot"
     assert built.snapshot["run_count"] == 1
     assert built.snapshot["snapshot_hash"] =~ ~r/\A[0-9a-f]{64}\z/
+    assert built.snapshot["content_snapshot_hash"] == content_snapshot_hash
     refute inspect(built.snapshot) =~ dir
     assert :ok = built.close.()
   end

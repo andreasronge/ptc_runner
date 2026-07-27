@@ -331,6 +331,31 @@ defmodule PtcRunner.Kernel.HostConfigTest do
     assert {:ok, host} = HostConfig.decode(trace, "/tmp")
     assert host.install["history"].source == :ptc_trace_snapshot
 
+    too_small_trace =
+      put_in(
+        trace,
+        ["install", "history", "ceilings"],
+        %{"max_result_bytes" => HostConfig.minimum_snapshot_result_bytes() - 1}
+      )
+
+    assert {:error, :invalid_host_config} = HostConfig.decode(too_small_trace, "/tmp")
+    assert {:error, _details} = JSV.validate(too_small_trace, root, cast: false)
+
+    content_hash = "sha256:" <> String.duplicate("0", 64)
+    metadata_bytes = byte_size(Jason.encode!(%{"snapshot_hash" => content_hash}))
+
+    empty_page_bytes =
+      byte_size(
+        Jason.encode!(%{
+          "items" => [],
+          "next_cursor" => nil,
+          "omitted_count" => 0,
+          "truncated" => false
+        })
+      )
+
+    assert HostConfig.minimum_snapshot_result_bytes() == metadata_bytes + empty_page_bytes
+
     inspection = %{
       "install" => %{
         "private-history" => %{
@@ -343,6 +368,16 @@ defmodule PtcRunner.Kernel.HostConfigTest do
     assert {:ok, _validated} = JSV.validate(inspection, root, cast: false)
     assert {:ok, host} = HostConfig.decode(inspection, "/tmp")
     assert host.install["private-history"].source == :ptc_inspection_snapshot
+
+    too_small_inspection =
+      put_in(
+        inspection,
+        ["install", "private-history", "ceilings"],
+        %{"max_result_bytes" => HostConfig.minimum_snapshot_result_bytes() - 1}
+      )
+
+    assert {:error, :invalid_host_config} = HostConfig.decode(too_small_inspection, "/tmp")
+    assert {:error, _details} = JSV.validate(too_small_inspection, root, cast: false)
 
     refute match?(
              {:ok, _validated},

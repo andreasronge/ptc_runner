@@ -12,10 +12,11 @@ defmodule PtcRunner.Kernel.ModelContract do
 
   JSON Schema annotations and validity constraints retain their normalized
   names: `title`, `description`, `enum`, `const`, `minimum`, `maximum`,
-  `min_length`, `max_length`, `min_items`, and `max_items`. Missing optional
-  output schemas remain `nil`; the prompt renderer omits absent information.
-  This structure is presentation data only. Runtime authority remains with the
-  compiled prelude contract and capability JSON Schema validators.
+  `min_length`, `max_length`, `min_items`, `max_items`, and `format`. Missing
+  optional output schemas remain `nil`; the prompt renderer omits absent
+  information. This structure is presentation data only. Runtime authority
+  remains with the compiled prelude contract and capability JSON Schema
+  validators.
   """
 
   alias PtcRunner.Kernel.DeterministicJSON
@@ -202,7 +203,8 @@ defmodule PtcRunner.Kernel.ModelContract do
 
   defp applicable_constraint_pairs(schema, "string") do
     optional_pair(schema, "minLength", "min_length") ++
-      optional_pair(schema, "maxLength", "max_length")
+      optional_pair(schema, "maxLength", "max_length") ++
+      optional_pair(schema, "format", "format")
   end
 
   defp applicable_constraint_pairs(schema, "array") do

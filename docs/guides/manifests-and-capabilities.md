@@ -196,6 +196,9 @@ out of the error entirely.
 Ordinary contracts are closed, bounded object schemas. The supported keywords
 are `type`, `title`, `description`, `properties`, `required`,
 `additionalProperties`, `items`, `enum`, `const`, numeric and length bounds.
+String schemas may additionally use the single asserted
+`"format": "sha256"` for an algorithm-qualified lowercase digest; arbitrary
+formats and regexes remain outside the profile.
 Application contracts also allow one root `oneOf` containing 2–16 closed
 object branches. Every branch must require the same single string
 discriminator and give it a distinct `const` value:
@@ -226,8 +229,9 @@ discriminator and give it a distinct `const` value:
 ```
 
 Contracts are at most 64 KiB after normalization. References, regexes, nested
-composition, union types, and general-purpose `oneOf` are rejected. This
-application profile does not widen MCP capability schemas.
+composition, union types, and general-purpose `oneOf` are rejected. Apart from
+the shared bounded `sha256` format, this application profile does not widen
+MCP capability schemas.
 
 `--output PATH` atomically writes only the validated `Result.value`, never
 clobbers an existing file, and can be passed directly to a later run with
@@ -279,7 +283,13 @@ installed alias derives four fixed capabilities:
 `history.counters`. Acquisition reads and validates the directory once;
 subsequent queries use the frozen capture even if path contents change. The
 safe provider snapshot includes counts, byte ceilings, and content identity,
-but no path.
+but no path. Every query result carries `snapshot_hash`, equal to that
+provider snapshot's `content_snapshot_hash`, so a cited run, sequence, or
+counter page remains bound to the captured catalog. Do not confuse that
+algorithm-qualified content identity with the safe provider snapshot's own
+bare-hex `snapshot_hash`: the latter attests the complete installed provider
+identity, including its policy and ceilings, while `content_snapshot_hash`
+attests only the frozen queried bytes.
 
 Private inspection artifacts use a separate paired native source:
 
@@ -310,9 +320,11 @@ The installed alias derives `list-runs`, `model-exchanges`,
 correlation IDs and use deterministic bounded pages with source-bound opaque
 cursors. Run-scoped private collections accept `"order": "asc" | "desc"`;
 ascending sequence order is the default, and the order is part of the cursor's
-bound query identity. V1 and V2 artifacts may share a directory: a V1 run has
-an empty provider-exchange page, while V2 exposes each paired MCP request and
-response. The source classifies the run as `private_inspection`, so every
+bound query identity. Every result carries the same `snapshot_hash` recorded
+as `content_snapshot_hash` in the safe provider snapshot. V1 and V2 artifacts
+may share a directory: a V1 run has an empty provider-exchange page, while V2
+exposes each paired MCP request and response. The source classifies the run as
+`private_inspection`, so every
 selected provider must accept private data before either snapshot directory is
 opened. Safe connector metadata contains only counts, byte ceilings,
 trace/content identities, and hashes—not paths or private payloads.

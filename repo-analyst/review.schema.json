@@ -39,41 +39,29 @@
               "properties": {
                 "provider": {
                   "type": "string",
-                  "description": "Installed provider alias, such as history, private-history, or workspace.",
-                  "minLength": 1,
-                  "maxLength": 64
+                  "description": "Installed provider alias.",
+                  "enum": ["history", "private-history", "workspace"]
                 },
                 "snapshot_hash": {
                   "type": "string",
                   "description": "Snapshot hash carried by the result that produced this evidence.",
+                  "format": "sha256"
+                },
+                "resource": {
+                  "type": "string",
+                  "description": "Run ID for history providers, or relative path for the workspace provider.",
                   "minLength": 1,
-                  "maxLength": 128
-                },
-                "run_id": {
-                  "type": "string",
-                  "description": "Run identity, when the evidence came from a run source.",
-                  "maxLength": 128
-                },
-                "event_sequences": {
-                  "type": "array",
-                  "description": "Canonical event sequence numbers, when the evidence came from a run source.",
-                  "maxItems": 32,
-                  "items": {"type": "integer", "minimum": 0}
-                },
-                "path": {
-                  "type": "string",
-                  "description": "Relative path, when the evidence came from a filesystem source.",
                   "maxLength": 1024
                 },
-                "lines": {
+                "positions": {
                   "type": "array",
-                  "description": "Inclusive first and last line number, when the evidence came from a filesystem source.",
-                  "minItems": 2,
-                  "maxItems": 2,
+                  "description": "Positive event sequence IDs for a run, or positive source line numbers for a workspace path.",
+                  "minItems": 1,
+                  "maxItems": 32,
                   "items": {"type": "integer", "minimum": 1}
                 }
               },
-              "required": ["provider", "snapshot_hash"]
+              "required": ["provider", "snapshot_hash", "resource", "positions"]
             }
           }
         },

@@ -26,6 +26,7 @@ defmodule PtcRunner.Kernel.RepoAnalystApplicationTest do
 
   @root Path.expand("../../..", __DIR__)
   @host Path.join(@root, "repo-analyst.host.json")
+  @base_source_hash "sha256:" <> String.duplicate("0", 64)
 
   # Frozen by direction plan section 8.3. A stub that renames one of these
   # would silently diverge from the native inspection source.
@@ -252,6 +253,11 @@ defmodule PtcRunner.Kernel.RepoAnalystApplicationTest do
 
         # cap/unwrap! returns the value; an unwrapped envelope would still carry :status.
         assert value["snapshot_hash"] == "sha256:stub"
+
+        expected_provider =
+          if String.starts_with?(operation, "history."), do: "history", else: "private-history"
+
+        assert value["provider"] == expected_provider
         refute Map.has_key?(value, :status)
 
         # A nil cursor is the first page and must not appear in the arguments.
@@ -281,6 +287,9 @@ defmodule PtcRunner.Kernel.RepoAnalystApplicationTest do
                )
 
       assert Map.keys(value) |> Enum.sort() == ["model_action", "program", "trace_errors"]
+      assert value["model_action"]["provider"] == "private-history"
+      assert value["program"]["provider"] == "private-history"
+      assert value["trace_errors"]["provider"] == "history"
 
       assert Enum.map(Agent.get(calls, & &1), &elem(&1, 0)) == [
                "private-history.model-exchanges",
@@ -294,8 +303,13 @@ defmodule PtcRunner.Kernel.RepoAnalystApplicationTest do
 
       granted = ~w(workspace.find workspace.list workspace.read workspace.search)
 
-      assert {:ok, _mission} =
-               MissionEnvironment.new(bundle: bundle, capabilities: stubs(granted))
+      assert {:ok, mission} = MissionEnvironment.new(bundle: bundle, capabilities: stubs(granted))
+
+      assert {:ok, %{value: %{outcome: :returned, value: %{"provider" => "workspace"}}}} =
+               Kernel.run(
+                 ~S|(return (kernel/eval (program (return (repo/ls "" nil)))))|,
+                 run_config(mission)
+               )
     end
   end
 
@@ -344,7 +358,14 @@ defmodule PtcRunner.Kernel.RepoAnalystApplicationTest do
     test "declining a change is a first-class improvement decision" do
       {:ok, contract} = contract("candidate.schema.json")
 
-      evidence = [%{"provider" => "history", "snapshot_hash" => "sha256:abc"}]
+      evidence = [
+        %{
+          "provider" => "history",
+          "snapshot_hash" => "sha256:" <> String.duplicate("a", 64),
+          "resource" => "run-1",
+          "positions" => [12, 18]
+        }
+      ]
 
       assert ValueContract.valid?(contract, %{
                "decision" => "no-change",
@@ -363,6 +384,35 @@ defmodule PtcRunner.Kernel.RepoAnalystApplicationTest do
       {:ok, contract} = contract("candidate.schema.json")
 
       assert ValueContract.valid?(contract, proposal())
+
+      refute ValueContract.valid?(
+               contract,
+               put_in(proposal(), ["candidate", "base_source_hash"], String.duplicate("0", 64))
+             ),
+             "a bare artifact digest cannot be materialized as an override descriptor"
+
+      refute ValueContract.valid?(
+               contract,
+               put_in(proposal(), ["candidate", "base_source_hash"], String.duplicate("x", 71))
+             ),
+             "a length-correct non-hash cannot be materialized as an override descriptor"
+
+      refute ValueContract.valid?(
+               contract,
+               Map.put(proposal(), "evidence", [
+                 %{
+                   "provider" => "history",
+                   "snapshot_hash" => "sha256:" <> String.duplicate("a", 64)
+                 }
+               ])
+             ),
+             "a hash alone does not locate evidence inside a snapshot"
+
+      refute ValueContract.valid?(
+               contract,
+               put_in(proposal(), ["evidence", Access.at(0), "positions"], [0])
+             ),
+             "trace sequences and source lines are both one-based"
 
       refute Map.has_key?(proposal()["candidate"], "source_hash"),
              "PTC-Lisp cannot compute SHA-256; trusted materialization must derive it"
@@ -389,7 +439,14 @@ defmodule PtcRunner.Kernel.RepoAnalystApplicationTest do
       refute ValueContract.valid?(contract, %{
                "decision" => "apply-change",
                "rationale" => "…",
-               "evidence" => [%{"provider" => "history", "snapshot_hash" => "sha256:abc"}]
+               "evidence" => [
+                 %{
+                   "provider" => "history",
+                   "snapshot_hash" => "sha256:" <> String.duplicate("a", 64),
+                   "resource" => "run-1",
+                   "positions" => [12]
+                 }
+               ]
              })
     end
 
@@ -405,9 +462,9 @@ defmodule PtcRunner.Kernel.RepoAnalystApplicationTest do
             "evidence" => [
               %{
                 "provider" => "private-history",
-                "snapshot_hash" => "sha256:abc",
-                "run_id" => "run-1",
-                "event_sequences" => [12, 18]
+                "snapshot_hash" => "sha256:" <> String.duplicate("a", 64),
+                "resource" => "run-1",
+                "positions" => [12, 18]
               }
             ]
           }
@@ -633,15 +690,15 @@ defmodule PtcRunner.Kernel.RepoAnalystApplicationTest do
       "evidence" => [
         %{
           "provider" => "history",
-          "snapshot_hash" => "sha256:abc",
-          "run_id" => "run-1",
-          "event_sequences" => [12, 18]
+          "snapshot_hash" => "sha256:" <> String.duplicate("a", 64),
+          "resource" => "run-1",
+          "positions" => [12, 18]
         }
       ],
       "candidate" => %{
         "format" => "component-source",
         "component_id" => "agent.core",
-        "base_source_hash" => "sha256:base",
+        "base_source_hash" => @base_source_hash,
         "content" => "(ns agent.core \"…\")"
       },
       "evaluation_plan" => %{

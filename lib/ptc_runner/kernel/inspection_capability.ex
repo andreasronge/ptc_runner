@@ -5,7 +5,9 @@ defmodule PtcRunner.Kernel.InspectionCapability do
   Profile-backed sessions receive stable `inspection-*` names. A manifest
   installation derives the same six operations from its selected alias as
   `<alias>.<operation>`. Both forms retain only an opaque snapshot handle and
-  delegate to the same query layer.
+  delegate to the same query layer. Every result carries the frozen capture's
+  `snapshot_hash`, matching the provider snapshot's `content_snapshot_hash`,
+  so private citations never depend on a path or an unbound page.
   """
 
   alias PtcRunner.Kernel.Capability

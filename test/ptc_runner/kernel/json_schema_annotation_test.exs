@@ -80,6 +80,31 @@ defmodule PtcRunner.Kernel.JSONSchemaAnnotationTest do
     assert {:error, :invalid_schema} = JSONSchema.compile(invalid)
   end
 
+  test "supports only the bounded sha256 format" do
+    schema = %{
+      "type" => "object",
+      "properties" => %{
+        "hash" => %{"type" => "string", "format" => "sha256"}
+      },
+      "required" => ["hash"]
+    }
+
+    assert {:ok, _normalized, compiled} = JSONSchema.compile(schema)
+
+    assert JSONSchema.valid?(
+             compiled,
+             %{"hash" => "sha256:" <> String.duplicate("a", 64)}
+           )
+
+    refute JSONSchema.valid?(compiled, %{"hash" => String.duplicate("a", 71)})
+    refute JSONSchema.valid?(compiled, %{"hash" => "sha256:" <> String.duplicate("A", 64)})
+
+    assert {:error, :invalid_schema} =
+             schema
+             |> put_in(["properties", "hash", "format"], "regex")
+             |> JSONSchema.compile()
+  end
+
   test "still rejects unsupported semantic keywords" do
     schema = %{
       "type" => "object",

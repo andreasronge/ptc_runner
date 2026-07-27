@@ -13,6 +13,11 @@ defmodule PtcRunner.Kernel.InspectionQuery do
   filters, ordering, and offset, and cannot be reused against another query or
   capture. Run-scoped private collections accept `"order": "asc" | "desc"`;
   ascending sequence order is the default.
+
+  Inspection artifacts retain their versioned bare-hex source hashes. Query
+  results expose those hashes with the `sha256:` algorithm prefix required by
+  trusted component-override descriptors, so an effective-prelude result can
+  be copied into `base_source_hash` without reinterpretation.
   """
 
   @default_limit 100
@@ -232,7 +237,7 @@ defmodule PtcRunner.Kernel.InspectionQuery do
       "environment" => payload["environment"],
       "program_kind" => payload["program_kind"],
       "source" => payload["source"],
-      "source_hash" => payload["source_hash"],
+      "source_hash" => descriptor_hash(payload["source_hash"]),
       "source_bytes" => payload["source_bytes"]
     }
   end
@@ -248,10 +253,12 @@ defmodule PtcRunner.Kernel.InspectionQuery do
       "timestamp" => record["timestamp"],
       "environment" => payload["environment"],
       "source" => payload["source"],
-      "source_hash" => payload["source_hash"],
+      "source_hash" => descriptor_hash(payload["source_hash"]),
       "source_bytes" => payload["source_bytes"]
     }
   end
+
+  defp descriptor_hash(hash), do: "sha256:" <> hash
 
   defp model_exchange?(%{"environment" => "workflow", "name" => "llm-request"}), do: true
   defp model_exchange?(_pair), do: false

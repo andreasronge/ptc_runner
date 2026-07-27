@@ -1,6 +1,8 @@
 defmodule PtcRunner.Kernel.InspectionSnapshotTest do
   use ExUnit.Case, async: true
 
+  alias PtcRunner.Kernel.Component
+  alias PtcRunner.Kernel.ComponentOverride
   alias PtcRunner.Kernel.HostConfig
   alias PtcRunner.Kernel.HostInstallation
   alias PtcRunner.Kernel.InspectionArtifact
@@ -29,17 +31,22 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
       TraceSnapshot.stop(trace_snapshot)
     end)
 
+    assert {:ok, %{snapshot_hash: snapshot_hash}} = InspectionSnapshot.info(snapshot)
+    assert snapshot_hash =~ ~r/\Asha256:[0-9a-f]{64}\z/
+
     assert {:ok,
             %{
               "items" => [%{"run_id" => "v1-run"}],
               "next_cursor" => cursor,
-              "truncated" => true
+              "truncated" => true,
+              "snapshot_hash" => ^snapshot_hash
             }} = InspectionSnapshot.query(snapshot, :list_runs, %{"limit" => 1})
 
     assert {:ok,
             %{
               "items" => [%{"run_id" => "v2-run", "schema_version" => 2}],
-              "next_cursor" => nil
+              "next_cursor" => nil,
+              "snapshot_hash" => ^snapshot_hash
             }} =
              InspectionSnapshot.query(snapshot, :list_runs, %{
                "limit" => 1,
@@ -62,7 +69,8 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
                   "arguments" => %{"messages" => [%{"content" => "private-v2-run"}]},
                   "result" => %{"status" => "ok", "value" => %{"answer" => "model-v2-run"}}
                 }
-              ]
+              ],
+              "snapshot_hash" => ^snapshot_hash
             }} =
              InspectionSnapshot.query(snapshot, :model_exchanges, %{"run_id" => "v2-run"})
 
@@ -86,7 +94,7 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
                 %{
                   "evaluation_id" => "eval-v2-run",
                   "source" => @source,
-                  "source_hash" => @source_hash
+                  "source_hash" => "sha256:" <> @source_hash
                 }
               ]
             }} =
@@ -98,7 +106,7 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
                 %{
                   "component_id" => "component-v2-run",
                   "source" => @source,
-                  "source_hash" => @source_hash
+                  "source_hash" => "sha256:" <> @source_hash
                 }
               ]
             }} =
@@ -214,6 +222,50 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
   end
 
   @tag :tmp_dir
+  test "an effective-prelude hash is directly usable as an override base hash", %{tmp_dir: root} do
+    {trace, inspection} = source_directories(root)
+    write_run(trace, inspection, "v2-run", 2)
+
+    {:ok, trace_snapshot} = TraceSnapshot.start({:directory, trace}, owner: self())
+
+    {:ok, snapshot} =
+      InspectionSnapshot.start({:directory, inspection}, trace_snapshot, owner: self())
+
+    on_exit(fn ->
+      InspectionSnapshot.stop(snapshot)
+      TraceSnapshot.stop(trace_snapshot)
+    end)
+
+    assert {:ok, %{"items" => [item]}} =
+             InspectionSnapshot.query(snapshot, :effective_preludes, %{"run_id" => "v2-run"})
+
+    candidate_source = item["source"] <> "\n"
+    File.write!(Path.join(root, "candidate.clj"), candidate_source)
+
+    File.write!(
+      Path.join(root, "override.json"),
+      Jason.encode!(%{
+        "component_id" => item["component_id"],
+        "base_source_hash" => item["source_hash"],
+        "source_hash" => ComponentOverride.hash(candidate_source),
+        "path" => "candidate.clj"
+      })
+    )
+
+    assert {:ok, override} = ComponentOverride.load(Path.join(root, "override.json"))
+
+    assert {:ok, installed} =
+             Component.new(
+               id: item["component_id"],
+               source: item["source"],
+               dependencies: [],
+               origin: "inspection"
+             )
+
+    assert {:ok, [_replacement], true} = ComponentOverride.apply([installed], override)
+  end
+
+  @tag :tmp_dir
   test "capability naming supports fixed profiles and manifest aliases", %{tmp_dir: root} do
     {trace, inspection} = source_directories(root)
     write_run(trace, inspection, "named", 1)
@@ -314,15 +366,23 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
              "private-history"
            ]
 
+    private_snapshot =
+      Enum.find(built.config.connector_snapshots, &(&1["provider"] == "private-history"))
+
     capability =
       Map.fetch!(
         built.config.mission_environment.capabilities,
         "private-history.provider-exchanges"
       )
 
-    assert {:ok, %{"items" => [%{"request_id" => 7}]}} =
+    assert {:ok,
+            %{
+              "items" => [%{"request_id" => 7}],
+              "snapshot_hash" => content_snapshot_hash
+            }} =
              capability.callback.(%{"run_id" => "manifest-run", "limit" => 1})
 
+    assert private_snapshot["content_snapshot_hash"] == content_snapshot_hash
     assert :ok = RunBuilder.close(built)
   end
 

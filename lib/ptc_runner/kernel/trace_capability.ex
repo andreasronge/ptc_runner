@@ -6,6 +6,9 @@ defmodule PtcRunner.Kernel.TraceCapability do
   `trace-get-run`, `trace-list-turns`, and `trace-counters`. Granting these
   capabilities exposes only the selected source and bounded query results; it
   does not grant ambient filesystem or cross-environment access.
+  Snapshot-backed results carry a `snapshot_hash` that matches the frozen
+  provider's `content_snapshot_hash`, so citations remain bound to the exact
+  captured catalog across every cursor page.
 
   Internal analysis profiles may instead construct the same four
   capabilities from a tokenized snapshot handle. Capability closures retain

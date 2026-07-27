@@ -19,6 +19,7 @@ defmodule PtcRunner.Kernel.InspectionSnapshot do
   alias PtcRunner.Kernel.BoundedWorker
   alias PtcRunner.Kernel.InspectionArtifact
   alias PtcRunner.Kernel.InspectionQuery
+  alias PtcRunner.Kernel.SafeMetadata
   alias PtcRunner.Kernel.TraceSnapshot
   alias PtcRunner.Lisp.RetainedSize
 
@@ -191,16 +192,7 @@ defmodule PtcRunner.Kernel.InspectionSnapshot do
     do: {:reply, {:ok, state.info}, state}
 
   def handle_call({token, {:query, operation, arguments}}, _from, %{token: token} = state) do
-    result =
-      InspectionQuery.query(
-        state.collections,
-        state.source_id,
-        operation,
-        arguments,
-        state.max_result_bytes
-      )
-
-    {:reply, result, state}
+    {:reply, query_with_snapshot_hash(state, operation, arguments), state}
   end
 
   def handle_call({token, :stop}, _from, %{token: token} = state),
@@ -510,11 +502,33 @@ defmodule PtcRunner.Kernel.InspectionSnapshot do
         captured_at: DateTime.utc_now(),
         file_count: capture.file_count,
         run_count: capture.run_count,
+        snapshot_hash: SafeMetadata.fingerprint(capture.source_id),
         source_bytes: capture.source_bytes,
         retained_bytes: capture.retained_bytes,
         trace_capture_id: capture.trace_capture_id
       }
     }
+  end
+
+  defp query_with_snapshot_hash(state, operation, arguments) do
+    snapshot_hash = state.info.snapshot_hash
+    metadata_bytes = byte_size(Jason.encode!(%{"snapshot_hash" => snapshot_hash}))
+    query_bytes = state.max_result_bytes - metadata_bytes
+
+    if query_bytes > 0 do
+      case InspectionQuery.query(
+             state.collections,
+             state.source_id,
+             operation,
+             arguments,
+             query_bytes
+           ) do
+        {:ok, result} -> {:ok, Map.put(result, "snapshot_hash", snapshot_hash)}
+        {:error, _reason} = error -> error
+      end
+    else
+      {:error, :result_limit_exceeded}
+    end
   end
 
   defp redact_status(status) do

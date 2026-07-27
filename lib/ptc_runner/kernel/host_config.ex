@@ -52,6 +52,11 @@ defmodule PtcRunner.Kernel.HostConfig do
   @max_inspection_source_bytes 64_000_000
   @max_inspection_files 1_024
   @max_replay_entries 10_000
+  # Native snapshot queries reserve the encoded algorithm-qualified content
+  # hash before delegating to their bounded query engines. This covers that
+  # reservation plus the smallest encoded empty page, so the accepted minimum
+  # can return at least one successful result.
+  @minimum_snapshot_result_bytes 158
   @max_timeout_ms 300_000
   @max_llm_tokens 1_000_000
   @max_llm_seed 2_147_483_647
@@ -172,6 +177,10 @@ defmodule PtcRunner.Kernel.HostConfig do
           credentials: %{binary() => credential()},
           install: %{binary() => installation()}
         }
+
+  @doc false
+  @spec minimum_snapshot_result_bytes() :: pos_integer()
+  def minimum_snapshot_result_bytes, do: @minimum_snapshot_result_bytes
 
   @doc "Loads and semantically validates one host configuration."
   @spec load(binary()) :: {:ok, t()} | {:error, atom()}
@@ -446,7 +455,9 @@ defmodule PtcRunner.Kernel.HostConfig do
          max_source_bytes when is_integer(max_source_bytes) and max_source_bytes > 0 <-
            Map.get(value, "max_source_bytes", @max_trace_source_bytes),
          true <- max_source_bytes <= @max_trace_source_bytes,
-         max_result_bytes when is_integer(max_result_bytes) and max_result_bytes > 0 <-
+         max_result_bytes
+         when is_integer(max_result_bytes) and
+                max_result_bytes >= @minimum_snapshot_result_bytes <-
            Map.get(value, "max_result_bytes", @max_result_bytes),
          true <- max_result_bytes <= @max_result_bytes do
       {:ok,
@@ -526,7 +537,9 @@ defmodule PtcRunner.Kernel.HostConfig do
          max_source_bytes when is_integer(max_source_bytes) and max_source_bytes > 0 <-
            Map.get(value, "max_source_bytes", @max_inspection_source_bytes),
          true <- max_source_bytes <= @max_inspection_source_bytes,
-         max_result_bytes when is_integer(max_result_bytes) and max_result_bytes > 0 <-
+         max_result_bytes
+         when is_integer(max_result_bytes) and
+                max_result_bytes >= @minimum_snapshot_result_bytes <-
            Map.get(value, "max_result_bytes", @max_result_bytes),
          true <- max_result_bytes <= @max_result_bytes do
       {:ok,
@@ -1008,7 +1021,7 @@ defmodule PtcRunner.Kernel.HostConfig do
             },
             "max_result_bytes" => %{
               "type" => "integer",
-              "minimum" => 1,
+              "minimum" => @minimum_snapshot_result_bytes,
               "maximum" => @max_result_bytes,
               "default" => @max_result_bytes
             }
@@ -1067,7 +1080,7 @@ defmodule PtcRunner.Kernel.HostConfig do
             },
             "max_result_bytes" => %{
               "type" => "integer",
-              "minimum" => 1,
+              "minimum" => @minimum_snapshot_result_bytes,
               "maximum" => @max_result_bytes,
               "default" => @max_result_bytes
             }

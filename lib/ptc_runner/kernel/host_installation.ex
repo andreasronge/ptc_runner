@@ -14,6 +14,13 @@ defmodule PtcRunner.Kernel.HostInstallation do
   exports its opaque frozen handle only to a selected inspection source, so
   private artifacts validate against the exact already-captured canonical
   source without reopening trace paths or exposing owner handles in metadata.
+
+  Every safe provider snapshot's bare-hex `snapshot_hash` attests its complete
+  non-secret provider identity, including policy and ceilings. A frozen-content
+  provider additionally publishes an algorithm-qualified
+  `content_snapshot_hash`; native query results call that content identity
+  `snapshot_hash` so citations can copy the source's own field unchanged. The
+  two hashes deliberately have different scopes and are not equal.
   """
 
   alias PtcRunner.Kernel.ConfinedFile
@@ -325,11 +332,14 @@ defmodule PtcRunner.Kernel.HostInstallation do
 
   defp trace_snapshot_selection(installation, value, context)
        when is_map(value) and not is_struct(value) do
+    minimum_result_bytes = HostConfig.minimum_snapshot_result_bytes()
+
     with true <- Map.keys(value) -- ~w(max_source_bytes max_result_bytes) == [],
          max_source_bytes when is_integer(max_source_bytes) and max_source_bytes > 0 <-
            Map.get(value, "max_source_bytes", installation.ceilings.max_source_bytes),
          true <- max_source_bytes <= installation.ceilings.max_source_bytes,
-         max_result_bytes when is_integer(max_result_bytes) and max_result_bytes > 0 <-
+         max_result_bytes
+         when is_integer(max_result_bytes) and max_result_bytes >= minimum_result_bytes <-
            Map.get(
              value,
              "max_result_bytes",
@@ -355,6 +365,8 @@ defmodule PtcRunner.Kernel.HostInstallation do
 
   defp inspection_snapshot_selection(installation, value, context)
        when is_map(value) and not is_struct(value) do
+    minimum_result_bytes = HostConfig.minimum_snapshot_result_bytes()
+
     with true <- Map.keys(value) -- ~w(max_files max_source_bytes max_result_bytes) == [],
          max_files when is_integer(max_files) and max_files > 0 <-
            Map.get(value, "max_files", installation.ceilings.max_files),
@@ -362,7 +374,8 @@ defmodule PtcRunner.Kernel.HostInstallation do
          max_source_bytes when is_integer(max_source_bytes) and max_source_bytes > 0 <-
            Map.get(value, "max_source_bytes", installation.ceilings.max_source_bytes),
          true <- max_source_bytes <= installation.ceilings.max_source_bytes,
-         max_result_bytes when is_integer(max_result_bytes) and max_result_bytes > 0 <-
+         max_result_bytes
+         when is_integer(max_result_bytes) and max_result_bytes >= minimum_result_bytes <-
            Map.get(
              value,
              "max_result_bytes",
@@ -665,6 +678,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
       "source" => "ptc_inspection_snapshot",
       "capture_id" => info.capture_id,
       "trace_capture_id" => info.trace_capture_id,
+      "content_snapshot_hash" => info.snapshot_hash,
       "file_count" => info.file_count,
       "run_count" => info.run_count,
       "source_bytes" => info.source_bytes,
@@ -686,6 +700,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
     identity = %{
       "source" => "ptc_trace_snapshot",
       "capture_id" => info.capture_id,
+      "content_snapshot_hash" => info.snapshot_hash,
       "run_count" => info.run_count,
       "source_bytes" => info.source_bytes,
       "retained_bytes" => info.retained_bytes,

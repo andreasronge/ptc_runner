@@ -4,6 +4,7 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
   use GenServer
 
   alias PtcRunner.Kernel.InspectionArtifact
+  alias PtcRunner.Kernel.SafeMetadata
   alias PtcRunner.Kernel.TraceLog
   alias PtcRunner.Lisp.RetainedSize
 
@@ -161,17 +162,7 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
     do: {:reply, {:ok, state.info}, state}
 
   def handle_call({token, {:query, operation, arguments}}, _from, %{token: token} = state) do
-    result =
-      TraceLog.query_loaded(
-        state.events,
-        state.source_id,
-        operation,
-        arguments,
-        state.max_result_bytes,
-        :sanitized
-      )
-
-    {:reply, result, state}
+    {:reply, query_with_snapshot_hash(state, operation, arguments), state}
   end
 
   def handle_call(
@@ -331,10 +322,33 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
         capture_id: capture.source_id,
         captured_at: DateTime.utc_now(),
         run_count: capture.events |> MapSet.new(& &1["run_id"]) |> MapSet.size(),
+        snapshot_hash: SafeMetadata.fingerprint(capture.source_id),
         source_bytes: capture.source_bytes,
         retained_bytes: retained_bytes
       }
     }
+  end
+
+  defp query_with_snapshot_hash(state, operation, arguments) do
+    snapshot_hash = state.info.snapshot_hash
+    metadata_bytes = byte_size(Jason.encode!(%{"snapshot_hash" => snapshot_hash}))
+    query_bytes = state.max_result_bytes - metadata_bytes
+
+    if query_bytes > 0 do
+      case TraceLog.query_loaded(
+             state.events,
+             state.source_id,
+             operation,
+             arguments,
+             query_bytes,
+             :sanitized
+           ) do
+        {:ok, result} -> {:ok, Map.put(result, "snapshot_hash", snapshot_hash)}
+        {:error, _reason} = error -> error
+      end
+    else
+      {:error, :result_limit_exceeded}
+    end
   end
 
   defp redact_status(status) do

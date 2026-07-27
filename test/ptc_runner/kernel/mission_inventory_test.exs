@@ -273,6 +273,37 @@ defmodule PtcRunner.Kernel.MissionInventoryTest do
     assert inventory.model_bytes <= 256 * 1_024
   end
 
+  test "compact context preserves asserted schema formats for the model" do
+    {:ok, capability} =
+      Capability.new(
+        name: "lookup",
+        input_schema: %{
+          "type" => "object",
+          "properties" => %{
+            "snapshot_hash" => %{"type" => "string", "format" => "sha256"}
+          },
+          "required" => ["snapshot_hash"]
+        },
+        callback: fn _ -> {:ok, %{}} end
+      )
+
+    {:ok, mission} = MissionEnvironment.new(capabilities: [capability])
+    {:ok, inventory} = MissionInventory.build(mission, Limits.defaults())
+
+    assert [%{"contract" => contract}] = Jason.decode!(inventory.model_rendered)["entries"]
+
+    assert "sha256" ==
+             get_in(contract, [
+               "parameters",
+               Access.at(0),
+               "type",
+               "fields",
+               Access.at(0),
+               "type",
+               "format"
+             ])
+  end
+
   defp mission_fixture do
     source = """
     (ns tools "Tools." {:visibility :prompt})

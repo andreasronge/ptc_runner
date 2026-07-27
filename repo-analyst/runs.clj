@@ -14,7 +14,12 @@
 ;;
 ;; Every function reads one page. Pass nil first, then the previous response's
 ;; `next_cursor`; a response with no `next_cursor` is the last page. Cursors are
-;; opaque, bound to the captured snapshot, and never parsed here.
+;; opaque, bound to the captured snapshot, and never parsed here. Each facade
+;; response labels its installed `provider` alias so a citation can copy both
+;; that alias and `snapshot_hash` without guessing which native source backed it.
+
+(defn- source-page [provider envelope]
+  (assoc (cap/unwrap! envelope) "provider" provider))
 
 (defn- compact-run [run]
   (select-keys
@@ -31,7 +36,8 @@
   {:signature "(limit :int, cursor :string?) -> :map"}
   [limit cursor]
   (let [page
-        (cap/unwrap!
+        (source-page
+          "history"
           (tool/history.list-runs
             (cap/with-cursor {"limit" limit} cursor)))]
     (assoc page "items" (map compact-run (get page "items")))))
@@ -46,7 +52,8 @@
   [run-id filters cursor]
   (let [filters (select-keys (or filters {}) ["status" "evaluation_id" "capability"])
         arguments (merge filters {"run_id" run-id "limit" 20})]
-    (cap/unwrap!
+    (source-page
+      "history"
       (tool/history.list-turns
         (cap/with-cursor arguments cursor)))))
 
@@ -57,7 +64,8 @@
   that ties it to a canonical turn."
   {:signature "(run-id :string, cursor :string?) -> :map"}
   [run-id cursor]
-  (cap/unwrap!
+  (source-page
+    "private-history"
     (tool/private-history.model-exchanges
       (cap/with-cursor {"run_id" run-id "limit" 1} cursor))))
 
@@ -68,7 +76,8 @@
   {:signature "(run-id :string) -> :map"}
   [run-id]
   (let [page
-        (cap/unwrap!
+        (source-page
+          "private-history"
           (tool/private-history.model-exchanges
             {"run_id" run-id "limit" 1 "order" "desc"}))
         item (first (get page "items"))]
@@ -80,6 +89,7 @@
       "run_id" (get item "run_id")
       "trace_id" (get item "trace_id")
       "transcript" (get item "arguments")}
+     "provider" (get page "provider")
      "snapshot_hash" (get page "snapshot_hash")}))
 
 (defn capability-calls
@@ -89,7 +99,8 @@
   it received."
   {:signature "(run-id :string, cursor :string?) -> :map"}
   [run-id cursor]
-  (cap/unwrap!
+  (source-page
+    "private-history"
     (tool/private-history.capability-calls
       (cap/with-cursor {"run_id" run-id "limit" 1} cursor))))
 
@@ -100,7 +111,8 @@
   bound to the evaluation that ran it."
   {:signature "(run-id :string, cursor :string?) -> :map"}
   [run-id cursor]
-  (cap/unwrap!
+  (source-page
+    "private-history"
     (tool/private-history.generated-sources
       (cap/with-cursor {"run_id" run-id "limit" 1} cursor))))
 
@@ -109,10 +121,12 @@
   {:signature "(run-id :string) -> :map"}
   [run-id]
   (let [page
-        (cap/unwrap!
+        (source-page
+          "private-history"
           (tool/private-history.generated-sources
             {"run_id" run-id "limit" 1 "order" "desc"}))]
     {"item" (first (get page "items"))
+     "provider" (get page "provider")
      "snapshot_hash" (get page "snapshot_hash")}))
 
 (defn review-seed
@@ -132,6 +146,7 @@
       "output_sequence" (get item "output_sequence")
       "response" (get item "response")
       "run_id" (get item "run_id")
+      "provider" (get exchange "provider")
       "snapshot_hash" (get exchange "snapshot_hash")
       "trace_id" (get item "trace_id")}
      "program" (latest-generated-source run-id)
@@ -141,10 +156,13 @@
   "Read one effective-prelude page for an explicitly granted run.
 
   This is the prelude the run actually compiled, which is the only reliable way
-  to tell a prelude defect from a generated-program defect."
+  to tell a prelude defect from a generated-program defect. Each item's
+  sha256-prefixed source_hash is directly usable as a candidate
+  base_source_hash."
   {:signature "(run-id :string, cursor :string?) -> :map"}
   [run-id cursor]
-  (cap/unwrap!
+  (source-page
+    "private-history"
     (tool/private-history.effective-preludes
       (cap/with-cursor {"run_id" run-id "limit" 1} cursor))))
 
@@ -157,6 +175,7 @@
   fault."
   {:signature "(run-id :string, cursor :string?) -> :map"}
   [run-id cursor]
-  (cap/unwrap!
+  (source-page
+    "private-history"
     (tool/private-history.provider-exchanges
       (cap/with-cursor {"run_id" run-id "limit" 1} cursor))))

@@ -8,13 +8,15 @@ defmodule PtcRunner.Kernel.ValueContract do
   one required string discriminator whose `const` value is distinct in every
   branch.
 
-  This deliberately does not widen MCP callable schemas. References, regexes,
-  nested composition, union types, and arbitrary `oneOf` remain unsupported.
-  The normalized contract is limited to 64 KiB and compiled once with JSV.
+  The shared bounded schema profile additionally recognizes only the asserted
+  `sha256` string format. References, regexes, arbitrary formats, nested
+  composition, union types, and arbitrary `oneOf` remain unsupported. The
+  normalized contract is limited to 64 KiB and compiled once with JSV.
   """
 
   alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.JSONSchema
+  alias PtcRunner.Kernel.JSONSchema.SHA256Format
   alias PtcRunner.Kernel.JSONValue
 
   @dialects [
@@ -286,7 +288,11 @@ defmodule PtcRunner.Kernel.ValueContract do
          {:ok, encoded} <- DeterministicJSON.encode(normalized),
          true <- byte_size(encoded) <= @max_contract_bytes,
          {:ok, validator} <-
-           JSV.build(normalized, atoms: false, formats: false, warnings: :silent) do
+           JSV.build(normalized,
+             atoms: false,
+             formats: [SHA256Format],
+             warnings: :silent
+           ) do
       {:ok, %__MODULE__{schema: normalized, validator: validator}}
     else
       _reason -> {:error, :invalid_value_contract}

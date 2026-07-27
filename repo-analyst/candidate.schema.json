@@ -29,23 +29,29 @@
           "items": {
             "type": "object",
             "properties": {
-              "provider": {"type": "string", "minLength": 1, "maxLength": 64},
-              "snapshot_hash": {"type": "string", "minLength": 1, "maxLength": 128},
-              "run_id": {"type": "string", "maxLength": 128},
-              "event_sequences": {
-                "type": "array",
-                "maxItems": 32,
-                "items": {"type": "integer", "minimum": 0}
+              "provider": {
+                "type": "string",
+                "enum": ["history", "private-history", "workspace"]
               },
-              "path": {"type": "string", "maxLength": 1024},
-              "lines": {
+              "snapshot_hash": {
+                "type": "string",
+                "format": "sha256"
+              },
+              "resource": {
+                "type": "string",
+                "description": "Run ID for history providers, or relative path for the workspace provider.",
+                "minLength": 1,
+                "maxLength": 1024
+              },
+              "positions": {
                 "type": "array",
-                "minItems": 2,
-                "maxItems": 2,
+                "description": "Positive event sequence IDs for a run, or positive source line numbers for a workspace path.",
+                "minItems": 1,
+                "maxItems": 32,
                 "items": {"type": "integer", "minimum": 1}
               }
             },
-            "required": ["provider", "snapshot_hash"]
+            "required": ["provider", "snapshot_hash", "resource", "positions"]
           }
         },
         "candidate": {
@@ -61,9 +67,10 @@
             },
             "base_source_hash": {
               "type": "string",
-              "description": "Hash of the component source the candidate was derived from. Verified against the installed component before compilation.",
-              "minLength": 1,
-              "maxLength": 128
+              "description": "Exact sha256-prefixed source_hash returned by runs/effective-preludes for the component this candidate replaces. Verified against the installed component before compilation.",
+              "format": "sha256",
+              "minLength": 71,
+              "maxLength": 71
             },
             "content": {
               "type": "string",
@@ -147,23 +154,29 @@
           "items": {
             "type": "object",
             "properties": {
-              "provider": {"type": "string", "minLength": 1, "maxLength": 64},
-              "snapshot_hash": {"type": "string", "minLength": 1, "maxLength": 128},
-              "run_id": {"type": "string", "maxLength": 128},
-              "event_sequences": {
-                "type": "array",
-                "maxItems": 32,
-                "items": {"type": "integer", "minimum": 0}
+              "provider": {
+                "type": "string",
+                "enum": ["history", "private-history", "workspace"]
               },
-              "path": {"type": "string", "maxLength": 1024},
-              "lines": {
+              "snapshot_hash": {
+                "type": "string",
+                "format": "sha256"
+              },
+              "resource": {
+                "type": "string",
+                "description": "Run ID for history providers, or relative path for the workspace provider.",
+                "minLength": 1,
+                "maxLength": 1024
+              },
+              "positions": {
                 "type": "array",
-                "minItems": 2,
-                "maxItems": 2,
+                "description": "Positive event sequence IDs for a run, or positive source line numbers for a workspace path.",
+                "minItems": 1,
+                "maxItems": 32,
                 "items": {"type": "integer", "minimum": 1}
               }
             },
-            "required": ["provider", "snapshot_hash"]
+            "required": ["provider", "snapshot_hash", "resource", "positions"]
           }
         }
       },
