@@ -81,6 +81,19 @@ defmodule PtcRunner.Kernel.ValueContractTest do
     assert %{path: "(root)", kind: :additionalProperties} in leaked.violations
   end
 
+  # Keyword keys are the commonest authoring mistake in PTC-Lisp, and they fail
+  # the JSON-value guard before any schema keyword runs. Reporting an empty
+  # violation list for them says "nothing is wrong" about a rejected value.
+  test "reports a value that is not JSON-like, which produces no violations" do
+    assert {:ok, contract} = ValueContract.compile(decision_schema())
+
+    assert %{json_value: false, violations: []} =
+             ValueContract.classify(contract, %{decision: "no-change", reason: "keyword keys"})
+
+    assert %{json_value: true} =
+             ValueContract.classify(contract, %{"decision" => "no-change"})
+  end
+
   test "locates a nested violation by path within the matched branch" do
     assert {:ok, contract} = ValueContract.compile(decision_schema())
 

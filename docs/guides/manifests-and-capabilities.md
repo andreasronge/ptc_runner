@@ -175,6 +175,12 @@ without repeating the run under private inspection:
     ]}}}
 ```
 
+`json_value` reports the guard that runs before any schema keyword: a value
+must be JSON-like, and a PTC-Lisp map with keyword keys is not. That rejection
+produces no violations at all, so `json_value: false` with an empty
+`violations` list is the signature of keyword keys rather than of a schema
+mismatch.
+
 `violations` locates each failure by schema keyword and path within the branch
 the discriminator selected; branches it did not select are omitted, since they
 fail on keys they were never given. Paths are built only from names the

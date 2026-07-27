@@ -75,6 +75,11 @@ defmodule PtcRunner.Kernel.ValueContract do
     shape
     |> Map.delete(:branch_index)
     |> Map.put(:value_kind, value_kind(value))
+    # A value can fail before any schema keyword runs: `valid?/2` also requires
+    # a JSON-like value, and a PTC-Lisp map with keyword keys is not one. That
+    # rejection produces no violations at all, so without this flag the
+    # commonest authoring mistake reports as an empty explanation.
+    |> Map.put(:json_value, JSONValue.value?(value))
     |> Map.put(
       :violations,
       violations(validator, value, Map.get(shape, :branch_index), declared_names(schema))
