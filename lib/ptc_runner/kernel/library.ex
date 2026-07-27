@@ -9,7 +9,10 @@ defmodule PtcRunner.Kernel.Library do
   `agent.main` is a generic entry wrapper: a manifest names `agent.main/run`
   and supplies `task` and `agent` through input, instead of every application
   repeating the same `agent.core` call. It is domain-blind by construction —
-  it forwards two input keys and never learns what the task is about.
+  it forwards two input keys and never learns what the task is about. It
+  selects `agent.core`'s raw-result mode so a manifest contract describes the
+  application value directly; callers of `agent.core/run` retain its explicit
+  `%{"ok" => true, "value" => value}` success envelope by default.
 
   `cap` is `:discoverable` rather than `:prompt`. Its `unwrap!` and
   `with-cursor` helpers compose capability envelopes for other libraries and

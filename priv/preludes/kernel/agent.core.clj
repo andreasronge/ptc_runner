@@ -79,7 +79,10 @@
               :tool-call
               (let [evaluation (kernel/eval-source (get action :program))]
                 (case (get evaluation :outcome)
-                  :returned (return (result/ok (get evaluation :value)))
+                  :returned
+                  (if (false? (get effective-cfg "result_envelope"))
+                    (return (get evaluation :value))
+                    (return (result/ok (get evaluation :value))))
                   :failed (fail (result/error :model-program-failed (get evaluation :value)))
                   :continued
                   (do

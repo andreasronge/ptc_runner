@@ -108,6 +108,20 @@ defmodule PtcRunner.Kernel.RepoAnalystApplicationTest do
       assert length(Enum.uniq(contracts)) == 3
     end
 
+    test "agent and mission deadlines are explicit rather than inherited defaults" do
+      for {name, workflow_timeout_ms} <- [
+            {"repo-analyst-answer.json", 90_000},
+            {"repo-analyst-review.json", 110_000},
+            {"repo-analyst-improve.json", 110_000}
+          ] do
+        {:ok, manifest} = Manifest.load(path(name))
+
+        assert manifest.limits.run_duration_ms == 120_000
+        assert manifest.limits.workflow_timeout_ms == workflow_timeout_ms
+        assert manifest.limits.evaluation_timeout_ms == 20_000
+      end
+    end
+
     @tag :tmp_dir
     test "review and improve assemble against the installed private source", %{tmp_dir: root} do
       trace_directory = Path.join(root, "traces")

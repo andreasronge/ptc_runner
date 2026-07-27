@@ -131,6 +131,31 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     refute_receive {:provider_closed, :terminal_success}
   end
 
+  test "agent.main returns the application value without agent.core's success envelope" do
+    response = %{
+      content: nil,
+      tool_calls: [
+        %{
+          id: "call-1",
+          name: "run_ptc_lisp",
+          args: %{"program" => ~S|(return {"answer" 42})|}
+        }
+      ]
+    }
+
+    input = %{
+      "input" => %{
+        "task" => "Return one application value",
+        "agent" => %{"max_turns" => 2}
+      }
+    }
+
+    {:ok, config} = agent_config([response], [], agent_main: true, input: input)
+
+    assert {:ok, %{value: %{"answer" => 42}}} =
+             Kernel.run("(agent.main/run data/input)", config)
+  end
+
   test "agent.core persists a defn across a correlated intermediate turn" do
     define = %{
       content: nil,
@@ -1337,7 +1362,13 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
 
   defp agent_bundle(opts) do
     names =
-      ~w(agent.core agent.feedback agent.native agent.prompt agent.retry kernel llm result workflow.event)
+      if Keyword.get(opts, :agent_main, false) do
+        ~w(agent.main agent.core agent.feedback agent.native agent.prompt agent.retry
+           kernel llm result workflow.event)
+      else
+        ~w(agent.core agent.feedback agent.native agent.prompt agent.retry
+           kernel llm result workflow.event)
+      end
 
     with {:ok, components} <- Library.components(names),
          {:ok, components} <- replace_prompt(components, opts) do
