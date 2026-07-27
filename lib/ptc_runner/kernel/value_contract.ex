@@ -96,6 +96,49 @@ defmodule PtcRunner.Kernel.ValueContract do
 
   def classify(_contract, _value), do: %{value_kind: :unknown}
 
+  @spec describe(t()) :: binary()
+  @doc """
+  Renders the contract's shape as compact text for a model-facing prompt.
+
+  A task prompt that paraphrases its own result schema drifts from it, and the
+  drift only surfaces as a rejected result after a live run has been paid for.
+  Generating the shape from the compiled contract keeps the schema the single
+  authority and turns drift into a test failure instead.
+
+  Types only — no descriptions, no prose, no guidance about when each branch
+  applies. That judgement belongs to the task, which the schema cannot express.
+  """
+  def describe(%__MODULE__{schema: schema}) do
+    case Map.fetch(schema, "oneOf") do
+      {:ok, branches} -> Enum.map_join(branches, "\n", &describe_object/1)
+      :error -> describe_object(schema)
+    end
+  end
+
+  defp describe_object(schema) do
+    required = Map.get(schema, "required", [])
+
+    fields =
+      schema
+      |> Map.get("properties", %{})
+      |> Enum.sort_by(fn {name, _} -> {name not in required, name} end)
+      |> Enum.map_join(", ", fn {name, node} ->
+        optional = if name in required, do: "", else: "?"
+        ~s("#{name}"#{optional} #{describe_type(node)})
+      end)
+
+    "{" <> fields <> "}"
+  end
+
+  defp describe_type(%{"const" => value}), do: inspect(value)
+
+  defp describe_type(%{"type" => "array"} = node),
+    do: "[" <> describe_type(Map.get(node, "items", %{})) <> "]"
+
+  defp describe_type(%{"type" => "object"} = node), do: describe_object(node)
+  defp describe_type(%{"type" => type}) when is_binary(type), do: type
+  defp describe_type(_node), do: "any"
+
   # The validator reports which schema keyword failed and where, but its error
   # struct also carries the offending data. Only the structural path and the
   # keyword travel out; `detail` is emitted for `:required` alone, whose
