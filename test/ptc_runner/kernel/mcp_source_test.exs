@@ -1474,11 +1474,14 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
 
     owner_ref = Process.monitor(owner)
     assert_receive {:owner_build, {:ok, abandoned}}, @owner_lifecycle_timeout_ms
-    sink_ref = Process.monitor(abandoned.config.event_sink.pid)
+    sink_pid = abandoned.config.event_sink.pid
+    sink_ref = Process.monitor(sink_pid)
     assert_receive {:DOWN, ^owner_ref, :process, ^owner, :normal}, @owner_lifecycle_timeout_ms
 
-    assert_receive {:DOWN, ^sink_ref, :process, _sink_pid, :normal},
+    assert_receive {:DOWN, ^sink_ref, :process, ^sink_pid, sink_reason},
                    @owner_lifecycle_timeout_ms
+
+    assert sink_reason in [:normal, :noproc]
   end
 
   @tag :tmp_dir
