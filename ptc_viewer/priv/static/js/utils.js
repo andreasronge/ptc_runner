@@ -1,77 +1,91 @@
-export function formatDuration(ms) {
-  if (ms == null) return '-';
-  if (ms < 1000) return `${ms}ms`;
-  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
-  return `${(ms / 60000).toFixed(1)}m`;
-}
-
-export function formatTokens(n) {
-  if (!n) return '0';
-  if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
-  if (n >= 1000) return (n / 1000).toFixed(1) + 'K';
-  return n.toString();
-}
-
-export function formatTokenBreakdown(measurements) {
-  if (!measurements) return '';
-  const input = measurements.input_tokens;
-  const output = measurements.output_tokens;
-  const total = measurements.tokens || 0;
-  if (input || output) {
-    let s = `${formatTokens(input || 0)} in / ${formatTokens(output || 0)} out`;
-    const cache = measurements.cache_read_tokens;
-    if (cache > 0) s += ` (${formatTokens(cache)} cached)`;
-    return s;
-  }
-  return total ? `${total.toLocaleString()} tk` : '';
-}
+// Small shared helpers. Rendering moved to Preact components, so the former
+// HTML-string helpers (manual escaping, markup-returning badge builders) are
+// gone: interpolation is escaped by the `html` tag instead.
 
 export function truncate(str, len) {
   return str && str.length > len ? str.slice(0, len) + '...' : str || '';
 }
 
-export function escapeHtml(text) {
-  if (!text) return '';
-  const div = document.createElement('div');
-  div.textContent = text;
-  return div.innerHTML;
-}
+/**
+ * Line-level diff of two texts as a flat list of `{kind, text}` where `kind` is
+ * `add`, `remove` or `context`. Used to report how a run's system prompt
+ * changed between calls instead of reprinting the whole prompt each time.
+ *
+ * Standard LCS over lines. Prompts are bounded by the capture limits, so the
+ * O(n·m) table is acceptable; above `MAX_DIFF_LINES` the inputs are reported as
+ * wholly replaced rather than diffed, which keeps a pathological input from
+ * allocating a huge table.
+ */
+const MAX_DIFF_LINES = 2000;
+const CONTEXT_LINES = 2;
 
-export function truncatePlan(str, len) {
-  if (!str) return '';
-  // Handle truncated strings from tracer
-  if (str.includes('[String truncated')) {
-    const match = str.match(/^([\s\S]*?)\.\.\.\s*\n?\n?\[String truncated/);
-    if (match) {
-      return match[1] + '... [truncated]';
+export function diffLines(before, after) {
+  const left = String(before ?? '').split('\n');
+  const right = String(after ?? '').split('\n');
+
+  if (left.length > MAX_DIFF_LINES || right.length > MAX_DIFF_LINES) {
+    return [
+      ...left.map(text => ({ kind: 'remove', text })),
+      ...right.map(text => ({ kind: 'add', text }))
+    ];
+  }
+
+  const lengths = Array.from({ length: left.length + 1 }, () => new Uint32Array(right.length + 1));
+  for (let i = left.length - 1; i >= 0; i--) {
+    for (let j = right.length - 1; j >= 0; j--) {
+      lengths[i][j] = left[i] === right[j]
+        ? lengths[i + 1][j + 1] + 1
+        : Math.max(lengths[i + 1][j], lengths[i][j + 1]);
     }
   }
-  return str.length > len ? str.slice(0, len) + '...' : str;
-}
 
-/**
- * Render a compaction badge from stats (returned by `compactionsByTurn`) as
- * an HTML string. Returns '' when stats is falsy so callers can interpolate
- * unconditionally.
- */
-export function renderCompactionBadge(stats) {
-  if (!stats) return '';
-  const before = escapeHtml(String(stats.messagesBefore ?? '?'));
-  const after = escapeHtml(String(stats.messagesAfter ?? '?'));
-  const reasonLabel = stats.reason === 'token_pressure' ? 'tokens'
-    : stats.reason === 'turn_pressure' ? 'turns'
-    : (stats.reason || '');
-  const tokenDelta = (stats.tokensBefore != null && stats.tokensAfter != null)
-    ? `, ~${formatTokens(stats.tokensBefore)}→${formatTokens(stats.tokensAfter)} tok`
-    : '';
-  const overBudget = stats.overBudget ? ' (over budget)' : '';
-  const tooltip = `compaction (${stats.strategy || 'trim'}) — reason: ${reasonLabel}${tokenDelta}, kept_recent: ${stats.keptRecentTurns ?? '?'}${overBudget}`;
-  return `<span class="turn-badge compaction" title="${escapeHtml(tooltip)}">✂${before}→${after}</span>`;
-}
-
-export function findFileByTraceId(state, traceId) {
-  for (const [name, data] of state.files) {
-    if (data.traceId === traceId) return name;
+  const changes = [];
+  let i = 0;
+  let j = 0;
+  while (i < left.length && j < right.length) {
+    if (left[i] === right[j]) {
+      changes.push({ kind: 'context', text: left[i] });
+      i++;
+      j++;
+    } else if (lengths[i + 1][j] >= lengths[i][j + 1]) {
+      changes.push({ kind: 'remove', text: left[i++] });
+    } else {
+      changes.push({ kind: 'add', text: right[j++] });
+    }
   }
-  return null;
+  while (i < left.length) changes.push({ kind: 'remove', text: left[i++] });
+  while (j < right.length) changes.push({ kind: 'add', text: right[j++] });
+
+  return collapseContext(changes);
+}
+
+// Keep a couple of unchanged lines around each edit so a change reads in
+// context, and replace longer unchanged stretches with one elision marker.
+function collapseContext(changes) {
+  const keep = new Set();
+  changes.forEach((change, index) => {
+    if (change.kind === 'context') return;
+    for (let offset = -CONTEXT_LINES; offset <= CONTEXT_LINES; offset++) {
+      const neighbour = index + offset;
+      if (neighbour >= 0 && neighbour < changes.length) keep.add(neighbour);
+    }
+  });
+
+  const result = [];
+  let skipped = 0;
+  changes.forEach((change, index) => {
+    if (keep.has(index)) {
+      if (skipped > 0) {
+        result.push({ kind: 'elision', text: `… ${skipped} unchanged line${skipped === 1 ? '' : 's'}` });
+        skipped = 0;
+      }
+      result.push(change);
+    } else {
+      skipped++;
+    }
+  });
+  if (skipped > 0) {
+    result.push({ kind: 'elision', text: `… ${skipped} unchanged line${skipped === 1 ? '' : 's'}` });
+  }
+  return result;
 }

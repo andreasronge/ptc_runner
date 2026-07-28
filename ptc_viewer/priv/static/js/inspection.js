@@ -1,4 +1,4 @@
-import { escapeHtml } from './utils.js';
+import { html, mount, toMarkup } from './preact.js';
 
 // Index private inspection records by their canonical correlation IDs so the
 // transcript and dialogue views can join exact payloads to canonical events.
@@ -44,18 +44,19 @@ export function indexInspection(inspection) {
 }
 
 export function renderInspection(container, inspection) {
-  const records = inspection?.records || [];
-  if (!records.length) return;
-
-  const section = document.createElement('section');
-  section.className = 'inspection-wrapper';
-  section.innerHTML = renderInspectionMarkup(inspection);
-  container.appendChild(section);
+  const host = container.querySelector('.inspection-wrapper') ||
+    container.appendChild(Object.assign(document.createElement('section'), { className: 'inspection-wrapper' }));
+  mount(host, html`<${InspectionRecords} inspection=${inspection} />`);
 }
 
 export function renderInspectionMarkup(inspection) {
+  if (!(inspection?.records || []).length) return '';
+  return toMarkup(html`<${InspectionRecords} inspection=${inspection} />`);
+}
+
+function InspectionRecords({ inspection }) {
   const records = inspection?.records || [];
-  if (!records.length) return '';
+  if (!records.length) return null;
 
   const counts = records.reduce((result, record) => {
     result[record.record_type] = (result[record.record_type] || 0) + 1;
@@ -66,39 +67,39 @@ export function renderInspectionMarkup(inspection) {
     .map(([type, count]) => `${count} ${type}`)
     .join(' · ');
 
-  return `
+  return html`
     <details class="inspection-panel inspection-advanced">
       <summary class="inspection-heading">
-      <div>
-        <span>Private artifact</span>
-        <h3>Advanced/private records</h3>
-      </div>
-      <strong>${records.length} records</strong>
+        <div>
+          <span>Private artifact</span>
+          <h3>Advanced/private records</h3>
+        </div>
+        <strong>${records.length} records</strong>
       </summary>
       <div class="inspection-sensitivity">
         Sensitive private data from the pinned local artifact. Keep it local.
       </div>
-      <div class="inspection-counts">${escapeHtml(countSummary)}</div>
+      <div class="inspection-counts">${countSummary}</div>
       <div class="inspection-records">
-        ${records.map(renderRecord).join('')}
+        ${records.map(record => html`<${Record} key=${record.sequence} record=${record} />`)}
       </div>
     </details>
   `;
 }
 
-function renderRecord(record) {
+function Record({ record }) {
   const label = record.record_type === 'evaluation-source'
     ? record.payload?.program_kind || record.record_type
     : record.payload?.name || record.record_type;
 
-  return `
+  return html`
     <details class="inspection-record">
       <summary>
-        <span>#${escapeHtml(String(record.sequence))}</span>
-        <strong>${escapeHtml(String(record.record_type))}</strong>
-        <code>${escapeHtml(String(label))}</code>
+        <span>#${String(record.sequence)}</span>
+        <strong>${String(record.record_type)}</strong>
+        <code>${String(label)}</code>
       </summary>
-      <pre>${escapeHtml(JSON.stringify(record, null, 2))}</pre>
+      <pre>${JSON.stringify(record, null, 2)}</pre>
     </details>
   `;
 }

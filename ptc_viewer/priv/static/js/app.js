@@ -1,3 +1,4 @@
+import { html, mount } from './preact.js';
 import { renderKernelTranscript } from './kernel-transcript.js';
 import { renderInspection } from './inspection.js';
 import { createAnalyzeButton, createReplController, nextTabName, readViewerConfig } from './repl.js';
@@ -16,7 +17,12 @@ const state = {
   activeTab: 'runs',
   scrollPositions: { runs: 0, repl: 0 },
   replAvailable: false,
-  analyzeActions: new Set()
+  analyzeActions: new Set(),
+  runs: [],
+  page: null,
+  catalogGeneration: 0,
+  query: '',
+  selectedRunId: null
 };
 
 function setReplAvailability(available) {
@@ -70,34 +76,111 @@ async function fetchRunsPage(cursor = null) {
   return response.json();
 }
 
+// --- Run picker -----------------------------------------------------------
+//
+// The catalog owner still serializes fetches behind a generation; this layer
+// only holds the latest page and re-renders. Because the picker is a component
+// tree rather than an `innerHTML` rebuild, the search box keeps focus and
+// caret position across a background catalog refresh.
+
 function setupRunPicker(page, priorRuns = [], catalogGeneration) {
-  const runs = [...priorRuns, ...(page.items || [])];
-  const picker = document.getElementById('file-picker');
-  picker.replaceChildren();
+  state.runs = [...priorRuns, ...(page.items || [])];
+  state.page = page;
+  state.catalogGeneration = catalogGeneration;
+  renderRunPicker();
+}
 
-  const header = element('div', 'file-picker-header');
-  header.id = 'file-picker-toggle';
-  const heading = element('h3', null, 'Kernel Runs ');
-  heading.append(element('span', 'file-picker-count', `${runs.length}${page.truncated ? '+' : ''} runs`));
-  header.append(heading, element('span', 'file-picker-expand', '▾'));
+function renderRunPicker() {
+  mount(document.getElementById('file-picker'), html`<${RunPicker} />`);
+}
 
-  const list = element('div', 'file-picker-list');
-  runs.forEach(run => list.append(runPickerItem(run)));
+function matchesQuery(run, query) {
+  if (!query) return true;
+  const needle = query.toLowerCase();
+  return [run.run_id, run.name, run.status, run.trace_id]
+    .some(field => typeof field === 'string' && field.toLowerCase().includes(needle));
+}
 
-  if (page.next_cursor) {
-    const more = element('button', 'btn kernel-load-more', 'Load more runs');
-    more.type = 'button';
-    more.addEventListener('click', async () => {
-      more.disabled = true;
-      const loaded = await runCatalog.loadMore(page.next_cursor, runs, catalogGeneration);
-      if (!loaded && more.isConnected) more.disabled = false;
-    });
-    list.append(more);
+function RunPicker() {
+  const { runs, page, query, selectedRunId } = state;
+  const visible = runs.filter(run => matchesQuery(run, query));
+  const selected = runs.find(run => run.run_id === selectedRunId) || null;
+
+  // With a run open the list is reference material, not the task at hand: it
+  // collapses to one control that both names the current run and returns to
+  // the list. That control is the only "back to runs" affordance, replacing
+  // the tab-plus-breadcrumb pair that used to sit two labels apart.
+  if (selected) {
+    return html`
+      <div class="file-picker-bar">
+        <button type="button" class="btn secondary file-picker-back" onClick=${() => selectRun(null)}>
+          ← All runs <span class="file-picker-count">${runs.length}${page?.truncated ? '+' : ''}</span>
+        </button>
+        <span class="file-picker-current">
+          <span class=${`trace-kind badge-${selected.status === 'ok' ? 'agent' : 'error'}`}>
+            ${selected.status || 'incomplete'}
+          </span>
+          <strong>${selected.run_id}</strong>
+        </span>
+      </div>
+    `;
   }
 
-  picker.append(header, list);
-  picker.style.display = 'block';
-  header.addEventListener('click', () => picker.classList.toggle('collapsed'));
+  return html`
+    <div class="file-picker-panel">
+      <div class="file-picker-header">
+        <h3>Kernel runs <span class="file-picker-count">${runs.length}${page?.truncated ? '+' : ''}</span></h3>
+        <input type="search" class="file-picker-search" placeholder="Filter by run id, status or bundle"
+               aria-label="Filter runs" value=${query}
+               onInput=${event => { state.query = event.currentTarget.value; renderRunPicker(); }} />
+      </div>
+      <div class="file-picker-list">
+        ${visible.map(run => html`<${RunRow} key=${run.run_id} run=${run} />`)}
+        ${!visible.length && html`<p class="file-picker-empty">
+          ${runs.length ? `No run matches “${query}”.` : 'No canonical runs in this trace directory.'}
+        </p>`}
+        ${page?.next_cursor && !query && html`<${LoadMoreRuns} cursor=${page.next_cursor} />`}
+      </div>
+    </div>
+  `;
+}
+
+function RunRow({ run }) {
+  // The run ID identifies the run; the bundle hash identifies the workflow and
+  // is shared by every run of it, so it is a secondary fact rather than the
+  // row's headline.
+  return html`
+    <button type="button" class="file-picker-item" onClick=${() => selectRun(run.run_id)}>
+      <span class="file-picker-main">
+        <span class=${`trace-kind badge-${run.status === 'ok' ? 'agent' : 'error'}`}>
+          ${run.status || 'incomplete'}
+        </span>
+        <span class="filename">${run.run_id}</span>
+      </span>
+      <span class="file-meta">
+        ${run.start_timestamp && html`<span class="modified">${formatDate(run.start_timestamp)}</span>`}
+        <span class="size">${run.subordinate_evaluations || 0} evaluations</span>
+        <span class="file-picker-query" title=${run.name || ''}>${shortenHash(run.name)}</span>
+      </span>
+    </button>
+  `;
+}
+
+function LoadMoreRuns({ cursor }) {
+  return html`
+    <button type="button" class="btn kernel-load-more" onClick=${async event => {
+      const button = event.currentTarget;
+      button.disabled = true;
+      const loaded = await runCatalog.loadMore(cursor, state.runs, state.catalogGeneration);
+      if (!loaded && button.isConnected) button.disabled = false;
+    }}>Load more runs</button>
+  `;
+}
+
+function shortenHash(value) {
+  if (!value) return '';
+  const text = String(value);
+  return text.length > 22 ? `${text.slice(0, 22)}…` : text;
 }
 
 const runCatalog = createRunCatalog({
@@ -107,34 +190,40 @@ const runCatalog = createRunCatalog({
   clearError: () => clearNotice('run-catalog')
 });
 
-function runPickerItem(run) {
-  const item = element('button', 'file-picker-item');
-  item.type = 'button';
-  const main = element('span', 'file-picker-main');
-  main.append(element('span', 'filename', run.name || run.run_id));
+// --- Routing --------------------------------------------------------------
+//
+// The selected run and active tab live in the URL, so a run view can be
+// bookmarked, shared and reloaded, and Back returns to the list.
 
-  const meta = element('span', 'file-meta');
-  meta.append(element('span', `trace-kind badge-${run.status === 'ok' ? 'agent' : 'error'}`, run.status || 'incomplete'));
-  if (run.start_timestamp) meta.append(element('span', 'modified', formatDate(run.start_timestamp)));
-  meta.append(element('span', 'size', `${run.subordinate_evaluations || 0} evaluations`));
-  main.append(meta);
-  item.append(main, element('span', 'file-picker-query', run.run_id));
-
-  // The decoded run ID stays in this closure. It never crosses an HTML
-  // attribute or parser boundary before reaching the typed template request.
-  item.addEventListener('click', async () => {
-    item.classList.add('loading');
-    await loadRun(run.run_id);
-    item.classList.remove('loading');
-  });
-  return item;
+function currentRoute() {
+  const hash = location.hash.replace(/^#\/?/, '');
+  if (hash === 'repl') return { tab: 'repl', runId: null };
+  const match = hash.match(/^run\/(.+)$/);
+  if (match) return { tab: 'runs', runId: decodeURIComponent(match[1]) };
+  return { tab: 'runs', runId: null };
 }
 
-function element(tag, className, text) {
-  const node = document.createElement(tag);
-  if (className) node.className = className;
-  if (text !== undefined) node.textContent = text;
-  return node;
+function selectRun(runId) {
+  location.hash = runId ? `#/run/${encodeURIComponent(runId)}` : '#/';
+}
+
+async function applyRoute() {
+  const route = currentRoute();
+  if (route.tab !== state.activeTab) activateTab(route.tab);
+
+  if (route.runId === state.selectedRunId) return;
+  state.selectedRunId = route.runId;
+
+  if (!route.runId) {
+    state.currentRun = null;
+    mount(document.getElementById('view-container'), null);
+    document.getElementById('breadcrumb').replaceChildren();
+    renderRunPicker();
+    return;
+  }
+
+  renderRunPicker();
+  await loadRun(route.runId);
 }
 
 // Bounded page budget for the eager turn fetch. Run-level projections
@@ -190,20 +279,17 @@ async function loadRun(runId) {
       reason
     };
   }
-  renderRun({ metadata: await runResponse.json(), turns: turnsResult.turns, inspection, inspectionStatus });
+  renderRun(
+    { metadata: await runResponse.json(), turns: turnsResult.turns, inspection, inspectionStatus },
+    { fresh: true }
+  );
 }
 
-function renderRun(data) {
+function renderRun(data, { fresh = false } = {}) {
   state.currentRun = data;
   const { metadata, turns, inspection, inspectionStatus } = data;
   const breadcrumb = document.getElementById('breadcrumb');
-  const home = element('button', 'breadcrumb-item breadcrumb-home', 'Runs');
-  home.type = 'button';
-  breadcrumb.replaceChildren(
-    home,
-    element('span', 'breadcrumb-sep', '/'),
-    element('span', 'breadcrumb-item active', metadata.name || metadata.run_id)
-  );
+  breadcrumb.replaceChildren();
 
   if (state.repl) {
     const analyzeRun = createAnalyzeButton(
@@ -224,13 +310,8 @@ function renderRun(data) {
     setReplAvailability(state.replAvailable);
   }
 
-  home.addEventListener('click', () => {
-    state.currentRun = null;
-    document.getElementById('view-container').replaceChildren();
-    breadcrumb.replaceChildren();
-  });
-
-  renderKernelTranscript(document.getElementById('view-container'), data, {
+  const container = document.getElementById('view-container');
+  renderKernelTranscript(container, data, {
     onLoadMore: async button => {
       button.disabled = true;
       button.textContent = 'Loading…';
@@ -245,6 +326,8 @@ function renderRun(data) {
       }
 
       const nextPage = await response.json();
+      // Not `fresh`: appending a page diffs into the existing tree, so open
+      // disclosures and the reading position are kept.
       renderRun({
         metadata,
         inspection,
@@ -253,7 +336,9 @@ function renderRun(data) {
       });
     }
   });
-  renderInspection(document.getElementById('view-container'), inspection);
+  renderInspection(container, inspection);
+
+  if (!fresh) return;
   if (state.activeTab === 'runs') window.scrollTo({ top: 0, behavior: 'auto' });
   else state.scrollPositions.runs = 0;
 }
@@ -282,11 +367,19 @@ function activateTab(name, { focus = false } = {}) {
   requestAnimationFrame(() => window.scrollTo(0, state.scrollPositions[name] || 0));
 }
 
+function navigateToTab(name) {
+  if (name === 'repl') {
+    location.hash = '#/repl';
+    return;
+  }
+  location.hash = state.selectedRunId ? `#/run/${encodeURIComponent(state.selectedRunId)}` : '#/';
+}
+
 function setupTabs() {
   const tabs = document.getElementById('primary-tabs');
   tabs.hidden = false;
   for (const name of ['runs', 'repl']) {
-    document.getElementById(`${name}-tab`).addEventListener('click', () => activateTab(name));
+    document.getElementById(`${name}-tab`).addEventListener('click', () => navigateToTab(name));
   }
   tabs.addEventListener('keydown', event => {
     if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
@@ -295,6 +388,7 @@ function setupTabs() {
       : event.target.id === 'repl-tab' ? 'repl'
         : state.activeTab;
     const next = nextTabName(current, event.key);
+    navigateToTab(next);
     activateTab(next, { focus: true });
   });
 }
@@ -305,10 +399,12 @@ if (config.repl_enabled) {
   state.repl = createReplController({
     pageNonce: config.page_bootstrap_nonce,
     getSelectedRunId: () => state.currentRun?.metadata?.run_id || null,
-    activate: () => activateTab('repl'),
+    activate: () => { location.hash = '#/repl'; },
     refreshRuns: () => runCatalog.refresh(),
     onAvailabilityChange: setReplAvailability
   });
 }
 
-void runCatalog.refresh();
+window.addEventListener('hashchange', () => void applyRoute());
+
+void runCatalog.refresh().then(() => applyRoute());

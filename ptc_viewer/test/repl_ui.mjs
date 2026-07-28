@@ -329,22 +329,45 @@ controller.setActive(true);
 await flush();
 assert.equal(availability, true);
 
-// A slow authoritative read immediately disables mutations, and the keyboard
-// shortcut explains why it did not execute instead of silently discarding it.
+// A background authoritative read is a pure GET: it never changes
+// mutation_nonce, and a response that arrives mid-mutation is rejected by
+// compareEnvelopes for going backwards. It must therefore leave the user's
+// controls alone. Gating them on it disabled every button for the duration of
+// each poll leg, which flickered once a second and swallowed clicks and
+// keystrokes that landed in the window.
 slowPoll = deferred();
 controller.setActive(true);
-assert.equal(controllerDocument.getElementById('repl-evaluate').disabled, true);
+assert.equal(controllerDocument.getElementById('repl-evaluate').disabled, false);
+
+// The keyboard shortcut executes rather than reporting that it could not.
+editor.value = '(log/runs {})';
 controllerDocument.getElementById('repl-editor').dispatch('keydown', { key: 'Enter', ctrlKey: true });
-assert.match(controllerDocument.getElementById('repl-status').textContent, /refreshing/);
+assert.doesNotMatch(controllerDocument.getElementById('repl-status').textContent, /refreshing/);
+await flush();
+
+// Analyze is accepted rather than refused while a read is outstanding: the
+// intent is queued and drains when the read lands, instead of being rejected
+// with a "wait for the current operation" warning the user did not cause.
 const templatesBeforeBusyExample = templateCount;
 controllerDocument.getElementById('repl-example-buttons').children[1].dispatch('click');
-assert.match(controllerDocument.getElementById('repl-status').textContent, /Wait for/);
+assert.doesNotMatch(controllerDocument.getElementById('repl-status').textContent, /Wait for/);
+
 authoritative = envelope('server-a', 1, 2);
 slowPoll.resolve(response(authoritative));
 slowPoll = null;
 await flush();
+assert.equal(templateCount, templatesBeforeBusyExample + 1);
+
+// That queued template is now a real in-flight mutation, which does gate the
+// controls; they free up again once it lands.
+assert.equal(controllerDocument.getElementById('repl-evaluate').disabled, true);
+templateRequests[0].pending.resolve(response({
+  ...authoritative,
+  template: { source: '(log/run "run-1")' }
+}));
+await flush();
+templateRequests.shift();
 assert.equal(controllerDocument.getElementById('repl-evaluate').disabled, false);
-assert.equal(templateCount, templatesBeforeBusyExample);
 
 // A 409 converges through an authoritative read and replaces the obsolete
 // warning with visible recovered state.
@@ -408,15 +431,16 @@ await flush();
 assert.equal(resetCount, 1);
 assert.equal(runsRefreshCount, 3);
 
-// Polling continues behind an open dialog. Confirm is disabled during the
-// read, then retains its captured predecessor and receives a stale-session
-// response after another tab advances the generation.
+// Polling continues behind an open dialog, and — like every other control —
+// Confirm stays usable across the read rather than blinking disabled. It
+// retains its captured predecessor and receives a stale-session response
+// after another tab advances the generation.
 controllerDocument.getElementById('repl-reset').dispatch('click');
 const capturedDraft = editor.value;
 slowPoll = deferred();
 controller.setActive(true);
 assert.equal(resetDialog.open, true);
-assert.equal(controllerDocument.getElementById('repl-reset-confirm').disabled, true);
+assert.equal(controllerDocument.getElementById('repl-reset-confirm').disabled, false);
 authoritative = envelope('server-a', authoritative.generation_sequence + 1, 1);
 slowPoll.resolve(response(authoritative));
 slowPoll = null;
@@ -587,9 +611,16 @@ await flush();
 assert.match(closedDocument.getElementById('repl-status').textContent, /closed/);
 assert.doesNotMatch(closedDocument.getElementById('repl-status').textContent, /ready/);
 
+// The decoded run ID must never reach the DOM as an attribute a parser could
+// reinterpret. It travels as a closure argument into the router, and through
+// the URL only as an encoded hash segment.
 const appSource = fs.readFileSync(new URL('../priv/static/js/app.js', import.meta.url), 'utf8');
 assert.doesNotMatch(appSource, /data-run-id/);
 assert.doesNotMatch(appSource, /dataset\.runId/);
-assert.match(appSource, /loadRun\(run\.run_id\)/);
+assert.match(appSource, /onClick=\$\{\(\) => selectRun\(run\.run_id\)\}/);
+assert.match(appSource, /location\.hash = runId \? `#\/run\/\$\{encodeURIComponent\(runId\)\}`/);
+assert.match(appSource, /decodeURIComponent\(match\[1\]\)/);
+assert.match(appSource, /loadRun\(route\.runId\)/);
+assert.match(appSource, /encodeURIComponent\(runId\)\}`\),/);
 
 process.stdout.write('ok');
