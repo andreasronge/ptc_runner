@@ -1,7 +1,8 @@
 # MCP write support and bounded client surfaces
 
-**Status:** proposed; the protocol baseline is reconciled, but no runtime work
-is approved. Revised 2026-07-28 against the final MCP `2026-07-28` tag at
+**Status:** active; the protocol baseline is reconciled and the effect-aware
+Dispatcher foundation is implemented, but MCP write authority remains
+unapproved. Revised 2026-07-28 against the final MCP `2026-07-28` tag at
 `modelcontextprotocol/modelcontextprotocol@5f5440bb26a62e2cf3440b92da5a667efa03b267`.
 
 PtcRunner installs MCP sources read-only. Every mapped tool must declare
@@ -98,12 +99,13 @@ resolves the effective effect against the installed mission capabilities, and
 Write support must not make the provider-independent compiler depend on a host
 installation.
 
-The remaining retry defect is at the per-call boundary. `MCPSource` marks
-timeouts and transport failures retryable, and `Dispatcher` independently
-marks callback exits and its outer provider timeout retryable without consulting
-`Capability.effect`. Generated mission code can observe that envelope and retry
-inside the same evaluation even though the outer evaluation will later refuse
-to retry as a whole.
+`Dispatcher` now classifies every mission failure produced after callback
+invocation with `Capability.effect` and trusted provider dispatch provenance.
+Read failures retain their provider policy; write and unknown failures after
+possible dispatch are non-retryable and carry the orthogonal
+`mutation_state: :indeterminate` field. Workflow provider policy remains
+independent. The remaining per-call work for MCP writes is to make `MCPSource`
+populate the shared mutation state and provenance from its transport boundary.
 
 ### Read-only MCP installation
 
@@ -191,30 +193,26 @@ Acceptance:
 A timeout, transport loss, or callback-process exit after dispatch does not
 prove whether a write happened. Cancellation does not change that fact.
 
-Make both failure-producing layers effect-aware at the mission boundary:
-
-1. `MCPSource` must classify request failures with the mapped tool's declared
-   effect and trusted transport dispatch provenance.
-2. `Dispatcher` must use `Capability.effect` when it constructs or normalizes
-   a mission capability's post-invocation envelope.
+The Dispatcher mission boundary is already effect-aware. `MCPSource` must now
+classify request failures with the mapped tool's declared effect and trusted
+transport dispatch provenance.
 
 Do not apply this rule blindly to workflow capabilities. In particular,
 `llm-request` deliberately has `effect: :unknown` while its trusted provider
 classifies some availability failures as retryable; the workflow agent owns
-that retry policy. Slice 1 preserves that contract and adds an explicit
-regression for it. A later proposal may replace the LLM's coarse effect with a
-more precise capability semantic, but MCP write support must not change it as a
-side effect.
+that retry policy. The Dispatcher preserves that contract. A later proposal
+may replace the LLM's coarse effect with a more precise capability semantic,
+but MCP write support must not change it as a side effect.
 
 For a read capability, the existing retryable timeout and transport semantics
 remain. For `write` or `unknown`, a failure after remote dispatch may have
 begun is non-retryable and explicitly classified as an indeterminate outcome.
-Represent that state independently from the diagnostic cause: add a bounded
-`mutation_state: :indeterminate` field to `ProviderError` and the public
-Dispatcher envelope while preserving `kind` and `reason` as the specific
-timeout, domain, protocol, validation, or transport diagnosis. Successful calls
-and failures proven to occur before dispatch omit the field. Do not encode
-mutation state as a replacement error kind or only in prose.
+The public Dispatcher envelope represents that state independently from the
+diagnostic cause with the bounded `mutation_state: :indeterminate` field while
+preserving `kind` and `reason` as the specific timeout, domain, protocol,
+validation, or transport diagnosis. Successful calls and failures proven to
+occur before dispatch omit the field. Do not encode mutation state as a
+replacement error kind or only in prose.
 
 Callback entry is not the dispatch boundary. Header-parameter projection,
 outbound-header validation, a request context already being closed, and other
@@ -269,7 +267,8 @@ Acceptance:
 - an export wrapping a write tool reports the installed write effect without
   injecting host knowledge into `Prelude.Compiler`.
 
-Sections 1 and 2 are one atomic write-support slice.
+The remaining MCP changes in sections 1 and 2 are one atomic write-support
+slice.
 
 ## 3. Complete Streamable HTTP cancellation
 
@@ -399,47 +398,7 @@ correctness and authority findings, and runs the slice's focused tests plus
 fix changes behavior. Dependent slices do not begin from an unreviewed
 authority or wire contract.
 
-### Slice 1 — effect-aware failure foundation
-
-**Scope**
-
-- Add one orthogonal, bounded `mutation_state` field to `ProviderError` and the
-  public Dispatcher envelope without replacing the existing diagnostic
-  `kind`/`reason`.
-- Make every mission Dispatcher outcome produced after callback invocation
-  consult `Capability.effect` and trusted dispatch provenance: timeout,
-  callback exit/crash, forwarded `ProviderError`, oversized or schema-invalid
-  result, arbitrary callback return, run closure, and inspection-output
-  replacement.
-- Preserve retryability for reads and make write or unknown outcomes
-  non-retryable when dispatch may have occurred.
-- Preserve the existing workflow `llm-request` contract, including its trusted
-  retryable availability errors despite its deliberately unknown effect.
-- Update the `ProviderError` and `Dispatcher` module documentation for the new
-  public error contract in this slice.
-- Add focused regressions before enabling write mappings in host configuration.
-
-This slice is protocol-independent and may land by itself.
-
-**Review checkpoint**
-
-- Review the public error shape once; reject parallel encodings of
-  indeterminacy in `kind`, `reason`, and free text.
-- Verify deterministic pre-dispatch failures retain their existing specific
-  classifications and carry trusted `not_dispatched` provenance through the
-  mission boundary without a public mutation-state claim.
-- Verify every post-callback Dispatcher normalization and replacement path has
-  read, write, and unknown tests, including provider errors, result bounds,
-  schema mismatch, invalid return, run closure, and inspection failure.
-- Confirm existing read-capability retry behavior is unchanged and unknown
-  remains unsafe.
-- Confirm a workflow `llm-request` retryable provider failure remains retryable;
-  this slice must not reinterpret workflow provider policy as mission mutation
-  state.
-
-### Slice 2 — MCP write authority end to end
-
-**Depends on:** Slice 1.
+### Slice 1 — MCP write authority end to end
 
 **Scope**
 
@@ -486,7 +445,7 @@ is one atomic merge even if developed as several commits.
 - Run one local stdio write fixture and one independent third-party read server
   to catch regressions outside synthetic unit paths.
 
-### Slice 3 — Streamable HTTP cancellation
+### Slice 2 — Streamable HTTP cancellation
 
 **Scope**
 
@@ -512,9 +471,9 @@ indeterminate classification of an abandoned write.
 - Verify cancellation races cannot turn an indeterminate write into a retryable
   failure.
 
-### Slice 4 — MRTR validation and policy refusal
+### Slice 3 — MRTR validation and policy refusal
 
-**Depends on:** Slice 2.
+**Depends on:** Slice 1.
 
 **Scope**
 
@@ -541,7 +500,7 @@ the centralized result classifier.
 - Confirm empty client capabilities never lead to fulfilling an input request
   or automatically retrying a state-only response.
 
-### Slice 5 — exact-resource authority design
+### Slice 4 — exact-resource authority design
 
 **Trigger:** a concrete first-party application that needs MCP resources.
 
@@ -567,9 +526,9 @@ This is a specification slice. It changes no runtime code.
 - Reject the slice if its consumer could instead use an ordinary mapped MCP
   tool without losing an important capability.
 
-### Slice 6 — exact-resource mappings
+### Slice 5 — exact-resource mappings
 
-**Depends on:** approved Slice 5.
+**Depends on:** approved Slice 4.
 
 **Scope**
 
