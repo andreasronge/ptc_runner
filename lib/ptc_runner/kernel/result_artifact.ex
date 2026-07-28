@@ -27,6 +27,7 @@ defmodule PtcRunner.Kernel.ResultArtifact do
   @type error ::
           :result_destination_exists
           | :result_persistence_failed
+          | {:result_not_json_encodable, atom()}
           | :invalid_result_destination
           | :private_result_requires_private_destination
 
@@ -62,12 +63,23 @@ defmodule PtcRunner.Kernel.ResultArtifact do
     end
   end
 
+  # A value that cannot be encoded did not fail to be written; it was never
+  # writable. `Kernel.run` legitimately answers Elixir terms — `tool/kernel-eval`
+  # returns an atom-keyed envelope, and embedding hosts read it — so the JSON
+  # requirement belongs to the artifact, not to the boundary. Reporting it as a
+  # persistence failure sent an operator looking at permissions and paths.
   defp encode(value) do
     case DeterministicJSON.encode(value) do
       {:ok, encoded} -> {:ok, encoded}
-      {:error, _reason} -> {:error, :result_persistence_failed}
+      {:error, _reason} -> {:error, {:result_not_json_encodable, value_kind(value)}}
     end
   end
+
+  defp value_kind(value) when is_map(value) and not is_struct(value), do: :object
+  defp value_kind(value) when is_list(value), do: :array
+  defp value_kind(value) when is_binary(value), do: :string
+  defp value_kind(value) when is_atom(value), do: :atom
+  defp value_kind(_value), do: :unknown
 
   # `File.ln/2` fails when the destination exists, so the no-clobber guarantee
   # survives a race between the check above and the link.

@@ -13,7 +13,9 @@ defmodule PtcRunner.Kernel.CoreContractTest do
   alias PtcRunner.Kernel.MissionEnvironment
   alias PtcRunner.Kernel.ProviderError
   alias PtcRunner.Kernel.ReplSession
+  alias PtcRunner.Kernel.ResultArtifact
   alias PtcRunner.Kernel.RunConfig
+  alias PtcRunner.Kernel.Runner
   alias PtcRunner.Kernel.RunState
   alias PtcRunner.Kernel.SafeMetadata
   alias PtcRunner.Kernel.WorkflowEnvironment
@@ -1376,6 +1378,25 @@ defmodule PtcRunner.Kernel.CoreContractTest do
                ),
              "effect #{inspect(effect)} must keep a resource kill terminal"
     end
+  end
+
+  # `Kernel.run` legitimately answers Elixir terms: `tool/kernel-eval` returns an
+  # atom-keyed envelope and embedding hosts read it, so the JSON requirement
+  # belongs to the artifact rather than to the boundary. What was wrong was the
+  # report — an unwritable value looked like a filesystem failure.
+  test "an unencodable result artifact names the value, not the write" do
+    dir = Path.join(System.tmp_dir!(), "ptc-unencodable-#{System.unique_integer([:positive])}")
+    File.mkdir_p!(dir)
+    on_exit(fn -> File.rm_rf(dir) end)
+    path = Path.join(dir, "result.json")
+
+    assert {:error, {:result_not_json_encodable, :object}} =
+             ResultArtifact.persist(path, %{outcome: :returned, value: 1}, :normal, :normal)
+
+    refute File.exists?(path)
+
+    assert :ok = ResultArtifact.persist(path, %{"outcome" => "returned"}, :normal, :normal)
+    assert File.exists?(path)
   end
 
   test "mission evaluation is serialized, persistent, and cannot use workflow capabilities" do
