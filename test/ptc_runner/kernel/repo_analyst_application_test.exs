@@ -363,10 +363,12 @@ defmodule PtcRunner.Kernel.RepoAnalystApplicationTest do
           capabilities: stubs(granted, nil, values)
         )
 
-      for {expression, expected_positions} <- [
-            {~S|(first (get (runs/list-runs 10 nil) "items"))|, [1]},
-            {~S|(runs/provenance "run-1")|, [1]},
-            {~S|(runs/effective-prelude "run-1" "agent.retry")|, [9]}
+      for {expression, provider, snapshot_hash, resource, positions} <- [
+            {~S|(first (get (runs/list-runs 10 nil) "items"))|, "history", "sha256:trace",
+             "run-1", [1]},
+            {~S|(runs/provenance "run-1")|, "history", "sha256:trace", "run-1", [1]},
+            {~S|(runs/effective-prelude "run-1" "agent.retry")|, "private-history",
+             "sha256:inspection", "run-1", [9]}
           ] do
         assert {:ok, %{value: %{outcome: :returned, value: value}}} =
                  Kernel.run(
@@ -374,7 +376,12 @@ defmodule PtcRunner.Kernel.RepoAnalystApplicationTest do
                    run_config(mission)
                  )
 
-        assert value["positions"] == expected_positions
+        assert Map.take(value, ~w(provider snapshot_hash resource positions)) == %{
+                 "provider" => provider,
+                 "snapshot_hash" => snapshot_hash,
+                 "resource" => resource,
+                 "positions" => positions
+               }
       end
     end
 

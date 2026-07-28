@@ -61,19 +61,26 @@
   Every item carries its own `component_overrides`, so one observation shows
   which runs replaced a component before compiling and which ran the installed
   source unchanged. Its `positions` identifies that run's run-started event for
-  citation. An empty component-overrides list means unchanged."
+  citation. Each item, not the enclosing page, is a complete evidence reference:
+  copy its provider, snapshot_hash, resource, and positions together. An empty
+  component-overrides list means unchanged."
   {:signature "(limit :int, cursor :string?) -> :map"}
   [limit cursor]
   (let [page
         (source-page
           "history"
           (tool/history.list-runs
-            (cap/with-cursor {"limit" limit} cursor)))]
+            (cap/with-cursor {"limit" limit} cursor)))
+        provider (get page "provider")
+        snapshot-hash (get page "snapshot_hash")]
     (assoc page
            "items"
            (mapv (fn [run]
                    (merge (compact-run run)
-                          (run-provenance (get run "run_id"))))
+                          (run-provenance (get run "run_id"))
+                          {"provider" provider
+                           "snapshot_hash" snapshot-hash
+                           "resource" (get run "run_id")}))
                  (get page "items")))))
 
 (defn provenance
@@ -98,6 +105,7 @@
        "mission_prelude" (get data "mission_prelude")
        "provider" (get page "provider")
        "snapshot_hash" (get page "snapshot_hash")
+       "resource" run-id
        "positions" [(get started "sequence")]}
       (fail {"error" "no-run-started-event" "run_id" run-id}))))
 
@@ -126,6 +134,7 @@
         match {"item" match
                "provider" (get page "provider")
                "snapshot_hash" (get page "snapshot_hash")
+               "resource" run-id
                "positions" [(get match "sequence")]}
         next-cursor (recur next-cursor)
         :else {"item" nil
