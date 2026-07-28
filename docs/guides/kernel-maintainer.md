@@ -232,10 +232,13 @@ resources into the run lifecycle. Exact selection grammar and transport
 behavior belong in `ProviderRegistry`, each provider module, and the manifest
 guide.
 
-The current MCP adapter is one host-installed read-only source with typed
-Streamable HTTP and stdio transports. Endpoints or process launch details,
-credentials, upstream mapping, and installed ceilings are host authority; a
-manifest may only select mapped names and narrow visibility or limits.
+The MCP adapter is one host-installed source with typed Streamable HTTP and
+stdio transports. Endpoints or process launch details, credentials, upstream
+mapping, read/write effects, and installed ceilings are host authority; server
+annotations are not. A manifest may only select mapped names and narrow
+visibility or limits. Every write-bearing installation requires an explicit
+non-empty manifest `allow`, while an all-read installation retains the omitted
+`allow` convenience.
 `PtcRunner.Kernel.MCPSource` owns common discovery and capability assembly,
 `PtcRunner.Kernel.MCPProtocol` owns pure protocol validation and normalization,
 and the transport owners bound and correlate each request. Their module docs
@@ -245,6 +248,12 @@ calls propagate only a derived W3C `traceparent`, with no baggage or
 operator-supplied trace value crossing the provider boundary. Immutable MCP
 sources may freeze a host-installed content identity during assembly; this is
 provider provenance, not a mission capability grant.
+
+`MCPSource` labels deterministic local call failures `:not_dispatched` and
+anything after the HTTP operation begins or a stdio write may have been accepted
+`:possibly_dispatched`. Dispatcher consumes that internal evidence: a possible
+write becomes non-retryable with indeterminate mutation state, while the
+transport provenance never reaches Lisp.
 
 PtcRunner-owned canonical traces remain native rather than passing through
 MCP. A host-installed `ptc_trace_snapshot` uses `TraceSnapshot` to capture one

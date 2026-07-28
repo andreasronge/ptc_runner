@@ -30,7 +30,9 @@ defmodule PtcRunner.Kernel.HostConfig do
   `schema/0` is the canonical structural description shipped for editor and
   human feedback. Runtime decoding remains authoritative for semantic checks
   such as unique public tool names, credential references, reserved headers,
-  and portable environment names.
+  portable environment names, and the requirement that `snapshot_identity`
+  name a read mapping. MCP effects form the closed `read`/`write` operator
+  classification; server-supplied annotations cannot widen or narrow it.
   """
 
   alias PtcRunner.Kernel.ConfinedFile
@@ -87,7 +89,7 @@ defmodule PtcRunner.Kernel.HostConfig do
 
   @type tool :: %{
           as: binary(),
-          effect: :read,
+          effect: :read | :write,
           description: binary() | nil,
           error_feedback: :closed | :bounded,
           model_visible: boolean()
@@ -696,7 +698,7 @@ defmodule PtcRunner.Kernel.HostConfig do
          :ok <- exact_keys(value, allowed, ~w(as effect)),
          as when is_binary(as) <- value["as"],
          true <- valid_name?(as),
-         "read" <- value["effect"],
+         effect when effect in ["read", "write"] <- value["effect"],
          {:ok, description} <- optional_description(Map.get(value, "description")),
          feedback when feedback in ["closed", "bounded"] <-
            Map.get(value, "error_feedback", "closed"),
@@ -705,7 +707,7 @@ defmodule PtcRunner.Kernel.HostConfig do
       {:ok,
        %{
          as: as,
-         effect: :read,
+         effect: tool_effect(effect),
          description: description,
          error_feedback: error_feedback(feedback),
          model_visible: model_visible
@@ -720,7 +722,7 @@ defmodule PtcRunner.Kernel.HostConfig do
   defp snapshot_identity(value, tools) when is_map(value) do
     with :ok <- exact_keys(value, ~w(tool field), ~w(tool field)),
          tool when is_binary(tool) <- value["tool"],
-         true <- Map.has_key?(tools, tool),
+         %{effect: :read} <- Map.get(tools, tool),
          field when is_binary(field) <- value["field"],
          true <- valid_name?(field) do
       {:ok, %{tool: tool, field: field}}
@@ -730,6 +732,9 @@ defmodule PtcRunner.Kernel.HostConfig do
   end
 
   defp snapshot_identity(_value, _tools), do: {:error, :invalid_snapshot_identity}
+
+  defp tool_effect("read"), do: :read
+  defp tool_effect("write"), do: :write
 
   defp optional_revision(nil), do: {:ok, nil}
 
@@ -1186,7 +1191,7 @@ defmodule PtcRunner.Kernel.HostConfig do
         required_object(
           %{
             "as" => name_schema(),
-            "effect" => %{"const" => "read"},
+            "effect" => %{"enum" => ["read", "write"]},
             "description" => bounded_string(4_096),
             "error_feedback" => %{
               "enum" => ["closed", "bounded"],

@@ -14,6 +14,10 @@ defmodule PtcRunner.Kernel.HostInstallation do
   exports its opaque frozen handle only to a selected inspection source, so
   private artifacts validate against the exact already-captured canonical
   source without reopening trace paths or exposing owner handles in metadata.
+  An MCP installation containing any write mapping requires an explicit,
+  nonempty manifest `allow` list before preflight, credential resolution, or
+  transport acquisition. Omitting `allow` is permitted only for an all-read
+  installation.
 
   Every safe provider snapshot's bare-hex `snapshot_hash` attests its complete
   non-secret provider identity, including policy and ceilings. A frozen-content
@@ -226,6 +230,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
 
     with true <-
            Map.keys(value) -- ~w(allow model_visible timeout_ms max_result_bytes) == [],
+         true <- read_only_mcp?(installation) or Map.has_key?(value, "allow"),
          allow when is_list(allow) and length(allow) in 1..128 <-
            Map.get(value, "allow", public |> Map.keys() |> Enum.sort()),
          true <- Enum.all?(allow, &is_binary/1) and Enum.uniq(allow) == allow,
@@ -268,6 +273,9 @@ defmodule PtcRunner.Kernel.HostInstallation do
   end
 
   defp mcp_selection(_installation, _value, _context), do: {:error, :invalid_mcp_selection}
+
+  defp read_only_mcp?(installation),
+    do: Enum.all?(installation.tools, fn {_upstream, mapping} -> mapping.effect == :read end)
 
   defp llm_selection(installation, value, context)
        when is_map(value) and not is_struct(value) do

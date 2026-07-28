@@ -42,9 +42,11 @@ defmodule PtcRunner.Kernel.Manifest do
 
   Provider entries contain a bounded `name` and JSON `config`. The manifest can
   select only builders installed in `PtcRunner.Kernel.ProviderRegistry`; there
-  are no implicit provider names. Installed MCP providers may accept a
-  `model_visible` subset of their authorized `allow` names. Visibility
-  controls discovery and model context only, never authority.
+  are no implicit provider names. An MCP installation containing a write
+  mapping requires an explicit, nonempty manifest `allow` list; omission is
+  accepted only when every installed mapping is read-only. Installed MCP
+  providers may accept a `model_visible` subset of their authorized `allow`
+  names. Visibility controls discovery and model context only, never authority.
   Limit names match `PtcRunner.Kernel.Limits`; version 1 accepts values no
   greater than the host-supplied installed ceilings. Omitted values use the
   normal runtime defaults, capped by a lower host ceiling. Event policy is

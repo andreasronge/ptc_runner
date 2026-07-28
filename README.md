@@ -38,10 +38,11 @@ than the thing holding the line.
   the separate operator-owned host document installs those.
 - **External tools arrive through exactly one door.** MCP is the only way to
   give a project a tool — there is no plugin API and no code to register. The
-  runtime pins the current `2026-07-28` draft protocol, speaks it over stdio or
-  streamable HTTP, installs every server read-only, and maps each upstream tool
-  to a public name the operator chooses. The manifest supplies no connection
-  details and no credentials.
+  runtime pins the final `2026-07-28` protocol, speaks it over stdio or
+  streamable HTTP, and maps each upstream tool to a public name and read/write
+  effect the operator chooses. A manifest selecting a write-bearing
+  installation must explicitly allow its chosen tools; it supplies no
+  connection details and no credentials.
 - **Every run is bounded, and enforced rather than requested.** Deadlines, heap,
   tool-call counts, result sizes, and event budgets are held by the runtime.
   The BEAM gives each evaluation its own heap and monitors, so a limit breach

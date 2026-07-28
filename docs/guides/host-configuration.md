@@ -197,6 +197,19 @@ every mapped tool. It accepts 1 to 128 tools.
       "description": "Read one UTF-8 file beneath the granted root.",
       "model_visible": false,
       "error_feedback": "closed"
+    },
+    "snapshot_hash": {
+      "as": "workspace.snapshot-hash",
+      "effect": "read",
+      "model_visible": false,
+      "error_feedback": "closed"
+    },
+    "write_text_file": {
+      "as": "workspace.write",
+      "effect": "write",
+      "description": "Replace one UTF-8 file beneath the granted root.",
+      "model_visible": true,
+      "error_feedback": "closed"
     }
   },
   "snapshot_identity": {"tool": "snapshot_hash", "field": "digest"},
@@ -209,9 +222,24 @@ every mapped tool. It accepts 1 to 128 tools.
 ```
 
 Only the public `as` name crosses the capability boundary; the upstream name
-stays inside the installation. `effect` is currently always `read`. Declaring it
-is what lets the agent loop retry after a resource kill that followed a
-capability call; an undeclared or writing effect is treated as unsafe to repeat.
+stays inside the installation. `effect` is the required operator declaration
+`read` or `write`. MCP server annotations such as `readOnlyHint`,
+`destructiveHint`, and `idempotentHint` do not change it. A manifest can select
+or hide a mapping but cannot change its installed effect.
+
+An installation containing any `write` mapping requires every selecting
+manifest to provide an explicit, non-empty `allow` list, even when that
+particular selection chooses reads only. This makes adding a write mapping to an
+existing installation fail closed for unchanged manifests rather than silently
+widening their authority. Omitted `allow` remains a convenience only for
+all-read installations. Installation plus explicit selection is standing
+authorization; there is no separate per-call approval prompt. `mix ptc.run
+--check` reports the selected read and write counts before execution.
+
+The declared effect also controls failure safety. A read transport failure keeps
+its provider retry policy. A write failure after dispatch may have begun is
+non-retryable and reports `mutation_state: indeterminate` independently from its
+specific timeout, protocol, domain, validation, or transport cause.
 See [Building agents](building-agents.md#handle-failures-as-policy) for the
 retry table.
 

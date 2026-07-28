@@ -200,6 +200,44 @@ defmodule PtcRunner.Kernel.HostConfigTest do
     assert installation.tools["search_issues"].error_feedback == :bounded
   end
 
+  @tag :tmp_dir
+  test "loads operator-declared write tools and rejects write snapshot identities", %{
+    tmp_dir: dir
+  } do
+    write_config =
+      valid_config()
+      |> put_in(
+        ["install", "workspace", "tools", "write_text"],
+        %{"as" => "workspace.write", "effect" => "write", "model_visible" => true}
+      )
+
+    assert {:ok, host} = dir |> write_config(write_config) |> HostConfig.load()
+    assert host.install["workspace"].tools["write_text"].effect == :write
+    assert host.install["workspace"].tools["write_text"].model_visible
+
+    invalid_identity =
+      put_in(
+        write_config,
+        ["install", "workspace", "snapshot_identity"],
+        %{"tool" => "write_text", "field" => "digest"}
+      )
+
+    assert {:error, :invalid_host_config} =
+             dir |> write_config(invalid_identity, unique_name()) |> HostConfig.load()
+
+    valid_identity =
+      put_in(
+        write_config,
+        ["install", "workspace", "snapshot_identity"],
+        %{"tool" => "read_text", "field" => "digest"}
+      )
+
+    assert {:ok, host} =
+             dir |> write_config(valid_identity, unique_name()) |> HostConfig.load()
+
+    assert host.install["workspace"].snapshot_identity == %{tool: "read_text", field: "digest"}
+  end
+
   test "every enumerated value decodes to an atom this module owns" do
     # The assertions above check the decoded values but not where the atoms came
     # from. They previously came from `String.to_existing_atom/1`, which only
@@ -218,7 +256,7 @@ defmodule PtcRunner.Kernel.HostConfigTest do
 
     owned = MapSet.new(atoms, fn {_index, atom} -> atom end)
 
-    for atom <- [:bearer, :basic, :closed, :bounded, :normal, :private_inspection] do
+    for atom <- [:bearer, :basic, :closed, :bounded, :write, :normal, :private_inspection] do
       assert MapSet.member?(owned, atom),
              "#{inspect(atom)} must be a literal in HostConfig, not borrowed from another module"
     end
@@ -257,7 +295,7 @@ defmodule PtcRunner.Kernel.HostConfigTest do
       put_in(
         valid_config(),
         ["install", "workspace", "tools", "read_text", "effect"],
-        "write"
+        "unknown"
       )
     ]
 
@@ -290,6 +328,17 @@ defmodule PtcRunner.Kernel.HostConfigTest do
     }
 
     assert {:ok, _validated} = JSV.validate(http, root, cast: false)
+
+    write =
+      put_in(
+        http,
+        ["install", "remote", "tools", "write"],
+        %{"as" => "remote.write", "effect" => "write"}
+      )
+
+    assert {:ok, _validated} = JSV.validate(write, root, cast: false)
+    assert {:ok, host} = HostConfig.decode(write, "/tmp")
+    assert host.install["remote"].tools["write"].effect == :write
 
     llm = %{
       "credentials" => %{"key" => %{"env" => "OPENROUTER_API_KEY"}},

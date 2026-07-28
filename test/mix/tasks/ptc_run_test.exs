@@ -243,7 +243,7 @@ defmodule Mix.Tasks.Ptc.RunTest do
           "tools" => %{
             "structured" => %{
               "as" => "workspace.structured",
-              "effect" => "read",
+              "effect" => "write",
               "model_visible" => true
             }
           },
@@ -264,6 +264,7 @@ defmodule Mix.Tasks.Ptc.RunTest do
       end)
 
     assert output =~ "mission  workspace  mcp/stdio  1 tools"
+    assert output =~ "1 tools  0 read  1 write"
     assert output =~ "snapshot "
     assert File.read!(marker) =~ "server/discover"
     assert File.read!(marker) =~ "tools/list"

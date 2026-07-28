@@ -251,7 +251,10 @@ configuration:
   ],
   "mission": [
     {
-      "name": "workspace"
+      "name": "workspace",
+      "config": {
+        "allow": ["workspace.read", "workspace.write"]
+      }
     }
   ]
 }
@@ -264,6 +267,14 @@ ceilings. A manifest cannot name a host module or callback, launch a command,
 include credentials, or choose an arbitrary endpoint. Placement is enforced:
 LLM sources are workflow-only; MCP and native snapshot sources are
 mission-only.
+
+For MCP, `allow` selects installed public names without changing their
+operator-declared effects. If an installation contains any write mapping,
+`allow` is mandatory and non-empty; adding a write mapping therefore invalidates
+an unchanged implicit selection instead of granting new authority. An
+all-read installation may omit `allow` to select all of its mappings. The
+optional `model_visible` list can only narrow the selected names the host marked
+visible and never changes call authority.
 
 [Host configuration](host-configuration.md) is the operator reference for that
 document: credentials, all five provider sources, transports, tool mappings,
