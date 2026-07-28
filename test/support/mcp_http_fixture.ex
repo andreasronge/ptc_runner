@@ -170,10 +170,16 @@ defmodule PtcRunner.TestSupport.MCPHTTPFixture do
       :ok = :gen_tcp.send(socket, "#{Integer.to_string(byte_size(chunk), 16)}\r\n#{chunk}\r\n")
     end)
 
+    :ok = :inet.setopts(socket, active: :once)
     send(owner, {:mcp_stream_holding, self()})
+    await_stream_end(socket, owner)
+  end
 
+  defp await_stream_end(socket, owner) do
     receive do
       :release -> :gen_tcp.send(socket, "0\r\n\r\n")
+      {:tcp_closed, ^socket} -> send(owner, {:mcp_stream_closed, self()})
+      {:tcp_error, ^socket, _reason} -> send(owner, {:mcp_stream_closed, self()})
     after
       5_000 -> :ok
     end

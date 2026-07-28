@@ -1,24 +1,23 @@
 # MCP bounded client surfaces
 
-**Status:** active; MCP write authority and effect-aware failure handling are
-implemented. Streamable HTTP cancellation is the next delivery slice. Revised
-2026-07-28 against the final MCP `2026-07-28` tag at
+**Status:** active; MCP write authority, effect-aware failures, and Streamable
+HTTP cancellation are implemented. MRTR validation and policy refusal is the
+next delivery slice. Revised 2026-07-28 against the final MCP `2026-07-28` tag at
 `modelcontextprotocol/modelcontextprotocol@5f5440bb26a62e2cf3440b92da5a667efa03b267`.
 
 PtcRunner supports operator-declared read and write MCP tools while keeping
 write selection explicit and post-dispatch failure outcomes conservative. This
-plan tracks the remaining HTTP cancellation gap, MRTR refusal hardening, and
-the authority decision required before adding other MCP client surfaces.
+plan tracks MRTR refusal hardening and the authority decision required before
+adding other MCP client surfaces.
 
 Backward compatibility is not a constraint. PtcRunner is a 0.x library and
 should delete obsolete restrictions rather than preserve compatibility shims.
-The remaining hard parts are semantic: closing an abandoned HTTP response
-stream, refusing server-initiated authority with precise protocol diagnoses,
-and freezing operator authority over server-owned resource namespaces.
+The remaining hard parts are semantic: refusing server-initiated authority
+with precise protocol diagnoses and freezing operator authority over
+server-owned resource namespaces.
 
 ## Goals
 
-- Verify protocol-correct request cancellation for Streamable HTTP.
 - Harden method-sensitive validation and refusal of Multi Round-Trip Requests.
 - Record a bounded authority model for MCP resources before adding that runtime
   surface.
@@ -44,7 +43,7 @@ the official Go SDK `v1.7.0`.
 | --- | --- |
 | `server/discover`, `tools/list`, `tools/call` | implemented |
 | stdio `notifications/cancelled` | implemented on timeout and caller death |
-| Streamable HTTP cancellation | incomplete; must close the request's response stream |
+| Streamable HTTP cancellation | implemented by closing the response stream; no cancellation notification |
 | `prompts/list`, `prompts/get` | deferred pending a first-party interactive use |
 | `resources/list`, `resources/read`, `resources/templates/list` | authority design required before implementation |
 | `completion/complete` | deferred pending a first-party interactive use |
@@ -53,8 +52,6 @@ the official Go SDK `v1.7.0`.
 
 The post-RC protocol details relevant to remaining work are:
 
-- cancellation is transport-specific: stdio sends
-  `notifications/cancelled`, while HTTP closes the response stream;
 - `InputRequiredResult` permits `requestState` without `inputRequests`;
 - every page of one list operation must use the same `cacheScope`, although
   page `ttlMs` values may differ;
@@ -62,33 +59,7 @@ The post-RC protocol details relevant to remaining work are:
 - server identity is optional result metadata and client identity remains
   valid on each request.
 
-## 1. Complete Streamable HTTP cancellation
-
-Current HTTP code kills the local Req task when its deadline expires, and Req
-halts a response stream after a complete SSE response, an oversized body, or
-an SSE parser error. Existing tests prove the caller returns, but not that the
-server observes a disconnected response stream.
-
-Add a live loopback integration harness that records the disconnect and covers
-timeout, caller death, run/provider close, and every early
-`{:halt, ...}` response path. If task termination or Req stream halt does not
-reliably close the stream, introduce an explicitly owned, cancellable streaming
-request handle.
-
-Cancellation is advisory and races with server execution. Write calls that are
-cancelled after dispatch remain indeterminate and non-retryable.
-
-Acceptance:
-
-- the server observes its Streamable HTTP response stream close after timeout,
-  caller death, provider close, a complete SSE response, response-size
-  rejection, and SSE parser rejection;
-- no HTTP cancellation notification is emitted;
-- stdio cancellation behavior remains unchanged; and
-- repeated cancellation leaves no request tasks, response streams, or
-  descriptors behind.
-
-## 2. Keep server-initiated authority refused
+## 1. Keep server-initiated authority refused
 
 The `2026-07-28` protocol replaces server-initiated roots, sampling, and
 elicitation requests with Multi Round-Trip Requests. A server can answer
@@ -120,7 +91,7 @@ Trigger to revisit: a first-party need for host-mediated elicitation, where the
 *host*—never mission code and never the model—supplies the response. Sampling
 has no trigger.
 
-## 3. Authority gate for exact resources
+## 2. Authority gate for exact resources
 
 Prompts, resources, and completion are not interchangeable with tools:
 
@@ -169,21 +140,9 @@ Review each complete slice against its invariants, resolve every correctness
 and authority finding, and run focused tests plus `mix precommit`. Dependent
 slices do not begin from an unreviewed authority or wire contract.
 
-### Slice 1 — Streamable HTTP cancellation
+### Slice 1 — MRTR validation and policy refusal
 
-Implement section 1 with a loopback server that observes response-stream
-closure. Cover deadline expiry, caller death, provider close, repeated
-connect/cancel cycles, and every Req early-halt path: complete SSE result,
-oversized body, and SSE parser error.
-
-Review packet-level behavior rather than only the Elixir caller result. Confirm
-HTTP never sends `notifications/cancelled`, stdio behavior remains unchanged,
-and cancellation races cannot make an indeterminate write retryable. Run
-descriptor/task leak stress tests on Linux and macOS.
-
-### Slice 2 — MRTR validation and policy refusal
-
-Harden section 2's rejection into method-sensitive structural validation and
+Harden section 1's rejection into method-sensitive structural validation and
 policy classification. Use schema-derived valid examples with `inputRequests`,
 `requestState`, and both together.
 
@@ -193,11 +152,11 @@ violation, and a valid state-only result refused by policy. For `tools/call`,
 exercise each classification through read and write mappings; retain the
 specific cause and indeterminate mutation state for a write after dispatch.
 
-### Slice 3 — exact-resource authority design
+### Slice 2 — exact-resource authority design
 
 **Trigger:** a concrete first-party application that needs MCP resources.
 
-Decide section 3's operator-owned exact-URI grammar, public capability
+Decide section 2's operator-owned exact-URI grammar, public capability
 projection, resource-only installation rule, frozen catalog semantics, and
 safe snapshot identity. Keep URI templates, prompts, and completion out.
 
@@ -208,9 +167,9 @@ use an ordinary mapped MCP tool without losing an important capability.
 
 This is a specification slice and changes no runtime code.
 
-### Slice 4 — exact-resource mappings
+### Slice 3 — exact-resource mappings
 
-**Depends on:** approved Slice 3.
+**Depends on:** approved Slice 2.
 
 Discover and validate operator-granted exact resources during assembly. Expose
 each as a bounded zero-argument read capability. Implement `resources/read`,

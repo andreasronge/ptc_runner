@@ -19,12 +19,18 @@ defmodule PtcRunner.Kernel.MCPSource do
   records.
 
   Streamable HTTP supports JSON and SSE responses to POST requests and rejects
-  redirects and remote endpoint changes. Both transports support schema-valid
-  structured object results with exact text or embedded text-resource
-  companions. Unstructured results expose ordered text plus bounded embedded
-  text resources; binary resources and other content block types remain
-  unsupported. The source ignores server effect annotations and rejects
-  manifest-supplied effects, connection details, and credential configuration.
+  redirects and remote endpoint changes. It uses Req's HTTP/1 response
+  streaming boundary: a completed SSE response, response-size rejection, or
+  SSE parser rejection halts and closes the response stream. Deadline expiry,
+  caller death, provider close, and source-owner death terminate the request
+  task and likewise close the stream. HTTP never sends
+  `notifications/cancelled`; that protocol notification remains specific to
+  stdio. Both transports support schema-valid structured object results with
+  exact text or embedded text-resource companions. Unstructured results expose
+  ordered text plus bounded embedded text resources; binary resources and
+  other content block types remain unsupported. The source ignores server
+  effect annotations and rejects manifest-supplied effects, connection details,
+  and credential configuration.
   """
 
   alias PtcRunner.Kernel.Capability

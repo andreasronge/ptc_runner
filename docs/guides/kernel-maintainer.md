@@ -255,6 +255,14 @@ anything after the HTTP operation begins or a stdio write may have been accepted
 write becomes non-retryable with indeterminate mutation state, while the
 transport provenance never reaches Lisp.
 
+Streamable HTTP uses Req's HTTP/1 streaming boundary. Returning `:halt` after a
+complete SSE response, response-size rejection, or SSE parser rejection closes
+the response stream. Killing the request task on deadline expiry, caller death,
+provider close, or source-owner death closes it as well. HTTP cancellation never
+sends `notifications/cancelled`; stdio retains its protocol notification.
+Cancellation remains advisory and cannot make a possibly dispatched write
+retryable.
+
 PtcRunner-owned canonical traces remain native rather than passing through
 MCP. A host-installed `ptc_trace_snapshot` uses `TraceSnapshot` to capture one
 directory and `TraceCapability` to expose the same four canonical `TraceLog`
