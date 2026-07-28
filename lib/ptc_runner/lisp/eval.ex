@@ -46,6 +46,7 @@ defmodule PtcRunner.Lisp.Eval do
   alias PtcRunner.Lisp.Eval.{
     Abort,
     Apply,
+    CapabilityResult,
     Capture,
     Helpers,
     HostContext,
@@ -206,7 +207,12 @@ defmodule PtcRunner.Lisp.Eval do
 
   defp capability_failure_source?({:tool_call, _name, _args}, _eval_ctx), do: true
 
-  defp capability_failure_source?(_error_ast, eval_ctx) do
+  defp capability_failure_source?({:var, name}, eval_ctx),
+    do: capability_result_binding?(eval_ctx, name) or cap_unwrap_origin?(eval_ctx)
+
+  defp capability_failure_source?(_error_ast, eval_ctx), do: cap_unwrap_origin?(eval_ctx)
+
+  defp cap_unwrap_origin?(eval_ctx) do
     match?(
       %{type: :prelude_export, ref: "cap/unwrap!"},
       EvalContext.current_origin(eval_ctx)
@@ -454,8 +460,13 @@ defmodule PtcRunner.Lisp.Eval do
         {:ok, value, value_ctx} = eval_child(value_ast, acc_ctx)
 
         case Patterns.match_pattern(pattern, value) do
-          {:ok, new_bindings} -> EvalContext.merge_env(value_ctx, new_bindings)
-          {:error, reason} -> Abort.error!(reason, value_ctx)
+          {:ok, new_bindings} ->
+            new_bindings
+            |> maybe_mark_capability_result_binding(pattern, value_ast)
+            |> then(&EvalContext.merge_env(value_ctx, &1))
+
+          {:error, reason} ->
+            Abort.error!(reason, value_ctx)
         end
       end)
 
@@ -470,8 +481,13 @@ defmodule PtcRunner.Lisp.Eval do
         {:ok, value, value_ctx} = eval_child(value_ast, acc_ctx)
 
         case Patterns.match_pattern(pattern, value) do
-          {:ok, new_bindings} -> EvalContext.merge_env(value_ctx, new_bindings)
-          {:error, reason} -> Abort.error!(reason, value_ctx)
+          {:ok, new_bindings} ->
+            new_bindings
+            |> maybe_mark_capability_result_binding(pattern, value_ast)
+            |> then(&EvalContext.merge_env(value_ctx, &1))
+
+          {:error, reason} ->
+            Abort.error!(reason, value_ctx)
         end
       end)
 
@@ -897,7 +913,9 @@ defmodule PtcRunner.Lisp.Eval do
   # ============================================================
 
   defp resolve_local(name, locals, env, eval_ctx) do
-    if MapSet.member?(locals, name), do: {:ok, Map.get(env, name), eval_ctx}, else: :error
+    if MapSet.member?(locals, name),
+      do: {:ok, env |> Map.get(name) |> unwrap_binding(), eval_ctx},
+      else: :error
   end
 
   defp resolve_user_ns(name, user_ns, eval_ctx) do
@@ -915,7 +933,7 @@ defmodule PtcRunner.Lisp.Eval do
 
   defp resolve_env(name, env, eval_ctx) do
     case Map.fetch(env, name) do
-      {:ok, value} -> {:ok, unwrap_constant(value), eval_ctx}
+      {:ok, value} -> {:ok, unwrap_binding(value), eval_ctx}
       :error -> :error
     end
   end
@@ -948,14 +966,31 @@ defmodule PtcRunner.Lisp.Eval do
     with true <- is_binary(name),
          {:ok, atom} <- safe_to_existing_atom(name),
          {:ok, value} <- Map.fetch(env, atom) do
-      {:ok, unwrap_constant(value), eval_ctx}
+      {:ok, unwrap_binding(value), eval_ctx}
     else
       _ -> :error
     end
   end
 
+  defp unwrap_binding(%CapabilityResult{value: value}), do: value
+  defp unwrap_binding(value), do: unwrap_constant(value)
+
   defp unwrap_constant({:constant, value}), do: value
   defp unwrap_constant(other), do: other
+
+  defp maybe_mark_capability_result_binding(
+         bindings,
+         {:var, name},
+         {:tool_call, _tool_name, _arguments}
+       ) do
+    Map.update!(bindings, name, &%CapabilityResult{value: &1})
+  end
+
+  defp maybe_mark_capability_result_binding(bindings, _pattern, _value_ast), do: bindings
+
+  defp capability_result_binding?(%EvalContext{locals: locals, env: env}, name) do
+    MapSet.member?(locals, name) and match?(%CapabilityResult{}, Map.get(env, name))
+  end
 
   defp unresolved_var(name) do
     name_str = to_string(name)

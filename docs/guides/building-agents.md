@@ -435,10 +435,11 @@ nothing installs yet.
 
 An explicit `(fail value)` remains terminal by default because it is also the
 application's deliberate failure signal. There is one narrower correction
-case: a direct capability call or `cap/unwrap!` produces the failure control
-signal, the failed value matches the evaluation's last recorded capability
-result, and every observed capability effect was declared `read`. The Kernel
-reports that evaluator-owned provenance separately; rebuilding an equal
+case: a direct capability call, its exact response retained in a simple lexical
+binding, or `cap/unwrap!` produces the failure control signal; the failed value
+matches the evaluation's last recorded capability result; and every observed
+capability effect was declared `read`. The Kernel reports that evaluator-owned
+provenance separately. Rebinding, rebuilding, or destructuring an equal
 error-shaped map after a read does not qualify. The shipped PTC-Lisp loop then
 gives the model one correction turn. An error-shaped value after an unrelated
 read is still terminal, as is any failure after a `write` or undeclared effect.

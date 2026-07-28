@@ -1024,7 +1024,8 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
           id: "missing-path",
           name: "run_ptc_lisp",
           args: %{
-            "program" => ~S|(fail (tool/lookup {}))|
+            "program" =>
+              ~S|(let [response (tool/lookup {})] (if (= :ok (get response :status)) (get response :value) (fail response)))|
           }
         }
       ]
