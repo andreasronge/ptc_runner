@@ -28,6 +28,20 @@
 (defn- source-page [provider envelope]
   (assoc (cap/unwrap! envelope) "provider" provider))
 
+;; Treatment assignment belongs in the first required observation, not behind an
+;; optional call. A reviewer that has to ask per run will sample a few and
+;; generalise: three detector runs checked provenance on one or two runs each,
+;; all of them unmodified, and concluded a mixed catalog was homogeneous.
+(defn- run-provenance [run-id]
+  (let [page (cap/unwrap! (tool/history.list-turns {"run_id" run-id "limit" 1}))
+        started (first (get page "items"))
+        data (get started "data")]
+    (if (= "run-started" (get started "type"))
+      {"component_overrides" (get data "component_overrides" [])
+       "workflow_prelude" (get-in data ["workflow_prelude" "hash"])
+       "mission_prelude" (get-in data ["mission_prelude" "hash"])}
+      {"component_overrides" []})))
+
 (defn- compact-run [run]
   (select-keys
     run
@@ -39,7 +53,11 @@
 (defn list-runs
   "Read one public run page. Pass nil first, then only the exact returned
   next_cursor; nil means the catalog is complete. This page is an intermediate
-  compact catalog for choosing run IDs, not a final review result."
+  compact catalog for choosing run IDs, not a final review result.
+
+  Every item carries its own `component_overrides`, so one observation shows
+  which runs replaced a component before compiling and which ran the installed
+  source unchanged. An empty list means unchanged."
   {:signature "(limit :int, cursor :string?) -> :map"}
   [limit cursor]
   (let [page
@@ -47,7 +65,12 @@
           "history"
           (tool/history.list-runs
             (cap/with-cursor {"limit" limit} cursor)))]
-    (assoc page "items" (map compact-run (get page "items")))))
+    (assoc page
+           "items"
+           (mapv (fn [run]
+                   (merge (compact-run run)
+                          (run-provenance (get run "run_id"))))
+                 (get page "items")))))
 
 (defn provenance
   "Read which components a run replaced before compiling, and the bundle hashes
