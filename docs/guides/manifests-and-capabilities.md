@@ -172,7 +172,7 @@ without repeating the run under private inspection. The command reports it as:
     missing_required: [], undeclared_key_count: 0,
     violations: [
       %{path: "rationale", kind: :maxLength},
-      %{path: "evidence[0]", kind: :required, detail: ["provider", "snapshot_hash"]}
+      %{path: "evidence[0]", kind: :required}
     ]}}}
 ```
 
