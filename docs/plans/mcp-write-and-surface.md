@@ -1,198 +1,635 @@
-# MCP write support and client-surface coverage
+# MCP write support and bounded client surfaces
 
-**Status:** proposed; no approved work. Written 2026-07-28 against MCP draft
-`2026-07-28` at `modelcontextprotocol/modelcontextprotocol@main`.
+**Status:** proposed; no approved work. Revised 2026-07-28 against MCP draft
+`2026-07-28` at
+`modelcontextprotocol/modelcontextprotocol@7d6c7b86eb2f1442051849ca76429fde3c3008b0`.
+At 2026-07-28 14:03 UTC the promised final release had not yet appeared: the
+repository still exposed only the `2026-07-28-RC` prerelease, the final tag was
+absent, and the schema remained under `schema/draft/`.
 
 PtcRunner installs MCP sources read-only. Every mapped tool must declare
-`effect: "read"`, and the source rejects writes outright. This plan covers what
-it would take to allow write-effect tools, how much of the remaining MCP client
-surface is worth implementing, and which parts must stay refused.
+`effect: "read"`, and the source rejects writes outright. This plan covers the
+smallest safe change that permits write-effect tools, the remaining HTTP
+cancellation gap, and the authority decision required before adding other MCP
+client surfaces.
 
-Backward compatibility is not a constraint anywhere in this plan. The read-only
-lock is a schema `const`, not a compatibility shim; the effect vocabulary
-already exists throughout the Kernel; and 0.x deletes rather than deprecates.
-The costs here are semantic (idempotency and retry) and architectural
-(server-initiated model access), and breaking compatibility relieves neither.
+Backward compatibility is not a constraint. PtcRunner is a 0.x library and
+should delete obsolete restrictions rather than preserve compatibility shims.
+The hard parts are semantic: what constitutes authorization to mutate, what a
+timeout means after a write may have arrived, and how an operator freezes
+authority over server-owned prompt and resource namespaces.
 
 ## Goals
 
-- Allow an operator to install a write-effect MCP tool, with retry and
-  reporting semantics that stay correct when a call mutates the world.
-- Complete the read-oriented MCP client surface: prompts, resources, and
-  completion.
-- Add request cancellation, which is missing today regardless of writes.
+- Allow an operator to install and select a write-effect MCP tool without
+  making an indeterminate write look safely retryable.
+- Preserve read-only provider assembly: discovery and snapshot identity must
+  never mutate external state.
+- Verify protocol-correct request cancellation for Streamable HTTP.
+- Record a bounded authority model for future MCP resources before adding any
+  new runtime surface.
+- Keep server-initiated model access permanently unavailable.
 
 ## Non-goals
 
-- **Server-initiated model access will not be supported.** See section 5. This
-  is a permanent design position, not deferred work.
-- No change to who declares authority. Effect stays operator-declared in the
-  host document; server-supplied tool annotations stay untrusted.
+- No automatic retry or deduplication of writes.
+- No trust in server-supplied tool annotations. Effect remains
+  operator-declared in the host document.
+- No per-call human approval mechanism. Host installation plus manifest
+  selection is standing authorization for mission code to invoke the selected
+  write capability. `--check` must make that grant conspicuous.
+- No raw server namespace exposed through a generic prompt name, resource URI,
+  URI template, or completion reference.
 - No change to the frozen-catalog model. Discovery still happens once per run
   build.
+- **Server-initiated model access will not be supported.** See section 5. This
+  is a permanent design position, not deferred work.
 
 ## Current state
 
 Established by reading the implementation on 2026-07-28. Recorded so a later
 slice does not re-derive it.
 
-The Kernel already models writes end to end:
+### Specification release check
+
+The current draft head is 281 commits ahead of the RC tag. Most changes are
+documentation, authorization, and SDK-alignment work, but these post-RC
+protocol details matter to PtcRunner:
+
+| Post-RC change | PtcRunner consequence |
+| --- | --- |
+| `io.modelcontextprotocol/serverInfo` moved from the `server/discover` result body to optional result `_meta` on every response | Already aligned: discovery reads the result metadata and treats absent or invalid identity as unavailable |
+| `io.modelcontextprotocol/clientInfo` changed from required to SHOULD on each request | Already aligned: PtcRunner continues to send it, which remains valid |
+| Cancellation became explicitly transport-specific | Confirms section 3: stdio sends `notifications/cancelled`; HTTP closes the response stream |
+| `Mcp-Name` gained the Base64 sentinel encoding used by `Mcp-Param-*` | Already aligned through `MCPProtocol.encode_header/1` |
+| `x-mcp-header` is valid only on statically reachable property paths and its emission is independent of cache TTL | Already aligned by the bounded property-path scan and unconditional request-time projection |
+| Draft-specific error codes moved to `-32020..-32022` | No current literal-code dependency; PtcRunner classifies JSON-RPC errors structurally |
+| `InputRequiredResult` permits `requestState` without `inputRequests` | Section 5 must validate this as structurally valid before applying PtcRunner's policy refusal |
+| `subscriptions/listen` gained a graceful terminal result and stricter acknowledgement ordering | No immediate work because subscriptions remain deferred |
+
+The official Go SDK
+[released `v1.7.0`](https://github.com/modelcontextprotocol/go-sdk/releases/tag/v1.7.0)
+at 2026-07-28 13:09 UTC. It is two commits newer than the pseudo-version
+currently pinned by the interoperability harness; the additional changes are a
+conformance update and a Streamable HTTP nil-safety fix. Re-pin the harness to
+the stable SDK during Slice 0 rather than carrying the pseudo-version into later
+protocol work.
+
+This comparison is evidence against the exact draft commit above, not a claim
+that the final release will be byte-identical. Slice 0 repeats the comparison
+against the final tag when it appears.
+
+### Effects and retry safety
+
+The Kernel already models and resolves effects end to end:
 
 | Fact | Location |
 | --- | --- |
 | Effect vocabulary is `:read \| :write \| :unknown`, default `:unknown` | `capability.ex:30`, `:43` |
-| Anything not `:read` counts as unsafe activity and forbids evaluation retry | `evaluation.ex:527`, `:535`, `:462` |
-| Prelude metadata accepts all three effects, and `:write` wins a join | `compiler.ex:47`, `:1509` |
-| Effect already appears in the safe provider snapshot | `mcp_source.ex:834` |
+| Actual non-read capability activity forbids whole-evaluation retry | `evaluation.ex:582` |
+| Mission inventory joins an export's static metadata with effects of its frozen capability dependencies | `mission_inventory.ex:283` |
+| A regression already covers a read-declared wrapper around an installed write capability | `mission_inventory_test.exs:136` |
+| Effect appears in the safe provider snapshot | `mcp_source.ex:834` |
 
-Read-only is enforced at exactly six sites, all in the MCP installation path:
+`Prelude.Compiler` uses `:read` as a context-free hint for an export that
+references a tool. That is not the runtime authority seam: `MissionInventory`
+resolves the effective effect against the installed mission capabilities, and
+`Evaluation` classifies retry safety from the capabilities actually invoked.
+Write support must not make the provider-independent compiler depend on a host
+installation.
+
+The remaining retry defect is at the per-call boundary. `MCPSource` marks
+timeouts and transport failures retryable, and `Dispatcher` independently
+marks callback exits and its outer provider timeout retryable without consulting
+`Capability.effect`. Generated mission code can observe that envelope and retry
+inside the same evaluation even though the outer evaluation will later refuse
+to retry as a whole.
+
+### Read-only MCP installation
+
+Read-only is enforced at these MCP installation sites:
 
 | Site | Lock |
 | --- | --- |
-| `priv/schemas/ptc-host-config.schema.json` | `"effect": {"const": "read"}` |
-| `host_config.ex:699` | `"read" <- value["effect"]` |
-| `host_config.ex:90`, `:708` | type and struct fixed to `:read` |
-| `mcp_source.ex:301` | normalization pattern-matches `effect: :read` |
-| `mcp_source.ex:317`, `:807`, `:834` | capability and snapshot hardcode read |
-| `docs/guides/host-configuration.md` | documents effect as always `read` |
+| Generated host JSON Schema | `"effect": {"const": "read"}` |
+| `HostConfig` | tool type, decoding, and normalized mapping fix `:read` |
+| `MCPSource` installation | mapping normalization accepts only `:read` |
+| `MCPSource` assembly and snapshot | capability and snapshot hardcode `:read` |
+| Host configuration guide | documents effect as always `read` |
 
-Of the draft's seventeen methods, three are implemented: `server/discover`,
-`tools/list`, and `tools/call`.
+`snapshot_identity` names one installed tool and is invoked automatically with
+an empty argument map while the provider is assembled, even when that tool is
+not selected into the mission. Today that is safe only because every mapping
+is read-only.
 
-## 1. Unlock write effects
+### Protocol surface
 
-Widen the six sites above from a fixed `:read` to the declared effect. The
-schema `const` becomes an enum of `read` and `write`; `:unknown` stays
-unavailable to a host document, because an operator installing a tool must say
-what it does.
+Avoid a single method count: the protocol mixes client requests,
+notifications, and server-initiated requests. The relevant disposition is:
 
-Acceptance: an operator can install a write tool, `--check` reports its effect,
-the safe snapshot records it, and a manifest can select it without gaining any
-ability to change it.
+| Surface | Current disposition |
+| --- | --- |
+| `server/discover`, `tools/list`, `tools/call` | implemented |
+| stdio `notifications/cancelled` | implemented on timeout and caller death |
+| Streamable HTTP cancellation | incomplete; must close the request's response stream |
+| `prompts/list`, `prompts/get` | deferred pending a first-party interactive use |
+| `resources/list`, `resources/read`, `resources/templates/list` | authority design required before implementation |
+| `completion/complete` | deferred pending a first-party interactive use |
+| subscriptions, list-change notifications, progress, and request-scoped logging | deferred |
+| sampling, elicitation, and roots through MRTR | refused |
 
-## 2. Make effect inference correct
+Every result currently passes through `MCPProtocol.outcome/2`.
+`InputRequiredResult` is already rejected generically as
+`:mcp_unsupported_result`; the remaining improvement is method-sensitive
+validation and classification, not initial enforcement.
 
-`compiler.ex:1028` infers `[:read]` for any prelude export that references a
-tool:
+## 1. Unlock write effects without mutating during assembly
 
-```elixir
-inferred_effects = if requires == [], do: [], else: [:read]
-```
+Widen installed tool mappings from a fixed `:read` to the operator-declared
+enum `read | write`. `:unknown` remains unavailable in a host document: an
+operator granting a tool must classify its authority deliberately.
 
-With `validate_effect(nil) -> {:ok, nil}` (`:1465`) and the join order at
-`:1509`, an export that wraps a tool but declares no effect joins to `:read`.
-That is sound only while every MCP tool is read-only. Once write tools exist, an
-undeclared wrapper around one will report `:read` and become retryable after
-mutating.
+Update the generated schema, `HostConfig`, `MCPSource`, safe provider snapshot,
+`--check` projection, tests, and durable host-configuration documentation
+together. Server annotations remain ignored.
 
-This must land with section 1, not after it. The inference must resolve the
-backing tool's installed effect, and must fall back to `:unknown` rather than
-`:read` when it cannot.
+Before any transport is acquired, validate that a tool referenced by
+`snapshot_identity` has declared effect `read`. Repeat the validation inside
+`MCPSource.builder/1` so direct callers cannot bypass the host decoder. A write
+identity is invalid configuration, not a provider failure.
 
-Acceptance: a prelude export wrapping a write tool reports `:write` when it
-declares nothing; a regression test covers the undeclared case specifically,
-because that is the path that silently degrades.
+`--check` must visibly distinguish selected write capabilities from reads.
+Installation plus manifest selection constitutes standing authorization; there
+is no hidden approval prompt at invocation time.
 
-## 3. Make retryability effect-aware
+Write authority must never arrive through the current implicit “allow every
+installed mapping” default. If an MCP installation contains any `write`
+mapping, its manifest selection must contain an explicit, non-empty `allow`
+list. Every selected write name therefore appears in model-authorable
+application text. Adding a write mapping to an existing host installation makes
+an unchanged implicit selection fail closed rather than silently widening it.
+Keep the existing omitted-`allow` convenience only for installations whose
+mapped tools are all `read`, and enforce this rule in both host-installation
+selection and direct `MCPSource` selection.
 
-`mcp_source.ex:1470` reports `mcp_timeout` as `retryable?: true`, and `:1485`
-does the same for transport failures. Both are correct for reads and wrong for
-writes: a timed-out write may already have been applied, and PtcRunner cannot
-distinguish that from one that never arrived.
+Acceptance:
 
-A write whose outcome is unknown must surface as non-retryable, with a
-classification that says the state is indeterminate rather than implying the
-call did not happen. The alternative — deriving idempotency from the server's
-`idempotentHint` — is rejected: the hint is server-supplied, defaults to
-`false`, and PtcRunner deliberately reads no tool annotations today
-(`mcp_protocol.ex` validates schemas, never annotations).
+- an operator can install and select a write tool;
+- every write-bearing installation requires an explicit manifest `allow`, and
+  adding a write to an existing read-only installation cannot widen unchanged
+  manifests;
+- a manifest can narrow selection and model visibility but cannot change the
+  installed effect;
+- `--check` and the safe provider snapshot report the effective write grant;
+- a write mapping cannot be used as `snapshot_identity`;
+- rejection of a write identity occurs before credential resolution, transport
+  acquisition, discovery, or any RPC; and
+- server annotations cannot widen or narrow the operator-declared effect.
 
-Acceptance: a write tool that times out yields a non-retryable indeterminate
-classification; the same timeout on a read tool stays retryable.
+## 2. Make per-call failure semantics effect-aware
 
-## 4. Complete the read surface and add cancellation
+A timeout, transport loss, or callback-process exit after dispatch does not
+prove whether a write happened. Cancellation does not change that fact.
 
-Additive, no architectural tension:
+Make both failure-producing layers effect-aware at the mission boundary:
 
-- `prompts/list`, `prompts/get`
-- `resources/list`, `resources/read`, `resources/templates/list`
-- `completion/complete`
+1. `MCPSource` must classify request failures with the mapped tool's declared
+   effect and trusted transport dispatch provenance.
+2. `Dispatcher` must use `Capability.effect` when it constructs or normalizes
+   a mission capability's post-invocation envelope.
 
-Most of the cost is content blocks, not methods. PtcRunner supports only exact
-text and embedded text resources; binary and blob content are unsupported, and
-`resources/read` makes that limitation user-visible rather than theoretical.
-`MRTR` also permits `InputRequiredResult` on `prompts/get` and `resources/read`,
-so each must reject that result cleanly — see section 5.
+Do not apply this rule blindly to workflow capabilities. In particular,
+`llm-request` deliberately has `effect: :unknown` while its trusted provider
+classifies some availability failures as retryable; the workflow agent owns
+that retry policy. Slice 1 preserves that contract and adds an explicit
+regression for it. A later proposal may replace the LLM's coarse effect with a
+more precise capability semantic, but MCP write support must not change it as a
+side effect.
 
-Cancellation (`notifications/cancelled`) is worth doing on its own account. A
-run that exhausts its deadline abandons the request today while the server keeps
-working; with writes, that gap is the difference between an abandoned read and
-an unattributed mutation.
+For a read capability, the existing retryable timeout and transport semantics
+remain. For `write` or `unknown`, a failure after remote dispatch may have
+begun is non-retryable and explicitly classified as an indeterminate outcome.
+Represent that state independently from the diagnostic cause: add a bounded
+`mutation_state: :indeterminate` field to `ProviderError` and the public
+Dispatcher envelope while preserving `kind` and `reason` as the specific
+timeout, domain, protocol, validation, or transport diagnosis. Successful calls
+and failures proven to occur before dispatch omit the field. Do not encode
+mutation state as a replacement error kind or only in prose.
 
-Deferred rather than refused: `subscriptions/listen`,
-`notifications/resources/updated`,
-`notifications/subscriptions/acknowledged`, and `notifications/progress`. These
-need push delivery into a bounded, deadline-scoped run built around frozen
-captures. Draining at call time is probably the shape, but it is unscoped design
-work with no current demand.
+Callback entry is not the dispatch boundary. Header-parameter projection,
+outbound-header validation, a request context already being closed, and other
+deterministic local checks can fail after the callback starts but before bytes
+can reach the transport. Carry a bounded internal dispatch provenance on
+provider failures (`not_dispatched | possibly_dispatched`). `MCPSource` sets
+`not_dispatched` only for a path that proves no transport send was attempted;
+once the HTTP request operation begins or a stdio request write may have been
+accepted, it uses `possibly_dispatched`. Dispatcher may omit mutation state for
+a non-read failure only when trusted provider provenance proves
+`not_dispatched`. Missing provenance, callback exit/crash, timeout, or a
+Dispatcher-generated replacement after callback entry remains conservative:
+`possibly_dispatched`. Do not expose transport internals in the public
+envelope.
 
-Acceptance: each added method has its own installed ceiling, appears in the safe
-snapshot, and is selectable and narrowable by manifest exactly as tools are.
+Known failures that prove no invocation occurred, such as argument validation
+or capability denial, retain their existing specific classifications. Do not
+derive idempotency from `idempotentHint`: it is server-supplied, defaults to
+false, and is outside the operator-owned authority contract.
 
-## 5. Why server-initiated model access stays refused
+For a non-read call, every non-success received after dispatch must remain
+non-retryable: JSON-RPC errors, tool `isError` results, malformed or oversized
+responses, and unsupported alternate results as well as transport failures.
+Preserve the specific diagnostic cause, but separately mark the external
+mutation state indeterminate unless the protocol proves the tool was not
+invoked. A syntactically complete error response does not prove rollback.
 
-In `2026-07-28`, server-initiated requests are removed and replaced by Multi
-Round-Trip Requests. A server answers `tools/call` with an `InputRequiredResult`
-carrying an `ElicitRequest`, `CreateMessageRequest`, or `ListRootsRequest`, and
-the client is expected to fulfil it and retry.
+The existing evaluation-level effect ledger remains authoritative for
+whole-evaluation correction. No compiler change is required. Add an MCP
+integration regression showing that an undeclared prelude wrapper around a
+mapped write tool projects as `write` and suppresses whole-evaluation retry
+through the existing `MissionInventory` and `Evaluation` seams.
 
-Supporting `CreateMessageRequest` — sampling — would let an MCP server reached
-by a tool the model itself chose to call make the workflow's LLM generate text.
-The invariant that mission code cannot reach the model capability is the
-property the two-environment split exists to enforce. This is an authority
-inversion, and no compatibility break resolves it.
+Acceptance:
 
-`ElicitRequest` needs a human, and missions are deliberately non-interactive.
-`ListRootsRequest` presumes ambient filesystem scope, which PtcRunner replaces
-with explicit grants.
+- a read timeout remains retryable;
+- write and unknown mission timeouts, transport losses, callback exits, and
+  callback crashes after possible dispatch are non-retryable and indeterminate;
+- deterministic parameter-header, outbound-header, and closed-context failures
+  proven to precede transport dispatch preserve their cause without claiming an
+  indeterminate mutation;
+- forwarded provider errors without trusted `not_dispatched` provenance,
+  oversized or schema-invalid results, arbitrary callback returns, run closure
+  after callback completion, and inspection-output failures preserve their
+  cause while reporting indeterminate mutation state for non-read calls;
+- JSON-RPC errors, tool `isError` results, malformed or oversized responses,
+  and unsupported alternate results preserve their cause while reporting
+  indeterminate mutation state for non-read calls;
+- the Dispatcher cannot overwrite a non-retryable MCP result with a retryable
+  outer timeout;
+- cancellation is never treated as proof that a write did not happen; and
+- an export wrapping a write tool reports the installed write effect without
+  injecting host knowledge into `Prelude.Compiler`.
 
-Two facts make this cheap to hold:
+Sections 1 and 2 are one atomic write-support slice.
 
-- PtcRunner declares `@client_capabilities %{}` (`mcp_source.ex:42`), and MRTR
-  forbids a server from sending input requests for capabilities the client has
-  not declared. The current posture is already an explicit refusal.
-- Roots, sampling, and logging are marked `@deprecated` as of `2026-07-28`
-  (SEP-2577) in the schema PtcRunner pins — `roots` at `schema.ts:732`,
-  `logging` at `:808`, `sampling/createMessage` at `:2173`, `roots/list` at
-  `:2706`. Implementing them would mean implementing features already scheduled
-  for removal.
+## 3. Complete Streamable HTTP cancellation
 
-What this plan does require is that every request type able to return
-`InputRequiredResult` — `tools/call`, `prompts/get`, `resources/read` — treats
-it as a closed protocol error rather than falling through validation. That is a
-correctness obligation of section 4, not a step toward support.
+Cancellation is transport-specific:
+
+- stdio uses `notifications/cancelled`; this is already implemented and covered
+  for timeout and caller death;
+- Streamable HTTP cancels by closing that request's response stream. It must
+  not send `notifications/cancelled`.
+
+Current HTTP code kills the local Req task when its deadline expires. Existing
+tests prove the caller returns, but not that the server observes a disconnected
+response stream. Add a live loopback integration harness that records the
+disconnect and covers timeout, caller death, and run/provider close. If task
+termination does not reliably close the stream, introduce an explicitly owned,
+cancellable streaming request handle.
+
+Cancellation is advisory and races with server execution. Write calls that are
+cancelled after dispatch remain indeterminate and non-retryable.
+
+Acceptance:
+
+- the server observes its Streamable HTTP response stream close after timeout,
+  caller death, and provider close;
+- no HTTP cancellation notification is emitted;
+- stdio cancellation behavior remains unchanged; and
+- repeated cancellation leaves no request tasks, response streams, or
+  descriptors behind.
+
+This slice is independent from write support.
+
+## 4. Authority gate for additional client surfaces
+
+Prompts, resources, and completion are not interchangeable with tools:
+
+- prompts are server-authored text normally selected by a user;
+- resources occupy a server-controlled URI namespace and may change after
+  discovery;
+- completion is an interactive utility over prompt or resource references.
+
+Exposing their raw list/read/get operations would let the server determine
+runtime authority after the host document was frozen. Therefore no additional
+surface is implementation-approved until its host grammar answers:
+
+- what exact upstream names, URIs, or templates the operator grants;
+- how each grant maps to a bounded public capability name;
+- which entries may be model-visible;
+- which aggregate catalog, page, argument, and result ceilings apply;
+- how duplicates and changes between discovery and invocation fail closed;
+- what metadata enters the safe provider snapshot and its hashes;
+- whether an MCP installation may be resource-only rather than requiring a
+  non-empty tool map; and
+- how `Mcp-Name` is emitted for `prompts/get` and `resources/read` over HTTP.
+
+Use the common installed `timeout_ms` and `max_result_bytes` ceilings for calls.
+Add family-specific catalog item/page ceilings only where acquisition needs
+them; do not create a separate timeout and result ceiling for every method.
+MCP `cacheScope: "private"` limits cache reuse to one authorization context; it
+is not a PtcRunner data classification and must not implicitly change
+`data_class` or `accepts_data`.
+
+The first acceptable resource shape, when a concrete application needs it, is
+an operator mapping of exact upstream resource URIs to public zero-argument
+read capabilities. `resources/list` is then assembly-time validation, not a raw
+mission capability, and `resources/read` is reachable only through those frozen
+mappings. Every returned `ResourceContents.uri` must exactly equal the granted
+URI; reject the whole result if any item names another URI. Sub-resources
+require their own explicit grants and are not inferred from URI prefixes.
+Treat returned prompt or resource text as inert, untrusted result data; never
+splice it automatically into workflow or system prompts.
+
+URI-template capabilities require a separate bounded parameter design and stay
+deferred. Prompts and completion stay deferred until a first-party interactive
+consumer provides requirements. The frozen catalog freezes membership and
+contracts, not the external contents returned by a later resource read.
+
+Subscriptions, list-change notifications, progress, and request-scoped logging
+also remain deferred. They need bounded push delivery into a deadline-scoped run
+and a clear reconciliation story with frozen catalogs.
+
+## 5. Keep server-initiated authority refused
+
+The `2026-07-28` protocol replaces server-initiated roots, sampling, and
+elicitation requests with Multi Round-Trip Requests. A server can answer
+`tools/call`, `prompts/get`, or `resources/read` with
+`InputRequiredResult`.
+
+Supporting a model request would let an MCP server reached through mission code
+invoke the workflow's LLM. That violates the two-environment authority split.
+Elicitation requires a human while missions are deliberately non-interactive,
+and roots presume ambient filesystem scope that PtcRunner replaces with
+explicit grants.
+
+PtcRunner declares empty client capabilities and already rejects
+`InputRequiredResult`. Harden the existing classifier rather than describing
+this as missing support:
+
+- a structurally valid state-only `InputRequiredResult` on one of its permitted
+  methods is an explicit, non-retryable policy refusal;
+- any `inputRequests` value is a protocol capability-negotiation error while
+  PtcRunner declares no elicitation, sampling, or roots capability, even if the
+  result is otherwise structurally valid;
+- `InputRequiredResult` on any other method is a protocol error;
+- a malformed MRTR result is a protocol error; and
+- state-only MRTR is never automatically retried, especially after a write.
+
+The classifier must validate the draft's structural requirements before
+distinguishing policy refusal from malformed input. Tests must use a valid MRTR
+example rather than an empty result object.
 
 Trigger to revisit: a first-party need for host-mediated elicitation, where the
-*host* — never mission code, never the model — supplies the response. Sampling
+*host*—never mission code and never the model—supplies the response. Sampling
 has no trigger.
 
-## Delivery and acceptance
+## Delivery slices and review checkpoints
 
-Sections 1 through 3 are one slice and must ship together; section 1 alone
-introduces the inference and retry defects that 2 and 3 close. Section 4 is
-independent and can be split per method. Section 5 is a documented position with
-one enforcement obligation.
+Review at architectural seams rather than after every commit. Each checkpoint
+reviews the complete slice against the stated invariants, resolves all
+correctness and authority findings, and runs the slice's focused tests plus
+`mix precommit`. Cosmetic findings do not trigger a new review round unless the
+fix changes behavior. Dependent slices do not begin from an unreviewed
+authority or wire contract.
 
-Every slice must:
+### Slice 0 — final-spec reconciliation
 
-- keep effect operator-declared and annotations untrusted;
-- state the effect in `--check` output and the safe provider snapshot;
-- carry a regression test for the unsafe-by-default path, not only the happy
-  path; and
+**Scope**
+
+- Check the official specification releases, tags, dated schema directory, and
+  changelog again.
+- Compare the final tag with
+  `7d6c7b86eb2f1442051849ca76429fde3c3008b0`.
+- Replace the draft commit in this plan with the final tag and commit.
+- Re-pin `test/support/mcp_go_stateless` from its pseudo-version to the stable
+  Go SDK, then run the official-server interoperability test.
+- Record only deltas that affect PtcRunner; do not restate the whole upstream
+  changelog.
+
+The absence of a final tag does not block local work on Slice 1, whose safety
+semantics are protocol-independent. Protocol-facing slices must repeat this
+checkpoint at review if the final tag was still absent when they started.
+
+**Review checkpoint**
+
+- Verify the tag and schema are final rather than another prerelease.
+- Inspect every changed protocol type or normative transport paragraph used by
+  PtcRunner: request/result metadata, discovery, tool calls, cache hints,
+  standard headers, cancellation, and MRTR.
+- Confirm the stable Go SDK server advertises `2026-07-28` and the focused
+  remote E2E passes without fallback.
+- Require an explicit delta table saying `code change`, `plan-only change`, or
+  `no impact` for each relevant final-spec change.
+
+### Slice 1 — effect-aware failure foundation
+
+**Scope**
+
+- Add one orthogonal, bounded `mutation_state` field to `ProviderError` and the
+  public Dispatcher envelope without replacing the existing diagnostic
+  `kind`/`reason`.
+- Make every mission Dispatcher outcome produced after callback invocation
+  consult `Capability.effect` and trusted dispatch provenance: timeout,
+  callback exit/crash, forwarded `ProviderError`, oversized or schema-invalid
+  result, arbitrary callback return, run closure, and inspection-output
+  replacement.
+- Preserve retryability for reads and make write or unknown outcomes
+  non-retryable when dispatch may have occurred.
+- Preserve the existing workflow `llm-request` contract, including its trusted
+  retryable availability errors despite its deliberately unknown effect.
+- Update the `ProviderError` and `Dispatcher` module documentation for the new
+  public error contract in this slice.
+- Add focused regressions before enabling write mappings in host configuration.
+
+This slice is protocol-independent and may land by itself.
+
+**Review checkpoint**
+
+- Review the public error shape once; reject parallel encodings of
+  indeterminacy in `kind`, `reason`, and free text.
+- Verify deterministic pre-dispatch failures retain their existing specific
+  classifications and carry trusted `not_dispatched` provenance through the
+  mission boundary without a public mutation-state claim.
+- Verify every post-callback Dispatcher normalization and replacement path has
+  read, write, and unknown tests, including provider errors, result bounds,
+  schema mismatch, invalid return, run closure, and inspection failure.
+- Confirm existing read-capability retry behavior is unchanged and unknown
+  remains unsafe.
+- Confirm a workflow `llm-request` retryable provider failure remains retryable;
+  this slice must not reinterpret workflow provider policy as mission mutation
+  state.
+
+### Slice 2 — MCP write authority end to end
+
+**Depends on:** Slice 1.
+
+**Scope**
+
+- Implement sections 1 and 2 across the generated host schema, `HostConfig`,
+  `MCPSource`, capability assembly, safe snapshots, manifests, and `--check`.
+- Require explicit manifest `allow` for every installation containing a write
+  mapping in both selection implementations; retain omitted `allow` only for
+  read-only installations.
+- Reject a write `snapshot_identity` before credentials, transport acquisition,
+  discovery, or RPC.
+- Make MCP transport failures use the mapped tool effect, trusted
+  pre-dispatch/possible-dispatch provenance, and the shared indeterminate
+  outcome.
+- Preserve diagnostic causes while making every non-success response after a
+  possible write non-retryable with indeterminate mutation state.
+- Prove a prelude wrapper around a write tool resolves to write through the
+  existing mission-inventory seam.
+- Update the `MCPSource` module docs plus
+  `docs/guides/host-configuration.md`,
+  `docs/guides/manifests-and-capabilities.md`,
+  `docs/guides/building-agents.md`, and
+  `docs/guides/kernel-maintainer.md` in the same slice. Remove their explicit
+  read-only claims and document the explicit write-selection rule.
+
+Do not split configuration enablement from its safety checks or reporting. This
+is one atomic merge even if developed as several commits.
+
+**Review checkpoint**
+
+- Trace one read and one write mapping from host JSON through the generated
+  schema, normalized installation, capability, `--check`, and safe snapshot.
+- Prove an unchanged manifest with omitted `allow` fails closed after a write
+  mapping is added, while omitted `allow` retains its read-only convenience.
+- Mutation-test the `snapshot_identity` guard and prove rejection occurs before
+  any authority-bearing activity.
+- Exercise parameter-header validation, outbound-header validation, and a
+  closed request context as proven pre-dispatch failures for a write mapping;
+  preserve their causes and omit indeterminate mutation state.
+- Exercise timeout, transport loss, callback exit, and callback crash for both
+  read and write mappings.
+- Exercise JSON-RPC errors, tool `isError`, malformed and oversized responses,
+  and unsupported alternate results after a possible write.
+- Verify server annotations cannot affect the installed effect.
+- Run one local stdio write fixture and one independent third-party read server
+  to catch regressions outside synthetic unit paths.
+
+### Slice 3 — Streamable HTTP cancellation
+
+**Depends on:** Slice 0 review if the final protocol has been published.
+
+**Scope**
+
+- Implement section 3 with a loopback server that observes response-stream
+  closure.
+- Cover deadline expiry, caller death, provider close, and repeated
+  connect/cancel cycles.
+- Introduce an explicitly cancellable request owner only if killing the Req
+  task does not reliably close the stream.
+
+This slice is independent from write support. Its result never changes the
+indeterminate classification of an abandoned write.
+
+**Review checkpoint**
+
+- Review packet-level behavior, not only the Elixir caller result: the server
+  must observe the HTTP stream close.
+- Confirm HTTP never sends `notifications/cancelled` and stdio behavior remains
+  unchanged.
+- Run descriptor/task leak stress tests on Linux and macOS.
+- Verify cancellation races cannot turn an indeterminate write into a retryable
+  failure.
+
+### Slice 4 — MRTR validation and policy refusal
+
+**Depends on:** Slice 2, and the Slice 0 review if the final protocol has been
+published.
+
+**Scope**
+
+- Harden section 5's existing rejection into method-sensitive structural
+  validation and policy classification.
+- Use valid examples with `inputRequests`, `requestState`, and both together.
+- Preserve the permanent refusal of sampling, roots, elicitation, and automatic
+  state-only retries.
+
+This slice is independent from cancellation. It follows write support because
+its `tools/call` regression must exercise both read and write mappings through
+the centralized result classifier.
+
+**Review checkpoint**
+
+- Generate or copy fixtures from the pinned final schema rather than inventing
+  approximately valid MRTR objects.
+- Cover all three permitted methods and at least one forbidden method.
+- Distinguish malformed protocol data, an input-bearing capability-negotiation
+  violation, and a structurally valid state-only result refused by policy.
+- For `tools/call`, exercise each MRTR classification through both read and
+  write mappings; preserve the specific cause and retain indeterminate mutation
+  state for the write after dispatch.
+- Confirm empty client capabilities never lead to fulfilling an input request
+  or automatically retrying a state-only response.
+
+### Slice 5 — exact-resource authority design
+
+**Trigger:** a concrete first-party application that needs MCP resources.
+
+**Scope**
+
+- Decide the operator-owned exact-URI mapping grammar and public capability
+  projection described in section 4.
+- Require every returned resource item to repeat the exact granted URI; do not
+  infer sub-resource authority.
+- Decide whether resource-only MCP installations are valid.
+- Freeze catalog, pagination, result, snapshot, and change-detection semantics.
+- Keep URI templates, prompts, and completion out of this slice.
+
+This is a specification slice. It changes no runtime code.
+
+**Review checkpoint**
+
+- Walk through one allowed URI, one unlisted URI, a catalog change, duplicate
+  aliases, a private result, and a resource-only server.
+- Prove no generic URI or raw list operation reaches mission code.
+- Approve generated-schema shape, safe-snapshot identity, and manifest
+  narrowing before implementation begins.
+- Reject the slice if its consumer could instead use an ordinary mapped MCP
+  tool without losing an important capability.
+
+### Slice 6 — exact-resource mappings
+
+**Depends on:** approved Slice 5.
+
+**Scope**
+
+- Discover and validate operator-granted exact resources during assembly.
+- Expose each mapping as a bounded zero-argument read capability.
+- Implement `resources/read`, required cache fields, `Mcp-Name`, text-result
+  normalization, safe snapshots, and resource-only installations as approved.
+- Reject binary/blob content until a separate bounded representation is
+  designed.
+
+**Review checkpoint**
+
+- Trace every public resource capability back to one exact host-granted URI.
+- Test pagination limits, catalog changes, missing resources, text bounds,
+  private cache scope, and unsupported content.
+- Reject a single mismatched returned URI and a mixed multi-item response where
+  only some items match the grant.
+- Verify `cacheScope` affects caching semantics only and never reclassifies
+  result data.
+- Verify a server cannot introduce a new reachable URI after assembly.
+- Run an independent third-party resource server over both stdio and HTTP.
+
+Prompts, completion, URI templates, subscriptions, and progress remain
+unscheduled. They receive their own plan only after a concrete consumer exists.
+
+## Common acceptance
+
+Every implementation slice must:
+
+- keep effect and namespace authority operator-declared;
+- preserve frozen, bounded safe snapshots;
+- carry a regression for the unsafe-by-default path, not only the happy path;
+- update generated host schemas and durable module/guide documentation with the
+  code; and
 - pass `mix precommit`.
 
-On landing sections 1 through 3, the durable contract moves into
-`PtcRunner.Kernel.MCPSource` and `PtcRunner.Kernel.HostConfig` module
-documentation plus the write-effect and retryability sections of
-[Host configuration](../guides/host-configuration.md) and
-[Building agents](../guides/building-agents.md); this plan is then deleted.
+When a slice lands, move its durable contract into the relevant modules and
+guides, then delete its completed material from this plan rather than keeping a
+historical checklist.
