@@ -39,14 +39,20 @@ defmodule PtcRunner.Kernel.MCPRemoteE2ETest do
       )
 
     {:ok, registry} = ProviderRegistry.new(%{"remote-docs" => builder})
-    {:ok, limits} = Limits.new(run_duration_ms: 90_000, workflow_timeout_ms: 90_000)
+
+    {:ok, limits} =
+      Limits.new(
+        run_duration_ms: 90_000,
+        workflow_timeout_ms: 90_000,
+        evaluation_timeout_ms: 30_000
+      )
 
     {:ok, %{capabilities: [capability], snapshot: snapshot, close: close}} =
       ProviderRegistry.build(
         registry,
         "remote-docs",
         %{"allow" => ["time.city"]},
-        %{directory: File.cwd!(), destination: :workflow, limits: limits, owner: self()}
+        %{directory: File.cwd!(), destination: :mission, limits: limits, owner: self()}
       )
 
     if is_function(close, 0), do: on_exit(close)
@@ -62,8 +68,8 @@ defmodule PtcRunner.Kernel.MCPRemoteE2ETest do
     refute encoded_snapshot =~ URI.parse(endpoint).host
     refute encoded_snapshot =~ "cityTime"
 
-    {:ok, workflow} = WorkflowEnvironment.new(capabilities: [capability])
-    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, workflow} = WorkflowEnvironment.new([])
+    {:ok, mission} = MissionEnvironment.new(capabilities: [capability])
     {:ok, sink} = EventSink.start(:normal, limits, run_id: "mcp-remote-e2e")
 
     {:ok, config} =
@@ -75,9 +81,12 @@ defmodule PtcRunner.Kernel.MCPRemoteE2ETest do
         event_sink: sink
       )
 
-    source = ~S|(return (tool/time.city {"city" "nyc"}))|
+    source =
+      ~S|(return (tool/kernel-eval {"kind" :source "source" "(return (tool/time.city {\"city\" \"nyc\"}))"}))|
 
-    assert {:ok, %{value: value}} = Kernel.run(source, config)
+    assert {:ok, %{value: %{status: :ok, value: %{outcome: :returned, value: value}}}} =
+             Kernel.run(source, config)
+
     assert %{status: :ok, value: %{"text" => [entry | _]}} = value
     assert is_binary(entry) and entry != ""
   end

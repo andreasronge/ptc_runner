@@ -243,6 +243,47 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
   end
 
   @tag :tmp_dir
+  test "write-bearing MCP installations require an explicit non-empty allow list", %{tmp_dir: dir} do
+    config =
+      http_config()
+      |> put_in(
+        ["install", "remote", "tools", "write"],
+        %{
+          "as" => "remote.write",
+          "effect" => "write",
+          "model_visible" => true
+        }
+      )
+
+    host = load_host(dir, config)
+    assert {:ok, registry} = HostInstallation.registry(host)
+    context = context(dir, :mission)
+
+    assert {:error, :invalid_mcp_selection} =
+             ProviderRegistry.prepare(registry, "remote", %{}, context)
+
+    assert {:ok, read_only} =
+             ProviderRegistry.prepare(
+               registry,
+               "remote",
+               %{"allow" => ["remote.read"]},
+               context
+             )
+
+    assert read_only.credential_names == ["token"]
+
+    assert {:ok, write_selected} =
+             ProviderRegistry.prepare(
+               registry,
+               "remote",
+               %{"allow" => ["remote.write"]},
+               context
+             )
+
+    assert write_selected.credential_names == ["token"]
+  end
+
+  @tag :tmp_dir
   test "installs one immutable trace snapshot under alias-derived mission operations", %{
     tmp_dir: dir
   } do

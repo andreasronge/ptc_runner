@@ -34,9 +34,10 @@ defmodule Mix.Tasks.Ptc.Run do
 
   `--host-config` installs the exact provider aliases declared by one strict,
   bounded host document. `--check` assembles and discovers those providers,
-  prints a safe resolved view, and closes every resource without invoking the
-  workflow or a model. A provider-bearing manifest requires `--host-config`;
-  provider-free manifests continue to run without one.
+  prints a safe resolved view including MCP read/write tool counts, and closes
+  every resource without invoking the workflow or a model. A provider-bearing
+  manifest requires `--host-config`; provider-free manifests continue to run
+  without one.
   """
   use Mix.Task
 
@@ -166,10 +167,14 @@ defmodule Mix.Tasks.Ptc.Run do
   end
 
   defp resolved_provider(snapshot, %{source: :mcp} = installation) do
+    effects = Enum.frequencies_by(snapshot["tools"], & &1["effect"])
+
     %{
       "environment" => "mission",
       "name" => snapshot["provider"],
-      "summary" => "mcp/#{snapshot["transport"]}  #{length(snapshot["tools"])} tools",
+      "summary" =>
+        "mcp/#{snapshot["transport"]}  #{length(snapshot["tools"])} tools  " <>
+          "#{Map.get(effects, "read", 0)} read  #{Map.get(effects, "write", 0)} write",
       "accepts_data" => Enum.map(installation.accepts_data, &Atom.to_string/1),
       "snapshot_hash" => snapshot["snapshot_hash"]
     }

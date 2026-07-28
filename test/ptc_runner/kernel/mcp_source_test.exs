@@ -8,12 +8,14 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
   alias PtcRunner.Kernel
   alias PtcRunner.Kernel.Capability
   alias PtcRunner.Kernel.DeterministicJSON
+  alias PtcRunner.Kernel.Dispatcher
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.InspectionArtifact
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.MCPSource
   alias PtcRunner.Kernel.ProviderRegistry
   alias PtcRunner.Kernel.RunBuilder
+  alias PtcRunner.Kernel.RunState
   alias PtcRunner.TestSupport.MCPHTTPFixture
 
   @owner_lifecycle_timeout_ms 30_000
@@ -271,6 +273,33 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
   end
 
   @tag :tmp_dir
+  test "the local stdio fixture executes an explicitly selected write mapping", %{tmp_dir: dir} do
+    marker = Path.join(dir, "stdio-write-methods")
+    tools = mappings_with_effect("structured", :write)
+    registry = stdio_registry(dir, marker, nil, tools: tools)
+
+    assert {:ok, built} =
+             dir
+             |> manifest(["remote.structured"],
+               program: single_call_program("remote.structured", "x"),
+               timeout_ms: 5_000,
+               evaluation_timeout_ms: 5_000
+             )
+             |> RunBuilder.load_and_build(registry)
+
+    assert %Capability{effect: :write} =
+             built.config.mission_environment.capabilities["remote.structured"]
+
+    assert [%{"name" => "remote.structured", "effect" => "write"}] =
+             built.config.connector_snapshots |> hd() |> Map.fetch!("tools")
+
+    assert {:ok, result} = Kernel.run(built.entry_source, built.config)
+    assert %{status: :ok, value: %{"value" => 42}} = get_in(result.value, [:value, :value])
+    assert :ok = RunBuilder.close(built)
+    assert File.read!(marker) =~ "tools/call"
+  end
+
+  @tag :tmp_dir
   test "both transports measure the selected ceiling on the decoded MCP result", %{tmp_dir: dir} do
     empty_result = %{
       "resultType" => "complete",
@@ -484,6 +513,317 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
   end
 
   @tag :tmp_dir
+  test "operator write effects reach capabilities, snapshots, and wrapper inventory unchanged", %{
+    tmp_dir: dir
+  } do
+    fixture = fixture(self(), spec_extras?: true)
+    on_exit(fixture.close)
+
+    tools =
+      Map.put(
+        mappings(),
+        "structured",
+        %{as: "remote.structured", effect: :write}
+      )
+
+    mission_source = """
+    (ns actions "Write facade" {:visibility :prompt})
+    (defn save {:signature "(query :string) -> :any" :effect :read}
+      [query]
+      (tool/remote.structured {"query" query}))
+    """
+
+    assert {:ok, built} =
+             dir
+             |> manifest(["remote.structured"],
+               mission_source: mission_source,
+               program: single_call_program("remote.structured", "x")
+             )
+             |> RunBuilder.load_and_build(registry(fixture.endpoint, tools: tools))
+
+    assert %Capability{effect: :write} =
+             built.config.mission_environment.capabilities["remote.structured"]
+
+    assert [%{"name" => "remote.structured", "effect" => "write"} = snapshot_tool] =
+             built.config.connector_snapshots |> hd() |> Map.fetch!("tools")
+
+    refute Map.has_key?(snapshot_tool, "annotations")
+
+    inventory = Jason.decode!(built.config.mission_inventory.rendered)
+    assert [%{"ref" => "actions/save", "effect" => "write"}] = inventory["exports"]
+
+    model_inventory = Jason.decode!(built.config.mission_inventory.model_rendered)
+
+    assert %{"effect" => "write"} =
+             Enum.find(model_inventory["entries"], &(&1["form"] == "(actions/save query)"))
+
+    assert {:ok, result} = Kernel.run(built.entry_source, built.config)
+
+    assert %{status: :ok, value: %{"value" => 42}} =
+             get_in(result.value, [:value, :value])
+
+    assert :ok = RunBuilder.close(built)
+  end
+
+  @tag :tmp_dir
+  test "write-bearing direct sources require explicit allow while read-only omission stays convenient",
+       %{tmp_dir: dir} do
+    fixture = fixture(self())
+    on_exit(fixture.close)
+
+    write_tools =
+      Map.put(
+        mappings(),
+        "structured",
+        %{as: "remote.structured", effect: :write}
+      )
+
+    assert {:error, :invalid_mcp_selection} =
+             dir
+             |> manifest(["remote.structured"], omit_allow?: true)
+             |> RunBuilder.load_and_build(registry(fixture.endpoint, tools: write_tools))
+
+    refute_receive {:mcp_request, _method, _headers}
+
+    assert {:ok, built} =
+             dir
+             |> manifest(["remote.structured"], omit_allow?: true)
+             |> RunBuilder.load_and_build(registry(fixture.endpoint))
+
+    assert :ok = RunBuilder.close(built)
+  end
+
+  test "direct sources reject write snapshot identities before any authority-bearing activity" do
+    parent = self()
+
+    assert_raise ArgumentError, fn ->
+      MCPSource.builder(
+        transport:
+          {:streamable_http,
+           endpoint: "https://example.test/mcp",
+           headers: fn ->
+             send(parent, :unexpected_credential_resolution)
+             []
+           end},
+        tools: %{"write" => %{as: "remote.write", effect: :write}},
+        snapshot_identity: %{tool: "write", field: "digest"}
+      )
+    end
+
+    refute_receive :unexpected_credential_resolution
+  end
+
+  test "direct sources reject workflow placement before authority-bearing activity" do
+    parent = self()
+
+    builder =
+      MCPSource.builder(
+        transport:
+          {:streamable_http,
+           endpoint: "https://example.test/mcp",
+           headers: fn ->
+             send(parent, :unexpected_credential_resolution)
+             []
+           end},
+        tools: %{"write" => %{as: "remote.write", effect: :write}}
+      )
+
+    {:ok, registry} = ProviderRegistry.new(%{"fixture-mcp" => builder})
+    {:ok, limits} = Limits.new()
+
+    assert {:error, :invalid_mcp_selection} =
+             ProviderRegistry.build(
+               registry,
+               "fixture-mcp",
+               %{"allow" => ["remote.write"]},
+               %{
+                 directory: File.cwd!(),
+                 destination: :workflow,
+                 limits: limits,
+                 owner: self()
+               }
+             )
+
+    refute_receive :unexpected_credential_resolution
+  end
+
+  @tag :tmp_dir
+  test "post-dispatch MCP failures preserve their cause and make writes indeterminate", %{
+    tmp_dir: dir
+  } do
+    cases = [
+      {"structured", [rpc_error_tool: "structured"], :domain_error, []},
+      {"structured", [structured_value: "wrong"], :invalid_result, []},
+      {"structured", [result_and_error?: true], :invalid_result, []},
+      {"structured", [result_type: "input_required"], :invalid_result, []},
+      {"fail", [], :domain_error, []},
+      {"text", [large_text?: true], :invalid_result, [max_result_bytes: 1_000]}
+    ]
+
+    for effect <- [:read, :write],
+        {upstream, fixture_opts, reason, manifest_opts} <- cases do
+      fixture = fixture(self(), fixture_opts)
+      on_exit(fixture.close)
+      tools = mappings_with_effect(upstream, effect)
+      public_name = tools[upstream].as
+
+      assert {:ok, built} =
+               dir
+               |> manifest(
+                 [public_name],
+                 [
+                   program: single_call_program(public_name, "x"),
+                   evaluation_timeout_ms: 5_000
+                 ] ++ manifest_opts
+               )
+               |> RunBuilder.load_and_build(
+                 registry(fixture.endpoint,
+                   tools: tools,
+                   timeout_ms: 5_000
+                 )
+               )
+
+      assert {:ok, result} = Kernel.run(built.entry_source, built.config)
+      failure = get_in(result.value, [:value, :value])
+
+      assert %{
+               status: :error,
+               kind: :provider_error,
+               reason: ^reason,
+               retryable?: false
+             } = failure
+
+      assert_effect_state(failure, effect)
+      assert :ok = RunBuilder.close(built)
+    end
+  end
+
+  @tag :tmp_dir
+  test "MCP timeout and transport loss remain retryable reads but indeterminate writes", %{
+    tmp_dir: dir
+  } do
+    for effect <- [:read, :write],
+        {fixture_opts, reason} <- [
+          {[block_tool: "structured"], :timeout},
+          {[disconnect_tool: "structured"], :transport_error}
+        ] do
+      fixture = fixture(self(), fixture_opts)
+      on_exit(fixture.close)
+      tools = mappings_with_effect("structured", effect)
+
+      assert {:ok, built} =
+               dir
+               |> manifest(["remote.structured"],
+                 program: single_call_program("remote.structured", "x"),
+                 timeout_ms: 100,
+                 evaluation_timeout_ms: 2_000
+               )
+               |> RunBuilder.load_and_build(
+                 registry(fixture.endpoint, tools: tools, timeout_ms: 100)
+               )
+
+      assert {:ok, result} = Kernel.run(built.entry_source, built.config)
+      failure = get_in(result.value, [:value, :value])
+
+      assert %{status: :error, kind: :provider_error, reason: ^reason} = failure
+
+      if reason == :timeout do
+        assert_receive {:mcp_blocked, worker}
+        send(worker, :release)
+      end
+
+      if effect == :read do
+        assert failure.retryable?
+        refute Map.has_key?(failure, :mutation_state)
+      else
+        refute failure.retryable?
+        assert failure.mutation_state == :indeterminate
+      end
+
+      assert :ok = RunBuilder.close(built)
+    end
+  end
+
+  @tag :tmp_dir
+  test "write parameter, outbound-header, and closed-context failures prove no dispatch", %{
+    tmp_dir: dir
+  } do
+    tools = mappings_with_effect("structured", :write)
+
+    for {query, registry_opts} <- [
+          {String.duplicate("x", 20_000), []},
+          {
+            String.duplicate("x", 16_365),
+            [headers: fn -> [{"authorization", String.duplicate("a", 16_367)}] end]
+          }
+        ] do
+      fixture = fixture(self())
+      on_exit(fixture.close)
+
+      assert {:ok, built} =
+               dir
+               |> manifest(["remote.structured"],
+                 program: single_call_program("remote.structured", query),
+                 evaluation_timeout_ms: 5_000
+               )
+               |> RunBuilder.load_and_build(
+                 registry(fixture.endpoint, [tools: tools] ++ registry_opts)
+               )
+
+      assert_receive {:mcp_request, "server/discover", _headers}
+      assert_receive {:mcp_request, "tools/list", _headers}
+      assert_receive {:mcp_request, "tools/list", _headers}
+
+      assert {:ok, result} = Kernel.run(built.entry_source, built.config)
+      failure = get_in(result.value, [:value, :value])
+
+      assert %{
+               status: :error,
+               kind: :provider_error,
+               reason: :invalid_result,
+               retryable?: false
+             } = failure
+
+      refute Map.has_key?(failure, :mutation_state)
+      refute_receive {:mcp_request, "tools/call", _headers}
+      assert :ok = RunBuilder.close(built)
+    end
+
+    fixture = fixture(self())
+    on_exit(fixture.close)
+
+    assert {:ok, built} =
+             dir
+             |> manifest(["remote.structured"],
+               program: single_call_program("remote.structured", "x")
+             )
+             |> RunBuilder.load_and_build(registry(fixture.endpoint, tools: tools))
+
+    capability = built.config.mission_environment.capabilities["remote.structured"]
+    assert :ok = RunBuilder.close(built)
+    {:ok, state} = RunState.start(Limits.defaults())
+
+    failure =
+      Dispatcher.dispatch(
+        state,
+        :mission,
+        %{capabilities: %{capability.name => capability}},
+        capability.name,
+        %{"query" => "x"},
+        1_000
+      )
+
+    assert %{
+             status: :error,
+             kind: :provider_error,
+             reason: :transport_error,
+             retryable?: true
+           } = failure
+
+    refute Map.has_key?(failure, :mutation_state)
+  end
+
+  @tag :tmp_dir
   test "excludes malformed x-mcp-header tools without poisoning unmapped tools", %{tmp_dir: dir} do
     parent = self()
     fixture = fixture(parent, invalid_header?: true)
@@ -646,6 +986,13 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
           "one" => %{as: "same", effect: :read},
           "two" => %{as: "same", effect: :read}
         }
+      )
+    end
+
+    assert_raise ArgumentError, fn ->
+      MCPSource.builder(
+        transport: {:streamable_http, endpoint: "https://example.com/mcp"},
+        tools: %{"one" => %{as: "remote.one", effect: :unknown}}
       )
     end
   end
@@ -1305,7 +1652,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     builder =
       MCPSource.builder(
         transport: {:stdio, stdio_transport_options(marker, mode)},
-        tools: mappings(),
+        tools: Keyword.get(opts, :tools, mappings()),
         timeout_ms: 5_000,
         max_result_bytes: Keyword.get(opts, :max_result_bytes, 64_000)
       )
@@ -1376,6 +1723,20 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     }
   end
 
+  defp mappings_with_effect(upstream, effect) do
+    Map.update!(mappings(), upstream, &Map.put(&1, :effect, effect))
+  end
+
+  defp single_call_program(public_name, query) do
+    ~s|(return (tool/#{public_name} {"query" #{Jason.encode!(query)}}))|
+  end
+
+  defp assert_effect_state(failure, :read),
+    do: refute(Map.has_key?(failure, :mutation_state))
+
+  defp assert_effect_state(failure, :write),
+    do: assert(failure.mutation_state == :indeterminate)
+
   defp public_mappings, do: Map.new(mappings(), fn {_upstream, mapping} -> {mapping.as, true} end)
 
   defp build_snapshot(dir, endpoint, tools) do
@@ -1410,7 +1771,10 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
         end
       end
 
-      if opts[:disconnect?] && method == "server/discover" do
+      disconnect_tool = get_in(request.body, ["params", "name"])
+
+      if (opts[:disconnect?] && method == "server/discover") ||
+           (method == "tools/call" && opts[:disconnect_tool] == disconnect_tool) do
         :close
       else
         if valid_modern_request?(request) do
@@ -1610,6 +1974,11 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
         base
         |> Map.merge(%{
           "title" => "Structured",
+          "annotations" => %{
+            "readOnlyHint" => true,
+            "destructiveHint" => false,
+            "idempotentHint" => true
+          },
           "execution" => %{"taskSupport" => "forbidden"},
           "_meta" => %{"vendor" => %{"tags" => []}}
         })
@@ -1730,6 +2099,9 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
         },
         Keyword.get(opts, :config_extra, %{})
       )
+      |> then(fn config ->
+        if Keyword.get(opts, :omit_allow?, false), do: Map.delete(config, "allow"), else: config
+      end)
 
     body = %{
       "version" => 1,
@@ -1755,6 +2127,20 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
           Keyword.get(opts, :limits, %{})
         )
     }
+
+    body =
+      case Keyword.get(opts, :mission_source) do
+        source when is_binary(source) ->
+          File.write!(Path.join(dir, "mission.clj"), source)
+
+          Map.put(body, "mission", %{
+            "components" => [%{"id" => "actions", "path" => "mission.clj"}],
+            "data" => %{}
+          })
+
+        _missing ->
+          body
+      end
 
     path = Path.join(dir, "#{System.unique_integer([:positive])}.json")
     File.write!(path, Jason.encode!(body))

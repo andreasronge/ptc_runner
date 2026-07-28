@@ -428,10 +428,17 @@ reports that the query was too large rather than that the world changed. An
 undeclared effect counts as unsafe, so a capability whose installation omits
 `effect` keeps the conservative behaviour.
 
-Today a mission cannot reach anything else: the host document accepts only
-`"effect": "read"` for a mapped tool, and the native trace and inspection
-sources declare the same. The `write` row exists for the capability class
-nothing installs yet.
+An MCP host installation may declare a mapped tool as `write`; every manifest
+selecting a write-bearing installation must use an explicit non-empty `allow`
+list. The server cannot change that effect through annotations. Native trace and
+inspection sources remain reads.
+
+Per-call failure safety is similarly conservative. A read timeout or transport
+loss can retain its provider retry policy. Once a write request may have been
+dispatched, every non-success remains non-retryable and carries
+`mutation_state: indeterminate` alongside its specific diagnostic cause.
+Cancellation does not prove rollback. Deterministic failures that prove no
+transport send was attempted omit mutation state.
 
 An explicit `(fail value)` remains terminal by default because it is also the
 application's deliberate failure signal. There is one narrower correction
