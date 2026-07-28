@@ -15,6 +15,12 @@ user-facing behavior belongs in guides or retained specifications.
   tracks the unfinished private-sink, overflow, real-pagination, and
   cache-usage journeys.
 
+## Proposed, not scheduled
+
+- [`mcp-write-and-surface.md`](mcp-write-and-surface.md) investigates write-effect
+  MCP tools, the remaining read-oriented client surface, and why
+  server-initiated model access stays refused.
+
 Plans are disposable staging contracts, not API references. When a slice
 lands, move its durable behavior into module documentation and the relevant
 guide or specification, update any remaining plan status, and delete a plan
