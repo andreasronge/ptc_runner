@@ -556,6 +556,9 @@ defmodule PtcRunner.Lisp.Eval do
   defp do_eval({:call, fun_ast, arg_asts}, %EvalContext{} = eval_ctx) do
     with {:ok, fun_val, eval_ctx1} <- eval_child(fun_ast, eval_ctx),
          {:ok, arg_vals, eval_ctx2} <- eval_all(arg_asts, eval_ctx1) do
+      arg_vals =
+        maybe_mark_capability_closure_args(fun_val, arg_asts, arg_vals, eval_ctx2)
+
       Apply.apply_fun(
         fun_val,
         arg_vals,
@@ -997,6 +1000,27 @@ defmodule PtcRunner.Lisp.Eval do
 
   defp maybe_mark_capability_prelude_args(_ref, _argument_asts, arguments, _eval_ctx),
     do: arguments
+
+  defp maybe_mark_capability_closure_args(
+         {:closure, _patterns, _body, _env, _turn_history, _meta},
+         argument_asts,
+         arguments,
+         eval_ctx
+       ) do
+    Enum.zip_with(argument_asts, arguments, fn argument_ast, argument ->
+      if capability_failure_source?(argument_ast, eval_ctx),
+        do: %CapabilityResult{value: argument},
+        else: argument
+    end)
+  end
+
+  defp maybe_mark_capability_closure_args(
+         _callable,
+         _argument_asts,
+         arguments,
+         _eval_ctx
+       ),
+       do: arguments
 
   defp capability_result_binding?(%EvalContext{locals: locals, env: env}, name) do
     MapSet.member?(locals, name) and match?(%CapabilityResult{}, Map.get(env, name))

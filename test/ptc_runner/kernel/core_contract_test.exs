@@ -1457,6 +1457,52 @@ defmodule PtcRunner.Kernel.CoreContractTest do
                5_000
              )
 
+    {:ok, facade_component} =
+      Component.new(
+        id: "facade",
+        dependencies: ["cap"],
+        source: """
+        (ns facade)
+
+        (defn- unwrap-through [envelope]
+          (cap/unwrap! envelope))
+
+        (defn- forward-through [envelope]
+          (unwrap-through envelope))
+
+        (defn lookup []
+          (forward-through (tool/lookup {})))
+
+        (defn copied-lookup []
+          (forward-through (into {} (tool/lookup {}))))
+        """
+      )
+
+    {:ok, facade_bundle} = Kernel.compile_bundle([cap_component, facade_component])
+
+    {:ok, facade_mission} =
+      MissionEnvironment.new(bundle: facade_bundle, capabilities: [lookup])
+
+    {:ok, facade_state} = RunState.start(Limits.defaults())
+
+    assert %{outcome: :failed, capability_failure?: true, retryable?: true} =
+             Evaluation.evaluate_source(
+               facade_state,
+               facade_mission,
+               ~S|(facade/lookup)|,
+               5_000
+             )
+
+    {:ok, copied_facade_state} = RunState.start(Limits.defaults())
+
+    assert %{outcome: :failed, capability_failure?: false, retryable?: true} =
+             Evaluation.evaluate_source(
+               copied_facade_state,
+               facade_mission,
+               ~S|(facade/copied-lookup)|,
+               5_000
+             )
+
     {:ok, copied_cap_state} = RunState.start(Limits.defaults())
 
     assert %{outcome: :failed, capability_failure?: false, retryable?: true} =

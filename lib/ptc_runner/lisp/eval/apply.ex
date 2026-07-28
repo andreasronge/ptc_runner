@@ -16,6 +16,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
 
   alias PtcRunner.Lisp.Env.Builtin
   alias PtcRunner.Lisp.Eval.Abort
+  alias PtcRunner.Lisp.Eval.CapabilityResult
   alias PtcRunner.Lisp.Eval.Capture
   alias PtcRunner.Lisp.Eval.Context, as: EvalContext
   alias PtcRunner.Lisp.Eval.Helpers
@@ -1613,8 +1614,9 @@ defmodule PtcRunner.Lisp.Eval.Apply do
 
   defp bind_args({:variadic, leading, rest_pattern}, args) do
     {leading_args, rest_args} = Enum.split(args, length(leading))
+    rest_args = Enum.map(rest_args, &unwrap_capability_argument/1)
 
-    leading_res = Patterns.match_zipped(leading, leading_args)
+    leading_res = match_capability_zipped(leading, leading_args)
 
     case leading_res do
       {:ok, leading_bindings} ->
@@ -1635,8 +1637,45 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   end
 
   defp bind_args(patterns, args) when is_list(patterns) do
-    Patterns.match_zipped(patterns, args)
+    match_capability_zipped(patterns, args)
   end
+
+  defp match_capability_zipped(patterns, values) do
+    Enum.zip(patterns, values)
+    |> Enum.reduce_while({:ok, %{}}, fn {pattern, value}, {:ok, acc} ->
+      case match_capability_argument(pattern, value) do
+        {:ok, bindings} -> {:cont, {:ok, Map.merge(acc, bindings)}}
+        {:error, _} = error -> {:halt, error}
+      end
+    end)
+  end
+
+  defp match_capability_argument(pattern, %CapabilityResult{value: value} = result) do
+    case Patterns.match_pattern(pattern, value) do
+      {:ok, bindings} ->
+        {:ok, preserve_capability_binding(bindings, pattern, result)}
+
+      {:error, _} = error ->
+        error
+    end
+  end
+
+  defp match_capability_argument(pattern, value), do: Patterns.match_pattern(pattern, value)
+
+  defp unwrap_capability_argument(%CapabilityResult{value: value}), do: value
+  defp unwrap_capability_argument(value), do: value
+
+  defp preserve_capability_binding(bindings, {:var, name}, result),
+    do: Map.put(bindings, name, result)
+
+  defp preserve_capability_binding(
+         bindings,
+         {:destructure, {:as, name, _inner_pattern}},
+         result
+       ),
+       do: Map.put(bindings, name, result)
+
+  defp preserve_capability_binding(bindings, _pattern, _result), do: bindings
 
   # Format arities list for human-readable error messages
   defp format_arities([n]), do: "#{n}"
