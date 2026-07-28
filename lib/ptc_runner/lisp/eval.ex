@@ -204,6 +204,15 @@ defmodule PtcRunner.Lisp.Eval do
     fn name, args, _origin -> tool_executor.(name, args) end
   end
 
+  defp capability_failure_source?({:tool_call, _name, _args}, _eval_ctx), do: true
+
+  defp capability_failure_source?(_error_ast, eval_ctx) do
+    match?(
+      %{type: :prelude_export, ref: "cap/unwrap!"},
+      EvalContext.current_origin(eval_ctx)
+    )
+  end
+
   # ============================================================
   # Turn history access: *1, *2, *3
   # ============================================================
@@ -601,6 +610,11 @@ defmodule PtcRunner.Lisp.Eval do
 
   defp do_eval({:fail, error_ast}, %EvalContext{} = eval_ctx) do
     with {:ok, error, eval_ctx2} <- eval_child(error_ast, eval_ctx) do
+      eval_ctx2 =
+        if capability_failure_source?(error_ast, eval_ctx2),
+          do: EvalContext.mark_capability_failure(eval_ctx2),
+          else: eval_ctx2
+
       Abort.control!(:fail, error, eval_ctx2)
     end
   end
@@ -832,7 +846,8 @@ defmodule PtcRunner.Lisp.Eval do
     %{
       caller_ctx
       | effects: export_ctx.effects,
-        iteration_count: export_ctx.iteration_count
+        iteration_count: export_ctx.iteration_count,
+        failure_origin: export_ctx.failure_origin
     }
   end
 

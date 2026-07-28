@@ -551,20 +551,21 @@ defmodule PtcRunner.Kernel.Evaluation do
     ledger_activity? or marker_activity?
   end
 
-  # An explicit failure is a capability failure only when it carries the exact
-  # result of the last recorded call. Merely reading something earlier cannot
-  # turn a later, deliberately constructed error-shaped value into a correction
-  # request. `cap/unwrap!` fails immediately with the envelope it received, so
-  # this binding needs no second PTC-Lisp failure vocabulary or forgeable tag.
+  # An explicit failure is a capability failure only when evaluator provenance
+  # says that a direct tool call or `cap/unwrap!` produced the control signal,
+  # and the value matches the last recorded result. Merely rebuilding an equal
+  # error-shaped map after a read cannot turn a deliberate failure into a
+  # correction request.
   defp capability_failure?(step, value) do
-    step
-    |> Map.get(:tool_calls, [])
-    |> List.wrap()
-    |> List.last()
-    |> case do
-      %{error: nil, result: result} -> result === value
-      _other -> false
-    end
+    Map.get(step, :failure_origin) == :capability and
+      step
+      |> Map.get(:tool_calls, [])
+      |> List.wrap()
+      |> List.last()
+      |> case do
+        %{error: nil, result: result} -> result === value
+        _other -> false
+      end
   end
 
   defp mission_capability_call_count(state), do: call_total(mission_capability_calls(state))

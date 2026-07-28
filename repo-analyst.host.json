@@ -2,7 +2,8 @@
   "$schema": "./priv/schemas/ptc-host-config.schema.json",
   "limits": {
     "subordinate_evaluations": 24,
-    "workflow_capability_calls_per_name": 24
+    "workflow_capability_calls_per_name": 24,
+    "normal_event_count": 512
   },
   "credentials": {
     "openrouter_key": {

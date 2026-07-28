@@ -1407,7 +1407,45 @@ defmodule PtcRunner.Kernel.CoreContractTest do
                  ~S|(fail (tool/lookup {}))|,
                  5_000
                )
+
+      if effect == :read do
+        {:ok, copied_state} = RunState.start(Limits.defaults())
+
+        assert %{
+                 outcome: :failed,
+                 capability_activity?: true,
+                 capability_failure?: false,
+                 retryable?: true
+               } =
+                 Evaluation.evaluate_source(
+                   copied_state,
+                   mission,
+                   ~S|(let [response (tool/lookup {}) copied (into {} response)] (fail copied))|,
+                   5_000
+                 )
+      end
     end
+
+    {:ok, lookup} =
+      Capability.new(
+        name: "lookup",
+        input_schema: @input_schema,
+        effect: :read,
+        callback: fn _ -> {:error, ProviderError.new(:not_found, "not found")} end
+      )
+
+    {:ok, cap_component} = Library.component("cap")
+    {:ok, cap_bundle} = Kernel.compile_bundle([cap_component])
+    {:ok, cap_mission} = MissionEnvironment.new(bundle: cap_bundle, capabilities: [lookup])
+    {:ok, cap_state} = RunState.start(Limits.defaults())
+
+    assert %{outcome: :failed, capability_failure?: true, retryable?: true} =
+             Evaluation.evaluate_source(
+               cap_state,
+               cap_mission,
+               ~S|(cap/unwrap! (tool/lookup {}))|,
+               5_000
+             )
 
     {:ok, mission} = MissionEnvironment.new([])
     {:ok, state} = RunState.start(Limits.defaults())

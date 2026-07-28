@@ -435,14 +435,15 @@ nothing installs yet.
 
 An explicit `(fail value)` remains terminal by default because it is also the
 application's deliberate failure signal. There is one narrower correction
-case: `cap/unwrap!` fails with a capability's structured error envelope, the
-failed value is the exact result of the evaluation's last recorded capability
-call, and every observed capability effect was declared `read`. The Kernel
-reports that binding separately; the shipped PTC-Lisp loop then gives the model
-one correction turn. An error-shaped value after an unrelated read is still
-terminal, as is any failure after a `write` or undeclared effect. Correction
-feedback includes only the bounded `kind` and `reason` classification, never
-provider details.
+case: a direct capability call or `cap/unwrap!` produces the failure control
+signal, the failed value matches the evaluation's last recorded capability
+result, and every observed capability effect was declared `read`. The Kernel
+reports that evaluator-owned provenance separately; rebuilding an equal
+error-shaped map after a read does not qualify. The shipped PTC-Lisp loop then
+gives the model one correction turn. An error-shaped value after an unrelated
+read is still terminal, as is any failure after a `write` or undeclared effect.
+Correction feedback includes only the bounded `kind` and `reason`
+classification, never provider details.
 
 When a failure is genuinely unsafe to retry, the shipped loop still does not
 repeat the program — but it no longer discards the run either. It spends one

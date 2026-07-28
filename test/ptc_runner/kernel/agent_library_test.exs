@@ -1024,8 +1024,7 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
           id: "missing-path",
           name: "run_ptc_lisp",
           args: %{
-            "program" =>
-              ~S|(let [response (tool/lookup {})] (if (= :ok (get response :status)) (get response :value) (fail response)))|
+            "program" => ~S|(fail (tool/lookup {}))|
           }
         }
       ]
@@ -1140,6 +1139,48 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     assert {:error, %{kind: :workflow_failed, reason: :explicit_failure}} =
              Kernel.run(~S|(agent.core/run "Respect the decision" {"max_turns" 3})|, config)
 
+    assert_receive {:agent_request, _first}
+    refute_receive {:agent_request, _second}
+  end
+
+  test "agent.core keeps a copied capability envelope terminal" do
+    parent = self()
+
+    copied_failure = %{
+      content: nil,
+      tool_calls: [
+        %{
+          id: "copied-failure",
+          name: "run_ptc_lisp",
+          args: %{
+            "program" =>
+              ~S|(let [response (tool/lookup {}) copied (into {} response)] (fail copied))|
+          }
+        }
+      ]
+    }
+
+    {:ok, lookup} =
+      Capability.new(
+        name: "lookup",
+        effect: :read,
+        input_schema: %{"type" => "object"},
+        callback: fn _ ->
+          send(parent, :lookup_called)
+          {:error, ProviderError.new(:not_found, "private provider detail")}
+        end
+      )
+
+    {:ok, config} =
+      agent_config([copied_failure, @recovered], [], mission_capabilities: [lookup])
+
+    assert {:error, %{kind: :workflow_failed, reason: :explicit_failure}} =
+             Kernel.run(
+               ~S|(agent.core/run "Respect the copied decision" {"max_turns" 3})|,
+               config
+             )
+
+    assert_receive :lookup_called
     assert_receive {:agent_request, _first}
     refute_receive {:agent_request, _second}
   end

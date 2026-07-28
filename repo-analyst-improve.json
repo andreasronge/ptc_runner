@@ -31,6 +31,7 @@
     "evaluation_timeout_ms": 20000,
     "subordinate_evaluations": 24,
     "workflow_capability_calls_per_name": 24,
-    "mission_capability_calls": 64
+    "mission_capability_calls": 64,
+    "normal_event_count": 512
   }
 }

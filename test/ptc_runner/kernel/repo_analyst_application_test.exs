@@ -136,6 +136,7 @@ defmodule PtcRunner.Kernel.RepoAnalystApplicationTest do
 
       assert manifest.limits.subordinate_evaluations >= max_turns
       assert manifest.limits.workflow_capability_calls_per_name >= max_turns
+      assert manifest.limits.normal_event_count >= max_turns * 11 + 4
     end
 
     @tag :tmp_dir
