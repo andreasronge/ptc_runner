@@ -43,12 +43,16 @@ back to a model are visible only when the original run has an explicitly pinned
 private inspection artifact, in the Runs tab's model dialogue. The human REPL
 transcript is separate presentation state.
 
-The UI first lists bounded canonical run summaries. Selecting a run loads its
-metadata and turn events through the shared Kernel query layer. The run view
-pairs canonical evaluation and capability start/stop events into an expandable
-execution transcript, with run metrics, prelude component fingerprints,
-mission inventory and connector fingerprints, workflow annotations, limit
-failures, and raw event metadata available on demand. Sanitized traces do not
+The UI first lists bounded canonical run summaries, identified by run ID and
+filterable by ID, status or bundle hash. Selecting a run loads its metadata and
+turn events through the shared Kernel query layer, and puts the run in the URL
+(`#/run/<run-id>`), so a run view can be bookmarked, shared and reloaded and
+Back returns to the list. The run view leads with identity, metrics,
+provenance, token spend and the model dialogue; preludes, mission inventory and
+connector fingerprints, the captured system prompt, and the canonical execution
+transcript sit behind labelled disclosures below it. The execution transcript
+opens by default only when there is no private overlay, because then it is the
+whole run rather than its detail. Sanitized traces do not
 contain prompts, provider responses,
 capability arguments/results, or private prelude source; the UI identifies
 those omissions rather than inferring or reconstructing payloads. Starting the
@@ -77,11 +81,14 @@ contradictory sanitized and sensitive warnings.
 When the artifact is pinned, the run view joins its records to canonical IDs
 and renders private additions alongside the sanitized transcript:
 
-- a default-open **captured model request** panel showing the first exact
-  system prompt. Known `PTC_AGENT_PROMPT_V1` text is split into readable
-  sections with the exact prompt retained; edited/unknown formats fall back to
-  opaque exact text. Each provider-neutral request remains available under
-  **Raw captured request** because adapters may transform it before transport;
+- a **captured model request** disclosure showing the first exact system
+  prompt. Known `PTC_AGENT_PROMPT_V1` text is split into readable sections with
+  the exact prompt retained; edited/unknown formats fall back to opaque exact
+  text. Each provider-neutral request remains available under **Raw captured
+  request** because adapters may transform it before transport. A system prompt
+  that changes mid-run is reported as a line diff against the first call with
+  unchanged stretches elided, plus that call's exact prompt, rather than as
+  another full copy of the prompt;
 
 - an **LLM token spend** panel summarizing the run's provider-reported usage:
   total input/output tokens, cache reads/creation, and reported cost, with a
@@ -94,10 +101,13 @@ and renders private additions alongside the sanitized transcript:
   counted as zero;
 - a **model dialogue** that replays the agent loop turn by turn — the messages
   sent to the model (highlighting tool-role feedback about the previous
-  program), the generated PTC-Lisp program from each response, and the
-  canonical outcome of the mission evaluation whose captured source exactly
-  matches that response's generated program. A window without an exact match
-  renders as unpaired rather than positionally inferred;
+  program), any prose the model wrote alongside its tool call, the generated
+  PTC-Lisp program from each response, and the canonical outcome of the mission
+  evaluation whose captured source exactly matches that response's generated
+  program. Prose is shown both as the model's own response and where that turn
+  is replayed as assistant history, always next to the generated source rather
+  than instead of it. A window without an exact match renders as unpaired
+  rather than positionally inferred;
 - a **program source** panel inside each subordinate evaluation, verifying the
   captured source hash against the canonical `evaluation-started`
   `source_hash` and flagging any mismatch;
@@ -143,6 +153,27 @@ repository root with:
 ```bash
 mix run ptc_viewer/scripts/generate_dialogue_fixture.exs
 ```
+
+## Frontend
+
+`priv/static` is served verbatim; there is no build step and no
+`node_modules`. Views are Preact components written with `htm` tagged
+templates, from a vendored ESM copy of `preact`, `preact/hooks`, `htm` and
+`preact-render-to-string` under `priv/static/js/vendor/preact/` (see
+`VERSIONS.txt` there for versions and the one edit applied). The browser mounts
+the components with `render`, so re-rendering a run — loading a further event
+page — diffs into the existing tree and keeps open disclosures and the reading
+position; `renderKernelTranscriptMarkup` renders the same components to a
+string for the test harness, which therefore runs under plain node with no DOM
+stub. Interpolated values are escaped by the `html` tag; the only raw markup
+embedded is the syntax highlighter's output, which is a pure escaping string
+transform.
+
+The REPL panel keeps its imperative controller. Its authoritative-read poll is
+a GET that never changes `mutation_nonce`, so it does not gate the controls;
+the remaining-budget clock ticks from a locally held deadline, and the session
+projection is fingerprinted. An idle session therefore performs no DOM writes
+between polls.
 
 ## Programmatic use
 

@@ -8,7 +8,7 @@
 // and partially loaded event pages are labeled rather than silently folded
 // into the totals.
 
-import { escapeHtml } from './utils.js';
+import { html, Fragment } from './preact.js';
 
 const INVENTORY_MARKERS = [
   'Frozen mission inventory (JSON):',
@@ -30,6 +30,10 @@ const SECTIONS = [
 ];
 
 const RESENT_KEYS = new Set(['system', 'inventory', 'tools']);
+
+const PARTIAL_NOTE =
+  'More canonical events exist beyond the loaded pages; these figures cover only the ' +
+  'loaded events, not the whole run.';
 
 export function buildTokenUsage(turns) {
   const calls = [];
@@ -127,31 +131,34 @@ function inventoryHeadingOffset(system) {
   return -1;
 }
 
-export function renderTokenUsage(turns, options = {}) {
+export function TokenUsage({ turns, partial = false }) {
   const usage = buildTokenUsage(turns);
-  if (!usage.calls.length) return '';
+  if (!usage.calls.length) return null;
 
   const unreported = usage.calls.length - usage.reportedCalls;
 
-  return `
-    <div class="kt-toolbar kt-dialogue-toolbar">
-      <span>LLM token spend</span>
-      <span class="kt-private-chip" title="Derived from the pinned private inspection artifact">private</span>
-      ${options.partial ? '<span class="kt-partial-chip" title="More canonical events exist beyond the loaded pages">partial</span>' : ''}
-    </div>
-    <section class="kt-tokens" aria-label="LLM token spend">
-      ${options.partial ? '<p class="kt-token-note kt-token-warning">More canonical events exist beyond the loaded pages; these figures cover only the loaded events, not the whole run.</p>' : ''}
-      ${usage.hasUsage ? renderTiles(usage) : ''}
-      ${usage.hasUsage ? renderCallTable(usage) : ''}
-      ${usage.hasUsage && unreported > 0
-        ? `<p class="kt-token-note kt-token-warning">Provider usage was reported for ${usage.reportedCalls} of ${usage.calls.length} calls; totals exclude the unreported calls.</p>`
-        : ''}
-      ${renderComposition(usage)}
-    </section>
+  return html`
+    <${Fragment}>
+      <div class="kt-toolbar kt-dialogue-toolbar">
+        <span>LLM token spend</span>
+        <span class="kt-private-chip" title="Derived from the pinned private inspection artifact">private</span>
+        ${partial && html`
+          <span class="kt-partial-chip" title="More canonical events exist beyond the loaded pages">partial</span>`}
+      </div>
+      <section class="kt-tokens" aria-label="LLM token spend">
+        ${partial && html`<p class="kt-token-note kt-token-warning">${PARTIAL_NOTE}</p>`}
+        ${usage.hasUsage && html`<${Tiles} usage=${usage} />`}
+        ${usage.hasUsage && html`<${CallTable} usage=${usage} />`}
+        ${usage.hasUsage && unreported > 0 && html`<p class="kt-token-note kt-token-warning">${
+          `Provider usage was reported for ${usage.reportedCalls} of ${usage.calls.length} calls; ` +
+          'totals exclude the unreported calls.'}</p>`}
+        <${Composition} usage=${usage} />
+      </section>
+    <//>
   `;
 }
 
-function renderTiles(usage) {
+function Tiles({ usage }) {
   const totals = usage.totals;
   const tiles = [
     [usage.inputReported ? formatCount(totals.input) : '—', 'input tokens'],
@@ -161,30 +168,29 @@ function renderTiles(usage) {
   if (totals.cacheCreation > 0) tiles.push([formatCount(totals.cacheCreation), 'cache creation']);
   if (totals.cost > 0) tiles.push([formatCost(totals.cost), 'reported cost']);
 
-  return `
+  return html`
     <div class="kt-metrics kt-token-tiles">
-      ${tiles.map(([value, label]) =>
-        `<div class="kt-metric"><strong>${escapeHtml(value)}</strong><span>${escapeHtml(label)}</span></div>`
-      ).join('')}
+      ${tiles.map(([value, label]) => html`
+        <div class="kt-metric" key=${label}><strong>${value}</strong><span>${label}</span></div>`)}
     </div>
   `;
 }
 
-function renderCallTable(usage) {
+function CallTable({ usage }) {
   const showCacheRead = usage.totals.cacheRead > 0;
   const showCacheCreation = usage.totals.cacheCreation > 0;
   const showCost = usage.totals.cost > 0;
 
-  const cell = (present, value) => `<td>${present ? escapeHtml(value) : '—'}</td>`;
+  const cell = (present, value) => html`<td>${present ? value : '—'}</td>`;
 
-  const row = (label, call, fields, cssClass = '') => `
-    <tr${cssClass ? ` class="${cssClass}"` : ''}>
-      <td>${escapeHtml(label)}</td>
+  const row = (label, call, fields, cssClass = '') => html`
+    <tr class=${cssClass || undefined} key=${label}>
+      <td>${label}</td>
       ${cell(fields.input, formatCount(call.input))}
       ${cell(fields.output, formatCount(call.output))}
-      ${showCacheRead ? cell(fields.cache_read, formatCount(call.cacheRead)) : ''}
-      ${showCacheCreation ? cell(fields.cache_creation, formatCount(call.cacheCreation)) : ''}
-      ${showCost ? cell(fields.total_cost && call.cost > 0, formatCost(call.cost)) : ''}
+      ${showCacheRead && cell(fields.cache_read, formatCount(call.cacheRead))}
+      ${showCacheCreation && cell(fields.cache_creation, formatCount(call.cacheCreation))}
+      ${showCost && cell(fields.total_cost && call.cost > 0, formatCost(call.cost))}
     </tr>
   `;
 
@@ -192,29 +198,29 @@ function renderCallTable(usage) {
     USAGE_KEYS.map(key => [key, usage.calls.some(call => call.fields[key])])
   );
 
-  return `
+  return html`
     <table class="kt-token-table">
       <thead>
         <tr>
           <th>Call</th><th>Input</th><th>Output</th>
-          ${showCacheRead ? '<th>Cache read</th>' : ''}
-          ${showCacheCreation ? '<th>Cache creation</th>' : ''}
-          ${showCost ? '<th>Cost</th>' : ''}
+          ${showCacheRead && html`<th>Cache read</th>`}
+          ${showCacheCreation && html`<th>Cache creation</th>`}
+          ${showCost && html`<th>Cost</th>`}
         </tr>
       </thead>
       <tbody>
-        ${usage.calls.map(call => row(`LLM call ${call.turn + 1}`, call, call.fields)).join('')}
+        ${usage.calls.map(call => row(`LLM call ${call.turn + 1}`, call, call.fields))}
         ${row('Total', usage.totals, totalFields, 'kt-token-total')}
       </tbody>
     </table>
   `;
 }
 
-function renderComposition(usage) {
+function Composition({ usage }) {
   const measure = usage.estimable ? 'estTokens' : 'chars';
   const buckets = usage.composition.filter(bucket => bucket.chars > 0);
   const total = buckets.reduce((sum, bucket) => sum + bucket[measure], 0);
-  if (!buckets.length || total <= 0) return '';
+  if (!buckets.length || total <= 0) return null;
 
   const resent = buckets
     .filter(bucket => RESENT_KEYS.has(bucket.key))
@@ -224,6 +230,7 @@ function renderComposition(usage) {
   const value = bucket => usage.estimable
     ? `≈${formatCount(Math.round(bucket.estTokens))} tokens`
     : `${formatCount(bucket.chars)} chars`;
+  const share = bucket => Math.round((bucket[measure] / total) * 100);
 
   let offset = 0;
   const segments = buckets.map(bucket => {
@@ -233,32 +240,34 @@ function renderComposition(usage) {
     return segment;
   });
 
-  return `
+  return html`
     <div class="kt-token-composition">
-      <div class="kt-turn-label">Input composition${usage.estimable ? ' (estimated)' : ' (by characters)'}</div>
+      <div class="kt-turn-label">
+        Input composition${usage.estimable ? ' (estimated)' : ' (by characters)'}
+      </div>
       <svg class="kt-token-bar" viewBox="0 0 100 10" preserveAspectRatio="none"
-        role="img" aria-label="Input composition by request section">
-        ${segments.map(({ bucket, x, width }) => `
-          <rect class="kt-token-color-${bucket.key}" x="${x}" width="${width}" height="10">
-            <title>${escapeHtml(`${bucket.label}: ${value(bucket)} · ${Math.round((bucket[measure] / total) * 100)}%`)}</title>
+           role="img" aria-label="Input composition by request section">
+        ${segments.map(({ bucket, x, width }) => html`
+          <rect key=${bucket.key} class=${`kt-token-color-${bucket.key}`}
+                x=${x} width=${width} height="10">
+            <title>${`${bucket.label}: ${value(bucket)} · ${share(bucket)}%`}</title>
           </rect>
-        `).join('')}
+        `)}
       </svg>
       <ul class="kt-token-legend">
-        ${buckets.map(bucket => `
-          <li>
-            <span class="kt-token-chip kt-token-color-${bucket.key}"></span>
-            <span class="kt-token-name">${escapeHtml(bucket.label)}</span>
-            <span class="kt-token-value">${escapeHtml(value(bucket))} · ${Math.round((bucket[measure] / total) * 100)}%</span>
+        ${buckets.map(bucket => html`
+          <li key=${bucket.key}>
+            <span class=${`kt-token-chip kt-token-color-${bucket.key}`}></span>
+            <span class="kt-token-name">${bucket.label}</span>
+            <span class="kt-token-value">${value(bucket)} · ${share(bucket)}%</span>
           </li>
-        `).join('')}
+        `)}
       </ul>
-      ${resent > 0 && buckets.length > 1 ? `
-        <p class="kt-token-note">
-          System prompt and tool schemas are resent with every call:
-          ${usage.estimable ? `≈${escapeHtml(formatCount(Math.round(resent)))} tokens` : `${escapeHtml(formatCount(resent))} chars`}
-          (${resentShare}% of run input).
-        </p>` : ''}
+      ${resent > 0 && buckets.length > 1 && html`
+        <p class="kt-token-note">${
+          'System prompt and tool schemas are resent with every call: ' +
+          (usage.estimable ? `≈${formatCount(Math.round(resent))} tokens` : `${formatCount(resent)} chars`) +
+          ` (${resentShare}% of run input).`}</p>`}
       <p class="kt-token-note">
         ${usage.estimable
           ? 'Providers report aggregate counts per call; section tokens apportion each call’s reported input tokens by character share.'

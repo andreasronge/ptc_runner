@@ -120,6 +120,9 @@ export function createReplController({
     resetSession: null,
     transcriptLength: 0,
     transcriptFingerprint: null,
+    sessionFingerprint: null,
+    deadline: null,
+    countdownTimer: null,
     reloadRequired: false,
     forcedRefreshPending: false,
     pollRecovery: null,
@@ -138,10 +141,6 @@ export function createReplController({
   dom.editor.addEventListener('keydown', event => {
     if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
       event.preventDefault();
-      if (state.polling) {
-        announce(dom, 'Session state is refreshing. Evaluate will be available again momentarily.', 'warning');
-        return;
-      }
       evaluate(dom, state, pageNonce);
     }
   });
@@ -154,6 +153,7 @@ export function createReplController({
     setActive(active) {
       state.active = active;
       if (active) {
+        startCountdown(dom, state);
         if (state.envelope) {
           refreshNow(dom, state, pageNonce, {
             forceStopped: state.forcedRefreshPending,
@@ -163,6 +163,7 @@ export function createReplController({
         else bootstrap(dom, state, pageNonce);
       } else {
         stopPolling(state);
+        stopCountdown(state);
       }
     },
 
@@ -628,7 +629,7 @@ function acceptEnvelope(dom, state, envelope, { preserveStopped = false } = {}) 
   state.envelope = envelope;
   if (!preserveStopped) state.stoppedError = null;
   state.conflictActive = false;
-  if (!preserveStopped) dom.retry.hidden = true;
+  if (!preserveStopped) setHidden(dom.retry, true);
   renderSession(dom, state);
   renderTranscript(dom, state);
   renderControls(dom, state);
@@ -642,16 +643,16 @@ function renderSession(dom, state) {
   const usage = session.usage || {};
   const evaluations = usage.evaluations || {};
 
+  // The budget clock is the one field that differs on every poll. It is
+  // rendered from a locally ticked deadline (see `startCountdown`) so a
+  // second passing never re-runs this projection, and this function is
+  // fingerprinted on everything else.
+  state.deadline = typeof usage.remaining_ms === 'number'
+    ? Date.now() + usage.remaining_ms
+    : null;
+  renderCountdown(dom, state);
+
   const namespaces = Array.isArray(session.namespaces) ? session.namespaces.join(', ') : '—';
-  dom.profileBanner.textContent = `server-owned ${session.profile_id || 'analysis'} profile and ${namespaces} API`;
-
-  dom.lifecycle.textContent = humanize(envelope.lifecycle || 'unknown');
-  dom.lifecycle.dataset.state = envelope.lifecycle || 'unknown';
-  dom.capturedAt.textContent = `snapshot ${formatTimestamp(snapshot.captured_at)}`;
-  dom.runCount.textContent = `${number(snapshot.run_count)} runs`;
-  dom.evaluationsLeft.textContent = `${number(evaluations.remaining)} evaluations left`;
-  dom.timeLeft.textContent = `${formatDuration(usage.remaining_ms)} left`;
-
   const continuation = usage.continuation || {};
   const trace = session.trace || {};
   const traceCalls = usage.trace_calls || {};
@@ -675,11 +676,65 @@ function renderSession(dom, state) {
     `${name} calls`,
     `${number(traceCalls[name]?.used)} used / ${number(traceCalls[name]?.remaining)} left`
   ]));
+
+  const fingerprint = JSON.stringify([
+    envelope.lifecycle, session.profile_id, namespaces, snapshot.captured_at,
+    snapshot.run_count, evaluations.remaining, details
+  ]);
+  if (fingerprint === state.sessionFingerprint) return;
+  state.sessionFingerprint = fingerprint;
+
+  setText(dom.profileBanner, `server-owned ${session.profile_id || 'analysis'} profile and ${namespaces} API`);
+  setText(dom.lifecycle, humanize(envelope.lifecycle || 'unknown'));
+  dom.lifecycle.dataset.state = envelope.lifecycle || 'unknown';
+  setText(dom.capturedAt, `snapshot ${formatTimestamp(snapshot.captured_at)}`);
+  setText(dom.runCount, `${number(snapshot.run_count)} runs`);
+  setText(dom.evaluationsLeft, `${number(evaluations.remaining)} evaluations left`);
+
   dom.metadata.replaceChildren(...details.flatMap(([term, value]) => {
     const dt = node('dt', null, term);
     const dd = node('dd', null, value == null ? '—' : String(value));
     return [dt, dd];
   }));
+}
+
+// The remaining-budget clock ticks from a locally held deadline. Rendering it
+// on the poll response instead would tie a once-per-second text change to a
+// full session projection, which is what made the whole panel churn.
+function renderCountdown(dom, state) {
+  const remaining = state.deadline == null ? null : Math.max(0, state.deadline - Date.now());
+  setText(dom.timeLeft, `${formatDuration(remaining)} left`);
+}
+
+// Ticks only while the REPL panel is active, alongside polling, so a hidden
+// panel neither polls nor holds a timer.
+function startCountdown(dom, state) {
+  stopCountdown(state);
+  state.countdownTimer = setInterval(() => renderCountdown(dom, state), 1000);
+  // Browsers return an opaque handle; under node (the render test harness) it
+  // is a Timeout that would otherwise keep the process alive.
+  state.countdownTimer?.unref?.();
+}
+
+function stopCountdown(state) {
+  if (state.countdownTimer !== null) clearInterval(state.countdownTimer);
+  state.countdownTimer = null;
+}
+
+function setText(element, value) {
+  if (element.textContent !== value) element.textContent = value;
+}
+
+function setDisabled(element, value) {
+  if (element.disabled !== value) element.disabled = value;
+}
+
+function setHidden(element, value) {
+  if (element.hidden !== value) element.hidden = value;
+}
+
+function setTitle(element, value) {
+  if (element.title !== value) element.title = value;
 }
 
 function renderTranscript(dom, state) {
@@ -760,18 +815,23 @@ function transcriptCard(dom, state, entry, index) {
   return card;
 }
 
+// Every write here is conditional. `renderControls` runs on each poll leg, so
+// unconditional assignment rewrote `disabled` on five buttons several times a
+// second; with a background refresh no longer part of `mutationBlocked` the
+// values are stable, and the guards keep an idle session from touching the DOM
+// at all.
 function renderControls(dom, state) {
   const lifecycle = state.envelope?.lifecycle;
   const blocked = mutationBlocked(state);
   const resettable = resettableLifecycle(lifecycle);
-  dom.evaluate.disabled = blocked || lifecycle !== 'open';
-  dom.reset.disabled = blocked || !resettable;
-  dom.close.disabled = blocked || !['open', 'terminal', 'persistence_failed', 'backend_failed'].includes(lifecycle);
-  dom.editor.disabled = lifecycle === 'backend_failed';
-  dom.resetConfirm.disabled = blocked || !resettable;
-  dom.retry.disabled = state.retryMode === 'reset'
+  setDisabled(dom.evaluate, blocked || lifecycle !== 'open');
+  setDisabled(dom.reset, blocked || !resettable);
+  setDisabled(dom.close, blocked || !['open', 'terminal', 'persistence_failed', 'backend_failed'].includes(lifecycle));
+  setDisabled(dom.editor, lifecycle === 'backend_failed');
+  setDisabled(dom.resetConfirm, blocked || !resettable);
+  setDisabled(dom.retry, state.retryMode === 'reset'
     ? retryResetBlocked(state)
-    : state.polling || state.mutationActive || state.conflictActive;
+    : state.mutationActive || state.conflictActive);
   // A fresh page may accept one Analyze intent and carry it through the lazy
   // bootstrap. Once a session exists, Analyze follows normal mutation gates.
   const available = state.envelope
@@ -781,16 +841,16 @@ function renderControls(dom, state) {
     state.availability = available;
     state.onAvailabilityChange(available);
   }
-  dom.close.textContent = lifecycle === 'persistence_failed'
+  setText(dom.close, lifecycle === 'persistence_failed'
     ? 'Retry persistence'
     : lifecycle === 'backend_failed'
       ? 'Close and preserve trace'
-      : 'Close and persist';
-  dom.evaluate.title = lifecycle === 'terminal'
+      : 'Close and persist');
+  setTitle(dom.evaluate, lifecycle === 'terminal'
     ? 'The session reached a terminal budget. Close or reset it.'
     : lifecycle === 'closed'
       ? 'This session is closed. Reset to start a fresh session.'
-      : '';
+      : '');
 }
 
 function canMutate(state, kind) {
@@ -800,10 +860,15 @@ function canMutate(state, kind) {
   return true;
 }
 
+// A background poll is a read: it never changes `mutation_nonce`, and a
+// response that arrives mid-mutation is rejected by `compareEnvelopes` for
+// going backwards. It therefore must not gate the user's controls — doing so
+// disabled every button for the duration of each poll leg, which both flickered
+// and swallowed clicks that landed in the window.
 function mutationBlocked(state) {
   const lifecycle = state.envelope?.lifecycle;
   const busyLifecycle = ['starting', 'evaluating', 'templating', 'resetting', 'closing', 'reconciling_start'].includes(lifecycle);
-  return !state.envelope || state.mutationActive || state.polling || state.conflictActive ||
+  return !state.envelope || state.mutationActive || state.conflictActive ||
     busyLifecycle || Boolean(state.stoppedError);
 }
 

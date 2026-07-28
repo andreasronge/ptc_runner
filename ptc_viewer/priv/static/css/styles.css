@@ -100,32 +100,67 @@ button:focus-visible, textarea:focus-visible, summary:focus-visible {
 }
 
 /* === File Picker === */
-.file-picker {
-  display: none;
+/* `#file-picker` is a bare mount point; the visible surface is whichever of
+   the panel (browsing) or bar (a run is open) the component renders. */
+.file-picker { display: block; margin-bottom: 20px; }
+.file-picker-panel {
   background: var(--bg-light);
   border-radius: 8px;
   padding: 16px;
-  margin-bottom: 20px;
 }
 .file-picker-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  cursor: pointer;
-  user-select: none;
+  gap: 16px;
+  flex-wrap: wrap;
 }
-.file-picker-header:hover { opacity: 0.8; }
-.file-picker h3 { margin: 0 0 12px 0; font-size: 14px; color: var(--muted); }
-.file-picker-header h3 { margin: 0; display: flex; align-items: center; gap: 8px; }
-.file-picker-count { font-size: 11px; font-weight: 400; }
-.file-picker-expand {
+.file-picker-header h3 {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
   color: var(--muted);
-  font-size: 16px;
-  transition: transform 0.2s;
 }
-.file-picker.collapsed .file-picker-expand { transform: rotate(-90deg); }
-.file-picker.collapsed .file-picker-list { display: none; }
-.file-picker.collapsed { padding: 12px 16px; }
+.file-picker-count { font-size: 11px; font-weight: 400; }
+.file-picker-search {
+  flex: 1 1 240px;
+  min-width: 0;
+  max-width: 360px;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-family: inherit;
+  color: var(--fg);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+.file-picker-search:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+.file-picker-empty { margin: 12px 2px 0; font-size: 12px; color: var(--muted); }
+
+/* Compact bar shown while a run is open: names the run and is the single
+   control that returns to the list. */
+.file-picker-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  background: var(--bg-light);
+  border-radius: 8px;
+  padding: 10px 16px;
+}
+.file-picker-back { flex-shrink: 0; }
+.file-picker-current { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.file-picker-current strong {
+  font-family: monospace;
+  font-weight: 500;
+  color: var(--accent);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .file-picker-list { display: flex; flex-direction: column; gap: 4px; margin-top: 12px; max-height: 400px; overflow-y: auto; }
 .file-picker-item {
   padding: 8px 12px;
@@ -135,13 +170,16 @@ button:focus-visible, textarea:focus-visible, summary:focus-visible {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 16px;
   transition: background 0.15s, border-color 0.15s;
   border-left: 3px solid transparent;
+  text-align: left;
+  width: 100%;
+  font: inherit;
+  color: inherit;
 }
 .file-picker-item:hover { background: var(--bg-hover); }
-.file-picker-item.active { border-left-color: var(--accent); background: var(--bg-hover); }
-.file-picker-item.loading { opacity: 0.6; pointer-events: none; }
-.file-picker-item.loading .filename::after { content: ' Loading...'; color: var(--muted); font-style: italic; }
+.file-picker-item:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .file-picker-item .filename { font-family: monospace; color: var(--accent); }
 .file-picker-item .file-meta { display: flex; gap: 12px; align-items: center; flex-shrink: 0; }
 .file-picker-item .modified { font-size: 11px; color: var(--muted); }
@@ -1437,6 +1475,7 @@ button:focus-visible, textarea:focus-visible, summary:focus-visible {
   .breadcrumb-item.active { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .file-picker-item { align-items: stretch; flex-direction: column; }
   .file-picker-main { min-width: 0; align-items: flex-start; flex-direction: column; gap: 5px; }
+  .file-picker-item { align-items: flex-start; gap: 6px; }
   .file-picker-item .filename { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .file-picker-item .file-meta { flex-wrap: wrap; gap: 5px 10px; }
   .kt-hero { padding: 18px; }
@@ -1764,7 +1803,8 @@ button:focus-visible, textarea:focus-visible, summary:focus-visible {
 
 .breadcrumb button { border: 0; font: inherit; }
 .file-picker-item { width: 100%; border-top: 0; border-right: 0; border-bottom: 0; color: inherit; font: inherit; text-align: left; }
-.file-picker-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.file-picker-main { display: flex; flex-direction: row; align-items: center; gap: 10px; min-width: 0; }
+.file-picker-main .filename { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .file-picker-query { max-width: 45%; overflow: hidden; color: var(--muted); font: 11px monospace; text-overflow: ellipsis; white-space: nowrap; }
 
 .repl-panel { max-width: 1440px; margin: 0 auto 60px; }
@@ -1871,3 +1911,95 @@ button:focus-visible, textarea:focus-visible, summary:focus-visible {
   .file-picker-item { align-items: flex-start; flex-direction: column; gap: 5px; }
   .file-picker-query { max-width: 100%; }
 }
+
+
+/* === Reference disclosures ===
+   Preludes, fingerprints, the captured system prompt and the execution
+   transcript are supporting evidence rather than the story of the run, so they
+   are collapsed panels below the dialogue instead of always-open sections. */
+.kt-reference { display: flex; flex-direction: column; gap: 10px; margin-top: 24px; }
+.kt-reference-panel {
+  background: var(--bg-light);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.kt-reference-panel > summary {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 12px 16px;
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+}
+.kt-reference-panel > summary::-webkit-details-marker { display: none; }
+.kt-reference-panel > summary::before {
+  content: '▸';
+  color: var(--muted);
+  transition: transform 0.15s;
+}
+.kt-reference-panel[open] > summary::before { transform: rotate(90deg); }
+.kt-reference-panel > summary:hover { background: var(--bg-hover); border-radius: 8px; }
+.kt-disclosure-title {
+  font-weight: 700;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--fg);
+}
+.kt-disclosure-hint { color: var(--muted); font-size: 11px; }
+.kt-disclosure-body { padding: 0 16px 16px; }
+.kt-disclosure-body > .kt-preludes:last-child,
+.kt-disclosure-body > .kt-fingerprints:last-child { margin-bottom: 0; }
+
+/* === System prompt diff ===
+   A changed system prompt is reported as the change. Reprinting the whole
+   prompt per call buried the run in repeated identical text. */
+.kt-prompt-diff {
+  margin: 10px 0;
+  padding: 8px 0;
+  background: var(--bg);
+  border-radius: 6px;
+  font-family: monospace;
+  font-size: 12px;
+  overflow-x: auto;
+}
+.kt-diff-line { display: flex; gap: 8px; padding: 0 12px; white-space: pre; }
+.kt-diff-marker { flex-shrink: 0; width: 1ch; color: var(--muted); user-select: none; }
+.kt-diff-text { flex: 1; }
+.kt-diff-add { background: rgba(78, 201, 176, 0.12); }
+.kt-diff-add .kt-diff-marker, .kt-diff-add .kt-diff-text { color: var(--success); }
+.kt-diff-remove { background: rgba(244, 71, 71, 0.12); }
+.kt-diff-remove .kt-diff-marker, .kt-diff-remove .kt-diff-text { color: var(--error); }
+.kt-diff-context { color: var(--muted); }
+.kt-diff-elision {
+  color: var(--muted);
+  font-style: italic;
+  padding-top: 4px;
+  padding-bottom: 4px;
+  white-space: normal;
+}
+
+/* === Model prose ===
+   Assistant turns can carry prose alongside their tool call; it is the model's
+   stated reasoning, so it renders next to the generated program rather than
+   being dropped when a tool call is present. */
+.kt-msg-prose { margin: 6px 0 10px; padding-left: 10px; border-left: 2px solid var(--keyword); }
+.kt-msg-prose-label,
+.kt-msg-reasoning .kt-msg-role {
+  display: inline-block;
+  margin-bottom: 4px;
+  color: var(--keyword);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.kt-msg-reasoning {
+  margin-bottom: 10px;
+  padding: 10px 12px;
+  background: var(--bg);
+  border-left: 2px solid var(--keyword);
+  border-radius: 4px;
+}
+.kt-msg-reasoning .kt-msg-content { white-space: pre-wrap; }

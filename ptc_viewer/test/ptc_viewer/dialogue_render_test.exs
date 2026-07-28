@@ -239,22 +239,91 @@ defmodule PtcViewer.DialogueRenderTest do
       assert length(Regex.scan(~r/class="kt-provenance/, rendered)) == 1
     end
 
-    test "shows turn-specific system prompts and keeps raw capture secondary", %{
+    test "keeps the captured prompt and raw request behind disclosures", %{
       rendered: rendered
     } do
-      assert rendered =~ ~r/<details class="kt-system-prompt" open>/
-      assert rendered =~ "System prompt"
       assert rendered =~ "Captured model request"
       assert rendered =~ "Raw captured request"
       assert rendered =~ "kt-prompt-version"
       assert rendered =~ "PTC_AGENT_PROMPT_V1"
       assert rendered =~ "Available API"
       assert rendered =~ "Exact captured prompt"
-      assert rendered =~ "System prompt changed"
-      assert rendered =~ "FINAL TURN: the next program must call"
       refute rendered =~ "System prompt: same as LLM call 1."
       refute rendered =~ "Edited or unknown prompt format"
       refute rendered =~ "Exact request sent to the model"
+    end
+
+    test "reports a changed system prompt as a diff, not a second full copy", %{
+      rendered: rendered
+    } do
+      assert rendered =~ "System prompt changed"
+      assert rendered =~ "kt-prompt-diff"
+      # The only substantive change between the two captured prompts is the
+      # final-turn instruction, and it is marked as an addition.
+      assert rendered =~
+               ~r/kt-diff-add"><span class="kt-diff-marker"[^>]*>\+<\/span><span class="kt-diff-text">FINAL TURN: the next program must call/
+
+      assert rendered =~ ~r/\+1 −0 lines vs LLM call 1/
+      # Unchanged stretches are elided rather than reprinted.
+      assert rendered =~ "unchanged lines"
+
+      # The prompt body is rendered in full exactly once (for LLM call 1); the
+      # second call contributes only the diff plus its collapsed exact copy.
+      assert length(Regex.scan(~r/class="kt-prompt-section"/, rendered)) == 4
+    end
+
+    test "renders model prose next to the generated program, in both directions" do
+      prose = "Trying parse-lines first; falling back to read-text if it is unbound."
+
+      rendered =
+        render_fixtures(%{
+          inspection: fn inspection ->
+            update_in(inspection, ["records"], fn records ->
+              Enum.map(records, fn record ->
+                cond do
+                  # The provider response: prose alongside the tool call.
+                  record["record_type"] == "capability-output" and
+                      record["payload"]["name"] == "llm-request" ->
+                    put_in(record, ["payload", "result", "value", "content"], prose)
+
+                  # The same assistant turn replayed in the next request's history.
+                  record["record_type"] == "capability-input" and
+                      record["payload"]["name"] == "llm-request" ->
+                    update_in(record, ["payload", "arguments", "messages"], fn messages ->
+                      Enum.map(messages, fn message ->
+                        if message["role"] == "assistant" and message["tool_calls"],
+                          do: Map.put(message, "content", prose),
+                          else: message
+                      end)
+                    end)
+
+                  true ->
+                    record
+                end
+              end)
+            end)
+          end
+        })
+
+      # Present as the model's own response...
+      assert rendered =~ "kt-msg-reasoning"
+      assert rendered =~ "assistant · prose"
+
+      # ...and preserved when that turn is replayed as history. Before, an
+      # assistant message carrying tool_calls rendered only its program and the
+      # prose was dropped.
+      assert rendered =~ "kt-msg-prose"
+
+      # Prose and generated source are both shown, never one instead of the other.
+      assert rendered =~ prose
+      assert rendered =~ "generated program"
+      assert length(Regex.scan(~r/#{Regex.escape(prose)}/, rendered)) >= 2
+    end
+
+    test "omits the prose block entirely when a response carries none", %{rendered: rendered} do
+      refute rendered =~ "kt-msg-reasoning"
+      refute rendered =~ "kt-msg-prose"
+      assert rendered =~ "generated program"
     end
 
     test "falls back to exact opaque text for an edited prompt format" do
@@ -401,7 +470,7 @@ defmodule PtcViewer.DialogueRenderTest do
 
       assert rendered =~ "Private inspection overlay is incomplete: 1/2 LLM calls joined."
       assert rendered =~ "LLM call 2"
-      assert rendered =~ "System prompt <span>LLM call 2"
+      assert rendered =~ "system prompt · LLM call 2"
       assert rendered =~ "Captured messages · previous request unavailable"
       refute rendered =~ "System prompt: same as LLM call 1."
       refute rendered =~ ~r/<strong>LLM call 1<\/strong>/

@@ -1,0 +1,9 @@
+Vendored ESM builds. No build step: these files are served verbatim from priv/static
+and imported directly by node in the test harness. The only edit applied is rewriting
+the bare specifier `from"preact"` to `from"./preact.mjs"` in hooks.mjs and
+render-to-string.mjs so both the browser and node resolve them without an import map
+or node_modules.
+
+preact                  10.29.7  (preact.mjs, hooks.mjs)
+htm                     3.1.1   (htm.mjs)
+preact-render-to-string 6.7.0   (render-to-string.mjs)
