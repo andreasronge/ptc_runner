@@ -17,6 +17,11 @@ examples/*/mix.lock
 # Temporary files, for example, from tests.
 /tmp/
 
+# Scratch manifests and host documents from probing runs at the repository
+# root. Deliberately anchored: a committed fixture deeper in the tree that
+# happens to end in .tmp.json should still be visible to Git.
+/*.tmp.json
+
 # If the VM crashes, it generates a dump, let's ignore it too.
 erl_crash.dump
 
