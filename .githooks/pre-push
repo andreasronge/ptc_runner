@@ -2,14 +2,12 @@
 # Pre-push hook — tracked under .githooks/ so it lives with the repo.
 #
 # Behavior:
-#   1. Docs-only short-circuit: if every file in the *combined* set
-#      (committed-diff against the remote + dirty worktree) matches the
-#      strict allow-list below, skip the test/dialyzer gate and exit 0.
-#   2. Otherwise: run the full tests for each top-level Mix project
-#      ("." and "ptc_viewer"), then invoke the root `mix prepush` alias for
-#      the upstream audit, Dialyzer, and unused-dependency check. The hook is
-#      the ordinary entry point; do not run `mix prepush` immediately before
-#      `git push`.
+#   1. Documentation routing: disposable plan-only changes skip the gate;
+#      other documentation-only changes run the ExDoc warnings gate.
+#   2. Otherwise: classify the affected contracts and run the relevant root,
+#      Viewer, launcher, and documentation gates. Root changes invoke the
+#      canonical `mix prepush` alias for the upstream audit, Dialyzer, and
+#      unused-dependency check.
 #
 # Override:
 #   FORCE_FULL_PRE_PUSH=1 git push  → always run the full gate, even if
@@ -18,13 +16,12 @@
 # Stdin contract (githooks(5)):
 #   <local-ref> <local-sha> <remote-ref> <remote-sha>\n  (one per ref)
 #
-# See Plans/pre-push-perf.md §"Phase 1" for design rationale, including
-# the allow-list / deny-list and the worktree-clean requirement.
-
 set -e
 
+HOOK_REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
 # ----------------------------------------------------------------------
-# Step 1: Docs-only short-circuit (unless FORCE_FULL_PRE_PUSH=1).
+# Step 1: Documentation routing (unless FORCE_FULL_PRE_PUSH=1).
 # ----------------------------------------------------------------------
 
 # Read stdin once. Pre-push hooks get ref tuples on stdin; if we don't
@@ -42,30 +39,55 @@ if [ -z "${FORCE_FULL_PRE_PUSH:-}" ]; then
   trap 'rm -f "$PY_TMP"' EXIT
   cat > "$PY_TMP" <<'PYEOF'
 import re
+import os
 import subprocess
 import sys
 
 # Exit codes returned to the bash wrapper:
-#   0 → docs-only, skip the full gate.
-#   2 → not docs-only (or empty), run the full gate.
+#   0 → plan-only, skip the full gate.
+#   2 → not docs-only, classify and run the selected gates.
+#   3 → user-facing docs only, run the documentation gate.
 #   1 → unexpected error; fail-safe by running the full gate.
 SKIP = 0
 RUN_FULL = 2
+RUN_DOCS = 3
 
-# Strict allow-list (exact regexes against repo-relative paths).
-ALLOW_PATTERNS = [
+PLAN_PATTERNS = [
     re.compile(r"^Plans/.*\.md$"),
     re.compile(r"^docs/plans/.*\.md$"),
+]
+
+DOC_PATTERNS = [
+    re.compile(r"^docs/.*$"),
+    re.compile(r"^[^/]+\.md$"),
+    re.compile(r"^ptc_runner_launcher/.*\.md$"),
+    re.compile(r"^ptc_viewer/.*\.md$"),
     re.compile(r"^CHANGELOG\.md$"),
-    re.compile(r"^ptc_viewer/CHANGELOG\.md$"),
-    re.compile(r"^LICENSES/MIT\.txt$"),
+    re.compile(r"^LICENSES/.*$"),
     re.compile(r"^\.gitignore$"),
     re.compile(r"^\.githooks/README\.md$"),
 ]
 
+GENERATED_DOC_PATTERNS = [
+    re.compile(r"^docs/function-reference\.md$"),
+    re.compile(r"^docs/java-interop\.md$"),
+    re.compile(r"^docs/conformance/.*$"),
+]
 
-def is_allowed(path):
-    return any(p.match(path) for p in ALLOW_PATTERNS)
+
+def matches(patterns, path):
+    return any(pattern.match(path) for pattern in patterns)
+
+
+def is_plan(path):
+    return matches(PLAN_PATTERNS, path)
+
+
+def is_documentation(path):
+    return (
+        matches(DOC_PATTERNS, path)
+        and not matches(GENERATED_DOC_PATTERNS, path)
+    )
 
 
 def run(args, **kwargs):
@@ -211,15 +233,21 @@ def main():
 
     combined = committed | dirty
 
+    paths_file = os.environ.get("PTC_PRE_PUSH_PATHS_FILE")
+    if paths_file:
+        with open(paths_file, "w", encoding="utf-8") as output:
+            for path in sorted(combined):
+                output.write(path)
+                output.write("\n")
+
     # Empty combined set → nothing to push *and* clean worktree.
-    # That can happen on a re-push of an already-pushed sha. Treat as
-    # docs-only-eligible: there's literally nothing to test.
-    non_allowed = [p for p in combined if not is_allowed(p)]
+    if not combined or all(is_plan(path) for path in combined):
+        return SKIP
 
-    if non_allowed:
-        return RUN_FULL
+    if all(is_plan(path) or is_documentation(path) for path in combined):
+        return RUN_DOCS
 
-    return SKIP
+    return RUN_FULL
 
 
 if __name__ == "__main__":
@@ -231,16 +259,25 @@ if __name__ == "__main__":
         sys.exit(RUN_FULL)
 PYEOF
 
+  PTC_PRE_PUSH_PATHS_FILE="$(mktemp -t pre-push-paths.XXXXXX)"
+  export PTC_PRE_PUSH_PATHS_FILE
+  trap 'rm -f "$PY_TMP" "$PTC_PRE_PUSH_PATHS_FILE"' EXIT
+
   set +e
   printf '%s' "$REFS_INPUT" | /usr/bin/env python3 "$PY_TMP"
   SHORT_CIRCUIT_RESULT=$?
   set -e
   rm -f "$PY_TMP"
-  trap - EXIT
 
   case "$SHORT_CIRCUIT_RESULT" in
     0)
-      echo "📝 Docs-only push, skipping full pre-push gate (override: FORCE_FULL_PRE_PUSH=1)"
+      echo "📝 Plan-only push, skipping full pre-push gate (override: FORCE_FULL_PRE_PUSH=1)"
+      exit 0
+      ;;
+    3)
+      echo "📚 Documentation-only push, running the ExDoc warnings gate..."
+      MIX_ENV=dev mix deps.get
+      MIX_ENV=dev mix docs --warnings-as-errors
       exit 0
       ;;
     2)
@@ -248,20 +285,52 @@ PYEOF
       ;;
     *)
       # Unexpected python failure — fail safe by running the full gate.
-      echo "⚠️  Docs-only check failed unexpectedly (exit=$SHORT_CIRCUIT_RESULT); running full gate."
+      echo "⚠️  Documentation routing failed unexpectedly (exit=$SHORT_CIRCUIT_RESULT); running full gate."
       ;;
   esac
+else
+  PTC_PRE_PUSH_PATHS_FILE="$(mktemp -t pre-push-force-full.XXXXXX)"
+  git ls-files > "$PTC_PRE_PUSH_PATHS_FILE"
+  trap 'rm -f "$PTC_PRE_PUSH_PATHS_FILE"' EXIT
 fi
 
 # ----------------------------------------------------------------------
-# Step 2: Full tests plus the canonical root pre-push gate.
+# Step 2: Run the gates selected by the combined pushed and dirty paths.
 # ----------------------------------------------------------------------
 
 echo "🔍 Running pre-push checks..."
 
 START_TIME=$(date +%s)
 
-PROJECTS=("." "ptc_viewer")
+SCOPES_FILE="$(mktemp -t pre-push-scopes.XXXXXX)"
+"$HOOK_REPO_ROOT/scripts/classify_changes.sh" "$PTC_PRE_PUSH_PATHS_FILE" > "$SCOPES_FILE"
+# The classifier emits only fixed boolean assignments.
+core=false
+launcher=false
+mcp_http=false
+mcp_filesystem=false
+java=false
+viewer=false
+docs=false
+# shellcheck disable=SC1090
+source "$SCOPES_FILE"
+rm -f "$SCOPES_FILE"
+
+PROJECTS=()
+if [ "$core" = true ] || [ "$mcp_http" = true ] ||
+   [ "$mcp_filesystem" = true ] || [ "$java" = true ]; then
+  PROJECTS+=(".")
+fi
+
+# Root trace and inspection contracts are consumed by the Viewer, so retain
+# Viewer coverage for core changes as well as Viewer-owned changes.
+if [ "$viewer" = true ] || [ "$core" = true ]; then
+  PROJECTS+=("ptc_viewer")
+fi
+
+if [ "$launcher" = true ]; then
+  PROJECTS+=("ptc_runner_launcher")
+fi
 
 project_has_dep() {
   local proj="$1" dep="$2"
@@ -283,6 +352,19 @@ run_project_gates() {
   echo "📦 Project: $label"
 
   pushd "$proj" > /dev/null
+
+  if [ "$proj" = "ptc_runner_launcher" ]; then
+    echo "  ⏳ Running launcher package and containment gate..."
+    local launcher_start=$SECONDS
+    if ! mix precommit; then
+      echo "  ❌ Launcher checks failed. Run: (cd ptc_runner_launcher && mix precommit)"
+      popd > /dev/null
+      exit 1
+    fi
+    echo "  ✅ Launcher checks passed in $((SECONDS - launcher_start))s"
+    popd > /dev/null
+    return 0
+  fi
 
   echo "  ⏳ Running full test suite..."
   local test_start=$SECONDS
@@ -325,6 +407,13 @@ run_project_gates() {
 for proj in "${PROJECTS[@]}"; do
   run_project_gates "$proj"
 done
+
+if [ "$docs" = true ]; then
+  echo ""
+  echo "📚 Documentation"
+  MIX_ENV=dev mix deps.get
+  MIX_ENV=dev mix docs --warnings-as-errors
+fi
 
 END_TIME=$(date +%s)
 ELAPSED=$((END_TIME - START_TIME))

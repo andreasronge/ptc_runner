@@ -407,7 +407,10 @@ defmodule PtcRunner.Lisp.Java.OracleFixturesTest do
     assert setup =~
              "babashka-${{ runner.os }}-${{ runner.arch }}-#{versions.babashka}-sha256-v1"
 
-    assert setup =~ "${{ runner.os }}-${{ runner.arch }}-mix-otp"
+    assert setup =~
+             "${{ runner.os }}-${{ runner.arch }}-mix-${{ inputs.project-directory }}-env"
+
+    assert setup =~ "hashFiles(format('{0}/mix.lock', inputs.project-directory))"
     assert setup =~ "plt-${{ runner.os }}-${{ runner.arch }}-otp"
   end
 

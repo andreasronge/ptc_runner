@@ -70,10 +70,10 @@ jobs:
 
       - name: Setup Elixir environment
         uses: ./.github/actions/setup-elixir
-
-      - name: Get launcher dependencies
-        working-directory: ptc_runner_launcher
-        run: mix deps.get
+        with:
+          project-directory: ptc_runner_launcher
+          cache-plt: 'false'
+          install-babashka: 'false'
 
       - name: Verify source package and process containment
         working-directory: ptc_runner_launcher
@@ -109,10 +109,10 @@ jobs:
 
       - name: Setup Elixir environment
         uses: ./.github/actions/setup-elixir
-
-      - name: Get launcher dependencies
-        working-directory: ptc_runner_launcher
-        run: mix deps.get
+        with:
+          project-directory: ptc_runner_launcher
+          cache-plt: 'false'
+          install-babashka: 'false'
 
       - name: Collect launcher artifacts
         uses: actions/download-artifact@v7

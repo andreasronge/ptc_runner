@@ -101,7 +101,7 @@ jobs:
       - name: Install git pre-commit hook
         if: steps.pr-branch.outputs.is_fork != 'true'
         run: |
-          cp scripts/pre-commit .git/hooks/pre-commit
+          cp scripts/pre-commit.template .git/hooks/pre-commit
           chmod +x .git/hooks/pre-commit
           echo "Installed pre-commit hook"
 

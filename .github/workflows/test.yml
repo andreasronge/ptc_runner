@@ -5,12 +5,71 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  schedule:
+    - cron: "23 4 * * 0"
+  workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    name: Classify changed files
+    outputs:
+      core: ${{ steps.scopes.outputs.core }}
+      launcher: ${{ steps.scopes.outputs.launcher }}
+      mcp_http: ${{ steps.scopes.outputs.mcp_http }}
+      mcp_filesystem: ${{ steps.scopes.outputs.mcp_filesystem }}
+      java: ${{ steps.scopes.outputs.java }}
+      viewer: ${{ steps.scopes.outputs.viewer }}
+      docs: ${{ steps.scopes.outputs.docs }}
+
+    steps:
+      - name: Checkout repository history
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Classify changed paths
+        id: scopes
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          paths_file="$(mktemp)"
+
+          if [ "$EVENT_NAME" = "schedule" ] || [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            printf '%s\n' '.github/workflows/test.yml' > "$paths_file"
+          else
+            base_sha="$BEFORE_SHA"
+            if [ "$EVENT_NAME" = "pull_request" ]; then
+              base_sha="$BASE_SHA"
+            fi
+
+            if [ -z "$base_sha" ] ||
+               [ "$base_sha" = "0000000000000000000000000000000000000000" ] ||
+               ! git cat-file -e "$base_sha^{commit}" 2>/dev/null; then
+              base_sha="$(git rev-parse "$GITHUB_SHA^" 2>/dev/null || true)"
+            fi
+
+            if [ -n "$base_sha" ]; then
+              git diff --name-only --no-renames "$base_sha" "$GITHUB_SHA" > "$paths_file"
+            else
+              git show --pretty=format: --name-only "$GITHUB_SHA" > "$paths_file"
+            fi
+          fi
+
+          scripts/classify_changes.sh "$paths_file" | tee -a "$GITHUB_OUTPUT"
+
   mcp-stdio-launcher:
+    needs: changes
+    if: needs.changes.outputs.launcher == 'true'
     runs-on: ${{ matrix.os }}
     name: MCP stdio launcher companion (${{ matrix.os }})
     strategy:
@@ -27,10 +86,10 @@ jobs:
 
       - name: Setup Elixir environment
         uses: ./.github/actions/setup-elixir
-
-      - name: Get launcher dependencies
-        working-directory: ptc_runner_launcher
-        run: mix deps.get
+        with:
+          project-directory: ptc_runner_launcher
+          cache-plt: 'false'
+          install-babashka: 'false'
 
       - name: Verify launcher package and process containment
         working-directory: ptc_runner_launcher
@@ -48,7 +107,8 @@ jobs:
           if-no-files-found: error
 
   mcp-stdio-launcher-package:
-    needs: mcp-stdio-launcher
+    needs: [changes, mcp-stdio-launcher]
+    if: needs.changes.outputs.launcher == 'true' && needs.mcp-stdio-launcher.result == 'success'
     runs-on: ubuntu-latest
     name: MCP stdio launcher release package
     env:
@@ -59,32 +119,12 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v6
 
-      # Deliberately not the shared setup action. That action resolves the root
-      # project, and under MIX_ENV=prod the root declares the companion as an
-      # unpublished Hex requirement rather than a path, so `mix deps.get` fails
-      # with "No package with name ptc_runner_launcher". It then runs a root Mix
-      # task to install Babashka, which would fail for the same reason. This job
-      # only assembles the launcher subproject, so it sets up Elixir directly.
-      - name: Set up Elixir
-        id: setup-beam
-        uses: erlef/setup-beam@v1
+      - name: Setup launcher packaging environment
+        uses: ./.github/actions/setup-elixir
         with:
-          elixir-version: '1.20.2'
-          otp-version: '29.0.3'
-
-      - name: Cache launcher dependencies
-        uses: actions/cache@v5
-        with:
-          path: |
-            ptc_runner_launcher/deps
-            ptc_runner_launcher/_build
-          key: launcher-pkg-${{ runner.os }}-${{ runner.arch }}-otp${{ steps.setup-beam.outputs.otp-version }}-elixir${{ steps.setup-beam.outputs.elixir-version }}-${{ hashFiles('ptc_runner_launcher/mix.lock') }}
-          restore-keys: |
-            launcher-pkg-${{ runner.os }}-${{ runner.arch }}-otp${{ steps.setup-beam.outputs.otp-version }}-elixir${{ steps.setup-beam.outputs.elixir-version }}-
-
-      - name: Get launcher dependencies
-        working-directory: ptc_runner_launcher
-        run: mix deps.get
+          project-directory: ptc_runner_launcher
+          cache-plt: 'false'
+          install-babashka: 'false'
 
       - name: Collect verified launcher artifacts
         uses: actions/download-artifact@v7
@@ -107,6 +147,8 @@ jobs:
           if-no-files-found: error
 
   mcp-http-interop:
+    needs: changes
+    if: needs.changes.outputs.mcp_http == 'true'
     runs-on: ubuntu-latest
     name: MCP stateless HTTP interoperability
     env:
@@ -120,6 +162,9 @@ jobs:
 
       - name: Setup Elixir environment
         uses: ./.github/actions/setup-elixir
+        with:
+          cache-plt: 'false'
+          install-babashka: 'false'
 
       - name: Setup pinned Go toolchain
         uses: actions/setup-go@v6
@@ -134,6 +179,8 @@ jobs:
               --include e2e --trace --warnings-as-errors
 
   mcp-filesystem-sample:
+    needs: changes
+    if: needs.changes.outputs.mcp_filesystem == 'true'
     runs-on: ubuntu-latest
     name: MCP filesystem sample server
 
@@ -143,6 +190,9 @@ jobs:
 
       - name: Setup Elixir environment
         uses: ./.github/actions/setup-elixir
+        with:
+          cache-plt: 'false'
+          install-babashka: 'false'
 
       - name: Setup pinned Node toolchain
         uses: actions/setup-node@v6
@@ -185,9 +235,11 @@ jobs:
           mix test test/ptc_runner/kernel/filesystem_mcp_e2e_test.exs \
             --include e2e --trace --warnings-as-errors
 
-  ci:
+  core:
+    needs: changes
+    if: needs.changes.outputs.core == 'true'
     runs-on: ubuntu-latest
-    name: Compile, test, format, credo, dialyzer & deps check
+    name: Core validation
     env:
       MIX_ENV: test
       HEX_SPONSOR: false
@@ -208,6 +260,9 @@ jobs:
       - name: Compile
         run: mix compile --warnings-as-errors
 
+      - name: Check compile-time dependency cycles
+        run: mix xref graph --format cycles --label compile-connected --fail-above 0
+
       - name: Run tests
         run: mix test --max-failures 1 --trace --warnings-as-errors
 
@@ -219,6 +274,9 @@ jobs:
 
       - name: Run Credo
         run: mix credo --strict
+
+      - name: Validate the PTC-Lisp specification
+        run: mix ptc.validate_spec
 
       - name: Check generated Java documentation and conformance inventory
         run: |
@@ -234,10 +292,9 @@ jobs:
       - name: Check unused dependencies
         run: mix deps.unlock --check-unused
 
-      - name: Build documentation
-        run: MIX_ENV=dev mix deps.get && MIX_ENV=dev mix docs --warnings-as-errors
-
   java-interop-conformance:
+    needs: changes
+    if: needs.changes.outputs.java == 'true'
     runs-on: ubuntu-latest
     name: Java interop conformance
     env:
@@ -276,3 +333,80 @@ jobs:
 
       - name: Verify closed-dispatch Java compatibility cases
         run: mix ptc.java_conformance --oracle ptc --subset closed-dispatch
+
+  viewer:
+    needs: changes
+    if: needs.changes.outputs.viewer == 'true' || needs.changes.outputs.core == 'true'
+    runs-on: ubuntu-latest
+    name: Viewer validation
+    env:
+      MIX_ENV: test
+      HEX_SPONSOR: false
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Setup Viewer Elixir environment
+        uses: ./.github/actions/setup-elixir
+        with:
+          project-directory: ptc_viewer
+          cache-plt: 'false'
+          install-babashka: 'false'
+
+      - name: Compile Viewer
+        working-directory: ptc_viewer
+        run: mix compile --warnings-as-errors
+
+      - name: Test Viewer
+        working-directory: ptc_viewer
+        run: mix test --warnings-as-errors
+
+  docs:
+    needs: changes
+    if: needs.changes.outputs.docs == 'true' || needs.changes.outputs.core == 'true'
+    runs-on: ubuntu-latest
+    name: Documentation validation
+    env:
+      MIX_ENV: dev
+      HEX_SPONSOR: false
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Setup documentation environment
+        uses: ./.github/actions/setup-elixir
+        with:
+          cache-plt: 'false'
+          install-babashka: 'false'
+
+      - name: Build documentation
+        run: mix docs --warnings-as-errors
+
+  required:
+    if: always()
+    needs:
+      - changes
+      - core
+      - viewer
+      - docs
+      - mcp-stdio-launcher
+      - mcp-stdio-launcher-package
+      - mcp-http-interop
+      - mcp-filesystem-sample
+      - java-interop-conformance
+    runs-on: ubuntu-latest
+    name: Required CI result
+
+    steps:
+      - name: Require every selected job to pass
+        env:
+          JOB_RESULTS: ${{ toJSON(needs) }}
+        run: |
+          jq -e '
+            all(
+              .[];
+              .result == "success" or .result == "skipped"
+            )
+          ' <<< "$JOB_RESULTS"

@@ -9,7 +9,7 @@ HOOKS_DIR=$(git rev-parse --git-path hooks)
 # Create hooks directory if it doesn't exist
 mkdir -p "$HOOKS_DIR"
 
-# Copy pre-commit hook
+# Install a stable wrapper; the implementation remains tracked in .githooks/.
 if [ -f scripts/pre-commit.template ]; then
   cp scripts/pre-commit.template "$HOOKS_DIR/pre-commit"
   chmod +x "$HOOKS_DIR/pre-commit"
@@ -19,7 +19,7 @@ else
   exit 1
 fi
 
-# Copy pre-push hook
+# Install a stable wrapper; the implementation remains tracked in .githooks/.
 if [ -f scripts/pre-push ]; then
   cp scripts/pre-push "$HOOKS_DIR/pre-push"
   chmod +x "$HOOKS_DIR/pre-push"

@@ -1,6 +1,20 @@
 name: 'Setup Elixir Environment'
 description: 'Install Elixir, OTP, and Mix dependencies with caching'
 
+inputs:
+  project-directory:
+    description: 'Mix project directory to prepare'
+    required: false
+    default: '.'
+  cache-plt:
+    description: 'Restore the root Dialyzer PLT cache'
+    required: false
+    default: 'true'
+  install-babashka:
+    description: 'Restore or install the root Babashka tool'
+    required: false
+    default: 'true'
+
 runs:
   using: 'composite'
   steps:
@@ -16,25 +30,28 @@ runs:
       id: cache-deps
       with:
         path: |
-          deps
-          _build
-        key: ${{ runner.os }}-${{ runner.arch }}-mix-otp${{ steps.setup-beam.outputs.otp-version }}-elixir${{ steps.setup-beam.outputs.elixir-version }}-${{ hashFiles('**/mix.lock') }}
+          ${{ inputs.project-directory }}/deps
+          ${{ inputs.project-directory }}/_build
+        key: ${{ runner.os }}-${{ runner.arch }}-mix-${{ inputs.project-directory }}-env${{ env.MIX_ENV || 'dev' }}-otp${{ steps.setup-beam.outputs.otp-version }}-elixir${{ steps.setup-beam.outputs.elixir-version }}-${{ hashFiles(format('{0}/mix.lock', inputs.project-directory)) }}
         restore-keys: |
-          ${{ runner.os }}-${{ runner.arch }}-mix-otp${{ steps.setup-beam.outputs.otp-version }}-elixir${{ steps.setup-beam.outputs.elixir-version }}-
+          ${{ runner.os }}-${{ runner.arch }}-mix-${{ inputs.project-directory }}-env${{ env.MIX_ENV || 'dev' }}-otp${{ steps.setup-beam.outputs.otp-version }}-elixir${{ steps.setup-beam.outputs.elixir-version }}-
 
     - name: Get dependencies
       run: mix deps.get
+      working-directory: ${{ inputs.project-directory }}
       shell: bash
 
     - name: Cache Dialyzer PLT
+      if: inputs.cache-plt == 'true'
       uses: actions/cache@v5
       with:
         path: priv/plts
-        key: plt-${{ runner.os }}-${{ runner.arch }}-otp${{ steps.setup-beam.outputs.otp-version }}-elixir${{ steps.setup-beam.outputs.elixir-version }}-${{ hashFiles('**/mix.lock') }}
+        key: plt-${{ runner.os }}-${{ runner.arch }}-otp${{ steps.setup-beam.outputs.otp-version }}-elixir${{ steps.setup-beam.outputs.elixir-version }}-${{ hashFiles('mix.lock') }}
         restore-keys: |
           plt-${{ runner.os }}-${{ runner.arch }}-otp${{ steps.setup-beam.outputs.otp-version }}-elixir${{ steps.setup-beam.outputs.elixir-version }}-
 
     - name: Cache Babashka
+      if: inputs.install-babashka == 'true'
       uses: actions/cache@v5
       id: cache-babashka
       with:
@@ -42,6 +59,6 @@ runs:
         key: babashka-${{ runner.os }}-${{ runner.arch }}-1.4.192-sha256-v1
 
     - name: Install Babashka
-      if: steps.cache-babashka.outputs.cache-hit != 'true'
+      if: inputs.install-babashka == 'true' && steps.cache-babashka.outputs.cache-hit != 'true'
       run: mix ptc.install_babashka --force
       shell: bash

@@ -28,8 +28,48 @@ defmodule PtcRunner.GitHooks.PrePushTest do
     {output, status} = run_hook(repo, path)
 
     assert status == 0
-    assert output =~ "Docs-only push, skipping full pre-push gate"
+    assert output =~ "Plan-only push, skipping full pre-push gate"
     refute File.exists?(mix_marker)
+  end
+
+  test "guide-only changes run only the documentation gate" do
+    %{repo: repo, mix_marker: mix_marker, path: path} =
+      git_repo_with_change("docs/guides/replay.md")
+
+    {output, status} = run_hook(repo, path)
+
+    assert status == 0
+    assert output =~ "Documentation-only push, running the ExDoc warnings gate"
+
+    assert mix_marker |> File.read!() |> String.split("\n", trim: true) ==
+             ["deps.get", "docs --warnings-as-errors"]
+  end
+
+  test "launcher-only changes run the launcher gate" do
+    %{repo: repo, mix_marker: mix_marker, path: path} =
+      git_repo_with_change("ptc_runner_launcher/c_src/launcher.c")
+
+    {output, status} = run_hook(repo, path)
+
+    assert status == 0
+    assert output =~ "Launcher checks passed"
+
+    assert mix_marker |> File.read!() |> String.split("\n", trim: true) ==
+             ["precommit"]
+  end
+
+  test "Viewer-only changes do not run the root gate" do
+    %{repo: repo, mix_marker: mix_marker, path: path} =
+      git_repo_with_change("ptc_viewer/lib/ptc_viewer.ex")
+
+    {output, status} = run_hook(repo, path)
+
+    assert status == 0
+    assert output =~ "Project: ptc_viewer/"
+    refute output =~ "Project: root"
+
+    assert mix_marker |> File.read!() |> String.split("\n", trim: true) ==
+             ["test --exclude clojure"]
   end
 
   @tag :slow

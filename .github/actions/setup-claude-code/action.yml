@@ -27,6 +27,11 @@ runs:
         rm -f /tmp/claude-install.lock 2>/dev/null || true
         rm -f ~/.claude/.installing 2>/dev/null || true
 
+    - name: Resolve cache bucket
+      id: cache-bucket
+      shell: bash
+      run: echo "week=$(date -u +%G-%V)" >> "$GITHUB_OUTPUT"
+
     - name: Cache Claude Code
       id: cache-claude
       uses: actions/cache@v5
@@ -35,7 +40,7 @@ runs:
           /home/runner/.local/bin/claude
           /home/runner/.claude
         # Include week number to bust cache weekly and pick up new versions
-        key: claude-code-${{ runner.os }}-v${{ inputs.version }}-week${{ github.run_id }}
+        key: claude-code-${{ runner.os }}-v${{ inputs.version }}-week${{ steps.cache-bucket.outputs.week }}
         restore-keys: |
           claude-code-${{ runner.os }}-v${{ inputs.version }}-
 
@@ -58,6 +63,8 @@ runs:
     - name: Install Claude Code
       if: steps.install.outputs.needs_install == 'true'
       shell: bash
+      env:
+        REQUESTED_VERSION: ${{ inputs.version }}
       run: |
         set -e
         echo "Installing Claude Code..."
@@ -73,8 +80,11 @@ runs:
         DOWNLOAD_DIR="$HOME/.claude/downloads"
         mkdir -p "$DOWNLOAD_DIR"
 
-        # Get stable version
-        version=$(curl -fsSL "$GCS_BUCKET/stable")
+        if [ "$REQUESTED_VERSION" = "latest" ]; then
+          version=$(curl -fsSL "$GCS_BUCKET/stable")
+        else
+          version="$REQUESTED_VERSION"
+        fi
         echo "Installing Claude Code v$version..."
 
         # Detect platform

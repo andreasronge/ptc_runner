@@ -35,11 +35,12 @@ how it was verified.
 - `mix precommit` — fast quality gate (format, compile, credo, schema, spec,
   root/Viewer tests, and launcher package/conformance/archive verification);
   run before every commit.
-- `git push` — the tracked pre-push hook runs the full root/Viewer tests and
-  then `mix prepush` (upstream API audit, Dialyzer, unused-deps). Do not run
-  `mix prepush` immediately before an ordinary push; invoke it directly only
-  for diagnosis or when hooks are unavailable. PR CI runs the same checks as
-  individual steps.
+- `git push` — the tracked pre-push hook classifies pushed and dirty paths and
+  runs the relevant root, Viewer, launcher, or documentation gates. Root
+  changes run the root tests and `mix prepush` (upstream API audit, Dialyzer,
+  unused-deps). Do not run `mix prepush` immediately before an ordinary push;
+  invoke it directly only for diagnosis or when hooks are unavailable. PR CI
+  runs the same checks as individual steps.
 - `mix test --include e2e` — E2E tests (requires `OPENROUTER_API_KEY`;
   the MCP tests also require the local server described below).
 - Fix all failures before committing/pushing.

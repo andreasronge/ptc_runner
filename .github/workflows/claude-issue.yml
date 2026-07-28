@@ -171,7 +171,7 @@ jobs:
         if: steps.pick.outputs.has_work == 'true' && steps.claim.outcome == 'success' && steps.issue-state.outcome == 'success' && steps.issue-state.outputs.should_run == 'true'
         timeout-minutes: 3
         run: |
-          cp scripts/pre-commit .git/hooks/pre-commit
+          cp scripts/pre-commit.template .git/hooks/pre-commit
           chmod +x .git/hooks/pre-commit
 
       - name: Setup Elixir environment
