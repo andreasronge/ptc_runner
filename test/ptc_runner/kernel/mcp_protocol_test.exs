@@ -177,7 +177,14 @@ defmodule PtcRunner.Kernel.MCPProtocolTest do
       "unknown" => %{"future" => true}
     }
 
-    state = %{tools: %{}, names: %{}, seen: %{}, received_tools: 0, received_bytes: 0}
+    state = %{
+      tools: %{},
+      names: %{},
+      seen: %{},
+      received_tools: 0,
+      received_bytes: 0,
+      cache_scope: nil
+    }
 
     assert {:continue, "next",
             %{
@@ -185,7 +192,11 @@ defmodule PtcRunner.Kernel.MCPProtocolTest do
               tools: %{"vendor.lookup" => ^incomplete_tool}
             } = state} =
              MCPProtocol.catalog_page(
-               %{"tools" => [incomplete_tool], "nextCursor" => "next"},
+               %{
+                 "tools" => [incomplete_tool],
+                 "nextCursor" => "next",
+                 "cacheScope" => "private"
+               },
                state,
                10,
                10_000
@@ -195,7 +206,7 @@ defmodule PtcRunner.Kernel.MCPProtocolTest do
 
     assert {:done, tools} =
              MCPProtocol.catalog_page(
-               %{"tools" => [valid_tool]},
+               %{"tools" => [valid_tool], "cacheScope" => "private"},
                state,
                10,
                10_000
@@ -206,17 +217,25 @@ defmodule PtcRunner.Kernel.MCPProtocolTest do
 
   test "rejects duplicate tools, looping cursors, invalid names, and exceeded bounds" do
     tool = %{"name" => "vendor.lookup"}
-    state = %{tools: %{}, names: %{}, seen: %{}, received_tools: 0, received_bytes: 0}
+
+    state = %{
+      tools: %{},
+      names: %{},
+      seen: %{},
+      received_tools: 0,
+      received_bytes: 0,
+      cache_scope: nil
+    }
 
     cases = [
-      {%{"tools" => [tool]},
+      {%{"tools" => [tool], "cacheScope" => "private"},
        %{state | tools: %{"vendor.lookup" => tool}, names: %{"vendor.lookup" => true}}, 10,
        10_000},
-      {%{"tools" => [tool], "nextCursor" => "seen"}, %{state | seen: %{"seen" => true}}, 10,
-       10_000},
-      {%{"tools" => [%{"name" => "bad name"}]}, state, 10, 10_000},
-      {%{"tools" => [tool]}, state, 0, 10_000},
-      {%{"tools" => [tool]}, state, 10, 0}
+      {%{"tools" => [tool], "nextCursor" => "seen", "cacheScope" => "private"},
+       %{state | seen: %{"seen" => true}}, 10, 10_000},
+      {%{"tools" => [%{"name" => "bad name"}], "cacheScope" => "private"}, state, 10, 10_000},
+      {%{"tools" => [tool], "cacheScope" => "private"}, state, 0, 10_000},
+      {%{"tools" => [tool], "cacheScope" => "private"}, state, 10, 0}
     ]
 
     for arguments <- cases do
@@ -225,7 +244,12 @@ defmodule PtcRunner.Kernel.MCPProtocolTest do
     end
 
     assert {:error, :mcp_catalog_exceeded} =
-             MCPProtocol.catalog_page(%{"tools" => [tool]}, state, 10, 1)
+             MCPProtocol.catalog_page(
+               %{"tools" => [tool], "cacheScope" => "private"},
+               state,
+               10,
+               1
+             )
   end
 
   test "counts discarded invalid header tools toward catalog ceilings across pages" do
@@ -239,11 +263,18 @@ defmodule PtcRunner.Kernel.MCPProtocolTest do
       }
     }
 
-    state = %{tools: %{}, names: %{}, seen: %{}, received_tools: 0, received_bytes: 0}
+    state = %{
+      tools: %{},
+      names: %{},
+      seen: %{},
+      received_tools: 0,
+      received_bytes: 0,
+      cache_scope: nil
+    }
 
     assert {:continue, "next", state} =
              MCPProtocol.catalog_page(
-               %{"tools" => [invalid], "nextCursor" => "next"},
+               %{"tools" => [invalid], "nextCursor" => "next", "cacheScope" => "private"},
                state,
                1,
                10_000
@@ -251,7 +282,7 @@ defmodule PtcRunner.Kernel.MCPProtocolTest do
 
     assert {:error, :mcp_catalog_exceeded} =
              MCPProtocol.catalog_page(
-               %{"tools" => [%{"name" => "vendor.valid"}]},
+               %{"tools" => [%{"name" => "vendor.valid"}], "cacheScope" => "private"},
                state,
                1,
                10_000
@@ -269,11 +300,18 @@ defmodule PtcRunner.Kernel.MCPProtocolTest do
       }
     }
 
-    state = %{tools: %{}, names: %{}, seen: %{}, received_tools: 0, received_bytes: 0}
+    state = %{
+      tools: %{},
+      names: %{},
+      seen: %{},
+      received_tools: 0,
+      received_bytes: 0,
+      cache_scope: nil
+    }
 
     assert {:continue, "next", state} =
              MCPProtocol.catalog_page(
-               %{"tools" => [invalid], "nextCursor" => "next"},
+               %{"tools" => [invalid], "nextCursor" => "next", "cacheScope" => "private"},
                state,
                10,
                10_000
@@ -281,7 +319,7 @@ defmodule PtcRunner.Kernel.MCPProtocolTest do
 
     assert {:error, :mcp_invalid_catalog} =
              MCPProtocol.catalog_page(
-               %{"tools" => [%{"name" => "vendor.lookup"}]},
+               %{"tools" => [%{"name" => "vendor.lookup"}], "cacheScope" => "private"},
                state,
                10,
                10_000

@@ -104,6 +104,17 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
   end
 
   @tag :tmp_dir
+  test "rejects a cache-scope change across catalog pages", %{tmp_dir: dir} do
+    fixture = fixture(self(), second_page_cache_scope: "public")
+    on_exit(fixture.close)
+
+    assert {:error, :mcp_invalid_catalog} =
+             dir
+             |> manifest(["remote.structured"])
+             |> RunBuilder.load_and_build(registry(fixture.endpoint))
+  end
+
+  @tag :tmp_dir
   test "bounded tool-error feedback is recoverable while canonical events stay closed", %{
     tmp_dir: dir
   } do
@@ -1500,7 +1511,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
         "resultType" => "complete",
         "tools" => tools,
         "ttlMs" => 0,
-        "cacheScope" => "private"
+        "cacheScope" => Keyword.get(opts, :second_page_cache_scope, "private")
       })
     end
   end

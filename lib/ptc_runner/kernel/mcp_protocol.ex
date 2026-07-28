@@ -10,9 +10,11 @@ defmodule PtcRunner.Kernel.MCPProtocol do
 
   Catalog reduction validates only the identity and pagination fields needed
   to find installed mappings. Contract fields on unselected tools are retained
-  without interpretation. Once a mapped tool is selected, its description,
-  schemas, and transport annotations are validated. Unknown tool fields remain
-  ignored for forward compatibility. The removed 2025-11-25
+  without interpretation. One paginated list operation must retain the same
+  `cacheScope` across every page, although page TTLs may differ. Once a mapped
+  tool is selected, its description, schemas, and transport annotations are
+  validated. Unknown tool fields remain ignored for forward compatibility. The
+  removed 2025-11-25
   `execution.taskSupport` field has no semantics in the pinned modern core.
 
   Structured results require a frozen object-output validator and explicit
@@ -210,15 +212,19 @@ defmodule PtcRunner.Kernel.MCPProtocol do
           names: names,
           seen: seen,
           received_tools: received_tools,
-          received_bytes: received_bytes
+          received_bytes: received_bytes,
+          cache_scope: cache_scope
         } = state,
         max_tools,
         max_bytes
       )
       when is_map(result) and is_map(tools) and is_map(names) and is_map(seen) and
+             (is_nil(cache_scope) or cache_scope in ["public", "private"]) and
              valid_catalog_counters(received_tools, received_bytes) and
              valid_catalog_limits(max_tools, max_bytes) do
-    with page when is_list(page) <- result["tools"],
+    with scope when scope in ["public", "private"] <- result["cacheScope"],
+         true <- is_nil(cache_scope) or cache_scope == scope,
+         page when is_list(page) <- result["tools"],
          {:ok, received_tools, received_bytes} <-
            catalog_usage(page, received_tools, received_bytes, max_tools, max_bytes),
          {:ok, tools, names} <- merge_tools(tools, names, page),
@@ -231,7 +237,8 @@ defmodule PtcRunner.Kernel.MCPProtocol do
           names: names,
           seen: if(is_binary(next), do: Map.put(seen, next, true), else: seen),
           received_tools: received_tools,
-          received_bytes: received_bytes
+          received_bytes: received_bytes,
+          cache_scope: scope
       })
     else
       {:error, _reason} = error -> error

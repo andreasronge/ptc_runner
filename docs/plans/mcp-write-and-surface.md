@@ -1,11 +1,8 @@
 # MCP write support and bounded client surfaces
 
-**Status:** proposed; no approved work. Revised 2026-07-28 against MCP draft
-`2026-07-28` at
-`modelcontextprotocol/modelcontextprotocol@7d6c7b86eb2f1442051849ca76429fde3c3008b0`.
-At 2026-07-28 14:03 UTC the promised final release had not yet appeared: the
-repository still exposed only the `2026-07-28-RC` prerelease, the final tag was
-absent, and the schema remained under `schema/draft/`.
+**Status:** proposed; the protocol baseline is reconciled, but no runtime work
+is approved. Revised 2026-07-28 against the final MCP `2026-07-28` tag at
+`modelcontextprotocol/modelcontextprotocol@5f5440bb26a62e2cf3440b92da5a667efa03b267`.
 
 PtcRunner installs MCP sources read-only. Every mapped tool must declare
 `effect: "read"`, and the source rejects writes outright. This plan covers the
@@ -52,9 +49,11 @@ slice does not re-derive it.
 
 ### Specification release check
 
-The current draft head is 281 commits ahead of the RC tag. Most changes are
-documentation, authorization, and SDK-alignment work, but these post-RC
-protocol details matter to PtcRunner:
+The final `2026-07-28` release and dated schema were published at
+2026-07-28 16:47 UTC. The final tag was compared with the draft commit used for
+this plan,
+`7d6c7b86eb2f1442051849ca76429fde3c3008b0`. The post-RC protocol details that
+matter to PtcRunner remain:
 
 | Post-RC change | PtcRunner consequence |
 | --- | --- |
@@ -67,17 +66,18 @@ protocol details matter to PtcRunner:
 | `InputRequiredResult` permits `requestState` without `inputRequests` | Section 5 must validate this as structurally valid before applying PtcRunner's policy refusal |
 | `subscriptions/listen` gained a graceful terminal result and stricter acknowledgement ordering | No immediate work because subscriptions remain deferred |
 
-The official Go SDK
-[released `v1.7.0`](https://github.com/modelcontextprotocol/go-sdk/releases/tag/v1.7.0)
-at 2026-07-28 13:09 UTC. It is two commits newer than the pseudo-version
-currently pinned by the interoperability harness; the additional changes are a
-conformance update and a Streamable HTTP nil-safety fix. Re-pin the harness to
-the stable SDK during Slice 0 rather than carrying the pseudo-version into later
-protocol work.
+Final-release reconciliation:
 
-This comparison is evidence against the exact draft commit above, not a claim
-that the final release will be byte-identical. Slice 0 repeats the comparison
-against the final tag when it appears.
+| Final delta from the recorded draft | Classification | PtcRunner consequence |
+| --- | --- | --- |
+| Draft specification links were promoted to the dated `2026-07-28` paths | Plan-only change | This plan and future reviews now cite the final tag; no runtime behavior changes |
+| `SubscriptionsListenResultResponse` was added and `SubscriptionsListenResultMeta` was renamed to `SubscriptionsListenResultMetaObject` | No impact | PtcRunner does not implement subscriptions; the surface remains deferred |
+| Cancellation, MRTR, stdio, Streamable HTTP, discovery, tools, and caching retained their normative draft behavior | No impact | The transport and policy conclusions in this plan remain valid |
+| Final-baseline review exposed the existing requirement that every page of one list operation use the same `cacheScope`; `ttlMs` may differ by page | Code change | Catalog reduction now carries the first page's scope and rejects mixed-scope pagination |
+| The official Go SDK [released `v1.7.0`](https://github.com/modelcontextprotocol/go-sdk/releases/tag/v1.7.0), two commits after the pinned pseudo-version | Code change | The interoperability harness is pinned to `v1.7.0`; the two SDK commits update conformance data and fix a Streamable HTTP nil dereference |
+
+The dated schema is now the authoritative fixture source for protocol-facing
+tests. The final release introduced no new PtcRunner runtime prerequisite.
 
 ### Effects and retry safety
 
@@ -280,12 +280,14 @@ Cancellation is transport-specific:
 - Streamable HTTP cancels by closing that request's response stream. It must
   not send `notifications/cancelled`.
 
-Current HTTP code kills the local Req task when its deadline expires. Existing
-tests prove the caller returns, but not that the server observes a disconnected
-response stream. Add a live loopback integration harness that records the
-disconnect and covers timeout, caller death, and run/provider close. If task
-termination does not reliably close the stream, introduce an explicitly owned,
-cancellable streaming request handle.
+Current HTTP code kills the local Req task when its deadline expires, and Req
+also halts a response stream after a complete SSE response, an oversized body,
+or an SSE parser error. Existing tests prove the caller returns, but not that
+the server observes a disconnected response stream. Add a live loopback
+integration harness that records the disconnect and covers timeout, caller
+death, run/provider close, and every early `{:halt, ...}` response path. If task
+termination or Req stream halt does not reliably close the stream, introduce an
+explicitly owned, cancellable streaming request handle.
 
 Cancellation is advisory and races with server execution. Write calls that are
 cancelled after dispatch remain indeterminate and non-retryable.
@@ -293,7 +295,8 @@ cancelled after dispatch remain indeterminate and non-retryable.
 Acceptance:
 
 - the server observes its Streamable HTTP response stream close after timeout,
-  caller death, and provider close;
+  caller death, provider close, a complete SSE response, response-size
+  rejection, and SSE parser rejection;
 - no HTTP cancellation notification is emitted;
 - stdio cancellation behavior remains unchanged; and
 - repeated cancellation leaves no request tasks, response streams, or
@@ -327,6 +330,9 @@ surface is implementation-approved until its host grammar answers:
 Use the common installed `timeout_ms` and `max_result_bytes` ceilings for calls.
 Add family-specific catalog item/page ceilings only where acquisition needs
 them; do not create a separate timeout and result ceiling for every method.
+Every paginated list operation must carry the first page's `cacheScope` through
+the reduction and reject a later page with a different scope; page `ttlMs`
+values remain independently variable.
 MCP `cacheScope: "private"` limits cache reuse to one authorization context; it
 is not a PtcRunner data classification and must not implicitly change
 `data_class` or `accepts_data`.
@@ -376,7 +382,7 @@ this as missing support:
 - a malformed MRTR result is a protocol error; and
 - state-only MRTR is never automatically retried, especially after a write.
 
-The classifier must validate the draft's structural requirements before
+The classifier must validate the final `2026-07-28` schema requirements before
 distinguishing policy refusal from malformed input. Tests must use a valid MRTR
 example rather than an empty result object.
 
@@ -392,35 +398,6 @@ correctness and authority findings, and runs the slice's focused tests plus
 `mix precommit`. Cosmetic findings do not trigger a new review round unless the
 fix changes behavior. Dependent slices do not begin from an unreviewed
 authority or wire contract.
-
-### Slice 0 — final-spec reconciliation
-
-**Scope**
-
-- Check the official specification releases, tags, dated schema directory, and
-  changelog again.
-- Compare the final tag with
-  `7d6c7b86eb2f1442051849ca76429fde3c3008b0`.
-- Replace the draft commit in this plan with the final tag and commit.
-- Re-pin `test/support/mcp_go_stateless` from its pseudo-version to the stable
-  Go SDK, then run the official-server interoperability test.
-- Record only deltas that affect PtcRunner; do not restate the whole upstream
-  changelog.
-
-The absence of a final tag does not block local work on Slice 1, whose safety
-semantics are protocol-independent. Protocol-facing slices must repeat this
-checkpoint at review if the final tag was still absent when they started.
-
-**Review checkpoint**
-
-- Verify the tag and schema are final rather than another prerelease.
-- Inspect every changed protocol type or normative transport paragraph used by
-  PtcRunner: request/result metadata, discovery, tool calls, cache hints,
-  standard headers, cancellation, and MRTR.
-- Confirm the stable Go SDK server advertises `2026-07-28` and the focused
-  remote E2E passes without fallback.
-- Require an explicit delta table saying `code change`, `plan-only change`, or
-  `no impact` for each relevant final-spec change.
 
 ### Slice 1 — effect-aware failure foundation
 
@@ -511,14 +488,14 @@ is one atomic merge even if developed as several commits.
 
 ### Slice 3 — Streamable HTTP cancellation
 
-**Depends on:** Slice 0 review if the final protocol has been published.
-
 **Scope**
 
 - Implement section 3 with a loopback server that observes response-stream
   closure.
 - Cover deadline expiry, caller death, provider close, and repeated
   connect/cancel cycles.
+- Cover every Req early-halt path: a complete SSE result, an oversized body,
+  and an SSE parser error.
 - Introduce an explicitly cancellable request owner only if killing the Req
   task does not reliably close the stream.
 
@@ -528,7 +505,7 @@ indeterminate classification of an abandoned write.
 **Review checkpoint**
 
 - Review packet-level behavior, not only the Elixir caller result: the server
-  must observe the HTTP stream close.
+  must observe the HTTP stream close on cancellation and every early-halt path.
 - Confirm HTTP never sends `notifications/cancelled` and stdio behavior remains
   unchanged.
 - Run descriptor/task leak stress tests on Linux and macOS.
@@ -537,8 +514,7 @@ indeterminate classification of an abandoned write.
 
 ### Slice 4 — MRTR validation and policy refusal
 
-**Depends on:** Slice 2, and the Slice 0 review if the final protocol has been
-published.
+**Depends on:** Slice 2.
 
 **Scope**
 
@@ -608,7 +584,8 @@ This is a specification slice. It changes no runtime code.
 
 - Trace every public resource capability back to one exact host-granted URI.
 - Test pagination limits, catalog changes, missing resources, text bounds,
-  private cache scope, and unsupported content.
+  private cache scope, mixed-scope pagination rejection, varying page TTLs, and
+  unsupported content.
 - Reject a single mismatched returned URI and a mixed multi-item response where
   only some items match the grant.
 - Verify `cacheScope` affects caching semantics only and never reclassifies

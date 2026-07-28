@@ -734,7 +734,15 @@ defmodule PtcRunner.Kernel.MCPSource do
   end
 
   defp list_tools(transport, installed) do
-    state = %{tools: %{}, names: %{}, seen: %{}, received_tools: 0, received_bytes: 0}
+    state = %{
+      tools: %{},
+      names: %{},
+      seen: %{},
+      received_tools: 0,
+      received_bytes: 0,
+      cache_scope: nil
+    }
+
     list_tools(transport, installed, nil, state, 0)
   end
 
