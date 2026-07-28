@@ -3,31 +3,50 @@
 PtcRunner lets an LLM write a small program to solve a task, then runs that
 program with only the tools you allow.
 
-Instead of sending every tool result back to the model, one PTC-Lisp program
-can call several tools, transform their results, branch, and loop. This can
-reduce model round trips while keeping credentials and unrestricted host access
-out of generated code.
+This pattern is often called **code mode**: instead of relaying one tool call at
+a time through the model, the model writes code that calls several tools,
+transforms their results, branches, and loops. That cuts round trips and keeps
+intermediate data out of the context window. The usual catch is that you are now
+executing model-written code.
+
+PtcRunner's answer is that the code is written in a language that cannot do
+anything dangerous in the first place.
 
 > PtcRunner is a 0.x project under active development. Breaking changes are
 > expected.
 
-## What is different?
+## Why it is safe
 
-- **Programmatic tool calling.** Deterministic work stays in generated code
-  instead of repeatedly passing intermediate data through the LLM.
-- **Replaceable agent behavior.** Prompts, retries, planning, memory, and
-  completion rules are PTC-Lisp libraries—not a loop fixed inside the runtime.
-- **Controlled tools.** Generated programs see a small task API, not
-  credentials, arbitrary files, network access, or host functions.
-- **Useful failures.** Successful definitions remain available on the next
-  turn; failed attempts roll back and return clear correction errors.
-- **Evidence for improvement.** Structured traces record outcomes, errors,
-  tool use, evaluations, and resource use. Exact prompts and generated code can
-  be captured separately during development.
+Most code-mode implementations generate Python or JavaScript and put a container
+or microVM around it, because those languages can do anything and the sandbox
+has to take it all back. PtcRunner inverts that: the boundary is the language
+and the capability grant, and a container is optional defense in depth rather
+than the thing holding the line.
 
-PtcRunner is most useful when a task needs several tool calls plus local data
-work, or when you want to experiment with agent behavior without changing the
-trusted host application.
+- **The language has no escape hatches.** PTC-Lisp is a small, eager subset of
+  Clojure. There is no `eval`, no macros, no host interop, no lazy or infinite
+  sequences, and no ambient filesystem, network, or process access. Generated
+  code cannot reach anything that was not handed to it.
+- **Model-written code runs with less authority than the code that called it.**
+  A run has two environments. The trusted *workflow* may call a model; the
+  *mission* that executes generated code gets only the narrow task tools the
+  host installed and the manifest selected. Mission code cannot call the model
+  capability and cannot re-enter the evaluation boundary.
+- **Applications cannot grant themselves authority.** A project's JSON manifest
+  selects installed provider names and may narrow them. It cannot name an
+  executable, endpoint, credential, or host callback, or raise a ceiling. Only
+  the separate operator-owned host document installs those.
+- **Every run is bounded, and enforced rather than requested.** Deadlines, heap,
+  tool-call counts, result sizes, and event budgets are held by the runtime.
+  The BEAM gives each evaluation its own heap and monitors, so a limit breach
+  kills the evaluation and cleans up its resources instead of being politely
+  asked to stop.
+
+Because isolation is a BEAM process rather than an OS process, it is cheap
+enough to do for every evaluation.
+
+Treat the workflow bundle and manifest as your application code. Treat
+model-generated source, tool output, and file content as untrusted data.
 
 ## How it works
 
@@ -39,59 +58,72 @@ task
   -> result, usage, and trace
 ```
 
-A project contains PTC-Lisp files and a small JSON manifest. The manifest
-chooses the entry function, input, providers, and limits. It cannot register
-host code or add tools the host did not install.
+A project is some PTC-Lisp files plus a small JSON manifest naming the entry
+function, input, providers, and limits. The runtime owns credentials, tool
+implementations, timeouts, memory limits, and cleanup.
 
-The workflow owns agent policy and may call a model. Model-written code runs in
-a separate mission with only the task tools granted by the host. The runtime
-owns credentials, tool implementations, timeouts, memory limits, and cleanup.
+A failed program is useful rather than fatal: definitions from successful turns
+stay available, failed attempts roll back cleanly, and the model gets a bounded
+correction message instead of a stack trace.
 
-## Why PTC-Lisp?
+## Swap the agent loop
 
-PTC-Lisp is a small subset of Clojure made for programmatic tool calling. Its
-regular syntax is compact for models, while still supporting data
-transformations, functions, branching, loops, and multiple tool calls. The
-model is shown the exact task API it may call; arbitrary host access, macros,
-`eval`, lazy or infinite sequences, and general Java interop are left out.
-
-### Preludes: reusable agent code
-
-Skills usually tell a model how to approach work. A prelude preserves working
-behavior as executable PTC-Lisp. Preludes can depend on one another and compile
-together into the fixed workflow or mission bundle used by a run. They
-typically work at three levels:
+The agent loop is not fixed inside the runtime. Prompts, retries, planning,
+memory, delegation, and completion rules are ordinary PTC-Lisp libraries called
+preludes, which compile into the frozen bundle a run executes. They work at
+three levels:
 
 - **Runtime:** safe wrappers for models, tools, results, and evaluation.
 - **Agent:** prompt, feedback, retry, memory, delegation, and workflow policy.
 - **Domain:** task-specific functions that combine lower-level tools into a
   smaller API for the model.
 
-Preludes can also shape model instructions. `agent.prompt` builds the system
-prompt, while prompt-visible domain functions appear in the model's available
-API with documentation and optional signatures. The model sees that rendered
-interface, not the prelude source by default.
+The shipped `agent.core` loop is one such library, and `agent.prompt` is a
+separate seam beside it: its `initial-state`, `render`, and `transition`
+functions are what you replace to change how a model is instructed, without
+touching the retry and evaluation machinery. The model sees the rendered
+interface — documented, optionally signed functions — not the prelude source.
 
-Prelude versions are selected explicitly today. A future promotion flow could
-use trace evidence to turn repeated successful programs into tested domain
-preludes for later runs. That code could improve how existing tools are used,
-but could not grant itself new tools or credentials.
+So you can experiment with agent behavior by editing PTC-Lisp, while the trusted
+host application stays unchanged.
 
-Trace analysis is itself programmable in PTC-Lisp. The shipped `log.core`
-prelude provides `log/runs`, `log/run`, `log/turns`, and `log/counters` over an
-unchanging trace capture. An investigation can start as a REPL function and
-later become a reusable analysis prelude. Logging does not improve the system
-automatically today; it provides the evidence and programmable analysis layer
-needed for a future improvement loop.
+## See what happened
 
-## Why the BEAM?
+Every run emits structured events: outcomes, errors, tool use, evaluations,
+limits, and resource use. They deliberately contain no prompts, model responses,
+tool payloads, or generated source.
 
-The BEAM virtual machine provides lightweight processes, separate heaps,
-message passing, and monitors. PtcRunner uses them for concurrent work,
-deadlines, memory limits, cleanup, and resource accounting. It behaves like a
-small process operating system inside the application, with much less startup
-overhead than an OS process or container for every evaluation. A container can
-still provide the outer security boundary.
+Analyzing them is itself a bounded run. The shipped `log.core` prelude exposes
+`log/runs`, `log/run`, `log/turns`, and `log/counters` to a mission whose only
+authority is querying one frozen capture of a trace directory — no filesystem,
+network, or model. An investigation can start as a REPL expression and graduate
+into a reusable analysis prelude.
+
+When you need the exact prompt and the exact generated code, that is a separate
+opt-in artifact written with owner-only permissions, kept out of normal trace
+discovery, and never joined into ordinary query results. There is also a local
+read-only viewer for browsing runs.
+
+## Evaluate a change
+
+Two pieces make it possible to test a change to agent behavior instead of
+guessing:
+
+- **Candidate components.** A trusted host step can compile one already-selected
+  component from replacement source, verifying both the hash of the candidate
+  and the hash of the base it was derived from before anything reaches the
+  compiler. A manifest cannot request one and a generated program cannot observe
+  one.
+- **A frozen model.** A replay provider serves recorded responses keyed by a
+  hash of the provider-neutral request, so a behavioural difference between a
+  baseline run and a candidate run is attributable to the candidate rather than
+  to model drift. It is selected by the same manifest grammar as a live model,
+  so nothing about the application changes between them.
+
+Promotion stays an explicit human decision today; turning trace evidence into
+promoted preludes automatically is future work. The important property holds
+either way: a candidate can change how existing tools are used, but cannot grant
+itself new tools or credentials.
 
 ## Try it
 
@@ -103,7 +135,7 @@ mix ptc.run examples/kernel-tutorial/01-orders/ptc.json
 ```
 
 The example loads JSON input, runs a PTC-Lisp function, and returns a JSON
-result. It requires no model credentials or Elixir code. See
+result. It needs no model credentials and no host code. See
 [Getting started](docs/guides/getting-started.md) for the walkthrough and trace
 commands, then [Building agents](docs/guides/building-agents.md) for a live
 model-generated program.
@@ -129,9 +161,12 @@ Read these in order. Each one owns its topic and links onward.
    PTC-Lisp workflow and inspect its result and trace.
 2. [Manifests and capabilities](docs/guides/manifests-and-capabilities.md) —
    assemble components, data, providers, limits, contracts, and event policy.
-3. [Building agents](docs/guides/building-agents.md) — put orchestration and
+3. [Host configuration](docs/guides/host-configuration.md) — the operator
+   document: credentials, provider sources, transports, data classes, and
+   installed ceilings.
+4. [Building agents](docs/guides/building-agents.md) — put orchestration and
    agent policy in PTC-Lisp while keeping mission authority narrow.
-4. [Running and debugging](docs/guides/running-and-debugging.md) — the
+5. [Running and debugging](docs/guides/running-and-debugging.md) — the
    commands, results, traces, private inspection, and development Viewer.
 
 ### Going further

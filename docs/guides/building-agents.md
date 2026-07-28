@@ -7,7 +7,9 @@ successful state, and decides when to return or fail.
 
 Read [Getting started](getting-started.md) first for a credential-free run.
 [Manifests and capabilities](manifests-and-capabilities.md) documents the
-manifest keys used throughout this guide, and
+manifest keys used throughout this guide,
+[Host configuration](host-configuration.md) documents the operator document and
+credentials the live examples need, and
 [Running and debugging](running-and-debugging.md) covers the commands, traces,
 and inspection artifacts. The examples here live under
 [`examples/kernel-tutorial/`](../../examples/kernel-tutorial/README.md) and use
@@ -159,54 +161,16 @@ The manifest selects host-installed aliases and may narrow their grants:
 }
 ```
 
-The separate trusted host document says what those names mean:
+A separate trusted host document says what those names mean. It resolves and
+freezes the model, sampling parameters, executable, working directory,
+credential binding, and tool mapping, so the manifest cannot invent a model,
+sampling policy, callback, command, credential, or network destination. The
+placement above is enforced rather than conventional: a live or replayed model
+is workflow-only, and MCP and snapshot sources are mission-only. See
+[Host configuration](host-configuration.md) for the operator side.
 
-```json
-"credentials": {
-  "openrouter_key": {"env": "OPENROUTER_API_KEY"}
-},
-"install": {
-  "deepseek": {
-    "source": "llm",
-    "model": "openrouter:deepseek/deepseek-v4-flash",
-    "credential": "openrouter_key",
-    "params": {
-      "temperature": 0.2,
-      "seed": 42,
-      "max_tokens": 4096
-    }
-  },
-  "workspace": {
-    "source": "mcp",
-    "transport": {
-      "type": "stdio",
-      "command": "node",
-      "cwd": ".",
-      "args": [
-        "../mcp/filesystem/dist/server.js",
-        "--root", "03-file-agent/files",
-        "--include", "**"
-      ],
-      "inherit_environment": true,
-      "env": {}
-    },
-    "tools": {
-      "read_text_file": {
-        "as": "workspace.read",
-        "effect": "read"
-      }
-    }
-  }
-}
-```
-
-The host resolves and freezes the model, optional sampling parameters,
-executable, working directory, snapshot include rules, credential binding, and
-tool mapping. The manifest cannot invent a model, sampling policy, callback,
-command, credential, or network destination. `params` is optional and closed;
-the supported host-fixed fields are `temperature` (0–2), `seed` (a
-non-negative signed 32-bit integer), and `max_tokens` (1–1,000,000). Provider support
-still varies, so use parameters the installed model actually implements.
+That split is what lets a model write mission code without inheriting the
+authority that called it.
 
 ## Call the provider-neutral LLM capability
 
@@ -285,9 +249,9 @@ returns data but does not author executable mission logic.
 ## Supply model credentials from the host
 
 Credentials never belong in PTC-Lisp, a manifest, a canonical trace, or a
-committed project file. The host document binds its `openrouter_key` credential
-to the operator's environment. For the tutorial's `deepseek` alias, use an
-OpenRouter key:
+committed project file. The host document declares them and the runtime
+resolves them at provider acquisition. To run the examples in this guide, set
+the key the repository's `deepseek` alias binds to:
 
 ```console
 cp .env.example .env
@@ -295,20 +259,8 @@ chmod 600 .env
 # Edit .env and set OPENROUTER_API_KEY to the real key.
 ```
 
-When commands run from the repository root, the adapter loads that `.env` at
-application startup. An already exported shell variable takes precedence:
-
-```console
-export OPENROUTER_API_KEY="..."
-mix ptc.run examples/kernel-tutorial/03-file-agent/ptc.json \
-  --host-config examples/kernel-tutorial/ptc-host.json
-```
-
-`.env` is ignored by Git, but it is still a plaintext local secret; use the
-shell, `direnv`, or a secret manager where appropriate. The host fixes the
-full `openrouter:deepseek/deepseek-v4-flash` model identifier, so the manifest's
-short alias contains no provider-resolution magic and cannot carry or override
-its credential.
+[Host configuration](host-configuration.md#credentials) documents the three
+declaration forms and how to move off `.env` for a real deployment.
 
 ## Give the model a small mission API
 
@@ -607,6 +559,8 @@ run with a private inspection artifact; see
   queries, private inspection, and the development Viewer.
 - [Manifests and capabilities](manifests-and-capabilities.md) documents
   provider selection, requested limits, contracts, and event policy.
+- [Host configuration](host-configuration.md) installs the providers a
+  manifest selects, and can swap a live model for a recorded one.
 - [Components and preludes](components-and-preludes.md) covers namespaces,
   dependencies, exports, signatures, and tool requirements when you package
   agent behavior as a reusable library.

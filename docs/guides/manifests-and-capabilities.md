@@ -265,21 +265,14 @@ include credentials, or choose an arbitrary endpoint. Placement is enforced:
 LLM sources are workflow-only; MCP and native snapshot sources are
 mission-only.
 
-Canonical PtcRunner traces use a native immutable source rather than MCP:
+[Host configuration](host-configuration.md) is the operator reference for that
+document: credentials, all five provider sources, transports, tool mappings,
+data classes, and installed ceilings.
 
-```json
-"history": {
-  "source": "ptc_trace_snapshot",
-  "directory": "traces",
-  "ceilings": {
-    "max_source_bytes": 8000000,
-    "max_result_bytes": 250000
-  }
-}
-```
-
-The manifest selects `{"name": "history"}` in its mission providers. The
-installed alias derives four fixed capabilities:
+Canonical PtcRunner traces use a native immutable source rather than MCP. Given
+a `ptc_trace_snapshot` alias named `history`, the manifest selects
+`{"name": "history"}` in its mission providers. The installed alias derives four
+fixed capabilities:
 `history.list-runs`, `history.get-run`, `history.list-turns`, and
 `history.counters`. Acquisition reads and validates the directory once;
 subsequent queries use the frozen capture even if path contents change. The
@@ -292,21 +285,9 @@ bare-hex `snapshot_hash`: the latter attests the complete installed provider
 identity, including its policy and ceilings, while `content_snapshot_hash`
 attests only the frozen queried bytes.
 
-Private inspection artifacts use a separate paired native source:
-
-```json
-"private-history": {
-  "source": "ptc_inspection_snapshot",
-  "directory": "inspection",
-  "ceilings": {
-    "max_files": 100,
-    "max_source_bytes": 64000000,
-    "max_result_bytes": 500000
-  }
-}
-```
-
-A manifest selecting `private-history` must also select exactly one
+Private inspection artifacts use a separate paired native source, installed as
+`ptc_inspection_snapshot`. A manifest selecting such an alias must also select
+exactly one
 `ptc_trace_snapshot` provider. Provider acquisition captures that canonical
 trace first, then loads each regular `.inspection.jsonl` artifact once through
 the authoritative inspection parser and validates every identity and
@@ -361,42 +342,12 @@ Limits cover the complete run, workflow and mission evaluations, process heap,
 source, retained continuation memory, provider concurrency and calls,
 capability arguments/results, terminal results, and canonical events.
 
-### Raising a ceiling for long-running work
-
 The compiled ceilings suit one bounded run. An agent that must work for hours
-needs more turns, more model calls, and more trace events than they allow, so
-the trusted host document may replace them with its own `limits` block:
-
-```json
-"limits": {
-  "run_duration_ms": 86400000,
-  "workflow_timeout_ms": 86400000,
-  "subordinate_evaluations": 500,
-  "workflow_capability_calls": 1000,
-  "workflow_capability_calls_per_name": 1000,
-  "mission_capability_calls": 8000,
-  "mission_capability_calls_per_name": 8000,
-  "normal_event_count": 20000,
-  "normal_event_bytes": 2000000000
-}
-```
-
-Every limit name is accepted, each value is a positive integer at most
-2,592,000,000, and any omitted name keeps its compiled installed default. The
-manifest rule is unchanged: it may still only request values at or below
-whatever the host installed, so raising a ceiling here does not by itself
-lengthen any run. A manifest that needs the larger budget must ask for it.
-
-Both documents are therefore explicit — the host decides the maximum an
-operator permits, and the manifest declares what its application needs.
-
-The most common reasons a long agent loop stops early are
-`subordinate_evaluations` (its turn count),
-the workflow total and per-name capability ceilings (its model calls),
-the mission total and per-name capability ceilings (its tool calls), and both
-the count and byte ceilings for normal events (its retained trace evidence).
-Raising `run_duration_ms` alone does not help, because the binding deadline for
-one workflow entry is `workflow_timeout_ms`.
+needs more turns, model calls, and trace events than they allow, and only the
+operator can grant that — see
+[Host configuration](host-configuration.md#installed-ceilings). Requesting more
+here than the host installed is rejected; a manifest that needs a larger budget
+must still ask for it after the operator raises the ceiling.
 
 ## Events and inspection
 
@@ -463,6 +414,8 @@ text do not belong there.
 
 ## Next steps
 
+- [Host configuration](host-configuration.md) is the operator half — what the
+  aliases selected here actually resolve to.
 - [Building agents](building-agents.md) puts model policy behind these grants.
 - [Running and debugging](running-and-debugging.md) runs a manifest and reads
   the traces, results, and inspection artifacts it declares.

@@ -61,7 +61,9 @@ event path in a web controller or job worker.
 Custom provider builders are trusted Elixir functions registered through
 `PtcRunner.Kernel.ProviderRegistry.new/1`. A manifest may select their bounded
 public names and JSON configuration, but it cannot provide executable callback
-code.
+code. Register a builder only for authority the five built-in sources cannot
+express; [Host configuration](host-configuration.md) covers what a plain
+operator document already installs.
 
 Builders receive the canonical manifest directory, target environment,
 construction owner, effective limits, and installed ceilings. They may return
@@ -119,6 +121,8 @@ sandbox boundary.
 - [Manifests and capabilities](manifests-and-capabilities.md) defines the
   strict manifest contract `RunBuilder` implements, so an embedded frontend
   accepts the same projects as `mix ptc.run`.
+- [Host configuration](host-configuration.md) defines the operator document
+  `HostConfig` loads and `HostInstallation` turns into a provider registry.
 - [Components and preludes](components-and-preludes.md) covers the bundle
   compiler that `compile_bundle/1` runs.
 - [Running and debugging](running-and-debugging.md) documents the trace and

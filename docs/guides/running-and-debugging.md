@@ -23,6 +23,11 @@ manifest, execution, result, and trace paths.
 `mix help ptc.run`, `mix help ptc.repl`, and `mix help ptc.viewer` list the
 installed options for each command.
 
+A provider-bearing manifest requires `--host-config`. Add `--check` to assemble
+and discover those providers, print a safe resolved view, and close everything
+without invoking the workflow or calling a model — see
+[Host configuration](host-configuration.md#verify-an-installation).
+
 ## Run a manifest
 
 ```console
@@ -249,5 +254,7 @@ unless the prompt restricts it to one token or one schema.
   and private inspection analysis.
 - [Manifests and capabilities](manifests-and-capabilities.md) — the event
   policy, contracts, and limits these commands enforce.
+- [Host configuration](host-configuration.md) — the providers, credentials, and
+  installed ceilings behind `--host-config`.
 - [Building agents](building-agents.md) — the agent policy that produces the
   runs you are debugging.

@@ -133,9 +133,12 @@ Continue in this order:
 1. [Manifests and capabilities](manifests-and-capabilities.md) documents the
    declarative authority boundary — components, input, contracts, providers,
    limits, and event policy.
-2. [Building agents](building-agents.md) explains model calls and confined
+2. [Host configuration](host-configuration.md) is the operator document that
+   installs providers and supplies credentials. You need it before any example
+   that calls a model.
+3. [Building agents](building-agents.md) explains model calls and confined
    model-authored mission programs.
-3. [Running and debugging](running-and-debugging.md) covers commands, traces,
+4. [Running and debugging](running-and-debugging.md) covers commands, traces,
    private inspection, and the development Viewer.
 
 The [PTC-Lisp specification](../ptc-lisp-specification.md) and

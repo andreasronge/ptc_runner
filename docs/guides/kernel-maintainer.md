@@ -9,6 +9,7 @@ documentation.
 For application authoring, start with
 [Getting started](getting-started.md), the
 [manifest guide](manifests-and-capabilities.md),
+[Host configuration](host-configuration.md),
 [Building agents](building-agents.md), and the
 [Kernel REPL guide](kernel-repl.md). PTC-Lisp semantics live in the
 [language specification](../ptc-lisp-specification.md); canonical trace

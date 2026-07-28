@@ -15,7 +15,6 @@ defmodule PtcRunner.Kernel.CoreContractTest do
   alias PtcRunner.Kernel.ReplSession
   alias PtcRunner.Kernel.ResultArtifact
   alias PtcRunner.Kernel.RunConfig
-  alias PtcRunner.Kernel.Runner
   alias PtcRunner.Kernel.RunState
   alias PtcRunner.Kernel.SafeMetadata
   alias PtcRunner.Kernel.WorkflowEnvironment

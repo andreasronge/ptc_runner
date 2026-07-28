@@ -27,6 +27,7 @@ const DEFAULT_DOCS = [
   'docs/guides/documentation-guidelines.md',
   'docs/guides/embedding-in-elixir.md',
   'docs/guides/getting-started.md',
+  'docs/guides/host-configuration.md',
   'docs/guides/kernel-maintainer.md',
   'docs/guides/kernel-repl.md',
   'docs/guides/large-change-guidelines.md',

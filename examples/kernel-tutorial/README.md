@@ -30,6 +30,11 @@ They require `OPENROUTER_API_KEY` in the host environment and use the trusted
 Git-ignored `.env` and replace its placeholder before running a live model
 example. Credentials never go in the manifests or PTC-Lisp files.
 
+[`ptc-host.json`](ptc-host.json) is the shared operator document these examples
+install from;
+[`docs/guides/host-configuration.md`](../../docs/guides/host-configuration.md)
+explains its fields.
+
 Run the live tutorial contracts manually with:
 
 ```bash

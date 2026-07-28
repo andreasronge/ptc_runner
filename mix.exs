@@ -219,6 +219,7 @@ defmodule PtcRunner.MixProject do
           "docs/conformance/index.md",
           "docs/guides/getting-started.md",
           "docs/guides/manifests-and-capabilities.md",
+          "docs/guides/host-configuration.md",
           "docs/guides/building-agents.md",
           "docs/guides/running-and-debugging.md",
           "docs/guides/kernel-repl.md",
