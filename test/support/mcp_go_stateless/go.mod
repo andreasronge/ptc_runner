@@ -2,7 +2,7 @@ module github.com/andreasronge/ptc_runner/test/support/mcp_go_stateless
 
 go 1.25.0
 
-require github.com/modelcontextprotocol/go-sdk v1.7.0-pre.3.0.20260724080706-e761950d9795
+require github.com/modelcontextprotocol/go-sdk v1.7.0
 
 require (
 	github.com/google/jsonschema-go v0.4.3 // indirect

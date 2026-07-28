@@ -18,9 +18,9 @@ belongs in guides or retained specifications.
 
 ## Proposed, not scheduled
 
-- [`mcp-write-and-surface.md`](mcp-write-and-surface.md) investigates write-effect
-  MCP tools, the remaining read-oriented client surface, and why
-  server-initiated model access stays refused.
+- [`mcp-write-and-surface.md`](mcp-write-and-surface.md) plans effect-safe MCP
+  writes and HTTP cancellation, records the authority design required before
+  exact-resource access, and keeps server-initiated model access refused.
 
 ## Future, trigger-gated
 

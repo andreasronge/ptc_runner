@@ -7,8 +7,8 @@ defmodule PtcRunner.Kernel.MCPRemoteE2ETest do
 
   The interoperability baseline is the checked-in
   `test/support/mcp_go_stateless` harness. Its Go module pins the official SDK
-  revision `e761950d9795d120ce9b00e5ba87b93c30a7be90`, explicitly configures
-  `StreamableHTTPOptions{Stateless: true}`, and exposes the `cityTime` tool.
+  release `v1.7.0`, explicitly configures `StreamableHTTPOptions{Stateless:
+  true}`, and exposes the `cityTime` tool.
   Unlike the loopback fixture, this covers an independently maintained
   protocol implementation and real SDK schemas. Public credential-free
   servers speaking a sessionful revision are intentionally not fallback
