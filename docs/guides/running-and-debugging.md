@@ -14,6 +14,7 @@ manifest, execution, result, and trace paths.
 | `mix ptc.run MANIFEST --output VALUE.json` | Write only the validated result value |
 | `mix ptc.run MANIFEST --trace TRACE.jsonl` | Persist bounded canonical events after the run |
 | `mix ptc.run MANIFEST --inspect RUN.inspection.jsonl` | Also write the owner-only private artifact |
+| `mix ptc.run MANIFEST --component-override-descriptor D.json` | Compile one selected component from verified replacement source |
 | `mix ptc.repl` | Start the direct transactional PTC-Lisp REPL |
 | `mix ptc.repl -e EXPR -l SETUP.clj` | Run repeatable expressions with optional setup |
 | `mix ptc.repl --manifest MANIFEST` | Reuse a manifest's workflow bundle and capabilities |
@@ -64,6 +65,47 @@ with normal traces.
 The current 0.x `--mission PATH` option replaces the manifest input file. Its
 name is historical and is planned to become `--input` without a compatibility
 alias before the standalone command contract is released.
+
+### Replace one component's source
+
+`--component-override-descriptor` compiles one already-selected component from
+different source. It is host command authority: a manifest cannot name an
+override and a generated program cannot observe one. The descriptor carries
+exactly four fields:
+
+```json
+{
+  "component_id": "my.agent",
+  "base_source_hash": "sha256:<64 lowercase hex>",
+  "source_hash": "sha256:<64 lowercase hex>",
+  "path": "candidate.clj"
+}
+```
+
+Both hashes use that `sha256:`-prefixed form. `path` resolves against the
+descriptor's own canonical directory and may not escape it. The descriptor is
+at most 64 KiB and the candidate source at most 1 MiB.
+
+Verification is two-sided and happens before the source reaches the compiler.
+`source_hash` proves you are compiling the bytes you believe you extracted;
+`base_source_hash` proves those bytes were derived from the component that is
+installed now, so source written against a since-changed base is rejected
+rather than compiled against the wrong baseline. The file is opened once and
+the bytes that were hashed are the bytes that compile — the path is never
+reopened, so a file replaced mid-run cannot substitute different source.
+
+The named component must already be selected; an override replaces source and
+never introduces a component. Its declared dependencies are preserved, so a
+candidate cannot quietly acquire a new one. If the same ID is selected into
+both the workflow and the mission, the run fails as an ambiguous target rather
+than replacing both. Normal dependency, export, signature, and capability
+validation still applies: an override changes which source compiles, never what
+compilation permits.
+
+The `run-started` event records the component ID and both hashes, never the
+candidate source, so a trace names the base as well as the candidate. Nothing
+here writes: producing candidate source and promoting it are separate steps
+outside this command.
 
 ## Understand results and errors
 
