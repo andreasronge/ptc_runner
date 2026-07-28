@@ -208,16 +208,9 @@ defmodule PtcRunner.Lisp.Eval do
   defp capability_failure_source?({:tool_call, _name, _args}, _eval_ctx), do: true
 
   defp capability_failure_source?({:var, name}, eval_ctx),
-    do: capability_result_binding?(eval_ctx, name) or cap_unwrap_origin?(eval_ctx)
+    do: capability_result_binding?(eval_ctx, name)
 
-  defp capability_failure_source?(_error_ast, eval_ctx), do: cap_unwrap_origin?(eval_ctx)
-
-  defp cap_unwrap_origin?(eval_ctx) do
-    match?(
-      %{type: :prelude_export, ref: "cap/unwrap!"},
-      EvalContext.current_origin(eval_ctx)
-    )
-  end
+  defp capability_failure_source?(_error_ast, _eval_ctx), do: false
 
   # ============================================================
   # Turn history access: *1, *2, *3
@@ -670,6 +663,9 @@ defmodule PtcRunner.Lisp.Eval do
       case Map.fetch(exports, ref) do
         {:ok, {callable, ns_env, export}} ->
           with {:ok, arg_vals, eval_ctx2} <- eval_all(arg_asts, eval_ctx) do
+            arg_vals =
+              maybe_mark_capability_prelude_args(ref, arg_asts, arg_vals, eval_ctx2)
+
             eval_prelude_callable(callable, arg_vals, ns_env, export, eval_ctx2)
           end
 
@@ -987,6 +983,20 @@ defmodule PtcRunner.Lisp.Eval do
   end
 
   defp maybe_mark_capability_result_binding(bindings, _pattern, _value_ast), do: bindings
+
+  defp maybe_mark_capability_prelude_args(
+         "cap/unwrap!",
+         [argument_ast],
+         [argument],
+         eval_ctx
+       ) do
+    if capability_failure_source?(argument_ast, eval_ctx),
+      do: [%CapabilityResult{value: argument}],
+      else: [argument]
+  end
+
+  defp maybe_mark_capability_prelude_args(_ref, _argument_asts, arguments, _eval_ctx),
+    do: arguments
 
   defp capability_result_binding?(%EvalContext{locals: locals, env: env}, name) do
     MapSet.member?(locals, name) and match?(%CapabilityResult{}, Map.get(env, name))

@@ -1447,6 +1447,26 @@ defmodule PtcRunner.Kernel.CoreContractTest do
                5_000
              )
 
+    {:ok, bound_cap_state} = RunState.start(Limits.defaults())
+
+    assert %{outcome: :failed, capability_failure?: true, retryable?: true} =
+             Evaluation.evaluate_source(
+               bound_cap_state,
+               cap_mission,
+               ~S|(let [response (tool/lookup {})] (cap/unwrap! response))|,
+               5_000
+             )
+
+    {:ok, copied_cap_state} = RunState.start(Limits.defaults())
+
+    assert %{outcome: :failed, capability_failure?: false, retryable?: true} =
+             Evaluation.evaluate_source(
+               copied_cap_state,
+               cap_mission,
+               ~S|(let [response (tool/lookup {}) copied (into {} response)] (cap/unwrap! copied))|,
+               5_000
+             )
+
     {:ok, mission} = MissionEnvironment.new([])
     {:ok, state} = RunState.start(Limits.defaults())
 
