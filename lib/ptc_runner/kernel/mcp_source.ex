@@ -96,13 +96,15 @@ defmodule PtcRunner.Kernel.MCPSource do
       `%{as: public_name, effect: :read}`. A mapping may also carry a bounded
       host-owned `:description`, `:model_visible` (default `true` for direct
       embedding), and `:error_feedback` (`:closed`, the default, or
-      `:bounded`). Bounded feedback exposes at most 1,024 bytes of exact,
-      validated text from an MCP `isError` result as untrusted recoverable
-      capability-error details. Enabling it trusts the installed server not
-      to place secrets, paths, or stack traces in that text. Public canonical
-      events remain closed. Both names are unique and bounded; only the public
-      name crosses the capability boundary. The host JSON decoder supplies its
-      stricter model-invisible default explicitly.
+      `:bounded`). Bounded feedback exposes at most 1,024 bytes of validated
+      text from an MCP `isError` result as untrusted recoverable
+      capability-error details. C0 controls, including tab, newline, carriage
+      return, ESC, and DEL, are replaced before exposure.
+      Enabling it trusts the installed server not to place secrets, paths, or
+      stack traces in that text. Public canonical events remain closed. Both
+      names are unique and bounded; only the public name crosses the capability
+      boundary. The host JSON decoder supplies its stricter model-invisible
+      default explicitly.
     * `:timeout_ms` - installed end-to-end ceiling for discovery, calls, and
       requests (default `5_000`; stdio maximum `300_000`). A manifest may only
       lower it.
@@ -140,18 +142,20 @@ defmodule PtcRunner.Kernel.MCPSource do
   Discovery produces ordinary read-only `PtcRunner.Kernel.Capability` values.
   An advertised object output schema accepts only schema-valid
   `structuredContent` accompanied by exact text blocks (which are validated
-  and discarded). A tool without an output schema accepts only exact text
-  blocks and returns `%{"text" => [string()]}`.
+  and discarded). Text and embedded text-resource blocks may carry standard
+  `annotations` and `_meta`; other extra block fields are rejected. A tool
+  without an output schema returns exact text as `%{"text" => [string()]}`.
   MCP `isError`, malformed/mixed content, invalid JSON-RPC envelopes, and
   schema failures become bounded `PtcRunner.Kernel.ProviderError` values with
   closed reasons. Authentication, timeout, unsupported-result, invalid-result,
   and transport failures never include remote messages or payloads.
 
   The safe connector snapshot has top-level fields `provider`, `protocol`,
-  `transport`, `server_info_hash`, `snapshot_hash`, and `tools`. When the host
-  installs `snapshot_identity`, it also carries the validated
-  `content_snapshot_hash`; changing that identity changes the overall
-  `snapshot_hash`. Stdio
+  `transport`, selected `timeout_ms`, selected `max_result_bytes`,
+  installed `max_catalog_tools`, installed `max_pages`, `server_info_hash`,
+  `snapshot_hash`, and `tools`. When the host installs `snapshot_identity`, it
+  also carries the validated `content_snapshot_hash`; changing that identity
+  or any effective ceiling changes the overall `snapshot_hash`. Stdio
   snapshots additionally contain the launcher protocol, launcher digest, and
   server-executable digest. The nullable server hash fingerprints bounded self-reported
   implementation identity without exposing its untrusted text. Successful
@@ -724,10 +728,12 @@ defmodule PtcRunner.Kernel.MCPSource do
              tools,
              server.server_info,
              content_snapshot_hash,
-             installed
+             installed,
+             selected
            ) do
       {:ok, capabilities, snapshot}
     else
+      {:error, :mcp_transport_closed} -> {:error, :mcp_transport_error}
       {:error, _reason} = error -> error
       _reason -> {:error, :mcp_protocol_error}
     end
@@ -871,7 +877,7 @@ defmodule PtcRunner.Kernel.MCPSource do
              context
            ) do
         {:ok, result} -> normalize_result(result, output_validator, error_feedback)
-        {:error, reason} -> {:error, provider_error(reason)}
+        {:error, reason} -> {:error, provider_error(reason, transport.type)}
       end
     end
   end
@@ -923,7 +929,8 @@ defmodule PtcRunner.Kernel.MCPSource do
          tools,
          server_info,
          content_snapshot_hash,
-         installed
+         installed,
+         selected
        )
        when is_binary(provider) and type in [:streamable_http, :stdio] do
     transport_name = Atom.to_string(type)
@@ -944,6 +951,10 @@ defmodule PtcRunner.Kernel.MCPSource do
               ) ++
               optional_projection("content_snapshot_hash", content_snapshot_hash) ++
               [
+                {"timeout_ms", selected.timeout_ms},
+                {"max_result_bytes", selected.max_result_bytes},
+                {"max_catalog_tools", installed.max_catalog_tools},
+                {"max_pages", installed.max_pages},
                 {"server_info_hash", server_info_hash},
                 {"tools",
                  Enum.map(tools, fn tool ->
@@ -968,6 +979,10 @@ defmodule PtcRunner.Kernel.MCPSource do
             "provider" => provider,
             "protocol" => "mcp-#{@protocol}",
             "transport" => transport_name,
+            "timeout_ms" => selected.timeout_ms,
+            "max_result_bytes" => selected.max_result_bytes,
+            "max_catalog_tools" => installed.max_catalog_tools,
+            "max_pages" => installed.max_pages,
             "server_info_hash" => server_info_hash,
             "snapshot_hash" => sha256(encoded),
             "tools" => tools
@@ -1089,7 +1104,7 @@ defmodule PtcRunner.Kernel.MCPSource do
           handle,
           method,
           params,
-          request_metadata(nil),
+          request_metadata(context),
           @max_transport_response_bytes,
           timeout_ms
         )
@@ -1104,7 +1119,7 @@ defmodule PtcRunner.Kernel.MCPSource do
         bounded_outcome(body, method, max_bytes)
 
       {:error, :closed} ->
-        {:error, :mcp_transport_error}
+        {:error, :mcp_transport_closed}
 
       {:error, _reason} = error ->
         error
@@ -1167,7 +1182,7 @@ defmodule PtcRunner.Kernel.MCPSource do
         end
 
       {:error, :closed} ->
-        {:error, :mcp_transport_error}
+        {:error, :mcp_transport_closed}
     end
   end
 
@@ -1471,25 +1486,31 @@ defmodule PtcRunner.Kernel.MCPSource do
   defp strip_sse_bom(<<0xEF, 0xBB, 0xBF, rest::binary>>, true), do: rest
   defp strip_sse_bom(event, _at_start?), do: event
 
-  defp provider_error(:mcp_authentication_failed),
+  defp provider_error(:mcp_authentication_failed, _transport),
     do: ProviderError.new(:authentication_failed, "mcp_authentication_failed")
 
-  defp provider_error(:mcp_timeout),
+  defp provider_error(:mcp_timeout, _transport),
     do: ProviderError.new(:timeout, "mcp_timeout", retryable?: true)
 
-  defp provider_error(:mcp_response_exceeded),
+  defp provider_error(:mcp_response_exceeded, _transport),
     do: ProviderError.new(:invalid_result, "mcp_response_exceeded")
 
-  defp provider_error(:mcp_protocol_error),
+  defp provider_error(:mcp_protocol_error, _transport),
     do: ProviderError.new(:invalid_result, "mcp_protocol_error")
 
-  defp provider_error(:mcp_remote_error),
+  defp provider_error(:mcp_remote_error, _transport),
     do: ProviderError.new(:domain_error, "mcp_remote_error")
 
-  defp provider_error(:mcp_unsupported_result),
+  defp provider_error(:mcp_unsupported_result, _transport),
     do: ProviderError.new(:invalid_result, "mcp_unsupported_result")
 
-  defp provider_error(_reason),
+  defp provider_error(:mcp_transport_closed, _transport),
+    do: ProviderError.new(:transport_error, "mcp_transport_closed")
+
+  defp provider_error(:mcp_transport_error, :stdio),
+    do: ProviderError.new(:transport_error, "mcp_transport_error")
+
+  defp provider_error(_reason, _transport),
     do: ProviderError.new(:transport_error, "mcp_transport_error", retryable?: true)
 
   defp sha256(value), do: :crypto.hash(:sha256, value) |> Base.encode16(case: :lower)

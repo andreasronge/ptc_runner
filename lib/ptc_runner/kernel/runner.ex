@@ -218,7 +218,13 @@ defmodule PtcRunner.Kernel.Runner do
          %Error{
            kind: workflow_error_kind(step.fail.reason),
            reason: step.fail.reason,
-           details: workflow_error_details(step.fail, timeout_ms, config.limits),
+           details:
+             workflow_error_details(
+               step.fail,
+               timeout_ms,
+               config.limits,
+               config.event_sink
+             ),
            usage: RunState.usage(state)
          }}
     end
@@ -433,7 +439,7 @@ defmodule PtcRunner.Kernel.Runner do
 
   defp workflow_error_kind(_reason), do: :workflow_failed
 
-  defp workflow_error_details(%{reason: reason}, timeout_ms, limits)
+  defp workflow_error_details(%{reason: reason}, timeout_ms, limits, _sink)
        when reason in [:timeout, :compile_timeout] do
     limit =
       if timeout_ms == limits.workflow_timeout_ms,
@@ -450,7 +456,19 @@ defmodule PtcRunner.Kernel.Runner do
     }
   end
 
-  defp workflow_error_details(fail, _timeout_ms, _limits),
+  defp workflow_error_details(fail, _timeout_ms, _limits, sink)
+       when not is_nil(sink) do
+    case EventSink.policy(sink) do
+      :normal -> :normal
+      _private_or_unavailable -> :private
+    end
+    |> workflow_error_details_for_class(fail)
+  end
+
+  defp workflow_error_details_for_class(:private, _fail),
+    do: %{message: "private workflow failed"}
+
+  defp workflow_error_details_for_class(:normal, fail),
     do: %{message: String.slice(fail.message || "workflow failed", 0, 4_096)}
 
   defp configuration_error(reason, usage),

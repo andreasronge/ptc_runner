@@ -107,6 +107,29 @@ defmodule PtcRunner.Kernel.TraceSnapshotTest do
   end
 
   @tag :tmp_dir
+  test "an individually oversized trace item fails instead of returning a stalled cursor", %{
+    tmp_dir: directory
+  } do
+    oversized =
+      "oversized"
+      |> event(1, "run-started")
+      |> put_in(["data", "labels"], %{"name" => String.duplicate("x", 1_024)})
+
+    write_events(Path.join(directory, "trace.jsonl"), [oversized])
+
+    assert {:ok, snapshot} =
+             TraceSnapshot.start({:directory, directory},
+               owner: self(),
+               max_result_bytes: 512
+             )
+
+    on_exit(fn -> TraceSnapshot.stop(snapshot) end)
+
+    assert {:error, :result_limit_exceeded} =
+             TraceSnapshot.query(snapshot, :list_runs, %{"limit" => 1})
+  end
+
+  @tag :tmp_dir
   test "safe metadata is bounded and contains no source path", %{tmp_dir: directory} do
     path = Path.join(directory, "trace.jsonl")
     write_events(path, [event("visible", 1, "run-started")])
@@ -182,6 +205,17 @@ defmodule PtcRunner.Kernel.TraceSnapshotTest do
   end
 
   @tag :tmp_dir
+  test "capture heap exhaustion returns a stable retained-limit error", %{tmp_dir: directory} do
+    write_events(Path.join(directory, "trace.jsonl"), [event("bounded", 1, "run-started")])
+
+    assert {:error, :source_retained_limit_exceeded} =
+             TraceSnapshot.start({:directory, directory},
+               owner: self(),
+               capture_heap_words: 233
+             )
+  end
+
+  @tag :tmp_dir
   test "construction limits may be lowered but not raised", %{tmp_dir: directory} do
     write_events(Path.join(directory, "trace.jsonl"), [event("bounded", 1, "run-started")])
 
@@ -190,7 +224,8 @@ defmodule PtcRunner.Kernel.TraceSnapshotTest do
       max_retained_bytes: 32_000_001,
       max_result_bytes: 1_000_001,
       max_directory_entries: 4_097,
-      max_trace_files: 1_025
+      max_trace_files: 1_025,
+      capture_heap_words: 10_000_001
     ]
 
     for {option, value} <- raised_limits do

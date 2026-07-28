@@ -31,6 +31,7 @@ defmodule PtcRunner.Kernel.InspectionSnapshot do
   @max_artifact_bytes 16_000_000
   @listing_timeout_ms 5_000
   @listing_heap_words 1_000_000
+  @capture_heap_words 40_000_000
   @operations [
     :list_runs,
     :model_exchanges,
@@ -74,6 +75,7 @@ defmodule PtcRunner.Kernel.InspectionSnapshot do
       :max_result_bytes,
       :max_directory_entries,
       :max_files,
+      :capture_heap_words,
       :capture_hook,
       :listing_hook
     ]
@@ -93,6 +95,8 @@ defmodule PtcRunner.Kernel.InspectionSnapshot do
            Keyword.get(opts, :max_directory_entries, @default_directory_entries),
          max_files when max_files in 1..@default_files <-
            Keyword.get(opts, :max_files, @default_files),
+         capture_heap_words when capture_heap_words in 233..@capture_heap_words <-
+           Keyword.get(opts, :capture_heap_words, @capture_heap_words),
          capture_hook when is_nil(capture_hook) or is_function(capture_hook, 0) <-
            Keyword.get(opts, :capture_hook),
          listing_hook when is_nil(listing_hook) or is_function(listing_hook, 0) <-
@@ -103,7 +107,7 @@ defmodule PtcRunner.Kernel.InspectionSnapshot do
              __MODULE__,
              {Path.expand(directory), trace_snapshot, owner, token, max_source_bytes,
               max_retained_bytes, max_result_bytes, max_directory_entries, max_files,
-              capture_hook, listing_hook}
+              capture_heap_words, capture_hook, listing_hook}
            ) do
         {:ok, pid} -> {:ok, %__MODULE__{pid: pid, token: token}}
         {:error, {:source_retained_limit_exceeded, _details} = reason} -> {:error, reason}
@@ -160,7 +164,8 @@ defmodule PtcRunner.Kernel.InspectionSnapshot do
   @impl GenServer
   def init(
         {directory, trace_snapshot, owner, token, max_source_bytes, max_retained_bytes,
-         max_result_bytes, max_directory_entries, max_files, capture_hook, listing_hook}
+         max_result_bytes, max_directory_entries, max_files, capture_heap_words, capture_hook,
+         listing_hook}
       ) do
     owner_ref = Process.monitor(owner)
     trace_ref = Process.monitor(trace_snapshot.pid)
@@ -178,7 +183,14 @@ defmodule PtcRunner.Kernel.InspectionSnapshot do
       )
     end
 
-    case capture_for_dependencies(capture, owner, owner_ref, trace_snapshot.pid, trace_ref) do
+    case capture_for_dependencies(
+           capture,
+           owner,
+           owner_ref,
+           trace_snapshot.pid,
+           trace_ref,
+           capture_heap_words
+         ) do
       {:ok, capture} ->
         {:ok, snapshot_state(capture, token, owner_ref, trace_ref, max_result_bytes)}
 
@@ -450,12 +462,31 @@ defmodule PtcRunner.Kernel.InspectionSnapshot do
 
   defp normalize_capture_error(_reason), do: :invalid_snapshot
 
-  defp capture_for_dependencies(capture, owner, owner_ref, trace, trace_ref) do
+  defp capture_for_dependencies(
+         capture,
+         owner,
+         owner_ref,
+         trace,
+         trace_ref,
+         capture_heap_words
+       ) do
     reply_alias = Process.alias()
     reply_ref = make_ref()
 
     {worker, worker_ref} =
-      Process.spawn(fn -> send(reply_alias, {reply_ref, capture.()}) end, [:monitor])
+      Process.spawn(
+        fn -> send(reply_alias, {reply_ref, capture.()}) end,
+        [
+          {:max_heap_size,
+           %{
+             size: capture_heap_words,
+             kill: true,
+             error_logger: false,
+             include_shared_binaries: true
+           }},
+          :monitor
+        ]
+      )
 
     receive do
       {^reply_ref, result} ->
@@ -473,6 +504,10 @@ defmodule PtcRunner.Kernel.InspectionSnapshot do
       {:DOWN, ^trace_ref, :process, ^trace, _reason} ->
         terminate_capture(worker, worker_ref, reply_alias)
         {:error, :snapshot_unavailable}
+
+      {:DOWN, ^worker_ref, :process, ^worker, :killed} ->
+        Process.unalias(reply_alias)
+        {:error, :source_retained_limit_exceeded}
 
       {:DOWN, ^worker_ref, :process, ^worker, _reason} ->
         Process.unalias(reply_alias)

@@ -425,15 +425,23 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
                  outcome: :returned,
                  value: %{
                    "structured" => structured,
-                   "text" => %{status: :error, reason: :transport_error},
-                   "failed" => %{status: :error, reason: :transport_error}
+                   "text" => %{
+                     status: :error,
+                     reason: :transport_error,
+                     retryable?: false
+                   },
+                   "failed" => %{
+                     status: :error,
+                     reason: :transport_error,
+                     retryable?: false
+                   }
                  }
                }
              } = result.value
 
       case mode do
         "exit-before-response" ->
-          assert %{status: :error, reason: :transport_error} = structured
+          assert %{status: :error, reason: :transport_error, retryable?: false} = structured
 
         "exit-after-response" ->
           assert %{status: :ok, value: %{"value" => 42}} = structured
@@ -537,6 +545,55 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     assert first_tool["upstream_name_hash"] != second_tool["upstream_name_hash"]
     assert first_tool["description_hash"] != second_tool["description_hash"]
     assert first_snapshot["snapshot_hash"] != second_snapshot["snapshot_hash"]
+  end
+
+  @tag :tmp_dir
+  test "snapshot identity attests selected timeout and result ceilings", %{tmp_dir: dir} do
+    fixture = fixture(self())
+    on_exit(fixture.close)
+    registry = registry(fixture.endpoint)
+
+    {:ok, first} =
+      dir
+      |> manifest(["remote.structured"], timeout_ms: 900, max_result_bytes: 31_000)
+      |> RunBuilder.load_and_build(registry)
+
+    [first_snapshot] = first.config.connector_snapshots
+    assert first_snapshot["timeout_ms"] == 900
+    assert first_snapshot["max_result_bytes"] == 31_000
+    assert :ok = RunBuilder.close(first)
+
+    {:ok, second} =
+      dir
+      |> manifest(["remote.structured"], timeout_ms: 800, max_result_bytes: 30_000)
+      |> RunBuilder.load_and_build(registry)
+
+    [second_snapshot] = second.config.connector_snapshots
+    assert second_snapshot["timeout_ms"] == 800
+    assert second_snapshot["max_result_bytes"] == 30_000
+    assert second_snapshot["snapshot_hash"] != first_snapshot["snapshot_hash"]
+    assert :ok = RunBuilder.close(second)
+  end
+
+  @tag :tmp_dir
+  test "a closed request context produces a terminal provider error", %{tmp_dir: dir} do
+    fixture = fixture(self())
+    on_exit(fixture.close)
+
+    {:ok, built} =
+      dir
+      |> manifest(["remote.structured"])
+      |> RunBuilder.load_and_build(registry(fixture.endpoint))
+
+    capability = built.config.mission_environment.capabilities["remote.structured"]
+    assert :ok = RunBuilder.close(built)
+
+    assert {:error,
+            %{
+              kind: :transport_error,
+              details: "mcp_transport_closed",
+              retryable?: false
+            }} = capability.callback.(%{"query" => "x"}, nil)
   end
 
   @tag :tmp_dir
@@ -1130,8 +1187,12 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     sink_ref = Process.monitor(abandoned.config.event_sink.pid)
     assert_receive {:DOWN, ^owner_ref, :process, ^owner, :normal}, @owner_lifecycle_timeout_ms
 
-    assert_receive {:DOWN, ^sink_ref, :process, _sink_pid, :normal},
+    assert_receive {:DOWN, ^sink_ref, :process, _sink_pid, sink_reason},
                    @owner_lifecycle_timeout_ms
+
+    # Monitoring can race with the owner-linked sink's normal shutdown. A
+    # monitor installed after that shutdown correctly reports :noproc.
+    assert sink_reason in [:normal, :noproc]
   end
 
   @tag :tmp_dir

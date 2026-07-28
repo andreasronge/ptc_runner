@@ -240,7 +240,8 @@ manifest may only select mapped names and narrow visibility or limits.
 `PtcRunner.Kernel.MCPProtocol` owns pure protocol validation and normalization,
 and the transport owners bound and correlate each request. Their module docs
 define the exact behavior. MCP tool errors are closed by default; a host
-mapping may opt into exact validated feedback bounded to 1,024 bytes. Runtime
+mapping may opt into validated feedback bounded to 1,024 bytes, with terminal
+control characters replaced before exposure. Runtime
 calls propagate only a derived W3C `traceparent`, with no baggage or
 operator-supplied trace value crossing the provider boundary. Immutable MCP
 sources may freeze a host-installed content identity during assembly; this is

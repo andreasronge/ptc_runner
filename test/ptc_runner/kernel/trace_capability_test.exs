@@ -221,6 +221,84 @@ defmodule PtcRunner.Kernel.TraceCapabilityTest do
   end
 
   @tag :tmp_dir
+  test "trace publication preserves symlink-sensitive parent components", %{tmp_dir: directory} do
+    physical_parent = Path.join(directory, "physical")
+    nested = Path.join(physical_parent, "nested")
+    alias_path = Path.join(directory, "alias")
+    File.mkdir_p!(nested)
+    File.ln_s!(nested, alias_path)
+
+    event = decoded_event("component-path", 1, "run-started")
+    append_path = Path.join([alias_path, "..", "append.jsonl"])
+    publish_path = Path.join([alias_path, "..", "publish.jsonl"])
+
+    assert :ok = TraceLog.append_jsonl(append_path, [event])
+    assert File.regular?(Path.join(physical_parent, "append.jsonl"))
+    refute File.exists?(Path.join(directory, "append.jsonl"))
+
+    assert :ok = TraceLog.publish_jsonl(publish_path, [event])
+    assert File.regular?(Path.join(physical_parent, "publish.jsonl"))
+    refute File.exists?(Path.join(directory, "publish.jsonl"))
+  end
+
+  @tag :tmp_dir
+  test "trace append follows a direct symlink to its physical parent", %{tmp_dir: directory} do
+    physical_parent = Path.join(directory, "physical-parent")
+    alias_parent = Path.join(directory, "alias-parent")
+    File.mkdir!(physical_parent)
+    File.ln_s!(physical_parent, alias_parent)
+
+    event = decoded_event("direct-parent-link", 1, "run-started")
+    path = Path.join(alias_parent, "trace.jsonl")
+
+    assert :ok = TraceLog.append_jsonl(path, [event])
+    assert File.regular?(Path.join(physical_parent, "trace.jsonl"))
+  end
+
+  @tag :tmp_dir
+  test "missing case-fold aliases share one append-lock identity", %{tmp_dir: directory} do
+    upper = Path.join(directory, "Run.jsonl")
+    lower = Path.join(directory, "run.jsonl")
+    sigma = Path.join(directory, "σ.jsonl")
+    final_sigma = Path.join(directory, "ς.jsonl")
+
+    assert {:ok, identity} = TraceLog.append_lock_identity(upper)
+    assert {:ok, ^identity} = TraceLog.append_lock_identity(lower)
+
+    assert {:ok, sigma_identity} = TraceLog.append_lock_identity(sigma)
+    assert {:ok, ^sigma_identity} = TraceLog.append_lock_identity(final_sigma)
+  end
+
+  @tag :tmp_dir
+  @tag :slow
+  test "a first-file append retains one cross-runtime lease after creation", %{
+    tmp_dir: directory
+  } do
+    path = Path.join(directory, "first-file.jsonl")
+    first = decoded_event("first-runtime", 1, "run-started")
+    second = decoded_event("second-runtime", 1, "run-started")
+    port = start_paused_append_runtime(path, first)
+
+    on_exit(fn ->
+      if Port.info(port), do: Port.close(port)
+    end)
+
+    assert_receive {^port, {:data, {:eol, "APPEND_READY"}}}, 10_000
+
+    second_append = Task.async(fn -> TraceLog.append_jsonl(path, [second]) end)
+    assert Task.yield(second_append, 250) == nil
+
+    assert true = Port.command(port, "X\n")
+    assert_receive {^port, {:data, {:eol, "APPEND_RESULT=:ok"}}}, 10_000
+    assert_receive {^port, {:exit_status, 0}}, 10_000
+    assert Task.await(second_append, 10_000) == :ok
+
+    assert {:ok, trace_log} = TraceLog.new(source: {:file, path})
+    assert {:ok, %{"items" => runs}} = TraceLog.query(trace_log, :list_runs, %{"limit" => 100})
+    assert Enum.sort(Enum.map(runs, & &1["run_id"])) == ["first-runtime", "second-runtime"]
+  end
+
+  @tag :tmp_dir
   @tag :slow
   test "concurrent same-path appends retain every canonical batch", %{tmp_dir: directory} do
     path = Path.join(directory, "concurrent.jsonl")
@@ -302,6 +380,44 @@ defmodule PtcRunner.Kernel.TraceCapabilityTest do
     refute_receive {_port, {:exit_status, _status}}, 100
   end
 
+  defp start_paused_append_runtime(path, event) do
+    executable = System.find_executable("elixir") || flunk("elixir is required for this test")
+
+    code =
+      """
+      path = #{inspect(path)}
+      [event] = :erlang.binary_to_term(Base.decode64!(#{inspect(encode_term([event]))}))
+      hook = fn :after_file_ready ->
+        IO.puts("APPEND_READY")
+        "X\\n" = IO.gets("")
+        :ok
+      end
+      result =
+        PtcRunner.Kernel.TraceLog.append_jsonl(path, [event], append_hook: hook)
+      IO.puts("APPEND_RESULT=" <> inspect(result))
+      """
+
+    code_paths =
+      :code.get_path()
+      |> Enum.flat_map(fn path -> ["-pa", List.to_string(path)] end)
+
+    args = Enum.concat(code_paths, ["-e", code])
+
+    Port.open(
+      {:spawn_executable, executable},
+      [
+        :binary,
+        :exit_status,
+        :use_stdio,
+        :stderr_to_stdout,
+        {:line, 1_024},
+        args: args
+      ]
+    )
+  end
+
+  defp encode_term(term), do: term |> :erlang.term_to_binary() |> Base.encode64()
+
   @tag :tmp_dir
   test "atomic publication is no-clobber, retry-safe, and cleans partial temporaries", %{
     tmp_dir: directory
@@ -333,7 +449,7 @@ defmodule PtcRunner.Kernel.TraceCapabilityTest do
         )
       end)
 
-    assert_receive {:publication_read_ready, publisher}
+    assert_receive {:publication_read_ready, publisher}, 1_000
     oversized = Path.join(directory, "oversized-replacement")
     File.write!(oversized, String.duplicate("x", byte_size(first) + 1))
     File.rm!(path)
@@ -367,7 +483,7 @@ defmodule PtcRunner.Kernel.TraceCapabilityTest do
         )
       end)
 
-    assert_receive {:temporary_synced, temporary_publisher}
+    assert_receive {:temporary_synced, temporary_publisher}, 1_000
 
     [temporary] =
       directory
@@ -527,6 +643,53 @@ defmodule PtcRunner.Kernel.TraceCapabilityTest do
 
     assert {:ok, %{"items" => [%{"run_id" => "private", "source" => "private"}]}} =
              TraceLog.query(private_directory_log, :list_runs, %{})
+  end
+
+  @tag :tmp_dir
+  test "private trace creation reports chmod failures without raising", %{tmp_dir: directory} do
+    path = Path.join(directory, "chmod-failure.private.jsonl")
+    event = decoded_event("private-chmod", 1, "run-started")
+
+    hook = fn
+      :before_private_chmod -> {:error, :simulated_chmod_failure}
+      _stage -> :ok
+    end
+
+    assert {:error, :source_unavailable} =
+             TraceLog.append_jsonl(path, [event], private: true, append_hook: hook)
+
+    refute File.exists?(path)
+  end
+
+  @tag :tmp_dir
+  test "private appends reject a replaceable parent directory", %{tmp_dir: directory} do
+    replaceable = Path.join(directory, "replaceable")
+    File.mkdir!(replaceable)
+    File.chmod!(replaceable, 0o777)
+
+    path = Path.join(replaceable, "secret.private.jsonl")
+    event = decoded_event("private-parent", 1, "run-started")
+
+    assert {:error, :source_unavailable} =
+             TraceLog.append_jsonl(path, [event], private: true)
+
+    refute File.exists?(path)
+  end
+
+  @tag :tmp_dir
+  test "private appends reject an existing file that is not already owner-only", %{
+    tmp_dir: directory
+  } do
+    path = Path.join(directory, "wide.private.jsonl")
+    File.write!(path, "")
+    File.chmod!(path, 0o644)
+    event = decoded_event("private-mode", 1, "run-started")
+
+    assert {:error, :source_unavailable} =
+             TraceLog.append_jsonl(path, [event], private: true)
+
+    assert File.read!(path) == ""
+    assert Bitwise.band(File.stat!(path).mode, 0o777) == 0o644
   end
 
   @tag :tmp_dir

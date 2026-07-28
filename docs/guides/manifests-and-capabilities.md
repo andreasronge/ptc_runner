@@ -237,7 +237,13 @@ MCP capability schemas.
 `--output PATH` atomically writes only the validated `Result.value`, never
 clobbers an existing file, and can be passed directly to a later run with
 `--mission`. Use `--private-output` for a private run; it creates a `0600`
-artifact and keeps the value off stdout.
+artifact and keeps the value off stdout. Destination conflicts and
+normal/private class mismatches are rejected before provider acquisition, while
+exclusive creation remains authoritative if the path appears during the run.
+Artifact publication currently requires a Unix host and POSIX-compatible
+`mkdir` and `id` executables on `PATH`. It fails closed if those authority and
+mode-at-create primitives are unavailable, rather than briefly exposing
+content through a wider default mode.
 
 ## Providers are installed authority
 
@@ -281,9 +287,11 @@ but no path. Every query result carries `snapshot_hash`, equal to that
 provider snapshot's `content_snapshot_hash`, so a cited run, sequence, or
 counter page remains bound to the captured catalog. Do not confuse that
 algorithm-qualified content identity with the safe provider snapshot's own
-bare-hex `snapshot_hash`: the latter attests the complete installed provider
-identity, including its policy and ceilings, while `content_snapshot_hash`
-attests only the frozen queried bytes.
+bare-hex `snapshot_hash`: the latter attests its provider-specific non-secret
+identity projection, including the effective ceilings present in that
+projection, while `content_snapshot_hash` attests only the frozen queried
+bytes. The provider hash does not automatically cover the alias, data-class
+policy, or deliberately excluded fields.
 
 Private inspection artifacts use a separate paired native source, installed as
 `ptc_inspection_snapshot`. A manifest selecting such an alias must also select

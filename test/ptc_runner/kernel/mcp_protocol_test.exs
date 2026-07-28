@@ -100,6 +100,62 @@ defmodule PtcRunner.Kernel.MCPProtocolTest do
     end
   end
 
+  test "rejects inbound JSON above the fixed document depth before decoding" do
+    nested = String.duplicate("[", 64) <> "0" <> String.duplicate("]", 64)
+    body = ~s({"jsonrpc":"2.0","id":7,"result":#{nested}})
+
+    assert {:error, :mcp_protocol_error} = MCPProtocol.decode_message(body)
+  end
+
+  test "rejects decoded inspection exchanges above the fixed document depth" do
+    nested = Enum.reduce(1..64, true, fn _level, value -> [value] end)
+
+    request = %{
+      "jsonrpc" => "2.0",
+      "id" => 7,
+      "method" => "tools/call",
+      "params" => %{"arguments" => %{"nested" => nested}}
+    }
+
+    response = %{
+      "jsonrpc" => "2.0",
+      "id" => 7,
+      "result" => %{"nested" => nested}
+    }
+
+    refute MCPProtocol.valid_exchange_request?(request, 7)
+    refute MCPProtocol.valid_exchange_response?(response, 7)
+  end
+
+  test "accepts a complete tools response containing a supported depth-16 schema" do
+    instance =
+      Enum.reduce(1..15, %{}, fn index, child ->
+        %{"level_#{index}" => child}
+      end)
+
+    schema =
+      Enum.reduce(1..15, %{"type" => "string", "const" => instance}, fn index, child ->
+        %{
+          "type" => "object",
+          "properties" => %{"level_#{index}" => child},
+          "additionalProperties" => false
+        }
+      end)
+
+    body =
+      Jason.encode!(%{
+        "jsonrpc" => "2.0",
+        "id" => 7,
+        "result" => %{
+          "resultType" => "complete",
+          "tools" => [%{"name" => "vendor.deep", "inputSchema" => schema}]
+        }
+      })
+
+    assert {:ok, {:response, 7, %{"result" => %{"tools" => [_tool]}}}} =
+             MCPProtocol.decode_message(body)
+  end
+
   test "accepts exactly one valid JSON-RPC outcome" do
     assert {:ok, %{"resultType" => "complete", "tools" => []}} =
              MCPProtocol.outcome(
@@ -167,6 +223,174 @@ defmodule PtcRunner.Kernel.MCPProtocolTest do
              MCPProtocol.outcome(
                %{"result" => %{"resultType" => "complete", "tools" => []}},
                "tools/list"
+             )
+  end
+
+  test "accepts standard content annotations and metadata but rejects unknown block fields" do
+    content = [
+      %{
+        "type" => "text",
+        "text" => "hello",
+        "annotations" => %{
+          "audience" => ["assistant"],
+          "lastModified" => "2026-07-28T10:00:00+02:00"
+        },
+        "_meta" => %{"vendor" => true}
+      }
+    ]
+
+    assert {:ok, %{"text" => ["hello"]}} =
+             MCPProtocol.normalize_tool_result(
+               %{"content" => content, "isError" => false},
+               nil,
+               :closed
+             )
+
+    for timestamp <- [
+          "2026-07-28t10:00:00z",
+          "2026-07-28t10:00:00.123z",
+          "2026-07-28t10:00:00+02:00"
+        ] do
+      annotated = [
+        %{
+          "type" => "text",
+          "text" => "hello",
+          "annotations" => %{"lastModified" => timestamp}
+        }
+      ]
+
+      assert {:ok, %{"text" => ["hello"]}} =
+               MCPProtocol.normalize_tool_result(
+                 %{"content" => annotated, "isError" => false},
+                 nil,
+                 :closed
+               )
+    end
+
+    for timestamp <- [
+          "yesterday",
+          "20260728T100000+0200",
+          "2026-07-28T10:00:00+0200",
+          "2026-07-28T10:00:00+02"
+        ] do
+      assert {:error, :mcp_invalid_result} =
+               MCPProtocol.normalize_tool_result(
+                 %{
+                   "content" => [
+                     %{
+                       "type" => "text",
+                       "text" => "hello",
+                       "annotations" => %{"lastModified" => timestamp}
+                     }
+                   ],
+                   "isError" => false
+                 },
+                 nil,
+                 :closed
+               )
+    end
+
+    assert {:error, :mcp_invalid_result} =
+             MCPProtocol.normalize_tool_result(
+               %{
+                 "content" => [
+                   %{"type" => "text", "text" => "hello", "unexpected" => true}
+                 ],
+                 "isError" => false
+               },
+               nil,
+               :closed
+             )
+
+    for malformed <- [
+          [%{"type" => "text", "text" => "hello", "annotations" => 42}],
+          [%{"type" => "text", "text" => "hello", "_meta" => []}],
+          [%{"type" => "text", "text" => "hello", "annotations" => %{"audience" => nil}}],
+          [%{"type" => "text", "text" => "hello", "annotations" => %{"priority" => nil}}],
+          [%{"type" => "text", "text" => "hello", "annotations" => %{"lastModified" => nil}}],
+          [
+            %{
+              "type" => "text",
+              "text" => "hello",
+              "annotations" => %{"lastModified" => String.duplicate("x", 257)}
+            }
+          ],
+          [
+            %{
+              "type" => "resource",
+              "resource" => %{"uri" => "repo://x", "text" => "hello"},
+              "annotations" => "assistant"
+            }
+          ]
+        ] do
+      assert {:error, :mcp_invalid_result} =
+               MCPProtocol.normalize_tool_result(
+                 %{"content" => malformed, "isError" => false},
+                 nil,
+                 :closed
+               )
+    end
+
+    assert {:ok,
+            %{
+              "resources" => [
+                %{"uri" => "repo://x", "text" => "hello"}
+              ]
+            }} =
+             MCPProtocol.normalize_tool_result(
+               %{
+                 "content" => [
+                   %{
+                     "type" => "resource",
+                     "resource" => %{
+                       "uri" => "repo://x",
+                       "text" => "hello",
+                       "_meta" => %{"vendor.example/checksum" => "safe-to-drop"}
+                     },
+                     "_meta" => %{"vendor.example/display" => true}
+                   }
+                 ],
+                 "isError" => false
+               },
+               nil,
+               :closed
+             )
+  end
+
+  test "bounded error feedback replaces terminal control characters" do
+    assert {:error, {:mcp_domain_error, feedback}} =
+             MCPProtocol.normalize_tool_result(
+               %{
+                 "content" => [
+                   %{
+                     "type" => "text",
+                     "text" => "bad\e[31mred\u009B32mgreen\rforged\tfield\nline"
+                   }
+                 ],
+                 "isError" => true
+               },
+               nil,
+               :bounded
+             )
+
+    refute feedback =~ "\e"
+    refute feedback =~ "\u009B"
+    refute feedback =~ "\r"
+    refute feedback =~ "\t"
+    refute feedback =~ "\n"
+    assert feedback =~ "bad�[31mred"
+    assert feedback =~ "green�forged�field�line"
+  end
+
+  test "bounded error feedback rejects invalid UTF-8 without raising" do
+    assert {:error, :mcp_invalid_result} =
+             MCPProtocol.normalize_tool_result(
+               %{
+                 "content" => [%{"type" => "text", "text" => <<0xFF>>}],
+                 "isError" => true
+               },
+               nil,
+               :bounded
              )
   end
 
@@ -563,7 +787,7 @@ defmodule PtcRunner.Kernel.MCPProtocolTest do
     assert {:error, :mcp_domain_error} =
              MCPProtocol.normalize_tool_result(%{"isError" => true, "content" => []}, validator)
 
-    assert {:error, {:mcp_domain_error, "unknown path\ntry another path"}} =
+    assert {:error, {:mcp_domain_error, "unknown path�try another path"}} =
              MCPProtocol.normalize_tool_result(
                %{
                  "isError" => true,
@@ -591,7 +815,7 @@ defmodule PtcRunner.Kernel.MCPProtocolTest do
     assert byte_size(bounded_feedback) == 1_024
     assert String.valid?(bounded_feedback)
 
-    assert {:error, :mcp_invalid_result} =
+    assert {:error, {:mcp_domain_error, "not exact"}} =
              MCPProtocol.normalize_tool_result(
                %{
                  "isError" => true,

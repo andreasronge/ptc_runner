@@ -27,6 +27,32 @@ defmodule PtcRunner.Kernel.MCPStdioTransportTest do
   end
 
   @tag :tmp_dir
+  test "pending request saturation is recoverable rather than terminal", %{tmp_dir: tmp_dir} do
+    transport = start_transport(tmp_dir)
+
+    requests =
+      for _request <- 1..128 do
+        Task.async(fn ->
+          MCPStdioTransport.request(transport, "never", %{}, %{}, 8_192, 5_000)
+        end)
+      end
+
+    assert_eventually(fn ->
+      match?(%{pending: pending} when map_size(pending) == 128, safe_state(transport.pid))
+    end)
+
+    assert {:error, :mcp_transport_busy} =
+             MCPStdioTransport.request(transport, "overflow", %{}, %{}, 8_192, 1_000)
+
+    assert Process.alive?(transport.pid)
+    assert MCPStdioTransport.close(transport) in [:ok, {:error, :mcp_transport_error}]
+
+    assert Enum.all?(requests, fn request ->
+             Task.await(request, 5_000) == {:error, :mcp_transport_error}
+           end)
+  end
+
+  @tag :tmp_dir
   test "returns the exact decoded request and response for private capture", %{tmp_dir: tmp_dir} do
     transport = start_transport(tmp_dir)
 
@@ -70,6 +96,57 @@ defmodule PtcRunner.Kernel.MCPStdioTransportTest do
 
     assert {:ok, %{"result" => %{"method" => "notify"}}} = request(transport, "notify")
     assert :ok = MCPStdioTransport.close(transport)
+  end
+
+  @tag :tmp_dir
+  test "unscoped notification accounting resets after each response", %{tmp_dir: tmp_dir} do
+    transport = start_transport(tmp_dir)
+
+    for _request <- 1..4 do
+      assert {:ok, %{"result" => %{"method" => "unscoped-notify"}}} =
+               request(transport, "unscoped-notify")
+    end
+
+    assert :ok = MCPStdioTransport.close(transport)
+  end
+
+  @tag :tmp_dir
+  test "a stale response for a retired request cannot tear down the transport", %{
+    tmp_dir: tmp_dir
+  } do
+    transport = start_transport(tmp_dir)
+
+    assert {:ok, %{"result" => %{"method" => "stale-response"}}} =
+             request(transport, "stale-response")
+
+    assert {:ok, %{"result" => %{"method" => "after-stale"}}} =
+             request(transport, "after-stale")
+
+    assert :ok = MCPStdioTransport.close(transport)
+  end
+
+  @tag :tmp_dir
+  test "a stale response cannot reset unscoped notification accounting", %{
+    tmp_dir: tmp_dir
+  } do
+    transport = start_transport(tmp_dir)
+
+    assert {:ok, %{"result" => %{"method" => "warmup"}}} = request(transport, "warmup")
+
+    assert {:error, :mcp_response_exceeded} = request(transport, "stale-reset-flood")
+    assert {:error, :closed} = request(transport, "after-flood")
+  end
+
+  @tag :tmp_dir
+  test "repeated stale responses remain subject to the unscoped byte ceiling", %{
+    tmp_dir: tmp_dir
+  } do
+    transport = start_transport(tmp_dir)
+
+    assert {:ok, %{"result" => %{"method" => "warmup"}}} = request(transport, "warmup")
+
+    assert {:error, :mcp_response_exceeded} = request(transport, "stale-response-flood")
+    assert {:error, :closed} = request(transport, "after-stale-response-flood")
   end
 
   @tag :tmp_dir

@@ -291,8 +291,14 @@ defmodule PtcRunner.Kernel.Dispatcher do
           send(pid, go)
           await_provider(state, capability, pid, ref, timeout_ms)
 
+        {:error, :provider_down} ->
+          reason = await_down(pid, ref)
+          RunState.release_provider_slot(state)
+          provider_exit(reason)
+
         {:error, :closed} ->
           await_down(pid, ref)
+          RunState.release_provider_slot(state)
           limit_error(state, nil, :run_closed)
       end
     end
@@ -310,13 +316,7 @@ defmodule PtcRunner.Kernel.Dispatcher do
 
       {:DOWN, ^ref, :process, ^pid, reason} ->
         RunState.release_provider_slot(state)
-
-        %{
-          status: :error,
-          kind: :provider_error,
-          reason: normalize_exit(reason),
-          retryable?: true
-        }
+        provider_exit(reason)
     after
       timeout_ms ->
         Process.exit(pid, :kill)
@@ -328,8 +328,17 @@ defmodule PtcRunner.Kernel.Dispatcher do
 
   defp await_down(pid, ref) do
     receive do
-      {:DOWN, ^ref, :process, ^pid, _reason} -> :ok
+      {:DOWN, ^ref, :process, ^pid, reason} -> reason
     end
+  end
+
+  defp provider_exit(reason) do
+    %{
+      status: :error,
+      kind: :provider_error,
+      reason: normalize_exit(reason),
+      retryable?: true
+    }
   end
 
   defp safely_invoke(callback, arguments, context) do

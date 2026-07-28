@@ -196,6 +196,57 @@ defmodule PtcRunner.Kernel.CoreContractTest do
              Dispatcher.dispatch(state, :workflow, environment, "malformed-struct", %{}, 100)
   end
 
+  test "provider death before tracker attachment releases every reserved slot" do
+    {:ok, capability} =
+      Capability.new(
+        name: "tiny-heap",
+        input_schema: @input_schema,
+        callback: fn _ -> {:ok, true} end
+      )
+
+    {:ok, environment} = WorkflowEnvironment.new(capabilities: [capability])
+
+    {:ok, limits} =
+      Limits.new(
+        live_provider_tasks: 1,
+        workflow_capability_calls: 5,
+        workflow_capability_calls_per_name: 5,
+        provider_heap_words: 100
+      )
+
+    {:ok, state} = RunState.start(limits)
+
+    for _attempt <- 1..4 do
+      assert %{status: :error, kind: :provider_error, reason: :provider_exit} =
+               Dispatcher.dispatch(state, :workflow, environment, "tiny-heap", %{}, 100)
+    end
+
+    assert :ok = RunState.reserve_capability(state, :workflow, "tiny-heap")
+    assert :ok = RunState.release_provider_slot(state)
+  end
+
+  test "provider attachment after run closure is rejected and releases its reservation" do
+    {:ok, state} = RunState.start(Limits.defaults())
+    assert :ok = RunState.reserve_capability(state, :workflow, "late-provider")
+    assert :ok = RunState.close(state)
+
+    provider =
+      spawn(fn ->
+        receive do
+          :stop -> :ok
+        end
+      end)
+
+    provider_ref = Process.monitor(provider)
+
+    assert {:error, :closed} = RunState.attach_provider(state, provider)
+    assert_receive {:DOWN, ^provider_ref, :process, ^provider, :killed}, 1_000
+
+    internal = :sys.get_state(state.pid)
+    assert internal.provider_tasks == 0
+    assert internal.reservations == %{}
+  end
+
   test "timed-out provider results cannot consume another callback slot after closure" do
     parent = self()
 
@@ -271,6 +322,32 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     assert :ok = RunState.close_and_drain(state)
     assert_receive {:DOWN, ^provider_ref, :process, ^provider, :killed}
     assert %{closed?: true} = RunState.usage(state)
+  end
+
+  test "provider attachment distinguishes a closed run from an already-dead provider" do
+    {:ok, closed_state} = RunState.start(Limits.defaults())
+    assert :ok = RunState.reserve_capability(closed_state, :workflow, "closed")
+    assert :ok = RunState.close_and_drain(closed_state)
+
+    live_provider =
+      spawn(fn ->
+        receive do
+          :stop -> :ok
+        end
+      end)
+
+    live_ref = Process.monitor(live_provider)
+
+    assert {:error, :closed} = RunState.attach_provider(closed_state, live_provider)
+    assert_receive {:DOWN, ^live_ref, :process, ^live_provider, :killed}
+
+    {:ok, live_state} = RunState.start(Limits.defaults())
+    assert :ok = RunState.reserve_capability(live_state, :workflow, "dead")
+    {dead_provider, dead_ref} = spawn_monitor(fn -> :ok end)
+    assert_receive {:DOWN, ^dead_ref, :process, ^dead_provider, :normal}
+
+    assert {:error, :provider_down} = RunState.attach_provider(live_state, dead_provider)
+    assert :ok = RunState.release_provider_slot(live_state)
   end
 
   test "a dispatching process killed mid-call releases its slot and stops its provider" do
@@ -1161,6 +1238,32 @@ defmodule PtcRunner.Kernel.CoreContractTest do
              Kernel.run(~s|(fail "#{private}")|, config)
 
     refute inspect(error) =~ private
+  end
+
+  test "private workflow evaluator failures expose only fixed diagnostics" do
+    {:ok, workflow} = WorkflowEnvironment.new([])
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, limits} = Limits.new()
+    {:ok, sink} = EventSink.start(:private, limits, run_id: "private-workflow-error")
+
+    {:ok, config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        mission_environment: mission,
+        input: %{},
+        limits: limits,
+        event_sink: sink
+      )
+
+    secret = "PRIVATE_NOT_CALLABLE_VALUE"
+
+    assert {:error,
+            %{
+              kind: :workflow_failed,
+              details: %{message: "private workflow failed"}
+            } = error} = Kernel.run(~s|("#{secret}" 1)|, config)
+
+    refute inspect(error) =~ secret
   end
 
   test "explicit workflow failure exposes only bounded safe taxonomy" do
