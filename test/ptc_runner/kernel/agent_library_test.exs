@@ -1120,6 +1120,30 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     refute_receive {:agent_request, _second}
   end
 
+  test "agent.core keeps a deliberate error-shaped fail terminal after an unrelated read" do
+    deliberate = %{
+      content: nil,
+      tool_calls: [
+        %{
+          id: "decline-after-read",
+          name: "run_ptc_lisp",
+          args: %{
+            "program" =>
+              ~S|(do (tool/runtime-usage {}) (fail {:status :error :kind :provider-error :reason :not-found :retryable? false}))|
+          }
+        }
+      ]
+    }
+
+    {:ok, config} = agent_config([deliberate, @recovered])
+
+    assert {:error, %{kind: :workflow_failed, reason: :explicit_failure}} =
+             Kernel.run(~S|(agent.core/run "Respect the decision" {"max_turns" 3})|, config)
+
+    assert_receive {:agent_request, _first}
+    refute_receive {:agent_request, _second}
+  end
+
   # The guard is intact for the effect nothing installs yet. An undeclared
   # effect is `:unknown` and counts as unsafe by the same rule.
   # A closing turn is offered once. It exists so an unsafe failure costs the

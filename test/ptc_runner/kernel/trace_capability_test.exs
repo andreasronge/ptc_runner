@@ -176,8 +176,17 @@ defmodule PtcRunner.Kernel.TraceCapabilityTest do
 
     path = Path.join(directory, "trace.jsonl")
 
+    component_override = %{
+      "component_id" => "agent.core",
+      "base_source_hash" => "sha256:" <> String.duplicate("a", 64),
+      "source_hash" => "sha256:" <> String.duplicate("b", 64)
+    }
+
     events = [
-      decoded_event("v2-run", 1, "run-started", %{"workflow_prelude" => v2_prelude}),
+      decoded_event("v2-run", 1, "run-started", %{
+        "workflow_prelude" => v2_prelude,
+        "component_overrides" => [component_override]
+      }),
       decoded_event("v2-run", 2, "run-stopped", %{"outcome" => "ok"}),
       decoded_event("legacy-run", 1, "run-started", %{"workflow_prelude" => legacy_prelude}),
       decoded_event("legacy-run", 2, "run-stopped", %{"outcome" => "ok"})
@@ -193,6 +202,8 @@ defmodule PtcRunner.Kernel.TraceCapabilityTest do
     # dependency_indices is never backfilled with invented edges.
     assert summaries["v2-run"]["workflow_prelude"] == v2_prelude
     assert summaries["legacy-run"]["workflow_prelude"] == legacy_prelude
+    assert summaries["v2-run"]["component_overrides"] == [component_override]
+    assert summaries["v2-run"]["positions"] == [1]
   end
 
   @tag :tmp_dir
@@ -604,6 +615,9 @@ defmodule PtcRunner.Kernel.TraceCapabilityTest do
     version_path = Path.join(directory, "version.jsonl")
     mixed_path = Path.join(directory, "mixed.jsonl")
     shared_trace_path = Path.join(directory, "shared-trace.jsonl")
+    stopped_only_path = Path.join(directory, "stopped-only.jsonl")
+    stopped_before_start_path = Path.join(directory, "stopped-before-start.jsonl")
+    event_after_stop_path = Path.join(directory, "event-after-stop.jsonl")
     unsupported = Map.put(decoded_event("version", 1, "run-started"), "schema_version", 2)
     mixed = [decoded_event("same", 1, "run-started"), decoded_event("same", 1, "run-stopped")]
     mixed = put_in(mixed, [Access.at(1), "trace_id"], "different-trace")
@@ -618,12 +632,44 @@ defmodule PtcRunner.Kernel.TraceCapabilityTest do
     File.write!(mixed_path, Enum.map_join(mixed, "", &(Jason.encode!(&1) <> "\n")))
     File.write!(shared_trace_path, Enum.map_join(shared_trace, "", &(Jason.encode!(&1) <> "\n")))
 
+    File.write!(
+      stopped_only_path,
+      Jason.encode!(decoded_event("stopped", 1, "run-stopped")) <> "\n"
+    )
+
+    stopped_before_start = [
+      decoded_event("reversed", 1, "run-stopped"),
+      decoded_event("reversed", 2, "run-started")
+    ]
+
+    event_after_stop = [
+      decoded_event("post-stop", 1, "run-started"),
+      decoded_event("post-stop", 2, "run-stopped"),
+      decoded_event("post-stop", 3, "workflow-annotation")
+    ]
+
+    File.write!(
+      stopped_before_start_path,
+      Enum.map_join(stopped_before_start, "", &(Jason.encode!(&1) <> "\n"))
+    )
+
+    File.write!(
+      event_after_stop_path,
+      Enum.map_join(event_after_stop, "", &(Jason.encode!(&1) <> "\n"))
+    )
+
     {:ok, version_log} = TraceLog.new(source: {:file, version_path})
     {:ok, mixed_log} = TraceLog.new(source: {:file, mixed_path})
     {:ok, shared_trace_log} = TraceLog.new(source: {:file, shared_trace_path})
+    {:ok, stopped_only_log} = TraceLog.new(source: {:file, stopped_only_path})
+    {:ok, stopped_before_start_log} = TraceLog.new(source: {:file, stopped_before_start_path})
+    {:ok, event_after_stop_log} = TraceLog.new(source: {:file, event_after_stop_path})
     assert {:error, :unsupported_version} = TraceLog.query(version_log, :list_runs, %{})
     assert {:error, :malformed_source} = TraceLog.query(mixed_log, :list_runs, %{})
     assert {:error, :malformed_source} = TraceLog.query(shared_trace_log, :list_runs, %{})
+    assert {:error, :malformed_source} = TraceLog.query(stopped_only_log, :list_runs, %{})
+    assert {:error, :malformed_source} = TraceLog.query(stopped_before_start_log, :list_runs, %{})
+    assert {:error, :malformed_source} = TraceLog.query(event_after_stop_log, :list_runs, %{})
   end
 
   @tag :tmp_dir

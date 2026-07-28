@@ -284,6 +284,12 @@ each other's trace grants.
 Every run has a stable run ID and trace ID. Events carry a monotonic sequence
 and timestamp, plus evaluation/capability IDs where applicable.
 
+Canonical loading also validates each run's lifecycle. `run-started` must be
+the first event for that run and may occur exactly once. A run may remain open
+or end with exactly one `run-stopped`; no event may follow it. Histories that
+start late, stop twice, or continue after stopping fail closed as
+`:malformed_source`.
+
 Grouping does not depend only on filenames. Duplicate events may be
 deduplicated only by a documented stable identity such as `{trace_id, seq}`.
 
@@ -312,6 +318,11 @@ a run without loading its turns:
   with `component_ids`; every entry lists unique ascending indices strictly
   earlier than its own position). Legacy events without the projection are
   served verbatim; the query layer never invents missing edges;
+- the run-started event's positive sequence in `positions`, so the summary is
+  directly citable without a second turn query;
+- the bounded `component_overrides` recorded at run start, including component,
+  base-source, and effective-source identities, so run discovery exposes
+  treatment assignment rather than requiring one provenance query per run;
 - frozen mission-inventory hash and byte count when an inventory was rendered;
 - safe connector snapshots containing public names, effects, schema hashes, and
   snapshot hashes, but no endpoint or session data;

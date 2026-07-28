@@ -18,7 +18,9 @@
 ;; response labels its installed `provider` alias so a citation can copy both
 ;; that alias and `snapshot_hash` without guessing which native source backed it.
 ;; Catalog items, provenance results, and matching effective-prelude results
-;; also expose positive `positions` copied from their source records.
+;; also expose positive `positions` copied from their source records. The trace
+;; catalog projects run-started provenance directly, so listing N runs remains
+;; one capability call instead of N follow-up turn queries.
 ;;
 ;; Authority for historical behaviour: `effective-prelude` returns the exact
 ;; source a run compiled, and that is the only source that explains what the run
@@ -30,28 +32,16 @@
 (defn- source-page [provider envelope]
   (assoc (cap/unwrap! envelope) "provider" provider))
 
-;; Treatment assignment belongs in the first required observation, not behind an
-;; optional call. A reviewer that has to ask per run will sample a few and
-;; generalise: three detector runs checked provenance on one or two runs each,
-;; all of them unmodified, and concluded a mixed catalog was homogeneous.
-(defn- run-provenance [run-id]
-  (let [page (cap/unwrap! (tool/history.list-turns {"run_id" run-id "limit" 1}))
-        started (first (get page "items"))
-        data (get started "data")]
-    (if (= "run-started" (get started "type"))
-      {"component_overrides" (get data "component_overrides" [])
-       "workflow_prelude" (get-in data ["workflow_prelude" "hash"])
-       "mission_prelude" (get-in data ["mission_prelude" "hash"])
-       "positions" [(get started "sequence")]}
-      {"component_overrides" []})))
-
 (defn- compact-run [run]
-  (select-keys
-    run
-    ["run_id" "trace_id" "status" "terminal_reason" "start_timestamp"
-     "stop_timestamp" "duration_ms" "llm_calls" "subordinate_evaluations"
-     "workflow_capability_calls" "mission_capability_calls" "error_count"
-     "complete" "truncated" "source"]))
+  (assoc
+    (select-keys
+      run
+      ["run_id" "trace_id" "status" "terminal_reason" "start_timestamp"
+       "stop_timestamp" "duration_ms" "llm_calls" "subordinate_evaluations"
+       "workflow_capability_calls" "mission_capability_calls" "error_count"
+       "component_overrides" "positions" "complete" "truncated" "source"])
+    "workflow_prelude" (get-in run ["workflow_prelude" "hash"])
+    "mission_prelude" (get-in run ["mission_prelude" "hash"])))
 
 (defn list-runs
   "Read one public run page. Pass nil first, then only the exact returned
@@ -77,7 +67,6 @@
            "items"
            (mapv (fn [run]
                    (merge (compact-run run)
-                          (run-provenance (get run "run_id"))
                           {"provider" provider
                            "snapshot_hash" snapshot-hash
                            "resource" (get run "run_id")}))
@@ -87,12 +76,13 @@
   "Read which components a run replaced before compiling, and the bundle hashes
   it froze.
 
-  The compact catalog cannot carry this: the trace records it once, on the
-  run-started event. A run that replaced a component did not execute the
-  repository's current source, and nothing else in a review distinguishes such a
-  run from a baseline one. `positions` identifies the source run-started event.
-  An empty `component_overrides` means the run compiled the installed components
-  unchanged."
+  `list-runs` already carries component overrides, compact prelude hashes, and a
+  citation position. Use this narrower query only when the full run-started
+  prelude structures are needed. A run that replaced a component did not execute
+  the repository's current source, and nothing else in a review distinguishes
+  such a run from a baseline one. `positions` identifies the source run-started
+  event. An empty `component_overrides` means the run compiled the installed
+  components unchanged."
   {:signature "(run-id :string) -> :map"}
   [run-id]
   (let [page (source-page "history" (tool/history.list-turns {"run_id" run-id "limit" 1}))

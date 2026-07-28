@@ -78,7 +78,7 @@ defmodule PtcRunner.Kernel.RepoAnalystApplicationTest do
 
   describe "task manifests" do
     test "the answer manifest never selects a prior-run source" do
-      assert {:ok, manifest} = Manifest.load(path("repo-analyst-answer.json"))
+      assert {:ok, manifest} = load_manifest("repo-analyst-answer.json")
 
       assert Enum.map(manifest.providers.mission, & &1["name"]) == ["workspace"]
       assert Enum.map(manifest.providers.workflow, & &1["name"]) == ["deepseek"]
@@ -88,7 +88,7 @@ defmodule PtcRunner.Kernel.RepoAnalystApplicationTest do
 
     test "the review and improve manifests add the evidence surface and nothing else" do
       for name <- ~w(repo-analyst-review.json repo-analyst-improve.json) do
-        assert {:ok, manifest} = Manifest.load(path(name)), "#{name} failed to load"
+        assert {:ok, manifest} = load_manifest(name), "#{name} failed to load"
 
         assert Enum.map(manifest.providers.mission, & &1["name"]) ==
                  ["workspace", "history", "private-history"]
@@ -102,7 +102,7 @@ defmodule PtcRunner.Kernel.RepoAnalystApplicationTest do
       contracts =
         for name <- ~w(repo-analyst-answer.json repo-analyst-review.json
                        repo-analyst-improve.json) do
-          {:ok, manifest} = Manifest.load(path(name))
+          {:ok, manifest} = load_manifest(name)
           assert manifest.contracts.result, "#{name} must declare a result contract"
           manifest.contracts.result.schema
         end
@@ -116,12 +116,26 @@ defmodule PtcRunner.Kernel.RepoAnalystApplicationTest do
             {"repo-analyst-review.json", 110_000},
             {"repo-analyst-improve.json", 110_000}
           ] do
-        {:ok, manifest} = Manifest.load(path(name))
+        {:ok, manifest} = load_manifest(name)
 
         assert manifest.limits.run_duration_ms == 120_000
         assert manifest.limits.workflow_timeout_ms == workflow_timeout_ms
         assert manifest.limits.evaluation_timeout_ms == 20_000
       end
+    end
+
+    test "the improvement turn budget is reachable through installed and selected limits" do
+      assert {:ok, host} = HostConfig.load(@host)
+      assert {:ok, manifest} = Manifest.load(path("repo-analyst-improve.json"), host.limits)
+
+      max_turns =
+        path("repo-analyst/improve-input.json")
+        |> File.read!()
+        |> Jason.decode!()
+        |> get_in(["agent", "max_turns"])
+
+      assert manifest.limits.subordinate_evaluations >= max_turns
+      assert manifest.limits.workflow_capability_calls_per_name >= max_turns
     end
 
     @tag :tmp_dir
@@ -325,10 +339,19 @@ defmodule PtcRunner.Kernel.RepoAnalystApplicationTest do
     test "catalog, provenance, and effective source expose copyable citation positions" do
       {:ok, bundle} = compile_facade("runs")
       granted = ["history.list-runs", "history.list-turns"] ++ @private_operations
+      {:ok, calls} = Agent.start_link(fn -> [] end)
 
       values = %{
         "history.list-runs" => %{
-          "items" => [%{"run_id" => "run-1"}],
+          "items" => [
+            %{
+              "run_id" => "run-1",
+              "component_overrides" => [],
+              "workflow_prelude" => %{"hash" => "workflow"},
+              "mission_prelude" => %{"hash" => "mission"},
+              "positions" => [1]
+            }
+          ],
           "snapshot_hash" => "sha256:trace"
         },
         "history.list-turns" => %{
@@ -360,7 +383,7 @@ defmodule PtcRunner.Kernel.RepoAnalystApplicationTest do
       {:ok, mission} =
         MissionEnvironment.new(
           bundle: bundle,
-          capabilities: stubs(granted, nil, values)
+          capabilities: stubs(granted, calls, values)
         )
 
       for {expression, provider, snapshot_hash, resource, positions} <- [
@@ -383,6 +406,14 @@ defmodule PtcRunner.Kernel.RepoAnalystApplicationTest do
                  "positions" => positions
                }
       end
+
+      assert Agent.get(calls, & &1)
+             |> Enum.map(&elem(&1, 0))
+             |> Enum.count(&(&1 == "history.list-runs")) == 1
+
+      assert Agent.get(calls, & &1)
+             |> Enum.map(&elem(&1, 0))
+             |> Enum.count(&(&1 == "history.list-turns")) == 1
     end
 
     test "repo assembles against the four mapped workspace tools" do
@@ -709,6 +740,12 @@ defmodule PtcRunner.Kernel.RepoAnalystApplicationTest do
     {:ok, cap} = Library.component("cap")
 
     Kernel.compile_bundle([cap, component])
+  end
+
+  defp load_manifest(name) do
+    with {:ok, host} <- HostConfig.load(@host) do
+      Manifest.load(path(name), host.limits)
+    end
   end
 
   defp facade_names(%{prelude: prelude}) do

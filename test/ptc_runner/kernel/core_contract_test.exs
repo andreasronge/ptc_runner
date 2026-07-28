@@ -1397,6 +1397,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
       assert %{
                outcome: :failed,
                capability_activity?: true,
+               capability_failure?: true,
                retryable?: ^retryable?,
                value: %{status: :error, kind: :provider_error, reason: :not_found}
              } =
@@ -1414,6 +1415,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     assert %{
              outcome: :failed,
              capability_activity?: false,
+             capability_failure?: false,
              retryable?: true
            } =
              Evaluation.evaluate_source(

@@ -58,7 +58,7 @@
 
 (defn- correctable-capability-failure? [evaluation]
   (let [error (get evaluation :value)]
-    (and (true? (get evaluation :capability-activity?))
+    (and (true? (get evaluation :capability-failure?))
          (true? (get evaluation :retryable?))
          (map? error)
          (= :error (get error :status))

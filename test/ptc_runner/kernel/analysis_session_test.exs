@@ -548,6 +548,33 @@ defmodule PtcRunner.Kernel.AnalysisSessionTest do
   end
 
   @tag :tmp_dir
+  test "explicit capability failures retain their activity classification", %{
+    tmp_dir: directory
+  } do
+    seed_trace(directory, "seed")
+
+    assert {:ok, session, _info} =
+             start_log_session({:directory, directory}, {:directory, directory})
+
+    on_exit(fn -> AnalysisSession.stop(session) end)
+
+    assert {:ok,
+            %{
+              status: :error,
+              outcome: :failed,
+              error: %{
+                capability_activity?: true,
+                capability_failure?: true,
+                retryable?: true
+              }
+            }} =
+             AnalysisSession.evaluate(
+               session,
+               ~S|(fail (tool/trace-list-runs {"unsupported" true}))|
+             )
+  end
+
+  @tag :tmp_dir
   test "log.core queries the frozen capture and public accounting is authoritative", %{
     tmp_dir: directory
   } do

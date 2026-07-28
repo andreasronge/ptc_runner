@@ -474,7 +474,9 @@ defmodule PtcRunner.Kernel.AnalysisSession do
       kind: Map.get(result, :kind, result.outcome),
       reason: Map.get(result, :reason),
       message: bounded_message(Map.get(details, :message)),
-      capability_activity?: Map.get(details, :capability_activity?),
+      capability_activity?:
+        Map.get(result, :capability_activity?, Map.get(details, :capability_activity?)),
+      capability_failure?: Map.get(result, :capability_failure?),
       retryable?: Map.get(result, :retryable?)
     }
   end
@@ -508,6 +510,7 @@ defmodule PtcRunner.Kernel.AnalysisSession do
         reason: :terminal_result_bytes,
         message: result_limit_message(profile_id),
         capability_activity?: nil,
+        capability_failure?: nil,
         retryable?: nil
       },
       evaluation_id: projection.evaluation_id,

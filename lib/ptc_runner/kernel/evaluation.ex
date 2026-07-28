@@ -9,11 +9,11 @@ defmodule PtcRunner.Kernel.Evaluation do
 
   An ordinary successful value is projected as `:continued`; an explicit
   `(return value)` is projected as `:returned`; and `(fail value)` is projected
-  as `:failed`. Failed results report whether capability activity occurred and
-  whether correcting the program is effect-safe. The latter says only that the
-  evaluation performed no write or unknown effect; a caller must still decide
-  whether the failure value denotes a correctable capability error rather than
-  a deliberate application failure.
+  as `:failed`. Failed results report whether capability activity occurred,
+  whether the failure value is the exact result of the last recorded capability
+  call, and whether correcting the program is effect-safe. The latter says only
+  that the evaluation performed no write or unknown effect; callers combine all
+  three facts with the bounded failure shape before requesting a correction.
 
   Continued and returned evaluations atomically commit native memory and exact
   bounded history before exposing only an inert public value. Continued results
@@ -434,6 +434,8 @@ defmodule PtcRunner.Kernel.Evaluation do
     {capability_activity?, unsafe_activity?} =
       evaluation_activity(state, environment, step, mission_calls_before)
 
+    capability_failure? = capability_failure?(step, value)
+
     :ok = RunState.release_evaluation(state, lease)
 
     case Lisp.project_boundary_value(value, projection_boundary) do
@@ -444,6 +446,7 @@ defmodule PtcRunner.Kernel.Evaluation do
           prints: Map.get(step, :prints, []),
           continuation_effect: :preserved,
           capability_activity?: capability_activity?,
+          capability_failure?: capability_failure?,
           retryable?: not unsafe_activity?
         }
 
@@ -546,6 +549,22 @@ defmodule PtcRunner.Kernel.Evaluation do
       get_in(step, [Access.key(:fail), Access.key(:details), :capability_activity?]) == true
 
     ledger_activity? or marker_activity?
+  end
+
+  # An explicit failure is a capability failure only when it carries the exact
+  # result of the last recorded call. Merely reading something earlier cannot
+  # turn a later, deliberately constructed error-shaped value into a correction
+  # request. `cap/unwrap!` fails immediately with the envelope it received, so
+  # this binding needs no second PTC-Lisp failure vocabulary or forgeable tag.
+  defp capability_failure?(step, value) do
+    step
+    |> Map.get(:tool_calls, [])
+    |> List.wrap()
+    |> List.last()
+    |> case do
+      %{error: nil, result: result} -> result === value
+      _other -> false
+    end
   end
 
   defp mission_capability_call_count(state), do: call_total(mission_capability_calls(state))
