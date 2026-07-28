@@ -108,18 +108,28 @@ defmodule PtcRunner.Kernel.RunState do
   def reserve_capability(state, environment, name),
     do: call(state, {:reserve_capability, environment, name})
 
-  @spec attach_provider(t(), pid()) :: :ok | {:error, :closed}
+  @spec attach_provider(t(), pid()) :: :ok | {:error, :closed | :provider_down}
   @doc "Attaches the caller's live provider process to its capability reservation."
   def attach_provider(%__MODULE__{} = state, provider) when is_pid(provider) do
-    with :ok <- ProviderTaskTracker.attach(state.provider_tracker, provider) do
-      case call(state, {:attach_provider, provider}) do
-        :ok ->
-          :ok
+    case ProviderTaskTracker.attach(state.provider_tracker, provider) do
+      :ok ->
+        case call(state, {:attach_provider, provider}) do
+          :ok ->
+            :ok
 
-        {:error, :closed} = error ->
-          Process.exit(provider, :kill)
-          error
-      end
+          {:error, :closed} = error ->
+            Process.exit(provider, :kill)
+            error
+        end
+
+      {:error, :closed} = error ->
+        Process.exit(provider, :kill)
+        _ = release_provider_slot(state)
+        error
+
+      {:error, :provider_down} = error ->
+        _ = release_provider_slot(state)
+        error
     end
   end
 
@@ -298,19 +308,24 @@ defmodule PtcRunner.Kernel.RunState do
   end
 
   def handle_call({token, {:attach_provider, provider}}, {caller, _tag}, %{token: token} = state) do
-    case state.reservations do
-      %{^caller => reservation} ->
-        reservation =
-          reservation
-          |> Map.put(:provider, provider)
-          |> Map.put(:provider_ref, Process.monitor(provider))
+    if unavailable?(state) do
+      Process.exit(provider, :kill)
+      {:reply, {:error, :closed}, release_reservation(state, caller)}
+    else
+      case state.reservations do
+        %{^caller => reservation} ->
+          reservation =
+            reservation
+            |> Map.put(:provider, provider)
+            |> Map.put(:provider_ref, Process.monitor(provider))
 
-        reservations = Map.put(state.reservations, caller, reservation)
-        {:reply, :ok, %{state | reservations: reservations}}
+          reservations = Map.put(state.reservations, caller, reservation)
+          {:reply, :ok, %{state | reservations: reservations}}
 
-      _ ->
-        Process.exit(provider, :kill)
-        {:reply, {:error, :closed}, state}
+        _ ->
+          Process.exit(provider, :kill)
+          {:reply, {:error, :closed}, state}
+      end
     end
   end
 

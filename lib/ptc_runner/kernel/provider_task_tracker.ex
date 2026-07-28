@@ -18,9 +18,9 @@ defmodule PtcRunner.Kernel.ProviderTaskTracker do
     end
   end
 
-  @spec attach(t(), pid()) :: :ok | {:error, :closed}
+  @spec attach(t(), pid()) :: :ok | {:error, :closed | :provider_down}
   def attach(tracker, provider) when is_pid(provider),
-    do: call(tracker, {:attach, provider})
+    do: safe_call(tracker, {:attach, provider})
 
   @spec close(t()) :: :ok
   def close(%__MODULE__{pid: pid} = tracker) do
@@ -53,7 +53,7 @@ defmodule PtcRunner.Kernel.ProviderTaskTracker do
       ref = Process.monitor(provider)
       {:reply, :ok, put_in(state.providers[ref], provider)}
     else
-      {:reply, {:error, :closed}, state}
+      {:reply, {:error, :provider_down}, state}
     end
   end
 

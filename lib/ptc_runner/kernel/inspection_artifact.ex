@@ -3,18 +3,34 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
   Persists and loads one immutable private inspection JSONL artifact.
 
   Destinations must end in `.inspection.jsonl`, must not already exist, and are
-  installed atomically with a hard-link create from an exclusive temporary
-  sibling whose permissions are restricted to `0600` before content is
-  written. The create fails when the destination already exists; unlike a
-  rename, it cannot replace an existing artifact. Loading rejects symlinks,
+  installed atomically with a hard-link create from a file inside a mode-0700
+  temporary sibling directory. The file is restricted to `0600` before
+  content is written or the hard link is published. The create fails when the
+  destination already exists; unlike a rename, it cannot replace an existing
+  artifact. Temporary cleanup after the link is best-effort and cannot turn a
+  committed publication into a reported failure. A relative destination is
+  anchored once before validation so a VM-wide working-directory change cannot
+  redirect later filesystem operations. Loading opens a raw descriptor,
+  revalidates its identity, and performs two exact whole-file reads through EOF
+  whose bytes must match. It rejects symlinks,
   changed files, content above 16 MB, any record above 2,000,000 encoded bytes,
-  malformed lines, mixed identities or schema versions, non-contiguous
-  sequences, and records outside the exact V1 or V2 vocabulary. V2 adds paired
-  MCP request/response bodies correlated to an existing capability attempt.
+  excessive structural depth, malformed lines, mixed identities or schema
+  versions, non-contiguous sequences, and records outside the exact V1 or V2
+  vocabulary. V2 adds paired MCP request/response bodies correlated to an
+  existing capability attempt.
+
+  Secure publication is supported on Unix hosts with POSIX-compatible `mkdir`
+  and `id` executables available on `PATH`; persistence fails closed when those
+  authority/mode primitives are unavailable, a physical or lexical ancestor
+  has an untrusted owner, or any ancestor is group/other-writable without
+  sticky-directory protection. Preflight also rejects a final parent whose
+  effective permission class lacks create access. The same structural-depth
+  ceiling applies before in-memory retention, persistence, and loading.
   """
 
   alias Jason.OrderedObject
   alias PtcRunner.Kernel.MCPProtocol
+  alias PtcRunner.Kernel.PrivateDirectory
 
   @max_bytes 16_000_000
   @max_record_bytes 2_000_000
@@ -28,7 +44,8 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
           | {:error,
              :invalid_inspection_path
              | :inspection_destination_exists
-             | :inspection_destination_unavailable}
+             | :inspection_destination_unavailable
+             | :inspection_persistence_failed}
   @doc """
   Read-only destination preflight using the same path rules as `persist/3`.
 
@@ -40,12 +57,9 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
   preflight does not promise the destination stays creatable.
   """
   def preflight_destination(path) when is_binary(path) do
-    with :ok <- valid_path(path) do
-      case File.lstat(path) do
-        {:ok, _stat} -> {:error, :inspection_destination_exists}
-        {:error, :enoent} -> :ok
-        {:error, _reason} -> {:error, :inspection_destination_unavailable}
-      end
+    with :ok <- valid_path(path),
+         {:ok, path} <- anchor_path(path, :invalid_inspection_path) do
+      preflight_anchored(path)
     end
   end
 
@@ -55,13 +69,25 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
   @doc "Validates and atomically persists one previously absent artifact."
   def persist(path, records, canonical_events)
       when is_binary(path) and is_list(records) and is_list(canonical_events) do
-    with :ok <- valid_path(path),
+    persist(path, records, canonical_events, nil)
+  end
+
+  def persist(_path, _records, _events), do: {:error, :invalid_inspection_artifact}
+
+  @doc false
+  @spec persist(binary(), [map()], [map()], nil | (atom() -> term())) ::
+          :ok | {:error, atom()}
+  def persist(path, records, canonical_events, fault_hook)
+      when is_binary(path) and is_list(records) and is_list(canonical_events) do
+    with true <- is_nil(fault_hook) or is_function(fault_hook, 1),
+         :ok <- valid_path(path),
+         {:ok, path} <- anchor_path(path, :invalid_inspection_artifact),
          false <- File.exists?(path),
          :ok <- validate_records(records),
          :ok <- validate_correlations(records, canonical_events),
          {:ok, encoded} <- encode(records),
          true <- byte_size(encoded) <= @max_bytes,
-         :ok <- persist_new(path, encoded) do
+         :ok <- persist_new(path, encoded, fault_hook) do
       :ok
     else
       true -> {:error, :inspection_destination_exists}
@@ -71,13 +97,53 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
     end
   end
 
-  def persist(_path, _records, _events), do: {:error, :invalid_inspection_artifact}
+  def persist(_path, _records, _events, _fault_hook),
+    do: {:error, :invalid_inspection_artifact}
+
+  defp anchor_path(path, error) do
+    case PrivateDirectory.anchor(path) do
+      {:ok, path} -> {:ok, path}
+      {:error, _reason} -> {:error, error}
+    end
+  end
+
+  defp preflight_anchored(path) do
+    case File.lstat(path) do
+      {:ok, _stat} -> {:error, :inspection_destination_exists}
+      {:error, :enoent} -> preflight_private_directory(path)
+      {:error, _reason} -> {:error, :inspection_destination_unavailable}
+    end
+  end
 
   @spec load(binary(), keyword()) :: {:ok, [map()]} | {:error, atom()}
   @doc "Loads one exact fixed artifact with optional lower aggregate and per-record limits."
   def load(path, opts \\ [])
 
   def load(path, opts) when is_binary(path) and is_list(opts) do
+    load(path, opts, nil)
+  end
+
+  def load(_path, _opts), do: {:error, :invalid_inspection_artifact}
+
+  @doc false
+  @spec load(binary(), keyword(), nil | (-> term())) ::
+          {:ok, [map()]} | {:error, atom()}
+  def load(path, opts, verification_hook)
+      when is_binary(path) and is_list(opts) and
+             (is_nil(verification_hook) or is_function(verification_hook, 0)) do
+    load(path, opts, verification_hook, &:file.read/2)
+  end
+
+  def load(_path, _opts, _verification_hook), do: {:error, :invalid_inspection_artifact}
+
+  @doc false
+  @spec load(binary(), keyword(), nil | (-> term()), (:file.io_device(), non_neg_integer() ->
+                                                        {:ok, binary()} | :eof | {:error, term()})) ::
+          {:ok, [map()]} | {:error, atom()}
+  def load(path, opts, verification_hook, reader)
+      when is_binary(path) and is_list(opts) and
+             (is_nil(verification_hook) or is_function(verification_hook, 0)) and
+             is_function(reader, 2) do
     max_bytes = Keyword.get(opts, :max_bytes, @max_bytes)
     max_record_bytes = Keyword.get(opts, :max_record_bytes, @max_record_bytes)
 
@@ -89,8 +155,10 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
          :ok <- valid_path(path),
          {:ok, before} <- regular_file(path),
          :ok <- within_limit(before, max_bytes),
-         {:ok, content} <- File.read(path),
+         {:ok, content, opened} <-
+           read_regular_file(path, before, max_bytes, verification_hook, reader),
          {:ok, after_read} <- regular_file(path),
+         :ok <- unchanged(before, opened),
          :ok <- unchanged(before, after_read),
          {:ok, records} <- decode(content, max_record_bytes),
          :ok <- validate_records(records) do
@@ -102,7 +170,8 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
     end
   end
 
-  def load(_path, _opts), do: {:error, :invalid_inspection_artifact}
+  def load(_path, _opts, _verification_hook, _reader),
+    do: {:error, :invalid_inspection_artifact}
 
   defp valid_path(path) do
     if String.valid?(path) and String.ends_with?(path, @suffix),
@@ -150,7 +219,8 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
   end
 
   defp decode_line(line) do
-    with {:ok, decoded} <- Jason.decode(line, objects: :ordered_objects),
+    with true <- MCPProtocol.within_inspection_document_depth?(line),
+         {:ok, decoded} <- Jason.decode(line, objects: :ordered_objects),
          do: ordered_value(decoded)
   end
 
@@ -319,7 +389,8 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
   end
 
   defp valid_record?(record, run_id, trace_id, schema_version, sequence) do
-    is_map(record) and Map.keys(record) |> Enum.sort() == Enum.sort(@envelope_keys) and
+    MCPProtocol.within_inspection_document_depth?(record) and
+      is_map(record) and Map.keys(record) |> Enum.sort() == Enum.sort(@envelope_keys) and
       schema_version in [1, 2] and record["schema_version"] == schema_version and
       record["run_id"] == run_id and
       record["trace_id"] == trace_id and is_binary(run_id) and is_binary(trace_id) and
@@ -502,21 +573,24 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
   defp string_value(value) when is_binary(value), do: value
   defp string_value(_value), do: nil
 
-  defp persist_new(path, encoded) do
-    temporary = path <> ".tmp-" <> Base.encode16(:crypto.strong_rand_bytes(6), case: :lower)
-    persist_temporary(path, temporary, encoded)
+  defp persist_new(path, encoded, fault_hook) do
+    {temporary_directory, temporary} = PrivateDirectory.temporary_sibling(path, "artifact")
+    persist_temporary(path, temporary_directory, temporary, encoded, fault_hook)
   end
 
-  defp persist_temporary(path, temporary, encoded) do
-    with {:ok, :ok} <-
-           File.open(temporary, [:write, :binary, :exclusive], fn device ->
-             case File.chmod(temporary, 0o600) do
-               :ok -> IO.binwrite(device, encoded)
-               {:error, _reason} = error -> error
-             end
-           end),
-         :ok <- File.ln(temporary, path),
-         :ok <- File.rm(temporary) do
+  defp persist_temporary(path, temporary_directory, temporary, encoded, fault_hook) do
+    case PrivateDirectory.create(temporary_directory) do
+      :ok ->
+        persist_created(path, temporary_directory, temporary, encoded, fault_hook)
+
+      {:error, _reason} ->
+        {:error, :inspection_persistence_failed}
+    end
+  end
+
+  defp persist_created(path, temporary_directory, temporary, encoded, fault_hook) do
+    with {:ok, :ok} <- write_private_file(temporary, encoded, fault_hook),
+         :ok <- File.ln(temporary, path) do
       :ok
     else
       {:error, :eexist} -> {:error, :inspection_destination_exists}
@@ -524,6 +598,48 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
     end
   after
     _ = File.rm(temporary)
+    _ = File.rmdir(temporary_directory)
+  end
+
+  defp preflight_private_directory(path) do
+    case PrivateDirectory.preflight(path) do
+      :ok ->
+        :ok
+
+      {:error, :private_directory_parent_unavailable} ->
+        {:error, :inspection_destination_unavailable}
+
+      {:error, _reason} ->
+        {:error, :inspection_persistence_failed}
+    end
+  end
+
+  defp write_private_file(path, encoded, fault_hook) do
+    case File.open(path, [:write, :binary, :exclusive], fn device ->
+           with :ok <- persistence_fault(fault_hook, :before_chmod),
+                :ok <- File.chmod(path, 0o600),
+                :ok <- persistence_fault(fault_hook, :before_write) do
+             IO.binwrite(device, encoded)
+           end
+         end) do
+      {:ok, :ok} = success -> success
+      {:ok, {:error, _reason}} -> {:error, :inspection_persistence_failed}
+      {:error, _reason} = error -> error
+      _unexpected -> {:error, :inspection_persistence_failed}
+    end
+  end
+
+  defp persistence_fault(nil, _stage), do: :ok
+
+  defp persistence_fault(fault_hook, stage) do
+    case fault_hook.(stage) do
+      :ok -> :ok
+      _failure -> {:error, :inspection_persistence_failed}
+    end
+  rescue
+    _exception -> {:error, :inspection_persistence_failed}
+  catch
+    _kind, _reason -> {:error, :inspection_persistence_failed}
   end
 
   defp regular_file(path) do
@@ -534,13 +650,93 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
     end
   end
 
-  defp stable?(before, after_read),
-    do:
-      before.size == after_read.size and before.mtime == after_read.mtime and
-        before.inode == after_read.inode
+  defp read_regular_file(path, expected, max_bytes, verification_hook, reader) do
+    case :file.open(String.to_charlist(path), [:read, :binary, :raw]) do
+      {:ok, device} ->
+        try do
+          with {:ok, info} <- :file.read_file_info(device, time: :posix),
+               opened = File.Stat.from_record(info),
+               :ok <- same_file(expected, opened),
+               :ok <- within_limit(opened, max_bytes),
+               {:ok, content} <- read_exact(device, opened.size, reader),
+               :ok <- run_verification_hook(verification_hook),
+               {:ok, 0} <- :file.position(device, :bof),
+               {:ok, verification} <- read_exact(device, opened.size, reader),
+               true <- verification == content,
+               {:ok, after_info} <- :file.read_file_info(device, time: :posix),
+               after_read = File.Stat.from_record(after_info),
+               :ok <- unchanged(opened, after_read) do
+            {:ok, content, opened}
+          else
+            false -> {:error, :inspection_source_changed}
+            {:error, _reason} = error -> error
+          end
+        after
+          :file.close(device)
+        end
+
+      {:error, _reason} ->
+        {:error, :inspection_source_unavailable}
+    end
+  end
+
+  defp run_verification_hook(nil), do: :ok
+
+  defp run_verification_hook(verification_hook) do
+    case verification_hook.() do
+      :ok -> :ok
+      _other -> {:error, :inspection_source_unavailable}
+    end
+  rescue
+    _exception -> {:error, :inspection_source_unavailable}
+  catch
+    _kind, _reason -> {:error, :inspection_source_unavailable}
+  end
+
+  defp read_exact(device, expected_bytes, reader),
+    do: read_exact(device, expected_bytes, reader, [])
+
+  defp read_exact(device, 0, reader, chunks) do
+    case reader.(device, 1) do
+      :eof -> {:ok, chunks |> Enum.reverse() |> IO.iodata_to_binary()}
+      {:ok, _unexpected} -> {:error, :inspection_source_changed}
+      {:error, _reason} -> {:error, :inspection_source_unavailable}
+    end
+  end
+
+  defp read_exact(device, remaining, reader, chunks) do
+    case reader.(device, remaining) do
+      {:ok, chunk}
+      when is_binary(chunk) and byte_size(chunk) > 0 and byte_size(chunk) <= remaining ->
+        read_exact(device, remaining - byte_size(chunk), reader, [chunk | chunks])
+
+      :eof ->
+        {:error, :inspection_source_changed}
+
+      {:ok, _unexpected} ->
+        {:error, :inspection_source_changed}
+
+      {:error, _reason} ->
+        {:error, :inspection_source_unavailable}
+    end
+  end
+
+  defp same_file(
+         %File.Stat{major_device: major, minor_device: minor, inode: inode},
+         %File.Stat{major_device: major, minor_device: minor, inode: inode}
+       ),
+       do: :ok
+
+  defp same_file(_expected, _opened), do: {:error, :inspection_source_changed}
 
   defp unchanged(before, after_read) do
-    if stable?(before, after_read), do: :ok, else: {:error, :inspection_source_changed}
+    with :ok <- same_file(before, after_read),
+         true <- before.size == after_read.size and before.mtime == after_read.mtime do
+      :ok
+    else
+      false -> {:error, :inspection_source_changed}
+      {:error, _reason} = error -> error
+    end
   end
 
   defp within_limit(stat, max_bytes) do

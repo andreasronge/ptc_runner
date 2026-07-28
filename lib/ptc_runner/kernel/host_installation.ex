@@ -19,12 +19,15 @@ defmodule PtcRunner.Kernel.HostInstallation do
   transport acquisition. Omitting `allow` is permitted only for an all-read
   installation.
 
-  Every safe provider snapshot's bare-hex `snapshot_hash` attests its complete
-  non-secret provider identity, including policy and ceilings. A frozen-content
-  provider additionally publishes an algorithm-qualified
-  `content_snapshot_hash`; native query results call that content identity
-  `snapshot_hash` so citations can copy the source's own field unchanged. The
-  two hashes deliberately have different scopes and are not equal.
+  Every safe provider snapshot's bare-hex `snapshot_hash` attests the
+  provider-specific non-secret identity projection from which it is calculated,
+  including the effective ceilings present in that projection. It does not
+  automatically cover the provider alias, data-class policy, or fields that a
+  provider deliberately excludes. A frozen-content provider additionally
+  publishes an algorithm-qualified `content_snapshot_hash`; native query
+  results call that content identity `snapshot_hash` so citations can copy the
+  source's own field unchanged. The two hashes deliberately have different
+  scopes and are not equal.
   """
 
   alias PtcRunner.Kernel.ConfinedFile

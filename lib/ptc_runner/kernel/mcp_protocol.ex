@@ -19,10 +19,13 @@ defmodule PtcRunner.Kernel.MCPProtocol do
 
   Structured results require a frozen object-output validator and explicit
   content containing only exact text or embedded text-resource blocks; those
-  companion blocks are validated and discarded. Tools without output schemas
+  companion blocks are validated and discarded. Standard content-block
+  `annotations` and `_meta` fields are validated, accepted, and ignored; other
+  extra block fields are rejected. Tools without output schemas
   return a map containing ordered `"text"` values and, when present, ordered
   embedded text `"resources"`. Binary resources and all other content types
-  remain unsupported.
+  remain unsupported. Inbound documents are rejected before decoding when
+  their raw JSON nesting exceeds the fixed document-depth ceiling.
 
   Multi-round-trip `input_required` results are legal only for `tools/call`,
   `prompts/get`, and `resources/read`. A schema-valid state-only result,
@@ -32,9 +35,10 @@ defmodule PtcRunner.Kernel.MCPProtocol do
   sampling, or roots capability. Input requests are validated against those
   three method schemas only to distinguish malformed protocol data; they are
   never interpreted or fulfilled. Malformed results and results on other
-  methods are protocol errors. This module never retries either form. The
-  functions return closed MCP reason atoms and never construct provider errors
-  or expose remote error data.
+  methods are protocol errors. This module never retries either form. Functions
+  normally return closed MCP reason atoms; the explicitly installed
+  `:bounded` error-feedback policy is the sole exception and returns a bounded
+  validated remote text value for later provider-error construction.
   """
 
   alias PtcRunner.Kernel.DeterministicJSON
@@ -64,8 +68,14 @@ defmodule PtcRunner.Kernel.MCPProtocol do
   @max_header_parameters 24
   @max_header_name_bytes 128
   @max_parameter_header_bytes 16_384
+  @max_annotation_string_bytes 256
+  @rfc3339_datetime ~r/\A\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})\z/i
   @max_schema_depth 16
   @input_required_methods ~w(tools/call prompts/get resources/read)
+  # A maximum-depth schema in tools/list occupies four envelope containers,
+  # `2 * depth - 1` schema containers, and `depth` const/enum instance
+  # containers: 4 + 31 + 16 = 51 at the configured limits.
+  @max_document_depth @max_schema_depth * 3 + 3
   @schema_instance_keywords ~w(const enum)
   @schema_value_keywords ~w(additionalProperties contains if items not then else)
   @schema_list_keywords ~w(allOf anyOf oneOf prefixItems)
@@ -124,7 +134,8 @@ defmodule PtcRunner.Kernel.MCPProtocol do
   @spec decode_message(binary()) ::
           {:ok, inbound_message()} | {:error, :mcp_protocol_error}
   def decode_message(body) when is_binary(body) do
-    with {:ok, decoded} <- StrictJSON.decode(body),
+    with true <- within_document_depth?(body),
+         {:ok, decoded} <- StrictJSON.decode(body),
          true <- JSONValue.map?(decoded),
          "2.0" <- decoded["jsonrpc"] do
       classify_message(decoded)
@@ -134,6 +145,74 @@ defmodule PtcRunner.Kernel.MCPProtocol do
   end
 
   def decode_message(_body), do: {:error, :mcp_protocol_error}
+
+  @doc false
+  @spec within_document_depth?(term()) :: boolean()
+  def within_document_depth?(body) when is_binary(body),
+    do: scan_document_depth(body, 0, false, false, @max_document_depth)
+
+  def within_document_depth?(value),
+    do: scan_decoded_depth(value, 0, @max_document_depth)
+
+  @doc false
+  @spec within_inspection_document_depth?(term()) :: boolean()
+  def within_inspection_document_depth?(body) when is_binary(body),
+    do: scan_document_depth(body, 0, false, false, @max_document_depth + 2)
+
+  def within_inspection_document_depth?(value),
+    do: scan_decoded_depth(value, 0, @max_document_depth + 2)
+
+  defp scan_document_depth(<<>>, _depth, _string?, _escaped?, _max_depth), do: true
+
+  defp scan_document_depth(<<_byte, rest::binary>>, depth, true, true, max_depth),
+    do: scan_document_depth(rest, depth, true, false, max_depth)
+
+  defp scan_document_depth(<<?\\, rest::binary>>, depth, true, false, max_depth),
+    do: scan_document_depth(rest, depth, true, true, max_depth)
+
+  defp scan_document_depth(<<?", rest::binary>>, depth, true, false, max_depth),
+    do: scan_document_depth(rest, depth, false, false, max_depth)
+
+  defp scan_document_depth(<<_byte, rest::binary>>, depth, true, false, max_depth),
+    do: scan_document_depth(rest, depth, true, false, max_depth)
+
+  defp scan_document_depth(<<?", rest::binary>>, depth, false, false, max_depth),
+    do: scan_document_depth(rest, depth, true, false, max_depth)
+
+  defp scan_document_depth(<<byte, rest::binary>>, depth, false, false, max_depth)
+       when byte in ~c"[{" do
+    next_depth = depth + 1
+
+    if next_depth <= max_depth,
+      do: scan_document_depth(rest, next_depth, false, false, max_depth),
+      else: false
+  end
+
+  defp scan_document_depth(<<byte, rest::binary>>, depth, false, false, max_depth)
+       when byte in ~c"]}" and depth > 0,
+       do: scan_document_depth(rest, depth - 1, false, false, max_depth)
+
+  defp scan_document_depth(<<_byte, rest::binary>>, depth, false, false, max_depth),
+    do: scan_document_depth(rest, depth, false, false, max_depth)
+
+  defp scan_decoded_depth(value, depth, max_depth)
+       when is_map(value) and not is_struct(value) do
+    next_depth = depth + 1
+
+    next_depth <= max_depth and
+      Enum.all?(value, fn {_key, item} ->
+        scan_decoded_depth(item, next_depth, max_depth)
+      end)
+  end
+
+  defp scan_decoded_depth(values, depth, max_depth) when is_list(values) do
+    next_depth = depth + 1
+
+    next_depth <= max_depth and
+      Enum.all?(values, &scan_decoded_depth(&1, next_depth, max_depth))
+  end
+
+  defp scan_decoded_depth(_value, _depth, _max_depth), do: true
 
   @doc false
   @spec valid_exchange_request?(term(), term()) :: boolean()
@@ -148,7 +227,9 @@ defmodule PtcRunner.Kernel.MCPProtocol do
       )
       when is_integer(id) and id > 0 and is_binary(method) and byte_size(method) in 1..128 and
              is_map(params) and not is_struct(params) do
-    Map.keys(request) |> Enum.sort() == ~w(id jsonrpc method params) and JSONValue.map?(request)
+    within_document_depth?(request) and
+      Map.keys(request) |> Enum.sort() == ~w(id jsonrpc method params) and
+      JSONValue.map?(request)
   end
 
   def valid_exchange_request?(_request, _id), do: false
@@ -157,7 +238,8 @@ defmodule PtcRunner.Kernel.MCPProtocol do
   @spec valid_exchange_response?(term(), term()) :: boolean()
   def valid_exchange_response?(response, id)
       when is_map(response) and is_integer(id) and id > 0 do
-    match?({:ok, {:response, ^id, _decoded}}, classify_message(response)) and
+    within_document_depth?(response) and
+      match?({:ok, {:response, ^id, _decoded}}, classify_message(response)) and
       response["jsonrpc"] == "2.0" and JSONValue.map?(response)
   end
 
@@ -501,14 +583,19 @@ defmodule PtcRunner.Kernel.MCPProtocol do
   defp text_result(content) do
     Enum.reduce_while(content, {:ok, [], []}, fn
       %{"type" => "text", "text" => text} = block, {:ok, texts, resources}
-      when is_binary(text) and map_size(block) == 2 ->
-        {:cont, {:ok, [text | texts], resources}}
+      when is_binary(text) ->
+        if valid_content_block?(block, ~w(type text annotations _meta)),
+          do: {:cont, {:ok, [text | texts], resources}},
+          else: {:halt, {:error, :mcp_invalid_result}}
 
-      %{"type" => "resource", "resource" => resource} = block, {:ok, texts, resources}
-      when map_size(block) == 2 ->
-        case text_resource(resource) do
-          {:ok, normalized} -> {:cont, {:ok, texts, [normalized | resources]}}
-          :error -> {:halt, {:error, :mcp_invalid_result}}
+      %{"type" => "resource", "resource" => resource} = block, {:ok, texts, resources} ->
+        if valid_content_block?(block, ~w(type resource annotations _meta)) do
+          case text_resource(resource) do
+            {:ok, normalized} -> {:cont, {:ok, texts, [normalized | resources]}}
+            :error -> {:halt, {:error, :mcp_invalid_result}}
+          end
+        else
+          {:halt, {:error, :mcp_invalid_result}}
         end
 
       _block, _acc ->
@@ -532,14 +619,19 @@ defmodule PtcRunner.Kernel.MCPProtocol do
 
   defp text_resource(%{"uri" => uri, "text" => text} = resource)
        when is_binary(uri) and byte_size(uri) > 0 and is_binary(text) do
-    allowed = ~w(uri mimeType text)
+    allowed = ~w(uri mimeType text _meta)
 
-    case {Map.keys(resource) -- allowed, Map.get(resource, "mimeType")} do
-      {[], nil} ->
-        {:ok, Map.take(resource, allowed)}
+    case {
+      JSONValue.map?(resource),
+      Map.keys(resource) -- allowed,
+      Map.get(resource, "mimeType"),
+      optional_meta?(resource)
+    } do
+      {true, [], nil, true} ->
+        {:ok, Map.take(resource, ~w(uri mimeType text))}
 
-      {[], mime_type} when is_binary(mime_type) and byte_size(mime_type) > 0 ->
-        {:ok, Map.take(resource, allowed)}
+      {true, [], mime_type, true} when is_binary(mime_type) and byte_size(mime_type) > 0 ->
+        {:ok, Map.take(resource, ~w(uri mimeType text))}
 
       _invalid ->
         :error
@@ -551,8 +643,10 @@ defmodule PtcRunner.Kernel.MCPProtocol do
   defp error_feedback(content, policy) do
     Enum.reduce_while(content, {:ok, []}, fn
       %{"type" => "text", "text" => text} = block, {:ok, texts}
-      when is_binary(text) and map_size(block) == 2 ->
-        {:cont, {:ok, [text | texts]}}
+      when is_binary(text) ->
+        if valid_content_block?(block, ~w(type text annotations _meta)),
+          do: {:cont, {:ok, [text | texts]}},
+          else: {:halt, {:error, :mcp_invalid_result}}
 
       _block, _acc ->
         {:halt, {:error, :mcp_invalid_result}}
@@ -564,7 +658,7 @@ defmodule PtcRunner.Kernel.MCPProtocol do
       {:ok, texts} ->
         case texts |> Enum.reverse() |> Enum.join("\n") do
           "" -> {:ok, nil}
-          feedback -> {:ok, truncate_utf8(feedback, 1_024)}
+          feedback -> {:ok, feedback |> sanitize_feedback() |> truncate_utf8(1_024)}
         end
 
       error ->
@@ -578,6 +672,61 @@ defmodule PtcRunner.Kernel.MCPProtocol do
     value
     |> binary_part(0, max_bytes)
     |> valid_utf8_prefix()
+  end
+
+  defp valid_content_block?(block, allowed) do
+    JSONValue.map?(block) and Map.keys(block) -- allowed == [] and
+      optional_annotations?(block) and optional_meta?(block)
+  end
+
+  defp optional_annotations?(block) do
+    case Map.fetch(block, "annotations") do
+      :error -> true
+      {:ok, annotations} -> valid_annotations?(annotations)
+    end
+  end
+
+  defp valid_annotations?(annotations) do
+    JSONValue.map?(annotations) and
+      Map.keys(annotations) -- ~w(audience priority lastModified) == [] and
+      valid_optional_annotation?(annotations, "audience", &valid_audience?/1) and
+      valid_optional_annotation?(annotations, "priority", &valid_priority?/1) and
+      valid_optional_annotation?(annotations, "lastModified", &valid_last_modified?/1)
+  end
+
+  defp valid_optional_annotation?(annotations, key, validator) do
+    case Map.fetch(annotations, key) do
+      :error -> true
+      {:ok, value} -> validator.(value)
+    end
+  end
+
+  defp valid_audience?(audience) when is_list(audience),
+    do: Enum.all?(audience, &(&1 in ["user", "assistant"]))
+
+  defp valid_audience?(_audience), do: false
+
+  defp valid_priority?(priority) when is_number(priority), do: priority >= 0 and priority <= 1
+  defp valid_priority?(_priority), do: false
+
+  defp valid_last_modified?(last_modified) when is_binary(last_modified) do
+    byte_size(last_modified) <= @max_annotation_string_bytes and
+      String.valid?(last_modified) and
+      last_modified =~ @rfc3339_datetime and
+      match?({:ok, _datetime, _offset}, DateTime.from_iso8601(String.upcase(last_modified)))
+  end
+
+  defp valid_last_modified?(_last_modified), do: false
+
+  defp optional_meta?(value) do
+    case Map.fetch(value, "_meta") do
+      :error -> true
+      {:ok, meta} -> JSONValue.map?(meta)
+    end
+  end
+
+  defp sanitize_feedback(feedback) do
+    String.replace(feedback, ~r/[\x00-\x1F\x7F-\x{9F}]/u, "�")
   end
 
   defp valid_utf8_prefix(value) do

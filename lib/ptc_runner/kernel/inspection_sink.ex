@@ -188,6 +188,8 @@ defmodule PtcRunner.Kernel.InspectionSink do
 
   defp retain(state, record_type, correlation, payload) do
     with true <- record_type in record_types(state.schema_version),
+         candidate <- record(state, record_type, correlation, payload),
+         true <- MCPProtocol.within_inspection_document_depth?(candidate),
          {:ok, correlation} <- normalize(correlation),
          {:ok, payload} <- normalize(payload),
          :ok <- shape(record_type, correlation, payload),

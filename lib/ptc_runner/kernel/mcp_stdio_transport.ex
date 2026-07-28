@@ -20,7 +20,6 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
   @max_start_timeout_ms 60_000
   @max_request_timeout_ms 300_000
   @max_pending_requests 128
-  @max_cancelled_requests 256
   @finish_drain_timeout_ms 100
   @default_grace_ms 250
   @default_stderr_bytes 65_536
@@ -66,6 +65,7 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
              | :mcp_protocol_error
              | :mcp_response_exceeded
              | :mcp_timeout
+             | :mcp_transport_busy
              | :mcp_transport_error}
   def request(
         %__MODULE__{pid: pid},
@@ -86,6 +86,7 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
              | :mcp_protocol_error
              | :mcp_response_exceeded
              | :mcp_timeout
+             | :mcp_transport_busy
              | :mcp_transport_error}
   def request_exchange(
         %__MODULE__{pid: pid},
@@ -139,7 +140,6 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
          next_ack_id: 1,
          pending: %{},
          monitors: %{},
-         cancelled: MapSet.new(),
          writes: :queue.new(),
          controls: :queue.new(),
          writing: nil,
@@ -179,7 +179,7 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
         %{pending: pending} = state
       )
       when map_size(pending) >= @max_pending_requests,
-      do: {:reply, {:error, :mcp_transport_error}, state}
+      do: {:reply, {:error, :mcp_transport_busy}, state}
 
   def handle_call(
         {:request, method, params, metadata, max_bytes, timeout_ms, exchange?},
@@ -758,6 +758,8 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
   defp consume_response(id, response, bytes, state) do
     case Map.fetch(state.pending, id) do
       {:ok, %{sent?: true} = pending} ->
+        state = %{state | unscoped_notification_bytes: 0}
+
         result =
           if pending.response_bytes + bytes <= pending.max_bytes do
             if pending.exchange?,
@@ -773,8 +775,8 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
         {:error, :mcp_protocol_error, state}
 
       :error ->
-        if MapSet.member?(state.cancelled, id),
-          do: {:ok, %{state | cancelled: MapSet.delete(state.cancelled, id)}},
+        if id < state.next_id,
+          do: charge_unscoped_bytes(state, bytes),
           else: {:error, :mcp_protocol_error, state}
     end
   end
@@ -793,12 +795,16 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
         {:ok, state}
 
       :unscoped ->
-        bytes = state.unscoped_notification_bytes + bytes
-
-        if bytes <= @max_response_bytes,
-          do: {:ok, %{state | unscoped_notification_bytes: bytes}},
-          else: {:error, :mcp_response_exceeded, state}
+        charge_unscoped_bytes(state, bytes)
     end
+  end
+
+  defp charge_unscoped_bytes(state, frame_bytes) do
+    bytes = state.unscoped_notification_bytes + frame_bytes
+
+    if bytes <= @max_response_bytes,
+      do: {:ok, %{state | unscoped_notification_bytes: bytes}},
+      else: {:error, :mcp_response_exceeded, state}
   end
 
   defp notification_request_id(
@@ -822,7 +828,6 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
 
         if sent? do
           state
-          |> remember_cancelled(id)
           |> enqueue_write(nil, encode_cancellation(id), write_timeout_ms)
         else
           %{state | writes: reject_write(state.writes, id)}
@@ -838,19 +843,6 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
     |> :queue.to_list()
     |> Enum.reject(&(&1.request_id == id))
     |> :queue.from_list()
-  end
-
-  defp remember_cancelled(state, id) do
-    cancelled =
-      if MapSet.size(state.cancelled) >= @max_cancelled_requests do
-        state.cancelled
-        |> Enum.min()
-        |> then(&MapSet.delete(state.cancelled, &1))
-      else
-        state.cancelled
-      end
-
-    %{state | cancelled: MapSet.put(cancelled, id)}
   end
 
   defp writing_request?(%{writing: %{request_id: id}}, id) when is_integer(id), do: true

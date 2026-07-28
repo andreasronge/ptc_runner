@@ -6,7 +6,9 @@ defmodule PtcRunner.Kernel.RunBuilder do
   mission bundles, assembles their environments, starts the configured event
   sink, and produces the same `PtcRunner.Kernel.RunConfig` accepted by direct
   Elixir embedding. Frontends should delegate here instead of creating a
-  second manifest, authority, or event path.
+  second manifest, authority, or event path. Relative artifact destinations are
+  anchored once before preflight and the same absolute paths are retained
+  through post-run persistence.
   """
 
   alias PtcRunner.Kernel
@@ -16,6 +18,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
   alias PtcRunner.Kernel.InspectionSink
   alias PtcRunner.Kernel.Manifest
   alias PtcRunner.Kernel.MissionEnvironment
+  alias PtcRunner.Kernel.PrivateDirectory
   alias PtcRunner.Kernel.ProviderRegistry
   alias PtcRunner.Kernel.ProviderResources
   alias PtcRunner.Kernel.Result
@@ -37,11 +40,15 @@ defmodule PtcRunner.Kernel.RunBuilder do
   def build(manifest, registry, opts \\ [])
 
   def build(%Manifest{} = manifest, %ProviderRegistry{} = registry, opts) when is_list(opts) do
-    input_class = Keyword.get(opts, :input_class, :normal)
+    with {:ok, opts} <- anchor_artifact_options(opts),
+         :ok <- preflight_inspection(opts),
+         :ok <- preflight_artifact_destinations(opts) do
+      input_class = Keyword.get(opts, :input_class, :normal)
 
-    case providers(manifest, registry, input_class) do
-      {:ok, providers} -> build_with_providers(manifest, providers, opts)
-      {:error, _reason} = error -> error
+      case providers(manifest, registry, input_class, opts) do
+        {:ok, providers} -> build_with_providers(manifest, providers, opts)
+        {:error, _reason} = error -> error
+      end
     end
   end
 
@@ -185,13 +192,15 @@ defmodule PtcRunner.Kernel.RunBuilder do
     end)
   end
 
-  defp providers(manifest, registry, input_class)
+  defp providers(manifest, registry, input_class, opts)
        when input_class in [:normal, :private_inspection] do
     with {:ok, prepared} <- prepare_providers(manifest, registry),
          :ok <- validate_provider_dependencies(prepared),
          :ok <- validate_single_workflow_llm(prepared),
          effective_class <- effective_data_class(input_class, prepared),
          :ok <- providers_accept(prepared, effective_class),
+         :ok <- preflight_trace(manifest.events.policy, effective_class, opts),
+         :ok <- preflight_result(manifest.events.policy, effective_class, opts),
          {:ok, preflighted} <- preflight_providers(prepared),
          {:ok, credentials} <-
            ProviderRegistry.resolve_credentials(registry, credential_names(prepared)),
@@ -207,7 +216,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
     end
   end
 
-  defp providers(_manifest, _registry, _input_class), do: {:error, :invalid_input_class}
+  defp providers(_manifest, _registry, _input_class, _opts), do: {:error, :invalid_input_class}
 
   defp sort_snapshots(snapshots), do: Enum.sort_by(snapshots, &Map.get(&1, "provider", ""))
 
@@ -503,21 +512,75 @@ defmodule PtcRunner.Kernel.RunBuilder do
   default for one construction.
   """
   def load_and_build(path, registry, opts \\ []) do
+    case load_and_build_with_options(path, registry, opts) do
+      {:ok, built, _anchored_opts} -> {:ok, built}
+      {:error, _reason} = error -> error
+    end
+  end
+
+  defp load_and_build_with_options(path, registry, opts) do
     installed_limits = Keyword.get(opts, :installed_limits, registry.installed_limits)
 
     with {:ok, manifest} <- Manifest.load(path, installed_limits),
          {:ok, manifest, input_class} <- maybe_override_input(manifest, opts),
          {:ok, manifest, override} <- maybe_override_component(manifest, opts),
-         :ok <- preflight_inspection(opts) do
-      build(
-        manifest,
-        registry,
-        opts
-        |> Keyword.put(:input_class, input_class)
-        |> Keyword.put(:component_overrides, List.wrap(override))
-      )
+         {:ok, opts} <- anchor_artifact_options(opts),
+         {:ok, built} <-
+           build(
+             manifest,
+             registry,
+             opts
+             |> Keyword.put(:input_class, input_class)
+             |> Keyword.put(:component_overrides, List.wrap(override))
+           ) do
+      {:ok, built, opts}
     end
   end
+
+  defp anchor_artifact_options(opts) do
+    case artifact_anchor_cwd(opts) do
+      {:ok, cwd} ->
+        anchor_artifact_options([:trace, :inspect, :output, :private_output], opts, cwd)
+
+      {:error, _reason} ->
+        invalid_artifact_destination()
+    end
+  end
+
+  defp anchor_artifact_options([], opts, _cwd), do: {:ok, opts}
+
+  defp anchor_artifact_options([key | rest], opts, cwd) do
+    case anchor_artifact_option(opts, key, cwd) do
+      {:ok, opts} -> anchor_artifact_options(rest, opts, cwd)
+      {:error, _reason} -> invalid_artifact_destination()
+    end
+  end
+
+  defp anchor_artifact_option(opts, key, cwd) do
+    case Keyword.fetch(opts, key) do
+      {:ok, path} when is_binary(path) ->
+        with {:ok, path} <- PrivateDirectory.anchor(path, cwd),
+             do: {:ok, Keyword.put(opts, key, path)}
+
+      _missing_or_invalid ->
+        {:ok, opts}
+    end
+  end
+
+  defp artifact_anchor_cwd(opts) do
+    relative? =
+      Enum.any?([:trace, :inspect, :output, :private_output], fn key ->
+        case Keyword.fetch(opts, key) do
+          {:ok, path} when is_binary(path) -> Path.type(path) == :relative
+          _missing_or_invalid -> false
+        end
+      end)
+
+    if relative?, do: File.cwd(), else: {:ok, nil}
+  end
+
+  defp invalid_artifact_destination,
+    do: {:error, {:artifact_preflight_failed, :invalid_destination}}
 
   # Applied after the manifest is loaded and before any bundle is compiled, so
   # the candidate goes through the same dependency, export, signature, and
@@ -554,7 +617,8 @@ defmodule PtcRunner.Kernel.RunBuilder do
 
   # A deterministic destination conflict is reported after manifest and input
   # validation (so a bad output path never masks a more useful error) but
-  # before provider builders — including MCP discovery — or model calls run.
+  # before provider preflight, credential resolution, acquisition, MCP
+  # discovery, or model calls run.
   # The atomic no-clobber creation in `InspectionArtifact.persist/3` remains
   # authoritative for destinations that appear after this check.
   defp preflight_inspection(opts) do
@@ -570,18 +634,91 @@ defmodule PtcRunner.Kernel.RunBuilder do
     end
   end
 
-  defp preflight_trace(sink, opts) do
+  defp preflight_artifact_destinations(opts) do
+    destinations =
+      [:trace, :inspect, :output, :private_output]
+      |> Enum.flat_map(fn key ->
+        case Keyword.fetch(opts, key) do
+          {:ok, path} when is_binary(path) -> [path]
+          _missing_or_invalid -> []
+        end
+      end)
+
+    with {:ok, identities} <- artifact_destination_identities(destinations) do
+      if length(identities) == MapSet.size(MapSet.new(identities)),
+        do: :ok,
+        else: {:error, {:artifact_preflight_failed, :conflicting_destinations}}
+    end
+  end
+
+  defp artifact_destination_identities(destinations) do
+    Enum.reduce_while(destinations, {:ok, []}, fn path, {:ok, identities} ->
+      case artifact_destination_identity(path) do
+        {:ok, identity} -> {:cont, {:ok, [identity | identities]}}
+        {:error, _reason} = error -> {:halt, error}
+      end
+    end)
+  end
+
+  defp artifact_destination_identity(path) do
+    if String.valid?(path) and not String.contains?(path, <<0>>) do
+      parent = Path.dirname(path)
+      basename = path |> Path.basename() |> PrivateDirectory.casefold_name()
+
+      case File.stat(parent, time: :posix) do
+        {:ok,
+         %File.Stat{
+           type: :directory,
+           major_device: major,
+           minor_device: minor,
+           inode: inode
+         }}
+        when is_integer(major) and is_integer(minor) and is_integer(inode) ->
+          {:ok, {:filesystem, major, minor, inode, basename}}
+
+        _unavailable_or_unsupported ->
+          {:ok, {:lexical, PrivateDirectory.casefold_name(path)}}
+      end
+    else
+      {:error, {:artifact_preflight_failed, :invalid_destination}}
+    end
+  rescue
+    _exception -> {:error, {:artifact_preflight_failed, :invalid_destination}}
+  end
+
+  defp preflight_trace(event_policy, provider_class, opts) do
     case Keyword.get(opts, :trace) do
       nil ->
         :ok
 
       path ->
-        private? = result_class(sink) == :private
+        private? = event_policy == :private or provider_class == :private_inspection
 
-        case TraceLog.validate_append_path(path, private?) do
+        case TraceLog.preflight_destination(path, private?) do
           :ok -> :ok
           {:error, reason} -> {:error, {:trace_preflight_failed, reason}}
         end
+    end
+  end
+
+  defp preflight_result(event_policy, provider_class, opts) do
+    class =
+      if event_policy == :private or provider_class == :private_inspection,
+        do: :private,
+        else: :normal
+
+    case result_destination(opts) do
+      {:ok, nil} ->
+        :ok
+
+      {:ok, {path, destination}} ->
+        case ResultArtifact.preflight_destination(path, class, destination) do
+          :ok -> :ok
+          {:error, reason} -> {:error, {:result_preflight_failed, reason}}
+        end
+
+      {:error, reason} ->
+        {:error, {:result_preflight_failed, reason}}
     end
   end
 
@@ -612,17 +749,11 @@ defmodule PtcRunner.Kernel.RunBuilder do
   from the same event sink the run itself used.
   """
   def run_with_class(path, registry, opts \\ []) do
-    with {:ok, built} <- load_and_build(path, registry, opts) do
+    with {:ok, built, opts} <- load_and_build_with_options(path, registry, opts) do
       try do
-        case preflight_trace(built.config.event_sink, opts) do
-          :ok ->
-            case execute_built(built, opts) do
-              {:ok, result} -> {:ok, result, result_class(built.config.event_sink)}
-              other -> other
-            end
-
-          {:error, _reason} = error ->
-            prefer_cleanup_error(error, RunConfig.close_provider_resources(built.config))
+        case execute_built(built, opts) do
+          {:ok, result} -> {:ok, result, result_class(built.config.event_sink)}
+          other -> other
         end
       after
         if built.config.inspection_sink, do: InspectionSink.stop(built.config.inspection_sink)
@@ -813,14 +944,15 @@ defmodule PtcRunner.Kernel.RunBuilder do
 
       path when is_binary(path) ->
         result =
-          with {:ok, identity} <- EventSink.identity(event_sink),
+          with {:ok, path} <- anchor_inspection_path(path),
+               {:ok, identity} <- EventSink.identity(event_sink),
                {:ok, inspection_sink} <-
                  InspectionSink.start(
                    run_id: identity.run_id,
                    trace_id: identity.trace_id,
                    schema_version: 2
                  ) do
-            {:ok, inspection_sink, Path.expand(path)}
+            {:ok, inspection_sink, path}
           end
 
         if match?({:error, _reason}, result), do: EventSink.stop(event_sink)
@@ -829,6 +961,13 @@ defmodule PtcRunner.Kernel.RunBuilder do
       _path ->
         EventSink.stop(event_sink)
         {:error, :invalid_inspection_path}
+    end
+  end
+
+  defp anchor_inspection_path(path) do
+    case PrivateDirectory.anchor(path) do
+      {:ok, path} -> {:ok, path}
+      {:error, _reason} -> {:error, :invalid_inspection_path}
     end
   end
 

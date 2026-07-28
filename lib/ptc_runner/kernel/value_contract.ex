@@ -153,9 +153,7 @@ defmodule PtcRunner.Kernel.ValueContract do
 
   # The validator reports which schema keyword failed and where, but its error
   # struct also carries the offending data. Only the structural path and the
-  # keyword travel out; `detail` is emitted for `:required` alone, whose
-  # argument is a list of schema-declared key names. Every other keyword
-  # reports its name and location and nothing more, so a new keyword cannot
+  # keyword travel out. No validator detail is emitted, so a new keyword cannot
   # start disclosing values by default.
   defp violations(validator, value, branch_index, declared) do
     case JSV.validate(value, validator, cast: false) do

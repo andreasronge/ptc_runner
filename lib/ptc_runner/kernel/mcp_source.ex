@@ -104,13 +104,15 @@ defmodule PtcRunner.Kernel.MCPSource do
       A mapping may also carry a bounded
       host-owned `:description`, `:model_visible` (default `true` for direct
       embedding), and `:error_feedback` (`:closed`, the default, or
-      `:bounded`). Bounded feedback exposes at most 1,024 bytes of exact,
-      validated text from an MCP `isError` result as untrusted recoverable
-      capability-error details. Enabling it trusts the installed server not
-      to place secrets, paths, or stack traces in that text. Public canonical
-      events remain closed. Both names are unique and bounded; only the public
-      name crosses the capability boundary. The host JSON decoder supplies its
-      stricter model-invisible default explicitly.
+      `:bounded`). Bounded feedback exposes at most 1,024 bytes of validated
+      text from an MCP `isError` result as untrusted recoverable
+      capability-error details. C0 controls, including tab, newline, carriage
+      return, ESC, and DEL, are replaced before exposure.
+      Enabling it trusts the installed server not to place secrets, paths, or
+      stack traces in that text. Public canonical events remain closed. Both
+      names are unique and bounded; only the public name crosses the capability
+      boundary. The host JSON decoder supplies its stricter model-invisible
+      default explicitly.
     * `:timeout_ms` - installed end-to-end ceiling for discovery, calls, and
       requests (default `5_000`; stdio maximum `300_000`). A manifest may only
       lower it.
@@ -158,8 +160,9 @@ defmodule PtcRunner.Kernel.MCPSource do
   effects come only from the installed mapping.
   An advertised object output schema accepts only schema-valid
   `structuredContent` accompanied by exact text blocks (which are validated
-  and discarded). A tool without an output schema accepts only exact text
-  blocks and returns `%{"text" => [string()]}`.
+  and discarded). Text and embedded text-resource blocks may carry standard
+  `annotations` and `_meta`; other extra block fields are rejected. A tool
+  without an output schema returns exact text as `%{"text" => [string()]}`.
   MCP `isError`, malformed/mixed content, invalid JSON-RPC envelopes, and
   schema failures become bounded `PtcRunner.Kernel.ProviderError` values with
   closed reasons. Authentication, timeout, unsupported-result, invalid-result,
@@ -170,18 +173,22 @@ defmodule PtcRunner.Kernel.MCPSource do
   results become `mcp_capability_negotiation_error` because this client
   advertises no input capabilities, and malformed or method-inapplicable
   results remain `mcp_protocol_error`.
-  Parameter-header projection, outbound-header validation, and a closed HTTP
-  request context are trusted `:not_dispatched` failures. Once an HTTP request
+  A closed transport reports the terminal `mcp_transport_closed` cause, and a
+  stdio transport failure is likewise terminal, because neither session can be
+  re-established within the run; only an in-flight HTTP transport failure stays
+  retryable. Parameter-header projection, outbound-header validation, and a
+  closed HTTP request context are trusted `:not_dispatched` failures. Once an HTTP request
   begins or a stdio request may have been written, failures carry internal
   `:possibly_dispatched` provenance. A possibly dispatched write failure is
   non-retryable and carries `mutation_state: :indeterminate`; the Dispatcher
   exposes the mutation state but never the transport provenance.
 
   The safe connector snapshot has top-level fields `provider`, `protocol`,
-  `transport`, `server_info_hash`, `snapshot_hash`, and `tools`. When the host
-  installs `snapshot_identity`, it also carries the validated
-  `content_snapshot_hash`; changing that identity changes the overall
-  `snapshot_hash`. Stdio
+  `transport`, selected `timeout_ms`, selected `max_result_bytes`,
+  installed `max_catalog_tools`, installed `max_pages`, `server_info_hash`,
+  `snapshot_hash`, and `tools`. When the host installs `snapshot_identity`, it
+  also carries the validated `content_snapshot_hash`; changing that identity
+  or any effective ceiling changes the overall `snapshot_hash`. Stdio
   snapshots additionally contain the launcher protocol, launcher digest, and
   server-executable digest. The nullable server hash fingerprints bounded self-reported
   implementation identity without exposing its untrusted text. Successful
@@ -757,10 +764,12 @@ defmodule PtcRunner.Kernel.MCPSource do
              tools,
              server.server_info,
              content_snapshot_hash,
-             installed
+             installed,
+             selected
            ) do
       {:ok, capabilities, snapshot}
     else
+      {:error, :mcp_transport_closed} -> {:error, :mcp_transport_error}
       {:error, _reason} = error -> error
       _reason -> {:error, :mcp_protocol_error}
     end
@@ -909,7 +918,7 @@ defmodule PtcRunner.Kernel.MCPSource do
           normalize_result(result, output_validator, error_feedback, effect)
 
         {:error, reason, provenance} ->
-          {:error, provider_error(reason, effect, provenance)}
+          {:error, provider_error(reason, transport.type, effect, provenance)}
       end
     end
   end
@@ -975,7 +984,8 @@ defmodule PtcRunner.Kernel.MCPSource do
          tools,
          server_info,
          content_snapshot_hash,
-         installed
+         installed,
+         selected
        )
        when is_binary(provider) and type in [:streamable_http, :stdio] do
     transport_name = Atom.to_string(type)
@@ -996,6 +1006,10 @@ defmodule PtcRunner.Kernel.MCPSource do
               ) ++
               optional_projection("content_snapshot_hash", content_snapshot_hash) ++
               [
+                {"timeout_ms", selected.timeout_ms},
+                {"max_result_bytes", selected.max_result_bytes},
+                {"max_catalog_tools", installed.max_catalog_tools},
+                {"max_pages", installed.max_pages},
                 {"server_info_hash", server_info_hash},
                 {"tools",
                  Enum.map(tools, fn tool ->
@@ -1020,6 +1034,10 @@ defmodule PtcRunner.Kernel.MCPSource do
             "provider" => provider,
             "protocol" => "mcp-#{@protocol}",
             "transport" => transport_name,
+            "timeout_ms" => selected.timeout_ms,
+            "max_result_bytes" => selected.max_result_bytes,
+            "max_catalog_tools" => installed.max_catalog_tools,
+            "max_pages" => installed.max_pages,
             "server_info_hash" => server_info_hash,
             "snapshot_hash" => sha256(encoded),
             "tools" => tools
@@ -1124,7 +1142,7 @@ defmodule PtcRunner.Kernel.MCPSource do
         end
 
       {:error, :closed} ->
-        {:error, :mcp_transport_error, :not_dispatched}
+        {:error, :mcp_transport_closed, :not_dispatched}
     end
   end
 
@@ -1222,7 +1240,7 @@ defmodule PtcRunner.Kernel.MCPSource do
           handle,
           method,
           params,
-          request_metadata(nil),
+          request_metadata(context),
           @max_transport_response_bytes,
           timeout_ms
         )
@@ -1237,7 +1255,7 @@ defmodule PtcRunner.Kernel.MCPSource do
         bounded_outcome(body, method, max_bytes)
 
       {:error, :closed} ->
-        {:error, :mcp_transport_error}
+        {:error, :mcp_transport_closed}
 
       {:error, _reason} = error ->
         error
@@ -1300,7 +1318,7 @@ defmodule PtcRunner.Kernel.MCPSource do
         end
 
       {:error, :closed} ->
-        {:error, :mcp_transport_error}
+        {:error, :mcp_transport_closed}
     end
   end
 
@@ -1604,7 +1622,7 @@ defmodule PtcRunner.Kernel.MCPSource do
   defp strip_sse_bom(<<0xEF, 0xBB, 0xBF, rest::binary>>, true), do: rest
   defp strip_sse_bom(event, _at_start?), do: event
 
-  defp provider_error(:mcp_authentication_failed, effect, provenance),
+  defp provider_error(:mcp_authentication_failed, _transport, effect, provenance),
     do:
       provider_error(
         :authentication_failed,
@@ -1614,16 +1632,16 @@ defmodule PtcRunner.Kernel.MCPSource do
         provenance
       )
 
-  defp provider_error(:mcp_timeout, effect, provenance),
+  defp provider_error(:mcp_timeout, _transport, effect, provenance),
     do: provider_error(:timeout, "mcp_timeout", true, effect, provenance)
 
-  defp provider_error(:mcp_response_exceeded, effect, provenance),
+  defp provider_error(:mcp_response_exceeded, _transport, effect, provenance),
     do: provider_error(:invalid_result, "mcp_response_exceeded", false, effect, provenance)
 
-  defp provider_error(:mcp_protocol_error, effect, provenance),
+  defp provider_error(:mcp_protocol_error, _transport, effect, provenance),
     do: provider_error(:invalid_result, "mcp_protocol_error", false, effect, provenance)
 
-  defp provider_error(:mcp_capability_negotiation_error, effect, provenance),
+  defp provider_error(:mcp_capability_negotiation_error, _transport, effect, provenance),
     do:
       provider_error(
         :invalid_result,
@@ -1633,7 +1651,7 @@ defmodule PtcRunner.Kernel.MCPSource do
         provenance
       )
 
-  defp provider_error(:mcp_input_required_refused, effect, provenance),
+  defp provider_error(:mcp_input_required_refused, _transport, effect, provenance),
     do:
       provider_error(
         :denied,
@@ -1643,13 +1661,21 @@ defmodule PtcRunner.Kernel.MCPSource do
         provenance
       )
 
-  defp provider_error(:mcp_remote_error, effect, provenance),
+  defp provider_error(:mcp_remote_error, _transport, effect, provenance),
     do: provider_error(:domain_error, "mcp_remote_error", false, effect, provenance)
 
-  defp provider_error(:mcp_unsupported_result, effect, provenance),
+  defp provider_error(:mcp_unsupported_result, _transport, effect, provenance),
     do: provider_error(:invalid_result, "mcp_unsupported_result", false, effect, provenance)
 
-  defp provider_error(_reason, effect, provenance),
+  # A closed transport stays closed for the rest of the run, and a stdio
+  # session cannot be re-established either, so neither failure is retryable.
+  defp provider_error(:mcp_transport_closed, _transport, effect, provenance),
+    do: provider_error(:transport_error, "mcp_transport_closed", false, effect, provenance)
+
+  defp provider_error(:mcp_transport_error, :stdio, effect, provenance),
+    do: provider_error(:transport_error, "mcp_transport_error", false, effect, provenance)
+
+  defp provider_error(_reason, _transport, effect, provenance),
     do: provider_error(:transport_error, "mcp_transport_error", true, effect, provenance)
 
   defp provider_error(kind, details, retryable?, effect, provenance) do
