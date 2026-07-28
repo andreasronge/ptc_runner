@@ -1,10 +1,11 @@
-# Active implementation plans
+# Implementation plans
 
-This directory contains only active or partially completed plans. Completed
-implementation records are removed; Git history preserves them. Current
-architecture belongs in the [Kernel maintainer guide](../guides/kernel-maintainer.md),
-exact runtime contracts belong in the owning module documentation, and
-user-facing behavior belongs in guides or retained specifications.
+This directory contains active, partially completed, and explicitly
+trigger-gated future plans. Completed implementation records are removed; Git
+history preserves them. Current architecture belongs in the
+[Kernel maintainer guide](../guides/kernel-maintainer.md), exact runtime
+contracts belong in the owning module documentation, and user-facing behavior
+belongs in guides or retained specifications.
 
 ## Remaining Kernel product work
 
@@ -20,6 +21,14 @@ user-facing behavior belongs in guides or retained specifications.
 - [`mcp-write-and-surface.md`](mcp-write-and-surface.md) investigates write-effect
   MCP tools, the remaining read-oriented client surface, and why
   server-initiated model access stays refused.
+
+## Future, trigger-gated
+
+- [`future/launcher-repository-extraction.md`](future/launcher-repository-extraction.md)
+  records the prerequisites and migration sequence for moving the independently
+  released native launcher companion into its own Git repository. Extraction
+  is not scheduled while core and launcher protocol changes still benefit from
+  atomic commits.
 
 Plans are disposable staging contracts, not API references. When a slice
 lands, move its durable behavior into module documentation and the relevant
