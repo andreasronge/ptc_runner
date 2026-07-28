@@ -35,6 +35,9 @@
 (defn- source-page [provider envelope]
   (assoc (cap/unwrap! envelope) "provider" provider))
 
+(defn- positive-positions [values]
+  (filterv #(and (integer? %) (pos? %)) values))
+
 (defn- compact-run [run]
   (assoc
     (select-keys
@@ -54,9 +57,11 @@
   Every item carries its own `component_overrides`, so one observation shows
   which runs replaced a component before compiling and which ran the installed
   source unchanged. Its `positions` identifies that run's run-started event for
-  citation. Each item, not the enclosing page, is a complete evidence reference:
-  copy its provider, snapshot_hash, resource, and positions together. An empty
-  component-overrides list means unchanged."
+  citation. That position supports only start-derived provenance such as
+  component overrides and prelude identities; use `turns` or `review-seed` for
+  outcome, error, and aggregate behavior evidence. Copy the item's provider,
+  snapshot_hash, resource, and positions together. An empty component-overrides
+  list means unchanged."
   {:signature "(limit :int, cursor :string?) -> :map"}
   [limit cursor]
   (let [page
@@ -164,7 +169,8 @@
 (defn latest-model-exchange
   "Read the latest exact model exchange in one descending page. The item puts
   the response before the cumulative request transcript so bounded feedback
-  shows the model action first."
+  shows the model action first. The wrapper carries copy-ready inspection
+  record positions for the paired input and output."
   {:signature "(run-id :string) -> :map"}
   [run-id]
   (let [page
@@ -182,7 +188,10 @@
       "trace_id" (get item "trace_id")
       "transcript" (get item "arguments")}
      "provider" (get page "provider")
-     "snapshot_hash" (get page "snapshot_hash")}))
+     "snapshot_hash" (get page "snapshot_hash")
+     "resource" run-id
+     "positions" (positive-positions
+                   [(get item "input_sequence") (get item "output_sequence")])}))
 
 (defn capability-calls
   "Read one private capability-exchange page.
@@ -209,17 +218,20 @@
       (cap/with-cursor {"run_id" run-id "limit" 1} cursor))))
 
 (defn latest-generated-source
-  "Read the latest generated program and retain its snapshot identity."
+  "Read the latest generated program with copy-ready inspection coordinates."
   {:signature "(run-id :string) -> :map"}
   [run-id]
   (let [page
         (source-page
           "private-history"
           (tool/private-history.generated-sources
-            {"run_id" run-id "limit" 1 "order" "desc"}))]
-    {"item" (first (get page "items"))
+            {"run_id" run-id "limit" 1 "order" "desc"}))
+        item (first (get page "items"))]
+    {"item" item
      "provider" (get page "provider")
-     "snapshot_hash" (get page "snapshot_hash")}))
+     "snapshot_hash" (get page "snapshot_hash")
+     "resource" run-id
+     "positions" (positive-positions [(get item "sequence")])}))
 
 (defn review-seed
   "Collect the bounded initial evidence for one failed run in one evaluation.
@@ -227,11 +239,15 @@
   Each underlying source read remains a distinct audited capability call. The
   compact result includes the exact latest model response but leaves its
   cumulative request transcript to latest-model-exchange, so a normal review
-  does not front-load the complete conversation."
+  does not front-load the complete conversation. Each of model_action, program,
+  and trace_errors carries its own provider, snapshot_hash, resource, and
+  positive positions when that evidence exists."
   {:signature "(run-id :string) -> :map"}
   [run-id]
   (let [exchange (latest-model-exchange run-id)
-        item (get exchange "item")]
+        item (get exchange "item")
+        program (latest-generated-source run-id)
+        trace-errors (turns run-id {"status" "error"} nil)]
     {"model_action"
      {"capability_id" (get item "capability_id")
       "input_sequence" (get item "input_sequence")
@@ -240,9 +256,16 @@
       "run_id" (get item "run_id")
       "provider" (get exchange "provider")
       "snapshot_hash" (get exchange "snapshot_hash")
-      "trace_id" (get item "trace_id")}
-     "program" (latest-generated-source run-id)
-     "trace_errors" (turns run-id {"status" "error"} nil)}))
+      "trace_id" (get item "trace_id")
+      "resource" (get exchange "resource")
+      "positions" (get exchange "positions")}
+     "program" program
+     "trace_errors"
+     (assoc trace-errors
+            "resource" run-id
+            "positions"
+            (positive-positions
+              (mapv #(get % "sequence") (get trace-errors "items"))))}))
 
 (defn effective-preludes
   "Read one effective-prelude page for an explicitly granted run.

@@ -318,8 +318,10 @@ a run without loading its turns:
   with `component_ids`; every entry lists unique ascending indices strictly
   earlier than its own position). Legacy events without the projection are
   served verbatim; the query layer never invents missing edges;
-- the run-started event's positive sequence in `positions`, so the summary is
-  directly citable without a second turn query;
+- the run-started event's positive sequence in `positions`, so start-derived
+  provenance such as component overrides and prelude identities is directly
+  citable without a second turn query. Outcome, error, and aggregate-count
+  claims still cite the canonical turns that support them;
 - the bounded `component_overrides` recorded at run start, including component,
   base-source, and effective-source identities, so run discovery exposes
   treatment assignment rather than requiring one provenance query per run;

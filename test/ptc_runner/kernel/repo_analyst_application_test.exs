@@ -315,8 +315,40 @@ defmodule PtcRunner.Kernel.RepoAnalystApplicationTest do
       granted = ["history.list-runs", "history.list-turns"] ++ @private_operations
       {:ok, calls} = Agent.start_link(fn -> [] end)
 
+      values = %{
+        "private-history.model-exchanges" => %{
+          "items" => [
+            %{
+              "capability_id" => "llm-1",
+              "input_sequence" => 7,
+              "output_sequence" => 8,
+              "result" => %{"content" => "answer"},
+              "run_id" => "run-1",
+              "trace_id" => "trace-1"
+            }
+          ],
+          "snapshot_hash" => "sha256:inspection"
+        },
+        "private-history.generated-sources" => %{
+          "items" => [
+            %{
+              "run_id" => "run-1",
+              "sequence" => 9,
+              "source" => "(return 42)"
+            }
+          ],
+          "snapshot_hash" => "sha256:inspection"
+        },
+        "history.list-turns" => %{
+          "items" => [
+            %{"run_id" => "run-1", "sequence" => 11, "type" => "evaluation-stopped"}
+          ],
+          "snapshot_hash" => "sha256:trace"
+        }
+      }
+
       {:ok, mission} =
-        MissionEnvironment.new(bundle: bundle, capabilities: stubs(granted, calls))
+        MissionEnvironment.new(bundle: bundle, capabilities: stubs(granted, calls, values))
 
       assert {:ok, %{value: %{outcome: :returned, value: value}}} =
                Kernel.run(
@@ -328,6 +360,12 @@ defmodule PtcRunner.Kernel.RepoAnalystApplicationTest do
       assert value["model_action"]["provider"] == "private-history"
       assert value["program"]["provider"] == "private-history"
       assert value["trace_errors"]["provider"] == "history"
+      assert value["model_action"]["resource"] == "run-1"
+      assert value["model_action"]["positions"] == [7, 8]
+      assert value["program"]["resource"] == "run-1"
+      assert value["program"]["positions"] == [9]
+      assert value["trace_errors"]["resource"] == "run-1"
+      assert value["trace_errors"]["positions"] == [11]
 
       assert Enum.map(Agent.get(calls, & &1), &elem(&1, 0)) == [
                "private-history.model-exchanges",
@@ -498,18 +536,22 @@ defmodule PtcRunner.Kernel.RepoAnalystApplicationTest do
              })
     end
 
-    test "improvement evidence documents each provider's position coordinate" do
-      schema =
-        "candidate.schema.json"
-        |> then(&path("repo-analyst/#{&1}"))
+    test "review and improvement evidence document each provider's position coordinate" do
+      candidate =
+        "repo-analyst/candidate.schema.json"
+        |> path()
+        |> File.read!()
+        |> Jason.decode!()
+
+      review =
+        "repo-analyst/review.schema.json"
+        |> path()
         |> File.read!()
         |> Jason.decode!()
 
       descriptions =
-        schema["oneOf"]
-        |> Enum.take(2)
-        |> Enum.map(
-          &get_in(&1, [
+        Enum.map(Enum.take(candidate["oneOf"], 2), fn branch ->
+          get_in(branch, [
             "properties",
             "evidence",
             "items",
@@ -517,7 +559,20 @@ defmodule PtcRunner.Kernel.RepoAnalystApplicationTest do
             "positions",
             "description"
           ])
-        )
+        end) ++
+          [
+            get_in(review, [
+              "properties",
+              "findings",
+              "items",
+              "properties",
+              "evidence",
+              "items",
+              "properties",
+              "positions",
+              "description"
+            ])
+          ]
 
       assert Enum.all?(
                descriptions,
@@ -531,16 +586,21 @@ defmodule PtcRunner.Kernel.RepoAnalystApplicationTest do
 
       assert Enum.all?(descriptions, &String.contains?(&1, "source line numbers for workspace"))
 
-      task =
-        "repo-analyst/improve-input.json"
-        |> path()
-        |> File.read!()
-        |> Jason.decode!()
-        |> Map.fetch!("task")
+      for input_name <- ~w(review-input.json improve-input.json) do
+        task =
+          "repo-analyst/#{input_name}"
+          |> path()
+          |> File.read!()
+          |> Jason.decode!()
+          |> Map.fetch!("task")
 
-      assert task =~ "history positions are canonical event sequence IDs"
-      assert task =~ "private-history positions are inspection-record sequence IDs"
-      assert task =~ "workspace positions are source line numbers"
+        assert task =~ "history positions are canonical event sequence IDs"
+        assert task =~ "private-history positions are inspection-record sequence IDs"
+        assert task =~ "workspace positions are source line numbers"
+
+        assert task =~
+                 "runs/list-runs positions cite only run-started provenance, not outcome or aggregate counts"
+      end
     end
 
     test "a proposed change carries complete source while the trusted host derives its hash" do
