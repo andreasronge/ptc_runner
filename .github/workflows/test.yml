@@ -10,6 +10,181 @@ permissions:
   contents: read
 
 jobs:
+  mcp-stdio-launcher:
+    runs-on: ${{ matrix.os }}
+    name: MCP stdio launcher companion (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04-arm, macos-15, macos-15-intel]
+    env:
+      MIX_ENV: test
+      HEX_SPONSOR: false
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Setup Elixir environment
+        uses: ./.github/actions/setup-elixir
+
+      - name: Get launcher dependencies
+        working-directory: ptc_runner_launcher
+        run: mix deps.get
+
+      - name: Verify launcher package and process containment
+        working-directory: ptc_runner_launcher
+        run: mix precommit
+
+      - name: Verify precompiled download, checksum, and source fallback
+        working-directory: ptc_runner_launcher
+        run: bash scripts/verify_precompiled.sh "$RUNNER_TEMP/launcher-artifacts"
+
+      - name: Retain verified launcher artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: launcher-${{ runner.os }}-${{ runner.arch }}
+          path: ${{ runner.temp }}/launcher-artifacts/*
+          if-no-files-found: error
+
+  mcp-stdio-launcher-package:
+    needs: mcp-stdio-launcher
+    runs-on: ubuntu-latest
+    name: MCP stdio launcher release package
+    env:
+      MIX_ENV: prod
+      HEX_SPONSOR: false
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      # Deliberately not the shared setup action. That action resolves the root
+      # project, and under MIX_ENV=prod the root declares the companion as an
+      # unpublished Hex requirement rather than a path, so `mix deps.get` fails
+      # with "No package with name ptc_runner_launcher". It then runs a root Mix
+      # task to install Babashka, which would fail for the same reason. This job
+      # only assembles the launcher subproject, so it sets up Elixir directly.
+      - name: Set up Elixir
+        id: setup-beam
+        uses: erlef/setup-beam@v1
+        with:
+          elixir-version: '1.20.2'
+          otp-version: '29.0.3'
+
+      - name: Cache launcher dependencies
+        uses: actions/cache@v5
+        with:
+          path: |
+            ptc_runner_launcher/deps
+            ptc_runner_launcher/_build
+          key: launcher-pkg-${{ runner.os }}-${{ runner.arch }}-otp${{ steps.setup-beam.outputs.otp-version }}-elixir${{ steps.setup-beam.outputs.elixir-version }}-${{ hashFiles('ptc_runner_launcher/mix.lock') }}
+          restore-keys: |
+            launcher-pkg-${{ runner.os }}-${{ runner.arch }}-otp${{ steps.setup-beam.outputs.otp-version }}-elixir${{ steps.setup-beam.outputs.elixir-version }}-
+
+      - name: Get launcher dependencies
+        working-directory: ptc_runner_launcher
+        run: mix deps.get
+
+      - name: Collect verified launcher artifacts
+        uses: actions/download-artifact@v7
+        with:
+          pattern: launcher-*
+          path: ${{ runner.temp }}/launcher-artifacts
+          merge-multiple: true
+
+      - name: Assemble checksums and verify the release package
+        working-directory: ptc_runner_launcher
+        run: bash scripts/build_release_package.sh "$RUNNER_TEMP/launcher-artifacts"
+
+      - name: Retain verified release package
+        uses: actions/upload-artifact@v6
+        with:
+          name: launcher-release-package
+          path: |
+            ${{ runner.temp }}/launcher-artifacts/checksum.exs
+            ${{ runner.temp }}/launcher-artifacts/ptc_runner_launcher-*.tar
+          if-no-files-found: error
+
+  mcp-http-interop:
+    runs-on: ubuntu-latest
+    name: MCP stateless HTTP interoperability
+    env:
+      MIX_ENV: test
+      HEX_SPONSOR: false
+      PTC_TEST_MCP_2026_ENDPOINT: http://127.0.0.1:8000
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Setup Elixir environment
+        uses: ./.github/actions/setup-elixir
+
+      - name: Setup pinned Go toolchain
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: test/support/mcp_go_stateless/go.mod
+          cache-dependency-path: test/support/mcp_go_stateless/go.sum
+
+      - name: Verify stateless HTTP interoperability
+        run: |
+          bash test/support/mcp_go_stateless/with_server.sh \
+            mix test test/ptc_runner/kernel/mcp_remote_e2e_test.exs \
+              --include e2e --trace --warnings-as-errors
+
+  mcp-filesystem-sample:
+    runs-on: ubuntu-latest
+    name: MCP filesystem sample server
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Setup Elixir environment
+        uses: ./.github/actions/setup-elixir
+
+      - name: Setup pinned Node toolchain
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22.22.2'
+          cache: npm
+          cache-dependency-path: examples/mcp/filesystem/package-lock.json
+
+      # `npm ci` installs the lockfile exactly and fails when package.json and
+      # the lockfile disagree, so a hand-edited dependency cannot reach CI.
+      - name: Install pinned dependencies
+        working-directory: examples/mcp/filesystem
+        run: npm ci --no-audit --no-fund
+
+      - name: Typecheck
+        working-directory: examples/mcp/filesystem
+        run: npm run typecheck
+
+      # The bundle is committed so a clean checkout can run the server without
+      # installing anything. Regenerate it and fail on any difference, so the
+      # artifact can never drift from the source that supposedly produced it.
+      - name: Rebuild the committed bundle
+        working-directory: examples/mcp/filesystem
+        run: npm run build
+
+      - name: Fail if the committed bundle is stale
+        working-directory: examples/mcp/filesystem
+        run: |
+          if ! git diff --exit-code -- dist/server.js; then
+            echo "::error::dist/server.js does not match a rebuild from src/. Run 'npm run build' in examples/mcp/filesystem and commit the result." >&2
+            exit 1
+          fi
+
+      - name: Run server conformance tests
+        working-directory: examples/mcp/filesystem
+        run: npm test
+
+      - name: Verify host JSON, manifest, stdio, and PTC-Lisp integration
+        run: |
+          mix test test/ptc_runner/kernel/filesystem_mcp_e2e_test.exs \
+            --include e2e --trace --warnings-as-errors
+
   ci:
     runs-on: ubuntu-latest
     name: Compile, test, format, credo, dialyzer & deps check
@@ -35,6 +210,9 @@ jobs:
 
       - name: Run tests
         run: mix test --max-failures 1 --trace --warnings-as-errors
+
+      - name: Verify core release package
+        run: bash scripts/verify_core_package.sh
 
       - name: Check code is formatted
         run: mix format --check-formatted

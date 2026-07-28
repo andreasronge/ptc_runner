@@ -103,8 +103,9 @@ body and before any capability activity. A signed function also validates its
 successful output. The agent loop does not automatically retry a contract
 failure after capability activity, because repeating external effects may be
 unsafe. See [Signature syntax](../signature-syntax.md) for the complete
-signature grammar and [Kernel component bundles](capability-prelude.md) for the
-runtime rules.
+signature grammar and [Components and preludes](components-and-preludes.md) for
+the runtime rules. [Building agents](building-agents.md) documents the
+correction protocol that renders this feedback for a live model.
 
 ## Input and mission data
 
@@ -130,10 +131,113 @@ Optional mission data is separate from workflow input:
 Paths are resolved under the canonical manifest directory. Absolute paths,
 traversal, devices, non-regular files, and symlink escapes are rejected.
 
-The built-in `file-read` provider freezes a bounded UTF-8 file snapshot during
-manifest assembly. Agent calls read that immutable snapshot and perform no
-runtime filesystem access, so later file, directory, or root replacement
-cannot change the granted contents.
+Model-accessible filesystem operations use an MCP server installed by the
+host. The shipped non-production sample freezes a bounded UTF-8 snapshot at
+startup and serves list, search, and ranged-read tools without later
+filesystem access. An immutable MCP installation may name one mapped
+read-only tool as `snapshot_identity`. PtcRunner calls that tool once during
+provider assembly with an empty argument object, validates its configured
+result field as a lowercase `sha256:` digest, and publishes the digest only as
+`content_snapshot_hash` in the safe provider snapshot. The identity tool need
+not be selected into the mission environment; failure to obtain a valid
+identity closes provider assembly.
+
+## Input and result contracts
+
+A manifest may validate its input and successful `Result.value` against
+manifest-relative JSON Schema files:
+
+```json
+"contracts": {
+  "input_schema": {"path": "task.schema.json"},
+  "result_schema": {"path": "candidate.schema.json"}
+}
+```
+
+The input contract covers inline input, an input file, and any `--mission` or
+`--private-mission` override. It is compiled and checked before provider
+preflight, credential resolution, process launch, or remote discovery. The
+result contract is checked after execution and evidence capture, but before
+stdout or `--output`/`--private-output` publication. A mismatch returns
+`input_contract_failed` or `result_contract_failed`; a rejected result value is
+not attached to the error.
+
+A rejection does carry a bounded classification, so a mismatch is diagnosable
+without repeating the run under private inspection. The command reports it as:
+
+```text
+{:error,
+ {:result_contract_failed,
+  %{value_kind: :object, discriminator: "decision", matched_branch: "no-change",
+    missing_required: [], undeclared_key_count: 0,
+    violations: [
+      %{path: "rationale", kind: :maxLength},
+      %{path: "evidence[0]", kind: :required, detail: ["provider", "snapshot_hash"]}
+    ]}}}
+```
+
+`json_value` reports the guard that runs before any schema keyword: a value
+must be JSON-like, and a PTC-Lisp map with keyword keys is not. That rejection
+produces no violations at all, so `json_value: false` with an empty
+`violations` list is the signature of keyword keys rather than of a schema
+mismatch.
+
+`violations` locates each failure by schema keyword and path within the branch
+the discriminator selected; branches it did not select are omitted, since they
+fail on keys they were never given. Paths are built only from names the
+contract declares and from array indices — a segment naming an undeclared key
+is replaced with `(undeclared)`, because that name is caller-authored content.
+
+Every other name comes from the compiled schema too: the discriminator, the
+branch whose `const` the value carried, and that branch's unmet `required` keys
+as `missing_required`. The value contributes only its JSON kind and
+`undeclared_key_count`, a number. The rejected value and its field values stay
+out of the error entirely.
+
+Ordinary contracts are closed, bounded object schemas. The supported keywords
+are `type`, `title`, `description`, `properties`, `required`,
+`additionalProperties`, `items`, `enum`, `const`, numeric and length bounds.
+String schemas may additionally use the single asserted
+`"format": "sha256"` for an algorithm-qualified lowercase digest; arbitrary
+formats and regexes remain outside the profile.
+Application contracts also allow one root `oneOf` containing 2–16 closed
+object branches. Every branch must require the same single string
+discriminator and give it a distinct `const` value:
+
+```json
+{
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["decision", "reason"],
+      "properties": {
+        "decision": {"type": "string", "const": "no-change"},
+        "reason": {"type": "string", "maxLength": 1000}
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["decision", "content"],
+      "properties": {
+        "decision": {"type": "string", "const": "propose-change"},
+        "content": {"type": "string", "maxLength": 32000}
+      }
+    }
+  ]
+}
+```
+
+Contracts are at most 64 KiB after normalization. References, regexes, nested
+composition, union types, and general-purpose `oneOf` are rejected. Apart from
+the shared bounded `sha256` format, this application profile does not widen
+MCP capability schemas.
+
+`--output PATH` atomically writes only the validated `Result.value`, never
+clobbers an existing file, and can be passed directly to a later run with
+`--mission`. Use `--private-output` for a private run; it creates a `0600`
+artifact and keeps the value off stdout.
 
 ## Providers are installed authority
 
@@ -143,24 +247,77 @@ configuration:
 ```json
 "providers": {
   "workflow": [
-    {"name": "llm", "config": {"model": "deepseek", "cache": false}}
+    {"name": "deepseek"}
   ],
   "mission": [
     {
-      "name": "file-read",
-      "config": {"root": "files", "max_bytes": 65536}
+      "name": "workspace"
     }
   ]
 }
 ```
 
-Only builders installed by the host may be selected. A manifest cannot name an
-Elixir module or callback, launch a command, include credentials, or choose an
-arbitrary endpoint. Provider placement is also enforced: the built-in model
-provider is workflow-only and file access is mission-only.
+Only builders installed by the host may be selected; no provider names are
+implicit. The separate host JSON fixes models, commands, credentials,
+endpoints, tool mappings, native PtcRunner sources, data classes, and outer
+ceilings. A manifest cannot name a host module or callback, launch a command,
+include credentials, or choose an arbitrary endpoint. Placement is enforced:
+LLM sources are workflow-only; MCP and native snapshot sources are
+mission-only.
+
+[Host configuration](host-configuration.md) is the operator reference for that
+document: credentials, all five provider sources, transports, tool mappings,
+data classes, and installed ceilings.
+
+Canonical PtcRunner traces use a native immutable source rather than MCP. Given
+a `ptc_trace_snapshot` alias named `history`, the manifest selects
+`{"name": "history"}` in its mission providers. The installed alias derives four
+fixed capabilities:
+`history.list-runs`, `history.get-run`, `history.list-turns`, and
+`history.counters`. Acquisition reads and validates the directory once;
+subsequent queries use the frozen capture even if path contents change. The
+safe provider snapshot includes counts, byte ceilings, and content identity,
+but no path. Every query result carries `snapshot_hash`, equal to that
+provider snapshot's `content_snapshot_hash`, so a cited run, sequence, or
+counter page remains bound to the captured catalog. Do not confuse that
+algorithm-qualified content identity with the safe provider snapshot's own
+bare-hex `snapshot_hash`: the latter attests the complete installed provider
+identity, including its policy and ceilings, while `content_snapshot_hash`
+attests only the frozen queried bytes.
+
+Private inspection artifacts use a separate paired native source, installed as
+`ptc_inspection_snapshot`. A manifest selecting such an alias must also select
+exactly one
+`ptc_trace_snapshot` provider. Provider acquisition captures that canonical
+trace first, then loads each regular `.inspection.jsonl` artifact once through
+the authoritative inspection parser and validates every identity and
+correlation against the captured trace. An orphan, duplicate run, malformed or
+replaced artifact, incomplete input/output pair, ambiguous trace source, or
+limit violation rejects the whole private snapshot. No partial catalog is
+exposed.
+
+The installed alias derives `list-runs`, `model-exchanges`,
+`capability-calls`, `generated-sources`, `effective-preludes`, and
+`provider-exchanges`. Collection results pair related records by their
+correlation IDs and use deterministic bounded pages with source-bound opaque
+cursors. Run-scoped private collections accept `"order": "asc" | "desc"`;
+ascending sequence order is the default, and the order is part of the cursor's
+bound query identity. Every result carries the same `snapshot_hash` recorded
+as `content_snapshot_hash` in the safe provider snapshot. V1 and V2 artifacts
+may share a directory: a V1 run has an empty provider-exchange page, while V2
+exposes each paired MCP request and response. The source classifies the run as
+`private_inspection`, so every
+selected provider must accept private data before either snapshot directory is
+opened. Safe connector metadata contains only counts, byte ceilings,
+trace/content identities, and hashes—not paths or private payloads.
 
 `model_visible` controls whether a capability appears in model context. It
-does not grant or remove execution authority.
+does not grant or remove execution authority: a granted hidden capability stays
+callable by exact name, and an ungranted one stays denied.
+
+The resulting trust boundary is simple. Treat the workflow bundle and the
+manifest as application code. Treat model-generated source, mission input, file
+content, and provider output as untrusted data.
 
 ## Requested limits narrow host ceilings
 
@@ -184,6 +341,13 @@ ceiling.
 Limits cover the complete run, workflow and mission evaluations, process heap,
 source, retained continuation memory, provider concurrency and calls,
 capability arguments/results, terminal results, and canonical events.
+
+The compiled ceilings suit one bounded run. An agent that must work for hours
+needs more turns, model calls, and trace events than they allow, and only the
+operator can grant that — see
+[Host configuration](host-configuration.md#installed-ceilings). Requesting more
+here than the host installed is rejected; a manifest that needs a larger budget
+must still ask for it after the operator raises the ceiling.
 
 ## Events and inspection
 
@@ -247,6 +411,16 @@ is not. They are deliberately not a general metadata map: keys and tag values
 come from a finite vocabulary, identifier strings are bounded and
 fingerprinted, and prompts, results, credentials, paths, and arbitrary user
 text do not belong there.
+
+## Next steps
+
+- [Host configuration](host-configuration.md) is the operator half — what the
+  aliases selected here actually resolve to.
+- [Building agents](building-agents.md) puts model policy behind these grants.
+- [Running and debugging](running-and-debugging.md) runs a manifest and reads
+  the traces, results, and inspection artifacts it declares.
+- [Components and preludes](components-and-preludes.md) covers the bundle
+  rules behind the `components` key.
 
 Exact field and failure contracts live in the
 `PtcRunner.Kernel.Manifest` module documentation. The

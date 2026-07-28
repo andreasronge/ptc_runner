@@ -421,6 +421,14 @@ defmodule PtcRunner.Lisp.FormatTest do
   end
 
   describe "to_clojure/2 string truncation hints" do
+    test "preserves strings longer than Elixir's default inspect limit" do
+      value = String.duplicate("x", 5_000)
+
+      assert {rendered, false} = Format.to_clojure(value)
+      assert rendered == inspect(value, printable_limit: :infinity)
+      refute rendered =~ " <> ..."
+    end
+
     test "shows char-based hint when truncated" do
       {result, true} = Format.to_clojure("hello world", printable_limit: 5)
       assert result =~ "(5/11 chars)"

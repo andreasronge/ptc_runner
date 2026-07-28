@@ -3,7 +3,7 @@ defmodule PtcRunner.Kernel.OwnerStatusPrivacyTest do
 
   alias PtcRunner.Kernel.InspectionSink
   alias PtcRunner.Kernel.Limits
-  alias PtcRunner.Kernel.MCPLease
+  alias PtcRunner.Kernel.MCPRequestContext
   alias PtcRunner.Kernel.RunState
 
   @logger_handler :owner_status_privacy_probe
@@ -33,7 +33,7 @@ defmodule PtcRunner.Kernel.OwnerStatusPrivacyTest do
     assert {:error, :closed} = GenServer.call(owners.store, {:unexpected, marker})
     assert {:error, :inspection_sink_error} = GenServer.call(owners.sink.pid, marker)
     assert {:error, :closed} = GenServer.call(owners.run_state.pid, marker)
-    assert {:error, :closed} = GenServer.call(owners.lease.pid, marker)
+    assert {:error, :closed} = GenServer.call(owners.mcp.pid, marker)
 
     Enum.each(owner_pids(owners), &GenServer.cast(&1, {:unexpected, marker}))
     Enum.each(owner_pids(owners), &:sys.get_status/1)
@@ -49,7 +49,7 @@ defmodule PtcRunner.Kernel.OwnerStatusPrivacyTest do
       sink: "PRIVATE_INSPECTION_RECORD_MARKER",
       run_state: "PRIVATE_EVALUATION_MEMORY_MARKER",
       endpoint: "PRIVATE_MCP_ENDPOINT_MARKER",
-      session: "PRIVATE_MCP_SESSION_MARKER"
+      header: "PRIVATE_MCP_HEADER_MARKER"
     }
 
     owners = start_owners(markers)
@@ -87,7 +87,7 @@ defmodule PtcRunner.Kernel.OwnerStatusPrivacyTest do
       sink: marker,
       run_state: marker,
       endpoint: marker,
-      session: marker
+      header: marker
     })
   end
 
@@ -114,19 +114,15 @@ defmodule PtcRunner.Kernel.OwnerStatusPrivacyTest do
         [markers.run_state]
       )
 
-    endpoint = "http://127.0.0.1:1/#{markers.endpoint}"
-
-    {:ok, lease} =
-      MCPLease.start(
+    {:ok, mcp} =
+      MCPRequestContext.start(
         owner: self(),
-        endpoint: endpoint,
-        headers: fn -> [] end,
+        endpoint: "https://example.com/#{markers.endpoint}",
+        headers: [{"authorization", "Bearer #{markers.header}"}],
         timeout_ms: 50
       )
 
-    :ok = MCPLease.set_session(lease, markers.session)
-
-    owners = %{store: store, sink: sink, run_state: run_state, lease: lease}
+    owners = %{store: store, sink: sink, run_state: run_state, mcp: mcp}
 
     on_exit(fn ->
       Enum.each(owner_pids(owners), fn pid ->
@@ -138,7 +134,7 @@ defmodule PtcRunner.Kernel.OwnerStatusPrivacyTest do
   end
 
   defp owner_pids(owners),
-    do: [owners.store, owners.sink.pid, owners.run_state.pid, owners.lease.pid]
+    do: [owners.store, owners.sink.pid, owners.run_state.pid, owners.mcp.pid]
 
   defp drain_logger_events(events) do
     receive do

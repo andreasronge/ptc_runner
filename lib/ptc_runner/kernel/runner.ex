@@ -7,6 +7,7 @@ defmodule PtcRunner.Kernel.Runner do
   projection, and terminal error normalization.
   """
 
+  alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.Dispatcher
   alias PtcRunner.Kernel.Error
   alias PtcRunner.Kernel.Events
@@ -15,6 +16,7 @@ defmodule PtcRunner.Kernel.Runner do
   alias PtcRunner.Kernel.RunConfig
   alias PtcRunner.Kernel.RunState
   alias PtcRunner.Kernel.RuntimeTools
+  alias PtcRunner.Kernel.SafeMetadata
   alias PtcRunner.Lisp
   alias PtcRunner.Lisp.RetainedSize
   alias PtcRunner.Lisp.TrustedTool
@@ -30,45 +32,80 @@ defmodule PtcRunner.Kernel.Runner do
   @spec run_and_events(binary(), RunConfig.t()) ::
           {{:ok, Result.t()} | {:error, Error.t()}, {:ok, [map()]} | {:error, atom()}}
   def run_and_events(entry_source, %RunConfig{} = config) when is_binary(entry_source) do
+    case EventSink.claim(config.event_sink, config.claim_id, config.run_started_metadata) do
+      :ok ->
+        run_claimed_attempt(entry_source, config)
+
+      {:error, :event_sink_already_claimed} ->
+        {event_sink_error(%{}), {:error, :event_sink_error}}
+
+      {:error, reason}
+      when reason in [:event_sink_claimed_by_other, :event_sink_error] ->
+        result =
+          apply_provider_cleanup_failure(
+            event_sink_error(%{}),
+            RunConfig.close_provider_resources(config),
+            %{}
+          )
+
+        {result, {:error, :event_sink_error}}
+    end
+  end
+
+  defp run_claimed_attempt(entry_source, config) do
     with :ok <- entry_source_within_limit(entry_source, config.limits),
          {:ok, state} <- RunState.start(config.limits) do
       try do
-        run_with_events(entry_source, config, state)
+        run_claimed(entry_source, config, state)
       after
-        RunState.close(state)
-        RunState.stop(state)
+        stop_run_state(state)
       end
     else
       {:error, reason} ->
-        {configuration_error(reason, %{}), {:error, :terminal_batch_unavailable}}
+        result =
+          reason
+          |> configuration_error(%{})
+          |> apply_provider_cleanup_failure(RunConfig.close_provider_resources(config), %{})
+
+        finalize_result(result, %{}, config.event_sink)
     end
   end
 
-  defp run_with_events(entry_source, config, state) do
-    case EventSink.begin(config.event_sink, config.run_started_metadata) do
-      :ok ->
-        try do
-          result = run_workflow(entry_source, config, state)
-          result = apply_terminal_failure(result, state)
-          :ok = RunState.close(state)
-          finalize_run(result, state, config.event_sink)
-        after
-          RunConfig.close_provider_resources(config)
-        end
+  defp run_claimed(entry_source, config, state) do
+    execution =
+      try do
+        result = run_workflow(entry_source, config, state)
+        result = apply_terminal_failure(result, state)
+        {:ok, result}
+      catch
+        kind, reason ->
+          {:raised, kind, reason, __STACKTRACE__}
+      after
+        close_run_state(state)
+      end
 
-      {:error, :event_sink_error} ->
-        {event_sink_error(RunState.usage(state)), {:error, :event_sink_error}}
+    usage = run_state_usage(state)
+    cleanup = RunConfig.close_provider_resources(config)
+
+    case execution do
+      {:ok, result} ->
+        result = apply_provider_cleanup_failure(result, cleanup, usage)
+        finalize_result(result, usage, config.event_sink)
+
+      {:raised, kind, reason, stacktrace} ->
+        :erlang.raise(kind, reason, stacktrace)
     end
   end
 
-  defp finalize_run(result, state, sink) do
-    usage = RunState.usage(state)
-
-    stopped_data = %{
-      outcome: outcome(result),
-      reason: terminal_reason(result),
-      usage: usage
-    }
+  defp finalize_result(result, usage, sink) do
+    stopped_data =
+      %{
+        outcome: outcome(result),
+        reason: terminal_reason(result),
+        usage: usage
+      }
+      |> maybe_put_result_hash(result)
+      |> maybe_put_failure_taxonomy(result)
 
     case EventSink.finalize_and_events(sink, stopped_data) do
       {:ok, %{events: events, dropped: dropped}} ->
@@ -77,7 +114,17 @@ defmodule PtcRunner.Kernel.Runner do
 
       {:error, :event_sink_error} ->
         failed_usage = Map.put(usage, :events_dropped, %{"event-sink" => 1})
-        {event_sink_error(failed_usage), {:error, :event_sink_error}}
+
+        terminal_result =
+          case result do
+            {:error, %Error{kind: :provider_cleanup_error}} ->
+              put_result_usage(result, failed_usage)
+
+            _other ->
+              event_sink_error(failed_usage)
+          end
+
+        {terminal_result, {:error, :event_sink_error}}
     end
   end
 
@@ -125,12 +172,12 @@ defmodule PtcRunner.Kernel.Runner do
     ]
 
     case Lisp.run_native(entry_source, opts) do
-      {:ok, %{return: {:__ptc_fail__, _value}}} ->
+      {:ok, %{return: {:__ptc_fail__, value}}} ->
         {:error,
          %Error{
            kind: :workflow_failed,
            reason: :explicit_failure,
-           details: %{},
+           details: SafeMetadata.failure_taxonomy(value),
            usage: RunState.usage(state)
          }}
 
@@ -138,6 +185,8 @@ defmodule PtcRunner.Kernel.Runner do
         case Lisp.project_boundary_value(kernel_return_value(step.return), :kernel_json) do
           {:ok, value} ->
             if terminal_result_within_limit?(value, config.limits.terminal_result_bytes) do
+              value = RetainedSize.detach_binaries(value)
+
               {:ok,
                %Result{
                  value: value,
@@ -169,7 +218,7 @@ defmodule PtcRunner.Kernel.Runner do
          %Error{
            kind: workflow_error_kind(step.fail.reason),
            reason: step.fail.reason,
-           details: %{message: String.slice(step.fail.message || "workflow failed", 0, 4_096)},
+           details: workflow_error_details(step.fail, timeout_ms, config.limits),
            usage: RunState.usage(state)
          }}
     end
@@ -271,6 +320,30 @@ defmodule PtcRunner.Kernel.Runner do
   defp terminal_reason({:ok, _result}), do: nil
   defp terminal_reason({:error, %Error{reason: reason}}), do: reason
 
+  defp maybe_put_result_hash(stopped_data, {:ok, %Result{value: value}}) do
+    case DeterministicJSON.encode(value) do
+      {:ok, encoded} -> Map.put(stopped_data, :result_hash, sha256(encoded))
+      {:error, _reason} -> stopped_data
+    end
+  end
+
+  defp maybe_put_result_hash(stopped_data, _result), do: stopped_data
+
+  defp maybe_put_failure_taxonomy(
+         stopped_data,
+         {:error, %Error{reason: :explicit_failure, details: details}}
+       ) do
+    Map.merge(
+      stopped_data,
+      Map.take(details, [:failure_kind, :failure_kind_fingerprint])
+    )
+  end
+
+  defp maybe_put_failure_taxonomy(stopped_data, _result), do: stopped_data
+
+  defp sha256(value),
+    do: "sha256:" <> Base.encode16(:crypto.hash(:sha256, value), case: :lower)
+
   defp put_result_usage({:ok, %Result{} = result}, usage), do: {:ok, %{result | usage: usage}}
   defp put_result_usage({:error, %Error{} = error}, usage), do: {:error, %{error | usage: usage}}
 
@@ -282,6 +355,48 @@ defmodule PtcRunner.Kernel.Runner do
        details: %{},
        usage: usage
      }}
+  end
+
+  defp apply_provider_cleanup_failure(
+         result,
+         :ok,
+         _usage
+       ),
+       do: result
+
+  defp apply_provider_cleanup_failure(
+         _result,
+         {:error, :provider_cleanup_failed},
+         usage
+       ) do
+    {:error,
+     %Error{
+       kind: :provider_cleanup_error,
+       reason: :provider_cleanup_failed,
+       details: %{},
+       usage: usage
+     }}
+  end
+
+  defp close_run_state(state) do
+    RunState.close_and_drain(state)
+    :ok
+  catch
+    :exit, _reason -> :ok
+  end
+
+  defp stop_run_state(state) do
+    close_run_state(state)
+    RunState.stop(state)
+    :ok
+  catch
+    :exit, _reason -> :ok
+  end
+
+  defp run_state_usage(state) do
+    RunState.usage(state)
+  catch
+    :exit, _reason -> %{}
   end
 
   defp apply_terminal_failure(result, state) do
@@ -313,9 +428,30 @@ defmodule PtcRunner.Kernel.Runner do
   defp maybe_emit_workflow_limit(_state, _sink, _result), do: :ok
 
   defp workflow_error_kind(reason)
-       when reason in [:timeout, :memory_exceeded, :program_too_large], do: :limit_exceeded
+       when reason in [:timeout, :compile_timeout, :memory_exceeded, :program_too_large],
+       do: :limit_exceeded
 
   defp workflow_error_kind(_reason), do: :workflow_failed
+
+  defp workflow_error_details(%{reason: reason}, timeout_ms, limits)
+       when reason in [:timeout, :compile_timeout] do
+    limit =
+      if timeout_ms == limits.workflow_timeout_ms,
+        do: :workflow_timeout_ms,
+        else: :run_duration_ms
+
+    phase = if reason == :compile_timeout, do: :compilation, else: :execution
+
+    %{
+      message: "#{limit} exceeded during #{phase} after #{timeout_ms}ms",
+      limit: limit,
+      limit_ms: timeout_ms,
+      phase: phase
+    }
+  end
+
+  defp workflow_error_details(fail, _timeout_ms, _limits),
+    do: %{message: String.slice(fail.message || "workflow failed", 0, 4_096)}
 
   defp configuration_error(reason, usage),
     do: {:error, %Error{kind: :configuration_error, reason: reason, details: %{}, usage: usage}}

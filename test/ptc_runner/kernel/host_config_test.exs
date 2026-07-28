@@ -1,0 +1,429 @@
+defmodule PtcRunner.Kernel.HostConfigTest do
+  use ExUnit.Case, async: true
+
+  alias PtcRunner.Kernel.HostConfig
+
+  @tag :tmp_dir
+  test "loads one closed stdio MCP installation without resolving credentials", %{tmp_dir: dir} do
+    config =
+      valid_config()
+      |> put_in(["credentials", "server_token"], %{"env" => "DEFINITELY_MISSING_PTC_TOKEN"})
+      |> put_in(
+        ["install", "workspace", "transport", "env"],
+        %{"SERVER_TOKEN" => %{"binding" => "server_token"}}
+      )
+
+    path = write_config(dir, config)
+
+    assert {:ok, host} = HostConfig.load(path)
+    assert host.path == Path.join(dir, "host.json")
+    assert host.directory == dir
+    assert host.runtime == %{stdio_launcher: nil}
+
+    assert host.credentials["server_token"] == %{
+             source: :env,
+             name: "DEFINITELY_MISSING_PTC_TOKEN"
+           }
+
+    assert host.install["workspace"] == %{
+             source: :mcp,
+             transport: %{
+               type: :stdio,
+               command: "node",
+               cwd: ".",
+               args: ["server.js"],
+               env: %{"SERVER_TOKEN" => "server_token"},
+               inherit_environment: true,
+               grace_ms: 250,
+               stderr_bytes: 65_536,
+               start_timeout_ms: 5_000
+             },
+             tools: %{
+               "read_text" => %{
+                 as: "workspace.read",
+                 effect: :read,
+                 description: nil,
+                 error_feedback: :closed,
+                 model_visible: false
+               }
+             },
+             snapshot_identity: nil,
+             installation_revision: nil,
+             ceilings: %{
+               timeout_ms: 5_000,
+               max_catalog_tools: 128,
+               max_result_bytes: 1_000_000
+             },
+             data_class: :normal,
+             accepts_data: [:normal]
+           }
+  end
+
+  @tag :tmp_dir
+  test "loads one closed live LLM installation with an explicit credential", %{tmp_dir: dir} do
+    config = %{
+      "credentials" => %{"openrouter_key" => %{"env" => "OPENROUTER_API_KEY"}},
+      "install" => %{
+        "deepseek" => %{
+          "source" => "llm",
+          "model" => "openrouter:deepseek/deepseek-v4-flash",
+          "credential" => "openrouter_key",
+          "cache" => false,
+          "params" => %{"temperature" => 0.2, "seed" => 42, "max_tokens" => 4_096},
+          "installation_revision" => "model-policy-v2",
+          "accepts_data" => ["normal", "private_inspection"],
+          "ceilings" => %{
+            "max_request_bytes" => 200_000,
+            "max_response_bytes" => 300_000
+          }
+        }
+      }
+    }
+
+    assert {:ok, host} = dir |> write_config(config) |> HostConfig.load()
+
+    assert host.install["deepseek"] == %{
+             source: :llm,
+             model: "openrouter:deepseek/deepseek-v4-flash",
+             credential: "openrouter_key",
+             cache: false,
+             params: %{temperature: 0.2, seed: 42, max_tokens: 4_096},
+             installation_revision: "model-policy-v2",
+             ceilings: %{max_request_bytes: 200_000, max_response_bytes: 300_000},
+             data_class: :normal,
+             accepts_data: [:normal, :private_inspection]
+           }
+  end
+
+  @tag :tmp_dir
+  test "loads one native canonical trace snapshot installation", %{tmp_dir: dir} do
+    config = %{
+      "install" => %{
+        "history" => %{
+          "source" => "ptc_trace_snapshot",
+          "directory" => "traces",
+          "ceilings" => %{
+            "max_source_bytes" => 2_000_000,
+            "max_result_bytes" => 250_000
+          }
+        }
+      }
+    }
+
+    assert {:ok, host} = dir |> write_config(config) |> HostConfig.load()
+
+    assert host.install["history"] == %{
+             source: :ptc_trace_snapshot,
+             directory: "traces",
+             ceilings: %{
+               max_source_bytes: 2_000_000,
+               max_result_bytes: 250_000
+             }
+           }
+  end
+
+  @tag :tmp_dir
+  test "loads one private inspection snapshot installation", %{tmp_dir: dir} do
+    config = %{
+      "install" => %{
+        "private-history" => %{
+          "source" => "ptc_inspection_snapshot",
+          "directory" => "inspection",
+          "ceilings" => %{
+            "max_files" => 100,
+            "max_source_bytes" => 64_000_000,
+            "max_result_bytes" => 500_000
+          }
+        }
+      }
+    }
+
+    assert {:ok, host} = dir |> write_config(config) |> HostConfig.load()
+
+    assert host.install["private-history"] == %{
+             source: :ptc_inspection_snapshot,
+             directory: "inspection",
+             ceilings: %{
+               max_files: 100,
+               max_source_bytes: 64_000_000,
+               max_result_bytes: 500_000
+             }
+           }
+  end
+
+  @tag :tmp_dir
+  test "loads closed HTTP authentication and safe installation metadata", %{tmp_dir: dir} do
+    config = %{
+      "$schema" => "./ptc-host-config.schema.json",
+      "runtime" => %{"stdio_launcher" => "/opt/ptc/launcher"},
+      "credentials" => %{"issues_token" => %{"file" => "secrets/issues-token"}},
+      "install" => %{
+        "issues" => %{
+          "source" => "mcp",
+          "transport" => %{
+            "type" => "streamable_http",
+            "endpoint" => "https://mcp.example.test/mcp",
+            "auth" => [%{"scheme" => "bearer", "binding" => "issues_token"}]
+          },
+          "tools" => %{
+            "search_issues" => %{
+              "as" => "issues.search",
+              "effect" => "read",
+              "description" => "Search approved issue metadata.",
+              "error_feedback" => "bounded",
+              "model_visible" => true
+            }
+          },
+          "installation_revision" => "deployment-3",
+          "data_class" => "private_inspection",
+          "accepts_data" => ["normal", "private_inspection"],
+          "ceilings" => %{
+            "timeout_ms" => 12_000,
+            "max_catalog_tools" => 16,
+            "max_result_bytes" => 250_000
+          }
+        }
+      }
+    }
+
+    assert {:ok, host} = dir |> write_config(config) |> HostConfig.load()
+    assert host.runtime.stdio_launcher == "/opt/ptc/launcher"
+    assert host.credentials["issues_token"] == %{source: :file, path: "secrets/issues-token"}
+
+    installation = host.install["issues"]
+    assert installation.transport.type == :streamable_http
+    assert installation.transport.auth == [%{scheme: :bearer, binding: "issues_token"}]
+    assert installation.installation_revision == "deployment-3"
+    assert installation.data_class == :private_inspection
+    assert installation.accepts_data == [:normal, :private_inspection]
+    assert installation.tools["search_issues"].model_visible
+    assert installation.tools["search_issues"].error_feedback == :bounded
+  end
+
+  test "every enumerated value decodes to an atom this module owns" do
+    # The assertions above check the decoded values but not where the atoms came
+    # from. They previously came from `String.to_existing_atom/1`, which only
+    # succeeds once some other module has interned the atom: `:bounded` and
+    # `:closed` appear in MCPProtocol and MCPSource guards, `:bearer` and
+    # `:basic` nowhere else at all. Decoding a valid host document therefore
+    # raised ArgumentError rather than returning a result whenever HostConfig
+    # ran first, and the tests above passed only because the surrounding suite
+    # happened to load MCP first.
+    #
+    # Reading the compiled atom chunk is the one check that does not depend on
+    # what else the VM has loaded: an atom in this list is a literal of this
+    # module and exists as soon as the module does.
+    {:ok, {_module, [atoms: atoms]}} =
+      PtcRunner.Kernel.HostConfig |> :code.which() |> :beam_lib.chunks([:atoms])
+
+    owned = MapSet.new(atoms, fn {_index, atom} -> atom end)
+
+    for atom <- [:bearer, :basic, :closed, :bounded, :normal, :private_inspection] do
+      assert MapSet.member?(owned, atom),
+             "#{inspect(atom)} must be a literal in HostConfig, not borrowed from another module"
+    end
+  end
+
+  @tag :tmp_dir
+  test "rejects duplicate keys, unknown sources, dangling bindings, and authority-bearing extras",
+       %{
+         tmp_dir: dir
+       } do
+    duplicate =
+      ~s|{"install":{"workspace":{"source":"mcp","source":"mcp","transport":{"type":"stdio","command":"node"},"tools":{"read":{"as":"workspace.read","effect":"read"}}}}}|
+
+    File.write!(Path.join(dir, "duplicate.json"), duplicate)
+
+    assert {:error, :duplicate_host_config_key} =
+             HostConfig.load(Path.join(dir, "duplicate.json"))
+
+    invalid = [
+      put_in(valid_config(), ["install", "workspace", "source"], "file-read"),
+      put_in(
+        valid_config(),
+        ["install", "workspace", "transport", "env"],
+        %{"TOKEN" => %{"binding" => "missing"}}
+      ),
+      put_in(
+        valid_config(),
+        ["install", "workspace", "transport", "env"],
+        %{"PATH" => %{"binding" => "server_token"}}
+      ),
+      put_in(
+        valid_config(),
+        ["install", "workspace", "transport", "shell"],
+        true
+      ),
+      put_in(
+        valid_config(),
+        ["install", "workspace", "tools", "read_text", "effect"],
+        "write"
+      )
+    ]
+
+    for config <- invalid do
+      assert {:error, :invalid_host_config} =
+               dir |> write_config(config, unique_name()) |> HostConfig.load()
+    end
+  end
+
+  test "generated schema accepts the same structural examples and rejects closed-shape errors" do
+    root = JSV.build!(HostConfig.schema(), atoms: false, formats: false, warnings: :silent)
+
+    assert {:ok, _validated} = JSV.validate(valid_config(), root, cast: false)
+
+    http = %{
+      "credentials" => %{"token" => %{"literal" => "test-only"}},
+      "install" => %{
+        "remote" => %{
+          "source" => "mcp",
+          "transport" => %{
+            "type" => "streamable_http",
+            "endpoint" => "https://example.test/mcp",
+            "auth" => [%{"scheme" => "api_key", "binding" => "token", "header" => "X-Key"}]
+          },
+          "tools" => %{
+            "read" => %{"as" => "remote.read", "effect" => "read"}
+          }
+        }
+      }
+    }
+
+    assert {:ok, _validated} = JSV.validate(http, root, cast: false)
+
+    llm = %{
+      "credentials" => %{"key" => %{"env" => "OPENROUTER_API_KEY"}},
+      "install" => %{
+        "deepseek" => %{
+          "source" => "llm",
+          "model" => "openrouter:deepseek/deepseek-v4-flash",
+          "credential" => "key"
+        }
+      }
+    }
+
+    assert {:ok, _validated} = JSV.validate(llm, root, cast: false)
+    assert {:ok, host} = HostConfig.decode(llm, "/tmp")
+    assert host.install["deepseek"].source == :llm
+    assert host.install["deepseek"].params == %{}
+
+    for invalid_params <- [
+          %{"temperature" => 2.1},
+          %{"seed" => -1},
+          %{"max_tokens" => 0},
+          %{"top_p" => 0.9}
+        ] do
+      invalid = put_in(llm, ["install", "deepseek", "params"], invalid_params)
+      assert {:error, :invalid_host_config} = HostConfig.decode(invalid, "/tmp")
+      assert {:error, _details} = JSV.validate(invalid, root, cast: false)
+    end
+
+    trace = %{
+      "install" => %{
+        "history" => %{
+          "source" => "ptc_trace_snapshot",
+          "directory" => "traces"
+        }
+      }
+    }
+
+    assert {:ok, _validated} = JSV.validate(trace, root, cast: false)
+    assert {:ok, host} = HostConfig.decode(trace, "/tmp")
+    assert host.install["history"].source == :ptc_trace_snapshot
+
+    too_small_trace =
+      put_in(
+        trace,
+        ["install", "history", "ceilings"],
+        %{"max_result_bytes" => HostConfig.minimum_snapshot_result_bytes() - 1}
+      )
+
+    assert {:error, :invalid_host_config} = HostConfig.decode(too_small_trace, "/tmp")
+    assert {:error, _details} = JSV.validate(too_small_trace, root, cast: false)
+
+    content_hash = "sha256:" <> String.duplicate("0", 64)
+    metadata_bytes = byte_size(Jason.encode!(%{"snapshot_hash" => content_hash}))
+
+    empty_page_bytes =
+      byte_size(
+        Jason.encode!(%{
+          "items" => [],
+          "next_cursor" => nil,
+          "omitted_count" => 0,
+          "truncated" => false
+        })
+      )
+
+    assert HostConfig.minimum_snapshot_result_bytes() == metadata_bytes + empty_page_bytes
+
+    inspection = %{
+      "install" => %{
+        "private-history" => %{
+          "source" => "ptc_inspection_snapshot",
+          "directory" => "inspection"
+        }
+      }
+    }
+
+    assert {:ok, _validated} = JSV.validate(inspection, root, cast: false)
+    assert {:ok, host} = HostConfig.decode(inspection, "/tmp")
+    assert host.install["private-history"].source == :ptc_inspection_snapshot
+
+    too_small_inspection =
+      put_in(
+        inspection,
+        ["install", "private-history", "ceilings"],
+        %{"max_result_bytes" => HostConfig.minimum_snapshot_result_bytes() - 1}
+      )
+
+    assert {:error, :invalid_host_config} = HostConfig.decode(too_small_inspection, "/tmp")
+    assert {:error, _details} = JSV.validate(too_small_inspection, root, cast: false)
+
+    refute match?(
+             {:ok, _validated},
+             valid_config()
+             |> put_in(["install", "workspace", "transport", "shell"], true)
+             |> JSV.validate(root, cast: false)
+           )
+
+    refute match?(
+             {:ok, _validated},
+             valid_config()
+             |> put_in(["install", "workspace", "source"], "file-read")
+             |> JSV.validate(root, cast: false)
+           )
+
+    dangling_llm = put_in(llm, ["install", "deepseek", "credential"], "missing")
+
+    assert {:ok, _validated} = JSV.validate(dangling_llm, root, cast: false)
+    assert {:error, :invalid_host_config} = HostConfig.decode(dangling_llm, "/tmp")
+  end
+
+  defp valid_config do
+    %{
+      "credentials" => %{"server_token" => %{"env" => "SERVER_TOKEN"}},
+      "install" => %{
+        "workspace" => %{
+          "source" => "mcp",
+          "transport" => %{
+            "type" => "stdio",
+            "command" => "node",
+            "args" => ["server.js"]
+          },
+          "tools" => %{
+            "read_text" => %{"as" => "workspace.read", "effect" => "read"}
+          }
+        }
+      }
+    }
+  end
+
+  defp write_config(dir, config, name \\ "host.json") do
+    path = Path.join(dir, name)
+    File.write!(path, Jason.encode!(config))
+    path
+  end
+
+  defp unique_name,
+    do: "host-#{System.unique_integer([:positive, :monotonic])}.json"
+end

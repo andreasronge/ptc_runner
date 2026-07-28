@@ -14,12 +14,12 @@
   },
   "providers": {
     "workflow": [
-      {"name": "llm", "config": {"model": "deepseek", "cache": false}}
+      {"name": "deepseek"}
     ]
   },
   "labels": {
     "name": "tutorial-deepseek-multi-turn-agent",
-    "model": "deepseek",
+    "model": "openrouter:deepseek/deepseek-v4-flash",
     "provider": "openrouter",
     "tags": {"mode": "agent"}
   }

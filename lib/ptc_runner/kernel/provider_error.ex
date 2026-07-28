@@ -19,7 +19,6 @@ defmodule PtcRunner.Kernel.ProviderError do
           | :internal
           | :domain_error
           | :invalid_result
-          | :session_expired
           | :authentication_failed
           | :timeout
           | :transport_error
@@ -39,7 +38,6 @@ defmodule PtcRunner.Kernel.ProviderError do
              :internal,
              :domain_error,
              :invalid_result,
-             :session_expired,
              :authentication_failed,
              :timeout,
              :transport_error

@@ -1,0 +1,170 @@
+name: PtcRunner Launcher Release
+
+on:
+  push:
+    tags:
+      - "ptc_runner_launcher-v*"
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-22.04
+    env:
+      MIX_ENV: test
+      HEX_SPONSOR: false
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Require a main commit
+        run: |
+          git fetch --no-tags origin main:refs/remotes/origin/main
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+
+      - name: Setup Java environment
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21.0.11+10"
+
+      - name: Setup Elixir environment
+        uses: ./.github/actions/setup-elixir
+
+      - name: Require tag to match the companion version
+        working-directory: ptc_runner_launcher
+        run: |
+          expected_tag="$(
+            elixir -e '
+              {config, _bindings} = Code.eval_file("release_config.exs")
+              IO.write(config.tag_prefix <> config.version)
+            '
+          )"
+          test "$GITHUB_REF_NAME" = "$expected_tag"
+
+      - name: Verify repository release gates
+        working-directory: .
+        run: |
+          mix precommit
+          mix prepush
+
+  build:
+    needs: verify
+    runs-on: ${{ matrix.os }}
+    name: Build launcher artifact (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04-arm, macos-15, macos-15-intel]
+    env:
+      MIX_ENV: test
+      HEX_SPONSOR: false
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Setup Elixir environment
+        uses: ./.github/actions/setup-elixir
+
+      - name: Get launcher dependencies
+        working-directory: ptc_runner_launcher
+        run: mix deps.get
+
+      - name: Verify source package and process containment
+        working-directory: ptc_runner_launcher
+        run: mix precommit
+
+      - name: Build and verify precompiled artifact
+        working-directory: ptc_runner_launcher
+        run: bash scripts/verify_precompiled.sh "$RUNNER_TEMP/launcher-artifacts"
+
+      - name: Upload launcher artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: launcher-${{ runner.os }}-${{ runner.arch }}
+          path: ${{ runner.temp }}/launcher-artifacts/*
+          if-no-files-found: error
+
+  package:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      attestations: write
+      contents: read
+      id-token: write
+    env:
+      MIX_ENV: prod
+      HEX_SPONSOR: false
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Setup Elixir environment
+        uses: ./.github/actions/setup-elixir
+
+      - name: Get launcher dependencies
+        working-directory: ptc_runner_launcher
+        run: mix deps.get
+
+      - name: Collect launcher artifacts
+        uses: actions/download-artifact@v7
+        with:
+          pattern: launcher-*
+          path: ${{ runner.temp }}/launcher-artifacts
+          merge-multiple: true
+
+      - name: Assemble checksums and verify the Hex package
+        working-directory: ptc_runner_launcher
+        run: bash scripts/build_release_package.sh "$RUNNER_TEMP/launcher-artifacts"
+
+      - name: Attest the workflow-built release assets
+        uses: actions/attest@v4
+        with:
+          subject-path: ${{ runner.temp }}/launcher-artifacts/*
+
+      - name: Retain attested release assets
+        uses: actions/upload-artifact@v6
+        with:
+          name: launcher-release-assets
+          path: ${{ runner.temp }}/launcher-artifacts/*
+          if-no-files-found: error
+
+  release:
+    needs: package
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Collect attested release assets
+        uses: actions/download-artifact@v7
+        with:
+          name: launcher-release-assets
+          path: ${{ runner.temp }}/launcher-artifacts
+
+      - name: Create checksummed draft release
+        env:
+          GH_REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "release $GITHUB_REF_NAME already exists" >&2
+            exit 1
+          fi
+
+          gh release create \
+            "$GITHUB_REF_NAME" \
+            "$RUNNER_TEMP"/launcher-artifacts/* \
+            --draft \
+            --generate-notes \
+            --latest=false \
+            --title "PtcRunner Launcher ${GITHUB_REF_NAME#ptc_runner_launcher-v}" \
+            --verify-tag

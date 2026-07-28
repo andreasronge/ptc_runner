@@ -1,0 +1,34 @@
+{
+  "case_set": "negative-control",
+  "description": "Cases that check the evaluator rather than the candidate. Every other case set asks whether a change helped; these ask whether the harness would have noticed if it had not. They exist because an evaluation that silently scores everything as passing looks exactly like an evaluation of a very good candidate, and nothing else in the suite can tell those apart. A negative control that behaves unexpectedly invalidates the run it belongs to; it never contributes to a verdict about the candidate.",
+  "cases": [
+    {
+      "id": "negative-control.always-passes",
+      "description": "Trivially satisfiable by any agent that returns at all.",
+      "task": "Return a JSON object whose \"answer\" is the single word ok and whose \"citations\" is an empty array. Do not read any file.",
+      "agent": {"max_turns": 3},
+      "workspace_fixture": {
+        "lib/unused.ex": "defmodule Unused do\nend\n"
+      },
+      "expect": {
+        "kind": "returns-value",
+        "value": "ok",
+        "reason": "Both subjects must pass. A failure here means the harness cannot score a correct answer, so every other result in the run is suspect."
+      }
+    },
+    {
+      "id": "negative-control.always-fails",
+      "description": "Unsatisfiable: the expectation names a path that is not in the snapshot.",
+      "task": "Report what lib/present.ex contains and cite the lines you read. Return a JSON object with an \"answer\" string and a \"citations\" array.",
+      "agent": {"max_turns": 4},
+      "workspace_fixture": {
+        "lib/present.ex": "defmodule Present do\nend\n"
+      },
+      "expect": {
+        "kind": "cites-path",
+        "path": "lib/does-not-exist.ex",
+        "reason": "Both subjects must fail. A pass here means the harness scores unmet expectations as met, which would make every improvement it reports meaningless."
+      }
+    }
+  ]
+}

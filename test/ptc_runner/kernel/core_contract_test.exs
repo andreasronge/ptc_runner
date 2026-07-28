@@ -12,8 +12,11 @@ defmodule PtcRunner.Kernel.CoreContractTest do
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.MissionEnvironment
   alias PtcRunner.Kernel.ProviderError
+  alias PtcRunner.Kernel.ReplSession
+  alias PtcRunner.Kernel.ResultArtifact
   alias PtcRunner.Kernel.RunConfig
   alias PtcRunner.Kernel.RunState
+  alias PtcRunner.Kernel.SafeMetadata
   alias PtcRunner.Kernel.WorkflowEnvironment
   alias PtcRunner.Lisp.Format
   alias PtcRunner.Lisp.RetainedSize
@@ -129,7 +132,32 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     assert :ok = RunState.release_evaluation(state, release_lease)
   end
 
+  test "continuation commit detaches retained values from transient binary parents" do
+    parent = :binary.copy("x", 100_000)
+    slice = binary_part(parent, 0, 1_000)
+
+    {:ok, limits} =
+      Limits.new(
+        subordinate_evaluations: 2,
+        evaluation_memory_bytes: 10_000,
+        evaluation_history_bytes: 10_000
+      )
+
+    {:ok, state} = RunState.start(limits)
+    assert {:ok, %{}, [], lease} = RunState.reserve_evaluation(state)
+    assert :ok = RunState.commit_evaluation(state, lease, %{"slice" => slice}, [slice])
+
+    assert {:ok, %{"slice" => retained}, [history], next_lease} =
+             RunState.reserve_evaluation(state)
+
+    assert :binary.referenced_byte_size(retained) == 1_000
+    assert :binary.referenced_byte_size(history) == 1_000
+    assert :ok = RunState.release_evaluation(state, next_lease)
+  end
+
   test "dispatcher contains provider errors and rejects invalid returns" do
+    missing_struct = Module.concat(__MODULE__, MissingProviderResult)
+
     assert {:ok, unavailable} =
              Capability.new(
                name: "unavailable",
@@ -146,7 +174,16 @@ defmodule PtcRunner.Kernel.CoreContractTest do
                callback: fn _ -> {:ok, self()} end
              )
 
-    assert {:ok, environment} = WorkflowEnvironment.new(capabilities: [unavailable, invalid])
+    assert {:ok, malformed_struct} =
+             Capability.new(
+               name: "malformed-struct",
+               input_schema: @input_schema,
+               callback: fn _ -> {:ok, %{__struct__: missing_struct, value: <<1>>}} end
+             )
+
+    assert {:ok, environment} =
+             WorkflowEnvironment.new(capabilities: [unavailable, invalid, malformed_struct])
+
     {:ok, state} = RunState.start(Limits.defaults())
 
     assert %{status: :error, kind: :provider_error, reason: :unavailable, retryable?: true} =
@@ -154,6 +191,9 @@ defmodule PtcRunner.Kernel.CoreContractTest do
 
     assert %{status: :error, kind: :result_exceeded, reason: :provider_result_limit} =
              Dispatcher.dispatch(state, :workflow, environment, "invalid", %{}, 100)
+
+    assert %{status: :error, kind: :result_exceeded, reason: :provider_result_limit} =
+             Dispatcher.dispatch(state, :workflow, environment, "malformed-struct", %{}, 100)
   end
 
   test "timed-out provider results cannot consume another callback slot after closure" do
@@ -213,6 +253,24 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     send(provider_pid, :finish)
 
     assert %{status: :error, kind: :limit_exceeded, reason: :run_closed} = Task.await(task)
+  end
+
+  test "closing with drain synchronously terminates attached providers" do
+    {:ok, state} = RunState.start(Limits.defaults())
+    assert :ok = RunState.reserve_capability(state, :workflow, "slow")
+
+    provider =
+      spawn(fn ->
+        receive do
+          :never -> :ok
+        end
+      end)
+
+    provider_ref = Process.monitor(provider)
+    assert :ok = RunState.attach_provider(state, provider)
+    assert :ok = RunState.close_and_drain(state)
+    assert_receive {:DOWN, ^provider_ref, :process, ^provider, :killed}
+    assert %{closed?: true} = RunState.usage(state)
   end
 
   test "a dispatching process killed mid-call releases its slot and stops its provider" do
@@ -369,7 +427,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
       Limits.new(
         normal_event_count: 4,
         normal_event_bytes: 100_000,
-        event_payload_bytes: 5_000
+        event_payload_bytes: 10_000
       )
 
     {:ok, sink} = EventSink.start(:normal, limits, run_id: "normal-run")
@@ -423,6 +481,232 @@ defmodule PtcRunner.Kernel.CoreContractTest do
                limits: limits,
                event_sink: sink
              )
+  end
+
+  test "tight terminal preflight covers cleanup-failure usage for Runner and REPL" do
+    {:ok, workflow} = WorkflowEnvironment.new([])
+    {:ok, mission} = MissionEnvironment.new([])
+
+    build = fn payload_bytes, close ->
+      {:ok, limits} =
+        Limits.new(
+          event_payload_bytes: payload_bytes,
+          normal_event_count: 4,
+          normal_event_bytes: 200_000
+        )
+
+      case EventSink.start(:normal, limits) do
+        {:ok, sink} ->
+          result =
+            RunConfig.new(
+              workflow_environment: workflow,
+              mission_environment: mission,
+              input: %{},
+              limits: limits,
+              event_sink: sink,
+              provider_resources: [close]
+            )
+
+          {result, sink, limits}
+
+        {:error, :invalid_event_sink} ->
+          {{:error, :invalid_event_sink}, nil, limits}
+      end
+    end
+
+    fits? = fn payload_bytes ->
+      case build.(payload_bytes, fn -> :ok end) do
+        {{:ok, _config}, sink, _limits} ->
+          EventSink.stop(sink)
+          true
+
+        {{:error, :invalid_run_config}, sink, _limits} ->
+          EventSink.stop(sink)
+          false
+
+        {{:error, :invalid_event_sink}, nil, _limits} ->
+          false
+      end
+    end
+
+    search = fn search, low, high ->
+      if low == high do
+        low
+      else
+        middle = div(low + high, 2)
+
+        if fits?.(middle),
+          do: search.(search, low, middle),
+          else: search.(search, middle + 1, high)
+      end
+    end
+
+    minimum = search.(search, 1, 50_000)
+    assert minimum > 1
+
+    {{:ok, accepted}, accepted_sink, _limits} = build.(minimum, fn -> :ok end)
+    EventSink.stop(accepted_sink)
+
+    {{:error, :invalid_run_config}, too_tight_sink, _limits} =
+      build.(minimum - 1, fn -> :ok end)
+
+    assert EventSink.begin_capacity?(too_tight_sink, accepted.run_started_metadata)
+    EventSink.stop(too_tight_sink)
+
+    cleanup_failure = fn -> {:error, :fixture_cleanup_failed} end
+    {{:ok, runner_config}, runner_sink, _limits} = build.(minimum, cleanup_failure)
+
+    assert {:error,
+            %PtcRunner.Kernel.Error{
+              kind: :provider_cleanup_error,
+              reason: :provider_cleanup_failed
+            }} = Kernel.run("(return 42)", runner_config)
+
+    assert List.last(EventSink.events(runner_sink)).data.reason == :provider_cleanup_failed
+
+    {{:ok, repl_config}, _repl_sink, _limits} = build.(minimum, cleanup_failure)
+    {:ok, repl} = ReplSession.new(config: repl_config)
+
+    assert {:error, :provider_cleanup_failed, events} = ReplSession.close(repl)
+    assert List.last(events).data.reason == :provider_cleanup_failed
+
+    {{:ok, abort_config}, _abort_sink, _limits} = build.(minimum, fn -> :ok end)
+    {:ok, abort_repl} = ReplSession.new(config: abort_config)
+
+    long_reason =
+      :frontend_exception_with_a_longer_terminal_reason_than_provider_cleanup_failed
+
+    assert {:ok, abort_events} = ReplSession.abort(abort_repl, long_reason)
+    assert List.last(abort_events).data.reason == long_reason
+  end
+
+  test "terminal preflight covers the protocol error that crosses its ceiling" do
+    {:ok, workflow} = WorkflowEnvironment.new([])
+    {:ok, mission} = MissionEnvironment.new([])
+
+    build = fn payload_bytes ->
+      {:ok, limits} =
+        Limits.new(
+          protocol_errors: 9,
+          event_payload_bytes: payload_bytes,
+          normal_event_count: 4,
+          normal_event_bytes: 100_000
+        )
+
+      case EventSink.start(:normal, limits) do
+        {:ok, sink} ->
+          result =
+            RunConfig.new(
+              workflow_environment: workflow,
+              mission_environment: mission,
+              input: %{},
+              limits: limits,
+              event_sink: sink
+            )
+
+          {result, sink, limits}
+
+        {:error, :invalid_event_sink} ->
+          {{:error, :invalid_event_sink}, nil, limits}
+      end
+    end
+
+    minimum =
+      Enum.find(1..50_000, fn payload_bytes ->
+        case build.(payload_bytes) do
+          {{:ok, _config}, sink, _limits} ->
+            EventSink.stop(sink)
+            true
+
+          {{:error, _reason}, sink, _limits} ->
+            if sink, do: EventSink.stop(sink)
+            false
+        end
+      end)
+
+    {{:ok, config}, sink, limits} = build.(minimum)
+    assert :ok = EventSink.claim(sink, config.claim_id, config.run_started_metadata)
+    {:ok, state} = RunState.start(limits)
+
+    Enum.each(1..limits.protocol_errors, fn _ ->
+      assert :ok = RunState.protocol_error(state)
+    end)
+
+    assert {:error, :protocol_error_limit} = RunState.protocol_error(state)
+    usage = RunState.usage(state)
+    assert usage.protocol_errors == limits.protocol_errors + 1
+
+    assert {:ok, %{events: events}} =
+             EventSink.finalize_and_events(sink, %{
+               outcome: :error,
+               reason: :protocol_errors,
+               usage: usage
+             })
+
+    assert List.last(events).type == "run-stopped"
+    RunState.stop(state)
+    EventSink.stop(sink)
+  end
+
+  test "capability construction detaches names from transient binary parents" do
+    parent = "s" <> String.duplicate("x", 500_000)
+    retained_name = binary_part(parent, 0, 65)
+    assert :binary.referenced_byte_size(retained_name) > byte_size(retained_name)
+
+    {:ok, retained} =
+      Capability.new(
+        name: retained_name,
+        input_schema: @input_schema,
+        callback: fn _ -> {:ok, nil} end
+      )
+
+    assert :binary.referenced_byte_size(retained.name) == byte_size(retained.name)
+
+    {:ok, logical_long} =
+      Capability.new(
+        name: String.duplicate("l", 128),
+        input_schema: @input_schema,
+        callback: fn _ -> {:ok, nil} end
+      )
+
+    {:ok, workflow} = WorkflowEnvironment.new(capabilities: [retained, logical_long])
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, limits} = Limits.new(workflow_capability_calls: 1)
+    {:ok, sink} = EventSink.start(:normal, limits)
+
+    assert {:ok, _config} =
+             RunConfig.new(
+               workflow_environment: workflow,
+               mission_environment: mission,
+               input: %{},
+               limits: limits,
+               event_sink: sink
+             )
+  end
+
+  test "terminal preflight counts only metered environment capabilities" do
+    {:ok, workflow} = WorkflowEnvironment.new([])
+    {:ok, mission} = MissionEnvironment.new([])
+
+    {:ok, limits} =
+      Limits.new(
+        event_payload_bytes: 5_900,
+        normal_event_count: 4,
+        normal_event_bytes: 100_000
+      )
+
+    {:ok, sink} = EventSink.start(:normal, limits)
+
+    assert {:ok, _config} =
+             RunConfig.new(
+               workflow_environment: workflow,
+               mission_environment: mission,
+               input: %{},
+               limits: limits,
+               event_sink: sink
+             )
+
+    EventSink.stop(sink)
   end
 
   test "run configuration requires exact sink limits and room for run-started" do
@@ -515,7 +799,12 @@ defmodule PtcRunner.Kernel.CoreContractTest do
         input: %{},
         limits: limits,
         event_sink: sink,
-        provider_resources: [fn -> send(parent, :resource_closed) end]
+        provider_resources: [
+          fn ->
+            send(parent, :resource_closed)
+            :ok
+          end
+        ]
       )
 
     first = Task.async(fn -> Kernel.run("(return (tool/blocking {}))", config) end)
@@ -531,6 +820,64 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     assert_receive :resource_closed
 
     assert Enum.count(EventSink.events(sink), &(&1.type == "run-started")) == 1
+  end
+
+  test "a distinct config losing a concurrent sink claim closes only its resources" do
+    parent = self()
+
+    {:ok, blocking} =
+      Capability.new(
+        name: "distinct-claim",
+        input_schema: @input_schema,
+        callback: fn _arguments ->
+          send(parent, {:distinct_claim_started, self()})
+
+          receive do
+            :continue -> {:ok, 42}
+          end
+        end
+      )
+
+    {:ok, workflow} = WorkflowEnvironment.new(capabilities: [blocking])
+    {:ok, mission} = MissionEnvironment.new([])
+    limits = Limits.defaults()
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "distinct-run-claim")
+
+    config = fn close_message ->
+      RunConfig.new(
+        workflow_environment: workflow,
+        mission_environment: mission,
+        input: %{},
+        limits: limits,
+        event_sink: sink,
+        provider_resources: [
+          fn ->
+            send(parent, close_message)
+            :ok
+          end
+        ]
+      )
+    end
+
+    {:ok, winner_config} = config.(:winner_resource_closed)
+    {:ok, loser_config} = config.(:loser_resource_closed)
+
+    winner =
+      Task.async(fn ->
+        Kernel.run("(return (tool/distinct-claim {}))", winner_config)
+      end)
+
+    assert_receive {:distinct_claim_started, provider}
+
+    assert {:error, %{kind: :event_sink_error, reason: :event_sink_error}} =
+             Kernel.run("(return 43)", loser_config)
+
+    assert_receive :loser_resource_closed
+    refute_receive :winner_resource_closed
+
+    send(provider, :continue)
+    assert {:ok, %{value: %{status: :ok, value: 42}}} = Task.await(winner)
+    assert_receive :winner_resource_closed
   end
 
   test "run owners provide explicit teardown and stop with their creating process" do
@@ -667,8 +1014,39 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     assert {:ok, %{value: 42, evaluation_memory: %{defined_count: 0}}} =
              Kernel.run("(return (+ 40 2))", config)
 
+    events = EventSink.events(sink)
+
     assert ["run-started", "evaluation-started", "evaluation-stopped", "run-stopped"] ==
-             Enum.map(EventSink.events(sink), & &1.type)
+             Enum.map(events, & &1.type)
+
+    expected_hash =
+      "sha256:" <> Base.encode16(:crypto.hash(:sha256, "42"), case: :lower)
+
+    assert List.last(events).data.result_hash == expected_hash
+  end
+
+  test "workflow timeout diagnostics name the effective configured limit" do
+    {:ok, workflow} = WorkflowEnvironment.new([])
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, limits} = Limits.new(workflow_timeout_ms: 1, run_duration_ms: 1_000)
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "workflow-timeout")
+
+    {:ok, config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        mission_environment: mission,
+        input: %{},
+        limits: limits,
+        event_sink: sink
+      )
+
+    assert {:error, error} = Kernel.run("(reduce + (range 1000000))", config)
+    assert error.kind == :limit_exceeded
+    assert error.reason in [:timeout, :compile_timeout]
+    assert error.details.limit == :workflow_timeout_ms
+    assert error.details.limit_ms == 1
+    assert error.details.phase in [:compilation, :execution]
+    assert error.details.message =~ "workflow_timeout_ms exceeded during"
   end
 
   test "Kernel JSON boundaries reject Java callable authority before commit" do
@@ -785,6 +1163,48 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     refute inspect(error) =~ private
   end
 
+  test "explicit workflow failure exposes only bounded safe taxonomy" do
+    {:ok, workflow} = WorkflowEnvironment.new([])
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, limits} = Limits.new()
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "workflow-failure-taxonomy")
+
+    {:ok, config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        mission_environment: mission,
+        input: %{},
+        limits: limits,
+        event_sink: sink
+      )
+
+    secret = "PRIVATE_FAILURE_DETAIL"
+
+    assert {:error,
+            %{
+              reason: :explicit_failure,
+              details: %{failure_kind: "turn-limit"}
+            }} =
+             Kernel.run(~s|(fail {:kind :turn-limit :reason "#{secret}"})|, config)
+
+    stopped = List.last(EventSink.events(sink))
+    assert stopped.type == "run-stopped"
+    assert stopped.data.failure_kind == "turn-limit"
+    refute inspect(stopped) =~ secret
+  end
+
+  test "application-defined failure kinds are fingerprinted" do
+    taxonomy =
+      SafeMetadata.failure_taxonomy(%{
+        "kind" => "PRIVATE_CUSTOM_FAILURE",
+        "detail" => "PRIVATE_DETAIL"
+      })
+
+    assert %{failure_kind_fingerprint: "sha256:" <> digest} = taxonomy
+    assert byte_size(digest) == 64
+    refute inspect(taxonomy) =~ "PRIVATE"
+  end
+
   test "new Kernel workflow routes only granted capabilities through the dispatcher" do
     {:ok, add} =
       Capability.new(
@@ -881,6 +1301,206 @@ defmodule PtcRunner.Kernel.CoreContractTest do
 
     assert %{protocol_errors: 1} = RunState.usage(state)
     refute_receive {:mission_provider_called, _arguments}
+  end
+
+  # A resource kill says the query was too big, not that the world changed.
+  # Refusing to retry after a read-only page fetch spends the agent's remaining
+  # turns protecting state nothing mutated, which is what ended a real
+  # investigation at the point it should have narrowed and continued.
+  test "a resource kill stays retryable after read-only capability activity" do
+    {:ok, reader} =
+      Capability.new(
+        name: "page",
+        input_schema: @input_schema,
+        effect: :read,
+        callback: fn _ -> {:ok, %{"items" => Enum.to_list(1..64)}} end
+      )
+
+    {:ok, mission} = MissionEnvironment.new(capabilities: [reader])
+    {:ok, limits} = Limits.new(%{evaluation_heap_words: 200_000})
+    {:ok, state} = RunState.start(limits)
+
+    assert %{outcome: :evaluation_error, retryable?: true} =
+             Evaluation.evaluate_source(
+               state,
+               mission,
+               ~S|(do (tool/page {}) (reduce (fn [acc i] (conj acc (range 0 4096))) [] (range 0 4096)))|,
+               5_000
+             )
+  end
+
+  test "parallel capacity stays retryable after read-only capability activity" do
+    {:ok, reader} =
+      Capability.new(
+        name: "page",
+        input_schema: @input_schema,
+        effect: :read,
+        callback: fn _ -> {:ok, %{"items" => [1, 2, 3]}} end
+      )
+
+    {:ok, mission} = MissionEnvironment.new(capabilities: [reader])
+    {:ok, state} = RunState.start(Limits.defaults())
+
+    assert %{
+             outcome: :evaluation_error,
+             kind: :parallel_capacity_exceeded,
+             retryable?: true
+           } =
+             Evaluation.evaluate_source(
+               state,
+               mission,
+               ~S|(do (tool/page {}) (pmap (fn [_] (pmap inc [1 2])) (range 0 16)))|,
+               5_000
+             )
+  end
+
+  test "a resource kill is not retryable after write or undeclared capability activity" do
+    for effect <- [:write, :unknown] do
+      {:ok, capability} =
+        Capability.new(
+          name: "commit",
+          input_schema: @input_schema,
+          effect: effect,
+          callback: fn _ -> {:ok, %{"ok" => true}} end
+        )
+
+      {:ok, mission} = MissionEnvironment.new(capabilities: [capability])
+      {:ok, limits} = Limits.new(%{evaluation_heap_words: 200_000})
+      {:ok, state} = RunState.start(limits)
+
+      assert %{outcome: :evaluation_error, retryable?: false} =
+               Evaluation.evaluate_source(
+                 state,
+                 mission,
+                 ~S|(do (tool/commit {}) (reduce (fn [acc i] (conj acc (range 0 4096))) [] (range 0 4096)))|,
+                 5_000
+               ),
+             "effect #{inspect(effect)} must keep a resource kill terminal"
+    end
+  end
+
+  test "an explicit capability failure reports whether correcting it is effect-safe" do
+    for {effect, retryable?} <- [read: true, write: false, unknown: false] do
+      {:ok, capability} =
+        Capability.new(
+          name: "lookup",
+          input_schema: @input_schema,
+          effect: effect,
+          callback: fn _ ->
+            {:error, ProviderError.new(:not_found, "not in the frozen source")}
+          end
+        )
+
+      {:ok, mission} = MissionEnvironment.new(capabilities: [capability])
+      {:ok, state} = RunState.start(Limits.defaults())
+
+      assert %{
+               outcome: :failed,
+               capability_activity?: true,
+               capability_failure?: true,
+               retryable?: ^retryable?,
+               value: %{status: :error, kind: :provider_error, reason: :not_found}
+             } =
+               Evaluation.evaluate_source(
+                 state,
+                 mission,
+                 ~S|(fail (tool/lookup {}))|,
+                 5_000
+               )
+
+      if effect == :read do
+        {:ok, copied_state} = RunState.start(Limits.defaults())
+
+        assert %{
+                 outcome: :failed,
+                 capability_activity?: true,
+                 capability_failure?: false,
+                 retryable?: true
+               } =
+                 Evaluation.evaluate_source(
+                   copied_state,
+                   mission,
+                   ~S|(let [response (tool/lookup {}) copied (into {} response)] (fail copied))|,
+                   5_000
+                 )
+      end
+    end
+
+    {:ok, lookup} =
+      Capability.new(
+        name: "lookup",
+        input_schema: @input_schema,
+        effect: :read,
+        callback: fn _ -> {:error, ProviderError.new(:not_found, "not found")} end
+      )
+
+    {:ok, cap_component} = Library.component("cap")
+    {:ok, cap_bundle} = Kernel.compile_bundle([cap_component])
+    {:ok, cap_mission} = MissionEnvironment.new(bundle: cap_bundle, capabilities: [lookup])
+    {:ok, cap_state} = RunState.start(Limits.defaults())
+
+    assert %{outcome: :failed, capability_failure?: true, retryable?: true} =
+             Evaluation.evaluate_source(
+               cap_state,
+               cap_mission,
+               ~S|(cap/unwrap! (tool/lookup {}))|,
+               5_000
+             )
+
+    {:ok, bound_cap_state} = RunState.start(Limits.defaults())
+
+    assert %{outcome: :failed, capability_failure?: true, retryable?: true} =
+             Evaluation.evaluate_source(
+               bound_cap_state,
+               cap_mission,
+               ~S|(let [response (tool/lookup {})] (cap/unwrap! response))|,
+               5_000
+             )
+
+    {:ok, copied_cap_state} = RunState.start(Limits.defaults())
+
+    assert %{outcome: :failed, capability_failure?: false, retryable?: true} =
+             Evaluation.evaluate_source(
+               copied_cap_state,
+               cap_mission,
+               ~S|(let [response (tool/lookup {}) copied (into {} response)] (cap/unwrap! copied))|,
+               5_000
+             )
+
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, state} = RunState.start(Limits.defaults())
+
+    assert %{
+             outcome: :failed,
+             capability_activity?: false,
+             capability_failure?: false,
+             retryable?: true
+           } =
+             Evaluation.evaluate_source(
+               state,
+               mission,
+               ~S|(fail {:status :error :kind :provider-error :reason :not-found})|,
+               5_000
+             )
+  end
+
+  # `Kernel.run` legitimately answers Elixir terms: `tool/kernel-eval` returns an
+  # atom-keyed envelope and embedding hosts read it, so the JSON requirement
+  # belongs to the artifact rather than to the boundary. What was wrong was the
+  # report — an unwritable value looked like a filesystem failure.
+  test "an unencodable result artifact names the value, not the write" do
+    dir = Path.join(System.tmp_dir!(), "ptc-unencodable-#{System.unique_integer([:positive])}")
+    File.mkdir_p!(dir)
+    on_exit(fn -> File.rm_rf(dir) end)
+    path = Path.join(dir, "result.json")
+
+    assert {:error, {:result_not_json_encodable, :object}} =
+             ResultArtifact.persist(path, %{outcome: :returned, value: 1}, :normal, :normal)
+
+    refute File.exists?(path)
+
+    assert :ok = ResultArtifact.persist(path, %{"outcome" => "returned"}, :normal, :normal)
+    assert File.exists?(path)
   end
 
   test "mission evaluation is serialized, persistent, and cannot use workflow capabilities" do
@@ -1117,17 +1737,20 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     assert %{outcome: :continued} =
              Evaluation.evaluate_source(state, mission, "(def retained 42)", 100)
 
-    assert %{
-             outcome: :evaluation_error,
-             retryable?: false,
-             details: %{capability_activity?: true}
-           } =
-             Evaluation.evaluate_source(
-               state,
-               mission,
-               ~S|(do (def leaked 99) (tool/touch {}) (+ {} 1))|,
-               100
-             )
+    # `capability_activity?` is still reported, because a reviewer wants to know
+    # something happened. It no longer decides retryability by itself: `touch`
+    # is declared `:read`, so repeating this program repeats a read and the
+    # loop's correction path stays reachable.
+    activity_result =
+      Evaluation.evaluate_source(
+        state,
+        mission,
+        ~S|(do (def leaked 99) (tool/touch {}) (+ {} 1))|,
+        100
+      )
+
+    assert %{outcome: :evaluation_error, details: %{capability_activity?: true}} = activity_result
+    refute Map.get(activity_result, :retryable?) == false
 
     assert_receive :mission_touch_called
 
@@ -1416,9 +2039,16 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     private = "PRIVATE_GENERATED_SOURCE_(return_42)"
     {private_config, private_sink} = config_for.("runtime-library-private")
 
-    assert {:ok, %{value: %{status: :error, reason: :invalid_workflow_annotation}}} =
+    assert {:ok,
+            %{
+              value: %{
+                status: :error,
+                kind: :invalid_annotation,
+                reason: :invalid_workflow_annotation
+              }
+            }} =
              Kernel.run(
-               ~s|(return (workflow.event/annotate "progress" {"source" "#{private}"}))|,
+               ~s|(return (workflow.event/annotate "progress" {"stage" "started" "source" "#{private}"}))|,
                private_config
              )
 
@@ -1426,11 +2056,55 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     session = "session-123"
     {prompt_config, prompt_sink} = config_for.("runtime-library-prompt")
 
-    assert {:ok, %{value: %{status: :error, reason: :invalid_workflow_annotation}}} =
+    assert {:ok,
+            %{
+              value: %{
+                status: :error,
+                kind: :invalid_annotation,
+                reason: :invalid_workflow_annotation
+              }
+            }} =
              Kernel.run(
                ~s|(return (workflow.event/annotate "progress" {"prompt" "#{prompt}" "session_id" "#{session}"}))|,
                prompt_config
              )
+
+    {malformed_config, _malformed_sink} = config_for.("runtime-library-malformed")
+
+    assert {:ok,
+            %{
+              value: %{
+                status: :error,
+                kind: :protocol_error,
+                reason: :invalid_workflow_annotation
+              }
+            }} =
+             Kernel.run(
+               ~s|(return (tool/workflow-annotate {}))|,
+               malformed_config
+             )
+
+    {rejection_config, rejection_sink} = config_for.("runtime-library-rejections")
+
+    rejected_calls =
+      Enum.map_join(1..(limits.protocol_errors + 1), "\n", fn _attempt ->
+        ~s|(workflow.event/annotate "progress" {"source" "private"})|
+      end)
+
+    assert {:ok, %{value: %{closed?: false, protocol_errors: 0}}} =
+             Kernel.run(
+               """
+               (do
+                 #{rejected_calls}
+                 (return (runtime/usage)))
+               """,
+               rejection_config
+             )
+
+    refute Enum.any?(
+             EventSink.events(rejection_sink),
+             &(&1.type == "workflow-annotation")
+           )
 
     public_events =
       EventSink.events(sink) ++ EventSink.events(private_sink) ++ EventSink.events(prompt_sink)

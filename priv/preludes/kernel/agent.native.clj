@@ -39,14 +39,21 @@
     (not (map? response))
     (protocol-error :invalid-response)
 
-    (and (string? (get response "content"))
-         (not (blank? (get response "content"))))
-    (protocol-error :assistant-text-with-tool-call)
-
     :else
-    (let [calls (get response "tool_calls")]
+    ;; Narration alongside a call is the native shape of a tool-calling turn:
+    ;; `content` and `tool_calls` are sibling fields, and instruction tuning
+    ;; rewards saying what you are about to do. Rejecting it discarded correct
+    ;; programs. Prose only violates the protocol when it arrives *instead of*
+    ;; a call, which is the case this rule exists to catch.
+    (let [calls (get response "tool_calls")
+          prose (get response "content")
+          narrating? (and (string? prose) (not (blank? prose)))]
       (cond
-        (not (sequential? calls)) (protocol-error :missing-tool-call)
+        (not (sequential? calls))
+        (if narrating?
+          (protocol-error :assistant-text-without-tool-call)
+          (protocol-error :missing-tool-call))
+
         (not= 1 (count calls)) (protocol-error :multiple-or-missing-tool-calls)
         :else
         (let [call (first calls)
@@ -64,5 +71,6 @@
             (> (count program) max-program-chars) (protocol-error :program-too-large)
             :else {:kind :tool-call
                    :program program
+                   :rationale (when narrating? prose)
                    :tool-call-id (get call "id")
                    :public-tool-call call})))))))

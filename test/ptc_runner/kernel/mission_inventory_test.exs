@@ -14,7 +14,7 @@ defmodule PtcRunner.Kernel.MissionInventoryTest do
   alias PtcRunner.Kernel.WorkflowEnvironment
 
   @expected ~S|{"schema_version":2,"exports":[{"ref":"tools/ping","kind":"function","call":"(tools/ping value)","doc":"Ping.","effect":"unknown","contract":null}],"capabilities":[{"name":"native.read","call":"(tool/native.read arguments)","description":"Read","effect":"read","input_schema":{"additionalProperties":false,"properties":{"query":{"type":"string"}},"required":["query"],"type":"object"},"output_schema":null}],"limits":{"evaluation_timeout_ms":1000,"subordinate_source_bytes":131072,"mission_capability_calls":128,"mission_capability_calls_per_name":32,"capability_argument_bytes":262144,"capability_result_bytes":1000000}}|
-  @expected_model ~S|{"schema_version":2,"entries":[{"kind":"call","form":"(tool/native.read {\"query\" query})","contract":{"parameters":[{"name":"arguments","type":{"kind":"object","nullable":false,"closed":true,"fields":[{"name":"query","required":true,"type":{"kind":"string","nullable":false}}]}}],"returns":null},"effect":"read","docs":"Read"},{"kind":"call","form":"(tools/ping value)","contract":null,"effect":"unknown","docs":"Ping."}],"limits":{"evaluation_timeout_ms":1000,"subordinate_source_bytes":131072,"mission_capability_calls":128,"mission_capability_calls_per_name":32,"capability_argument_bytes":262144,"capability_result_bytes":1000000}}|
+  @expected_model ~S|{"schema_version":2,"namespaces":[{"namespace":"tools","doc":"Tools."}],"entries":[{"kind":"call","form":"(tool/native.read {\"query\" query})","contract":{"parameters":[{"name":"arguments","type":{"kind":"object","nullable":false,"closed":true,"fields":[{"name":"query","required":true,"type":{"kind":"string","nullable":false}}]}}],"returns":null},"effect":"read","docs":"Read"},{"kind":"call","form":"(tools/ping value)","contract":null,"effect":"unknown","docs":"Ping."}],"limits":{"evaluation_timeout_ms":1000,"subordinate_source_bytes":131072,"mission_capability_calls":128,"mission_capability_calls_per_name":32,"capability_argument_bytes":262144,"capability_result_bytes":1000000}}|
 
   test "renders and hashes the exact versioned frozen inventory" do
     {:ok, mission, limits} = mission_fixture()
@@ -271,6 +271,37 @@ defmodule PtcRunner.Kernel.MissionInventoryTest do
     assert inventory.bytes > 128 * 1_024
     assert inventory.bytes <= 256 * 1_024
     assert inventory.model_bytes <= 256 * 1_024
+  end
+
+  test "compact context preserves asserted schema formats for the model" do
+    {:ok, capability} =
+      Capability.new(
+        name: "lookup",
+        input_schema: %{
+          "type" => "object",
+          "properties" => %{
+            "snapshot_hash" => %{"type" => "string", "format" => "sha256"}
+          },
+          "required" => ["snapshot_hash"]
+        },
+        callback: fn _ -> {:ok, %{}} end
+      )
+
+    {:ok, mission} = MissionEnvironment.new(capabilities: [capability])
+    {:ok, inventory} = MissionInventory.build(mission, Limits.defaults())
+
+    assert [%{"contract" => contract}] = Jason.decode!(inventory.model_rendered)["entries"]
+
+    assert "sha256" ==
+             get_in(contract, [
+               "parameters",
+               Access.at(0),
+               "type",
+               "fields",
+               Access.at(0),
+               "type",
+               "format"
+             ])
   end
 
   defp mission_fixture do

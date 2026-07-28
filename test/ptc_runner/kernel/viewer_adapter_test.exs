@@ -10,7 +10,9 @@ defmodule PtcRunner.Kernel.ViewerAdapterTest do
 
     connector = %{
       "provider" => "fixture-mcp",
-      "protocol" => "mcp-2025-11-25",
+      "protocol" => "mcp-2026-07-28",
+      "transport" => "streamable_http",
+      "server_info_hash" => nil,
       "snapshot_hash" => String.duplicate("a", 64),
       "tools" => []
     }

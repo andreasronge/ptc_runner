@@ -28,19 +28,23 @@ defmodule PtcRunner.GitHooks.PrePushTest do
     {output, status} = run_hook(repo, path)
 
     assert status == 0
-    assert output =~ "Docs-only push, skipping test/dialyzer gate"
+    assert output =~ "Docs-only push, skipping full pre-push gate"
     refute File.exists?(mix_marker)
   end
 
   @tag :slow
-  test "full gate reports test and dialyzer timings" do
-    %{repo: repo, path: path} = git_repo_with_change("lib/example.ex")
+  test "full gate runs tests and the canonical prepush alias once" do
+    %{repo: repo, mix_marker: mix_marker, path: path} =
+      git_repo_with_change("lib/example.ex")
 
     {output, status} = run_hook(repo, path)
 
     assert status == 0
     assert output =~ ~r/Tests passed in \d+s/
-    assert output =~ ~r/Dialyzer passed in \d+s/
+    assert output =~ ~r/Pre-push checks passed in \d+s/
+
+    assert mix_marker |> File.read!() |> String.split("\n", trim: true) ==
+             ["test --exclude clojure", "prepush"]
   end
 
   defp git_repo_with_change(changed_path) do
@@ -60,7 +64,7 @@ defmodule PtcRunner.GitHooks.PrePushTest do
 
     fake_mix = Path.join(bin, "mix")
 
-    File.write!(fake_mix, "#!/bin/sh\nprintf called >> \"$MIX_MARKER\"\nexit 0\n")
+    File.write!(fake_mix, "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$MIX_MARKER\"\nexit 0\n")
     File.chmod!(fake_mix, 0o755)
 
     git!(repo, ["init", "--quiet"])

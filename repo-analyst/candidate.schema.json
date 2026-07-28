@@ -1,0 +1,208 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "repo-analyst improvement decision",
+  "description": "The tagged decision union returned by the improvement task. Declining to change anything is a first-class outcome: two of the three branches carry no candidate at all, so the run has an honest way to report that the evidence does not support a change.",
+  "oneOf": [
+    {
+      "type": "object",
+      "title": "propose-change",
+      "description": "A generalized agent-behavior gap backed by cited evidence, with complete replacement source for one component.",
+      "properties": {
+        "decision": {"type": "string", "const": "propose-change"},
+        "target": {
+          "type": "string",
+          "description": "Component the candidate replaces, such as agent.core.",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "generalized_failure": {
+          "type": "string",
+          "description": "The reusable behavior gap, stated independently of any single run.",
+          "minLength": 1,
+          "maxLength": 2000
+        },
+        "evidence": {
+          "type": "array",
+          "description": "Run and source evidence that must exist in the captured providers. Unsupported claims fail evaluation even when the patch looks plausible.",
+          "minItems": 1,
+          "maxItems": 32,
+          "items": {
+            "type": "object",
+            "properties": {
+              "provider": {
+                "type": "string",
+                "enum": ["history", "private-history", "workspace"]
+              },
+              "snapshot_hash": {
+                "type": "string",
+                "format": "sha256"
+              },
+              "resource": {
+                "type": "string",
+                "description": "Run ID for history providers, or relative path for the workspace provider.",
+                "minLength": 1,
+                "maxLength": 1024
+              },
+              "positions": {
+                "type": "array",
+                "description": "Positive positions in the cited provider snapshot: canonical event sequence IDs for history, inspection-record sequence IDs for private-history, or source line numbers for workspace.",
+                "minItems": 1,
+                "maxItems": 32,
+                "items": {"type": "integer", "minimum": 1}
+              }
+            },
+            "required": ["provider", "snapshot_hash", "resource", "positions"]
+          }
+        },
+        "candidate": {
+          "type": "object",
+          "description": "Complete replacement source. Source is authoritative because it can be hashed and compiled exactly; a diff may accompany it for review but is not executable truth.",
+          "properties": {
+            "format": {"type": "string", "const": "component-source"},
+            "component_id": {
+              "type": "string",
+              "description": "Installed component the candidate replaces.",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "base_source_hash": {
+              "type": "string",
+              "description": "Exact sha256-prefixed source_hash returned by runs/effective-preludes for the component this candidate replaces. Verified against the installed component before compilation.",
+              "format": "sha256",
+              "minLength": 71,
+              "maxLength": 71
+            },
+            "content": {
+              "type": "string",
+              "description": "Complete PTC-Lisp component source.",
+              "minLength": 1,
+              "maxLength": 65536
+            }
+          },
+          "required": [
+            "format",
+            "component_id",
+            "base_source_hash",
+            "content"
+          ]
+        },
+        "review_diff": {
+          "type": "string",
+          "description": "Human-facing diff. Advisory only.",
+          "maxLength": 32768
+        },
+        "evaluation_plan": {
+          "type": "object",
+          "description": "Cases the proposer expects to be run. Held-out cases are chosen by the evaluator, not from this list.",
+          "properties": {
+            "motivating_cases": {
+              "type": "array",
+              "maxItems": 32,
+              "items": {"type": "string", "minLength": 1, "maxLength": 128}
+            },
+            "regression_cases": {
+              "type": "array",
+              "maxItems": 32,
+              "items": {"type": "string", "minLength": 1, "maxLength": 128}
+            },
+            "held_out_cases": {
+              "type": "array",
+              "maxItems": 32,
+              "items": {"type": "string", "minLength": 1, "maxLength": 128}
+            },
+            "metrics": {
+              "type": "array",
+              "maxItems": 16,
+              "items": {"type": "string", "minLength": 1, "maxLength": 64}
+            }
+          },
+          "required": ["motivating_cases", "regression_cases", "metrics"]
+        },
+        "risks": {
+          "type": "array",
+          "description": "What the change could break.",
+          "maxItems": 16,
+          "items": {"type": "string", "minLength": 1, "maxLength": 1000}
+        }
+      },
+      "required": [
+        "decision",
+        "target",
+        "generalized_failure",
+        "evidence",
+        "candidate",
+        "evaluation_plan"
+      ]
+    },
+    {
+      "type": "object",
+      "title": "no-change",
+      "description": "The evidence is sufficient and shows no reusable agent-behavior gap. An isolated defect belongs in a normal bug report, not in a change to shared agent behavior.",
+      "properties": {
+        "decision": {"type": "string", "const": "no-change"},
+        "rationale": {
+          "type": "string",
+          "description": "Why the observed behavior is a one-off rather than a reusable gap.",
+          "minLength": 1,
+          "maxLength": 2000
+        },
+        "evidence": {
+          "type": "array",
+          "description": "The evidence that was examined before declining.",
+          "minItems": 1,
+          "maxItems": 32,
+          "items": {
+            "type": "object",
+            "properties": {
+              "provider": {
+                "type": "string",
+                "enum": ["history", "private-history", "workspace"]
+              },
+              "snapshot_hash": {
+                "type": "string",
+                "format": "sha256"
+              },
+              "resource": {
+                "type": "string",
+                "description": "Run ID for history providers, or relative path for the workspace provider.",
+                "minLength": 1,
+                "maxLength": 1024
+              },
+              "positions": {
+                "type": "array",
+                "description": "Positive positions in the cited provider snapshot: canonical event sequence IDs for history, inspection-record sequence IDs for private-history, or source line numbers for workspace.",
+                "minItems": 1,
+                "maxItems": 32,
+                "items": {"type": "integer", "minimum": 1}
+              }
+            },
+            "required": ["provider", "snapshot_hash", "resource", "positions"]
+          }
+        }
+      },
+      "required": ["decision", "rationale", "evidence"]
+    },
+    {
+      "type": "object",
+      "title": "insufficient-evidence",
+      "description": "The captured providers do not contain enough evidence to decide. This is not a failure of the run; it is the correct answer when the sources do not support a conclusion.",
+      "properties": {
+        "decision": {"type": "string", "const": "insufficient-evidence"},
+        "rationale": {
+          "type": "string",
+          "description": "What was searched and why it was not conclusive.",
+          "minLength": 1,
+          "maxLength": 2000
+        },
+        "missing_evidence": {
+          "type": "array",
+          "description": "What would have to be captured to decide.",
+          "minItems": 1,
+          "maxItems": 16,
+          "items": {"type": "string", "minLength": 1, "maxLength": 1000}
+        }
+      },
+      "required": ["decision", "rationale", "missing_evidence"]
+    }
+  ]
+}

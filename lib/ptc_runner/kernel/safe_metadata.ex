@@ -21,6 +21,21 @@ defmodule PtcRunner.Kernel.SafeMetadata do
   @fingerprint ~r/\Asha256:[0-9a-f]{64}\z/
   @progress_stages ~w(started planning executing validating completed failed)
   @agent_action_kinds ~w(tool-call protocol-error provider-error)
+  @failure_kinds ~w(
+    invalid-input
+    invalid-prompt
+    invalid-transcript
+    transcript-limit
+    turn-limit
+    model-program-failed
+    non-retryable-evaluation
+    llm-provider-error
+    protocol-error
+    provider-error
+    capability-error
+    assertion-failed
+    unknown-action
+  )
 
   @spec normalize_labels(term()) :: {:ok, map()} | {:error, :invalid_safe_metadata}
   @doc "Validates labels and fingerprints caller-defined identifier fields."
@@ -58,7 +73,9 @@ defmodule PtcRunner.Kernel.SafeMetadata do
   those stay in the agent's own history and, when enabled, in private
   inspection records.
   """
-  def annotation?("progress", %{"stage" => stage}) when stage in @progress_stages, do: true
+  def annotation?("progress", %{"stage" => stage} = data)
+      when map_size(data) == 1 and stage in @progress_stages,
+      do: true
 
   def annotation?("agent-action", %{"turn" => turn, "kind" => kind} = data)
       when map_size(data) == 2 and is_integer(turn) and turn >= 0 and turn <= 127 and
@@ -66,6 +83,23 @@ defmodule PtcRunner.Kernel.SafeMetadata do
       do: true
 
   def annotation?(_type, _data), do: false
+
+  @spec failure_taxonomy(term()) :: map()
+  @doc """
+  Projects an explicit failure value to bounded, payload-free taxonomy.
+
+  Known framework categories remain readable. An application-defined category
+  is represented only by a stable fingerprint, so repeated failures can be
+  grouped without putting the caller's value into a public error or trace.
+  Values without a scalar `kind` field produce no public taxonomy.
+  """
+  def failure_taxonomy(value) when is_map(value) and not is_struct(value) do
+    value
+    |> fetch_failure_kind()
+    |> normalize_failure_kind()
+  end
+
+  def failure_taxonomy(_value), do: %{}
 
   @spec fingerprint(binary()) :: binary()
   @doc "Returns the canonical non-reversible fingerprint for one bounded identifier."
@@ -76,6 +110,38 @@ defmodule PtcRunner.Kernel.SafeMetadata do
       "sha256:" <> (:crypto.hash(:sha256, value) |> Base.encode16(case: :lower))
     end
   end
+
+  defp fetch_failure_kind(value) do
+    Enum.find_value(value, fn {key, kind} ->
+      if metadata_name(key) == "kind", do: kind
+    end)
+  end
+
+  defp metadata_name(%PtcRunner.Lisp.Keyword{name: name}), do: name
+  defp metadata_name(value) when is_atom(value), do: Atom.to_string(value)
+  defp metadata_name(value) when is_binary(value), do: value
+  defp metadata_name(_value), do: nil
+
+  defp normalize_failure_kind(%PtcRunner.Lisp.Keyword{name: kind}),
+    do: normalize_failure_kind(kind)
+
+  defp normalize_failure_kind(kind) when is_atom(kind),
+    do: kind |> Atom.to_string() |> normalize_failure_kind()
+
+  defp normalize_failure_kind(kind)
+       when is_binary(kind) and byte_size(kind) in 1..256 do
+    if String.valid?(kind) do
+      normalized = String.replace(kind, "_", "-")
+
+      if normalized in @failure_kinds,
+        do: %{failure_kind: normalized},
+        else: %{failure_kind_fingerprint: fingerprint("failure-kind:" <> kind)}
+    else
+      %{}
+    end
+  end
+
+  defp normalize_failure_kind(_kind), do: %{}
 
   defp valid_label_inputs?(labels) do
     Enum.all?(Map.take(labels, ~w(name model provider)), fn {_key, value} ->

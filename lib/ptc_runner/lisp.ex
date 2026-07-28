@@ -1363,6 +1363,7 @@ defmodule PtcRunner.Lisp do
       signature: nil,
       usage: nil,
       turns: nil,
+      failure_origin: ctx.failure_origin,
       prints: effects.prints,
       tool_calls: cleaned_tool_calls,
       pmap_calls: cleaned_pmap_calls,

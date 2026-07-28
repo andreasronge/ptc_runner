@@ -407,7 +407,7 @@ defmodule PtcRunner.Lisp.Format do
 
     case limit do
       :infinity ->
-        {inspect(s), false}
+        {inspect(s, printable_limit: :infinity), false}
 
       n when is_integer(n) ->
         total = String.length(s)

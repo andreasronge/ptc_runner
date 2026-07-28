@@ -105,9 +105,41 @@ defmodule PtcRunner.Kernel.MissionInventory do
        {:object,
         [
           {"schema_version", 2},
+          {"namespaces", model_namespaces(mission)},
           {"entries", Enum.sort_by(entries, &entry_form/1)},
           {"limits", limit_projection(limits)}
         ]}}
+    end
+  end
+
+  # A facade's own docstring states the contract its functions share — which
+  # source is authoritative, how cursors behave, what a citation must carry.
+  # Only per-function docs used to reach the model, so that guidance had to be
+  # restated in every task prompt, and the copies drifted. The namespace states
+  # it once and the model reads it from the same place the code declares it.
+  defp model_namespaces(%{bundle: %{prelude: prelude}}) do
+    prompt_namespaces =
+      prelude
+      |> Prelude.prompt_exports()
+      |> MapSet.new(&namespace_of/1)
+
+    prelude.metadata
+    |> Map.get(:namespaces, %{})
+    |> Enum.filter(fn {name, meta} ->
+      MapSet.member?(prompt_namespaces, name) and is_binary(Map.get(meta, :doc))
+    end)
+    |> Enum.sort_by(&elem(&1, 0))
+    |> Enum.map(fn {name, meta} ->
+      {:object, [{"namespace", name}, {"doc", meta.doc}]}
+    end)
+  end
+
+  defp model_namespaces(_mission), do: []
+
+  defp namespace_of(%Export{ref: ref}) do
+    case String.split(ref, "/", parts: 2) do
+      [namespace, _rest] -> namespace
+      _other -> ref
     end
   end
 

@@ -256,8 +256,20 @@ if Code.ensure_loaded?(ReqLLM) do
       {messages, extra_opts} = apply_caching(model_id, messages, cache_enabled)
       extra_opts = apply_bedrock_region(model_id, extra_opts)
 
+      generation_opts =
+        req
+        |> request_opts()
+        |> Keyword.take([
+          :api_key,
+          :max_tokens,
+          :provider_options,
+          :seed,
+          :temperature
+        ])
+
       req_opts =
-        [receive_timeout: @default_timeout]
+        [receive_timeout: req[:receive_timeout] || @default_timeout]
+        |> Keyword.merge(generation_opts)
         |> Keyword.merge(extra_opts)
 
       case ReqLLM.Generation.stream_text(model_id, messages, req_opts) do
@@ -306,6 +318,7 @@ if Code.ensure_loaded?(ReqLLM) do
         :provider_options,
         :receive_timeout,
         :req_http_options,
+        :seed,
         :temperature,
         :tool_choice
       ])
@@ -320,8 +333,14 @@ if Code.ensure_loaded?(ReqLLM) do
 
       Logger.debug("Calling Ollama: #{model}")
 
+      options =
+        opts
+        |> Keyword.take([:temperature, :seed])
+        |> Enum.into(%{})
+        |> maybe_put_ollama_max_tokens(opts)
+
       case Req.post("#{base_url}/api/generate",
-             json: %{model: model, prompt: prompt, stream: false},
+             json: %{model: model, prompt: prompt, stream: false, options: options},
              receive_timeout: timeout
            ) do
         {:ok, %{status: 200, body: %{"response" => text} = body}} ->
@@ -341,7 +360,7 @@ if Code.ensure_loaded?(ReqLLM) do
 
     defp call_openai_compat(base_url, model, messages, opts) do
       timeout = Keyword.get(opts, :receive_timeout, @default_timeout)
-      generation_opts = Keyword.take(opts, [:max_tokens, :temperature])
+      generation_opts = Keyword.take(opts, [:max_tokens, :seed, :temperature])
 
       formatted_messages =
         Enum.map(messages, fn msg ->
@@ -381,7 +400,14 @@ if Code.ensure_loaded?(ReqLLM) do
       cache_enabled = Keyword.get(opts, :cache, false)
 
       generation_opts =
-        Keyword.take(opts, [:api_key, :max_tokens, :provider_options, :temperature, :tool_choice])
+        Keyword.take(opts, [
+          :api_key,
+          :max_tokens,
+          :provider_options,
+          :seed,
+          :temperature,
+          :tool_choice
+        ])
 
       {messages, extra_opts} = apply_caching(model, messages, cache_enabled)
       extra_opts = apply_bedrock_region(model, extra_opts)
@@ -411,7 +437,14 @@ if Code.ensure_loaded?(ReqLLM) do
       cache_enabled = Keyword.get(opts, :cache, false)
 
       generation_opts =
-        Keyword.take(opts, [:api_key, :max_tokens, :provider_options, :temperature, :tool_choice])
+        Keyword.take(opts, [
+          :api_key,
+          :max_tokens,
+          :provider_options,
+          :seed,
+          :temperature,
+          :tool_choice
+        ])
 
       {messages, extra_opts} = apply_caching(model, messages, cache_enabled)
       extra_opts = apply_bedrock_region(model, extra_opts)
@@ -440,7 +473,14 @@ if Code.ensure_loaded?(ReqLLM) do
       cache_enabled = Keyword.get(opts, :cache, false)
 
       generation_opts =
-        Keyword.take(opts, [:api_key, :max_tokens, :provider_options, :temperature, :tool_choice])
+        Keyword.take(opts, [
+          :api_key,
+          :max_tokens,
+          :provider_options,
+          :seed,
+          :temperature,
+          :tool_choice
+        ])
 
       {messages, extra_opts} = apply_caching(model, messages, cache_enabled)
       extra_opts = apply_bedrock_region(model, extra_opts)
@@ -785,6 +825,13 @@ if Code.ensure_loaded?(ReqLLM) do
         input: body["prompt_eval_count"] || 0,
         output: body["eval_count"] || 0
       }
+    end
+
+    defp maybe_put_ollama_max_tokens(options, opts) do
+      case Keyword.fetch(opts, :max_tokens) do
+        {:ok, max_tokens} -> Map.put(options, :num_predict, max_tokens)
+        :error -> options
+      end
     end
 
     defp add_cache_fields(tokens) do

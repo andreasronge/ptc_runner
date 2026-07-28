@@ -199,7 +199,11 @@ defmodule PtcRunner.Kernel.RuntimeTools do
         {:error, :event_sink_error} -> %{status: :error, kind: :event_sink_error}
       end
     else
-      protocol_error(state, :invalid_workflow_annotation)
+      %{
+        status: :error,
+        kind: :invalid_annotation,
+        reason: :invalid_workflow_annotation
+      }
     end
   end
 

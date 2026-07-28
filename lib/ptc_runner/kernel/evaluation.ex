@@ -9,12 +9,18 @@ defmodule PtcRunner.Kernel.Evaluation do
 
   An ordinary successful value is projected as `:continued`; an explicit
   `(return value)` is projected as `:returned`; and `(fail value)` is projected
-  as `:failed`. Continued and returned evaluations atomically commit native
-  memory and exact bounded history before exposing only an inert public value.
-  Continued results additionally expose bounded chronological prints for the
-  next agent turn. Runtime-tool results use the strict `:kernel_json`
-  projection and reject ambiguous collections. The log-analysis session opts
-  into the preserving `:public` projection because it formats an Elixir
+  as `:failed`. Failed results report whether capability activity occurred,
+  whether the failure value is the exact result of the last recorded capability
+  call, and whether correcting the program is effect-safe. The latter says only
+  that the evaluation performed no write or unknown effect; callers combine all
+  three facts with the bounded failure shape before requesting a correction.
+
+  Continued and returned evaluations atomically commit native memory and exact
+  bounded history before exposing only an inert public value. Continued results
+  additionally expose bounded chronological prints for the next agent turn.
+  Runtime-tool results use the strict `:kernel_json` projection and reject
+  ambiguous collections. Code-owned analysis sessions opt into the preserving
+  `:public` projection because their trusted frontend formats an Elixir
   observation rather than returning JSON to workflow Lisp.
   """
 
@@ -285,30 +291,25 @@ defmodule PtcRunner.Kernel.Evaluation do
       link: true
     ]
 
-    mission_calls_before = mission_capability_call_count(state)
+    mission_calls_before = mission_capability_calls(state)
 
     case Lisp.run_native(source, options) do
       {:ok, %{return: {:__ptc_fail__, value}} = step} ->
-        :ok = RunState.release_evaluation(state, lease)
-
-        case Lisp.project_boundary_value(value, projection_boundary) do
-          {:ok, projected} ->
-            %{
-              outcome: :failed,
-              value: projected,
-              prints: Map.get(step, :prints, []),
-              continuation_effect: :preserved
-            }
-
-          {:error, reason} ->
-            projection_failure(step, reason)
-        end
+        release_explicit_failure(
+          state,
+          environment,
+          lease,
+          step,
+          value,
+          mission_calls_before,
+          projection_boundary
+        )
 
       {:ok, step} ->
         commit_result(state, lease, history, step, projection_boundary)
 
       {:error, step} ->
-        release_failure(state, lease, step, mission_calls_before)
+        release_failure(state, environment, lease, step, mission_calls_before)
     end
   end
 
@@ -421,10 +422,49 @@ defmodule PtcRunner.Kernel.Evaluation do
   defp history_after_success(history, {:__ptc_return__, _value}), do: history
   defp history_after_success(history, value), do: Enum.take(history ++ [value], -3)
 
-  defp release_failure(state, lease, step, mission_calls_before) do
-    capability_activity? =
-      mission_capability_call_count(state) > mission_calls_before or
-        evaluator_capability_activity?(step)
+  defp release_explicit_failure(
+         state,
+         environment,
+         lease,
+         step,
+         value,
+         mission_calls_before,
+         projection_boundary
+       ) do
+    {capability_activity?, unsafe_activity?} =
+      evaluation_activity(state, environment, step, mission_calls_before)
+
+    capability_failure? = capability_failure?(step, value)
+
+    :ok = RunState.release_evaluation(state, lease)
+
+    case Lisp.project_boundary_value(value, projection_boundary) do
+      {:ok, projected} ->
+        %{
+          outcome: :failed,
+          value: projected,
+          prints: Map.get(step, :prints, []),
+          continuation_effect: :preserved,
+          capability_activity?: capability_activity?,
+          capability_failure?: capability_failure?,
+          retryable?: not unsafe_activity?
+        }
+
+      {:error, reason} ->
+        projection_failure(step, reason)
+    end
+  end
+
+  defp release_failure(state, environment, lease, step, mission_calls_before) do
+    # Retryability asks a narrower question than "did anything happen": it asks
+    # whether repeating the program could repeat an effect the Kernel cannot undo.
+    # A program that read three pages and then exhausted its heap committed
+    # nothing, so refusing the retry only spends the agent's remaining turns
+    # protecting state that was never mutated. Effects are declared by the host
+    # installation, and anything not declared `:read` — including `:unknown` —
+    # counts as unsafe, so an undeclared capability keeps the old behaviour.
+    {capability_activity?, unsafe_activity?} =
+      evaluation_activity(state, environment, step, mission_calls_before)
 
     :ok = RunState.release_evaluation(state, lease)
 
@@ -442,10 +482,22 @@ defmodule PtcRunner.Kernel.Evaluation do
       continuation_effect: :preserved
     }
 
-    case evaluation_retryable(step, capability_activity?) do
+    case evaluation_retryable(step, unsafe_activity?) do
       retryable? when is_boolean(retryable?) -> Map.put(result, :retryable?, retryable?)
       nil -> result
     end
+  end
+
+  defp evaluation_activity(state, environment, step, mission_calls_before) do
+    capability_activity? =
+      mission_capability_call_count(state) > call_total(mission_calls_before) or
+        evaluator_capability_activity?(step)
+
+    unsafe_activity? =
+      unsafe_capability_activity?(state, environment, mission_calls_before) or
+        unsafe_ledger_activity?(environment, step)
+
+    {capability_activity?, unsafe_activity?}
   end
 
   defp evaluation_retryable(_step, true), do: false
@@ -457,7 +509,37 @@ defmodule PtcRunner.Kernel.Evaluation do
        when phase in [:input, :output],
        do: true
 
+  # A resource kill says the query was too big, not that the world changed.
+  defp evaluation_retryable(%{fail: %{reason: reason}}, false)
+       when reason in [:memory_exceeded, :timeout, :parallel_capacity_exceeded],
+       do: true
+
+  # Any other failure with no unsafe effect: the program was wrong and nothing
+  # the Kernel cannot undo was committed, so the loop's correction path applies.
+  # Treating a read as activity that forbids a retry made that path unreachable
+  # for any agent whose work begins by reading its evidence.
   defp evaluation_retryable(_step, false), do: nil
+
+  # The counter path sees installed capabilities; the ledger also sees reserved
+  # runtime routes, which are not capabilities and declare no effect. Both are
+  # reads of frozen or in-process state, so they are named here rather than
+  # falling through to "undeclared, therefore unsafe".
+  defp unsafe_ledger_activity?(environment, step) do
+    step
+    |> Map.get(:tool_calls, [])
+    |> List.wrap()
+    |> Enum.any?(fn call ->
+      case Map.get(call, :name) do
+        name when is_binary(name) -> not read_only_tool?(environment, name)
+        _other -> true
+      end
+    end)
+  end
+
+  defp read_only_tool?(environment, name) do
+    read_only_capability?(environment, name) or
+      name in RuntimeTools.mission_contract_descriptor()["routes"]
+  end
 
   defp evaluator_capability_activity?(step) do
     tool_calls = Map.get(step, :tool_calls, [])
@@ -469,12 +551,50 @@ defmodule PtcRunner.Kernel.Evaluation do
     ledger_activity? or marker_activity?
   end
 
-  defp mission_capability_call_count(state) do
+  # An explicit failure is a capability failure only when evaluator provenance
+  # says that a direct tool call or `cap/unwrap!` produced the control signal,
+  # and the value matches the last recorded result. Merely rebuilding an equal
+  # error-shaped map after a read cannot turn a deliberate failure into a
+  # correction request.
+  defp capability_failure?(step, value) do
+    Map.get(step, :failure_origin) == :capability and
+      step
+      |> Map.get(:tool_calls, [])
+      |> List.wrap()
+      |> List.last()
+      |> case do
+        %{error: nil, result: result} -> result === value
+        _other -> false
+      end
+  end
+
+  defp mission_capability_call_count(state), do: call_total(mission_capability_calls(state))
+
+  defp mission_capability_calls(state) do
     state
     |> RunState.usage()
     |> get_in([:capability_calls, :mission])
-    |> Map.values()
-    |> Enum.sum()
+    |> Kernel.||(%{})
+  end
+
+  defp call_total(calls), do: calls |> Map.values() |> Enum.sum()
+
+  # A capability counts as unsafe unless the installation declared it `:read`.
+  # Names are compared against the frozen environment rather than the call
+  # ledger, so a capability that vanished cannot be assumed harmless.
+  defp unsafe_capability_activity?(state, environment, before) do
+    state
+    |> mission_capability_calls()
+    |> Enum.any?(fn {name, count} ->
+      count > Map.get(before, name, 0) and not read_only_capability?(environment, name)
+    end)
+  end
+
+  defp read_only_capability?(environment, name) do
+    case Map.fetch(environment.capabilities, name) do
+      {:ok, %{effect: :read}} -> true
+      _other -> false
+    end
   end
 
   defp mission_tools(environment, state, timeout_ms, event_sink, inspection_sink) do

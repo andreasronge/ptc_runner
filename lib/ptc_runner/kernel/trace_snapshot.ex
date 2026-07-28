@@ -3,6 +3,8 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
 
   use GenServer
 
+  alias PtcRunner.Kernel.InspectionArtifact
+  alias PtcRunner.Kernel.SafeMetadata
   alias PtcRunner.Kernel.TraceLog
   alias PtcRunner.Lisp.RetainedSize
 
@@ -18,7 +20,16 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
 
   @opaque t :: %__MODULE__{pid: pid(), token: reference()}
 
-  @spec start({:directory, binary()}, keyword()) :: {:ok, t()} | {:error, atom()}
+  @type retained_limit_error ::
+          {:source_retained_limit_exceeded,
+           %{
+             source: :ptc_trace_snapshot,
+             measured_bytes: pos_integer(),
+             limit_bytes: pos_integer()
+           }}
+
+  @spec start({:directory, binary()}, keyword()) ::
+          {:ok, t()} | {:error, atom() | retained_limit_error()}
   def start(source, opts \\ [])
 
   def start({:directory, directory}, opts) when is_binary(directory) and is_list(opts) do
@@ -59,6 +70,7 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
               max_directory_entries, max_trace_files, capture_hook, listing_hook}
            ) do
         {:ok, pid} -> {:ok, %__MODULE__{pid: pid, token: token}}
+        {:error, {:source_retained_limit_exceeded, _details} = reason} -> {:error, reason}
         {:error, reason} when is_atom(reason) -> {:error, reason}
         {:error, _reason} -> {:error, :source_unavailable}
       end
@@ -80,6 +92,13 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
   @spec info(t()) :: {:ok, map()} | {:error, atom()}
   def info(%__MODULE__{} = snapshot), do: call(snapshot, :info)
   def info(_snapshot), do: {:error, :invalid_snapshot}
+
+  @doc false
+  @spec validate_inspection(t(), [map()]) :: :ok | {:error, atom()}
+  def validate_inspection(%__MODULE__{} = snapshot, records) when is_list(records),
+    do: call(snapshot, {:validate_inspection, records})
+
+  def validate_inspection(_snapshot, _records), do: {:error, :invalid_snapshot}
 
   @doc false
   @spec transfer_owner(t(), pid()) :: :ok | {:error, atom()}
@@ -143,18 +162,31 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
     do: {:reply, {:ok, state.info}, state}
 
   def handle_call({token, {:query, operation, arguments}}, _from, %{token: token} = state) do
-    result =
-      TraceLog.query_loaded(
+    {:reply, query_with_snapshot_hash(state, operation, arguments), state}
+  end
+
+  def handle_call(
+        {token,
+         {:validate_inspection, [%{"run_id" => run_id, "trace_id" => trace_id} | _] = records}},
+        _from,
+        %{token: token} = state
+      ) do
+    matching_identity? =
+      Enum.any?(
         state.events,
-        state.source_id,
-        operation,
-        arguments,
-        state.max_result_bytes,
-        :sanitized
+        &(&1["run_id"] == run_id and &1["trace_id"] == trace_id)
       )
+
+    result =
+      if matching_identity?,
+        do: InspectionArtifact.validate_correlations(records, state.events),
+        else: {:error, :inspection_correlation_missing}
 
     {:reply, result, state}
   end
+
+  def handle_call({token, {:validate_inspection, _records}}, _from, %{token: token} = state),
+    do: {:reply, {:error, :inspection_correlation_missing}, state}
 
   def handle_call({token, :stop}, _from, %{token: token} = state),
     do: {:stop, :normal, :ok, state}
@@ -220,11 +252,18 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
              listing_hook: listing_hook
            ),
          retained_bytes when is_integer(retained_bytes) and retained_bytes <= max_retained_bytes <-
-           RetainedSize.bytes_with_cap(capture.events, max_retained_bytes) do
-      {:ok, capture, retained_bytes}
+           RetainedSize.bytes(capture.events) do
+      retained_capture = %{capture | events: RetainedSize.detach_binaries(capture.events)}
+      {:ok, retained_capture, retained_bytes}
     else
       retained_bytes when is_integer(retained_bytes) ->
-        {:error, :source_retained_limit_exceeded}
+        {:error,
+         {:source_retained_limit_exceeded,
+          %{
+            source: :ptc_trace_snapshot,
+            measured_bytes: retained_bytes,
+            limit_bytes: max_retained_bytes
+          }}}
 
       :oversized ->
         {:error, :source_retained_limit_exceeded}
@@ -283,10 +322,33 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
         capture_id: capture.source_id,
         captured_at: DateTime.utc_now(),
         run_count: capture.events |> MapSet.new(& &1["run_id"]) |> MapSet.size(),
+        snapshot_hash: SafeMetadata.fingerprint(capture.source_id),
         source_bytes: capture.source_bytes,
         retained_bytes: retained_bytes
       }
     }
+  end
+
+  defp query_with_snapshot_hash(state, operation, arguments) do
+    snapshot_hash = state.info.snapshot_hash
+    metadata_bytes = byte_size(Jason.encode!(%{"snapshot_hash" => snapshot_hash}))
+    query_bytes = state.max_result_bytes - metadata_bytes
+
+    if query_bytes > 0 do
+      case TraceLog.query_loaded(
+             state.events,
+             state.source_id,
+             operation,
+             arguments,
+             query_bytes,
+             :sanitized
+           ) do
+        {:ok, result} -> {:ok, Map.put(result, "snapshot_hash", snapshot_hash)}
+        {:error, _reason} = error -> error
+      end
+    else
+      {:error, :result_limit_exceeded}
+    end
   end
 
   defp redact_status(status) do

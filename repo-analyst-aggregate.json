@@ -1,0 +1,38 @@
+{
+  "$schema": "./priv/schemas/ptc-application-manifest.schema.json",
+  "version": 1,
+  "workflow": {
+    "components": [
+      {
+        "id": "evaluation.plan",
+        "path": "repo-analyst/evaluation.plan.clj"
+      },
+      {
+        "id": "aggregate",
+        "path": "repo-analyst/aggregate.clj",
+        "dependencies": [
+          "evaluation.plan"
+        ]
+      }
+    ],
+    "entry": "aggregate/run"
+  },
+  "mission": {
+    "components": [],
+    "data": {}
+  },
+  "input": {
+    "path": "repo-analyst/aggregate-input.json"
+  },
+  "contracts": {
+    "input_schema": {
+      "path": "repo-analyst/trials.schema.json"
+    },
+    "result_schema": {
+      "path": "repo-analyst/evaluation.schema.json"
+    }
+  },
+  "limits": {
+    "run_duration_ms": 60000
+  }
+}

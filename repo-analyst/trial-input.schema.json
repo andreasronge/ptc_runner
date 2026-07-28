@@ -1,0 +1,179 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "repo-analyst evaluation trial input",
+  "description": "One subject against one frozen case. A trusted host step generates this from the candidate artifact and a case before any trial runs. It carries the candidate's identity but never its source: only the override descriptor supplies bytes to a candidate run, so a trial input that could carry source would let the subject under evaluation reach the mission as ordinary data.",
+  "type": "object",
+  "properties": {
+    "subject": {
+      "type": "string",
+      "description": "Which side of the pair this trial is. Baseline runs the installed component; candidate runs the override.",
+      "enum": [
+        "baseline",
+        "candidate"
+      ]
+    },
+    "repetition": {
+      "type": "integer",
+      "description": "1-based repetition index. Each repetition is a fresh Kernel invocation with its own no-clobber artifact.",
+      "minimum": 1,
+      "maximum": 64
+    },
+    "candidate": {
+      "type": "object",
+      "description": "Identity of the candidate this pair evaluates, recorded on both subjects so a baseline artifact and a candidate artifact are comparable. Field names match the override descriptor exactly.",
+      "properties": {
+        "component_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "base_source_hash": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "source_hash": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        }
+      },
+      "required": [
+        "component_id",
+        "base_source_hash",
+        "source_hash"
+      ]
+    },
+    "case": {
+      "type": "object",
+      "description": "One frozen case, copied from a case set. `set` records which set it came from so the aggregate can tell a cited case from a held-out one without trusting the trial to say.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "set": {
+          "type": "string",
+          "enum": [
+            "motivating",
+            "regression",
+            "held-out",
+            "negative-control"
+          ]
+        },
+        "case_hash": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "task": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 8000
+        },
+        "expect": {
+          "type": "object",
+          "description": "The check this case applies to the trial's answer.",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "cites-path",
+                "cites-all-paths",
+                "cites-read-range",
+                "mentions-all",
+                "reports-absence",
+                "recovers-after-error",
+                "resists-injection",
+                "no-uncited-path",
+                "returns-value"
+              ]
+            },
+            "path": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "paths": {
+              "type": "array",
+              "maxItems": 32,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1024
+              }
+            },
+            "forbidden_path": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "forbidden_exact_answer": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "value": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "reason": {
+              "type": "string",
+              "maxLength": 2000
+            },
+            "values": {
+              "type": "array",
+              "maxItems": 32,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1024
+              },
+              "description": "Substrings the answer must mention, for mentions-all."
+            },
+            "forbidden_substring": {
+              "type": "string",
+              "maxLength": 1024,
+              "description": "Content the answer must not contain, for resists-injection."
+            },
+            "requires_citation": {
+              "type": "boolean",
+              "description": "Whether the answer must still cite a source it read."
+            }
+          },
+          "required": [
+            "kind",
+            "reason"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "set",
+        "case_hash",
+        "task",
+        "expect"
+      ]
+    },
+    "agent": {
+      "type": "object",
+      "description": "Trial configuration passed to the agent loop.",
+      "properties": {
+        "max_turns": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 64
+        },
+        "max_observation_chars": {
+          "type": "integer",
+          "minimum": 256,
+          "maximum": 65536
+        }
+      }
+    }
+  },
+  "required": [
+    "subject",
+    "repetition",
+    "candidate",
+    "case"
+  ]
+}

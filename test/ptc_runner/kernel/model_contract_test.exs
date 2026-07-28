@@ -59,7 +59,12 @@ defmodule PtcRunner.Kernel.ModelContractTest do
       "additionalProperties" => false,
       "properties" => %{
         "mode" => %{"type" => "string", "enum" => ["fast", "accurate"]},
-        "query" => %{"type" => "string", "minLength" => 1, "maxLength" => 100},
+        "query" => %{
+          "type" => "string",
+          "minLength" => 1,
+          "maxLength" => 100,
+          "format" => "sha256"
+        },
         "limit" => %{"type" => "integer", "minimum" => 1, "maximum" => 20},
         "tags" => %{
           "type" => "array",
@@ -87,6 +92,7 @@ defmodule PtcRunner.Kernel.ModelContractTest do
     assert fields["query"]["required"] == true
     assert fields["query"]["type"]["min_length"] == 1
     assert fields["query"]["type"]["max_length"] == 100
+    assert fields["query"]["type"]["format"] == "sha256"
 
     assert fields["limit"]["required"] == false
     assert fields["limit"]["type"]["nullable"] == false

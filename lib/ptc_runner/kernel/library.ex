@@ -3,8 +3,31 @@ defmodule PtcRunner.Kernel.Library do
   Shipped PTC-Lisp libraries as explicit Kernel components.
 
   Available component IDs are `kernel`, `runtime`, `cap`, `workflow.event`,
-  `fs`, `llm`, `agent.native`, `agent.core`, `agent.feedback`, `agent.retry`,
-  `agent.prompt`, `result`, and `log.core`.
+  `llm`, `agent.native`, `agent.core`, `agent.feedback`, `agent.retry`,
+  `agent.prompt`, `agent.main`, `result`, `log.core`, and `inspection.core`.
+
+  `agent.main` is a generic entry wrapper: a manifest names `agent.main/run`
+  and supplies `task` and `agent` through input, instead of every application
+  repeating the same `agent.core` call. It is domain-blind by construction —
+  it forwards two input keys and never learns what the task is about. It
+  selects `agent.core`'s raw-result mode so a manifest contract describes the
+  application value directly; callers of `agent.core/run` retain its explicit
+  `%{"ok" => true, "value" => value}` success envelope by default.
+  `agent.core/run-value` is the composable variant: it returns the same
+  model-authored value to its PTC-Lisp caller without terminating the outer
+  workflow, allowing an evaluator to judge the answer before returning.
+
+  `cap` is `:discoverable` rather than `:prompt`. Its `unwrap!` and
+  `with-cursor` helpers compose capability envelopes for other libraries and
+  are not something a generated program should be prompted to call, so they
+  stay out of the prompt inventory. `unwrap!` fails the program on an error
+  envelope rather than returning it, so a forgotten check cannot turn a
+  provider error into ordinary data; `with-cursor` adds one opaque cursor to
+  an argument map and leaves traversal to the caller.
+
+  Fetching a component does not expand its dependencies. `PtcRunner.Kernel`
+  refuses to compile an incomplete set, so a manifest selecting `agent.main`
+  must also carry the `agent.core` closure.
 
   Fetching a component grants no capability. The host still compiles the
   selected closed component set and supplies the capabilities required by its
@@ -17,42 +40,45 @@ defmodule PtcRunner.Kernel.Library do
   @runtime_path Path.expand("../../../priv/preludes/kernel/runtime.clj", __DIR__)
   @cap_path Path.expand("../../../priv/preludes/kernel/cap.clj", __DIR__)
   @workflow_event_path Path.expand("../../../priv/preludes/kernel/workflow.event.clj", __DIR__)
-  @fs_path Path.expand("../../../priv/preludes/kernel/fs.clj", __DIR__)
   @llm_path Path.expand("../../../priv/preludes/kernel/llm.clj", __DIR__)
   @agent_native_path Path.expand("../../../priv/preludes/kernel/agent.native.clj", __DIR__)
   @agent_prompt_path Path.expand("../../../priv/preludes/kernel/agent.prompt.clj", __DIR__)
   @agent_core_path Path.expand("../../../priv/preludes/kernel/agent.core.clj", __DIR__)
+  @agent_main_path Path.expand("../../../priv/preludes/kernel/agent.main.clj", __DIR__)
   @agent_feedback_path Path.expand("../../../priv/preludes/kernel/agent.feedback.clj", __DIR__)
   @agent_retry_path Path.expand("../../../priv/preludes/kernel/agent.retry.clj", __DIR__)
   @result_path Path.expand("../../../priv/preludes/kernel/result.clj", __DIR__)
   @log_core_path Path.expand("../../../priv/preludes/kernel/log.core.clj", __DIR__)
+  @inspection_core_path Path.expand("../../../priv/preludes/kernel/inspection.core.clj", __DIR__)
   @external_resource @kernel_path
   @external_resource @runtime_path
   @external_resource @cap_path
   @external_resource @workflow_event_path
-  @external_resource @fs_path
   @external_resource @llm_path
   @external_resource @agent_native_path
   @external_resource @agent_prompt_path
   @external_resource @agent_core_path
+  @external_resource @agent_main_path
   @external_resource @agent_feedback_path
   @external_resource @agent_retry_path
   @external_resource @result_path
   @external_resource @log_core_path
+  @external_resource @inspection_core_path
   @sources %{
     "kernel" => File.read!(@kernel_path),
     "runtime" => File.read!(@runtime_path),
     "cap" => File.read!(@cap_path),
     "workflow.event" => File.read!(@workflow_event_path),
-    "fs" => File.read!(@fs_path),
     "llm" => File.read!(@llm_path),
     "agent.native" => File.read!(@agent_native_path),
     "agent.prompt" => File.read!(@agent_prompt_path),
     "agent.core" => File.read!(@agent_core_path),
+    "agent.main" => File.read!(@agent_main_path),
     "agent.feedback" => File.read!(@agent_feedback_path),
     "agent.retry" => File.read!(@agent_retry_path),
     "result" => File.read!(@result_path),
-    "log.core" => File.read!(@log_core_path)
+    "log.core" => File.read!(@log_core_path),
+    "inspection.core" => File.read!(@inspection_core_path)
   }
   @dependencies %{
     "agent.prompt" => ["kernel"],
@@ -65,7 +91,8 @@ defmodule PtcRunner.Kernel.Library do
       "llm",
       "result",
       "workflow.event"
-    ]
+    ],
+    "agent.main" => ["agent.core"]
   }
 
   @spec component(binary()) :: {:ok, Component.t()} | {:error, :unknown_library}

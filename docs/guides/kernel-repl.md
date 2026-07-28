@@ -1,12 +1,14 @@
 # Kernel REPL
 
-`mix ptc.repl` provides two deliberately different PTC-Lisp session modes:
+`mix ptc.repl` provides deliberately different PTC-Lisp session modes:
 
 - direct and manifest-backed sessions are workflow scratchpads;
 - `log-analysis-v1` is a fixed mission session for querying an immutable
-  capture of canonical traces.
+  capture of canonical traces; and
+- `inspection-analysis-v1` is a fixed private mission session for correlating
+  canonical traces with exact private inspection evidence.
 
-Both modes retain successful definitions and exact `*1`, `*2`, and `*3`
+All modes retain successful definitions and exact `*1`, `*2`, and `*3`
 history for one command. Failed forms preserve the previously committed state.
 A successful evaluation is installed before its terminal event is recorded; if
 that fail-closed event write fails, the returned session reflects the committed
@@ -40,23 +42,17 @@ The direct REPL does not accept an ambient capability catalog or arbitrary
 profile configuration. Providers and component sources are selected only by
 the manifest and trusted provider registry.
 
-Elixir hosts using `PtcRunner.Kernel.ReplSession` directly must keep each
-session in the process that created it. That process performs every evaluation
-and the final close or abort. Sending the struct to another process does not
-transfer its continuation or cleanup authority; `eval/2`, `close/1`, and
-`abort/2` return `{:error, :session_owner_mismatch}` without changing the
-session. The public value contains an opaque ID resolved through a shared table
-only the creator can read; closed entries are deleted. It contains no owner PID,
-token, continuation value, or raw run-state, configuration, sink, or provider
-capability. The internal owner binds the run state to the configured event and
-optional inspection sinks. Each `eval/2` result is an inert observation
-projection; its memory is not the authoritative continuation and must not be
-threaded back into the session.
-Preflight errors preserve that committed public memory view, and projection is
-validated before continuation commit. Each bounded worker starts a small
-monitor-only watchdog before running the workload. The watchdog cancels the
-worker when the creator exits, without changing its trap-exit behavior or
-holding an unbounded workload copy, before retained resources are closed.
+An interactive session also accepts a few meta-commands:
+
+```text
+:doc <name>       Show core function documentation
+:find <pattern>   Search the available function surface
+:help             List the session commands
+```
+
+The full language surface is in the
+[PTC-Lisp specification](../ptc-lisp-specification.md) and
+[function reference](../function-reference.md).
 
 Every workflow session emits canonical Kernel events. Persist them as bounded,
 append-only JSONL with:
@@ -130,6 +126,60 @@ mix ptc.repl \
 close it. A terminal deadline or Kernel budget prevents later forms; normal
 close still finalizes the session trace with the authoritative terminal reason.
 
+## Private inspection mission sessions
+
+Use the private profile only on an attached terminal, and explicitly authorize
+that terminal as the private result sink:
+
+```bash
+mix ptc.repl \
+  --profile inspection-analysis-v1 \
+  --resource traces=tmp/tutorial-traces \
+  --resource inspection=tmp/tutorial-inspection \
+  --session-trace-dir tmp/analysis-traces \
+  --private-terminal
+```
+
+The profile checks both terminal attachment and `--private-terminal` before it
+opens either source directory. Its `traces`, `inspection`, and analysis-trace
+directories must be physically separate, including through ancestors and
+symlink aliases. Inspection capture validates every private artifact against
+the corresponding run in the immutable canonical trace capture; malformed,
+replaced, uncorrelated, or oversized input rejects the whole private source.
+
+`inspection-analysis-v1` installs only `log.core` and `inspection.core`.
+Alongside the ordinary `log/*` functions, it exports:
+
+- `inspection/runs`;
+- `inspection/model-exchanges`;
+- `inspection/capability-calls`;
+- `inspection/generated-sources`;
+- `inspection/effective-preludes`; and
+- `inspection/provider-exchanges`.
+
+All collection functions are bounded and return an opaque `next_cursor` for a
+later page. For example:
+
+```clojure
+(def runs (inspection/runs {"limit" 20}))
+(def run-id (get (first (get runs "items")) "run_id"))
+(inspection/model-exchanges run-id nil)
+(inspection/generated-sources run-id nil)
+(inspection/provider-exchanges run-id nil)
+```
+
+Exact model messages, generated source, capability arguments/results,
+effective preludes, and MCP request/response bodies may appear on the
+authorized terminal. They are private data: do not paste or redirect them to a
+public sink.
+
+The initial private frontend is intentionally interactive-only. It rejects
+`--eval`, `--load`, positional scripts, stdin, `--format jsonl`, and
+`--continue-on-error`. Its separate canonical analysis trace records only safe
+profile identity, hashes, sizes, timing, outcomes, and usage. It never records
+the evaluated REPL source, returned private value, prints, or retained REPL
+history.
+
 ### Separate analysis traces
 
 Terminal profile sessions never write their analysis trace into the captured
@@ -172,7 +222,7 @@ and, when their corresponding lifecycle stage is reached, appear in this order:
 
 1. one `session-started` record after successful session construction;
 2. one `evaluation` record per accepted source, containing `index`,
-   `input_kind`, and the bounded `LogAnalysisSession` result projection;
+   `input_kind`, and the bounded `AnalysisSession` result projection;
 3. one `session-closed` record only after successful close and persistence,
    containing the persisted `trace_path`;
 4. a final `command-error` for an unsuccessful command, with category `cli`, `setup`,
@@ -217,5 +267,17 @@ The description lists the required resource, component, namespace,
 capabilities, fixed limits, and policies. It contains no path, snapshot,
 callback, process identifier, source, or credential.
 
-For a manifest entry run rather than a REPL session, use
-`mix ptc.run MANIFEST --trace PATH`.
+## Next steps
+
+- [Running and debugging](running-and-debugging.md) owns the run command,
+  result shape, trace capture, private inspection capture, and the Viewer. For
+  a manifest entry run rather than a REPL session, use
+  `mix ptc.run MANIFEST --trace PATH`.
+- [Manifests and capabilities](manifests-and-capabilities.md) documents the
+  manifest that `--manifest` sessions attach to, and the trace and inspection
+  snapshot providers these profiles read.
+- [Components and preludes](components-and-preludes.md) explains the `log.core`
+  and `inspection.core` components these profiles install, and how to package
+  your own analysis functions the same way.
+- Hosts driving `PtcRunner.Kernel.ReplSession` programmatically should read
+  [Embedding in Elixir](embedding-in-elixir.md) for its ownership rules.

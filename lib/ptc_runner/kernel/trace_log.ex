@@ -5,11 +5,14 @@ defmodule PtcRunner.Kernel.TraceLog do
   A source is an in-memory `PtcRunner.Kernel.EventSink`, one JSONL file, or a
   directory of JSONL files. Loading validates the complete event envelope,
   schema version, JSON-like data, run/trace identity, timestamps, and monotonic
-  sequence before deriving query results.
+  sequence before deriving query results. Each run must begin with exactly one
+  `run-started`; it may remain open or end with exactly one final
+  `run-stopped`.
 
   Supported query operations are:
 
-  - `:list_runs` — bounded filtered run summaries;
+  - `:list_runs` — bounded filtered run summaries, including the run-started
+    sequence and component-override provenance;
   - `:get_run` — one run summary by run ID;
   - `:list_turns` — ordered evaluation/capability facts for one run;
   - `:counters` — aggregate counters for filtered runs.
@@ -229,7 +232,7 @@ defmodule PtcRunner.Kernel.TraceLog do
          max_bytes when is_integer(max_bytes) and max_bytes > 0 <-
            Keyword.get(opts, :max_source_bytes, @default_source_bytes),
          private? when is_boolean(private?) <- Keyword.get(opts, :private, false),
-         true <- private_path?(path) == private? do
+         :ok <- validate_append_path(path, private?) do
       path = Path.expand(path)
 
       :global.trans({{__MODULE__, {:append, path}}, self()}, fn ->
@@ -243,6 +246,30 @@ defmodule PtcRunner.Kernel.TraceLog do
   end
 
   def append_jsonl(_path, _events, _opts), do: {:error, :invalid_trace_log}
+
+  @doc false
+  @spec validate_append_path(term(), term()) :: :ok | {:error, atom()}
+  def validate_append_path(path, private?)
+      when is_binary(path) and is_boolean(private?) do
+    cond do
+      not String.valid?(path) ->
+        {:error, :invalid_trace_path}
+
+      not String.ends_with?(path, ".jsonl") or inspection_path?(path) ->
+        {:error, :invalid_trace_path}
+
+      private? and not private_path?(path) ->
+        {:error, :private_trace_requires_private_suffix}
+
+      not private? and private_path?(path) ->
+        {:error, :normal_trace_requires_normal_suffix}
+
+      true ->
+        :ok
+    end
+  end
+
+  def validate_append_path(_path, _private?), do: {:error, :invalid_trace_path}
 
   defp with_append_lock(path, callback, attempts \\ 3)
 
@@ -1489,7 +1516,7 @@ defmodule PtcRunner.Kernel.TraceLog do
   end
 
   defp validate_events(events) do
-    initial = %{sequences: %{}, run_traces: %{}, trace_runs: %{}}
+    initial = %{sequences: %{}, run_traces: %{}, trace_runs: %{}, run_lifecycles: %{}}
 
     Enum.reduce_while(events, {:ok, initial}, fn event, {:ok, state} ->
       with :ok <- validate_event(event),
@@ -1498,13 +1525,16 @@ defmodule PtcRunner.Kernel.TraceLog do
            sequence = event["sequence"],
            previous = Map.get(state.sequences, trace_id, 0),
            true <- sequence > previous,
-           :ok <- same_identity(state, run_id, trace_id) do
+           :ok <- same_identity(state, run_id, trace_id),
+           {:ok, run_lifecycles} <-
+             advance_run_lifecycle(state.run_lifecycles, run_id, event["type"]) do
         {:cont,
          {:ok,
           %{
             sequences: Map.put(state.sequences, trace_id, sequence),
             run_traces: Map.put(state.run_traces, run_id, trace_id),
-            trace_runs: Map.put(state.trace_runs, trace_id, run_id)
+            trace_runs: Map.put(state.trace_runs, trace_id, run_id),
+            run_lifecycles: run_lifecycles
           }}}
       else
         {:error, reason} -> {:halt, {:error, reason}}
@@ -1512,8 +1542,30 @@ defmodule PtcRunner.Kernel.TraceLog do
       end
     end)
     |> case do
-      {:ok, _sequences} -> :ok
-      {:error, _reason} = error -> error
+      {:ok, _state} ->
+        :ok
+
+      {:error, _reason} = error ->
+        error
+    end
+  end
+
+  defp advance_run_lifecycle(run_lifecycles, run_id, type) do
+    case {Map.get(run_lifecycles, run_id), type} do
+      {nil, "run-started"} ->
+        {:ok, Map.put(run_lifecycles, run_id, :open)}
+
+      {:open, "run-stopped"} ->
+        {:ok, Map.put(run_lifecycles, run_id, :stopped)}
+
+      {:open, "run-started"} ->
+        {:error, :malformed_source}
+
+      {:open, _type} ->
+        {:ok, run_lifecycles}
+
+      {_lifecycle, _type} ->
+        {:error, :malformed_source}
     end
   end
 
@@ -1588,8 +1640,10 @@ defmodule PtcRunner.Kernel.TraceLog do
       "mission_inventory_bytes" => event_data(started, "mission_inventory_bytes"),
       "mission_model_context_hash" => event_data(started, "mission_model_context_hash"),
       "mission_model_context_bytes" => event_data(started, "mission_model_context_bytes"),
+      "component_overrides" => event_data(started, "component_overrides", []),
       "connector_snapshots" => event_data(started, "connector_snapshots", []),
       "session_profile" => event_data(started, "session_profile"),
+      "positions" => event_positions(started),
       "complete" => not is_nil(stopped),
       "truncated" => Enum.any?(events, &(&1["type"] == "events-dropped")),
       "schema_version" => 1,
@@ -1602,6 +1656,11 @@ defmodule PtcRunner.Kernel.TraceLog do
   # layer never invents missing edges.
   defp empty_prelude,
     do: %{"component_ids" => [], "dependency_indices" => [], "hash" => nil}
+
+  defp event_positions(%{"sequence" => sequence}) when is_integer(sequence) and sequence > 0,
+    do: [sequence]
+
+  defp event_positions(_event), do: []
 
   defp filter_runs(items, arguments) do
     Enum.filter(items, fn item ->

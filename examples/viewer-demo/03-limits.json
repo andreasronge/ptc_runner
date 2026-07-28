@@ -36,27 +36,15 @@
   },
   "providers": {
     "workflow": [
-      {
-        "name": "llm",
-        "config": {
-          "model": "deepseek",
-          "cache": true
-        }
-      }
+      {"name": "deepseek"}
     ],
     "mission": [
-      {
-        "name": "file-read",
-        "config": {
-          "root": "files",
-          "max_bytes": 65536
-        }
-      }
+      {"name": "workspace"}
     ]
   },
   "labels": {
     "name": "viewer-demo-limits",
-    "model": "deepseek",
+    "model": "openrouter:deepseek/deepseek-v4-flash",
     "provider": "openrouter",
     "tags": {
       "mode": "agent"

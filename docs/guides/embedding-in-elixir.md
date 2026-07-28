@@ -61,17 +61,53 @@ event path in a web controller or job worker.
 Custom provider builders are trusted Elixir functions registered through
 `PtcRunner.Kernel.ProviderRegistry.new/1`. A manifest may select their bounded
 public names and JSON configuration, but it cannot provide executable callback
-code.
+code. Register a builder only for authority the five built-in sources cannot
+express; [Host configuration](host-configuration.md) covers what a plain
+operator document already installs.
 
 Builders receive the canonical manifest directory, target environment,
 construction owner, effective limits, and installed ceilings. They may return
-capabilities, a safe connector snapshot, and an idempotent close function. The
-Kernel owns cleanup across success, failure, timeout, cancellation, and owner
-death.
+capabilities and a safe connector snapshot, plus an idempotent close function
+when the provider owns live resources. The Kernel owns cleanup across success,
+failure, timeout, cancellation, and owner death. Every close function must
+return exactly `:ok`; another return, an exception, or an exit is reported as
+`:provider_cleanup_failed` and can replace a completed run with the terminal
+`:provider_cleanup_error` outcome. Cleanup still attempts every registered
+resource. `ReplSession.close/1` and `abort/2` return
+`{:error, :provider_cleanup_failed, events}` when that failure follows a
+successfully frozen terminal batch; persist those canonical events before
+surfacing the cleanup error.
 
 Keep credentials, endpoints, native handles, and close functions out of
 capability results, PTC-Lisp data, prompts, canonical events, and inspection
 records.
+
+## Drive REPL sessions programmatically
+
+The interactive sessions described in the [Kernel REPL guide](kernel-repl.md)
+are also available through `PtcRunner.Kernel.ReplSession`. Each session must
+stay in the process that created it. That process performs every evaluation and
+the final close or abort. Sending the struct to another process does not
+transfer its continuation or cleanup authority; `eval/2`, `close/1`, and
+`abort/2` return `{:error, :session_owner_mismatch}` without changing the
+session.
+
+The public value contains an opaque ID resolved through a shared table only the
+creator can read; closed entries are deleted. It contains no owner PID, token,
+continuation value, or raw run-state, configuration, sink, or provider
+capability. The internal owner binds the run state to the configured event and
+optional inspection sinks. Each `eval/2` result is an inert observation
+projection; its memory is not the authoritative continuation and must not be
+threaded back into the session. Preflight errors preserve the committed public
+memory view, and projection is validated before continuation commit.
+
+If provider cleanup fails after terminal finalization, `close/1` and `abort/2`
+return `{:error, :provider_cleanup_failed, events}` so the host can persist the
+frozen batch before reporting the error. The Mix frontend does this for normal
+closure and exception-driven aborts. Each bounded worker starts a small
+monitor-only watchdog before running the workload. The watchdog cancels the
+worker when the creator exits, without changing its trap-exit behavior or
+holding an unbounded workload copy, before retained resources are closed.
 
 ## Preserve the product boundary
 
@@ -80,6 +116,17 @@ model-turn logic, retries, delegation, feedback, and task orchestration in
 PTC-Lisp unless the behavior establishes native authority or enforces the
 sandbox boundary.
 
-The [Kernel maintainer guide](kernel-maintainer.md) maps construction,
-ownership, lifecycle, observability, and extension points. Exact contracts live
-beside the public `PtcRunner.Kernel.*` modules.
+## Next steps
+
+- [Manifests and capabilities](manifests-and-capabilities.md) defines the
+  strict manifest contract `RunBuilder` implements, so an embedded frontend
+  accepts the same projects as `mix ptc.run`.
+- [Host configuration](host-configuration.md) defines the operator document
+  `HostConfig` loads and `HostInstallation` turns into a provider registry.
+- [Components and preludes](components-and-preludes.md) covers the bundle
+  compiler that `compile_bundle/1` runs.
+- [Running and debugging](running-and-debugging.md) documents the trace and
+  inspection artifacts an embedded event sink produces.
+- The [Kernel maintainer guide](kernel-maintainer.md) maps construction,
+  ownership, lifecycle, observability, and extension points. Exact contracts
+  live beside the public `PtcRunner.Kernel.*` modules.

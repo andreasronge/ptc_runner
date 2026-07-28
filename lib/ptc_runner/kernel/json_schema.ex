@@ -3,20 +3,22 @@ defmodule PtcRunner.Kernel.JSONSchema do
   Internal compiler for the bounded capability JSON Schema profile.
 
   The accepted profile is a strict subset of JSON Schema 2020-12 containing
-  `type`, `title`, `description`, `properties`, `required`,
+  `type`, `title`, `description`, `default`, `properties`, `required`,
   `additionalProperties`, `items`, `enum`, `const`, `minimum`, `maximum`,
-  `minLength`, `maxLength`, `minItems`, and `maxItems`. Types are scalar rather
-  than unions, roots are objects, and a missing `additionalProperties` on an
-  object is normalized to `false`.
+  `minLength`, `maxLength`, `minItems`, `maxItems`, and the single bounded
+  `sha256` string format. Types are scalar rather than unions, roots are
+  objects, and a missing `additionalProperties` on an object is normalized to
+  `false`.
 
   `$schema` selects the schema dialect; absence means the MCP default
   (2020-12). Because the accepted profile is a common subset of the
   allowlisted dialects, a supported root `$schema` URI (2020-12, or draft-07
   as a deliberate compatibility translation) is accepted and removed, while
   unknown, malformed, and nested dialect markers are rejected. Vendor `x-…`
-  extension keys are discarded from every level as a deliberate client
-  policy — mainstream MCP SDKs emit them by default. Neither reaches
-  normalized output, encodings, or hashes. All other unknown keywords remain
+  extension keys and the standard non-validating `default` annotation are
+  discarded from every level as a deliberate client policy — mainstream MCP
+  SDKs emit them by default. They do not reach normalized output, encodings,
+  hashes, or runtime argument construction. All other unknown keywords remain
   rejected.
 
   Each normalized schema is at most 64 KiB with maximum depth 16, 128
@@ -26,9 +28,10 @@ defmodule PtcRunner.Kernel.JSONSchema do
   """
 
   alias PtcRunner.Kernel.DeterministicJSON
+  alias PtcRunner.Kernel.JSONSchema.SHA256Format
   alias PtcRunner.Kernel.JSONValue
 
-  @allowed ~w(type title description properties required additionalProperties items enum const minimum maximum minLength maxLength minItems maxItems)
+  @allowed ~w(type title description properties required additionalProperties items enum const minimum maximum minLength maxLength minItems maxItems format)
   @types ~w(null boolean object array number integer string)
   @max_schema_bytes 65_536
   @max_depth 16
@@ -50,7 +53,7 @@ defmodule PtcRunner.Kernel.JSONSchema do
          {:ok, encoded} <- DeterministicJSON.encode(normalized),
          true <- byte_size(encoded) <= @max_schema_bytes,
          {:ok, root} <-
-           JSV.build(normalized, atoms: false, formats: false, warnings: :silent) do
+           JSV.build(normalized, atoms: false, formats: [SHA256Format], warnings: :silent) do
       {:ok, normalized, root}
     else
       _reason -> {:error, :invalid_schema}
@@ -80,6 +83,7 @@ defmodule PtcRunner.Kernel.JSONSchema do
          :ok <- validate_number_bounds(schema),
          :ok <- validate_size_bounds(schema, "minLength", "maxLength"),
          :ok <- validate_size_bounds(schema, "minItems", "maxItems"),
+         :ok <- validate_format(schema, type),
          :ok <- validate_const(schema),
          :ok <- validate_enum(schema),
          {:ok, properties} <- normalize_properties(schema, type, depth),
@@ -111,11 +115,14 @@ defmodule PtcRunner.Kernel.JSONSchema do
     end
   end
 
-  # Vendor "x-…" extension keys are discarded as deliberate client policy;
-  # mainstream MCP SDKs emit them by default and this profile assigns them
-  # no semantics. Unsupported semantic keywords remain rejected.
+  # Vendor "x-…" extension keys and JSON Schema's non-validating "default"
+  # annotation are discarded as deliberate client policy; mainstream MCP SDKs
+  # emit them by default and this profile assigns them no runtime semantics.
+  # Unsupported semantic keywords remain rejected.
   defp drop_ignored_annotations(schema) do
-    Map.reject(schema, fn {key, _value} -> String.starts_with?(key, "x-") end)
+    Map.reject(schema, fn {key, _value} ->
+      key == "default" or String.starts_with?(key, "x-")
+    end)
   end
 
   defp normalize_properties(schema, "object", depth) do
@@ -232,6 +239,20 @@ defmodule PtcRunner.Kernel.JSONSchema do
       true ->
         :ok
     end
+  end
+
+  defp validate_format(schema, "string") do
+    case Map.fetch(schema, "format") do
+      :error -> :ok
+      {:ok, "sha256"} -> :ok
+      {:ok, _format} -> {:error, :invalid_schema}
+    end
+  end
+
+  defp validate_format(schema, _type) do
+    if Map.has_key?(schema, "format"),
+      do: {:error, :invalid_schema},
+      else: :ok
   end
 
   defp validate_size_bounds(schema, minimum_key, maximum_key) do

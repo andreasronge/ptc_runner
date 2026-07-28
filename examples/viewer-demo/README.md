@@ -16,8 +16,10 @@ examples/viewer-demo/run.sh            # outputs to tmp/viewer-demo
 examples/viewer-demo/run.sh /path/out  # or an explicit directory
 ```
 
-The script regenerates the granted `files/` root, runs each journey with
-`--trace` and `--inspect`, and prints a `mix ptc.viewer` command. The viewer
+The script regenerates the granted `files/` root, launches the committed
+filesystem MCP sample through `ptc-host.json`, runs each journey with `--trace`
+and `--inspect`, and prints a `mix ptc.viewer` command. Node.js is required,
+but the committed bundle needs no package installation. The viewer
 pins exactly one inspection artifact per instance — pick the journey whose
 private payloads you want to inspect; the other runs still render their
 sanitized transcripts.
@@ -27,7 +29,7 @@ sanitized transcripts.
 | Journey | Design | Viewer surfaces exercised |
 | --- | --- | --- |
 | `01-recovery` | The task names `demo.files/parse-lines`, which does not exist, then instructs recovery via `demo.files/read-text`. Expect an `:unbound_var` evaluation error, a tool-role correction message, and a successful second turn. | Multi-turn dialogue, error feedback then recovery, source-hash verification, ok status. |
-| `02-bulk` | The task calls `demo.files/sum-values`, which itself reads `index.txt` plus all 30 listed record files (31 `fs-read` calls, just under the installed per-name quota of 32) and computes a sum the model cannot fabricate (3255). | Long capability lists in the transcript, per-call private payloads, deterministic bulk event volume (~76 events), ok status. |
+| `02-bulk` | The task calls `demo.files/sum-values`, which itself reads `index.txt` plus all 30 listed record files (31 `workspace.read` calls, just under the installed per-name quota of 32) and computes a sum the model cannot fabricate (3255). | Long capability lists in the transcript, per-call private payloads, deterministic bulk event volume (~76 events), ok status. |
 | `03-limits` | Same task, but the manifest lowers `mission_capability_calls_per_name` to 6, so `sum-values` exhausts the quota mid-evaluation and the model receives the failure as feedback. | `limit-exceeded` events, error feedback turns, quota-error envelopes in private payloads. |
 | `04-loop-limit` | The task calls `demo.files/spin-forever`, an unbounded `loop`/`recur`, which hits the evaluator's deterministic loop-iteration bound. | Error-outcome runs in the picker, `:loop_limit_exceeded` feedback turns, `explicit_failure` terminal reason. |
 | `05-memory` | The task calls `demo.files/exhaust-memory`, which doubles a string until the in-evaluator heap budget rejects it. | `:memory_exceeded` error feedback, error-outcome run, heap-budget message in the dialogue. |

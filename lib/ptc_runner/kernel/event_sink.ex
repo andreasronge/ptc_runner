@@ -31,6 +31,8 @@ defmodule PtcRunner.Kernel.EventSink do
 
   @drop_count_limit 4_294_967_295
   @max_drop_type String.duplicate("e", 128)
+  @maximum_terminal_reason String.duplicate("r", 1_020)
+  @stop_timeout_ms 5_000
 
   @enforce_keys [:pid, :token, :policy]
   defstruct [:pid, :token, :policy, fail_closed?: false]
@@ -106,14 +108,62 @@ defmodule PtcRunner.Kernel.EventSink do
 
   @doc false
   @spec begin(t(), map()) :: :ok | {:error, :event_sink_error}
-  def begin(%__MODULE__{} = sink, data) when is_map(data), do: call(sink, {:begin, data})
+  def begin(%__MODULE__{} = sink, data) when is_map(data) do
+    case claim(sink, make_ref(), data) do
+      {:error, reason}
+      when reason in [:event_sink_already_claimed, :event_sink_claimed_by_other] ->
+        {:error, :event_sink_error}
+
+      result ->
+        result
+    end
+  end
+
   def begin(_sink, _data), do: {:error, :event_sink_error}
+
+  @doc false
+  @spec claim(t(), reference(), map()) ::
+          :ok
+          | {:error,
+             :event_sink_error
+             | :event_sink_already_claimed
+             | :event_sink_claimed_by_other}
+  def claim(%__MODULE__{} = sink, claim_id, data)
+      when is_reference(claim_id) and is_map(data),
+      do: call(sink, {:begin, claim_id, data})
+
+  def claim(_sink, _claim_id, _data), do: {:error, :event_sink_error}
 
   @doc false
   def begin_capacity?(%__MODULE__{} = sink, data) when is_map(data),
     do: call(sink, {:begin_capacity?, data}) == true
 
   def begin_capacity?(_sink, _data), do: false
+
+  @doc false
+  def terminal_usage_capacity?(
+        %__MODULE__{policy: policy},
+        %Limits{} = limits,
+        usage
+      )
+      when policy in [:normal, :private] and is_map(usage) do
+    dropped = if policy == :normal, do: maximum_dropped(), else: %{}
+
+    usage = Map.put(usage, :events_dropped, dropped)
+
+    [
+      %{outcome: :error, reason: @maximum_terminal_reason, usage: usage},
+      %{
+        outcome: :ok,
+        reason: nil,
+        result_hash: "sha256:" <> String.duplicate("f", 64),
+        usage: usage
+      }
+    ]
+    |> Enum.all?(&EventSinkState.payload_within_limit?(&1, limits.event_payload_bytes))
+  end
+
+  def terminal_usage_capacity?(_sink, _limits, _usage), do: false
 
   @spec events(t()) :: [map()]
   @doc "Returns retained canonical events in sequence order."
@@ -170,12 +220,31 @@ defmodule PtcRunner.Kernel.EventSink do
   @spec owner?(t()) :: boolean()
   def owner?(sink), do: call(sink, :owner?) == true
 
+  @doc false
+  @spec owner(t()) :: {:ok, pid()} | {:error, :event_sink_error}
+  def owner(sink), do: call(sink, :owner)
+
   @spec stop(t()) :: :ok
   @doc "Stops the sink. Calling it after owner-driven shutdown is harmless."
-  def stop(sink) do
-    GenServer.stop(sink.pid, :normal)
-  catch
-    :exit, _reason -> :ok
+  def stop(sink), do: stop(sink, @stop_timeout_ms)
+
+  @doc false
+  @spec stop(t(), timeout()) :: :ok
+  def stop(sink, timeout) do
+    ref = Process.monitor(sink.pid)
+
+    try do
+      try do
+        GenServer.stop(sink.pid, :normal, timeout)
+      catch
+        :exit, _reason -> :ok
+      end
+
+      if Process.alive?(sink.pid), do: Process.exit(sink.pid, :kill)
+      await_stop(ref, sink.pid, timeout)
+    after
+      Process.demonitor(ref, [:flush])
+    end
   end
 
   @impl GenServer
@@ -187,6 +256,9 @@ defmodule PtcRunner.Kernel.EventSink do
   end
 
   @impl GenServer
+  def handle_call({token, :owner}, _from, %{token: token} = state),
+    do: {:reply, {:ok, state.owner}, state}
+
   def handle_call({token, :owner?}, {caller, _tag}, %{token: token} = state),
     do: {:reply, caller == state.owner, state}
 
@@ -215,14 +287,21 @@ defmodule PtcRunner.Kernel.EventSink do
   defp terminal_payload_capacity?(:private, _limits, _reserve), do: true
 
   defp terminal_payload_capacity?(:normal, limits, _reserve) do
-    dropped =
-      1..16
-      |> Map.new(&{"#{@max_drop_type}#{&1}", @drop_count_limit})
-      |> Map.put("$overflow", @drop_count_limit)
+    dropped = maximum_dropped()
 
     terminal_payloads = [
-      %{counts: dropped},
-      %{outcome: :error, reason: :event_sink_error, usage: %{events_dropped: dropped}}
+      %{"counts" => dropped},
+      %{
+        "outcome" => "error",
+        "reason" => @maximum_terminal_reason,
+        "usage" => %{"events_dropped" => dropped}
+      },
+      %{
+        "outcome" => "ok",
+        "reason" => nil,
+        "result_hash" => "sha256:" <> String.duplicate("f", 64),
+        "usage" => %{"events_dropped" => dropped}
+      }
     ]
 
     Enum.all?(terminal_payloads, fn payload ->
@@ -231,6 +310,12 @@ defmodule PtcRunner.Kernel.EventSink do
         :oversized -> false
       end
     end)
+  end
+
+  defp maximum_dropped do
+    1..16
+    |> Map.new(&{"#{@max_drop_type}#{&1}", @drop_count_limit})
+    |> Map.put("$overflow", @drop_count_limit)
   end
 
   defp terminal_envelope_bytes(type) do
@@ -249,6 +334,14 @@ defmodule PtcRunner.Kernel.EventSink do
 
   defp valid_id?(value),
     do: is_binary(value) and byte_size(value) in 1..256 and String.valid?(value)
+
+  defp await_stop(ref, pid, timeout) do
+    receive do
+      {:DOWN, ^ref, :process, ^pid, _reason} -> :ok
+    after
+      timeout -> :ok
+    end
+  end
 
   defp call(%__MODULE__{pid: pid, token: token}, request) do
     GenServer.call(pid, {token, request})

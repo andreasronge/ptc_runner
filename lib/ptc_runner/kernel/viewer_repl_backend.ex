@@ -561,18 +561,32 @@ defmodule PtcRunner.Kernel.ViewerReplBackend do
   defp normalize_result({:error, reason}) when is_atom(reason), do: {:error, reason}
   defp normalize_result(_result), do: {:error, :adapter_failure}
 
-  defp normalize_start_error(reason)
-       when reason in [
-              :source_changed,
-              :source_limit_exceeded,
-              :source_retained_limit_exceeded,
-              :malformed_source,
-              :unsupported_version,
-              :source_unavailable
-            ],
-       do: reason
+  @doc false
+  @spec normalize_start_error(term()) :: atom()
+  def normalize_start_error(reason)
+      when reason in [
+             :source_changed,
+             :source_limit_exceeded,
+             :source_retained_limit_exceeded,
+             :malformed_source,
+             :unsupported_version,
+             :source_unavailable
+           ],
+      do: reason
 
-  defp normalize_start_error(_reason), do: :repl_start_failed
+  def normalize_start_error(
+        {:source_retained_limit_exceeded,
+         %{
+           source: :ptc_trace_snapshot,
+           measured_bytes: measured_bytes,
+           limit_bytes: limit_bytes
+         } = details}
+      )
+      when map_size(details) == 3 and is_integer(measured_bytes) and measured_bytes > 0 and
+             is_integer(limit_bytes) and limit_bytes > 0,
+      do: :source_retained_limit_exceeded
+
+  def normalize_start_error(_reason), do: :repl_start_failed
 
   defp reply_callers(callers, result), do: Enum.each(callers, &GenServer.reply(&1, result))
 

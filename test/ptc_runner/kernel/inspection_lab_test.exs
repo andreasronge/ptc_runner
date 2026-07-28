@@ -24,11 +24,10 @@ defmodule PtcRunner.Kernel.InspectionLabTest do
 
     for journey <- [direct, wrapper] do
       assert {:ok, records} = InspectionArtifact.load(journey.inspection)
-      assert File.read!(journey.trace) =~ "mcp-2025-11-25"
+      assert File.read!(journey.trace) =~ "mcp-2026-07-28"
 
       inspection_body = File.read!(journey.inspection)
       refute inspection_body =~ "127.0.0.1"
-      refute inspection_body =~ "inspection-lab-session"
       refute inspection_body =~ "mcp-session-id"
 
       assert Enum.any?(records, fn record ->
@@ -64,8 +63,10 @@ defmodule PtcRunner.Kernel.InspectionLabTest do
 
       assert Enum.any?(records, fn record ->
                record["record_type"] == "capability-output" and
-                 record["payload"]["name"] == "fs-read" and
-                 get_in(record, ["payload", "result", "value", "content"]) == "fixture-file"
+                 record["payload"]["name"] == "filesystem.read" and
+                 get_in(record, ["payload", "result", "value", "lines"]) == [
+                   %{"line" => 1, "text" => "fixture-file"}
+                 ]
              end)
 
       assert Enum.any?(records, fn record ->
@@ -167,8 +168,8 @@ defmodule PtcRunner.Kernel.InspectionLabTest do
     wrapper_request = model_request(wrapper.inspection)
     refute direct_request["system"] =~ "lab.tools/read-file"
     assert wrapper_request["system"] =~ "lab.tools/read-file"
-    assert direct_request["system"] =~ ~S|Call: (tool/fs-read {"path" path})|
-    refute wrapper_request["system"] =~ ~S|Call: (tool/fs-read {"path" path})|
+    assert direct_request["system"] =~ ~S|Call: (tool/filesystem.read {"path" path})|
+    refute wrapper_request["system"] =~ ~S|Call: (tool/filesystem.read {"path" path})|
   end
 
   defp model_request(path) do

@@ -15,6 +15,10 @@ defmodule PtcRunner.Kernel.Manifest do
         },
         "mission": {"components": [], "data": {}},
         "input": {"value": {}},
+        "contracts": {
+          "input_schema": {"path": "input.schema.json"},
+          "result_schema": {"path": "result.schema.json"}
+        },
         "providers": {"workflow": [], "mission": []},
         "limits": {},
         "events": {"policy": "normal"},
@@ -32,15 +36,15 @@ defmodule PtcRunner.Kernel.Manifest do
   collisions fail loading. The workflow `entry` is a qualified function name;
   `PtcRunner.Kernel.RunBuilder` renders the executable entry expression. Input
   contains exactly one of a JSON object in `value` or a manifest-relative JSON
-  file in `path`.
+  file in `path`. Optional manifest-local contracts validate input before
+  provider activity and `Result.value` before publication. Contract schemas
+  use the bounded `PtcRunner.Kernel.ValueContract` profile.
 
   Provider entries contain a bounded `name` and JSON `config`. The manifest can
-  select only builders installed in `PtcRunner.Kernel.ProviderRegistry`.
-  Built-in `file-read` accepts `root`, optional `max_bytes`, and optional
-  `model_visible`, and freezes a bounded immutable file snapshot during
-  assembly; installed MCP providers may accept a `model_visible` subset of
-  their authorized `allow` names. Visibility controls discovery and model
-  context only, never authority.
+  select only builders installed in `PtcRunner.Kernel.ProviderRegistry`; there
+  are no implicit provider names. Installed MCP providers may accept a
+  `model_visible` subset of their authorized `allow` names. Visibility
+  controls discovery and model context only, never authority.
   Limit names match `PtcRunner.Kernel.Limits`; version 1 accepts values no
   greater than the host-supplied installed ceilings. Omitted values use the
   normal runtime defaults, capped by a lower host ceiling. Event policy is
@@ -56,16 +60,18 @@ defmodule PtcRunner.Kernel.Manifest do
 
   alias Jason.OrderedObject
   alias PtcRunner.Kernel.Component
-  alias PtcRunner.Kernel.FileCapability
+  alias PtcRunner.Kernel.ConfinedFile
   alias PtcRunner.Kernel.JSONValue
   alias PtcRunner.Kernel.Library
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.SafeMetadata
+  alias PtcRunner.Kernel.ValueContract
 
   @max_manifest_bytes 1_000_000
   @max_input_bytes 2_000_000
+  @max_contract_bytes 65_536
   @entry ~r/\A[a-z][a-z0-9._-]{0,127}\/[a-z][a-z0-9._?!-]{0,127}\z/
-  @top_keys ~w(version workflow mission input providers limits events labels)
+  @top_keys ~w($schema version workflow mission input contracts providers limits events labels)
 
   @enforce_keys [
     :path,
@@ -74,6 +80,7 @@ defmodule PtcRunner.Kernel.Manifest do
     :mission_components,
     :entry,
     :input,
+    :contracts,
     :mission_data,
     :providers,
     :limits,
@@ -90,6 +97,7 @@ defmodule PtcRunner.Kernel.Manifest do
           mission_components: [Component.t()],
           entry: binary(),
           input: map(),
+          contracts: %{input: ValueContract.t() | nil, result: ValueContract.t() | nil},
           mission_data: map(),
           providers: %{workflow: [map()], mission: [map()]},
           limits: Limits.t(),
@@ -103,16 +111,19 @@ defmodule PtcRunner.Kernel.Manifest do
   def load(path, installed_limits \\ Limits.installed_defaults())
 
   def load(path, %Limits{} = installed_limits) when is_binary(path) do
-    with {:ok, path} <- resolve_absolute(Path.expand(path)),
+    with {:ok, path} <- ConfinedFile.resolve_absolute(Path.expand(path)),
          directory = Path.dirname(path),
          {:ok, source} <- read_relative(directory, Path.basename(path), @max_manifest_bytes),
          {:ok, decoded} <- Jason.decode(source, objects: :ordered_objects),
          {:ok, manifest} <- ordered_map(decoded),
          :ok <- exact_keys(manifest, @top_keys, ~w(version workflow input)),
+         :ok <- optional_schema(manifest["$schema"]),
          1 <- manifest["version"],
          {:ok, workflow} <- workflow(manifest["workflow"], directory),
          {:ok, mission} <- mission(Map.get(manifest, "mission", %{}), directory),
+         {:ok, contracts} <- contracts(Map.get(manifest, "contracts", %{}), directory),
          {:ok, input} <- input(manifest["input"], directory),
+         :ok <- validate_input(contracts.input, input),
          {:ok, providers} <- providers(Map.get(manifest, "providers", %{})),
          {:ok, limits} <- limits(Map.get(manifest, "limits", %{}), installed_limits),
          {:ok, events} <- events(Map.get(manifest, "events", %{})),
@@ -125,6 +136,7 @@ defmodule PtcRunner.Kernel.Manifest do
          mission_components: mission.components,
          entry: workflow.entry,
          input: input,
+         contracts: contracts,
          mission_data: mission.data,
          providers: providers,
          limits: limits,
@@ -141,6 +153,14 @@ defmodule PtcRunner.Kernel.Manifest do
 
   def load(_path, _installed_limits), do: {:error, :invalid_manifest}
 
+  defp optional_schema(nil), do: :ok
+
+  defp optional_schema(value)
+       when is_binary(value) and byte_size(value) in 1..2_048,
+       do: if(String.valid?(value), do: :ok, else: {:error, :invalid_manifest})
+
+  defp optional_schema(_value), do: {:error, :invalid_manifest}
+
   @doc """
   Replaces the decoded input with a manifest-relative JSON object file.
 
@@ -149,6 +169,7 @@ defmodule PtcRunner.Kernel.Manifest do
   @spec override_input(t(), binary()) :: {:ok, t()} | {:error, term()}
   def override_input(%__MODULE__{} = manifest, path) when is_binary(path) do
     with {:ok, value} <- input(%{"path" => path}, manifest.directory),
+         :ok <- validate_input(manifest.contracts.input, value),
          do: {:ok, %{manifest | input: value}}
   end
 
@@ -248,6 +269,41 @@ defmodule PtcRunner.Kernel.Manifest do
   end
 
   defp input(_input, _directory), do: {:error, :invalid_input}
+
+  defp contracts(value, directory) when is_map(value) do
+    with :ok <- exact_keys(value, ~w(input_schema result_schema), []),
+         {:ok, input} <- contract(Map.get(value, "input_schema"), directory),
+         {:ok, result} <- contract(Map.get(value, "result_schema"), directory) do
+      {:ok, %{input: input, result: result}}
+    else
+      {:error, :duplicate_json_key} = error -> error
+      _invalid -> {:error, :invalid_contracts}
+    end
+  end
+
+  defp contracts(_value, _directory), do: {:error, :invalid_contracts}
+
+  defp contract(nil, _directory), do: {:ok, nil}
+
+  defp contract(%{"path" => path} = reference, directory) when is_binary(path) do
+    with :ok <- exact_keys(reference, ~w(path), ~w(path)),
+         {:ok, source} <- read_relative(directory, path, @max_contract_bytes),
+         {:ok, decoded} <- Jason.decode(source, objects: :ordered_objects),
+         {:ok, schema} <- ordered_map(decoded),
+         true <- is_map(schema) and not is_struct(schema) do
+      ValueContract.compile(schema)
+    end
+  end
+
+  defp contract(_reference, _directory), do: {:error, :invalid_contracts}
+
+  defp validate_input(nil, _input), do: :ok
+
+  defp validate_input(%ValueContract{} = contract, input) do
+    if ValueContract.valid?(contract, input),
+      do: :ok,
+      else: {:error, :input_contract_failed}
+  end
 
   defp providers(value) when is_map(value) do
     with :ok <- exact_keys(value, ~w(workflow mission), []),
@@ -381,66 +437,168 @@ defmodule PtcRunner.Kernel.Manifest do
 
   defp ordered_map(value), do: {:ok, value}
 
+  @doc "Returns the generated JSON Schema 2020-12 structural manifest contract."
+  @spec schema() :: map()
+  def schema do
+    %{
+      "$schema" => "https://json-schema.org/draft/2020-12/schema",
+      "$id" => "https://ptc-runner.dev/schemas/ptc-application-manifest.schema.json",
+      "title" => "PtcRunner application manifest",
+      "description" =>
+        "Model-authorable application selection. Runtime loading remains authoritative.",
+      "type" => "object",
+      "additionalProperties" => false,
+      "required" => ["version", "workflow", "input"],
+      "properties" => %{
+        "$schema" => bounded_string(2_048),
+        "version" => %{"const" => 1},
+        "workflow" => workflow_schema(),
+        "mission" => mission_schema(),
+        "input" => input_schema(),
+        "contracts" => contracts_schema(),
+        "providers" => providers_schema(),
+        "limits" => limits_schema(),
+        "events" => events_schema(),
+        "labels" => labels_schema()
+      }
+    }
+  end
+
+  defp workflow_schema do
+    required_object(
+      %{
+        "components" => components_schema(),
+        "entry" => %{
+          "type" => "string",
+          "pattern" => "^[a-z][a-z0-9._-]{0,127}/[a-z][a-z0-9._?!-]{0,127}$"
+        }
+      },
+      ["components", "entry"]
+    )
+  end
+
+  defp mission_schema do
+    closed_object(%{
+      "components" => components_schema(),
+      "data" => %{"type" => "object"}
+    })
+  end
+
+  defp components_schema do
+    %{
+      "type" => "array",
+      "maxItems" => 128,
+      "items" => %{
+        "oneOf" => [
+          required_object(%{"library" => component_id_schema()}, ["library"]),
+          required_object(
+            %{
+              "id" => component_id_schema(),
+              "path" => bounded_string(1_024),
+              "dependencies" => %{
+                "type" => "array",
+                "maxItems" => 128,
+                "uniqueItems" => true,
+                "items" => component_id_schema()
+              }
+            },
+            ["id", "path"]
+          )
+        ]
+      }
+    }
+  end
+
+  defp input_schema do
+    %{
+      "oneOf" => [
+        required_object(%{"value" => %{"type" => "object"}}, ["value"]),
+        required_object(%{"path" => bounded_string(1_024)}, ["path"])
+      ]
+    }
+  end
+
+  defp contracts_schema do
+    reference = required_object(%{"path" => bounded_string(1_024)}, ["path"])
+
+    closed_object(%{
+      "input_schema" => reference,
+      "result_schema" => reference
+    })
+  end
+
+  defp providers_schema do
+    provider =
+      required_object(%{"name" => component_id_schema(), "config" => %{"type" => "object"}}, [
+        "name"
+      ])
+
+    closed_object(%{
+      "workflow" => %{"type" => "array", "maxItems" => 32, "items" => provider},
+      "mission" => %{"type" => "array", "maxItems" => 32, "items" => provider}
+    })
+  end
+
+  defp limits_schema do
+    properties =
+      Limits.defaults()
+      |> Map.from_struct()
+      |> Map.new(fn {name, _value} ->
+        {Atom.to_string(name), %{"type" => "integer", "minimum" => 1}}
+      end)
+
+    closed_object(properties)
+  end
+
+  defp events_schema do
+    closed_object(%{
+      "policy" => %{"enum" => ["normal", "private"], "default" => "normal"},
+      "run_id" => bounded_string(256),
+      "trace_id" => bounded_string(256)
+    })
+  end
+
+  defp labels_schema do
+    identifier = %{
+      "type" => "string",
+      "pattern" => "^(?:[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,255}|sha256:[0-9a-f]{64})$"
+    }
+
+    tags =
+      closed_object(%{
+        "environment" => %{"enum" => ~w(development test staging production)},
+        "mode" => %{"enum" => ~w(agent deterministic direct wrapper repl)},
+        "stage" => %{"enum" => ~w(started planning executing validating completed failed)},
+        "suite" => %{"enum" => ~w(unit integration e2e conformance privacy)}
+      })
+
+    closed_object(%{
+      "name" => identifier,
+      "model" => identifier,
+      "provider" => identifier,
+      "tags" => tags
+    })
+  end
+
+  defp required_object(properties, required) do
+    properties
+    |> closed_object()
+    |> Map.put("required", required)
+  end
+
+  defp closed_object(properties),
+    do: %{"type" => "object", "additionalProperties" => false, "properties" => properties}
+
+  defp bounded_string(max_length),
+    do: %{"type" => "string", "minLength" => 1, "maxLength" => max_length}
+
+  defp component_id_schema,
+    do: %{"type" => "string", "pattern" => "^[a-z][a-z0-9._-]{0,127}$"}
+
   defp read_relative(directory, path, max_bytes) do
-    with true <- is_binary(path),
-         true <- String.valid?(path),
-         true <- byte_size(path) in 1..1_024,
-         {:ok, path} <- resolve_relative(directory, path),
-         {:ok, capability} <- FileCapability.new(root: directory, max_bytes: max_bytes),
-         {:ok, %{"content" => content}} <- capability.callback.(%{"path" => path}) do
-      {:ok, content}
-    else
-      _ -> {:error, :unsafe_or_unreadable_path}
+    case ConfinedFile.read(directory, path, max_bytes) do
+      {:ok, content} -> {:ok, content}
+      {:error, _reason} -> {:error, :unsafe_or_unreadable_path}
     end
-  end
-
-  defp resolve_absolute(path) do
-    relative = Path.relative_to(path, "/")
-
-    case resolve_segments("/", Path.split(relative), 0) do
-      {:ok, relative} -> {:ok, Path.join("/", relative)}
-      error -> error
-    end
-  end
-
-  defp resolve_relative(directory, path),
-    do: resolve_segments(directory, Path.split(path), 0)
-
-  defp resolve_segments(_root, _segments, depth) when depth > 16,
-    do: {:error, :symlink_depth_exceeded}
-
-  defp resolve_segments(root, segments, depth) do
-    Enum.reduce_while(segments, {:ok, {root, []}}, fn segment, {:ok, {parent, consumed}} ->
-      candidate = Path.join(parent, segment)
-
-      case File.lstat(candidate) do
-        {:ok, %{type: :symlink}} ->
-          with {:ok, target} <- File.read_link(candidate),
-               target = Path.expand(target, parent),
-               true <- within_root?(root, target) do
-            remaining = Enum.drop(segments, length(consumed) + 1)
-            target_segments = target |> Path.relative_to(root) |> Path.split()
-            {:halt, resolve_segments(root, target_segments ++ remaining, depth + 1)}
-          else
-            _ -> {:halt, {:error, :symlink_escape}}
-          end
-
-        {:ok, _stat} ->
-          {:cont, {:ok, {candidate, consumed ++ [segment]}}}
-
-        {:error, reason} ->
-          {:halt, {:error, reason}}
-      end
-    end)
-    |> case do
-      {:ok, {resolved, _consumed}} -> {:ok, Path.relative_to(resolved, root)}
-      error -> error
-    end
-  end
-
-  defp within_root?("/", target), do: Path.type(target) == :absolute
-
-  defp within_root?(root, target) do
-    if target == root, do: true, else: String.starts_with?(target, root <> "/")
   end
 end

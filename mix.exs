@@ -91,11 +91,25 @@ defmodule PtcRunner.MixProject do
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
       {:ex_doc, "~> 0.31", only: :dev, runtime: false},
       {:req_llm, "~> 1.8", optional: true},
+      launcher_dep(),
       {:ptc_viewer, path: "ptc_viewer", only: [:test, :dev]},
       {:usage_rules, "~> 1.2", only: :dev, runtime: false},
       {:recon, "~> 2.5", only: [:dev, :test], runtime: false},
       {:benchee, "~> 1.3", only: [:dev, :test], runtime: false}
     ]
+  end
+
+  # Local development exercises the companion from this checkout. Published
+  # package metadata instead carries the compatible optional Hex requirement,
+  # so HTTP-only consumers are not forced to install native support.
+  defp launcher_dep do
+    launcher_path = Path.expand("ptc_runner_launcher", __DIR__)
+
+    if Mix.env() in [:dev, :test] and File.dir?(launcher_path) do
+      {:ptc_runner_launcher, "~> 0.1.0", path: "ptc_runner_launcher", optional: true}
+    else
+      {:ptc_runner_launcher, "~> 0.1.0", optional: true}
+    end
   end
 
   defp aliases do
@@ -109,7 +123,9 @@ defmodule PtcRunner.MixProject do
         "ptc.gen_docs --check",
         "ptc.conformance_report --check-inventory",
         "test --warnings-as-errors",
-        "cmd --cd ptc_viewer mix test --color"
+        "cmd --cd ptc_viewer mix test --color",
+        "cmd --cd ptc_runner_launcher mix precommit",
+        "cmd bash scripts/verify_core_package.sh"
       ],
       # Slower checks kept out of the per-commit loop; run before pushing.
       # PR CI runs these as individual steps. The upstream audit attests all
@@ -135,7 +151,6 @@ defmodule PtcRunner.MixProject do
           PtcRunner.Kernel.Component,
           PtcRunner.Kernel.Error,
           PtcRunner.Kernel.EventSink,
-          PtcRunner.Kernel.FileCapability,
           PtcRunner.Kernel.FrozenBundle,
           PtcRunner.Kernel.InspectionArtifact,
           PtcRunner.Kernel.InspectionSink,
@@ -166,6 +181,7 @@ defmodule PtcRunner.MixProject do
           PtcRunner.Kernel.Events,
           PtcRunner.Kernel.JSONValue,
           PtcRunner.Kernel.JSONSchema,
+          PtcRunner.Kernel.MCPProtocol,
           PtcRunner.Kernel.Program,
           PtcRunner.Kernel.RunState,
           PtcRunner.Kernel.Runner,
@@ -201,16 +217,16 @@ defmodule PtcRunner.MixProject do
           "docs/signature-syntax.md",
           "docs/trace-log-contract.md",
           "docs/conformance/index.md",
-          "docs/guides/capability-prelude.md",
           "docs/guides/getting-started.md",
-          "docs/guides/building-agents.md",
           "docs/guides/manifests-and-capabilities.md",
+          "docs/guides/host-configuration.md",
+          "docs/guides/building-agents.md",
           "docs/guides/running-and-debugging.md",
+          "docs/guides/kernel-repl.md",
+          "docs/guides/components-and-preludes.md",
           "docs/guides/embedding-in-elixir.md",
           "docs/guides/documentation-guidelines.md",
-          "docs/guides/kernel-maintainer.md",
-          "docs/guides/kernel-tutorial.md",
-          "docs/guides/kernel-repl.md"
+          "docs/guides/kernel-maintainer.md"
         ] ++ Path.wildcard("docs/conformance/*-audit.md"),
       groups_for_extras: [
         Maintainers: ~r/docs\/guides\/kernel-maintainer\.md/,
@@ -225,7 +241,7 @@ defmodule PtcRunner.MixProject do
   defp package do
     [
       files:
-        ~w(lib docs examples/kernel-tutorial examples/kernel-inspection-lab .formatter.exs mix.exs README.md LICENSE CHANGELOG.md priv/function_audit.exs priv/functions.exs priv/java_interop.exs priv/java_interop_oracle_cases.exs priv/java_interop_oracle_baseline.json priv/java_oracle_versions.exs priv/preludes priv/spec),
+        ~w(lib docs examples/kernel-tutorial examples/kernel-inspection-lab .formatter.exs mix.exs README.md LICENSE CHANGELOG.md priv/function_audit.exs priv/functions.exs priv/java_interop.exs priv/java_interop_oracle_cases.exs priv/java_interop_oracle_baseline.json priv/java_oracle_versions.exs priv/preludes priv/schemas priv/spec),
       licenses: ["MIT"],
       links: %{
         "GitHub" => "https://github.com/andreasronge/ptc_runner",

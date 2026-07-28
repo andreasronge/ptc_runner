@@ -10,6 +10,7 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.LLMCapability
   alias PtcRunner.Kernel.MissionEnvironment
+  alias PtcRunner.Kernel.ProviderError
   alias PtcRunner.Kernel.RunConfig
   alias PtcRunner.Kernel.WorkflowEnvironment
   alias PtcRunner.Lisp
@@ -69,8 +70,8 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
 
     cases = [
       {valid, "tool-call", nil},
-      {%{"content" => "prose", "tool_calls" => valid["tool_calls"]}, "protocol-error",
-       "assistant-text-with-tool-call"},
+      {%{"content" => "prose", "tool_calls" => valid["tool_calls"]}, "tool-call", nil},
+      {%{"content" => "prose"}, "protocol-error", "assistant-text-without-tool-call"},
       {%{"tool_calls" => valid["tool_calls"] ++ valid["tool_calls"]}, "protocol-error",
        "multiple-or-missing-tool-calls"},
       {%{"tool_calls" => [%{"name" => "wrong", "args" => %{"program" => "x"}}]}, "protocol-error",
@@ -129,6 +130,31 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     assert annotation.data.data == %{"turn" => 0, "kind" => "tool-call"}
     assert_receive {:provider_closed, :terminal_success}
     refute_receive {:provider_closed, :terminal_success}
+  end
+
+  test "agent.main returns the application value without agent.core's success envelope" do
+    response = %{
+      content: nil,
+      tool_calls: [
+        %{
+          id: "call-1",
+          name: "run_ptc_lisp",
+          args: %{"program" => ~S|(return {"answer" 42})|}
+        }
+      ]
+    }
+
+    input = %{
+      "input" => %{
+        "task" => "Return one application value",
+        "agent" => %{"max_turns" => 2}
+      }
+    }
+
+    {:ok, config} = agent_config([response], [], agent_main: true, input: input)
+
+    assert {:ok, %{value: %{"answer" => 42}}} =
+             Kernel.run("(agent.main/run data/input)", config)
   end
 
   test "agent.core persists a defn across a correlated intermediate turn" do
@@ -489,6 +515,78 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
              )
   end
 
+  test "agent.core honors the documented 65536-character observation ceiling" do
+    observation = String.duplicate("x", 70_000)
+
+    {:ok, large_observation} =
+      Capability.new(
+        name: "large-observation",
+        effect: :read,
+        input_schema: %{"type" => "object"},
+        callback: fn _ -> {:ok, observation} end
+      )
+
+    responses = [
+      %{
+        content: nil,
+        tool_calls: [
+          %{
+            id: "observe",
+            name: "run_ptc_lisp",
+            args: %{"program" => ~S|(tool/large-observation {})|}
+          }
+        ]
+      },
+      %{
+        content: nil,
+        tool_calls: [
+          %{id: "done", name: "run_ptc_lisp", args: %{"program" => "(return 42)"}}
+        ]
+      }
+    ]
+
+    {:ok, config} =
+      agent_config(responses, [],
+        prompt_source: tiny_prompt_source(),
+        mission_capabilities: [large_observation]
+      )
+
+    assert {:ok, _result} =
+             Kernel.run(
+               ~S|(agent.core/run "Inspect" {"max_turns" 2 "max_observation_chars" 65536 "max_transcript_chars" 1000000})|,
+               config
+             )
+
+    assert_receive {:agent_request, _first_request}
+    assert_receive {:agent_request, second_request}
+    tool_message = List.last(second_request["messages"])
+
+    assert tool_message["role"] == "tool"
+    assert tool_message["content"] =~ "observation truncated"
+    assert tool_message["content"] |> success_feedback_body() |> String.length() == 65_536
+
+    {:ok, fallback_config} =
+      agent_config(responses, [],
+        prompt_source: tiny_prompt_source(),
+        mission_capabilities: [large_observation]
+      )
+
+    assert {:ok, _result} =
+             Kernel.run(
+               ~S|(agent.core/run "Inspect" {"max_turns" 2 "max_observation_chars" 65537 "max_transcript_chars" 1000000})|,
+               fallback_config
+             )
+
+    assert_receive {:agent_request, _first_request}
+    assert_receive {:agent_request, fallback_request}
+
+    assert fallback_request["messages"]
+           |> List.last()
+           |> Map.fetch!("content")
+           |> success_feedback_body()
+           |> String.length() == 2_048
+  end
+
   @tag :tmp_dir
   test "agent.core bounds the complete encoded request at the exact character ceiling", %{
     tmp_dir: dir
@@ -692,10 +790,9 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
   end
 
   test "agent.core corrects protocol and evaluation errors" do
-    mixed = %{
-      content: "I will explain",
-      tool_calls: [%{id: "bad", name: "run_ptc_lisp", args: %{"program" => "(return 1)"}}]
-    }
+    # Prose alongside a valid call is now accepted, so the protocol error this
+    # exercises is prose arriving *instead of* a call.
+    mixed = %{content: "I will explain", tool_calls: []}
 
     invalid_program = %{
       content: nil,
@@ -788,7 +885,20 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     assert List.last(second["messages"])["content"] =~ "api/double input value"
   end
 
-  test "agent.core does not retry an output contract failure after a capability call" do
+  # Retryability asks whether repeating the program could repeat an effect the
+  # Kernel cannot undo. Every capability a mission can call is declared `:read`
+  # — the host document cannot express anything else — and the reserved runtime
+  # routes read in-process state. Treating those as activity that forbids a
+  # retry made the loop's own correction path unreachable for any agent whose
+  # work begins by reading its evidence.
+  @recovered %{
+    content: nil,
+    tool_calls: [
+      %{id: "recovered", name: "run_ptc_lisp", args: %{"program" => ~S|(return "ok")|}}
+    ]
+  }
+
+  test "agent.core retries an output contract failure after a read-only capability call" do
     response = %{
       content: nil,
       tool_calls: [
@@ -810,19 +920,19 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
       )
 
     {:ok, config} =
-      agent_config([response], [],
+      agent_config([response, @recovered], [],
         mission_source: mission_source,
         mission_capabilities: [touch]
       )
 
-    assert {:error, %{kind: :workflow_failed}} =
-             Kernel.run(~S|(agent.core/run "Do not duplicate" {"max_turns" 3})|, config)
+    assert {:ok, _result} =
+             Kernel.run(~S|(agent.core/run "Correct the shape" {"max_turns" 3})|, config)
 
     assert_receive {:agent_request, _first}
-    refute_receive {:agent_request, _second}
+    assert_receive {:agent_request, _second}
   end
 
-  test "agent.core does not retry after a mission runtime-tool call" do
+  test "agent.core retries after a mission runtime-tool call" do
     response = %{
       content: nil,
       tool_calls: [
@@ -838,19 +948,16 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
       (do (tool/runtime-usage {}) 42))
     """
 
-    {:ok, config} = agent_config([response], [], mission_source: mission_source)
+    {:ok, config} = agent_config([response, @recovered], [], mission_source: mission_source)
 
-    assert {:error, %{kind: :workflow_failed}} =
-             Kernel.run(
-               ~S|(agent.core/run "Do not repeat runtime reads" {"max_turns" 3})|,
-               config
-             )
+    assert {:ok, _result} =
+             Kernel.run(~S|(agent.core/run "Correct the shape" {"max_turns" 3})|, config)
 
     assert_receive {:agent_request, _first}
-    refute_receive {:agent_request, _second}
+    assert_receive {:agent_request, _second}
   end
 
-  test "agent.core does not retry an ordinary runtime error after a capability call" do
+  test "agent.core retries an ordinary runtime error after a read-only capability call" do
     parent = self()
 
     response = %{
@@ -876,23 +983,17 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
       )
 
     {:ok, config} =
-      agent_config([response], [],
-        mission_capabilities: [touch],
-        provider_resources: [close_counter(self(), :non_retryable)]
-      )
+      agent_config([response, @recovered], [], mission_capabilities: [touch])
 
-    assert {:error, %{kind: :workflow_failed}} =
-             Kernel.run(~S|(agent.core/run "Do not repeat the read" {"max_turns" 3})|, config)
+    assert {:ok, _result} =
+             Kernel.run(~S|(agent.core/run "Correct the program" {"max_turns" 3})|, config)
 
     assert_receive :touch_called
     assert_receive {:agent_request, _first}
-    refute_receive :touch_called
-    refute_receive {:agent_request, _second}
-    assert_receive {:provider_closed, :non_retryable}
-    refute_receive {:provider_closed, :non_retryable}
+    assert_receive {:agent_request, _second}
   end
 
-  test "agent.core does not retry an ordinary runtime error after a mission runtime tool" do
+  test "agent.core retries an ordinary runtime error after a mission runtime tool" do
     response = %{
       content: nil,
       tool_calls: [
@@ -904,19 +1005,260 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
       ]
     }
 
-    {:ok, config} = agent_config([response], [])
+    {:ok, config} = agent_config([response, @recovered], [])
 
-    assert {:error, %{kind: :workflow_failed}} =
-             Kernel.run(
-               ~S|(agent.core/run "Do not repeat runtime reads" {"max_turns" 3})|,
-               config
-             )
+    assert {:ok, _result} =
+             Kernel.run(~S|(agent.core/run "Correct the program" {"max_turns" 3})|, config)
+
+    assert_receive {:agent_request, _first}
+    assert_receive {:agent_request, _second}
+  end
+
+  test "agent.core corrects a failed read-only capability call without exposing details" do
+    parent = self()
+
+    failed_lookup = %{
+      content: nil,
+      tool_calls: [
+        %{
+          id: "missing-path",
+          name: "run_ptc_lisp",
+          args: %{
+            "program" =>
+              ~S|(let [response (tool/lookup {})] (if (= :ok (get response :status)) (get response :value) (fail response)))|
+          }
+        }
+      ]
+    }
+
+    {:ok, lookup} =
+      Capability.new(
+        name: "lookup",
+        effect: :read,
+        input_schema: %{"type" => "object"},
+        callback: fn _ ->
+          send(parent, :lookup_called)
+          {:error, ProviderError.new(:not_found, "private provider detail")}
+        end
+      )
+
+    {:ok, config} =
+      agent_config([failed_lookup, @recovered], [], mission_capabilities: [lookup])
+
+    assert {:ok, %{value: %{"ok" => true, "value" => "ok"}}} =
+             Kernel.run(~S|(agent.core/run "Correct the lookup" {"max_turns" 3})|, config)
+
+    assert_receive :lookup_called
+    assert_receive {:agent_request, _first}
+    assert_receive {:agent_request, second}
+
+    feedback = second["messages"] |> List.last() |> Map.fetch!("content")
+    assert feedback =~ "provider_error"
+    assert feedback =~ "not_found"
+    refute feedback =~ "private provider detail"
+  end
+
+  test "agent.core does not correct a capability failure after an unsafe effect" do
+    parent = self()
+
+    failed_commit = %{
+      content: nil,
+      tool_calls: [
+        %{
+          id: "uncertain-write",
+          name: "run_ptc_lisp",
+          args: %{
+            "program" =>
+              ~S|(let [response (tool/commit {})] (if (= :ok (get response :status)) (get response :value) (fail response)))|
+          }
+        }
+      ]
+    }
+
+    {:ok, commit} =
+      Capability.new(
+        name: "commit",
+        effect: :write,
+        input_schema: %{"type" => "object"},
+        callback: fn _ ->
+          send(parent, :commit_called)
+          {:error, ProviderError.new(:unavailable, "write outcome is private")}
+        end
+      )
+
+    {:ok, config} =
+      agent_config([failed_commit, @recovered], [], mission_capabilities: [commit])
+
+    assert {:error, %{kind: :workflow_failed, reason: :explicit_failure}} =
+             Kernel.run(~S|(agent.core/run "Do not repeat the write" {"max_turns" 3})|, config)
+
+    assert_receive :commit_called
+    assert_receive {:agent_request, _first}
+    refute_receive {:agent_request, _second}
+  end
+
+  test "agent.core keeps a deliberate error-shaped fail terminal without capability activity" do
+    deliberate = %{
+      content: nil,
+      tool_calls: [
+        %{
+          id: "decline",
+          name: "run_ptc_lisp",
+          args: %{
+            "program" => ~S|(fail {:status :error :kind :provider-error :reason :not-found})|
+          }
+        }
+      ]
+    }
+
+    {:ok, config} = agent_config([deliberate, @recovered])
+
+    assert {:error, %{kind: :workflow_failed, reason: :explicit_failure}} =
+             Kernel.run(~S|(agent.core/run "Respect the decision" {"max_turns" 3})|, config)
 
     assert_receive {:agent_request, _first}
     refute_receive {:agent_request, _second}
   end
 
-  test "agent.core does not retry an input contract failure after earlier capability activity" do
+  test "agent.core keeps a deliberate error-shaped fail terminal after an unrelated read" do
+    deliberate = %{
+      content: nil,
+      tool_calls: [
+        %{
+          id: "decline-after-read",
+          name: "run_ptc_lisp",
+          args: %{
+            "program" =>
+              ~S|(do (tool/runtime-usage {}) (fail {:status :error :kind :provider-error :reason :not-found :retryable? false}))|
+          }
+        }
+      ]
+    }
+
+    {:ok, config} = agent_config([deliberate, @recovered])
+
+    assert {:error, %{kind: :workflow_failed, reason: :explicit_failure}} =
+             Kernel.run(~S|(agent.core/run "Respect the decision" {"max_turns" 3})|, config)
+
+    assert_receive {:agent_request, _first}
+    refute_receive {:agent_request, _second}
+  end
+
+  test "agent.core keeps a copied capability envelope terminal" do
+    parent = self()
+
+    copied_failure = %{
+      content: nil,
+      tool_calls: [
+        %{
+          id: "copied-failure",
+          name: "run_ptc_lisp",
+          args: %{
+            "program" =>
+              ~S|(let [response (tool/lookup {}) copied (into {} response)] (fail copied))|
+          }
+        }
+      ]
+    }
+
+    {:ok, lookup} =
+      Capability.new(
+        name: "lookup",
+        effect: :read,
+        input_schema: %{"type" => "object"},
+        callback: fn _ ->
+          send(parent, :lookup_called)
+          {:error, ProviderError.new(:not_found, "private provider detail")}
+        end
+      )
+
+    {:ok, config} =
+      agent_config([copied_failure, @recovered], [], mission_capabilities: [lookup])
+
+    assert {:error, %{kind: :workflow_failed, reason: :explicit_failure}} =
+             Kernel.run(
+               ~S|(agent.core/run "Respect the copied decision" {"max_turns" 3})|,
+               config
+             )
+
+    assert_receive :lookup_called
+    assert_receive {:agent_request, _first}
+    refute_receive {:agent_request, _second}
+  end
+
+  # The guard is intact for the effect nothing installs yet. An undeclared
+  # effect is `:unknown` and counts as unsafe by the same rule.
+  # A closing turn is offered once. It exists so an unsafe failure costs the
+  # last program rather than the whole investigation, and it must not become a
+  # second chance to run anything: the write is called exactly once across both
+  # turns, and a second unsafe failure ends the run.
+  test "agent.core offers exactly one closing turn after an unsafe failure" do
+    parent = self()
+
+    unsafe = %{
+      content: nil,
+      tool_calls: [
+        %{
+          id: "unsafe",
+          name: "run_ptc_lisp",
+          args: %{"program" => ~S|(do (tool/commit {}) (+ {} 1))|}
+        }
+      ]
+    }
+
+    {:ok, commit} =
+      Capability.new(
+        name: "commit",
+        effect: :write,
+        input_schema: %{"type" => "object"},
+        callback: fn _ ->
+          send(parent, :commit_called)
+          {:ok, 42}
+        end
+      )
+
+    {:ok, config} =
+      agent_config([unsafe, unsafe, @recovered], [], mission_capabilities: [commit])
+
+    assert {:error, %{kind: :workflow_failed}} =
+             Kernel.run(~S|(agent.core/run "Close out" {"max_turns" 4})|, config)
+
+    assert_receive {:agent_request, _first}
+    assert_receive {:agent_request, _closing}
+    refute_receive {:agent_request, _third}
+  end
+
+  test "agent.core does not repeat an ordinary runtime error after a write capability call, but closes the run" do
+    response = %{
+      content: nil,
+      tool_calls: [
+        %{
+          id: "runtime-error-after-write",
+          name: "run_ptc_lisp",
+          args: %{"program" => ~S|(do (tool/commit {}) (+ {} 1))|}
+        }
+      ]
+    }
+
+    {:ok, commit} =
+      Capability.new(
+        name: "commit",
+        effect: :write,
+        input_schema: %{"type" => "object"},
+        callback: fn _ -> {:ok, 42} end
+      )
+
+    {:ok, config} =
+      agent_config([response, @recovered], [], mission_capabilities: [commit])
+
+    assert {:ok, _closing_result} =
+             Kernel.run(~S|(agent.core/run "Do not repeat the write" {"max_turns" 3})|, config)
+
+    assert_receive {:agent_request, _first}
+    assert_receive {:agent_request, _second}
+  end
+
+  test "agent.core does not repeat an input contract failure after earlier capability activity, but closes the run" do
     response = %{
       content: nil,
       tool_calls: [
@@ -942,19 +1284,19 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
       )
 
     {:ok, config} =
-      agent_config([response], [],
+      agent_config([response, @recovered], [],
         mission_source: mission_source,
         mission_capabilities: [touch]
       )
 
-    assert {:error, %{kind: :workflow_failed}} =
+    assert {:ok, _closing_result} =
              Kernel.run(~S|(agent.core/run "Do not repeat the write" {"max_turns" 3})|, config)
 
     assert_receive {:agent_request, _first}
-    refute_receive {:agent_request, _second}
+    assert_receive {:agent_request, _second}
   end
 
-  test "agent.core does not retry a higher-order contract failure after earlier activity" do
+  test "agent.core does not repeat a higher-order contract failure after earlier activity, but closes the run" do
     response = %{
       content: nil,
       tool_calls: [
@@ -983,16 +1325,16 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
       )
 
     {:ok, config} =
-      agent_config([response], [],
+      agent_config([response, @recovered], [],
         mission_source: mission_source,
         mission_capabilities: [touch]
       )
 
-    assert {:error, %{kind: :workflow_failed}} =
+    assert {:ok, _closing_result} =
              Kernel.run(~S|(agent.core/run "Do not repeat the write" {"max_turns" 3})|, config)
 
     assert_receive {:agent_request, _first}
-    refute_receive {:agent_request, _second}
+    assert_receive {:agent_request, _second}
   end
 
   test "agent.core retries a pure output contract failure" do
@@ -1233,6 +1575,75 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
              Kernel.run(~S|(agent.core/run "Quota" {"max_turns" 2})|, quota_config)
   end
 
+  test "agent.core run-outcome returns attributable subject failures without hiding provider failures" do
+    explicit = %{
+      content: nil,
+      tool_calls: [
+        %{id: "fail", name: "run_ptc_lisp", args: %{"program" => ~S|(fail "declined")|}}
+      ]
+    }
+
+    {:ok, explicit_config} = agent_config([explicit])
+
+    assert {:ok,
+            %{
+              value: %{
+                "status" => "subject-failure",
+                "kind" => "model-program-failed"
+              }
+            }} =
+             Kernel.run(
+               ~S|(return (agent.core/run-outcome "Fail" {"max_turns" 1}))|,
+               explicit_config
+             )
+
+    {:ok, provider_config} = agent_config([{:error, :transport_down}])
+
+    assert {:error, %{kind: :workflow_failed}} =
+             Kernel.run(
+               ~S|(return (agent.core/run-outcome "Provider" {"max_turns" 1}))|,
+               provider_config
+             )
+
+    non_retryable = %{
+      content: nil,
+      tool_calls: [
+        %{
+          id: "bad-after-read",
+          name: "run_ptc_lisp",
+          args: %{"program" => ~S|(do (tool/commit {}) (+ {} 1))|}
+        }
+      ]
+    }
+
+    # A write is the effect that genuinely cannot be repeated, so it is what
+    # still produces a non-retryable evaluation for run-outcome to attribute.
+    {:ok, commit} =
+      Capability.new(
+        name: "commit",
+        effect: :write,
+        input_schema: %{"type" => "object"},
+        callback: fn _ -> {:ok, 42} end
+      )
+
+    # The closing turn is offered once. A second unsafe failure ends the run,
+    # which is the outcome run-outcome must attribute to the subject.
+    {:ok, non_retryable_config} =
+      agent_config([non_retryable, non_retryable], [], mission_capabilities: [commit])
+
+    assert {:ok,
+            %{
+              value: %{
+                "status" => "subject-failure",
+                "kind" => "non-retryable-evaluation"
+              }
+            }} =
+             Kernel.run(
+               ~S|(return (agent.core/run-outcome "Read once" {"max_turns" 3}))|,
+               non_retryable_config
+             )
+  end
+
   defp agent_config(responses, limit_overrides \\ [], opts \\ []) do
     parent = self()
     {:ok, queue} = Agent.start_link(fn -> responses end)
@@ -1337,7 +1748,13 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
 
   defp agent_bundle(opts) do
     names =
-      ~w(agent.core agent.feedback agent.native agent.prompt agent.retry kernel llm result workflow.event)
+      if Keyword.get(opts, :agent_main, false) do
+        ~w(agent.main agent.core agent.feedback agent.native agent.prompt agent.retry
+           kernel llm result workflow.event)
+      else
+        ~w(agent.core agent.feedback agent.native agent.prompt agent.retry
+           kernel llm result workflow.event)
+      end
 
     with {:ok, components} <- Library.components(names),
          {:ok, components} <- replace_prompt(components, opts) do

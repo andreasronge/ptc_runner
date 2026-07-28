@@ -9,7 +9,8 @@ defmodule PtcRunner.Kernel.Error do
   a hard runtime boundary makes them terminal.
 
   Outer kinds currently include `:workflow_failed`, `:limit_exceeded`,
-  `:event_sink_error`, `:configuration_error`, and `:inspection_sink_error`.
+  `:event_sink_error`, `:configuration_error`, `:inspection_sink_error`, and
+  `:provider_cleanup_error`.
   """
   @enforce_keys [:kind, :reason, :details, :usage]
   defstruct [:kind, :reason, :details, :usage]

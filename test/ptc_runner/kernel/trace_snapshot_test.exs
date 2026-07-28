@@ -1,9 +1,34 @@
 defmodule PtcRunner.Kernel.TraceSnapshotTest do
   use ExUnit.Case, async: true
 
+  alias PtcRunner.Kernel.HostConfig
   alias PtcRunner.Kernel.TraceCapability
   alias PtcRunner.Kernel.TraceLog
   alias PtcRunner.Kernel.TraceSnapshot
+
+  @tag :tmp_dir
+  test "the accepted minimum result ceiling can return an empty page", %{
+    tmp_dir: directory
+  } do
+    File.write!(Path.join(directory, "empty.jsonl"), "")
+
+    assert {:ok, snapshot} =
+             TraceSnapshot.start({:directory, directory},
+               owner: self(),
+               max_result_bytes: HostConfig.minimum_snapshot_result_bytes()
+             )
+
+    on_exit(fn -> TraceSnapshot.stop(snapshot) end)
+
+    assert {:ok,
+            %{
+              "items" => [],
+              "next_cursor" => nil,
+              "omitted_count" => 0,
+              "truncated" => false,
+              "snapshot_hash" => "sha256:" <> _
+            }} = TraceSnapshot.query(snapshot, :list_runs, %{})
+  end
 
   @tag :tmp_dir
   test "captures one immutable normal directory and reuses canonical queries", %{
@@ -20,26 +45,39 @@ defmodule PtcRunner.Kernel.TraceSnapshotTest do
     assert {:ok, live_log} = TraceLog.new(source: {:directory, directory})
     assert {:ok, snapshot} = TraceSnapshot.start({:directory, directory}, owner: self())
     on_exit(fn -> TraceSnapshot.stop(snapshot) end)
+    assert {:ok, %{snapshot_hash: snapshot_hash}} = TraceSnapshot.info(snapshot)
+    assert snapshot_hash =~ ~r/\Asha256:[0-9a-f]{64}\z/
 
     assert {:ok, expected_runs} = TraceLog.query(live_log, :list_runs, %{})
-    assert {:ok, ^expected_runs} = TraceSnapshot.query(snapshot, :list_runs, %{})
+    assert {:ok, snapshot_runs} = TraceSnapshot.query(snapshot, :list_runs, %{})
+    assert Map.delete(snapshot_runs, "snapshot_hash") == expected_runs
+    assert snapshot_runs["snapshot_hash"] == snapshot_hash
 
     assert {:ok, expected_run} = TraceLog.query(live_log, :get_run, %{"run_id" => "first"})
-    assert {:ok, ^expected_run} = TraceSnapshot.query(snapshot, :get_run, %{"run_id" => "first"})
+    assert {:ok, snapshot_run} = TraceSnapshot.query(snapshot, :get_run, %{"run_id" => "first"})
+    assert Map.delete(snapshot_run, "snapshot_hash") == expected_run
+    assert snapshot_run["snapshot_hash"] == snapshot_hash
 
     assert {:ok, expected_turns} =
              TraceLog.query(live_log, :list_turns, %{"run_id" => "first"})
 
-    assert {:ok, ^expected_turns} =
+    assert {:ok, snapshot_turns} =
              TraceSnapshot.query(snapshot, :list_turns, %{"run_id" => "first"})
 
+    assert Map.delete(snapshot_turns, "snapshot_hash") == expected_turns
+    assert snapshot_turns["snapshot_hash"] == snapshot_hash
+
     assert {:ok, expected_counters} = TraceLog.query(live_log, :counters, %{})
-    assert {:ok, ^expected_counters} = TraceSnapshot.query(snapshot, :counters, %{})
+    assert {:ok, snapshot_counters} = TraceSnapshot.query(snapshot, :counters, %{})
+    assert Map.delete(snapshot_counters, "snapshot_hash") == expected_counters
+    assert snapshot_counters["snapshot_hash"] == snapshot_hash
 
     write_events(path, [event("changed", 1, "run-started")])
     write_events(Path.join(directory, "later.jsonl"), [event("later", 1, "run-started")])
 
-    assert {:ok, ^expected_runs} = TraceSnapshot.query(snapshot, :list_runs, %{})
+    assert {:ok, frozen_runs} = TraceSnapshot.query(snapshot, :list_runs, %{})
+    assert Map.delete(frozen_runs, "snapshot_hash") == expected_runs
+    assert frozen_runs["snapshot_hash"] == snapshot_hash
 
     assert {:ok, %{"items" => live_items}} = TraceLog.query(live_log, :list_runs, %{})
     assert Enum.sort(Enum.map(live_items, & &1["run_id"])) == ["changed", "later"]
@@ -118,17 +156,29 @@ defmodule PtcRunner.Kernel.TraceSnapshotTest do
     path = Path.join(directory, "trace.jsonl")
     write_events(path, [event("bounded", 1, "run-started")])
 
+    assert {:ok, snapshot} = TraceSnapshot.start({:directory, directory}, owner: self())
+    assert {:ok, %{retained_bytes: expected_retained_bytes}} = TraceSnapshot.info(snapshot)
+    assert :ok = TraceSnapshot.stop(snapshot)
+
     assert {:error, :source_limit_exceeded} =
              TraceSnapshot.start({:directory, directory},
                owner: self(),
                max_source_bytes: 1
              )
 
-    assert {:error, :source_retained_limit_exceeded} =
+    assert {:error,
+            {:source_retained_limit_exceeded,
+             %{
+               source: :ptc_trace_snapshot,
+               measured_bytes: measured_bytes,
+               limit_bytes: 1
+             }}} =
              TraceSnapshot.start({:directory, directory},
                owner: self(),
                max_retained_bytes: 1
              )
+
+    assert measured_bytes == expected_retained_bytes
   end
 
   @tag :tmp_dir
@@ -173,7 +223,9 @@ defmodule PtcRunner.Kernel.TraceSnapshotTest do
   end
 
   @tag :tmp_dir
-  test "snapshot and live directories agree at the exact byte ceiling", %{tmp_dir: directory} do
+  test "snapshot and live directories agree at the exact source byte ceiling", %{
+    tmp_dir: directory
+  } do
     path = Path.join(directory, "a.jsonl")
     write_events(path, [event("exact", 1, "run-started")])
     File.write!(Path.join(directory, "z.jsonl"), "")
@@ -191,7 +243,8 @@ defmodule PtcRunner.Kernel.TraceSnapshotTest do
     on_exit(fn -> TraceSnapshot.stop(snapshot) end)
 
     assert {:ok, expected} = TraceLog.query(live_log, :list_runs, %{})
-    assert {:ok, ^expected} = TraceSnapshot.query(snapshot, :list_runs, %{})
+    assert {:ok, actual} = TraceSnapshot.query(snapshot, :list_runs, %{})
+    assert Map.delete(actual, "snapshot_hash") == expected
   end
 
   @tag :tmp_dir

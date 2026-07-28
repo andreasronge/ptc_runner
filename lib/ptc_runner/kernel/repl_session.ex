@@ -42,6 +42,8 @@ defmodule PtcRunner.Kernel.ReplSession do
   alias PtcRunner.Lisp.TrustedTool
 
   @access_table_key {__MODULE__, :access_table}
+  @maximum_counter 4_294_967_295
+  @setup_cleanup_timeout_ms 1_000
 
   @enforce_keys [:access, :id]
   defstruct [:access, :id, attempts: 0, errors: 0]
@@ -61,9 +63,12 @@ defmodule PtcRunner.Kernel.ReplSession do
   and a normal in-memory event sink. Exact native history has the fixed language
   depth of three and is owned by RunState with continuation memory.
 
-  A supplied config's event and optional inspection sinks must belong to the
-  calling process. A mismatch returns `{:error, :session_owner_mismatch}` before
-  the recorder is claimed or a run state is started.
+  A supplied config's event and optional inspection sink owners are frozen when
+  the config is constructed and must match the calling process. A mismatch or
+  inconclusive live-sink ownership probe returns
+  `{:error, :session_owner_mismatch}` before the recorder is claimed or a run
+  state is started and leaves the config untouched. A dead owned sink closes
+  the config's provider resources before setup fails.
   """
   def new(opts \\ [])
 
@@ -162,9 +167,17 @@ defmodule PtcRunner.Kernel.ReplSession do
 
   @spec close(t()) ::
           {:ok, [map()]}
-          | {:error, :event_sink_error | :session_closed | :session_owner_mismatch}
+          | {:error, :provider_cleanup_failed, [map()]}
+          | {:error,
+             :event_sink_error
+             | :provider_cleanup_failed
+             | :session_closed
+             | :session_owner_mismatch}
   @doc """
   Closes a session normally and returns its atomically frozen canonical events.
+  When provider cleanup fails after terminal publication, the error tuple also
+  returns the frozen events so a frontend can persist them before reporting the
+  cleanup failure.
 
   Returns `{:error, :session_owner_mismatch}` without closing anything when
   called outside the process that created the session.
@@ -183,28 +196,49 @@ defmodule PtcRunner.Kernel.ReplSession do
   end
 
   defp close_owned(session) do
-    if sink_alive?(session) do
-      try do
-        :ok = RunState.close(session.state)
-        outcome = if session.errors == 0, do: :ok, else: :error
-        reason = if session.errors == 0, do: nil, else: :repl_evaluation_error
+    state_result = close_run_state(session.state)
+    cleanup = ReplSessionOwner.close_provider_resources(session.owner_pid, session.owner_token)
 
-        case finalize(session, outcome, reason) do
-          {:ok, events} -> {:ok, events}
-          {:error, :event_sink_error} -> {:error, :event_sink_error}
-        end
-      catch
-        :exit, _reason -> {:error, :session_closed}
-      end
+    if state_result == :ok and cleanup_result?(cleanup) and
+         Process.alive?(session.config.event_sink.pid) do
+      finalize_close(session, cleanup)
     else
-      {:error, :session_closed}
+      prefer_cleanup_error({:error, :session_closed}, cleanup)
     end
   end
 
+  defp finalize_close(session, cleanup) do
+    {outcome, reason} =
+      case {cleanup, bounded_counter(session.errors)} do
+        {:ok, 0} ->
+          {:ok, nil}
+
+        {:ok, _errors} ->
+          {:error, :repl_evaluation_error}
+
+        {{:error, :provider_cleanup_failed}, _errors} ->
+          {:error, :provider_cleanup_failed}
+      end
+
+    case finalize(session, outcome, reason) do
+      {:ok, events} when cleanup == :ok -> {:ok, events}
+      {:ok, events} -> {:error, :provider_cleanup_failed, events}
+      {:error, :event_sink_error} when cleanup == :ok -> {:error, :event_sink_error}
+      {:error, :event_sink_error} -> cleanup
+    end
+  catch
+    :exit, _reason -> prefer_cleanup_error({:error, :session_closed}, cleanup)
+  end
+
   @spec abort(t(), atom()) ::
-          {:ok, [map()]} | :ok | {:error, :session_owner_mismatch}
+          {:ok, [map()]}
+          | :ok
+          | {:error, :provider_cleanup_failed, [map()]}
+          | {:error, :provider_cleanup_failed | :session_owner_mismatch}
   @doc """
   Closes a session with an error reason and returns retained events when available.
+  When provider cleanup fails after terminal publication, the error tuple also
+  returns those events.
 
   Returns `{:error, :session_owner_mismatch}` without closing anything when
   called outside the process that created the session.
@@ -230,18 +264,46 @@ defmodule PtcRunner.Kernel.ReplSession do
   end
 
   defp abort_owned(session, reason) do
-    if sink_alive?(session) do
-      :ok = RunState.close(session.state)
+    state_result = close_run_state(session.state)
+    cleanup = ReplSessionOwner.close_provider_resources(session.owner_pid, session.owner_token)
 
-      case finalize(session, :error, reason) do
-        {:ok, events} -> {:ok, events}
-        {:error, :event_sink_error} -> :ok
-      end
+    if state_result == :ok and cleanup_result?(cleanup) and
+         Process.alive?(session.config.event_sink.pid) do
+      finalize_abort(session, reason, cleanup)
     else
-      :ok
+      prefer_cleanup_error(:ok, cleanup)
+    end
+  end
+
+  defp finalize_abort(session, reason, cleanup) do
+    terminal_reason =
+      if cleanup == :ok,
+        do: reason,
+        else: :provider_cleanup_failed
+
+    case finalize(session, :error, terminal_reason) do
+      {:ok, events} when cleanup == :ok -> {:ok, events}
+      {:ok, events} -> {:error, :provider_cleanup_failed, events}
+      {:error, :event_sink_error} when cleanup == :ok -> :ok
+      {:error, :event_sink_error} -> cleanup
     end
   catch
-    :exit, _reason -> :ok
+    :exit, _reason -> prefer_cleanup_error(:ok, cleanup)
+  end
+
+  defp prefer_cleanup_error(_result, {:error, :provider_cleanup_failed} = error), do: error
+  defp prefer_cleanup_error(result, :ok), do: result
+  defp prefer_cleanup_error(result, _owner_failure), do: result
+
+  defp cleanup_result?(:ok), do: true
+  defp cleanup_result?({:error, :provider_cleanup_failed}), do: true
+  defp cleanup_result?(_result), do: false
+
+  defp close_run_state(state) do
+    RunState.close_and_drain(state)
+    :ok
+  catch
+    :exit, _reason -> {:error, :session_closed}
   end
 
   defp config(nil) do
@@ -268,24 +330,49 @@ defmodule PtcRunner.Kernel.ReplSession do
   end
 
   defp config(%RunConfig{} = config) do
-    if EventSink.owner?(config.event_sink) and inspection_owner?(config.inspection_sink),
-      do: {:ok, config},
-      else: {:error, :session_owner_mismatch}
+    cond do
+      config.event_sink_owner != self() or
+          config.inspection_sink_owner not in [nil, self()] ->
+        {:error, :session_owner_mismatch}
+
+      not Process.alive?(config.event_sink.pid) ->
+        reject_unstarted_config(config, :event_sink_error)
+
+      not inspection_alive?(config.inspection_sink) ->
+        reject_unstarted_config(config, :inspection_sink_error)
+
+      true ->
+        {:ok, config}
+    end
   end
 
   defp config(_config), do: {:error, :invalid_repl_session}
 
-  defp inspection_owner?(nil), do: true
-  defp inspection_owner?(sink), do: InspectionSink.owner?(sink)
+  defp inspection_alive?(nil), do: true
+  defp inspection_alive?(sink), do: Process.alive?(sink.pid)
 
   defp emit_run_started(config) do
-    EventSink.begin(config.event_sink, config.run_started_metadata)
+    EventSink.claim(config.event_sink, config.claim_id, config.run_started_metadata)
   end
 
   defp start_session(config) do
     case RunState.start_repl(config.limits, config.event_sink, config.inspection_sink) do
-      {:ok, state} -> start_session_with_state(config, state)
-      {:error, _reason} = error -> error
+      {:ok, state} ->
+        start_session_with_state(config, state)
+
+      {:error, reason} ->
+        case setup_failure_reason(config, reason) do
+          :session_owner_mismatch -> {:error, :session_owner_mismatch}
+          failure -> reject_unstarted_config(config, failure)
+        end
+    end
+  end
+
+  defp setup_failure_reason(config, fallback) do
+    cond do
+      not Process.alive?(config.event_sink.pid) -> :event_sink_error
+      not inspection_alive?(config.inspection_sink) -> :inspection_sink_error
+      true -> fallback
     end
   end
 
@@ -297,19 +384,29 @@ defmodule PtcRunner.Kernel.ReplSession do
             register_access(pid, token)
 
           {:error, reason} ->
-            stop_owners(%{config: config, state: state})
-            {:error, reason}
+            cleanup = stop_owners(%{config: config, state: state})
+            prefer_cleanup_error({:error, reason}, cleanup)
         end
 
-      {:error, :event_sink_error} = error ->
+      {:error, :event_sink_already_claimed} ->
         RunState.close(state)
         RunState.stop(state)
-        error
+        {:error, :event_sink_error}
+
+      {:error, reason}
+      when reason in [:event_sink_claimed_by_other, :event_sink_error] ->
+        RunState.close(state)
+        RunState.stop(state)
+
+        case RunConfig.close_provider_resources(config) do
+          :ok -> {:error, :event_sink_error}
+          {:error, :provider_cleanup_failed} = error -> error
+        end
     end
   end
 
   defp finalize(session, outcome, reason) do
-    errors = max(session.errors, observed_errors(session))
+    errors = min(max(bounded_counter(session.errors), observed_errors(session)), @maximum_counter)
 
     usage =
       session.state
@@ -567,7 +664,7 @@ defmodule PtcRunner.Kernel.ReplSession do
                :ok,
                nil
              ) do
-          :ok -> {:ok, public_step, %{next | attempts: next.attempts + 1}}
+          :ok -> {:ok, public_step, %{next | attempts: increment_counter(next.attempts)}}
           {:error, :event_sink_error} -> event_sink_failure(next)
         end
 
@@ -656,7 +753,18 @@ defmodule PtcRunner.Kernel.ReplSession do
   end
 
   defp increment_error(session),
-    do: %{session | attempts: session.attempts + 1, errors: session.errors + 1}
+    do: %{
+      session
+      | attempts: increment_counter(session.attempts),
+        errors: increment_counter(session.errors)
+    }
+
+  defp increment_counter(value), do: min(bounded_counter(value) + 1, @maximum_counter)
+
+  defp bounded_counter(value) when is_integer(value) and value > 0,
+    do: min(value, @maximum_counter)
+
+  defp bounded_counter(_value), do: 0
 
   defp history_after_success(history, {:__ptc_return__, _value}), do: history
   defp history_after_success(history, value), do: Enum.take(history ++ [value], -3)
@@ -670,11 +778,23 @@ defmodule PtcRunner.Kernel.ReplSession do
 
   defp stop_owners(session) do
     if Process.alive?(session.state.pid), do: RunState.stop(session.state)
-    RunConfig.close_provider_resources(session.config)
+    cleanup = RunConfig.close_provider_resources(session.config)
     if session.config.inspection_sink, do: InspectionSink.stop(session.config.inspection_sink)
 
     if Process.alive?(session.config.event_sink.pid),
       do: EventSink.stop(session.config.event_sink)
+
+    cleanup
+  end
+
+  defp reject_unstarted_config(config, reason) do
+    cleanup = RunConfig.close_provider_resources(config)
+
+    if config.inspection_sink,
+      do: InspectionSink.stop(config.inspection_sink, @setup_cleanup_timeout_ms)
+
+    EventSink.stop(config.event_sink, @setup_cleanup_timeout_ms)
+    prefer_cleanup_error({:error, reason}, cleanup)
   end
 
   defp sink_alive?(session),
@@ -690,7 +810,9 @@ defmodule PtcRunner.Kernel.ReplSession do
          config: config,
          state: state,
          memory: %{},
-         history: []
+         history: [],
+         attempts: bounded_counter(session.attempts),
+         errors: bounded_counter(session.errors)
        })}
     end
   end

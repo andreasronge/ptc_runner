@@ -1,8 +1,9 @@
 name: Integration Tests
 
 on:
-  # Scheduled e2e execution is the rot guard for :e2e-tagged tests, which
-  # stay excluded from push/PR pipelines and would otherwise decay silently.
+  # Scheduled e2e execution is the rot guard for model-driven :e2e tests that
+  # require secrets. Credential-free MCP interoperability is also a required
+  # PR check in test.yml.
   schedule:
     - cron: '17 5 * * *'
   workflow_dispatch:
@@ -16,12 +17,16 @@ on:
           - 'integration'
         default: 'e2e'
 
+permissions:
+  contents: read
+
 jobs:
   integration:
     runs-on: ubuntu-latest
     name: Integration Tests
     env:
       MIX_ENV: test
+      PTC_TEST_MCP_2026_ENDPOINT: http://127.0.0.1:8000
 
     steps:
       - name: Checkout repository
@@ -30,15 +35,45 @@ jobs:
       - name: Setup Elixir environment
         uses: ./.github/actions/setup-elixir
 
+      - name: Setup pinned Go toolchain
+        if: github.event_name == 'schedule' || inputs.test_type == 'e2e'
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: test/support/mcp_go_stateless/go.mod
+          cache-dependency-path: test/support/mcp_go_stateless/go.sum
+
       - name: Compile
         run: mix compile
+
+      - name: Verify E2E configuration
+        if: github.event_name == 'schedule' || inputs.test_type == 'e2e'
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: test -n "$OPENROUTER_API_KEY"
+
+      - name: Install pinned GitHub MCP Server
+        if: github.event_name == 'schedule' || inputs.test_type == 'e2e'
+        env:
+          GITHUB_MCP_ARCHIVE_SHA256: b653a2a01f33e9a726b581fa0d8a8d9a05a86af419e5ab33b8e26858366d1d66
+        run: |
+          curl --fail --silent --show-error --location \
+            --output "$RUNNER_TEMP/github-mcp-server.tar.gz" \
+            https://github.com/github/github-mcp-server/releases/download/v1.7.0/github-mcp-server_Linux_x86_64.tar.gz
+          echo "$GITHUB_MCP_ARCHIVE_SHA256  $RUNNER_TEMP/github-mcp-server.tar.gz" \
+            | sha256sum --check
+          tar --extract --gzip --file "$RUNNER_TEMP/github-mcp-server.tar.gz" \
+            --directory "$RUNNER_TEMP" github-mcp-server
+          chmod 0755 "$RUNNER_TEMP/github-mcp-server"
 
       - name: Run tagged tests
         env:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          PTC_TEST_GITHUB_MCP_BINARY: ${{ runner.temp }}/github-mcp-server
+          PTC_TEST_GITHUB_TOKEN: ${{ github.token }}
         run: |
           if [ "${{ github.event_name }}" = "schedule" ] || [ "${{ inputs.test_type }}" = "e2e" ]; then
-            mix test --include e2e --trace
+            bash test/support/mcp_go_stateless/with_server.sh \
+              mix test --include e2e --trace
           else
             mix test --include integration --trace
           fi

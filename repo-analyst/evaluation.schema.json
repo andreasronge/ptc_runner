@@ -1,0 +1,133 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "repo-analyst aggregate evaluation",
+  "description": "The evidence an evaluation produces. It is not a promotion decision: a human or trusted CI gate reviews confidentiality and behaviour and applies an approved candidate. Every verdict other than accept is reachable from the counts below, so a reader can check the conclusion against the trials rather than trusting it.",
+  "type": "object",
+  "properties": {
+    "verdict": {
+      "type": "string",
+      "description": "accept means the cited cases improved with no regression anywhere; reject means a held-out or regression case that passed before now fails; inconclusive means nothing improved; invalid means the trial set itself could not be trusted.",
+      "enum": [
+        "accept",
+        "reject",
+        "inconclusive",
+        "invalid"
+      ]
+    },
+    "reasons": {
+      "type": "array",
+      "maxItems": 16,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 500
+      }
+    },
+    "candidate": {
+      "type": "object",
+      "properties": {
+        "component_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "base_source_hash": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "source_hash": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        }
+      },
+      "required": [
+        "component_id",
+        "base_source_hash",
+        "source_hash"
+      ]
+    },
+    "counts": {
+      "type": "object",
+      "properties": {
+        "trials": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "baseline": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "candidate": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "trials",
+        "baseline",
+        "candidate"
+      ]
+    },
+    "rates": {
+      "type": "object",
+      "description": "Pass rates per case set, before and after. Frozen inputs make these attributable, not statistically significant; the platform reports distributions and leaves thresholds to the application.",
+      "properties": {
+        "motivating_before": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "motivating_after": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "regression_before": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "regression_after": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "held_out_before": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "held_out_after": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      },
+      "required": [
+        "motivating_before",
+        "motivating_after",
+        "held_out_before",
+        "held_out_after"
+      ]
+    },
+    "regressed_cases": {
+      "type": "array",
+      "maxItems": 64,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128
+      }
+    }
+  },
+  "required": [
+    "verdict",
+    "reasons",
+    "candidate",
+    "counts",
+    "rates",
+    "regressed_cases"
+  ]
+}

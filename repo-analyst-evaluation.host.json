@@ -1,0 +1,72 @@
+{
+  "$schema": "./priv/schemas/ptc-host-config.schema.json",
+  "install": {
+    "replay-llm": {
+      "source": "llm_replay",
+      "fixtures": "repo-analyst/evaluation/replay.jsonl",
+      "data_class": "private_inspection",
+      "accepts_data": [
+        "normal",
+        "private_inspection"
+      ],
+      "ceilings": {
+        "max_entries": 16,
+        "max_result_bytes": 250000
+      }
+    },
+    "workspace": {
+      "source": "mcp",
+      "transport": {
+        "type": "stdio",
+        "command": "node",
+        "cwd": ".",
+        "args": [
+          "examples/mcp/filesystem/dist/server.js",
+          "--root",
+          "repo-analyst/evaluation/workspace",
+          "--include",
+          "lib/**"
+        ],
+        "start_timeout_ms": 15000
+      },
+      "tools": {
+        "list_directory": {
+          "as": "workspace.list",
+          "effect": "read"
+        },
+        "search_files": {
+          "as": "workspace.find",
+          "effect": "read"
+        },
+        "search_text": {
+          "as": "workspace.search",
+          "effect": "read",
+          "error_feedback": "bounded"
+        },
+        "read_text_file": {
+          "as": "workspace.read",
+          "effect": "read",
+          "error_feedback": "bounded"
+        },
+        "snapshot_info": {
+          "as": "workspace.info",
+          "effect": "read"
+        }
+      },
+      "snapshot_identity": {
+        "tool": "snapshot_info",
+        "field": "snapshot_hash"
+      },
+      "installation_revision": "repo-analyst-replay-workspace-v1",
+      "accepts_data": [
+        "normal",
+        "private_inspection"
+      ],
+      "ceilings": {
+        "timeout_ms": 15000,
+        "max_catalog_tools": 32,
+        "max_result_bytes": 250000
+      }
+    }
+  }
+}

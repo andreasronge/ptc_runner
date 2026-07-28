@@ -1,7 +1,12 @@
 defmodule PtcRunner.TestSupport.MCPHTTPFixture do
   @moduledoc false
 
-  @spec start((map() -> {pos_integer(), [{binary(), binary()}], binary()} | :close)) :: map()
+  @type response ::
+          {pos_integer(), [{binary(), binary()}], binary()}
+          | {:chunked, pos_integer(), [{binary(), binary()}], [binary()]}
+          | :close
+
+  @spec start((map() -> response())) :: map()
   def start(handler) when is_function(handler, 1) do
     owner = self()
 
@@ -56,8 +61,14 @@ defmodule PtcRunner.TestSupport.MCPHTTPFixture do
       request = Map.put(request, :body, decode_body(body))
 
       case handler.(request) do
-        {status, headers, response_body} -> send_response(socket, status, headers, response_body)
-        :close -> :ok
+        {status, headers, response_body} ->
+          send_response(socket, status, headers, response_body)
+
+        {:chunked, status, headers, chunks} ->
+          send_chunked(socket, status, headers, chunks, owner)
+
+        :close ->
+          :ok
       end
     else
       _reason -> send_response(socket, 400, [], "")
@@ -140,5 +151,31 @@ defmodule PtcRunner.TestSupport.MCPHTTPFixture do
 
     encoded_headers = Enum.map_join(headers, "\r\n", fn {name, value} -> "#{name}: #{value}" end)
     :gen_tcp.send(socket, "HTTP/1.1 #{status} #{reason}\r\n#{encoded_headers}\r\n\r\n#{body}")
+  end
+
+  defp send_chunked(socket, status, headers, chunks, owner) do
+    reason = if status in 200..299, do: "OK", else: "Error"
+
+    headers =
+      headers ++
+        [
+          {"transfer-encoding", "chunked"},
+          {"connection", "keep-alive"}
+        ]
+
+    encoded_headers = Enum.map_join(headers, "\r\n", fn {name, value} -> "#{name}: #{value}" end)
+    :ok = :gen_tcp.send(socket, "HTTP/1.1 #{status} #{reason}\r\n#{encoded_headers}\r\n\r\n")
+
+    Enum.each(chunks, fn chunk ->
+      :ok = :gen_tcp.send(socket, "#{Integer.to_string(byte_size(chunk), 16)}\r\n#{chunk}\r\n")
+    end)
+
+    send(owner, {:mcp_stream_holding, self()})
+
+    receive do
+      :release -> :gen_tcp.send(socket, "0\r\n\r\n")
+    after
+      5_000 -> :ok
+    end
   end
 end

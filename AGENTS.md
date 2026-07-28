@@ -33,15 +33,46 @@ how it was verified.
 ## Commands
 
 - `mix precommit` — fast quality gate (format, compile, credo, schema, spec,
-  tests); run before every commit.
-- `mix prepush` — slower checks (upstream API audit, dialyzer, unused-deps) before `git push`;
-  PR CI runs the same checks as individual steps.
-- `mix test --include e2e` — E2E tests (requires `OPENROUTER_API_KEY`).
+  root/Viewer tests, and launcher package/conformance/archive verification);
+  run before every commit.
+- `git push` — the tracked pre-push hook runs the full root/Viewer tests and
+  then `mix prepush` (upstream API audit, Dialyzer, unused-deps). Do not run
+  `mix prepush` immediately before an ordinary push; invoke it directly only
+  for diagnosis or when hooks are unavailable. PR CI runs the same checks as
+  individual steps.
+- `mix test --include e2e` — E2E tests (requires `OPENROUTER_API_KEY`;
+  the MCP tests also require the local server described below).
 - Fix all failures before committing/pushing.
+
+### Local MCP E2E server
+
+The MCP E2E tests use the stateless harness in
+`test/support/mcp_go_stateless`. Its `go.mod` pins the official Go SDK
+protocol implementation. Start it in one terminal:
+
+```bash
+mcp_server_dir="$(mktemp -d)"
+go -C test/support/mcp_go_stateless build \
+  -o "$mcp_server_dir/ptc-mcp-http-server" .
+"$mcp_server_dir/ptc-mcp-http-server" -host 127.0.0.1 -port 8000
+```
+
+The credential-free interoperability test runs as a dedicated PR check and can
+be run from another terminal:
+
+```bash
+PTC_TEST_MCP_2026_ENDPOINT=http://127.0.0.1:8000 \
+  mix test test/ptc_runner/kernel/mcp_remote_e2e_test.exs \
+    --include e2e --trace
+```
+
+The scheduled/manual model-driven test uses the same server and additionally
+loads `OPENROUTER_API_KEY` and the optional `PTC_TEST_MODEL` from `.env`.
 
 ## Project Structure
 
 - `lib/ptc_runner/` — the library (`kernel/`, `lisp/`, `sandbox.ex`, …).
+- `ptc_runner_launcher/` — optional macOS/Linux MCP stdio launcher companion.
 - `docs/` — specifications, guides, and implementation records.
   `priv/preludes/kernel/` — shipped Lisp libraries; recompile after editing.
 - `docs/function-reference.md`, `docs/java-interop.md`, and `docs/conformance/`

@@ -4,22 +4,16 @@ defmodule PtcRunner.Kernel.LogAnalysisProfile do
 
   `log-analysis-v1` installs only the shipped `log.core` mission component,
   four read-only snapshot capabilities, empty mission data, and the ordinary
-  implicit mission introspection routes. The profile is application code, not
-  browser or deployment data; changing its authority incompatibly requires a
-  new profile ID.
+  implicit mission introspection routes. Its descriptor and behavior remain
+  stable while the shared analysis-session engine also serves other closed
+  profiles.
   """
 
-  alias PtcRunner.Kernel.DeterministicJSON
-  alias PtcRunner.Kernel.Library
+  alias PtcRunner.Kernel.AnalysisProfile
+  alias PtcRunner.Kernel.AnalysisResources
   alias PtcRunner.Kernel.Limits
-  alias PtcRunner.Kernel.MissionEnvironment
-  alias PtcRunner.Kernel.MissionInventory
-  alias PtcRunner.Kernel.RunConfig
-  alias PtcRunner.Kernel.RuntimeTools
-  alias PtcRunner.Kernel.SessionTrace
   alias PtcRunner.Kernel.TraceCapability
   alias PtcRunner.Kernel.TraceSnapshot
-  alias PtcRunner.Kernel.WorkflowEnvironment
 
   @id "log-analysis-v1"
   @component_ids ["log.core"]
@@ -31,8 +25,14 @@ defmodule PtcRunner.Kernel.LogAnalysisProfile do
   @spec id() :: binary()
   def id, do: @id
 
+  @doc false
+  def component_ids, do: @component_ids
+
   @spec component_selections() :: [{:library, binary()}]
   def component_selections, do: Enum.map(@component_ids, &{:library, &1})
+
+  @doc false
+  def namespaces, do: @namespaces
 
   @spec explicit_capabilities() :: [binary()]
   def explicit_capabilities, do: @capabilities
@@ -42,6 +42,54 @@ defmodule PtcRunner.Kernel.LogAnalysisProfile do
 
   @spec result_policy() :: binary()
   def result_policy, do: @result_policy
+
+  @doc false
+  def identity_extension, do: %{}
+
+  @doc false
+  def labels do
+    %{
+      "name" => "ptc.log-analysis.repl",
+      "tags" => %{"mode" => "repl"}
+    }
+  end
+
+  @doc false
+  def invalid_profile_error, do: :invalid_log_analysis_profile
+
+  @doc false
+  def invalid_assembly_error, do: :invalid_log_analysis_assembly
+
+  @doc false
+  def invalid_source_error, do: :invalid_log_analysis_source
+
+  @doc false
+  def session_failed_error, do: :log_analysis_session_failed
+
+  @doc false
+  def session_closed_error, do: :log_analysis_session_closed
+
+  @doc false
+  def run_id_prefix, do: "log-analysis-"
+
+  @doc false
+  def usage_capability_key, do: :trace_calls
+
+  @doc false
+  def result_limit_message, do: "public evaluation result exceeded its byte limit"
+
+  @doc false
+  def resource_names, do: ["traces"]
+
+  @doc false
+  def frontend do
+    %{
+      input_modes: [:interactive, :eval, :load, :script, :stdin],
+      output_formats: [:clojure, :jsonl],
+      continue_on_error: :repeated_eval_only,
+      private_terminal: :forbidden
+    }
+  end
 
   @doc "Returns the safe, static discovery contract for `log-analysis-v1`."
   @spec description() :: map()
@@ -83,104 +131,50 @@ defmodule PtcRunner.Kernel.LogAnalysisProfile do
   end
 
   @doc false
-  @spec assemble(TraceSnapshot.t(), PtcRunner.Kernel.EventSink.t()) ::
-          {:ok, %{config: RunConfig.t(), profile: map()}} | {:error, atom()}
-  def assemble(snapshot, sink) do
-    limits = limits()
+  def capture(%{"traces" => directory} = resources, opts)
+      when map_size(resources) == 1 and is_binary(directory) and is_list(opts) do
+    case TraceSnapshot.start({:directory, directory},
+           owner: self(),
+           capture_hook: Keyword.get(opts, :capture_hook),
+           listing_hook: Keyword.get(opts, :listing_hook)
+         ) do
+      {:ok, snapshot} ->
+        case AnalysisResources.new(@id, %{traces: snapshot}) do
+          {:ok, _resources} = success ->
+            success
 
-    with true <- TraceSnapshot.valid?(snapshot),
-         {:ok, components} <- Library.resolve_components(component_selections()),
-         {:ok, bundle} <- PtcRunner.Kernel.compile_bundle(components),
-         true <- namespaces(bundle) == @namespaces,
-         {:ok, capabilities} <- TraceCapability.from_snapshot(snapshot),
-         true <- capability_names(capabilities) == explicit_capabilities(),
-         {:ok, mission} <-
-           MissionEnvironment.new(bundle: bundle, capabilities: capabilities, data: %{}),
-         {:ok, workflow} <- WorkflowEnvironment.new([]),
-         {:ok, profile} <- descriptor(bundle, mission, limits),
-         {:ok, config} <- fixed_config(workflow, mission, limits, sink, profile) do
-      {:ok, %{config: config, profile: profile}}
-    else
-      _ -> {:error, :invalid_log_analysis_profile}
+          {:error, _reason} = error ->
+            TraceSnapshot.stop(snapshot)
+            error
+        end
+
+      {:error, _reason} = error ->
+        error
     end
+  end
+
+  def capture(_resources, _opts), do: {:error, :invalid_log_analysis_source}
+
+  @doc false
+  def capabilities(%AnalysisResources{} = resources) do
+    resources
+    |> AnalysisResources.handle(:traces)
+    |> TraceCapability.from_snapshot()
   end
 
   @doc false
-  @spec valid_assembly?(term(), term(), term(), term()) :: boolean()
-  def valid_assembly?(config, profile, snapshot, session_trace) do
-    with true <- TraceSnapshot.valid?(snapshot),
-         {:ok, sink} <- SessionTrace.sink(session_trace),
-         {:ok, expected} <- assemble(snapshot, sink) do
-      config === expected.config and profile === expected.profile
-    else
-      _ -> false
-    end
-  catch
-    :exit, _reason -> false
-  end
+  def assemble(resources, sink), do: AnalysisProfile.assemble(__MODULE__, resources, sink)
 
   @doc false
-  @spec descriptor(map(), map(), Limits.t()) :: {:ok, map()} | {:error, atom()}
-  def descriptor(bundle, mission, %Limits{} = limits) do
-    with true <- namespaces(bundle) == @namespaces,
-         {:ok, inventory} <- MissionInventory.build(mission, limits),
-         identity = identity(bundle, inventory, limits),
-         {:ok, encoded} <- DeterministicJSON.encode(identity) do
-      digest = "sha256:" <> sha256(encoded)
-
-      {:ok,
-       %{
-         id: @id,
-         digest: digest,
-         namespaces: @namespaces,
-         identity: identity,
-         mission_inventory: inventory
-       }}
-    else
-      _ -> {:error, :invalid_log_analysis_profile}
-    end
-  end
-
-  defp identity(bundle, inventory, limits) do
-    %{
-      "profile_id" => @id,
-      "bundle_hash" => bundle.hash,
-      "mission_inventory_hash" => inventory.hash,
-      "implicit_runtime" => RuntimeTools.mission_contract_descriptor(),
-      "limits" => limits |> Map.from_struct() |> stringify_keys(),
-      "explicit_capabilities" => @capabilities,
-      "components" => @component_ids,
-      "mission_data" => %{},
-      "persistence_policy" => @persistence,
-      "result_policy" => @result_policy
-    }
-  end
-
-  defp fixed_config(workflow, mission, limits, sink, profile) do
-    RunConfig.new(
-      workflow_environment: workflow,
-      mission_environment: mission,
-      input: %{},
-      limits: limits,
-      event_sink: sink,
-      labels: %{
-        "name" => "ptc.log-analysis.repl",
-        "tags" => %{"mode" => "repl"}
-      },
-      session_profile: %{"id" => profile.id, "digest" => profile.digest}
+  def valid_assembly?(config, profile, resources, session_trace) do
+    AnalysisProfile.valid_assembly?(
+      __MODULE__,
+      config,
+      profile,
+      resources,
+      session_trace
     )
   end
 
-  defp capability_names(capabilities),
-    do: capabilities |> Enum.map(& &1.name) |> Enum.sort()
-
-  defp namespaces(bundle) do
-    bundle.components
-    |> Enum.flat_map(& &1.namespaces)
-    |> Enum.uniq()
-    |> Enum.sort()
-  end
-
   defp stringify_keys(map), do: Map.new(map, fn {key, value} -> {Atom.to_string(key), value} end)
-  defp sha256(value), do: :crypto.hash(:sha256, value) |> Base.encode16(case: :lower)
 end

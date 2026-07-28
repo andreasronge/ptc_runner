@@ -1,0 +1,131 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "repo-analyst observable evaluation trial",
+  "description": "The bounded value written by one trial run. Scored answers and subject-attributable failures are distinct branches. Provider and host failures produce no trial value.",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "status": {"type": "string", "const": "scored"},
+        "subject": {"type": "string", "enum": ["baseline", "candidate"]},
+        "repetition": {"type": "integer", "minimum": 1, "maximum": 64},
+        "candidate": {
+          "type": "object",
+          "properties": {
+            "component_id": {"type": "string", "minLength": 1, "maxLength": 128},
+            "base_source_hash": {"type": "string", "minLength": 1, "maxLength": 128},
+            "source_hash": {"type": "string", "minLength": 1, "maxLength": 128}
+          },
+          "required": ["component_id", "base_source_hash", "source_hash"]
+        },
+        "case": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "id": {"type": "string", "minLength": 1, "maxLength": 128},
+            "set": {
+              "type": "string",
+              "enum": ["motivating", "regression", "held-out", "negative-control"]
+            },
+            "case_hash": {"type": "string", "minLength": 1, "maxLength": 128}
+          },
+          "required": ["id", "set", "case_hash"]
+        },
+        "answer": {"type": "string", "minLength": 1, "maxLength": 4000},
+        "citations": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "provider": {"type": "string", "const": "workspace"},
+              "snapshot_hash": {"type": "string", "minLength": 71, "maxLength": 71},
+              "path": {"type": "string", "minLength": 1, "maxLength": 1024},
+              "lines": {
+                "type": "array",
+                "minItems": 2,
+                "maxItems": 2,
+                "items": {"type": "integer", "minimum": 1}
+              }
+            },
+            "required": ["provider", "snapshot_hash", "path", "lines"]
+          }
+        },
+        "passed": {"type": "boolean"},
+        "detail": {"type": "string", "minLength": 1, "maxLength": 2000}
+      },
+      "required": [
+        "status",
+        "subject",
+        "repetition",
+        "candidate",
+        "case",
+        "answer",
+        "citations",
+        "passed",
+        "detail"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "status": {"type": "string", "const": "subject-failure"},
+        "subject": {"type": "string", "enum": ["baseline", "candidate"]},
+        "repetition": {"type": "integer", "minimum": 1, "maximum": 64},
+        "candidate": {
+          "type": "object",
+          "properties": {
+            "component_id": {"type": "string", "minLength": 1, "maxLength": 128},
+            "base_source_hash": {"type": "string", "minLength": 1, "maxLength": 128},
+            "source_hash": {"type": "string", "minLength": 1, "maxLength": 128}
+          },
+          "required": ["component_id", "base_source_hash", "source_hash"]
+        },
+        "case": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "id": {"type": "string", "minLength": 1, "maxLength": 128},
+            "set": {
+              "type": "string",
+              "enum": ["motivating", "regression", "held-out", "negative-control"]
+            },
+            "case_hash": {"type": "string", "minLength": 1, "maxLength": 128}
+          },
+          "required": ["id", "set", "case_hash"]
+        },
+        "failure": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "turn-limit",
+                "model-program-failed",
+                "non-retryable-evaluation",
+                "invalid-answer"
+              ]
+            }
+          },
+          "required": ["kind"]
+        },
+        "passed": {"type": "boolean", "const": false},
+        "detail": {"type": "string", "minLength": 1, "maxLength": 2000}
+      },
+      "required": [
+        "status",
+        "subject",
+        "repetition",
+        "candidate",
+        "case",
+        "failure",
+        "passed",
+        "detail"
+      ]
+    }
+  ]
+}

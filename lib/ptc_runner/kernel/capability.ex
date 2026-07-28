@@ -7,6 +7,10 @@ defmodule PtcRunner.Kernel.Capability do
   budget reservation, and provider invocation. `output_schema`, when present,
   checks successful values before they return to Lisp. `callback` returns
   `{:ok, json_value}` or `{:error, %PtcRunner.Kernel.ProviderError{}}`.
+  One-argument callbacks receive only normalized arguments. Trusted
+  two-argument callbacks additionally receive a dispatcher-owned invocation
+  context for private observation and safe trace propagation; that context
+  never crosses into Lisp.
 
   `description` and `model_visible` control bounded discovery metadata only.
   They do not grant authority. A capability can be invoked only when the host
@@ -21,6 +25,7 @@ defmodule PtcRunner.Kernel.Capability do
   @name ~r|\A[a-z][a-z0-9._/-]{0,127}\z|
   alias PtcRunner.Kernel.JSONSchema
   alias PtcRunner.Lisp.KeyNormalizer
+  alias PtcRunner.Lisp.RetainedSize
 
   @effects [:read, :write, :unknown]
   @options ~w(name callback validate description model_visible input_schema output_schema effect)a
@@ -38,7 +43,14 @@ defmodule PtcRunner.Kernel.Capability do
     effect: :unknown
   ]
 
-  @type callback :: (map() -> {:ok, term()} | {:error, PtcRunner.Kernel.ProviderError.t()})
+  @type callback_result :: {:ok, term()} | {:error, PtcRunner.Kernel.ProviderError.t()}
+  @type invocation_context :: %{
+          capability_id: binary(),
+          inspection_sink: PtcRunner.Kernel.InspectionSink.t() | nil,
+          traceparent: binary() | nil
+        }
+  @type callback ::
+          (map() -> callback_result()) | (map(), invocation_context() -> callback_result())
   @type t :: %__MODULE__{
           name: binary(),
           callback: callback(),
@@ -68,7 +80,8 @@ defmodule PtcRunner.Kernel.Capability do
   def new(opts) when is_list(opts) do
     with true <- Keyword.keys(opts) -- @options == [],
          {:ok, name} <- valid_name(Keyword.get(opts, :name)),
-         callback when is_function(callback, 1) <- Keyword.get(opts, :callback),
+         callback when is_function(callback, 1) or is_function(callback, 2) <-
+           Keyword.get(opts, :callback),
          :ok <- valid_validator(Keyword.get(opts, :validate)),
          {:ok, description} <- valid_description(Keyword.get(opts, :description)),
          visible when is_boolean(visible) <- Keyword.get(opts, :model_visible, true),
@@ -110,7 +123,9 @@ defmodule PtcRunner.Kernel.Capability do
   end
 
   defp valid_name(name) when is_binary(name) do
-    if name =~ @name, do: {:ok, name}, else: {:error, :invalid_capability}
+    if name =~ @name,
+      do: {:ok, RetainedSize.detach_binaries(name)},
+      else: {:error, :invalid_capability}
   end
 
   defp valid_name(_name), do: {:error, :invalid_capability}
@@ -120,7 +135,8 @@ defmodule PtcRunner.Kernel.Capability do
   defp valid_description(nil), do: {:ok, nil}
 
   defp valid_description(description)
-       when is_binary(description) and byte_size(description) <= 4_096, do: {:ok, description}
+       when is_binary(description) and byte_size(description) <= 4_096,
+       do: {:ok, RetainedSize.detach_binaries(description)}
 
   defp valid_description(_description), do: {:error, :invalid_capability}
 

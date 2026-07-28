@@ -11,6 +11,7 @@ defmodule PtcRunner.Kernel.Dispatcher do
 
   alias PtcRunner.Kernel.Capability
   alias PtcRunner.Kernel.Events
+  alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.InspectionSink
   alias PtcRunner.Kernel.JSONSchema
   alias PtcRunner.Kernel.JSONValue
@@ -157,8 +158,12 @@ defmodule PtcRunner.Kernel.Dispatcher do
                  capability.name,
                  arguments
                ) do
-            :ok -> {invoke(state, capability, arguments, timeout_ms), true}
-            {:error, :inspection_sink_error} -> {inspection_failure(state), false}
+            :ok ->
+              context = invocation_context(event_sink, inspection_sink, capability_id)
+              {invoke(state, capability, arguments, timeout_ms, context), true}
+
+            {:error, :inspection_sink_error} ->
+              {inspection_failure(state), false}
           end
 
         result =
@@ -229,7 +234,21 @@ defmodule PtcRunner.Kernel.Dispatcher do
     }
   end
 
-  defp invoke(state, capability, arguments, requested_timeout_ms) do
+  defp invocation_context(event_sink, inspection_sink, capability_id) do
+    traceparent =
+      case event_sink && EventSink.identity(event_sink) do
+        {:ok, %{trace_id: trace_id}} -> Events.traceparent(trace_id, capability_id)
+        _unavailable -> nil
+      end
+
+    %{
+      capability_id: capability_id,
+      inspection_sink: inspection_sink,
+      traceparent: traceparent
+    }
+  end
+
+  defp invoke(state, capability, arguments, requested_timeout_ms, context) do
     remaining = RunState.usage(state).remaining_ms
     timeout_ms = min(requested_timeout_ms, remaining)
     limits = state_limits(state)
@@ -259,7 +278,7 @@ defmodule PtcRunner.Kernel.Dispatcher do
             ^go ->
               send(
                 parent,
-                {:provider_result, self(), safely_invoke(capability.callback, arguments)}
+                {:provider_result, self(), safely_invoke(capability.callback, arguments, context)}
               )
 
             {:DOWN, ^parent_ref, :process, _parent, _reason} ->
@@ -313,8 +332,8 @@ defmodule PtcRunner.Kernel.Dispatcher do
     end
   end
 
-  defp safely_invoke(callback, arguments) do
-    callback.(arguments)
+  defp safely_invoke(callback, arguments, context) do
+    if is_function(callback, 2), do: callback.(arguments, context), else: callback.(arguments)
   rescue
     _exception -> {:raised, :exception}
   catch
@@ -344,7 +363,7 @@ defmodule PtcRunner.Kernel.Dispatcher do
         }
 
       true ->
-        %{status: :ok, value: value}
+        %{status: :ok, value: RetainedSize.detach_binaries(value)}
     end
   end
 

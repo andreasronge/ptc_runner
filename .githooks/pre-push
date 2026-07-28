@@ -5,9 +5,11 @@
 #   1. Docs-only short-circuit: if every file in the *combined* set
 #      (committed-diff against the remote + dirty worktree) matches the
 #      strict allow-list below, skip the test/dialyzer gate and exit 0.
-#   2. Otherwise: run `mix test --exclude clojure` and `mix dialyzer`
-#      for each top-level Mix project ("." and "ptc_viewer"),
-#      preserving the existing pre-push behavior.
+#   2. Otherwise: run the full tests for each top-level Mix project
+#      ("." and "ptc_viewer"), then invoke the root `mix prepush` alias for
+#      the upstream audit, Dialyzer, and unused-dependency check. The hook is
+#      the ordinary entry point; do not run `mix prepush` immediately before
+#      `git push`.
 #
 # Override:
 #   FORCE_FULL_PRE_PUSH=1 git push  → always run the full gate, even if
@@ -238,7 +240,7 @@ PYEOF
 
   case "$SHORT_CIRCUIT_RESULT" in
     0)
-      echo "📝 Docs-only push, skipping test/dialyzer gate (override: FORCE_FULL_PRE_PUSH=1)"
+      echo "📝 Docs-only push, skipping full pre-push gate (override: FORCE_FULL_PRE_PUSH=1)"
       exit 0
       ;;
     2)
@@ -252,7 +254,7 @@ PYEOF
 fi
 
 # ----------------------------------------------------------------------
-# Step 2: Existing per-project test + dialyzer gate (unchanged behavior).
+# Step 2: Full tests plus the canonical root pre-push gate.
 # ----------------------------------------------------------------------
 
 echo "🔍 Running pre-push checks..."
@@ -291,26 +293,28 @@ run_project_gates() {
   fi
   echo "  ✅ Tests passed in $((SECONDS - test_start))s"
 
+  if [ "$proj" = "." ]; then
+    echo "  ⏳ Running canonical pre-push checks..."
+    local prepush_start=$SECONDS
+    if ! mix prepush; then
+      echo "  ❌ Pre-push checks failed in $label. Run: mix prepush"
+      popd > /dev/null
+      exit 1
+    fi
+    echo "  ✅ Pre-push checks passed in $((SECONDS - prepush_start))s"
   # CWD is the project dir (we are inside `pushd "$proj"`), so check
   # `./mix.exs` rather than `$proj/mix.exs`. Passing `$proj` here would
-  # resolve to a duplicated project path and silently skip
-  # dialyzer for non-root projects.
-  if project_has_dep "." "dialyxir"; then
+  # resolve to a duplicated project path and silently skip Dialyzer for
+  # non-root projects.
+  elif project_has_dep "." "dialyxir"; then
     echo "  ⏳ Running dialyzer (this may take a moment)..."
     local dialyzer_start=$SECONDS
-    DIALYZER_OUTPUT=$(mix dialyzer 2>&1) || DIALYZER_EXIT=$?
-    DIALYZER_EXIT=${DIALYZER_EXIT:-0}
-
-    if [ "$DIALYZER_EXIT" -ne 0 ]; then
-      echo "  ❌ Dialyzer found errors in $label:"
-      echo "$DIALYZER_OUTPUT"
-      echo ""
-      echo "  Run: (cd $proj && mix dialyzer)"
+    if ! mix dialyzer; then
+      echo "  ❌ Dialyzer found errors in $label. Run: (cd $proj && mix dialyzer)"
       popd > /dev/null
       exit 1
     fi
     echo "  ✅ Dialyzer passed in $((SECONDS - dialyzer_start))s"
-    unset DIALYZER_EXIT
   else
     echo "  ⏭️  Dialyzer not declared in ${label}mix.exs"
   fi
