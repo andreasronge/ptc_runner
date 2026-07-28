@@ -17,6 +17,8 @@
 ;; opaque, bound to the captured snapshot, and never parsed here. Each facade
 ;; response labels its installed `provider` alias so a citation can copy both
 ;; that alias and `snapshot_hash` without guessing which native source backed it.
+;; Catalog items, provenance results, and matching effective-prelude results
+;; also expose positive `positions` copied from their source records.
 ;;
 ;; Authority for historical behaviour: `effective-prelude` returns the exact
 ;; source a run compiled, and that is the only source that explains what the run
@@ -39,7 +41,8 @@
     (if (= "run-started" (get started "type"))
       {"component_overrides" (get data "component_overrides" [])
        "workflow_prelude" (get-in data ["workflow_prelude" "hash"])
-       "mission_prelude" (get-in data ["mission_prelude" "hash"])}
+       "mission_prelude" (get-in data ["mission_prelude" "hash"])
+       "positions" [(get started "sequence")]}
       {"component_overrides" []})))
 
 (defn- compact-run [run]
@@ -57,7 +60,8 @@
 
   Every item carries its own `component_overrides`, so one observation shows
   which runs replaced a component before compiling and which ran the installed
-  source unchanged. An empty list means unchanged."
+  source unchanged. Its `positions` identifies that run's run-started event for
+  citation. An empty component-overrides list means unchanged."
   {:signature "(limit :int, cursor :string?) -> :map"}
   [limit cursor]
   (let [page
@@ -79,8 +83,9 @@
   The compact catalog cannot carry this: the trace records it once, on the
   run-started event. A run that replaced a component did not execute the
   repository's current source, and nothing else in a review distinguishes such a
-  run from a baseline one. An empty `component_overrides` means the run compiled
-  the installed components unchanged."
+  run from a baseline one. `positions` identifies the source run-started event.
+  An empty `component_overrides` means the run compiled the installed components
+  unchanged."
   {:signature "(run-id :string) -> :map"}
   [run-id]
   (let [page (source-page "history" (tool/history.list-turns {"run_id" run-id "limit" 1}))
@@ -92,7 +97,8 @@
        "workflow_prelude" (get data "workflow_prelude")
        "mission_prelude" (get data "mission_prelude")
        "provider" (get page "provider")
-       "snapshot_hash" (get page "snapshot_hash")}
+       "snapshot_hash" (get page "snapshot_hash")
+       "positions" [(get started "sequence")]}
       (fail {"error" "no-run-started-event" "run_id" run-id}))))
 
 (defn effective-prelude
@@ -102,7 +108,8 @@
   component, so a caller spends one observation instead of a bundle. This is the
   authoritative source for what the run did; a workspace read of the same path
   shows current bytes, which may be different ones. Compare `source_hash` before
-  concluding anything about historical behaviour.
+  concluding anything about historical behaviour. `positions` identifies the
+  matching private prelude-source record.
 
   A nil `item` means the run never compiled that component."
   {:signature "(run-id :string, component-id :string) -> :map"}
@@ -118,7 +125,8 @@
       (cond
         match {"item" match
                "provider" (get page "provider")
-               "snapshot_hash" (get page "snapshot_hash")}
+               "snapshot_hash" (get page "snapshot_hash")
+               "positions" [(get match "sequence")]}
         next-cursor (recur next-cursor)
         :else {"item" nil
                "provider" (get page "provider")

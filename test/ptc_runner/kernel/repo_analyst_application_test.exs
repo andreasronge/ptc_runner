@@ -322,6 +322,62 @@ defmodule PtcRunner.Kernel.RepoAnalystApplicationTest do
              ]
     end
 
+    test "catalog, provenance, and effective source expose copyable citation positions" do
+      {:ok, bundle} = compile_facade("runs")
+      granted = ["history.list-runs", "history.list-turns"] ++ @private_operations
+
+      values = %{
+        "history.list-runs" => %{
+          "items" => [%{"run_id" => "run-1"}],
+          "snapshot_hash" => "sha256:trace"
+        },
+        "history.list-turns" => %{
+          "items" => [
+            %{
+              "sequence" => 1,
+              "type" => "run-started",
+              "data" => %{
+                "component_overrides" => [],
+                "workflow_prelude" => %{"hash" => "workflow"},
+                "mission_prelude" => %{"hash" => "mission"}
+              }
+            }
+          ],
+          "snapshot_hash" => "sha256:trace"
+        },
+        "private-history.effective-preludes" => %{
+          "items" => [
+            %{
+              "component_id" => "agent.retry",
+              "sequence" => 9,
+              "source_hash" => "sha256:source"
+            }
+          ],
+          "snapshot_hash" => "sha256:inspection"
+        }
+      }
+
+      {:ok, mission} =
+        MissionEnvironment.new(
+          bundle: bundle,
+          capabilities: stubs(granted, nil, values)
+        )
+
+      for {expression, expected_positions} <- [
+            {~S|(first (get (runs/list-runs 10 nil) "items"))|, [1]},
+            {~S|(runs/provenance "run-1")|, [1]},
+            {~S|(runs/effective-prelude "run-1" "agent.retry")|, [9]}
+          ] do
+        assert {:ok, %{value: %{outcome: :returned, value: value}}} =
+                 Kernel.run(
+                   "(return (kernel/eval (program (return #{expression}))))",
+                   run_config(mission)
+                 )
+
+        assert value["positions"] == expected_positions
+      end
+    end
+
     test "repo assembles against the four mapped workspace tools" do
       {:ok, bundle} = compile_facade("repo")
 
@@ -687,11 +743,16 @@ defmodule PtcRunner.Kernel.RepoAnalystApplicationTest do
   # Bounded recording stubs isolate facade argument/envelope behavior from
   # native provider acquisition. The assembly test above exercises the real
   # trace and private-inspection sources.
-  defp stubs(names, recorder \\ nil) do
+  defp stubs(names, recorder \\ nil, values \\ %{}) do
     Enum.map(names, fn name ->
       callback = fn args ->
         if recorder, do: Agent.update(recorder, &(&1 ++ [{name, args}]))
-        {:ok, %{"items" => [], "snapshot_hash" => "sha256:stub"}}
+
+        {:ok,
+         Map.get(values, name, %{
+           "items" => [],
+           "snapshot_hash" => "sha256:stub"
+         })}
       end
 
       {:ok, capability} =
