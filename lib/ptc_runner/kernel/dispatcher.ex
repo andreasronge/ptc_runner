@@ -7,6 +7,14 @@ defmodule PtcRunner.Kernel.Dispatcher do
   events, runs the trusted callback in a monitored heap-limited process, and
   constructs the uniform Lisp result envelope. Completion is checked against
   run closure so late results cannot re-enter Lisp.
+
+  Mission failures after callback entry are classified with the capability's
+  declared effect. Read failures keep their provider retry policy. Write and
+  unknown failures are non-retryable and carry
+  `mutation_state: :indeterminate` when invocation may have reached external
+  state. A trusted `ProviderError` with `dispatch_provenance: :not_dispatched`
+  preserves its specific pre-dispatch policy without exposing that internal
+  provenance. Workflow capabilities retain their provider-owned retry policy.
   """
 
   alias PtcRunner.Kernel.Capability
@@ -160,7 +168,7 @@ defmodule PtcRunner.Kernel.Dispatcher do
                ) do
             :ok ->
               context = invocation_context(event_sink, inspection_sink, capability_id)
-              {invoke(state, capability, arguments, timeout_ms, context), true}
+              {invoke(state, capability, arguments, timeout_ms, context, environment), true}
 
             {:error, :inspection_sink_error} ->
               {inspection_failure(state), false}
@@ -175,8 +183,13 @@ defmodule PtcRunner.Kernel.Dispatcher do
                    capability.name,
                    result
                  ) do
-              :ok -> result
-              {:error, :inspection_sink_error} -> inspection_failure(state)
+              :ok ->
+                result
+
+              {:error, :inspection_sink_error} ->
+                state
+                |> inspection_failure()
+                |> post_invocation_failure(environment, capability)
             end
           else
             result
@@ -248,7 +261,7 @@ defmodule PtcRunner.Kernel.Dispatcher do
     }
   end
 
-  defp invoke(state, capability, arguments, requested_timeout_ms, context) do
+  defp invoke(state, capability, arguments, requested_timeout_ms, context, environment) do
     remaining = RunState.usage(state).remaining_ms
     timeout_ms = min(requested_timeout_ms, remaining)
     limits = state_limits(state)
@@ -289,7 +302,7 @@ defmodule PtcRunner.Kernel.Dispatcher do
       case RunState.attach_provider(state, pid) do
         :ok ->
           send(pid, go)
-          await_provider(state, capability, pid, ref, timeout_ms)
+          await_provider(state, capability, pid, ref, timeout_ms, environment)
 
         {:error, :closed} ->
           await_down(pid, ref)
@@ -298,31 +311,45 @@ defmodule PtcRunner.Kernel.Dispatcher do
     end
   end
 
-  defp await_provider(state, capability, pid, ref, timeout_ms) do
+  defp await_provider(state, capability, pid, ref, timeout_ms, environment) do
     receive do
       {:provider_result, ^pid, result} ->
         await_down(pid, ref)
 
         case RunState.finish_provider(state) do
-          :ok -> normalize_result(state, capability, result)
-          {:error, :run_closed} -> limit_error(state, nil, :run_closed)
+          :ok ->
+            normalize_result(state, environment, capability, result)
+
+          {:error, :run_closed} ->
+            state
+            |> limit_error(nil, :run_closed)
+            |> post_invocation_failure(environment, capability)
         end
 
       {:DOWN, ^ref, :process, ^pid, reason} ->
         RunState.release_provider_slot(state)
 
-        %{
-          status: :error,
-          kind: :provider_error,
-          reason: normalize_exit(reason),
-          retryable?: true
-        }
+        post_invocation_failure(
+          %{
+            status: :error,
+            kind: :provider_error,
+            reason: normalize_exit(reason),
+            retryable?: true
+          },
+          environment,
+          capability
+        )
     after
       timeout_ms ->
         Process.exit(pid, :kill)
         await_down(pid, ref)
         RunState.release_provider_slot(state)
-        %{status: :error, kind: :timeout, reason: :provider_timeout, retryable?: true}
+
+        post_invocation_failure(
+          %{status: :error, kind: :timeout, reason: :provider_timeout, retryable?: true},
+          environment,
+          capability
+        )
     end
   end
 
@@ -341,52 +368,109 @@ defmodule PtcRunner.Kernel.Dispatcher do
     _kind, _reason -> {:raised, :throw}
   end
 
-  defp normalize_result(state, capability, {:ok, value}) do
+  defp normalize_result(state, environment, capability, {:ok, value}) do
     cap = capability_result_limit(state)
     bytes = RetainedSize.bytes_with_cap(value, cap)
 
     cond do
       not (json_value?(value) and is_integer(bytes) and bytes <= cap) ->
-        %{
-          status: :error,
-          kind: :result_exceeded,
-          reason: :provider_result_limit,
-          retryable?: false
-        }
+        post_invocation_failure(
+          %{
+            status: :error,
+            kind: :result_exceeded,
+            reason: :provider_result_limit,
+            retryable?: false
+          },
+          environment,
+          capability
+        )
 
       not valid_output?(capability, value) ->
-        %{
-          status: :error,
-          kind: :invalid_result,
-          reason: :output_schema_mismatch,
-          retryable?: false
-        }
+        post_invocation_failure(
+          %{
+            status: :error,
+            kind: :invalid_result,
+            reason: :output_schema_mismatch,
+            retryable?: false
+          },
+          environment,
+          capability
+        )
 
       true ->
         %{status: :ok, value: RetainedSize.detach_binaries(value)}
     end
   end
 
-  defp normalize_result(_state, _capability, {:error, %ProviderError{} = error}) do
-    %{
-      status: :error,
-      kind: :provider_error,
-      reason: error.kind,
-      details: error.details,
-      retryable?: error.retryable?
-    }
+  defp normalize_result(
+         _state,
+         environment,
+         capability,
+         {:error, %ProviderError{} = error}
+       ) do
+    if ProviderError.valid?(error) do
+      %{
+        status: :error,
+        kind: :provider_error,
+        reason: error.kind,
+        details: error.details,
+        retryable?: error.retryable?
+      }
+      |> maybe_put_mutation_state(error.mutation_state)
+      |> post_invocation_failure(environment, capability, error.dispatch_provenance)
+    else
+      invalid_provider_result(environment, capability)
+    end
   end
 
-  defp normalize_result(_state, _capability, {:raised, reason}),
-    do: %{status: :error, kind: :provider_error, reason: reason, retryable?: true}
+  defp normalize_result(_state, environment, capability, {:raised, reason}) do
+    post_invocation_failure(
+      %{status: :error, kind: :provider_error, reason: reason, retryable?: true},
+      environment,
+      capability
+    )
+  end
 
-  defp normalize_result(_state, _capability, _result),
-    do: %{
-      status: :error,
-      kind: :invalid_result,
-      reason: :invalid_provider_return,
-      retryable?: false
-    }
+  defp normalize_result(_state, environment, capability, _result),
+    do: invalid_provider_result(environment, capability)
+
+  defp invalid_provider_result(environment, capability) do
+    post_invocation_failure(
+      %{
+        status: :error,
+        kind: :invalid_result,
+        reason: :invalid_provider_return,
+        retryable?: false
+      },
+      environment,
+      capability
+    )
+  end
+
+  defp post_invocation_failure(result, environment, capability, provenance \\ nil)
+
+  defp post_invocation_failure(
+         result,
+         :mission,
+         %Capability{effect: effect},
+         provenance
+       )
+       when effect in [:write, :unknown] and provenance != :not_dispatched do
+    result
+    |> Map.put(:retryable?, false)
+    |> Map.put(:mutation_state, :indeterminate)
+  end
+
+  defp post_invocation_failure(result, _environment, _capability, _provenance) do
+    if Map.get(result, :mutation_state) == :indeterminate,
+      do: Map.put(result, :retryable?, false),
+      else: result
+  end
+
+  defp maybe_put_mutation_state(result, :indeterminate),
+    do: Map.put(result, :mutation_state, :indeterminate)
+
+  defp maybe_put_mutation_state(result, nil), do: result
 
   defp validate(%Capability{} = capability, arguments) do
     if JSONSchema.valid?(capability.input_validator, arguments),
