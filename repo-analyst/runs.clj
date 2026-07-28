@@ -21,6 +21,9 @@
 ;; also expose positive `positions` copied from their source records. The trace
 ;; catalog projects run-started provenance directly, so listing N runs remains
 ;; one capability call instead of N follow-up turn queries.
+;; A history position is a canonical event sequence. A private-history position
+;; is the sequence of the cited inspection record; it is not a canonical trace
+;; event. Workspace facades use source line numbers.
 ;;
 ;; Authority for historical behaviour: `effective-prelude` returns the exact
 ;; source a run compiled, and that is the only source that explains what the run

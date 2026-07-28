@@ -498,6 +498,51 @@ defmodule PtcRunner.Kernel.RepoAnalystApplicationTest do
              })
     end
 
+    test "improvement evidence documents each provider's position coordinate" do
+      schema =
+        "candidate.schema.json"
+        |> then(&path("repo-analyst/#{&1}"))
+        |> File.read!()
+        |> Jason.decode!()
+
+      descriptions =
+        schema["oneOf"]
+        |> Enum.take(2)
+        |> Enum.map(
+          &get_in(&1, [
+            "properties",
+            "evidence",
+            "items",
+            "properties",
+            "positions",
+            "description"
+          ])
+        )
+
+      assert Enum.all?(
+               descriptions,
+               &String.contains?(&1, "canonical event sequence IDs for history")
+             )
+
+      assert Enum.all?(
+               descriptions,
+               &String.contains?(&1, "inspection-record sequence IDs for private-history")
+             )
+
+      assert Enum.all?(descriptions, &String.contains?(&1, "source line numbers for workspace"))
+
+      task =
+        "repo-analyst/improve-input.json"
+        |> path()
+        |> File.read!()
+        |> Jason.decode!()
+        |> Map.fetch!("task")
+
+      assert task =~ "history positions are canonical event sequence IDs"
+      assert task =~ "private-history positions are inspection-record sequence IDs"
+      assert task =~ "workspace positions are source line numbers"
+    end
+
     test "a proposed change carries complete source while the trusted host derives its hash" do
       {:ok, contract} = contract("candidate.schema.json")
 
