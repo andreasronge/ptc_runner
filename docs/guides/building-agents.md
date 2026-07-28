@@ -433,6 +433,16 @@ Today a mission cannot reach anything else: the host document accepts only
 sources declare the same. The `write` row exists for the capability class
 nothing installs yet.
 
+An explicit `(fail value)` remains terminal by default because it is also the
+application's deliberate failure signal. There is one narrower correction
+case: `cap/unwrap!` fails with a capability's structured error envelope, the
+evaluation actually called a capability, and every observed capability effect
+was declared `read`. The Kernel reports those facts separately; the shipped
+PTC-Lisp loop then gives the model one correction turn. An error-shaped value
+without real capability activity is still terminal, as is any failure after a
+`write` or undeclared effect. Correction feedback includes only the bounded
+`kind` and `reason` classification, never provider details.
+
 When a failure is genuinely unsafe to retry, the shipped loop still does not
 repeat the program — but it no longer discards the run either. It spends one
 closing turn telling the model that the program cannot be retried and asking for

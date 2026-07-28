@@ -41,6 +41,12 @@
          (if message (str "; message=" message) "")
          ". Send one corrected run_ptc_lisp call.")))
 
+(defn capability-error [evaluation]
+  (let [error (get evaluation :value)]
+    (str "The capability call failed without an unsafe effect. "
+         "kind=" (get error :kind) "; reason=" (get error :reason)
+         ". Send one corrected run_ptc_lisp call with corrected capability arguments.")))
+
 (defn non-retryable [evaluation]
   (str "The PTC-Lisp evaluation did not return successfully and cannot be retried, "
        "because it already performed an effect this runtime cannot undo. "

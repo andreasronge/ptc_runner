@@ -56,6 +56,17 @@
    :kind kind
    :error (result/error kind reason)})
 
+(defn- correctable-capability-failure? [evaluation]
+  (let [error (get evaluation :value)]
+    (and (true? (get evaluation :capability-activity?))
+         (true? (get evaluation :retryable?))
+         (map? error)
+         (= :error (get error :status))
+         (keyword? (get error :kind))
+         (keyword? (get error :reason))
+         (or (true? (get error :retryable?))
+             (false? (get error :retryable?))))))
+
 (defn run-outcome
   "Runs the agent loop and distinguishes model-authored completion from a
   bounded subject-attributable failure.
@@ -97,7 +108,18 @@
                   :returned
                   (returned-outcome (get evaluation :value))
                   :failed
-                  (subject-failure :model-program-failed (get evaluation :value))
+                  (if (and (correctable-capability-failure? evaluation)
+                           (agent.retry/retry? turn max-turns))
+                    (let [event (completed-event :evaluation-error turn max-turns)
+                          next-prompt-state (transition-prompt prompt-state event)]
+                      (recur (inc turn)
+                             (append-correlated
+                               messages
+                               action
+                               (agent.feedback/capability-error evaluation))
+                             next-prompt-state
+                             closing?))
+                    (subject-failure :model-program-failed (get evaluation :value)))
                   :continued
                   (if (agent.retry/retry? turn max-turns)
                     (let [event (completed-event :evaluation-success turn max-turns)

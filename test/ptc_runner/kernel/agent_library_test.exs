@@ -10,6 +10,7 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.LLMCapability
   alias PtcRunner.Kernel.MissionEnvironment
+  alias PtcRunner.Kernel.ProviderError
   alias PtcRunner.Kernel.RunConfig
   alias PtcRunner.Kernel.WorkflowEnvironment
   alias PtcRunner.Lisp
@@ -1011,6 +1012,112 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
 
     assert_receive {:agent_request, _first}
     assert_receive {:agent_request, _second}
+  end
+
+  test "agent.core corrects a failed read-only capability call without exposing details" do
+    parent = self()
+
+    failed_lookup = %{
+      content: nil,
+      tool_calls: [
+        %{
+          id: "missing-path",
+          name: "run_ptc_lisp",
+          args: %{
+            "program" =>
+              ~S|(let [response (tool/lookup {})] (if (= :ok (get response :status)) (get response :value) (fail response)))|
+          }
+        }
+      ]
+    }
+
+    {:ok, lookup} =
+      Capability.new(
+        name: "lookup",
+        effect: :read,
+        input_schema: %{"type" => "object"},
+        callback: fn _ ->
+          send(parent, :lookup_called)
+          {:error, ProviderError.new(:not_found, "private provider detail")}
+        end
+      )
+
+    {:ok, config} =
+      agent_config([failed_lookup, @recovered], [], mission_capabilities: [lookup])
+
+    assert {:ok, %{value: %{"ok" => true, "value" => "ok"}}} =
+             Kernel.run(~S|(agent.core/run "Correct the lookup" {"max_turns" 3})|, config)
+
+    assert_receive :lookup_called
+    assert_receive {:agent_request, _first}
+    assert_receive {:agent_request, second}
+
+    feedback = second["messages"] |> List.last() |> Map.fetch!("content")
+    assert feedback =~ "provider_error"
+    assert feedback =~ "not_found"
+    refute feedback =~ "private provider detail"
+  end
+
+  test "agent.core does not correct a capability failure after an unsafe effect" do
+    parent = self()
+
+    failed_commit = %{
+      content: nil,
+      tool_calls: [
+        %{
+          id: "uncertain-write",
+          name: "run_ptc_lisp",
+          args: %{
+            "program" =>
+              ~S|(let [response (tool/commit {})] (if (= :ok (get response :status)) (get response :value) (fail response)))|
+          }
+        }
+      ]
+    }
+
+    {:ok, commit} =
+      Capability.new(
+        name: "commit",
+        effect: :write,
+        input_schema: %{"type" => "object"},
+        callback: fn _ ->
+          send(parent, :commit_called)
+          {:error, ProviderError.new(:unavailable, "write outcome is private")}
+        end
+      )
+
+    {:ok, config} =
+      agent_config([failed_commit, @recovered], [], mission_capabilities: [commit])
+
+    assert {:error, %{kind: :workflow_failed, reason: :explicit_failure}} =
+             Kernel.run(~S|(agent.core/run "Do not repeat the write" {"max_turns" 3})|, config)
+
+    assert_receive :commit_called
+    assert_receive {:agent_request, _first}
+    refute_receive {:agent_request, _second}
+  end
+
+  test "agent.core keeps a deliberate error-shaped fail terminal without capability activity" do
+    deliberate = %{
+      content: nil,
+      tool_calls: [
+        %{
+          id: "decline",
+          name: "run_ptc_lisp",
+          args: %{
+            "program" => ~S|(fail {:status :error :kind :provider-error :reason :not-found})|
+          }
+        }
+      ]
+    }
+
+    {:ok, config} = agent_config([deliberate, @recovered])
+
+    assert {:error, %{kind: :workflow_failed, reason: :explicit_failure}} =
+             Kernel.run(~S|(agent.core/run "Respect the decision" {"max_turns" 3})|, config)
+
+    assert_receive {:agent_request, _first}
+    refute_receive {:agent_request, _second}
   end
 
   # The guard is intact for the effect nothing installs yet. An undeclared

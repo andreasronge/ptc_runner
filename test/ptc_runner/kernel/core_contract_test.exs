@@ -1379,6 +1379,51 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     end
   end
 
+  test "an explicit capability failure reports whether correcting it is effect-safe" do
+    for {effect, retryable?} <- [read: true, write: false, unknown: false] do
+      {:ok, capability} =
+        Capability.new(
+          name: "lookup",
+          input_schema: @input_schema,
+          effect: effect,
+          callback: fn _ ->
+            {:error, ProviderError.new(:not_found, "not in the frozen source")}
+          end
+        )
+
+      {:ok, mission} = MissionEnvironment.new(capabilities: [capability])
+      {:ok, state} = RunState.start(Limits.defaults())
+
+      assert %{
+               outcome: :failed,
+               capability_activity?: true,
+               retryable?: ^retryable?,
+               value: %{status: :error, kind: :provider_error, reason: :not_found}
+             } =
+               Evaluation.evaluate_source(
+                 state,
+                 mission,
+                 ~S|(fail (tool/lookup {}))|,
+                 5_000
+               )
+    end
+
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, state} = RunState.start(Limits.defaults())
+
+    assert %{
+             outcome: :failed,
+             capability_activity?: false,
+             retryable?: true
+           } =
+             Evaluation.evaluate_source(
+               state,
+               mission,
+               ~S|(fail {:status :error :kind :provider-error :reason :not-found})|,
+               5_000
+             )
+  end
+
   # `Kernel.run` legitimately answers Elixir terms: `tool/kernel-eval` returns an
   # atom-keyed envelope and embedding hosts read it, so the JSON requirement
   # belongs to the artifact rather than to the boundary. What was wrong was the
