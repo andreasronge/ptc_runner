@@ -1,8 +1,10 @@
 # Manifests and capabilities
 
-A version 1 JSON manifest is the deployable boundary for a PTC-Lisp project. It
-selects code, data, installed providers, requested limits, event policy, and
-optional trace labels. Loading is strict and performs no workflow execution.
+A manifest is a JSON file you write to declare one runnable PTC-Lisp
+application: its code, its data, the providers it needs, the limits it wants,
+its event policy, and optional trace labels. Because it declares everything a
+run may use, it is also the boundary you deploy and review — nothing outside it
+reaches the run. Loading it is strict and executes no workflow.
 
 ## Smallest useful manifest
 
@@ -43,10 +45,10 @@ An installed PTC-Lisp library is selected by ID:
 {"library": "agent.core"}
 ```
 
-Installed dependencies expand deterministically and enter the same immutable
-bundle compiler as local components. Missing dependencies, cycles, duplicate
-selections, undeclared cross-component calls, and local/library ID collisions
-fail assembly.
+A library's own dependencies expand deterministically, and everything compiles
+into one immutable bundle alongside your local components. Missing
+dependencies, cycles, duplicate selections, undeclared cross-component calls,
+and collisions between a local ID and a library ID all fail assembly.
 
 ## Test a signed mission function without a model
 
@@ -131,16 +133,12 @@ Optional mission data is separate from workflow input:
 Paths are resolved under the canonical manifest directory. Absolute paths,
 traversal, devices, non-regular files, and symlink escapes are rejected.
 
-Model-accessible filesystem operations use an MCP server installed by the
-host. The shipped non-production sample freezes a bounded UTF-8 snapshot at
-startup and serves list, search, and ranged-read tools without later
-filesystem access. An immutable MCP installation may name one mapped
-read-only tool as `snapshot_identity`. PtcRunner calls that tool once during
-provider assembly with an empty argument object, validates its configured
-result field as a lowercase `sha256:` digest, and publishes the digest only as
-`content_snapshot_hash` in the safe provider snapshot. The identity tool need
-not be selected into the mission environment; failure to obtain a valid
-identity closes provider assembly.
+Those rules govern files the host reads while loading the manifest. Files the
+*model* can reach are separate and never come from the manifest: they come from
+an MCP server the host installs. The
+[filesystem sample server](../../examples/mcp/filesystem/README.md) is a
+non-production example of one, used by the tutorials and integration tests.
+[Host configuration](host-configuration.md#mcp-servers) covers installing it.
 
 ## Input and result contracts
 
@@ -176,11 +174,12 @@ without repeating the run under private inspection. The command reports it as:
     ]}}}
 ```
 
-`json_value` reports the guard that runs before any schema keyword: a value
-must be JSON-like, and a PTC-Lisp map with keyword keys is not. That rejection
-produces no violations at all, so `json_value: false` with an empty
-`violations` list is the signature of keyword keys rather than of a schema
-mismatch.
+One common failure has nothing to do with your schema. Before any schema
+keyword runs, the value must be JSON-like, and a PTC-Lisp map with keyword keys
+is not — so a workflow returning `{:decision "no-change"}` instead of
+`{"decision" "no-change"}` fails this guard. That rejection produces no
+violations at all, which is how you recognize it: `json_value: false` with an
+empty `violations` list means keyword keys, not a schema mismatch.
 
 `violations` locates each failure by schema keyword and path within the branch
 the discriminator selected; branches it did not select are omitted, since they
@@ -239,10 +238,10 @@ clobbers an existing file, and can be passed directly to a later run with
 `--mission`. Use `--private-output` for a private run; it creates a `0600`
 artifact and keeps the value off stdout.
 
-## Providers are installed authority
+## Providers come from the host, not the manifest
 
-The manifest selects providers by a bounded public name and JSON
-configuration:
+A manifest cannot create a provider. It can only select one the operator
+already installed, by its public name plus JSON configuration:
 
 ```json
 "providers": {
@@ -260,75 +259,53 @@ configuration:
 }
 ```
 
-Only builders installed by the host may be selected; no provider names are
-implicit. The separate host JSON fixes models, commands, credentials,
-endpoints, tool mappings, native PtcRunner sources, data classes, and outer
-ceilings. A manifest cannot name a host module or callback, launch a command,
-include credentials, or choose an arbitrary endpoint. Placement is enforced:
-LLM sources are workflow-only; MCP and native snapshot sources are
-mission-only.
+A name is all a manifest gets. The credentials, endpoints, commands, and tool
+mappings behind that name live in the host JSON, so a manifest cannot reach past
+its selection to launch a command, supply a credential, or point a provider
+somewhere else. Placement is fixed too: LLM providers are workflow-only, MCP and
+native snapshot providers mission-only.
 
 For MCP, `allow` selects installed public names without changing their
-operator-declared effects. If an installation contains any write mapping,
-`allow` is mandatory and non-empty; adding a write mapping therefore invalidates
-an unchanged implicit selection instead of granting new authority. An
-all-read installation may omit `allow` to select all of its mappings. The
-optional `model_visible` list can only narrow the selected names the host marked
-visible and never changes call authority.
+operator-declared effects. An all-read installation may omit `allow` to select
+every mapping. But if the installation contains even one write mapping, `allow`
+becomes mandatory and non-empty — so adding a write mapping breaks an unchanged
+manifest that relied on implicit selection instead of silently widening its
+authority.
 
-[Host configuration](host-configuration.md) is the operator reference for that
-document: credentials, all five provider sources, transports, tool mappings,
-data classes, and installed ceilings.
+The optional `model_visible` list may only narrow the names the host already
+marked visible. Visibility is not authority in either direction: a granted
+capability the model cannot see stays callable by exact name, and an ungranted
+one stays denied no matter how visible it is.
 
-Canonical PtcRunner traces use a native immutable source rather than MCP. Given
-a `ptc_trace_snapshot` alias named `history`, the manifest selects
-`{"name": "history"}` in its mission providers. The installed alias derives four
-fixed capabilities:
+[Host configuration](host-configuration.md) is the operator reference for the
+host JSON itself: credentials, all five provider sources, transports, tool
+mappings, data classes, and installed ceilings.
+
+Two providers are native rather than MCP, and both serve PtcRunner's own
+evidence back to a mission. A `ptc_trace_snapshot` alias named `history` derives
 `history.list-runs`, `history.get-run`, `history.list-turns`, and
-`history.counters`. Acquisition reads and validates the directory once;
-subsequent queries use the frozen capture even if path contents change. The
-safe provider snapshot includes counts, byte ceilings, and content identity,
-but no path. Every query result carries `snapshot_hash`, equal to that
-provider snapshot's `content_snapshot_hash`, so a cited run, sequence, or
-counter page remains bound to the captured catalog. Do not confuse that
-algorithm-qualified content identity with the safe provider snapshot's own
-bare-hex `snapshot_hash`: the latter attests the complete installed provider
-identity, including its policy and ceilings, while `content_snapshot_hash`
-attests only the frozen queried bytes.
+`history.counters`. A `ptc_inspection_snapshot` alias derives `list-runs`,
+`model-exchanges`, `capability-calls`, `generated-sources`,
+`effective-preludes`, and `provider-exchanges`.
+[Kernel REPL](kernel-repl.md#private-inspection-mission-sessions) shows the
+queries in use, and the
+[TraceLog contract](../trace-log-contract.md#query-contract) is normative for
+paging and bounds.
 
-Private inspection artifacts use a separate paired native source, installed as
-`ptc_inspection_snapshot`. A manifest selecting such an alias must also select
-exactly one
-`ptc_trace_snapshot` provider. Provider acquisition captures that canonical
-trace first, then loads each regular `.inspection.jsonl` artifact once through
-the authoritative inspection parser and validates every identity and
-correlation against the captured trace. An orphan, duplicate run, malformed or
-replaced artifact, incomplete input/output pair, ambiguous trace source, or
-limit violation rejects the whole private snapshot. No partial catalog is
-exposed.
+Four properties matter when selecting them. Each reads its directory once, so an
+agent querying the trace of its own run sees a stable catalog instead of its own
+writes. An inspection snapshot never stands alone: it requires exactly one trace
+snapshot to validate against, and one orphaned, duplicated, malformed, or
+oversized artifact rejects the whole private catalog rather than exposing part of
+it. Because inspection data classifies the run as `private_inspection`, every
+other selected provider must accept private data before either directory is
+opened. And neither provider's safe snapshot contains its directory path — only
+counts, ceilings, and content identity — so publishing a snapshot does not
+disclose where the evidence lives.
 
-The installed alias derives `list-runs`, `model-exchanges`,
-`capability-calls`, `generated-sources`, `effective-preludes`, and
-`provider-exchanges`. Collection results pair related records by their
-correlation IDs and use deterministic bounded pages with source-bound opaque
-cursors. Run-scoped private collections accept `"order": "asc" | "desc"`;
-ascending sequence order is the default, and the order is part of the cursor's
-bound query identity. Every result carries the same `snapshot_hash` recorded
-as `content_snapshot_hash` in the safe provider snapshot. V1 and V2 artifacts
-may share a directory: a V1 run has an empty provider-exchange page, while V2
-exposes each paired MCP request and response. The source classifies the run as
-`private_inspection`, so every
-selected provider must accept private data before either snapshot directory is
-opened. Safe connector metadata contains only counts, byte ceilings,
-trace/content identities, and hashes—not paths or private payloads.
-
-`model_visible` controls whether a capability appears in model context. It
-does not grant or remove execution authority: a granted hidden capability stays
-callable by exact name, and an ungranted one stays denied.
-
-The resulting trust boundary is simple. Treat the workflow bundle and the
-manifest as application code. Treat model-generated source, mission input, file
-content, and provider output as untrusted data.
+That yields a simple trust boundary. Treat the workflow bundle and the manifest
+as application code. Treat model-generated source, mission input, file content,
+and provider output as untrusted data.
 
 ## Requested limits narrow host ceilings
 
@@ -345,20 +322,21 @@ All limits are positive hard ceilings. A manifest may request lower values:
 }
 ```
 
-The installation controls the maximum allowed values. A manifest cannot raise
-them. Omitted values use normal runtime defaults capped by any lower installed
-ceiling.
+The installation sets the maximum for each one, and a manifest can only request
+that value or less. An omitted limit takes the normal runtime default, capped by
+any lower installed ceiling.
 
-Limits cover the complete run, workflow and mission evaluations, process heap,
-source, retained continuation memory, provider concurrency and calls,
-capability arguments/results, terminal results, and canonical events.
+Limits reach further than the six shown above: they also bound process heap,
+source size, retained continuation memory, provider concurrency, capability
+arguments and results, and canonical events.
 
 The compiled ceilings suit one bounded run. An agent that must work for hours
 needs more turns, model calls, and trace events than they allow, and only the
-operator can grant that — see
-[Host configuration](host-configuration.md#installed-ceilings). Requesting more
-here than the host installed is rejected; a manifest that needs a larger budget
-must still ask for it after the operator raises the ceiling.
+operator can raise that — requesting more here than the host installed is
+rejected. Even after the operator raises a ceiling, a manifest that wants the
+larger budget must still ask for it.
+[Host configuration](host-configuration.md#installed-ceilings) lists every
+installable name.
 
 ## Events and inspection
 
@@ -381,18 +359,9 @@ choose that destination.
 
 ## Optional labels for trace queries
 
-Labels do not affect execution, authority, prompts, results, or provider
-selection. Most small manifests should omit them. Add labels when one trace
-directory contains many runs and you need to group or filter those runs in the
-log-analysis REPL or Viewer.
-
-Labels are supplied by the manifest author; they are not inferred from the
-selected providers and the Kernel does not treat them as authoritative. Use
-the actual provider configuration and canonical capability events for runtime
-accounting or security decisions.
-
-Labels live at the manifest's top level. The loader validates them once and
-copies their normalized form into the canonical `run-started` event:
+Labels are one optional block at the manifest's top level. The loader validates
+them once and copies their normalized form into the canonical `run-started`
+event:
 
 ```json
 "labels": {
@@ -403,7 +372,18 @@ copies their normalized form into the canonical `run-started` event:
 }
 ```
 
-The fields have different purposes:
+They exist for one job: grouping and filtering runs when a single trace
+directory holds many of them, in the log-analysis REPL or the Viewer. They
+affect nothing else — not execution, authority, prompts, results, or provider
+selection — so most small manifests should omit them entirely.
+
+Because the manifest author supplies labels, the Kernel does not treat them as
+authoritative. They are never inferred from the providers actually selected, so
+a label claiming `"model": "deepseek"` proves nothing about which model ran. For
+runtime accounting or security decisions, read the real provider configuration
+and the canonical capability events instead.
+
+The fields serve different purposes:
 
 - `tags` are readable, queryable categories from a fixed vocabulary, such as
   `mode=agent`, `mode=deterministic`, or `environment=staging`;

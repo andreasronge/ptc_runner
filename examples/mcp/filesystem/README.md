@@ -23,6 +23,44 @@ capture cannot alter a result.
 Every data-bearing result carries the same `snapshot_hash`, so a citation binds
 to the exact bytes queried.
 
+## Why it freezes
+
+Serving live bytes is what a filesystem server normally does, and PtcRunner
+never requires otherwise. This sample freezes for three reasons of its own:
+
+- **Repeatability.** Tutorials and integration tests run against it. A server
+  reading the live working tree would make their results depend on whatever the
+  tree happened to contain at the time.
+- **A hashable set of bytes.** A digest can only cover a bounded capture, never
+  "the filesystem". Freezing is what makes a content identity possible, not a
+  consequence of having one.
+- **No races to defend against.** A capture that is never read twice cannot be
+  raced by a file that changes, appears, or disappears mid-run, so the
+  confinement rules below need no time-of-check logic.
+
+## Publishing the content identity
+
+A host installation may publish this server's digest by adding
+`snapshot_identity`, naming the tool that reports it and the field that carries
+it:
+
+```json
+"snapshot_identity": {"tool": "snapshot_info", "field": "snapshot_hash"}
+```
+
+PtcRunner then calls `snapshot_info` once during provider assembly and publishes
+the value as `content_snapshot_hash` in the safe provider snapshot. Two things
+consume it. Snapshot-backed capability results carry it, so a citation stays
+bound to the exact bytes queried. And an evaluation harness can require it to
+match before treating two runs as comparable — `repo-analyst/aggregate.clj`
+rejects a baseline and candidate pair whose content hashes differ. Install the
+field when a run's conclusions will be cited or compared against another run,
+and omit it otherwise.
+
+`repo-analyst.host.json` in the repository root is a working installation.
+[Host configuration](../../../docs/guides/host-configuration.md#mcp-servers) is
+the full reference.
+
 ## Running
 
 ```console

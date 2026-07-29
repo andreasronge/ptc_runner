@@ -198,8 +198,8 @@ every mapped tool. It accepts 1 to 128 tools.
       "model_visible": false,
       "error_feedback": "closed"
     },
-    "snapshot_hash": {
-      "as": "workspace.snapshot-hash",
+    "snapshot_info": {
+      "as": "workspace.info",
       "effect": "read",
       "model_visible": false,
       "error_feedback": "closed"
@@ -212,7 +212,7 @@ every mapped tool. It accepts 1 to 128 tools.
       "error_feedback": "closed"
     }
   },
-  "snapshot_identity": {"tool": "snapshot_hash", "field": "digest"},
+  "snapshot_identity": {"tool": "snapshot_info", "field": "snapshot_hash"},
   "ceilings": {
     "timeout_ms": 5000,
     "max_catalog_tools": 128,
@@ -254,11 +254,20 @@ recoverable error detail. Enabling it trusts the installed server not to place
 secrets, paths, or stack traces in that text. Public canonical events stay
 closed either way.
 
-`snapshot_identity` names one mapped read-only tool and a result field.
-PtcRunner calls it once during assembly with an empty argument object, validates
-the field as a lowercase `sha256:` digest, and publishes it as
-`content_snapshot_hash`. The identity tool need not be selected into the mission
-environment; failing to obtain a valid identity closes provider assembly.
+`snapshot_identity` names one mapped read-only tool and a field in that tool's
+result. PtcRunner calls it once during assembly with an empty argument object,
+so the tool must require no arguments. The field must hold a lowercase
+`sha256:` digest, published as `content_snapshot_hash`. The identity tool need
+not be selected into the mission environment; failing to obtain a valid identity
+closes provider assembly.
+
+Install it when the server serves content that cannot change during a run, so
+the digest identifies exactly the bytes the run could have read. Only the
+digest's shape is checked here; nothing verifies that the server is genuinely
+immutable. The
+[filesystem sample](../../examples/mcp/filesystem/README.md#publishing-the-content-identity)
+explains when the field is worth installing, and `repo-analyst.host.json` in the
+repository root is a working installation of it.
 
 Ceilings default to a 5,000 ms end-to-end timeout (maximum 300,000), 128
 catalog tools, and 1,000,000 result bytes (maximum 1,048,576).
@@ -346,10 +355,11 @@ can carry the reserved content hash plus an empty page.
 
 Selecting an inspection snapshot also requires exactly one trace snapshot: the
 canonical capture is taken first, and every private artifact is validated
-against it. [Manifests and capabilities](manifests-and-capabilities.md#providers-are-installed-authority)
-documents the derived capability names and the query contract, and
-[Running and debugging](running-and-debugging.md) covers producing the
-artifacts in the first place.
+against it. [Manifests and capabilities](manifests-and-capabilities.md#providers-come-from-the-host-not-the-manifest)
+lists the derived capability names,
+[TraceLog contract](../trace-log-contract.md#query-contract) is normative for
+the query contract, and [Running and debugging](running-and-debugging.md) covers
+producing the artifacts in the first place.
 
 ## Data classes
 
