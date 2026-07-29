@@ -27,7 +27,10 @@ defmodule PtcRunner.Kernel.RunState do
   terminates. A process holds at most one reservation at a time: dispatch is
   sequential per process, so a second reserve while one is active is a protocol
   violation and is rejected rather than silently replacing the tracked
-  reservation.
+  reservation. A provider process atomically records terminal policy
+  classification against the active evaluation before publishing its result;
+  that evaluation-scoped bit therefore survives a later sandbox timeout or heap
+  kill and is cleared with the lease.
   """
   use GenServer
 
@@ -128,6 +131,11 @@ defmodule PtcRunner.Kernel.RunState do
   @doc "Releases a provider slot and accepts completion only while the run is open."
   def finish_provider(state), do: call(state, :finish_provider)
 
+  @doc false
+  @spec mark_evaluation_terminal_provider_failure(t()) :: :ok
+  def mark_evaluation_terminal_provider_failure(state),
+    do: call(state, :mark_evaluation_terminal_provider_failure)
+
   @spec reserve_evaluation(t()) :: {:ok, map(), [term()], reference()} | {:error, atom()}
   @doc "Atomically reserves and returns native subordinate memory and turn history."
   def reserve_evaluation(state), do: call(state, :reserve_evaluation)
@@ -141,6 +149,12 @@ defmodule PtcRunner.Kernel.RunState do
   @spec release_evaluation(t(), reference()) :: :ok | {:error, atom()}
   @doc "Releases the caller's evaluation lease without changing committed memory."
   def release_evaluation(state, lease), do: call(state, {:release_evaluation, lease})
+
+  @doc false
+  @spec release_evaluation_status(t(), reference()) ::
+          {:ok, %{terminal_provider_failure?: boolean()}} | {:error, atom()}
+  def release_evaluation_status(state, lease),
+    do: call(state, {:release_evaluation_status, lease})
 
   @spec protocol_error(t()) :: :ok | {:error, :protocol_error_limit}
   @doc "Records one protocol error and closes the run when its ceiling is exceeded."
@@ -235,6 +249,8 @@ defmodule PtcRunner.Kernel.RunState do
        memory: %{},
        history: [],
        evaluation_lease: nil,
+       evaluation_release_waiter: nil,
+       evaluation_terminal_provider_failure?: false,
        reservations: %{}
      }}
   end
@@ -302,6 +318,35 @@ defmodule PtcRunner.Kernel.RunState do
     {:reply, reply, state}
   end
 
+  def handle_call(
+        {token, :mark_evaluation_terminal_provider_failure},
+        {provider, _tag},
+        %{token: token} = state
+      ) do
+    reservation_lease =
+      Enum.find_value(state.reservations, fn
+        {_caller,
+         %{environment: :mission, provider: ^provider, evaluation_lease: evaluation_lease}} ->
+          evaluation_lease
+
+        _reservation ->
+          nil
+      end)
+
+    current_lease? =
+      case state.evaluation_lease do
+        {^reservation_lease, _owner, _monitor_ref} when is_reference(reservation_lease) -> true
+        _other -> false
+      end
+
+    state =
+      if current_lease?,
+        do: %{state | evaluation_terminal_provider_failure?: true},
+        else: state
+
+    {:reply, :ok, state}
+  end
+
   def handle_call({token, :reserve_evaluation}, {caller, _tag}, %{token: token} = state) do
     cond do
       state.closed? ->
@@ -320,7 +365,13 @@ defmodule PtcRunner.Kernel.RunState do
         lease = {make_ref(), caller, Process.monitor(caller)}
 
         {:reply, {:ok, state.memory, state.history, elem(lease, 0)},
-         %{state | evaluations: state.evaluations + 1, evaluation_lease: lease}}
+         %{
+           state
+           | evaluations: state.evaluations + 1,
+             evaluation_lease: lease,
+             evaluation_release_waiter: nil,
+             evaluation_terminal_provider_failure?: false
+         }}
     end
   end
 
@@ -353,7 +404,7 @@ defmodule PtcRunner.Kernel.RunState do
 
         cond do
           unavailable?(state) ->
-            {:reply, {:error, :run_closed}, %{state | evaluation_lease: nil}}
+            {:reply, {:error, :run_closed}, clear_evaluation(state)}
 
           not event_sink_ready?(state.event_sink) ->
             failure =
@@ -362,28 +413,29 @@ defmodule PtcRunner.Kernel.RunState do
             next = %{
               state
               | closed?: true,
-                terminal_failure: failure,
-                evaluation_lease: nil
+                terminal_failure: failure
             }
+
+            next = clear_evaluation(next)
 
             {:reply, {:error, :run_closed}, next}
 
           not (is_integer(memory_bytes) and
                    memory_bytes <= state.limits.evaluation_memory_bytes) ->
-            {:reply, {:error, :memory_exceeded}, %{state | evaluation_lease: nil}}
+            {:reply, {:error, :memory_exceeded}, clear_evaluation(state)}
 
           not (history_values_valid? and is_integer(history_bytes) and
                    history_bytes <= state.limits.evaluation_history_bytes) ->
-            {:reply, {:error, :history_exceeded}, %{state | evaluation_lease: nil}}
+            {:reply, {:error, :history_exceeded}, clear_evaluation(state)}
 
           true ->
             {:reply, :ok,
              %{
                state
                | memory: RetainedSize.detach_binaries(memory),
-                 history: RetainedSize.detach_binaries(history),
-                 evaluation_lease: nil
-             }}
+                 history: RetainedSize.detach_binaries(history)
+             }
+             |> clear_evaluation()}
         end
 
       _ ->
@@ -395,7 +447,26 @@ defmodule PtcRunner.Kernel.RunState do
     case state.evaluation_lease do
       {^lease, ^caller, monitor_ref} ->
         Process.demonitor(monitor_ref, [:flush])
-        {:reply, :ok, %{state | evaluation_lease: nil}}
+        {:reply, :ok, clear_evaluation(state)}
+
+      _ ->
+        {:reply, {:error, :stale_lease}, state}
+    end
+  end
+
+  def handle_call(
+        {token, {:release_evaluation_status, lease}},
+        {caller, _tag} = from,
+        %{token: token} = state
+      ) do
+    case state.evaluation_lease do
+      {^lease, ^caller, monitor_ref} ->
+        if evaluation_reservations?(state, lease) do
+          {:noreply, %{state | evaluation_release_waiter: {from, lease}}}
+        else
+          Process.demonitor(monitor_ref, [:flush])
+          {:reply, {:ok, evaluation_status(state)}, clear_evaluation(state)}
+        end
 
       _ ->
         {:reply, {:error, :stale_lease}, state}
@@ -515,7 +586,7 @@ defmodule PtcRunner.Kernel.RunState do
         {:DOWN, ref, :process, _pid, _reason},
         %{evaluation_lease: {_lease, _caller, ref}} = state
       ),
-      do: {:noreply, %{state | evaluation_lease: nil}}
+      do: {:noreply, clear_evaluation(state)}
 
   def handle_info({:DOWN, ref, :process, pid, _reason}, state) do
     case state.reservations do
@@ -590,6 +661,7 @@ defmodule PtcRunner.Kernel.RunState do
     end)
 
     %{state | closed?: true, provider_tasks: 0, reservations: %{}}
+    |> maybe_complete_evaluation_release()
   end
 
   defp redact_status(status) do
@@ -631,6 +703,8 @@ defmodule PtcRunner.Kernel.RunState do
 
       true ->
         reservation = %{
+          environment: environment,
+          evaluation_lease: active_evaluation_lease(state, environment),
           caller_ref: Process.monitor(caller),
           provider: nil,
           provider_ref: nil
@@ -663,11 +737,61 @@ defmodule PtcRunner.Kernel.RunState do
         :ok
     end
 
-    if reservation do
-      %{state | provider_tasks: max(state.provider_tasks - 1, 0), reservations: reservations}
-    else
-      state
+    next =
+      if reservation do
+        %{state | provider_tasks: max(state.provider_tasks - 1, 0), reservations: reservations}
+      else
+        state
+      end
+
+    maybe_complete_evaluation_release(next)
+  end
+
+  defp active_evaluation_lease(state, :mission) do
+    case state.evaluation_lease do
+      {lease, _owner, _monitor_ref} -> lease
+      nil -> nil
     end
+  end
+
+  defp active_evaluation_lease(_state, :workflow), do: nil
+
+  defp evaluation_reservations?(state, lease) do
+    Enum.any?(state.reservations, fn
+      {_caller, %{evaluation_lease: ^lease}} -> true
+      _reservation -> false
+    end)
+  end
+
+  defp evaluation_status(state) do
+    %{terminal_provider_failure?: state.evaluation_terminal_provider_failure?}
+  end
+
+  defp maybe_complete_evaluation_release(%{evaluation_release_waiter: nil} = state), do: state
+
+  defp maybe_complete_evaluation_release(%{evaluation_release_waiter: {from, lease}} = state) do
+    case state.evaluation_lease do
+      {^lease, _owner, monitor_ref} ->
+        if evaluation_reservations?(state, lease) do
+          state
+        else
+          Process.demonitor(monitor_ref, [:flush])
+          GenServer.reply(from, {:ok, evaluation_status(state)})
+          clear_evaluation(state)
+        end
+
+      _other ->
+        clear_evaluation(state)
+    end
+  end
+
+  defp clear_evaluation(state) do
+    %{
+      state
+      | evaluation_lease: nil,
+        evaluation_release_waiter: nil,
+        evaluation_terminal_provider_failure?: false
+    }
   end
 
   defp reservation_by_provider_ref(reservations, ref) do

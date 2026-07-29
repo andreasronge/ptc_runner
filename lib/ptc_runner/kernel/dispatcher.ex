@@ -15,6 +15,9 @@ defmodule PtcRunner.Kernel.Dispatcher do
   state. A trusted `ProviderError` with `dispatch_provenance: :not_dispatched`
   preserves its specific pre-dispatch policy without exposing that internal
   provenance. Workflow capabilities retain their provider-owned retry policy.
+  Before a mission provider publishes a terminal policy failure, its monitored
+  callback records that classification in RunState so a subsequent evaluator
+  kill cannot make the agent repeat the call.
   """
 
   alias PtcRunner.Kernel.Capability
@@ -289,10 +292,12 @@ defmodule PtcRunner.Kernel.Dispatcher do
 
           receive do
             ^go ->
-              send(
-                parent,
-                {:provider_result, self(), safely_invoke(capability.callback, arguments, context)}
-              )
+              result = safely_invoke(capability.callback, arguments, context)
+
+              if terminal_provider_failure?(result),
+                do: RunState.mark_evaluation_terminal_provider_failure(state)
+
+              send(parent, {:provider_result, self(), result})
 
             {:DOWN, ^parent_ref, :process, _parent, _reason} ->
               :ok
@@ -471,6 +476,15 @@ defmodule PtcRunner.Kernel.Dispatcher do
     do: Map.put(result, :mutation_state, :indeterminate)
 
   defp maybe_put_mutation_state(result, nil), do: result
+
+  defp terminal_provider_failure?({:error, %ProviderError{} = error}) do
+    ProviderError.valid?(error) and
+      (error.kind == :denied or
+         (error.kind == :invalid_result and
+            error.details in ["mcp_capability_negotiation_error", "mcp_protocol_error"]))
+  end
+
+  defp terminal_provider_failure?(_result), do: false
 
   defp validate(%Capability{} = capability, arguments) do
     if JSONSchema.valid?(capability.input_validator, arguments),

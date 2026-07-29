@@ -147,12 +147,6 @@ defmodule PtcRunner.Kernel.MCPProtocolTest do
     end
 
     assert {:error, :mcp_unsupported_result} =
-             MCPProtocol.outcome(
-               %{"result" => %{"resultType" => "input_required"}},
-               "tools/call"
-             )
-
-    assert {:error, :mcp_unsupported_result} =
              MCPProtocol.outcome(%{"result" => %{"resultType" => "future"}}, "tools/call")
 
     for malformed <- [nil, 42, %{}, []] do
@@ -168,6 +162,173 @@ defmodule PtcRunner.Kernel.MCPProtocolTest do
                %{"result" => %{"resultType" => "complete", "tools" => []}},
                "tools/list"
              )
+  end
+
+  test "classifies input-required outcomes by method, structure, and client policy" do
+    state_only = %{
+      "resultType" => "input_required",
+      "requestState" => "eyJwcm9ncmVzcyI6IjUwJSJ9"
+    }
+
+    input_requests = %{
+      "resultType" => "input_required",
+      "inputRequests" => %{
+        "github_login" => %{
+          "method" => "elicitation/create",
+          "params" => %{
+            "message" => "Please provide your GitHub username",
+            "requestedSchema" => %{
+              "type" => "object",
+              "properties" => %{"name" => %{"type" => "string"}},
+              "required" => ["name"]
+            }
+          }
+        },
+        "capital_of_france" => %{
+          "method" => "sampling/createMessage",
+          "params" => %{
+            "messages" => [
+              %{
+                "role" => "user",
+                "content" => %{"type" => "text", "text" => "What is the capital of France?"}
+              }
+            ],
+            "maxTokens" => 100,
+            "metadata" => %{"threshold" => 0.5, "fallback" => nil}
+          }
+        }
+      }
+    }
+
+    for method <- ["tools/call", "prompts/get", "resources/read"] do
+      assert {:error, :mcp_input_required_refused} =
+               MCPProtocol.outcome(%{"result" => state_only}, method)
+
+      assert {:error, :mcp_protocol_error} =
+               MCPProtocol.outcome(
+                 %{"result" => %{"resultType" => "input_required", "inputRequests" => %{}}},
+                 method
+               )
+
+      assert {:error, :mcp_input_required_refused} =
+               MCPProtocol.outcome(
+                 %{
+                   "result" => %{
+                     "resultType" => "input_required",
+                     "inputRequests" => %{},
+                     "requestState" => "load-shed"
+                   }
+                 },
+                 method
+               )
+
+      assert {:error, :mcp_capability_negotiation_error} =
+               MCPProtocol.outcome(%{"result" => input_requests}, method)
+
+      assert {:error, :mcp_capability_negotiation_error} =
+               MCPProtocol.outcome(
+                 %{"result" => Map.put(input_requests, "requestState", "opaque")},
+                 method
+               )
+    end
+
+    assert {:error, :mcp_protocol_error} =
+             MCPProtocol.outcome(%{"result" => state_only}, "tools/list")
+
+    assert {:error, :mcp_capability_negotiation_error} =
+             MCPProtocol.outcome(
+               %{
+                 "result" => %{
+                   "resultType" => "input_required",
+                   "inputRequests" => %{
+                     "roots" => %{"method" => "roots/list"}
+                   }
+                 }
+               },
+               "tools/call"
+             )
+
+    for malformed <- [
+          %{"resultType" => "input_required"},
+          %{"resultType" => "input_required", "requestState" => 42},
+          %{"resultType" => "input_required", "inputRequests" => []},
+          %{
+            "resultType" => "input_required",
+            "inputRequests" => %{},
+            "requestState" => nil
+          },
+          %{
+            "resultType" => "input_required",
+            "requestState" => "opaque",
+            "_meta" => []
+          },
+          %{
+            "resultType" => "input_required",
+            "inputRequests" => %{
+              "future" => %{"method" => "future/request", "params" => %{}}
+            }
+          },
+          %{
+            "resultType" => "input_required",
+            "inputRequests" => %{
+              "sampling" => %{
+                "method" => "sampling/createMessage",
+                "params" => %{"messages" => [], "maxTokens" => "many"}
+              }
+            }
+          },
+          %{
+            "resultType" => "input_required",
+            "inputRequests" => %{
+              "elicitation" => %{
+                "method" => "elicitation/create",
+                "params" => %{"message" => "Missing schema"}
+              }
+            }
+          },
+          %{
+            "resultType" => "input_required",
+            "inputRequests" => %{
+              "elicitation" => %{
+                "method" => "elicitation/create",
+                "params" => %{
+                  "message" => "Choose values",
+                  "requestedSchema" => %{
+                    "type" => "object",
+                    "properties" => %{
+                      "choices" => %{"type" => "array", "items" => %{}}
+                    }
+                  }
+                }
+              }
+            }
+          },
+          %{
+            "resultType" => "input_required",
+            "inputRequests" => %{
+              "sampling" => %{
+                "method" => "sampling/createMessage",
+                "params" => %{
+                  "messages" => [
+                    %{
+                      "role" => "user",
+                      "content" => %{
+                        "type" => "image",
+                        "data" => "not base64!",
+                        "mimeType" => "image/png",
+                        "annotations" => %{"priority" => "high"}
+                      }
+                    }
+                  ],
+                  "maxTokens" => 100
+                }
+              }
+            }
+          }
+        ] do
+      assert {:error, :mcp_protocol_error} =
+               MCPProtocol.outcome(%{"result" => malformed}, "tools/call")
+    end
   end
 
   test "reduces catalog pages without interpreting unmapped tool contracts" do

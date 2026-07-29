@@ -87,6 +87,64 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     assert combined_bytes == memory_bytes + history_bytes
   end
 
+  test "evaluation status waits for its provider and cannot leak into the next lease" do
+    parent = self()
+    {:ok, state} = RunState.start(Limits.defaults())
+
+    evaluation_owner =
+      spawn_link(fn ->
+        {:ok, %{}, [], lease} = RunState.reserve_evaluation(state)
+        send(parent, {:evaluation_ready, self()})
+
+        receive do
+          :release ->
+            status = RunState.release_evaluation_status(state, lease)
+            send(parent, {:evaluation_released, status})
+        end
+      end)
+
+    assert_receive {:evaluation_ready, ^evaluation_owner}
+
+    {:ok, blocked} =
+      Capability.new(
+        name: "blocked",
+        effect: :read,
+        input_schema: @input_schema,
+        callback: fn _ ->
+          send(parent, {:provider_ready, self()})
+
+          receive do
+            :finish ->
+              {:error,
+               ProviderError.new(:denied, "mcp_input_required_refused", retryable?: false)}
+          end
+        end
+      )
+
+    {:ok, mission} = MissionEnvironment.new(capabilities: [blocked])
+
+    dispatch =
+      Task.async(fn ->
+        Dispatcher.dispatch(state, :mission, mission, "blocked", %{}, 2_000)
+      end)
+
+    assert_receive {:provider_ready, provider}
+    send(evaluation_owner, :release)
+    refute_receive {:evaluation_released, _status}, 50
+
+    send(provider, :finish)
+
+    assert %{status: :error, kind: :provider_error, reason: :denied} =
+             Task.await(dispatch, 2_000)
+
+    assert_receive {:evaluation_released, {:ok, %{terminal_provider_failure?: true}}}
+
+    assert {:ok, %{}, [], next_lease} = RunState.reserve_evaluation(state)
+
+    assert {:ok, %{terminal_provider_failure?: false}} =
+             RunState.release_evaluation_status(state, next_lease)
+  end
+
   test "continuation commit applies separate memory and exact-history ceilings atomically" do
     memory = %{"retained" => String.duplicate("m", 64)}
     history_value = String.duplicate("h", 64)
@@ -1805,6 +1863,41 @@ defmodule PtcRunner.Kernel.CoreContractTest do
 
     assert %{outcome: :evaluation_error, details: %{capability_activity?: false}} =
              Evaluation.evaluate_source(state, mission, "leaked", 100)
+  end
+
+  test "sandbox kills retain terminal provider-failure provenance outside the evaluator" do
+    {:ok, blocked} =
+      Capability.new(
+        name: "blocked",
+        effect: :read,
+        input_schema: @input_schema,
+        callback: fn _ ->
+          {:error, ProviderError.new(:denied, "mcp_input_required_refused", retryable?: false)}
+        end
+      )
+
+    {:ok, mission} = MissionEnvironment.new(capabilities: [blocked])
+
+    {:ok, limits} =
+      Limits.new(
+        evaluation_timeout_ms: 500,
+        evaluation_heap_words: 100_000_000
+      )
+
+    {:ok, state} = RunState.start(limits)
+
+    assert %{
+             outcome: :evaluation_error,
+             kind: :timeout,
+             retryable?: true,
+             terminal_provider_failure?: true
+           } =
+             Evaluation.evaluate_source(
+               state,
+               mission,
+               ~S|(do (tool/blocked {}) (reduce + (range 0 100000000)))|,
+               500
+             )
   end
 
   test "workflow kernel-eval routes source into the mission environment" do

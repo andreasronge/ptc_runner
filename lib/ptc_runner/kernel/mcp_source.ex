@@ -148,7 +148,8 @@ defmodule PtcRunner.Kernel.MCPSource do
   stable atom error: `:mcp_authentication_failed`, `:mcp_timeout`,
   `:mcp_transport_error`, `:mcp_protocol_error`, `:mcp_remote_error`,
   `:mcp_response_exceeded`, `:mcp_catalog_exceeded`, `:mcp_invalid_catalog`,
-  `:mcp_invalid_tool_schema`, `:mcp_unsupported_result`,
+  `:mcp_invalid_tool_schema`, `:mcp_capability_negotiation_error`,
+  `:mcp_input_required_refused`, `:mcp_unsupported_result`,
   `:mcp_mapped_tool_missing`, or `:mcp_invalid_snapshot_identity`.
 
   ## Frozen result and snapshot contracts
@@ -163,6 +164,12 @@ defmodule PtcRunner.Kernel.MCPSource do
   schema failures become bounded `PtcRunner.Kernel.ProviderError` values with
   closed reasons. Authentication, timeout, unsupported-result, invalid-result,
   and transport failures never include remote messages or payloads.
+  `InputRequiredResult` is never retried: valid state-only results, including
+  empty load-shedding request maps accompanied by `requestState`, become the denied
+  `mcp_input_required_refused` policy cause, valid non-empty input-bearing
+  results become `mcp_capability_negotiation_error` because this client
+  advertises no input capabilities, and malformed or method-inapplicable
+  results remain `mcp_protocol_error`.
   Parameter-header projection, outbound-header validation, and a closed HTTP
   request context are trusted `:not_dispatched` failures. Once an HTTP request
   begins or a stdio request may have been written, failures carry internal
@@ -1615,6 +1622,26 @@ defmodule PtcRunner.Kernel.MCPSource do
 
   defp provider_error(:mcp_protocol_error, effect, provenance),
     do: provider_error(:invalid_result, "mcp_protocol_error", false, effect, provenance)
+
+  defp provider_error(:mcp_capability_negotiation_error, effect, provenance),
+    do:
+      provider_error(
+        :invalid_result,
+        "mcp_capability_negotiation_error",
+        false,
+        effect,
+        provenance
+      )
+
+  defp provider_error(:mcp_input_required_refused, effect, provenance),
+    do:
+      provider_error(
+        :denied,
+        "mcp_input_required_refused",
+        false,
+        effect,
+        provenance
+      )
 
   defp provider_error(:mcp_remote_error, effect, provenance),
     do: provider_error(:domain_error, "mcp_remote_error", false, effect, provenance)

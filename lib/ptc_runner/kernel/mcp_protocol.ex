@@ -22,15 +22,42 @@ defmodule PtcRunner.Kernel.MCPProtocol do
   companion blocks are validated and discarded. Tools without output schemas
   return a map containing ordered `"text"` values and, when present, ordered
   embedded text `"resources"`. Binary resources and all other content types
-  remain unsupported. The functions return closed MCP reason atoms and never
-  construct provider errors or expose remote error data.
+  remain unsupported.
+
+  Multi-round-trip `input_required` results are legal only for `tools/call`,
+  `prompts/get`, and `resources/read`. A schema-valid state-only result,
+  including an empty load-shedding `inputRequests` map accompanied by
+  `requestState`, is refused by policy. A schema-valid, non-empty request map is
+  a capability-negotiation error because the client advertises no elicitation,
+  sampling, or roots capability. Input requests are validated against those
+  three method schemas only to distinguish malformed protocol data; they are
+  never interpreted or fulfilled. Malformed results and results on other
+  methods are protocol errors. This module never retries either form. The
+  functions return closed MCP reason atoms and never construct provider errors
+  or expose remote error data.
   """
 
   alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.JSONSchema
   alias PtcRunner.Kernel.JSONValue
+  alias PtcRunner.Kernel.MCPBase64Format
   alias PtcRunner.Kernel.StrictJSON
 
+  @input_request_schema_path Path.expand(
+                               "../../../priv/schemas/mcp-input-request-2026-07-28.schema.json",
+                               __DIR__
+                             )
+  @external_resource @input_request_schema_path
+  @input_request_validator @input_request_schema_path
+                           |> File.read!()
+                           |> Jason.decode!()
+                           |> JSV.build!(
+                             atoms: false,
+                             formats: [
+                               MCPBase64Format | JSV.default_format_validator_modules()
+                             ],
+                             warnings: :silent
+                           )
   @upstream_name ~r/\A[^\s\x00-\x1f\x7f]{1,128}\z/u
   @header_token ~r/\A[!#$%&'*+\-.^_`|~0-9A-Za-z]+\z/
   @max_safe_integer 9_007_199_254_740_991
@@ -38,6 +65,7 @@ defmodule PtcRunner.Kernel.MCPProtocol do
   @max_header_name_bytes 128
   @max_parameter_header_bytes 16_384
   @max_schema_depth 16
+  @input_required_methods ~w(tools/call prompts/get resources/read)
   @schema_instance_keywords ~w(const enum)
   @schema_value_keywords ~w(additionalProperties contains if items not then else)
   @schema_list_keywords ~w(allOf anyOf oneOf prefixItems)
@@ -168,7 +196,12 @@ defmodule PtcRunner.Kernel.MCPProtocol do
 
   @spec outcome(map(), binary()) ::
           {:ok, map()}
-          | {:error, :mcp_protocol_error | :mcp_remote_error | :mcp_unsupported_result}
+          | {:error,
+             :mcp_capability_negotiation_error
+             | :mcp_input_required_refused
+             | :mcp_protocol_error
+             | :mcp_remote_error
+             | :mcp_unsupported_result}
   def outcome(body, method) when is_map(body) and is_binary(method) do
     case {Map.fetch(body, "result"), Map.fetch(body, "error")} do
       {{:ok, result}, :error} when is_map(result) ->
@@ -559,9 +592,11 @@ defmodule PtcRunner.Kernel.MCPProtocol do
     if cacheable_method?(method), do: validate_cache_hints(result), else: {:ok, result}
   end
 
-  defp classify_result(%{"resultType" => type}, _method)
-       when type in ["input_required", "task"],
-       do: {:error, :mcp_unsupported_result}
+  defp classify_result(%{"resultType" => "input_required"} = result, method),
+    do: classify_input_required(result, method)
+
+  defp classify_result(%{"resultType" => "task"}, _method),
+    do: {:error, :mcp_unsupported_result}
 
   defp classify_result(result, _method) when not is_map_key(result, "resultType"),
     do: {:error, :mcp_protocol_error}
@@ -570,6 +605,60 @@ defmodule PtcRunner.Kernel.MCPProtocol do
     do: {:error, :mcp_unsupported_result}
 
   defp classify_result(_result, _method), do: {:error, :mcp_protocol_error}
+
+  defp classify_input_required(result, method) when method in @input_required_methods do
+    input_requests = Map.fetch(result, "inputRequests")
+    request_state = Map.fetch(result, "requestState")
+
+    with true <- JSONValue.map?(result),
+         true <- valid_optional_result_meta?(result),
+         true <- valid_optional_request_state?(request_state) do
+      case {input_requests, request_state} do
+        {{:ok, requests}, {:ok, _state}}
+        when is_map(requests) and not is_struct(requests) and map_size(requests) == 0 ->
+          {:error, :mcp_input_required_refused}
+
+        {{:ok, requests}, _request_state}
+        when is_map(requests) and not is_struct(requests) and map_size(requests) > 0 ->
+          if valid_input_requests?(requests),
+            do: {:error, :mcp_capability_negotiation_error},
+            else: {:error, :mcp_protocol_error}
+
+        {:error, {:ok, _state}} ->
+          {:error, :mcp_input_required_refused}
+
+        _malformed ->
+          {:error, :mcp_protocol_error}
+      end
+    else
+      false -> {:error, :mcp_protocol_error}
+    end
+  end
+
+  defp classify_input_required(_result, _method), do: {:error, :mcp_protocol_error}
+
+  defp valid_input_requests?(requests) do
+    Enum.all?(requests, fn
+      {id, request} when is_binary(id) -> valid_input_request?(request)
+      _entry -> false
+    end)
+  end
+
+  defp valid_input_request?(request) do
+    match?({:ok, _validated}, JSV.validate(request, @input_request_validator, cast: false))
+  rescue
+    _exception -> false
+  end
+
+  defp valid_optional_result_meta?(result) do
+    case Map.fetch(result, "_meta") do
+      :error -> true
+      {:ok, meta} -> is_map(meta) and not is_struct(meta)
+    end
+  end
+
+  defp valid_optional_request_state?(:error), do: true
+  defp valid_optional_request_state?({:ok, state}), do: is_binary(state)
 
   defp validate_cache_hints(%{"ttlMs" => ttl, "cacheScope" => scope} = result)
        when is_integer(ttl) and ttl >= 0 and scope in ["public", "private"],

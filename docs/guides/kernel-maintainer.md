@@ -263,6 +263,20 @@ sends `notifications/cancelled`; stdio retains its protocol notification.
 Cancellation remains advisory and cannot make a possibly dispatched write
 retryable.
 
+The client advertises no MCP elicitation, sampling, or roots capabilities and
+never retries an `input_required` result. On `tools/call`, `prompts/get`, or
+`resources/read`, a structurally valid state-only result, including an empty
+load-shedding request map accompanied by `requestState`, is a closed denied
+policy refusal; a schema-valid non-empty request map is a
+capability-negotiation error. Malformed request entries and
+`input_required` on any other method are protocol errors. Provider denial is
+terminal at the agent correction boundary, as are the capability-negotiation
+and protocol classifications. The provider owner records that terminal
+classification before publishing the result, so a later evaluator error,
+timeout, or heap kill cannot trigger a correction turn. Once a tool call may
+have been dispatched, all three causes preserve the operator-declared effect,
+so a write remains indeterminate.
+
 PtcRunner-owned canonical traces remain native rather than passing through
 MCP. A host-installed `ptc_trace_snapshot` uses `TraceSnapshot` to capture one
 directory and `TraceCapability` to expose the same four canonical `TraceLog`
