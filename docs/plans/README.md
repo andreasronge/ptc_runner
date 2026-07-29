@@ -18,6 +18,9 @@ belongs in guides or retained specifications.
 - [`lisp-kernel/real-flow-e2e-hardening.md`](lisp-kernel/real-flow-e2e-hardening.md)
   tracks the unfinished private-sink, overflow, real-pagination, and
   cache-usage journeys.
+- [`mcp-oauth.md`](mcp-oauth.md) plans principal-scoped OAuth authorization for
+  remote Streamable HTTP MCP servers without weakening host authority or tool
+  replay safety.
 
 ## Future, trigger-gated
 
