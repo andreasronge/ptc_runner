@@ -367,7 +367,7 @@ defmodule PtcRunner.Kernel.TraceCapabilityTest do
         )
       end)
 
-    assert_receive {:temporary_synced, temporary_publisher}
+    assert_receive {:temporary_synced, temporary_publisher}, 1_000
 
     [temporary] =
       directory

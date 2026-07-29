@@ -31,6 +31,10 @@ defmodule PtcRunner.Kernel.RunConfig do
   `connector_snapshots` are bounded safe metadata copied into `run-started`;
   neither field is visible to Lisp.
 
+  `result_contract` is an optional compiled application contract exposed only
+  through the reserved workflow validator used by `agent.main`. Final
+  publication enforcement remains the responsibility of `RunBuilder`.
+
   `labels` is an optional closed safe-metadata map. Caller-defined identifier
   fields become SHA-256 fingerprints and tags use finite enumerated values
   before the map enters `run-started`.
@@ -52,6 +56,7 @@ defmodule PtcRunner.Kernel.RunConfig do
   alias PtcRunner.Kernel.ProviderRegistry
   alias PtcRunner.Kernel.ProviderResources
   alias PtcRunner.Kernel.SafeMetadata
+  alias PtcRunner.Kernel.ValueContract
   alias PtcRunner.Kernel.WorkflowEnvironment
   alias PtcRunner.Lisp.RetainedSize
 
@@ -76,6 +81,7 @@ defmodule PtcRunner.Kernel.RunConfig do
     :event_sink_owner,
     :mission_inventory,
     :claim_id,
+    result_contract: nil,
     inspection_sink: nil,
     inspection_sink_owner: nil,
     inspection_path: nil,
@@ -95,6 +101,7 @@ defmodule PtcRunner.Kernel.RunConfig do
           event_sink_owner: pid(),
           mission_inventory: MissionInventory.t(),
           claim_id: reference(),
+          result_contract: ValueContract.t() | nil,
           inspection_sink: InspectionSink.t() | nil,
           inspection_sink_owner: pid() | nil,
           inspection_path: binary() | nil,
@@ -121,6 +128,7 @@ defmodule PtcRunner.Kernel.RunConfig do
                :input,
                :limits,
                :event_sink,
+               :result_contract,
                :inspection_sink,
                :inspection_path,
                :provider_resources,
@@ -136,6 +144,7 @@ defmodule PtcRunner.Kernel.RunConfig do
          %Limits{} = limits <- Keyword.get(opts, :limits),
          %EventSink{} = sink <- Keyword.get(opts, :event_sink),
          true <- valid_event_sink_contract?(sink, limits),
+         true <- result_contract?(Keyword.get(opts, :result_contract)),
          {:ok, event_sink_owner} <- EventSink.owner(sink),
          true <-
            inspection?(Keyword.get(opts, :inspection_sink), Keyword.get(opts, :inspection_path)),
@@ -176,6 +185,7 @@ defmodule PtcRunner.Kernel.RunConfig do
          event_sink_owner: event_sink_owner,
          mission_inventory: mission_inventory,
          claim_id: make_ref(),
+         result_contract: Keyword.get(opts, :result_contract),
          inspection_sink: Keyword.get(opts, :inspection_sink),
          inspection_sink_owner: inspection_sink_owner,
          inspection_path: Keyword.get(opts, :inspection_path),
@@ -191,6 +201,10 @@ defmodule PtcRunner.Kernel.RunConfig do
       _ -> {:error, :invalid_run_config}
     end
   end
+
+  defp result_contract?(nil), do: true
+  defp result_contract?(%ValueContract{}), do: true
+  defp result_contract?(_contract), do: false
 
   defp valid_event_sink_contract?(%EventSink{policy: :normal} = sink, limits) do
     reserve = EventSink.terminal_reserve(:normal, limits)

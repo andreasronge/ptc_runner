@@ -53,3 +53,8 @@
        "error_code=" (or (get evaluation :kind) (get evaluation :outcome))
        ". Do not repeat that program. Return your best decision from the evidence "
        "you have already gathered, using return or fail on this turn."))
+
+(defn result-contract [validation]
+  (str "The returned value did not satisfy the application result contract. "
+       "Structural diagnostics: " (pr-str (get validation :details))
+       ". Send one corrected run_ptc_lisp call that returns a contract-valid value."))

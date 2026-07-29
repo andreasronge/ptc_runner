@@ -73,6 +73,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The shipped `agent.main/run` entry now validates model-authored terminal
+  candidates against the manifest result contract while the bounded loop can
+  still request a correction. Rejected values remain withheld; other workflow
+  entries retain the final fail-closed publication check.
 - `PtcRunner.Lisp.run/2` now retains only statically referenced context keys
   when context filtering is enabled, including scalar grants. Set
   `filter_context: false` when a program requires dynamic or metadata

@@ -67,7 +67,7 @@
          (or (true? (get error :retryable?))
              (false? (get error :retryable?))))))
 
-(defn run-outcome
+(defn- run-outcome*
   "Runs the agent loop and distinguishes model-authored completion from a
   bounded subject-attributable failure.
 
@@ -76,7 +76,7 @@
   score a model program failure, exhausted correction loop, or non-retryable
   generated-program error without misclassifying provider failure as subject
   behavior."
-  [task cfg]
+  [task cfg validate-result?]
   (let [max-turns (positive-int-or (get cfg "max_turns") 4 128)
         max-program-chars (positive-int-or (get cfg "max_program_chars") 64000 1000000)
         max-observation-chars (positive-int-or (get cfg "max_observation_chars") 2048 65536)
@@ -116,7 +116,22 @@
                       :terminal-provider-failure))
                   (case (get evaluation :outcome)
                     :returned
-                    (returned-outcome (get evaluation :value))
+                    (if validate-result?
+                      (let [validation (kernel/validate-result (get evaluation :value))]
+                        (if (true? (get validation :valid?))
+                          (returned-outcome (get evaluation :value))
+                          (if (agent.retry/retry? turn max-turns)
+                            (let [event (completed-event :result-contract-error turn max-turns)
+                                  next-prompt-state (transition-prompt prompt-state event)]
+                              (recur (inc turn)
+                                     (append-correlated
+                                       messages
+                                       action
+                                       (agent.feedback/result-contract validation))
+                                     next-prompt-state
+                                     closing?))
+                            (subject-failure :result-contract :invalid-result))))
+                      (returned-outcome (get evaluation :value)))
                     :failed
                     (if (and (correctable-capability-failure? evaluation)
                              (agent.retry/retry? turn max-turns))
@@ -192,6 +207,12 @@
 
               (fail (result/error :unknown-action (get action :kind))))))))))
 
+(defn run-outcome
+  "Runs the agent loop and distinguishes model-authored completion from a
+  bounded subject-attributable failure."
+  [task cfg]
+  (run-outcome* task cfg false))
+
 (defn run-value
   "Runs the agent loop and returns its model-authored value to the calling
   PTC-Lisp function. Unlike `run`, this does not terminate the outer program,
@@ -201,6 +222,15 @@
   to record those attempts use `run-outcome`."
   [task cfg]
   (let [outcome (run-outcome task cfg)]
+    (if (= :returned (get outcome :status))
+      (get outcome :value)
+      (fail (get outcome :error)))))
+
+(defn run-result-value
+  "Runs the agent loop and validates model-authored completion against the
+  manifest result contract before returning it to the calling workflow."
+  [task cfg]
+  (let [outcome (run-outcome* task cfg true)]
     (if (= :returned (get outcome :status))
       (get outcome :value)
       (fail (get outcome :error)))))

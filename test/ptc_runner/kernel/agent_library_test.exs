@@ -12,8 +12,10 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
   alias PtcRunner.Kernel.MissionEnvironment
   alias PtcRunner.Kernel.ProviderError
   alias PtcRunner.Kernel.RunConfig
+  alias PtcRunner.Kernel.ValueContract
   alias PtcRunner.Kernel.WorkflowEnvironment
   alias PtcRunner.Lisp
+  alias PtcRunner.Lisp.Format
   alias PtcRunner.Lisp.TrustedTool
 
   test "llm/request is an ordinary bounded workflow capability" do
@@ -155,6 +157,188 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
 
     assert {:ok, %{value: %{"answer" => 42}}} =
              Kernel.run("(agent.main/run data/input)", config)
+  end
+
+  test "agent.main gives a rejected terminal result one bounded correction turn" do
+    invalid = %{
+      content: nil,
+      tool_calls: [
+        %{
+          id: "invalid-result",
+          name: "run_ptc_lisp",
+          args: %{
+            "program" => ~S|(return {"decision" "propose-change" "evidence" [{"resource" ""}]})|
+          }
+        }
+      ]
+    }
+
+    corrected = %{
+      content: nil,
+      tool_calls: [
+        %{
+          id: "corrected-result",
+          name: "run_ptc_lisp",
+          args: %{
+            "program" =>
+              ~S|(return {"decision" "propose-change" "evidence" [{"resource" "run-1"}]})|
+          }
+        }
+      ]
+    }
+
+    schema = %{
+      "type" => "object",
+      "additionalProperties" => false,
+      "required" => ["decision", "evidence"],
+      "properties" => %{
+        "decision" => %{"type" => "string", "const" => "propose-change"},
+        "evidence" => %{
+          "type" => "array",
+          "items" => %{
+            "type" => "object",
+            "additionalProperties" => false,
+            "required" => ["resource"],
+            "properties" => %{"resource" => %{"type" => "string", "minLength" => 1}}
+          }
+        }
+      }
+    }
+
+    assert {:ok, result_contract} = ValueContract.compile(schema)
+
+    input = %{
+      "input" => %{
+        "task" => "Return one application value",
+        "agent" => %{"max_turns" => 2}
+      }
+    }
+
+    {:ok, config} =
+      agent_config([invalid, corrected], [],
+        agent_main: true,
+        input: input,
+        result_contract: result_contract
+      )
+
+    assert {:ok,
+            %{
+              value: %{
+                "decision" => "propose-change",
+                "evidence" => [%{"resource" => "run-1"}]
+              }
+            }} = Kernel.run("(agent.main/run data/input)", config)
+
+    assert_receive {:agent_request, _first_request}
+    assert_receive {:agent_request, second_request}
+
+    assert List.last(second_request["messages"])["content"] =~
+             "did not satisfy the application result contract"
+
+    assert List.last(second_request["messages"])["content"] =~ "minLength"
+  end
+
+  test "agent.main rejects keyword-keyed candidates instead of normalizing them past a contract" do
+    keyword_keyed = %{
+      content: nil,
+      tool_calls: [
+        %{
+          id: "keyword-result",
+          name: "run_ptc_lisp",
+          args: %{"program" => ~S|(return {:when 42})|}
+        }
+      ]
+    }
+
+    corrected = %{
+      content: nil,
+      tool_calls: [
+        %{
+          id: "string-result",
+          name: "run_ptc_lisp",
+          args: %{"program" => ~S|(return {"when" 42})|}
+        }
+      ]
+    }
+
+    assert {:ok, result_contract} =
+             ValueContract.compile(%{
+               "type" => "object",
+               "additionalProperties" => false,
+               "required" => ["when"],
+               "properties" => %{"when" => %{"type" => "integer"}}
+             })
+
+    input = %{
+      "input" => %{
+        "task" => "Return one application value",
+        "agent" => %{"max_turns" => 2}
+      }
+    }
+
+    {:ok, config} =
+      agent_config([keyword_keyed, corrected], [],
+        agent_main: true,
+        input: input,
+        result_contract: result_contract
+      )
+
+    assert {:ok, %{value: %{"when" => 42}}} =
+             Kernel.run("(agent.main/run data/input)", config)
+
+    assert_receive {:agent_request, _first_request}
+    assert_receive {:agent_request, second_request}
+    assert List.last(second_request["messages"])["content"] =~ ":json_value false"
+  end
+
+  test "agent.main accepts quoted symbols through the result contract JSON projection" do
+    quoted_symbol = %{
+      content: nil,
+      tool_calls: [
+        %{
+          id: "quoted-symbol-result",
+          name: "run_ptc_lisp",
+          args: %{"program" => ~S|(return {"ref" 'foo 'kind "quoted"})|}
+        }
+      ]
+    }
+
+    assert {:ok, result_contract} =
+             ValueContract.compile(%{
+               "type" => "object",
+               "additionalProperties" => false,
+               "required" => ["ref", "'kind"],
+               "properties" => %{
+                 "ref" => %{"type" => "string", "const" => "'foo"},
+                 "'kind" => %{"type" => "string", "const" => "quoted"}
+               }
+             })
+
+    input = %{
+      "input" => %{
+        "task" => "Return one application value",
+        "agent" => %{"max_turns" => 1}
+      }
+    }
+
+    {:ok, config} =
+      agent_config([quoted_symbol], [],
+        agent_main: true,
+        input: input,
+        result_contract: result_contract
+      )
+
+    assert {:ok,
+            %{
+              value: %{
+                "ref" => %Format.SymbolRef{name: "foo"},
+                %Format.SymbolRef{name: "kind"} => "quoted"
+              }
+            }} =
+             Kernel.run("(agent.main/run data/input)", config)
+
+    assert_receive {:agent_request, _request}
+    refute_receive {:agent_request, _request}
   end
 
   test "agent.core persists a defn across a correlated intermediate turn" do
@@ -1671,7 +1855,7 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     {:ok, limits} = Limits.new(limit_overrides)
     {:ok, sink} = EventSink.start(:normal, limits, run_id: "agent-library")
 
-    RunConfig.new(
+    config_opts = [
       workflow_environment: workflow,
       mission_environment: mission,
       input: Keyword.get(opts, :input, %{}),
@@ -1680,7 +1864,15 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
       provider_resources: Keyword.get(opts, :provider_resources, []),
       inspection_sink: Keyword.get(opts, :inspection_sink),
       inspection_path: Keyword.get(opts, :inspection_path)
-    )
+    ]
+
+    config_opts =
+      case Keyword.fetch(opts, :result_contract) do
+        {:ok, result_contract} -> Keyword.put(config_opts, :result_contract, result_contract)
+        :error -> config_opts
+      end
+
+    RunConfig.new(config_opts)
   end
 
   defp agent_config_with_requester(requester) do
@@ -1793,7 +1985,8 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
 
   defp required_agent_tools do
     Map.new(
-      ~w(kernel-eval kernel-mission-inventory kernel-mission-model-context llm-request workflow-annotate),
+      ~w(kernel-eval kernel-mission-inventory kernel-mission-model-context kernel-result-contract
+         llm-request workflow-annotate),
       &{&1, %TrustedTool{function: fn _arguments -> %{status: :error} end}}
     )
   end

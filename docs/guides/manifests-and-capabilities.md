@@ -156,9 +156,13 @@ The input contract covers inline input, an input file, and any `--mission` or
 `--private-mission` override. It is compiled and checked before provider
 preflight, credential resolution, process launch, or remote discovery. The
 result contract is checked after execution and evidence capture, but before
-stdout or `--output`/`--private-output` publication. A mismatch returns
-`input_contract_failed` or `result_contract_failed`; a rejected result value is
-not attached to the error.
+stdout or `--output`/`--private-output` publication. The shipped
+`agent.main/run` entry also checks each model-authored terminal candidate while
+the bounded agent loop is still live. When turns remain, it returns the same
+structural classification to the model for one ordinary correction turn; the
+rejected value itself is withheld. Other workflow entries retain only the
+final fail-closed check. A mismatch returns `input_contract_failed` or
+`result_contract_failed`.
 
 A rejection does carry a bounded classification, so a mismatch is diagnosable
 without repeating the run under private inspection. The command reports it as:

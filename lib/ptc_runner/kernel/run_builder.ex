@@ -11,7 +11,6 @@ defmodule PtcRunner.Kernel.RunBuilder do
 
   alias PtcRunner.Kernel
   alias PtcRunner.Kernel.ComponentOverride
-  alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.InspectionArtifact
   alias PtcRunner.Kernel.InspectionSink
@@ -101,6 +100,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
            input: %{"input" => manifest.input},
            limits: manifest.limits,
            event_sink: sink,
+           result_contract: manifest.contracts.result,
            inspection_sink: inspection_sink,
            inspection_path: inspection_path,
            provider_resources: providers.resources,
@@ -752,8 +752,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
   # contracts see ordinary JSON values without a second, potentially lossy
   # map-key conversion.
   defp json_contract_value(value) do
-    with {:ok, encoded} <- DeterministicJSON.encode(value),
-         do: Jason.decode(encoded)
+    ValueContract.json_value(value)
   end
 
   defp persist_trace(nil, _sink, _events), do: :ok

@@ -10,6 +10,7 @@
   entry returns the model-authored value directly so a manifest result contract
   describes that value rather than agent.core's default success envelope."
   [input]
-  (agent.core/run
-    (get input "task")
-    (assoc (get input "agent") "result_envelope" false)))
+  (return
+    (agent.core/run-result-value
+      (get input "task")
+      (get input "agent"))))
