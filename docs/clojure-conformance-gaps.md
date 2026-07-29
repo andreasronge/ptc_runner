@@ -1248,13 +1248,20 @@ surprising renderings, and avoids broad atom-like identifier growth.
 (name 'foo)      ;=> "foo"
 
 ;; PTC-Lisp
-(symbol? :foo)   ;=> false (always false)
+(symbol? 'foo)   ;=> false
 (name 'foo)      ;=> runtime error
 ```
 
-PTC-Lisp uses keywords where Clojure uses symbols. There is no symbol type.
+PTC-Lisp has no first-class Clojure symbol type. It does support partial quote
+syntax for inert symbol references: `'foo` and `(quote foo)` produce a
+displayable host-facing reference, but `symbol?` remains false, `name` rejects
+it, and general quoted data is unsupported. Keywords remain the ordinary
+identifier values used in data transformations; inert references exist for
+APIs that explicitly require a symbolic name. See
+[Quoted Symbol References](ptc-lisp-specification.md#311-quoted-symbol-references).
 
-**Rationale:** Simplicity. Keywords cover all identifier needs in data transformation pipelines.
+**Rationale:** Simplicity. PTC-Lisp provides the narrow host-facing reference
+use case without adopting Clojure's general symbol and quotation model.
 
 ### DIV-20: `decimal?` and `ratio?` always return false
 
@@ -1927,36 +1934,30 @@ design reason.
 now also accepts the map (counting its `[k v]` entries) — `frequencies` is
 order-insensitive like `count`, so it belongs with the accepting set; the
 order-EXPOSING `distinct` instead rejects direct maps
-([GAP-S134](#gap-s134-distinct-accepts-direct-map-input-clojure-rejects)).
+([DIV-29](#div-29-direct-positional-sequence-operations-reject-maps)).
 
-### GAP-S134: `distinct` accepts direct map input Clojure rejects
+### GAP-S134: Direct-map `distinct` was misclassified
 
 | Field | Value |
 |-------|-------|
 | **Priority** | P2 |
-| **Status** | **fixed** |
-| **Source** | Manual conformance case `core/distinct-map-001` |
+| **Status** | **reclassified as DIV-29** |
+| **Source** | Manual conformance case `div/distinct-map-direct-001` |
 
 ```clojure
 ;; Clojure
-(distinct {:a 1 :b 2}) ;=> UnsupportedOperationException
+(distinct {:a 1 :b 2}) ;=> sequence of distinct map entries
 
-;; PTC-Lisp (fixed)
+;; PTC-Lisp
 (distinct {:a 1 :b 2}) ;=> type_error "distinct does not support maps ... Use (keys m), (vals m), or (entries m)"
 ```
 
-**Decision:** BUG. `distinct` is a supported Clojure-named sequence helper,
-but direct map inputs are not a supported ordered map view in PTC-Lisp's
-documented map policy. Returning entries silently makes an invalid direct-map
-call look successful; callers should use `seq`, `entries`, `keys`, or `vals`
-when they need an ordered map view.
-
-**Fix:** Removed `distinct`'s direct-map clause so a map now raises a clean
-`type_error` (via the `:first`/`:last`/`:reverse`/`:distinct` map message in
-`Eval.Helpers`), matching Clojure and the [DIV-29](#div-29-direct-positional-sequence-operations-reject-maps)
-map policy. This is the order-EXPOSING half of the map-as-collection rule: an
-op whose result depends on or exposes traversal order rejects a direct map,
-while order-INSENSITIVE consumers (`count`, `frequencies`) accept it (GAP-S20).
+**Correction:** The original gap entry incorrectly stated that Clojure rejects
+the map. Clojure treats a map as a sequence of entries here. PTC-Lisp
+deliberately rejects this order-exposing direct-map operation and requires
+`seq`, `entries`, `keys`, or `vals`; that behavior belongs to
+[DIV-29](#div-29-direct-positional-sequence-operations-reject-maps), not to a
+fixed compatibility bug.
 
 ### GAP-S21: `reduce` without init on empty input ignores the reducing function identity
 
@@ -5512,7 +5513,7 @@ programs.
 |-------|-------|
 | **Priority** | n/a |
 | **Status** | by design |
-| **Source** | Manual conformance cases `div/first-map-direct-001`, `div/rest-map-direct-001`, `div/second-map-direct-001`, `div/last-map-direct-001`, `div/next-map-direct-001`, `div/reverse-map-direct-001`, `div/interpose-map-direct-001`, `div/interleave-map-direct-001` |
+| **Source** | Manual conformance cases `div/first-map-direct-001`, `div/rest-map-direct-001`, `div/second-map-direct-001`, `div/last-map-direct-001`, `div/next-map-direct-001`, `div/reverse-map-direct-001`, `div/distinct-map-direct-001`, `div/interpose-map-direct-001`, `div/interleave-map-direct-001` |
 
 ```clojure
 ;; Clojure
@@ -5522,6 +5523,7 @@ programs.
 (last {:a 1})         ;=> [:a 1]
 (next {:a 1})         ;=> nil
 (reverse {:a 1 :b 2}) ;=> sequence of map entries
+(distinct {:a 1 :b 2});=> sequence of distinct map entries
 (interpose :x {:a 1 :b 2}) ;=> sequence of map entries separated by :x
 (interleave {:a 1} [:x]) ;=> sequence of map entry then :x
 
@@ -5532,6 +5534,7 @@ programs.
 (last {:a 1})         ;=> type_error
 (next {:a 1})         ;=> type_error
 (reverse {:a 1 :b 2}) ;=> type_error
+(distinct {:a 1 :b 2});=> type_error
 (interpose :x {:a 1 :b 2}) ;=> type_error
 (interleave {:a 1} [:x]) ;=> type_error
 (first (seq {:a 1}))  ;=> [:a 1]

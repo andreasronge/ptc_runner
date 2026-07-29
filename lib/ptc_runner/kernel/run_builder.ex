@@ -24,6 +24,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
   alias PtcRunner.Kernel.TraceLog
   alias PtcRunner.Kernel.ValueContract
   alias PtcRunner.Kernel.WorkflowEnvironment
+  alias PtcRunner.Lisp.Format.SymbolRef
 
   @spec build(Manifest.t(), ProviderRegistry.t(), keyword()) ::
           {:ok,
@@ -742,14 +743,26 @@ defmodule PtcRunner.Kernel.RunBuilder do
     end
   end
 
+  defp public_value(%SymbolRef{} = value) do
+    if SymbolRef.valid?(value),
+      do: Elixir.Kernel.to_string(value),
+      else: value |> Map.from_struct() |> public_value()
+  end
+
   defp public_value(value) when is_struct(value),
     do: value |> Map.from_struct() |> public_value()
 
   defp public_value(value) when is_map(value),
-    do: Map.new(value, fn {key, nested} -> {key, public_value(nested)} end)
+    do: Map.new(value, fn {key, nested} -> {public_key(key), public_value(nested)} end)
 
   defp public_value(value) when is_list(value), do: Enum.map(value, &public_value/1)
   defp public_value(value), do: value
+
+  defp public_key(%SymbolRef{} = key) do
+    if SymbolRef.valid?(key), do: Elixir.Kernel.to_string(key), else: key
+  end
+
+  defp public_key(key), do: key
 
   defp persist_trace(nil, _sink, _events), do: :ok
 

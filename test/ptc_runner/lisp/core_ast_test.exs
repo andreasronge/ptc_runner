@@ -44,4 +44,72 @@ defmodule PtcRunner.Lisp.CoreASTTest do
     assert :ok = CoreAST.validate(node)
     assert :ok = CoreAST.validate({:java_ref, :string_contains})
   end
+
+  test "rejects malformed quoted-symbol nodes" do
+    for name <- ["", "server/tool x", <<255>>] do
+      assert {:error, {:invalid_core_ast, [], {:symbol_ref, ^name}}} =
+               CoreAST.validate({:symbol_ref, name})
+    end
+  end
+
+  test "requires prelude references to be exact namespaced symbols" do
+    for node <- [
+          {:prelude_ref, "nil"},
+          {:prelude_ref, "crm"},
+          {:prelude_ref, "crm/get/user"},
+          {:prelude_ref, "-1/x"},
+          {:prelude_call, "true", []}
+        ] do
+      assert {:error, {:invalid_core_ast, [], ^node}} = CoreAST.validate(node)
+    end
+
+    assert :ok = CoreAST.validate({:prelude_ref, "crm/get-user"})
+    assert :ok = CoreAST.validate({:prelude_call, "crm/get-user", [1]})
+  end
+
+  test "accepts only exact tool runtime-callable nodes" do
+    assert :ok = CoreAST.validate({:runtime_callable, :tool, "echo"})
+    assert :ok = CoreAST.validate({:runtime_callable, :tool, "server/echo"})
+
+    for node <- [
+          {:runtime_callable, :data, "echo"},
+          {:runtime_callable, "tool", "echo"},
+          {:runtime_callable, :tool, "echo value"}
+        ] do
+      assert {:error, {:invalid_core_ast, [], ^node}} = CoreAST.validate(node)
+    end
+  end
+
+  test "requires data and tool nodes to have exact nonempty qualified names" do
+    assert :ok = CoreAST.validate({:data, "input"})
+    assert :ok = CoreAST.validate({:tool_call, "server/echo", []})
+
+    for node <- [{:data, ""}, {:tool_call, "", []}] do
+      assert {:error, {:invalid_core_ast, [], ^node}} = CoreAST.validate(node)
+    end
+  end
+
+  test "rejects improper lists instead of raising" do
+    malformed = [1 | 2]
+
+    assert {:error, {:invalid_core_ast, [], ^malformed}} =
+             CoreAST.validate({:vector, malformed})
+
+    assert {:error, {:invalid_core_ast, [0], ^malformed}} =
+             CoreAST.validate({:fn, malformed, 1})
+
+    assert {:error, {:invalid_core_ast, [0], ^malformed}} =
+             CoreAST.validate({:let, malformed, 1})
+
+    map = {:map, [{1, 2} | 3]}
+    assert {:error, {:invalid_core_ast, [], ^map}} = CoreAST.validate(map)
+  end
+
+  test "rejects improper lists nested inside destructuring patterns" do
+    malformed = [{:var, :head} | {:var, :tail}]
+    pattern = {:destructure, {:seq, malformed}}
+
+    assert {:error, {:invalid_core_ast, _path, ^malformed}} =
+             CoreAST.validate({:fn, [pattern], {:var, :head}})
+  end
 end

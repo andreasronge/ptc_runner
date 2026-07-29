@@ -91,6 +91,8 @@ defmodule PtcRunner.Lisp.KeyNormalizer do
      Atom keys and string keys collapse to the same canonical form, and
      hyphenated and underscored keys collapse together — matching the
      PTC-Lisp `stringify_key/1` boundary normalization in `eval.ex`.
+     Quoted-symbol display keys begin with `'` and retain their exact spelling,
+     matching the tool boundary (`"'foo-bar"` and `"'foo_bar"` stay distinct).
   2. **Maps** — Elixir maps are structurally compared regardless of
      insertion order, so two maps with the same string-keyed entries
      produced from differently-ordered inputs are `==`.
@@ -201,10 +203,15 @@ defmodule PtcRunner.Lisp.KeyNormalizer do
 
   defp canonicalize(value), do: value
 
-  # Re-use `normalize_key/1` so hyphenated and underscored
-  # keys collapse together, matching `Lisp.Eval.stringify_key/1` at the
-  # PTC-Lisp tool boundary. Without this, a native cache write with
-  # `"was-improved"` and a PTC-Lisp lookup with `"was_improved"` miss.
+  # Quoted-symbol keys have already been projected to their public display
+  # spelling. Unlike ordinary keyword/string keys, that spelling intentionally
+  # preserves hyphens, so cache identity must preserve it too.
+  defp stringify_key(<<"'", _rest::binary>> = key), do: key
+
+  # Re-use `normalize_key/1` so ordinary hyphenated and underscored keys
+  # collapse together, matching `Lisp.Eval.stringify_key/1` at the PTC-Lisp
+  # tool boundary. Without this, a native cache write with `"was-improved"`
+  # and a PTC-Lisp lookup with `"was_improved"` miss.
   defp stringify_key(k) when is_binary(k) or is_atom(k), do: normalize_key(k)
   defp stringify_key(k), do: k
 end

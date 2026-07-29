@@ -111,6 +111,11 @@ defmodule PtcRunner.Sandbox do
           budget_bytes: non_neg_integer()
         }
 
+  @type timeout_info :: %{
+          phase: :eval | :setup,
+          timeout_ms: non_neg_integer()
+        }
+
   @typedoc """
   Evaluator function that takes AST and context and returns result with memory.
   """
@@ -120,6 +125,8 @@ defmodule PtcRunner.Sandbox do
                          {atom(), String.t()}
                          | {atom(), String.t(), any()}
                          | {atom(), String.t(), any(), any()}})
+  @type prepare_context_fn :: (term() -> {:ok, term()} | {:error, term()})
+  @type failure_snapshot_fn :: (term() -> term())
 
   @doc """
   Executes an AST in an isolated sandbox process.
@@ -129,6 +136,11 @@ defmodule PtcRunner.Sandbox do
     - context: The execution context
     - opts: Options (timeout, max_heap, eval_fn)
       - `:eval_fn` - Evaluator function (required)
+      - `:prepare_context` - Optional bounded context normalization performed
+        under `:setup_max_heap` before the environment baseline is measured
+      - `:failure_snapshot` - Optional bounded callback that extracts rollback
+        state from the prepared context. Post-setup failures return it as
+        `{:error, reason, snapshot}`.
       - `:timeout` - Timeout in milliseconds (default: 1000, configurable via `:default_timeout`)
       - `:max_heap` - Program heap budget in words above the measured
         baseline (default: 1_250_000, configurable via `:default_max_heap`;
@@ -139,17 +151,14 @@ defmodule PtcRunner.Sandbox do
 
   ## Returns
     - `{:ok, result, metrics, memory}` on success
-    - `{:error, reason}` on failure; a heap kill is
+    - `{:error, reason}` on failure; a timeout is
+      `{:timeout, timeout_info()}` and a heap kill is
       `{:memory_exceeded, memory_exceeded_info()}`
   """
   @spec execute(any(), term(), keyword()) ::
           {:ok, any(), metrics(), map()}
-          | {:error,
-             {atom(), memory_exceeded_info()}
-             | {atom(), non_neg_integer()}
-             | {atom(), String.t()}
-             | {atom(), String.t(), any()}
-             | {atom(), String.t(), any(), any()}}
+          | {:error, term()}
+          | {:error, term(), term()}
 
   def execute(ast, context, opts \\ []) do
     default_timeout = Application.get_env(:ptc_runner, :default_timeout, @default_timeout)
@@ -157,21 +166,55 @@ defmodule PtcRunner.Sandbox do
 
     timeout = Keyword.get(opts, :timeout, default_timeout)
     max_heap = Keyword.get(opts, :max_heap, default_max_heap)
+
+    validate_limit!(:timeout, timeout)
+    validate_limit!(:max_heap, max_heap)
+
     setup_max_heap = Keyword.get(opts, :setup_max_heap, 4 * max_heap)
     eval_fn = Keyword.fetch!(opts, :eval_fn)
+    prepare_context = Keyword.get(opts, :prepare_context, fn context -> {:ok, context} end)
+    failure_snapshot = Keyword.get(opts, :failure_snapshot)
     # When `link: true`, the bounded worker starts a tiny watchdog that monitors
     # both worker and caller. Caller shutdown therefore kills the sandbox
     # without changing the caller's trap-exit behavior.
     link? = Keyword.get(opts, :link, false)
 
-    # Spawn isolated process with resource limits
+    validate_limit!(:setup_max_heap, setup_max_heap)
+    validate_callback!(:eval_fn, eval_fn, 2)
+    validate_callback!(:prepare_context, prepare_context, 1)
+    validate_optional_callback!(:failure_snapshot, failure_snapshot, 1)
+    validate_boolean!(:link, link?)
+
     start_time = System.monotonic_time(:millisecond)
+    reply_alias = Process.alias()
 
-    parent = self()
+    execution = %{
+      link?: link?,
+      timeout: timeout,
+      max_heap: max_heap,
+      setup_max_heap: setup_max_heap,
+      start_time: start_time,
+      reply_alias: reply_alias,
+      failure_snapshot: failure_snapshot
+    }
 
+    try do
+      spawn_and_await(ast, context, eval_fn, prepare_context, execution)
+    after
+      # Covers a spawn failure before a pid/ref exists.
+      Process.unalias(reply_alias)
+    end
+  end
+
+  defp spawn_and_await(ast, context, eval_fn, prepare_context, execution) do
     spawn_opts = [
       {:max_heap_size,
-       %{size: setup_max_heap, kill: true, error_logger: false, include_shared_binaries: true}}
+       %{
+         size: execution.setup_max_heap,
+         kill: true,
+         error_logger: false,
+         include_shared_binaries: true
+       }}
     ]
 
     {pid, ref} =
@@ -180,35 +223,53 @@ defmodule PtcRunner.Sandbox do
           # Set process priority to normal within the process
           Process.flag(:priority, :normal)
 
-          # Re-baseline: the spawn copy (context, memory, tools, AST) is
-          # host-provided; measure it after a forced GC and re-arm the heap
-          # flag at baseline + budget so it doesn't bill the program. The
-          # forced GC also deterministically enforces the setup ceiling.
-          baseline_words = rebaseline(max_heap)
-          send(parent, {:baseline, self(), baseline_words})
+          case prepare_context.(context) do
+            {:ok, prepared_context} ->
+              failure_snapshot = capture_failure_snapshot(execution, prepared_context)
 
-          start_reductions = process_reductions()
-          result = eval_fn.(ast, context)
-          eval_reductions = process_reductions() - start_reductions
-          memory = get_process_memory()
-          send(parent, {:result, self(), result, memory, eval_reductions})
+              # Re-baseline: the spawn copy and bounded host normalization are
+              # environment setup. Measure them after a forced GC and re-arm
+              # the heap flag at baseline + budget so the program is not
+              # charged for either.
+              baseline_words = rebaseline(execution.max_heap)
+              send_baseline(execution.reply_alias, baseline_words, failure_snapshot)
+
+              start_reductions = process_reductions()
+              result = eval_fn.(ast, prepared_context)
+              eval_reductions = process_reductions() - start_reductions
+              memory = get_process_memory()
+
+              send(
+                execution.reply_alias,
+                {:result, self(), result, memory, eval_reductions}
+              )
+
+            {:error, reason} ->
+              send(execution.reply_alias, {:setup_error, self(), reason})
+          end
         end,
         spawn_opts,
-        link?
+        execution.link?
       )
 
     await = %{
       pid: pid,
       ref: ref,
-      deadline: start_time + timeout,
-      start_time: start_time,
-      timeout: timeout,
-      max_heap: max_heap,
-      setup_max_heap: setup_max_heap,
-      baseline_words: nil
+      deadline: execution.start_time + execution.timeout,
+      start_time: execution.start_time,
+      timeout: execution.timeout,
+      max_heap: execution.max_heap,
+      setup_max_heap: execution.setup_max_heap,
+      baseline_words: nil,
+      failure_snapshot: :none,
+      reply_alias: execution.reply_alias
     }
 
-    await_result(await)
+    try do
+      await_result(await)
+    after
+      cleanup_worker(pid, ref, execution.reply_alias)
+    end
   end
 
   # Wait for the sandbox child: consumes the `{:baseline, _, _}` message the
@@ -224,6 +285,16 @@ defmodule PtcRunner.Sandbox do
       {:baseline, ^pid, baseline_words} ->
         await_result(%{await | baseline_words: baseline_words})
 
+      {:baseline, ^pid, baseline_words, failure_snapshot} ->
+        await_result(%{
+          await
+          | baseline_words: baseline_words,
+            failure_snapshot: {:some, failure_snapshot}
+        })
+
+      {:setup_error, ^pid, reason} ->
+        {:error, reason}
+
       {:result, ^pid, result, memory, eval_reductions} ->
         duration = System.monotonic_time(:millisecond) - await.start_time
 
@@ -234,8 +305,6 @@ defmodule PtcRunner.Sandbox do
           baseline_bytes: baseline_bytes(await.baseline_words, await.max_heap)
         }
 
-        Process.demonitor(ref, [:flush])
-
         case result do
           {:ok, value, eval_memory} ->
             {:ok, value, metrics, eval_memory}
@@ -243,38 +312,57 @@ defmodule PtcRunner.Sandbox do
           {:error, reason, eval_ctx} ->
             # Error with eval_ctx (e.g., from tool execution error with recorded tool_calls)
             # Return as a 4-tuple success with error tagged in the value
-            {:ok, {:error_with_ctx, reason}, metrics, eval_ctx}
+            error_with_context(reason, metrics, eval_ctx, await.failure_snapshot)
 
           {:error, reason} ->
-            {:error, reason}
+            failure(reason, await.failure_snapshot)
         end
 
       {:DOWN, ^ref, :process, ^pid, :killed} ->
-        {:error, {:memory_exceeded, memory_exceeded_info(await)}}
+        failure({:memory_exceeded, memory_exceeded_info(await)}, await.failure_snapshot)
 
       {:DOWN, ^ref, :process, ^pid, reason} ->
-        {:error, {:execution_error, "Process terminated: #{inspect(reason)}"}}
+        failure(
+          {:execution_error, "Process terminated: #{inspect(reason)}"},
+          await.failure_snapshot
+        )
     after
       remaining ->
-        Process.demonitor(ref, [:flush])
-        Process.exit(pid, :kill)
+        failure({:timeout, timeout_info(await)}, await.failure_snapshot)
+    end
+  end
 
-        # Flush stragglers the child may have sent right as the timeout
-        # fired — a baseline and/or result left unmatched would leak into
-        # the caller's mailbox.
-        receive do
-          {:baseline, ^pid, _words} -> :ok
-        after
-          0 -> :ok
-        end
+  defp cleanup_worker(pid, ref, reply_alias) do
+    Process.unalias(reply_alias)
 
-        receive do
-          {:result, ^pid, _result, _memory, _eval_reductions} -> :ok
-        after
-          0 -> :ok
-        end
+    if Process.alive?(pid) do
+      Process.exit(pid, :kill)
+    end
 
-        {:error, {:timeout, await.timeout}}
+    Process.demonitor(ref, [:flush])
+    flush_worker_messages(pid)
+  end
+
+  # Deactivating the reply alias drops signals that have not reached the
+  # mailbox. Flush any replies that arrived just before deactivation.
+  defp flush_worker_messages(pid) do
+    receive do
+      {:baseline, ^pid, _words} ->
+        flush_worker_messages(pid)
+
+      {:baseline, ^pid, _words, _failure_snapshot} ->
+        flush_worker_messages(pid)
+
+      {:setup_error, ^pid, _reason} ->
+        flush_worker_messages(pid)
+
+      {:result, ^pid, _result, _memory, _eval_reductions} ->
+        flush_worker_messages(pid)
+
+      {:bounded_result, ^pid, _result} ->
+        flush_worker_messages(pid)
+    after
+      0 -> :ok
     end
   end
 
@@ -297,6 +385,56 @@ defmodule PtcRunner.Sandbox do
       budget_bytes: await.max_heap * 8
     }
   end
+
+  defp timeout_info(%{baseline_words: nil, timeout: timeout}),
+    do: %{phase: :setup, timeout_ms: timeout}
+
+  defp timeout_info(%{timeout: timeout}),
+    do: %{phase: :eval, timeout_ms: timeout}
+
+  defp validate_limit!(_name, value) when is_integer(value) and value >= 0, do: :ok
+
+  defp validate_limit!(name, value) do
+    raise ArgumentError, "#{name} must be a non-negative integer, got: #{inspect(value)}"
+  end
+
+  defp validate_callback!(_name, callback, arity) when is_function(callback, arity), do: :ok
+
+  defp validate_callback!(name, callback, arity) do
+    raise ArgumentError,
+          "#{name} must be a function of arity #{arity}, got: #{inspect(callback)}"
+  end
+
+  defp validate_optional_callback!(_name, nil, _arity), do: :ok
+
+  defp validate_optional_callback!(name, callback, arity),
+    do: validate_callback!(name, callback, arity)
+
+  defp validate_boolean!(_name, value) when is_boolean(value), do: :ok
+
+  defp validate_boolean!(name, value) do
+    raise ArgumentError, "#{name} must be a boolean, got: #{inspect(value)}"
+  end
+
+  defp capture_failure_snapshot(%{failure_snapshot: nil}, _prepared_context), do: :none
+
+  defp capture_failure_snapshot(%{failure_snapshot: callback}, prepared_context),
+    do: {:some, callback.(prepared_context)}
+
+  defp send_baseline(reply_alias, baseline_words, :none),
+    do: send(reply_alias, {:baseline, self(), baseline_words})
+
+  defp send_baseline(reply_alias, baseline_words, {:some, failure_snapshot}),
+    do: send(reply_alias, {:baseline, self(), baseline_words, failure_snapshot})
+
+  defp error_with_context(reason, metrics, eval_ctx, :none),
+    do: {:ok, {:error_with_ctx, reason}, metrics, eval_ctx}
+
+  defp error_with_context(reason, metrics, eval_ctx, {:some, failure_snapshot}),
+    do: {:ok, {:error_with_ctx, reason, failure_snapshot}, metrics, eval_ctx}
+
+  defp failure(reason, :none), do: {:error, reason}
+  defp failure(reason, {:some, failure_snapshot}), do: {:error, reason, failure_snapshot}
 
   defp baseline_bytes(nil, _max_heap), do: nil
   defp baseline_bytes(_words, 0), do: nil
@@ -383,8 +521,21 @@ defmodule PtcRunner.Sandbox do
     max_heap = Keyword.get(opts, :max_heap, default_max_heap)
     link? = Keyword.get(opts, :link, false)
 
-    parent = self()
+    validate_limit!(:timeout, timeout)
+    validate_limit!(:max_heap, max_heap)
+    validate_boolean!(:link, link?)
 
+    reply_alias = Process.alias()
+
+    try do
+      spawn_and_await_bounded(fun, timeout, max_heap, link?, reply_alias)
+    after
+      # Covers a spawn failure before a pid/ref exists.
+      Process.unalias(reply_alias)
+    end
+  end
+
+  defp spawn_and_await_bounded(fun, timeout, max_heap, link?, reply_alias) do
     spawn_opts = [
       {:max_heap_size,
        %{size: max_heap, kill: true, error_logger: false, include_shared_binaries: true}}
@@ -395,15 +546,22 @@ defmodule PtcRunner.Sandbox do
         fn ->
           Process.flag(:priority, :normal)
           result = fun.()
-          send(parent, {:bounded_result, self(), result})
+          send(reply_alias, {:bounded_result, self(), result})
         end,
         spawn_opts,
         link?
       )
 
+    try do
+      await_bounded_result(pid, ref, timeout, max_heap)
+    after
+      cleanup_worker(pid, ref, reply_alias)
+    end
+  end
+
+  defp await_bounded_result(pid, ref, timeout, max_heap) do
     receive do
       {:bounded_result, ^pid, result} ->
-        Process.demonitor(ref, [:flush])
         {:ok, result}
 
       {:DOWN, ^ref, :process, ^pid, :killed} ->
@@ -413,15 +571,6 @@ defmodule PtcRunner.Sandbox do
         {:error, {:execution_error, "Process terminated: #{inspect(reason)}"}}
     after
       timeout ->
-        Process.demonitor(ref, [:flush])
-        Process.exit(pid, :kill)
-
-        receive do
-          {:bounded_result, ^pid, _} -> :ok
-        after
-          0 -> :ok
-        end
-
         {:error, {:timeout, timeout}}
     end
   end

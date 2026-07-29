@@ -12,6 +12,7 @@ defmodule PtcRunner.Kernel.Runner do
   alias PtcRunner.Kernel.Error
   alias PtcRunner.Kernel.Events
   alias PtcRunner.Kernel.EventSink
+  alias PtcRunner.Kernel.ProjectionError
   alias PtcRunner.Kernel.Result
   alias PtcRunner.Kernel.RunConfig
   alias PtcRunner.Kernel.RunState
@@ -207,7 +208,7 @@ defmodule PtcRunner.Kernel.Runner do
             {:error,
              %Error{
                kind: :workflow_failed,
-               reason: projection_failure_kind(reason),
+               reason: ProjectionError.kind(reason),
                details: %{projection_error: inspect(reason, limit: 10)},
                usage: RunState.usage(state)
              }}
@@ -296,11 +297,6 @@ defmodule PtcRunner.Kernel.Runner do
 
   defp kernel_return_value({:__ptc_return__, value}), do: value
   defp kernel_return_value(value), do: value
-
-  defp projection_failure_kind({:public_projection_collision, _path, _collection}),
-    do: :public_projection_collision
-
-  defp projection_failure_kind(_reason), do: :java_projection_error
 
   defp terminal_result_within_limit?(value, limit) do
     case {RetainedSize.bytes_with_cap(value, limit), safe_encoded_size(value)} do

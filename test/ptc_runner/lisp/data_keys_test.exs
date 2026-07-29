@@ -1,8 +1,11 @@
 defmodule PtcRunner.Lisp.DataKeysTest do
   use ExUnit.Case, async: true
 
+  alias PtcRunner.Lisp
   alias PtcRunner.Lisp.Analyze
   alias PtcRunner.Lisp.DataKeys
+  alias PtcRunner.Lisp.Format.SymbolRef
+  alias PtcRunner.Lisp.Keyword, as: LispKeyword
   alias PtcRunner.Lisp.Parser
 
   describe "extract/1" do
@@ -61,6 +64,13 @@ defmodule PtcRunner.Lisp.DataKeysTest do
     test "returns empty set when no data keys accessed" do
       {:ok, ast} = parse_and_analyze("(+ 1 2 3)")
       assert DataKeys.extract(ast) == MapSet.new()
+    end
+
+    test "treats literal payloads as opaque" do
+      ast = {:literal, {:data, :secret}}
+
+      assert DataKeys.extract(ast) == MapSet.new()
+      assert DataKeys.prefilter_context(ast, %{secret: [1, 2, 3]}) == %{}
     end
 
     test "handles complex benchmark code" do
@@ -174,6 +184,88 @@ defmodule PtcRunner.Lisp.DataKeysTest do
 
       filtered = DataKeys.filter_context(ast, ctx)
       assert filtered == %{"items" => [1, 2, 3]}
+    end
+
+    test "retains unrenderable keys for bounded input handling" do
+      {:ok, ast} = parse_and_analyze("nil")
+      invalid_charlist = [0xD800]
+      ctx = %{invalid_charlist => [1, 2, 3]}
+
+      assert DataKeys.filter_context(ast, ctx) == ctx
+    end
+
+    test "defers symbol-reference key inspection to bounded input handling" do
+      {:ok, ast} = parse_and_analyze("nil")
+      symbol = %SymbolRef{name: "unused"}
+      ctx = %{symbol => [1, 2, 3]}
+
+      assert DataKeys.filter_context(ast, ctx) == ctx
+    end
+
+    test "filters normalized symbol-reference collections by their source spelling" do
+      unused = {:symbol_ref, "unused"}
+      used = {:symbol_ref, "used"}
+      ctx = %{unused => [1, 2, 3], used => [4, 5, 6]}
+
+      {:ok, no_data_ast} = parse_and_analyze("nil")
+      assert DataKeys.filter_context(no_data_ast, ctx) == %{}
+
+      {:ok, used_ast} = parse_and_analyze(~S|data/'used|)
+      assert DataKeys.filter_context(used_ast, ctx) == %{used => [4, 5, 6]}
+    end
+  end
+
+  describe "prefilter_context/2" do
+    test "removes unused collection grants with ordinary host keys" do
+      {:ok, ast} = parse_and_analyze("(count data/products)")
+
+      ctx = %{
+        "products" => [1, 2, 3],
+        :unused => %{1 => "one"},
+        "question" => "How many?"
+      }
+
+      assert DataKeys.prefilter_context(ast, ctx) == %{
+               "products" => [1, 2, 3]
+             }
+    end
+
+    test "drops unrelated unusual keys without enumerating the grant" do
+      {:ok, ast} = parse_and_analyze("nil")
+      charlist_key = ~c"unused"
+      symbol_key = %SymbolRef{name: "unused"}
+      ctx = %{charlist_key => [1, 2, 3], symbol_key => [4, 5, 6]}
+
+      assert DataKeys.prefilter_context(ast, ctx) == %{}
+    end
+
+    test "retains referenced symbol-wrapper keys for bounded normalization" do
+      {:ok, ast} = parse_and_analyze(~S|data/'used|)
+      symbol_key = %SymbolRef{name: "used"}
+      ctx = %{symbol_key => [1, 2, 3], %SymbolRef{name: "unused"} => [4, 5, 6]}
+
+      assert DataKeys.prefilter_context(ast, ctx) == %{symbol_key => [1, 2, 3]}
+    end
+
+    test "quoted-symbol lookup is independent of existing VM atoms" do
+      _existing_atom = :"'atom-table-quoted-key"
+      symbol_key = %SymbolRef{name: "atom-table-quoted-key"}
+
+      assert {:ok, %{return: 42}} =
+               Lisp.run(~S|data/'atom-table-quoted-key|,
+                 context: %{symbol_key => 42},
+                 strict_data: true
+               )
+    end
+
+    test "public runs retain every bounded key variant accepted by data lookup" do
+      context = %{
+        LispKeyword.new("foo") => 1,
+        "foo_bar" => 2
+      }
+
+      assert {:ok, %{return: [1, 2]}} =
+               Lisp.run("[data/foo data/foo-bar]", context: context, strict_data: true)
     end
   end
 

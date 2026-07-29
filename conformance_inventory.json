@@ -991,7 +991,7 @@
     "symbol": "distinct",
     "namespace": "clojure.core",
     "compatibility_target": "Clojure",
-    "notes": "BUG GAP-S20: nil input currently raises instead of returning an empty seq. BUG GAP-S134: direct map input returns entries instead of raising"
+    "notes": "DIV-29: direct map input raises; use seq/entries/keys/vals for an explicit ordered map view"
   },
   {
     "status": "supported",
@@ -2104,7 +2104,7 @@
     "symbol": "name",
     "namespace": "clojure.core",
     "compatibility_target": "Clojure",
-    "notes": "DIV-19: quoted symbols are not supported as runtime values. BUG GAP-S129: character literals return strings instead of raising"
+    "notes": "DIV-19: inert quoted-symbol references are not accepted by name and symbol? remains false. BUG GAP-S129: character literals return strings instead of raising"
   },
   {
     "status": "not_relevant",
@@ -2492,11 +2492,11 @@
     "notes": "DIV-37: uses PTC-Lisp arbitrary-precision integers instead of JVM Long/MIN_VALUE overflow. BUG GAP-S138: non-finite operands return NaN instead of matching Clojure/JVM behavior"
   },
   {
-    "status": "not_relevant",
+    "status": "supported",
     "symbol": "quote",
     "namespace": "clojure.core",
     "compatibility_target": "Clojure",
-    "notes": "quote syntax is intentionally unsupported; use vectors and data literals directly"
+    "notes": "DIV-19: only inert symbol references are supported; quoted collections and general quoted data remain unsupported, and symbol? returns false"
   },
   {
     "status": "not_relevant",

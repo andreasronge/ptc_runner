@@ -29,6 +29,10 @@ defmodule PtcRunner.Lisp.ClosureCapture do
     end
   end
 
+  # Core literals carry opaque runtime values. AST-shaped data inside them must
+  # not participate in lexical capture analysis.
+  defp collect_free_var_refs({:literal, _value}, acc, _bound), do: acc
+
   defp collect_free_var_refs({:let, bindings, body}, acc, bound) do
     collect_free_refs_in_bindings(bindings, body, acc, bound)
   end

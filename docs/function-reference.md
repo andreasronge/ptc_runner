@@ -148,7 +148,7 @@ See also: [PTC-Lisp Specification](ptc-lisp-specification.md) | [Clojure Conform
 | `drop-while` | `(drop-while pred coll)` | Drop while pred is true |
 | `empty` | `(empty coll)` | Return empty collection of same type |
 | `empty?` | `(empty? coll)` | True if empty or nil |
-| `entries` | `(entries m)` | Get all `[key value]` pairs as a list |
+| `entries` | `(entries m)` | Get all `[key value]` pairs as a vector |
 | `even?` | `(even? ...)` |  |
 | `every-pred` | `(every-pred p1 p2 ...)` | Returns a predicate true when all preds are satisfied (always boolean) |
 | `every?` | `(every? :key coll)` | True if all have truthy `:key` |
@@ -236,7 +236,7 @@ See also: [PTC-Lisp Specification](ptc-lisp-specification.md) | [Clojure Conform
 | `reduce-kv` | `(reduce-kv f init m)` | Reduce map with f receiving (acc, key, val) |
 | `rem` | `(rem x y)` | Remainder (truncated division, result sign matches dividend) |
 | `remove` | `(remove pred coll)` | Remove items where pred is truthy |
-| `rest` | `(rest coll)` | All but first (empty list if none) |
+| `rest` | `(rest coll)` | All but first (empty vector if none) |
 | `reverse` | `(reverse coll)` | Reverse order |
 | `reversible?` | `(reversible? ...)` |  |
 | `second` | `(second coll)` | Second item or nil |
@@ -360,7 +360,7 @@ See also: [PTC-Lisp Specification](ptc-lisp-specification.md) | [Clojure Conform
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
-| `contains?` | `(contains? coll key)` | True if key/element exists (maps, sets, lists) |
+| `contains?` | `(contains? coll key)` | True if key/element exists (maps, sets, vectors) |
 | `difference` | `(clojure.set/difference & sets)` | Returns the difference of one or more sets |
 | `disj` | `(disj set x ...)` | Remove elements from set |
 | `hash-set` | `(hash-set & items)` | Create set from arguments |
@@ -384,7 +384,7 @@ See also: [PTC-Lisp Specification](ptc-lisp-specification.md) | [Clojure Conform
 | `re-find` | `(re-find re s)` | Returns the first match of `re` in `s` |
 | `re-matches` | `(re-matches re s)` | Returns match if `re` matches the **entire** string `s` |
 | `re-pattern` | `(re-pattern s)` | Compile string `s` into an opaque regex object |
-| `re-seq` | `(re-seq re s)` | Returns all matches of `re` in `s` as a list |
+| `re-seq` | `(re-seq re s)` | Returns all matches of `re` in `s` as a vector |
 | `re-split` | `(re-split re s)` | Split string `s` by regex pattern `re` |
 | `regex?` | `(regex? x)` | Returns true if `x` is a regex object |
 

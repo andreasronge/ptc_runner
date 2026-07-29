@@ -8,22 +8,33 @@
 
 ## 1. Overview
 
-PTC-Lisp is a small, safe, deterministic subset of Clojure designed for Programmatic Tool Calling. Programs are expressions that transform data through pipelines of operations. Multiple top-level expressions are supported with implicit `do` semantics.
+PTC-Lisp is a small, bounded Clojure-like language designed for Programmatic
+Tool Calling. Programs are expressions that transform data and may invoke
+explicitly granted tools. Multiple top-level expressions are supported with
+implicit `do` semantics.
 
 ### Execution Model
 
-A PTC-Lisp program is a **pure function** of `(memory, ctx) → result`:
+A PTC-Lisp evaluation consumes `(memory, context, tools, limits)` and produces a
+result plus staged continuation state and diagnostics:
 
-- **Input**: Persistent memory from previous turns + current request context
-- **Output**: A result value that may update persistent memory
-- **Semantics**: Functional, transactional, all-or-nothing
+- **Input**: Persistent definitions and turn history, current request context,
+  explicitly granted tools, and resource limits
+- **Output**: An ordinary value, explicit `return`/`fail` outcome, candidate
+  definitions, prints, and tool-call diagnostics
+- **Commit semantics**: Definition and history changes are committed
+  transactionally by a stateful Kernel host; failed evaluation publishes
+  neither
 
-This design enables safe execution in **agentic LLM loops** where programs are generated, executed, and refined across multiple turns.
+Pure transformations are deterministic for the same inputs. Tool calls,
+`System/currentTimeMillis`, and the zero-argument `(java.util.Date.)`
+constructor are explicit sources of external or time-dependent behavior.
 
 ### Design Goals
 
 1. **LLM-friendly**: Easy for language models to generate correctly
-2. **Safe**: No side effects, resource-limited execution, no system access
+2. **Safe**: Resource-limited execution with no ambient filesystem, network, or
+   process access; external effects require granted tools
 3. **Compact**: Minimal syntax, high information density
 4. **Verifiable**: Can be validated against real Clojure for correctness
 5. **Expressive**: Sufficient for common data transformation tasks
@@ -89,25 +100,25 @@ divergence at all — it is the intended behavior (rule 4).
 - General-purpose programming
 - Full Clojure compatibility
 
-### Clojure Extensions
+### Relationship to Clojure
 
-PTC-Lisp extends standard Clojure with features designed for data transformation in agentic contexts. These are **not valid Clojure** but provide significant utility for LLM-generated programs:
+PTC-Lisp combines a supported subset of Clojure with host-specific names and
+intentional semantic divergences. A form can use valid Clojure reader syntax
+without being defined by `clojure.core`, and a familiar Clojure name can still
+have bounded PTC semantics.
 
-| Extension | Description |
-|-----------|-------------|
-| Implicit `do` | Multiple expressions in `fn`, `let`, `when`, `when-let` bodies (§5, §13.1) |
-| `data/path`, `tool/name` | Namespace-qualified access to context data and tool invocation (§9) |
-| `*1`, `*2`, `*3` | Turn history symbols for accessing previous results (§9.4) |
-| `sum`, `avg` | Simple collection aggregators (§8) |
-| `sum-by`, `avg-by`, `min-by`, `max-by`, `distinct-by` | Field-based collection aggregators (§8) |
-| `min-key`, `max-key` | Clojure-compatible variadic key comparison (§8) |
-| `re-pattern`, `#"..."` | Compile string to regex (§8.10) |
-| `floor`, `ceil`, `round`, `trunc` | Integer rounding |
-| `float`, `double`, `int` | Type coercion (to float / to integer) |
-| `return`, `fail` | Control flow for multi-turn agentic loops (§5.22, §5.23) |
-| `doseq` | Side-effecting iteration (§5.21) |
+| Category | Examples |
+|----------|----------|
+| Standard Clojure syntax or core vocabulary | Implicit `do` bodies in `fn`, `let`, `when`, and `when-let`; `doseq`; `min-key`/`max-key`; `re-pattern` and `#"..."`; `float`/`double`/`int` |
+| Clojure syntax with PTC host meaning | `data/path` and `tool/name` use namespaced-symbol syntax but resolve through the host; `*1`/`*2`/`*3` use familiar REPL names for Kernel turn history |
+| PTC syntax/arity extensions | Multiple body expressions in `for`; `:asc`/`:desc` comparator keywords for `sort` and `sort-by` |
+| PTC-provided helpers | `sum`, `avg`, the `*-by` helpers, unqualified rounding helpers, JSON helpers, and bounded Java compatibility namespaces |
+| PTC control forms | `return` and `fail` communicate explicit outcomes to a Kernel host (§5.19, §5.20) |
 
-All other syntax and functions are valid Clojure and are tested against Babashka for conformance.
+Compatibility is tracked per feature rather than claimed for the language as a
+whole. The opt-in Babashka suites exercise supported cases, while intentional
+differences and open gaps are recorded in
+[Clojure Conformance Gaps](clojure-conformance-gaps.md).
 
 ---
 
@@ -242,7 +253,9 @@ Double-quoted, with escape sequences:
 "backslash: \\"
 ```
 
-Supported escapes: `\\`, `\"`, `\n`, `\t`, `\r`
+Recognized escapes `\\`, `\"`, `\n`, `\t`, and `\r` decode to their
+corresponding characters. A backslash before any other non-newline character is
+preserved verbatim (for example, `"a\qb"` contains the two characters `\q`).
 
 **Multi-line strings:** Strings may contain literal newline characters (like Clojure). Escape sequences (`\n`, `\r`) also work.
 
@@ -250,7 +263,11 @@ Supported escapes: `\\`, `\"`, `\n`, `\t`, `\r`
 
 **String operations:** Strings support `count`, `empty?`, `seq`, `str`, `pr-str`, `subs`, `join`, `split`, `trim`, `replace`, `index-of`, `last-index-of`, `format`, `name`, `re-find`, and `re-matches`. The `seq` function converts a string to a sequence of characters (graphemes), enabling character iteration. See Section 8.1 and 8.3 for details.
 
-**String as sequence:** Strings can be used as sequences in many collection operations. Functions like `filter`, `map`, `first`, `last`, `take`, `drop`, `reverse`, `sort`, and others work directly on strings, treating them as sequences of characters (graphemes). These operations return lists of single-character strings:
+**String as sequence:** Strings can be used as sequences in many collection
+operations. Functions like `filter`, `map`, `first`, `last`, `take`, `drop`,
+`reverse`, `sort`, and others work directly on strings, treating them as
+sequences of characters (graphemes). Sequence-producing operations return
+vectors of single-character strings:
 
 ```clojure
 (first "hello")                    ; => "h"
@@ -365,8 +382,15 @@ Key-value associations:
 
 **Map keys:** Keywords and strings are the standard map key types — keywords are preferred for their readability and self-documenting nature. Other key types (numbers, vectors) evaluate without error inside a program, but you should not rely on them for outputs because the serialization boundaries treat them inconsistently:
 
-- **`return` value:** maps with non-string/non-keyword keys are **rejected** (the program errors).
-- **Tool-call arguments:** all keys are **stringified** (e.g. `1` → `"1"`, `[:a :b]` → its inspected form), never rejected.
+- **Direct `PtcRunner.Lisp.run/2` and `PtcRunner.Kernel.run/2` results:** preserve numeric and
+  vector map-key types. Source keyword keys use the bounded public keyword
+  representation (a known atom or otherwise a string). The Kernel rejects
+  projection collisions, but its terminal return value is not itself restricted
+  to JSON object keys. A non-JSON-encodable result has no event `result_hash`,
+  and explicit JSON result-artifact persistence rejects it.
+- **Tool-call arguments:** keys are recursively normalized to strings (e.g.
+  `1` → `"1"`, `[:a :b]` → its inspected form). A projection collision or an
+  invalid native Java value is rejected rather than silently losing data.
 - **`json/generate-string`:** integer keys are stringified (`{1 "a"}` → `{"1":"a"}`), but vector/float keys (and even keyword keys) return `nil`.
 - **`json/parse-lines`:** line-delimited JSON helper; skips blank lines and parses each remaining line with `json/parse-string`.
 
@@ -374,7 +398,7 @@ Key-value associations:
 {:name "Alice"}           ; OK - keyword key
 {"name" "Alice"}          ; OK - string key
 {1 "one"}                 ; evaluates fine; serialization depends on the boundary (see above)
-{[:a :b] "nested"}        ; evaluates fine; rejected by `return`, stringified for tool args
+{[:a :b] "nested"}        ; evaluates fine; preserved directly, stringified for tool args
 ```
 
 For predictable behavior, use keyword or string keys for any map you intend to return or pass to a tool.
@@ -395,11 +419,10 @@ For predictable behavior, use keyword or string keys for any map you intend to r
 | `({:a 1} :missing "default")` | `"default"` | Missing key with default |
 | `({"name" "Alice"} "name")` | `"Alice"` | String key lookup |
 
-**Note:** Maps cannot be passed directly to higher-order functions like `mapv` or `filter`. Use a wrapper closure instead:
+Maps are callable directly, but higher-order collection functions currently
+reject a map in their callable argument position. Wrap the lookup in a closure:
 
 ```clojure
-;; Won't work: (mapv my-map keys)
-;; Use instead:
 (let [lookup {:a 1 :b 2}]
   (mapv #(lookup %) [:a :b]))  ; => [1 2]
 ```
@@ -443,30 +466,54 @@ Sets are **unordered** - iteration order is not guaranteed.
 
 **Not supported for sets:** `first`, `last`, `nth`, `sort` (sets are unordered). Note that `sort-by` *is* supported on sets — it iterates the elements and returns a sorted vector.
 
-**Not supported:** Lists (`'()`)
+**No separate list type:** Quoted list data such as `'()` is unsupported.
+The compatibility function `(list ...)` returns a vector, the same as
+`(vector ...)`.
 
-### 3.10 Vars
+### 3.10 Var-like Display Values
 
-Vars are references to bindings created by the `def` form. They allow you to create references to named values that can be stored in collections and passed around.
+`def`, `defonce`, and `defn` return an inert value displayed as `#'name`, matching
+Clojure's presentation of a Var. PTC-Lisp does not otherwise expose
+first-class, dereferenceable Var objects.
 
-**Reader syntax:** The `#'name` syntax produces a var reference:
+For reader compatibility, `#'name` in source resolves the binding's value just
+like the plain symbol `name`; it does not construct a Var value:
 
 ```clojure
-#'x                    ; var reference to binding x
-#'my-var               ; var reference to binding my-var
-#'suspicious?          ; var reference to binding suspicious?
-#'save!                ; var reference to binding save!
+(def x 42)                  ; => #'x
+(do (def x 42) #'x)         ; => 42
+(do (def x 42) [#'x x])     ; => [42 42]
 ```
 
-Vars can be stored in collections:
+The `#'name` value returned by a definition may appear in a result or
+collection, but evaluating the source spelling later is still ordinary binding
+lookup.
 
-| Expression | Description |
-|------------|-------------|
-| `[#'x #'y]` | Vector containing two var references |
-| `{:result #'foo}` | Map with var reference as value |
-| `#{#'a #'b #'c}` | Set containing var references |
+### 3.11 Quoted Symbol References
 
-**Var dereferencing:** The actual dereferencing of vars and access to the values they reference is handled by the `def` form. See the `def` form documentation for details on how var bindings work and how vars are evaluated.
+PTC-Lisp supports inert symbol references using either `'name` or
+`(quote name)`. Only symbols may be quoted; quoted collections and general
+quoted data are unsupported.
+
+```clojure
+'github/search-repos
+(quote github/search-repos)
+```
+
+For ordinary symbol spellings accepted by both forms, they produce the same
+inert, displayable reference. The reader shorthand consumes the raw
+symbol-shaped token after `'`, so reserved and numeric-looking spellings such
+as `'nil`, `'-1`, and `'*1` are also references. Their corresponding
+`(quote nil)`, `(quote -1)`, and `(quote *1)` forms are rejected because those
+arguments parse as a literal or turn-history expression rather than a symbol.
+References do not resolve the named binding and are useful where a host-facing
+API explicitly expects a symbolic reference. This is partial quote support,
+not Clojure's general data quotation. The current `symbol?` predicate still
+returns `false` for these references, and `type` reports `:unknown`. Public
+results and ordinary tool-call arguments expose an inert `'name` display
+wrapper; the Kernel rejects map-key collisions between that wrapper and an
+equivalent string representation. The dedicated `tool/call` symbolic target
+form consumes the reference before invoking its callback.
 
 ---
 
@@ -537,14 +584,15 @@ Binds names to values for use in the body expression:
     x))             ; => 2
 ```
 
-#### Implicit `do` (Clojure Extension)
+#### Implicit `do`
 
-Multiple body expressions are supported without explicit `do`:
+As in Clojure, multiple body expressions are supported without an explicit
+`do`:
 
 ```clojure
 ;; Multiple expressions - last value is returned
 (let [x 10]
-  (def saved x)     ; side effect: store in memory
+  (def saved x)     ; stage a continuation binding
   (* x 2))          ; => 20, saved = 10
 
 ;; Equivalent to explicit do
@@ -581,7 +629,7 @@ Extract values from vectors by position.
 (let [[a b & rest] [1 2 3 4 5]]
   [a b rest]) ; => [1 2 [3 4 5]]
 
-; Bind entire list (no leading elements)
+; Bind the entire remaining sequence (no leading elements)
 (let [[& all] [1 2 3]]
   all)       ; => [1 2 3]
 ```
@@ -618,7 +666,8 @@ Extract values from maps by key. Supports both keyword and string keys.
 - `{:strs [a b]}` — map string keys
 - `{:keys [a] :or {a default}}` — map with defaults
 - `{new-name :old-key}` — map renaming
-- `{:as symbol}` — bind collection to symbol
+- `{:keys [a] :as symbol}` (or another supported map pattern plus `:as`) —
+  bind the whole map in addition to its selected fields
 
 
 ### 5.2 `if` — Conditional
@@ -681,11 +730,11 @@ Returns body if condition is truthy, otherwise `nil`:
 (when (< 5 3) "smaller")          ; => nil
 ```
 
-**Implicit `do` (Clojure Extension):** Multiple body expressions are supported:
+**Implicit `do`:** As in Clojure, multiple body expressions are supported:
 
 ```clojure
 (when (> x 0)
-  (def positive x)    ; side effect
+  (def positive x)    ; stage a continuation binding
   (* x 2))            ; return value
 ```
 
@@ -833,11 +882,12 @@ Binds a value from an expression and evaluates the body only if the value is tru
   (+ x 1))                       ; => nil (x is falsy, body not evaluated)
 ```
 
-**Implicit `do` (Clojure Extension):** `when-let` supports multiple body expressions:
+**Implicit `do`:** As in Clojure, `when-let` supports multiple body
+expressions:
 
 ```clojure
 (when-let [x (find-value)]
-  (def found x)     ; side effect
+  (def found x)     ; stage a continuation binding
   (* x 2))          ; return value
 ```
 
@@ -955,8 +1005,9 @@ Binds a name to a value in the user namespace, persisting across turns:
 - Returns the var (`#'name`), not the value (like Clojure)
 - Creates or overwrites the binding in user namespace
 - Value is evaluated before binding
-- Binding persists until session ends or redefined
-- Shadows builtin names — the user binding takes precedence until session ends
+- Binding is returned in candidate memory and persists when the host supplies
+  that memory to a later evaluation
+- Shadows builtin names while the binding remains in continuation memory
 - Can shadow data names, but `data/` prefix still works
 
 ```clojure
@@ -1013,7 +1064,7 @@ Syntactic sugar for defining named functions in the user namespace:
 
 ```clojure
 (defn name [params] body)
-(defn name docstring [params] body)  ; docstring is optional and ignored
+(defn name docstring [params] body)  ; docstring is optional and retained in function metadata
 ```
 
 **Desugars to:** `(def name (fn [params] body))`
@@ -1042,13 +1093,13 @@ Syntactic sugar for defining named functions in the user namespace:
 
 ; With higher-order functions
 (defn expensive? [e] (> (:amount e) 5000))
-(filter expensive? data/expenses)  ; => filtered list
+(filter expensive? data/expenses)  ; => filtered vector
 ```
 
 **Multiple body expressions (implicit do):**
 ```clojure
 (defn with-logging [x]
-  (def last-input x)                  ; side effect
+  (def last-input x)                  ; stage a continuation binding
   (* x 2))                            ; return value
 ```
 
@@ -1118,7 +1169,7 @@ Syntactic sugar for defining named functions in the user namespace:
  5 1)
 ; => 120
 
-;; Process list with rest pattern destructuring
+;; Process a vector with rest-pattern destructuring
 (loop [[head & tail] [1 2 3 4]
        sum 0]
   (if head
@@ -1130,7 +1181,7 @@ Syntactic sugar for defining named functions in the user namespace:
 **Safety Mechanism:**
 PTC-Lisp enforces an iteration limit on `loop`/`recur` jumps. If a `loop` or tail-recursive function using `recur` exceeds the allowed number of iterations (default 1000), execution is terminated with a `loop_limit_exceeded` error. Ordinary non-tail function recursion is not counted by this limit; it remains bounded by the sandbox timeout and memory limit.
 
-### 5.17 `for` — List Comprehension
+### 5.17 `for` — Eager Comprehension
 
 `for` produces a vector by evaluating a body expression for each element of one or more collections. (Unlike Clojure's lazy sequence, PTC-Lisp's `for` returns an eager vector, displayed as `[...]`.)
 
@@ -1202,7 +1253,7 @@ PTC-Lisp enforces an iteration limit on `loop`/`recur` jumps. If a `loop` or tai
 
 Multiple `:when` clauses act as AND (all must pass). `:let` supports destructuring.
 
-### 5.21 `doseq` — Side-effecting Iteration
+### 5.18 `doseq` — Effect-oriented Iteration
 
 `doseq` iterates over collections for side effects (like `for`, but returns `nil` instead of collecting results). Desugars to `loop`/`recur` at analysis time.
 
@@ -1237,9 +1288,12 @@ Multiple `:when` clauses act as AND (all must pass). `:let` supports destructuri
 
 ---
 
-### 5.22 `return` — Signal Successful Completion
+### 5.19 `return` — Signal Successful Completion
 
-`return` immediately terminates execution and returns the given value as the result. Used in multi-turn agentic loops to signal that the agent has completed its task.
+`return` immediately terminates the current evaluation with an explicit
+successful outcome. A Kernel host uses that outcome to complete a multi-turn
+run. Direct `PtcRunner.Lisp.run/2` reports the outcome as
+`{:__ptc_return__, value}` in `Result.return`.
 
 **Syntax:**
 
@@ -1250,7 +1304,8 @@ Multiple `:when` clauses act as AND (all must pass). `:let` supports destructuri
 **Semantics:**
 
 - Immediately terminates the current program execution
-- The value becomes the program result, wrapped in a `return_signal`
+- The outer call to `PtcRunner.Lisp.run/2` succeeds and `Result.return` contains
+  `{:__ptc_return__, value}`
 - Cannot be used inside `pmap` or `pcalls` (raises an error)
 
 ```clojure
@@ -1262,9 +1317,13 @@ Multiple `:when` clauses act as AND (all must pass). `:let` supports destructuri
 
 ---
 
-### 5.23 `fail` — Signal Failure
+### 5.20 `fail` — Signal Failure
 
-`fail` immediately terminates execution with an error. Used in multi-turn agentic loops to signal that the agent cannot complete the task.
+`fail` immediately terminates the current evaluation with an explicit
+language-level failure outcome. A Kernel host uses that outcome to abort and
+roll back a multi-turn run. Direct `PtcRunner.Lisp.run/2` reports it as a
+successful evaluation whose `Result.return` is `{:__ptc_fail__, value}`; this
+is distinct from an evaluator error returned under the outer `:error` tag.
 
 **Syntax:**
 
@@ -1275,7 +1334,8 @@ Multiple `:when` clauses act as AND (all must pass). `:let` supports destructuri
 **Semantics:**
 
 - Immediately terminates the current program execution
-- The error value becomes the failure reason, wrapped in a `fail_signal`
+- The outer call to `PtcRunner.Lisp.run/2` succeeds and `Result.return` contains
+  `{:__ptc_fail__, value}`
 - Cannot be used inside `pmap` or `pcalls` (raises an error)
 
 ```clojure
@@ -1447,7 +1507,7 @@ To check several conditions, build the boolean inside a single `fn`:
 
 ### 7.2 Membership Testing
 
-Use `contains?` against a set or list:
+Use `contains?` against a set or vector:
 
 ```clojure
 ;; Pick orders whose status is "active" or "pending"
@@ -1573,7 +1633,9 @@ missing key: `(find {:a nil} :a)` => `[:a nil]` while `(find {:a 1} :b)` =>
 (find [10 20] 5)      ;=> nil
 ```
 
-**Map support:** `filter` and `remove` accept maps as input, treating each entry as a `[key value]` pair passed to the predicate. They return a **list** of `[key value]` pairs (not a map):
+**Map support:** `filter` and `remove` accept maps as input, treating each entry
+as a `[key value]` pair passed to the predicate. They return a **vector** of
+`[key value]` pairs (not a map):
 
 ```clojure
 ;; Filter map entries by value
@@ -1662,9 +1724,9 @@ missing key: `(find {:a nil} :a)` => `[:a nil]` while `(find {:a 1} :b)` =>
 
 **pmap semantics:**
 - Order is preserved - results match input order
-- Shares `map`'s finite seqable contract: `(pmap inc nil)` → `()`, strings map
-  over graphemes (`(pmap str "ab")` → `("a" "b")`), and multiple collections
-  zip element-wise, truncating to the shortest (`(pmap + [1 2 3] [10 20])` → `(11 22)`)
+- Shares `map`'s finite seqable contract: `(pmap inc nil)` → `[]`, strings map
+  over graphemes (`(pmap str "ab")` → `["a" "b"]`), and multiple collections
+  zip element-wise, truncating to the shortest (`(pmap + [1 2 3] [10 20])` → `[11 22]`)
 - Each parallel branch gets a read-only snapshot of the user namespace
 - Writes within branches (via `def`) are isolated and discarded
 - Errors in any branch propagate to the caller
@@ -1739,7 +1801,10 @@ wrappers raise a recoverable invalid-value error.
 
 **Note:** `sort`, `sort-by`, and the explicit comparison operators (`>`, `<`, `>=`, `<=`) support strings and mixed scalar values using recoverable runtime term ordering. Prefer numeric-only data when numeric ordering is required.
 
-**Map support:** `sort` and `sort-by` accept maps, treating each entry as a `[key value]` pair. They return a **list** of `[key value]` pairs (not a map) to preserve sort order:
+**Map support:** The one-argument `sort` form and both `sort-by` forms accept
+maps, treating each entry as a `[key value]` pair. They return a **vector** of
+`[key value]` pairs (not a map) to preserve sort order. The two-argument
+`(sort comparator coll)` form does not accept maps.
 
 ```clojure
 ;; Sort map entries by key/value pair order
@@ -1763,7 +1828,7 @@ wrappers raise a recoverable invalid-value error.
 | `second` | `(second coll)` | Second item or nil |
 | `last` | `(last coll)` | Last item or nil |
 | `nth` | `(nth coll idx)` | Item at index or nil |
-| `rest` | `(rest coll)` | All but first (empty list if none) |
+| `rest` | `(rest coll)` | All but first (empty vector if none) |
 | `butlast` | `(butlast coll)` | All but last (nil if none) |
 | `next` | `(next coll)` | All but first (nil if none) |
 | `ffirst` | `(ffirst coll)` | First of first |
@@ -1950,7 +2015,7 @@ These functions work on all collection types: vectors, maps, and sets.
 
 ;; postwalk can aggregate after children are processed
 (postwalk #(if (vector? %) (apply + %) %) [[1 2] [3 4]])
-; => 10 (inner lists sum first: [3 7], then outer sums: 10)
+; => 10 (inner vectors sum first: [3 7], then outer sums: 10)
 
 ;; tree-seq: flatten hierarchical data
 (let [tree {:id 1 :children [{:id 2 :children []} {:id 3 :children []}]}]
@@ -1980,11 +2045,11 @@ These functions work on all collection types: vectors, maps, and sets.
 |----------|-----------|-------------|
 | `seq` | `(seq coll)` | Convert to sequence (nil if empty) |
 
-The `seq` function converts a collection to a sequence:
-- **Lists**: Returns the list unchanged, or nil if empty
-- **Strings**: Returns a list of characters (graphemes), or nil if empty
-- **Sets**: Returns a list of elements, or nil if empty
-- **Maps**: Returns a list of `[key value]` pairs, or nil if empty
+The `seq` function converts a value to PTC-Lisp's eager sequence representation:
+- **Vectors**: Returns the vector unchanged, or nil if empty
+- **Strings**: Returns a vector of characters (graphemes), or nil if empty
+- **Sets**: Returns a vector of elements, or nil if empty
+- **Maps**: Returns a vector of `[key value]` pairs, or nil if empty
 - **nil**: Returns nil
 
 ```clojure
@@ -2083,7 +2148,7 @@ The `seq` function converts a collection to a sequence:
 | `not-every?` | `(not-every? pred coll)` | True if not all match (complement of `every?`) |
 | `not-every?` | `(not-every? :key coll)` | True if not all have truthy `:key` |
 | `distinct?` | `(distinct? x y ...)` | True if all arguments are distinct |
-| `contains?` | `(contains? coll key)` | True if key/element exists (maps, sets, lists) |
+| `contains?` | `(contains? coll key)` | True if key/element exists (maps, sets, vectors) |
 
 ```clojure
 (empty? [])                        ; => true
@@ -2096,7 +2161,7 @@ The `seq` function converts a collection to a sequence:
 (not-any? :error items)            ; no errors?
 (contains? {:a 1} :a)              ; => true
 (contains? {:a 1} :b)              ; => false
-(contains? ["a" "b" "c"] "b")      ; => true (works on lists too)
+(contains? ["a" "b" "c"] "b")      ; => true (PTC vector membership)
 (contains? ["a" "b" "c"] "x")      ; => false
 ```
 
@@ -2140,7 +2205,7 @@ The `seq` function converts a collection to a sequence:
 | `select-keys` | `(select-keys m keys)` | Pick specific keys |
 | `keys` | `(keys m)` | Get all keys |
 | `vals` | `(vals m)` | Get all values |
-| `entries` | `(entries m)` | Get all `[key value]` pairs as a list |
+| `entries` | `(entries m)` | Get all `[key value]` pairs as a vector |
 | `update-vals` | `(update-vals m f)` | Apply f to each value (matches Clojure 1.11) |
 | `update-keys` | `(update-keys m f)` | Apply f to each key (collision: retained value unspecified) |
 | `merge-with` | `(merge-with f m1 m2 ...)` | Merge maps with combining function for duplicates |
@@ -2187,9 +2252,9 @@ The `seq` function converts a collection to a sequence:
 (reduce-kv (fn [acc k v] (assoc acc k (* v 2))) {} {:a 1 :b 2}) ; => {:a 2 :b 4}
 ```
 
-**List Index Support:**
+**Vector Index Support:**
 
-`get-in`, `assoc`, `assoc-in`, and `update-in` support numeric indices for list/vector access:
+`get-in`, `assoc`, `assoc-in`, and `update-in` support numeric vector indices:
 
 ```clojure
 (get-in {:results [{:title "A"}]} [:results 0 :title])  ; => "A"
@@ -2204,7 +2269,8 @@ The `seq` function converts a collection to a sequence:
 (update-in [1 2 3] [1] inc)                              ; => [1 3 3]
 ```
 
-**Note:** `assoc`, `assoc-in`, and `update-in` raise `ArgumentError` for out-of-bounds indices.
+**Note:** `assoc`, `assoc-in`, and `update-in` fail with a `:runtime_error` for
+out-of-bounds vector indices.
 
 ### 8.3 String Functions
 
@@ -2389,11 +2455,16 @@ The `seq` function converts a collection to a sequence:
 (int Double/POSITIVE_INFINITY)      ; => ARITHMETIC ERROR
 ```
 
-**Division behavior:** The `/` operator always returns a float, even for exact divisions. For integer division, use `quot` which truncates toward zero—useful for index calculations like `(take (quot n 2) coll)`. Division by zero returns `Infinity`, `-Infinity`, or `NaN` as per IEEE 754 standard for floats. Converting `Infinity` to `int` raises an `arithmetic-error`; `(int ##NaN)` returns `0`.
+**Division behavior:** The `/` operator always returns a float, even for exact
+divisions. For integer division, use `quot`, which truncates toward zero—useful
+for index calculations like `(take (quot n 2) coll)`. An integer zero divisor
+raises `:arithmetic_error`; a floating zero divisor returns `Infinity`,
+`-Infinity`, or `NaN` according to IEEE 754. Converting `Infinity` to `int`
+raises `:arithmetic_error`; `(int ##NaN)` returns `0`.
 
 **`keyword` coercion:** Coerces a string to a keyword, passes keywords through unchanged, and returns `nil` for `nil`. Validates that the name starts with a letter and contains only letters, digits, `-`, `_`, `?`, `!`—no `/` (per DIV-13), no spaces, no empty strings, and no operator characters (`+`, `*`, `<`, `>`, `=`). Special numeric values (`##Inf`, `##-Inf`, `##NaN`) are rejected. Coercion never grows the BEAM atom table: names in the bounded vocabulary become atoms, every other name becomes a runtime keyword struct.
 
-### 8.4a Bitwise Operations
+#### 8.4.1 Bitwise Operations
 
 Integer-only bit manipulation, mirroring `clojure.core`. All arguments must be integers; non-integer arguments raise a `type-error`. For the single-bit ops (`bit-set`, `bit-clear`, `bit-flip`, `bit-test`), `n` is the zero-based bit index and must be a non-negative integer.
 
@@ -2504,7 +2575,7 @@ Integer-only bit manipulation, mirroring `clojure.core`. All arguments must be i
 | `fn?` | Is function? |
 | `false?` | Is exactly `false`? |
 | `true?` | Is exactly `true`? |
-| `symbol?` | Always false — PTC-Lisp uses keywords, not symbols (see [DIV-19](clojure-conformance-gaps.md#div-19-no-first-class-symbol-runtime-values)) |
+| `symbol?` | Always false, including for the limited inert references produced by `quote` (see §3.11 and [DIV-19](clojure-conformance-gaps.md#div-19-no-first-class-symbol-runtime-values)) |
 | `decimal?` | Always false — BEAM has no BigDecimal (see [DIV-20](clojure-conformance-gaps.md#div-20-decimal-and-ratio-always-return-false)) |
 | `ratio?` | Always false — BEAM has no ratio type (see [DIV-20](clojure-conformance-gaps.md#div-20-decimal-and-ratio-always-return-false)) |
 | `rational?` | Is integer? — integers are the only BEAM rationals (see [DIV-20](clojure-conformance-gaps.md#div-20-decimal-and-ratio-always-return-false)) |
@@ -2522,9 +2593,9 @@ Integer-only bit manipulation, mirroring `clojure.core`. All arguments must be i
 | `reversible?` | Supports `reverse`? (vectors and strings) |
 | `sorted?` | Always false — no sorted collections in PTC-Lisp |
 | `seqable?` | Can produce a seq? (collections, strings, nil) |
-| `ifn?` | Is invokable via direct call? (functions, keywords, maps, sets — NOT vectors). Note: maps/sets are invokable as `(my-map :key)` but cannot be passed directly to HOFs like `mapv`; wrap in a lambda: `(mapv #(my-map %) coll)` |
+| `ifn?` | Is directly invokable? (functions, keywords, maps, and sets; not vectors). Higher-order argument validation also accepts sets, but currently rejects maps; wrap a map lookup in a closure. |
 | `map-entry?` | Always false — no MapEntry type on BEAM |
-| `type` | Returns the type as a keyword: `:boolean`, `:number`, `:string`, `:vector`, `:map`, `:set`, `:keyword`, `:regex`, `:function`, or `:java_object` for a validated native Java wrapper. For `nil`, returns `nil` (not `:nil`). |
+| `type` | Returns the type as a keyword: `:boolean`, `:number`, `:string`, `:vector`, `:map`, `:set`, `:keyword`, `:regex`, `:function`, `:java_object` for a validated native Java wrapper, or `:unknown` for an unclassified value such as an inert quoted-symbol reference. For `nil`, returns `nil` (not `:nil`). |
 | `describe` | Returns a bounded map summary for data shape, type histograms, key coverage, examples, and optional nested paths. Forms: `(describe x)`, `(describe x opts)`. Options: `{:paths true :depth 2 :sample 3}`. |
 
 ```clojure
@@ -2547,11 +2618,14 @@ Integer-only bit manipulation, mirroring `clojure.core`. All arguments must be i
 (tree-seq sequential? seq [[1 2] [3 [4 5]]])
 ```
 
-**Note:** Strings are not considered collections by any predicate. This affects functions like `flatten` which only flatten values where `coll?` is true.
+**Note:** `coll?` returns false for strings, although capability predicates such
+as `seqable?`, `counted?`, `indexed?`, and `reversible?` return true. `flatten`
+does not recurse into strings.
 
 **Collection Functions on Maps and Strings:**
 
-Although maps and strings are not "collections" per `coll?`, many collection functions work on them:
+Maps satisfy `coll?`, while strings do not. Both nevertheless work with many
+sequence-oriented functions:
 
 | Function | Maps | Strings | Notes |
 |----------|------|---------|-------|
@@ -2562,32 +2636,34 @@ Although maps and strings are not "collections" per `coll?`, many collection fun
 | `second` | ✗ | ✓ | Maps: use `(second (keys m))`. Strings: returns second character |
 | `last` | ✗ | ✓ | Maps: use `(last (keys m))`. Strings: returns last character |
 | `nth` | ✗ | ✓ | Maps: not supported. Strings: returns character at index |
-| `rest` | ✗ | ✓ | Strings: returns list of remaining characters |
-| `butlast` | ✗ | ✓ | Strings: returns list of all but last character |
-| `next` | ✗ | ✓ | Strings: returns list of remaining characters or nil |
-| `take` | ✓ | ✓ | Maps: returns list of `[key value]` pairs. Strings: returns list of first n characters |
-| `drop` | ✓ | ✓ | Maps: returns list of `[key value]` pairs. Strings: returns list of characters after dropping n |
-| `take-last` | ✓ | ✓ | Maps: returns list of `[key value]` pairs. Strings: returns list of last n characters |
-| `drop-last` | ✓ | ✓ | Maps: returns list of `[key value]` pairs. Strings: returns list of characters after dropping last n |
-| `take-while` | ✓ | ✓ | Maps: iterates `[key value]` pairs. Strings: returns list of characters while predicate is true |
-| `drop-while` | ✓ | ✓ | Maps: iterates `[key value]` pairs. Strings: returns list of characters after predicate becomes false |
+| `rest` | ✗ | ✓ | Strings: returns a vector of remaining characters |
+| `butlast` | ✗ | ✓ | Strings: returns a vector of all but the last character |
+| `next` | ✗ | ✓ | Strings: returns a vector of remaining characters or nil |
+| `take` | ✓ | ✓ | Maps: returns a vector of `[key value]` pairs. Strings: returns a vector of first n characters |
+| `drop` | ✓ | ✓ | Maps: returns a vector of `[key value]` pairs. Strings: returns a vector of characters after dropping n |
+| `take-last` | ✓ | ✓ | Maps: returns a vector of `[key value]` pairs. Strings: returns a vector of last n characters |
+| `drop-last` | ✓ | ✓ | Maps: returns a vector of `[key value]` pairs. Strings: returns a vector of characters after dropping last n |
+| `take-while` | ✓ | ✓ | Maps: iterates `[key value]` pairs. Strings: returns a vector of characters while predicate is true |
+| `drop-while` | ✓ | ✓ | Maps: iterates `[key value]` pairs. Strings: returns a vector of characters after predicate becomes false |
 | `map` | ✓ | ✓ | Maps: iterates over `[key value]` pairs. Strings: iterates over characters |
 | `mapv` | ✓ | ✓ | Same as `map`, returns vector |
-| `filter` | ✓ | ✓ | Maps: returns list of `[key value]` pairs. Strings: returns list of characters |
-| `remove` | ✓ | ✓ | Maps: returns list of `[key value]` pairs. Strings: returns list of characters |
+| `filter` | ✓ | ✓ | Maps: returns a vector of `[key value]` pairs. Strings: returns a vector of characters |
+| `remove` | ✓ | ✓ | Maps: returns a vector of `[key value]` pairs. Strings: returns a vector of characters |
 | `find` | ✓ | ✗ | Maps: associative entry lookup. Strings: not associative and signal `:type_error` |
-| `sort` | ✗ | ✓ | Strings: returns sorted list of characters |
-| `sort-by` | ✓ | ✓ | Maps: returns sorted list of `[key value]` pairs. Strings: sorted list of characters |
-| `reverse` | ✗ | ✓ | Strings: returns reversed list of characters |
-| `distinct` | ✓ | ✓ | Maps: returns `[key value]` pairs (already unique). Strings: returns list of unique characters |
-| `some` | ✗ | ✓ | Strings: returns first truthy result of predicate |
-| `every?` | ✗ | ✓ | Strings: true if predicate is truthy for all characters |
-| `not-any?` | ✗ | ✓ | Strings: true if predicate is false for all characters |
-| `not-every?` | ✗ | ✓ | Strings: true if predicate is false for at least one character |
+| `sort` | ✓ | ✓ | Maps: sorts `[key value]` entries. Strings: returns a sorted vector of characters |
+| `sort-by` | ✓ | ✓ | Maps: returns a sorted vector of `[key value]` pairs. Strings: a sorted vector of characters |
+| `reverse` | ✗ | ✓ | Strings: returns a reversed vector of characters |
+| `distinct` | ✗ | ✓ | Maps: use `(distinct (entries m))`. Strings: returns a vector of unique characters |
+| `some` | ✓ | ✓ | Maps pass `[key value]` entries; strings pass characters |
+| `every?` | ✓ | ✓ | Maps pass `[key value]` entries; strings pass characters |
+| `not-any?` | ✓ | ✓ | Maps pass `[key value]` entries; strings pass characters |
+| `not-every?` | ✓ | ✓ | Maps pass `[key value]` entries; strings pass characters |
 | `reduce` | ✓ | ✓ | Maps: iterates over `[key value]` pairs. Strings: iterates over characters |
-| `entries` | ✓ | ✗ | Explicit conversion to list of `[key value]` pairs |
+| `entries` | ✓ | ✗ | Explicit conversion to a vector of `[key value]` pairs |
 
-**Note:** String operations that return characters return lists of single-character strings, not a string. Use `(join "" result)` to convert back to a string if needed.
+**Note:** String operations that return character sequences return vectors of
+single-character strings, not a string. Use `(join "" result)` to convert back
+to a string if needed.
 
 **Mapping over maps:** When you call `map` on a map, each entry is passed as a `[key value]` vector. Use destructuring to extract the key and value:
 
@@ -2661,7 +2737,8 @@ families such as `.contains` are manifest-resolved source identities; they move
 to Java CoreAST only once their complete reference family uses closed dispatch.
 
 **Parsing behavior:**
-- Both functions require the entire string to be consumed by the parse. Partial parses are rejected.
+- The unqualified parsers require the entire string to be consumed. Partial
+  parses are rejected.
 - Leading/trailing whitespace is not stripped—the string must be in exact numeric form.
 - Invalid input returns `nil` rather than an error.
 
@@ -2682,6 +2759,34 @@ numeric parsers follow the class-specific behavior described above.
 (Boolean/parseBoolean "x") ; => false
 ```
 
+```clojure
+;; Failed parses
+(parse-long "abc")         ; => nil
+(parse-double "invalid")   ; => nil
+(parse-long "42abc")       ; => nil (partial parse rejected)
+(parse-double "3.14 ")     ; => nil (trailing whitespace not allowed)
+```
+
+**Type checking:** The unqualified parsing functions return `nil` for
+non-string input (see
+[DIV-18](clojure-conformance-gaps.md#div-18-parse-long-parse-double-parse-boolean-return-nil-for-non-string-input)).
+
+```clojure
+(parse-long 42)            ; => nil
+(parse-long nil)           ; => nil
+(parse-double nil)         ; => nil
+(parse-double 3.14)        ; => nil
+```
+
+Typical usage filters recoverable failures:
+
+```clojure
+(->> ["1" "2" "not-a-number" "4"]
+     (map parse-long)
+     (filter some?)
+     (reduce + 0))  ; => 7
+```
+
 ### 8.10 Regex Functions
 
 Regex functions provide validation and extraction capabilities. To ensure system stability, PTC-Lisp uses a "Safety-First" regex engine with forced backtracking and recursion limits.
@@ -2691,7 +2796,7 @@ Regex functions provide validation and extraction capabilities. To ensure system
 | `re-pattern` | `(re-pattern s)` | Compile string `s` into an opaque regex object |
 | `re-find` | `(re-find re s)` | Returns the first match of `re` in `s` |
 | `re-matches` | `(re-matches re s)` | Returns match if `re` matches the **entire** string `s` |
-| `re-seq` | `(re-seq re s)` | Returns all matches of `re` in `s` as a list |
+| `re-seq` | `(re-seq re s)` | Returns all matches of `re` in `s` as a vector |
 | `re-split` | `(re-split re s)` | Split string `s` by regex pattern `re` |
 | `regex?` | `(regex? x)` | Returns true if `x` is a regex object |
 | `extract` | `(extract pattern s)` | Extract capture group 1 from match |
@@ -2700,11 +2805,13 @@ Regex functions provide validation and extraction capabilities. To ensure system
 | `extract-int` | `(extract-int pattern s n)` | Extract group n and parse as integer |
 | `extract-int` | `(extract-int pattern s n default)` | Extract group n, parse as int, return default on failure |
 
-**Opaque Regex Type:** Regexes do not have a literal syntax. They must be created using `re-pattern`. Internally, they are opaque objects that can be passed to functions but not inspected directly.
+**Opaque Regex Type:** Regexes are created with `re-pattern` or the standard
+reader shorthand `#"..."`. Internally, they are opaque values that can be
+passed to regex functions but are not otherwise inspected.
 
 **Return Value Semantics:**
-- If no match is found, `re-find` and `re-matches` return `nil`; `re-seq` returns an empty list.
-- If the regex has no capture groups, returns the matching string (or list of strings for `re-seq`).
+- If no match is found, `re-find` and `re-matches` return `nil`; `re-seq` returns an empty vector.
+- If the regex has no capture groups, returns the matching string (or vector of strings for `re-seq`).
 - If the regex contains capture groups, returns a **vector** where the first element is the full match and subsequent elements are the groups.
 
 ```clojure
@@ -2737,37 +2844,6 @@ Regex functions provide validation and extraction capabilities. To ensure system
 - **Match Limit:** Regex execution is restricted to 100,000 backtracking steps. Exceeding this limit (e.g., due to ReDoS) terminates evaluation with an error.
 - **Input Truncation:** To prevent super-linear scaling on massive inputs, regex functions only scan the first 32KB of any input string.
 - **Pattern Complexity:** Patterns are limited to 256 bytes in length.
-
-
-```clojure
-;; Failed parses
-
-(parse-long "abc")         ; => nil
-(parse-double "invalid")   ; => nil
-(parse-long "42abc")       ; => nil (partial parse rejected - must consume entire string)
-(parse-double "3.14 ")     ; => nil (trailing whitespace not allowed)
-```
-
-**Type checking:**
-Both functions accept strings and return `nil` for non-string input (see [DIV-18](clojure-conformance-gaps.md#div-18-parse-long-parse-double-parse-boolean-return-nil-for-non-string-input)).
-
-```clojure
-(parse-long 42)            ; => ...
-(parse-long nil)           ; => ...
-(parse-double nil)         ; => ...
-(parse-double 3.14)        ; => ...
-```
-
-**Use cases:**
-Typical usage involves filtering valid parses from potentially invalid input:
-
-```clojure
-;; Extract valid integers from mixed data
-(->> ["1" "2" "not-a-number" "4"]
-     (map parse-long)
-     (filter some?)
-     (reduce + 0))  ; => 7
-```
 
 ### 8.11 Function Combinators
 
@@ -2881,7 +2957,10 @@ The `juxt` combinator creates a function that applies each of its argument funct
 | `apply` | `(apply f coll)` | Applies function `f` to the argument sequence `coll` |
 | | `(apply f x y ... coll)` | Applies function `f` to `x`, `y`, ... and the argument sequence `coll` |
 
-The `apply` function invokes a function `f` with the provided arguments. The last argument must be a collection (vector or set), which is "unrolled" into individual arguments. Any arguments between `f` and the collection are passed as fixed prefix arguments.
+The `apply` function invokes a function `f` with the provided arguments. The
+last argument must be a vector, set, or map, which is "unrolled" into
+individual arguments. A map is unrolled as `[key value]` entry vectors. Any
+arguments between `f` and the collection are passed as fixed prefix arguments.
 
 ```clojure
 ;; Basic usage
@@ -2891,6 +2970,7 @@ The `apply` function invokes a function `f` with the provided arguments. The las
 ;; Spreading with fixed arguments
 (apply + 1 2 [3 4])            ; => 10
 (apply merge {:a 1} [{:b 2} {:c 3}]) ; => {:a 1 :b 2 :c 3}
+(apply vector {:a 1})          ; => [[:a 1]]
 
 ;; With Keywords as functions
 (apply :name [{:name "Alice"}]) ; => "Alice"
@@ -2906,6 +2986,8 @@ The `apply` function invokes a function `f` with the provided arguments. The las
 - **Empty collection:** `(apply + [])` is equivalent to `(+)`, returning `0`.
 - **Nil as last argument:** `(apply + 1 2 nil)` returns a `type-error`. PTC-Lisp requires an explicit collection.
 - **Sets as last argument:** `(apply + 1 #{2 3})` is allowed, but since sets are unordered, the application order is undefined (not an issue for commutative operations like `+`).
+- **Maps as last argument:** Each map entry is spread as one `[key value]`
+  argument; map iteration order is unspecified.
 - **Non-callable first argument:** Raises a `not-callable` error.
 - **Non-collection last argument:** Raises a `type_error`.
 
@@ -3011,7 +3093,7 @@ of the same admitted temporal class by their Java temporal value, never by the
 field order of the native wrapper.
 
 Date(long) always means milliseconds. It performs no seconds-versus-milliseconds
-heuristic. The Date temporal-struct constructor extension has been removed.
+heuristic. Host temporal structs are not accepted as constructor arguments.
 Date(String) accepts a deterministic bounded subset of the deprecated Java
 legacy English grammar. It requires an explicit year with at least four digits
 and a date on or after Java's Gregorian cutover (`1582-10-15`), and treats a
@@ -3095,8 +3177,6 @@ until a deterministic locale and pinned Unicode-data contract are selected.
 
 ---
 
----
-
 ## 9. Namespaces, Context, and Tools
 
 Programs have access to data and functions through **namespaced symbols** and **special forms**.
@@ -3128,11 +3208,11 @@ Stored values are **read-only during evaluation** unless redefined via `def`. To
 orders ; return current total
 ```
 
-With default values (using `or`):
+Use `defonce` to initialize a value before updating it:
 
 ```clojure
-(def current-count (or query-count 0))
-(def query-count (inc current-count))
+(defonce query-count 0)
+(def query-count (inc query-count))
 query-count
 ```
 
@@ -3182,8 +3262,8 @@ Access results from previous turns using the turn history symbols:
 - Lightweight chaining when full values aren't needed
 
 ```clojure
-;; On turn 2, check if previous result was a list
-(if (list? *1)
+;; On turn 2, check if the previous result was a vector
+(if (vector? *1)
   (count *1)
   0)
 
@@ -3196,7 +3276,7 @@ ceilings. If either candidate exceeds its ceiling, neither changes. Use
 `(def name value)` when a value needs a stable name beyond the three-result
 history window.
 
-### 9.6 Tool Invocation — `tool/tool-name`
+### 9.5 Tool Invocation — `tool/tool-name`
 
 Invoke registered tools using the `tool/` namespace:
 
@@ -3206,7 +3286,8 @@ Invoke registered tools using the `tool/` namespace:
 ```
 
 **Syntax:**
-- Tool names become atoms in `tool/` namespace: `tool/tool-name`
+- A `tool/name` symbol resolves only against the tools explicitly granted by
+  the host
 - **Tools require named arguments** (maps):
   - No arguments: `(tool/get-users)` → tool receives `%{}`
   - Map argument: `(tool/fetch {:id 123})` → tool receives `%{"id" => 123}`
@@ -3238,7 +3319,7 @@ Invoke registered tools using the `tool/` namespace:
 - Tool errors propagate as execution errors
 - Tool calls are logged for auditing
 
-### 9.8 Namespace Compatibility
+### 9.6 Namespace Compatibility
 
 LLMs often generate code with namespace-qualified symbols. PTC-Lisp does not
 evaluate namespace declarations (`ns`, `require`, `refer`, `import`), but it
@@ -3330,7 +3411,7 @@ When a namespaced function doesn't exist as a built-in, the analyzer provides he
 and tool invocation respectively. They are not aliases for Clojure
 namespaces.
 
-### 9.9 Kernel Component Namespaces
+### 9.7 Kernel Component Namespaces
 
 Hosts compile namespace-bearing components with `PtcRunner.Kernel.compile_bundle/1`.
 Public `defn`/`def` exports are callable by qualified name; `defn-` helpers stay
@@ -3344,7 +3425,7 @@ Manifest component arrays may combine local source objects with exact
 installed catalog, expand their transitive closure before compilation, and may
 not be repeated or shadowed by a local component ID.
 
-### 9.10 Public Component Contracts
+### 9.8 Public Component Contracts
 
 Host-compiled components may attach an optional contract metadata map to a
 public function or constant:
@@ -3375,7 +3456,7 @@ Contract enforcement has three stages:
    successful result; `(fail value)` is not.
 
 Supported scalar types are `:string`, `:int`, `:float`, `:bool`/`:boolean`,
-`:keyword`, `:map`, `:datetime`, and `:any`, plus homogeneous lists such as
+`:keyword`, `:map`, `:datetime`, and `:any`, plus homogeneous sequences such as
 `[:string]` and shaped maps such as `{id :string, title :string?}`. A `?`
 means the value may be `nil`. It does not make a positional parameter
 omittable; fixed arity still applies. For a shaped-map field, the same marker
@@ -3404,7 +3485,8 @@ Filter expenses by category and sum amounts:
      (sum-by :amount))
 ```
 
-Returns a number. No memory update (non-map result).
+Returns a number. No memory is updated because the program contains no `def`;
+the result's type does not control persistence.
 
 ### 10.2 Find Single Item
 
@@ -3650,12 +3732,13 @@ Maps can be called as functions with a keyword argument:
 (flatten [1 [2 {:a 3}] "str"])    ; => [1 2 {:a 3} "str"]
 ```
 
-- Only vectors (Erlang lists) are flattened — `flatten` delegates to `List.flatten/1`, which recurses only into lists
-- Maps, sets, strings, and other non-list values pass through unchanged (even though sets satisfy `coll?`, they are not flattened)
+- Only vectors are recursively flattened
+- Maps, sets, strings, and other non-vector values pass through unchanged (even
+  though sets satisfy `coll?`, they are not flattened)
 
 ### 11.10 Tool Call Evaluation Order
 
-Tool calls are evaluated in left-to-right order and never reordered:
+Outside explicit parallel forms, tool calls are evaluated left-to-right:
 
 ```clojure
 (let [a (tool/tool-1)   ; called first
@@ -3663,32 +3746,52 @@ Tool calls are evaluated in left-to-right order and never reordered:
   [a b])
 ```
 
-This matters because tools may have side effects. The interpreter guarantees:
+This matters because tools may have side effects. Sequential evaluation
+guarantees:
 - Arguments evaluated left-to-right
 - Tool calls execute in program order
-- No speculative or parallel execution
+- No speculative execution
 
----
+`pmap` and `pcalls` are the explicit exception: their worker calls may overlap
+and complete in any order, while their result vectors retain input order.
 
 ## 12. Error Handling
 
-Errors are represented as tagged tuples: `{:error, {error_type, details}}`. The error type is an atom, and details vary by error type (usually a message string, but may include additional context like expected/got values for type errors). Examples:
+`PtcRunner.Lisp.run/2` returns `{:ok, %PtcRunner.Lisp.Result{}}` on success and
+`{:error, %PtcRunner.Lisp.Result{}}` on failure. The public failure is in the
+result's `fail` field:
 
 ```elixir
-{:error, {:parse_error, "unexpected token at line 3"}}
-{:error, {:invalid_form, "let bindings require even number of forms"}}
-{:error, {:type_error, "expected number, got string", [nil]}}  # 3rd element is the arg list / bad value
-{:error, {:runtime_error, "runtime evaluation failed"}}
-{:error, {:tool_error, "get-users", "connection refused"}}
-{:error, {:timeout, 5000}}
-{:error, {:memory_exceeded, 10_000_000}}
+{:error,
+ %PtcRunner.Lisp.Result{
+   return: nil,
+   fail: %{
+     reason: :type_error,
+     message: "type_error: add: invalid argument types: number, nil",
+     details: %{}
+   },
+   memory: %{},
+   prints: [],
+   tool_calls: []
+ }}
 ```
 
-The formatted strings shown below are human-readable renderings for display to users or LLMs.
+The evaluator uses internal tagged reasons while executing, but callers should
+consume the stable `Result.fail` map rather than depend on those internal
+tuples. Failed evaluations normally return the original continuation memory,
+and candidate `def` changes are rolled back. If supplied continuation memory
+contains an improper list or a malformed symbol-reference or keyword wrapper,
+the public error returns empty memory instead: copying that invalid value into
+the error result would make the error itself unsafe to project. Invalid context
+or history still preserves otherwise-valid continuation memory. A setup-phase
+heap kill or timeout also returns empty memory: the environment worker could
+not safely import and normalize the grant, so the caller does not traverse and
+project that input memory again outside the setup bounds. The failure details
+identify the phase as `:setup`; evaluation-phase failures identify `:eval`.
 
 ### 12.1 Error Types
 
-| Error Type (atom) | Cause |
+| `fail.reason` | Cause |
 |------------|-------|
 | `:parse_error` | Invalid syntax |
 | `:invalid_form` | Malformed program structure (static analysis phase) |
@@ -3706,22 +3809,19 @@ The formatted strings shown below are human-readable renderings for display to u
 | `:invalid_placeholder` | Invalid placeholder in `#()` syntax |
 | `:unsupported_pattern` | Unsupported destructuring/binding pattern |
 | `:unsupported_method` | Unknown Java-interop method |
-| `:timeout` | Execution time exceeded |
+| `:invalid_keyword` | A supplied or returned keyword wrapper is malformed or its name is outside the reader's keyword grammar |
+| `:invalid_lisp_list` | A supplied public value contains an improper Elixir list, which cannot represent a PTC-Lisp vector |
+| `:invalid_symbol_ref` | A supplied or returned symbol-reference wrapper is malformed or its name is outside the reader's symbol grammar |
+| `:symbol_ref_collision` | Distinct public/native symbol-reference values collapse to the same map key or set member |
+| `:timeout` | Setup or execution time exceeded (`fail.details.phase` identifies the phase) |
 | `:memory_exceeded` | Memory limit exceeded |
 
 ### 12.2 Error Message Format
 
-Errors should include location and context when available. Source location tracking (line/column) is recommended but optional for v1 implementations—at minimum, errors must include the error type and a descriptive message.
-
-```
-type-error at line 5:
-  (sum-by :amount items)
-
-  'sum-by' expected a collection, got string: "not a list"
-
-  Context: items was bound at line 2:
-    (let [items data/data] ...)
-```
+`fail.reason` is the machine-readable atom. `fail.message` is a bounded
+human-readable rendering, and `fail.details` carries structured data when the
+error supplies it. Message wording is diagnostic and should not be parsed as an
+API.
 
 ### 12.3 Common Errors and Hints
 
@@ -3756,11 +3856,11 @@ Anonymous functions are supported via `fn` or `#()` shorthand with restrictions:
 (fn [{:strs [x]}] body) ; map destructuring in params (string keys)
 ```
 
-**Implicit `do` (Clojure Extension):** Multiple body expressions are supported:
+**Implicit `do`:** As in Clojure, multiple body expressions are supported:
 
 ```clojure
 (fn [x]
-  (def last-input x)   ; side effect
+  (def last-input x)   ; stage a continuation binding
   (* x 2))             ; return value
 ```
 
@@ -3773,7 +3873,7 @@ The `#()` shorthand syntax provides concise lambdas (like Clojure):
 #(+ %1 %2)         ; explicit numbered parameters
 #(* % %)           ; same parameter used multiple times
 #(42)              ; zero-arity thunk (no parameters)
-#(vector %1 %&)    ; %& captures remaining args as a list
+#(vector %1 %&)    ; %& captures remaining args as a vector
 ```
 
 The `#()` syntax desugars to the equivalent `fn`:
@@ -3782,7 +3882,8 @@ The `#()` syntax desugars to the equivalent `fn`:
 - `#()` with no placeholders → `(fn [] ...)`
 - `#(vector %1 %&)` → `(fn [p1 & rest] (vector p1 rest))`
 - Arity is determined by the highest numbered placeholder, or 1 if only `%` is used
-- `%&` captures remaining arguments as a list (like `& rest` in `fn`)
+- `%&` captures remaining arguments in PTC-Lisp's vector sequence
+  representation (unlike Clojure's list/seq representation)
 
 **Restrictions:**
 - `#()` accepts a single expression as the body
@@ -3832,28 +3933,39 @@ program     = expression* ;  (* Multiple top-level expressions with implicit do 
 expression  = literal
             | symbol
             | keyword
+            | regex
+            | var-lookup
+            | quoted-symbol
+            | short-fn
             | vector
             | set
             | map
             | list-expr ;
 
-literal     = nil | boolean | number | string | char ;
+literal     = nil | boolean | number | special-number | string | char ;
 
 nil         = "nil" ;
 boolean     = "true" | "false" ;
 number      = integer | float ;
+special-number = "##Inf" | "##-Inf" | "##NaN" ;
 integer     = ["-"] digit+ ;
 float       = ["-"] digit+ "." digit+ [exponent]
             | ["-"] digit+ exponent ;
 exponent    = ("e" | "E") ["+" | "-"] digit+ ;
 string      = '"' string-char* '"' ;
+regex       = '#"' regex-char* '"' ;
 string-char = escape-seq | (any char except '"' and '\') ;  (* literal newlines allowed *)
-escape-seq  = '\\' ('"' | '\\' | 'n' | 't' | 'r') ;
+regex-char  = regex-escape | (any char except '"' and '\') ; (* literal newlines allowed *)
+escape-seq  = '\\' (any char except newline or carriage return) ;
+regex-escape = '\\' (any char except newline or carriage return) ;
 char        = '\\' (char-name | any-char) ;
 char-name   = "newline" | "space" | "tab" | "return" | "backspace" | "formfeed" ;
 any-char    = (any single Unicode grapheme) ;
 
 symbol      = symbol-first symbol-rest* ;
+var-lookup  = "#'" symbol ;
+quoted-symbol = "'" symbol ;
+short-fn    = "#(" expression* ")" ;
 symbol-first = letter | special-initial ;
 symbol-rest  = letter | digit | special-rest ;
 letter      = "a"-"z" | "A"-"Z" ;
@@ -3873,7 +3985,7 @@ map-entry   = expression expression ;
 
 list-expr   = "(" expression expression* ")" ;  (* operator can be any expression *)
 
-comment     = ";" (any char except newline)* newline ;
+comment     = ";" (any char except newline)* (newline | end-of-input) ;
 
 whitespace  = " " | "\t" | "\n" | "\r" | "," ;
 ```
@@ -3893,7 +4005,10 @@ whitespace  = " " | "\t" | "\n" | "\r" | "," ;
 4. `\a`, `\newline` → character literal
 5. Everything else → symbol
 
-This means `-1` is always the integer negative one, never a symbol named "-1". Similarly, `\r` is the character "r", not a symbol.
+Outside reader-quote shorthand, `-1` is always the integer negative one, never
+a symbol named "-1". Reader quote consumes raw symbol-shaped text, so `'-1`
+is the reference described in §3.11. Similarly, `\r` is the character "r", not
+a symbol.
 
 ---
 
@@ -3903,8 +4018,10 @@ This means `-1` is always the integer negative one, never a symbol named "-1". S
 
 - Programs can contain multiple expressions (evaluated sequentially, last value returned)
 - Evaluation is strict (eager), not lazy
-- No side effects except tool calls
-- Tools may have side effects (external)
+- `def` stages continuation changes; `println` records bounded diagnostics
+- Granted tools are the only general external-effect boundary
+- `System/currentTimeMillis` and zero-argument `(java.util.Date.)` explicitly
+  read the system clock
 
 ### 15.2 Resource Limits
 
@@ -3937,9 +4054,18 @@ heap is therefore bounded by `Max Parallel Workers × Worker Max Heap`.
 
 ### 15.3 Compatibility Testing
 
-Programs should produce identical results when run in:
-1. PTC-Lisp interpreter (Elixir)
-2. Clojure (with stub implementations for `data/`, `tool/`, and other PTC-specific forms)
+Supported compatibility cases are exercised by opt-in Babashka oracle suites.
+They compare individual forms/functions after supplying adapters for
+PTC-specific context and helper vocabulary; they do not assert whole-language
+equivalence. Run them with:
+
+```bash
+mix test --include clojure
+```
+
+The suite skips when the `bb` executable is unavailable. Intentional
+differences, unsupported features, and open gaps remain authoritative in
+[Clojure Conformance Gaps](clojure-conformance-gaps.md).
 
 ---
 
@@ -3949,46 +4075,51 @@ This section specifies how PTC-Lisp programs interact with persistent memory acr
 
 ### 16.1 Core Principle: Functional Transactions
 
-Programs are **pure functions** that:
-- Read from stored values (plain symbols) and `data/` namespace
-- Return a result value
-- The result determines stored value updates
+Each evaluation:
+- Reads stored definitions, turn history, and `data/` context
+- May call explicitly granted tools
+- Produces an ordinary value or explicit `return`/`fail` outcome
+- Stages stored-value updates only through `def`/`defonce`/`defn`
 
-This provides **transactional semantics**: either the entire program succeeds and memory updates, or it fails and memory remains unchanged.
+The stateful Kernel host applies these changes transactionally: it commits the
+native continuation only after a successful turn and rolls it back on failure.
+`PtcRunner.Lisp.run/2` is a lower-level, stateless API; its returned memory is a
+continuation snapshot for the caller to accept or discard, not an automatic
+commit.
 
 ### 16.2 Environment Structure
 
-The host builds an execution environment for each program:
+Direct callers supply the environment through `PtcRunner.Lisp.run/2` options:
 
 ```elixir
-%{
-  memory: %{                    # Persistent across turns
-    high_paid: [...],
-    query_count: 5,
-    ...
-  },
-  ctx: %{                       # Current request only
-    input: [...],
-    user_id: "user-123",
-    request_id: "req-456",
-    ...
-  },
-  tools: %{                     # Registered tool functions
+PtcRunner.Lisp.run(source,
+  memory: %{high_paid: employees, query_count: 5},
+  turn_history: [previous_result],
+  context: %{"input" => request_items, "user-id" => "user-123"},
+  tools: %{
     "get-users" => &Host.get_users/1,
-    "get-orders" => &Host.get_orders/1,
-    ...
+    "get-orders" => &Host.get_orders/1
   },
-  __meta__: %{                  # Execution metadata (not exposed to DSL)
-    call_id: "uuid-...",
-    turn: 3,
-    retry_count: 0,
-    timestamp: ~U[2024-01-15 10:30:00Z],
-    limits: %{max_tool_calls: nil, timeout_ms: 1000}   # illustrative; max_tool_calls defaults to nil (unlimited), sandbox timeout to 1000 ms
-  }
-}
+  timeout: 1_000
+)
 ```
 
-### 16.3 Result Contract (V2 Simplified Model)
+`run/2` returns a filtered continuation snapshot but does not retain it
+globally. In particular, direct runtime-callable aliases such as a binding to a
+builtin or tool are omitted. Runtime callables nested in ordinary collection
+data are replaced with display labels. Supported closures and composed
+callables preserve embedded builtin/tool references, but Java callables become
+display labels even when captured by a closure; that closure is therefore
+observation-only on the public continuation path. A direct caller may thread
+the snapshot into a later call for ordinary data and supported callable forms
+that do not capture Java callables, but must discard it when `Result.return` is
+`{:__ptc_fail__, _}`.
+
+A Kernel owner instead uses the native continuation path, which preserves the
+full callable state needed by the runtime, and atomically commits continuation
+memory and turn history only for successful turns.
+
+### 16.3 Result and Continuation Contract
 
 At the language boundary, ordinary completion produces the value of the last
 expression and storage is explicit via `def`. A host running a multi-turn
@@ -3999,12 +4130,12 @@ successful terminal completion, and `(fail value)` is terminal failure.
 | Behavior | How It Works |
 |----------|--------------|
 | **Ordinary value** | Last expression result; a Kernel agent continues to another turn |
-| **Terminal success** | `(return value)` explicitly completes a Kernel agent |
-| **Terminal failure** | `(fail value)` explicitly aborts and rolls back the current program |
-| **Persistent storage** | Use `(def name value)` to store values |
+| **Terminal success** | `(return value)` yields `{:__ptc_return__, value}` for direct callers and explicitly completes a Kernel agent |
+| **Terminal failure** | `(fail value)` yields `{:__ptc_fail__, value}` for direct callers, which must discard the returned continuation snapshot; a Kernel aborts and rolls back the current program |
+| **Persistent storage** | Use `(def name value)` to stage a binding; persistence depends on the caller accepting the snapshot or the Kernel committing the turn |
 | **Access stored values** | Use plain symbols (e.g., `my-value`) |
 
-**No implicit map merge.** Unlike earlier versions, returning a map does NOT automatically store its keys. Use `def` for explicit storage.
+Returning a map does not store its keys. Use `def` for explicit storage.
 
 #### Pure Query (No Storage)
 
@@ -4026,7 +4157,7 @@ successful terminal completion, and `(fail value)` is terminal failure.
 ```
 
 After execution:
-- `high-paid` = the filtered list (available as symbol in next turn)
+- `high-paid` = the filtered vector (available as symbol in next turn)
 - `last-query` = `"employees"` (available as symbol in next turn)
 - Ordinary value = `["alice@example.com", "bob@example.com", ...]`
 
@@ -4168,60 +4299,60 @@ ceiling.
 **Turn 4:** Return summary
 
 ```clojure
-{:employee-count (count high-paid)
- :order-count (count orders)}
+(return {:employee-count (count high-paid)
+         :order-count (count orders)})
 ```
 
-*Returns:* `{:employee-count 5, :order-count 42}`
+*Terminal return:* `{:employee-count 5, :order-count 42}`
 *Symbols unchanged*
 
 ### 16.7 Logging and Audit Trail
 
-Every execution produces a log entry:
+`PtcRunner.Lisp.run/2` returns bounded evaluation diagnostics in
+`PtcRunner.Lisp.Result`:
 
 ```elixir
-%{
-  call_id: "uuid-...",
-  turn: 3,
-  timestamp: ~U[2024-01-15 10:30:00Z],
-
-  # Input
-  program_source: "(do (def orders (tool/get-orders {:ids (map :id high-paid)})) ...)",
-  memory_before: %{high_paid: [...]},
-  ctx: %{user_id: "user-123"},
-
-  # Execution trace. A call's recorded `result` is bounded: results larger than
-  # `max_tool_call_result_bytes` (§16.8) are stored as a preview with
-  # `result_truncated: true` and `result_bytes: <retained size>`. `args` are
-  # kept verbatim for diagnostics and deterministic hashing.
-  tool_calls: [
-    %{tool: "get-orders", args: %{ids: [1, 2, 3]},
-      result_size: 42, duration_ms: 150}
-  ],
-
-  # Output
-  status: :success,  # or :error
-  result: {:orders-count 42},  # last expression value
-  memory_after: %{"high_paid" => [...], "orders" => [...]},  # includes def bindings
-
-  # Metrics
-  duration_ms: 180,
-  memory_bytes: 102400
+%PtcRunner.Lisp.Result{
+  return: value,
+  fail: nil,
+  memory: filtered_continuation_snapshot,
+  prints: ["..."],
+  tool_calls: [%{name: "get-orders", args: %{"ids" => [1, 2, 3]}, ...}],
+  pmap_calls: [...],
+  usage: %{...}
 }
 ```
 
+Tool results retained in `tool_calls` are bounded by
+`max_tool_call_result_bytes`; oversized entries retain a preview and truncation
+metadata without changing the value delivered to the program.
+
+A Kernel host additionally emits canonical trace events through its configured
+event/inspection sinks. Direct `Lisp.run/2` does not create a persistent log by
+itself; persistence and redaction are host responsibilities.
+
 ### 16.8 Resource Limits for Agentic Execution
+
+Kernel hosts apply the following relevant defaults from
+`PtcRunner.Kernel.Limits`:
 
 | Limit | Default | Description |
 |-------|---------|-------------|
-| `timeout_ms` | 1,000 | Max execution time per program |
-| `max_heap` | ~10 MB | Memory limit (1,250,000 words) |
-| `max_tool_calls` | unlimited (`nil`) | Program-wide max uncached tool invocations; cache hits do not consume reservations, and no limit applies unless explicitly set |
-| `max_tool_call_result_bytes` | 16,384 | Per-call cap on the tool result **retained in the in-eval ledger** (`tool_calls`). A result whose retained heap size exceeds this is stored as a bounded preview, so a looping/paginated tool fold cannot accumulate full payloads in eval memory. Does **not** affect the value returned to the program — only what the audit ledger keeps (see §16.7). |
-| Kernel `evaluation_memory_bytes` | 2,000,000 | Run-wide retained definition-memory ceiling |
-| Kernel `evaluation_history_bytes` | 1,000,000 | Independent per-value and aggregate ceiling for exact `*1`/`*2`/`*3` history |
+| `evaluation_timeout_ms` | 1,000 | Max execution time per evaluation |
+| `evaluation_heap_words` | 1,250,000 | Evaluator heap ceiling in BEAM words |
+| `workflow_capability_calls` / `mission_capability_calls` | 64 / 128 | Run-wide capability-call quotas |
+| `workflow_capability_calls_per_name` / `mission_capability_calls_per_name` | 16 / 32 | Per-capability quotas |
+| `capability_argument_bytes` | 262,144 | Capability argument boundary |
+| `capability_result_bytes` | 1,000,000 | Capability result boundary |
+| `terminal_result_bytes` | 1,000,000 | Terminal return boundary |
+| `evaluation_memory_bytes` | 2,000,000 | Run-wide retained definition-memory ceiling |
+| `evaluation_history_bytes` | 1,000,000 | Independent per-value and aggregate ceiling for exact `*1`/`*2`/`*3` history |
 
-*Note: Hosts can configure higher timeouts (e.g., 5,000ms) to accommodate slow tool calls.*
+Direct `PtcRunner.Lisp.run/2` has its own options. Its defaults include
+`timeout: 1_000`, `max_heap: 1_250_000` words, no tool-call count limit
+(`max_tool_calls: nil`), and a 16,384-byte retained tool-result ledger cap.
+Kernel capability quotas still apply when tools are invoked through a Kernel
+environment.
 
 On limit violation:
 - Execution aborts immediately
@@ -4231,23 +4362,23 @@ On limit violation:
 
 ### 16.9 Error Handling in Agentic Loops
 
-Errors are designed to be **LLM-recoverable**:
+Failures retain a machine-readable reason, bounded message, and structured
+details:
 
 ```elixir
-# Error structure
-{:error, %{
-  type: :tool_call_limit_exceeded,
-  message: "Program made 12 tool calls, limit is 10",
-  context: %{
-    limit: 10,
-    actual: 12,
-    last_tool: "get-orders"
-  },
-  hint: "Consider batching requests or filtering data before tool calls"
-}}
+{:error,
+ %PtcRunner.Lisp.Result{
+   return: nil,
+   fail: %{reason: reason, message: message, details: details},
+   memory: prior_memory,
+   prints: retained_prints,
+   tool_calls: retained_tool_calls
+ }}
 ```
 
-The LLM receives this error and can generate a corrected program.
+A Kernel host renders a bounded failure observation for the model and may offer
+another turn under its correction and run-limit policy. The language itself
+does not promise a retry.
 
 ### 16.10 Security Considerations
 
@@ -4256,10 +4387,10 @@ The LLM receives this error and can generate a corrected program.
 | Memory exhaustion | Max memory size limit |
 | Infinite loops | Timeout + loop iteration limit (default 1000) |
 | Unbounded recursion | Timeout + memory limit |
-| Tool abuse | Per-program tool call limit |
+| Tool abuse | Explicit capability grants; Kernel total/per-name quotas; optional direct `max_tool_calls` |
 | Data exfiltration | Tools are host-controlled, audited |
 | Memory pollution | Explicit `def` storage only |
-| Cross-turn attacks | Memory is agent-scoped, not shared |
+| Cross-turn continuation growth | Owner-scoped Kernel state plus independent definition/history ceilings |
 
 ---
 

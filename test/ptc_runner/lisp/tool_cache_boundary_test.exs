@@ -117,6 +117,21 @@ defmodule PtcRunner.Lisp.ToolCacheBoundaryTest do
     assert :atomics.get(provider_calls, 1) == 1
   end
 
+  test "cache identity preserves exact quoted-symbol key spelling" do
+    provider_calls = :atomics.new(1, [])
+
+    tools = %{
+      "cached" => {fn _arguments -> :atomics.add_get(provider_calls, 1, 1) end, cache: true}
+    }
+
+    source = ~S|(do (tool/cached {'foo-bar 1}) (tool/cached {'foo_bar 1}))|
+
+    assert {:ok, step} = Lisp.run(source, tools: tools)
+    assert step.return == 2
+    assert Enum.map(step.tool_calls, &Map.get(&1, :cached, false)) == [false, false]
+    assert :atomics.get(provider_calls, 1) == 2
+  end
+
   test "later parallel inputs win cache conflicts before sequential reuse" do
     provider_calls = :atomics.new(1, [])
 

@@ -760,7 +760,7 @@
     },
     %{
       name: "contains?",
-      description: "True if key/element exists (maps, sets, lists)",
+      description: "True if key/element exists (maps, sets, vectors)",
       binding: :normal,
       category: :set,
       dispatch: :env,
@@ -933,7 +933,8 @@
       notes: nil,
       see_also: [],
       clojure_var: "distinct",
-      divergences: nil
+      divergences:
+        "DIV-29: direct map input raises; use seq/entries/keys/vals for an explicit ordered map view."
     },
     %{
       name: "distinct-by",
@@ -1161,7 +1162,7 @@
     },
     %{
       name: "entries",
-      description: "Get all `[key value]` pairs as a list",
+      description: "Get all `[key value]` pairs as a vector",
       binding: :normal,
       category: :core,
       dispatch: :env,
@@ -2933,7 +2934,7 @@
     },
     %{
       name: "re-seq",
-      description: "Returns all matches of `re` in `s` as a list",
+      description: "Returns all matches of `re` in `s` as a vector",
       binding: :normal,
       category: :regex,
       dispatch: :env,
@@ -3061,7 +3062,7 @@
     },
     %{
       name: "rest",
-      description: "All but first (empty list if none)",
+      description: "All but first (empty vector if none)",
       binding: :normal,
       category: :core,
       dispatch: :env,
@@ -3577,7 +3578,7 @@
       see_also: [],
       clojure_var: "symbol?",
       divergences:
-        "DIV-19: always returns false; PTC-Lisp has no symbol type — keywords cover all identifier needs. See docs/clojure-conformance-gaps.md."
+        "DIV-19: always returns false; inert quoted-symbol references are not first-class Clojure symbols. See docs/clojure-conformance-gaps.md."
     },
     %{
       name: "take",

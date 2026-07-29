@@ -2035,7 +2035,7 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
                Lisp.run("(frequencies {:a 1 :b 1})")
     end
 
-    test "distinct rejects a direct map and guides to an explicit ordered view (GAP-S134)" do
+    test "distinct rejects a direct map and guides to an explicit ordered view (DIV-29)" do
       assert {:error, %Step{fail: %{reason: :type_error, message: message}}} =
                Lisp.run("(distinct {:a 1 :b 2})")
 
@@ -2192,9 +2192,9 @@ defmodule PtcRunner.Lisp.Integration.CollectionOpsTest do
       assert result == []
     end
 
-    test "distinct on a map rejects with a clean type_error (GAP-S134)" do
-      # distinct's result order would expose unordered map traversal; Clojure
-      # also raises. Use an explicit ordered view, e.g. (distinct (entries m)).
+    test "distinct on a map rejects with a clean type_error (DIV-29)" do
+      # Clojure accepts the map as a seq of entries. PTC-Lisp deliberately
+      # requires an explicit ordered view, e.g. (distinct (entries m)).
       assert {:error, %Step{fail: %{reason: :type_error, message: message}}} =
                Lisp.run(~S|(distinct {:a 1 :b 2})|)
 

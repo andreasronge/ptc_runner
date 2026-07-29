@@ -17,6 +17,9 @@ defmodule PtcRunner.Lisp.DataKeys do
 
   """
 
+  alias PtcRunner.Lisp.Format.SymbolRef
+  alias PtcRunner.Lisp.Keyword, as: LispKeyword
+
   @doc """
   Extracts all data keys accessed by a program.
 
@@ -56,17 +59,111 @@ defmodule PtcRunner.Lisp.DataKeys do
     # Extract data keys and normalize to strings for consistent lookup
     data_keys = extract(ast)
 
-    # Convert to string set for consistent comparison
-    string_keys = Enum.into(data_keys, MapSet.new(), &to_string/1)
+    # Convert to the same direct and hyphen/underscore spellings accepted by
+    # runtime data lookup.
+    string_keys =
+      Enum.reduce(data_keys, MapSet.new(), fn key, keys ->
+        key_string = to_string(key)
+
+        keys
+        |> MapSet.put(key_string)
+        |> MapSet.put(normalize_separator(key_string))
+      end)
 
     # Keep keys that are either:
     # 1. Accessed via data/xxx (in data_keys)
     # 2. Not collections (scalar metadata like "question", "fail", integers, etc.)
     # This filters out unused datasets (lists/maps) while preserving metadata
     Map.filter(ctx, fn {key, value} ->
-      MapSet.member?(string_keys, to_string(key)) or not collection?(value)
+      case context_key_string(key) do
+        {:ok, key_string} ->
+          MapSet.member?(string_keys, key_string) or not collection?(value)
+
+        :error ->
+          # Retain keys that cannot be rendered so the bounded public-input
+          # validator can reject malformed wrapper keys inside the sandbox.
+          true
+      end
     end)
   end
+
+  @doc false
+  @spec prefilter_context(term(), map()) :: map()
+  def prefilter_context(ast, ctx) when is_map(ctx) do
+    # Never enumerate the host grant here: this pass runs before the bounded
+    # setup worker starts. The Core AST is already symbol-bounded, so direct
+    # lookups for the statically referenced data keys keep caller work bounded
+    # while avoiding a sandbox copy of unrelated grants.
+    ast
+    |> extract()
+    |> Enum.flat_map(&context_lookup_keys/1)
+    |> Enum.uniq()
+    |> Enum.reduce(%{}, fn key, filtered ->
+      case Map.fetch(ctx, key) do
+        {:ok, value} -> Map.put(filtered, key, value)
+        :error -> filtered
+      end
+    end)
+  end
+
+  defp context_lookup_keys(key) when is_atom(key),
+    do: context_lookup_keys(Atom.to_string(key))
+
+  defp context_lookup_keys(<<39, name::binary>> = key) do
+    symbol_keys =
+      if SymbolRef.valid_name?(name),
+        do: [%SymbolRef{name: name}, {:symbol_ref, name}],
+        else: []
+
+    ordinary_context_lookup_keys(key, key) ++ symbol_keys
+  end
+
+  defp context_lookup_keys(key) when is_binary(key),
+    do: ordinary_context_lookup_keys(key, key)
+
+  defp ordinary_context_lookup_keys(key, key_string) do
+    normalized = normalize_separator(key_string)
+
+    [key, key_string, LispKeyword.new(key_string)] ++
+      existing_atom_key(key_string) ++
+      if normalized == key_string,
+        do: [],
+        else: [normalized | existing_atom_key(normalized)]
+  end
+
+  defp existing_atom_key(key) do
+    [String.to_existing_atom(key)]
+  rescue
+    ArgumentError -> []
+  end
+
+  # The normal public run path validates and normalizes wrappers before calling
+  # this function. A direct caller that supplies a wrapper still gets fail-safe
+  # retention instead of unbounded name inspection here.
+  defp context_key_string(%{__struct__: SymbolRef}), do: :error
+
+  defp context_key_string(%{__struct__: LispKeyword} = keyword) do
+    if LispKeyword.valid?(keyword), do: {:ok, keyword.name}, else: :error
+  end
+
+  defp context_key_string({:symbol_ref, name}) when is_binary(name) do
+    if SymbolRef.valid_name?(name), do: {:ok, "'" <> name}, else: :error
+  end
+
+  defp context_key_string(key) when is_binary(key), do: {:ok, key}
+  defp context_key_string(key) when is_atom(key), do: {:ok, Atom.to_string(key)}
+  defp context_key_string(key) when is_integer(key), do: {:ok, Integer.to_string(key)}
+  defp context_key_string(key) when is_float(key), do: {:ok, Float.to_string(key)}
+
+  defp context_key_string(key) when is_list(key) do
+    {:ok, List.to_string(key)}
+  rescue
+    _exception -> :error
+  end
+
+  defp context_key_string(_key), do: :error
+
+  defp normalize_separator(key), do: String.replace(key, "-", "_")
 
   # Check if a value is a collection that could be a large dataset
   defp collection?(value) when is_list(value), do: true
@@ -79,6 +176,10 @@ defmodule PtcRunner.Lisp.DataKeys do
 
   defp do_extract({:data, key}, acc) when is_binary(key),
     do: MapSet.put(acc, existing_atom_or(key))
+
+  # Literal payloads are inert runtime values, even when their data happens to
+  # have the shape of a Core AST node.
+  defp do_extract({:literal, _value}, acc), do: acc
 
   # Lists - recurse into each element
   defp do_extract(list, acc) when is_list(list) do

@@ -219,7 +219,12 @@ defmodule PtcRunner.Kernel.RunState do
 
   @doc false
   @spec evaluation_memory_observation(t()) ::
-          map() | {:error, :session_owner_mismatch | {:java_projection_error, term()}}
+          map()
+          | {:error,
+             :session_owner_mismatch
+             | {:java_projection_error
+                | :lisp_value_projection_error
+                | :symbol_ref_projection_error, term()}}
   def evaluation_memory_observation(state), do: call(state, :evaluation_memory_observation)
 
   @doc false

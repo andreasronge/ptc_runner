@@ -2,6 +2,7 @@ defmodule PtcRunner.Lisp.HeapRebaselineTest do
   use ExUnit.Case, async: true
 
   alias PtcRunner.Lisp
+  alias PtcRunner.Lisp.Format.SymbolRef
 
   @moduledoc """
   Sandbox heap re-baseline contract:
@@ -33,6 +34,13 @@ defmodule PtcRunner.Lisp.HeapRebaselineTest do
       "lookup" => fn _args -> length(rows) end,
       "rows" => fn _args -> Enum.take(rows, 3) end
     }
+  end
+
+  defp caller_reductions(fun) do
+    {:reductions, before_run} = Process.info(self(), :reductions)
+    fun.()
+    {:reductions, after_run} = Process.info(self(), :reductions)
+    after_run - before_run
   end
 
   describe "host-granted data is excluded from the program budget (F3 regression)" do
@@ -85,6 +93,30 @@ defmodule PtcRunner.Lisp.HeapRebaselineTest do
       assert step.fail.details.limit_bytes >= step.fail.details.budget_bytes
     end
 
+    test "an evaluation timeout preserves prepared native continuation memory" do
+      owner = self()
+
+      task =
+        Task.async(fn ->
+          Lisp.run("(tool/wait {})",
+            memory: %{"saved" => %SymbolRef{name: "x"}},
+            tools: %{
+              "wait" => fn _arguments ->
+                send(owner, :evaluation_started)
+                receive do: (:never -> nil)
+              end
+            },
+            timeout: 100
+          )
+        end)
+
+      assert_receive :evaluation_started, 1_000
+      assert {:error, step} = Task.await(task, 1_000)
+      assert step.fail.reason == :timeout
+      assert step.fail.details.phase == :eval
+      assert step.memory == %{"saved" => {:symbol_ref, "x"}}
+    end
+
     test "a grant larger than the setup ceiling is killed with phase :setup diagnostics" do
       tools = grant_over(refc_rows(20_000, 300))
 
@@ -99,6 +131,122 @@ defmodule PtcRunner.Lisp.HeapRebaselineTest do
       assert step.fail.reason == :memory_exceeded
       assert step.fail.details.phase == :setup
       assert step.fail.details.limit_bytes == 150_000 * 8
+    end
+
+    test "a setup memory kill does not re-project the oversized input memory" do
+      memory = %{"cached" => refc_rows(20_000, 300)}
+
+      assert {:error, step} =
+               Lisp.run("(+ 1 2)",
+                 memory: memory,
+                 max_heap: @default_max_heap,
+                 setup_max_heap: 150_000,
+                 timeout: 5_000
+               )
+
+      assert step.fail.reason == :memory_exceeded
+      assert step.fail.details.phase == :setup
+      assert step.memory == %{}
+    end
+
+    test "context filtering runs under the setup heap ceiling" do
+      large_charlist_value = List.duplicate(?x, 100_000)
+
+      assert {:error, step} =
+               Lisp.run("data/used",
+                 context: %{"used" => large_charlist_value},
+                 filter_context: true,
+                 setup_max_heap: 20_000,
+                 timeout: 5_000
+               )
+
+      assert step.fail.reason == :memory_exceeded
+      assert step.fail.details.phase == :setup
+    end
+
+    test "a setup timeout does not re-project continuation memory in the caller" do
+      expensive_setup_value = List.duplicate(?x, 200_000)
+
+      assert {:error, step} =
+               Lisp.run("data/used",
+                 context: %{"used" => expensive_setup_value},
+                 memory: %{preserved: "memory"},
+                 filter_context: true,
+                 setup_max_heap: 5_000_000,
+                 timeout: 1
+               )
+
+      assert step.fail.reason == :timeout
+      assert step.fail.details.phase == :setup
+      assert step.memory == %{}
+    end
+
+    test "early errors fail closed when continuation-memory preparation exceeds its limits" do
+      assert {:error, timeout_step} =
+               Lisp.run("(", memory: %{preserved: "memory"}, timeout: 0)
+
+      assert timeout_step.fail.reason == :timeout
+      assert timeout_step.fail.details.phase == :setup
+      assert timeout_step.memory == %{}
+
+      assert {:error, heap_step} =
+               Lisp.run("(",
+                 memory: %{"rows" => Enum.to_list(1..100_000)},
+                 setup_max_heap: 10_000,
+                 timeout: 5_000
+               )
+
+      assert heap_step.fail.reason == :memory_exceeded
+      assert heap_step.fail.details.phase == :setup
+      assert heap_step.memory == %{}
+    end
+
+    test "context filtering removes ordinary unused datasets before the sandbox copy" do
+      context = %{"unused" => Enum.to_list(1..200_000)}
+
+      assert {:ok, step} =
+               Lisp.run("nil",
+                 context: context,
+                 filter_context: true,
+                 max_heap: 300_000,
+                 setup_max_heap: 100_000,
+                 timeout: 5_000
+               )
+
+      assert step.return == nil
+    end
+
+    test "context filtering does not copy high-cardinality unused scalar grants" do
+      context = Map.new(1..50_000, fn index -> {"unused-#{index}", index} end)
+
+      assert {:ok, step} =
+               Lisp.run("nil",
+                 context: context,
+                 filter_context: true,
+                 max_heap: 300_000,
+                 setup_max_heap: 20_000,
+                 timeout: 5_000
+               )
+
+      assert step.return == nil
+    end
+
+    test "compile scope checks do not enumerate high-cardinality continuation memory" do
+      memory = Map.new(1..50_000, fn index -> {"unused-#{index}", index} end)
+
+      baseline_reductions =
+        caller_reductions(fn ->
+          assert {:error, %{fail: %{reason: :unbound_var}}} =
+                   Lisp.run_native("missing-binding", memory: %{})
+        end)
+
+      granted_reductions =
+        caller_reductions(fn ->
+          assert {:error, %{fail: %{reason: :unbound_var}}} =
+                   Lisp.run_native("missing-binding", memory: memory)
+        end)
+
+      assert granted_reductions <= baseline_reductions + 20_000
     end
   end
 

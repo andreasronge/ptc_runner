@@ -78,6 +78,32 @@ defmodule PtcRunner.Lisp.Format do
     @moduledoc false
     defstruct [:name]
 
+    @type t :: %__MODULE__{name: binary()}
+
+    @special_initial [?+, ?-, ?*, ?/, ?<, ?>, ?=, ??, ?!, ?_, ?%, ?., ?&]
+    @special_rest [?' | @special_initial]
+
+    @spec valid?(term()) :: boolean()
+    def valid?(%__MODULE__{name: name} = value),
+      do: map_size(value) == 2 and valid_name?(name)
+
+    def valid?(_value), do: false
+
+    @spec valid_name?(term()) :: boolean()
+    def valid_name?(<<first, rest::binary>>)
+        when first in ?a..?z or first in ?A..?Z or first in @special_initial,
+        do: valid_rest?(rest)
+
+    def valid_name?(_name), do: false
+
+    defp valid_rest?(""), do: true
+
+    defp valid_rest?(<<char, rest::binary>>)
+         when char in ?a..?z or char in ?A..?Z or char in ?0..?9 or char in @special_rest,
+         do: valid_rest?(rest)
+
+    defp valid_rest?(_rest), do: false
+
     defimpl Inspect do
       def inspect(%{name: name}, _opts), do: "'#{name}"
     end
@@ -107,6 +133,223 @@ defmodule PtcRunner.Lisp.Format do
       def encode(regex_literal, opts),
         do: Jason.Encode.string(Kernel.to_string(regex_literal), opts)
     end
+  end
+
+  @doc false
+  @spec internalize_symbol_refs(term()) ::
+          {:ok, term()}
+          | {:error,
+             {:invalid_keyword | :invalid_lisp_list | :invalid_symbol_ref, list()}
+             | {:symbol_ref_collision, list(), :map | :set}}
+  def internalize_symbol_refs(value), do: project_symbol_refs(value, :internalize)
+
+  @doc false
+  @spec externalize_symbol_refs(term()) ::
+          {:ok, term()}
+          | {:error,
+             {:invalid_keyword | :invalid_lisp_list | :invalid_symbol_ref, list()}
+             | {:symbol_ref_collision, list(), :map | :set}}
+  def externalize_symbol_refs(value), do: project_symbol_refs(value, :externalize)
+
+  defp project_symbol_refs(value, direction) do
+    case do_project_symbol_refs(value, [], direction) do
+      {:ok, projected, _changed?} -> {:ok, projected}
+      {:error, _reason} = error -> error
+    end
+  end
+
+  defp do_project_symbol_refs(
+         %{__struct__: PtcRunner.Lisp.Keyword} = value,
+         path,
+         _direction
+       ) do
+    if PtcRunner.Lisp.Keyword.valid?(value),
+      do: {:ok, value, false},
+      else: {:error, {:invalid_keyword, Enum.reverse(path)}}
+  end
+
+  defp do_project_symbol_refs(%{__struct__: SymbolRef} = value, path, :internalize) do
+    if SymbolRef.valid?(value),
+      do: {:ok, {:symbol_ref, value.name}, true},
+      else: {:error, {:invalid_symbol_ref, Enum.reverse(path)}}
+  end
+
+  defp do_project_symbol_refs(%{__struct__: SymbolRef} = value, path, :externalize) do
+    if SymbolRef.valid?(value),
+      do: {:ok, value, false},
+      else: {:error, {:invalid_symbol_ref, Enum.reverse(path)}}
+  end
+
+  defp do_project_symbol_refs({:symbol_ref, name} = value, path, :internalize) do
+    if SymbolRef.valid_name?(name),
+      do: {:ok, value, false},
+      else: {:error, {:invalid_symbol_ref, Enum.reverse(path)}}
+  end
+
+  defp do_project_symbol_refs({:symbol_ref, name}, path, :externalize) do
+    if SymbolRef.valid_name?(name),
+      do: {:ok, %SymbolRef{name: name}, true},
+      else: {:error, {:invalid_symbol_ref, Enum.reverse(path)}}
+  end
+
+  defp do_project_symbol_refs(value, path, direction) when is_list(value) do
+    if proper_list?(value) do
+      with {:ok, items, changed?} <- project_items(value, path, :list, direction) do
+        {:ok, if(changed?, do: items, else: value), changed?}
+      end
+    else
+      {:error, {:invalid_lisp_list, Enum.reverse(path)}}
+    end
+  end
+
+  defp do_project_symbol_refs(%MapSet{} = set, path, direction) do
+    with {:ok, values} <- valid_map_set_items(set, path),
+         {:ok, items, changed?} <- project_items(values, path, :set, direction) do
+      if changed? do
+        projected = MapSet.new(items)
+
+        if MapSet.size(projected) == length(items),
+          do: {:ok, projected, true},
+          else: {:error, {:symbol_ref_collision, Enum.reverse(path), :set}}
+      else
+        {:ok, set, false}
+      end
+    end
+  end
+
+  defp do_project_symbol_refs(value, path, direction) when is_struct(value) do
+    module = value.__struct__
+    fields = Map.delete(value, :__struct__)
+
+    case projection_struct_template(module) do
+      {:ok, template} ->
+        project_known_struct(value, fields, template, path, direction)
+
+      _invalid ->
+        validate_hidden_struct_fields(value, fields, path, direction)
+    end
+  end
+
+  defp do_project_symbol_refs(value, path, direction) when is_map(value) do
+    value
+    |> Enum.to_list()
+    |> Enum.with_index()
+    |> Enum.reduce_while({:ok, [], false}, fn
+      {{key, item}, index}, {:ok, pairs, changed?} ->
+        with {:ok, projected_key, key_changed?} <-
+               do_project_symbol_refs(key, [{:map_key, index} | path], direction),
+             {:ok, projected_item, item_changed?} <-
+               do_project_symbol_refs(item, [{:map_value, index} | path], direction) do
+          {:cont,
+           {:ok, [{projected_key, projected_item} | pairs],
+            changed? or key_changed? or item_changed?}}
+        else
+          {:error, _reason} = error -> {:halt, error}
+        end
+    end)
+    |> case do
+      {:ok, _pairs, false} ->
+        {:ok, value, false}
+
+      {:ok, pairs, true} ->
+        projected = Map.new(pairs)
+
+        if map_size(projected) == length(pairs),
+          do: {:ok, projected, true},
+          else: {:error, {:symbol_ref_collision, Enum.reverse(path), :map}}
+
+      {:error, _reason} = error ->
+        error
+    end
+  end
+
+  defp do_project_symbol_refs(value, path, direction) when is_tuple(value) do
+    with {:ok, items, changed?} <-
+           project_items(Tuple.to_list(value), path, :tuple, direction) do
+      {:ok, if(changed?, do: List.to_tuple(items), else: value), changed?}
+    end
+  end
+
+  defp do_project_symbol_refs(value, _path, _direction), do: {:ok, value, false}
+
+  defp valid_map_set_items(%MapSet{map: map} = set, path) when is_map(map) do
+    values = Map.keys(map)
+
+    if map_size(set) == 2 and MapSet.new(values) == set,
+      do: {:ok, values},
+      else: {:error, {:invalid_symbol_ref, Enum.reverse(path)}}
+  end
+
+  defp valid_map_set_items(_set, path),
+    do: {:error, {:invalid_symbol_ref, Enum.reverse(path)}}
+
+  defp project_known_struct(value, fields, template, path, direction) do
+    if exact_struct_fields?(fields, template) do
+      with {:ok, projected_fields, changed?} <-
+             project_struct_fields(fields, path, direction) do
+        {:ok, if(changed?, do: Map.merge(template, projected_fields), else: value), changed?}
+      end
+    else
+      validate_hidden_struct_fields(value, fields, path, direction)
+    end
+  end
+
+  # Invalid outer shapes are left for their owning boundary projector to
+  # reject, but their fields still need inspection so a malformed symbol
+  # wrapper or inverse collision cannot hide inside the forged struct.
+  defp validate_hidden_struct_fields(value, fields, path, direction) do
+    case do_project_symbol_refs(fields, path, direction) do
+      {:ok, _projected_fields, _changed?} -> {:ok, value, false}
+      {:error, _reason} = error -> error
+    end
+  end
+
+  defp project_items(values, path, collection, direction) do
+    values
+    |> Enum.with_index()
+    |> Enum.reduce_while({:ok, [], false}, fn {value, index}, {:ok, items, changed?} ->
+      case do_project_symbol_refs(value, [{collection, index} | path], direction) do
+        {:ok, projected, item_changed?} ->
+          {:cont, {:ok, [projected | items], changed? or item_changed?}}
+
+        {:error, _reason} = error ->
+          {:halt, error}
+      end
+    end)
+    |> case do
+      {:ok, reversed, changed?} -> {:ok, Enum.reverse(reversed), changed?}
+      {:error, _reason} = error -> error
+    end
+  end
+
+  defp project_struct_fields(fields, path, direction) do
+    Enum.reduce_while(fields, {:ok, %{}, false}, fn
+      {field, item}, {:ok, projected, changed?} ->
+        case do_project_symbol_refs(item, [{:struct_field, field} | path], direction) do
+          {:ok, value, item_changed?} ->
+            {:cont, {:ok, Map.put(projected, field, value), changed? or item_changed?}}
+
+          {:error, _reason} = error ->
+            {:halt, error}
+        end
+    end)
+  end
+
+  defp projection_struct_template(module) do
+    case module.__struct__() do
+      %{__struct__: ^module} = template -> {:ok, template}
+      _invalid -> :error
+    end
+  rescue
+    _exception -> :error
+  catch
+    _kind, _reason -> :error
+  end
+
+  defp exact_struct_fields?(fields, template) do
+    actual = fields |> Map.keys() |> MapSet.new()
+    expected = template |> Map.delete(:__struct__) |> Map.keys() |> MapSet.new()
+    MapSet.equal?(actual, expected)
   end
 
   alias PtcRunner.Lisp.Env.Builtin, as: EnvBuiltin
@@ -569,4 +812,8 @@ defmodule PtcRunner.Lisp.Format do
   defp extract_param_name({:var, name}), do: Kernel.to_string(name)
   defp extract_param_name({:destructure, _}), do: "_"
   defp extract_param_name(_), do: "_"
+
+  defp proper_list?([]), do: true
+  defp proper_list?([_head | tail]), do: proper_list?(tail)
+  defp proper_list?(_other), do: false
 end

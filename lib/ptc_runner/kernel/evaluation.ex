@@ -31,6 +31,7 @@ defmodule PtcRunner.Kernel.Evaluation do
   alias PtcRunner.Kernel.Dispatcher
   alias PtcRunner.Kernel.Events
   alias PtcRunner.Kernel.InspectionSink
+  alias PtcRunner.Kernel.ProjectionError
   alias PtcRunner.Kernel.RunState
   alias PtcRunner.Kernel.RuntimeTools
   alias PtcRunner.Lisp
@@ -409,22 +410,15 @@ defmodule PtcRunner.Kernel.Evaluation do
   end
 
   defp projection_failure(step, reason) do
-    failure_kind = projection_failure_kind(reason)
-
     %{
       outcome: :evaluation_error,
-      kind: failure_kind,
+      kind: ProjectionError.kind(reason),
       details: %{projection_error: inspect(reason, limit: 10)},
       prints: Map.get(step, :prints, []),
       continuation_effect: :preserved,
       retryable?: false
     }
   end
-
-  defp projection_failure_kind({:public_projection_collision, _path, _collection}),
-    do: :public_projection_collision
-
-  defp projection_failure_kind(_reason), do: :java_projection_error
 
   defp history_after_success(history, {:__ptc_return__, _value}), do: history
   defp history_after_success(history, value), do: Enum.take(history ++ [value], -3)
