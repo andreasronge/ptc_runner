@@ -1,12 +1,12 @@
 # Lisp Kernel product readiness
 
-**Status:** active roadmap; reviewed 2026-07-27.
+**Status:** active roadmap; reviewed 2026-07-29.
 
-The bounded Kernel, manifest-authored application path, host-installed MCP and
-LLM sources, classified artifacts, input/result contracts, native trace
-snapshots, and isolated candidate-evaluation flow are implemented. Their
-durable contracts live in the owning module documentation and implemented
-guides.
+The bounded Kernel, manifest-authored application path, host-installed MCP
+sources with explicit read/write tool effects, host-installed LLM sources,
+classified artifacts, input/result contracts, native trace snapshots, and
+isolated candidate-evaluation flow are implemented. Their durable contracts
+live in the owning module documentation and implemented guides.
 
 This plan contains only the remaining work needed to make that runtime
 straightforward to install, script, diagnose, and operate without Elixir
@@ -157,7 +157,7 @@ The Kernel is ready for its intended non-Elixir product boundary when:
 
 Streaming responses, multi-model routing, chat lifecycle management,
 concurrent mission evaluation, live bundle mutation, broad Clojure coverage,
-MCP Tasks, writes, OAuth, shared catalog caching, authenticated host IAM, and
+MCP Tasks, OAuth, shared catalog caching, authenticated host IAM, and
 inbound service frontends require demonstrated demand and separate plans.
 
 ## Related documents
