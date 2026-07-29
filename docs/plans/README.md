@@ -16,14 +16,11 @@ belongs in guides or retained specifications.
   tracks the unfinished private-sink, overflow, real-pagination, and
   cache-usage journeys.
 
-## Active MCP work
-
-- [`mcp-write-and-surface.md`](mcp-write-and-surface.md) records the authority
-  design required before exact-resource access and keeps server-initiated
-  model access refused.
-
 ## Future, trigger-gated
 
+- [`future/mcp-exact-resources.md`](future/mcp-exact-resources.md) records the
+  unmet first-party trigger and minimum authority shape required before MCP
+  exact-resource work can begin.
 - [`future/launcher-repository-extraction.md`](future/launcher-repository-extraction.md)
   records the prerequisites and migration sequence for moving the independently
   released native launcher companion into its own Git repository. Extraction
