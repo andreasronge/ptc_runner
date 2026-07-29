@@ -104,64 +104,74 @@
             (case (get action :kind)
               :tool-call
               (let [evaluation (kernel/eval-source (get action :program))]
-                (case (get evaluation :outcome)
-                  :returned
-                  (returned-outcome (get evaluation :value))
-                  :failed
-                  (if (and (correctable-capability-failure? evaluation)
-                           (agent.retry/retry? turn max-turns))
-                    (let [event (completed-event :evaluation-error turn max-turns)
-                          next-prompt-state (transition-prompt prompt-state event)]
-                      (recur (inc turn)
-                             (append-correlated
-                               messages
-                               action
-                               (agent.feedback/capability-error evaluation))
-                             next-prompt-state
-                             closing?))
-                    (subject-failure :model-program-failed (get evaluation :value)))
-                  :continued
-                  (if (agent.retry/retry? turn max-turns)
-                    (let [event (completed-event :evaluation-success turn max-turns)
-                          next-prompt-state (transition-prompt prompt-state event)
-                          observation (agent.feedback/success evaluation max-observation-chars)]
-                      (recur (inc turn)
-                             (append-correlated messages action observation)
-                             next-prompt-state
-                             closing?))
-                    (subject-failure :turn-limit :intermediate-result))
-                  (if (false? (get evaluation :retryable?))
-                    ;; An unsafe failure forbids repeating the program, not
-                    ;; salvaging the run. Spend one closing turn asking for a
-                    ;; decision from evidence already gathered rather than
-                    ;; discarding every prior evaluation; a second unsafe
-                    ;; failure ends it.
-                    (if (or closing? (not (agent.retry/retry? turn max-turns)))
-                      (subject-failure :non-retryable-evaluation (get evaluation :kind))
-                      (let [next-prompt-state
-                            (transition-prompt
-                              prompt-state
-                              (completed-event :evaluation-error turn max-turns))]
+                ;; Host policy and malformed/provider-initiated MCP exchanges
+                ;; are not argument mistakes the model can correct. The Kernel
+                ;; derives this provenance from the private capability ledger,
+                ;; so it applies even when a later expression fails.
+                (if (true? (get evaluation :terminal-provider-failure?))
+                  (subject-failure
+                    :model-program-failed
+                    (if (= :failed (get evaluation :outcome))
+                      (get evaluation :value)
+                      :terminal-provider-failure))
+                  (case (get evaluation :outcome)
+                    :returned
+                    (returned-outcome (get evaluation :value))
+                    :failed
+                    (if (and (correctable-capability-failure? evaluation)
+                             (agent.retry/retry? turn max-turns))
+                      (let [event (completed-event :evaluation-error turn max-turns)
+                            next-prompt-state (transition-prompt prompt-state event)]
                         (recur (inc turn)
                                (append-correlated
                                  messages
                                  action
-                                 (agent.feedback/non-retryable evaluation))
-                               next-prompt-state
-                               true)))
-                    (if (agent.retry/retry? turn max-turns)
-                      (let [next-prompt-state
-                            (transition-prompt
-                              prompt-state
-                              (completed-event :evaluation-error turn max-turns))]
-                        (recur (inc turn)
-                               (append-correlated
-                                 messages
-                                 action
-                                 (agent.feedback/evaluation-error evaluation))
+                                 (agent.feedback/capability-error evaluation))
                                next-prompt-state
                                closing?))
-                      (subject-failure :turn-limit :evaluation-error)))))
+                      (subject-failure :model-program-failed (get evaluation :value)))
+                    :continued
+                    (if (agent.retry/retry? turn max-turns)
+                      (let [event (completed-event :evaluation-success turn max-turns)
+                            next-prompt-state (transition-prompt prompt-state event)
+                            observation (agent.feedback/success evaluation max-observation-chars)]
+                        (recur (inc turn)
+                               (append-correlated messages action observation)
+                               next-prompt-state
+                               closing?))
+                      (subject-failure :turn-limit :intermediate-result))
+                    (if (false? (get evaluation :retryable?))
+                      ;; An unsafe failure forbids repeating the program, not
+                      ;; salvaging the run. Spend one closing turn asking for a
+                      ;; decision from evidence already gathered rather than
+                      ;; discarding every prior evaluation; a second unsafe
+                      ;; failure ends it.
+                      (if (or closing? (not (agent.retry/retry? turn max-turns)))
+                        (subject-failure :non-retryable-evaluation (get evaluation :kind))
+                        (let [next-prompt-state
+                              (transition-prompt
+                                prompt-state
+                                (completed-event :evaluation-error turn max-turns))]
+                          (recur (inc turn)
+                                 (append-correlated
+                                   messages
+                                   action
+                                   (agent.feedback/non-retryable evaluation))
+                                 next-prompt-state
+                                 true)))
+                      (if (agent.retry/retry? turn max-turns)
+                        (let [next-prompt-state
+                              (transition-prompt
+                                prompt-state
+                                (completed-event :evaluation-error turn max-turns))]
+                          (recur (inc turn)
+                                 (append-correlated
+                                   messages
+                                   action
+                                   (agent.feedback/evaluation-error evaluation))
+                                 next-prompt-state
+                                 closing?))
+                        (subject-failure :turn-limit :evaluation-error))))))
 
               :protocol-error
               (if (agent.retry/retry? turn max-turns)

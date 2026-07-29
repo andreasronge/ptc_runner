@@ -11,11 +11,16 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
   alias PtcRunner.Kernel.Dispatcher
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.InspectionArtifact
+  alias PtcRunner.Kernel.Library
   alias PtcRunner.Kernel.Limits
+  alias PtcRunner.Kernel.LLMCapability
   alias PtcRunner.Kernel.MCPSource
+  alias PtcRunner.Kernel.MissionEnvironment
   alias PtcRunner.Kernel.ProviderRegistry
   alias PtcRunner.Kernel.RunBuilder
+  alias PtcRunner.Kernel.RunConfig
   alias PtcRunner.Kernel.RunState
+  alias PtcRunner.Kernel.WorkflowEnvironment
   alias PtcRunner.TestSupport.MCPHTTPFixture
 
   @owner_lifecycle_timeout_ms 30_000
@@ -652,16 +657,33 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     tmp_dir: dir
   } do
     cases = [
-      {"structured", [rpc_error_tool: "structured"], :domain_error, []},
-      {"structured", [structured_value: "wrong"], :invalid_result, []},
-      {"structured", [result_and_error?: true], :invalid_result, []},
-      {"structured", [result_type: "input_required"], :invalid_result, []},
-      {"fail", [], :domain_error, []},
-      {"text", [large_text?: true], :invalid_result, [max_result_bytes: 1_000]}
+      {"structured", [rpc_error_tool: "structured"], :domain_error, "mcp_remote_error", []},
+      {"structured", [structured_value: "wrong"], :invalid_result, "mcp_invalid_result", []},
+      {"structured", [result_and_error?: true], :invalid_result, "mcp_protocol_error", []},
+      {"structured", [structured_result: input_required_state_only()], :denied,
+       "mcp_input_required_refused", []},
+      {"structured",
+       [
+         structured_result: %{
+           "resultType" => "input_required",
+           "inputRequests" => %{},
+           "requestState" => "load-shed"
+         }
+       ], :denied, "mcp_input_required_refused", []},
+      {"structured",
+       [structured_result: %{"resultType" => "input_required", "inputRequests" => %{}}],
+       :invalid_result, "mcp_protocol_error", []},
+      {"structured", [structured_result: input_required_with_requests()], :invalid_result,
+       "mcp_capability_negotiation_error", []},
+      {"structured", [structured_result: %{"resultType" => "input_required"}], :invalid_result,
+       "mcp_protocol_error", []},
+      {"fail", [], :domain_error, "mcp_domain_error", []},
+      {"text", [large_text?: true], :invalid_result, "mcp_response_exceeded",
+       [max_result_bytes: 1_000]}
     ]
 
     for effect <- [:read, :write],
-        {upstream, fixture_opts, reason, manifest_opts} <- cases do
+        {upstream, fixture_opts, reason, details, manifest_opts} <- cases do
       fixture = fixture(self(), fixture_opts)
       on_exit(fixture.close)
       tools = mappings_with_effect(upstream, effect)
@@ -690,11 +712,116 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
                status: :error,
                kind: :provider_error,
                reason: ^reason,
+               details: ^details,
                retryable?: false
              } = failure
 
       assert_effect_state(failure, effect)
       assert :ok = RunBuilder.close(built)
+    end
+  end
+
+  test "agent correction does not repeat any MCP input-required classification" do
+    programs = [
+      {~S|(fail (tool/remote.structured {"query" "x"}))|, [evaluation_timeout_ms: 5_000]},
+      {~S|(do (tool/remote.structured {"query" "x"}) (+ {} 1))|, [evaluation_timeout_ms: 5_000]},
+      {~S|(do (tool/remote.structured {"query" "x"}) (reduce + (range 0 100000000)))|,
+       [evaluation_timeout_ms: 500, evaluation_heap_words: 100_000_000]}
+    ]
+
+    for structured_result <- [
+          input_required_state_only(),
+          input_required_with_requests(),
+          %{"resultType" => "input_required"}
+        ],
+        {program, limit_overrides} <- programs do
+      parent = self()
+      fixture = fixture(parent, structured_result: structured_result)
+      on_exit(fixture.close)
+
+      {:ok, limits} = Limits.new(limit_overrides)
+      evaluation_timeout_ms = limits.evaluation_timeout_ms
+
+      assert {:ok, mcp} =
+               ProviderRegistry.build(
+                 registry(fixture.endpoint),
+                 "fixture-mcp",
+                 %{
+                   "allow" => ["remote.structured"],
+                   "timeout_ms" => min(evaluation_timeout_ms, 2_000),
+                   "max_result_bytes" => 32_000
+                 },
+                 %{
+                   directory: File.cwd!(),
+                   destination: :mission,
+                   limits: limits,
+                   installed_limits: limits,
+                   owner: self()
+                 }
+               )
+
+      assert_receive {:mcp_request, "server/discover", _headers}
+      assert_receive {:mcp_request, "tools/list", _headers}
+      assert_receive {:mcp_request, "tools/list", _headers}
+
+      first = %{
+        content: nil,
+        tool_calls: [
+          %{
+            id: "mcp-refusal",
+            name: "run_ptc_lisp",
+            args: %{"program" => program}
+          }
+        ]
+      }
+
+      recovered = %{
+        content: nil,
+        tool_calls: [
+          %{id: "unexpected-retry", name: "run_ptc_lisp", args: %{"program" => "(return 42)"}}
+        ]
+      }
+
+      {:ok, responses} = Agent.start_link(fn -> [first, recovered] end)
+
+      {:ok, llm} =
+        LLMCapability.new(
+          requester: fn request ->
+            send(parent, {:agent_request, request})
+
+            Agent.get_and_update(responses, fn
+              [response | rest] -> {{:ok, response}, rest}
+              [] -> {{:error, :script_exhausted}, []}
+            end)
+          end
+        )
+
+      {:ok, components} =
+        Library.components(~w(agent.core agent.feedback agent.native agent.prompt agent.retry
+             kernel llm result workflow.event))
+
+      {:ok, bundle} = Kernel.compile_bundle(components)
+      {:ok, workflow} = WorkflowEnvironment.new(bundle: bundle, capabilities: [llm])
+      {:ok, mission} = MissionEnvironment.new(capabilities: mcp.capabilities)
+      {:ok, sink} = EventSink.start(:normal, limits, run_id: "mcp-mrtr-agent-refusal")
+
+      {:ok, config} =
+        RunConfig.new(
+          workflow_environment: workflow,
+          mission_environment: mission,
+          input: %{},
+          limits: limits,
+          event_sink: sink,
+          provider_resources: [mcp.close]
+        )
+
+      assert {:error, %{kind: :workflow_failed, reason: :explicit_failure}} =
+               Kernel.run(~S|(agent.core/run "Read once" {"max_turns" 3})|, config)
+
+      assert_receive {:agent_request, _first}
+      refute_receive {:agent_request, _second}
+      assert_receive {:mcp_request, "tools/call", _headers}
+      refute_receive {:mcp_request, "tools/call", _headers}
     end
   end
 
@@ -880,9 +1007,9 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
   end
 
   @tag :tmp_dir
-  test "rejects unsupported modern result types", %{tmp_dir: dir} do
+  test "rejects unknown modern result types", %{tmp_dir: dir} do
     parent = self()
-    fixture = fixture(parent, result_type: "input_required")
+    fixture = fixture(parent, result_type: "future")
     on_exit(fixture.close)
 
     registry = registry(fixture.endpoint)
@@ -891,7 +1018,12 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     {:ok, built} = RunBuilder.load_and_build(manifest, registry)
     assert {:ok, result} = Kernel.run(built.entry_source, built.config)
 
-    assert %{status: :error, kind: :provider_error, reason: :invalid_result} =
+    assert %{
+             status: :error,
+             kind: :provider_error,
+             reason: :invalid_result,
+             details: "mcp_unsupported_result"
+           } =
              get_in(result.value, [:value, :value, "structured"])
 
     EventSink.stop(built.config.event_sink)
@@ -1740,6 +1872,32 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
   defp assert_effect_state(failure, :write),
     do: assert(failure.mutation_state == :indeterminate)
 
+  defp input_required_state_only do
+    %{
+      "resultType" => "input_required",
+      "requestState" => "eyJwcm9ncmVzcyI6IjUwJSJ9"
+    }
+  end
+
+  defp input_required_with_requests do
+    %{
+      "resultType" => "input_required",
+      "inputRequests" => %{
+        "github_login" => %{
+          "method" => "elicitation/create",
+          "params" => %{
+            "message" => "Please provide your GitHub username",
+            "requestedSchema" => %{
+              "type" => "object",
+              "properties" => %{"name" => %{"type" => "string"}},
+              "required" => ["name"]
+            }
+          }
+        }
+      }
+    }
+  end
+
   defp public_mappings, do: Map.new(mappings(), fn {_upstream, mapping} -> {mapping.as, true} end)
 
   defp build_snapshot(dir, endpoint, tools) do
@@ -1889,37 +2047,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
        ) do
     case params["name"] do
       "structured" ->
-        if opts[:rpc_error_tool] == "structured" do
-          rpc_error(
-            id,
-            -32_602,
-            "invalid parameters",
-            status: Keyword.get(opts, :rpc_error_status, 200)
-          )
-        else
-          value = Keyword.get(opts, :structured_value, 42)
-
-          if opts[:result_and_error?] do
-            body = %{
-              "jsonrpc" => "2.0",
-              "id" => id,
-              "result" => %{
-                "resultType" => "complete",
-                "structuredContent" => %{"value" => value},
-                "content" => []
-              },
-              "error" => %{"code" => -32_000, "message" => "must not coexist"}
-            }
-
-            {200, [{"content-type", "application/json"}], Jason.encode!(body)}
-          else
-            json(id, %{
-              "resultType" => Keyword.get(opts, :result_type, "complete"),
-              "structuredContent" => %{"value" => value},
-              "content" => []
-            })
-          end
-        end
+        structured_response(id, opts)
 
       "text" ->
         text =
@@ -1949,6 +2077,46 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
 
           json(id, %{"resultType" => "complete", "isError" => true, "content" => content})
         end
+    end
+  end
+
+  defp structured_response(id, opts) do
+    cond do
+      opts[:rpc_error_tool] == "structured" ->
+        rpc_error(
+          id,
+          -32_602,
+          "invalid parameters",
+          status: Keyword.get(opts, :rpc_error_status, 200)
+        )
+
+      result = opts[:structured_result] ->
+        json(id, result)
+
+      opts[:result_and_error?] ->
+        value = Keyword.get(opts, :structured_value, 42)
+
+        body = %{
+          "jsonrpc" => "2.0",
+          "id" => id,
+          "result" => %{
+            "resultType" => "complete",
+            "structuredContent" => %{"value" => value},
+            "content" => []
+          },
+          "error" => %{"code" => -32_000, "message" => "must not coexist"}
+        }
+
+        {200, [{"content-type", "application/json"}], Jason.encode!(body)}
+
+      true ->
+        json(id, %{
+          "resultType" => Keyword.get(opts, :result_type, "complete"),
+          "structuredContent" => %{
+            "value" => Keyword.get(opts, :structured_value, 42)
+          },
+          "content" => []
+        })
     end
   end
 

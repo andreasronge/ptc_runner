@@ -14,6 +14,10 @@ defmodule PtcRunner.Kernel.Evaluation do
   call, and whether correcting the program is effect-safe. The latter says only
   that the evaluation performed no write or unknown effect; callers combine all
   three facts with the bounded failure shape before requesting a correction.
+  Terminal provider-policy provenance is reported separately. It is derived
+  from the private tool ledger for normal outcomes and from the evaluation
+  owner for sandbox hard stops, so a later expression failure, timeout, or heap
+  kill cannot erase it.
 
   Continued and returned evaluations atomically commit native memory and exact
   bounded history before exposing only an inert public value. Continued results
@@ -304,12 +308,15 @@ defmodule PtcRunner.Kernel.Evaluation do
           mission_calls_before,
           projection_boundary
         )
+        |> put_terminal_provider_failure(step)
 
       {:ok, step} ->
         commit_result(state, lease, history, step, projection_boundary)
+        |> put_terminal_provider_failure(step)
 
       {:error, step} ->
         release_failure(state, environment, lease, step, mission_calls_before)
+        |> put_terminal_provider_failure(step)
     end
   end
 
@@ -466,7 +473,7 @@ defmodule PtcRunner.Kernel.Evaluation do
     {capability_activity?, unsafe_activity?} =
       evaluation_activity(state, environment, step, mission_calls_before)
 
-    :ok = RunState.release_evaluation(state, lease)
+    {:ok, evaluation_status} = RunState.release_evaluation_status(state, lease)
 
     details =
       step.fail
@@ -482,10 +489,15 @@ defmodule PtcRunner.Kernel.Evaluation do
       continuation_effect: :preserved
     }
 
-    case evaluation_retryable(step, unsafe_activity?) do
-      retryable? when is_boolean(retryable?) -> Map.put(result, :retryable?, retryable?)
-      nil -> result
-    end
+    result =
+      case evaluation_retryable(step, unsafe_activity?) do
+        retryable? when is_boolean(retryable?) -> Map.put(result, :retryable?, retryable?)
+        nil -> result
+      end
+
+    if evaluation_status.terminal_provider_failure?,
+      do: Map.put(result, :terminal_provider_failure?, true),
+      else: result
   end
 
   defp evaluation_activity(state, environment, step, mission_calls_before) do
@@ -566,6 +578,36 @@ defmodule PtcRunner.Kernel.Evaluation do
         %{error: nil, result: result} -> result === value
         _other -> false
       end
+  end
+
+  defp put_terminal_provider_failure(result, step) do
+    if terminal_provider_failure?(step),
+      do: Map.put(result, :terminal_provider_failure?, true),
+      else: result
+  end
+
+  defp terminal_provider_failure?(step) do
+    step
+    |> Map.get(:tool_calls, [])
+    |> List.wrap()
+    |> Enum.any?(fn
+      %{result: %{status: :error, kind: :provider_error, reason: :denied}} ->
+        true
+
+      %{
+        result: %{
+          status: :error,
+          kind: :provider_error,
+          reason: :invalid_result,
+          details: details
+        }
+      }
+      when details in ["mcp_capability_negotiation_error", "mcp_protocol_error"] ->
+        true
+
+      _call ->
+        false
+    end)
   end
 
   defp mission_capability_call_count(state), do: call_total(mission_capability_calls(state))

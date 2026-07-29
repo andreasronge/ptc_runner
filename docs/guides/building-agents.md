@@ -440,6 +440,13 @@ dispatched, every non-success remains non-retryable and carries
 Cancellation does not prove rollback. Deterministic failures that prove no
 transport send was attempted omit mutation state.
 
+Some read-side provider failures are terminal even though repeating an ordinary
+read would otherwise be effect-safe. In particular, the MCP adapter never asks
+the model to correct or repeat an `input_required` exchange: policy refusal,
+unsupported capability negotiation, and malformed protocol data close the
+agent evaluation. The Kernel retains that terminal classification outside the
+killable evaluator, so a later program error or resource kill cannot erase it.
+
 An explicit `(fail value)` remains terminal by default because it is also the
 application's deliberate failure signal. There is one narrower correction
 case: a direct capability call, its exact response retained in a simple lexical

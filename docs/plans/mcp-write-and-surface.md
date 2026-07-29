@@ -1,24 +1,23 @@
 # MCP bounded client surfaces
 
-**Status:** active; MCP write authority, effect-aware failures, and Streamable
-HTTP cancellation are implemented. MRTR validation and policy refusal is the
-next delivery slice. Revised 2026-07-28 against the final MCP `2026-07-28` tag at
+**Status:** active; MCP write authority, effect-aware failures, Streamable
+HTTP cancellation, and MRTR refusal are implemented. Exact-resource authority
+design is the next delivery slice. Revised 2026-07-28 against the final MCP
+`2026-07-28` tag at
 `modelcontextprotocol/modelcontextprotocol@5f5440bb26a62e2cf3440b92da5a667efa03b267`.
 
 PtcRunner supports operator-declared read and write MCP tools while keeping
 write selection explicit and post-dispatch failure outcomes conservative. This
-plan tracks MRTR refusal hardening and the authority decision required before
-adding other MCP client surfaces.
+plan tracks the authority decision required before adding other MCP client
+surfaces.
 
 Backward compatibility is not a constraint. PtcRunner is a 0.x library and
 should delete obsolete restrictions rather than preserve compatibility shims.
-The remaining hard parts are semantic: refusing server-initiated authority
-with precise protocol diagnoses and freezing operator authority over
+The remaining hard part is semantic: freezing operator authority over
 server-owned resource namespaces.
 
 ## Goals
 
-- Harden method-sensitive validation and refusal of Multi Round-Trip Requests.
 - Record a bounded authority model for MCP resources before adding that runtime
   surface.
 - Keep server-initiated model access permanently unavailable.
@@ -52,46 +51,13 @@ the official Go SDK `v1.7.0`.
 
 The post-RC protocol details relevant to remaining work are:
 
-- `InputRequiredResult` permits `requestState` without `inputRequests`;
 - every page of one list operation must use the same `cacheScope`, although
   page `ttlMs` values may differ;
 - `Mcp-Name` uses the same Base64 sentinel encoding as `Mcp-Param-*`; and
 - server identity is optional result metadata and client identity remains
   valid on each request.
 
-## 1. Keep server-initiated authority refused
-
-The `2026-07-28` protocol replaces server-initiated roots, sampling, and
-elicitation requests with Multi Round-Trip Requests. A server can answer
-`tools/call`, `prompts/get`, or `resources/read` with
-`InputRequiredResult`.
-
-Supporting a model request would let an MCP server reached through mission code
-invoke the workflow's LLM. That violates the two-environment authority split.
-Elicitation requires a human while missions are deliberately non-interactive,
-and roots presume ambient filesystem scope that PtcRunner replaces with
-explicit grants.
-
-PtcRunner declares empty client capabilities and already rejects
-`InputRequiredResult`. Harden the classifier:
-
-- a structurally valid state-only `InputRequiredResult` on one of its permitted
-  methods is an explicit, non-retryable policy refusal;
-- any `inputRequests` value is a protocol capability-negotiation error while
-  PtcRunner declares no elicitation, sampling, or roots capability;
-- `InputRequiredResult` on any other method is a protocol error;
-- a malformed MRTR result is a protocol error; and
-- state-only MRTR is never automatically retried, especially after a write.
-
-Validate the final schema requirements before distinguishing policy refusal
-from malformed input. Tests must use schema-derived valid examples rather than
-an empty result object.
-
-Trigger to revisit: a first-party need for host-mediated elicitation, where the
-*host*—never mission code and never the model—supplies the response. Sampling
-has no trigger.
-
-## 2. Authority gate for exact resources
+## 1. Authority gate for exact resources
 
 Prompts, resources, and completion are not interchangeable with tools:
 
@@ -140,23 +106,11 @@ Review each complete slice against its invariants, resolve every correctness
 and authority finding, and run focused tests plus `mix precommit`. Dependent
 slices do not begin from an unreviewed authority or wire contract.
 
-### Slice 1 — MRTR validation and policy refusal
-
-Harden section 1's rejection into method-sensitive structural validation and
-policy classification. Use schema-derived valid examples with `inputRequests`,
-`requestState`, and both together.
-
-Cover all three permitted methods and at least one forbidden method.
-Distinguish malformed protocol data, an input-bearing capability-negotiation
-violation, and a valid state-only result refused by policy. For `tools/call`,
-exercise each classification through read and write mappings; retain the
-specific cause and indeterminate mutation state for a write after dispatch.
-
-### Slice 2 — exact-resource authority design
+### Slice 1 — exact-resource authority design
 
 **Trigger:** a concrete first-party application that needs MCP resources.
 
-Decide section 2's operator-owned exact-URI grammar, public capability
+Decide section 1's operator-owned exact-URI grammar, public capability
 projection, resource-only installation rule, frozen catalog semantics, and
 safe snapshot identity. Keep URI templates, prompts, and completion out.
 
@@ -167,9 +121,9 @@ use an ordinary mapped MCP tool without losing an important capability.
 
 This is a specification slice and changes no runtime code.
 
-### Slice 3 — exact-resource mappings
+### Slice 2 — exact-resource mappings
 
-**Depends on:** approved Slice 2.
+**Depends on:** approved Slice 1.
 
 Discover and validate operator-granted exact resources during assembly. Expose
 each as a bounded zero-argument read capability. Implement `resources/read`,
