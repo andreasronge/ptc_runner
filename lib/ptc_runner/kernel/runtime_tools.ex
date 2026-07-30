@@ -15,6 +15,7 @@ defmodule PtcRunner.Kernel.RuntimeTools do
   alias PtcRunner.Kernel.Program
   alias PtcRunner.Kernel.RunState
   alias PtcRunner.Kernel.SafeMetadata
+  alias PtcRunner.Kernel.ValueContract
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
   alias PtcRunner.Lisp.RetainedSize
 
@@ -109,6 +110,58 @@ defmodule PtcRunner.Kernel.RuntimeTools do
       _arguments ->
         invalid_kernel_eval_request(state)
     end
+  end
+
+  @doc "Builds the workflow-only application-result contract callback."
+  def result_contract(nil) do
+    fn
+      %{"value" => _value, "json_value" => json_value?} when is_boolean(json_value?) ->
+        %{status: :ok, value: %{enforced?: false, valid?: true}}
+
+      _arguments ->
+        %{status: :error, kind: :protocol_error, reason: :invalid_result_contract_request}
+    end
+  end
+
+  def result_contract(%ValueContract{} = contract) do
+    fn
+      %{"value" => value, "json_value" => json_value?} when is_boolean(json_value?) ->
+        validate_result_contract(contract, value, json_value?)
+
+      _arguments ->
+        %{status: :error, kind: :protocol_error, reason: :invalid_result_contract_request}
+    end
+  end
+
+  defp validate_result_contract(contract, value, true) do
+    case ValueContract.json_value(value) do
+      {:ok, json_value} ->
+        if ValueContract.valid?(contract, json_value) do
+          %{status: :ok, value: %{enforced?: true, valid?: true}}
+        else
+          invalid_result_contract(ValueContract.classify(contract, json_value))
+        end
+
+      {:error, _reason} ->
+        invalid_json_result_contract(contract, value)
+    end
+  end
+
+  defp validate_result_contract(contract, value, false),
+    do: invalid_json_result_contract(contract, value)
+
+  defp invalid_json_result_contract(contract, value) do
+    details =
+      contract
+      |> ValueContract.classify(value)
+      |> Map.put(:json_value, false)
+      |> Map.put(:violations, [])
+
+    invalid_result_contract(details)
+  end
+
+  defp invalid_result_contract(details) do
+    %{status: :ok, value: %{enforced?: true, valid?: false, details: details}}
   end
 
   @doc "Wraps an internal runtime callback with canonical capability events."

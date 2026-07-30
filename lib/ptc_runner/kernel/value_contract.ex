@@ -53,6 +53,18 @@ defmodule PtcRunner.Kernel.ValueContract do
 
   def valid?(_contract, _value), do: false
 
+  @doc false
+  @spec json_value(term()) :: {:ok, term()} | {:error, :duplicate_key | :invalid_json}
+  def json_value(value) do
+    with {:ok, encoded} <- DeterministicJSON.encode(value),
+         {:ok, decoded} <- Jason.decode(encoded) do
+      {:ok, decoded}
+    else
+      {:error, :duplicate_key} = error -> error
+      {:error, _reason} -> {:error, :invalid_json}
+    end
+  end
+
   @spec classify(t(), term()) :: map()
   @doc """
   Explains a contract rejection without disclosing the rejected value.

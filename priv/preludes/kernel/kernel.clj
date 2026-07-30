@@ -1,5 +1,30 @@
 (ns kernel "Explicit subordinate evaluation helpers." {:visibility :prompt})
 
+(defn- json-contract-value? [value]
+  ;; Quoted symbol references intentionally report :unknown (DIV-19), but the
+  ;; host serializes them as their inert display strings. The host still
+  ;; performs the exact canonical JSON projection after this shape check.
+  (cond
+    (or (nil? value)
+        (true? value)
+        (false? value)
+        (string? value)
+        (= :unknown (type value))
+        (integer? value)
+        (float? value))
+    true
+
+    (map? value)
+    (every? (fn [[key nested]]
+              (and (or (string? key) (= :unknown (type key)))
+                   (json-contract-value? nested)))
+            value)
+
+    (sequential? value)
+    (every? json-contract-value? value)
+
+    :else false))
+
 (defn eval
   "Evaluate an opaque static Program in the mission environment."
   [program-value]
@@ -31,3 +56,13 @@
     (if (= :ok (get response :status))
       (get response :value)
       response)))
+
+(defn validate-result
+  "Validate one candidate against the manifest's application result contract."
+  [value]
+  (let [response (tool/kernel-result-contract
+                   {"value" value
+                    "json_value" (json-contract-value? value)})]
+    (if (= :ok (get response :status))
+      (get response :value)
+      (fail response))))

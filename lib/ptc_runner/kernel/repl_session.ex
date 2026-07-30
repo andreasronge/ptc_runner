@@ -549,6 +549,16 @@ defmodule PtcRunner.Kernel.ReplSession do
         )
       )
     )
+    |> Map.put(
+      "kernel-result-contract",
+      RuntimeTools.instrument(
+        session.state,
+        session.config.event_sink,
+        :workflow,
+        "kernel-result-contract",
+        RuntimeTools.result_contract(session.config.result_contract)
+      )
+    )
     |> Map.new(fn {name, callback} -> {name, %TrustedTool{function: callback}} end)
   end
 

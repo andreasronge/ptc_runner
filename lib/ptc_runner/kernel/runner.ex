@@ -283,6 +283,16 @@ defmodule PtcRunner.Kernel.Runner do
         RuntimeTools.mission_model_context(state, config.mission_inventory.model_rendered)
       )
     )
+    |> Map.put(
+      "kernel-result-contract",
+      RuntimeTools.instrument(
+        state,
+        config.event_sink,
+        :workflow,
+        "kernel-result-contract",
+        RuntimeTools.result_contract(config.result_contract)
+      )
+    )
     |> Map.new(fn {name, callback} -> {name, %TrustedTool{function: callback}} end)
   end
 

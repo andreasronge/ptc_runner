@@ -10,8 +10,9 @@ defmodule PtcRunner.Kernel.Library do
   and supplies `task` and `agent` through input, instead of every application
   repeating the same `agent.core` call. It is domain-blind by construction —
   it forwards two input keys and never learns what the task is about. It
-  selects `agent.core`'s raw-result mode so a manifest contract describes the
-  application value directly; callers of `agent.core/run` retain its explicit
+  validates each model-authored terminal candidate against the manifest result
+  contract while a bounded correction turn can still run, then returns the
+  raw application value; callers of `agent.core/run` retain its explicit
   `%{"ok" => true, "value" => value}` success envelope by default.
   `agent.core/run-value` is the composable variant: it returns the same
   model-authored value to its PTC-Lisp caller without terminating the outer
