@@ -119,13 +119,25 @@ defmodule PtcRunner.Sandbox do
   @typedoc """
   Evaluator function that takes AST and context and returns result with memory.
   """
-  @type eval_fn :: (any(), term() ->
-                      {:ok, any(), map()}
-                      | {:error,
-                         {atom(), String.t()}
-                         | {atom(), String.t(), any()}
-                         | {atom(), String.t(), any(), any()}})
-  @type prepare_context_fn :: (term() -> {:ok, term()} | {:error, term()})
+  @type callback_failure ::
+          {atom(), term()}
+          | {atom(), term(), term()}
+          | {atom(), term(), term(), term()}
+  @type failure_reason ::
+          {:timeout, timeout_info()}
+          | {:memory_exceeded, memory_exceeded_info()}
+          | {:execution_error, String.t()}
+          | callback_failure()
+  @type failure_snapshot :: term()
+  @type execute_result ::
+          {:ok, term(), metrics(), map()}
+          | {:error, failure_reason()}
+          | {:error, failure_reason(), failure_snapshot()}
+  @type eval_fn :: (term(), term() ->
+                      {:ok, term(), map()}
+                      | {:error, callback_failure()}
+                      | {:error, callback_failure(), map()})
+  @type prepare_context_fn :: (term() -> {:ok, term()} | {:error, callback_failure()})
   @type failure_snapshot_fn :: (term() -> term())
 
   @doc """
@@ -154,11 +166,10 @@ defmodule PtcRunner.Sandbox do
     - `{:error, reason}` on failure; a timeout is
       `{:timeout, timeout_info()}` and a heap kill is
       `{:memory_exceeded, memory_exceeded_info()}`
+    - `{:error, reason, snapshot}` on a post-setup failure when
+      `:failure_snapshot` is configured
   """
-  @spec execute(any(), term(), keyword()) ::
-          {:ok, any(), metrics(), map()}
-          | {:error, term()}
-          | {:error, term(), term()}
+  @spec execute(term(), term(), keyword()) :: execute_result()
 
   def execute(ast, context, opts \\ []) do
     default_timeout = Application.get_env(:ptc_runner, :default_timeout, @default_timeout)

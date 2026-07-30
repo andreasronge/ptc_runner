@@ -73,6 +73,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `PtcRunner.Lisp.run/2` now retains only statically referenced context keys
+  when context filtering is enabled, including scalar grants. Set
+  `filter_context: false` when a program requires dynamic or metadata
+  passthrough. Public pre-setup errors validate continuation memory inside the
+  bounded setup worker before returning it.
+- `PtcRunner.Lisp.CoreToSource.serialize_closure/1` and
+  `serialize_namespace/1` now return `{:ok, value}` or `{:error, reason}` and
+  reject closures, including closure entries selected from a namespace, that
+  cannot hydrate losslessly.
+- `PtcRunner.Sandbox.execute/3` timeout failures now include `:setup` or `:eval`
+  phase metadata and may include a third rollback-snapshot element when a
+  configured post-setup failure occurs.
 - MCP provider installation now requires a nested `:transport` tuple; the
   former top-level HTTP `:endpoint`, `:headers`, and
   `:allow_insecure_loopback` options were removed.
@@ -131,6 +143,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   inference.
 - Moved canonical trace loading/querying into `Kernel.TraceLog` and updated
   `ptc_viewer` to use it.
+
+### Fixed
+
+- PTC-Lisp namespace export now uses the shortest round-trippable float
+  representation, preventing small finite values such as `1.0e-20` from being
+  serialized as zero.
+- Hardened public, continuation, tool, Kernel JSON, artifact, and namespace
+  export boundaries against malformed wrappers, improper lists, and lossy map
+  or set projection collisions.
+- Centralized sandbox worker teardown around process aliases and phase-aware
+  cleanup so late replies cannot leak into callers and evaluation failures
+  retain bounded rollback state.
 
 This is a 0.x replacement release. The deleted APIs have no compatibility
 facades.

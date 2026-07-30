@@ -357,6 +357,35 @@ defmodule PtcRunner.Kernel.ManifestTest do
   end
 
   @tag :tmp_dir
+  test "manifest runs reject quoted-symbol artifact key collisions before persistence", %{
+    tmp_dir: dir
+  } do
+    File.write!(
+      Path.join(dir, "main.clj"),
+      ~S|(ns main) (defn run [_] (return {'foo 1 "'foo" 2}))|
+    )
+
+    manifest = %{
+      "version" => 1,
+      "workflow" => %{
+        "components" => [%{"id" => "main", "path" => "main.clj"}],
+        "entry" => "main/run"
+      },
+      "input" => %{"value" => %{}}
+    }
+
+    manifest_path = Path.join(dir, "ptc.json")
+    output_path = Path.join(dir, "result.json")
+    File.write!(manifest_path, Jason.encode!(manifest))
+    {:ok, registry} = ProviderRegistry.new()
+
+    assert {:error, %{kind: :workflow_failed, reason: :public_projection_collision}} =
+             RunBuilder.run(manifest_path, registry, output: output_path)
+
+    refute File.exists?(output_path)
+  end
+
+  @tag :tmp_dir
   test "manifest labels accept only bounded safe metadata", %{tmp_dir: dir} do
     File.write!(Path.join(dir, "main.clj"), "(ns main) (defn run [_] (return 1))")
 

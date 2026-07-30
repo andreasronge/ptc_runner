@@ -1254,10 +1254,6 @@ defmodule PtcRunner.Lisp do
     {:error, Step.error(:timeout, "execution exceeded #{timeout_ms}ms limit", memory, info)}
   end
 
-  defp handle_execute_result({:error, {:timeout, ms}}, %{memory: memory}) do
-    {:error, Step.error(:timeout, "execution exceeded #{ms}ms limit", memory, %{})}
-  end
-
   # The setup worker was killed while importing the grant, so do not traverse
   # and project that same oversized memory again in the unbounded caller.
   defp handle_execute_result(

@@ -30,5 +30,5 @@ defmodule PtcRunner.Kernel.ProjectionError do
   def kind({reason, _path, _boundary, _details}) when reason in @java_errors,
     do: :java_projection_error
 
-  def kind(_reason), do: :lisp_value_projection_error
+  def kind(_reason), do: :projection_error
 end

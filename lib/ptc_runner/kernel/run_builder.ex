@@ -11,6 +11,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
 
   alias PtcRunner.Kernel
   alias PtcRunner.Kernel.ComponentOverride
+  alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.InspectionArtifact
   alias PtcRunner.Kernel.InspectionSink
@@ -24,7 +25,6 @@ defmodule PtcRunner.Kernel.RunBuilder do
   alias PtcRunner.Kernel.TraceLog
   alias PtcRunner.Kernel.ValueContract
   alias PtcRunner.Kernel.WorkflowEnvironment
-  alias PtcRunner.Lisp.Format.SymbolRef
 
   @spec build(Manifest.t(), ProviderRegistry.t(), keyword()) ::
           {:ok,
@@ -676,11 +676,15 @@ defmodule PtcRunner.Kernel.RunBuilder do
   defp validate_result(_result, nil), do: :ok
 
   defp validate_result({:ok, %Result{value: value}}, %ValueContract{} = contract) do
-    public = public_value(value)
+    case json_contract_value(value) do
+      {:ok, public} ->
+        if ValueContract.valid?(contract, public),
+          do: :ok,
+          else: {:error, {:result_contract_failed, ValueContract.classify(contract, public)}}
 
-    if ValueContract.valid?(contract, public),
-      do: :ok,
-      else: {:error, {:result_contract_failed, ValueContract.classify(contract, public)}}
+      {:error, _reason} ->
+        {:error, {:result_contract_failed, %{value_kind: :invalid_json}}}
+    end
   end
 
   defp validate_result(_result, %ValueContract{}), do: :ok
@@ -712,7 +716,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
         :ok
 
       {:ok, {path, destination}} ->
-        case ResultArtifact.persist(path, public_value(result.value), class, destination) do
+        case ResultArtifact.persist(path, result.value, class, destination) do
           :ok -> :ok
           {:error, reason} -> {:error, {:result, reason}}
         end
@@ -743,26 +747,14 @@ defmodule PtcRunner.Kernel.RunBuilder do
     end
   end
 
-  defp public_value(%SymbolRef{} = value) do
-    if SymbolRef.valid?(value),
-      do: Elixir.Kernel.to_string(value),
-      else: value |> Map.from_struct() |> public_value()
+  # Result values have already crossed the strict Kernel JSON boundary. Decode
+  # the same deterministic bytes used by artifacts and result hashes so result
+  # contracts see ordinary JSON values without a second, potentially lossy
+  # map-key conversion.
+  defp json_contract_value(value) do
+    with {:ok, encoded} <- DeterministicJSON.encode(value),
+         do: Jason.decode(encoded)
   end
-
-  defp public_value(value) when is_struct(value),
-    do: value |> Map.from_struct() |> public_value()
-
-  defp public_value(value) when is_map(value),
-    do: Map.new(value, fn {key, nested} -> {public_key(key), public_value(nested)} end)
-
-  defp public_value(value) when is_list(value), do: Enum.map(value, &public_value/1)
-  defp public_value(value), do: value
-
-  defp public_key(%SymbolRef{} = key) do
-    if SymbolRef.valid?(key), do: Elixir.Kernel.to_string(key), else: key
-  end
-
-  defp public_key(key), do: key
 
   defp persist_trace(nil, _sink, _events), do: :ok
 
