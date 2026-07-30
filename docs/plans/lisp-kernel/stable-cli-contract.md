@@ -445,8 +445,8 @@ V1 envelopes contain exactly:
 Every envelope has `schema_version`, `command`, `status`, and `run_ref`.
 `status` is the closed enum `ok` or `error`. Success has `result`; failure has
 `error`. Every error object also has `subject`, defined below. `command` is the
-closed enum `help`, `init`, `validate`, `run`, `doctor`, `models`, or
-`unknown`.
+closed enum `help`, `version`, `init`, `validate`, `run`, `doctor`, `models`,
+or `unknown`.
 
 A successful validation has the same framing:
 
@@ -663,7 +663,7 @@ The authoritative V1 diagnostic catalog is:
 | `host` | `host_unavailable`, `host_invalid`, `host_schema_invalid`, `installed_limit_invalid`, `installation_revision_missing` | `3` | false |
 | `application` | `application_unavailable`, `invalid_json`, `duplicate_property`, `schema_violation`, `required_property_missing`, `reference_missing`, `document_limit_exceeded`, `contract_invalid`, `input_contract_failed`, `override_invalid`, `event_identity_conflict` | `3` | false |
 | `bundle` | `bundle_invalid`, `bundle_limit_exceeded`, `compile_failed`, `entry_invalid` | `3` | false |
-| `provider_declaration` | `provider_unknown`, `selection_invalid`, `selection_unverifiable`, `placement_denied`, `dependency_invalid`, `data_policy_denied` | `4` | false |
+| `provider_declaration` | `provider_unknown`, `selection_invalid`, `selection_unverifiable`, `placement_denied`, `dependency_invalid`, `data_policy_denied` | `3` | false |
 | `destination` | `invalid_destination`, `destination_exists`, `private_destination_required`, `recovery_reservation_failed` | `7` | false |
 | `local_preflight` | `environment_unavailable`, `adapter_unavailable`, `launcher_unavailable` | `4` | false |
 | `active_preflight` | `provider_application_unavailable`, `selection_rejected`, `selection_validation_failed`, `selection_validation_timeout`, `credential_unavailable`, `authorization_required`, `authorization_rejected`, `authentication_rejected`, `connectivity_rejected`, `connectivity_protocol_error`, `connectivity_unsupported`, `connectivity_outcome_unknown` | `4` | false |
@@ -686,6 +686,16 @@ for a duplicate pair or a pair absent from this table. When activity may have
 occurred, a failure not explicitly listed as retryable remains false because
 the CLI cannot prove that retrying will not repeat an external effect.
 
+Retryability is therefore also a command- and mode-specific invariant.
+Standalone V1 `run` never returns `retryable: true`. Its runtime-services mode
+is `disabled`, so OAuth and store availability paths are unreachable, and
+ordinary acquisition or execution failures use non-retryable projections. Mix
+and host-owned runs may additionally return retryable
+`active_preflight/authorization_unavailable` or
+`active_preflight/connectivity_unavailable` when the failure occurs before
+provider request dispatch. Every other retryable connectivity outcome is
+limited to an explicit connectivity check such as `doctor --connect`.
+
 Sink mappings are closed as well. A code-owned event or inspection record
 rejected by its installed encoded, retained, or count bound maps respectively
 to `event_capture_limit_exceeded` or
@@ -702,7 +712,7 @@ Initial exit classes are:
 | --- | --- |
 | `0` | success |
 | `2` | invalid command or arguments |
-| `3` | invalid host configuration, application, input, contract, or bundle |
+| `3` | invalid host configuration, application, input, contract, bundle, or provider declaration |
 | `4` | installed provider, credential, launcher, or environment unavailable |
 | `5` | classified workflow or mission failure |
 | `6` | enforced runtime limit |
@@ -719,6 +729,9 @@ Command success results are closed:
   non-empty ordered array of bounded code-owned usage lines; and `notices` is
   `[]` except that doctor help contains exactly
   `["doctor --connect may perform one or more real provider requests and may incur provider cost"]`.
+- `version` has exactly `version`: the compile-time packaged `ptc_runner`
+  version string, read from the build at compile time and never from a host
+  document, application, environment variable, or filesystem.
 - `init` is `{"created":["main.clj","ptc.json"]}` in that fixed order.
 - `validate` has exactly `application_content_digest`,
   `effective_application_digest`, `workflow_bundle_hash`,
@@ -2035,6 +2048,7 @@ Deliver:
 4. `ptc doctor [ptc.json] [--host-config HOST.json] [--connect]`
 5. `ptc models --host-config HOST.json`
 6. `ptc init DIRECTORY`
+7. `ptc --version` and `ptc version`
 
 Standalone V1 deliberately has no OAuth authorization command or interaction
 flag. The runtime ships no durable OAuth store, and a separate authorization
@@ -2093,12 +2107,20 @@ implementation; both use the same lazy `ProviderRuntimeServices` seam.
 
 All three help forms normalize to `command: "help"` and return the closed help
 result inside the ordinary one-envelope stdout contract. Root help lists the
-five operational commands in the order above. Command help uses the
-corresponding operational command as its topic; unsupported topics or
-additional arguments are `arguments/invalid_arguments`. Help completes in
-phase 1 and performs no host, application, destination, credential, provider,
-or filesystem work. V1 does not define a version command or `--version`;
-invoking it is `arguments/invalid_command`.
+five operational commands in the order above, then the `--version` form.
+Command help uses the corresponding operational command as its topic;
+unsupported topics or additional arguments are `arguments/invalid_arguments`.
+Help completes in phase 1 and performs no host, application, destination,
+credential, provider, or filesystem work.
+
+Both `ptc --version` and `ptc version` normalize to `command: "version"` and
+return the closed version result in that same one-envelope contract. Like
+help, it completes in phase 1 with no host, application, destination,
+credential, provider, or filesystem work, and its `provider_activity` is
+false. It accepts no other option, argument, or topic; any addition is
+`arguments/invalid_arguments`. `version` is not a help topic, and the parser
+resolves `--version` before command dispatch so it never depends on a valid
+subcommand.
 
 Because this is a 0.x library, rename `--mission`/`--private-mission` to
 `--input`/`--private-input`, replace `--trace PATH` with generated
@@ -2916,8 +2938,8 @@ pre-existing or unrecognized state.
 
 ### Commit 9. Focused shared commands and REPL parity
 
-- implement JSON-envelope help, `validate`, and `run`, then `doctor`, `models`,
-  and `init`;
+- implement JSON-envelope help and `version`, then `validate` and `run`, then
+  `doctor`, `models`, and `init`;
 - remove unconditional Mix `app.start` and make `Mix.Tasks.Ptc.Run` delegate
   to the shared parser/engine and mode-specific phase-8 application/runtime
   service gate, while explicitly ensuring the inert `:ptc_runner` command core;
@@ -3104,8 +3126,25 @@ At minimum:
 - shared parser parity for every `run` default, option, and conflict;
 - one valid and representative invalid invocation for every command;
 - exact root and per-command help envelope fixtures, including the doctor
-  provider-cost notice, plus `--version` rejection without host/provider/file
-  activity;
+  provider-cost notice and the root listing that ends with the `--version`
+  form;
+- `ptc --version` and `ptc version` fixtures proving both normalize to
+  `command: "version"`, return the single-key result carrying the compile-time
+  packaged value, report `provider_activity: false`, and perform no
+  host/provider/file work; `--version` resolves without a valid subcommand,
+  while combining it with any other option, argument, or topic is
+  `arguments/invalid_arguments`;
+- command- and mode-specific retryability fixtures proving standalone `run`
+  emits `retryable: true` on no catalog path, that a `disabled`-mode OAuth
+  selection yields non-retryable `active_preflight/authorization_required`,
+  and that Mix and host-owned `context_groups` runs emit retryable
+  `active_preflight/authorization_unavailable` on reservation failure and
+  `active_preflight/connectivity_unavailable` on OAuth metadata or token
+  transport failure before provider request dispatch, while every other
+  retryable connectivity outcome appears only under an explicit connectivity
+  check;
+- `provider_declaration` fixtures for every code proving exit `3` rather than
+  `4` through both `validate` and `run`, with no provider activity;
 - standalone exact envelope schema/key/status/phase/code/retryability
   assertions, without imposing process framing on the Mix adapter;
 - standalone success and failure fixtures proving the closed `ok`/`error`
