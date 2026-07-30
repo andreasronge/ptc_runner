@@ -1,6 +1,7 @@
 # Stable CLI and transport-neutral application plan
 
-**Status:** proposed; implementation-ready after review.
+**Status:** proposed; implementation-ready after merged-OAuth and
+multitenancy-preparation review.
 
 This plan turns the remaining command-line work in
 [`product-readiness.md`](product-readiness.md) into small implementation slices.
@@ -9,9 +10,12 @@ same runtime can later accept a cloud-supplied application without requiring
 application or artifact paths.
 
 The plan deliberately does not make hostile same-user process containment,
-multi-tenant service isolation, or transactional artifact storage prerequisites
-for fixing the current CLI. Those are different trust boundaries and should be
-designed from deployment evidence.
+inbound tenant authentication, adversarial multi-tenant service isolation, or
+transactional artifact storage prerequisites for fixing the current CLI. It
+does preserve trusted host-supplied tenant/principal partition keys and
+execution-scoped provider services so a later multi-tenant host does not need
+to undo a process-global credential design. Those keys are namespacing inputs
+to the OAuth store, not proof of identity or a security boundary by themselves.
 
 ## Current evidence
 
@@ -26,6 +30,10 @@ The implementation already has most of the execution machinery:
   behavior.
 - manifest, host-configuration, and result contracts already have bounded
   validators.
+- `PtcRunner.Kernel.MCPOAuth` supplies principal-scoped authorization contexts,
+  an atomic store behaviour, an in-memory adapter, explicit authorization,
+  refresh fencing, and deferred manager cleanup. `MCPHTTPAdapter` is the shipped
+  bounded direct-Mint HTTP/1 boundary shared by MCP and OAuth.
 - `Mix.Tasks.Ptc.Run` owns the run option/error-rendering layer. The existing
   REPL also has non-interactive script/profile modes and a distinct JSONL
   streaming protocol; its manifest-backed mode calls `RunBuilder`.
@@ -36,6 +44,10 @@ evaluator:
 - inspected Elixir errors are not a stable machine protocol;
 - validation, destination checks, provider preparation, credentials, and
   acquisition are not ordered as an explicit public contract;
+- OAuth registry construction currently requires `MCPOAuth.Context` and performs
+  `claim_principal`/`claim_authorities` store writes before provider selection,
+  so the existing seam cannot preserve zero provider activity for `validate`,
+  `models`, or default `doctor`;
 - manifest loading and execution assembly are still coupled through paths;
 - bundle identity does not cover dependency edges; and
 - focused `validate`, `models`, `doctor`, and `init` commands do not exist.
@@ -47,7 +59,9 @@ evaluator:
 Add one shared argv parser, command dispatcher, diagnostic projector, and
 `CommandEngine` in Elixir. Both the standalone entrypoint and
 `Mix.Tasks.Ptc.Run` delegate to them. The Mix task prepends the fixed `run`
-command and does not maintain a second option table. The engine owns only
+command and selects the `mix_cli` frontend mode in the same option table; that
+mode admits the one documented Mix-only `--authorize-mcp` adapter while
+standalone mode rejects it. There is no second option table. The engine owns only
 frontend concerns: argv, path-backed acquisition adapters, destination
 preflight/publication, and envelope rendering. It returns a closed
 `CommandOutcome` containing the envelope and exit status. Only the standalone
@@ -55,15 +69,165 @@ wrapper writes the exact process streams and exits; the Mix adapter returns or
 raises through Mix conventions and never halts the caller's VM.
 
 Add a separate path-free `RunCoordinator` with `prepare/2`,
-`open_session/1`, and `execute/1`. `prepare/2` consumes a sealed `RunRequest`
-plus a trusted host installation, compiles bundles, normalizes provider
+`open_session/2`, and `execute/2`. `prepare/2` consumes a sealed `RunRequest`
+plus a pure trusted `InstallationCatalog`, compiles bundles, normalizes provider
 selections, classifies the run, and returns a sealed prepared run. After a
-frontend performs any destination preflight, `open_session/1` owns local/active
-provider work and acquisition for both one-shot and REPL execution;
-`execute/1` composes that operation with Kernel execution, result guarding,
+frontend performs any destination preflight, `open_session/2` consumes
+execution-scoped `ProviderRuntimeServices` and owns local/active provider work
+and acquisition for both one-shot and REPL execution;
+`execute/2` composes that operation with Kernel execution, result guarding,
 cleanup, and terminal-event finalization. Both the CLI and a cloud embedding
 use this coordinator; neither `RunCoordinator` nor `RunBuilder` accepts argv,
 an application path, or an artifact destination.
+
+`InstallationCatalog` is inert. It contains validated provider descriptors,
+implementations, safe static OAuth authority metadata, installed limits, and
+installation revisions, but no principal, store claim, live authorization
+context, resolved credential, process, or port. Constructing it performs no
+store call or other provider activity. In particular, replace the current
+`HostInstallation.registry/1` OAuth refusal and `registry/2` eager
+`claim_authorities` path rather than wrapping either behind the new type.
+
+`ProviderRuntimeServices` is a sealed execution-scoped authority supplied only
+to `open_session/2`. It contains the provider-application ownership mode,
+bounded ordinary credential resolver, and an OAuth activation mode of exactly
+`disabled` or `context_groups`. `disabled` carries no store, partition, resolver,
+or interaction and is used by standalone V1. `context_groups` carries a private
+alias-to-group map and lazy runtime specification for each declared group. The
+CLI resolver owns environment/confined-file/literal
+resolution from inert host declarations; a cloud resolver may use its
+authenticated secret service without exposing a filesystem. Neither is invoked
+before phase 8. An OAuth runtime specification
+contains trusted host-supplied tenant/principal partition keys, a store handle,
+an optional interaction implementation, and a just-in-time client-credential
+resolver. Constructing the specification validates only bounded shapes and
+does not call the store or resolver. After atomically marking provider activity
+in phase 8, `open_session/2` constructs `MCPOAuth.Context`, claims the selected
+authorities, and only then loads, refreshes, or explicitly authorizes a grant.
+Every context, principal claim, authority claim, grant operation, and
+authorization call carries one caller-owned absolute monotonic deadline; no
+OAuth boundary retains the current independent 5,000 ms claim timeout.
+
+Intentionally break the `Store` behavior's bare-timeout transaction boundary.
+Every coordinator-facing store call supplies a sealed `%Store.Deadline{}` with
+the absolute local monotonic deadline and its positive remaining duration at
+submission. A same-VM adapter checks it before dispatch, and its serialized
+handler rechecks the absolute value inside the atomic transaction immediately
+before any mutation and commit. An expired queued in-VM request returns
+`:timeout` without changing state.
+
+A remote adapter cannot compare unrelated monotonic timestamps and must not
+pretend the submitted remaining duration is still fresh on arrival. Before
+dispatch it chooses one of two declared mutation modes. `authoritative_deadline`
+negotiates an opaque adapter-issued transaction guard whose server-clock expiry,
+including the adapter's proven clock/transport uncertainty margin, is no later
+than the caller deadline; the server rechecks that guard atomically before
+commit. `indeterminate_after_dispatch` applies when no such bound can be proven:
+once a mutation request may have been dispatched, local expiry never asserts
+that state is unchanged and returns the operation's existing
+`mutation_indeterminate`/possibly-dispatched outcome. Reads may simply time out
+and discard a late reply. An adapter that does neither is unsupported. A
+mutation committed before a guarded deadline whose reply is lost, or committed
+at an unknown time in indeterminate mode, retains its operation-specific
+idempotency/dispatch-indeterminate classification; no caller-local clock is
+projected as an adapter-authoritative fact.
+
+Generate the Store command catalog with more than a `read`/`mutation` bit. Every
+exported transaction command has exact `access`, `remote_replay`,
+`post_dispatch_projection`, and `cleanup_action` fields. A read has
+`remote_replay: not_applicable`, `post_dispatch_projection:
+discard_late_reply`, and `cleanup_action: none`. A mutation's `remote_replay` is
+either `stable_idempotency_key`—the command carries a bounded key and replay
+returns the original committed result—or `authoritative_only`, which an
+`indeterminate_after_dispatch` adapter rejects before dispatch. A mutation's
+`post_dispatch_projection` is one closed phase/code/retryability mapper, not a
+raw atom or callback, and its `cleanup_action` is exactly `none`,
+`reconcile`, `preserve_authorization_fence`, `preserve_response_fence`, or
+`retain_admission_cleanup`.
+
+The store handle seals its declared remote mutation mode as inert capability
+metadata. To avoid a second conditional-operation inventory, handle construction
+checks the complete generated Store catalog: an `indeterminate_after_dispatch`
+store is invalid if any exported mutation is `authoritative_only`, whether or
+not one particular run is expected to reach it. An `authoritative_deadline`
+store may implement those rows. The incompatible trusted runtime specification
+is rejected as non-retryable `internal/internal_error` before the activity
+marker, store call, resolver, interaction, manager, or network action; it never
+degrades into retryable `authorization_unavailable`.
+
+All production Store calls go through wrappers generated from that same
+catalog. A compile/source audit rejects a coordinator, OAuth module, cleanup
+owner, or adapter helper that constructs a transaction command or calls
+`transact/3` directly outside the generated Store boundary. Thus conditional
+run, doctor, explicit-authorization, execution-response, and cleanup calls
+cannot escape the capability check.
+
+Principal/authority claims and pre-external-dispatch flow/lease setup use stable
+reconciliation and their declared availability mapping; they may be retryable
+without claiming the first attempt did not commit. Refresh/code operations
+after possible external dispatch preserve the authorization fence and use
+non-retryable `authorization_required`. Dynamic response-transition mutations
+preserve their response fence and use the phase-specific doctor,
+session-opening, or execution rows below. MCP admission/release retains its
+cleanup owner until the exact idempotent release is acknowledged and uses the
+cleanup precedence table. Retirement operations either carry their existing
+stable idempotency/intent identity and policy mapper or are
+`authoritative_only`. No mutation may inherit a default classification.
+Generation fails when an exported Store command lacks a catalog row, when a
+mutation lacks an admitted replay mode and projector, or when its public pair is
+absent from the diagnostic catalog.
+
+Relative TTLs stored in flows, leases, requirements, and retirements remain
+separate from the caller deadline. Unselected OAuth installations are never
+claimed. A runtime-service callback is trusted host code and is never invoked
+by `validate`, `models`, default `doctor`, or a run rejected through destination
+preflight.
+
+An OAuth context-group key is an opaque, private execution-local identifier,
+not a tenant ID or public identity. In `context_groups` mode, construction
+requires every installed OAuth alias to map to exactly one declared group and
+rejects unused or missing mappings. One group owns exactly one tenant ID,
+principal ID, store handle, interaction implementation, and client-credential
+resolver. Aliases intentionally mapped to that group may share its principal
+claim and context. Construction validates only these inert mappings and does
+not invoke a store adapter.
+
+Make `Store.local_identity/1` mandatory for every store admitted to
+`context_groups` and remove its handle-tuple fallback. The adapter must return a
+non-secret opaque binary of exactly `1..128` bytes; arbitrary byte values are
+allowed, but the empty binary and values longer than 128 bytes are invalid. The
+value must be stable and equal for every live handle to the same backing store
+and distinct from another backing store; violating that contract is an invalid
+store adapter. After the activity marker and cleanup-capacity reservation, the
+coordinator invokes this otherwise pure callback for selected groups in
+deterministic group-anchor order inside monitored workers under the shared
+activation-admission deadline. It rejects a missing, malformed, raised, exited,
+or duplicate
+`{store_identity, tenant_id, principal_id}` namespace before constructing a
+context or performing any store mutation, then releases the reserved batch.
+Callers that intend to share that namespace must map the aliases to one group.
+Thus different groups cannot produce identical `GrantKey` values without adding
+a second namespace concept to the durable-store contract. This makes a future
+authenticated multi-tenant host an explicit producer of separate groups rather
+than relying on process-global context. The group key, partition keys, store
+identity, and resolver identity remain private.
+
+In `disabled` mode, selecting any OAuth occurrence is a supported active
+failure, not an invalid runtime specification. After the activity marker flips,
+the first selected OAuth occurrence in the ordinary total order returns
+non-retryable `active_preflight/authorization_required` with its
+`authorization` subject, without reserving cleanup capacity, constructing a
+context, calling a store/resolver, starting a manager, or opening an
+interaction. Static providers in the same run retain their ordinary behavior,
+but acquisition stops at this first OAuth failure. Static commands never
+inspect the activation mode because they stop before phase 8.
+
+Tenant and principal IDs never come from a manifest, MCP response, process
+dictionary, or application environment. They remain private, do not enter
+application/provider identity or public diagnostics, and are scoped to one
+OAuth store authority. This prepares the runtime for a future authenticated
+multi-tenant host while making no claim that the CLI or one BEAM VM authenticates
+or isolates mutually hostile tenants.
 
 The first standalone package should use the smallest supported BEAM packaging
 that can carry the project and its dependencies. An OTP release with a
@@ -72,7 +236,10 @@ spike proves that the dependency and optional-provider surface works without a
 parallel runtime configuration. Packaging choice must not change the command
 engine or envelope schema.
 
-The standalone boot profile starts only the command core. Optional provider
+The standalone boot profile starts only the command core, including the inert
+`PtcRunner.Supervisor`, bounded `MCPOAuth.ManagerCleanup.Registry`, and empty
+cleanup worker supervisor. Starting that core performs no store or provider
+work and does not mark provider activity. Optional provider
 applications are loaded but not started until the coordinator has entered the
 active-provider boundary. Production and release configuration disables
 implicit dotenv loading in `req_llm` and `llm_db`, and the standalone entrypoint
@@ -175,7 +342,11 @@ target the standalone package.
 
 Remove the task's current unconditional `Mix.Task.run("app.start")`. The Mix
 adapter may explicitly ensure only the command-core applications needed for
-parsing and package construction. Provider OTP applications, including
+parsing, package construction, and ownership transfer. That ensured core
+includes `:ptc_runner`'s root supervisor,
+`PtcRunner.Kernel.MCPOAuth.ManagerCleanup.Registry`, and its empty worker
+supervisor; they must be available before phase 7 but start with no provider or
+store state. Provider OTP applications, including
 `req_llm`/its included `llm_db`, are resolved through a host-supplied
 `ProviderRuntime` gate immediately after the owner atomically marks activity; a
 provider kind declares which application it needs.
@@ -211,7 +382,9 @@ No mode stops a VM-global application per run. Repeated/concurrent Mix commands
 reuse the already-started application, while a cloud host never delegates its
 application lifecycle to a request. Provider sessions, ports, and child
 processes remain per-run `ProviderResources`; application background processes
-are VM/host-owned runtime infrastructure outside that graph.
+are VM/host-owned runtime infrastructure outside that graph. The OAuth cleanup
+supervisor is likewise VM/host-owned infrastructure, but a token manager is
+per-run until an explicit successful ownership transfer described below.
 
 If Mix dependency metadata still auto-starts an optional provider, adjust the
 application/dependency topology (or extract a provider application) rather
@@ -457,14 +630,16 @@ line/column coordinates.
 installed alias or, for `provider_unknown`, the manifest alias that already
 passed the same bounded alias validator. The closed operation enum is
 `declaration`, `selection`, `local`, `application`, `credentials`,
-`connectivity`, `acquisition`, `execution`, or `cleanup`. `occurrence` is JSON
-`null` or exactly
+`authorization`, `connectivity`, `acquisition`, `execution`, or `cleanup`.
+`occurrence` is JSON `null` or exactly
 `{"destination":"workflow|mission","index":nonnegative_integer}`. The index is
 the zero-based position in that destination's manifest provider list. It is
 non-null only when the failure is attributed to one selected occurrence;
-installation-declaration, provider-application, credential-resolution, and
-aggregate cleanup failures use `null`. Audited-local failures use the selected
-occurrence they were checking.
+installation-declaration, provider-application, alias-wide runtime-service
+activation, credential-resolution, and aggregate cleanup failures use `null`.
+An authorization, connectivity, or acquisition failure uses the selected
+occurrence when the failed operation had entered that occurrence. Audited-local
+failures use the selected occurrence they were checking.
 Selection-validation failures use operation `selection`; selection,
 connectivity, acquisition, or provider-execution failures use the occurrence
 that failed when it is known. The locator contains no selection value or
@@ -491,8 +666,8 @@ The authoritative V1 diagnostic catalog is:
 | `provider_declaration` | `provider_unknown`, `selection_invalid`, `selection_unverifiable`, `placement_denied`, `dependency_invalid`, `data_policy_denied` | `4` | false |
 | `destination` | `invalid_destination`, `destination_exists`, `private_destination_required`, `recovery_reservation_failed` | `7` | false |
 | `local_preflight` | `environment_unavailable`, `adapter_unavailable`, `launcher_unavailable` | `4` | false |
-| `active_preflight` | `provider_application_unavailable`, `selection_rejected`, `selection_validation_failed`, `selection_validation_timeout`, `credential_unavailable`, `authentication_rejected`, `connectivity_rejected`, `connectivity_protocol_error`, `connectivity_unsupported`, `connectivity_outcome_unknown` | `4` | false |
-| `active_preflight` | `connectivity_unavailable`, `connectivity_rate_limited` | `4` | true |
+| `active_preflight` | `provider_application_unavailable`, `selection_rejected`, `selection_validation_failed`, `selection_validation_timeout`, `credential_unavailable`, `authorization_required`, `authorization_rejected`, `authentication_rejected`, `connectivity_rejected`, `connectivity_protocol_error`, `connectivity_unsupported`, `connectivity_outcome_unknown` | `4` | false |
+| `active_preflight` | `authorization_unavailable`, `connectivity_unavailable`, `connectivity_rate_limited` | `4` | true |
 | `provider_acquisition` | `provider_unavailable` | `4` | false |
 | `provider_acquisition` | `provider_protocol_error`, `provider_policy_changed` | `4` | false |
 | `execution` | `workflow_failed`, `mission_failed` | `5` | false |
@@ -581,13 +756,16 @@ duplicate it as booleans.
 Doctor checks appear in this exact order: `runtime`, `application`, `viewer`,
 then the applicable per-provider checks in installed-alias byte order. A
 provider check name is exactly `provider/<alias>/local`,
-`provider/<alias>/selection`, `provider/<alias>/credentials`, or
-`provider/<alias>/connectivity`; aliases already exclude `/`. Within one alias,
-the fixed order is local, selection, credentials, connectivity. Omit selection
-when there is no application occurrence for that alias. Omit a credential
-check when the descriptor declares no credential names. Omit a connectivity
-check exactly when its connectivity mode is `none`; `acquisition` and `probe`
-both include it. The only success-result pairs are:
+`provider/<alias>/selection`, `provider/<alias>/credentials`,
+`provider/<alias>/authorization`, or `provider/<alias>/connectivity`; aliases
+already exclude `/`. Within one alias, the fixed order is local, selection,
+credentials, authorization, connectivity. Omit selection when there is no
+application occurrence for that alias. Omit a credential check when the
+descriptor declares no ordinary static credential names. Include authorization
+exactly when `authorization_mode` is `oauth`; static MCP authentication and all
+other shipped providers omit it. Omit a connectivity check exactly when its
+connectivity mode is `none`; `acquisition` and `probe` both include it. The only
+success-result pairs are:
 
 | Check name | Allowed `status` / `code` |
 | --- | --- |
@@ -597,11 +775,81 @@ both include it. The only success-result pairs are:
 | `provider/<alias>/local` | `pass` / `available`; `skipped` / `application_required`; `skipped` / `active_check_required` |
 | `provider/<alias>/selection` | `pass` / `declarative`; `pass` / `available`; `skipped` / `active_check_required` |
 | `provider/<alias>/credentials` | `pass` / `available`; `skipped` / `requires_connect` |
+| `provider/<alias>/authorization` | `pass` / `available`; `skipped` / `requires_connect` |
 | `provider/<alias>/connectivity` | `pass` / `available`; `skipped` / `requires_connect` |
 
-A required local, selection, credential, or connectivity failure produces the
-matching top-level diagnostic instead of inventing a warning check code. Thus
-this table and the diagnostic catalog jointly close every doctor outcome.
+A required local, selection, credential, authorization, or connectivity failure
+produces the matching top-level diagnostic instead of inventing a warning
+check code. `authorization_required` means the selected OAuth authority has no
+usable grant and needs a new explicit host/Mix interaction, including when a
+previous explicit interaction expired safely; it is not
+`authentication_rejected`, and an automatic command retry cannot repair it.
+`authorization_rejected` covers an explicit denied/invalid authorization
+outcome. `authorization_unavailable` is reserved for a bounded store or
+runtime-service availability failure before provider request dispatch and is
+retryable. Just-in-time confidential-client secret failure remains
+`credential_unavailable`, with operation `authorization`.
+
+The OAuth boundary uses this exhaustive provenance mapping during explicit
+authorization, `doctor --connect`, and session opening/acquisition; an unlisted
+raw reason is a caught `internal/internal_error`, never guessed into a retryable
+class:
+
+| OAuth/store outcome | Public diagnostic | Retryable |
+| --- | --- | --- |
+| absent grant, expired grant without an admissible refresh, `authorization_required`, or `mcp_authorization_required` before provider dispatch | `active_preflight/authorization_required` | false |
+| explicit browser denial, invalid callback, invalid/consumed flow, or authorization-code rejection | `active_preflight/authorization_rejected` | false |
+| `authorization_timeout` or explicit callback/listener wait expiry before any possibly-dispatched token/code mutation | `active_preflight/authorization_required` | false |
+| store timeout/unavailability/error, runtime-service timeout/unavailability, `mutation_busy`, `principal_retiring`, or `authority_retiring`, all before external dispatch | `active_preflight/authorization_unavailable` | true |
+| `authority_collision`, `stale_authority`, `stale_principal`, or another epoch/fingerprint mismatch | `provider_acquisition/provider_policy_changed` | false |
+| invalid runtime specification, invalid store handle, invalid authority batch, or an impossible post-construction context shape | `internal/internal_error` | false |
+| missing or failed just-in-time confidential-client binding before token dispatch | `active_preflight/credential_unavailable`, authorization subject | false |
+| malformed, oversized, or unsupported successful OAuth discovery/token response before provider request dispatch | `active_preflight/connectivity_protocol_error`, authorization subject | false |
+| well-formed OAuth discovery/token endpoint rejection other than the explicit authorization, credential, or lifecycle cases in this table, before provider request dispatch | `active_preflight/connectivity_rejected`, authorization subject | false |
+| OAuth metadata/token timeout or transport failure with no indeterminate authorization mutation | `active_preflight/connectivity_unavailable` | true |
+| refresh/code mutation that crossed `possibly_dispatched`, including `mutation_indeterminate`, an indeterminate commit, or a failed compensating fence | `active_preflight/authorization_required` | false |
+| dynamic OAuth `401` after fencing the sent generation, or valid satisfiable `403 insufficient_scope` after fencing its requirement | `active_preflight/authorization_required` | false |
+| dynamic OAuth `403` with a syntactically valid challenge but an unsatisfiable or unsupported scope requirement | `active_preflight/connectivity_rejected`, authorization subject | false |
+| dynamic OAuth `403` with a missing or malformed challenge | `active_preflight/connectivity_protocol_error`, authorization subject | false |
+| dynamic OAuth rejection that proves the presented client/grant is invalid without installing a new requirement | `active_preflight/authentication_rejected`, authorization subject | false |
+| static-auth provider `401`/`403` during `doctor --connect` or another explicit connectivity probe | `active_preflight/authentication_rejected`, connectivity subject | false |
+| static-auth provider `401`/`403` during ordinary session opening/acquisition | `active_preflight/authentication_rejected`, acquisition subject | false |
+| static-auth provider `401`/`403` during provider execution | `execution/provider_failed`, execution subject | false |
+| failure to persist an already fenced response-driven OAuth transition during `doctor --connect` | `active_preflight/connectivity_outcome_unknown`, connectivity subject | false |
+| failure to persist an already fenced response-driven OAuth transition during ordinary session opening/acquisition | `provider_acquisition/provider_unavailable`, acquisition subject | false |
+| failure to persist an already fenced response-driven OAuth transition during provider execution | `execution/provider_failed`, execution subject | false |
+
+The classifier receives the operation and dispatch provenance, not only the raw
+atom. In particular, it cannot turn an unsafe refresh/code outcome into
+`authorization_unavailable`, retry the original MCP operation, or erase the
+runtime-shared local fence.
+
+Phase 10 has one explicit projection override, subordinate to the binding-limit
+rule below. Any non-invariant dynamic OAuth/store outcome encountered while
+obtaining an execution request's bearer header, refreshing it, or processing
+that request's `401`/`403`—including authorization-required, stale/retiring
+lifecycle state, credential resolution, transport/protocol rejection,
+response-transition persistence failure, and timeout when the provider's
+intrinsic deadline binds—maps to non-retryable `execution/provider_failed` with
+the exact provider execution subject and occurrence. If the run deadline binds
+that timeout, including an exact tie, `execution/run_timeout` with a null subject
+wins instead. The internal `ProviderError` retains only the closed cause,
+dispatch provenance, mutation state, and deadline provenance needed by Kernel;
+the public envelope never backdates a phase-10 failure to `active_preflight` or
+`provider_acquisition`. An invalid runtime specification or impossible internal
+shape remains `internal/internal_error`, and cleanup may still displace either
+result under the precedence table. Explicit browser interaction is never
+entered from phase 10. Thus the table, this operation override, binding-limit
+precedence, and the diagnostic catalog jointly close every doctor and run
+outcome.
+An explicit authorization target runs in a monitored resource worker. On its
+deadline the owner stops the listener/worker and expires the pending flow under
+the remaining bounded cleanup budget. If no token/code mutation was possibly
+dispatched, the timeout row above applies. If dispatch provenance is
+indeterminate, the existing possibly-dispatched row applies and its local fence
+is preserved. Failure to stop a registered root or persist the required fence
+is a provider cleanup failure under the compound precedence table, not silently
+collapsed into the authorization timeout.
 `application_required` means an audited-local callback needs the final
 post-selection context but no application was supplied. `active_check_required`
 means either the custom provider's nominal local check is unverified phase-8
@@ -677,16 +925,18 @@ observable phases, with fixed ownership:
    application digest from normalized selections;
 6. `CommandEngine`, or the embedding host's publication policy, preflights
    every locally knowable result, inspection, and trace destination error;
-7. `RunCoordinator.open_session/1` starts the event and optional inspection
+7. `RunCoordinator.open_session/2` starts the event and optional inspection
    owners from the sealed `ExecutionPolicy`, then runs shared audited-local
    provider checks that perform no credential access, process launch, network
    activity, discovery, or unbounded callback;
-8. `RunCoordinator.open_session/1` enters the active-provider boundary, runs any
-   unverified/active preflight, and resolves credentials;
-9. `RunCoordinator.open_session/1` acquires providers, including MCP discovery,
+8. `RunCoordinator.open_session/2` enters the active-provider boundary, runs any
+   unverified/active preflight, activates selected execution-scoped provider
+   services, and resolves ordinary static credentials;
+9. `RunCoordinator.open_session/2` acquires providers, including OAuth grant
+   admission/refresh and MCP discovery,
    and returns one owner-backed `ExecutionSession`;
-10. `RunCoordinator.execute/1` assembles and executes the Kernel;
-11. `RunCoordinator.execute/1` guards the result, validates its contract,
+10. `RunCoordinator.execute/2` assembles and executes the Kernel;
+11. `RunCoordinator.execute/2` guards the result, validates its contract,
     projects it to the selected native/JSON policy, closes every acquired
     provider, and finalizes terminal events from the compound
     execution/contract/cleanup outcome; and
@@ -694,6 +944,151 @@ observable phases, with fixed ownership:
     result only when cleanup succeeded, while permitting requested trace and
     inspection adapters to publish the terminal failure evidence needed to
     diagnose cleanup failure.
+
+Phase 2 may decode and validate inert OAuth authority configuration, including
+references to a confidential-client binding, but it cannot construct
+`MCPOAuth.Context`, call `Store.claim_principal/4` or
+`Store.claim_authorities/4`, load a grant, or invoke a runtime-service factory.
+`validate`, `models`, and default `doctor` therefore need no
+`ProviderRuntimeServices` value and complete without touching an OAuth store,
+even when the host installs OAuth-bearing MCP aliases. Phase 8 activates only
+selected services, after all destinations and audited-local checks pass. Once
+the activity marker is set, `disabled` mode returns the closed
+`authorization_required` failure above without a store or cleanup reservation.
+For `context_groups`, every required provider-application gate must succeed
+before activation admission or any context, store, resolver, listener,
+interaction, URL output, token-manager, or network action. The coordinator then
+atomically reserves the entire
+worst-case cleanup-capacity batch for the selected OAuth occurrences. That
+batch either succeeds in full or fails before any runtime-service callback,
+credential resolver, context/store call, authorization interaction, token
+manager, or network action. Immediately after the marker it seals
+`activation_admission_deadline_ms = monotonic_now_ms +
+provider_cleanup_timeout_ms`; the application gates, Registry reservation, and
+mandatory selected store-identity checks share that one absolute deadline
+without resetting it.
+Application-gate failure or expiry uses non-retryable
+`active_preflight/provider_application_unavailable` and occurs before a
+reservation. Reservation timeout or unavailability uses the closed availability
+diagnostic below. A missing/malformed store-identity callback or an identity
+collision is an invalid runtime specification and uses
+`internal/internal_error`; callback raise/exit is the same caught internal
+error, while callback deadline expiry uses retryable
+`active_preflight/authorization_unavailable`. Every post-reservation failure
+releases the full reservation batch. Explicit Mix authorization, when
+requested, runs as a bounded pre-run subphase only after both the application
+gate and activation admission succeed. Phase 9 may admit or refresh a grant as
+part of selected MCP acquisition; ordinary execution never starts an
+authorization interaction.
+
+For ordinary `run`/REPL session opening, the coordinator starts the effective
+`run_duration_ms` clock and seals `run_deadline_ms` immediately before the
+first ordinary post-authorization phase-8 runtime action. With no explicit
+interaction, that is immediately after activation admission (the capacity
+reservation and store-identity validation). With explicit Mix authorization,
+it is after every requested target has completed;
+interactive browser time is governed by the target's authorization deadline
+and does not consume the ordinary run budget. Define that instant as
+`ordinary_phase_8_start_ms`. Each selected MCP occurrence also receives the two
+distinct values
+`provider_intrinsic_deadline_ms = ordinary_phase_8_start_ms +
+normalized_timeout_ms` and
+`occurrence_deadline_ms = min(run_deadline_ms,
+provider_intrinsic_deadline_ms)`. For a repeated OAuth alias, its intrinsic
+runtime-service deadline is the minimum of its occurrences' provider-intrinsic
+deadlines. Within one selected OAuth context group, the principal claim uses
+the minimum intrinsic runtime-service deadline of that group's selected
+aliases, then combines it with `run_deadline_ms`; different groups claim their
+own principals independently. Authority claims are never batched across
+context groups. After a group's principal succeeds, the coordinator makes one
+atomic authority batch for all selected aliases in that group under the same
+group-minimum deadline. It orders unique authority entries by the UTF-8 bytes
+of their lowest mapped alias; repeated occurrences and identical
+installation-ID/fingerprint entries are claimed once and share the returned
+epoch. Conflicting fingerprints for one installation ID inside a group are an
+invalid runtime specification rejected before the store call. Grant admission,
+refresh, and provider acquisition then use the relevant occurrence deadline
+without resetting it. This deliberately makes the shortest selected OAuth
+occurrence in one group bound all of that group's shared context setup rather
+than allowing setup to consume time hidden from the occurrence. Provider-free
+and non-OAuth runs retain the same run clock but skip these claims.
+
+`ManagerCleanup.Registry.reserve_many/3` takes the active operation owner, one
+slot per selected OAuth occurrence in total acquisition order, and
+`activation_admission_deadline_ms`. The count is bounded by both the installed
+selection limits and the Registry's fixed capacity. Its serialized ledger
+mutation is all-or-nothing: saturation, Registry unavailability, deadline
+expiry, or malformed acknowledgement leaves no partial reservation and returns
+retryable
+`active_preflight/authorization_unavailable`, anchored to the first selected
+OAuth alias with operation `authorization` and `occurrence: null`. The
+Registry checks the supplied absolute deadline before mutating its ledger, so a
+call that expires while queued cannot later create orphan reservations. The
+coordinator releases every unused slot when authorization, preflight, or
+acquisition stops before a token manager is constructed. Acquisition binds any
+constructed manager to that occurrence's exact pre-reserved slot before
+exposing it. It never borrows another occurrence's slot or reserves after a
+store mutation.
+
+Extend the intentionally breaking 0.x `Store.claim_authorities/4` result
+contract without weakening its all-or-nothing mutation: an
+`authority_collision` or `authority_retiring` error also returns the
+zero-based index of the rejected ordered input entry. The store validates the
+whole batch and either commits every compatible/new authority or none. Generic
+timeout, availability, or adapter failure has no entry index because it applies
+to the group operation; an out-of-range/missing index for an entry-specific
+reason is an `internal/internal_error`, not guessed. The safe index is consumed
+inside the coordinator and never enters the envelope.
+
+Each selected group seals a deterministic diagnostic anchor: the selected
+occurrence that supplied its minimum provider-intrinsic deadline, breaking ties
+by alias UTF-8 bytes, `workflow` before `mission`, then manifest index. Group
+claims run in anchor order. A pre-dispatch principal-context/store failure uses
+`active_preflight/authorization_unavailable` and that anchor's alias,
+`authorization` operation, and `occurrence: null`, because the shared operation
+has not entered an occurrence. An indexed `authority_collision` uses the
+rejected entry's lowest mapped alias, `authorization`, and `occurrence: null`,
+with `provider_acquisition/provider_policy_changed`; indexed
+`authority_retiring` uses the same subject with retryable
+`active_preflight/authorization_unavailable`. A generic authority-batch
+availability failure uses the group anchor and the same availability code. If
+the run deadline binds, the ordinary `execution/run_timeout` null-subject rule
+below wins instead. Thus a shared group operation never chooses an arbitrary
+alias, while failures in separate tenant/principal/store groups remain
+independently attributable.
+
+Every ordinary phase-8–10 bounded operation derives an
+`operation_intrinsic_deadline_ms` before it starts and carries that candidate,
+`run_deadline_ms`, and their binding-limit provenance; passing only the minimum
+timestamp is forbidden. For occurrence acquisition and its nested OAuth work,
+the intrinsic candidate is `provider_intrinsic_deadline_ms`, not the already
+minimized `occurrence_deadline_ms`. For an OAuth context-group claim, it is the
+group minimum defined above. For active selection validation, it is the
+validator invocation's monotonic start plus
+`selection_validation_timeout_ms`, including for a custom provider with no MCP
+timeout. Any later operation-specific bound follows the same construction and
+must name its diagnostic before admission. There are two pre-run exceptions
+with no not-yet-created `run_deadline_ms`: activation admission carries
+`activation_admission_deadline_ms` and the installed cleanup-limit provenance;
+the explicit authorization subphase gives each target its own
+`authorization_deadline_ms` and authorization provenance. Their expiry is
+classified by the closed activation/authorization diagnostics, never as
+`execution/run_timeout`.
+
+If `run_deadline_ms <= operation_intrinsic_deadline_ms`, expiry anywhere in
+the ordinary phases 8–10 is non-retryable `execution/run_timeout` with `subject: null`,
+including expiry during selection validation, OAuth context/store work, or
+provider acquisition; the run limit wins an exact tie. Only when the intrinsic
+operation deadline is strictly earlier does the operation-specific mapper
+apply: selection validation uses `selection_validation_timeout`, OAuth
+runtime-service/store expiry before external dispatch uses retryable
+`authorization_unavailable`, and provider acquisition expiry uses
+non-retryable `provider_acquisition/provider_unavailable`, each with its
+documented provider subject. Nested calls inherit both candidates and
+provenance and may narrow but never reset them. Cleanup failure can still
+displace any of these under the compound-failure precedence table. `RunState`
+receives the already sealed `run_deadline_ms` and provenance and never starts a
+replacement `run_duration_ms` clock after phase-8 setup.
 
 Phase 6 evaluates all pure destination checks without creating an artifact,
 then chooses at most one diagnostic in this fixed order: trace, inspection,
@@ -749,11 +1144,12 @@ the table and the recovery cleanup failure is retained in `secondary_errors`.
 Reservation creation happens in phase 6 before compound work and therefore
 emits `recovery_reservation_failed` as the sole primary diagnostic.
 
-`RunCoordinator.prepare/2` accepts only a sealed request and trusted
-installation and returns a sealed prepared run containing classification,
+`RunCoordinator.prepare/2` accepts only a sealed request and inert trusted
+`InstallationCatalog` and returns a sealed prepared run containing classification,
 digests, normalized selections, execution policy, and an activity marker still
 set to false.
-`open_session/1` consumes that prepared run exactly once, owns provider
+`open_session/2` consumes that prepared run exactly once with one sealed
+`ProviderRuntimeServices` value, owns provider
 activity and phases 7–9, and returns a non-forgeable `ExecutionSession`
 containing the live event/optional inspection owners, acquired owner-backed
 resource graph, and complete Kernel configuration. It starts the sinks before
@@ -762,17 +1158,18 @@ lifecycle; any failed open closes the sinks and resource graph under the same
 bounded owner. Its owner must either pass it to one-shot execution or transfer
 it once to the REPL session owner; owner death or explicit close runs the same
 bounded cleanup and sink finalization.
-`execute/1` is the one-shot operation: it opens a prepared run through
-`open_session/1`, runs phases 10–11, and returns a `RunOutcome` after cleanup.
+`execute/2` is the one-shot operation: it opens a prepared run with the supplied
+runtime services through `open_session/2`, runs phases 10–11, and returns a
+`RunOutcome` after cleanup.
 An internal `execute_session/1` consumes an already-open session exactly once
 for this composition; it is not a second acquisition path.
 
 Neither operation knows argv, paths, destinations, or publication callbacks.
 `CommandEngine` never reproduces compilation, selection, acquisition,
 execution, or cleanup semantics. A cloud host calls the same `prepare/2` and
-`execute/1`, with a memory application adapter and no file destinations.
+`execute/2`, with a memory application adapter and no file destinations.
 `validate` calls `prepare/2` only. The manifest-backed Mix REPL calls
-`prepare/2` and `open_session/1`, transfers the returned handle to
+`prepare/2` and `open_session/2`, transfers the returned handle to
 `ReplSessionOwner`, and evaluates its streaming/script modes without first
 running a workflow. Its manifest mode accepts `--host-config HOST.json`,
 resolves it into the same trusted installation used by `mix ptc.run`, and
@@ -804,7 +1201,7 @@ than in a destination adapter. They contain no file path, object-store key, or
 publication callback. `CommandEngine` generates its `run_ref` before parsing so
 even argument failures can use it, then uses that value for event identities
 when `--trace-dir` is selected. An embedding host may supply bounded explicit
-identities and capture/projection policy. `open_session/1` starts event and
+identities and capture/projection policy. `open_session/2` starts event and
 optional inspection owners from this sealed policy before recording any
 session or execution evidence; phase 12 only persists the already-classified
 outcome.
@@ -896,8 +1293,11 @@ death, the resource owner rolls back every provisional root under the same
 cleanup bound. Success commits the lease with its final idempotent closer,
 dependency edges, and capabilities/exports; only a committed lease can return
 capabilities to the coordinator. The final closer may perform graceful
-protocol shutdown, but the owner always retains authority to force-terminate
-the registered roots. Migrate the shipped LLM/replay builders, MCP transports,
+protocol shutdown. The owner retains authority to force-terminate ordinary
+registered roots; the only exception is an OAuth token manager with an
+unsettled response-persistence fence, whose safe terminal operation is
+ownership transfer rather than termination as defined below. Migrate the
+shipped LLM/replay builders, MCP transports,
 trace/inspection snapshots, and the custom builder API to this lease contract.
 Legacy custom callbacks that cannot satisfy it are unsupported and removed in
 this intentional 0.x break. Custom builders are trusted same-VM host code: the
@@ -906,6 +1306,121 @@ but it cannot prevent arbitrary Elixir code from spawning an unlinked process,
 transferring a port, or hiding a resource in a closure. Registration is
 therefore an explicit trusted-callback obligation, not a sandbox guarantee.
 Hosted untrusted extensions require a later process/isolation boundary.
+
+OAuth response persistence adds one closed transferable resource kind. Split
+the command-core cleanup facility into a bounded `ManagerCleanup.Registry` and
+its restartable worker supervisor. The registry is a sibling outside the worker
+supervisor's restart domain. A namespaced, non-secret `:persistent_term` lease
+ledger is authoritative for the VM-local capacity count across Registry
+restarts; records contain only a random lease ID, transfer generation, the
+operation-owner/manager pid where present, state, and safe timestamps—never a
+store key, authority, tenant/principal, token, or provider selector.
+
+Immediately after the phase-8 activity marker, the coordinator seals
+`activation_admission_deadline_ms` and runs every required
+provider-application gate under it. Only after those gates succeed,
+`context_groups` activation calls serialized
+`ManagerCleanup.Registry.reserve_many/3` once for the complete ordered
+occurrence count and the same caller-owned deadline. It atomically writes every
+owner-monitored `reserved` record or none, before context construction, store or
+resolver work, interaction, token-manager creation, or network activity. It
+rechecks the absolute deadline before mutation, including after mailbox backlog.
+Reservation failure maps to retryable
+`active_preflight/authorization_unavailable`; the implementation may not
+perform provider work and hope that `adopt/1` later succeeds. Registry restart
+reconstructs and re-monitors live operation owners; a dead owner with an
+unbound reservation releases it, while a record already bound to a manager
+follows the manager rules below.
+
+Each OAuth acquisition receives its exact pre-reserved slot. If it constructs a
+token manager, the Registry atomically binds that manager and its transfer
+generation to the slot and the pending `AcquisitionLease` before either is
+exposed. If no manager is needed, or if authorization/preflight/acquisition
+stops first, the resource owner releases the unused slot during the same
+bounded rollback. The Registry never allocates a replacement slot after a store
+mutation and never reassigns one occurrence's slot to another.
+
+A clean manager does not exit first and rely on a transient `DOWN` reason.
+After its persistence fence is settled during per-run cleanup, it calls
+idempotent `ManagerCleanup.Registry.mark_clean/4` with lease ID, transfer
+generation, manager pid, and the remaining per-run cleanup deadline. The
+Registry atomically writes
+`clean_pending_exit` to the persistent ledger and acknowledges that exact
+generation; only after receiving the acknowledgement may the manager exit. The
+Registry retains the clean record until it observes that manager dead, then
+erases it. If the Registry crashes after the write but before acknowledgement,
+the live manager retries and receives the same acknowledgement. If the manager
+received it and exits while the Registry is down, restart sees
+`clean_pending_exit` plus a dead matching pid and erases the slot. A crash after
+`DOWN` but before erase is handled identically. If the clean acknowledgement
+cannot complete within the per-run cleanup deadline, the still-live manager
+transfers/remains in autonomous cleanup and the command reports cleanup failure;
+it never exits into an unprovable state.
+
+An autonomous manager never reuses the expired per-run deadline. Once a later
+persistence attempt settles its fence, it seals a fresh manager-owned
+`cleanup_ack_attempt_deadline_ms = monotonic_now_ms +
+provider_cleanup_timeout_ms`, using the installed value captured when the
+manager was created, and calls the same idempotent `mark_clean/4`. If the
+Registry call times out or is unavailable, the manager remains live and retries
+with capped backoff; every retry gets one fresh bounded acknowledgement-attempt
+deadline. It exits only after the exact generation is acknowledged. This
+manager-owned retry clock can outlive the command but cannot make that command's
+failed cleanup successful retroactively.
+
+Change `TokenManager.close/1` at this integration boundary to accept the
+resource owner's remaining monotonic deadline; its current fixed 6,000 ms call
+cannot run beneath the installed 5,000 ms default. If response persistence is
+still unsettled when the per-run attempt fails or its allotted deadline
+expires, call a new atomic `TokenManager.transfer_to_cleanup/3` handshake. It
+first records the manager against the pre-reserved registry lease, then changes
+the manager from per-run ownership to an autonomous `deferred_cleanup` state,
+cancels the old owner monitor, schedules its own individually bounded
+persistence retries with capped backoff, and acknowledges only after both sides
+observe the same transfer generation. The manager itself is the sole retry
+owner; a cleanup worker may observe or nudge it but never links to it or owns its
+survival. The registry monitors the manager and releases capacity only when that
+generation completes the `clean_pending_exit` handshake and is observed dead.
+
+A committed transfer removes the manager root from the per-run graph and leaves
+the runtime-shared fence closed. Killing or restarting the cleanup worker
+supervisor cannot kill the manager or interrupt its self-retry; the surviving
+registry reattaches observation after restart. On Registry start, admission
+remains closed while it reconstructs reservations and monitors from the entire
+namespaced ledger. A live autonomous manager continues self-retry and
+re-registers its generation. A dead matching manager in
+`clean_pending_exit` is the sole recoverable exit state and releases its slot; a
+dead manager whose ledger record did not reach that state becomes a `poisoned`
+reservation that still consumes capacity and is never automatically erased or
+reused. An abnormal autonomous-manager exit therefore fails closed rather than
+creating a replacement with lost secret state. A Registry crash loses no
+capacity state, and calls while it is absent fail as
+`authorization_unavailable` before manager/store/network work.
+
+The bounded internal ledger record is removed only after a
+generation-acknowledged `clean_pending_exit` manager is observed dead, an
+unbound owner dies, or the whole VM terminates. Loss of the command-core root
+application/VM remains outside
+the live-VM cleanup guarantee; a host may replace that VM but cannot restart the
+application in place while discarding poisoned records. Transfer does not turn
+cleanup into success: the command reports
+`result_cleanup/provider_cleanup_failed` (or `provider_cleanup_timeout` when
+expiry was primary), withholds the result, and may publish authorized terminal
+evidence. `cleanup_unavailable` is an internal transfer failure, never a new
+public code and never `mcp_transport_error`; the pre-reservation and
+generation-acknowledgement protocol must make it unreachable after manager
+creation. An invariant breach maps to the existing cleanup failure while the
+pre-transfer owner remains authoritative; it never kills or orphans the
+unsettled manager.
+
+`ManagerCleanup.Registry` remains bounded to its configured capacity.
+Saturation applies backpressure through reservation and cannot silently kill a
+manager, discard a retry owner, or admit more OAuth work. Poisoned slots may
+reduce availability, but never relax fencing or the capacity bound. No
+standalone V1 command creates an OAuth manager, so its short-lived VM does not
+claim deferred durable convergence. Mix and long-lived host-owned modes keep
+the command-core registry and supervisor alive independently of provider
+applications.
 
 Any closer failure classifies the run as `provider_cleanup_failed`; expiry of a
 layer slice with unfinished work classifies it as
@@ -928,7 +1443,9 @@ an uncommitted acquisition.
 
 `Kernel.run`, `RunBuilder` rollback, `Runner`, and `ReplSessionOwner` all call
 or transfer ownership to this same resource owner; none retains a private
-cleanup loop. Direct embedding constructors that
+cleanup loop. The one post-run retry loop lives in each transferred manager's
+autonomous state and is bounded by the central command-core registry above.
+Direct embedding constructors that
 need provider resources must create/register through this API. Delete the
 current public `ProviderRegistry.build/4` convenience contract that returns a
 raw `close/0`. Its replacement requires a caller-owned `ProviderResources`
@@ -947,6 +1464,8 @@ changes from false to true immediately before:
 
 - an unverified host callback;
 - any active provider preflight;
+- activation of execution-scoped provider runtime services, including any
+  OAuth context construction or store claim;
 - any credential resolution;
 - optional provider application startup; or
 - provider acquisition/discovery.
@@ -958,9 +1477,14 @@ A whole-VM crash may have no envelope.
 
 Replace callback-derived preparation metadata with a sealed
 `ProviderDescriptor` registered alongside each builder. It declares bounded
-credential names, data policy, service dependencies, destination eligibility,
+ordinary static credential names, a closed `authorization_mode` of `none` or
+`oauth`, data policy, service dependencies, destination eligibility,
 workflow-LLM identity, a closed connectivity mode, a closed selection-validation
-mode, and a data-only `SelectionRules` value. The selection-validation mode is
+mode, and a data-only `SelectionRules` value. OAuth descriptors also carry the
+already validated inert `Authority` and its private behavior fingerprint, but
+not an `MCPOAuth.Context`, store claim, grant, token manager, or principal. The
+fingerprint remains an internal grant-fencing key and is never a public or
+effective-application fingerprint. The selection-validation mode is
 exactly `declarative` or `active`: `declarative` means the generic IR completely
 validates the selection in phase 5, while `active` means phase 5 can only
 normalize the generic portion and the registered implementation must supply a
@@ -975,6 +1499,16 @@ connectivity modes. Phase 5 consumes only the descriptor and never looks up or
 invokes the implementation. Shipped host decoding constructs it from the
 validated host document; custom embeddings must provide one and cannot defer
 those facts to a callback.
+
+Ordinary credential resolution remains a once-resolved phase-8 barrier for
+static MCP authentication, stdio environment bindings, and live LLM keys. OAuth
+is not forced into that map. Its bearer grant is store-owned, and a confidential
+client secret is resolved only when code exchange or refresh actually needs it,
+through the runtime specification's bounded just-in-time resolver. A descriptor
+with `authorization_mode: oauth` therefore may have no ordinary credential
+names while still producing the separate doctor authorization check. The
+dispatcher owns the mapping from OAuth/store reasons to the closed diagnostics;
+provider callbacks cannot supply public retryability.
 
 Provider registration rejects an extraneous probe or `probe_effect` for `none`
 or `acquisition`, rejects a missing effect for `probe`, and rejects an
@@ -1020,8 +1554,10 @@ selected occurrences: installed-alias UTF-8 byte order, then `workflow` before
 list. Thus an alias selected once in each environment is validated twice with
 its distinct normalized selection and sealed destination context. Each
 validator runs in a monitored worker bounded by
-`selection_validation_timeout_ms`. The callback receives only the normalized
-selection and sealed post-selection context and has exactly two admitted
+`selection_validation_timeout_ms`. During `doctor --connect`, the occurrence
+deadline may narrow that worker further as defined below without changing its
+selection-specific failure projection. The callback receives only the
+normalized selection and sealed post-selection context and has exactly two admitted
 returns: `:ok` or `{:error, :selection_rejected}`. Rejection maps to
 non-retryable `active_preflight/selection_rejected`; raise, exit, or any other
 return maps to non-retryable
@@ -1032,6 +1568,16 @@ failing occurrence locator, expose no callback reason, and stop before
 credentials or later provider work. Because the callback is trusted same-VM
 custom code and may already have caused an external effect, none of these
 outcomes is retryable.
+
+The explicit Mix authorization subphase is the sole ordering exception. After
+the activity marker, every required provider-application gate succeeds first;
+activation admission then reserves cleanup capacity and validates selected
+store identities; only then does the coordinator complete every requested
+authorization target before these ordinary phase-8 validators run.
+Authorization targets therefore cannot observe credentials or provider work
+from ordinary preflight, and an application-gate, admission, or authorization
+failure stops before any validator. A noninteractive run follows the ordinary
+ordering directly.
 
 No function, module name, MFA, captured term, regex, or caller-owned schema
 enters `SelectionRules` or the prepared run. Decoder and constructor tests
@@ -1196,8 +1742,11 @@ manifest and component reads.
 
 The seal is an in-VM construction invariant like `FrozenBundle`, not a hostile
 same-VM security boundary. A trusted embedding can read process memory and
-process-global attestation keys; cloud tenant isolation belongs outside this
-BEAM instance unless a later service design establishes a stronger boundary.
+process-global attestation keys. The OAuth store already keeps trusted
+tenant/principal namespaces distinct, and this plan preserves those
+execution-scoped partition keys, but inbound authentication and adversarial
+cloud tenant isolation belong outside this BEAM instance unless a later service
+design establishes a stronger boundary.
 
 ### Keep input out of application identity
 
@@ -1355,6 +1904,7 @@ longer uses Erlang external-term encoding.
     "workflow": [
       {
         "accepts_data": ["normal"],
+        "authorization_mode": "none",
         "config": {},
         "data_class": "normal",
         "installation_revision": "<portable lowercase revision>",
@@ -1389,8 +1939,11 @@ arrays contain the final local and shipped closure, sorted by UTF-8
 component-ID bytes; their dependency arrays are sorted unique direct IDs.
 Provider arrays retain manifest order. Every entry contains the installed safe
 alias, closed descriptor source, required installation revision, declared data
-class, accepted data classes, and phase-5 normalized selection config—not the
-original spelling or raw installation configuration. `accepts_data` is sorted
+class, accepted data classes, closed `authorization_mode`, and phase-5
+normalized selection config—not the original spelling or raw installation
+configuration. `authorization_mode` is exactly `none` or `oauth`; it exposes no
+issuer, resource, client, scope, redirect, tenant, principal, store, credential
+binding, or authority fingerprint. `accepts_data` is sorted
 in the closed data-class order, and every set-like array inside a normalized
 config is sorted by that normalizer. The source is one of the shipped source
 identifiers above or `custom` for a directly registered generic descriptor.
@@ -1483,6 +2036,61 @@ Deliver:
 5. `ptc models --host-config HOST.json`
 6. `ptc init DIRECTORY`
 
+Standalone V1 deliberately has no OAuth authorization command or interaction
+flag. The runtime ships no durable OAuth store, and a separate authorization
+process backed only by the current in-memory adapter could not make its grant
+available to a later `ptc run`. An OAuth-bearing host remains valid input to
+standalone `validate`, `models`, and default `doctor`, which inspect only inert
+declarations without store activity. A standalone `run` or `doctor --connect`
+that selects OAuth reaches the marked phase-8 boundary and returns
+`active_preflight/authorization_required` without constructing a token manager
+or opening an interaction. The retained
+[`mcp-oauth-durable-store.md`](../future/mcp-oauth-durable-store.md) trigger owns
+any later standalone authorization command and its private interaction
+protocol.
+
+`mix ptc.run --authorize-mcp NAME` remains an explicitly Mix-only, repeatable
+interactive adapter outside the standalone argv/envelope contract. The parser
+preserves argv order, rejects a duplicate name, and rejects any target that is
+missing, non-OAuth, not CLI-compatible, or absent from the manifest's normalized
+workflow/mission selections. Authorization targets therefore form an explicit
+subset of selected OAuth aliases; an unselected installation is never claimed
+as a side effect of the option. Multiple valid targets authorize sequentially
+in argv order, while the later ordinary runtime claims every selected OAuth
+alias once in the provider graph's deterministic total order.
+
+The adapter may print each one-time URL through the Mix shell, but the shared
+coordinator still owns ordering: parse and static validation, destination
+preflight, and audited-local checks complete first; provider activity is
+atomically marked; every required provider-application gate succeeds; cleanup
+capacity for every selected OAuth occurrence is then reserved in one batch and
+selected store identities are validated; only after those steps does the Mix
+runtime service construct the principal context and perform the requested
+authorizations before ordinary active preflight, provider acquisition, or
+Kernel execution. Application-gate failure therefore occurs before a cleanup
+reservation, context/store call, listener, interaction, or URL output.
+Immediately before each target's first
+context/store/listener action, the coordinator seals a fresh
+`authorization_deadline_ms = monotonic_now_ms +
+authority.authorization_timeout_ms`. That one absolute deadline covers the
+target's context and claims, listener, discovery, interaction, and token commit;
+sequential targets never inherit or reset one another's clock.
+
+After every requested authorization succeeds, the authorization-only contexts
+are discarded, the ordinary run clock starts, and the selected context groups
+are constructed/claimed under the ordinary deadlines as for a noninteractive
+run. The persisted grant may make those idempotent claims cheap, but interaction
+does not satisfy, extend, or predate the ordinary run deadline. An authorization
+failure releases all unused reservations and sinks under the bounded owner and
+returns the applicable `authorization_required`,
+`authorization_rejected`, or `authorization_unavailable` diagnostic; it cannot
+become `run_timeout` merely because the browser interaction exceeded
+`run_duration_ms`.
+Without an explicit flag, normal Mix and embedded runs never open an
+interaction. A host-owned embedding may supply a previously populated durable
+store or perform explicit authorization through its own trusted interaction
+implementation; both use the same lazy `ProviderRuntimeServices` seam.
+
 All three help forms normalize to `command: "help"` and return the closed help
 result inside the ordinary one-envelope stdout contract. Root help lists the
 five operational commands in the order above. Command help uses the
@@ -1504,8 +2112,8 @@ It does not look up environment/file credential sources or use a decoded inline
 literal after validating the host document. Because the current format stores
 literal credentials inline, bounded host-document decoding necessarily reads
 their bytes. Checks that require provider application startup, an unverified
-callback, a process, discovery, or network access are reported as skipped by
-default. `doctor --connect` enters the active boundary and flips
+callback, an OAuth store/context, a process, discovery, or network access are
+reported as skipped by default. `doctor --connect` enters the active boundary and flips
 `provider_activity` before any such check or credential resolution.
 `--connect` requires the application argument: connectivity and MCP discovery
 must use the exact selected providers, placement, narrowed ceilings, and
@@ -1518,7 +2126,7 @@ The default-doctor applicability matrix is exact:
 | --- | --- | --- |
 | neither host nor application | `skipped/not_requested` | none |
 | application only | `pass/valid`; the application must select no providers or fail with `provider_declaration/provider_unknown` | none |
-| host only | `skipped/not_requested` | every installed alias; local is `skipped/application_required`, selection is omitted, and declared credential/connectivity checks are `skipped/requires_connect` |
+| host only | `skipped/not_requested` | every installed alias; local is `skipped/application_required`, selection is omitted, and declared credential/authorization/connectivity checks are `skipped/requires_connect` |
 | host and application | `pass/valid` | selected aliases only, using their final occurrence contexts; unselected installations are declaration-validated but omitted |
 
 All four rows still emit `runtime` and `viewer`. Host decoding and declaration
@@ -1548,27 +2156,106 @@ selection as `skipped/active_check_required`. `doctor --connect` reports the
 selection check as `pass/declarative` or, after every active occurrence passes,
 `pass/available`.
 
+After the activity marker, `doctor --connect` runs every required
+provider-application gate under `activation_admission_deadline_ms`. For selected
+OAuth descriptors, it then performs the one all-or-none cleanup-capacity
+reservation and mandatory store-identity validation under the remainder of that
+same deadline, before any occurrence connectivity clock or store mutation.
+Batch failure uses the first selected OAuth alias with a null occurrence as
+specified above; it is not charged independently to every occurrence.
+
+After all application gates and any OAuth activation admission succeed, seal
+one `doctor_phase_8_start_ms`. Every selected occurrence whose connectivity mode
+is `acquisition` or `probe` receives
+`doctor_operation_deadline_ms = doctor_phase_8_start_ms +
+doctor_connectivity_timeout_ms`. If its sealed normalized selection has a
+provider timeout, it also receives `doctor_provider_deadline_ms =
+doctor_phase_8_start_ms + normalized_timeout_ms` and
+`doctor_occurrence_deadline_ms` is the minimum of those values; otherwise its
+occurrence deadline is the operation deadline. This formula applies unchanged
+to static MCP and custom acquisition/probe occurrences.
+
+The coordinator preserves two barriers. First it runs every active selection
+validator in the documented occurrence order before resolving any credential.
+For an occurrence with a doctor deadline, its validator runs under
+`min(doctor_occurrence_deadline_ms, validator_start_ms +
+selection_validation_timeout_ms)`; an occurrence without a connectivity
+operation retains the selection-validation deadline alone. If the doctor
+occurrence deadline binds, including an exact tie, the dispatcher terminates
+the validator's owned worker tree and returns non-retryable
+`active_preflight/selection_validation_timeout` with its selection occurrence;
+the callback's possible external effect forbids the generic retryable
+connectivity mapping.
+
+Only after every validator succeeds, the coordinator groups ordinary credential
+requirements by alias and resolves each alias exactly once in alias byte order.
+For an alias with one or more doctor connectivity occurrences, seal
+`doctor_alias_credential_deadline_ms` as the minimum of their already-running
+occurrence deadlines; repeated workflow/mission occurrences share the one
+resolved value. If an alias declares ordinary credentials but every occurrence
+has `connectivity_mode: none`, seal its credential deadline instead as
+`doctor_phase_8_start_ms + doctor_connectivity_timeout_ms`; omitting a
+connectivity check does not leave credential resolution unbounded. This is the
+same already-running doctor-phase clock, not a fresh timeout taken when the
+resolver starts. Credential resolution cannot reset either form of clock. If
+that alias deadline binds, the dispatcher terminates the resolver worker and
+returns non-retryable `active_preflight/credential_unavailable` with the
+documented alias-wide credentials subject and `occurrence: null`. The same
+operation-specific projection applies to resolver rejection, raise, or exit. A
+later validator failure therefore performs zero credential reads.
+
+Only after both barriers succeed does the coordinator apply the same
+context-group algorithm as an ordinary run to the OAuth subset: one
+principal claim and one ordered atomic authority batch per group, under the
+minimum doctor occurrence deadline in that group; unique authorities and
+repeated occurrences are claimed once; groups and their deterministic anchors
+use the same ordering, indexed-failure attribution, and null-occurrence
+shared-failure subjects defined above. Claims never cross a group.
+
+After a group's claims succeed, each occurrence's grant
+load/refresh/admission, acquisition-backed discovery, and provisional cleanup
+continue under that occurrence's already-running deadline without resetting it.
+Thus shared setup consumes every member's budget, while a repeated/shared alias
+does not create extra principal or authority mutations. A usable grant allows
+the authorization check to pass only after the bearer admission needed for
+discovery succeeds. Missing or expired-without-refresh grants return
+`authorization_required`; other raw outcomes use the exhaustive provenance
+table above. A dynamic OAuth `401` or valid satisfiable `403
+insufficient_scope` received after an actual provider request also returns
+`authorization_required` only after its runtime-shared fence is installed.
+Ordinary/malformed `403` and static-auth rejection retain the existing closed
+authentication/scope/protocol mappings. Doctor never reports authorization
+`available` merely because an OAuth block or credential binding parsed.
+
 Every occurrence-level connectivity operation, including acquisition-backed
-MCP discovery, runs in a monitored worker under one
-`doctor_connectivity_timeout_ms` monotonic deadline. For `acquisition`, the
-deadline covers dependency dispatch, process/session startup, discovery,
-bounded response consumption, and provisional-resource registration. On
-expiry the dispatcher terminates the owned worker tree, then rolls back every
-registered provisional resource under the separate cleanup deadline, and reports
-retryable `active_preflight/connectivity_unavailable` with that occurrence's
-`connectivity` subject. An `acquisition` connectivity descriptor promises that
-this doctor operation performs observation/discovery only and has no
-application-domain effect; shipped MCP satisfies that rule, and a custom
-implementation is a trusted obligation. Cleanup failure can still replace the
-timeout as primary under the documented precedence while retaining the timeout
-in `secondary_errors`.
+MCP discovery, runs in a monitored worker under that one absolute deadline. For
+`acquisition`, the occurrence deadline begins after the separately bounded
+application/activation-admission work and covers active selection validation,
+credentials, OAuth context/group claims and grant admission, dependency
+dispatch, process/session startup, discovery, bounded response consumption, and
+provisional-resource registration. On expiry the dispatcher terminates the
+ordinary owned worker tree and rolls back every registered provisional resource
+under the separate cleanup deadline.
+
+Only an observational discovery timeout with settled authorization state maps
+to retryable `active_preflight/connectivity_unavailable` with that occurrence's
+connectivity subject. If a refresh/code mutation may have been dispatched, or a
+response-driven fence is awaiting persistence, the owner first preserves or
+transfers the manager and projects the applicable non-retryable
+`authorization_required` or `connectivity_outcome_unknown` row from the
+provenance table; the generic timeout mapper may not overwrite it. An
+`acquisition` connectivity descriptor promises that this doctor operation has
+no application-domain effect beyond the separately classified OAuth lifecycle
+work; shipped MCP satisfies that rule, and a custom implementation is a trusted
+obligation. Cleanup failure can still replace the timeout as primary under the
+documented precedence while retaining the timeout in `secondary_errors`.
 
 Every selected shipped live-LLM descriptor supplies a code-owned bounded
 `connectivity_probe` operation in addition to acquisition. After the activity
 marker, provider-application gate, active selection validation, and explicit
 credential resolution, `doctor --connect` invokes that operation with only the
-normalized selection, resolved credential value, and the installed
-`doctor_connectivity_timeout_ms`. One monotonic deadline covers application
+normalized selection, resolved credential value, and its sealed
+`doctor_occurrence_deadline_ms`. That one monotonic deadline covers application
 dispatch, connection, request, bounded response consumption, and worker
 termination; the dispatcher kills the monitored worker tree at expiry.
 
@@ -1582,20 +2269,37 @@ explicitly documented minimal completion capped to one output token and declare
 `probe_effect: completion`. The latter may incur one provider request/cost,
 which the command help and retained guide must state.
 
-The shipped HTTP path uses one code-owned passive HTTP/1 client for its single
-attempt; it does not use a Req/Finch/Mint executor or pool. Its backend must
-implement `recv_up_to(max_bytes, deadline)`: return promptly after at least one
-byte is available, never return more than the positive maximum, and preserve
-the single monotonic deadline. Plain TCP uses OTP `:socket.recv/4` in
-nowait/select mode. The packaged TLS backend must prove the same semantics plus
-peer/hostname verification, SNI, the packaged in-memory CA trust source, and
-ALPN restricted to `http/1.1`. If OTP `:ssl` cannot prove the bound, use a small
-code-owned length-framed port helper whose frames are capped before entering
-BEAM; its stderr, lifecycle, and cleanup follow the provider-resource contract.
-Host-owned/cloud embedding may inject an equivalent in-memory backend. If no
-packaged backend passes the conformance spike, the shipped route is unsupported;
-do not fall back to `recv(..., 0)`, exact positive-length reads, or an unbounded
-library executor.
+Keep the existing code-owned `MCPHTTPAdapter` as the one shared request facade.
+It already avoids Req/Finch, pooling, redirects, retries, and automatic
+decompression; the probe adds only its closed serializer, header policy,
+response callbacks, and outcome mapping. Pin Mint logging off explicitly rather
+than relying on its default, and prove no request/response material reaches a
+Logger or Telemetry handler.
+
+The current adapter's active Mint receive path is not the final supported
+backend. `active: :once` can deliver an OS/environment-sized socket message
+before the adapter callback, and a finite fixture cannot establish an
+authoritative adversarial bound. Commit 7 therefore installs one capped passive
+receive boundary behind `MCPHTTPAdapter`, not a parallel public HTTP stack.
+`recv_up_to(max_bytes, deadline)` must return promptly after at least one byte is
+available, never return more than the positive maximum, and preserve one
+absolute deadline. Plain TCP may use OTP `:socket.recv/4` in nowait/select mode.
+If OTP `:ssl` cannot prove the equivalent TLS bound, use a small length-framed
+port helper whose frames are capped before entering BEAM and whose
+stderr/lifecycle follow `ProviderResources`. Mint may remain the pinned
+HTTP/1.1 parser only if it consumes exclusively those already-capped chunks and
+cannot perform its own active or zero-length receive; otherwise replace that
+internal parser within the same adapter. Do not ship both backends for one
+target or fall back to an unbounded library executor.
+
+The dependency-version-bound conformance suite then proves the selected
+backend's one monotonic deadline, prompt partial delivery, authoritative
+transport-chunk bound, cumulative status/header/body bounds, peer/hostname
+verification, SNI, ALPN restricted to HTTP/1.1, pinned in-memory CA trust, and
+compression rejection before decoding. Retained and decoded response data may
+never exceed the configured payload cap plus one. These are implementation
+tests tied to the pinned Mint/OTP/TLS versions, not measurements used to infer a
+hard bound.
 
 Before connect or send, the code-owned serializer admits only its closed
 `GET`/`POST` methods and applies distinct byte grammars to the other request
@@ -1623,22 +2327,20 @@ HTTP transfer coding; only absent transfer coding or ordinary `chunked` framing
 is admitted. The transport must expose and validate those headers before
 applying a content or transfer decompressor.
 
-The strict incremental parser consumes only `recv_up_to` chunks. Status, header,
-informational-response, chunk-size, and trailer lines each have a line-size
-ceiling; separate aggregate head/trailer byte,
-field-count, and informational-response-count ceilings reject an unterminated
-line or repeated `1xx` sequence before unbounded accumulation. After validating
-the final headers, admit only a valid `Content-Length` or ordinary chunked body;
-close-delimited bodies fail closed. For either framing, request at most the
-lesser of the unread framed payload, fixed quantum, and remaining payload budget
-plus one. The backend may return less and the parser carries bounded partial
-framing state, so a large announced chunk delivered through many small SSE
-writes produces prompt deltas. Count identity payload pieces before retaining
-or decoding them and close on overflow. Thus at most cap-plus-one decoded
-payload bytes enter code, and a small content- or transfer-compressed body can
-never expand inside the command. The probe retains no response body, emits no
-selector or credential metadata, and returns only one closed normalized
-outcome. Map HTTP/protocol outcomes as follows:
+The pinned Mint parser plus adapter callbacks must enforce line/aggregate
+status, header, trailer, field-count, informational-response-count, and body
+ceilings before unbounded retention. After validating final headers, admit only
+a valid `Content-Length` or ordinary chunked body; close-delimited bodies fail
+closed. Reject an oversized declared length before body retention, count
+identity payload pieces before retaining or decoding them, and close on
+overflow. A large announced chunk delivered through many small SSE writes must
+still produce prompt callbacks. Thus at most cap-plus-one payload bytes are
+retained or decoded, a compressed body never expands inside the command, and
+the configured capped-receive transport-ingress bound also holds.
+The live-LLM connectivity probe retains no response body, emits no selector or
+credential metadata, and returns only one closed normalized outcome. Its
+HTTP/protocol outcomes, distinct from the OAuth MCP response transitions above,
+map as follows:
 
 - `401`/`403` or the provider's equivalent authenticated rejection becomes
   `active_preflight/authentication_rejected` (non-retryable);
@@ -1685,8 +2387,11 @@ non-retryable
 
 `doctor --connect` creates the same owner-backed `ProviderResources` handle and
 pending acquisition leases used by `run`. Every successful, failed, or raised
-check closes or rolls back its registered sessions, ports, and process roots
-under the installed global cleanup deadline before the command returns. A
+check closes or rolls back its registered ordinary sessions, ports, and process
+roots under the installed global cleanup deadline before the command returns.
+An OAuth token manager with unsettled response persistence may instead complete
+the pre-reserved ownership transfer above; the command still returns a cleanup
+failure while the host-owned supervisor retains the one live retry owner. A
 single-provider close failure reports
 `result_cleanup/provider_cleanup_failed` (or
 `provider_cleanup_timeout`) with that provider's `cleanup` subject; failures
@@ -1695,8 +2400,9 @@ its acquisition lease is committed, and cleanup failure replaces doctor
 success. Host-owned OTP applications are not part of this per-command cleanup.
 
 `models` lists safe installed aliases and metadata without resolving
-credentials, starting providers, or emitting/fingerprinting raw model
-selectors. The transport-neutral command core accepts one already validated
+credentials, constructing an OAuth context, claiming/loading a store, starting
+providers, or emitting/fingerprinting raw model selectors. The
+transport-neutral command core accepts one already validated
 `InstallationCatalog`; the standalone adapter constructs it only from
 `--host-config`, while a trusted embedding may inject registered custom
 descriptors/builders and call the same command core without a filesystem.
@@ -1926,9 +2632,14 @@ before provider activity.
 ### Commit 4. Provider declarations and effective identity
 
 - add sealed declarative `ProviderDescriptor` metadata, including the closed
-  selection-validation mode, connectivity mode, probe-effect class, safe
-  installation revision, and implementation-consistency checks, so phase 5
-  never invokes a builder or callback;
+  authorization mode, selection-validation mode, connectivity mode,
+  probe-effect class, safe installation revision, and
+  implementation-consistency checks, so phase 5 never invokes a builder,
+  callback, OAuth context, or store;
+- replace eager `HostInstallation.registry/1,2` assembly with the inert
+  `InstallationCatalog`; retain validated OAuth authority/fingerprint data as
+  private descriptor authority while removing principal/context/store claims
+  from catalog construction;
 - normalize every provider selection, derive the aggregate data class,
   effective flow, and effective event policy, then compute the exact effective
   application projection/digest—including input authority, that policy,
@@ -1937,7 +2648,8 @@ before provider activity.
   `ptc_semantic_revision`—before constructing the post-selection provider
   context;
 - build public snapshots and effective provider projections only from the safe
-  declaration fields plus the separately hashed runtime-captured
+  declaration fields—including only the safe `authorization_mode`—plus the
+  separately hashed runtime-captured
   acquisition/content projection;
 - complete successful provider-free validation routing through the shared
   engine now that every required content/effective digest exists; successful
@@ -1952,17 +2664,50 @@ source/revision/data policy or normalized selection, `mission.data`, limits,
 contracts, dependency edges, effective event privacy, inspection-capture
 selection, result projection, or semantic revision changes it. Changing an
 unselected installed provider does not change it. Exact boundary tests cover
-all five shipped provider variants, custom descriptors, normalized selections,
-and safe installation-revision projection. Same candidate/effective source
+  all five shipped source variants, both static-auth and OAuth MCP descriptors,
+  custom descriptors, normalized selections, and safe installation-revision
+  projection. Switching the selected authorization mode changes effective
+  identity, while issuer/resource/client/scope/redirect/tenant/principal/store
+  and the private authority fingerprint never appear publicly. Same
+  candidate/effective source
 with a different verified override base changes the content digest but not the
 effective digest. Internal-engine and direct-embedding validation success
 fixtures return the exact schema-valid digest result without provider activity.
 
-### Commit 5. Local/application provider preflight
+### Commit 5. Local/application and runtime-service preflight
 
 - split provider preflight into deterministic per-occurrence audited-local
   checks and the active application/credential boundary used by the shared
   doctor and run engine operations;
+- add sealed lazy `ProviderRuntimeServices` with the closed `disabled` and
+  `context_groups` OAuth modes, the latter's private alias-to-context-group map,
+  duplicate-store-namespace rejection, and one OAuth runtime specification per
+  group; make `open_session/2` activate selected groups only after the marker
+  and construct each `MCPOAuth.Context` plus selected authority claims there
+  rather than during host/catalog loading;
+- replace fixed OAuth context/authority claim waits with absolute-deadline-aware
+  APIs; introduce `%Store.Deadline{}` plus the checked Store command catalog
+  carrying access, remote-replay, post-dispatch-projection, and cleanup-action
+  metadata for every operation; make same-VM transactions recheck the caller's
+  absolute deadline before mutation/commit instead of relying on
+  `GenServer.call/3`, and require a remote adapter to declare either an
+  adapter-authoritative transaction guard or catalog-checked
+  indeterminate-after-dispatch mutation semantics;
+  pass the applicable authorization-only or ordinary-operation budget through
+  every phase-8/9 store and authorization call;
+- make store-local identity mandatory and bounded for grouped stores, and
+  resolve it only inside marked, monitored activation;
+- introduce the command-core `ManagerCleanup.Registry`, its bounded non-secret
+  reservation ledger, and usable deadline-aware `reserve_many/3`; atomically
+  reserve selected OAuth occurrence capacity before runtime-service/store work,
+  release every unused reservation on the pre-manager paths available in this
+  slice, give explicit Mix authorization a separate per-target absolute clock,
+  then start the ordinary run clock before the first post-authorization runtime
+  action; preserve raw per-operation deadline candidates and binding
+  provenance, derive repeated-alias and per-context-group OAuth
+  deadlines/anchors exactly as specified above, and change the atomic
+  authority-batch result to return a checked safe failing index for
+  entry-specific errors;
 - implement the serialized provider-application gate and safe-start ownership
   records for standalone, Mix CLI, and host-owned modes;
 - adjust the application/dependency metadata in this slice so starting
@@ -1974,17 +2719,64 @@ fixtures return the exact schema-valid digest result without provider activity.
   and streaming constructors, and force `max_retries: 0` in that shared helper
   rather than exposing a host or manifest retry option; and
 - make provider activity monotonic before every unverified callback,
-  application start, credential resolution, or later provider action.
+  application start, runtime-service activation/store claim, credential
+  resolution, or later provider action.
 
 **Gate:** phase-5 declaration and selection validation invokes no builder,
-callback, application, credential resolver, or network operation. Phase-7
+callback, application, credential resolver, OAuth context/store, or network
+operation. OAuth-bearing `validate`, `models`, default `doctor`, and
+occupied-destination fixtures complete with zero store calls and cannot incur
+either current 5,000 ms claim timeout; selected `run`/`doctor --connect` claims
+only after the phase-8 marker, while unselected OAuth aliases are never claimed.
+Standalone `disabled` activation returns `authorization_required` with no
+cleanup reservation, context, store, resolver, manager, interaction, or network
+call. Marked activation rejects two group keys that resolve to the same
+store-local tenant/principal namespace, accepts the same textual tenant/principal
+IDs under distinct mandatory store identities, and permits intended sharing
+only by mapping aliases to one group. Missing/malformed identity callbacks and
+callback raise/exit/timeout cases take their exact closed paths without a store
+mutation; identity fixtures accept arbitrary one- and 128-byte values and reject
+empty and 129-byte values.
+Slow-store fixtures at the accepted 100 ms minimum prove principal plus
+authority claims share one deadline rather than consuming two fixed waits.
+Catalog-driven mailbox-backlog fixtures cover every Store mutation class and
+prove an expired queued same-VM transaction performs no late mutation; remote
+test adapters prove delayed authoritative guards reject before commit and
+indeterminate mode never labels a possibly dispatched timeout as unchanged.
+Mutations committed before the deadline whose replies are lost retain their
+catalog-declared idempotent or indeterminate mapping. Catalog generation covers
+every exported command and rejects a missing replay, projector, cleanup action,
+or diagnostic pair. Store-handle construction rejects an indeterminate mode
+when any catalog mutation is `authoritative_only`, and the direct-transaction
+source audit prevents conditional operations from bypassing it.
+Ordinary-run fixtures with two OAuth aliases in one context group, another
+alias in a different store/tenant/principal group, and repeated occurrences at
+distinct normalized timeouts prove per-group minimum/anchor rules, independent
+principal claims, group-bounded atomic authority claims with exact indexed
+failure attribution, and the shared `run_duration_ms` cap.
+Capacity fixtures fill the Registry before activation and prove the
+deadline-aware atomic reservation batch fails before the first store call with
+no partially occupied slots; an expired request left in the Registry mailbox
+cannot later reserve, and early authorization/preflight plus no-manager paths
+release every unused reservation. A fake-clock interaction longer than a
+narrowed `run_duration_ms` but shorter than its authorization timeout succeeds
+and receives a fresh full ordinary run budget afterward; the inverse expires as
+non-retryable `authorization_required`, never `run_timeout`.
+Application-gate failure and fake-clock expiry precede activation admission,
+map to `provider_application_unavailable`, and produce no reservation,
+context/store call, listener, interaction, or URL output.
+Trusted tenant/principal partition keys reach only the selected OAuth store
+operations, never identity or output; two principals using one installation
+remain distinct without claiming inbound authentication or hostile-tenant
+isolation. Phase-7
 audited-local checks run once per occurrence in the documented order and return
 identical results in the internal doctor and run operations; workflow/mission
 alias collapse occurs only after all occurrences pass. Public command wiring
 belongs to commit 9. Failures through phase 7 prove zero credential
 resolution/acquisition, phase 8 marks activity before active work, and dotenv
 sentinels prove the mode-specific application gate does not implicitly load
-credentials. Starting only `:ptc_runner` in a fresh VM leaves both provider
+credentials. Starting only `:ptc_runner` in a fresh VM starts the empty
+command-core cleanup registry/worker supervisor but leaves both provider
 applications absent from `Application.started_applications/0` until a marked
 provider-bearing operation reaches the gate. A table-driven counting endpoint
 returns `429`, which the pinned
@@ -1996,13 +2788,22 @@ caller-controlled retry override.
 
 ### Commit 6. Provider resource ownership and cleanup
 
-- complete the owner-backed shared `RunCoordinator.open_session/1` acquisition
+- complete the owner-backed shared `RunCoordinator.open_session/2` acquisition
   operation introduced by the command-engine boundary;
 - complete successful provider-free execution routing through the shared engine
   using the same owner-backed session lifecycle and an empty resource handle;
 - enforce the installed cleanup deadline with monitored closers and owned-tree
   termination through one owner-backed resource graph, including pending
   acquisition leases that roll back provisional roots;
+- extend commit 5's sibling `ManagerCleanup.Registry` reservations into
+  token-manager ownership: add deadline-aware token-manager close and the
+  generation-acknowledged transition to autonomous deferred cleanup; bind a
+  manager to its exact pre-reserved slot, release acquisition-failure and
+  successful no-manager slots, add the persisted generation-acknowledged
+  `clean_pending_exit` handshake, reconstruct reservations/monitors across
+  Registry restart from the existing bounded non-secret ledger, release only
+  proven clean deaths, and poison abnormal/unacknowledged manager exits; remove
+  linked-worker ownership and the kill-and-`mcp_transport_error` fallback;
 - remove raw-close-returning `ProviderRegistry.build/4`, and migrate direct
   embedding/E2E acquisition, `RunConfig`/`Kernel.run`, builder rollback,
   Runner, and REPL cleanup to the graph-requiring replacement; and
@@ -2014,6 +2815,29 @@ completion, and concurrent runs all close each registered resource exactly
 once in dependency order under the one deadline. No former direct
 `ProviderRegistry.build/4` caller bypasses the owner. Cleanup failure has the
 documented primary/secondary precedence and leaves no untracked worker or port.
+OAuth fixtures cover clean close, response-persistence failure, per-run expiry,
+successful pre-reserved transfer, atomic batch saturation before
+context/store/resolver/manager work, partial-batch rollback, unused-slot
+release, repeated bounded self-retry, and
+owner/Registry/worker-supervisor death.
+Crash-point tests cover reservation, manager registration, transfer intent,
+generation acknowledgement, clean-state write before acknowledgement, clean
+acknowledgement before manager exit, `DOWN` before ledger erase, Registry
+reconstruction, and worker-supervisor restart. They prove a Registry crash in
+either clean-exit window releases the slot after restart, Registry death
+preserves every other ledger slot and monitor after reconstruction, and
+abnormal autonomous-manager death poisons rather than releases its slot. An
+unsettled manager is never force-killed; transfer remains classified as cleanup
+failure, preserves the local fence, and keeps exactly one live retry owner until
+an acknowledged clean exit or a fail-closed poisoned state.
+When persistence settles after the original per-run cleanup deadline, the
+autonomous manager uses fresh bounded acknowledgement-attempt deadlines,
+survives Registry timeout/unavailability, retries, and eventually releases the
+slot only after the exact clean generation is acknowledged and observed dead.
+The current
+6,000 ms token-manager close cannot overrun a narrowed/default 5,000 ms global
+deadline, `cleanup_unavailable` never becomes `mcp_transport_error`, and no
+post-creation transfer can fail for lack of capacity.
 Internal-engine and direct-embedding provider-free success fixtures return the
 exact schema-valid run outcome, exercise the empty resource handle, and prove
 session cleanup completes.
@@ -2024,9 +2848,19 @@ session cleanup completes.
   response-bounded real connectivity probe to the internal doctor-connect
   operation after the shared local/application boundary, checking every
   selected occurrence before collapsing success to the alias result;
-- implement the passive bounded HTTP/1 transport, request serializer,
-  `recv_up_to` backends, strict response framing, decoded-byte ceiling, TLS
-  conformance spike, and closed outcome mapping above;
+- retain `MCPHTTPAdapter` as the shared facade while installing the capped
+  passive `recv_up_to` boundary, strict response policy,
+  decoded/retained-byte ceiling, and Mint/OTP/TLS conformance suite above; never
+  ship parallel transports for one target;
+- implement OAuth authorization doctor state and the exhaustive
+  operation/provenance mapping table for required, rejected, unavailable,
+  lifecycle/policy change, indeterminate mutation, just-in-time client-secret
+  failure, authenticated rejection, and discovery/protocol failure without
+  opening an interaction; keep doctor/session-opening projections distinct from
+  the phase-10 `execution/provider_failed` override;
+- make acquisition-backed OAuth doctor checks use the same one-principal,
+  one-atomic-authority-batch context-group algorithm as ordinary activation,
+  under group-minimum doctor occurrence deadlines;
 - implement the declared `none`, `acquisition`, and `probe` connectivity modes
   and provider-specific authenticated/model-specific probe rules through the
   commit-6 resource owner and pending-lease API; and
@@ -2037,11 +2871,22 @@ session cleanup completes.
 attempt, no redirect/decompression/retry, a single monotonic deadline, prompt
 partial delivery, exact payload bounds, injection-safe request serialization,
 compressed-expansion rejection, and every closed HTTP/protocol outcome.
+It exercises the shipped `MCPHTTPAdapter` through the authoritative configured
+capped receive boundary; active Mint and zero-length passive receives are
+forbidden on this path.
 Repeated workflow/mission occurrences are checked in deterministic order. The
 default internal doctor operation performs no credential/network work, and the
 connect variant sets activity before credential resolution while never
 emitting a selector, endpoint, credential, or response body. Acquisition-backed
-checks register/close or roll back through the commit-6 owner. Commit 9 wires
+OAuth checks also prove no context/store call by default, distinct
+authorization versus authentication diagnostics, no automatic interaction or
+tool replay, grouped claim parity, and registered close/transfer/rollback
+through the commit-6 owner. Dynamic OAuth failures are projected separately
+through doctor, session opening/acquisition, and phase-10 execution, with the
+last always using non-retryable `execution/provider_failed` for non-invariant
+provider failures except when the binding run deadline correctly wins as
+`execution/run_timeout`.
+Commit 9 wires
 these operations to the public `doctor` command without duplicating them.
 
 ### Commit 8. Destination preflight and terminal publication
@@ -2074,9 +2919,16 @@ pre-existing or unrecognized state.
 - implement JSON-envelope help, `validate`, and `run`, then `doctor`, `models`,
   and `init`;
 - remove unconditional Mix `app.start` and make `Mix.Tasks.Ptc.Run` delegate
-  to the shared parser/engine and mode-specific phase-8 application gate;
+  to the shared parser/engine and mode-specific phase-8 application/runtime
+  service gate, while explicitly ensuring the inert `:ptc_runner` command core;
+- retain `--authorize-mcp` as a documented Mix-only interactive adapter: it
+  performs no context/store/interaction work until the shared engine has passed
+  destination and audited-local phases and marked provider activity; standalone
+  parsing rejects the flag and never prints an authorization URL; preserve its
+  repeatable argv order, reject duplicates and unselected/non-OAuth targets, and
+  authorize multiple valid selected targets sequentially;
 - keep manifest-backed REPL script/profile modes on the same directory package
-  adapter and shared `prepare/2` plus `open_session/1` lifecycle, remove the
+  adapter and shared `prepare/2` plus `open_session/2` lifecycle, remove the
   REPL's unconditional `app.start`, and leave only its streaming
   parser/protocol distinct; manifest mode gains `--host-config`, rejects it in
   direct/profile modes, and provider-bearing manifests use that installation
@@ -2088,10 +2940,20 @@ pre-existing or unrecognized state.
   shell journeys to the final names.
 
 **Gate:** focused tests prove Mix/direct parser and engine parity for every
-default, option, conflict, phase, and closed exit class without claiming Mix
-process-stream purity. Directory and memory fixtures run identically; a
-memory-backed fixture whose application/file-artifact adapters raise on use
-succeeds when no file-backed provider is installed. REPL manifest mode uses the
+shared default, option, conflict, phase, and closed exit class without claiming
+Mix process-stream purity; the one documented parser delta is the Mix-only
+`--authorize-mcp` adapter, whose explicit interaction ordering and safe output
+have separate fixtures. They cover duplicate rejection, missing/non-OAuth and
+unselected-target rejection with zero store calls, and two valid selected
+targets authorized in argv order before deterministic selected-provider
+acquisition. Directory and memory fixtures run identically; a memory-backed
+fixture whose application/file-artifact adapters raise on use succeeds when no
+file-backed provider is installed. Standalone OAuth-bearing
+`validate`, `models`, and default `doctor` remain non-active, while a selected
+OAuth `run`/`doctor --connect` returns `authorization_required` after the marker
+without a store call, token manager, or interaction. Mix explicit authorization
+and a host-owned populated-store run activate only through
+`ProviderRuntimeServices`. REPL manifest mode uses the
 same prepare/acquire/cleanup lifecycle, and private REPL values never reach an
 unauthorized stream. This commit adds frontend delegation only: it does not
 reimplement the validation, run, doctor, or publication operations completed by
@@ -2107,7 +2969,8 @@ earlier commits.
   entrypoint;
 - ship a minimal boot profile with implicit dotenv disabled and optional
   provider applications started lazily inside the activity boundary in
-  standalone/Mix CLI mode, while cloud embedding remains host-owned; and
+  standalone/Mix CLI mode, while the empty command-core OAuth cleanup
+  supervisor starts eagerly and cloud embedding remains host-owned; and
 - document stdout as the V1 machine stream, stderr framing as non-contractual,
   and stderr content on supported paths as secret-safe.
 
@@ -2118,14 +2981,17 @@ failures, signal characterization outside V1, and ordinary
 stdout envelope/schema validity. Descriptor survival, noninheritance,
 broken-pipe, exit-status, startup-identity, and focused authority-audit tests
 pass on every packaged macOS/Linux target or trigger the outer framing process.
-Mix/standalone parser and engine parity covers every command, default, option,
-conflict, phase, and closed exit class without changing Mix process-stream
-semantics.
+Mix/standalone parser and engine parity covers every shared command, default,
+option, conflict, phase, and closed exit class without changing Mix
+process-stream semantics; the documented Mix-only authorization adapter is
+excluded from standalone parity and tested independently.
 A packaged default `doctor` neither starts provider applications nor consumes a
 sentinel `.env`, and a clean environment runs the packaged command without a
 repository checkout. Retained guides, examples, shell journeys, and generated
 schemas use the released names and host contract; `mix ptc.gen_docs --check`
-passes.
+passes. Packaged OAuth-bearing static commands touch no store, and selected
+OAuth execution returns the documented noninteractive
+`authorization_required` envelope without creating a manager.
 
 ### Commit 11. Credentialed live-model and filesystem-free acceptance
 
@@ -2148,6 +3014,12 @@ passes.
   `ApplicationPackage`/`ExecutionInput` path with application and file-artifact
   adapters that raise if invoked, proving the cloud execution path needs no
   application filesystem; and
+- add a credential-free local OAuth MCP integration through that same
+  host-owned memory package path, using an injected in-memory store and lazy
+  tenant/principal context groups; prove two principals remain partitioned,
+  aliases share a claim only inside an explicitly shared group, only selected
+  authorities are claimed, no file adapter is invoked, and
+  authorization/token-manager cleanup follows commits 5–7; and
 - keep prompts domain-blind, configure all three operations for one attempt,
   cap their request and response size, and record only the selected safe model
   alias, closed outcomes, and pass/fail status in the PR evidence.
@@ -2321,10 +3193,14 @@ At minimum:
   `models` must render a compliant custom catalog entry with `source: "custom"`;
   also prove same-alias public snapshot and effective identity change when the
   selected host installation declares a new revision or behavior;
-- default `validate` and `doctor` with no provider activity;
+- OAuth-bearing `validate`, `models`, and default `doctor` with no provider
+  activity, context construction, principal/authority claim, grant load, or
+  claim-timeout latency; ordinary provider-free variants retain the same gate;
 - optional provider-application startup failure mapping to
   `active_preflight/provider_application_unavailable`, with activity true and
-  no credential resolution or acquisition attempted afterward;
+  no credential resolution or acquisition attempted afterward; a hung startup
+  is bounded by `activation_admission_deadline_ms`, has the same mapping, and
+  creates no OAuth cleanup reservation;
 - sequential and concurrent long-lived-host runs proving `ProviderRuntime`
   never starts or stops a VM-global application per command; repeated and
   concurrent `:mix_cli` runs proving one serialized post-marker startup is
@@ -2368,7 +3244,136 @@ At minimum:
   selection validation, with `doctor --connect` marking activity, executing
   both applicable checks, and reporting the selection pass only after every
   occurrence succeeds; declarative selections report `pass/declarative`;
-- `doctor --connect` activity before the first credential/connectivity attempt;
+- `doctor --connect` activity before the first credential, authorization,
+  runtime-service, store, or connectivity attempt;
+- OAuth activation-mode fixtures proving standalone `disabled` selected work
+  returns `authorization_required` without a cleanup reservation or store call;
+  marked `context_groups` activation rejects duplicate
+  `{Store.local_identity(store), tenant_id, principal_id}` namespaces before
+  context construction/store mutation, permits equal textual partition IDs for
+  distinct mandatory store identities, shares one namespace only when aliases
+  map to one group, and closes missing/malformed/raise/exit/timeout identity
+  callbacks without pre-marker invocation; exact boundary fixtures accept
+  arbitrary one- and 128-byte identities and reject empty and 129-byte values;
+- Registry-capacity fixtures proving `reserve_many/3` reserves one slot per
+  selected occurrence all-or-none before context/store/resolver/network work,
+  reports saturation against the first OAuth alias with a null occurrence,
+  leaves no partial reservations on failure, refuses an expired mailbox request
+  without a late mutation, binds managers only to their assigned slots, and
+  releases slots for authorization/preflight/acquisition failure and successful
+  no-manager paths;
+- Store command-catalog parity plus a valid-state fixture factory for every
+  exported operation and mutating row, proving `%Store.Deadline{}` is propagated
+  through wrappers, every read has the exact not-applicable/discard/none tuple,
+  every mutation has an explicit remote-replay,
+  post-dispatch-projection, and cleanup-action class, and an operation queued
+  behind a blocked transaction rechecks its expired absolute deadline inside
+  the serialized transaction without changing state;
+  remote-mode test doubles delay request arrival past the local deadline and
+  prove an adapter-authoritative guard rejects before commit while
+  indeterminate-after-dispatch drives every mutation through its catalog
+  projector and cleanup action without asserting unchanged state; this includes
+  principal/authority claims, admissions/releases, flow and grant mutations,
+  requirements/response fences, and both retirement families; an
+  indeterminate-mode store with any catalog `authoritative_only` mutation is
+  rejected as an invalid runtime specification before the activity marker or
+  adapter call, and the source audit covers direct transaction-command
+  construction/calls in coordinator, OAuth, cleanup, and adapter helpers;
+  paired committed-before-deadline/lost-reply cases prove each operation retains
+  its declared idempotent or indeterminate result rather than being mislabeled
+  as a proven non-mutation;
+- a slow OAuth store at `doctor_connectivity_timeout_ms: 100`, proving context
+  creation, principal claim, authority claim, grant admission, and discovery
+  share one occurrence deadline after the separately bounded application gate
+  and activation admission and cannot each consume a fresh timeout; equivalent
+  run and explicit-Mix-authorization fixtures prove their own active absolute
+  deadlines reach every nested store call; a run with two aliases in one
+  context group, a third alias in a distinct store/tenant/principal group, plus
+  a repeated alias at three distinct normalized MCP timeouts proves per-group
+  principal minima, deterministic anchors and equal-deadline tie-breaking,
+  independent group claims, per-alias minima, separate atomic authority batches,
+  per-occurrence acquisition deadlines, and the `run_duration_ms` cap; inject
+  a principal-claim failure in each group and prove the exact anchored
+  authorization subject has the anchored alias but a null occurrence and obeys
+  first-failure order; inject a collision at a non-first indexed authority
+  entry and prove the entire group batch remains unchanged and the diagnostic
+  names that entry's lowest mapped alias with a null occurrence; prove a slow
+  batch is capped by the group's shortest provider deadline even when that
+  alias sorts last; paired
+  fixtures make the run deadline bind (including an exact tie) and then the
+  provider deadline bind, proving the former is
+  `execution/run_timeout` with a null subject while the latter retains the
+  exact selection-, authorization-, or acquisition-specific diagnostic and
+  provider subject without restarting either clock; repeat that comparison for
+  an active custom validator with no MCP timeout and make both its independent
+  `selection_validation_timeout_ms` candidate and the run candidate bind;
+- `doctor --connect` with two aliases sharing one context group, a repeated
+  alias at distinct normalized timeouts, and a third alias in a separate group,
+  proving one principal and atomic authority batch per group, group-minimum
+  doctor occurrence deadlines, deterministic anchors/indexed failure
+  attribution, null occurrences for shared claim failure, per-occurrence
+  admission/discovery after setup, and no cross-group batch; static MCP and
+  custom `acquisition`/`probe` occurrences prove the same common start time,
+  doctor-only bound when no provider timeout exists, and minimum rule when one
+  does, without entering OAuth grouping; active validators are additionally
+  narrowed by `selection_validation_timeout_ms`, all validators complete before
+  the once-per-alias credential barrier, and repeated workflow/mission aliases
+  resolve one credential under their minimum occurrence deadline without
+  resetting it; a credential-only custom provider with
+  `connectivity_mode: none` resolves under the original doctor-phase deadline
+  despite omitting connectivity, and its slow resolver is terminated with the
+  same alias-wide non-retryable `credential_unavailable`; a later validator
+  failure proves zero credential reads. Slow validator and resolver fixtures
+  make the doctor deadline bind first on both acquisition and probe paths,
+  prove worker-tree termination, null occurrence for the alias-wide credential
+  subject, and retain the non-retryable `selection_validation_timeout` and
+  `credential_unavailable` projections rather than retryable connectivity
+  failure;
+- explicit Mix authorization fake-clock fixtures in which interaction exceeds a
+  narrowed `run_duration_ms` but remains inside
+  `authority.authorization_timeout_ms`, then receives the complete ordinary run
+  budget after authorization; reverse the bounds and prove authorization expiry
+  uses non-retryable `authorization_required` rather than `run_timeout`, with
+  unused cleanup reservations released in both failure paths; timeout before
+  token dispatch cancels the listener/worker and pending flow, while
+  possibly-dispatched mutation preserves its fence and cancellation/registered
+  root failure follows cleanup precedence; fail the provider-application gate
+  and prove it precedes admission with no reservation, context/store call,
+  listener, interaction, or Mix-shell URL output;
+- OAuth doctor/run fixtures proving missing grants map to non-retryable
+  `authorization_required`, explicit denial to `authorization_rejected`,
+  store/context availability failures to retryable `authorization_unavailable`,
+  just-in-time confidential-client secret failure to `credential_unavailable`,
+  and remote authenticated rejection remains distinct; standalone opens no
+  interaction, while explicit Mix interaction occurs only after destination
+  and audited-local success; repeatable Mix authorization rejects duplicate,
+  missing, non-OAuth, and unselected targets before a store call, then processes
+  two valid selected targets in argv order; the table covers every store reason,
+  including
+  retiring lifecycle states, authority collision, stale epochs, invalid runtime
+  shape, and not-dispatched versus possibly-dispatched refresh/code failures,
+  with no fallback to a retryable classification; run every applicable dynamic
+  store/header/refresh/`401`/`403` outcome through doctor, session
+  opening/acquisition, and a phase-10 MCP invocation, proving the first two use
+  the exhaustive pre-execution rows while phase 10 uses non-retryable
+  `execution/provider_failed` with the exact execution occurrence; dynamic
+  phase-10 timeout fixtures separately make the intrinsic provider deadline and
+  the run deadline bind, including an exact tie, proving the former is
+  `provider_failed` with the occurrence and the latter is `run_timeout` with a
+  null subject; dynamic OAuth `401` and valid satisfiable `403
+  insufficient_scope` install their local
+  fences before either projection; valid-but-unsatisfiable and malformed challenges,
+  dynamic authentication rejection, and malformed-success versus well-formed
+  endpoint rejection each exercise their one exact catalog row; static-auth
+  `401`/`403` fixtures separately prove connectivity, acquisition, and execution
+  classification with the matching subject operation;
+  response-transition persistence failure separately proves the closed
+  doctor, acquisition, and execution mappings plus mandatory cleanup/transfer;
+  expire doctor during settled observational discovery and prove retryable
+  `connectivity_unavailable`, then expire after possibly dispatched refresh/code
+  mutation and during fenced response persistence and prove the respective
+  non-retryable `authorization_required` and `connectivity_outcome_unknown`
+  projections survive manager transfer;
 - selected live-LLM `doctor --connect` probes with a fake bounded adapter,
   proving valid credentials/endpoints pass, a bad key maps to non-retryable
   `authentication_rejected`, transient rate limiting maps to retryable
@@ -2394,9 +3399,12 @@ At minimum:
   informational responses, short keep-alive content-length, final short chunk,
   a large announced chunk delivered through many small SSE writes, and
   single-write compressed-expansion fixtures prove the bounded framing-aware
-  behavior rather than relying on server chunk timing; TCP and packaged TLS
-  backend conformance proves `recv_up_to` returns available partial data without
-  exceeding its requested maximum or total deadline, while request
+  behavior rather than relying on server chunk timing; the
+  `MCPHTTPAdapter` capped passive TCP and packaged TLS conformance proves the
+  configured hard transport-ingress bound, prompt partial delivery,
+  peer/hostname/SNI/ALPN behavior, and total deadline. It also proves that this
+  path performs no active Mint or zero-length passive receive and that
+  `recv_up_to` never exceeds its requested maximum or deadline. Request
   serialization tests accept `/v1/chat/completions` and a canonical
   `Authorization: Bearer <credential>` field, percent-encode admitted path
   segments exactly once—including a base-path `%20` fixture that must not
@@ -2419,6 +3427,13 @@ At minimum:
   dependency dotenv reads; every paid request has explicit token/byte/time
   ceilings, missing credentials fail rather than skip this acceptance, and
   credential sentinels appear in no public or captured channel;
+- a credential-free local OAuth MCP run through the host-owned memory package,
+  injected in-memory stores, and lazy context-group specifications, proving no
+  application/artifact file adapter use, selected-only authority claims,
+  explicit same-group sharing, distinct store/tenant/principal partitions, no
+  public group/partition/grant material, and bounded token-manager
+  close/transfer; these local requests are outside the exactly-three paid
+  OpenRouter request count;
 - a custom `probe` alias selected with distinct workflow and mission
   configurations, proving both occurrences are checked in the documented
   order, failure of either prevents the collapsed alias pass, success requires
@@ -2436,7 +3451,8 @@ At minimum:
   `active_preflight/connectivity_unsupported` with
   `provider_activity: true`, the safe provider connectivity subject, no
   credential resolution/request, and no false availability claim;
-- successful, failed, raised, and hung `doctor --connect` acquisition proving
+- successful, failed, raised, and hung observational `doctor --connect`
+  acquisition with settled authorization state proving
   one `doctor_connectivity_timeout_ms` deadline terminates the occurrence
   worker tree, maps a hang to retryable
   `active_preflight/connectivity_unavailable`, and every
@@ -2494,6 +3510,29 @@ At minimum:
 - a multi-layer provider graph whose first reverse closer never returns,
   proving every later-layer closer is still attempted and every registered
   process/port root terminates within the global deadline;
+- OAuth response-persistence fixtures at every side of the cleanup deadline,
+  proving a clean manager writes and receives acknowledgement for
+  `clean_pending_exit` before exiting and releases its pre-reserved slot, an
+  unsettled manager transfers exactly once without being killed, transfer
+  preserves cleanup failure/result withholding, the manager itself retries
+  bounded attempts, a worker-supervisor kill/restart neither kills nor
+  duplicates that owner, Registry death/restart reconstructs all reservations
+  from the non-secret ledger before admission, crashes after the clean-state
+  write/before acknowledgement, after acknowledgement/before manager exit, and
+  after clean `DOWN`/before erase all recover and release exactly once, abnormal
+  or unacknowledged manager death leaves one poisoned occupied slot with no
+  replacement or fence relaxation, and
+  persistence that settles only after the original per-run cleanup deadline
+  starts fresh bounded manager-owned acknowledgement attempts, survives at
+  least one Registry timeout/restart, and releases the slot only after the exact
+  generation is acknowledged and observed dead; prove 128 occupied registry
+  slots make the next activation return
+  `authorization_unavailable` before manager/store/network work; inject the
+  former `cleanup_unavailable` branch and prove it cannot become
+  `mcp_transport_error` or leave an ownerless manager; inject crashes at every
+  reservation/registration/transfer acknowledgement boundary and prove the
+  generation handshake yields either the original owner or exactly one
+  autonomous manager;
 - every former direct `ProviderRegistry.build/4` embedding and E2E path
   requiring a resource handle, with no public acquisition API able to return a
   raw closer or unregistered process/port root;
@@ -2508,7 +3547,7 @@ At minimum:
 - equivalent direct `Kernel.run` and REPL owner-death/hung-closer regressions,
   proving those paths use the same resource owner and deadline;
 - manifest-backed REPL setup proving it uses the directory adapter plus
-  `prepare/2`/`open_session/1`, does not execute the workflow while opening,
+  `prepare/2`/`open_session/2`, does not execute the workflow while opening,
   removes unconditional `app.start`, marks activity before provider application
   startup or acquisition, starts the same event/optional inspection owners as
   one-shot execution, does not consume a sentinel `.env`, and transfers sink
@@ -2651,14 +3690,19 @@ At minimum:
 
 This plan does not define:
 
-- an HTTP service, job queue, authentication, tenant isolation, service
-  cancellation, scheduling, or concurrency quotas;
+- an HTTP service, job queue, inbound tenant authentication, adversarial tenant
+  isolation, service cancellation, scheduling, or concurrency quotas; it does
+  preserve trusted host-supplied OAuth tenant/principal partition keys and the
+  store's existing logical separation contract;
 - an adversarial same-user/same-VM security boundary;
 - manifest-defined provider installations, URLs, filesystem roots,
   credentials, commands, or callbacks (manifests still select installed
   aliases);
 - a remote/streaming application-source protocol;
 - a general object store or active trace persistence service;
+- a shipped durable OAuth token store or standalone authorization interaction;
+  [`mcp-oauth-durable-store.md`](../future/mcp-oauth-durable-store.md) remains
+  adapter-triggered;
 - a hard five-minute standalone run ceiling;
 - blanket rejection of FUSE, 9p, virtiofs, bind mounts, or unknown filesystems;
 - a native lock-pool/ACL/statfs subsystem; or
@@ -2678,10 +3722,14 @@ input actually enters.
 ## Feasibility and recommendation
 
 The Elixir slices are implementable against the current architecture.
-`RunBuilder`, `ProviderRegistry`, strict schemas, confined reads, result
-classification, and artifact modules provide the necessary seams. The main
-refactors are preserving typed error provenance, making phase order explicit,
-and replacing path-coupled manifest state with a sealed document closure.
+`RunBuilder`, `ProviderRegistry`, `MCPOAuth.Store`, `MCPHTTPAdapter`, strict
+schemas, confined reads, result classification, and artifact modules provide
+the necessary primitives. The existing registry boundary is not itself
+sufficient: it must be split into inert `InstallationCatalog` declarations and
+lazy execution-scoped `ProviderRuntimeServices`, and OAuth cleanup must gain
+pre-reserved ownership transfer. The other main refactors are preserving typed
+error provenance, making phase order explicit, and replacing path-coupled
+manifest state with a sealed document closure.
 
 The transport-neutral package should be done now, not postponed until a cloud
 service exists. It is small enough to define without choosing object storage,
@@ -2689,9 +3737,11 @@ IAM, or tenancy, and it prevents the CLI directory layout from becoming the
 runtime API.
 
 The generalized artifact store should wait. A cloud frontend can authenticate
-and fetch documents, construct the bounded in-memory request, supply a trusted
-host installation and credential resolver, execute without application or file
-destinations, and persist the classified outcome inside its own boundary. The
+and fetch documents, construct the bounded in-memory request, supply an inert
+installation catalog plus execution-scoped runtime services carrying its
+trusted tenant/principal partition and credential resolver, execute without
+application or file destinations, and persist the classified outcome inside
+its own boundary. The
 BEAM code still comes from its release/container image, and any selected
 file-backed credential or provider remains host responsibility. This supports
 the stated application-filesystem-free direction without pretending this
