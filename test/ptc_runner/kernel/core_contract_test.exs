@@ -399,6 +399,28 @@ defmodule PtcRunner.Kernel.CoreContractTest do
   # The tracker hears about owner death only through its monitor, so it can still
   # accept an attachment after the owner is gone. Pinning the owner pid to an
   # already-dead process reproduces that window without racing the monitor.
+  # Everything a dispatch calls on a dead owner answers with the value that fails
+  # closed for its own caller, so the dispatching process unwinds into a terminal
+  # result instead of exiting. usage/1 and limits/1 are deliberately excluded:
+  # there is no safe answer to invent, so they still exit.
+  test "dispatch-path calls on a dead owner report instead of exiting" do
+    {:ok, state} = RunState.start(Limits.defaults())
+
+    owner_ref = Process.monitor(state.pid)
+    assert :ok = RunState.stop(state)
+    assert_receive {:DOWN, ^owner_ref, :process, _pid, _reason}
+
+    assert {:error, :run_closed} = RunState.reserve_capability(state, :workflow, "gone")
+    assert {:error, :run_closed} = RunState.finish_provider(state)
+    assert {:error, :closed} = RunState.release_provider_slot(state)
+    assert :ok = RunState.protocol_error(state)
+    assert :ok = RunState.fail(state, :event_sink_error, :event_sink_error)
+    assert :ok = RunState.mark_evaluation_terminal_provider_failure(state)
+
+    assert catch_exit(RunState.usage(state))
+    assert catch_exit(RunState.limits(state))
+  end
+
   test "provider attachment reports closure when the owner died before the tracker noticed" do
     {:ok, state} = RunState.start(Limits.defaults())
     assert :ok = RunState.reserve_capability(state, :workflow, "orphaned")

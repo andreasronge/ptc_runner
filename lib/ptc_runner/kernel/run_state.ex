@@ -24,13 +24,20 @@ defmodule PtcRunner.Kernel.RunState do
   its `:DOWN` observed. Thus connector cleanup cannot begin while a callback
   from that run remains live. Shutdown — owner death or explicit stop —
   likewise kills and drains every still-attached provider before state
-  terminates. A dispatching process routinely races that shutdown, so
-  `attach_provider/2`, `finish_provider/1`, and `release_provider_slot/1` report
-  closure rather than propagating the owner's exit; every other call still fails
-  loudly. Closure is what they report for any exit, including a call timeout. A process holds at most one reservation at a time: dispatch is
+  terminates. A process holds at most one reservation at a time: dispatch is
   sequential per process, so a second reserve while one is active is a protocol
   violation and is rejected rather than silently replacing the tracked
-  reservation. A provider process atomically records terminal policy
+  reservation.
+
+  A dispatching process routinely races that shutdown, so the calls it makes
+  here report closure rather than propagating the owner's exit, each answering
+  with the value that fails closed for its own caller. `usage/1` and `limits/1`
+  are the deliberate exceptions: invented limits would widen the ceilings a
+  caller is about to enforce and an invented usage snapshot would misreport the
+  budget, so exiting with the owner is the safe outcome and they stay unguarded.
+  What is reported is the same for any exit, including a call timeout; a reply
+  the owner actually sent is always passed through, so a mismatched token still
+  reaches the caller unchanged. A provider process atomically records terminal policy
   classification against the active evaluation before publishing its result;
   that evaluation-scoped bit therefore survives a later sandbox timeout or heap
   kill and is cleared with the lease.
@@ -109,7 +116,7 @@ defmodule PtcRunner.Kernel.RunState do
   @spec reserve_capability(t(), environment(), binary()) :: :ok | {:error, atom()}
   @doc "Atomically reserves environment, per-name, and live-provider budgets."
   def reserve_capability(state, environment, name),
-    do: call(state, {:reserve_capability, environment, name})
+    do: safe_call(state, {:reserve_capability, environment, name}, {:error, :run_closed})
 
   @spec attach_provider(t(), pid()) :: :ok | {:error, :closed | :provider_down}
   @doc "Attaches the caller's live provider process to its capability reservation."
@@ -158,9 +165,9 @@ defmodule PtcRunner.Kernel.RunState do
   def finish_provider(state), do: safe_call(state, :finish_provider, {:error, :run_closed})
 
   @doc false
-  @spec mark_evaluation_terminal_provider_failure(t()) :: :ok
+  @spec mark_evaluation_terminal_provider_failure(t()) :: :ok | {:error, :closed}
   def mark_evaluation_terminal_provider_failure(state),
-    do: call(state, :mark_evaluation_terminal_provider_failure)
+    do: safe_call(state, :mark_evaluation_terminal_provider_failure, :ok)
 
   @spec reserve_evaluation(t()) :: {:ok, map(), [term()], reference()} | {:error, atom()}
   @doc "Atomically reserves and returns native subordinate memory and turn history."
@@ -184,11 +191,13 @@ defmodule PtcRunner.Kernel.RunState do
 
   @spec protocol_error(t()) :: :ok | {:error, :protocol_error_limit}
   @doc "Records one protocol error and closes the run when its ceiling is exceeded."
-  def protocol_error(state), do: call(state, :protocol_error)
+  def protocol_error(state), do: safe_call(state, :protocol_error, :ok)
 
-  @spec fail(t(), atom(), atom()) :: :ok
+  # There is no failure left to record once the owner is gone. As above, the
+  # declared :ok never covered the mismatched-token reply.
+  @spec fail(t(), atom(), atom()) :: :ok | {:error, :closed}
   @doc "Records the first terminal failure and closes the run."
-  def fail(state, kind, reason), do: call(state, {:fail, kind, reason})
+  def fail(state, kind, reason), do: safe_call(state, {:fail, kind, reason}, :ok)
 
   @spec terminal_failure(t()) :: nil | %{kind: atom(), reason: atom()}
   @doc "Returns the first terminal failure, if any."
@@ -214,6 +223,10 @@ defmodule PtcRunner.Kernel.RunState do
     ProviderTaskTracker.close(state.provider_tracker)
   end
 
+  # These two answer with the owner's data, and there is no substitute that
+  # fails closed: invented limits would widen the byte ceilings a caller is
+  # about to enforce, and an invented usage snapshot would misreport the budget.
+  # Exiting with the dead owner is the safe outcome, so they stay unguarded.
   @spec usage(t()) :: map()
   @doc "Returns a read-only bounded usage snapshot."
   def usage(state), do: call(state, :usage)
