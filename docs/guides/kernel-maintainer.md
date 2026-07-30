@@ -93,6 +93,12 @@ documented `RunBuilder` close operation.
 graph into one `PtcRunner.Kernel.FrozenBundle`. Compilation validates code and
 records requirements; it grants no authority.
 
+`FrozenBundle.hash` is the canonical V2 identity of the complete component
+graph. It covers each component ID, source hash, and sorted unique direct
+dependency list in a domain-separated, length-framed byte format. Rewiring an
+edge therefore changes bundle identity even when every component ID and source
+byte remains unchanged.
+
 Authority appears only when a frozen bundle is placed in an environment:
 
 | Environment | Purpose | Typical grants |
