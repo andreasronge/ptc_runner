@@ -21,6 +21,9 @@ belongs in guides or retained specifications.
 
 ## Future, trigger-gated
 
+- [`future/mcp-dcr.md`](future/mcp-dcr.md) retains the deprecated Dynamic Client
+  Registration compatibility state machine until a concrete server that lacks
+  CIMD and practical pre-registration creates an implementation trigger.
 - [`future/mcp-exact-resources.md`](future/mcp-exact-resources.md) records the
   unmet first-party trigger and minimum authority shape required before MCP
   exact-resource work can begin.
