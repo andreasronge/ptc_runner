@@ -81,8 +81,8 @@ an explicit adapter inside the marked boundary, not an application-start side
 effect. This makes the activity flag truthful even for `doctor` and failures
 before command execution.
 
-For the standalone `ptc` entrypoint, stdout is the machine channel on ordinary
-and caught paths:
+For the standalone `ptc` entrypoint, the caller's stdout is the machine channel
+on ordinary and caught paths:
 
 - success writes exactly one JSON envelope plus a newline to stdout and exits
   `0`;
@@ -106,38 +106,50 @@ into a bounded private buffer and expose only closed launch status/codes. A
 shipped provider or NIF that writes process stderr directly is unsupported
 until it is wrapped by that capture boundary.
 
-The standalone wrapper runs the command tree under a dedicated bounded group
-leader that absorbs arbitrary `stdio` requests, so same-VM `IO.puts`/`write`
-from command-descended processes cannot corrupt the stdout envelope. Optional
-application supervisors and other globally supervised processes do not
-necessarily inherit that group leader, so their stdout routes are governed by
-the output audit below. The group leader also does not intercept `IO.warn` or
-explicit `IO.*(:stderr, ...)`, which target the VM-global
-`:standard_error` device. Do not rebind that name: BEAM exposes only separate
-unregister/register operations, and their gap could crash an already-running
-Logger/SASL writer.
+The standalone release wrapper preserves the caller's stdout as private
+descriptor 3, redirects descriptor 1 to the null device before BEAM starts,
+and reserves descriptor 3 by contract for the code-owned envelope writer. The
+writer emits the single envelope through `/dev/fd/3`; ordinary BEAM,
+dependency, port, and NIF stdout still targets descriptor 1 and is discarded.
+This is not OS-enforced exclusivity inside one VM: trusted same-VM native code
+could still name, duplicate, close, or write descriptor 3.
+The command tree also runs under a dedicated bounded group leader that absorbs
+arbitrary `stdio` requests, keeping unexpected command-descended output bounded
+inside the VM instead of relying only on the null device.
 
-Instead, the packaged support gate owns a checked-in, dependency-version-bound
-inventory of every reachable stdout or stderr route in the command core and
-shipped provider dependency closure, including command-descended and globally
-supervised paths: default/group-leader IO, explicit
-`:standard_io`/`:standard_error`, Logger/`:logger`, SASL/OTP reports, handler
-installation, ports, and known NIF/direct-file-descriptor writes. Logger/SASL
-routes are acceptable only because the packaged profile removes their console
-destination before optional code starts. Command-descended `stdio` is
-acceptable only because its group leader is guarded. A globally supervised
-stdout call, any direct `:standard_error`/`IO.warn` outside the wrapper, and
-uncaptured port/NIF output must be proven unreachable under the sealed options
-or replaced by a non-writing/captured API; only the wrapper emits the stdout
-envelope and its enumerated fixed stderr messages. A reachable call that can
-interpolate a selector, endpoint, credential, rejected value, callback reason,
-exception/report, or other arbitrary term fails the gate; it is not a supported
-packaged path. The inventory fails when a pinned dependency revision changes,
-an optional application adds a console handler, or a new process-output route
-appears without classification. Mix and `:host_owned` modes do not claim exact
-framing. A dependency/NIF that writes an OS file descriptor directly or cannot
-satisfy this audit remains unsupported and belongs behind the trigger-gated
-outer process if a packaged test demonstrates the need.
+This design is gated by a packaged spike on every supported macOS/Linux release
+target. The spike must prove that descriptor 3 survives the release wrapper and
+BEAM startup, `/dev/fd/3` writes reach the original caller stdout, the
+descriptor is not inherited by provider launchers or other child ports,
+caller-close/broken-pipe behavior is bounded, and the wrapper preserves the
+documented command exit status. The implementation may use a post-start
+close-on-exec transition or another release-specific mechanism, but a child
+must never receive envelope authority. If any supported target cannot satisfy
+all five checks, do not fall back to dependency-wide stdout auditing; introduce
+the trigger-gated outer framing process before claiming exact standalone
+framing.
+
+Descriptor separation removes ordinary stdout behavior from the dependency
+support audit, but it does not remove descriptor-authority or stderr secrecy
+checks. Keep a focused, dependency-version-bound inventory of any same-VM code
+or NIF that can enumerate inherited descriptors or write, close, duplicate, or
+replace a numeric descriptor; every reachable route must be proven unable to
+target descriptor 3. Immediately before envelope emission, validate that
+descriptor 3 still has the captured startup identity and fail without writing
+to another target if it was closed or replaced. If the inventory or identity
+check cannot be implemented on a supported target, use the outer framing
+process. The focused inventory also covers reachable secret-bearing stderr
+routes: explicit
+`:standard_error`/`IO.warn`, Logger/`:logger`, SASL/OTP reports, console-handler
+installation, uncaptured child stderr, and known NIF/direct-file-descriptor
+writes. Logger/SASL routes are acceptable only because the packaged profile
+removes their console destination before optional code starts. A reachable
+stderr call that can interpolate a selector, endpoint, credential, rejected
+value, callback reason, exception/report, or other arbitrary term fails the
+gate unless it is replaced by a closed non-writing/captured API. The inventory
+fails when a pinned dependency revision changes, an optional application adds a
+console handler, or a new secret-bearing stderr route appears without
+classification. Mix and `:host_owned` modes do not claim exact framing.
 
 In particular, the shipped ReqLLM adapter must not pass a caller-controlled
 string selector through ReqLLM's warning-producing fallback resolution.
@@ -146,16 +158,14 @@ through a non-warning API and acquisition reuses that sealed value. An
 uncatalogued but otherwise allowed model either uses that structured path or is
 rejected before acquisition; its raw selector is never passed to `IO.warn`.
 Keep a dependency-version audit and packaged sentinel regression for this
-assumption. A new same-VM provider/dependency direct-write path is unsupported
-until it is either proven command-descended and routed through the guarded
-group leader or replaced with an audited non-writing/captured API; a globally
-supervised writer cannot rely on the command group leader.
+assumption. A new same-VM provider/dependency stderr path is unsupported until
+it is replaced with an audited non-writing/captured API.
 
 A caller parses stdout only. A VM abort, OOM, uncatchable signal, failure before
-the command boundary starts, or direct native write to stdout may produce no
-envelope or corrupt it. Those cases are documented local CLI limitations, not
-a claimed security boundary; OS/VM emergency diagnostics are outside the
-caught-path content guarantee.
+the command boundary starts, or loss of descriptor 3 may produce no envelope.
+Those cases are documented local CLI limitations, not a claimed security
+boundary; OS/VM emergency diagnostics are outside the caught-path content
+guarantee.
 
 `Mix.Tasks.Ptc.Run` delegates parsing, defaults, validation order, and execution
 to the same engine but does not promise exact process framing. Mix compilation,
@@ -224,12 +234,14 @@ signal response, or a reproducible child leak under that deployment's shutdown
 mechanism, is a concrete trigger for the separate outer-supervisor plan.
 Service/job cancellation is outside this plan.
 
-An outer framing process becomes a separate, trigger-gated plan only if real
-packaged-command tests show that stdout purity cannot be maintained with the
-Elixir boundary and controlled provider launchers. Its initial scope is stream
-purity and child cleanup. Static-PIE builds, fs-verity/IMA, macOS designated
-requirements, credential brokers, filesystem allowlists, and same-UID
-adversary claims require their own demonstrated deployment threat.
+An outer framing process becomes a separate, trigger-gated plan if any
+supported release target fails the descriptor-3 survival, noninheritance,
+broken-pipe, exit-status, focused descriptor-authority inventory, or
+startup-identity checks, or if reliable signal response or child cleanup
+requires it. Its initial scope is stream purity and child cleanup. Static-PIE
+builds, fs-verity/IMA, macOS designated requirements, credential brokers,
+filesystem allowlists, and same-UID adversary claims require their own
+demonstrated deployment threat.
 
 ### Use one versioned, privacy-safe envelope
 
@@ -450,8 +462,9 @@ passed the same bounded alias validator. The closed operation enum is
 `{"destination":"workflow|mission","index":nonnegative_integer}`. The index is
 the zero-based position in that destination's manifest provider list. It is
 non-null only when the failure is attributed to one selected occurrence;
-installation-declaration, installation-wide local/application,
-credential-resolution, and aggregate cleanup failures use `null`.
+installation-declaration, provider-application, credential-resolution, and
+aggregate cleanup failures use `null`. Audited-local failures use the selected
+occurrence they were checking.
 Selection-validation failures use operation `selection`; selection,
 connectivity, acquisition, or provider-execution failures use the occurrence
 that failed when it is known. The locator contains no selection value or
@@ -1034,6 +1047,15 @@ check that cannot meet those rules belongs inside phase 8. Custom embedding
 callbacks default to `unverified`, are never invoked by `validate` or before
 destination preflight, and flip the marker before invocation.
 
+Phase 7 invokes an `audited_local` callback once for every selected occurrence,
+in installed-alias UTF-8 byte order, then `workflow` before `mission`, then
+zero-based manifest index. Each invocation receives that occurrence's
+normalized selection and final post-selection context. `doctor` and `run` use
+the same order and stop at the same first failure, whose `local` subject carries
+the failing occurrence. Doctor reports one alias-level local pass only after
+all selected occurrences for that alias pass; no partial occurrence set can
+produce a pass.
+
 Provider staging uses two contexts:
 
 - the phase-5 selection context contains the safe display identity,
@@ -1508,9 +1530,10 @@ is no legal final context to give it. `doctor --connect` is rejected as
 `arguments/invalid_arguments` unless both host and application are present,
 and that rejection occurs before provider activity.
 
-Active doctor work is occurrence-based even though its success projection is
-alias-based. The occurrence key is the same total key used by active selection
-validation: alias UTF-8 bytes, `workflow` before `mission`, then manifest index.
+Phase-7 audited-local and active doctor work are occurrence-based even though
+their success projections are alias-based. The occurrence key is the same total
+key used by active selection validation: alias UTF-8 bytes, `workflow` before
+`mission`, then manifest index.
 For `probe`, `doctor --connect` invokes every selected occurrence in that order
 with its own normalized selection and destination context. For `acquisition`,
 it respects the sealed provider dependency graph; every ready layer is ordered
@@ -1559,10 +1582,61 @@ explicitly documented minimal completion capped to one output token and declare
 `probe_effect: completion`. The latter may incur one provider request/cost,
 which the command help and retained guide must state.
 
-The HTTP path enforces its installed response-byte cap while streaming: reject
-an oversized declared `Content-Length` before reading the body, otherwise read
-at most cap-plus-one bytes and stop/cancel the body on overflow. It never fully
-buffers an unbounded response. The probe retains no response body, emits no
+The shipped HTTP path uses one code-owned passive HTTP/1 client for its single
+attempt; it does not use a Req/Finch/Mint executor or pool. Its backend must
+implement `recv_up_to(max_bytes, deadline)`: return promptly after at least one
+byte is available, never return more than the positive maximum, and preserve
+the single monotonic deadline. Plain TCP uses OTP `:socket.recv/4` in
+nowait/select mode. The packaged TLS backend must prove the same semantics plus
+peer/hostname verification, SNI, the packaged in-memory CA trust source, and
+ALPN restricted to `http/1.1`. If OTP `:ssl` cannot prove the bound, use a small
+code-owned length-framed port helper whose frames are capped before entering
+BEAM; its stderr, lifecycle, and cleanup follow the provider-resource contract.
+Host-owned/cloud embedding may inject an equivalent in-memory backend. If no
+packaged backend passes the conformance spike, the shipped route is unsupported;
+do not fall back to `recv(..., 0)`, exact positive-length reads, or an unbounded
+library executor.
+
+Before connect or send, the code-owned serializer admits only its closed
+`GET`/`POST` methods and applies distinct byte grammars to the other request
+parts. The generated origin-form target must start with `/`, is serialized from
+validated URI path segments with required percent-encoding, and admits no raw
+space, CR/LF, NUL, other control, or fragment delimiter. Endpoint parsing splits
+the raw path only on literal `/`, validates and decodes each percent triplet
+within its segment exactly once, rejects a decoded `/`, `\`, NUL, or control,
+and retains empty segments. The serializer appends only fixed code-owned
+operation segments and encodes each resulting segment once, so an existing
+escape such as `%20` is not emitted as `%2520`. Header names use the bounded
+HTTP token grammar. Generated header values may contain visible ASCII and the
+spaces required by schemes such as
+`Authorization: Bearer <credential>` but admit no CR/LF, NUL, other control,
+obs-fold, or non-ASCII byte; credentials that cannot be represented by that
+grammar are rejected rather than rewritten. All three parts have individual
+byte caps, and aggregate request-header count/byte caps apply. A
+credential-bearing endpoint must use `https`; plain
+`http` is loopback-only and credential-free. The request asks the server to
+close the connection after one response. It requests
+`Accept-Encoding: identity`, disables automatic response decompression, and
+rejects any non-identity `Content-Encoding` as
+`connectivity_protocol_error` before decoding. It also rejects every compressed
+HTTP transfer coding; only absent transfer coding or ordinary `chunked` framing
+is admitted. The transport must expose and validate those headers before
+applying a content or transfer decompressor.
+
+The strict incremental parser consumes only `recv_up_to` chunks. Status, header,
+informational-response, chunk-size, and trailer lines each have a line-size
+ceiling; separate aggregate head/trailer byte,
+field-count, and informational-response-count ceilings reject an unterminated
+line or repeated `1xx` sequence before unbounded accumulation. After validating
+the final headers, admit only a valid `Content-Length` or ordinary chunked body;
+close-delimited bodies fail closed. For either framing, request at most the
+lesser of the unread framed payload, fixed quantum, and remaining payload budget
+plus one. The backend may return less and the parser carries bounded partial
+framing state, so a large announced chunk delivered through many small SSE
+writes produces prompt deltas. Count identity payload pieces before retaining
+or decoding them and close on overflow. Thus at most cap-plus-one decoded
+payload bytes enter code, and a small content- or transfer-compressed body can
+never expand inside the command. The probe retains no response body, emits no
 selector or credential metadata, and returns only one closed normalized
 outcome. Map HTTP/protocol outcomes as follows:
 
@@ -1779,10 +1853,11 @@ directory.
 - preserve typed, schema-context-aware `ValueContract` violation segments at
   classification time and make the diagnostic projector only RFC 6901-escape
   that safe representation;
-- install the standalone-only bounded stdout group leader, make the shipped
-  ReqLLM adapter use a structured non-warning model-resolution path, and add
-  the pinned stdout/Logger/SASL/explicit-stderr/direct-file-descriptor
-  dependency audit described above;
+- spike and install the standalone descriptor-3 envelope wrapper plus bounded
+  stdout group leader, make the shipped ReqLLM adapter use a structured
+  non-warning model-resolution path, and add the focused pinned
+  Logger/SASL/explicit-stderr/direct-file-descriptor secret audit described
+  above;
 - establish the `CommandEngine`/path-free `RunCoordinator` boundary above,
   including its owner-backed shared `open_session/1` acquisition operation;
   decompose `RunBuilder` behind it, and make activity monotonic;
@@ -1800,8 +1875,9 @@ directory.
   bundles, effective limits, normalized selections, and
   `ptc_semantic_revision`—before constructing the post-selection provider
   context;
-- split provider preflight into one shared audited-local check and an active
-  boundary used by both `doctor` and `run`; add the selected live-LLM adapter's
+- split provider preflight into deterministic per-occurrence audited-local
+  checks and an active boundary used by both `doctor` and `run`; add the
+  selected live-LLM adapter's
   single-attempt, deadline- and response-bounded real connectivity probe as a
   `doctor --connect`-only operation after that shared boundary, checking every
   selected occurrence before collapsing success to the alias result;
@@ -2045,11 +2121,28 @@ At minimum:
   discarded, callback-supplied retry metadata is ignored, and mere capability
   construction never emits a connectivity pass;
 - shipped probe tests through a counting local HTTP server, not only a fake
-  callback, proving metadata and completion paths disable SDK/HTTP retries and
-  redirects, make exactly one request on timeout/transport/`429`/`5xx`, enforce
-  one total `doctor_connectivity_timeout_ms` deadline, reject oversized declared
-  `Content-Length` before body consumption, and cancel a chunked response after
-  reading at most cap-plus-one bytes;
+  callback, proving metadata and completion paths disable SDK/HTTP retries,
+  redirects, and automatic decompression, request identity encoding, make
+  exactly one request on timeout/transport/`429`/`5xx`, enforce one total
+  `doctor_connectivity_timeout_ms` deadline, reject gzip/Brotli or any other
+  non-identity `Content-Encoding` and compressed `Transfer-Encoding` before
+  decompression, admit ordinary chunk framing, reject oversized declared
+  `Content-Length` before retaining or decoding body data, and cancel a chunked
+  response after reading at most cap-plus-one payload bytes; coalesced
+  header/body, unterminated/oversized status or header lines, repeated
+  informational responses, short keep-alive content-length, final short chunk,
+  a large announced chunk delivered through many small SSE writes, and
+  single-write compressed-expansion fixtures prove the bounded framing-aware
+  behavior rather than relying on server chunk timing; TCP and packaged TLS
+  backend conformance proves `recv_up_to` returns available partial data without
+  exceeding its requested maximum or total deadline, while request
+  serialization tests accept `/v1/chat/completions` and a canonical
+  `Authorization: Bearer <credential>` field, percent-encode admitted path
+  segments exactly once—including a base-path `%20` fixture that must not
+  become `%2520`—and reject invalid percent triplets, decoded slash/backslash,
+  raw spaces, CR/LF, NUL, other controls, or fragments in the target plus
+  invalid header-name or header-value bytes in declared headers and resolved
+  authorization before any bytes are sent;
 - a custom `probe` alias selected with distinct workflow and mission
   configurations, proving both occurrences are checked in the documented
   order, failure of either prevents the collapsed alias pass, success requires
@@ -2080,8 +2173,12 @@ At minimum:
 - `doctor --connect` without either required host or application argument
   rejected before activity, plus a selected write-capable MCP fixture proving
   the manifest `allow` list is honored;
-- shared audited-local model/adapter/launcher checks returning the same result
-  in `doctor` and `run`, with active checks skipped by default doctor;
+- shared audited-local model/adapter/launcher checks running in the exact
+  occurrence order and returning the same result in `doctor` and `run`, with
+  active checks skipped by default doctor; select one alias with distinct
+  workflow and mission configurations and prove both local occurrences run,
+  failure identifies the correct occurrence, and alias success is emitted only
+  after both pass;
 - provider preparation with destination and effective limits, followed by
   exact capability/data-class verification at acquisition;
 - missing application file, schema error, missing component, malformed Lisp,
@@ -2235,17 +2332,22 @@ At minimum:
 - packaged live-LLM runs with an allowed uncatalogued sentinel selector and a
   fake dependency that attempts direct `IO.warn`, proving structured ReqLLM
   resolution invokes no warning fallback, arbitrary command-descended `stdio`
-  is swallowed by the bounded group leader, stdout remains one envelope, and
-  the selector appears in neither stdout nor stderr; the fake
-  arbitrary-stderr path must fail the packaged support audit rather than being
-  executed, while separate
-  command-descended and globally supervised secret-bearing Logger/SASL
-  fixtures prove the absent console handler suppresses their reports and a
-  wrapper fixture proves only enumerated fixed stderr messages are emitted;
-  tests also prove Mix/host-owned modes never mutate VM-global IO registration
-  and the audit rejects an unclassified call site, dependency-version drift,
-  optional Logger handler installation, a globally supervised arbitrary
-  `stdio` write, and a direct-file-descriptor bypass;
+  is swallowed by the bounded group leader, arbitrary globally supervised and
+  direct-file-descriptor stdout is discarded on descriptor 1, stdout remains
+  one descriptor-3 envelope, and the selector appears in neither stdout nor
+  stderr; the fake arbitrary-stderr path must fail the packaged support audit
+  rather than being executed, while separate command-descended and globally
+  supervised secret-bearing Logger/SASL fixtures prove the absent console
+  handler suppresses their reports and a wrapper fixture proves only enumerated
+  fixed stderr messages are emitted; tests also prove descriptor 3 survives
+  the macOS/Linux release wrappers, is not inherited by launched providers or
+  ports, handles a caller-side close without an unbounded failure, preserves
+  the command exit status, and that Mix/host-owned modes never mutate VM-global
+  IO registration; the focused audit rejects an unclassified secret-bearing
+  stderr call site, dependency-version drift, optional Logger handler
+  installation, and fake same-VM native code that can target descriptor 3;
+  descriptor close/replacement fault injection proves the writer validates its
+  startup identity and never emits to a substituted target;
 - Mix parse, application, and occupied-destination failures with a sentinel
   `.env`, proving unconditional `app.start` is gone and neither `req_llm` nor
   `llm_db` starts before the marker;
@@ -2286,11 +2388,13 @@ This plan does not define:
 - a native lock-pool/ACL/statfs subsystem; or
 - backward-compatible CLI aliases.
 
-Start a separate outer-supervisor plan only after a packaged subprocess test or
-deployment demonstrates that controlled Logger/provider redirection cannot keep
-stdout parseable, reliable signal response is required, or child-tree cleanup
-requires a process boundary. Start a service-boundary plan when cloud
-deployment needs untrusted tenant handling;
+Start the outer-supervisor plan if any supported release target fails the
+descriptor-3 survival, noninheritance, broken-pipe, exit-status, focused
+descriptor-authority inventory, or startup-identity checks required above; do
+not substitute dependency-wide stdout auditing. It is also triggered when
+reliable signal response or child-tree cleanup requires a process boundary.
+Start a service-boundary plan when cloud deployment needs untrusted tenant
+handling;
 that plan must define authentication, isolation, credential ownership,
 cancellation, artifact durability, and resource quotas where the untrusted
 input actually enters.
