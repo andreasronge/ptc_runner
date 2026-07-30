@@ -861,7 +861,7 @@
       status: :supported,
       description: "Returns seq removing duplicates",
       notes:
-        "BUG GAP-S20: nil input currently raises instead of returning an empty seq. BUG GAP-S134: direct map input returns entries instead of raising"
+        "DIV-29: direct map input raises; use seq/entries/keys/vals for an explicit ordered map view"
     },
     %{
       name: "distinct?",
@@ -1820,7 +1820,7 @@
       status: :supported,
       description: "Returns name string of symbol/keyword",
       notes:
-        "DIV-19: quoted symbols are not supported as runtime values. BUG GAP-S129: character literals return strings instead of raising"
+        "DIV-19: inert quoted-symbol references are not accepted by name and symbol? remains false. BUG GAP-S129: character literals return strings instead of raising"
     },
     %{
       name: "namespace",
@@ -2144,9 +2144,10 @@
     },
     %{
       name: "quote",
-      status: :not_relevant,
+      status: :supported,
       description: "Returns form unevaluated",
-      notes: "quote syntax is intentionally unsupported; use vectors and data literals directly"
+      notes:
+        "DIV-19: only inert symbol references are supported; quoted collections and general quoted data remain unsupported, and symbol? returns false"
     },
     %{
       name: "rand",

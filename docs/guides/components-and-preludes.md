@@ -55,7 +55,7 @@ integer or `nil`; it does not make a positional argument omittable. In shaped
 maps, an optional field may be omitted or `nil`. Function signatures currently
 apply only to fixed-arity exports; the grammar has no rest-parameter contract.
 See [Signature syntax](../signature-syntax.md) for the complete grammar and the
-[PTC-Lisp specification](../ptc-lisp-specification.md#910-public-component-contracts).
+[PTC-Lisp specification](../ptc-lisp-specification.md#98-public-component-contracts).
 [Manifests and capabilities](manifests-and-capabilities.md#test-a-signed-mission-function-without-a-model)
 walks a credential-free run of a signature rejection and its model feedback.
 

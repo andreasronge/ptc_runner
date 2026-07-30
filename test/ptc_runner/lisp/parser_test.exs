@@ -38,6 +38,11 @@ defmodule PtcRunner.Lisp.ParserTest do
       assert {:error, {:parse_error, _}} = Parser.parse("#\"a\\\rb\"")
     end
 
+    test "unknown string and regex escapes are preserved verbatim" do
+      assert {:ok, {:string, ~S(a\qb)}} = Parser.parse(~S("a\qb"))
+      assert {:ok, {:regex_literal, ~S(a\qb)}} = Parser.parse(~S(#"a\qb"))
+    end
+
     test "keywords" do
       assert {:ok, {:keyword, :name}} = Parser.parse(":name")
       assert {:ok, {:keyword, "user_id"}} = Parser.parse(":user_id")

@@ -56,6 +56,7 @@ defmodule PtcRunner.Lisp.Eval do
   }
 
   alias PtcRunner.Lisp.Eval.Context, as: EvalContext
+  alias PtcRunner.Lisp.Format
   alias PtcRunner.Lisp.Format.Var
   alias PtcRunner.Lisp.Java.Callable, as: JavaCallable
   alias PtcRunner.Lisp.Java.Condition, as: JavaCondition
@@ -73,7 +74,9 @@ defmodule PtcRunner.Lisp.Eval do
   alias PtcRunner.Lisp.RuntimeCallable
   alias PtcRunner.Lisp.UntrustedRenderer
 
-  import PtcRunner.Lisp.Runtime, only: [flex_get: 2]
+  import PtcRunner.Lisp.Runtime, only: [flex_fetch: 2]
+
+  @max_trace_id_bytes 256
 
   @type env :: %{atom() => term()}
   @type tool_executor ::
@@ -308,17 +311,25 @@ defmodule PtcRunner.Lisp.Eval do
   # runtime error naming the binding. In permissive mode the lookup returns
   # `nil` for unknown keys.
   defp do_eval({:data, key}, %EvalContext{ctx: ctx, strict_data: true} = eval_ctx) do
-    if data_key_present?(ctx, key) do
-      {:ok, flex_get(ctx, key), eval_ctx}
-    else
-      {:error,
-       {:runtime_error,
-        "data/#{key} is not bound: the `context` object did not provide a `#{key}` key", nil}}
+    case data_fetch(ctx, key) do
+      {:ok, value} ->
+        {:ok, value, eval_ctx}
+
+      :error ->
+        {:error,
+         {:runtime_error,
+          "data/#{key} is not bound: the `context` object did not provide a `#{key}` key", nil}}
     end
   end
 
   defp do_eval({:data, key}, %EvalContext{ctx: ctx} = eval_ctx) do
-    {:ok, flex_get(ctx, key), eval_ctx}
+    value =
+      case data_fetch(ctx, key) do
+        {:ok, found} -> found
+        :error -> nil
+      end
+
+    {:ok, value, eval_ctx}
   end
 
   defp do_eval({:runtime_callable, namespace, name}, %EvalContext{} = eval_ctx) do
@@ -696,7 +707,7 @@ defmodule PtcRunner.Lisp.Eval do
             origin = EvalContext.current_origin(eval_ctx2)
             private_tool? = Map.get(tool_meta, :visibility) == :private
 
-            case JavaProject.project(args_map, :tool_argument, Map.get(tool_meta, :signature)) do
+            case prepare_tool_args(args_map, tool_meta, tool_name_str) do
               {:ok, prepared_args} ->
                 record_tool_call(
                   tool_name_str,
@@ -708,9 +719,12 @@ defmodule PtcRunner.Lisp.Eval do
                   private_tool?
                 )
 
-              {:error, reason} ->
-                {:error, {:tool_error, tool_name_str, {:java_projection_error, reason}}}
+              {:error, _reason} = error ->
+                error
             end
+
+          {:error, {:java_projection_error, reason}} ->
+            {:error, {:tool_error, to_string(tool_name), {:java_projection_error, reason}}}
 
           {:error, _} = err ->
             err
@@ -718,6 +732,26 @@ defmodule PtcRunner.Lisp.Eval do
 
       {:error, _} = err ->
         err
+    end
+  end
+
+  defp prepare_tool_args(args_map, tool_meta, tool_name) do
+    case Format.externalize_symbol_refs(args_map) do
+      {:ok, public_args} ->
+        project_tool_args(public_args, tool_meta, tool_name)
+
+      {:error, _reason} = error ->
+        error
+    end
+  end
+
+  defp project_tool_args(public_args, tool_meta, tool_name) do
+    case JavaProject.project(public_args, :tool_argument, Map.get(tool_meta, :signature)) do
+      {:ok, prepared_args} ->
+        {:ok, prepared_args}
+
+      {:error, reason} ->
+        {:error, {:tool_error, tool_name, {:java_projection_error, reason}}}
     end
   end
 
@@ -1106,24 +1140,32 @@ defmodule PtcRunner.Lisp.Eval do
 
   defp build_args_map([{:symbol_ref, ref}, args], tool_name)
        when is_binary(ref) and is_map(args) and not is_struct(args) do
-    if tool_call_name?(tool_name) do
-      case String.split(ref, "/", parts: 2) do
-        [server, tool] when server != "" and tool != "" ->
-          case stringify_keys(args) do
-            {:ok, normalized} ->
-              {:ok, %{"server" => server, "tool" => tool, "args" => normalized}}
+    cond do
+      not tool_call_name?(tool_name) ->
+        invalid_positional_args([{:symbol_ref, ref}, args], tool_name)
 
-            :ambiguous ->
-              {:ok, %AmbiguousArguments{}}
-          end
+      not Format.SymbolRef.valid_name?(ref) ->
+        {:error, {:invalid_symbol_ref, []}}
 
-        _ ->
-          {:error,
-           {:invalid_tool_args,
-            "tool/call symbol form requires a qualified symbol like 'server/tool"}}
-      end
-    else
-      invalid_positional_args([{:symbol_ref, ref}, args], tool_name)
+      true ->
+        case String.split(ref, "/", parts: 2) do
+          [server, tool] when server != "" and tool != "" ->
+            case stringify_keys(args) do
+              {:ok, normalized} ->
+                {:ok, %{"server" => server, "tool" => tool, "args" => normalized}}
+
+              :ambiguous ->
+                {:ok, %AmbiguousArguments{}}
+
+              {:error, _reason} = error ->
+                error
+            end
+
+          _ ->
+            {:error,
+             {:invalid_tool_args,
+              "tool/call symbol form requires a qualified symbol like 'server/tool"}}
+        end
     end
   end
 
@@ -1140,7 +1182,11 @@ defmodule PtcRunner.Lisp.Eval do
 
   defp build_args_map(args, tool_name) do
     if keyword_style_args?(args) do
-      {:ok, args_to_string_map(args)}
+      case args_to_string_map(args) do
+        {:ok, normalized} -> {:ok, normalized}
+        :ambiguous -> {:ok, %AmbiguousArguments{}}
+        {:error, _reason} = error -> error
+      end
     else
       invalid_positional_args(args, tool_name)
     end
@@ -1184,32 +1230,30 @@ defmodule PtcRunner.Lisp.Eval do
     args
     |> Enum.chunk_every(2)
     |> Enum.reduce_while({:ok, %{}}, fn [key, value], {:ok, normalized} ->
-      normalized_key = stringify_key(key)
-
-      with false <- Map.has_key?(normalized, normalized_key),
+      with {:ok, normalized_key} <- stringify_key(key),
+           false <- Map.has_key?(normalized, normalized_key),
            {:ok, normalized_value} <- stringify_value(value) do
         {:cont, {:ok, Map.put(normalized, normalized_key, normalized_value)}}
       else
-        _ -> {:halt, :ambiguous}
+        true -> {:halt, :ambiguous}
+        :ambiguous -> {:halt, :ambiguous}
+        {:error, _reason} = error -> {:halt, error}
       end
     end)
-    |> case do
-      {:ok, normalized} -> normalized
-      :ambiguous -> %AmbiguousArguments{}
-    end
   end
 
   # Recursively convert map keys to strings (for tool boundary).
   # Handles nested maps and lists to ensure full protection against atom leaks.
   defp stringify_keys(map) when is_map(map) and not is_struct(map) do
     Enum.reduce_while(map, {:ok, %{}}, fn {key, value}, {:ok, normalized} ->
-      normalized_key = stringify_key(key)
-
-      with false <- Map.has_key?(normalized, normalized_key),
+      with {:ok, normalized_key} <- stringify_key(key),
+           false <- Map.has_key?(normalized, normalized_key),
            {:ok, normalized_value} <- stringify_value(value) do
         {:cont, {:ok, Map.put(normalized, normalized_key, normalized_value)}}
       else
-        _ -> {:halt, :ambiguous}
+        true -> {:halt, :ambiguous}
+        :ambiguous -> {:halt, :ambiguous}
+        {:error, _reason} = error -> {:halt, error}
       end
     end)
   end
@@ -1217,35 +1261,142 @@ defmodule PtcRunner.Lisp.Eval do
   # Recursively stringify values (for nested maps/lists in tool args).
   # A keyword value becomes its plain name string — deterministic and
   # JSON-friendly, matching how `stringify_key/1` handles keyword keys (#964).
-  defp stringify_value(%LispKeyword{name: name}), do: {:ok, name}
+  defp stringify_value(%LispKeyword{name: name} = keyword) do
+    if LispKeyword.valid?(keyword),
+      do: {:ok, name},
+      else: {:error, {:invalid_keyword, []}}
+  end
 
   defp stringify_value(map) when is_map(map) and not is_struct(map), do: stringify_keys(map)
 
-  defp stringify_value(list) when is_list(list) do
-    Enum.reduce_while(list, {:ok, []}, fn value, {:ok, normalized} ->
+  defp stringify_value(%MapSet{map: map} = set) when is_map(map) do
+    values = Map.keys(map)
+
+    if map_size(set) == 2 and MapSet.new(values) == set do
+      values
+      |> Enum.reduce_while({:ok, []}, fn value, {:ok, normalized} ->
+        case stringify_value(value) do
+          {:ok, item} -> {:cont, {:ok, [item | normalized]}}
+          :ambiguous -> {:halt, :ambiguous}
+          {:error, _reason} = error -> {:halt, error}
+        end
+      end)
+      |> case do
+        {:ok, normalized} ->
+          projected = MapSet.new(normalized)
+
+          if MapSet.size(projected) == length(normalized),
+            do: {:ok, projected},
+            else: :ambiguous
+
+        :ambiguous ->
+          :ambiguous
+
+        {:error, _reason} = error ->
+          error
+      end
+    else
+      {:error, {:invalid_projection_struct, [], MapSet}}
+    end
+  end
+
+  defp stringify_value(%MapSet{}), do: {:error, {:invalid_projection_struct, [], MapSet}}
+
+  defp stringify_value(struct) when is_struct(struct) do
+    module = Map.fetch!(struct, :__struct__)
+
+    struct
+    |> Map.from_struct()
+    |> Enum.reduce_while({:ok, %{}}, fn {field, value}, {:ok, normalized} ->
       case stringify_value(value) do
-        {:ok, item} -> {:cont, {:ok, [item | normalized]}}
-        :ambiguous -> {:halt, :ambiguous}
+        {:ok, normalized_value} ->
+          {:cont, {:ok, Map.put(normalized, field, normalized_value)}}
+
+        :ambiguous ->
+          {:halt, :ambiguous}
+
+        {:error, _reason} = error ->
+          {:halt, error}
       end
     end)
     |> case do
-      {:ok, normalized} -> {:ok, Enum.reverse(normalized)}
+      {:ok, normalized} -> {:ok, Map.put(normalized, :__struct__, module)}
       :ambiguous -> :ambiguous
+      {:error, _reason} = error -> error
+    end
+  end
+
+  defp stringify_value(list) when is_list(list) do
+    if proper_list?(list) do
+      Enum.reduce_while(list, {:ok, []}, fn value, {:ok, normalized} ->
+        case stringify_value(value) do
+          {:ok, item} -> {:cont, {:ok, [item | normalized]}}
+          :ambiguous -> {:halt, :ambiguous}
+          {:error, _reason} = error -> {:halt, error}
+        end
+      end)
+      |> case do
+        {:ok, normalized} -> {:ok, Enum.reverse(normalized)}
+        :ambiguous -> :ambiguous
+        {:error, _reason} = error -> error
+      end
+    else
+      {:error, {:invalid_lisp_list, []}}
+    end
+  end
+
+  defp stringify_value(tuple) when is_tuple(tuple) do
+    tuple
+    |> Tuple.to_list()
+    |> Enum.reduce_while({:ok, []}, fn value, {:ok, normalized} ->
+      case stringify_value(value) do
+        {:ok, item} -> {:cont, {:ok, [item | normalized]}}
+        :ambiguous -> {:halt, :ambiguous}
+        {:error, _reason} = error -> {:halt, error}
+      end
+    end)
+    |> case do
+      {:ok, normalized} -> {:ok, normalized |> Enum.reverse() |> List.to_tuple()}
+      :ambiguous -> :ambiguous
+      {:error, _reason} = error -> error
     end
   end
 
   defp stringify_value(other), do: {:ok, other}
 
+  defp proper_list?([]), do: true
+  defp proper_list?([_head | tail]), do: proper_list?(tail)
+  defp proper_list?(_other), do: false
+
   defp normalized_args(map) do
     case stringify_keys(map) do
       {:ok, normalized} -> {:ok, normalized}
       :ambiguous -> {:ok, %AmbiguousArguments{}}
+      {:error, _reason} = error -> error
     end
   end
 
-  defp stringify_key(k) when is_atom(k), do: KeyNormalizer.normalize_key(k)
-  defp stringify_key(%LispKeyword{name: name}), do: KeyNormalizer.normalize_key(name)
-  defp stringify_key(k) when is_binary(k), do: KeyNormalizer.normalize_key(k)
+  defp stringify_key({:symbol_ref, name}) do
+    if Format.SymbolRef.valid_name?(name),
+      do: {:ok, %Format.SymbolRef{name: name}},
+      else: {:error, {:invalid_symbol_ref, []}}
+  end
+
+  defp stringify_key(%{__struct__: Format.SymbolRef} = ref) do
+    if Format.SymbolRef.valid?(ref),
+      do: {:ok, ref},
+      else: {:error, {:invalid_symbol_ref, []}}
+  end
+
+  defp stringify_key(k) when is_atom(k), do: {:ok, KeyNormalizer.normalize_key(k)}
+
+  defp stringify_key(%LispKeyword{name: name} = keyword) do
+    if LispKeyword.valid?(keyword),
+      do: {:ok, KeyNormalizer.normalize_key(name)},
+      else: {:error, {:invalid_keyword, []}}
+  end
+
+  defp stringify_key(k) when is_binary(k), do: {:ok, KeyNormalizer.normalize_key(k)}
 
   defp stringify_key(%{__struct__: module} = key)
        when module in [
@@ -1256,9 +1407,16 @@ defmodule PtcRunner.Lisp.Eval do
               JavaDuration,
               JavaDate
             ],
-       do: key
+       do: {:ok, key}
 
-  defp stringify_key(k), do: inspect(k)
+  defp stringify_key(k) do
+    with {:ok, public_key} <- Format.externalize_symbol_refs(k) do
+      case JavaProject.project(public_key, :tool_argument) do
+        {:ok, projected_key} -> {:ok, inspect(projected_key)}
+        {:error, reason} -> {:error, {:java_projection_error, reason}}
+      end
+    end
+  end
 
   # Record a tool call with timing, execution, error capture, and evaluation context update.
   # Captures the error field if the tool raises an exception, records it, and throws a special
@@ -1386,7 +1544,16 @@ defmodule PtcRunner.Lisp.Eval do
     {result, error, tool_error_reason} =
       case JavaProject.project(result, :tool_result) do
         {:ok, projected} ->
-          {projected, error, tool_error_reason}
+          case Format.internalize_symbol_refs(projected) do
+            {:ok, internalized} ->
+              {internalized, error, tool_error_reason}
+
+            {:error, reason} ->
+              projection_error = lisp_projection_error(reason)
+
+              {nil, format_tool_failure(tool_name, projection_error),
+               {:tool_error, tool_name, projection_error}}
+          end
 
         {:error, reason} ->
           projection_error = {:java_projection_error, reason}
@@ -1396,7 +1563,7 @@ defmodule PtcRunner.Lisp.Eval do
       end
 
     # Preserve nested metadata carried by a failed tool result.
-    child_trace_id = child_trace_id || error_child_trace_id
+    child_trace_id = normalize_child_trace_id(child_trace_id || error_child_trace_id)
     child_step = child_step || error_child_step
 
     {child_trace_id, child_step} =
@@ -1491,6 +1658,11 @@ defmodule PtcRunner.Lisp.Eval do
     UntrustedRenderer.tool_failure(name, data)
   end
 
+  defp lisp_projection_error({:invalid_keyword, _path} = reason),
+    do: {:lisp_value_projection_error, reason}
+
+  defp lisp_projection_error(reason), do: {:symbol_ref_projection_error, reason}
+
   defp maybe_put_child_result(nil, nil), do: :ok
 
   defp maybe_put_child_result(child_trace_id, child_step),
@@ -1575,6 +1747,13 @@ defmodule PtcRunner.Lisp.Eval do
 
   defp unwrap_tool_result(result), do: {result, nil, nil}
 
+  defp normalize_child_trace_id(trace_id)
+       when is_binary(trace_id) and byte_size(trace_id) in 1..@max_trace_id_bytes do
+    if String.valid?(trace_id), do: trace_id, else: nil
+  end
+
+  defp normalize_child_trace_id(_trace_id), do: nil
+
   # Helper for map pair evaluation to reduce nesting
   defp eval_map_pair(k_ast, v_ast, %EvalContext{} = eval_ctx, acc) do
     with {:ok, k, eval_ctx2} <- eval_child(k_ast, eval_ctx),
@@ -1601,29 +1780,25 @@ defmodule PtcRunner.Lisp.Eval do
   # Strict-data lookup helpers (used by `do_eval({:data, key}, ...)`)
   # ============================================================
 
-  # `data/<key>` is bound when either the binary or atom form of the
-  # key is present in `ctx`. Mirrors `flex_get`'s atom/binary-tolerant
-  # access so strict mode does not reject keys that flex_get would
-  # successfully resolve.
-  defp data_key_present?(ctx, key) when is_map(ctx) and is_atom(key) do
-    Map.has_key?(ctx, key) or Map.has_key?(ctx, Atom.to_string(key))
+  # Public SymbolRef context keys internalize to `{:symbol_ref, name}` while
+  # `data/'name` carries the display spelling. Preserve normal flexible lookup
+  # precedence, then bridge that display spelling to the internal key.
+  defp data_fetch(ctx, key) when is_map(ctx) do
+    case flex_fetch(ctx, key) do
+      {:ok, _value} = found -> found
+      :error -> fetch_symbol_ref_data_key(ctx, key)
+    end
   end
 
-  defp data_key_present?(ctx, key) when is_map(ctx) and is_binary(key) do
-    Map.has_key?(ctx, key) or
-      case key_to_existing_atom(key) do
-        {:ok, atom} -> Map.has_key?(ctx, atom)
-        :error -> false
-      end
+  defp data_fetch(_ctx, _key), do: :error
+
+  defp fetch_symbol_ref_data_key(ctx, <<?', name::binary>>) do
+    if Format.SymbolRef.valid_name?(name),
+      do: Map.fetch(ctx, {:symbol_ref, name}),
+      else: :error
   end
 
-  defp data_key_present?(_ctx, _key), do: false
-
-  defp key_to_existing_atom(bin) do
-    {:ok, String.to_existing_atom(bin)}
-  rescue
-    ArgumentError -> :error
-  end
+  defp fetch_symbol_ref_data_key(_ctx, _key), do: :error
 
   # ============================================================
   # Sequential evaluation helpers
@@ -1861,7 +2036,7 @@ defmodule PtcRunner.Lisp.Eval do
   defp keyword_value(name) when is_atom(name), do: name
   defp keyword_value(name) when is_binary(name), do: LispKeyword.new(name)
 
-  defp keyword_runtime?(%LispKeyword{}), do: true
+  defp keyword_runtime?(%LispKeyword{} = keyword), do: LispKeyword.valid?(keyword)
   defp keyword_runtime?(atom) when is_atom(atom), do: not is_nil(atom) and not is_boolean(atom)
   defp keyword_runtime?(_), do: false
 

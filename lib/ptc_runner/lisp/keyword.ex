@@ -29,6 +29,13 @@ defmodule PtcRunner.Lisp.Keyword do
   def valid_name?(name) when is_binary(name), do: Regex.match?(@valid_name, name)
   def valid_name?(_), do: false
 
+  @doc false
+  @spec valid?(term()) :: boolean()
+  def valid?(%__MODULE__{name: name} = value),
+    do: map_size(value) == 2 and valid_name?(name)
+
+  def valid?(_value), do: false
+
   @spec name(atom() | t()) :: String.t()
   def name(%__MODULE__{name: name}), do: name
   def name(atom) when is_atom(atom), do: Atom.to_string(atom)

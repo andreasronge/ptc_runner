@@ -3,6 +3,7 @@ defmodule PtcRunner.Lisp.Java.ProjectTest do
 
   alias PtcRunner.Lisp
   alias PtcRunner.Lisp.Eval.Helpers
+  alias PtcRunner.Lisp.ExternalizedCollision
   alias PtcRunner.Lisp.Format
   alias PtcRunner.Lisp.Java.Callable
   alias PtcRunner.Lisp.Java.Primitive
@@ -11,6 +12,7 @@ defmodule PtcRunner.Lisp.Java.ProjectTest do
   alias PtcRunner.Lisp.Java.Time.Instant
   alias PtcRunner.Lisp.Java.Time.LocalDate
   alias PtcRunner.Lisp.Java.Util.Date, as: JavaDate
+  alias PtcRunner.Lisp.Keyword
   alias PtcRunner.Lisp.Result
 
   test "projects valid Java leaves and retains them only at the native boundary" do
@@ -36,6 +38,57 @@ defmodule PtcRunner.Lisp.Java.ProjectTest do
     assert {:error,
             {:unsupported_java_boundary_value, [], :tool_argument, :boolean_parse_boolean}} =
              Project.project(callable, :tool_argument)
+  end
+
+  test "rejects improper lists at Java and public projection boundaries" do
+    malformed = [1 | 2]
+
+    assert {:error, {:invalid_projection_list, []}} = Project.project(malformed, :public)
+
+    assert {:error, {:invalid_projection_list, []}} =
+             Project.project(malformed, :tool_argument, "(x: int) -> any")
+
+    assert {:error, {:java_projection_error, {:invalid_projection_list, []}}} =
+             Lisp.externalize_value(malformed)
+  end
+
+  test "public Step projection sanitizes every auxiliary field" do
+    secret = fn -> "captured-secret" end
+
+    step = %{
+      Result.ok(:ok, %{"hidden" => secret})
+      | messages: [%{callable: secret, ref: {:symbol_ref, "server/tool"}}],
+        field_descriptions: %{result: {:symbol_ref, "result/value"}},
+        tools: %{hidden: secret}
+    }
+
+    {:ok, projected_native} = Lisp.project_native_result({:ok, step})
+
+    for projected <- [projected_native, Lisp.externalize_value(step)] do
+      assert [%{callable: %Format.Fn{}, ref: %Format.SymbolRef{name: "server/tool"}}] =
+               projected.messages
+
+      assert projected.field_descriptions == %{
+               result: %Format.SymbolRef{name: "result/value"}
+             }
+
+      assert %{hidden: %Format.Fn{}} = projected.tools
+      assert %Format.Fn{} = projected.memory["hidden"]
+    end
+  end
+
+  test "public continuation documents Java-capturing closures as observation-only" do
+    source = ~S|(def f (let [parse Integer/parseInt] (fn [value] (parse value))))|
+
+    assert {:ok, public_first} = Lisp.run(source)
+
+    assert {:error, %{fail: %{reason: :not_callable}}} =
+             Lisp.run(~S|(f "42")|, memory: public_first.memory)
+
+    assert {:ok, native_first} = Lisp.run_native(source)
+
+    assert {:ok, %{return: %Primitive{kind: :int, value: 42}}} =
+             Lisp.run_native(~S|(f "42")|, memory: native_first.memory)
   end
 
   test "projects temporal wrappers according to public and direct-tool contracts" do
@@ -120,6 +173,354 @@ defmodule PtcRunner.Lisp.Java.ProjectTest do
              Lisp.run("(tool/echo {})", tools: %{"echo" => returning_tool})
   end
 
+  test "tool-result symbol references reject inverse map and set collisions" do
+    symbol = %Format.SymbolRef{name: "x"}
+    native = {:symbol_ref, "x"}
+
+    for result <- [
+          %{symbol => :public, native => :native},
+          MapSet.new([symbol, native])
+        ] do
+      assert {:error, %{fail: %{reason: :tool_error}}} =
+               Lisp.run("(tool/echo {})", tools: %{"echo" => {fn _args -> result end, :skip}})
+    end
+  end
+
+  test "Java projection rejects malformed MapSet structs before enumeration" do
+    malformed = Map.put(MapSet.new([%Format.SymbolRef{name: "x"}]), :map, :invalid)
+    forged = Map.put(MapSet.new([%Format.SymbolRef{name: "x"}]), :extra, true)
+
+    for value <- [malformed, forged],
+        boundary <- [:native, :continuation, :public, :tool_argument, :tool_result, :kernel_json] do
+      assert {:error, {:invalid_projection_struct, [], MapSet}} =
+               Project.project(value, boundary)
+    end
+
+    for value <- [malformed, forged] do
+      assert {:error, {:invalid_projection_struct, [], MapSet}} =
+               Project.project(value, :tool_argument, "(value :int) -> :any")
+    end
+  end
+
+  test "tool results reject malformed symbol-reference wrappers" do
+    for malformed <- [
+          %Format.SymbolRef{name: %{}},
+          {:symbol_ref, <<255>>}
+        ] do
+      assert {:error, %{fail: %{reason: :tool_error}}} =
+               Lisp.run("(tool/echo {})",
+                 tools: %{"echo" => {fn _args -> malformed end, :skip}}
+               )
+    end
+  end
+
+  test "tool-result symbol references are internalized through validated structs" do
+    symbol = %Format.SymbolRef{name: "x"}
+    result = %Result{return: symbol}
+
+    assert {:ok, %{return: %Result{return: ^symbol}}} =
+             Lisp.run("(tool/echo {})", tools: %{"echo" => {fn _args -> result end, :skip}})
+  end
+
+  test "tool-result symbol references use their public wrapper when forwarded to another tool" do
+    parent = self()
+    symbol = %Format.SymbolRef{name: "x"}
+
+    tools = %{
+      "source" => {fn _args -> symbol end, :skip},
+      "sink" =>
+        {fn args ->
+           send(parent, {:symbol_args, args})
+           :ok
+         end, :skip}
+    }
+
+    assert {:ok, %{return: :ok}} =
+             Lisp.run(
+               "(let [ref (tool/source {})] (tool/sink {:ref ref :by-ref {ref 1}}))",
+               tools: tools
+             )
+
+    assert_receive {:symbol_args, %{"ref" => ^symbol, "by_ref" => %{"'x" => 1}}}
+  end
+
+  test "tool-result structs preserve symbol-reference map keys when forwarded" do
+    parent = self()
+    symbol = %Format.SymbolRef{name: "x"}
+
+    tools = %{
+      "source" => {fn _args -> %Result{return: %{symbol => 1}} end, :skip},
+      "sink" =>
+        {fn args ->
+           send(parent, {:symbol_struct_args, args})
+           :ok
+         end, :skip}
+    }
+
+    assert {:ok, %{return: :ok}} =
+             Lisp.run(
+               "(let [result (tool/source {})] (tool/sink {:payload result}))",
+               tools: tools
+             )
+
+    assert_receive {:symbol_struct_args, %{"payload" => %Result{return: %{"'x" => 1}}}}
+  end
+
+  test "tool arguments reject malformed native symbol-reference map keys" do
+    parent = self()
+
+    tool = fn args ->
+      send(parent, {:malformed_symbol_args, args})
+      :ok
+    end
+
+    for malformed <- [
+          {:symbol_ref, "x y"},
+          %Format.SymbolRef{name: "x y"},
+          %{__struct__: Format.SymbolRef},
+          %{__struct__: Format.SymbolRef, name: "x", extra: true}
+        ],
+        saved <- [%{malformed => 1}, %Result{return: %{malformed => 1}}] do
+      assert {:error, %{fail: %{reason: :invalid_symbol_ref}}} =
+               Lisp.run_native("(tool/sink {:payload saved})",
+                 memory: %{saved: saved},
+                 tools: %{"sink" => {tool, :skip}}
+               )
+    end
+
+    refute_receive {:malformed_symbol_args, _args}
+  end
+
+  test "tool arguments preserve exact quoted-symbol key spelling" do
+    parent = self()
+
+    tool =
+      {fn args ->
+         send(parent, {:quoted_symbol_args, args})
+         :ok
+       end, :skip}
+
+    assert {:ok, %{return: :ok}} =
+             Lisp.run("(tool/sink {'foo-bar 1 :nested {'foo-bar 2}})",
+               tools: %{"sink" => tool}
+             )
+
+    assert_receive {:quoted_symbol_args, %{"'foo-bar" => 1, "nested" => %{"'foo-bar" => 2}}}
+
+    assert {:ok, %{return: :ok}} =
+             Lisp.run("(tool/sink {'foo-bar 1 'foo_bar 2})",
+               tools: %{"sink" => tool}
+             )
+
+    assert_receive {:quoted_symbol_args, %{"'foo-bar" => 1, "'foo_bar" => 2}}
+  end
+
+  test "native tool arguments reject malformed keyword wrappers" do
+    parent = self()
+
+    tool =
+      {fn args ->
+         send(parent, {:keyword_args, args})
+         :ok
+       end, :skip}
+
+    for malformed <- [
+          %PtcRunner.Lisp.Keyword{name: %{}},
+          %{__struct__: PtcRunner.Lisp.Keyword, name: "valid", extra: true}
+        ],
+        saved <- [%{"value" => malformed}, %{malformed => "value"}] do
+      assert {:error, %{fail: %{reason: :invalid_keyword}}} =
+               Lisp.run_native("(tool/sink saved)",
+                 memory: %{"saved" => saved},
+                 tools: %{"sink" => tool}
+               )
+    end
+
+    refute_receive {:keyword_args, _args}
+  end
+
+  test "tool arguments project and validate boundary values inside composite keys" do
+    parent = self()
+    {:ok, int} = Primitive.new(:int, 1)
+    forged_int = %Primitive{kind: :int, value: 9_999_999_999}
+
+    tool = fn args ->
+      send(parent, {:composite_symbol_args, args})
+      :ok
+    end
+
+    assert {:ok, %{return: :ok}} =
+             Lisp.run("(tool/sink {['foo] 1})", tools: %{"sink" => {tool, :skip}})
+
+    assert_receive {:composite_symbol_args, %{"['foo]" => 1}}
+
+    assert {:ok, %{return: :ok}} =
+             Lisp.run_native("(tool/sink saved)",
+               memory: %{saved: %{{{:symbol_ref, "foo"}} => 1}},
+               tools: %{"sink" => {tool, :skip}}
+             )
+
+    assert_receive {:composite_symbol_args, %{"{'foo}" => 1}}
+
+    assert {:ok, %{return: :ok}} =
+             Lisp.run_native("(tool/sink saved)",
+               memory: %{saved: %{[int] => :vector, {int} => :tuple}},
+               tools: %{"sink" => {tool, :skip}}
+             )
+
+    assert_receive {:composite_symbol_args, %{"[1]" => :vector, "{1}" => :tuple}}
+
+    for malformed_key <- [
+          [%Format.SymbolRef{name: "x y"}],
+          {{:symbol_ref, "x y"}},
+          %Result{return: {:symbol_ref, "x y"}}
+        ] do
+      assert {:error, %{fail: %{reason: :invalid_symbol_ref}}} =
+               Lisp.run_native("(tool/sink saved)",
+                 memory: %{saved: %{malformed_key => 1}},
+                 tools: %{"sink" => {tool, :skip}}
+               )
+    end
+
+    for malformed_key <- [
+          [forged_int],
+          {forged_int},
+          %Result{return: forged_int}
+        ] do
+      assert {:error, %{fail: %{reason: :tool_error}}} =
+               Lisp.run_native("(tool/sink saved)",
+                 memory: %{saved: %{malformed_key => 1}},
+                 tools: %{"sink" => {tool, :skip}}
+               )
+    end
+
+    refute_receive {:composite_symbol_args, _args}
+  end
+
+  test "tool-result symbol collisions nested in validated structs are rejected" do
+    symbol = %Format.SymbolRef{name: "x"}
+    result = %Result{return: %{symbol => :public, {:symbol_ref, "x"} => :native}}
+
+    assert {:error, %{fail: %{reason: :tool_error}}} =
+             Lisp.run("(tool/echo {})", tools: %{"echo" => {fn _args -> result end, :skip}})
+  end
+
+  test "strict public projection detects JSON key collisions nested in structs" do
+    result = %Result{return: %{{:symbol_ref, "x"} => :symbol, "'x" => :string}}
+
+    assert {:error, {:public_projection_collision, [{:struct_field, :return}], :map}} =
+             Lisp.project_boundary_value(result, :kernel_json)
+  end
+
+  test "public projection rejects malformed symbol-reference outputs" do
+    for malformed_native <- [
+          {:symbol_ref, <<255>>},
+          {:symbol_ref, ""},
+          {:symbol_ref, "x y"},
+          {:symbol_ref, "x\n(tool/other {})"},
+          {:symbol_ref, "λ"}
+        ] do
+      assert {:error, {:invalid_symbol_ref, _path}} =
+               Lisp.project_boundary_value(malformed_native, :kernel_json)
+    end
+
+    assert {:error, {:invalid_symbol_ref, _path}} =
+             Lisp.project_boundary_value(%Format.SymbolRef{name: %{}}, :kernel_json)
+
+    assert {:error, {:invalid_projection_struct, _path, Format.SymbolRef}} =
+             Lisp.project_boundary_value(%{__struct__: Format.SymbolRef}, :kernel_json)
+  end
+
+  test "native Step and memory projection reject malformed symbol references" do
+    malformed = {:symbol_ref, <<255>>}
+
+    assert {:error, {:symbol_ref_projection_error, {:invalid_symbol_ref, _path}}} =
+             Lisp.externalize_value(malformed)
+
+    assert {:error, %{fail: %{reason: :invalid_symbol_ref}, memory: %{}}} =
+             Lisp.project_native_result({:ok, %Result{return: malformed, memory: %{}}})
+
+    assert {:error, %{fail: %{reason: :invalid_symbol_ref}, memory: %{}}} =
+             Lisp.project_native_result(
+               {:ok, %Result{return: :ok, memory: %{"bad" => malformed}}}
+             )
+
+    assert {:error, {:symbol_ref_projection_error, {:invalid_symbol_ref, _path}}} =
+             Lisp.externalize_memory(%{"bad" => malformed})
+  end
+
+  test "memory projection externalizes native symbol-reference keys without losing collisions" do
+    symbol = %Format.SymbolRef{name: "x"}
+
+    assert Lisp.externalize_memory(%{{:symbol_ref, "x"} => :native}) == %{symbol => :native}
+
+    externalized =
+      Lisp.externalize_memory(%{
+        symbol => :public,
+        {:symbol_ref, "x"} => :native
+      })
+
+    assert map_size(externalized) == 2
+    assert externalized |> Map.values() |> Enum.sort() == [:native, :public]
+
+    assert Enum.all?(Map.keys(externalized), fn
+             %ExternalizedCollision{collection: :map, value: ^symbol} -> true
+             _key -> false
+           end)
+  end
+
+  test "Java projection errors preserve valid effects and discard malformed diagnostics" do
+    malformed = {:symbol_ref, <<255>>}
+    tool_call = %{name: "echo", arguments: %{}, result: :ok}
+
+    step = %{
+      Result.ok(%Primitive{kind: :int, value: :invalid}, %{})
+      | prints: ["tool completed"],
+        tool_calls: [tool_call],
+        child_traces: ["child-1"],
+        child_steps: [%Result{return: malformed}]
+    }
+
+    assert {:error,
+            %{
+              fail: %{reason: :java_projection_error},
+              memory: %{},
+              prints: ["tool completed"],
+              tool_calls: [^tool_call],
+              child_traces: ["child-1"],
+              child_steps: [%{fail: %{reason: :invalid_symbol_ref}}]
+            }} = Lisp.project_native_result({:ok, step})
+  end
+
+  test "symbol projection errors discard malformed child-trace metadata" do
+    step = %{Result.ok(:ok, %{}) | child_traces: [{:symbol_ref, <<255>>}]}
+
+    assert {:error,
+            %{
+              fail: %{reason: :invalid_symbol_ref},
+              child_traces: []
+            }} = Lisp.project_native_result({:ok, step})
+  end
+
+  test "malformed tool child-trace metadata cannot erase the effect ledger" do
+    parent = self()
+
+    tool = fn _args ->
+      send(parent, :tool_called)
+      %{__child_trace_id__: {:symbol_ref, <<255>>}, value: :ok}
+    end
+
+    assert {:ok,
+            %{
+              return: :ok,
+              child_traces: [],
+              tool_calls: [%{name: "echo"} = tool_call]
+            }} = Lisp.run("(tool/echo {})", tools: %{"echo" => {tool, :skip}})
+
+    refute Map.has_key?(tool_call, :child_trace_id)
+    assert_received :tool_called
+  end
+
   test "signed tool projection scans Java values nested in ordinary structs" do
     {:ok, instant} = Instant.parse(["2024-01-02T03:04:05.123456Z"])
     parent = self()
@@ -137,6 +538,23 @@ defmodule PtcRunner.Lisp.Java.ProjectTest do
 
     assert_receive {:struct_temporal_args,
                     %{"payload" => %Result{return: "2024-01-02T03:04:05.123456Z"}}}
+  end
+
+  test "tool argument normalization scans keyword values nested in ordinary structs" do
+    parent = self()
+
+    tool = fn args ->
+      send(parent, {:struct_keyword_args, args})
+      :ok
+    end
+
+    assert {:ok, %{return: :ok}} =
+             Lisp.run_native("(tool/echo {:payload data/result})",
+               context: %{"result" => %Result{return: Keyword.new("novel")}},
+               tools: %{"echo" => {tool, "(payload :any) -> :any"}}
+             )
+
+    assert_receive {:struct_keyword_args, %{"payload" => %Result{return: "novel"}}}
   end
 
   test "untyped map tool contracts project nested Java values as any" do

@@ -3,6 +3,7 @@ defmodule PtcRunner.Lisp.IntegrationTest do
 
   alias PtcRunner.Lisp
   alias PtcRunner.Lisp.Format
+  alias PtcRunner.Lisp.Prelude.Compiler
 
   describe "explicit storage via def" do
     test "def stores value in user_ns, accessible in same expression" do
@@ -17,6 +18,247 @@ defmodule PtcRunner.Lisp.IntegrationTest do
       source = "previous"
       {:ok, %{return: result, memory: _}} = Lisp.run(source, memory: mem)
       assert result == 50
+    end
+  end
+
+  describe "quoted symbol references" do
+    test "reader quote and quote form produce the same inert public value" do
+      assert {:ok, %{return: %Format.SymbolRef{name: "x"} = reader_quote}} =
+               Lisp.run("'x")
+
+      assert {:ok, %{return: %Format.SymbolRef{name: "x"} = quote_form}} =
+               Lisp.run("(quote x)")
+
+      assert reader_quote == quote_form
+    end
+
+    test "reader quote alone accepts reserved and numeric-looking token spellings" do
+      for name <- ["nil", "-1", "*1"] do
+        assert {:ok, %{return: %Format.SymbolRef{name: ^name}}} = Lisp.run("'" <> name)
+        assert {:error, %{fail: %{reason: :invalid_form}}} = Lisp.run("(quote #{name})")
+      end
+    end
+
+    test "public results round-trip through context and continuation memory" do
+      assert {:ok, %{return: quoted}} = Lisp.run("'x")
+
+      assert {:ok, %{return: true}} =
+               Lisp.run("(= data/ref 'x)", context: %{ref: quoted})
+
+      assert {:ok, %{return: true}} =
+               Lisp.run("(= saved 'x)", memory: %{saved: quoted})
+    end
+
+    test "evaluation errors preserve native continuation memory" do
+      quoted = %Format.SymbolRef{name: "x"}
+
+      assert {:error, %{fail: %{reason: :type_error}, memory: memory}} =
+               Lisp.run("(get 1 2)", memory: %{"saved" => quoted})
+
+      assert memory == %{"saved" => {:symbol_ref, "x"}}
+    end
+
+    test "native evaluation does not send a continuation snapshot to its caller" do
+      owner = self()
+      memory = %{"large" => Enum.to_list(1..50_000)}
+
+      caller =
+        spawn(fn ->
+          receive do
+            :run ->
+              send(owner, {:native_result, self(), Lisp.run_native("nil", memory: memory)})
+          end
+        end)
+
+      :erlang.trace(caller, true, [:receive, {:tracer, owner}])
+      send(caller, :run)
+
+      assert_receive {:trace, ^caller, :receive, {:baseline, _worker, _words}}, 1_000
+      assert_receive {:native_result, ^caller, {:ok, %{return: nil}}}, 1_000
+      refute_receive {:trace, ^caller, :receive, {:baseline, _worker, _words, _snapshot}}, 100
+    end
+
+    test "public symbol-reference context keys are readable through data namespace" do
+      quoted = %Format.SymbolRef{name: "x"}
+
+      for strict_data <- [false, true] do
+        assert {:ok, %{return: 42}} =
+                 Lisp.run(~S|data/'x|,
+                   context: %{quoted => 42},
+                   strict_data: strict_data
+                 )
+      end
+
+      assert {:ok, %{return: :exact}} =
+               Lisp.run(~S|data/'x|,
+                 context: %{quoted => :symbol, "'x" => :exact}
+               )
+    end
+
+    test "public input conversion rejects symbol-reference collisions" do
+      quoted = %Format.SymbolRef{name: "x"}
+      colliding = %{quoted => :public, {:symbol_ref, "x"} => :native}
+
+      assert {:error, %{fail: %{reason: :symbol_ref_collision}, memory: %{preserved: "memory"}}} =
+               Lisp.run("data/value",
+                 context: %{value: colliding},
+                 memory: %{preserved: "memory"}
+               )
+
+      assert {:error, %{fail: %{reason: :symbol_ref_collision}, memory: %{}}} =
+               Lisp.run("saved", memory: %{saved: colliding})
+    end
+
+    test "public input conversion rejects malformed symbol wrappers" do
+      for malformed <- [
+            %Format.SymbolRef{name: %{}},
+            %Format.SymbolRef{name: ""},
+            %Format.SymbolRef{name: "x y"},
+            %Format.SymbolRef{name: "x\n(tool/other {})"},
+            %Format.SymbolRef{name: "λ"},
+            %{__struct__: Format.SymbolRef}
+          ] do
+        assert {:error, %{fail: %{reason: :invalid_symbol_ref}, memory: %{preserved: "memory"}}} =
+                 Lisp.run("data/value",
+                   context: %{value: malformed},
+                   memory: %{preserved: "memory"}
+                 )
+
+        assert {:error, %{fail: %{reason: :invalid_symbol_ref}, memory: %{}}} =
+                 Lisp.run("saved", memory: %{saved: malformed})
+      end
+    end
+
+    test "public input conversion rejects malformed wrapper keys and native tuples" do
+      for malformed_wrapper <- [
+            %Format.SymbolRef{name: %{}},
+            %Format.SymbolRef{name: <<255>>},
+            %{__struct__: Format.SymbolRef},
+            %{__struct__: Format.SymbolRef, name: "x", extra: true}
+          ] do
+        assert {:ok, %{return: nil}} =
+                 Lisp.run("nil", context: %{malformed_wrapper => %{nested: true}})
+
+        assert {:error, %{fail: %{reason: :invalid_symbol_ref}}} =
+                 Lisp.run("nil",
+                   context: %{malformed_wrapper => %{nested: true}},
+                   filter_context: false
+                 )
+      end
+
+      for malformed_native <- [
+            {:symbol_ref, <<255>>},
+            {:symbol_ref, ""},
+            {:symbol_ref, "x y"},
+            {:symbol_ref, "x\n(tool/other {})"},
+            {:symbol_ref, "λ"}
+          ] do
+        assert {:error, %{fail: %{reason: :invalid_symbol_ref}, memory: %{}}} =
+                 Lisp.run("saved", memory: %{saved: malformed_native})
+      end
+    end
+
+    test "public boundaries reject malformed keyword wrappers without host exceptions" do
+      malformed = %PtcRunner.Lisp.Keyword{name: %{}}
+
+      assert {:error, %{fail: %{reason: :invalid_keyword}, memory: %{preserved: "memory"}}} =
+               Lisp.run("data/value",
+                 context: %{value: malformed},
+                 memory: %{preserved: "memory"}
+               )
+
+      assert {:error, %{fail: %{reason: :invalid_keyword}, memory: %{}}} =
+               Lisp.run("saved", memory: %{saved: malformed})
+
+      assert {:error, {:lisp_value_projection_error, {:invalid_keyword, []}}} =
+               Lisp.externalize_value(malformed)
+
+      assert {:error, {:lisp_value_projection_error, {:invalid_keyword, _path}}} =
+               Lisp.externalize_memory(%{malformed => :value})
+
+      assert {:error, %{fail: %{reason: :tool_error, message: message}}} =
+               Lisp.run("(tool/echo {})",
+                 tools: %{"echo" => {fn _args -> malformed end, :skip}}
+               )
+
+      assert message =~ "lisp_value_projection_error"
+      refute message =~ "symbol_ref_projection_error"
+    end
+
+    test "public inputs report improper lists without secondary projection failures" do
+      malformed = [1 | 2]
+
+      assert {:error, %{fail: %{reason: :invalid_lisp_list}, memory: %{kept: true}}} =
+               Lisp.run("nil",
+                 context: %{bad: malformed},
+                 memory: %{kept: true},
+                 filter_context: false
+               )
+
+      assert {:error, %{fail: %{reason: :invalid_lisp_list}, memory: %{}}} =
+               Lisp.run("saved", memory: %{saved: malformed})
+
+      assert {:error, %{fail: %{reason: :invalid_lisp_list}, memory: %{kept: true}}} =
+               Lisp.run("*1", turn_history: [malformed], memory: %{kept: true})
+    end
+
+    test "early failures still validate continuation memory inside the setup bounds" do
+      malformed_memory = %{"bad" => [1 | 2]}
+
+      assert {:ok, prelude} =
+               Compiler.compile("""
+               (ns cap "Capability." {:visibility :prompt})
+               (defn fetch "Fetch." [] (tool/fetch {}))
+               """)
+
+      cases = [
+        {"parse", "(", [], :parse_error},
+        {"program size", "nil", [max_program_bytes: 1], :program_too_large},
+        {"tool configuration", "nil", [tools: %{"bad" => :not_a_tool}], :invalid_tool},
+        {"signature", "nil", [signature: "("], :parse_error},
+        {"parallel configuration", "nil", [max_parallel_workers: 0], :invalid_config},
+        {"prelude attachment", "nil", [prelude: prelude], :prelude_attach_failed}
+      ]
+
+      for {failure_class, source, opts, original_reason} <- cases do
+        assert {:error, %{fail: %{reason: :invalid_lisp_list}, memory: %{}}} =
+                 Lisp.run(source, Keyword.put(opts, :memory, malformed_memory)),
+               failure_class
+
+        assert {:error,
+                %{fail: %{reason: ^original_reason}, memory: %{"kept" => {:symbol_ref, "x"}}}} =
+                 Lisp.run(
+                   source,
+                   Keyword.put(opts, :memory, %{
+                     "kept" => %Format.SymbolRef{name: "x"}
+                   })
+                 ),
+               failure_class
+      end
+    end
+
+    test "native continuation cannot use a malformed quoted symbol as a tool/call target" do
+      owner = self()
+
+      assert {:error, %{fail: %{reason: :invalid_symbol_ref}}} =
+               Lisp.run_native("(tool/call target {})",
+                 memory: %{"target" => {:symbol_ref, "server/tool x"}},
+                 tools: %{"call" => fn args -> send(owner, {:called, args}) end}
+               )
+
+      refute_receive {:called, _args}
+    end
+
+    test "native continuation rejects improper lists in tool arguments without calling the tool" do
+      owner = self()
+
+      assert {:error, %{fail: %{reason: :invalid_lisp_list}}} =
+               Lisp.run_native("(tool/echo {:payload saved})",
+                 memory: %{"saved" => [1 | 2]},
+                 tools: %{"echo" => fn args -> send(owner, {:called, args}) end}
+               )
+
+      refute_receive {:called, _args}
     end
   end
 
@@ -625,6 +867,26 @@ defmodule PtcRunner.Lisp.IntegrationTest do
       assert [tool_call] = step.tool_calls
       assert tool_call.args == %{"kind" => "novel-runtime-keyword"}
       assert step.return == %{"kind" => "novel-runtime-keyword"}
+    end
+
+    test "set values in tool args preserve their recursively normalized members" do
+      tools = %{
+        "echo" => fn args -> args end
+      }
+
+      assert {:ok, step} =
+               Lisp.run(~S|(tool/echo {:items #{1 2} :labels #{:novel-runtime-keyword}})|,
+                 tools: tools
+               )
+
+      assert [tool_call] = step.tool_calls
+
+      assert tool_call.args == %{
+               "items" => MapSet.new([1, 2]),
+               "labels" => MapSet.new(["novel-runtime-keyword"])
+             }
+
+      assert step.return == tool_call.args
     end
 
     test "successful tool data shaped like an error tuple remains return data" do

@@ -3277,14 +3277,6 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         [:collection]
       ),
       regression_case(
-        "core/distinct-map-001",
-        "clojure.core",
-        ["distinct"],
-        "(distinct {:a 1 :b 2})",
-        ["GAP-S134"],
-        [:collection]
-      ),
-      regression_case(
         "core/interleave-left-nil-001",
         "clojure.core",
         ["interleave"],
@@ -6720,11 +6712,11 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
       div_case(
         "div/symbol-predicate-001",
         "clojure.core",
-        ["symbol?"],
+        ["quote", "symbol?"],
         "(symbol? 'x)",
         "DIV-19",
         false,
-        "Quoted symbols are not supported as runtime values."
+        "Quoted symbols produce inert references, not first-class Clojure symbol values, so symbol? returns false."
       ),
       div_case(
         "div/name-symbol-001",
@@ -6733,7 +6725,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "(name 'x)",
         "DIV-19",
         {:error, :runtime_error},
-        "Quoted symbols are not supported as runtime values, so name only applies to PTC-supported identifier values."
+        "Quoted symbols produce inert references rather than first-class Clojure symbols, so name rejects them."
       ),
       div_case(
         "div/loop-limit-001",
@@ -7417,6 +7409,15 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "DIV-29",
         {:error, :type_error},
         "Direct positional map access raises; use seq/entries/keys/vals for ordered map views."
+      ),
+      div_case(
+        "div/distinct-map-direct-001",
+        "clojure.core",
+        ["distinct"],
+        "(distinct {:a 1 :b 2})",
+        "DIV-29",
+        {:error, :type_error},
+        "Direct order-exposing map traversal raises; use seq/entries/keys/vals for ordered map views."
       ),
       div_case(
         "div/interpose-map-direct-001",

@@ -1198,6 +1198,95 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     end
   end
 
+  test "Kernel classifies Lisp and Java projector failures at both exit paths" do
+    {:ok, workflow} = WorkflowEnvironment.new([])
+    {:ok, limits} = Limits.new()
+
+    malformed_values = [
+      {{:symbol_ref, <<255>>}, :invalid_symbol_ref},
+      {%PtcRunner.Lisp.Keyword{name: "invalid/name"}, :invalid_keyword},
+      {[1 | 2], :java_projection_error},
+      {%{__struct__: PtcRunner.MissingJavaProjectionStruct, payload: 1}, :java_projection_error}
+    ]
+
+    for {malformed, expected_kind} <- malformed_values do
+      {:ok, sink} = EventSink.start(:normal, limits, run_id: "malformed-#{expected_kind}")
+      {:ok, mission} = MissionEnvironment.new([])
+      mission = %{mission | data: %{"bad" => malformed}}
+
+      {:ok, config} =
+        RunConfig.new(
+          workflow_environment: workflow,
+          mission_environment: mission,
+          input: %{},
+          limits: limits,
+          event_sink: sink
+        )
+
+      config = %{config | input: %{"bad" => malformed}}
+
+      assert {:error, %{kind: :workflow_failed, reason: ^expected_kind}} =
+               Kernel.run("(return data/bad)", config)
+
+      {:ok, state} = RunState.start(limits)
+
+      assert %{
+               outcome: :evaluation_error,
+               kind: ^expected_kind,
+               continuation_effect: :preserved,
+               retryable?: false
+             } =
+               Evaluation.evaluate_source_detailed(
+                 state,
+                 mission,
+                 "data/bad",
+                 100,
+                 nil,
+                 nil
+               )
+
+      assert %{defined_count: 0, history_count: 0} =
+               RunState.evaluation_memory_summary(state)
+    end
+  end
+
+  test "Kernel safely projects quoted symbols and rejects equivalent string-key collisions" do
+    {:ok, workflow} = WorkflowEnvironment.new([])
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, limits} = Limits.new()
+
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "quoted-symbol-key")
+
+    {:ok, config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        mission_environment: mission,
+        input: %{},
+        limits: limits,
+        event_sink: sink
+      )
+
+    assert {:ok, %{value: %{%Format.SymbolRef{name: "foo"} => 1}}} =
+             Kernel.run(~S|(return {'foo 1})|, config)
+
+    assert %{data: %{result_hash: "sha256:" <> hash}} = List.last(EventSink.events(sink))
+    assert byte_size(hash) == 64
+
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "quoted-symbol-key-collision")
+
+    {:ok, config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        mission_environment: mission,
+        input: %{},
+        limits: limits,
+        event_sink: sink
+      )
+
+    assert {:error, %{kind: :workflow_failed, reason: :public_projection_collision}} =
+             Kernel.run(~S|(return {'foo 1 "'foo" 2})|, config)
+  end
+
   test "explicit workflow failure returns the outer error algebra" do
     {:ok, workflow} = WorkflowEnvironment.new([])
     {:ok, mission} = MissionEnvironment.new([])
@@ -1930,6 +2019,36 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     assert mission_started.data.environment == :mission
     assert mission_stopped.data.environment == :mission
     assert workflow_stopped.data.environment == :workflow
+  end
+
+  test "workflow kernel-eval restores quoted-symbol identity inside the parent evaluator" do
+    {:ok, workflow} = WorkflowEnvironment.new([])
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, limits} = Limits.new()
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "kernel-eval-quoted-symbol")
+
+    {:ok, config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        mission_environment: mission,
+        input: %{},
+        limits: limits,
+        event_sink: sink
+      )
+
+    source = ~S"""
+    (let [nested (tool/kernel-eval {:kind :source :source "(return 'server/tool)"})
+          returned (get (get nested :value) :value)]
+      (return [(= returned 'server/tool) {returned :found}]))
+    """
+
+    assert {:ok,
+            %{
+              value: [
+                true,
+                %{%Format.SymbolRef{name: "server/tool"} => "found"}
+              ]
+            }} = Kernel.run(source, config)
   end
 
   test "workflow bundle exports are attached only to the workflow evaluator" do

@@ -79,6 +79,27 @@ defmodule PtcRunner.Lisp do
   alias PtcRunner.Lisp.UntrustedRenderer
 
   @valid_callers [:direct, :kernel, :repl]
+  @projection_error_public_field_fallbacks [
+    signature: nil,
+    usage: nil,
+    turns: nil,
+    trace_id: nil,
+    parent_trace_id: nil,
+    name: nil,
+    field_descriptions: nil,
+    failure_origin: nil,
+    prints: [],
+    tool_calls: [],
+    pmap_calls: [],
+    child_traces: [],
+    child_steps: [],
+    messages: nil,
+    prompt: nil,
+    original_prompt: nil,
+    tools: nil,
+    prelude_trace: nil,
+    prelude_call_counts: %{}
+  ]
 
   @doc """
   Format a PTC-Lisp value as Clojure-style syntax for display.
@@ -114,11 +135,28 @@ defmodule PtcRunner.Lisp do
   every entry is retained with an opaque inert collision wrapper. Strict Kernel
   boundaries use the same projection and reject those collisions instead.
   """
-  @spec externalize_value(term()) :: term() | {:error, {:java_projection_error, term()}}
+  @spec externalize_value(term()) ::
+          term()
+          | {:error,
+             {:java_projection_error
+              | :lisp_value_projection_error
+              | :symbol_ref_projection_error, term()}}
   def externalize_value(value) do
     case project_boundary_value(value, :public) do
-      {:ok, projected} -> projected
-      {:error, reason} -> {:error, {:java_projection_error, reason}}
+      {:ok, projected} ->
+        projected
+
+      {:error, {kind, _, _} = reason} when kind == :symbol_ref_collision ->
+        {:error, {:symbol_ref_projection_error, reason}}
+
+      {:error, {kind, _} = reason} when kind == :invalid_symbol_ref ->
+        {:error, {:symbol_ref_projection_error, reason}}
+
+      {:error, {kind, _} = reason} when kind == :invalid_keyword ->
+        {:error, {:lisp_value_projection_error, reason}}
+
+      {:error, reason} ->
+        {:error, {:java_projection_error, reason}}
     end
   end
 
@@ -128,6 +166,7 @@ defmodule PtcRunner.Lisp do
   def project_boundary_value(value, boundary) when boundary in [:public, :kernel_json] do
     with {:ok, projected_java} <- JavaProject.project(value, boundary),
          projected = externalize_lisp_values(projected_java),
+         :ok <- validate_externalized_symbol_refs(projected),
          :ok <- validate_projection_collisions(projected, boundary) do
       {:ok, projected}
     end
@@ -143,6 +182,12 @@ defmodule PtcRunner.Lisp do
 
       {:error, {:java_projection_error, reason}} ->
         {:error, java_projection_error_step(%{step | memory: %{}}, reason)}
+
+      {:error, {:symbol_ref_projection_error, reason}} ->
+        {:error, symbol_projection_error_step(%{step | memory: %{}}, reason)}
+
+      {:error, {:lisp_value_projection_error, reason}} ->
+        {:error, symbol_projection_error_step(%{step | memory: %{}}, reason)}
     end
   end
 
@@ -153,15 +198,27 @@ defmodule PtcRunner.Lisp do
   keys through the bounded source vocabulary.
   """
   @spec externalize_memory(map()) ::
-          map() | {:error, {:java_projection_error, term()}}
+          map()
+          | {:error,
+             {:java_projection_error
+              | :lisp_value_projection_error
+              | :symbol_ref_projection_error, term()}}
   def externalize_memory(memory) when is_map(memory) do
     case JavaProject.project(memory, :public) do
       {:ok, projected} ->
-        projected
-        |> Enum.reject(fn {_k, v} -> match?(%PtcRunner.Lisp.RuntimeCallable{}, v) end)
-        |> Map.new(fn {k, v} ->
-          {externalize_memory_key(k), externalize_lisp_values(v)}
-        end)
+        with externalized <-
+               projected
+               |> Enum.reject(fn {_k, v} -> match?(%PtcRunner.Lisp.RuntimeCallable{}, v) end)
+               |> externalize_memory_entries(),
+             :ok <- validate_externalized_symbol_refs(externalized) do
+          externalized
+        else
+          {:error, {:invalid_keyword, _path} = reason} ->
+            {:error, {:lisp_value_projection_error, reason}}
+
+          {:error, reason} ->
+            {:error, {:symbol_ref_projection_error, reason}}
+        end
 
       {:error, reason} ->
         {:error, {:java_projection_error, reason}}
@@ -258,11 +315,15 @@ defmodule PtcRunner.Lisp do
      - `step.memory`: Data memory after execution. Direct Lisp callers can pass
        it back through the `:memory` option on a later eval; use
        `externalize_memory/1` when you need a purely public observation shape.
-       The `run/2` result preserves closures and
-       composed callable forms, but deliberately omits top-level runtime
-       callables such as directly bound builtin/tool aliases and renders nested
-       runtime callables as labels. Do not serialize `step.memory` (JSON,
-       ETF-to-disk, database) between evals —
+       The `run/2` result preserves supported closures and composed callable
+       forms, including embedded builtin/tool runtime-callable references. It
+       deliberately omits top-level runtime callables such as directly bound
+       builtin/tool aliases and renders runtime callables nested in ordinary
+       collection data as labels. Java callables are also rendered as labels,
+       including when captured by a closure, so such a closure is
+       observation-only on the public continuation path. Do not serialize
+       `step.memory`
+       (JSON, ETF-to-disk, database) between evals —
        serialization silently converts native values such as keywords into
        plain strings. For a bounded persistent REPL continuation, use
        `PtcRunner.Kernel.ReplSession` from one stable owner process. It is
@@ -276,8 +337,10 @@ defmodule PtcRunner.Lisp do
     - `step.fail.reason`: Error reason atom
     - `step.fail.message`: Human-readable error description
     - `step.memory`: Native continuation memory at the time of error, with the
-      same callable caveats as successful `run/2` results. Do not serialize it;
-      use `externalize_memory/1` for an observation-only projection.
+      same callable caveats as successful `run/2` results. Setup-phase heap
+      kills return empty memory because the oversized grant cannot safely be
+      projected outside the bounded worker. Do not serialize continuation
+      memory; use `externalize_memory/1` for an observation-only projection.
 
   ## Memory Contract
 
@@ -288,15 +351,17 @@ defmodule PtcRunner.Lisp do
   survive across explicitly managed evaluations.
 
   There are two deliberate host memory projections. Ordinary embedders may use
-  `run/2` to continue data definitions, `defn` closures, and composed
-  callable forms by threading `step.memory` directly into the next call's
-  `:memory` option. Top-level direct runtime-callable aliases are not
-  preserved on this public path. Hosts that must preserve every runtime
-  callable, including direct builtin/tool aliases, use the internal
-  `run_native/2` continuation path with `preserve_runtime_callables: true`, as
-  `PtcRunner.Kernel` does. A host must not substitute the JSON/public memory
-  projection for either continuation path: that projection is observation-only
-  and cannot retain executable values.
+  `run/2` to continue data definitions, closures that do not capture Java
+  callables, and supported composed callable forms by threading `step.memory`
+  directly into the next call's `:memory` option. Top-level direct
+  runtime-callable aliases and Java callables are not preserved on this public
+  path. Hosts that must preserve every runtime callable, including direct
+  builtin/tool aliases and Java callables captured by closures, use the
+  internal `run_native/2` continuation path with
+  `preserve_runtime_callables: true`, as `PtcRunner.Kernel` does. A host must
+  not substitute the JSON/public memory projection for either continuation
+  path: that projection is observation-only and cannot retain executable
+  values.
 
   `:turn_history` is separate from memory. Hosts pass a list of prior
   successful `step.return` values in chronological order; `*1` reads the most
@@ -333,13 +398,11 @@ defmodule PtcRunner.Lisp do
 
       PtcRunner.Lisp.run(source, timeout: 5000, max_heap: 5_000_000)
 
-  Exceeding limits returns an error:
-  - `{:error, {:timeout, ms}}` - execution exceeded timeout
-  - `{:error, {:memory_exceeded, info}}` - heap limit exceeded; `info` is a
-    diagnostics map (`:phase`, `:limit_bytes`, `:baseline_bytes`,
-    `:budget_bytes`) where `phase: :eval` marks a program over its budget and
-    `phase: :setup` a granted environment over the setup ceiling, surfaced in
-    `Step.fail.details`
+  Exceeding a limit returns an error result whose `Step.fail.reason` is
+  `:timeout` or `:memory_exceeded`. `Step.fail.details.phase` identifies
+  `:setup` (bounded grant preparation) or `:eval` (program execution). Heap
+  diagnostics also include `:limit_bytes`, `:baseline_bytes`, and
+  `:budget_bytes`.
 
   ## Context Filtering
 
@@ -351,8 +414,8 @@ defmodule PtcRunner.Lisp do
       ctx = %{"products" => large_list, "orders" => large_list, "employees" => large_list}
       PtcRunner.Lisp.run("(count data/products)", context: ctx)
 
-  Scalar context values (strings, numbers, nil) are always preserved as they typically
-  represent metadata like prompts or configuration.
+  Filtering performs direct lookups for the statically referenced keys; it does
+  not enumerate or copy unrelated collection or scalar grants into the sandbox.
 
   Disable filtering if you need all context available (e.g., for dynamic data access):
 
@@ -363,19 +426,25 @@ defmodule PtcRunner.Lisp do
   @spec run(String.t(), keyword()) :: {:ok, Step.t()} | {:error, Step.t()}
   def run(source, opts \\ []) do
     source
-    |> run_native(opts)
+    |> instrumented_run(opts, :public)
     |> public_result()
   end
 
   @doc false
   @spec run_native(String.t(), keyword()) ::
           {:ok, Step.t()} | {:error, Step.t()}
-  def run_native(source, opts \\ []) do
+  def run_native(source, opts \\ []), do: instrumented_run(source, opts, :native)
+
+  defp instrumented_run(source, opts, history_mode) when history_mode in [:native, :public] do
     reject_imported_tool_cache!(opts)
     caller = validate_caller!(Keyword.get(opts, :caller, :direct))
     # Strip instrumentation options so they cannot affect execution semantics
     # or be re-read by downstream code.
-    inner_opts = Keyword.delete(opts, :caller)
+    inner_opts =
+      opts
+      |> Keyword.delete(:caller)
+      |> Keyword.put(:turn_history_mode, history_mode)
+
     signature_supplied? = not is_nil(Keyword.get(inner_opts, :signature))
     program_bytes = if is_binary(source), do: byte_size(source), else: 0
 
@@ -436,70 +505,109 @@ defmodule PtcRunner.Lisp do
 
   defp public_result({tag, %Step{} = step}) when tag in [:ok, :error] do
     case project_public_step(step) do
-      {:ok, projected} -> {tag, externalize_public_step(projected)}
-      {:error, reason} -> {:error, java_projection_error_step(step, reason)}
+      {:ok, projected} ->
+        public_step = externalize_public_step(projected)
+
+        case validate_externalized_symbol_refs(public_step) do
+          :ok -> {tag, public_step}
+          {:error, reason} -> {:error, symbol_projection_error_step(public_step, reason)}
+        end
+
+      {:error, reason} ->
+        {:error, java_projection_error_step(step, reason)}
     end
   end
 
   defp project_public_step(%Step{} = step) do
-    Enum.reduce_while(
-      [:return, :fail, :memory, :tool_calls, :pmap_calls, :child_steps],
-      {:ok, step},
-      fn field, {:ok, projected_step} ->
-        boundary = if field == :memory, do: :continuation, else: :public
+    step
+    |> Map.from_struct()
+    |> Map.keys()
+    |> Enum.reduce_while({:ok, step}, fn field, {:ok, projected_step} ->
+      boundary = if field == :memory, do: :continuation, else: :public
 
-        case JavaProject.project(Map.fetch!(projected_step, field), boundary) do
-          {:ok, value} -> {:cont, {:ok, Map.put(projected_step, field, value)}}
-          {:error, reason} -> {:halt, {:error, reason}}
-        end
+      case JavaProject.project(Map.fetch!(projected_step, field), boundary) do
+        {:ok, value} -> {:cont, {:ok, Map.put(projected_step, field, value)}}
+        {:error, reason} -> {:halt, {:error, reason}}
       end
-    )
+    end)
   end
 
   defp externalize_public_step(%Step{} = step) do
-    %{
-      step
-      | return: externalize_lisp_values(step.return),
-        fail: externalize_lisp_values(step.fail),
-        memory: step.memory,
-        tool_calls: externalize_lisp_values(step.tool_calls),
-        pmap_calls: externalize_lisp_values(step.pmap_calls),
-        child_steps: externalize_lisp_values(step.child_steps)
-    }
+    step
+    |> Map.from_struct()
+    |> Enum.reduce(step, fn
+      {:memory, _memory}, projected_step ->
+        projected_step
+
+      {field, value}, projected_step ->
+        Map.put(projected_step, field, externalize_lisp_values(value))
+    end)
   end
 
   defp java_projection_error_step(%Step{} = step, reason) do
     details = %{projection_error: inspect(reason, limit: 10)}
 
-    %{
-      step
-      | return: nil,
-        memory: safely_project_continuation(step.memory, %{}),
-        tool_calls: safely_project_public(step.tool_calls, []),
-        pmap_calls: safely_project_public(step.pmap_calls, []),
-        child_steps: safely_project_public(step.child_steps, []),
-        fail: %{
-          reason: :java_projection_error,
-          message: "Java value could not be projected at the public boundary",
-          details: details
-        }
-    }
-    |> externalize_public_step()
+    projection_error_step(
+      step,
+      :java_projection_error,
+      "Java value could not be projected at the public boundary",
+      details
+    )
   end
 
-  defp safely_project_public(value, fallback) do
-    case JavaProject.project(value, :public) do
-      {:ok, projected} -> projected
+  defp symbol_projection_error_step(%Step{} = step, reason) do
+    projection_error_step(
+      step,
+      elem(reason, 0),
+      format_error(reason),
+      error_details(reason)
+    )
+  end
+
+  defp projection_error_step(%Step{} = step, reason, message, details) do
+    safe_step =
+      Enum.reduce(
+        @projection_error_public_field_fallbacks,
+        %{
+          step
+          | return: nil,
+            fail: %{reason: reason, message: message, details: details},
+            memory: safely_project_error_field(step.memory, :continuation, %{})
+        },
+        fn {field, fallback}, projected_step ->
+          Map.put(
+            projected_step,
+            field,
+            safely_project_error_field(Map.fetch!(step, field), :public, fallback)
+          )
+        end
+      )
+
+    case validate_externalized_symbol_refs(safe_step) do
+      :ok -> safe_step
+      {:error, _projection_reason} -> Step.error(reason, message, %{}, details)
+    end
+  end
+
+  defp validate_externalized_symbol_refs(value) do
+    case Format.internalize_symbol_refs(value) do
+      {:ok, _validated} -> :ok
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp safely_project_error_field(value, boundary, fallback) do
+    with {:ok, projected} <- JavaProject.project(value, boundary),
+         externalized = maybe_externalize_error_field(projected, boundary),
+         :ok <- validate_externalized_symbol_refs(externalized) do
+      externalized
+    else
       {:error, _reason} -> fallback
     end
   end
 
-  defp safely_project_continuation(value, fallback) do
-    case JavaProject.project(value, :continuation) do
-      {:ok, projected} -> projected
-      {:error, _reason} -> fallback
-    end
-  end
+  defp maybe_externalize_error_field(value, :public), do: externalize_lisp_values(value)
+  defp maybe_externalize_error_field(value, :continuation), do: value
 
   # Closed atom set for :caller telemetry tag. Validated at entry to
   # `run/2` so out-of-set values fail fast and don't reach instrumentation.
@@ -548,31 +656,33 @@ defmodule PtcRunner.Lisp do
     max_program_bytes = Keyword.get(opts, :max_program_bytes, @default_max_program_bytes)
     prelude_opt = Keyword.get(opts, :prelude)
     tools = Keyword.get(opts, :tools, %{})
+    params = run_params(opts)
 
     # Preflight: reject oversized source before any parsing
     if is_binary(source) and byte_size(source) > max_program_bytes do
-      {:error,
-       Step.error(
-         :program_too_large,
-         "program size #{byte_size(source)} bytes exceeds limit of #{max_program_bytes}",
-         memory,
-         %{}
-       )}
+      Step.error(
+        :program_too_large,
+        "program size #{byte_size(source)} bytes exceeds limit of #{max_program_bytes}",
+        memory,
+        %{}
+      )
+      |> then(&{:error, &1})
+      |> prepare_pre_setup_error(params)
     else
-      attach_and_run(source, opts, prelude_opt, tools, memory)
+      attach_and_run(source, params, prelude_opt, tools, memory)
     end
   end
 
-  defp attach_and_run(source, opts, prelude_opt, tools, memory) do
+  defp attach_and_run(source, params, prelude_opt, tools, memory) do
     case attach_prelude(prelude_opt, tools, memory) do
       {:ok, prelude} ->
         source
-        |> do_run_inner(Map.put(run_params(opts), :prelude, prelude))
+        |> do_run_inner(Map.put(params, :prelude, prelude))
         |> stamp_prelude_trace(prelude)
 
       {:error, %Step{}} = err ->
         # Attach FAILED — there is no compiled artifact to summarize.
-        err
+        prepare_pre_setup_error(err, params)
     end
   end
 
@@ -616,6 +726,7 @@ defmodule PtcRunner.Lisp do
       pmap_max_concurrency: Keyword.get(opts, :pmap_max_concurrency),
       max_tool_calls: Keyword.get(opts, :max_tool_calls),
       max_tool_call_result_bytes: Keyword.get(opts, :max_tool_call_result_bytes),
+      turn_history_mode: Keyword.fetch!(opts, :turn_history_mode),
       strict_data: Keyword.get(opts, :strict_data, false),
       strict_transitive_calls: Keyword.get(opts, :strict_transitive_calls, false),
       direct_namespaces: Keyword.get(opts, :direct_namespaces, []),
@@ -673,14 +784,19 @@ defmodule PtcRunner.Lisp do
       execute_program(source, opts)
     else
       {:error, {:invalid_tool, tool_name, reason}} ->
-        {:error,
-         Step.error(:invalid_tool, "Tool '#{tool_name}': #{inspect(reason)}", memory, %{})}
+        Step.error(:invalid_tool, "Tool '#{tool_name}': #{inspect(reason)}", memory, %{})
+        |> then(&{:error, &1})
+        |> prepare_pre_setup_error(params)
 
       {:error, {:invalid_signature, msg}} ->
-        {:error, Step.error(:parse_error, "Invalid signature: #{msg}", memory, %{})}
+        Step.error(:parse_error, "Invalid signature: #{msg}", memory, %{})
+        |> then(&{:error, &1})
+        |> prepare_pre_setup_error(params)
 
       {:error, {:invalid_config, msg}} ->
-        {:error, Step.error(:invalid_config, msg, memory, %{})}
+        Step.error(:invalid_config, msg, memory, %{})
+        |> then(&{:error, &1})
+        |> prepare_pre_setup_error(params)
     end
   end
 
@@ -790,12 +906,10 @@ defmodule PtcRunner.Lisp do
     prelude_filtered_exports = Map.get(opts, :prelude_filtered_exports, [])
 
     # The compile sandbox closure must capture ONLY what parse/analyze need:
-    # tool NAMES and memory KEYS, never the tool closures or memory values
-    # (whose data can be megabytes of granted environment). Error Steps built
-    # inside carry placeholder memory, re-hydrated in
-    # `handle_compile_error/2`. `run_bounded/2` bills everything the closure
-    # references against `max_heap` at spawn — by design (the closure is the
-    # workload), so the grant must not ride along.
+    # tool names, never tool closures or continuation memory (whose data can be
+    # megabytes of granted environment). It returns the AST-bounded unresolved
+    # variable candidates; the caller then performs direct map lookups for only
+    # those names instead of enumerating the memory grant.
     tool_names = Map.keys(normalized_tools)
 
     public_tool_names =
@@ -803,16 +917,14 @@ defmodule PtcRunner.Lisp do
       |> Enum.reject(fn {_name, tool} -> Tool.private?(tool) end)
       |> Enum.map(fn {name, _tool} -> name end)
 
-    memory_keys = Map.keys(memory)
-
     compile_fn = fn ->
       with {:ok, raw_ast} <- Parser.parse(source),
            :ok <- check_symbol_limit(raw_ast, max_symbols),
            {:ok, core_ast} <- Analyze.analyze(raw_ast, prelude, prelude_filtered_exports),
-           :ok <- CoreAST.validate(core_ast),
-           :ok <- check_undefined_vars(core_ast, memory_keys),
-           :ok <- check_undefined_tools(core_ast, public_tool_names, tool_names, prelude) do
-        {:ok, core_ast}
+           :ok <- CoreAST.validate(core_ast) do
+        undefined_vars = core_ast |> collect_undefined_vars(MapSet.new()) |> Enum.uniq()
+        tool_check = check_undefined_tools(core_ast, public_tool_names, tool_names, prelude)
+        {:ok, core_ast, undefined_vars, tool_check}
       end
     end
 
@@ -826,32 +938,46 @@ defmodule PtcRunner.Lisp do
     ]
 
     case PtcRunner.Sandbox.run_bounded(compile_fn, compile_opts) do
-      {:ok, {:ok, core_ast}} ->
-        execute_eval(core_ast, apply_run_deadline(opts))
+      {:ok, {:ok, core_ast, undefined_vars, tool_check}} ->
+        with :ok <- check_undefined_var_candidates(undefined_vars, memory),
+             :ok <- tool_check do
+          execute_eval(core_ast, apply_run_deadline(opts))
+        else
+          {:error, _} = compile_error ->
+            compile_error
+            |> handle_compile_error(memory)
+            |> prepare_pre_setup_error(opts)
+        end
 
       {:ok, {:error, _} = compile_error} ->
-        handle_compile_error(compile_error, memory)
+        compile_error
+        |> handle_compile_error(memory)
+        |> prepare_pre_setup_error(opts)
 
       {:error, {:timeout, ms}} ->
-        {:error,
-         Step.error(
-           :compile_timeout,
-           "compilation exceeded #{ms}ms limit",
-           memory,
-           %{}
-         )}
+        Step.error(
+          :compile_timeout,
+          "compilation exceeded #{ms}ms limit",
+          memory,
+          %{}
+        )
+        |> then(&{:error, &1})
+        |> prepare_pre_setup_error(opts)
 
       {:error, {:memory_exceeded, bytes}} ->
-        {:error,
-         Step.error(
-           :compile_memory_exceeded,
-           "compilation exceeded #{bytes} byte heap limit",
-           memory,
-           %{}
-         )}
+        Step.error(
+          :compile_memory_exceeded,
+          "compilation exceeded #{bytes} byte heap limit",
+          memory,
+          %{}
+        )
+        |> then(&{:error, &1})
+        |> prepare_pre_setup_error(opts)
 
       {:error, {:execution_error, msg}} ->
-        {:error, Step.error(:compile_error, "compilation failed: #{msg}", memory, %{})}
+        Step.error(:compile_error, "compilation failed: #{msg}", memory, %{})
+        |> then(&{:error, &1})
+        |> prepare_pre_setup_error(opts)
     end
   end
 
@@ -882,6 +1008,38 @@ defmodule PtcRunner.Lisp do
     {:error, Step.error(reason_atom, format_error(reason), memory, %{})}
   end
 
+  defp prepare_pre_setup_error(result, %{turn_history_mode: :native}), do: result
+
+  defp prepare_pre_setup_error({:error, %Step{} = step}, opts) do
+    sandbox_opts =
+      [
+        timeout: opts.timeout,
+        max_heap: opts.max_heap,
+        prepare_context: &internalize_public_input(&1, :memory),
+        eval_fn: fn _ast, prepared_memory -> {:ok, prepared_memory, %{}} end,
+        link: Map.get(opts, :link, false)
+      ]
+      |> put_setup_max_heap(opts.setup_max_heap)
+
+    case PtcRunner.Sandbox.execute(:prepare_error_memory, step.memory, sandbox_opts) do
+      {:ok, prepared_memory, _metrics, %{}} ->
+        {:error, %{step | memory: prepared_memory}}
+
+      {:error, {:public_input_error, :memory, _reason}} = error ->
+        handle_execute_result(error, %{memory: step.memory})
+
+      {:error, {:timeout, %{timeout_ms: timeout_ms} = info}} ->
+        {:error, Step.error(:timeout, "execution exceeded #{timeout_ms}ms limit", %{}, info)}
+
+      {:error, {:memory_exceeded, info}} ->
+        memory_exceeded_step(info, %{})
+
+      {:error, reason} ->
+        {:error,
+         Step.error(:setup_error, "environment setup failed: #{inspect(reason)}", %{}, %{})}
+    end
+  end
+
   defp execute_eval(core_ast, opts) do
     %{
       ctx: ctx,
@@ -901,6 +1059,7 @@ defmodule PtcRunner.Lisp do
       tools_meta: tools_meta,
       max_tool_calls: max_tool_calls,
       max_tool_call_result_bytes: max_tool_call_result_bytes,
+      turn_history_mode: turn_history_mode,
       strict_data: strict_data,
       strict_transitive_calls: strict_transitive_calls,
       direct_namespaces: direct_namespaces,
@@ -910,16 +1069,14 @@ defmodule PtcRunner.Lisp do
 
     prelude = Map.get(opts, :prelude)
 
-    # Skip dataset filtering when a prelude is attached: a prelude export may
-    # read `data/*` keys that never appear in the user program's own AST, so
-    # filtering (a memory optimization, not a security boundary) would starve
-    # the export of its data. Correctness wins over the optimization here.
-    filtered_ctx =
-      if filter_context and is_nil(prelude),
-        do: DataKeys.filter_context(core_ast, ctx),
+    filter_context? = filter_context and is_nil(prelude)
+
+    ctx =
+      if filter_context?,
+        do: DataKeys.prefilter_context(core_ast, ctx),
         else: ctx
 
-    context = PtcRunner.Lisp.Context.new(filtered_ctx, memory, normalized_tools, turn_history)
+    context = PtcRunner.Lisp.Context.new(ctx, memory, normalized_tools, turn_history)
 
     parallel_budget = ParallelBudget.new(max_parallel_workers)
 
@@ -980,9 +1137,16 @@ defmodule PtcRunner.Lisp do
       [
         timeout: timeout,
         max_heap: max_heap,
+        prepare_context:
+          prepare_context(
+            turn_history_mode,
+            core_ast,
+            filter_context?
+          ),
         eval_fn: eval_fn,
         link: Map.get(opts, :link, false)
       ]
+      |> put_failure_snapshot(turn_history_mode)
       |> put_setup_max_heap(setup_max_heap)
 
     core_ast
@@ -1039,10 +1203,21 @@ defmodule PtcRunner.Lisp do
   end
 
   defp handle_execute_result(
+         {:ok, {:error_with_ctx, reason, rollback_memory}, metrics, %EvalContext{} = eval_ctx},
+         _opts
+       ) do
+    eval_error_step(reason, metrics, rollback_memory, eval_ctx)
+  end
+
+  defp handle_execute_result(
          {:ok, {:error_with_ctx, reason}, metrics, %EvalContext{} = eval_ctx},
          %{memory: memory}
        ) do
     eval_error_step(reason, metrics, memory, eval_ctx)
+  end
+
+  defp handle_execute_result({:error, reason, rollback_memory}, opts) do
+    handle_execute_result({:error, reason}, %{opts | memory: rollback_memory})
   end
 
   defp handle_execute_result({:ok, value, metrics, %EvalContext{} = eval_ctx}, opts) do
@@ -1065,12 +1240,63 @@ defmodule PtcRunner.Lisp do
     end
   end
 
-  defp handle_execute_result({:error, {:timeout, ms}}, %{memory: memory}) do
-    {:error, Step.error(:timeout, "execution exceeded #{ms}ms limit", memory, %{})}
+  defp handle_execute_result(
+         {:error, {:timeout, %{phase: :setup, timeout_ms: timeout_ms} = info}},
+         _opts
+       ) do
+    {:error, Step.error(:timeout, "execution exceeded #{timeout_ms}ms limit", %{}, info)}
+  end
+
+  defp handle_execute_result(
+         {:error, {:timeout, %{phase: :eval, timeout_ms: timeout_ms} = info}},
+         %{memory: memory}
+       ) do
+    {:error, Step.error(:timeout, "execution exceeded #{timeout_ms}ms limit", memory, info)}
+  end
+
+  # The setup worker was killed while importing the grant, so do not traverse
+  # and project that same oversized memory again in the unbounded caller.
+  defp handle_execute_result(
+         {:error, {:memory_exceeded, %{phase: :setup} = info}},
+         _opts
+       ) do
+    memory_exceeded_step(info, %{})
   end
 
   defp handle_execute_result({:error, {:memory_exceeded, info}}, %{memory: memory}) do
     memory_exceeded_step(info, memory)
+  end
+
+  # A malformed wrapper inside continuation memory is not a valid runtime
+  # value. Do not copy it into the public error Step: boundary projection could
+  # replace the useful validation failure with a secondary projection error.
+  # Invalid context/history, however, must preserve otherwise-valid memory.
+  defp handle_execute_result(
+         {:error, {:public_input_error, source, reason}},
+         %{memory: memory}
+       )
+       when source in [:context, :memory, :turn_history] and
+              is_tuple(reason) and
+              elem(reason, 0) in [
+                :invalid_keyword,
+                :invalid_lisp_list,
+                :invalid_symbol_ref,
+                :symbol_ref_collision
+              ] do
+    reason_atom = elem(reason, 0)
+
+    safe_memory =
+      if source == :memory and
+           reason_atom in [
+             :invalid_keyword,
+             :invalid_lisp_list,
+             :invalid_symbol_ref,
+             :symbol_ref_collision
+           ],
+         do: %{},
+         else: memory
+
+    {:error, Step.error(reason_atom, format_error(reason), safe_memory, error_details(reason))}
   end
 
   defp handle_execute_result({:error, {reason_atom, _, _} = reason}, %{memory: memory})
@@ -1320,6 +1546,43 @@ defmodule PtcRunner.Lisp do
   defp put_setup_max_heap(opts, nil), do: opts
   defp put_setup_max_heap(opts, words), do: [{:setup_max_heap, words} | opts]
 
+  defp put_failure_snapshot(opts, :public), do: [{:failure_snapshot, & &1.memory} | opts]
+  defp put_failure_snapshot(opts, :native), do: opts
+
+  defp prepare_context(mode, core_ast, filter_context?) do
+    fn context ->
+      # Public values must be validated and normalized before filtering so
+      # symbol-reference keys have their canonical internal spelling. This
+      # complete pass stays inside the setup worker's heap ceiling and
+      # deadline. An AST-bounded caller-side lookup has already retained only
+      # referenced keys before the sandbox copy. A prelude disables filtering
+      # because its exports may read data keys absent from the user program's
+      # own Core AST.
+      with {:ok, prepared} <- prepare_context_values(mode, context) do
+        if filter_context?,
+          do: {:ok, %{prepared | ctx: DataKeys.filter_context(core_ast, prepared.ctx)}},
+          else: {:ok, prepared}
+      end
+    end
+  end
+
+  defp prepare_context_values(:native, context), do: {:ok, context}
+
+  defp prepare_context_values(:public, context) do
+    with {:ok, memory} <- internalize_public_input(context.memory, :memory),
+         {:ok, ctx} <- internalize_public_input(context.ctx, :context),
+         {:ok, history} <- internalize_public_input(context.turn_history, :turn_history) do
+      {:ok, %{context | ctx: ctx, memory: memory, turn_history: history}}
+    end
+  end
+
+  defp internalize_public_input(value, source) do
+    case Format.internalize_symbol_refs(value) do
+      {:ok, projected} -> {:ok, projected}
+      {:error, reason} -> {:error, {:public_input_error, source, reason}}
+    end
+  end
+
   # V2 simplified memory contract: pass through all values unchanged.
   # Storage is explicit via `def` (values persist in user_ns).
   # No implicit map merge or :return key handling.
@@ -1488,9 +1751,15 @@ defmodule PtcRunner.Lisp do
     %{program?: true, byte_size: program.byte_size, digest: program.digest}
   end
 
-  defp externalize_lisp_values(%Step{} = step), do: public_result({:ok, step}) |> elem(1)
+  defp externalize_lisp_values(%Step{memory: memory} = step) when is_map(memory),
+    do: project_native_result({:ok, step}) |> elem(1)
 
-  defp externalize_lisp_values(%LispKeyword{name: name}), do: SourceAtoms.intern(name)
+  defp externalize_lisp_values(%Step{} = step),
+    do: public_result({:ok, %{step | memory: externalize_lisp_values(step.memory)}}) |> elem(1)
+
+  defp externalize_lisp_values(%{__struct__: LispKeyword} = keyword) do
+    if LispKeyword.valid?(keyword), do: SourceAtoms.intern(keyword.name), else: keyword
+  end
 
   defp externalize_lisp_values({:closure, _params, _body, _env, _turn_history, _metadata}),
     do: %Format.Fn{params: "..."}
@@ -1509,6 +1778,9 @@ defmodule PtcRunner.Lisp do
 
   defp externalize_lisp_values({:var, name}) when is_atom(name) or is_binary(name),
     do: %Var{name: existing_atom_or(Kernel.to_string(name), name)}
+
+  defp externalize_lisp_values({:symbol_ref, name}) when is_binary(name),
+    do: %Format.SymbolRef{name: name}
 
   defp externalize_lisp_values({:__ptc_return__, inner}) do
     {:__ptc_return__, externalize_lisp_values(inner)}
@@ -1599,6 +1871,15 @@ defmodule PtcRunner.Lisp do
     |> List.to_tuple()
   end
 
+  defp externalize_lisp_values(value) when is_struct(value) do
+    fields =
+      value
+      |> Map.from_struct()
+      |> Map.new(fn {field, item} -> {field, externalize_lisp_values(item)} end)
+
+    struct(value.__struct__, fields)
+  end
+
   defp externalize_lisp_values(value), do: value
 
   defp next_collision_ordinal(values, collection) do
@@ -1644,6 +1925,18 @@ defmodule PtcRunner.Lisp do
     else
       find_projection_collision(items, path, :set)
     end
+  end
+
+  defp projection_collision(value, path) when is_struct(value) do
+    value
+    |> Map.from_struct()
+    |> Enum.sort_by(&elem(&1, 0))
+    |> Enum.reduce_while(nil, fn {field, item}, nil ->
+      case projection_collision(item, [{:struct_field, field} | path]) do
+        nil -> {:cont, nil}
+        collision -> {:halt, collision}
+      end
+    end)
   end
 
   defp projection_collision(value, path) when is_map(value) and not is_struct(value) do
@@ -1694,9 +1987,38 @@ defmodule PtcRunner.Lisp do
   # same bounded vocabulary as parsed symbols: builtin names remain atoms,
   # user-defined names remain binaries, and unrelated VM atom-table state is
   # ignored.
-  defp externalize_memory_key(%LispKeyword{name: name}), do: SourceAtoms.intern(name)
+  defp externalize_memory_entries(entries) do
+    pairs =
+      Enum.map(entries, fn {key, item} ->
+        externalized_key = externalize_memory_key(key)
+        display_key = if match?(%LispKeyword{}, key), do: key, else: externalized_key
+        {externalized_key, display_key, externalize_lisp_values(item)}
+      end)
+
+    frequencies = Enum.frequencies_by(pairs, &elem(&1, 0))
+    next_ordinal = pairs |> Enum.map(&elem(&1, 0)) |> next_collision_ordinal(:map)
+
+    pairs
+    |> Enum.map_reduce(next_ordinal, fn {key, display_key, item}, ordinal ->
+      if Map.fetch!(frequencies, key) > 1 do
+        {{%ExternalizedCollision{
+            collection: :map,
+            value: display_key,
+            ordinal: ordinal
+          }, item}, ordinal + 1}
+      else
+        {{key, item}, ordinal}
+      end
+    end)
+    |> elem(0)
+    |> Map.new()
+  end
+
+  defp externalize_memory_key(%{__struct__: LispKeyword} = keyword),
+    do: externalize_lisp_values(keyword)
+
   defp externalize_memory_key(name) when is_binary(name), do: SourceAtoms.intern(name)
-  defp externalize_memory_key(other), do: other
+  defp externalize_memory_key(other), do: externalize_lisp_values(other)
 
   defp existing_atom_or(name, fallback) when is_binary(name) do
     case safe_to_existing_atom(name) do
@@ -1722,26 +2044,26 @@ defmodule PtcRunner.Lisp do
   end
 
   # Pre-execution check: reject programs with undefined variables before any
-  # side effects (tool calls) can execute. Memory keys are included in scope
-  # to support executions where the supplied memory pre-binds variables.
-  # Runs inside the compile sandbox: takes memory KEYS (pre-bound vars from
-  # prior turns), not the memory map, so the closure doesn't capture grant
-  # data. Error Steps carry placeholder memory, re-hydrated in
-  # `handle_compile_error/2`.
-  defp check_undefined_vars(core_ast, memory_keys) do
-    initial_scope = MapSet.new(memory_keys)
+  # side effects can execute. `undefined` comes from the symbol-bounded compile
+  # worker. Checking only those candidate names avoids enumerating continuation
+  # memory in the unbounded caller process.
+  defp check_undefined_var_candidates(undefined, memory) do
+    vars = Enum.reject(undefined, &memory_binding?(memory, &1))
 
-    case collect_undefined_vars(core_ast, initial_scope) do
-      [] ->
-        :ok
-
-      undefined ->
-        vars = Enum.uniq(undefined)
-
-        label = if length(vars) == 1, do: "Undefined variable", else: "Undefined variables"
-
-        {:error, Step.error(:unbound_var, "#{label}: #{Enum.join(vars, ", ")}", %{})}
+    if vars == [] do
+      :ok
+    else
+      label = if length(vars) == 1, do: "Undefined variable", else: "Undefined variables"
+      {:error, Step.error(:unbound_var, "#{label}: #{Enum.join(vars, ", ")}", %{})}
     end
+  end
+
+  defp memory_binding?(memory, name) when is_binary(name) do
+    Map.has_key?(memory, name) or
+      case safe_to_existing_atom(name) do
+        {:ok, atom} -> Map.has_key?(memory, atom)
+        :error -> false
+      end
   end
 
   # Pre-execution check: reject programs that reference tools not in the provided
@@ -2085,15 +2407,23 @@ defmodule PtcRunner.Lisp do
   defp validate_return_value(parsed_signature, signature_str, step) do
     case JavaProject.project(step.return, :public) do
       {:ok, projected_return} ->
-        case Signature.validate(parsed_signature, externalize_lisp_values(projected_return)) do
+        externalized_return = externalize_lisp_values(projected_return)
+
+        case validate_externalized_symbol_refs(externalized_return) do
           :ok ->
-            # Store the original signature string in the step
-            {:ok, %{step | signature: signature_str}}
+            case Signature.validate(parsed_signature, externalized_return) do
+              :ok ->
+                # Store the original signature string in the step
+                {:ok, %{step | signature: signature_str}}
 
-          {:error, errors} ->
-            msg = format_validation_errors(errors)
+              {:error, errors} ->
+                msg = format_validation_errors(errors)
 
-            {:error, Step.error(:validation_error, msg, step.memory, %{})}
+                {:error, Step.error(:validation_error, msg, step.memory, %{})}
+            end
+
+          {:error, reason} ->
+            {:error, symbol_projection_error_step(step, reason)}
         end
 
       {:error, reason} ->

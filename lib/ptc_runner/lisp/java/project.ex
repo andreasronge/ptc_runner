@@ -7,6 +7,7 @@ defmodule PtcRunner.Lisp.Java.Project do
   It never exposes an executable callable or a forged primitive.
   """
 
+  alias PtcRunner.Lisp.Format
   alias PtcRunner.Lisp.Java.Callable
   alias PtcRunner.Lisp.Java.Primitive
   alias PtcRunner.Lisp.Java.Surface
@@ -29,6 +30,7 @@ defmodule PtcRunner.Lisp.Java.Project do
           | {:struct_field, atom()}
   @type error ::
           {:invalid_java_value, [path_segment()], atom() | nil}
+          | {:invalid_projection_list, [path_segment()]}
           | {:invalid_projection_struct, [path_segment()], module()}
           | {:java_projection_collision, [path_segment()], :map | :set}
           | {:invalid_java_tool_contract, String.t()}
@@ -110,7 +112,9 @@ defmodule PtcRunner.Lisp.Java.Project do
        do: {:error, {:invalid_java_value, path, object_profile(module)}}
 
   defp do_project(value, boundary, contract, path) when is_list(value) do
-    project_list(value, boundary, contract, path, :list)
+    if proper_list?(value),
+      do: project_list(value, boundary, contract, path, :list),
+      else: {:error, {:invalid_projection_list, path}}
   end
 
   defp do_project(value, boundary, contract, path) when is_tuple(value) do
@@ -120,19 +124,13 @@ defmodule PtcRunner.Lisp.Java.Project do
   end
 
   defp do_project(%MapSet{} = value, boundary, contract, path) do
-    value
-    |> Enum.to_list()
-    |> project_list(boundary, contract, path, :set)
-    |> case do
-      {:ok, items} ->
-        projected = MapSet.new(items)
+    with {:ok, values} <- valid_map_set_items(value, path),
+         {:ok, items} <- project_list(values, boundary, contract, path, :set) do
+      projected = MapSet.new(items)
 
-        if MapSet.size(projected) == length(items),
-          do: {:ok, projected},
-          else: {:error, {:java_projection_collision, path, :set}}
-
-      {:error, _reason} = error ->
-        error
+      if MapSet.size(projected) == length(items),
+        do: {:ok, projected},
+        else: {:error, {:java_projection_collision, path, :set}}
     end
   end
 
@@ -181,12 +179,33 @@ defmodule PtcRunner.Lisp.Java.Project do
 
   defp do_project(value, _boundary, _contract, _path), do: {:ok, value}
 
+  defp valid_map_set_items(%MapSet{map: map} = set, path) when is_map(map) do
+    values = Map.keys(map)
+
+    if map_size(set) == 2 and MapSet.new(values) == set,
+      do: {:ok, values},
+      else: {:error, {:invalid_projection_struct, path, MapSet}}
+  end
+
+  defp valid_map_set_items(_set, path),
+    do: {:error, {:invalid_projection_struct, path, MapSet}}
+
   defp project_map_key(key, boundary, path) do
     with {:ok, projected} <- do_project(key, boundary, nil, path) do
       if boundary == :tool_argument,
         do: {:ok, stringify_tool_key(projected)},
         else: {:ok, projected}
     end
+  end
+
+  defp stringify_tool_key({:symbol_ref, name} = key) do
+    if Format.SymbolRef.valid_name?(name),
+      do: Kernel.to_string(%Format.SymbolRef{name: name}),
+      else: key
+  end
+
+  defp stringify_tool_key(%{__struct__: Format.SymbolRef} = key) do
+    if Format.SymbolRef.valid?(key), do: Kernel.to_string(key), else: key
   end
 
   defp stringify_tool_key(%LispKeyword{name: name}), do: KeyNormalizer.normalize_key(name)
@@ -263,8 +282,12 @@ defmodule PtcRunner.Lisp.Java.Project do
   defp contains_valid_java_value?(%Duration{} = value), do: Duration.valid?(value)
   defp contains_valid_java_value?(%JavaDate{} = value), do: JavaDate.valid?(value)
 
-  defp contains_valid_java_value?(%MapSet{} = set),
-    do: Enum.any?(set, &contains_valid_java_value?/1)
+  defp contains_valid_java_value?(%MapSet{} = set) do
+    case valid_map_set_items(set, []) do
+      {:ok, values} -> Enum.any?(values, &contains_valid_java_value?/1)
+      {:error, _reason} -> false
+    end
+  end
 
   defp contains_valid_java_value?(value) when is_struct(value) do
     value
@@ -279,8 +302,9 @@ defmodule PtcRunner.Lisp.Java.Project do
     end)
   end
 
-  defp contains_valid_java_value?(value) when is_list(value),
-    do: Enum.any?(value, &contains_valid_java_value?/1)
+  defp contains_valid_java_value?(value) when is_list(value) do
+    proper_list?(value) and Enum.any?(value, &contains_valid_java_value?/1)
+  end
 
   defp contains_valid_java_value?(value) when is_tuple(value),
     do: value |> Tuple.to_list() |> Enum.any?(&contains_valid_java_value?/1)
@@ -381,4 +405,8 @@ defmodule PtcRunner.Lisp.Java.Project do
   defp unwrap_optional(contract), do: contract
 
   defp child(path, segment), do: Enum.take(path ++ [segment], 32)
+
+  defp proper_list?([]), do: true
+  defp proper_list?([_head | tail]), do: proper_list?(tail)
+  defp proper_list?(_other), do: false
 end

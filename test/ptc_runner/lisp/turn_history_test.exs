@@ -6,6 +6,7 @@ defmodule PtcRunner.Lisp.TurnHistoryTest do
 
   alias PtcRunner.Lisp
   alias PtcRunner.Lisp.{Analyze, AST, Eval}
+  alias PtcRunner.Lisp.Format
 
   import PtcRunner.TestSupport.TestHelpers
 
@@ -112,6 +113,48 @@ defmodule PtcRunner.Lisp.TurnHistoryTest do
       history = [5, 10]
       {:ok, step} = Lisp.run("(+ *1 *2)", turn_history: history)
       assert step.return == 15
+    end
+
+    test "public quoted-symbol results round-trip through turn history" do
+      assert {:ok, %{return: previous}} = Lisp.run("{'outer ['inner]}")
+
+      assert {:ok, %{return: true}} =
+               Lisp.run("(= *1 {'outer ['inner]})", turn_history: [previous])
+    end
+
+    test "native runs preserve exact host history terms" do
+      wrapper = %Format.SymbolRef{name: "host-value"}
+
+      assert {:ok, %{return: ^wrapper}} =
+               Lisp.run_native("*1", turn_history: [wrapper])
+    end
+
+    test "public runs reject malformed symbol wrappers in turn history" do
+      for malformed <- [
+            %Format.SymbolRef{name: %{}},
+            %{__struct__: Format.SymbolRef}
+          ] do
+        assert {:error, %{fail: %{reason: :invalid_symbol_ref}, memory: %{preserved: "memory"}}} =
+                 Lisp.run("*1",
+                   turn_history: [malformed],
+                   memory: %{preserved: "memory"}
+                 )
+      end
+    end
+
+    test "public wrapper conversion is bounded setup and excluded from the evaluator heap" do
+      history_value =
+        for index <- 1..30_000 do
+          %Format.SymbolRef{name: "history/#{index}"}
+        end
+
+      assert {:ok, %{return: 30_000}} =
+               Lisp.run("(count *1)",
+                 turn_history: [history_value],
+                 max_heap: 1_200_000,
+                 setup_max_heap: 4_000_000,
+                 timeout: 5_000
+               )
     end
 
     test "turn history works with nil checks" do

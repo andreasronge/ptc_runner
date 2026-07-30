@@ -41,6 +41,40 @@ defmodule Mix.Tasks.Ptc.RunTest do
   end
 
   @tag :tmp_dir
+  test "prints quoted-symbol results with their public display strings", %{tmp_dir: dir} do
+    File.write!(
+      Path.join(dir, "main.clj"),
+      ~S|(ns main) (defn run [_] (return {"ref" 'foo "nested" ['bar] 'key "quoted-key"}))|
+    )
+
+    manifest = %{
+      "version" => 1,
+      "workflow" => %{
+        "components" => [%{"id" => "main", "path" => "main.clj"}],
+        "entry" => "main/run"
+      },
+      "input" => %{"value" => %{}}
+    }
+
+    path = Path.join(dir, "ptc.json")
+    File.write!(path, Jason.encode!(manifest))
+
+    output =
+      capture_io(fn ->
+        Mix.Task.reenable("ptc.run")
+        Run.run([path])
+      end)
+
+    assert %{
+             "value" => %{
+               "ref" => "'foo",
+               "nested" => ["'bar"],
+               "'key" => "quoted-key"
+             }
+           } = Jason.decode!(output)
+  end
+
+  @tag :tmp_dir
   test "--private-mission classifies the value before assembly and requires a private sink", %{
     tmp_dir: dir
   } do

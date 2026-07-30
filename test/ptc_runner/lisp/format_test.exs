@@ -11,6 +11,13 @@ defmodule PtcRunner.Lisp.FormatTest do
 
   doctest PtcRunner.Lisp.Format
 
+  test "symbol-reference projection rejects improper lists without raising" do
+    malformed = [1 | 2]
+
+    assert {:error, {:invalid_lisp_list, []}} = Format.externalize_symbol_refs(malformed)
+    assert {:error, {:invalid_lisp_list, []}} = Format.internalize_symbol_refs(malformed)
+  end
+
   describe "to_string/2 with closures" do
     test "formats closure with single parameter" do
       closure = {:closure, [{:var, :x}], nil, %{}, [], %{}}
@@ -157,6 +164,16 @@ defmodule PtcRunner.Lisp.FormatTest do
         assert Jason.encode!(value) == Jason.encode!(display)
       end
     end
+
+    test "symbol references use the reader's symbol-name grammar" do
+      for name <- ["x", "github/search_repos", "*1", "+", "ends-with?'"] do
+        assert SymbolRef.valid?(%SymbolRef{name: name})
+      end
+
+      for name <- ["", "x y", "x\n(tool/other {})", "λ", "#bad", "bad:name"] do
+        refute SymbolRef.valid?(%SymbolRef{name: name})
+      end
+    end
   end
 
   describe "to_clojure/2 with vars" do
@@ -178,6 +195,16 @@ defmodule PtcRunner.Lisp.FormatTest do
   end
 
   describe "symbol references" do
+    test "rejects malformed MapSet structs before enumeration" do
+      malformed = Map.put(MapSet.new([%SymbolRef{name: "x"}]), :map, :invalid)
+      forged = Map.put(MapSet.new([%SymbolRef{name: "x"}]), :extra, true)
+
+      for value <- [malformed, forged],
+          projector <- [&Format.internalize_symbol_refs/1, &Format.externalize_symbol_refs/1] do
+        assert {:error, {:invalid_symbol_ref, []}} = projector.(value)
+      end
+    end
+
     test "formats bare symbolic refs as quoted symbols" do
       assert Format.to_string({:symbol_ref, "github/search_repos"}) == "'github/search_repos"
 
@@ -190,6 +217,30 @@ defmodule PtcRunner.Lisp.FormatTest do
 
       assert Format.to_clojure([ref]) == {"['github/search_repos]", false}
       assert Format.to_clojure(%{ref: ref}) == {"{:ref 'github/search_repos}", false}
+    end
+
+    test "invalid outer structs cannot hide malformed symbol wrappers" do
+      forged = %{__struct__: URI, extra: %SymbolRef{name: "x y"}}
+
+      assert {:error, {:invalid_symbol_ref, [{:map_value, 0}]}} =
+               Format.internalize_symbol_refs(forged)
+
+      forged_key = Map.new([{:__struct__, URI}, {%SymbolRef{name: "x y"}, :hidden}])
+
+      assert {:error, {:invalid_symbol_ref, [{:map_key, 0}]}} =
+               Format.internalize_symbol_refs(forged_key)
+    end
+
+    test "externalization validates native refs and rejects inverse collisions" do
+      symbol = %SymbolRef{name: "x"}
+
+      assert {:ok, ^symbol} = Format.externalize_symbol_refs({:symbol_ref, "x"})
+
+      assert {:error, {:symbol_ref_collision, [], :map}} =
+               Format.externalize_symbol_refs(%{
+                 symbol => :public,
+                 {:symbol_ref, "x"} => :native
+               })
     end
   end
 

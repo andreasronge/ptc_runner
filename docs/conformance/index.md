@@ -13,18 +13,18 @@ Rows marked `PTC extension` are intentionally outside Clojure/Java standard comp
 
 | Metric | Count |
 |--------|-------|
-| Supported | 299 |
+| Supported | 300 |
 | Candidate | 80 |
-| Not Relevant | 328 |
+| Not Relevant | 327 |
 | Not Classified | 0 |
-| Relevant Target | 379 |
-| Coverage | 299/379 (78.9%) |
+| Relevant Target | 380 |
+| Coverage | 300/380 (78.9%) |
 
 ## Namespace Index
 
 | Namespace | Scope | Target | Supported | Candidate | Not Relevant | Coverage | Audit |
 |-----------|-------|--------|-----------|-----------|--------------|----------|-------|
-| `clojure.core/`, `core/` | Clojure standard | Clojure standard vars (535) | 235 | 14 | 286 | 235/249 (94.4%) | [audit](clojure-core-audit.md) |
+| `clojure.core/`, `core/` | Clojure standard | Clojure standard vars (535) | 236 | 14 | 285 | 236/250 (94.4%) | [audit](clojure-core-audit.md) |
 | `clojure.string/`, `str/`, `string/` | Clojure standard | Clojure standard vars (21) | 16 | 4 | 1 | 16/20 (80.0%) | [audit](clojure-string-audit.md) |
 | `clojure.set/`, `set/` | Clojure standard | Clojure standard vars (12) | 3 | 9 | 0 | 3/12 (25.0%) | [audit](clojure-set-audit.md) |
 | `clojure.walk/`, `walk/` | Clojure standard | Clojure standard vars (10) | 3 | 4 | 3 | 3/7 (42.9%) | [audit](clojure-walk-audit.md) |

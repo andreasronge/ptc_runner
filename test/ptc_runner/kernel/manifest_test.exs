@@ -9,6 +9,7 @@ defmodule PtcRunner.Kernel.ManifestTest do
   alias PtcRunner.Kernel.RunBuilder
   alias PtcRunner.Kernel.SafeMetadata
   alias PtcRunner.Kernel.ValueContract
+  alias PtcRunner.Lisp.Format
 
   @input_schema %{"type" => "object", "additionalProperties" => true}
 
@@ -297,6 +298,91 @@ defmodule PtcRunner.Kernel.ManifestTest do
     refute File.exists?(invalid_output)
     refute inspect(error) =~ secret
     refute inspect(error) =~ "unknown"
+  end
+
+  @tag :tmp_dir
+  test "manifest result contracts and artifacts use quoted-symbol display strings", %{
+    tmp_dir: dir
+  } do
+    File.write!(
+      Path.join(dir, "main.clj"),
+      ~S|(ns main) (defn run [_] (return {"ref" 'foo "nested" ['bar] 'key "quoted-key"}))|
+    )
+
+    result_schema = %{
+      "type" => "object",
+      "additionalProperties" => false,
+      "required" => ["ref", "nested", "'key"],
+      "properties" => %{
+        "ref" => %{"type" => "string", "const" => "'foo"},
+        "nested" => %{
+          "type" => "array",
+          "items" => %{"type" => "string", "const" => "'bar"}
+        },
+        "'key" => %{"type" => "string", "const" => "quoted-key"}
+      }
+    }
+
+    File.write!(Path.join(dir, "result.schema.json"), Jason.encode!(result_schema))
+
+    manifest = %{
+      "version" => 1,
+      "workflow" => %{
+        "components" => [%{"id" => "main", "path" => "main.clj"}],
+        "entry" => "main/run"
+      },
+      "input" => %{"value" => %{}},
+      "contracts" => %{"result_schema" => %{"path" => "result.schema.json"}}
+    }
+
+    manifest_path = Path.join(dir, "ptc.json")
+    output_path = Path.join(dir, "result.json")
+    File.write!(manifest_path, Jason.encode!(manifest))
+    {:ok, registry} = ProviderRegistry.new()
+
+    assert {:ok,
+            %{
+              value: %{
+                "ref" => %Format.SymbolRef{name: "foo"},
+                "nested" => [%Format.SymbolRef{name: "bar"}],
+                %Format.SymbolRef{name: "key"} => "quoted-key"
+              }
+            }} = RunBuilder.run(manifest_path, registry, output: output_path)
+
+    assert Jason.decode!(File.read!(output_path)) == %{
+             "ref" => "'foo",
+             "nested" => ["'bar"],
+             "'key" => "quoted-key"
+           }
+  end
+
+  @tag :tmp_dir
+  test "manifest runs reject quoted-symbol artifact key collisions before persistence", %{
+    tmp_dir: dir
+  } do
+    File.write!(
+      Path.join(dir, "main.clj"),
+      ~S|(ns main) (defn run [_] (return {'foo 1 "'foo" 2}))|
+    )
+
+    manifest = %{
+      "version" => 1,
+      "workflow" => %{
+        "components" => [%{"id" => "main", "path" => "main.clj"}],
+        "entry" => "main/run"
+      },
+      "input" => %{"value" => %{}}
+    }
+
+    manifest_path = Path.join(dir, "ptc.json")
+    output_path = Path.join(dir, "result.json")
+    File.write!(manifest_path, Jason.encode!(manifest))
+    {:ok, registry} = ProviderRegistry.new()
+
+    assert {:error, %{kind: :workflow_failed, reason: :public_projection_collision}} =
+             RunBuilder.run(manifest_path, registry, output: output_path)
+
+    refute File.exists?(output_path)
   end
 
   @tag :tmp_dir

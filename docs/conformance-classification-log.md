@@ -109,19 +109,21 @@ New status totals: open(BUG) 116 · DIV/by-design 52 · fixed 41 · UNSUPPORTED 
   `bug_case`s and DIV-14/33 keep `div_case`s (they still pass; semantic-label cleanup TODO).
 - **4 entries unaudited** (batch-boundary drop): DIV-23, DIV-24, DIV-36, GAP-S09.
 
-## GAP-S134 + GAP-S20(freq) — direct-map-as-collection consistency rule  ·  committed
+## GAP-S134 + GAP-S20(freq) — direct-map-as-collection consistency rule  ·  corrected
 
-- **Classification:** BUG (both) — `distinct` BUG (too lenient), `frequencies`
-  BUG (too strict); each already filed in opposite directions.
+- **Classification:** `frequencies` was a BUG (too strict). The original entry
+  incorrectly classified `distinct` as a Clojure compatibility bug: Clojure
+  accepts a map and returns its distinct entries, while PTC-Lisp intentionally
+  rejects the order-exposing direct-map operation under DIV-29.
 - **Work size:** A/B
 - **Spec basis:** Codex consult on the most consistent rule for LLM use settled
   on: *a direct map is data, not an implicit ordered sequence — order-INSENSITIVE
   consumers accept it; ops whose result exposes/depends on traversal order
   reject it and require an explicit ordered view (`seq`/`entries`/`keys`/`vals`)*.
-  Applied to the two ops the team already flagged: `frequencies` (counts →
-  order-insensitive) now **accepts** maps like `count` + Clojure (GAP-S20);
-  `distinct` (result order exposes traversal) now **rejects** maps like
-  Clojure + DIV-29 (GAP-S134).
+  `frequencies` (counts → order-insensitive) now **accepts** maps like `count`
+  and Clojure (GAP-S20). `distinct` (result order exposes traversal)
+  **rejects** maps as the deliberate DIV-29 difference from Clojure; GAP-S134
+  is retained only as a corrected historical record.
 - **Decision boundary:** declined codex's *broader* version (rejecting
   `map`/`filter`/`reduce`/`take`/`drop` on maps). Those are whole-collection ops
   Clojure accepts, DIV-29 scopes itself to *positional* ops, PTC traversal is
@@ -156,8 +158,9 @@ New status totals: open(BUG) 116 · DIV/by-design 52 · fixed 41 · UNSUPPORTED 
   these were inconsistently strict. Added `nil` clauses (`[]`, or `{}` for
   `frequencies`).
 - **Risk:** local (one `nil` clause per function; no shared-path change). The
-  `frequencies`/`distinct` direct-*map* sub-cases are a separate map-seqable
-  question (GAP-S134), left open.
+  `frequencies`/`distinct` direct-*map* sub-cases were handled separately:
+  `frequencies` was fixed for Clojure compatibility, while `distinct` was
+  reclassified under DIV-29 (see the corrected entry above).
 - **Codex review:** pending.
 
 ## GAP-S98 — `interleave` accepts strings / nil (twin of GAP-S60)  ·  committed

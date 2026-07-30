@@ -13,6 +13,8 @@ defmodule PtcRunner.Lisp.CoreAST do
   ```
   """
 
+  alias PtcRunner.Lisp.FastParser
+  alias PtcRunner.Lisp.Format.SymbolRef
   alias PtcRunner.Lisp.Java.Surface, as: JavaSurface
 
   @type name :: atom() | String.t()
@@ -36,7 +38,7 @@ defmodule PtcRunner.Lisp.CoreAST do
           # Variables and namespace access
           | {:var, name()}
           | {:data, name()}
-          | {:runtime_callable, name(), name()}
+          | {:runtime_callable, :tool, name()}
           | {:turn_history, 1 | 2 | 3}
           | {:literal, term()}
           # Function call: f(args...)
@@ -90,36 +92,73 @@ defmodule PtcRunner.Lisp.CoreAST do
   @spec validate(term()) :: :ok | {:error, validation_error()}
   def validate(ast), do: do_validate(ast, [])
 
+  @doc false
+  @spec valid_prelude_ref?(term()) :: boolean()
+  def valid_prelude_ref?(ref) when is_binary(ref) do
+    case String.split(ref, "/", parts: 3) do
+      [namespace, name] ->
+        SymbolRef.valid_name?(namespace) and SymbolRef.valid_name?(name) and
+          not String.contains?(namespace, "/") and not String.contains?(name, "/") and
+          exact_namespaced_symbol?(ref, namespace, name)
+
+      _other ->
+        false
+    end
+  end
+
+  def valid_prelude_ref?(_ref), do: false
+
+  defp exact_namespaced_symbol?(ref, namespace, name) do
+    case FastParser.parse(ref) do
+      {:ok, {:ns_symbol, parsed_namespace, parsed_name}} ->
+        to_string(parsed_namespace) == namespace and to_string(parsed_name) == name
+
+      _other ->
+        false
+    end
+  end
+
   defp do_validate(value, _path)
        when is_nil(value) or is_boolean(value) or is_number(value) or is_atom(value),
        do: :ok
 
   defp do_validate({:string, value}, _path) when is_binary(value), do: :ok
   defp do_validate({:keyword, name}, _path) when is_atom(name) or is_binary(name), do: :ok
-  defp do_validate({:symbol_ref, name}, _path) when is_binary(name), do: :ok
+
+  defp do_validate({:symbol_ref, name} = value, path) when is_binary(name) do
+    if SymbolRef.valid_name?(name), do: :ok, else: invalid(path, value)
+  end
+
   defp do_validate({:literal, _value}, _path), do: :ok
   defp do_validate({:var, name}, _path) when is_atom(name) or is_binary(name), do: :ok
-  defp do_validate({:data, name}, _path) when is_atom(name) or is_binary(name), do: :ok
+
+  defp do_validate({:data, name} = node, path) when is_atom(name) or is_binary(name) do
+    if exact_qualified_name?("data", name), do: :ok, else: invalid(path, node)
+  end
 
   defp do_validate({tag, elements}, path)
        when tag in [:vector, :set, :do, :and, :or, :recur, :pcalls, :juxt] and is_list(elements),
        do: validate_list(elements, path)
 
   defp do_validate({:map, pairs}, path) when is_list(pairs) do
-    pairs
-    |> Enum.with_index()
-    |> Enum.reduce_while(:ok, fn
-      {{key, value}, index}, :ok ->
-        with :ok <- do_validate(key, path ++ [index, 0]),
-             :ok <- do_validate(value, path ++ [index, 1]) do
-          {:cont, :ok}
-        else
-          {:error, _reason} = error -> {:halt, error}
-        end
+    if proper_list?(pairs) do
+      pairs
+      |> Enum.with_index()
+      |> Enum.reduce_while(:ok, fn
+        {{key, value}, index}, :ok ->
+          with :ok <- do_validate(key, path ++ [index, 0]),
+               :ok <- do_validate(value, path ++ [index, 1]) do
+            {:cont, :ok}
+          else
+            {:error, _reason} = error -> {:halt, error}
+          end
 
-      {_malformed, _index}, :ok ->
-        {:halt, invalid(path, {:map, pairs})}
-    end)
+        {_malformed, _index}, :ok ->
+          {:halt, invalid(path, {:map, pairs})}
+      end)
+    else
+      invalid(path, {:map, pairs})
+    end
   end
 
   defp do_validate({:call, target, arguments}, path) when is_list(arguments),
@@ -148,19 +187,26 @@ defmodule PtcRunner.Lisp.CoreAST do
        when tag in [:def, :defonce] and (is_atom(name) or is_binary(name)) and is_map(metadata),
        do: do_validate(value, path ++ [0])
 
-  defp do_validate({:tool_call, name, arguments}, path)
-       when (is_atom(name) or is_binary(name)) and is_list(arguments),
-       do: validate_list(arguments, path)
+  defp do_validate({:tool_call, name, arguments} = node, path)
+       when (is_atom(name) or is_binary(name)) and is_list(arguments) do
+    if exact_qualified_name?("tool", name),
+      do: validate_list(arguments, path),
+      else: invalid(path, node)
+  end
 
-  defp do_validate({:prelude_ref, ref}, _path) when is_binary(ref), do: :ok
+  defp do_validate({:prelude_ref, ref} = node, path) when is_binary(ref) do
+    if valid_prelude_ref?(ref), do: :ok, else: invalid(path, node)
+  end
 
-  defp do_validate({:prelude_call, ref, arguments}, path)
-       when is_binary(ref) and is_list(arguments),
-       do: validate_list(arguments, path)
+  defp do_validate({:prelude_call, ref, arguments} = node, path)
+       when is_binary(ref) and is_list(arguments) do
+    if valid_prelude_ref?(ref), do: validate_list(arguments, path), else: invalid(path, node)
+  end
 
-  defp do_validate({:runtime_callable, namespace, name}, _path)
-       when (is_atom(namespace) or is_binary(namespace)) and (is_atom(name) or is_binary(name)),
-       do: :ok
+  defp do_validate({:runtime_callable, :tool, name} = node, path)
+       when is_atom(name) or is_binary(name) do
+    if exact_tool_callable?(name), do: :ok, else: invalid(path, node)
+  end
 
   defp do_validate({:turn_history, n}, _path) when n in [1, 2, 3], do: :ok
 
@@ -232,31 +278,39 @@ defmodule PtcRunner.Lisp.CoreAST do
   end
 
   defp validate_list(values, path) do
-    values
-    |> Enum.with_index()
-    |> Enum.reduce_while(:ok, fn {value, index}, :ok ->
-      case do_validate(value, path ++ [index]) do
-        :ok -> {:cont, :ok}
-        {:error, _reason} = error -> {:halt, error}
-      end
-    end)
+    if proper_list?(values) do
+      values
+      |> Enum.with_index()
+      |> Enum.reduce_while(:ok, fn {value, index}, :ok ->
+        case do_validate(value, path ++ [index]) do
+          :ok -> {:cont, :ok}
+          {:error, _reason} = error -> {:halt, error}
+        end
+      end)
+    else
+      invalid(path, values)
+    end
   end
 
   defp validate_bindings(bindings, path) do
-    bindings
-    |> Enum.with_index()
-    |> Enum.reduce_while(:ok, fn
-      {{:binding, pattern, value}, index}, :ok ->
-        with :ok <- validate_pattern(pattern, path ++ [index, 0]),
-             :ok <- do_validate(value, path ++ [index, 1]) do
-          {:cont, :ok}
-        else
-          {:error, _reason} = error -> {:halt, error}
-        end
+    if proper_list?(bindings) do
+      bindings
+      |> Enum.with_index()
+      |> Enum.reduce_while(:ok, fn
+        {{:binding, pattern, value}, index}, :ok ->
+          with :ok <- validate_pattern(pattern, path ++ [index, 0]),
+               :ok <- do_validate(value, path ++ [index, 1]) do
+            {:cont, :ok}
+          else
+            {:error, _reason} = error -> {:halt, error}
+          end
 
-      {_malformed, _index}, :ok ->
-        {:halt, invalid(path, bindings)}
-    end)
+        {_malformed, _index}, :ok ->
+          {:halt, invalid(path, bindings)}
+      end)
+    else
+      invalid(path, bindings)
+    end
   end
 
   defp validate_params(params, path) when is_list(params), do: validate_patterns(params, path)
@@ -269,28 +323,129 @@ defmodule PtcRunner.Lisp.CoreAST do
   defp validate_params(malformed, path), do: invalid(path, malformed)
 
   defp validate_patterns(patterns, path) do
-    patterns
-    |> Enum.with_index()
-    |> Enum.reduce_while(:ok, fn {pattern, index}, :ok ->
-      case validate_pattern(pattern, path ++ [index]) do
-        :ok -> {:cont, :ok}
-        {:error, _reason} = error -> {:halt, error}
-      end
-    end)
+    if proper_list?(patterns) do
+      patterns
+      |> Enum.with_index()
+      |> Enum.reduce_while(:ok, fn {pattern, index}, :ok ->
+        case validate_pattern(pattern, path ++ [index]) do
+          :ok -> {:cont, :ok}
+          {:error, _reason} = error -> {:halt, error}
+        end
+      end)
+    else
+      invalid(path, patterns)
+    end
   end
 
   defp validate_pattern({:var, name}, _path) when is_atom(name) or is_binary(name), do: :ok
-  defp validate_pattern({:destructure, _shape}, _path), do: :ok
+
+  defp validate_pattern({:destructure, {:keys, keys, defaults}}, path) do
+    with :ok <- validate_pattern_names(keys, path ++ [0]),
+         do: validate_pattern_defaults(defaults, path ++ [1])
+  end
+
+  defp validate_pattern({:destructure, {:map, keys, renames, defaults}}, path) do
+    with :ok <- validate_pattern_names(keys, path ++ [0]),
+         :ok <- validate_pattern_renames(renames, path ++ [1]),
+         do: validate_pattern_defaults(defaults, path ++ [2])
+  end
+
+  defp validate_pattern({:destructure, {:as, name, inner}}, path)
+       when is_atom(name) or is_binary(name),
+       do: validate_pattern(inner, path ++ [1])
+
+  defp validate_pattern({:destructure, {:seq, patterns}}, path),
+    do: validate_patterns(patterns, path)
+
+  defp validate_pattern({:destructure, {:seq_rest, leading, rest}}, path) do
+    with :ok <- validate_patterns(leading, path ++ [0]),
+         do: validate_pattern(rest, path ++ [1])
+  end
+
   defp validate_pattern(malformed, path), do: invalid(path, malformed)
 
+  defp validate_pattern_names(names, path) do
+    if proper_list?(names) do
+      names
+      |> Enum.with_index()
+      |> Enum.reduce_while(:ok, fn
+        {name, _index}, :ok when is_atom(name) or is_binary(name) ->
+          {:cont, :ok}
+
+        {name, index}, :ok ->
+          {:halt, invalid(path ++ [index], name)}
+      end)
+    else
+      invalid(path, names)
+    end
+  end
+
+  defp validate_pattern_renames(renames, path) do
+    if proper_list?(renames) do
+      renames
+      |> Enum.with_index()
+      |> Enum.reduce_while(:ok, fn
+        {{pattern, source_key}, index}, :ok
+        when is_atom(source_key) or is_binary(source_key) ->
+          case validate_pattern(pattern, path ++ [index, 0]) do
+            :ok -> {:cont, :ok}
+            {:error, _reason} = error -> {:halt, error}
+          end
+
+        {malformed, index}, :ok ->
+          {:halt, invalid(path ++ [index], malformed)}
+      end)
+    else
+      invalid(path, renames)
+    end
+  end
+
+  defp validate_pattern_defaults(defaults, path) do
+    if proper_list?(defaults) do
+      defaults
+      |> Enum.with_index()
+      |> Enum.reduce_while(:ok, fn
+        {{name, value}, _index}, :ok
+        when (is_atom(name) or is_binary(name)) and
+               (is_nil(value) or is_boolean(value) or is_number(value) or is_atom(value) or
+                  is_binary(value)) ->
+          {:cont, :ok}
+
+        {malformed, index}, :ok ->
+          {:halt, invalid(path ++ [index], malformed)}
+      end)
+    else
+      invalid(path, defaults)
+    end
+  end
+
   defp invalid(path, malformed), do: {:error, {:invalid_core_ast, Enum.take(path, 32), malformed}}
+
+  defp exact_tool_callable?(name), do: exact_qualified_name?("tool", name)
+
+  defp exact_qualified_name?(namespace, name) do
+    name = to_string(name)
+    source = namespace <> "/" <> name
+
+    case FastParser.parse(source) do
+      {:ok, {:ns_symbol, parsed_namespace, parsed_name}} ->
+        to_string(parsed_namespace) == namespace and to_string(parsed_name) == name
+
+      _other ->
+        false
+    end
+  end
+
+  defp proper_list?([]), do: true
+  defp proper_list?([_head | tail]), do: proper_list?(tail)
+  defp proper_list?(_other), do: false
 
   @type binding :: {:binding, pattern(), t()}
 
   @type pattern ::
           {:var, name()}
-          | {:destructure, {:keys, [name()], keyword()}}
-          | {:destructure, {:map, [name()], [{pattern(), term()}], keyword()}}
+          | {:destructure, {:keys, [name()], [{name(), term()}]}}
+          | {:destructure, {:map, [name()], [{pattern(), name()}], [{name(), term()}]}}
           | {:destructure, {:as, name(), pattern()}}
           | {:destructure, {:seq, [pattern()]}}
           # Rest pattern: [a b & rest] binds rest to remaining elements

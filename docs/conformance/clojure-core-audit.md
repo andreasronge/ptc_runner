@@ -14,12 +14,12 @@ Coverage excludes `not_relevant` entries: `supported / (supported + candidate + 
 
 | Status | Count |
 |--------|-------|
-| Supported | 235 |
+| Supported | 236 |
 | Candidate | 14 |
-| Not Relevant | 286 |
+| Not Relevant | 285 |
 | Not Classified | 0 |
-| Relevant Target | 249 |
-| Coverage | 235/249 (94.4%) |
+| Relevant Target | 250 |
+| Coverage | 236/250 (94.4%) |
 | **Total** | **535** |
 
 ## Details
@@ -168,7 +168,7 @@ Coverage excludes `not_relevant` entries: `supported / (supported + candidate + 
 | `disj!` | ❌ not_relevant | Removes from transient set | relies on transient/mutable data structures |
 | `dissoc` | ✅ supported | Returns map with key removed | BUG GAP-S19: nil map root currently raises instead of returning nil |
 | `dissoc!` | ❌ not_relevant | Removes from transient map | relies on transient/mutable data structures |
-| `distinct` | ✅ supported | Returns seq removing duplicates | BUG GAP-S20: nil input currently raises instead of returning an empty seq. BUG GAP-S134: direct map input returns entries instead of raising |
+| `distinct` | ✅ supported | Returns seq removing duplicates | DIV-29: direct map input raises; use seq/entries/keys/vals for an explicit ordered map view |
 | `distinct?` | ✅ supported | Returns true if all args distinct | BUG GAP-S64: zero-arity distinct? returns true instead of raising. BUG GAP-S101: repeated NaN values are treated as duplicates |
 | `do` | ✅ supported | Evaluates expressions, returns last |  |
 | `doall` | ❌ not_relevant | Realizes entire lazy seq | relies on lazy sequences |
@@ -326,7 +326,7 @@ Coverage excludes `not_relevant` entries: `supported / (supported + candidate + 
 | `min` | ✅ supported | Returns least number | DIV-30: uses PTC's recoverable total term ordering for nil and mixed values |
 | `min-key` | ✅ supported | Returns item with least function value | DIV-30: key comparison uses PTC's recoverable total term ordering for nil and mixed values. BUG GAP-S47: ties currently return the first minimum instead of the last. BUG GAP-S71: map/vector callables are rejected as key functions |
 | `mod` | ✅ supported | Returns modulo | BUG GAP-S138: non-finite operands return NaN instead of matching Clojure/JVM behavior |
-| `name` | ✅ supported | Returns name string of symbol/keyword | DIV-19: quoted symbols are not supported as runtime values. BUG GAP-S129: character literals return strings instead of raising |
+| `name` | ✅ supported | Returns name string of symbol/keyword | DIV-19: inert quoted-symbol references are not accepted by name and symbol? remains false. BUG GAP-S129: character literals return strings instead of raising |
 | `namespace` | ❌ not_relevant | Returns namespace of symbol/keyword | relies on namespace support |
 | `nat-int?` | ✅ supported | Returns true if non-negative integer | DIV-37: arbitrary-precision PTC integers have no distinct JVM int/long width |
 | `neg-int?` | ✅ supported | Returns true if negative integer | DIV-37: arbitrary-precision PTC integers have no distinct JVM int/long width |
@@ -382,7 +382,7 @@ Coverage excludes `not_relevant` entries: `supported / (supported + candidate + 
 | `qualified-keyword?` | ❌ not_relevant | Returns true if keyword has namespace | namespaced keywords are not supported |
 | `qualified-symbol?` | ❌ not_relevant | Returns true if symbol has namespace | symbols are not supported as runtime values |
 | `quot` | ✅ supported | Returns integer division quotient | DIV-37: uses PTC-Lisp arbitrary-precision integers instead of JVM Long/MIN_VALUE overflow. BUG GAP-S138: non-finite operands return NaN instead of matching Clojure/JVM behavior |
-| `quote` | ❌ not_relevant | Returns form unevaluated | quote syntax is intentionally unsupported; use vectors and data literals directly |
+| `quote` | ✅ supported | Returns form unevaluated | DIV-19: only inert symbol references are supported; quoted collections and general quoted data remain unsupported, and symbol? returns false |
 | `rand` | ❌ not_relevant | Returns random float 0-1 | non-deterministic randomness contradicts sandbox determinism |
 | `rand-int` | ❌ not_relevant | Returns random int less than arg | relies on non-deterministic side effects/state |
 | `rand-nth` | ❌ not_relevant | Returns random item from seq | relies on non-deterministic side effects/state |

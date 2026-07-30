@@ -45,6 +45,7 @@ defmodule Mix.Tasks.Ptc.Run do
   alias PtcRunner.Kernel.HostInstallation
   alias PtcRunner.Kernel.ProviderRegistry
   alias PtcRunner.Kernel.RunBuilder
+  alias PtcRunner.Lisp.Format.SymbolRef
 
   @usage "usage: mix ptc.run MANIFEST [--mission PATH | --private-mission PATH] " <>
            "[--trace PATH] [--inspect PATH] " <>
@@ -262,8 +263,15 @@ defmodule Mix.Tasks.Ptc.Run do
   defp report(result, :normal, _opts),
     do: Mix.shell().info(Jason.encode!(public(result)))
 
+  defp public(%SymbolRef{} = value), do: Kernel.to_string(value)
   defp public(struct) when is_struct(struct), do: struct |> Map.from_struct() |> public()
-  defp public(map) when is_map(map), do: Map.new(map, fn {key, value} -> {key, public(value)} end)
+
+  defp public(map) when is_map(map),
+    do: Map.new(map, fn {key, value} -> {public_key(key), public(value)} end)
+
   defp public(list) when is_list(list), do: Enum.map(list, &public/1)
   defp public(value), do: value
+
+  defp public_key(%SymbolRef{} = key), do: Kernel.to_string(key)
+  defp public_key(key), do: key
 end

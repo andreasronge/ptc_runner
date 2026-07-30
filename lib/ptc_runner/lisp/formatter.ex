@@ -15,8 +15,7 @@ defmodule PtcRunner.Lisp.Formatter do
   def format(n) when is_integer(n), do: Integer.to_string(n)
 
   def format(n) when is_float(n) do
-    # Ensure consistent float formatting
-    :erlang.float_to_binary(n, [:compact, decimals: 10])
+    :erlang.float_to_binary(n, [:short])
   end
 
   def format(:infinity), do: "##Inf"
