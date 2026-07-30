@@ -113,7 +113,10 @@ defmodule PtcRunner.Kernel.RunState do
   def attach_provider(%__MODULE__{} = state, provider) when is_pid(provider) do
     case ProviderTaskTracker.attach(state.provider_tracker, provider) do
       :ok ->
-        case call(state, {:attach_provider, provider}) do
+        # The tracker hears about owner death only through its monitor, so it can
+        # still accept an attachment after the owner is gone. This call races that
+        # window and must report closure rather than exit.
+        case safe_call(state, {:attach_provider, provider}) do
           :ok ->
             :ok
 
@@ -143,8 +146,16 @@ defmodule PtcRunner.Kernel.RunState do
   def release_provider_slot(state), do: safe_call(state, :release_provider_slot)
 
   @spec finish_provider(t()) :: :ok | {:error, :run_closed}
+  # A provider result can arrive after the owner is gone. A dead owner means the
+  # run is closed, which is what the caller already handles, so report that
+  # instead of exiting.
   @doc "Releases a provider slot and accepts completion only while the run is open."
-  def finish_provider(state), do: call(state, :finish_provider)
+  def finish_provider(state) do
+    case safe_call(state, :finish_provider) do
+      {:error, :closed} -> {:error, :run_closed}
+      result -> result
+    end
+  end
 
   @doc false
   @spec mark_evaluation_terminal_provider_failure(t()) :: :ok

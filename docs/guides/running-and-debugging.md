@@ -79,13 +79,21 @@ another tenant could otherwise replace the private temporary directory before
 the artifact is opened. A final parent must also grant create access to the
 effective owner, group, or other permission class.
 
-Preflight reports an untrusted ancestor under its own reason —
+Destination preflight reports an untrusted ancestor under its own reason —
 `result_destination_unsafe`, `inspection_destination_unsafe`, or
 `trace_destination_unsafe` — rather than the generic persistence or
 unavailability failure, because the remedy differs: an untrusted ancestor names
 a directory whose owner or mode an operator can correct, while a missing `id`
-or `mkdir` names an unusable host. The runtime append and publication paths keep
-their single closed reason.
+or `mkdir` names an unusable host. Result publication shares that preflight, so
+`--output` and `--private-output` report `result_destination_unsafe` too when a
+destination turns unsafe after preflight; trace appends and inspection
+publication keep their single closed reason.
+
+Ancestry is validated for every private destination and for a normal trace that
+must still be created. An existing normal trace is validated for writability
+only. The append-lock directory under `TMPDIR` is validated separately and
+reports `source_unavailable` for any fault, including an untrusted ancestor of
+its own.
 
 Private trace creation uses the same host primitives and ancestry checks. A
 missing trace requires both `mkdir` and `id` and is published at mode `0600`

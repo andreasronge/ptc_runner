@@ -396,6 +396,31 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     assert {:error, :closed} = RunState.release_provider_slot(state)
   end
 
+  # The tracker hears about owner death only through its monitor, so it can still
+  # accept an attachment after the owner is gone. Pinning the owner pid to an
+  # already-dead process reproduces that window without racing the monitor.
+  test "provider attachment reports closure when the owner died before the tracker noticed" do
+    {:ok, state} = RunState.start(Limits.defaults())
+    assert :ok = RunState.reserve_capability(state, :workflow, "orphaned")
+
+    {dead_owner, dead_ref} = spawn_monitor(fn -> :ok end)
+    assert_receive {:DOWN, ^dead_ref, :process, ^dead_owner, :normal}
+
+    provider =
+      spawn(fn ->
+        receive do
+          :stop -> :ok
+        end
+      end)
+
+    provider_ref = Process.monitor(provider)
+
+    assert {:error, :closed} = RunState.attach_provider(%{state | pid: dead_owner}, provider)
+    assert_receive {:DOWN, ^provider_ref, :process, ^provider, :killed}
+
+    assert :ok = RunState.close_and_drain(state)
+  end
+
   test "provider attachment distinguishes a closed run from an already-dead provider" do
     {:ok, closed_state} = RunState.start(Limits.defaults())
     assert :ok = RunState.reserve_capability(closed_state, :workflow, "closed")

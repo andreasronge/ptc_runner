@@ -1247,10 +1247,13 @@ defmodule PtcRunner.Kernel.TraceLog do
     end
   end
 
+  # Unlike the normal-trace paths, this one has always collapsed an unavailable
+  # parent into :source_unavailable. Only the unsafe split is new here.
   defp private_creation_parent(path) do
     case PrivateDirectory.preflight(path) do
       :ok -> :ok
-      {:error, reason} -> {:error, preflight_reason(reason, :source_unavailable)}
+      {:error, :private_directory_parent_unsafe} -> {:error, :trace_destination_unsafe}
+      {:error, _reason} -> {:error, :source_unavailable}
     end
   end
 

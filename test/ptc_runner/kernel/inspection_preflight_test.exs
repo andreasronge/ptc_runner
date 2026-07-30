@@ -526,6 +526,26 @@ defmodule PtcRunner.Kernel.InspectionPreflightTest do
   end
 
   describe "TraceLog private destination ownership" do
+    # Both classes report the untrusted ancestor rather than a bare
+    # "unavailable": the private path carries the reason out of
+    # PrivateDirectory.preflight/1, and the normal path out of
+    # preflight_writable_parent/1, which previously flattened it.
+    @tag :tmp_dir
+    test "creation preflight names a replaceable ancestor for either class", %{tmp_dir: dir} do
+      replaceable = Path.join(dir, "replaceable")
+      File.mkdir!(replaceable)
+      File.chmod!(replaceable, 0o777)
+
+      assert {:error, :trace_destination_unsafe} =
+               TraceLog.preflight_destination(
+                 Path.join(replaceable, "run.private.jsonl"),
+                 true
+               )
+
+      assert {:error, :trace_destination_unsafe} =
+               TraceLog.preflight_destination(Path.join(replaceable, "run.jsonl"), false)
+    end
+
     @tag :tmp_dir
     test "accepts an appendable existing private trace in a non-creatable parent", %{
       tmp_dir: dir
