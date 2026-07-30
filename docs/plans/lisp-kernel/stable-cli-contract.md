@@ -1276,7 +1276,7 @@ bases overridden to the same candidate intentionally have different content
 digests while retaining the same effective digest when all effective behavior
 is otherwise identical.
 
-`FrozenBundle.hash` changes in slice 0 to bare lowercase SHA-256 hex over the
+`FrozenBundle.hash` changes in commit 0 to bare lowercase SHA-256 hex over the
 following exact bytes:
 
 ```text
@@ -1807,7 +1807,48 @@ into the single-document command envelope. A standalone REPL is not part of V1.
 
 ## Implementation slices
 
-### 0. Fix bundle graph identity
+### Delivery protocol
+
+Implement this entire plan on one feature branch and deliver it through one
+draft PR targeting `origin/main`. Open the draft after commit 0 and accumulate
+the numbered commits below in order; do not split the work across independent
+PRs and do not squash the slice boundaries. Every numbered slice is exactly one
+reviewable commit in the final PR history. Each commit must leave the repository
+compiling, keep all previously completed gates green, update its generated
+artifacts and durable module/guide documentation, and contain no temporary
+compatibility path or knowingly dead scaffold.
+
+For each numbered commit:
+
+1. implement only that slice and its gate;
+2. run the focused tests plus `mix precommit`;
+3. run an independent adversarial review of that commit in the context of all
+   preceding commits;
+4. address findings by amending the same slice commit and repeat focused
+   follow-up review until it has no actionable finding;
+5. run a fresh independent review as the final gate; and
+6. only after that fresh review is clean, push the commit to the draft PR and
+   begin the next slice.
+
+The completed branch then receives one final `mix precommit`, the credentialed
+live-model acceptance in commit 11, and a fresh full-PR review against
+`origin/main`. Record the focused commands and clean review result for every
+commit in the PR body. A later commit may integrate a completed seam but must
+not silently repair a known failure in an earlier commit; amend and re-review
+the owning commit instead. If a later integration or the final full-PR review
+finds such a defect, rewrite the owning commit with `--force-with-lease`, rerun
+that commit's clean-review cycle, and rerun the gates/reviews of every affected
+descendant commit before declaring the PR ready.
+
+This PR retains `req_llm`, `llm_db`, the current `PtcRunner.LLM` adapter seam,
+and the existing provider/model configuration. The future ReqLLM-removal plan
+is explicitly out of scope: do not introduce `PtcRunner.LLM.Target`, replace
+the adapter, change the wire codecs, or remove/reclassify either dependency.
+The only ReqLLM work allowed here is the structured non-warning model
+resolution, safe application lifecycle, and bounded stable-CLI provider
+behavior required below.
+
+### Commit 0. Fix bundle graph identity
 
 - replace Erlang-term hashing with the canonical V2 bundle framing above and
   include canonical dependency edges in `FrozenBundle.hash`;
@@ -1816,9 +1857,9 @@ into the single-document command envelope. A standalone REPL is not part of V1.
 
 **Gate:** rewiring an edge changes the bundle hash without changing component
 IDs or sources. The effective-application half of this regression lands with
-the digest in slice 2.
+the digest in commit 4.
 
-### 1. Transport-neutral package and identity
+### Commit 1. Transport-neutral package and content identity
 
 - add `ApplicationPackage`, `ExecutionInput`, destination-free
   `ExecutionPolicy`, and sealed `RunRequest`;
@@ -1841,11 +1882,11 @@ dependency-edge changes alter content identity. Directory acquisition never
 reopens a captured path and documents its trusted-quiescent multi-file
 assumption. Safe component-override identity reaches identical terminal
 run-started metadata through both adapters; same candidate/effective source
-with a different verified base changes the content digest but not the effective
-digest. Neither package nor selection context contains an application
-directory.
+with a different verified base changes the content digest. The corresponding
+effective-digest assertion lands in commit 4. Neither package nor selection
+context contains an application directory.
 
-### 2. Typed diagnostics, phase ordering, and publication
+### Commit 2. Closed diagnostics and command engine
 
 - define closed outcome, diagnostic, phase, code, source, and activity types;
 - add the generated V1 schema, safe renderer, shared argv parser, and closed
@@ -1853,21 +1894,41 @@ directory.
 - preserve typed, schema-context-aware `ValueContract` violation segments at
   classification time and make the diagnostic projector only RFC 6901-escape
   that safe representation;
-- spike and install the standalone descriptor-3 envelope wrapper plus bounded
-  stdout group leader, make the shipped ReqLLM adapter use a structured
-  non-warning model-resolution path, and add the focused pinned
-  Logger/SASL/explicit-stderr/direct-file-descriptor secret audit described
-  above;
 - establish the `CommandEngine`/path-free `RunCoordinator` boundary above,
-  including its owner-backed shared `open_session/1` acquisition operation;
-  decompose `RunBuilder` behind it, and make activity monotonic;
-- add sealed declarative `ProviderDescriptor` metadata, including the closed
-  selection-validation mode, connectivity mode, probe-effect class, and their
-  implementation-consistency checks, so phase 5 never invokes a builder or
-  callback;
+  decompose provider-free preparation from `RunBuilder`, and make activity
+  monotonic; and
+- route provider-free pre-success diagnostics and failure handling through the
+  shared engine while retaining the existing public entrypoints; successful
+  validation waits for commit 4's final effective digest, and successful
+  execution waits for commit 6's owner-backed session lifecycle.
+
+**Gate:** representative provider-free failures through phases 1–5 have exact
+schema-valid envelopes, status/code/retryability, path-free safe diagnostics,
+and correct `provider_activity: false` through the internal engine API and
+existing direct embedding entrypoint. Public Mix/direct frontend parity belongs
+to commit 9, and standalone parity belongs to commit 10. Rejected values,
+arbitrary exception terms, paths, and private inputs never enter the envelope.
+
+### Commit 3. Closed limit catalog
+
 - replace reflected limit-name handling with the scoped `LimitCatalog`, generate
   both host/application schemas from it, and seal the three installed-only
-  operational timeouts with their exact ranges and identity participation;
+  operational timeouts with their exact defaults, ranges, scopes, and identity
+  participation; and
+- migrate existing limit construction, narrowing, and enforcement callers to
+  the catalog without changing provider declaration or execution yet.
+
+**Gate:** exact boundary tests cover every generated limit
+default/range/scope, host/manifest narrowing rule, runtime lookup, and schema
+projection. Generated schemas are current, and invalid or unknown limits fail
+before provider activity.
+
+### Commit 4. Provider declarations and effective identity
+
+- add sealed declarative `ProviderDescriptor` metadata, including the closed
+  selection-validation mode, connectivity mode, probe-effect class, safe
+  installation revision, and implementation-consistency checks, so phase 5
+  never invokes a builder or callback;
 - normalize every provider selection, derive the aggregate data class,
   effective flow, and effective event policy, then compute the exact effective
   application projection/digest—including input authority, that policy,
@@ -1875,59 +1936,140 @@ directory.
   bundles, effective limits, normalized selections, and
   `ptc_semantic_revision`—before constructing the post-selection provider
   context;
+- build public snapshots and effective provider projections only from the safe
+  declaration fields plus the separately hashed runtime-captured
+  acquisition/content projection;
+- complete successful provider-free validation routing through the shared
+  engine now that every required content/effective digest exists; successful
+  execution waits for commit 6's owner-backed session lifecycle; and
+- regenerate both schemas and update the retained identity, limits, and host
+  configuration documentation.
+
+**Gate:** directory and memory runs produce the same effective digest; input
+form/value/name within one authority class leaves it unchanged, while an
+input-authority-class change, local/shipped/override source, selected provider
+source/revision/data policy or normalized selection, `mission.data`, limits,
+contracts, dependency edges, effective event privacy, inspection-capture
+selection, result projection, or semantic revision changes it. Changing an
+unselected installed provider does not change it. Exact boundary tests cover
+all five shipped provider variants, custom descriptors, normalized selections,
+and safe installation-revision projection. Same candidate/effective source
+with a different verified override base changes the content digest but not the
+effective digest. Internal-engine and direct-embedding validation success
+fixtures return the exact schema-valid digest result without provider activity.
+
+### Commit 5. Local/application provider preflight
+
 - split provider preflight into deterministic per-occurrence audited-local
-  checks and an active boundary used by both `doctor` and `run`; add the
-  selected live-LLM adapter's
-  single-attempt, deadline- and response-bounded real connectivity probe as a
-  `doctor --connect`-only operation after that shared boundary, checking every
+  checks and the active application/credential boundary used by the shared
+  doctor and run engine operations;
+- implement the serialized provider-application gate and safe-start ownership
+  records for standalone, Mix CLI, and host-owned modes;
+- adjust the application/dependency metadata in this slice so starting
+  `:ptc_runner` loads provider code when packaged but never auto-starts
+  `:req_llm` or its included `:llm_db` application before the gate;
+- make the shipped ReqLLM adapter use the reviewed structured non-warning model
+  resolution path without changing or replacing the adapter, centralize final
+  generation-option sealing for its plain-text, structured-object, tool-call,
+  and streaming constructors, and force `max_retries: 0` in that shared helper
+  rather than exposing a host or manifest retry option; and
+- make provider activity monotonic before every unverified callback,
+  application start, credential resolution, or later provider action.
+
+**Gate:** phase-5 declaration and selection validation invokes no builder,
+callback, application, credential resolver, or network operation. Phase-7
+audited-local checks run once per occurrence in the documented order and return
+identical results in the internal doctor and run operations; workflow/mission
+alias collapse occurs only after all occurrences pass. Public command wiring
+belongs to commit 9. Failures through phase 7 prove zero credential
+resolution/acquisition, phase 8 marks activity before active work, and dotenv
+sentinels prove the mode-specific application gate does not implicitly load
+credentials. Starting only `:ptc_runner` in a fresh VM leaves both provider
+applications absent from `Application.started_applications/0` until a marked
+provider-bearing operation reaches the gate. A table-driven counting endpoint
+returns `429`, which the pinned
+ReqLLM version retries by default, across the retained adapter's plain-text,
+structured-object, tool-call, and streaming constructors and proves each sends
+exactly once with the shared `max_retries: 0` seal. This is distinct from the
+commit-7 connectivity-probe transport and leaves no parallel constructor or
+caller-controlled retry override.
+
+### Commit 6. Provider resource ownership and cleanup
+
+- complete the owner-backed shared `RunCoordinator.open_session/1` acquisition
+  operation introduced by the command-engine boundary;
+- complete successful provider-free execution routing through the shared engine
+  using the same owner-backed session lifecycle and an empty resource handle;
+- enforce the installed cleanup deadline with monitored closers and owned-tree
+  termination through one owner-backed resource graph, including pending
+  acquisition leases that roll back provisional roots;
+- remove raw-close-returning `ProviderRegistry.build/4`, and migrate direct
+  embedding/E2E acquisition, `RunConfig`/`Kernel.run`, builder rollback,
+  Runner, and REPL cleanup to the graph-requiring replacement; and
+- add a sidecar lease only if concurrency tests demonstrate spend-before-run
+  races that justify it.
+
+**Gate:** construction/acquisition rollback, owner death, timeout, ordinary
+completion, and concurrent runs all close each registered resource exactly
+once in dependency order under the one deadline. No former direct
+`ProviderRegistry.build/4` caller bypasses the owner. Cleanup failure has the
+documented primary/secondary precedence and leaves no untracked worker or port.
+Internal-engine and direct-embedding provider-free success fixtures return the
+exact schema-valid run outcome, exercise the empty resource handle, and prove
+session cleanup completes.
+
+### Commit 7. Bounded connectivity and doctor
+
+- add the selected live-LLM adapter's single-attempt, deadline- and
+  response-bounded real connectivity probe to the internal doctor-connect
+  operation after the shared local/application boundary, checking every
   selected occurrence before collapsing success to the alias result;
-- require a safe installation revision on all five shipped host provider
-  variants and every custom descriptor, and build public snapshots and
-  effective provider projections only from the safe declaration fields plus
-  the separately hashed runtime-captured acquisition/content projection;
-- regenerate `priv/schemas/ptc-host-config.schema.json` from the decoder and
-  update the retained host-configuration guide in the same change;
-- retain existing result/inspection/trace adapters;
+- implement the passive bounded HTTP/1 transport, request serializer,
+  `recv_up_to` backends, strict response framing, decoded-byte ceiling, TLS
+  conformance spike, and closed outcome mapping above;
+- implement the declared `none`, `acquisition`, and `probe` connectivity modes
+  and provider-specific authenticated/model-specific probe rules through the
+  commit-6 resource owner and pending-lease API; and
+- keep ordinary provider acquisition and ordinary runs free of the extra
+  connectivity request.
+
+**Gate:** the local counting-server and backend-conformance suite proves one
+attempt, no redirect/decompression/retry, a single monotonic deadline, prompt
+partial delivery, exact payload bounds, injection-safe request serialization,
+compressed-expansion rejection, and every closed HTTP/protocol outcome.
+Repeated workflow/mission occurrences are checked in deterministic order. The
+default internal doctor operation performs no credential/network work, and the
+connect variant sets activity before credential resolution while never
+emitting a selector, endpoint, credential, or response body. Acquisition-backed
+checks register/close or roll back through the commit-6 owner. Commit 9 wires
+these operations to the public `doctor` command without duplicating them.
+
+### Commit 8. Destination preflight and terminal publication
+
+- retain existing result/inspection/trace adapters behind the shared engine;
 - preflight already knowable destination failures in phase 6 using the fixed
   trace/inspection/result order and terminal state table;
 - reserve the deterministic owner-only private-output recovery artifact in
   phase 6, fill it after valid-result/cleanup success but before optional
   evidence publication, and retain it on any later failure;
 - make final publication exclusive, no-clobbering, and private-trace-aware;
-- enforce the installed cleanup deadline with monitored closers and owned-tree
-  termination through one owner-backed resource graph, including pending
-  acquisition leases that roll back provisional roots;
-- remove raw-close-returning `ProviderRegistry.build/4`, and migrate direct
-  embedding/E2E acquisition, `RunConfig`/`Kernel.run`, builder rollback,
-  Runner, and REPL cleanup to the graph-requiring replacement;
 - preserve successful execution facts when later publication fails;
 - withhold result/success artifacts on cleanup failure while retaining the
   terminal `provider_cleanup_failed` trace and authorized inspection evidence;
-  and
-- add a sidecar lease only if concurrency tests demonstrate spend-before-run
-  races that justify it.
+  and ensure every partial publication state is represented exactly.
 
-**Gate:** representative failures at every phase have asserted envelopes,
-status/code/retryability, and activity. Failures through audited-local phase 7
-prove zero credential-resolution/acquisition calls; phase 8 marks activity
-before active work. `doctor` and `run` return identical results for their shared
-local checks. `validate` and occupied-destination failures never invoke an
-unverified builder. Late collisions never overwrite data; cleanup failure
-publishes no result but can publish its terminal failure trace/inspection; each
-partial publication state is reported; a private-output result remains
+**Gate:** internal validation and occupied-destination failures never invoke an
+unverified builder; public `validate` wiring belongs to commit 9. Late
+collisions never overwrite data, cleanup failure
+publishes no result but can publish its terminal failure trace/inspection, each
+partial publication state is reported, and a private-output result remains
 recoverable after any post-recovery trace, inspection, or final-link failure;
-and private
-trace-directory publication is exclusive, mode `0600`, correctly suffixed, and
-correctly classified by discovery. Directory and memory runs produce the same
-effective digest; input
-form/value/name within one authority class leaves it unchanged, while an
-input-authority-class change, local/shipped/override source, selected provider
-source/revision/data policy or normalized selection, `mission.data`, limits,
-contracts, dependency edges, effective event privacy, inspection-capture
-selection, result projection, or semantic revision changes it. Changing an
-unselected installed provider does not change it.
+private trace-directory publication is exclusive, mode `0600`, correctly
+suffixed, and correctly classified by discovery. Fault injection covers every
+write/link/sync boundary and proves invocation-owned cleanup never removes
+pre-existing or unrecognized state.
 
-### 3. Focused commands and packaged V1
+### Commit 9. Focused shared commands and REPL parity
 
 - implement JSON-envelope help, `validate`, and `run`, then `doctor`, `models`,
   and `init`;
@@ -1941,7 +2083,26 @@ unselected installed provider does not change it.
   rather than an empty registry;
 - require an attached interactive `--private-terminal` before a classified
   private manifest REPL evaluates anything, reject private `-e`/`--load`
-  sessions, and remove the current private-result-to-stdout behavior;
+  sessions, and remove the current private-result-to-stdout behavior; and
+- regenerate the command/host schemas and update retained guides, examples, and
+  shell journeys to the final names.
+
+**Gate:** focused tests prove Mix/direct parser and engine parity for every
+default, option, conflict, phase, and closed exit class without claiming Mix
+process-stream purity. Directory and memory fixtures run identically; a
+memory-backed fixture whose application/file-artifact adapters raise on use
+succeeds when no file-backed provider is installed. REPL manifest mode uses the
+same prepare/acquire/cleanup lifecycle, and private REPL values never reach an
+unauthorized stream. This commit adds frontend delegation only: it does not
+reimplement the validation, run, doctor, or publication operations completed by
+earlier commits.
+
+### Commit 10. Standalone packaging and descriptor framing
+
+- spike and install the standalone descriptor-3 envelope wrapper plus bounded
+  stdout group leader and add the focused pinned
+  Logger/SASL/explicit-stderr/direct-file-descriptor secret audit described
+  above;
 - package the same engine through the smallest proven OTP release/escript
   entrypoint;
 - ship a minimal boot profile with implicit dotenv disabled and optional
@@ -1951,18 +2112,118 @@ unselected installed provider does not change it.
   and stderr content on supported paths as secret-safe.
 
 **Gate:** the first packaged V1 already satisfies the final schema, phase,
-digest, privacy, and publication contracts from slices 1 and 2. Standalone
+digest, privacy, and publication contracts from commits 1 through 9. Standalone
 subprocess tests cover every command, malformed arguments, caught internal
 failures, signal characterization outside V1, and ordinary
-stdout envelope/schema validity. Focused
-tests prove Mix/standalone parser and engine parity without claiming Mix
-process-stream purity. Directory and memory fixtures run identically; a
-memory-backed fixture whose application/file-artifact adapters raise on use
-succeeds when no file-backed provider is installed; a packaged default
-`doctor` neither starts provider applications nor consumes a sentinel `.env`;
-and a clean environment runs the packaged command without a repository
-checkout. Retained guides, examples, shell journeys, and generated schemas use
-the released names and host contract; `mix ptc.gen_docs --check` passes.
+stdout envelope/schema validity. Descriptor survival, noninheritance,
+broken-pipe, exit-status, startup-identity, and focused authority-audit tests
+pass on every packaged macOS/Linux target or trigger the outer framing process.
+Mix/standalone parser and engine parity covers every command, default, option,
+conflict, phase, and closed exit class without changing Mix process-stream
+semantics.
+A packaged default `doctor` neither starts provider applications nor consumes a
+sentinel `.env`, and a clean environment runs the packaged command without a
+repository checkout. Retained guides, examples, shell journeys, and generated
+schemas use the released names and host contract; `mix ptc.gen_docs --check`
+passes.
+
+### Commit 11. Credentialed live-model and filesystem-free acceptance
+
+- add one dedicated, bounded `:e2e` acceptance module for the completed stable
+  command path;
+- in the test harness only, load the repository `.env`, require
+  `OPENROUTER_API_KEY`, honor optional `PTC_TEST_MODEL` only after resolving it
+  to an OpenRouter-backed model admitted by the selected installation (otherwise
+  fail the gate), and pass only the resolved environment entries or host-owned
+  credential resolver into the system under test;
+- prove the packaged `doctor --connect` performs its declared real
+  authenticated/model-specific probe and returns the closed available result;
+- execute one minimal real `llm/request` through the retained ReqLLM adapter
+  through the packaged `run` command with strict run/provider/output-token
+  deadlines and ceilings, asserting the contract shape, usage normalization
+  when reported, resource cleanup, and absence of
+  endpoint/model/credential/response data from public diagnostics and stderr
+  rather than depending on stylistic model output;
+- repeat the actual run through the host-owned in-memory
+  `ApplicationPackage`/`ExecutionInput` path with application and file-artifact
+  adapters that raise if invoked, proving the cloud execution path needs no
+  application filesystem; and
+- keep prompts domain-blind, configure all three operations for one attempt,
+  cap their request and response size, and record only the selected safe model
+  alias, closed outcomes, and pass/fail status in the PR evidence.
+
+The parent test process may call `PtcRunner.Dotenv.load/0` once to obtain the
+local credential, but it must not execute either acceptance path in that
+already-marked VM. Spawn every child with an allowlisted environment that
+explicitly removes inherited provider credentials. Pass the copied
+`OPENROUTER_API_KEY` only to the packaged child; keep it absent from the
+host-owned child's OS environment and supply it only through the host-owned
+credential resolver. Pass the optional non-secret model override explicitly to
+each child. Run both the packaged path and a small host-owned embedding runner
+in fresh child VMs. In the host-owned child, require
+`Code.ensure_loaded(PtcRunner.Dotenv)`, install a local call
+trace pattern for exactly `{PtcRunner.Dotenv, :load, 0}`, assert the pattern
+matched exactly one function, and enable call tracing for every existing
+process plus descendants before invoking the runtime. After the runtime and its
+owned processes quiesce, disable tracing, wait for an
+`:erlang.trace_delivered/1` barrier, and fail if any matching call arrived.
+Before starting provider applications, the paid host-owned child also sets both
+`:req_llm` and `:llm_db` `:load_dotenv` flags to `false`, changes into an
+isolated directory containing a self-tested unopened `.env` FIFO, and installs
+exact matched local call traces for the pinned dependency's
+`Dotenvy.source/1`, `source/2`, `source!/1`, and `source!/2` entrypoints. It
+first requires `Code.ensure_loaded(Dotenvy)` and asserts that each trace pattern
+matched exactly one function before starting either application. It proves
+`OPENROUTER_API_KEY` is absent from the child OS environment before application
+startup, after startup, and after the paid run; only the resolver holds the
+copied credential. The FIFO subprocess deadline and all dependency trace
+patterns remain active through application startup, and the same trace-delivery
+barrier proves that neither project nor dependency dotenv code ran.
+
+Use two separate credential-free startup guards in isolated directories before
+the paid operations. One contains an unreadable regular `.env`, so an
+unintended `PtcRunner.Dotenv.load/0` read fails; the other contains an unopened
+FIFO named `.env` with no writer, so ReqLLM/Dotenvy-style `File.exists?` plus
+read blocks and misses the subprocess deadline. The packaged guards use host
+JSON to select the shipped `llm` descriptor, whose declaration names the real
+`req_llm`/`llm_db` provider applications, and run a minimal packaged workflow
+that installs but never invokes that capability. Its bounded host JSON supplies
+one explicitly non-secret dummy literal credential while every real provider
+credential remains scrubbed. The `run` command crosses the application gate,
+completes selection and acquisition, executes the workflow, and returns a fixed
+local value; assert both applications actually started before the standalone VM
+exits and that the provider request counter remains zero. No custom descriptor
+or test-only public injection path is involved. The
+host-owned guards set both dotenv flags false, start
+those real applications as the host while the traps are active, capture and
+monitor the `ReqLLM.Supervisor` PID, and assert `:llm_db` remains in the
+started-application set. Instrument the code-owned provider-application adapter
+to prove the runtime issues no start/stop call for either host-owned
+application. Thus the guards exercise real dependency startup without making a
+provider request. Also omit
+an independently generated credential sentinel from both the explicit
+environment and resolver and prove it remains unavailable. Local absence of the
+required real credential is a hard failure for the final live gate, not a skip.
+Scheduled CI may supply the same credential directly as an environment secret.
+Before using either trap on each supported macOS/Linux target, the harness
+self-tests under the same UID that the regular file returns the expected access
+failure and that a sacrificial FIFO reader remains blocked until explicitly
+terminated. An ineffective or unavailable trap fails the target gate; it never
+counts as evidence that dotenv was not read.
+
+**Gate:** the focused live module passes with the locally available `.env`
+credential and optional model override. Within that focused module, exactly
+three single-attempt external provider requests are permitted: one packaged
+connectivity probe, one packaged run request, and one host-owned memory-run
+request. The startup guards make none. All three focused live requests stay
+within their declared token, byte, and time ceilings and close resources; the
+memory-backed run performs no application/file-artifact access; and credential
+sentinels appear in no envelope, trace, inspection, log, or stderr capture.
+As a separate gate, the documented scheduled/manual E2E harness then runs the
+full `mix test --include e2e` suite with its required MCP fixtures and secrets.
+That suite retains its own per-test request/turn ceilings and may make more than
+the focused module's three requests; a skip caused by a missing live-model
+credential does not satisfy either gate.
 
 ## Required tests
 
@@ -2143,6 +2404,21 @@ At minimum:
   raw spaces, CR/LF, NUL, other controls, or fragments in the target plus
   invalid header-name or header-value bytes in declared headers and resolved
   authorization before any bytes are sent;
+- the commit-11 credentialed live acceptance, with the parent test harness
+  loading `OPENROUTER_API_KEY` and optional `PTC_TEST_MODEL` from `.env` before
+  execution, rejecting an override that does not resolve to an admitted
+  OpenRouter-backed model, spawning allowlisted child environments that scrub
+  inherited provider credentials, proving one real packaged `doctor --connect`, one
+  bounded real packaged `llm/request` through the retained ReqLLM adapter, and
+  one host-owned filesystem-free memory run whose credential exists only in its
+  resolver; exactly three single-attempt provider requests are permitted within
+  this focused module; separate zero-request packaged and fresh-VM host-owned
+  guards start or reuse the real declared `req_llm`/`llm_db` applications and
+  use an exact matched BEAM call trace with a delivery barrier, an unreadable
+  regular `.env`, and an unopened `.env` FIFO to catch both project and
+  dependency dotenv reads; every paid request has explicit token/byte/time
+  ceilings, missing credentials fail rather than skip this acceptance, and
+  credential sentinels appear in no public or captured channel;
 - a custom `probe` alias selected with distinct workflow and mission
   configurations, proving both occurrences are checked in the documented
   order, failure of either prevents the collapsed alias pass, success requires
