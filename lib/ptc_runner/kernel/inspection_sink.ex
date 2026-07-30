@@ -188,6 +188,7 @@ defmodule PtcRunner.Kernel.InspectionSink do
 
   defp retain(state, record_type, correlation, payload) do
     with true <- record_type in record_types(state.schema_version),
+         true <- within_record_depth?(correlation, payload),
          {:ok, correlation} <- normalize(correlation),
          {:ok, payload} <- normalize(payload),
          :ok <- shape(record_type, correlation, payload),
@@ -209,6 +210,17 @@ defmodule PtcRunner.Kernel.InspectionSink do
     else
       _reason -> {:reply, {:error, :inspection_sink_error}, %{state | failed?: true}}
     end
+  end
+
+  # `normalize/1` recurses, so nesting is bounded before it runs. The retained
+  # record wraps correlation and payload at exactly one level, so bounding that
+  # envelope bounds the record itself without building the record — and without
+  # stamping a timestamp the check would discard.
+  defp within_record_depth?(correlation, payload) do
+    MCPProtocol.within_inspection_document_depth?(%{
+      "correlation" => correlation,
+      "payload" => payload
+    })
   end
 
   defp record(state, record_type, correlation, payload) do

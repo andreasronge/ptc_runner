@@ -323,8 +323,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     assert {:ok, encoded_result} = DeterministicJSON.encode(mcp_result)
     assert byte_size(encoded_result) == @max_logical_result_bytes
 
-    wire_response =
-      Jason.encode!(%{"jsonrpc" => "2.0", "id" => 1, "result" => mcp_result})
+    wire_response = Jason.encode!(%{"jsonrpc" => "2.0", "id" => 1, "result" => mcp_result})
 
     assert byte_size(wire_response) > @max_logical_result_bytes
 
@@ -459,15 +458,23 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
                  outcome: :returned,
                  value: %{
                    "structured" => structured,
-                   "text" => %{status: :error, reason: :transport_error},
-                   "failed" => %{status: :error, reason: :transport_error}
+                   "text" => %{
+                     status: :error,
+                     reason: :transport_error,
+                     retryable?: false
+                   },
+                   "failed" => %{
+                     status: :error,
+                     reason: :transport_error,
+                     retryable?: false
+                   }
                  }
                }
              } = result.value
 
       case mode do
         "exit-before-response" ->
-          assert %{status: :error, reason: :transport_error} = structured
+          assert %{status: :error, reason: :transport_error, retryable?: false} = structured
 
         "exit-after-response" ->
           assert %{status: :ok, value: %{"value" => 42}} = structured
@@ -564,8 +571,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
 
     assert {:ok, result} = Kernel.run(built.entry_source, built.config)
 
-    assert %{status: :ok, value: %{"value" => 42}} =
-             get_in(result.value, [:value, :value])
+    assert %{status: :ok, value: %{"value" => 42}} = get_in(result.value, [:value, :value])
 
     assert :ok = RunBuilder.close(built)
   end
@@ -944,7 +950,8 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
              status: :error,
              kind: :provider_error,
              reason: :transport_error,
-             retryable?: true
+             details: "mcp_transport_closed",
+             retryable?: false
            } = failure
 
     refute Map.has_key?(failure, :mutation_state)
@@ -1007,6 +1014,55 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
   end
 
   @tag :tmp_dir
+  test "snapshot identity attests selected timeout and result ceilings", %{tmp_dir: dir} do
+    fixture = fixture(self())
+    on_exit(fixture.close)
+    registry = registry(fixture.endpoint)
+
+    {:ok, first} =
+      dir
+      |> manifest(["remote.structured"], timeout_ms: 900, max_result_bytes: 31_000)
+      |> RunBuilder.load_and_build(registry)
+
+    [first_snapshot] = first.config.connector_snapshots
+    assert first_snapshot["timeout_ms"] == 900
+    assert first_snapshot["max_result_bytes"] == 31_000
+    assert :ok = RunBuilder.close(first)
+
+    {:ok, second} =
+      dir
+      |> manifest(["remote.structured"], timeout_ms: 800, max_result_bytes: 30_000)
+      |> RunBuilder.load_and_build(registry)
+
+    [second_snapshot] = second.config.connector_snapshots
+    assert second_snapshot["timeout_ms"] == 800
+    assert second_snapshot["max_result_bytes"] == 30_000
+    assert second_snapshot["snapshot_hash"] != first_snapshot["snapshot_hash"]
+    assert :ok = RunBuilder.close(second)
+  end
+
+  @tag :tmp_dir
+  test "a closed request context produces a terminal provider error", %{tmp_dir: dir} do
+    fixture = fixture(self())
+    on_exit(fixture.close)
+
+    {:ok, built} =
+      dir
+      |> manifest(["remote.structured"])
+      |> RunBuilder.load_and_build(registry(fixture.endpoint))
+
+    capability = built.config.mission_environment.capabilities["remote.structured"]
+    assert :ok = RunBuilder.close(built)
+
+    assert {:error,
+            %{
+              kind: :transport_error,
+              details: "mcp_transport_closed",
+              retryable?: false
+            }} = capability.callback.(%{"query" => "x"}, nil)
+  end
+
+  @tag :tmp_dir
   test "rejects unknown modern result types", %{tmp_dir: dir} do
     parent = self()
     fixture = fixture(parent, result_type: "future")
@@ -1023,8 +1079,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
              kind: :provider_error,
              reason: :invalid_result,
              details: "mcp_unsupported_result"
-           } =
-             get_in(result.value, [:value, :value, "structured"])
+           } = get_in(result.value, [:value, :value, "structured"])
 
     EventSink.stop(built.config.event_sink)
   end
@@ -1339,8 +1394,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
 
     EventSink.stop(built.config.event_sink)
 
-    protocol_error =
-      fixture(parent, rpc_error_tool: "structured", rpc_error_status: 400)
+    protocol_error = fixture(parent, rpc_error_tool: "structured", rpc_error_status: 400)
 
     on_exit(protocol_error.close)
 
@@ -1407,8 +1461,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
 
     assert :ok = RunBuilder.close(repeated_build)
 
-    repeated_chunked =
-      fixture(parent, sse?: true, sse_extra_response?: true, sse_chunked?: true)
+    repeated_chunked = fixture(parent, sse?: true, sse_extra_response?: true, sse_chunked?: true)
 
     on_exit(repeated_chunked.close)
 
@@ -1431,8 +1484,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
 
     assert :ok = RunBuilder.close(coalesced_tail_build)
 
-    split_tail =
-      fixture(parent, sse?: true, sse_trailing_bytes: 1_100_000, sse_chunked?: true)
+    split_tail = fixture(parent, sse?: true, sse_trailing_bytes: 1_100_000, sse_chunked?: true)
 
     on_exit(split_tail.close)
 
@@ -1610,9 +1662,11 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     sink_ref = Process.monitor(sink_pid)
     assert_receive {:DOWN, ^owner_ref, :process, ^owner, :normal}, @owner_lifecycle_timeout_ms
 
-    assert_receive {:DOWN, ^sink_ref, :process, ^sink_pid, sink_reason},
+    assert_receive {:DOWN, ^sink_ref, :process, _sink_pid, sink_reason},
                    @owner_lifecycle_timeout_ms
 
+    # Monitoring can race with the owner-linked sink's normal shutdown. A
+    # monitor installed after that shutdown correctly reports :noproc.
     assert sink_reason in [:normal, :noproc]
   end
 

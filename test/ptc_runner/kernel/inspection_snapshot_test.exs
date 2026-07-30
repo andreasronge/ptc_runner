@@ -569,6 +569,42 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
   end
 
   @tag :tmp_dir
+  test "capture heap exhaustion has the stable retained-limit error", %{tmp_dir: root} do
+    {trace, inspection} = source_directories(root)
+    write_run(trace, inspection, "heap-bounded", 1)
+    {:ok, trace_snapshot} = TraceSnapshot.start({:directory, trace}, owner: self())
+    on_exit(fn -> TraceSnapshot.stop(trace_snapshot) end)
+
+    assert {:error, :source_retained_limit_exceeded} =
+             InspectionSnapshot.start({:directory, inspection}, trace_snapshot,
+               capture_heap_words: 233
+             )
+  end
+
+  @tag :tmp_dir
+  test "an individually oversized query item fails instead of returning a stalled cursor", %{
+    tmp_dir: root
+  } do
+    {trace, inspection} = source_directories(root)
+    write_run(trace, inspection, "oversized", 1)
+    {:ok, trace_snapshot} = TraceSnapshot.start({:directory, trace}, owner: self())
+
+    {:ok, snapshot} =
+      InspectionSnapshot.start({:directory, inspection}, trace_snapshot, max_result_bytes: 256)
+
+    on_exit(fn ->
+      InspectionSnapshot.stop(snapshot)
+      TraceSnapshot.stop(trace_snapshot)
+    end)
+
+    assert {:error, :result_limit_exceeded} =
+             InspectionSnapshot.query(snapshot, :model_exchanges, %{
+               "run_id" => "oversized",
+               "limit" => 1
+             })
+  end
+
+  @tag :tmp_dir
   test "safe metadata and owner lifecycle retain no private paths or payloads", %{tmp_dir: root} do
     {trace, inspection} = source_directories(root)
     write_run(trace, inspection, "owned", 2)

@@ -31,6 +31,7 @@ defmodule PtcRunner.Kernel.TraceLog do
   alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.JSONValue
+  alias PtcRunner.Kernel.PrivateDirectory
 
   @default_source_bytes 8_000_000
   @default_result_bytes 1_000_000
@@ -47,15 +48,16 @@ defmodule PtcRunner.Kernel.TraceLog do
   @append_lock_timeout_ms 30_000
   @append_lock_helper ~S"""
   set -eu
-  lock_file=$1
+  lock_kind=$1
+  lock_executable=$2
+  shell=$3
+  lock_file=$4
   lock_body='printf "READY\n"; IFS= read -r command; [ "$command" = X ]; printf "DONE\n"'
-  if command -v lockf >/dev/null 2>&1; then
-    exec lockf -k -t 30 "$lock_file" sh -c "$lock_body"
-  elif command -v flock >/dev/null 2>&1; then
-    exec flock -w 30 "$lock_file" sh -c "$lock_body"
-  else
-    exit 1
-  fi
+  case "$lock_kind" in
+    lockf) exec "$lock_executable" -k -t 30 "$lock_file" "$shell" -c "$lock_body" ;;
+    flock) exec "$lock_executable" -w 30 "$lock_file" "$shell" -c "$lock_body" ;;
+    *) exit 1 ;;
+  esac
   """
   @bound_publication_helper ~S"""
   set -eu
@@ -218,26 +220,31 @@ defmodule PtcRunner.Kernel.TraceLog do
 
   @doc """
   Appends canonical events to one admin-selected JSONL file under a total byte
-  cap. `private: true` restricts the empty/new or existing file to mode `0600`
-  before event bytes are appended. An OS-released advisory lease keyed by the
-  existing file's device and inode serializes hard-link aliases across BEAM
-  processes and separate local runtimes.
+  cap. `private: true` requires safe parent ancestry and a mode-`0600` file,
+  owned by the current process authority or root, creating a missing file
+  privately before publication. The permission-checked descriptor is retained
+  through validation and append so pathname replacement cannot redirect private
+  bytes. One OS-released advisory lease keyed by the parent-directory/name
+  identity remains held across first-file creation. A nested device/inode lease
+  serializes hard-link aliases. The fixed path-then-inode acquisition order
+  applies across BEAM processes and separate local runtimes.
   """
   @spec append_jsonl(binary(), [map()], keyword()) :: :ok | {:error, atom()}
   def append_jsonl(path, events, opts \\ [])
 
   def append_jsonl(path, events, opts)
       when is_binary(path) and is_list(events) and is_list(opts) do
-    with true <- Keyword.keys(opts) -- [:max_source_bytes, :private] == [],
+    with true <- Keyword.keys(opts) -- [:max_source_bytes, :private, :append_hook] == [],
          max_bytes when is_integer(max_bytes) and max_bytes > 0 <-
            Keyword.get(opts, :max_source_bytes, @default_source_bytes),
          private? when is_boolean(private?) <- Keyword.get(opts, :private, false),
-         :ok <- validate_append_path(path, private?) do
-      path = Path.expand(path)
-
+         append_hook when is_nil(append_hook) or is_function(append_hook, 1) <-
+           Keyword.get(opts, :append_hook),
+         :ok <- validate_append_path(path, private?),
+         {:ok, path} <- PrivateDirectory.anchor(path) do
       :global.trans({{__MODULE__, {:append, path}}, self()}, fn ->
         with_append_lock(path, fn ->
-          append_locked(path, normalize(events), max_bytes, private?)
+          append_locked(path, normalize(events), max_bytes, private?, append_hook)
         end)
       end)
     else
@@ -271,16 +278,41 @@ defmodule PtcRunner.Kernel.TraceLog do
 
   def validate_append_path(_path, _private?), do: {:error, :invalid_trace_path}
 
+  @doc false
+  @spec preflight_destination(term(), term()) :: :ok | {:error, atom()}
+  def preflight_destination(path, private?)
+      when is_binary(path) and is_boolean(private?) do
+    with :ok <- validate_append_path(path, private?),
+         {:ok, path} <- PrivateDirectory.anchor(path),
+         :ok <- preflight_trace_destination(path, private?),
+         :ok <- preflight_append_lock() do
+      :ok
+    else
+      {:error, reason} when is_atom(reason) -> {:error, reason}
+    end
+  end
+
+  def preflight_destination(_path, _private?), do: {:error, :invalid_trace_path}
+
+  @doc false
+  @spec append_lock_identity(binary()) :: {:ok, term()} | {:error, :source_unavailable}
+  def append_lock_identity(path) when is_binary(path) do
+    with {:ok, path} <- PrivateDirectory.anchor(path),
+         do: append_path_lock_scope(path)
+  end
+
+  def append_lock_identity(_path), do: {:error, :source_unavailable}
+
   defp with_append_lock(path, callback, attempts \\ 3)
 
   defp with_append_lock(_path, _callback, 0), do: {:error, :source_unavailable}
 
   defp with_append_lock(path, callback, attempts) do
-    with {:ok, scope} <- append_lock_scope(path),
+    with {:ok, scope} <- append_path_lock_scope(path),
          {:ok, port} <- start_append_lock(scope) do
       result =
         try do
-          case append_lock_scope(path) do
+          case append_path_lock_scope(path) do
             {:ok, ^scope} -> callback.()
             _changed -> :retry_append_lock
           end
@@ -298,18 +330,26 @@ defmodule PtcRunner.Kernel.TraceLog do
 
   defp start_append_lock(scope) do
     with {:ok, lock_root} <- append_lock_root(),
-         executable when is_binary(executable) <- System.find_executable("sh"),
+         {:ok, shell, lock_kind, lock_executable} <- append_lock_executables(),
          lock_file = Path.join(lock_root, append_lock_name(scope)),
          port <-
            Port.open(
-             {:spawn_executable, executable},
+             {:spawn_executable, shell},
              [
                :binary,
                :exit_status,
                :use_stdio,
                :stderr_to_stdout,
                {:line, 64},
-               args: ["-c", @append_lock_helper, "ptc-trace-append-lock", lock_file]
+               args: [
+                 "-c",
+                 @append_lock_helper,
+                 "ptc-trace-append-lock",
+                 Atom.to_string(lock_kind),
+                 lock_executable,
+                 shell,
+                 lock_file
+               ]
              ]
            ),
          :ok <- await_append_lock(port) do
@@ -319,6 +359,27 @@ defmodule PtcRunner.Kernel.TraceLog do
     end
   rescue
     _exception -> {:error, :source_unavailable}
+  end
+
+  defp append_lock_executables do
+    case System.find_executable("sh") do
+      shell when is_binary(shell) ->
+        cond do
+          lockf = System.find_executable("lockf") -> {:ok, shell, :lockf, lockf}
+          flock = System.find_executable("flock") -> {:ok, shell, :flock, flock}
+          true -> {:error, :source_unavailable}
+        end
+
+      nil ->
+        {:error, :source_unavailable}
+    end
+  end
+
+  defp preflight_append_lock do
+    with {:ok, _root} <- append_lock_root(),
+         {:ok, _shell, _lock_kind, _lock_executable} <- append_lock_executables() do
+      :ok
+    end
   end
 
   defp await_append_lock(port) do
@@ -364,7 +425,50 @@ defmodule PtcRunner.Kernel.TraceLog do
     end
   end
 
-  defp append_lock_scope(path) do
+  defp append_path_lock_scope(path) do
+    case File.stat(Path.dirname(path), time: :posix) do
+      {:ok,
+       %File.Stat{
+         type: :directory,
+         major_device: major,
+         minor_device: minor,
+         inode: inode
+       }} ->
+        name = path |> Path.basename() |> PrivateDirectory.casefold_name()
+        {:ok, {:path, major, minor, inode, name}}
+
+      _ ->
+        {:error, :source_unavailable}
+    end
+  end
+
+  defp with_inode_append_lock(path, callback, attempts \\ 3)
+
+  defp with_inode_append_lock(_path, _callback, 0),
+    do: {:error, :source_unavailable}
+
+  defp with_inode_append_lock(path, callback, attempts) do
+    with {:ok, scope, _stat} <- append_inode_lock_scope(path),
+         {:ok, port} <- start_append_lock(scope) do
+      result =
+        try do
+          case append_inode_lock_scope(path) do
+            {:ok, ^scope, locked_stat} -> callback.(locked_stat)
+            _changed -> :retry_inode_append_lock
+          end
+        after
+          release_append_lock(port)
+        end
+
+      if result == :retry_inode_append_lock,
+        do: with_inode_append_lock(path, callback, attempts - 1),
+        else: result
+    else
+      _ -> {:error, :source_unavailable}
+    end
+  end
+
+  defp append_inode_lock_scope(path) do
     case File.lstat(path) do
       {:ok,
        %File.Stat{
@@ -372,25 +476,8 @@ defmodule PtcRunner.Kernel.TraceLog do
          major_device: major,
          minor_device: minor,
          inode: inode
-       }} ->
-        {:ok, {:inode, major, minor, inode}}
-
-      {:error, :enoent} ->
-        parent = Path.dirname(path)
-
-        case File.lstat(parent) do
-          {:ok,
-           %File.Stat{
-             type: :directory,
-             major_device: major,
-             minor_device: minor,
-             inode: inode
-           }} ->
-            {:ok, {:new_path, major, minor, inode, Path.basename(path)}}
-
-          _ ->
-            {:error, :source_unavailable}
-        end
+       } = stat} ->
+        {:ok, {:inode, major, minor, inode}, stat}
 
       _ ->
         {:error, :source_unavailable}
@@ -398,12 +485,44 @@ defmodule PtcRunner.Kernel.TraceLog do
   end
 
   defp append_lock_root do
-    root = Path.join(System.tmp_dir!(), "ptc-runner-trace-append-locks")
+    base = Path.join(System.tmp_dir!(), "ptc-runner-trace-append-locks")
 
-    with :ok <- File.mkdir_p(root),
-         :ok <- File.chmod(root, 0o700),
-         {:ok, %File.Stat{type: :directory}} <- File.lstat(root) do
+    with {:ok, uid} <- PrivateDirectory.preflight_owner(base),
+         root = base <> "-" <> Integer.to_string(uid),
+         :ok <- ensure_append_lock_root(root, uid) do
       {:ok, root}
+    else
+      _error -> {:error, :source_unavailable}
+    end
+  end
+
+  defp ensure_append_lock_root(root, uid) do
+    case validate_append_lock_root(root, uid) do
+      :ok ->
+        :ok
+
+      {:error, :enoent} ->
+        case PrivateDirectory.create(root) do
+          :ok -> validate_append_lock_root(root, uid)
+          {:error, _reason} -> validate_append_lock_root(root, uid)
+        end
+
+      {:error, _reason} ->
+        {:error, :source_unavailable}
+    end
+  end
+
+  defp validate_append_lock_root(root, uid) do
+    case File.lstat(root, time: :posix) do
+      {:ok, %File.Stat{type: :directory, uid: ^uid, mode: mode}}
+      when Bitwise.band(mode, 0o777) == 0o700 ->
+        :ok
+
+      {:error, :enoent} ->
+        {:error, :enoent}
+
+      _unsafe_or_unavailable ->
+        {:error, :source_unavailable}
     end
   end
 
@@ -426,8 +545,8 @@ defmodule PtcRunner.Kernel.TraceLog do
     with true <-
            Keyword.keys(opts) -- [:max_source_bytes, :fault_hook, :expected_parent_identity] == [],
          true <- String.valid?(path),
-         true <- Path.basename(path) == Path.basename(Path.expand(path)),
          true <- String.ends_with?(path, ".jsonl") and not reserved_path?(path),
+         {:ok, path} <- PrivateDirectory.anchor(path),
          max_bytes when max_bytes in 1..@default_source_bytes <-
            Keyword.get(opts, :max_source_bytes, @default_source_bytes),
          fault_hook when is_nil(fault_hook) or is_function(fault_hook, 1) <-
@@ -439,7 +558,7 @@ defmodule PtcRunner.Kernel.TraceLog do
          :ok <- publication_fault(fault_hook, :after_validation),
          {:ok, encoded} <- encode_jsonl(normalized, max_bytes),
          :ok <- publication_fault(fault_hook, :after_encoding) do
-      publish_encoded(Path.expand(path), encoded, fault_hook, expected_parent_identity)
+      publish_encoded(path, encoded, fault_hook, expected_parent_identity)
     else
       false ->
         {:error, :invalid_trace_log}
@@ -537,14 +656,27 @@ defmodule PtcRunner.Kernel.TraceLog do
     end
   end
 
-  defp append_locked(path, events, max_bytes, private?) do
-    with :ok <- ensure_trace_file(path, private?),
+  defp append_locked(path, events, max_bytes, true, append_hook),
+    do: append_private_locked(path, events, max_bytes, append_hook)
+
+  defp append_locked(path, events, max_bytes, false, append_hook) do
+    with :ok <- ensure_trace_file(path),
+         :ok <- append_fault(append_hook, :after_file_ready) do
+      with_inode_append_lock(path, fn locked_stat ->
+        append_regular_locked(path, events, max_bytes, locked_stat)
+      end)
+    end
+  end
+
+  defp append_regular_locked(path, events, max_bytes, locked_stat) do
+    with {:ok, current_stat} <- File.lstat(path),
+         :ok <- same_file(locked_stat, current_stat),
          {:ok, existing_source} <- read_regular_file(path, max_bytes),
          {:ok, existing_events} <- decode_jsonl(existing_source),
          {:ok, _events, _source_id} <- validate_loaded(existing_events ++ events, max_bytes),
          encoded = Enum.map_join(events, "", &(Jason.encode!(&1) <> "\n")),
          true <- byte_size(existing_source) + byte_size(encoded) <= max_bytes,
-         :ok <- append_regular_file(path, existing_source, encoded, max_bytes) do
+         :ok <- append_regular_file(path, existing_source, encoded, max_bytes, locked_stat) do
       :ok
     else
       false -> {:error, :source_limit_exceeded}
@@ -552,6 +684,49 @@ defmodule PtcRunner.Kernel.TraceLog do
     end
   rescue
     Jason.EncodeError -> {:error, :malformed_source}
+  end
+
+  defp append_private_locked(path, events, max_bytes, append_hook) do
+    with {:ok, uid} <- private_parent_identity(path),
+         :ok <- ensure_private_trace_file(path, uid, append_hook),
+         :ok <- append_fault(append_hook, :after_file_ready) do
+      with_inode_append_lock(path, fn locked_stat ->
+        append_private_inode_locked(path, events, max_bytes, uid, locked_stat)
+      end)
+    end
+  end
+
+  defp append_private_inode_locked(path, events, max_bytes, uid, locked_stat) do
+    with {:ok, device} <- open_private_trace(path, uid, locked_stat) do
+      try do
+        with {:ok, existing_source} <- read_private_device(device, max_bytes),
+             {:ok, existing_events} <- decode_jsonl(existing_source),
+             {:ok, _events, _source_id} <- validate_loaded(existing_events ++ events, max_bytes),
+             encoded = Enum.map_join(events, "", &(Jason.encode!(&1) <> "\n")),
+             true <- byte_size(existing_source) + byte_size(encoded) <= max_bytes,
+             {:ok, _position} <- :file.position(device, :eof),
+             :ok <- :file.write(device, encoded) do
+          :ok
+        else
+          false -> {:error, :source_limit_exceeded}
+          {:error, _reason} = error -> error
+        end
+      after
+        :file.close(device)
+      end
+    end
+  rescue
+    Jason.EncodeError -> {:error, :malformed_source}
+  end
+
+  defp append_fault(nil, _stage), do: :ok
+  defp append_fault(hook, stage), do: hook.(stage)
+
+  defp read_private_device(device, max_bytes) do
+    case :file.position(device, :bof) do
+      {:ok, 0} -> read_device(device, max_bytes)
+      {:error, _reason} -> {:error, :source_unavailable}
+    end
   end
 
   defp encode_jsonl(events, max_bytes) do
@@ -991,46 +1166,216 @@ defmodule PtcRunner.Kernel.TraceLog do
     _kind, _reason -> {:error, :trace_persistence_failed}
   end
 
-  defp ensure_trace_file(path, private?) do
+  defp ensure_trace_file(path) do
     case File.lstat(path) do
-      {:ok, %File.Stat{type: :regular}} -> restrict_trace_file(path, private?)
+      {:ok, %File.Stat{type: :regular}} -> :ok
       {:ok, %File.Stat{}} -> {:error, :malformed_source}
-      {:error, :enoent} -> create_trace_file(path, private?)
+      {:error, :enoent} -> create_trace_file(path)
       {:error, _reason} -> {:error, :source_unavailable}
     end
   end
 
-  defp create_trace_file(path, private?) do
+  defp create_trace_file(path) do
     case File.write(path, "", [:exclusive]) do
       :ok ->
-        case restrict_trace_file(path, private?) do
-          :ok ->
-            :ok
-
-          {:error, _reason} = error ->
-            File.rm(path)
-            error
-        end
+        :ok
 
       {:error, :eexist} ->
-        ensure_trace_file(path, private?)
+        ensure_trace_file(path)
 
       {:error, _reason} ->
         {:error, :source_unavailable}
     end
   end
 
-  defp restrict_trace_file(path, true) do
-    case File.chmod(path, 0o600) do
+  defp preflight_trace_destination(path, private?) do
+    case File.lstat(path, time: :posix) do
+      {:ok, %File.Stat{type: :regular} = stat} ->
+        if private?,
+          do: preflight_private_trace(path, stat),
+          else: preflight_normal_trace(path)
+
+      {:ok, %File.Stat{}} ->
+        {:error, :invalid_trace_path}
+
+      {:error, :enoent} ->
+        preflight_missing_trace(path, private?)
+
+      {:error, _reason} ->
+        {:error, :trace_destination_unavailable}
+    end
+  end
+
+  defp preflight_missing_trace(path, private?) do
+    case File.lstat(Path.dirname(path)) do
+      {:ok, %File.Stat{type: :directory}} ->
+        if private?, do: private_creation_parent(path), else: normal_creation_parent(path)
+
+      _missing_or_invalid ->
+        {:error, :trace_destination_unavailable}
+    end
+  end
+
+  defp preflight_normal_trace(path) do
+    case PrivateDirectory.preflight_writable_file(path) do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        {:error, preflight_reason(reason, :source_unavailable)}
+    end
+  end
+
+  defp normal_creation_parent(path) do
+    case PrivateDirectory.preflight_writable_parent(path) do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        {:error, preflight_reason(reason, :source_unavailable)}
+    end
+  end
+
+  defp preflight_private_trace(path, %File.Stat{mode: mode, uid: owner}) do
+    with {:ok, uid} <- PrivateDirectory.preflight_owner(path),
+         true <- owner in [0, uid] and Bitwise.band(mode, 0o777) == 0o600,
+         :ok <- PrivateDirectory.preflight_writable_file(path) do
+      :ok
+    else
+      false -> {:error, :trace_destination_unavailable}
+      {:error, reason} -> {:error, preflight_reason(reason, :trace_destination_unavailable)}
+    end
+  end
+
+  # Unlike the normal-trace paths, this one has always collapsed an unavailable
+  # parent into :source_unavailable. Only the unsafe split is new here.
+  defp private_creation_parent(path) do
+    case PrivateDirectory.preflight(path) do
       :ok -> :ok
+      {:error, :private_directory_parent_unsafe} -> {:error, :trace_destination_unsafe}
       {:error, _reason} -> {:error, :source_unavailable}
     end
   end
 
-  defp restrict_trace_file(_path, false), do: :ok
+  # An untrusted ancestor — one owned outside this authority, or a
+  # group/other-writable directory somewhere on the path -- is operator-fixable
+  # and names a specific directory to go look at. A missing `id`/`mkdir` or an
+  # unreadable parent is a different problem with a different remedy, so
+  # preflight names the untrusted ancestor apart from both. What the remaining
+  # faults collapse to still differs by call site, which is why each passes its
+  # own fallback. The append path keeps its single closed reason.
+  defp preflight_reason(:private_directory_parent_unsafe, _fallback),
+    do: :trace_destination_unsafe
 
-  defp append_regular_file(path, existing_source, encoded, max_bytes) do
+  defp preflight_reason(:private_directory_parent_unavailable, _fallback),
+    do: :trace_destination_unavailable
+
+  defp preflight_reason(_reason, fallback), do: fallback
+
+  defp private_parent_identity(path) do
+    case PrivateDirectory.preflight_owner(path) do
+      {:ok, uid} -> {:ok, uid}
+      {:error, _reason} -> {:error, :source_unavailable}
+    end
+  end
+
+  defp ensure_private_trace_file(path, uid, append_hook) do
+    case File.lstat(path) do
+      {:ok, %File.Stat{type: :regular, mode: mode, uid: owner}}
+      when owner in [0, uid] and Bitwise.band(mode, 0o777) == 0o600 ->
+        :ok
+
+      {:ok, %File.Stat{}} ->
+        {:error, :source_unavailable}
+
+      {:error, :enoent} ->
+        publish_empty_private_trace(path, uid, append_hook)
+
+      {:error, _reason} ->
+        {:error, :source_unavailable}
+    end
+  end
+
+  defp publish_empty_private_trace(path, uid, append_hook) do
+    {temporary_directory, temporary} = PrivateDirectory.temporary_sibling(path, "trace")
+
+    case PrivateDirectory.create(temporary_directory) do
+      :ok ->
+        publish_empty_private_trace_created(
+          path,
+          uid,
+          temporary_directory,
+          temporary,
+          append_hook
+        )
+
+      {:error, _reason} ->
+        {:error, :source_unavailable}
+    end
+  end
+
+  defp publish_empty_private_trace_created(
+         path,
+         uid,
+         temporary_directory,
+         temporary,
+         append_hook
+       ) do
+    with {:ok, :ok} <-
+           File.open(temporary, [:write, :binary, :exclusive], fn _device ->
+             with :ok <- append_fault(append_hook, :before_private_chmod),
+                  do: File.chmod(temporary, 0o600)
+           end),
+         :ok <- File.ln(temporary, path) do
+      :ok
+    else
+      {:error, :eexist} -> ensure_private_trace_file(path, uid, append_hook)
+      {:ok, {:error, _reason}} -> {:error, :source_unavailable}
+      {:error, _reason} -> {:error, :source_unavailable}
+    end
+  after
+    _ = File.rm(temporary)
+    _ = File.rmdir(temporary_directory)
+  end
+
+  defp open_private_trace(path, uid, locked_stat) do
+    case :file.open(String.to_charlist(path), [:read, :append, :binary, :raw]) do
+      {:ok, device} ->
+        case validate_open_private_trace(path, device, uid, locked_stat) do
+          :ok ->
+            {:ok, device}
+
+          {:error, _reason} = error ->
+            :file.close(device)
+            error
+        end
+
+      {:error, _reason} ->
+        {:error, :source_unavailable}
+    end
+  end
+
+  defp validate_open_private_trace(path, device, uid, locked_stat) do
+    with {:ok, file_info} <- :file.read_file_info(device, time: :posix),
+         opened = File.Stat.from_record(file_info),
+         :ok <- same_file(locked_stat, opened),
+         true <-
+           opened.type == :regular and opened.uid in [0, uid] and
+             Bitwise.band(opened.mode, 0o777) == 0o600,
+         {:ok, current} <- File.lstat(path, time: :posix),
+         true <-
+           current.type == :regular and current.uid in [0, uid] and
+             Bitwise.band(current.mode, 0o777) == 0o600,
+         :ok <- same_file(opened, current) do
+      :ok
+    else
+      _changed_or_invalid -> {:error, :source_unavailable}
+    end
+  end
+
+  defp append_regular_file(path, existing_source, encoded, max_bytes, locked_stat) do
     with {:ok, %File.Stat{type: :regular} = expected} <- File.lstat(path),
+         :ok <- same_file(locked_stat, expected),
          true <- expected.size == byte_size(existing_source),
          {:ok, device} <-
            :file.open(String.to_charlist(path), [:read, :append, :binary, :raw]) do
@@ -1803,33 +2148,72 @@ defmodule PtcRunner.Kernel.TraceLog do
   end
 
   defp fit_page(selected, all_items, offset, source_id, query_id, max_result_bytes) do
+    result = page_result(selected, all_items, offset, source_id, query_id)
+
+    cond do
+      byte_size(Jason.encode!(result)) <= max_result_bytes ->
+        {:ok, result}
+
+      selected == [] ->
+        {:error, :result_limit_exceeded}
+
+      true ->
+        context = {all_items, offset, source_id, query_id, max_result_bytes}
+
+        fit_page_prefix(
+          selected,
+          context,
+          1,
+          length(selected) - 1,
+          nil
+        )
+    end
+  end
+
+  defp fit_page_prefix(_selected, _context, lower, upper, best)
+       when lower > upper do
+    if best, do: {:ok, best}, else: {:error, :result_limit_exceeded}
+  end
+
+  defp fit_page_prefix(
+         selected,
+         {all_items, offset, source_id, query_id, max_result_bytes} = context,
+         lower,
+         upper,
+         best
+       ) do
+    count = div(lower + upper, 2)
+    result = page_result(Enum.take(selected, count), all_items, offset, source_id, query_id)
+
+    if byte_size(Jason.encode!(result)) <= max_result_bytes do
+      fit_page_prefix(
+        selected,
+        context,
+        count + 1,
+        upper,
+        result
+      )
+    else
+      fit_page_prefix(
+        selected,
+        context,
+        lower,
+        count - 1,
+        best
+      )
+    end
+  end
+
+  defp page_result(selected, all_items, offset, source_id, query_id) do
     next_offset = offset + length(selected)
     more? = next_offset < length(all_items)
 
-    result = %{
+    %{
       "items" => selected,
       "next_cursor" => if(more?, do: encode_cursor(next_offset, source_id, query_id), else: nil),
       "truncated" => more?,
       "omitted_count" => max(length(all_items) - next_offset, 0)
     }
-
-    case within_result_limit(result, max_result_bytes) do
-      :ok ->
-        {:ok, result}
-
-      {:error, :result_limit_exceeded} when selected != [] ->
-        fit_page(
-          Enum.drop(selected, -1),
-          all_items,
-          offset,
-          source_id,
-          query_id,
-          max_result_bytes
-        )
-
-      {:error, :result_limit_exceeded} ->
-        {:error, :result_limit_exceeded}
-    end
   end
 
   defp encode_cursor(offset, source_id, query_id) do

@@ -47,44 +47,83 @@ defmodule PtcRunner.TestSupport.MCPStdioFixture do
   end
 
   defp handle_line(line, marker) do
-    case {extract_id(line), extract_method(line)} do
-      {nil, "notifications/cancelled"} ->
-        File.write!(marker, line, [:append])
-
-      {id, "slow"} when is_integer(id) ->
-        respond_after(id, "slow", 75)
-
-      {id, "fast"} when is_integer(id) ->
-        respond_after(id, "fast", 5)
-
-      {id, "never"} when is_integer(id) ->
-        :ok
-
-      {id, "junk"} when is_integer(id) ->
-        IO.write(:stdio, "not-json\n")
-
-      {id, "large"} when is_integer(id) ->
-        respond(id, "large", String.duplicate("x", 2_048))
-
-      {id, "exact"} when is_integer(id) ->
-        body = response_body(id, "exact", "")
-        respond(id, "exact", String.duplicate("x", 1_048_576 - byte_size(body)))
-
-      {id, "exact-crlf"} when is_integer(id) ->
-        body = response_body(id, "exact-crlf", "")
-        padding = String.duplicate("x", 1_048_576 - byte_size(body))
-        IO.write(:stdio, [response_body(id, "exact-crlf", padding), "\r\n"])
-
-      {id, method} when is_integer(id) and method in ["notify", "notify-flood"] ->
-        emit_notifications(id, method, line)
-
-      {id, method} when is_integer(id) and is_binary(method) ->
-        respond(id, method)
-
-      _invalid ->
-        IO.write(:stdio, "invalid request\n")
-    end
+    handle_request(extract_id(line), extract_method(line), line, marker)
   end
+
+  defp handle_request(nil, "notifications/cancelled", line, marker),
+    do: File.write!(marker, line, [:append])
+
+  defp handle_request(id, "slow", _line, _marker) when is_integer(id),
+    do: respond_after(id, "slow", 75)
+
+  defp handle_request(id, "fast", _line, _marker) when is_integer(id),
+    do: respond_after(id, "fast", 5)
+
+  defp handle_request(id, "never", _line, _marker) when is_integer(id), do: :ok
+
+  defp handle_request(id, "junk", _line, _marker) when is_integer(id),
+    do: IO.write(:stdio, "not-json\n")
+
+  defp handle_request(id, "large", _line, _marker) when is_integer(id),
+    do: respond(id, "large", String.duplicate("x", 2_048))
+
+  defp handle_request(id, "exact", _line, _marker) when is_integer(id) do
+    body = response_body(id, "exact", "")
+    respond(id, "exact", String.duplicate("x", 1_048_576 - byte_size(body)))
+  end
+
+  defp handle_request(id, "exact-crlf", _line, _marker) when is_integer(id) do
+    body = response_body(id, "exact-crlf", "")
+    padding = String.duplicate("x", 1_048_576 - byte_size(body))
+    IO.write(:stdio, [response_body(id, "exact-crlf", padding), "\r\n"])
+  end
+
+  defp handle_request(id, method, line, _marker)
+       when is_integer(id) and method in ["notify", "notify-flood"],
+       do: emit_notifications(id, method, line)
+
+  defp handle_request(id, "unscoped-notify", _line, _marker) when is_integer(id) do
+    padding = String.duplicate("x", 600_000)
+
+    IO.write(
+      :stdio,
+      ~s({"jsonrpc":"2.0","method":"notifications/message","params":{"data":"#{padding}"}}\n)
+    )
+
+    respond(id, "unscoped-notify")
+  end
+
+  defp handle_request(id, "stale-response", _line, _marker)
+       when is_integer(id) and id > 1 do
+    respond(id - 1, "late")
+    respond(id, "stale-response")
+  end
+
+  defp handle_request(id, "stale-reset-flood", _line, _marker)
+       when is_integer(id) and id > 1 do
+    emit_unscoped_notifications(3)
+    respond(id - 1, "late")
+    emit_unscoped_notifications(1)
+    respond(id, "stale-reset-flood")
+  end
+
+  defp handle_request(id, "stale-response-flood", _line, _marker)
+       when is_integer(id) and id > 1 do
+    padding = String.duplicate("x", 600_000)
+
+    for _response <- 1..4 do
+      respond(id - 1, "late", padding)
+    end
+
+    respond(id, "stale-response-flood")
+  end
+
+  defp handle_request(id, method, _line, _marker)
+       when is_integer(id) and is_binary(method),
+       do: respond(id, method)
+
+  defp handle_request(_id, _method, _line, _marker),
+    do: IO.write(:stdio, "invalid request\n")
 
   defp extract_id(line) do
     case Regex.run(~r/"id"\s*:\s*([1-9][0-9]*)/, line, capture: :all_but_first) do
@@ -120,6 +159,17 @@ defmodule PtcRunner.TestSupport.MCPStdioFixture do
     end
 
     respond(id, method)
+  end
+
+  defp emit_unscoped_notifications(count) do
+    padding = String.duplicate("x", 600_000)
+
+    for _notification <- 1..count do
+      IO.write(
+        :stdio,
+        ~s({"jsonrpc":"2.0","method":"notifications/message","params":{"data":"#{padding}"}}\n)
+      )
+    end
   end
 
   defp respond_after(id, method, delay_ms) do

@@ -237,6 +237,23 @@ defmodule PtcRunner.Kernel.InspectionAnalysisProfileTest do
   end
 
   @tag :tmp_dir
+  test "private analysis evaluator errors expose only fixed diagnostics", %{tmp_dir: root} do
+    fixture = PrivateInspectionFixture.create!(root)
+    {:ok, session, _info} = start_internal_session(fixture)
+    on_exit(fn -> AnalysisSession.stop(session) end)
+
+    secret = "PRIVATE_ANALYSIS_NOT_CALLABLE"
+
+    assert {:ok,
+            %{
+              status: :error,
+              error: %{message: "private evaluation failed"}
+            } = result} = AnalysisSession.evaluate(session, ~s|("#{secret}" 1)|)
+
+    refute inspect(result) =~ secret
+  end
+
+  @tag :tmp_dir
   test "session owner death closes both captures and persists an aborted canonical trace", %{
     tmp_dir: root
   } do

@@ -308,6 +308,46 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
              )
   end
 
+  test "rejects a non-MCP record above the artifact document-depth ceiling" do
+    {:ok, sink} = InspectionSink.start(run_id: "run-1", trace_id: "trace-1")
+    nested = Enum.reduce(1..64, true, fn _level, value -> [value] end)
+
+    assert {:error, :inspection_sink_error} =
+             InspectionSink.emit(
+               sink,
+               "capability-input",
+               %{capability_id: "cap-1"},
+               %{
+                 environment: :mission,
+                 name: "remote.read",
+                 arguments: %{"nested" => nested}
+               }
+             )
+
+    assert {:error, :inspection_sink_error} = InspectionSink.records(sink)
+  end
+
+  # The retained record wraps the payload at exactly one level, so the ceiling is
+  # measured through that envelope. Pinning both sides of the edge keeps a
+  # cheaper pre-normalization check from quietly moving it.
+  test "retains a record at the document-depth ceiling and rejects the next level" do
+    nest = fn levels -> Enum.reduce(1..levels, true, fn _level, value -> [value] end) end
+
+    emit = fn levels ->
+      {:ok, sink} = InspectionSink.start(run_id: "run-1", trace_id: "trace-1")
+
+      InspectionSink.emit(
+        sink,
+        "capability-input",
+        %{capability_id: "cap-1"},
+        %{environment: :mission, name: "remote.read", arguments: %{"nested" => nest.(levels)}}
+      )
+    end
+
+    assert :ok = emit.(50)
+    assert {:error, :inspection_sink_error} = emit.(51)
+  end
+
   @tag :tmp_dir
   test "persists one exclusive 0600 artifact and validates immutable loading", %{tmp_dir: dir} do
     {:ok, sink} = InspectionSink.start(run_id: "run-1", trace_id: "trace-1")
@@ -322,6 +362,27 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
         data: %{capability_id: "cap-1", environment: :mission, name: "read"}
       }
     ]
+
+    for failure_stage <- [:before_chmod, :before_write] do
+      failed_path = Path.join(dir, "#{failure_stage}.inspection.jsonl")
+
+      hook = fn
+        ^failure_stage -> {:error, :simulated_write_failure}
+        _stage -> :ok
+      end
+
+      assert {:error, :inspection_persistence_failed} =
+               InspectionArtifact.persist(failed_path, records, events, hook)
+
+      refute File.exists?(failed_path)
+    end
+
+    File.cd!(dir, fn ->
+      relative_path = "-run.inspection.jsonl"
+
+      assert :ok = InspectionArtifact.persist(relative_path, records, events)
+      assert File.regular?(relative_path)
+    end)
 
     path = Path.join(dir, "run.inspection.jsonl")
 
@@ -475,6 +536,70 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
     assert_receive {:bandit_telemetry, [:bandit, :request, :stop], stop_metadata}
     refute inspect(start_metadata) =~ private_marker
     refute inspect(stop_metadata) =~ private_marker
+  end
+
+  @tag :tmp_dir
+  test "loading rejects a same-size rewrite between bounded reads", %{tmp_dir: dir} do
+    path = Path.join(dir, "changing.inspection.jsonl")
+    replacement_path = Path.join(dir, "replacement.inspection.jsonl")
+    _records = persisted_records(path, "AAAA")
+    _replacement_records = persisted_records(replacement_path, "BBBB")
+    replacement = File.read!(replacement_path)
+
+    assert byte_size(File.read!(path)) == byte_size(replacement)
+
+    assert {:error, :inspection_source_changed} =
+             InspectionArtifact.load(path, [], fn -> File.write!(path, replacement) end)
+  end
+
+  @tag :tmp_dir
+  test "loading rejects an incomplete short read instead of parsing its prefix", %{tmp_dir: dir} do
+    path = Path.join(dir, "short-read.inspection.jsonl")
+    _records = persisted_records(path, "PRIVATE_SUFFIX")
+    valid_prefix_bytes = path |> File.read!() |> byte_size()
+    File.write!(path, File.read!(path) <> String.duplicate(" ", 64))
+    read_key = {__MODULE__, make_ref()}
+
+    short_reader = fn device, requested ->
+      case Process.get(read_key, :first) do
+        :first ->
+          Process.put(read_key, :done)
+          :file.read(device, min(requested, valid_prefix_bytes))
+
+        :done ->
+          :eof
+      end
+    end
+
+    assert {:error, :inspection_source_changed} =
+             InspectionArtifact.load(path, [], nil, short_reader)
+  end
+
+  @tag :tmp_dir
+  test "loading rejects excessive raw document depth before recursive normalization", %{
+    tmp_dir: dir
+  } do
+    path = Path.join(dir, "deep.inspection.jsonl")
+    nested = Enum.reduce(1..64, true, fn _level, value -> [value] end)
+
+    record = %{
+      "schema_version" => 1,
+      "run_id" => "deep",
+      "trace_id" => "deep",
+      "sequence" => 1,
+      "timestamp" => "2026-07-28T12:00:00Z",
+      "record_type" => "capability-input",
+      "correlation" => %{"capability_id" => "deep-capability"},
+      "payload" => %{
+        "environment" => "mission",
+        "name" => "read",
+        "arguments" => %{"nested" => nested}
+      }
+    }
+
+    File.write!(path, Jason.encode!(record) <> "\n")
+
+    assert {:error, :malformed_inspection_artifact} = InspectionArtifact.load(path)
   end
 
   @tag :tmp_dir

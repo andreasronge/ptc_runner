@@ -379,33 +379,72 @@ defmodule PtcRunner.Kernel.InspectionQuery do
   end
 
   defp fit_page(selected, all_items, offset, source_id, query_id, max_result_bytes) do
-    next_offset = offset + length(selected)
-    more? = next_offset < length(all_items)
-
-    result = %{
-      "items" => selected,
-      "next_cursor" => if(more?, do: encode_cursor(next_offset, source_id, query_id), else: nil),
-      "truncated" => more?,
-      "omitted_count" => max(length(all_items) - next_offset, 0)
-    }
+    result = page_result(selected, all_items, offset, source_id, query_id)
 
     cond do
       byte_size(Jason.encode!(result)) <= max_result_bytes ->
         {:ok, result}
 
-      selected != [] ->
-        fit_page(
-          Enum.drop(selected, -1),
-          all_items,
-          offset,
-          source_id,
-          query_id,
-          max_result_bytes
-        )
+      selected == [] ->
+        {:error, :result_limit_exceeded}
 
       true ->
-        {:error, :result_limit_exceeded}
+        context = {all_items, offset, source_id, query_id, max_result_bytes}
+
+        fit_page_prefix(
+          selected,
+          context,
+          1,
+          length(selected) - 1,
+          nil
+        )
     end
+  end
+
+  defp fit_page_prefix(_selected, _context, lower, upper, best)
+       when lower > upper do
+    if best, do: {:ok, best}, else: {:error, :result_limit_exceeded}
+  end
+
+  defp fit_page_prefix(
+         selected,
+         {all_items, offset, source_id, query_id, max_result_bytes} = context,
+         lower,
+         upper,
+         best
+       ) do
+    count = div(lower + upper, 2)
+    result = page_result(Enum.take(selected, count), all_items, offset, source_id, query_id)
+
+    if byte_size(Jason.encode!(result)) <= max_result_bytes do
+      fit_page_prefix(
+        selected,
+        context,
+        count + 1,
+        upper,
+        result
+      )
+    else
+      fit_page_prefix(
+        selected,
+        context,
+        lower,
+        count - 1,
+        best
+      )
+    end
+  end
+
+  defp page_result(selected, all_items, offset, source_id, query_id) do
+    next_offset = offset + length(selected)
+    more? = next_offset < length(all_items)
+
+    %{
+      "items" => selected,
+      "next_cursor" => if(more?, do: encode_cursor(next_offset, source_id, query_id), else: nil),
+      "truncated" => more?,
+      "omitted_count" => max(length(all_items) - next_offset, 0)
+    }
   end
 
   defp encode_cursor(offset, source_id, query_id) do

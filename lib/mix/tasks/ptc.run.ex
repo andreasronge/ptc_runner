@@ -17,6 +17,8 @@ defmodule Mix.Tasks.Ptc.Run do
   `--output` and `--private-output` write the result value as a standalone
   JSON artifact so a later run can consume it without scraping stdout. Both
   refuse to overwrite an existing destination and are mutually exclusive.
+  Deterministic destination and data-class conflicts fail before provider
+  acquisition; exclusive publication still protects against later races.
   `--private-mission` is mutually exclusive with `--mission`, loads the same
   manifest-confined JSON shape, and classifies the entire run before provider
   activity.

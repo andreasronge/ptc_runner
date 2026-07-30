@@ -309,8 +309,22 @@ defmodule PtcRunner.Kernel.Dispatcher do
           send(pid, go)
           await_provider(state, capability, pid, ref, timeout_ms, environment)
 
+        {:error, :provider_down} ->
+          reason = await_down(pid, ref)
+          RunState.release_provider_slot(state)
+
+          # The provider died before the gate opened, so the callback never
+          # ran and no effect can have reached the outside world.
+          post_invocation_failure(
+            provider_exit(reason),
+            environment,
+            capability,
+            :not_dispatched
+          )
+
         {:error, :closed} ->
           await_down(pid, ref)
+          RunState.release_provider_slot(state)
           limit_error(state, nil, :run_closed)
       end
     end
@@ -333,17 +347,7 @@ defmodule PtcRunner.Kernel.Dispatcher do
 
       {:DOWN, ^ref, :process, ^pid, reason} ->
         RunState.release_provider_slot(state)
-
-        post_invocation_failure(
-          %{
-            status: :error,
-            kind: :provider_error,
-            reason: normalize_exit(reason),
-            retryable?: true
-          },
-          environment,
-          capability
-        )
+        post_invocation_failure(provider_exit(reason), environment, capability)
     after
       timeout_ms ->
         Process.exit(pid, :kill)
@@ -360,8 +364,17 @@ defmodule PtcRunner.Kernel.Dispatcher do
 
   defp await_down(pid, ref) do
     receive do
-      {:DOWN, ^ref, :process, ^pid, _reason} -> :ok
+      {:DOWN, ^ref, :process, ^pid, reason} -> reason
     end
+  end
+
+  defp provider_exit(reason) do
+    %{
+      status: :error,
+      kind: :provider_error,
+      reason: normalize_exit(reason),
+      retryable?: true
+    }
   end
 
   defp safely_invoke(callback, arguments, context) do

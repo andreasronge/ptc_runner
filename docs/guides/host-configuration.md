@@ -249,10 +249,10 @@ ungranted one stays denied. A manifest may narrow the visible set but never
 extend it beyond what the installation marked visible.
 
 `error_feedback` defaults to `closed`. Setting it to `bounded` exposes at most
-1,024 bytes of exact validated text from an MCP `isError` result as untrusted
-recoverable error detail. Enabling it trusts the installed server not to place
-secrets, paths, or stack traces in that text. Public canonical events stay
-closed either way.
+1,024 bytes of validated text from an MCP `isError` result as untrusted
+recoverable error detail, with terminal control characters replaced. Enabling
+it trusts the installed server not to place secrets, paths, or stack traces in
+that text. Public canonical events stay closed either way.
 
 `snapshot_identity` names one mapped read-only tool and a field in that tool's
 result. PtcRunner calls it once during assembly with an empty argument object,
@@ -447,8 +447,10 @@ workflow  deepseek  llm  model openrouter:deepseek/deepseek-v4-flash  accepts: n
 
 Each line reports the environment, alias, source, resolved non-secret policy,
 accepted data classes, and the provider snapshot hash. That bare-hex
-`snapshot_hash` attests the complete installed provider identity, including its
-policy and ceilings. A frozen-content provider also publishes an
+`snapshot_hash` attests the provider-specific non-secret identity projection,
+including the effective ceilings present in that projection. It does not
+automatically cover the alias, data-class policy, or fields the provider
+deliberately excludes. A frozen-content provider also publishes an
 algorithm-qualified `content_snapshot_hash` covering only the captured bytes;
 the two have deliberately different scopes and are never equal.
 

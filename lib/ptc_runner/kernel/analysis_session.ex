@@ -345,7 +345,7 @@ defmodule PtcRunner.Kernel.AnalysisSession do
       formatted_truncated?: false,
       prints: prints,
       prints_truncated?: prints_truncated?,
-      error: error_projection(detailed),
+      error: error_projection(detailed, state),
       evaluation_id: detailed.evaluation_id,
       duration_ms: detailed.duration_ms,
       usage: usage_projection(state)
@@ -465,21 +465,28 @@ defmodule PtcRunner.Kernel.AnalysisSession do
 
   defp bounded_prints(_prints), do: {[], true}
 
-  defp error_projection(%{outcome: outcome}) when outcome in [:continued, :returned], do: nil
+  defp error_projection(%{outcome: outcome}, _state) when outcome in [:continued, :returned],
+    do: nil
 
-  defp error_projection(result) do
+  defp error_projection(result, state) do
     details = Map.get(result, :details, %{})
 
     %{
       kind: Map.get(result, :kind, result.outcome),
       reason: Map.get(result, :reason),
-      message: bounded_message(Map.get(details, :message)),
+      message: error_message(details, state),
       capability_activity?:
         Map.get(result, :capability_activity?, Map.get(details, :capability_activity?)),
       capability_failure?: Map.get(result, :capability_failure?),
       retryable?: Map.get(result, :retryable?)
     }
   end
+
+  defp error_message(_details, %{profile: %{identity: %{"result_data_class" => class}}})
+       when class != "normal",
+       do: "private evaluation failed"
+
+  defp error_message(details, _state), do: bounded_message(Map.get(details, :message))
 
   defp bounded_message(message) when is_binary(message), do: elem(clip_utf8(message, 4_096), 0)
   defp bounded_message(_message), do: nil

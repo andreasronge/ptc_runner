@@ -37,6 +37,15 @@ do
     *) exit 65 ;;
   esac
 
+  case "$line" in
+    *'"method":"tools/call"'*)
+      case "$line" in
+        *'"traceparent":"00-'*) ;;
+        *) exit 65 ;;
+      esac
+      ;;
+  esac
+
   case "$seen_ids" in
     *" $id "*) exit 65 ;;
     *) seen_ids="${seen_ids}${id} " ;;

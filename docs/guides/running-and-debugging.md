@@ -52,6 +52,14 @@ The command checks this rule after assembly determines the effective run class
 but before workflow execution or model activity. A normal run may not use the
 reserved private suffix.
 
+Configured result, trace, and inspection destinations must be pairwise
+distinct after resolving their existing parent-directory identity; final names
+are Unicode case-folded and normalized so the rule remains safe on
+case-insensitive filesystems. Deterministic destination conflicts and
+filesystem-invalid or deterministically unwritable destinations are rejected
+before provider acquisition; each persistence path still uses its own
+publication checks to close races after preflight.
+
 Snapshot capture failures report the source kind, measured retained bytes, and
 configured retained-byte ceiling when the decoded trace or inspection catalog
 is too large. Workflow timeouts likewise name the effective limit
@@ -60,7 +68,44 @@ whether compilation or execution exhausted it.
 
 `--inspect` is a host opt-in development feature. It writes a separate bounded
 owner-only artifact containing sensitive execution details. Do not publish it
-with normal traces.
+with normal traces. Artifact publication through `--output`,
+`--private-output`, or `--inspect` requires a Unix host and POSIX-compatible
+`mkdir` and `id` executables on `PATH`; it fails closed with
+`result_persistence_failed` or `inspection_persistence_failed` when that
+authority or mode-at-create primitive is unavailable. Publication validates
+both lexical and resolved physical ancestry and rejects an untrusted owner or a
+group/other-writable directory without sticky-directory protection, because
+another tenant could otherwise replace the private temporary directory before
+the artifact is opened. A final parent must also grant create access to the
+effective owner, group, or other permission class.
+
+Destination preflight reports an untrusted ancestor under its own reason —
+`result_destination_unsafe`, `inspection_destination_unsafe`, or
+`trace_destination_unsafe` — rather than the generic persistence or
+unavailability failure, because the remedy differs: an untrusted ancestor names
+a directory whose owner or mode an operator can correct, while a missing `id`
+or `mkdir` names an unusable host. Result publication shares that preflight, so
+`--output` and `--private-output` report `result_destination_unsafe` too when a
+destination turns unsafe after preflight; trace appends and inspection
+publication keep their single closed reason.
+
+Ancestry is validated for every result and inspection destination whatever its
+class, for every private trace, and for a normal trace that must still be
+created. An existing normal trace is validated for writability only. The
+append-lock directory under `TMPDIR` is validated separately and reports
+`source_unavailable` for any fault, including an untrusted ancestor of its
+own.
+
+Private trace creation uses the same host primitives and ancestry checks. A
+missing trace requires both `mkdir` and `id` and is published at mode `0600`
+before use. An existing private trace requires `id`, must already be mode
+`0600`, owned by the current process authority or root, and writable by the
+effective authority; its parent needs traversal but not create access. The
+append retains its permission-checked descriptor. Every trace append also
+requires `sh` and either `lockf` or `flock` for its cross-runtime lease. The
+per-authority lease directory is owner-only; its first creation additionally
+requires `mkdir`, while later appends validate its type, owner, and exact mode
+without changing permissions through an unresolved path.
 
 The current 0.x `--mission PATH` option replaces the manifest input file. Its
 name is historical and is planned to become `--input` without a compatibility
