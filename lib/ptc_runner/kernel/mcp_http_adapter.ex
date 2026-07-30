@@ -29,7 +29,8 @@ defmodule PtcRunner.Kernel.MCPHTTPAdapter do
   @type response :: %{
           required(:status) => non_neg_integer(),
           required(:headers) => [{binary(), binary()}],
-          required(:body) => term()
+          required(:body) => term(),
+          optional(:authorization_result) => term()
         }
 
   @type dispatch_provenance :: :not_dispatched | :possibly_dispatched
@@ -296,7 +297,7 @@ defmodule PtcRunner.Kernel.MCPHTTPAdapter do
          ],
          {:ok, connection} <-
            Mint.HTTP.connect(request.scheme, request.address, request.port, opts) do
-      case verify_connected_peer(connection, request.connected_peer) do
+      case verify_connected_peer(connection, request.scheme, request.connected_peer) do
         :ok ->
           {:ok, connection}
 
@@ -335,10 +336,10 @@ defmodule PtcRunner.Kernel.MCPHTTPAdapter do
   defp address_family_options(address) when is_binary(address),
     do: [inet6: true, inet4: true]
 
-  defp verify_connected_peer(_connection, nil), do: :ok
+  defp verify_connected_peer(_connection, _scheme, nil), do: :ok
 
-  defp verify_connected_peer(connection, callback) do
-    case socket_peername(connection) do
+  defp verify_connected_peer(connection, scheme, callback) do
+    case socket_peername(connection, scheme) do
       {:ok, address} ->
         case callback.(address) do
           :ok -> :ok
@@ -354,13 +355,11 @@ defmodule PtcRunner.Kernel.MCPHTTPAdapter do
     _kind, _reason -> {:error, :peer_rejected}
   end
 
-  defp socket_peername(%Mint.HTTP1{socket: socket, transport: Mint.Core.Transport.TCP}),
-    do: peername(:inet, socket)
+  defp socket_peername(connection, :http),
+    do: peername(:inet, Mint.HTTP.get_socket(connection))
 
-  defp socket_peername(%Mint.HTTP1{socket: socket, transport: Mint.Core.Transport.SSL}),
-    do: peername(:ssl, socket)
-
-  defp socket_peername(_connection), do: {:error, :unsupported_connection}
+  defp socket_peername(connection, :https),
+    do: peername(:ssl, Mint.HTTP.get_socket(connection))
 
   defp peername(module, socket) do
     case module.peername(socket) do
@@ -644,10 +643,13 @@ defmodule PtcRunner.Kernel.MCPHTTPAdapter do
   defp remaining_ms(request),
     do: request.deadline_ms - System.monotonic_time(:millisecond)
 
-  defp timeout_reason?(:timeout), do: true
-  defp timeout_reason?({:timeout, _detail}), do: true
-  defp timeout_reason?({:transport, :timeout}), do: true
-  defp timeout_reason?(_reason), do: false
+  defp timeout_reason?(%Mint.TransportError{reason: reason}), do: timeout_detail?(reason)
+  defp timeout_reason?(%Mint.HTTPError{reason: reason}), do: timeout_detail?(reason)
+
+  defp timeout_detail?(:timeout), do: true
+  defp timeout_detail?({:timeout, _detail}), do: true
+  defp timeout_detail?({:transport, :timeout}), do: true
+  defp timeout_detail?(_reason), do: false
 
   defp response_exceeded_reason?(%Mint.HTTPError{
          reason: {:max_header_list_size_exceeded, _size, _maximum}

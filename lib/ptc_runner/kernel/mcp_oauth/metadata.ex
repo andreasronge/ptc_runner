@@ -97,16 +97,16 @@ defmodule PtcRunner.Kernel.MCPOAuth.Metadata do
          true <- NetworkPolicy.endpoint_allowed?(token_endpoint, authority),
          {:ok, response_types} <-
            string_set(Map.get(document, "response_types_supported"), required: true),
-         true <- MapSet.member?(response_types, "code"),
+         true <- Enum.member?(response_types, "code"),
          {:ok, grant_types, explicit_refresh?} <- grant_types(document),
-         true <- MapSet.member?(grant_types, "authorization_code"),
+         true <- Enum.member?(grant_types, "authorization_code"),
          {:ok, response_modes} <- response_modes(document),
-         true <- MapSet.member?(response_modes, "query"),
+         true <- Enum.member?(response_modes, "query"),
          {:ok, pkce_methods} <-
            string_set(Map.get(document, "code_challenge_methods_supported"),
              required: true
            ),
-         true <- MapSet.member?(pkce_methods, "S256"),
+         true <- Enum.member?(pkce_methods, "S256"),
          {:ok, authentication_methods} <- authentication_methods(document),
          {:ok, scopes} <- optional_scopes(Map.get(document, "scopes_supported")),
          {:ok, issuer_response?} <-
@@ -165,9 +165,9 @@ defmodule PtcRunner.Kernel.MCPOAuth.Metadata do
          "none" <- Map.get(document, "token_endpoint_auth_method"),
          false <- forbidden_client_key?(document),
          {:ok, grant_types, explicit_grants?} <- client_grant_types(document),
-         true <- MapSet.member?(grant_types, "authorization_code"),
+         true <- Enum.member?(grant_types, "authorization_code"),
          {:ok, response_types} <- client_response_types(document),
-         true <- MapSet.member?(response_types, "code"),
+         true <- Enum.member?(response_types, "code"),
          {:ok, par_required?} <-
            optional_boolean(Map.get(document, "require_pushed_authorization_requests"), false),
          false <- par_required?,
@@ -183,7 +183,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.Metadata do
          token_endpoint_auth_method: :none,
          grant_types: grant_types,
          explicit_refresh_support:
-           explicit_grants? and MapSet.member?(grant_types, "refresh_token"),
+           explicit_grants? and Enum.member?(grant_types, "refresh_token"),
          response_types: response_types
        }}
     else
@@ -231,7 +231,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.Metadata do
 
       {:ok, values} ->
         with {:ok, set} <- string_set(values, required: true),
-             do: {:ok, set, MapSet.member?(set, "refresh_token")}
+             do: {:ok, set, Enum.member?(set, "refresh_token")}
     end
   end
 

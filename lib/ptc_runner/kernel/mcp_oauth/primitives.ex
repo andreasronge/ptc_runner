@@ -207,7 +207,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.Primitives do
 
         with :ok <- valid_percent_encoding(part),
              {:ok, decoded_name} <- decode_www_form(name),
-             false <- MapSet.member?(owned, decoded_name) do
+             false <- Enum.member?(owned, decoded_name) do
           {:cont, :ok}
         else
           _invalid -> {:halt, {:error, :invalid_endpoint}}

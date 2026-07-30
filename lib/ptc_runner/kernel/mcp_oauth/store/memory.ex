@@ -3,7 +3,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.Store.Memory do
   Owner-process, process-local implementation of the MCP OAuth store.
 
   It is intended for tests, examples, and one foreground CLI invocation. All
-  compound behavior operations execute in one `GenServer.handle_call/3`, so
+  compound behavior operations execute in one serialized GenServer callback, so
   grant CAS, lease transitions, requirement updates, authority claims, and
   retirement fences are atomic. Owner death destroys the complete store.
   """
