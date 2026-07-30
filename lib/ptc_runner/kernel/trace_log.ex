@@ -1261,8 +1261,9 @@ defmodule PtcRunner.Kernel.TraceLog do
   # group/other-writable directory somewhere on the path -- is operator-fixable
   # and names a specific directory to go look at. A missing `id`/`mkdir` or an
   # unreadable parent is a different problem with a different remedy, so
-  # preflight reports them apart instead of collapsing both to "unavailable".
-  # The append path keeps its single closed reason.
+  # preflight names the untrusted ancestor apart from both. What the remaining
+  # faults collapse to still differs by call site, which is why each passes its
+  # own fallback. The append path keeps its single closed reason.
   defp preflight_reason(:private_directory_parent_unsafe, _fallback),
     do: :trace_destination_unsafe
 

@@ -547,6 +547,32 @@ defmodule PtcRunner.Kernel.InspectionPreflightTest do
     end
 
     @tag :tmp_dir
+    test "an existing private trace under a replaceable ancestor is unsafe", %{tmp_dir: dir} do
+      replaceable = Path.join(dir, "replaceable")
+      path = Path.join(replaceable, "existing.private.jsonl")
+
+      File.mkdir!(replaceable)
+      File.write!(path, "")
+      File.chmod!(path, 0o600)
+      File.chmod!(replaceable, 0o777)
+
+      assert {:error, :trace_destination_unsafe} = TraceLog.preflight_destination(path, true)
+    end
+
+    # Only the untrusted ancestor is named apart here; an unavailable parent has
+    # always been reported as the generic closed reason on this path.
+    @tag :tmp_dir
+    test "private creation reports an unavailable parent as source_unavailable", %{tmp_dir: dir} do
+      parent = Path.join(dir, "uncreatable")
+      File.mkdir!(parent)
+      File.chmod!(parent, 0o500)
+      on_exit(fn -> File.chmod(parent, 0o700) end)
+
+      assert {:error, :source_unavailable} =
+               TraceLog.preflight_destination(Path.join(parent, "run.private.jsonl"), true)
+    end
+
+    @tag :tmp_dir
     test "accepts an appendable existing private trace in a non-creatable parent", %{
       tmp_dir: dir
     } do

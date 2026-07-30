@@ -89,11 +89,12 @@ or `mkdir` names an unusable host. Result publication shares that preflight, so
 destination turns unsafe after preflight; trace appends and inspection
 publication keep their single closed reason.
 
-Ancestry is validated for every private destination and for a normal trace that
-must still be created. An existing normal trace is validated for writability
-only. The append-lock directory under `TMPDIR` is validated separately and
-reports `source_unavailable` for any fault, including an untrusted ancestor of
-its own.
+Ancestry is validated for every result and inspection destination whatever its
+class, for every private trace, and for a normal trace that must still be
+created. An existing normal trace is validated for writability only. The
+append-lock directory under `TMPDIR` is validated separately and reports
+`source_unavailable` for any fault, including an untrusted ancestor of its
+own.
 
 Private trace creation uses the same host primitives and ancestry checks. A
 missing trace requires both `mkdir` and `id` and is published at mode `0600`

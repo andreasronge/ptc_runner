@@ -24,7 +24,10 @@ defmodule PtcRunner.Kernel.RunState do
   its `:DOWN` observed. Thus connector cleanup cannot begin while a callback
   from that run remains live. Shutdown — owner death or explicit stop —
   likewise kills and drains every still-attached provider before state
-  terminates. A process holds at most one reservation at a time: dispatch is
+  terminates. A dispatching process routinely races that shutdown, so
+  `attach_provider/2`, `finish_provider/1`, and `release_provider_slot/1` report
+  closure rather than propagating the owner's exit; every other call still fails
+  loudly. Closure is what they report for any exit, including a call timeout. A process holds at most one reservation at a time: dispatch is
   sequential per process, so a second reserve while one is active is a protocol
   violation and is rejected rather than silently replacing the tracked
   reservation. A provider process atomically records terminal policy
@@ -116,7 +119,7 @@ defmodule PtcRunner.Kernel.RunState do
         # The tracker hears about owner death only through its monitor, so it can
         # still accept an attachment after the owner is gone. This call races that
         # window and must report closure rather than exit.
-        case safe_call(state, {:attach_provider, provider}) do
+        case safe_call(state, {:attach_provider, provider}, {:error, :closed}) do
           :ok ->
             :ok
 
@@ -136,26 +139,23 @@ defmodule PtcRunner.Kernel.RunState do
     end
   end
 
-  @spec release_provider_slot(t()) :: :ok | {:error, :closed}
   # Returning a slot is best effort. The tracker refuses an attachment exactly
   # when it has stopped, which is what it does once the owner goes down, so this
   # release routinely races the owner's exit. The budget dies with the owner
   # either way; an exiting call here would instead take the dispatching process
   # with it.
+  @spec release_provider_slot(t()) :: :ok | {:error, :closed}
   @doc "Releases the caller's live provider slot without accepting a result."
-  def release_provider_slot(state), do: safe_call(state, :release_provider_slot)
+  def release_provider_slot(state),
+    do: safe_call(state, :release_provider_slot, {:error, :closed})
 
+  # A provider result can arrive after the owner is gone, which is the same race
+  # release_provider_slot/1 answers. Only the exit becomes :run_closed; a reply
+  # the owner actually sent is passed through, so a bad token still reaches the
+  # caller as the unhandled :closed it has always been.
   @spec finish_provider(t()) :: :ok | {:error, :run_closed}
-  # A provider result can arrive after the owner is gone. A dead owner means the
-  # run is closed, which is what the caller already handles, so report that
-  # instead of exiting.
   @doc "Releases a provider slot and accepts completion only while the run is open."
-  def finish_provider(state) do
-    case safe_call(state, :finish_provider) do
-      {:error, :closed} -> {:error, :run_closed}
-      result -> result
-    end
-  end
+  def finish_provider(state), do: safe_call(state, :finish_provider, {:error, :run_closed})
 
   @doc false
   @spec mark_evaluation_terminal_provider_failure(t()) :: :ok
@@ -915,9 +915,9 @@ defmodule PtcRunner.Kernel.RunState do
   defp call(%__MODULE__{pid: pid, token: token}, request),
     do: GenServer.call(pid, {token, request})
 
-  defp safe_call(state, request) do
+  defp safe_call(state, request, on_exit) do
     call(state, request)
   catch
-    :exit, _reason -> {:error, :closed}
+    :exit, _reason -> on_exit
   end
 end
