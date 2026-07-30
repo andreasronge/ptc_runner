@@ -41,6 +41,7 @@ defmodule PtcRunner.Kernel.ResultArtifact do
   @type error ::
           :result_destination_exists
           | :result_persistence_failed
+          | :result_destination_unsafe
           | {:result_not_json_encodable, atom()}
           | :invalid_result_destination
           | :private_result_requires_private_destination
@@ -121,10 +122,14 @@ defmodule PtcRunner.Kernel.ResultArtifact do
     end
   end
 
+  # An untrusted ancestor names a directory the operator can go fix; a missing
+  # `mkdir`/`id` does not. They are reported apart rather than both arriving as
+  # a bare persistence failure.
   defp preflight_private_directory(path) do
     case PrivateDirectory.preflight(path) do
       :ok -> :ok
       {:error, :private_directory_parent_unavailable} -> {:error, :invalid_result_destination}
+      {:error, :private_directory_parent_unsafe} -> {:error, :result_destination_unsafe}
       {:error, _reason} -> {:error, :result_persistence_failed}
     end
   end

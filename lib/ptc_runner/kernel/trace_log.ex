@@ -1221,11 +1221,8 @@ defmodule PtcRunner.Kernel.TraceLog do
       :ok ->
         :ok
 
-      {:error, :private_directory_parent_unavailable} ->
-        {:error, :trace_destination_unavailable}
-
-      {:error, _reason} ->
-        {:error, :source_unavailable}
+      {:error, reason} ->
+        {:error, preflight_reason(reason, :source_unavailable)}
     end
   end
 
@@ -1234,31 +1231,42 @@ defmodule PtcRunner.Kernel.TraceLog do
       :ok ->
         :ok
 
-      {:error, :private_directory_parent_unavailable} ->
-        {:error, :trace_destination_unavailable}
-
-      {:error, _reason} ->
-        {:error, :source_unavailable}
+      {:error, reason} ->
+        {:error, preflight_reason(reason, :source_unavailable)}
     end
   end
 
   defp preflight_private_trace(path, %File.Stat{mode: mode, uid: owner}) do
-    with {:ok, uid} <- private_parent_identity(path),
+    with {:ok, uid} <- PrivateDirectory.preflight_owner(path),
          true <- owner in [0, uid] and Bitwise.band(mode, 0o777) == 0o600,
          :ok <- PrivateDirectory.preflight_writable_file(path) do
       :ok
     else
       false -> {:error, :trace_destination_unavailable}
-      {:error, _reason} -> {:error, :trace_destination_unavailable}
+      {:error, reason} -> {:error, preflight_reason(reason, :trace_destination_unavailable)}
     end
   end
 
   defp private_creation_parent(path) do
     case PrivateDirectory.preflight(path) do
       :ok -> :ok
-      {:error, _reason} -> {:error, :source_unavailable}
+      {:error, reason} -> {:error, preflight_reason(reason, :source_unavailable)}
     end
   end
+
+  # An untrusted ancestor — one owned outside this authority, or a
+  # group/other-writable directory somewhere on the path -- is operator-fixable
+  # and names a specific directory to go look at. A missing `id`/`mkdir` or an
+  # unreadable parent is a different problem with a different remedy, so
+  # preflight reports them apart instead of collapsing both to "unavailable".
+  # The append path keeps its single closed reason.
+  defp preflight_reason(:private_directory_parent_unsafe, _fallback),
+    do: :trace_destination_unsafe
+
+  defp preflight_reason(:private_directory_parent_unavailable, _fallback),
+    do: :trace_destination_unavailable
+
+  defp preflight_reason(_reason, fallback), do: fallback
 
   defp private_parent_identity(path) do
     case PrivateDirectory.preflight_owner(path) do

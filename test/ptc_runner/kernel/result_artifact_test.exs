@@ -5,6 +5,12 @@ defmodule PtcRunner.Kernel.ResultArtifactTest do
   alias PtcRunner.Kernel.ResultArtifact
   alias PtcRunner.Lisp.Format
 
+  # A uid no real account on a test host holds, so the stubbed authority cannot
+  # be mistaken for the process owner. `chown` itself takes a signed int, so the
+  # foreign owner has to stay in normal range.
+  @authority_uid 4_294_967_294
+  @foreign_uid 65_534
+
   @tag :tmp_dir
   test "persists the same canonical bytes used by run result hashes", %{tmp_dir: dir} do
     value = %{"z" => [3, 2, 1], "a" => %{"b" => true}}
@@ -158,7 +164,7 @@ defmodule PtcRunner.Kernel.ResultArtifactTest do
     File.mkdir!(replaceable)
     File.chmod!(replaceable, 0o777)
 
-    assert {:error, :result_persistence_failed} =
+    assert {:error, :result_destination_unsafe} =
              ResultArtifact.preflight_destination(
                Path.join(replaceable, "result.json"),
                :private,
@@ -171,19 +177,30 @@ defmodule PtcRunner.Kernel.ResultArtifactTest do
     mkdir = System.find_executable("mkdir")
     bin = Path.join(dir, "authority-bin")
     id_wrapper = Path.join(bin, "id")
+    nested = Path.join(dir, "nested")
     original_path = System.get_env("PATH")
 
     assert is_binary(mkdir)
     File.mkdir!(bin)
+    File.mkdir!(nested)
     File.ln_s!(mkdir, Path.join(bin, "mkdir"))
-    File.write!(id_wrapper, "#!/bin/sh\nprintf '4294967294\\n'\n")
+    File.write!(id_wrapper, "#!/bin/sh\nprintf '#{@authority_uid}\\n'\n")
     File.chmod!(id_wrapper, 0o700)
     System.put_env("PATH", bin)
     on_exit(fn -> restore_env("PATH", original_path) end)
 
-    assert {:error, :result_persistence_failed} =
+    # The hierarchy check trusts root as well as the reported authority, so a
+    # root-owned checkout has no untrusted ancestor to find and would fail the
+    # later writability check instead. An unprivileged run already owns the tree
+    # with a third uid; a privileged one has to say so explicitly.
+    if File.stat!(nested, time: :posix).uid == 0,
+      do: :ok = File.chown(nested, @foreign_uid)
+
+    refute File.stat!(nested, time: :posix).uid in [0, @authority_uid]
+
+    assert {:error, :result_destination_unsafe} =
              ResultArtifact.preflight_destination(
-               Path.join(dir, "result.json"),
+               Path.join(nested, "result.json"),
                :private,
                :private
              )

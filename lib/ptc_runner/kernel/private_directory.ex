@@ -115,7 +115,8 @@ defmodule PtcRunner.Kernel.PrivateDirectory do
       {:error, reason}
       when reason in [
              :private_directory_unsupported,
-             :private_directory_unavailable
+             :private_directory_unavailable,
+             :private_directory_parent_unsafe
            ] ->
         {:error, reason}
 

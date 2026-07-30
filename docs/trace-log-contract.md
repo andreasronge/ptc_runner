@@ -608,7 +608,10 @@ grant-relative identifiers.
 Inspection loading and persistence use a separate stable error set:
 `:inspection_sink_error`, `:inspection_persistence_failed`,
 `:invalid_inspection_source`, `:inspection_source_changed`,
-`:inspection_source_limit_exceeded`, and `:inspection_run_mismatch`. Errors do
+`:inspection_source_limit_exceeded`, and `:inspection_run_mismatch`.
+Destination preflight adds `:inspection_destination_exists`,
+`:inspection_destination_unavailable`, and `:inspection_destination_unsafe`,
+the last naming an ancestor with an untrusted owner or mode. Errors do
 not include a record payload or host path. A completed Kernel result may be
 returned as bounded context with `:inspection_persistence_failed`, matching the
 existing trace-persistence distinction; persistence failure is not rewritten

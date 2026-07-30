@@ -327,6 +327,27 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
     assert {:error, :inspection_sink_error} = InspectionSink.records(sink)
   end
 
+  # The retained record wraps the payload at exactly one level, so the ceiling is
+  # measured through that envelope. Pinning both sides of the edge keeps a
+  # cheaper pre-normalization check from quietly moving it.
+  test "retains a record at the document-depth ceiling and rejects the next level" do
+    nest = fn levels -> Enum.reduce(1..levels, true, fn _level, value -> [value] end) end
+
+    emit = fn levels ->
+      {:ok, sink} = InspectionSink.start(run_id: "run-1", trace_id: "trace-1")
+
+      InspectionSink.emit(
+        sink,
+        "capability-input",
+        %{capability_id: "cap-1"},
+        %{environment: :mission, name: "remote.read", arguments: %{"nested" => nest.(levels)}}
+      )
+    end
+
+    assert :ok = emit.(50)
+    assert {:error, :inspection_sink_error} = emit.(51)
+  end
+
   @tag :tmp_dir
   test "persists one exclusive 0600 artifact and validates immutable loading", %{tmp_dir: dir} do
     {:ok, sink} = InspectionSink.start(run_id: "run-1", trace_id: "trace-1")

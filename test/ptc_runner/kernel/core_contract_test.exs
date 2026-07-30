@@ -382,6 +382,20 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     assert %{closed?: true} = RunState.usage(state)
   end
 
+  # The tracker refuses an attachment exactly when it has stopped, which is what
+  # it does once the owner goes down — so the release that follows the refusal
+  # routinely races the owner's exit and must not kill the dispatcher.
+  test "releasing a provider slot after the owner is gone reports closure" do
+    {:ok, state} = RunState.start(Limits.defaults())
+    assert :ok = RunState.reserve_capability(state, :workflow, "orphaned")
+
+    owner_ref = Process.monitor(state.pid)
+    assert :ok = RunState.stop(state)
+    assert_receive {:DOWN, ^owner_ref, :process, _pid, _reason}
+
+    assert {:error, :closed} = RunState.release_provider_slot(state)
+  end
+
   test "provider attachment distinguishes a closed run from an already-dead provider" do
     {:ok, closed_state} = RunState.start(Limits.defaults())
     assert :ok = RunState.reserve_capability(closed_state, :workflow, "closed")

@@ -134,8 +134,13 @@ defmodule PtcRunner.Kernel.RunState do
   end
 
   @spec release_provider_slot(t()) :: :ok | {:error, :closed}
+  # Returning a slot is best effort. The tracker refuses an attachment exactly
+  # when it has stopped, which is what it does once the owner goes down, so this
+  # release routinely races the owner's exit. The budget dies with the owner
+  # either way; an exiting call here would instead take the dispatching process
+  # with it.
   @doc "Releases the caller's live provider slot without accepting a result."
-  def release_provider_slot(state), do: call(state, :release_provider_slot)
+  def release_provider_slot(state), do: safe_call(state, :release_provider_slot)
 
   @spec finish_provider(t()) :: :ok | {:error, :run_closed}
   @doc "Releases a provider slot and accepts completion only while the run is open."
@@ -898,4 +903,10 @@ defmodule PtcRunner.Kernel.RunState do
 
   defp call(%__MODULE__{pid: pid, token: token}, request),
     do: GenServer.call(pid, {token, request})
+
+  defp safe_call(state, request) do
+    call(state, request)
+  catch
+    :exit, _reason -> {:error, :closed}
+  end
 end

@@ -57,7 +57,7 @@ defmodule PtcRunner.Kernel.InspectionPreflightTest do
       File.mkdir!(replaceable)
       File.chmod!(replaceable, 0o777)
 
-      assert {:error, :inspection_persistence_failed} =
+      assert {:error, :inspection_destination_unsafe} =
                InspectionArtifact.preflight_destination(
                  Path.join(replaceable, "run.inspection.jsonl")
                )
@@ -75,7 +75,7 @@ defmodule PtcRunner.Kernel.InspectionPreflightTest do
       File.chmod!(protected_child, 0o700)
       File.ln_s!(protected_child, alias_path)
 
-      assert {:error, :inspection_persistence_failed} =
+      assert {:error, :inspection_destination_unsafe} =
                InspectionArtifact.preflight_destination(
                  Path.join(alias_path, "run.inspection.jsonl")
                )
@@ -93,7 +93,7 @@ defmodule PtcRunner.Kernel.InspectionPreflightTest do
       File.chmod!(protected_child, 0o700)
       File.ln_s!(protected_child, alias_path)
 
-      assert {:error, :inspection_persistence_failed} =
+      assert {:error, :inspection_destination_unsafe} =
                InspectionArtifact.preflight_destination(
                  Path.join([alias_path, "..", "run.inspection.jsonl"])
                )
@@ -113,7 +113,7 @@ defmodule PtcRunner.Kernel.InspectionPreflightTest do
       File.ln_s!(protected_child, hop)
       File.ln_s!(hop, alias_path)
 
-      assert {:error, :inspection_persistence_failed} =
+      assert {:error, :inspection_destination_unsafe} =
                InspectionArtifact.preflight_destination(
                  Path.join(alias_path, "run.inspection.jsonl")
                )

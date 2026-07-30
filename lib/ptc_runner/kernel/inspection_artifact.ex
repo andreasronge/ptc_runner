@@ -45,6 +45,7 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
              :invalid_inspection_path
              | :inspection_destination_exists
              | :inspection_destination_unavailable
+             | :inspection_destination_unsafe
              | :inspection_persistence_failed}
   @doc """
   Read-only destination preflight using the same path rules as `persist/3`.
@@ -601,6 +602,9 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
     _ = File.rmdir(temporary_directory)
   end
 
+  # An untrusted ancestor names a directory the operator can go fix; a missing
+  # `mkdir`/`id` does not. They are reported apart rather than both arriving as
+  # a bare persistence failure.
   defp preflight_private_directory(path) do
     case PrivateDirectory.preflight(path) do
       :ok ->
@@ -608,6 +612,9 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
 
       {:error, :private_directory_parent_unavailable} ->
         {:error, :inspection_destination_unavailable}
+
+      {:error, :private_directory_parent_unsafe} ->
+        {:error, :inspection_destination_unsafe}
 
       {:error, _reason} ->
         {:error, :inspection_persistence_failed}
