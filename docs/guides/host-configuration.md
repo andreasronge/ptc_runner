@@ -315,6 +315,121 @@ rejected, including `authorization`, `content-type`, `host`,
 `content-length`, `connection`, `transfer-encoding`, `proxy-authorization`, and
 the `mcp-*` family.
 
+#### OAuth-protected MCP servers
+
+An OAuth installation replaces static `auth` with a host-owned `oauth` block:
+
+```json
+"transport": {
+  "type": "streamable_http",
+  "endpoint": "https://mcp.example.com/v1",
+  "oauth": {
+    "installation_id": "primary-account",
+    "issuer": "https://accounts.example.com",
+    "scope_ceiling": ["documents.read", "offline_access"],
+    "default_scopes": ["documents.read"],
+    "refresh_access": "when_supported",
+    "client": {
+      "registration": "pre_registered",
+      "client_id": "ptc-runner-local",
+      "token_endpoint_auth_method": "none",
+      "grant_types": ["authorization_code", "refresh_token"],
+      "loopback_redirect": {
+        "host": "127.0.0.1",
+        "path": "/callback"
+      }
+    }
+  }
+}
+```
+
+Authorize a named installation explicitly before provider acquisition:
+
+```console
+mix ptc.run ptc.json --host-config ptc-host.json \
+  --authorize-mcp workspace
+```
+
+The command binds an operating-system-selected loopback port, prints one
+authorization URL for you to open, waits for the exact callback, and only then
+builds the provider. It never launches a browser. The option composes with
+`--check`; the check performs authorization first and reports only the closed
+mode `oauth`, never account, issuer, client, scope, redirect, or token details.
+Repeat `--authorize-mcp` to authorize multiple named installations.
+The CLI store is process-local: the grant and any later `403` scope requirement
+exist only for that command invocation, so another invocation must authorize
+again. Embeddings may retain state across runs only by supplying their own
+secure persistent `MCPOAuth.Store` adapter; PtcRunner does not ship one.
+
+The CLI supports public clients with `token_endpoint_auth_method: "none"` and
+an exact `127.0.0.1` or `::1` loopback redirect. `localhost`, fixed callback
+ports, confidential clients, and HTTPS callbacks require an embedding
+application using `PtcRunner.Kernel.MCPOAuth.Authorization` and an explicit
+principal-scoped `PtcRunner.Kernel.MCPOAuth.Context`.
+
+The host pins the exact resource, issuer, client, maximum scopes, refresh
+policy, redirect authority, and permitted network origins. The manifest and
+MCP server cannot widen them. Pre-registered clients support `none` and
+`client_secret_basic`; a confidential secret is resolved just in time and is
+not part of the ordinary provider credential barrier. Client ID Metadata
+Documents are supported for public clients when the authorization server
+advertises them. Dynamic Client Registration (DCR) is deliberately unsupported:
+the final MCP profile deprecates it, and providers such as Google use
+console-managed pre-registration instead.
+
+PtcRunner requires an explicit, non-empty authorization scope. Challenge
+scopes take priority, then Protected Resource Metadata scopes, then installed
+`default_scopes`; the result must stay within `scope_ceiling`. If every source
+is empty, authorization stops before interaction. This
+**MCP-OAUTH-EXPLICIT-SCOPE** policy deliberately tightens MCP's omit-scope
+fallback so a stored grant never has unreported authority.
+
+Resource metadata that requires DPoP or contains `signed_metadata` is rejected.
+The signed-metadata rejection is a PtcRunner interoperability restriction:
+PtcRunner does not verify signed metadata and therefore refuses to consume
+unsigned fields beside it. Authorization-server or client metadata requiring
+PAR or DPoP is likewise unsupported.
+
+Normal execution never opens an authorization interaction. An absent,
+rejected, expired-without-refresh, or indeterminate grant returns
+`mcp_authorization_required`. A `401` rejects only the bearer generation
+actually sent. A valid `403 insufficient_scope` challenge stores a private
+scope requirement for the next explicit authorization in the same store
+lifetime. That server response overrides the sent generation's nominal token
+scope report. A delayed response is discarded only when a strictly newer token
+generation reports every required scope; otherwise the requirement remains.
+If either response-driven store transition fails, the current provider reports
+a transport failure and retains an equivalent runtime-shared local fence rather
+than issuing that authority again. A replacement provider using the same local
+store and grant key remains fenced. Retry provider shutdown after the store is
+healthy, or install a strictly newer grant containing the complete requirement;
+do not treat a failed close as permission to discard the old provider.
+These response-driven transitions use a separate bounded cleanup budget, so a
+response arriving at the HTTP deadline cannot skip its local fence. The scope
+requirement or token rejection persists in a bounded non-owner worker started
+with that fence, so a provider-task timeout cannot skip the durable transition
+either. A definitive `401` status line stops immediately, even when the
+remaining header block is oversized, malformed, or stalled. A `403` stops
+after its complete bounded challenge headers, before the body. The HTTP
+response callback installs the manager fence before handing a result back
+to the bounded provider task, so cancellation cannot open a gap between parsing
+the response and fencing its bearer generation. Closing the manager drains
+those bounded persistence workers before discarding its local state. A
+failed persistence is retained and retried during close; if the retry still
+fails, provider shutdown reports a transport error and the runtime keeps the
+shared fence. If provider acquisition fails before returning a provider close
+handle, a supervised cleanup owner retains the manager and retries bounded
+shutdown until persistence succeeds or the manager exits.
+An ordinary `403`, or a malformed or unsupported Bearer challenge, is a
+non-retryable authentication or authorization result. Only failure to persist
+one valid, satisfiable `insufficient_scope` challenge is reported as a
+retryable transport failure.
+PtcRunner does not
+retry the original MCP request in either case. This is
+**MCP-AUTH-DEV-001**, a deliberate safety deviation from MCP's recommended
+step-up-and-retry behavior: a `tools/call` may be a write and must not be
+replayed automatically.
+
 Stdio containment is provided by the optional
 [launcher companion](../../ptc_runner_launcher/README.md), which pins a frozen
 SHA-256 identity of the executable, separates streams, and bounds cleanup.

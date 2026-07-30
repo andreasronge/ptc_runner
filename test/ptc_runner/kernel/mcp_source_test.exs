@@ -14,13 +14,20 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
   alias PtcRunner.Kernel.Library
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.LLMCapability
+  alias PtcRunner.Kernel.MCPOAuth.Authority
+  alias PtcRunner.Kernel.MCPOAuth.Context, as: OAuthContext
+  alias PtcRunner.Kernel.MCPOAuth.Store
+  alias PtcRunner.Kernel.MCPOAuth.Store.Memory
+  alias PtcRunner.Kernel.MCPOAuth.TokenManager
   alias PtcRunner.Kernel.MCPSource
   alias PtcRunner.Kernel.MissionEnvironment
+  alias PtcRunner.Kernel.ProviderError
   alias PtcRunner.Kernel.ProviderRegistry
   alias PtcRunner.Kernel.RunBuilder
   alias PtcRunner.Kernel.RunConfig
   alias PtcRunner.Kernel.RunState
   alias PtcRunner.Kernel.WorkflowEnvironment
+  alias PtcRunner.Test.MCPOAuthRecordingStore
   alias PtcRunner.TestSupport.MCPHTTPFixture
 
   @owner_lifecycle_timeout_ms 30_000
@@ -28,6 +35,351 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
   @stdio_fixture Path.expand("../../support/mcp_stdio_source_fixture.sh", __DIR__)
   @root Path.expand("../../..", __DIR__)
   @inherited_environment ~w(HOME LOGNAME PATH SHELL TERM USER)
+
+  test "rejects a dynamic OAuth manager bound to another exact resource" do
+    manager = %TokenManager{pid: self(), resource: "https://mcp.example/a"}
+
+    assert_raise ArgumentError, fn ->
+      MCPSource.builder(
+        transport: {:streamable_http, endpoint: "https://mcp.example/b", authorization: manager},
+        tools: %{"read" => %{as: "read", effect: :read}}
+      )
+    end
+  end
+
+  test "fences dynamic OAuth after rejected-response state persistence fails" do
+    cases = [
+      {{401, [{"www-authenticate", ~s(Bearer error="invalid_token")}]}, 401,
+       [{"www-authenticate", ~s(Bearer error="invalid_token")}],
+       fn
+         {:mark_access_rejected, _key, _generation}, _timeout ->
+           {:return, {:error, :store_error}}
+
+         _operation, _timeout ->
+           :delegate
+       end},
+      {{403,
+        [
+          {"www-authenticate", ~s(Bearer error="insufficient_scope", scope="write")}
+        ]}, 403,
+       [
+         {"www-authenticate", ~s(Bearer error="insufficient_scope", scope="write")}
+       ],
+       fn
+         {:upsert_requirement, _key, _generation, _scopes, _ttl_ms}, _timeout ->
+           {:return, {:error, :store_error}}
+
+         _operation, _timeout ->
+           :delegate
+       end},
+      {{401, [{"www-authenticate", ~s(Bearer error="invalid_token")}],
+        String.duplicate("x", 2_100_000)}, 401,
+       [{"www-authenticate", ~s(Bearer error="invalid_token")}],
+       fn
+         {:mark_access_rejected, _key, _generation}, _timeout ->
+           {:return, {:error, :store_error}}
+
+         _operation, _timeout ->
+           :delegate
+       end},
+      {{:headers_only, 403,
+        [
+          {"www-authenticate", ~s(Bearer error="insufficient_scope", scope="write")}
+        ]}, 403,
+       [
+         {"www-authenticate", ~s(Bearer error="insufficient_scope", scope="write")}
+       ],
+       fn
+         {:upsert_requirement, _key, _generation, _scopes, _ttl_ms}, _timeout ->
+           {:return, {:error, :store_error}}
+
+         _operation, _timeout ->
+           :delegate
+       end},
+      {{:status_only, 401}, 401, [],
+       fn
+         {:mark_access_rejected, _key, _generation}, _timeout ->
+           {:return, {:error, :store_error}}
+
+         _operation, _timeout ->
+           :delegate
+       end},
+      {{401, [{"x-oversized", String.duplicate("x", 40_000)}], ""}, 401, [],
+       fn
+         {:mark_access_rejected, _key, _generation}, _timeout ->
+           {:return, {:error, :store_error}}
+
+         _operation, _timeout ->
+           :delegate
+       end}
+    ]
+
+    for {tool_http_error, status, _headers, interceptor} <- cases do
+      fixture = fixture(self(), tool_http_error: tool_http_error)
+      manager = oauth_manager(fixture.endpoint, interceptor)
+
+      builder =
+        MCPSource.builder(
+          transport:
+            {:streamable_http,
+             endpoint: fixture.endpoint, authorization: manager, allow_insecure_loopback: true},
+          tools: %{"structured" => %{as: "remote.structured", effect: :read}},
+          timeout_ms: 2_000
+        )
+
+      {:ok, registry} = ProviderRegistry.new(%{"fixture-mcp" => builder})
+      {:ok, limits} = Limits.new()
+
+      assert {:ok, %{capabilities: [capability], close: close}} =
+               ProviderRegistry.build(
+                 registry,
+                 "fixture-mcp",
+                 %{"allow" => ["remote.structured"]},
+                 %{
+                   directory: File.cwd!(),
+                   destination: :mission,
+                   limits: limits,
+                   installed_limits: limits,
+                   owner: self()
+                 }
+               )
+
+      result =
+        capability.callback.(%{"query" => "x"}, %{
+          capability_id: capability.name,
+          inspection_sink: nil,
+          traceparent: "00-0123456789abcdef0123456789abcdef-0123456789abcdef-01"
+        })
+
+      assert_receive {:fixture_tool_http_error, ^status}
+
+      assert {:error, :mcp_authorization_required} =
+               TokenManager.authorization_header(
+                 manager,
+                 System.monotonic_time(:millisecond) + 1_000
+               )
+
+      assert match?({:error, %ProviderError{kind: :transport_error}}, result),
+             "unexpected OAuth #{status} result: #{inspect(result)}"
+
+      assert {:error, :mcp_transport_error} = close.()
+      Process.exit(manager.pid, :kill)
+      fixture.close.()
+    end
+  end
+
+  test "ordinary and malformed dynamic 403 responses are non-retryable authentication failures" do
+    challenges = [
+      [],
+      [{"www-authenticate", "Bearer ???"}],
+      [{"www-authenticate", ~s(Bearer error="access_denied")}]
+    ]
+
+    for headers <- challenges do
+      fixture = fixture(self(), tool_http_error: {403, headers})
+      manager = oauth_manager(fixture.endpoint, fn _operation, _timeout -> :delegate end)
+
+      builder =
+        MCPSource.builder(
+          transport:
+            {:streamable_http,
+             endpoint: fixture.endpoint, authorization: manager, allow_insecure_loopback: true},
+          tools: %{"structured" => %{as: "remote.structured", effect: :read}},
+          timeout_ms: 2_000
+        )
+
+      {:ok, registry} = ProviderRegistry.new(%{"fixture-mcp" => builder})
+      {:ok, limits} = Limits.new()
+
+      assert {:ok, %{capabilities: [capability], close: close}} =
+               ProviderRegistry.build(
+                 registry,
+                 "fixture-mcp",
+                 %{"allow" => ["remote.structured"]},
+                 %{
+                   directory: File.cwd!(),
+                   destination: :mission,
+                   limits: limits,
+                   installed_limits: limits,
+                   owner: self()
+                 }
+               )
+
+      assert {:error,
+              %ProviderError{
+                kind: :authentication_failed,
+                retryable?: false,
+                details: "mcp_authentication_failed"
+              }} =
+               capability.callback.(%{"query" => "x"}, %{
+                 capability_id: capability.name,
+                 inspection_sink: nil,
+                 traceparent: "00-0123456789abcdef0123456789abcdef-0123456789abcdef-01"
+               })
+
+      deadline = System.monotonic_time(:millisecond) + 1_000
+      assert {:ok, issued} = TokenManager.authorization_header(manager, deadline)
+      assert :ok = TokenManager.release(manager, issued.admission, deadline)
+      assert :ok = close.()
+      fixture.close.()
+    end
+  end
+
+  test "a Dispatcher timeout cannot skip late OAuth response persistence" do
+    assert_dispatcher_timeout_persists_oauth_failure(
+      401,
+      [{"www-authenticate", ~s(Bearer error="invalid_token")}]
+    )
+
+    assert_dispatcher_timeout_persists_oauth_failure(
+      403,
+      [
+        {"www-authenticate", ~s(Bearer error="insufficient_scope", scope="write")}
+      ]
+    )
+  end
+
+  defp assert_dispatcher_timeout_persists_oauth_failure(status, headers) do
+    parent = self()
+
+    fixture =
+      fixture(
+        parent,
+        tool_http_error: {status, headers}
+      )
+
+    manager =
+      oauth_manager(fixture.endpoint, fn operation, _timeout ->
+        transition? =
+          case {status, operation} do
+            {401, {:mark_access_rejected, _key, _generation}} -> true
+            {403, {:upsert_requirement, _key, _generation, _scopes, _ttl_ms}} -> true
+            _other -> false
+          end
+
+        if transition? do
+          send(parent, {:oauth_transition_persistence_blocked, status, self()})
+
+          receive do
+            :continue_oauth_transition -> :delegate
+          end
+        else
+          :delegate
+        end
+      end)
+
+    builder =
+      MCPSource.builder(
+        transport:
+          {:streamable_http,
+           endpoint: fixture.endpoint, authorization: manager, allow_insecure_loopback: true},
+        tools: %{"structured" => %{as: "remote.structured", effect: :read}},
+        timeout_ms: 1_000
+      )
+
+    {:ok, registry} = ProviderRegistry.new(%{"fixture-mcp" => builder})
+    {:ok, limits} = Limits.new()
+
+    assert {:ok, %{capabilities: [capability], close: close}} =
+             ProviderRegistry.build(
+               registry,
+               "fixture-mcp",
+               %{"allow" => ["remote.structured"]},
+               %{
+                 directory: File.cwd!(),
+                 destination: :mission,
+                 limits: limits,
+                 installed_limits: limits,
+                 owner: self()
+               }
+             )
+
+    {:ok, environment} = MissionEnvironment.new(capabilities: [capability])
+    authorization_config = :sys.get_state(manager.pid).config
+
+    {:ok, grant} =
+      Store.load_grant(authorization_config.context.store, authorization_config.key, 1_000)
+
+    limits = Limits.defaults()
+
+    {:ok, state, event_sink} =
+      RunState.start_with_event_sink(
+        limits,
+        run_id: "late-oauth-transition-#{status}",
+        trace_id: "late-oauth-transition-#{status}",
+        terminal_reserve: EventSink.terminal_reserve(:normal, limits)
+      )
+
+    task =
+      Task.async(fn ->
+        Dispatcher.dispatch(
+          state,
+          :mission,
+          environment,
+          capability.name,
+          %{"query" => "x"},
+          500,
+          event_sink
+        )
+      end)
+
+    assert_receive {:oauth_transition_persistence_blocked, ^status, persistence_worker}, 1_000
+    persistence_ref = Process.monitor(persistence_worker)
+
+    assert %{status: :error, kind: :timeout, reason: :provider_timeout} =
+             Task.await(task, 2_000)
+
+    send(persistence_worker, :continue_oauth_transition)
+    assert_receive {:DOWN, ^persistence_ref, :process, ^persistence_worker, :normal}, 1_000
+
+    assert {:error, :mcp_authorization_required} =
+             TokenManager.authorization_header(
+               manager,
+               System.monotonic_time(:millisecond) + 1_000
+             )
+
+    case status do
+      401 ->
+        assert {:error, :rejected_before_dispatch} =
+                 Store.admit_mcp(
+                   authorization_config.context.store,
+                   authorization_config.key,
+                   grant.generation,
+                   1_000,
+                   1_000
+                 )
+
+      403 ->
+        assert {:ok, %{scopes: scopes}} =
+                 Store.load_requirement(
+                   authorization_config.context.store,
+                   authorization_config.key,
+                   1_000
+                 )
+
+        assert scopes == MapSet.new(["write"])
+    end
+
+    assert :ok = close.()
+
+    assert {:ok, replacement_manager} =
+             TokenManager.start(
+               owner: self(),
+               context: authorization_config.context,
+               authority: authorization_config.authority,
+               authority_epoch: authorization_config.key.authority_epoch
+             )
+
+    assert {:error, :mcp_authorization_required} =
+             TokenManager.authorization_header(
+               replacement_manager,
+               System.monotonic_time(:millisecond) + 1_000
+             )
+
+    assert :ok = TokenManager.close(replacement_manager)
+    assert :ok = RunState.close(state)
+    fixture.close.()
+  end
 
   @input_schema %{
     "type" => "object",
@@ -1837,6 +2189,100 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     registry
   end
 
+  defp oauth_manager(endpoint, interceptor) do
+    uri = URI.parse(endpoint)
+    private_origin = "#{uri.scheme}://#{uri.host}:#{uri.port}"
+
+    {:ok, authority} =
+      Authority.from_host(
+        %{
+          "installation_id" => "source-test",
+          "issuer" => endpoint,
+          "scope_ceiling" => ["read", "write"],
+          "default_scopes" => ["read"],
+          "network" => %{
+            "additional_origins" => [],
+            "private_network_origins" => [private_origin]
+          },
+          "client" => %{
+            "registration" => "pre_registered",
+            "client_id" => "client",
+            "token_endpoint_auth_method" => "none",
+            "grant_types" => ["authorization_code"],
+            "loopback_redirect" => %{"host" => "127.0.0.1", "path" => "/callback"}
+          }
+        },
+        endpoint,
+        MapSet.new(),
+        allow_insecure_loopback: true
+      )
+
+    {:ok, memory} = Memory.start_link(owner: self())
+    {:ok, store} = Memory.store(memory)
+    {:ok, context} = OAuthContext.new(tenant_id: "tenant", principal_id: "alice", store: store)
+
+    {:ok, claims} =
+      Store.claim_authorities(
+        store,
+        context.tenant_id,
+        [{authority.installation_id, authority.fingerprint}],
+        1_000
+      )
+
+    epoch = claims[authority.installation_id]
+    key = OAuthContext.grant_key(context, authority, epoch)
+    {:ok, anchor} = Store.time_anchor(store, 1_000)
+    {:ok, lease} = Store.acquire_mutation(store, key, :authorization, 5_000, 1_000)
+
+    :ok =
+      Store.begin_mutation_dispatch(
+        store,
+        key,
+        lease.fence,
+        %{freshness_anchor: anchor, freshness_anchor_ttl_ms: 5_000},
+        1_000
+      )
+
+    {:ok, _grant} =
+      Store.commit_grant(
+        store,
+        key,
+        lease.fence,
+        %{
+          access_token: "access",
+          requested_scopes: MapSet.new(["read"]),
+          granted_scopes: MapSet.new(["read"]),
+          refresh_authorized: false,
+          redirect_uri: "http://127.0.0.1:49152/callback",
+          metadata_revision: 1,
+          metadata_binding: nil
+        },
+        60_000,
+        anchor,
+        1_000
+      )
+
+    {:ok, recording_store} =
+      MCPOAuthRecordingStore.wrap(store, self(), interceptor: interceptor)
+
+    {:ok, wrapped_context} =
+      OAuthContext.new(
+        tenant_id: context.tenant_id,
+        principal_id: context.principal_id,
+        store: recording_store
+      )
+
+    {:ok, manager} =
+      TokenManager.start(
+        owner: self(),
+        context: wrapped_context,
+        authority: authority,
+        authority_epoch: epoch
+      )
+
+    manager
+  end
+
   defp stdio_registry(_dir, marker, mode \\ nil, opts \\ []) do
     builder =
       MCPSource.builder(
@@ -1963,6 +2409,8 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
   end
 
   defp fixture(parent, opts \\ []) do
+    opts = Keyword.put(opts, :observer, parent)
+
     MCPHTTPFixture.start(fn request ->
       method = request.body["method"]
       send(parent, {:mcp_request, method, request.headers})
@@ -2099,38 +2547,61 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
          %{body: %{"method" => "tools/call", "id" => id, "params" => params}},
          opts
        ) do
-    case params["name"] do
-      "structured" ->
-        structured_response(id, opts)
+    case opts[:tool_http_error] do
+      {:status_only, status} ->
+        send(Keyword.fetch!(opts, :observer), {:fixture_tool_http_error, status})
+        {:status_only, status}
 
-      "text" ->
-        text =
-          cond do
-            text_bytes = opts[:text_bytes] -> String.duplicate("x", text_bytes)
-            opts[:large_text?] -> String.duplicate("x", 40_000)
-            true -> "hello"
-          end
+      {status, headers} ->
+        send(Keyword.fetch!(opts, :observer), {:fixture_tool_http_error, status})
+        {status, headers, ""}
 
-        json(id, %{
-          "resultType" => "complete",
-          "content" => [%{"type" => "text", "text" => text}]
-        })
+      {:headers_only, status, headers} ->
+        send(Keyword.fetch!(opts, :observer), {:fixture_tool_http_error, status})
+        {:headers_only, status, headers}
 
-      "fail" ->
-        if opts[:recoverable_error?] && params["arguments"]["query"] == "x" do
-          json(id, %{
-            "resultType" => "complete",
-            "content" => [%{"type" => "text", "text" => "recovered"}]
-          })
-        else
-          content =
-            case opts[:error_text] do
-              text when is_binary(text) -> [%{"type" => "text", "text" => text}]
-              _missing -> []
-            end
+      {status, headers, body} ->
+        send(Keyword.fetch!(opts, :observer), {:fixture_tool_http_error, status})
+        {status, headers, body}
 
-          json(id, %{"resultType" => "complete", "isError" => true, "content" => content})
+      nil ->
+        case params["name"] do
+          "structured" ->
+            structured_response(id, opts)
+
+          "text" ->
+            text =
+              cond do
+                text_bytes = opts[:text_bytes] -> String.duplicate("x", text_bytes)
+                opts[:large_text?] -> String.duplicate("x", 40_000)
+                true -> "hello"
+              end
+
+            json(id, %{
+              "resultType" => "complete",
+              "content" => [%{"type" => "text", "text" => text}]
+            })
+
+          "fail" ->
+            failure_response(id, params, opts)
         end
+    end
+  end
+
+  defp failure_response(id, params, opts) do
+    if opts[:recoverable_error?] && params["arguments"]["query"] == "x" do
+      json(id, %{
+        "resultType" => "complete",
+        "content" => [%{"type" => "text", "text" => "recovered"}]
+      })
+    else
+      content =
+        case opts[:error_text] do
+          text when is_binary(text) -> [%{"type" => "text", "text" => text}]
+          _missing -> []
+        end
+
+      json(id, %{"resultType" => "complete", "isError" => true, "content" => content})
     end
   end
 

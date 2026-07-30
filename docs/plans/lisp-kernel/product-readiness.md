@@ -180,8 +180,10 @@ The Kernel is ready for its intended non-Elixir product boundary when:
 
 Streaming responses, multi-model routing, chat lifecycle management,
 concurrent mission evaluation, live bundle mutation, broad Clojure coverage,
-MCP Tasks, OAuth, shared catalog caching, authenticated host IAM, and
-inbound service frontends require demonstrated demand and separate plans.
+MCP Tasks, shared catalog caching, authenticated host IAM, and inbound service
+frontends require demonstrated demand and separate plans. Remote MCP OAuth has
+demonstrated demand and is tracked in the
+[MCP OAuth authorization plan](../mcp-oauth.md).
 
 ## Related documents
 

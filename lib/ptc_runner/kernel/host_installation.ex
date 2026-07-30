@@ -37,6 +37,11 @@ defmodule PtcRunner.Kernel.HostInstallation do
   alias PtcRunner.Kernel.InspectionSnapshot
   alias PtcRunner.Kernel.LLMCapability
   alias PtcRunner.Kernel.LLMReplay
+  alias PtcRunner.Kernel.MCPOAuth.Authority
+  alias PtcRunner.Kernel.MCPOAuth.Context, as: OAuthContext
+  alias PtcRunner.Kernel.MCPOAuth.ManagerCleanup
+  alias PtcRunner.Kernel.MCPOAuth.Store
+  alias PtcRunner.Kernel.MCPOAuth.TokenManager
   alias PtcRunner.Kernel.MCPSource
   alias PtcRunner.Kernel.ProviderRegistry
   alias PtcRunner.Kernel.TraceCapability
@@ -50,12 +55,68 @@ defmodule PtcRunner.Kernel.HostInstallation do
 
   @doc "Builds the closed provider registry installed by a loaded host document."
   @spec registry(HostConfig.t()) ::
-          {:ok, ProviderRegistry.t()} | {:error, :invalid_host_installation}
+          {:ok, ProviderRegistry.t()}
+          | {:error, :invalid_host_installation | :authorization_context_required}
   def registry(%HostConfig{} = host) do
+    if oauth_installations(host) == [] do
+      build_registry(host, %{})
+    else
+      {:error, :authorization_context_required}
+    end
+  end
+
+  def registry(_host), do: {:error, :invalid_host_installation}
+
+  @doc """
+  Builds a registry with one explicit principal-scoped authorization context.
+
+  Registry assembly atomically claims every OAuth installation in the supplied
+  store before a builder may load grant state. A collision changes nothing.
+  """
+  @spec registry(HostConfig.t(), OAuthContext.t()) ::
+          {:ok, ProviderRegistry.t()} | {:error, atom()}
+  def registry(%HostConfig{} = host, %OAuthContext{} = authorization_context) do
+    authorities = oauth_installations(host)
+
+    claims =
+      Enum.map(authorities, fn {_alias, authority} ->
+        {authority.installation_id, authority.fingerprint}
+      end)
+
+    with {:ok, epochs} <-
+           Store.claim_authorities(
+             authorization_context.store,
+             authorization_context.tenant_id,
+             claims,
+             5_000
+           ) do
+      runtimes =
+        Map.new(authorities, fn {alias_name, authority} ->
+          {alias_name,
+           %{
+             authority: authority,
+             authority_epoch: Map.fetch!(epochs, authority.installation_id),
+             context: authorization_context
+           }}
+        end)
+
+      build_registry(host, runtimes)
+    end
+  end
+
+  def registry(_host, _authorization_context), do: {:error, :invalid_host_installation}
+
+  defp build_registry(host, oauth_runtimes) do
     builders =
       Map.new(host.install, fn {name, installation} ->
         prepare = fn selection, context ->
-          prepare(host, installation, selection, context)
+          prepare(
+            host,
+            installation,
+            selection,
+            context,
+            Map.get(oauth_runtimes, name)
+          )
         end
 
         {name, ProviderRegistry.staged(prepare)}
@@ -70,9 +131,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
     end
   end
 
-  def registry(_host), do: {:error, :invalid_host_installation}
-
-  defp prepare(host, %{source: :mcp} = installation, selection, context) do
+  defp prepare(host, %{source: :mcp} = installation, selection, context, oauth_runtime) do
     with :ok <- placement(installation, context.destination),
          {:ok, selected} <- mcp_selection(installation, selection, context) do
       credential_names = credential_names(installation.transport)
@@ -94,7 +153,8 @@ defmodule PtcRunner.Kernel.HostInstallation do
                   transport,
                   selected,
                   context,
-                  credentials
+                  credentials,
+                  oauth_runtime
                 )
               end}
            end
@@ -103,7 +163,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
     end
   end
 
-  defp prepare(_host, %{source: :llm} = installation, selection, context) do
+  defp prepare(_host, %{source: :llm} = installation, selection, context, _oauth_runtime) do
     credential_names = [installation.credential]
 
     with :ok <- placement(installation, context.destination),
@@ -133,7 +193,13 @@ defmodule PtcRunner.Kernel.HostInstallation do
     end
   end
 
-  defp prepare(host, %{source: :llm_replay} = installation, selection, context) do
+  defp prepare(
+         host,
+         %{source: :llm_replay} = installation,
+         selection,
+         context,
+         _oauth_runtime
+       ) do
     with :ok <- placement(installation, context.destination),
          {:ok, selected} <- llm_replay_selection(installation, selection, context) do
       {:ok,
@@ -149,7 +215,13 @@ defmodule PtcRunner.Kernel.HostInstallation do
     end
   end
 
-  defp prepare(host, %{source: :ptc_trace_snapshot} = installation, selection, context) do
+  defp prepare(
+         host,
+         %{source: :ptc_trace_snapshot} = installation,
+         selection,
+         context,
+         _oauth_runtime
+       ) do
     with :ok <- placement(installation, context.destination),
          {:ok, selected} <- trace_snapshot_selection(installation, selection, context) do
       {:ok,
@@ -175,7 +247,13 @@ defmodule PtcRunner.Kernel.HostInstallation do
     end
   end
 
-  defp prepare(host, %{source: :ptc_inspection_snapshot} = installation, selection, context) do
+  defp prepare(
+         host,
+         %{source: :ptc_inspection_snapshot} = installation,
+         selection,
+         context,
+         _oauth_runtime
+       ) do
     with :ok <- placement(installation, context.destination),
          {:ok, selected} <- inspection_snapshot_selection(installation, selection, context) do
       {:ok,
@@ -417,6 +495,12 @@ defmodule PtcRunner.Kernel.HostInstallation do
   defp credential_names(%{type: :streamable_http, auth: auth}),
     do: auth |> Enum.map(& &1.binding) |> Enum.uniq() |> Enum.sort()
 
+  defp oauth_installations(%HostConfig{} = host) do
+    for {alias_name, %{source: :mcp, transport: %{oauth: %Authority{} = authority}}} <-
+          host.install,
+        do: {alias_name, authority}
+  end
+
   defp preflight_transport(_host, %{type: :streamable_http} = transport),
     do: {:ok, transport}
 
@@ -492,7 +576,8 @@ defmodule PtcRunner.Kernel.HostInstallation do
          %{type: :streamable_http} = transport,
          selected,
          context,
-         credentials
+         credentials,
+         nil
        ) do
     with {:ok, headers} <- render_headers(transport.auth, credentials) do
       options =
@@ -507,7 +592,62 @@ defmodule PtcRunner.Kernel.HostInstallation do
     end
   end
 
-  defp acquire(installation, options, %{type: :stdio} = transport, selected, context, credentials) do
+  defp acquire(
+         installation,
+         options,
+         %{type: :streamable_http} = transport,
+         selected,
+         context,
+         credentials,
+         %{authority: authority, authority_epoch: authority_epoch, context: authorization_context}
+       ) do
+    with %{} <- credentials,
+         {:ok, manager} <-
+           TokenManager.start(
+             owner: context.owner,
+             context: authorization_context,
+             authority: authority,
+             authority_epoch: authority_epoch
+           ) do
+      source_options =
+        [
+          transport: {:streamable_http, endpoint: transport.endpoint, authorization: manager}
+        ] ++ options
+
+      result =
+        source_options
+        |> MCPSource.builder()
+        |> then(& &1.(selected, context))
+        |> classify(installation)
+
+      case result do
+        {:ok, _provider} = success ->
+          success
+
+        error ->
+          case ManagerCleanup.adopt(manager) do
+            :ok ->
+              error
+
+            {:error, :cleanup_unavailable} ->
+              Process.exit(manager.pid, :kill)
+              {:error, :mcp_transport_error}
+          end
+      end
+    else
+      _invalid -> {:error, :mcp_authorization_required}
+    end
+  end
+
+  defp acquire(
+         installation,
+         options,
+         %{type: :stdio} = transport,
+         selected,
+         context,
+         credentials,
+         _oauth_runtime
+       ) do
     with {:ok, credential_environment} <- render_environment(transport.env, credentials) do
       environment = Map.merge(transport.compatibility_environment, credential_environment)
 

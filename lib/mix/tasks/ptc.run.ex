@@ -11,6 +11,7 @@ defmodule Mix.Tasks.Ptc.Run do
       mix ptc.run MANIFEST --output results/answer.json
       mix ptc.run MANIFEST --private-output results/answer.private.json
       mix ptc.run MANIFEST --host-config ptc-host.json
+      mix ptc.run MANIFEST --host-config ptc-host.json --authorize-mcp NAME
       mix ptc.run MANIFEST --host-config ptc-host.json --check
       mix ptc.run MANIFEST --component-override-descriptor private/agent.core.override.json
 
@@ -45,6 +46,11 @@ defmodule Mix.Tasks.Ptc.Run do
 
   alias PtcRunner.Kernel.HostConfig
   alias PtcRunner.Kernel.HostInstallation
+  alias PtcRunner.Kernel.MCPOAuth.Authority
+  alias PtcRunner.Kernel.MCPOAuth.Authorization
+  alias PtcRunner.Kernel.MCPOAuth.Context, as: OAuthContext
+  alias PtcRunner.Kernel.MCPOAuth.LoopbackListener
+  alias PtcRunner.Kernel.MCPOAuth.Store.Memory
   alias PtcRunner.Kernel.ProviderRegistry
   alias PtcRunner.Kernel.RunBuilder
   alias PtcRunner.Lisp.Format.SymbolRef
@@ -52,7 +58,7 @@ defmodule Mix.Tasks.Ptc.Run do
   @usage "usage: mix ptc.run MANIFEST [--mission PATH | --private-mission PATH] " <>
            "[--trace PATH] [--inspect PATH] " <>
            "[--output PATH | --private-output PATH] [--host-config PATH] " <>
-           "[--component-override-descriptor PATH] [--check]"
+           "[--authorize-mcp NAME] [--component-override-descriptor PATH] [--check]"
 
   @impl Mix.Task
   def run(args) do
@@ -68,6 +74,7 @@ defmodule Mix.Tasks.Ptc.Run do
                output: :string,
                private_output: :string,
                host_config: :string,
+               authorize_mcp: :keep,
                component_override_descriptor: :string,
                check: :boolean
              ],
@@ -135,19 +142,82 @@ defmodule Mix.Tasks.Ptc.Run do
   end
 
   defp registry(opts) do
-    case Keyword.get(opts, :host_config) do
-      nil ->
+    authorizations = Keyword.get_values(opts, :authorize_mcp)
+
+    case {Keyword.get(opts, :host_config), authorizations} do
+      {nil, []} ->
         with {:ok, registry} <- ProviderRegistry.new(),
              do: {:ok, registry, nil}
 
-      path ->
-        with {:ok, host} <- HostConfig.load(path),
-             {:ok, registry} <- HostInstallation.registry(host),
-             do: {:ok, registry, host}
+      {nil, _requested} ->
+        {:error, :authorization_requires_host_config}
+
+      {path, requested} ->
+        with true <- requested == Enum.uniq(requested),
+             {:ok, host} <- HostConfig.load(path),
+             {:ok, memory} <- Memory.start_link(owner: self()),
+             {:ok, store} <- Memory.store(memory),
+             {:ok, authorization_context} <-
+               OAuthContext.new(
+                 tenant_id: "local-cli",
+                 principal_id: "local-user",
+                 store: store
+               ),
+             :ok <- authorize_installations(host, authorization_context, requested),
+             {:ok, registry} <- HostInstallation.registry(host, authorization_context) do
+          {:ok, registry, host}
+        else
+          false -> {:error, :duplicate_mcp_authorization}
+          {:error, _reason} = error -> error
+          _invalid -> {:error, :invalid_mcp_authorization}
+        end
     end
   end
 
-  defp run_options(opts), do: Keyword.drop(opts, [:host_config, :check])
+  defp authorize_installations(host, context, requested) do
+    Enum.reduce_while(requested, :ok, fn name, :ok ->
+      case Map.get(host.install, name) do
+        %{source: :mcp, transport: %{oauth: authority}} when not is_nil(authority) ->
+          case authorize_installation(context, authority) do
+            :ok -> {:cont, :ok}
+            {:error, _reason} = error -> {:halt, error}
+          end
+
+        _missing_or_not_oauth ->
+          {:halt, {:error, :invalid_mcp_authorization}}
+      end
+    end)
+  end
+
+  defp authorize_installation(context, authority) do
+    with true <- Authority.cli_compatible?(authority),
+         {:ok, listener} <- LoopbackListener.start(authority) do
+      authorize_with_listener(context, authority, listener)
+    else
+      false -> {:error, :mcp_authorization_not_cli_compatible}
+      {:error, _reason} = error -> error
+    end
+  end
+
+  defp authorize_with_listener(context, authority, listener) do
+    case Authorization.begin_authorization(context, authority,
+           redirect_uri: listener.redirect_uri
+         ) do
+      {:ok, pending} ->
+        Mix.shell().info("Open this one-time authorization URL:\n#{pending.url}")
+
+        case LoopbackListener.await(listener, context, pending, []) do
+          {:ok, _grant} -> :ok
+          {:error, _reason} = error -> error
+        end
+
+      {:error, _reason} = error ->
+        LoopbackListener.close(listener)
+        error
+    end
+  end
+
+  defp run_options(opts), do: Keyword.drop(opts, [:host_config, :authorize_mcp, :check])
 
   defp check(manifest, registry, host, opts) do
     with {:ok, built} <- RunBuilder.load_and_build(manifest, registry, opts) do
@@ -177,7 +247,8 @@ defmodule Mix.Tasks.Ptc.Run do
       "name" => snapshot["provider"],
       "summary" =>
         "mcp/#{snapshot["transport"]}  #{length(snapshot["tools"])} tools  " <>
-          "#{Map.get(effects, "read", 0)} read  #{Map.get(effects, "write", 0)} write",
+          "#{Map.get(effects, "read", 0)} read  #{Map.get(effects, "write", 0)} write  " <>
+          "auth #{authorization_mode(installation.transport)}",
       "accepts_data" => Enum.map(installation.accepts_data, &Atom.to_string/1),
       "snapshot_hash" => snapshot["snapshot_hash"]
     }
@@ -246,6 +317,10 @@ defmodule Mix.Tasks.Ptc.Run do
       )
     end)
   end
+
+  defp authorization_mode(%{oauth: oauth}) when not is_nil(oauth), do: "oauth"
+  defp authorization_mode(%{auth: auth}) when auth in [nil, []], do: "none"
+  defp authorization_mode(_transport), do: "static"
 
   defp run_with_class(manifest, registry, opts),
     do: RunBuilder.run_with_class(manifest, registry, opts)

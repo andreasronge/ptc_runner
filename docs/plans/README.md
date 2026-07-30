@@ -18,9 +18,18 @@ belongs in guides or retained specifications.
 - [`lisp-kernel/real-flow-e2e-hardening.md`](lisp-kernel/real-flow-e2e-hardening.md)
   tracks the unfinished private-sink, overflow, real-pagination, and
   cache-usage journeys.
+- [`mcp-oauth.md`](mcp-oauth.md) plans principal-scoped OAuth authorization for
+  remote Streamable HTTP MCP servers without weakening host authority or tool
+  replay safety.
 
 ## Future, trigger-gated
 
+- [`future/mcp-dcr.md`](future/mcp-dcr.md) retains the deprecated Dynamic Client
+  Registration compatibility state machine until a concrete server that lacks
+  CIMD and practical pre-registration creates an implementation trigger.
+- [`future/mcp-oauth-durable-store.md`](future/mcp-oauth-durable-store.md)
+  retains the encrypted persistent-adapter conformance work until a concrete
+  hosted or embedding store exists to make that protocol representative.
 - [`future/mcp-exact-resources.md`](future/mcp-exact-resources.md) records the
   unmet first-party trigger and minimum authority shape required before MCP
   exact-resource work can begin.

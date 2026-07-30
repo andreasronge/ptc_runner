@@ -19,7 +19,7 @@ defmodule PtcRunner.Kernel.MCPSource do
   records.
 
   Streamable HTTP supports JSON and SSE responses to POST requests and rejects
-  redirects and remote endpoint changes. It uses Req's HTTP/1 response
+  redirects and remote endpoint changes. It uses a direct Mint HTTP/1 response
   streaming boundary: a completed SSE response, response-size rejection, or
   SSE parser rejection halts and closes the response stream. Deadline expiry,
   caller death, provider close, and source-owner death terminate the request
@@ -37,7 +37,11 @@ defmodule PtcRunner.Kernel.MCPSource do
   alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.InspectionSink
   alias PtcRunner.Kernel.JSONSchema
+  alias PtcRunner.Kernel.MCPHTTPAdapter
   alias PtcRunner.Kernel.MCPLauncherStaging
+  alias PtcRunner.Kernel.MCPOAuth.Authority
+  alias PtcRunner.Kernel.MCPOAuth.NetworkPolicy
+  alias PtcRunner.Kernel.MCPOAuth.TokenManager
   alias PtcRunner.Kernel.MCPProtocol
   alias PtcRunner.Kernel.MCPRequestContext
   alias PtcRunner.Kernel.MCPStdioTransport
@@ -88,7 +92,10 @@ defmodule PtcRunner.Kernel.MCPSource do
       `65_536`, maximum `1_048_576`), and `:start_timeout_ms` (default `5_000`,
       maximum `60_000`). At most 256 arguments and 256 environment bindings
       are accepted; every configuration string is at most 131,072 bytes.
-      Strings are UTF-8 and NUL-free; environment names use the portable
+      Streamable HTTP may instead receive one validated
+      `PtcRunner.Kernel.MCPOAuth.TokenManager`; dynamic OAuth and caller
+      headers remain mutually exclusive at the host layer. Strings are UTF-8
+      and NUL-free; environment names use the portable
       `[A-Za-z_][A-Za-z0-9_]*` form. The launcher is limited to 16 MiB. The
       optional absolute `:launcher` path is a trusted custom override.
       Otherwise stdio requires
@@ -151,6 +158,7 @@ defmodule PtcRunner.Kernel.MCPSource do
   `:mcp_transport_error`, `:mcp_protocol_error`, `:mcp_remote_error`,
   `:mcp_response_exceeded`, `:mcp_catalog_exceeded`, `:mcp_invalid_catalog`,
   `:mcp_invalid_tool_schema`, `:mcp_capability_negotiation_error`,
+  `:mcp_authorization_required`,
   `:mcp_input_required_refused`, `:mcp_unsupported_result`,
   `:mcp_mapped_tool_missing`, or `:mcp_invalid_snapshot_identity`.
 
@@ -260,7 +268,7 @@ defmodule PtcRunner.Kernel.MCPSource do
   end
 
   defp installed_transport({:streamable_http, opts}) when is_list(opts) do
-    allowed = [:endpoint, :headers, :allow_insecure_loopback]
+    allowed = [:endpoint, :headers, :authorization, :allow_insecure_loopback]
 
     with true <- Keyword.keyword?(opts),
          true <- Keyword.keys(opts) -- allowed == [],
@@ -269,8 +277,25 @@ defmodule PtcRunner.Kernel.MCPSource do
          allow_insecure_loopback when is_boolean(allow_insecure_loopback) <-
            Keyword.get(opts, :allow_insecure_loopback, false),
          :ok <- endpoint(endpoint, allow_insecure_loopback),
-         headers when is_function(headers, 0) <- Keyword.get(opts, :headers, fn -> [] end) do
-      {:ok, %{type: :streamable_http, endpoint: endpoint, headers: headers}}
+         explicit_headers? = Keyword.has_key?(opts, :headers),
+         headers when is_function(headers, 0) <- Keyword.get(opts, :headers, fn -> [] end),
+         authorization <- Keyword.get(opts, :authorization),
+         true <- is_nil(authorization) or match?(%TokenManager{}, authorization),
+         true <- is_nil(authorization) or not explicit_headers?,
+         true <-
+           is_nil(authorization) or
+             oauth_resource_matches?(
+               endpoint,
+               authorization.resource,
+               allow_insecure_loopback
+             ) do
+      {:ok,
+       %{
+         type: :streamable_http,
+         endpoint: endpoint,
+         headers: headers,
+         authorization: authorization
+       }}
     else
       _reason -> {:error, :invalid_transport}
     end
@@ -331,6 +356,13 @@ defmodule PtcRunner.Kernel.MCPSource do
 
       _uri ->
         {:error, :invalid_endpoint}
+    end
+  end
+
+  defp oauth_resource_matches?(endpoint, resource, allow_insecure_loopback) do
+    case Authority.resource(endpoint, allow_insecure_loopback: allow_insecure_loopback) do
+      {:ok, canonical} -> canonical == resource
+      {:error, :invalid_resource} -> false
     end
   end
 
@@ -425,7 +457,8 @@ defmodule PtcRunner.Kernel.MCPSource do
              owner: context.owner,
              endpoint: installed.endpoint,
              headers: headers,
-             timeout_ms: selected.timeout_ms
+             timeout_ms: selected.timeout_ms,
+             authorization: installed.authorization
            ) do
       {:ok, %{type: :streamable_http, handle: request_context}}
     end
@@ -1136,6 +1169,7 @@ defmodule PtcRunner.Kernel.MCPSource do
               context
             )
           end)
+          |> finish_authorization_transition()
           |> conservative_invocation_result()
         after
           MCPRequestContext.finish_request(request_context)
@@ -1143,6 +1177,12 @@ defmodule PtcRunner.Kernel.MCPSource do
 
       {:error, :closed} ->
         {:error, :mcp_transport_closed, :not_dispatched}
+
+      {:error, :timeout} ->
+        {:error, :mcp_timeout, :not_dispatched}
+
+      {:error, :mcp_authorization_required} ->
+        {:error, :mcp_authorization_required, :not_dispatched}
     end
   end
 
@@ -1185,6 +1225,11 @@ defmodule PtcRunner.Kernel.MCPSource do
 
   defp mark_possibly_dispatched({:error, reason}),
     do: {:error, reason, :possibly_dispatched}
+
+  defp mark_possibly_dispatched(
+         {:authorization_transition, _status, _response, _auth, _deadline} = transition
+       ),
+       do: transition
 
   defp mark_possibly_dispatched({:ok, _result} = success), do: success
 
@@ -1312,13 +1357,21 @@ defmodule PtcRunner.Kernel.MCPSource do
     case MCPRequestContext.begin_request(request_context) do
       {:ok, request} ->
         try do
-          within_deadline(request.timeout_ms, fn -> callback.(request) end)
+          request.timeout_ms
+          |> within_deadline(fn -> callback.(request) end)
+          |> finish_authorization_transition()
         after
           MCPRequestContext.finish_request(request_context)
         end
 
       {:error, :closed} ->
         {:error, :mcp_transport_closed}
+
+      {:error, :timeout} ->
+        {:error, :mcp_timeout}
+
+      {:error, :mcp_authorization_required} ->
+        {:error, :mcp_authorization_required}
     end
   end
 
@@ -1414,49 +1467,172 @@ defmodule PtcRunner.Kernel.MCPSource do
   end
 
   defp http(request, headers, payload, max_bytes) do
-    into = fn {:data, data}, {req, response} ->
-      case accumulate_response(response, data, payload["id"], max_bytes) do
-        {:cont, response} -> {:cont, {req, response}}
-        {:halt, response} -> {:halt, {req, response}}
+    on_status = fn response ->
+      case {response, Map.get(request, :authorization)} do
+        {%{status: 401}, authorization} when is_map(authorization) ->
+          apply_authorization_transition(401, response, authorization, request.deadline_ms)
+
+        _other ->
+          {:cont, response}
       end
     end
 
-    case Req.request(
-           method: :post,
-           url: request.endpoint,
-           headers: headers,
-           json: payload,
-           connect_options: [timeout: request.timeout_ms],
-           pool_timeout: request.timeout_ms,
-           receive_timeout: request.timeout_ms,
-           retry: false,
-           redirect: false,
-           decode_body: false,
-           into: into
-         ) do
-      {:ok, %{status: 404}} ->
-        {:error, :mcp_protocol_error}
+    on_headers = fn response ->
+      case {response, Map.get(request, :authorization)} do
+        {%{status: 403}, authorization} when is_map(authorization) ->
+          apply_authorization_transition(403, response, authorization, request.deadline_ms)
 
-      {:ok, %{status: 400} = response} ->
-        http_protocol_error(response, payload)
+        _other ->
+          {:cont, response}
+      end
+    end
 
-      {:ok, %{status: status}} when status in [401, 403] ->
-        {:error, :mcp_authentication_failed}
+    on_data = fn response, data ->
+      case accumulate_response(response, data, payload["id"], max_bytes) do
+        {:cont, response} -> {:cont, response}
+        {:halt, response} -> {:halt, response}
+      end
+    end
 
-      {:ok, %{status: status, body: :body_exceeded}} when status in 200..299 ->
-        {:error, :mcp_response_exceeded}
-
-      {:ok, %{status: status} = response} when status in 200..299 ->
-        {:ok, response}
-
-      {:ok, _response} ->
+    with {:ok, body} <- Jason.encode(payload),
+         {:ok, network_options} <- oauth_network_options(request) do
+      [
+        method: :post,
+        url: request.endpoint,
+        headers: headers,
+        body: body,
+        timeout_ms: request.timeout_ms,
+        max_body_bytes: max_bytes,
+        on_status: on_status,
+        on_headers: on_headers,
+        on_data: on_data
+      ]
+      |> Keyword.merge(network_options)
+      |> MCPHTTPAdapter.request()
+      |> classify_http_response(payload, request)
+    else
+      {:error, reason} when reason in [:egress_denied, :resolution_failed] ->
         {:error, :mcp_transport_error}
-
-      {:error, %Req.TransportError{reason: :timeout}} ->
-        {:error, :mcp_timeout}
 
       {:error, _reason} ->
-        {:error, :mcp_transport_error}
+        {:error, :mcp_protocol_error}
+    end
+  end
+
+  defp oauth_network_options(%{
+         endpoint: endpoint,
+         deadline_ms: deadline_ms,
+         authorization: %{egress: %{authority: authority, resolver: resolver}}
+       }) do
+    options =
+      [deadline_ms: deadline_ms]
+      |> then(fn options ->
+        if is_nil(resolver), do: options, else: [{:resolver, resolver} | options]
+      end)
+
+    with {:ok, target} <- NetworkPolicy.resolve(endpoint, authority, options),
+         remaining_ms when remaining_ms > 0 <-
+           deadline_ms - System.monotonic_time(:millisecond) do
+      {:ok,
+       [
+         timeout_ms: remaining_ms,
+         address: hd(target.addresses),
+         connected_peer: NetworkPolicy.peer_verifier(target.addresses)
+       ]}
+    else
+      remaining_ms when is_integer(remaining_ms) and remaining_ms <= 0 ->
+        {:error, :resolution_failed}
+
+      error ->
+        error
+    end
+  end
+
+  defp oauth_network_options(_request), do: {:ok, []}
+
+  defp classify_http_response({:ok, %{status: 404}}, _payload, _request),
+    do: {:error, :mcp_protocol_error}
+
+  defp classify_http_response(
+         {:ok, %{authorization_result: result}},
+         _payload,
+         _request
+       ),
+       do: result
+
+  defp classify_http_response({:ok, %{status: 400} = response}, payload, _request),
+    do: http_protocol_error(response, payload)
+
+  defp classify_http_response(
+         {:ok, %{status: status} = response},
+         _payload,
+         %{authorization: authorization, deadline_ms: deadline_ms}
+       )
+       when status in [401, 403],
+       do: {:authorization_transition, status, response, authorization, deadline_ms}
+
+  defp classify_http_response({:ok, %{status: status}}, _payload, _request)
+       when status in [401, 403],
+       do: {:error, :mcp_authentication_failed}
+
+  defp classify_http_response(
+         {:ok, %{status: status, body: :body_exceeded}},
+         _payload,
+         _request
+       )
+       when status in 200..299,
+       do: {:error, :mcp_response_exceeded}
+
+  defp classify_http_response({:ok, %{status: status} = response}, _payload, _request)
+       when status in 200..299,
+       do: {:ok, response}
+
+  defp classify_http_response({:error, :timeout, _provenance}, _payload, _request),
+    do: {:error, :mcp_timeout}
+
+  defp classify_http_response({:error, :response_exceeded, _provenance}, _payload, _request),
+    do: {:error, :mcp_response_exceeded}
+
+  defp classify_http_response(_response, _payload, _request),
+    do: {:error, :mcp_transport_error}
+
+  defp finish_authorization_transition(
+         {:authorization_transition, status, response, authorization, deadline_ms}
+       ),
+       do: dynamic_authorization_failure(status, response, authorization, deadline_ms)
+
+  defp finish_authorization_transition(result), do: result
+
+  defp apply_authorization_transition(status, response, authorization, deadline_ms) do
+    result = dynamic_authorization_failure(status, response, authorization, deadline_ms)
+    {:halt, Map.put(response, :authorization_result, result)}
+  end
+
+  defp dynamic_authorization_failure(
+         401,
+         _response,
+         %{manager: manager, generation: generation},
+         deadline_ms
+       ) do
+    case TokenManager.reject(manager, generation, deadline_ms) do
+      :ok -> {:error, :mcp_authorization_required}
+      {:error, _reason} -> {:error, :mcp_transport_error}
+    end
+  end
+
+  defp dynamic_authorization_failure(
+         403,
+         response,
+         %{manager: manager, generation: generation},
+         deadline_ms
+       ) do
+    headers = MCPHTTPAdapter.get_header(response, "www-authenticate")
+
+    case TokenManager.require_scopes(manager, generation, headers, deadline_ms) do
+      :ok -> {:error, :mcp_authorization_required}
+      {:error, :mcp_authorization_required} -> {:error, :mcp_authorization_required}
+      {:error, :invalid_scope_challenge} -> {:error, :mcp_authentication_failed}
+      {:error, _reason} -> {:error, :mcp_transport_error}
     end
   end
 
@@ -1561,7 +1737,7 @@ defmodule PtcRunner.Kernel.MCPSource do
   end
 
   defp response_content_type(response) do
-    case Req.Response.get_header(response, "content-type") do
+    case MCPHTTPAdapter.get_header(response, "content-type") do
       [value] when is_binary(value) ->
         value
         |> String.split(";", parts: 2)
@@ -1627,6 +1803,16 @@ defmodule PtcRunner.Kernel.MCPSource do
       provider_error(
         :authentication_failed,
         "mcp_authentication_failed",
+        false,
+        effect,
+        provenance
+      )
+
+  defp provider_error(:mcp_authorization_required, _transport, effect, provenance),
+    do:
+      provider_error(
+        :denied,
+        "mcp_authorization_required",
         false,
         effect,
         provenance
