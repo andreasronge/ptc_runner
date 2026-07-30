@@ -29,6 +29,9 @@ belongs in guides or retained specifications.
   released native launcher companion into its own Git repository. Extraction
   is not scheduled while core and launcher protocol changes still benefit from
   atomic commits.
+- [`future/reqllm-removal.md`](future/reqllm-removal.md) records the trigger
+  and required adapter shape for replacing the optional `req_llm`/`llm_db`
+  closure with a direct `Req` adapter for OpenAI-compatible endpoints.
 
 Plans are disposable staging contracts, not API references. When a slice
 lands, move its durable behavior into module documentation and the relevant
