@@ -29,30 +29,44 @@ expertise.
 
 ## 1. Stabilize the command-line contract
 
-Successful and failed invocations need stable JSON envelopes, documented exit
-statuses, and a strict stdout/stderr policy. A failure should identify at
-least:
+The detailed, implementation-ordered work is tracked in
+[Stable CLI and application-source contract](stable-cli-contract.md).
+
+Successful and failed standalone invocations need stable JSON envelopes on stdout,
+documented exit statuses, non-contractual stderr framing with secret-safe
+content on supported paths, and an evidence gate for any outer framing process.
+A failure should identify at least:
 
 - phase and stable code;
-- JSON path and source file when applicable;
+- JSON path and safe logical source when applicable;
 - bounded human-readable message and notes; and
 - whether any provider activity occurred.
 
 Add focused command-line entry points equivalent to:
 
 ```console
-ptc init
+ptc init my-app
 ptc validate ptc.json
-ptc run ptc.json --input input.json --trace trace.jsonl
-ptc repl --manifest ptc.json
-ptc models
-ptc doctor
+ptc run ptc.json --host-config ptc-host.json --input input.json --trace-dir traces/
+ptc models --host-config ptc-host.json
+ptc doctor ptc.json --host-config ptc-host.json
 ```
 
 Because this is a 0.x library, rename `--mission` to `--input` without a
-compatibility alias. `ptc doctor` should verify runtime versions, credentials,
-model configuration, manifest-relative files, launcher availability, and
-optional Viewer availability without exposing secret values.
+compatibility alias. Default `ptc doctor` should verify runtime versions,
+credential declarations, model configuration, manifest-relative files,
+launcher availability, and optional Viewer availability through the same
+audited-local checks used by `run` when an application supplies their final
+selection context; host-only doctor reports those checks as requiring an
+application. It does not look up credential sources, use decoded inline
+literals, start provider applications, or expose secret values. Inline
+literals are necessarily parsed as part of the bounded host document.
+`ptc doctor --connect` performs bounded credential availability and
+provider-connectivity checks after marking provider activity.
+
+The existing interactive Mix REPL remains supported. A standalone REPL needs a
+separate streaming protocol and is not part of the single-document CLI
+contract.
 
 Keep the entropy-based default run identifiers and add a real subprocess
 regression proving that repeated CLI processes can publish into one trace
@@ -66,7 +80,9 @@ possible; repeated subprocess runs persist and load independently.
 
 Carry structured-output schema and a closed set of reasoning/sampling options
 through the LLM adapter. Add an explicit provider timeout distinct from the
-overall run and capability budgets.
+overall run and capability budgets. This is the timeout for ordinary model
+requests; it is separate from the standalone plan's installed-only,
+per-occurrence `doctor --connect` health-check deadline.
 
 Normalize token and cost metadata when a provider supplies it, and allow an
 installation to enforce corresponding ceilings. Provider-dependent missing
@@ -101,8 +117,13 @@ large run passes the complete trace-to-browser path.
 ## 4. Package the user journey
 
 Publish a breaking 0.x release representing the current Kernel product. Supply
-at least one standalone installation path: an OTP release/native CLI archive
-or a supported container image. Document supported OTP versions,
+at least one standalone installation path through the smallest BEAM packaging
+that carries the real dependency surface, initially an OTP release unless an
+escript spike proves simpler. Do not make root-owned/fs-verity or signed-sealed
+installation policy a prerequisite for the local CLI; those controls belong to
+a deployment threat model that needs them. Use a minimal command boot profile,
+disable implicit dotenv loading, and start optional provider applications only
+inside the marked activity boundary. Document supported OTP versions,
 configuration, upgrades, trace storage, and complete removal.
 
 Package the Viewer as a production artifact rather than depending on the
@@ -110,8 +131,10 @@ sibling project through development-only wiring. Add operational health checks
 for the packaged runtime and its optional launcher.
 
 A service frontend may add job submission, cancellation, concurrency control,
-and durable results only when deployments require it; it is not a prerequisite
-for the standalone product.
+tenant isolation, and durable results only when deployments require it; it is
+not a prerequisite for the standalone product. The transport-neutral
+application package should land before that service so the runtime does not
+depend on its filesystem layout.
 
 **Exit gate:** a clean environment can install published artifacts, run the
 documented application journey, inspect its trace, and remove all state
@@ -162,6 +185,9 @@ inbound service frontends require demonstrated demand and separate plans.
 
 ## Related documents
 
+- [Stable CLI and application-source contract](stable-cli-contract.md) —
+  implementation plan for the machine protocol, validation order, commands,
+  and filesystem-independent application packages.
 - [Kernel maintainer guide](../../guides/kernel-maintainer.md) — implemented
   authority, lifecycle, ownership, and code map.
 - [Manifests and capabilities](../../guides/manifests-and-capabilities.md) —
