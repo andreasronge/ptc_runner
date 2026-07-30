@@ -256,13 +256,69 @@ anything after the HTTP operation begins or a stdio write may have been accepted
 write becomes non-retryable with indeterminate mutation state, while the
 transport provenance never reaches Lisp.
 
-Streamable HTTP uses Req's HTTP/1 streaming boundary. Returning `:halt` after a
-complete SSE response, response-size rejection, or SSE parser rejection closes
-the response stream. Killing the request task on deadline expiry, caller death,
-provider close, or source-owner death closes it as well. HTTP cancellation never
-sends `notifications/cancelled`; stdio retains its protocol notification.
+Streamable HTTP and MCP OAuth use the shared direct-Mint
+`MCPHTTPAdapter` HTTP/1 boundary. Each request owns one non-pooled connection,
+enforces cumulative response-header and body ceilings, and carries one absolute
+deadline across bounded DNS resolution, peer pinning, connection, and response
+streaming. Returning `:halt` after a complete SSE response, response-size
+rejection, or SSE parser rejection closes the response stream. Killing the
+request task on deadline expiry, caller death, provider close, or source-owner
+death closes it as well. HTTP cancellation never sends
+`notifications/cancelled`; stdio retains its protocol notification.
 Cancellation remains advisory and cannot make a possibly dispatched write
 retryable.
+
+OAuth authority and grant state stays behind `MCPOAuth.Store`.
+`MCPOAuth.Authorization` owns explicit, callback-agnostic authorization-code
+flows, while a principal-scoped `MCPOAuth.TokenManager` coordinates only local
+single-flight refresh leadership. Discovery, store round-trips, credential
+resolution, and network I/O run in bounded non-owner tasks rather than either
+owner callback. The store atomically fences bearer admissions, refresh/code
+dispatch, generation commits, requirements, and retirement. A worker death
+after token dispatch is positive process fencing: the in-memory adapter
+terminalizes the exact authorization flow or poisons the refresh generation;
+lease expiry by itself never restores a possibly spent credential.
+Request completion uses a separate bounded cleanup budget and acknowledges its
+admission release before removing owner state. If an admitted worker exits
+without that acknowledgement, the request context retains the opaque release
+operation and retries it asynchronously; durable adapters cannot depend on
+BEAM process monitors to drain an admission. An unacknowledged ordinary
+release irreversibly terminates the admitted worker before that detached
+cleanup begins. OAuth admission runs in context-owned asynchronous work. If the
+request caller exits before receiving its header, the context adopts and
+releases any admission created by that work. Provider close returns an error
+and leaves that cleanup owner running while a release remains unacknowledged;
+it never reports success by killing the retry state.
+Likewise, `401` rejection and valid `403 insufficient_scope` handling install a
+runtime-shared local generation/requirement fence before durable persistence,
+using a fresh bounded post-response transition budget rather than the exhausted
+HTTP request deadline. A definitive `401` status line ends processing
+immediately, even if the remaining header block is oversized, malformed, or
+stalled. A `403` ends processing after its complete bounded challenge headers
+and before its body. The HTTP response callback contacts the token manager
+before returning a result to the bounded provider task. The manager starts the
+bounded persistence worker atomically with the shared fence, so a Dispatcher
+timeout cannot skip the durable transition.
+A store failure is a transport failure and cannot make that manager—or a
+replacement manager for the same local store and grant key—reissue the rejected
+authority; only a strictly newer sufficient grant clears the local fallback.
+Each secret-free fallback transition has its own process-independent
+`:persistent_term` entry. Admission reads and clears satisfied entries in one
+operation, so there is no fence-owner restart window within the running VM.
+Manager shutdown drains in-flight response persistence before discarding that
+fallback. Failed persistence is retained and retried once per close attempt;
+continued failure makes transport shutdown fail while the runtime keeps the
+shared fence. When provider acquisition fails before it can return a close
+handle, the supervised OAuth cleanup owner adopts the token manager and retries
+that bounded shutdown, so the retained fence cannot become an orphaned process.
+An ordinary or malformed dynamic `403` that is not one valid satisfiable
+`insufficient_scope` challenge is a non-retryable authentication or
+authorization result; it is not mislabeled as a retryable transport failure.
+
+Concurrent managers may observe an active refresh mutation lease. Followers
+reload and wait outside all owner processes, bounded by their request deadline,
+until the winner commits a usable generation, safely releases an undispatched
+lease that a follower can acquire, or the grant becomes authorization-required.
 
 The client advertises no MCP elicitation, sampling, or roots capabilities and
 never retries an `input_required` result. On `tools/call`, `prompts/get`, or

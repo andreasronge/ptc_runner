@@ -48,7 +48,8 @@ defmodule PtcRunner.MixProject do
   # Run "mix help compile.app" to learn about applications.
   def application do
     [
-      extra_applications: [:logger],
+      mod: {PtcRunner.Application, []},
+      extra_applications: [:crypto, :logger, :public_key, :ssl],
       env: [
         model_registry: PtcRunner.LLM.DefaultRegistry,
         llm_adapter: PtcRunner.LLM.ReqLLMAdapter
@@ -84,6 +85,7 @@ defmodule PtcRunner.MixProject do
       {:jason, "~> 1.4"},
       {:jsv, "== 0.21.2"},
       {:nimble_parsec, "~> 1.4"},
+      {:mint, "~> 1.9"},
       {:req, "== 0.6.3"},
       {:telemetry, "~> 1.0"},
       {:stream_data, "~> 1.1", only: [:test, :dev]},

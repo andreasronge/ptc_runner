@@ -142,6 +142,32 @@ defmodule Mix.Tasks.Ptc.RunTest do
           "source" => "llm",
           "model" => "openrouter:deepseek/deepseek-v4-flash",
           "credential" => "openrouter_key"
+        },
+        "unused-oauth" => %{
+          "source" => "mcp",
+          "transport" => %{
+            "type" => "streamable_http",
+            "endpoint" => "https://mcp.example/mcp",
+            "oauth" => %{
+              "installation_id" => "unused-oauth",
+              "issuer" => "https://auth.example",
+              "scope_ceiling" => ["read"],
+              "default_scopes" => ["read"],
+              "client" => %{
+                "registration" => "pre_registered",
+                "client_id" => "unused-client",
+                "token_endpoint_auth_method" => "none",
+                "grant_types" => ["authorization_code"],
+                "loopback_redirect" => %{
+                  "host" => "127.0.0.1",
+                  "path" => "/callback"
+                }
+              }
+            }
+          },
+          "tools" => %{
+            "read" => %{"as" => "unused.read", "effect" => "read"}
+          }
         }
       }
     }

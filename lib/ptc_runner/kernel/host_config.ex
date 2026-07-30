@@ -37,6 +37,7 @@ defmodule PtcRunner.Kernel.HostConfig do
 
   alias PtcRunner.Kernel.ConfinedFile
   alias PtcRunner.Kernel.Limits
+  alias PtcRunner.Kernel.MCPOAuth.Authority
   alias PtcRunner.Kernel.StrictJSON
 
   @max_config_bytes 1_000_000
@@ -110,7 +111,8 @@ defmodule PtcRunner.Kernel.HostConfig do
           | %{
               type: :streamable_http,
               endpoint: binary(),
-              auth: [map()]
+              auth: [map()],
+              oauth: Authority.t() | nil
             }
 
   @type installation ::
@@ -322,9 +324,21 @@ defmodule PtcRunner.Kernel.HostConfig do
 
   defp installations(value, credentials)
        when is_map(value) and map_size(value) in 1..@max_installations do
-    reduce_named_map(value, fn name, installation ->
-      installation(name, installation, credentials)
-    end)
+    with {:ok, installations} <-
+           reduce_named_map(value, fn name, installation ->
+             installation(name, installation, credentials)
+           end),
+         ids =
+           for(
+             {_name, %{source: :mcp, transport: %{oauth: %Authority{} = oauth}}} <-
+               installations,
+             do: oauth.installation_id
+           ),
+         true <- ids == Enum.uniq(ids) do
+      {:ok, installations}
+    else
+      _invalid -> {:error, :invalid_installations}
+    end
   end
 
   defp installations(_value, _credentials), do: {:error, :invalid_installations}
@@ -603,14 +617,23 @@ defmodule PtcRunner.Kernel.HostConfig do
   end
 
   defp http_transport(value, credentials) do
-    with :ok <- exact_keys(value, ~w(type endpoint auth), ~w(type endpoint)),
+    with :ok <- exact_keys(value, ~w(type endpoint auth oauth), ~w(type endpoint)),
          endpoint when is_binary(endpoint) <- value["endpoint"],
          true <- valid_string?(endpoint, 4_096),
-         {:ok, auth} <- auth(Map.get(value, "auth", []), credentials) do
-      {:ok, %{type: :streamable_http, endpoint: endpoint, auth: auth}}
+         {:ok, auth} <- auth(Map.get(value, "auth", []), credentials),
+         {:ok, oauth} <-
+           oauth_authority(Map.get(value, "oauth"), endpoint, credentials),
+         true <- auth == [] or is_nil(oauth) do
+      {:ok, %{type: :streamable_http, endpoint: endpoint, auth: auth, oauth: oauth}}
     else
       _reason -> {:error, :invalid_transport}
     end
+  end
+
+  defp oauth_authority(nil, _endpoint, _credentials), do: {:ok, nil}
+
+  defp oauth_authority(value, endpoint, credentials) do
+    Authority.from_host(value, endpoint, credentials |> Map.keys() |> MapSet.new())
   end
 
   defp environment_bindings(value, credentials)
@@ -1147,18 +1170,158 @@ defmodule PtcRunner.Kernel.HostConfig do
   end
 
   defp http_schema do
+    %{
+      "type" => %{"const" => "streamable_http"},
+      "endpoint" => bounded_string(4_096),
+      "auth" => %{
+        "type" => "array",
+        "maxItems" => 8,
+        "items" => auth_schema(),
+        "default" => []
+      },
+      "oauth" => oauth_schema()
+    }
+    |> required_object(["type", "endpoint"])
+    |> Map.put("not", %{
+      "required" => ["auth", "oauth"],
+      "properties" => %{"auth" => %{"minItems" => 1}}
+    })
+  end
+
+  defp oauth_schema do
     required_object(
       %{
-        "type" => %{"const" => "streamable_http"},
-        "endpoint" => bounded_string(4_096),
-        "auth" => %{
-          "type" => "array",
-          "maxItems" => 8,
-          "items" => auth_schema(),
-          "default" => []
-        }
+        "installation_id" => bounded_string(256),
+        "issuer" => bounded_string(4_096),
+        "resource" => bounded_string(4_096),
+        "scope_ceiling" => scope_list_schema(true),
+        "default_scopes" => Map.put(scope_list_schema(true), "default", []),
+        "refresh_access" => %{
+          "enum" => ["none", "when_supported"],
+          "default" => "none"
+        },
+        "authorization_timeout_ms" => integer_schema(1, 900_000, 300_000),
+        "unknown_expiry_ttl_ms" => integer_schema(1, 86_400_000, 300_000),
+        "network" =>
+          closed_object(%{
+            "additional_origins" => origin_list_schema(),
+            "private_network_origins" => origin_list_schema()
+          }),
+        "client" => oauth_client_schema()
       },
-      ["type", "endpoint"]
+      ["installation_id", "issuer", "scope_ceiling", "client"]
+    )
+  end
+
+  defp oauth_client_schema do
+    %{
+      "oneOf" => [
+        pre_registered_client_schema("none", "loopback_redirect"),
+        pre_registered_client_schema("none", "redirect_uris"),
+        pre_registered_client_schema("client_secret_basic", "redirect_uris"),
+        metadata_document_client_schema("loopback_redirect"),
+        metadata_document_client_schema("redirect_uris")
+      ]
+    }
+  end
+
+  defp pre_registered_client_schema(method, redirect_field) do
+    properties = %{
+      "registration" => %{"const" => "pre_registered"},
+      "client_id" => bounded_string(2_048),
+      "token_endpoint_auth_method" => %{"const" => method},
+      "grant_types" => %{
+        "type" => "array",
+        "minItems" => 1,
+        "maxItems" => 2,
+        "uniqueItems" => true,
+        "contains" => %{"const" => "authorization_code"},
+        "items" => %{"enum" => ["authorization_code", "refresh_token"]}
+      },
+      redirect_field => redirect_schema(redirect_field)
+    }
+
+    {properties, required} =
+      if method == "client_secret_basic" do
+        {
+          Map.put(properties, "client_secret_binding", name_schema()),
+          [
+            "registration",
+            "client_id",
+            "token_endpoint_auth_method",
+            "client_secret_binding",
+            "grant_types",
+            redirect_field
+          ]
+        }
+      else
+        {
+          properties,
+          [
+            "registration",
+            "client_id",
+            "token_endpoint_auth_method",
+            "grant_types",
+            redirect_field
+          ]
+        }
+      end
+
+    required_object(properties, required)
+  end
+
+  defp metadata_document_client_schema(redirect_field) do
+    required_object(
+      %{
+        "registration" => %{"const" => "client_id_metadata_document"},
+        "client_id" => bounded_string(2_048),
+        "token_endpoint_auth_method" => %{"const" => "none"},
+        redirect_field => redirect_schema(redirect_field)
+      },
+      ["registration", "client_id", "token_endpoint_auth_method", redirect_field]
+    )
+  end
+
+  defp redirect_schema("redirect_uris"), do: redirect_list_schema()
+  defp redirect_schema("loopback_redirect"), do: loopback_redirect_schema()
+
+  defp scope_list_schema(allow_empty?) do
+    %{
+      "type" => "array",
+      "minItems" => if(allow_empty?, do: 0, else: 1),
+      "maxItems" => 64,
+      "uniqueItems" => true,
+      "items" => bounded_string(256)
+    }
+  end
+
+  defp origin_list_schema do
+    %{
+      "type" => "array",
+      "maxItems" => 32,
+      "uniqueItems" => true,
+      "items" => bounded_string(4_096),
+      "default" => []
+    }
+  end
+
+  defp redirect_list_schema do
+    %{
+      "type" => "array",
+      "minItems" => 1,
+      "maxItems" => 16,
+      "uniqueItems" => true,
+      "items" => bounded_string(4_096)
+    }
+  end
+
+  defp loopback_redirect_schema do
+    required_object(
+      %{
+        "host" => %{"enum" => ["127.0.0.1", "::1"]},
+        "path" => bounded_string(1_024)
+      },
+      ["host", "path"]
     )
   end
 

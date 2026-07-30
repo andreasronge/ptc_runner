@@ -560,7 +560,17 @@ generation, never tool arguments, model data, provider error text, or token
 material. Its atomic upsert reloads the current grant: it discards a stale
 challenge when a newer known grant already contains every required scope,
 otherwise it unions the requirement within the installed ceiling. An unknown
-grant cannot prove satisfaction and retains the requirement. An explicit
+grant cannot prove satisfaction and retains the requirement. A challenge for
+the exact generation sent is authoritative even when that generation's token
+response nominally reported the challenged scope. A delayed challenge is
+reconciled with the complete stored requirement: only a strictly newer
+generation reporting every member may clear it; otherwise it remains for
+explicit reauthorization. The manager installs the corresponding exact
+generation or scope-requirement fence before each response-driven store
+round-trip. A persistence failure becomes a transport failure and cannot allow
+the same manager to reissue that authority; only a strictly newer grant that
+reports every required scope clears the process-local requirement fallback.
+An explicit
 `begin_authorization` atomically creates at most one live pending flow for the
 stable grant key and snapshots both the current token generation and requirement
 version. Another begin fails closed while that flow is live. Terminal
@@ -622,7 +632,14 @@ Define a `PtcRunner.Kernel.MCPOAuth.Store` behaviour with:
   grant updates and recovery transitions preserve the marker until a fenced
   token mutation installs a new generation and clears it. A successful
   transport completion or acknowledged transport termination releases the
-  admission. Its deadline is retained for cancellation and diagnosis, but
+  admission. Admission runs in context-owned asynchronous work and the store
+  associates it with the actual request worker. If that worker exits before
+  receiving its header or before acknowledging release, the request context
+  adopts the opaque release operation and retries it asynchronously;
+  persistent adapters must not depend on local process monitoring for this
+  transition. Provider close reports failure and leaves that cleanup owner
+  running while release is unacknowledged rather than killing retry state.
+  Its deadline is retained for cancellation and diagnosis, but
   expiry alone leaves a recovery-visible drain record. Begin-retirement
   prevents new admissions, and complete-retirement cannot succeed until every
   prior admission has supplied that acknowledgement or its worker has been
@@ -1039,6 +1056,10 @@ Implement the final MCP discovery sequence:
   revalidates the cached Protected Resource Metadata, even when the URL is
   unchanged and its prior freshness lifetime has not elapsed; a changed URL
   cannot reuse the previous entry.
+  `Cache-Control` parsing accepts at most one syntactically valid non-negative
+  `max-age` across all field lines. A malformed or duplicate `max-age` is
+  immediately stale and single-use rather than falling back to a default or
+  selecting one conflicting value.
 
 One shared bounded Bearer challenge parser handles both the initial discovery
 `401` and runtime `401`/`403` authorization failures. It combines all
@@ -1170,7 +1191,10 @@ mutation lease, performs the bounded network operation outside both owners,
 and returns the result for a lease- and generation-conditional commit. Thus
 unrelated concurrent MCP calls do not queue behind another call's store
 round-trip or refresh, while callers for the same grant still serialize at the
-mutation lease.
+mutation lease. A caller that encounters another active or unresolved refresh
+lease reloads and waits outside the owners, bounded by its absolute request
+deadline, until it observes a usable committed generation or an
+authorization-required state.
 
 The manager:
 
@@ -1290,11 +1314,37 @@ begins:
 - a `401` conditionally marks rejected only the exact access-token generation
   used by that request before inspecting its challenge and returns
   `mcp_authorization_required`; challenge parsing failure cannot skip or roll
-  back that rejection;
+  back that rejection. Definitive response status and headers stop untrusted
+  body processing immediately, so a stalled or oversized body cannot hide the
+  rejection. The runtime-shared local fence and durable transition use a fresh,
+  bounded post-response budget rather than the HTTP request deadline. The
+  manager atomically installs the shared fence and starts a bounded non-owner
+  persistence worker before replying;
 - a `403` with `insufficient_scope` atomically records the private bounded
   authorization requirement only after the shared Bearer challenge parser and
   ceiling validation succeed, while returning only
-  `mcp_authorization_required`;
+  `mcp_authorization_required`. Its runtime-shared local fence and durable
+  transition use the same fresh, bounded post-response budget. The manager
+  atomically installs the shared fence and starts a bounded non-owner
+  persistence worker before replying, so caller or Dispatcher death cannot
+  skip durable persistence. The shared fence is keyed by an opaque digest of
+  local store identity and grant key, survives manager replacement or death,
+  and clears only after durable persistence or a strictly newer sufficient
+  grant. Each transition uses its own process-independent `:persistent_term`
+  entry, so no fence-owner restart window exists within the running VM. The
+  secret-free entry is published before mutation acknowledgement. Store
+  wrappers expose the same non-secret local identity as their backing adapter.
+  Manager shutdown drains these workers before discarding
+  manager-local state. Failed persistence is retained and retried on close;
+  continued failure makes close fail without stopping the fenced manager. When
+  provider acquisition fails before returning a close handle, a supervised
+  cleanup owner adopts the manager and retries bounded shutdown so no fenced
+  manager is orphaned;
+- an ordinary, missing, malformed, non-`insufficient_scope`, or unsatisfiable
+  dynamic `403` challenge does not create a scope fence and returns a
+  non-retryable authentication or authorization result. Only a durable
+  transition failure after one valid satisfiable challenge is a transport
+  failure;
 - no browser interaction or scope step-up begins automatically;
 - `tools/call` is never replayed, regardless of declared read/write effect or
   server idempotency annotations; and
@@ -1340,28 +1390,15 @@ replayed.
   compare-and-swap replacement, shared grant mutation lease, stable
   installation/principal indexes, principal lifecycle claims, atomic authority
   claim/replacement/release, and retirement operations.
-- Add a test-only encrypted durable reference adapter with the same store
-  behaviour, atomic operations, fencing, authoritative-clock, and
-  secret-redaction contracts. Back it with a dedicated owner on a separate
-  test node and a versioned whole-state snapshot protocol, so every store
-  operation that is atomic at the behaviour boundary has one crash-atomic
-  persistence point rather than a sequence of independently durable record
-  writes. Encrypt and authenticate each complete snapshot under a fixture key
-  held outside the state directory. Persist a new immutable snapshot to a
-  same-directory temporary file, sync it, rename it into place, and sync the
-  directory so that snapshot entry is durable before publishing a marker.
-  Then write and sync a same-directory temporary commit marker containing the
-  snapshot version and digest, atomically rename it into place, sync the
-  directory again, and reply only after that marker is durable. Recovery loads only
-  the complete authenticated snapshot named by the last valid commit marker
-  and ignores uncommitted newer files. Missing, corrupt, or mismatched state
-  fails closed. Fault-inject owner and store-node death before
-  and after every write, sync, rename, marker publication, and reply boundary,
-  including batch claim, bulk retirement, and transactional
-  grant/requirement updates. The adapter must reopen and validate persisted
-  state after restart and remain usable from multiple caller nodes with
-  unrelated monotonic origins. It is an executable conformance subject, not a
-  shipped production persistence recommendation or runtime dependency.
+- Keep durable persistence out of the first implementation. A filesystem
+  snapshot adapter used only by tests would exercise a persistence protocol
+  that no production host uses while adding its own encryption, fsync,
+  recovery, distributed-clock, and fault-injection state machine to the
+  credential path. Retain the required persistent-adapter contract at the
+  behaviour boundary and defer an executable durable conformance subject until
+  a concrete hosted or embedding adapter exists; the trigger and acceptance
+  work are recorded in
+  [`future/mcp-oauth-durable-store.md`](future/mcp-oauth-durable-store.md).
 - Add the bounded just-in-time credential resolver usable before build and
   during delayed refresh. Keep the existing public
   `ProviderRegistry.credential_resolver` bulk callback unchanged and wire the
@@ -1606,12 +1643,12 @@ Focused tests must cover:
   before credential dispatch. Slow-response and slow-store tests for Protected
   Resource, authorization-server, and CIMD documents must likewise prove
   externally advertised freshness never increases at commit.
-  Persistent-store tests must use nodes with
+  A future persistent-adapter conformance suite must use nodes with
   deliberately unrelated monotonic origins and skewed wall clocks, restart a
   node between commit and load, and prove that adapter-authoritative remaining
   TTLs and opaque fences neither extend token usability nor permit concurrent
-  refresh-token spending. Two token
-  managers or nodes must prove that a generation committed before the MCP
+  refresh-token spending. The active in-memory suite uses two token managers
+  to prove that a generation committed before the MCP
   dispatch-admission fence is never served: a commit between header load and
   that fence produces `stale_before_dispatch` and header reacquisition with no
   network request. A generation-N `401` between header issuance and dispatch
@@ -1643,8 +1680,9 @@ Focused tests must cover:
   including both changed and unchanged metadata URLs; identical issuer/resource
   pairs under different authority fingerprints, epochs, network policies, and
   redirect/client authority must never share a metadata cache entry;
-- owner death and close during discovery, callback wait, refresh, and active
-  MCP requests;
+- owner death and close during discovery, callback wait, refresh, admission,
+  header delivery, and active MCP requests, including a close timeout followed
+  by store recovery proving that detached release remains alive;
 - one absolute MCP request deadline across admission, store access,
   just-in-time credential resolution, refresh, and HTTP dispatch, including
   configured ceilings above five seconds and cancellation at every stage;
@@ -1739,7 +1777,12 @@ Focused tests must cover:
   cancellation, and closed-owner results from every owner call;
 - exactly one upstream `tools/call` when the server responds `401` or `403`,
   including a possibly dispatched write, plus a delayed generation-N `401`
-  racing both refresh and reauthorization to generation N+1;
+  racing both refresh and reauthorization to generation N+1. A `401` status
+  line must reject N even when its remaining header block stalls, is malformed,
+  or exceeds the header ceiling; a `403` still requires one complete bounded
+  Bearer challenge. Cancel the bounded provider task after the response
+  callback starts its manager transition but before the callback can return,
+  and prove the runtime-shared and durable fences still complete;
 - explicit authorization completing before provider acquisition or model
   activity; and
 - no Assent or other OAuth client library in the runtime dependency or

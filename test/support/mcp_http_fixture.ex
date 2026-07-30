@@ -4,6 +4,8 @@ defmodule PtcRunner.TestSupport.MCPHTTPFixture do
   @type response ::
           {pos_integer(), [{binary(), binary()}], binary()}
           | {:chunked, pos_integer(), [{binary(), binary()}], [binary()]}
+          | {:headers_only, pos_integer(), [{binary(), binary()}]}
+          | {:status_only, pos_integer()}
           | :close
 
   @spec start((map() -> response())) :: map()
@@ -61,6 +63,12 @@ defmodule PtcRunner.TestSupport.MCPHTTPFixture do
       request = Map.put(request, :body, decode_body(body))
 
       case handler.(request) do
+        {:status_only, status} ->
+          send_status_only(socket, status, owner)
+
+        {:headers_only, status, headers} ->
+          send_headers_only(socket, status, headers, owner)
+
         {status, headers, response_body} ->
           send_response(socket, status, headers, response_body)
 
@@ -170,6 +178,21 @@ defmodule PtcRunner.TestSupport.MCPHTTPFixture do
       :ok = :gen_tcp.send(socket, "#{Integer.to_string(byte_size(chunk), 16)}\r\n#{chunk}\r\n")
     end)
 
+    :ok = :inet.setopts(socket, active: :once)
+    send(owner, {:mcp_stream_holding, self()})
+    await_stream_end(socket, owner)
+  end
+
+  defp send_headers_only(socket, status, headers, owner) do
+    encoded_headers = Enum.map_join(headers, "\r\n", fn {name, value} -> "#{name}: #{value}" end)
+    :ok = :gen_tcp.send(socket, "HTTP/1.1 #{status} Error\r\n#{encoded_headers}\r\n\r\n")
+    :ok = :inet.setopts(socket, active: :once)
+    send(owner, {:mcp_stream_holding, self()})
+    await_stream_end(socket, owner)
+  end
+
+  defp send_status_only(socket, status, owner) do
+    :ok = :gen_tcp.send(socket, "HTTP/1.1 #{status} Error\r\n")
     :ok = :inet.setopts(socket, active: :once)
     send(owner, {:mcp_stream_holding, self()})
     await_stream_end(socket, owner)

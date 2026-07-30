@@ -27,6 +27,9 @@ belongs in guides or retained specifications.
 - [`future/mcp-dcr.md`](future/mcp-dcr.md) retains the deprecated Dynamic Client
   Registration compatibility state machine until a concrete server that lacks
   CIMD and practical pre-registration creates an implementation trigger.
+- [`future/mcp-oauth-durable-store.md`](future/mcp-oauth-durable-store.md)
+  retains the encrypted persistent-adapter conformance work until a concrete
+  hosted or embedding store exists to make that protocol representative.
 - [`future/mcp-exact-resources.md`](future/mcp-exact-resources.md) records the
   unmet first-party trigger and minimum authority shape required before MCP
   exact-resource work can begin.

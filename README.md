@@ -42,7 +42,10 @@ than the thing holding the line.
   streamable HTTP, and maps each upstream tool to a public name and read/write
   effect the operator chooses. A manifest selecting a write-bearing
   installation must explicitly allow its chosen tools; it supplies no
-  connection details and no credentials.
+  connection details and no credentials. Streamable HTTP supports
+  credential-free, static-authentication, and explicit principal-scoped OAuth
+  installations; authorization completes before a run and never causes an
+  automatic tool-call replay.
 - **Every run is bounded, and enforced rather than requested.** Deadlines, heap,
   tool-call counts, result sizes, and event budgets are held by the runtime.
   The BEAM gives each evaluation its own heap and monitors, so a limit breach

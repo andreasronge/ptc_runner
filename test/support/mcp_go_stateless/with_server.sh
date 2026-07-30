@@ -24,7 +24,14 @@ cleanup() {
 trap cleanup EXIT
 
 go -C "$script_dir" build -o "$server" .
-"$server" -host 127.0.0.1 -port 0 -address-file "$address_file" >"$log" 2>&1 &
+server_args=(-host 127.0.0.1 -port 0 -address-file "$address_file")
+if [ -n "${PTC_TEST_MCP_BEARER_TOKEN:-}" ]; then
+  server_args+=(-bearer-token "$PTC_TEST_MCP_BEARER_TOKEN")
+fi
+if [ "${PTC_TEST_MCP_OAUTH:-}" = "1" ]; then
+  server_args+=(-oauth)
+fi
+"$server" "${server_args[@]}" >"$log" 2>&1 &
 server_pid=$!
 
 ready=false
@@ -36,7 +43,11 @@ for _attempt in {1..60}; do
   if [ -s "$address_file" ]; then
     PTC_TEST_MCP_2026_ENDPOINT="$(tr -d '\r\n' <"$address_file")"
     export PTC_TEST_MCP_2026_ENDPOINT
-    if curl --silent --output /dev/null "$PTC_TEST_MCP_2026_ENDPOINT"; then
+    ready_url="$PTC_TEST_MCP_2026_ENDPOINT"
+    if [ "${PTC_TEST_MCP_OAUTH:-}" = "1" ]; then
+      ready_url="$PTC_TEST_MCP_2026_ENDPOINT/oauth/stats"
+    fi
+    if curl --silent --output /dev/null "$ready_url"; then
       if ! kill -0 "$server_pid" 2>/dev/null; then
         cat "$log"
         exit 1

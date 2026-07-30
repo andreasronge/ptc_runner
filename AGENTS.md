@@ -67,6 +67,16 @@ PTC_TEST_MCP_2026_ENDPOINT=http://127.0.0.1:8000 \
     --include e2e --trace
 ```
 
+The credential-free OAuth authorization/interoperability test starts the same
+official SDK server behind its deterministic OAuth harness:
+
+```bash
+PTC_TEST_MCP_OAUTH=1 \
+  bash test/support/mcp_go_stateless/with_server.sh \
+    mix test test/ptc_runner/kernel/mcp_oauth_remote_e2e_test.exs \
+      --include e2e --trace
+```
+
 The scheduled/manual model-driven test uses the same server and additionally
 loads `OPENROUTER_API_KEY` and the optional `PTC_TEST_MODEL` from `.env`.
 
