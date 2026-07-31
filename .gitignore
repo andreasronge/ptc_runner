@@ -62,3 +62,6 @@ MEMORY/
 
 # Generated private results for the repo-analyst example application.
 repo-analyst/private/
+
+# Personal Claude Code overrides
+.claude/settings.local.json
