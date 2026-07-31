@@ -28,6 +28,10 @@ belongs in guides or retained specifications.
   defines the first business-facing reference application — a read-only
   incident-evidence compiler with fail-closed citations — and the staged
   benchmark that turns it into release evidence.
+- [`future/mcp-compose-gateway.md`](future/mcp-compose-gateway.md) designs the
+  inbound MCP gateway product — served compound tools, client-authored
+  evaluation, gated publication, and qualification — in staged modes on the
+  completed stable-CLI seam.
 - [`future/mcp-dcr.md`](future/mcp-dcr.md) retains the deprecated Dynamic Client
   Registration compatibility state machine until a concrete server that lacks
   CIMD and practical pre-registration creates an implementation trigger.
