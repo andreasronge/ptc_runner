@@ -153,6 +153,30 @@ uncited claim, dropped facts, an inference stated as an observation, dropped
 contradicting evidence. A scorer that only ever awards full marks proves
 nothing.
 
+### What the current scores are not evidence of
+
+The oracles for `checkout-5xx` and `queue-backlog` were written alongside their
+scripted reports rather than derived from the evidence independently. Every one
+of their `must_include` tokens — 15 of 15 and 14 of 14 — appears in the
+scripted report. Those two reports therefore score full recall partly because
+the oracle was written from them, and the `== 1.0` assertions are regression
+guards rather than quality measurements.
+
+This does not contaminate Phase 3. The baseline systems never see these
+reports, so the same oracle scores them independently. It does mean no number
+here should be quoted as evidence that the compiler produces good reports, and
+that the two oracles should be re-derived from the evidence by someone who has
+not read the scripted output before they carry any comparative weight.
+
+Two related limits are structural rather than accidental.
+`citation_completeness` is 1.0 for any contract-valid report by construction,
+because the result contract already requires a citation on every claim — it
+measures the contract, and only discriminates for producers without one. And
+an abstaining report cannot carry observed facts, so its required-fact recall
+is always 0: correct on `batch-silent-failure`, a total failure anywhere else.
+The score reports `abstention_defensible` alongside the ratio so the two are
+never read as the same result.
+
 ## Regenerating the frozen model responses
 
 A replay entry is keyed by the hash of the provider-neutral request, and that
@@ -181,20 +205,35 @@ the diagnosis is correct.
 mix test test/incident_compiler/compiler_e2e_test.exs --include e2e
 ```
 
-It passes against `openrouter:deepseek/deepseek-v3.2` in roughly 90 seconds and
-about twenty turns, where the scripted path needs five. Getting there required
-four fixes, and all four came from the live run rather than from replay:
+It publishes against `openrouter:deepseek/deepseek-v3.2` in roughly 90 seconds
+and about twelve turns, where the scripted path needs five. That number is
+measured, not asserted once: an earlier version of this file claimed the test
+"passes" on the strength of a single green run, and re-running it four more
+times showed it published roughly half the time. Do not trust a
+single live run, including this one.
 
-- `workflow_capability_calls_per_name` and `mission_capability_calls_per_name`
-  both default to low values relative to this workload. A live agent exhausts
-  the per-name model-call quota mid-run, and `agent.core` surfaces that
-  refusal as `llm-provider-error`, which reads like a provider outage rather
-  than a budget the manifest failed to request.
-- The task text now tells the model that one program can fetch many records
-  and keep them in a definition. Without it the model spent one turn per
-  record, which is the round-trip cost the runtime exists to remove.
-- The task text now states the report's exact key set, for the reason in
-  finding 4 below.
+Every fix below came from the live run. Replay could not have surfaced any of
+them, because the scripted turns never make the mistakes a real model makes.
+
+- **Capability quotas are the first thing to exhaust.**
+  `workflow_capability_calls_per_name` and `mission_capability_calls_per_name`
+  default to 16 and 32, well below this workload. A live agent hits the
+  per-name model-call quota mid-run, and `agent.core` reports that refusal as
+  `llm-provider-error` — which reads like a provider outage rather than a
+  budget the manifest failed to request.
+- **Untyped signatures cost turns.** `list-sources`, `search`, and
+  `get-record` originally returned `:map`. The model guessed a result key,
+  got nothing, and spent a turn calling `keys` to discover the shape. Spelling
+  the shape out in the signature removed that entirely: searches per run fell
+  from 14 to 1.
+- **"Keep them in a definition" was too vague.** The model read it as licence
+  to define helper *functions* while re-running the search and refetching all
+  thirteen records inside every program. Naming `def` explicitly, with an
+  example, cut model turns from 24 to 12 and took the failure mode from
+  turn-limit exhaustion to publication. Together with typed signatures this is
+  what moved the success rate from roughly half to four out of four.
+- **The output shape has to be in the prompt**, for the reason in finding 4
+  below.
 
 ## Telemetry capture from SREGym
 

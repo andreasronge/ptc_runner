@@ -67,7 +67,8 @@
         "chat-7709"
       ],
       "must_include": [
-        "unrelated"
+        "backup",
+        "analytics"
       ]
     }
   ],

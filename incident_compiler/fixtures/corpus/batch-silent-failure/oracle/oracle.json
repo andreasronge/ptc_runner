@@ -38,7 +38,7 @@
         "chat-2218"
       ],
       "must_include": [
-        "retention"
+        "seven days"
       ]
     },
     {
@@ -89,6 +89,7 @@
         "output"
       ],
       "evidence_ids": [
+        "ticket-1101",
         "chat-2218",
         "chat-2240"
       ]

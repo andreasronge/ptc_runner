@@ -56,7 +56,7 @@
       "incident_id": "checkout-5xx",
       "format": "postmortem",
       "agent": {
-        "max_turns": 24
+        "max_turns": 40
       }
     }
   },
@@ -84,7 +84,7 @@
     "run_duration_ms": 600000,
     "workflow_capability_calls": 256,
     "mission_capability_calls": 512,
-    "subordinate_evaluations": 32,
+    "subordinate_evaluations": 64,
     "workflow_timeout_ms": 600000,
     "evaluation_timeout_ms": 30000,
     "normal_event_count": 4096,

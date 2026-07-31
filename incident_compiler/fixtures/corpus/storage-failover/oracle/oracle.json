@@ -46,7 +46,8 @@
       "id": "only-large-objects",
       "claim": "Every failing write carried a payload above 5MB while smaller writes succeeded throughout.",
       "evidence_ids": [
-        "log-33480"
+        "log-33480",
+        "log-33110"
       ],
       "must_include": [
         "413"

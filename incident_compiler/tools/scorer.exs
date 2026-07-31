@@ -77,6 +77,12 @@ defmodule IncidentCompiler.Scorer do
     %{
       incident_id: oracle["incident_id"],
       abstained: report["status"] == "insufficient_evidence",
+      # An abstaining report structurally cannot carry observed facts, so its
+      # required-fact recall is always 0. That is a failure on an incident whose
+      # evidence supports a report and the correct answer on one whose evidence
+      # does not, and only the oracle knows which — so both facts travel
+      # together rather than collapsing into one misleading ratio.
+      abstention_defensible: oracle["abstention_defensible"] == true,
       citations: citation_integrity(citations, records),
       citation_completeness: citation_completeness(claims),
       required_fact_recall: required_fact_recall(report, oracle),

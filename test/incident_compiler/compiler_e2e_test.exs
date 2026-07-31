@@ -52,14 +52,17 @@ defmodule IncidentCompiler.CompilerE2ETest do
       |> Map.fetch!("value")
 
     assert report["incident_id"] == "checkout-5xx"
-    assert report["status"] in ["report", "insufficient_evidence"]
 
-    if report["status"] == "report" do
-      # Publication already required every citation to resolve, so reaching
-      # here at all is the assertion. These check the report is not degenerate.
-      assert report["observed_facts"] != []
+    # Deliberately not `in ["report", "insufficient_evidence"]`. Accepting
+    # abstention here would let a model that never publishes anything pass the
+    # gate, and this incident carries thirteen records and a cause the evidence
+    # states outright. Abstaining on it is a failure, not a judgement call.
+    assert report["status"] == "report"
 
-      assert Enum.all?(report["observed_facts"], &(&1["citations"] != []))
-    end
+    # Publication already required every citation to resolve, so reaching here
+    # at all is most of the assertion. These reject a degenerate report.
+    assert length(report["observed_facts"]) >= 3
+    assert Enum.all?(report["observed_facts"], &(&1["citations"] != []))
+    assert report["timeline"] != []
   end
 end

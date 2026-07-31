@@ -115,9 +115,7 @@
       ]
     }
   ],
-  "irrelevant_evidence_ids": [
-    "deploy-1102"
-  ],
+  "irrelevant_evidence_ids": [],
   "duplicate_groups": [
     [
       "log-70210",

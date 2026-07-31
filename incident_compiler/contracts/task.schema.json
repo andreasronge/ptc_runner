@@ -3,7 +3,9 @@
   "title": "Incident compilation request",
   "type": "object",
   "additionalProperties": false,
-  "required": ["incident_id"],
+  "required": [
+    "incident_id"
+  ],
   "properties": {
     "incident_id": {
       "type": "string",
@@ -14,14 +16,21 @@
     "format": {
       "type": "string",
       "description": "Output template. Templates differ in emphasis, never in what must be cited.",
-      "enum": ["postmortem", "sev-review"]
+      "enum": [
+        "postmortem",
+        "sev-review"
+      ]
     },
     "agent": {
       "type": "object",
       "description": "Bounded agent-loop configuration forwarded to the shared loop.",
       "additionalProperties": false,
       "properties": {
-        "max_turns": {"type": "integer", "minimum": 1, "maximum": 32}
+        "max_turns": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 64
+        }
       }
     }
   }

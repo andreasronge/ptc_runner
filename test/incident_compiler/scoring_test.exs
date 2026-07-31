@@ -188,6 +188,78 @@ defmodule IncidentCompiler.ScoringTest do
       end
     end
 
+    # An oracle can be wrong in ways that are invisible when only three of ten
+    # incidents ever run: a requirement can demand vocabulary the record it
+    # names does not supply, or two metrics can contradict each other. Both
+    # happened. These guards make the whole corpus checkable without running it.
+    test "no requirement demands vocabulary its own cited records lack" do
+      for incident <- incidents() do
+        records = Scorer.load_records(@corpus, incident)
+        oracle = Scorer.load_oracle(@corpus, incident)
+
+        for key <- ["required_facts", "required_open_questions"],
+            requirement <- oracle[key] || [] do
+          cited =
+            requirement["evidence_ids"]
+            |> Enum.map(&Map.fetch!(records, &1))
+            |> Enum.map_join(" ", &"#{&1["title"]} #{&1["body"]}")
+            |> String.downcase()
+
+          for token <- requirement["must_include"] do
+            assert String.contains?(cited, String.downcase(token)),
+                   "#{incident}/#{requirement["id"]} requires #{inspect(token)} but none of " <>
+                     "#{inspect(requirement["evidence_ids"])} supplies it"
+          end
+        end
+      end
+    end
+
+    # A contradicted hypothesis takes its wording from the record that proposes
+    # it, not from the records that refute it, so this one is corpus-wide.
+    test "no contradicted hypothesis demands vocabulary the incident lacks" do
+      for incident <- incidents() do
+        evidence =
+          @corpus
+          |> Scorer.load_records(incident)
+          |> Enum.map_join(" ", fn {_id, r} -> "#{r["title"]} #{r["body"]}" end)
+          |> String.downcase()
+
+        oracle = Scorer.load_oracle(@corpus, incident)
+
+        for hypothesis <- oracle["contradicted_hypotheses"] || [],
+            token <- hypothesis["must_include"] do
+          assert String.contains?(evidence, String.downcase(token)),
+                 "#{incident}/#{hypothesis["id"]} requires #{inspect(token)}, absent from the corpus"
+        end
+      end
+    end
+
+    test "no record is both required and penalised as noise" do
+      for incident <- incidents() do
+        oracle = Scorer.load_oracle(@corpus, incident)
+
+        required =
+          [
+            {"required_facts", "evidence_ids"},
+            {"contradicted_hypotheses", "contradicting_evidence_ids"},
+            {"required_open_questions", "evidence_ids"}
+          ]
+          |> Enum.flat_map(fn {key, id_key} ->
+            Enum.flat_map(oracle[key] || [], &(&1[id_key] || []))
+          end)
+          |> MapSet.new()
+
+        clash =
+          oracle["irrelevant_evidence_ids"]
+          |> MapSet.new()
+          |> MapSet.intersection(required)
+          |> MapSet.to_list()
+
+        assert clash == [],
+               "#{incident} cannot score full recall and zero noise at once: #{inspect(clash)}"
+      end
+    end
+
     test "every oracle carries the fields the scorer needs" do
       for incident <- incidents() do
         oracle = Scorer.load_oracle(@corpus, incident)
@@ -210,6 +282,14 @@ defmodule IncidentCompiler.ScoringTest do
   end
 
   describe "scoring a published report" do
+    # What these do and do not show. `citation_completeness` is 1.0 for any
+    # contract-valid report by construction, because the result contract
+    # already requires a citation on every claim — it measures the contract,
+    # not the report, and only discriminates for the unenforced producers
+    # Phase 3 compares. And the oracles for these two incidents were written
+    # alongside their scripted reports, so full recall is not independent
+    # evidence of report quality. What they do catch is regression: a change
+    # that breaks grounding, drops a section, or loosens the contract.
     test "the compiler's checkout-5xx report recalls every required fact", context do
       score = score(context.checkout, "checkout-5xx")
 
@@ -313,18 +393,23 @@ defmodule IncidentCompiler.ScoringTest do
       assert score.contradiction_recall.ratio == 0.0
     end
 
-    test "an abstention is recorded rather than scored as a failed report" do
-      abstention = %{
-        "status" => "insufficient_evidence",
-        "incident_id" => "checkout-5xx",
-        "reason" => "Not enough evidence.",
-        "open_questions" => []
-      }
-
-      score = score(abstention, "checkout-5xx")
+    test "abstaining on an incident whose evidence supports a report scores zero recall" do
+      score = score(abstention("checkout-5xx"), "checkout-5xx")
 
       assert score.abstained
+      refute score.abstention_defensible
       assert score.citations.total == 0
+      assert score.required_fact_recall.ratio == 0.0
+    end
+
+    # The same zero means the opposite thing here, and only the oracle
+    # distinguishes them. Reading recall alone would score the correct answer on
+    # this incident identically to a total failure on the one above.
+    test "abstaining on an incident whose evidence does not is flagged as defensible" do
+      score = score(abstention("batch-silent-failure"), "batch-silent-failure")
+
+      assert score.abstained
+      assert score.abstention_defensible
       assert score.required_fact_recall.ratio == 0.0
     end
   end
@@ -338,6 +423,15 @@ defmodule IncidentCompiler.ScoringTest do
   end
 
   defp incidents, do: @corpus |> File.ls!() |> Enum.sort()
+
+  defp abstention(incident) do
+    %{
+      "status" => "insufficient_evidence",
+      "incident_id" => incident,
+      "reason" => "The retained evidence does not establish what happened.",
+      "open_questions" => []
+    }
+  end
 
   # Asks the shipped server for every record and the corpus identity in one
   # invocation, so the agreement checks run against the exact code path the
