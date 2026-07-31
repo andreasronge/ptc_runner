@@ -1,0 +1,133 @@
+{
+  "injected_faults": [
+    {
+      "summary": "One cache node was evicted from the ring at 13:19:02Z. Because no request coalescing is configured, every concurrent miss for a rehashed key reached the origin index, and origin query rate rose roughly fortyfold until the node rejoined at 13:52:10Z.",
+      "evidence_ids": [
+        "log-70210",
+        "log-70402",
+        "log-70915"
+      ]
+    }
+  ],
+  "required_facts": [
+    {
+      "id": "latency-objective",
+      "claim": "p99 for GET /v3/search rose from 180ms to 4200ms.",
+      "evidence_ids": [
+        "alert-1180"
+      ],
+      "must_include": [
+        "4200"
+      ]
+    },
+    {
+      "id": "single-eviction",
+      "claim": "Exactly one cache node was evicted; the two log lines are one event ingested twice.",
+      "evidence_ids": [
+        "chat-3308",
+        "log-70210"
+      ],
+      "must_include": [
+        "duplicat"
+      ]
+    },
+    {
+      "id": "origin-surge",
+      "claim": "Origin query rate rose from 240/s to 9800/s with no request coalescing configured.",
+      "evidence_ids": [
+        "log-70402",
+        "metric-origin-qps"
+      ],
+      "must_include": [
+        "9800"
+      ]
+    },
+    {
+      "id": "recovery",
+      "claim": "Origin query rate returned to baseline after cache-07 rejoined at 13:52:10Z.",
+      "evidence_ids": [
+        "log-70915"
+      ],
+      "must_include": [
+        "13:52:10"
+      ]
+    },
+    {
+      "id": "release-scope",
+      "claim": "Release 8.2.1 changed a log field and a documentation link and touches no cache or query path.",
+      "evidence_ids": [
+        "deploy-1102"
+      ],
+      "must_include": [
+        "8.2.1"
+      ]
+    }
+  ],
+  "inference_only": [
+    {
+      "id": "stampede-causation",
+      "claim": "That the eviction caused the latency through a cache stampede is an inference.",
+      "all_of": [
+        "evict",
+        "caused"
+      ]
+    },
+    {
+      "id": "flap-causation",
+      "claim": "That the node flapped twice is a misreading of duplicate ingestion, not an observation.",
+      "all_of": [
+        "twice",
+        "evict"
+      ]
+    }
+  ],
+  "contradicted_hypotheses": [
+    {
+      "id": "two-evictions",
+      "claim": "cache-07 was evicted twice, causing a sustained stampede.",
+      "must_include": [
+        "twice"
+      ],
+      "contradicting_evidence_ids": [
+        "chat-3308"
+      ]
+    }
+  ],
+  "required_open_questions": [
+    {
+      "id": "coalescing-gap",
+      "question": "Do the other cache tiers also lack request coalescing?",
+      "must_include": [
+        "coalesc"
+      ],
+      "evidence_ids": [
+        "chat-3320"
+      ]
+    },
+    {
+      "id": "search-impact",
+      "question": "How many searches timed out?",
+      "must_include": [
+        "search"
+      ],
+      "evidence_ids": [
+        "ticket-5510"
+      ]
+    }
+  ],
+  "irrelevant_evidence_ids": [
+    "deploy-1102"
+  ],
+  "duplicate_groups": [
+    [
+      "log-70210",
+      "log-70211"
+    ]
+  ],
+  "rubric": {
+    "adversarial_element": "Duplicate events. log-70210 and log-70211 are byte-identical apart from their identifiers. A timeline listing both as separate evictions is wrong, and chat-3301 is a responder making exactly that error while chat-3308 corrects it.",
+    "misleading_correlation": "deploy-1102 lands 5m34s before the alert and touches nothing on the path.",
+    "evidence_gap": "No record states how many searches failed."
+  },
+  "incident_id": "cache-stampede"
+}

@@ -1,0 +1,32 @@
+{
+  "incident_id": "cache-stampede",
+  "title": "Product search latency spike",
+  "opened_at": "2026-04-08T13:20:00Z",
+  "origin": "synthesized",
+  "sources": [
+    {
+      "source": "alerts",
+      "description": "Monitoring alerts raised against search service objectives."
+    },
+    {
+      "source": "deployments",
+      "description": "Release events recorded by the delivery pipeline."
+    },
+    {
+      "source": "logs",
+      "description": "Application log excerpts retained for the incident window. The ingestion pipeline is at-least-once and can retain the same emitted line more than once."
+    },
+    {
+      "source": "metrics",
+      "description": "Numeric series exported for the incident window."
+    },
+    {
+      "source": "chat",
+      "description": "Responder messages from the incident channel."
+    },
+    {
+      "source": "tickets",
+      "description": "Ticket activity linked to the incident."
+    }
+  ]
+}

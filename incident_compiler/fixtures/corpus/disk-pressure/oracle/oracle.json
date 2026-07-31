@@ -1,0 +1,141 @@
+{
+  "injected_faults": [
+    {
+      "summary": "The staging volume on media-3 filled to 100% over roughly a week with no alert configured on the usage series. Uploads routed to that node failed with ENOSPC until an operator reclaimed 412GB of orphaned files.",
+      "evidence_ids": [
+        "log-11902",
+        "metric-disk-usage",
+        "log-12905"
+      ]
+    }
+  ],
+  "required_facts": [
+    {
+      "id": "upload-failure-ratio",
+      "claim": "POST /v1/media failed at 0.48 of attempts against an objective of 0.01.",
+      "evidence_ids": [
+        "alert-3301"
+      ],
+      "must_include": [
+        "0.48"
+      ]
+    },
+    {
+      "id": "enospc",
+      "claim": "Writes to the staging volume on media-3 failed with ENOSPC from 04:29:47Z with the volume 100% used.",
+      "evidence_ids": [
+        "log-11902"
+      ],
+      "must_include": [
+        "ENOSPC"
+      ]
+    },
+    {
+      "id": "single-node",
+      "claim": "Every failing upload was routed to node media-3.",
+      "evidence_ids": [
+        "log-12240"
+      ],
+      "must_include": [
+        "media-3"
+      ]
+    },
+    {
+      "id": "gradual-fill",
+      "claim": "Staging volume usage rose from 0.61 to 1.00 over a week with no alert configured on the series.",
+      "evidence_ids": [
+        "metric-disk-usage"
+      ],
+      "must_include": [
+        "0.61"
+      ]
+    },
+    {
+      "id": "reclaim-recovery",
+      "claim": "Uploads recovered after 412GB of orphaned staging files were deleted at 05:18:22Z.",
+      "evidence_ids": [
+        "log-12905"
+      ],
+      "must_include": [
+        "412gb"
+      ]
+    },
+    {
+      "id": "unrelated-alerts",
+      "claim": "The backup, certificate, and analytics alerts firing in the window are unrelated to media-api.",
+      "evidence_ids": [
+        "chat-7709"
+      ],
+      "must_include": [
+        "unrelated"
+      ]
+    }
+  ],
+  "inference_only": [
+    {
+      "id": "disk-causation",
+      "claim": "That the full volume caused the upload failures is an inference.",
+      "all_of": [
+        "volume",
+        "caused"
+      ]
+    }
+  ],
+  "contradicted_hypotheses": [
+    {
+      "id": "platform-wide",
+      "claim": "A platform-wide problem is causing four simultaneous alerts.",
+      "must_include": [
+        "platform"
+      ],
+      "contradicting_evidence_ids": [
+        "chat-7709",
+        "log-12240"
+      ]
+    }
+  ],
+  "required_open_questions": [
+    {
+      "id": "other-nodes",
+      "question": "Are the other media nodes close to full?",
+      "must_include": [
+        "node"
+      ],
+      "evidence_ids": [
+        "chat-7730"
+      ]
+    },
+    {
+      "id": "orphan-cleanup",
+      "question": "Why are orphaned staging files never cleaned up?",
+      "must_include": [
+        "orphan"
+      ],
+      "evidence_ids": [
+        "chat-7730"
+      ]
+    },
+    {
+      "id": "upload-impact",
+      "question": "How many uploads failed?",
+      "must_include": [
+        "upload"
+      ],
+      "evidence_ids": [
+        "ticket-4408"
+      ]
+    }
+  ],
+  "irrelevant_evidence_ids": [
+    "alert-3302",
+    "alert-3303",
+    "alert-3304",
+    "deploy-1440"
+  ],
+  "rubric": {
+    "adversarial_element": "Irrelevant alerts. Three unrelated alerts fire inside the window and each names a real system, so a report that builds a timeline from 'everything that fired' produces a platform-wide narrative with no supporting evidence. Each irrelevant record states its own irrelevance if read.",
+    "misleading_correlation": "chat-7701 is a responder reasoning from alert volume rather than from routing.",
+    "evidence_gap": "No record states how many uploads failed."
+  },
+  "incident_id": "disk-pressure"
+}

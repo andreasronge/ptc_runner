@@ -1,0 +1,28 @@
+{
+  "incident_id": "batch-silent-failure",
+  "title": "Reconciliation output missing",
+  "opened_at": "2026-01-23T09:00:00Z",
+  "origin": "synthesized",
+  "sources": [
+    {
+      "source": "alerts",
+      "description": "Monitoring alerts raised during the window. No alert is configured for this job."
+    },
+    {
+      "source": "deployments",
+      "description": "Release events recorded by the delivery pipeline."
+    },
+    {
+      "source": "logs",
+      "description": "Log excerpts retained for the window, subject to a seven-day retention policy."
+    },
+    {
+      "source": "chat",
+      "description": "Responder messages from the incident channel."
+    },
+    {
+      "source": "tickets",
+      "description": "Ticket activity linked to the incident."
+    }
+  ]
+}

@@ -1,0 +1,137 @@
+{
+  "injected_faults": [
+    {
+      "summary": "A configuration reload at 22:04:50Z replaced resolver-2's upstream forwarder with an unreachable address, causing SERVFAIL for inventory.internal until the change was reverted at 22:40:30Z. resolver-2's clock runs about 7m09s fast, so its log timestamps appear to follow the application errors when they in fact coincide.",
+      "evidence_ids": [
+        "infra-0440",
+        "log-40118",
+        "chat-6620",
+        "chat-6640"
+      ]
+    }
+  ],
+  "required_facts": [
+    {
+      "id": "error-ratio",
+      "claim": "Upstream failures reached 0.22 of traffic against an objective of 0.01.",
+      "evidence_ids": [
+        "alert-2280"
+      ],
+      "must_include": [
+        "0.22"
+      ]
+    },
+    {
+      "id": "clock-skew",
+      "claim": "resolver-2's clock runs approximately 7m09s fast, so its log timestamps are ahead of real time.",
+      "evidence_ids": [
+        "chat-6620"
+      ],
+      "must_include": [
+        "skew"
+      ]
+    },
+    {
+      "id": "corrected-ordering",
+      "claim": "Corrected for skew, the resolver SERVFAIL logs coincide with the start of the application failures rather than following them.",
+      "evidence_ids": [
+        "chat-6620",
+        "log-40119"
+      ],
+      "must_include": [
+        "22:05"
+      ]
+    },
+    {
+      "id": "config-reload",
+      "claim": "A resolver-2 configuration reload at 22:04:50Z replaced an upstream forwarder address.",
+      "evidence_ids": [
+        "infra-0440"
+      ],
+      "must_include": [
+        "22:04:50"
+      ]
+    },
+    {
+      "id": "trace-no-connection",
+      "claim": "A sampled failing request failed at name resolution with no connection established.",
+      "evidence_ids": [
+        "trace-7b19"
+      ],
+      "must_include": [
+        "resolution"
+      ]
+    },
+    {
+      "id": "recovery",
+      "claim": "Resolution recovered from 22:41:05Z after the forwarder address was reverted.",
+      "evidence_ids": [
+        "log-40620",
+        "chat-6640"
+      ],
+      "must_include": [
+        "22:41:05"
+      ]
+    }
+  ],
+  "inference_only": [
+    {
+      "id": "forwarder-causation",
+      "claim": "That the replaced forwarder address caused the failures is an inference.",
+      "all_of": [
+        "forwarder",
+        "caused"
+      ]
+    }
+  ],
+  "contradicted_hypotheses": [
+    {
+      "id": "resolver-reacting",
+      "claim": "The resolver was reacting to an upstream problem because its failures began after the application's.",
+      "must_include": [
+        "react"
+      ],
+      "contradicting_evidence_ids": [
+        "chat-6620"
+      ]
+    }
+  ],
+  "required_open_questions": [
+    {
+      "id": "forwarder-validation",
+      "question": "Why was the replacement forwarder address unreachable, and was it validated before the reload?",
+      "must_include": [
+        "forwarder"
+      ],
+      "evidence_ids": [
+        "chat-6640"
+      ]
+    },
+    {
+      "id": "order-impact",
+      "question": "How many orders failed?",
+      "must_include": [
+        "order"
+      ],
+      "evidence_ids": [
+        "ticket-6602"
+      ]
+    }
+  ],
+  "irrelevant_evidence_ids": [],
+  "clock_skew": {
+    "source": "logs",
+    "host": "resolver-2",
+    "offset_seconds": 429,
+    "disclosed_by": "chat-6620",
+    "affected_evidence_ids": [
+      "log-40118"
+    ]
+  },
+  "rubric": {
+    "adversarial_element": "Clock skew. Taking log-40118's timestamp at face value inverts causality and supports chat-6612's wrong conclusion. The skew is disclosed in chat-6620, so a careful report finds it; an ordering built from raw timestamps does not.",
+    "misleading_correlation": "infra-0440 lands 46s before the alert and is in fact causal here, which is the inverse trap: proximity is not proof either way.",
+    "evidence_gap": "No record states how many orders failed, and the resolution note omits the skew entirely."
+  },
+  "incident_id": "dns-flap"
+}

@@ -1,0 +1,86 @@
+[
+  {
+    "evidence_id": "alert-6603",
+    "observed_at": "2026-06-21T07:05:12Z",
+    "source": "alerts",
+    "title": "auth-service login failure ratio above objective",
+    "body": "Alert auth-login-failure-ratio fired at 07:05:12Z. Failed logins reached 0.31 of attempts against an objective of 0.02. The alert aggregates all regions and does not break the ratio down by region."
+  },
+  {
+    "evidence_id": "maint-0091",
+    "observed_at": "2026-06-21T07:00:00Z",
+    "source": "deployments",
+    "title": "scheduled network maintenance window opens",
+    "body": "Scheduled maintenance window for rack replacement in region eu-west opened at 07:00:00Z, five minutes and twelve seconds before alert-6603. The maintenance record states that the affected racks host batch analytics capacity only, and that no authentication or session-store capacity is placed in them."
+  },
+  {
+    "evidence_id": "deploy-4402",
+    "observed_at": "2026-06-21T06:41:30Z",
+    "source": "deployments",
+    "title": "session-store client library upgrade",
+    "body": "Release deployed at 06:41:30Z upgrading the auth-service session-store client from 3.2.1 to 4.0.0. The 4.0.0 release notes state that the default key serialization changed from string to binary, and that mixed-version fleets require an explicit compatibility flag."
+  },
+  {
+    "evidence_id": "log-31200",
+    "observed_at": "2026-06-21T07:04:58Z",
+    "source": "logs",
+    "title": "session lookup misses in us-east",
+    "body": "auth-service us-east: session lookup returned not_found for keys written before 06:41:30Z. Rate 0.30 of attempts. Sessions written after the upgrade resolve normally; sessions written before it do not."
+  },
+  {
+    "evidence_id": "log-31488",
+    "observed_at": "2026-06-21T07:26:00Z",
+    "source": "logs",
+    "title": "log shipper down for eu-west",
+    "body": "Log ingestion reports that the shipper for auth-service in region eu-west has been down since 06:52:00Z. No auth-service log lines from eu-west are retained for the incident window."
+  },
+  {
+    "evidence_id": "trace-9c40",
+    "observed_at": "2026-06-21T07:15:44Z",
+    "source": "traces",
+    "title": "sampled failing login trace",
+    "body": "Trace 9c40ab from region us-east: POST /login total 88ms. Span session.lookup 6ms returned not_found for a key written at 05:12:00Z. The request then returned 401 without contacting the identity provider."
+  },
+  {
+    "evidence_id": "chat-2201",
+    "observed_at": "2026-06-21T07:09:40Z",
+    "source": "chat",
+    "title": "responder attributes failures to maintenance",
+    "body": "Responder G: 'The eu-west maintenance window opened five minutes before this. Let us page the network team and get the window aborted.'"
+  },
+  {
+    "evidence_id": "chat-2209",
+    "observed_at": "2026-06-21T07:18:02Z",
+    "source": "chat",
+    "title": "responder attributes failures to the identity provider",
+    "body": "Responder H: 'I think the upstream identity provider is rejecting our tokens. We should open a ticket with them before we touch anything on our side.'"
+  },
+  {
+    "evidence_id": "chat-2231",
+    "observed_at": "2026-06-21T07:33:15Z",
+    "source": "chat",
+    "title": "responder points at the session-store client upgrade",
+    "body": "Responder I: 'The traces never reach the identity provider, they fail at session lookup. We upgraded the session-store client to 4.0.0 at 06:41 and that release changes key serialization. Sessions written before the upgrade are unreadable by the new client.'"
+  },
+  {
+    "evidence_id": "chat-2258",
+    "observed_at": "2026-06-21T08:02:00Z",
+    "source": "chat",
+    "title": "mitigation applied",
+    "body": "Responder I: 'Set the compatibility flag on the session-store client and restarted auth-service in us-east at 07:58:00Z. Failure ratio in us-east is back to 0.01. We still cannot see eu-west.'"
+  },
+  {
+    "evidence_id": "ticket-9930",
+    "observed_at": "2026-06-21T07:07:00Z",
+    "source": "tickets",
+    "title": "INC-9930 opened",
+    "body": "INC-9930 opened at 07:07:00Z, severity 1, title 'Users cannot log in'. The ticket does not record which regions were affected, and no per-region breakdown was added before resolution."
+  },
+  {
+    "evidence_id": "ticket-9941",
+    "observed_at": "2026-06-21T08:40:00Z",
+    "source": "tickets",
+    "title": "INC-9930 resolution note",
+    "body": "INC-9930 marked resolved at 08:40:00Z. Resolution note records the us-east mitigation only. Whether eu-west was affected during the same window was never established, because no eu-west authentication logs were retained."
+  }
+]

@@ -1,0 +1,159 @@
+{
+  "incident_id": "auth-partial",
+  "injected_faults": [
+    {
+      "summary": "The session-store client upgrade to 4.0.0 changed default key serialization, so sessions written before 06:41:30Z became unreadable. Setting the compatibility flag restored us-east. Whether eu-west was affected is unknowable from retained evidence.",
+      "evidence_ids": [
+        "deploy-4402",
+        "log-31200",
+        "chat-2258"
+      ]
+    }
+  ],
+  "required_facts": [
+    {
+      "id": "failure-ratio",
+      "claim": "The login failure ratio reached 0.31 against an objective of 0.02, aggregated across all regions.",
+      "evidence_ids": [
+        "alert-6603"
+      ],
+      "must_include": [
+        "0.31"
+      ]
+    },
+    {
+      "id": "serialization-change",
+      "claim": "The 4.0.0 client changed default key serialization and requires an explicit compatibility flag for mixed-version fleets.",
+      "evidence_ids": [
+        "deploy-4402"
+      ],
+      "must_include": [
+        "4.0.0",
+        "serialization"
+      ]
+    },
+    {
+      "id": "pre-upgrade-sessions",
+      "claim": "Sessions written before 06:41:30Z returned not_found while later ones resolved normally.",
+      "evidence_ids": [
+        "log-31200"
+      ],
+      "must_include": [
+        "06:41:30"
+      ]
+    },
+    {
+      "id": "trace-never-reached-idp",
+      "claim": "A sampled failing login returned 401 after a session lookup miss without contacting the identity provider.",
+      "evidence_ids": [
+        "trace-9c40"
+      ],
+      "must_include": [
+        "401"
+      ]
+    },
+    {
+      "id": "eu-west-unobservable",
+      "claim": "No eu-west auth-service logs are retained for the window because that region's shipper was down from 06:52:00Z.",
+      "evidence_ids": [
+        "log-31488"
+      ],
+      "must_include": [
+        "eu-west",
+        "shipper"
+      ]
+    },
+    {
+      "id": "maintenance-scope",
+      "claim": "The eu-west maintenance window affected batch analytics racks only, hosting no authentication or session-store capacity.",
+      "evidence_ids": [
+        "maint-0091"
+      ],
+      "must_include": [
+        "maintenance"
+      ]
+    },
+    {
+      "id": "mitigation",
+      "claim": "Setting the compatibility flag and restarting auth-service in us-east at 07:58:00Z returned the failure ratio to 0.01.",
+      "evidence_ids": [
+        "chat-2258"
+      ],
+      "must_include": [
+        "07:58:00"
+      ]
+    }
+  ],
+  "inference_only": [
+    {
+      "id": "upgrade-causation",
+      "claim": "That the client upgrade caused the login failures is an inference.",
+      "all_of": [
+        "4.0.0",
+        "caused"
+      ]
+    },
+    {
+      "id": "maintenance-causation",
+      "claim": "That the maintenance window caused the login failures is an inference, and a contradicted one.",
+      "all_of": [
+        "maintenance",
+        "caused"
+      ]
+    }
+  ],
+  "contradicted_hypotheses": [
+    {
+      "id": "maintenance-caused-it",
+      "claim": "The eu-west maintenance window caused the login failures.",
+      "must_include": [
+        "maintenance"
+      ],
+      "contradicting_evidence_ids": [
+        "maint-0091",
+        "trace-9c40"
+      ]
+    },
+    {
+      "id": "idp-caused-it",
+      "claim": "The upstream identity provider rejected tokens.",
+      "must_include": [
+        "identity provider"
+      ],
+      "contradicting_evidence_ids": [
+        "trace-9c40",
+        "chat-2231"
+      ]
+    }
+  ],
+  "required_open_questions": [
+    {
+      "id": "affected-regions",
+      "question": "Which regions were affected and for how long?",
+      "must_include": [
+        "region"
+      ],
+      "evidence_ids": [
+        "ticket-9930",
+        "alert-6603"
+      ]
+    },
+    {
+      "id": "eu-west-status",
+      "question": "Was eu-west affected during the same window?",
+      "must_include": [
+        "eu-west"
+      ],
+      "evidence_ids": [
+        "log-31488",
+        "ticket-9941"
+      ]
+    }
+  ],
+  "irrelevant_evidence_ids": [],
+  "rubric": {
+    "misleading_correlation": "maint-0091 opens 5m12s before the alert in a region the report cannot see, which makes it the most tempting and least supportable attribution.",
+    "conflicting_hypotheses": "chat-2201, chat-2209, and chat-2231 propose three different causes; only the third is consistent with the trace.",
+    "evidence_gap": "eu-west has no retained authentication logs at all. Any claim about eu-west's failure ratio, in either direction, is fabricated. This is the incident's defining trap."
+  }
+}

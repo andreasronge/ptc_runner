@@ -1,0 +1,65 @@
+[
+  {
+    "evidence_id": "ticket-1101",
+    "observed_at": "2026-01-23T09:00:00Z",
+    "source": "tickets",
+    "title": "Finance reports missing reconciliation file",
+    "body": "Finance opened INC-1101 at 09:00:00Z on 2026-01-23 reporting that the nightly reconciliation output for 2026-01-15 is absent from the shared location. Files for every other date in January are present."
+  },
+  {
+    "evidence_id": "chat-2210",
+    "observed_at": "2026-01-23T09:40:00Z",
+    "source": "chat",
+    "title": "job reported success",
+    "body": "Responder T: 'The scheduler shows the 2026-01-15 reconciliation run as completed successfully with exit status 0 at 02:14:00Z. It reports success on exit status alone and does not check whether output was produced.'"
+  },
+  {
+    "evidence_id": "chat-2218",
+    "observed_at": "2026-01-23T10:05:00Z",
+    "source": "chat",
+    "title": "logs are gone",
+    "body": "Responder T: 'Application logs for the reconciliation job are retained for seven days. The 2026-01-15 run is eight days ago, so there are no logs for it. Nothing was captured before they rotated.'"
+  },
+  {
+    "evidence_id": "chat-2225",
+    "observed_at": "2026-01-23T10:30:00Z",
+    "source": "chat",
+    "title": "no monitoring configured",
+    "body": "Responder U: 'There is no alert on this job at all, in either direction. No output-produced check, no duration check, no exit-status alert. Nobody noticed for eight days because nothing was watching.'"
+  },
+  {
+    "evidence_id": "chat-2240",
+    "observed_at": "2026-01-23T11:15:00Z",
+    "source": "chat",
+    "title": "input data unavailable for replay",
+    "body": "Responder U: 'The upstream extract the job reads is also on seven-day retention, so we cannot replay 2026-01-15 to see what happened. We can replay a recent date, but that tells us about today, not about then.'"
+  },
+  {
+    "evidence_id": "log-90001",
+    "observed_at": "2026-01-22T02:14:00Z",
+    "source": "logs",
+    "title": "reconciliation run for 2026-01-22",
+    "body": "reconciliation job for 2026-01-22 completed at 02:31:00Z, processing 412093 rows and writing one output file. This is a different date from the failed run and is retained only because it falls inside the retention window."
+  },
+  {
+    "evidence_id": "deploy-0440",
+    "observed_at": "2026-01-14T17:30:00Z",
+    "source": "deployments",
+    "title": "reconciliation job release 2.1.0",
+    "body": "Release 2.1.0 deployed at 17:30:00Z on 2026-01-14, roughly nine hours before the failed run. Changes: replaces the CSV writer library. The release record does not state whether the new writer signals failure by exit status."
+  },
+  {
+    "evidence_id": "alert-0000",
+    "observed_at": "2026-01-15T02:14:00Z",
+    "source": "alerts",
+    "title": "no alerts fired for this job",
+    "body": "A query of the alerting system for 2026-01-15 returns no alerts for the reconciliation job or its host. The query result is evidence that nothing fired, not evidence that nothing went wrong."
+  },
+  {
+    "evidence_id": "ticket-1109",
+    "observed_at": "2026-01-23T14:00:00Z",
+    "source": "tickets",
+    "title": "INC-1101 status",
+    "body": "INC-1101 remains open. No root cause has been established. The ticket records that the 2026-01-15 output was regenerated manually from a downstream copy on 2026-01-23."
+  }
+]

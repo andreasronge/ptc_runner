@@ -1,0 +1,157 @@
+{
+  "injected_faults": [
+    {
+      "summary": "A concurrency change at 15:55:00Z raised workers from 8 to 32 without enlarging the connection pool of 20, exhausting it from 15:58:10Z.",
+      "evidence_ids": [
+        "deploy-5510",
+        "log-66120",
+        "log-67800"
+      ]
+    },
+    {
+      "summary": "Independently, the flags.internal service token expired at 15:59:00Z and the worker fails closed without the flag, adding a second failure mode that the pool fix did not address.",
+      "evidence_ids": [
+        "cred-0091",
+        "log-66450",
+        "log-68210"
+      ]
+    }
+  ],
+  "required_facts": [
+    {
+      "id": "failure-ratio",
+      "claim": "Settlement failures reached 0.61 against an objective of 0.02.",
+      "evidence_ids": [
+        "alert-7001"
+      ],
+      "must_include": [
+        "0.61"
+      ]
+    },
+    {
+      "id": "pool-exhaustion",
+      "claim": "The database connection pool of 20 was exhausted from 15:58:10Z with pool_timeout errors.",
+      "evidence_ids": [
+        "log-66120"
+      ],
+      "must_include": [
+        "pool"
+      ]
+    },
+    {
+      "id": "token-expiry",
+      "claim": "The flags.internal service token expired at 15:59:00Z and calls returned 401 invalid_token.",
+      "evidence_ids": [
+        "cred-0091",
+        "log-66450"
+      ],
+      "must_include": [
+        "401"
+      ]
+    },
+    {
+      "id": "concurrency-change",
+      "claim": "Worker concurrency was raised from 8 to 32 at 15:55:00Z while pool size stayed at 20.",
+      "evidence_ids": [
+        "deploy-5510"
+      ],
+      "must_include": [
+        "32"
+      ]
+    },
+    {
+      "id": "partial-recovery",
+      "claim": "Enlarging the pool at 17:20:15Z stopped pool_timeout errors but only reduced the failure ratio from 0.61 to 0.29.",
+      "evidence_ids": [
+        "log-67800",
+        "metric-failure-ratio"
+      ],
+      "must_include": [
+        "0.29"
+      ]
+    },
+    {
+      "id": "full-recovery",
+      "claim": "Replacing the token at 18:12:10Z reduced the failure ratio from 0.29 to 0.004.",
+      "evidence_ids": [
+        "log-68210"
+      ],
+      "must_include": [
+        "0.004"
+      ]
+    },
+    {
+      "id": "two-step-series",
+      "claim": "The failure-ratio series shows two distinct step changes, each aligned with a different remediation.",
+      "evidence_ids": [
+        "metric-failure-ratio"
+      ],
+      "must_include": [
+        "two"
+      ]
+    }
+  ],
+  "inference_only": [
+    {
+      "id": "single-cause",
+      "claim": "Attributing the incident to one fault is an inference and a wrong one.",
+      "all_of": [
+        "root cause",
+        "pool"
+      ]
+    }
+  ],
+  "contradicted_hypotheses": [
+    {
+      "id": "pool-alone",
+      "claim": "Pool exhaustion alone explains the settlement failures.",
+      "must_include": [
+        "pool"
+      ],
+      "contradicting_evidence_ids": [
+        "log-67800",
+        "chat-5512"
+      ]
+    }
+  ],
+  "required_open_questions": [
+    {
+      "id": "pool-derivation",
+      "question": "Why is pool size not derived from worker concurrency?",
+      "must_include": [
+        "pool"
+      ],
+      "evidence_ids": [
+        "chat-5540"
+      ]
+    },
+    {
+      "id": "token-audit",
+      "question": "Which other service tokens are on manual renewal?",
+      "must_include": [
+        "token"
+      ],
+      "evidence_ids": [
+        "chat-5540"
+      ]
+    },
+    {
+      "id": "settlement-value",
+      "question": "What settlement value was at risk?",
+      "must_include": [
+        "value"
+      ],
+      "evidence_ids": [
+        "ticket-2201"
+      ]
+    }
+  ],
+  "irrelevant_evidence_ids": [],
+  "expected_fault_count": 2,
+  "rubric": {
+    "adversarial_element": "Two simultaneous root causes starting four minutes apart. A report naming one is incomplete rather than wrong, and the failure-ratio series showing two step changes is the mechanical tell. Scoring should reward a report whose hypotheses cover both faults.",
+    "misleading_correlation": "deploy-5510 at 15:55 is causal for one fault and irrelevant to the other, so proximity supports a partial answer that feels complete.",
+    "evidence_gap": "No record states the settlement value at risk."
+  },
+  "incident_id": "dual-cause-payments"
+}

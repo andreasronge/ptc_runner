@@ -1,0 +1,32 @@
+{
+  "incident_id": "dual-cause-payments",
+  "title": "Payment settlement failures",
+  "opened_at": "2026-02-11T16:00:00Z",
+  "origin": "synthesized",
+  "sources": [
+    {
+      "source": "alerts",
+      "description": "Monitoring alerts raised against settlement objectives."
+    },
+    {
+      "source": "deployments",
+      "description": "Release and configuration change events."
+    },
+    {
+      "source": "logs",
+      "description": "Application log excerpts retained for the incident window."
+    },
+    {
+      "source": "metrics",
+      "description": "Numeric series exported for the incident window."
+    },
+    {
+      "source": "chat",
+      "description": "Responder messages from the incident channel."
+    },
+    {
+      "source": "tickets",
+      "description": "Ticket activity linked to the incident."
+    }
+  ]
+}

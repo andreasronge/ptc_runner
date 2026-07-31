@@ -1,0 +1,86 @@
+[
+  {
+    "evidence_id": "alert-7001",
+    "observed_at": "2026-02-11T16:00:44Z",
+    "source": "alerts",
+    "title": "settlement failure ratio above objective",
+    "body": "Alert settlement-failures fired at 16:00:44Z. Settlement attempts failing reached 0.61 against an objective of 0.02. The alert did not clear until 18:12:30Z."
+  },
+  {
+    "evidence_id": "log-66120",
+    "observed_at": "2026-02-11T15:58:10Z",
+    "source": "logs",
+    "title": "connection pool exhausted",
+    "body": "settlement-worker: database connection pool exhausted from 15:58:10Z. Pool size 20, checked-out 20, queue depth rising. Errors: pool_timeout after 5000ms. Affects approximately 0.38 of attempts."
+  },
+  {
+    "evidence_id": "log-66450",
+    "observed_at": "2026-02-11T15:59:02Z",
+    "source": "logs",
+    "title": "feature-flag service token rejected",
+    "body": "settlement-worker: calls to flags.internal returning 401 invalid_token from 15:59:02Z. The worker fails closed when it cannot read the settlement_v2_enabled flag. Affects approximately 0.31 of attempts, overlapping with pool_timeout failures on some attempts."
+  },
+  {
+    "evidence_id": "deploy-5510",
+    "observed_at": "2026-02-11T15:55:00Z",
+    "source": "deployments",
+    "title": "settlement-worker concurrency increase",
+    "body": "Configuration change at 15:55:00Z raised settlement-worker concurrency from 8 to 32 workers. The database connection pool size was left at 20 and is not derived from the worker count."
+  },
+  {
+    "evidence_id": "cred-0091",
+    "observed_at": "2026-02-11T15:59:00Z",
+    "source": "deployments",
+    "title": "feature-flag service token expiry",
+    "body": "The service token settlement-worker uses for flags.internal was issued for 90 days on 2025-11-13 and expired at 15:59:00Z on 2026-02-11. Its renewal was not automated. This expiry is unrelated to the concurrency change applied four minutes earlier."
+  },
+  {
+    "evidence_id": "log-67800",
+    "observed_at": "2026-02-11T17:20:15Z",
+    "source": "logs",
+    "title": "pool enlarged, failures reduced but not resolved",
+    "body": "settlement-worker: connection pool raised to 64 at 17:20:15Z. pool_timeout errors stopped. Settlement failure ratio fell from 0.61 to 0.29 and did not fall further."
+  },
+  {
+    "evidence_id": "log-68210",
+    "observed_at": "2026-02-11T18:12:10Z",
+    "source": "logs",
+    "title": "token replaced, failures resolved",
+    "body": "settlement-worker: a replacement token for flags.internal was installed at 18:12:10Z. 401 responses stopped and the settlement failure ratio fell from 0.29 to 0.004."
+  },
+  {
+    "evidence_id": "metric-failure-ratio",
+    "observed_at": "2026-02-11T17:20:15Z",
+    "source": "metrics",
+    "title": "settlement failure ratio series",
+    "body": "Series settlement_failure_ratio: 0.61 from 16:00Z, stepping down to 0.29 at 17:20Z and to 0.004 at 18:12Z. The series shows two distinct step changes, each aligned with a different remediation."
+  },
+  {
+    "evidence_id": "chat-5501",
+    "observed_at": "2026-02-11T17:25:40Z",
+    "source": "chat",
+    "title": "responder expects full recovery after pool fix",
+    "body": "Responder R: 'Pool is at 64 now and pool_timeout is gone, so we should be recovered. Why are we still failing 29% of settlements?'"
+  },
+  {
+    "evidence_id": "chat-5512",
+    "observed_at": "2026-02-11T17:41:05Z",
+    "source": "chat",
+    "title": "responder identifies the second fault",
+    "body": "Responder S: 'Because there are two faults, not one. The pool exhaustion came from the concurrency change at 15:55. Separately, the flags.internal token expired at 15:59. They started four minutes apart and neither explains the other.'"
+  },
+  {
+    "evidence_id": "chat-5540",
+    "observed_at": "2026-02-11T18:20:00Z",
+    "source": "chat",
+    "title": "remaining questions",
+    "body": "Responder S: 'Both are fixed. Nobody has established why pool size is not derived from worker concurrency, and nobody has audited which other service tokens are on manual renewal.'"
+  },
+  {
+    "evidence_id": "ticket-2201",
+    "observed_at": "2026-02-11T16:05:00Z",
+    "source": "tickets",
+    "title": "INC-2201 opened",
+    "body": "INC-2201 opened at 16:05:00Z, severity 1, title 'Settlements failing'. The ticket records no settlement value at risk and no such figure was added before resolution."
+  }
+]

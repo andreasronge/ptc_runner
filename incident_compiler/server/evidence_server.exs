@@ -31,23 +31,33 @@ defmodule IncidentCompiler.EvidenceServer do
 
   ## Corpus loading
 
+  # Only `incident.json` and `evidence/records.json` are ever opened. The
+  # sibling `oracle/` directory holds the answer key for offline scoring and
+  # must never become reachable through a tool, so this server has no code
+  # path that reads it.
   defp load_corpora(dir) do
     dir
-    |> Path.join("*.json")
+    |> Path.join("*/incident.json")
     |> Path.wildcard()
     |> Enum.sort()
     |> Map.new(fn path ->
-      corpus = path |> File.read!() |> decode!()
-      {corpus["incident_id"], digest_records(corpus)}
+      incident = path |> File.read!() |> decode!()
+
+      records =
+        path
+        |> Path.dirname()
+        |> Path.join("evidence/records.json")
+        |> File.read!()
+        |> decode!()
+
+      {incident["incident_id"], Map.put(incident, "records", digest_records(records))}
     end)
   end
 
-  defp digest_records(corpus) do
-    Map.update!(corpus, "records", fn records ->
-      records
-      |> Enum.map(&Map.put(&1, "content_digest", record_digest(&1)))
-      |> Enum.sort_by(&{&1["observed_at"], &1["evidence_id"]})
-    end)
+  defp digest_records(records) do
+    records
+    |> Enum.map(&Map.put(&1, "content_digest", record_digest(&1)))
+    |> Enum.sort_by(&{&1["observed_at"], &1["evidence_id"]})
   end
 
   # Canonical over an explicit ordered field list: the digest must not depend

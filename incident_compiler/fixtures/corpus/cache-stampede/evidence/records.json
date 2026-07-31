@@ -1,0 +1,86 @@
+[
+  {
+    "evidence_id": "alert-1180",
+    "observed_at": "2026-04-08T13:20:14Z",
+    "source": "alerts",
+    "title": "search-api p99 latency above objective",
+    "body": "Alert search-api-latency fired at 13:20:14Z. p99 for GET /v3/search rose from 180ms to 4200ms. Alert cleared at 13:52:30Z."
+  },
+  {
+    "evidence_id": "log-70210",
+    "observed_at": "2026-04-08T13:19:02Z",
+    "source": "logs",
+    "title": "cache node eviction",
+    "body": "search-cache: node cache-07 evicted from the ring at 13:19:02Z after three consecutive health-check failures. 1 of 8 nodes removed; keys owned by cache-07 rehash to the remaining nodes."
+  },
+  {
+    "evidence_id": "log-70211",
+    "observed_at": "2026-04-08T13:19:02Z",
+    "source": "logs",
+    "title": "cache node eviction",
+    "body": "search-cache: node cache-07 evicted from the ring at 13:19:02Z after three consecutive health-check failures. 1 of 8 nodes removed; keys owned by cache-07 rehash to the remaining nodes."
+  },
+  {
+    "evidence_id": "log-70402",
+    "observed_at": "2026-04-08T13:19:20Z",
+    "source": "logs",
+    "title": "origin query volume rises sharply",
+    "body": "search-api: origin query rate rose from 240/s to 9800/s between 13:19:20Z and 13:19:50Z. Every miss for a rehashed key reached the origin index concurrently; no request coalescing is configured for this cache tier."
+  },
+  {
+    "evidence_id": "log-70915",
+    "observed_at": "2026-04-08T13:52:10Z",
+    "source": "logs",
+    "title": "cache node rejoins",
+    "body": "search-cache: node cache-07 passed health checks and rejoined the ring at 13:52:10Z. Origin query rate returned to 260/s by 13:52:30Z."
+  },
+  {
+    "evidence_id": "metric-origin-qps",
+    "observed_at": "2026-04-08T13:25:00Z",
+    "source": "metrics",
+    "title": "origin query rate series",
+    "body": "Series search_origin_query_rate peaked at 9800 queries per second at 13:19:50Z and remained above 7000 until 13:52:10Z. Baseline for this hour on the preceding seven days is 240 to 280."
+  },
+  {
+    "evidence_id": "deploy-1102",
+    "observed_at": "2026-04-08T13:14:40Z",
+    "source": "deployments",
+    "title": "search-api release 8.2.1",
+    "body": "Release 8.2.1 deployed at 13:14:40Z, five minutes and thirty-four seconds before alert-1180. Changes: adds a structured-logging field to the access log and updates a documentation link in the error page. Neither touches cache client configuration or query paths."
+  },
+  {
+    "evidence_id": "chat-3301",
+    "observed_at": "2026-04-08T13:27:11Z",
+    "source": "chat",
+    "title": "responder counts two evictions",
+    "body": "Responder J: 'I see two separate eviction events for cache-07 in the logs. If it flapped twice that would explain a sustained stampede rather than a single one.'"
+  },
+  {
+    "evidence_id": "chat-3308",
+    "observed_at": "2026-04-08T13:33:45Z",
+    "source": "chat",
+    "title": "responder identifies duplicate ingestion",
+    "body": "Responder K: 'Those two eviction lines are byte-identical and carry the same emit timestamp of 13:19:02Z. Our log pipeline is at-least-once, so that is one eviction ingested twice, not two evictions. The ring membership metric only ever drops by one node.'"
+  },
+  {
+    "evidence_id": "chat-3320",
+    "observed_at": "2026-04-08T13:55:02Z",
+    "source": "chat",
+    "title": "responder raises coalescing gap",
+    "body": "Responder K: 'The stampede happened because nothing coalesces concurrent misses for the same key. Nobody has checked whether the other cache tiers have the same gap.'"
+  },
+  {
+    "evidence_id": "ticket-5510",
+    "observed_at": "2026-04-08T13:24:00Z",
+    "source": "tickets",
+    "title": "INC-5510 opened",
+    "body": "INC-5510 opened at 13:24:00Z, severity 2, title 'Search slow for all users'. The ticket records no estimate of how many searches timed out, and none was added before resolution."
+  },
+  {
+    "evidence_id": "ticket-5522",
+    "observed_at": "2026-04-08T14:40:00Z",
+    "source": "tickets",
+    "title": "INC-5510 resolution note",
+    "body": "INC-5510 marked resolved at 14:40:00Z. Resolution note reads 'cache node recovered'. It records no follow-up for request coalescing."
+  }
+]

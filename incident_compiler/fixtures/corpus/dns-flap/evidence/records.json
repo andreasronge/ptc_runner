@@ -1,0 +1,79 @@
+[
+  {
+    "evidence_id": "alert-2280",
+    "observed_at": "2026-05-29T22:05:36Z",
+    "source": "alerts",
+    "title": "orders-api upstream error ratio above objective",
+    "body": "Alert orders-api-upstream-errors fired at 22:05:36Z. Requests failing with upstream_unreachable reached 0.22 of traffic against an objective of 0.01. Alert cleared at 22:41:12Z."
+  },
+  {
+    "evidence_id": "log-40118",
+    "observed_at": "2026-05-29T22:12:40Z",
+    "source": "logs",
+    "title": "resolver cache misses and SERVFAIL",
+    "body": "resolver-2 (host clock, see chat-6620): repeated SERVFAIL responses for inventory.internal beginning at the timestamp recorded here. 40 to 70 failures per second sustained for roughly thirty minutes."
+  },
+  {
+    "evidence_id": "log-40119",
+    "observed_at": "2026-05-29T22:05:31Z",
+    "source": "logs",
+    "title": "orders-api upstream connection failures",
+    "body": "orders-api: connections to inventory.internal failing with name resolution error beginning 22:05:31Z. This host's clock is NTP-synchronised and was within 40ms of reference throughout."
+  },
+  {
+    "evidence_id": "log-40620",
+    "observed_at": "2026-05-29T22:41:05Z",
+    "source": "logs",
+    "title": "resolution recovers",
+    "body": "orders-api: name resolution for inventory.internal succeeding again from 22:41:05Z. Upstream error ratio returned to 0.004."
+  },
+  {
+    "evidence_id": "infra-0440",
+    "observed_at": "2026-05-29T22:04:50Z",
+    "source": "deployments",
+    "title": "resolver-2 configuration reload",
+    "body": "Configuration reload applied to resolver-2 at 22:04:50Z, forty-six seconds before alert-2280. The reload replaced an upstream forwarder address. The change record does not state whether the replacement address was reachable."
+  },
+  {
+    "evidence_id": "trace-7b19",
+    "observed_at": "2026-05-29T22:20:03Z",
+    "source": "traces",
+    "title": "sampled failing order trace",
+    "body": "Trace 7b19dd: POST /v1/orders total 84ms. Span inventory.lookup 12ms error, name resolution failed. No connection was established, so no upstream span exists."
+  },
+  {
+    "evidence_id": "chat-6612",
+    "observed_at": "2026-05-29T22:18:40Z",
+    "source": "chat",
+    "title": "responder reads resolver logs as following the errors",
+    "body": "Responder L: 'The resolver only starts logging SERVFAIL at 22:12, but orders-api was already failing at 22:05. So the resolver is reacting to something upstream, not causing it.'"
+  },
+  {
+    "evidence_id": "chat-6620",
+    "observed_at": "2026-05-29T22:26:15Z",
+    "source": "chat",
+    "title": "responder reports resolver clock skew",
+    "body": "Responder M: 'resolver-2 lost NTP sync on 2026-05-24 and its clock runs approximately seven minutes and nine seconds fast. Its log timestamps are ahead of real time by that amount. The 22:12:40Z SERVFAIL line therefore corresponds to about 22:05:31Z real time, which is when orders-api started failing, not after it.'"
+  },
+  {
+    "evidence_id": "chat-6640",
+    "observed_at": "2026-05-29T22:44:00Z",
+    "source": "chat",
+    "title": "mitigation and remaining question",
+    "body": "Responder M: 'Reverted the forwarder address on resolver-2 at 22:40:30Z and resolution recovered. Nobody has established why the replacement forwarder address was unreachable, or whether it was ever validated before the reload.'"
+  },
+  {
+    "evidence_id": "ticket-6602",
+    "observed_at": "2026-05-29T22:09:00Z",
+    "source": "tickets",
+    "title": "INC-6602 opened",
+    "body": "INC-6602 opened at 22:09:00Z, severity 2, title 'Orders failing intermittently'. The ticket records no count of failed orders and none was added before resolution."
+  },
+  {
+    "evidence_id": "ticket-6615",
+    "observed_at": "2026-05-30T09:00:00Z",
+    "source": "tickets",
+    "title": "INC-6602 resolution note",
+    "body": "INC-6602 marked resolved. Resolution note reads 'DNS issue, reverted config'. It does not record the resolver clock skew, so a later reader comparing raw log timestamps would reach the same wrong ordering."
+  }
+]

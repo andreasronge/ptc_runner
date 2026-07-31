@@ -1,0 +1,168 @@
+{
+  "incident_id": "queue-backlog",
+  "injected_faults": [
+    {
+      "summary": "An order_shipped payload with no locale field reached the head of a partition. The 4.19.0 template renderer raises on it, so every worker crash-looped on the same message and the consumer group made no forward progress until an operator advanced the committed offset.",
+      "evidence_ids": [
+        "log-22401",
+        "log-22890",
+        "deploy-3311",
+        "log-24115"
+      ]
+    }
+  ],
+  "required_facts": [
+    {
+      "id": "lag-objective",
+      "claim": "Consumer lag reached 412000 undelivered messages against an objective of 5000.",
+      "evidence_ids": [
+        "alert-9012"
+      ],
+      "must_include": [
+        "412000"
+      ]
+    },
+    {
+      "id": "render-error",
+      "claim": "Workers exited with TemplateRenderError for a missing locale field from 14:39:12Z.",
+      "evidence_ids": [
+        "log-22401"
+      ],
+      "must_include": [
+        "TemplateRenderError",
+        "locale"
+      ]
+    },
+    {
+      "id": "poison-redelivery",
+      "claim": "Message 8831f4 was redelivered 214 times and no dead-letter destination is configured.",
+      "evidence_ids": [
+        "log-22890"
+      ],
+      "must_include": [
+        "214",
+        "dead-letter"
+      ]
+    },
+    {
+      "id": "retention-scope",
+      "claim": "The retention change altered on-disk retention only and does not affect consumer concurrency, acknowledgement, or delivery order.",
+      "evidence_ids": [
+        "config-3310"
+      ],
+      "must_include": [
+        "retention"
+      ]
+    },
+    {
+      "id": "scaling-had-no-effect",
+      "claim": "Scaling from 6 to 24 replicas did not change the lag because every worker failed on the same message.",
+      "evidence_ids": [
+        "chat-4436",
+        "chat-4418"
+      ],
+      "must_include": [
+        "24"
+      ]
+    },
+    {
+      "id": "renderer-origin",
+      "claim": "Release 4.19.0 added the renderer that raises when a payload's locale field is absent.",
+      "evidence_ids": [
+        "deploy-3311"
+      ],
+      "must_include": [
+        "4.19.0"
+      ]
+    },
+    {
+      "id": "offset-recovery",
+      "claim": "Forward progress resumed after the committed offset was advanced past the message at 17:09:40Z.",
+      "evidence_ids": [
+        "log-24115"
+      ],
+      "must_include": [
+        "17:09:40"
+      ]
+    }
+  ],
+  "inference_only": [
+    {
+      "id": "retention-causation",
+      "claim": "That the retention change caused the backlog is an inference, and a contradicted one.",
+      "all_of": [
+        "retention",
+        "caused"
+      ]
+    },
+    {
+      "id": "provisioning-causation",
+      "claim": "That under-provisioned consumers caused the backlog is an inference, and a contradicted one.",
+      "all_of": [
+        "provision",
+        "caused"
+      ]
+    }
+  ],
+  "contradicted_hypotheses": [
+    {
+      "id": "retention-caused-it",
+      "claim": "The broker retention configuration change caused the backlog.",
+      "must_include": [
+        "retention"
+      ],
+      "contradicting_evidence_ids": [
+        "config-3310",
+        "chat-4436"
+      ]
+    },
+    {
+      "id": "underprovisioned-caused-it",
+      "claim": "Under-provisioned consumers caused the backlog.",
+      "must_include": [
+        "provision"
+      ],
+      "contradicting_evidence_ids": [
+        "chat-4436"
+      ]
+    }
+  ],
+  "required_open_questions": [
+    {
+      "id": "payload-origin",
+      "question": "Which producer emitted an order_shipped payload with no locale field?",
+      "must_include": [
+        "producer"
+      ],
+      "evidence_ids": [
+        "chat-4460"
+      ]
+    },
+    {
+      "id": "growth-rate",
+      "question": "How quickly did the backlog grow before 16:00Z?",
+      "must_include": [
+        "16:00"
+      ],
+      "evidence_ids": [
+        "metric-lag-window"
+      ]
+    },
+    {
+      "id": "notification-impact",
+      "question": "How many customer notifications were delayed or dropped?",
+      "must_include": [
+        "notification"
+      ],
+      "evidence_ids": [
+        "ticket-8815"
+      ]
+    }
+  ],
+  "irrelevant_evidence_ids": [],
+  "rubric": {
+    "misleading_correlation": "config-3310 lands 3m30s before the alert and is the only change that day, but its own record states it cannot affect consumer progress.",
+    "conflicting_hypotheses": "chat-4410 and chat-4418 propose different causes; chat-4436 refutes both by observation.",
+    "evidence_gap": "The lag series is retained only from 16:00:00Z, so backlog growth before then is unmeasurable rather than zero."
+  }
+}

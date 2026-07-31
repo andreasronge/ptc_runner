@@ -1,0 +1,32 @@
+{
+  "incident_id": "queue-backlog",
+  "title": "Notification queue backlog",
+  "opened_at": "2026-06-02T14:40:00Z",
+  "origin": "synthesized",
+  "sources": [
+    {
+      "source": "alerts",
+      "description": "Monitoring alerts raised against queue consumer objectives."
+    },
+    {
+      "source": "deployments",
+      "description": "Release and configuration-change events recorded by the delivery pipeline."
+    },
+    {
+      "source": "logs",
+      "description": "Consumer log excerpts retained for the incident window."
+    },
+    {
+      "source": "metrics",
+      "description": "Numeric series exported for the incident window, subject to retention."
+    },
+    {
+      "source": "chat",
+      "description": "Responder messages from the incident channel."
+    },
+    {
+      "source": "tickets",
+      "description": "Ticket activity linked to the incident."
+    }
+  ]
+}

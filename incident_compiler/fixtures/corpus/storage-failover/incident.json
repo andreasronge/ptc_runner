@@ -1,0 +1,32 @@
+{
+  "incident_id": "storage-failover",
+  "title": "Object storage failover degradation",
+  "opened_at": "2026-06-09T03:40:00Z",
+  "origin": "synthesized",
+  "sources": [
+    {
+      "source": "alerts",
+      "description": "Monitoring alerts raised across the platform during the window."
+    },
+    {
+      "source": "deployments",
+      "description": "Infrastructure change events recorded by the platform team."
+    },
+    {
+      "source": "logs",
+      "description": "Application and storage-proxy log excerpts retained for the window."
+    },
+    {
+      "source": "metrics",
+      "description": "Numeric series exported for the window, subject to per-series retention."
+    },
+    {
+      "source": "chat",
+      "description": "Responder messages from the incident channel."
+    },
+    {
+      "source": "tickets",
+      "description": "Ticket activity linked to the incident."
+    }
+  ]
+}

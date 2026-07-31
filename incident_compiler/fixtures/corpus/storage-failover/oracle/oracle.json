@@ -1,0 +1,138 @@
+{
+  "injected_faults": [
+    {
+      "summary": "An automated failover moved writes to a secondary endpoint whose per-object limit is 5MB against the primary's 100MB. The failover did not compare limits, so writes above 5MB were rejected with 413 while smaller writes succeeded, until the primary was restored.",
+      "evidence_ids": [
+        "infra-8801",
+        "log-33110",
+        "log-33480",
+        "log-34900"
+      ]
+    }
+  ],
+  "required_facts": [
+    {
+      "id": "error-ratio",
+      "claim": "Writes failed at 0.55 against an objective of 0.01.",
+      "evidence_ids": [
+        "alert-5501"
+      ],
+      "must_include": [
+        "0.55"
+      ]
+    },
+    {
+      "id": "failover-time",
+      "claim": "An automated failover moved writes to the secondary at 03:38:30Z after three failed health checks.",
+      "evidence_ids": [
+        "infra-8801"
+      ],
+      "must_include": [
+        "03:38:30"
+      ]
+    },
+    {
+      "id": "limit-mismatch",
+      "claim": "The secondary's per-object limit is 5MB against the primary's 100MB and the failover did not compare them.",
+      "evidence_ids": [
+        "log-33110"
+      ],
+      "must_include": [
+        "5mb",
+        "100mb"
+      ]
+    },
+    {
+      "id": "only-large-objects",
+      "claim": "Every failing write carried a payload above 5MB while smaller writes succeeded throughout.",
+      "evidence_ids": [
+        "log-33480"
+      ],
+      "must_include": [
+        "413"
+      ]
+    },
+    {
+      "id": "recovery",
+      "claim": "Writes returned to the primary at 05:01:50Z and the error ratio returned to 0.002.",
+      "evidence_ids": [
+        "log-34900"
+      ],
+      "must_include": [
+        "05:01:50"
+      ]
+    }
+  ],
+  "inference_only": [
+    {
+      "id": "limit-causation",
+      "claim": "That the object-size limit mismatch caused the failures is an inference.",
+      "all_of": [
+        "limit",
+        "caused"
+      ]
+    },
+    {
+      "id": "failover-broken",
+      "claim": "That the failover itself is broken is an inference the evidence contradicts.",
+      "all_of": [
+        "failover",
+        "broken"
+      ]
+    }
+  ],
+  "contradicted_hypotheses": [
+    {
+      "id": "failover-caused-it",
+      "claim": "The failover itself is broken and caused the write failures.",
+      "must_include": [
+        "failover"
+      ],
+      "contradicting_evidence_ids": [
+        "log-33480",
+        "chat-8822"
+      ]
+    }
+  ],
+  "required_open_questions": [
+    {
+      "id": "primary-health",
+      "question": "Why did the primary endpoint fail its health checks?",
+      "must_include": [
+        "health"
+      ],
+      "evidence_ids": [
+        "chat-8848"
+      ]
+    },
+    {
+      "id": "failover-limits",
+      "question": "Does the failover automation compare endpoint limits before switching?",
+      "must_include": [
+        "limit"
+      ],
+      "evidence_ids": [
+        "chat-8848"
+      ]
+    },
+    {
+      "id": "upload-impact",
+      "question": "How many uploads were rejected?",
+      "must_include": [
+        "reject"
+      ],
+      "evidence_ids": [
+        "ticket-7001"
+      ]
+    }
+  ],
+  "irrelevant_evidence_ids": [
+    "alert-5502"
+  ],
+  "rubric": {
+    "adversarial_element": "A partially correct attribution. The failover is genuinely the proximate change and errors start immediately, so chat-8810's conclusion is nearly right and operationally dangerous. The distinguishing evidence is that failures are confined to objects above one specific size.",
+    "misleading_correlation": "alert-5502 fires inside the window and belongs to CI.",
+    "evidence_gap": "Per-object detail has aged into rollups, and the primary's health-check failures are never explained."
+  },
+  "incident_id": "storage-failover"
+}

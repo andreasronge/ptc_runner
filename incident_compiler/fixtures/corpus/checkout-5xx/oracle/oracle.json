@@ -1,0 +1,150 @@
+{
+  "incident_id": "checkout-5xx",
+  "injected_faults": [
+    {
+      "summary": "The payments-gateway.internal leaf certificate expired at 09:11:40Z and its replacement took effect at 09:57:50Z. Checkout submissions failed for the duration because the payments connector could not complete a TLS handshake.",
+      "evidence_ids": [
+        "log-88120",
+        "chat-1204",
+        "log-90013"
+      ]
+    }
+  ],
+  "required_facts": [
+    {
+      "id": "error-ratio",
+      "claim": "The checkout error-ratio alert reported a 5xx ratio of 0.184 against an objective of 0.005.",
+      "evidence_ids": [
+        "alert-4471"
+      ],
+      "must_include": [
+        "0.184"
+      ]
+    },
+    {
+      "id": "tls-failures",
+      "claim": "Payments-connector TLS handshakes failed with an expired certificate from 09:11:47Z.",
+      "evidence_ids": [
+        "log-88120"
+      ],
+      "must_include": [
+        "certificate",
+        "09:11:47"
+      ]
+    },
+    {
+      "id": "release-scope",
+      "claim": "Release 2026.5.14-a changed email templates and a CSV export dependency, neither on the submit path.",
+      "evidence_ids": [
+        "deploy-2291"
+      ],
+      "must_include": [
+        "2026.5.14-a",
+        "CSV"
+      ]
+    },
+    {
+      "id": "recovery-preceded-rollback",
+      "claim": "The error ratio recovered at 09:58:10Z, before the rollback completed at 10:04:18Z.",
+      "evidence_ids": [
+        "deploy-2292"
+      ],
+      "must_include": [
+        "09:58:10",
+        "10:04:18"
+      ]
+    },
+    {
+      "id": "trace-stalled-in-payments",
+      "claim": "A sampled failing request spent 10388ms in the payments.authorize span with no upstream response.",
+      "evidence_ids": [
+        "trace-5f21"
+      ],
+      "must_include": [
+        "10388"
+      ]
+    },
+    {
+      "id": "certificate-window",
+      "claim": "The gateway team reported the certificate expired at 09:11:40Z and its replacement took effect at 09:57:50Z.",
+      "evidence_ids": [
+        "chat-1204"
+      ],
+      "must_include": [
+        "09:11:40",
+        "09:57:50"
+      ]
+    },
+    {
+      "id": "latency-is-a-ceiling",
+      "claim": "The reported 10400ms p99 equals the client timeout and is a ceiling rather than a measured completion time.",
+      "evidence_ids": [
+        "alert-4472"
+      ],
+      "must_include": [
+        "10400",
+        "ceiling"
+      ]
+    }
+  ],
+  "inference_only": [
+    {
+      "id": "certificate-causation",
+      "claim": "That the expired certificate caused the failures is an inference, not a recorded observation.",
+      "all_of": [
+        "certificate",
+        "caused"
+      ]
+    },
+    {
+      "id": "release-causation",
+      "claim": "That the release caused the failures is an inference, and a contradicted one.",
+      "all_of": [
+        "2026.5.14-a",
+        "caused"
+      ]
+    }
+  ],
+  "contradicted_hypotheses": [
+    {
+      "id": "release-caused-it",
+      "claim": "Release 2026.5.14-a caused the checkout 5xx spike.",
+      "must_include": [
+        "2026.5.14-a"
+      ],
+      "contradicting_evidence_ids": [
+        "deploy-2291",
+        "deploy-2292",
+        "trace-5f21"
+      ]
+    }
+  ],
+  "required_open_questions": [
+    {
+      "id": "customer-impact",
+      "question": "How many customers were unable to complete checkout?",
+      "must_include": [
+        "customer"
+      ],
+      "evidence_ids": [
+        "ticket-7742"
+      ]
+    },
+    {
+      "id": "renewal-ownership",
+      "question": "Which team owns renewal automation for the gateway certificate?",
+      "must_include": [
+        "renewal"
+      ],
+      "evidence_ids": [
+        "chat-1204"
+      ]
+    }
+  ],
+  "irrelevant_evidence_ids": [],
+  "rubric": {
+    "misleading_correlation": "deploy-2291 lands 2m11s before the alert and deploy-2292 appears to resolve an incident that had already recovered. A report treating either as causal without testing it should lose semantic support precision.",
+    "conflicting_hypotheses": "chat-1180 and chat-1186 disagree. Both are legitimate evidence of what responders believed; neither is evidence of what happened.",
+    "evidence_gap": "No record states customer impact. A number here is fabricated regardless of how plausible it looks."
+  }
+}

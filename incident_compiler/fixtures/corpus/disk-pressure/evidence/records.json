@@ -1,0 +1,93 @@
+[
+  {
+    "evidence_id": "alert-3301",
+    "observed_at": "2026-03-17T04:30:22Z",
+    "source": "alerts",
+    "title": "media-api upload failure ratio above objective",
+    "body": "Alert media-upload-failures fired at 04:30:22Z. POST /v1/media failing at 0.48 of attempts against an objective of 0.01. Alert cleared at 05:18:40Z."
+  },
+  {
+    "evidence_id": "alert-3302",
+    "observed_at": "2026-03-17T04:31:05Z",
+    "source": "alerts",
+    "title": "nightly-backup job duration above objective",
+    "body": "Alert backup-duration fired at 04:31:05Z. The nightly backup for the reporting database took 96 minutes against an objective of 60. This job runs on the reporting cluster and shares no capacity with media-api."
+  },
+  {
+    "evidence_id": "alert-3303",
+    "observed_at": "2026-03-17T04:33:41Z",
+    "source": "alerts",
+    "title": "certificate expiring within 30 days",
+    "body": "Alert certificate-expiry-warning fired at 04:33:41Z for cdn-edge.example.com, which expires in 27 days. This is a scheduled advisory alert unrelated to any request path."
+  },
+  {
+    "evidence_id": "alert-3304",
+    "observed_at": "2026-03-17T04:40:12Z",
+    "source": "alerts",
+    "title": "analytics-ingest consumer lag warning",
+    "body": "Alert analytics-lag fired at 04:40:12Z. The analytics ingest consumer is 12000 messages behind. This consumer reads a topic media-api does not produce to."
+  },
+  {
+    "evidence_id": "log-11902",
+    "observed_at": "2026-03-17T04:29:47Z",
+    "source": "logs",
+    "title": "media-api node volume full",
+    "body": "media-api node media-3: writes to /var/lib/media-staging failing with ENOSPC beginning 04:29:47Z. The volume is 100% used. Uploads are staged to this volume before transfer to object storage."
+  },
+  {
+    "evidence_id": "log-12240",
+    "observed_at": "2026-03-17T04:30:19Z",
+    "source": "logs",
+    "title": "upload requests return 500",
+    "body": "media-api: POST /v1/media returning 500 staging_write_failed. Every failing request was routed to node media-3."
+  },
+  {
+    "evidence_id": "metric-disk-usage",
+    "observed_at": "2026-03-17T04:29:47Z",
+    "source": "metrics",
+    "title": "staging volume usage series",
+    "body": "Series media_staging_volume_used_ratio on media-3 rose steadily from 0.61 to 1.00 between 2026-03-10 and 2026-03-17. No alert is configured on this series at any threshold."
+  },
+  {
+    "evidence_id": "log-12905",
+    "observed_at": "2026-03-17T05:18:22Z",
+    "source": "logs",
+    "title": "staging volume reclaimed",
+    "body": "media-api node media-3: an operator deleted 412GB of orphaned staging files at 05:18:22Z. Volume usage fell to 0.34 and uploads succeeded again by 05:18:40Z."
+  },
+  {
+    "evidence_id": "deploy-1440",
+    "observed_at": "2026-03-16T18:20:00Z",
+    "source": "deployments",
+    "title": "media-api release 12.4.0",
+    "body": "Release 12.4.0 deployed at 18:20:00Z on 2026-03-16, ten hours before the incident. Changes: adds an image format to the accepted list."
+  },
+  {
+    "evidence_id": "chat-7701",
+    "observed_at": "2026-03-17T04:44:30Z",
+    "source": "chat",
+    "title": "responder overwhelmed by alert volume",
+    "body": "Responder N: 'We have four alerts firing. Backup duration, a cert warning, analytics lag, and the upload failures. Are these related? Do we have a platform-wide problem?'"
+  },
+  {
+    "evidence_id": "chat-7709",
+    "observed_at": "2026-03-17T04:51:18Z",
+    "source": "chat",
+    "title": "responder separates the alerts",
+    "body": "Responder O: 'Only the upload alert is ours. Backup runs on the reporting cluster, the cert warning is a 27-day advisory, and analytics reads a topic we do not produce to. Every failing upload is on media-3, whose staging volume is full.'"
+  },
+  {
+    "evidence_id": "chat-7730",
+    "observed_at": "2026-03-17T05:22:00Z",
+    "source": "chat",
+    "title": "responder raises monitoring gap",
+    "body": "Responder O: 'The volume filled over a week and nothing alerted. Nobody has checked whether the other media nodes are close to full, or why orphaned staging files are never cleaned up.'"
+  },
+  {
+    "evidence_id": "ticket-4408",
+    "observed_at": "2026-03-17T04:36:00Z",
+    "source": "tickets",
+    "title": "INC-4408 opened",
+    "body": "INC-4408 opened at 04:36:00Z, severity 2, title 'Media uploads failing'. The ticket records no count of failed uploads and none was added before resolution."
+  }
+]

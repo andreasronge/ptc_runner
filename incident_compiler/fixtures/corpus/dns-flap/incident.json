@@ -1,0 +1,32 @@
+{
+  "incident_id": "dns-flap",
+  "title": "Intermittent upstream resolution failures",
+  "opened_at": "2026-05-29T22:05:00Z",
+  "origin": "synthesized",
+  "sources": [
+    {
+      "source": "alerts",
+      "description": "Monitoring alerts raised against API service objectives."
+    },
+    {
+      "source": "deployments",
+      "description": "Release and infrastructure change events."
+    },
+    {
+      "source": "logs",
+      "description": "Application and resolver log excerpts. Timestamps are recorded by the emitting host."
+    },
+    {
+      "source": "traces",
+      "description": "Distributed trace summaries sampled during the incident."
+    },
+    {
+      "source": "chat",
+      "description": "Responder messages from the incident channel."
+    },
+    {
+      "source": "tickets",
+      "description": "Ticket activity linked to the incident."
+    }
+  ]
+}

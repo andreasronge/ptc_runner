@@ -1,0 +1,32 @@
+{
+  "incident_id": "disk-pressure",
+  "title": "Media upload failures",
+  "opened_at": "2026-03-17T04:30:00Z",
+  "origin": "synthesized",
+  "sources": [
+    {
+      "source": "alerts",
+      "description": "Monitoring alerts raised across the platform during the incident window, not only for the affected service."
+    },
+    {
+      "source": "deployments",
+      "description": "Release events recorded by the delivery pipeline."
+    },
+    {
+      "source": "logs",
+      "description": "Application and node log excerpts retained for the incident window."
+    },
+    {
+      "source": "metrics",
+      "description": "Numeric series exported for the incident window."
+    },
+    {
+      "source": "chat",
+      "description": "Responder messages from the incident channel."
+    },
+    {
+      "source": "tickets",
+      "description": "Ticket activity linked to the incident."
+    }
+  ]
+}

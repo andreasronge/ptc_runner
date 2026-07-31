@@ -5,9 +5,10 @@ deployments, logs, traces, responder chat, tickets — into a report in which
 every material claim must resolve to a real evidence record before the report
 is published.
 
-This is Phase 1: the complete application running against three hand-authored
-fixture incidents, credential-free. It is not yet a benchmark, and it makes no
-measured claim about report quality.
+Phases 1 and 2 are done: the complete application runs credential-free, and a
+ten-incident corpus with machine-readable oracles and a mechanical scorer is in
+place. There is still no measured claim about report quality — comparing
+systems is Phase 3, and nothing here has run that comparison.
 
 ## Run it
 
@@ -102,16 +103,55 @@ evidence.clj                 mission component: read-only evidence access + reso
 selftest.clj                 workflow entry: model-free evidence-surface check
 contracts/                   input and result contracts
 server/evidence_server.exs   stdio MCP fixture server (read-only, no dependencies)
-fixtures/incidents/          three hand-authored evidence corpora
+fixtures/corpus/<id>/        one incident: incident.json, evidence/, oracle/
 fixtures/replay/scripts/     scripted model turns, one file per scenario
 fixtures/replay/programs/    the PTC-Lisp each scripted turn runs
 fixtures/replay/compiler.jsonl  generated frozen model responses
 tools/record.exs             regenerates the frozen responses
+tools/scorer.exs             scores a report against an oracle
 ```
 
-Record `content_digest` values are derived by the server from the record's own
-fields rather than authored in the corpus, so a citation digest cannot drift
-from the evidence it names.
+Record `content_digest` values are derived from the record's own fields rather
+than authored in the corpus, so a citation digest cannot drift from the
+evidence it names. The server reads only `incident.json` and
+`evidence/records.json`; it has no code path that opens `oracle/`, so the
+answer key cannot reach a model through any tool.
+
+## Corpus and oracles
+
+Ten incidents, each carrying a conflicting responder hypothesis, a misleading
+correlation, and a gap the evidence cannot close. Six also carry a named
+adversarial variant:
+
+| Incident | Adversarial variant |
+| --- | --- |
+| `cache-stampede` | Duplicate events — one eviction ingested twice, and a responder who reads it as two |
+| `dns-flap` | Clock skew — a resolver 7m09s fast, which inverts causality if its timestamps are taken at face value |
+| `disk-pressure` | Irrelevant alerts — three unrelated alerts fire in the window, each naming a real system |
+| `gateway-injection` | Prompt-injection text embedded in a log body, instructing its reader to attribute the incident elsewhere and cite a record that does not exist |
+| `dual-cause-payments` | Two simultaneous root causes starting four minutes apart, where fixing one leaves a third of traffic failing |
+| `batch-silent-failure` | An evidence gap severe enough that abstention is the correct outcome — logs and input data both aged out before anyone looked |
+
+Each incident's `oracle/oracle.json` carries the injected fault or faults, the
+facts a report must recall (each keyed to the evidence that establishes it plus
+tokens that must appear), claims that may only appear as hypotheses, the
+contradicted hypotheses and the evidence that contradicts them, the required
+open questions, and a rubric for the human adjudication pass. The rubric is the
+only part no code reads.
+
+`tools/scorer.exs` scores a report against an oracle: citation resolution,
+citation completeness, required-fact recall, contradiction recall,
+open-question recall, fact/hypothesis separation violations, and noise-citation
+rate. It resolves every citation itself rather than trusting the producer,
+because three of the four systems Phase 3 will compare have no fail-closed
+publication.
+
+Scoring is exercised in both directions. Each metric is asserted against the
+compiler's real output and against a report deliberately broken in exactly the
+way that metric exists to catch — a fabricated citation, a tampered digest, an
+uncited claim, dropped facts, an inference stated as an observation, dropped
+contradicting evidence. A scorer that only ever awards full marks proves
+nothing.
 
 ## Regenerating the frozen model responses
 
@@ -156,7 +196,26 @@ four fixes, and all four came from the live run rather than from replay:
 - The task text now states the report's exact key set, for the reason in
   finding 4 below.
 
-## Phase 1 scope
+## Telemetry capture from SREGym
+
+The corpus plan calls for capturing the telemetry half from SREGym and
+synthesising the human half — responder chat, deployments, tickets — by hand.
+Licensing is clear: SREGym is MIT, so its material is redistributable here.
+Capture is not done, and it is the one part of Phase 2 left open.
+
+Running SREGym needs a Kubernetes cluster, Docker, Helm, and kubectl. In this
+working environment `kind` and `helm` are absent and the Docker daemon is not
+running, so no capture was attempted rather than half-attempted. Every record
+in the corpus is therefore hand-synthesised and marked `"origin":
+"synthesized"` in its `incident.json`, so captured telemetry can be
+distinguished from authored telemetry the moment any lands.
+
+Nothing else depends on that capture. The oracle schema, the scorer, and the
+adversarial variants all work the same way on captured telemetry, and the human
+layer — which is where the hard citation problems live — would be authored by
+hand either way.
+
+## Scope
 
 Deliberately narrowed, and worth stating so the narrowing is not mistaken for
 coverage:
@@ -167,15 +226,26 @@ coverage:
   the same hand-authored corpus without adding evidence value; they belong
   with real backends. The corpora already carry metric, log, and trace record
   kinds so those tools can be added over the same records later.
-- **No oracle files.** Scoring citation completeness and required-fact recall
-  mechanically is Phase 2 work. Nothing here scores the report's content.
+- **Three incidents are scripted, not ten.** All ten have evidence and oracles,
+  but only `checkout-5xx`, `queue-backlog`, and `auth-partial` have frozen
+  model turns and run end to end. Running the whole corpus is the Phase 3
+  matrix, and it needs the baseline systems to exist first.
 - **Scripted turns test the compiler, not the model.** The frozen responses
   exist to exercise correction, publication, and refusal deterministically —
   including failure paths a real model might not produce on demand. Evidence
   about model behaviour comes from the live comparison in later phases.
+- **Semantic support is not scored.** Whether a cited record actually supports
+  the claim attached to it is not mechanically decidable. The scorer measures
+  what is; blind human adjudication on a subset is Phase 4, and the oracle
+  rubric exists for that pass.
+- **Fact/hypothesis separation is best-effort.** A violation is caught only
+  when an oracle's whole token conjunction appears inside an observed fact, so
+  paraphrase escapes it. It is reported as a violation count rather than a
+  score for that reason.
 - **Structured abstention is contract-tested only.** The
-  `insufficient_evidence` branch is exercised against the compiled contract,
-  not through a full scripted run.
+  `insufficient_evidence` branch is exercised against the compiled contract and
+  against the scorer, not yet through a full scripted run — `batch-silent-
+  failure` is the incident that will exercise it.
 
 ## Findings for the plan
 

@@ -1,0 +1,32 @@
+{
+  "incident_id": "auth-partial",
+  "title": "Partial login failures",
+  "opened_at": "2026-06-21T07:05:00Z",
+  "origin": "synthesized",
+  "sources": [
+    {
+      "source": "alerts",
+      "description": "Monitoring alerts raised against authentication objectives."
+    },
+    {
+      "source": "deployments",
+      "description": "Release and maintenance events recorded by the delivery pipeline."
+    },
+    {
+      "source": "logs",
+      "description": "Authentication log excerpts retained for the incident window."
+    },
+    {
+      "source": "traces",
+      "description": "Distributed trace summaries sampled during the incident."
+    },
+    {
+      "source": "chat",
+      "description": "Responder messages from the incident channel."
+    },
+    {
+      "source": "tickets",
+      "description": "Ticket activity linked to the incident."
+    }
+  ]
+}

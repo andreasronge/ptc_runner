@@ -1,0 +1,86 @@
+[
+  {
+    "evidence_id": "alert-5501",
+    "observed_at": "2026-06-09T03:40:18Z",
+    "source": "alerts",
+    "title": "object-storage write error ratio above objective",
+    "body": "Alert storage-write-errors fired at 03:40:18Z. Writes to the primary object-storage endpoint failing at 0.55 against an objective of 0.01. Alert cleared at 05:02:10Z."
+  },
+  {
+    "evidence_id": "alert-5502",
+    "observed_at": "2026-06-09T03:44:00Z",
+    "source": "alerts",
+    "title": "documentation site build failed",
+    "body": "Alert docs-build-failed fired at 03:44:00Z. The scheduled documentation build failed on a broken external link. This job runs in CI and touches no production capacity."
+  },
+  {
+    "evidence_id": "infra-8801",
+    "observed_at": "2026-06-09T03:38:30Z",
+    "source": "deployments",
+    "title": "storage failover to secondary region initiated",
+    "body": "An automated failover moved object-storage writes from primary to secondary at 03:38:30Z after the primary endpoint failed three consecutive health checks."
+  },
+  {
+    "evidence_id": "log-33110",
+    "observed_at": "2026-06-09T03:38:55Z",
+    "source": "logs",
+    "title": "secondary accepts writes but rejects large objects",
+    "body": "storage-proxy: writes to the secondary endpoint succeeding for objects under 5MB and failing with 413 payload_too_large above it. The secondary's per-object limit is 5MB; the primary's is 100MB. The failover did not compare endpoint limits."
+  },
+  {
+    "evidence_id": "log-33480",
+    "observed_at": "2026-06-09T03:41:02Z",
+    "source": "logs",
+    "title": "failing writes are large objects only",
+    "body": "storage-proxy: every failing write in the incident window carries a payload above 5MB. Writes below that threshold succeeded throughout at the normal rate."
+  },
+  {
+    "evidence_id": "log-34900",
+    "observed_at": "2026-06-09T05:01:50Z",
+    "source": "logs",
+    "title": "primary restored and writes returned",
+    "body": "storage-proxy: writes moved back to the primary endpoint at 05:01:50Z after it passed health checks. The 413 responses stopped and the error ratio returned to 0.002 by 05:02:10Z."
+  },
+  {
+    "evidence_id": "metric-object-size",
+    "observed_at": "2026-06-09T03:45:00Z",
+    "source": "metrics",
+    "title": "object size distribution series, partial retention",
+    "body": "Series storage_object_size_bytes is retained at full resolution for 24 hours and in five-minute rollups beyond that. Rollups show roughly 0.55 of writes above 5MB during the window, consistent with the observed error ratio. Per-object detail for this window is no longer available."
+  },
+  {
+    "evidence_id": "chat-8810",
+    "observed_at": "2026-06-09T03:52:00Z",
+    "source": "chat",
+    "title": "responder attributes failures to the failover itself",
+    "body": "Responder V: 'The failover fired at 03:38:30 and errors started immediately. The failover is broken, let us fail back right now.'"
+  },
+  {
+    "evidence_id": "chat-8822",
+    "observed_at": "2026-06-09T04:06:30Z",
+    "source": "chat",
+    "title": "responder narrows to object size",
+    "body": "Responder W: 'The failover worked. Every failing write is over 5MB and the secondary caps objects at 5MB while the primary allows 100MB. Small writes never stopped. Failing back before the primary is healthy would take out everything, not just large objects.'"
+  },
+  {
+    "evidence_id": "chat-8848",
+    "observed_at": "2026-06-09T05:05:00Z",
+    "source": "chat",
+    "title": "remaining questions",
+    "body": "Responder W: 'Primary is back. Nobody has established why the primary failed its health checks in the first place, and nobody has checked whether the failover automation compares endpoint limits before switching.'"
+  },
+  {
+    "evidence_id": "ticket-7001",
+    "observed_at": "2026-06-09T03:47:00Z",
+    "source": "tickets",
+    "title": "INC-7001 opened",
+    "body": "INC-7001 opened at 03:47:00Z, severity 2, title 'Storage writes failing'. The ticket records no count of rejected uploads and none was added before resolution."
+  },
+  {
+    "evidence_id": "ticket-7014",
+    "observed_at": "2026-06-09T06:00:00Z",
+    "source": "tickets",
+    "title": "INC-7001 resolution note",
+    "body": "INC-7001 marked resolved at 06:00:00Z. Resolution note reads 'failed back to primary'. It does not record the object-size limit mismatch, nor the unexplained primary health-check failures."
+  }
+]
