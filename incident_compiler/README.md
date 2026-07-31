@@ -288,8 +288,9 @@ coverage:
 
 ## Findings for the plan
 
-Phase 1 exists partly to discover what the runtime cannot yet express. Four
-things surfaced while building it:
+Phase 1 exists partly to discover what the runtime cannot yet express. Five
+things surfaced while building it, and one of them was a runtime bug this
+branch fixes:
 
 1. **The canonical annotation vocabulary is closed.** `SafeMetadata` admits
    only `progress` and `agent-action`, and `progress` carries a single `stage`
@@ -310,19 +311,34 @@ things surfaced while building it:
    violation gets. Closing that would need either an application-supplied
    in-loop validator or a contract keyword that can express resolution.
 
-4. **An `additionalProperties` violation cannot be corrected from its own
-   feedback.** The result-contract classification names the path of an
-   undeclared key but replaces the key itself with `(undeclared)`, because the
-   name is caller-authored content. That redaction is right, and it leaves the
-   model told *where* it erred and not *what* it added — against a live model
-   this produced `timeline[9].(undeclared)` on five consecutive correction
-   turns until the run died at its turn limit. The workaround is for the
-   application to publish its own key set in the prompt, which this one now
-   does. It works, and it means every application with a closed contract must
-   restate that contract in prose or spend its correction budget guessing.
+4. **Tagged-union contracts reported the wrong violation, on every failure.**
+   `ValueContract.classify/2` picked the branch's error units by list position,
+   assuming `JSV.normalize_error/1` returns one unit per `oneOf` alternative in
+   schema order. It returns a flat list ordered by instance location instead,
+   so indexing it landed on whichever alternative happened to sit there —
+   almost always one the discriminator had not selected, whose only complaint
+   is that it was handed keys it never declared. Five different defects in this
+   application's contract — an empty citation array, a malformed digest, a
+   missing required key, a bad enum, an undeclared key — all reported the
+   identical violation at `timeline`, and a minimal reproduction reported
+   `kind: :const` on the discriminator itself, telling the model the one field
+   it had got right was wrong. Fixed by selecting units on their
+   `schemaLocation` prefix; each of the five now names its own field. The
+   existing test for this passed throughout, because its union happens to
+   select branch 1 and the list happened to put a usable unit there.
 
-The first two are small. The third and fourth are worth carrying into the
-abstraction-feedback discussion: the third is the difference between "the
-model gets one chance to fix a fabricated citation" and "the run is lost," and
-the fourth is a correction protocol that cannot correct the most common closed-
-schema failure without help the runtime does not provide.
+5. **An undeclared key still cannot be named back.** With the above fixed, the
+   classification points at the right object but still renders the offending
+   key as `(undeclared)`, correctly, since the name is caller-authored content.
+   An application with a closed contract therefore still has to publish its own
+   key set in the prompt. `ValueContract.describe/1` exists to generate exactly
+   that from the compiled schema — its own documentation says a prompt that
+   paraphrases its schema drifts from it — but nothing in `lib/` calls it and
+   no capability exposes it, so this application hand-writes the shape and
+   carries the drift risk the function was built to remove.
+
+The first two are small. The third is the difference between "the model gets
+one chance to fix a fabricated citation" and "the run is lost." The fourth was
+silently degrading every correction turn any tagged-union contract has ever
+run, and is fixed. The fifth is a function that already exists and needs only
+to be reachable.

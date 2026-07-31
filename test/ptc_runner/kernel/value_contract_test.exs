@@ -251,6 +251,39 @@ defmodule PtcRunner.Kernel.ValueContractTest do
              ])
   end
 
+  test "reports the selected branch's fault, not another branch's undeclared keys" do
+    assert {:ok, contract} = ValueContract.compile(report_schema())
+
+    classification =
+      ValueContract.classify(contract, %{
+        "kind" => "report",
+        "facts" => [%{"citations" => []}]
+      })
+
+    assert classification.matched_branch == "report"
+
+    # The selected branch fails on one thing: an empty `citations` array. Every
+    # key of this value is also undeclared in the *other* branch, which rejects
+    # each of them through `additionalProperties: false`. Those rejections carry
+    # no information the caller can act on, and reporting one of them instead
+    # sends a correcting model to the wrong field.
+    assert %{
+             kind: :minItems,
+             segments: [{:property, "facts"}, {:index, 0}, {:property, "citations"}]
+           } in classification.violations
+
+    refute Enum.any?(classification.violations, &(&1.kind == :boolean_schema))
+  end
+
+  test "reports a missing required key of the selected branch" do
+    assert {:ok, contract} = ValueContract.compile(report_schema())
+
+    classification = ValueContract.classify(contract, %{"kind" => "report"})
+
+    assert classification.matched_branch == "report"
+    assert "facts" in classification.missing_required
+  end
+
   test "rejects ambiguous, mismatched, repeated, open, and excessive union branches" do
     [no_change, propose] = decision_schema()["oneOf"]
 
@@ -346,6 +379,46 @@ defmodule PtcRunner.Kernel.ValueContractTest do
             }
           },
           "required" => ["decision", "candidate"]
+        }
+      ]
+    }
+  end
+
+  # A union whose selected branch is index 0 and whose fault is nested. The
+  # `decision_schema/0` union above happens to select index 1, which is why its
+  # violations came out right by accident of ordering rather than by selection.
+  defp report_schema do
+    %{
+      "$schema" => "https://json-schema.org/draft/2020-12/schema",
+      "oneOf" => [
+        %{
+          "type" => "object",
+          "required" => ["kind", "facts"],
+          "properties" => %{
+            "kind" => %{"type" => "string", "const" => "report"},
+            "facts" => %{
+              "type" => "array",
+              "items" => %{
+                "type" => "object",
+                "required" => ["citations"],
+                "properties" => %{
+                  "citations" => %{
+                    "type" => "array",
+                    "minItems" => 1,
+                    "items" => %{"type" => "string"}
+                  }
+                }
+              }
+            }
+          }
+        },
+        %{
+          "type" => "object",
+          "required" => ["kind", "reason"],
+          "properties" => %{
+            "kind" => %{"type" => "string", "const" => "withheld"},
+            "reason" => %{"type" => "string", "maxLength" => 1_000}
+          }
         }
       ]
     }
