@@ -1,0 +1,22 @@
+{
+  "manifest": "ptc.queue-backlog.json",
+  "description": "Explores the corpus and publishes a contract-valid, fully grounded report on the first attempt.",
+  "turns": [
+    {
+      "rationale": "Listing the evidence sources for this incident.",
+      "program": "queue-backlog/01-list-sources.clj"
+    },
+    {
+      "rationale": "Listing every record summary before building a timeline.",
+      "program": "queue-backlog/02-search.clj"
+    },
+    {
+      "rationale": "Reading the body of every record and building a citation helper from the digests they return.",
+      "program": "queue-backlog/03-read-records.clj"
+    },
+    {
+      "rationale": "Two responders proposed causes the records contradict, so both stay as low-confidence hypotheses with their contradicting evidence attached.",
+      "program": "queue-backlog/04-report.clj"
+    }
+  ]
+}

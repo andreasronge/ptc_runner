@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Incident compilation request",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["incident_id"],
+  "properties": {
+    "incident_id": {
+      "type": "string",
+      "description": "Identifier of the incident whose evidence is compiled.",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "format": {
+      "type": "string",
+      "description": "Output template. Templates differ in emphasis, never in what must be cited.",
+      "enum": ["postmortem", "sev-review"]
+    },
+    "agent": {
+      "type": "object",
+      "description": "Bounded agent-loop configuration forwarded to the shared loop.",
+      "additionalProperties": false,
+      "properties": {
+        "max_turns": {"type": "integer", "minimum": 1, "maximum": 32}
+      }
+    }
+  }
+}

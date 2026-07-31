@@ -1,0 +1,106 @@
+{
+  "incident_id": "checkout-5xx",
+  "title": "Checkout API 5xx spike",
+  "opened_at": "2026-05-14T09:12:00Z",
+  "sources": [
+    {"source": "alerts", "description": "Monitoring alerts raised against checkout service objectives."},
+    {"source": "deployments", "description": "Release events recorded by the delivery pipeline."},
+    {"source": "logs", "description": "Application log excerpts retained for the incident window."},
+    {"source": "traces", "description": "Distributed trace summaries sampled during the incident."},
+    {"source": "chat", "description": "Responder messages from the incident channel."},
+    {"source": "tickets", "description": "Ticket activity linked to the incident."}
+  ],
+  "records": [
+    {
+      "evidence_id": "alert-4471",
+      "observed_at": "2026-05-14T09:12:03Z",
+      "source": "alerts",
+      "title": "checkout-api error ratio above objective",
+      "body": "Alert checkout-api-error-ratio fired. Observed 5xx ratio 0.184 over a 5 minute window against an objective of 0.005. Affected route: POST /v2/checkout/submit. Alert remained firing until 09:58:10Z."
+    },
+    {
+      "evidence_id": "alert-4472",
+      "observed_at": "2026-05-14T09:14:41Z",
+      "source": "alerts",
+      "title": "checkout-api latency objective burn",
+      "body": "Alert checkout-api-latency fired. p99 latency for POST /v2/checkout/submit rose from 240ms to 10400ms. The 10400ms value sits at the configured client timeout, which is a ceiling rather than a measured completion time."
+    },
+    {
+      "evidence_id": "deploy-2291",
+      "observed_at": "2026-05-14T09:09:52Z",
+      "source": "deployments",
+      "title": "checkout-api release 2026.5.14-a",
+      "body": "Release 2026.5.14-a deployed to production at 09:09:52Z, two minutes and eleven seconds before alert-4471 fired. Changes: copy edits to three checkout confirmation email templates, and a dependency bump of the CSV export library used by the nightly reconciliation job. No code path in this release is reachable from POST /v2/checkout/submit."
+    },
+    {
+      "evidence_id": "deploy-2292",
+      "observed_at": "2026-05-14T10:04:18Z",
+      "source": "deployments",
+      "title": "checkout-api rollback to 2026.5.13-c",
+      "body": "Rollback of checkout-api to 2026.5.13-c completed at 10:04:18Z. The 5xx ratio had already returned to 0.004 at 09:58:10Z, six minutes before this rollback completed."
+    },
+    {
+      "evidence_id": "log-88120",
+      "observed_at": "2026-05-14T09:11:47Z",
+      "source": "logs",
+      "title": "payments connector TLS handshake failures begin",
+      "body": "checkout-api payments-connector: repeated outbound TLS handshake failures to payments-gateway.internal:8443. Error: certificate verify failed: certificate has expired. First occurrence 09:11:47Z, sustained at 40-60 events per second."
+    },
+    {
+      "evidence_id": "log-88455",
+      "observed_at": "2026-05-14T09:12:02Z",
+      "source": "logs",
+      "title": "checkout submit returns 502",
+      "body": "checkout-api: POST /v2/checkout/submit returning 502 upstream_unavailable after payments-connector exhausted 3 retries. Correlated with payments-connector TLS failures."
+    },
+    {
+      "evidence_id": "log-90013",
+      "observed_at": "2026-05-14T09:57:55Z",
+      "source": "logs",
+      "title": "payments connector recovers",
+      "body": "checkout-api payments-connector: outbound TLS handshakes to payments-gateway.internal:8443 succeeding again. Error rate returned to baseline at 09:57:55Z."
+    },
+    {
+      "evidence_id": "trace-5f21",
+      "observed_at": "2026-05-14T09:20:10Z",
+      "source": "traces",
+      "title": "sampled failing checkout trace",
+      "body": "Trace 5f21c0: POST /v2/checkout/submit total 10402ms. Span checkout.validate 12ms ok. Span payments.authorize 10388ms error, terminated by client timeout, no upstream response recorded. No span entered the email template or CSV export code paths."
+    },
+    {
+      "evidence_id": "chat-1180",
+      "observed_at": "2026-05-14T09:17:22Z",
+      "source": "chat",
+      "title": "responder attributes incident to the release",
+      "body": "Responder A: 'We shipped 2026.5.14-a two minutes before this started. That is almost certainly the cause, let us roll it back.'"
+    },
+    {
+      "evidence_id": "chat-1186",
+      "observed_at": "2026-05-14T09:23:05Z",
+      "source": "chat",
+      "title": "responder disputes the release attribution",
+      "body": "Responder B: 'The release only touched email templates and the CSV export dependency. Nothing in it is on the submit path. The connector logs show expired-certificate TLS failures starting at 09:11:47Z, which is before the alert but after the deploy. I think we are looking at the payments gateway certificate.'"
+    },
+    {
+      "evidence_id": "chat-1204",
+      "observed_at": "2026-05-14T09:59:40Z",
+      "source": "chat",
+      "title": "gateway team reports certificate rotation",
+      "body": "Responder C from the payments-gateway team: 'Our leaf certificate for payments-gateway.internal expired at 09:11:40Z. We rotated it and it took effect at 09:57:50Z. We have no record of who owns the renewal automation for that host.'"
+    },
+    {
+      "evidence_id": "ticket-7742",
+      "observed_at": "2026-05-14T09:15:00Z",
+      "source": "tickets",
+      "title": "INC-7742 opened",
+      "body": "INC-7742 opened at 09:15:00Z, severity 1, title 'Checkout submit failing for all customers'. Impact field left empty. No customer-impact estimate was recorded at any point during the incident."
+    },
+    {
+      "evidence_id": "ticket-7749",
+      "observed_at": "2026-05-14T10:22:00Z",
+      "source": "tickets",
+      "title": "INC-7742 resolution note",
+      "body": "INC-7742 marked resolved. Resolution note reads only 'rolled back and recovered'. The note does not mention the certificate rotation reported in the incident channel."
+    }
+  ]
+}

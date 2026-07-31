@@ -1,0 +1,100 @@
+{
+  "version": 1,
+  "workflow": {
+    "components": [
+      {
+        "id": "incident.compiler",
+        "path": "compiler.clj",
+        "dependencies": [
+          "agent.core",
+          "kernel",
+          "result",
+          "workflow.event"
+        ]
+      },
+      {
+        "library": "agent.core"
+      },
+      {
+        "library": "agent.feedback"
+      },
+      {
+        "library": "agent.native"
+      },
+      {
+        "library": "agent.prompt"
+      },
+      {
+        "library": "agent.retry"
+      },
+      {
+        "library": "kernel"
+      },
+      {
+        "library": "llm"
+      },
+      {
+        "library": "result"
+      },
+      {
+        "library": "workflow.event"
+      }
+    ],
+    "entry": "incident.compiler/run"
+  },
+  "mission": {
+    "components": [
+      {
+        "id": "incident.evidence",
+        "path": "evidence.clj"
+      }
+    ],
+    "data": {}
+  },
+  "input": {
+    "value": {
+      "incident_id": "auth-partial",
+      "format": "postmortem",
+      "agent": {
+        "max_turns": 16
+      }
+    }
+  },
+  "contracts": {
+    "input_schema": {
+      "path": "contracts/task.schema.json"
+    },
+    "result_schema": {
+      "path": "contracts/report.schema.json"
+    }
+  },
+  "providers": {
+    "workflow": [
+      {
+        "name": "frozen-model"
+      }
+    ],
+    "mission": [
+      {
+        "name": "evidence"
+      }
+    ]
+  },
+  "limits": {
+    "run_duration_ms": 300000,
+    "workflow_capability_calls": 256,
+    "mission_capability_calls": 512,
+    "subordinate_evaluations": 32,
+    "workflow_timeout_ms": 300000,
+    "evaluation_timeout_ms": 30000,
+    "normal_event_count": 4096,
+    "workflow_capability_calls_per_name": 64,
+    "mission_capability_calls_per_name": 512
+  },
+  "labels": {
+    "name": "incident-evidence-compiler",
+    "tags": {
+      "mode": "agent"
+    }
+  }
+}

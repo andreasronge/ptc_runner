@@ -1,0 +1,91 @@
+{
+  "credentials": {
+    "openrouter_key": {
+      "env": "OPENROUTER_API_KEY"
+    }
+  },
+  "limits": {
+    "run_duration_ms": 600000,
+    "workflow_timeout_ms": 600000,
+    "evaluation_timeout_ms": 60000,
+    "subordinate_evaluations": 64,
+    "workflow_capability_calls": 256,
+    "workflow_capability_calls_per_name": 256,
+    "mission_capability_calls": 1024,
+    "mission_capability_calls_per_name": 1024,
+    "normal_event_count": 8192,
+    "normal_event_bytes": 64000000
+  },
+  "install": {
+    "evidence": {
+      "source": "mcp",
+      "transport": {
+        "type": "stdio",
+        "command": "elixir",
+        "cwd": ".",
+        "args": [
+          "server/evidence_server.exs",
+          "--corpus-dir",
+          "fixtures/incidents"
+        ],
+        "inherit_environment": true,
+        "env": {},
+        "start_timeout_ms": 30000
+      },
+      "tools": {
+        "evidence_list_sources": {
+          "as": "evidence.list_sources",
+          "effect": "read",
+          "description": "List the evidence sources available for one incident.",
+          "model_visible": true
+        },
+        "evidence_search": {
+          "as": "evidence.search",
+          "effect": "read",
+          "description": "Search one incident's evidence summaries by free text and source.",
+          "model_visible": true
+        },
+        "evidence_get": {
+          "as": "evidence.get",
+          "effect": "read",
+          "description": "Fetch one evidence record with its body and content digest.",
+          "model_visible": true
+        },
+        "evidence_snapshot": {
+          "as": "evidence.snapshot",
+          "effect": "read",
+          "description": "Return the content identity of the installed evidence corpora.",
+          "model_visible": false
+        }
+      },
+      "snapshot_identity": {
+        "tool": "evidence_snapshot",
+        "field": "snapshot_hash"
+      },
+      "installation_revision": "incident-evidence-fixture-0.1.0",
+      "ceilings": {
+        "timeout_ms": 60000,
+        "max_catalog_tools": 8,
+        "max_result_bytes": 262144
+      }
+    },
+    "frozen-model": {
+      "source": "llm_replay",
+      "fixtures": "fixtures/replay/compiler.jsonl",
+      "ceilings": {
+        "max_entries": 512,
+        "max_result_bytes": 262144
+      }
+    },
+    "live-model": {
+      "source": "llm",
+      "model": "openrouter:deepseek/deepseek-v3.2",
+      "credential": "openrouter_key",
+      "cache": false,
+      "params": {
+        "temperature": 0,
+        "seed": 7
+      }
+    }
+  }
+}

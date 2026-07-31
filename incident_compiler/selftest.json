@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "workflow": {
+    "components": [
+      {"id": "incident.selftest", "path": "selftest.clj", "dependencies": ["kernel", "result"]},
+      {"library": "kernel"},
+      {"library": "result"}
+    ],
+    "entry": "incident.selftest/run"
+  },
+  "mission": {
+    "components": [
+      {"id": "incident.evidence", "path": "evidence.clj"}
+    ],
+    "data": {}
+  },
+  "input": {
+    "value": {"incident_id": "checkout-5xx"}
+  },
+  "providers": {
+    "mission": [
+      {"name": "evidence"}
+    ]
+  },
+  "labels": {
+    "name": "incident-evidence-selftest",
+    "tags": {"mode": "deterministic"}
+  }
+}

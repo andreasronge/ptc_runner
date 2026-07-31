@@ -1,0 +1,22 @@
+{
+  "manifest": "ptc.auth-partial.json",
+  "description": "Publishes a structurally perfect report containing one fabricated citation. The result contract accepts it; citation resolution refuses it and the run fails closed.",
+  "turns": [
+    {
+      "rationale": "Listing the evidence sources for this incident.",
+      "program": "auth-partial/01-list-sources.clj"
+    },
+    {
+      "rationale": "Listing every record summary before building a timeline.",
+      "program": "auth-partial/02-search.clj"
+    },
+    {
+      "rationale": "Reading the body of every record and building a citation helper from the digests they return.",
+      "program": "auth-partial/03-read-records.clj"
+    },
+    {
+      "rationale": "Reporting the session-store client upgrade as the cause, and confirming eu-west stayed healthy.",
+      "program": "auth-partial/04-fabricated-citation.clj"
+    }
+  ]
+}

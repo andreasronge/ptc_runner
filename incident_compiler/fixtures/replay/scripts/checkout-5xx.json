@@ -1,0 +1,26 @@
+{
+  "manifest": "ptc.json",
+  "description": "Explores the corpus, drafts a report carrying one uncited impact number, and corrects it after the result contract rejects the draft.",
+  "turns": [
+    {
+      "rationale": "Listing the evidence sources for this incident before reading anything.",
+      "program": "checkout-5xx/01-list-sources.clj"
+    },
+    {
+      "rationale": "Listing every record summary so the timeline comes from the corpus rather than from expectation.",
+      "program": "checkout-5xx/02-search.clj"
+    },
+    {
+      "rationale": "Reading the body of every record and building a citation helper from the digests they return.",
+      "program": "checkout-5xx/03-read-records.clj"
+    },
+    {
+      "rationale": "Drafting the report.",
+      "program": "checkout-5xx/04-uncited-draft.clj"
+    },
+    {
+      "rationale": "The impact figure was not in any record. Withdrawing it from observed facts and recording it as an open question instead.",
+      "program": "checkout-5xx/05-report.clj"
+    }
+  ]
+}
