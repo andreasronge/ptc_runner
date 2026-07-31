@@ -217,7 +217,11 @@ defmodule Mix.Tasks.Ptc.Run do
     end
   end
 
-  defp run_options(opts), do: Keyword.drop(opts, [:host_config, :authorize_mcp, :check])
+  defp run_options(opts) do
+    opts
+    |> Keyword.drop([:host_config, :authorize_mcp, :check])
+    |> Keyword.put(:result_projection, :json)
+  end
 
   defp check(manifest, registry, host, opts) do
     with {:ok, built} <- RunBuilder.load_and_build(manifest, registry, opts) do

@@ -77,6 +77,43 @@ defmodule PtcRunner.Kernel.ComponentOverrideTest do
     end
 
     @tag :tmp_dir
+    test "candidate source uses the portable logical-name grammar", context do
+      paths = write_application(context, context.base, path: "Candidate.clj")
+      File.write!(Path.join(Path.dirname(paths.descriptor), "Candidate.clj"), context.base.source)
+
+      assert {:error, :invalid_override_source} =
+               RunBuilder.run(paths.manifest, context.registry,
+                 component_override_descriptor: paths.descriptor
+               )
+    end
+
+    @tag :tmp_dir
+    test "cached candidate symlink may not escape the descriptor directory", context do
+      paths = write_application(context, context.base)
+      override_directory = Path.join(paths.dir, "overrides")
+      File.mkdir_p!(override_directory)
+
+      descriptor =
+        paths.descriptor
+        |> File.read!()
+        |> Jason.decode!()
+        |> Map.put("path", "candidate.clj")
+
+      descriptor_path = Path.join(override_directory, "override.json")
+      File.write!(descriptor_path, Jason.encode!(descriptor))
+
+      File.ln_s!(
+        "../agent.retry.candidate.clj",
+        Path.join(override_directory, "candidate.clj")
+      )
+
+      assert {:error, :invalid_override_source} =
+               RunBuilder.run(paths.manifest, context.registry,
+                 component_override_descriptor: descriptor_path
+               )
+    end
+
+    @tag :tmp_dir
     test "the descriptor accepts exactly the four documented fields", context do
       for mutation <- [
             %{"extra" => true},

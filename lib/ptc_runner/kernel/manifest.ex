@@ -60,13 +60,13 @@ defmodule PtcRunner.Kernel.Manifest do
   escape. Loading performs no workflow execution.
   """
 
-  alias Jason.OrderedObject
+  alias PtcRunner.Kernel.ApplicationSource
   alias PtcRunner.Kernel.Component
-  alias PtcRunner.Kernel.ConfinedFile
   alias PtcRunner.Kernel.JSONValue
   alias PtcRunner.Kernel.Library
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.SafeMetadata
+  alias PtcRunner.Kernel.StrictJSON
   alias PtcRunner.Kernel.ValueContract
 
   @max_manifest_bytes 1_000_000
@@ -76,13 +76,16 @@ defmodule PtcRunner.Kernel.Manifest do
   @top_keys ~w($schema version workflow mission input contracts providers limits events labels)
 
   @enforce_keys [
-    :path,
-    :directory,
+    :document,
     :workflow_components,
+    :workflow_component_kinds,
     :mission_components,
+    :mission_component_kinds,
     :entry,
+    :input_declaration,
     :input,
     :contracts,
+    :contract_sources,
     :mission_data,
     :providers,
     :limits,
@@ -93,13 +96,16 @@ defmodule PtcRunner.Kernel.Manifest do
   defstruct @enforce_keys
 
   @type t :: %__MODULE__{
-          path: binary(),
-          directory: binary(),
+          document: map(),
           workflow_components: [Component.t()],
+          workflow_component_kinds: %{binary() => :local | :library},
           mission_components: [Component.t()],
+          mission_component_kinds: %{binary() => :local | :library},
           entry: binary(),
-          input: map(),
+          input_declaration: map(),
+          input: map() | nil,
           contracts: %{input: ValueContract.t() | nil, result: ValueContract.t() | nil},
+          contract_sources: %{input: binary() | nil, result: binary() | nil},
           mission_data: map(),
           providers: %{workflow: [map()], mission: [map()]},
           limits: Limits.t(),
@@ -113,32 +119,92 @@ defmodule PtcRunner.Kernel.Manifest do
   def load(path, installed_limits \\ Limits.installed_defaults())
 
   def load(path, %Limits{} = installed_limits) when is_binary(path) do
-    with {:ok, path} <- ConfinedFile.resolve_absolute(Path.expand(path)),
-         directory = Path.dirname(path),
-         {:ok, source} <- read_relative(directory, Path.basename(path), @max_manifest_bytes),
-         {:ok, decoded} <- Jason.decode(source, objects: :ordered_objects),
-         {:ok, manifest} <- ordered_map(decoded),
+    with {:ok, source} <- ApplicationSource.open_directory(path) do
+      try do
+        with {:ok, manifest} <- load_source(source, installed_limits),
+             {:ok, _accounting} <- ApplicationSource.finish(source) do
+          {:ok, manifest}
+        end
+      after
+        ApplicationSource.close(source)
+      end
+    end
+  end
+
+  def load(_path, _installed_limits), do: {:error, :invalid_manifest}
+
+  @doc """
+  Loads one manifest from an in-memory portable logical-name/bytes map.
+
+  Every supplied document must belong to the exact referenced closure; unused
+  entries are rejected.
+  """
+  @spec load_memory(binary(), %{binary() => binary()}, Limits.t()) ::
+          {:ok, t()} | {:error, term()}
+  def load_memory(manifest_name, documents, installed_limits \\ Limits.installed_defaults())
+
+  def load_memory(manifest_name, documents, %Limits{} = installed_limits) do
+    with {:ok, source} <- ApplicationSource.open_memory(manifest_name, documents) do
+      try do
+        with {:ok, manifest} <- load_source(source, installed_limits),
+             {:ok, _accounting} <- ApplicationSource.finish(source) do
+          {:ok, manifest}
+        end
+      after
+        ApplicationSource.close(source)
+      end
+    end
+  end
+
+  def load_memory(_manifest_name, _documents, _installed_limits),
+    do: {:error, :invalid_manifest}
+
+  @doc false
+  @spec load_source(ApplicationSource.t(), Limits.t()) :: {:ok, t()} | {:error, term()}
+  def load_source(source, installed_limits),
+    do: load_source(source, installed_limits, materialize_input: true)
+
+  @doc false
+  @spec load_source(ApplicationSource.t(), Limits.t(), keyword()) ::
+          {:ok, t()} | {:error, term()}
+  def load_source(%ApplicationSource{} = source, %Limits{} = installed_limits, opts)
+      when is_list(opts) do
+    materialize_input? = Keyword.get(opts, :materialize_input, true)
+
+    with {:ok, raw} <- ApplicationSource.manifest(source),
+         true <- byte_size(raw) <= @max_manifest_bytes,
+         {:ok, manifest} <- StrictJSON.decode(raw),
+         true <- is_map(manifest) and not is_struct(manifest),
          :ok <- exact_keys(manifest, @top_keys, ~w(version workflow input)),
          :ok <- optional_schema(manifest["$schema"]),
          1 <- manifest["version"],
-         {:ok, workflow} <- workflow(manifest["workflow"], directory),
-         {:ok, mission} <- mission(Map.get(manifest, "mission", %{}), directory),
-         {:ok, contracts} <- contracts(Map.get(manifest, "contracts", %{}), directory),
-         {:ok, input} <- input(manifest["input"], directory),
-         :ok <- validate_input(contracts.input, input),
+         {:ok, workflow} <- workflow(manifest["workflow"], source),
+         {:ok, mission} <- mission(Map.get(manifest, "mission", %{}), source),
+         {:ok, contract_result} <- contracts(Map.get(manifest, "contracts", %{}), source),
+         {:ok, input_declaration} <- input_declaration(manifest["input"]),
+         {:ok, input} <-
+           maybe_materialize_input(
+             input_declaration,
+             source,
+             contract_result.contracts.input,
+             materialize_input?
+           ),
          {:ok, providers} <- providers(Map.get(manifest, "providers", %{})),
          {:ok, limits} <- limits(Map.get(manifest, "limits", %{}), installed_limits),
          {:ok, events} <- events(Map.get(manifest, "events", %{})),
          {:ok, labels} <- SafeMetadata.normalize_labels(Map.get(manifest, "labels", %{})) do
       {:ok,
        %__MODULE__{
-         path: path,
-         directory: directory,
+         document: manifest,
          workflow_components: workflow.components,
+         workflow_component_kinds: workflow.kinds,
          mission_components: mission.components,
+         mission_component_kinds: mission.kinds,
          entry: workflow.entry,
+         input_declaration: input_declaration,
          input: input,
-         contracts: contracts,
+         contracts: contract_result.contracts,
+         contract_sources: contract_result.sources,
          mission_data: mission.data,
          providers: providers,
          limits: limits,
@@ -153,7 +219,7 @@ defmodule PtcRunner.Kernel.Manifest do
     end
   end
 
-  def load(_path, _installed_limits), do: {:error, :invalid_manifest}
+  def load_source(_source, _installed_limits, _opts), do: {:error, :invalid_manifest}
 
   defp optional_schema(nil), do: :ok
 
@@ -163,106 +229,129 @@ defmodule PtcRunner.Kernel.Manifest do
 
   defp optional_schema(_value), do: {:error, :invalid_manifest}
 
-  @doc """
-  Replaces the decoded input with a manifest-relative JSON object file.
-
-  The same path confinement and input-size rules as `load/1` apply.
-  """
-  @spec override_input(t(), binary()) :: {:ok, t()} | {:error, term()}
-  def override_input(%__MODULE__{} = manifest, path) when is_binary(path) do
-    with {:ok, value} <- input(%{"path" => path}, manifest.directory),
-         :ok <- validate_input(manifest.contracts.input, value),
-         do: {:ok, %{manifest | input: value}}
-  end
-
-  def override_input(_manifest, _path), do: {:error, :invalid_input}
-
-  defp workflow(value, directory) when is_map(value) do
+  defp workflow(value, source) when is_map(value) do
     with :ok <- exact_keys(value, ~w(components entry), ~w(components entry)),
-         {:ok, components} <- components(value["components"], directory),
+         {:ok, component_result} <- components(value["components"], source),
          entry when is_binary(entry) <- value["entry"],
          true <- String.valid?(entry),
          true <- entry =~ @entry do
-      {:ok, %{components: components, entry: entry}}
+      {:ok,
+       %{components: component_result.components, kinds: component_result.kinds, entry: entry}}
     else
       {:error, _reason} = error -> error
       _ -> {:error, :invalid_workflow_manifest}
     end
   end
 
-  defp workflow(_value, _directory), do: {:error, :invalid_workflow_manifest}
+  defp workflow(_value, _source), do: {:error, :invalid_workflow_manifest}
 
-  defp mission(value, directory) when is_map(value) do
+  defp mission(value, source) when is_map(value) do
     with :ok <- exact_keys(value, ~w(components data), []),
-         {:ok, components} <- components(Map.get(value, "components", []), directory),
+         {:ok, component_result} <- components(Map.get(value, "components", []), source),
          data when is_map(data) <- Map.get(value, "data", %{}),
+         {:ok, data} <- StrictJSON.admit(data),
          true <- JSONValue.map?(data) do
-      {:ok, %{components: components, data: data}}
+      {:ok, %{components: component_result.components, kinds: component_result.kinds, data: data}}
     else
       {:error, _reason} = error -> error
       _ -> {:error, :invalid_mission_manifest}
     end
   end
 
-  defp mission(_value, _directory), do: {:error, :invalid_mission_manifest}
+  defp mission(_value, _source), do: {:error, :invalid_mission_manifest}
 
-  defp components(values, directory) when is_list(values) and length(values) <= 128 do
-    Enum.reduce_while(values, {:ok, []}, fn value, {:ok, components} ->
-      case component(value, directory) do
-        {:ok, component} -> {:cont, {:ok, [component | components]}}
+  defp components(values, source) when is_list(values) and length(values) <= 128 do
+    Enum.reduce_while(values, {:ok, []}, fn value, {:ok, selections} ->
+      case component(value, source) do
+        {:ok, selection} -> {:cont, {:ok, [selection | selections]}}
         {:error, _reason} = error -> {:halt, error}
       end
     end)
     |> case do
-      {:ok, components} -> components |> Enum.reverse() |> Library.resolve_components()
-      error -> error
+      {:ok, selections} ->
+        selections = Enum.reverse(selections)
+        local_ids = for {%Component{id: id}, :local} <- selections, into: MapSet.new(), do: id
+
+        with {:ok, components} <-
+               selections
+               |> Enum.map(&elem(&1, 0))
+               |> Library.resolve_components() do
+          kinds =
+            Map.new(components, fn component ->
+              {component.id,
+               if(MapSet.member?(local_ids, component.id), do: :local, else: :library)}
+            end)
+
+          {:ok, %{components: components, kinds: kinds}}
+        end
+
+      error ->
+        error
     end
   end
 
-  defp components(_values, _directory), do: {:error, :invalid_components}
+  defp components(_values, _source), do: {:error, :invalid_components}
 
-  defp component(%{"library" => library} = value, _directory) do
+  defp component(%{"library" => library} = value, _source) do
     with :ok <- exact_keys(value, ~w(library), ~w(library)),
          true <- is_binary(library) and String.valid?(library) do
-      {:ok, {:library, library}}
+      {:ok, {{:library, library}, :library}}
     else
       _ -> {:error, :invalid_component}
     end
   end
 
-  defp component(value, directory) when is_map(value) do
+  defp component(value, source) when is_map(value) do
     with :ok <- exact_keys(value, ~w(id path dependencies), ~w(id path)),
          path when is_binary(path) <- value["path"],
-         {:ok, source} <- read_relative(directory, path, 2_000_000),
+         {:ok, component_source} <-
+           ApplicationSource.read_reference(source, path, 2_000_000),
          {:ok, component} <-
            Component.new(
              id: value["id"],
-             source: source,
+             source: component_source,
              dependencies: Map.get(value, "dependencies", []),
              origin: path
            ) do
-      {:ok, component}
+      {:ok, {component, :local}}
     else
       _ -> {:error, :invalid_component}
     end
   end
 
-  defp component(_value, _directory), do: {:error, :invalid_component}
+  defp component(_value, _source), do: {:error, :invalid_component}
 
-  defp input(%{"value" => value} = input, _directory) do
+  defp input_declaration(%{"value" => value} = input) do
     with :ok <- exact_keys(input, ~w(value), ~w(value)),
-         true <- JSONValue.map?(value) do
-      {:ok, value}
+         true <- is_map(value) and not is_struct(value) do
+      {:ok, input}
     else
       _ -> {:error, :invalid_input}
     end
   end
 
-  defp input(%{"path" => path} = input, directory) when is_binary(path) do
+  defp input_declaration(%{"path" => path} = input) when is_binary(path) do
     with :ok <- exact_keys(input, ~w(path), ~w(path)),
-         {:ok, source} <- read_relative(directory, path, @max_input_bytes),
-         {:ok, decoded} <- Jason.decode(source, objects: :ordered_objects),
-         {:ok, value} <- ordered_map(decoded),
+         true <- ApplicationSource.valid_name?(path) do
+      {:ok, input}
+    else
+      _ -> {:error, :invalid_input}
+    end
+  end
+
+  defp input_declaration(_input), do: {:error, :invalid_input}
+
+  defp maybe_materialize_input(_declaration, _source, _contract, false), do: {:ok, nil}
+
+  defp maybe_materialize_input(declaration, source, contract, true) do
+    with {:ok, input} <- materialize_input(declaration, source),
+         :ok <- validate_input(contract, input) do
+      {:ok, input}
+    end
+  end
+
+  defp materialize_input(%{"value" => value}, _source) do
+    with {:ok, value} <- StrictJSON.admit(value),
          true <- JSONValue.map?(value) do
       {:ok, value}
     else
@@ -270,34 +359,48 @@ defmodule PtcRunner.Kernel.Manifest do
     end
   end
 
-  defp input(_input, _directory), do: {:error, :invalid_input}
+  defp materialize_input(%{"path" => path}, source) do
+    with {:ok, raw} <- ApplicationSource.read_reference(source, path, @max_input_bytes),
+         {:ok, value} <- StrictJSON.decode(raw),
+         true <- JSONValue.map?(value) do
+      {:ok, value}
+    else
+      _ -> {:error, :invalid_input}
+    end
+  end
 
-  defp contracts(value, directory) when is_map(value) do
+  defp materialize_input(_input, _source), do: {:error, :invalid_input}
+
+  defp contracts(value, source) when is_map(value) do
     with :ok <- exact_keys(value, ~w(input_schema result_schema), []),
-         {:ok, input} <- contract(Map.get(value, "input_schema"), directory),
-         {:ok, result} <- contract(Map.get(value, "result_schema"), directory) do
-      {:ok, %{input: input, result: result}}
+         {:ok, input, input_source} <- contract(Map.get(value, "input_schema"), source),
+         {:ok, result, result_source} <- contract(Map.get(value, "result_schema"), source) do
+      {:ok,
+       %{
+         contracts: %{input: input, result: result},
+         sources: %{input: input_source, result: result_source}
+       }}
     else
       {:error, :duplicate_json_key} = error -> error
       _invalid -> {:error, :invalid_contracts}
     end
   end
 
-  defp contracts(_value, _directory), do: {:error, :invalid_contracts}
+  defp contracts(_value, _source), do: {:error, :invalid_contracts}
 
-  defp contract(nil, _directory), do: {:ok, nil}
+  defp contract(nil, _source), do: {:ok, nil, nil}
 
-  defp contract(%{"path" => path} = reference, directory) when is_binary(path) do
+  defp contract(%{"path" => path} = reference, source) when is_binary(path) do
     with :ok <- exact_keys(reference, ~w(path), ~w(path)),
-         {:ok, source} <- read_relative(directory, path, @max_contract_bytes),
-         {:ok, decoded} <- Jason.decode(source, objects: :ordered_objects),
-         {:ok, schema} <- ordered_map(decoded),
-         true <- is_map(schema) and not is_struct(schema) do
-      ValueContract.compile(schema)
+         {:ok, raw} <- ApplicationSource.read_reference(source, path, @max_contract_bytes),
+         {:ok, schema} <- StrictJSON.decode(raw),
+         true <- is_map(schema) and not is_struct(schema),
+         {:ok, contract} <- ValueContract.compile(schema) do
+      {:ok, contract, raw}
     end
   end
 
-  defp contract(_reference, _directory), do: {:error, :invalid_contracts}
+  defp contract(_reference, _source), do: {:error, :invalid_contracts}
 
   defp validate_input(nil, _input), do: :ok
 
@@ -408,37 +511,6 @@ defmodule PtcRunner.Kernel.Manifest do
     end
   end
 
-  defp ordered_map(%OrderedObject{values: pairs}) do
-    keys = Enum.map(pairs, &elem(&1, 0))
-
-    if keys == Enum.uniq(keys) do
-      pairs
-      |> Enum.reduce_while({:ok, %{}}, fn {key, value}, {:ok, map} ->
-        case ordered_map(value) do
-          {:ok, value} -> {:cont, {:ok, Map.put(map, key, value)}}
-          error -> {:halt, error}
-        end
-      end)
-    else
-      {:error, :duplicate_json_key}
-    end
-  end
-
-  defp ordered_map(values) when is_list(values) do
-    Enum.reduce_while(values, {:ok, []}, fn value, {:ok, normalized} ->
-      case ordered_map(value) do
-        {:ok, value} -> {:cont, {:ok, [value | normalized]}}
-        error -> {:halt, error}
-      end
-    end)
-    |> case do
-      {:ok, values} -> {:ok, Enum.reverse(values)}
-      error -> error
-    end
-  end
-
-  defp ordered_map(value), do: {:ok, value}
-
   @doc "Returns the generated JSON Schema 2020-12 structural manifest contract."
   @spec schema() :: map()
   def schema do
@@ -496,7 +568,7 @@ defmodule PtcRunner.Kernel.Manifest do
           required_object(
             %{
               "id" => component_id_schema(),
-              "path" => bounded_string(1_024),
+              "path" => logical_name_schema(),
               "dependencies" => %{
                 "type" => "array",
                 "maxItems" => 128,
@@ -515,13 +587,13 @@ defmodule PtcRunner.Kernel.Manifest do
     %{
       "oneOf" => [
         required_object(%{"value" => %{"type" => "object"}}, ["value"]),
-        required_object(%{"path" => bounded_string(1_024)}, ["path"])
+        required_object(%{"path" => logical_name_schema()}, ["path"])
       ]
     }
   end
 
   defp contracts_schema do
-    reference = required_object(%{"path" => bounded_string(1_024)}, ["path"])
+    reference = required_object(%{"path" => logical_name_schema()}, ["path"])
 
     closed_object(%{
       "input_schema" => reference,
@@ -594,13 +666,11 @@ defmodule PtcRunner.Kernel.Manifest do
   defp bounded_string(max_length),
     do: %{"type" => "string", "minLength" => 1, "maxLength" => max_length}
 
+  defp logical_name_schema do
+    bounded_string(1_024)
+    |> Map.put("pattern", ApplicationSource.logical_name_pattern())
+  end
+
   defp component_id_schema,
     do: %{"type" => "string", "pattern" => "^[a-z][a-z0-9._-]{0,127}$"}
-
-  defp read_relative(directory, path, max_bytes) do
-    case ConfinedFile.read(directory, path, max_bytes) do
-      {:ok, content} -> {:ok, content}
-      {:error, _reason} -> {:error, :unsafe_or_unreadable_path}
-    end
-  end
 end

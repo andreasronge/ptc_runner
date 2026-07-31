@@ -3,8 +3,12 @@ defmodule PtcRunner.Application do
 
   use Application
 
+  alias PtcRunner.Kernel.SemanticRevision
+
   @impl Application
   def start(_type, _args) do
+    _revision = SemanticRevision.current()
+
     children = [
       PtcRunner.Kernel.MCPOAuth.ManagerCleanup
     ]

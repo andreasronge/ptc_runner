@@ -1,0 +1,589 @@
+defmodule PtcRunner.Kernel.ApplicationPackage do
+  @moduledoc """
+  Immutable, path-free application semantics and captured source closure.
+
+  Directory and memory adapters feed the same manifest decoder and bounded
+  document source. The resulting package contains portable logical names,
+  effective component bytes, compiled contracts, safe override identities,
+  aggregate accounting, a semantic-runtime revision, and the canonical
+  `application_content_digest`; it contains no application directory, file
+  descriptor, reader callback, selected input, or input name.
+
+  Directory acquisition caches every referenced byte exactly once. Compilation
+  never reopens a captured path. This prevents time-of-check/time-of-use drift
+  within one acquired record, but it is not a transactional multi-file
+  snapshot: trusted deployments must keep the application directory quiescent
+  while its closure is acquired.
+
+  Content identity is SHA-256 over
+  `"ptc.application-content.v1\\0"`, a big-endian `u32` record count, and
+  records sorted by kind byte then UTF-8 logical name. Each record is
+  `kind || u32(name-bytes) || name || u64(payload-bytes) || payload`.
+  The closed kinds are projected-manifest `0x01`, effective-local-source
+  `0x02`, shipped-library-source `0x03`, input-contract `0x04`,
+  result-contract `0x05`, direct-dependencies `0x06`, and verified-override
+  identity `0x07`. Component records use `workflow/<id>` or `mission/<id>`;
+  contract names are `input` and `result`. Duplicate kind/name pairs are
+  invalid. Manifest, dependency, and override payloads use
+  `PtcRunner.Kernel.TypedCanonicalJSON`; source and contract payloads retain
+  their exact captured UTF-8 bytes. The complete framed projection is capped
+  at 8 MiB, so selecting the same captured source under multiple component IDs
+  charges its bytes for every semantic occurrence instead of amplifying one
+  cached document without bound.
+  """
+
+  alias PtcRunner.Kernel.ApplicationSource
+  alias PtcRunner.Kernel.Attestation
+  alias PtcRunner.Kernel.ComponentOverride
+  alias PtcRunner.Kernel.ExecutionInput
+  alias PtcRunner.Kernel.ExecutionPolicy
+  alias PtcRunner.Kernel.Library
+  alias PtcRunner.Kernel.Limits
+  alias PtcRunner.Kernel.Manifest
+  alias PtcRunner.Kernel.RunRequest
+  alias PtcRunner.Kernel.SemanticRevision
+  alias PtcRunner.Kernel.StrictJSON
+  alias PtcRunner.Kernel.TypedCanonicalJSON
+  alias PtcRunner.Kernel.ValueContract
+
+  @content_domain <<"ptc.application-content.v1", 0>>
+  @max_records 512
+  @max_bytes 8_388_608
+  @input_marker %{"$ptc_input" => "excluded"}
+  @common_acquisition_options [:installed_limits, :input_authority, :input]
+  @directory_acquisition_options @common_acquisition_options ++
+                                   [:component_override_descriptor]
+  @memory_acquisition_options @common_acquisition_options ++ [:component_override]
+  @directory_request_options @directory_acquisition_options ++
+                               [:inspection_capture, :result_projection]
+  @memory_request_options @memory_acquisition_options ++
+                            [:inspection_capture, :result_projection]
+
+  @enforce_keys [
+    :manifest,
+    :workflow_components,
+    :workflow_component_kinds,
+    :mission_components,
+    :mission_component_kinds,
+    :entry,
+    :contracts,
+    :contract_sources,
+    :mission_data,
+    :providers,
+    :limits,
+    :installed_limits,
+    :events,
+    :labels,
+    :component_overrides,
+    :contract_behavior_hashes,
+    :application_content_digest,
+    :document_count,
+    :document_bytes,
+    :ptc_semantic_revision
+  ]
+  defstruct @enforce_keys ++ [attestation: nil]
+
+  @type t :: %__MODULE__{
+          manifest: map(),
+          workflow_components: [PtcRunner.Kernel.Component.t()],
+          workflow_component_kinds: %{binary() => :local | :library},
+          mission_components: [PtcRunner.Kernel.Component.t()],
+          mission_component_kinds: %{binary() => :local | :library},
+          entry: binary(),
+          contracts: %{input: ValueContract.t() | nil, result: ValueContract.t() | nil},
+          contract_sources: %{input: binary() | nil, result: binary() | nil},
+          mission_data: map(),
+          providers: %{workflow: [map()], mission: [map()]},
+          limits: Limits.t(),
+          installed_limits: Limits.t(),
+          events: map(),
+          labels: map(),
+          component_overrides: [map()],
+          contract_behavior_hashes: %{input: binary() | nil, result: binary() | nil},
+          application_content_digest: binary(),
+          document_count: non_neg_integer(),
+          document_bytes: non_neg_integer(),
+          ptc_semantic_revision: binary(),
+          attestation: binary() | nil
+        }
+
+  @spec acquire_directory(binary(), keyword()) ::
+          {:ok, t(), ExecutionInput.t()} | {:error, term()}
+  @doc """
+  Acquires one confined-directory application into a path-free package.
+
+  Options are exactly `:installed_limits`, `:input_authority`, `:input`, and
+  `:component_override_descriptor`. Unknown and duplicate options fail before
+  the application source is opened.
+  """
+  def acquire_directory(path, opts \\ [])
+
+  def acquire_directory(path, opts) when is_binary(path) and is_list(opts) do
+    with :ok <- validate_options(opts, @directory_acquisition_options),
+         do: do_acquire_directory(path, opts)
+  end
+
+  def acquire_directory(_path, _opts), do: {:error, :invalid_application_source}
+
+  @spec acquire_memory(binary(), %{binary() => binary()}, keyword()) ::
+          {:ok, t(), ExecutionInput.t()} | {:error, term()}
+  @doc """
+  Acquires one trusted in-memory logical-name/bytes application.
+
+  Options are exactly `:installed_limits`, `:input_authority`, `:input`, and
+  `:component_override`. Unknown and duplicate options fail before the
+  application source is opened.
+  """
+  def acquire_memory(manifest_name, documents, opts \\ [])
+
+  def acquire_memory(manifest_name, documents, opts)
+      when is_binary(manifest_name) and is_map(documents) and is_list(opts) do
+    with :ok <- validate_options(opts, @memory_acquisition_options),
+         do: do_acquire_memory(manifest_name, documents, opts)
+  end
+
+  def acquire_memory(_manifest_name, _documents, _opts),
+    do: {:error, :invalid_application_source}
+
+  @spec request_directory(binary(), keyword()) :: {:ok, RunRequest.t()} | {:error, term()}
+  @doc """
+  Acquires and seals one complete directory-backed run request.
+
+  In addition to the directory-acquisition options, accepts exactly
+  `:inspection_capture` and `:result_projection`.
+  """
+  def request_directory(path, opts \\ [])
+
+  def request_directory(path, opts) when is_binary(path) and is_list(opts) do
+    with :ok <- validate_options(opts, @directory_request_options),
+         {:ok, package, input} <- do_acquire_directory(path, opts),
+         {:ok, policy} <- execution_policy(package, opts),
+         do: RunRequest.new(package, input, policy)
+  end
+
+  def request_directory(_path, _opts), do: {:error, :invalid_application_source}
+
+  @spec request_memory(binary(), %{binary() => binary()}, keyword()) ::
+          {:ok, RunRequest.t()} | {:error, term()}
+  @doc """
+  Acquires and seals one complete memory-backed run request.
+
+  In addition to the memory-acquisition options, accepts exactly
+  `:inspection_capture` and `:result_projection`.
+  """
+  def request_memory(manifest_name, documents, opts \\ [])
+
+  def request_memory(manifest_name, documents, opts)
+      when is_binary(manifest_name) and is_map(documents) and is_list(opts) do
+    with :ok <- validate_options(opts, @memory_request_options),
+         {:ok, package, input} <- do_acquire_memory(manifest_name, documents, opts),
+         {:ok, policy} <- execution_policy(package, opts),
+         do: RunRequest.new(package, input, policy)
+  end
+
+  def request_memory(_manifest_name, _documents, _opts),
+    do: {:error, :invalid_application_source}
+
+  @spec valid?(term()) :: boolean()
+  @doc "Checks the package's in-VM construction attestation."
+  def valid?(%__MODULE__{attestation: attestation} = package),
+    do:
+      package.ptc_semantic_revision == SemanticRevision.current() and
+        Attestation.valid?(__MODULE__, payload(package), attestation)
+
+  def valid?(_package), do: false
+
+  defp do_acquire_directory(path, opts) do
+    with {:ok, source} <- ApplicationSource.open_directory(path) do
+      acquire_source(source, directory_override(source, opts), opts)
+    end
+  end
+
+  defp do_acquire_memory(manifest_name, documents, opts) do
+    with {:ok, source} <- ApplicationSource.open_memory(manifest_name, documents) do
+      acquire_source(source, memory_override(source, opts), opts)
+    end
+  end
+
+  defp validate_options(opts, allowed) do
+    if Keyword.keyword?(opts) do
+      keys = Keyword.keys(opts)
+
+      if keys -- allowed == [] and
+           length(keys) == MapSet.size(MapSet.new(keys)),
+         do: :ok,
+         else: {:error, :invalid_application_options}
+    else
+      {:error, :invalid_application_options}
+    end
+  end
+
+  defp acquire_source(source, override_result, opts) do
+    installed_limits = Keyword.get(opts, :installed_limits, Limits.installed_defaults())
+
+    try do
+      with %Limits{} <- installed_limits,
+           {:ok, manifest} <-
+             Manifest.load_source(source, installed_limits, materialize_input: false),
+           {:ok, input} <- select_input(source, manifest, opts),
+           {:ok, override} <- override_result,
+           {:ok, effective, identities} <- apply_override(manifest, override),
+           {:ok, accounting} <- ApplicationSource.finish(source),
+           {:ok, package} <- build(effective, identities, accounting) do
+        {:ok, package, input}
+      else
+        %{} -> {:error, :invalid_installed_limits}
+        {:error, _reason} = error -> error
+        _invalid -> {:error, :invalid_application_package}
+      end
+    after
+      ApplicationSource.close(source)
+    end
+  end
+
+  defp select_input(source, manifest, opts) do
+    authority = Keyword.get(opts, :input_authority, :normal)
+
+    case Keyword.get(opts, :input) do
+      nil ->
+        select_declared_input(source, manifest, authority)
+
+      name when is_binary(name) ->
+        with {:ok, raw} <- ApplicationSource.read_reference(source, name, 2_000_000),
+             {:ok, value} <- StrictJSON.decode(raw) do
+          ExecutionInput.new(value, authority, manifest.contracts.input)
+        end
+
+      _invalid ->
+        {:error, :invalid_input}
+    end
+  end
+
+  defp select_declared_input(source, manifest, authority) do
+    case manifest.input_declaration do
+      %{"value" => value} ->
+        ExecutionInput.new(value, authority, manifest.contracts.input)
+
+      %{"path" => name} ->
+        with {:ok, raw} <- ApplicationSource.read_reference(source, name, 2_000_000),
+             {:ok, value} <- StrictJSON.decode(raw) do
+          ExecutionInput.new(value, authority, manifest.contracts.input)
+        end
+    end
+  end
+
+  defp directory_override(source, opts) do
+    case Keyword.get(opts, :component_override_descriptor) do
+      nil ->
+        {:ok, nil}
+
+      path ->
+        case ApplicationSource.logical_name(source, path) do
+          {:ok, descriptor_name} ->
+            with {:ok, override} <- ComponentOverride.load_application(source, descriptor_name),
+                 do: {:ok, {override, :captured}}
+
+          {:error, :outside_application_source} ->
+            with {:ok, override} <- ComponentOverride.load(path),
+                 do: {:ok, {override, :external}}
+
+          {:error, :invalid_logical_name} ->
+            {:error, :invalid_override_descriptor}
+        end
+    end
+  end
+
+  defp memory_override(source, opts) do
+    case Keyword.get(opts, :component_override) do
+      nil ->
+        {:ok, nil}
+
+      {descriptor_name, candidate_name}
+      when is_binary(descriptor_name) and is_binary(candidate_name) ->
+        with {:ok, override} <-
+               ComponentOverride.load_application(source, descriptor_name, candidate_name) do
+          {:ok, {override, :captured}}
+        end
+
+      _invalid ->
+        {:error, :invalid_override_descriptor}
+    end
+  end
+
+  defp apply_override(manifest, nil), do: {:ok, manifest, []}
+
+  defp apply_override(manifest, {%ComponentOverride{} = override, accounting})
+       when accounting in [:captured, :external] do
+    with {:ok, workflow, workflow?} <-
+           ComponentOverride.apply(manifest.workflow_components, override),
+         {:ok, mission, mission?} <-
+           ComponentOverride.apply(manifest.mission_components, override),
+         {:ok, environment} <- override_environment(workflow?, mission?) do
+      effective = %{manifest | workflow_components: workflow, mission_components: mission}
+      identity = Map.put(ComponentOverride.identity(override), "environment", environment)
+      {:ok, effective, [{identity, override, accounting}]}
+    end
+  end
+
+  defp override_environment(true, false), do: {:ok, "workflow"}
+  defp override_environment(false, true), do: {:ok, "mission"}
+  defp override_environment(true, true), do: {:error, :ambiguous_override_target}
+  defp override_environment(false, false), do: {:error, :override_component_not_selected}
+
+  defp build(manifest, override_pairs, accounting) do
+    identities =
+      Enum.map(override_pairs, fn {identity, _override, _accounting} ->
+        Map.delete(identity, "environment")
+      end)
+
+    with {:ok, records} <- content_records(manifest, override_pairs),
+         {:ok, contract_behavior_hashes} <- contract_behavior_hashes(manifest.contracts),
+         {:ok, document_count, document_bytes} <-
+           complete_accounting(manifest, override_pairs, accounting),
+         {:ok, digest} <- content_digest(records) do
+      package = %__MODULE__{
+        manifest: Map.put(manifest.document, "input", @input_marker),
+        workflow_components: manifest.workflow_components,
+        workflow_component_kinds: manifest.workflow_component_kinds,
+        mission_components: manifest.mission_components,
+        mission_component_kinds: manifest.mission_component_kinds,
+        entry: manifest.entry,
+        contracts: manifest.contracts,
+        contract_sources: manifest.contract_sources,
+        mission_data: manifest.mission_data,
+        providers: manifest.providers,
+        limits: manifest.limits,
+        installed_limits: manifest.installed_limits,
+        events: manifest.events,
+        labels: manifest.labels,
+        component_overrides: identities,
+        contract_behavior_hashes: contract_behavior_hashes,
+        application_content_digest: digest,
+        document_count: document_count,
+        document_bytes: document_bytes,
+        ptc_semantic_revision: SemanticRevision.current()
+      }
+
+      {:ok, %{package | attestation: Attestation.attest(__MODULE__, payload(package))}}
+    end
+  end
+
+  defp content_records(manifest, override_pairs) do
+    with {:ok, projected_manifest} <-
+           manifest.document
+           |> Map.put("input", @input_marker)
+           |> TypedCanonicalJSON.encode(),
+         {:ok, workflow} <-
+           component_records(
+             "workflow",
+             manifest.workflow_components,
+             manifest.workflow_component_kinds
+           ),
+         {:ok, mission} <-
+           component_records(
+             "mission",
+             manifest.mission_components,
+             manifest.mission_component_kinds
+           ),
+         {:ok, contracts} <- contract_records(manifest),
+         {:ok, overrides} <- override_records(override_pairs) do
+      records = [{0x01, "", projected_manifest} | workflow ++ mission ++ contracts ++ overrides]
+
+      if unique_records?(records),
+        do: {:ok, records},
+        else: {:error, :duplicate_application_record}
+    end
+  end
+
+  defp component_records(environment, components, kinds) do
+    Enum.reduce_while(components, {:ok, []}, fn component, {:ok, records} ->
+      name = environment <> "/" <> component.id
+      source_kind = if Map.fetch!(kinds, component.id) == :local, do: 0x02, else: 0x03
+
+      case TypedCanonicalJSON.encode(component.dependencies) do
+        {:ok, dependencies} ->
+          {:cont,
+           {:ok,
+            [
+              {0x06, name, dependencies},
+              {source_kind, name, component.source}
+              | records
+            ]}}
+
+        {:error, _reason} ->
+          {:halt, {:error, :invalid_application_package}}
+      end
+    end)
+    |> case do
+      {:ok, records} -> {:ok, Enum.reverse(records)}
+      {:error, _reason} = error -> error
+    end
+  end
+
+  defp contract_records(manifest) do
+    records =
+      [
+        contract_record(0x04, "input", manifest.contract_sources.input),
+        contract_record(0x05, "result", manifest.contract_sources.result)
+      ]
+      |> Enum.reject(&is_nil/1)
+
+    {:ok, records}
+  end
+
+  defp contract_record(_kind, _name, nil), do: nil
+  defp contract_record(kind, name, source), do: {kind, name, source}
+
+  defp contract_behavior_hashes(contracts) do
+    with {:ok, input} <- contract_behavior_hash(contracts.input),
+         {:ok, result} <- contract_behavior_hash(contracts.result) do
+      {:ok, %{input: input, result: result}}
+    end
+  end
+
+  defp contract_behavior_hash(nil), do: {:ok, nil}
+
+  defp contract_behavior_hash(%ValueContract{} = contract),
+    do: {:ok, ValueContract.behavior_hash(contract)}
+
+  defp contract_behavior_hash(_contract), do: {:error, :invalid_application_package}
+
+  defp override_records(pairs) do
+    Enum.reduce_while(pairs, {:ok, []}, fn {identity, _override, _accounting}, {:ok, records} ->
+      name = identity["environment"] <> "/" <> identity["component_id"]
+      safe = Map.delete(identity, "environment")
+
+      case TypedCanonicalJSON.encode(safe) do
+        {:ok, encoded} -> {:cont, {:ok, [{0x07, name, encoded} | records]}}
+        {:error, _reason} -> {:halt, {:error, :invalid_application_package}}
+      end
+    end)
+    |> case do
+      {:ok, records} -> {:ok, Enum.reverse(records)}
+      {:error, _reason} = error -> error
+    end
+  end
+
+  defp unique_records?(records) do
+    identities = Enum.map(records, fn {kind, name, _payload} -> {kind, name} end)
+    identities == Enum.uniq(identities)
+  end
+
+  defp content_digest(records) do
+    records = Enum.sort_by(records, fn {kind, name, _payload} -> {kind, name} end)
+
+    if framed_content_bytes(records) <= @max_bytes do
+      framed =
+        [
+          @content_domain,
+          <<length(records)::unsigned-big-32>>,
+          Enum.map(records, fn {kind, name, record_payload} ->
+            [
+              <<kind>>,
+              <<byte_size(name)::unsigned-big-32>>,
+              name,
+              <<byte_size(record_payload)::unsigned-big-64>>,
+              record_payload
+            ]
+          end)
+        ]
+
+      {:ok, :crypto.hash(:sha256, framed) |> Base.encode16(case: :lower)}
+    else
+      {:error, :document_limit_exceeded}
+    end
+  end
+
+  defp framed_content_bytes(records) do
+    Enum.reduce(records, byte_size(@content_domain) + 4, fn {_kind, name, payload}, total ->
+      total + 1 + 4 + byte_size(name) + 8 + byte_size(payload)
+    end)
+  end
+
+  defp complete_accounting(manifest, override_pairs, accounting) do
+    with {:ok, library_components} <- original_library_components(manifest) do
+      inline_input =
+        case manifest.document["input"] do
+          %{"value" => value} ->
+            {:ok, encoded} = TypedCanonicalJSON.encode(value)
+            [{:input, encoded}]
+
+          _path ->
+            []
+        end
+
+      override_documents =
+        Enum.flat_map(override_pairs, fn
+          {_identity, override, :external} ->
+            [
+              {:override_descriptor, override.descriptor_bytes},
+              {:override_source, byte_size(override.source)}
+            ]
+
+          {_identity, _override, :captured} ->
+            []
+        end)
+
+      added =
+        Enum.map(library_components, &{:library, byte_size(&1.source)}) ++
+          Enum.map(inline_input, fn {kind, bytes} -> {kind, byte_size(bytes)} end) ++
+          override_documents
+
+      count = accounting.document_count + length(added)
+
+      bytes =
+        accounting.document_bytes +
+          Enum.reduce(added, 0, fn {_kind, byte_count}, sum -> sum + byte_count end)
+
+      if count <= @max_records and bytes <= @max_bytes,
+        do: {:ok, count, bytes},
+        else: {:error, :document_limit_exceeded}
+    end
+  end
+
+  defp original_library_components(manifest) do
+    ids =
+      library_component_ids(
+        manifest.workflow_components,
+        manifest.workflow_component_kinds
+      ) ++
+        library_component_ids(
+          manifest.mission_components,
+          manifest.mission_component_kinds
+        )
+
+    ids
+    |> Enum.uniq()
+    |> Enum.sort()
+    |> Enum.reduce_while({:ok, []}, fn id, {:ok, components} ->
+      case Library.component(id) do
+        {:ok, component} -> {:cont, {:ok, [component | components]}}
+        {:error, _reason} -> {:halt, {:error, :invalid_application_package}}
+      end
+    end)
+    |> case do
+      {:ok, components} -> {:ok, Enum.reverse(components)}
+      {:error, _reason} = error -> error
+    end
+  end
+
+  defp library_component_ids(components, kinds),
+    do:
+      for(component <- components, Map.fetch!(kinds, component.id) == :library, do: component.id)
+
+  defp execution_policy(package, opts) do
+    ExecutionPolicy.new(
+      event_policy: package.events.policy,
+      run_id: package.events.run_id,
+      trace_id: package.events.trace_id,
+      inspection_capture: Keyword.get(opts, :inspection_capture, false),
+      result_projection: Keyword.get(opts, :result_projection, :native)
+    )
+  end
+
+  defp payload(package) do
+    package
+    |> Map.from_struct()
+    |> Map.delete(:attestation)
+  end
+end

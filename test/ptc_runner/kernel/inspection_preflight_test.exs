@@ -1,10 +1,10 @@
 defmodule PtcRunner.Kernel.InspectionPreflightTest do
   use ExUnit.Case, async: false
 
+  alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.Capability
   alias PtcRunner.Kernel.InspectionArtifact
   alias PtcRunner.Kernel.InspectionSink
-  alias PtcRunner.Kernel.Manifest
   alias PtcRunner.Kernel.PrivateDirectory
   alias PtcRunner.Kernel.ProviderRegistry
   alias PtcRunner.Kernel.ResultArtifact
@@ -435,19 +435,24 @@ defmodule PtcRunner.Kernel.InspectionPreflightTest do
       manifest_path =
         write_manifest(dir, %{"workflow" => [%{"name" => "probe", "config" => %{}}]})
 
-      {:ok, manifest} = Manifest.load(manifest_path)
+      {:ok, request} =
+        ApplicationPackage.request_directory(manifest_path,
+          inspection_capture: true,
+          result_projection: :native
+        )
+
       occupied = Path.join(dir, "occupied.inspection.jsonl")
       File.write!(occupied, "occupied")
 
       assert {:error, {:inspection_preflight_failed, :inspection_destination_exists}} =
-               RunBuilder.build(manifest, registry, inspect: occupied)
+               RunBuilder.build(request, registry, inspect: occupied)
 
       refute_received :provider_prepared
 
       shared = Path.join(dir, "shared.inspection.jsonl")
 
       assert {:error, {:artifact_preflight_failed, :conflicting_destinations}} =
-               RunBuilder.build(manifest, registry, inspect: shared, output: shared)
+               RunBuilder.build(request, registry, inspect: shared, output: shared)
 
       refute_received :provider_prepared
     end

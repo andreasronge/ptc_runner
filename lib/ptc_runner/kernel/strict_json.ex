@@ -1,51 +1,203 @@
 defmodule PtcRunner.Kernel.StrictJSON do
   @moduledoc """
-  Duplicate-rejecting JSON decoding for authority and protocol boundaries.
+  Bounded, duplicate-rejecting JSON admission for authority boundaries.
 
   Objects are decoded as ordered key-value pairs first, then recursively
-  converted to ordinary maps only when every object key is unique.
+  converted to ordinary maps only when every object key is unique. Decoding
+  and trusted in-memory admission share the same depth, node, UTF-8, finite
+  number, timeout, and heap limits.
   """
 
   alias Jason.OrderedObject
+  alias PtcRunner.Kernel.BoundedWorker
 
-  @spec decode(binary()) :: {:ok, term()} | {:error, :invalid_json | :duplicate_json_key}
-  @doc "Decodes one JSON value and rejects duplicate keys at every nesting level."
-  def decode(source) when is_binary(source) do
-    case Jason.decode(source, objects: :ordered_objects) do
-      {:ok, decoded} -> value(decoded)
+  @max_depth 64
+  @max_nodes 100_000
+  @timeout_ms 1_000
+  @max_heap_words 2_000_000
+
+  @type error ::
+          :invalid_json
+          | :duplicate_json_key
+          | :json_depth_exceeded
+          | :json_node_limit_exceeded
+
+  @spec decode(binary(), keyword()) :: {:ok, term()} | {:error, error()}
+  @doc """
+  Decodes one JSON value under the shared structural admission limits.
+
+  Options may only narrow `:max_depth` and `:max_nodes`.
+  """
+  def decode(source, opts \\ [])
+
+  def decode(source, opts) when is_binary(source) and is_list(opts) do
+    with {:ok, limits} <- limits(opts) do
+      bounded(fn ->
+        case Jason.decode(source, objects: :ordered_objects) do
+          {:ok, decoded} -> admit_value(decoded, Map.put(limits, :ordered_objects?, true))
+          {:error, _reason} -> {:error, :invalid_json}
+        end
+      end)
+    end
+  end
+
+  def decode(_source, _opts), do: {:error, :invalid_json}
+
+  @spec admit(term(), keyword()) :: {:ok, term()} | {:error, error()}
+  @doc """
+  Admits a trusted in-memory JSON value under the same limits as `decode/2`.
+
+  Structs, non-binary keys, invalid UTF-8, improper lists, and non-finite
+  floats are rejected.
+  """
+  def admit(value, opts \\ [])
+
+  def admit(value, opts) when is_list(opts) do
+    with {:ok, limits} <- limits(opts) do
+      bounded(fn -> admit_value(value, Map.put(limits, :ordered_objects?, false)) end)
+    end
+  end
+
+  def admit(_value, _opts), do: {:error, :invalid_json}
+
+  defp bounded(function) do
+    case BoundedWorker.run(function,
+           timeout_ms: @timeout_ms,
+           max_heap_words: @max_heap_words
+         ) do
+      {:ok, result} -> result
       {:error, _reason} -> {:error, :invalid_json}
     end
   end
 
-  def decode(_source), do: {:error, :invalid_json}
+  defp limits(opts) do
+    if Keyword.keyword?(opts) do
+      keys = Keyword.keys(opts)
+      max_depth = Keyword.get(opts, :max_depth, @max_depth)
+      max_nodes = Keyword.get(opts, :max_nodes, @max_nodes)
 
-  defp value(%OrderedObject{values: pairs}) do
-    keys = Enum.map(pairs, &elem(&1, 0))
-
-    if keys == Enum.uniq(keys) do
-      Enum.reduce_while(pairs, {:ok, %{}}, fn {key, item}, {:ok, map} ->
-        case value(item) do
-          {:ok, item} -> {:cont, {:ok, Map.put(map, key, item)}}
-          {:error, _reason} = error -> {:halt, error}
-        end
-      end)
+      if keys -- [:max_depth, :max_nodes] == [] and
+           length(keys) == MapSet.size(MapSet.new(keys)) and
+           is_integer(max_depth) and max_depth in 1..@max_depth and
+           is_integer(max_nodes) and max_nodes in 1..@max_nodes do
+        {:ok, %{max_depth: max_depth, max_nodes: max_nodes}}
+      else
+        {:error, :invalid_json}
+      end
     else
-      {:error, :duplicate_json_key}
+      {:error, :invalid_json}
     end
   end
 
-  defp value(values) when is_list(values) do
-    Enum.reduce_while(values, {:ok, []}, fn item, {:ok, normalized} ->
-      case value(item) do
-        {:ok, item} -> {:cont, {:ok, [item | normalized]}}
-        {:error, _reason} = error -> {:halt, error}
-      end
-    end)
-    |> case do
-      {:ok, normalized} -> {:ok, Enum.reverse(normalized)}
+  defp admit_value(value, limits) do
+    case value(value, 1, 0, limits) do
+      {:ok, admitted, _nodes} -> {:ok, admitted}
       {:error, _reason} = error -> error
     end
   end
 
-  defp value(value), do: {:ok, value}
+  defp value(_value, depth, _nodes, %{max_depth: max_depth}) when depth > max_depth,
+    do: {:error, :json_depth_exceeded}
+
+  defp value(_value, _depth, nodes, %{max_nodes: max_nodes}) when nodes >= max_nodes,
+    do: {:error, :json_node_limit_exceeded}
+
+  defp value(
+         %OrderedObject{values: pairs},
+         depth,
+         nodes,
+         %{ordered_objects?: true} = limits
+       ) do
+    keys = Enum.map(pairs, &elem(&1, 0))
+
+    if keys == Enum.uniq(keys),
+      do: object(pairs, depth, nodes + 1, limits),
+      else: {:error, :duplicate_json_key}
+  end
+
+  defp value(value, depth, nodes, limits) when is_map(value) and not is_struct(value),
+    do: object(Map.to_list(value), depth, nodes + 1, limits)
+
+  defp value(values, depth, nodes, limits) when is_list(values) do
+    if proper_list?(values) do
+      Enum.reduce_while(values, {:ok, [], nodes + 1}, fn item, {:ok, admitted, count} ->
+        case value(item, depth + 1, count, limits) do
+          {:ok, item, next_count} -> {:cont, {:ok, [item | admitted], next_count}}
+          {:error, _reason} = error -> {:halt, error}
+        end
+      end)
+      |> case do
+        {:ok, admitted, count} -> {:ok, Enum.reverse(admitted), count}
+        {:error, _reason} = error -> error
+      end
+    else
+      {:error, :invalid_json}
+    end
+  end
+
+  defp value(value, _depth, nodes, limits)
+       when is_nil(value) or is_boolean(value) or is_integer(value),
+       do: count_scalar(value, nodes, limits)
+
+  defp value(value, _depth, nodes, limits) when is_float(value) do
+    if finite_float?(value),
+      do: count_scalar(value, nodes, limits),
+      else: {:error, :invalid_json}
+  end
+
+  defp value(value, _depth, nodes, limits) when is_binary(value) do
+    if String.valid?(value),
+      do: count_scalar(value, nodes, limits),
+      else: {:error, :invalid_json}
+  end
+
+  defp value(_value, _depth, _nodes, _limits), do: {:error, :invalid_json}
+
+  defp object(pairs, depth, nodes, limits) do
+    Enum.reduce_while(pairs, {:ok, %{}, nodes}, fn
+      {key, item}, {:ok, admitted, count} when is_binary(key) ->
+        cond do
+          not String.valid?(key) ->
+            {:halt, {:error, :invalid_json}}
+
+          count >= limits.max_nodes ->
+            {:halt, {:error, :json_node_limit_exceeded}}
+
+          true ->
+            case value(item, depth + 1, count + 1, limits) do
+              {:ok, item, next_count} ->
+                {:cont, {:ok, Map.put(admitted, key, item), next_count}}
+
+              {:error, _reason} = error ->
+                {:halt, error}
+            end
+        end
+
+      _pair, _acc ->
+        {:halt, {:error, :invalid_json}}
+    end)
+  end
+
+  defp count_scalar(value, nodes, %{max_nodes: max_nodes}) do
+    next = nodes + 1
+
+    if next <= max_nodes do
+      {:ok, value, next}
+    else
+      {:error, :json_node_limit_exceeded}
+    end
+  end
+
+  defp finite_float?(value) do
+    case :erlang.float_to_binary(value, [:short]) do
+      "nan" -> false
+      "inf" -> false
+      "-inf" -> false
+      _finite -> true
+    end
+  end
+
+  defp proper_list?([]), do: true
+  defp proper_list?([_head | tail]), do: proper_list?(tail)
+  defp proper_list?(_other), do: false
 end

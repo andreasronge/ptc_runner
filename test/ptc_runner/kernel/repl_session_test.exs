@@ -79,6 +79,27 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
     assert history_bytes > 0
   end
 
+  test "REPL sessions reject JSON-result configurations" do
+    {:ok, workflow} = WorkflowEnvironment.new([])
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, limits} = Limits.new()
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "repl-json-projection")
+    on_exit(fn -> if Process.alive?(sink.pid), do: EventSink.stop(sink) end)
+
+    {:ok, config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        mission_environment: mission,
+        input: %{},
+        limits: limits,
+        event_sink: sink,
+        result_projection: :json
+      )
+
+    assert {:error, :invalid_repl_session} = ReplSession.new(config: config)
+    assert Process.alive?(sink.pid)
+  end
+
   test "sessions reject evaluation and teardown outside their creating process" do
     {:ok, eval_session} = ReplSession.new()
     refute Enum.any?(Map.values(Map.from_struct(eval_session)), &is_pid/1)

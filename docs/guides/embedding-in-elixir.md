@@ -65,10 +65,22 @@ instead of producing a partially functional bundle.
 
 ## Prefer manifests for deployable projects
 
-`PtcRunner.Kernel.RunBuilder` is the shared construction path for manifests and
-current Mix frontends. Reuse it when an application wants the standard strict
-manifest contract. Do not build a parallel loader or another provider and
-event path in a web controller or job worker.
+`PtcRunner.Kernel.ApplicationPackage` is the shared acquisition path for
+directory and in-memory applications. It produces a path-free package and
+selected `ExecutionInput`; `request_directory/2` and `request_memory/3` also
+seal the destination-free `ExecutionPolicy` into a `RunRequest`.
+`PtcRunner.Kernel.RunBuilder` consumes that request. Reuse these boundaries
+when an application wants the standard strict manifest contract. Do not build
+a parallel loader or another provider and event path in a web controller or
+job worker. Both embedding paths default to the native result projection;
+JSON-emitting commands select the JSON projection explicitly, while the REPL
+selects native continuation values explicitly.
+
+A separately acquired request must use the same installed ceilings as the
+`ProviderRegistry` passed to `RunBuilder.build/3`. The builder rejects a
+mismatch by default. Trusted embedding may deliberately replace that authority
+for one construction only by supplying the same explicit `:installed_limits`
+to both package acquisition and `RunBuilder.build/3`.
 
 ## Install custom providers
 
@@ -79,13 +91,15 @@ code. Register a builder only for authority the five built-in sources cannot
 express; [Host configuration](host-configuration.md) covers what a plain
 operator document already installs.
 
-Builders receive the canonical manifest directory, target environment,
-construction owner, effective limits, and installed ceilings. They may return
-capabilities and a safe connector snapshot, plus an idempotent close function
-when the provider owns live resources. The Kernel owns cleanup across success,
-failure, timeout, cancellation, and owner death. Every close function must
-return exactly `:ok`; another return, an exception, or an exit is reported as
-`:provider_cleanup_failed` and can replace a completed run with the terminal
+Builders receive the path-free application-content digest, target environment,
+construction owner, effective limits, and installed ceilings. Application
+directories and document readers never enter provider selection context;
+provider-owned roots must come from trusted host installation. Builders may
+return capabilities and a safe connector snapshot, plus an idempotent close
+function when the provider owns live resources. The Kernel owns cleanup across
+success, failure, timeout, cancellation, and owner death. Every close function
+must return exactly `:ok`; another return, an exception, or an exit is reported
+as `:provider_cleanup_failed` and can replace a completed run with the terminal
 `:provider_cleanup_error` outcome. Cleanup still attempts every registered
 resource. `ReplSession.close/1` and `abort/2` return
 `{:error, :provider_cleanup_failed, events}` when that failure follows a

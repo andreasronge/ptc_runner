@@ -1,6 +1,7 @@
 defmodule PtcRunner.Kernel.ManifestTest do
   use ExUnit.Case, async: true
 
+  alias PtcRunner.Kernel.ApplicationSource
   alias PtcRunner.Kernel.Capability
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.Manifest
@@ -111,6 +112,21 @@ defmodule PtcRunner.Kernel.ManifestTest do
     duplicate_path = Path.join(dir, "duplicate.json")
     File.write!(duplicate_path, duplicate)
     assert {:error, :duplicate_json_key} = Manifest.load(duplicate_path)
+  end
+
+  @tag :tmp_dir
+  test "directory and memory manifests reject non-object JSON roots without raising", %{
+    tmp_dir: dir
+  } do
+    for {name, raw} <- [{"array", "[]"}, {"null", "null"}, {"number", "1"}] do
+      path = Path.join(dir, "#{name}.json")
+      File.write!(path, raw)
+
+      assert {:error, :invalid_manifest} = Manifest.load(path)
+
+      assert {:error, :invalid_manifest} =
+               Manifest.load_memory("#{name}.json", %{"#{name}.json" => raw})
+    end
   end
 
   @tag :tmp_dir
@@ -588,6 +604,24 @@ defmodule PtcRunner.Kernel.ManifestTest do
              |> Map.put("unknown", true)
              |> JSV.validate(root, cast: false)
            )
+
+    refute match?(
+             {:ok, _validated},
+             manifest
+             |> put_in(["workflow", "components", Access.at(0), "path"], "Main.clj")
+             |> JSV.validate(root, cast: false)
+           )
+
+    for invalid_name <- ["main.clj\n", "main.clj\r\n"] do
+      refute ApplicationSource.valid_name?(invalid_name)
+
+      refute match?(
+               {:ok, _validated},
+               manifest
+               |> put_in(["workflow", "components", Access.at(0), "path"], invalid_name)
+               |> JSV.validate(root, cast: false)
+             )
+    end
   end
 
   @tag :tmp_dir

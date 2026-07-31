@@ -41,7 +41,7 @@ defmodule Mix.Tasks.Ptc.RunTest do
   end
 
   @tag :tmp_dir
-  test "prints quoted-symbol results with their public display strings", %{tmp_dir: dir} do
+  test "rejects quoted-symbol results at the JSON command boundary", %{tmp_dir: dir} do
     File.write!(
       Path.join(dir, "main.clj"),
       ~S|(ns main) (defn run [_] (return {"ref" 'foo "nested" ['bar] 'key "quoted-key"}))|
@@ -59,19 +59,36 @@ defmodule Mix.Tasks.Ptc.RunTest do
     path = Path.join(dir, "ptc.json")
     File.write!(path, Jason.encode!(manifest))
 
-    output =
-      capture_io(fn ->
-        Mix.Task.reenable("ptc.run")
-        Run.run([path])
-      end)
+    Mix.Task.reenable("ptc.run")
 
-    assert %{
-             "value" => %{
-               "ref" => "'foo",
-               "nested" => ["'bar"],
-               "'key" => "quoted-key"
-             }
-           } = Jason.decode!(output)
+    assert_raise Mix.Error, ~r/invalid_result_projection/, fn ->
+      capture_io(fn -> Run.run([path]) end)
+    end
+  end
+
+  @tag :tmp_dir
+  test "rejects native-only results before CLI JSON serialization", %{tmp_dir: dir} do
+    File.write!(
+      Path.join(dir, "main.clj"),
+      ~S|(ns main) (defn run [_] (return #{1 2}))|
+    )
+
+    manifest = %{
+      "version" => 1,
+      "workflow" => %{
+        "components" => [%{"id" => "main", "path" => "main.clj"}],
+        "entry" => "main/run"
+      },
+      "input" => %{"value" => %{}}
+    }
+
+    path = Path.join(dir, "ptc.json")
+    File.write!(path, Jason.encode!(manifest))
+    Mix.Task.reenable("ptc.run")
+
+    assert_raise Mix.Error, ~r/invalid_result_projection/, fn ->
+      Run.run([path])
+    end
   end
 
   @tag :tmp_dir

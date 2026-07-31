@@ -82,6 +82,7 @@ defmodule PtcRunner.Kernel.RunConfig do
     :mission_inventory,
     :claim_id,
     result_contract: nil,
+    result_projection: :native,
     inspection_sink: nil,
     inspection_sink_owner: nil,
     inspection_path: nil,
@@ -102,6 +103,7 @@ defmodule PtcRunner.Kernel.RunConfig do
           mission_inventory: MissionInventory.t(),
           claim_id: reference(),
           result_contract: ValueContract.t() | nil,
+          result_projection: :native | :json,
           inspection_sink: InspectionSink.t() | nil,
           inspection_sink_owner: pid() | nil,
           inspection_path: binary() | nil,
@@ -129,6 +131,7 @@ defmodule PtcRunner.Kernel.RunConfig do
                :limits,
                :event_sink,
                :result_contract,
+               :result_projection,
                :inspection_sink,
                :inspection_path,
                :provider_resources,
@@ -145,6 +148,7 @@ defmodule PtcRunner.Kernel.RunConfig do
          %EventSink{} = sink <- Keyword.get(opts, :event_sink),
          true <- valid_event_sink_contract?(sink, limits),
          true <- result_contract?(Keyword.get(opts, :result_contract)),
+         true <- result_projection?(Keyword.get(opts, :result_projection, :native)),
          {:ok, event_sink_owner} <- EventSink.owner(sink),
          true <-
            inspection?(Keyword.get(opts, :inspection_sink), Keyword.get(opts, :inspection_path)),
@@ -186,6 +190,7 @@ defmodule PtcRunner.Kernel.RunConfig do
          mission_inventory: mission_inventory,
          claim_id: make_ref(),
          result_contract: Keyword.get(opts, :result_contract),
+         result_projection: Keyword.get(opts, :result_projection, :native),
          inspection_sink: Keyword.get(opts, :inspection_sink),
          inspection_sink_owner: inspection_sink_owner,
          inspection_path: Keyword.get(opts, :inspection_path),
@@ -205,6 +210,8 @@ defmodule PtcRunner.Kernel.RunConfig do
   defp result_contract?(nil), do: true
   defp result_contract?(%ValueContract{}), do: true
   defp result_contract?(_contract), do: false
+
+  defp result_projection?(projection), do: projection in [:native, :json]
 
   defp valid_event_sink_contract?(%EventSink{policy: :normal} = sink, limits) do
     reserve = EventSink.terminal_reserve(:normal, limits)

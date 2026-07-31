@@ -6,7 +6,9 @@ defmodule PtcRunner.Kernel.ReplSession do
   prior results for `*1`, `*2`, and `*3`. Failed forms preserve the previous
   memory. A session uses the workflow bundle, capabilities, limits, input,
   labels, and event policy from an optional `PtcRunner.Kernel.RunConfig` but
-  does not execute the manifest entry function.
+  does not execute the manifest entry function. REPL continuation and history
+  require the native result projection, so a supplied configuration sealed for
+  JSON command output is rejected before its recorder is claimed.
 
   A session is process-affine: the process that calls `new/1` is its owner and
   must perform every `eval/2`, `close/1`, and `abort/2` call. Passing the struct
@@ -68,7 +70,9 @@ defmodule PtcRunner.Kernel.ReplSession do
   inconclusive live-sink ownership probe returns
   `{:error, :session_owner_mismatch}` before the recorder is claimed or a run
   state is started and leaves the config untouched. A dead owned sink closes
-  the config's provider resources before setup fails.
+  the config's provider resources before setup fails. The config must select
+  the native result projection; a JSON-projection config returns
+  `{:error, :invalid_repl_session}` untouched.
   """
   def new(opts \\ [])
 
@@ -334,6 +338,9 @@ defmodule PtcRunner.Kernel.ReplSession do
       config.event_sink_owner != self() or
           config.inspection_sink_owner not in [nil, self()] ->
         {:error, :session_owner_mismatch}
+
+      config.result_projection != :native ->
+        {:error, :invalid_repl_session}
 
       not Process.alive?(config.event_sink.pid) ->
         reject_unstarted_config(config, :event_sink_error)

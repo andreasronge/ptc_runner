@@ -123,6 +123,7 @@ defmodule PtcRunner.MixProject do
         "credo --strict",
         "ptc.validate_spec",
         "ptc.gen_docs --check",
+        "ptc.gen_semantic_revision --check",
         "ptc.conformance_report --check-inventory",
         "test --warnings-as-errors",
         "cmd --cd ptc_viewer mix test --color",
@@ -149,10 +150,13 @@ defmodule PtcRunner.MixProject do
       groups_for_modules: [
         Kernel: [
           PtcRunner.Kernel,
+          PtcRunner.Kernel.ApplicationPackage,
           PtcRunner.Kernel.Capability,
           PtcRunner.Kernel.Component,
           PtcRunner.Kernel.Error,
           PtcRunner.Kernel.EventSink,
+          PtcRunner.Kernel.ExecutionInput,
+          PtcRunner.Kernel.ExecutionPolicy,
           PtcRunner.Kernel.FrozenBundle,
           PtcRunner.Kernel.InspectionArtifact,
           PtcRunner.Kernel.InspectionSink,
@@ -169,11 +173,14 @@ defmodule PtcRunner.MixProject do
           PtcRunner.Kernel.Result,
           PtcRunner.Kernel.RunBuilder,
           PtcRunner.Kernel.RunConfig,
+          PtcRunner.Kernel.RunRequest,
           PtcRunner.Kernel.TraceCapability,
           PtcRunner.Kernel.TraceLog,
           PtcRunner.Kernel.WorkflowEnvironment
         ],
         "Kernel internals": [
+          PtcRunner.Kernel.ApplicationSource,
+          PtcRunner.Kernel.Attestation,
           PtcRunner.Kernel.BoundedWorker,
           PtcRunner.Kernel.BundleCompiler,
           PtcRunner.Kernel.DeterministicJSON,
@@ -188,6 +195,9 @@ defmodule PtcRunner.MixProject do
           PtcRunner.Kernel.RunState,
           PtcRunner.Kernel.Runner,
           PtcRunner.Kernel.RuntimeTools,
+          PtcRunner.Kernel.SemanticRevision,
+          PtcRunner.Kernel.StrictJSON,
+          PtcRunner.Kernel.TypedCanonicalJSON,
           PtcRunner.Kernel.ViewerAdapter
         ],
         "PTC-Lisp": [
@@ -243,7 +253,7 @@ defmodule PtcRunner.MixProject do
   defp package do
     [
       files:
-        ~w(lib docs examples/kernel-tutorial examples/kernel-inspection-lab .formatter.exs mix.exs README.md LICENSE CHANGELOG.md priv/function_audit.exs priv/functions.exs priv/java_interop.exs priv/java_interop_oracle_cases.exs priv/java_interop_oracle_baseline.json priv/java_oracle_versions.exs priv/preludes priv/schemas priv/spec),
+        ~w(lib docs examples/kernel-tutorial examples/kernel-inspection-lab .formatter.exs mix.exs README.md LICENSE CHANGELOG.md priv/function_audit.exs priv/functions.exs priv/java_interop.exs priv/java_interop_oracle_cases.exs priv/java_interop_oracle_baseline.json priv/java_oracle_versions.exs priv/preludes priv/schemas priv/spec priv/semantic_build_inventory.exs priv/semantic_build_projection.json),
       licenses: ["MIT"],
       links: %{
         "GitHub" => "https://github.com/andreasronge/ptc_runner",

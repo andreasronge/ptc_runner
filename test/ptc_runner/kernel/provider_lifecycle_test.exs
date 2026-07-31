@@ -1,11 +1,11 @@
 defmodule PtcRunner.Kernel.ProviderLifecycleTest do
   use ExUnit.Case, async: true
 
+  alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.Capability
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.InspectionSink
   alias PtcRunner.Kernel.Limits
-  alias PtcRunner.Kernel.Manifest
   alias PtcRunner.Kernel.MissionEnvironment
   alias PtcRunner.Kernel.ProviderRegistry
   alias PtcRunner.Kernel.ProviderResources
@@ -40,7 +40,15 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
     }
 
     {:ok, registry} = ProviderRegistry.new(builders)
-    context = %{directory: ".", destination: :workflow, owner: self(), limits: limits()}
+    limits = limits()
+
+    context = %{
+      application_content_digest: String.duplicate("0", 64),
+      destination: :workflow,
+      owner: self(),
+      limits: limits,
+      installed_limits: limits
+    }
 
     assert {:ok, %{capabilities: [^capability], snapshot: nil, close: nil}} =
              ProviderRegistry.build(registry, "legacy", %{}, context)
@@ -53,6 +61,31 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
             }} = ProviderRegistry.build(registry, "resource", %{}, context)
 
     assert is_function(close, 0)
+  end
+
+  test "registry rejects directory-bearing provider contexts before invoking a builder" do
+    parent = self()
+
+    builder = fn _config, _context ->
+      send(parent, :provider_invoked)
+      capability("fixture")
+    end
+
+    {:ok, registry} = ProviderRegistry.new(%{"fixture" => builder})
+    limits = limits()
+
+    legacy_context = %{
+      directory: "/application",
+      destination: :workflow,
+      owner: self(),
+      limits: limits,
+      installed_limits: limits
+    }
+
+    assert {:error, :invalid_provider_context} =
+             ProviderRegistry.build(registry, "fixture", %{}, legacy_context)
+
+    refute_received :provider_invoked
   end
 
   @tag :tmp_dir
@@ -98,8 +131,8 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
         [provider("staged", %{"id" => "mission"})]
       )
 
-    {:ok, loaded} = Manifest.load(manifest)
-    assert {:ok, built} = RunBuilder.build(loaded, registry)
+    {:ok, request} = ApplicationPackage.request_directory(manifest, result_projection: :native)
+    assert {:ok, built} = RunBuilder.build(request, registry)
     assert :ok = RunBuilder.close(built)
 
     assert_receive {:provider_phase, :prepare, "workflow"}
@@ -264,8 +297,8 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
         [provider("staged", %{"id" => "bad"})]
       )
 
-    {:ok, loaded} = Manifest.load(manifest)
-    assert {:error, :fixture_preflight_failed} = RunBuilder.build(loaded, registry)
+    {:ok, request} = ApplicationPackage.request_directory(manifest, result_projection: :native)
+    assert {:error, :fixture_preflight_failed} = RunBuilder.build(request, registry)
     assert_receive {:preflight, "ok"}
     assert_receive {:preflight, "bad"}
     refute_received :credentials_resolved
@@ -320,8 +353,8 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
         []
       )
 
-    {:ok, loaded} = Manifest.load(manifest)
-    assert {:error, :fixture_acquisition_failed} = RunBuilder.build(loaded, registry)
+    {:ok, request} = ApplicationPackage.request_directory(manifest, result_projection: :native)
+    assert {:error, :fixture_acquisition_failed} = RunBuilder.build(request, registry)
     assert_receive {:closed_after_acquisition_failure, "first"}
   end
 
@@ -437,7 +470,7 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
         [provider("owned", %{"id" => "mission"})]
       )
 
-    {:ok, loaded} = Manifest.load(manifest)
+    {:ok, request} = ApplicationPackage.request_directory(manifest, result_projection: :native)
 
     builder = fn %{"id" => id}, _context ->
       {:ok, capability} = capability("provided.#{id}")
@@ -456,7 +489,7 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
     {:ok, registry} = ProviderRegistry.new(%{"owned" => builder})
 
     assert {:error, {:missing_capability_requirement, ["missing"]}} =
-             RunBuilder.build(loaded, registry)
+             RunBuilder.build(request, registry)
 
     assert_receive {:closed, "mission"}
     assert_receive {:closed, "workflow"}

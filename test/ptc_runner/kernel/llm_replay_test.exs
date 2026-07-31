@@ -190,7 +190,7 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
         {:ok, limits} = Limits.new()
 
         context = %{
-          directory: dir,
+          application_content_digest: String.duplicate("0", 64),
           destination: :workflow,
           owner: self(),
           limits: limits,

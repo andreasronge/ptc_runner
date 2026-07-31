@@ -37,9 +37,10 @@ PTC-Lisp owns replaceable workflow policy:
 - reusable prompt and agent behavior in shipped or local components.
 
 Frontends own presentation and host choices. They must enter through
-`PtcRunner.Kernel.RunBuilder` or construct the same public Kernel values; they
-must not create another manifest parser, provider registry, event model, or
-evaluator.
+`PtcRunner.Kernel.ApplicationPackage` and a sealed
+`PtcRunner.Kernel.RunRequest`, then delegate assembly to
+`PtcRunner.Kernel.RunBuilder`; they must not create another manifest parser,
+provider registry, event model, or evaluator.
 
 When placing new behavior, prefer the lowest layer that must own it:
 
@@ -53,13 +54,18 @@ When placing new behavior, prefer the lowest layer that must own it:
 The normal path is:
 
 ```text
-manifest + host-owned registry
+directory or memory documents + host-owned registry
           |
           v
-Manifest -> RunBuilder -> components/providers/limits/input
-                         |
-                         v
-                 immutable RunConfig
+ApplicationSource -> Manifest -> ApplicationPackage
+                                  + ExecutionInput
+                                  + ExecutionPolicy
+                                          |
+                                          v
+                                   sealed RunRequest
+                                          |
+                                          v
+                         RunBuilder -> immutable RunConfig
                          |
                          v
 Kernel.run -> Runner -> RunState + Dispatcher + Evaluation
@@ -72,8 +78,15 @@ Kernel.run -> Runner -> RunState + Dispatcher + Evaluation
              close providers and persist artifacts
 ```
 
-`PtcRunner.Kernel.Manifest` strictly decodes untrusted data and confines
-manifest-relative paths. It never creates executable host callbacks.
+`PtcRunner.Kernel.ApplicationSource` is the bounded, caching byte-acquisition
+boundary. Directory and memory sources feed the same
+`PtcRunner.Kernel.Manifest` decoder. The manifest decoder never creates
+executable host callbacks. `PtcRunner.Kernel.ApplicationPackage` retains the
+captured path-free source closure and semantic application identity;
+`PtcRunner.Kernel.ExecutionInput` separately retains the selected input and
+its authority class. A destination-free `PtcRunner.Kernel.ExecutionPolicy`
+fixes event identities, inspection capture, and result projection before the
+three values are sealed as one `PtcRunner.Kernel.RunRequest`.
 `PtcRunner.Kernel.ProviderRegistry` maps selected names to trusted builders.
 `PtcRunner.Kernel.RunBuilder` is the shared assembly and cleanup boundary.
 
@@ -86,6 +99,71 @@ close only after in-flight work is cancelled and observed.
 Construction failures close already-built resources in reverse order.
 Frontends that build but do not execute a configuration must call the
 documented `RunBuilder` close operation.
+
+Directory acquisition opens each referenced logical document at most once and
+compilation uses only the retained bytes. This prevents a single captured path
+from changing between validation and compilation. It is not a transactional
+snapshot across independent files: trusted deployments must keep an
+application directory quiescent during closure acquisition or publish an
+immutable versioned directory. Memory acquisition rejects unused supplied
+documents, so its map is the exact referenced closure. A multi-segment memory
+manifest name establishes the same logical root as the directory containing a
+filesystem manifest: component, input, contract, and selected-input names are
+resolved relative to it, and the transport prefix does not consume their
+logical-name byte or segment limits. Aggregate memory bytes are capped before
+document UTF-8 scans.
+
+## Application and semantic identity
+
+`application_content_digest` is input-independent identity for captured
+application content. It uses the versioned
+`ptc.application-content.v1\0` framing documented by
+`PtcRunner.Kernel.ApplicationPackage`: a sorted record stream covers the
+projected manifest, environment-qualified local and shipped component source,
+direct dependency lists, exact contract bytes, and verified override
+identities. The complete manifest input declaration is replaced by the fixed
+`{"$ptc_input":"excluded"}` marker. Input form, logical name, bytes, value, and
+digest therefore cannot perturb content identity.
+
+Identity-bearing semantic JSON uses
+`PtcRunner.Kernel.TypedCanonicalJSON` (TJCS). It tags every node before
+canonical encoding, so integers and binary64 floats retain different
+identities, negative zero is preserved, and arbitrarily large JSON integers
+never collapse through IEEE-754. `PtcRunner.Kernel.StrictJSON` supplies the
+shared duplicate-key, UTF-8, finite-number, depth-64, and node-100,000
+admission boundary in a time- and heap-bounded worker.
+
+Contract behavior identity is computed from the compiled normalized schema.
+Its schema-aware traversal removes `title` and `description` only at admitted
+schema positions and preserves application property names with those literal
+spellings. Exact raw contract bytes remain part of content identity, while the
+`ptc.contract-behavior.v1\0` hash represents normalized behavior.
+
+`ptc_semantic_revision` is `sem1-` plus lowercase SHA-256 over the generated
+semantic-build projection and the exact Elixir, OTP, ERTS, BEAM architecture,
+compiled scheduler-derived pmap default, conditionally compiled semantic-module
+presence, and consuming-build dependency-artifact projection. Dependency
+presence, regular-file identity, the complete owner/group/other execute mask,
+and the bytes under each present dependency's compiled `ebin` and `priv`
+directories are captured once under the trusted immutable-build assumption.
+Artifact bytes are hashed in bounded chunks, so runtime revision construction
+does not retain the complete dependency closure in memory.
+Starting from audited runtime roots, the projection traverses required,
+included, and optional `.app` metadata, records absent optional applications,
+and follows the required closure of every application that is present.
+Compatible downstream resolutions, scheduler-dependent compiled defaults,
+conditional-compilation outcomes, optional-dependency presence, and
+execute-mask changes therefore cannot reuse the publisher's revision.
+`priv/semantic_build_inventory.exs` owns the classified source boundaries,
+code-owned Mix application defaults, explicit semantic files, conditionally
+compiled semantic modules, runtime roots, publisher dependency closure, and
+local path-dependency content.
+Regenerate with
+`mix ptc.gen_semantic_revision`; `mix precommit` runs the `--check` form and
+fails on dependency inventory drift, missing classified paths, changed
+semantic bytes, or a stale projection. This revision is conservative:
+comments, refactors, dependency changes, or runtime patch changes may produce a
+new value even when observed behavior is unchanged.
 
 ## Bundles, environments, and capabilities
 
@@ -262,6 +340,12 @@ resources into the run lifecycle. Exact selection grammar and transport
 behavior belong in `ProviderRegistry`, each provider module, and the manifest
 guide.
 
+Builder selection context is path-free. It carries
+`application_content_digest`, target environment, construction owner,
+effective limits, and installed ceilings. Application directories and reader
+callbacks never cross the package/selection boundary. Any provider-owned
+filesystem roots come from the trusted host installation instead.
+
 The MCP adapter is one host-installed source with typed Streamable HTTP and
 stdio transports. Endpoints or process launch details, credentials, upstream
 mapping, read/write effects, and installed ceilings are host authority; server
@@ -390,7 +474,7 @@ internals or paths.
 | Public run boundary | `Kernel`, `RunConfig`, `Result`, `Error` |
 | Components and libraries | `Component`, `FrozenBundle`, `Library`, `BundleCompiler` |
 | Environment authority | `Capability`, `WorkflowEnvironment`, `MissionEnvironment`, `Environment` |
-| Host/manifest assembly | `HostConfig`, `HostInstallation`, `Manifest`, `ValueContract`, `ResultArtifact`, `ProviderRegistry`, `RunBuilder`, `MissionInventory` |
+| Host/application assembly | `HostConfig`, `HostInstallation`, `ApplicationSource`, `Manifest`, `ApplicationPackage`, `ExecutionInput`, `ExecutionPolicy`, `RunRequest`, `ValueContract`, `ResultArtifact`, `ProviderRegistry`, `RunBuilder`, `MissionInventory` |
 | Mutable resources | `Limits`, `RunState`, `BoundedWorker`, `Dispatcher` |
 | Subordinate execution | `Runner`, `Evaluation`, `RuntimeTools` |
 | Lisp internals | `Lisp.Eval`, `Lisp.Eval.Effects`, `Lisp.Eval.Capture`, `Lisp.Eval.Parallel`, `Lisp.Eval.ParallelRunner` |
@@ -424,11 +508,15 @@ and review. They are not alternative supported entry points.
 
 ### Manifest or frontend
 
-1. Reuse `Manifest` and `RunBuilder`.
-2. Keep manifest data non-executable and paths confined.
+1. Reuse `ApplicationSource`, `ApplicationPackage`, `RunRequest`, and
+   `RunBuilder`.
+2. Keep manifest data non-executable, logical names portable, and directory
+   acquisition confined.
 3. Preserve workflow/mission authority and installed-ceiling precedence.
-4. Keep stdout/stderr and canonical/private artifacts unambiguous.
-5. Exercise the same configuration through normal run and REPL paths where
+4. Keep input outside application content identity and destinations outside
+   the sealed execution policy.
+5. Keep stdout/stderr and canonical/private artifacts unambiguous.
+6. Exercise the same configuration through normal run and REPL paths where
    their contracts overlap.
 
 ### Events or private inspection

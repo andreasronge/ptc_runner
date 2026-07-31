@@ -47,6 +47,8 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
   @valid_effects [:read, :write, :unknown]
   @max_contract_errors 16
   @max_contract_diagnostic_bytes 4_096
+  @runtime_eval_timeout_ms 5_000
+  @runtime_eval_max_heap_words 1_250_000
 
   @doc """
   Compiles prelude `source` into a `%PtcRunner.Lisp.Prelude{}`.
@@ -1666,9 +1668,13 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
     tool_exec = fn _name, _args -> nil end
 
     bounded =
-      Sandbox.run_bounded(fn ->
-        Eval.eval(core, %{}, %{}, Env.initial(), tool_exec, [], [])
-      end)
+      Sandbox.run_bounded(
+        fn ->
+          Eval.eval(core, %{}, %{}, Env.initial(), tool_exec, [], [])
+        end,
+        timeout: @runtime_eval_timeout_ms,
+        max_heap: @runtime_eval_max_heap_words
+      )
 
     case bounded do
       {:ok, {:ok, _result, user_ns}} ->

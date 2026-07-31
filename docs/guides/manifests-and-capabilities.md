@@ -130,8 +130,23 @@ Optional mission data is separate from workflow input:
 }
 ```
 
-Paths are resolved under the canonical manifest directory. Absolute paths,
-traversal, devices, non-regular files, and symlink escapes are rejected.
+Referenced files use portable lowercase ASCII logical names. A name is at most
+1,024 bytes and 16 slash-separated segments; every segment starts with a
+lowercase letter or digit and otherwise contains only lowercase letters,
+digits, `.`, `_`, or `-`. Paths are resolved under the canonical manifest
+directory. Absolute paths, empty or dot segments, Unicode, uppercase names,
+devices, non-regular files, and symlink escapes are rejected. The same grammar
+applies to component, input, contract, and trusted override candidate names.
+For an in-memory application whose manifest logical name has directory
+segments, those references are resolved relative to the manifest's logical
+directory, exactly like the filesystem adapter. That transport prefix does not
+consume the referenced name's 1,024-byte or 16-segment application limit.
+When a directory-backed override descriptor and candidate are inside that
+application directory, they use the same logical-document cache as manifest
+references. A candidate that is also a selected component document is captured
+and charged once, matching the in-memory adapter. Candidate resolution still
+uses the descriptor's own directory as its confinement boundary; entering the
+shared cache does not widen that authority.
 
 Those rules govern files the host reads while loading the manifest. Files the
 *model* can reach are separate and never come from the manifest: they come from

@@ -28,6 +28,7 @@ defmodule PtcRunner.Kernel.ComponentOverride do
   step, and promotion stays an explicit human decision.
   """
 
+  alias PtcRunner.Kernel.ApplicationSource
   alias PtcRunner.Kernel.Component
   alias PtcRunner.Kernel.ConfinedFile
   alias PtcRunner.Kernel.StrictJSON
@@ -38,7 +39,14 @@ defmodule PtcRunner.Kernel.ComponentOverride do
   @hash ~r/\Asha256:[0-9a-f]{64}\z/
   @component_id ~r/\A[a-z][a-z0-9._-]{0,127}\z/
 
-  @enforce_keys [:component_id, :base_source_hash, :source_hash, :source, :origin]
+  @enforce_keys [
+    :component_id,
+    :base_source_hash,
+    :source_hash,
+    :source,
+    :origin,
+    :descriptor_bytes
+  ]
   defstruct @enforce_keys
 
   @type t :: %__MODULE__{
@@ -46,7 +54,8 @@ defmodule PtcRunner.Kernel.ComponentOverride do
           base_source_hash: binary(),
           source_hash: binary(),
           source: binary(),
-          origin: binary()
+          origin: binary(),
+          descriptor_bytes: non_neg_integer()
         }
 
   @type error ::
@@ -70,6 +79,7 @@ defmodule PtcRunner.Kernel.ComponentOverride do
          {:ok, raw} <-
            ConfinedFile.read(directory, Path.basename(canonical), @max_descriptor_bytes),
          {:ok, decoded} <- decode(raw),
+         :ok <- valid_candidate_name(decoded["path"]),
          {:ok, source} <- read_source(directory, decoded["path"]),
          :ok <- verify_source_hash(source, decoded["source_hash"]) do
       {:ok,
@@ -78,7 +88,8 @@ defmodule PtcRunner.Kernel.ComponentOverride do
          base_source_hash: decoded["base_source_hash"],
          source_hash: decoded["source_hash"],
          source: source,
-         origin: "component-override"
+         origin: "component-override",
+         descriptor_bytes: byte_size(raw)
        }}
     else
       {:error, reason} when reason in [:override_source_hash_mismatch] -> {:error, reason}
@@ -88,6 +99,47 @@ defmodule PtcRunner.Kernel.ComponentOverride do
   end
 
   def load(_path), do: {:error, :invalid_override_descriptor}
+
+  @spec load_application(ApplicationSource.t(), binary()) :: {:ok, t()} | {:error, error()}
+  @doc false
+  def load_application(application_source, descriptor_name),
+    do: load_application(application_source, descriptor_name, nil)
+
+  @spec load_application(ApplicationSource.t(), binary(), binary() | nil) ::
+          {:ok, t()} | {:error, error()}
+  @doc false
+  def load_application(%ApplicationSource{} = application_source, descriptor_name, expected_name)
+      when is_binary(descriptor_name) and (is_binary(expected_name) or is_nil(expected_name)) do
+    with {:ok, descriptor} <-
+           ApplicationSource.read(application_source, descriptor_name, @max_descriptor_bytes),
+         {:ok, decoded} <- decode(descriptor),
+         :ok <- valid_candidate_name(decoded["path"]),
+         {:ok, candidate_name} <-
+           ApplicationSource.resolve_reference(
+             application_source,
+             descriptor_name,
+             decoded["path"]
+           ),
+         :ok <- expected_candidate_name(expected_name, candidate_name),
+         {:ok, source} <-
+           ApplicationSource.read(application_source, candidate_name, @max_source_bytes),
+         true <- byte_size(source) > 0,
+         :ok <- verify_source_hash(source, decoded["source_hash"]) do
+      {:ok, override(decoded, descriptor, source)}
+    else
+      {:error, :override_source_hash_mismatch} = error -> error
+      {:error, :invalid_override_source} = error -> error
+      {:error, :invalid_override_descriptor} = error -> error
+      {:error, :document_limit_exceeded} -> {:error, :invalid_override_source}
+      {:error, :reference_missing} -> {:error, :invalid_override_source}
+      {:error, :invalid_logical_name} -> {:error, :invalid_override_source}
+      false -> {:error, :invalid_override_source}
+      _reason -> {:error, :invalid_override_descriptor}
+    end
+  end
+
+  def load_application(_application_source, _descriptor_name, _expected_name),
+    do: {:error, :invalid_override_descriptor}
 
   @doc """
   Applies one verified override to a selected component list.
@@ -148,6 +200,17 @@ defmodule PtcRunner.Kernel.ComponentOverride do
     end
   end
 
+  defp override(decoded, descriptor, source) do
+    %__MODULE__{
+      component_id: decoded["component_id"],
+      base_source_hash: decoded["base_source_hash"],
+      source_hash: decoded["source_hash"],
+      source: source,
+      origin: "component-override",
+      descriptor_bytes: byte_size(descriptor)
+    }
+  end
+
   defp decode(raw) do
     with {:ok, value} <- StrictJSON.decode(raw),
          true <- is_map(value) and not is_struct(value),
@@ -171,6 +234,18 @@ defmodule PtcRunner.Kernel.ComponentOverride do
       _reason -> {:error, :invalid_override_source}
     end
   end
+
+  defp valid_candidate_name(path) do
+    if ApplicationSource.valid_name?(path),
+      do: :ok,
+      else: {:error, :invalid_override_source}
+  end
+
+  defp expected_candidate_name(nil, _candidate_name), do: :ok
+  defp expected_candidate_name(candidate_name, candidate_name), do: :ok
+
+  defp expected_candidate_name(_expected_name, _candidate_name),
+    do: {:error, :invalid_override_descriptor}
 
   defp verify_source_hash(source, expected) do
     if hash(source) == expected, do: :ok, else: {:error, :override_source_hash_mismatch}

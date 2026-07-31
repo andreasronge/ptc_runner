@@ -26,13 +26,20 @@ defmodule PtcRunner.Kernel.DeepSeekE2ETest do
   test "a live DeepSeek request crosses the bounded Kernel capability boundary" do
     model = System.get_env("PTC_TEST_MODEL", "deepseek")
     {:ok, registry} = ProviderRegistry.new()
+    {:ok, limits} = Limits.new(run_duration_ms: 90_000, workflow_timeout_ms: 90_000)
 
     {:ok, %{capabilities: [capability], close: close}} =
       ProviderRegistry.build(
         registry,
         "llm",
         %{"model" => model},
-        %{directory: File.cwd!(), destination: :workflow}
+        %{
+          application_content_digest: String.duplicate("0", 64),
+          destination: :workflow,
+          limits: limits,
+          installed_limits: limits,
+          owner: self()
+        }
       )
 
     if close, do: on_exit(close)
@@ -41,7 +48,6 @@ defmodule PtcRunner.Kernel.DeepSeekE2ETest do
     {:ok, bundle} = Kernel.compile_bundle([component])
     {:ok, workflow} = WorkflowEnvironment.new(bundle: bundle, capabilities: [capability])
     {:ok, mission} = MissionEnvironment.new([])
-    {:ok, limits} = Limits.new(run_duration_ms: 90_000, workflow_timeout_ms: 90_000)
     {:ok, sink} = EventSink.start(:normal, limits, run_id: "deepseek-e2e")
 
     {:ok, config} =

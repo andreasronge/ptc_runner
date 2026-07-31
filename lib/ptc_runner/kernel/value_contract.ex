@@ -18,6 +18,7 @@ defmodule PtcRunner.Kernel.ValueContract do
   alias PtcRunner.Kernel.JSONSchema
   alias PtcRunner.Kernel.JSONSchema.SHA256Format
   alias PtcRunner.Kernel.JSONValue
+  alias PtcRunner.Kernel.TypedCanonicalJSON
 
   @dialects [
     "https://json-schema.org/draft/2020-12/schema",
@@ -52,6 +53,21 @@ defmodule PtcRunner.Kernel.ValueContract do
   end
 
   def valid?(_contract, _value), do: false
+
+  @spec behavior_hash(t()) :: binary()
+  @doc """
+  Returns the stable behavior identity of the compiled contract.
+
+  `$schema`, `default`, and vendor annotations are removed by compilation.
+  This projection additionally removes `title` and `description` only while
+  traversing accepted schema positions; property names with those spellings
+  remain literal application keys.
+  """
+  def behavior_hash(%__MODULE__{schema: schema}) do
+    projection = behavior_schema(schema)
+    {:ok, encoded} = TypedCanonicalJSON.encode(projection)
+    TypedCanonicalJSON.sha256(<<"ptc.contract-behavior.v1", 0>>, encoded)
+  end
 
   @doc false
   @spec json_value(term()) :: {:ok, term()} | {:error, :duplicate_key | :invalid_json}
@@ -326,6 +342,23 @@ defmodule PtcRunner.Kernel.ValueContract do
 
       {:error, :invalid_schema} ->
         {:error, :invalid_value_contract}
+    end
+  end
+
+  defp behavior_schema(schema) when is_map(schema) do
+    schema
+    |> Map.drop(["title", "description"])
+    |> maybe_map_schema_children("properties", fn properties ->
+      Map.new(properties, fn {name, child} -> {name, behavior_schema(child)} end)
+    end)
+    |> maybe_map_schema_children("items", &behavior_schema/1)
+    |> maybe_map_schema_children("oneOf", &Enum.map(&1, fn branch -> behavior_schema(branch) end))
+  end
+
+  defp maybe_map_schema_children(schema, key, mapper) do
+    case Map.fetch(schema, key) do
+      {:ok, value} -> Map.put(schema, key, mapper.(value))
+      :error -> schema
     end
   end
 

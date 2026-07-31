@@ -1,22 +1,22 @@
 defmodule PtcRunner.Kernel.RunBuilder do
   @moduledoc """
-  Shared manifest-backed construction and execution path.
+  Shared path-free request construction and execution path.
 
-  The builder resolves trusted provider names, compiles separate workflow and
-  mission bundles, assembles their environments, starts the configured event
-  sink, and produces the same `PtcRunner.Kernel.RunConfig` accepted by direct
-  Elixir embedding. Frontends should delegate here instead of creating a
-  second manifest, authority, or event path. Relative artifact destinations are
-  anchored once before preflight and the same absolute paths are retained
-  through post-run persistence.
+  Filesystem and memory adapters first acquire a sealed
+  `PtcRunner.Kernel.RunRequest`. The builder then resolves trusted provider
+  names, compiles separate workflow and mission bundles, assembles their
+  environments, starts the configured event sink, and produces the same
+  `PtcRunner.Kernel.RunConfig` accepted by direct Elixir embedding. Relative
+  artifact destinations are anchored once before preflight and the same
+  absolute paths are retained through post-run persistence.
   """
 
   alias PtcRunner.Kernel
-  alias PtcRunner.Kernel.ComponentOverride
+  alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.InspectionArtifact
   alias PtcRunner.Kernel.InspectionSink
-  alias PtcRunner.Kernel.Manifest
+  alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.MissionEnvironment
   alias PtcRunner.Kernel.PrivateDirectory
   alias PtcRunner.Kernel.ProviderRegistry
@@ -24,39 +24,64 @@ defmodule PtcRunner.Kernel.RunBuilder do
   alias PtcRunner.Kernel.Result
   alias PtcRunner.Kernel.ResultArtifact
   alias PtcRunner.Kernel.RunConfig
+  alias PtcRunner.Kernel.RunRequest
   alias PtcRunner.Kernel.TraceLog
   alias PtcRunner.Kernel.ValueContract
   alias PtcRunner.Kernel.WorkflowEnvironment
 
-  @spec build(Manifest.t(), ProviderRegistry.t(), keyword()) ::
+  @spec build(RunRequest.t(), ProviderRegistry.t(), keyword()) ::
           {:ok,
            %{
              entry_source: binary(),
              config: RunConfig.t(),
-             result_contract: ValueContract.t() | nil
+             result_contract: ValueContract.t() | nil,
+             result_projection: :native | :json
            }}
           | {:error, term()}
-  @doc "Builds an entry expression and complete run configuration from a loaded manifest."
-  def build(manifest, registry, opts \\ [])
+  @doc "Builds an entry expression and complete run configuration from a sealed request."
+  def build(request, registry, opts \\ [])
 
-  def build(%Manifest{} = manifest, %ProviderRegistry{} = registry, opts) when is_list(opts) do
-    with {:ok, opts} <- anchor_artifact_options(opts),
+  def build(%RunRequest{} = request, %ProviderRegistry{} = registry, opts) when is_list(opts) do
+    package = request.package
+
+    with true <- RunRequest.valid?(request),
+         :ok <- validate_installed_limits(package, registry, opts),
+         :ok <- validate_inspection_selection(request, opts),
+         {:ok, opts} <- anchor_artifact_options(opts),
          :ok <- preflight_inspection(opts),
-         :ok <- preflight_artifact_destinations(opts) do
-      input_class = Keyword.get(opts, :input_class, :normal)
-
-      case providers(manifest, registry, input_class, opts) do
-        {:ok, providers} -> build_with_providers(manifest, providers, opts)
-        {:error, _reason} = error -> error
-      end
+         :ok <- preflight_artifact_destinations(opts),
+         {:ok, workflow_bundle} <- bundle(package.workflow_components),
+         {:ok, mission_bundle} <- bundle(package.mission_components),
+         {:ok, providers} <-
+           providers(package, registry, provider_input_class(request.input.authority), opts) do
+      build_with_providers(request, {workflow_bundle, mission_bundle}, providers, opts)
+    else
+      false -> {:error, :invalid_run_request}
+      {:error, _reason} = error -> error
     end
   end
 
-  defp build_with_providers(manifest, providers, opts) do
+  def build(_request, _registry, _opts), do: {:error, :invalid_run_request}
+
+  defp validate_installed_limits(package, registry, opts) do
+    expected = Keyword.get(opts, :installed_limits, registry.installed_limits)
+
+    if match?(%Limits{}, expected) and package.installed_limits == expected,
+      do: :ok,
+      else: {:error, :installed_limits_mismatch}
+  end
+
+  defp validate_inspection_selection(request, opts) do
+    if request.policy.inspection_capture == is_binary(Keyword.get(opts, :inspect)),
+      do: :ok,
+      else: {:error, :invalid_execution_policy}
+  end
+
+  defp build_with_providers(request, {workflow_bundle, mission_bundle}, providers, opts) do
+    package = request.package
+
     result =
-      with {:ok, workflow_bundle} <- bundle(manifest.workflow_components),
-           {:ok, mission_bundle} <- bundle(manifest.mission_components),
-           {:ok, workflow} <-
+      with {:ok, workflow} <-
              WorkflowEnvironment.new(
                bundle: workflow_bundle,
                capabilities: providers.workflow.capabilities
@@ -65,20 +90,20 @@ defmodule PtcRunner.Kernel.RunBuilder do
              MissionEnvironment.new(
                bundle: mission_bundle,
                capabilities: providers.mission.capabilities,
-               data: manifest.mission_data
+               data: package.mission_data
              ),
-           {:ok, sink} <- event_sink(manifest, providers),
+           {:ok, sink} <- event_sink(request, providers),
            {:ok, inspection_sink, inspection_path} <- inspection_sink(sink, opts),
-           :ok <- capture_prelude_sources(inspection_sink, sink, {workflow, mission}, manifest) do
+           :ok <- capture_prelude_sources(inspection_sink, sink, {workflow, mission}, package) do
         build_config(
-          manifest,
+          request,
           providers,
           workflow,
           mission,
           sink,
           inspection_sink,
           inspection_path,
-          Keyword.get(opts, :component_overrides, [])
+          package.component_overrides
         )
       end
 
@@ -92,7 +117,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
   end
 
   defp build_config(
-         manifest,
+         request,
          providers,
          workflow,
          mission,
@@ -101,26 +126,30 @@ defmodule PtcRunner.Kernel.RunBuilder do
          inspection_path,
          component_overrides
        ) do
+    package = request.package
+
     case RunConfig.new(
            workflow_environment: workflow,
            mission_environment: mission,
-           input: %{"input" => manifest.input},
-           limits: manifest.limits,
+           input: %{"input" => request.input.value},
+           limits: package.limits,
            event_sink: sink,
-           result_contract: manifest.contracts.result,
+           result_contract: package.contracts.result,
+           result_projection: request.policy.result_projection,
            inspection_sink: inspection_sink,
            inspection_path: inspection_path,
            provider_resources: providers.resources,
            connector_snapshots: providers.snapshots,
            component_overrides: component_overrides,
-           labels: manifest.labels
+           labels: package.labels
          ) do
       {:ok, config} ->
         {:ok,
          %{
-           entry_source: "(#{manifest.entry} data/input)",
+           entry_source: "(#{package.entry} data/input)",
            config: config,
-           result_contract: manifest.contracts.result
+           result_contract: package.contracts.result,
+           result_projection: request.policy.result_projection
          }}
 
       {:error, _reason} = error ->
@@ -216,21 +245,19 @@ defmodule PtcRunner.Kernel.RunBuilder do
     end
   end
 
-  defp providers(_manifest, _registry, _input_class, _opts), do: {:error, :invalid_input_class}
-
   defp sort_snapshots(snapshots), do: Enum.sort_by(snapshots, &Map.get(&1, "provider", ""))
 
-  defp prepare_providers(manifest, registry) do
-    manifest
+  defp prepare_providers(package, registry) do
+    package
     |> provider_specs()
     |> Enum.with_index()
     |> Enum.reduce_while({:ok, []}, fn {{destination, spec}, index}, {:ok, prepared} ->
       context = %{
-        directory: manifest.directory,
+        application_content_digest: package.application_content_digest,
         destination: destination,
         owner: self(),
-        limits: manifest.limits,
-        installed_limits: manifest.installed_limits
+        limits: package.limits,
+        installed_limits: package.installed_limits
       }
 
       case ProviderRegistry.prepare(
@@ -496,7 +523,8 @@ defmodule PtcRunner.Kernel.RunBuilder do
            %{
              entry_source: binary(),
              config: RunConfig.t(),
-             result_contract: ValueContract.t() | nil
+             result_contract: ValueContract.t() | nil,
+             result_projection: :native | :json
            }}
           | {:error, term()}
   @doc """
@@ -521,19 +549,43 @@ defmodule PtcRunner.Kernel.RunBuilder do
   defp load_and_build_with_options(path, registry, opts) do
     installed_limits = Keyword.get(opts, :installed_limits, registry.installed_limits)
 
-    with {:ok, manifest} <- Manifest.load(path, installed_limits),
-         {:ok, manifest, input_class} <- maybe_override_input(manifest, opts),
-         {:ok, manifest, override} <- maybe_override_component(manifest, opts),
+    with {:ok, request_opts} <- request_options(opts, installed_limits),
+         {:ok, request} <- ApplicationPackage.request_directory(path, request_opts),
          {:ok, opts} <- anchor_artifact_options(opts),
-         {:ok, built} <-
-           build(
-             manifest,
-             registry,
-             opts
-             |> Keyword.put(:input_class, input_class)
-             |> Keyword.put(:component_overrides, List.wrap(override))
-           ) do
+         {:ok, built} <- build(request, registry, opts) do
       {:ok, built, opts}
+    end
+  end
+
+  defp request_options(opts, installed_limits) do
+    with {:ok, input_opts} <- input_options(opts) do
+      {:ok,
+       input_opts ++
+         [
+           installed_limits: installed_limits,
+           component_override_descriptor: Keyword.get(opts, :component_override_descriptor),
+           inspection_capture: is_binary(Keyword.get(opts, :inspect)),
+           result_projection: Keyword.get(opts, :result_projection, :native)
+         ]}
+    end
+  end
+
+  defp input_options(opts) do
+    case {Keyword.get(opts, :mission), Keyword.get(opts, :private_mission)} do
+      {nil, nil} ->
+        {:ok, [input_authority: :normal]}
+
+      {path, nil} when is_binary(path) ->
+        {:ok, [input: path, input_authority: :normal]}
+
+      {nil, path} when is_binary(path) ->
+        {:ok, [input: path, input_authority: :private]}
+
+      {path, private} when is_binary(path) and is_binary(private) ->
+        {:error, :conflicting_mission_inputs}
+
+      _invalid ->
+        {:error, :invalid_input}
     end
   end
 
@@ -581,39 +633,6 @@ defmodule PtcRunner.Kernel.RunBuilder do
 
   defp invalid_artifact_destination,
     do: {:error, {:artifact_preflight_failed, :invalid_destination}}
-
-  # Applied after the manifest is loaded and before any bundle is compiled, so
-  # the candidate goes through the same dependency, export, signature, and
-  # capability validation as the source it replaces. An override changes which
-  # source compiles, never what compilation permits.
-  #
-  # The candidate reaches the run only here. It is never manifest input and
-  # never mission data, so a generated program cannot introduce or observe one.
-  defp maybe_override_component(%Manifest{} = manifest, opts) do
-    case Keyword.get(opts, :component_override_descriptor) do
-      nil ->
-        {:ok, manifest, nil}
-
-      path ->
-        with {:ok, override} <- ComponentOverride.load(path),
-             {:ok, workflow, workflow_applied?} <-
-               ComponentOverride.apply(manifest.workflow_components, override),
-             {:ok, mission, mission_applied?} <-
-               ComponentOverride.apply(manifest.mission_components, override),
-             :ok <- exactly_one_target(workflow_applied?, mission_applied?) do
-          {:ok, %Manifest{manifest | workflow_components: workflow, mission_components: mission},
-           ComponentOverride.identity(override)}
-        end
-    end
-  end
-
-  # The descriptor names one component, so it must resolve to one. The same ID
-  # can legitimately be selected into both environments, and replacing both
-  # from a single descriptor would evaluate a candidate in a place the operator
-  # never named.
-  defp exactly_one_target(true, true), do: {:error, :ambiguous_override_target}
-  defp exactly_one_target(false, false), do: {:error, :override_component_not_selected}
-  defp exactly_one_target(_workflow, _mission), do: :ok
 
   # A deterministic destination conflict is reported after manifest and input
   # validation (so a bad output path never masks a more useful error) but
@@ -764,26 +783,8 @@ defmodule PtcRunner.Kernel.RunBuilder do
     end
   end
 
-  defp maybe_override_input(manifest, opts) do
-    case {Keyword.get(opts, :mission), Keyword.get(opts, :private_mission)} do
-      {nil, nil} ->
-        {:ok, manifest, :normal}
-
-      {path, nil} when is_binary(path) ->
-        with {:ok, manifest} <- Manifest.override_input(manifest, path),
-             do: {:ok, manifest, :normal}
-
-      {nil, path} when is_binary(path) ->
-        with {:ok, manifest} <- Manifest.override_input(manifest, path),
-             do: {:ok, manifest, :private_inspection}
-
-      {path, private} when is_binary(path) and is_binary(private) ->
-        {:error, :conflicting_mission_inputs}
-
-      _invalid ->
-        {:error, :invalid_input}
-    end
-  end
+  defp provider_input_class(:normal), do: :normal
+  defp provider_input_class(:private), do: :private_inspection
 
   defp persistence_failure(:trace), do: :trace_persistence_failed
   defp persistence_failure(:inspection), do: :inspection_persistence_failed
@@ -923,18 +924,21 @@ defmodule PtcRunner.Kernel.RunBuilder do
   defp bundle([]), do: {:ok, nil}
   defp bundle(components), do: Kernel.compile_bundle(components)
 
-  defp event_sink(manifest, providers) do
+  defp event_sink(request, providers) do
+    policy = request.policy
+    package = request.package
+
     opts =
       []
-      |> maybe_put(:run_id, manifest.events.run_id)
-      |> maybe_put(:trace_id, manifest.events.trace_id)
+      |> maybe_put(:run_id, policy.run_id)
+      |> maybe_put(:trace_id, policy.trace_id)
 
-    policy =
-      if manifest.events.policy == :private or providers.data_class == :private_inspection,
+    effective_policy =
+      if policy.event_policy == :private or providers.data_class == :private_inspection,
         do: :private,
         else: :normal
 
-    EventSink.start(policy, manifest.limits, opts)
+    EventSink.start(effective_policy, package.limits, opts)
   end
 
   defp inspection_sink(event_sink, opts) do

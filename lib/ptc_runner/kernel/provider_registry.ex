@@ -4,7 +4,7 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
 
   A manifest can select a bounded provider name and JSON configuration; it
   cannot register a module, function, callback, command, or code URL. Builders
-  receive the canonical manifest directory, requested workflow or mission
+  receive a path-free application identity, requested workflow or mission
   destination, building owner, and installed limits. They return either one
   legacy `PtcRunner.Kernel.Capability` or a normalized provider build with one
   or more capabilities, an optional safe snapshot, and an optional idempotent
@@ -55,18 +55,27 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
   alias PtcRunner.Kernel.JSONValue
   alias PtcRunner.Kernel.Limits
 
+  @application_content_digest ~r/\A[0-9a-f]{64}\z/
+  @build_context_keys [
+    :application_content_digest,
+    :destination,
+    :owner,
+    :limits,
+    :installed_limits
+  ]
+
   @enforce_keys [:builders, :credential_resolver, :installed_limits]
   defstruct [:builders, :credential_resolver, :installed_limits]
 
   @type build_context :: %{
-          directory: binary(),
+          application_content_digest: binary(),
           destination: :workflow | :mission,
           owner: pid(),
           limits: PtcRunner.Kernel.Limits.t(),
           installed_limits: PtcRunner.Kernel.Limits.t()
         }
   @type context :: %{
-          directory: binary(),
+          application_content_digest: binary(),
           destination: :workflow | :mission,
           owner: pid(),
           limits: PtcRunner.Kernel.Limits.t(),
@@ -188,6 +197,14 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
           {:ok, prepared()} | {:error, term()}
   @doc false
   def prepare(%__MODULE__{builders: builders}, name, config, context) do
+    with :ok <- validate_build_context(context) do
+      prepare_builder(builders, name, config, context)
+    end
+  end
+
+  def prepare(_registry, _name, _config, _context), do: {:error, :invalid_provider_context}
+
+  defp prepare_builder(builders, name, config, context) do
     case Map.fetch(builders, name) do
       {:ok, {:staged, prepare}} ->
         invoke(
@@ -216,6 +233,23 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
         {:error, :unknown_provider}
     end
   end
+
+  defp validate_build_context(context)
+       when is_map(context) and not is_struct(context) do
+    if Enum.sort(Map.keys(context)) == Enum.sort(@build_context_keys) and
+         is_binary(context.application_content_digest) and
+         context.application_content_digest =~ @application_content_digest and
+         context.destination in [:workflow, :mission] and
+         is_pid(context.owner) and
+         match?(%Limits{}, context.limits) and
+         match?(%Limits{}, context.installed_limits) do
+      :ok
+    else
+      {:error, :invalid_provider_context}
+    end
+  end
+
+  defp validate_build_context(_context), do: {:error, :invalid_provider_context}
 
   @spec preflight(prepared()) :: {:ok, preflighted()} | {:error, term()}
   @doc false

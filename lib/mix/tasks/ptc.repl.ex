@@ -938,7 +938,7 @@ defmodule Mix.Tasks.Ptc.Repl do
 
   defp load_config(path) do
     with {:ok, registry} <- ProviderRegistry.new(),
-         {:ok, built} <- RunBuilder.load_and_build(path, registry),
+         {:ok, built} <- RunBuilder.load_and_build(path, registry, result_projection: :native),
          do: {:ok, built.config}
   end
 

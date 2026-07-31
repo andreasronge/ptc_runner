@@ -400,11 +400,11 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
     assert prepared.accepts_data == [:private_inspection]
   end
 
-  defp context(directory, destination) do
+  defp context(_directory, destination) do
     {:ok, limits} = Limits.new()
 
     %{
-      directory: directory,
+      application_content_digest: String.duplicate("0", 64),
       destination: destination,
       owner: self(),
       limits: limits,

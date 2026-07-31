@@ -136,7 +136,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
                  "fixture-mcp",
                  %{"allow" => ["remote.structured"]},
                  %{
-                   directory: File.cwd!(),
+                   application_content_digest: String.duplicate("0", 64),
                    destination: :mission,
                    limits: limits,
                    installed_limits: limits,
@@ -197,7 +197,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
                  "fixture-mcp",
                  %{"allow" => ["remote.structured"]},
                  %{
-                   directory: File.cwd!(),
+                   application_content_digest: String.duplicate("0", 64),
                    destination: :mission,
                    limits: limits,
                    installed_limits: limits,
@@ -286,7 +286,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
                "fixture-mcp",
                %{"allow" => ["remote.structured"]},
                %{
-                 directory: File.cwd!(),
+                 application_content_digest: String.duplicate("0", 64),
                  destination: :mission,
                  limits: limits,
                  installed_limits: limits,
@@ -1000,9 +1000,10 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
                "fixture-mcp",
                %{"allow" => ["remote.write"]},
                %{
-                 directory: File.cwd!(),
+                 application_content_digest: String.duplicate("0", 64),
                  destination: :workflow,
                  limits: limits,
+                 installed_limits: limits,
                  owner: self()
                }
              )
@@ -1110,7 +1111,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
                    "max_result_bytes" => 32_000
                  },
                  %{
-                   directory: File.cwd!(),
+                   application_content_digest: String.duplicate("0", 64),
                    destination: :mission,
                    limits: limits,
                    installed_limits: limits,

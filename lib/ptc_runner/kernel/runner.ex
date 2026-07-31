@@ -18,6 +18,7 @@ defmodule PtcRunner.Kernel.Runner do
   alias PtcRunner.Kernel.RunState
   alias PtcRunner.Kernel.RuntimeTools
   alias PtcRunner.Kernel.SafeMetadata
+  alias PtcRunner.Kernel.StrictJSON
   alias PtcRunner.Lisp
   alias PtcRunner.Lisp.RetainedSize
   alias PtcRunner.Lisp.TrustedTool
@@ -183,26 +184,36 @@ defmodule PtcRunner.Kernel.Runner do
          }}
 
       {:ok, step} ->
-        case Lisp.project_boundary_value(kernel_return_value(step.return), :kernel_json) do
-          {:ok, value} ->
-            if terminal_result_within_limit?(value, config.limits.terminal_result_bytes) do
-              value = RetainedSize.detach_binaries(value)
+        with {:ok, value} <-
+               Lisp.project_boundary_value(kernel_return_value(step.return), :kernel_json),
+             {:ok, value} <- project_result(value, config.result_projection) do
+          if terminal_result_within_limit?(value, config.limits.terminal_result_bytes) do
+            value = RetainedSize.detach_binaries(value)
 
-              {:ok,
-               %Result{
-                 value: value,
-                 usage: RunState.usage(state),
-                 evaluation_memory: RunState.evaluation_memory_summary(state)
-               }}
-            else
-              {:error,
-               %Error{
-                 kind: :limit_exceeded,
-                 reason: :terminal_result_exceeded,
-                 details: %{},
-                 usage: RunState.usage(state)
-               }}
-            end
+            {:ok,
+             %Result{
+               value: value,
+               usage: RunState.usage(state),
+               evaluation_memory: RunState.evaluation_memory_summary(state)
+             }}
+          else
+            {:error,
+             %Error{
+               kind: :limit_exceeded,
+               reason: :terminal_result_exceeded,
+               details: %{},
+               usage: RunState.usage(state)
+             }}
+          end
+        else
+          {:error, :invalid_result_projection} ->
+            {:error,
+             %Error{
+               kind: :workflow_failed,
+               reason: :invalid_result_projection,
+               details: %{},
+               usage: RunState.usage(state)
+             }}
 
           {:error, reason} ->
             {:error,
@@ -228,6 +239,15 @@ defmodule PtcRunner.Kernel.Runner do
              ),
            usage: RunState.usage(state)
          }}
+    end
+  end
+
+  defp project_result(value, :native), do: {:ok, value}
+
+  defp project_result(value, :json) do
+    case StrictJSON.admit(value) do
+      {:ok, projected} -> {:ok, projected}
+      {:error, _reason} -> {:error, :invalid_result_projection}
     end
   end
 
