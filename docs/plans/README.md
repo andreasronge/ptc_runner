@@ -24,6 +24,10 @@ belongs in guides or retained specifications.
 
 ## Future, trigger-gated
 
+- [`future/incident-evidence-compiler.md`](future/incident-evidence-compiler.md)
+  defines the first business-facing reference application — a read-only
+  incident-evidence compiler with fail-closed citations — and the staged
+  benchmark that turns it into release evidence.
 - [`future/mcp-dcr.md`](future/mcp-dcr.md) retains the deprecated Dynamic Client
   Registration compatibility state machine until a concrete server that lacks
   CIMD and practical pre-registration creates an implementation trigger.
