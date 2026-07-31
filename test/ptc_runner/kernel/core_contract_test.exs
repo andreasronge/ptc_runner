@@ -17,6 +17,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
   alias PtcRunner.Kernel.RunConfig
   alias PtcRunner.Kernel.RunState
   alias PtcRunner.Kernel.SafeMetadata
+  alias PtcRunner.Kernel.ValueContract
   alias PtcRunner.Kernel.WorkflowEnvironment
   alias PtcRunner.Lisp.Format
   alias PtcRunner.Lisp.RetainedSize
@@ -676,6 +677,32 @@ defmodule PtcRunner.Kernel.CoreContractTest do
                input: %{},
                limits: limits,
                event_sink: sink
+             )
+  end
+
+  test "run configuration rejects a mutated result contract" do
+    {:ok, workflow} = WorkflowEnvironment.new([])
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, limits} = Limits.new()
+    {:ok, sink} = EventSink.start(:normal, limits)
+
+    assert {:ok, contract} =
+             ValueContract.compile(%{
+               "type" => "object",
+               "properties" => %{"result" => %{"type" => "integer"}}
+             })
+
+    forged =
+      %{contract | schema: put_in(contract.schema, ["properties", "result", "type"], "string")}
+
+    assert {:error, :invalid_run_config} =
+             RunConfig.new(
+               workflow_environment: workflow,
+               mission_environment: mission,
+               input: %{},
+               limits: limits,
+               event_sink: sink,
+               result_contract: forged
              )
   end
 

@@ -59,15 +59,19 @@ Only `install` is required. The other top-level keys are `credentials`,
 `limits`, `runtime`, and `$schema`. Unknown keys are rejected. A document is at
 most 1 MB and holds at most 128 installations and 128 credentials. Every alias,
 credential name, and public tool name matches `^[a-z][a-z0-9._-]{0,127}$`.
+Optional properties use omission for their default; an explicit JSON `null`
+does not mean omitted and fails structural validation.
 
-`installation_revision` is a free-form operator string, at most 256 characters.
-It records which build of a server or model policy an alias represents so that
-traces from different installations remain distinguishable.
+`installation_revision` is a nonempty, NUL-free operator string of at most 256
+UTF-8 bytes. It records which build of a server or model policy an alias
+represents so that traces from different installations remain distinguishable.
 
 The canonical structural description is shipped as
 `priv/schemas/ptc-host-config.schema.json` for editor completion. Runtime
 decoding stays authoritative for semantic checks such as unique public tool
 names, credential references, reserved headers, and portable environment names.
+Standalone command diagnostics classify duplicate properties as structural
+host failures and retain only the duplicate's schema-authorized parent pointer.
 
 ## Credentials
 

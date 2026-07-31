@@ -111,7 +111,9 @@ defmodule PtcRunner.Kernel.ManifestTest do
 
     duplicate_path = Path.join(dir, "duplicate.json")
     File.write!(duplicate_path, duplicate)
-    assert {:error, :duplicate_json_key} = Manifest.load(duplicate_path)
+
+    assert {:error, {:manifest_path, [], :duplicate_json_key}} =
+             Manifest.load(duplicate_path)
   end
 
   @tag :tmp_dir
@@ -177,7 +179,9 @@ defmodule PtcRunner.Kernel.ManifestTest do
     assert %ValueContract{} = loaded.contracts.input
     assert nil == loaded.contracts.result
 
-    assert {:error, :input_contract_failed} =
+    assert {:error,
+            {:source_role, :external_input,
+             {:input_contract_failed, %{missing_required: ["question"]}}}} =
              RunBuilder.load_and_build(path, registry, mission: "invalid.json")
 
     refute_receive :provider_prepared
@@ -188,7 +192,10 @@ defmodule PtcRunner.Kernel.ManifestTest do
 
     invalid_initial = put_in(manifest, ["input", "value"], %{"other" => "invalid"})
     File.write!(path, Jason.encode!(invalid_initial))
-    assert {:error, :input_contract_failed} = RunBuilder.load_and_build(path, registry)
+
+    assert {:error, {:input_contract_failed, %{missing_required: ["question"]}}} =
+             RunBuilder.load_and_build(path, registry)
+
     refute_receive :provider_prepared
   end
 
@@ -210,7 +217,8 @@ defmodule PtcRunner.Kernel.ManifestTest do
     File.write!(path, Jason.encode!(manifest))
     File.write!(Path.join(dir, "input.schema.json"), ~S|{"type":"object","type":"object"}|)
 
-    assert {:error, :duplicate_json_key} = Manifest.load(path)
+    assert {:error, {:source_role, :input_contract, "input.schema.json", :duplicate_json_key}} =
+             Manifest.load(path)
 
     File.write!(
       Path.join(dir, "input.schema.json"),
@@ -219,7 +227,14 @@ defmodule PtcRunner.Kernel.ManifestTest do
 
     escaped = put_in(manifest, ["contracts", "input_schema", "path"], "../input.schema.json")
     File.write!(path, Jason.encode!(escaped))
-    assert {:error, :invalid_contracts} = Manifest.load(path)
+
+    assert {:error,
+            {:manifest_path,
+             [
+               {:property, "contracts"},
+               {:property, "input_schema"},
+               {:property, "path"}
+             ], :invalid_contract_reference}} = Manifest.load(path)
   end
 
   @tag :tmp_dir
@@ -440,11 +455,17 @@ defmodule PtcRunner.Kernel.ManifestTest do
       Map.put(base, "labels", %{"tags" => %{"credential" => credential}})
 
     File.write!(path, Jason.encode!(credential_labels))
-    assert {:error, :invalid_manifest} = Manifest.load(path)
+
+    assert {:error,
+            {:manifest_path, [{:property, "labels"}, {:property, "tags"}], :unknown_properties}} =
+             Manifest.load(path)
 
     private = "PRIVATE GENERATED SOURCE (return 42)"
     File.write!(path, Jason.encode!(Map.put(base, "labels", %{"name" => private})))
-    assert {:error, :invalid_manifest} = Manifest.load(path)
+
+    assert {:error,
+            {:manifest_path, [{:property, "labels"}, {:property, "name"}], :invalid_manifest}} =
+             Manifest.load(path)
   end
 
   @tag :tmp_dir
@@ -464,7 +485,7 @@ defmodule PtcRunner.Kernel.ManifestTest do
     path = Path.join(dir, "inspection.json")
     File.write!(path, Jason.encode!(manifest))
 
-    assert {:error, :unknown_or_missing_keys} = Manifest.load(path)
+    assert {:error, :unknown_properties} = Manifest.load(path)
 
     manifest = Map.delete(manifest, "inspect")
     File.write!(path, Jason.encode!(manifest))
@@ -496,10 +517,29 @@ defmodule PtcRunner.Kernel.ManifestTest do
     assert loaded.limits.evaluation_timeout_ms == 20_000
     assert loaded.installed_limits == Limits.installed_defaults()
 
+    for malformed_limits <- [
+          Map.delete(Limits.installed_defaults(), :run_duration_ms),
+          Map.put(Limits.installed_defaults(), :unexpected_limit, 1)
+        ] do
+      assert {:error, :invalid_manifest} = Manifest.load(path, malformed_limits)
+
+      assert {:error, :invalid_manifest} =
+               Manifest.load_memory(
+                 "ptc.json",
+                 %{
+                   "ptc.json" => File.read!(path),
+                   "main.clj" => "(ns main) (defn run [_] (return 1))"
+                 },
+                 malformed_limits
+               )
+    end
+
     {:ok, lower_ceiling} =
       Limits.new(run_duration_ms: 45_000, evaluation_timeout_ms: 500)
 
-    assert {:error, :invalid_limits} = Manifest.load(path, lower_ceiling)
+    assert {:error,
+            {:manifest_path, [{:property, "limits"}, {:property, "evaluation_timeout_ms"}],
+             :invalid_limits}} = Manifest.load(path, lower_ceiling)
 
     manifest = put_in(manifest, ["limits"], %{})
     File.write!(path, Jason.encode!(manifest))
@@ -515,8 +555,8 @@ defmodule PtcRunner.Kernel.ManifestTest do
     manifest = %{
       "version" => 1,
       "workflow" => %{
-        "components" => [%{"library" => "agent.core"}],
-        "entry" => "agent.core/run"
+        "components" => [%{"library" => "agent.main"}],
+        "entry" => "agent.main/run"
       },
       "input" => %{"value" => %{}},
       "providers" => %{"workflow" => [%{"name" => "fixture"}]}
@@ -545,7 +585,8 @@ defmodule PtcRunner.Kernel.ManifestTest do
              "llm",
              "result",
              "workflow.event",
-             "agent.core"
+             "agent.core",
+             "agent.main"
            ]
   end
 

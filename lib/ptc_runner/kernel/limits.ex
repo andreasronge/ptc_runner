@@ -61,6 +61,7 @@ defmodule PtcRunner.Kernel.Limits do
                         workflow_timeout_ms: 120_000,
                         evaluation_timeout_ms: 60_000
                       })
+  @fields @defaults |> Map.keys() |> Enum.sort()
   @enforce_keys Map.keys(@defaults)
   defstruct Map.to_list(@defaults)
 
@@ -96,6 +97,17 @@ defmodule PtcRunner.Kernel.Limits do
   @spec installed_defaults() :: t()
   @doc "Returns practical host ceilings for manifest-backed model and connector runs."
   def installed_defaults, do: struct!(__MODULE__, @installed_defaults)
+
+  @spec valid?(term()) :: boolean()
+  @doc "Checks that a complete limits struct contains only positive integer ceilings."
+  def valid?(%__MODULE__{} = limits) do
+    values = Map.from_struct(limits)
+
+    Enum.sort(Map.keys(values)) == @fields and
+      Enum.all?(values, fn {_name, value} -> is_integer(value) and value > 0 end)
+  end
+
+  def valid?(_limits), do: false
 
   @names @defaults |> Map.keys() |> Enum.map(&Atom.to_string/1) |> Enum.sort()
   @name_index Map.new(Map.keys(@defaults), &{Atom.to_string(&1), &1})

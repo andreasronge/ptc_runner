@@ -17,6 +17,7 @@ defmodule PtcRunner.Kernel.ExecutionPolicy do
     :result_projection
   ]
   defstruct @enforce_keys ++ [attestation: nil]
+  @field_keys Enum.sort([:__struct__, :attestation | @enforce_keys])
 
   @type t :: %__MODULE__{
           event_policy: :normal | :private,
@@ -58,7 +59,9 @@ defmodule PtcRunner.Kernel.ExecutionPolicy do
   @spec valid?(term()) :: boolean()
   @doc "Checks the policy's in-VM construction attestation."
   def valid?(%__MODULE__{attestation: attestation} = policy),
-    do: valid_shape?(policy) and Attestation.valid?(__MODULE__, payload(policy), attestation)
+    do:
+      Enum.sort(Map.keys(policy)) == @field_keys and valid_shape?(policy) and
+        Attestation.valid?(__MODULE__, payload(policy), attestation)
 
   def valid?(_policy), do: false
 

@@ -11,6 +11,7 @@ defmodule Mix.Tasks.Ptc.GenDocs do
   4. `docs/java-interop.md` — bounded Java interop reference
   5. `priv/schemas/ptc-host-config.schema.json` — host-installation JSON Schema
   6. `priv/schemas/ptc-application-manifest.schema.json` — manifest JSON Schema
+  7. `priv/schemas/ptc-command-envelope-v1.schema.json` — command envelope JSON Schema
 
   ## Usage
 
@@ -21,6 +22,7 @@ defmodule Mix.Tasks.Ptc.GenDocs do
   """
   use Mix.Task
 
+  alias PtcRunner.Kernel.CommandContract
   alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.HostConfig
   alias PtcRunner.Kernel.Manifest
@@ -31,6 +33,7 @@ defmodule Mix.Tasks.Ptc.GenDocs do
   @audit_index_path "docs/conformance/index.md"
   @host_schema_path "priv/schemas/ptc-host-config.schema.json"
   @manifest_schema_path "priv/schemas/ptc-application-manifest.schema.json"
+  @command_schema_path "priv/schemas/ptc-command-envelope-v1.schema.json"
 
   @audits [
     %{
@@ -117,6 +120,7 @@ defmodule Mix.Tasks.Ptc.GenDocs do
     generate_java_interop(check?)
     generate_host_schema(check?)
     generate_manifest_schema(check?)
+    generate_command_schema(check?)
   end
 
   defp generate_host_schema(check?) do
@@ -129,6 +133,12 @@ defmodule Mix.Tasks.Ptc.GenDocs do
     {:ok, encoded} = Manifest.schema() |> DeterministicJSON.encode()
     write_or_check!(@manifest_schema_path, encoded <> "\n", check?)
     report_generation(@manifest_schema_path, 1, "schema", check?)
+  end
+
+  defp generate_command_schema(check?) do
+    {:ok, encoded} = CommandContract.schema() |> DeterministicJSON.encode()
+    write_or_check!(@command_schema_path, encoded <> "\n", check?)
+    report_generation(@command_schema_path, 1, "schema", check?)
   end
 
   defp check_java_audit_path_set! do

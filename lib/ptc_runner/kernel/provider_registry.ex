@@ -141,27 +141,49 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
   @doc "Creates a registry from explicit builder functions keyed by provider name."
   def new(additional_builders \\ %{}, opts \\ [])
 
-  def new(additional_builders, opts) when is_map(additional_builders) and is_list(opts) do
-    resolver = Keyword.get(opts, :credential_resolver, &default_credential_resolver/1)
-    installed_limits = Keyword.get(opts, :installed_limits, Limits.installed_defaults())
+  def new(additional_builders, opts)
+      when is_map(additional_builders) and not is_struct(additional_builders) and is_list(opts) do
+    if Keyword.keyword?(opts) do
+      registry = %__MODULE__{
+        builders: additional_builders,
+        credential_resolver:
+          Keyword.get(opts, :credential_resolver, &default_credential_resolver/1),
+        installed_limits: Keyword.get(opts, :installed_limits, Limits.installed_defaults())
+      }
 
-    if Enum.all?(additional_builders, fn {name, builder} ->
-         valid_name?(name) and valid_builder?(builder)
-       end) and is_function(resolver, 1) and
-         is_struct(installed_limits, Limits) and
-         Keyword.keys(opts) -- [:credential_resolver, :installed_limits] == [] do
-      {:ok,
-       %__MODULE__{
-         builders: additional_builders,
-         credential_resolver: resolver,
-         installed_limits: installed_limits
-       }}
+      keys = Keyword.keys(opts)
+
+      if valid?(registry) and keys -- [:credential_resolver, :installed_limits] == [] and
+           length(keys) == MapSet.size(MapSet.new(keys)) do
+        {:ok, registry}
+      else
+        {:error, :invalid_provider_registry}
+      end
     else
       {:error, :invalid_provider_registry}
     end
   end
 
   def new(_builders, _opts), do: {:error, :invalid_provider_registry}
+
+  @spec valid?(term()) :: boolean()
+  @doc "Checks the complete inert registry shape accepted by the constructor."
+  def valid?(
+        %__MODULE__{
+          builders: builders,
+          credential_resolver: resolver,
+          installed_limits: installed_limits
+        } = registry
+      ) do
+    map_size(registry) == map_size(struct(__MODULE__)) and
+      is_map(builders) and not is_struct(builders) and
+      Enum.all?(builders, fn {name, builder} ->
+        valid_name?(name) and valid_builder?(builder)
+      end) and
+      is_function(resolver, 1) and Limits.valid?(installed_limits)
+  end
+
+  def valid?(_registry), do: false
 
   @spec staged((map(), context() -> {:ok, prepared()} | {:error, term()})) ::
           staged_builder()

@@ -38,9 +38,15 @@ PTC-Lisp owns replaceable workflow policy:
 
 Frontends own presentation and host choices. They must enter through
 `PtcRunner.Kernel.ApplicationPackage` and a sealed
-`PtcRunner.Kernel.RunRequest`, then delegate assembly to
-`PtcRunner.Kernel.RunBuilder`; they must not create another manifest parser,
-provider registry, event model, or evaluator.
+`PtcRunner.Kernel.RunRequest`. The closed command pipeline uses
+`PtcRunner.Kernel.CommandEngine`; the existing Mix command remains on its
+transitional `RunBuilder` adapter until frontend integration is complete.
+Embedding frontends pass their sealed request to the path-free
+`PtcRunner.Kernel.RunCoordinator`, then pass its sealed `PreparedRun` to
+`PtcRunner.Kernel.RunBuilder.build_prepared/3`. Frontends must not create
+another manifest parser, provider registry, event model, or evaluator; once
+integrated, command frontends must also share the engine's argv parser and
+diagnostic vocabulary.
 
 When placing new behavior, prefer the lowest layer that must own it:
 
@@ -63,6 +69,9 @@ ApplicationSource -> Manifest -> ApplicationPackage
                                           |
                                           v
                                    sealed RunRequest
+                                          |
+                                          v
+                  RunCoordinator.prepare (path-free phases 4-5)
                                           |
                                           v
                          RunBuilder -> immutable RunConfig
@@ -88,7 +97,206 @@ its authority class. A destination-free `PtcRunner.Kernel.ExecutionPolicy`
 fixes event identities, inspection capture, and result projection before the
 three values are sealed as one `PtcRunner.Kernel.RunRequest`.
 `PtcRunner.Kernel.ProviderRegistry` maps selected names to trusted builders.
-`PtcRunner.Kernel.RunBuilder` is the shared assembly and cleanup boundary.
+`PtcRunner.Kernel.RunCoordinator.prepare/2` compiles the captured workflow and
+mission component graphs, validates the public workflow entry, and performs
+provider-inert declaration checks without accepting a path or invoking a
+builder. The returned `PreparedRun` owns its monotonic activity-marker process;
+construction atomically claims a fresh false marker, so an active or previously
+claimed marker cannot be shared by another prepared run. Its creating process
+must retain the marker link through construction. Consuming the prepared run
+atomically transfers that link and the marker's creator monitor to the
+consuming process; cross-process construction and unlinked markers are
+rejected. The current owner must call `PreparedRun.close/1`, which is
+idempotent, and owner death closes the marker even after a normal exit. Marker
+calls carry a five-second server-clock deadline and a short reply grace: a
+backlogged call fails boundedly, and processing it after the deadline cannot
+apply the queued transition. An expired close still checks the caller against
+the current controller, so a delayed creator cannot terminate the marker after
+ownership transfers.
+Until inert provider descriptors land, `PreparedRun` itself admits only
+provider-free requests; provider-bearing preparation stops at the closed
+`selection_unverifiable` diagnostic and cannot bypass that boundary by calling
+the constructor directly.
+Construction binds each frozen bundle's component IDs, source hashes,
+dependency edges, mission presence, and exported entry back to the sealed
+request. `RunBuilder.build_prepared/3` atomically consumes the prepared run
+before assembly; sequential or concurrent reuse is rejected. Keyword shape,
+duplicate and unknown keys, pure option types, and mutually exclusive option
+pairs are rejected before acquisition, artifact anchoring, or that consumption,
+so a caller may correct a side-effect-free option error and use the same
+prepared run. Input, component-override, and result-projection options belong
+only to document acquisition; `build/3` and `build_prepared/3` reject them
+instead of silently competing with the sealed request. They consume the sealed
+request, entry expression, and correlated frozen bundles without reconstructing
+coordinator-owned fields. The provider-free
+`RunBuilder.build/3` convenience path crosses that same boundary and closes its
+temporary prepared run after assembly.
+`PtcRunner.Kernel.RunBuilder` remains the shared environment assembly and
+cleanup boundary.
+
+The staged `PtcRunner.Kernel.CommandEngine` core allocates a command reference
+before strict argv parsing, consumes host/application paths through acquisition
+adapters, and projects failures into `PtcRunner.Kernel.CommandOutcome`. It is
+not yet the public Mix or standalone adapter. After frontend integration, only
+an outer standalone wrapper may turn the outcome's status into a process exit.
+Successful `validate` and `run` preparations return a sealed
+`PtcRunner.Kernel.CommandPreparation`, not a bare `PreparedRun`. That wrapper
+retains the original command reference, inert registry, and only the artifact
+destinations needed by phase 6 alongside the separately sealed path-free
+prepared run; acquisition paths do not survive into it. Construction validates
+the complete registry, requires its installed limits to match the captured
+package, requires JSON result projection, binds inspection presence to the
+sealed policy, and binds a requested trace directory to policy IDs equal to the
+command reference. Relative artifact destinations are anchored once against the
+invocation working directory immediately after strict parsing, before host or
+application acquisition, so later continuation work and VM-global cwd changes
+cannot reinterpret them. The sealed wrapper accepts only absolute destination
+paths and its exact field set. If the invocation cwd is unavailable, the engine
+seals the ordered keys it could not anchor alongside every absolute destination.
+Phase 6 can therefore preflight earlier absolute classes before projecting an
+`invalid_destination` for a later unanchored class, preserving the fixed
+trace/inspection/result precedence. A failed or exceptional wrapper
+construction releases the prepared run's activity owner before the engine
+projects its closed internal diagnostic. Long switch names use their documented
+dashed spellings, and underscore spellings before the `--` option terminator
+are rejected before `OptionParser` normalization can create an alias; positional
+values after the terminator remain opaque to both spelling and duplicate
+checks. The exact `--version` token is resolved across the option-bearing
+prefix before command dispatch; combining it with any other token is therefore
+a version-mode argument failure even when the preceding command token is
+unknown.
+The renderer accepts closed `CommandDiagnostic`, `CommandSource`, and
+`CommandSubject` values; it never inspects an arbitrary exception or rejected
+value. The authoritative phase/code/exit/retryability/message rows live in
+`PtcRunner.Kernel.DiagnosticCatalog`, and `mix ptc.gen_docs` projects them into
+`priv/schemas/ptc-command-envelope-v1.schema.json`.
+`CommandOutcome` is itself sealed over its exact command mode, validated
+envelope, and exit status. Frontends render only through
+`CommandOutcome.to_map/1`; direct or nested mutation invalidates the
+attestation. Non-run outcomes admit only the phase/code rows reachable by that
+command, as exact pairs rather than whole phases. Static command modes require
+`provider_activity: false`; the private `{:doctor, :connect}` mode admits only
+active doctor and provider-cleanup rows while retaining the public `"doctor"`
+command value. Successful default doctor outcomes require activity false and
+only local/declarative/skipped provider checks. Successful connect outcomes
+preserve the marker's actual activity value and admit only completed
+local/declarative-or-active provider checks; an active pass requires activity
+true, while a provider-free connect can remain false. Default doctor also binds
+provider rows to application presence: host-only groups require
+`application_required` and omit selection, while application-backed groups
+cannot use that skip. Because V1 has no public connect-mode field, the generated
+doctor branches are the union of default and connect outcomes; the sealed
+outcome is the boundary that distinguishes the two modes.
+Every attested command/coordinator value validates its exact declared field set
+before validating its payload attestation. An otherwise authentic nested value
+with an undeclared field is therefore invalid at its own boundary and cannot be
+re-attested by an outer continuation.
+The catalog also owns the phase/code-specific source kinds, provider-subject
+operations, operation-specific occurrence policy, and activity policy used by
+both constructors and the generated schema. Provider diagnostics cannot carry
+document provenance and non-provider diagnostics cannot carry provider
+subjects. Activity is fixed false through local preflight and fixed true for
+active preflight and provider acquisition. Provider execution and provider
+cleanup codes also require true, while other later codes admit the marker's
+actual monotonic value. Occurrence indices use the manifest's closed `0..31`
+bound in both the typed subject constructor and the generated envelope schema.
+Installation-declaration `dependency_invalid` diagnostics use operation
+`declaration` with a null occurrence; selection-specific declaration failures
+retain their workflow or mission occurrence.
+A non-null byte span is admitted only when its
+`CommandSource` was constructed with the exact trusted source bytes and the
+exclusive end offset is within that retained byte bound.
+The command-specific host loader preserves closed phase-2 causes instead of
+projecting every failure to `host_invalid`: inaccessible files are
+`host_unavailable`, invalid bytes/JSON are `host_invalid`, structural failures
+are `host_schema_invalid`, and invalid installed limits are
+`installed_limit_invalid`. Structural and limit diagnostics carry only a path
+authorized by the generated host schema. Duplicate properties are structural
+host failures. The command loader retains
+their schema-authorized parent pointer (the empty pointer for a root duplicate)
+instead of collapsing them into an unlocated JSON failure.
+Non-null diagnostic paths require a non-null source and are admitted only for
+the catalog's phase/code/source-kind combinations; source-less provider
+diagnostics therefore cannot carry a path. Finished execution records have two
+disjoint schema branches: `ok` requires a null diagnostic and `error` requires
+a non-null closed diagnostic. Unclassified run failures admit only
+`execution.state: "not_started"`; successful run branches bind normal/private
+result projection to the same artifact class. Successful trace and inspection
+artifacts are only `not_requested` or `written`; a normal result has the same
+choice, while a private result must be `written`. Recovery-only publication
+states are confined to the result field of a failed envelope. The generated
+schema additionally requires a compatible publication diagnostic as either
+the primary or a secondary before it admits
+`recovery_written` or `finalization_uncertain`; an unrelated execution,
+phase-6 destination, or cleanup failure cannot claim a recovery artifact by
+itself.
+Trace/inspection publication failure or a late destination collision can
+justify only `recovery_written`. `finalization_uncertain` requires result
+publication failure, because only final-link processing can make the remaining
+name set ambiguous. A generic caught `internal_error` carries no publication
+stage evidence and therefore cannot justify either recovery state.
+Compound outcomes validate the catalog-owned precedence before rendering: the
+primary and up to six secondaries must be in order, no phase/code/subject
+identity may repeat, and only one diagnostic may come from each cleanup,
+internal-catch, result-guard, Kernel-or-session-opening, event-sink,
+inspection-sink, or publication category.
+Commands that stop before compound work require `secondary_errors: []` in both
+their sealed outcome constructor and generated envelope branch.
+
+Help, version, and doctor success values are closed data contracts, not merely
+shape-compatible maps. Help usage/notices and the packaged version are exact
+compile-time constants. Doctor check names and status/code pairs come from the
+closed runtime/application/viewer/provider vocabulary. The generated schema
+requires the runtime/application/viewer prefix. Consumers must additionally
+call `CommandContract.valid_success_semantics?/2` after schema validation for
+the byte-order and per-provider-local ordering rules that JSON Schema cannot
+express; the same predicate owns `models` ordering. A lone successful `local`
+provider check admits either activity value because its public row deliberately
+does not reveal whether the implementation was audited-local or unverified.
+Each `models` row preserves the host contract's free-form, non-NUL
+`installation_revision` of 1 to 256 UTF-8 bytes; it is not constrained by the
+provider-alias grammar. The semantic success predicate enforces the byte bound
+that JSON Schema `maxLength` cannot express.
+Any successful active selection, credential, authorization, or connectivity
+check still requires `provider_activity: true`, and no provider check requires
+false.
+
+Public diagnostic paths originate as typed property/index segments.
+`PtcRunner.Kernel.ValueContract` is sealed at bounded compilation and retains a
+segment only while walking the exact local schema node that declares it,
+stopping at the first unknown segment.
+Manifest structural validation likewise retains each known section, list
+index, declared field with an invalid value, and declared missing property
+while stopping before an unknown key. Directory and in-memory acquisition use
+the same typed manifest path.
+Host structural paths are independently admitted against the generated host
+schema.
+Strict JSON decoding can retain a duplicate property's raw parent location for
+the manifest loader, but only the prefix authorized by the generated manifest
+schema crosses into the typed diagnostic path.
+The applicable host, manifest, or contract schema walker seals those segments
+as an attested `CommandPath`;
+`CommandDiagnostic` rejects raw segment lists and performs only RFC 6901
+escaping of the sealed path. Contract paths additionally carry their compiled
+contract's sealed classification authority and are authorized only against the
+selected tagged-union branch that produced the classification. The public
+classification map omits the internal branch selector; separate attested
+evidence supplies the exact branch schema used to construct the authority.
+`ExecutionInput` carries that authority with the bounded rejection
+classification;
+`CommandEngine` binds that authority to the diagnostic source independently of
+the selected path. Diagnostic construction then requires the path authority to
+match the source binding, so a path minted from another contract is rejected
+even when both are contract-authorized. The same check rejects recombining a
+path and source from different classified branches of one contract, while a
+path declared only by another union branch cannot be minted. It does not parse
+flattened strings or retain the rejected input. Manifest contract-load failures
+retain their
+portable logical contract name, and bundle failures attributed to one
+component retain its portable origin (falling back to its safe component ID);
+directory and memory acquisition therefore produce the same public provenance.
+External override records that cross aggregate acquisition limits retain the
+fixed override source role instead of being attributed to the manifest.
 
 Assembly compiles components, builds providers, constructs workflow and mission
 environments, freezes limits and inventories, and returns one
@@ -112,6 +320,18 @@ filesystem manifest: component, input, contract, and selected-input names are
 resolved relative to it, and the transport prefix does not consume their
 logical-name byte or segment limits. Aggregate memory bytes are capped before
 document UTF-8 scans.
+Acquisition failures originating in an explicit input or component override
+retain only a closed `{:source_role, role, reason}` tag. Command projection
+uses that tag to select the fixed public `input.json` or
+`component-override.json` provenance; it never retains the caller's path.
+Descriptor decoding may additionally retain a typed path authorized by the
+closed four-field override schema. Duplicate and unknown fields expose only
+their safe parent; an invalid declared field may expose that declared field.
+Descriptor/source byte ceilings and descriptor JSON depth/node ceilings remain
+structural `document_limit_exceeded` failures through both captured and
+external override acquisition; they are not collapsed into an override-schema
+failure.
+Manifest-declared input failures remain attributed to `ptc.json`.
 
 ## Application and semantic identity
 
@@ -158,6 +378,14 @@ execute-mask changes therefore cannot reuse the publisher's revision.
 code-owned Mix application defaults, explicit semantic files, conditionally
 compiled semantic modules, runtime roots, publisher dependency closure, and
 local path-dependency content.
+The command parser, outcome/envelope/diagnostic/path types, sealed contract
+classification evidence, help/version data, and diagnostic catalog are
+explicitly classified as frontend contracts and excluded from this
+execution-semantics closure. `RunCoordinator`,
+`PreparedRun`, and `ProviderActivity` remain included because they participate
+in execution preparation and ownership. A frontend wording or argv-only change
+therefore does not invalidate application identity, while a coordinator change
+does.
 Regenerate with
 `mix ptc.gen_semantic_revision`; `mix precommit` runs the `--check` form and
 fails on dependency inventory drift, missing classified paths, changed
@@ -277,8 +505,10 @@ before connector cleanup. Providers are trusted host extensions: the Kernel
 contains ordinary faults and bounded results, but it is not a security
 sandbox for malicious BEAM code.
 
-Limits are host-enforced ceilings. Manifest values may narrow installed
-ceilings; Lisp policy such as turn counts cannot grant more authority.
+Limits are host-enforced ceilings. Every complete installed-limits struct is
+revalidated as positive integers before an application source or provider
+builder is opened. Manifest values may narrow installed ceilings; Lisp policy
+such as turn counts cannot grant more authority.
 `PtcRunner.Kernel.Limits`, `RunState`, `BoundedWorker`, and `Dispatcher`
 document exact counters, deadlines, byte accounting, and cleanup ordering.
 

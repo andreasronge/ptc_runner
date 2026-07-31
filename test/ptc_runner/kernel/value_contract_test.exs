@@ -1,6 +1,9 @@
 defmodule PtcRunner.Kernel.ValueContractTest do
   use ExUnit.Case, async: true
 
+  alias PtcRunner.Kernel.CommandContractAuthority
+  alias PtcRunner.Kernel.CommandPath
+  alias PtcRunner.Kernel.ExecutionInput
   alias PtcRunner.Kernel.ValueContract
 
   test "compiles and validates an ordinary bounded object contract" do
@@ -62,10 +65,13 @@ defmodule PtcRunner.Kernel.ValueContractTest do
              matched_branch: "propose-change",
              missing_required: ["candidate"]
            } =
+             classified =
              ValueContract.classify(contract, %{
                "decision" => "propose-change",
                "reason" => "wrong branch"
              })
+
+    refute Map.has_key?(classified, :branch_index)
 
     secret = "must-not-escape"
 
@@ -78,7 +84,7 @@ defmodule PtcRunner.Kernel.ValueContractTest do
     # An undeclared key is reported by keyword and location only. Its name is
     # model-authored, so naming it would put caller content into a public error
     # by the same route the rejected value is withheld from.
-    assert Enum.any?(leaked.violations, &(&1.path == "(undeclared)"))
+    assert Enum.any?(leaked.violations, &(&1.segments == []))
   end
 
   # Keyword keys are the commonest authoring mistake in PTC-Lisp, and they fail
@@ -108,8 +114,141 @@ defmodule PtcRunner.Kernel.ValueContractTest do
     # Only the selected branch is reported. The branches the discriminator did
     # not choose fail too, on required keys they were never given, and burying
     # the real fault under those is what made the original error unusable.
-    assert %{path: "candidate.content", kind: :type} in classification.violations
-    refute Enum.any?(classification.violations, &(&1.path == "reason"))
+    assert %{
+             segments: [{:property, "candidate"}, {:property, "content"}],
+             kind: :type
+           } in classification.violations
+
+    refute Enum.any?(
+             classification.violations,
+             &(&1.segments == [{:property, "reason"}])
+           )
+  end
+
+  test "attributes all violations by tagged-union branch identity rather than detail position" do
+    assert {:ok, contract} = ValueContract.compile(decision_schema())
+
+    classification =
+      ValueContract.classify(contract, %{
+        "decision" => "no-change"
+      })
+
+    assert classification.matched_branch == "no-change"
+    assert classification.missing_required == ["reason"]
+
+    refute Enum.any?(
+             classification.violations,
+             &(&1.kind == :const and &1.segments == [{:property, "decision"}])
+           )
+  end
+
+  test "retains only locally declared path segments and RFC 6901-escapes them" do
+    schema = %{
+      "type" => "object",
+      "properties" => %{
+        "declared/at~root" => %{
+          "type" => "object",
+          "properties" => %{"safe" => %{"type" => "integer"}}
+        },
+        "elsewhere" => %{
+          "type" => "object",
+          "properties" => %{"secret" => %{"type" => "integer"}}
+        }
+      }
+    }
+
+    assert {:ok, contract} = ValueContract.compile(schema)
+
+    escaped =
+      ValueContract.classify(contract, %{
+        "declared/at~root" => %{"safe" => "wrong"},
+        "elsewhere" => %{"secret" => 1}
+      })
+
+    assert %{segments: [{:property, "declared/at~root"}, {:property, "safe"}]} =
+             Enum.find(escaped.violations, &(&1.kind == :type))
+
+    {_classification, evidence} =
+      ValueContract.classify_with_evidence(contract, %{
+        "declared/at~root" => %{"safe" => "wrong"}
+      })
+
+    assert {:ok, authority} = CommandContractAuthority.new(evidence)
+
+    assert {:ok, path} =
+             CommandPath.contract(authority, [
+               {:property, "declared/at~root"},
+               {:property, "safe"}
+             ])
+
+    assert CommandPath.to_pointer(path) == "/declared~1at~0root/safe"
+
+    local_only =
+      ValueContract.classify(contract, %{
+        "declared/at~root" => %{"secret" => "must-not-be-retained"},
+        "elsewhere" => %{"secret" => 1}
+      })
+
+    assert Enum.any?(
+             local_only.violations,
+             &(&1.segments == [{:property, "declared/at~root"}])
+           )
+
+    refute Enum.any?(
+             local_only.violations,
+             &(&1.segments == [
+                 {:property, "declared/at~root"},
+                 {:property, "secret"}
+               ])
+           )
+  end
+
+  test "rejects a mutated compiled contract as path authority" do
+    assert {:ok, contract} =
+             ValueContract.compile(%{
+               "type" => "object",
+               "properties" => %{"safe" => %{"type" => "integer"}}
+             })
+
+    forged = %{
+      contract
+      | schema: %{
+          "type" => "object",
+          "properties" => %{"caller-secret" => %{"type" => "string"}}
+        }
+    }
+
+    refute ValueContract.sealed?(forged)
+    refute ValueContract.valid?(forged, %{"caller-secret" => "hidden"})
+
+    assert {:error, :invalid_input} =
+             ExecutionInput.new(%{"caller-secret" => "hidden"}, :normal, forged)
+
+    assert {:error, :invalid_command_path} =
+             CommandPath.contract(forged, [{:property, "caller-secret"}])
+  end
+
+  test "contract path authority is restricted to the classified tagged-union branch" do
+    assert {:ok, contract} = ValueContract.compile(decision_schema())
+
+    assert {:error, {:input_contract_failed, classification}} =
+             ExecutionInput.new(
+               %{"decision" => "no-change", "reason" => 42},
+               :normal,
+               contract
+             )
+
+    assert {:ok, path} =
+             CommandPath.contract(classification.contract_authority, [
+               {:property, "reason"}
+             ])
+
+    assert CommandPath.to_pointer(path) == "/reason"
+
+    assert {:error, :invalid_command_path} =
+             CommandPath.contract(classification.contract_authority, [
+               {:property, "candidate"}
+             ])
   end
 
   test "rejects ambiguous, mismatched, repeated, open, and excessive union branches" do

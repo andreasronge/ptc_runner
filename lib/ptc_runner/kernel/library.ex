@@ -165,8 +165,10 @@ defmodule PtcRunner.Kernel.Library do
   Explicit library selections must be unique. Installed dependency closure is
   expanded from this module only, transitive duplicates coalesce, and local
   component IDs may not collide with any installed ID. The result is ordered
-  with dependencies before dependants and lexical component-ID tie breaking.
-  Missing dependencies and cycles fail before bundle compilation.
+  lexically by component ID. Graph validation and dependency ordering belong
+  to bounded bundle compilation, so missing local dependencies and cycles
+  remain phase-4 bundle failures instead of being flattened into application
+  acquisition.
   """
   def resolve_components(selections) when is_list(selections) do
     with {:ok, local, installed_ids} <- split_selections(selections),
@@ -175,10 +177,8 @@ defmodule PtcRunner.Kernel.Library do
          {:ok, local_by_id} <- unique_local(local),
          :ok <- no_collisions(local_by_id, installed),
          all = Map.merge(installed, local_by_id),
-         true <- map_size(all) <= 128,
-         :ok <- dependencies_exist(all),
-         {:ok, ordered} <- topological_order(all) do
-      {:ok, ordered}
+         true <- map_size(all) <= 128 do
+      {:ok, all |> Map.values() |> Enum.sort_by(& &1.id)}
     else
       false -> {:error, :component_limit_exceeded}
       {:error, _reason} = error -> error
@@ -266,38 +266,5 @@ defmodule PtcRunner.Kernel.Library do
     if Enum.any?(Map.keys(local), &Map.has_key?(installed, &1)),
       do: {:error, :local_library_collision},
       else: :ok
-  end
-
-  defp dependencies_exist(by_id) do
-    if Enum.any?(by_id, fn {_id, component} ->
-         Enum.any?(component.dependencies, &(not Map.has_key?(by_id, &1)))
-       end),
-       do: {:error, :missing_component_dependency},
-       else: :ok
-  end
-
-  defp topological_order(by_id), do: topological_order(by_id, %{}, [])
-
-  defp topological_order(by_id, resolved, ordered) do
-    if map_size(by_id) == map_size(resolved) do
-      {:ok, Enum.reverse(ordered)}
-    else
-      next =
-        by_id
-        |> Map.values()
-        |> Enum.reject(&Map.has_key?(resolved, &1.id))
-        |> Enum.filter(fn component ->
-          Enum.all?(component.dependencies, &Map.has_key?(resolved, &1))
-        end)
-        |> Enum.min_by(& &1.id, fn -> nil end)
-
-      case next do
-        nil ->
-          {:error, :component_cycle}
-
-        component ->
-          topological_order(by_id, Map.put(resolved, component.id, true), [component | ordered])
-      end
-    end
   end
 end

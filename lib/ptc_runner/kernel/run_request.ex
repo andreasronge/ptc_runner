@@ -15,6 +15,7 @@ defmodule PtcRunner.Kernel.RunRequest do
 
   @enforce_keys [:package, :input, :policy]
   defstruct [:package, :input, :policy, :attestation]
+  @field_keys Enum.sort([:__struct__, :package, :input, :policy, :attestation])
 
   @type t :: %__MODULE__{
           package: ApplicationPackage.t(),
@@ -42,7 +43,8 @@ defmodule PtcRunner.Kernel.RunRequest do
   @spec valid?(term()) :: boolean()
   @doc "Checks the request and all nested construction attestations."
   def valid?(%__MODULE__{attestation: attestation} = request) do
-    ApplicationPackage.valid?(request.package) and
+    Enum.sort(Map.keys(request)) == @field_keys and
+      ApplicationPackage.valid?(request.package) and
       ExecutionInput.valid?(request.input) and
       ExecutionPolicy.valid?(request.policy) and
       input_matches_package?(request.input, request.package) and
@@ -52,11 +54,11 @@ defmodule PtcRunner.Kernel.RunRequest do
 
   def valid?(_request), do: false
 
-  defp policy_matches_package?(policy, package) do
-    policy.event_policy == package.events.policy and
-      policy.run_id == package.events.run_id and
-      policy.trace_id == package.events.trace_id
-  end
+  # Event privacy remains application semantics. Identity ownership belongs to
+  # the adapter: a traced command fixes both IDs to its run reference, while a
+  # trusted embedding may retain or replace manifest identities before sealing.
+  defp policy_matches_package?(policy, package),
+    do: policy.event_policy == package.events.policy
 
   defp input_matches_package?(_input, %{contracts: %{input: nil}}), do: true
 

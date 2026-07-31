@@ -31,8 +31,8 @@ defmodule PtcRunner.Kernel.RunConfig do
   `connector_snapshots` are bounded safe metadata copied into `run-started`;
   neither field is visible to Lisp.
 
-  `result_contract` is an optional compiled application contract exposed only
-  through the reserved workflow validator used by `agent.main`. Final
+  `result_contract` is an optional sealed, compiled application contract
+  exposed only through the reserved workflow validator used by `agent.main`. Final
   publication enforcement remains the responsibility of `RunBuilder`.
 
   `labels` is an optional closed safe-metadata map. Caller-defined identifier
@@ -208,7 +208,7 @@ defmodule PtcRunner.Kernel.RunConfig do
   end
 
   defp result_contract?(nil), do: true
-  defp result_contract?(%ValueContract{}), do: true
+  defp result_contract?(%ValueContract{} = contract), do: ValueContract.sealed?(contract)
   defp result_contract?(_contract), do: false
 
   defp result_projection?(projection), do: projection in [:native, :json]

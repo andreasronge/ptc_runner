@@ -39,7 +39,7 @@ defmodule PtcRunner.Kernel.ComponentOverrideTest do
     test "a candidate whose bytes do not match its hash is rejected", context do
       paths = write_application(context, context.base, source_hash: hash("something else"))
 
-      assert {:error, :override_source_hash_mismatch} =
+      assert {:error, {:source_role, :component_override, :override_source_hash_mismatch}} =
                RunBuilder.run(paths.manifest, context.registry,
                  component_override_descriptor: paths.descriptor
                )
@@ -49,7 +49,7 @@ defmodule PtcRunner.Kernel.ComponentOverrideTest do
     test "a candidate written against a since-changed base is rejected", context do
       paths = write_application(context, context.base, base_source_hash: hash("stale base"))
 
-      assert {:error, :override_base_hash_mismatch} =
+      assert {:error, {:source_role, :component_override, :override_base_hash_mismatch}} =
                RunBuilder.run(paths.manifest, context.registry,
                  component_override_descriptor: paths.descriptor
                )
@@ -59,7 +59,7 @@ defmodule PtcRunner.Kernel.ComponentOverrideTest do
     test "an override for a component the manifest never selected is rejected", context do
       paths = write_application(context, context.base, component_id: "agent.core")
 
-      assert {:error, :override_component_not_selected} =
+      assert {:error, {:source_role, :component_override, :override_component_not_selected}} =
                RunBuilder.run(paths.manifest, context.registry,
                  component_override_descriptor: paths.descriptor
                )
@@ -70,7 +70,7 @@ defmodule PtcRunner.Kernel.ComponentOverrideTest do
       paths = write_application(context, context.base, path: "../escape.clj")
       File.write!(Path.join(Path.dirname(paths.descriptor), "../escape.clj"), "(ns escape)")
 
-      assert {:error, :invalid_override_source} =
+      assert {:error, {:source_role, :component_override, :invalid_override_source}} =
                RunBuilder.run(paths.manifest, context.registry,
                  component_override_descriptor: paths.descriptor
                )
@@ -81,7 +81,7 @@ defmodule PtcRunner.Kernel.ComponentOverrideTest do
       paths = write_application(context, context.base, path: "Candidate.clj")
       File.write!(Path.join(Path.dirname(paths.descriptor), "Candidate.clj"), context.base.source)
 
-      assert {:error, :invalid_override_source} =
+      assert {:error, {:source_role, :component_override, :invalid_override_source}} =
                RunBuilder.run(paths.manifest, context.registry,
                  component_override_descriptor: paths.descriptor
                )
@@ -107,7 +107,7 @@ defmodule PtcRunner.Kernel.ComponentOverrideTest do
         Path.join(override_directory, "candidate.clj")
       )
 
-      assert {:error, :invalid_override_source} =
+      assert {:error, {:source_role, :component_override, :invalid_override_source}} =
                RunBuilder.run(paths.manifest, context.registry,
                  component_override_descriptor: descriptor_path
                )
@@ -115,16 +115,18 @@ defmodule PtcRunner.Kernel.ComponentOverrideTest do
 
     @tag :tmp_dir
     test "the descriptor accepts exactly the four documented fields", context do
-      for mutation <- [
-            %{"extra" => true},
-            %{"component_id" => nil},
-            %{"base_source_hash" => "not-a-hash"},
-            %{"source_hash" => "sha256:short"},
-            %{"path" => 42}
+      for {mutation, expected_path} <- [
+            {%{"extra" => true}, []},
+            {%{"component_id" => nil}, [{:property, "component_id"}]},
+            {%{"base_source_hash" => "not-a-hash"}, [{:property, "base_source_hash"}]},
+            {%{"source_hash" => "sha256:short"}, [{:property, "source_hash"}]},
+            {%{"path" => 42}, [{:property, "path"}]}
           ] do
         paths = write_application(context, context.base, raw: mutation)
 
-        assert {:error, :invalid_override_descriptor} =
+        assert {:error,
+                {:source_role, :component_override,
+                 {:component_override_path, ^expected_path, :invalid_override_descriptor}}} =
                  RunBuilder.run(paths.manifest, context.registry,
                    component_override_descriptor: paths.descriptor
                  ),
@@ -136,7 +138,7 @@ defmodule PtcRunner.Kernel.ComponentOverrideTest do
     test "a missing descriptor fails before the run rather than silently skipping", context do
       paths = write_application(context, context.base)
 
-      assert {:error, :invalid_override_descriptor} =
+      assert {:error, {:source_role, :component_override, :invalid_override_descriptor}} =
                RunBuilder.run(paths.manifest, context.registry,
                  component_override_descriptor: Path.join(paths.dir, "absent.json")
                )
@@ -183,7 +185,7 @@ defmodule PtcRunner.Kernel.ComponentOverrideTest do
     test "one descriptor may not replace the same id in two environments", context do
       paths = write_application(context, context.base, both_environments: true)
 
-      assert {:error, :ambiguous_override_target} =
+      assert {:error, {:source_role, :component_override, :ambiguous_override_target}} =
                RunBuilder.load_and_build(paths.manifest, context.registry,
                  component_override_descriptor: paths.descriptor
                )

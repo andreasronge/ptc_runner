@@ -214,6 +214,65 @@ defmodule PtcRunner.Kernel.HostConfig do
   def load(_path), do: {:error, :invalid_host_config}
 
   @doc false
+  @spec load_command(binary()) ::
+          {:ok, t()}
+          | {:error,
+             :host_unavailable
+             | :host_invalid
+             | {:host_schema_invalid, [PtcRunner.Kernel.CommandPath.segment()]}
+             | {:installed_limit_invalid, [PtcRunner.Kernel.CommandPath.segment()]}}
+  def load_command(path) when is_binary(path) do
+    with {:ok, canonical} <- ConfinedFile.resolve_absolute(Path.expand(path)),
+         directory = Path.dirname(canonical),
+         {:ok, source} <-
+           ConfinedFile.read(directory, Path.basename(canonical), @max_config_bytes),
+         {:ok, decoded} <- StrictJSON.decode_with_locations(source),
+         {:ok, normalized} <- decode_command(decoded, directory) do
+      {:ok,
+       struct!(__MODULE__,
+         path: canonical,
+         directory: directory,
+         runtime: normalized.runtime,
+         limits: normalized.limits,
+         credentials: normalized.credentials,
+         install: normalized.install
+       )}
+    else
+      {:error, {:duplicate_json_key, path}} ->
+        {:error, {:host_schema_invalid, safe_host_path(path)}}
+
+      {:error, reason}
+      when reason in [
+             :invalid_json,
+             :invalid_utf8,
+             :json_depth_exceeded,
+             :json_node_limit_exceeded,
+             :too_large
+           ] ->
+        {:error, :host_invalid}
+
+      {:error, reason}
+      when reason in [
+             :host_unavailable,
+             :host_invalid
+           ] ->
+        {:error, reason}
+
+      {:error, {code, _detail}} = error
+      when code in [
+             :host_schema_invalid,
+             :installed_limit_invalid
+           ] ->
+        error
+
+      {:error, _reason} ->
+        {:error, :host_unavailable}
+    end
+  end
+
+  def load_command(_path), do: {:error, :host_unavailable}
+
+  @doc false
   @spec decode(term(), binary()) ::
           {:ok,
            %{
@@ -224,7 +283,8 @@ defmodule PtcRunner.Kernel.HostConfig do
            }}
           | {:error, :invalid_host_config}
   def decode(value, directory) when is_map(value) and is_binary(directory) do
-    with :ok <-
+    with true <- schema_valid?(value),
+         :ok <-
            exact_keys(value, ~w($schema runtime limits credentials install), ~w(install)),
          :ok <- optional_schema(value["$schema"]),
          {:ok, runtime} <- runtime(Map.get(value, "runtime", %{})),
@@ -238,6 +298,190 @@ defmodule PtcRunner.Kernel.HostConfig do
   end
 
   def decode(_value, _directory), do: {:error, :invalid_host_config}
+
+  @doc false
+  def decode_command(value, directory) when is_map(value) and is_binary(directory) do
+    with :ok <- validate_command_schema(value),
+         :ok <-
+           schema_result(
+             exact_keys(value, ~w($schema runtime limits credentials install), ~w(install)),
+             []
+           ),
+         :ok <-
+           command_schema_result(
+             optional_schema(value["$schema"]),
+             [{:property, "$schema"}],
+             value
+           ),
+         {:ok, runtime} <-
+           command_schema_result(
+             runtime(Map.get(value, "runtime", %{})),
+             [{:property, "runtime"}],
+             value
+           ),
+         {:ok, limits} <- command_limits(Map.get(value, "limits", %{})),
+         {:ok, credentials} <-
+           command_schema_result(
+             credentials(Map.get(value, "credentials", %{})),
+             [{:property, "credentials"}],
+             value
+           ),
+         {:ok, install} <-
+           command_schema_result(
+             installations(value["install"], credentials),
+             [{:property, "install"}],
+             value
+           ) do
+      {:ok, %{runtime: runtime, limits: limits, credentials: credentials, install: install}}
+    end
+  end
+
+  def decode_command(_value, _directory), do: {:error, {:host_schema_invalid, []}}
+
+  defp schema_result(:ok, _segments), do: :ok
+
+  defp schema_result({:error, _reason}, segments),
+    do: {:error, {:host_schema_invalid, segments}}
+
+  defp command_schema_result(:ok, _segments, _value), do: :ok
+  defp command_schema_result({:ok, decoded}, _segments, _value), do: {:ok, decoded}
+
+  defp command_schema_result({:error, _reason}, segments, value) do
+    if schema_valid?(value),
+      do: {:error, :host_invalid},
+      else: {:error, {:host_schema_invalid, segments}}
+  end
+
+  defp schema_valid?(value) do
+    with {:ok, root} <- JSV.build(schema(), atoms: false, warnings: :silent),
+         {:ok, _validated} <- JSV.validate(value, root, cast: false) do
+      true
+    else
+      _invalid -> false
+    end
+  rescue
+    _exception -> false
+  end
+
+  defp validate_command_schema(value) do
+    case JSV.build(schema(), atoms: false, warnings: :silent) do
+      {:ok, root} ->
+        case JSV.validate(command_schema_value(value), root, cast: false) do
+          {:ok, _validated} ->
+            :ok
+
+          {:error, %JSV.ValidationError{errors: errors}} ->
+            {:error, {:host_schema_invalid, command_validation_path(errors)}}
+        end
+
+      {:error, _reason} ->
+        {:error, {:host_schema_invalid, []}}
+    end
+  rescue
+    _exception -> {:error, {:host_schema_invalid, []}}
+  end
+
+  # Installed-limit values have their own closed diagnostic and exact path
+  # below. Substitute valid values only for this structural pass so type/range
+  # failures retain `installed_limit_invalid`; non-objects and unknown names
+  # still fail the generated schema before any normalization.
+  defp command_schema_value(%{"limits" => limits} = value) when is_map(limits) do
+    if Map.keys(limits) -- Limits.names() == [] do
+      installed = Map.from_struct(Limits.installed_defaults())
+
+      schema_limits =
+        Map.new(limits, fn {name, _value} ->
+          {:ok, field} = Limits.name(name)
+          {name, Map.fetch!(installed, field)}
+        end)
+
+      Map.put(value, "limits", schema_limits)
+    else
+      value
+    end
+  end
+
+  defp command_schema_value(value), do: value
+
+  defp command_validation_path(errors) do
+    paths =
+      Enum.map(errors, fn
+        %{data_path: path} when is_list(path) -> path |> Enum.reverse() |> safe_host_path()
+        _error -> []
+      end)
+
+    case Enum.sort_by(paths, fn path -> {-length(path), path} end) do
+      [path | _rest] -> path
+      [] -> []
+    end
+  end
+
+  defp safe_host_path(path), do: safe_schema_path(path, schema(), [])
+
+  defp safe_schema_path([], _schema, retained), do: Enum.reverse(retained)
+
+  defp safe_schema_path([segment | rest], schema, retained) do
+    case next_schema(schema, segment) do
+      {:ok, child} when is_binary(segment) ->
+        safe_schema_path(rest, child, [{:property, segment} | retained])
+
+      {:ok, child} when is_integer(segment) and segment >= 0 ->
+        safe_schema_path(rest, child, [{:index, segment} | retained])
+
+      :error ->
+        Enum.reverse(retained)
+    end
+  end
+
+  defp next_schema(%{"properties" => properties}, segment)
+       when is_map(properties) and is_binary(segment),
+       do: Map.fetch(properties, segment)
+
+  defp next_schema(%{"items" => items}, segment) when is_integer(segment) and segment >= 0,
+    do: {:ok, items}
+
+  defp next_schema(%{"oneOf" => branches}, segment) when is_list(branches) do
+    Enum.find_value(branches, :error, fn branch ->
+      case next_schema(branch, segment) do
+        {:ok, _child} = found -> found
+        :error -> false
+      end
+    end)
+  end
+
+  defp next_schema(_schema, _segment), do: :error
+
+  defp command_limits(value) when is_map(value) do
+    if Map.keys(value) -- Limits.names() == [] do
+      case limits(value) do
+        {:ok, limits} -> {:ok, limits}
+        {:error, _reason} -> {:error, {:installed_limit_invalid, invalid_limit_path(value)}}
+      end
+    else
+      {:error, {:host_schema_invalid, [{:property, "limits"}]}}
+    end
+  end
+
+  defp command_limits(_value),
+    do: {:error, {:host_schema_invalid, [{:property, "limits"}]}}
+
+  defp invalid_limit_path(value) when is_map(value) do
+    invalid_name =
+      value
+      |> Map.keys()
+      |> Enum.sort()
+      |> Enum.find(fn name ->
+        name in Limits.names() and
+          not match?(
+            number when is_integer(number) and number > 0 and number <= @max_limit_value,
+            value[name]
+          )
+      end)
+
+    if invalid_name,
+      do: [{:property, "limits"}, {:property, invalid_name}],
+      else: [{:property, "limits"}]
+  end
 
   defp optional_schema(nil), do: :ok
 
@@ -938,6 +1182,7 @@ defmodule PtcRunner.Kernel.HostConfig do
         "type" => "string",
         "minLength" => 1,
         "maxLength" => 4_096,
+        "pattern" => "^/",
         "description" => "Optional absolute trusted launcher override."
       }
     })

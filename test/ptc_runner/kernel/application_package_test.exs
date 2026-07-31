@@ -297,6 +297,15 @@ defmodule PtcRunner.Kernel.ApplicationPackageTest do
     missing = Path.join(directory, "missing.json")
     invalid_memory = %{}
 
+    invalid_limits = [
+      %{Limits.installed_defaults() | run_duration_ms: :invalid},
+      Map.delete(Limits.installed_defaults(), :run_duration_ms),
+      Map.put(Limits.installed_defaults(), :unexpected_limit, 1)
+    ]
+
+    Enum.each(invalid_limits, &refute(Limits.valid?(&1)))
+    assert Limits.valid?(Limits.installed_defaults())
+
     assert {:error, :invalid_application_options} =
              ApplicationPackage.acquire_directory(missing, result_projecton: :json)
 
@@ -312,6 +321,29 @@ defmodule PtcRunner.Kernel.ApplicationPackageTest do
              ApplicationPackage.request_memory("app.json", invalid_memory,
                result_projecton: :json
              )
+
+    for limits <- invalid_limits do
+      for adapter <- [
+            fn ->
+              ApplicationPackage.acquire_directory(missing, installed_limits: limits)
+            end,
+            fn ->
+              ApplicationPackage.acquire_memory("app.json", invalid_memory,
+                installed_limits: limits
+              )
+            end,
+            fn ->
+              ApplicationPackage.request_directory(missing, installed_limits: limits)
+            end,
+            fn ->
+              ApplicationPackage.request_memory("app.json", invalid_memory,
+                installed_limits: limits
+              )
+            end
+          ] do
+        assert {:error, :invalid_installed_limits} = adapter.()
+      end
+    end
 
     documents = fixture_documents()
     manifest_path = write_documents(directory, documents)
@@ -373,7 +405,7 @@ defmodule PtcRunner.Kernel.ApplicationPackageTest do
       descriptor_bytes: :not_a_byte_count
     }
 
-    assert {:error, :invalid_override_descriptor} =
+    assert {:error, {:source_role, :component_override, :invalid_override_descriptor}} =
              ApplicationPackage.request_memory("app.json", fixture_documents(),
                component_override: forged
              )
@@ -387,7 +419,7 @@ defmodule PtcRunner.Kernel.ApplicationPackageTest do
       |> Map.put("override.json", override_descriptor(@source, candidate))
       |> Map.put("different.clj", candidate)
 
-    assert {:error, :invalid_override_descriptor} =
+    assert {:error, {:source_role, :component_override, :invalid_override_descriptor}} =
              ApplicationPackage.request_memory("app.json", documents,
                component_override: {"override.json", "different.clj"}
              )

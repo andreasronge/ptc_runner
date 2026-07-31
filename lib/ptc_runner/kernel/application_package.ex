@@ -55,9 +55,9 @@ defmodule PtcRunner.Kernel.ApplicationPackage do
                                    [:component_override_descriptor]
   @memory_acquisition_options @common_acquisition_options ++ [:component_override]
   @directory_request_options @directory_acquisition_options ++
-                               [:inspection_capture, :result_projection]
+                               [:inspection_capture, :result_projection, :event_identity]
   @memory_request_options @memory_acquisition_options ++
-                            [:inspection_capture, :result_projection]
+                            [:inspection_capture, :result_projection, :event_identity]
 
   @enforce_keys [
     :manifest,
@@ -82,6 +82,7 @@ defmodule PtcRunner.Kernel.ApplicationPackage do
     :ptc_semantic_revision
   ]
   defstruct @enforce_keys ++ [attestation: nil]
+  @field_keys Enum.sort([:__struct__, :attestation | @enforce_keys])
 
   @type t :: %__MODULE__{
           manifest: map(),
@@ -150,7 +151,9 @@ defmodule PtcRunner.Kernel.ApplicationPackage do
   Acquires and seals one complete directory-backed run request.
 
   In addition to the directory-acquisition options, accepts exactly
-  `:inspection_capture` and `:result_projection`.
+  `:inspection_capture`, `:result_projection`, and `:event_identity`. The
+  latter fixes both event IDs and is rejected when the manifest already owns
+  either identity.
   """
   def request_directory(path, opts \\ [])
 
@@ -169,7 +172,9 @@ defmodule PtcRunner.Kernel.ApplicationPackage do
   Acquires and seals one complete memory-backed run request.
 
   In addition to the memory-acquisition options, accepts exactly
-  `:inspection_capture` and `:result_projection`.
+  `:inspection_capture`, `:result_projection`, and `:event_identity`. The
+  latter fixes both event IDs and is rejected when the manifest already owns
+  either identity.
   """
   def request_memory(manifest_name, documents, opts \\ [])
 
@@ -188,7 +193,8 @@ defmodule PtcRunner.Kernel.ApplicationPackage do
   @doc "Checks the package's in-VM construction attestation."
   def valid?(%__MODULE__{attestation: attestation} = package),
     do:
-      package.ptc_semantic_revision == SemanticRevision.current() and
+      Enum.sort(Map.keys(package)) == @field_keys and
+        package.ptc_semantic_revision == SemanticRevision.current() and
         Attestation.valid?(__MODULE__, payload(package), attestation)
 
   def valid?(_package), do: false
@@ -209,12 +215,25 @@ defmodule PtcRunner.Kernel.ApplicationPackage do
     if Keyword.keyword?(opts) do
       keys = Keyword.keys(opts)
 
-      if keys -- allowed == [] and
-           length(keys) == MapSet.size(MapSet.new(keys)),
-         do: :ok,
-         else: {:error, :invalid_application_options}
+      cond do
+        keys -- allowed != [] or length(keys) != MapSet.size(MapSet.new(keys)) ->
+          {:error, :invalid_application_options}
+
+        not valid_optional_installed_limits?(opts) ->
+          {:error, :invalid_installed_limits}
+
+        true ->
+          :ok
+      end
     else
       {:error, :invalid_application_options}
+    end
+  end
+
+  defp valid_optional_installed_limits?(opts) do
+    case Keyword.fetch(opts, :installed_limits) do
+      {:ok, limits} -> Limits.valid?(limits)
+      :error -> true
     end
   end
 
@@ -222,7 +241,7 @@ defmodule PtcRunner.Kernel.ApplicationPackage do
     installed_limits = Keyword.get(opts, :installed_limits, Limits.installed_defaults())
 
     try do
-      with %Limits{} <- installed_limits,
+      with true <- Limits.valid?(installed_limits),
            {:ok, manifest} <-
              Manifest.load_source(source, installed_limits, materialize_input: false),
            {:ok, input} <- select_input(source, manifest, opts),
@@ -232,7 +251,7 @@ defmodule PtcRunner.Kernel.ApplicationPackage do
            {:ok, package} <- build(effective, identities, accounting) do
         {:ok, package, input}
       else
-        %{} -> {:error, :invalid_installed_limits}
+        false -> {:error, :invalid_installed_limits}
         {:error, _reason} = error -> error
         _invalid -> {:error, :invalid_application_package}
       end
@@ -249,10 +268,13 @@ defmodule PtcRunner.Kernel.ApplicationPackage do
         select_declared_input(source, manifest, authority)
 
       name when is_binary(name) ->
-        with {:ok, raw} <- ApplicationSource.read_reference(source, name, 2_000_000),
-             {:ok, value} <- StrictJSON.decode(raw) do
-          ExecutionInput.new(value, authority, manifest.contracts.input)
-        end
+        result =
+          with {:ok, raw} <- ApplicationSource.read_reference(source, name, 2_000_000),
+               {:ok, value} <- StrictJSON.decode(raw) do
+            ExecutionInput.new(value, authority, manifest.contracts.input)
+          end
+
+        source_error(result, :external_input)
 
       _invalid ->
         {:error, :invalid_input}
@@ -280,15 +302,21 @@ defmodule PtcRunner.Kernel.ApplicationPackage do
       path ->
         case ApplicationSource.logical_name(source, path) do
           {:ok, descriptor_name} ->
-            with {:ok, override} <- ComponentOverride.load_application(source, descriptor_name),
-                 do: {:ok, {override, :captured}}
+            ComponentOverride.load_application(source, descriptor_name)
+            |> case do
+              {:ok, override} -> {:ok, {override, :captured}}
+              {:error, _reason} = error -> source_error(error, :component_override)
+            end
 
           {:error, :outside_application_source} ->
-            with {:ok, override} <- ComponentOverride.load(path),
-                 do: {:ok, {override, :external}}
+            ComponentOverride.load(path)
+            |> case do
+              {:ok, override} -> {:ok, {override, :external}}
+              {:error, _reason} = error -> source_error(error, :component_override)
+            end
 
           {:error, :invalid_logical_name} ->
-            {:error, :invalid_override_descriptor}
+            source_error({:error, :invalid_override_descriptor}, :component_override)
         end
     end
   end
@@ -300,13 +328,14 @@ defmodule PtcRunner.Kernel.ApplicationPackage do
 
       {descriptor_name, candidate_name}
       when is_binary(descriptor_name) and is_binary(candidate_name) ->
-        with {:ok, override} <-
-               ComponentOverride.load_application(source, descriptor_name, candidate_name) do
-          {:ok, {override, :captured}}
+        ComponentOverride.load_application(source, descriptor_name, candidate_name)
+        |> case do
+          {:ok, override} -> {:ok, {override, :captured}}
+          {:error, _reason} = error -> source_error(error, :component_override)
         end
 
       _invalid ->
-        {:error, :invalid_override_descriptor}
+        source_error({:error, :invalid_override_descriptor}, :component_override)
     end
   end
 
@@ -314,16 +343,26 @@ defmodule PtcRunner.Kernel.ApplicationPackage do
 
   defp apply_override(manifest, {%ComponentOverride{} = override, accounting})
        when accounting in [:captured, :external] do
-    with {:ok, workflow, workflow?} <-
-           ComponentOverride.apply(manifest.workflow_components, override),
-         {:ok, mission, mission?} <-
-           ComponentOverride.apply(manifest.mission_components, override),
-         {:ok, environment} <- override_environment(workflow?, mission?) do
-      effective = %{manifest | workflow_components: workflow, mission_components: mission}
-      identity = Map.put(ComponentOverride.identity(override), "environment", environment)
-      {:ok, effective, [{identity, override, accounting}]}
-    end
+    result =
+      with {:ok, workflow, workflow?} <-
+             ComponentOverride.apply(manifest.workflow_components, override),
+           {:ok, mission, mission?} <-
+             ComponentOverride.apply(manifest.mission_components, override),
+           {:ok, environment} <- override_environment(workflow?, mission?) do
+        effective = %{manifest | workflow_components: workflow, mission_components: mission}
+        identity = Map.put(ComponentOverride.identity(override), "environment", environment)
+        {:ok, effective, [{identity, override, accounting}]}
+      end
+
+    source_error(result, :component_override)
   end
+
+  defp source_error({:ok, _value} = success, _role), do: success
+  defp source_error({:ok, _first, _second} = success, _role), do: success
+
+  defp source_error({:error, reason}, role)
+       when role in [:external_input, :component_override],
+       do: {:error, {:source_role, role, reason}}
 
   defp override_environment(true, false), do: {:ok, "workflow"}
   defp override_environment(false, true), do: {:ok, "mission"}
@@ -516,8 +555,8 @@ defmodule PtcRunner.Kernel.ApplicationPackage do
         Enum.flat_map(override_pairs, fn
           {_identity, override, :external} ->
             [
-              {:override_descriptor, override.descriptor_bytes},
-              {:override_source, byte_size(override.source)}
+              {:component_override, :override_descriptor, override.descriptor_bytes},
+              {:component_override, :override_source, byte_size(override.source)}
             ]
 
           {_identity, _override, :captured} ->
@@ -525,21 +564,32 @@ defmodule PtcRunner.Kernel.ApplicationPackage do
         end)
 
       added =
-        Enum.map(library_components, &{:library, byte_size(&1.source)}) ++
-          Enum.map(inline_input, fn {kind, bytes} -> {kind, byte_size(bytes)} end) ++
+        Enum.map(library_components, &{nil, :library, byte_size(&1.source)}) ++
+          Enum.map(inline_input, fn {kind, bytes} -> {nil, kind, byte_size(bytes)} end) ++
           override_documents
 
-      count = accounting.document_count + length(added)
-
-      bytes =
-        accounting.document_bytes +
-          Enum.reduce(added, 0, fn {_kind, byte_count}, sum -> sum + byte_count end)
-
-      if count <= @max_records and bytes <= @max_bytes,
-        do: {:ok, count, bytes},
-        else: {:error, :document_limit_exceeded}
+      account_documents(added, accounting)
     end
   end
+
+  defp account_documents(documents, accounting) do
+    initial = {:ok, accounting.document_count, accounting.document_bytes}
+    Enum.reduce_while(documents, initial, &account_document/2)
+  end
+
+  defp account_document({role, _kind, byte_count}, {:ok, count, bytes}) do
+    next_count = count + 1
+    next_bytes = bytes + byte_count
+
+    if next_count <= @max_records and next_bytes <= @max_bytes,
+      do: {:cont, {:ok, next_count, next_bytes}},
+      else: {:halt, document_limit_error(role)}
+  end
+
+  defp document_limit_error(nil), do: {:error, :document_limit_exceeded}
+
+  defp document_limit_error(role),
+    do: {:error, {:source_role, role, :document_limit_exceeded}}
 
   defp original_library_components(manifest) do
     ids =
@@ -572,13 +622,28 @@ defmodule PtcRunner.Kernel.ApplicationPackage do
       for(component <- components, Map.fetch!(kinds, component.id) == :library, do: component.id)
 
   defp execution_policy(package, opts) do
-    ExecutionPolicy.new(
-      event_policy: package.events.policy,
-      run_id: package.events.run_id,
-      trace_id: package.events.trace_id,
-      inspection_capture: Keyword.get(opts, :inspection_capture, false),
-      result_projection: Keyword.get(opts, :result_projection, :native)
-    )
+    with {:ok, run_id, trace_id} <- event_identity(package.events, opts) do
+      ExecutionPolicy.new(
+        event_policy: package.events.policy,
+        run_id: run_id,
+        trace_id: trace_id,
+        inspection_capture: Keyword.get(opts, :inspection_capture, false),
+        result_projection: Keyword.get(opts, :result_projection, :native)
+      )
+    end
+  end
+
+  defp event_identity(events, opts) do
+    case Keyword.fetch(opts, :event_identity) do
+      :error ->
+        {:ok, events.run_id, events.trace_id}
+
+      {:ok, identity} when is_nil(events.run_id) and is_nil(events.trace_id) ->
+        {:ok, identity, identity}
+
+      {:ok, _identity} ->
+        {:error, :event_identity_conflict}
+    end
   end
 
   defp payload(package) do

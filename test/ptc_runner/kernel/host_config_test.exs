@@ -95,6 +95,38 @@ defmodule PtcRunner.Kernel.HostConfigTest do
            }
   end
 
+  test "command decoding rejects explicit nulls that semantic defaults would otherwise accept" do
+    cases = [
+      {
+        put_in(valid_config(), ["$schema"], nil),
+        [{:property, "$schema"}]
+      },
+      {
+        put_in(valid_config(), ["runtime"], %{"stdio_launcher" => nil}),
+        [{:property, "runtime"}, {:property, "stdio_launcher"}]
+      },
+      {
+        put_in(valid_config(), ["install", "workspace", "installation_revision"], nil),
+        [{:property, "install"}]
+      },
+      {
+        put_in(
+          valid_config(),
+          ["install", "workspace", "tools", "read_text", "description"],
+          nil
+        ),
+        [{:property, "install"}]
+      }
+    ]
+
+    for {config, expected_path} <- cases do
+      assert {:error, :invalid_host_config} = HostConfig.decode(config, "/tmp")
+
+      assert {:error, {:host_schema_invalid, ^expected_path}} =
+               HostConfig.decode_command(config, "/tmp")
+    end
+  end
+
   @tag :tmp_dir
   test "loads one native canonical trace snapshot installation", %{tmp_dir: dir} do
     config = %{

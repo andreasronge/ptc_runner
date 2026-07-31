@@ -31,10 +31,12 @@ defmodule PtcRunner.Kernel.Manifest do
   `workflow.components` and optional `mission.components` contain a strict
   tagged union: local `id`/`path`/optional `dependencies` objects or exact
   `{"library": id}` selections resolved only through
-  `PtcRunner.Kernel.Library`. Installed dependencies expand deterministically;
-  explicit duplicates, missing dependencies, cycles, and local/installed ID
-  collisions fail loading. The workflow `entry` is a qualified function name;
-  `PtcRunner.Kernel.RunBuilder` renders the executable entry expression. Input
+  `PtcRunner.Kernel.Library`. Installed dependencies expand deterministically
+  and their invalid closures fail loading. Explicit duplicates and
+  local/installed ID collisions also fail loading; local missing dependencies
+  and cycles survive until bounded bundle compilation. The workflow `entry` is
+  a qualified function name; `PtcRunner.Kernel.RunBuilder` renders the
+  executable entry expression. Input
   contains exactly one of a JSON object in `value` or a manifest-relative JSON
   file in `path`. Optional manifest-local contracts validate input before
   provider activity and `Result.value` before publication. Contract schemas
@@ -72,8 +74,18 @@ defmodule PtcRunner.Kernel.Manifest do
   @max_manifest_bytes 1_000_000
   @max_input_bytes 2_000_000
   @max_contract_bytes 65_536
+  @component_id ~r/\A[a-z][a-z0-9._-]{0,127}\z/
   @entry ~r/\A[a-z][a-z0-9._-]{0,127}\/[a-z][a-z0-9._?!-]{0,127}\z/
   @top_keys ~w($schema version workflow mission input contracts providers limits events labels)
+  @label_keys ~w(name model provider tags)
+  @tag_keys ~w(environment mode stage suite)
+  @label_identifier ~r/\A(?:[A-Za-z0-9][A-Za-z0-9._:\/@+-]{0,255}|sha256:[0-9a-f]{64})\z/
+  @tag_values %{
+    "environment" => ~w(development test staging production),
+    "mode" => ~w(agent deterministic direct wrapper repl),
+    "stage" => ~w(started planning executing validating completed failed),
+    "suite" => ~w(unit integration e2e conformance privacy)
+  }
 
   @enforce_keys [
     :document,
@@ -119,15 +131,19 @@ defmodule PtcRunner.Kernel.Manifest do
   def load(path, installed_limits \\ Limits.installed_defaults())
 
   def load(path, %Limits{} = installed_limits) when is_binary(path) do
-    with {:ok, source} <- ApplicationSource.open_directory(path) do
-      try do
-        with {:ok, manifest} <- load_source(source, installed_limits),
-             {:ok, _accounting} <- ApplicationSource.finish(source) do
-          {:ok, manifest}
+    if Limits.valid?(installed_limits) do
+      with {:ok, source} <- ApplicationSource.open_directory(path) do
+        try do
+          with {:ok, manifest} <- load_source(source, installed_limits),
+               {:ok, _accounting} <- ApplicationSource.finish(source) do
+            {:ok, manifest}
+          end
+        after
+          ApplicationSource.close(source)
         end
-      after
-        ApplicationSource.close(source)
       end
+    else
+      {:error, :invalid_manifest}
     end
   end
 
@@ -144,15 +160,19 @@ defmodule PtcRunner.Kernel.Manifest do
   def load_memory(manifest_name, documents, installed_limits \\ Limits.installed_defaults())
 
   def load_memory(manifest_name, documents, %Limits{} = installed_limits) do
-    with {:ok, source} <- ApplicationSource.open_memory(manifest_name, documents) do
-      try do
-        with {:ok, manifest} <- load_source(source, installed_limits),
-             {:ok, _accounting} <- ApplicationSource.finish(source) do
-          {:ok, manifest}
+    if Limits.valid?(installed_limits) do
+      with {:ok, source} <- ApplicationSource.open_memory(manifest_name, documents) do
+        try do
+          with {:ok, manifest} <- load_source(source, installed_limits),
+               {:ok, _accounting} <- ApplicationSource.finish(source) do
+            {:ok, manifest}
+          end
+        after
+          ApplicationSource.close(source)
         end
-      after
-        ApplicationSource.close(source)
       end
+    else
+      {:error, :invalid_manifest}
     end
   end
 
@@ -171,13 +191,14 @@ defmodule PtcRunner.Kernel.Manifest do
       when is_list(opts) do
     materialize_input? = Keyword.get(opts, :materialize_input, true)
 
-    with {:ok, raw} <- ApplicationSource.manifest(source),
+    with :ok <- validate_installed_limits(installed_limits),
+         {:ok, raw} <- ApplicationSource.manifest(source),
          true <- byte_size(raw) <= @max_manifest_bytes,
-         {:ok, manifest} <- StrictJSON.decode(raw),
+         {:ok, manifest} <- decode_manifest(raw),
          true <- is_map(manifest) and not is_struct(manifest),
-         :ok <- exact_keys(manifest, @top_keys, ~w(version workflow input)),
-         :ok <- optional_schema(manifest["$schema"]),
-         1 <- manifest["version"],
+         :ok <- root_keys(manifest, @top_keys, ~w(version workflow input)),
+         :ok <- optional_schema(manifest),
+         :ok <- version(manifest["version"]),
          {:ok, workflow} <- workflow(manifest["workflow"], source),
          {:ok, mission} <- mission(Map.get(manifest, "mission", %{}), source),
          {:ok, contract_result} <- contracts(Map.get(manifest, "contracts", %{}), source),
@@ -192,7 +213,7 @@ defmodule PtcRunner.Kernel.Manifest do
          {:ok, providers} <- providers(Map.get(manifest, "providers", %{})),
          {:ok, limits} <- limits(Map.get(manifest, "limits", %{}), installed_limits),
          {:ok, events} <- events(Map.get(manifest, "events", %{})),
-         {:ok, labels} <- SafeMetadata.normalize_labels(Map.get(manifest, "labels", %{})) do
+         {:ok, labels} <- labels(Map.get(manifest, "labels", %{})) do
       {:ok,
        %__MODULE__{
          document: manifest,
@@ -213,7 +234,6 @@ defmodule PtcRunner.Kernel.Manifest do
          labels: labels
        }}
     else
-      {:error, :invalid_safe_metadata} -> {:error, :invalid_manifest}
       {:error, _reason} = error -> error
       _ -> {:error, :invalid_manifest}
     end
@@ -221,50 +241,131 @@ defmodule PtcRunner.Kernel.Manifest do
 
   def load_source(_source, _installed_limits, _opts), do: {:error, :invalid_manifest}
 
-  defp optional_schema(nil), do: :ok
+  defp validate_installed_limits(installed_limits) do
+    if Limits.valid?(installed_limits), do: :ok, else: {:error, :invalid_limits}
+  end
 
-  defp optional_schema(value)
-       when is_binary(value) and byte_size(value) in 1..2_048,
-       do: if(String.valid?(value), do: :ok, else: {:error, :invalid_manifest})
+  defp decode_manifest(raw) do
+    case StrictJSON.decode_with_locations(raw) do
+      {:error, {:duplicate_json_key, path}} ->
+        {:error, {:manifest_path, safe_manifest_path(path), :duplicate_json_key}}
 
-  defp optional_schema(_value), do: {:error, :invalid_manifest}
+      result ->
+        result
+    end
+  end
+
+  defp optional_schema(manifest) do
+    case Map.fetch(manifest, "$schema") do
+      :error ->
+        :ok
+
+      {:ok, value} when is_binary(value) and byte_size(value) in 1..2_048 ->
+        if String.valid?(value),
+          do: :ok,
+          else:
+            manifest_value_error(
+              [{:property, "$schema"}],
+              :invalid_schema_identifier
+            )
+
+      {:ok, _value} ->
+        manifest_value_error([{:property, "$schema"}], :invalid_schema_identifier)
+    end
+  end
+
+  defp version(1), do: :ok
+
+  defp version(_version),
+    do: manifest_value_error([{:property, "version"}], :invalid_manifest_version)
 
   defp workflow(value, source) when is_map(value) do
-    with :ok <- exact_keys(value, ~w(components entry), ~w(components entry)),
-         {:ok, component_result} <- components(value["components"], source),
-         entry when is_binary(entry) <- value["entry"],
-         true <- String.valid?(entry),
-         true <- entry =~ @entry do
+    with :ok <- section_keys(value, "workflow", ~w(components entry), ~w(components entry)),
+         {:ok, component_result} <- components(value["components"], source, :workflow),
+         {:ok, entry} <- workflow_entry(value["entry"]) do
       {:ok,
        %{components: component_result.components, kinds: component_result.kinds, entry: entry}}
-    else
-      {:error, _reason} = error -> error
-      _ -> {:error, :invalid_workflow_manifest}
     end
   end
 
-  defp workflow(_value, _source), do: {:error, :invalid_workflow_manifest}
+  defp workflow(_value, _source),
+    do: manifest_value_error([{:property, "workflow"}], :invalid_workflow_manifest)
+
+  defp workflow_entry(entry)
+       when is_binary(entry) do
+    if String.valid?(entry) and entry =~ @entry,
+      do: {:ok, entry},
+      else:
+        manifest_value_error(
+          [{:property, "workflow"}, {:property, "entry"}],
+          :invalid_workflow_entry
+        )
+  end
+
+  defp workflow_entry(_entry),
+    do:
+      manifest_value_error(
+        [{:property, "workflow"}, {:property, "entry"}],
+        :invalid_workflow_entry
+      )
 
   defp mission(value, source) when is_map(value) do
-    with :ok <- exact_keys(value, ~w(components data), []),
-         {:ok, component_result} <- components(Map.get(value, "components", []), source),
-         data when is_map(data) <- Map.get(value, "data", %{}),
-         {:ok, data} <- StrictJSON.admit(data),
-         true <- JSONValue.map?(data) do
+    with :ok <- section_keys(value, "mission", ~w(components data), []),
+         {:ok, component_result} <-
+           components(Map.get(value, "components", []), source, :mission),
+         {:ok, data} <- mission_data(Map.get(value, "data", %{})) do
       {:ok, %{components: component_result.components, kinds: component_result.kinds, data: data}}
-    else
-      {:error, _reason} = error -> error
-      _ -> {:error, :invalid_mission_manifest}
     end
   end
 
-  defp mission(_value, _source), do: {:error, :invalid_mission_manifest}
+  defp mission(_value, _source),
+    do: manifest_value_error([{:property, "mission"}], :invalid_mission_manifest)
 
-  defp components(values, source) when is_list(values) and length(values) <= 128 do
-    Enum.reduce_while(values, {:ok, []}, fn value, {:ok, selections} ->
+  defp mission_data(data) when is_map(data) and not is_struct(data) do
+    case StrictJSON.admit(data) do
+      {:ok, admitted} when is_map(admitted) -> {:ok, admitted}
+      _invalid -> invalid_mission_data()
+    end
+  end
+
+  defp mission_data(_data), do: invalid_mission_data()
+
+  defp invalid_mission_data,
+    do:
+      manifest_value_error(
+        [{:property, "mission"}, {:property, "data"}],
+        :invalid_mission_data
+      )
+
+  defp components(values, source, destination)
+       when is_list(values) and length(values) <= 128 do
+    values
+    |> Enum.with_index()
+    |> Enum.reduce_while({:ok, []}, fn {value, index}, {:ok, selections} ->
       case component(value, source) do
-        {:ok, selection} -> {:cont, {:ok, [selection | selections]}}
-        {:error, _reason} = error -> {:halt, error}
+        {:ok, selection} ->
+          {:cont, {:ok, [selection | selections]}}
+
+        {:error, {:component_structure, reason}} ->
+          path = [
+            {:property, Atom.to_string(destination)},
+            {:property, "components"},
+            {:index, index}
+          ]
+
+          {:halt, {:error, {:manifest_path, path, reason}}}
+
+        {:error, {:component_value, suffix, reason}} ->
+          path = [
+            {:property, Atom.to_string(destination)},
+            {:property, "components"},
+            {:index, index}
+          ]
+
+          {:halt, {:error, {:manifest_path, path ++ suffix, reason}}}
+
+        {:error, _reason} = error ->
+          {:halt, error}
       end
     end)
     |> case do
@@ -290,22 +391,29 @@ defmodule PtcRunner.Kernel.Manifest do
     end
   end
 
-  defp components(_values, _source), do: {:error, :invalid_components}
+  defp components(_values, _source, destination),
+    do:
+      manifest_value_error(
+        [{:property, Atom.to_string(destination)}, {:property, "components"}],
+        :invalid_components
+      )
 
   defp component(%{"library" => library} = value, _source) do
-    with :ok <- exact_keys(value, ~w(library), ~w(library)),
-         true <- is_binary(library) and String.valid?(library) do
+    with :ok <- structural_keys(value, ~w(library), ~w(library)),
+         :ok <- component_id(library, "library") do
       {:ok, {{:library, library}, :library}}
     else
-      _ -> {:error, :invalid_component}
+      {:error, reason} -> {:error, {:component_structure, reason}}
+      {:value_error, suffix, reason} -> {:error, {:component_value, suffix, reason}}
     end
   end
 
   defp component(value, source) when is_map(value) do
-    with :ok <- exact_keys(value, ~w(id path dependencies), ~w(id path)),
-         path when is_binary(path) <- value["path"],
-         {:ok, component_source} <-
-           ApplicationSource.read_reference(source, path, 2_000_000),
+    with :ok <- structural_keys(value, ~w(id path dependencies), ~w(id path)),
+         :ok <- component_id(value["id"], "id"),
+         {:ok, path} <- component_path(value["path"]),
+         :ok <- component_dependencies(Map.get(value, "dependencies", [])),
+         {:ok, component_source} <- read_component_source(source, path),
          {:ok, component} <-
            Component.new(
              id: value["id"],
@@ -315,31 +423,145 @@ defmodule PtcRunner.Kernel.Manifest do
            ) do
       {:ok, {component, :local}}
     else
-      _ -> {:error, :invalid_component}
+      {:error, :unknown_properties} ->
+        {:error, {:component_structure, :unknown_properties}}
+
+      {:error, {:required_property_missing, _name} = reason} ->
+        {:error, {:component_structure, reason}}
+
+      {:error, {:source_role, :component, _name, _reason}} = error ->
+        error
+
+      {:value_error, suffix, reason} ->
+        {:error, {:component_value, suffix, reason}}
+
+      _ ->
+        {:error, :invalid_component}
     end
   end
 
-  defp component(_value, _source), do: {:error, :invalid_component}
+  defp component(_value, _source),
+    do: {:error, {:component_value, [], :invalid_component}}
+
+  defp component_id(id, field) when is_binary(id) do
+    if String.valid?(id) and id =~ @component_id,
+      do: :ok,
+      else: {:value_error, [{:property, field}], :invalid_component_id}
+  end
+
+  defp component_id(_id, field),
+    do: {:value_error, [{:property, field}], :invalid_component_id}
+
+  defp component_path(path) when is_binary(path) do
+    if ApplicationSource.valid_name?(path),
+      do: {:ok, path},
+      else: {:value_error, [{:property, "path"}], :invalid_component_path}
+  end
+
+  defp component_path(_path),
+    do: {:value_error, [{:property, "path"}], :invalid_component_path}
+
+  defp component_dependencies(dependencies)
+       when is_list(dependencies) and length(dependencies) <= 128 do
+    cond do
+      dependencies != Enum.sort(Enum.uniq(dependencies)) ->
+        {:value_error, [{:property, "dependencies"}], :invalid_component_dependencies}
+
+      invalid_index = Enum.find_index(dependencies, &(not valid_component_id?(&1))) ->
+        {:value_error, [{:property, "dependencies"}, {:index, invalid_index}],
+         :invalid_component_dependency}
+
+      true ->
+        :ok
+    end
+  end
+
+  defp component_dependencies(_dependencies),
+    do: {:value_error, [{:property, "dependencies"}], :invalid_component_dependencies}
+
+  defp valid_component_id?(id),
+    do: is_binary(id) and String.valid?(id) and id =~ @component_id
+
+  defp structural_keys(map, allowed, required) do
+    case exact_keys(map, allowed, required) do
+      {:error, :required_properties_missing} ->
+        missing = Enum.find(required, &(not Map.has_key?(map, &1)))
+        {:error, {:required_property_missing, missing}}
+
+      result ->
+        result
+    end
+  end
+
+  defp read_component_source(source, path) do
+    case ApplicationSource.read_reference(source, path, 2_000_000) do
+      {:ok, _source} = success ->
+        success
+
+      {:error, :invalid_logical_name} ->
+        {:error, {:source_role, :component, path, :reference_missing}}
+
+      {:error, reason} ->
+        {:error, {:source_role, :component, path, reason}}
+    end
+  end
 
   defp input_declaration(%{"value" => value} = input) do
-    with :ok <- exact_keys(input, ~w(value), ~w(value)),
-         true <- is_map(value) and not is_struct(value) do
+    with :ok <- section_keys(input, "input", ~w(value), ~w(value)),
+         :ok <- inline_input(value) do
       {:ok, input}
     else
-      _ -> {:error, :invalid_input}
+      {:error, {:manifest_path, _path, _reason}} = error -> error
     end
   end
 
-  defp input_declaration(%{"path" => path} = input) when is_binary(path) do
-    with :ok <- exact_keys(input, ~w(path), ~w(path)),
-         true <- ApplicationSource.valid_name?(path) do
+  defp input_declaration(%{"path" => path} = input) do
+    with :ok <- section_keys(input, "input", ~w(path), ~w(path)),
+         :ok <- input_path(path) do
       {:ok, input}
     else
-      _ -> {:error, :invalid_input}
+      {:error, {:manifest_path, _path, _reason}} = error -> error
     end
   end
 
-  defp input_declaration(_input), do: {:error, :invalid_input}
+  defp input_declaration(input) when is_map(input) and not is_struct(input) do
+    case section_keys(input, "input", ~w(value path), []) do
+      :ok -> invalid_input_declaration()
+      {:error, {:manifest_path, _path, _reason}} = error -> error
+    end
+  end
+
+  defp input_declaration(_input), do: invalid_input_declaration()
+
+  defp invalid_input_declaration do
+    {:error, {:manifest_path, [{:property, "input"}], :invalid_input_declaration}}
+  end
+
+  defp inline_input(value) when is_map(value) and not is_struct(value), do: :ok
+
+  defp inline_input(_value),
+    do:
+      manifest_value_error(
+        [{:property, "input"}, {:property, "value"}],
+        :invalid_input_declaration
+      )
+
+  defp input_path(path) when is_binary(path) do
+    if ApplicationSource.valid_name?(path),
+      do: :ok,
+      else:
+        manifest_value_error(
+          [{:property, "input"}, {:property, "path"}],
+          :invalid_input_declaration
+        )
+  end
+
+  defp input_path(_path),
+    do:
+      manifest_value_error(
+        [{:property, "input"}, {:property, "path"}],
+        :invalid_input_declaration
+      )
 
   defp maybe_materialize_input(_declaration, _source, _contract, false), do: {:ok, nil}
 
@@ -372,35 +594,88 @@ defmodule PtcRunner.Kernel.Manifest do
   defp materialize_input(_input, _source), do: {:error, :invalid_input}
 
   defp contracts(value, source) when is_map(value) do
-    with :ok <- exact_keys(value, ~w(input_schema result_schema), []),
-         {:ok, input, input_source} <- contract(Map.get(value, "input_schema"), source),
-         {:ok, result, result_source} <- contract(Map.get(value, "result_schema"), source) do
+    with :ok <- section_keys(value, "contracts", ~w(input_schema result_schema), []),
+         {:ok, input, input_source} <-
+           optional_contract(value, "input_schema", source, :input_contract),
+         {:ok, result, result_source} <-
+           optional_contract(value, "result_schema", source, :result_contract) do
       {:ok,
        %{
          contracts: %{input: input, result: result},
          sources: %{input: input_source, result: result_source}
        }}
     else
-      {:error, :duplicate_json_key} = error -> error
-      _invalid -> {:error, :invalid_contracts}
+      {:error, {:source_role, _role, _name, _reason}} = error ->
+        error
+
+      {:error, {:manifest_path, _path, _reason}} = error ->
+        error
     end
   end
 
-  defp contracts(_value, _source), do: {:error, :invalid_contracts}
+  defp contracts(_value, _source),
+    do: {:error, {:manifest_path, [{:property, "contracts"}], :invalid_contracts_section}}
 
-  defp contract(nil, _source), do: {:ok, nil, nil}
-
-  defp contract(%{"path" => path} = reference, source) when is_binary(path) do
-    with :ok <- exact_keys(reference, ~w(path), ~w(path)),
-         {:ok, raw} <- ApplicationSource.read_reference(source, path, @max_contract_bytes),
-         {:ok, schema} <- StrictJSON.decode(raw),
-         true <- is_map(schema) and not is_struct(schema),
-         {:ok, contract} <- ValueContract.compile(schema) do
-      {:ok, contract, raw}
+  defp optional_contract(contracts, name, source, role) do
+    case Map.fetch(contracts, name) do
+      :error -> {:ok, nil, nil}
+      {:ok, reference} -> contract(reference, source, role)
     end
   end
 
-  defp contract(_reference, _source), do: {:error, :invalid_contracts}
+  defp contract(reference, source, role) when is_map(reference) do
+    case structural_keys(reference, ~w(path), ~w(path)) do
+      :ok ->
+        contract_path(reference["path"], source, role)
+
+      {:error, reason} ->
+        {:error, {:manifest_path, contract_reference_path(role), reason}}
+    end
+  end
+
+  defp contract(_reference, _source, role),
+    do: {:error, {:manifest_path, contract_reference_path(role), :invalid_contract_reference}}
+
+  defp contract_path(path, source, role) when is_binary(path) do
+    if ApplicationSource.valid_name?(path),
+      do: load_contract(source, role, path),
+      else: invalid_contract_path(role)
+  end
+
+  defp contract_path(_path, _source, role), do: invalid_contract_path(role)
+
+  defp invalid_contract_path(role) do
+    {:error,
+     {:manifest_path, contract_reference_path(role) ++ [{:property, "path"}],
+      :invalid_contract_reference}}
+  end
+
+  defp contract_reference_path(:input_contract),
+    do: [{:property, "contracts"}, {:property, "input_schema"}]
+
+  defp contract_reference_path(:result_contract),
+    do: [{:property, "contracts"}, {:property, "result_schema"}]
+
+  defp load_contract(source, role, path) do
+    result =
+      with {:ok, raw} <- ApplicationSource.read_reference(source, path, @max_contract_bytes),
+           {:ok, schema} <- StrictJSON.decode(raw),
+           true <- is_map(schema) and not is_struct(schema),
+           {:ok, contract} <- ValueContract.compile(schema) do
+        {:ok, contract, raw}
+      end
+
+    case result do
+      {:ok, _contract, _raw} = success ->
+        success
+
+      {:error, reason} ->
+        {:error, {:source_role, role, path, reason}}
+
+      _invalid ->
+        {:error, {:source_role, role, path, :invalid_contracts}}
+    end
+  end
 
   defp validate_input(nil, _input), do: :ok
 
@@ -411,39 +686,94 @@ defmodule PtcRunner.Kernel.Manifest do
   end
 
   defp providers(value) when is_map(value) do
-    with :ok <- exact_keys(value, ~w(workflow mission), []),
-         {:ok, workflow} <- provider_list(Map.get(value, "workflow", [])),
-         {:ok, mission} <- provider_list(Map.get(value, "mission", [])) do
+    with :ok <- section_keys(value, "providers", ~w(workflow mission), []),
+         {:ok, workflow} <- provider_list(Map.get(value, "workflow", []), :workflow),
+         {:ok, mission} <- provider_list(Map.get(value, "mission", []), :mission) do
       {:ok, %{workflow: workflow, mission: mission}}
     end
   end
 
-  defp providers(_value), do: {:error, :invalid_providers}
+  defp providers(_value),
+    do: manifest_value_error([{:property, "providers"}], :invalid_providers)
 
-  defp provider_list(values) when is_list(values) and length(values) <= 32 do
-    with true <- Enum.all?(values, &provider?/1),
-         names = Enum.map(values, & &1["name"]),
-         true <- names == Enum.uniq(names) do
-      {:ok, values}
-    else
-      _ -> {:error, :invalid_providers}
+  defp provider_list(values, destination) when is_list(values) and length(values) <= 32 do
+    with :ok <- validate_provider_entries(values, destination) do
+      names = Enum.map(values, & &1["name"])
+
+      if names == Enum.uniq(names),
+        do: {:ok, values},
+        else:
+          manifest_value_error(
+            [{:property, "providers"}, {:property, Atom.to_string(destination)}],
+            :invalid_providers
+          )
     end
   end
 
-  defp provider_list(_values), do: {:error, :invalid_providers}
+  defp provider_list(_values, destination),
+    do:
+      manifest_value_error(
+        [{:property, "providers"}, {:property, Atom.to_string(destination)}],
+        :invalid_providers
+      )
 
-  defp provider?(value) when is_map(value) do
-    with :ok <- exact_keys(value, ~w(name config), ~w(name)),
-         name when is_binary(name) <- value["name"],
-         true <- name =~ ~r/\A[a-z][a-z0-9._-]{0,127}\z/,
-         true <- JSONValue.map?(Map.get(value, "config", %{})) do
-      true
+  defp validate_provider_entries(values, destination) do
+    values
+    |> Enum.with_index()
+    |> Enum.reduce_while(:ok, fn {value, index}, :ok ->
+      case provider(value) do
+        :ok ->
+          {:cont, :ok}
+
+        {:error, {:provider_structure, reason}} ->
+          path = [
+            {:property, "providers"},
+            {:property, Atom.to_string(destination)},
+            {:index, index}
+          ]
+
+          {:halt, {:error, {:manifest_path, path, reason}}}
+
+        {:error, {:provider_value, suffix, reason}} ->
+          path = [
+            {:property, "providers"},
+            {:property, Atom.to_string(destination)},
+            {:index, index}
+          ]
+
+          {:halt, {:error, {:manifest_path, path ++ suffix, reason}}}
+      end
+    end)
+  end
+
+  defp provider(value) when is_map(value) do
+    with :ok <- structural_keys(value, ~w(name config), ~w(name)),
+         :ok <- provider_name(value["name"]),
+         :ok <- provider_config(Map.get(value, "config", %{})) do
+      :ok
     else
-      _invalid -> false
+      {:error, reason} -> {:error, {:provider_structure, reason}}
+      {:value_error, suffix, reason} -> {:error, {:provider_value, suffix, reason}}
     end
   end
 
-  defp provider?(_value), do: false
+  defp provider(_value),
+    do: {:error, {:provider_value, [], :invalid_provider}}
+
+  defp provider_name(name) when is_binary(name) do
+    if String.valid?(name) and name =~ @component_id,
+      do: :ok,
+      else: {:value_error, [{:property, "name"}], :invalid_provider_name}
+  end
+
+  defp provider_name(_name),
+    do: {:value_error, [{:property, "name"}], :invalid_provider_name}
+
+  defp provider_config(config) do
+    if JSONValue.map?(config),
+      do: :ok,
+      else: {:value_error, [{:property, "config"}], :invalid_provider_config}
+  end
 
   defp limits(value, %Limits{} = installed_limits) when is_map(value) do
     ceilings = Map.from_struct(installed_limits)
@@ -455,61 +785,241 @@ defmodule PtcRunner.Kernel.Manifest do
 
     requested = Map.new(defaults, fn {name, default} -> {name, min(default, ceilings[name])} end)
 
-    value
-    |> Map.to_list()
-    |> normalize_limits(names, ceilings_by_name, requested)
+    with :ok <- section_keys(value, "limits", Map.keys(ceilings_by_name), []) do
+      value
+      |> Map.to_list()
+      |> Enum.sort_by(&elem(&1, 0))
+      |> normalize_limits(names, ceilings_by_name, requested)
+    end
   end
 
-  defp limits(_value, _installed_limits), do: {:error, :invalid_limits}
+  defp limits(_value, _installed_limits),
+    do: manifest_value_error([{:property, "limits"}], :invalid_limits)
 
   defp normalize_limits([], _names, _ceilings, normalized), do: Limits.new(normalized)
 
-  defp normalize_limits([{key, number} | rest], names, ceilings, normalized)
-       when is_integer(number) and number > 0 do
-    case {Map.fetch(names, key), Map.fetch(ceilings, key)} do
-      {{:ok, name}, {:ok, ceiling}} when number <= ceiling ->
+  defp normalize_limits([{key, number} | rest], names, ceilings, normalized) do
+    case {Map.fetch(names, key), Map.fetch(ceilings, key), number} do
+      {{:ok, name}, {:ok, ceiling}, number}
+      when is_integer(number) and number > 0 and number <= ceiling ->
         normalize_limits(rest, names, ceilings, Map.put(normalized, name, number))
 
       _invalid ->
-        {:error, :invalid_limits}
+        manifest_value_error(
+          [{:property, "limits"}, {:property, key}],
+          :invalid_limits
+        )
     end
   end
 
-  defp normalize_limits(_values, _names, _ceilings, _normalized),
-    do: {:error, :invalid_limits}
-
   defp events(value) when is_map(value) do
-    with :ok <- exact_keys(value, ~w(policy run_id trace_id), []),
-         policy when policy in ["normal", "private"] <- Map.get(value, "policy", "normal"),
-         true <- optional_id?(Map.get(value, "run_id")),
-         true <- optional_id?(Map.get(value, "trace_id")) do
+    with :ok <- section_keys(value, "events", ~w(policy run_id trace_id), []),
+         {:ok, policy} <- event_policy(Map.get(value, "policy", "normal")),
+         :ok <- event_id(value, "run_id"),
+         :ok <- event_id(value, "trace_id") do
       {:ok,
        %{
-         policy: String.to_existing_atom(policy),
+         policy: policy,
          run_id: Map.get(value, "run_id"),
          trace_id: Map.get(value, "trace_id")
        }}
-    else
-      _ -> {:error, :invalid_events}
     end
   end
 
-  defp events(_value), do: {:error, :invalid_events}
-  defp optional_id?(nil), do: true
+  defp events(_value),
+    do: manifest_value_error([{:property, "events"}], :invalid_events)
 
-  defp optional_id?(id) when is_binary(id) and byte_size(id) in 1..256,
-    do: String.valid?(id)
+  defp event_policy(policy) when policy in ["normal", "private"],
+    do: {:ok, String.to_existing_atom(policy)}
 
-  defp optional_id?(_id), do: false
+  defp event_policy(_policy),
+    do:
+      manifest_value_error(
+        [{:property, "events"}, {:property, "policy"}],
+        :invalid_event_policy
+      )
+
+  defp event_id(events, field) do
+    case Map.fetch(events, field) do
+      :error ->
+        :ok
+
+      {:ok, id} when is_binary(id) and byte_size(id) in 1..256 ->
+        if String.valid?(id),
+          do: :ok,
+          else:
+            manifest_value_error(
+              [{:property, "events"}, {:property, field}],
+              :invalid_event_id
+            )
+
+      {:ok, _id} ->
+        manifest_value_error(
+          [{:property, "events"}, {:property, field}],
+          :invalid_event_id
+        )
+    end
+  end
+
+  defp labels(value) when is_map(value) and not is_struct(value) do
+    with :ok <- section_keys(value, "labels", @label_keys, []),
+         :ok <- label_identifiers(value),
+         :ok <- label_tags(value),
+         {:ok, labels} <- SafeMetadata.normalize_labels(value) do
+      {:ok, labels}
+    else
+      {:error, :invalid_safe_metadata} ->
+        manifest_value_error([{:property, "labels"}], :invalid_manifest)
+
+      {:error, _reason} = error ->
+        error
+    end
+  end
+
+  defp labels(_value),
+    do: manifest_value_error([{:property, "labels"}], :invalid_manifest)
+
+  defp label_identifiers(labels) do
+    Enum.reduce_while(~w(name model provider), :ok, fn name, :ok ->
+      case Map.fetch(labels, name) do
+        :error ->
+          {:cont, :ok}
+
+        {:ok, value} when is_binary(value) ->
+          if String.valid?(value) and value =~ @label_identifier,
+            do: {:cont, :ok},
+            else: {:halt, invalid_label(name)}
+
+        {:ok, _value} ->
+          {:halt, invalid_label(name)}
+      end
+    end)
+  end
+
+  defp invalid_label(name),
+    do:
+      manifest_value_error(
+        [{:property, "labels"}, {:property, name}],
+        :invalid_manifest
+      )
+
+  defp label_tags(labels) do
+    case Map.fetch(labels, "tags") do
+      :error -> :ok
+      {:ok, tags} -> validate_label_tags(tags)
+    end
+  end
+
+  defp validate_label_tags(tags) when is_map(tags) and not is_struct(tags) do
+    with :ok <-
+           section_keys(
+             tags,
+             [{:property, "labels"}, {:property, "tags"}],
+             @tag_keys,
+             []
+           ) do
+      Enum.reduce_while(@tag_keys, :ok, fn name, :ok ->
+        case validate_label_tag(tags, name) do
+          :ok -> {:cont, :ok}
+          {:error, _reason} = error -> {:halt, error}
+        end
+      end)
+    end
+  end
+
+  defp validate_label_tags(_tags),
+    do:
+      manifest_value_error(
+        [{:property, "labels"}, {:property, "tags"}],
+        :invalid_manifest
+      )
+
+  defp validate_label_tag(tags, name) do
+    allowed = Map.fetch!(@tag_values, name)
+
+    case Map.fetch(tags, name) do
+      :error -> :ok
+      {:ok, value} -> if(value in allowed, do: :ok, else: invalid_label_tag(name))
+    end
+  end
+
+  defp invalid_label_tag(name),
+    do:
+      manifest_value_error(
+        [{:property, "labels"}, {:property, "tags"}, {:property, name}],
+        :invalid_manifest
+      )
+
+  defp manifest_value_error(path, reason),
+    do: {:error, {:manifest_path, path, reason}}
+
+  defp section_keys(map, section, allowed, required) when is_binary(section),
+    do: section_keys(map, [{:property, section}], allowed, required)
+
+  defp section_keys(map, path, allowed, required) when is_list(path) do
+    case structural_keys(map, allowed, required) do
+      :ok -> :ok
+      {:error, reason} -> {:error, {:manifest_path, path, reason}}
+    end
+  end
+
+  defp root_keys(map, allowed, required) do
+    case structural_keys(map, allowed, required) do
+      :ok ->
+        :ok
+
+      {:error, {:required_property_missing, _name} = reason} ->
+        {:error, {:manifest_path, [], reason}}
+
+      {:error, _reason} = error ->
+        error
+    end
+  end
 
   defp exact_keys(map, allowed, required) do
     keys = Map.keys(map)
 
     case {keys -- allowed, required -- keys} do
       {[], []} -> :ok
-      _unknown_or_missing -> {:error, :unknown_or_missing_keys}
+      {[_unknown | _rest], _missing} -> {:error, :unknown_properties}
+      {[], [_missing | _rest]} -> {:error, :required_properties_missing}
     end
   end
+
+  defp safe_manifest_path(path), do: safe_schema_path(path, schema(), [])
+
+  defp safe_schema_path([], _schema, retained), do: Enum.reverse(retained)
+
+  defp safe_schema_path([segment | rest], schema, retained) do
+    case next_schema(schema, segment) do
+      {:ok, child} when is_binary(segment) ->
+        safe_schema_path(rest, child, [{:property, segment} | retained])
+
+      {:ok, child} when is_integer(segment) and segment >= 0 ->
+        safe_schema_path(rest, child, [{:index, segment} | retained])
+
+      :error ->
+        Enum.reverse(retained)
+    end
+  end
+
+  defp next_schema(%{"properties" => properties}, segment)
+       when is_map(properties) and is_binary(segment),
+       do: Map.fetch(properties, segment)
+
+  defp next_schema(%{"items" => items}, segment) when is_integer(segment) and segment >= 0,
+    do: {:ok, items}
+
+  defp next_schema(%{"oneOf" => branches}, segment) when is_list(branches) do
+    Enum.find_value(branches, :error, fn branch ->
+      case next_schema(branch, segment) do
+        {:ok, _child} = found -> found
+        :error -> false
+      end
+    end)
+  end
+
+  defp next_schema(_schema, _segment), do: :error
 
   @doc "Returns the generated JSON Schema 2020-12 structural manifest contract."
   @spec schema() :: map()

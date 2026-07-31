@@ -9,6 +9,14 @@ defmodule PtcRunner.Kernel.RunBuilder do
   `PtcRunner.Kernel.RunConfig` accepted by direct Elixir embedding. Relative
   artifact destinations are anchored once before preflight and the same
   absolute paths are retained through post-run persistence.
+
+  Provider-free requests cross the same path-free
+  `PtcRunner.Kernel.RunCoordinator` phases 4 and 5 as command frontends, and
+  downstream assembly consumes the resulting sealed `PreparedRun` directly.
+  Pure option validation completes before that one-way consumption.
+  Provider-bearing preparation remains here until declarative installation
+  descriptors replace builder inspection, but it uses the coordinator's same
+  public-entry validation before any builder inspection.
   """
 
   alias PtcRunner.Kernel
@@ -18,16 +26,34 @@ defmodule PtcRunner.Kernel.RunBuilder do
   alias PtcRunner.Kernel.InspectionSink
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.MissionEnvironment
+  alias PtcRunner.Kernel.PreparedRun
   alias PtcRunner.Kernel.PrivateDirectory
   alias PtcRunner.Kernel.ProviderRegistry
   alias PtcRunner.Kernel.ProviderResources
   alias PtcRunner.Kernel.Result
   alias PtcRunner.Kernel.ResultArtifact
   alias PtcRunner.Kernel.RunConfig
+  alias PtcRunner.Kernel.RunCoordinator
   alias PtcRunner.Kernel.RunRequest
   alias PtcRunner.Kernel.TraceLog
   alias PtcRunner.Kernel.ValueContract
   alias PtcRunner.Kernel.WorkflowEnvironment
+
+  @acquisition_options [
+    :component_override_descriptor,
+    :mission,
+    :private_mission,
+    :result_projection
+  ]
+  @build_options [
+    :inspect,
+    :installed_limits,
+    :output,
+    :private_output,
+    :trace
+  ]
+  @load_options @acquisition_options ++ @build_options
+  @artifact_options [:trace, :inspect, :output, :private_output]
 
   @spec build(RunRequest.t(), ProviderRegistry.t(), keyword()) ::
           {:ok,
@@ -44,17 +70,14 @@ defmodule PtcRunner.Kernel.RunBuilder do
   def build(%RunRequest{} = request, %ProviderRegistry{} = registry, opts) when is_list(opts) do
     package = request.package
 
-    with true <- RunRequest.valid?(request),
+    with :ok <- validate_registry(registry),
+         :ok <- validate_build_options(opts),
+         true <- RunRequest.valid?(request),
          :ok <- validate_installed_limits(package, registry, opts),
-         :ok <- validate_inspection_selection(request, opts),
-         {:ok, opts} <- anchor_artifact_options(opts),
-         :ok <- preflight_inspection(opts),
-         :ok <- preflight_artifact_destinations(opts),
-         {:ok, workflow_bundle} <- bundle(package.workflow_components),
-         {:ok, mission_bundle} <- bundle(package.mission_components),
-         {:ok, providers} <-
-           providers(package, registry, provider_input_class(request.input.authority), opts) do
-      build_with_providers(request, {workflow_bundle, mission_bundle}, providers, opts)
+         :ok <- validate_inspection_selection(request, opts) do
+      if provider_free?(package.providers),
+        do: prepare_and_build(request, registry, opts),
+        else: build_provider_bearing(request, registry, opts)
     else
       false -> {:error, :invalid_run_request}
       {:error, _reason} = error -> error
@@ -63,12 +86,136 @@ defmodule PtcRunner.Kernel.RunBuilder do
 
   def build(_request, _registry, _opts), do: {:error, :invalid_run_request}
 
+  @spec build_prepared(PreparedRun.t(), ProviderRegistry.t(), keyword()) ::
+          {:ok,
+           %{
+             entry_source: binary(),
+             config: RunConfig.t(),
+             result_contract: ValueContract.t() | nil,
+             result_projection: :native | :json
+           }}
+          | {:error, term()}
+  @doc "Builds a provider-free run directly from the sealed phase-4/5 result."
+  def build_prepared(prepared, registry, opts \\ [])
+
+  def build_prepared(%PreparedRun{} = prepared, %ProviderRegistry{} = registry, opts)
+      when is_list(opts) do
+    request = prepared.request
+
+    with :ok <- validate_registry(registry),
+         true <- PreparedRun.valid?(prepared),
+         true <- provider_free?(request.package.providers),
+         :ok <- validate_build_options(opts),
+         :ok <- validate_installed_limits(request.package, registry, opts),
+         :ok <- validate_inspection_selection(request, opts),
+         :ok <- PreparedRun.consume(prepared) do
+      do_build_prepared(prepared, registry, opts)
+    else
+      false -> {:error, :invalid_prepared_run}
+      {:error, _reason} = error -> error
+    end
+  end
+
+  def build_prepared(_prepared, _registry, _opts), do: {:error, :invalid_prepared_run}
+
+  defp validate_registry(registry) do
+    if ProviderRegistry.valid?(registry),
+      do: :ok,
+      else: {:error, :invalid_provider_registry}
+  end
+
+  defp validate_build_options(opts) when is_list(opts) do
+    with :ok <- validate_option_shape(opts, @build_options),
+         :ok <- validate_artifact_option_types(opts),
+         true <- valid_optional_installed_limits?(opts),
+         :ok <- validate_result_option_conflict(opts) do
+      :ok
+    else
+      {:error, _reason} = error -> error
+      false -> {:error, :invalid_build_options}
+    end
+  end
+
+  defp validate_load_options(opts) when is_list(opts) do
+    with :ok <- validate_option_shape(opts, @load_options),
+         :ok <- validate_artifact_option_types(opts),
+         true <- valid_optional_installed_limits?(opts),
+         true <- valid_optional_binary?(opts, :component_override_descriptor),
+         true <- valid_optional_binary?(opts, :mission),
+         true <- valid_optional_binary?(opts, :private_mission),
+         true <- valid_result_projection?(opts),
+         :ok <- validate_mission_option_conflict(opts),
+         :ok <- validate_result_option_conflict(opts) do
+      :ok
+    else
+      {:error, _reason} = error -> error
+      false -> {:error, :invalid_build_options}
+    end
+  end
+
+  defp validate_load_options(_opts), do: {:error, :invalid_build_options}
+
+  defp validate_option_shape(opts, allowed) do
+    if Keyword.keyword?(opts) do
+      keys = Keyword.keys(opts)
+
+      if keys -- allowed == [] and length(keys) == MapSet.size(MapSet.new(keys)),
+        do: :ok,
+        else: {:error, :invalid_build_options}
+    else
+      {:error, :invalid_build_options}
+    end
+  end
+
+  defp validate_artifact_option_types(opts) do
+    if Enum.all?(@artifact_options, &valid_optional_binary?(opts, &1)),
+      do: :ok,
+      else: invalid_artifact_destination()
+  end
+
+  defp valid_optional_installed_limits?(opts) do
+    case Keyword.fetch(opts, :installed_limits) do
+      {:ok, limits} -> Limits.valid?(limits)
+      :error -> true
+    end
+  end
+
+  defp valid_optional_binary?(opts, key) do
+    case Keyword.fetch(opts, key) do
+      {:ok, value} -> is_nil(value) or is_binary(value)
+      :error -> true
+    end
+  end
+
+  defp valid_result_projection?(opts) do
+    case Keyword.fetch(opts, :result_projection) do
+      {:ok, projection} -> projection in [:native, :json]
+      :error -> true
+    end
+  end
+
+  defp validate_mission_option_conflict(opts) do
+    if is_binary(Keyword.get(opts, :mission)) and
+         is_binary(Keyword.get(opts, :private_mission)),
+       do: {:error, :conflicting_mission_inputs},
+       else: :ok
+  end
+
+  defp validate_result_option_conflict(opts) do
+    if is_binary(Keyword.get(opts, :output)) and
+         is_binary(Keyword.get(opts, :private_output)),
+       do: {:error, {:result_preflight_failed, :conflicting_result_destinations}},
+       else: :ok
+  end
+
   defp validate_installed_limits(package, registry, opts) do
     expected = Keyword.get(opts, :installed_limits, registry.installed_limits)
 
-    if match?(%Limits{}, expected) and package.installed_limits == expected,
-      do: :ok,
-      else: {:error, :installed_limits_mismatch}
+    cond do
+      not Limits.valid?(expected) -> {:error, :invalid_build_options}
+      package.installed_limits == expected -> :ok
+      true -> {:error, :installed_limits_mismatch}
+    end
   end
 
   defp validate_inspection_selection(request, opts) do
@@ -77,7 +224,68 @@ defmodule PtcRunner.Kernel.RunBuilder do
       else: {:error, :invalid_execution_policy}
   end
 
-  defp build_with_providers(request, {workflow_bundle, mission_bundle}, providers, opts) do
+  defp prepare_and_build(request, registry, opts) do
+    case RunCoordinator.prepare(request, registry) do
+      {:ok, prepared} ->
+        try do
+          build_prepared(prepared, registry, opts)
+        after
+          PreparedRun.close(prepared)
+        end
+
+      {:error, _diagnostic} = error ->
+        error
+    end
+  end
+
+  defp do_build_prepared(prepared, registry, opts) do
+    bundles = {prepared.workflow_bundle, prepared.mission_bundle}
+
+    assemble(
+      prepared.request,
+      bundles,
+      prepared.entry_source,
+      registry,
+      opts
+    )
+  end
+
+  defp build_provider_bearing(request, registry, opts) do
+    with {:ok, workflow_bundle} <- bundle(request.package.workflow_components),
+         {:ok, mission_bundle} <- bundle(request.package.mission_components),
+         :ok <- RunCoordinator.validate_entry(workflow_bundle, request.package.entry) do
+      assemble(
+        request,
+        {workflow_bundle, mission_bundle},
+        "(#{request.package.entry} data/input)",
+        registry,
+        opts
+      )
+    end
+  end
+
+  defp assemble(request, bundles, entry_source, registry, opts) do
+    with {:ok, opts} <- anchor_artifact_options(opts),
+         :ok <- preflight_inspection(opts),
+         :ok <- preflight_artifact_destinations(opts),
+         {:ok, providers} <-
+           providers(
+             request.package,
+             registry,
+             provider_input_class(request.input.authority),
+             opts
+           ) do
+      build_with_providers(request, bundles, entry_source, providers, opts)
+    end
+  end
+
+  defp build_with_providers(
+         request,
+         {workflow_bundle, mission_bundle},
+         entry_source,
+         providers,
+         opts
+       ) do
     package = request.package
 
     result =
@@ -96,7 +304,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
            {:ok, inspection_sink, inspection_path} <- inspection_sink(sink, opts),
            :ok <- capture_prelude_sources(inspection_sink, sink, {workflow, mission}, package) do
         build_config(
-          request,
+          {request, entry_source},
           providers,
           workflow,
           mission,
@@ -117,7 +325,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
   end
 
   defp build_config(
-         request,
+         {request, entry_source},
          providers,
          workflow,
          mission,
@@ -146,7 +354,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
       {:ok, config} ->
         {:ok,
          %{
-           entry_source: "(#{package.entry} data/input)",
+           entry_source: entry_source,
            config: config,
            result_contract: package.contracts.result,
            result_projection: request.policy.result_projection
@@ -547,13 +755,19 @@ defmodule PtcRunner.Kernel.RunBuilder do
   end
 
   defp load_and_build_with_options(path, registry, opts) do
-    installed_limits = Keyword.get(opts, :installed_limits, registry.installed_limits)
-
-    with {:ok, request_opts} <- request_options(opts, installed_limits),
+    with :ok <- validate_load_options(opts),
+         :ok <- validate_registry(registry),
+         installed_limits <- Keyword.get(opts, :installed_limits, registry.installed_limits),
+         true <- Limits.valid?(installed_limits),
+         {:ok, request_opts} <- request_options(opts, installed_limits),
          {:ok, request} <- ApplicationPackage.request_directory(path, request_opts),
          {:ok, opts} <- anchor_artifact_options(opts),
-         {:ok, built} <- build(request, registry, opts) do
-      {:ok, built, opts}
+         build_opts = Keyword.drop(opts, @acquisition_options),
+         {:ok, built} <- build(request, registry, build_opts) do
+      {:ok, built, build_opts}
+    else
+      false -> {:error, :invalid_build_options}
+      {:error, _reason} = error -> error
     end
   end
 
@@ -592,7 +806,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
   defp anchor_artifact_options(opts) do
     case artifact_anchor_cwd(opts) do
       {:ok, cwd} ->
-        anchor_artifact_options([:trace, :inspect, :output, :private_output], opts, cwd)
+        anchor_artifact_options(@artifact_options, opts, cwd)
 
       {:error, _reason} ->
         invalid_artifact_destination()
@@ -621,7 +835,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
 
   defp artifact_anchor_cwd(opts) do
     relative? =
-      Enum.any?([:trace, :inspect, :output, :private_output], fn key ->
+      Enum.any?(@artifact_options, fn key ->
         case Keyword.fetch(opts, key) do
           {:ok, path} when is_binary(path) -> Path.type(path) == :relative
           _missing_or_invalid -> false
@@ -655,7 +869,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
 
   defp preflight_artifact_destinations(opts) do
     destinations =
-      [:trace, :inspect, :output, :private_output]
+      @artifact_options
       |> Enum.flat_map(fn key ->
         case Keyword.fetch(opts, key) do
           {:ok, path} when is_binary(path) -> [path]
@@ -920,6 +1134,9 @@ defmodule PtcRunner.Kernel.RunBuilder do
   defp maybe_append(values, value), do: values ++ [value]
   defp maybe_prepend(values, nil), do: values
   defp maybe_prepend(values, value), do: [value | values]
+
+  defp provider_free?(%{workflow: [], mission: []}), do: true
+  defp provider_free?(_providers), do: false
 
   defp bundle([]), do: {:ok, nil}
   defp bundle(components), do: Kernel.compile_bundle(components)

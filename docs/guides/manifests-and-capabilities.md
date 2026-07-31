@@ -188,8 +188,8 @@ without repeating the run under private inspection. The command reports it as:
   %{value_kind: :object, discriminator: "decision", matched_branch: "no-change",
     missing_required: [], undeclared_key_count: 0,
     violations: [
-      %{path: "rationale", kind: :maxLength},
-      %{path: "evidence[0]", kind: :required}
+      %{segments: [{:property, "rationale"}], kind: :maxLength},
+      %{segments: [{:property, "evidence"}, {:index, 0}], kind: :required}
     ]}}}
 ```
 
@@ -200,11 +200,13 @@ is not — so a workflow returning `{:decision "no-change"}` instead of
 violations at all, which is how you recognize it: `json_value: false` with an
 empty `violations` list means keyword keys, not a schema mismatch.
 
-`violations` locates each failure by schema keyword and path within the branch
-the discriminator selected; branches it did not select are omitted, since they
-fail on keys they were never given. Paths are built only from names the
-contract declares and from array indices — a segment naming an undeclared key
-is replaced with `(undeclared)`, because that name is caller-authored content.
+`violations` locates each failure by schema keyword and a typed property/index
+segment list within the branch the discriminator selected; branches it did not
+select are omitted, since they fail on keys they were never given. Segments are
+retained only while the exact local schema node declares that property or array
+index. At the first undeclared or structurally inconsistent segment,
+classification stops at the safe parent, so caller-authored property names
+never enter the report.
 
 Every other name comes from the compiled schema too: the discriminator, the
 branch whose `const` the value carried, and that branch's unmet `required` keys

@@ -38,6 +38,17 @@ defmodule PtcRunner.Kernel.ComponentOverride do
   @keys ~w(component_id base_source_hash source_hash path)
   @hash ~r/\Asha256:[0-9a-f]{64}\z/
   @component_id ~r/\A[a-z][a-z0-9._-]{0,127}\z/
+  @descriptor_schema %{
+    "type" => "object",
+    "additionalProperties" => false,
+    "required" => @keys,
+    "properties" => %{
+      "component_id" => %{"type" => "string", "pattern" => "^[a-z][a-z0-9._-]{0,127}$"},
+      "base_source_hash" => %{"type" => "string", "pattern" => "^sha256:[0-9a-f]{64}$"},
+      "source_hash" => %{"type" => "string", "pattern" => "^sha256:[0-9a-f]{64}$"},
+      "path" => %{"type" => "string"}
+    }
+  }
 
   @enforce_keys [
     :component_id,
@@ -61,9 +72,18 @@ defmodule PtcRunner.Kernel.ComponentOverride do
   @type error ::
           :invalid_override_descriptor
           | :invalid_override_source
+          | :document_limit_exceeded
+          | :json_depth_exceeded
+          | :json_node_limit_exceeded
           | :override_source_hash_mismatch
           | :override_base_hash_mismatch
           | :override_component_not_selected
+          | {:component_override_path, [PtcRunner.Kernel.CommandPath.segment()],
+             :invalid_override_descriptor}
+
+  @doc false
+  @spec schema() :: map()
+  def schema, do: @descriptor_schema
 
   @doc """
   Loads and verifies one descriptor, returning the candidate source it names.
@@ -92,9 +112,28 @@ defmodule PtcRunner.Kernel.ComponentOverride do
          descriptor_bytes: byte_size(raw)
        }}
     else
-      {:error, reason} when reason in [:override_source_hash_mismatch] -> {:error, reason}
-      {:error, :invalid_override_source} -> {:error, :invalid_override_source}
-      _reason -> {:error, :invalid_override_descriptor}
+      {:error, {:component_override_path, _path, :invalid_override_descriptor}} = error ->
+        error
+
+      {:error, reason} when reason in [:override_source_hash_mismatch] ->
+        {:error, reason}
+
+      {:error, :invalid_override_source} ->
+        {:error, :invalid_override_source}
+
+      {:error, reason}
+      when reason in [
+             :document_limit_exceeded,
+             :json_depth_exceeded,
+             :json_node_limit_exceeded
+           ] ->
+        {:error, reason}
+
+      {:error, :too_large} ->
+        {:error, :document_limit_exceeded}
+
+      _reason ->
+        {:error, :invalid_override_descriptor}
     end
   end
 
@@ -127,14 +166,37 @@ defmodule PtcRunner.Kernel.ComponentOverride do
          :ok <- verify_source_hash(source, decoded["source_hash"]) do
       {:ok, override(decoded, descriptor, source)}
     else
-      {:error, :override_source_hash_mismatch} = error -> error
-      {:error, :invalid_override_source} = error -> error
-      {:error, :invalid_override_descriptor} = error -> error
-      {:error, :document_limit_exceeded} -> {:error, :invalid_override_source}
-      {:error, :reference_missing} -> {:error, :invalid_override_source}
-      {:error, :invalid_logical_name} -> {:error, :invalid_override_source}
-      false -> {:error, :invalid_override_source}
-      _reason -> {:error, :invalid_override_descriptor}
+      {:error, {:component_override_path, _path, :invalid_override_descriptor}} = error ->
+        error
+
+      {:error, :override_source_hash_mismatch} = error ->
+        error
+
+      {:error, :invalid_override_source} = error ->
+        error
+
+      {:error, :invalid_override_descriptor} = error ->
+        error
+
+      {:error, reason}
+      when reason in [
+             :document_limit_exceeded,
+             :json_depth_exceeded,
+             :json_node_limit_exceeded
+           ] ->
+        {:error, reason}
+
+      {:error, :reference_missing} ->
+        {:error, :invalid_override_source}
+
+      {:error, :invalid_logical_name} ->
+        {:error, :invalid_override_source}
+
+      false ->
+        {:error, :invalid_override_source}
+
+      _reason ->
+        {:error, :invalid_override_descriptor}
     end
   end
 
@@ -212,18 +274,66 @@ defmodule PtcRunner.Kernel.ComponentOverride do
   end
 
   defp decode(raw) do
-    with {:ok, value} <- StrictJSON.decode(raw),
-         true <- is_map(value) and not is_struct(value),
-         true <- Enum.sort(Map.keys(value)) == Enum.sort(@keys),
-         true <- valid_component_id?(value["component_id"]),
-         true <- valid_hash?(value["base_source_hash"]),
-         true <- valid_hash?(value["source_hash"]),
-         true <- is_binary(value["path"]) do
-      {:ok, value}
-    else
-      _reason -> {:error, :invalid_override_descriptor}
+    case StrictJSON.decode_with_locations(raw) do
+      {:ok, value} ->
+        decode_value(value)
+
+      {:error, {:duplicate_json_key, path}} ->
+        descriptor_violation(safe_descriptor_path(path))
+
+      {:error, reason} when reason in [:json_depth_exceeded, :json_node_limit_exceeded] ->
+        {:error, reason}
+
+      {:error, _reason} ->
+        {:error, :invalid_override_descriptor}
     end
   end
+
+  defp decode_value(value) when is_map(value) and not is_struct(value) do
+    keys = Map.keys(value)
+
+    cond do
+      keys -- @keys != [] ->
+        descriptor_violation([])
+
+      @keys -- keys != [] ->
+        descriptor_violation([])
+
+      not valid_component_id?(value["component_id"]) ->
+        descriptor_violation([{:property, "component_id"}])
+
+      not valid_hash?(value["base_source_hash"]) ->
+        descriptor_violation([{:property, "base_source_hash"}])
+
+      not valid_hash?(value["source_hash"]) ->
+        descriptor_violation([{:property, "source_hash"}])
+
+      not is_binary(value["path"]) ->
+        descriptor_violation([{:property, "path"}])
+
+      true ->
+        {:ok, value}
+    end
+  end
+
+  defp decode_value(_value), do: descriptor_violation([])
+
+  defp descriptor_violation(path),
+    do: {:error, {:component_override_path, path, :invalid_override_descriptor}}
+
+  defp safe_descriptor_path(path), do: safe_schema_path(path, @descriptor_schema, [])
+
+  defp safe_schema_path([], _schema, retained), do: Enum.reverse(retained)
+
+  defp safe_schema_path([segment | rest], %{"properties" => properties}, retained)
+       when is_binary(segment) and is_map(properties) do
+    case Map.fetch(properties, segment) do
+      {:ok, child} -> safe_schema_path(rest, child, [{:property, segment} | retained])
+      :error -> Enum.reverse(retained)
+    end
+  end
+
+  defp safe_schema_path(_path, _schema, retained), do: Enum.reverse(retained)
 
   # ConfinedFile rejects absolute paths, traversal segments, and symlinks that
   # leave the root, so a descriptor cannot point at source outside its own
@@ -231,6 +341,7 @@ defmodule PtcRunner.Kernel.ComponentOverride do
   defp read_source(directory, path) do
     case ConfinedFile.read(directory, path, @max_source_bytes) do
       {:ok, source} when byte_size(source) > 0 -> {:ok, source}
+      {:error, :too_large} -> {:error, :document_limit_exceeded}
       _reason -> {:error, :invalid_override_source}
     end
   end

@@ -129,7 +129,12 @@ exactly four fields:
 
 Both hashes use that `sha256:`-prefixed form. `path` resolves against the
 descriptor's own canonical directory and may not escape it. The descriptor is
-at most 64 KiB and the candidate source at most 1 MiB.
+at most 64 KiB and the candidate source at most 1 MiB. Standalone command
+diagnostics authorize descriptor paths against this exact four-field schema:
+duplicate or unknown fields report the safe parent pointer, while an invalid
+declared field can report its public field pointer.
+Crossing either byte ceiling, or the descriptor JSON depth/node ceiling, is
+reported as a document-limit failure with fixed component-override provenance.
 
 Verification is two-sided and happens before the source reaches the compiler.
 `source_hash` proves you are compiling the bytes you believe you extracted;

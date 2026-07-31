@@ -35,6 +35,7 @@ defmodule PtcRunner.Kernel.FrozenBundle do
   import Bitwise, only: [bor: 2, bxor: 2]
   @enforce_keys [:components, :component_ids, :hash, :prelude]
   defstruct [:components, :component_ids, :hash, :prelude, :attestation]
+  @field_keys Enum.sort([:__struct__, :components, :component_ids, :hash, :prelude, :attestation])
 
   @type t :: %__MODULE__{
           components: [map()],
@@ -103,7 +104,9 @@ defmodule PtcRunner.Kernel.FrozenBundle do
   @spec valid?(t()) :: boolean()
   @doc "Checks that a bundle still matches its in-VM attestation."
   def valid?(%__MODULE__{attestation: attestation} = bundle) when is_binary(attestation),
-    do: secure_compare(attestation, attest(bundle))
+    do:
+      Enum.sort(Map.keys(bundle)) == @field_keys and
+        secure_compare(attestation, attest(bundle))
 
   def valid?(_bundle), do: false
 
