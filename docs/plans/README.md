@@ -31,11 +31,11 @@ belongs in guides or retained specifications.
   with proposed remedies. Its analysis-prelude findings shipped in #1162; the
   correction-feedback and verification findings remain open.
 - [`lisp-kernel/private-analysis-sink.md`](lisp-kernel/private-analysis-sink.md)
-  plans non-interactive private inspection analysis behind an explicit
+  designs non-interactive private inspection analysis behind an explicit
   owner-only sink, so agents read private artifacts through the validating
-  profile instead of bypassing it. Blocked on an explicit threat-model decision
-  about same-UID processes, and on a safe stdout projection the current frontend
-  does not have.
+  profile instead of bypassing it. Organised around three seams: the projection
+  split inside `AnalysisSession`, a buffer-and-publish-at-close artifact, and
+  the missing close-failure and halt reporting paths.
 - [`mcp-oauth.md`](mcp-oauth.md) plans principal-scoped OAuth authorization for
   remote Streamable HTTP MCP servers without weakening host authority or tool
   replay safety.
