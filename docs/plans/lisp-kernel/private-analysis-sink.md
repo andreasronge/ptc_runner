@@ -13,12 +13,12 @@ false against the current frontend, and two of its factual claims about existing
 code were wrong. This revision narrows the justification and records what
 remains.
 
-All five blockers now carry a recommended resolution. Blocker 2 dissolves
-rather than being solved: buffering records and publishing the sink atomically
-at close removes the per-evaluation commit coupling entirely. Blocker 3 is
-resolved by the threat-model answer. What remains is a bounded implementation
-modelled on `InspectionArtifact`, plus one open question — whether losing a
-session's private records on crash is acceptable.
+All five blockers now carry a recommended resolution. Blocker 2 is reduced
+rather than removed: staging plus an atomic final link moves the coupling from
+per-evaluation to a single session-scope publication with a declared terminal
+state. Blocker 3 is resolved by the threat-model answer. What remains is a
+bounded implementation modelled on `InspectionArtifact`, plus the open questions
+below.
 
 ## Problem
 
@@ -209,17 +209,27 @@ The frontend receives a result *after* evaluation and continuation processing.
 If the sink write fails there and the evaluation is reported as failed, that is
 dishonest: definitions and `*1`/`*2`/`*3` history have already committed.
 
-**Resolution: dissolve it — buffer bounded private records in the session owner
-and publish the sink once, atomically, at close.** The transactional coupling
-exists only if the sink is written per evaluation. With a single publication at
-close there is no per-evaluation write that can fail after continuation commit,
-so no commit-point redesign is needed.
+**Resolution: reduce it to one declared failure point.** Write bounded private
+records to an owner-only *staging* file as the session runs, and link that
+staging file to the final sink path atomically at close.
 
-This matches `InspectionArtifact`, which already validates a complete batch and
+This does not *dissolve* the problem — an earlier draft of this section claimed
+it did, which was wrong. It relocates the coupling from per-evaluation to
+session scope, where it becomes a single point with a declared terminal state
+rather than a per-evaluation commit ordering. The residual case is real:
+evaluations commit, and close-time publication then fails.
+
+That case is exactly what `stable-cli-contract.md`'s `recovery_written` state
+describes — the durable artifact exists under its recovery name, the final name
+does not. Reuse that shape in the REPL's `session-closed` record so the outcome
+is stated rather than inferred. Staging also fails fast: an unusable sink path
+is rejected at session start, not after an hour of analysis.
+
+This matches `InspectionArtifact`, which validates a complete batch and
 publishes atomically with a no-clobber link. Consequences:
 
-- a crash produces **no sink file at all** — fail-closed and honest, and the
-  same behaviour the inspection artifact already has;
+- a crash before close leaves only the staging file, never a final sink that a
+  reader could mistake for a complete session;
 - the buffer needs a byte ceiling; analysis sessions already carry them, and
   exceeding it fails the session closed, consistent with capture being either
   disabled or required/fail-closed;
@@ -282,9 +292,11 @@ when an existing mode's records change.
 
 A new option on `mix ptc.repl`, valid only with a private analysis profile.
 
-- **Reject every existing destination.** Create once with `O_EXCL` and an
-  explicit `0600` mode in the open call — never create permissively and `chmod`
-  after. Retain the descriptor for the whole session. Set close-on-exec.
+- **Reject every existing destination**, both the final path and the staging
+  path. Create the *staging* file once with `O_EXCL` and an explicit `0600` mode
+  in the open call — never create permissively and `chmod` after. Retain that
+  descriptor for the whole session and set close-on-exec. The final path is not
+  created until close.
 - After opening, `fstat` and verify: regular file, expected owner and exact
   mode, expected device and inode, link count 1. Reject FIFOs, sockets, devices,
   and `/dev/fd`-style aliases based on the opened object, not string matching —
@@ -422,6 +434,11 @@ observable.
   above assumes yes, because `InspectionArtifact` already behaves that way. If
   not, per-evaluation durability needs its own state machine and this becomes a
   materially larger change.
+- **Should a `recovery_written` staging file survive a failed close, or be
+  removed?** Leaving it preserves the data at a path the caller did not ask for;
+  removing it destroys evidence of a session that did commit evaluations. The
+  `run` envelope answers this for `--private-output`; the REPL should follow the
+  same answer rather than pick its own.
 - **Why does the private profile forbid `continue_on_error`?** No rationale is
   recorded. Blocker 4 keeps the restriction rather than relaxing it on a guess;
   someone should establish and document the reason.
