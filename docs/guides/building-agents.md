@@ -545,7 +545,7 @@ Inspect the run through the bounded log-analysis REPL:
 
 ```console
 mix ptc.repl \
-  --profile log-analysis-v1 \
+  --profile log-analysis-v2 \
   --resource traces=tmp/file-agent-traces \
   -e '(def run-id (get-in (log/runs {}) ["items" 0 "run_id"]))' \
   -e '(log/run run-id)' \

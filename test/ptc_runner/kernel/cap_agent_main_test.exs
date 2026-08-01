@@ -56,14 +56,119 @@ defmodule PtcRunner.Kernel.CapAgentMainTest do
                ~S|{"cursor" "abc" "limit" 100}|
     end
 
-    test "leaves first-page arguments unchanged for a nil cursor" do
+    test "a nil cursor selects the first page and removes a stale cursor" do
       assert run(~S|(cap/with-cursor {"path" "lib" "limit" 100} nil)|) ==
                ~S|{"limit" 100 "path" "lib"}|
+
+      assert run(~S|(cap/with-cursor {"cursor" "stale" "limit" 100} nil)|) ==
+               ~S|{"limit" 100}|
+
+      assert run(~S|(cap/with-cursor {:cursor "stale" :limit 100} nil)|) ==
+               ~S|{:limit 100}|
     end
 
     test "does not interpret or transform the cursor" do
       assert run(~S|(cap/with-cursor {} "opaque:page/2?x=1")|) ==
                ~S|{"cursor" "opaque:page/2?x=1"}|
+    end
+  end
+
+  describe "cap/collect-pages" do
+    test "follows opaque cursors and reports complete traversal" do
+      source = ~S"""
+      (cap/collect-pages
+        (fn [cursor]
+          (if cursor
+            {"items" [3] "next_cursor" nil}
+            {"items" [1 2] "next_cursor" "page-2"}))
+        2)
+      """
+
+      assert run(source) ==
+               ~S|{"complete?" true "items" [1 2 3] "pages" 2}|
+    end
+
+    test "preserves snapshot provenance and rejects a changed snapshot" do
+      source = ~S"""
+      (cap/collect-pages
+        (fn [cursor]
+          (if cursor
+            {"items" [2] "next_cursor" nil "snapshot_hash" "sha256:same"}
+            {"items" [1] "next_cursor" "page-2" "snapshot_hash" "sha256:same"}))
+        2)
+      """
+
+      assert run(source) ==
+               ~S|{"complete?" true "items" [1 2] "pages" 2 "snapshot_hash" "sha256:same"}|
+
+      changed = ~S"""
+      (cap/collect-pages
+        (fn [cursor]
+          (if cursor
+            {"items" [2] "next_cursor" nil "snapshot_hash" "sha256:changed"}
+            {"items" [1] "next_cursor" "page-2" "snapshot_hash" "sha256:first"}))
+        2)
+      """
+
+      assert run(changed) =~ ":snapshot-changed"
+    end
+
+    test "marks a bounded prefix incomplete and rejects an invalid bound" do
+      source = ~S"""
+      (cap/collect-pages
+        (fn [cursor]
+          {"items" [(if cursor 2 1)] "next_cursor" "more"})
+        1)
+      """
+
+      assert run(source) ==
+               ~S|{"complete?" false "items" [1] "pages" 1}|
+
+      assert run(~S|(cap/collect-pages (fn [_] {"items" []}) 0)|) =~
+               ":invalid-max-pages"
+    end
+  end
+
+  describe "analysis prelude composition" do
+    test "primitive and analysis components declare their direct shared dependencies" do
+      assert {:ok, log_core} = Library.component("log.core")
+      assert {:ok, inspection_core} = Library.component("inspection.core")
+      assert {:ok, log_analysis} = Library.component("log.analysis")
+      assert {:ok, inspection_analysis} = Library.component("inspection.analysis")
+
+      assert log_core.dependencies == ["cap"]
+      assert inspection_core.dependencies == ["cap"]
+      assert log_analysis.dependencies == ["cap", "log.core"]
+      assert inspection_analysis.dependencies == ["cap", "inspection.core"]
+
+      assert {:ok, components} =
+               Library.resolve_components([
+                 {:library, "log.analysis"},
+                 {:library, "inspection.analysis"}
+               ])
+
+      assert Enum.map(components, & &1.id) == [
+               "cap",
+               "inspection.core",
+               "inspection.analysis",
+               "log.core",
+               "log.analysis"
+             ]
+
+      assert {:ok, bundle} = Kernel.compile_bundle(components)
+
+      for ref <- [
+            "log.analysis/all-runs",
+            "log.analysis/all-turns",
+            "inspection.analysis/all-runs",
+            "inspection.analysis/all-model-exchanges",
+            "inspection.analysis/all-capability-calls",
+            "inspection.analysis/all-generated-sources",
+            "inspection.analysis/all-effective-preludes",
+            "inspection.analysis/all-provider-exchanges"
+          ] do
+        assert {:ok, _export} = Prelude.fetch_export(bundle.prelude, ref)
+      end
     end
   end
 

@@ -15,8 +15,8 @@ defmodule PtcViewer.TestReplAdapter do
     {:ok, backend,
      %{
        "enabled" => true,
-       "profile_id" => "log-analysis-v1",
-       "namespaces" => ["log"],
+       "profile_id" => "log-analysis-v2",
+       "namespaces" => ["cap", "log", "log.analysis"],
        "source_limit_bytes" => 65_536
      }}
   end
@@ -273,9 +273,9 @@ defmodule PtcViewer.TestReplAdapter do
     %{
       session_id: session_id,
       lifecycle: lifecycle,
-      profile_id: "log-analysis-v1",
+      profile_id: "log-analysis-v2",
       profile_digest: String.duplicate("a", 64),
-      namespaces: ["log"],
+      namespaces: ["cap", "log", "log.analysis"],
       snapshot: %{
         capture_id: "capture",
         captured_at: DateTime.utc_now(),

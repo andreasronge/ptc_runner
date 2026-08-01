@@ -11,12 +11,12 @@ defmodule Mix.Tasks.Ptc.Repl do
       mix ptc.repl -
       mix ptc.repl --manifest ptc.json
       mix ptc.repl --manifest ptc.json --trace trace.jsonl
-      mix ptc.repl --profile log-analysis-v1 --resource traces=tmp/traces
-      mix ptc.repl --profile inspection-analysis-v1 \
+      mix ptc.repl --profile log-analysis-v2 --resource traces=tmp/traces
+      mix ptc.repl --profile inspection-analysis-v2 \
         --resource traces=tmp/traces \
         --resource inspection=tmp/inspection \
         --private-terminal
-      mix ptc.repl --describe-profile log-analysis-v1
+      mix ptc.repl --describe-profile log-analysis-v2
 
   Options:
 
@@ -31,7 +31,7 @@ defmodule Mix.Tasks.Ptc.Repl do
     * `--session-trace-dir` — existing output directory for a profile session's
       separate canonical trace;
     * `--private-terminal` — explicitly authorize an attached terminal as the
-      private output sink required by `inspection-analysis-v1`;
+      private output sink required by `inspection-analysis-v2`;
     * `--format clojure|jsonl` — choose human output or non-interactive
       profile-mode JSON Lines;
     * `--continue-on-error` — evaluate later repeated `--eval` forms after a
@@ -272,10 +272,10 @@ defmodule Mix.Tasks.Ptc.Repl do
     do: "selected profile does not allow --continue-on-error"
 
   defp profile_frontend_error(:private_terminal_required),
-    do: "inspection-analysis-v1 requires --private-terminal"
+    do: "inspection-analysis-v2 requires --private-terminal"
 
   defp profile_frontend_error(:interactive_terminal_required),
-    do: "inspection-analysis-v1 requires attached stdin and stdout terminals"
+    do: "inspection-analysis-v2 requires attached stdin and stdout terminals"
 
   defp profile_frontend_error(:private_terminal_unsupported),
     do: "--private-terminal is supported only by a private analysis profile"

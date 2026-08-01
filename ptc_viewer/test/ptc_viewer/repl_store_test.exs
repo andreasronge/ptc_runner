@@ -15,7 +15,7 @@ defmodule PtcViewer.ReplStoreTest do
     assert byte_size(nonce) == 43
     assert first["generation_sequence"] == 1
     assert first["lifecycle"] == "open"
-    assert first["session"][:profile_id] == "log-analysis-v1"
+    assert first["session"][:profile_id] == "log-analysis-v2"
 
     assert {:ok, evaluated} = ReplStore.evaluate(store, first_session, "(+ 1 2)")
     assert evaluated["evaluation"].status == :ok

@@ -104,13 +104,16 @@ limits. Query the captured directory through the fixed log-analysis profile:
 
 ```console
 mix ptc.repl \
-  --profile log-analysis-v1 \
+  --profile log-analysis-v2 \
   --resource traces=tmp/tutorial-traces \
-  -e '(log/runs {})'
+  -e '(log.analysis/all-runs {"limit" 50} 10)'
 ```
 
 The profile receives an immutable capture and has no filesystem, network,
-model, private-inspection, or nested-evaluation authority.
+model, private-inspection, or nested-evaluation authority. The final argument
+is a page bound. The result carries the immutable source's `snapshot_hash`.
+The returned `complete?` field is `false` if that bound stops the traversal
+before the captured source is exhausted.
 
 ## Try the language directly
 

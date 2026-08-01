@@ -14,7 +14,14 @@ defmodule PtcRunner.Kernel.TraceCapabilityTest do
 
   test "log.core requires source-scoped query capabilities" do
     assert {:ok, component} = Library.component("log.core")
-    assert {:ok, bundle} = Kernel.compile_bundle([component])
+    assert component.dependencies == ["cap"]
+
+    assert {:error, %{id: "log.core", reason: :missing_component_dependency}} =
+             Kernel.compile_bundle([component])
+
+    assert {:ok, components} = Library.resolve_components([{:library, "log.core"}])
+    assert Enum.map(components, & &1.id) == ["cap", "log.core"]
+    assert {:ok, bundle} = Kernel.compile_bundle(components)
 
     assert {:error,
             {:missing_capability_requirement,
@@ -119,9 +126,9 @@ defmodule PtcRunner.Kernel.TraceCapabilityTest do
 
     {:ok, trace_capabilities} = TraceCapability.new(source: source_sink)
     {:ok, kernel_component} = Library.component("kernel")
-    {:ok, log_component} = Library.component("log.core")
     {:ok, workflow_bundle} = Kernel.compile_bundle([kernel_component])
-    {:ok, mission_bundle} = Kernel.compile_bundle([log_component])
+    {:ok, log_components} = Library.resolve_components([{:library, "log.core"}])
+    {:ok, mission_bundle} = Kernel.compile_bundle(log_components)
     {:ok, workflow} = WorkflowEnvironment.new(bundle: workflow_bundle)
 
     {:ok, mission} =

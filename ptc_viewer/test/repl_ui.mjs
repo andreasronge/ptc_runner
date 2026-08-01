@@ -78,9 +78,9 @@ const envelope = (instance, generation, revision, lifecycle = 'open') => ({
   transcript: [],
   transcript_omitted_count: 0,
   session: {
-    profile_id: 'log-analysis-v1',
+    profile_id: 'log-analysis-v2',
     profile_digest: 'digest',
-    namespaces: ['log'],
+    namespaces: ['cap', 'log', 'log.analysis'],
     snapshot: { capture_id: `capture-${generation}`, captured_at: '2026-07-19T12:00:00Z', run_count: 2 },
     usage: { evaluations: { remaining: 10 }, remaining_ms: 30_000, trace_calls: {} },
     trace: { persistence: 'pending', event_count: 0 }

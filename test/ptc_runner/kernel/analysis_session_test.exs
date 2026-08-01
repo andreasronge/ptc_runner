@@ -35,13 +35,13 @@ defmodule PtcRunner.Kernel.AnalysisSessionTest do
       AnalysisSession.stop(second)
     end)
 
-    assert first_info.profile_id == "log-analysis-v1"
+    assert first_info.profile_id == "log-analysis-v2"
     assert first_info.profile_digest == second_info.profile_digest
 
     assert first_info.profile_digest ==
-             "sha256:1574100cc8695016550e21c41c9ce68cfe2a6a0e2fcd280057efbeef71b2609e"
+             "sha256:845d54529806c34a7df353bb828d8453e215697d39afbcf659d5c2ceac78704f"
 
-    assert first_info.namespaces == ["log"]
+    assert first_info.namespaces == ["cap", "log", "log.analysis"]
     refute inspect(first_info) =~ directory
 
     forged = %{first | token: make_ref()}
@@ -54,8 +54,8 @@ defmodule PtcRunner.Kernel.AnalysisSessionTest do
     assert Process.read_timer(first_state.timer) <=
              remaining_before_timer_read + 10
 
-    assert identity["profile_id"] == "log-analysis-v1"
-    assert identity["components"] == ["log.core"]
+    assert identity["profile_id"] == "log-analysis-v2"
+    assert identity["components"] == ["cap", "log.core", "log.analysis"]
     assert identity["explicit_capabilities"] == LogAnalysisProfile.explicit_capabilities()
 
     assert identity["implicit_runtime"] == %{
@@ -605,6 +605,81 @@ defmodule PtcRunner.Kernel.AnalysisSessionTest do
              AnalysisSession.evaluate(session, "(log/runs {})")
 
     assert Enum.map(still_frozen, & &1["run_id"]) == ["seed"]
+  end
+
+  @tag :tmp_dir
+  test "log analysis fails rejected queries and traverses bounded pages", %{
+    tmp_dir: directory
+  } do
+    for run_id <- ~w(first second third), do: seed_trace(directory, run_id)
+
+    assert {:ok, session, _info} =
+             start_log_session({:directory, directory}, {:directory, directory})
+
+    on_exit(fn -> AnalysisSession.stop(session) end)
+
+    assert {:ok, %{status: :error, outcome: :failed}} =
+             AnalysisSession.evaluate(session, ~S|(log/runs {"limit" 101})|)
+
+    assert {:ok,
+            %{
+              status: :ok,
+              value: %{
+                "complete?" => true,
+                "items" => items,
+                "pages" => 3,
+                "snapshot_hash" => snapshot_hash
+              }
+            }} =
+             AnalysisSession.evaluate(
+               session,
+               ~S|(log.analysis/all-runs {"limit" 1} 4)|
+             )
+
+    assert items |> Enum.map(& &1["run_id"]) |> Enum.sort() == ~w(first second third)
+    assert snapshot_hash =~ ~r/\Asha256:[0-9a-f]{64}\z/
+
+    assert {:ok, %{value: %{"items" => from_first_page}}} =
+             AnalysisSession.evaluate(
+               session,
+               ~S"""
+               (let [cursor (get (log/runs {"limit" 1}) "next_cursor")]
+                 (log.analysis/all-runs {"limit" 1 "cursor" cursor} 4))
+               """
+             )
+
+    assert from_first_page |> Enum.map(& &1["run_id"]) |> Enum.sort() ==
+             ~w(first second third)
+
+    assert {:ok,
+            %{
+              value: %{
+                "complete?" => true,
+                "items" => turns,
+                "pages" => 2,
+                "snapshot_hash" => ^snapshot_hash
+              }
+            }} =
+             AnalysisSession.evaluate(
+               session,
+               ~S|(log.analysis/all-turns "first" {"limit" 1} 3)|
+             )
+
+    assert Enum.map(turns, & &1["type"]) == ["run-started", "run-stopped"]
+
+    assert {:ok,
+            %{
+              value: %{
+                "complete?" => false,
+                "items" => [_],
+                "pages" => 1,
+                "snapshot_hash" => ^snapshot_hash
+              }
+            }} =
+             AnalysisSession.evaluate(
+               session,
+               ~S|(log.analysis/all-runs {"limit" 1} 1)|
+             )
   end
 
   @tag :tmp_dir

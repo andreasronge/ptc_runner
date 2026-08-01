@@ -163,15 +163,17 @@ directory changes later. The snapshot exits with its owning analysis session;
 cleanup is idempotent. This immutable boundary also prevents an analysis run's
 new canonical events from mutating the source it is paging.
 
-### Local log-analysis sessions
+### Local analysis sessions
 
-The server-owned `log-analysis-v1` profile is the sole local analysis profile
-and is shared by the Viewer and terminal REPL frontends. Its mission bundle
-contains the shipped `log.core` component,
-its explicit authority contains only `trace-list-runs`, `trace-get-run`,
-`trace-list-turns`, and `trace-counters`, and ordinary implicit mission
-introspection remains available. Filesystem, network, LLM, agent, workflow,
-MCP, private-inspection, and nested `kernel-eval` authority are absent.
+The server-owned `log-analysis-v2` profile is shared by the Viewer and ordinary
+terminal REPL frontends. Its mission bundle contains `cap`, `log.core`, and
+`log.analysis`; its explicit authority contains only `trace-list-runs`,
+`trace-get-run`, `trace-list-turns`, and `trace-counters`; and ordinary implicit
+mission introspection remains available. Filesystem, network, LLM, agent,
+workflow, MCP, private-inspection, and nested `kernel-eval` authority are
+absent. The separate `inspection-analysis-v2` profile adds the validated
+private-inspection source, both inspection components, and a private terminal
+gate.
 
 Each session queries one immutable snapshot and records its own canonical events
 in the same owner process that holds its continuation and quotas, under a
@@ -419,14 +421,22 @@ Host query capabilities follow the standard Kernel envelope and may be named:
 - `trace-list-turns`;
 - `trace-counters`.
 
-The default `log.core` prelude requires them and provides the regular Lisp API.
-Higher-level preludes may compose it:
+The default `log.core` prelude requires them and provides the regular one-page
+Lisp API. The shipped `log.analysis` layer composes it with the pure pagination
+helpers in `cap`:
 
 ```text
 log.analysis
-  depends: log.core
-  requires: trace-counters
+  depends: cap, log.core
+  traverses through log.core: trace-list-runs, trace-list-turns
 ```
+
+`log.analysis/all-runs` and `log.analysis/all-turns` take an explicit positive
+page bound and return `items`, `pages`, `complete?`, and `snapshot_hash`. A
+bound-limited prefix is always marked `complete? false`. The aggregate
+preserves the source's `snapshot_hash`, and a changed snapshot identity fails
+traversal. Capability error envelopes fail evaluation rather than flowing into
+projections as ordinary empty data.
 
 Preludes may change ergonomics, projections, defaults, or analysis policy. They
 cannot expand the source grant, bypass bounds/sanitization, or acquire private

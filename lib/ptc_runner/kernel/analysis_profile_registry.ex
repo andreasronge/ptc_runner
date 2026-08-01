@@ -12,8 +12,8 @@ defmodule PtcRunner.Kernel.AnalysisProfileRegistry do
   alias PtcRunner.Kernel.LogAnalysisProfile
 
   @profiles %{
-    "inspection-analysis-v1" => InspectionAnalysisProfile,
-    "log-analysis-v1" => LogAnalysisProfile
+    "inspection-analysis-v2" => InspectionAnalysisProfile,
+    "log-analysis-v2" => LogAnalysisProfile
   }
 
   @type recipe :: module()
@@ -110,7 +110,7 @@ defmodule PtcRunner.Kernel.AnalysisProfileRegistry do
       "continue_on_error" => frontend_value(frontend.continue_on_error)
     }
 
-    if recipe.id() == "log-analysis-v1",
+    if frontend.private_terminal == :forbidden,
       do: description,
       else: Map.put(description, "private_terminal", frontend_value(frontend.private_terminal))
   end

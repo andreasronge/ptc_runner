@@ -120,6 +120,27 @@ Exact component, schema, inventory, prompt-rendering, and projection rules live
 in `Component`, `FrozenBundle`, `Capability`, `MissionInventory`, and the Lisp
 runtime-contract module docs.
 
+Components may compose other components through declared acyclic dependencies.
+Edges should point toward lower-level reusable behavior: capability facades may
+reuse pure support components, while policy and ergonomics layers compose the
+facades. The bundle compiler admits only public exports from direct dependency
+namespaces and derives capability requirements through those calls. Evaluated
+source can call every public export in the resolved bundle, including
+`:discoverable` exports omitted from model prompts, so every new edge is also a
+callable-surface review.
+
+Installed-library selections expand transitively in manifests and through
+`Library.resolve_components/1`; raw `compile_bundle/1` callers still provide a
+closed set. Fixed analysis profiles go further: their declared component,
+namespace, and capability sets must equal the resolved environment exactly.
+Declaration order is not significant. Runtime identity records components in
+the bundle compiler's canonical dependency order and namespaces and
+capabilities in lexical order, so harmless recipe reordering does not change
+the digest. The bundle hash still identifies the exact compiled build, and a
+source-only bug fix changes the digest. Change the profile ID when the declared
+callable surface, authority, limits, persistence policy, result policy, or
+other published behavioral contract changes.
+
 ## Subordinate evaluation and workflow policy
 
 The reserved `kernel-eval` capability delegates dynamic or compiled mission
@@ -337,7 +358,7 @@ so a write remains indeterminate.
 PtcRunner-owned canonical traces remain native rather than passing through
 MCP. A host-installed `ptc_trace_snapshot` uses `TraceSnapshot` to capture one
 directory and `TraceCapability` to expose the same four canonical `TraceLog`
-queries used by `log-analysis-v1`. A paired private
+queries used by `log-analysis-v2`. A paired private
 `ptc_inspection_snapshot` receives that already captured trace through the
 provider acquisition service, validates all artifacts and correlations before
 publication, and exposes the shared `InspectionQuery` layer through
@@ -347,8 +368,8 @@ Local analysis profiles are fixed, code-owned recipes selected through the
 closed `AnalysisProfileRegistry`. `AnalysisSessionBuilder` is the host entry;
 `AnalysisSession`, `SessionTrace`, and `AnalysisResources` share continuation,
 publication, and cleanup without letting a caller supply modules,
-capabilities, limits, or sink policy. `log-analysis-v1` remains the Viewer and
-ordinary terminal profile. `inspection-analysis-v1` adds correlated
+capabilities, limits, or sink policy. `log-analysis-v2` remains the Viewer and
+ordinary terminal profile. `inspection-analysis-v2` adds correlated
 `TraceSnapshot` and `InspectionSnapshot` captures behind a private
 interactive-terminal gate. Browser or Lisp input does not supply profile
 internals or paths.

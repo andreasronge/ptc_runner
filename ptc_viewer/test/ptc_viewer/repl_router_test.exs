@@ -188,7 +188,7 @@ defmodule PtcViewer.ReplRouterTest do
 
     assert html.status == 200
     assert html.resp_body =~ "ptc-viewer-config"
-    refute html.resp_body =~ "log-analysis-v1"
+    refute html.resp_body =~ "log-analysis-v2"
     refute html.resp_body =~ "source_limit_bytes"
     refute html.resp_body =~ "test_pid"
 
