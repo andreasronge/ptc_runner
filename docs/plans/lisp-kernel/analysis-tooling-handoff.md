@@ -127,32 +127,44 @@ Outside the repo, in `~/.claude/skills/codex/`:
 
 Ranked by what blocks what.
 
-### 1. `memory_exceeded` on `inspection-analysis-v2` — blocks §3
+### ~~1. `memory_exceeded` on `inspection-analysis-v2`~~ — **fixed**
 
-`inspection-analysis-v2` returns `kind: :memory_exceeded` for **any** evaluation
-under `mix run`, including `(+ 1 1)`, at any artifact size, through either the
-CLI or `AnalysisSessionBuilder` + `AnalysisSession.evaluate/2` directly. The
-same evaluation passes under `mix test`. `log-analysis-v2` works everywhere.
+Cause: every mission capability callback closed over the whole environment, and
+the spawn copy into the sandbox does not preserve sharing. With ten
+capabilities plus two runtime routes, the environment — dominated by its
+16,214-word frozen bundle — was copied **twelve times** into the evaluation
+process. Measured on the CLI: `tools` 231,328 words flat against 16,255 with
+sharing, a pre-eval baseline of 552,708 words (4.4 MB), and 7,645 ProcBins.
 
-Reproduces at merge-base `3dddb84c` with every change from this session
-reverted, so it is pre-existing and unrelated to `ba983f95` — but it means the
-feature that commit ships **cannot be used end to end**.
+That baseline is what killed the evaluation. `max_heap` is additive headroom
+above the measured baseline, but BEAM heaps grow multiplicatively: with a
+4.4 MB baseline the young heap steps in ~4 MB increments and the promoted old
+heap holds another copy, so `baseline + 1,250,000` words was crossed after two
+or three generation steps regardless of what the program did. Hence the
+`mix run` versus `mix test` split — it was never environmental, only marginal.
 
-Three hypotheses disproven, so do not re-spend on them:
+Fixed by `Environment.capability_view/1,2`: dispatch resolves one name, so a
+callback carries one capability; only the discovery routes carry the whole map.
+Applied to all three tool builders (`Evaluation.mission_tools/6`,
+`Runner.workflow_tools/3`, `ReplSession.tools/2`) — the two workflow builders
+had the same defect, and captured the whole `config`/`session` besides. After:
+`tools` 10,264 words flat, baseline 29,507 words (0.24 MB) — 19× smaller than
+the 552,708 that was killing the evaluation — and 181 ProcBins.
 
-- **Bundle growth from #1162** — the inspection prelude is 6,951 words, 0.6% of
-  the 1,250,000-word evaluation heap.
-- **Artifact size** — a 2.9 KB fixture fails identically to a 210 KB one.
-- **CLI-specific** — the builder API fails the same way.
+Review caught a second, larger instance of the same defect: carrying the whole
+capability map per callback is `O(capabilities²)`. Unreached by the shipped
+profiles at ten capabilities, but a mission environment holding 30 MCP tools
+with ordinary described-property schemas blew the 40 MB **setup** ceiling on
+`(+ 1 1)` — 60 tools cost 80 MB of hand-over. Now linear: 3.9 MB at 60.
 
-The unexplained part is `mix run` versus `mix test` with identical code and
-data. Toolchain matches `mise.toml` exactly (Erlang 29.0.3, Elixir
-1.20.2-otp-29). Worth looking at what is copied into the spawned evaluation
-process, since `mission_tools/6` closures capture the environment.
+Regression tests in `test/ptc_runner/kernel/environment_copy_test.exs` cover
+the two duplications separately; each fails only against its own defect. The
+flaky test *"PTC-Lisp reaches exact evidence while its analysis trace stays
+payload-free"* was the first cause and now passes standalone.
 
-Related and possibly the same cause: the test *"PTC-Lisp reaches exact evidence
-while its analysis trace stays payload-free"* fails deterministically when its
-file is run alone and passes in the full suite.
+Residual, not pursued: the two discovery routes still copy the whole map, so
+hand-over stays linear but with a ~3× constant. Precomputing
+`Environment.metadata/1` once would shrink it.
 
 ### 2. `637958c1` is unlanded and `main` has the bug
 
