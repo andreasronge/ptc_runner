@@ -31,11 +31,11 @@ belongs in guides or retained specifications.
   with proposed remedies. Its analysis-prelude findings shipped in #1162; the
   correction-feedback and verification findings remain open.
 - [`lisp-kernel/private-analysis-sink.md`](lisp-kernel/private-analysis-sink.md)
-  designs non-interactive private inspection analysis for the CLI REPL, so it
-  serves private records with the same bounded queries it already serves
+  designs non-interactive private inspection analysis for the CLI REPL by
+  redirecting the whole session output stream to an owner-only `--private-output`
+  file, so it serves private records with the bounded queries it already serves
   canonical ones. Starts from a behaviour-preserving refactor of the builder's
-  terminal check into a private-destination check, since the Viewer already
-  proves the session machinery needs no terminal.
+  terminal check into a private-destination check.
 - [`mcp-oauth.md`](mcp-oauth.md) plans principal-scoped OAuth authorization for
   remote Streamable HTTP MCP servers without weakening host authority or tool
   replay safety.
