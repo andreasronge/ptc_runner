@@ -149,10 +149,10 @@ defmodule PtcRunner.Kernel.CapAgentMainTest do
 
       assert Enum.map(components, & &1.id) == [
                "cap",
-               "inspection.core",
                "inspection.analysis",
-               "log.core",
-               "log.analysis"
+               "inspection.core",
+               "log.analysis",
+               "log.core"
              ]
 
       assert {:ok, bundle} = Kernel.compile_bundle(components)

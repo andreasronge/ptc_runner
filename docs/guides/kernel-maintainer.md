@@ -505,12 +505,17 @@ before connector cleanup. Providers are trusted host extensions: the Kernel
 contains ordinary faults and bounded results, but it is not a security
 sandbox for malicious BEAM code.
 
-Limits are host-enforced ceilings. Every complete installed-limits struct is
-revalidated as positive integers before an application source or provider
-builder is opened. Manifest values may narrow installed ceilings; Lisp policy
-such as turn counts cannot grant more authority.
-`PtcRunner.Kernel.Limits`, `RunState`, `BoundedWorker`, and `Dispatcher`
-document exact counters, deadlines, byte accounting, and cleanup ordering.
+Limits are host-enforced ceilings. `PtcRunner.Kernel.LimitCatalog` is the
+checked-in authority for every field's public name, scope, compiled and
+installed defaults, inclusive range, and effective-identity participation.
+Every complete installed-limits struct is checked against those rows before an
+application source or provider builder is opened. Manifests may narrow only
+`:manifest_narrowable` rows; installed-only operational timeouts pass through
+unchanged. Host and manifest schemas are generated from the same scoped rows,
+and documentation generation fails when the catalog and `Limits` struct
+diverge. `PtcRunner.Kernel.Limits`, `RunState`, `BoundedWorker`, and
+`Dispatcher` document exact counters, deadlines, byte accounting, and cleanup
+ordering.
 
 Standalone `PtcRunner.Kernel.ReplSession` is process-affine. Passing its public
 value does not transfer ownership. A product that needs transferable or

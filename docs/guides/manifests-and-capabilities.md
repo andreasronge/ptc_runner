@@ -357,6 +357,11 @@ Limits reach further than the six shown above: they also bound process heap,
 source size, retained continuation memory, provider concurrency, capability
 arguments and results, and canonical events.
 
+The host-only `provider_cleanup_timeout_ms`,
+`selection_validation_timeout_ms`, and `doctor_connectivity_timeout_ms` names
+are deliberately absent from the application schema. A manifest that declares
+one is rejected rather than narrowing host-owned operational policy.
+
 The compiled ceilings suit one bounded run. An agent that must work for hours
 needs more turns, model calls, and trace events than they allow, and only the
 operator can raise that — requesting more here than the host installed is

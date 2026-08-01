@@ -1880,6 +1880,34 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert limit.envelope["error"]["path"] == "/limits/run_duration_ms"
     assert limit.envelope["error"]["source"] == %{"kind" => "host", "name" => "ptc-host.json"}
 
+    for {limit_name, invalid_value} <- [
+          {"provider_cleanup_timeout_ms", 99},
+          {"selection_validation_timeout_ms", 30_001},
+          {"doctor_connectivity_timeout_ms", 99}
+        ] do
+      host_path =
+        write_host_config(
+          directory,
+          "operational-limit-#{limit_name}",
+          put_in(base, ["limits"], %{limit_name => invalid_value})
+        )
+
+      outcome =
+        assert_error(
+          ["validate", application, "--host-config", host_path],
+          "host",
+          "installed_limit_invalid"
+        )
+
+      assert outcome.envelope["error"]["path"] == "/limits/#{limit_name}"
+      assert outcome.envelope["error"]["provider_activity"] == false
+
+      assert outcome.envelope["error"]["source"] == %{
+               "kind" => "host",
+               "name" => "ptc-host.json"
+             }
+    end
+
     for {name, malformed_limits} <- [
           {"non-object", []},
           {"unknown-key", %{"caller-secret" => 1}}

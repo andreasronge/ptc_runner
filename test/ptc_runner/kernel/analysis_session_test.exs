@@ -39,7 +39,7 @@ defmodule PtcRunner.Kernel.AnalysisSessionTest do
     assert first_info.profile_digest == second_info.profile_digest
 
     assert first_info.profile_digest ==
-             "sha256:1c53117fb485203075c87cedac0147a6bfd9a8b141a4afb5223d0b6e931b63e3"
+             "sha256:fbfebbb21e447479e76adad797189b6f3592f6469e170c44d8ba5f72a35006a5"
 
     assert first_info.namespaces == ["cap", "log", "log.analysis"]
     refute inspect(first_info) =~ directory

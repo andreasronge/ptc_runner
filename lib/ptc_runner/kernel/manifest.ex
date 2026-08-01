@@ -49,13 +49,15 @@ defmodule PtcRunner.Kernel.Manifest do
   accepted only when every installed mapping is read-only. Installed MCP
   providers may accept a `model_visible` subset of their authorized `allow`
   names. Visibility controls discovery and model context only, never authority.
-  Limit names match `PtcRunner.Kernel.Limits`; version 1 accepts values no
-  greater than the host-supplied installed ceilings. Omitted values use the
-  normal runtime defaults, capped by a lower host ceiling. Event policy is
-  `normal` or `private` with optional run and trace IDs. Labels use the closed
-  `name`, `model`, `provider`, and flat `tags` safe-metadata profile. Identifier
-  fields become SHA-256 fingerprints and tags use finite enumerated values, so
-  arbitrary text and secrets are never copied into traces.
+  Limit names are the `:manifest_narrowable` rows in
+  `PtcRunner.Kernel.LimitCatalog`; version 1 accepts values no greater than the
+  host-supplied installed ceilings. Omitted values use the normal runtime
+  defaults, capped by a lower host ceiling. Installed-only rows remain
+  host-owned. Event policy is `normal` or `private` with optional run and trace
+  IDs. Labels use the closed `name`, `model`, `provider`, and flat `tags`
+  safe-metadata profile. Identifier fields become SHA-256 fingerprints and tags
+  use finite enumerated values, so arbitrary text and secrets are never copied
+  into traces.
 
   The loader resolves paths relative to the canonical manifest directory and
   rejects absolute paths, traversal, devices, non-regular files, and symlink
@@ -66,6 +68,7 @@ defmodule PtcRunner.Kernel.Manifest do
   alias PtcRunner.Kernel.Component
   alias PtcRunner.Kernel.JSONValue
   alias PtcRunner.Kernel.Library
+  alias PtcRunner.Kernel.LimitCatalog
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.SafeMetadata
   alias PtcRunner.Kernel.StrictJSON
@@ -778,14 +781,27 @@ defmodule PtcRunner.Kernel.Manifest do
   defp limits(value, %Limits{} = installed_limits) when is_map(value) do
     ceilings = Map.from_struct(installed_limits)
     defaults = Limits.defaults() |> Map.from_struct()
-    names = ceilings |> Map.keys() |> Map.new(&{Atom.to_string(&1), &1})
+    manifest_rows = LimitCatalog.rows(:manifest_narrowable)
+    names = Map.new(manifest_rows, &{&1.name, &1.field})
 
     ceilings_by_name =
-      Map.new(ceilings, fn {name, ceiling} -> {Atom.to_string(name), ceiling} end)
+      Map.new(manifest_rows, &{&1.name, Map.fetch!(ceilings, &1.field)})
 
-    requested = Map.new(defaults, fn {name, default} -> {name, min(default, ceilings[name])} end)
+    requested =
+      Map.new(LimitCatalog.rows(), fn row ->
+        value =
+          case row.scope do
+            :manifest_narrowable ->
+              min(Map.fetch!(defaults, row.field), Map.fetch!(ceilings, row.field))
 
-    with :ok <- section_keys(value, "limits", Map.keys(ceilings_by_name), []) do
+            :installed_only ->
+              Map.fetch!(ceilings, row.field)
+          end
+
+        {row.field, value}
+      end)
+
+    with :ok <- section_keys(value, "limits", LimitCatalog.names(:manifest_narrowable), []) do
       value
       |> Map.to_list()
       |> Enum.sort_by(&elem(&1, 0))
@@ -1124,14 +1140,9 @@ defmodule PtcRunner.Kernel.Manifest do
   end
 
   defp limits_schema do
-    properties =
-      Limits.defaults()
-      |> Map.from_struct()
-      |> Map.new(fn {name, _value} ->
-        {Atom.to_string(name), %{"type" => "integer", "minimum" => 1}}
-      end)
-
-    closed_object(properties)
+    :manifest
+    |> LimitCatalog.schema_properties()
+    |> closed_object()
   end
 
   defp events_schema do

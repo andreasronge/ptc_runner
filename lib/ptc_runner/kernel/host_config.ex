@@ -9,11 +9,11 @@ defmodule PtcRunner.Kernel.HostConfig do
   sampling parameters. A manifest may later select an installed alias and
   narrow its authority; it cannot introduce or replace any field decoded here.
 
-  An optional `limits` block replaces the compiled installed ceilings, so an
+  An optional `limits` block replaces cataloged installed ceilings, so an
   operator can permit work measured in hours rather than in one bounded run.
-  Omitted names keep their compiled installed default, and a manifest still
-  requests only values at or below whatever is installed here — raising a
-  ceiling permits a longer run without silently producing one.
+  Omitted names keep their installed default. A manifest requests only
+  manifest-narrowable values at or below whatever is installed here;
+  installed-only operational limits remain host-owned.
 
   Loading is bounded, path-confined, duplicate-key rejecting, and side-effect
   free. In particular, credential declarations are validated but environment
@@ -36,16 +36,13 @@ defmodule PtcRunner.Kernel.HostConfig do
   """
 
   alias PtcRunner.Kernel.ConfinedFile
+  alias PtcRunner.Kernel.LimitCatalog
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.MCPOAuth.Authority
   alias PtcRunner.Kernel.StrictJSON
 
   @max_config_bytes 1_000_000
   @max_credentials 128
-  # Thirty days in milliseconds. High enough for a run measured in days and
-  # low enough that a mistyped value fails loading instead of scheduling a timer
-  # nobody will outlive.
-  @max_limit_value 2_592_000_000
   @max_installations 128
   @max_tools 128
   @max_string_bytes 131_072
@@ -471,11 +468,10 @@ defmodule PtcRunner.Kernel.HostConfig do
       |> Map.keys()
       |> Enum.sort()
       |> Enum.find(fn name ->
-        name in Limits.names() and
-          not match?(
-            number when is_integer(number) and number > 0 and number <= @max_limit_value,
-            value[name]
-          )
+        case LimitCatalog.fetch(name) do
+          {:ok, row} -> not LimitCatalog.valid_value?(row, value[name])
+          :error -> false
+        end
       end)
 
     if invalid_name,
@@ -496,11 +492,9 @@ defmodule PtcRunner.Kernel.HostConfig do
   # manifest asked for. An omitted block keeps the previous compiled defaults,
   # and a manifest may still only narrow whatever ends up installed.
   defp limits(value) when is_map(value) do
-    installed = Map.from_struct(Limits.installed_defaults())
-
     with :ok <- exact_keys(value, Limits.names(), []),
          {:ok, overrides} <- limit_overrides(Map.to_list(value), %{}),
-         {:ok, limits} <- Limits.new(Map.merge(installed, overrides)) do
+         {:ok, limits} <- Limits.installed(overrides) do
       {:ok, limits}
     else
       _reason -> {:error, :invalid_limits}
@@ -511,15 +505,17 @@ defmodule PtcRunner.Kernel.HostConfig do
 
   defp limit_overrides([], overrides), do: {:ok, overrides}
 
-  defp limit_overrides([{key, number} | rest], overrides)
-       when is_integer(number) and number > 0 and number <= @max_limit_value do
-    case Limits.name(key) do
-      {:ok, name} -> limit_overrides(rest, Map.put(overrides, name, number))
-      :error -> {:error, :invalid_limits}
+  defp limit_overrides([{key, number} | rest], overrides) do
+    case LimitCatalog.fetch(key) do
+      {:ok, row} ->
+        if LimitCatalog.valid_value?(row, number),
+          do: limit_overrides(rest, Map.put(overrides, row.field, number)),
+          else: {:error, :invalid_limits}
+
+      :error ->
+        {:error, :invalid_limits}
     end
   end
-
-  defp limit_overrides(_values, _overrides), do: {:error, :invalid_limits}
 
   defp runtime(value) when is_map(value) do
     with :ok <- exact_keys(value, ~w(stdio_launcher), []),
@@ -1157,22 +1153,28 @@ defmodule PtcRunner.Kernel.HostConfig do
   end
 
   defp limits_schema do
+    catalog_properties = LimitCatalog.schema_properties(:host)
+
     properties =
-      Map.new(Limits.names(), fn name ->
-        {name,
-         %{
-           "type" => "integer",
-           "minimum" => 1,
-           "maximum" => @max_limit_value,
-           "description" => "Installed ceiling for #{name}; a manifest may only request less."
-         }}
+      Map.new(LimitCatalog.rows(), fn row ->
+        description =
+          case row.scope do
+            :manifest_narrowable ->
+              "Installed ceiling for #{row.name}; a manifest may only request less."
+
+            :installed_only ->
+              "Installed-only operational limit for #{row.name}; applications cannot declare it."
+          end
+
+        {row.name,
+         catalog_properties |> Map.fetch!(row.name) |> Map.put("description", description)}
       end)
 
     properties
     |> closed_object()
     |> Map.put(
       "description",
-      "Optional operator-owned installed ceilings. Omitted limits keep the compiled host defaults."
+      "Optional operator-owned installed ceilings. Omitted limits keep their cataloged installed defaults."
     )
   end
 

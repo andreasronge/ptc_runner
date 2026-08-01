@@ -528,16 +528,29 @@ more turns, model calls, and trace events than they allow:
 }
 ```
 
-Every limit name is accepted, each value is a positive integer of at most
-2,592,000,000 — thirty days in milliseconds, high enough for a run measured in
-days and low enough that a mistyped value fails loading instead of scheduling a
-timer nobody will outlive. Any omitted name keeps its compiled default.
+Every cataloged limit name is accepted. Existing application limits accept
+positive integers through 2,592,000,000. Three operational timeouts instead
+have narrow, installed-only contracts:
+
+| Limit | Installed default | Accepted range | Identity metadata |
+| --- | ---: | ---: | --- |
+| `provider_cleanup_timeout_ms` | 5,000 | 100–30,000 | Included |
+| `selection_validation_timeout_ms` | 5,000 | 100–30,000 | Included |
+| `doctor_connectivity_timeout_ms` | 10,000 | 100–30,000 | Excluded; doctor-only |
+
+Applications cannot declare or narrow those three names. The first two are
+copied into sealed execution limits and marked as effective-identity
+participants; the doctor-only value is excluded. This slice seals that policy
+before the later provider-lifecycle and doctor implementations consume the
+timeouts—it does not yet impose those deadlines. Any omitted name keeps its
+cataloged installed default.
 
 Raising a ceiling here does not by itself lengthen any run. The manifest rule is
-unchanged: an application may still only request values at or below what is
-installed, so a manifest that needs the larger budget must ask for it. Both
-documents stay explicit — the host decides the maximum an operator permits, and
-the manifest declares what its application needs. See
+unchanged for manifest-narrowable limits: an application may still only request
+values at or below what is installed, so a manifest that needs the larger
+budget must ask for it. Both documents stay explicit — the host decides the
+maximum an operator permits, and the manifest declares what its application
+needs. See
 [Manifests and capabilities](manifests-and-capabilities.md#requested-limits-narrow-host-ceilings)
 for the application side and the full limit vocabulary.
 

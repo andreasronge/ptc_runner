@@ -25,6 +25,8 @@ defmodule Mix.Tasks.Ptc.GenDocs do
   alias PtcRunner.Kernel.CommandContract
   alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.HostConfig
+  alias PtcRunner.Kernel.LimitCatalog
+  alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.Manifest
   alias PtcRunner.Lisp.Java.Surface
   alias PtcRunner.Lisp.Registry
@@ -113,6 +115,7 @@ defmodule Mix.Tasks.Ptc.GenDocs do
     check? = "--check" in args
 
     if check?, do: check_java_audit_path_set!()
+    validate_limit_catalog!()
 
     generate_function_reference(check?)
     Enum.each(all_audits(), &generate_audit(&1, check?))
@@ -121,6 +124,13 @@ defmodule Mix.Tasks.Ptc.GenDocs do
     generate_host_schema(check?)
     generate_manifest_schema(check?)
     generate_command_schema(check?)
+  end
+
+  defp validate_limit_catalog! do
+    Limits.defaults()
+    |> Map.from_struct()
+    |> Map.keys()
+    |> LimitCatalog.validate_fields!()
   end
 
   defp generate_host_schema(check?) do
