@@ -25,6 +25,10 @@ belongs in guides or retained specifications.
 - [`lisp-kernel/real-flow-e2e-hardening.md`](lisp-kernel/real-flow-e2e-hardening.md)
   tracks the unfinished private-sink, overflow, real-pagination, and
   cache-usage journeys.
+- [`lisp-kernel/analysis-tooling-handoff.md`](lisp-kernel/analysis-tooling-handoff.md)
+  hands off the trace-analysis tooling session: turn correlation, the
+  `--private-unattended` destination, corrected documentation, and the
+  `memory_exceeded` failure that blocks private querying end to end.
 - [`lisp-kernel/agent-developer-findings.md`](lisp-kernel/agent-developer-findings.md)
   hands off the correction-feedback, analysis-ergonomics, and prelude-layering
   problems found while building and debugging the incident-evidence compiler,
