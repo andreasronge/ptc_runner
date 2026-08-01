@@ -21,7 +21,7 @@ defmodule PtcRunner.Sandbox do
   the parsed program) is copied in, then garbage-collects, measures that
   **pre-eval sandbox baseline**, and re-arms the `max_heap_size` flag at
   `baseline + max_heap`. Host-granted data is therefore excluded from the
-  program's bill; memory the *program* acquires stays fail-closed. Two
+  program's bill; memory the *program* acquires stays fail-closed. Three
   caveats:
 
   - the baseline is a *sandbox* baseline — it includes the parsed user
@@ -29,7 +29,15 @@ defmodule PtcRunner.Sandbox do
     grants;
   - per OTP, the `max_heap_size` check runs only when a GC triggers and
     counts transient garbage plus GC workspace, so `:max_heap` is
-    allocation headroom, not a live-data quota.
+    allocation headroom, not a live-data quota;
+  - the spawn copy does **not** preserve sharing. A term two tool closures
+    both capture is copied twice, so grants must close over only what the
+    callback reads — a per-callback capture of something every callback
+    shares costs `O(callbacks²)`. A large baseline also shrinks the
+    effective budget: BEAM heaps grow multiplicatively while `:max_heap` is
+    additive, so a process whose baseline is already megabytes crosses
+    `baseline + max_heap` after two or three heap generations no matter how
+    little the program allocates.
 
   Callers granting data larger than the default setup ceiling must raise
   `:setup_max_heap` explicitly; otherwise the forced post-copy GC kills

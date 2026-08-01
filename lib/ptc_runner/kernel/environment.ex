@@ -28,6 +28,31 @@ defmodule PtcRunner.Kernel.Environment do
     end
   end
 
+  @doc """
+  Returns the whole-environment capability view.
+
+  Dispatch and the runtime routes read nothing but `:capabilities`. Callbacks
+  handed to a sandboxed evaluation must capture a view rather than the
+  environment itself: the spawn copy does not preserve sharing, so capturing
+  the environment would copy its frozen bundle once per capability callback.
+
+  Only the discovery routes need every capability. A callback that dispatches
+  one capability must capture `capability_view/2` instead — capturing the whole
+  map from each of them costs the hand-over `O(capabilities²)`, which a
+  tool-rich MCP environment blows the sandbox setup ceiling with.
+  """
+  def capability_view(%{capabilities: capabilities}), do: %{capabilities: capabilities}
+
+  @doc """
+  Returns the single-capability view one dispatch callback needs.
+
+  `Dispatcher.dispatch/7` resolves `name` against the `:capabilities` of the
+  value it is given, so a callback bound to one capability can carry only that
+  capability and dispatch identically.
+  """
+  def capability_view(name, %Capability{} = capability) when is_binary(name),
+    do: %{capabilities: %{name => capability}}
+
   @doc "Returns sorted model-visible capability metadata for one environment."
   def metadata(%{capabilities: capabilities}) do
     capabilities
