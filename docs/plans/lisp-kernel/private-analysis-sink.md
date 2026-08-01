@@ -11,7 +11,12 @@ them as the session runs" — buffering and streaming are different designs.
 "Matches `InspectionArtifact`" — that module does not hold an append target
 open. "`session-closed` carries the state" — it is not emitted when close fails.
 
-This revision is organised around the three seams the change actually touches,
+A fourth error outlived both reviews: the security justification itself. The
+Viewer already provides validated non-interactive access to the same records, so
+there was never an integrity gap. That argument is withdrawn below and replaced
+with the narrower one that survives — interface consistency and queryability.
+
+The design is organised around the three seams the change actually touches,
 because that is where the previous drafts went wrong.
 
 ## Problem
@@ -31,25 +36,58 @@ def frontend do
 end
 ```
 
-An agent investigating a run therefore cannot use the profile that validates
-private records against the canonical trace. It reads the raw
-`.inspection.jsonl` instead and gets the same bytes with no integrity guarantee.
+An agent investigating a run therefore cannot use the REPL to query private
+records, even though the same agent can query canonical traces there through
+`log-analysis-v2` without any terminal.
 
-Demonstrated: the profile refused a non-interactive invocation, the artifact was
-read directly with Python, and every private fact was recovered anyway.
+### The Viewer already provides validated non-interactive access
 
-**That evidence is narrower than it looks.** It shows one process in one
-development environment already had filesystem authority. It does not show the
-gate is worthless — the gate still requires a conscious interactive action,
-prevents unattended extraction, and keeps private values out of CI logs, pipes,
-and transcripts. `--private-sink` does not restore "a destination the operator
-chose" either; an automated caller can pass the flag itself.
+The first two drafts of this plan argued that the gate forces agents onto an
+*unvalidated* path — reading `.inspection.jsonl` directly. **That was wrong**,
+and the error survived two reviews because nobody checked the Viewer.
 
-**The justification is integrity and ergonomics only:** for callers already
-trusted with direct read access, the terminal requirement pushes them onto an
-unvalidated path. Adding a sink does not recover auditing as a security
-property, because bypassing the profile stays possible. It makes the validated
-route usable.
+Verified end to end:
+
+```console
+mix ptc.viewer --trace-dir tmp/demo \
+  --inspection-file tmp/demo/run.inspection.jsonl --no-open --port 4137
+curl http://127.0.0.1:4137/api/inspection/runs/run-8fe6b10962e1
+# HTTP 200, 209833 bytes
+```
+
+That returns every private record — generated PTC-Lisp source, model prose,
+capability arguments and results — as JSON. And it is fully validated:
+`ViewerAdapter.pin_inspection/2` calls `InspectionArtifact.load/1`, checks the
+artifact's `trace_id` against the canonical run, and runs
+`InspectionArtifact.validate_correlations/2` before issuing a grant. It is the
+same correlation check the REPL profile performs.
+
+**So there is no integrity gap, and no security argument for this change.**
+Both remaining drafts of that argument are withdrawn.
+
+### What is actually wrong
+
+The Viewer is a whole-artifact dump, not a query interface. That single `curl`
+returned 209,833 bytes for a five-turn run. There is no filtering, no
+projection, no pagination, and no way to ask a question — an agent wanting "what
+did turn 4 do" receives the entire run and does the work itself, which is
+exactly the raw-parsing problem the REPL preludes exist to remove. It also
+requires starting a server and binding a port.
+
+The REPL is the intended analysis interface. `inspection/model-exchanges`,
+`inspection/capability-calls`, and `inspection/generated-sources` are bounded
+cursor-paginated queries, and `inspection.analysis/all-*` wraps them with an
+explicit page bound. None of that is reachable without a terminal.
+
+**The defect is an asymmetry.** `log-analysis-v2` serves canonical traces
+non-interactively with exactly these ergonomics. `inspection-analysis-v2`
+refuses the same usage over private ones. The two profiles share a frontend, a
+prelude layering, and an analysis engine; the difference is a terminal check
+whose only remaining purpose is refusing unattended extraction — a policy that
+should be a host's choice, not the only shape available.
+
+This change is therefore about **interface consistency and queryability**. It
+grants no access the Viewer does not already grant.
 
 ## Trust boundary
 
@@ -335,3 +373,6 @@ Tests accompany each step rather than a single pass at the end.
   private record shapes, correlation, validation, and fail-closed capture.
 - [`../../guides/kernel-repl.md`](../../guides/kernel-repl.md) — documents the
   current private-profile invocation.
+- `ptc_viewer/` and `lib/ptc_runner/kernel/viewer_adapter.ex` — the existing
+  validated non-interactive read path. Any claim that private records are
+  otherwise unreachable must be checked against these first.
