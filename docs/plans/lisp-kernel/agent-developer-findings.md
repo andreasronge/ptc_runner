@@ -19,11 +19,11 @@ architecture invariant that was undocumented until a change violated it.
 | # | Finding | Status |
 | --- | --- | --- |
 | 1 | Correction cannot name an undeclared key; counters do not descend | open, [issue #1161](https://github.com/andreasronge/ptc_runner/issues/1161) |
-| 2 | Tagged-union violations reported another branch's fault | fixed in `c236b981`, **not yet in `main`** |
+| 2 | Tagged-union violations reported another branch's fault | fixed in `637958c1`, **not yet in `main`** |
 | 3 | `ValueContract.describe/1` exists and is unreachable | open |
 | 4 | Analysis preludes turn a rejected query into an empty result | **fixed in `main`** (#1162) |
 | 5 | No shared pagination traversal | **fixed in `main`** (#1162) |
-| 6 | Private inspection is interactive-only | open, needs a design decision |
+| 6 | Private inspection is interactive-only | **fixed in `ba983f95`** |
 | 7 | Canonical annotation vocabulary is closed | open |
 | 8 | Application failure kinds are fingerprinted, not named | open |
 | 9 | Verification cannot run inside the agent loop | open |
@@ -54,7 +54,7 @@ undeclared-key violation is actively misleading.
 
 ## 2. Tagged-union violations reported another branch's fault — fixed, unlanded
 
-**Still only on this branch.** `c236b981` is not an ancestor of `main` and the
+**Still only on this branch.** `637958c1` is not an ancestor of `main` and the
 `schemaLocation` selection is absent from `main`'s `ValueContract`. This needs
 its own PR.
 
@@ -181,7 +181,46 @@ matching the repository's stance against silent caps.
 **Proposed:** ship it, but see the layering section — the prototype is in the
 wrong component.
 
-## 6. Private inspection is interactive-only
+## 6. Private inspection is interactive-only — fixed
+
+Resolved in `ba983f95` by `--private-unattended`, a second authorized private
+destination beside the attached terminal. Exactly one must be supplied. Under it
+the profile admits `-e`/`--load`/script/stdin and `--format jsonl`. The check
+lives in `AnalysisSessionBuilder`, so an embedding host gets the same option.
+
+**The reasoning in the original report below was wrong on two counts**, and both
+took several rounds to find:
+
+The gate was never containing the access. The Viewer already served the same
+private records non-interactively and fully validated —
+`ViewerAdapter.pin_inspection/2` runs `InspectionArtifact.load/1` and
+`validate_correlations/2` — through `GET /api/inspection/runs/:run_id`. There
+was no integrity gap to close.
+
+Nor was the terminal check access control. `isatty/1` cannot distinguish a
+human's terminal from a pseudo-terminal allocated by `script(1)`, `tmux`, or
+`ssh -t`; verified that an agent's non-interactive shell under
+`script -q /dev/null` reports both streams as terminals and opens the private
+profile. A same-UID caller can also read the artifact directly. The check is an
+accident guard — it keeps private values out of a log or transcript by mistake —
+and that is now documented in `AnalysisSessionBuilder`'s moduledoc so nobody
+designs against it as a boundary again.
+
+A five-draft design for an owner-only sink file was written and deleted. It was
+defending against an adversary the trust boundary excludes, and its blocker list
+kept proposing resolutions the code contradicted.
+
+`stable-cli-contract.md` was amended in two places, since it had recorded the
+code-owned profile as keeping an explicit-terminal rule.
+
+**Known limitation:** `inspection-analysis-v2` returns `memory_exceeded` for any
+evaluation under `mix run` — any artifact size, CLI or builder API — while the
+same evaluation passes under `mix test`. It reproduces at merge-base `3dddb84c`
+with the fix reverted, so it is pre-existing and unrelated. Private querying is
+not usable end to end until that is diagnosed.
+
+The original report follows.
+
 
 `inspection-analysis-v1` requires terminal attachment and `--private-terminal`,
 and rejects `--eval`, `--load`, scripts, stdin, and `--format jsonl`. The
@@ -361,7 +400,7 @@ The finding 4 and 5 prototype still in
 #1162 shipped both fixes in better form, so these modifications now regress
 `main` and should be discarded rather than landed.
 
-The union fix for finding 2 (`c236b981`) is the one piece of this branch's work
+The union fix for finding 2 (`637958c1`) is the one piece of this branch's work
 that is still needed and still unlanded.
 
 ## Suggested order
@@ -369,12 +408,13 @@ that is still needed and still unlanded.
 1. ~~**Finding 4 alone** into the primitives.~~ Done in #1162, together with 2.
 2. ~~**Findings 5 + the layering section**: build `log.analysis`.~~ Done in
    #1162.
-3. **Finding 2**: land `c236b981`, which is written and tested but not in
+3. **Finding 2**: land `637958c1`, which is written and tested but not in
    `main`.
 4. **Finding 3**: expose `describe/1`. Small, and it is the cheapest partial
    remedy for finding 1.
 5. **Finding 1** proper, tracked in #1161.
-6. **Finding 6**, sequenced with the stable CLI plan.
+6. ~~**Finding 6**, sequenced with the stable CLI plan.~~ Done in `ba983f95`;
+   the CLI plan was amended rather than sequenced against.
 7. Findings 7–9 as separate design work.
 
 ## Related documents
