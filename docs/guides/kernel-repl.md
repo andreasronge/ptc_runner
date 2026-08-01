@@ -296,10 +296,12 @@ source and exact trace-query payloads are not copied into canonical events.
 The output directory cannot be the input directory, an ancestor or descendant
 of it, or the same physical directory through symlinked parents.
 
-### JSON Lines for coding agents
+### JSON Lines for structured output
 
-Coding agents can avoid PTY and prompt handling by repeating `-e` with
-`--format jsonl`:
+Repeating `-e` already avoids PTY and prompt handling, and the default Clojure
+format prints one readable value per form. Reach for `--format jsonl` only when
+you need the lifecycle and usage records around each result; it wraps every
+answer in an envelope a plain reader then has to parse.
 
 ```bash
 mix ptc.repl \

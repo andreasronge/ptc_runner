@@ -362,13 +362,31 @@ Useful functions are:
 (log/counters {})
 ```
 
+Those return one page each. `log.analysis/all-runs` and `log.analysis/all-turns`
+traverse to exhaustion under a required page bound and report `complete?`, so a
+bounded prefix is never mistaken for the whole result:
+
+```clojure
+(log.analysis/all-turns "run-id" {"limit" 100} 20)
+```
+
+Turn filter keys are `status`, `evaluation_id`, and `capability`. Capability
+events carry the `evaluation_id` of the evaluation whose program invoked them,
+so one query scopes to a single turn instead of reconstructing evaluation
+windows from `sequence` order:
+
+```clojure
+(log/turns "run-id" {"evaluation_id" "mission-evaluation-18"})
+```
+
 The captured files, session code, results, and analysis trace have independent
 byte ceilings. The profile has no access to private inspection data or to the
 active run that produced the traces.
 
 Events pair evaluations by `evaluation_id` and capabilities by `capability_id`,
-and carry environment, status, duration, labels, prelude component IDs and
-hashes, limit events, and aggregate usage. The
+carry the invoking `evaluation_id` on each capability event, and record
+environment, status, duration, labels, prelude component IDs and hashes, limit
+events, and aggregate usage. The
 [TraceLog contract](../trace-log-contract.md) defines the event schemas,
 sanitization, filtering, pagination, and private sources. See the
 [Kernel REPL guide](kernel-repl.md) for longer interactive investigations.

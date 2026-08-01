@@ -49,6 +49,10 @@ how it was verified.
   ExUnit concurrency.
 - `mix test --include e2e` — E2E tests (requires `OPENROUTER_API_KEY`;
   the MCP tests also require the local server described below).
+- Debug a run by recording `mix ptc.run MANIFEST --trace DIR/run.jsonl` and
+  querying the capture through the `log-analysis-v2` REPL profile rather than
+  `jq` or Python — see
+  [Query canonical traces](docs/guides/running-and-debugging.md#query-canonical-traces).
 - Fix all failures before committing/pushing.
 
 ### Fresh worktree setup
