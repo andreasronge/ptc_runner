@@ -31,6 +31,7 @@ the later preflight and acquisition phases.
   "install": {
     "deepseek": {
       "source": "llm",
+      "installation_revision": "deepseek-policy-v1",
       "model": "openrouter:deepseek/deepseek-v4-flash",
       "credential": "openrouter_key",
       "cache": false
@@ -62,9 +63,13 @@ credential name, and public tool name matches `^[a-z][a-z0-9._-]{0,127}$`.
 Optional properties use omission for their default; an explicit JSON `null`
 does not mean omitted and fails structural validation.
 
-`installation_revision` is a nonempty, NUL-free operator string of at most 256
-UTF-8 bytes. It records which build of a server or model policy an alias
-represents so that traces from different installations remain distinguishable.
+Every installation requires `installation_revision`. It is a public,
+non-secret behavior identity matching exactly
+`^[a-z][a-z0-9._-]{0,127}$`. Change it whenever model or endpoint behavior,
+adapter/launcher build, MCP mappings or effects, replay fixtures, snapshot
+policy, or another installed authority detail changes. A missing revision is
+reported as `host/installation_revision_missing` for the affected alias before
+generic schema reporting, even when the application does not select it.
 
 The canonical structural description is shipped as
 `priv/schemas/ptc-host-config.schema.json` for editor completion. Runtime
@@ -100,8 +105,9 @@ missing variable, unreadable file, or empty value fails the run with
 `credential_unavailable` rather than falling back.
 
 Credentials never belong in a manifest, in PTC-Lisp, in a canonical trace, or
-in a committed project file. A safe provider snapshot records model and policy
-identity, never the secret.
+in a committed project file. A safe provider snapshot records the public
+installation revision and normalized selected policy, never the raw model
+selector or secret.
 
 For local development from a repository checkout, the runtime loads the nearest
 `.env` at startup, so an `env` credential can come from there:
@@ -123,11 +129,11 @@ one environment, and that placement is enforced at assembly:
 
 | `source` | Purpose | Required keys | Environment |
 | --- | --- | --- | --- |
-| `llm` | Live language model | `model`, `credential` | Workflow only |
-| `llm_replay` | Frozen model responses | `fixtures` | Workflow only |
-| `mcp` | External tool server | `transport`, `tools` | Mission only |
-| `ptc_trace_snapshot` | Canonical trace queries | `directory` | Mission only |
-| `ptc_inspection_snapshot` | Private inspection queries | `directory` | Mission only |
+| `llm` | Live language model | `installation_revision`, `model`, `credential` | Workflow only |
+| `llm_replay` | Frozen model responses | `installation_revision`, `fixtures` | Workflow only |
+| `mcp` | External tool server | `installation_revision`, `transport`, `tools` | Mission only |
+| `ptc_trace_snapshot` | Canonical trace queries | `installation_revision`, `directory` | Mission only |
+| `ptc_inspection_snapshot` | Private inspection queries | `installation_revision`, `directory` | Mission only |
 
 Selecting an alias into the wrong environment fails with
 `provider_destination_denied`. This is what keeps model authority out of
@@ -138,6 +144,7 @@ model-authored mission code.
 ```json
 "deepseek": {
   "source": "llm",
+  "installation_revision": "deepseek-policy-v1",
   "model": "openrouter:deepseek/deepseek-v4-flash",
   "credential": "openrouter_key",
   "cache": false,
@@ -156,6 +163,12 @@ parameters the installed model actually implements.
 preference in its request, but this setting takes precedence. Request and
 response ceilings default to 1,000,000 bytes and cannot exceed 1,048,576.
 
+The active `doctor --connect` check for a selected live model performs one real
+minimal completion and may incur provider cost. The probe forces a one-token
+output ceiling, disables retries and redirects, and uses the installed
+credential under `doctor_connectivity_timeout_ms`; provider errors and timeouts
+fail the check instead of being reported as availability.
+
 ### Recorded models
 
 Evaluation needs a model whose answers do not move between a baseline run and a
@@ -167,6 +180,7 @@ application changes between them.
 ```json
 "frozen-model": {
   "source": "llm_replay",
+  "installation_revision": "frozen-model-v1",
   "fixtures": "evaluation/replay.jsonl",
   "ceilings": {"max_entries": 10000, "max_result_bytes": 1048576}
 }
@@ -193,6 +207,7 @@ every mapped tool. It accepts 1 to 128 tools.
 ```json
 "workspace": {
   "source": "mcp",
+  "installation_revision": "workspace-v1",
   "transport": {"type": "stdio", "command": "node", "args": ["server.js"]},
   "tools": {
     "read_text_file": {
@@ -453,11 +468,13 @@ reading an immutable capture rather than live files.
 ```json
 "history": {
   "source": "ptc_trace_snapshot",
+  "installation_revision": "history-v1",
   "directory": "traces",
   "ceilings": {"max_source_bytes": 8000000, "max_result_bytes": 1048576}
 },
 "private-history": {
   "source": "ptc_inspection_snapshot",
+  "installation_revision": "private-history-v1",
   "directory": "inspection",
   "ceilings": {
     "max_files": 1024,
@@ -487,6 +504,7 @@ Every installation carries a data class and a set of classes it accepts:
 ```json
 "vendor": {
   "source": "mcp",
+  "installation_revision": "vendor-v1",
   "data_class": "normal",
   "accepts_data": ["normal"],
   "transport": {"type": "streamable_http", "endpoint": "https://example.com"},
@@ -574,17 +592,23 @@ mix ptc.run examples/kernel-tutorial/02-deepseek-extract/ptc.json \
 ```
 
 ```text
-workflow  deepseek  llm  model openrouter:deepseek/deepseek-v4-flash  accepts: normal  snapshot 7a768b7771c97e4975c9b9943acdeb87b725dd325b55e397ed343b6a54ea9de7
+workflow  deepseek  llm  revision deepseek-policy-v1  accepts: normal  snapshot 7a768b7771c97e4975c9b9943acdeb87b725dd325b55e397ed343b6a54ea9de7
 ```
 
-Each line reports the environment, alias, source, resolved non-secret policy,
-accepted data classes, and the provider snapshot hash. That bare-hex
-`snapshot_hash` attests the provider-specific non-secret identity projection,
-including the effective ceilings present in that projection. It does not
-automatically cover the alias, data-class policy, or fields the provider
-deliberately excludes. A frozen-content provider also publishes an
-algorithm-qualified `content_snapshot_hash` covering only the captured bytes;
-the two have deliberately different scopes and are never equal.
+Each line reports the environment, alias, source, public revision, accepted
+data classes, and provider snapshot hash. The snapshot contains a declaration
+projection (alias, source, revision, data policy, authorization mode, and
+normalized selection) and a separately hashed acquisition projection of
+bounded observed facts. For frozen content, that acquisition projection also
+contains the algorithm-qualified content hash, so `acquisition_identity_hash`
+is exactly recomputable from the published `acquisition` object. The bare-hex
+`snapshot_hash` covers both declaration and acquisition identity. A
+frozen-content provider also publishes an algorithm-qualified
+`content_snapshot_hash` covering only the captured bytes. Raw model selectors,
+endpoints, commands, paths, credentials, OAuth authority, and identifiers
+derived from secret-bearing values are excluded. Audited stdio executable and
+launcher content digests are included so build replacement changes provider
+identity without exposing either path.
 
 Use `--check` in deployment pipelines to catch a missing credential, an
 unreachable endpoint, a renamed upstream tool, or a changed server build before

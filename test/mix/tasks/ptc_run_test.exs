@@ -157,11 +157,13 @@ defmodule Mix.Tasks.Ptc.RunTest do
       "install" => %{
         "deepseek" => %{
           "source" => "llm",
+          "installation_revision" => "check-llm-v1",
           "model" => "openrouter:deepseek/deepseek-v4-flash",
           "credential" => "openrouter_key"
         },
         "unused-oauth" => %{
           "source" => "mcp",
+          "installation_revision" => "check-workspace-v1",
           "transport" => %{
             "type" => "streamable_http",
             "endpoint" => "https://mcp.example/mcp",
@@ -200,10 +202,10 @@ defmodule Mix.Tasks.Ptc.RunTest do
         Run.run([manifest_path, "--host-config", host_path, "--check"])
       end)
 
-    assert output =~
-             "workflow  deepseek  llm  model openrouter:deepseek/deepseek-v4-flash"
+    assert output =~ "workflow  deepseek  llm  revision check-llm-v1"
 
     assert output =~ "snapshot "
+    refute output =~ "openrouter:"
     refute output =~ "test-only-secret"
   end
 
@@ -258,6 +260,7 @@ defmodule Mix.Tasks.Ptc.RunTest do
       "install" => %{
         "remote" => %{
           "source" => "mcp",
+          "installation_revision" => "unknown-provider-v1",
           "transport" => %{
             "type" => "streamable_http",
             "endpoint" => "https://example.test/mcp"
@@ -310,6 +313,7 @@ defmodule Mix.Tasks.Ptc.RunTest do
       "install" => %{
         "workspace" => %{
           "source" => "mcp",
+          "installation_revision" => "stdio-check-v1",
           "transport" => %{
             "type" => "stdio",
             "command" => System.find_executable("sh"),
@@ -370,6 +374,7 @@ defmodule Mix.Tasks.Ptc.RunTest do
       "install" => %{
         "history" => %{
           "source" => "ptc_trace_snapshot",
+          "installation_revision" => "trace-check-v1",
           "directory" => "traces",
           "ceilings" => %{"max_result_bytes" => 250_000}
         }
@@ -424,10 +429,12 @@ defmodule Mix.Tasks.Ptc.RunTest do
       "install" => %{
         "history" => %{
           "source" => "ptc_trace_snapshot",
+          "installation_revision" => "trace-check-v1",
           "directory" => "traces"
         },
         "private-history" => %{
           "source" => "ptc_inspection_snapshot",
+          "installation_revision" => "inspection-check-v1",
           "directory" => "inspection",
           "ceilings" => %{
             "max_files" => 100,

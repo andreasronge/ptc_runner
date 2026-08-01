@@ -52,6 +52,7 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
   """
 
   alias PtcRunner.Kernel.Capability
+  alias PtcRunner.Kernel.HostInstallationAuthority
   alias PtcRunner.Kernel.JSONValue
   alias PtcRunner.Kernel.Limits
 
@@ -65,7 +66,7 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
   ]
 
   @enforce_keys [:builders, :credential_resolver, :installed_limits]
-  defstruct [:builders, :credential_resolver, :installed_limits]
+  defstruct @enforce_keys ++ [authority_owner: nil]
 
   @type build_context :: %{
           application_content_digest: binary(),
@@ -115,10 +116,13 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
           requires: [atom()],
           provides: [atom()],
           workflow_llm?: boolean(),
-          preflight: (-> {:ok, acquire()} | {:error, term()})
+          preflight: (-> {:ok, acquire()}
+                         | {:ok, acquire(), (-> :ok | {:error, term()})}
+                         | {:error, term()})
         }
   @type preflighted :: %{
           acquire: acquire(),
+          release: (-> :ok | {:error, term()}) | nil,
           data_class: :normal | :private_inspection,
           accepts_data: [:normal | :private_inspection],
           requires: [atom()],
@@ -131,10 +135,12 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
   @type registry_builder :: builder() | staged_builder()
   @type credential_resolver ::
           ([binary()] -> {:ok, credential_values()} | {:error, term()})
+  @opaque authority_owner :: struct()
   @type t :: %__MODULE__{
           builders: %{binary() => registry_builder()},
           credential_resolver: credential_resolver(),
-          installed_limits: Limits.t()
+          installed_limits: Limits.t(),
+          authority_owner: authority_owner() | nil
         }
 
   @spec new(map(), keyword()) :: {:ok, t()} | {:error, :invalid_provider_registry}
@@ -148,12 +154,14 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
         builders: additional_builders,
         credential_resolver:
           Keyword.get(opts, :credential_resolver, &default_credential_resolver/1),
-        installed_limits: Keyword.get(opts, :installed_limits, Limits.installed_defaults())
+        installed_limits: Keyword.get(opts, :installed_limits, Limits.installed_defaults()),
+        authority_owner: Keyword.get(opts, :authority_owner)
       }
 
       keys = Keyword.keys(opts)
 
-      if valid?(registry) and keys -- [:credential_resolver, :installed_limits] == [] and
+      if valid?(registry) and
+           keys -- [:credential_resolver, :installed_limits, :authority_owner] == [] and
            length(keys) == MapSet.size(MapSet.new(keys)) do
         {:ok, registry}
       else
@@ -172,7 +180,8 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
         %__MODULE__{
           builders: builders,
           credential_resolver: resolver,
-          installed_limits: installed_limits
+          installed_limits: installed_limits,
+          authority_owner: authority_owner
         } = registry
       ) do
     map_size(registry) == map_size(struct(__MODULE__)) and
@@ -180,10 +189,16 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
       Enum.all?(builders, fn {name, builder} ->
         valid_name?(name) and valid_builder?(builder)
       end) and
-      is_function(resolver, 1) and Limits.valid?(installed_limits)
+      is_function(resolver, 1) and Limits.valid?(installed_limits) and
+      (is_nil(authority_owner) or HostInstallationAuthority.valid?(authority_owner))
   end
 
   def valid?(_registry), do: false
+
+  @doc "Idempotently releases private host authority retained by this registry."
+  @spec close(t()) :: :ok
+  def close(%__MODULE__{authority_owner: owner}), do: HostInstallationAuthority.close(owner)
+  def close(_registry), do: :ok
 
   @spec staged((map(), context() -> {:ok, prepared()} | {:error, term()})) ::
           staged_builder()
@@ -209,10 +224,15 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
   """
   def build(%__MODULE__{} = registry, name, config, context) do
     with {:ok, prepared} <- prepare(registry, name, config, context),
-         {:ok, preflighted} <- preflight(prepared),
-         {:ok, credentials} <-
-           resolve_credentials(registry, prepared.credential_names),
-         do: acquire(preflighted, credentials, %{})
+         {:ok, preflighted} <- preflight(prepared) do
+      try do
+        with {:ok, credentials} <-
+               resolve_credentials(registry, prepared.credential_names),
+             do: acquire(preflighted, credentials, %{})
+      after
+        release_preflight(preflighted)
+      end
+    end
   end
 
   @spec prepare(t(), binary(), map(), build_context()) ::
@@ -313,7 +333,11 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
   def acquire(_preflighted, _credentials), do: {:error, :provider_dependency_unavailable}
 
   @doc false
-  def acquire(%{acquire: acquire, requires: requires, provides: provides}, credentials, services)
+  def acquire(
+        %{acquire: acquire, requires: requires, provides: provides} = preflighted,
+        credentials,
+        services
+      )
       when is_function(acquire, 2) and is_map(credentials) and is_map(services) do
     if Enum.sort(Map.keys(services)) == Enum.sort(requires) do
       acquire
@@ -322,17 +346,35 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
     else
       {:error, :provider_dependency_unavailable}
     end
+  after
+    release_preflight(preflighted)
   end
 
-  def acquire(%{acquire: acquire, requires: [], provides: provides}, credentials, %{})
+  def acquire(
+        %{acquire: acquire, requires: [], provides: provides} = preflighted,
+        credentials,
+        %{}
+      )
       when is_function(acquire, 1) and is_map(credentials) do
     acquire
     |> invoke_with(credentials, :provider_acquisition_failed)
     |> normalize_build(provides)
+  after
+    release_preflight(preflighted)
   end
 
   def acquire(_preflighted, _credentials, _services),
     do: {:error, :invalid_provider_preflight}
+
+  @doc false
+  @spec release_preflight(preflighted() | term()) :: :ok
+  def release_preflight(%{release: release}) when is_function(release, 0) do
+    _ignored = invoke(release, :provider_preflight_release_failed)
+    :ok
+  end
+
+  def release_preflight(%{release: nil}), do: :ok
+  def release_preflight(_preflighted), do: :ok
 
   defp normalize_prepared({:ok, %{credential_names: names, preflight: preflight} = prepared})
        when is_list(names) and is_function(preflight, 0) do
@@ -373,6 +415,7 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
     {:ok,
      %{
        acquire: acquire,
+       release: nil,
        data_class: data_class,
        accepts_data: accepts_data,
        requires: requires,
@@ -385,6 +428,45 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
     {:ok,
      %{
        acquire: acquire,
+       release: nil,
+       data_class: data_class,
+       accepts_data: accepts_data,
+       requires: requires,
+       provides: provides
+     }}
+  end
+
+  defp normalize_preflight(
+         {:ok, acquire, release},
+         data_class,
+         accepts_data,
+         requires,
+         provides
+       )
+       when is_function(acquire, 1) and requires == [] and is_function(release, 0) do
+    {:ok,
+     %{
+       acquire: acquire,
+       release: once_release(release),
+       data_class: data_class,
+       accepts_data: accepts_data,
+       requires: requires,
+       provides: provides
+     }}
+  end
+
+  defp normalize_preflight(
+         {:ok, acquire, release},
+         data_class,
+         accepts_data,
+         requires,
+         provides
+       )
+       when is_function(acquire, 2) and is_function(release, 0) do
+    {:ok,
+     %{
+       acquire: acquire,
+       release: once_release(release),
        data_class: data_class,
        accepts_data: accepts_data,
        requires: requires,
@@ -403,6 +485,18 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
 
   defp normalize_preflight(_result, _data_class, _accepts_data, _requires, _provides),
     do: {:error, :invalid_provider_preflight}
+
+  defp once_release(release) do
+    gate = :atomics.new(1, signed: false)
+    :ok = :atomics.put(gate, 1, 0)
+
+    fn ->
+      case :atomics.compare_exchange(gate, 1, 0, 1) do
+        :ok -> release.()
+        _already_released -> :ok
+      end
+    end
+  end
 
   defp normalize_credentials({:ok, credentials}, names) when is_map(credentials) do
     if Enum.sort(Map.keys(credentials)) == names and

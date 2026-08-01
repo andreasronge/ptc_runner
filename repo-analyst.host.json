@@ -13,6 +13,7 @@
   "install": {
     "deepseek": {
       "source": "llm",
+      "installation_revision": "repo-analyst-llm-v1",
       "model": "openrouter:deepseek/deepseek-v4-flash",
       "credential": "openrouter_key",
       "accepts_data": [
@@ -22,6 +23,7 @@
     },
     "replay-llm": {
       "source": "llm_replay",
+      "installation_revision": "repo-analyst-replay-v1",
       "fixtures": "repo-analyst/evaluation/replay.jsonl",
       "data_class": "private_inspection",
       "accepts_data": [
@@ -115,6 +117,7 @@
     },
     "history": {
       "source": "ptc_trace_snapshot",
+      "installation_revision": "repo-analyst-trace-v1",
       "directory": "tmp/traces",
       "ceilings": {
         "max_source_bytes": 8000000,
@@ -123,6 +126,7 @@
     },
     "private-history": {
       "source": "ptc_inspection_snapshot",
+      "installation_revision": "repo-analyst-inspection-v1",
       "directory": "tmp/inspection",
       "ceilings": {
         "max_files": 100,

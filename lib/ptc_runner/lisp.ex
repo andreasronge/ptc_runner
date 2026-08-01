@@ -1770,11 +1770,13 @@ defmodule PtcRunner.Lisp do
   defp externalize_lisp_values(value) when is_function(value), do: %Format.Fn{params: "..."}
 
   defp externalize_lisp_values(%Var{name: name} = var) when is_binary(name) do
-    %{var | name: existing_atom_or(name, name)}
+    %{var | name: SourceAtoms.intern(name)}
   end
 
-  defp externalize_lisp_values({:var, name}) when is_atom(name) or is_binary(name),
-    do: %Var{name: existing_atom_or(Kernel.to_string(name), name)}
+  defp externalize_lisp_values({:var, name}) when is_binary(name),
+    do: %Var{name: SourceAtoms.intern(name)}
+
+  defp externalize_lisp_values({:var, name}) when is_atom(name), do: %Var{name: name}
 
   defp externalize_lisp_values({:symbol_ref, name}) when is_binary(name),
     do: %Format.SymbolRef{name: name}
@@ -2021,13 +2023,6 @@ defmodule PtcRunner.Lisp do
 
   defp externalize_memory_key(name) when is_binary(name), do: SourceAtoms.intern(name)
   defp externalize_memory_key(other), do: externalize_lisp_values(other)
-
-  defp existing_atom_or(name, fallback) when is_binary(name) do
-    case safe_to_existing_atom(name) do
-      {:ok, atom} -> atom
-      :error -> fallback
-    end
-  end
 
   # Check if symbol count exceeds limit
   defp check_symbol_limit(ast, max_symbols) do

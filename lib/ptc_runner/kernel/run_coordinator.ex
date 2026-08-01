@@ -14,20 +14,29 @@ defmodule PtcRunner.Kernel.RunCoordinator do
   alias PtcRunner.Kernel.CommandSource
   alias PtcRunner.Kernel.CommandSubject
   alias PtcRunner.Kernel.Component
+  alias PtcRunner.Kernel.InstallationCatalog
   alias PtcRunner.Kernel.PreparedRun
   alias PtcRunner.Kernel.ProviderActivity
-  alias PtcRunner.Kernel.ProviderRegistry
+  alias PtcRunner.Kernel.ProviderDescriptor
+  alias PtcRunner.Kernel.ProviderPlan
   alias PtcRunner.Kernel.RunRequest
+  alias PtcRunner.Kernel.SelectionRules
 
-  @spec prepare(RunRequest.t(), ProviderRegistry.t()) ::
+  @spec prepare(RunRequest.t(), InstallationCatalog.t()) ::
           {:ok, PreparedRun.t()} | {:error, CommandDiagnostic.t()}
-  def prepare(%RunRequest{} = request, %ProviderRegistry{} = registry) do
+  def prepare(%RunRequest{} = request, %InstallationCatalog{} = catalog) do
     with true <- RunRequest.valid?(request),
-         true <- ProviderRegistry.valid?(registry),
+         true <- InstallationCatalog.valid?(catalog),
+         true <- catalog.installed_limits == request.package.installed_limits,
          {:ok, workflow_bundle} <- compile_required(request.package.workflow_components),
          {:ok, mission_bundle} <- compile_optional(request.package.mission_components),
          :ok <- validate_entry(workflow_bundle, request.package.entry),
-         :ok <- validate_providers(request.package.providers, registry),
+         {:ok, declarations} <-
+           prepare_providers(request, workflow_bundle, mission_bundle, catalog),
+         {:ok, derived} <-
+           derive_provider_plan(request, workflow_bundle, mission_bundle, declarations),
+         declarations <- add_post_selection_context(declarations, derived.post_selection_context),
+         prepared_declarations <- prepared_declarations(declarations),
          {:ok, prepared} <-
            ProviderActivity.start_owned(fn activity ->
              PreparedRun.new(
@@ -35,7 +44,9 @@ defmodule PtcRunner.Kernel.RunCoordinator do
                workflow_bundle,
                mission_bundle,
                "(#{request.package.entry} data/input)",
-               activity
+               activity,
+               catalog,
+               Map.put(derived, :provider_declarations, prepared_declarations)
              )
            end) do
       {:ok, prepared}
@@ -122,34 +133,209 @@ defmodule PtcRunner.Kernel.RunCoordinator do
       else: {:error, diagnostic(:bundle, :entry_invalid)}
   end
 
-  defp validate_providers(providers, registry) do
-    [:workflow, :mission]
-    |> Enum.reduce_while(:ok, fn destination, :ok ->
-      providers
-      |> Map.fetch!(destination)
-      |> Enum.with_index()
-      |> Enum.reduce_while(:ok, fn {selection, index}, :ok ->
-        name = selection["name"]
-        occurrence = %{destination: destination, index: index}
+  defp prepare_providers(request, workflow_bundle, mission_bundle, catalog) do
+    request.package.providers
+    |> provider_specs()
+    |> Enum.reduce_while({:ok, []}, fn {destination, selection, index}, {:ok, prepared} ->
+      name = selection["name"]
+      occurrence = %{destination: destination, index: index}
 
-        if Map.has_key?(registry.builders, name) do
-          {:ok, subject} = CommandSubject.provider(name, :selection, occurrence)
+      case InstallationCatalog.fetch(catalog, name) do
+        {:ok, descriptor} ->
+          prepare_provider(
+            request,
+            workflow_bundle,
+            mission_bundle,
+            descriptor,
+            name,
+            Map.get(selection, "config", %{}),
+            occurrence,
+            prepared
+          )
 
-          {:halt,
-           {:error, diagnostic(:provider_declaration, :selection_unverifiable, subject: subject)}}
-        else
+        :error ->
           {:ok, subject} = CommandSubject.provider(name, :declaration, occurrence)
 
           {:halt,
            {:error, diagnostic(:provider_declaration, :provider_unknown, subject: subject)}}
-        end
-      end)
-      |> case do
-        :ok -> {:cont, :ok}
-        {:error, _diagnostic} = error -> {:halt, error}
       end
     end)
+    |> reverse_success()
   end
+
+  defp prepare_provider(
+         request,
+         workflow_bundle,
+         mission_bundle,
+         descriptor,
+         name,
+         config,
+         occurrence,
+         prepared
+       ) do
+    with :ok <- validate_placement(descriptor, name, occurrence),
+         selection_context <-
+           selection_context(
+             request,
+             workflow_bundle,
+             mission_bundle,
+             descriptor,
+             name,
+             occurrence
+           ),
+         {:ok, normalized} <-
+           SelectionRules.normalize(descriptor.selection_rules, config, request.package.limits) do
+      declaration = %{
+        name: name,
+        destination: occurrence.destination,
+        index: occurrence.index,
+        descriptor: descriptor,
+        config: normalized,
+        validation_state:
+          if(descriptor.selection_validation == :active,
+            do: :active_required,
+            else: :declarative
+          ),
+        selection_context: selection_context
+      }
+
+      {:cont, {:ok, [declaration | prepared]}}
+    else
+      {:error, %CommandDiagnostic{} = diagnostic} ->
+        {:halt, {:error, diagnostic}}
+
+      {:error, :invalid_selection} ->
+        {:ok, subject} = CommandSubject.provider(name, :selection, occurrence)
+        {:halt, {:error, diagnostic(:provider_declaration, :selection_invalid, subject: subject)}}
+    end
+  end
+
+  defp validate_placement(descriptor, name, occurrence) do
+    if occurrence.destination in descriptor.destinations do
+      :ok
+    else
+      {:ok, subject} = CommandSubject.provider(name, :selection, occurrence)
+      {:error, diagnostic(:provider_declaration, :placement_denied, subject: subject)}
+    end
+  end
+
+  defp selection_context(
+         request,
+         workflow_bundle,
+         mission_bundle,
+         descriptor,
+         name,
+         occurrence
+       ) do
+    %{
+      display: ProviderDescriptor.display_projection(descriptor, name),
+      application_content_digest: request.package.application_content_digest,
+      bundle_hashes: %{
+        workflow: workflow_bundle.hash,
+        mission: if(mission_bundle, do: mission_bundle.hash, else: nil)
+      },
+      input_authority_class: request.input.authority,
+      execution_scope_id: make_ref(),
+      destination: occurrence.destination,
+      index: occurrence.index,
+      limits: request.package.limits
+    }
+  end
+
+  defp derive_provider_plan(request, workflow_bundle, mission_bundle, declarations) do
+    case ProviderPlan.derive(request, workflow_bundle, mission_bundle, declarations) do
+      {:ok, derived} ->
+        {:ok, derived}
+
+      {:error, {:dependency_invalid, nil}} ->
+        {:error, diagnostic(:provider_declaration, :dependency_invalid)}
+
+      {:error, {:dependency_invalid, declaration}} ->
+        {:ok, subject} = CommandSubject.provider(declaration.name, :declaration)
+        {:error, diagnostic(:provider_declaration, :dependency_invalid, subject: subject)}
+
+      {:error, {:data_policy_denied, declaration}} ->
+        occurrence = %{destination: declaration.destination, index: declaration.index}
+        {:ok, subject} = CommandSubject.provider(declaration.name, :selection, occurrence)
+        {:error, diagnostic(:provider_declaration, :data_policy_denied, subject: subject)}
+    end
+  end
+
+  defp add_post_selection_context(declarations, context) do
+    Enum.map(declarations, fn declaration ->
+      Map.update!(declaration, :selection_context, &Map.merge(&1, context))
+    end)
+  end
+
+  defp prepared_declarations(declarations) do
+    Enum.map(declarations, fn declaration ->
+      %{
+        name: declaration.name,
+        destination: declaration.destination,
+        index: declaration.index,
+        config: declaration.config,
+        validation_state: declaration.validation_state,
+        selection_context: declaration.selection_context,
+        provider_projection:
+          ProviderDescriptor.public_projection(
+            declaration.descriptor,
+            declaration.name,
+            declaration.config
+          )
+      }
+    end)
+  end
+
+  defp provider_specs(providers) do
+    for destination <- [:workflow, :mission],
+        {selection, index} <- providers |> Map.fetch!(destination) |> Enum.with_index(),
+        do: {destination, selection, index}
+  end
+
+  defp reverse_success({:ok, declarations}), do: {:ok, Enum.reverse(declarations)}
+  defp reverse_success({:error, _diagnostic} = error), do: error
+
+  @spec validation_result(PreparedRun.t()) ::
+          {:ok, map()}
+          | {:error, :invalid_prepared_run}
+          | {:error, {:selection_unverifiable, binary(), CommandSubject.occurrence()}}
+  @doc "Projects the closed validation-success result from one sealed preparation."
+  def validation_result(%PreparedRun{} = prepared) do
+    cond do
+      not PreparedRun.valid?(prepared) or
+          ProviderActivity.value(prepared.provider_activity) != false ->
+        {:error, :invalid_prepared_run}
+
+      declaration = first_active_declaration(prepared.provider_declarations) ->
+        {:error,
+         {:selection_unverifiable, declaration.name,
+          %{destination: declaration.destination, index: declaration.index}}}
+
+      true ->
+        {:ok,
+         %{
+           "application_content_digest" =>
+             "sha256:" <> prepared.request.package.application_content_digest,
+           "effective_application_digest" => prepared.effective_application_digest,
+           "workflow_bundle_hash" => prepared.workflow_bundle.hash,
+           "mission_bundle_hash" =>
+             if(prepared.mission_bundle, do: prepared.mission_bundle.hash, else: nil),
+           "provider_activity" => false
+         }}
+    end
+  end
+
+  defp first_active_declaration(declarations) do
+    declarations
+    |> Enum.filter(&(&1.validation_state == :active_required))
+    |> Enum.sort_by(fn declaration ->
+      {declaration.name, destination_rank(declaration.destination), declaration.index}
+    end)
+    |> List.first()
+  end
+
+  defp destination_rank(:workflow), do: 0
+  defp destination_rank(:mission), do: 1
 
   defp diagnostic(phase, code, opts \\ []),
     do: CommandDiagnostic.new!(phase, code, opts)

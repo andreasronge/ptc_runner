@@ -3,6 +3,7 @@
   "install": {
     "replay-llm": {
       "source": "llm_replay",
+      "installation_revision": "repo-analyst-evaluation-replay-v1",
       "fixtures": "repo-analyst/evaluation/replay.jsonl",
       "data_class": "private_inspection",
       "accepts_data": [

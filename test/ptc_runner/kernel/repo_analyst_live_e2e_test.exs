@@ -17,6 +17,7 @@ defmodule PtcRunner.Kernel.RepoAnalystLiveE2ETest do
   alias PtcRunner.Kernel.HostConfig
   alias PtcRunner.Kernel.HostInstallation
   alias PtcRunner.Kernel.InspectionArtifact
+  alias PtcRunner.Kernel.InstallationCatalog
   alias PtcRunner.Kernel.RunBuilder
   alias PtcRunner.Kernel.TraceLog
 
@@ -46,7 +47,12 @@ defmodule PtcRunner.Kernel.RepoAnalystLiveE2ETest do
 
     assert {:ok, host} = HostConfig.load(paths.host)
     assert_live_installations(host)
-    assert {:ok, registry} = HostInstallation.registry(host)
+
+    assert {:ok, registry} =
+             HostInstallation.catalog(host)
+             |> then(fn {:ok, catalog} ->
+               InstallationCatalog.runtime_registry(catalog)
+             end)
 
     assert {:ok, result, :normal} =
              RunBuilder.run_with_class(paths.manifest, registry,
@@ -255,15 +261,15 @@ defmodule PtcRunner.Kernel.RepoAnalystLiveE2ETest do
 
     assert Enum.any?(snapshots, fn snapshot ->
              snapshot["provider"] == "deepseek" and
-               snapshot["source"] == "llm" and
-               snapshot["model"] == @deepseek_model
+               snapshot["declaration"]["source"] == "llm" and
+               snapshot["acquisition"]["source"] == "llm"
            end)
 
     assert Enum.any?(snapshots, fn snapshot ->
              snapshot["provider"] == "workspace" and
-               snapshot["transport"] == "stdio" and
-               snapshot["protocol"] == "mcp-2026-07-28" and
-               snapshot["installation_revision"] == @workspace_revision
+               snapshot["acquisition"]["transport"] == "stdio" and
+               snapshot["acquisition"]["protocol"] == "mcp-2026-07-28" and
+               snapshot["declaration"]["installation_revision"] == @workspace_revision
            end)
   end
 
@@ -554,9 +560,18 @@ defmodule PtcRunner.Kernel.RepoAnalystLiveE2ETest do
     end
 
     for {path, source} <- key_occurrences(events, "source") do
-      assert [event_index, "data", "connector_snapshots", snapshot_index, "source"] = path
+      assert [
+               event_index,
+               "data",
+               "connector_snapshots",
+               snapshot_index,
+               projection,
+               "source"
+             ] = path
+
       assert is_integer(event_index)
       assert is_integer(snapshot_index)
+      assert projection in ["declaration", "acquisition"]
       assert source in ~w(llm mcp)
     end
 

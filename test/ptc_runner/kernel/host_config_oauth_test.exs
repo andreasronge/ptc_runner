@@ -3,9 +3,8 @@ defmodule PtcRunner.Kernel.HostConfigOAuthTest do
 
   alias PtcRunner.Kernel.HostConfig
   alias PtcRunner.Kernel.HostInstallation
+  alias PtcRunner.Kernel.InstallationCatalog
   alias PtcRunner.Kernel.MCPOAuth.Authority
-  alias PtcRunner.Kernel.MCPOAuth.Context
-  alias PtcRunner.Kernel.MCPOAuth.Store.Memory
 
   test "decodes OAuth only when normalized static authentication is empty" do
     config = host_config()
@@ -119,7 +118,7 @@ defmodule PtcRunner.Kernel.HostConfigOAuthTest do
     assert {:ok, _validated} = JSV.validate(host_config(), root, cast: false)
   end
 
-  test "registry/1 rejects OAuth while registry/2 claims explicit principal authority" do
+  test "catalog construction retains private authority without requiring a principal or store" do
     assert {:ok, decoded} = HostConfig.decode(host_config(), "/tmp")
 
     host =
@@ -132,15 +131,20 @@ defmodule PtcRunner.Kernel.HostConfigOAuthTest do
         install: decoded.install
       )
 
-    assert {:error, :authorization_context_required} = HostInstallation.registry(host)
+    assert {:ok, catalog} = HostInstallation.catalog(host)
+    descriptor = catalog.descriptors["github"]
 
-    {:ok, memory} = Memory.start_link(owner: self())
-    {:ok, store} = Memory.store(memory)
+    assert descriptor.authorization_mode == :oauth
+    assert descriptor.credential_names == []
+    assert %Authority{} = catalog.authorities["github"]
+    assert descriptor.authority_fingerprint == catalog.authorities["github"].fingerprint
 
-    {:ok, context} =
-      Context.new(tenant_id: "local", principal_id: "operator", store: store)
+    public =
+      catalog |> InstallationCatalog.public_installations() |> List.first()
 
-    assert {:ok, _registry} = HostInstallation.registry(host, context)
+    assert public["installation_revision"] == "github-v1"
+    refute Map.has_key?(public, "authority")
+    refute inspect(public) =~ descriptor.authority_fingerprint
   end
 
   defp host_config do
@@ -152,6 +156,7 @@ defmodule PtcRunner.Kernel.HostConfigOAuthTest do
       "install" => %{
         "github" => %{
           "source" => "mcp",
+          "installation_revision" => "github-v1",
           "transport" => %{
             "type" => "streamable_http",
             "endpoint" => "https://mcp.example/mcp",

@@ -14,6 +14,7 @@ defmodule PtcRunner.Kernel.RepoAnalystApplicationTest do
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.HostConfig
   alias PtcRunner.Kernel.HostInstallation
+  alias PtcRunner.Kernel.InstallationCatalog
   alias PtcRunner.Kernel.Library
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.Manifest
@@ -153,7 +154,12 @@ defmodule PtcRunner.Kernel.RepoAnalystApplicationTest do
         )
 
       assert {:ok, host} = HostConfig.load(host_path)
-      assert {:ok, registry} = HostInstallation.registry(host)
+
+      assert {:ok, registry} =
+               HostInstallation.catalog(host)
+               |> then(fn {:ok, catalog} ->
+                 InstallationCatalog.runtime_registry(catalog)
+               end)
 
       for name <- ~w(repo-analyst-review.json repo-analyst-improve.json) do
         assert {:ok, built} = RunBuilder.load_and_build(path(name), registry)

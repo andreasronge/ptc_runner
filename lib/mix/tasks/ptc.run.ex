@@ -46,6 +46,7 @@ defmodule Mix.Tasks.Ptc.Run do
 
   alias PtcRunner.Kernel.HostConfig
   alias PtcRunner.Kernel.HostInstallation
+  alias PtcRunner.Kernel.InstallationCatalog
   alias PtcRunner.Kernel.MCPOAuth.Authority
   alias PtcRunner.Kernel.MCPOAuth.Authorization
   alias PtcRunner.Kernel.MCPOAuth.Context, as: OAuthContext
@@ -84,25 +85,29 @@ defmodule Mix.Tasks.Ptc.Run do
          :ok <- exclusive_mission_inputs(opts),
          :ok <- check_options(opts),
          {:ok, registry, host} <- registry(opts) do
-      run_opts = run_options(opts)
+      try do
+        run_opts = run_options(opts)
 
-      result =
-        if Keyword.get(opts, :check, false) do
-          with {:ok, view} <- check(manifest, registry, host, run_opts) do
-            report_check(view)
+        result =
+          if Keyword.get(opts, :check, false) do
+            with {:ok, view} <- check(manifest, registry, host, run_opts) do
+              report_check(view)
+            end
+          else
+            with {:ok, result, class} <- run_with_class(manifest, registry, run_opts) do
+              report(result, class, opts)
+            end
           end
-        else
-          with {:ok, result, class} <- run_with_class(manifest, registry, run_opts) do
-            report(result, class, opts)
-          end
+
+        case result do
+          {:error, error} ->
+            Mix.raise("ptc.run failed: #{inspect(error, limit: 10, printable_limit: 1_024)}")
+
+          completed ->
+            completed
         end
-
-      case result do
-        {:error, error} ->
-          Mix.raise("ptc.run failed: #{inspect(error, limit: 10, printable_limit: 1_024)}")
-
-        completed ->
-          completed
+      after
+        ProviderRegistry.close(registry)
       end
     else
       {_opts, _arguments, invalid} when invalid != [] ->
@@ -146,7 +151,8 @@ defmodule Mix.Tasks.Ptc.Run do
 
     case {Keyword.get(opts, :host_config), authorizations} do
       {nil, []} ->
-        with {:ok, registry} <- ProviderRegistry.new(),
+        with {:ok, catalog} <- InstallationCatalog.new(),
+             {:ok, registry} <- InstallationCatalog.runtime_registry(catalog),
              do: {:ok, registry, nil}
 
       {nil, _requested} ->
@@ -164,8 +170,15 @@ defmodule Mix.Tasks.Ptc.Run do
                  store: store
                ),
              :ok <- authorize_installations(host, authorization_context, requested),
-             {:ok, registry} <- HostInstallation.registry(host, authorization_context) do
-          {:ok, registry, host}
+             {:ok, catalog} <- HostInstallation.catalog(host) do
+          try do
+            with {:ok, registry} <-
+                   InstallationCatalog.runtime_registry(catalog, authorization_context) do
+              {:ok, registry, host}
+            end
+          after
+            InstallationCatalog.close(catalog)
+          end
         else
           false -> {:error, :duplicate_mcp_authorization}
           {:error, _reason} = error -> error
@@ -244,13 +257,14 @@ defmodule Mix.Tasks.Ptc.Run do
   end
 
   defp resolved_provider(snapshot, %{source: :mcp} = installation) do
-    effects = Enum.frequencies_by(snapshot["tools"], & &1["effect"])
+    acquisition = snapshot["acquisition"]
+    effects = Enum.frequencies_by(acquisition["tools"], & &1["effect"])
 
     %{
       "environment" => "mission",
       "name" => snapshot["provider"],
       "summary" =>
-        "mcp/#{snapshot["transport"]}  #{length(snapshot["tools"])} tools  " <>
+        "mcp/#{acquisition["transport"]}  #{length(acquisition["tools"])} tools  " <>
           "#{Map.get(effects, "read", 0)} read  #{Map.get(effects, "write", 0)} write  " <>
           "auth #{authorization_mode(installation.transport)}",
       "accepts_data" => Enum.map(installation.accepts_data, &Atom.to_string/1),
@@ -262,18 +276,21 @@ defmodule Mix.Tasks.Ptc.Run do
     %{
       "environment" => "workflow",
       "name" => snapshot["provider"],
-      "summary" => "llm  model #{snapshot["model"]}",
+      "summary" => "llm  revision #{snapshot["declaration"]["installation_revision"]}",
       "accepts_data" => Enum.map(installation.accepts_data, &Atom.to_string/1),
       "snapshot_hash" => snapshot["snapshot_hash"]
     }
   end
 
   defp resolved_provider(snapshot, %{source: :llm_replay} = installation) do
+    acquisition = snapshot["acquisition"]
+
     %{
       "environment" => "workflow",
       "name" => snapshot["provider"],
       "summary" =>
-        "llm_replay  #{snapshot["entry_count"]} entries  #{snapshot["response_count"]} responses",
+        "llm_replay  #{acquisition["entry_count"]} entries  " <>
+          "#{acquisition["response_count"]} responses",
       "accepts_data" => Enum.map(installation.accepts_data, &Atom.to_string/1),
       "snapshot_hash" => snapshot["snapshot_hash"]
     }

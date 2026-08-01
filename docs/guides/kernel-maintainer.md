@@ -41,12 +41,16 @@ Frontends own presentation and host choices. They must enter through
 `PtcRunner.Kernel.RunRequest`. The closed command pipeline uses
 `PtcRunner.Kernel.CommandEngine`; the existing Mix command remains on its
 transitional `RunBuilder` adapter until frontend integration is complete.
-Embedding frontends pass their sealed request to the path-free
-`PtcRunner.Kernel.RunCoordinator`, then pass its sealed `PreparedRun` to
-`PtcRunner.Kernel.RunBuilder.build_prepared/3`. Frontends must not create
-another manifest parser, provider registry, event model, or evaluator; once
-integrated, command frontends must also share the engine's argv parser and
-diagnostic vocabulary.
+Embedding frontends execute a sealed request through
+`PtcRunner.Kernel.RunBuilder.build/3`. For a provider-free request they may
+instead call the path-free `PtcRunner.Kernel.RunCoordinator` and pass its
+sealed `PreparedRun` to `PtcRunner.Kernel.RunBuilder.build_prepared/3`.
+Provider-bearing command preparation is already sealed by `CommandEngine`, but
+its later active continuation is not implemented yet; callers must close that
+`CommandPreparation` rather than pass its embedded run to `build_prepared/3`.
+Frontends must not create another manifest parser, provider registry, event
+model, or evaluator; once integrated, command frontends must also share the
+engine's argv parser and diagnostic vocabulary.
 
 When placing new behavior, prefer the lowest layer that must own it:
 
@@ -60,7 +64,7 @@ When placing new behavior, prefer the lowest layer that must own it:
 The normal path is:
 
 ```text
-directory or memory documents + host-owned registry
+directory or memory documents + host-owned installation catalog
           |
           v
 ApplicationSource -> Manifest -> ApplicationPackage
@@ -96,11 +100,48 @@ captured path-free source closure and semantic application identity;
 its authority class. A destination-free `PtcRunner.Kernel.ExecutionPolicy`
 fixes event identities, inspection capture, and result projection before the
 three values are sealed as one `PtcRunner.Kernel.RunRequest`.
-`PtcRunner.Kernel.ProviderRegistry` maps selected names to trusted builders.
+`PtcRunner.Kernel.InstallationCatalog` maps selected names to sealed
+`ProviderDescriptor` values and keeps trusted implementations inaccessible to
+phase 5. Host-backed runtime activation transfers the private installation
+owner before making an OAuth authority claim; a stale, closed, or timed-out
+owner therefore cannot leave a new store claim behind. After transfer, every
+claim or registry-construction failure releases that owner.
 `PtcRunner.Kernel.RunCoordinator.prepare/2` compiles the captured workflow and
 mission component graphs, validates the public workflow entry, and performs
-provider-inert declaration checks without accepting a path or invoking a
-builder. The returned `PreparedRun` owns its monotonic activity-marker process;
+provider-inert declaration checks without accepting a path, looking up an
+implementation, or invoking a builder, validator, credential resolver, OAuth
+context/store, preflight, or probe. `SelectionRules` is the only selection
+normalizer at this boundary: a sealed data-only IR with exact fields, scalar or
+unique-list types, defaults, finite sets, ranges, and the closed cross-rules
+`subset_of`, `required_when_set_nonempty`, and
+`ceiling_of_context_limit`. A custom descriptor that needs executable
+validation records `active_required`; `validate` reports
+`provider_declaration/selection_unverifiable` without running it.
+
+Shipped live-LLM and stdio MCP descriptors declare `audited_local` callbacks.
+Those callbacks use the same model/adapter and executable/launcher checks as
+runtime provider preflight, without resolving credentials or contacting a
+provider. A live-LLM descriptor also supplies a bounded completion probe for
+the active `doctor --connect` path. It resolves the declared credential only
+after local checks, disables adapter and HTTP retries and redirects, forces a
+one-token response ceiling, and makes exactly one request under the sealed
+doctor timeout and provider heap limit.
+
+After every selection is normalized, the coordinator derives aggregate data
+class, flow, and event privacy, then builds
+`effective_application_digest` as SHA-256 over
+`"ptc.effective-application.v1\\0" || u64(n) || TJCS(projection)`. The literal
+projection contains final bundle hashes and ID-sorted component records,
+contract behavior hashes, entry, mission data, identity-participating limits,
+provider arrays in manifest order, input authority, derived event policy,
+inspection-capture choice, result projection, and semantic revision. Each
+provider record contains exactly alias, source, required installation revision,
+data class, accepted data classes, authorization mode, and normalized config.
+Input values/forms, paths, event IDs, credentials, raw selectors, and private
+OAuth authority/fingerprint are excluded. The final digest and derived classes
+are then added to each occurrence's path-free execution context.
+
+The returned `PreparedRun` owns its monotonic activity-marker process;
 construction atomically claims a fresh false marker, so an active or previously
 claimed marker cannot be shared by another prepared run. Its creating process
 must retain the marker link through construction. Consuming the prepared run
@@ -113,10 +154,13 @@ backlogged call fails boundedly, and processing it after the deadline cannot
 apply the queued transition. An expired close still checks the caller against
 the current controller, so a delayed creator cannot terminate the marker after
 ownership transfers.
-Until inert provider descriptors land, `PreparedRun` itself admits only
-provider-free requests; provider-bearing preparation stops at the closed
-`selection_unverifiable` diagnostic and cannot bypass that boundary by calling
-the constructor directly.
+`PreparedRun` revalidates the exact normalized declarations and recomputes the
+effective projection/digest at construction and on every seal check, so
+provider-bearing preparation cannot bypass declaration processing by calling
+the constructor directly. Such provider-bearing values are presently
+continuation state for the staged command pipeline; `RunBuilder.build_prepared/3`
+rejects them until the active continuation consumes the inert catalog and
+builds a runtime registry.
 Construction binds each frozen bundle's component IDs, source hashes,
 dependency edges, mission presence, and exported entry back to the sealed
 request. `RunBuilder.build_prepared/3` atomically consumes the prepared run
@@ -139,12 +183,18 @@ before strict argv parsing, consumes host/application paths through acquisition
 adapters, and projects failures into `PtcRunner.Kernel.CommandOutcome`. It is
 not yet the public Mix or standalone adapter. After frontend integration, only
 an outer standalone wrapper may turn the outcome's status into a process exit.
-Successful `validate` and `run` preparations return a sealed
-`PtcRunner.Kernel.CommandPreparation`, not a bare `PreparedRun`. That wrapper
-retains the original command reference, inert registry, and only the artifact
-destinations needed by phase 6 alongside the separately sealed path-free
-prepared run; acquisition paths do not survive into it. Construction validates
-the complete registry, requires its installed limits to match the captured
+Successful `validate` is terminal: it projects the five-field digest result,
+closes its prepared run, and returns a sealed `CommandOutcome`. Successful
+`run` preparation returns a sealed `PtcRunner.Kernel.CommandPreparation`, not a
+bare `PreparedRun`. That wrapper retains the original command reference, inert
+catalog, and only the artifact destinations needed by phase 6 alongside the
+separately sealed path-free prepared run. Host-backed catalogs retain only an
+opaque owner reference in the wrapper; host paths and credential declarations
+remain private owner state and do not survive in inspectable catalog closures.
+The authority owner monitors its catalog creator and is also transferred into
+any derived runtime registry; callers that retain such a registry must close it
+with `ProviderRegistry.close/1` when the execution scope ends. Construction
+validates the complete catalog, requires its installed limits to match the captured
 package, requires JSON result projection, binds inspection presence to the
 sealed policy, and binds a requested trace directory to policy IDs equal to the
 command reference. Relative artifact destinations are anchored once against the
@@ -253,10 +303,10 @@ the byte-order and per-provider-local ordering rules that JSON Schema cannot
 express; the same predicate owns `models` ordering. A lone successful `local`
 provider check admits either activity value because its public row deliberately
 does not reveal whether the implementation was audited-local or unverified.
-Each `models` row preserves the host contract's free-form, non-NUL
-`installation_revision` of 1 to 256 UTF-8 bytes; it is not constrained by the
-provider-alias grammar. The semantic success predicate enforces the byte bound
-that JSON Schema `maxLength` cannot express.
+Each `models` row preserves the host contract's required public
+`installation_revision`, matching exactly
+`^[a-z][a-z0-9._-]{0,127}$`. Host decoding reports a missing revision before
+generic schema failure, including for an unselected installation.
 Any successful active selection, credential, authorization, or connectivity
 check still requires `provider_activity: true`, and no provider check requires
 false.
@@ -561,25 +611,29 @@ logging payload-bearing structures directly.
 
 ## Providers and interactive frontends
 
-The registry has no implicit providers. CLI runs receive exactly the aliases
-declared by a strict host installation; trusted Elixir embedding may construct
-an explicit registry of custom builders. Host installations provide workflow
-LLM plus mission MCP and native snapshot sources.
+The catalog has no implicit providers. CLI runs receive exactly the aliases
+declared by a strict host installation; trusted Elixir embedding constructs an
+explicit catalog of custom descriptor/implementation pairs. Host
+installations provide workflow LLM plus mission MCP and native snapshot
+sources. Catalog construction is inert and never accepts an OAuth principal or
+store context.
 
-Provider builders return capabilities plus optional safe connector metadata
+Provider implementations later return capabilities plus optional safe connector metadata
 and an idempotent closer. Staged builders may also exchange bounded code-owned
 acquisition services after the global preflight and credential barrier; these
 opaque values never enter environments or artifacts. `RunBuilder` resolves
 those dependencies, owns construction cleanup, and transfers successful
-resources into the run lifecycle. Exact selection grammar and transport
-behavior belong in `ProviderRegistry`, each provider module, and the manifest
-guide.
+resources into the run lifecycle. Exact declarative selection grammar belongs
+in `SelectionRules`; active transport behavior belongs in each provider module
+and the later runtime dispatcher.
 
-Builder selection context is path-free. It carries
-`application_content_digest`, target environment, construction owner,
-effective limits, and installed ceilings. Application directories and reader
-callbacks never cross the package/selection boundary. Any provider-owned
-filesystem roots come from the trusted host installation instead.
+Provider occurrence contexts are path-free. They carry safe display identity,
+application content and effective digests, final bundle hashes, input
+authority, destination/index, an internal execution-scope ID, effective limits,
+and derived data/flow/event classes. Application directories, input values,
+reader callbacks, descriptors, credentials, and host implementation details
+never cross the package/selection boundary. Any provider-owned filesystem
+roots remain captured only by the trusted implementation.
 
 The MCP adapter is one host-installed source with typed Streamable HTTP and
 stdio transports. Endpoints or process launch details, credentials, upstream

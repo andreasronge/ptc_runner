@@ -25,6 +25,7 @@ defmodule PtcRunner.Kernel.CommandContract do
   @hash "^[0-9a-f]{64}$(?![\\s\\S])"
   @digest "^sha256:[0-9a-f]{64}$(?![\\s\\S])"
   @alias "^[a-z][a-z0-9._-]{0,127}$(?![\\s\\S])"
+  @installation_revision ~r/\A[a-z][a-z0-9._-]{0,127}\z/
   @capability_name "^[a-z][a-z0-9._/-]{0,127}$(?![\\s\\S])"
   @event_type "^[a-z][a-z0-9-]{0,127}$(?![\\s\\S])"
   @json_pointer "^(?:/(?:[^~/]|~[01])*)*$(?![\\s\\S])"
@@ -302,9 +303,7 @@ defmodule PtcRunner.Kernel.CommandContract do
   def valid_success_semantics?(_command, _result), do: false
 
   defp valid_installation_revision?(revision) when is_binary(revision),
-    do:
-      byte_size(revision) in 1..256 and String.valid?(revision) and
-        not String.contains?(revision, <<0>>)
+    do: revision =~ @installation_revision
 
   defp valid_installation_revision?(_revision), do: false
 
@@ -1079,8 +1078,7 @@ defmodule PtcRunner.Kernel.CommandContract do
           },
           "installation_revision" => %{
             "type" => "string",
-            "minLength" => 1,
-            "maxLength" => 256
+            "pattern" => @alias
           },
           "data_class" => %{"enum" => ~w(normal private_inspection)},
           "accepts_data" => %{

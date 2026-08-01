@@ -48,7 +48,7 @@ defmodule PtcRunner.Kernel.HostConfigTest do
                }
              },
              snapshot_identity: nil,
-             installation_revision: nil,
+             installation_revision: "workspace-v1",
              ceilings: %{
                timeout_ms: 5_000,
                max_catalog_tools: 128,
@@ -127,6 +127,42 @@ defmodule PtcRunner.Kernel.HostConfigTest do
     end
   end
 
+  test "command decoding reports a missing revision before generic schema failure for every source" do
+    for {name, source} <- [
+          {"mcp", "mcp"},
+          {"llm", "llm"},
+          {"replay", "llm_replay"},
+          {"trace", "ptc_trace_snapshot"},
+          {"inspection", "ptc_inspection_snapshot"}
+        ] do
+      document = %{"install" => %{name => %{"source" => source}}}
+
+      assert {:error, {:installation_revision_missing, ^name}} =
+               HostConfig.decode_command(document, "/tmp")
+    end
+  end
+
+  test "an invalid installation alias is a schema error even when its revision is absent" do
+    document = %{"install" => %{"BAD" => %{"source" => "mcp"}}}
+
+    assert {:error, {:host_schema_invalid, _path}} =
+             HostConfig.decode_command(document, "/tmp")
+  end
+
+  test "installation revisions use the exact portable lowercase identifier grammar" do
+    for invalid <- ["Upper", "1leading", "contains/slash", "", String.duplicate("a", 129)] do
+      document =
+        put_in(
+          valid_config(),
+          ["install", "workspace", "installation_revision"],
+          invalid
+        )
+
+      assert {:error, :invalid_host_config} = HostConfig.decode(document, "/tmp")
+      assert {:error, {:host_schema_invalid, _path}} = HostConfig.decode_command(document, "/tmp")
+    end
+  end
+
   @tag :tmp_dir
   test "loads one native canonical trace snapshot installation", %{tmp_dir: dir} do
     config = %{
@@ -134,6 +170,7 @@ defmodule PtcRunner.Kernel.HostConfigTest do
         "history" => %{
           "source" => "ptc_trace_snapshot",
           "directory" => "traces",
+          "installation_revision" => "history-v1",
           "ceilings" => %{
             "max_source_bytes" => 2_000_000,
             "max_result_bytes" => 250_000
@@ -147,6 +184,7 @@ defmodule PtcRunner.Kernel.HostConfigTest do
     assert host.install["history"] == %{
              source: :ptc_trace_snapshot,
              directory: "traces",
+             installation_revision: "history-v1",
              ceilings: %{
                max_source_bytes: 2_000_000,
                max_result_bytes: 250_000
@@ -161,6 +199,7 @@ defmodule PtcRunner.Kernel.HostConfigTest do
         "private-history" => %{
           "source" => "ptc_inspection_snapshot",
           "directory" => "inspection",
+          "installation_revision" => "private-history-v1",
           "ceilings" => %{
             "max_files" => 100,
             "max_source_bytes" => 64_000_000,
@@ -175,6 +214,7 @@ defmodule PtcRunner.Kernel.HostConfigTest do
     assert host.install["private-history"] == %{
              source: :ptc_inspection_snapshot,
              directory: "inspection",
+             installation_revision: "private-history-v1",
              ceilings: %{
                max_files: 100,
                max_source_bytes: 64_000_000,
@@ -347,6 +387,7 @@ defmodule PtcRunner.Kernel.HostConfigTest do
       "install" => %{
         "remote" => %{
           "source" => "mcp",
+          "installation_revision" => "remote-v1",
           "transport" => %{
             "type" => "streamable_http",
             "endpoint" => "https://example.test/mcp",
@@ -377,6 +418,7 @@ defmodule PtcRunner.Kernel.HostConfigTest do
       "install" => %{
         "deepseek" => %{
           "source" => "llm",
+          "installation_revision" => "deepseek-v1",
           "model" => "openrouter:deepseek/deepseek-v4-flash",
           "credential" => "key"
         }
@@ -403,7 +445,8 @@ defmodule PtcRunner.Kernel.HostConfigTest do
       "install" => %{
         "history" => %{
           "source" => "ptc_trace_snapshot",
-          "directory" => "traces"
+          "directory" => "traces",
+          "installation_revision" => "history-v1"
         }
       }
     }
@@ -441,7 +484,8 @@ defmodule PtcRunner.Kernel.HostConfigTest do
       "install" => %{
         "private-history" => %{
           "source" => "ptc_inspection_snapshot",
-          "directory" => "inspection"
+          "directory" => "inspection",
+          "installation_revision" => "private-history-v1"
         }
       }
     }
@@ -486,6 +530,7 @@ defmodule PtcRunner.Kernel.HostConfigTest do
       "install" => %{
         "workspace" => %{
           "source" => "mcp",
+          "installation_revision" => "workspace-v1",
           "transport" => %{
             "type" => "stdio",
             "command" => "node",

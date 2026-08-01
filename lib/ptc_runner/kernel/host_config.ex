@@ -26,6 +26,9 @@ defmodule PtcRunner.Kernel.HostConfig do
   the adapter per request rather than ambient provider-specific environment
   lookup. The native snapshot sources fix host-relative directories and
   expose only PtcRunner's canonical or private inspection query vocabularies.
+  Every installation requires a public, non-secret `installation_revision`
+  matching `\\A[a-z][a-z0-9._-]{0,127}\\z`; command decoding reports its
+  absence before generic schema failure, including for unselected aliases.
 
   `schema/0` is the canonical structural description shipped for editor and
   human feedback. Runtime decoding remains authoritative for semantic checks
@@ -61,6 +64,7 @@ defmodule PtcRunner.Kernel.HostConfig do
   @max_llm_tokens 1_000_000
   @max_llm_seed 2_147_483_647
   @name ~r/\A[a-z][a-z0-9._-]{0,127}\z/
+  @installation_revision @name
   @environment_name ~r/\A[A-Za-z_][A-Za-z0-9_]*\z/
   @header_name ~r/\A[!#$%&'*+\-.^_`|~0-9A-Za-z]+\z/
   @reserved_environment ~w(HOME LOGNAME PATH SHELL TERM USER)
@@ -118,7 +122,7 @@ defmodule PtcRunner.Kernel.HostConfig do
             transport: transport(),
             tools: %{binary() => tool()},
             snapshot_identity: %{tool: binary(), field: binary()} | nil,
-            installation_revision: binary() | nil,
+            installation_revision: binary(),
             ceilings: %{
               timeout_ms: pos_integer(),
               max_catalog_tools: pos_integer(),
@@ -137,7 +141,7 @@ defmodule PtcRunner.Kernel.HostConfig do
                 optional(:seed) => non_neg_integer(),
                 optional(:max_tokens) => pos_integer()
               },
-              installation_revision: binary() | nil,
+              installation_revision: binary(),
               ceilings: %{
                 max_request_bytes: pos_integer(),
                 max_response_bytes: pos_integer()
@@ -148,7 +152,7 @@ defmodule PtcRunner.Kernel.HostConfig do
           | %{
               source: :llm_replay,
               fixtures: binary(),
-              installation_revision: binary() | nil,
+              installation_revision: binary(),
               ceilings: %{max_entries: pos_integer(), max_result_bytes: pos_integer()},
               data_class: :normal | :private_inspection,
               accepts_data: [:normal | :private_inspection]
@@ -156,6 +160,7 @@ defmodule PtcRunner.Kernel.HostConfig do
           | %{
               source: :ptc_trace_snapshot,
               directory: binary(),
+              installation_revision: binary(),
               ceilings: %{
                 max_source_bytes: pos_integer(),
                 max_result_bytes: pos_integer()
@@ -164,6 +169,7 @@ defmodule PtcRunner.Kernel.HostConfig do
           | %{
               source: :ptc_inspection_snapshot,
               directory: binary(),
+              installation_revision: binary(),
               ceilings: %{
                 max_files: pos_integer(),
                 max_source_bytes: pos_integer(),
@@ -216,6 +222,7 @@ defmodule PtcRunner.Kernel.HostConfig do
           | {:error,
              :host_unavailable
              | :host_invalid
+             | {:installation_revision_missing, binary()}
              | {:host_schema_invalid, [PtcRunner.Kernel.CommandPath.segment()]}
              | {:installed_limit_invalid, [PtcRunner.Kernel.CommandPath.segment()]}}
   def load_command(path) when is_binary(path) do
@@ -257,6 +264,7 @@ defmodule PtcRunner.Kernel.HostConfig do
 
       {:error, {code, _detail}} = error
       when code in [
+             :installation_revision_missing,
              :host_schema_invalid,
              :installed_limit_invalid
            ] ->
@@ -298,7 +306,8 @@ defmodule PtcRunner.Kernel.HostConfig do
 
   @doc false
   def decode_command(value, directory) when is_map(value) and is_binary(directory) do
-    with :ok <- validate_command_schema(value),
+    with :ok <- require_installation_revisions(value),
+         :ok <- validate_command_schema(value),
          :ok <-
            schema_result(
              exact_keys(value, ~w($schema runtime limits credentials install), ~w(install)),
@@ -334,6 +343,28 @@ defmodule PtcRunner.Kernel.HostConfig do
   end
 
   def decode_command(_value, _directory), do: {:error, {:host_schema_invalid, []}}
+
+  defp require_installation_revisions(%{"install" => installations})
+       when is_map(installations) do
+    installations
+    |> Map.keys()
+    |> Enum.sort()
+    |> Enum.find(fn name ->
+      case Map.get(installations, name) do
+        installation when is_map(installation) ->
+          valid_name?(name) and not Map.has_key?(installation, "installation_revision")
+
+        _invalid ->
+          false
+      end
+    end)
+    |> case do
+      nil -> :ok
+      name -> {:error, {:installation_revision_missing, name}}
+    end
+  end
+
+  defp require_installation_revisions(_value), do: :ok
 
   defp schema_result(:ok, _segments), do: :ok
 
@@ -603,13 +634,18 @@ defmodule PtcRunner.Kernel.HostConfig do
     allowed =
       ~w(source transport tools snapshot_identity installation_revision ceilings data_class accepts_data)
 
-    with :ok <- exact_keys(value, allowed, ~w(source transport tools)),
+    with :ok <-
+           exact_keys(
+             value,
+             allowed,
+             ~w(source transport tools installation_revision)
+           ),
          {:ok, transport} <- transport(value["transport"], credentials),
          {:ok, tools} <- tools(value["tools"]),
          {:ok, snapshot_identity} <-
            snapshot_identity(Map.get(value, "snapshot_identity"), tools),
          {:ok, installation_revision} <-
-           optional_revision(Map.get(value, "installation_revision")),
+           revision(value["installation_revision"]),
          {:ok, ceilings} <- ceilings(Map.get(value, "ceilings", %{})),
          {:ok, data_class} <- data_class(Map.get(value, "data_class", "normal")),
          {:ok, accepts_data} <-
@@ -634,7 +670,12 @@ defmodule PtcRunner.Kernel.HostConfig do
     allowed =
       ~w(source model credential cache params installation_revision ceilings data_class accepts_data)
 
-    with :ok <- exact_keys(value, allowed, ~w(source model credential)),
+    with :ok <-
+           exact_keys(
+             value,
+             allowed,
+             ~w(source model credential installation_revision)
+           ),
          model when is_binary(model) <- value["model"],
          true <- valid_string?(model, 256),
          credential when is_binary(credential) <- value["credential"],
@@ -642,7 +683,7 @@ defmodule PtcRunner.Kernel.HostConfig do
          cache when is_boolean(cache) <- Map.get(value, "cache", false),
          {:ok, params} <- llm_params(Map.get(value, "params", %{})),
          {:ok, installation_revision} <-
-           optional_revision(Map.get(value, "installation_revision")),
+           revision(value["installation_revision"]),
          {:ok, ceilings} <- llm_ceilings(Map.get(value, "ceilings", %{})),
          {:ok, data_class} <- data_class(Map.get(value, "data_class", "normal")),
          {:ok, accepts_data} <-
@@ -691,14 +732,21 @@ defmodule PtcRunner.Kernel.HostConfig do
   end
 
   defp trace_snapshot_installation(value) do
-    with :ok <- exact_keys(value, ~w(source directory ceilings), ~w(source directory)),
+    with :ok <-
+           exact_keys(
+             value,
+             ~w(source directory installation_revision ceilings),
+             ~w(source directory installation_revision)
+           ),
          directory when is_binary(directory) <- value["directory"],
          true <- valid_path_string?(directory),
+         {:ok, installation_revision} <- revision(value["installation_revision"]),
          {:ok, ceilings} <- trace_snapshot_ceilings(Map.get(value, "ceilings", %{})) do
       {:ok,
        %{
          source: :ptc_trace_snapshot,
          directory: directory,
+         installation_revision: installation_revision,
          ceilings: ceilings
        }}
     else
@@ -731,11 +779,12 @@ defmodule PtcRunner.Kernel.HostConfig do
   defp llm_replay_installation(value) do
     allowed = ~w(source fixtures installation_revision ceilings data_class accepts_data)
 
-    with :ok <- exact_keys(value, allowed, ~w(source fixtures)),
+    with :ok <-
+           exact_keys(value, allowed, ~w(source fixtures installation_revision)),
          fixtures when is_binary(fixtures) <- value["fixtures"],
          true <- valid_path_string?(fixtures),
          {:ok, installation_revision} <-
-           optional_revision(Map.get(value, "installation_revision")),
+           revision(value["installation_revision"]),
          {:ok, ceilings} <- llm_replay_ceilings(Map.get(value, "ceilings", %{})),
          {:ok, data_class} <- data_class(Map.get(value, "data_class", "normal")),
          {:ok, accepts_data} <- accepts_data(Map.get(value, "accepts_data", ["normal"])) do
@@ -770,14 +819,21 @@ defmodule PtcRunner.Kernel.HostConfig do
   defp llm_replay_ceilings(_value), do: {:error, :invalid_ceilings}
 
   defp inspection_snapshot_installation(value) do
-    with :ok <- exact_keys(value, ~w(source directory ceilings), ~w(source directory)),
+    with :ok <-
+           exact_keys(
+             value,
+             ~w(source directory installation_revision ceilings),
+             ~w(source directory installation_revision)
+           ),
          directory when is_binary(directory) <- value["directory"],
          true <- valid_path_string?(directory),
+         {:ok, installation_revision} <- revision(value["installation_revision"]),
          {:ok, ceilings} <- inspection_snapshot_ceilings(Map.get(value, "ceilings", %{})) do
       {:ok,
        %{
          source: :ptc_inspection_snapshot,
          directory: directory,
+         installation_revision: installation_revision,
          ceilings: ceilings
        }}
     else
@@ -999,10 +1055,8 @@ defmodule PtcRunner.Kernel.HostConfig do
   defp tool_effect("read"), do: :read
   defp tool_effect("write"), do: :write
 
-  defp optional_revision(nil), do: {:ok, nil}
-
-  defp optional_revision(value) do
-    if valid_string?(value, 256),
+  defp revision(value) do
+    if is_binary(value) and value =~ @installation_revision,
       do: {:ok, value},
       else: {:error, :invalid_installation_revision}
   end
@@ -1238,12 +1292,12 @@ defmodule PtcRunner.Kernel.HostConfig do
             %{"tool" => name_schema(), "field" => name_schema()},
             ["tool", "field"]
           ),
-        "installation_revision" => bounded_string(256),
+        "installation_revision" => installation_revision_schema(),
         "ceilings" => ceilings_schema(),
         "data_class" => data_class_schema(),
         "accepts_data" => accepts_data_schema()
       },
-      ["source", "transport", "tools"]
+      ["source", "transport", "tools", "installation_revision"]
     )
   end
 
@@ -1272,12 +1326,12 @@ defmodule PtcRunner.Kernel.HostConfig do
               "maximum" => @max_llm_tokens
             }
           }),
-        "installation_revision" => bounded_string(256),
+        "installation_revision" => installation_revision_schema(),
         "ceilings" => llm_ceilings_schema(),
         "data_class" => data_class_schema(),
         "accepts_data" => accepts_data_schema()
       },
-      ["source", "model", "credential"]
+      ["source", "model", "credential", "installation_revision"]
     )
   end
 
@@ -1286,6 +1340,7 @@ defmodule PtcRunner.Kernel.HostConfig do
       %{
         "source" => %{"const" => "ptc_trace_snapshot"},
         "directory" => path_schema(),
+        "installation_revision" => installation_revision_schema(),
         "ceilings" =>
           closed_object(%{
             "max_source_bytes" => %{
@@ -1302,7 +1357,7 @@ defmodule PtcRunner.Kernel.HostConfig do
             }
           })
       },
-      ["source", "directory"]
+      ["source", "directory", "installation_revision"]
     )
   end
 
@@ -1311,7 +1366,7 @@ defmodule PtcRunner.Kernel.HostConfig do
       %{
         "source" => %{"const" => "llm_replay"},
         "fixtures" => path_schema(),
-        "installation_revision" => bounded_string(256),
+        "installation_revision" => installation_revision_schema(),
         "ceilings" =>
           closed_object(%{
             "max_entries" => %{
@@ -1330,7 +1385,7 @@ defmodule PtcRunner.Kernel.HostConfig do
         "data_class" => data_class_schema(),
         "accepts_data" => accepts_data_schema()
       },
-      ["source", "fixtures"]
+      ["source", "fixtures", "installation_revision"]
     )
   end
 
@@ -1339,6 +1394,7 @@ defmodule PtcRunner.Kernel.HostConfig do
       %{
         "source" => %{"const" => "ptc_inspection_snapshot"},
         "directory" => path_schema(),
+        "installation_revision" => installation_revision_schema(),
         "ceilings" =>
           closed_object(%{
             "max_files" => %{
@@ -1361,7 +1417,7 @@ defmodule PtcRunner.Kernel.HostConfig do
             }
           })
       },
-      ["source", "directory"]
+      ["source", "directory", "installation_revision"]
     )
   end
 
@@ -1645,6 +1701,8 @@ defmodule PtcRunner.Kernel.HostConfig do
 
   defp name_schema,
     do: %{"type" => "string", "pattern" => "^[a-z][a-z0-9._-]{0,127}$"}
+
+  defp installation_revision_schema, do: name_schema()
 
   defp environment_name_schema,
     do: %{"type" => "string", "pattern" => "^[A-Za-z_][A-Za-z0-9_]*$"}

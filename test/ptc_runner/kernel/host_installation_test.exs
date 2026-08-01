@@ -3,14 +3,21 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
 
   alias PtcRunner.Kernel.HostConfig
   alias PtcRunner.Kernel.HostInstallation
+  alias PtcRunner.Kernel.InstallationCatalog
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.ProviderRegistry
   alias PtcRunner.Kernel.RunBuilder
+  alias PtcRunner.Kernel.SelectionRules
 
   @tag :tmp_dir
   test "installs only declared aliases and enforces MCP mission placement", %{tmp_dir: dir} do
     host = load_host(dir, http_config())
-    assert {:ok, registry} = HostInstallation.registry(host)
+
+    assert {:ok, registry} =
+             HostInstallation.catalog(host)
+             |> then(fn {:ok, catalog} ->
+               InstallationCatalog.runtime_registry(catalog)
+             end)
 
     context = context(dir, :mission)
 
@@ -27,6 +34,118 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
                context
                | destination: :workflow
              })
+  end
+
+  @tag :tmp_dir
+  test "prepared host callbacks retain only opaque installation authority", %{tmp_dir: dir} do
+    host = load_host(dir, http_config())
+
+    assert {:ok, registry} =
+             HostInstallation.catalog(host)
+             |> then(fn {:ok, catalog} ->
+               InstallationCatalog.runtime_registry(catalog)
+             end)
+
+    assert {:ok, prepared} =
+             ProviderRegistry.prepare(registry, "remote", %{}, context(dir, :mission))
+
+    assert {:ok, preflighted} = ProviderRegistry.preflight(prepared)
+
+    for callback <- [prepared.preflight, preflighted.acquire] do
+      {:env, environment} = :erlang.fun_info(callback, :env)
+      captured = :erlang.term_to_binary(environment)
+
+      refute captured =~ dir
+      refute captured =~ "test-secret"
+      refute captured =~ "https://example.test/mcp"
+    end
+
+    assert :ok = ProviderRegistry.close(registry)
+  end
+
+  test "normalized preflight release runs at most once across overlapping cleanup paths" do
+    releases = :atomics.new(1, signed: false)
+    :ok = :atomics.put(releases, 1, 0)
+
+    prepared = %{
+      credential_names: [],
+      data_class: :normal,
+      accepts_data: [:normal],
+      requires: [],
+      provides: [],
+      workflow_llm?: false,
+      preflight: fn ->
+        {:ok, fn %{} -> {:error, :fixture_acquisition_failed} end,
+         fn ->
+           :atomics.add(releases, 1, 1)
+           :ok
+         end}
+      end
+    }
+
+    assert {:ok, preflighted} = ProviderRegistry.preflight(prepared)
+
+    assert {:error, :fixture_acquisition_failed} =
+             ProviderRegistry.acquire(preflighted, %{})
+
+    assert :ok = ProviderRegistry.release_preflight(preflighted)
+    assert :ok = ProviderRegistry.release_preflight(preflighted)
+    assert :atomics.get(releases, 1) == 1
+  end
+
+  @tag :tmp_dir
+  test "failed constructions release every opaque preflight ticket", %{tmp_dir: dir} do
+    environment_name = "PTC_TEST_MISSING_PREFLIGHT_TICKET_CREDENTIAL"
+    previous = System.get_env(environment_name)
+    System.delete_env(environment_name)
+
+    on_exit(fn ->
+      if previous,
+        do: System.put_env(environment_name, previous),
+        else: System.delete_env(environment_name)
+    end)
+
+    File.write!(Path.join(dir, "workflow.clj"), "(ns app) (defn run [_] (return 1))")
+
+    manifest = %{
+      "version" => 1,
+      "workflow" => %{
+        "components" => [%{"id" => "app", "path" => "workflow.clj"}],
+        "entry" => "app/run"
+      },
+      "input" => %{"value" => %{}},
+      "providers" => %{"mission" => [%{"name" => "remote"}]}
+    }
+
+    manifest_path = Path.join(dir, "manifest.json")
+    File.write!(manifest_path, Jason.encode!(manifest))
+
+    config =
+      http_config()
+      |> put_in(["credentials", "token"], %{"env" => environment_name})
+
+    host = load_host(dir, config)
+
+    assert {:ok, registry} =
+             HostInstallation.catalog(host)
+             |> then(fn {:ok, catalog} -> InstallationCatalog.runtime_registry(catalog) end)
+
+    for _attempt <- 1..129 do
+      assert {:error, :credential_unavailable} =
+               RunBuilder.load_and_build(manifest_path, registry)
+    end
+
+    for _attempt <- 1..129 do
+      assert {:error, :credential_unavailable} =
+               ProviderRegistry.build(registry, "remote", %{}, context(dir, :mission))
+    end
+
+    assert {:ok, prepared} =
+             ProviderRegistry.prepare(registry, "remote", %{}, context(dir, :mission))
+
+    assert {:ok, preflighted} = ProviderRegistry.preflight(prepared)
+    assert :ok = ProviderRegistry.release_preflight(preflighted)
+    assert :ok = ProviderRegistry.close(registry)
   end
 
   @tag :tmp_dir
@@ -51,7 +170,12 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
       |> Map.put("limits", %{"subordinate_evaluations" => 24})
 
     host = load_host(dir, config)
-    assert {:ok, registry} = HostInstallation.registry(host)
+
+    assert {:ok, registry} =
+             HostInstallation.catalog(host)
+             |> then(fn {:ok, catalog} ->
+               InstallationCatalog.runtime_registry(catalog)
+             end)
 
     assert {:ok, built} = RunBuilder.load_and_build(manifest_path, registry)
     assert built.config.limits.subordinate_evaluations == 24
@@ -69,6 +193,7 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
       "install" => %{
         "invalid-model" => %{
           "source" => "llm",
+          "installation_revision" => "invalid-model-v1",
           "model" => "definitely-not-a-model",
           "credential" => "missing_key"
         }
@@ -76,15 +201,62 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
     }
 
     host = load_host(dir, config)
-    assert {:ok, registry} = HostInstallation.registry(host)
 
-    assert {:error, :invalid_llm_model} =
-             ProviderRegistry.build(
-               registry,
-               "invalid-model",
-               %{},
-               context(dir, :workflow)
-             )
+    assert_local_preflight_parity(
+      host,
+      "invalid-model",
+      :workflow,
+      {:error, :invalid_llm_model}
+    )
+  end
+
+  @tag :tmp_dir
+  test "audited local preflight matches missing LLM adapters and stdio runtime files", %{
+    tmp_dir: dir
+  } do
+    previous_adapter = Application.get_env(:ptc_runner, :llm_adapter)
+    Application.put_env(:ptc_runner, :llm_adapter, PtcRunner.TestSupport.MissingLLMAdapter)
+
+    on_exit(fn -> restore_env(:llm_adapter, previous_adapter) end)
+
+    llm_host =
+      load_host(dir, %{
+        "credentials" => %{"key" => %{"literal" => "not-read"}},
+        "install" => %{
+          "live" => %{
+            "source" => "llm",
+            "installation_revision" => "live-v1",
+            "model" => "openrouter:deepseek/deepseek-v4-flash",
+            "credential" => "key"
+          }
+        }
+      })
+
+    assert_local_preflight_parity(llm_host, "live", :workflow, {:error, :invalid_llm_model})
+
+    missing_executable_host =
+      stdio_config("/definitely/missing-ptc-server")
+      |> put_in(["runtime", "stdio_launcher"], System.find_executable("sh"))
+      |> then(&load_host(Path.join(dir, "missing-executable"), &1))
+
+    assert_local_preflight_parity(
+      missing_executable_host,
+      "workspace",
+      :mission,
+      {:error, :invalid_mcp_executable}
+    )
+
+    missing_launcher_host =
+      stdio_config(System.find_executable("sh"))
+      |> put_in(["runtime", "stdio_launcher"], "/definitely/missing-ptc-launcher")
+      |> then(&load_host(Path.join(dir, "missing-launcher"), &1))
+
+    assert_local_preflight_parity(
+      missing_launcher_host,
+      "workspace",
+      :mission,
+      {:error, :mcp_stdio_launcher_unavailable}
+    )
   end
 
   @tag :tmp_dir
@@ -120,7 +292,13 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
     }
 
     host = load_host(dir, config)
-    assert {:ok, registry} = HostInstallation.registry(host)
+
+    assert {:ok, registry} =
+             HostInstallation.catalog(host)
+             |> then(fn {:ok, catalog} ->
+               InstallationCatalog.runtime_registry(catalog)
+             end)
+
     workflow = context(dir, :workflow)
 
     assert {:ok, prepared} =
@@ -159,20 +337,24 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
     assert built.accepts_data == [:normal, :private_inspection]
     assert built.data_class == :normal
     assert built.snapshot["provider"] == "deepseek"
-    assert built.snapshot["source"] == "llm"
-    assert built.snapshot["model"] == "openrouter:deepseek/deepseek-v4-flash"
-    assert built.snapshot["cache"] == false
+    assert built.snapshot["acquisition"] == %{"source" => "llm"}
 
-    assert built.snapshot["params"] == %{
-             "temperature" => 0.15,
-             "seed" => 73,
-             "max_tokens" => 2_048
+    assert built.snapshot["declaration"] == %{
+             "name" => "deepseek",
+             "source" => "llm",
+             "installation_revision" => "model-policy-v2",
+             "data_class" => "normal",
+             "accepts_data" => ["normal", "private_inspection"],
+             "authorization_mode" => "none",
+             "config" => %{
+               "max_request_bytes" => 100_000,
+               "max_response_bytes" => 300_000
+             }
            }
 
-    assert built.snapshot["installation_revision"] == "model-policy-v2"
-    assert built.snapshot["max_request_bytes"] == 100_000
-    assert built.snapshot["max_response_bytes"] == 300_000
+    assert built.snapshot["acquisition_identity_hash"] =~ ~r/\A[0-9a-f]{64}\z/
     assert built.snapshot["snapshot_hash"] =~ ~r/\A[0-9a-f]{64}\z/
+    refute inspect(built.snapshot) =~ "openrouter"
     refute inspect(built.snapshot) =~ "test-llm-secret"
 
     assert {:ok, response} =
@@ -192,13 +374,94 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
   end
 
   @tag :tmp_dir
+  test "live LLM connectivity probe makes exactly one bounded completion request", %{
+    tmp_dir: dir
+  } do
+    previous_adapter = Application.get_env(:ptc_runner, :llm_adapter)
+    previous_owner = Application.get_env(:ptc_runner, :host_llm_test_owner)
+    previous_result = Application.get_env(:ptc_runner, :host_llm_test_result)
+    previous_warm_words = Application.get_env(:ptc_runner, :host_llm_test_warm_words)
+    Application.put_env(:ptc_runner, :llm_adapter, PtcRunner.TestSupport.HostLLMAdapter)
+    Application.put_env(:ptc_runner, :host_llm_test_owner, self())
+    Application.put_env(:ptc_runner, :host_llm_test_warm_words, 100_000)
+
+    on_exit(fn ->
+      restore_env(:llm_adapter, previous_adapter)
+      restore_env(:host_llm_test_owner, previous_owner)
+      restore_env(:host_llm_test_result, previous_result)
+      restore_env(:host_llm_test_warm_words, previous_warm_words)
+    end)
+
+    host =
+      load_host(dir, %{
+        "credentials" => %{"key" => %{"literal" => "probe-secret"}},
+        "install" => %{
+          "live" => %{
+            "source" => "llm",
+            "installation_revision" => "live-v1",
+            "model" => "openrouter:deepseek/deepseek-v4-flash",
+            "credential" => "key",
+            "params" => %{"max_tokens" => 99}
+          }
+        }
+      })
+
+    assert {:ok, catalog} = HostInstallation.catalog(host)
+    descriptor = catalog.descriptors["live"]
+    implementation = catalog.implementations["live"]
+
+    probe_context =
+      dir
+      |> context(:workflow)
+      |> update_in([:limits], &Map.put(&1, :provider_heap_words, 20_000))
+
+    assert descriptor.local_preflight == :audited_local
+    assert descriptor.connectivity_mode == :probe
+    assert descriptor.probe_effect == :completion
+    assert is_function(implementation.local_preflight, 2)
+    assert is_function(implementation.connectivity_probe, 2)
+
+    assert {:ok, selection} =
+             SelectionRules.normalize(descriptor.selection_rules, %{}, probe_context.limits)
+
+    assert :ok = implementation.local_preflight.(selection, probe_context)
+    assert :ok = implementation.connectivity_probe.(selection, probe_context)
+
+    assert_receive {:host_llm_ensure_ready, warmup_pid}
+    assert_receive {:host_llm_request, "openrouter:deepseek/deepseek-v4-flash", request}
+    request_pid = Map.fetch!(request, :probe_pid)
+    refute warmup_pid == request_pid
+    assert request.api_key == "probe-secret"
+    assert request.cache == false
+    assert request.max_tokens == 1
+    assert request.max_retries == 0
+    assert request.req_http_options == [retry: false, redirect: false, max_retries: 0]
+    assert [%{role: :user, content: "Health check."}] = request.messages
+    refute_receive {:host_llm_request, _, _}
+
+    Application.put_env(:ptc_runner, :host_llm_test_result, {:error, :unavailable})
+
+    assert {:error, :llm_connectivity_unavailable} =
+             implementation.connectivity_probe.(selection, probe_context)
+
+    assert_receive {:host_llm_request, "openrouter:deepseek/deepseek-v4-flash", _request}
+    refute_receive {:host_llm_request, _, _}
+    assert :ok = InstallationCatalog.close(catalog)
+  end
+
+  @tag :tmp_dir
   test "preflight freezes local stdio paths before resolving credentials", %{tmp_dir: dir} do
     config =
       stdio_config(System.find_executable("sh"))
       |> put_in(["runtime", "stdio_launcher"], System.find_executable("sh"))
 
     host = load_host(dir, config)
-    assert {:ok, registry} = HostInstallation.registry(host)
+
+    assert {:ok, registry} =
+             HostInstallation.catalog(host)
+             |> then(fn {:ok, catalog} ->
+               InstallationCatalog.runtime_registry(catalog)
+             end)
 
     assert {:ok, prepared} =
              ProviderRegistry.prepare(registry, "workspace", %{}, context(dir, :mission))
@@ -214,7 +477,13 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
   @tag :tmp_dir
   test "selection can only narrow installed visibility and ceilings", %{tmp_dir: dir} do
     host = load_host(dir, http_config())
-    assert {:ok, registry} = HostInstallation.registry(host)
+
+    assert {:ok, registry} =
+             HostInstallation.catalog(host)
+             |> then(fn {:ok, catalog} ->
+               InstallationCatalog.runtime_registry(catalog)
+             end)
+
     context = context(dir, :mission)
 
     assert {:ok, _prepared} =
@@ -243,6 +512,92 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
   end
 
   @tag :tmp_dir
+  test "runtime MCP normalization matches the declarative canonical set order", %{tmp_dir: dir} do
+    host = load_host(dir, http_config())
+    assert {:ok, catalog} = HostInstallation.catalog(host)
+
+    selection = %{
+      "allow" => ["remote.read", "remote.hidden"],
+      "model_visible" => ["remote.read"]
+    }
+
+    runtime =
+      HostInstallation.normalize_selection(
+        host.install["remote"],
+        selection,
+        context(dir, :mission)
+      )
+
+    declarative =
+      SelectionRules.normalize(
+        catalog.descriptors["remote"].selection_rules,
+        selection,
+        context(dir, :mission).limits
+      )
+
+    assert runtime == declarative
+
+    assert {:ok, %{"allow" => ["remote.hidden", "remote.read"]}} =
+             then(runtime, fn {:ok, normalized} -> {:ok, Map.take(normalized, ["allow"])} end)
+
+    assert :ok = InstallationCatalog.close(catalog)
+  end
+
+  @tag :tmp_dir
+  test "catalog callbacks are revoked and registry callbacks rebound on transfer", %{tmp_dir: dir} do
+    host = load_host(dir, http_config())
+    assert {:ok, catalog} = HostInstallation.catalog(host)
+
+    stale_builder = catalog.implementations["remote"].builder
+    stale_credentials = catalog.credential_resolver
+    runtime_context = context(dir, :mission)
+
+    assert {:ok, registry} = InstallationCatalog.runtime_registry(catalog)
+
+    assert {:error, :invalid_host_installation} = stale_builder.(%{}, runtime_context)
+    assert {:error, :invalid_host_installation} = stale_credentials.(["token"])
+
+    assert {:ok, prepared} =
+             ProviderRegistry.prepare(registry, "remote", %{}, runtime_context)
+
+    assert prepared.credential_names == ["token"]
+
+    assert {:ok, %{"token" => "test-secret"}} =
+             ProviderRegistry.resolve_credentials(registry, ["token"])
+
+    assert :ok = ProviderRegistry.close(registry)
+  end
+
+  @tag :tmp_dir
+  test "installation owner status and crash reports redact host credentials", %{tmp_dir: dir} do
+    sentinel = "HOST_OWNER_SECRET_7b412"
+
+    host =
+      load_host(
+        dir,
+        put_in(http_config(), ["credentials", "token", "literal"], sentinel)
+      )
+
+    assert {:ok, catalog} = HostInstallation.catalog(host)
+    owner = catalog.owner.pid
+
+    refute inspect(:sys.get_status(owner), limit: :infinity, printable_limit: :infinity) =~
+             sentinel
+
+    monitor = Process.monitor(owner)
+
+    log =
+      ExUnit.CaptureLog.capture_log(fn ->
+        assert :ok = GenServer.stop(owner, :privacy_probe)
+        assert_receive {:DOWN, ^monitor, :process, ^owner, :privacy_probe}
+        Logger.flush()
+      end)
+
+    refute log =~ sentinel
+    assert :ok = InstallationCatalog.close(catalog)
+  end
+
+  @tag :tmp_dir
   test "write-bearing MCP installations require an explicit non-empty allow list", %{tmp_dir: dir} do
     config =
       http_config()
@@ -256,7 +611,13 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
       )
 
     host = load_host(dir, config)
-    assert {:ok, registry} = HostInstallation.registry(host)
+
+    assert {:ok, registry} =
+             HostInstallation.catalog(host)
+             |> then(fn {:ok, catalog} ->
+               InstallationCatalog.runtime_registry(catalog)
+             end)
+
     context = context(dir, :mission)
 
     assert {:error, :invalid_mcp_selection} =
@@ -301,6 +662,7 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
       "install" => %{
         "history" => %{
           "source" => "ptc_trace_snapshot",
+          "installation_revision" => "trace-snapshot-v1",
           "directory" => "traces",
           "ceilings" => %{
             "max_source_bytes" => 2_000_000,
@@ -311,7 +673,13 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
     }
 
     host = load_host(dir, config)
-    assert {:ok, registry} = HostInstallation.registry(host)
+
+    assert {:ok, registry} =
+             HostInstallation.catalog(host)
+             |> then(fn {:ok, catalog} ->
+               InstallationCatalog.runtime_registry(catalog)
+             end)
+
     mission = context(dir, :mission)
 
     assert {:error, :provider_destination_denied} =
@@ -373,8 +741,9 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
     assert built.data_class == :normal
     assert built.accepts_data == [:normal, :private_inspection]
     assert built.snapshot["provider"] == "history"
-    assert built.snapshot["source"] == "ptc_trace_snapshot"
-    assert built.snapshot["run_count"] == 1
+    assert built.snapshot["declaration"]["source"] == "ptc_trace_snapshot"
+    assert built.snapshot["declaration"]["installation_revision"] == "trace-snapshot-v1"
+    assert built.snapshot["acquisition"]["run_count"] == 1
     assert built.snapshot["snapshot_hash"] =~ ~r/\A[0-9a-f]{64}\z/
     assert built.snapshot["content_snapshot_hash"] == content_snapshot_hash
     refute inspect(built.snapshot) =~ dir
@@ -391,7 +760,12 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
       |> put_in(["install", "remote", "accepts_data"], ["private_inspection"])
 
     host = load_host(dir, config)
-    assert {:ok, registry} = HostInstallation.registry(host)
+
+    assert {:ok, registry} =
+             HostInstallation.catalog(host)
+             |> then(fn {:ok, catalog} ->
+               InstallationCatalog.runtime_registry(catalog)
+             end)
 
     assert {:ok, prepared} =
              ProviderRegistry.prepare(registry, "remote", %{}, context(dir, :mission))
@@ -418,6 +792,7 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
       "install" => %{
         "remote" => %{
           "source" => "mcp",
+          "installation_revision" => "remote-v1",
           "transport" => %{
             "type" => "streamable_http",
             "endpoint" => "https://example.test/mcp",
@@ -447,6 +822,7 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
       "install" => %{
         "workspace" => %{
           "source" => "mcp",
+          "installation_revision" => "stdio-v1",
           "transport" => %{
             "type" => "stdio",
             "command" => command,
@@ -463,10 +839,30 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
   end
 
   defp load_host(dir, body) do
+    File.mkdir_p!(dir)
     path = Path.join(dir, "host.json")
     File.write!(path, Jason.encode!(body))
     {:ok, host} = HostConfig.load(path)
     host
+  end
+
+  defp assert_local_preflight_parity(host, name, destination, expected) do
+    assert {:ok, catalog} = HostInstallation.catalog(host)
+    descriptor = Map.fetch!(catalog.descriptors, name)
+    implementation = Map.fetch!(catalog.implementations, name)
+    provider_context = context(host.directory, destination)
+
+    assert descriptor.local_preflight == :audited_local
+    assert is_function(implementation.local_preflight, 2)
+
+    assert {:ok, selection} =
+             SelectionRules.normalize(descriptor.selection_rules, %{}, provider_context.limits)
+
+    assert ^expected = implementation.local_preflight.(selection, provider_context)
+    assert {:ok, registry} = InstallationCatalog.runtime_registry(catalog)
+    assert {:ok, prepared} = ProviderRegistry.prepare(registry, name, selection, provider_context)
+    assert ^expected = ProviderRegistry.preflight(prepared)
+    assert :ok = ProviderRegistry.close(registry)
   end
 
   defp restore_env(key, nil), do: Application.delete_env(:ptc_runner, key)

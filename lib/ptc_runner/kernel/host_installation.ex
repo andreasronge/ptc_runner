@@ -1,16 +1,18 @@
 defmodule PtcRunner.Kernel.HostInstallation do
   @moduledoc """
-  Turns one strict host document into a staged provider registry.
+  Turns one strict host document into an inert installation catalog.
 
-  The returned registry contains exactly the aliases installed by the host
-  document. Manifest selections cannot fall back to the legacy implicit
-  built-ins. MCP installations prepare selection and placement without I/O,
-  preflight local executable and launcher identity without reading
-  credentials, and only then render the once-resolved credentials while
-  acquiring the transport and catalog. Live LLM installations use the same
-  barrier: model resolution precedes credential access, while the acquired
-  capability receives its key explicitly and records only non-secret model
-  policy in a deterministic provider snapshot. Native trace acquisition
+  The catalog contains exactly the aliases installed by the host document.
+  Each alias pairs a sealed, declarative descriptor with a trusted
+  implementation that phase 5 cannot inspect or invoke. Construction does not
+  resolve credentials, inspect local paths, start applications, claim OAuth
+  authority for a principal, or perform provider work. Manifest selections
+  cannot fall back to implicit built-ins.
+
+  Later runtime phases preflight local executable and launcher identity without
+  reading credentials, then render once-resolved credentials while acquiring
+  the provider. Live LLM model resolution likewise precedes credential access.
+  Native trace acquisition
   exports its opaque frozen handle only to a selected inspection source, so
   private artifacts validate against the exact already-captured canonical
   source without reopening trace paths or exposing owner handles in metadata.
@@ -19,31 +21,33 @@ defmodule PtcRunner.Kernel.HostInstallation do
   transport acquisition. Omitting `allow` is permitted only for an all-read
   installation.
 
-  Every safe provider snapshot's bare-hex `snapshot_hash` attests the
-  provider-specific non-secret identity projection from which it is calculated,
-  including the effective ceilings present in that projection. It does not
-  automatically cover the provider alias, data-class policy, or fields that a
-  provider deliberately excludes. A frozen-content provider additionally
+  Every public provider snapshot separates the safe declaration projection
+  from bounded runtime-captured acquisition facts. `acquisition_identity_hash`
+  covers the latter and bare-hex `snapshot_hash` covers both. Raw model
+  selectors, endpoints, commands, paths, credentials, and private OAuth
+  authority never enter either projection. A frozen-content provider also
   publishes an algorithm-qualified `content_snapshot_hash`; native query
-  results call that content identity `snapshot_hash` so citations can copy the
-  source's own field unchanged. The two hashes deliberately have different
-  scopes and are not equal.
+  results copy that content identity unchanged for citations.
   """
 
+  alias PtcRunner.Kernel.BoundedWorker
   alias PtcRunner.Kernel.ConfinedFile
-  alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.HostConfig
+  alias PtcRunner.Kernel.HostInstallationAuthority
+  alias PtcRunner.Kernel.HostInstallationOwner
   alias PtcRunner.Kernel.InspectionCapability
   alias PtcRunner.Kernel.InspectionSnapshot
+  alias PtcRunner.Kernel.InstallationCatalog
   alias PtcRunner.Kernel.LLMCapability
   alias PtcRunner.Kernel.LLMReplay
   alias PtcRunner.Kernel.MCPOAuth.Authority
-  alias PtcRunner.Kernel.MCPOAuth.Context, as: OAuthContext
   alias PtcRunner.Kernel.MCPOAuth.ManagerCleanup
-  alias PtcRunner.Kernel.MCPOAuth.Store
   alias PtcRunner.Kernel.MCPOAuth.TokenManager
   alias PtcRunner.Kernel.MCPSource
+  alias PtcRunner.Kernel.ProviderDescriptor
   alias PtcRunner.Kernel.ProviderRegistry
+  alias PtcRunner.Kernel.ProviderSnapshot
+  alias PtcRunner.Kernel.SelectionRules
   alias PtcRunner.Kernel.TraceCapability
   alias PtcRunner.Kernel.TraceSnapshot
 
@@ -53,112 +57,446 @@ defmodule PtcRunner.Kernel.HostInstallation do
   @max_launcher_bytes 16_777_216
   @launcher_protocol_version 1
 
-  @doc "Builds the closed provider registry installed by a loaded host document."
-  @spec registry(HostConfig.t()) ::
-          {:ok, ProviderRegistry.t()}
-          | {:error, :invalid_host_installation | :authorization_context_required}
-  def registry(%HostConfig{} = host) do
-    if oauth_installations(host) == [] do
-      build_registry(host, %{})
-    else
-      {:error, :authorization_context_required}
-    end
-  end
-
-  def registry(_host), do: {:error, :invalid_host_installation}
-
   @doc """
-  Builds a registry with one explicit principal-scoped authorization context.
+  Builds the inert declaration catalog installed by a loaded host document.
 
-  Registry assembly atomically claims every OAuth installation in the supplied
-  store before a builder may load grant state. A collision changes nothing.
+  Construction does not claim OAuth authorities, resolve credentials, inspect
+  local paths, start applications, or invoke provider implementations.
   """
-  @spec registry(HostConfig.t(), OAuthContext.t()) ::
-          {:ok, ProviderRegistry.t()} | {:error, atom()}
-  def registry(%HostConfig{} = host, %OAuthContext{} = authorization_context) do
-    authorities = oauth_installations(host)
+  @spec catalog(HostConfig.t()) ::
+          {:ok, InstallationCatalog.t()} | {:error, :invalid_host_installation}
+  def catalog(%HostConfig{} = host) do
+    case HostInstallationOwner.start(host) do
+      {:ok, owner} ->
+        try do
+          registrations =
+            Enum.reduce_while(host.install, {:ok, %{}}, fn
+              {name, installation}, {:ok, acc} ->
+                case registration(owner, name, installation) do
+                  {:ok, registration} -> {:cont, {:ok, Map.put(acc, name, registration)}}
+                  {:error, _reason} -> {:halt, {:error, :invalid_host_installation}}
+                end
+            end)
 
-    claims =
-      Enum.map(authorities, fn {_alias, authority} ->
-        {authority.installation_id, authority.fingerprint}
-      end)
+          result =
+            with {:ok, registrations} <- registrations,
+                 {:ok, catalog} <-
+                   InstallationCatalog.new(registrations,
+                     credential_resolver:
+                       &HostInstallationAuthority.invoke(owner, {:credentials, &1}),
+                     installed_limits: host.limits,
+                     owner: owner
+                   ) do
+              {:ok, catalog}
+            else
+              _error -> {:error, :invalid_host_installation}
+            end
 
-    with {:ok, epochs} <-
-           Store.claim_authorities(
-             authorization_context.store,
-             authorization_context.tenant_id,
-             claims,
-             5_000
-           ) do
-      runtimes =
-        Map.new(authorities, fn {alias_name, authority} ->
-          {alias_name,
-           %{
-             authority: authority,
-             authority_epoch: Map.fetch!(epochs, authority.installation_id),
-             context: authorization_context
-           }}
-        end)
-
-      build_registry(host, runtimes)
-    end
-  end
-
-  def registry(_host, _authorization_context), do: {:error, :invalid_host_installation}
-
-  defp build_registry(host, oauth_runtimes) do
-    builders =
-      Map.new(host.install, fn {name, installation} ->
-        prepare = fn selection, context ->
-          prepare(
-            host,
-            installation,
-            selection,
-            context,
-            Map.get(oauth_runtimes, name)
-          )
+          if match?({:error, _reason}, result), do: HostInstallationAuthority.close(owner)
+          result
+        rescue
+          exception ->
+            HostInstallationAuthority.close(owner)
+            reraise exception, __STACKTRACE__
+        catch
+          kind, reason ->
+            HostInstallationAuthority.close(owner)
+            :erlang.raise(kind, reason, __STACKTRACE__)
         end
 
-        {name, ProviderRegistry.staged(prepare)}
-      end)
-
-    case ProviderRegistry.new(builders,
-           credential_resolver: &resolve_credentials(host, &1),
-           installed_limits: host.limits
-         ) do
-      {:ok, registry} -> {:ok, registry}
-      {:error, _reason} -> {:error, :invalid_host_installation}
+      {:error, _reason} ->
+        {:error, :invalid_host_installation}
     end
   end
 
-  defp prepare(host, %{source: :mcp} = installation, selection, context, oauth_runtime) do
+  def catalog(_host), do: {:error, :invalid_host_installation}
+
+  defp registration(owner, name, installation) do
+    authority = authority(installation)
+
+    with {:ok, rules} <- selection_rules(installation),
+         {:ok, descriptor} <- descriptor(installation, rules, authority) do
+      builder = runtime_builder(owner, name)
+
+      implementation =
+        %{builder: builder}
+        |> maybe_oauth_builder(owner, name, installation)
+        |> maybe_local_preflight(owner, name, installation)
+        |> maybe_connectivity_probe(owner, name, installation)
+
+      {:ok, %{descriptor: descriptor, implementation: implementation, authority: authority}}
+    end
+  end
+
+  defp maybe_oauth_builder(implementation, owner, name, %{source: :mcp} = installation) do
+    case authority(installation) do
+      %Authority{} ->
+        Map.put(implementation, :oauth_builder, fn selection, context, _oauth_runtime ->
+          runtime_builder(owner, name).(selection, context)
+        end)
+
+      nil ->
+        implementation
+    end
+  end
+
+  defp maybe_oauth_builder(implementation, _owner, _name, _installation), do: implementation
+
+  defp maybe_local_preflight(implementation, owner, name, installation) do
+    if local_preflight_mode(installation) == :audited_local do
+      Map.put(implementation, :local_preflight, fn selection, context ->
+        HostInstallationAuthority.invoke(owner, {:local_preflight, name, selection, context})
+      end)
+    else
+      implementation
+    end
+  end
+
+  defp maybe_connectivity_probe(implementation, owner, name, %{source: :llm}) do
+    Map.put(implementation, :connectivity_probe, fn selection, context ->
+      with {:ok, probe} <-
+             HostInstallationAuthority.invoke(
+               owner,
+               {:connectivity_probe, name, selection, context}
+             ) do
+        run_llm_connectivity_probe(probe)
+      end
+    end)
+  end
+
+  defp maybe_connectivity_probe(implementation, _owner, _name, _installation),
+    do: implementation
+
+  @doc false
+  def runtime_builder(%HostInstallationAuthority{} = owner, name) when is_binary(name) do
+    fn selection, context ->
+      prepare_through_owner(owner, name, selection, context)
+    end
+  end
+
+  defp prepare_through_owner(owner, name, selection, context) do
+    case HostInstallationAuthority.invoke(owner, {:prepare, name, selection, context}) do
+      {:ok, prepared} when is_map(prepared) ->
+        requires_services? = Map.get(prepared, :requires, []) != []
+
+        preflight = fn ->
+          preflight_through_owner(owner, name, selection, context, requires_services?)
+        end
+
+        {:ok, Map.put(prepared, :preflight, preflight)}
+
+      {:error, _reason} = error ->
+        error
+
+      _invalid ->
+        {:error, :invalid_host_installation}
+    end
+  end
+
+  defp preflight_through_owner(owner, name, selection, context, requires_services?) do
+    with {:ok, ticket} <-
+           HostInstallationAuthority.invoke(owner, {:preflight, name, selection, context}) do
+      acquisition_callbacks(owner, ticket, requires_services?)
+    end
+  end
+
+  defp acquisition_callbacks(owner, ticket, true) do
+    acquire = fn credentials, services ->
+      HostInstallationAuthority.invoke(owner, {:acquire, ticket, credentials, services})
+    end
+
+    {:ok, acquire, cancel_preflight_callback(owner, ticket)}
+  end
+
+  defp acquisition_callbacks(owner, ticket, false) do
+    acquire = fn credentials ->
+      HostInstallationAuthority.invoke(owner, {:acquire, ticket, credentials, %{}})
+    end
+
+    {:ok, acquire, cancel_preflight_callback(owner, ticket)}
+  end
+
+  defp cancel_preflight_callback(owner, ticket),
+    do: fn -> HostInstallationAuthority.invoke(owner, {:cancel_preflight, ticket}) end
+
+  @doc false
+  def owner_call(%HostConfig{} = host, {:prepare, name, selection, context, oauth_runtime}) do
+    case Map.fetch(host.install, name) do
+      {:ok, installation} -> prepare(host, installation, selection, context, oauth_runtime)
+      :error -> {:error, :invalid_host_installation}
+    end
+  end
+
+  def owner_call(%HostConfig{} = host, {:preflight, name, selection, context, oauth_runtime}) do
+    case Map.fetch(host.install, name) do
+      {:ok, installation} -> preflight(host, installation, selection, context, oauth_runtime)
+      :error -> {:error, :invalid_host_installation}
+    end
+  end
+
+  def owner_call(%HostConfig{} = host, {:local_preflight, name, selection, context}) do
+    case Map.fetch(host.install, name) do
+      {:ok, installation} -> local_preflight(host, installation, selection, context)
+      :error -> {:error, :invalid_host_installation}
+    end
+  end
+
+  def owner_call(%HostConfig{} = host, {:connectivity_probe, name, selection, context}) do
+    case Map.fetch(host.install, name) do
+      {:ok, %{source: :llm} = installation} ->
+        prepare_llm_connectivity_probe(host, installation, selection, context)
+
+      _missing_or_wrong_source ->
+        {:error, :invalid_host_installation}
+    end
+  end
+
+  def owner_call(%HostConfig{} = host, {:credentials, names}),
+    do: resolve_credentials(host, names)
+
+  def owner_call(_host, _request), do: {:error, :invalid_host_installation}
+
+  defp descriptor(installation, rules, authority) do
+    ProviderDescriptor.new(
+      source: installation.source,
+      installation_revision: installation.installation_revision,
+      credential_names: descriptor_credential_names(installation),
+      authorization_mode: authorization_mode(installation),
+      data_class: descriptor_data_class(installation),
+      accepts_data:
+        Map.get(installation, :accepts_data, snapshot_accepts_data(installation.source)),
+      requires: descriptor_requires(installation.source),
+      provides: descriptor_provides(installation.source),
+      destinations: descriptor_destinations(installation.source),
+      workflow_llm?: installation.source in [:llm, :llm_replay],
+      connectivity_mode: connectivity_mode(installation.source),
+      probe_effect: if(installation.source == :llm, do: :completion, else: nil),
+      selection_validation: :declarative,
+      selection_rules: rules,
+      authority_fingerprint: if(authority, do: authority.fingerprint, else: nil),
+      local_preflight: local_preflight_mode(installation)
+    )
+  end
+
+  defp descriptor_credential_names(%{source: :mcp, transport: transport}) do
+    case authority_from_transport(transport) do
+      %Authority{} -> []
+      nil -> credential_names(transport)
+    end
+  end
+
+  defp descriptor_credential_names(%{source: :llm, credential: credential}), do: [credential]
+  defp descriptor_credential_names(_installation), do: []
+
+  defp descriptor_data_class(%{source: :ptc_inspection_snapshot}),
+    do: :private_inspection
+
+  defp descriptor_data_class(installation), do: Map.get(installation, :data_class, :normal)
+
+  defp authorization_mode(%{source: :mcp, transport: transport}) do
+    if match?(%Authority{}, authority_from_transport(transport)), do: :oauth, else: :none
+  end
+
+  defp authorization_mode(_installation), do: :none
+
+  defp authority(%{source: :mcp, transport: transport}), do: authority_from_transport(transport)
+  defp authority(_installation), do: nil
+
+  defp authority_from_transport(%{oauth: %Authority{} = authority}), do: authority
+  defp authority_from_transport(_transport), do: nil
+
+  defp snapshot_accepts_data(source)
+       when source in [:ptc_trace_snapshot, :ptc_inspection_snapshot],
+       do: [:normal, :private_inspection]
+
+  defp snapshot_accepts_data(_source), do: [:normal]
+
+  defp descriptor_requires(:ptc_inspection_snapshot), do: [:canonical_trace_snapshot]
+  defp descriptor_requires(_source), do: []
+
+  defp descriptor_provides(:ptc_trace_snapshot), do: [:canonical_trace_snapshot]
+  defp descriptor_provides(_source), do: []
+
+  defp descriptor_destinations(source) when source in [:llm, :llm_replay], do: [:workflow]
+  defp descriptor_destinations(_source), do: [:mission]
+
+  defp connectivity_mode(:mcp), do: :acquisition
+  defp connectivity_mode(:llm), do: :probe
+  defp connectivity_mode(_source), do: :none
+
+  defp local_preflight_mode(%{source: :llm}), do: :audited_local
+  defp local_preflight_mode(%{source: :mcp, transport: %{type: :stdio}}), do: :audited_local
+  defp local_preflight_mode(_installation), do: :none
+
+  defp selection_rules(%{source: :mcp} = installation) do
+    public =
+      installation.tools
+      |> Map.values()
+      |> Map.new(&{&1.as, &1})
+
+    all = public |> Map.keys() |> Enum.sort()
+
+    visible =
+      public
+      |> Enum.filter(fn {_name, mapping} -> mapping.model_visible end)
+      |> Enum.map(&elem(&1, 0))
+      |> Enum.sort()
+
+    write =
+      public
+      |> Enum.reject(fn {_name, mapping} -> mapping.effect == :read end)
+      |> Enum.map(&elem(&1, 0))
+      |> Enum.sort()
+
+    SelectionRules.new(
+      fields: %{
+        "allow" => %{
+          type: {:unique_list, :string},
+          input: true,
+          default: {:named_set, "all"},
+          minimum_items: 1,
+          members: "all"
+        },
+        "max_result_bytes" => %{
+          type: :integer,
+          input: true,
+          default: installation.ceilings.max_result_bytes,
+          minimum: 1,
+          maximum: installation.ceilings.max_result_bytes
+        },
+        "model_visible" => %{
+          type: {:unique_list, :string},
+          input: true,
+          default: {:intersection, "allow", "visible"},
+          members: "visible"
+        },
+        "timeout_ms" => %{
+          type: :integer,
+          input: true,
+          default: installation.ceilings.timeout_ms,
+          minimum: 1,
+          maximum: installation.ceilings.timeout_ms
+        }
+      },
+      cross_rules: [
+        {:required_when_set_nonempty, "allow", "write"},
+        {:subset_of, "model_visible", "allow"},
+        {:ceiling_of_context_limit, "timeout_ms", :evaluation_timeout_ms},
+        {:ceiling_of_context_limit, "max_result_bytes", :capability_result_bytes}
+      ],
+      named_sets: %{"all" => all, "visible" => visible, "write" => write}
+    )
+  end
+
+  defp selection_rules(%{source: :llm} = installation) do
+    SelectionRules.new(
+      fields: %{
+        "max_request_bytes" => %{
+          type: :integer,
+          input: true,
+          default: installation.ceilings.max_request_bytes,
+          minimum: 1,
+          maximum: installation.ceilings.max_request_bytes
+        },
+        "max_response_bytes" => %{
+          type: :integer,
+          input: true,
+          default: installation.ceilings.max_response_bytes,
+          minimum: 1,
+          maximum: installation.ceilings.max_response_bytes
+        }
+      },
+      cross_rules: [
+        {:ceiling_of_context_limit, "max_request_bytes", :capability_argument_bytes},
+        {:ceiling_of_context_limit, "max_response_bytes", :capability_result_bytes}
+      ],
+      named_sets: %{}
+    )
+  end
+
+  defp selection_rules(%{source: :llm_replay} = installation) do
+    SelectionRules.new(
+      fields: %{
+        "max_entries" => %{
+          type: :integer,
+          input: false,
+          default: installation.ceilings.max_entries,
+          minimum: 1,
+          maximum: installation.ceilings.max_entries
+        },
+        "max_result_bytes" => %{
+          type: :integer,
+          input: true,
+          default: installation.ceilings.max_result_bytes,
+          minimum: 1,
+          maximum: installation.ceilings.max_result_bytes
+        }
+      },
+      cross_rules: [
+        {:ceiling_of_context_limit, "max_result_bytes", :capability_result_bytes}
+      ],
+      named_sets: %{}
+    )
+  end
+
+  defp selection_rules(%{source: :ptc_trace_snapshot} = installation) do
+    snapshot_selection_rules(installation, false)
+  end
+
+  defp selection_rules(%{source: :ptc_inspection_snapshot} = installation) do
+    snapshot_selection_rules(installation, true)
+  end
+
+  defp snapshot_selection_rules(installation, include_max_files?) do
+    fields = %{
+      "max_source_bytes" => %{
+        type: :integer,
+        input: true,
+        default: installation.ceilings.max_source_bytes,
+        minimum: 1,
+        maximum: installation.ceilings.max_source_bytes
+      },
+      "max_result_bytes" => %{
+        type: :integer,
+        input: true,
+        default: installation.ceilings.max_result_bytes,
+        minimum: HostConfig.minimum_snapshot_result_bytes(),
+        maximum: installation.ceilings.max_result_bytes
+      }
+    }
+
+    fields =
+      if include_max_files? do
+        Map.put(fields, "max_files", %{
+          type: :integer,
+          input: true,
+          default: installation.ceilings.max_files,
+          minimum: 1,
+          maximum: installation.ceilings.max_files
+        })
+      else
+        fields
+      end
+
+    SelectionRules.new(
+      fields: fields,
+      cross_rules: [
+        {:ceiling_of_context_limit, "max_result_bytes", :capability_result_bytes}
+      ],
+      named_sets: %{}
+    )
+  end
+
+  defp prepare(_host, %{source: :mcp} = installation, selection, context, _oauth_runtime) do
     with :ok <- placement(installation, context.destination),
-         {:ok, selected} <- mcp_selection(installation, selection, context) do
+         {:ok, _selected} <- normalize_selection(installation, selection, context) do
       credential_names = credential_names(installation.transport)
 
       {:ok,
        %{
          credential_names: credential_names,
          data_class: installation.data_class,
-         accepts_data: installation.accepts_data,
-         preflight: fn ->
-           with {:ok, transport} <- preflight_transport(host, installation.transport),
-                {:ok, installed_options} <-
-                  installed_options(installation, transport, credential_names) do
-             {:ok,
-              fn credentials ->
-                acquire(
-                  installation,
-                  installed_options,
-                  transport,
-                  selected,
-                  context,
-                  credentials,
-                  oauth_runtime
-                )
-              end}
-           end
-         end
+         accepts_data: installation.accepts_data
        }}
     end
   end
@@ -167,33 +505,110 @@ defmodule PtcRunner.Kernel.HostInstallation do
     credential_names = [installation.credential]
 
     with :ok <- placement(installation, context.destination),
-         {:ok, selected} <- llm_selection(installation, selection, context) do
+         {:ok, _selected} <- llm_selection(installation, selection, context) do
       {:ok,
        %{
          credential_names: credential_names,
          data_class: installation.data_class,
          accepts_data: installation.accepts_data,
-         workflow_llm?: true,
-         preflight: fn ->
-           with {:ok, model, adapter} <- preflight_llm(installation.model) do
-             {:ok,
-              fn credentials ->
-                acquire_llm(
-                  installation,
-                  selected,
-                  context,
-                  model,
-                  adapter,
-                  credentials
-                )
-              end}
-           end
-         end
+         workflow_llm?: true
        }}
     end
   end
 
   defp prepare(
+         _host,
+         %{source: :llm_replay} = installation,
+         selection,
+         context,
+         _oauth_runtime
+       ) do
+    with :ok <- placement(installation, context.destination),
+         {:ok, _selected} <- llm_replay_selection(installation, selection, context) do
+      {:ok,
+       %{
+         credential_names: [],
+         data_class: installation.data_class,
+         accepts_data: installation.accepts_data,
+         workflow_llm?: true
+       }}
+    end
+  end
+
+  defp prepare(
+         _host,
+         %{source: :ptc_trace_snapshot} = installation,
+         selection,
+         context,
+         _oauth_runtime
+       ) do
+    with :ok <- placement(installation, context.destination),
+         {:ok, _selected} <- trace_snapshot_selection(installation, selection, context) do
+      {:ok,
+       %{
+         credential_names: [],
+         data_class: :normal,
+         accepts_data: [:normal, :private_inspection],
+         provides: [:canonical_trace_snapshot]
+       }}
+    end
+  end
+
+  defp prepare(
+         _host,
+         %{source: :ptc_inspection_snapshot} = installation,
+         selection,
+         context,
+         _oauth_runtime
+       ) do
+    with :ok <- placement(installation, context.destination),
+         {:ok, _selected} <- inspection_snapshot_selection(installation, selection, context) do
+      {:ok,
+       %{
+         credential_names: [],
+         data_class: :private_inspection,
+         accepts_data: [:normal, :private_inspection],
+         requires: [:canonical_trace_snapshot]
+       }}
+    end
+  end
+
+  defp preflight(host, %{source: :mcp} = installation, selection, context, oauth_runtime) do
+    with :ok <- placement(installation, context.destination),
+         {:ok, selected} <- normalize_selection(installation, selection, context),
+         credential_names = credential_names(installation.transport),
+         {:ok, transport} <- preflight_transport(host, installation.transport),
+         {:ok, installed_options} <-
+           installed_options(installation, transport, credential_names) do
+      {:ok,
+       {:private_preflight,
+        fn credentials ->
+          acquire(
+            installation,
+            installed_options,
+            transport,
+            selected,
+            context,
+            credentials,
+            oauth_runtime
+          )
+        end}}
+    end
+  end
+
+  defp preflight(_host, %{source: :llm} = installation, selection, context, _oauth_runtime) do
+    with :ok <- placement(installation, context.destination),
+         {:ok, selected} <- llm_selection(installation, selection, context),
+         {:ok, model, adapter} <- preflight_llm(installation.model) do
+      {:ok,
+       {:private_preflight,
+        fn credentials ->
+          acquire_llm(installation, selected, context, model, adapter, credentials)
+        end}}
+    end
+  end
+
+  defp preflight(
          host,
          %{source: :llm_replay} = installation,
          selection,
@@ -203,19 +618,12 @@ defmodule PtcRunner.Kernel.HostInstallation do
     with :ok <- placement(installation, context.destination),
          {:ok, selected} <- llm_replay_selection(installation, selection, context) do
       {:ok,
-       %{
-         credential_names: [],
-         data_class: installation.data_class,
-         accepts_data: installation.accepts_data,
-         workflow_llm?: true,
-         preflight: fn ->
-           {:ok, fn _credentials -> acquire_llm_replay(host, installation, selected, context) end}
-         end
-       }}
+       {:private_preflight,
+        fn _credentials -> acquire_llm_replay(host, installation, selected, context) end}}
     end
   end
 
-  defp prepare(
+  defp preflight(
          host,
          %{source: :ptc_trace_snapshot} = installation,
          selection,
@@ -223,31 +631,16 @@ defmodule PtcRunner.Kernel.HostInstallation do
          _oauth_runtime
        ) do
     with :ok <- placement(installation, context.destination),
-         {:ok, selected} <- trace_snapshot_selection(installation, selection, context) do
+         {:ok, selected} <- trace_snapshot_selection(installation, selection, context),
+         {:ok, directory} <-
+           canonical_snapshot_directory(host.directory, installation.directory) do
       {:ok,
-       %{
-         credential_names: [],
-         data_class: :normal,
-         accepts_data: [:normal, :private_inspection],
-         provides: [:canonical_trace_snapshot],
-         preflight: fn ->
-           with {:ok, directory} <-
-                  canonical_snapshot_directory(host.directory, installation.directory) do
-             {:ok,
-              fn %{} ->
-                acquire_trace_snapshot(
-                  directory,
-                  selected,
-                  context
-                )
-              end}
-           end
-         end
-       }}
+       {:private_preflight,
+        fn %{} -> acquire_trace_snapshot(directory, installation, selected, context) end}}
     end
   end
 
-  defp prepare(
+  defp preflight(
          host,
          %{source: :ptc_inspection_snapshot} = installation,
          selection,
@@ -255,31 +648,20 @@ defmodule PtcRunner.Kernel.HostInstallation do
          _oauth_runtime
        ) do
     with :ok <- placement(installation, context.destination),
-         {:ok, selected} <- inspection_snapshot_selection(installation, selection, context) do
+         {:ok, selected} <- inspection_snapshot_selection(installation, selection, context),
+         {:ok, directory} <-
+           canonical_inspection_snapshot_directory(host.directory, installation.directory) do
       {:ok,
-       %{
-         credential_names: [],
-         data_class: :private_inspection,
-         accepts_data: [:normal, :private_inspection],
-         requires: [:canonical_trace_snapshot],
-         preflight: fn ->
-           with {:ok, directory} <-
-                  canonical_inspection_snapshot_directory(
-                    host.directory,
-                    installation.directory
-                  ) do
-             {:ok,
-              fn %{}, %{canonical_trace_snapshot: trace_snapshot} ->
-                acquire_inspection_snapshot(
-                  directory,
-                  trace_snapshot,
-                  selected,
-                  context
-                )
-              end}
-           end
-         end
-       }}
+       {:private_preflight,
+        fn %{}, %{canonical_trace_snapshot: trace_snapshot} ->
+          acquire_inspection_snapshot(
+            directory,
+            trace_snapshot,
+            installation,
+            selected,
+            context
+          )
+        end}}
     end
   end
 
@@ -302,192 +684,43 @@ defmodule PtcRunner.Kernel.HostInstallation do
   defp placement(%{source: :ptc_inspection_snapshot}, _destination),
     do: {:error, :provider_destination_denied}
 
-  defp mcp_selection(installation, value, context)
-       when is_map(value) and not is_struct(value) do
-    public =
-      Map.new(installation.tools, fn {_upstream, mapping} ->
-        {mapping.as, mapping}
-      end)
-
-    with true <-
-           Map.keys(value) -- ~w(allow model_visible timeout_ms max_result_bytes) == [],
-         true <- read_only_mcp?(installation) or Map.has_key?(value, "allow"),
-         allow when is_list(allow) and length(allow) in 1..128 <-
-           Map.get(value, "allow", public |> Map.keys() |> Enum.sort()),
-         true <- Enum.all?(allow, &is_binary/1) and Enum.uniq(allow) == allow,
-         true <- Enum.all?(allow, &Map.has_key?(public, &1)),
-         installed_visible =
-           Enum.filter(allow, fn name -> Map.fetch!(public, name).model_visible end),
-         visible when is_list(visible) and length(visible) <= 128 <-
-           Map.get(value, "model_visible", installed_visible),
-         true <- Enum.all?(visible, &is_binary/1) and Enum.uniq(visible) == visible,
-         true <- Enum.all?(visible, &(&1 in installed_visible)),
-         timeout_ms when is_integer(timeout_ms) and timeout_ms > 0 <-
-           Map.get(
-             value,
-             "timeout_ms",
-             min(installation.ceilings.timeout_ms, context.limits.evaluation_timeout_ms)
-           ),
-         true <- timeout_ms <= installation.ceilings.timeout_ms,
-         true <- timeout_ms <= context.limits.evaluation_timeout_ms,
-         max_result_bytes when is_integer(max_result_bytes) and max_result_bytes > 0 <-
-           Map.get(
-             value,
-             "max_result_bytes",
-             min(
-               installation.ceilings.max_result_bytes,
-               context.limits.capability_result_bytes
-             )
-           ),
-         true <- max_result_bytes <= installation.ceilings.max_result_bytes,
-         true <- max_result_bytes <= context.limits.capability_result_bytes do
-      {:ok,
-       %{
-         "allow" => allow,
-         "model_visible" => visible,
-         "timeout_ms" => timeout_ms,
-         "max_result_bytes" => max_result_bytes
-       }}
+  @doc false
+  def normalize_selection(%{source: source} = installation, value, %{limits: limits})
+      when source in [:mcp, :llm, :llm_replay, :ptc_trace_snapshot, :ptc_inspection_snapshot] do
+    with {:ok, rules} <- selection_rules(installation),
+         {:ok, normalized} <- SelectionRules.normalize_runtime(rules, value, limits) do
+      {:ok, normalized}
     else
-      _reason -> {:error, :invalid_mcp_selection}
+      _reason -> {:error, selection_error(source)}
     end
   end
 
-  defp mcp_selection(_installation, _value, _context), do: {:error, :invalid_mcp_selection}
+  def normalize_selection(_installation, _value, _context),
+    do: {:error, :invalid_mcp_selection}
 
-  defp read_only_mcp?(installation),
-    do: Enum.all?(installation.tools, fn {_upstream, mapping} -> mapping.effect == :read end)
+  defp llm_selection(installation, value, context),
+    do: normalize_runtime_selection(installation, value, context)
 
-  defp llm_selection(installation, value, context)
-       when is_map(value) and not is_struct(value) do
-    with true <- Map.keys(value) -- ~w(max_request_bytes max_response_bytes) == [],
-         max_request_bytes when is_integer(max_request_bytes) and max_request_bytes > 0 <-
-           Map.get(
-             value,
-             "max_request_bytes",
-             min(
-               installation.ceilings.max_request_bytes,
-               context.limits.capability_argument_bytes
-             )
-           ),
-         true <- max_request_bytes <= installation.ceilings.max_request_bytes,
-         true <- max_request_bytes <= context.limits.capability_argument_bytes,
-         max_response_bytes when is_integer(max_response_bytes) and max_response_bytes > 0 <-
-           Map.get(
-             value,
-             "max_response_bytes",
-             min(
-               installation.ceilings.max_response_bytes,
-               context.limits.capability_result_bytes
-             )
-           ),
-         true <- max_response_bytes <= installation.ceilings.max_response_bytes,
-         true <- max_response_bytes <= context.limits.capability_result_bytes do
-      {:ok,
-       %{
-         max_request_bytes: max_request_bytes,
-         max_response_bytes: max_response_bytes
-       }}
-    else
-      _reason -> {:error, :invalid_llm_selection}
+  defp llm_replay_selection(installation, value, context),
+    do: normalize_runtime_selection(installation, value, context)
+
+  defp trace_snapshot_selection(installation, value, context),
+    do: normalize_runtime_selection(installation, value, context)
+
+  defp inspection_snapshot_selection(installation, value, context),
+    do: normalize_runtime_selection(installation, value, context)
+
+  defp normalize_runtime_selection(installation, value, context) do
+    with {:ok, normalized} <- normalize_selection(installation, value, context) do
+      {:ok, Map.new(normalized, fn {key, item} -> {String.to_existing_atom(key), item} end)}
     end
   end
 
-  defp llm_selection(_installation, _value, _context), do: {:error, :invalid_llm_selection}
-
-  defp llm_replay_selection(installation, value, context)
-       when is_map(value) and not is_struct(value) do
-    with true <- Map.keys(value) -- ~w(max_result_bytes) == [],
-         max_result_bytes when is_integer(max_result_bytes) and max_result_bytes > 0 <-
-           Map.get(
-             value,
-             "max_result_bytes",
-             min(installation.ceilings.max_result_bytes, context.limits.capability_result_bytes)
-           ),
-         true <- max_result_bytes <= installation.ceilings.max_result_bytes,
-         true <- max_result_bytes <= context.limits.capability_result_bytes do
-      {:ok,
-       %{
-         max_entries: installation.ceilings.max_entries,
-         max_result_bytes: max_result_bytes
-       }}
-    else
-      _reason -> {:error, :invalid_llm_replay_selection}
-    end
-  end
-
-  defp llm_replay_selection(_installation, _value, _context),
-    do: {:error, :invalid_llm_replay_selection}
-
-  defp trace_snapshot_selection(installation, value, context)
-       when is_map(value) and not is_struct(value) do
-    minimum_result_bytes = HostConfig.minimum_snapshot_result_bytes()
-
-    with true <- Map.keys(value) -- ~w(max_source_bytes max_result_bytes) == [],
-         max_source_bytes when is_integer(max_source_bytes) and max_source_bytes > 0 <-
-           Map.get(value, "max_source_bytes", installation.ceilings.max_source_bytes),
-         true <- max_source_bytes <= installation.ceilings.max_source_bytes,
-         max_result_bytes
-         when is_integer(max_result_bytes) and max_result_bytes >= minimum_result_bytes <-
-           Map.get(
-             value,
-             "max_result_bytes",
-             min(
-               installation.ceilings.max_result_bytes,
-               context.limits.capability_result_bytes
-             )
-           ),
-         true <- max_result_bytes <= installation.ceilings.max_result_bytes,
-         true <- max_result_bytes <= context.limits.capability_result_bytes do
-      {:ok,
-       %{
-         max_source_bytes: max_source_bytes,
-         max_result_bytes: max_result_bytes
-       }}
-    else
-      _reason -> {:error, :invalid_trace_snapshot_selection}
-    end
-  end
-
-  defp trace_snapshot_selection(_installation, _value, _context),
-    do: {:error, :invalid_trace_snapshot_selection}
-
-  defp inspection_snapshot_selection(installation, value, context)
-       when is_map(value) and not is_struct(value) do
-    minimum_result_bytes = HostConfig.minimum_snapshot_result_bytes()
-
-    with true <- Map.keys(value) -- ~w(max_files max_source_bytes max_result_bytes) == [],
-         max_files when is_integer(max_files) and max_files > 0 <-
-           Map.get(value, "max_files", installation.ceilings.max_files),
-         true <- max_files <= installation.ceilings.max_files,
-         max_source_bytes when is_integer(max_source_bytes) and max_source_bytes > 0 <-
-           Map.get(value, "max_source_bytes", installation.ceilings.max_source_bytes),
-         true <- max_source_bytes <= installation.ceilings.max_source_bytes,
-         max_result_bytes
-         when is_integer(max_result_bytes) and max_result_bytes >= minimum_result_bytes <-
-           Map.get(
-             value,
-             "max_result_bytes",
-             min(
-               installation.ceilings.max_result_bytes,
-               context.limits.capability_result_bytes
-             )
-           ),
-         true <- max_result_bytes <= installation.ceilings.max_result_bytes,
-         true <- max_result_bytes <= context.limits.capability_result_bytes do
-      {:ok,
-       %{
-         max_files: max_files,
-         max_source_bytes: max_source_bytes,
-         max_result_bytes: max_result_bytes
-       }}
-    else
-      _reason -> {:error, :invalid_inspection_snapshot_selection}
-    end
-  end
-
-  defp inspection_snapshot_selection(_installation, _value, _context),
-    do: {:error, :invalid_inspection_snapshot_selection}
+  defp selection_error(:mcp), do: :invalid_mcp_selection
+  defp selection_error(:llm), do: :invalid_llm_selection
+  defp selection_error(:llm_replay), do: :invalid_llm_replay_selection
+  defp selection_error(:ptc_trace_snapshot), do: :invalid_trace_snapshot_selection
+  defp selection_error(:ptc_inspection_snapshot), do: :invalid_inspection_snapshot_selection
 
   defp credential_names(%{type: :stdio, env: env}),
     do: env |> Map.values() |> Enum.uniq() |> Enum.sort()
@@ -495,10 +728,112 @@ defmodule PtcRunner.Kernel.HostInstallation do
   defp credential_names(%{type: :streamable_http, auth: auth}),
     do: auth |> Enum.map(& &1.binding) |> Enum.uniq() |> Enum.sort()
 
-  defp oauth_installations(%HostConfig{} = host) do
-    for {alias_name, %{source: :mcp, transport: %{oauth: %Authority{} = authority}}} <-
-          host.install,
-        do: {alias_name, authority}
+  defp local_preflight(host, %{source: :mcp} = installation, selection, context) do
+    with :ok <- placement(installation, context.destination),
+         {:ok, _selected} <- normalize_selection(installation, selection, context),
+         {:ok, transport} <- preflight_transport(host, installation.transport),
+         {:ok, _options} <-
+           installed_options(installation, transport, credential_names(installation.transport)) do
+      :ok
+    end
+  end
+
+  defp local_preflight(_host, %{source: :llm} = installation, selection, context) do
+    with :ok <- placement(installation, context.destination),
+         {:ok, _selected} <- llm_selection(installation, selection, context),
+         {:ok, _model, _adapter} <- preflight_llm(installation.model) do
+      :ok
+    end
+  end
+
+  defp local_preflight(_host, _installation, _selection, _context),
+    do: {:error, :invalid_host_installation}
+
+  defp prepare_llm_connectivity_probe(host, installation, selection, context) do
+    with :ok <- placement(installation, context.destination),
+         {:ok, _selected} <- llm_selection(installation, selection, context),
+         {:ok, model, adapter} <- preflight_llm(installation.model),
+         {:ok, credentials} <- resolve_credentials(host, [installation.credential]),
+         {:ok, credential} <- Map.fetch(credentials, installation.credential),
+         {:ok, timeout_ms, max_heap_words} <- connectivity_probe_bounds(context) do
+      {:ok,
+       %{
+         model: model,
+         adapter: adapter,
+         credential: credential,
+         params: installation.params,
+         timeout_ms: timeout_ms,
+         max_heap_words: max_heap_words
+       }}
+    else
+      _reason -> {:error, :llm_connectivity_unavailable}
+    end
+  end
+
+  defp connectivity_probe_bounds(%{limits: limits} = context) do
+    with timeout_ms when is_integer(timeout_ms) and timeout_ms > 0 <-
+           Map.get(limits, :doctor_connectivity_timeout_ms),
+         max_heap_words when is_integer(max_heap_words) and max_heap_words > 0 <-
+           Map.get(limits, :provider_heap_words) do
+      timeout_ms =
+        case Map.get(context, :doctor_occurrence_deadline_ms) do
+          deadline when is_integer(deadline) ->
+            min(timeout_ms, deadline - System.monotonic_time(:millisecond))
+
+          nil ->
+            timeout_ms
+
+          _invalid ->
+            0
+        end
+
+      if timeout_ms > 0,
+        do: {:ok, timeout_ms, max_heap_words},
+        else: {:error, :llm_connectivity_unavailable}
+    else
+      _invalid -> {:error, :llm_connectivity_unavailable}
+    end
+  end
+
+  defp connectivity_probe_bounds(_context), do: {:error, :llm_connectivity_unavailable}
+
+  defp run_llm_connectivity_probe(probe) do
+    options =
+      probe.params
+      |> Map.to_list()
+      |> Keyword.merge(
+        adapter: probe.adapter,
+        api_key: probe.credential,
+        cache: false,
+        max_tokens: 1,
+        max_retries: 0,
+        receive_timeout: probe.timeout_ms,
+        req_http_options: [retry: false, redirect: false, max_retries: 0]
+      )
+
+    requester = PtcRunner.LLM.callback(probe.model, options)
+
+    result =
+      BoundedWorker.run(
+        fn ->
+          requester.(%{
+            messages: [%{role: :user, content: "Health check."}],
+            cache: false
+          })
+        end,
+        timeout_ms: probe.timeout_ms,
+        max_heap_words: probe.max_heap_words,
+        cancel_with_caller: true
+      )
+
+    case result do
+      {:ok, {:ok, response}} when is_map(response) -> :ok
+      _failure -> {:error, :llm_connectivity_unavailable}
+    end
+  rescue
+    _exception -> {:error, :llm_connectivity_unavailable}
+  catch
+    _kind, _reason -> {:error, :llm_connectivity_unavailable}
   end
 
   defp preflight_transport(_host, %{type: :streamable_http} = transport),
@@ -588,7 +923,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
       options
       |> MCPSource.builder()
       |> then(& &1.(selected, context))
-      |> classify(installation)
+      |> classify(installation, selected, context.provider)
     end
   end
 
@@ -618,7 +953,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
         source_options
         |> MCPSource.builder()
         |> then(& &1.(selected, context))
-        |> classify(installation)
+        |> classify(installation, selected, context.provider)
 
       case result do
         {:ok, _provider} = success ->
@@ -666,7 +1001,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
       ([transport: {:stdio, transport_options}] ++ options)
       |> MCPSource.builder()
       |> then(& &1.(selected, context))
-      |> classify(installation)
+      |> classify(installation, selected, context.provider)
     end
   end
 
@@ -702,7 +1037,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
              max_request_bytes: selected.max_request_bytes,
              max_response_bytes: selected.max_response_bytes
            ),
-         {:ok, snapshot} <- llm_snapshot(installation, selected, context.provider, model) do
+         {:ok, snapshot} <- llm_snapshot(installation, selected, context.provider) do
       {:ok,
        %{
          capabilities: [capability],
@@ -743,34 +1078,40 @@ defmodule PtcRunner.Kernel.HostInstallation do
   end
 
   defp llm_replay_snapshot(replay, installation, provider) do
-    identity =
-      replay
-      |> LLMReplay.snapshot()
-      |> maybe_put("installation_revision", installation.installation_revision)
+    acquisition = LLMReplay.snapshot(replay)
+    content_snapshot_hash = acquisition["fixture_set_hash"]
 
-    with {:ok, encoded} <- DeterministicJSON.encode(identity) do
-      {:ok,
-       identity
-       |> Map.put("provider", provider)
-       |> Map.put("snapshot_hash", sha256(encoded))}
-    end
+    public_snapshot(
+      installation,
+      provider,
+      %{
+        "max_entries" => installation.ceilings.max_entries,
+        "max_result_bytes" => acquisition["max_result_bytes"]
+      },
+      acquisition,
+      content_snapshot_hash
+    )
   end
 
-  defp acquire_trace_snapshot(directory, selected, context) do
+  defp acquire_trace_snapshot(directory, installation, selected, context) do
     case TraceSnapshot.start({:directory, directory},
            owner: context.owner,
            max_source_bytes: selected.max_source_bytes,
            max_result_bytes: selected.max_result_bytes
          ) do
-      {:ok, snapshot} -> finish_trace_snapshot(snapshot, selected, context.provider)
-      {:error, _reason} = error -> error
+      {:ok, snapshot} ->
+        finish_trace_snapshot(snapshot, installation, selected, context.provider)
+
+      {:error, _reason} = error ->
+        error
     end
   end
 
-  defp finish_trace_snapshot(snapshot, selected, provider) do
+  defp finish_trace_snapshot(snapshot, installation, selected, provider) do
     with {:ok, capabilities} <- TraceCapability.from_snapshot(snapshot, provider),
          {:ok, info} <- TraceSnapshot.info(snapshot),
-         {:ok, provider_snapshot} <- trace_provider_snapshot(info, selected, provider) do
+         {:ok, provider_snapshot} <-
+           trace_provider_snapshot(info, installation, selected, provider) do
       {:ok,
        %{
          capabilities: capabilities,
@@ -790,22 +1131,32 @@ defmodule PtcRunner.Kernel.HostInstallation do
     end
   end
 
-  defp acquire_inspection_snapshot(directory, trace_snapshot, selected, context) do
+  defp acquire_inspection_snapshot(
+         directory,
+         trace_snapshot,
+         installation,
+         selected,
+         context
+       ) do
     case InspectionSnapshot.start({:directory, directory}, trace_snapshot,
            owner: context.owner,
            max_files: selected.max_files,
            max_source_bytes: selected.max_source_bytes,
            max_result_bytes: selected.max_result_bytes
          ) do
-      {:ok, snapshot} -> finish_inspection_snapshot(snapshot, selected, context.provider)
-      {:error, _reason} = error -> error
+      {:ok, snapshot} ->
+        finish_inspection_snapshot(snapshot, installation, selected, context.provider)
+
+      {:error, _reason} = error ->
+        error
     end
   end
 
-  defp finish_inspection_snapshot(snapshot, selected, provider) do
+  defp finish_inspection_snapshot(snapshot, installation, selected, provider) do
     with {:ok, capabilities} <- InspectionCapability.from_snapshot(snapshot, provider),
          {:ok, info} <- InspectionSnapshot.info(snapshot),
-         {:ok, provider_snapshot} <- inspection_provider_snapshot(info, selected, provider) do
+         {:ok, provider_snapshot} <-
+           inspection_provider_snapshot(info, installation, selected, provider) do
       {:ok,
        %{
          capabilities: capabilities,
@@ -824,78 +1175,110 @@ defmodule PtcRunner.Kernel.HostInstallation do
     end
   end
 
-  defp inspection_provider_snapshot(info, selected, provider) do
-    identity = %{
+  defp inspection_provider_snapshot(info, installation, selected, provider) do
+    acquisition = %{
       "source" => "ptc_inspection_snapshot",
       "capture_id" => info.capture_id,
       "trace_capture_id" => info.trace_capture_id,
-      "content_snapshot_hash" => info.snapshot_hash,
       "file_count" => info.file_count,
       "run_count" => info.run_count,
       "source_bytes" => info.source_bytes,
-      "retained_bytes" => info.retained_bytes,
-      "max_files" => selected.max_files,
-      "max_source_bytes" => selected.max_source_bytes,
-      "max_result_bytes" => selected.max_result_bytes
+      "retained_bytes" => info.retained_bytes
     }
 
-    with {:ok, encoded} <- DeterministicJSON.encode(identity) do
-      {:ok,
-       identity
-       |> Map.put("provider", provider)
-       |> Map.put("snapshot_hash", sha256(encoded))}
-    end
+    public_snapshot(
+      installation,
+      provider,
+      selected,
+      acquisition,
+      info.snapshot_hash
+    )
   end
 
-  defp trace_provider_snapshot(info, selected, provider) do
-    identity = %{
+  defp trace_provider_snapshot(info, installation, selected, provider) do
+    acquisition = %{
       "source" => "ptc_trace_snapshot",
       "capture_id" => info.capture_id,
-      "content_snapshot_hash" => info.snapshot_hash,
       "run_count" => info.run_count,
       "source_bytes" => info.source_bytes,
-      "retained_bytes" => info.retained_bytes,
-      "max_source_bytes" => selected.max_source_bytes,
-      "max_result_bytes" => selected.max_result_bytes
+      "retained_bytes" => info.retained_bytes
     }
 
-    with {:ok, encoded} <- DeterministicJSON.encode(identity) do
+    public_snapshot(
+      installation,
+      provider,
+      selected,
+      acquisition,
+      info.snapshot_hash
+    )
+  end
+
+  defp llm_snapshot(installation, selected, provider) do
+    public_snapshot(
+      installation,
+      provider,
+      selected,
+      %{"source" => "llm"},
+      nil
+    )
+  end
+
+  defp classify({:ok, built}, installation, selected, provider) do
+    acquisition =
+      Map.take(
+        built.snapshot,
+        ~w(
+          launcher_protocol_version
+          launcher_sha256
+          protocol
+          server_executable_sha256
+          server_info_hash
+          tools
+          transport
+        )
+      )
+
+    content_snapshot_hash = Map.get(built.snapshot, "content_snapshot_hash")
+
+    with {:ok, snapshot} <-
+           public_snapshot(
+             installation,
+             provider,
+             selected,
+             acquisition,
+             content_snapshot_hash
+           ) do
       {:ok,
-       identity
-       |> Map.put("provider", provider)
-       |> Map.put("snapshot_hash", sha256(encoded))}
+       built
+       |> Map.put(:snapshot, snapshot)
+       |> Map.put(:data_class, installation.data_class)
+       |> Map.put(:accepts_data, installation.accepts_data)}
     end
   end
 
-  defp llm_snapshot(installation, selected, provider, model) do
-    identity =
-      %{
-        "source" => "llm",
-        "model" => model,
-        "cache" => installation.cache,
-        "params" =>
-          Map.new(installation.params, fn {key, value} -> {Atom.to_string(key), value} end),
-        "max_request_bytes" => selected.max_request_bytes,
-        "max_response_bytes" => selected.max_response_bytes
-      }
-      |> maybe_put("installation_revision", installation.installation_revision)
+  defp classify({:error, _reason} = error, _installation, _selected, _provider), do: error
 
-    with {:ok, encoded} <- DeterministicJSON.encode(identity) do
-      {:ok,
-       identity
-       |> Map.put("provider", provider)
-       |> Map.put("snapshot_hash", sha256(encoded))}
+  defp public_snapshot(installation, provider, selected, acquisition, content_snapshot_hash) do
+    with {:ok, rules} <- selection_rules(installation),
+         {:ok, descriptor} <- descriptor(installation, rules, authority(installation)) do
+      ProviderSnapshot.build(
+        descriptor,
+        provider,
+        string_keyed(selected),
+        acquisition,
+        content_snapshot_hash
+      )
+    else
+      _invalid -> {:error, :invalid_provider_snapshot}
     end
   end
 
-  defp classify({:ok, built}, installation) do
-    {:ok,
-     built
-     |> Map.put(:data_class, installation.data_class)
-     |> Map.put(:accepts_data, installation.accepts_data)}
+  defp string_keyed(value) when is_map(value) do
+    Map.new(value, fn
+      {key, item} when is_atom(key) -> {Atom.to_string(key), item}
+      {key, item} when is_binary(key) -> {key, item}
+    end)
   end
-
-  defp classify({:error, _reason} = error, _installation), do: error
 
   defp compatibility_environment(false), do: {:ok, %{}}
 
@@ -1132,10 +1515,4 @@ defmodule PtcRunner.Kernel.HostInstallation do
       {:error, _reason} = error -> error
     end
   end
-
-  defp maybe_put(map, _key, nil), do: map
-  defp maybe_put(map, key, value), do: Map.put(map, key, value)
-
-  defp sha256(value),
-    do: value |> then(&:crypto.hash(:sha256, &1)) |> Base.encode16(case: :lower)
 end

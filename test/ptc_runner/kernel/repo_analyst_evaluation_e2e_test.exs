@@ -17,6 +17,7 @@ defmodule PtcRunner.Kernel.RepoAnalystEvaluationE2ETest do
   alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.HostConfig
   alias PtcRunner.Kernel.HostInstallation
+  alias PtcRunner.Kernel.InstallationCatalog
   alias PtcRunner.Kernel.ProviderRegistry
   alias PtcRunner.Kernel.RunBuilder
   alias PtcRunner.Kernel.ValueContract
@@ -88,7 +89,12 @@ defmodule PtcRunner.Kernel.RepoAnalystEvaluationE2ETest do
 
   test "the shipped replay manifest and dedicated host config run unchanged" do
     {:ok, host} = HostConfig.load(@evaluation_host)
-    {:ok, registry} = HostInstallation.registry(host)
+
+    {:ok, registry} =
+      HostInstallation.catalog(host)
+      |> then(fn {:ok, catalog} ->
+        InstallationCatalog.runtime_registry(catalog)
+      end)
 
     assert {:ok, result} = RunBuilder.run(@replay_manifest, registry)
     assert result.value["status"] == "scored"
@@ -135,7 +141,12 @@ defmodule PtcRunner.Kernel.RepoAnalystEvaluationE2ETest do
     workspace = materialize_workspace(directory, get_in(baseline_input, ["case", "id"]))
     host_path = prepare_host(directory, workspace)
     {:ok, host} = HostConfig.load(host_path)
-    {:ok, registry} = HostInstallation.registry(host)
+
+    {:ok, registry} =
+      HostInstallation.catalog(host)
+      |> then(fn {:ok, catalog} ->
+        InstallationCatalog.runtime_registry(catalog)
+      end)
 
     %{
       jq: jq,

@@ -204,7 +204,7 @@ defmodule PtcRunner.Lisp.DefTest do
       source = "(def x 42)"
       {:ok, %{return: result, memory: user_ns}} = Lisp.run(source)
 
-      assert result == %Var{name: :x}
+      assert result == %Var{name: "x"}
       assert user_ns == %{"x" => 42}
     end
 
@@ -212,7 +212,7 @@ defmodule PtcRunner.Lisp.DefTest do
       source = ~S|(def x "the value is 42" 42)|
       {:ok, %{return: result, memory: user_ns}} = Lisp.run(source)
 
-      assert result == %Var{name: :x}
+      assert result == %Var{name: "x"}
       assert user_ns == %{"x" => 42}
     end
 
@@ -220,7 +220,7 @@ defmodule PtcRunner.Lisp.DefTest do
       source = "(def result (+ 1 2 3))"
       {:ok, %{return: result, memory: user_ns}} = Lisp.run(source)
 
-      assert result == %Var{name: :result}
+      assert result == %Var{name: "result"}
       assert user_ns == %{"result" => 6}
     end
 
@@ -265,7 +265,7 @@ defmodule PtcRunner.Lisp.DefTest do
       tools = %{"search" => fn _args -> [%{id: 1}, %{id: 2}] end}
       {:ok, %{return: result, memory: user_ns}} = Lisp.run(source, tools: tools)
 
-      assert result == %Var{name: :results}
+      assert result == %Var{name: "results"}
       assert user_ns == %{"results" => [%{id: 1}, %{id: 2}]}
     end
 
@@ -408,7 +408,7 @@ defmodule PtcRunner.Lisp.DefTest do
       source = "(defonce x 0)"
       {:ok, %{return: result, memory: user_ns}} = Lisp.run(source)
 
-      assert result == %Var{name: :x}
+      assert result == %Var{name: "x"}
       assert user_ns == %{"x" => 0}
     end
 
@@ -419,7 +419,7 @@ defmodule PtcRunner.Lisp.DefTest do
       # Turn 2: defonce with different value — x stays 0
       {:ok, %{return: result, memory: user_ns2}} = Lisp.run("(defonce x 99)", memory: user_ns1)
 
-      assert result == %Var{name: :x}
+      assert result == %Var{name: "x"}
       assert user_ns2["x"] == 0
     end
 
@@ -445,7 +445,7 @@ defmodule PtcRunner.Lisp.DefTest do
       source = ~S|(defonce total "running total" 0)|
       {:ok, %{return: result, memory: user_ns}} = Lisp.run(source)
 
-      assert result == %Var{name: :total}
+      assert result == %Var{name: "total"}
       assert user_ns["total"] == 0
     end
 
@@ -481,7 +481,7 @@ defmodule PtcRunner.Lisp.DefTest do
     test "def return renders as display string for string and JSON protocols" do
       {:ok, %{return: result}} = Lisp.run("(def x 41)")
 
-      assert result == %Var{name: :x}
+      assert result == %Var{name: "x"}
       assert to_string(result) == "#'x"
       assert Jason.encode!(result) == ~s("#'x")
     end

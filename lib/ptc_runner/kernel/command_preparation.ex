@@ -4,7 +4,7 @@ defmodule PtcRunner.Kernel.CommandPreparation do
 
   The command engine consumes application, host, input, and override paths
   before constructing this value. It retains the generated command reference,
-  the inert provider registry needed by later assembly, and only the artifact
+  the inert installation catalog needed by later assembly, and only the artifact
   destinations that phase 6 must preflight. If the invocation directory was
   unavailable, it retains the ordered destination keys that could not be
   anchored so phase 6 can apply its fixed trace/inspection/result precedence.
@@ -13,8 +13,8 @@ defmodule PtcRunner.Kernel.CommandPreparation do
 
   alias PtcRunner.Kernel.Attestation
   alias PtcRunner.Kernel.CommandRunRef
+  alias PtcRunner.Kernel.InstallationCatalog
   alias PtcRunner.Kernel.PreparedRun
-  alias PtcRunner.Kernel.ProviderRegistry
 
   @artifact_keys [:trace_dir, :inspect, :output, :private_output]
 
@@ -22,7 +22,7 @@ defmodule PtcRunner.Kernel.CommandPreparation do
     :command,
     :run_ref,
     :prepared_run,
-    :registry,
+    :catalog,
     :artifact_destinations,
     :artifact_destination_failures
   ]
@@ -33,7 +33,7 @@ defmodule PtcRunner.Kernel.CommandPreparation do
           command: :validate | :run,
           run_ref: binary(),
           prepared_run: PreparedRun.t(),
-          registry: ProviderRegistry.t(),
+          catalog: InstallationCatalog.t(),
           artifact_destinations: %{optional(atom()) => binary()},
           artifact_destination_failures: [atom()],
           attestation: binary() | nil
@@ -44,7 +44,7 @@ defmodule PtcRunner.Kernel.CommandPreparation do
           :validate | :run,
           binary(),
           PreparedRun.t(),
-          ProviderRegistry.t(),
+          InstallationCatalog.t(),
           map(),
           [atom()]
         ) :: {:ok, t()} | {:error, :invalid_command_preparation}
@@ -52,7 +52,7 @@ defmodule PtcRunner.Kernel.CommandPreparation do
         command,
         run_ref,
         prepared_run,
-        registry,
+        catalog,
         artifact_destinations,
         artifact_destination_failures
       )
@@ -62,7 +62,7 @@ defmodule PtcRunner.Kernel.CommandPreparation do
       command: command,
       run_ref: run_ref,
       prepared_run: prepared_run,
-      registry: registry,
+      catalog: catalog,
       artifact_destinations: artifact_destinations,
       artifact_destination_failures: artifact_destination_failures
     }
@@ -82,7 +82,7 @@ defmodule PtcRunner.Kernel.CommandPreparation do
         _command,
         _run_ref,
         _prepared_run,
-        _registry,
+        _catalog,
         _artifact_destinations,
         _artifact_destination_failures
       ),
@@ -96,9 +96,13 @@ defmodule PtcRunner.Kernel.CommandPreparation do
 
   def valid?(_preparation), do: false
 
-  @doc "Idempotently releases the embedded prepared run."
+  @doc "Idempotently releases the embedded prepared run and private catalog authority."
   @spec close(t()) :: :ok
-  def close(%__MODULE__{prepared_run: prepared_run}), do: PreparedRun.close(prepared_run)
+  def close(%__MODULE__{prepared_run: prepared_run, catalog: catalog}) do
+    PreparedRun.close(prepared_run)
+    InstallationCatalog.close(catalog)
+  end
+
   def close(_preparation), do: :ok
 
   defp fields_valid?(preparation) do
@@ -106,8 +110,8 @@ defmodule PtcRunner.Kernel.CommandPreparation do
       preparation.command in [:validate, :run] and
       CommandRunRef.valid?(preparation.run_ref) and
       PreparedRun.valid?(preparation.prepared_run) and
-      ProviderRegistry.valid?(preparation.registry) and
-      registry_matches_request?(preparation) and
+      InstallationCatalog.valid?(preparation.catalog) and
+      catalog_matches_request?(preparation) and
       artifact_destinations_valid?(
         preparation.command,
         preparation.artifact_destinations,
@@ -116,10 +120,11 @@ defmodule PtcRunner.Kernel.CommandPreparation do
       policy_matches_destinations?(preparation)
   end
 
-  defp registry_matches_request?(preparation),
+  defp catalog_matches_request?(preparation),
     do:
-      preparation.registry.installed_limits ==
-        preparation.prepared_run.request.package.installed_limits
+      preparation.catalog.installed_limits ==
+        preparation.prepared_run.request.package.installed_limits and
+        preparation.catalog.attestation == preparation.prepared_run.catalog_attestation
 
   defp artifact_destinations_valid?(:validate, destinations, failures),
     do: destinations == %{} and failures == []
@@ -164,7 +169,7 @@ defmodule PtcRunner.Kernel.CommandPreparation do
       preparation.command,
       preparation.run_ref,
       preparation.prepared_run,
-      preparation.registry,
+      preparation.catalog,
       preparation.artifact_destinations,
       preparation.artifact_destination_failures
     }

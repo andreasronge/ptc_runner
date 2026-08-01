@@ -20,6 +20,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   alias PtcRunner.Kernel.ExecutionPolicy
   alias PtcRunner.Kernel.FrozenBundle
   alias PtcRunner.Kernel.HostConfig
+  alias PtcRunner.Kernel.InstallationCatalog
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.PreparedRun
   alias PtcRunner.Kernel.ProviderActivity
@@ -429,7 +430,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   test "success construction rejects results outside the command schema" do
     run_ref = CommandRunRef.encode(@zero_entropy)
 
-    host_revision = String.duplicate("R", 256)
+    host_revision = String.duplicate("r", 128)
 
     host_document = %{
       "credentials" => %{"key" => %{"env" => "KEY"}},
@@ -451,7 +452,13 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert %CommandOutcome{} =
              CommandOutcome.success(:models, run_ref, %{"installations" => [model]})
 
-    for invalid_revision <- [String.duplicate("😀", 65), "revision\0"] do
+    for invalid_revision <- [
+          String.duplicate("a", 129),
+          String.duplicate("😀", 65),
+          "Upper",
+          "revision/slash",
+          "revision\0"
+        ] do
       invalid_host =
         put_in(host_document, ["install", "model", "installation_revision"], invalid_revision)
 
@@ -1842,11 +1849,49 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert schema.envelope["error"]["path"] == "/runtime/stdio_launcher"
     assert schema.envelope["error"]["source"] == %{"kind" => "host", "name" => "ptc-host.json"}
 
+    missing_revision_path =
+      write_host_config(
+        directory,
+        "missing-revision",
+        update_in(base, ["install", "workspace"], &Map.delete(&1, "installation_revision"))
+      )
+
+    missing_revision =
+      assert_error(
+        ["validate", application, "--host-config", missing_revision_path],
+        "host",
+        "installation_revision_missing"
+      )
+
+    assert missing_revision.envelope["error"]["source"] == nil
+
+    assert missing_revision.envelope["error"]["subject"] == %{
+             "kind" => "provider",
+             "name" => "workspace",
+             "operation" => "declaration",
+             "occurrence" => nil
+           }
+
+    invalid_alias_path =
+      write_host_config(directory, "invalid-alias", %{
+        "install" => %{"BAD" => %{"source" => "mcp"}}
+      })
+
+    invalid_alias =
+      assert_error(
+        ["validate", application, "--host-config", invalid_alias_path],
+        "host",
+        "host_schema_invalid"
+      )
+
+    refute invalid_alias.envelope["error"]["code"] == "internal_error"
+
     dangling_credential =
       write_host_config(directory, "dangling-credential", %{
         "install" => %{
           "model" => %{
             "source" => "llm",
+            "installation_revision" => "model-v1",
             "model" => "provider:model",
             "credential" => "missing"
           }
@@ -2232,7 +2277,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert preparation.artifact_destinations == %{output: output, inspect: inspection}
     assert preparation.artifact_destination_failures == []
     assert %PreparedRun{} = preparation.prepared_run
-    assert %ProviderRegistry{} = preparation.registry
+    assert %InstallationCatalog{} = preparation.catalog
     assert CommandPreparation.valid?(preparation)
     refute CommandPreparation.valid?(%{preparation | run_ref: "cmd-invalid"})
     assert :ok = PreparedRun.close(preparation.prepared_run)
@@ -2356,36 +2401,84 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     end)
 
     :persistent_term.put(storage_key, :invalid_hmac_key)
-    {:links, links_before} = Process.info(self(), :links)
+    owners_before = host_installation_owners()
 
     assert {:error, %CommandOutcome{} = outcome} =
-             CommandEngine.prepare(["validate", application])
+             CommandEngine.prepare(["run", application])
 
     assert outcome.envelope["error"]["code"] == "internal_error"
-    {:links, links_after} = Process.info(self(), :links)
-    assert links_after -- links_before == []
+    assert MapSet.difference(host_installation_owners(), owners_before) == MapSet.new()
   end
 
   @tag :tmp_dir
-  test "command preparation seals correlated policy, registry, and destinations", %{
+  test "host catalog construction rolls back its authority owner when sealing raises", %{
+    tmp_dir: directory
+  } do
+    application = write_application(directory, "catalog-sealing-failure", valid_manifest())
+    host_path = write_host_config(directory, "catalog-sealing-failure", valid_host_config())
+    storage_key = {Attestation, PtcRunner.Kernel.SelectionRules}
+    previous_key = :persistent_term.get(storage_key, :missing)
+
+    on_exit(fn ->
+      case previous_key do
+        :missing -> :persistent_term.erase(storage_key)
+        key -> :persistent_term.put(storage_key, key)
+      end
+    end)
+
+    :persistent_term.put(storage_key, :invalid_hmac_key)
+    owners_before = host_installation_owners()
+
+    assert {:error, %CommandOutcome{} = outcome} =
+             CommandEngine.prepare(["validate", application, "--host-config", host_path])
+
+    assert outcome.envelope["error"]["code"] == "internal_error"
+    assert MapSet.difference(host_installation_owners(), owners_before) == MapSet.new()
+  end
+
+  @tag :tmp_dir
+  test "host authority rolls back when application request construction raises", %{
+    tmp_dir: directory
+  } do
+    application = write_application(directory, "request-sealing-failure", valid_manifest())
+    host_path = write_host_config(directory, "request-sealing-failure", valid_host_config())
+    storage_key = {Attestation, ApplicationPackage}
+    previous_key = :persistent_term.get(storage_key, :missing)
+
+    on_exit(fn ->
+      case previous_key do
+        :missing -> :persistent_term.erase(storage_key)
+        key -> :persistent_term.put(storage_key, key)
+      end
+    end)
+
+    :persistent_term.put(storage_key, :invalid_hmac_key)
+    owners_before = host_installation_owners()
+
+    assert {:error, %CommandOutcome{} = outcome} =
+             CommandEngine.prepare(["validate", application, "--host-config", host_path])
+
+    assert outcome.envelope["error"]["code"] == "internal_error"
+    assert MapSet.difference(host_installation_owners(), owners_before) == MapSet.new()
+  end
+
+  @tag :tmp_dir
+  test "command preparation seals correlated policy, catalog, and destinations", %{
     tmp_dir: directory
   } do
     application = write_application(directory, "correlated-preparation", valid_manifest())
     assert {:ok, preparation} = CommandEngine.prepare(["run", application])
 
-    invalid_registry = %{
-      preparation.registry
-      | builders: %{"not/a/provider" => fn _selection, _context -> :invalid end}
-    }
+    invalid_catalog = Map.put(preparation.catalog, :unexpected, :retained)
 
-    refute ProviderRegistry.valid?(invalid_registry)
+    refute InstallationCatalog.valid?(invalid_catalog)
 
     assert {:error, :invalid_command_preparation} =
              CommandPreparation.new(
                :run,
                preparation.run_ref,
                preparation.prepared_run,
-               preparation.registry,
+               preparation.catalog,
                %{output: "relative-result.json"},
                []
              )
@@ -2394,21 +2487,21 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
 
     malformed =
       preparation
-      |> Map.delete(:registry)
+      |> Map.delete(:catalog)
       |> Map.put(:unexpected, :retained)
 
     refute CommandPreparation.valid?(malformed)
 
     mismatched_limits = %{
-      preparation.registry
-      | installed_limits: %{preparation.registry.installed_limits | run_duration_ms: 299_999}
+      preparation.catalog
+      | installed_limits: %{preparation.catalog.installed_limits | run_duration_ms: 299_999}
     }
 
-    for {registry, destinations} <- [
-          {preparation.registry, %{inspect: "inspection.jsonl"}},
-          {preparation.registry, %{trace_dir: "trace"}},
-          {preparation.registry, %{output: "normal.json", private_output: "private.json"}},
-          {invalid_registry, %{}},
+    for {catalog, destinations} <- [
+          {preparation.catalog, %{inspect: "inspection.jsonl"}},
+          {preparation.catalog, %{trace_dir: "trace"}},
+          {preparation.catalog, %{output: "normal.json", private_output: "private.json"}},
+          {invalid_catalog, %{}},
           {mismatched_limits, %{}}
         ] do
       assert {:error, :invalid_command_preparation} =
@@ -2416,21 +2509,23 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
                  :run,
                  preparation.run_ref,
                  preparation.prepared_run,
-                 registry,
+                 catalog,
                  destinations,
                  []
                )
     end
 
     assert {:ok, native_request} = ApplicationPackage.request_directory(application)
-    assert {:ok, native_prepared} = RunCoordinator.prepare(native_request, preparation.registry)
+
+    assert {:ok, native_prepared} =
+             RunCoordinator.prepare(native_request, preparation.catalog)
 
     assert {:error, :invalid_command_preparation} =
              CommandPreparation.new(
                :run,
                preparation.run_ref,
                native_prepared,
-               preparation.registry,
+               preparation.catalog,
                %{},
                []
              )
@@ -2491,7 +2586,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
                :run,
                preparation.run_ref,
                Map.put(preparation.prepared_run, :application_path, "private"),
-               preparation.registry,
+               preparation.catalog,
                %{},
                []
              )
@@ -2525,7 +2620,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert {:error, :invalid_provider_registry} =
              RunBuilder.build(request, invalid_registry)
 
-    assert {:ok, prepared} = RunCoordinator.prepare(request, registry)
+    assert {:ok, prepared} = RunCoordinator.prepare(request, catalog_for(registry))
 
     assert {:error, :invalid_provider_registry} =
              RunBuilder.build_prepared(prepared, invalid_registry)
@@ -2543,7 +2638,10 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
              ApplicationPackage.request_directory(application, result_projection: :json)
 
     assert {:ok, registry} = ProviderRegistry.new()
-    assert {:ok, %PreparedRun{} = prepared} = RunCoordinator.prepare(request, registry)
+
+    assert {:ok, %PreparedRun{} = prepared} =
+             RunCoordinator.prepare(request, catalog_for(registry))
+
     assert Process.alive?(prepared.provider_activity.owner)
 
     assert :ok = PreparedRun.close(prepared)
@@ -2559,7 +2657,10 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
              ApplicationPackage.request_directory(application, result_projection: :json)
 
     assert {:ok, registry} = ProviderRegistry.new()
-    assert {:ok, %PreparedRun{} = prepared} = RunCoordinator.prepare(request, registry)
+
+    assert {:ok, %PreparedRun{} = prepared} =
+             RunCoordinator.prepare(request, catalog_for(registry))
+
     assert {:ok, built} = RunBuilder.build_prepared(prepared, registry)
     assert built.entry_source == prepared.entry_source
     assert built.config.workflow_environment.bundle.hash == prepared.workflow_bundle.hash
@@ -2576,7 +2677,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
              ApplicationPackage.request_directory(application, result_projection: :json)
 
     assert {:ok, registry} = ProviderRegistry.new()
-    assert {:ok, prepared} = RunCoordinator.prepare(request, registry)
+    assert {:ok, prepared} = RunCoordinator.prepare(request, catalog_for(registry))
 
     acquisition_options = [
       [mission: "input.json"],
@@ -2682,7 +2783,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
              ApplicationPackage.request_directory(application, result_projection: :json)
 
     assert {:ok, registry} = ProviderRegistry.new()
-    assert {:ok, prepared} = RunCoordinator.prepare(request, registry)
+    assert {:ok, prepared} = RunCoordinator.prepare(request, catalog_for(registry))
 
     results =
       1..2
@@ -2721,8 +2822,9 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
              ApplicationPackage.request_directory(second, result_projection: :json)
 
     assert {:ok, registry} = ProviderRegistry.new()
-    assert {:ok, first_prepared} = RunCoordinator.prepare(first_request, registry)
-    assert {:ok, second_prepared} = RunCoordinator.prepare(second_request, registry)
+    catalog = catalog_for(registry)
+    assert {:ok, first_prepared} = RunCoordinator.prepare(first_request, catalog)
+    assert {:ok, second_prepared} = RunCoordinator.prepare(second_request, catalog)
 
     assert {:error, :invalid_prepared_run} =
              ProviderActivity.start_owned(fn activity ->
@@ -2731,7 +2833,9 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
                  second_prepared.workflow_bundle,
                  second_prepared.mission_bundle,
                  first_prepared.entry_source,
-                 activity
+                 activity,
+                 catalog,
+                 prepared_metadata(first_prepared)
                )
              end)
 
@@ -2751,7 +2855,8 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert {:ok, mission_request} =
              ApplicationPackage.request_directory(mission_application, result_projection: :json)
 
-    assert {:ok, mission_prepared} = RunCoordinator.prepare(mission_request, registry)
+    assert {:ok, mission_prepared} =
+             RunCoordinator.prepare(mission_request, catalog)
 
     assert {:error, :invalid_prepared_run} =
              ProviderActivity.start_owned(fn activity ->
@@ -2760,7 +2865,9 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
                  first_prepared.workflow_bundle,
                  mission_prepared.mission_bundle,
                  first_prepared.entry_source,
-                 activity
+                 activity,
+                 catalog,
+                 prepared_metadata(first_prepared)
                )
              end)
 
@@ -2789,6 +2896,8 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert {:ok, workflow_bundle} =
              PtcRunner.Kernel.compile_bundle(request.package.workflow_components)
 
+    assert {:ok, catalog} = InstallationCatalog.new()
+
     assert {:error, :invalid_prepared_run} =
              ProviderActivity.start_owned(fn activity ->
                PreparedRun.new(
@@ -2796,7 +2905,9 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
                  workflow_bundle,
                  nil,
                  "(#{request.package.entry} data/input)",
-                 activity
+                 activity,
+                 catalog,
+                 %{}
                )
              end)
   end
@@ -2809,7 +2920,8 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
              ApplicationPackage.request_directory(application, result_projection: :json)
 
     assert {:ok, registry} = ProviderRegistry.new()
-    assert {:ok, prepared} = RunCoordinator.prepare(request, registry)
+    catalog = catalog_for(registry)
+    assert {:ok, prepared} = RunCoordinator.prepare(request, catalog)
 
     assert {:error, :invalid_prepared_run} =
              PreparedRun.new(
@@ -2817,7 +2929,9 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
                prepared.workflow_bundle,
                prepared.mission_bundle,
                prepared.entry_source,
-               prepared.provider_activity
+               prepared.provider_activity,
+               catalog,
+               prepared_metadata(prepared)
              )
 
     assert {:ok, marked_activity} = ProviderActivity.start_link()
@@ -2829,7 +2943,9 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
                prepared.workflow_bundle,
                prepared.mission_bundle,
                prepared.entry_source,
-               marked_activity
+               marked_activity,
+               catalog,
+               prepared_metadata(prepared)
              )
 
     assert :ok = ProviderActivity.stop(marked_activity)
@@ -2846,6 +2962,9 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert {:ok, workflow_bundle} =
              PtcRunner.Kernel.compile_bundle(request.package.workflow_components)
 
+    assert {:ok, registry} = ProviderRegistry.new()
+    catalog = catalog_for(registry)
+    assert {:ok, exemplar} = RunCoordinator.prepare(request, catalog)
     assert {:ok, activity} = ProviderActivity.start_link()
 
     construction =
@@ -2855,7 +2974,9 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
           workflow_bundle,
           nil,
           "(#{request.package.entry} data/input)",
-          activity
+          activity,
+          catalog,
+          prepared_metadata(exemplar)
         )
       end)
 
@@ -2869,10 +2990,13 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
                workflow_bundle,
                nil,
                "(#{request.package.entry} data/input)",
-               activity
+               activity,
+               catalog,
+               prepared_metadata(exemplar)
              )
 
     assert :ok = ProviderActivity.stop(activity)
+    assert :ok = PreparedRun.close(exemplar)
   end
 
   test "the linked activity marker exits with its creating process" do
@@ -3264,7 +3388,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert {:ok, registry} = ProviderRegistry.new()
 
     assert {:error, %CommandDiagnostic{} = memory_component} =
-             RunCoordinator.prepare(request, registry)
+             RunCoordinator.prepare(request, catalog_for(registry))
 
     assert CommandDiagnostic.to_map(memory_component)["source"] ==
              component.envelope["error"]["source"]
@@ -3755,6 +3879,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
       "install" => %{
         "workspace" => %{
           "source" => "mcp",
+          "installation_revision" => "workspace-v1",
           "transport" => %{"type" => "stdio", "command" => "node"},
           "tools" => %{
             "read" => %{"as" => "workspace.read", "effect" => "read"}
@@ -3772,6 +3897,38 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
 
   defp write_host_config(directory, name, config),
     do: write_host_config(directory, name, Jason.encode!(config))
+
+  defp catalog_for(registry) do
+    {:ok, catalog} =
+      InstallationCatalog.new(%{}, installed_limits: registry.installed_limits)
+
+    catalog
+  end
+
+  defp prepared_metadata(prepared) do
+    Map.take(prepared, [
+      :provider_declarations,
+      :effective_data_class,
+      :effective_flow,
+      :effective_event_policy,
+      :effective_application_projection,
+      :effective_application_digest,
+      :post_selection_context
+    ])
+  end
+
+  defp host_installation_owners do
+    marker = {PtcRunner.Kernel.HostInstallationOwner, :authority}
+
+    Process.list()
+    |> Enum.filter(fn pid ->
+      case Process.info(pid, :dictionary) do
+        {:dictionary, dictionary} -> List.keymember?(dictionary, marker, 0)
+        nil -> false
+      end
+    end)
+    |> MapSet.new()
+  end
 
   defp write_application(directory, name, manifest, extra_documents \\ []) do
     root = Path.join(directory, name)

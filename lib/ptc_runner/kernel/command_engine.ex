@@ -18,10 +18,12 @@ defmodule PtcRunner.Kernel.CommandEngine do
   alias PtcRunner.Kernel.CommandPreparation
   alias PtcRunner.Kernel.CommandRunRef
   alias PtcRunner.Kernel.CommandSource
+  alias PtcRunner.Kernel.CommandSubject
   alias PtcRunner.Kernel.HostConfig
+  alias PtcRunner.Kernel.HostInstallation
+  alias PtcRunner.Kernel.InstallationCatalog
   alias PtcRunner.Kernel.PreparedRun
   alias PtcRunner.Kernel.PrivateDirectory
-  alias PtcRunner.Kernel.ProviderRegistry
   alias PtcRunner.Kernel.RunCoordinator
 
   @artifact_destination_keys [:trace_dir, :inspect, :output, :private_output]
@@ -65,11 +67,30 @@ defmodule PtcRunner.Kernel.CommandEngine do
 
   defp prepare_arguments(%CommandArguments{command: command} = arguments, run_ref, destinations)
        when command in [:validate, :run] do
-    with {:ok, registry} <- registry(arguments.options),
-         {:ok, request} <- request(arguments, registry, run_ref),
-         {:ok, prepared} <- RunCoordinator.prepare(request, registry) do
-      command_preparation(arguments, run_ref, prepared, registry, destinations)
-    else
+    case catalog(arguments.options) do
+      {:ok, catalog} ->
+        try do
+          result =
+            with {:ok, request} <- request(arguments, catalog, run_ref),
+                 {:ok, prepared} <- RunCoordinator.prepare(request, catalog) do
+              command_preparation(arguments, run_ref, prepared, catalog, destinations)
+            else
+              {:error, %CommandDiagnostic{} = diagnostic} ->
+                {:error, arguments_outcome(arguments, run_ref, diagnostic)}
+            end
+
+          if match?({:error, _outcome}, result), do: InstallationCatalog.close(catalog)
+          result
+        rescue
+          exception ->
+            InstallationCatalog.close(catalog)
+            reraise exception, __STACKTRACE__
+        catch
+          kind, reason ->
+            InstallationCatalog.close(catalog)
+            :erlang.raise(kind, reason, __STACKTRACE__)
+        end
+
       {:error, %CommandDiagnostic{} = diagnostic} ->
         {:error, arguments_outcome(arguments, run_ref, diagnostic)}
     end
@@ -94,31 +115,68 @@ defmodule PtcRunner.Kernel.CommandEngine do
          arguments,
          run_ref,
          prepared,
-         registry,
+         catalog,
          {destinations, destination_failures}
        ) do
-    case CommandPreparation.new(
-           arguments.command,
-           run_ref,
-           prepared,
-           registry,
-           destinations,
-           destination_failures
-         ) do
-      {:ok, preparation} ->
-        {:ok, preparation}
+    case arguments.command do
+      :validate ->
+        result = validation_outcome(arguments, run_ref, prepared)
+        InstallationCatalog.close(catalog)
+        result
 
-      {:error, _reason} ->
-        invalid_command_preparation(arguments, run_ref, prepared)
+      :run ->
+        case CommandPreparation.new(
+               :run,
+               run_ref,
+               prepared,
+               catalog,
+               destinations,
+               destination_failures
+             ) do
+          {:ok, preparation} ->
+            {:ok, preparation}
+
+          {:error, _reason} ->
+            InstallationCatalog.close(catalog)
+            invalid_command_preparation(arguments, run_ref, prepared)
+        end
     end
   rescue
     exception ->
       PreparedRun.close(prepared)
+      InstallationCatalog.close(catalog)
       reraise exception, __STACKTRACE__
   catch
     kind, reason ->
       PreparedRun.close(prepared)
+      InstallationCatalog.close(catalog)
       :erlang.raise(kind, reason, __STACKTRACE__)
+  end
+
+  defp validation_outcome(arguments, run_ref, prepared) do
+    case RunCoordinator.validation_result(prepared) do
+      {:ok, result} ->
+        PreparedRun.close(prepared)
+        {:ok, CommandOutcome.success(:validate, run_ref, result)}
+
+      {:error, {:selection_unverifiable, name, occurrence}} ->
+        PreparedRun.close(prepared)
+        {:ok, subject} = CommandSubject.provider(name, :selection, occurrence)
+
+        {:error,
+         arguments_outcome(
+           arguments,
+           run_ref,
+           CommandDiagnostic.new!(
+             :provider_declaration,
+             :selection_unverifiable,
+             subject: subject
+           )
+         )}
+
+      {:error, :invalid_prepared_run} ->
+        invalid_command_preparation(arguments, run_ref, prepared)
+    end
   end
 
   defp capture_artifact_destinations(options) do
@@ -182,26 +240,21 @@ defmodule PtcRunner.Kernel.CommandEngine do
      )}
   end
 
-  defp registry(options) do
+  defp catalog(options) do
     case Map.get(options, :host_config) do
       nil ->
-        ProviderRegistry.new()
+        InstallationCatalog.new()
 
       path ->
-        load_registry(path)
+        load_catalog(path)
     end
   end
 
-  defp load_registry(path) do
+  defp load_catalog(path) do
     case HostConfig.load_command(path) do
       {:ok, host} ->
-        inert_builders =
-          Map.new(host.install, fn {name, _installation} ->
-            {name, fn _selection, _context -> {:error, :inactive_provider} end}
-          end)
-
-        case ProviderRegistry.new(inert_builders, installed_limits: host.limits) do
-          {:ok, registry} -> {:ok, registry}
+        case HostInstallation.catalog(host) do
+          {:ok, catalog} -> {:ok, catalog}
           {:error, _reason} -> {:error, diagnostic(:host, :host_invalid)}
         end
 
@@ -210,6 +263,11 @@ defmodule PtcRunner.Kernel.CommandEngine do
 
       {:error, :host_invalid} ->
         {:error, diagnostic(:host, :host_invalid)}
+
+      {:error, {:installation_revision_missing, name}} ->
+        {:ok, subject} = CommandSubject.provider(name, :declaration)
+
+        {:error, CommandDiagnostic.new!(:host, :installation_revision_missing, subject: subject)}
 
       {:error, {:host_schema_invalid, segments}} ->
         {:error, host_path_diagnostic(:host_schema_invalid, segments)}
@@ -228,10 +286,10 @@ defmodule PtcRunner.Kernel.CommandEngine do
     )
   end
 
-  defp request(arguments, registry, run_ref) do
+  defp request(arguments, catalog, run_ref) do
     options =
       [
-        installed_limits: registry.installed_limits,
+        installed_limits: catalog.installed_limits,
         result_projection: :json,
         inspection_capture: Map.has_key?(arguments.options, :inspect)
       ]

@@ -5,6 +5,7 @@
   "install": {
     "deepseek": {
       "source": "llm",
+      "installation_revision": "viewer-llm-v1",
       "model": "openrouter:deepseek/deepseek-v4-flash",
       "credential": "openrouter_key",
       "cache": true

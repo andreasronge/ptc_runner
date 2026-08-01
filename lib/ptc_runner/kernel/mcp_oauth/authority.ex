@@ -146,6 +146,27 @@ defmodule PtcRunner.Kernel.MCPOAuth.Authority do
   def from_host(_value, _endpoint, _credential_names, _opts),
     do: {:error, :invalid_oauth_authority}
 
+  @doc false
+  @spec valid?(term()) :: boolean()
+  def valid?(%__MODULE__{} = authority) do
+    credentials =
+      case authority.client do
+        %{client_secret_binding: binding} when is_binary(binding) -> MapSet.new([binding])
+        _client -> MapSet.new()
+      end
+
+    case from_host(authority_document(authority), authority.resource, credentials,
+           allow_insecure_loopback: true
+         ) do
+      {:ok, rebuilt} -> rebuilt == authority
+      _invalid -> false
+    end
+  rescue
+    _exception -> false
+  end
+
+  def valid?(_authority), do: false
+
   @doc """
   Validates and retains one exact HTTPS issuer identifier.
 
@@ -522,6 +543,59 @@ defmodule PtcRunner.Kernel.MCPOAuth.Authority do
       "redirect" => redirect_projection(client.redirect)
     }
   end
+
+  defp authority_document(authority) do
+    %{
+      "installation_id" => authority.installation_id,
+      "issuer" => authority.issuer,
+      "resource" => authority.resource,
+      "scope_ceiling" => sorted_scopes(authority.scope_ceiling),
+      "default_scopes" => sorted_scopes(authority.default_scopes),
+      "refresh_access" => Atom.to_string(authority.refresh_access),
+      "authorization_timeout_ms" => authority.authorization_timeout_ms,
+      "unknown_expiry_ttl_ms" => authority.unknown_expiry_ttl_ms,
+      "network" => %{
+        "additional_origins" => authority.additional_origins,
+        "private_network_origins" => authority.private_network_origins
+      },
+      "client" => client_document(authority.client)
+    }
+  end
+
+  defp client_document(%{registration: :pre_registered} = client) do
+    %{
+      "registration" => "pre_registered",
+      "client_id" => client.client_id,
+      "token_endpoint_auth_method" => Atom.to_string(client.token_endpoint_auth_method),
+      "grant_types" => sorted_scopes(client.grant_types)
+    }
+    |> maybe_put_client_secret_binding(client)
+    |> put_redirect(client.redirect)
+  end
+
+  defp client_document(%{registration: :client_id_metadata_document} = client) do
+    %{
+      "registration" => "client_id_metadata_document",
+      "client_id" => client.client_id,
+      "token_endpoint_auth_method" => "none"
+    }
+    |> put_redirect(client.redirect)
+  end
+
+  defp maybe_put_client_secret_binding(document, %{client_secret_binding: binding}),
+    do: Map.put(document, "client_secret_binding", binding)
+
+  defp maybe_put_client_secret_binding(document, _client), do: document
+
+  defp put_redirect(document, {:loopback, redirect}) do
+    Map.put(document, "loopback_redirect", %{
+      "host" => redirect.host,
+      "path" => redirect.path
+    })
+  end
+
+  defp put_redirect(document, {:https, redirect_uris}),
+    do: Map.put(document, "redirect_uris", redirect_uris)
 
   defp redirect_projection({:https, values}),
     do: %{"type" => "https", "uris" => values}

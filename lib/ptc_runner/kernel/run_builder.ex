@@ -24,6 +24,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.InspectionArtifact
   alias PtcRunner.Kernel.InspectionSink
+  alias PtcRunner.Kernel.InstallationCatalog
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.MissionEnvironment
   alias PtcRunner.Kernel.PreparedRun
@@ -225,16 +226,21 @@ defmodule PtcRunner.Kernel.RunBuilder do
   end
 
   defp prepare_and_build(request, registry, opts) do
-    case RunCoordinator.prepare(request, registry) do
-      {:ok, prepared} ->
-        try do
-          build_prepared(prepared, registry, opts)
-        after
-          PreparedRun.close(prepared)
-        end
+    installed_limits = Keyword.get(opts, :installed_limits, registry.installed_limits)
 
-      {:error, _diagnostic} = error ->
-        error
+    with {:ok, catalog} <-
+           InstallationCatalog.new(%{}, installed_limits: installed_limits) do
+      case RunCoordinator.prepare(request, catalog) do
+        {:ok, prepared} ->
+          try do
+            build_prepared(prepared, registry, opts)
+          after
+            PreparedRun.close(prepared)
+          end
+
+        {:error, _diagnostic} = error ->
+          error
+      end
     end
   end
 
@@ -438,18 +444,23 @@ defmodule PtcRunner.Kernel.RunBuilder do
          :ok <- providers_accept(prepared, effective_class),
          :ok <- preflight_trace(manifest.events.policy, effective_class, opts),
          :ok <- preflight_result(manifest.events.policy, effective_class, opts),
-         {:ok, preflighted} <- preflight_providers(prepared),
-         {:ok, credentials} <-
-           ProviderRegistry.resolve_credentials(registry, credential_names(prepared)),
-         {:ok, acquired} <- acquire_providers(preflighted, credentials, effective_class) do
-      {:ok,
-       %{
-         acquired
-         | workflow: finalize_capabilities(acquired.workflow),
-           mission: finalize_capabilities(acquired.mission),
-           snapshots: sort_snapshots(acquired.snapshots)
-       }
-       |> Map.delete(:exports)}
+         {:ok, preflighted} <- preflight_providers(prepared) do
+      try do
+        with {:ok, credentials} <-
+               ProviderRegistry.resolve_credentials(registry, credential_names(prepared)),
+             {:ok, acquired} <- acquire_providers(preflighted, credentials, effective_class) do
+          {:ok,
+           %{
+             acquired
+             | workflow: finalize_capabilities(acquired.workflow),
+               mission: finalize_capabilities(acquired.mission),
+               snapshots: sort_snapshots(acquired.snapshots)
+           }
+           |> Map.delete(:exports)}
+        end
+      after
+        release_preflights(preflighted)
+      end
     end
   end
 
@@ -510,6 +521,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
           {:cont, {:ok, [entry | preflighted]}}
 
         {:error, _reason} = error ->
+          release_preflights(preflighted)
           {:halt, error}
       end
     end)
@@ -660,6 +672,13 @@ defmodule PtcRunner.Kernel.RunBuilder do
 
   defp reverse_success({:ok, values}), do: {:ok, Enum.reverse(values)}
   defp reverse_success({:error, _reason} = error), do: error
+
+  defp release_preflights(preflighted) do
+    Enum.each(preflighted, fn
+      %{preflighted: provider} -> ProviderRegistry.release_preflight(provider)
+      provider -> ProviderRegistry.release_preflight(provider)
+    end)
+  end
 
   defp strictest_data_class(:private_inspection, _next), do: :private_inspection
   defp strictest_data_class(_current, :private_inspection), do: :private_inspection

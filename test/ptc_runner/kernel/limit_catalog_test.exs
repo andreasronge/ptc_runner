@@ -287,6 +287,7 @@ defmodule PtcRunner.Kernel.LimitCatalogTest do
       "install" => %{
         "history" => %{
           "source" => "ptc_trace_snapshot",
+          "installation_revision" => "trace-v1",
           "directory" => "traces"
         }
       }
