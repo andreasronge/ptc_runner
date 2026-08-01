@@ -1,378 +1,316 @@
 # Non-interactive private inspection analysis
 
-**Status:** design, third revision, 2026-08-01. No implementation started.
+**Status:** design, fourth revision, 2026-08-01. No implementation started.
 Addresses finding 6 of [`agent-developer-findings.md`](agent-developer-findings.md).
 
-Two earlier drafts were structured as a blocker list with proposed resolutions,
-and both failed independent review the same way: each resolution was a plausible
-sentence that the implementation contradicted. "Route `error.message` to the
-sink" — already redacted before the frontend sees it. "Buffer records and write
-them as the session runs" — buffering and streaming are different designs.
-"Matches `InspectionArtifact`" — that module does not hold an append target
-open. "`session-closed` carries the state" — it is not emitted when close fails.
+Three earlier drafts were wrong in ways worth recording, because each error was
+a plausible sentence the code contradicted:
 
-A fourth error outlived both reviews: the security justification itself. The
-Viewer already provides validated non-interactive access to the same records, so
-there was never an integrity gap. That argument is withdrawn below and replaced
-with the narrower one that survives — interface consistency and queryability.
+- the security justification — the Viewer already provides validated
+  non-interactive access to the same records, so there was never an integrity
+  gap;
+- "route `error.message` to the sink" — already redacted before the frontend
+  sees it;
+- "buffer records and write them as the session runs" — buffering and streaming
+  are different designs;
+- "matches `InspectionArtifact`" — that module does not hold an append target
+  open;
+- "`session-closed` carries the state" — it is not emitted when close fails.
 
-The design is organised around the three seams the change actually touches,
-because that is where the previous drafts went wrong.
+This revision starts from what already works rather than from what is missing.
 
-## Problem
+## The session machinery already runs without a terminal
 
-`inspection-analysis-v2` is the only validated reader of private inspection
-artifacts, and only a human at an attached terminal can drive it:
+The Viewer serves a bounded `log-analysis-v2` REPL over HTTP with no terminal
+anywhere. `ViewerReplSessionWorker.run/3` calls the same constructor the CLI
+uses:
 
 ```elixir
-# lib/ptc_runner/kernel/inspection_analysis_profile.ex:108
-def frontend do
-  %{
-    input_modes: [:interactive],
-    output_formats: [:clojure],
-    continue_on_error: :forbidden,
-    private_terminal: :required
-  }
-end
+AnalysisSessionBuilder.start(
+  LogAnalysisProfile.id(),
+  %{"traces" => trace_dir},
+  {:directory, trace_dir}
+)
 ```
 
-An agent investigating a run therefore cannot use the REPL to query private
-records, even though the same agent can query canonical traces there through
-`log-analysis-v2` without any terminal.
+No frontend authorization, no terminal check, no options. It works because
+`log-analysis-v2` declares `private_terminal: :forbidden`, so the builder's
+`authorize_private_profile/2` returns `:ok`.
 
-### The Viewer already provides validated non-interactive access
+So sessions, preludes, bounded queries, and pagination are all already
+non-interactive. **Nothing in the analysis engine needs a terminal.** What is
+missing is a private-capable frontend contract, not new session machinery.
 
-The first two drafts of this plan argued that the gate forces agents onto an
-*unvalidated* path — reading `.inspection.jsonl` directly. **That was wrong**,
-and the error survived two reviews because nobody checked the Viewer.
+## Where the gate actually lives
 
-Verified end to end:
+Two independent authorization layers, and only one is shared:
 
-```console
-mix ptc.viewer --trace-dir tmp/demo \
-  --inspection-file tmp/demo/run.inspection.jsonl --no-open --port 4137
-curl http://127.0.0.1:4137/api/inspection/runs/run-8fe6b10962e1
-# HTTP 200, 209833 bytes
-```
+| Layer | Enforces | CLI | Viewer |
+| --- | --- | --- | --- |
+| `AnalysisSessionBuilder.authorize_private_profile/2` | `private_terminal: true` **and** `AnalysisTerminal.attached?()` for any profile declaring `private_terminal: :required` | passes the flag | never passes it |
+| `AnalysisProfileRegistry.authorize_frontend/2` | `input_modes`, `output_formats`, `continue_on_error`, terminal | calls it | **ignores it entirely** |
 
-That returns every private record — generated PTC-Lisp source, model prose,
-capability arguments and results — as JSON. And it is fully validated:
-`ViewerAdapter.pin_inspection/2` calls `InspectionArtifact.load/1`, checks the
-artifact's `trace_id` against the canonical run, and runs
-`InspectionArtifact.validate_correlations/2` before issuing a grant. It is the
-same correlation check the REPL profile performs.
+The builder layer is the real gate: it applies to every caller. The registry
+layer is a CLI-only contract that the Viewer does not participate in — which is
+why the Viewer can serve a REPL that the CLI's own frontend table would reject.
 
-**So there is no integrity gap, and no security argument for this change.**
-Both remaining drafts of that argument are withdrawn.
+That divergence is the thing to fix. The `frontend/0` contract claims to
+describe how a profile may be driven, but one of the two frontends does not
+consult it.
 
-### What is actually wrong
+## What is actually wrong
 
-The Viewer is a whole-artifact dump, not a query interface. That single `curl`
-returned 209,833 bytes for a five-turn run. There is no filtering, no
-projection, no pagination, and no way to ask a question — an agent wanting "what
-did turn 4 do" receives the entire run and does the work itself, which is
-exactly the raw-parsing problem the REPL preludes exist to remove. It also
-requires starting a server and binding a port.
+The CLI is the intended analysis interface for an agent — it has the preludes,
+bounded cursor-paginated queries, and `inspection.analysis/all-*` with explicit
+page bounds. The Viewer's `/api/inspection/runs/:run_id` is a whole-artifact
+dump: one `curl` returned 209,833 bytes for a five-turn run, with no filtering,
+projection, or pagination. It is a browsing surface, not a query surface, and it
+should not become the agent path by default.
 
-The REPL is the intended analysis interface. `inspection/model-exchanges`,
-`inspection/capability-calls`, and `inspection/generated-sources` are bounded
-cursor-paginated queries, and `inspection.analysis/all-*` wraps them with an
-explicit page bound. None of that is reachable without a terminal.
-
-**The defect is an asymmetry.** `log-analysis-v2` serves canonical traces
-non-interactively with exactly these ergonomics. `inspection-analysis-v2`
-refuses the same usage over private ones. The two profiles share a frontend, a
-prelude layering, and an analysis engine; the difference is a terminal check
-whose only remaining purpose is refusing unattended extraction — a policy that
-should be a host's choice, not the only shape available.
-
-This change is therefore about **interface consistency and queryability**. It
-grants no access the Viewer does not already grant.
+`log-analysis-v2` already serves canonical traces through the CLI
+non-interactively. `inspection-analysis-v2` refuses the same usage over private
+records despite sharing the builder, the analysis engine, and the prelude
+layering. **The defect is that asymmetry**, and the change grants no access the
+Viewer does not already grant.
 
 ## Trust boundary
 
 **Same-UID processes are trusted.** Confirmed by the maintainer, 2026-08-01.
 
-The previous draft grounded this by citing `stable-cli-contract.md`'s non-goal
-"an adversarial same-user/same-VM security boundary." That was overstated: that
-document is itself a disposable plan and its non-goal is scoped to the
-standalone CLI, so it is evidence of intent, not a durable contract for
-`mix ptc.repl`. **This decision must be recorded in `InspectionAnalysisProfile`'s
-moduledoc**, which is durable, as part of the work.
+An earlier draft grounded this by citing `stable-cli-contract.md`'s non-goal
+"an adversarial same-user/same-VM security boundary." That was overstated — that
+document is a disposable plan scoped to the standalone CLI. **Record the
+decision in `InspectionAnalysisProfile`'s moduledoc**, which is durable, as part
+of this work.
 
-Consequences:
+Consequences: `PrivateDirectory`'s pathname preflight is adequate and
+`openat2`-class discipline is unnecessary; `0600` protects against other UIDs,
+not same-UID processes; post-open `fstat` checks remain as protection against
+operator mistakes, not adversaries.
 
-- `PrivateDirectory`'s pathname preflight is adequate; `openat2`-class
-  descriptor discipline is not required. Post-open `fstat` checks stay as
-  protection against operator mistakes — a path that is a FIFO, a device, or an
-  alias for stdout — not against a racing adversary.
-- `0600` protects against other UIDs, not against same-UID processes.
-- A host needing to refuse unattended private extraction keeps a terminal-only
-  profile. That is now the only remaining purpose of the gate, and the reason
-  `v2` is retained rather than deleted.
+## The refactoring: a private destination, not a terminal
 
-## Seam A — the projection boundary
+Replace the builder's terminal requirement with a **private destination** the
+builder validates, which each frontend implements in its own way.
 
-`AnalysisSession.project_result/2` (`analysis_session.ex:335`) turns a detailed
-evaluation result into the public projection the frontend receives. Two facts
-make this the correct split point, and both invalidate the earlier design that
-split in the frontend:
+```
+authorize_private_profile(recipe, opts)
+  :required -> exactly one authorized destination must be present
+```
 
-1. `error_message/2` (`analysis_session.ex:485`) replaces the message with the
-   constant `"private evaluation failed"` whenever
-   `result_data_class != "normal"`. Splitting after projection would write that
-   constant to the sink. The real bounded text is in `detailed.details.message`.
-2. Splitting later means the frontend receives private content and is trusted
-   not to print it. Under a sink the frontend is exactly the component that
-   stopped being trustworthy for that.
+| Frontend | Destination |
+| --- | --- |
+| CLI, interactive | attached terminal (today's behaviour, unchanged) |
+| CLI, non-interactive | `--private-sink PATH`, an owner-only file |
+| Viewer | the pinned loopback response it already serves |
+
+This makes `frontend/0` describe something both frontends can honour, and moves
+the CLI's `input_modes`/`output_formats` from a CLI-private table into the
+destination's declared capabilities. A host that wants to refuse unattended
+private extraction declares no non-interactive destination.
+
+The sink is one implementation of this abstraction, not the abstraction itself.
+That framing matters: the previous drafts designed the sink first and then tried
+to justify it.
+
+## Seam A — the projection boundary (shared, not CLI-only)
+
+`AnalysisSession.project_result/2` (`analysis_session.ex:335`) produces the
+public projection every frontend receives. `error_message/2`
+(`analysis_session.ex:485`) already replaces the message with the constant
+`"private evaluation failed"` when `result_data_class != "normal"` — but
+`formatted`, `value`, and `prints` are not redacted, and flow to whatever
+frontend asked.
+
+**This is not a CLI problem.** If the Viewer ever served a private profile it
+would face it identically. Fix it once, in the session.
 
 **Design:** under a private destination, `project_result/2` returns
 `{safe_projection, private_record}`. The private record is built from the
-detailed result *before* redaction. The frontend never receives private content
-for a sink session.
+detailed result *before* redaction; the frontend never receives private content.
 
 ### The safe projection
 
-Constructed explicitly and validated — **not** `json_projection/1` over a key
-list. A generic pass-through turns a future producer change into a silent leak.
+Constructed explicitly and validated — **not** a key filter over
+`json_projection/1`, which turns a future producer change into a silent leak.
 
-| Field | Source | Constraint |
-| --- | --- | --- |
-| `status` | result | closed enum |
-| `outcome` | result | closed enum |
-| `evaluation_id` | result | opaque id |
-| `duration_ms` | result | integer |
-| `continuation_effect` | result | closed enum: `committed_with_history`, `committed_without_history`, `preserved` (`evaluation.ex:340`) |
-| `usage` | session | counts and byte totals only |
-| `value_available` | derived | boolean |
-| `formatted_truncated`, `prints_truncated` | derived | boolean |
-| `error.kind`, `error.reason` | error projection | closed enums |
-| `error.capability_activity?`, `error.capability_failure?`, `error.retryable?` | error projection | boolean |
+| Field | Constraint |
+| --- | --- |
+| `status`, `outcome` | closed enum |
+| `evaluation_id` | opaque id |
+| `duration_ms` | integer |
+| `continuation_effect` | closed enum: `committed_with_history`, `committed_without_history`, `preserved` (`evaluation.ex:340`) |
+| `usage` | counts and byte totals only |
+| `value_available`, `formatted_truncated`, `prints_truncated` | boolean |
+| `error.kind`, `error.reason` | closed enum |
+| `error.capability_activity?`, `error.capability_failure?`, `error.retryable?` | boolean (`analysis_session.ex:471`) |
 
-The last row was missing from the previous draft, which silently dropped three
-fields the projection already produces (`analysis_session.ex:471`).
-
-Validation must reject an out-of-enum `kind`, `reason`, `outcome`, or
-`continuation_effect` rather than passing it through.
+An out-of-enum value is rejected, not passed through.
 
 ### The private record
 
 `evaluation_id`, `formatted`, `value`, `prints`, and the **unredacted** bounded
-`details.message`. Joined to the safe stream on `evaluation_id`, which is
-already present and is the same key that makes turn correlation work.
+`details.message`. Joined to the safe stream on `evaluation_id`.
 
-### Metadata that stays on stdout, deliberately
+### Accepted side channels
 
-`value_available`, the truncation flags, `duration_ms`, and `usage` counters
-disclose presence, size thresholds, timing, and activity. These are side
-channels, not content, and they are **accepted** — they are what makes the safe
-stream useful at all. `session-closed`'s `trace_path` is a host path and is
-likewise accepted as intentional CLI metadata. Stating this explicitly is the
-point; an unqualified "stdout contains nothing private" is the claim that failed
-review twice.
+`value_available`, truncation flags, `duration_ms`, and `usage` counters
+disclose presence, size thresholds, timing, and activity. `session-closed`'s
+`trace_path` is a host path. These are **accepted** and stated as such — an
+unqualified "stdout contains nothing private" is the claim that failed review
+twice.
 
 ## Seam B — the sink artifact
 
 **Buffer in memory; build, validate, and publish one complete artifact at
-close.** This is a choice between three coherent designs, and the previous draft
-blended them:
+close.** Chosen explicitly over per-evaluation writes and over accepting
+post-commit write failure. Blending those is what left the earlier draft's
+transactional coupling alive.
 
-1. buffer and publish at close;
-2. integrate each write into the evaluation commit protocol;
-3. accept post-commit write failure and report that exact state.
+This matches `InspectionArtifact`, which constructs and validates a complete
+encoded artifact, writes a temporary file, and links it
+(`inspection_artifact.ex:579`) without holding an append target open.
 
-Choosing (1) removes per-evaluation disk I/O entirely, so there is no write that
-can fail after continuation commit. The earlier "write to a staging file as the
-session runs" was (2) or (3) wearing (1)'s claims.
+- **Session start:** validate the final path and parent — non-existent target,
+  safe parent per `PrivateDirectory`, physically distinct from the captured
+  trace directory, the captured inspection artifact, and `--session-trace-dir`.
+  Create nothing. This catches deterministic setup problems only; it does not
+  guarantee publication succeeds.
+- **During:** append to a bounded in-memory buffer; exceeding the ceiling fails
+  the session closed.
+- **At close:** encode, validate, write a private temporary sibling, `fsync`,
+  link no-clobber, sync the directory, unlink the temporary.
+- **On crash:** nothing published, no discoverable temporary, records lost —
+  the same trade `InspectionArtifact` already makes.
 
-This now genuinely matches `InspectionArtifact`, which constructs and validates a
-complete encoded artifact, writes it to a temporary file, and links it
-(`inspection_artifact.ex:579`). It does not hold an append target open, and
-neither does this.
+Reachable states: `not_requested`, `written`, `failed`, and
+`finalization_uncertain` (link succeeded, directory sync or unlink unproven).
+`recovery_written` does not apply because no artifact persists before close.
 
-**Session start:** validate the final path and its parent — non-existent target,
-safe parent per `PrivateDirectory`, physically distinct from the captured trace
-directory, the captured inspection artifact, and `--session-trace-dir`. Do not
-create anything. This catches deterministic setup problems; it does **not**
-guarantee the later publication succeeds, and the plan no longer claims it does.
-
-**During the session:** append records to a bounded in-memory buffer. Exceeding
-the ceiling fails the session closed, consistent with capture being either
-disabled or required/fail-closed.
-
-**At close:** encode, validate, write a private temporary sibling in the target
-directory, `fsync`, link no-clobber to the final name, sync the directory,
-unlink the temporary.
-
-**On crash before close:** nothing is published and no temporary survives in a
-discoverable state. The session's private records are lost. This is the answer
-to the question the previous draft left open in two contradictory places, and it
-matches what `InspectionArtifact` already does.
-
-Because no artifact persists before close, `recovery_written` does not apply.
-The reachable states are `not_requested`, `written`, `failed`, and
-`finalization_uncertain` — the last only when the link succeeded but the
-directory sync or temporary unlink cannot be proven.
-
-### Two-artifact ordering
-
-The session trace and the private sink cannot be published atomically together.
-Publish the **sink first, the session trace last**, so the canonical trace
-remains the authoritative marker that a session completed. A sink without a
-trace is possible and must be reportable; a trace implying a sink that was never
-written is not.
+Publish the **sink first, the session trace last**, so the canonical trace stays
+the authoritative completion marker.
 
 ## Seam C — close and halt reporting
 
-Two gaps make the states above unobservable exactly when they matter.
-
 **`session-closed` is not emitted on close failure.** `finish_profile_session/4`
-(`ptc.repl.ex:668`) calls `present_profile_closed` only on `{:ok, info}`;
-`close_profile_session/1` retries once and otherwise yields `{:error, reason}`,
-which produces `command_error`. A declared `failed` or `finalization_uncertain`
-sink state would never reach the caller.
+(`ptc.repl.ex:668`) presents it only on `{:ok, info}`; `close_profile_session/1`
+retries once then yields `{:error, reason}` → `command_error`. A declared
+`failed` or `finalization_uncertain` state would never reach the caller.
+`AnalysisSession.close/1` must return structured failure information, and the
+frontend must emit an error-status `session-closed` before `command_error`.
 
-**Required:** `AnalysisSession.close/1` returns structured information on
-failure, and the frontend emits an error-status `session-closed` carrying both
-artifact states *before* `command_error`.
+**The session owner never learns the frontend halted.** With `continue_on_error`
+forbidden, `run_profile_sources/5` halts on the first error while the session
+sees an ordinary close. Persisting "stopped at evaluation N" needs a seam that
+does not exist — `AnalysisSession.close(session, halted_at: index)` or a
+separate call before close.
 
-**The session owner does not know the frontend halted.** With
-`continue_on_error` forbidden, `run_profile_sources/5` halts on the first error,
-but the session sees an ordinary evaluation followed by an ordinary close. There
-is no seam through which "the session stopped at evaluation N" can reach the
-artifact.
+`continue_on_error` stays `:forbidden`. Why the private profile forbids it while
+`log-analysis` allows `:repeated_eval_only` is not recorded anywhere, and
+relaxing an unexplained restriction is how the first draft went wrong.
 
-**Required:** the frontend passes a halt outcome into the session before close —
-`AnalysisSession.close(session, halted_at: index)` or equivalent — and the sink
-records it. Without this seam the halt state cannot be persisted at all.
+## Frontend
 
-`continue_on_error` itself stays `:forbidden`. Why the private profile forbids
-it while `log-analysis` allows `:repeated_eval_only` is not recorded anywhere,
-and relaxing an unexplained restriction is how the first draft went wrong.
+`--private-sink PATH`, valid only with a private analysis profile.
 
-## Frontend and authorization
-
-`--private-sink PATH` on `mix ptc.repl`, valid only with a private analysis
-profile. Authorization becomes "a private destination is authorized" — attached
-terminal or sink, exactly one. Both is an error; neither keeps today's
-`private_terminal_required`.
-
-| Axis | Terminal | With `--private-sink` |
+| Axis | Terminal | Sink |
 | --- | --- | --- |
 | `input_modes` | `[:interactive]` | `[:eval, :load, :script, :stdin]` |
 | `output_formats` | `[:clojure]` | `[:jsonl]` |
 | `continue_on_error` | `:forbidden` | `:forbidden` |
 
-`[:jsonl]` is unconditional. With the value suppressed, Clojure mode prints
-almost nothing, and defining semantics for it invents a format with no users.
-**Because `clojure` is the default format, `--private-sink` without
-`--format jsonl` fails** — documented, not accidental. Rejection must occur
-before path validation, source capture, and session construction.
+`[:jsonl]` is unconditional — with the value suppressed, Clojure mode prints
+almost nothing. **Because `clojure` is the default, `--private-sink` without
+`--format jsonl` fails**; documented, not accidental. Rejection precedes path
+validation, source capture, and session construction.
 
-### Record shape discrimination
-
-`private_destination: "sink"` on `session-started` is not sufficient: a
-line-oriented JSONL consumer reading one `evaluation` record cannot tell which
-`result` variant it holds. Put a **record-local** discriminator —
-`result_projection: "private-split-v1"` — on every evaluation record. Keep
-`schema_version: 1`; no consumer has ever parsed a sink session, so nothing
-regresses.
+Put a **record-local** discriminator, `result_projection: "private-split-v1"`,
+on every evaluation record. `private_destination` on `session-started` alone
+leaves a line-oriented consumer unable to tell which `result` variant it holds.
+Keep `schema_version: 1`; no consumer has parsed a sink session.
 
 ## Versioning
 
-`inspection-analysis-v3`. The result policy changes, admitted input modes
-change, output behaviour changes, the published frontend discovery contract
-changes, and unattended private-query authority is added — all four triggers in
-`kernel-maintainer.md`.
-
-Retain `v2`. Deleting it is a separate policy decision; a terminal-only profile
-still serves hosts that refuse unattended extraction.
+`inspection-analysis-v3` — result policy, input modes, output behaviour, and the
+published frontend contract all change. Retain `v2`; a terminal-only profile
+still serves hosts that refuse unattended extraction, and deleting it is a
+separate policy decision.
 
 ## Repository default
 
-Unchanged and independently confirmed: a caller-authored "this run is a fixture"
-bit is an assertion by the party seeking the exemption, and credential-free does
-not imply public. A legitimate public-fixture path would be a separate
-code-owned profile over immutable, digest-pinned, publicly classified resources
-— a different authority recipe, not an exemption.
+A caller-authored "this run is a fixture" bit is an assertion by the party
+seeking the exemption, and credential-free does not imply public. A legitimate
+public-fixture path would be a separate code-owned profile over immutable,
+digest-pinned, publicly classified resources.
 
 The default belongs in tooling: a helper that records `--trace` and `--inspect`
 and opens the private profile with `--private-sink` and `--format jsonl` already
-wired, so the safe invocation is the short one. Documentation follows the
-helper.
+wired, so the safe invocation is the short one.
 
 ## Verification
 
-Failing test first, per the repo's testing rule.
+Failing test first.
 
-- **Projection:** the private record carries the unredacted
-  `details.message` while the safe projection carries `"private evaluation
-  failed"` — the specific defect that made the previous design useless.
-- **Closed shapes:** an out-of-enum `kind`, `reason`, `outcome`, or
-  `continuation_effect` is rejected, not passed through.
-- **Leakage, asserted on captured output:** stdout and stderr contain no
+- **Projection:** the private record carries the unredacted `details.message`
+  while the safe projection carries `"private evaluation failed"`.
+- **Closed shapes:** out-of-enum `kind`, `reason`, `outcome`, or
+  `continuation_effect` is rejected.
+- **Leakage, asserted on captured output:** stdout and stderr carry no
   `formatted`, `value`, `prints`, or unredacted message — across success,
   evaluation error, contract violation, buffer overflow, halted session, close
-  failure, and VM crash reports.
-- **Format:** `--private-sink` without `--format jsonl` fails before staging,
-  capture, or session construction.
-- **Destination:** reject an existing final path, a symlinked leaf, a FIFO, a
-  device, a `/dev/fd` alias, a path colliding with stdin/stdout/stderr, a path
-  inside the captured input tree, and a path equal to `--session-trace-dir`.
-  Assert on the opened object.
-- **Close reporting:** a forced publication failure produces an error-status
-  `session-closed` carrying `failed`, ahead of `command_error`.
-- **Halt reporting:** a session halted at evaluation N records N in the sink.
-- **Crash:** a kill before close leaves no final artifact and no discoverable
-  temporary.
-- **Ordering:** a sink written with a subsequent trace failure is reportable;
-  the reverse is impossible.
+  failure, and crash reports.
+- **Format:** `--private-sink` without `--format jsonl` fails before capture or
+  session construction.
+- **Destination:** reject an existing final path, symlinked leaf, FIFO, device,
+  `/dev/fd` alias, collision with stdin/stdout/stderr, a path inside the
+  captured input tree, and a path equal to `--session-trace-dir`.
+- **Close and halt reporting:** forced publication failure yields an
+  error-status `session-closed` carrying `failed`; a session halted at
+  evaluation N records N.
+- **Ordering:** a sink written with a later trace failure is reportable; the
+  reverse is impossible.
 - **Correlation preserved:** malformed, replaced, uncorrelated, and oversized
-  input reject through the sink path exactly as through the terminal path. This
-  is the point of the change.
+  input reject through the sink path exactly as through the terminal path.
+- **Viewer unchanged:** the existing Viewer REPL and inspection API keep working
+  through the refactored authorization.
 - **End-to-end:** reproduce the per-turn account of an incident-compiler run
-  entirely through the profile, with no direct artifact reads.
+  entirely through the CLI profile.
 
 ## Order
 
-Schemas and lifecycle before implementation — the artifact's API depends on
-both.
-
 1. Record the trust decision in `InspectionAnalysisProfile`'s moduledoc.
-2. Define the safe projection, private record, evaluation-record discriminator,
-   and the closed set of sink states.
-3. Define the full lifecycle: buffer admission, overflow, ordinary close,
-   frontend halt, abort, deadline close, owner crash, link collision, sync
-   uncertainty, idempotent close retry, temporary cleanup, and two-artifact
-   ordering.
-4. Implement the sink artifact with its tests, modelled on
+2. Refactor `authorize_private_profile/2` to a destination check with the
+   terminal as the only initially-registered destination. **No behaviour
+   change**; the Viewer and CLI both keep working. This is the refactoring step
+   and it is independently verifiable.
+3. Define the safe projection, private record, discriminator, and sink states.
+4. Split the projection inside `AnalysisSession`; add the close and halt seams.
+5. Implement the sink artifact with its tests, modelled on
    `InspectionArtifact`'s build-validate-write-link sequence.
-5. Split the projection inside `AnalysisSession`; add the close and halt seams.
-6. Destination-based authorization and `v3`, retaining `v2`.
-7. CLI routing, format restriction, and end-to-end leakage tests.
+6. Register the sink as a destination; `v3`, retaining `v2`.
+7. CLI routing, format restriction, end-to-end leakage tests.
 8. Helper and documentation.
 
-Tests accompany each step rather than a single pass at the end.
+Step 2 is the answer to "is refactoring needed first" — yes, and it is a
+behaviour-preserving step that can land on its own.
 
 ## Open questions
 
-- **Should `AnalysisSession.close/1` grow an arity, or should halt metadata
-  arrive through a separate call before close?** Both work; the former is fewer
-  round trips, the latter avoids changing a public signature.
-- **Does the sink need its own byte ceiling, or does the existing analysis
-  result limit suffice?** The buffer holds every evaluation's private record,
-  which is strictly larger than any single result.
+- **Should `authorize_frontend/2` become shared rather than CLI-only?** The
+  Viewer ignoring the frontend contract is the deeper inconsistency. Fixing it
+  is larger than this change and may belong in its own plan.
+- **`close/1` arity versus a separate halt call** for the halt seam.
+- **Sink byte ceiling** — the buffer holds every evaluation's private record,
+  strictly larger than any single result.
 
 ## Related documents
 
 - [`agent-developer-findings.md`](agent-developer-findings.md) — finding 6.
-- [`stable-cli-contract.md`](stable-cli-contract.md) — owns the standalone CLI
-  surface. `mix ptc.repl` is outside its command set, so this work has no
-  sequencing dependency on it.
+- [`stable-cli-contract.md`](stable-cli-contract.md) — `mix ptc.repl` is outside
+  its command set, so this work has no sequencing dependency on it.
 - [`../../trace-log-contract.md`](../../trace-log-contract.md) — normative for
   private record shapes, correlation, validation, and fail-closed capture.
-- [`../../guides/kernel-repl.md`](../../guides/kernel-repl.md) — documents the
-  current private-profile invocation.
-- `ptc_viewer/` and `lib/ptc_runner/kernel/viewer_adapter.ex` — the existing
-  validated non-interactive read path. Any claim that private records are
-  otherwise unreachable must be checked against these first.
+- `ptc_viewer/`, `lib/ptc_runner/kernel/viewer_adapter.ex`, and
+  `viewer_repl_session_worker.ex` — the existing non-interactive paths. Any
+  claim that private records are unreachable, or that the session machinery
+  needs a terminal, must be checked against these first.
