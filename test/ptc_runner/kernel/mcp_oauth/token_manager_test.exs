@@ -789,7 +789,8 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManagerTest do
   test "cleanup adoption treats a manager that already exited as complete" do
     pid = spawn(fn -> :ok end)
     ref = Process.monitor(pid)
-    assert_receive {:DOWN, ^ref, :process, ^pid, :normal}
+    assert_receive {:DOWN, ^ref, :process, ^pid, reason}, 1_000
+    assert reason in [:normal, :noproc]
 
     manager = %TokenManager{pid: pid, resource: "https://mcp.example/mcp"}
     assert :ok = ManagerCleanup.adopt(manager)

@@ -433,7 +433,7 @@ defmodule PtcRunner.Kernel.MCPStdioTransportTest do
   test "close acknowledges and discards trailing server stdout", %{tmp_dir: tmp_dir} do
     marker = Path.join(tmp_dir, "request-received")
     transport = start_transport(tmp_dir, marker, "close-output")
-    request = Task.async(fn -> request(transport, "wait-for-close") end)
+    request = Task.async(fn -> request(transport, "wait-for-close", 8_192, 5_000) end)
 
     assert_eventually(fn -> File.exists?(marker) end)
     assert :ok = MCPStdioTransport.close(transport)
@@ -588,8 +588,8 @@ defmodule PtcRunner.Kernel.MCPStdioTransportTest do
     assert :ok = MCPStdioTransport.close(transport)
   end
 
-  defp request(transport, method, max_bytes \\ 8_192),
-    do: MCPStdioTransport.request(transport, method, %{}, %{}, max_bytes, 1_000)
+  defp request(transport, method, max_bytes \\ 8_192, timeout_ms \\ 1_000),
+    do: MCPStdioTransport.request(transport, method, %{}, %{}, max_bytes, timeout_ms)
 
   defp blocked_request(transport) do
     MCPStdioTransport.request(

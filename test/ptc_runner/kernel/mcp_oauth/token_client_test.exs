@@ -318,7 +318,6 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenClientTest do
 
   test "stops a resolver at its deadline without dispatching a late secret" do
     parent = self()
-    deadline_ms = System.monotonic_time(:millisecond) + 30
 
     resolver = fn "oauth_secret", _deadline ->
       send(parent, {:resolver_started, self()})
@@ -328,16 +327,20 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenClientTest do
       end
     end
 
-    assert {:error, :timeout} =
-             CredentialResolver.with_secret(
-               resolver,
-               "oauth_secret",
-               deadline_ms,
-               fn _secret -> flunk("late secret was dispatched") end
-             )
+    resolution =
+      Task.async(fn ->
+        CredentialResolver.with_secret(
+          resolver,
+          "oauth_secret",
+          System.monotonic_time(:millisecond) + 1_000,
+          fn _secret -> flunk("late secret was dispatched") end
+        )
+      end)
 
-    assert_receive {:resolver_started, resolver_pid}
-    refute Process.alive?(resolver_pid)
+    assert_receive {:resolver_started, resolver_pid}, 1_000
+    resolver_ref = Process.monitor(resolver_pid)
+    assert {:error, :timeout} = Task.await(resolution, 2_000)
+    assert_receive {:DOWN, ^resolver_ref, :process, ^resolver_pid, :killed}, 1_000
   end
 
   defp oauth_binding(authority) do

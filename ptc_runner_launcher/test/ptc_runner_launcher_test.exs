@@ -10,4 +10,16 @@ defmodule PtcRunnerLauncherTest do
     assert {:ok, stat} = File.stat(path)
     assert Bitwise.band(stat.mode, 0o111) != 0
   end
+
+  test "precommit cannot be scoped to a partial test suite" do
+    precommit = Mix.Project.config() |> Keyword.fetch!(:aliases) |> Keyword.fetch!(:precommit)
+
+    assert_raise Mix.Error, ~r/accepts only the optional --max-cases/, fn ->
+      precommit.(["test/ptc_runner_launcher_test.exs"])
+    end
+
+    assert_raise Mix.Error, ~r/requires --max-cases to be a positive integer/, fn ->
+      precommit.(["--max-cases", "0"])
+    end
+  end
 end
