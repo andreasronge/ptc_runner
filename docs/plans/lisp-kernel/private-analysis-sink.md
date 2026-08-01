@@ -1,15 +1,20 @@
 # Non-interactive private inspection analysis
 
-**Status:** plan, revised 2026-08-01 after an independent adversarial review that
-found three blocking defects in the first draft. No implementation started.
-Addresses finding 6 of [`agent-developer-findings.md`](agent-developer-findings.md).
+**Status:** plan, revised 2026-08-01 after an independent adversarial review and
+a follow-up check against the CLI contract. The threat-model decision is
+answered; five blockers are open. No implementation started. Addresses finding 6
+of [`agent-developer-findings.md`](agent-developer-findings.md).
 
 The first draft argued that the interactive-terminal gate on
 `inspection-analysis-v2` provides no confidentiality and could be replaced by an
 owner-only sink file. That argument was overstated, its central invariant was
 false against the current frontend, and two of its factual claims about existing
-code were wrong. This revision narrows the justification, records the blockers,
-and puts the threat-model decision first because everything else depends on it.
+code were wrong. This revision narrows the justification and records what
+remains.
+
+**Blocked on blockers 1 and 2** — the safe stdout/stderr projection and the
+transactional commit point. Both are design work in the analysis frontend, not
+CLI plumbing, and neither is started.
 
 ## Problem
 
@@ -68,12 +73,33 @@ ergonomics change, not proof that the gate is worthless. Adding a sink also does
 not recover auditing as a security property — a caller can still bypass the
 profile entirely. It only makes the validated route usable.
 
-## Decision 1: the threat model (blocks everything else)
+## Decision 1: the threat model — ANSWERED
 
-**Are same-UID processes inside the trust boundary?** The first draft never
-asked, and was incoherent as a result: it used same-UID filesystem access to
-dismiss the terminal gate, then treated `0600` as protection against those same
-processes.
+**Same-UID processes are inside the trust boundary.** Confirmed 2026-08-01, and
+it was already repo policy rather than a new decision:
+[`stable-cli-contract.md`](stable-cli-contract.md) lists
+
+> an adversarial same-user/same-VM security boundary
+
+among its explicit non-goals. The first draft treated this as open and was
+incoherent as a result: it used same-UID filesystem access to dismiss the
+terminal gate, then treated `0600` as protection against those same processes.
+
+**Binding consequences:**
+
+- The confidentiality justification for relaxing the gate is dropped. The change
+  is justified as integrity and ergonomics only.
+- `PrivateDirectory`'s pathname preflight is adequate; `openat2`-class
+  descriptor discipline is not required. Post-open `fstat` identity checks stay
+  as cheap defence against mistakes, not against an adversary.
+- `0600` is documented as protecting against *other* UIDs, not against same-UID
+  processes.
+- Hosts that must refuse unattended private extraction keep a terminal-only
+  profile — which is now the only remaining reason the gate exists, and the
+  reason `v2` is retained.
+
+The table below records what the alternative answer would have required, since
+a host with a brokered-agent boundary may revisit it.
 
 | | Same-UID trusted | Same-UID untrusted |
 | --- | --- | --- |
@@ -82,22 +108,46 @@ processes.
 | Confidentiality claim | the gate adds little against same-UID; ergonomics argument stands | the gate is load-bearing and a sink weakens it |
 | Brokered-agent hosts | out of scope | in scope, and the sink is a private-data oracle for them |
 
-**Recommendation: treat same-UID processes as trusted**, and state it explicitly
-in the profile documentation. A same-UID process can already read the artifact,
+The rationale for the answer: a same-UID process can already read the artifact,
 attach to the VM, and read the terminal's own output. Defending against it while
 handing it a CLI that prints private values is theatre.
 
-**The consequence is binding:** with that answer, the confidentiality
-justification for relaxing the gate is dropped entirely. The change is justified
-only as integrity plus ergonomics, and hosts that need to refuse unattended
-private extraction must retain a terminal-only profile (see versioning below).
+Were the answer "untrusted," this plan would need a different sink
+implementation and probably should not proceed at all — the same-UID reader it
+is designed to serve would be the thing being defended against.
 
-If the answer is instead "untrusted," this plan needs a different sink
-implementation than the one below, and probably should not proceed at all —
-because the same-UID reader it is designed to serve is the thing being defended
-against.
+## Impact of `stable-cli-contract.md`
 
-## Blockers found in review
+Checked directly. Three findings, one of which removes a dependency the first
+draft asserted.
+
+**`mix ptc.repl` is outside the standalone command set.** The delivered commands
+are `help`, `validate`, `run`, `doctor`, `models`, `init`, and `version`. The
+plan's own verification explicitly preserves `mix ptc.repl --trace PATH` as a
+Mix-only spelling while removing `--trace PATH` from `ptc run`. So
+`--private-sink` on the REPL does **not** need to conform to the standalone
+argv/envelope contract, and does not need to wait for that work. The first
+draft's "sequence accordingly" was too strong; the sequencing dependency is
+removed.
+
+**The artifact-state vocabulary does not transfer directly.** `recovery_written`
+and `finalization_uncertain` are values in the `run` envelope's *closed* map over
+`trace`, `inspection`, and `result`. `ptc.repl` emits a different schema —
+`session-started`, `evaluation`, `session-closed` at `schema_version: 1`. Adding
+a sink state to the run envelope would be a schema change to a closed map for a
+command that does not produce it.
+
+Reuse the **durability pattern**, not the state names: a durable recovery
+artifact published first, a final link second, and an honest terminal state when
+the link or directory sync cannot be proven. Define the state field inside the
+REPL's own `session-closed` record.
+
+**The same-UID non-goal** is cited under Decision 1 above.
+
+## Blockers
+
+Items 1-3 came from an independent adversarial review; 4-5 from
+inspecting the frontend while answering Decision 1.
 
 ### 1. The stdout invariant is false today
 
@@ -141,15 +191,34 @@ commit continuation and history only after the write is acknowledged, then
 return the safe projection. Crash points between those steps need defined
 recovery states. This is not CLI plumbing.
 
-### 3. `PrivateDirectory` does not reject symlinked parents
+### 3. `PrivateDirectory` does not reject symlinked parents (resolved)
 
 The first draft claimed it did. It does not — `resolve_components/4` *follows*
 symlinks that pass `safe_symlink(stat, uid)`, and its pathname walk is separate
 from the later create and open, leaving a rename/retarget window.
 
-Under the recommended trust model this is acceptable. Under "same-UID
-untrusted" it is not, and pathname preflight cannot be the authorization
-boundary.
+**Resolved by Decision 1.** With same-UID processes trusted, the preflight is
+adequate and the window is not an attack surface. The plan's description of what
+`PrivateDirectory` does is corrected; no implementation change is required. Keep
+the post-open `fstat` checks as protection against operator mistakes — a sink
+path that is a FIFO, a device, or an alias for stdout — rather than against a
+racing adversary.
+
+### 4. `continue_on_error: :forbidden` halts the session on the first error
+
+`run_profile_sources/5` reduces with `{:halt, put_failure(...)}` unless
+`continue_on_error` is set, and the private profile forbids it. For an agent
+running a multi-step `-e` analysis, one malformed form ends the session and
+costs a full re-capture of both snapshots. This is the ergonomics problem the
+plan exists to solve, reappearing one layer down. Either relax it under a sink,
+or accept it and document that sink sessions are single-shot batches.
+
+### 5. The `evaluation` record schema is versioned
+
+It is `schema_version: 1` with `result` carrying `json_projection(result)`.
+Rerouting private values changes what that field means for sink sessions, which
+needs either a schema bump or a distinct record type — not a silent change of
+contents under the same version.
 
 ## Proposal
 
@@ -169,10 +238,13 @@ A new option on `mix ptc.repl`, valid only with a private analysis profile.
   Refuse any collision.
 - Fail-closed, and transactional per the blocker above.
 
-Rejecting existing files removes most of the dangerous cases at once: hard links
-to unrelated sensitive files, another process holding the file open, stdout
-already pointing at the same inode, interleaved sessions, and ambiguous
-ownership of prior contents.
+Rejecting existing files removes most of the awkward cases at once: hard links
+to unrelated files, another process holding the file open, stdout already
+pointing at the same inode, interleaved sessions, and ambiguous ownership of
+prior contents. Under Decision 1 these are correctness and mistake-avoidance
+concerns rather than adversarial ones — but "create exclusively, never reuse" is
+the cheaper rule either way, and it removes the need to reason about which is
+which.
 
 ### Authorization becomes a destination check
 
@@ -273,11 +345,11 @@ The first draft's "plumbing first; nothing observable changes" was wrong —
 option parsing, path validation, help text, and error behaviour are all
 observable.
 
-1. **Answer Decision 1** and record it in the profile documentation.
-2. Resolve the private-artifact state vocabulary against
-   [`stable-cli-contract.md`](stable-cli-contract.md), which already defines
-   `recovery_written` and `finalization_uncertain`. Adopt it rather than
-   inventing a parallel one.
+1. Record Decision 1 in the profile documentation, and resolve blocker 4
+   (single-shot batch versus relaxed continuation under a sink).
+2. Define the sink's terminal state inside the REPL's `session-closed`
+   record, reusing the durability pattern from `stable-cli-contract.md`
+   without importing the `run` envelope's closed state map.
 3. Specify the sink record schema, the safe stdout/stderr projection, bounds,
    correlation, the transactional commit point, and publication semantics.
 4. Implement and adversarially test the sink artifact on its own.
