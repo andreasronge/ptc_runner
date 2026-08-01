@@ -30,6 +30,11 @@ belongs in guides or retained specifications.
   problems found while building and debugging the incident-evidence compiler,
   with proposed remedies. Its analysis-prelude findings shipped in #1162; the
   correction-feedback and verification findings remain open.
+- [`lisp-kernel/private-analysis-sink.md`](lisp-kernel/private-analysis-sink.md)
+  plans non-interactive private inspection analysis behind an explicit
+  owner-only sink, so agents read private artifacts through the validating
+  profile instead of bypassing it, and makes that the documented default for
+  this repository's example programs.
 - [`mcp-oauth.md`](mcp-oauth.md) plans principal-scoped OAuth authorization for
   remote Streamable HTTP MCP servers without weakening host authority or tool
   replay safety.
