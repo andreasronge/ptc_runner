@@ -23,6 +23,12 @@ Public `defn` and `def` forms become qualified exports. `defn-` remains
 private to its namespace. Cross-component calls require both a declared
 component dependency and a public export in the dependency.
 
+Dependencies are real composition boundaries, not authority grants. A
+component can call only the public namespaces of its direct dependencies. Once
+the whole bundle is installed, evaluated PTC-Lisp can call every public export
+in that bundle. `:visibility :discoverable` keeps an export out of model prompt
+inventory; it does not make the export inaccessible.
+
 ## Declare runtime contracts
 
 Public exports may declare contracts in their ordinary metadata map:
@@ -83,6 +89,29 @@ Their transitive dependencies are frozen into the same compiled bundle as local
 components. Unknown IDs, repeated selections, and local/library ID collisions
 are rejected. Workflow and mission bundles compile separately and attach to
 structurally distinct environments.
+
+Manifest library selections and `Library.resolve_components/1` expand shipped
+dependencies automatically. `Library.component/1` intentionally returns only
+the requested component; an embedder passing components directly to
+`PtcRunner.Kernel.compile_bundle/1` must first assemble a closed dependency set.
+
+Shipped components reuse lower-level components in the same way as application
+components. The analysis stack is a concrete example:
+
+| Component | Purpose |
+| --- | --- |
+| `cap` | Fail-safe capability-envelope handling and bounded cursor traversal |
+| `log.core` | One-page canonical trace queries |
+| `log.analysis` | Bounded whole-result trace traversal |
+| `inspection.core` | One-page private inspection queries |
+| `inspection.analysis` | Bounded whole-result private inspection traversal |
+
+`log.core` and `inspection.core` depend on `cap`; each analysis layer depends
+on its matching core component and on `cap`. This keeps each helper in one
+place without granting new host capabilities. Adding an installed dependency
+does widen the resolved bundle and its callable namespaces, so fixed profiles
+pin the complete resolved component list and version user-visible surface
+changes.
 
 [Building agents](building-agents.md) covers the `agent.core` loop and the
 `agent.prompt` policy seam these libraries provide.

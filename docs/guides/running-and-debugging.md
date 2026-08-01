@@ -194,7 +194,7 @@ immutable directory capture through the fixed log-analysis profile:
 
 ```console
 mix ptc.repl \
-  --profile log-analysis-v1 \
+  --profile log-analysis-v2 \
   --resource traces=traces \
   -e '(log/runs {})' \
   -e '(log/counters {})'

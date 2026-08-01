@@ -24,18 +24,19 @@ local server on port 4123, and opens the browser. Use `--port`, `--trace-dir`,
 always binds to loopback.
 
 The REPL evaluates PTC-Lisp against an immutable capture of the selected trace
-directory. The server fixes the `log-analysis-v1` profile: normal bounded
-PTC-Lisp built-ins, the shipped `log.core` component (`log/runs`, `log/run`,
-`log/turns`, and `log/counters`), four read-only trace capabilities, and the
-ordinary runtime/capability introspection routes. It does not grant filesystem,
-network, LLM, MCP, workflow-event, or arbitrary prelude authority.
+directory. The server fixes the `log-analysis-v2` profile: normal bounded
+PTC-Lisp built-ins, one-page `log/*` queries, bounded whole-result
+`log.analysis/all-runs` and `log.analysis/all-turns` queries, their shared
+`cap` helpers, four read-only trace capabilities, and the ordinary
+runtime/capability introspection routes. It does not grant filesystem, network,
+LLM, MCP, workflow-event, or arbitrary prelude authority.
 
 Forms such as `(log/runs {})`, `(log/run "run-id")`, and
-`(log/turns "run-id" {})` return bounded values, prints, errors, continuation
-effects, duration, and remaining usage. The server-owned transcript survives a
-page reload. Reset first closes and persists the analysis run, then captures a
-new snapshot and starts with fresh definitions; Close persists the analysis
-trace and ends further evaluation.
+`(log.analysis/all-turns "run-id" {"limit" 100} 20)` return bounded values,
+prints, errors, continuation effects, duration, and remaining usage. The
+server-owned transcript survives a page reload. Reset first closes and persists
+the analysis run, then captures a new snapshot and starts with fresh
+definitions; Close persists the analysis trace and ends further evaluation.
 
 Entered human-REPL source and returned inspection payloads are not copied into
 the canonical analysis trace. Model-generated PTC-Lisp and the feedback sent

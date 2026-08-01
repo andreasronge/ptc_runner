@@ -55,10 +55,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   grapheme-based. Oversized or unrepresentable String operations now return the
   documented bounded condition; locale-sensitive `.toLowerCase` and
   `.toUpperCase` and all legacy Java String aliases were removed.
-- Added the code-owned `log-analysis-v1` profile to `mix ptc.repl`, with
+- Added the code-owned `log-analysis-v2` profile to `mix ptc.repl`, with
   bounded multi-turn mission evaluation over an immutable trace capture,
-  deterministic JSONL output for coding agents, safe profile discovery, and
-  separate atomic analysis-trace persistence.
+  explicit whole-result cursor traversal, deterministic JSONL output for
+  coding agents, safe profile discovery, and separate atomic analysis-trace
+  persistence. Rejected log and inspection queries now fail instead of looking
+  like empty results, and both analysis profiles reuse the shipped `cap`
+  envelope and pagination helpers.
 - Added one typed MCP source with equivalent stateless Streamable HTTP and
   owned stdio transports. Stdio uses the optional precompiled
   `ptc_runner_launcher` companion, freezes launcher and server digests, and

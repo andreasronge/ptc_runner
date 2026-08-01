@@ -10,9 +10,11 @@ defmodule PtcRunner.Kernel.ViewerReplAdapter do
 
   alias PtcRunner.Kernel.ViewerReplBackend
 
+  @profile_id "log-analysis-v2"
+
   # The standalone Viewer validates this callback contract dynamically. The
   # root library deliberately does not depend on the nested Viewer project.
-  def connect(%{trace_dir: trace_dir, profile_id: "log-analysis-v1"})
+  def connect(%{trace_dir: trace_dir, profile_id: @profile_id})
       when is_binary(trace_dir) do
     with expanded <- Path.expand(trace_dir),
          {:ok, %File.Stat{type: :directory}} <- File.stat(expanded),
@@ -20,8 +22,8 @@ defmodule PtcRunner.Kernel.ViewerReplAdapter do
       {:ok, backend,
        %{
          "enabled" => true,
-         "profile_id" => "log-analysis-v1",
-         "namespaces" => ["log"],
+         "profile_id" => @profile_id,
+         "namespaces" => ["cap", "log", "log.analysis"],
          "source_limit_bytes" => 65_536
        }}
     else

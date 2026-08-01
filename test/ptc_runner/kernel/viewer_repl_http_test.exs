@@ -29,7 +29,7 @@ defmodule PtcRunner.Kernel.ViewerReplHttpTest do
         port: 0,
         trace_dir: trace_dir,
         repl_adapter: ViewerReplAdapter,
-        repl_config: %{trace_dir: trace_dir, profile_id: "log-analysis-v1"},
+        repl_config: %{trace_dir: trace_dir, profile_id: "log-analysis-v2"},
         open: false
       )
 
@@ -60,8 +60,8 @@ defmodule PtcRunner.Kernel.ViewerReplHttpTest do
     assert bootstrap.status == 200
     session_id = bootstrap.body["session_id"]
     nonce = bootstrap.body["mutation_nonce"]
-    assert bootstrap.body["session"]["profile_id"] == "log-analysis-v1"
-    assert bootstrap.body["session"]["namespaces"] == ["log"]
+    assert bootstrap.body["session"]["profile_id"] == "log-analysis-v2"
+    assert bootstrap.body["session"]["namespaces"] == ["cap", "log", "log.analysis"]
     refute inspect(bootstrap.body) =~ trace_dir
 
     private_source = ~S|(do "PRIVATE_REPL_SOURCE" (log/runs {}))|

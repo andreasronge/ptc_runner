@@ -32,6 +32,7 @@ defmodule PtcRunner.Kernel.AnalysisProfile do
          true <- resources.profile_id == recipe.id(),
          {:ok, components} <- Library.resolve_components(recipe.component_selections()),
          {:ok, bundle} <- PtcRunner.Kernel.compile_bundle(components),
+         true <- bundle.component_ids == recipe.component_ids(),
          true <- namespaces(bundle) == recipe.namespaces(),
          {:ok, capabilities} <- recipe.capabilities(resources),
          true <- capability_names(capabilities) == recipe.explicit_capabilities(),
@@ -72,7 +73,8 @@ defmodule PtcRunner.Kernel.AnalysisProfile do
   @spec descriptor(recipe(), map(), map(), Limits.t()) ::
           {:ok, map()} | {:error, atom()}
   def descriptor(recipe, bundle, mission, %Limits{} = limits) when is_atom(recipe) do
-    with true <- namespaces(bundle) == recipe.namespaces(),
+    with true <- bundle.component_ids == recipe.component_ids(),
+         true <- namespaces(bundle) == recipe.namespaces(),
          {:ok, inventory} <- MissionInventory.build(mission, limits),
          identity = identity(recipe, bundle, inventory, limits),
          {:ok, encoded} <- DeterministicJSON.encode(identity) do

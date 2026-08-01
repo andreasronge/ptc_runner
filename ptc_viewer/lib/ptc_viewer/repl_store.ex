@@ -779,8 +779,8 @@ defmodule PtcViewer.ReplStore do
 
     projected = info |> Map.take(allowed) |> Map.put(:session_id, public_session_id)
 
-    with "log-analysis-v1" <- Map.get(projected, :profile_id),
-         ["log"] <- Map.get(projected, :namespaces),
+    with "log-analysis-v2" <- Map.get(projected, :profile_id),
+         ["cap", "log", "log.analysis"] <- Map.get(projected, :namespaces),
          {:ok, encoded} <- Jason.encode(projected),
          true <- byte_size(encoded) <= 524_288 do
       {:ok, projected}

@@ -4,7 +4,8 @@ defmodule PtcRunner.Kernel.Library do
 
   Available component IDs are `kernel`, `runtime`, `cap`, `workflow.event`,
   `llm`, `agent.native`, `agent.core`, `agent.feedback`, `agent.retry`,
-  `agent.prompt`, `agent.main`, `result`, `log.core`, and `inspection.core`.
+  `agent.prompt`, `agent.main`, `result`, `log.core`, `log.analysis`,
+  `inspection.core`, and `inspection.analysis`.
 
   `agent.main` is a generic entry wrapper: a manifest names `agent.main/run`
   and supplies `task` and `agent` through input, instead of every application
@@ -18,17 +19,16 @@ defmodule PtcRunner.Kernel.Library do
   model-authored value to its PTC-Lisp caller without terminating the outer
   workflow, allowing an evaluator to judge the answer before returning.
 
-  `cap` is `:discoverable` rather than `:prompt`. Its `unwrap!` and
-  `with-cursor` helpers compose capability envelopes for other libraries and
-  are not something a generated program should be prompted to call, so they
-  stay out of the prompt inventory. `unwrap!` fails the program on an error
-  envelope rather than returning it, so a forgotten check cannot turn a
-  provider error into ordinary data; `with-cursor` adds one opaque cursor to
-  an argument map and leaves traversal to the caller.
+  `cap` is `:discoverable` rather than `:prompt`. Its envelope and pagination
+  helpers compose capabilities for other libraries and stay out of the prompt
+  inventory. `unwrap!` fails the program on an error envelope rather than
+  returning it, `with-cursor` adds one opaque cursor to an argument map, and
+  `collect-pages` follows cursors only up to its explicit page bound.
 
-  Fetching a component does not expand its dependencies. `PtcRunner.Kernel`
-  refuses to compile an incomplete set, so a manifest selecting `agent.main`
-  must also carry the `agent.core` closure.
+  Fetching one component with `component/1` does not expand its dependencies,
+  and `PtcRunner.Kernel` refuses to compile an incomplete set. Manifests and
+  `resolve_components/1` expand installed-library selections transitively;
+  direct callers of `compile_bundle/1` must supply the resulting closed set.
 
   Fetching a component grants no capability. The host still compiles the
   selected closed component set and supplies the capabilities required by its
@@ -51,6 +51,12 @@ defmodule PtcRunner.Kernel.Library do
   @result_path Path.expand("../../../priv/preludes/kernel/result.clj", __DIR__)
   @log_core_path Path.expand("../../../priv/preludes/kernel/log.core.clj", __DIR__)
   @inspection_core_path Path.expand("../../../priv/preludes/kernel/inspection.core.clj", __DIR__)
+  @log_analysis_path Path.expand("../../../priv/preludes/kernel/log.analysis.clj", __DIR__)
+
+  @inspection_analysis_path Path.expand(
+                              "../../../priv/preludes/kernel/inspection.analysis.clj",
+                              __DIR__
+                            )
   @external_resource @kernel_path
   @external_resource @runtime_path
   @external_resource @cap_path
@@ -65,6 +71,8 @@ defmodule PtcRunner.Kernel.Library do
   @external_resource @result_path
   @external_resource @log_core_path
   @external_resource @inspection_core_path
+  @external_resource @log_analysis_path
+  @external_resource @inspection_analysis_path
   @sources %{
     "kernel" => File.read!(@kernel_path),
     "runtime" => File.read!(@runtime_path),
@@ -79,9 +87,15 @@ defmodule PtcRunner.Kernel.Library do
     "agent.retry" => File.read!(@agent_retry_path),
     "result" => File.read!(@result_path),
     "log.core" => File.read!(@log_core_path),
-    "inspection.core" => File.read!(@inspection_core_path)
+    "inspection.core" => File.read!(@inspection_core_path),
+    "log.analysis" => File.read!(@log_analysis_path),
+    "inspection.analysis" => File.read!(@inspection_analysis_path)
   }
   @dependencies %{
+    "inspection.analysis" => ["cap", "inspection.core"],
+    "inspection.core" => ["cap"],
+    "log.analysis" => ["cap", "log.core"],
+    "log.core" => ["cap"],
     "agent.prompt" => ["kernel"],
     "agent.core" => [
       "agent.feedback",

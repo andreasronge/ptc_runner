@@ -61,6 +61,6 @@ defmodule Mix.Tasks.Ptc.Viewer do
   end
 
   defp repl_config(trace_dir) do
-    %{trace_dir: Path.expand(trace_dir || "traces"), profile_id: "log-analysis-v1"}
+    %{trace_dir: Path.expand(trace_dir || "traces"), profile_id: "log-analysis-v2"}
   end
 end

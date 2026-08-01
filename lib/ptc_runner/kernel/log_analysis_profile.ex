@@ -2,11 +2,9 @@ defmodule PtcRunner.Kernel.LogAnalysisProfile do
   @moduledoc """
   Fixed authority recipe for local log-analysis sessions.
 
-  `log-analysis-v1` installs only the shipped `log.core` mission component,
-  four read-only snapshot capabilities, empty mission data, and the ordinary
-  implicit mission introspection routes. Its descriptor and behavior remain
-  stable while the shared analysis-session engine also serves other closed
-  profiles.
+  `log-analysis-v2` installs the shipped `cap`, `log.core`, and `log.analysis`
+  mission components, four read-only snapshot capabilities, empty mission
+  data, and the ordinary implicit mission introspection routes.
   """
 
   alias PtcRunner.Kernel.AnalysisProfile
@@ -15,9 +13,9 @@ defmodule PtcRunner.Kernel.LogAnalysisProfile do
   alias PtcRunner.Kernel.TraceCapability
   alias PtcRunner.Kernel.TraceSnapshot
 
-  @id "log-analysis-v1"
-  @component_ids ["log.core"]
-  @namespaces ["log"]
+  @id "log-analysis-v2"
+  @component_ids ["cap", "log.core", "log.analysis"]
+  @namespaces ["cap", "log", "log.analysis"]
   @capabilities ~w(trace-counters trace-get-run trace-list-runs trace-list-turns)
   @persistence "canonical-trace-on-close"
   @result_policy "bounded-json-v1"
@@ -91,7 +89,7 @@ defmodule PtcRunner.Kernel.LogAnalysisProfile do
     }
   end
 
-  @doc "Returns the safe, static discovery contract for `log-analysis-v1`."
+  @doc "Returns the safe, static discovery contract for `log-analysis-v2`."
   @spec description() :: map()
   def description do
     %{

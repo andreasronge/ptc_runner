@@ -4,8 +4,8 @@ defmodule PtcRunner.Kernel.AnalysisResources do
   alias PtcRunner.Kernel.InspectionSnapshot
   alias PtcRunner.Kernel.TraceSnapshot
 
-  @log_profile "log-analysis-v1"
-  @inspection_profile "inspection-analysis-v1"
+  @log_profile "log-analysis-v2"
+  @inspection_profile "inspection-analysis-v2"
 
   @enforce_keys [:profile_id, :handles]
   defstruct [:profile_id, :handles]

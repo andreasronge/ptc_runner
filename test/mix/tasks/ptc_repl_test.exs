@@ -188,14 +188,14 @@ defmodule Mix.Tasks.Ptc.ReplTest do
   test "describes the fixed log-analysis profile as safe JSONL" do
     output =
       capture_io(fn ->
-        Repl.run(["--describe-profile", "log-analysis-v1", "--format", "jsonl"])
+        Repl.run(["--describe-profile", "log-analysis-v2", "--format", "jsonl"])
       end)
 
     assert [description] = decode_jsonl(output)
     assert description["type"] == "profile"
-    assert description["id"] == "log-analysis-v1"
-    assert description["components"] == ["log.core"]
-    assert description["namespaces"] == ["log"]
+    assert description["id"] == "log-analysis-v2"
+    assert description["components"] == ["cap", "log.core", "log.analysis"]
+    assert description["namespaces"] == ["cap", "log", "log.analysis"]
     assert description["resources"]["traces"]["required"] == true
     assert description["frontend"]["output_formats"] == ["clojure", "jsonl"]
     refute output =~ "#Function<"
@@ -205,7 +205,7 @@ defmodule Mix.Tasks.Ptc.ReplTest do
   test "private profile frontend policy fails before opening declared sources" do
     missing_resources = [
       "--profile",
-      "inspection-analysis-v1",
+      "inspection-analysis-v2",
       "--resource",
       "traces=/definitely/missing/private-traces",
       "--resource",
@@ -241,7 +241,7 @@ defmodule Mix.Tasks.Ptc.ReplTest do
       capture_io(fn ->
         Repl.run([
           "--profile",
-          "log-analysis-v1",
+          "log-analysis-v2",
           "--resource",
           "traces=#{source}",
           "--session-trace-dir",
@@ -269,7 +269,7 @@ defmodule Mix.Tasks.Ptc.ReplTest do
              TraceLog.query(trace, :list_runs, %{})
 
     assert name == SafeMetadata.fingerprint("ptc.log-analysis.repl")
-    assert profile["id"] == "log-analysis-v1"
+    assert profile["id"] == "log-analysis-v2"
     assert profile["digest"] =~ ~r/\Asha256:[0-9a-f]{64}\z/
   end
 
@@ -300,7 +300,7 @@ defmodule Mix.Tasks.Ptc.ReplTest do
       command =
         [
           "--profile",
-          "log-analysis-v1",
+          "log-analysis-v2",
           "--resource",
           "traces=#{source}",
           "--session-trace-dir",
@@ -330,7 +330,7 @@ defmodule Mix.Tasks.Ptc.ReplTest do
         assert_raise Mix.Error, ~r/one or more profile evaluations failed/, fn ->
           Repl.run([
             "--profile",
-            "log-analysis-v1",
+            "log-analysis-v2",
             "--resource",
             "traces=#{source}",
             "--session-trace-dir",
@@ -454,7 +454,7 @@ defmodule Mix.Tasks.Ptc.ReplTest do
       capture_io(fn ->
         Repl.run([
           "--profile",
-          "log-analysis-v1",
+          "log-analysis-v2",
           "--resource",
           "traces=#{source}",
           "--format",
@@ -512,20 +512,20 @@ defmodule Mix.Tasks.Ptc.ReplTest do
           ["--resource", "traces=tmp"],
           ["--no-continue-on-error", "-e", "42"],
           ["--profile", "unknown", "--resource", "traces=tmp"],
-          ["--profile", "log-analysis-v1", "--manifest", "ptc.json", "--resource", "traces=tmp"],
+          ["--profile", "log-analysis-v2", "--manifest", "ptc.json", "--resource", "traces=tmp"],
           [
             "--profile",
-            "log-analysis-v1",
+            "log-analysis-v2",
             "--resource",
             "traces=tmp",
             "--resource",
             "traces=tmp"
           ],
-          ["--profile", "log-analysis-v1", "--resource", "other=tmp"],
-          ["--profile", "log-analysis-v1", "--resource", "traces=tmp", "--format", "jsonl"],
+          ["--profile", "log-analysis-v2", "--resource", "other=tmp"],
+          ["--profile", "log-analysis-v2", "--resource", "traces=tmp", "--format", "jsonl"],
           [
             "--profile",
-            "log-analysis-v1",
+            "log-analysis-v2",
             "--resource",
             "traces=tmp",
             "--continue-on-error",
@@ -583,7 +583,7 @@ defmodule Mix.Tasks.Ptc.ReplTest do
         [
           "ptc.repl",
           "--profile",
-          "log-analysis-v1",
+          "log-analysis-v2",
           "--resource",
           "traces=#{source}",
           "--session-trace-dir",
@@ -606,7 +606,7 @@ defmodule Mix.Tasks.Ptc.ReplTest do
   defp profile_args(source, output_directory) do
     [
       "--profile",
-      "log-analysis-v1",
+      "log-analysis-v2",
       "--resource",
       "traces=#{source}",
       "--session-trace-dir",

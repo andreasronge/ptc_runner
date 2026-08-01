@@ -16,17 +16,32 @@ defmodule PtcRunner.Kernel.InspectionAnalysisProfileTest do
   alias PtcRunner.Kernel.TraceLog
   alias PtcRunner.TestSupport.PrivateInspectionFixture
 
-  @profile_id "inspection-analysis-v1"
+  @profile_id "inspection-analysis-v2"
 
   test "the profile registry is closed and describes fixed private authority" do
-    assert AnalysisProfileRegistry.ids() == ["inspection-analysis-v1", "log-analysis-v1"]
+    assert AnalysisProfileRegistry.ids() == ["inspection-analysis-v2", "log-analysis-v2"]
     assert {:error, :unsupported_analysis_profile} = AnalysisProfileRegistry.fetch("custom")
     assert {:error, :unsupported_analysis_profile} = AnalysisProfileRegistry.fetch(nil)
 
     assert {:ok, description} = AnalysisProfileRegistry.description(@profile_id)
     assert description["resources"] |> Map.keys() |> Enum.sort() == ["inspection", "traces"]
-    assert description["components"] == ["inspection.core", "log.core"]
-    assert description["namespaces"] == ["inspection", "log"]
+
+    assert description["components"] == [
+             "cap",
+             "inspection.core",
+             "inspection.analysis",
+             "log.core",
+             "log.analysis"
+           ]
+
+    assert description["namespaces"] == [
+             "cap",
+             "inspection",
+             "inspection.analysis",
+             "log",
+             "log.analysis"
+           ]
+
     assert description["source_data_class"] == "private_inspection"
     assert description["result_data_class"] == "private_inspection"
 
@@ -168,10 +183,17 @@ defmodule PtcRunner.Kernel.InspectionAnalysisProfileTest do
     identity = state.profile.identity
     mission = state.config.mission_environment
 
-    assert identity["components"] == ["inspection.core", "log.core"]
+    assert identity["components"] == [
+             "cap",
+             "inspection.core",
+             "inspection.analysis",
+             "log.core",
+             "log.analysis"
+           ]
+
     assert identity["source_data_class"] == "private_inspection"
     assert identity["result_data_class"] == "private_inspection"
-    assert mission.bundle.component_ids == ["inspection.core", "log.core"]
+    assert mission.bundle.component_ids == identity["components"]
     assert mission.data == %{}
 
     assert mission.capabilities |> Map.keys() |> Enum.sort() ==
@@ -207,6 +229,26 @@ defmodule PtcRunner.Kernel.InspectionAnalysisProfileTest do
              )
 
     assert source["source"] == "(return 42)"
+
+    assert {:ok, %{status: :error, outcome: :failed}} =
+             AnalysisSession.evaluate(session, ~S|(inspection/runs {"limit" 1001})|)
+
+    assert {:ok,
+            %{
+              value: %{
+                "complete?" => true,
+                "items" => [collected_exchange],
+                "pages" => 1,
+                "snapshot_hash" => inspection_snapshot_hash
+              }
+            }} =
+             AnalysisSession.evaluate(
+               session,
+               ~s|(inspection.analysis/all-model-exchanges "#{fixture.run_id}" 2)|
+             )
+
+    assert collected_exchange == model_exchange
+    assert inspection_snapshot_hash =~ ~r/\Asha256:[0-9a-f]{64}\z/
 
     assert {:ok, %{value: %{"items" => [exchange]}}} =
              AnalysisSession.evaluate(

@@ -49,6 +49,20 @@ The host creates every authority-bearing value. `PtcRunner.Kernel.run/2` does no
 capabilities from application environment, the process dictionary, or other
 ambient state.
 
+The example component has no dependencies. For shipped libraries, resolve the
+installed closure before compiling it:
+
+```elixir
+{:ok, components} =
+  PtcRunner.Kernel.Library.resolve_components([{:library, "log.analysis"}])
+
+{:ok, bundle} = PtcRunner.Kernel.compile_bundle(components)
+```
+
+`Library.component/1` fetches exactly one component and does not expand its
+dependencies. This makes incomplete direct API usage fail at compilation
+instead of producing a partially functional bundle.
+
 ## Prefer manifests for deployable projects
 
 `PtcRunner.Kernel.RunBuilder` is the shared construction path for manifests and

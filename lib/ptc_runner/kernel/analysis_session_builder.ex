@@ -8,7 +8,7 @@ defmodule PtcRunner.Kernel.AnalysisSessionBuilder do
   profile module, component, capability set, mission data, label, limit, or
   sink policy.
 
-  `inspection-analysis-v1` is admitted only with `private_terminal: true` on
+  `inspection-analysis-v2` is admitted only with `private_terminal: true` on
   attached stdin and stdout. That check and physical separation of its trace,
   inspection, and analysis-trace directories happen before either source is
   captured.
