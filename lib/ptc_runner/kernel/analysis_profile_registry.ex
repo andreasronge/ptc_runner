@@ -46,6 +46,7 @@ defmodule PtcRunner.Kernel.AnalysisProfileRegistry do
             required(:output_format) => atom(),
             required(:continue_on_error) => boolean(),
             required(:private_terminal) => boolean(),
+            optional(:private_unattended) => boolean(),
             required(:terminal_attached) => boolean()
           }
         ) :: :ok | {:error, atom()}
@@ -57,32 +58,49 @@ defmodule PtcRunner.Kernel.AnalysisProfileRegistry do
           continue_on_error: continue_on_error,
           private_terminal: private_terminal,
           terminal_attached: terminal_attached
-        }
+        } = context
       )
       when is_atom(recipe) and is_atom(input_mode) and is_atom(output_format) and
              is_boolean(continue_on_error) and is_boolean(private_terminal) and
              is_boolean(terminal_attached) do
     frontend = recipe.frontend()
+    unattended = Map.get(context, :private_unattended, false)
 
-    with :ok <- authorize_input(frontend, input_mode),
-         :ok <- authorize_output(frontend, output_format),
+    with true <- is_boolean(unattended),
+         :ok <- authorize_input(frontend, input_mode, unattended),
+         :ok <- authorize_output(frontend, output_format, unattended),
          :ok <- authorize_continuation(frontend, continue_on_error) do
-      authorize_terminal(frontend, private_terminal, terminal_attached)
+      authorize_private_destination(frontend, private_terminal, unattended, terminal_attached)
+    else
+      false -> {:error, :invalid_profile_frontend}
+      {:error, _reason} = error -> error
     end
   end
 
   def authorize_frontend(_recipe, _context), do: {:error, :invalid_profile_frontend}
 
-  defp authorize_input(frontend, input_mode) do
-    if input_mode in frontend.input_modes,
-      do: :ok,
-      else: {:error, :unsupported_profile_input}
+  # An unattended private destination admits the non-interactive input modes and
+  # the machine-readable output format. The attached-terminal default remains
+  # unchanged, so nothing that worked before behaves differently.
+  @unattended_input_modes [:interactive, :eval, :load, :script, :stdin]
+  @unattended_output_formats [:clojure, :jsonl]
+
+  defp authorize_input(frontend, input_mode, unattended) do
+    allowed =
+      if unattended and frontend.private_terminal == :required,
+        do: @unattended_input_modes,
+        else: frontend.input_modes
+
+    if input_mode in allowed, do: :ok, else: {:error, :unsupported_profile_input}
   end
 
-  defp authorize_output(frontend, output_format) do
-    if output_format in frontend.output_formats,
-      do: :ok,
-      else: {:error, :unsupported_profile_output}
+  defp authorize_output(frontend, output_format, unattended) do
+    allowed =
+      if unattended and frontend.private_terminal == :required,
+        do: @unattended_output_formats,
+        else: frontend.output_formats
+
+    if output_format in allowed, do: :ok, else: {:error, :unsupported_profile_output}
   end
 
   defp authorize_continuation(%{continue_on_error: :forbidden}, true),
@@ -90,16 +108,25 @@ defmodule PtcRunner.Kernel.AnalysisProfileRegistry do
 
   defp authorize_continuation(_frontend, _continue_on_error), do: :ok
 
-  defp authorize_terminal(%{private_terminal: :required}, false, _terminal_attached),
+  defp authorize_private_destination(_frontend, true, true, _attached),
+    do: {:error, :private_destination_conflict}
+
+  defp authorize_private_destination(%{private_terminal: :required}, false, false, _attached),
     do: {:error, :private_terminal_required}
 
-  defp authorize_terminal(%{private_terminal: :required}, true, false),
+  defp authorize_private_destination(%{private_terminal: :required}, true, false, false),
     do: {:error, :interactive_terminal_required}
 
-  defp authorize_terminal(%{private_terminal: :forbidden}, true, _terminal_attached),
-    do: {:error, :private_terminal_unsupported}
+  defp authorize_private_destination(
+         %{private_terminal: :forbidden},
+         terminal,
+         unattended,
+         _attached
+       )
+       when terminal or unattended,
+       do: {:error, :private_terminal_unsupported}
 
-  defp authorize_terminal(_frontend, _private_terminal, _terminal_attached), do: :ok
+  defp authorize_private_destination(_frontend, _terminal, _unattended, _attached), do: :ok
 
   defp frontend_description(recipe) do
     frontend = recipe.frontend()

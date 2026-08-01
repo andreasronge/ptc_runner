@@ -296,6 +296,35 @@ source and exact trace-query payloads are not copied into canonical events.
 The output directory cannot be the input directory, an ancestor or descendant
 of it, or the same physical directory through symlinked parents.
 
+### Private analysis without a terminal
+
+`inspection-analysis-v2` requires one authorized private destination. Two are
+available, and exactly one may be given:
+
+- `--private-terminal` — the attached terminal is the private sink. Requires
+  stdin and stdout to be terminals, and admits only interactive input.
+- `--private-unattended` — this command's own streams are the private sink.
+  Admits `-e`, `--load`, script, and stdin input, and `--format jsonl`.
+
+```bash
+mix ptc.repl --profile inspection-analysis-v2 \
+  --resource traces=tmp/traces --resource inspection=tmp/inspection \
+  --session-trace-dir tmp/analysis \
+  --private-unattended --format jsonl \
+  -e '(inspection/runs {})'
+```
+
+The attached-terminal check is an **accident guard, not access control**. It
+stops private values reaching a log or transcript by mistake; it cannot stop a
+determined caller, because `isatty/1` cannot tell a human's terminal from a
+pseudo-terminal allocated by `script(1)`, `tmux`, or `ssh -t`, and because a
+caller running as the same user can read the inspection artifact directly.
+`--private-unattended` makes deliberate non-interactive use explicit and
+greppable instead of requiring that workaround.
+
+Private values still reach whatever this command's stdout is. Redirect it
+somewhere owner-only if that matters for your environment.
+
 ### JSON Lines for structured output
 
 Repeating `-e` already avoids PTY and prompt handling, and the default Clojure

@@ -79,6 +79,103 @@ defmodule PtcRunner.Kernel.InspectionAnalysisProfileTest do
              })
   end
 
+  test "an explicit unattended destination authorizes without a terminal" do
+    {:ok, recipe} = AnalysisProfileRegistry.fetch(@profile_id)
+
+    # The attached-terminal rule is an accident guard, not access control.
+    # `private_unattended` is the deliberate, greppable opt-out.
+    for input_mode <- [:eval, :load, :script, :stdin] do
+      assert :ok =
+               AnalysisProfileRegistry.authorize_frontend(recipe, %{
+                 input_mode: input_mode,
+                 output_format: :jsonl,
+                 continue_on_error: false,
+                 private_terminal: false,
+                 private_unattended: true,
+                 terminal_attached: false
+               })
+    end
+
+    assert :ok =
+             AnalysisProfileRegistry.authorize_frontend(recipe, %{
+               input_mode: :eval,
+               output_format: :clojure,
+               continue_on_error: false,
+               private_terminal: false,
+               private_unattended: true,
+               terminal_attached: false
+             })
+  end
+
+  test "exactly one private destination may be authorized" do
+    {:ok, recipe} = AnalysisProfileRegistry.fetch(@profile_id)
+
+    assert {:error, :private_destination_conflict} =
+             AnalysisProfileRegistry.authorize_frontend(recipe, %{
+               input_mode: :eval,
+               output_format: :jsonl,
+               continue_on_error: false,
+               private_terminal: true,
+               private_unattended: true,
+               terminal_attached: true
+             })
+
+    assert {:error, :private_terminal_required} =
+             AnalysisProfileRegistry.authorize_frontend(recipe, %{
+               input_mode: :interactive,
+               output_format: :clojure,
+               continue_on_error: false,
+               private_terminal: false,
+               private_unattended: false,
+               terminal_attached: true
+             })
+  end
+
+  test "an unattended destination still forbids continuing past an error" do
+    {:ok, recipe} = AnalysisProfileRegistry.fetch(@profile_id)
+
+    assert {:error, :unsupported_profile_continuation} =
+             AnalysisProfileRegistry.authorize_frontend(recipe, %{
+               input_mode: :eval,
+               output_format: :jsonl,
+               continue_on_error: true,
+               private_terminal: false,
+               private_unattended: true,
+               terminal_attached: false
+             })
+  end
+
+  test "the builder accepts an unattended destination without a terminal" do
+    resources = %{
+      "traces" => "/definitely/missing/private-traces",
+      "inspection" => "/definitely/missing/private-inspection"
+    }
+
+    refute AnalysisTerminal.attached?()
+
+    # Authorization passes, so the failure is the source preflight rather than
+    # the destination gate.
+    refute match?(
+             {:error, reason}
+             when reason in [:private_terminal_required, :interactive_terminal_required],
+             AnalysisSessionBuilder.start(
+               @profile_id,
+               resources,
+               {:directory, "/definitely/missing/private-output"},
+               private_unattended: true
+             )
+           )
+
+    assert {:error, :private_destination_conflict} =
+             AnalysisSessionBuilder.start(
+               @profile_id,
+               resources,
+               {:directory, "/definitely/missing/private-output"},
+               private_terminal: true,
+               private_unattended: true
+             )
+  end
+
   test "the private terminal gate runs before any source preflight" do
     resources = %{
       "traces" => "/definitely/missing/private-traces",

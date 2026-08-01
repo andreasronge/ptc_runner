@@ -8,10 +8,22 @@ defmodule PtcRunner.Kernel.AnalysisSessionBuilder do
   profile module, component, capability set, mission data, label, limit, or
   sink policy.
 
-  `inspection-analysis-v2` is admitted only with `private_terminal: true` on
-  attached stdin and stdout. That check and physical separation of its trace,
-  inspection, and analysis-trace directories happen before either source is
-  captured.
+  `inspection-analysis-v2` requires one authorized private destination before
+  either source is captured, alongside physical separation of its trace,
+  inspection, and analysis-trace directories.
+
+  Exactly one of two destinations must be supplied. `private_terminal: true`
+  additionally requires attached stdin and stdout. `private_unattended: true`
+  authorizes the caller's own stream without that check, for a host that has
+  decided where private values go.
+
+  The attached-terminal check is an **accident guard, not access control**. It
+  prevents private values from being piped into a log or transcript by mistake;
+  it cannot prevent a determined caller, because `isatty/1` cannot distinguish a
+  human's terminal from a pseudo-terminal allocated by `script(1)`, `tmux`, or
+  `ssh -t`, and because a same-UID caller can read the inspection artifact
+  directly. `private_unattended` makes deliberate use explicit and greppable
+  rather than requiring that workaround.
   """
 
   alias PtcRunner.Kernel.AnalysisAssembly
@@ -44,7 +56,12 @@ defmodule PtcRunner.Kernel.AnalysisSessionBuilder do
     :resource_cleanup_hook,
     :expected_destination_identity
   ]
-  @inspection_options [:inspection_capture_hook, :inspection_listing_hook, :private_terminal]
+  @inspection_options [
+    :inspection_capture_hook,
+    :inspection_listing_hook,
+    :private_terminal,
+    :private_unattended
+  ]
 
   @doc """
   Starts one fixed analysis profile over immutable source captures.
@@ -125,27 +142,29 @@ defmodule PtcRunner.Kernel.AnalysisSessionBuilder do
   end
 
   defp valid_private_terminal?(opts),
-    do: Keyword.get(opts, :private_terminal, false) in [true, false]
+    do:
+      Keyword.get(opts, :private_terminal, false) in [true, false] and
+        Keyword.get(opts, :private_unattended, false) in [true, false]
 
   defp valid_optional_hook?(nil, _arity), do: true
   defp valid_optional_hook?(hook, arity), do: is_function(hook, arity)
 
   defp authorize_private_profile(recipe, opts) do
+    terminal? = Keyword.get(opts, :private_terminal, false)
+    unattended? = Keyword.get(opts, :private_unattended, false)
+
     case recipe.frontend().private_terminal do
       :required ->
         cond do
-          Keyword.get(opts, :private_terminal, false) != true ->
-            {:error, :private_terminal_required}
-
-          not AnalysisTerminal.attached?() ->
-            {:error, :interactive_terminal_required}
-
-          true ->
-            :ok
+          terminal? and unattended? -> {:error, :private_destination_conflict}
+          unattended? -> :ok
+          not terminal? -> {:error, :private_terminal_required}
+          not AnalysisTerminal.attached?() -> {:error, :interactive_terminal_required}
+          true -> :ok
         end
 
       :forbidden ->
-        if Keyword.get(opts, :private_terminal, false),
+        if terminal? or unattended?,
           do: {:error, :private_terminal_unsupported},
           else: :ok
     end
