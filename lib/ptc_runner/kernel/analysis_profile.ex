@@ -32,10 +32,8 @@ defmodule PtcRunner.Kernel.AnalysisProfile do
          true <- resources.profile_id == recipe.id(),
          {:ok, components} <- Library.resolve_components(recipe.component_selections()),
          {:ok, bundle} <- PtcRunner.Kernel.compile_bundle(components),
-         true <- bundle.component_ids == recipe.component_ids(),
-         true <- namespaces(bundle) == recipe.namespaces(),
          {:ok, capabilities} <- recipe.capabilities(resources),
-         true <- capability_names(capabilities) == recipe.explicit_capabilities(),
+         :ok <- validate_contract(recipe, bundle, capabilities),
          {:ok, mission} <-
            MissionEnvironment.new(bundle: bundle, capabilities: capabilities, data: %{}),
          {:ok, workflow} <- WorkflowEnvironment.new([]),
@@ -73,10 +71,9 @@ defmodule PtcRunner.Kernel.AnalysisProfile do
   @spec descriptor(recipe(), map(), map(), Limits.t()) ::
           {:ok, map()} | {:error, atom()}
   def descriptor(recipe, bundle, mission, %Limits{} = limits) when is_atom(recipe) do
-    with true <- bundle.component_ids == recipe.component_ids(),
-         true <- namespaces(bundle) == recipe.namespaces(),
+    with :ok <- validate_contract(recipe, bundle, Map.values(mission.capabilities)),
          {:ok, inventory} <- MissionInventory.build(mission, limits),
-         identity = identity(recipe, bundle, inventory, limits),
+         identity = identity(recipe, bundle, mission, inventory, limits),
          {:ok, encoded} <- DeterministicJSON.encode(identity) do
       digest = "sha256:" <> sha256(encoded)
 
@@ -84,7 +81,7 @@ defmodule PtcRunner.Kernel.AnalysisProfile do
        %{
          id: recipe.id(),
          digest: digest,
-         namespaces: recipe.namespaces(),
+         namespaces: namespaces(bundle),
          identity: identity,
          mission_inventory: inventory
        }}
@@ -93,17 +90,55 @@ defmodule PtcRunner.Kernel.AnalysisProfile do
     end
   end
 
+  @doc false
+  @spec validate_contract(recipe(), map(), [map()]) ::
+          :ok
+          | {:error,
+             :profile_component_set_mismatch
+             | :profile_namespace_set_mismatch
+             | :profile_capability_set_mismatch
+             | :invalid_profile_contract}
+  def validate_contract(
+        recipe,
+        %{component_ids: component_ids, components: components} = bundle,
+        capabilities
+      )
+      when is_atom(recipe) and is_list(component_ids) and is_list(components) and
+             is_list(capabilities) do
+    with :ok <-
+           validate_members(
+             component_ids,
+             recipe.component_ids(),
+             :profile_component_set_mismatch
+           ),
+         :ok <-
+           validate_members(
+             namespaces(bundle),
+             recipe.namespaces(),
+             :profile_namespace_set_mismatch
+           ) do
+      validate_members(
+        capability_names(capabilities),
+        recipe.explicit_capabilities(),
+        :profile_capability_set_mismatch
+      )
+    end
+  end
+
+  def validate_contract(_recipe, _bundle, _capabilities),
+    do: {:error, :invalid_profile_contract}
+
   defp comparable_config(%RunConfig{} = config), do: %{config | claim_id: nil}
 
-  defp identity(recipe, bundle, inventory, limits) do
+  defp identity(recipe, bundle, mission, inventory, limits) do
     base = %{
       "profile_id" => recipe.id(),
       "bundle_hash" => bundle.hash,
       "mission_inventory_hash" => inventory.hash,
       "implicit_runtime" => RuntimeTools.mission_contract_descriptor(),
       "limits" => limits |> Map.from_struct() |> stringify_keys(),
-      "explicit_capabilities" => recipe.explicit_capabilities(),
-      "components" => recipe.component_ids(),
+      "explicit_capabilities" => mission.capabilities |> Map.keys() |> Enum.sort(),
+      "components" => bundle.component_ids,
       "mission_data" => %{},
       "persistence_policy" => recipe.persistence_policy(),
       "result_policy" => recipe.result_policy()
@@ -133,6 +168,13 @@ defmodule PtcRunner.Kernel.AnalysisProfile do
     |> Enum.uniq()
     |> Enum.sort()
   end
+
+  defp validate_members(actual, expected, mismatch)
+       when is_list(actual) and is_list(expected) do
+    if Enum.sort(actual) == Enum.sort(expected), do: :ok, else: {:error, mismatch}
+  end
+
+  defp validate_members(_actual, _expected, mismatch), do: {:error, mismatch}
 
   defp stringify_keys(map), do: Map.new(map, fn {key, value} -> {Atom.to_string(key), value} end)
   defp sha256(value), do: :crypto.hash(:sha256, value) |> Base.encode16(case: :lower)

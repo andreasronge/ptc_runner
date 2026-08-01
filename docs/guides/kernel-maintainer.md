@@ -131,12 +131,15 @@ callable-surface review.
 
 Installed-library selections expand transitively in manifests and through
 `Library.resolve_components/1`; raw `compile_bundle/1` callers still provide a
-closed set. Fixed analysis profiles go further: their component list must equal
-the resolved bundle order, their namespace list must equal all resolved
-namespaces, and their digest identifies the exact build. A source-only bug fix
-changes the digest. Change the profile ID when the declared callable surface,
-authority, limits, persistence policy, result policy, or other published
-behavioral contract changes.
+closed set. Fixed analysis profiles go further: their declared component,
+namespace, and capability sets must equal the resolved environment exactly.
+Declaration order is not significant. Runtime identity records components in
+the bundle compiler's canonical dependency order and namespaces and
+capabilities in lexical order, so harmless recipe reordering does not change
+the digest. The bundle hash still identifies the exact compiled build, and a
+source-only bug fix changes the digest. Change the profile ID when the declared
+callable surface, authority, limits, persistence policy, result policy, or
+other published behavioral contract changes.
 
 ## Subordinate evaluation and workflow policy
 
