@@ -354,6 +354,17 @@ defmodule PtcRunner.Kernel.Runner do
         evaluation_id
       )
     )
+    |> Map.put(
+      "kernel-result-contract-description",
+      RuntimeTools.instrument(
+        state,
+        config.event_sink,
+        :workflow,
+        "kernel-result-contract-description",
+        RuntimeTools.result_contract_description(config.result_contract),
+        evaluation_id
+      )
+    )
     |> RuntimeTools.trusted_tools(config.limits)
   end
 

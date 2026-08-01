@@ -44,6 +44,11 @@ well-formed `sha256:` digest. A rejection while turns remain returns the
 bounded structural classification to the model for one ordinary correction
 turn; the rejected value itself is withheld.
 
+The compiler also reads the active compiled contract through
+`kernel/result-contract-description` when it builds the model task. The prompt
+therefore carries the exact schema-derived branch shapes instead of a second,
+hand-maintained list of result keys.
+
 **Citation resolution** (`incident.evidence/resolve-citations`) is what the
 contract cannot do. A JSON Schema can require that a digest is 64 hex
 characters; it cannot know whether any record carries it. After the agent loop
@@ -289,8 +294,8 @@ coverage:
 ## Findings for the plan
 
 Phase 1 exists partly to discover what the runtime cannot yet express. Five
-things surfaced while building it, and one of them was a runtime bug this
-branch fixes:
+things surfaced while building it; the last two exposed runtime correction and
+prompt gaps this branch fixes:
 
 1. **The canonical annotation vocabulary is closed.** `SafeMetadata` admits
    only `progress` and `agent-action`, and `progress` carries a single `stage`
@@ -330,15 +335,14 @@ branch fixes:
 5. **An undeclared key still cannot be named back.** With the above fixed, the
    classification points at the right object but still renders the offending
    key as `(undeclared)`, correctly, since the name is caller-authored content.
-   An application with a closed contract therefore still has to publish its own
-   key set in the prompt. `ValueContract.describe/1` exists to generate exactly
-   that from the compiled schema — its own documentation says a prompt that
-   paraphrases its schema drifts from it — but nothing in `lib/` calls it and
-   no capability exposes it, so this application hand-writes the shape and
-   carries the drift risk the function was built to remove.
+   Fixed in two complementary ways: correction diagnostics now return the
+   schema-declared key set at that object, and
+   `kernel/result-contract-description` makes `ValueContract.describe/1`
+   available to workflows. This compiler inserts that generated description
+   into its task instead of hand-writing the report key set.
 
 The first two are small. The third is the difference between "the model gets
 one chance to fix a fabricated citation" and "the run is lost." The fourth was
 silently degrading every correction turn any tagged-union contract has ever
-run, and is fixed. The fifth is a function that already exists and needs only
-to be reachable.
+run, and is fixed. The fifth is fixed by the generated contract-description
+route.

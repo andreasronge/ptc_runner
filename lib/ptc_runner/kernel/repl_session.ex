@@ -595,6 +595,16 @@ defmodule PtcRunner.Kernel.ReplSession do
         RuntimeTools.result_contract(session.config.result_contract)
       )
     )
+    |> Map.put(
+      "kernel-result-contract-description",
+      RuntimeTools.instrument(
+        session.state,
+        session.config.event_sink,
+        :workflow,
+        "kernel-result-contract-description",
+        RuntimeTools.result_contract_description(session.config.result_contract)
+      )
+    )
     |> RuntimeTools.trusted_tools(session.config.limits)
   end
 

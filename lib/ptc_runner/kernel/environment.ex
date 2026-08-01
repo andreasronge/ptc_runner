@@ -11,7 +11,12 @@ defmodule PtcRunner.Kernel.Environment do
   alias PtcRunner.Kernel.FrozenBundle
   alias PtcRunner.Kernel.JSONValue
 
-  @reserved ~w(kernel-check-source kernel-eval kernel-mission-inventory kernel-mission-model-context kernel-result-contract runtime-usage runtime-remaining cap-list cap-describe workflow-annotate)
+  @reserved ~w(
+    kernel-check-source kernel-eval kernel-mission-inventory
+    kernel-mission-model-context kernel-result-contract
+    kernel-result-contract-description runtime-usage runtime-remaining
+    cap-list cap-describe workflow-annotate
+  )
 
   @doc "Validates common environment fields and returns normalized attributes."
   def assemble(bundle, capabilities, data, kind)

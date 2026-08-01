@@ -337,6 +337,29 @@ defmodule PtcRunner.Kernel.RuntimeTools do
     end
   end
 
+  @doc "Builds the workflow-only application-result contract description callback."
+  def result_contract_description(nil), do: result_contract_description_callback(nil)
+
+  def result_contract_description(%ValueContract{} = contract) do
+    contract
+    |> ValueContract.describe()
+    |> result_contract_description_callback()
+  end
+
+  defp result_contract_description_callback(description) do
+    fn
+      arguments when is_map(arguments) and map_size(arguments) == 0 ->
+        %{status: :ok, value: description}
+
+      _arguments ->
+        %{
+          status: :error,
+          kind: :protocol_error,
+          reason: :invalid_result_contract_description_request
+        }
+    end
+  end
+
   defp validate_result_contract(contract, value, true) do
     case ValueContract.json_value(value) do
       {:ok, json_value} ->

@@ -13,6 +13,7 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
   alias PtcRunner.Kernel.ReplSessionOwner
   alias PtcRunner.Kernel.RunConfig
   alias PtcRunner.Kernel.RunState
+  alias PtcRunner.Kernel.ValueContract
   alias PtcRunner.Kernel.WorkflowEnvironment
   alias PtcRunner.TestSupport.ProviderSessionFixture
 
@@ -40,24 +41,35 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
     {:ok, limits} = Limits.new(evaluation_timeout_ms: 5_000)
     {:ok, sink} = EventSink.start(:normal, limits, run_id: "repl-manifest-tools")
 
+    {:ok, result_contract} =
+      ValueContract.compile(%{
+        "type" => "object",
+        "required" => ["answer"],
+        "properties" => %{"answer" => %{"type" => "integer"}}
+      })
+
     {:ok, config} =
       RunConfig.new(
         workflow_environment: workflow,
         mission_environment: mission,
         input: %{},
         limits: limits,
-        event_sink: sink
+        event_sink: sink,
+        result_contract: result_contract
       )
 
     {:ok, session} = ReplSession.new(config: config)
 
-    assert {:ok, step, _session} =
+    assert {:ok, step, session} =
              ReplSession.eval(
                session,
                ~S|(workflow.event/annotate "agent-action" {:turn 0 :kind "tool-call"})|
              )
 
     assert step.return[:status] == :ok or step.return["status"] == "ok"
+
+    assert {:ok, %{return: ~s({"answer" integer})}, _session} =
+             ReplSession.eval(session, "(kernel/result-contract-description)")
 
     assert Enum.any?(EventSink.events(sink), fn event ->
              event.type == "workflow-annotation" and

@@ -4,7 +4,10 @@
 `worktree-incident-evidence-compiler`, revised the same day after
 [PR #1162](https://github.com/andreasronge/ptc_runner/pull/1162) merged as
 `3dddb84c`. Findings 4 and 5 and the prelude-layering section are resolved in
-`main`. Finding 2's fix is written but not yet landed. The rest are unstarted.
+`main`, and so are findings 2 and 3 — finding 2 by `main`'s own union fix rather
+than this branch's, and `describe/1` predates the branch split. Finding 1 is
+still open in [#1161](https://github.com/andreasronge/ptc_runner/issues/1161).
+The rest are unstarted.
 
 These surfaced while building the incident-evidence compiler reference
 application and then investigating its own traces. Most of them share a theme
@@ -20,7 +23,7 @@ architecture invariant that was undocumented until a change violated it.
 | --- | --- | --- |
 | 1 | Correction cannot name an undeclared key; counters do not descend | open, [issue #1161](https://github.com/andreasronge/ptc_runner/issues/1161) |
 | 2 | Tagged-union violations reported another branch's fault | fixed in `637958c1`, **not yet in `main`** |
-| 3 | `ValueContract.describe/1` exists and is unreachable | open |
+| 3 | `ValueContract.describe/1` exists and is unreachable | fixed on this branch |
 | 4 | Analysis preludes turn a rejected query into an empty result | **fixed in `main`** (#1162) |
 | 5 | No shared pagination traversal | **fixed in `main`** (#1162) |
 | 6 | Private inspection is interactive-only | **fixed in `ba983f95`** |
@@ -81,7 +84,7 @@ behaviour passed before and after the fix. Its union selects branch 1, and the
 flat list happened to carry a usable unit at that position. Coverage of a
 union-selection rule needs a case that selects **branch 0**.
 
-## 3. `ValueContract.describe/1` is unreachable
+## 3. `ValueContract.describe/1` is unreachable — fixed, unlanded
 
 The function renders a contract's shape from the compiled schema, and its own
 documentation states the motivation exactly:
@@ -89,19 +92,16 @@ documentation states the motivation exactly:
 > A task prompt that paraphrases its own result schema drifts from it, and the
 > drift only surfaces as a rejected result after a live run has been paid for.
 
-Nothing in `lib/` calls it. One test references it. No capability exposes it to
-a workflow.
+Previously, nothing in `lib/` called it. One test referenced it and no
+capability exposed it to a workflow.
 
-Consequence: every application with a closed contract hand-writes its key set
-into the prompt and carries precisely the drift the function exists to prevent.
-`incident_compiler/compiler.clj` does this today, and adding it was what
-finally let a live model satisfy the contract.
-
-**Proposed:** expose it through a workflow capability alongside
-`kernel/validate-result`, so an application generates its prompt shape from the
-compiled contract instead of restating it. This is also the cleanest partial
-answer to finding 1: a model that has the declared shape in front of it does
-not need the offending key named back.
+Fixed by exposing the compiled description through the workflow-only
+`kernel/result-contract-description` function alongside
+`kernel/validate-result`. It returns `nil` when no result contract is active.
+The incident compiler now inserts this generated shape into its task instead
+of restating the schema's keys. Runner and REPL integrations expose the same
+route, and an agent-boundary regression proves the generated shape reaches the
+model request.
 
 ## 4. Analysis preludes turn a rejected query into an empty result — fixed
 
@@ -393,26 +393,32 @@ home:
 > that is what makes its required capabilities derivable from the compiled
 > bundle.
 
-## Uncommitted work on this branch
+## Branch work
 
-The finding 4 and 5 prototype still in
-`priv/preludes/kernel/log.core.clj` and `inspection.core.clj` is **obsolete**.
-#1162 shipped both fixes in better form, so these modifications now regress
-`main` and should be discarded rather than landed.
+The finding 4 and 5 prototype was superseded by #1162, which shipped both fixes
+in better form. Those obsolete modifications are not part of this branch.
 
-The union fix for finding 2 (`637958c1`) is the one piece of this branch's work
-that is still needed and still unlanded.
+Finding 2 landed on `main` independently as `selected_branches/3`, which also
+resolves branch identity through `evaluationPath`. This branch's version was
+superseded and dropped when it rebased; only its regression tests were kept.
+
+The fix for finding 1 is written on `pre-rebase-2026-08-03` but does not apply
+to `main`, which rebuilt the violation model to report structured `segments`
+behind `CommandContractAuthority` rather than path strings. Re-landing it means
+re-implementing it on that structure, not replaying the commit — which is why
+it was skipped rather than merged during a conflict resolution. #1161 remains
+the tracking issue.
 
 ## Suggested order
 
 1. ~~**Finding 4 alone** into the primitives.~~ Done in #1162, together with 2.
 2. ~~**Findings 5 + the layering section**: build `log.analysis`.~~ Done in
    #1162.
-3. **Finding 2**: land `637958c1`, which is written and tested but not in
-   `main`.
-4. **Finding 3**: expose `describe/1`. Small, and it is the cheapest partial
-   remedy for finding 1.
-5. **Finding 1** proper, tracked in #1161.
+3. ~~**Finding 2**: land the union fix.~~ Landed on `main` independently; this
+   branch's version was dropped as superseded.
+4. ~~**Finding 3**: expose `describe/1`.~~ Predates the branch split.
+5. **Finding 1** proper, tracked in #1161. Needs re-implementing on `main`'s
+   `segments`/`CommandContractAuthority` violation model.
 6. ~~**Finding 6**, sequenced with the stable CLI plan.~~ Done in `ba983f95`;
    the CLI plan was amended rather than sequenced against.
 7. Findings 7–9 as separate design work.

@@ -2,6 +2,12 @@
   "Compiles incident evidence into a report whose claims resolve to evidence."
   {:visibility :prompt})
 
+(defn- result-shape []
+  (let [description (kernel/result-contract-description)]
+    (if (and (string? description) (not (blank? description)))
+      description
+      (fail (result/error :invalid-prompt :missing-result-contract)))))
+
 (defn- task-text [incident-id format]
   (str/join
     "\n"
@@ -35,21 +41,12 @@
      "record that does not exist or carries a digest that does not match, so do"
      "not construct, guess, or edit a digest."
      ""
-     "Output shape. These keys exactly, and no others anywhere in the report:"
-     "{\"status\": \"report\", \"incident_id\", \"summary\","
-     " \"timeline\": [{\"observed_at\", \"statement\", \"citations\"}],"
-     " \"observed_facts\": [{\"statement\", \"citations\"}],"
-     " \"hypotheses\": [{\"statement\", \"confidence\", \"supporting_citations\","
-     "                 \"contradicting_citations\"}],"
-     " \"open_questions\": [{\"question\", \"missing_evidence\", \"citations\"}]}"
+     "Output contract. Return exactly one generated shape below. A ? after a"
+     "field name means that field is optional. Add no keys the shape does not name:"
+     (result-shape)
      "confidence is one of \"low\", \"medium\", \"high\". contradicting_citations and"
      "an open question's citations may be omitted; every other key is required."
-     "A key the shape does not list is rejected, and the rejection cannot name it"
-     "back to you, so add nothing outside this list."
-     ""
-     "If the evidence cannot support a report, return instead:"
-     "{\"status\": \"insufficient_evidence\", \"incident_id\", \"reason\","
-     " \"open_questions\": [{\"question\", \"missing_evidence\"}]}"]))
+     "A key the generated shape does not list is rejected, so add nothing outside it."]))
 
 (defn- agent-config [input]
   (let [requested (get input "agent")]

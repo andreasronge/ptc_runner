@@ -239,6 +239,48 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     assert List.last(second_request["messages"])["content"] =~ "minLength"
   end
 
+  test "workflow derives an agent task from the active result contract" do
+    response = %{
+      content: nil,
+      tool_calls: [
+        %{
+          id: "contract-shaped-result",
+          name: "run_ptc_lisp",
+          args: %{"program" => ~S|(return {"answer" 42})|}
+        }
+      ]
+    }
+
+    assert {:ok, result_contract} =
+             ValueContract.compile(%{
+               "type" => "object",
+               "required" => ["answer"],
+               "properties" => %{"answer" => %{"type" => "integer"}}
+             })
+
+    {:ok, config} = agent_config([response], [], result_contract: result_contract)
+
+    assert {:ok, %{value: %{"ok" => true, "value" => %{"answer" => 42}}}} =
+             Kernel.run(
+               ~S|(agent.core/run (str "Return exactly " (kernel/result-contract-description)) {"max_turns" 1})|,
+               config
+             )
+
+    assert_receive {:agent_request, request}
+
+    assert request["messages"] == [
+             %{"role" => "user", "content" => ~s(Return exactly {"answer" integer})}
+           ]
+
+    {:ok, no_contract_config} = agent_config([])
+
+    assert {:ok, %{value: nil}} =
+             Kernel.run(
+               "(return (kernel/result-contract-description))",
+               no_contract_config
+             )
+  end
+
   test "agent.main rejects keyword-keyed candidates instead of normalizing them past a contract" do
     keyword_keyed = %{
       content: nil,
@@ -1989,8 +2031,8 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
 
   defp required_agent_tools do
     Map.new(
-      ~w(kernel-check-source kernel-eval kernel-mission-inventory kernel-mission-model-context kernel-result-contract
-         llm-request workflow-annotate),
+      ~w(kernel-check-source kernel-eval kernel-mission-inventory kernel-mission-model-context
+         kernel-result-contract kernel-result-contract-description llm-request workflow-annotate),
       &{&1, %TrustedTool{function: fn _arguments -> %{status: :error} end}}
     )
   end

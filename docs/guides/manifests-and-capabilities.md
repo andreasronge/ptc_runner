@@ -181,6 +181,20 @@ final fail-closed check. A mismatch returns `input_contract_failed` or
 object instead returns `input_invalid`, even when no input contract is
 declared.
 
+A workflow that includes the shipped `kernel` component can render the active
+result contract directly into a model-facing task:
+
+```clojure
+(str "Return exactly " (kernel/result-contract-description))
+```
+
+`kernel/result-contract-description` returns the compiled contract's compact
+type shape, with one line per tagged-union branch, or `nil` when the manifest
+has no result contract. The output deliberately contains types and
+schema-declared names and `const` values rather than descriptions or task
+guidance. Generating this part of a prompt prevents a hand-written key list
+from drifting away from the schema that validation actually enforces.
+
 A rejection does carry a bounded classification, so a mismatch is diagnosable
 without repeating the run under private inspection. The command reports it as:
 

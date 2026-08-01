@@ -69,6 +69,21 @@ defmodule IncidentCompiler.CompilerTest do
              )
     end
 
+    test "generates the agent task shape from the compiled result contract", context do
+      schema =
+        @app
+        |> Path.join("contracts/report.schema.json")
+        |> File.read!()
+        |> Jason.decode!()
+
+      assert {:ok, contract} = ValueContract.compile(schema)
+      task = context.transcripts |> List.first() |> List.first()
+
+      for branch <- String.split(ValueContract.describe(contract), "\n") do
+        assert task =~ branch
+      end
+    end
+
     test "compiles queue-backlog without needing a correction turn", context do
       report = context.queue
 

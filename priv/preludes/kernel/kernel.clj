@@ -94,3 +94,12 @@
     (if (= :ok (get response :status))
       (get response :value)
       (fail response))))
+
+(defn result-contract-description
+  "Return the active application result contract's generated shape, or nil
+  when the manifest declares no result contract."
+  []
+  (let [response (tool/kernel-result-contract-description {})]
+    (if (= :ok (get response :status))
+      (get response :value)
+      (fail response))))
