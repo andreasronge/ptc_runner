@@ -1245,21 +1245,21 @@ defmodule PtcRunner.Kernel.AnalysisSessionTest do
 
     on_exit(fn -> Process.exit(builder, :kill) end)
     builder_ref = Process.monitor(builder)
-    assert_receive {:before_run_state_transfer, resources, ^builder}, 1_000
+    assert_receive {:before_run_state_transfer, resources, ^builder}, @lifecycle_timeout_ms
     trace_ref = Process.monitor(resources.session_trace.pid)
     runtime_ref = Process.monitor(resources.run_state.pid)
     snapshot_ref = Process.monitor(resources.snapshot.pid)
 
     Process.exit(resources.session_trace.pid, :kill)
-    assert_receive {:DOWN, ^trace_ref, :process, _pid, :killed}
+    assert_receive {:DOWN, ^trace_ref, :process, _pid, :killed}, @lifecycle_timeout_ms
     send(builder, :finish_transfer)
 
-    assert_receive {:pre_transfer_builder_result, {:error, _reason}}
-    assert_receive {:DOWN, ^runtime_ref, :process, _pid, _reason}
-    assert_receive {:DOWN, ^snapshot_ref, :process, _pid, _reason}
+    assert_receive {:pre_transfer_builder_result, {:error, _reason}}, @lifecycle_timeout_ms
+    assert_receive {:DOWN, ^runtime_ref, :process, _pid, _reason}, @lifecycle_timeout_ms
+    assert_receive {:DOWN, ^snapshot_ref, :process, _pid, _reason}, @lifecycle_timeout_ms
     refute_received {:DOWN, ^builder_ref, :process, ^builder, _reason}
     send(builder, :stop_builder)
-    assert_receive {:DOWN, ^builder_ref, :process, ^builder, :normal}
+    assert_receive {:DOWN, ^builder_ref, :process, ^builder, :normal}, @lifecycle_timeout_ms
   end
 
   @tag :tmp_dir

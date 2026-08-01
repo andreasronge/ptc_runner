@@ -32,18 +32,47 @@ how it was verified.
 
 ## Commands
 
-- `mix precommit` — fast quality gate (format, compile, credo, schema, spec,
+- `mix precommit` — comprehensive local quality gate (format, compile, credo, schema, spec,
   root/Viewer tests, and launcher package/conformance/archive verification);
-  run before every commit.
+  run before every commit. This is intentionally much broader than the fast,
+  staged-file Git pre-commit hook and can take a few minutes in a fresh worktree.
+- `MIX_ENV=dev mix docs --warnings-as-errors` — ExDoc reference and rendering
+  gate; run when changing user-facing documentation. Generated-doc consistency
+  is a separate check inside `mix precommit`.
 - `git push` — the tracked pre-push hook classifies pushed and dirty paths and
   runs the relevant root, Viewer, launcher, or documentation gates. Root
   changes run the root tests and `mix prepush` (upstream API audit, Dialyzer,
   unused-deps). Do not run `mix prepush` immediately before an ordinary push;
   invoke it directly only for diagnosis or when hooks are unavailable. PR CI
-  runs the same checks as individual steps.
+  runs the same checks as individual steps. On a resource-constrained machine,
+  `PTC_PRE_PUSH_MAX_CASES=2 git push` keeps every gate enabled while reducing
+  ExUnit concurrency.
 - `mix test --include e2e` — E2E tests (requires `OPENROUTER_API_KEY`;
   the MCP tests also require the local server described below).
 - Fix all failures before committing/pushing.
+
+### Fresh worktree setup
+
+Tool versions are pinned in `mise.toml`. From a new worktree, install the
+toolchain and dependencies before running tests:
+
+```bash
+mise install
+mix deps.get
+(cd ptc_viewer && mix deps.get)
+(cd ptc_runner_launcher && mix deps.get)
+mix compile
+```
+
+Run `./scripts/install-hooks.sh` once per clone. Linked worktrees share the
+clone's installed hook wrappers, so they do not need to reinstall them. The
+first Dialyzer run in a worktree builds its local `priv/plts` cache and is
+expected to be slower.
+
+If a timing-sensitive test fails only in the full suite, rerun the exact file
+and line reported by ExUnit. Do not bypass the hook; use
+`PTC_PRE_PUSH_MAX_CASES=2 git push` to confirm the complete gate under lower
+scheduler pressure, and fix reproducible failures.
 
 ### Local MCP E2E server
 

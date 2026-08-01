@@ -53,14 +53,28 @@ defmodule PtcRunnerLauncher.MixProject do
     ]
   end
 
-  defp precommit(_args) do
+  defp precommit(test_args) do
+    test_args = precommit_test_args!(test_args)
     Application.put_env(:elixir_make, :force_build, ptc_runner_launcher: true)
 
     Mix.Task.run("deps.get")
     Mix.Task.run("format", ["--check-formatted"])
     Mix.Task.run("compile", ["--warnings-as-errors"])
-    Mix.Task.run("test", ["--warnings-as-errors"])
+    Mix.Task.run("test", ["--warnings-as-errors" | test_args])
     Mix.Task.run("cmd", ["bash", "scripts/verify_package.sh"])
+  end
+
+  defp precommit_test_args!([]), do: []
+
+  defp precommit_test_args!(["--max-cases", value]) do
+    case Integer.parse(value) do
+      {limit, ""} when limit > 0 -> ["--max-cases", value]
+      _invalid -> Mix.raise("mix precommit requires --max-cases to be a positive integer")
+    end
+  end
+
+  defp precommit_test_args!(_args) do
+    Mix.raise("mix precommit accepts only the optional --max-cases N argument")
   end
 
   defp precompiled_url do
