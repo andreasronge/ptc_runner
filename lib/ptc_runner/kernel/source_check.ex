@@ -54,7 +54,10 @@ defmodule PtcRunner.Kernel.SourceCheck do
     compile_result =
       Lisp.check_native(source,
         memory: memory,
-        tools: Evaluation.mission_tools(mission, state, timeout_ms, event_sink, nil),
+        # No inspection sink and no evaluation id: a check resolves names
+        # without executing, so it emits no capability events for either to
+        # attribute.
+        tools: Evaluation.mission_tools(mission, state, timeout_ms, event_sink, nil, nil),
         prelude: bundle_prelude(mission),
         timeout: timeout_ms,
         compile_timeout: compile_timeout_ms,

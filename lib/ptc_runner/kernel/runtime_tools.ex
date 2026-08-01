@@ -42,12 +42,13 @@ defmodule PtcRunner.Kernel.RuntimeTools do
   end
 
   @doc "Builds the reserved runtime-tool map for one environment."
-  def tools(state, environment, event_sink, kind) when kind in [:workflow, :mission] do
+  def tools(state, environment, event_sink, kind, evaluation_id \\ nil)
+      when kind in [:workflow, :mission] do
     @mission_routes
     |> Map.new(fn {name, route} -> {name, route_callback(route, state, environment)} end)
     |> maybe_put_annotation(state, event_sink, kind)
     |> Map.new(fn {name, callback} ->
-      {name, instrument(state, event_sink, kind, name, callback)}
+      {name, instrument(state, event_sink, kind, name, callback, evaluation_id)}
     end)
   end
 
@@ -368,28 +369,38 @@ defmodule PtcRunner.Kernel.RuntimeTools do
   end
 
   @doc "Wraps an internal runtime callback with canonical capability events."
-  def instrument(state, event_sink, environment, name, callback)
+  def instrument(state, event_sink, environment, name, callback, evaluation_id \\ nil)
       when environment in [:workflow, :mission] and is_binary(name) and is_function(callback, 1) do
     fn arguments ->
       capability_id = Events.id("capability")
       started_ms = System.monotonic_time(:millisecond)
 
-      case Events.emit(state, event_sink, "capability-started", %{
-             capability_id: capability_id,
-             environment: environment,
-             name: name
-           }) do
+      started =
+        put_evaluation_id(
+          %{capability_id: capability_id, environment: environment, name: name},
+          evaluation_id
+        )
+
+      case Events.emit(state, event_sink, "capability-started", started) do
         :ok ->
           result = callback.(arguments)
 
           _ =
-            Events.emit(state, event_sink, "capability-stopped", %{
-              capability_id: capability_id,
-              environment: environment,
-              name: name,
-              status: result_status(result),
-              duration_ms: Events.duration_ms(started_ms)
-            })
+            Events.emit(
+              state,
+              event_sink,
+              "capability-stopped",
+              put_evaluation_id(
+                %{
+                  capability_id: capability_id,
+                  environment: environment,
+                  name: name,
+                  status: result_status(result),
+                  duration_ms: Events.duration_ms(started_ms)
+                },
+                evaluation_id
+              )
+            )
 
           result
 
@@ -398,6 +409,11 @@ defmodule PtcRunner.Kernel.RuntimeTools do
       end
     end
   end
+
+  defp put_evaluation_id(data, evaluation_id) when is_binary(evaluation_id),
+    do: Map.put(data, :evaluation_id, evaluation_id)
+
+  defp put_evaluation_id(data, _evaluation_id), do: data
 
   defp usage(state, arguments) when is_map(arguments) and map_size(arguments) == 0,
     do: RunState.usage(state)

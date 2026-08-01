@@ -356,8 +356,7 @@ defmodule PtcRunner.Kernel.DispatcherEffectTest do
       capability.name,
       %{},
       Keyword.get(opts, :timeout_ms, 100),
-      nil,
-      Keyword.get(opts, :inspection_sink)
+      %{inspection_sink: Keyword.get(opts, :inspection_sink)}
     )
   end
 

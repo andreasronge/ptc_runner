@@ -320,7 +320,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
           capability.name,
           %{"query" => "x"},
           500,
-          event_sink
+          %{event_sink: event_sink}
         )
       end)
 

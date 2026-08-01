@@ -238,7 +238,7 @@ defmodule PtcRunner.Kernel.InspectionSink do
 
   defp shape("capability-input", %{"capability_id" => id}, payload) do
     valid? =
-      exact_payload(payload, ~w(environment name arguments)) and valid_id?(id) and
+      capability_payload_keys?(payload, "arguments") and valid_id?(id) and
         valid_capability_payload?(payload, "arguments")
 
     ok_or_error(valid?)
@@ -246,7 +246,7 @@ defmodule PtcRunner.Kernel.InspectionSink do
 
   defp shape("capability-output", %{"capability_id" => id}, payload) do
     valid? =
-      exact_payload(payload, ~w(environment name result)) and valid_id?(id) and
+      capability_payload_keys?(payload, "result") and valid_id?(id) and
         valid_capability_payload?(payload, "result")
 
     ok_or_error(valid?)
@@ -308,6 +308,15 @@ defmodule PtcRunner.Kernel.InspectionSink do
 
   defp exact_payload(payload, keys) do
     Map.keys(payload) |> Enum.sort() == Enum.sort(keys) and JSONValue.map?(payload)
+  end
+
+  # `evaluation_id` is optional: a dispatch outside any evaluation still records
+  # a valid pair. When present it attributes the call to one turn, which is what
+  # lets a private capability record join the program that made it.
+  defp capability_payload_keys?(payload, value_key) do
+    exact_payload(payload, ["environment", "name", value_key]) or
+      (exact_payload(payload, ["environment", "evaluation_id", "name", value_key]) and
+         valid_id?(payload["evaluation_id"]))
   end
 
   defp valid_capability_payload?(payload, value_key) do

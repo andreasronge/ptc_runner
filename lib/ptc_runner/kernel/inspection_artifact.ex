@@ -405,7 +405,8 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
          "payload" => payload
        }),
        do:
-         valid_id?(id) and exact_keys?(payload, ~w(environment name arguments)) and
+         valid_id?(id) and
+           capability_payload_keys?(payload, "arguments") and
            valid_capability_payload?(payload, "arguments")
 
   defp valid_shape?(%{
@@ -414,7 +415,8 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
          "payload" => payload
        }),
        do:
-         valid_id?(id) and exact_keys?(payload, ~w(environment name result)) and
+         valid_id?(id) and
+           capability_payload_keys?(payload, "result") and
            valid_capability_payload?(payload, "result")
 
   defp valid_shape?(%{
@@ -752,6 +754,15 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
 
   defp exact_keys?(map, keys),
     do: is_map(map) and Map.keys(map) |> Enum.sort() == Enum.sort(keys)
+
+  # `evaluation_id` is optional so a dispatch made outside any evaluation still
+  # produces a valid record; when present it must name an evaluation, which is
+  # what lets a private capability call be attributed to one turn.
+  defp capability_payload_keys?(payload, value_key) do
+    exact_keys?(payload, ["environment", "name", value_key]) or
+      (exact_keys?(payload, ["environment", "evaluation_id", "name", value_key]) and
+         valid_id?(payload["evaluation_id"]))
+  end
 
   defp valid_capability_payload?(payload, value_key) do
     payload["environment"] in ["workflow", "mission"] and

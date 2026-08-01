@@ -139,7 +139,11 @@ defmodule PtcRunner.Kernel.Evaluation do
         mission_environment,
         source,
         timeout_ms,
-        %{event_sink: event_sink, inspection_sink: inspection_sink},
+        %{
+          event_sink: event_sink,
+          inspection_sink: inspection_sink,
+          evaluation_id: evaluation_id
+        },
         {
           evaluation_id,
           started_ms,
@@ -312,7 +316,8 @@ defmodule PtcRunner.Kernel.Evaluation do
           state,
           timeout_ms,
           capture.event_sink,
-          capture.inspection_sink
+          capture.inspection_sink,
+          capture[:evaluation_id]
         ),
       prelude: bundle_prelude(environment),
       timeout: timeout_ms,
@@ -668,24 +673,21 @@ defmodule PtcRunner.Kernel.Evaluation do
   end
 
   @doc false
-  def mission_tools(environment, state, timeout_ms, event_sink, inspection_sink) do
+  def mission_tools(environment, state, timeout_ms, event_sink, inspection_sink, evaluation_id) do
+    context = %{
+      event_sink: event_sink,
+      inspection_sink: inspection_sink,
+      evaluation_id: evaluation_id
+    }
+
     environment.capabilities
     |> Map.new(fn {name, _capability} ->
       {name,
        fn arguments ->
-         Dispatcher.dispatch(
-           state,
-           :mission,
-           environment,
-           name,
-           arguments,
-           timeout_ms,
-           event_sink,
-           inspection_sink
-         )
+         Dispatcher.dispatch(state, :mission, environment, name, arguments, timeout_ms, context)
        end}
     end)
-    |> Map.merge(RuntimeTools.tools(state, environment, event_sink, :mission))
+    |> Map.merge(RuntimeTools.tools(state, environment, event_sink, :mission, evaluation_id))
     |> Map.new(fn {name, callback} -> {name, %TrustedTool{function: callback}} end)
   end
 

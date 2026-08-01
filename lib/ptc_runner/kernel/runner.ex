@@ -161,7 +161,9 @@ defmodule PtcRunner.Kernel.Runner do
            environment: :workflow
          }) do
       :ok ->
-        result = execute_workflow(entry_source, config, state, timeout_ms, deadline_ms)
+        result =
+          execute_workflow(entry_source, config, state, timeout_ms, deadline_ms, evaluation_id)
+
         _ = maybe_emit_workflow_limit(state, config.event_sink, result)
 
         _ =
@@ -179,10 +181,10 @@ defmodule PtcRunner.Kernel.Runner do
     end
   end
 
-  defp execute_workflow(entry_source, config, state, timeout_ms, deadline_ms) do
+  defp execute_workflow(entry_source, config, state, timeout_ms, deadline_ms, evaluation_id) do
     opts = [
       context: config.input,
-      tools: workflow_tools(config, state),
+      tools: workflow_tools(config, state, evaluation_id),
       prelude: bundle_prelude(config.workflow_environment),
       timeout: timeout_ms,
       compile_timeout: timeout_ms,
@@ -271,7 +273,7 @@ defmodule PtcRunner.Kernel.Runner do
     end
   end
 
-  defp workflow_tools(config, state) do
+  defp workflow_tools(config, state, evaluation_id) do
     tools =
       Map.new(config.workflow_environment.capabilities, fn {name, _capability} ->
         {name,
@@ -283,15 +285,24 @@ defmodule PtcRunner.Kernel.Runner do
              name,
              arguments,
              config.limits.workflow_timeout_ms,
-             config.event_sink,
-             config.inspection_sink
+             %{
+               event_sink: config.event_sink,
+               inspection_sink: config.inspection_sink,
+               evaluation_id: evaluation_id
+             }
            )
          end}
       end)
 
     tools
     |> Map.merge(
-      RuntimeTools.tools(state, config.workflow_environment, config.event_sink, :workflow)
+      RuntimeTools.tools(
+        state,
+        config.workflow_environment,
+        config.event_sink,
+        :workflow,
+        evaluation_id
+      )
     )
     |> Map.put(
       "kernel-eval",
@@ -306,7 +317,8 @@ defmodule PtcRunner.Kernel.Runner do
           config.limits,
           config.event_sink,
           config.inspection_sink
-        )
+        ),
+        evaluation_id
       )
     )
     |> Map.put(
@@ -331,7 +343,8 @@ defmodule PtcRunner.Kernel.Runner do
         config.event_sink,
         :workflow,
         "kernel-mission-inventory",
-        RuntimeTools.mission_inventory(state, config.mission_inventory.rendered)
+        RuntimeTools.mission_inventory(state, config.mission_inventory.rendered),
+        evaluation_id
       )
     )
     |> Map.put(
@@ -341,7 +354,8 @@ defmodule PtcRunner.Kernel.Runner do
         config.event_sink,
         :workflow,
         "kernel-mission-model-context",
-        RuntimeTools.mission_model_context(state, config.mission_inventory.model_rendered)
+        RuntimeTools.mission_model_context(state, config.mission_inventory.model_rendered),
+        evaluation_id
       )
     )
     |> Map.put(
@@ -351,7 +365,8 @@ defmodule PtcRunner.Kernel.Runner do
         config.event_sink,
         :workflow,
         "kernel-result-contract",
-        RuntimeTools.result_contract(config.result_contract)
+        RuntimeTools.result_contract(config.result_contract),
+        evaluation_id
       )
     )
     |> RuntimeTools.trusted_tools(config.limits)

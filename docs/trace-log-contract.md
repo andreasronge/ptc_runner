@@ -377,8 +377,16 @@ It does not return all turns implicitly.
 ### `log/turns`
 
 Returns bounded canonical turn/subordinate-evaluation projections for one run.
-V1 filters include status, evaluation/turn ID, capability name, limit, and
-cursor. Ordering is ascending canonical sequence.
+V1 filter keys are `status`, `evaluation_id`, `capability`, `limit`, and
+`cursor`. Ordering is ascending canonical sequence.
+
+Capability events carry the `evaluation_id` of the evaluation whose program
+invoked them, so `{"evaluation_id" => id}` selects a turn's boundary events
+*and* the calls made inside it. Attribution is to the innermost open
+evaluation: a call made by a subordinate mission program belongs to that
+mission evaluation, not to the enclosing workflow evaluation. Without this a
+turn-scoped question could only be answered by reading every event in the run
+and reconstructing evaluation windows from `sequence` order.
 
 ### `log/counters`
 
@@ -496,8 +504,8 @@ IDs for the record's environment. V1 record types and payloads are:
 
 | Record type | Correlation | Exact payload fields |
 | --- | --- | --- |
-| `capability-input` | `capability_id` | `environment`, `name`, `arguments` |
-| `capability-output` | `capability_id` | `environment`, `name`, `result` |
+| `capability-input` | `capability_id` | `environment`, `name`, `arguments`, optional `evaluation_id` |
+| `capability-output` | `capability_id` | `environment`, `name`, `result`, optional `evaluation_id` |
 | `evaluation-source` | `evaluation_id` | `environment`, `program_kind`, `source`, `source_hash`, `source_bytes` |
 | `prelude-source` | `component_id` | `environment`, `source`, `source_hash`, `source_bytes` |
 
@@ -505,6 +513,14 @@ Enums and map keys are normalized to JSON strings before retention. `result` is
 the bounded Dispatcher envelope returned to Lisp, so `llm-request` input/output
 records contain the provider-neutral model request and normalized response, and
 MCP records contain the public connector arguments and normalized result/error.
+
+`evaluation_id` is present whenever the call was made from inside an
+evaluation, which is every call a program makes. It joins a capability record
+to the `evaluation-source` record for the same evaluation, so one turn reads as
+a unit: the exact program the model wrote, the full model exchange that
+produced it — including any prose the model emitted alongside the program — and
+every call the program then made, with arguments and results. It is absent only
+for a dispatch made outside any evaluation.
 `evaluation-source` is emitted only for subordinate mission evaluation in this
 increment. Its hash and byte count must equal the corresponding canonical
 `evaluation-started` fields. `prelude-source` records carry the exact

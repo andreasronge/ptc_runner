@@ -671,9 +671,14 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
 
     assert input["payload"] == %{
              "environment" => "mission",
+             "evaluation_id" => source["correlation"]["evaluation_id"],
              "name" => "native-read",
              "arguments" => %{"query" => "inspect me"}
            }
+
+    # The call and the program that made it join on evaluation_id, so a turn's
+    # private record is readable as one unit rather than as unrelated rows.
+    assert output["payload"]["evaluation_id"] == source["correlation"]["evaluation_id"]
 
     assert output["payload"]["result"] == %{
              "status" => "ok",

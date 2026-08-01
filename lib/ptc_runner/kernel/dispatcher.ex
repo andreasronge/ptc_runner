@@ -31,15 +31,20 @@ defmodule PtcRunner.Kernel.Dispatcher do
   alias PtcRunner.Lisp.AmbiguousArguments
   alias PtcRunner.Lisp.RetainedSize
 
-  @doc "Dispatches one environment-local capability with optional event collection."
-  @spec dispatch(RunState.t(), :workflow | :mission, map(), binary(), map(), non_neg_integer()) ::
-          map()
-  def dispatch(state, environment, %{capabilities: capabilities}, name, arguments, timeout_ms)
-      when environment in [:workflow, :mission] and is_binary(name) and is_map(arguments) and
-             is_integer(timeout_ms) do
-    dispatch(state, environment, %{capabilities: capabilities}, name, arguments, timeout_ms, nil)
-  end
+  @typedoc """
+  Per-invocation dispatch context.
 
+  `evaluation_id` names the evaluation whose program made this call, so a
+  capability event is attributable to one turn rather than only to its position
+  in the run's event sequence. Callers that emit no events omit every key.
+  """
+  @type context :: %{
+          optional(:event_sink) => term(),
+          optional(:inspection_sink) => term(),
+          optional(:evaluation_id) => binary() | nil
+        }
+
+  @doc "Dispatches one environment-local capability with optional event collection."
   @spec dispatch(
           RunState.t(),
           :workflow | :mission,
@@ -47,41 +52,9 @@ defmodule PtcRunner.Kernel.Dispatcher do
           binary(),
           map(),
           non_neg_integer(),
-          term()
+          context()
         ) :: map()
-  def dispatch(
-        state,
-        environment,
-        %{capabilities: _capabilities},
-        _name,
-        %AmbiguousArguments{},
-        _timeout_ms,
-        event_sink
-      )
-      when environment in [:workflow, :mission] do
-    protocol_error(state, event_sink, :ambiguous_arguments)
-  end
-
-  def dispatch(
-        state,
-        environment,
-        environment_value,
-        name,
-        arguments,
-        timeout_ms,
-        event_sink
-      ) do
-    dispatch(
-      state,
-      environment,
-      environment_value,
-      name,
-      arguments,
-      timeout_ms,
-      event_sink,
-      nil
-    )
-  end
+  def dispatch(state, environment, environment_value, name, arguments, timeout_ms, context \\ %{})
 
   def dispatch(
         state,
@@ -90,11 +63,10 @@ defmodule PtcRunner.Kernel.Dispatcher do
         _name,
         %AmbiguousArguments{},
         _timeout_ms,
-        event_sink,
-        _inspection_sink
+        context
       )
-      when environment in [:workflow, :mission] do
-    protocol_error(state, event_sink, :ambiguous_arguments)
+      when environment in [:workflow, :mission] and is_map(context) do
+    protocol_error(state, context[:event_sink], :ambiguous_arguments)
   end
 
   def dispatch(
@@ -104,11 +76,12 @@ defmodule PtcRunner.Kernel.Dispatcher do
         name,
         arguments,
         timeout_ms,
-        event_sink,
-        inspection_sink
+        context
       )
       when environment in [:workflow, :mission] and is_binary(name) and is_map(arguments) and
-             is_integer(timeout_ms) do
+             is_integer(timeout_ms) and is_map(context) do
+    event_sink = context[:event_sink]
+
     with %Capability{} = capability <- Map.get(capabilities, name),
          :ok <- validate(capability, arguments),
          :ok <- validate_size(arguments, capability_argument_limit(state)),
@@ -120,7 +93,8 @@ defmodule PtcRunner.Kernel.Dispatcher do
         timeout_ms,
         environment,
         event_sink,
-        inspection_sink
+        context[:inspection_sink],
+        context[:evaluation_id]
       )
     else
       nil ->
@@ -153,11 +127,17 @@ defmodule PtcRunner.Kernel.Dispatcher do
          timeout_ms,
          environment,
          event_sink,
-         inspection_sink
+         inspection_sink,
+         evaluation_id
        ) do
     capability_id = Events.id("capability")
     started_ms = System.monotonic_time(:millisecond)
-    data = %{capability_id: capability_id, environment: environment, name: capability.name}
+
+    data =
+      put_evaluation_id(
+        %{capability_id: capability_id, environment: environment, name: capability.name},
+        evaluation_id
+      )
 
     case Events.emit(state, event_sink, "capability-started", data) do
       :ok ->
@@ -167,7 +147,8 @@ defmodule PtcRunner.Kernel.Dispatcher do
                  capability_id,
                  environment,
                  capability.name,
-                 arguments
+                 arguments,
+                 evaluation_id
                ) do
             :ok ->
               context = invocation_context(event_sink, inspection_sink, capability_id)
@@ -184,7 +165,8 @@ defmodule PtcRunner.Kernel.Dispatcher do
                    capability_id,
                    environment,
                    capability.name,
-                   result
+                   result,
+                   evaluation_id
                  ) do
               :ok ->
                 result
@@ -201,13 +183,21 @@ defmodule PtcRunner.Kernel.Dispatcher do
         _ = maybe_emit_limit(state, event_sink, result)
 
         _ =
-          Events.emit(state, event_sink, "capability-stopped", %{
-            capability_id: capability_id,
-            environment: environment,
-            name: capability.name,
-            status: result.status,
-            duration_ms: Events.duration_ms(started_ms)
-          })
+          Events.emit(
+            state,
+            event_sink,
+            "capability-stopped",
+            put_evaluation_id(
+              %{
+                capability_id: capability_id,
+                environment: environment,
+                name: capability.name,
+                status: result.status,
+                duration_ms: Events.duration_ms(started_ms)
+              },
+              evaluation_id
+            )
+          )
 
         result
 
@@ -217,27 +207,37 @@ defmodule PtcRunner.Kernel.Dispatcher do
     end
   end
 
-  defp inspection_input(nil, _capability_id, _environment, _name, _arguments), do: :ok
+  defp inspection_input(nil, _capability_id, _environment, _name, _arguments, _evaluation_id),
+    do: :ok
 
-  defp inspection_input(sink, capability_id, environment, name, arguments) do
+  defp inspection_input(sink, capability_id, environment, name, arguments, evaluation_id) do
     InspectionSink.emit(
       sink,
       "capability-input",
       %{capability_id: capability_id},
-      %{environment: environment, name: name, arguments: arguments}
+      put_evaluation_id(
+        %{environment: environment, name: name, arguments: arguments},
+        evaluation_id
+      )
     )
   end
 
-  defp inspection_output(nil, _capability_id, _environment, _name, _result), do: :ok
+  defp inspection_output(nil, _capability_id, _environment, _name, _result, _evaluation_id),
+    do: :ok
 
-  defp inspection_output(sink, capability_id, environment, name, result) do
+  defp inspection_output(sink, capability_id, environment, name, result, evaluation_id) do
     InspectionSink.emit(
       sink,
       "capability-output",
       %{capability_id: capability_id},
-      %{environment: environment, name: name, result: result}
+      put_evaluation_id(%{environment: environment, name: name, result: result}, evaluation_id)
     )
   end
+
+  defp put_evaluation_id(data, evaluation_id) when is_binary(evaluation_id),
+    do: Map.put(data, :evaluation_id, evaluation_id)
+
+  defp put_evaluation_id(data, _evaluation_id), do: data
 
   defp inspection_failure(state) do
     :ok = RunState.fail(state, :inspection_sink_error, :inspection_sink_error)

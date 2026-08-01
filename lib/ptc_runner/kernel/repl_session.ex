@@ -477,7 +477,7 @@ defmodule PtcRunner.Kernel.ReplSession do
              environment: :workflow
            }) do
         :ok ->
-          result = run_lisp(session, memory, history, source)
+          result = run_lisp(session, memory, history, source, evaluation_id)
           finish_evaluation(session, result, history, lease, evaluation_id, started_ms)
 
         {:error, :event_sink_error} ->
@@ -491,7 +491,7 @@ defmodule PtcRunner.Kernel.ReplSession do
     end
   end
 
-  defp run_lisp(session, memory, history, source) do
+  defp run_lisp(session, memory, history, source, evaluation_id) do
     limits = session.config.limits
     timeout_ms = min(limits.evaluation_timeout_ms, RunState.remaining_ms(session.state))
 
@@ -500,7 +500,7 @@ defmodule PtcRunner.Kernel.ReplSession do
       context: session.config.input,
       memory: memory,
       turn_history: history,
-      tools: tools(session),
+      tools: tools(session, evaluation_id),
       prelude: prelude(session.config.workflow_environment),
       timeout: timeout_ms,
       compile_timeout: timeout_ms,
@@ -514,7 +514,7 @@ defmodule PtcRunner.Kernel.ReplSession do
     )
   end
 
-  defp tools(session) do
+  defp tools(session, evaluation_id) do
     environment = session.config.workflow_environment
     timeout_ms = session.config.limits.evaluation_timeout_ms
 
@@ -528,8 +528,11 @@ defmodule PtcRunner.Kernel.ReplSession do
           name,
           arguments,
           timeout_ms,
-          session.config.event_sink,
-          session.config.inspection_sink
+          %{
+            event_sink: session.config.event_sink,
+            inspection_sink: session.config.inspection_sink,
+            evaluation_id: evaluation_id
+          }
         )
       end
 
@@ -540,7 +543,8 @@ defmodule PtcRunner.Kernel.ReplSession do
         session.state,
         environment,
         session.config.event_sink,
-        :workflow
+        :workflow,
+        evaluation_id
       )
     )
     |> Map.put(
@@ -556,7 +560,8 @@ defmodule PtcRunner.Kernel.ReplSession do
           session.config.limits,
           session.config.event_sink,
           session.config.inspection_sink
-        )
+        ),
+        evaluation_id
       )
     )
     |> Map.put(

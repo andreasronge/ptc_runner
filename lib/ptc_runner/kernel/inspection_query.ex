@@ -195,6 +195,7 @@ defmodule PtcRunner.Kernel.InspectionQuery do
       "run_id" => input["run_id"],
       "trace_id" => input["trace_id"],
       "capability_id" => capability_id,
+      "evaluation_id" => input_payload["evaluation_id"],
       "environment" => input_payload["environment"],
       "name" => input_payload["name"],
       "input_sequence" => input["sequence"],
