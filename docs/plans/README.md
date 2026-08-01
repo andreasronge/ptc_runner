@@ -33,8 +33,9 @@ belongs in guides or retained specifications.
 - [`lisp-kernel/private-analysis-sink.md`](lisp-kernel/private-analysis-sink.md)
   plans non-interactive private inspection analysis behind an explicit
   owner-only sink, so agents read private artifacts through the validating
-  profile instead of bypassing it, and makes that the documented default for
-  this repository's example programs.
+  profile instead of bypassing it. Blocked on an explicit threat-model decision
+  about same-UID processes, and on a safe stdout projection the current frontend
+  does not have.
 - [`mcp-oauth.md`](mcp-oauth.md) plans principal-scoped OAuth authorization for
   remote Streamable HTTP MCP servers without weakening host authority or tool
   replay safety.
