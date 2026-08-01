@@ -15,8 +15,10 @@ defmodule PtcRunner.Kernel.ToolGrant do
   modest environment to eat the program's whole heap budget through the
   measured baseline. `PtcRunner.Sandbox` documents how that baseline is billed.
 
-  Size the grant with `PtcRunner.Lisp.RetainedSize.bytes/1`; it counts flat
-  heap words plus referenced binaries, which is what the sandbox bills.
+  Size the grant in flat heap words, via ERTS `flat_size`: that is the copy the
+  sandbox pays for, and the quantity a per-callback capture inflates.
+  Referenced binaries are shared rather than copied, and `max_heap_size` counts
+  each one once however many callbacks reference it.
   """
 
   alias PtcRunner.Kernel.Dispatcher

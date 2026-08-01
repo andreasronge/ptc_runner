@@ -10,7 +10,7 @@ inspection authorization, two plans, and the debugging documentation.
 
 ## Branch contents
 
-Four independent workstreams are bundled here and would review better apart.
+Six independent workstreams are bundled here and would review better apart.
 
 | Commits | What | State |
 | --- | --- | --- |
@@ -18,10 +18,22 @@ Four independent workstreams are bundled here and would review better apart.
 | `637958c1` | union-selection fix — **live bug on `main`** | ready, unlanded |
 | `d478cf38` | capability events carry `evaluation_id` | shipped, tested |
 | `ba983f95` | `--private-unattended` private destination | shipped, tested |
-| `2285997a`, `1d00c606`, `2dbf7969` + 8 superseded | documentation and plans | current |
+| `f8d7cea9`, `40308883` | sandbox tool-grant fix and memory guards | shipped, tested |
+| `bb2be8cf`, `9e497012` | issue #1161 — actionable corrections, `describe/1` | rebased in, tested |
+| `2285997a`, `1d00c606`, `2dbf7969`, `ba3dcbe1` + 8 superseded | documentation and plans | current |
 
 Nine of those doc commits are the private-analysis plan being rewritten five
 times. The plan was ultimately deleted; the history is left as a record of why.
+
+The last two code commits were `agent/expose-result-contract-description`,
+rebased onto this branch on 2026-08-02 because both branches edit the same tool
+builders and resolving that twice was avoidable. Their originals are
+`c55f0481` and `ecdf9c52`; that branch is now superseded and can be deleted
+once this lands. The rebase's only conflicts were in
+`agent-developer-findings.md`, where the incoming copy still cited `c236b981`
+for the union fix — a pre-rebase SHA that is not in this history. The live SHA
+is `637958c1`, which is what the table above and the findings doc now carry.
+**Issue #1161 is still open with no PR linking this work to it.**
 
 ## Problems found and what was done
 
@@ -202,10 +214,14 @@ local user, not just same-UID — broader than the stated trust boundary.
 
 ### 6. Open findings from the earlier session
 
-Unchanged and still tracked in `agent-developer-findings.md`: finding 1
-(correction cannot name an undeclared key, issue #1161), finding 3
-(`ValueContract.describe/1` is unreachable), and findings 7–9 (annotation
-vocabulary, failure-kind fingerprinting, in-loop verification).
+Findings 1 and 3 are now **fixed on this branch** by the rebased
+`bb2be8cf`/`9e497012`: corrections emit the declared key set at the violating
+path with descending counters, and `kernel/result-contract-description` reaches
+the compiled shape. Both remain unlanded, and issue #1161 does not yet
+reference them.
+
+Still open and tracked in `agent-developer-findings.md`: findings 7–9
+(annotation vocabulary, failure-kind fingerprinting, in-loop verification).
 
 ## Process notes
 
