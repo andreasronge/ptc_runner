@@ -1,13 +1,19 @@
 # Findings handoff: correction feedback, analysis ergonomics, prelude layering
 
 **Status:** findings and proposals; written 2026-08-01 on branch
-`worktree-incident-evidence-compiler`, revised the same day after
-[PR #1162](https://github.com/andreasronge/ptc_runner/pull/1162) merged as
-`3dddb84c`. Findings 4 and 5 and the prelude-layering section are resolved in
-`main`, and so are findings 2 and 3 — finding 2 by `main`'s own union fix rather
-than this branch's, and `describe/1` predates the branch split. Finding 1 is
-still open in [#1161](https://github.com/andreasronge/ptc_runner/issues/1161).
-The rest are unstarted.
+`worktree-incident-evidence-compiler`, revised 2026-08-02 and again on
+2026-08-03 after this branch rebased onto `main`. Findings 4 and 5 and the
+prelude-layering section are resolved in `main` by
+[PR #1162](https://github.com/andreasronge/ptc_runner/pull/1162) (`3dddb84c`).
+Findings 2, 3, and 6 are resolved there too, none of them by this branch's work:
+`main` landed its own union fix, `describe/1` predates the branch split, and
+finding 6 shipped in `ba983f95`. Finding 1 is still open in
+[#1161](https://github.com/andreasronge/ptc_runner/issues/1161). Findings 7–9
+are unstarted.
+
+Read [the trace-analysis handoff](analysis-tooling-handoff.md) first — it is
+the entry point for this branch and records what shipped, what is unlanded, and
+what is still worth looking at.
 
 These surfaced while building the incident-evidence compiler reference
 application and then investigating its own traces. Most of them share a theme
@@ -213,11 +219,16 @@ kept proposing resolutions the code contradicted.
 `stable-cli-contract.md` was amended in two places, since it had recorded the
 code-owned profile as keeping an explicit-terminal rule.
 
-**Known limitation:** `inspection-analysis-v2` returns `memory_exceeded` for any
-evaluation under `mix run` — any artifact size, CLI or builder API — while the
-same evaluation passes under `mix test`. It reproduces at merge-base `3dddb84c`
-with the fix reverted, so it is pre-existing and unrelated. Private querying is
-not usable end to end until that is diagnosed.
+**Former blocker, now fixed.** `inspection-analysis-v2` used to return
+`memory_exceeded` for any evaluation, which made this feature unusable end to
+end. The cause was unrelated to private analysis: every capability callback
+closed over the whole mission environment, and the flat spawn copy into the
+sandbox duplicated it once per callback, inflating the pre-eval baseline until
+the heap budget was gone. Fixed in `f8d7cea9`; the `mix run` versus `mix test`
+split was marginality, not environment. See
+[the trace-analysis handoff](analysis-tooling-handoff.md) for the measurements.
+Private querying now works end to end through
+`mix ptc.repl --private-unattended`.
 
 The original report follows.
 
@@ -398,6 +409,7 @@ home:
 The finding 4 and 5 prototype was superseded by #1162, which shipped both fixes
 in better form. Those obsolete modifications are not part of this branch.
 
+<<<<<<< HEAD
 Finding 2 landed on `main` independently as `selected_branches/3`, which also
 resolves branch identity through `evaluationPath`. This branch's version was
 superseded and dropped when it rebased; only its regression tests were kept.
@@ -408,17 +420,30 @@ behind `CommandContractAuthority` rather than path strings. Re-landing it means
 re-implementing it on that structure, not replaying the commit — which is why
 it was skipped rather than merged during a conflict resolution. #1161 remains
 the tracking issue.
+=======
+The fixes for findings 1–3 are the branch work that is still needed and still
+unlanded, along with finding 6's `--private-unattended` destination and the
+sandbox tool-grant fix that made it usable.
+>>>>>>> b31361ad (docs(plans): make the handoff docs accurate for a cold start)
 
 ## Suggested order
 
 1. ~~**Finding 4 alone** into the primitives.~~ Done in #1162, together with 2.
 2. ~~**Findings 5 + the layering section**: build `log.analysis`.~~ Done in
    #1162.
+<<<<<<< HEAD
 3. ~~**Finding 2**: land the union fix.~~ Landed on `main` independently; this
    branch's version was dropped as superseded.
 4. ~~**Finding 3**: expose `describe/1`.~~ Predates the branch split.
 5. **Finding 1** proper, tracked in #1161. Needs re-implementing on `main`'s
    `segments`/`CommandContractAuthority` violation model.
+=======
+3. **Finding 2**: land `637958c1`, which is written and tested but not in
+   `main`.
+4. ~~**Finding 3**: expose `describe/1`.~~ Done on this branch (`9e497012`).
+5. ~~**Finding 1** proper, tracked in #1161.~~ Done on this branch
+   (`bb2be8cf`); the issue is still open and references neither commit.
+>>>>>>> b31361ad (docs(plans): make the handoff docs accurate for a cold start)
 6. ~~**Finding 6**, sequenced with the stable CLI plan.~~ Done in `ba983f95`;
    the CLI plan was amended rather than sequenced against.
 7. Findings 7–9 as separate design work.

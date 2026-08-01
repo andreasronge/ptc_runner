@@ -28,12 +28,15 @@ belongs in guides or retained specifications.
 - [`lisp-kernel/analysis-tooling-handoff.md`](lisp-kernel/analysis-tooling-handoff.md)
   hands off the trace-analysis tooling session: turn correlation, the
   `--private-unattended` destination, corrected documentation, and the
-  `memory_exceeded` failure that blocks private querying end to end.
+  sandbox tool-grant fix that unblocked private querying end to end. It is the
+  entry point for that branch — read it before the findings below.
 - [`lisp-kernel/agent-developer-findings.md`](lisp-kernel/agent-developer-findings.md)
   hands off the correction-feedback, analysis-ergonomics, and prelude-layering
   problems found while building and debugging the incident-evidence compiler,
-  with proposed remedies. Its analysis-prelude findings shipped in #1162; the
-  correction-feedback and verification findings remain open.
+  with proposed remedies. Its analysis-prelude findings shipped in #1162;
+  correction feedback and `describe/1` are fixed on the branch and unlanded;
+  the annotation-vocabulary, failure-kind, and verification findings remain
+  open.
 - [`mcp-oauth.md`](mcp-oauth.md) plans principal-scoped OAuth authorization for
   remote Streamable HTTP MCP servers without weakening host authority or tool
   replay safety.

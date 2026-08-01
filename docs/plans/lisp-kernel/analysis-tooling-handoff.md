@@ -1,8 +1,13 @@
 # Handoff: trace-analysis tooling
 
-**Written:** 2026-08-01, branch `worktree-incident-evidence-compiler`,
-18 commits ahead of `main` at `7d997a0a`. Working tree clean, pushed,
-`mix precommit` green. **No PR opened.**
+**Written:** 2026-08-01, revised 2026-08-02. Branch
+`worktree-incident-evidence-compiler`, 25 commits ahead of `main` at
+`7d997a0a`. Working tree clean; `mix precommit`, `mix prepush`, and the
+warnings-as-errors doc build green. **The last 3 commits are unpushed** (a
+fast-forward). **No PR opened.**
+
+Nothing on this branch is in `main` — `637958c1`, `d478cf38`, and `ba983f95`
+are all still unlanded, verified with `git merge-base --is-ancestor`.
 
 Covers one session of work that started as "dogfood the PTC log analysis
 instead of using Python" and ended up touching turn correlation, private
@@ -222,6 +227,28 @@ reference them.
 
 Still open and tracked in `agent-developer-findings.md`: findings 7–9
 (annotation vocabulary, failure-kind fingerprinting, in-loop verification).
+
+## Known flaky tests
+
+Not caused by this branch, and each one cost time to re-diagnose. All pass on
+re-run; none is an assertion mismatch that indicates a real defect.
+
+| Test | Symptom | Measured |
+| --- | --- | --- |
+| `mcp_oauth/network_policy_test.exs:130` | `:egress_denied` instead of `:resolution_failed` | fails ~1 run in 10 **in isolation** — a race between the egress check and the deadline path |
+| `IncidentCompiler.CompilerTest` | `setup_all` dies with `:mcp_timeout`, invalidating all 13 | passes alone in 6.6s; trips under full-suite scheduler pressure |
+| `mcp_oauth/store_memory_test.exs:416` | `:stale_flow` instead of `{:ok, pending}` | 5/5 in isolation |
+| `lisp/runtime/collection_ops_test.exs:64` | 1000 ms sandbox timeout instead of a type error | 3/3 in isolation |
+| `analysis_session_test.exs:1149` | `assert_receive` empty after 1000 ms | passes alone |
+
+Across roughly a dozen `mix precommit` runs on this branch, most were fully
+green and the rest failed on one of the above. `PTC_PRE_PUSH_MAX_CASES=2`
+reduces but does not eliminate them. The first one is worth fixing on its own —
+it fails without any concurrent load.
+
+**There is no `pre-push` hook installed in this clone.** `git push` runs no
+gates; run `mix precommit` and `mix prepush` yourself, or install the hooks with
+`./scripts/install-hooks.sh` from the main checkout.
 
 ## Process notes
 
