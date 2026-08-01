@@ -2,8 +2,9 @@
 
 **Status:** plan, revised 2026-08-01 after an independent adversarial review and
 a follow-up check against the CLI contract. The threat-model decision is
-answered; five blockers are open. No implementation started. Addresses finding 6
-of [`agent-developer-findings.md`](agent-developer-findings.md).
+answered and all five blockers have recommended resolutions. No implementation
+started. Addresses finding 6 of
+[`agent-developer-findings.md`](agent-developer-findings.md).
 
 The first draft argued that the interactive-terminal gate on
 `inspection-analysis-v2` provides no confidentiality and could be replaced by an
@@ -12,9 +13,12 @@ false against the current frontend, and two of its factual claims about existing
 code were wrong. This revision narrows the justification and records what
 remains.
 
-**Blocked on blockers 1 and 2** — the safe stdout/stderr projection and the
-transactional commit point. Both are design work in the analysis frontend, not
-CLI plumbing, and neither is started.
+All five blockers now carry a recommended resolution. Blocker 2 dissolves
+rather than being solved: buffering records and publishing the sink atomically
+at close removes the per-evaluation commit coupling entirely. Blocker 3 is
+resolved by the threat-model answer. What remains is a bounded implementation
+modelled on `InspectionArtifact`, plus one open question — whether losing a
+session's private records on crash is acceptable.
 
 ## Problem
 
@@ -173,11 +177,31 @@ what a sink would stop being.
 "Analysis-trace records" was also an invented abstraction. The task emits CLI
 lifecycle records (`session-started`, `evaluation`, `session-closed`).
 
-**Required:** a private record schema for the sink *and* a separate safe
-projection for stdout and stderr, covering errors, exceptions, Logger output,
-and crash reports — not just the success path. `--format clojure` under a sink
-needs defined semantics or must be refused, since suppressing private output
-leaves almost nothing to print.
+**Resolution: take the seam the record already has.** The evaluation result
+pairs every private field with safe metadata about it — `value` with
+`value_available`, `formatted` with `formatted_truncated`, `prints` with
+`prints_truncated`. Split there rather than inventing a projection:
+
+| Destination | Fields |
+| --- | --- |
+| stdout | `status`, `outcome`, `evaluation_id`, `duration_ms`, `continuation_effect`, `usage`, `value_available`, `formatted_truncated`, `prints_truncated`, `error.kind`, `error.reason` |
+| sink | `evaluation_id`, `formatted`, `value`, `prints`, `error.message` |
+
+The join key is `evaluation_id`, already present in the record and the same key
+that makes turn correlation work. A reader takes the safe stream to learn what
+happened and joins the sink for content.
+
+`format_profile_error/1` prints `error.kind` and `error.message || error.reason`
+to stderr, so `message` is the one field needing rerouting there; `kind` and
+`reason` stay.
+
+**Refuse `--format clojure` under a sink.** With the value suppressed, Clojure
+mode prints almost nothing, and defining semantics for it invents a format with
+no users — a sink session is machine-driven by definition. Restricting sink
+sessions to `jsonl` deletes the question rather than answering it.
+
+Still required: the safe projection must cover exceptions, Logger output, and
+crash reports, not only the success and evaluation-error paths.
 
 ### 2. Fail-closed sink writes conflict with continuation commit
 
@@ -185,11 +209,25 @@ The frontend receives a result *after* evaluation and continuation processing.
 If the sink write fails there and the evaluation is reported as failed, that is
 dishonest: definitions and `*1`/`*2`/`*3` history have already committed.
 
-**Required:** the private write participates in the evaluation transaction —
-produce candidate result and continuation, durably stage the private record,
-commit continuation and history only after the write is acknowledged, then
-return the safe projection. Crash points between those steps need defined
-recovery states. This is not CLI plumbing.
+**Resolution: dissolve it — buffer bounded private records in the session owner
+and publish the sink once, atomically, at close.** The transactional coupling
+exists only if the sink is written per evaluation. With a single publication at
+close there is no per-evaluation write that can fail after continuation commit,
+so no commit-point redesign is needed.
+
+This matches `InspectionArtifact`, which already validates a complete batch and
+publishes atomically with a no-clobber link. Consequences:
+
+- a crash produces **no sink file at all** — fail-closed and honest, and the
+  same behaviour the inspection artifact already has;
+- the buffer needs a byte ceiling; analysis sessions already carry them, and
+  exceeding it fails the session closed, consistent with capture being either
+  disabled or required/fail-closed;
+- per-evaluation durability is lost on a long session. That is the trade, and
+  it is the trade the existing artifact already makes.
+
+If per-evaluation durability is later required, that is a separate decision with
+its own state machine — not a prerequisite for this change.
 
 ### 3. `PrivateDirectory` does not reject symlinked parents (resolved)
 
@@ -209,16 +247,34 @@ racing adversary.
 `run_profile_sources/5` reduces with `{:halt, put_failure(...)}` unless
 `continue_on_error` is set, and the private profile forbids it. For an agent
 running a multi-step `-e` analysis, one malformed form ends the session and
-costs a full re-capture of both snapshots. This is the ergonomics problem the
-plan exists to solve, reappearing one layer down. Either relax it under a sink,
-or accept it and document that sink sessions are single-shot batches.
+costs a full re-capture of both snapshots.
+
+**Resolution: keep `:forbidden`; publish what was collected, with an explicit
+halt state.** Why the private profile forbids continuation while `log-analysis`
+allows `:repeated_eval_only` is not recorded anywhere, and relaxing a policy
+whose rationale cannot be established is how the first draft went wrong.
+
+On halt, publish the sink with the records collected so far plus a terminal
+state naming the evaluation that stopped the session. Partial-but-declared is
+not the silent partial state the contract forbids.
+
+The re-capture cost stays. Revisit with evidence if it proves painful, and
+record the rationale for `:forbidden` when someone establishes it.
 
 ### 5. The `evaluation` record schema is versioned
 
 It is `schema_version: 1` with `result` carrying `json_projection(result)`.
-Rerouting private values changes what that field means for sink sessions, which
-needs either a schema bump or a distinct record type — not a silent change of
-contents under the same version.
+Rerouting private values changes what that field means for sink sessions.
+
+**Resolution: a discriminator, not a version bump.** Keep `schema_version: 1`,
+put `"private_destination": "sink"` on the `session-started` record, and
+document that a sink session's `evaluation` records omit the private fields
+listed under blocker 1.
+
+No consumer regression is possible: non-interactive private sessions do not
+exist today, so nothing has ever parsed one. A discriminated closed shape is
+also the idiom this repo already uses for tagged results. Bump the version only
+when an existing mode's records change.
 
 ## Proposal
 
@@ -345,27 +401,30 @@ The first draft's "plumbing first; nothing observable changes" was wrong —
 option parsing, path validation, help text, and error behaviour are all
 observable.
 
-1. Record Decision 1 in the profile documentation, and resolve blocker 4
-   (single-shot batch versus relaxed continuation under a sink).
-2. Define the sink's terminal state inside the REPL's `session-closed`
-   record, reusing the durability pattern from `stable-cli-contract.md`
-   without importing the `run` envelope's closed state map.
-3. Specify the sink record schema, the safe stdout/stderr projection, bounds,
-   correlation, the transactional commit point, and publication semantics.
-4. Implement and adversarially test the sink artifact on its own.
-5. Integrate the write into evaluation/continuation commit.
-6. Add destination-based authorization and introduce `v3`, retaining `v2`.
-7. Full leakage and race test pass.
-8. Only then the example helper and documentation.
+1. Record Decision 1 in the profile documentation, and confirm the crash-loss
+   trade in Open questions. Everything below assumes it.
+2. Specify the two record shapes from blocker 1 — the safe stdout/stderr
+   projection and the sink record — plus the `private_destination`
+   discriminator, buffer ceiling, and the halt state from blocker 4.
+3. Implement the sink artifact on its own: create-exclusive with `O_EXCL` and
+   explicit `0600`, post-open `fstat` checks, bounded buffer, atomic
+   publication at close, modelled on `InspectionArtifact`.
+4. Route the frontend through the two shapes and restrict sink sessions to
+   `jsonl`.
+5. Add destination-based authorization and introduce `v3`, retaining `v2`.
+6. Full leakage test pass across stdout, stderr, errors, buffer overflow,
+   halted sessions, and crash.
+7. Only then the example helper and documentation.
 
 ## Open questions
 
-- **Clojure-under-sink semantics.** Either define what stdout shows when the
-  formatted value is private, or restrict a sink session to `jsonl`. Leaving it
-  undefined is how the first draft's stdout claim slipped through.
-- **Per-evaluation recovery.** Atomic publication at session close is the
-  starting position; whether a long session needs durable per-evaluation records
-  is a real question with a real cost.
+- **Is losing a long session's private records on crash acceptable?** Everything
+  above assumes yes, because `InspectionArtifact` already behaves that way. If
+  not, per-evaluation durability needs its own state machine and this becomes a
+  materially larger change.
+- **Why does the private profile forbid `continue_on_error`?** No rationale is
+  recorded. Blocker 4 keeps the restriction rather than relaxing it on a guess;
+  someone should establish and document the reason.
 
 ## Related documents
 
