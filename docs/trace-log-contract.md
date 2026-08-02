@@ -363,8 +363,17 @@ Examples:
 ### `log/runs`
 
 Discovers runs in the granted source. V1 filters are limited to run/trace ID,
-status, bounded exact-match tags, workflow/agent name, model/provider when
-present, timestamp range, limit, and cursor.
+status, `failure_kind`, bounded exact-match tags, workflow/agent name,
+model/provider when present, timestamp range, limit, and cursor.
+
+`failure_kind` matches the name the run's `run-stopped` event recorded, as an
+opaque bounded string. It is not validated against any vocabulary: a declared
+failure vocabulary lives in the frozen bundle of the run that *produced* the
+trace, not in the trace, so the query layer has no authority to check a name
+against it — the trace is the authority for what it contains. A kind that no
+run recorded selects nothing and returns an empty page, exactly like any other
+non-matching filter. A run whose failure was fingerprinted rather than named
+carries no `failure_kind` and is never selected by this filter.
 
 Default ordering is deterministic: newest start timestamp first, with run ID as
 a stable tie-breaker.
@@ -394,6 +403,29 @@ Returns bounded aggregate counters using the same source and filters as run
 discovery. Counters may include run status, errors, evaluations, and
 workflow/mission capability calls by bounded name. They are reproducible from
 the selected canonical events.
+
+Two counters break the selected runs down by how their failure was recorded,
+derived from each selected run's final `run-stopped` event:
+
+- `failure_kinds` — a map of named failure kind to the number of selected runs
+  that stopped with it.
+- `failure_kind_fingerprinted` — the number of selected runs that stopped with
+  a `failure_kind_fingerprint` instead of a name. These are never bucketed
+  inside `failure_kinds` under a synthetic key: the point of a fingerprint is
+  that the kind has no name to bucket under.
+
+A run contributes to at most one of the two. A successful run, and a run still
+open with no `run-stopped` at all, appears in neither.
+
+The reconciliation rule is an inequality, not an equality:
+
+    sum(failure_kinds) + failure_kind_fingerprinted <= errors
+
+The left side counts runs that failed through an explicit failure value, which
+is the only path that produces a failure taxonomy. `errors` counts error-tagged
+*events*, and other failure classes — an exceeded limit, a rejected result
+contract — carry no taxonomy at all. Reading the two as equal will therefore
+undercount errors on any source containing them.
 
 ## Pagination, ordering, and bounds
 

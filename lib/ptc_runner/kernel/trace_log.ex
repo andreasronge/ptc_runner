@@ -608,7 +608,7 @@ defmodule PtcRunner.Kernel.TraceLog do
     with :ok <-
            validate_keys(
              arguments,
-             ~w(limit cursor status run_id trace_id tags name model provider from to)
+             ~w(limit cursor status run_id trace_id tags name model provider from to failure_kind)
            ),
          :ok <- validate_run_filters(arguments),
          {:ok, page} <- page_options(arguments, source_id, :list_runs) do
@@ -674,7 +674,10 @@ defmodule PtcRunner.Kernel.TraceLog do
 
   defp execute(:counters, events, _source_id, arguments, max_result_bytes, source_kind) do
     with :ok <-
-           validate_keys(arguments, ~w(status run_id trace_id tags name model provider from to)),
+           validate_keys(
+             arguments,
+             ~w(status run_id trace_id tags name model provider from to failure_kind)
+           ),
          :ok <- validate_run_filters(arguments) do
       selected_ids =
         events |> runs(source_kind) |> filter_runs(arguments) |> MapSet.new(& &1["run_id"])
@@ -2082,6 +2085,7 @@ defmodule PtcRunner.Kernel.TraceLog do
       equal_filter?(item, arguments, "status") and equal_filter?(item, arguments, "run_id") and
         equal_filter?(item, arguments, "trace_id") and equal_filter?(item, arguments, "name") and
         equal_filter?(item, arguments, "model") and equal_filter?(item, arguments, "provider") and
+        equal_filter?(item, arguments, "failure_kind") and
         tags_match?(item["tags"], arguments["tags"]) and
         after_or_equal?(item["start_timestamp"], arguments["from"]) and
         before_or_equal?(item["start_timestamp"], arguments["to"])
@@ -2128,14 +2132,44 @@ defmodule PtcRunner.Kernel.TraceLog do
   end
 
   defp counters(events) do
+    {failure_kinds, failure_kind_fingerprinted} = failure_kind_breakdown(events)
+
     %{
       "events" => length(events),
       "runs" => events |> Enum.map(& &1["run_id"]) |> Enum.uniq() |> length(),
       "errors" => Enum.count(events, &error_event?/1),
       "evaluations" => Enum.count(events, &(&1["type"] == "evaluation-started")),
       "workflow_capability_calls" => capability_call_count(events, "workflow"),
-      "mission_capability_calls" => capability_call_count(events, "mission")
+      "mission_capability_calls" => capability_call_count(events, "mission"),
+      "failure_kinds" => failure_kinds,
+      "failure_kind_fingerprinted" => failure_kind_fingerprinted
     }
+  end
+
+  # Named kind => count, and a separate count of fingerprinted failures, over
+  # the selected runs' final `run-stopped` event. A run contributes to at most
+  # one bucket: a successful run or one still open (no `run-stopped` at all)
+  # carries neither field and appears in neither. Fingerprinted failures are
+  # never bucketed inside `failure_kinds` under a synthetic key — the whole
+  # point is that their kind has no name to bucket under.
+  defp failure_kind_breakdown(events) do
+    events
+    |> Enum.filter(&(&1["type"] == "run-stopped"))
+    |> Enum.group_by(& &1["run_id"])
+    |> Enum.map(fn {_run_id, stopped_events} -> List.last(stopped_events) end)
+    |> Enum.reduce({%{}, 0}, &accumulate_failure_kind/2)
+  end
+
+  defp accumulate_failure_kind(stopped, {kinds, fingerprinted}) do
+    case event_data(stopped, "failure_kind") do
+      nil ->
+        if event_data(stopped, "failure_kind_fingerprint"),
+          do: {kinds, fingerprinted + 1},
+          else: {kinds, fingerprinted}
+
+      kind ->
+        {Map.update(kinds, kind, 1, &(&1 + 1)), fingerprinted}
+    end
   end
 
   defp capability_call_count(events, environment) do
@@ -2309,7 +2343,10 @@ defmodule PtcRunner.Kernel.TraceLog do
 
   defp validate_run_filters(arguments) do
     with :ok <-
-           optional_strings(arguments, ~w(status run_id trace_id name model provider from to)),
+           optional_strings(
+             arguments,
+             ~w(status run_id trace_id name model provider from to failure_kind)
+           ),
          :ok <- valid_tags(arguments["tags"]),
          :ok <- valid_timestamp(arguments["from"]) do
       valid_timestamp(arguments["to"])

@@ -236,6 +236,111 @@ defmodule PtcRunner.Kernel.TraceCapabilityTest do
              })
   end
 
+  @tag :tmp_dir
+  test "failure_kind filters runs by the opaque string run-stopped recorded, and an unmatched kind returns an empty page rather than an error",
+       %{tmp_dir: directory} do
+    path = Path.join(directory, "trace.jsonl")
+
+    events = [
+      decoded_event("turn-limit-a", 1, "run-started"),
+      decoded_event("turn-limit-a", 2, "run-stopped", %{
+        "outcome" => "error",
+        "failure_kind" => "turn-limit"
+      }),
+      decoded_event("capability-error", 1, "run-started"),
+      decoded_event("capability-error", 2, "run-stopped", %{
+        "outcome" => "error",
+        "failure_kind" => "capability-error"
+      }),
+      decoded_event("clean", 1, "run-started"),
+      decoded_event("clean", 2, "run-stopped", %{"outcome" => "ok"})
+    ]
+
+    assert :ok = TraceLog.append_jsonl(path, events)
+    assert {:ok, trace_log} = TraceLog.new(source: {:file, path})
+
+    assert {:ok, %{"items" => [%{"run_id" => "turn-limit-a"}]}} =
+             TraceLog.query(trace_log, :list_runs, %{"failure_kind" => "turn-limit"})
+
+    # The kind is matched as an opaque string against whatever run-stopped
+    # recorded — no vocabulary check, so a misspelled or unknown kind is
+    # simply a non-matching filter, exactly like any other one.
+    assert {:ok, %{"items" => []}} =
+             TraceLog.query(trace_log, :list_runs, %{"failure_kind" => "no-such-kind"})
+
+    # The new key still inherits the existing bounded-string rule: an empty
+    # string is a structurally invalid filter, not a query that matches nothing.
+    assert {:error, :invalid_query} =
+             TraceLog.query(trace_log, :list_runs, %{"failure_kind" => ""})
+  end
+
+  @tag :tmp_dir
+  test "counters break failed runs down by failure_kind and failure_kind_fingerprint, reconciling against but not equaling errors",
+       %{tmp_dir: directory} do
+    path = Path.join(directory, "trace.jsonl")
+    fingerprint = "sha256:" <> String.duplicate("a", 64)
+
+    events = [
+      # Two runs share a named failure_kind, one has a distinct named kind:
+      # the map must sum counts per kind, not just count runs.
+      decoded_event("named-a", 1, "run-started"),
+      decoded_event("named-a", 2, "run-stopped", %{
+        "outcome" => "error",
+        "failure_kind" => "turn-limit"
+      }),
+      decoded_event("named-b", 1, "run-started"),
+      decoded_event("named-b", 2, "run-stopped", %{
+        "outcome" => "error",
+        "failure_kind" => "turn-limit"
+      }),
+      decoded_event("named-c", 1, "run-started"),
+      decoded_event("named-c", 2, "run-stopped", %{
+        "outcome" => "error",
+        "failure_kind" => "capability-error"
+      }),
+      # An application-defined kind fingerprints instead of naming: it must be
+      # counted only in failure_kind_fingerprinted, never bucketed into
+      # failure_kinds under a synthetic key.
+      decoded_event("fingerprinted", 1, "run-started"),
+      decoded_event("fingerprinted", 2, "run-stopped", %{
+        "outcome" => "error",
+        "failure_kind_fingerprint" => fingerprint
+      }),
+      # A clean run carries neither field and must appear in neither bucket.
+      decoded_event("clean", 1, "run-started"),
+      decoded_event("clean", 2, "run-stopped", %{"outcome" => "ok"}),
+      # An error with no failure taxonomy at all (a limit-exceeded stop, the
+      # same shape a result-contract failure would take): it counts toward
+      # `errors` but must not appear in either failure_kind bucket, which is
+      # exactly why the two totals must not be required to be equal.
+      decoded_event("no-taxonomy", 1, "run-started"),
+      decoded_event("no-taxonomy", 2, "limit-exceeded", %{"reason" => "terminal_result_exceeded"}),
+      decoded_event("no-taxonomy", 3, "run-stopped", %{
+        "outcome" => "error",
+        "reason" => "terminal_result_exceeded"
+      })
+    ]
+
+    assert :ok = TraceLog.append_jsonl(path, events)
+    assert {:ok, trace_log} = TraceLog.new(source: {:file, path})
+
+    assert {:ok,
+            %{
+              "runs" => 6,
+              "errors" => errors,
+              "failure_kinds" => %{"turn-limit" => 2, "capability-error" => 1} = failure_kinds,
+              "failure_kind_fingerprinted" => 1
+            }} = TraceLog.query(trace_log, :counters, %{})
+
+    explicit_failures = Enum.sum(Map.values(failure_kinds)) + 1
+
+    # Every run that failed via an explicit `(fail ...)` is accounted for...
+    assert explicit_failures == 4
+    # ...but `errors` also counts the limit-exceeded run, which carries no
+    # failure taxonomy at all, so the two must not reconcile to equality.
+    assert explicit_failures < errors
+  end
+
   test "a trace grant never discovers runs in another sink" do
     {:ok, limits} = Limits.new()
     {:ok, visible} = EventSink.start(:normal, limits, run_id: "visible")
