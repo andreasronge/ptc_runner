@@ -1,8 +1,53 @@
 # Plan: make the trace analyzer answerable by an agent
 
-**Status:** proposal, written 2026-08-02 on branch
-`worktree-incident-evidence-compiler`, revised the same day after review.
-Nothing here is implemented.
+**Status:** all five items implemented 2026-08-02 on branch
+`worktree-incident-evidence-compiler`. Written and revised the same day after
+review; the body below is the proposal as reviewed, kept for the reasoning.
+
+| Item | Commit |
+| --- | --- |
+| 1 — self-describing rejections | `64f86c57` |
+| 3 — annotation `evaluation_id` + `annotation_type` filter | `d15d4c96` |
+| 2 — `failure_kind` filter + counter breakdown | `c224d9ac` |
+| 4 — `fields` projection | `7471890f` |
+| 5 — `long` | `572cdbdf` |
+
+Decisions the plan left open, settled during implementation and written into
+[`../../trace-log-contract.md`](../../trace-log-contract.md) rather than left
+in this disposable document:
+
+- **Item 2's filter semantics.** `failure_kind` matches as an opaque bounded
+  string with no vocabulary validation, because a declared vocabulary lives in
+  the frozen bundle of the run that *produced* the trace, not in the trace.
+  The plan's "only a named kind is filterable" is withdrawn — it asserted a
+  property with no mechanism behind it.
+- **Item 2's counter rule.** Fingerprinted failures get their own counter
+  rather than a synthetic key inside `failure_kinds`, and the reconciliation
+  is the inequality `sum(failure_kinds) + failure_kind_fingerprinted <=
+  errors`, because other failure classes carry no taxonomy.
+- **Item 4's pagination trade-off.** Projection applies after byte-fit, so a
+  narrow projection never changes which runs land on a page, at the cost of
+  not fitting more of them.
+- **Item 5.** The plan expected "document it as absent" to be the likely
+  answer. `int` enforcing the signed 32-bit range is what argued the other
+  way: the natural `(int (* 100 ratio))` works in development and fails past
+  2^31 with nothing to reach for. Divergence recorded as DIV-54.
+
+Verified end to end against `openrouter:deepseek/deepseek-v3.2` rather than
+fixtures alone. One composite query now answers what previously could not be
+asked at all:
+
+```clojure
+(log/runs {"failure_kind" "unresolved-citations"
+           "fields" ["status" "failure_kind" "llm_calls"]})
+(log/turns run-id {"annotation_type" "citations-verified" "limit" 20})
+;=> {"checked" 12 "mismatched" 3 "unresolved" 0}
+```
+
+25% of that run's citations were ungrounded — and `mismatched 3, unresolved 0`
+says the model cited real records with hallucinated digests, which is a
+different failure from inventing records and is only visible because the two
+counters are separate.
 
 Review corrected four things and they are folded in above: the annotation
 `evaluation_id` must be added before the payload is size-checked, not after;
