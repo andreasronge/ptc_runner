@@ -2818,6 +2818,85 @@
       divergences: nil
     },
     %{
+      name: "dir",
+      description:
+        "Lists namespaces in the attached prelude, or the public export refs of one namespace.",
+      binding: :special,
+      category: :core,
+      dispatch: :env,
+      signatures: ["(dir)", "(dir namespace)"],
+      since: nil,
+      section: "Introspection",
+      ptc_extension?: true,
+      examples: [],
+      notes:
+        "Only namespaces holding at least one visible public export are listed; a namespace of " <>
+          "private `defn-` helpers does not appear. An unknown namespace returns an empty vector.",
+      see_also: ["apropos", "doc", "export-meta"],
+      clojure_var: nil,
+      divergences: nil
+    },
+    %{
+      name: "apropos",
+      description: "Searches the attached prelude's public exports, returning matching refs.",
+      binding: :special,
+      category: :core,
+      dispatch: :env,
+      signatures: ["(apropos query)"],
+      since: nil,
+      section: "Introspection",
+      ptc_extension?: true,
+      examples: [],
+      notes:
+        "Case-insensitive substring match over each export's ref and docstring; an export " <>
+          "without a docstring is matched on its ref alone. A blank query returns an empty " <>
+          "vector rather than every export.",
+      see_also: ["dir", "doc", "export-meta"],
+      clojure_var: nil,
+      divergences: nil
+    },
+    %{
+      name: "doc",
+      description: "Prints documentation for a public prelude export and returns `nil`.",
+      binding: :special,
+      category: :core,
+      dispatch: :env,
+      signatures: ["(doc ref)"],
+      since: nil,
+      section: "Introspection",
+      ptc_extension?: true,
+      examples: [],
+      notes:
+        "Prints rather than returns, so documentation is charged to the print budget instead " <>
+          "of the result channel and is subject to print truncation. Use `export-meta` for the " <>
+          "same information as data. A miss prints a not-found line and still returns `nil`.",
+      see_also: ["apropos", "dir", "export-meta"],
+      clojure_var: nil,
+      divergences: nil
+    },
+    %{
+      name: "export-meta",
+      description:
+        "Returns structured metadata for a public prelude export, or `nil` when unknown.",
+      binding: :special,
+      category: :core,
+      dispatch: :env,
+      signatures: ["(export-meta ref)"],
+      since: nil,
+      section: "Introspection",
+      ptc_extension?: true,
+      examples: [],
+      notes:
+        "Reports the calling contract — `:ref`, `:namespace`, `:symbol`, `:kind`, `:call`, " <>
+          "`:doc`, `:visibility`, `:effect`, plus `:arity`/`:params` for functions and " <>
+          "`:signature` or `:type` when declared. Capability wiring is not reported. This is " <>
+          "not `clojure.core/meta`, which takes an object rather than a reference string and " <>
+          "is not implemented.",
+      see_also: ["apropos", "dir", "doc"],
+      clojure_var: nil,
+      divergences: nil
+    },
+    %{
       name: "quot",
       description: "Integer division (truncated toward zero)",
       binding: :normal,
@@ -4518,7 +4597,7 @@
       ptc_extension?: false,
       examples: [],
       notes: "Only symbols are supported in this phase; quoted collections remain unsupported.",
-      see_also: ["dir", "doc", "meta"],
+      see_also: [],
       clojure_var: "quote",
       divergences:
         "DIV: quoted lists, vectors, maps, sets, syntax quote, unquote, and reader metadata are not supported."

@@ -584,6 +584,49 @@ defmodule PtcRunner.Lisp.Eval.Context do
     Map.get(requirers, namespace, [])
   end
 
+  @doc """
+  Whether a prelude ref may be resolved from the current origin.
+
+  Under `strict_transitive_calls` a session-authored program may name a
+  namespace it selected directly, or one no direct selection pulled in, but not
+  one reached only transitively through another prelude's requirements. Calls
+  made from inside a prelude export are never restricted.
+
+  Both the evaluator's resolution guard and `PtcRunner.Lisp.Introspection`'s
+  visibility filter read this, so what a program can discover and what it can
+  call cannot drift apart.
+  """
+  @spec prelude_ref_visible?(t(), String.t()) :: boolean()
+  def prelude_ref_visible?(%__MODULE__{strict_transitive_calls: false}, ref)
+      when is_binary(ref),
+      do: true
+
+  def prelude_ref_visible?(%__MODULE__{} = context, ref) when is_binary(ref) do
+    namespace = ref_namespace(ref)
+
+    cond do
+      namespace == nil -> true
+      not session_authored_origin?(current_origin(context)) -> true
+      direct_namespace?(context, namespace) -> true
+      true -> transitive_namespace_requirers(context, namespace) == []
+    end
+  end
+
+  @doc "Returns the namespace part of a qualified prelude ref, or `nil`."
+  @spec ref_namespace(String.t()) :: String.t() | nil
+  def ref_namespace(ref) when is_binary(ref) do
+    case String.split(ref, "/", parts: 2) do
+      [namespace, _symbol] when namespace != "" -> namespace
+      _ -> nil
+    end
+  end
+
+  @doc "Whether an origin is session-authored rather than a prelude export."
+  @spec session_authored_origin?(map() | nil) :: boolean()
+  def session_authored_origin?(nil), do: true
+  def session_authored_origin?(%{type: :user_closure}), do: true
+  def session_authored_origin?(_origin), do: false
+
   @doc "Pushes a prelude-export origin for private tool authorization."
   @spec push_prelude_origin(t(), map()) :: t()
   def push_prelude_origin(%__MODULE__{origin_stack: stack} = context, %{ref: ref} = export)

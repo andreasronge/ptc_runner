@@ -27,7 +27,11 @@ Dependencies are real composition boundaries, not authority grants. A
 component can call only the public namespaces of its direct dependencies. Once
 the whole bundle is installed, evaluated PTC-Lisp can call every public export
 in that bundle. `:visibility :discoverable` keeps an export out of model prompt
-inventory; it does not make the export inaccessible.
+inventory; it does not make the export inaccessible. Evaluated code finds such
+an export at runtime with `(dir)`, `(dir "ns")`, and `(apropos "term")`, and
+reads its documentation with `(doc "ns/name")` or `(export-meta "ns/name")`.
+Use it for exports that other components compose but a model should not have to
+read past in every prompt.
 
 ## Declare runtime contracts
 

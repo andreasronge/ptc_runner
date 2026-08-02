@@ -128,6 +128,26 @@ defmodule PtcRunner.Lisp.Prelude.Export do
     if args == "", do: "(#{symbol})", else: "(#{symbol} #{args})"
   end
 
+  @doc """
+  Renders the fully-qualified call form for an export, e.g.
+  `"(crm/get-user id)"`.
+
+  A `:constant` export yields its bare ref: `(cfg/answer)` would apply the
+  value rather than read it, so the ref alone is the correct call form.
+
+  Both the model-facing mission inventory and `PtcRunner.Lisp.Introspection`
+  render call forms from here, so the form a program is shown by `(doc ...)` is
+  the form the prompt advertises.
+  """
+  @spec call_form(map()) :: String.t()
+  def call_form(%{kind: :constant, ref: ref}), do: ref
+
+  def call_form(%{ref: ref, symbol: symbol} = export) do
+    export
+    |> signature()
+    |> String.replace_prefix("(#{symbol}", "(#{ref}")
+  end
+
   defp synthetic_args(:variadic), do: "& args"
 
   defp synthetic_args(arity) when is_integer(arity) do

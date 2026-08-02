@@ -21,7 +21,9 @@ defmodule PtcRunner.Kernel.Library do
 
   `cap` is `:discoverable` rather than `:prompt`. Its envelope and pagination
   helpers compose capabilities for other libraries and stay out of the prompt
-  inventory. `unwrap!` fails the program on an error envelope rather than
+  inventory; evaluated code still finds them with `(dir "cap")` and reads them
+  with `(doc "cap/collect-pages")`. `unwrap!` fails the program on an error
+  envelope rather than
   returning it, `with-cursor` adds one opaque cursor to an argument map, and
   `collect-pages` follows cursors only up to its explicit page bound.
 

@@ -10,6 +10,11 @@ defmodule PtcRunner.Lisp.Env do
   - `{:variadic_nonempty, name, fun}` - Variadic function requiring at least 1 argument
   - `{:multi_arity, name, tuple_of_funs}` - Multiple arities where tuple index = arity - min_arity
   - `{:collect, fun}` - Collects all args into a list and passes to unary function
+  - `{:special, name}` - Dispatched by name in `PtcRunner.Lisp.Eval.Apply`
+    because it needs the evaluation context (the print channel, the attached
+    prelude), which a plain function cannot reach. A special used in
+    higher-order position also needs a `closure_to_fun/3` bridge there;
+    `PtcRunner.Lisp.Runtime.Callable` has no clause for these tuples.
   """
 
   alias PtcRunner.Lisp.Env.Builtin
@@ -23,6 +28,7 @@ defmodule PtcRunner.Lisp.Env do
           | {:variadic_nonempty, atom(), function()}
           | {:multi_arity, atom(), tuple()}
           | {:collect, function()}
+          | {:special, atom()}
           | {:constant, term()}
   @type env :: %{atom() => binding()}
 

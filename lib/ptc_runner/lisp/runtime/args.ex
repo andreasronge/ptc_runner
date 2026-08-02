@@ -49,7 +49,7 @@ defmodule PtcRunner.Lisp.Runtime.Args do
 
   def valid_callable?({:partial_fn, _f, fixed}) when is_list(fixed), do: true
   def valid_callable?({:fnil_fn, _f, _default}), do: true
-  def valid_callable?({:special, :println}), do: true
+  def valid_callable?({:special, name}) when is_atom(name), do: true
   def valid_callable?(%LispKeyword{}), do: true
   def valid_callable?(x) when is_atom(x) and x not in [nil, true, false], do: true
   def valid_callable?(x), do: Builtin.builtin?(x) or closure?(x)
