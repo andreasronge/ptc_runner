@@ -23,6 +23,7 @@ defmodule PtcRunner.Kernel.Environment do
   def assemble(bundle, capabilities, data, kind)
       when kind in [:workflow, :mission] do
     with :ok <- valid_bundle(bundle),
+         :ok <- consistent_annotations(bundle),
          true <- JSONValue.map?(data),
          {:ok, capability_map} <- capability_map(capabilities),
          :ok <- reserved_names(kind, capability_map),
@@ -44,6 +45,9 @@ defmodule PtcRunner.Kernel.Environment do
   is not declarable, or that would shadow a framework failure kind, is
   dropped, so the worst a malformed declaration can do is leave a value
   fingerprinted or an annotation rejected.
+
+  Merging annotation types is safe because `assemble/4` has already refused a
+  bundle whose namespaces declare one type with conflicting counters.
   """
   @spec vocabulary(term()) :: %{failure_kinds: [binary()], annotations: %{binary() => [binary()]}}
   def vocabulary(%{bundle: %FrozenBundle{prelude: %{metadata: %{namespaces: namespaces}}}})
@@ -65,6 +69,29 @@ defmodule PtcRunner.Kernel.Environment do
   end
 
   def vocabulary(_environment), do: %{failure_kinds: [], annotations: %{}}
+
+  # Two namespaces declaring one annotation type with different counters is a
+  # conflict, not a merge: keeping either list by fold order would silently
+  # reject the other namespace's own annotations, and a rejected annotation
+  # emits no event and counts no protocol error, so nothing would surface it.
+  # Refused here for the same reason the prelude compiler refuses a redeclared
+  # namespace. Agreeing declarations are fine, and counter order is not part
+  # of the declaration.
+  defp consistent_annotations(%FrozenBundle{
+         prelude: %{metadata: %{namespaces: namespaces}}
+       })
+       when is_map(namespaces) do
+    conflict? =
+      namespaces
+      |> Map.values()
+      |> Enum.flat_map(&Map.to_list(declarable_annotations(&1)))
+      |> Enum.group_by(&elem(&1, 0), &Enum.sort(elem(&1, 1)))
+      |> Enum.any?(fn {_type, declarations} -> length(Enum.uniq(declarations)) > 1 end)
+
+    if conflict?, do: {:error, :conflicting_annotation_declaration}, else: :ok
+  end
+
+  defp consistent_annotations(_bundle), do: :ok
 
   defp declarable_annotations(declared) do
     declared

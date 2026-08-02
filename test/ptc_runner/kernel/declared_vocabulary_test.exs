@@ -12,6 +12,7 @@ defmodule PtcRunner.Kernel.DeclaredVocabularyTest do
 
   alias PtcRunner.Kernel
   alias PtcRunner.Kernel.Component
+  alias PtcRunner.Kernel.Environment
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.Library
   alias PtcRunner.Kernel.Limits
@@ -74,6 +75,11 @@ defmodule PtcRunner.Kernel.DeclaredVocabularyTest do
       |> Enum.map(& &1.data)
 
     {outcome, annotations, sink}
+  end
+
+  defp component!(id, source) do
+    {:ok, component} = Component.new(id: id, source: "#{source}\n(defn run [_] (return 1))")
+    [component]
   end
 
   defp summary(sink) do
@@ -165,6 +171,35 @@ defmodule PtcRunner.Kernel.DeclaredVocabularyTest do
                  Kernel.compile_bundle([component]),
                "accepted #{meta}"
       end
+    end
+
+    test "two namespaces cannot declare the same annotation type differently" do
+      # Merging would keep one list by fold order and silently reject the
+      # loser's own annotations at runtime, where a rejection emits no event
+      # and counts no protocol error. Refused at assembly instead, matching
+      # how the prelude compiler refuses a redeclared namespace.
+      conflicting =
+        component!("a", ~S|(ns a {:annotations {"checked" ["hits"]}})|) ++
+          component!("b", ~S|(ns b {:annotations {"checked" ["hits" "misses"]}})|)
+
+      assert {:ok, bundle} = Kernel.compile_bundle(conflicting)
+
+      assert {:error, :conflicting_annotation_declaration} =
+               WorkflowEnvironment.new(bundle: bundle)
+
+      assert {:error, :conflicting_annotation_declaration} =
+               MissionEnvironment.new(bundle: bundle)
+    end
+
+    test "the same declaration in two namespaces is allowed regardless of order" do
+      agreeing =
+        component!("a", ~S|(ns a {:annotations {"checked" ["hits" "misses"]}})|) ++
+          component!("b", ~S|(ns b {:annotations {"checked" ["misses" "hits"]}})|)
+
+      assert {:ok, bundle} = Kernel.compile_bundle(agreeing)
+      assert {:ok, environment} = WorkflowEnvironment.new(bundle: bundle)
+      assert %{"checked" => counters} = Environment.vocabulary(environment).annotations
+      assert Enum.sort(counters) == ["hits", "misses"]
     end
 
     test "a declaration cannot shadow a framework kind or a canonical annotation" do
