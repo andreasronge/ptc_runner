@@ -10,6 +10,8 @@ defmodule PtcRunner.Kernel.SafeMetadata do
   data therefore require private inspection.
   """
 
+  alias PtcRunner.Lisp.KeyNormalizer
+
   @label_keys ~w(name model provider tags)
   @tag_values %{
     "environment" => ~w(development test staging production),
@@ -84,6 +86,16 @@ defmodule PtcRunner.Kernel.SafeMetadata do
   from the frozen bundle rather than from the running program, so an
   application outcome reaches a canonical trace without any position where
   caller-chosen text could land.
+
+  A declared counter name stays bounded lowercase kebab-case, matching
+  `declarable_annotation?/2` and the Lisp declaration grammar. `data`, by
+  the time it reaches here, has already crossed the tool boundary, where
+  `PtcRunner.Lisp.KeyNormalizer` rewrites every hyphen in a map key to an
+  underscore — so a declared `"already-seen"` counter is matched against a
+  `data` key spelled `"already_seen"`. That rewrite is applied only to the
+  comparison; the counters passed to `declarable_annotation?/2` are left
+  exactly as declared, so a malformed declaration using an underscore still
+  fails that check.
   """
   def annotation?(type, data, declared \\ %{})
 
@@ -101,10 +113,7 @@ defmodule PtcRunner.Kernel.SafeMetadata do
              is_map(declared) do
     case declared do
       %{^type => counters} ->
-        declarable_annotation?(type, counters) and
-          Enum.all?(data, fn {key, value} ->
-            key in counters and is_integer(value) and value >= 0 and value <= @max_counter
-          end)
+        declarable_annotation?(type, counters) and counters_match?(counters, data)
 
       _undeclared ->
         false
@@ -112,6 +121,20 @@ defmodule PtcRunner.Kernel.SafeMetadata do
   end
 
   def annotation?(_type, _data, _declared), do: false
+
+  # Declared counters are kebab-case; `data` keys have already crossed the
+  # tool boundary, where `KeyNormalizer.normalize_key/1` rewrites hyphens to
+  # underscores. Normalize the declared names the same way, here only, so
+  # `declarable_annotation?/2` above keeps seeing the original kebab-case
+  # counters — its pattern forbids underscores, so normalizing before that
+  # check would make it reject every declared counter it is meant to allow.
+  defp counters_match?(counters, data) do
+    normalized_counters = Enum.map(counters, &KeyNormalizer.normalize_key/1)
+
+    Enum.all?(data, fn {key, value} ->
+      key in normalized_counters and is_integer(value) and value >= 0 and value <= @max_counter
+    end)
+  end
 
   @spec declarable_annotation?(term(), term()) :: boolean()
   @doc """

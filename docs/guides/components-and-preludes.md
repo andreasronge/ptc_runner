@@ -51,6 +51,13 @@ fingerprinting. `:annotations` maps an annotation type to the counter names
 `workflow.event/annotate` may carry for it; such an annotation holds nothing
 but those counters, each a non-negative integer no greater than 65535.
 
+A counter name is declared in kebab-case like every other name here, but the
+data map `workflow.event/annotate` receives crosses the same tool boundary as
+every other call, where a hyphen in a map key is rewritten to an underscore.
+Matching accounts for that rewrite, so a declared `already-seen` counter is
+satisfied by an `already-seen` key in the call and recorded in the canonical
+event as `already_seen`.
+
 Both are declared here rather than in a manifest so the vocabulary sits beside
 the code that emits it and is covered by the component source hash. Every name
 is bounded lowercase kebab-case, at most 16 per list. Undeclared kinds keep

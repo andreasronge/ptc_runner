@@ -52,6 +52,41 @@ defmodule PtcRunner.Kernel.SafeMetadataTest do
     end
   end
 
+  describe "declared annotation counter names" do
+    test "a hyphenated declared counter is satisfied by its tool-boundary-normalized data key" do
+      # `already-seen`/`net-new` are how the counters are declared (kebab-case,
+      # matching `declarable_annotation?/2`). By the time `data` reaches here
+      # it has already crossed the tool boundary, where
+      # `PtcRunner.Lisp.KeyNormalizer.normalize_key/1` rewrites every hyphen
+      # to an underscore — so the data keys are `already_seen`/`net_new`.
+      declared = %{"records-checked" => ["already-seen", "net-new"]}
+
+      assert SafeMetadata.annotation?(
+               "records-checked",
+               %{"already_seen" => 3, "net_new" => 1},
+               declared
+             )
+    end
+
+    test "declarable_annotation?/2 rejects an underscore in a declared name" do
+      refute SafeMetadata.declarable_annotation?("records-checked", ["already_seen"])
+    end
+
+    test "a malformed declared counter with an underscore never validates" do
+      # Defence in depth: `annotation?/3` re-checks `declarable_annotation?/2`
+      # against the declared counters exactly as given. Normalizing those
+      # declared names before this re-check would make it pass here, which
+      # would defeat the point of keeping the check at all.
+      malformed_declared = %{"records-checked" => ["already_seen"]}
+
+      refute SafeMetadata.annotation?(
+               "records-checked",
+               %{"already_seen" => 1},
+               malformed_declared
+             )
+    end
+  end
+
   describe "failure taxonomy" do
     test "names framework kinds and fingerprints everything else" do
       assert SafeMetadata.failure_taxonomy(%{"kind" => "turn-limit"}) == %{

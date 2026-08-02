@@ -25,7 +25,8 @@ defmodule PtcRunner.Kernel.DeclaredVocabularyTest do
   @declaring ~S"""
   (ns app "Declares its own vocabulary."
     {:failure-kinds ["budget-exceeded"]
-     :annotations {"records-checked" ["checked" "rejected"]}})
+     :annotations {"records-checked" ["checked" "rejected"]
+                   "batch-summary" ["already-seen" "net-new"]}})
 
   (defn refuse [_] (fail {"kind" "budget-exceeded"}))
   (defn undeclared-refusal [_] (fail {"kind" "some-other-kind"}))
@@ -38,6 +39,9 @@ defmodule PtcRunner.Kernel.DeclaredVocabularyTest do
 
   (defn note-undeclared-type [_]
     (return (workflow.event/annotate "audit" {"checked" 12})))
+
+  (defn note-hyphenated-counter [_]
+    (return (workflow.event/annotate "batch-summary" {"already-seen" 5 "net-new" 2})))
   """
 
   @silent ~S"""
@@ -124,6 +128,27 @@ defmodule PtcRunner.Kernel.DeclaredVocabularyTest do
                  annotation_type: "records-checked",
                  provenance: :workflow,
                  data: %{"checked" => 12, "rejected" => 1}
+               }
+             ] = annotations
+    end
+
+    test "a hyphenated counter name is satisfied by its tool-boundary-normalized data key" do
+      # The declared counters are kebab-case (`already-seen`, `net-new`), the
+      # Lisp call carries the same kebab-case keys, and
+      # `PtcRunner.Lisp.KeyNormalizer` rewrites every hyphen to an underscore
+      # at the tool boundary before the annotation reaches `SafeMetadata`.
+      # Matching must account for that rewrite, or every multi-word counter
+      # name is unusable.
+      {outcome, annotations, _sink} =
+        run(@declaring, "note-hyphenated-counter", "hyphenated-counter")
+
+      assert {:ok, %{value: %{status: :ok}}} = outcome
+
+      assert [
+               %{
+                 annotation_type: "batch-summary",
+                 provenance: :workflow,
+                 data: %{"already_seen" => 5, "net_new" => 2}
                }
              ] = annotations
     end
