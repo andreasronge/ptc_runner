@@ -2,7 +2,6 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
   use ExUnit.Case, async: false
 
   alias PtcRunner.Kernel.ApplicationPackage
-  alias PtcRunner.Kernel.Attestation
   alias PtcRunner.Kernel.CommandEngine
   alias PtcRunner.Kernel.CommandOutcome
   alias PtcRunner.Kernel.CommandPreparation
@@ -12,6 +11,7 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
   alias PtcRunner.Kernel.HostConfig
   alias PtcRunner.Kernel.HostInstallation
   alias PtcRunner.Kernel.HostInstallationAuthority
+  alias PtcRunner.Kernel.HostInstallationOwner
   alias PtcRunner.Kernel.InstallationCatalog
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.MCPOAuth.Authority
@@ -22,6 +22,7 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
   alias PtcRunner.Kernel.ProviderActivity
   alias PtcRunner.Kernel.ProviderDescriptor
   alias PtcRunner.Kernel.ProviderRegistry
+  alias PtcRunner.Kernel.ProviderRuntimeServices
   alias PtcRunner.Kernel.ProviderSnapshot
   alias PtcRunner.Kernel.RunCoordinator
   alias PtcRunner.Kernel.SelectionRules
@@ -64,7 +65,7 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
     assert {:ok, descriptor} = ProviderDescriptor.new(base)
 
     builder = fn _selection, _context -> {:error, :inactive_provider} end
-    probe = fn _selection, _context -> :ok end
+    probe = fn _selection, _context, _services -> :ok end
 
     assert {:ok, catalog} =
              InstallationCatalog.new(%{
@@ -330,8 +331,9 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
             install: decoded.install
           )
 
-        assert {:ok, catalog} = HostInstallation.catalog(host)
-        send(parent, {:catalog_owner, catalog.owner.pid})
+        assert {:ok, services} = HostInstallation.runtime_services(host)
+        assert {:ok, authority} = ProviderRuntimeServices.activate(services)
+        send(parent, {:catalog_owner, authority.pid})
       end)
 
     creator_monitor = Process.monitor(creator)
@@ -354,10 +356,10 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
       )
 
     assert {:ok, catalog} = HostInstallation.catalog(host)
-    assert {:ok, registry} = InstallationCatalog.runtime_registry(catalog)
+    assert {:ok, services} = HostInstallation.runtime_services(host)
+    assert {:ok, registry} = InstallationCatalog.runtime_registry(catalog, services)
     registry_owner = registry.authority_owner.pid
     assert Process.alive?(registry_owner)
-    assert {:error, :invalid_provider_registry} = InstallationCatalog.runtime_registry(catalog)
     assert :ok = InstallationCatalog.close(catalog)
     assert Process.alive?(registry_owner)
     assert :ok = :sys.suspend(registry_owner)
@@ -409,11 +411,11 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
         install: decoded.install
       )
 
-    assert {:ok, catalog} = HostInstallation.catalog(host)
-    owner = catalog.owner.pid
+    assert {:ok, authority} = HostInstallationOwner.start(host)
+    owner = authority.pid
     monitor = Process.monitor(owner)
     assert true = :erlang.suspend_process(owner)
-    assert :ok = InstallationCatalog.close(catalog)
+    assert :ok = HostInstallationAuthority.close(authority)
     assert_receive {:DOWN, ^monitor, :process, ^owner, :killed}
   end
 
@@ -460,22 +462,22 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
         install: decoded.install
       )
 
-    assert {:ok, catalog} = HostInstallation.catalog(host)
-    owner = catalog.owner.pid
+    assert {:ok, authority} = HostInstallationOwner.start(host)
+    owner = authority.pid
     assert :ok = :sys.suspend(owner)
 
-    transfer = Task.async(fn -> InstallationCatalog.runtime_registry(catalog) end)
+    transfer = Task.async(fn -> HostInstallationAuthority.transfer_to_registry(authority) end)
 
     assert Task.yield(transfer, 1_250) ==
-             {:ok, {:error, :invalid_provider_registry}}
+             {:ok, {:error, :invalid_host_installation_authority}}
 
     monitor = Process.monitor(owner)
     assert :ok = :sys.resume(owner)
-    assert :ok = InstallationCatalog.close(catalog)
+    assert :ok = HostInstallationAuthority.close(authority)
     assert_receive {:DOWN, ^monitor, :process, ^owner, :normal}
   end
 
-  test "catalog close cancels a pending transfer before forcing suspended cleanup" do
+  test "authority close cancels a pending transfer before forcing suspended cleanup" do
     document = %{
       "install" => %{
         "history" => %{
@@ -498,8 +500,8 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
         install: decoded.install
       )
 
-    assert {:ok, catalog} = HostInstallation.catalog(host)
-    owner = catalog.owner.pid
+    assert {:ok, authority} = HostInstallationOwner.start(host)
+    owner = authority.pid
     monitor = Process.monitor(owner)
     assert :ok = :sys.suspend(owner)
     parent = self()
@@ -507,7 +509,9 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
     transfer =
       spawn(fn ->
         receive do: (:activate -> :ok)
-        send(parent, {:pending_transfer_result, InstallationCatalog.runtime_registry(catalog)})
+
+        result = HostInstallationAuthority.transfer_to_registry(authority)
+        send(parent, {:pending_transfer_result, result})
       end)
 
     assert 1 = :erlang.trace(transfer, true, [:send])
@@ -518,10 +522,11 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
                      {:transfer, _token, :catalog, :registry, ^transfer, _transition, _deadline}},
                     ^owner}
 
-    assert :atomics.get(catalog.owner.fence, 1) > 1
-    assert :ok = InstallationCatalog.close(catalog)
+    assert :atomics.get(authority.fence, 1) > 1
+    assert :ok = HostInstallationAuthority.close(authority)
     assert_receive {:DOWN, ^monitor, :process, ^owner, :killed}
-    assert_receive {:pending_transfer_result, {:error, :invalid_provider_registry}}
+
+    assert_receive {:pending_transfer_result, {:error, :invalid_host_installation_authority}}
   end
 
   test "published cross-process transfer detaches the old creator before suspension" do
@@ -551,110 +556,40 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
             install: decoded.install
           )
 
-        {:ok, catalog} = HostInstallation.catalog(host)
-        send(parent, {:cross_process_catalog, catalog})
+        {:ok, authority} = HostInstallationOwner.start(host)
+        send(parent, {:cross_process_authority, authority})
         receive do: (:hold -> :ok)
       end)
 
-    assert_receive {:cross_process_catalog, catalog}
-
-    registry_owner = catalog.owner.pid
+    assert_receive {:cross_process_authority, authority}
+    owner = authority.pid
 
     registry_holder =
       spawn(fn ->
-        result = InstallationCatalog.runtime_registry(catalog)
+        result = HostInstallationAuthority.transfer_to_registry(authority)
         send(parent, {:cross_process_registry, self(), result})
         receive do: (:hold -> :ok)
       end)
 
-    assert_receive {:cross_process_registry, ^registry_holder, {:ok, registry}}
-    owner_monitor = Process.monitor(registry_owner)
+    assert_receive {:cross_process_registry, ^registry_holder, {:ok, registry_authority}}
+    owner_monitor = Process.monitor(owner)
     creator_monitor = Process.monitor(creator)
-    assert :ok = :sys.suspend(registry_owner)
+    assert :ok = :sys.suspend(owner)
     Process.exit(creator, :kill)
     assert_receive {:DOWN, ^creator_monitor, :process, ^creator, :killed}
-    assert Process.alive?(registry_owner)
-    assert :ok = :sys.resume(registry_owner)
-    assert :ok = ProviderRegistry.close(registry)
-    assert_receive {:DOWN, ^owner_monitor, :process, ^registry_owner, :normal}
-    send(registry_holder, :hold)
-  end
-
-  test "runtime registry construction rolls back transferred host authority on exceptions" do
-    document = %{
-      "install" => %{
-        "history" => %{
-          "source" => "ptc_trace_snapshot",
-          "installation_revision" => "history-v1",
-          "directory" => "traces"
-        }
-      }
-    }
-
-    assert {:ok, decoded} = HostConfig.decode(document, "/tmp")
-
-    host =
-      struct!(HostConfig,
-        path: "/tmp/ptc-host.json",
-        directory: "/tmp",
-        runtime: decoded.runtime,
-        limits: decoded.limits,
-        credentials: decoded.credentials,
-        install: decoded.install
-      )
-
-    assert {:ok, catalog} = HostInstallation.catalog(host)
-    owner = catalog.owner.pid
-    monitor = Process.monitor(owner)
-    storage_key = {Attestation, PtcRunner.Kernel.HostInstallationAuthority}
-    previous_key = :persistent_term.get(storage_key, :missing)
-
-    on_exit(fn ->
-      case previous_key do
-        :missing -> :persistent_term.erase(storage_key)
-        key -> :persistent_term.put(storage_key, key)
-      end
-    end)
-
-    assert :ok = :sys.suspend(owner)
-    parent = self()
-
-    worker =
-      spawn(fn ->
-        receive do: (:activate -> :ok)
-
-        result =
-          try do
-            InstallationCatalog.runtime_registry(catalog)
-          rescue
-            exception -> {:raised, exception}
-          catch
-            kind, reason -> {:raised, {kind, reason}}
-          end
-
-        send(parent, {:runtime_registry_result, result})
-      end)
-
-    assert 1 = :erlang.trace(worker, true, [:send])
-    send(worker, :activate)
-
-    assert_receive {:trace, ^worker, :send,
-                    {:"$gen_call", _from,
-                     {:transfer, _token, :catalog, :registry, ^worker, _transition, _deadline}},
-                    ^owner}
-
-    :persistent_term.put(storage_key, :invalid_hmac_key)
+    assert Process.alive?(owner)
     assert :ok = :sys.resume(owner)
-    assert_receive {:runtime_registry_result, {:raised, _reason}}, 1_000
-
-    assert_receive {:DOWN, ^monitor, :process, ^owner, :normal}
+    assert :ok = HostInstallationAuthority.close(registry_authority)
+    assert_receive {:DOWN, ^owner_monitor, :process, ^owner, :normal}
+    send(registry_holder, :hold)
   end
 
   test "OAuth runtime activation requires and binds a principal context" do
     assert {:ok, catalog} = custom_catalog(authority: oauth_authority("issuer.example"))
+    assert {:ok, services} = ProviderRuntimeServices.new()
 
     assert {:error, :authorization_context_required} =
-             InstallationCatalog.runtime_registry(catalog)
+             InstallationCatalog.runtime_registry(catalog, services)
 
     assert {:ok, memory} = Memory.start_link(owner: self())
     assert {:ok, store} = Memory.store(memory)
@@ -662,7 +597,10 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
     assert {:ok, context} =
              OAuthContext.new(tenant_id: "tenant", principal_id: "principal", store: store)
 
-    assert {:ok, registry} = InstallationCatalog.runtime_registry(catalog, context)
+    assert {:ok, services} =
+             ProviderRuntimeServices.new(oauth_mode: {:context_factory, fn -> {:ok, context} end})
+
+    assert {:ok, registry} = InstallationCatalog.runtime_registry(catalog, services)
 
     limits = Limits.installed_defaults()
 
@@ -674,6 +612,51 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
                limits: limits,
                installed_limits: limits
              })
+
+    assert :ok = ProviderRegistry.close(registry)
+  end
+
+  test "an unbound catalog rejects and releases a generic host authority" do
+    assert {:ok, decoded} =
+             HostConfig.decode(
+               %{
+                 "install" => %{
+                   "selected" => %{
+                     "source" => "ptc_trace_snapshot",
+                     "installation_revision" => "selected-v1",
+                     "directory" => "traces"
+                   }
+                 }
+               },
+               "/tmp"
+             )
+
+    host =
+      struct!(HostConfig,
+        path: "/tmp/ptc-host.json",
+        directory: "/tmp",
+        runtime: decoded.runtime,
+        limits: decoded.limits,
+        credentials: decoded.credentials,
+        install: decoded.install
+      )
+
+    assert {:ok, catalog} = custom_catalog()
+    parent = self()
+
+    activation = fn ->
+      {:ok, authority} = HostInstallationOwner.start(host)
+      send(parent, {:generic_substitute_owner, authority.pid})
+      {:ok, authority}
+    end
+
+    assert {:ok, services} = ProviderRuntimeServices.new(activation: activation)
+
+    assert {:error, :invalid_provider_registry} =
+             InstallationCatalog.runtime_registry(catalog, services)
+
+    assert_receive {:generic_substitute_owner, owner}
+    refute Process.alive?(owner)
   end
 
   test "OAuth catalog rejects malformed private authority and runtime activation fails closed" do
@@ -696,45 +679,24 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
     assert {:ok, context} =
              OAuthContext.new(tenant_id: "tenant", principal_id: "principal", store: store)
 
+    factory_calls = :atomics.new(1, signed: false)
+
+    assert {:ok, services} =
+             ProviderRuntimeServices.new(
+               oauth_mode:
+                 {:context_factory,
+                  fn ->
+                    :atomics.add(factory_calls, 1, 1)
+                    {:ok, context}
+                  end}
+             )
+
     malformed_catalog = %{catalog | descriptors: []}
 
     assert {:error, :invalid_provider_registry} =
-             InstallationCatalog.runtime_registry(malformed_catalog, context)
+             InstallationCatalog.runtime_registry(malformed_catalog, services)
 
-    assert {:ok, %{"oauth-primary" => _epoch}} =
-             Store.claim_authorities(
-               store,
-               "tenant",
-               [{"oauth-primary", "different-fingerprint"}],
-               1_000
-             )
-  end
-
-  test "failed OAuth owner transfer leaves the authority store unchanged" do
-    assert {:ok, decoded} = HostConfig.decode(oauth_host_document("issuer.example"), "/tmp")
-
-    host =
-      struct!(HostConfig,
-        path: "/tmp/ptc-host.json",
-        directory: "/tmp",
-        runtime: decoded.runtime,
-        limits: decoded.limits,
-        credentials: decoded.credentials,
-        install: decoded.install
-      )
-
-    assert {:ok, catalog} = HostInstallation.catalog(host)
-    assert :ok = InstallationCatalog.close(catalog)
-    refute Process.alive?(catalog.owner.pid)
-
-    assert {:ok, memory} = Memory.start_link(owner: self())
-    assert {:ok, store} = Memory.store(memory)
-
-    assert {:ok, context} =
-             OAuthContext.new(tenant_id: "tenant", principal_id: "principal", store: store)
-
-    assert {:error, :invalid_provider_registry} =
-             InstallationCatalog.runtime_registry(catalog, context)
+    assert :atomics.get(factory_calls, 1) == 0
 
     assert {:ok, %{"oauth-primary" => _epoch}} =
              Store.claim_authorities(
@@ -829,14 +791,19 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
       )
 
     assert {:ok, catalog} = HostInstallation.catalog(host)
+    assert {:ok, runtime_services} = HostInstallation.runtime_services(host)
+    assert ProviderRuntimeServices.valid?(runtime_services)
 
-    captured_authority =
-      [
-        catalog.credential_resolver
-        | Enum.flat_map(catalog.implementations, fn {_name, implementation} ->
-            Map.values(implementation)
-          end)
-      ]
+    owners_before = host_installation_owners()
+
+    assert {:error, :authorization_context_required} =
+             InstallationCatalog.runtime_registry(catalog, runtime_services)
+
+    assert host_installation_owners() == owners_before
+
+    captured_recipes =
+      catalog.implementations
+      |> Enum.flat_map(fn {_name, implementation} -> Map.values(implementation) end)
       |> Enum.filter(&is_function/1)
       |> Enum.flat_map(fn callback ->
         {:env, environment} = :erlang.fun_info(callback, :env)
@@ -844,8 +811,8 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
       end)
       |> :erlang.term_to_binary()
 
-    refute captured_authority =~ "/definitely/not/read"
-    refute captured_authority =~ "private-selector"
+    refute captured_recipes =~ "not-read-during-catalog"
+    refute :erlang.term_to_binary(catalog) =~ "not-read-during-catalog"
 
     assert InstallationCatalog.names(catalog) ==
              ~w(inspection live oauth replay static trace)
@@ -854,11 +821,9 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
     assert catalog.descriptors["static"].credential_names == ["token"]
     assert catalog.descriptors["static"].connectivity_mode == :acquisition
 
-    assert %Authority{} = catalog.authorities["oauth"]
+    assert catalog.authorities["oauth"] == :host_runtime
     assert catalog.descriptors["oauth"].authorization_mode == :oauth
-
-    assert catalog.descriptors["oauth"].authority_fingerprint ==
-             catalog.authorities["oauth"].fingerprint
+    assert is_binary(catalog.descriptors["oauth"].authority_fingerprint)
 
     assert catalog.descriptors["oauth"].credential_names == []
 
@@ -931,7 +896,7 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
     encoded = Jason.encode!(public)
     refute encoded =~ "private-selector"
     refute encoded =~ "issuer.example"
-    refute encoded =~ catalog.authorities["oauth"].fingerprint
+    refute encoded =~ catalog.descriptors["oauth"].authority_fingerprint
   end
 
   test "provider-free preparation computes the exact effective identity without activity", %{
@@ -1240,7 +1205,14 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
     assert {:ok, run_ref} = CommandRunRef.generate()
 
     assert {:error, :invalid_command_preparation} =
-             CommandPreparation.new(:validate, run_ref, prepared, other_catalog, %{}, [])
+             CommandPreparation.new(
+               :validate,
+               run_ref,
+               prepared,
+               other_catalog,
+               %{},
+               []
+             )
 
     assert :ok = PreparedRun.close(prepared)
   end
@@ -1597,7 +1569,7 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
                implementation:
                  %{
                    builder: fn _selection, _context -> {:error, :inactive_provider} end,
-                   local_preflight: fn _selection, _context -> :ok end
+                   local_preflight: fn _selection, _context, _services -> :ok end
                  }
                  |> maybe_oauth_builder(authority)
                  |> maybe_active_validator(selection_validation)
@@ -1724,5 +1696,18 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
     end)
 
     Path.join(root, "ptc.json")
+  end
+
+  defp host_installation_owners do
+    marker = {PtcRunner.Kernel.HostInstallationOwner, :authority}
+
+    Process.list()
+    |> Enum.filter(fn pid ->
+      case Process.info(pid, :dictionary) do
+        {:dictionary, dictionary} -> List.keymember?(dictionary, marker, 0)
+        nil -> false
+      end
+    end)
+    |> MapSet.new()
   end
 end

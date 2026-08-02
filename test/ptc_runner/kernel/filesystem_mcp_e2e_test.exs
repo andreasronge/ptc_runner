@@ -15,7 +15,6 @@ defmodule PtcRunner.Kernel.FilesystemMCPE2ETest do
 
   alias PtcRunner.Kernel.HostConfig
   alias PtcRunner.Kernel.HostInstallation
-  alias PtcRunner.Kernel.InstallationCatalog
   alias PtcRunner.Kernel.RunBuilder
 
   @server Path.expand("../../../examples/mcp/filesystem/dist/server.js", __DIR__)
@@ -32,7 +31,7 @@ defmodule PtcRunner.Kernel.FilesystemMCPE2ETest do
     assert {:ok, registry} =
              HostInstallation.catalog(host)
              |> then(fn {:ok, catalog} ->
-               InstallationCatalog.runtime_registry(catalog)
+               HostInstallation.runtime_registry(host, catalog)
              end)
 
     assert {:ok, built} = RunBuilder.load_and_build(paths.manifest, registry)

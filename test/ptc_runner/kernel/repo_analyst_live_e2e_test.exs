@@ -17,7 +17,6 @@ defmodule PtcRunner.Kernel.RepoAnalystLiveE2ETest do
   alias PtcRunner.Kernel.HostConfig
   alias PtcRunner.Kernel.HostInstallation
   alias PtcRunner.Kernel.InspectionArtifact
-  alias PtcRunner.Kernel.InstallationCatalog
   alias PtcRunner.Kernel.RunBuilder
   alias PtcRunner.Kernel.TraceLog
 
@@ -51,7 +50,7 @@ defmodule PtcRunner.Kernel.RepoAnalystLiveE2ETest do
     assert {:ok, registry} =
              HostInstallation.catalog(host)
              |> then(fn {:ok, catalog} ->
-               InstallationCatalog.runtime_registry(catalog)
+               HostInstallation.runtime_registry(host, catalog)
              end)
 
     assert {:ok, result, :normal} =

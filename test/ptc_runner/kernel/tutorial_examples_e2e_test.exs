@@ -6,7 +6,6 @@ defmodule PtcRunner.Kernel.TutorialExamplesE2ETest do
 
   alias PtcRunner.Kernel.HostConfig
   alias PtcRunner.Kernel.HostInstallation
-  alias PtcRunner.Kernel.InstallationCatalog
   alias PtcRunner.Kernel.RunBuilder
 
   @examples Path.expand("../../../examples/kernel-tutorial", __DIR__)
@@ -62,7 +61,7 @@ defmodule PtcRunner.Kernel.TutorialExamplesE2ETest do
     {:ok, registry} =
       HostInstallation.catalog(host)
       |> then(fn {:ok, catalog} ->
-        InstallationCatalog.runtime_registry(catalog)
+        HostInstallation.runtime_registry(host, catalog)
       end)
 
     RunBuilder.run(path(example), registry)

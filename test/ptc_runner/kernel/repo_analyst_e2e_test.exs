@@ -20,7 +20,6 @@ defmodule PtcRunner.Kernel.RepoAnalystE2ETest do
 
   alias PtcRunner.Kernel.HostConfig
   alias PtcRunner.Kernel.HostInstallation
-  alias PtcRunner.Kernel.InstallationCatalog
   alias PtcRunner.Kernel.RunBuilder
 
   @root Path.expand("../../..", __DIR__)
@@ -43,7 +42,7 @@ defmodule PtcRunner.Kernel.RepoAnalystE2ETest do
     {:ok, registry} =
       HostInstallation.catalog(host)
       |> then(fn {:ok, catalog} ->
-        InstallationCatalog.runtime_registry(catalog)
+        HostInstallation.runtime_registry(host, catalog)
       end)
 
     assert {:ok, built} = RunBuilder.load_and_build(paths.manifest, registry)
@@ -90,7 +89,7 @@ defmodule PtcRunner.Kernel.RepoAnalystE2ETest do
     {:ok, registry} =
       HostInstallation.catalog(host)
       |> then(fn {:ok, catalog} ->
-        InstallationCatalog.runtime_registry(catalog)
+        HostInstallation.runtime_registry(host, catalog)
       end)
 
     # This workflow returns the rendered prompt directly rather than through
@@ -126,7 +125,7 @@ defmodule PtcRunner.Kernel.RepoAnalystE2ETest do
     {:ok, registry} =
       HostInstallation.catalog(decoded)
       |> then(fn {:ok, catalog} ->
-        InstallationCatalog.runtime_registry(catalog)
+        HostInstallation.runtime_registry(decoded, catalog)
       end)
 
     assert {:error, :mcp_invalid_snapshot_identity} =
@@ -183,7 +182,7 @@ defmodule PtcRunner.Kernel.RepoAnalystE2ETest do
     {:ok, registry} =
       HostInstallation.catalog(host)
       |> then(fn {:ok, catalog} ->
-        InstallationCatalog.runtime_registry(catalog)
+        HostInstallation.runtime_registry(host, catalog)
       end)
 
     assert {:ok, result} = RunBuilder.run(manifest_path, registry)

@@ -53,6 +53,7 @@ defmodule Mix.Tasks.Ptc.Run do
   alias PtcRunner.Kernel.MCPOAuth.LoopbackListener
   alias PtcRunner.Kernel.MCPOAuth.Store.Memory
   alias PtcRunner.Kernel.ProviderRegistry
+  alias PtcRunner.Kernel.ProviderRuntimeServices
   alias PtcRunner.Kernel.RunBuilder
   alias PtcRunner.Lisp.Format.SymbolRef
 
@@ -152,7 +153,8 @@ defmodule Mix.Tasks.Ptc.Run do
     case {Keyword.get(opts, :host_config), authorizations} do
       {nil, []} ->
         with {:ok, catalog} <- InstallationCatalog.new(),
-             {:ok, registry} <- InstallationCatalog.runtime_registry(catalog),
+             {:ok, services} <- ProviderRuntimeServices.new(),
+             {:ok, registry} <- InstallationCatalog.runtime_registry(catalog, services),
              do: {:ok, registry, nil}
 
       {nil, _requested} ->
@@ -170,10 +172,14 @@ defmodule Mix.Tasks.Ptc.Run do
                  store: store
                ),
              :ok <- authorize_installations(host, authorization_context, requested),
-             {:ok, catalog} <- HostInstallation.catalog(host) do
+             {:ok, catalog} <- HostInstallation.catalog(host),
+             {:ok, services} <-
+               HostInstallation.runtime_services(host,
+                 oauth_mode: {:context_factory, fn -> {:ok, authorization_context} end}
+               ) do
           try do
             with {:ok, registry} <-
-                   InstallationCatalog.runtime_registry(catalog, authorization_context) do
+                   InstallationCatalog.runtime_registry(catalog, services) do
               {:ok, registry, host}
             end
           after

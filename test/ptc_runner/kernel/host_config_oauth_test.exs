@@ -118,7 +118,7 @@ defmodule PtcRunner.Kernel.HostConfigOAuthTest do
     assert {:ok, _validated} = JSV.validate(host_config(), root, cast: false)
   end
 
-  test "catalog construction retains private authority without requiring a principal or store" do
+  test "catalog construction retains only an OAuth runtime marker" do
     assert {:ok, decoded} = HostConfig.decode(host_config(), "/tmp")
 
     host =
@@ -136,8 +136,15 @@ defmodule PtcRunner.Kernel.HostConfigOAuthTest do
 
     assert descriptor.authorization_mode == :oauth
     assert descriptor.credential_names == []
-    assert %Authority{} = catalog.authorities["github"]
-    assert descriptor.authority_fingerprint == catalog.authorities["github"].fingerprint
+    assert catalog.authorities["github"] == :host_runtime
+    assert is_binary(descriptor.authority_fingerprint)
+
+    encoded_catalog = :erlang.term_to_binary(catalog)
+    refute encoded_catalog =~ "https://auth.example"
+    refute encoded_catalog =~ "https://mcp.example/mcp"
+    refute encoded_catalog =~ "public-client"
+    refute encoded_catalog =~ "/callback"
+    refute encoded_catalog =~ "oauth_secret"
 
     public =
       catalog |> InstallationCatalog.public_installations() |> List.first()

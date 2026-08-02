@@ -102,10 +102,22 @@ fixes event identities, inspection capture, and result projection before the
 three values are sealed as one `PtcRunner.Kernel.RunRequest`.
 `PtcRunner.Kernel.InstallationCatalog` maps selected names to sealed
 `ProviderDescriptor` values and keeps trusted implementations inaccessible to
-phase 5. Host-backed runtime activation transfers the private installation
-owner before making an OAuth authority claim; a stale, closed, or timed-out
-owner therefore cannot leave a new store claim behind. After transfer, every
-claim or registry-construction failure releases that owner.
+phase 5. Host catalog construction is process-free: it starts no installation
+owner, retains no credential resolver, and seals each implementation recipe
+with only its alias and opaque host binding rather than any installation
+payload.
+Opening a host-backed registry invokes separately sealed
+`ProviderRuntimeServices`, starts and transfers one private installation owner,
+and only then creates an OAuth context or claims authority. OAuth context
+creation is lazy and disabled by default. Every context, claim, transfer, or
+registry-construction failure releases the new owner. The catalog and runtime
+services independently seal the same keyed host-document binding; a mismatch
+is rejected before activation, context creation, store access, credential
+resolution, or a direct connectivity probe. Host runtime services retain the
+host document only as an authenticated, process-local encrypted payload; their
+inspectable callback environments expose neither paths nor credential values.
+Generic runtime-service construction cannot mint a host binding, and a
+host-bound catalog requires activation to return a valid host authority.
 `PtcRunner.Kernel.RunCoordinator.prepare/2` compiles the captured workflow and
 mission component graphs, validates the public workflow entry, and performs
 provider-inert declaration checks without accepting a path, looking up an
@@ -189,11 +201,14 @@ closes its prepared run, and returns a sealed `CommandOutcome`. Successful
 bare `PreparedRun`. That wrapper retains the original command reference, inert
 catalog, and only the artifact destinations needed by phase 6 alongside the
 separately sealed path-free prepared run. Host-backed catalogs retain only an
-opaque owner reference in the wrapper; host paths and credential declarations
-remain private owner state and do not survive in inspectable catalog closures.
-The authority owner monitors its catalog creator and is also transferred into
-any derived runtime registry; callers that retain such a registry must close it
-with `ProviderRegistry.close/1` when the execution scope ends. Construction
+opaque path-free per-alias implementation recipe in the wrapper; they retain
+neither a live owner nor runtime services, host paths, installation payloads,
+credential values, or a credential resolver.
+The active adapter supplies `ProviderRuntimeServices` only when it opens a
+runtime registry. That registry owns the resulting private authority, and
+callers that retain it must use `ProviderRegistry.close/1` when the execution
+scope ends; closing revokes retained builders and credential access.
+Construction
 validates the complete catalog, requires its installed limits to match the captured
 package, requires JSON result projection, binds inspection presence to the
 sealed policy, and binds a requested trace directory to policy IDs equal to the

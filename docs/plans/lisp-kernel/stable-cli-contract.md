@@ -70,6 +70,7 @@ Completed commits on `codex/stable-cli-contract`:
 | 2 | `4ebfc302` | Closed command preparation, diagnostics, and envelopes. |
 | 3 | `54c26bb7` | Closed generated limit catalog. |
 | 4 | `416e9346` | Inert provider declarations and effective identity. |
+| 5a | `9db10af5` | Shared absolute-monotonic deadline type and migrated provider activity. |
 
 The first local implementation of slice 5, `d38d0bef`, is intentionally not a
 delivery milestone. It demonstrated useful failure cases but combined remote
@@ -173,23 +174,43 @@ runtime VM dies.
 ### Runtime services
 
 `ProviderRuntimeServices` is a sealed execution-scoped value supplied only
-when opening a session. It contains:
+when opening a session. Its first delivery contains:
 
+- a lazy runtime-activation callback;
 - a bounded credential resolver;
-- provider application mode, either `:host_owned` or `:command_vm`; and
+- an opaque keyed binding to the host document that produced it; and
 - OAuth mode, either `:disabled` or one lazy process-local context factory.
+
+Add provider application mode, either `:host_owned` or `:command_vm`, in the
+same commit that adds the application gate which consumes it. Do not carry an
+unused mode through preparation merely to complete the eventual type early.
 
 The value contains no filesystem path. Constructing it performs no provider
 activity. A CLI adapter may resolve environment, confined-file, or validated
 literal credential declarations. An embedding may resolve credentials from
 its own trusted service.
 
+For the transitional host adapter, the lazy activation and credential
+callbacks capture only one authenticated, process-local encrypted host payload.
+They do not retain a plaintext host document, path, or credential declaration.
+Generic service construction cannot mint the keyed host binding, and a
+host-bound catalog rejects activation that does not return a valid private host
+authority.
+
 Slice 5 removes the current live `HostInstallationOwner` from catalog
 construction. `InstallationCatalog` retains only sealed declarations and
-process-free implementation recipes; the credential resolver and any live
-authority they need move into `ProviderRuntimeServices` and are activated only
-inside the marked session. Host-backed provider-free commands and failures
-before phase 8 therefore create no catalog process.
+process-free, path-free implementation recipes. Host recipes retain only an
+alias and opaque host binding; path-bearing installation data, the credential
+resolver, and any live authority they need stay in `ProviderRuntimeServices`
+and are activated only inside the marked session. Host-backed provider-free
+commands and failures before phase 8 therefore create no catalog process.
+
+Until `ProviderSession` owns equivalent revocation, runtime activation starts
+the existing private `HostInstallationOwner` only while opening a registry and
+transfers that authority directly to the registry. Registry close therefore
+still revokes retained builders and credential access. Delete that owner only
+in the commit that replaces its lifecycle; an intermediate no-op close is not
+an acceptable simplification.
 
 All selected OAuth aliases in one command use the session context. Authority
 identity still distinguishes aliases and grants. A future host needing several
@@ -502,6 +523,13 @@ The completed results are listed above. They remain the base of the revised
 work.
 
 ### Slice 5: provider-session foundation
+
+Delivery is intentionally split into review-sized commits:
+
+- 5a (complete): shared deadlines;
+- 5b: process-free catalogs and sealed runtime activation;
+- 5c: one provider-session owner, cleanup stack, and provisional registrar;
+- 5d: application admission, active validation, and credential resolution.
 
 - replace the unpushed draft with the minimal `ProviderSession`, `Deadline`,
   cleanup stack, provisional root registrar, and runtime-services types;

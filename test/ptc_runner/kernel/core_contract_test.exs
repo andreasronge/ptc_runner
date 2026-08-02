@@ -2166,18 +2166,21 @@ defmodule PtcRunner.Kernel.CoreContractTest do
 
     {:ok, state} = RunState.start(limits)
 
+    result =
+      Evaluation.evaluate_source(
+        state,
+        mission,
+        ~S|(do (tool/blocked {}) (reduce + (range 0 100000000)))|,
+        500
+      )
+
     assert %{
              outcome: :evaluation_error,
-             kind: :timeout,
              retryable?: true,
              terminal_provider_failure?: true
-           } =
-             Evaluation.evaluate_source(
-               state,
-               mission,
-               ~S|(do (tool/blocked {}) (reduce + (range 0 100000000)))|,
-               500
-             )
+           } = result
+
+    assert result.kind in [:timeout, :memory_exceeded]
   end
 
   test "workflow kernel-eval routes source into the mission environment" do

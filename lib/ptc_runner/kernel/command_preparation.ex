@@ -96,7 +96,7 @@ defmodule PtcRunner.Kernel.CommandPreparation do
 
   def valid?(_preparation), do: false
 
-  @doc "Idempotently releases the embedded prepared run and private catalog authority."
+  @doc "Idempotently releases the embedded prepared run and inert catalog."
   @spec close(t()) :: :ok
   def close(%__MODULE__{prepared_run: prepared_run, catalog: catalog}) do
     PreparedRun.close(prepared_run)

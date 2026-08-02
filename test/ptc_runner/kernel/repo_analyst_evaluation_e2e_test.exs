@@ -17,7 +17,6 @@ defmodule PtcRunner.Kernel.RepoAnalystEvaluationE2ETest do
   alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.HostConfig
   alias PtcRunner.Kernel.HostInstallation
-  alias PtcRunner.Kernel.InstallationCatalog
   alias PtcRunner.Kernel.ProviderRegistry
   alias PtcRunner.Kernel.RunBuilder
   alias PtcRunner.Kernel.ValueContract
@@ -93,7 +92,7 @@ defmodule PtcRunner.Kernel.RepoAnalystEvaluationE2ETest do
     {:ok, registry} =
       HostInstallation.catalog(host)
       |> then(fn {:ok, catalog} ->
-        InstallationCatalog.runtime_registry(catalog)
+        HostInstallation.runtime_registry(host, catalog)
       end)
 
     assert {:ok, result} = RunBuilder.run(@replay_manifest, registry)
@@ -145,7 +144,7 @@ defmodule PtcRunner.Kernel.RepoAnalystEvaluationE2ETest do
     {:ok, registry} =
       HostInstallation.catalog(host)
       |> then(fn {:ok, catalog} ->
-        InstallationCatalog.runtime_registry(catalog)
+        HostInstallation.runtime_registry(host, catalog)
       end)
 
     %{

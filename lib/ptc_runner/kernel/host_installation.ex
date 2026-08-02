@@ -30,11 +30,12 @@ defmodule PtcRunner.Kernel.HostInstallation do
   results copy that content identity unchanged for citations.
   """
 
+  alias PtcRunner.Kernel.Attestation
   alias PtcRunner.Kernel.BoundedWorker
   alias PtcRunner.Kernel.ConfinedFile
   alias PtcRunner.Kernel.HostConfig
   alias PtcRunner.Kernel.HostInstallationAuthority
-  alias PtcRunner.Kernel.HostInstallationOwner
+  alias PtcRunner.Kernel.HostRuntimePayload
   alias PtcRunner.Kernel.InspectionCapability
   alias PtcRunner.Kernel.InspectionSnapshot
   alias PtcRunner.Kernel.InstallationCatalog
@@ -46,6 +47,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
   alias PtcRunner.Kernel.MCPSource
   alias PtcRunner.Kernel.ProviderDescriptor
   alias PtcRunner.Kernel.ProviderRegistry
+  alias PtcRunner.Kernel.ProviderRuntimeServices
   alias PtcRunner.Kernel.ProviderSnapshot
   alias PtcRunner.Kernel.SelectionRules
   alias PtcRunner.Kernel.TraceCapability
@@ -66,106 +68,146 @@ defmodule PtcRunner.Kernel.HostInstallation do
   @spec catalog(HostConfig.t()) ::
           {:ok, InstallationCatalog.t()} | {:error, :invalid_host_installation}
   def catalog(%HostConfig{} = host) do
-    case HostInstallationOwner.start(host) do
-      {:ok, owner} ->
-        try do
-          registrations =
-            Enum.reduce_while(host.install, {:ok, %{}}, fn
-              {name, installation}, {:ok, acc} ->
-                case registration(owner, name, installation) do
-                  {:ok, registration} -> {:cont, {:ok, Map.put(acc, name, registration)}}
-                  {:error, _reason} -> {:halt, {:error, :invalid_host_installation}}
-                end
-            end)
+    binding = runtime_binding(host)
 
-          result =
-            with {:ok, registrations} <- registrations,
-                 {:ok, catalog} <-
-                   InstallationCatalog.new(registrations,
-                     credential_resolver:
-                       &HostInstallationAuthority.invoke(owner, {:credentials, &1}),
-                     installed_limits: host.limits,
-                     owner: owner
-                   ) do
-              {:ok, catalog}
-            else
-              _error -> {:error, :invalid_host_installation}
-            end
+    registrations =
+      Enum.reduce_while(host.install, {:ok, %{}}, fn
+        {name, installation}, {:ok, acc} ->
+          case registration(name, installation, binding) do
+            {:ok, registration} -> {:cont, {:ok, Map.put(acc, name, registration)}}
+            {:error, _reason} -> {:halt, {:error, :invalid_host_installation}}
+          end
+      end)
 
-          if match?({:error, _reason}, result), do: HostInstallationAuthority.close(owner)
-          result
-        rescue
-          exception ->
-            HostInstallationAuthority.close(owner)
-            reraise exception, __STACKTRACE__
-        catch
-          kind, reason ->
-            HostInstallationAuthority.close(owner)
-            :erlang.raise(kind, reason, __STACKTRACE__)
-        end
-
-      {:error, _reason} ->
-        {:error, :invalid_host_installation}
+    with {:ok, registrations} <- registrations,
+         {:ok, catalog} <-
+           InstallationCatalog.new(registrations,
+             installed_limits: host.limits,
+             runtime_binding: binding
+           ) do
+      {:ok, catalog}
+    else
+      _error -> {:error, :invalid_host_installation}
     end
   end
 
   def catalog(_host), do: {:error, :invalid_host_installation}
 
-  defp registration(owner, name, installation) do
+  @doc "Builds sealed active-runtime services for a loaded host document."
+  @spec runtime_services(HostConfig.t(), keyword()) ::
+          {:ok, ProviderRuntimeServices.t()} | {:error, :invalid_host_installation}
+  def runtime_services(host, opts \\ [])
+
+  def runtime_services(%HostConfig{} = host, opts) when is_list(opts) do
+    with {:ok, payload} <- HostRuntimePayload.seal(host),
+         {:ok, services} <- ProviderRuntimeServices.from_host_payload(payload, opts) do
+      {:ok, services}
+    else
+      _invalid -> {:error, :invalid_host_installation}
+    end
+  end
+
+  def runtime_services(_host, _opts), do: {:error, :invalid_host_installation}
+
+  @doc false
+  @spec runtime_registry(HostConfig.t(), InstallationCatalog.t()) ::
+          {:ok, ProviderRegistry.t()} | {:error, atom()}
+  def runtime_registry(%HostConfig{} = host, %InstallationCatalog{} = catalog) do
+    with {:ok, services} <- runtime_services(host) do
+      InstallationCatalog.runtime_registry(catalog, services)
+    end
+  end
+
+  def runtime_registry(_host, _catalog), do: {:error, :invalid_provider_registry}
+
+  @doc false
+  @spec runtime_registry(HostConfig.t(), InstallationCatalog.t(), term()) ::
+          {:ok, ProviderRegistry.t()} | {:error, atom()}
+  def runtime_registry(%HostConfig{} = host, %InstallationCatalog{} = catalog, context) do
+    with {:ok, services} <-
+           runtime_services(host, oauth_mode: {:context_factory, fn -> {:ok, context} end}) do
+      InstallationCatalog.runtime_registry(catalog, services)
+    end
+  end
+
+  def runtime_registry(_host, _catalog, _context), do: {:error, :invalid_provider_registry}
+
+  defp runtime_binding(host), do: Attestation.attest(__MODULE__, host)
+
+  defp registration(name, installation, binding) do
     authority = authority(installation)
 
     with {:ok, rules} <- selection_rules(installation),
          {:ok, descriptor} <- descriptor(installation, rules, authority) do
-      builder = runtime_builder(owner, name)
-
       implementation =
-        %{builder: builder}
-        |> maybe_oauth_builder(owner, name, installation)
-        |> maybe_local_preflight(owner, name, installation)
-        |> maybe_connectivity_probe(owner, name, installation)
+        %{builder: &inactive_runtime_builder/2}
+        |> maybe_oauth_builder(installation)
+        |> maybe_local_preflight(name, installation, binding)
+        |> maybe_connectivity_probe(name, installation, binding)
 
-      {:ok, %{descriptor: descriptor, implementation: implementation, authority: authority}}
+      authority_binding = if authority, do: :host_runtime, else: nil
+
+      {:ok,
+       %{descriptor: descriptor, implementation: implementation, authority: authority_binding}}
     end
   end
 
-  defp maybe_oauth_builder(implementation, owner, name, %{source: :mcp} = installation) do
+  defp maybe_oauth_builder(implementation, %{source: :mcp} = installation) do
     case authority(installation) do
       %Authority{} ->
-        Map.put(implementation, :oauth_builder, fn selection, context, _oauth_runtime ->
-          runtime_builder(owner, name).(selection, context)
-        end)
+        Map.put(implementation, :oauth_builder, &inactive_oauth_runtime_builder/3)
 
       nil ->
         implementation
     end
   end
 
-  defp maybe_oauth_builder(implementation, _owner, _name, _installation), do: implementation
+  defp maybe_oauth_builder(implementation, _installation), do: implementation
 
-  defp maybe_local_preflight(implementation, owner, name, installation) do
+  defp maybe_local_preflight(implementation, name, installation, binding) do
     if local_preflight_mode(installation) == :audited_local do
-      Map.put(implementation, :local_preflight, fn selection, context ->
-        HostInstallationAuthority.invoke(owner, {:local_preflight, name, selection, context})
+      Map.put(implementation, :local_preflight, fn selection, context, services ->
+        ProviderRuntimeServices.host_call(
+          services,
+          binding,
+          {:local_preflight, name, selection, context}
+        )
       end)
     else
       implementation
     end
   end
 
-  defp maybe_connectivity_probe(implementation, owner, name, %{source: :llm}) do
-    Map.put(implementation, :connectivity_probe, fn selection, context ->
-      with {:ok, probe} <-
-             HostInstallationAuthority.invoke(
-               owner,
-               {:connectivity_probe, name, selection, context}
-             ) do
-        run_llm_connectivity_probe(probe)
+  defp maybe_connectivity_probe(
+         implementation,
+         name,
+         %{source: :llm},
+         binding
+       ) do
+    Map.put(
+      implementation,
+      :connectivity_probe,
+      fn selection, context, %ProviderRuntimeServices{} = services ->
+        with {:ok, probe} <-
+               ProviderRuntimeServices.host_call(
+                 services,
+                 binding,
+                 {:connectivity_probe, name, selection, context}
+               ) do
+          run_llm_connectivity_probe(probe)
+        end
       end
-    end)
+    )
   end
 
-  defp maybe_connectivity_probe(implementation, _owner, _name, _installation),
+  defp maybe_connectivity_probe(implementation, _name, _installation, _binding),
     do: implementation
+
+  defp inactive_runtime_builder(_selection, _context),
+    do: {:error, :invalid_host_installation}
+
+  defp inactive_oauth_runtime_builder(_selection, _context, _oauth_runtime),
+    do: {:error, :invalid_host_installation}
 
   @doc false
   def runtime_builder(%HostInstallationAuthority{} = owner, name) when is_binary(name) do
@@ -244,11 +286,29 @@ defmodule PtcRunner.Kernel.HostInstallation do
   def owner_call(%HostConfig{} = host, {:connectivity_probe, name, selection, context}) do
     case Map.fetch(host.install, name) do
       {:ok, %{source: :llm} = installation} ->
-        prepare_llm_connectivity_probe(host, installation, selection, context)
+        prepare_llm_connectivity_probe(
+          host,
+          installation,
+          selection,
+          context,
+          &resolve_credentials(host, &1)
+        )
 
       _missing_or_wrong_source ->
         {:error, :invalid_host_installation}
     end
+  end
+
+  def owner_call(%HostConfig{} = host, :oauth_authorities) do
+    authorities =
+      Enum.reduce(host.install, %{}, fn {name, installation}, acc ->
+        case authority(installation) do
+          %Authority{} = authority -> Map.put(acc, name, authority)
+          nil -> acc
+        end
+      end)
+
+    {:ok, authorities}
   end
 
   def owner_call(%HostConfig{} = host, {:credentials, names}),
@@ -746,14 +806,17 @@ defmodule PtcRunner.Kernel.HostInstallation do
     end
   end
 
-  defp local_preflight(_host, _installation, _selection, _context),
-    do: {:error, :invalid_host_installation}
-
-  defp prepare_llm_connectivity_probe(host, installation, selection, context) do
+  defp prepare_llm_connectivity_probe(
+         _host,
+         installation,
+         selection,
+         context,
+         credential_resolver
+       ) do
     with :ok <- placement(installation, context.destination),
          {:ok, _selected} <- llm_selection(installation, selection, context),
          {:ok, model, adapter} <- preflight_llm(installation.model),
-         {:ok, credentials} <- resolve_credentials(host, [installation.credential]),
+         {:ok, credentials} <- credential_resolver.([installation.credential]),
          {:ok, credential} <- Map.fetch(credentials, installation.credential),
          {:ok, timeout_ms, max_heap_words} <- connectivity_probe_bounds(context) do
       {:ok,
@@ -1445,7 +1508,10 @@ defmodule PtcRunner.Kernel.HostInstallation do
     end
   end
 
-  defp resolve_credentials(host, names) do
+  @doc false
+  @spec resolve_runtime_credentials(HostConfig.t(), [binary()]) ::
+          {:ok, %{binary() => binary()}} | {:error, :credential_unavailable}
+  def resolve_runtime_credentials(%HostConfig{} = host, names) when is_list(names) do
     Enum.reduce_while(names, {:ok, %{}}, fn name, {:ok, resolved} ->
       with {:ok, declaration} <- Map.fetch(host.credentials, name),
            {:ok, value} <- resolve_credential(host.directory, declaration),
@@ -1456,6 +1522,10 @@ defmodule PtcRunner.Kernel.HostInstallation do
       end
     end)
   end
+
+  def resolve_runtime_credentials(_host, _names), do: {:error, :credential_unavailable}
+
+  defp resolve_credentials(host, names), do: resolve_runtime_credentials(host, names)
 
   defp resolve_credential(_directory, %{source: :env, name: name}),
     do: System.fetch_env(name)

@@ -2,10 +2,11 @@ defmodule PtcRunner.Kernel.InstallationCatalog do
   @moduledoc """
   Inert provider declarations paired with trusted implementations.
 
-  Phase 5 reads only `descriptors`; implementations and the credential
-  resolver remain sealed for later active phases. Host-backed catalogs keep
-  path and credential declarations behind an opaque private owner, so their
-  public callbacks capture only its process reference and an installed alias.
+  Phase 5 reads only `descriptors`; process-free implementations remain sealed
+  for later active phases. Credential access is supplied separately through
+  `PtcRunner.Kernel.ProviderRuntimeServices` when execution opens.
+  Host-backed catalogs carry an opaque keyed binding so runtime services from
+  a different host document are rejected before activation.
   Catalog construction checks that active validators, connectivity probes, and
   local checks agree with their descriptors without invoking any callback.
   """
@@ -15,10 +16,10 @@ defmodule PtcRunner.Kernel.InstallationCatalog do
   alias PtcRunner.Kernel.HostInstallationAuthority
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.MCPOAuth.Authority
-  alias PtcRunner.Kernel.MCPOAuth.Context, as: OAuthContext
   alias PtcRunner.Kernel.MCPOAuth.Store
   alias PtcRunner.Kernel.ProviderDescriptor
   alias PtcRunner.Kernel.ProviderRegistry
+  alias PtcRunner.Kernel.ProviderRuntimeServices
 
   @name ~r/\A[a-z][a-z0-9._-]{0,127}\z/
   @implementation_keys [
@@ -33,9 +34,8 @@ defmodule PtcRunner.Kernel.InstallationCatalog do
     :descriptors,
     :implementations,
     :authorities,
-    :credential_resolver,
     :installed_limits,
-    :owner
+    :runtime_binding
   ]
   defstruct @enforce_keys ++ [attestation: nil]
   @field_keys Enum.sort([:__struct__, :attestation | @enforce_keys])
@@ -43,24 +43,23 @@ defmodule PtcRunner.Kernel.InstallationCatalog do
   @type implementation :: %{
           required(:builder) => function(),
           optional(:oauth_builder) => function(),
-          optional(:local_preflight) => function(),
+          optional(:local_preflight) => (map(), map(), ProviderRuntimeServices.t() ->
+                                           :ok | {:error, term()}),
           optional(:selection_validator) => function(),
-          optional(:connectivity_probe) => function()
+          optional(:connectivity_probe) => (map(), map(), ProviderRuntimeServices.t() ->
+                                              :ok | {:error, term()})
         }
   @type registration :: %{
           required(:descriptor) => ProviderDescriptor.t(),
           required(:implementation) => implementation(),
-          required(:authority) => Authority.t() | nil
+          required(:authority) => Authority.t() | :host_runtime | nil
         }
-  @type credential_resolver :: ([binary()] -> {:ok, %{binary() => binary()}} | {:error, term()})
-  @opaque owner :: struct()
   @type t :: %__MODULE__{
           descriptors: %{binary() => ProviderDescriptor.t()},
           implementations: %{binary() => implementation()},
-          authorities: %{binary() => Authority.t() | nil},
-          credential_resolver: credential_resolver(),
+          authorities: %{binary() => Authority.t() | :host_runtime | nil},
           installed_limits: Limits.t(),
-          owner: owner() | nil,
+          runtime_binding: binary() | nil,
           attestation: binary() | nil
         }
 
@@ -71,7 +70,7 @@ defmodule PtcRunner.Kernel.InstallationCatalog do
   def new(registrations, opts)
       when is_map(registrations) and not is_struct(registrations) and is_list(opts) do
     if Keyword.keyword?(opts) and
-         Keyword.keys(opts) -- [:credential_resolver, :installed_limits, :owner] == [] and
+         Keyword.keys(opts) -- [:installed_limits, :runtime_binding] == [] and
          length(opts) == MapSet.size(MapSet.new(Keyword.keys(opts))) do
       with {:ok, descriptors, implementations, authorities} <-
              split_registrations(registrations) do
@@ -79,10 +78,8 @@ defmodule PtcRunner.Kernel.InstallationCatalog do
           descriptors: descriptors,
           implementations: implementations,
           authorities: authorities,
-          credential_resolver:
-            Keyword.get(opts, :credential_resolver, &default_credential_resolver/1),
           installed_limits: Keyword.get(opts, :installed_limits, Limits.installed_defaults()),
-          owner: Keyword.get(opts, :owner)
+          runtime_binding: Keyword.get(opts, :runtime_binding)
         }
 
         if valid_shape?(catalog) do
@@ -118,9 +115,8 @@ defmodule PtcRunner.Kernel.InstallationCatalog do
   @doc "Returns installed aliases in UTF-8 byte order."
   def names(%__MODULE__{descriptors: descriptors}), do: descriptors |> Map.keys() |> Enum.sort()
 
-  @doc "Idempotently releases private host authority retained by this catalog."
+  @doc "Closes an inert catalog."
   @spec close(t()) :: :ok
-  def close(%__MODULE__{owner: owner}), do: HostInstallationAuthority.close(owner)
   def close(_catalog), do: :ok
 
   @spec public_installations(t()) :: [map()]
@@ -132,38 +128,19 @@ defmodule PtcRunner.Kernel.InstallationCatalog do
   end
 
   @doc false
-  @spec runtime_registry(t()) ::
-          {:ok, ProviderRegistry.t()}
-          | {:error, :authorization_context_required | :invalid_provider_registry}
-  def runtime_registry(%__MODULE__{} = catalog) do
-    cond do
-      not valid?(catalog) -> {:error, :invalid_provider_registry}
-      oauth_authorities(catalog) != [] -> {:error, :authorization_context_required}
-      true -> build_runtime_registry(catalog, %{})
-    end
-  end
-
-  def runtime_registry(_catalog), do: {:error, :invalid_provider_registry}
-
-  @doc false
-  @spec runtime_registry(t(), OAuthContext.t()) ::
+  @spec runtime_registry(t(), ProviderRuntimeServices.t()) ::
           {:ok, ProviderRegistry.t()} | {:error, atom()}
-  def runtime_registry(%__MODULE__{} = catalog, %OAuthContext{} = context) do
+  def runtime_registry(%__MODULE__{} = catalog, %ProviderRuntimeServices{} = services) do
     with true <- valid?(catalog),
-         authorities <- oauth_authorities(catalog),
-         claims <-
-           Enum.map(authorities, fn {_name, authority} ->
-             {authority.installation_id, authority.fingerprint}
-           end),
-         {:ok, owner} <- HostInstallationAuthority.transfer_to_registry(catalog.owner) do
-      activate_oauth_registry(catalog, authorities, claims, context, owner)
+         true <- ProviderRuntimeServices.bound_to?(services, catalog.runtime_binding),
+         {:ok, owner} <- activate_registry_owner(services, catalog.runtime_binding) do
+      open_runtime_registry(catalog, services, owner)
     else
-      false -> {:error, :invalid_provider_registry}
-      {:error, :invalid_host_installation_authority} -> {:error, :invalid_provider_registry}
+      _invalid -> {:error, :invalid_provider_registry}
     end
   end
 
-  def runtime_registry(_catalog, _context), do: {:error, :invalid_provider_registry}
+  def runtime_registry(_catalog, _services), do: {:error, :invalid_provider_registry}
 
   defp split_registrations(registrations) when map_size(registrations) <= 128 do
     Enum.reduce_while(registrations, {:ok, %{}, %{}, %{}}, fn
@@ -218,16 +195,30 @@ defmodule PtcRunner.Kernel.InstallationCatalog do
   end
 
   defp catalog_support_valid?(catalog) do
-    is_function(catalog.credential_resolver, 1) and Limits.valid?(catalog.installed_limits) and
-      (is_nil(catalog.owner) or HostInstallationAuthority.valid?(catalog.owner))
+    Limits.valid?(catalog.installed_limits) and valid_runtime_binding?(catalog.runtime_binding) and
+      runtime_authority_bindings_valid?(catalog)
   end
+
+  defp valid_runtime_binding?(nil), do: true
+  defp valid_runtime_binding?(binding), do: is_binary(binding) and byte_size(binding) == 32
+
+  defp runtime_authority_bindings_valid?(%{runtime_binding: nil, authorities: authorities}),
+    do: Enum.all?(authorities, fn {_name, authority} -> authority != :host_runtime end)
+
+  defp runtime_authority_bindings_valid?(%{runtime_binding: binding, authorities: authorities})
+       when is_binary(binding),
+       do:
+         Enum.all?(authorities, fn
+           {_name, %Authority{}} -> false
+           {_name, authority} -> authority in [nil, :host_runtime]
+         end)
 
   defp valid_implementation?(descriptor, implementation)
        when is_map(implementation) and not is_struct(implementation) do
     Map.keys(implementation) -- @implementation_keys == [] and
       is_function(Map.get(implementation, :builder), 2) and
       oauth_builder_matches?(descriptor, Map.get(implementation, :oauth_builder)) and
-      operation_matches?(
+      local_preflight_matches?(
         descriptor.local_preflight != :none,
         Map.get(implementation, :local_preflight)
       ) and
@@ -235,7 +226,7 @@ defmodule PtcRunner.Kernel.InstallationCatalog do
         descriptor.selection_validation == :active,
         Map.get(implementation, :selection_validator)
       ) and
-      operation_matches?(
+      connectivity_probe_matches?(
         descriptor.connectivity_mode == :probe,
         Map.get(implementation, :connectivity_probe)
       )
@@ -246,6 +237,14 @@ defmodule PtcRunner.Kernel.InstallationCatalog do
   defp operation_matches?(true, callback), do: is_function(callback, 2)
   defp operation_matches?(false, nil), do: true
   defp operation_matches?(_required, _callback), do: false
+
+  defp local_preflight_matches?(true, callback), do: is_function(callback, 3)
+  defp local_preflight_matches?(false, nil), do: true
+  defp local_preflight_matches?(_required, _callback), do: false
+
+  defp connectivity_probe_matches?(true, callback), do: is_function(callback, 3)
+  defp connectivity_probe_matches?(false, nil), do: true
+  defp connectivity_probe_matches?(_required, _callback), do: false
 
   defp oauth_builder_matches?(%{authorization_mode: :oauth}, callback),
     do: is_function(callback, 3)
@@ -260,6 +259,12 @@ defmodule PtcRunner.Kernel.InstallationCatalog do
        do: Authority.valid?(authority) and authority.fingerprint == fingerprint
 
   defp valid_authority_binding?(
+         %{authorization_mode: :oauth, authority_fingerprint: fingerprint},
+         :host_runtime
+       ),
+       do: is_binary(fingerprint)
+
+  defp valid_authority_binding?(
          %{authorization_mode: :none, authority_fingerprint: nil},
          nil
        ),
@@ -269,26 +274,123 @@ defmodule PtcRunner.Kernel.InstallationCatalog do
 
   defp valid_name?(name), do: is_binary(name) and name =~ @name
 
-  defp default_credential_resolver([]), do: {:ok, %{}}
-  defp default_credential_resolver(_names), do: {:error, :credential_resolver_missing}
+  defp activate_registry_owner(services, runtime_binding) do
+    case ProviderRuntimeServices.activate(services) do
+      {:ok, nil} when is_binary(runtime_binding) ->
+        {:error, :invalid_provider_registry}
 
-  defp oauth_authorities(catalog) do
-    catalog.authorities
-    |> Enum.reject(fn {_name, authority} -> is_nil(authority) end)
-    |> Enum.sort_by(&elem(&1, 0))
-  end
+      {:ok, nil} ->
+        {:ok, nil}
 
-  defp build_runtime_registry(catalog, oauth_runtimes) do
-    case HostInstallationAuthority.transfer_to_registry(catalog.owner) do
-      {:ok, owner} ->
-        build_transferred_runtime_registry(catalog, oauth_runtimes, owner)
+      {:ok, catalog_owner} when is_nil(runtime_binding) ->
+        HostInstallationAuthority.release(catalog_owner)
+        {:error, :invalid_provider_registry}
+
+      {:ok, catalog_owner} ->
+        transfer_registry_owner(catalog_owner)
 
       {:error, _reason} ->
         {:error, :invalid_provider_registry}
     end
   end
 
-  defp activate_oauth_registry(catalog, authorities, claims, context, owner) do
+  defp transfer_registry_owner(catalog_owner) do
+    case HostInstallationAuthority.transfer_to_registry(catalog_owner) do
+      {:ok, registry_owner} ->
+        {:ok, registry_owner}
+
+      {:error, _reason} ->
+        HostInstallationAuthority.release(catalog_owner)
+        {:error, :invalid_provider_registry}
+    end
+  rescue
+    exception ->
+      HostInstallationAuthority.release(catalog_owner)
+      reraise exception, __STACKTRACE__
+  catch
+    kind, reason ->
+      HostInstallationAuthority.release(catalog_owner)
+      :erlang.raise(kind, reason, __STACKTRACE__)
+  end
+
+  defp open_runtime_registry(catalog, services, owner) do
+    case runtime_oauth_authorities(catalog, owner) do
+      {:ok, []} ->
+        build_runtime_registry(catalog, services, %{}, owner)
+
+      {:ok, authorities} ->
+        open_oauth_registry(catalog, services, authorities, owner)
+
+      {:error, _reason} ->
+        HostInstallationAuthority.release(owner)
+        {:error, :invalid_provider_registry}
+    end
+  end
+
+  defp runtime_oauth_authorities(catalog, %HostInstallationAuthority{} = owner) do
+    case HostInstallationAuthority.invoke(owner, :oauth_authorities) do
+      {:ok, authorities} -> validate_runtime_oauth_authorities(catalog, authorities)
+      {:error, _reason} -> {:error, :invalid_provider_registry}
+    end
+  end
+
+  defp runtime_oauth_authorities(catalog, nil) do
+    authorities =
+      catalog.authorities
+      |> Enum.reject(fn {_name, authority} -> is_nil(authority) end)
+      |> Enum.sort_by(&elem(&1, 0))
+
+    {:ok, authorities}
+  end
+
+  defp validate_runtime_oauth_authorities(catalog, authorities)
+       when is_map(authorities) and not is_struct(authorities) do
+    expected_names =
+      catalog.descriptors
+      |> Enum.filter(fn {_name, descriptor} -> descriptor.authorization_mode == :oauth end)
+      |> Enum.map(&elem(&1, 0))
+      |> Enum.sort()
+
+    if Enum.sort(Map.keys(authorities)) == expected_names and
+         runtime_authorities_match?(authorities, catalog.descriptors) do
+      {:ok, Enum.sort_by(authorities, &elem(&1, 0))}
+    else
+      {:error, :invalid_provider_registry}
+    end
+  end
+
+  defp validate_runtime_oauth_authorities(_catalog, _authorities),
+    do: {:error, :invalid_provider_registry}
+
+  defp runtime_authorities_match?(authorities, descriptors) do
+    Enum.all?(authorities, fn {name, authority} ->
+      descriptor = Map.fetch!(descriptors, name)
+      runtime_authority_matches?(authority, descriptor.authority_fingerprint)
+    end)
+  end
+
+  defp runtime_authority_matches?(%Authority{} = authority, fingerprint),
+    do: Authority.valid?(authority) and authority.fingerprint == fingerprint
+
+  defp runtime_authority_matches?(_authority, _fingerprint), do: false
+
+  defp open_oauth_registry(catalog, services, authorities, owner) do
+    case ProviderRuntimeServices.oauth_context(services) do
+      {:ok, context} ->
+        claims =
+          Enum.map(authorities, fn {_name, authority} ->
+            {authority.installation_id, authority.fingerprint}
+          end)
+
+        activate_oauth_registry(catalog, services, authorities, claims, context, owner)
+
+      {:error, _reason} = error ->
+        HostInstallationAuthority.release(owner)
+        error
+    end
+  end
+
+  defp activate_oauth_registry(catalog, services, authorities, claims, context, owner) do
     case Store.claim_authorities(context.store, context.tenant_id, claims, 5_000) do
       {:ok, epochs} ->
         runtimes =
@@ -301,7 +403,7 @@ defmodule PtcRunner.Kernel.InstallationCatalog do
              }}
           end)
 
-        build_transferred_runtime_registry(catalog, runtimes, owner)
+        build_runtime_registry(catalog, services, runtimes, owner)
 
       {:error, _reason} = error ->
         HostInstallationAuthority.release(owner)
@@ -317,11 +419,11 @@ defmodule PtcRunner.Kernel.InstallationCatalog do
       :erlang.raise(kind, reason, __STACKTRACE__)
   end
 
-  defp build_transferred_runtime_registry(catalog, oauth_runtimes, owner) do
+  defp build_runtime_registry(catalog, services, oauth_runtimes, owner) do
     result =
       with :ok <- install_oauth_runtimes(owner, oauth_runtimes) do
         ProviderRegistry.new(runtime_builders(catalog, oauth_runtimes, owner),
-          credential_resolver: runtime_credential_resolver(catalog, owner),
+          credential_resolver: runtime_credential_resolver(services, owner),
           installed_limits: catalog.installed_limits,
           authority_owner: owner
         )
@@ -362,10 +464,10 @@ defmodule PtcRunner.Kernel.InstallationCatalog do
     end)
   end
 
-  defp runtime_credential_resolver(_catalog, %HostInstallationAuthority{} = owner),
+  defp runtime_credential_resolver(_services, %HostInstallationAuthority{} = owner),
     do: &HostInstallationAuthority.invoke(owner, {:credentials, &1})
 
-  defp runtime_credential_resolver(catalog, nil), do: catalog.credential_resolver
+  defp runtime_credential_resolver(services, nil), do: services.credential_resolver
 
   defp install_oauth_runtimes(%HostInstallationAuthority{} = owner, runtimes),
     do: HostInstallationAuthority.invoke(owner, {:install_oauth_runtimes, runtimes})
@@ -377,9 +479,8 @@ defmodule PtcRunner.Kernel.InstallationCatalog do
       catalog.descriptors,
       catalog.implementations,
       catalog.authorities,
-      catalog.credential_resolver,
       catalog.installed_limits,
-      catalog.owner
+      catalog.runtime_binding
     }
   end
 end

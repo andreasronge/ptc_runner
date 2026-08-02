@@ -13,7 +13,6 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
   alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.HostConfig
   alias PtcRunner.Kernel.HostInstallation
-  alias PtcRunner.Kernel.InstallationCatalog
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.LLMReplay
   alias PtcRunner.Kernel.PreparedRun
@@ -194,7 +193,7 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
         {:ok, registry} =
           HostInstallation.catalog(host)
           |> then(fn {:ok, catalog} ->
-            InstallationCatalog.runtime_registry(catalog)
+            HostInstallation.runtime_registry(host, catalog)
           end)
 
         {:ok, limits} = Limits.new()
@@ -284,7 +283,7 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
       {:ok, registry} =
         HostInstallation.catalog(host)
         |> then(fn {:ok, catalog} ->
-          InstallationCatalog.runtime_registry(catalog)
+          HostInstallation.runtime_registry(host, catalog)
         end)
 
       assert {:ok, result} = RunBuilder.run(paths.manifest, registry)
@@ -309,7 +308,7 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
 
       assert get_in(prepared.provider_declarations, [Access.at(0), :config, "max_entries"]) == 100
 
-      assert {:ok, registry} = InstallationCatalog.runtime_registry(catalog)
+      assert {:ok, registry} = HostInstallation.runtime_registry(host, catalog)
 
       [declaration] = prepared.provider_declarations
 
@@ -350,7 +349,7 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
       {:ok, registry} =
         HostInstallation.catalog(host)
         |> then(fn {:ok, catalog} ->
-          InstallationCatalog.runtime_registry(catalog)
+          HostInstallation.runtime_registry(host, catalog)
         end)
 
       assert {:error, :ambiguous_workflow_llm} = RunBuilder.run(paths.manifest, registry)
@@ -367,7 +366,7 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
       {:ok, registry} =
         HostInstallation.catalog(host)
         |> then(fn {:ok, catalog} ->
-          InstallationCatalog.runtime_registry(catalog)
+          HostInstallation.runtime_registry(host, catalog)
         end)
 
       assert {:error, :provider_destination_denied} = RunBuilder.run(paths.manifest, registry)
@@ -384,7 +383,7 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
       {:ok, registry} =
         HostInstallation.catalog(host)
         |> then(fn {:ok, catalog} ->
-          InstallationCatalog.runtime_registry(catalog)
+          HostInstallation.runtime_registry(host, catalog)
         end)
 
       assert {:error, :invalid_llm_replay_selection} = RunBuilder.run(paths.manifest, registry)

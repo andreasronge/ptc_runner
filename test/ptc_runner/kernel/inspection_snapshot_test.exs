@@ -9,7 +9,6 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
   alias PtcRunner.Kernel.InspectionCapability
   alias PtcRunner.Kernel.InspectionSink
   alias PtcRunner.Kernel.InspectionSnapshot
-  alias PtcRunner.Kernel.InstallationCatalog
   alias PtcRunner.Kernel.RunBuilder
   alias PtcRunner.Kernel.TraceSnapshot
 
@@ -363,7 +362,7 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
     {:ok, registry} =
       HostInstallation.catalog(host)
       |> then(fn {:ok, catalog} ->
-        InstallationCatalog.runtime_registry(catalog)
+        HostInstallation.runtime_registry(host, catalog)
       end)
 
     {:ok, built} = RunBuilder.load_and_build(manifest_path, registry)
@@ -462,7 +461,7 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
     {:ok, registry} =
       HostInstallation.catalog(host)
       |> then(fn {:ok, catalog} ->
-        InstallationCatalog.runtime_registry(catalog)
+        HostInstallation.runtime_registry(host, catalog)
       end)
 
     assert {:error, :provider_data_class_denied} =
