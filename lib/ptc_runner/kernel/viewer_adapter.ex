@@ -10,7 +10,8 @@ defmodule PtcRunner.Kernel.ViewerAdapter do
 
   alias PtcRunner.Kernel.{InspectionArtifact, TraceLog}
 
-  @spec query(TraceLog.source(), atom(), map()) :: {:ok, map()} | {:error, atom()}
+  @spec query(TraceLog.source(), atom(), map()) ::
+          {:ok, map()} | {:error, atom() | TraceLog.query_error()}
   @doc "Constructs a bounded TraceLog for the source and executes one query."
   def query(source, operation, arguments) when is_map(arguments) do
     with {:ok, trace_log} <- TraceLog.new(source: source),

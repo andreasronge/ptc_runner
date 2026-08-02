@@ -45,6 +45,8 @@ defmodule PtcRunner.Kernel.TraceLog do
   @max_string_bytes 256
   @event_type ~r/\A[a-z][a-z0-9-]{0,127}\z/
   @event_keys ~w(schema_version run_id trace_id sequence timestamp type data)
+  @query_key_pattern ~r/\A[a-z][a-z0-9_]{0,63}\z/
+  @max_echoed_keys 8
   @append_lock_timeout_ms 30_000
   @append_lock_helper ~S"""
   set -eu
@@ -100,6 +102,30 @@ defmodule PtcRunner.Kernel.TraceLog do
           max_result_bytes: pos_integer()
         }
 
+  @typedoc """
+  Bounded reason carried by a rejected query, so a caller learns what was
+  wrong instead of a bare `:invalid_query`. `unknown_keys` and `argument` are
+  echoed only when they are already-safe, developer-controlled or
+  bounded-identifier strings; anything else collapses to a count so no
+  caller-authored content is echoed into an error.
+  """
+  @type invalid_query_reason ::
+          %{unknown_keys: [binary()], accepted_keys: [binary()]}
+          | %{unknown_key_count: non_neg_integer(), accepted_keys: [binary()]}
+          | %{argument: binary(), bound: Range.t()}
+
+  @typedoc "Every reason a bounded trace query can fail with."
+  @type query_error ::
+          :invalid_query
+          | :not_found
+          | :source_changed
+          | :source_limit_exceeded
+          | :result_limit_exceeded
+          | :malformed_source
+          | :unsupported_version
+          | :source_unavailable
+          | {:invalid_query, invalid_query_reason()}
+
   @spec new(keyword()) :: {:ok, t()} | {:error, :invalid_trace_log}
   @doc """
   Constructs a query boundary from required `:source` and optional positive
@@ -127,7 +153,7 @@ defmodule PtcRunner.Kernel.TraceLog do
   def new(_opts), do: {:error, :invalid_trace_log}
 
   @spec query(t(), :list_runs | :get_run | :list_turns | :counters, map()) ::
-          {:ok, map()} | {:error, atom()}
+          {:ok, map()} | {:error, query_error()}
   @doc "Executes one validated, source-scoped bounded trace query."
   def query(%__MODULE__{} = trace_log, operation, arguments)
       when operation in [:list_runs, :get_run, :list_turns, :counters] and is_map(arguments) do
@@ -153,7 +179,7 @@ defmodule PtcRunner.Kernel.TraceLog do
           map(),
           pos_integer(),
           :sanitized | :private
-        ) :: {:ok, map()} | {:error, atom()}
+        ) :: {:ok, map()} | {:error, query_error()}
   def query_loaded(events, source_id, operation, arguments, max_result_bytes, source_kind)
       when is_list(events) and is_binary(source_id) and
              operation in [:list_runs, :get_run, :list_turns, :counters] and is_map(arguments) and
@@ -2149,8 +2175,8 @@ defmodule PtcRunner.Kernel.TraceLog do
          {:ok, offset} <- cursor_offset(Map.get(arguments, "cursor"), source_id, query_id) do
       {:ok, %{limit: limit, offset: offset, query_id: query_id}}
     else
+      false -> {:error, {:invalid_query, %{argument: "limit", bound: 1..@max_limit}}}
       {:error, _reason} = error -> error
-      _ -> {:error, :invalid_query}
     end
   end
 
@@ -2318,10 +2344,38 @@ defmodule PtcRunner.Kernel.TraceLog do
 
   defp valid_timestamp(_timestamp), do: {:error, :invalid_query}
 
+  # `JSONValue.map?/1` is a precondition, not merely a fallback: it validates
+  # the map recursively (every key binary and UTF-8-valid, every value
+  # JSON-like), and a non-JSON-shaped map is a structural problem, not an
+  # "unknown key" one — it must stay a bare `:invalid_query` exactly as
+  # before, even when every key happens to be in `allowed`. Newly added
+  # allowlist entries inherit this guard for free, before they have their own
+  # downstream validator.
   defp validate_keys(arguments, allowed) do
-    if JSONValue.map?(arguments) and Map.keys(arguments) -- allowed == [],
-      do: :ok,
-      else: {:error, :invalid_query}
+    if JSONValue.map?(arguments) do
+      case Map.keys(arguments) -- allowed do
+        [] -> :ok
+        unknown -> unknown_keys_error(unknown, allowed)
+      end
+    else
+      {:error, :invalid_query}
+    end
+  end
+
+  # A rejected query names the offending keys only when each unknown key is a
+  # bounded identifier: echoing caller-authored content into an error string
+  # is otherwise unbounded. Anything else — an over-long key, or more unknown
+  # keys than fit the cap — reports a count alone and echoes nothing.
+  defp unknown_keys_error(unknown, allowed) do
+    if echoable_keys?(unknown) do
+      {:error, {:invalid_query, %{unknown_keys: Enum.sort(unknown), accepted_keys: allowed}}}
+    else
+      {:error, {:invalid_query, %{unknown_key_count: length(unknown), accepted_keys: allowed}}}
+    end
+  end
+
+  defp echoable_keys?(unknown) do
+    length(unknown) <= @max_echoed_keys and Enum.all?(unknown, &(&1 =~ @query_key_pattern))
   end
 
   defp event_data(nil, _key), do: nil

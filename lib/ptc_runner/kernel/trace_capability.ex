@@ -124,6 +124,12 @@ defmodule PtcRunner.Kernel.TraceCapability do
       {:ok, result} ->
         {:ok, result}
 
+      # Exact match, placed before the generic catch-all below: a structured
+      # rejection must never fall through to the internal-error clause, or
+      # the bounded reason it carries is silently thrown away again.
+      {:error, {:invalid_query, reason}} ->
+        provider_error(:invalid_request, invalid_query_details(reason))
+
       {:error, :not_found} ->
         provider_error(:not_found, "run not found")
 
@@ -149,6 +155,21 @@ defmodule PtcRunner.Kernel.TraceCapability do
         provider_error(:internal, "trace source unavailable")
     end
   end
+
+  defp invalid_query_details(%{unknown_keys: unknown, accepted_keys: accepted}) do
+    "invalid trace query: unknown key(s) #{Enum.join(unknown, ", ")}" <>
+      " (accepted: #{Enum.join(accepted, ", ")})"
+  end
+
+  defp invalid_query_details(%{unknown_key_count: count, accepted_keys: accepted}) do
+    "invalid trace query: #{count} unknown key(s) (accepted: #{Enum.join(accepted, ", ")})"
+  end
+
+  defp invalid_query_details(%{argument: argument, bound: bound}) do
+    "invalid trace query: argument #{argument} out of bound #{inspect(bound)}"
+  end
+
+  defp invalid_query_details(_reason), do: "invalid trace query"
 
   defp query_source(%TraceLog{} = trace_log, operation, arguments),
     do: TraceLog.query(trace_log, operation, arguments)

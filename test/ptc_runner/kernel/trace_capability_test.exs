@@ -94,6 +94,93 @@ defmodule PtcRunner.Kernel.TraceCapabilityTest do
              callbacks["trace-list-runs"].(%{"cursor" => 1})
   end
 
+  test "a rejected query names the offending key, the limit bound, and never leaks unbounded keys" do
+    {:ok, limits} = Limits.new()
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "visible")
+    run_kernel(sink, limits)
+
+    assert {:ok, capabilities} = TraceCapability.new(source: sink)
+    callbacks = Map.new(capabilities, &{&1.name, &1.callback})
+
+    # An unknown key is named, alongside the accepted set for that operation.
+    # `kind: :invalid_request` (not `:internal`) also pins that the structured
+    # reason does not fall through to the generic catch-all clause.
+    assert {:error, %{kind: :invalid_request, details: details}} =
+             callbacks["trace-list-runs"].(%{"bogus_key" => "x"})
+
+    assert details =~ "bogus_key"
+    assert details =~ "limit"
+    assert details =~ "cursor"
+
+    # A rejected limit names the argument and the bound, not just "invalid".
+    assert {:error, %{kind: :invalid_request, details: details}} =
+             callbacks["trace-list-runs"].(%{"limit" => 999})
+
+    assert details =~ "limit"
+    assert details =~ "1..100"
+
+    # A non-string key makes the whole map structurally invalid, not an
+    # "unknown key" — that stays the bare, pre-existing rejection.
+    assert {:error, %{kind: :invalid_request, details: "invalid trace query"}} =
+             callbacks["trace-list-runs"].(%{"limit" => 1, :bogus => "x"})
+
+    # An over-long key is a valid string but still not echoed.
+    over_long_key = String.duplicate("a", 100)
+
+    assert {:error, %{kind: :invalid_request, details: details}} =
+             callbacks["trace-list-runs"].(%{over_long_key => "x"})
+
+    assert details =~ "1 unknown key"
+    refute details =~ over_long_key
+
+    # More unknown keys than the echo cap also collapses to a count alone.
+    oversized = Map.new(1..9, &{"unknown_key_#{&1}", &1})
+
+    assert {:error, %{kind: :invalid_request, details: details}} =
+             callbacks["trace-list-runs"].(oversized)
+
+    assert details =~ "9 unknown key"
+    refute details =~ "unknown_key_1"
+  end
+
+  test "a map built only from allowed keys is still rejected when a value is not JSON-shaped" do
+    {:ok, limits} = Limits.new()
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "visible")
+    run_kernel(sink, limits)
+
+    assert {:ok, capabilities} = TraceCapability.new(source: sink)
+    callbacks = Map.new(capabilities, &{&1.name, &1.callback})
+
+    # "status" is on the allowlist, so this never reaches the unknown-key
+    # path: the map as a whole must still fail the structural JSON-shape
+    # check, exactly as it did before unknown keys grew a structured reason.
+    assert {:error, %{kind: :invalid_request, details: "invalid trace query"}} =
+             callbacks["trace-list-runs"].(%{"run_id" => "visible", "status" => self()})
+  end
+
+  test "the accepted-key set named in a rejection matches its own operation" do
+    {:ok, limits} = Limits.new()
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "visible")
+    run_kernel(sink, limits)
+
+    assert {:ok, capabilities} = TraceCapability.new(source: sink)
+    callbacks = Map.new(capabilities, &{&1.name, &1.callback})
+
+    assert {:error, %{details: get_run_details}} =
+             callbacks["trace-get-run"].(%{"run_id" => "visible", "bogus" => 1})
+
+    assert get_run_details =~ "run_id"
+    refute get_run_details =~ "limit"
+
+    assert {:error, %{details: counters_details}} = callbacks["trace-counters"].(%{"bogus" => 1})
+    assert counters_details =~ "status"
+
+    assert {:error, %{details: turns_details}} =
+             callbacks["trace-list-turns"].(%{"run_id" => "visible", "bogus" => 1})
+
+    assert turns_details =~ "evaluation_id"
+  end
+
   test "a trace grant never discovers runs in another sink" do
     {:ok, limits} = Limits.new()
     {:ok, visible} = EventSink.start(:normal, limits, run_id: "visible")

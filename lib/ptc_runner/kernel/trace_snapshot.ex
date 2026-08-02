@@ -90,7 +90,7 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
   def start(_source, _opts), do: {:error, :invalid_snapshot}
 
   @spec query(t(), :list_runs | :get_run | :list_turns | :counters, map()) ::
-          {:ok, map()} | {:error, atom()}
+          {:ok, map()} | {:error, atom() | TraceLog.query_error()}
   def query(%__MODULE__{} = snapshot, operation, arguments)
       when operation in @operations and is_map(arguments),
       do: call(snapshot, {:query, operation, arguments})
