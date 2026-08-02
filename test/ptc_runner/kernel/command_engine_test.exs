@@ -15,6 +15,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   alias PtcRunner.Kernel.CommandSource
   alias PtcRunner.Kernel.CommandSubject
   alias PtcRunner.Kernel.ComponentOverride
+  alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.DiagnosticCatalog
   alias PtcRunner.Kernel.ExecutionInput
   alias PtcRunner.Kernel.ExecutionPolicy
@@ -3122,7 +3123,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
       end)
 
     assert_receive :activity_consumed
-    expired_deadline = System.monotonic_time(:millisecond) - 1
+    expired_deadline = Deadline.new(1, System.monotonic_time(:millisecond) - 2)
 
     assert :ok =
              GenServer.call(

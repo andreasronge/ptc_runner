@@ -14,9 +14,10 @@ defmodule PtcRunner.Kernel.ProviderActivity do
   use GenServer
 
   alias PtcRunner.Kernel.Attestation
+  alias PtcRunner.Kernel.Deadline
 
   @operation_timeout_ms 5_000
-  @reply_timeout_ms 5_100
+  @reply_grace_ms 100
 
   @enforce_keys [:owner, :creator, :attestation]
   defstruct @enforce_keys
@@ -119,8 +120,8 @@ defmodule PtcRunner.Kernel.ProviderActivity do
         from,
         state
       )
-      when is_atom(operation) and is_integer(deadline) do
-    if System.monotonic_time(:millisecond) <= deadline,
+      when is_atom(operation) and is_struct(deadline, Deadline) do
+    if Deadline.valid?(deadline) and not Deadline.expired?(deadline),
       do: handle_operation(operation, from, state),
       else: expired_operation(operation, from, state)
   end
@@ -239,8 +240,9 @@ defmodule PtcRunner.Kernel.ProviderActivity do
   end
 
   defp call(owner, operation, fallback) do
-    deadline = System.monotonic_time(:millisecond) + @operation_timeout_ms
-    GenServer.call(owner, {:deadline, operation, deadline}, @reply_timeout_ms)
+    deadline = Deadline.new(@operation_timeout_ms)
+    reply_timeout_ms = Deadline.remaining(deadline) + @reply_grace_ms
+    GenServer.call(owner, {:deadline, operation, deadline}, reply_timeout_ms)
   catch
     :exit, _reason -> fallback
   end
