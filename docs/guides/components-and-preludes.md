@@ -33,6 +33,41 @@ reads its documentation with `(doc "ns/name")` or `(export-meta "ns/name")`.
 Use it for exports that other components compose but a model should not have to
 read past in every prompt.
 
+## Declare the vocabularies a namespace emits
+
+Canonical traces are payload-free, so an application failure kind reaches a
+public error only as a one-way fingerprint and an application annotation is
+rejected outright — unless the namespace declares it:
+
+```clojure
+(ns audit "Checks records against their source."
+  {:failure-kinds ["budget-exceeded"]
+   :annotations {"records-checked" ["checked" "rejected"]}})
+```
+
+`:failure-kinds` names the kinds `(fail (result/error :budget-exceeded ...))`
+may print in a public error and in a trace's `run-stopped` event instead of
+fingerprinting. `:annotations` maps an annotation type to the counter names
+`workflow.event/annotate` may carry for it; such an annotation holds nothing
+but those counters, each a non-negative integer no greater than 65535.
+
+Both are declared here rather than in a manifest so the vocabulary sits beside
+the code that emits it and is covered by the component source hash. Every name
+is bounded lowercase kebab-case, at most 16 per list, and may not shadow a
+framework failure kind or the `progress`/`agent-action` annotation types.
+Undeclared kinds keep fingerprinting and undeclared annotation types stay
+rejected, so omitting both changes nothing.
+
+Naming a declared kind gives up no privacy the fingerprint provided: the
+fingerprint is unsalted, so anyone holding the trace and the component can
+precompute a closed declared set and match it. That reasoning holds only
+because the set is closed and fixed at compile time.
+
+Two namespaces in one bundle may declare the same annotation type only if they
+agree on its counters — counter order does not matter. A conflict fails
+environment assembly with `:conflicting_annotation_declaration` rather than
+silently keeping one list and rejecting the other namespace's annotations.
+
 ## Declare runtime contracts
 
 Public exports may declare contracts in their ordinary metadata map:

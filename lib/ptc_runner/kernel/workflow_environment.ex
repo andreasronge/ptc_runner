@@ -24,6 +24,11 @@ defmodule PtcRunner.Kernel.WorkflowEnvironment do
   @doc """
   Assembles a workflow environment from optional `:bundle`, `:capabilities`,
   and JSON-like `:data` options. Unknown options are rejected.
+
+  Returns `{:error, :conflicting_annotation_declaration}` when two of the
+  bundle's namespaces declare the same annotation type with different counter
+  names. `PtcRunner.Kernel.Component` compilation accepts each declaration on
+  its own; only assembling them together can detect the conflict.
   """
   def new(opts) when is_list(opts) do
     with false <- Keyword.keys(opts) -- [:bundle, :capabilities, :data] != [],
