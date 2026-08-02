@@ -117,6 +117,7 @@ defmodule PtcRunner.Lisp.IntrospectionTest do
                call: "(alpha/greet name)",
                doc: "Greets a name.",
                visibility: :prompt,
+               effect: :read,
                signature: "(name :string) -> :string"
              }
     end
@@ -152,11 +153,36 @@ defmodule PtcRunner.Lisp.IntrospectionTest do
     test "does not report capability wiring or compiler internals", %{prelude: prelude} do
       meta = eval!(~S|(export-meta "alpha/greet")|, prelude).return
 
-      # `effect` is absent on purpose: the authoritative value is the
-      # mission-resolved effect, which this layer cannot compute.
-      for key <- [:effect, :tool_refs, :requires, :min_arity, :parsed_signature] do
+      for key <- [:tool_refs, :requires, :min_arity, :declared_effect, :parsed_signature] do
         refute Map.has_key?(meta, key)
       end
+    end
+
+    test "never reports :read for an export that reaches a capability", %{prelude: _} do
+      # This layer cannot see a capability's installed effect, so a wrapper
+      # declaring :read over a :write capability would read as safe. The
+      # authoritative value is the mission-resolved effect; the most this can
+      # honestly say about a capability-touching export is :unknown.
+      {:ok, prelude} =
+        Compiler.compile("""
+        (ns alpha "Alpha." {:visibility :prompt})
+
+        (defn calc "Touches nothing." {:effect :read} [x] x)
+
+        (defn fetch "Reads through a capability." {:effect :read} [] (tool/probe {}))
+
+        (defn store "Writes through a capability." {:effect :write} [] (tool/probe {}))
+        """)
+
+      opts = [tools: %{"probe" => {fn _args -> "ok" end, "() -> :string"}}]
+
+      effect = fn ref ->
+        eval!(~s|(export-meta "#{ref}")|, prelude, opts).return.effect
+      end
+
+      assert effect.("alpha/calc") == :read
+      assert effect.("alpha/fetch") == :unknown
+      assert effect.("alpha/store") == :write
     end
 
     test "a private helper, unknown ref, or malformed ref is a miss", %{prelude: prelude} do
@@ -177,6 +203,7 @@ defmodule PtcRunner.Lisp.IntrospectionTest do
                alpha/greet
                (alpha/greet name)
                  (name :string) -> :string
+                 effect: read
 
                  Greets a name.\
                """
@@ -189,6 +216,7 @@ defmodule PtcRunner.Lisp.IntrospectionTest do
                alpha/limit
                alpha/limit
                  :int
+                 effect: unknown
 
                  Default page size.\
                """
@@ -199,7 +227,8 @@ defmodule PtcRunner.Lisp.IntrospectionTest do
       assert eval!(~S|(doc "alpha/shout")|, prelude).prints == [
                """
                alpha/shout
-               (alpha/shout name)\
+               (alpha/shout name)
+                 effect: unknown\
                """
              ]
     end
@@ -272,6 +301,11 @@ defmodule PtcRunner.Lisp.IntrospectionTest do
 
       assert eval!(~S|(let [f (identity dir)] (f "beta"))|, prelude).return ==
                ["beta/collect", "beta/hidden"]
+    end
+
+    test "dir is a valid pcalls thunk and the unary forms are not", %{prelude: prelude} do
+      assert eval!("(pcalls dir)", prelude).return == [["alpha", "beta"]]
+      assert fail(~S|(pcalls doc)|, prelude)
     end
 
     test "apply, comp, partial, and pmap", %{prelude: prelude} do

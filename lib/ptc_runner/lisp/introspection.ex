@@ -29,20 +29,28 @@ defmodule PtcRunner.Lisp.Introspection do
   the discovery half. A narrowed session grant needs no filter here — it hands
   the run a prelude whose `exports` list is already the narrow set.
 
-  ## Why no effect is reported
+  ## How the reported effect is bounded
 
-  `Export.effect` is the effect declared at compile time. The authoritative
-  effect is the mission-resolved one `PtcRunner.Kernel.MissionInventory`
-  publishes, which joins the declaration with the effects of the capabilities
-  the export actually reaches — a wrapper declaring `:read` over a capability
-  installed as `:write` resolves to `:write`. That join needs the mission's
-  capability set, which this layer does not have.
+  `Export.effect` joins an export's own declaration with those of the prelude
+  helpers it calls, but not with the effects of the *capabilities* it reaches.
+  The authoritative value is the mission-resolved effect
+  `PtcRunner.Kernel.MissionInventory` publishes, which adds that last join: a
+  wrapper declaring `:read` over a capability installed as `:write` resolves to
+  `:write`. Producing it needs the mission's capability set, which this layer
+  does not have.
 
-  Reporting the declared effect here would let a program read `:read` for an
-  operation the prompt inventory calls `:write`, and the weaker of the two is
-  the one that invites repeating an irreversible call. So neither `export_meta/3`
-  nor `render_doc/3` reports an effect at all; the mission inventory remains the
-  single place an effect is stated.
+  Reporting the raw declaration would therefore let a program read `:read` for
+  an operation the inventory calls `:write` — the direction that invites
+  repeating an irreversible call. Omitting the effect is no better: the
+  inventory covers only `Prelude.prompt_exports/1`, so a `:discoverable` export
+  is callable with no effect stated anywhere.
+
+  So the reported effect is deliberately weakened rather than dropped. An export
+  that reaches no capability is reported as declared. An export that does reach
+  one is reported as `:write` if anything in its chain declares `:write`, and
+  `:unknown` otherwise. It can still fall short of a `:write` the inventory
+  resolves, but it never calls something `:read` that touches a capability, so
+  no answer here presents an unresolved effect as safe.
 
   ## Misses
 
@@ -175,10 +183,10 @@ defmodule PtcRunner.Lisp.Introspection do
   Structured metadata for one visible export, or `nil` on a miss.
 
   Reports the calling contract: identity, arity, parameter names, call form,
-  docstring, visibility, and any declared signature or type. Capability wiring
+  docstring, visibility, effect, and any declared signature or type. The effect
+  is bounded as described in the module documentation. Capability wiring
   (`tool_refs`, `requires`) and compiler internals (`min_arity`,
-  `parsed_signature`, `parsed_type`) stay out, and so does `effect` — see the
-  module documentation.
+  `parsed_signature`, `parsed_type`) stay out.
   """
   @spec export_meta(Prelude.t() | nil, String.t(), visible()) :: map() | nil
   def export_meta(prelude, ref, visible) when is_binary(ref) do
@@ -230,7 +238,8 @@ defmodule PtcRunner.Lisp.Introspection do
       kind: :constant,
       call: Export.call_form(export),
       doc: export.doc,
-      visibility: export.visibility
+      visibility: export.visibility,
+      effect: bounded_effect(export)
     }
 
     maybe_put(base, :type, export.type)
@@ -246,7 +255,8 @@ defmodule PtcRunner.Lisp.Introspection do
       params: export.params,
       call: Export.call_form(export),
       doc: export.doc,
-      visibility: export.visibility
+      visibility: export.visibility,
+      effect: bounded_effect(export)
     }
 
     maybe_put(base, :signature, export.signature)
@@ -255,11 +265,25 @@ defmodule PtcRunner.Lisp.Introspection do
   defp maybe_put(map, _key, nil), do: map
   defp maybe_put(map, key, value), do: Map.put(map, key, value)
 
+  # Never present an export that reaches a capability as `:read` — this layer
+  # cannot see the capability's installed effect, and a false `:read` is the
+  # answer that invites repeating an irreversible call.
+  defp bounded_effect(%Export{effect: :write}), do: :write
+
+  defp bounded_effect(%Export{} = export) do
+    if reaches_capability?(export), do: :unknown, else: export.effect
+  end
+
+  defp reaches_capability?(%Export{tool_refs: tool_refs, requires: requires}) do
+    tool_refs != [] or Enum.any?(requires, &String.starts_with?(&1, "tool:"))
+  end
+
   defp render_export(%Export{} = export) do
     [
       export.ref,
       Export.call_form(export),
       contract_line(export),
+      "  effect: #{bounded_effect(export)}",
       doc_block(export)
     ]
     |> Enum.reject(&is_nil/1)

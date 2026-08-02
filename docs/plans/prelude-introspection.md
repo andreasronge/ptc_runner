@@ -75,17 +75,22 @@ Keyword keys, matching the `cap/describe` envelope convention.
  :call "(inspection/model-exchanges run-id cursor)"
  :doc "..."
  :visibility :discoverable
+ :effect :read
  :signature "(run-id :string, cursor :string?) -> {...}"}
 ```
 
-**No effect is reported.** `Export.effect` is the compile-time declaration; the
-authoritative value is the mission-resolved effect `MissionInventory` publishes,
-which joins the declaration with the effects of the capabilities an export
-reaches — a wrapper declaring `:read` over a `:write` capability resolves to
-`:write`. That join needs the mission capability set, which the Lisp layer does
-not have. Reporting the declared value would contradict the inventory in the
-direction that invites repeating an irreversible call, so the inventory stays
-the single place an effect is stated.
+**`:effect` is conservative, not authoritative.** The authoritative value is the
+mission-resolved effect `MissionInventory` publishes, which joins an export's
+declaration with the effects of the capabilities it reaches — a wrapper
+declaring `:read` over a `:write` capability resolves to `:write`. That join
+needs the mission capability set, which the Lisp layer does not have.
+
+Reporting the raw declaration would let a program read `:read` for an operation
+the inventory calls `:write`. Omitting the effect is no better: the inventory
+covers only prompt-visible exports, so a `:discoverable` export would be
+callable with no effect stated anywhere. So the value is weakened rather than
+dropped — an export reaching any capability reports `:write` if its chain
+declares `:write` and `:unknown` otherwise, never `:read`.
 
 Field rules:
 
@@ -94,8 +99,9 @@ Field rules:
 - Variadic functions report `:arity :variadic` and keep `"&"` in `:params`.
 - `:signature`/`:type` are omitted entirely when undeclared, not set to `nil`.
 - `:doc` is `nil` when the export has no docstring.
-- `Export.effect`, `tool_refs`, `requires`, `min_arity`, `declared_effect`, and
-  the `parsed_*` fields stay internal — they describe capability wiring, not the
+- `:effect` is always present, `:unknown` included.
+- `Export.tool_refs`, `requires`, `min_arity`, `declared_effect`, and the
+  `parsed_*` fields stay internal — they describe capability wiring, not the
   calling contract.
 
 ### `doc` rendering
@@ -104,6 +110,7 @@ Field rules:
 inspection/model-exchanges
 (inspection/model-exchanges run-id cursor)
   (run-id :string, cursor :string?) -> {items [...], next_cursor :string?}
+  effect: read
 
   Correlated model exchanges for one run, one page per call.
 ```

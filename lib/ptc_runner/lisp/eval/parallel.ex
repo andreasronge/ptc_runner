@@ -371,6 +371,18 @@ defmodule PtcRunner.Lisp.Eval.Parallel do
 
   defp pcalls_thunk(fun, %EvalContext{}, _do_eval) when is_function(fun, 0), do: {:ok, fun}
 
+  # `dir` is the one introspection builtin with a zero-argument form. It stays a
+  # binding tuple rather than a BEAM function so both its arities survive, so
+  # the plain-function clauses above do not see it.
+  defp pcalls_thunk({:special, :dir} = callable, %EvalContext{} = context, do_eval) do
+    {:ok, fn -> apply_worker_callable(callable, [], context, do_eval) end}
+  end
+
+  defp pcalls_thunk({:special, op}, %EvalContext{}, _do_eval)
+       when op in [:apropos, :doc, :export_meta] do
+    {:error, "pcalls requires zero-arity thunks, got function with arity 1"}
+  end
+
   defp pcalls_thunk(fun, %EvalContext{}, _do_eval) when is_function(fun) do
     {:arity, arity} = Function.info(fun, :arity)
     {:error, "pcalls requires zero-arity thunks, got function with arity #{arity}"}
