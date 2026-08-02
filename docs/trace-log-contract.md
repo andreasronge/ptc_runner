@@ -378,6 +378,21 @@ carries no `failure_kind` and is never selected by this filter.
 Default ordering is deterministic: newest start timestamp first, with run ID as
 a stable tie-breaker.
 
+An optional `fields` list projects each summary to a subset of the run
+projection's own keys. `run_id` is always returned whether or not it was
+requested, so a projected page stays joinable. Omitting `fields` returns the
+full summary. Duplicates collapse and order is not significant: the list is
+sorted and deduped before use, so `["status", "run_id"]` and
+`["run_id", "status"]` are the same request and share a cursor. An unknown
+field name is rejected and the error names the selectable set.
+
+Projection applies **after** page selection and after the byte-fit truncation
+that keeps a page within its result limit. A narrowed projection therefore
+never changes which runs land on a page — it only shrinks what is returned for
+them. The deliberate cost is that a narrow projection does not fit *more* runs
+per page than a wide one would; page composition stays independent of `fields`
+rather than being optimal for it.
+
 ### `log/run`
 
 Returns metadata for one source-visible run or a uniform not-found/denied error.

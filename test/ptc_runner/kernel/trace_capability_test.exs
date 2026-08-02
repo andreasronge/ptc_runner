@@ -341,6 +341,167 @@ defmodule PtcRunner.Kernel.TraceCapabilityTest do
     assert explicit_failures < errors
   end
 
+  @tag :tmp_dir
+  test "fields projects a run summary to only the requested keys plus run_id",
+       %{tmp_dir: directory} do
+    path = Path.join(directory, "trace.jsonl")
+
+    events = [
+      decoded_event("visible", 1, "run-started"),
+      decoded_event("visible", 2, "run-stopped", %{"outcome" => "ok"})
+    ]
+
+    assert :ok = TraceLog.append_jsonl(path, events)
+    assert {:ok, trace_log} = TraceLog.new(source: {:file, path})
+
+    assert {:ok, %{"items" => [full]}} = TraceLog.query(trace_log, :list_runs, %{})
+
+    assert {:ok, %{"items" => [projected]}} =
+             TraceLog.query(trace_log, :list_runs, %{"fields" => ["status"]})
+
+    assert Enum.sort(Map.keys(projected)) == ["run_id", "status"]
+    assert projected["run_id"] == full["run_id"]
+    assert projected["status"] == full["status"]
+
+    # `run_id` is included even when it is not itself requested.
+    assert {:ok, %{"items" => [run_id_only]}} =
+             TraceLog.query(trace_log, :list_runs, %{"fields" => ["terminal_reason"]})
+
+    assert Enum.sort(Map.keys(run_id_only)) == ["run_id", "terminal_reason"]
+  end
+
+  @tag :tmp_dir
+  test "the accepted fields set covers every key run_metadata actually produces",
+       %{tmp_dir: directory} do
+    path = Path.join(directory, "trace.jsonl")
+
+    events = [
+      decoded_event("visible", 1, "run-started"),
+      decoded_event("visible", 2, "run-stopped", %{"outcome" => "ok"})
+    ]
+
+    assert :ok = TraceLog.append_jsonl(path, events)
+    assert {:ok, trace_log} = TraceLog.new(source: {:file, path})
+
+    assert {:ok, %{"items" => [full]}} = TraceLog.query(trace_log, :list_runs, %{})
+    full_keys = full |> Map.keys() |> Enum.sort()
+
+    # Requesting every key the unprojected summary actually has must be
+    # accepted and must reproduce it exactly. If the selectable-fields
+    # constant ever drifts behind `run_metadata/3` (a key added there but
+    # forgotten in the constant), this request starts naming an "unknown"
+    # field and this assertion catches it.
+    assert {:ok, %{"items" => [projected]}} =
+             TraceLog.query(trace_log, :list_runs, %{"fields" => full_keys})
+
+    assert Enum.sort(Map.keys(projected)) == full_keys
+  end
+
+  @tag :tmp_dir
+  test "an unknown field name is rejected and names the available fields",
+       %{tmp_dir: directory} do
+    path = Path.join(directory, "trace.jsonl")
+    events = [decoded_event("visible", 1, "run-started")]
+
+    assert :ok = TraceLog.append_jsonl(path, events)
+    assert {:ok, trace_log} = TraceLog.new(source: {:file, path})
+
+    assert {:error, {:invalid_query, %{unknown_keys: ["bogus_field"], accepted_keys: accepted}}} =
+             TraceLog.query(trace_log, :list_runs, %{"fields" => ["status", "bogus_field"]})
+
+    assert "status" in accepted
+    assert "run_id" in accepted
+    assert "workflow_prelude" in accepted
+  end
+
+  @tag :tmp_dir
+  test "fields list rules: bounded string elements, a bounded length, and collapsed duplicates",
+       %{tmp_dir: directory} do
+    path = Path.join(directory, "trace.jsonl")
+    events = [decoded_event("visible", 1, "run-started")]
+
+    assert :ok = TraceLog.append_jsonl(path, events)
+    assert {:ok, trace_log} = TraceLog.new(source: {:file, path})
+
+    # A non-string element is a structural shape problem, not an unknown-name
+    # one, so it stays the bare pre-existing rejection.
+    assert {:error, :invalid_query} =
+             TraceLog.query(trace_log, :list_runs, %{"fields" => ["status", 1]})
+
+    # A list longer than the selectable set itself can never request more
+    # distinct keys than exist, and is rejected by length alone.
+    over_long = List.duplicate("status", 34)
+
+    assert {:error, {:invalid_query, %{argument: "fields", bound: _bound}}} =
+             TraceLog.query(trace_log, :list_runs, %{"fields" => over_long})
+
+    # Duplicates within the bound collapse rather than reject.
+    assert {:ok, %{"items" => [projected]}} =
+             TraceLog.query(trace_log, :list_runs, %{
+               "fields" => ["status", "status", "run_id"]
+             })
+
+    assert Enum.sort(Map.keys(projected)) == ["run_id", "status"]
+  end
+
+  @tag :tmp_dir
+  test "fields does not change which runs land on a page", %{tmp_dir: directory} do
+    path = Path.join(directory, "trace.jsonl")
+
+    events = [
+      decoded_event("first", 1, "run-started"),
+      decoded_event("first", 2, "run-stopped", %{"outcome" => "ok"}),
+      decoded_event("second", 1, "run-started"),
+      decoded_event("second", 2, "run-stopped", %{"outcome" => "ok"})
+    ]
+
+    assert :ok = TraceLog.append_jsonl(path, events)
+    assert {:ok, trace_log} = TraceLog.new(source: {:file, path})
+
+    assert {:ok, %{"items" => full_items}} =
+             TraceLog.query(trace_log, :list_runs, %{"limit" => 1})
+
+    assert {:ok, %{"items" => projected_items}} =
+             TraceLog.query(trace_log, :list_runs, %{"limit" => 1, "fields" => ["status"]})
+
+    assert Enum.map(full_items, & &1["run_id"]) == Enum.map(projected_items, & &1["run_id"])
+  end
+
+  @tag :tmp_dir
+  test "a cursor issued under one field ordering is accepted under an equivalent one",
+       %{tmp_dir: directory} do
+    path = Path.join(directory, "trace.jsonl")
+
+    events = [
+      decoded_event("first", 1, "run-started"),
+      decoded_event("first", 2, "run-stopped", %{"outcome" => "ok"}),
+      decoded_event("second", 1, "run-started"),
+      decoded_event("second", 2, "run-stopped", %{"outcome" => "ok"})
+    ]
+
+    assert :ok = TraceLog.append_jsonl(path, events)
+    assert {:ok, trace_log} = TraceLog.new(source: {:file, path})
+
+    assert {:ok, %{"next_cursor" => cursor, "items" => [first_page]}} =
+             TraceLog.query(trace_log, :list_runs, %{
+               "limit" => 1,
+               "fields" => ["status", "run_id"]
+             })
+
+    assert is_binary(cursor)
+
+    # Same projection, elements reordered: canonicalization must fold both
+    # into the same `query_id`, so the cursor from the first call is honored.
+    assert {:ok, %{"items" => [second_page]}} =
+             TraceLog.query(trace_log, :list_runs, %{
+               "limit" => 1,
+               "cursor" => cursor,
+               "fields" => ["run_id", "status"]
+             })
+
+    refute first_page["run_id"] == second_page["run_id"]
+  end
+
   test "a trace grant never discovers runs in another sink" do
     {:ok, limits} = Limits.new()
     {:ok, visible} = EventSink.start(:normal, limits, run_id: "visible")

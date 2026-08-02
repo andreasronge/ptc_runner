@@ -12,7 +12,9 @@ defmodule PtcRunner.Kernel.TraceLog do
   Supported query operations are:
 
   - `:list_runs` — bounded filtered run summaries, including the run-started
-    sequence and component-override provenance;
+    sequence and component-override provenance; an optional `fields` list
+    projects each summary to a caller-selected subset, always including
+    `run_id`;
   - `:get_run` — one run summary by run ID;
   - `:list_turns` — ordered evaluation/capability facts for one run;
   - `:counters` — aggregate counters for filtered runs.
@@ -608,14 +610,17 @@ defmodule PtcRunner.Kernel.TraceLog do
     with :ok <-
            validate_keys(
              arguments,
-             ~w(limit cursor status run_id trace_id tags name model provider from to failure_kind)
+             ~w(limit cursor status run_id trace_id tags name model provider from to failure_kind fields)
            ),
          :ok <- validate_run_filters(arguments),
-         {:ok, page} <- page_options(arguments, source_id, :list_runs) do
+         {:ok, fields} <- validate_fields(arguments["fields"]),
+         canonical_arguments = canonicalize_fields(arguments, fields),
+         {:ok, page} <- page_options(canonical_arguments, source_id, :list_runs) do
       events
       |> runs(source_kind)
       |> filter_runs(arguments)
       |> paginate(page, source_id, max_result_bytes)
+      |> project_page(fields)
     end
   end
 
@@ -2013,6 +2018,26 @@ defmodule PtcRunner.Kernel.TraceLog do
     end)
   end
 
+  # `fields` (on `:list_runs`) selects a subset of these keys. Declared
+  # explicitly and kept beside the projection it describes: deriving the
+  # accepted set from `Map.keys/1` of a sample projection instead would let it
+  # drift silently whenever a key is added to or removed from
+  # `run_metadata/3` below.
+  @run_summary_fields ~w(
+    run_id trace_id start_timestamp stop_timestamp status terminal_reason
+    failure_kind failure_kind_fingerprint labels tags name model provider
+    subordinate_evaluations workflow_capability_calls mission_capability_calls
+    llm_calls error_count duration_ms workflow_prelude mission_prelude
+    mission_inventory_hash mission_inventory_bytes mission_model_context_hash
+    mission_model_context_bytes component_overrides connector_snapshots
+    session_profile positions complete truncated schema_version source
+  )
+
+  # A raw `fields` list can never usefully request more distinct keys than
+  # the selectable set itself has, so a longer one is rejected by length
+  # alone before any per-element validation runs.
+  @max_fields_length length(@run_summary_fields)
+
   defp run_metadata(run_id, events, source_kind) do
     started = Enum.find(events, &(&1["type"] == "run-started"))
     stopped = events |> Enum.filter(&(&1["type"] == "run-stopped")) |> List.last()
@@ -2060,6 +2085,34 @@ defmodule PtcRunner.Kernel.TraceLog do
       "source" => Atom.to_string(source_kind)
     }
   end
+
+  # Absent `fields` (nil) keeps the unprojected summary, exactly as before
+  # this option existed. An unknown name is rejected through the same
+  # mechanism as an unknown query key (`unknown_keys_error/2`), naming
+  # `@run_summary_fields` as the accepted set. Duplicates collapse rather than
+  # reject: canonicalizing (sort + dedupe) here is also what lets equivalent
+  # field lists share a cursor once folded into the `page_options/3` digest
+  # by `canonicalize_fields/2`.
+  defp validate_fields(nil), do: {:ok, nil}
+
+  defp validate_fields(fields)
+       when is_list(fields) and length(fields) <= @max_fields_length do
+    if Enum.all?(fields, &(valid_string(&1) == :ok)) do
+      canonical = fields |> Enum.uniq() |> Enum.sort()
+
+      case canonical -- @run_summary_fields do
+        [] -> {:ok, canonical}
+        unknown -> unknown_keys_error(unknown, @run_summary_fields)
+      end
+    else
+      {:error, :invalid_query}
+    end
+  end
+
+  defp validate_fields(fields) when is_list(fields),
+    do: {:error, {:invalid_query, %{argument: "fields", bound: 0..@max_fields_length}}}
+
+  defp validate_fields(_fields), do: {:error, :invalid_query}
 
   # Absent prelude data projects to an empty graph. Legacy run-started
   # payloads without dependency_indices pass through verbatim — the query
@@ -2252,6 +2305,31 @@ defmodule PtcRunner.Kernel.TraceLog do
     selected = items |> Enum.drop(offset) |> Enum.take(limit)
     fit_page(selected, items, offset, source_id, query_id, max_result_bytes)
   end
+
+  # `fields` participates in the `query_id` digest (`page_options/3` digests
+  # `Map.drop(arguments, ["cursor", "limit"])`) so a cursor cannot leak across
+  # projections. The raw list order would otherwise split one projection's
+  # cursor across two digests — `["status", "run_id"]` and
+  # `["run_id", "status"]` are the same request — so the already-canonical
+  # (sorted, deduped) list from `validate_fields/1` is swapped into the
+  # arguments map that gets digested, not just used downstream by
+  # `project_page/2`. An explicit `"fields" => nil` and an absent key
+  # canonicalize to the same absent key, so neither affects the digest.
+  defp canonicalize_fields(arguments, nil), do: Map.delete(arguments, "fields")
+  defp canonicalize_fields(arguments, fields), do: Map.put(arguments, "fields", fields)
+
+  # Applied strictly after `paginate/4` has already selected and byte-fit the
+  # page from full, unprojected items: `fields` can only shrink the response
+  # afterward, never change which runs land on a page or how many are
+  # truncated to fit `max_result_bytes`.
+  defp project_page({:ok, result}, nil), do: {:ok, result}
+
+  defp project_page({:ok, result}, fields) do
+    projected = Enum.map(result["items"], &Map.take(&1, ["run_id" | fields]))
+    {:ok, %{result | "items" => projected}}
+  end
+
+  defp project_page(error, _fields), do: error
 
   defp fit_page(selected, all_items, offset, source_id, query_id, max_result_bytes) do
     result = page_result(selected, all_items, offset, source_id, query_id)
