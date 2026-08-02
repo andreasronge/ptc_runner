@@ -147,6 +147,35 @@ defmodule PtcRunner.Kernel.MCPOAuth.NetworkPolicyTest do
     assert System.monotonic_time(:millisecond) - deadline_ms < 500
   end
 
+  test "an expired deadline is a resolution failure, not a policy verdict about the host", %{
+    authority: authority
+  } do
+    parent = self()
+
+    resolver = fn _hostname ->
+      send(parent, :resolver_invoked)
+      {:ok, [{93, 184, 216, 34}]}
+    end
+
+    assert {:error, :resolution_failed} =
+             NetworkPolicy.resolve("https://auth.example/token", authority,
+               resolver: resolver,
+               deadline_ms: System.monotonic_time(:millisecond) - 1
+             )
+
+    # With no budget left the resolver is never invoked, so classifying expiry
+    # as a resolution failure cannot widen egress to an unapproved answer.
+    refute_received :resolver_invoked
+  end
+
+  test "a disallowed origin still outranks an expired deadline", %{authority: authority} do
+    assert {:error, :egress_denied} =
+             NetworkPolicy.resolve("https://attacker.example/token", authority,
+               resolver: fn _ -> {:ok, [{8, 8, 8, 8}]} end,
+               deadline_ms: System.monotonic_time(:millisecond) - 1
+             )
+  end
+
   test "classifies representative reserved IPv4 and IPv6 ranges" do
     for address <- [
           {10, 0, 0, 1},

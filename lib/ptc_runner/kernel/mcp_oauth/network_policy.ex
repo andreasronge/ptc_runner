@@ -7,6 +7,15 @@ defmodule PtcRunner.Kernel.MCPOAuth.NetworkPolicy do
   answer. Callers connect to one returned address while preserving the
   original hostname and verify the connected peer against the same approved
   set before sending request bytes.
+
+  The two error classes are distinct and must not be conflated.
+  `:resolution_failed` means the DNS answer could not be obtained: the resolver
+  failed, overran the deadline, or had no budget left by the time it was
+  reached. `:egress_denied` covers everything else `resolve/3` rejects — a
+  disallowed origin, a denied address in the answer, and malformed input such as
+  an unparseable URL, a non-function resolver, or a non-integer deadline. An
+  exhausted deadline is never a statement about the host, so it is classified by
+  `safe_resolve/3` rather than folded into the policy guard.
   """
 
   alias PtcRunner.Kernel.MCPOAuth.Authority
@@ -53,7 +62,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.NetworkPolicy do
       )
 
     with true <- is_function(resolver, 1),
-         true <- is_integer(deadline_ms) and deadline_ms > System.monotonic_time(:millisecond),
+         true <- is_integer(deadline_ms),
          {:ok, target} <- target(url),
          true <- origin_allowed?(target.origin, authority),
          {:ok, addresses} <- safe_resolve(resolver, target.hostname, deadline_ms),
