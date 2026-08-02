@@ -51,8 +51,13 @@ how it was verified.
   the MCP tests also require the local server described below).
 - Debug a run by recording `mix ptc.run MANIFEST --trace DIR/run.jsonl` and
   querying the capture through the `log-analysis-v2` REPL profile rather than
-  `jq` or Python — see
-  [Query canonical traces](docs/guides/running-and-debugging.md#query-canonical-traces).
+  `jq` or Python. Compose one session — bind intermediate values with `def`
+  and prefer the `log.analysis/all-*` traversals, which report `complete?`
+  instead of silently truncating. Extracting a value to the shell and
+  interpolating it into the next command is the habit that makes an external
+  tool feel necessary. See
+  [Query canonical traces](docs/guides/running-and-debugging.md#query-canonical-traces)
+  and [Compose one program](docs/guides/running-and-debugging.md#compose-one-program-instead-of-chaining-shell-commands).
 - Fix all failures before committing/pushing.
 
 ### Fresh worktree setup

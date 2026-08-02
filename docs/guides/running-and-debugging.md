@@ -400,6 +400,55 @@ events, and aggregate usage. The
 sanitization, filtering, pagination, and private sources. See the
 [Kernel REPL guide](kernel-repl.md) for longer interactive investigations.
 
+### Compose one program instead of chaining shell commands
+
+The reference above lists the query functions. The habit that makes them
+usable is composing a single session rather than running one query, extracting
+a value with `jq` or Python, and interpolating it into the next command. That
+extract-and-interpolate loop is what makes an external tool feel necessary; it
+is also what silently drops the paging and completeness signals these queries
+return.
+
+Bind intermediate values with `def` in one session. Everything below is one
+invocation:
+
+```console
+mix ptc.repl --profile log-analysis-v2 --resource traces=traces \
+  -e '(def run-id (get (first (get (log/runs {"fields" ["run_id" "status"]}) "items")) "run_id"))' \
+  -e '(def verified (log.analysis/annotations run-id "citations-verified" 20))' \
+  -e '{"run" run-id
+       "complete?" (get verified "complete?")
+       "counts" (map (fn [a] (get a "data")) (get verified "items"))}'
+```
+
+For anything longer, put the definitions in a file and pass `--load`, keeping
+only the result expression in `-e`:
+
+```console
+mix ptc.repl --profile log-analysis-v2 --resource traces=traces \
+  --load analysis.clj -e '(summarize)'
+```
+
+`--load` is setup only — it evaluates the file and does not print. A `return`
+inside the loaded file is ignored; the value you want must come from `-e`.
+
+Five things that cost a round trip if you meet them by surprise:
+
+- **Prefer the `log.analysis/all-*` and `inspection.analysis/all-*`
+  traversals.** The one-page `log/turns` and `inspection/*` functions return
+  `next_cursor` and it is easy to ignore, which turns a truncated prefix into a
+  wrong answer. The traversals take a required page bound and report
+  `complete?`, so a partial result announces itself.
+- **`fields` on `log/runs`** keeps a summary to the keys you asked for instead
+  of all 33. Worth using on anything that pages.
+- **A rejected query names what was wrong.** An unknown filter key reports the
+  accepted set for that operation, and an out-of-range `limit` reports its
+  bound. Read the error rather than guessing a second time.
+- **`--session-trace-dir` must already exist.** It is not created for you.
+- **Private inspection needs `--private-unattended`** for non-interactive use,
+  and its `inspection/*` functions take `[run-id cursor]` positionally rather
+  than an options map.
+
 ## Use private inspection deliberately
 
 Pass both output paths when exact development diagnostics are required:
@@ -458,6 +507,27 @@ matches the public `defined_count: 0` and `history_count: 0`.
 More complex agents use the same boundary across several turns, with inspection
 recording each private request, response, and generated program while the
 canonical trace retains only bounded operational evidence.
+
+The private profile reads both planes, so one program can correlate them. A
+`run_id` discovered from the canonical trace indexes straight into the private
+records, and `inspection.analysis/prose` returns the model's own narration per
+turn with the `evaluation_id` that correlates it to that turn's capability
+calls and annotations:
+
+```clojure
+(def run-id
+  (get (first (get (log/runs {"fields" ["run_id" "status"]}) "items")) "run_id"))
+
+(def narration (inspection.analysis/prose run-id 20))
+(def verified (log.analysis/annotations run-id "citations-verified" 20))
+```
+
+Keep the planes visible rather than blurring them. `verified` above comes from
+the canonical trace and needs no private access at all — an application's
+declared annotations are public by construction — while `narration` requires
+the private artifact. Collecting an outcome metric across many runs therefore
+does not require opening private data; only asking *why* a particular run
+behaved that way does.
 
 ## Development Viewer
 
