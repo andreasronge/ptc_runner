@@ -822,12 +822,22 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   # `(map apply ...)` does. A bridge cannot return an error tuple, so argument
   # faults raise through `HostContext` with the same canonical reason the
   # direct dispatcher reports.
+  #
+  # The visibility filter is resolved when the function RUNS, not when it is
+  # converted. A privileged prelude export can convert one of these values and
+  # hand the result to session-authored code; binding the captured context here
+  # would let that code inherit the prelude's unrestricted view under
+  # `strict_transitive_calls`. Only `dir` supports a zero-argument form, and a
+  # BEAM function has one arity: like a converted variadic closure, the
+  # converted value takes the arity useful in higher-order position.
   def closure_to_fun({:special, op}, %EvalContext{} = eval_ctx, _do_eval_fn)
       when op in [:dir, :apropos, :doc, :export_meta] do
     fn arg ->
-      case introspect(op, [arg], eval_ctx) do
+      active = introspection_invocation_context(eval_ctx)
+
+      case introspect(op, [arg], active) do
         {:ok, rendered} when op == :doc ->
-          _updated_context = EvalContext.append_print(eval_ctx, rendered)
+          _updated_context = EvalContext.append_print(active, rendered)
           nil
 
         {:ok, value} ->
@@ -882,6 +892,18 @@ defmodule PtcRunner.Lisp.Eval.Apply do
       {:error,
        {:arity_error,
         "#{name} expects #{Enum.join(arities, " or ")} argument(s), got #{length(args)}"}}
+    end
+  end
+
+  # The context a converted introspection value is running under, which is the
+  # caller's rather than the one that converted it. Falls back to the captured
+  # context when no host binding is active or the active one carries no
+  # prelude — the run-scoped prelude is identical either way.
+  defp introspection_invocation_context(%EvalContext{} = captured) do
+    case HostContext.current() do
+      {%EvalContext{prelude: nil}, _do_eval} -> captured
+      {%EvalContext{} = active, _do_eval} -> active
+      _other -> captured
     end
   end
 

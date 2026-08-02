@@ -2888,8 +2888,9 @@
       examples: [],
       notes:
         "Reports the calling contract — `:ref`, `:namespace`, `:symbol`, `:kind`, `:call`, " <>
-          "`:doc`, `:visibility`, `:effect`, plus `:arity`/`:params` for functions and " <>
-          "`:signature` or `:type` when declared. Capability wiring is not reported. This is " <>
+          "`:doc`, `:visibility`, plus `:arity`/`:params` for functions and `:signature` or " <>
+          "`:type` when declared. Capability wiring and effects are not reported; the " <>
+          "mission inventory remains the single place an effect is stated. This is " <>
           "not `clojure.core/meta`, which takes an object rather than a reference string and " <>
           "is not implemented.",
       see_also: ["apropos", "dir", "doc"],

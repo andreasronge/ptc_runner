@@ -744,6 +744,8 @@ defmodule PtcRunner.Lisp.Format do
     do: %Builtin{}
 
   defp sanitize({:multi_arity, name, funs}) when is_atom(name) and is_tuple(funs), do: %Builtin{}
+  # Context-dispatched builtins (`println`, `apply`, the introspection forms).
+  defp sanitize({:special, name}) when is_atom(name), do: %Builtin{}
   # {:collect, fun} is used by fnil to wrap variadic functions - display as #fn
   defp sanitize({:collect, fun}) when is_function(fun), do: %Fn{params: "..."}
   defp sanitize({:juxt_fn, fns}) when is_list(fns), do: %Fn{params: "..."}

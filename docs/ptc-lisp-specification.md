@@ -3505,8 +3505,15 @@ special forms: they compose in any position a function is accepted.
 `doc` prints and returns `nil` so documentation is charged to the print budget
 rather than the result channel; a program that needs the same information as
 data calls `export-meta`. Both report the calling contract — identity, arity,
-parameter names, call form, docstring, visibility, effect, and any declared
-signature or type — and neither reports capability wiring.
+parameter names, call form, docstring, visibility, and any declared signature or
+type — and neither reports capability wiring.
+
+Neither reports an effect. The authoritative effect is the mission-resolved one
+in the prompt inventory, which combines an export's declaration with the effects
+of the capabilities it reaches; a wrapper declaring `:read` over a `:write`
+capability resolves to `:write`. Reporting the weaker declared value here would
+contradict the inventory in the direction that invites repeating an irreversible
+call, so the inventory stays the single place an effect is stated.
 
 Scope is the attached prelude only. These forms do not search `clojure.core`,
 the Java interop surface, or host capabilities; built-in functions are

@@ -29,6 +29,21 @@ defmodule PtcRunner.Lisp.Introspection do
   the discovery half. A narrowed session grant needs no filter here — it hands
   the run a prelude whose `exports` list is already the narrow set.
 
+  ## Why no effect is reported
+
+  `Export.effect` is the effect declared at compile time. The authoritative
+  effect is the mission-resolved one `PtcRunner.Kernel.MissionInventory`
+  publishes, which joins the declaration with the effects of the capabilities
+  the export actually reaches — a wrapper declaring `:read` over a capability
+  installed as `:write` resolves to `:write`. That join needs the mission's
+  capability set, which this layer does not have.
+
+  Reporting the declared effect here would let a program read `:read` for an
+  operation the prompt inventory calls `:write`, and the weaker of the two is
+  the one that invites repeating an irreversible call. So neither `export_meta/3`
+  nor `render_doc/3` reports an effect at all; the mission inventory remains the
+  single place an effect is stated.
+
   ## Misses
 
   An unknown ref, a malformed ref, or an absent prelude is a miss, not a
@@ -88,9 +103,10 @@ defmodule PtcRunner.Lisp.Introspection do
   Structured metadata for one visible export, or `nil` on a miss.
 
   Reports the calling contract: identity, arity, parameter names, call form,
-  docstring, visibility, effect, and any declared signature or type. Capability
-  wiring (`tool_refs`, `requires`) and compiler internals (`min_arity`,
-  `parsed_signature`, `parsed_type`) stay out.
+  docstring, visibility, and any declared signature or type. Capability wiring
+  (`tool_refs`, `requires`) and compiler internals (`min_arity`,
+  `parsed_signature`, `parsed_type`) stay out, and so does `effect` — see the
+  module documentation.
   """
   @spec export_meta(Prelude.t() | nil, String.t(), visible()) :: map() | nil
   def export_meta(prelude, ref, visible) when is_binary(ref) do
@@ -142,8 +158,7 @@ defmodule PtcRunner.Lisp.Introspection do
       kind: :constant,
       call: Export.call_form(export),
       doc: export.doc,
-      visibility: export.visibility,
-      effect: export.effect
+      visibility: export.visibility
     }
 
     maybe_put(base, :type, export.type)
@@ -159,8 +174,7 @@ defmodule PtcRunner.Lisp.Introspection do
       params: export.params,
       call: Export.call_form(export),
       doc: export.doc,
-      visibility: export.visibility,
-      effect: export.effect
+      visibility: export.visibility
     }
 
     maybe_put(base, :signature, export.signature)
@@ -174,7 +188,6 @@ defmodule PtcRunner.Lisp.Introspection do
       export.ref,
       Export.call_form(export),
       contract_line(export),
-      "  effect: #{export.effect}",
       doc_block(export)
     ]
     |> Enum.reject(&is_nil/1)

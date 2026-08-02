@@ -117,7 +117,6 @@ defmodule PtcRunner.Lisp.IntrospectionTest do
                call: "(alpha/greet name)",
                doc: "Greets a name.",
                visibility: :prompt,
-               effect: :read,
                signature: "(name :string) -> :string"
              }
     end
@@ -127,7 +126,6 @@ defmodule PtcRunner.Lisp.IntrospectionTest do
 
       refute Map.has_key?(meta, :signature)
       assert meta.doc == nil
-      assert meta.effect == :unknown
     end
 
     test "a constant reports its type and bare-ref call form", %{prelude: prelude} do
@@ -154,7 +152,9 @@ defmodule PtcRunner.Lisp.IntrospectionTest do
     test "does not report capability wiring or compiler internals", %{prelude: prelude} do
       meta = eval!(~S|(export-meta "alpha/greet")|, prelude).return
 
-      for key <- [:tool_refs, :requires, :min_arity, :declared_effect, :parsed_signature] do
+      # `effect` is absent on purpose: the authoritative value is the
+      # mission-resolved effect, which this layer cannot compute.
+      for key <- [:effect, :tool_refs, :requires, :min_arity, :parsed_signature] do
         refute Map.has_key?(meta, key)
       end
     end
@@ -177,7 +177,6 @@ defmodule PtcRunner.Lisp.IntrospectionTest do
                alpha/greet
                (alpha/greet name)
                  (name :string) -> :string
-                 effect: read
 
                  Greets a name.\
                """
@@ -190,7 +189,6 @@ defmodule PtcRunner.Lisp.IntrospectionTest do
                alpha/limit
                alpha/limit
                  :int
-                 effect: unknown
 
                  Default page size.\
                """
@@ -201,8 +199,7 @@ defmodule PtcRunner.Lisp.IntrospectionTest do
       assert eval!(~S|(doc "alpha/shout")|, prelude).prints == [
                """
                alpha/shout
-               (alpha/shout name)
-                 effect: unknown\
+               (alpha/shout name)\
                """
              ]
     end
@@ -291,6 +288,16 @@ defmodule PtcRunner.Lisp.IntrospectionTest do
   end
 
   describe "callable values" do
+    test "render as builtins rather than leaking their binding tuple", %{prelude: prelude} do
+      assert %PtcRunner.Lisp.Format.Builtin{} = eval!("dir", prelude).return
+      assert eval!("(println dir)", prelude).prints == ["#<builtin>"]
+    end
+
+    test "work as an fnil replacement target", %{prelude: prelude} do
+      assert eval!(~S|((fnil dir "alpha") nil)|, prelude).return ==
+               ["alpha/greet", "alpha/limit", "alpha/shout"]
+    end
+
     test "are recognized as functions", %{prelude: prelude} do
       assert eval!(~S|[(fn? dir) (fn? apropos) (fn? doc) (fn? export-meta)]|, prelude).return ==
                [true, true, true, true]
@@ -407,6 +414,32 @@ defmodule PtcRunner.Lisp.IntrospectionTest do
       # ...and the hidden namespace is genuinely uncallable, so discovery and
       # callability agree rather than merely both being restricted.
       assert fail(~S|(beta/hidden 1)|, prelude, strict)
+    end
+
+    test "a prelude-converted callback does not carry the prelude's view", %{prelude: _} do
+      # A privileged export can convert an introspection value and hand the
+      # result to session code. If the filter were bound when the value was
+      # converted rather than when it runs, that code would inherit the
+      # prelude's unrestricted view and enumerate a namespace it cannot call.
+      {:ok, prelude} =
+        Compiler.compile("""
+        (ns alpha "Alpha." {:visibility :prompt})
+
+        (defn echo [x] (identity x))
+
+        (ns beta "Beta." {:visibility :prompt})
+
+        (defn hidden "Hidden." [x] x)
+        """)
+
+      strict = [
+        strict_transitive_calls: true,
+        direct_namespaces: ["alpha"],
+        transitive_namespace_requirers: %{"beta" => ["alpha"]}
+      ]
+
+      assert eval!(~S|((alpha/echo dir) "beta")|, prelude, strict).return == []
+      assert eval!(~S|((alpha/echo dir) "alpha")|, prelude, strict).return == ["alpha/echo"]
     end
 
     test "every ref discovered under strict mode is callable", %{prelude: prelude} do

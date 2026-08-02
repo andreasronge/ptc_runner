@@ -78,6 +78,11 @@ defmodule PtcRunner.Lisp.Runtime.Predicates do
     {:fnil_fn, callable, default}
   end
 
+  # Context-dispatched builtins are callable, so fnil must accept them too.
+  def fnil({:special, name} = callable, default) when is_atom(name) do
+    {:fnil_fn, callable, default}
+  end
+
   def fnil({tag, _} = callable, default) when tag in [:complement_fn, :constantly_fn] do
     {:fnil_fn, callable, default}
   end
