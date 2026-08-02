@@ -1,10 +1,13 @@
 # Handoff: trace-analysis tooling
 
 **Written:** 2026-08-01, revised 2026-08-02. Branch
-`worktree-incident-evidence-compiler`, 25 commits ahead of `main` at
+`worktree-incident-evidence-compiler`, 26 commits ahead of `origin/main` at
 `7d997a0a`. Working tree clean; `mix precommit`, `mix prepush`, and the
-warnings-as-errors doc build green. **The last 3 commits are unpushed** (a
+warnings-as-errors doc build green. **The last 4 commits are unpushed** (a
 fast-forward). **No PR opened.**
+
+Count against `origin/main`, not the local `main` ref — in this worktree the
+local `main` is stale at `612621d2` and reports five extra commits.
 
 Nothing on this branch is in `main` — `637958c1`, `d478cf38`, and `ba983f95`
 are all still unlanded, verified with `git merge-base --is-ancestor`.
