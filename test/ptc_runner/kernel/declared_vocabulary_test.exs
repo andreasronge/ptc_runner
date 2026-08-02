@@ -208,6 +208,26 @@ defmodule PtcRunner.Kernel.DeclaredVocabularyTest do
       refute SafeMetadata.declarable_annotation?("agent-action", ["turn"])
     end
 
+    test "declaring a reserved name fails assembly instead of being dropped" do
+      # Filtering a reserved declaration cannot widen anything, but it leaves
+      # an author who declared `progress` with their own counters wondering
+      # why their annotations vanish. Refuse the bundle instead.
+      for meta <- [
+            ~S|{:failure-kinds ["turn-limit"]}|,
+            ~S|{:annotations {"progress" ["stage"]}}|,
+            ~S|{:annotations {"agent-action" ["turn"]}}|
+          ] do
+        assert {:ok, bundle} = Kernel.compile_bundle(component!("app", "(ns app #{meta})"))
+
+        assert {:error, :reserved_vocabulary_declaration} =
+                 WorkflowEnvironment.new(bundle: bundle),
+               "accepted #{meta}"
+
+        assert {:error, :reserved_vocabulary_declaration} =
+                 MissionEnvironment.new(bundle: bundle)
+      end
+    end
+
     test "counters are bounded non-negative integers only" do
       declared = %{"records-checked" => ["checked"]}
 

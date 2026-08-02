@@ -37,7 +37,7 @@ read past in every prompt.
 
 Canonical traces are payload-free, so an application failure kind reaches a
 public error only as a one-way fingerprint and an application annotation is
-rejected outright — unless the namespace declares it:
+rejected outright — unless the bundle declares it:
 
 ```clojure
 (ns audit "Checks records against their source."
@@ -53,10 +53,20 @@ but those counters, each a non-negative integer no greater than 65535.
 
 Both are declared here rather than in a manifest so the vocabulary sits beside
 the code that emits it and is covered by the component source hash. Every name
-is bounded lowercase kebab-case, at most 16 per list, and may not shadow a
-framework failure kind or the `progress`/`agent-action` annotation types.
-Undeclared kinds keep fingerprinting and undeclared annotation types stay
-rejected, so omitting both changes nothing.
+is bounded lowercase kebab-case, at most 16 per list. Undeclared kinds keep
+fingerprinting and undeclared annotation types stay rejected, so omitting both
+changes nothing.
+
+A declaration is **bundle-wide, not namespace-local**. The vocabulary is the
+union across every namespace in the bundle, so a kind declared in one namespace
+is named wherever in that bundle it is emitted, and any namespace may annotate
+a type another declared. Declaring beside the emitting code is a convention
+that keeps the two from drifting; it is not a scope boundary.
+
+A declaration may not redefine a framework failure kind such as `turn-limit`,
+nor the canonical `progress` and `agent-action` annotation types. Component
+compilation checks only name shape, so such a bundle compiles and then fails
+environment assembly with `:reserved_vocabulary_declaration`.
 
 Naming a declared kind gives up no privacy the fingerprint provided: the
 fingerprint is unsalted, so anyone holding the trace and the component can

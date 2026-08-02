@@ -25,10 +25,13 @@ defmodule PtcRunner.Kernel.MissionEnvironment do
   Assembles a mission environment from optional `:bundle`, `:capabilities`,
   and JSON-like `:data` options. Unknown options are rejected.
 
-  Returns `{:error, :conflicting_annotation_declaration}` when two of the
-  bundle's namespaces declare the same annotation type with different counter
-  names. `PtcRunner.Kernel.Component` compilation accepts each declaration on
-  its own; only assembling them together can detect the conflict.
+  A bundle's declared vocabulary is the union across its namespaces, so a
+  declaration authorises the whole bundle rather than the namespace it sits in.
+  Component compilation checks only the shape of declared names, which leaves
+  two assembly-time errors: `{:error, :reserved_vocabulary_declaration}` when a
+  declaration redefines a framework failure kind or a canonical annotation
+  type, and `{:error, :conflicting_annotation_declaration}` when two namespaces
+  declare the same annotation type with different counter names.
   """
   def new(opts) when is_list(opts) do
     with false <- Keyword.keys(opts) -- [:bundle, :capabilities, :data] != [],

@@ -23,6 +23,7 @@ defmodule PtcRunner.Kernel.Environment do
   def assemble(bundle, capabilities, data, kind)
       when kind in [:workflow, :mission] do
     with :ok <- valid_bundle(bundle),
+         :ok <- declarable_vocabulary(bundle),
          :ok <- consistent_annotations(bundle),
          true <- JSONValue.map?(data),
          {:ok, capability_map} <- capability_map(capabilities),
@@ -69,6 +70,39 @@ defmodule PtcRunner.Kernel.Environment do
   end
 
   def vocabulary(_environment), do: %{failure_kinds: [], annotations: %{}}
+
+  # A framework failure kind or a canonical annotation type cannot be
+  # redeclared. Filtering such a declaration out would widen nothing, but it
+  # would leave an author who declared `progress` with their own counters
+  # watching their annotations vanish with no diagnostic. The prelude compiler
+  # checks only name shape — it is a layer below this vocabulary — so the
+  # reserved-name rule is enforced here, where the canonical lists live.
+  defp declarable_vocabulary(%FrozenBundle{prelude: %{metadata: %{namespaces: namespaces}}})
+       when is_map(namespaces) do
+    declarations = Map.values(namespaces)
+
+    kinds_ok? =
+      Enum.all?(declarations, fn declared ->
+        declared
+        |> Map.get(:failure_kinds, [])
+        |> Enum.all?(&SafeMetadata.declarable_failure_kind?/1)
+      end)
+
+    annotations_ok? =
+      Enum.all?(declarations, fn declared ->
+        declared
+        |> Map.get(:annotations, %{})
+        |> Enum.all?(fn {type, counters} ->
+          SafeMetadata.declarable_annotation?(type, counters)
+        end)
+      end)
+
+    if kinds_ok? and annotations_ok?,
+      do: :ok,
+      else: {:error, :reserved_vocabulary_declaration}
+  end
+
+  defp declarable_vocabulary(_bundle), do: :ok
 
   # Two namespaces declaring one annotation type with different counters is a
   # conflict, not a merge: keeping either list by fold order would silently
