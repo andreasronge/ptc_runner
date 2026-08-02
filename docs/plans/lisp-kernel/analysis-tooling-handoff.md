@@ -1,10 +1,11 @@
 # Handoff: trace-analysis tooling
 
 **Written:** 2026-08-01, revised 2026-08-02. Branch
-`worktree-incident-evidence-compiler`, 26 commits ahead of `origin/main` at
-`7d997a0a`. Working tree clean; `mix precommit`, `mix prepush`, and the
-warnings-as-errors doc build green. **The last 4 commits are unpushed** (a
-fast-forward). **No PR opened.**
+`worktree-incident-evidence-compiler`, 28 commits ahead of `origin/main` at
+`7d997a0a`. Working tree clean and **fully pushed**; `mix precommit`,
+`mix prepush`, and the warnings-as-errors doc build green as of the last
+code commit — the two most recent commits are documentation only.
+**No PR opened.**
 
 Count against `origin/main`, not the local `main` ref — in this worktree the
 local `main` is stale at `612621d2` and reports five extra commits.
