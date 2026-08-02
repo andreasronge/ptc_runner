@@ -3504,9 +3504,15 @@ special forms: they compose in any position a function is accepted.
 
 `doc` prints and returns `nil` so documentation is charged to the print budget
 rather than the result channel; a program that needs the same information as
-data calls `export-meta`. Both report the calling contract — identity, arity,
-parameter names, call form, docstring, visibility, effect, and any declared
-signature or type — and neither reports capability wiring.
+data calls `export-meta`.
+
+`export-meta` reports the full calling contract: `:ref`, `:namespace`,
+`:symbol`, `:kind`, `:call`, `:doc`, `:visibility`, `:effect`, plus
+`:arity`/`:params` for functions and `:signature` or `:type` where declared.
+`doc` renders the reader-facing subset — ref, call form, declared contract,
+effect, and docstring — so `:visibility` and the separate arity and parameter
+fields are available only from `export-meta`. Neither reports capability
+wiring.
 
 The reported effect is conservative. The authoritative value is the
 mission-resolved effect in the prompt inventory, which combines an export's
