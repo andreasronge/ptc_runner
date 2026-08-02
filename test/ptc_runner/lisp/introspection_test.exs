@@ -265,6 +265,15 @@ defmodule PtcRunner.Lisp.IntrospectionTest do
       assert String.starts_with?(second, "beta/hidden\n")
     end
 
+    test "conversion preserves both of dir's arities", %{prelude: prelude} do
+      # A BEAM function has one arity, so converting `dir` to one would drop a
+      # documented overload. It stays a binding tuple and dispatches on args.
+      assert eval!(~S|(let [f (identity dir)] (f))|, prelude).return == ["alpha", "beta"]
+
+      assert eval!(~S|(let [f (identity dir)] (f "beta"))|, prelude).return ==
+               ["beta/collect", "beta/hidden"]
+    end
+
     test "apply, comp, partial, and pmap", %{prelude: prelude} do
       assert eval!(~S|(apply dir ["beta"])|, prelude).return == ["beta/collect", "beta/hidden"]
 

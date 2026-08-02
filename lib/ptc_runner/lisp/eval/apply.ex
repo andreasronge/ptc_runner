@@ -196,19 +196,13 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   end
 
   # Special builtins: prelude introspection (dir/apropos/doc/export-meta).
-  # `introspect/3` owns argument validation and answer construction for BOTH
-  # this direct path and the HOF bridges below, so neither can drift.
-  defp do_apply_fun({:special, :doc}, args, eval_ctx, _do_eval_fn) do
-    case introspect(:doc, args, eval_ctx) do
-      {:ok, rendered} -> {:ok, nil, EvalContext.append_print(eval_ctx, rendered)}
-      {:error, reason} -> {:error, reason}
-    end
-  end
-
+  # `Introspection.invoke/3` owns validation and answers for this path and for
+  # `Runtime.Callable`'s higher-order path alike, so the two cannot drift.
   defp do_apply_fun({:special, op}, args, eval_ctx, _do_eval_fn)
-       when op in [:dir, :apropos, :export_meta] do
-    case introspect(op, args, eval_ctx) do
+       when op in [:dir, :apropos, :doc, :export_meta] do
+    case Introspection.invoke(op, args, eval_ctx) do
       {:ok, value} -> {:ok, value, eval_ctx}
+      {:print, text} -> {:ok, nil, EvalContext.append_print(eval_ctx, text)}
       {:error, reason} -> {:error, reason}
     end
   end
@@ -816,120 +810,19 @@ defmodule PtcRunner.Lisp.Eval.Apply do
     end
   end
 
-  # Prelude introspection specials in higher-order position. Without these
-  # bridges the raw `{:special, _}` tuple reaches `Runtime.Callable.call/2`,
-  # which has no clause for it — `(map export-meta refs)` would fail the way
-  # `(map apply ...)` does. A bridge cannot return an error tuple, so argument
-  # faults raise through `HostContext` with the same canonical reason the
-  # direct dispatcher reports.
-  #
-  # The visibility filter is resolved when the function RUNS, not when it is
-  # converted. A privileged prelude export can convert one of these values and
-  # hand the result to session-authored code; binding the captured context here
-  # would let that code inherit the prelude's unrestricted view under
-  # `strict_transitive_calls`. Only `dir` supports a zero-argument form, and a
-  # BEAM function has one arity: like a converted variadic closure, the
-  # converted value takes the arity useful in higher-order position.
-  def closure_to_fun({:special, op}, %EvalContext{} = eval_ctx, _do_eval_fn)
-      when op in [:dir, :apropos, :doc, :export_meta] do
-    fn arg ->
-      active = introspection_invocation_context(eval_ctx)
-
-      case introspect(op, [arg], active) do
-        {:ok, rendered} when op == :doc ->
-          _updated_context = EvalContext.append_print(active, rendered)
-          nil
-
-        {:ok, value} ->
-          value
-
-        {:error, reason} ->
-          HostContext.error!(reason)
-      end
-    end
-  end
+  # Introspection specials are deliberately NOT converted to BEAM functions
+  # here. `Runtime.Callable.call/2` dispatches them from the argument list, so
+  # the tuple keeps both of `dir`'s arities — a unary wrapper would make
+  # `(let [f (identity dir)] (f))` fail an arity that `(dir)` accepts — and it
+  # resolves its visibility filter from the context it RUNS under. Capturing
+  # the converting context would let a privileged prelude export hand
+  # session-authored code the prelude's unrestricted view under
+  # `strict_transitive_calls`.
 
   # Non-closures pass through unchanged
   def closure_to_fun(value, %EvalContext{}, _do_eval_fn) do
     value
   end
-
-  # ============================================================
-  # Prelude introspection
-  # ============================================================
-
-  @introspection_arities %{dir: [0, 1], apropos: [1], doc: [1], export_meta: [1]}
-  @introspection_names %{
-    dir: "dir",
-    apropos: "apropos",
-    doc: "doc",
-    export_meta: "export-meta"
-  }
-
-  @spec introspect(atom(), [term()], EvalContext.t()) :: {:ok, term()} | {:error, term()}
-  defp introspect(:dir, [], %EvalContext{} = eval_ctx),
-    do: {:ok, Introspection.namespaces(eval_ctx.prelude, introspection_filter(eval_ctx))}
-
-  defp introspect(:dir, [namespace], %EvalContext{} = eval_ctx) when is_binary(namespace),
-    do: {:ok, Introspection.dir(eval_ctx.prelude, namespace, introspection_filter(eval_ctx))}
-
-  defp introspect(:apropos, [query], %EvalContext{} = eval_ctx) when is_binary(query),
-    do: {:ok, Introspection.apropos(eval_ctx.prelude, query, introspection_filter(eval_ctx))}
-
-  defp introspect(:doc, [ref], %EvalContext{} = eval_ctx) when is_binary(ref),
-    do: {:ok, Introspection.render_doc(eval_ctx.prelude, ref, introspection_filter(eval_ctx))}
-
-  defp introspect(:export_meta, [ref], %EvalContext{} = eval_ctx) when is_binary(ref),
-    do: {:ok, Introspection.export_meta(eval_ctx.prelude, ref, introspection_filter(eval_ctx))}
-
-  defp introspect(op, args, %EvalContext{}) do
-    name = Map.fetch!(@introspection_names, op)
-    arities = Map.fetch!(@introspection_arities, op)
-
-    if length(args) in arities do
-      {:error, {:type_error, "#{name} expects a string reference", args}}
-    else
-      {:error,
-       {:arity_error,
-        "#{name} expects #{Enum.join(arities, " or ")} argument(s), got #{length(args)}"}}
-    end
-  end
-
-  # The context a converted introspection value is running under, which is the
-  # caller's rather than the one that converted it. Falls back to the captured
-  # context when no host binding is active or the active one carries no
-  # prelude — the run-scoped prelude is identical either way.
-  defp introspection_invocation_context(%EvalContext{} = captured) do
-    case HostContext.current() do
-      {%EvalContext{prelude: nil}, _do_eval} -> captured
-      {%EvalContext{} = active, _do_eval} -> active
-      _other -> captured
-    end
-  end
-
-  # What a program can discover must equal what it can call. The run's
-  # `prelude_export_mask` is the discovery overlay — a namespace absent from it
-  # is unrestricted, and a namespace present in it exposes only its listed
-  # refs. `prelude_ref_visible?/2` is the same predicate the evaluator's
-  # resolution guard uses for `strict_transitive_calls`.
-  defp introspection_filter(%EvalContext{prelude_export_mask: mask} = eval_ctx) do
-    fn %{ref: ref, namespace: namespace} ->
-      mask_visible?(mask, namespace, ref) and EvalContext.prelude_ref_visible?(eval_ctx, ref)
-    end
-  end
-
-  defp mask_visible?(nil, _namespace, _ref), do: true
-
-  defp mask_visible?(mask, namespace, ref) when is_map(mask) do
-    case Map.fetch(mask, namespace) do
-      {:ok, %MapSet{} = refs} -> MapSet.member?(refs, ref)
-      {:ok, refs} when is_list(refs) -> ref in refs
-      {:ok, _other} -> true
-      :error -> true
-    end
-  end
-
-  defp mask_visible?(_mask, _namespace, _ref), do: true
 
   # ============================================================
   # Internal Helpers

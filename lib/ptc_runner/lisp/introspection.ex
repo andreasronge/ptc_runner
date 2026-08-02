@@ -52,10 +52,82 @@ defmodule PtcRunner.Lisp.Introspection do
   something that does not exist is a normal part of exploring.
   """
 
+  alias PtcRunner.Lisp.Eval.Context, as: EvalContext
   alias PtcRunner.Lisp.Prelude
   alias PtcRunner.Lisp.Prelude.Export
 
   @type visible :: (Export.t() -> boolean())
+  @type operation :: :dir | :apropos | :doc | :export_meta
+
+  @operations [:dir, :apropos, :doc, :export_meta]
+  @arities %{dir: [0, 1], apropos: [1], doc: [1], export_meta: [1]}
+  @names %{dir: "dir", apropos: "apropos", doc: "doc", export_meta: "export-meta"}
+
+  @doc "The introspection operations bound as `{:special, op}` builtins."
+  @spec operations() :: [operation()]
+  def operations, do: @operations
+
+  @doc """
+  Validates arguments and answers one introspection call.
+
+  Every call path — direct application and higher-order dispatch — routes
+  through here, so argument faults and answers cannot differ between them.
+  `doc` answers `{:print, text}` because its text belongs on the print channel
+  rather than in the result.
+  """
+  @spec invoke(operation(), [term()], EvalContext.t()) ::
+          {:ok, term()} | {:print, String.t()} | {:error, term()}
+  def invoke(:dir, [], %EvalContext{} = context),
+    do: {:ok, namespaces(context.prelude, filter(context))}
+
+  def invoke(:dir, [namespace], %EvalContext{} = context) when is_binary(namespace),
+    do: {:ok, dir(context.prelude, namespace, filter(context))}
+
+  def invoke(:apropos, [query], %EvalContext{} = context) when is_binary(query),
+    do: {:ok, apropos(context.prelude, query, filter(context))}
+
+  def invoke(:export_meta, [ref], %EvalContext{} = context) when is_binary(ref),
+    do: {:ok, export_meta(context.prelude, ref, filter(context))}
+
+  def invoke(:doc, [ref], %EvalContext{} = context) when is_binary(ref),
+    do: {:print, render_doc(context.prelude, ref, filter(context))}
+
+  def invoke(op, args, %EvalContext{}) when op in @operations do
+    name = Map.fetch!(@names, op)
+    arities = Map.fetch!(@arities, op)
+
+    if length(args) in arities do
+      {:error, {:type_error, "#{name} expects a string reference", args}}
+    else
+      {:error,
+       {:arity_error,
+        "#{name} expects #{Enum.join(arities, " or ")} argument(s), got #{length(args)}"}}
+    end
+  end
+
+  # What a program can discover must equal what it can call. The run's
+  # `prelude_export_mask` is the discovery overlay — a namespace absent from it
+  # is unrestricted, and a namespace present in it exposes only its listed
+  # refs. `prelude_ref_visible?/2` is the same predicate the evaluator's
+  # resolution guard applies under `strict_transitive_calls`.
+  defp filter(%EvalContext{prelude_export_mask: mask} = context) do
+    fn %{ref: ref, namespace: namespace} ->
+      mask_visible?(mask, namespace, ref) and EvalContext.prelude_ref_visible?(context, ref)
+    end
+  end
+
+  defp mask_visible?(nil, _namespace, _ref), do: true
+
+  defp mask_visible?(mask, namespace, ref) when is_map(mask) do
+    case Map.fetch(mask, namespace) do
+      {:ok, %MapSet{} = refs} -> MapSet.member?(refs, ref)
+      {:ok, refs} when is_list(refs) -> ref in refs
+      {:ok, _other} -> true
+      :error -> true
+    end
+  end
+
+  defp mask_visible?(_mask, _namespace, _ref), do: true
 
   @doc "Sorted namespace names holding at least one visible export."
   @spec namespaces(Prelude.t() | nil, visible()) :: [String.t()]

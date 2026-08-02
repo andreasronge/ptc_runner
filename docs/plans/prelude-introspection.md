@@ -75,9 +75,17 @@ Keyword keys, matching the `cap/describe` envelope convention.
  :call "(inspection/model-exchanges run-id cursor)"
  :doc "..."
  :visibility :discoverable
- :effect :read
  :signature "(run-id :string, cursor :string?) -> {...}"}
 ```
+
+**No effect is reported.** `Export.effect` is the compile-time declaration; the
+authoritative value is the mission-resolved effect `MissionInventory` publishes,
+which joins the declaration with the effects of the capabilities an export
+reaches — a wrapper declaring `:read` over a `:write` capability resolves to
+`:write`. That join needs the mission capability set, which the Lisp layer does
+not have. Reporting the declared value would contradict the inventory in the
+direction that invites repeating an irreversible call, so the inventory stays
+the single place an effect is stated.
 
 Field rules:
 
@@ -86,9 +94,8 @@ Field rules:
 - Variadic functions report `:arity :variadic` and keep `"&"` in `:params`.
 - `:signature`/`:type` are omitted entirely when undeclared, not set to `nil`.
 - `:doc` is `nil` when the export has no docstring.
-- `:effect` is always present, `:unknown` included.
-- `Export.tool_refs`, `requires`, `min_arity`, `declared_effect`, and the
-  `parsed_*` fields stay internal — they describe capability wiring, not the
+- `Export.effect`, `tool_refs`, `requires`, `min_arity`, `declared_effect`, and
+  the `parsed_*` fields stay internal — they describe capability wiring, not the
   calling contract.
 
 ### `doc` rendering
@@ -97,7 +104,6 @@ Field rules:
 inspection/model-exchanges
 (inspection/model-exchanges run-id cursor)
   (run-id :string, cursor :string?) -> {items [...], next_cursor :string?}
-  effect: read
 
   Correlated model exchanges for one run, one page per call.
 ```
@@ -248,23 +254,30 @@ inventory form from drifting; without the move they are two copies.
   `{:ok, nil, EvalContext.append_print(eval_ctx, rendered)}` exactly as
   `println` does.
 - **One shared invocation helper for both call paths.** The direct dispatcher
-  returns `{:error, {:type_error, …}}` tuples; a HOF bridge cannot — it must
-  raise through `HostContext.error!/1` (`eval/host_context.ex:89`). Route both
-  through a single `invoke(op, args, eval_ctx)` that validates argument count
-  and string-ness once and produces the canonical reason, so a bridge cannot
-  leak a raw `FunctionClauseError` from `Introspection` misreported as a `map`
-  failure.
-- **`closure_to_fun/3` bridge per form — required, not optional.**
-  `Runtime.Callable.call/2` has no `{:special, _}` clause and no `EvalContext`,
-  so a special reaching HOF position via `closure_to_fun`'s pass-through clause
-  errors. Verified: `(map println [1 2 3])` works only because
-  `apply.ex:782` has a bespoke `{:special, :println}` bridge, while
-  `(map apply [1 2])` — a special with no bridge — returns an error.
-  The three read-only bridges are pure closures over `eval_ctx.prelude`. The
-  `doc` bridge mirrors `println`'s: it calls `EvalContext.append_print/2`,
-  discards the returned struct, and relies on the process-scoped
-  `Capture.record_print/1` side channel (`eval/context.ex:365`) for the print to
-  survive.
+  returns `{:error, {:type_error, …}}` tuples; the higher-order path cannot — it
+  must raise through `HostContext.error!/1` (`eval/host_context.ex:89`). Route
+  both through `Introspection.invoke/3`, which validates argument count and
+  string-ness once and produces the canonical reason, so higher-order use cannot
+  leak a raw `FunctionClauseError` misreported as a `map` failure.
+- **Higher-order dispatch belongs in `Runtime.Callable.call/2`, not a
+  `closure_to_fun/3` bridge.** A special reaching higher-order position via
+  `closure_to_fun`'s pass-through clause errors today: `(map println [1 2 3])`
+  works only because `apply.ex` has a bespoke `{:special, :println}` bridge,
+  while `(map apply [1 2])` — a special with no bridge — fails. A bridge is the
+  wrong shape here for two reasons a review caught:
+  a BEAM function has one arity, so a unary wrapper drops `dir`'s zero-argument
+  form and `(let [f (identity dir)] (f))` fails an arity `(dir)` accepts; and a
+  closure capturing its converting context lets a privileged prelude export hand
+  session-authored code the prelude's unrestricted view under
+  `strict_transitive_calls`.
+  So these values are **not** converted. They stay binding tuples, and
+  `Runtime.Callable.call/2` gains a `{:special, op}` clause that dispatches from
+  the argument list and takes its context from `HostContext.current/0` — the
+  same pattern `%RuntimeCallable{}` already uses for `tool/` values. Arity and
+  visibility are both resolved at call time. `doc` reaches the print channel
+  through `EvalContext.append_print/2`, whose `Capture.record_print/1` side
+  channel (`eval/context.ex:365`) carries the print even where the returned
+  struct is discarded.
 - `lib/ptc_runner/lisp/runtime/args.ex` — extend `valid_callable?/1`.
 - `Runtime.Predicates.type_of/1` (`predicates.ex:364`) and `Runtime.Describe`
   (`describe.ex:575`) match `{tag, _, _}` — a **three**-element tuple — for

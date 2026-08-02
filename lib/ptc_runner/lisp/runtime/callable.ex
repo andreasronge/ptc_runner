@@ -17,8 +17,10 @@ defmodule PtcRunner.Lisp.Runtime.Callable do
   """
 
   alias PtcRunner.Lisp.Env.Builtin
+  alias PtcRunner.Lisp.Eval.Context, as: EvalContext
   alias PtcRunner.Lisp.Eval.Helpers
   alias PtcRunner.Lisp.Eval.HostContext
+  alias PtcRunner.Lisp.Introspection
   alias PtcRunner.Lisp.Java.Callable, as: JavaCallable
   alias PtcRunner.Lisp.Java.Condition, as: JavaCondition
   alias PtcRunner.Lisp.Java.Primitive, as: JavaPrimitive
@@ -53,6 +55,19 @@ defmodule PtcRunner.Lisp.Runtime.Callable do
   end
 
   def call(%RuntimeCallable{} = callable, args), do: RuntimeCallable.call(callable, args)
+
+  # Prelude introspection builtins. Like `%RuntimeCallable{}`, these need the
+  # evaluator context — for the attached prelude and the run's visibility
+  # filter — so they stay binding tuples instead of being converted to BEAM
+  # functions. Dispatching from `args` preserves `dir`'s zero- and one-argument
+  # forms, and taking the context from `HostContext` resolves visibility
+  # against the caller that is running the value, not whoever converted it.
+  def call({:special, op}, args) when op in [:dir, :apropos, :doc, :export_meta] do
+    case HostContext.current() do
+      {%EvalContext{} = context, _do_eval} -> introspect(op, args, context)
+      nil -> HostContext.error!({:type_error, "#{op} requires an evaluator context", args})
+    end
+  end
 
   def call(%JavaCallable{} = callable, args) do
     case JavaCallable.invoke(callable, args) do
@@ -184,6 +199,22 @@ defmodule PtcRunner.Lisp.Runtime.Callable do
     case JavaPrimitive.prepare_arguments(name, args) do
       {:ok, values} -> values
       {:error, :invalid_java_value} -> HostContext.error!({:invalid_java_value, :primitive})
+    end
+  end
+
+  # A callable cannot return an error tuple, so an argument fault raises the
+  # same canonical reason the direct dispatcher reports.
+  defp introspect(op, args, context) do
+    case Introspection.invoke(op, args, context) do
+      {:ok, value} ->
+        value
+
+      {:print, text} ->
+        _updated_context = EvalContext.append_print(context, text)
+        nil
+
+      {:error, reason} ->
+        HostContext.error!(reason)
     end
   end
 
