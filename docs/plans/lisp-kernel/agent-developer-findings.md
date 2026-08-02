@@ -7,9 +7,10 @@ prelude-layering section are resolved in `main` by
 [PR #1162](https://github.com/andreasronge/ptc_runner/pull/1162) (`3dddb84c`).
 Findings 2, 3, and 6 are resolved there too, none of them by this branch's work:
 `main` landed its own union fix, `describe/1` predates the branch split, and
-finding 6 shipped in `ba983f95`. Finding 1 is still open in
-[#1161](https://github.com/andreasronge/ptc_runner/issues/1161). Findings 7–9
-are unstarted.
+finding 6 shipped in `ba983f95`. Findings 7 and 8 are fixed by this branch's
+declared vocabularies and are not in `main`. Finding 1 is still open in
+[#1161](https://github.com/andreasronge/ptc_runner/issues/1161). Finding 9 is
+unstarted.
 
 Read [the trace-analysis handoff](analysis-tooling-handoff.md) first — it is
 the entry point for this branch and records what shipped, what is unlanded, and
@@ -33,8 +34,8 @@ architecture invariant that was undocumented until a change violated it.
 | 4 | Analysis preludes turn a rejected query into an empty result | **fixed in `main`** (#1162) |
 | 5 | No shared pagination traversal | **fixed in `main`** (#1162) |
 | 6 | Private inspection is interactive-only | **fixed in `ba983f95`** |
-| 7 | Canonical annotation vocabulary is closed | open |
-| 8 | Application failure kinds are fingerprinted, not named | open |
+| 7 | Canonical annotation vocabulary is closed | fixed on this branch (`d963ffc1`) |
+| 8 | Application failure kinds are fingerprinted, not named | fixed on this branch (`d963ffc1`) |
 | 9 | Verification cannot run inside the agent loop | open |
 | — | Leaf preludes must not depend on leaf preludes | **withdrawn** — see below |
 
@@ -270,32 +271,76 @@ This touches the CLI surface owned by
 [`stable-cli-contract.md`](stable-cli-contract.md) and should be sequenced with
 it.
 
-## 7. Canonical annotation vocabulary is closed
+## 7 and 8. Application vocabularies were closed — fixed, unlanded
 
-`SafeMetadata.annotation?/2` admits only `progress` with a single `stage` key
-and `agent-action` with `turn`/`kind`. An application-level verification
-outcome — how many citations were checked, how many failed to resolve — cannot
-reach a normal trace. Rejected annotations fail silently from Lisp, since
-`workflow.event/annotate` discards the response.
+Recorded together because they turned out to be one mechanism, not two.
 
-The incident compiler emits `validating` then `completed`/`failed` so its
-refusal is observable at all, and keeps the counts in the failure value.
+`SafeMetadata.annotation?/2` admitted only `progress` with a single `stage` key
+and `agent-action` with `turn`/`kind`, so an application-level verification
+outcome — how many citations were checked, how many failed to resolve — could
+not reach a normal trace at all. Separately, a refusal surfaced only as
+`failure_kind_fingerprint`, so a reader could not distinguish
+`unresolved-citations` from any other application failure. The incident
+compiler worked around both by emitting `validating` then `completed`/`failed`
+and keeping the counts in the failure value — which `runner.ex` then replaced
+with the taxonomy, so the counts never reached the host either.
 
-**Proposed:** either a bounded application-annotation type with a closed value
-grammar (bounded name, small integer counters), or accept the limit and
-document that application-level outcomes belong in the result value. Making
-`annotate` fail on rejection would at least surface authoring mistakes.
+**Fixed in `d963ffc1`**, with `90c93ec0`, `0c9ab6ff`, and `24bfc17a` following
+from review. A namespace declares both vocabularies in its `(ns ...)` metadata:
 
-## 8. Application failure kinds are fingerprinted, not named
+```clojure
+(ns incident.compiler "..."
+  {:failure-kinds ["unresolved-citations" ...]
+   :annotations {"citations-verified" ["checked" "unresolved" "mismatched"]}})
+```
 
-A refusal surfaces publicly as `failure_kind_fingerprint`, so a reader cannot
-distinguish `unresolved-citations` from any other application failure without
-computing the fingerprint. Correct for privacy, awkward for an application
-whose entire point is a legible refusal.
+Declared kinds are named in the public taxonomy and in `run-stopped`;
+everything else keeps fingerprinting, so an omitted declaration preserves the
+previous behaviour exactly. A declared annotation carries nothing but its
+declared counters, each a non-negative integer no greater than 65535.
 
-**Proposed:** allow a manifest to declare a small closed vocabulary of its own
-failure kinds, admitting those to the public taxonomy while everything else
-keeps fingerprinting. Unspecified is fine too; recorded because it recurs.
+Three things the design settled that the original proposals had wrong:
+
+- **Declaration belongs to the component, not the manifest.** Finding 8
+  proposed a manifest key. Putting it in the `(ns ...)` metadata keeps the
+  vocabulary beside the `fail`/`annotate` calls that emit it, covers it with
+  the component source hash, and avoids restating it in every manifest that
+  selects the component. The declaration is bundle-wide in effect — the
+  vocabulary is the union across namespaces — so co-location is a convention
+  against drift, not a scope boundary.
+- **A caller-supplied name is not needed.** Finding 7 proposed a "bounded
+  name", which would have been the first caller-chosen string in a canonical
+  annotation and collided with the payload-free invariant. Declaring the type
+  name instead means every name comes from the frozen bundle.
+- **Naming a declared kind gives up no privacy.** `fingerprint/1` is unsalted,
+  so anyone holding the trace and the component can precompute a closed
+  declared set and match it. The fingerprint only ever protected values an
+  observer could not enumerate. That reasoning holds precisely because the set
+  is closed and fixed at compile time.
+
+The premise that "rejected annotations fail silently from Lisp, since
+`workflow.event/annotate` discards the response" was **wrong**. The prelude
+returns the tool response, and `core_contract_test.exs` already asserted the
+error map reaches the caller. What discarded it were the call sites —
+`agent.core.clj` and the incident compiler both call `annotate` in statement
+position. The rejection is still invisible in the *trace*, which is the part
+worth keeping in mind.
+
+Verified against a live model: four incidents through `gemini-3.1-flash-lite`,
+one refusal reading `unresolved-citations` with
+`{"checked" 5 "unresolved" 1 "mismatched" 0}` through `log-analysis-v2`.
+`trace_log.ex`'s run projection carried neither taxonomy field before this, so
+the fingerprint had been invisible to the analysis profile too.
+
+**Still open here:** nothing verifies a declaration against the kinds the code
+actually emits, so a new `fail` silently fingerprints. `result/error`'s first
+argument is a literal keyword at every call site and the compiler already walks
+ASTs for `tool_refs`/`effects`, so extraction is tractable — but this repo's
+raw-AST walkers fail open on `short_fn` and reader-macro leaves, which for a
+completeness check means silently reporting "no drift". Coverage is also one
+call site: mission and subordinate failures still fingerprint, and annotations
+are not indexed, so grouping by kind means fetching runs and folding
+client-side.
 
 ## 9. Verification cannot run inside the agent loop
 
@@ -409,6 +454,7 @@ home:
 The finding 4 and 5 prototype was superseded by #1162, which shipped both fixes
 in better form. Those obsolete modifications are not part of this branch.
 
+<<<<<<< HEAD
 Finding 2 landed on `main` independently as `selected_branches/3`, which also
 resolves branch identity through `evaluationPath`. This branch's version was
 superseded and dropped when it rebased; only its regression tests were kept.
@@ -419,6 +465,11 @@ behind `CommandContractAuthority` rather than path strings. Re-landing it means
 re-implementing it on that structure, not replaying the commit — which is why
 it was skipped rather than merged during a conflict resolution. #1161 remains
 the tracking issue.
+
+The declared vocabularies that closed findings 7 and 8 are this branch's work
+and are not in `main`. They depend on the sandbox tool-grant fix that
+introduced `Environment.capability_view/1`, which is where the annotate route
+reads its declaration; the vocabulary commits do not apply without it.
 
 ## Suggested order
 
@@ -432,7 +483,10 @@ the tracking issue.
    `segments`/`CommandContractAuthority` violation model.
 6. ~~**Finding 6**, sequenced with the stable CLI plan.~~ Done in `ba983f95`;
    the CLI plan was amended rather than sequenced against.
-7. Findings 7–9 as separate design work.
+7. ~~**Findings 7 and 8** as separate design work.~~ Done on this branch
+   (`d963ffc1`), as one mechanism rather than two.
+8. **Finding 9** as separate design work; it is the only one still open, and
+   the largest.
 
 ## Related documents
 
@@ -447,4 +501,7 @@ the tracking issue.
   — now documents dependency scoping, that evaluated source sees the whole
   bundle, and the `cap` / `*.core` / `*.analysis` layering.
 - `incident_compiler/README.md` — records findings 1, 7, 8, and 9 as they were
-  hit, with the live-run evidence.
+  hit, with the live-run evidence, and their current state.
+- [`../../guides/components-and-preludes.md`](../../guides/components-and-preludes.md)
+  — normative for the `:failure-kinds` / `:annotations` declaration surface
+  that closed findings 7 and 8.

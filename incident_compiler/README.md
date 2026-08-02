@@ -294,20 +294,25 @@ coverage:
 ## Findings for the plan
 
 Phase 1 exists partly to discover what the runtime cannot yet express. Five
-things surfaced while building it; the last two exposed runtime correction and
-prompt gaps this branch fixes:
+things surfaced while building it; all but the third are runtime gaps this
+branch fixes:
 
-1. **The canonical annotation vocabulary is closed.** `SafeMetadata` admits
+1. **The canonical annotation vocabulary was closed.** `SafeMetadata` admitted
    only `progress` and `agent-action`, and `progress` carries a single `stage`
-   key. An application-level verification outcome — how many citations were
-   checked, how many failed to resolve — cannot be published to a normal
-   trace. The compiler emits `validating` and then `completed` or `failed`, so
-   the refusal is observable, but the counts stay in the failure value.
-2. **Application failure kinds are fingerprinted, not named.** A refusal
-   surfaces publicly as `failure_kind_fingerprint`, so a reader cannot tell
+   key, so an application-level verification outcome — how many citations were
+   checked, how many failed to resolve — could not be published to a normal
+   trace. The compiler emitted `validating` and then `completed` or `failed`
+   and kept the counts in the failure value, where the Kernel then dropped
+   them. Fixed together with the next item.
+2. **Application failure kinds were fingerprinted, not named.** A refusal
+   surfaced publicly as `failure_kind_fingerprint`, so a reader could not tell
    `unresolved-citations` from any other application failure without computing
-   the fingerprint. That is correct for privacy and awkward for an application
-   whose whole point is a legible refusal.
+   the fingerprint — correct for privacy, awkward for an application whose
+   whole point is a legible refusal. Fixed by one mechanism covering both: a
+   namespace declares its closed vocabularies in `(ns ...)` metadata, and this
+   compiler declares its three failure kinds and a `citations-verified`
+   annotation carrying `checked`/`unresolved`/`mismatched`. A refused run now
+   reads as `unresolved-citations` with its counts in a normal trace.
 3. **Verification cannot run inside the agent loop.** Mission capabilities are
    unreachable from the workflow except through `kernel/eval-source`, and the
    loop's only in-loop validation hook is the result contract. Citation
@@ -341,7 +346,8 @@ prompt gaps this branch fixes:
    available to workflows. This compiler inserts that generated description
    into its task instead of hand-writing the report key set.
 
-The first two are small. The third is the difference between "the model gets
+The first two turned out to be one mechanism and are fixed together. The third
+is the only one still open, and it is the difference between "the model gets
 one chance to fix a fabricated citation" and "the run is lost." The fourth was
 silently degrading every correction turn any tagged-union contract has ever
 run, and is fixed. The fifth is fixed by the generated contract-description

@@ -233,8 +233,13 @@ path with descending counters, and `kernel/result-contract-description` reaches
 the compiled shape. Both remain unlanded, and issue #1161 does not yet
 reference them.
 
-Still open and tracked in `agent-developer-findings.md`: findings 7–9
-(annotation vocabulary, failure-kind fingerprinting, in-loop verification).
+Findings 7 and 8 (annotation vocabulary, failure-kind fingerprinting) are also
+fixed on this branch, by `d963ffc1` and its three review follow-ups: a
+namespace declares both closed vocabularies in its `(ns ...)` metadata, so a
+refusal names itself and carries its counts into a normal trace. Also unlanded.
+
+Still open and tracked in `agent-developer-findings.md`: finding 9, in-loop
+verification.
 
 ## Known flaky tests
 
