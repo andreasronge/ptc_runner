@@ -159,7 +159,11 @@ defmodule PtcRunner.Lisp.Eval.Helpers do
   # error formatting when a builtin is used as a value, e.g. `(first filter)`.
   # Surface them as "function" rather than the leaky "unknown".
   def describe_type({tag, _}) when tag in [:normal, :collect], do: "function"
-  def describe_type({:special, name}) when is_atom(name), do: "function"
+
+  def describe_type({:special, name})
+      when name in [:dir, :apropos, :doc, :export_meta, :println],
+      do: "function"
+
   def describe_type({:juxt_fn, fns}) when is_list(fns), do: "function"
   def describe_type({tag, _}) when tag in [:complement_fn, :constantly_fn], do: "function"
 

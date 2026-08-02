@@ -349,10 +349,11 @@ defmodule PtcRunner.Lisp.IntrospectionTest do
       assert eval!(~S|(get (describe doc) :type)|, prelude).return == "function"
     end
 
-    test "apply is a function too", %{prelude: prelude} do
-      # Same two-element `{:special, _}` binding shape; it was reported as a
-      # non-function before the shape was recognized.
-      assert eval!(~S|(fn? apply)|, prelude).return == true
+    test "apply stays a non-function because it has no value position", %{prelude: prelude} do
+      # `apply` shares the two-element `{:special, _}` binding shape but has no
+      # higher-order dispatch, so classifying it callable would promise a
+      # position it cannot be used in.
+      assert eval!(~S|(fn? apply)|, prelude).return == false
     end
   end
 

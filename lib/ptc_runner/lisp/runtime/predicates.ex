@@ -79,7 +79,8 @@ defmodule PtcRunner.Lisp.Runtime.Predicates do
   end
 
   # Context-dispatched builtins are callable, so fnil must accept them too.
-  def fnil({:special, name} = callable, default) when is_atom(name) do
+  def fnil({:special, name} = callable, default)
+      when name in [:dir, :apropos, :doc, :export_meta, :println] do
     {:fnil_fn, callable, default}
   end
 
@@ -366,7 +367,7 @@ defmodule PtcRunner.Lisp.Runtime.Predicates do
       {tag, fns} when tag in [:comp_fn, :every_pred_fn, :some_fn] and is_list(fns) -> :function
       {:partial_fn, _f, fixed} when is_list(fixed) -> :function
       {:fnil_fn, _f, _default} -> :function
-      {:special, name} when is_atom(name) -> :function
+      {:special, name} when name in [:dir, :apropos, :doc, :export_meta, :println] -> :function
       {tag, _, _} when tag in [:variadic, :variadic_nonempty, :multi_arity, :special] -> :function
       _ -> :unknown
     end
