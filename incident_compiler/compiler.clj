@@ -1,6 +1,13 @@
 (ns incident.compiler
   "Compiles incident evidence into a report whose claims resolve to evidence."
-  {:visibility :prompt})
+  {:visibility :prompt
+   ;; The closed vocabularies this namespace emits. Declared beside the
+   ;; `fail` and `annotate` calls below so a canonical trace can name a
+   ;; refusal and carry its counts without either drifting from the code.
+   :failure-kinds ["unresolved-citations"
+                   "citation-verification-refused"
+                   "citation-verification-failed"]
+   :annotations {"citations-verified" ["checked" "unresolved" "mismatched"]}})
 
 (defn- result-shape []
   (let [description (kernel/result-contract-description)]
@@ -112,12 +119,17 @@
       :else
       (let [_ (workflow.event/annotate "progress" {"stage" "validating"})
             resolution (resolve-citations incident-id citations)
-            grounded? (and (empty? (get resolution "unresolved"))
-                           (empty? (get resolution "mismatched")))]
-        ;; The canonical annotation vocabulary is closed to `progress` and
-        ;; `agent-action`, so the resolution counts cannot be published here.
-        ;; The stage transition is what makes the refusal visible in a normal
-        ;; trace; the counts stay in the failure value.
+            unresolved (get resolution "unresolved")
+            mismatched (get resolution "mismatched")
+            grounded? (and (empty? unresolved) (empty? mismatched))]
+        ;; Counts only. The identifiers stay in the failure value; how many
+        ;; citations were checked and how many failed is what a reader needs
+        ;; to tell one fabricated reference from a wholly invented corpus.
+        (workflow.event/annotate
+          "citations-verified"
+          {"checked" (get resolution "checked")
+           "unresolved" (count unresolved)
+           "mismatched" (count mismatched)})
         (workflow.event/annotate
           "progress"
           {"stage" (if grounded? "completed" "failed")})

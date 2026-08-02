@@ -44,6 +44,8 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
   alias PtcRunner.Sandbox
 
   @default_visibility :prompt
+  @vocabulary_name ~r/\A[a-z][a-z0-9-]{0,63}\z/
+  @max_vocabulary 16
   @valid_effects [:read, :write, :unknown]
   @max_contract_errors 16
   @max_contract_diagnostic_bytes 4_096
@@ -470,17 +472,24 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
   end
 
   # (ns name) | (ns name "doc") | (ns name "doc" {meta}) | (ns name {meta})
-  defp ns_metadata([]), do: {:ok, %{doc: nil, visibility: @default_visibility}}
+  defp ns_metadata([]), do: {:ok, empty_ns_metadata(nil)}
 
-  defp ns_metadata([{:string, doc}]),
-    do: {:ok, %{doc: doc, visibility: @default_visibility}}
+  defp ns_metadata([{:string, doc}]), do: {:ok, empty_ns_metadata(doc)}
 
   defp ns_metadata([{:map, _} = meta_ast]), do: ns_metadata([{:string, nil}, meta_ast])
 
   defp ns_metadata([{:string, doc}, {:map, pairs}]) do
     with {:ok, meta} <- normalize_meta(pairs),
-         {:ok, visibility} <- visibility(Map.get(meta, "visibility")) do
-      {:ok, %{doc: doc, visibility: visibility}}
+         {:ok, visibility} <- visibility(Map.get(meta, "visibility")),
+         {:ok, failure_kinds} <- failure_kinds(Map.get(meta, "failure-kinds")),
+         {:ok, annotations} <- annotations(Map.get(meta, "annotations")) do
+      {:ok,
+       %{
+         doc: doc,
+         visibility: visibility,
+         failure_kinds: failure_kinds,
+         annotations: annotations
+       }}
     end
   end
 
@@ -1440,6 +1449,93 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
   defp meta_value({:string, s}), do: s
   defp meta_value({:vector, elems}), do: Enum.map(elems, &meta_value/1)
   defp meta_value(other), do: other
+
+  defp empty_ns_metadata(doc),
+    do: %{doc: doc, visibility: @default_visibility, failure_kinds: [], annotations: %{}}
+
+  # A namespace may declare the closed vocabularies its own code emits: the
+  # application failure kinds a public taxonomy may name, and the annotation
+  # types a canonical trace may carry with their permitted counter names.
+  # Declared here rather than in a manifest so the vocabulary lives beside the
+  # code that emits it and is covered by the component's source hash. Shape is
+  # all this layer checks; the Kernel decides what a declaration authorises.
+  defp failure_kinds(nil), do: {:ok, []}
+
+  defp failure_kinds(kinds) when is_list(kinds) and length(kinds) <= @max_vocabulary do
+    if Enum.all?(kinds, &vocabulary_name?/1) and kinds == Enum.uniq(kinds) do
+      {:ok, kinds}
+    else
+      {:error,
+       ValidationError.new(
+         :invalid_metadata,
+         ":failure-kinds must be unique bounded lowercase kebab-case names"
+       )}
+    end
+  end
+
+  defp failure_kinds(_kinds) do
+    {:error,
+     ValidationError.new(
+       :invalid_metadata,
+       ":failure-kinds must be a vector of at most #{@max_vocabulary} names"
+     )}
+  end
+
+  defp annotations(nil), do: {:ok, %{}}
+
+  defp annotations({:map, pairs}) when length(pairs) <= @max_vocabulary do
+    Enum.reduce_while(pairs, {:ok, %{}}, fn {key_ast, value_ast}, {:ok, acc} ->
+      with {:ok, type} <- annotation_type(meta_value(key_ast)),
+           {:ok, counters} <- annotation_counters(meta_value(value_ast)),
+           false <- Map.has_key?(acc, type) do
+        {:cont, {:ok, Map.put(acc, type, counters)}}
+      else
+        true -> {:halt, {:error, duplicate_annotation_error()}}
+        {:error, _reason} = error -> {:halt, error}
+      end
+    end)
+  end
+
+  defp annotations(_value) do
+    {:error,
+     ValidationError.new(
+       :invalid_metadata,
+       ":annotations must be a map of at most #{@max_vocabulary} type names to counter vectors"
+     )}
+  end
+
+  defp annotation_type(type) when is_binary(type) do
+    if vocabulary_name?(type),
+      do: {:ok, type},
+      else: {:error, invalid_annotation_error()}
+  end
+
+  defp annotation_type(_type), do: {:error, invalid_annotation_error()}
+
+  defp annotation_counters(counters)
+       when is_list(counters) and counters != [] and length(counters) <= @max_vocabulary do
+    if Enum.all?(counters, &vocabulary_name?/1) and counters == Enum.uniq(counters) do
+      {:ok, counters}
+    else
+      {:error, invalid_annotation_error()}
+    end
+  end
+
+  defp annotation_counters(_counters), do: {:error, invalid_annotation_error()}
+
+  defp invalid_annotation_error do
+    ValidationError.new(
+      :invalid_metadata,
+      ":annotations maps a bounded lowercase kebab-case type name to a non-empty vector of unique counter names"
+    )
+  end
+
+  defp duplicate_annotation_error do
+    ValidationError.new(:invalid_metadata, ":annotations declares a type more than once")
+  end
+
+  defp vocabulary_name?(name) when is_binary(name), do: name =~ @vocabulary_name
+  defp vocabulary_name?(_name), do: false
 
   # Visibility value comes through as `{:keyword, "prompt"}` after normalize.
   defp visibility(nil), do: {:ok, @default_visibility}

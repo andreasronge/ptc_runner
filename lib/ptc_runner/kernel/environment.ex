@@ -10,6 +10,7 @@ defmodule PtcRunner.Kernel.Environment do
   alias PtcRunner.Kernel.Capability
   alias PtcRunner.Kernel.FrozenBundle
   alias PtcRunner.Kernel.JSONValue
+  alias PtcRunner.Kernel.SafeMetadata
 
   @reserved ~w(
     kernel-check-source kernel-eval kernel-mission-inventory
@@ -34,6 +35,45 @@ defmodule PtcRunner.Kernel.Environment do
   end
 
   @doc """
+  Returns the closed vocabularies the environment's components declare.
+
+  A namespace declares the application failure kinds and annotation types its
+  own code emits, so the vocabulary is covered by the component source hash
+  and cannot drift from the `fail`/`annotate` calls beside it. The union is
+  taken across namespaces and filtered here rather than trusted: a name that
+  is not declarable, or that would shadow a framework failure kind, is
+  dropped, so the worst a malformed declaration can do is leave a value
+  fingerprinted or an annotation rejected.
+  """
+  @spec vocabulary(term()) :: %{failure_kinds: [binary()], annotations: %{binary() => [binary()]}}
+  def vocabulary(%{bundle: %FrozenBundle{prelude: %{metadata: %{namespaces: namespaces}}}})
+      when is_map(namespaces) do
+    namespaces
+    |> Map.values()
+    |> Enum.reduce(%{failure_kinds: [], annotations: %{}}, fn declared, acc ->
+      %{
+        failure_kinds:
+          acc.failure_kinds ++
+            Enum.filter(
+              Map.get(declared, :failure_kinds, []),
+              &SafeMetadata.declarable_failure_kind?/1
+            ),
+        annotations: Map.merge(acc.annotations, declarable_annotations(declared))
+      }
+    end)
+    |> Map.update!(:failure_kinds, &(&1 |> Enum.uniq() |> Enum.sort()))
+  end
+
+  def vocabulary(_environment), do: %{failure_kinds: [], annotations: %{}}
+
+  defp declarable_annotations(declared) do
+    declared
+    |> Map.get(:annotations, %{})
+    |> Enum.filter(fn {type, counters} -> SafeMetadata.declarable_annotation?(type, counters) end)
+    |> Map.new()
+  end
+
+  @doc """
   Returns the whole-environment capability view.
 
   Dispatch and the runtime routes read nothing but `:capabilities`. Callbacks
@@ -46,7 +86,12 @@ defmodule PtcRunner.Kernel.Environment do
   map from each of them costs the hand-over `O(capabilities²)`, which a
   tool-rich MCP environment blows the sandbox setup ceiling with.
   """
-  def capability_view(%{capabilities: capabilities}), do: %{capabilities: capabilities}
+  # The whole-environment view also carries the declared annotation vocabulary.
+  # The runtime annotate route needs it and must not capture the environment —
+  # the bundle behind it dominates the spawn copy. The vocabulary is at most 16
+  # types of at most 16 bounded names, so carrying it costs nothing measurable.
+  def capability_view(%{capabilities: capabilities} = environment),
+    do: %{capabilities: capabilities, annotations: vocabulary(environment).annotations}
 
   @doc """
   Returns the single-capability view one dispatch callback needs.

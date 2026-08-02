@@ -46,7 +46,7 @@ defmodule PtcRunner.Kernel.RuntimeTools do
       when kind in [:workflow, :mission] do
     @mission_routes
     |> Map.new(fn {name, route} -> {name, route_callback(route, state, environment)} end)
-    |> maybe_put_annotation(state, event_sink, kind)
+    |> maybe_put_annotation(state, environment, event_sink, kind)
     |> Map.new(fn {name, callback} ->
       {name, instrument(state, event_sink, kind, name, callback, evaluation_id)}
     end)
@@ -474,21 +474,25 @@ defmodule PtcRunner.Kernel.RuntimeTools do
   defp route_callback(:capability_description, state, environment),
     do: fn arguments -> capability_description(state, environment, arguments) end
 
-  defp maybe_put_annotation(tools, state, event_sink, :workflow) do
+  defp maybe_put_annotation(tools, state, environment, event_sink, :workflow) do
+    # Read off the view, not the environment: the declaration is fixed by the
+    # frozen bundle, and a callback must not capture the bundle behind it.
+    declared = Map.get(environment, :annotations, %{})
+
     Map.put(tools, "workflow-annotate", fn arguments ->
-      annotate(state, event_sink, arguments)
+      annotate(state, declared, event_sink, arguments)
     end)
   end
 
-  defp maybe_put_annotation(tools, _state, _event_sink, :mission), do: tools
+  defp maybe_put_annotation(tools, _state, _environment, _event_sink, :mission), do: tools
 
-  defp annotate(state, event_sink, %{"type" => type, "data" => data})
+  defp annotate(state, declared, event_sink, %{"type" => type, "data" => data})
        when is_binary(type) do
     limit = RunState.limits(state).event_payload_bytes
     payload = %{annotation_type: type, data: data, provenance: :workflow}
     bytes = RetainedSize.bytes_with_cap(payload, limit)
 
-    if SafeMetadata.annotation?(type, data) and is_integer(bytes) and bytes <= limit do
+    if SafeMetadata.annotation?(type, data, declared) and is_integer(bytes) and bytes <= limit do
       case Events.emit(state, event_sink, "workflow-annotation", payload) do
         :ok -> %{status: :ok}
         {:error, :event_sink_error} -> %{status: :error, kind: :event_sink_error}
@@ -502,7 +506,7 @@ defmodule PtcRunner.Kernel.RuntimeTools do
     end
   end
 
-  defp annotate(state, _event_sink, _arguments),
+  defp annotate(state, _declared, _event_sink, _arguments),
     do: protocol_error(state, :invalid_workflow_annotation)
 
   defp protocol_error(state, reason) do

@@ -19,6 +19,10 @@ defmodule PtcRunner.Kernel.SafeMetadata do
   }
   @identifier ~r/\A[A-Za-z0-9][A-Za-z0-9._:\/@+-]{0,255}\z/
   @fingerprint ~r/\Asha256:[0-9a-f]{64}\z/
+  @declarable_failure_kind ~r/\A[a-z][a-z0-9-]{0,63}\z/
+  @canonical_annotations ~w(progress agent-action)
+  @max_counter 65_535
+  @max_vocabulary 16
   @progress_stages ~w(started planning executing validating completed failed)
   @agent_action_kinds ~w(tool-call protocol-error provider-error)
   @failure_kinds ~w(
@@ -61,9 +65,9 @@ defmodule PtcRunner.Kernel.SafeMetadata do
   @doc "Returns whether a value is an already-normalized canonical-label map."
   def labels?(labels), do: match?({:ok, ^labels}, normalize_labels(labels))
 
-  @spec annotation?(term(), term()) :: boolean()
+  @spec annotation?(term(), term(), %{binary() => [binary()]}) :: boolean()
   @doc """
-  Returns whether an annotation belongs to the finite canonical vocabulary.
+  Returns whether an annotation belongs to a finite canonical vocabulary.
 
   `"progress"` carries exactly one enumerated `stage`. `"agent-action"` is
   the shipped agent loop's coarse per-turn record: exactly the keys `turn`
@@ -72,34 +76,102 @@ defmodule PtcRunner.Kernel.SafeMetadata do
   It never carries detailed reasons, generated source, or model content —
   those stay in the agent's own history and, when enabled, in private
   inspection records.
+
+  `declared` adds the annotation types a component declares in its namespace
+  metadata, each mapping a type name to the counter names it may carry. Such
+  an annotation holds nothing but those counters, each a non-negative integer
+  no greater than #{@max_counter}. Both the type and every key therefore come
+  from the frozen bundle rather than from the running program, so an
+  application outcome reaches a canonical trace without any position where
+  caller-chosen text could land.
   """
-  def annotation?("progress", %{"stage" => stage} = data)
+  def annotation?(type, data, declared \\ %{})
+
+  def annotation?("progress", %{"stage" => stage} = data, _declared)
       when map_size(data) == 1 and stage in @progress_stages,
       do: true
 
-  def annotation?("agent-action", %{"turn" => turn, "kind" => kind} = data)
+  def annotation?("agent-action", %{"turn" => turn, "kind" => kind} = data, _declared)
       when map_size(data) == 2 and is_integer(turn) and turn >= 0 and turn <= 127 and
              kind in @agent_action_kinds,
       do: true
 
-  def annotation?(_type, _data), do: false
+  def annotation?(type, data, declared)
+      when is_binary(type) and is_map(data) and not is_struct(data) and map_size(data) > 0 and
+             is_map(declared) do
+    case declared do
+      %{^type => counters} ->
+        declarable_annotation?(type, counters) and
+          Enum.all?(data, fn {key, value} ->
+            key in counters and is_integer(value) and value >= 0 and value <= @max_counter
+          end)
 
-  @spec failure_taxonomy(term()) :: map()
+      _undeclared ->
+        false
+    end
+  end
+
+  def annotation?(_type, _data, _declared), do: false
+
+  @spec declarable_annotation?(term(), term()) :: boolean()
+  @doc """
+  Returns whether one annotation type and its counter names may be declared.
+
+  Both the type and every counter name are bounded lowercase kebab-case, and a
+  declaration may not redefine a canonical type. Counters must be a non-empty
+  unique list, so a declared type always carries at least one number.
+  """
+  def declarable_annotation?(type, counters)
+      when is_binary(type) and is_list(counters) and counters != [] and
+             length(counters) <= @max_vocabulary do
+    type =~ @declarable_failure_kind and type not in @canonical_annotations and
+      counters == Enum.uniq(counters) and
+      Enum.all?(counters, &(is_binary(&1) and &1 =~ @declarable_failure_kind))
+  end
+
+  def declarable_annotation?(_type, _counters), do: false
+
+  @spec failure_taxonomy(term(), [binary()]) :: map()
   @doc """
   Projects an explicit failure value to bounded, payload-free taxonomy.
 
-  Known framework categories remain readable. An application-defined category
-  is represented only by a stable fingerprint, so repeated failures can be
-  grouped without putting the caller's value into a public error or trace.
-  Values without a scalar `kind` field produce no public taxonomy.
+  Known framework categories remain readable. So does any kind in `declared` —
+  a closed vocabulary an application declares in its manifest before a run
+  starts, never a name the running program chooses. Everything else is
+  represented only by a stable fingerprint, so repeated failures can be grouped
+  without putting the caller's value into a public error or trace. Values
+  without a scalar `kind` field produce no public taxonomy.
+
+  Naming a declared kind loses no privacy the fingerprint was providing.
+  `fingerprint/1` is unsalted, so anyone holding both the trace and the
+  manifest can precompute the whole declared set and match it; the fingerprint
+  only protects values an observer cannot enumerate. That reasoning holds
+  precisely because the vocabulary is closed and fixed at load time, which is
+  why the caller must validate entries with `declarable_failure_kind?/1`.
   """
-  def failure_taxonomy(value) when is_map(value) and not is_struct(value) do
+  def failure_taxonomy(value, declared \\ [])
+
+  def failure_taxonomy(value, declared) when is_map(value) and not is_struct(value) do
     value
     |> fetch_failure_kind()
-    |> normalize_failure_kind()
+    |> normalize_failure_kind(declared)
   end
 
-  def failure_taxonomy(_value), do: %{}
+  def failure_taxonomy(_value, _declared), do: %{}
+
+  @spec declarable_failure_kind?(term()) :: boolean()
+  @doc """
+  Returns whether one name may be declared as an application failure kind.
+
+  Bounded lowercase kebab-case, so a declared vocabulary cannot carry prose,
+  punctuation, or an entity name into a canonical trace. Framework kinds are
+  rejected: declaring one is either redundant or an attempt to make an
+  application failure read as a framework failure.
+  """
+  def declarable_failure_kind?(kind) when is_binary(kind),
+    do: kind =~ @declarable_failure_kind and kind not in @failure_kinds
+
+  def declarable_failure_kind?(_kind), do: false
 
   @spec fingerprint(binary()) :: binary()
   @doc "Returns the canonical non-reversible fingerprint for one bounded identifier."
@@ -122,18 +194,18 @@ defmodule PtcRunner.Kernel.SafeMetadata do
   defp metadata_name(value) when is_binary(value), do: value
   defp metadata_name(_value), do: nil
 
-  defp normalize_failure_kind(%PtcRunner.Lisp.Keyword{name: kind}),
-    do: normalize_failure_kind(kind)
+  defp normalize_failure_kind(%PtcRunner.Lisp.Keyword{name: kind}, declared),
+    do: normalize_failure_kind(kind, declared)
 
-  defp normalize_failure_kind(kind) when is_atom(kind),
-    do: kind |> Atom.to_string() |> normalize_failure_kind()
+  defp normalize_failure_kind(kind, declared) when is_atom(kind),
+    do: kind |> Atom.to_string() |> normalize_failure_kind(declared)
 
-  defp normalize_failure_kind(kind)
+  defp normalize_failure_kind(kind, declared)
        when is_binary(kind) and byte_size(kind) in 1..256 do
     if String.valid?(kind) do
       normalized = String.replace(kind, "_", "-")
 
-      if normalized in @failure_kinds,
+      if normalized in @failure_kinds or named?(normalized, declared),
         do: %{failure_kind: normalized},
         else: %{failure_kind_fingerprint: fingerprint("failure-kind:" <> kind)}
     else
@@ -141,7 +213,15 @@ defmodule PtcRunner.Kernel.SafeMetadata do
     end
   end
 
-  defp normalize_failure_kind(_kind), do: %{}
+  defp normalize_failure_kind(_kind, _declared), do: %{}
+
+  # A malformed declaration never widens the taxonomy: an entry that would not
+  # survive `declarable_failure_kind?/1` cannot name a kind here either, so a
+  # loader bug degrades to fingerprinting rather than to arbitrary text.
+  defp named?(kind, declared) when is_list(declared),
+    do: kind in declared and declarable_failure_kind?(kind)
+
+  defp named?(_kind, _declared), do: false
 
   defp valid_label_inputs?(labels) do
     Enum.all?(Map.take(labels, ~w(name model provider)), fn {_key, value} ->

@@ -118,7 +118,11 @@ defmodule IncidentCompiler.CompilerTest do
     test "refuses a structurally valid report whose citation names no record", context do
       # The draft satisfies the result contract in every structural respect, so
       # only citation resolution can reject it.
-      assert context.refusal =~ SafeMetadata.fingerprint("failure-kind:unresolved-citations")
+      #
+      # The manifest declares this kind, so the refusal names itself instead of
+      # arriving as a fingerprint an operator has to precompute to recognise.
+      assert context.refusal =~ "failure_kind: \"unresolved-citations\""
+      refute context.refusal =~ SafeMetadata.fingerprint("failure-kind:unresolved-citations")
     end
 
     test "records the refusal as a failed validation stage in the trace", context do

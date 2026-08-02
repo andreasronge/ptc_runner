@@ -1994,6 +1994,11 @@ defmodule PtcRunner.Kernel.TraceLog do
       "stop_timestamp" => event_value(stopped, "timestamp"),
       "status" => stringify(event_data(stopped, "outcome")),
       "terminal_reason" => event_data(stopped, "reason"),
+      # Whichever taxonomy the run recorded: a manifest-declared kind is named,
+      # everything else stays a fingerprint. Both are already payload-free in
+      # the event, so the projection copies rather than re-derives.
+      "failure_kind" => event_data(stopped, "failure_kind"),
+      "failure_kind_fingerprint" => event_data(stopped, "failure_kind_fingerprint"),
       "labels" => labels,
       "tags" => Map.get(labels, "tags", %{}),
       "name" => Map.get(labels, "name"),

@@ -51,4 +51,65 @@ defmodule PtcRunner.Kernel.SafeMetadataTest do
       refute SafeMetadata.annotation?("agent-step", %{"turn" => 0, "kind" => "tool-call"})
     end
   end
+
+  describe "failure taxonomy" do
+    test "names framework kinds and fingerprints everything else" do
+      assert SafeMetadata.failure_taxonomy(%{"kind" => "turn-limit"}) == %{
+               failure_kind: "turn-limit"
+             }
+
+      assert %{failure_kind_fingerprint: fingerprint} =
+               SafeMetadata.failure_taxonomy(%{"kind" => "budget-exceeded"})
+
+      assert fingerprint == SafeMetadata.fingerprint("failure-kind:budget-exceeded")
+    end
+
+    test "names a declared application kind" do
+      declared = ["budget-exceeded", "stale-snapshot"]
+
+      assert SafeMetadata.failure_taxonomy(%{"kind" => "budget-exceeded"}, declared) == %{
+               failure_kind: "budget-exceeded"
+             }
+
+      assert SafeMetadata.failure_taxonomy(%{kind: :budget_exceeded}, declared) == %{
+               failure_kind: "budget-exceeded"
+             }
+    end
+
+    test "fingerprints an undeclared kind even when a vocabulary is declared" do
+      declared = ["budget-exceeded"]
+
+      assert %{failure_kind_fingerprint: _} =
+               SafeMetadata.failure_taxonomy(%{"kind" => "undeclared-kind"}, declared)
+    end
+
+    test "keeps framework kinds reachable alongside a declared vocabulary" do
+      assert SafeMetadata.failure_taxonomy(%{"kind" => "turn-limit"}, ["budget-exceeded"]) ==
+               %{failure_kind: "turn-limit"}
+    end
+  end
+
+  describe "declarable failure kinds" do
+    test "accepts bounded lowercase kebab-case identifiers" do
+      assert SafeMetadata.declarable_failure_kind?("budget-exceeded")
+      assert SafeMetadata.declarable_failure_kind?("a")
+      assert SafeMetadata.declarable_failure_kind?(String.duplicate("a", 64))
+    end
+
+    test "rejects anything that could smuggle text into a trace" do
+      refute SafeMetadata.declarable_failure_kind?("Budget Exceeded")
+      refute SafeMetadata.declarable_failure_kind?("budget_exceeded")
+      refute SafeMetadata.declarable_failure_kind?("customer: acme corp")
+      refute SafeMetadata.declarable_failure_kind?("-leading-dash")
+      refute SafeMetadata.declarable_failure_kind?("")
+      refute SafeMetadata.declarable_failure_kind?(String.duplicate("a", 65))
+      refute SafeMetadata.declarable_failure_kind?(:budget_exceeded)
+      refute SafeMetadata.declarable_failure_kind?(nil)
+    end
+
+    test "rejects framework kinds so an application cannot shadow one" do
+      refute SafeMetadata.declarable_failure_kind?("turn-limit")
+      refute SafeMetadata.declarable_failure_kind?("capability-error")
+    end
+  end
 end

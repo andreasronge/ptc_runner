@@ -409,7 +409,6 @@ home:
 The finding 4 and 5 prototype was superseded by #1162, which shipped both fixes
 in better form. Those obsolete modifications are not part of this branch.
 
-<<<<<<< HEAD
 Finding 2 landed on `main` independently as `selected_branches/3`, which also
 resolves branch identity through `evaluationPath`. This branch's version was
 superseded and dropped when it rebased; only its regression tests were kept.
@@ -420,30 +419,17 @@ behind `CommandContractAuthority` rather than path strings. Re-landing it means
 re-implementing it on that structure, not replaying the commit — which is why
 it was skipped rather than merged during a conflict resolution. #1161 remains
 the tracking issue.
-=======
-The fixes for findings 1–3 are the branch work that is still needed and still
-unlanded, along with finding 6's `--private-unattended` destination and the
-sandbox tool-grant fix that made it usable.
->>>>>>> b31361ad (docs(plans): make the handoff docs accurate for a cold start)
 
 ## Suggested order
 
 1. ~~**Finding 4 alone** into the primitives.~~ Done in #1162, together with 2.
 2. ~~**Findings 5 + the layering section**: build `log.analysis`.~~ Done in
    #1162.
-<<<<<<< HEAD
 3. ~~**Finding 2**: land the union fix.~~ Landed on `main` independently; this
    branch's version was dropped as superseded.
 4. ~~**Finding 3**: expose `describe/1`.~~ Predates the branch split.
 5. **Finding 1** proper, tracked in #1161. Needs re-implementing on `main`'s
    `segments`/`CommandContractAuthority` violation model.
-=======
-3. **Finding 2**: land `637958c1`, which is written and tested but not in
-   `main`.
-4. ~~**Finding 3**: expose `describe/1`.~~ Done on this branch (`9e497012`).
-5. ~~**Finding 1** proper, tracked in #1161.~~ Done on this branch
-   (`bb2be8cf`); the issue is still open and references neither commit.
->>>>>>> b31361ad (docs(plans): make the handoff docs accurate for a cold start)
 6. ~~**Finding 6**, sequenced with the stable CLI plan.~~ Done in `ba983f95`;
    the CLI plan was amended rather than sequenced against.
 7. Findings 7–9 as separate design work.

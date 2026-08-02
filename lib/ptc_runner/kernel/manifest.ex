@@ -59,6 +59,10 @@ defmodule PtcRunner.Kernel.Manifest do
   use finite enumerated values, so arbitrary text and secrets are never copied
   into traces.
 
+  An application's own failure kinds and annotation types are declared by the
+  component that emits them, in its `(ns ...)` metadata, not here — the
+  manifest selects components, it does not restate their vocabulary.
+
   The loader resolves paths relative to the canonical manifest directory and
   rejects absolute paths, traversal, devices, non-regular files, and symlink
   escape. Loading performs no workflow execution.
@@ -844,6 +848,8 @@ defmodule PtcRunner.Kernel.Manifest do
 
   defp events(_value),
     do: manifest_value_error([{:property, "events"}], :invalid_events)
+
+  defp optional_id?(nil), do: true
 
   defp event_policy(policy) when policy in ["normal", "private"],
     do: {:ok, String.to_existing_atom(policy)}

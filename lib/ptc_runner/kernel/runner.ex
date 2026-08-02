@@ -8,6 +8,7 @@ defmodule PtcRunner.Kernel.Runner do
   """
 
   alias PtcRunner.Kernel.DeterministicJSON
+  alias PtcRunner.Kernel.Environment
   alias PtcRunner.Kernel.Error
   alias PtcRunner.Kernel.Events
   alias PtcRunner.Kernel.EventSink
@@ -201,7 +202,11 @@ defmodule PtcRunner.Kernel.Runner do
          %Error{
            kind: :workflow_failed,
            reason: :explicit_failure,
-           details: SafeMetadata.failure_taxonomy(value),
+           details:
+             SafeMetadata.failure_taxonomy(
+               value,
+               Environment.vocabulary(config.workflow_environment).failure_kinds
+             ),
            usage: RunState.usage(state)
          }}
 
