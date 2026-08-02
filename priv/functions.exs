@@ -1693,7 +1693,7 @@
       ptc_extension?: false,
       examples: [],
       notes: nil,
-      see_also: [],
+      see_also: ["long"],
       clojure_var: "int",
       divergences: nil
     },
@@ -2021,6 +2021,23 @@
       see_also: [],
       clojure_var: "last-index-of",
       divergences: nil
+    },
+    %{
+      name: "long",
+      description: "Type coercion (to 64-bit integer)",
+      binding: :normal,
+      category: :math,
+      dispatch: :env,
+      signatures: ["(long x)"],
+      since: nil,
+      section: "Math Functions",
+      ptc_extension?: false,
+      examples: [],
+      notes: "Same input handling as `int`, but accepts the signed 64-bit range.",
+      see_also: ["int"],
+      clojure_var: "long",
+      divergences:
+        "DIV-54: overflow raises the same arithmetic error as `int` (\"integer overflow\") rather than Clojure's long-specific out-of-range exception. See docs/clojure-conformance-gaps.md."
     },
     %{
       name: "lower-case",

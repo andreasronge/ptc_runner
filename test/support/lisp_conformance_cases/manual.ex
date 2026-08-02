@@ -7913,6 +7913,24 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "PTC-Lisp integers are arbitrary-precision, so nat-int? has no distinct JVM fixed-width integer boundary."
       ),
       div_case(
+        "div/long-overflow-positive-001",
+        "clojure.core",
+        ["long"],
+        "(long 9223372036854775808)",
+        "DIV-54",
+        {:error, :arithmetic_error},
+        "Clojure raises IllegalArgumentException (\"Value out of range for long: ...\") for long overflow; PTC-Lisp reuses int's {:arithmetic_error, \"integer overflow\"} failure mode instead of a long-specific message."
+      ),
+      div_case(
+        "div/long-overflow-negative-001",
+        "clojure.core",
+        ["long"],
+        "(long -9223372036854775809)",
+        "DIV-54",
+        {:error, :arithmetic_error},
+        "Clojure raises IllegalArgumentException (\"Value out of range for long: ...\") for long underflow; PTC-Lisp reuses int's {:arithmetic_error, \"integer overflow\"} failure mode instead of a long-specific message."
+      ),
+      div_case(
         "div/conj-list-001",
         "clojure.core",
         ["conj", "list"],

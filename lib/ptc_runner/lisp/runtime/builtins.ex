@@ -178,6 +178,7 @@ defmodule PtcRunner.Lisp.Runtime.Builtins do
       {:double, {:normal, &Runtime.double/1}},
       {:float, {:normal, &Runtime.float/1}},
       {:int, {:normal, &Runtime.int/1}},
+      {:long, {:normal, &Runtime.long/1}},
       {:sqrt, {:normal, &Runtime.sqrt/1}},
       {:pow, {:normal, &Runtime.pow/2}},
 

@@ -144,6 +144,33 @@ defmodule PtcRunner.Lisp.RuntimeArithmeticTest do
       assert_lisp_error("(int -2147483649)", :arithmetic_error, "integer overflow")
     end
 
+    test "long truncates toward zero like int, at 64-bit width" do
+      assert_lisp("(long 3.7)", 3)
+      assert_lisp("(long -3.7)", -3)
+    end
+
+    test "long passes an in-range integer through unchanged" do
+      assert_lisp("(long 42)", 42)
+      assert_lisp("(long -42)", -42)
+    end
+
+    test "long accepts values beyond the 32-bit range that int rejects" do
+      assert_lisp("(long 2147483648)", 2_147_483_648)
+      assert_lisp("(long -2147483649)", -2_147_483_649)
+    end
+
+    test "long follows Java long coercion boundaries" do
+      assert_lisp("(long 9223372036854775807)", 9_223_372_036_854_775_807)
+      assert_lisp("(long -9223372036854775808)", -9_223_372_036_854_775_808)
+      assert_lisp_error("(long 9223372036854775808)", :arithmetic_error, "integer overflow")
+      assert_lisp_error("(long -9223372036854775809)", :arithmetic_error, "integer overflow")
+    end
+
+    test "long matches int's handling of NaN and character literals" do
+      assert_lisp("(long ##NaN)", 0)
+      assert_lisp(~S|(long \A)|, 65)
+    end
+
     test "bounded take over zero-step range repeats the start value" do
       assert_lisp("(take 3 (range 1 5 0))", [1, 1, 1])
       assert_lisp("(take 2 (range 1 5 (identity 0)))", [1, 1])

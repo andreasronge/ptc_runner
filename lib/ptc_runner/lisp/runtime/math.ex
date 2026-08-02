@@ -275,6 +275,35 @@ defmodule PtcRunner.Lisp.Runtime.Math do
     end
   end
 
+  # `long` mirrors `int` exactly (same input classes, same failure mode on
+  # overflow) and differs only in its accepted range: signed 64-bit instead
+  # of signed 32-bit. Clojure's own `long` actually raises a distinct
+  # `IllegalArgumentException` ("Value out of range for long: ...") on
+  # overflow rather than reusing `int`'s `ArithmeticException`; PTC-Lisp
+  # intentionally keeps the same `{:arithmetic_error, "integer overflow"}`
+  # shape as `int` here for consistency within this runtime rather than
+  # inventing a second overflow presentation (see DIV-54 in
+  # docs/clojure-conformance-gaps.md).
+  def long(x) do
+    case x do
+      :nan -> 0
+      :infinity -> raise ArithmeticError, "cannot convert Infinity to integer"
+      :negative_infinity -> raise ArithmeticError, "cannot convert -Infinity to integer"
+      <<cp::utf8>> -> cp
+      n when is_number(n) -> trunc_java_long(n)
+    end
+  end
+
+  defp trunc_java_long(n) do
+    long = Kernel.trunc(n)
+
+    if long < -9_223_372_036_854_775_808 or long > 9_223_372_036_854_775_807 do
+      raise ArithmeticError, "integer overflow"
+    else
+      long
+    end
+  end
+
   def sqrt(x), do: JavaMathSemantics.sqrt(x)
 
   # `pow` follows java.lang.Math.pow's IEEE 754 special-case table. PTC-Lisp

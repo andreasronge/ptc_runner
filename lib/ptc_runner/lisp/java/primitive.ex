@@ -46,6 +46,7 @@ defmodule PtcRunner.Lisp.Java.Primitive do
     :double,
     :float,
     :int,
+    :long,
     :sqrt,
     :pow,
     :"bit-and",

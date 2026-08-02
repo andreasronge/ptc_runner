@@ -3168,6 +3168,34 @@ whose contract follows JVM primitive int coercion. PTC-Lisp can keep
 arbitrary-precision integers generally, but this supported coercion should not
 turn overflow into plausible unchanged data.
 
+### DIV-54: `long` overflow reuses `int`'s generic arithmetic error
+
+| Field | Value |
+|-------|-------|
+| **Priority** | n/a |
+| **Status** | by design |
+| **Source** | Manual conformance cases `div/long-overflow-positive-001`, `div/long-overflow-negative-001` |
+
+```clojure
+;; Clojure
+(long 9223372036854775808)   ;=> IllegalArgumentException: Value out of range for long: 9223372036854775808
+(long -9223372036854775809)  ;=> IllegalArgumentException: Value out of range for long: -9223372036854775809
+
+;; PTC-Lisp
+(long 9223372036854775808)   ;=> arithmetic error: integer overflow
+(long -9223372036854775809)  ;=> arithmetic error: integer overflow
+```
+
+**Rationale:** Clojure's `long` raises a distinct `IllegalArgumentException`
+("Value out of range for long: ...") on overflow — a different exception class
+and message than `int`'s `ArithmeticException` ("integer overflow"). `long`
+mirrors `int`'s implementation in this runtime exactly (same truncation, same
+NaN/Infinity/character-literal handling) and differs only in accepting the
+wider signed 64-bit range, so its overflow path reuses `int`'s
+`{:arithmetic_error, "integer overflow"}` failure rather than inventing a
+second, long-specific overflow presentation. Both raise on overflow either
+way; only the presentation differs.
+
 ### GAP-S121: `int` rejects character literals instead of returning code points
 
 | Field | Value |

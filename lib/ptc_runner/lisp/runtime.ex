@@ -191,6 +191,7 @@ defmodule PtcRunner.Lisp.Runtime do
   defdelegate double(x), to: Math
   defdelegate float(x), to: Math
   defdelegate int(x), to: Math
+  defdelegate long(x), to: Math
   defdelegate sqrt(x), to: Math
   defdelegate pow(x, y), to: Math
 
