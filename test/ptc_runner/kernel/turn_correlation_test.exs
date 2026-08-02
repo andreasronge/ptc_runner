@@ -17,6 +17,7 @@ defmodule PtcRunner.Kernel.TurnCorrelationTest do
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.MissionEnvironment
   alias PtcRunner.Kernel.RunConfig
+  alias PtcRunner.Kernel.TraceCapability
   alias PtcRunner.Kernel.WorkflowEnvironment
 
   test "capability events carry the evaluation that invoked them" do
@@ -146,6 +147,73 @@ defmodule PtcRunner.Kernel.TurnCorrelationTest do
 
     assert call["payload"]["evaluation_id"] == evaluation_id,
            "the private capability record cannot be joined to the program that made it"
+  end
+
+  test "a workflow annotation carries the evaluation that emitted it, and log/turns returns it beside the turn's capability call" do
+    {:ok, probe} =
+      Capability.new(
+        name: "probe",
+        input_schema: %{"type" => "object", "additionalProperties" => true},
+        effect: :read,
+        callback: fn _arguments -> {:ok, %{"seen" => true}} end
+      )
+
+    {:ok, kernel_component} = Library.component("kernel")
+    {:ok, event_component} = Library.component("workflow.event")
+    {:ok, workflow_bundle} = Kernel.compile_bundle([kernel_component, event_component])
+    {:ok, workflow} = WorkflowEnvironment.new(bundle: workflow_bundle, capabilities: [probe])
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, limits} = Limits.new()
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "annotation-correlation")
+
+    {:ok, config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        mission_environment: mission,
+        input: %{},
+        limits: limits,
+        event_sink: sink
+      )
+
+    source = ~S"""
+    (do
+      (tool/probe {})
+      (workflow.event/annotate "progress" {"stage" "started"})
+      (return 1))
+    """
+
+    assert {:ok, _result} = Kernel.run(source, config)
+
+    events = sink |> EventSink.events() |> Enum.map(&normalize/1)
+
+    workflow_evaluation_id =
+      events
+      |> Enum.find(&(&1["type"] == "evaluation-started"))
+      |> get_in(["data", "evaluation_id"])
+
+    assert is_binary(workflow_evaluation_id)
+
+    annotation = Enum.find(events, &(&1["type"] == "workflow-annotation"))
+
+    assert annotation["data"]["evaluation_id"] == workflow_evaluation_id,
+           "the annotation cannot be attributed to the evaluation that emitted it"
+
+    # The documented `evaluation_id` turn filter must return the annotation
+    # alongside the turn's other capability activity, not only the
+    # evaluation's own start/stop pair.
+    assert {:ok, trace_capabilities} = TraceCapability.new(source: sink)
+    callbacks = Map.new(trace_capabilities, &{&1.name, &1.callback})
+
+    assert {:ok, %{"items" => turns}} =
+             callbacks["trace-list-turns"].(%{
+               "run_id" => "annotation-correlation",
+               "evaluation_id" => workflow_evaluation_id,
+               "limit" => 20
+             })
+
+    turn_types = Enum.map(turns, & &1["type"])
+    assert "workflow-annotation" in turn_types
+    assert "capability-started" in turn_types
   end
 
   defp run_with_capability_calls do

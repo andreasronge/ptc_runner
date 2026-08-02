@@ -650,7 +650,11 @@ defmodule PtcRunner.Kernel.TraceLog do
          max_result_bytes,
          _source_kind
        ) do
-    with :ok <- validate_keys(arguments, ~w(run_id limit cursor status evaluation_id capability)),
+    with :ok <-
+           validate_keys(
+             arguments,
+             ~w(run_id limit cursor status evaluation_id capability annotation_type)
+           ),
          :ok <- valid_string(run_id),
          :ok <- validate_turn_filters(arguments),
          true <- Enum.any?(events, &(&1["run_id"] == run_id)),
@@ -2118,7 +2122,9 @@ defmodule PtcRunner.Kernel.TraceLog do
     (is_nil(arguments["status"]) or status == arguments["status"]) and
       (is_nil(arguments["evaluation_id"]) or
          event_data(event, "evaluation_id") == arguments["evaluation_id"]) and
-      (is_nil(arguments["capability"]) or event_data(event, "name") == arguments["capability"])
+      (is_nil(arguments["capability"]) or event_data(event, "name") == arguments["capability"]) and
+      (is_nil(arguments["annotation_type"]) or
+         event_data(event, "annotation_type") == arguments["annotation_type"])
   end
 
   defp counters(events) do
@@ -2311,7 +2317,7 @@ defmodule PtcRunner.Kernel.TraceLog do
   end
 
   defp validate_turn_filters(arguments),
-    do: optional_strings(arguments, ~w(status evaluation_id capability))
+    do: optional_strings(arguments, ~w(status evaluation_id capability annotation_type))
 
   defp optional_strings(arguments, keys) do
     if Enum.all?(keys, &(is_nil(arguments[&1]) or valid_string(arguments[&1]) == :ok)),

@@ -2966,6 +2966,65 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     refute String.contains?(encoded_events, session)
   end
 
+  test "the annotation payload's size bound covers the evaluation_id, not just the caller's data" do
+    environment = %{capabilities: %{}, annotations: %{}}
+    arguments = %{"type" => "progress", "data" => %{"stage" => "started"}}
+
+    # Measure the payload exactly as `annotate/5` builds and measures it,
+    # before an evaluation_id is added, and set the *RunState's* bound (the
+    # one `annotate/5` reads) to admit precisely that many bytes. The
+    # EventSink underneath keeps the generous default bound, and applies its
+    # own independent, JSON-normalized size check on top — giving it the
+    # generous bound isolates this test to the ordering invariant inside
+    # `annotate/5` itself, rather than that separate accounting.
+    bare_payload = %{
+      annotation_type: "progress",
+      data: %{"stage" => "started"},
+      provenance: :workflow
+    }
+
+    bare_bytes = RetainedSize.bytes_with_cap(bare_payload, 1_000_000)
+    assert is_integer(bare_bytes)
+
+    {:ok, tight_limits} = Limits.new(event_payload_bytes: bare_bytes)
+    {:ok, generous_limits} = Limits.new()
+
+    {:ok, admitting_state} = RunState.start(tight_limits)
+
+    {:ok, admitting_sink} =
+      EventSink.start(:normal, generous_limits, run_id: "annotation-bound-admits")
+
+    # With no evaluation_id, the bare payload fits the bound exactly.
+    admitting_tools = RuntimeTools.tools(admitting_state, environment, admitting_sink, :workflow)
+    assert %{status: :ok} = admitting_tools["workflow-annotate"].(arguments)
+
+    assert Enum.any?(EventSink.events(admitting_sink), &(&1.type == "workflow-annotation")),
+           "the bare annotation should have fit the tight bound"
+
+    {:ok, rejecting_state} = RunState.start(tight_limits)
+
+    {:ok, rejecting_sink} =
+      EventSink.start(:normal, generous_limits, run_id: "annotation-bound-rejects")
+
+    # Same bound, but the evaluation_id must be counted before the check, not
+    # after: the payload no longer fits, so the tool must refuse rather than
+    # emit an event larger than the bound it was checked against.
+    rejecting_tools =
+      RuntimeTools.tools(
+        rejecting_state,
+        environment,
+        rejecting_sink,
+        :workflow,
+        "workflow-evaluation-fixture"
+      )
+
+    assert %{status: :error, kind: :invalid_annotation, reason: :invalid_workflow_annotation} =
+             rejecting_tools["workflow-annotate"].(arguments)
+
+    refute Enum.any?(EventSink.events(rejecting_sink), &(&1.type == "workflow-annotation")),
+           "an oversized annotation must never reach the trace"
+  end
+
   test "terminal workflow results and retained mission memory use Kernel limits and state" do
     {:ok, workflow} = WorkflowEnvironment.new([])
     {:ok, mission} = MissionEnvironment.new([])

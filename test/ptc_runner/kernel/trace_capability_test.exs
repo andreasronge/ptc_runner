@@ -181,6 +181,61 @@ defmodule PtcRunner.Kernel.TraceCapabilityTest do
     assert turns_details =~ "evaluation_id"
   end
 
+  test "annotation_type filters turns, and an unmatched value returns an empty page rather than an error" do
+    {:ok, probe} =
+      Capability.new(
+        name: "probe",
+        input_schema: %{"type" => "object", "additionalProperties" => true},
+        effect: :read,
+        callback: fn _arguments -> {:ok, %{"seen" => true}} end
+      )
+
+    {:ok, kernel_component} = Library.component("kernel")
+    {:ok, event_component} = Library.component("workflow.event")
+    {:ok, workflow_bundle} = Kernel.compile_bundle([kernel_component, event_component])
+    {:ok, workflow} = WorkflowEnvironment.new(bundle: workflow_bundle, capabilities: [probe])
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, limits} = Limits.new()
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "annotation-filter")
+
+    {:ok, config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        mission_environment: mission,
+        input: %{},
+        limits: limits,
+        event_sink: sink
+      )
+
+    source = ~S"""
+    (do
+      (tool/probe {})
+      (workflow.event/annotate "progress" {"stage" "started"})
+      (workflow.event/annotate "agent-action" {"turn" 0 "kind" "tool-call"})
+      (return 1))
+    """
+
+    assert {:ok, _result} = Kernel.run(source, config)
+
+    assert {:ok, capabilities} = TraceCapability.new(source: sink)
+    callbacks = Map.new(capabilities, &{&1.name, &1.callback})
+
+    assert {:ok, %{"items" => matched}} =
+             callbacks["trace-list-turns"].(%{
+               "run_id" => "annotation-filter",
+               "annotation_type" => "agent-action"
+             })
+
+    assert [%{"type" => "workflow-annotation", "data" => %{"annotation_type" => "agent-action"}}] =
+             matched
+
+    assert {:ok, %{"items" => []}} =
+             callbacks["trace-list-turns"].(%{
+               "run_id" => "annotation-filter",
+               "annotation_type" => "no-such-type"
+             })
+  end
+
   test "a trace grant never discovers runs in another sink" do
     {:ok, limits} = Limits.new()
     {:ok, visible} = EventSink.start(:normal, limits, run_id: "visible")

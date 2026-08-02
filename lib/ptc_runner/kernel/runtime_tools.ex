@@ -46,7 +46,7 @@ defmodule PtcRunner.Kernel.RuntimeTools do
       when kind in [:workflow, :mission] do
     @mission_routes
     |> Map.new(fn {name, route} -> {name, route_callback(route, state, environment)} end)
-    |> maybe_put_annotation(state, environment, event_sink, kind)
+    |> maybe_put_annotation(state, environment, event_sink, kind, evaluation_id)
     |> Map.new(fn {name, callback} ->
       {name, instrument(state, event_sink, kind, name, callback, evaluation_id)}
     end)
@@ -474,22 +474,33 @@ defmodule PtcRunner.Kernel.RuntimeTools do
   defp route_callback(:capability_description, state, environment),
     do: fn arguments -> capability_description(state, environment, arguments) end
 
-  defp maybe_put_annotation(tools, state, environment, event_sink, :workflow) do
+  defp maybe_put_annotation(tools, state, environment, event_sink, :workflow, evaluation_id) do
     # Read off the view, not the environment: the declaration is fixed by the
     # frozen bundle, and a callback must not capture the bundle behind it.
     declared = Map.get(environment, :annotations, %{})
 
     Map.put(tools, "workflow-annotate", fn arguments ->
-      annotate(state, declared, event_sink, arguments)
+      annotate(state, declared, event_sink, evaluation_id, arguments)
     end)
   end
 
-  defp maybe_put_annotation(tools, _state, _environment, _event_sink, :mission), do: tools
+  defp maybe_put_annotation(tools, _state, _environment, _event_sink, :mission, _evaluation_id),
+    do: tools
 
-  defp annotate(state, declared, event_sink, %{"type" => type, "data" => data})
+  # The evaluation_id is added to `payload` before it is measured, exactly
+  # like the same field on capability events (see `put_evaluation_id/2`
+  # above): adding it after `RetainedSize.bytes_with_cap/2` would emit a
+  # payload larger than the one the bound just approved.
+  defp annotate(state, declared, event_sink, evaluation_id, %{"type" => type, "data" => data})
        when is_binary(type) do
     limit = RunState.limits(state).event_payload_bytes
-    payload = %{annotation_type: type, data: data, provenance: :workflow}
+
+    payload =
+      put_evaluation_id(
+        %{annotation_type: type, data: data, provenance: :workflow},
+        evaluation_id
+      )
+
     bytes = RetainedSize.bytes_with_cap(payload, limit)
 
     if SafeMetadata.annotation?(type, data, declared) and is_integer(bytes) and bytes <= limit do
@@ -506,7 +517,7 @@ defmodule PtcRunner.Kernel.RuntimeTools do
     end
   end
 
-  defp annotate(state, _declared, _event_sink, _arguments),
+  defp annotate(state, _declared, _event_sink, _evaluation_id, _arguments),
     do: protocol_error(state, :invalid_workflow_annotation)
 
   defp protocol_error(state, reason) do
