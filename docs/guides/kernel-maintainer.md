@@ -293,6 +293,63 @@ inspection-sink, or publication category.
 Commands that stop before compound work require `secondary_errors: []` in both
 their sealed outcome constructor and generated envelope branch.
 
+### Private-result recovery (planned)
+
+This section records the slice-8 stable-command contract; the current Mix
+publisher has not implemented it yet. The planned `--private-output` path will
+use one small recovery state machine, not a general artifact transaction.
+During destination preflight it exclusively
+creates an owner-only (`0600`) file named
+`.ptc-private-result-<run_ref>.json` in the already-authorized output directory.
+The invocation retains an open handle and captured file identity. Reservation
+failure is `destination/recovery_reservation_failed` before provider activity,
+and the file remains empty while execution is in progress.
+
+After a valid result and successful provider cleanup, the publisher writes the
+already-bounded bytes through that handle, syncs the file, and syncs its
+containing directory. Only completion of both syncs establishes
+`recovery_written`. A write or file-sync failure removes an invocation-owned
+partial file and reports `failed`. A directory-sync failure leaves the complete
+recovery name for inspection but also reports `failed`, because durability was
+not proven. Failure before a valid result, including provider cleanup failure,
+never materializes result bytes and removes the empty reservation only after
+verifying its captured identity.
+
+If identity verification or unlinking fails while removing an empty or partial
+reservation, the publisher leaves the name untouched, reports result state
+`failed`, and emits `publication/recovery_cleanup_failed`. No durable complete
+result is claimed. This is the sole publication-category diagnostic for that
+compound outcome: it replaces an earlier result-publication diagnostic when
+cleanup of that failed write also fails, while any higher-precedence provider,
+execution, or result-cleanup diagnostic remains primary. The bounded message
+directs the caller to inspect the derived recovery basename.
+
+Optional trace and inspection publication follows recovery materialization. If
+either fails, the durable recovery file remains and result state is
+`recovery_written`. Otherwise finalization exclusively hard-links the recovery
+inode to the requested result name, syncs the directory, unlinks the recovery
+name, and syncs the directory again. Only then is result state `written`. A
+late name collision leaves the recovery name and reports `recovery_written`.
+
+The failure states carry these exact proofs:
+
+| Result state | Proven filesystem state |
+| --- | --- |
+| `not_written` | Result bytes were withheld before recovery materialization. |
+| `failed` | Reservation or recovery write/durability failed; no durable complete result is claimed. |
+| `recovery_written` | The complete synced inode is proven reachable only by the derived recovery name. |
+| `finalization_uncertain` | The complete synced inode exists, but a finalization or rollback failure means the recovery name, requested name, or both may remain. |
+| `written` | The requested name is durable and the recovery name is durably absent. |
+
+If the first directory sync after linking fails, rollback unlinks the requested
+name and syncs the directory; it returns to `recovery_written` only when that
+state is verified. Failure to unlink the recovery name, failure of the final
+directory sync, or an unverifiable rollback is `finalization_uncertain`.
+Callers already know the authorized directory and can derive both safe
+basenames from `run_ref`; public envelopes expose neither path. A VM abort may
+leave an empty or partial reservation, but no successful envelope or recovery
+state claims it as complete.
+
 Help, version, and doctor success values are closed data contracts, not merely
 shape-compatible maps. Help usage/notices and the packaged version are exact
 compile-time constants. Doctor check names and status/code pairs come from the
