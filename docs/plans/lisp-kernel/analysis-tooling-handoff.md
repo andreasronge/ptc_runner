@@ -233,21 +233,63 @@ Still open and tracked in `agent-developer-findings.md`: findings 7–9
 
 ## Known flaky tests
 
-Not caused by this branch, and each one cost time to re-diagnose. All pass on
-re-run; none is an assertion mismatch that indicates a real defect.
+Investigated 2026-08-02. **Nothing below is fixed** — the section records
+diagnosis and proposed changes only; the working tree carries none of them.
 
-| Test | Symptom | Measured |
+Every one has the same shape: a fixed wall-clock budget asserted from a
+preemptible process, where an exhausted budget is indistinguishable from the
+failure the test is looking for. None is an assertion mismatch indicating a
+product defect. `test/test_helper.exs` already names this class — it halves
+`max_cases` precisely because a sandbox's 1 s cap flakes under contention.
+
+| Test | Budget that expires | Proposed change |
 | --- | --- | --- |
-| `mcp_oauth/network_policy_test.exs:130` | `:egress_denied` instead of `:resolution_failed` | fails ~1 run in 10 **in isolation** — a race between the egress check and the deadline path |
-| `IncidentCompiler.CompilerTest` | `setup_all` dies with `:mcp_timeout`, invalidating all 13 | passes alone in 6.6s; trips under full-suite scheduler pressure |
-| `mcp_oauth/store_memory_test.exs:416` | `:stale_flow` instead of `{:ok, pending}` | 5/5 in isolation |
-| `lisp/runtime/collection_ops_test.exs:64` | 1000 ms sandbox timeout instead of a type error | 3/3 in isolation |
-| `analysis_session_test.exs:1149` | `assert_receive` empty after 1000 ms | passes alone |
+| `mcp_oauth/store_memory_test.exs:416` | 100 ms binding freshness, spanning `flow/1`'s key generation and a store round-trip | anchor freshness last, so the window covers only `begin_flow` |
+| `lisp/runtime/collection_ops_test.exs:64` | `Lisp.run/1`'s 1000 ms product default, for a sandboxed spawn | pass an explicit generous `timeout:` in the file's two eval helpers — they assert semantics, never timing |
+| `analysis_session_test.exs:1149` | 1000 ms, hard-coded at 8 sites against the file's own `@lifecycle_timeout_ms 30_000` | use the constant, as its 15 sibling assertions already do |
+| `kernel/dispatcher_effect_test.exs:103` | ExUnit's 100 ms `assert_receive` default, for `Task.async` plus a full mission dispatch | give the two callback-liveness waits an explicit timeout |
+| `mcp_oauth/network_policy_test.exs:130` | 20 ms, from computing the deadline to `resolve/3` checking it | none — but see the real defect below |
+| `IncidentCompiler.CompilerTest` | `setup_all` dies with `:mcp_timeout`, invalidating all 13 | none — not reproduced, and its timeouts are already 30 s/60 s |
 
-Across roughly a dozen `mix precommit` runs on this branch, most were fully
-green and the rest failed on one of the above. `PTC_PRE_PUSH_MAX_CASES=2`
-reduces but does not eliminate them. The first one is worth fixing on its own —
-it fails without any concurrent load.
+### The reproduction record, corrected
+
+The rate previously claimed here for `network_policy_test.exs:130` — "fails ~1
+run in 10 **in isolation** — a race between the egress check and the deadline
+path" — does not hold, and the mechanism named was wrong. Measured:
+
+- 200/200 passes under `--repeat-until-failure`, and 40/40 isolated file runs.
+- A faithful in-BEAM replay of the original guard (fresh process per iteration,
+  4× CPU oversubscription) produced `:egress_denied` **0 times in 600
+  attempts**. The gap the race needs stays under 5 ms against a 20 ms budget.
+- `store_memory:416` and `collection_ops:64` likewise pass 200/200.
+- Three consecutive full-suite runs: two clean, one failure — and that failure
+  was `dispatcher_effect_test.exs:103`, which was **not** on the original list.
+
+So the list was both overstated (no isolated failure is reproducible) and
+incomplete. Treat any rate here as unmeasured unless it cites a method.
+
+Use `--repeat-until-failure N` for this, not a shell loop over `mix test`: the
+whole cost is BEAM startup, and looping externally makes a microsecond-scale
+window take minutes to sample.
+
+### A real defect found underneath, also unfixed
+
+Unrelated to timing: `NetworkPolicy.resolve/3` folds an expired deadline into
+`{:error, :egress_denied}`, reporting a timeout as a policy verdict about the
+host. A deadline only 1 ms away already returns it. The module disagrees with
+itself — `safe_resolve/3`'s own expiry branch returns `:resolution_failed`, and
+so does `mcp_source.ex:1544` — which leaves the correct branch effectively
+unreachable.
+
+The fix is to drop the expiry from the guard, keeping `is_integer/1`, and let
+`safe_resolve/3` classify it. That cannot widen egress: with no budget left the
+resolver is never invoked and `{:ok, target}` is unreachable, while a
+disallowed origin still fails the origin check first. Worth two tests — one
+pinning an expired deadline to `:resolution_failed`, one pinning that a
+disallowed origin still outranks it.
+
+Consequence today is confined to diagnostics: `mcp_source.ex:1514` maps both
+errors to `:mcp_transport_error`.
 
 **There is no `pre-push` hook installed in this clone.** `git push` runs no
 gates; run `mix precommit` and `mix prepush` yourself, or install the hooks with
