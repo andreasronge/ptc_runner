@@ -10,7 +10,9 @@ defmodule PtcRunner.Kernel.InspectionAnalysisProfileTest do
   alias PtcRunner.Kernel.AnalysisTerminal
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.InspectionAnalysisProfile
+  alias PtcRunner.Kernel.InspectionArtifact
   alias PtcRunner.Kernel.InspectionCapability
+  alias PtcRunner.Kernel.InspectionSink
   alias PtcRunner.Kernel.LogAnalysisProfile
   alias PtcRunner.Kernel.RunState
   alias PtcRunner.Kernel.SessionTrace
@@ -377,6 +379,45 @@ defmodule PtcRunner.Kernel.InspectionAnalysisProfileTest do
   end
 
   @tag :tmp_dir
+  test "inspection.analysis/prose returns the model's narration per turn with evaluation_id", %{
+    tmp_dir: root
+  } do
+    fixture =
+      seed_model_exchange_fixture(root, "prose-run", [
+        %{
+          capability_id: "llm-a",
+          evaluation_id: "eval-a",
+          prompt: "first",
+          content: "first reply"
+        },
+        %{
+          capability_id: "llm-b",
+          evaluation_id: "eval-b",
+          prompt: "second",
+          content: "second reply"
+        }
+      ])
+
+    assert {:ok, session, _info} = start_internal_session(fixture)
+    on_exit(fn -> AnalysisSession.stop(session) end)
+
+    assert {:ok,
+            %{
+              status: :ok,
+              value: %{"items" => items, "complete?" => true}
+            }} =
+             AnalysisSession.evaluate(
+               session,
+               ~s|(inspection.analysis/prose "#{fixture.run_id}" 4)|
+             )
+
+    assert items == [
+             %{"evaluation_id" => "eval-a", "content" => "first reply"},
+             %{"evaluation_id" => "eval-b", "content" => "second reply"}
+           ]
+  end
+
+  @tag :tmp_dir
   test "private analysis evaluator errors expose only fixed diagnostics", %{tmp_dir: root} do
     fixture = PrivateInspectionFixture.create!(root)
     {:ok, session, _info} = start_internal_session(fixture)
@@ -613,5 +654,92 @@ defmodule PtcRunner.Kernel.InspectionAnalysisProfileTest do
   defp directory_identity(directory) do
     stat = File.stat!(directory)
     {stat.major_device, stat.minor_device, stat.inode}
+  end
+
+  # Builds a correlated fixture with one `llm-request` model exchange per
+  # entry in `exchanges` (each a map with `:capability_id`, `:evaluation_id`,
+  # `:prompt`, and `:content`), independent of the shared
+  # `PrivateInspectionFixture` so its exact-match assertions elsewhere stay
+  # untouched.
+  defp seed_model_exchange_fixture(root, run_id, exchanges) do
+    traces = Path.join(root, "traces")
+    inspection = Path.join(root, "inspection")
+    output = Path.join(root, "output")
+    Enum.each([traces, inspection, output], &File.mkdir_p!/1)
+
+    capability_events =
+      exchanges
+      |> Enum.with_index(2)
+      |> Enum.map(fn {exchange, sequence} ->
+        exchange_event(run_id, sequence, "capability-started", %{
+          "capability_id" => exchange.capability_id,
+          "environment" => "workflow",
+          "name" => "llm-request"
+        })
+      end)
+
+    events =
+      [exchange_event(run_id, 1, "run-started", %{})] ++
+        capability_events ++
+        [exchange_event(run_id, length(exchanges) + 2, "run-stopped", %{"outcome" => "ok"})]
+
+    File.write!(
+      Path.join(traces, "#{run_id}.jsonl"),
+      Enum.map_join(events, "", &(Jason.encode!(&1) <> "\n"))
+    )
+
+    {:ok, sink} = InspectionSink.start(run_id: run_id, trace_id: run_id, schema_version: 2)
+
+    Enum.each(exchanges, fn exchange ->
+      :ok =
+        InspectionSink.emit(
+          sink,
+          "capability-input",
+          %{capability_id: exchange.capability_id},
+          %{
+            environment: :workflow,
+            name: "llm-request",
+            evaluation_id: exchange.evaluation_id,
+            arguments: %{"messages" => [%{"content" => exchange.prompt}]}
+          }
+        )
+
+      :ok =
+        InspectionSink.emit(
+          sink,
+          "capability-output",
+          %{capability_id: exchange.capability_id},
+          %{
+            environment: :workflow,
+            name: "llm-request",
+            result: %{status: :ok, value: %{"content" => exchange.content}}
+          }
+        )
+    end)
+
+    {:ok, records} = InspectionSink.records(sink)
+
+    :ok =
+      InspectionArtifact.persist(
+        Path.join(inspection, "#{run_id}.inspection.jsonl"),
+        records,
+        events
+      )
+
+    :ok = InspectionSink.stop(sink)
+
+    %{traces: traces, inspection: inspection, output: output, run_id: run_id}
+  end
+
+  defp exchange_event(run_id, sequence, type, data) do
+    %{
+      "schema_version" => 1,
+      "run_id" => run_id,
+      "trace_id" => run_id,
+      "sequence" => sequence,
+      "timestamp" => "2026-08-02T12:00:#{String.pad_leading(to_string(sequence), 2, "0")}Z",
+      "type" => type,
+      "data" => data
+    }
   end
 end

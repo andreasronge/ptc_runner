@@ -1,5 +1,6 @@
 (ns inspection.analysis
-  "Bounded whole-result traversal for private inspection queries."
+  "Bounded whole-result traversal for private inspection queries, plus shape
+  conveniences built on that traversal layer (see `prose` below)."
   {:visibility :discoverable})
 
 (defn all-runs
@@ -44,3 +45,20 @@
   (cap/collect-pages
     (fn [cursor] (inspection/provider-exchanges run-id cursor))
     max-pages))
+
+(defn prose
+  "Reads the model's own narration per turn, exhausting pages up to
+  `max-pages`.
+
+  Each item is `{\"evaluation_id\" ... \"content\" ...}`, built from
+  `all-model-exchanges` in turn order: `evaluation_id` correlates the
+  narration to the same turn as capability calls and annotations, and
+  `content` is read from `[\"result\" \"value\" \"content\"]` on the
+  exchange. The result keeps `all-model-exchanges`'
+  `complete?`/`pages`/`snapshot_hash` envelope around the projected `items`."
+  [run-id max-pages]
+  (let [page (all-model-exchanges run-id max-pages)
+        narrate (fn [exchange]
+                  {"evaluation_id" (get exchange "evaluation_id")
+                   "content" (get-in exchange ["result" "value" "content"])})]
+    (assoc page "items" (mapv narrate (get page "items")))))

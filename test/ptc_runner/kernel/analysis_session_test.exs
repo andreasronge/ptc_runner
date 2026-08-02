@@ -39,7 +39,7 @@ defmodule PtcRunner.Kernel.AnalysisSessionTest do
     assert first_info.profile_digest == second_info.profile_digest
 
     assert first_info.profile_digest ==
-             "sha256:63ae553a6fc6ff5e9611093a31496eadef45efab8f143d35830e211f92817c3e"
+             "sha256:aa9c0f0848d81dbcdbeac65ff521c91810eff4f7aa94f19d9496d3cc8f53b945"
 
     assert first_info.namespaces == ["cap", "log", "log.analysis"]
     refute inspect(first_info) =~ directory
@@ -612,6 +612,93 @@ defmodule PtcRunner.Kernel.AnalysisSessionTest do
              AnalysisSession.evaluate(session, "(log/runs {})")
 
     assert Enum.map(still_frozen, & &1["run_id"]) == ["seed"]
+  end
+
+  @tag :tmp_dir
+  test "log.analysis/annotations strips the event envelope, filters by type, and keeps evaluation_id",
+       %{tmp_dir: directory} do
+    seed_annotated_trace(directory, "annotated", [
+      {"progress", %{"stage" => "started"}, "eval-1"},
+      {"agent-action", %{"turn" => 0, "kind" => "tool-call"}, "eval-2"},
+      {"progress", %{"stage" => "finished"}, "eval-3"}
+    ])
+
+    assert {:ok, session, _info} =
+             start_log_session({:directory, directory}, {:directory, directory})
+
+    on_exit(fn -> AnalysisSession.stop(session) end)
+
+    assert {:ok,
+            %{
+              status: :ok,
+              value: %{"items" => all_annotations, "complete?" => true}
+            }} =
+             AnalysisSession.evaluate(
+               session,
+               ~S|(log.analysis/annotations "annotated" nil 4)|
+             )
+
+    assert all_annotations == [
+             %{
+               "annotation_type" => "progress",
+               "data" => %{"stage" => "started"},
+               "provenance" => "workflow",
+               "evaluation_id" => "eval-1"
+             },
+             %{
+               "annotation_type" => "agent-action",
+               "data" => %{"turn" => 0, "kind" => "tool-call"},
+               "provenance" => "workflow",
+               "evaluation_id" => "eval-2"
+             },
+             %{
+               "annotation_type" => "progress",
+               "data" => %{"stage" => "finished"},
+               "provenance" => "workflow",
+               "evaluation_id" => "eval-3"
+             }
+           ]
+
+    assert {:ok, %{value: %{"items" => progress_only}}} =
+             AnalysisSession.evaluate(
+               session,
+               ~S|(log.analysis/annotations "annotated" "progress" 4)|
+             )
+
+    assert Enum.map(progress_only, & &1["evaluation_id"]) == ["eval-1", "eval-3"]
+
+    assert {:ok, %{value: %{"items" => []}}} =
+             AnalysisSession.evaluate(
+               session,
+               ~S|(log.analysis/annotations "annotated" "no-such-type" 4)|
+             )
+  end
+
+  @tag :tmp_dir
+  test "log.analysis/annotations reports an incomplete envelope instead of silently truncating",
+       %{tmp_dir: directory} do
+    annotations = for index <- 1..20, do: {"progress", %{"index" => index}, "eval-#{index}"}
+    seed_annotated_trace(directory, "flood", annotations)
+
+    assert {:ok, session, _info} =
+             start_log_session({:directory, directory}, {:directory, directory})
+
+    on_exit(fn -> AnalysisSession.stop(session) end)
+
+    # The default `log/turns` page holds 20 events: `run-started` plus the
+    # first 19 annotations. A one-page read must not present that prefix as
+    # the whole run's annotations.
+    assert {:ok,
+            %{
+              status: :ok,
+              value: %{"items" => items, "complete?" => false, "pages" => 1}
+            }} =
+             AnalysisSession.evaluate(
+               session,
+               ~S|(log.analysis/annotations "flood" nil 1)|
+             )
+
+    assert length(items) == 19
   end
 
   @tag :tmp_dir
@@ -1782,6 +1869,37 @@ defmodule PtcRunner.Kernel.AnalysisSessionTest do
     {:ok, limits} = Limits.new()
     {:ok, sink} = EventSink.start(:normal, limits, run_id: run_id)
     :ok = EventSink.emit(sink, "run-started", %{})
+    :ok = EventSink.emit(sink, "run-stopped", %{outcome: :ok, reason: nil})
+    :ok = TraceLog.append_jsonl(path, EventSink.events(sink))
+    EventSink.stop(sink)
+  end
+
+  # Seeds a trace carrying `{type, data, evaluation_id}` workflow-annotation
+  # events, plus an unrelated capability event, so a nil-type read can be
+  # proven to select only annotations rather than every turn.
+  defp seed_annotated_trace(directory, run_id, annotations) do
+    path = Path.join(directory, run_id <> ".jsonl")
+    {:ok, limits} = Limits.new()
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: run_id)
+    :ok = EventSink.emit(sink, "run-started", %{})
+
+    Enum.each(annotations, fn {type, data, evaluation_id} ->
+      :ok =
+        EventSink.emit(sink, "workflow-annotation", %{
+          annotation_type: type,
+          data: data,
+          provenance: :workflow,
+          evaluation_id: evaluation_id
+        })
+    end)
+
+    :ok =
+      EventSink.emit(sink, "capability-started", %{
+        capability_id: "cap-#{run_id}",
+        environment: :workflow,
+        name: "probe"
+      })
+
     :ok = EventSink.emit(sink, "run-stopped", %{outcome: :ok, reason: nil})
     :ok = TraceLog.append_jsonl(path, EventSink.events(sink))
     EventSink.stop(sink)

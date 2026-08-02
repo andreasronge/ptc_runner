@@ -1,0 +1,2 @@
+[0mWaiting for lock on the build directory (held by process 45661)
+** (Mix) ptc.run failed: provider_cleanup_error/provider_cleanup_failed

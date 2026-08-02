@@ -370,13 +370,22 @@ bounded prefix is never mistaken for the whole result:
 (log.analysis/all-turns "run-id" {"limit" 100} 20)
 ```
 
-Turn filter keys are `status`, `evaluation_id`, and `capability`. Capability
-events carry the `evaluation_id` of the evaluation whose program invoked them,
-so one query scopes to a single turn instead of reconstructing evaluation
-windows from `sequence` order:
+Turn filter keys are `status`, `evaluation_id`, `capability`, and
+`annotation_type`. Capability and annotation events carry the `evaluation_id`
+of the evaluation whose program invoked or emitted them, so one query scopes
+to a single turn instead of reconstructing evaluation windows from `sequence`
+order:
 
 ```clojure
 (log/turns "run-id" {"evaluation_id" "mission-evaluation-18"})
+```
+
+`log.analysis/annotations` strips the outer event envelope off a run's
+workflow annotations, filters by `annotation_type` when one is given, and
+traverses to exhaustion under the same page bound as `all-turns`:
+
+```clojure
+(log.analysis/annotations "run-id" "progress" 20)
 ```
 
 The captured files, session code, results, and analysis trace have independent

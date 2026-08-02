@@ -454,7 +454,6 @@ home:
 The finding 4 and 5 prototype was superseded by #1162, which shipped both fixes
 in better form. Those obsolete modifications are not part of this branch.
 
-<<<<<<< HEAD
 Finding 2 landed on `main` independently as `selected_branches/3`, which also
 resolves branch identity through `evaluationPath`. This branch's version was
 superseded and dropped when it rebased; only its regression tests were kept.

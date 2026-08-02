@@ -143,6 +143,19 @@ the source was exhausted; a page-bound stop returns the collected prefix with
 `complete? false`. Invalid or rejected source queries fail the form instead of
 returning an error map that can be mistaken for an empty result.
 
+`log.analysis/annotations` strips the outer event envelope off a run's
+workflow annotations, returning each `data` map — `annotation_type`, `data`
+(the payload), `provenance`, and `evaluation_id` — instead of making every
+caller re-derive that shape:
+
+```clojure
+(log.analysis/annotations "run-id" nil 10)
+(log.analysis/annotations "run-id" "progress" 10)
+```
+
+`type` selects one `annotation_type`; `nil` returns every annotation for the
+run. It shares the same bounded envelope as the other analysis functions.
+
 Ordinary bounded mission introspection such as `(tool/runtime-usage {})` and
 `(tool/cap-list {})` is also available. Filesystem, network, LLM, agent,
 workflow, MCP, private-inspection, and nested evaluation authority is absent.
@@ -233,6 +246,17 @@ For example:
 (inspection.analysis/all-generated-sources run-id 10)
 (inspection.analysis/all-provider-exchanges run-id 10)
 ```
+
+`inspection.analysis/prose` reads the model's own narration per turn, without
+requiring every caller to know that it lives at
+`["result" "value" "content"]` on a model exchange:
+
+```clojure
+(inspection.analysis/prose run-id 10)
+```
+
+Each item is `{"evaluation_id" ... "content" ...}` in turn order, so narration
+correlates to the same turn as capability calls and annotations.
 
 Exact model messages, generated source, capability arguments/results,
 effective preludes, and MCP request/response bodies may appear on the
