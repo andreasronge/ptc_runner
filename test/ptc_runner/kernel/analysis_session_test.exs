@@ -1145,9 +1145,9 @@ defmodule PtcRunner.Kernel.AnalysisSessionTest do
       :erlang.resume_process(resources.session_trace.pid)
     end
 
-    assert_receive {:DOWN, ^session_ref, :process, _pid, _reason}, 1_000
-    assert_receive {:DOWN, ^runtime_ref, :process, _pid, _reason}, 1_000
-    assert_receive {:DOWN, ^snapshot_ref, :process, _pid, _reason}, 1_000
+    assert_receive {:DOWN, ^session_ref, :process, _pid, _reason}, @lifecycle_timeout_ms
+    assert_receive {:DOWN, ^runtime_ref, :process, _pid, _reason}, @lifecycle_timeout_ms
+    assert_receive {:DOWN, ^snapshot_ref, :process, _pid, _reason}, @lifecycle_timeout_ms
     assert_receive {:DOWN, ^trace_ref, :process, _pid, _reason}, @lifecycle_timeout_ms
     refute_received {:release_race_builder_result, _result}
   end
@@ -1172,7 +1172,7 @@ defmodule PtcRunner.Kernel.AnalysisSessionTest do
         )
       end)
 
-    assert_receive {:handoff_started, resources, builder}, 1_000
+    assert_receive {:handoff_started, resources, builder}, @lifecycle_timeout_ms
     session_ref = Process.monitor(resources.session.pid)
     trace_ref = Process.monitor(resources.session_trace.pid)
 
@@ -1181,7 +1181,7 @@ defmodule PtcRunner.Kernel.AnalysisSessionTest do
     send(builder, :finish_handoff)
 
     assert {:error, _reason} = Task.await(starter)
-    assert_receive {:DOWN, ^session_ref, :process, _pid, _reason}, 1_000
+    assert_receive {:DOWN, ^session_ref, :process, _pid, _reason}, @lifecycle_timeout_ms
   end
 
   @tag :tmp_dir
@@ -1208,7 +1208,7 @@ defmodule PtcRunner.Kernel.AnalysisSessionTest do
         )
       end)
 
-    assert_receive {:final_completion_ready, resources, builder}, 1_000
+    assert_receive {:final_completion_ready, resources, builder}, @lifecycle_timeout_ms
     session_ref = Process.monitor(resources.session.pid)
     trace_ref = Process.monitor(resources.session_trace.pid)
     Process.exit(resources.session_trace.pid, :kill)
@@ -1216,7 +1216,7 @@ defmodule PtcRunner.Kernel.AnalysisSessionTest do
     send(builder, :finish_final_completion)
 
     assert {:error, :log_analysis_session_failed} = Task.await(starter)
-    assert_receive {:DOWN, ^session_ref, :process, _pid, _reason}, 1_000
+    assert_receive {:DOWN, ^session_ref, :process, _pid, _reason}, @lifecycle_timeout_ms
   end
 
   @tag :tmp_dir
@@ -1372,7 +1372,7 @@ defmodule PtcRunner.Kernel.AnalysisSessionTest do
           )
         end)
 
-      assert_receive {:construction_fault, ^stage, resources, builder}, 1_000
+      assert_receive {:construction_fault, ^stage, resources, builder}, @lifecycle_timeout_ms
       snapshot_ref = Process.monitor(resources.snapshot.pid)
 
       trace_ref =
@@ -1818,7 +1818,7 @@ defmodule PtcRunner.Kernel.AnalysisSessionTest do
   end
 
   defp await_process_message(pid, predicate) do
-    deadline = System.monotonic_time(:millisecond) + 1_000
+    deadline = System.monotonic_time(:millisecond) + @lifecycle_timeout_ms
     do_await_process_message(pid, predicate, deadline)
   end
 

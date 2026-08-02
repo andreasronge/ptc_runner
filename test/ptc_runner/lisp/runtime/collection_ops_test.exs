@@ -22,15 +22,23 @@ defmodule PtcRunner.Lisp.Runtime.CollectionOpsTest do
 
   alias PtcRunner.Lisp
 
+  # These assertions are about evaluator semantics, never about timing, so a
+  # sandboxed spawn starved of scheduler time must not return a timeout that is
+  # indistinguishable from the semantic failure being asserted. Kept to 5× the
+  # 1000 ms product default rather than something far larger: these programs are
+  # trivial, so this is ample headroom against starvation while still failing on
+  # a gross evaluator regression.
+  @eval_timeout_ms 5_000
+
   defp eval!(src) do
-    case Lisp.run(src) do
+    case Lisp.run(src, timeout: @eval_timeout_ms) do
       {:ok, %{return: value}} -> value
       {:error, %{fail: %{message: msg}}} -> flunk("PTC-Lisp program errored: #{msg}\n#{src}")
     end
   end
 
   defp eval_error(src) do
-    case Lisp.run(src) do
+    case Lisp.run(src, timeout: @eval_timeout_ms) do
       {:error, %{fail: %{message: msg}}} -> msg
       {:ok, %{return: value}} -> flunk("expected error, got #{inspect(value)}\n#{src}")
     end

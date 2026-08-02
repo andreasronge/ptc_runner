@@ -124,9 +124,21 @@ defmodule PtcRunner.Kernel.OwnerStatusPrivacyTest do
 
     owners = %{store: store, sink: sink, run_state: run_state, mcp: mcp}
 
+    # The sink, run-state and MCP owners each monitor the process that started
+    # them and stop themselves when it dies; the Viewer store only does so once
+    # attached, which this test never does. `on_exit` runs after the test
+    # process has exited, so those three are already terminating here: a
+    # `Process.alive?/1` guard is a race, not a check, and `GenServer.stop/2`
+    # exits with `:noproc` when the owner wins it.
     on_exit(fn ->
       Enum.each(owner_pids(owners), fn pid ->
-        if Process.alive?(pid), do: GenServer.stop(pid, :normal)
+        try do
+          GenServer.stop(pid, :normal)
+        catch
+          # Only the lost race is tolerated. Any other exit reason is a real
+          # teardown failure and must still fail the test.
+          :exit, {:noproc, _call} -> :ok
+        end
       end)
     end)
 

@@ -14,6 +14,16 @@ defmodule PtcRunner.Kernel.DispatcherEffectTest do
   @effects [:read, :write, :unknown]
   @input_schema %{"type" => "object", "additionalProperties" => false}
 
+  # Waiting for a callback to *start* is a liveness wait, not a latency bound:
+  # it depends on when another process is scheduled. In the timeout test the
+  # wait also spans a `RunState` spawn and a whole `MissionEnvironment` build,
+  # because `dispatch_mission/3` runs inside the task; the run-closure test
+  # builds those before spawning, so its wait spans only the task and the
+  # dispatch. ExUnit's 100 ms `assert_receive` default is not enough headroom
+  # for either under a loaded suite, and an exhausted budget there is
+  # indistinguishable from the liveness failure these waits exist to catch.
+  @callback_liveness_timeout_ms 5_000
+
   test "mission provider errors become indeterminate only after possible non-read dispatch" do
     for effect <- @effects do
       result =
@@ -119,7 +129,7 @@ defmodule PtcRunner.Kernel.DispatcherEffectTest do
           )
         end)
 
-      assert_receive {:callback_started, ^effect}
+      assert_receive {:callback_started, ^effect}, @callback_liveness_timeout_ms
 
       assert_effect_failure(
         Task.await(task),
@@ -152,7 +162,7 @@ defmodule PtcRunner.Kernel.DispatcherEffectTest do
           Dispatcher.dispatch(state, :mission, environment, capability.name, %{}, 1_000)
         end)
 
-      assert_receive {:callback_started, ^effect, provider}
+      assert_receive {:callback_started, ^effect, provider}, @callback_liveness_timeout_ms
       assert :ok = RunState.close(state)
       send(provider, :finish)
 

@@ -2,9 +2,13 @@
 
 **Written:** 2026-08-01, revised 2026-08-02. Branch
 `worktree-incident-evidence-compiler`, 28 commits ahead of `origin/main` at
-`7d997a0a`. Working tree clean and **fully pushed**; `mix precommit`,
-`mix prepush`, and the warnings-as-errors doc build green as of the last
-code commit — the two most recent commits are documentation only.
+`7d997a0a`. Everything through the last commit is **pushed**; `mix precommit`,
+`mix prepush`, and the warnings-as-errors doc build were green as of the last
+code commit.
+
+The working tree is **not** clean: it carries the uncommitted flaky-test work
+described under [Known flaky tests](#known-flaky-tests) — one product fix to
+`NetworkPolicy.resolve/3` plus test changes across six files.
 **No PR opened.**
 
 Count against `origin/main`, not the local `main` ref — in this worktree the
@@ -234,63 +238,122 @@ Still open and tracked in `agent-developer-findings.md`: findings 7–9
 
 ## Known flaky tests
 
-Investigated 2026-08-02. **Nothing below is fixed** — the section records
-diagnosis and proposed changes only; the working tree carries none of them.
+Investigated and **fixed** 2026-08-02. The working tree now carries the fixes;
+the numbers below are measured, and each cites its method.
 
-Every one has the same shape: a fixed wall-clock budget asserted from a
-preemptible process, where an exhausted budget is indistinguishable from the
-failure the test is looking for. None is an assertion mismatch indicating a
-product defect. `test/test_helper.exs` already names this class — it halves
-`max_cases` precisely because a sandbox's 1 s cap flakes under contention.
+### Method, because the last two records here were both wrong
 
-| Test | Budget that expires | Proposed change |
-| --- | --- | --- |
-| `mcp_oauth/store_memory_test.exs:416` | 100 ms binding freshness, spanning `flow/1`'s key generation and a store round-trip | anchor freshness last, so the window covers only `begin_flow` |
-| `lisp/runtime/collection_ops_test.exs:64` | `Lisp.run/1`'s 1000 ms product default, for a sandboxed spawn | pass an explicit generous `timeout:` in the file's two eval helpers — they assert semantics, never timing |
-| `analysis_session_test.exs:1149` | 1000 ms, hard-coded at 8 sites against the file's own `@lifecycle_timeout_ms 30_000` | use the constant, as its 15 sibling assertions already do |
-| `kernel/dispatcher_effect_test.exs:103` | ExUnit's 100 ms `assert_receive` default, for `Task.async` plus a full mission dispatch | give the two callback-liveness waits an explicit timeout |
-| `mcp_oauth/network_policy_test.exs:130` | 20 ms, from computing the deadline to `resolve/3` checking it | none — but see the real defect below |
-| `IncidentCompiler.CompilerTest` | `setup_all` dies with `:mcp_timeout`, invalidating all 13 | none — not reproduced, and its timeouts are already 30 s/60 s |
+Two harnesses, and they disagree — which is the whole lesson:
 
-### The reproduction record, corrected
+- **Full suite, default settings** (10-core machine, `max_cases: 10`, ~70 s a
+  run). This is ground truth and the *only* harness that reproduced anything
+  on the first pass.
+- **One file, `--repeat-until-failure N`, under 20 CPU burners** (3×
+  oversubscription). Fast, but it both misses real flakes and manufactures
+  failures a real run never sees. Use it to *confirm* a mechanism and to
+  verify a fix, never to rule a test clean.
 
-The rate previously claimed here for `network_policy_test.exs:130` — "fails ~1
-run in 10 **in isolation** — a race between the egress check and the deadline
-path" — does not hold, and the mechanism named was wrong. Measured:
+The previous record concluded `network_policy_test` was not reproducible from
+200/200 passes and 0/600 in a replay harness. It reproduced in a plain
+full-suite run with exactly the originally predicted signature. The replay was
+unfaithful: it had no CPU contention, so it never created the starvation the
+bug needs. **A passing isolated loop is not evidence a test is clean.**
 
-- 200/200 passes under `--repeat-until-failure`, and 40/40 isolated file runs.
-- A faithful in-BEAM replay of the original guard (fresh process per iteration,
-  4× CPU oversubscription) produced `:egress_denied` **0 times in 600
-  attempts**. The gap the race needs stays under 5 ms against a 20 ms budget.
-- `store_memory:416` and `collection_ops:64` likewise pass 200/200.
-- Three consecutive full-suite runs: two clean, one failure — and that failure
-  was `dispatcher_effect_test.exs:103`, which was **not** on the original list.
+### Measured
 
-So the list was both overstated (no isolated failure is reproducible) and
-incomplete. Treat any rate here as unmeasured unless it cites a method.
+Pre-fix, full suite × 10: **2 failures**. Post-fix, full suite × 12: 11 clean,
+one *new* test surfaced (below). Isolated + 20 burners × 100: `dispatcher_effect`,
+`owner_status_privacy`, `collection_ops` and `store_memory` were all clean — so
+four of the six originally listed have **no reproduction evidence at all**.
 
-Use `--repeat-until-failure N` for this, not a shell loop over `mix test`: the
-whole cost is BEAM startup, and looping externally makes a microsecond-scale
-window take minutes to sample.
+| Test | Mechanism | Evidence | Fix |
+| --- | --- | --- | --- |
+| `mcp_oauth/network_policy_test.exs:141` | 20 ms window from computing the deadline to `resolve/3`'s guard, surfacing as `:egress_denied` | **full suite 1/10** | product fix below — now correct by construction |
+| `mcp_oauth/network_policy_test.exs:147` | separate 500 ms overshoot bound on `Task.shutdown` | **burners only, iter 82/100** (644 ms) | **left at 500 ms** — see below; 200/200 clean unloaded |
+| `owner_status_privacy_test.exs:129` | TOCTOU: `if Process.alive?(pid), do: GenServer.stop(pid, :normal)` | **full suite 1/10** | drop the guard, catch `{:noproc, _}` only |
+| `bounded_worker_test.exs:134` | ExUnit's 100 ms `assert_receive` default, for a 1 ms timer plus several process hops | **full suite 1/12, burners iter 116** | explicit 5 s liveness timeout; **400/400 clean after** |
+| `kernel/dispatcher_effect_test.exs:122,159` | 100 ms default spanning a `RunState` spawn and a whole `MissionEnvironment` build | none — 100/100 clean | hardened anyway; the budget is indefensible |
+| `analysis_session_test.exs` (8 sites + helper) | 1000 ms hard-coded against the file's own `@lifecycle_timeout_ms 30_000` | none — not reproduced | use the constant, as its siblings do |
+| `lisp/runtime/collection_ops_test.exs` | `Lisp.run/1`'s 1000 ms default for a sandboxed spawn | none — 100/100 clean | explicit `timeout: 5_000` in both eval helpers |
+| `mcp_oauth/store_memory_test.exs:416` | 100 ms freshness spanning `flow/1`'s key generation | none — 100/100 clean | anchor freshness last |
+| `IncidentCompiler.CompilerTest` | `setup_all` dies with `:mcp_timeout` | never reproduced | none; timeouts are already 30 s/60 s and it is `async: false` |
 
-### A real defect found underneath, also unfixed
+Note the correction to the earlier framing: **not every one is a wall-clock
+budget.** `owner_status_privacy` is a teardown race, and no timeout change would
+have fixed it. The sink, run-state and MCP owners each monitor the process that
+started them and self-stop when it dies (the Viewer store only does so once
+attached, which that test never does); `on_exit` runs after the test process
+exits, so those owners are always dying exactly when teardown probes them.
 
-Unrelated to timing: `NetworkPolicy.resolve/3` folds an expired deadline into
+### What the independent review changed
+
+A Codex review of the diff confirmed the egress argument formally: if the old
+guard rejected deadline `d` at `t0` then `d <= t0`, and `safe_resolve/3` reads
+`t1 >= t0`, so the remaining budget can never become positive. It then found
+four problems in the *test* changes, three of which were accepted:
+
+- **Widening `:147` from 500 ms to 2 s was wrong** and has been reverted. It was
+  justified by burner-harness evidence — exactly the harness this document says
+  manufactures failures a real run never sees. It has never failed unloaded
+  (200/200) and the bound is a real assertion, not headroom.
+- **A 30 s eval timeout removed real coverage** in `collection_ops`: a 20-second
+  evaluator regression would have passed. Reduced to 5 s — ample against
+  starvation for programs this trivial, still failing on a gross regression.
+- **Catching every `:exit` hid genuine teardown failures** in
+  `owner_status_privacy`. Narrowed to `{:noproc, _}`, the only reason the race
+  can produce. Verified that shape empirically before narrowing.
+- Its fourth point — that raising the `analysis_session` budgets weakens
+  orphan-prevention coverage — was **not** taken. 30 s is that file's own
+  `@lifecycle_timeout_ms`, already used by 14 sibling assertions including one
+  in the same test on a related `:DOWN`; the three 1000 ms values were the
+  anomaly. The asserted property (the process does die) is unchanged.
+
+It also caught a factually wrong code comment: not all three `BoundedWorker`
+waits depend on the 1 ms timer — only the cleanup wait does, which is precisely
+the one that was measured failing. The comment now says that.
+
+### Still open: `bounded_worker_test.exs:137`
+
+Seen **once**, in a full-suite run: the `{:DOWN, ...}` arrived with reason
+`:noproc` instead of `:killed`, meaning the worker was already dead when
+`Process.monitor/1` ran. This is *not* the budget mode and the timeout fix does
+not address it — widening a budget cannot change which reason arrives. It did
+not recur in 400 contended iterations, so it is rarer than that.
+
+The mechanism is not established. Reading says the worker should still be alive:
+the cleanup hook blocks *before* `terminate_linked`, and the caller is parked
+inside it. Do not "fix" this by relaxing the assertion to accept `:noproc` —
+that reason is precisely what the test exists to rule out.
+
+### The product defect underneath — **fixed**
+
+`NetworkPolicy.resolve/3` folded an expired deadline into
 `{:error, :egress_denied}`, reporting a timeout as a policy verdict about the
-host. A deadline only 1 ms away already returns it. The module disagrees with
-itself — `safe_resolve/3`'s own expiry branch returns `:resolution_failed`, and
-so does `mcp_source.ex:1544` — which leaves the correct branch effectively
-unreachable.
+host. The module disagreed with itself: `safe_resolve/3`'s own expiry branch
+returns `:resolution_failed`, and so does `mcp_source.ex:1544`, which left the
+correct branch effectively unreachable.
 
-The fix is to drop the expiry from the guard, keeping `is_integer/1`, and let
-`safe_resolve/3` classify it. That cannot widen egress: with no budget left the
-resolver is never invoked and `{:ok, target}` is unreachable, while a
-disallowed origin still fails the origin check first. Worth two tests — one
-pinning an expired deadline to `:resolution_failed`, one pinning that a
-disallowed origin still outranks it.
+Fixed by dropping the expiry from the guard, keeping `is_integer/1`, and letting
+`safe_resolve/3` classify it. This cannot widen egress: `safe_resolve/3` is
+always on the path to `{:ok, target}` and returns before invoking the resolver
+when no budget remains, while a disallowed origin fails `origin_allowed?/2`
+first. Both properties are now pinned by tests, the second asserting the
+resolver is never invoked. The classification is recorded in the moduledoc.
 
-Consequence today is confined to diagnostics: `mcp_source.ex:1514` maps both
-errors to `:mcp_transport_error`.
+This also makes `network_policy_test:141` deterministic rather than merely
+widening its budget — every path now returns `:resolution_failed`.
+
+Consequence was confined to diagnostics throughout: `mcp_source.ex:1514` maps
+both errors to `:mcp_transport_error`.
+
+### Unapplied option: raise the global `assert_receive` default
+
+`test/test_helper.exs` sets no `:assert_receive_timeout`, so all **477**
+`assert_receive` sites run on ExUnit's 100 ms default; three separate tests were
+caught by it. Raising only `assert_receive_timeout` (leaving
+`refute_receive_timeout` at 100 ms, since the **128** `refute_receive` sites pay
+their full budget on *success*) would cover the untriaged tail at no cost to a
+passing run. Left unapplied — it is a suite-wide policy call, not a bug fix.
 
 **There is no `pre-push` hook installed in this clone.** `git push` runs no
 gates; run `mix precommit` and `mix prepush` yourself, or install the hooks with

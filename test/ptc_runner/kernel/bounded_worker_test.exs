@@ -4,6 +4,15 @@ defmodule PtcRunner.Kernel.BoundedWorkerTest do
   alias PtcRunner.Kernel.BoundedWorker
   alias PtcRunner.Kernel.BundleCompiler
 
+  # These waits are for liveness, not latency: each depends on when another
+  # process is scheduled, and ExUnit's 100 ms `assert_receive` default leaves
+  # no headroom for that under a loaded suite. The measured failure is the
+  # cleanup wait, which additionally waits on a 1 ms timer to fire in the
+  # caller and on the hook it then runs. The `refute_receive` budgets are
+  # deliberately left at the default — lengthening those only slows the suite
+  # down.
+  @liveness_timeout_ms 5_000
+
   test "timeout kills the worker without leaking monitor or result messages" do
     parent = self()
 
@@ -130,10 +139,10 @@ defmodule PtcRunner.Kernel.BoundedWorkerTest do
         )
       end)
 
-    assert_receive {:timeout_worker, worker}
-    assert_receive {:timeout_cleanup, ^caller}
+    assert_receive {:timeout_worker, worker}, @liveness_timeout_ms
+    assert_receive {:timeout_cleanup, ^caller}, @liveness_timeout_ms
     worker_ref = Process.monitor(worker)
     Process.exit(caller, :kill)
-    assert_receive {:DOWN, ^worker_ref, :process, ^worker, :killed}
+    assert_receive {:DOWN, ^worker_ref, :process, ^worker, :killed}, @liveness_timeout_ms
   end
 end

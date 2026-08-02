@@ -444,8 +444,13 @@ defmodule PtcRunner.Kernel.MCPOAuth.StoreMemoryTest do
 
   test "cached discovery freshness cannot restart after callback delay", context do
     key = Context.grant_key(context.alice, context.authority, context.authority_epoch)
+
+    # Anchor the 100 ms freshness window last. `flow/1` generates fresh flow
+    # material, so building it first keeps key generation out of a window the
+    # test needs to still be open when `consume_callback` reports the fence.
+    unbound_flow = flow(context.store)
     binding = oauth_binding(context.store, 100)
-    flow = put_in(flow(context.store), [:binding], binding)
+    flow = put_in(unbound_flow, [:binding], binding)
 
     assert {:ok, pending} = Store.begin_flow(context.store, key, flow, 5_000, 1_000)
 
