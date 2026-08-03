@@ -172,8 +172,13 @@ defmodule PtcRunner.Kernel.RunBuilder do
       )
       when is_list(opts) do
     with true <- PreparedRun.active_valid?(prepared),
+         :ok <-
+           ProviderSession.claim_operation(
+             session,
+             prepared.request.package.limits,
+             prepared.attestation
+           ),
          :ok <- validate_registry(registry),
-         true <- ProviderSession.compatible_limits?(session, prepared.request.package.limits),
          :ok <- validate_build_options(opts),
          :ok <- validate_installed_limits(prepared.request.package, registry, opts),
          :ok <- validate_inspection_selection(prepared.request, opts) do
@@ -181,6 +186,18 @@ defmodule PtcRunner.Kernel.RunBuilder do
       # owns it. Only failures before that handoff are cleaned up here.
       build_active_preflighted(prepared, registry, session, opts)
     else
+      {:error, :operation_claimed} ->
+        {:error, :invalid_active_run}
+
+      {:error, :operation_mismatch} ->
+        prefer_cleanup_error({:error, :invalid_active_run}, close_live_session(session))
+
+      {:error, :provider_session_unavailable} ->
+        # Claim timeouts are ambiguous: the claim may have committed before
+        # its reply was lost. ProviderSession queues conditional cleanup that
+        # preserves a claimed session and closes only an abandoned one.
+        {:error, :invalid_active_run}
+
       false ->
         prefer_cleanup_error({:error, :invalid_active_run}, close_live_session(session))
 

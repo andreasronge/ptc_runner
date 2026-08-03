@@ -2,6 +2,7 @@ defmodule PtcRunner.Kernel.ProviderActiveSessionTest do
   use ExUnit.Case, async: false
 
   alias PtcRunner.Kernel.ApplicationPackage
+  alias PtcRunner.Kernel.Capability
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.InstallationCatalog
@@ -75,6 +76,105 @@ defmodule PtcRunner.Kernel.ProviderActiveSessionTest do
              RunBuilder.build_active(prepared, registry, session, [])
 
     refute ProviderSession.alive?(session)
+    assert :ok = PreparedRun.close(prepared)
+  end
+
+  test "active build rejects a session opened for another prepared run" do
+    {:ok, first, first_catalog} = fixture(fn _selection, _context -> :ok end)
+    {:ok, second, second_catalog} = fixture(fn _selection, _context -> :ok end)
+    assert {:ok, first_session} = ProviderActiveSession.open(first, first_catalog, services())
+    assert {:ok, second_session} = ProviderActiveSession.open(second, second_catalog, services())
+    assert {:ok, registry} = ProviderRegistry.new(%{})
+
+    assert {:error, :invalid_active_run} =
+             RunBuilder.build_active(second, registry, first_session, [])
+
+    refute ProviderSession.alive?(first_session)
+    assert :ok = ProviderSession.close(second_session)
+    assert :ok = PreparedRun.close(first)
+    assert :ok = PreparedRun.close(second)
+  end
+
+  test "active build rejects cloned identity with different limits before preparation" do
+    parent = self()
+    {:ok, prepared, catalog} = fixture(fn _selection, _context -> :ok end)
+    assert {:ok, opened_session} = ProviderActiveSession.open(prepared, catalog, services())
+    assert :ok = ProviderSession.close(opened_session)
+
+    limits = prepared.request.package.limits
+    other_limits = %{limits | provider_cleanup_timeout_ms: limits.provider_cleanup_timeout_ms + 1}
+
+    assert {:ok, wrong_session} =
+             ProviderSession.start(other_limits, operation_identity: prepared.attestation)
+
+    staged = fn _selection, _context ->
+      send(parent, :unexpected_provider_preparation)
+      {:error, :unexpected_provider_preparation}
+    end
+
+    assert {:ok, registry} =
+             ProviderRegistry.new(%{"selected" => ProviderRegistry.staged(staged)})
+
+    assert {:error, :invalid_active_run} =
+             RunBuilder.build_active(prepared, registry, wrong_session, [])
+
+    refute_receive :unexpected_provider_preparation
+    refute ProviderSession.alive?(wrong_session)
+    assert :ok = PreparedRun.close(prepared)
+  end
+
+  test "active build claims its session once without closing it on replay" do
+    {:ok, prepared, catalog} = fixture(fn _selection, _context -> :ok end)
+    assert {:ok, session} = ProviderActiveSession.open(prepared, catalog, services())
+    assert {:ok, registry} = active_registry()
+
+    assert {:ok, built} = RunBuilder.build_active(prepared, registry, session, [])
+
+    assert {:error, :invalid_active_run} =
+             RunBuilder.build_active(prepared, registry, session, [])
+
+    assert {:error, :invalid_active_run} =
+             RunBuilder.build_active(prepared, registry, session, unknown: true)
+
+    {:ok, other, other_catalog} = fixture(fn _selection, _context -> :ok end)
+    assert {:ok, other_session} = ProviderActiveSession.open(other, other_catalog, services())
+
+    assert {:error, :invalid_active_run} =
+             RunBuilder.build_active(other, registry, session, [])
+
+    assert ProviderSession.alive?(session)
+
+    assert :ok = RunBuilder.close(built)
+    assert :ok = ProviderSession.close(other_session)
+    assert :ok = PreparedRun.close(prepared)
+    assert :ok = PreparedRun.close(other)
+  end
+
+  @tag timeout: 10_000
+  test "a timed-out replay cannot close a claimed active session" do
+    {:ok, prepared, catalog} = fixture(fn _selection, _context -> :ok end)
+    assert {:ok, session} = ProviderActiveSession.open(prepared, catalog, services())
+    assert {:ok, registry} = active_registry()
+    assert {:ok, built} = RunBuilder.build_active(prepared, registry, session, [])
+
+    assert true = :erlang.suspend_process(session.pid)
+
+    try do
+      assert {:error, :invalid_active_run} =
+               RunBuilder.build_active(prepared, registry, session, [])
+    after
+      if Process.alive?(session.pid), do: :erlang.resume_process(session.pid)
+    end
+
+    assert {:error, :operation_claimed} =
+             ProviderSession.claim_operation(
+               session,
+               prepared.request.package.limits,
+               prepared.attestation
+             )
+
+    assert ProviderSession.alive?(session)
+    assert :ok = RunBuilder.close(built)
     assert :ok = PreparedRun.close(prepared)
   end
 
@@ -420,6 +520,25 @@ defmodule PtcRunner.Kernel.ProviderActiveSessionTest do
       cross_rules: [],
       named_sets: %{"modes" => ["first", "second"]}
     )
+  end
+
+  defp active_registry do
+    {:ok, capability} =
+      Capability.new(
+        name: "fixture",
+        input_schema: %{"type" => "object", "additionalProperties" => false},
+        callback: fn _arguments -> {:ok, %{}} end
+      )
+
+    staged = fn _selection, _context ->
+      {:ok,
+       %{
+         credential_names: [],
+         preflight: fn -> {:ok, fn %{} -> {:ok, capability} end} end
+       }}
+    end
+
+    ProviderRegistry.new(%{"selected" => ProviderRegistry.staged(staged)})
   end
 
   defp close(session, prepared) do

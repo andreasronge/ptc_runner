@@ -62,7 +62,9 @@ defmodule PtcRunner.Kernel.ProviderActiveSession do
   end
 
   defp open_marked(prepared, catalog, services) do
-    case ProviderSession.start(prepared.request.package.limits) do
+    case ProviderSession.start(prepared.request.package.limits,
+           operation_identity: prepared.attestation
+         ) do
       {:ok, session} -> admit_open_session(session, prepared, catalog, services)
       {:error, _reason} -> fail_without_session(prepared, internal_diagnostic(true))
     end

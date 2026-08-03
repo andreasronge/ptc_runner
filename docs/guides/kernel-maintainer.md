@@ -177,7 +177,9 @@ the constructor directly. Such provider-bearing values are presently
 continuation state for the staged command pipeline. `RunBuilder.build_prepared/3`
 rejects them; after `ProviderActiveSession` consumes and marks one, the Mix
 adapter opens its runtime registry and passes the active value and same session
-to `RunBuilder.build_active/4`.
+to `RunBuilder.build_active/4`. That active build atomically claims a session
+sealed to the exact prepared run; swapping sessions or replaying the same
+prepared/session pair is rejected before acquisition.
 Construction binds each frozen bundle's component IDs, source hashes,
 dependency edges, mission presence, and exported entry back to the sealed
 request. `RunBuilder.build_prepared/3` atomically consumes the prepared run

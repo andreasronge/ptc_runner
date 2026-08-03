@@ -31,6 +31,35 @@ defmodule PtcRunner.Kernel.ProviderSessionTest do
     assert {:error, :invalid_provider_session} = ProviderSession.start(invalid)
   end
 
+  test "malformed and duplicate session options fail closed" do
+    assert {:error, :invalid_provider_session} =
+             ProviderSession.start(limits(), [{:operation_identity}])
+
+    assert {:error, :invalid_provider_session} =
+             ProviderSession.start(limits(),
+               operation_identity: "first",
+               operation_identity: "second"
+             )
+  end
+
+  test "claimed operation remains claimed after lifecycle ownership transfers" do
+    identity = "prepared-operation"
+    limits = limits()
+    {:ok, session} = ProviderSession.start(limits, operation_identity: identity)
+    assert :ok = ProviderSession.claim_operation(session, limits, identity)
+
+    lifecycle_owner = spawn(fn -> receive do: (:stop -> :ok) end)
+    run_state = spawn(fn -> receive do: (:stop -> :ok) end)
+    assert :ok = ProviderSession.bind_lifecycle(session, lifecycle_owner, run_state)
+
+    assert {:error, :operation_claimed} =
+             ProviderSession.claim_operation(session, limits, identity)
+
+    assert :ok = ProviderSession.close(session)
+    send(lifecycle_owner, :stop)
+    send(run_state, :stop)
+  end
+
   test "abnormal session death cannot be reported as successful cleanup" do
     parent = self()
     {:ok, session} = ProviderSession.start(limits())
