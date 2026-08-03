@@ -225,6 +225,94 @@ defmodule Mix.Tasks.Ptc.MaterializeTest do
     end
   end
 
+  @tag :tmp_dir
+  test "a candidate that drops the workflow entry is refused", %{tmp_dir: dir} do
+    manifest = write_application(dir)
+
+    # This compiles cleanly and only *removes* an export, so without an entry
+    # check it would pass the gate and leave every later run failing at entry
+    # validation instead.
+    File.write!(
+      Path.join(dir, "authored.clj"),
+      ~S|(ns main) (defn go [_i] (return (helper/double 21)))|
+    )
+
+    assert_raise Mix.Error, ~r/candidate refused/, fn ->
+      capture_io(fn ->
+        Mix.Task.reenable("ptc.materialize")
+
+        Materialize.run([
+          manifest,
+          "--component",
+          "main",
+          "--out",
+          Path.join(dir, "candidate"),
+          "--source",
+          Path.join(dir, "authored.clj")
+        ])
+      end)
+    end
+
+    refute File.exists?(Path.join(dir, "candidate"))
+  end
+
+  @tag :tmp_dir
+  test "the root pointer and array indices resolve per RFC 6901", %{tmp_dir: dir} do
+    manifest = write_application(dir)
+
+    File.write!(Path.join(dir, "root.json"), Jason.encode!(@authored))
+
+    File.write!(
+      Path.join(dir, "array.json"),
+      Jason.encode!(%{"value" => [%{"src" => @authored}]})
+    )
+
+    for {artifact, pointer, out} <- [
+          {"root.json", "", "candidate-root"},
+          {"array.json", "/value/0/src", "candidate-array"}
+        ] do
+      capture_io(fn ->
+        Mix.Task.reenable("ptc.materialize")
+
+        Materialize.run([
+          manifest,
+          "--component",
+          "helper",
+          "--out",
+          Path.join(dir, out),
+          "--from-result",
+          Path.join(dir, artifact),
+          "--result-pointer",
+          pointer
+        ])
+      end)
+
+      assert File.read!(Path.join([dir, out, "candidate.clj"])) == @authored
+    end
+  end
+
+  @tag :tmp_dir
+  test "an oversized candidate file is refused without loading it whole", %{tmp_dir: dir} do
+    manifest = write_application(dir)
+    File.write!(Path.join(dir, "authored.clj"), String.duplicate("x", 1_048_577))
+
+    assert_raise Mix.Error, ~r/candidate_source_too_large/, fn ->
+      capture_io(fn ->
+        Mix.Task.reenable("ptc.materialize")
+
+        Materialize.run([
+          manifest,
+          "--component",
+          "helper",
+          "--out",
+          Path.join(dir, "candidate"),
+          "--source",
+          Path.join(dir, "authored.clj")
+        ])
+      end)
+    end
+  end
+
   defp write_application(dir) do
     File.write!(Path.join(dir, "helper.clj"), @placeholder)
 

@@ -28,6 +28,7 @@ defmodule PtcRunner.Kernel.CandidatePromotion do
 
   alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.Component
+  alias PtcRunner.Kernel.PreparedRun
   alias PtcRunner.Lisp.Prelude
   alias PtcRunner.Lisp.Prelude.Export
 
@@ -86,10 +87,7 @@ defmodule PtcRunner.Kernel.CandidatePromotion do
       comparison = compare(base_exports, candidate_exports, owned)
 
       criteria = [
-        pass("G1", "candidate compiles in the #{environment} environment", %{
-          "environment" => environment,
-          "component_id" => component_id
-        }),
+        compiles(candidate, candidate_bundle, environment, component_id),
         signatures(candidate_exports, owned),
         widening(comparison, accepted?),
         dependencies()
@@ -105,6 +103,31 @@ defmodule PtcRunner.Kernel.CandidatePromotion do
 
         %{outcome: :fail, environment: environment, criteria: criteria}
     end
+  end
+
+  # G1. Compiling is not enough when the promoted component owns the workflow
+  # entry: a candidate can drop or rename that function, compile cleanly, and
+  # leave every later run failing at entry validation. The gate checks the same
+  # callability the coordinator does, so that failure surfaces here instead.
+  defp compiles(package, bundle, "workflow" = environment, component_id) do
+    detail = %{"environment" => environment, "component_id" => component_id}
+
+    if PreparedRun.entry_callable?(bundle, package.entry) do
+      pass("G1", "candidate compiles and keeps the workflow entry callable", detail)
+    else
+      fail(
+        "G1",
+        "candidate compiles but no longer offers the workflow entry",
+        Map.put(detail, "entry", package.entry)
+      )
+    end
+  end
+
+  defp compiles(_package, _bundle, environment, component_id) do
+    pass("G1", "candidate compiles in the #{environment} environment", %{
+      "environment" => environment,
+      "component_id" => component_id
+    })
   end
 
   # G2. An export without a signature and a docstring compiles and ships, but

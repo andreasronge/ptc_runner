@@ -151,7 +151,8 @@ kept out of content identity, so adding it never changes
 Both hashes use that `sha256:`-prefixed form. `path` resolves against the
 descriptor's own canonical directory and may not escape it. The descriptor is
 at most 64 KiB and the candidate source at most 1 MiB. Standalone command
-diagnostics authorize descriptor paths against this exact four-field schema:
+diagnostics authorize descriptor paths against this exact schema — the four
+required fields plus the optional `provenance` object described below:
 duplicate or unknown fields report the safe parent pointer, while an invalid
 declared field can report its public field pointer.
 Crossing either byte ceiling, or the descriptor JSON depth/node ceiling, is

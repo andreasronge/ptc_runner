@@ -76,6 +76,7 @@ defmodule Mix.Tasks.Ptc.Materialize do
            "[--origin-authored-at RFC3339] [--accept-widened-effect]"
 
   @max_result_bytes 1_048_576
+  @max_source_bytes 1_048_576
 
   @impl Mix.Task
   def run(argv) do
@@ -189,17 +190,45 @@ defmodule Mix.Tasks.Ptc.Materialize do
 
   defp candidate_source(opts) do
     case {Keyword.get(opts, :source), Keyword.get(opts, :from_result)} do
-      {nil, nil} -> {:error, :missing_candidate_source}
-      {source, nil} -> read_source(source)
-      {nil, result} -> extract_source(result, Keyword.get(opts, :result_pointer))
-      {_source, _result} -> {:error, :conflicting_candidate_source}
+      {nil, nil} ->
+        {:error, :missing_candidate_source}
+
+      {source, nil} ->
+        read_bounded_source(
+          source,
+          @max_source_bytes,
+          :candidate_source_too_large,
+          :unreadable_candidate_source
+        )
+
+      {nil, result} ->
+        extract_source(result, Keyword.get(opts, :result_pointer))
+
+      {_source, _result} ->
+        {:error, :conflicting_candidate_source}
     end
   end
 
-  defp read_source(path) do
-    case File.read(path) do
-      {:ok, source} -> {:ok, source}
-      {:error, _reason} -> {:error, :unreadable_candidate_source}
+  # Read at most the applicable limit plus one byte. Reading the whole file and
+  # checking its size afterwards lets an oversized input exhaust the VM before
+  # the documented size error is ever returned, and a stat-then-read pair races
+  # against a file that grows in between.
+  defp read_bounded_source(path, limit, too_large, unreadable) do
+    case File.open(path, [:read, :binary]) do
+      {:ok, device} ->
+        try do
+          case IO.binread(device, limit + 1) do
+            data when is_binary(data) and byte_size(data) > limit -> {:error, too_large}
+            data when is_binary(data) -> {:ok, data}
+            :eof -> {:ok, ""}
+            _other -> {:error, unreadable}
+          end
+        after
+          File.close(device)
+        end
+
+      {:error, _reason} ->
+        {:error, unreadable}
     end
   end
 
@@ -217,14 +246,16 @@ defmodule Mix.Tasks.Ptc.Materialize do
   end
 
   defp read_bounded(path) do
-    case File.stat(path) do
-      {:ok, %{size: size}} when size <= @max_result_bytes -> read_source(path)
-      {:ok, _stat} -> {:error, :result_artifact_too_large}
-      {:error, _reason} -> {:error, :unreadable_result_artifact}
-    end
+    read_bounded_source(
+      path,
+      @max_result_bytes,
+      :result_artifact_too_large,
+      :unreadable_result_artifact
+    )
   end
 
-  defp pointer_segments(""), do: {:error, :invalid_result_pointer}
+  # RFC 6901: the empty string points at the whole document.
+  defp pointer_segments(""), do: {:ok, []}
 
   defp pointer_segments("/" <> rest) do
     segments =
@@ -243,6 +274,21 @@ defmodule Mix.Tasks.Ptc.Materialize do
     case Map.fetch(value, segment) do
       {:ok, child} -> resolve(child, rest)
       :error -> {:error, :result_pointer_missing}
+    end
+  end
+
+  # Array indices are part of RFC 6901 evaluation, so a result whose source sits
+  # under a list is reachable.
+  defp resolve(value, [segment | rest]) when is_list(value) do
+    case Integer.parse(segment) do
+      {index, ""} when index >= 0 ->
+        case Enum.fetch(value, index) do
+          {:ok, child} -> resolve(child, rest)
+          :error -> {:error, :result_pointer_missing}
+        end
+
+      _other ->
+        {:error, :result_pointer_missing}
     end
   end
 
