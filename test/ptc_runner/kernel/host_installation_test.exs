@@ -854,6 +854,16 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
     Application.put_env(:ptc_runner, :host_llm_test_owner, self())
     Application.put_env(:ptc_runner, :host_llm_test_result, {:error, :transport_boom})
 
+    # An e2e setup_all may have started :req_llm and left it running, which would
+    # quietly dissolve this test's premise. Establish the stopped state rather
+    # than assuming it, and put it back afterwards.
+    req_llm_running? = Enum.any?(Application.started_applications(), &(elem(&1, 0) == :req_llm))
+    if req_llm_running?, do: Application.stop(:req_llm)
+
+    on_exit(fn ->
+      if req_llm_running?, do: Application.ensure_all_started(:req_llm)
+    end)
+
     on_exit(fn ->
       restore_env(:llm_adapter, previous.adapter)
       restore_env(:host_llm_test_owner, previous.owner)

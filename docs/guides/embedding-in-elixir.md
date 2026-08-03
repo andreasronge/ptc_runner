@@ -95,6 +95,7 @@ does not pass through that gate, so it owns the admission itself:
 
 ```elixir
 Application.put_env(:req_llm, :load_dotenv, false, persistent: true)
+Application.put_env(:llm_db, :load_dotenv, false, persistent: true)
 {:ok, _started} = Application.ensure_all_started(:req_llm)
 ```
 
