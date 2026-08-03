@@ -9,8 +9,12 @@ defmodule PtcRunner.Kernel.ComponentOverride do
   deliberate operator act, so the candidate bytes must not be reachable through
   anything a run can influence.
 
-  The descriptor carries exactly `component_id`, `base_source_hash`,
-  `source_hash`, and `path`. Verification is deliberately two-sided. The
+  The descriptor carries `component_id`, `base_source_hash`, `source_hash`, and
+  `path`, plus an optional closed `provenance` object recording who authored the
+  candidate. Provenance is operator-asserted and verified by nothing here: a
+  `run_id` is a claim about origin, not evidence of it. It is kept out of
+  `identity/1` so content identity stays derived from content. Verification of
+  the candidate itself is deliberately two-sided. The
   candidate `source_hash` proves the operator is compiling the bytes they
   believe they extracted; `base_source_hash` proves those bytes were derived
   from the component that is actually installed now, so a candidate written
@@ -35,18 +39,32 @@ defmodule PtcRunner.Kernel.ComponentOverride do
 
   @max_descriptor_bytes 65_536
   @max_source_bytes 1_048_576
-  @keys ~w(component_id base_source_hash source_hash path)
+  @required_keys ~w(component_id base_source_hash source_hash path)
+  @optional_keys ~w(provenance)
+  @keys @required_keys ++ @optional_keys
+  @provenance_keys ~w(run_id prompt_hash authored_at accept_widened_effect)
   @hash ~r/\Asha256:[0-9a-f]{64}\z/
   @component_id ~r/\A[a-z][a-z0-9._-]{0,127}\z/
+  @run_id ~r/\A[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\z/
   @descriptor_schema %{
     "type" => "object",
     "additionalProperties" => false,
-    "required" => @keys,
+    "required" => @required_keys,
     "properties" => %{
       "component_id" => %{"type" => "string", "pattern" => "^[a-z][a-z0-9._-]{0,127}$"},
       "base_source_hash" => %{"type" => "string", "pattern" => "^sha256:[0-9a-f]{64}$"},
       "source_hash" => %{"type" => "string", "pattern" => "^sha256:[0-9a-f]{64}$"},
-      "path" => %{"type" => "string"}
+      "path" => %{"type" => "string"},
+      "provenance" => %{
+        "type" => "object",
+        "additionalProperties" => false,
+        "properties" => %{
+          "run_id" => %{"type" => "string", "pattern" => "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"},
+          "prompt_hash" => %{"type" => "string", "pattern" => "^sha256:[0-9a-f]{64}$"},
+          "authored_at" => %{"type" => "string"},
+          "accept_widened_effect" => %{"type" => "boolean"}
+        }
+      }
     }
   }
 
@@ -56,9 +74,12 @@ defmodule PtcRunner.Kernel.ComponentOverride do
     :source_hash,
     :source,
     :origin,
+    :provenance,
     :descriptor_bytes
   ]
   defstruct @enforce_keys
+
+  @type provenance :: %{optional(binary()) => binary() | boolean()}
 
   @type t :: %__MODULE__{
           component_id: binary(),
@@ -66,6 +87,7 @@ defmodule PtcRunner.Kernel.ComponentOverride do
           source_hash: binary(),
           source: binary(),
           origin: binary(),
+          provenance: provenance() | nil,
           descriptor_bytes: non_neg_integer()
         }
 
@@ -109,6 +131,7 @@ defmodule PtcRunner.Kernel.ComponentOverride do
          source_hash: decoded["source_hash"],
          source: source,
          origin: "component-override",
+         provenance: decoded["provenance"],
          descriptor_bytes: byte_size(raw)
        }}
     else
@@ -250,6 +273,21 @@ defmodule PtcRunner.Kernel.ComponentOverride do
     }
   end
 
+  @doc """
+  Returns the authorship attribution an artifact records beside the identity.
+
+  This is deliberately separate from `identity/1`. That map is the override
+  content record's payload, so anything added to it changes
+  `application_content_digest`. Attribution is operator-asserted metadata about
+  *who authored* a candidate, not part of *what the candidate is*, and content
+  identity must not depend on an asserted timestamp or an acceptance flag.
+
+  Returns an empty map when the descriptor carried no provenance.
+  """
+  @spec attribution(t()) :: map()
+  def attribution(%__MODULE__{provenance: nil}), do: %{}
+  def attribution(%__MODULE__{provenance: provenance}), do: provenance
+
   @doc "Hashes component source with the descriptor's `sha256:` convention."
   @spec hash(binary()) :: binary()
   def hash(source) when is_binary(source),
@@ -269,6 +307,7 @@ defmodule PtcRunner.Kernel.ComponentOverride do
       source_hash: decoded["source_hash"],
       source: source,
       origin: "component-override",
+      provenance: decoded["provenance"],
       descriptor_bytes: byte_size(descriptor)
     }
   end
@@ -296,8 +335,11 @@ defmodule PtcRunner.Kernel.ComponentOverride do
       keys -- @keys != [] ->
         descriptor_violation([])
 
-      @keys -- keys != [] ->
+      @required_keys -- keys != [] ->
         descriptor_violation([])
+
+      not valid_provenance?(value) ->
+        descriptor_violation([{:property, "provenance"}])
 
       not valid_component_id?(value["component_id"]) ->
         descriptor_violation([{:property, "component_id"}])
@@ -376,4 +418,30 @@ defmodule PtcRunner.Kernel.ComponentOverride do
 
   defp valid_component_id?(value), do: is_binary(value) and value =~ @component_id
   defp valid_hash?(value), do: is_binary(value) and value =~ @hash
+
+  # Provenance is optional, but a present object is closed and every supplied
+  # key is validated. It is operator-asserted: nothing here proves the run named
+  # by `run_id` produced the candidate bytes.
+  defp valid_provenance?(value) when not is_map_key(value, "provenance"), do: true
+
+  defp valid_provenance?(%{"provenance" => provenance})
+       when is_map(provenance) and not is_struct(provenance) do
+    Map.keys(provenance) -- @provenance_keys == [] and
+      Enum.all?(provenance, fn {key, entry} -> valid_provenance_entry?(key, entry) end)
+  end
+
+  defp valid_provenance?(_value), do: false
+
+  defp valid_provenance_entry?("run_id", value), do: is_binary(value) and value =~ @run_id
+  defp valid_provenance_entry?("prompt_hash", value), do: valid_hash?(value)
+  defp valid_provenance_entry?("accept_widened_effect", value), do: is_boolean(value)
+
+  defp valid_provenance_entry?("authored_at", value) when is_binary(value) do
+    case DateTime.from_iso8601(value) do
+      {:ok, _datetime, 0} -> true
+      _other -> false
+    end
+  end
+
+  defp valid_provenance_entry?(_key, _value), do: false
 end
