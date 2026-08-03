@@ -5,19 +5,22 @@
   and the model is asked for the whole report in one exchange — the shape a
   general coding agent uses when it reads a directory and writes a file."
   {:visibility :prompt
-   :failure-kinds ["unresolved-citations" "citation-verification-refused"
+   :failure-kinds ["unresolved-citations" "citation-verification-failed"
                    "malformed-report"]
    :annotations {"citations-verified" ["checked" "unresolved" "mismatched"]
                  "attempts" ["passes" "corrected"]}})
 
+;; The program is a constant. The incident id reaches it as data at
+;; `data/params`, never as text substituted into the source, so there is no
+;; escaping to get right and no value that can change the program's shape.
 (def fetch-src
-  (str "(let [found (get (incident.evidence/search INCIDENT nil nil 50) \"records\")\n"
+  (str "(let [inc (get data/params \"incident_id\")\n"
+       "      found (get (incident.evidence/search inc nil nil 50) \"records\")\n"
        "      ids (map (fn [r] (get r \"evidence_id\")) found)]\n"
-       "  (return (mapv (fn [id] (get (incident.evidence/get-record INCIDENT id) \"record\")) ids)))"))
+       "  (return (mapv (fn [id] (get (incident.evidence/get-record inc id) \"record\")) ids)))"))
 
 (defn- fetch-records [incident-id]
-  (let [src (str/replace fetch-src "INCIDENT" (str "\"" incident-id "\""))
-        ev (kernel/eval-source src)]
+  (let [ev (kernel/eval-source-with fetch-src {"incident_id" incident-id})]
     (if (= :returned (get ev :outcome))
       (get ev :value)
       (fail (result/error :citation-verification-failed (get ev :outcome))))))
@@ -77,17 +80,26 @@
                               (or (get h "contradicting_citations") [])))
               (or (get report "hypotheses") [])))))
 
-(defn- citation-literal [c]
-  (str "{\"evidence_id\" \"" (get c "evidence_id")
-       "\" \"content_digest\" \"" (get c "content_digest") "\"}"))
+;; Citations are model-authored. Projecting them to exactly the two declared
+;; fields and passing them as data means a hostile `evidence_id` stays a string:
+;; it is compared against the evidence source, never parsed as part of the
+;; program that does the comparing.
+(defn- citation-value [c]
+  {"evidence_id" (get c "evidence_id")
+   "content_digest" (get c "content_digest")})
+
+(def resolve-src
+  (str "(return (incident.evidence/resolve-citations (get data/params \"incident_id\")\n"
+       "                                             (get data/params \"citations\")))"))
 
 (defn- resolve-outcome [incident-id report]
   (let [cites (citations-of report)]
     (if (empty? cites)
       {"ok" false "detail" "the report carried no citations"}
-      (let [src (str "(return (incident.evidence/resolve-citations \"" incident-id "\" ["
-                     (str/join " " (map citation-literal cites)) "]))")
-            ev (kernel/eval-source src)]
+      (let [ev (kernel/eval-source-with
+                 resolve-src
+                 {"incident_id" incident-id
+                  "citations" (mapv citation-value cites)})]
         (if (not= :returned (get ev :outcome))
           {"ok" false "detail" "citation resolution did not return"}
           (let [res (get ev :value)
@@ -103,27 +115,6 @@
                            "; digests not matching the stored record: "
                            (str/join ", " mismatched))}))))))
 
-(defn- verify [incident-id report]
-  (let [cites (citations-of report)]
-    (if (empty? cites)
-      (fail (result/error :citation-verification-refused :no-citations))
-      (let [src (str "(return (incident.evidence/resolve-citations \"" incident-id "\" ["
-                     (str/join " " (map citation-literal cites)) "]))")
-            ev (kernel/eval-source src)]
-        (if (not= :returned (get ev :outcome))
-          (fail (result/error :citation-verification-failed (get ev :outcome)))
-          (let [res (get ev :value)
-                unresolved (get res "unresolved")
-                mismatched (get res "mismatched")]
-            (workflow.event/annotate
-              "citations-verified"
-              {"checked" (get res "checked")
-               "unresolved" (count unresolved)
-               "mismatched" (count mismatched)})
-            (if (and (empty? unresolved) (empty? mismatched))
-              report
-              (fail (result/error :unresolved-citations
-                                  {:unresolved unresolved :mismatched mismatched})))))))))
 
 (defn- correction-prompt [incident-id format records contract detail]
   (str (prompt incident-id format records contract)

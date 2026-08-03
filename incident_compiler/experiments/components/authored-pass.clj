@@ -16,11 +16,10 @@
   failures: an unrunnable program is a fact about this arm, not something to
   paper over with a fallback."
   {:visibility :prompt
-   :failure-kinds ["unresolved-citations" "citation-verification-refused"
-                   "malformed-report" "authoring-failed"]
+   :failure-kinds ["unresolved-citations" "malformed-report" "authoring-failed"]
    :annotations {"citations-verified" ["checked" "unresolved" "mismatched"]
                  "attempts" ["passes" "corrected"]
-                 "authoring" ["program-ran" "eval-failed" "records"]}})
+                 "authoring" ["program-ran" "eval-failed" "records" "repaired"]}})
 
 (defn- strip-fence [content]
   (let [trimmed (str/trim (str content))]
@@ -28,11 +27,15 @@
       (str/trim (str/replace (str/replace trimmed "```clojure" "") "```" ""))
       trimmed)))
 
-(defn- authoring-prompt [incident-id format context]
+(defn- authoring-prompt [incident-id format context rejection]
   (str "Write one program that gathers the evidence needed to compile a report\n"
        "for incident \"" incident-id "\", to be rendered as \"" format "\".\n\n"
        "It runs in this environment. These are the only functions it may call:\n\n"
        context
+       (if (nil? rejection)
+         ""
+         (str "\n\nA previous attempt was rejected before it ran:\n" rejection
+              "\nReturn a corrected program."))
        "\n\nRules for the program:\n"
        "- It is one expression, evaluated once. There is no conversation and no\n"
        "  second attempt: whatever it returns is all the evidence the report is\n"
@@ -45,31 +48,59 @@
        "- Clojure-style syntax. Use let, map, mapv, filter, reduce, get, concat.\n\n"
        "Return the program text and nothing else — no prose, no code fence."))
 
-(defn- author-program [incident-id format]
+(defn- author-program [incident-id format rejection]
   (let [response (llm/request
                    {"system" "You write one program and return its source text, nothing else."
                     "messages" [{"role" "user"
                                  "content" (authoring-prompt
                                              incident-id format
-                                             (kernel/mission-model-context))}]})
+                                             (kernel/mission-model-context)
+                                             rejection)}]})
         content (get response "content")]
     (if (string? content)
       (strip-fence content)
       (fail (result/error :authoring-failed :no-content)))))
 
-(defn- fetch-records [incident-id format]
-  (let [src (author-program incident-id format)
-        ev (kernel/eval-source src)]
+(defn- run-program [src repaired]
+  (let [ev (kernel/eval-source src)]
     (if (not= :returned (get ev :outcome))
-      (do (workflow.event/annotate "authoring" {"program-ran" 0 "eval-failed" 1 "records" 0})
+      (do (workflow.event/annotate
+            "authoring"
+            {"program-ran" 0 "eval-failed" 1 "records" 0 "repaired" repaired})
           (fail (result/error :authoring-failed (get ev :outcome))))
       (let [records (get ev :value)]
         (workflow.event/annotate
           "authoring"
-          {"program-ran" 1 "eval-failed" 0 "records" (if (sequential? records) (count records) 0)})
+          {"program-ran" 1
+           "eval-failed" 0
+           "records" (if (sequential? records) (count records) 0)
+           "repaired" repaired})
         (if (and (sequential? records) (seq records))
           records
           (fail (result/error :authoring-failed :no-records)))))))
+
+;; `check-source` resolves names against the live mission environment without
+;; executing, and costs no evaluation against the mission budget. That makes one
+;; repair turn cheap: an authored program that names a function that does not
+;; exist is caught and rewritten before it ever runs, rather than spending an
+;; evaluation to discover the same thing. A second rejection fails closed, so
+;; the annotation still separates "could not write a runnable program" from
+;; "wrote one that produced a bad report".
+(defn- fetch-records [incident-id format]
+  (let [src (author-program incident-id format nil)
+        check (kernel/check-source src)]
+    (if (= :valid (get check :outcome))
+      (run-program src 0)
+      (let [detail (get (get check :diagnostic) :message)
+            repaired (author-program incident-id format detail)
+            recheck (kernel/check-source repaired)]
+        (if (= :valid (get recheck :outcome))
+          (run-program repaired 1)
+          (do (workflow.event/annotate
+                "authoring"
+                {"program-ran" 0 "eval-failed" 1 "records" 0 "repaired" 1})
+              (fail (result/error :authoring-failed
+                                  (get (get recheck :diagnostic) :kind)))))))))
 
 (defn- prompt [incident-id format records contract]
   (str "You are compiling an evidence report for incident \"" incident-id "\".\n"
@@ -133,17 +164,25 @@
                               (or (get h "contradicting_citations") [])))
               (or (get report "hypotheses") [])))))
 
-(defn- citation-literal [c]
-  (str "{\"evidence_id\" \"" (get c "evidence_id")
-       "\" \"content_digest\" \"" (get c "content_digest") "\"}"))
+;; Citations are model-authored, and this arm's program text is too. Both reach
+;; the verifier as data rather than as source, so neither can alter the program
+;; that checks them.
+(defn- citation-value [c]
+  {"evidence_id" (get c "evidence_id")
+   "content_digest" (get c "content_digest")})
+
+(def resolve-src
+  (str "(return (incident.evidence/resolve-citations (get data/params \"incident_id\")\n"
+       "                                             (get data/params \"citations\")))"))
 
 (defn- resolve-outcome [incident-id report]
   (let [cites (citations-of report)]
     (if (empty? cites)
       {"ok" false "detail" "the report carried no citations"}
-      (let [src (str "(return (incident.evidence/resolve-citations \"" incident-id "\" ["
-                     (str/join " " (map citation-literal cites)) "]))")
-            ev (kernel/eval-source src)]
+      (let [ev (kernel/eval-source-with
+                 resolve-src
+                 {"incident_id" incident-id
+                  "citations" (mapv citation-value cites)})]
         (if (not= :returned (get ev :outcome))
           {"ok" false "detail" "citation resolution did not return"}
           (let [res (get ev :value)
