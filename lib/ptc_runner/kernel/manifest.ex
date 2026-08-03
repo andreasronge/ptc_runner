@@ -849,8 +849,6 @@ defmodule PtcRunner.Kernel.Manifest do
   defp events(_value),
     do: manifest_value_error([{:property, "events"}], :invalid_events)
 
-  defp optional_id?(nil), do: true
-
   defp event_policy(policy) when policy in ["normal", "private"],
     do: {:ok, String.to_existing_atom(policy)}
 
