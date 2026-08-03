@@ -33,7 +33,7 @@ commit this plan was written on, so review need not re-derive them.
 | --- | --- |
 | An override is applied to **both** component lists and the environment is derived from which one matched; ambiguity and non-selection are hard errors | `application_package.ex:344-354`, `application_package.ex:369-370` |
 | Override selection and environment resolution are **private**; the only public route that applies an override is acquisition | `application_package.ex:342-344` |
-| Acquisition accepts an override: `acquire_directory/2` takes `:component_override_descriptor` (a path), `acquire_memory/3` takes a built `:component_override` | `application_package.ex:55-56` |
+| Acquisition is the public route that applies an override: `acquire_directory/2` takes `:component_override_descriptor` (a path); `acquire_memory/3` takes `:component_override` as a `{descriptor_name, candidate_name}` pair of logical names — **not** a built `%ComponentOverride{}` | `application_package.ex:298-322`, `application_package.ex:324-338` |
 | The resolved environment is deleted before it reaches the package, and `identity/1` never carried it | `application_package.ex:375`, `component_override.ex:245` |
 | A **second** deletion strips the environment from a content record whose name already encodes it — load-bearing for `application_content_digest` | `application_package.ex:492-493` |
 | `identity/1` output, minus the environment, *is* the encoded override record payload, so anything added to it changes content identity | `application_package.ex:493-495` |
@@ -43,8 +43,8 @@ commit this plan was written on, so review need not re-derive them.
 | Capability **names** survive on the export table as `requires` and `tool_refs`; the rendered inventory keeps only a coarse effect and its resolver is private | `export.ex:72-73`, `mission_inventory.ex:277` |
 | Export visibility is `:prompt` or `:discoverable`; `signature`/`type` are nullable and `doc` defaults to `nil`; the inventory projects a `nil` doc and contract without objection | `export.ex:57`, `export.ex:76-77`, `export.ex:88`, `mission_inventory.ex:161`, `mission_inventory.ex:258` |
 | The capability-requirement check compares **names only** — granted capability keys plus implicit ones against export `tool_refs` | `environment.ex:67-79` |
-| Real `%Capability{}` values exist only after provider acquisition | `run_builder.ex:768` |
-| Providers statically declare the capability names they grant, as `provides` | `provider_descriptor.ex:28` |
+| Real `%Capability{}` values, and therefore capability **names**, exist only after provider acquisition | `run_builder.ex:768`, `provider_registry.ex:558-577` |
+| `ProviderDescriptor.provides` is a list of inter-provider **service atoms** (e.g. `:canonical_trace_snapshot`), disjoint from `requires` — *not* capability names, and dynamic providers such as MCP cannot declare discovered tool names through it | `provider_descriptor.ex:56`, `provider_descriptor.ex:159`, `provider_descriptor.ex:231` |
 | An export with no requirements and no declared effect resolves to `:unknown`, not `:read`, because `join_effects([])` falls through to `:unknown` | `compiler.ex:1030`, `compiler.ex:1511-1517` |
 | Secure publication already exists: exclusive link, refuse-clobber, 0700 temp sibling, 0600 for private, ancestor ownership and permission checks | `result_artifact.ex:12-30` |
 | `SourceCheck` fingerprints source with the same `sha256:` convention a descriptor carries | `source_check.ex:143` |
@@ -129,24 +129,33 @@ A run cannot invoke this. A run only *emits* source through channels it already
 has, and the descriptor path stays unreachable from anything a run can
 influence — the property `ComponentOverride` depends on.
 
-### D3 — The gate is static, and says so
+### D3 — The gate is relative and static, and says so
 
 The accepted stable-CLI grammar deletes `run --check`, so building on it would
 build on something scheduled for removal. But the replacement must not
-overclaim either: `Environment.assemble/4` needs real `%Capability{}` values,
-and those exist only after provider acquisition. A materialization task with no
-host configuration cannot assemble, and passing an empty capability map would
-reject every valid provider-backed requirement.
+overclaim either.
 
-The gate therefore performs the **same name-based comparison** that
-`bundle_requirements/3` performs — export `tool_refs` against granted
-names — but sources those names statically from the package's provider
-`provides` declarations plus the environment's implicit capabilities. No host
-config, no provider session, no model call.
+The gate **cannot check capability grants at all**, and does not try.
+`Environment.assemble/4` needs real `%Capability{}` values, and those — with
+their names — exist only after provider acquisition. There is no static
+substitute: `ProviderDescriptor.provides` lists inter-provider *service* atoms
+disjoint from `requires`, not capability names, and a dynamic provider such as
+MCP discovers its tool names at acquisition, so no static declaration of them
+exists to compare against. Comparing `provides` to export `tool_refs` would
+compare an atom like `:canonical_trace_snapshot` against a string like
+`"trace-list-runs"` and report nonsense.
 
-This is a **pre-filter, not a proof**. Run-time assembly remains authoritative;
-the gate catches the typo and the ungranted name early, and the report says so
-in those words. Overstating it as "assembles" would be false.
+Every gate criterion is therefore either **intrinsic** to the candidate (does
+it compile, do its exports carry signatures and docstrings) or **relative** to
+the base it replaces (does any export widen). That is exactly the scope the
+issue asks for — "does not widen effect or capability requirements *relative to
+its base*" — and it needs no host config, no provider session, and no model
+call.
+
+The documented limitation, stated in the report and the guide: a candidate
+naming a capability that no provider grants passes the gate and fails at
+run-time assembly. The gate narrows the distance to that failure; it does not
+remove it.
 
 ### D4 — Provenance is operator-asserted and kept out of content identity
 
@@ -210,9 +219,11 @@ table when G1 fails, and calling that `fail` would misattribute the cause.
 | G1 | Candidate resolves to exactly one environment and that environment's bundle compiles | acquisition, `Kernel.compile_bundle/1` |
 | G2 | Every `:prompt`-visible export declares a `:signature` (or `:type` for a value) and a non-empty docstring | `Export.visibility`, `Export.signature`, `Export.type`, `Export.doc` |
 | G3 | No export widens, compared **per export ref** | `Export.effect`, `Export.requires`, `Export.tool_refs` |
-| G4 | Every `tool_refs` name is statically declared by some provider `provides` or is implicit for that environment | mirrors `environment.ex:67-79`, sourced from `provider_descriptor.ex:28` |
-| G5 | Declared dependencies unchanged — **preserved by construction**, reported, not enforced | `component_override.ex:225` |
-| G6 | Candidate ≤ 1 MiB and encoded descriptor ≤ 64 KiB, checked on the bytes actually written | existing `ComponentOverride` bounds |
+| G4 | Declared dependencies unchanged — **preserved by construction**, reported, not enforced | `component_override.ex:225` |
+| G5 | Candidate ≤ 1 MiB and encoded descriptor ≤ 64 KiB, checked on the bytes actually written | existing `ComponentOverride` bounds |
+
+There is deliberately no capability-grant criterion. Per D3, no static source
+of capability names exists to check against.
 
 G2 is a **promotion policy**, not a claim the runtime rejects such exports. It
 does not: the inventory projects `nil` docs and contracts without objection.
@@ -248,7 +259,7 @@ in the descriptor's provenance. An override "changes which source compiles,
 never what compilation permits", so a widening candidate is not a security
 hole — but it is a different risk profile and must not pass silently.
 
-G6 is evaluated inside materialization, on the final encoded bytes, because
+G5 is evaluated inside materialization, on the final encoded bytes, because
 descriptor size is not knowable until path, provenance, and the acceptance
 decision are all encoded.
 
@@ -263,11 +274,11 @@ Landing as one PR; separate commits.
    and the new `attribution/1` all change together. `identity/1` is untouched.
    Absent provenance keeps today's default.
 2. **Promotion gate.** New `PtcRunner.Kernel.CandidatePromotion` implementing
-   G1–G5 over an acquired effective package, returning a closed
+   G1–G4 over an acquired effective package, returning a closed
    `pass | fail | blocked` report. No filesystem writes.
 3. **Materialization task.** `mix ptc.materialize` — argument handling, both
    acquisition modes, secure private publication via the primitive extracted
-   from `ResultArtifact`, G6 on final bytes, deterministic report, non-zero
+   from `ResultArtifact`, G5 on final bytes, deterministic report, non-zero
    exit and directory removal on gate failure.
 4. **Documentation.** The placeholder idiom, its consumer requirement, the
    operator-asserted nature of provenance, the gate's pre-filter status, and
@@ -280,8 +291,7 @@ Landing as one PR; separate commits.
   one export while present on another (the union-comparison trap); an added
   export requiring a capability against an empty base; an added pure helper
   (must report indeterminate, not fail); a removed export; a `:prompt` export
-  missing a signature; a candidate naming a capability no provider declares
-  (must fail G4); a candidate that fails to compile (G2/G3 `blocked`); an ID
+  missing a signature; a candidate that fails to compile (G2/G3 `blocked`); an ID
   selected in both environments (`:ambiguous_override_target`).
 - Publication: `--out` at an existing directory fails, an existing **empty**
   directory is not replaced, files are `0600` inside a `0700` directory, and a
