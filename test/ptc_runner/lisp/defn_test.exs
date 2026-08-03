@@ -212,7 +212,7 @@ defmodule PtcRunner.Lisp.DefnTest do
       source = "(defn twice [x] (* x 2))"
       {:ok, %{return: result, memory: user_ns}} = Lisp.run(source)
 
-      assert result == %Var{name: :twice}
+      assert result == %Var{name: "twice"}
       # Functions are stored as closures (6-tuple with metadata)
       assert {:closure, _, _, _, _, %{}} = user_ns["twice"]
     end

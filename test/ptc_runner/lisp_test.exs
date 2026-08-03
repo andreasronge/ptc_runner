@@ -48,7 +48,10 @@ defmodule PtcRunner.LispTest do
       assert "tool/search" = Lisp.externalize_value(runtime_callable)
       assert %Format.Fn{params: "..."} = Lisp.externalize_value(composed)
       assert %Format.Fn{params: "..."} = Lisp.externalize_value(&Kernel.to_string/1)
-      assert %Format.Var{name: :value} = Lisp.externalize_value(%Format.Var{name: "value"})
+      _already_loaded_user_atom = :externalized_user_var
+
+      assert %Format.Var{name: "externalized_user_var"} =
+               Lisp.externalize_value(%Format.Var{name: "externalized_user_var"})
     end
 
     test "recursively sanitizes collections and terminal sentinels" do

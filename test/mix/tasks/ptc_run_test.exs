@@ -41,7 +41,7 @@ defmodule Mix.Tasks.Ptc.RunTest do
   end
 
   @tag :tmp_dir
-  test "prints quoted-symbol results with their public display strings", %{tmp_dir: dir} do
+  test "rejects quoted-symbol results at the JSON command boundary", %{tmp_dir: dir} do
     File.write!(
       Path.join(dir, "main.clj"),
       ~S|(ns main) (defn run [_] (return {"ref" 'foo "nested" ['bar] 'key "quoted-key"}))|
@@ -59,19 +59,66 @@ defmodule Mix.Tasks.Ptc.RunTest do
     path = Path.join(dir, "ptc.json")
     File.write!(path, Jason.encode!(manifest))
 
-    output =
-      capture_io(fn ->
-        Mix.Task.reenable("ptc.run")
-        Run.run([path])
-      end)
+    Mix.Task.reenable("ptc.run")
 
-    assert %{
-             "value" => %{
-               "ref" => "'foo",
-               "nested" => ["'bar"],
-               "'key" => "quoted-key"
-             }
-           } = Jason.decode!(output)
+    assert_raise Mix.Error, ~r/invalid_result_projection/, fn ->
+      capture_io(fn -> Run.run([path]) end)
+    end
+  end
+
+  @tag :tmp_dir
+  test "rejects native-only results before CLI JSON serialization", %{tmp_dir: dir} do
+    File.write!(
+      Path.join(dir, "main.clj"),
+      ~S|(ns main) (defn run [_] (return #{1 2}))|
+    )
+
+    manifest = %{
+      "version" => 1,
+      "workflow" => %{
+        "components" => [%{"id" => "main", "path" => "main.clj"}],
+        "entry" => "main/run"
+      },
+      "input" => %{"value" => %{}}
+    }
+
+    path = Path.join(dir, "ptc.json")
+    File.write!(path, Jason.encode!(manifest))
+    Mix.Task.reenable("ptc.run")
+
+    assert_raise Mix.Error, ~r/invalid_result_projection/, fn ->
+      Run.run([path])
+    end
+  end
+
+  test "failure rendering ignores persistence result payloads and structural tags" do
+    success =
+      Run.failure_message(
+        {:trace_persistence_failed, :write_failed, {:ok, %{value: "private-success-value"}}}
+      )
+
+    failure =
+      Run.failure_message(
+        {:result_persistence_failed, :write_failed,
+         {:error, %{reason: :"private-failure-reason", value: "private-failure-value"}}}
+      )
+
+    assert success == "trace_persistence_failed/write_failed"
+    assert failure == "result_persistence_failed/write_failed"
+    refute success =~ "ok"
+    refute success =~ "private-success-value"
+    refute failure =~ "error"
+    refute failure =~ "private-failure"
+    assert Run.failure_message(%{private: "arbitrary-term"}) == "internal_error"
+  end
+
+  test "failure rendering retains established source classifications" do
+    assert Run.failure_message({:source_role, :component_override, :invalid_override_descriptor}) ==
+             "source_role/component_override/invalid_override_descriptor"
+
+    assert Run.failure_message(
+             {:source_role, :input_contract, "private-contract-path.json", :duplicate_json_key}
+           ) == "source_role/input_contract/duplicate_json_key"
   end
 
   @tag :tmp_dir
@@ -119,63 +166,14 @@ defmodule Mix.Tasks.Ptc.RunTest do
   end
 
   @tag :tmp_dir
-  test "--check reports a host-installed workflow LLM without invoking it", %{tmp_dir: dir} do
-    File.write!(
-      Path.join(dir, "main.clj"),
-      ~S|(ns main) (defn run [input] (return input))|
-    )
-
-    manifest = %{
-      "version" => 1,
-      "workflow" => %{
-        "components" => [%{"id" => "main", "path" => "main.clj"}],
-        "entry" => "main/run"
-      },
-      "input" => %{"value" => %{}},
-      "providers" => %{"workflow" => [%{"name" => "deepseek"}]}
-    }
-
-    host = %{
-      "credentials" => %{"openrouter_key" => %{"literal" => "test-only-secret"}},
-      "install" => %{
-        "deepseek" => %{
-          "source" => "llm",
-          "model" => "openrouter:deepseek/deepseek-v4-flash",
-          "credential" => "openrouter_key"
-        },
-        "unused-oauth" => %{
-          "source" => "mcp",
-          "transport" => %{
-            "type" => "streamable_http",
-            "endpoint" => "https://mcp.example/mcp",
-            "oauth" => %{
-              "installation_id" => "unused-oauth",
-              "issuer" => "https://auth.example",
-              "scope_ceiling" => ["read"],
-              "default_scopes" => ["read"],
-              "client" => %{
-                "registration" => "pre_registered",
-                "client_id" => "unused-client",
-                "token_endpoint_auth_method" => "none",
-                "grant_types" => ["authorization_code"],
-                "loopback_redirect" => %{
-                  "host" => "127.0.0.1",
-                  "path" => "/callback"
-                }
-              }
-            }
-          },
-          "tools" => %{
-            "read" => %{"as" => "unused.read", "effect" => "read"}
-          }
-        }
-      }
-    }
-
-    manifest_path = Path.join(dir, "ptc.json")
-    host_path = Path.join(dir, "host.json")
-    File.write!(manifest_path, Jason.encode!(manifest))
-    File.write!(host_path, Jason.encode!(host))
+  test "--check reports a host-installed workflow LLM across repeated Mix invocations", %{
+    tmp_dir: dir
+  } do
+    restore_provider_applications_on_exit()
+    stop_provider_applications()
+    Application.put_env(:req_llm, :load_dotenv, true, persistent: true)
+    Application.put_env(:llm_db, :load_dotenv, true, persistent: true)
+    {manifest_path, host_path} = write_llm_check_fixture(dir)
 
     output =
       capture_io(fn ->
@@ -183,11 +181,89 @@ defmodule Mix.Tasks.Ptc.RunTest do
         Run.run([manifest_path, "--host-config", host_path, "--check"])
       end)
 
-    assert output =~
-             "workflow  deepseek  llm  model openrouter:deepseek/deepseek-v4-flash"
+    assert output =~ "workflow  deepseek  llm  revision check-llm-v1"
 
     assert output =~ "snapshot "
+    refute output =~ "openrouter:"
     refute output =~ "test-only-secret"
+    assert Application.get_env(:req_llm, :load_dotenv) == false
+    assert Application.get_env(:llm_db, :load_dotenv) == false
+    assert :req_llm in started_applications()
+    assert :llm_db in started_applications()
+
+    repeated_output =
+      capture_io(fn ->
+        Mix.Task.reenable("ptc.run")
+        Run.run([manifest_path, "--host-config", host_path, "--check"])
+      end)
+
+    assert repeated_output =~ "workflow  deepseek  llm  revision check-llm-v1"
+  end
+
+  @tag :tmp_dir
+  test "--check resolves a declared LLM credential from the nearest .env", %{tmp_dir: dir} do
+    restore_provider_applications_on_exit()
+    stop_provider_applications()
+
+    credential_env = "PTC_RUN_DOTENV_CREDENTIAL"
+    previous_credential = System.get_env(credential_env)
+    dotenv_key = {PtcRunner.Dotenv, :dotenv_loaded}
+    previous_dotenv_state = :persistent_term.get(dotenv_key, :missing)
+
+    System.delete_env(credential_env)
+    :persistent_term.erase(dotenv_key)
+
+    on_exit(fn ->
+      if previous_credential,
+        do: System.put_env(credential_env, previous_credential),
+        else: System.delete_env(credential_env)
+
+      case previous_dotenv_state do
+        :missing -> :persistent_term.erase(dotenv_key)
+        state -> :persistent_term.put(dotenv_key, state)
+      end
+    end)
+
+    File.write!(Path.join(dir, ".env"), "#{credential_env}=dotenv-secret\n")
+
+    {manifest_path, host_path} =
+      write_llm_check_fixture(dir, %{"env" => credential_env})
+
+    output =
+      File.cd!(dir, fn ->
+        capture_io(fn ->
+          Mix.Task.reenable("ptc.run")
+          Run.run([manifest_path, "--host-config", host_path, "--check"])
+        end)
+      end)
+
+    assert output =~ "workflow  deepseek  llm  revision check-llm-v1"
+    refute output =~ "dotenv-secret"
+  end
+
+  @tag :tmp_dir
+  test "provider destination preflight completes before application admission", %{tmp_dir: dir} do
+    restore_provider_applications_on_exit()
+    stop_provider_applications()
+    {manifest_path, host_path} = write_llm_check_fixture(dir)
+    occupied = Path.join(dir, "occupied.json")
+    File.write!(occupied, "occupied")
+
+    Mix.Task.reenable("ptc.run")
+
+    assert_raise Mix.Error, ~r/result_destination_exists/, fn ->
+      Run.run([manifest_path, "--host-config", host_path, "--output", occupied])
+    end
+
+    refute :req_llm in started_applications()
+    refute :llm_db in started_applications()
+  end
+
+  test "the core application does not infer optional provider applications" do
+    applications = Application.spec(:ptc_runner, :applications)
+
+    refute :req_llm in applications
+    refute :llm_db in applications
   end
 
   @tag :tmp_dir
@@ -241,6 +317,7 @@ defmodule Mix.Tasks.Ptc.RunTest do
       "install" => %{
         "remote" => %{
           "source" => "mcp",
+          "installation_revision" => "unknown-provider-v1",
           "transport" => %{
             "type" => "streamable_http",
             "endpoint" => "https://example.test/mcp"
@@ -257,9 +334,17 @@ defmodule Mix.Tasks.Ptc.RunTest do
 
     Mix.Task.reenable("ptc.run")
 
-    assert_raise Mix.Error, ~r/unknown_provider/, fn ->
-      Run.run([manifest_path, "--host-config", host_path, "--check"])
-    end
+    error =
+      assert_raise Mix.Error, fn ->
+        Run.run([manifest_path, "--host-config", host_path, "--check"])
+      end
+
+    assert error.message ==
+             "ptc.run failed: provider_declaration/provider_unknown: " <>
+               "the selected provider is not installed"
+
+    refute error.message =~ "CommandDiagnostic"
+    refute error.message =~ "attestation"
   end
 
   @tag :tmp_dir
@@ -293,6 +378,7 @@ defmodule Mix.Tasks.Ptc.RunTest do
       "install" => %{
         "workspace" => %{
           "source" => "mcp",
+          "installation_revision" => "stdio-check-v1",
           "transport" => %{
             "type" => "stdio",
             "command" => System.find_executable("sh"),
@@ -353,6 +439,7 @@ defmodule Mix.Tasks.Ptc.RunTest do
       "install" => %{
         "history" => %{
           "source" => "ptc_trace_snapshot",
+          "installation_revision" => "trace-check-v1",
           "directory" => "traces",
           "ceilings" => %{"max_result_bytes" => 250_000}
         }
@@ -407,10 +494,12 @@ defmodule Mix.Tasks.Ptc.RunTest do
       "install" => %{
         "history" => %{
           "source" => "ptc_trace_snapshot",
+          "installation_revision" => "trace-check-v1",
           "directory" => "traces"
         },
         "private-history" => %{
           "source" => "ptc_inspection_snapshot",
+          "installation_revision" => "inspection-check-v1",
           "directory" => "inspection",
           "ceilings" => %{
             "max_files" => 100,
@@ -743,5 +832,94 @@ defmodule Mix.Tasks.Ptc.RunTest do
     path = Path.join(dir, "ptc.json")
     File.write!(path, Jason.encode!(manifest))
     path
+  end
+
+  defp write_llm_check_fixture(
+         dir,
+         credential_declaration \\ %{"literal" => "test-only-secret"}
+       ) do
+    File.write!(
+      Path.join(dir, "main.clj"),
+      ~S|(ns main) (defn run [input] (return input))|
+    )
+
+    manifest = %{
+      "version" => 1,
+      "workflow" => %{
+        "components" => [%{"id" => "main", "path" => "main.clj"}],
+        "entry" => "main/run"
+      },
+      "input" => %{"value" => %{}},
+      "providers" => %{"workflow" => [%{"name" => "deepseek"}]}
+    }
+
+    host = %{
+      "credentials" => %{"openrouter_key" => credential_declaration},
+      "install" => %{
+        "deepseek" => %{
+          "source" => "llm",
+          "installation_revision" => "check-llm-v1",
+          "model" => "openrouter:deepseek/deepseek-v4-flash",
+          "credential" => "openrouter_key"
+        },
+        "unused-oauth" => %{
+          "source" => "mcp",
+          "installation_revision" => "check-workspace-v1",
+          "transport" => %{
+            "type" => "streamable_http",
+            "endpoint" => "https://mcp.example/mcp",
+            "oauth" => %{
+              "installation_id" => "unused-oauth",
+              "issuer" => "https://auth.example",
+              "scope_ceiling" => ["read"],
+              "default_scopes" => ["read"],
+              "client" => %{
+                "registration" => "pre_registered",
+                "client_id" => "unused-client",
+                "token_endpoint_auth_method" => "none",
+                "grant_types" => ["authorization_code"],
+                "loopback_redirect" => %{
+                  "host" => "127.0.0.1",
+                  "path" => "/callback"
+                }
+              }
+            }
+          },
+          "tools" => %{"read" => %{"as" => "unused.read", "effect" => "read"}}
+        }
+      }
+    }
+
+    manifest_path = Path.join(dir, "ptc.json")
+    host_path = Path.join(dir, "host.json")
+    File.write!(manifest_path, Jason.encode!(manifest))
+    File.write!(host_path, Jason.encode!(host))
+    {manifest_path, host_path}
+  end
+
+  defp started_applications,
+    do: Application.started_applications() |> Enum.map(&elem(&1, 0))
+
+  defp stop_provider_applications do
+    running = started_applications()
+
+    if :req_llm in running, do: Application.stop(:req_llm)
+    if :llm_db in running, do: Application.stop(:llm_db)
+  end
+
+  defp restore_provider_applications_on_exit do
+    initially_running = MapSet.new(started_applications())
+
+    on_exit(fn ->
+      stop_provider_applications()
+      Application.put_env(:req_llm, :load_dotenv, false, persistent: true)
+      Application.put_env(:llm_db, :load_dotenv, false, persistent: true)
+
+      if MapSet.member?(initially_running, :llm_db),
+        do: Application.ensure_all_started(:llm_db)
+
+      if MapSet.member?(initially_running, :req_llm),
+        do: Application.ensure_all_started(:req_llm)
+    end)
   end
 end

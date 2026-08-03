@@ -376,17 +376,20 @@ function Fingerprints({ metadata }) {
         <div class="kt-fingerprint-summary">${String(metadata.mission_inventory_bytes ?? 0)} bytes</div>
         <div class="kt-hash" title=${String(inventoryHash || '')}>${shorten(inventoryHash) || 'No inventory hash'}</div>
       </article>
-      ${connectors.map((connector, position) => html`
-        <article class="kt-prelude-card" key=${connector.snapshot_hash || position}>
-          <div class="kt-card-label">Connector · ${String(connector.provider || 'unknown')}</div>
-          <div class="kt-fingerprint-summary">
-            ${String(connector.protocol || 'unknown protocol')} · ${(connector.tools || []).length} tools
-          </div>
-          <div class="kt-hash" title=${String(connector.snapshot_hash || '')}>
-            ${shorten(connector.snapshot_hash) || 'No snapshot hash'}
-          </div>
-        </article>
-      `)}
+      ${connectors.map((connector, position) => {
+        const acquisition = connector.acquisition || connector;
+        return html`
+          <article class="kt-prelude-card" key=${connector.snapshot_hash || position}>
+            <div class="kt-card-label">Connector · ${String(connector.provider || 'unknown')}</div>
+            <div class="kt-fingerprint-summary">
+              ${String(acquisition.protocol || 'unknown protocol')} · ${(acquisition.tools || []).length} tools
+            </div>
+            <div class="kt-hash" title=${String(connector.snapshot_hash || '')}>
+              ${shorten(connector.snapshot_hash) || 'No snapshot hash'}
+            </div>
+          </article>
+        `;
+      })}
     </section>
   `;
 }

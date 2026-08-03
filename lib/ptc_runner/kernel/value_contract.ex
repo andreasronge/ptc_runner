@@ -14,10 +14,13 @@ defmodule PtcRunner.Kernel.ValueContract do
   normalized contract is limited to 64 KiB and compiled once with JSV.
   """
 
+  alias PtcRunner.Kernel.Attestation
   alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.JSONSchema
   alias PtcRunner.Kernel.JSONSchema.SHA256Format
   alias PtcRunner.Kernel.JSONValue
+  alias PtcRunner.Kernel.TypedCanonicalJSON
+  alias PtcRunner.Kernel.ValueContractClassification
 
   @dialects [
     "https://json-schema.org/draft/2020-12/schema",
@@ -29,10 +32,15 @@ defmodule PtcRunner.Kernel.ValueContract do
   @max_discriminator_bytes 128
   @max_violations 8
 
-  @enforce_keys [:schema, :validator]
-  defstruct [:schema, :validator]
+  @enforce_keys [:schema, :validator, :attestation]
+  defstruct @enforce_keys
+  @field_keys Enum.sort([:__struct__ | @enforce_keys])
 
-  @type t :: %__MODULE__{schema: map(), validator: JSV.Root.t()}
+  @type t :: %__MODULE__{
+          schema: map(),
+          validator: JSV.Root.t(),
+          attestation: binary()
+        }
 
   @spec compile(map()) :: {:ok, t()} | {:error, :invalid_value_contract}
   def compile(schema) when is_map(schema) and not is_struct(schema) do
@@ -46,12 +54,38 @@ defmodule PtcRunner.Kernel.ValueContract do
 
   def compile(_schema), do: {:error, :invalid_value_contract}
 
+  @spec sealed?(term()) :: boolean()
+  @doc "Checks that a contract is the unchanged result of bounded compilation."
+  def sealed?(%__MODULE__{attestation: attestation} = contract) do
+    Enum.sort(Map.keys(contract)) == @field_keys and
+      Attestation.valid?(__MODULE__, payload(contract), attestation)
+  end
+
+  def sealed?(_contract), do: false
+
   @spec valid?(t(), term()) :: boolean()
-  def valid?(%__MODULE__{validator: validator}, value) do
-    JSONValue.value?(value) and JSONSchema.valid?(validator, value)
+  def valid?(%__MODULE__{validator: validator} = contract, value) do
+    sealed?(contract) and JSONValue.value?(value) and JSONSchema.valid?(validator, value)
   end
 
   def valid?(_contract, _value), do: false
+
+  @spec behavior_hash(t()) :: binary()
+  @doc """
+  Returns the stable behavior identity of the compiled contract.
+
+  `$schema`, `default`, and vendor annotations are removed by compilation.
+  This projection additionally removes `title` and `description` only while
+  traversing accepted schema positions; property names with those spellings
+  remain literal application keys.
+  """
+  def behavior_hash(%__MODULE__{schema: schema} = contract) do
+    if not sealed?(contract), do: raise(ArgumentError, "invalid value contract")
+
+    projection = behavior_schema(schema)
+    {:ok, encoded} = TypedCanonicalJSON.encode(projection)
+    TypedCanonicalJSON.sha256(<<"ptc.contract-behavior.v1", 0>>, encoded)
+  end
 
   @doc false
   @spec json_value(term()) :: {:ok, term()} | {:error, :duplicate_key | :invalid_json}
@@ -83,30 +117,52 @@ defmodule PtcRunner.Kernel.ValueContract do
   elements fail the same way, the reported set may name fewer of them than
   actually failed. It is a diagnosis, not a validation report.
   """
-  def classify(%__MODULE__{schema: schema, validator: validator}, value) do
+  def classify(%__MODULE__{} = contract, value) do
+    if not sealed?(contract), do: raise(ArgumentError, "invalid value contract")
+
+    {classification, _evidence} = classify_with_evidence(contract, value)
+    classification
+  rescue
+    _exception -> %{value_kind: :unknown}
+  end
+
+  def classify(_contract, _value), do: %{value_kind: :unknown}
+
+  @spec classify_with_evidence(t(), term()) ::
+          {map(), ValueContractClassification.t() | nil}
+  @doc false
+  def classify_with_evidence(
+        %__MODULE__{schema: schema, validator: validator} = contract,
+        value
+      ) do
+    if not sealed?(contract), do: raise(ArgumentError, "invalid value contract")
+
     shape =
       case Map.fetch(schema, "oneOf") do
         {:ok, branches} -> classify_union(branches, value)
         :error -> classify_object(schema, value)
       end
 
-    shape
-    |> Map.delete(:branch_index)
-    |> Map.put(:value_kind, value_kind(value))
-    # A value can fail before any schema keyword runs: `valid?/2` also requires
-    # a JSON-like value, and a PTC-Lisp map with keyword keys is not one. That
-    # rejection produces no violations at all, so without this flag the
-    # commonest authoring mistake reports as an empty explanation.
-    |> Map.put(:json_value, JSONValue.value?(value))
-    |> Map.put(
-      :violations,
-      violations(validator, value, Map.get(shape, :branch_index), declared_names(schema))
-    )
+    classification =
+      shape
+      |> Map.delete(:branch_index)
+      |> Map.put(:value_kind, value_kind(value))
+      # A value can fail before any schema keyword runs: `valid?/2` also requires
+      # a JSON-like value, and a PTC-Lisp map with keyword keys is not one. That
+      # rejection produces no violations at all, so without this flag the
+      # commonest authoring mistake reports as an empty explanation.
+      |> Map.put(:json_value, JSONValue.value?(value))
+      |> Map.put(
+        :violations,
+        violations(validator, value, schema, Map.get(shape, :branch_index))
+      )
+
+    {classification, classification_evidence(contract, Map.get(shape, :branch_index))}
   rescue
-    _exception -> %{value_kind: :unknown}
+    _exception -> {%{value_kind: :unknown}, nil}
   end
 
-  def classify(_contract, _value), do: %{value_kind: :unknown}
+  def classify_with_evidence(_contract, _value), do: {%{value_kind: :unknown}, nil}
 
   @spec describe(t()) :: binary()
   @doc """
@@ -120,7 +176,9 @@ defmodule PtcRunner.Kernel.ValueContract do
   Types only — no descriptions, no prose, no guidance about when each branch
   applies. That judgement belongs to the task, which the schema cannot express.
   """
-  def describe(%__MODULE__{schema: schema}) do
+  def describe(%__MODULE__{schema: schema} = contract) do
+    if not sealed?(contract), do: raise(ArgumentError, "invalid value contract")
+
     case Map.fetch(schema, "oneOf") do
       {:ok, branches} -> Enum.map_join(branches, "\n", &describe_object/1)
       :error -> describe_object(schema)
@@ -155,7 +213,7 @@ defmodule PtcRunner.Kernel.ValueContract do
   # struct also carries the offending data. Only the structural path and the
   # keyword travel out. No validator detail is emitted, so a new keyword cannot
   # start disclosing values by default.
-  defp violations(validator, value, branch_index, declared) do
+  defp violations(validator, value, schema, branch_index) do
     case JSV.validate(value, validator, cast: false) do
       {:ok, _validated} ->
         []
@@ -164,8 +222,8 @@ defmodule PtcRunner.Kernel.ValueContract do
         error
         |> JSV.normalize_error()
         |> Map.get(:details, [])
-        |> Enum.flat_map(&unit_violations(&1, branch_index, declared))
-        |> Enum.uniq_by(&{&1.path, &1.kind})
+        |> Enum.flat_map(&unit_violations(&1, schema, branch_index))
+        |> Enum.uniq_by(&{&1.segments, &1.kind})
         |> Enum.take(@max_violations)
     end
   rescue
@@ -177,8 +235,8 @@ defmodule PtcRunner.Kernel.ValueContract do
   # validator's internal error structs instead lost every violation as soon as
   # more than one array element failed, because applicator keywords nest their
   # causes differently at depth.
-  defp unit_violations(unit, branch_index, declared) do
-    path = unit |> Map.get(:instanceLocation, "#") |> pointer_path(declared)
+  defp unit_violations(unit, schema, branch_index) do
+    segments = unit |> Map.get(:instanceLocation, "#") |> pointer_segments(schema)
 
     unit
     |> Map.get(:errors, [])
@@ -188,84 +246,122 @@ defmodule PtcRunner.Kernel.ValueContract do
       cond do
         Map.get(error, :kind) == :oneOf and details != [] ->
           details
-          |> selected_branches(branch_index)
-          |> Enum.flat_map(&unit_violations(&1, branch_index, declared))
+          |> selected_branches(schema, branch_index)
+          |> Enum.flat_map(fn {detail, branch_schema} ->
+            unit_violations(detail, branch_schema, nil)
+          end)
 
         details != [] ->
-          Enum.flat_map(details, &unit_violations(&1, branch_index, declared))
+          Enum.flat_map(details, &unit_violations(&1, schema, branch_index))
 
         true ->
-          leaf_violation(path, Map.get(error, :kind))
+          leaf_violation(segments, Map.get(error, :kind))
       end
     end)
   end
 
-  # `oneOf` alternatives arrive in schema order, so the branch the
-  # discriminator selected is the one at its index. Every other alternative is
-  # rejected by its own `const` and then reports each key it was never given;
-  # reporting those buried the one fault the caller could act on. With no
-  # branch selected the value fits nowhere, and all alternatives are relevant.
-  defp selected_branches(details, nil), do: details
+  # JSV flattens nested branch errors and sorts them by instance location, so
+  # neither the detail count nor its position corresponds to the `oneOf`
+  # alternatives. The evaluation/schema pointer is the stable branch identity.
+  # Every detail from the discriminator-selected branch remains relevant; the
+  # other alternatives are rejected by their own `const` and must stay private.
+  defp selected_branches(details, %{"oneOf" => branches} = schema, branch_index) do
+    Enum.flat_map(details, fn detail ->
+      case detail_branch_index(detail) do
+        {:ok, index} when is_nil(branch_index) or index == branch_index ->
+          case Enum.at(branches, index) do
+            nil -> []
+            branch_schema -> [{detail, branch_schema}]
+          end
 
-  defp selected_branches(details, branch_index) do
-    case Enum.at(details, branch_index) do
-      nil -> details
-      branch -> [branch]
+        {:ok, _other_index} ->
+          []
+
+        :error when is_nil(branch_index) ->
+          [{detail, schema}]
+
+        :error ->
+          []
+      end
+    end)
+  end
+
+  defp selected_branches(details, schema, _branch_index),
+    do: Enum.map(details, &{&1, schema})
+
+  defp detail_branch_index(detail) do
+    pointer = Map.get(detail, :evaluationPath) || Map.get(detail, :schemaLocation)
+
+    case pointer do
+      "#/oneOf/" <> rest ->
+        rest
+        |> String.split("/", parts: 2)
+        |> hd()
+        |> nonnegative_index()
+
+      _other ->
+        :error
     end
   end
 
-  defp leaf_violation(_path, nil), do: []
+  defp leaf_violation(_segments, nil), do: []
 
-  defp leaf_violation(_path, kind) when kind in [:properties, :items, :oneOf, :allOf, :anyOf],
-    do: []
+  defp leaf_violation(_segments, kind)
+       when kind in [:properties, :items, :oneOf, :allOf, :anyOf],
+       do: []
 
-  defp leaf_violation(path, kind), do: [%{path: path, kind: kind}]
+  defp leaf_violation(nil, _kind), do: []
+  defp leaf_violation(segments, kind), do: [%{segments: segments, kind: kind}]
 
-  # `#/evidence/0/snapshot_hash` becomes `evidence[0].snapshot_hash`. A segment
-  # naming an undeclared key is caller-authored content, so it is replaced.
-  defp pointer_path("#", _declared), do: "(root)"
+  # JSV exposes RFC 6901 instance pointers. Decode the pointer, then authorize
+  # each segment against the exact schema node at that location. A property
+  # declared elsewhere in the contract is not authority for this path.
+  defp pointer_segments("#", _schema), do: []
 
-  defp pointer_path("#/" <> rest, declared) do
+  defp pointer_segments("#/" <> rest, schema) do
     rest
     |> String.split("/")
-    |> Enum.map_join(fn segment ->
-      case Integer.parse(segment) do
-        {index, ""} -> "[#{index}]"
-        _other -> "." <> declared_name(segment, declared)
-      end
-    end)
-    |> String.trim_leading(".")
+    |> Enum.map(&decode_pointer_segment/1)
+    |> walk_schema_path(schema, [])
   end
 
-  defp pointer_path(_other, _declared), do: "(root)"
+  defp pointer_segments(_other, _schema), do: nil
 
-  defp declared_name(key, declared) do
-    if MapSet.member?(declared, key), do: key, else: "(undeclared)"
+  defp walk_schema_path([], _schema, retained), do: Enum.reverse(retained)
+
+  defp walk_schema_path([segment | rest], %{"type" => "object"} = schema, retained) do
+    properties = Map.get(schema, "properties", %{})
+
+    case Map.fetch(properties, segment) do
+      {:ok, child} ->
+        walk_schema_path(rest, child, [{:property, segment} | retained])
+
+      :error ->
+        Enum.reverse(retained)
+    end
   end
 
-  # Every property name the contract mentions, at any depth. Bounded by the
-  # 64 KiB normalized contract, so this stays small.
-  defp declared_names(schema) when is_map(schema) do
-    own =
-      schema
-      |> Map.get("properties", %{})
-      |> Map.keys()
-      |> MapSet.new()
-
-    schema
-    |> Map.drop(["properties"])
-    |> Map.values()
-    |> Enum.concat(Map.values(Map.get(schema, "properties", %{})))
-    |> Enum.reduce(own, fn value, acc -> MapSet.union(acc, declared_names(value)) end)
+  defp walk_schema_path([segment | rest], %{"type" => "array", "items" => child}, retained) do
+    case nonnegative_index(segment) do
+      {:ok, index} -> walk_schema_path(rest, child, [{:index, index} | retained])
+      :error -> Enum.reverse(retained)
+    end
   end
 
-  defp declared_names(values) when is_list(values),
-    do:
-      Enum.reduce(values, MapSet.new(), fn value, acc ->
-        MapSet.union(acc, declared_names(value))
-      end)
+  defp walk_schema_path(_segments, _schema, retained), do: Enum.reverse(retained)
 
-  defp declared_names(_other), do: MapSet.new()
+  defp decode_pointer_segment(segment),
+    do: segment |> String.replace("~1", "/") |> String.replace("~0", "~")
+
+  defp nonnegative_index(segment) do
+    case Integer.parse(segment) do
+      {index, ""} when index >= 0 ->
+        if Integer.to_string(index) == segment, do: {:ok, index}, else: :error
+
+      _invalid ->
+        :error
+    end
+  end
 
   defp classify_union(branches, value) do
     with {:ok, name} <- shared_discriminator(branches),
@@ -322,10 +418,27 @@ defmodule PtcRunner.Kernel.ValueContract do
   defp compile_object(schema) do
     case JSONSchema.compile(schema) do
       {:ok, normalized, validator} ->
-        {:ok, %__MODULE__{schema: normalized, validator: validator}}
+        {:ok, seal(normalized, validator)}
 
       {:error, :invalid_schema} ->
         {:error, :invalid_value_contract}
+    end
+  end
+
+  defp behavior_schema(schema) when is_map(schema) do
+    schema
+    |> Map.drop(["title", "description"])
+    |> maybe_map_schema_children("properties", fn properties ->
+      Map.new(properties, fn {name, child} -> {name, behavior_schema(child)} end)
+    end)
+    |> maybe_map_schema_children("items", &behavior_schema/1)
+    |> maybe_map_schema_children("oneOf", &Enum.map(&1, fn branch -> behavior_schema(branch) end))
+  end
+
+  defp maybe_map_schema_children(schema, key, mapper) do
+    case Map.fetch(schema, key) do
+      {:ok, value} -> Map.put(schema, key, mapper.(value))
+      :error -> schema
     end
   end
 
@@ -346,7 +459,7 @@ defmodule PtcRunner.Kernel.ValueContract do
              formats: [SHA256Format],
              warnings: :silent
            ) do
-      {:ok, %__MODULE__{schema: normalized, validator: validator}}
+      {:ok, seal(normalized, validator)}
     else
       _reason -> {:error, :invalid_value_contract}
     end
@@ -434,4 +547,36 @@ defmodule PtcRunner.Kernel.ValueContract do
   defp distinct_discriminator_values?(values) do
     length(values) == MapSet.size(MapSet.new(values))
   end
+
+  defp seal(schema, validator) do
+    contract = %__MODULE__{schema: schema, validator: validator, attestation: <<>>}
+    %{contract | attestation: Attestation.attest(__MODULE__, payload(contract))}
+  end
+
+  defp classification_evidence(contract, branch_index) do
+    path_schema = selected_path_schema(contract.schema, branch_index)
+
+    evidence = %ValueContractClassification{
+      behavior_hash: behavior_hash(contract),
+      path_schema: path_schema,
+      attestation: <<>>
+    }
+
+    payload = {evidence.behavior_hash, evidence.path_schema}
+
+    %{
+      evidence
+      | attestation: Attestation.attest(ValueContractClassification, payload)
+    }
+  end
+
+  defp selected_path_schema(%{"oneOf" => branches}, branch_index)
+       when is_list(branches) and is_integer(branch_index) and branch_index >= 0,
+       do: Enum.at(branches, branch_index)
+
+  defp selected_path_schema(%{"oneOf" => branches}, nil) when is_list(branches), do: nil
+  defp selected_path_schema(schema, nil) when is_map(schema), do: schema
+  defp selected_path_schema(_schema, _branch_index), do: nil
+
+  defp payload(contract), do: {contract.schema, contract.validator}
 end

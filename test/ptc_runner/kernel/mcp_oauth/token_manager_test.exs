@@ -1,6 +1,7 @@
 defmodule PtcRunner.Kernel.MCPOAuth.TokenManagerTest do
   use ExUnit.Case, async: false
 
+  alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.MCPOAuth.Authority
   alias PtcRunner.Kernel.MCPOAuth.Binding
   alias PtcRunner.Kernel.MCPOAuth.Context
@@ -10,6 +11,8 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManagerTest do
   alias PtcRunner.Kernel.MCPOAuth.Store
   alias PtcRunner.Kernel.MCPOAuth.Store.Memory
   alias PtcRunner.Kernel.MCPOAuth.TokenManager
+  alias PtcRunner.Kernel.ProviderSession
+  alias PtcRunner.Kernel.ResourceRegistrar
   alias PtcRunner.Test.MCPOAuthRecordingStore
 
   setup do
@@ -31,6 +34,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManagerTest do
     {:ok,
      authority: authority,
      context: context,
+     memory: memory,
      store: store,
      epoch: claims[authority.installation_id],
      key: key}
@@ -754,6 +758,194 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManagerTest do
     assert_receive {:DOWN, ^manager_ref, :process, _pid, :normal}, 2_000
   end
 
+  test "closing an ephemeral store terminates its adopted retry managers", context do
+    {:ok, _grant} = seed_grant(context.store, context.key, 60_000)
+    parent = self()
+
+    interceptor = fn
+      {:mark_access_rejected, _key, _generation}, _timeout ->
+        send(parent, :terminal_persistence_attempt)
+        {:return, {:error, :store_error}}
+
+      _operation, _timeout ->
+        :delegate
+    end
+
+    manager = manager_with_interceptor(context, interceptor)
+    manager_ref = Process.monitor(manager.pid)
+    deadline = System.monotonic_time(:millisecond) + 1_000
+
+    assert {:error, :store_error} = TokenManager.reject(manager, 1, deadline)
+    assert_receive :terminal_persistence_attempt
+    assert :ok = ManagerCleanup.adopt(manager)
+    assert_receive :terminal_persistence_attempt
+    assert Process.alive?(manager.pid)
+
+    assert :ok = Memory.close(context.memory)
+    assert_receive {:DOWN, ^manager_ref, :process, _pid, :killed}, 1_000
+  end
+
+  test "registration-controller loss does not block persistence handoff", context do
+    {:ok, _grant} = seed_grant(context.store, context.key, 60_000)
+    {:ok, persist?} = Agent.start_link(fn -> false end)
+
+    interceptor = fn
+      {:mark_access_rejected, _key, _generation}, _timeout ->
+        if Agent.get(persist?, & &1),
+          do: :delegate,
+          else: {:return, {:error, :store_error}}
+
+      _operation, _timeout ->
+        :delegate
+    end
+
+    {:ok, session} = ProviderSession.start(Limits.defaults())
+    {:ok, registrar} = ProviderSession.open_registrar(session)
+    assert :ok = ResourceRegistrar.activate(registrar)
+
+    manager =
+      manager_with_interceptor(context, interceptor,
+        owner: ResourceRegistrar.owner(registrar),
+        resource_registrar: registrar
+      )
+
+    manager_ref = Process.monitor(manager.pid)
+    deadline = System.monotonic_time(:millisecond) + 1_000
+    assert {:error, :store_error} = TokenManager.reject(manager, 1, deadline)
+
+    Process.exit(registrar.scope_controller, :kill)
+    assert :ok = ManagerCleanup.adopt(manager, registrar)
+    assert Process.alive?(manager.pid)
+
+    Agent.update(persist?, fn _failed -> true end)
+    assert_receive {:DOWN, ^manager_ref, :process, _pid, :normal}, 2_000
+    assert {:error, :provider_cleanup_failed} = ProviderSession.close(session)
+  end
+
+  test "an unavailable registrar is not reported as an invalid token manager", context do
+    {:ok, session} = ProviderSession.start(Limits.defaults())
+    {:ok, registrar} = ProviderSession.open_registrar(session)
+    assert :ok = ResourceRegistrar.activate(registrar)
+    owner = ResourceRegistrar.owner(registrar)
+    assert :ok = ResourceRegistrar.abort(registrar)
+
+    assert {:error, :resource_registrar_unavailable} =
+             TokenManager.start(
+               owner: owner,
+               resource_registrar: registrar,
+               context: context.context,
+               authority: context.authority,
+               authority_epoch: context.epoch
+             )
+
+    assert :ok = ProviderSession.close(session)
+  end
+
+  test "concurrent repeated adoption creates one cleanup worker", context do
+    {:ok, _grant} = seed_grant(context.store, context.key, 60_000)
+    {:ok, persist?} = Agent.start_link(fn -> false end)
+    {:ok, session} = ProviderSession.start(Limits.defaults())
+    {:ok, registrar} = ProviderSession.open_registrar(session)
+    assert :ok = ResourceRegistrar.activate(registrar)
+
+    interceptor = fn
+      {:mark_access_rejected, _key, _generation}, _timeout ->
+        if Agent.get(persist?, & &1),
+          do: :delegate,
+          else: {:return, {:error, :store_error}}
+
+      _operation, _timeout ->
+        :delegate
+    end
+
+    manager =
+      manager_with_interceptor(context, interceptor,
+        owner: ResourceRegistrar.owner(registrar),
+        resource_registrar: registrar
+      )
+
+    manager_ref = Process.monitor(manager.pid)
+    deadline = System.monotonic_time(:millisecond) + 1_000
+    assert {:error, :store_error} = TokenManager.reject(manager, 1, deadline)
+
+    results =
+      1..32
+      |> Task.async_stream(fn _attempt -> ManagerCleanup.adopt(manager, registrar) end,
+        max_concurrency: 32,
+        ordered: false,
+        timeout: 5_000
+      )
+      |> Enum.to_list()
+
+    assert Enum.all?(results, &(&1 == {:ok, :ok}))
+    assert {:ok, worker} = ManagerCleanup.adopted_worker(manager.pid)
+    assert Process.alive?(worker)
+    assert {:links, [^worker]} = Process.info(manager.pid, :links)
+
+    Agent.update(persist?, fn _failed -> true end)
+    assert_receive {:DOWN, ^manager_ref, :process, _pid, :normal}, 2_000
+    assert :ok = ResourceRegistrar.commit(registrar, nil)
+    assert :ok = ProviderSession.close(session)
+  end
+
+  test "a stalled scope handoff does not block adoption from another scope", context do
+    {:ok, _grant} = seed_grant(context.store, context.key, 60_000)
+    {:ok, persist?} = Agent.start_link(fn -> false end)
+    {:ok, first_session} = ProviderSession.start(Limits.defaults())
+    {:ok, first_registrar} = ProviderSession.open_registrar(first_session)
+    assert :ok = ResourceRegistrar.activate(first_registrar)
+    {:ok, second_session} = ProviderSession.start(Limits.defaults())
+    {:ok, second_registrar} = ProviderSession.open_registrar(second_session)
+    assert :ok = ResourceRegistrar.activate(second_registrar)
+
+    interceptor = fn
+      {:mark_access_rejected, _key, _generation}, _timeout ->
+        if Agent.get(persist?, & &1),
+          do: :delegate,
+          else: {:return, {:error, :store_error}}
+
+      _operation, _timeout ->
+        :delegate
+    end
+
+    first_manager =
+      manager_with_interceptor(context, interceptor,
+        owner: ResourceRegistrar.owner(first_registrar),
+        resource_registrar: first_registrar
+      )
+
+    second_manager =
+      manager_with_interceptor(context, interceptor,
+        owner: ResourceRegistrar.owner(second_registrar),
+        resource_registrar: second_registrar
+      )
+
+    first_ref = Process.monitor(first_manager.pid)
+    second_ref = Process.monitor(second_manager.pid)
+    deadline = System.monotonic_time(:millisecond) + 1_000
+    assert {:error, :store_error} = TokenManager.reject(first_manager, 1, deadline)
+    assert {:error, :store_error} = TokenManager.reject(second_manager, 1, deadline)
+
+    assert true = :erlang.suspend_process(first_registrar.cleanup_owner)
+    stalled = Task.async(fn -> ManagerCleanup.adopt(first_manager, first_registrar) end)
+    assert nil == Task.yield(stalled, 50)
+
+    healthy = Task.async(fn -> ManagerCleanup.adopt(second_manager, second_registrar) end)
+    assert {:ok, :ok} = Task.yield(healthy, 500)
+    assert nil == Task.yield(stalled, 0)
+
+    assert true = :erlang.resume_process(first_registrar.cleanup_owner)
+    assert :ok = Task.await(stalled, 1_000)
+
+    Agent.update(persist?, fn _failed -> true end)
+    assert_receive {:DOWN, ^first_ref, :process, _pid, :normal}, 2_000
+    assert_receive {:DOWN, ^second_ref, :process, _pid, :normal}, 2_000
+    assert :ok = ResourceRegistrar.commit(first_registrar, nil)
+    assert :ok = ResourceRegistrar.commit(second_registrar, nil)
+    assert :ok = ProviderSession.close(first_session)
+    assert :ok = ProviderSession.close(second_session)
+  end
+
   test "cleanup supervisor restart terminates an adopted manager instead of orphaning it",
        context do
     {:ok, _grant} = seed_grant(context.store, context.key, 60_000)
@@ -794,6 +986,8 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManagerTest do
 
     manager = %TokenManager{pid: pid, resource: "https://mcp.example/mcp"}
     assert :ok = ManagerCleanup.adopt(manager)
+    assert :ok = ManagerCleanup.adopt(manager, nil)
+    refute Map.has_key?(:sys.get_state(ManagerCleanup).handoffs, pid)
   end
 
   test "concurrent successful cleanups do not restart the cleanup supervisor", context do
@@ -1009,6 +1203,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManagerTest do
     {:ok, manager} =
       TokenManager.start(
         owner: Keyword.get(opts, :owner, self()),
+        resource_registrar: Keyword.get(opts, :resource_registrar),
         context: wrapped_context,
         authority: context.authority,
         authority_epoch: context.epoch

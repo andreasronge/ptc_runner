@@ -14,6 +14,7 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
   alias PtcRunner.Kernel.RunConfig
   alias PtcRunner.Kernel.RunState
   alias PtcRunner.Kernel.WorkflowEnvironment
+  alias PtcRunner.TestSupport.ProviderSessionFixture
 
   @input_schema %{"type" => "object", "additionalProperties" => true}
 
@@ -77,6 +78,27 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
              ReplSession.evaluation_memory_summary(session)
 
     assert history_bytes > 0
+  end
+
+  test "REPL sessions reject JSON-result configurations" do
+    {:ok, workflow} = WorkflowEnvironment.new([])
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, limits} = Limits.new()
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "repl-json-projection")
+    on_exit(fn -> if Process.alive?(sink.pid), do: EventSink.stop(sink) end)
+
+    {:ok, config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        mission_environment: mission,
+        input: %{},
+        limits: limits,
+        event_sink: sink,
+        result_projection: :json
+      )
+
+    assert {:error, :invalid_repl_session} = ReplSession.new(config: config)
+    assert Process.alive?(sink.pid)
   end
 
   test "sessions reject evaluation and teardown outside their creating process" do
@@ -150,12 +172,16 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
             input: %{},
             limits: limits,
             event_sink: sink,
-            provider_resources: [
-              fn ->
-                send(parent, :foreign_config_resource_closed)
-                :ok
-              end
-            ]
+            provider_session:
+              ProviderSessionFixture.start(
+                [
+                  fn ->
+                    send(parent, :foreign_config_resource_closed)
+                    :ok
+                  end
+                ],
+                limits
+              )
           )
 
         send(parent, {:foreign_config, config})
@@ -238,12 +264,16 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
             input: %{},
             limits: limits,
             event_sink: sink,
-            provider_resources: [
-              fn ->
-                send(parent, :suspended_config_resource_closed)
-                :ok
-              end
-            ]
+            provider_session:
+              ProviderSessionFixture.start(
+                [
+                  fn ->
+                    send(parent, :suspended_config_resource_closed)
+                    :ok
+                  end
+                ],
+                limits
+              )
           )
 
         :ok = :sys.suspend(sink.pid)
@@ -255,7 +285,7 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
       end)
 
     assert {{:error, :session_owner_mismatch}, true} = Task.await(task, 7_000)
-    refute_receive :suspended_config_resource_closed
+    assert_receive :suspended_config_resource_closed
   end
 
   test "setup cleanup remains bounded when one owned sink is dead and the other is suspended" do
@@ -280,12 +310,16 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
             event_sink: event_sink,
             inspection_sink: inspection_sink,
             inspection_path: "mixed-dead-wedged.inspection.jsonl",
-            provider_resources: [
-              fn ->
-                send(parent, :mixed_config_resource_closed)
-                :ok
-              end
-            ]
+            provider_session:
+              ProviderSessionFixture.start(
+                [
+                  fn ->
+                    send(parent, :mixed_config_resource_closed)
+                    :ok
+                  end
+                ],
+                limits
+              )
           )
 
         :ok = EventSink.stop(event_sink)
@@ -320,12 +354,16 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
             event_sink: event_sink,
             inspection_sink: inspection_sink,
             inspection_path: "wedged-dead-mixed.inspection.jsonl",
-            provider_resources: [
-              fn ->
-                send(parent, :reverse_mixed_config_resource_closed)
-                :ok
-              end
-            ]
+            provider_session:
+              ProviderSessionFixture.start(
+                [
+                  fn ->
+                    send(parent, :reverse_mixed_config_resource_closed)
+                    :ok
+                  end
+                ],
+                limits
+              )
           )
 
         :ok = InspectionSink.stop(inspection_sink)
@@ -355,12 +393,16 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
             input: %{},
             limits: limits,
             event_sink: sink,
-            provider_resources: [
-              fn ->
-                send(parent, :owner_exit_resource_closed)
-                :ok
-              end
-            ]
+            provider_session:
+              ProviderSessionFixture.start(
+                [
+                  fn ->
+                    send(parent, :owner_exit_resource_closed)
+                    :ok
+                  end
+                ],
+                limits
+              )
           )
 
         {:ok, _session} = ReplSession.new(config: config)
@@ -432,6 +474,74 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
     Process.exit(creator, :shutdown)
     assert_receive {:DOWN, ^creator_ref, :process, ^creator, :shutdown}, 2_000
     assert_receive {:DOWN, ^evaluation_ref, :process, ^evaluation_worker, _reason}, 2_000
+  end
+
+  test "REPL session-owner death drains provider work before closing its resource" do
+    parent = self()
+    provider_table = :ets.new(:repl_owner_death_provider, [:set, :public])
+
+    callback = fn _arguments ->
+      true = :ets.insert(provider_table, {:provider, self()})
+      send(parent, {:repl_owner_death_provider_started, self()})
+
+      receive do
+        :never -> {:ok, %{}}
+      end
+    end
+
+    {creator, creator_ref} =
+      spawn_monitor(fn ->
+        {:ok, capability} =
+          Capability.new(
+            name: "repl_owner_death",
+            input_schema: %{"type" => "object", "additionalProperties" => false},
+            callback: callback
+          )
+
+        {:ok, workflow} = WorkflowEnvironment.new(capabilities: [capability])
+        {:ok, mission} = MissionEnvironment.new([])
+
+        {:ok, limits} =
+          Limits.new(
+            evaluation_timeout_ms: 30_000,
+            workflow_timeout_ms: 30_000,
+            run_duration_ms: 30_000
+          )
+
+        {:ok, sink} = EventSink.start(:normal, limits, run_id: "repl-owner-provider")
+
+        close = fn ->
+          [{:provider, provider}] = :ets.lookup(provider_table, :provider)
+          send(parent, {:repl_owner_death_resource_closed, Process.alive?(provider)})
+          :ok
+        end
+
+        {:ok, config} =
+          RunConfig.new(
+            workflow_environment: workflow,
+            mission_environment: mission,
+            input: %{},
+            limits: limits,
+            event_sink: sink,
+            provider_session: ProviderSessionFixture.start([close], limits)
+          )
+
+        {:ok, session} = ReplSession.new(config: config)
+        [{_, {session_owner, _token}}] = :ets.lookup(session.access, session.id)
+        send(parent, {:repl_session_owner_ready, session_owner})
+        ReplSession.eval(session, "(tool/repl_owner_death {})")
+      end)
+
+    assert_receive {:repl_session_owner_ready, session_owner}, 5_000
+    session_owner_ref = Process.monitor(session_owner)
+    assert_receive {:repl_owner_death_provider_started, provider}, 5_000
+    Process.exit(session_owner, :kill)
+
+    assert_receive {:DOWN, ^session_owner_ref, :process, ^session_owner, :killed}, 5_000
+    assert_receive {:repl_owner_death_resource_closed, false}, 5_000
+    refute Process.alive?(provider)
+    refute_receive {:repl_owner_death_resource_closed, _alive?}
+    assert_receive {:DOWN, ^creator_ref, :process, ^creator, :normal}, 5_000
   end
 
   test "session owner rejects a run state not bound to its configured sinks" do
@@ -684,12 +794,16 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
         input: %{},
         limits: limits,
         event_sink: sink,
-        provider_resources: [
-          fn ->
-            send(parent, :resource_closed)
-            :ok
-          end
-        ]
+        provider_session:
+          ProviderSessionFixture.start(
+            [
+              fn ->
+                send(parent, :resource_closed)
+                :ok
+              end
+            ],
+            limits
+          )
       )
 
     {:ok, session} = ReplSession.new(config: config)
@@ -716,12 +830,16 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
         input: %{},
         limits: limits,
         event_sink: sink,
-        provider_resources: [
-          fn ->
-            send(parent, close_message)
-            :ok
-          end
-        ]
+        provider_session:
+          ProviderSessionFixture.start(
+            [
+              fn ->
+                send(parent, close_message)
+                :ok
+              end
+            ],
+            limits
+          )
       )
     end
 

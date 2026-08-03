@@ -31,6 +31,7 @@ the later preflight and acquisition phases.
   "install": {
     "deepseek": {
       "source": "llm",
+      "installation_revision": "deepseek-policy-v1",
       "model": "openrouter:deepseek/deepseek-v4-flash",
       "credential": "openrouter_key",
       "cache": false
@@ -59,15 +60,23 @@ Only `install` is required. The other top-level keys are `credentials`,
 `limits`, `runtime`, and `$schema`. Unknown keys are rejected. A document is at
 most 1 MB and holds at most 128 installations and 128 credentials. Every alias,
 credential name, and public tool name matches `^[a-z][a-z0-9._-]{0,127}$`.
+Optional properties use omission for their default; an explicit JSON `null`
+does not mean omitted and fails structural validation.
 
-`installation_revision` is a free-form operator string, at most 256 characters.
-It records which build of a server or model policy an alias represents so that
-traces from different installations remain distinguishable.
+Every installation requires `installation_revision`. It is a public,
+non-secret behavior identity matching exactly
+`^[a-z][a-z0-9._-]{0,127}$`. Change it whenever model or endpoint behavior,
+adapter/launcher build, MCP mappings or effects, replay fixtures, snapshot
+policy, or another installed authority detail changes. A missing revision is
+reported as `host/installation_revision_missing` for the affected alias before
+generic schema reporting, even when the application does not select it.
 
 The canonical structural description is shipped as
 `priv/schemas/ptc-host-config.schema.json` for editor completion. Runtime
 decoding stays authoritative for semantic checks such as unique public tool
 names, credential references, reserved headers, and portable environment names.
+Standalone command diagnostics classify duplicate properties as structural
+host failures and retain only the duplicate's schema-authorized parent pointer.
 
 ## Credentials
 
@@ -96,21 +105,33 @@ missing variable, unreadable file, or empty value fails the run with
 `credential_unavailable` rather than falling back.
 
 Credentials never belong in a manifest, in PTC-Lisp, in a canonical trace, or
-in a committed project file. A safe provider snapshot records model and policy
-identity, never the secret.
+in a committed project file. A safe provider snapshot records the public
+installation revision and normalized selected policy, never the raw model
+selector or secret.
 
-For local development from a repository checkout, the runtime loads the nearest
-`.env` at startup, so an `env` credential can come from there:
+A command-owned VM disables dependency `.env` readers before starting the
+selected provider application. A reused host-owned application keeps whatever
+its own start applied, because it was already running.
+
+For a selected shipped LLM whose declared credential uses `env`, the Mix
+frontend loads the nearest `.env` through `PtcRunner.Dotenv` after provider
+activity begins and before resolving that credential. One declared credential
+triggers the load, but the load is not scoped to it: the loader walks up from
+the invocation directory to the filesystem root and sets every variable in the
+first `.env` it finds. This happens once per VM and those variables persist for
+the process lifetime, so a later invocation in the same VM keeps them. Existing
+process variables take precedence. Embedded hosts do not load `.env`
+implicitly; export an `env` credential before invoking them, or use a
+shell-local environment manager or explicit secret source:
 
 ```console
-cp .env.example .env
-chmod 600 .env
-# Edit .env and set OPENROUTER_API_KEY to the real key.
+export OPENROUTER_API_KEY="$(secret-tool lookup service openrouter)"
+mix ptc.run ptc.json --host-config ptc-host.json
 ```
 
-An already-exported shell variable takes precedence. `.env` is Git-ignored, but
-it is still a plaintext local secret; prefer the shell, `direnv`, or a secret
-manager where appropriate.
+Tools such as `direnv` may populate the process environment before the command
+starts. A `.env` file being Git-ignored does not make it a safe plaintext secret
+store.
 
 ## Provider sources
 
@@ -119,11 +140,11 @@ one environment, and that placement is enforced at assembly:
 
 | `source` | Purpose | Required keys | Environment |
 | --- | --- | --- | --- |
-| `llm` | Live language model | `model`, `credential` | Workflow only |
-| `llm_replay` | Frozen model responses | `fixtures` | Workflow only |
-| `mcp` | External tool server | `transport`, `tools` | Mission only |
-| `ptc_trace_snapshot` | Canonical trace queries | `directory` | Mission only |
-| `ptc_inspection_snapshot` | Private inspection queries | `directory` | Mission only |
+| `llm` | Live language model | `installation_revision`, `model`, `credential` | Workflow only |
+| `llm_replay` | Frozen model responses | `installation_revision`, `fixtures` | Workflow only |
+| `mcp` | External tool server | `installation_revision`, `transport`, `tools` | Mission only |
+| `ptc_trace_snapshot` | Canonical trace queries | `installation_revision`, `directory` | Mission only |
+| `ptc_inspection_snapshot` | Private inspection queries | `installation_revision`, `directory` | Mission only |
 
 Selecting an alias into the wrong environment fails with
 `provider_destination_denied`. This is what keeps model authority out of
@@ -134,6 +155,7 @@ model-authored mission code.
 ```json
 "deepseek": {
   "source": "llm",
+  "installation_revision": "deepseek-policy-v1",
   "model": "openrouter:deepseek/deepseek-v4-flash",
   "credential": "openrouter_key",
   "cache": false,
@@ -152,6 +174,12 @@ parameters the installed model actually implements.
 preference in its request, but this setting takes precedence. Request and
 response ceilings default to 1,000,000 bytes and cannot exceed 1,048,576.
 
+The active `doctor --connect` check for a selected live model performs one real
+minimal completion and may incur provider cost. The probe forces a one-token
+output ceiling, disables retries and redirects, and uses the installed
+credential under `doctor_connectivity_timeout_ms`; provider errors and timeouts
+fail the check instead of being reported as availability.
+
 ### Recorded models
 
 Evaluation needs a model whose answers do not move between a baseline run and a
@@ -163,6 +191,7 @@ application changes between them.
 ```json
 "frozen-model": {
   "source": "llm_replay",
+  "installation_revision": "frozen-model-v1",
   "fixtures": "evaluation/replay.jsonl",
   "ceilings": {"max_entries": 10000, "max_result_bytes": 1048576}
 }
@@ -189,6 +218,7 @@ every mapped tool. It accepts 1 to 128 tools.
 ```json
 "workspace": {
   "source": "mcp",
+  "installation_revision": "workspace-v1",
   "transport": {"type": "stdio", "command": "node", "args": ["server.js"]},
   "tools": {
     "read_text_file": {
@@ -449,11 +479,13 @@ reading an immutable capture rather than live files.
 ```json
 "history": {
   "source": "ptc_trace_snapshot",
+  "installation_revision": "history-v1",
   "directory": "traces",
   "ceilings": {"max_source_bytes": 8000000, "max_result_bytes": 1048576}
 },
 "private-history": {
   "source": "ptc_inspection_snapshot",
+  "installation_revision": "private-history-v1",
   "directory": "inspection",
   "ceilings": {
     "max_files": 1024,
@@ -483,6 +515,7 @@ Every installation carries a data class and a set of classes it accepts:
 ```json
 "vendor": {
   "source": "mcp",
+  "installation_revision": "vendor-v1",
   "data_class": "normal",
   "accepts_data": ["normal"],
   "transport": {"type": "streamable_http", "endpoint": "https://example.com"},
@@ -524,16 +557,29 @@ more turns, model calls, and trace events than they allow:
 }
 ```
 
-Every limit name is accepted, each value is a positive integer of at most
-2,592,000,000 — thirty days in milliseconds, high enough for a run measured in
-days and low enough that a mistyped value fails loading instead of scheduling a
-timer nobody will outlive. Any omitted name keeps its compiled default.
+Every cataloged limit name is accepted. Existing application limits accept
+positive integers through 2,592,000,000. Three operational timeouts instead
+have narrow, installed-only contracts:
+
+| Limit | Installed default | Accepted range | Identity metadata |
+| --- | ---: | ---: | --- |
+| `provider_cleanup_timeout_ms` | 5,000 | 100–30,000 | Included |
+| `selection_validation_timeout_ms` | 5,000 | 100–30,000 | Included |
+| `doctor_connectivity_timeout_ms` | 10,000 | 100–30,000 | Excluded; doctor-only |
+
+Applications cannot declare or narrow those three names. The first two are
+copied into sealed execution limits and marked as effective-identity
+participants; the doctor-only value is excluded. This slice seals that policy
+before the later provider-lifecycle and doctor implementations consume the
+timeouts—it does not yet impose those deadlines. Any omitted name keeps its
+cataloged installed default.
 
 Raising a ceiling here does not by itself lengthen any run. The manifest rule is
-unchanged: an application may still only request values at or below what is
-installed, so a manifest that needs the larger budget must ask for it. Both
-documents stay explicit — the host decides the maximum an operator permits, and
-the manifest declares what its application needs. See
+unchanged for manifest-narrowable limits: an application may still only request
+values at or below what is installed, so a manifest that needs the larger
+budget must ask for it. Both documents stay explicit — the host decides the
+maximum an operator permits, and the manifest declares what its application
+needs. See
 [Manifests and capabilities](manifests-and-capabilities.md#requested-limits-narrow-host-ceilings)
 for the application side and the full limit vocabulary.
 
@@ -557,17 +603,23 @@ mix ptc.run examples/kernel-tutorial/02-deepseek-extract/ptc.json \
 ```
 
 ```text
-workflow  deepseek  llm  model openrouter:deepseek/deepseek-v4-flash  accepts: normal  snapshot 7a768b7771c97e4975c9b9943acdeb87b725dd325b55e397ed343b6a54ea9de7
+workflow  deepseek  llm  revision deepseek-policy-v1  accepts: normal  snapshot 7a768b7771c97e4975c9b9943acdeb87b725dd325b55e397ed343b6a54ea9de7
 ```
 
-Each line reports the environment, alias, source, resolved non-secret policy,
-accepted data classes, and the provider snapshot hash. That bare-hex
-`snapshot_hash` attests the provider-specific non-secret identity projection,
-including the effective ceilings present in that projection. It does not
-automatically cover the alias, data-class policy, or fields the provider
-deliberately excludes. A frozen-content provider also publishes an
-algorithm-qualified `content_snapshot_hash` covering only the captured bytes;
-the two have deliberately different scopes and are never equal.
+Each line reports the environment, alias, source, public revision, accepted
+data classes, and provider snapshot hash. The snapshot contains a declaration
+projection (alias, source, revision, data policy, authorization mode, and
+normalized selection) and a separately hashed acquisition projection of
+bounded observed facts. For frozen content, that acquisition projection also
+contains the algorithm-qualified content hash, so `acquisition_identity_hash`
+is exactly recomputable from the published `acquisition` object. The bare-hex
+`snapshot_hash` covers both declaration and acquisition identity. A
+frozen-content provider also publishes an algorithm-qualified
+`content_snapshot_hash` covering only the captured bytes. Raw model selectors,
+endpoints, commands, paths, credentials, OAuth authority, and identifiers
+derived from secret-bearing values are excluded. Audited stdio executable and
+launcher content digests are included so build replacement changes provider
+identity without exposing either path.
 
 Use `--check` in deployment pipelines to catch a missing credential, an
 unreachable endpoint, a renamed upstream tool, or a changed server build before

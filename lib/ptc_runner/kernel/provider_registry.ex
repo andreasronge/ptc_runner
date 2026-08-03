@@ -4,7 +4,7 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
 
   A manifest can select a bounded provider name and JSON configuration; it
   cannot register a module, function, callback, command, or code URL. Builders
-  receive the canonical manifest directory, requested workflow or mission
+  receive a path-free application identity, requested workflow or mission
   destination, building owner, and installed limits. They return either one
   legacy `PtcRunner.Kernel.Capability` or a normalized provider build with one
   or more capabilities, an optional safe snapshot, and an optional idempotent
@@ -34,6 +34,19 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
   host authority rather than reconstructing it in CLI-specific options.
   Builder exceptions are contained at their current lifecycle phase.
 
+  A staged acquisition context's `owner` is the private signal owner for that
+  provider's resource scope. Any process or port root started by an acquisition
+  must monitor that owner and synchronously call
+  `PtcRunner.Kernel.ResourceRegistrar.register_root/1` from the root's init
+  callback before its start operation returns. The registrar's private
+  controller forwards registration into the scope's authoritative cleanup
+  owner. Ports must be owned by a registered process. Registration after start
+  returns is unsupported. A root
+  retaining an unsettled OAuth release or persistence fence may call
+  `PtcRunner.Kernel.ResourceRegistrar.handoff_root/2` only after it has stopped
+  accepting work and the terminal operation has a bounded self-owner or
+  adopter.
+
   ## Adding a field to the prepared contract
 
   A prepared map is built in two places: `normalize_prepared/1` defaults and
@@ -52,21 +65,34 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
   """
 
   alias PtcRunner.Kernel.Capability
+  alias PtcRunner.Kernel.HostInstallationAuthority
   alias PtcRunner.Kernel.JSONValue
   alias PtcRunner.Kernel.Limits
+  alias PtcRunner.Kernel.ResourceRegistrar
+
+  @application_content_digest ~r/\A[0-9a-f]{64}\z/
+  @build_context_keys [
+    :application_content_digest,
+    :destination,
+    :owner,
+    :limits,
+    :installed_limits
+  ]
 
   @enforce_keys [:builders, :credential_resolver, :installed_limits]
-  defstruct [:builders, :credential_resolver, :installed_limits]
+  defstruct @enforce_keys ++ [authority_owner: nil]
 
   @type build_context :: %{
-          directory: binary(),
+          optional(:resource_registrar) => ResourceRegistrar.t(),
+          application_content_digest: binary(),
           destination: :workflow | :mission,
           owner: pid(),
           limits: PtcRunner.Kernel.Limits.t(),
           installed_limits: PtcRunner.Kernel.Limits.t()
         }
   @type context :: %{
-          directory: binary(),
+          optional(:resource_registrar) => ResourceRegistrar.t(),
+          application_content_digest: binary(),
           destination: :workflow | :mission,
           owner: pid(),
           limits: PtcRunner.Kernel.Limits.t(),
@@ -106,10 +132,13 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
           requires: [atom()],
           provides: [atom()],
           workflow_llm?: boolean(),
-          preflight: (-> {:ok, acquire()} | {:error, term()})
+          preflight: (-> {:ok, acquire()}
+                         | {:ok, acquire(), (-> :ok | {:error, term()})}
+                         | {:error, term()})
         }
   @type preflighted :: %{
           acquire: acquire(),
+          release: (-> :ok | {:error, term()}) | nil,
           data_class: :normal | :private_inspection,
           accepts_data: [:normal | :private_inspection],
           requires: [atom()],
@@ -122,37 +151,70 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
   @type registry_builder :: builder() | staged_builder()
   @type credential_resolver ::
           ([binary()] -> {:ok, credential_values()} | {:error, term()})
+  @opaque authority_owner :: struct()
   @type t :: %__MODULE__{
           builders: %{binary() => registry_builder()},
           credential_resolver: credential_resolver(),
-          installed_limits: Limits.t()
+          installed_limits: Limits.t(),
+          authority_owner: authority_owner() | nil
         }
 
   @spec new(map(), keyword()) :: {:ok, t()} | {:error, :invalid_provider_registry}
   @doc "Creates a registry from explicit builder functions keyed by provider name."
   def new(additional_builders \\ %{}, opts \\ [])
 
-  def new(additional_builders, opts) when is_map(additional_builders) and is_list(opts) do
-    resolver = Keyword.get(opts, :credential_resolver, &default_credential_resolver/1)
-    installed_limits = Keyword.get(opts, :installed_limits, Limits.installed_defaults())
+  def new(additional_builders, opts)
+      when is_map(additional_builders) and not is_struct(additional_builders) and is_list(opts) do
+    if Keyword.keyword?(opts) do
+      registry = %__MODULE__{
+        builders: additional_builders,
+        credential_resolver:
+          Keyword.get(opts, :credential_resolver, &default_credential_resolver/1),
+        installed_limits: Keyword.get(opts, :installed_limits, Limits.installed_defaults()),
+        authority_owner: Keyword.get(opts, :authority_owner)
+      }
 
-    if Enum.all?(additional_builders, fn {name, builder} ->
-         valid_name?(name) and valid_builder?(builder)
-       end) and is_function(resolver, 1) and
-         is_struct(installed_limits, Limits) and
-         Keyword.keys(opts) -- [:credential_resolver, :installed_limits] == [] do
-      {:ok,
-       %__MODULE__{
-         builders: additional_builders,
-         credential_resolver: resolver,
-         installed_limits: installed_limits
-       }}
+      keys = Keyword.keys(opts)
+
+      if valid?(registry) and
+           keys -- [:credential_resolver, :installed_limits, :authority_owner] == [] and
+           length(keys) == MapSet.size(MapSet.new(keys)) do
+        {:ok, registry}
+      else
+        {:error, :invalid_provider_registry}
+      end
     else
       {:error, :invalid_provider_registry}
     end
   end
 
   def new(_builders, _opts), do: {:error, :invalid_provider_registry}
+
+  @spec valid?(term()) :: boolean()
+  @doc "Checks the complete inert registry shape accepted by the constructor."
+  def valid?(
+        %__MODULE__{
+          builders: builders,
+          credential_resolver: resolver,
+          installed_limits: installed_limits,
+          authority_owner: authority_owner
+        } = registry
+      ) do
+    map_size(registry) == map_size(struct(__MODULE__)) and
+      is_map(builders) and not is_struct(builders) and
+      Enum.all?(builders, fn {name, builder} ->
+        valid_name?(name) and valid_builder?(builder)
+      end) and
+      is_function(resolver, 1) and Limits.valid?(installed_limits) and
+      (is_nil(authority_owner) or HostInstallationAuthority.valid?(authority_owner))
+  end
+
+  def valid?(_registry), do: false
+
+  @doc "Idempotently releases private host authority retained by this registry."
+  @spec close(t()) :: :ok
+  def close(%__MODULE__{authority_owner: owner}), do: HostInstallationAuthority.close(owner)
+  def close(_registry), do: :ok
 
   @spec staged((map(), context() -> {:ok, prepared()} | {:error, term()})) ::
           staged_builder()
@@ -174,20 +236,37 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
 
   Run assembly uses the individual phase functions so the barrier spans every
   selected provider. This convenience path remains useful for embedding and
-  focused provider tests.
+  focused provider tests. It rejects registrar-backed contexts because scoped
+  acquisition requires the run builder's complete multi-provider lifecycle.
   """
+  def build(%__MODULE__{}, _name, _config, %{resource_registrar: _registrar}),
+    do: {:error, :invalid_provider_context}
+
   def build(%__MODULE__{} = registry, name, config, context) do
     with {:ok, prepared} <- prepare(registry, name, config, context),
-         {:ok, preflighted} <- preflight(prepared),
-         {:ok, credentials} <-
-           resolve_credentials(registry, prepared.credential_names),
-         do: acquire(preflighted, credentials, %{})
+         {:ok, preflighted} <- preflight(prepared) do
+      try do
+        with {:ok, credentials} <-
+               resolve_credentials(registry, prepared.credential_names),
+             do: acquire(preflighted, credentials, %{})
+      after
+        release_preflight(preflighted)
+      end
+    end
   end
 
   @spec prepare(t(), binary(), map(), build_context()) ::
           {:ok, prepared()} | {:error, term()}
   @doc false
   def prepare(%__MODULE__{builders: builders}, name, config, context) do
+    with :ok <- validate_build_context(context) do
+      prepare_builder(builders, name, config, context)
+    end
+  end
+
+  def prepare(_registry, _name, _config, _context), do: {:error, :invalid_provider_context}
+
+  defp prepare_builder(builders, name, config, context) do
     case Map.fetch(builders, name) do
       {:ok, {:staged, prepare}} ->
         invoke(
@@ -216,6 +295,36 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
         {:error, :unknown_provider}
     end
   end
+
+  defp validate_build_context(context)
+       when is_map(context) and not is_struct(context) do
+    if valid_build_context_keys?(context) and
+         is_binary(context.application_content_digest) and
+         context.application_content_digest =~ @application_content_digest and
+         context.destination in [:workflow, :mission] and
+         is_pid(context.owner) and
+         valid_resource_registrar?(context) and
+         match?(%Limits{}, context.limits) and
+         match?(%Limits{}, context.installed_limits) do
+      :ok
+    else
+      {:error, :invalid_provider_context}
+    end
+  end
+
+  defp validate_build_context(_context), do: {:error, :invalid_provider_context}
+
+  defp valid_build_context_keys?(context) do
+    keys = Enum.sort(Map.keys(context))
+
+    keys == Enum.sort(@build_context_keys) or
+      keys == Enum.sort([:resource_registrar | @build_context_keys])
+  end
+
+  defp valid_resource_registrar?(%{resource_registrar: registrar, owner: owner}),
+    do: ResourceRegistrar.valid?(registrar) and ResourceRegistrar.owner(registrar) == owner
+
+  defp valid_resource_registrar?(_context), do: true
 
   @spec preflight(prepared()) :: {:ok, preflighted()} | {:error, term()}
   @doc false
@@ -257,7 +366,11 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
   def acquire(_preflighted, _credentials), do: {:error, :provider_dependency_unavailable}
 
   @doc false
-  def acquire(%{acquire: acquire, requires: requires, provides: provides}, credentials, services)
+  def acquire(
+        %{acquire: acquire, requires: requires, provides: provides} = preflighted,
+        credentials,
+        services
+      )
       when is_function(acquire, 2) and is_map(credentials) and is_map(services) do
     if Enum.sort(Map.keys(services)) == Enum.sort(requires) do
       acquire
@@ -266,17 +379,35 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
     else
       {:error, :provider_dependency_unavailable}
     end
+  after
+    release_preflight(preflighted)
   end
 
-  def acquire(%{acquire: acquire, requires: [], provides: provides}, credentials, %{})
+  def acquire(
+        %{acquire: acquire, requires: [], provides: provides} = preflighted,
+        credentials,
+        %{}
+      )
       when is_function(acquire, 1) and is_map(credentials) do
     acquire
     |> invoke_with(credentials, :provider_acquisition_failed)
     |> normalize_build(provides)
+  after
+    release_preflight(preflighted)
   end
 
   def acquire(_preflighted, _credentials, _services),
     do: {:error, :invalid_provider_preflight}
+
+  @doc false
+  @spec release_preflight(preflighted() | term()) :: :ok
+  def release_preflight(%{release: release}) when is_function(release, 0) do
+    _ignored = invoke(release, :provider_preflight_release_failed)
+    :ok
+  end
+
+  def release_preflight(%{release: nil}), do: :ok
+  def release_preflight(_preflighted), do: :ok
 
   defp normalize_prepared({:ok, %{credential_names: names, preflight: preflight} = prepared})
        when is_list(names) and is_function(preflight, 0) do
@@ -317,6 +448,7 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
     {:ok,
      %{
        acquire: acquire,
+       release: nil,
        data_class: data_class,
        accepts_data: accepts_data,
        requires: requires,
@@ -329,6 +461,45 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
     {:ok,
      %{
        acquire: acquire,
+       release: nil,
+       data_class: data_class,
+       accepts_data: accepts_data,
+       requires: requires,
+       provides: provides
+     }}
+  end
+
+  defp normalize_preflight(
+         {:ok, acquire, release},
+         data_class,
+         accepts_data,
+         requires,
+         provides
+       )
+       when is_function(acquire, 1) and requires == [] and is_function(release, 0) do
+    {:ok,
+     %{
+       acquire: acquire,
+       release: once_release(release),
+       data_class: data_class,
+       accepts_data: accepts_data,
+       requires: requires,
+       provides: provides
+     }}
+  end
+
+  defp normalize_preflight(
+         {:ok, acquire, release},
+         data_class,
+         accepts_data,
+         requires,
+         provides
+       )
+       when is_function(acquire, 2) and is_function(release, 0) do
+    {:ok,
+     %{
+       acquire: acquire,
+       release: once_release(release),
        data_class: data_class,
        accepts_data: accepts_data,
        requires: requires,
@@ -347,6 +518,18 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
 
   defp normalize_preflight(_result, _data_class, _accepts_data, _requires, _provides),
     do: {:error, :invalid_provider_preflight}
+
+  defp once_release(release) do
+    gate = :atomics.new(1, signed: false)
+    :ok = :atomics.put(gate, 1, 0)
+
+    fn ->
+      case :atomics.compare_exchange(gate, 1, 0, 1) do
+        :ok -> release.()
+        _already_released -> :ok
+      end
+    end
+  end
 
   defp normalize_credentials({:ok, credentials}, names) when is_map(credentials) do
     if Enum.sort(Map.keys(credentials)) == names and

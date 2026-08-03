@@ -9,11 +9,11 @@ defmodule PtcRunner.Kernel.HostConfig do
   sampling parameters. A manifest may later select an installed alias and
   narrow its authority; it cannot introduce or replace any field decoded here.
 
-  An optional `limits` block replaces the compiled installed ceilings, so an
+  An optional `limits` block replaces cataloged installed ceilings, so an
   operator can permit work measured in hours rather than in one bounded run.
-  Omitted names keep their compiled installed default, and a manifest still
-  requests only values at or below whatever is installed here — raising a
-  ceiling permits a longer run without silently producing one.
+  Omitted names keep their installed default. A manifest requests only
+  manifest-narrowable values at or below whatever is installed here;
+  installed-only operational limits remain host-owned.
 
   Loading is bounded, path-confined, duplicate-key rejecting, and side-effect
   free. In particular, credential declarations are validated but environment
@@ -26,6 +26,9 @@ defmodule PtcRunner.Kernel.HostConfig do
   the adapter per request rather than ambient provider-specific environment
   lookup. The native snapshot sources fix host-relative directories and
   expose only PtcRunner's canonical or private inspection query vocabularies.
+  Every installation requires a public, non-secret `installation_revision`
+  matching `\\A[a-z][a-z0-9._-]{0,127}\\z`; command decoding reports its
+  absence before generic schema failure, including for unselected aliases.
 
   `schema/0` is the canonical structural description shipped for editor and
   human feedback. Runtime decoding remains authoritative for semantic checks
@@ -36,16 +39,13 @@ defmodule PtcRunner.Kernel.HostConfig do
   """
 
   alias PtcRunner.Kernel.ConfinedFile
+  alias PtcRunner.Kernel.LimitCatalog
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.MCPOAuth.Authority
   alias PtcRunner.Kernel.StrictJSON
 
   @max_config_bytes 1_000_000
   @max_credentials 128
-  # Thirty days in milliseconds. High enough for a run measured in days and
-  # low enough that a mistyped value fails loading instead of scheduling a timer
-  # nobody will outlive.
-  @max_limit_value 2_592_000_000
   @max_installations 128
   @max_tools 128
   @max_string_bytes 131_072
@@ -64,6 +64,7 @@ defmodule PtcRunner.Kernel.HostConfig do
   @max_llm_tokens 1_000_000
   @max_llm_seed 2_147_483_647
   @name ~r/\A[a-z][a-z0-9._-]{0,127}\z/
+  @installation_revision @name
   @environment_name ~r/\A[A-Za-z_][A-Za-z0-9_]*\z/
   @header_name ~r/\A[!#$%&'*+\-.^_`|~0-9A-Za-z]+\z/
   @reserved_environment ~w(HOME LOGNAME PATH SHELL TERM USER)
@@ -121,7 +122,7 @@ defmodule PtcRunner.Kernel.HostConfig do
             transport: transport(),
             tools: %{binary() => tool()},
             snapshot_identity: %{tool: binary(), field: binary()} | nil,
-            installation_revision: binary() | nil,
+            installation_revision: binary(),
             ceilings: %{
               timeout_ms: pos_integer(),
               max_catalog_tools: pos_integer(),
@@ -140,7 +141,7 @@ defmodule PtcRunner.Kernel.HostConfig do
                 optional(:seed) => non_neg_integer(),
                 optional(:max_tokens) => pos_integer()
               },
-              installation_revision: binary() | nil,
+              installation_revision: binary(),
               ceilings: %{
                 max_request_bytes: pos_integer(),
                 max_response_bytes: pos_integer()
@@ -151,7 +152,7 @@ defmodule PtcRunner.Kernel.HostConfig do
           | %{
               source: :llm_replay,
               fixtures: binary(),
-              installation_revision: binary() | nil,
+              installation_revision: binary(),
               ceilings: %{max_entries: pos_integer(), max_result_bytes: pos_integer()},
               data_class: :normal | :private_inspection,
               accepts_data: [:normal | :private_inspection]
@@ -159,6 +160,7 @@ defmodule PtcRunner.Kernel.HostConfig do
           | %{
               source: :ptc_trace_snapshot,
               directory: binary(),
+              installation_revision: binary(),
               ceilings: %{
                 max_source_bytes: pos_integer(),
                 max_result_bytes: pos_integer()
@@ -167,6 +169,7 @@ defmodule PtcRunner.Kernel.HostConfig do
           | %{
               source: :ptc_inspection_snapshot,
               directory: binary(),
+              installation_revision: binary(),
               ceilings: %{
                 max_files: pos_integer(),
                 max_source_bytes: pos_integer(),
@@ -214,6 +217,67 @@ defmodule PtcRunner.Kernel.HostConfig do
   def load(_path), do: {:error, :invalid_host_config}
 
   @doc false
+  @spec load_command(binary()) ::
+          {:ok, t()}
+          | {:error,
+             :host_unavailable
+             | :host_invalid
+             | {:installation_revision_missing, binary()}
+             | {:host_schema_invalid, [PtcRunner.Kernel.CommandPath.segment()]}
+             | {:installed_limit_invalid, [PtcRunner.Kernel.CommandPath.segment()]}}
+  def load_command(path) when is_binary(path) do
+    with {:ok, canonical} <- ConfinedFile.resolve_absolute(Path.expand(path)),
+         directory = Path.dirname(canonical),
+         {:ok, source} <-
+           ConfinedFile.read(directory, Path.basename(canonical), @max_config_bytes),
+         {:ok, decoded} <- StrictJSON.decode_with_locations(source),
+         {:ok, normalized} <- decode_command(decoded, directory) do
+      {:ok,
+       struct!(__MODULE__,
+         path: canonical,
+         directory: directory,
+         runtime: normalized.runtime,
+         limits: normalized.limits,
+         credentials: normalized.credentials,
+         install: normalized.install
+       )}
+    else
+      {:error, {:duplicate_json_key, path}} ->
+        {:error, {:host_schema_invalid, safe_host_path(path)}}
+
+      {:error, reason}
+      when reason in [
+             :invalid_json,
+             :invalid_utf8,
+             :json_depth_exceeded,
+             :json_node_limit_exceeded,
+             :too_large
+           ] ->
+        {:error, :host_invalid}
+
+      {:error, reason}
+      when reason in [
+             :host_unavailable,
+             :host_invalid
+           ] ->
+        {:error, reason}
+
+      {:error, {code, _detail}} = error
+      when code in [
+             :installation_revision_missing,
+             :host_schema_invalid,
+             :installed_limit_invalid
+           ] ->
+        error
+
+      {:error, _reason} ->
+        {:error, :host_unavailable}
+    end
+  end
+
+  def load_command(_path), do: {:error, :host_unavailable}
+
+  @doc false
   @spec decode(term(), binary()) ::
           {:ok,
            %{
@@ -224,7 +288,8 @@ defmodule PtcRunner.Kernel.HostConfig do
            }}
           | {:error, :invalid_host_config}
   def decode(value, directory) when is_map(value) and is_binary(directory) do
-    with :ok <-
+    with true <- schema_valid?(value),
+         :ok <-
            exact_keys(value, ~w($schema runtime limits credentials install), ~w(install)),
          :ok <- optional_schema(value["$schema"]),
          {:ok, runtime} <- runtime(Map.get(value, "runtime", %{})),
@@ -239,6 +304,212 @@ defmodule PtcRunner.Kernel.HostConfig do
 
   def decode(_value, _directory), do: {:error, :invalid_host_config}
 
+  @doc false
+  def decode_command(value, directory) when is_map(value) and is_binary(directory) do
+    with :ok <- require_installation_revisions(value),
+         :ok <- validate_command_schema(value),
+         :ok <-
+           schema_result(
+             exact_keys(value, ~w($schema runtime limits credentials install), ~w(install)),
+             []
+           ),
+         :ok <-
+           command_schema_result(
+             optional_schema(value["$schema"]),
+             [{:property, "$schema"}],
+             value
+           ),
+         {:ok, runtime} <-
+           command_schema_result(
+             runtime(Map.get(value, "runtime", %{})),
+             [{:property, "runtime"}],
+             value
+           ),
+         {:ok, limits} <- command_limits(Map.get(value, "limits", %{})),
+         {:ok, credentials} <-
+           command_schema_result(
+             credentials(Map.get(value, "credentials", %{})),
+             [{:property, "credentials"}],
+             value
+           ),
+         {:ok, install} <-
+           command_schema_result(
+             installations(value["install"], credentials),
+             [{:property, "install"}],
+             value
+           ) do
+      {:ok, %{runtime: runtime, limits: limits, credentials: credentials, install: install}}
+    end
+  end
+
+  def decode_command(_value, _directory), do: {:error, {:host_schema_invalid, []}}
+
+  defp require_installation_revisions(%{"install" => installations})
+       when is_map(installations) do
+    installations
+    |> Map.keys()
+    |> Enum.sort()
+    |> Enum.find(fn name ->
+      case Map.get(installations, name) do
+        installation when is_map(installation) ->
+          valid_name?(name) and not Map.has_key?(installation, "installation_revision")
+
+        _invalid ->
+          false
+      end
+    end)
+    |> case do
+      nil -> :ok
+      name -> {:error, {:installation_revision_missing, name}}
+    end
+  end
+
+  defp require_installation_revisions(_value), do: :ok
+
+  defp schema_result(:ok, _segments), do: :ok
+
+  defp schema_result({:error, _reason}, segments),
+    do: {:error, {:host_schema_invalid, segments}}
+
+  defp command_schema_result(:ok, _segments, _value), do: :ok
+  defp command_schema_result({:ok, decoded}, _segments, _value), do: {:ok, decoded}
+
+  defp command_schema_result({:error, _reason}, segments, value) do
+    if schema_valid?(value),
+      do: {:error, :host_invalid},
+      else: {:error, {:host_schema_invalid, segments}}
+  end
+
+  defp schema_valid?(value) do
+    with {:ok, root} <- JSV.build(schema(), atoms: false, warnings: :silent),
+         {:ok, _validated} <- JSV.validate(value, root, cast: false) do
+      true
+    else
+      _invalid -> false
+    end
+  rescue
+    _exception -> false
+  end
+
+  defp validate_command_schema(value) do
+    case JSV.build(schema(), atoms: false, warnings: :silent) do
+      {:ok, root} ->
+        case JSV.validate(command_schema_value(value), root, cast: false) do
+          {:ok, _validated} ->
+            :ok
+
+          {:error, %JSV.ValidationError{errors: errors}} ->
+            {:error, {:host_schema_invalid, command_validation_path(errors)}}
+        end
+
+      {:error, _reason} ->
+        {:error, {:host_schema_invalid, []}}
+    end
+  rescue
+    _exception -> {:error, {:host_schema_invalid, []}}
+  end
+
+  # Installed-limit values have their own closed diagnostic and exact path
+  # below. Substitute valid values only for this structural pass so type/range
+  # failures retain `installed_limit_invalid`; non-objects and unknown names
+  # still fail the generated schema before any normalization.
+  defp command_schema_value(%{"limits" => limits} = value) when is_map(limits) do
+    if Map.keys(limits) -- Limits.names() == [] do
+      installed = Map.from_struct(Limits.installed_defaults())
+
+      schema_limits =
+        Map.new(limits, fn {name, _value} ->
+          {:ok, field} = Limits.name(name)
+          {name, Map.fetch!(installed, field)}
+        end)
+
+      Map.put(value, "limits", schema_limits)
+    else
+      value
+    end
+  end
+
+  defp command_schema_value(value), do: value
+
+  defp command_validation_path(errors) do
+    paths =
+      Enum.map(errors, fn
+        %{data_path: path} when is_list(path) -> path |> Enum.reverse() |> safe_host_path()
+        _error -> []
+      end)
+
+    case Enum.sort_by(paths, fn path -> {-length(path), path} end) do
+      [path | _rest] -> path
+      [] -> []
+    end
+  end
+
+  defp safe_host_path(path), do: safe_schema_path(path, schema(), [])
+
+  defp safe_schema_path([], _schema, retained), do: Enum.reverse(retained)
+
+  defp safe_schema_path([segment | rest], schema, retained) do
+    case next_schema(schema, segment) do
+      {:ok, child} when is_binary(segment) ->
+        safe_schema_path(rest, child, [{:property, segment} | retained])
+
+      {:ok, child} when is_integer(segment) and segment >= 0 ->
+        safe_schema_path(rest, child, [{:index, segment} | retained])
+
+      :error ->
+        Enum.reverse(retained)
+    end
+  end
+
+  defp next_schema(%{"properties" => properties}, segment)
+       when is_map(properties) and is_binary(segment),
+       do: Map.fetch(properties, segment)
+
+  defp next_schema(%{"items" => items}, segment) when is_integer(segment) and segment >= 0,
+    do: {:ok, items}
+
+  defp next_schema(%{"oneOf" => branches}, segment) when is_list(branches) do
+    Enum.find_value(branches, :error, fn branch ->
+      case next_schema(branch, segment) do
+        {:ok, _child} = found -> found
+        :error -> false
+      end
+    end)
+  end
+
+  defp next_schema(_schema, _segment), do: :error
+
+  defp command_limits(value) when is_map(value) do
+    if Map.keys(value) -- Limits.names() == [] do
+      case limits(value) do
+        {:ok, limits} -> {:ok, limits}
+        {:error, _reason} -> {:error, {:installed_limit_invalid, invalid_limit_path(value)}}
+      end
+    else
+      {:error, {:host_schema_invalid, [{:property, "limits"}]}}
+    end
+  end
+
+  defp command_limits(_value),
+    do: {:error, {:host_schema_invalid, [{:property, "limits"}]}}
+
+  defp invalid_limit_path(value) when is_map(value) do
+    invalid_name =
+      value
+      |> Map.keys()
+      |> Enum.sort()
+      |> Enum.find(fn name ->
+        case LimitCatalog.fetch(name) do
+          {:ok, row} -> not LimitCatalog.valid_value?(row, value[name])
+          :error -> false
+        end
+      end)
+
+    if invalid_name,
+      do: [{:property, "limits"}, {:property, invalid_name}],
+      else: [{:property, "limits"}]
+  end
+
   defp optional_schema(nil), do: :ok
 
   defp optional_schema(value) do
@@ -252,11 +523,9 @@ defmodule PtcRunner.Kernel.HostConfig do
   # manifest asked for. An omitted block keeps the previous compiled defaults,
   # and a manifest may still only narrow whatever ends up installed.
   defp limits(value) when is_map(value) do
-    installed = Map.from_struct(Limits.installed_defaults())
-
     with :ok <- exact_keys(value, Limits.names(), []),
          {:ok, overrides} <- limit_overrides(Map.to_list(value), %{}),
-         {:ok, limits} <- Limits.new(Map.merge(installed, overrides)) do
+         {:ok, limits} <- Limits.installed(overrides) do
       {:ok, limits}
     else
       _reason -> {:error, :invalid_limits}
@@ -267,15 +536,17 @@ defmodule PtcRunner.Kernel.HostConfig do
 
   defp limit_overrides([], overrides), do: {:ok, overrides}
 
-  defp limit_overrides([{key, number} | rest], overrides)
-       when is_integer(number) and number > 0 and number <= @max_limit_value do
-    case Limits.name(key) do
-      {:ok, name} -> limit_overrides(rest, Map.put(overrides, name, number))
-      :error -> {:error, :invalid_limits}
+  defp limit_overrides([{key, number} | rest], overrides) do
+    case LimitCatalog.fetch(key) do
+      {:ok, row} ->
+        if LimitCatalog.valid_value?(row, number),
+          do: limit_overrides(rest, Map.put(overrides, row.field, number)),
+          else: {:error, :invalid_limits}
+
+      :error ->
+        {:error, :invalid_limits}
     end
   end
-
-  defp limit_overrides(_values, _overrides), do: {:error, :invalid_limits}
 
   defp runtime(value) when is_map(value) do
     with :ok <- exact_keys(value, ~w(stdio_launcher), []),
@@ -363,13 +634,18 @@ defmodule PtcRunner.Kernel.HostConfig do
     allowed =
       ~w(source transport tools snapshot_identity installation_revision ceilings data_class accepts_data)
 
-    with :ok <- exact_keys(value, allowed, ~w(source transport tools)),
+    with :ok <-
+           exact_keys(
+             value,
+             allowed,
+             ~w(source transport tools installation_revision)
+           ),
          {:ok, transport} <- transport(value["transport"], credentials),
          {:ok, tools} <- tools(value["tools"]),
          {:ok, snapshot_identity} <-
            snapshot_identity(Map.get(value, "snapshot_identity"), tools),
          {:ok, installation_revision} <-
-           optional_revision(Map.get(value, "installation_revision")),
+           revision(value["installation_revision"]),
          {:ok, ceilings} <- ceilings(Map.get(value, "ceilings", %{})),
          {:ok, data_class} <- data_class(Map.get(value, "data_class", "normal")),
          {:ok, accepts_data} <-
@@ -394,7 +670,12 @@ defmodule PtcRunner.Kernel.HostConfig do
     allowed =
       ~w(source model credential cache params installation_revision ceilings data_class accepts_data)
 
-    with :ok <- exact_keys(value, allowed, ~w(source model credential)),
+    with :ok <-
+           exact_keys(
+             value,
+             allowed,
+             ~w(source model credential installation_revision)
+           ),
          model when is_binary(model) <- value["model"],
          true <- valid_string?(model, 256),
          credential when is_binary(credential) <- value["credential"],
@@ -402,7 +683,7 @@ defmodule PtcRunner.Kernel.HostConfig do
          cache when is_boolean(cache) <- Map.get(value, "cache", false),
          {:ok, params} <- llm_params(Map.get(value, "params", %{})),
          {:ok, installation_revision} <-
-           optional_revision(Map.get(value, "installation_revision")),
+           revision(value["installation_revision"]),
          {:ok, ceilings} <- llm_ceilings(Map.get(value, "ceilings", %{})),
          {:ok, data_class} <- data_class(Map.get(value, "data_class", "normal")),
          {:ok, accepts_data} <-
@@ -451,14 +732,21 @@ defmodule PtcRunner.Kernel.HostConfig do
   end
 
   defp trace_snapshot_installation(value) do
-    with :ok <- exact_keys(value, ~w(source directory ceilings), ~w(source directory)),
+    with :ok <-
+           exact_keys(
+             value,
+             ~w(source directory installation_revision ceilings),
+             ~w(source directory installation_revision)
+           ),
          directory when is_binary(directory) <- value["directory"],
          true <- valid_path_string?(directory),
+         {:ok, installation_revision} <- revision(value["installation_revision"]),
          {:ok, ceilings} <- trace_snapshot_ceilings(Map.get(value, "ceilings", %{})) do
       {:ok,
        %{
          source: :ptc_trace_snapshot,
          directory: directory,
+         installation_revision: installation_revision,
          ceilings: ceilings
        }}
     else
@@ -491,11 +779,12 @@ defmodule PtcRunner.Kernel.HostConfig do
   defp llm_replay_installation(value) do
     allowed = ~w(source fixtures installation_revision ceilings data_class accepts_data)
 
-    with :ok <- exact_keys(value, allowed, ~w(source fixtures)),
+    with :ok <-
+           exact_keys(value, allowed, ~w(source fixtures installation_revision)),
          fixtures when is_binary(fixtures) <- value["fixtures"],
          true <- valid_path_string?(fixtures),
          {:ok, installation_revision} <-
-           optional_revision(Map.get(value, "installation_revision")),
+           revision(value["installation_revision"]),
          {:ok, ceilings} <- llm_replay_ceilings(Map.get(value, "ceilings", %{})),
          {:ok, data_class} <- data_class(Map.get(value, "data_class", "normal")),
          {:ok, accepts_data} <- accepts_data(Map.get(value, "accepts_data", ["normal"])) do
@@ -530,14 +819,21 @@ defmodule PtcRunner.Kernel.HostConfig do
   defp llm_replay_ceilings(_value), do: {:error, :invalid_ceilings}
 
   defp inspection_snapshot_installation(value) do
-    with :ok <- exact_keys(value, ~w(source directory ceilings), ~w(source directory)),
+    with :ok <-
+           exact_keys(
+             value,
+             ~w(source directory installation_revision ceilings),
+             ~w(source directory installation_revision)
+           ),
          directory when is_binary(directory) <- value["directory"],
          true <- valid_path_string?(directory),
+         {:ok, installation_revision} <- revision(value["installation_revision"]),
          {:ok, ceilings} <- inspection_snapshot_ceilings(Map.get(value, "ceilings", %{})) do
       {:ok,
        %{
          source: :ptc_inspection_snapshot,
          directory: directory,
+         installation_revision: installation_revision,
          ceilings: ceilings
        }}
     else
@@ -759,10 +1055,8 @@ defmodule PtcRunner.Kernel.HostConfig do
   defp tool_effect("read"), do: :read
   defp tool_effect("write"), do: :write
 
-  defp optional_revision(nil), do: {:ok, nil}
-
-  defp optional_revision(value) do
-    if valid_string?(value, 256),
+  defp revision(value) do
+    if is_binary(value) and value =~ @installation_revision,
       do: {:ok, value},
       else: {:error, :invalid_installation_revision}
   end
@@ -913,22 +1207,28 @@ defmodule PtcRunner.Kernel.HostConfig do
   end
 
   defp limits_schema do
+    catalog_properties = LimitCatalog.schema_properties(:host)
+
     properties =
-      Map.new(Limits.names(), fn name ->
-        {name,
-         %{
-           "type" => "integer",
-           "minimum" => 1,
-           "maximum" => @max_limit_value,
-           "description" => "Installed ceiling for #{name}; a manifest may only request less."
-         }}
+      Map.new(LimitCatalog.rows(), fn row ->
+        description =
+          case row.scope do
+            :manifest_narrowable ->
+              "Installed ceiling for #{row.name}; a manifest may only request less."
+
+            :installed_only ->
+              "Installed-only operational limit for #{row.name}; applications cannot declare it."
+          end
+
+        {row.name,
+         catalog_properties |> Map.fetch!(row.name) |> Map.put("description", description)}
       end)
 
     properties
     |> closed_object()
     |> Map.put(
       "description",
-      "Optional operator-owned installed ceilings. Omitted limits keep the compiled host defaults."
+      "Optional operator-owned installed ceilings. Omitted limits keep their cataloged installed defaults."
     )
   end
 
@@ -938,6 +1238,7 @@ defmodule PtcRunner.Kernel.HostConfig do
         "type" => "string",
         "minLength" => 1,
         "maxLength" => 4_096,
+        "pattern" => "^/",
         "description" => "Optional absolute trusted launcher override."
       }
     })
@@ -991,12 +1292,12 @@ defmodule PtcRunner.Kernel.HostConfig do
             %{"tool" => name_schema(), "field" => name_schema()},
             ["tool", "field"]
           ),
-        "installation_revision" => bounded_string(256),
+        "installation_revision" => installation_revision_schema(),
         "ceilings" => ceilings_schema(),
         "data_class" => data_class_schema(),
         "accepts_data" => accepts_data_schema()
       },
-      ["source", "transport", "tools"]
+      ["source", "transport", "tools", "installation_revision"]
     )
   end
 
@@ -1025,12 +1326,12 @@ defmodule PtcRunner.Kernel.HostConfig do
               "maximum" => @max_llm_tokens
             }
           }),
-        "installation_revision" => bounded_string(256),
+        "installation_revision" => installation_revision_schema(),
         "ceilings" => llm_ceilings_schema(),
         "data_class" => data_class_schema(),
         "accepts_data" => accepts_data_schema()
       },
-      ["source", "model", "credential"]
+      ["source", "model", "credential", "installation_revision"]
     )
   end
 
@@ -1039,6 +1340,7 @@ defmodule PtcRunner.Kernel.HostConfig do
       %{
         "source" => %{"const" => "ptc_trace_snapshot"},
         "directory" => path_schema(),
+        "installation_revision" => installation_revision_schema(),
         "ceilings" =>
           closed_object(%{
             "max_source_bytes" => %{
@@ -1055,7 +1357,7 @@ defmodule PtcRunner.Kernel.HostConfig do
             }
           })
       },
-      ["source", "directory"]
+      ["source", "directory", "installation_revision"]
     )
   end
 
@@ -1064,7 +1366,7 @@ defmodule PtcRunner.Kernel.HostConfig do
       %{
         "source" => %{"const" => "llm_replay"},
         "fixtures" => path_schema(),
-        "installation_revision" => bounded_string(256),
+        "installation_revision" => installation_revision_schema(),
         "ceilings" =>
           closed_object(%{
             "max_entries" => %{
@@ -1083,7 +1385,7 @@ defmodule PtcRunner.Kernel.HostConfig do
         "data_class" => data_class_schema(),
         "accepts_data" => accepts_data_schema()
       },
-      ["source", "fixtures"]
+      ["source", "fixtures", "installation_revision"]
     )
   end
 
@@ -1092,6 +1394,7 @@ defmodule PtcRunner.Kernel.HostConfig do
       %{
         "source" => %{"const" => "ptc_inspection_snapshot"},
         "directory" => path_schema(),
+        "installation_revision" => installation_revision_schema(),
         "ceilings" =>
           closed_object(%{
             "max_files" => %{
@@ -1114,7 +1417,7 @@ defmodule PtcRunner.Kernel.HostConfig do
             }
           })
       },
-      ["source", "directory"]
+      ["source", "directory", "installation_revision"]
     )
   end
 
@@ -1398,6 +1701,8 @@ defmodule PtcRunner.Kernel.HostConfig do
 
   defp name_schema,
     do: %{"type" => "string", "pattern" => "^[a-z][a-z0-9._-]{0,127}$"}
+
+  defp installation_revision_schema, do: name_schema()
 
   defp environment_name_schema,
     do: %{"type" => "string", "pattern" => "^[A-Za-z_][A-Za-z0-9_]*$"}

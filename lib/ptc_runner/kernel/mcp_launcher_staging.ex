@@ -3,6 +3,8 @@ defmodule PtcRunner.Kernel.MCPLauncherStaging do
 
   use GenServer
 
+  alias PtcRunner.Kernel.ResourceRegistrar
+
   @enforce_keys [:pid, :path]
   defstruct [:pid, :path]
 
@@ -10,8 +12,11 @@ defmodule PtcRunner.Kernel.MCPLauncherStaging do
 
   @spec start(pid(), pos_integer()) ::
           {:ok, t()} | {:error, :mcp_stdio_launcher_unavailable}
-  def start(owner, lease_ms) when is_pid(owner) and is_integer(lease_ms) and lease_ms > 0 do
-    case GenServer.start(__MODULE__, {owner, lease_ms}) do
+  def start(owner, lease_ms, registrar \\ nil)
+
+  def start(owner, lease_ms, registrar)
+      when is_pid(owner) and is_integer(lease_ms) and lease_ms > 0 do
+    case GenServer.start(__MODULE__, {owner, lease_ms, registrar}) do
       {:ok, pid} ->
         case GenServer.call(pid, :path) do
           {:ok, path} -> {:ok, %__MODULE__{pid: pid, path: path}}
@@ -34,22 +39,23 @@ defmodule PtcRunner.Kernel.MCPLauncherStaging do
   end
 
   @impl GenServer
-  def init({owner, lease_ms}) do
+  def init({owner, lease_ms, registrar}) do
     timer = Process.send_after(self(), :lease_expired, lease_ms)
+    owner_ref = Process.monitor(owner)
 
-    case create_directory(8) do
-      {:ok, directory} ->
-        {:ok,
-         %{
-           owner_ref: Process.monitor(owner),
-           timer: timer,
-           directory: directory,
-           path: Path.join(directory, "launcher")
-         }}
-
-      {:error, _reason} = error ->
+    with :ok <- ResourceRegistrar.register_root(registrar),
+         {:ok, directory} <- create_directory(8) do
+      {:ok,
+       %{
+         owner_ref: owner_ref,
+         timer: timer,
+         directory: directory,
+         path: Path.join(directory, "launcher")
+       }}
+    else
+      {:error, reason} ->
         Process.cancel_timer(timer)
-        {:stop, elem(error, 1)}
+        {:stop, reason}
     end
   end
 

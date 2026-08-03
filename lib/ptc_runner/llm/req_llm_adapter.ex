@@ -262,6 +262,7 @@ if Code.ensure_loaded?(ReqLLM) do
         |> Keyword.take([
           :api_key,
           :max_tokens,
+          :max_retries,
           :provider_options,
           :seed,
           :temperature
@@ -315,6 +316,7 @@ if Code.ensure_loaded?(ReqLLM) do
         :api_key,
         :cache,
         :max_tokens,
+        :max_retries,
         :provider_options,
         :receive_timeout,
         :req_http_options,
@@ -328,6 +330,7 @@ if Code.ensure_loaded?(ReqLLM) do
     defp call_ollama(model, messages, opts) do
       base_url = Keyword.get(opts, :ollama_base_url, @ollama_base_url)
       timeout = Keyword.get(opts, :receive_timeout, @default_timeout)
+      http_opts = Keyword.get(opts, :req_http_options, [])
 
       prompt = format_messages_as_prompt(messages)
 
@@ -339,10 +342,13 @@ if Code.ensure_loaded?(ReqLLM) do
         |> Enum.into(%{})
         |> maybe_put_ollama_max_tokens(opts)
 
-      case Req.post("#{base_url}/api/generate",
-             json: %{model: model, prompt: prompt, stream: false, options: options},
-             receive_timeout: timeout
-           ) do
+      request_opts =
+        [
+          json: %{model: model, prompt: prompt, stream: false, options: options},
+          receive_timeout: timeout
+        ] ++ http_opts
+
+      case Req.post("#{base_url}/api/generate", request_opts) do
         {:ok, %{status: 200, body: %{"response" => text} = body}} ->
           tokens = extract_ollama_tokens(body) |> add_cache_fields()
           {:ok, %{content: text, tokens: tokens}}
@@ -360,6 +366,7 @@ if Code.ensure_loaded?(ReqLLM) do
 
     defp call_openai_compat(base_url, model, messages, opts) do
       timeout = Keyword.get(opts, :receive_timeout, @default_timeout)
+      http_opts = Keyword.get(opts, :req_http_options, [])
       generation_opts = Keyword.take(opts, [:max_tokens, :seed, :temperature])
 
       formatted_messages =
@@ -367,11 +374,14 @@ if Code.ensure_loaded?(ReqLLM) do
           %{"role" => to_string(msg.role), "content" => msg.content}
         end)
 
-      case Req.post("#{base_url}/chat/completions",
-             json:
-               Map.merge(%{model: model, messages: formatted_messages}, Map.new(generation_opts)),
-             receive_timeout: timeout
-           ) do
+      request_opts =
+        [
+          json:
+            Map.merge(%{model: model, messages: formatted_messages}, Map.new(generation_opts)),
+          receive_timeout: timeout
+        ] ++ http_opts
+
+      case Req.post("#{base_url}/chat/completions", request_opts) do
         {:ok, %{status: 200, body: body}} ->
           text = get_in(body, ["choices", Access.at(0), "message", "content"]) || ""
           usage = body["usage"] || %{}
@@ -403,6 +413,7 @@ if Code.ensure_loaded?(ReqLLM) do
         Keyword.take(opts, [
           :api_key,
           :max_tokens,
+          :max_retries,
           :provider_options,
           :seed,
           :temperature,
@@ -440,6 +451,7 @@ if Code.ensure_loaded?(ReqLLM) do
         Keyword.take(opts, [
           :api_key,
           :max_tokens,
+          :max_retries,
           :provider_options,
           :seed,
           :temperature,
@@ -476,6 +488,7 @@ if Code.ensure_loaded?(ReqLLM) do
         Keyword.take(opts, [
           :api_key,
           :max_tokens,
+          :max_retries,
           :provider_options,
           :seed,
           :temperature,

@@ -16,7 +16,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
   | `loop_limit` | 1,000 | 10,000 | Max loop/recur jumps |
   | `max_print_length` | 2,000 | — | Max chars per `println` call |
   | `max_tool_call_result_bytes` | 16,384 | — | Per-entry cap on the `:result` retained in the in-eval tool ledger |
-  | `pmap_max_concurrency` | `schedulers * 2` | — | Max concurrent pmap/pcalls tasks |
+  | `pmap_max_concurrency` | build-time `schedulers * 2` | — | Max concurrent pmap/pcalls tasks |
 
   ## Tool-ledger retention
 
@@ -212,7 +212,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
   - `:pmap_timeout` - Shared absolute deadline in ms for each pmap/pcalls
     operation, including nested parallel calls (default: 5000). Increase for
     LLM-backed tools.
-  - `:pmap_max_concurrency` - Max concurrent tasks in pmap/pcalls (default: `System.schedulers_online() * 2`)
+  - `:pmap_max_concurrency` - Max concurrent tasks in pmap/pcalls (default: the build-time `System.schedulers_online() * 2`, frozen into the semantic revision)
   - `:max_heap` - Sandbox per-process heap cap in words (default: nil).
   - `:worker_max_heap` - FIXED `max_heap_size` (in words) for every
     pmap/pcalls worker, top-level and nested (default: the `:max_heap`
@@ -273,6 +273,10 @@ defmodule PtcRunner.Lisp.Eval.Context do
       prelude: prelude_artifact(Keyword.get(opts, :prelude))
     }
   end
+
+  @doc false
+  @spec default_pmap_max_concurrency() :: pos_integer()
+  def default_pmap_max_concurrency, do: @default_pmap_max_concurrency
 
   # Build the public export table (ref => {callable, ns_env}) from the attached
   # prelude. Each export's callable lives in the captured `private_env` under

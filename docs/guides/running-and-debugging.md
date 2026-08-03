@@ -29,6 +29,11 @@ and discover those providers, print a safe resolved view, and close everything
 without invoking the workflow or calling a model — see
 [Host configuration](host-configuration.md#verify-an-installation).
 
+A fresh Mix invocation safely configures and starts a selected optional
+provider application only after provider activity begins. A later `ptc.run`
+invocation in the same VM reuses an already-running application as host-owned,
+so task chaining and `iex -S mix` do not require restarting the VM.
+
 ## Run a manifest
 
 ```console
@@ -129,7 +134,12 @@ exactly four fields:
 
 Both hashes use that `sha256:`-prefixed form. `path` resolves against the
 descriptor's own canonical directory and may not escape it. The descriptor is
-at most 64 KiB and the candidate source at most 1 MiB.
+at most 64 KiB and the candidate source at most 1 MiB. Standalone command
+diagnostics authorize descriptor paths against this exact four-field schema:
+duplicate or unknown fields report the safe parent pointer, while an invalid
+declared field can report its public field pointer.
+Crossing either byte ceiling, or the descriptor JSON depth/node ceiling, is
+reported as a document-limit failure with fixed component-override provenance.
 
 Verification is two-sided and happens before the source reaches the compiler.
 `source_hash` proves you are compiling the bytes you believe you extracted;
@@ -166,9 +176,82 @@ workflow decides whether to retry, correct, degrade, or fail. Parser, compiler,
 timeout, heap, source, result, quota, provider, and event failures retain
 bounded classifications at the Kernel boundary.
 
-Current Mix failures are intended for people working from the repository and
-may contain inspected internal runtime terms. Stable JSON command errors and
-exit codes are release work for the shared standalone `ptc` frontend.
+Current Mix failures are intended for people working from the repository.
+Failures returned by the shared preparation and runtime path render only the
+closed diagnostic catalog or a bounded sequence of code atoms; they never
+inspect a rejected runtime term. Stable JSON command errors and exit codes are
+release work for the shared standalone `ptc` frontend.
+
+### Stable standalone process contract
+
+The planned standalone `ptc` command treats stdout as its only machine
+channel. On every ordinary or caught path it writes exactly one V1 JSON command
+envelope followed by one newline:
+
+- success exits `0`;
+- a classified failure exits with the primary diagnostic's exact
+  `PtcRunner.Kernel.DiagnosticCatalog` status, one of `2` through `7`; the
+  catalog is authoritative because codes within one phase may intentionally
+  have different statuses; and
+- a caught unexpected failure writes the closed `internal/internal_error`
+  envelope and exits `70`.
+
+The envelope schema is `priv/schemas/ptc-command-envelope-v1.schema.json`.
+The command never renders an inspected exception, arbitrary callback result,
+credential, private value, provider response, selector, or filesystem path into
+either public stream.
+
+With `--trace-dir DIR`, the command-generated `run_ref` is also the complete
+trace stem. A normal trace is exactly `<run_ref>.jsonl`; a private trace is
+exactly `<run_ref>.private.jsonl`. The envelope's `artifact_class` selects which
+suffix callers use, so they can locate the file without a published path.
+Normal discovery excludes the private suffix; private-aware discovery accepts
+and classifies it explicitly.
+
+Stderr is not a second framing channel. The wrapper may write only bounded,
+fixed, code-owned launcher messages there. The packaged boot profile configures
+no Logger or SASL console handler before the command core starts. Optional
+applications may not install one; the pinned packaged dependency audit and
+provider-free/optional-application fixtures enforce that condition. Child
+stderr is captured behind its provider boundary. Expected command diagnostics
+remain inside the stdout envelope.
+
+The pinned audit also inventories reachable same-VM writes that bypass those
+handlers: `IO.warn`/`:standard_error`, direct descriptor-2 operations, and known
+NIF or dependency writes. A route that can interpolate a selector, endpoint,
+credential, rejected value, callback reason, exception, report, or other
+arbitrary term is unsupported until it is removed or captured behind a closed
+code-owned boundary. The audit fails closed when a pinned dependency revision
+changes or introduces an unclassified stderr or descriptor route.
+
+The release wrapper reserves the caller's stdout as descriptor 3, redirects
+ordinary descriptor 1 to the null device before BEAM startup, and treats
+descriptor 3 as code-owned envelope authority. Child processes and ports must
+not inherit it. Immediately before writing, the wrapper verifies that
+descriptor 3 still names the captured startup destination; it never falls back
+to another descriptor.
+
+This is not OS-enforced isolation inside one VM: trusted same-VM native code
+could still name, duplicate, close, or write descriptor 3, and an identity
+check cannot detect an injected write. Each supported packaged target therefore
+has a pinned, focused inventory of reachable NIF/native routes that can target
+numeric descriptors. If that inventory cannot establish that no reachable
+route targets descriptor 3, or dependency drift invalidates it, the release
+requires an outer framing process before claiming one-envelope output.
+
+If the startup-destination identity check fails, or if the caller closes stdout
+and the descriptor write fails, the writer stops without retrying on stderr or
+another descriptor. The wrapper exits `74` within 5,000 milliseconds, measured
+from identity-mismatch detection or the failed descriptor-3 write to observed
+process exit. No valid envelope is promised on either transport failure.
+
+`SIGINT`, `SIGTERM`, VM abort, OOM, and failure before the command boundary are
+outside the V1 envelope and stderr-content contract. They may produce no
+envelope or VM/OS emergency output, and the OS or shell determines their
+status. Packaged tests characterize termination and child behavior but do not
+promote one observed signal status to a portable guarantee. A deployment that
+requires a bounded signal response, application bootstrap, or child-tree
+cleanup must use the separately triggered outer supervisor design.
 
 ## Use workflow REPL sessions
 

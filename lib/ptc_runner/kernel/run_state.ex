@@ -48,6 +48,7 @@ defmodule PtcRunner.Kernel.RunState do
   alias PtcRunner.Kernel.EventSinkState
   alias PtcRunner.Kernel.InspectionSink
   alias PtcRunner.Kernel.Limits
+  alias PtcRunner.Kernel.ProviderSession
   alias PtcRunner.Kernel.ProviderTaskTracker
   alias PtcRunner.Lisp
   alias PtcRunner.Lisp.RetainedSize
@@ -68,7 +69,7 @@ defmodule PtcRunner.Kernel.RunState do
   `pid()` would be inaccurate because the handle also carries an ownership
   token.
   """
-  @type provider_tracker :: struct()
+  @type provider_tracker :: {atom(), term()}
 
   @type t :: %__MODULE__{
           pid: pid(),
@@ -81,7 +82,14 @@ defmodule PtcRunner.Kernel.RunState do
   def start(%Limits{} = limits, opts \\ []) do
     token = make_ref()
     owner = Keyword.get(opts, :owner, self())
-    start_state({limits, token, owner, nil, false, nil})
+    provider_session = Keyword.get(opts, :provider_session)
+
+    if Keyword.keys(opts) -- [:owner, :provider_session] == [] and
+         valid_provider_session?(provider_session) do
+      start_state({limits, token, owner, nil, false, nil, provider_session})
+    else
+      {:error, :invalid_run_state}
+    end
   end
 
   @doc false
@@ -91,7 +99,7 @@ defmodule PtcRunner.Kernel.RunState do
          token = make_ref(),
          owner = self(),
          {:ok, state} <-
-           start_state({limits, token, owner, nil, false, {event_sink, inspection_sink}}) do
+           start_state({limits, token, owner, nil, false, {event_sink, inspection_sink}, nil}) do
       {:ok, state}
     else
       _ -> {:error, :session_owner_mismatch}
@@ -106,7 +114,7 @@ defmodule PtcRunner.Kernel.RunState do
     with true <- Keyword.keys(opts) -- [:owner] == [],
          {:ok, event_sink, handle} <- EventSink.prepare(:normal, limits, sink_opts),
          {:ok, state} <-
-           start_state({limits, token, owner, event_sink, true, nil}) do
+           start_state({limits, token, owner, event_sink, true, nil, nil}) do
       {:ok, state, struct!(EventSink, Map.put(handle, :pid, state.pid))}
     else
       _ -> {:error, :invalid_run_state}
@@ -121,11 +129,11 @@ defmodule PtcRunner.Kernel.RunState do
   @spec attach_provider(t(), pid()) :: :ok | {:error, :closed | :provider_down}
   @doc "Attaches the caller's live provider process to its capability reservation."
   def attach_provider(%__MODULE__{} = state, provider) when is_pid(provider) do
-    case ProviderTaskTracker.attach(state.provider_tracker, provider) do
+    case attach_provider_task(state.provider_tracker, provider) do
       :ok ->
-        # The tracker hears about owner death only through its monitor, so it can
-        # still accept an attachment after the owner is gone. This call races that
-        # window and must report closure rather than exit.
+        # The external task owner can still accept an attachment while its
+        # run-state death notification is queued. This call closes that window
+        # and must report closure rather than exit.
         case safe_call(state, {:attach_provider, provider}, {:error, :closed}) do
           :ok ->
             :ok
@@ -212,7 +220,7 @@ defmodule PtcRunner.Kernel.RunState do
   def close_and_drain(%__MODULE__{} = state) do
     call(state, :close_and_drain)
   after
-    ProviderTaskTracker.close(state.provider_tracker)
+    drain_provider_tasks(state.provider_tracker)
   end
 
   @spec stop(t()) :: :ok
@@ -220,7 +228,7 @@ defmodule PtcRunner.Kernel.RunState do
   def stop(%__MODULE__{} = state) do
     GenServer.stop(state.pid, :normal)
   after
-    ProviderTaskTracker.close(state.provider_tracker)
+    drain_provider_tasks(state.provider_tracker)
   end
 
   # These two answer with the owner's data, and there is no substitute that
@@ -270,8 +278,27 @@ defmodule PtcRunner.Kernel.RunState do
   @doc false
   def transfer_owner(state, owner) when is_pid(owner), do: call(state, {:transfer_owner, owner})
 
+  @doc false
+  @spec use_provider_session(t(), ProviderSession.t() | nil) ::
+          {:ok, t()} | {:error, :invalid_run_state}
+  def use_provider_session(%__MODULE__{} = state, nil), do: {:ok, state}
+
+  def use_provider_session(
+        %__MODULE__{provider_tracker: {:task_tracker, tracker}} = state,
+        session
+      ) do
+    if ProviderSession.valid?(session) do
+      :ok = ProviderTaskTracker.close(tracker)
+      {:ok, %{state | provider_tracker: {:provider_session, session}}}
+    else
+      {:error, :invalid_run_state}
+    end
+  end
+
+  def use_provider_session(_state, _session), do: {:error, :invalid_run_state}
+
   @impl GenServer
-  def init({limits, token, owner, event_sink, owner_transferable?, repl_resources}) do
+  def init({limits, token, owner, event_sink, owner_transferable?, repl_resources, _session}) do
     now = System.monotonic_time(:millisecond)
 
     {:ok,
@@ -910,7 +937,7 @@ defmodule PtcRunner.Kernel.RunState do
   defp start_state(args) do
     case GenServer.start(__MODULE__, args) do
       {:ok, pid} ->
-        case ProviderTaskTracker.start(pid) do
+        case start_provider_tracker(elem(args, 6), pid) do
           {:ok, provider_tracker} ->
             token = elem(args, 1)
             {:ok, %__MODULE__{pid: pid, token: token, provider_tracker: provider_tracker}}
@@ -924,6 +951,30 @@ defmodule PtcRunner.Kernel.RunState do
         {:error, reason}
     end
   end
+
+  defp start_provider_tracker(nil, run_state) do
+    case ProviderTaskTracker.start(run_state) do
+      {:ok, tracker} -> {:ok, {:task_tracker, tracker}}
+      {:error, _reason} = error -> error
+    end
+  end
+
+  defp start_provider_tracker(session, _run_state),
+    do: {:ok, {:provider_session, session}}
+
+  defp attach_provider_task({:task_tracker, tracker}, provider),
+    do: ProviderTaskTracker.attach(tracker, provider)
+
+  defp attach_provider_task({:provider_session, session}, provider),
+    do: ProviderSession.attach_provider(session, provider)
+
+  defp drain_provider_tasks({:task_tracker, tracker}), do: ProviderTaskTracker.close(tracker)
+
+  defp drain_provider_tasks({:provider_session, session}),
+    do: ProviderSession.drain_provider_tasks(session)
+
+  defp valid_provider_session?(nil), do: true
+  defp valid_provider_session?(session), do: ProviderSession.valid?(session)
 
   defp call(%__MODULE__{pid: pid, token: token}, request),
     do: GenServer.call(pid, {token, request})

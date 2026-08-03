@@ -53,6 +53,35 @@ defmodule PtcRunner.Kernel.MCPOAuth.StoreMemoryTest do
      bob: bob}
   end
 
+  test "manager registration is idempotent and releases tracking after manager death", context do
+    manager = spawn(fn -> receive do: (:stop -> :ok) end)
+
+    assert :ok = Store.register_manager(context.store, manager)
+    assert :ok = Store.register_manager(context.store, manager)
+    assert manager_monitor_count(context.memory.pid, manager) == 1
+
+    manager_ref = Process.monitor(manager)
+    send(manager, :stop)
+    assert_receive {:DOWN, ^manager_ref, :process, ^manager, :normal}
+
+    assert_eventually(fn ->
+      context.memory.pid
+      |> :sys.get_state()
+      |> Map.fetch!(:managers)
+      |> Map.has_key?(manager)
+      |> Kernel.not()
+    end)
+  end
+
+  test "closing the store terminates each live registered manager", context do
+    manager = spawn(fn -> receive do: (:stop -> :ok) end)
+    manager_ref = Process.monitor(manager)
+
+    assert :ok = Store.register_manager(context.store, manager)
+    assert :ok = Memory.close(context.memory)
+    assert_receive {:DOWN, ^manager_ref, :process, ^manager, :killed}
+  end
+
   test "isolates grants by principal and redacts opaque identities", context do
     alice_key =
       Context.grant_key(context.alice, context.authority, context.authority_epoch)
@@ -658,6 +687,11 @@ defmodule PtcRunner.Kernel.MCPOAuth.StoreMemoryTest do
   end
 
   defp assert_eventually(_callback, 0), do: flunk("condition did not become true")
+
+  defp manager_monitor_count(store_pid, manager) do
+    {:monitors, monitors} = Process.info(store_pid, :monitors)
+    Enum.count(monitors, &(&1 == {:process, manager}))
+  end
 
   defp wait_until_after(target_ms) do
     if System.monotonic_time(:millisecond) > target_ms,

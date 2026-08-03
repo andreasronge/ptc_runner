@@ -35,6 +35,9 @@ defmodule PtcRunner.Test.MCPOAuthRecordingStore do
   @impl Store
   def local_identity(state), do: Store.local_identity(state.delegate)
 
+  @impl Store
+  def register_manager(state, manager), do: Store.register_manager(state.delegate, manager)
+
   defp record_anchor(observer, {:time_anchor}, {:ok, anchor}),
     do: send(observer, {:oauth_sequence, {:time_anchor, anchor}})
 

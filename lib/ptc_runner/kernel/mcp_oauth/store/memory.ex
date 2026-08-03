@@ -5,7 +5,9 @@ defmodule PtcRunner.Kernel.MCPOAuth.Store.Memory do
   It is intended for tests, examples, and one foreground CLI invocation. All
   compound behavior operations execute in one serialized GenServer callback, so
   grant CAS, lease transitions, requirement updates, authority claims, and
-  retirement fences are atomic. Owner death destroys the complete store.
+  retirement fences are atomic. Registered managers are monitored and removed
+  from lifecycle tracking when they stop. Owner death destroys the complete
+  store.
   """
 
   use GenServer
@@ -38,6 +40,14 @@ defmodule PtcRunner.Kernel.MCPOAuth.Store.Memory do
   def store(%__MODULE__{} = memory),
     do: Store.new(__MODULE__, memory)
 
+  @doc false
+  @spec close(t()) :: :ok
+  def close(%__MODULE__{pid: pid}) do
+    GenServer.call(pid, :close, :infinity)
+  catch
+    :exit, _reason -> :ok
+  end
+
   @impl Store
   def transact(%__MODULE__{pid: pid}, operation, timeout) do
     GenServer.call(pid, operation, timeout)
@@ -59,11 +69,19 @@ defmodule PtcRunner.Kernel.MCPOAuth.Store.Memory do
   @impl Store
   def local_identity(%__MODULE__{pid: pid}), do: {__MODULE__, pid}
 
+  @impl Store
+  def register_manager(%__MODULE__{pid: pid}, manager) when is_pid(manager) do
+    GenServer.call(pid, {:register_manager, manager})
+  catch
+    :exit, _reason -> {:error, :closed}
+  end
+
   @impl GenServer
   def init(owner) do
     {:ok,
      %{
        owner_ref: Process.monitor(owner),
+       managers: %{},
        serial: 0,
        principals: %{},
        authorities: %{},
@@ -74,6 +92,35 @@ defmodule PtcRunner.Kernel.MCPOAuth.Store.Memory do
        admissions: %{},
        retirements: %{}
      }}
+  end
+
+  @impl GenServer
+  def handle_call({:register_manager, manager}, _from, state) when is_pid(manager) do
+    case Map.fetch(state.managers, manager) do
+      {:ok, ref} ->
+        if Process.alive?(manager) do
+          {:reply, :ok, state}
+        else
+          Process.demonitor(ref, [:flush])
+          {:reply, {:error, :closed}, update_in(state.managers, &Map.delete(&1, manager))}
+        end
+
+      :error ->
+        if Process.alive?(manager) do
+          ref = Process.monitor(manager)
+          {:reply, :ok, put_in(state.managers[manager], ref)}
+        else
+          {:reply, {:error, :closed}, state}
+        end
+    end
+  end
+
+  def handle_call(:close, _from, state) do
+    Enum.each(Map.keys(state.managers), fn manager ->
+      if Process.alive?(manager), do: Process.exit(manager, :kill)
+    end)
+
+    {:stop, :normal, :ok, state}
   end
 
   @impl GenServer
@@ -535,16 +582,22 @@ defmodule PtcRunner.Kernel.MCPOAuth.Store.Memory do
   def handle_info({:DOWN, ref, :process, _pid, _reason}, %{owner_ref: ref} = state),
     do: {:stop, :normal, state}
 
-  def handle_info({:DOWN, ref, :process, _pid, _reason}, state) do
-    case worker_record(state, ref) do
-      {:lease, key, lease} ->
-        {:noreply, recover_fenced_mutation(state, key, lease)}
+  def handle_info({:DOWN, ref, :process, pid, _reason}, state) do
+    case Map.get(state.managers, pid) do
+      ^ref ->
+        {:noreply, update_in(state.managers, &Map.delete(&1, pid))}
 
-      {:admission, admission} ->
-        {:noreply, delete_admission(state, admission, false)}
+      _other ->
+        case worker_record(state, ref) do
+          {:lease, key, lease} ->
+            {:noreply, recover_fenced_mutation(state, key, lease)}
 
-      nil ->
-        {:noreply, state}
+          {:admission, admission} ->
+            {:noreply, delete_admission(state, admission, false)}
+
+          nil ->
+            {:noreply, state}
+        end
     end
   end
 

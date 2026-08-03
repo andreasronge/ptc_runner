@@ -130,8 +130,23 @@ Optional mission data is separate from workflow input:
 }
 ```
 
-Paths are resolved under the canonical manifest directory. Absolute paths,
-traversal, devices, non-regular files, and symlink escapes are rejected.
+Referenced files use portable lowercase ASCII logical names. A name is at most
+1,024 bytes and 16 slash-separated segments; every segment starts with a
+lowercase letter or digit and otherwise contains only lowercase letters,
+digits, `.`, `_`, or `-`. Paths are resolved under the canonical manifest
+directory. Absolute paths, empty or dot segments, Unicode, uppercase names,
+devices, non-regular files, and symlink escapes are rejected. The same grammar
+applies to component, input, contract, and trusted override candidate names.
+For an in-memory application whose manifest logical name has directory
+segments, those references are resolved relative to the manifest's logical
+directory, exactly like the filesystem adapter. That transport prefix does not
+consume the referenced name's 1,024-byte or 16-segment application limit.
+When a directory-backed override descriptor and candidate are inside that
+application directory, they use the same logical-document cache as manifest
+references. A candidate that is also a selected component document is captured
+and charged once, matching the in-memory adapter. Candidate resolution still
+uses the descriptor's own directory as its confinement boundary; entering the
+shared cache does not widen that authority.
 
 Those rules govern files the host reads while loading the manifest. Files the
 *model* can reach are separate and never come from the manifest: they come from
@@ -162,7 +177,9 @@ the bounded agent loop is still live. When turns remain, it returns the same
 structural classification to the model for one ordinary correction turn; the
 rejected value itself is withheld. Other workflow entries retain only the
 final fail-closed check. A mismatch returns `input_contract_failed` or
-`result_contract_failed`.
+`result_contract_failed`. A selected input that is not an admissible JSON
+object instead returns `input_invalid`, even when no input contract is
+declared.
 
 A rejection does carry a bounded classification, so a mismatch is diagnosable
 without repeating the run under private inspection. The command reports it as:
@@ -173,8 +190,8 @@ without repeating the run under private inspection. The command reports it as:
   %{value_kind: :object, discriminator: "decision", matched_branch: "no-change",
     missing_required: [], undeclared_key_count: 0,
     violations: [
-      %{path: "rationale", kind: :maxLength},
-      %{path: "evidence[0]", kind: :required}
+      %{segments: [{:property, "rationale"}], kind: :maxLength},
+      %{segments: [{:property, "evidence"}, {:index, 0}], kind: :required}
     ]}}}
 ```
 
@@ -185,11 +202,13 @@ is not — so a workflow returning `{:decision "no-change"}` instead of
 violations at all, which is how you recognize it: `json_value: false` with an
 empty `violations` list means keyword keys, not a schema mismatch.
 
-`violations` locates each failure by schema keyword and path within the branch
-the discriminator selected; branches it did not select are omitted, since they
-fail on keys they were never given. Paths are built only from names the
-contract declares and from array indices — a segment naming an undeclared key
-is replaced with `(undeclared)`, because that name is caller-authored content.
+`violations` locates each failure by schema keyword and a typed property/index
+segment list within the branch the discriminator selected; branches it did not
+select are omitted, since they fail on keys they were never given. Segments are
+retained only while the exact local schema node declares that property or array
+index. At the first undeclared or structurally inconsistent segment,
+classification stops at the safe parent, so caller-authored property names
+never enter the report.
 
 Every other name comes from the compiled schema too: the discriminator, the
 branch whose `const` the value carried, and that branch's unmet `required` keys
@@ -339,6 +358,11 @@ any lower installed ceiling.
 Limits reach further than the six shown above: they also bound process heap,
 source size, retained continuation memory, provider concurrency, capability
 arguments and results, and canonical events.
+
+The host-only `provider_cleanup_timeout_ms`,
+`selection_validation_timeout_ms`, and `doctor_connectivity_timeout_ms` names
+are deliberately absent from the application schema. A manifest that declares
+one is rejected rather than narrowing host-owned operational policy.
 
 The compiled ceilings suit one bounded run. An agent that must work for hours
 needs more turns, model calls, and trace events than they allow, and only the

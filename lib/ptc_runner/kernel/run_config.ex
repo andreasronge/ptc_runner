@@ -27,12 +27,14 @@ defmodule PtcRunner.Kernel.RunConfig do
   each with distinct hashes and byte counts. Hosts cannot supply mutable
   inventory text.
 
-  `provider_resources` are opaque idempotent close functions owned by the host.
+  `provider_session` is the single owner-backed provider cleanup boundary.
+  Before callbacks can start, execution binds it to the Runner or REPL session
+  owner and to the run state whose provider tasks it tracks.
   `connector_snapshots` are bounded safe metadata copied into `run-started`;
   neither field is visible to Lisp.
 
-  `result_contract` is an optional compiled application contract exposed only
-  through the reserved workflow validator used by `agent.main`. Final
+  `result_contract` is an optional sealed, compiled application contract
+  exposed only through the reserved workflow validator used by `agent.main`. Final
   publication enforcement remains the responsibility of `RunBuilder`.
 
   `labels` is an optional closed safe-metadata map. Caller-defined identifier
@@ -53,8 +55,7 @@ defmodule PtcRunner.Kernel.RunConfig do
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.MissionEnvironment
   alias PtcRunner.Kernel.MissionInventory
-  alias PtcRunner.Kernel.ProviderRegistry
-  alias PtcRunner.Kernel.ProviderResources
+  alias PtcRunner.Kernel.ProviderSession
   alias PtcRunner.Kernel.SafeMetadata
   alias PtcRunner.Kernel.ValueContract
   alias PtcRunner.Kernel.WorkflowEnvironment
@@ -82,10 +83,11 @@ defmodule PtcRunner.Kernel.RunConfig do
     :mission_inventory,
     :claim_id,
     result_contract: nil,
+    result_projection: :native,
     inspection_sink: nil,
     inspection_sink_owner: nil,
     inspection_path: nil,
-    provider_resources: [],
+    provider_session: nil,
     connector_snapshots: [],
     session_profile: nil,
     labels: %{},
@@ -102,10 +104,11 @@ defmodule PtcRunner.Kernel.RunConfig do
           mission_inventory: MissionInventory.t(),
           claim_id: reference(),
           result_contract: ValueContract.t() | nil,
+          result_projection: :native | :json,
           inspection_sink: InspectionSink.t() | nil,
           inspection_sink_owner: pid() | nil,
           inspection_path: binary() | nil,
-          provider_resources: [ProviderRegistry.close()],
+          provider_session: ProviderSession.t() | nil,
           connector_snapshots: [map()],
           session_profile: map() | nil,
           labels: map(),
@@ -129,9 +132,10 @@ defmodule PtcRunner.Kernel.RunConfig do
                :limits,
                :event_sink,
                :result_contract,
+               :result_projection,
                :inspection_sink,
                :inspection_path,
-               :provider_resources,
+               :provider_session,
                :connector_snapshots,
                :session_profile,
                :labels,
@@ -145,12 +149,13 @@ defmodule PtcRunner.Kernel.RunConfig do
          %EventSink{} = sink <- Keyword.get(opts, :event_sink),
          true <- valid_event_sink_contract?(sink, limits),
          true <- result_contract?(Keyword.get(opts, :result_contract)),
+         true <- result_projection?(Keyword.get(opts, :result_projection, :native)),
          {:ok, event_sink_owner} <- EventSink.owner(sink),
          true <-
            inspection?(Keyword.get(opts, :inspection_sink), Keyword.get(opts, :inspection_path)),
          {:ok, inspection_sink_owner} <-
            inspection_owner(Keyword.get(opts, :inspection_sink)),
-         true <- provider_resources?(Keyword.get(opts, :provider_resources, [])),
+         true <- provider_session?(Keyword.get(opts, :provider_session), limits),
          true <- connector_snapshots?(Keyword.get(opts, :connector_snapshots, [])),
          {:ok, session_profile} <- session_profile(Keyword.get(opts, :session_profile)),
          {:ok, labels} <- SafeMetadata.normalize_labels(Keyword.get(opts, :labels, %{})),
@@ -186,10 +191,11 @@ defmodule PtcRunner.Kernel.RunConfig do
          mission_inventory: mission_inventory,
          claim_id: make_ref(),
          result_contract: Keyword.get(opts, :result_contract),
+         result_projection: Keyword.get(opts, :result_projection, :native),
          inspection_sink: Keyword.get(opts, :inspection_sink),
          inspection_sink_owner: inspection_sink_owner,
          inspection_path: Keyword.get(opts, :inspection_path),
-         provider_resources: Keyword.get(opts, :provider_resources, []),
+         provider_session: Keyword.get(opts, :provider_session),
          connector_snapshots: Keyword.get(opts, :connector_snapshots, []),
          session_profile: session_profile,
          labels: labels,
@@ -203,8 +209,10 @@ defmodule PtcRunner.Kernel.RunConfig do
   end
 
   defp result_contract?(nil), do: true
-  defp result_contract?(%ValueContract{}), do: true
+  defp result_contract?(%ValueContract{} = contract), do: ValueContract.sealed?(contract)
   defp result_contract?(_contract), do: false
+
+  defp result_projection?(projection), do: projection in [:native, :json]
 
   defp valid_event_sink_contract?(%EventSink{policy: :normal} = sink, limits) do
     reserve = EventSink.terminal_reserve(:normal, limits)
@@ -284,16 +292,29 @@ defmodule PtcRunner.Kernel.RunConfig do
     end
   end
 
-  @spec close_provider_resources(t()) :: :ok | {:error, :provider_cleanup_failed}
+  @spec close_provider_session(t()) :: :ok | {:error, :provider_cleanup_failed}
   @doc """
-  Closes opaque provider resources in their stored reverse-build order.
+  Closes the one provider session and its reverse-order cleanup stack.
 
-  Every resource is attempted. Exceptions and non-success results are
-  normalized to `:provider_cleanup_failed` without exposing provider details.
+  Cleanup is bounded by the session's sealed limit. Exceptions, timeouts, and
+  non-success results are normalized to `:provider_cleanup_failed` without
+  exposing provider details.
   """
-  def close_provider_resources(%__MODULE__{provider_resources: resources}) do
-    ProviderResources.close(resources)
-  end
+  def close_provider_session(%__MODULE__{provider_session: nil}), do: :ok
+
+  def close_provider_session(%__MODULE__{provider_session: session}),
+    do: ProviderSession.close(session)
+
+  @doc false
+  @spec bind_provider_session(t(), pid(), pid()) ::
+          :ok | {:error, :provider_session_unavailable}
+  def bind_provider_session(%__MODULE__{provider_session: nil}, owner, run_state)
+      when is_pid(owner) and is_pid(run_state),
+      do: :ok
+
+  def bind_provider_session(%__MODULE__{provider_session: session}, owner, run_state)
+      when is_pid(owner) and is_pid(run_state),
+      do: ProviderSession.bind_lifecycle(session, owner, run_state)
 
   # A trial artifact has to name the base a candidate replaced, not only the
   # candidate itself. The effective bundle hash already changes when source
@@ -314,8 +335,10 @@ defmodule PtcRunner.Kernel.RunConfig do
 
   defp component_overrides(_overrides), do: {:error, :invalid_run_config}
 
-  defp provider_resources?(resources),
-    do: is_list(resources) and Enum.all?(resources, &is_function(&1, 0))
+  defp provider_session?(nil, _limits), do: true
+
+  defp provider_session?(session, limits),
+    do: ProviderSession.compatible_limits?(session, limits)
 
   defp connector_snapshots?(snapshots) do
     is_list(snapshots) and length(snapshots) <= 128 and

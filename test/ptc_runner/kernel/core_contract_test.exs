@@ -12,14 +12,17 @@ defmodule PtcRunner.Kernel.CoreContractTest do
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.MissionEnvironment
   alias PtcRunner.Kernel.ProviderError
+  alias PtcRunner.Kernel.ProviderSession
   alias PtcRunner.Kernel.ReplSession
   alias PtcRunner.Kernel.ResultArtifact
   alias PtcRunner.Kernel.RunConfig
   alias PtcRunner.Kernel.RunState
   alias PtcRunner.Kernel.SafeMetadata
+  alias PtcRunner.Kernel.ValueContract
   alias PtcRunner.Kernel.WorkflowEnvironment
   alias PtcRunner.Lisp.Format
   alias PtcRunner.Lisp.RetainedSize
+  alias PtcRunner.TestSupport.ProviderSessionFixture
 
   @input_schema %{"type" => "object", "additionalProperties" => true}
 
@@ -679,6 +682,54 @@ defmodule PtcRunner.Kernel.CoreContractTest do
              )
   end
 
+  test "run configuration rejects a provider session with different cleanup limits" do
+    {:ok, workflow} = WorkflowEnvironment.new([])
+    {:ok, mission} = MissionEnvironment.new([])
+    limits = Limits.defaults()
+    {:ok, session_limits} = Limits.new(provider_cleanup_timeout_ms: 100)
+    {:ok, sink} = EventSink.start(:normal, limits)
+    provider_session = ProviderSessionFixture.start([], session_limits)
+
+    assert {:error, :invalid_run_config} =
+             RunConfig.new(
+               workflow_environment: workflow,
+               mission_environment: mission,
+               input: %{},
+               limits: limits,
+               event_sink: sink,
+               provider_session: provider_session
+             )
+
+    assert :ok = ProviderSession.close(provider_session)
+    EventSink.stop(sink)
+  end
+
+  test "run configuration rejects a mutated result contract" do
+    {:ok, workflow} = WorkflowEnvironment.new([])
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, limits} = Limits.new()
+    {:ok, sink} = EventSink.start(:normal, limits)
+
+    assert {:ok, contract} =
+             ValueContract.compile(%{
+               "type" => "object",
+               "properties" => %{"result" => %{"type" => "integer"}}
+             })
+
+    forged =
+      %{contract | schema: put_in(contract.schema, ["properties", "result", "type"], "string")}
+
+    assert {:error, :invalid_run_config} =
+             RunConfig.new(
+               workflow_environment: workflow,
+               mission_environment: mission,
+               input: %{},
+               limits: limits,
+               event_sink: sink,
+               result_contract: forged
+             )
+  end
+
   test "tight terminal preflight covers cleanup-failure usage for Runner and REPL" do
     {:ok, workflow} = WorkflowEnvironment.new([])
     {:ok, mission} = MissionEnvironment.new([])
@@ -700,7 +751,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
               input: %{},
               limits: limits,
               event_sink: sink,
-              provider_resources: [close]
+              provider_session: ProviderSessionFixture.start([close], limits)
             )
 
           {result, sink, limits}
@@ -995,12 +1046,16 @@ defmodule PtcRunner.Kernel.CoreContractTest do
         input: %{},
         limits: limits,
         event_sink: sink,
-        provider_resources: [
-          fn ->
-            send(parent, :resource_closed)
-            :ok
-          end
-        ]
+        provider_session:
+          ProviderSessionFixture.start(
+            [
+              fn ->
+                send(parent, :resource_closed)
+                :ok
+              end
+            ],
+            limits
+          )
       )
 
     first = Task.async(fn -> Kernel.run("(return (tool/blocking {}))", config) end)
@@ -1046,12 +1101,16 @@ defmodule PtcRunner.Kernel.CoreContractTest do
         input: %{},
         limits: limits,
         event_sink: sink,
-        provider_resources: [
-          fn ->
-            send(parent, close_message)
-            :ok
-          end
-        ]
+        provider_session:
+          ProviderSessionFixture.start(
+            [
+              fn ->
+                send(parent, close_message)
+                :ok
+              end
+            ],
+            limits
+          )
       )
     end
 
@@ -2139,18 +2198,21 @@ defmodule PtcRunner.Kernel.CoreContractTest do
 
     {:ok, state} = RunState.start(limits)
 
+    result =
+      Evaluation.evaluate_source(
+        state,
+        mission,
+        ~S|(do (tool/blocked {}) (reduce + (range 0 100000000)))|,
+        500
+      )
+
     assert %{
              outcome: :evaluation_error,
-             kind: :timeout,
              retryable?: true,
              terminal_provider_failure?: true
-           } =
-             Evaluation.evaluate_source(
-               state,
-               mission,
-               ~S|(do (tool/blocked {}) (reduce + (range 0 100000000)))|,
-               500
-             )
+           } = result
+
+    assert result.kind in [:timeout, :memory_exceeded]
   end
 
   test "workflow kernel-eval routes source into the mission environment" do

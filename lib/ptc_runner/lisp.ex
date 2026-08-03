@@ -244,7 +244,7 @@ defmodule PtcRunner.Lisp do
     - `:pmap_timeout` - Shared absolute deadline in milliseconds for each
       pmap/pcalls operation, including nested parallel calls (default: 5000).
       Increase for LLM-backed tools.
-    - `:pmap_max_concurrency` - Local pmap/pcalls scheduling window — max tasks one call keeps in flight (default: `System.schedulers_online() * 2`). Reduce to avoid overflowing connection pools. The HARD aggregate cap is `:max_parallel_workers`.
+    - `:pmap_max_concurrency` - Local pmap/pcalls scheduling window — max tasks one call keeps in flight (default: the build-time `System.schedulers_online() * 2`, frozen into the semantic revision). Reduce to avoid overflowing connection pools. The HARD aggregate cap is `:max_parallel_workers`.
     - `:max_heap` - Program heap budget in words ABOVE the measured
       environment baseline (default: 1_250_000). Host-provided data
       (context, `:memory`, tool closures, the parsed program) is measured
@@ -928,12 +928,9 @@ defmodule PtcRunner.Lisp do
       end
     end
 
-    compile_max_heap =
-      Application.get_env(:ptc_runner, :default_max_heap, 1_250_000)
-
     compile_opts = [
       timeout: compile_timeout,
-      max_heap: compile_max_heap,
+      max_heap: opts.max_heap,
       link: Map.get(opts, :link, false)
     ]
 
@@ -1773,11 +1770,13 @@ defmodule PtcRunner.Lisp do
   defp externalize_lisp_values(value) when is_function(value), do: %Format.Fn{params: "..."}
 
   defp externalize_lisp_values(%Var{name: name} = var) when is_binary(name) do
-    %{var | name: existing_atom_or(name, name)}
+    %{var | name: SourceAtoms.intern(name)}
   end
 
-  defp externalize_lisp_values({:var, name}) when is_atom(name) or is_binary(name),
-    do: %Var{name: existing_atom_or(Kernel.to_string(name), name)}
+  defp externalize_lisp_values({:var, name}) when is_binary(name),
+    do: %Var{name: SourceAtoms.intern(name)}
+
+  defp externalize_lisp_values({:var, name}) when is_atom(name), do: %Var{name: name}
 
   defp externalize_lisp_values({:symbol_ref, name}) when is_binary(name),
     do: %Format.SymbolRef{name: name}
@@ -2024,13 +2023,6 @@ defmodule PtcRunner.Lisp do
 
   defp externalize_memory_key(name) when is_binary(name), do: SourceAtoms.intern(name)
   defp externalize_memory_key(other), do: externalize_lisp_values(other)
-
-  defp existing_atom_or(name, fallback) when is_binary(name) do
-    case safe_to_existing_atom(name) do
-      {:ok, atom} -> atom
-      :error -> fallback
-    end
-  end
 
   # Check if symbol count exceeds limit
   defp check_symbol_limit(ast, max_symbols) do

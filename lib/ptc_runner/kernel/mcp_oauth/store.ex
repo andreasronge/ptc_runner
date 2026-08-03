@@ -24,7 +24,8 @@ defmodule PtcRunner.Kernel.MCPOAuth.Store do
 
   @callback transact(adapter_state :: term(), operation(), timeout()) :: term()
   @callback local_identity(adapter_state :: term()) :: term()
-  @optional_callbacks local_identity: 1
+  @callback register_manager(adapter_state :: term(), pid()) :: :ok | {:error, atom()}
+  @optional_callbacks local_identity: 1, register_manager: 2
 
   @spec new(module(), term()) :: {:ok, t()} | {:error, :invalid_store}
   def new(module, adapter_state) when is_atom(module) do
@@ -46,6 +47,19 @@ defmodule PtcRunner.Kernel.MCPOAuth.Store do
     if Code.ensure_loaded?(module) and function_exported?(module, :local_identity, 1),
       do: module.local_identity(adapter_state),
       else: store
+  end
+
+  @doc false
+  @spec register_manager(t(), pid()) :: :ok | {:error, atom()}
+  def register_manager({module, adapter_state}, manager)
+      when is_atom(module) and is_pid(manager) do
+    if Code.ensure_loaded?(module) and function_exported?(module, :register_manager, 2),
+      do: module.register_manager(adapter_state, manager),
+      else: :ok
+  rescue
+    _exception -> {:error, :store_error}
+  catch
+    _kind, _reason -> {:error, :store_error}
   end
 
   @spec claim_principal(t(), binary(), binary(), timeout()) ::

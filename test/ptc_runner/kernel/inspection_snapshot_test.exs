@@ -324,10 +324,12 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
         "install" => %{
           "history" => %{
             "source" => "ptc_trace_snapshot",
+            "installation_revision" => "trace-v1",
             "directory" => "traces"
           },
           "private-history" => %{
             "source" => "ptc_inspection_snapshot",
+            "installation_revision" => "inspection-v1",
             "directory" => "inspection",
             "ceilings" => %{"max_files" => 10}
           }
@@ -356,7 +358,13 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
     )
 
     {:ok, host} = HostConfig.load(host_path)
-    {:ok, registry} = HostInstallation.registry(host)
+
+    {:ok, registry} =
+      HostInstallation.catalog(host)
+      |> then(fn {:ok, catalog} ->
+        HostInstallation.runtime_registry(host, catalog)
+      end)
+
     {:ok, built} = RunBuilder.load_and_build(manifest_path, registry)
 
     assert built.config.event_sink.policy == :private
@@ -368,6 +376,13 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
 
     private_snapshot =
       Enum.find(built.config.connector_snapshots, &(&1["provider"] == "private-history"))
+
+    assert private_snapshot["declaration"]["data_class"] == "private_inspection"
+
+    assert private_snapshot["declaration"]["accepts_data"] == [
+             "normal",
+             "private_inspection"
+           ]
 
     capability =
       Map.fetch!(
@@ -397,6 +412,7 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
         "install" => %{
           "ordinary-egress" => %{
             "source" => "mcp",
+            "installation_revision" => "private-only-v1",
             "transport" => %{
               "type" => "streamable_http",
               "endpoint" => "https://127.0.0.1:1/mcp"
@@ -407,10 +423,12 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
           },
           "history" => %{
             "source" => "ptc_trace_snapshot",
+            "installation_revision" => "trace-v1",
             "directory" => "missing-traces"
           },
           "private-history" => %{
             "source" => "ptc_inspection_snapshot",
+            "installation_revision" => "inspection-v1",
             "directory" => "missing-inspection"
           }
         }
@@ -439,7 +457,12 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
     )
 
     {:ok, host} = HostConfig.load(host_path)
-    {:ok, registry} = HostInstallation.registry(host)
+
+    {:ok, registry} =
+      HostInstallation.catalog(host)
+      |> then(fn {:ok, catalog} ->
+        HostInstallation.runtime_registry(host, catalog)
+      end)
 
     assert {:error, :provider_data_class_denied} =
              RunBuilder.load_and_build(manifest_path, registry)

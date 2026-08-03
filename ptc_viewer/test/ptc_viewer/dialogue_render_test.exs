@@ -493,6 +493,29 @@ defmodule PtcViewer.DialogueRenderTest do
     end
   end
 
+  describe "provider fingerprints" do
+    test "renders nested acquisition protocol and tool counts" do
+      rendered =
+        render_fixtures(%{
+          metadata: fn metadata ->
+            update_in(metadata, ["connector_snapshots"], fn snapshots ->
+              Enum.map(snapshots, fn snapshot ->
+                %{
+                  "provider" => snapshot["provider"],
+                  "snapshot_hash" => snapshot["snapshot_hash"],
+                  "acquisition" => Map.take(snapshot, ~w(protocol tools))
+                }
+              end)
+            end)
+          end
+        })
+
+      assert rendered =~ "mcp-2026-07-28 · 1 tools"
+      assert rendered =~ "mcp-2026-07-28 · 3 tools"
+      refute rendered =~ "unknown protocol"
+    end
+  end
+
   describe "token spend" do
     test "reports totals and estimated input composition", %{rendered: rendered} do
       assert rendered =~ "LLM token spend"

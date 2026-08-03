@@ -1,6 +1,7 @@
 defmodule PtcRunner.Kernel.MCPRequestContextTest do
   use ExUnit.Case, async: true
 
+  alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.MCPOAuth.Authority
   alias PtcRunner.Kernel.MCPOAuth.Context
   alias PtcRunner.Kernel.MCPOAuth.Store
@@ -8,6 +9,8 @@ defmodule PtcRunner.Kernel.MCPRequestContextTest do
   alias PtcRunner.Kernel.MCPOAuth.TokenManager
   alias PtcRunner.Kernel.MCPRequestContext
   alias PtcRunner.Kernel.ProviderRegistry
+  alias PtcRunner.Kernel.ProviderSession
+  alias PtcRunner.Kernel.ResourceRegistrar
   alias PtcRunner.Test.MCPOAuthRecordingStore
 
   test "owner death closes the credential context" do
@@ -274,16 +277,202 @@ defmodule PtcRunner.Kernel.MCPRequestContextTest do
     assert :ok = MCPRequestContext.close(context)
   end
 
-  test "close reports failure without abandoning a detached admission release" do
+  test "cleanup retains simultaneous admission release and token persistence" do
     parent = self()
     {:ok, available} = Agent.start_link(fn -> false end)
+    {:ok, session} = ProviderSession.start(Limits.defaults())
+    {:ok, registrar} = ProviderSession.open_registrar(session)
+    assert :ok = ResourceRegistrar.activate(registrar)
+
+    interceptor = fn
+      {:mark_access_rejected, _key, _generation}, _timeout ->
+        if Agent.get(available, & &1), do: :delegate, else: {:return, {:error, :store_error}}
+
+      {:admit_mcp, _admission, _key, _generation, _worker_pid, _ttl_ms}, _timeout ->
+        if Agent.get(available, & &1),
+          do: :delegate,
+          else: {:return, {:ok, :durable_admission}}
+
+      {:release_mcp, :durable_admission}, _timeout ->
+        send(parent, :detached_release_attempt)
+
+        if Agent.get(available, & &1),
+          do: {:return, :ok},
+          else: {:return, {:error, :store_error}}
+
+      _operation, _timeout ->
+        :delegate
+    end
+
+    fixture =
+      oauth_manager_fixture(interceptor,
+        owner: ResourceRegistrar.owner(registrar),
+        resource_registrar: registrar
+      )
+
+    manager = fixture.manager
+
+    {:ok, context} =
+      MCPRequestContext.start(
+        owner: ResourceRegistrar.owner(registrar),
+        resource_registrar: registrar,
+        endpoint: manager.resource,
+        headers: [],
+        timeout_ms: 1_000,
+        authorization: manager
+      )
+
+    caller =
+      spawn(fn ->
+        assert {:ok, _request} = MCPRequestContext.begin_request(context)
+        send(parent, :combined_request_started)
+        receive do: (:finish -> :ok)
+      end)
+
+    caller_ref = Process.monitor(caller)
+    assert_receive :combined_request_started
+    deadline = System.monotonic_time(:millisecond) + 1_000
+    assert {:error, :store_error} = TokenManager.reject(manager, 1, deadline)
+    send(caller, :finish)
+    assert_receive {:DOWN, ^caller_ref, :process, ^caller, :normal}
+    assert_receive :detached_release_attempt
+    assert :ok = ResourceRegistrar.commit(registrar, fn -> MCPRequestContext.close(context) end)
+
+    context_ref = Process.monitor(context.pid)
+    manager_ref = Process.monitor(manager.pid)
+    assert {:error, :provider_cleanup_failed} = ProviderSession.close(session)
+    assert Process.alive?(context.pid)
+    assert Process.alive?(manager.pid)
+
+    Agent.update(available, fn _available -> true end)
+    assert_receive {:DOWN, ^manager_ref, :process, _pid, :normal}, 2_000
+    assert_receive {:DOWN, ^context_ref, :process, _pid, :normal}, 31_000
+    assert :ok = MCPRequestContext.close(context)
+
+    {:ok, replacement_manager} =
+      TokenManager.start(
+        owner: self(),
+        context: fixture.context,
+        authority: fixture.authority,
+        authority_epoch: fixture.epoch
+      )
+
+    replacement_deadline = System.monotonic_time(:millisecond) + 1_000
+
+    assert {:error, :mcp_authorization_required} =
+             TokenManager.authorization_header(replacement_manager, replacement_deadline)
+
+    assert :ok = TokenManager.close(replacement_manager)
+  end
+
+  test "abnormal session death hands off simultaneous release and persistence" do
+    parent = self()
+    {:ok, available} = Agent.start_link(fn -> false end)
+    {:ok, limits} = Limits.new(provider_cleanup_timeout_ms: 500)
+    {:ok, session} = ProviderSession.start(limits)
+    {:ok, registrar} = ProviderSession.open_registrar(session)
+    assert :ok = ResourceRegistrar.activate(registrar)
+
+    interceptor = fn
+      {:mark_access_rejected, _key, _generation}, _timeout ->
+        if Agent.get(available, & &1), do: :delegate, else: {:return, {:error, :store_error}}
+
+      {:admit_mcp, _admission, _key, _generation, _worker_pid, _ttl_ms}, _timeout ->
+        {:return, {:ok, :abnormal_admission}}
+
+      {:release_mcp, :abnormal_admission}, _timeout ->
+        send(parent, :abnormal_release_attempt)
+
+        if Agent.get(available, & &1),
+          do: {:return, :ok},
+          else: {:return, {:error, :store_error}}
+
+      _operation, _timeout ->
+        :delegate
+    end
+
+    fixture =
+      oauth_manager_fixture(interceptor,
+        owner: ResourceRegistrar.owner(registrar),
+        resource_registrar: registrar
+      )
+
+    manager = fixture.manager
+
+    {:ok, context} =
+      MCPRequestContext.start(
+        owner: ResourceRegistrar.owner(registrar),
+        resource_registrar: registrar,
+        endpoint: manager.resource,
+        headers: [],
+        timeout_ms: 1_000,
+        authorization: manager
+      )
+
+    caller = spawn(fn -> assert {:ok, _request} = MCPRequestContext.begin_request(context) end)
+    caller_ref = Process.monitor(caller)
+    assert_receive {:DOWN, ^caller_ref, :process, ^caller, :normal}
+    assert_receive :abnormal_release_attempt
+
+    deadline = System.monotonic_time(:millisecond) + 1_000
+    assert {:error, :store_error} = TokenManager.reject(manager, 1, deadline)
+    assert :ok = ResourceRegistrar.commit(registrar, nil)
+
+    session_ref = Process.monitor(session.pid)
+    controller_ref = Process.monitor(registrar.scope_controller)
+    context_ref = Process.monitor(context.pid)
+    manager_ref = Process.monitor(manager.pid)
+    Process.exit(session.pid, :kill)
+
+    assert_receive {:DOWN, ^session_ref, :process, _pid, :killed}
+    assert_receive {:DOWN, ^controller_ref, :process, _pid, :killed}, 2_000
+    assert Process.alive?(context.pid)
+    assert Process.alive?(manager.pid)
+
+    Agent.update(available, fn _available -> true end)
+    assert_receive {:DOWN, ^manager_ref, :process, _pid, :normal}, 2_000
+    assert_receive {:DOWN, ^context_ref, :process, _pid, :normal}, 2_000
+    assert :ok = MCPRequestContext.close(context)
+  end
+
+  test "session death during registration returns a transport error" do
+    {:ok, session} = ProviderSession.start(Limits.defaults())
+    {:ok, registrar} = ProviderSession.open_registrar(session)
+    assert :ok = ResourceRegistrar.activate(registrar)
+    assert true = :erlang.suspend_process(session.pid)
+
+    start =
+      Task.async(fn ->
+        MCPRequestContext.start(
+          owner: ResourceRegistrar.owner(registrar),
+          resource_registrar: registrar,
+          endpoint: "https://mcp.example/mcp",
+          headers: [],
+          timeout_ms: 1_000
+        )
+      end)
+
+    assert nil == Task.yield(start, 50)
+    session_ref = Process.monitor(session.pid)
+    Process.exit(session.pid, :kill)
+    assert_receive {:DOWN, ^session_ref, :process, _pid, :killed}
+    assert {:error, :mcp_transport_error} = Task.await(start, 1_000)
+  end
+
+  test "retained release survives an unavailable signal owner" do
+    parent = self()
+    {:ok, available} = Agent.start_link(fn -> false end)
+    {:ok, limits} = Limits.new(provider_cleanup_timeout_ms: 200)
+    {:ok, session} = ProviderSession.start(limits)
+    {:ok, registrar} = ProviderSession.open_registrar(session)
+    assert :ok = ResourceRegistrar.activate(registrar)
 
     interceptor = fn
       {:admit_mcp, _admission, _key, _generation, _worker_pid, _ttl_ms}, _timeout ->
         {:return, {:ok, :durable_admission}}
 
       {:release_mcp, :durable_admission}, _timeout ->
-        send(parent, :detached_release_attempt)
+        send(parent, :unavailable_owner_release_attempt)
 
         if Agent.get(available, & &1),
           do: {:return, :ok},
@@ -297,74 +486,29 @@ defmodule PtcRunner.Kernel.MCPRequestContextTest do
 
     {:ok, context} =
       MCPRequestContext.start(
-        owner: self(),
+        owner: ResourceRegistrar.owner(registrar),
+        resource_registrar: registrar,
         endpoint: manager.resource,
         headers: [],
         timeout_ms: 1_000,
         authorization: manager
       )
 
-    caller =
-      spawn(fn ->
-        assert {:ok, _request} = MCPRequestContext.begin_request(context)
-      end)
-
+    caller = spawn(fn -> assert {:ok, _request} = MCPRequestContext.begin_request(context) end)
     caller_ref = Process.monitor(caller)
     assert_receive {:DOWN, ^caller_ref, :process, ^caller, :normal}
-    assert_receive :detached_release_attempt
+    assert_receive :unavailable_owner_release_attempt
 
+    assert true = :erlang.suspend_process(ResourceRegistrar.owner(registrar))
+    assert :ok = ResourceRegistrar.commit(registrar, fn -> MCPRequestContext.close(context) end)
     context_ref = Process.monitor(context.pid)
-    assert {:error, :mcp_transport_error} = MCPRequestContext.close(context)
+
+    assert {:error, :provider_cleanup_failed} = ProviderSession.close(session)
     assert Process.alive?(context.pid)
 
     Agent.update(available, fn _available -> true end)
-    assert_receive {:DOWN, ^context_ref, :process, _pid, :normal}, 31_000
-    assert :ok = MCPRequestContext.close(context)
-  end
-
-  test "close retries its retained token manager after persistence recovers" do
-    {:ok, attempts} = Agent.start_link(fn -> 0 end)
-
-    interceptor = fn
-      {:mark_access_rejected, _key, _generation}, _timeout ->
-        attempt = Agent.get_and_update(attempts, &{&1, &1 + 1})
-        if attempt < 2, do: {:return, {:error, :store_error}}, else: :delegate
-
-      _operation, _timeout ->
-        :delegate
-    end
-
-    fixture = oauth_manager_fixture(interceptor)
-    manager = fixture.manager
-    deadline = System.monotonic_time(:millisecond) + 1_000
-    assert {:error, :store_error} = TokenManager.reject(manager, 1, deadline)
-
-    {:ok, context} =
-      MCPRequestContext.start(
-        owner: self(),
-        endpoint: manager.resource,
-        headers: [],
-        timeout_ms: 1_000,
-        authorization: manager
-      )
-
-    assert {:error, :mcp_transport_error} = MCPRequestContext.close(context)
-    assert Process.alive?(manager.pid)
-    assert :ok = MCPRequestContext.close(context)
-    refute Process.alive?(manager.pid)
-
-    {:ok, replacement_manager} =
-      TokenManager.start(
-        owner: self(),
-        context: fixture.context,
-        authority: fixture.authority,
-        authority_epoch: fixture.epoch
-      )
-
-    assert {:error, :mcp_authorization_required} =
-             TokenManager.authorization_header(replacement_manager, deadline)
-
-    assert :ok = TokenManager.close(replacement_manager)
+    assert_receive {:DOWN, ^context_ref, :process, _pid, :normal}, 10_000
+    assert :ok = TokenManager.close(manager)
   end
 
   test "a stopped token manager closes request admission without leaking its internal error" do
@@ -397,7 +541,7 @@ defmodule PtcRunner.Kernel.MCPRequestContextTest do
     oauth_manager_fixture(interceptor).manager
   end
 
-  defp oauth_manager_fixture(interceptor) do
+  defp oauth_manager_fixture(interceptor, opts \\ []) do
     {:ok, authority} =
       Authority.from_host(
         %{
@@ -474,7 +618,8 @@ defmodule PtcRunner.Kernel.MCPRequestContextTest do
 
     {:ok, manager} =
       TokenManager.start(
-        owner: self(),
+        owner: Keyword.get(opts, :owner, self()),
+        resource_registrar: Keyword.get(opts, :resource_registrar),
         context: wrapped_context,
         authority: authority,
         authority_epoch: epoch

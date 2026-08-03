@@ -42,6 +42,13 @@ The direct REPL does not accept an ambient capability catalog or arbitrary
 profile configuration. Providers and component sources are selected only by
 the manifest and trusted provider registry.
 
+The planned stable manifest mode adds `--host-config HOST.json` and resolves it
+through the same bounded trusted-installation path as `mix ptc.run`. A manifest
+that selects a provider requires this option; a provider-free manifest may omit
+it. Direct sessions and code-owned profile modes reject it. The current REPL
+does not yet accept this option; these rules record the release contract rather
+than a currently usable command combination.
+
 An interactive session also accepts a few meta-commands:
 
 ```text
@@ -66,6 +73,18 @@ Private event policies require an explicit private manifest selection; the
 REPL requires the reserved `.private.jsonl` suffix and restricts the file to
 owner read/write permissions before appending event data. Normal directory
 grants and the Viewer do not discover private-suffixed traces.
+
+The planned stable manifest-backed frontend will treat a private manifest
+result as interactive authority, not ordinary stdout. It will require an
+attached terminal and the explicit `--private-terminal` grant during
+destination preflight, after manifest classification but before audited-local
+checks or opening a provider session. It will reject `--eval`, `--load`,
+positional scripts, stdin, `--format jsonl`, and detached execution at that same
+boundary with `provider_activity: false` and no provider work. Returned private
+values and prints may reach only that authorized terminal; they never enter the
+JSONL stream or an unauthorized stdout sink. The current manifest mode does not
+yet accept this grant; this paragraph records the release contract, not a
+currently usable option combination.
 
 ## Log-analysis mission sessions
 

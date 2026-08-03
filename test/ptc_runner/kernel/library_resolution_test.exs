@@ -4,20 +4,20 @@ defmodule PtcRunner.Kernel.LibraryResolutionTest do
   alias PtcRunner.Kernel.Component
   alias PtcRunner.Kernel.Library
 
-  test "expands installed dependencies before dependants with lexical tie breaking" do
+  test "expands installed dependencies into lexical acquisition order" do
     assert {:ok, components} =
              Library.resolve_components([{:library, "agent.core"}, {:library, "agent.feedback"}])
 
     assert Enum.map(components, & &1.id) == [
+             "agent.core",
              "agent.feedback",
              "agent.native",
+             "agent.prompt",
              "agent.retry",
              "kernel",
-             "agent.prompt",
              "llm",
              "result",
-             "workflow.event",
-             "agent.core"
+             "workflow.event"
            ]
   end
 
@@ -35,7 +35,7 @@ defmodule PtcRunner.Kernel.LibraryResolutionTest do
              Library.resolve_components([local_kernel, {:library, "kernel"}])
   end
 
-  test "rejects missing local dependencies and cycles before compilation" do
+  test "retains local graph failures for bounded bundle compilation" do
     {:ok, missing} =
       Component.new(
         id: "local.missing",
@@ -53,7 +53,14 @@ defmodule PtcRunner.Kernel.LibraryResolutionTest do
         dependencies: ["local.first"]
       )
 
-    assert {:error, :missing_component_dependency} = Library.resolve_components([missing])
-    assert {:error, :component_cycle} = Library.resolve_components([first, second])
+    assert {:ok, [^missing]} = Library.resolve_components([missing])
+
+    assert {:error, %{reason: :missing_component_dependency}} =
+             PtcRunner.Kernel.compile_bundle([missing])
+
+    assert {:ok, [^first, ^second]} = Library.resolve_components([first, second])
+
+    assert {:error, %{reason: :component_cycle}} =
+             PtcRunner.Kernel.compile_bundle([first, second])
   end
 end

@@ -57,7 +57,13 @@ defmodule PtcRunner.Kernel.TutorialExamplesE2ETest do
 
   defp run(example) do
     {:ok, host} = HostConfig.load(@host)
-    {:ok, registry} = HostInstallation.registry(host)
+
+    {:ok, registry} =
+      HostInstallation.catalog(host)
+      |> then(fn {:ok, catalog} ->
+        HostInstallation.runtime_registry(host, catalog)
+      end)
+
     RunBuilder.run(path(example), registry)
   end
 

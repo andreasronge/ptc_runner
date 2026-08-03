@@ -3,9 +3,8 @@ defmodule PtcRunner.Kernel.HostConfigOAuthTest do
 
   alias PtcRunner.Kernel.HostConfig
   alias PtcRunner.Kernel.HostInstallation
+  alias PtcRunner.Kernel.InstallationCatalog
   alias PtcRunner.Kernel.MCPOAuth.Authority
-  alias PtcRunner.Kernel.MCPOAuth.Context
-  alias PtcRunner.Kernel.MCPOAuth.Store.Memory
 
   test "decodes OAuth only when normalized static authentication is empty" do
     config = host_config()
@@ -119,7 +118,7 @@ defmodule PtcRunner.Kernel.HostConfigOAuthTest do
     assert {:ok, _validated} = JSV.validate(host_config(), root, cast: false)
   end
 
-  test "registry/1 rejects OAuth while registry/2 claims explicit principal authority" do
+  test "catalog construction retains only an OAuth runtime marker" do
     assert {:ok, decoded} = HostConfig.decode(host_config(), "/tmp")
 
     host =
@@ -132,15 +131,27 @@ defmodule PtcRunner.Kernel.HostConfigOAuthTest do
         install: decoded.install
       )
 
-    assert {:error, :authorization_context_required} = HostInstallation.registry(host)
+    assert {:ok, catalog} = HostInstallation.catalog(host)
+    descriptor = catalog.descriptors["github"]
 
-    {:ok, memory} = Memory.start_link(owner: self())
-    {:ok, store} = Memory.store(memory)
+    assert descriptor.authorization_mode == :oauth
+    assert descriptor.credential_names == []
+    assert catalog.authorities["github"] == :host_runtime
+    assert is_binary(descriptor.authority_fingerprint)
 
-    {:ok, context} =
-      Context.new(tenant_id: "local", principal_id: "operator", store: store)
+    encoded_catalog = :erlang.term_to_binary(catalog)
+    refute encoded_catalog =~ "https://auth.example"
+    refute encoded_catalog =~ "https://mcp.example/mcp"
+    refute encoded_catalog =~ "public-client"
+    refute encoded_catalog =~ "/callback"
+    refute encoded_catalog =~ "oauth_secret"
 
-    assert {:ok, _registry} = HostInstallation.registry(host, context)
+    public =
+      catalog |> InstallationCatalog.public_installations() |> List.first()
+
+    assert public["installation_revision"] == "github-v1"
+    refute Map.has_key?(public, "authority")
+    refute inspect(public) =~ descriptor.authority_fingerprint
   end
 
   defp host_config do
@@ -152,6 +163,7 @@ defmodule PtcRunner.Kernel.HostConfigOAuthTest do
       "install" => %{
         "github" => %{
           "source" => "mcp",
+          "installation_revision" => "github-v1",
           "transport" => %{
             "type" => "streamable_http",
             "endpoint" => "https://mcp.example/mcp",

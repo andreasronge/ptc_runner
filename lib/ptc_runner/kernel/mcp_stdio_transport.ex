@@ -4,6 +4,7 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
   use GenServer
 
   alias PtcRunner.Kernel.MCPProtocol
+  alias PtcRunner.Kernel.ResourceRegistrar
 
   @enforce_keys [:pid, :outcome]
   defstruct [:pid, :outcome]
@@ -32,12 +33,14 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
   def start(opts), do: start(opts, self())
 
   @doc false
-  @spec start(keyword(), pid()) :: {:ok, t()} | {:error, atom()}
-  def start(opts, owner) when is_list(opts) and is_pid(owner) do
+  @spec start(keyword(), pid(), ResourceRegistrar.t() | nil) :: {:ok, t()} | {:error, atom()}
+  def start(opts, owner, registrar \\ nil)
+
+  def start(opts, owner, registrar) when is_list(opts) and is_pid(owner) do
     outcome = :atomics.new(1, signed: false)
 
     with {:ok, config} <- validate_options(opts) do
-      case GenServer.start(__MODULE__, {owner, config, outcome}) do
+      case GenServer.start(__MODULE__, {owner, config, outcome, registrar}) do
         {:ok, pid} -> {:ok, %__MODULE__{pid: pid, outcome: outcome}}
         {:error, reason} when is_atom(reason) -> {:error, reason}
         {:error, _reason} -> {:error, :mcp_stdio_launcher_unavailable}
@@ -45,7 +48,7 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
     end
   end
 
-  def start(_opts, _owner), do: {:error, :invalid_mcp_stdio_launch}
+  def start(_opts, _owner, _registrar), do: {:error, :invalid_mcp_stdio_launch}
 
   @doc false
   @spec validate_options(keyword()) :: {:ok, map()} | {:error, :invalid_mcp_stdio_launch}
@@ -124,11 +127,12 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
   end
 
   @impl GenServer
-  def init({owner, config, outcome}) do
+  def init({owner, config, outcome, registrar}) do
     Process.flag(:trap_exit, true)
     owner_ref = Process.monitor(owner)
 
-    with :ok <- supported_platform(),
+    with :ok <- ResourceRegistrar.register_root(registrar),
+         :ok <- supported_platform(),
          {:ok, payload} <- bootstrap(config),
          {:ok, port} <- open_port(config.launcher),
          :ok <- start_launcher(port, payload, config.start_timeout_ms, owner_ref) do

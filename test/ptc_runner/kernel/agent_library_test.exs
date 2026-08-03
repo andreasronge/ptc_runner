@@ -17,6 +17,7 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
   alias PtcRunner.Lisp
   alias PtcRunner.Lisp.Format
   alias PtcRunner.Lisp.TrustedTool
+  alias PtcRunner.TestSupport.ProviderSessionFixture
 
   test "llm/request is an ordinary bounded workflow capability" do
     parent = self()
@@ -109,7 +110,7 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     }
 
     {:ok, config} =
-      agent_config([response], [], provider_resources: [close_counter(self(), :terminal_success)])
+      agent_config([response], [], provider_closers: [close_counter(self(), :terminal_success)])
 
     assert {:ok, %{value: %{"ok" => true, "value" => 42}, usage: usage}} =
              Kernel.run(~S|(agent.core/run "Compute the value" {"max_turns" 2})|, config)
@@ -817,7 +818,7 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
       agent_config([response], [],
         prompt_source: prompt_source,
         input: %{"task" => task},
-        provider_resources: [close_counter(self(), :transcript_rejected)],
+        provider_closers: [close_counter(self(), :transcript_rejected)],
         inspection_sink: inspection_sink,
         inspection_path: Path.join(dir, "transcript-rejected.inspection.jsonl")
       )
@@ -864,7 +865,7 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     {:ok, config} =
       agent_config([response], [],
         prompt_source: tiny_prompt_source(),
-        provider_resources: [close_counter(self(), :encoding_rejected)],
+        provider_closers: [close_counter(self(), :encoding_rejected)],
         inspection_sink: inspection_sink,
         inspection_path: Path.join(dir, "encoding-rejected.inspection.jsonl")
       )
@@ -911,7 +912,7 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     }
 
     {:ok, config} =
-      agent_config([response], [], provider_resources: [close_counter(self(), :final_turn)])
+      agent_config([response], [], provider_closers: [close_counter(self(), :final_turn)])
 
     assert {:error, %{kind: :workflow_failed, reason: :explicit_failure, usage: usage}} =
              Kernel.run(~S|(agent.core/run "Use the final turn" {"max_turns" 1})|, config)
@@ -946,7 +947,7 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
 
     {:ok, llm_limited} =
       agent_config([continue, finish], [workflow_capability_calls: 1],
-        provider_resources: [close_counter(self(), :llm_quota)]
+        provider_closers: [close_counter(self(), :llm_quota)]
       )
 
     assert {:error, %{kind: :workflow_failed, usage: llm_usage}} =
@@ -960,7 +961,7 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
 
     {:ok, evaluation_limited} =
       agent_config([continue, finish], [subordinate_evaluations: 1],
-        provider_resources: [close_counter(self(), :evaluation_quota)]
+        provider_closers: [close_counter(self(), :evaluation_quota)]
       )
 
     assert {:error, %{kind: :workflow_failed, usage: evaluation_usage}} =
@@ -1733,7 +1734,7 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     }
 
     {:ok, explicit_config} =
-      agent_config([explicit], [], provider_resources: [close_counter(self(), :explicit_failure)])
+      agent_config([explicit], [], provider_closers: [close_counter(self(), :explicit_failure)])
 
     assert {:error, %{kind: :workflow_failed, reason: :explicit_failure}} =
              Kernel.run(~S|(agent.core/run "Fail" {"max_turns" 1})|, explicit_config)
@@ -1743,7 +1744,7 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
 
     {:ok, provider_config} =
       agent_config([{:error, :transport_down}], [],
-        provider_resources: [close_counter(self(), :provider_failure)]
+        provider_closers: [close_counter(self(), :provider_failure)]
       )
 
     assert {:error, %{kind: :workflow_failed, reason: :explicit_failure}} =
@@ -1861,7 +1862,7 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
       input: Keyword.get(opts, :input, %{}),
       limits: limits,
       event_sink: sink,
-      provider_resources: Keyword.get(opts, :provider_resources, []),
+      provider_session: provider_session(Keyword.get(opts, :provider_closers, []), limits),
       inspection_sink: Keyword.get(opts, :inspection_sink),
       inspection_path: Keyword.get(opts, :inspection_path)
     ]
@@ -1982,6 +1983,9 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
       :ok
     end
   end
+
+  defp provider_session([], _limits), do: nil
+  defp provider_session(resources, limits), do: ProviderSessionFixture.start(resources, limits)
 
   defp required_agent_tools do
     Map.new(

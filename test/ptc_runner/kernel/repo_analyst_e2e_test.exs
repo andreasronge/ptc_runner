@@ -38,7 +38,12 @@ defmodule PtcRunner.Kernel.RepoAnalystE2ETest do
     paths = write_application(dir, node, search_program())
 
     {:ok, host} = HostConfig.load(paths.host)
-    {:ok, registry} = HostInstallation.registry(host)
+
+    {:ok, registry} =
+      HostInstallation.catalog(host)
+      |> then(fn {:ok, catalog} ->
+        HostInstallation.runtime_registry(host, catalog)
+      end)
 
     assert {:ok, built} = RunBuilder.load_and_build(paths.manifest, registry)
     assert [provider_snapshot] = built.config.connector_snapshots
@@ -80,7 +85,12 @@ defmodule PtcRunner.Kernel.RepoAnalystE2ETest do
     paths = write_application(dir, node, nil, workflow: prompt_workflow())
 
     {:ok, host} = HostConfig.load(paths.host)
-    {:ok, registry} = HostInstallation.registry(host)
+
+    {:ok, registry} =
+      HostInstallation.catalog(host)
+      |> then(fn {:ok, catalog} ->
+        HostInstallation.runtime_registry(host, catalog)
+      end)
 
     # This workflow returns the rendered prompt directly rather than through
     # kernel-eval, so the projected value is the prompt string itself.
@@ -111,7 +121,12 @@ defmodule PtcRunner.Kernel.RepoAnalystE2ETest do
 
     File.write!(paths.host, Jason.encode!(host))
     {:ok, decoded} = HostConfig.load(paths.host)
-    {:ok, registry} = HostInstallation.registry(decoded)
+
+    {:ok, registry} =
+      HostInstallation.catalog(decoded)
+      |> then(fn {:ok, catalog} ->
+        HostInstallation.runtime_registry(decoded, catalog)
+      end)
 
     assert {:error, :mcp_invalid_snapshot_identity} =
              RunBuilder.load_and_build(paths.manifest, registry)
@@ -163,7 +178,12 @@ defmodule PtcRunner.Kernel.RepoAnalystE2ETest do
     File.write!(manifest_path, Jason.encode!(manifest))
 
     {:ok, host} = HostConfig.load(Path.join(@root, "repo-analyst.host.json"))
-    {:ok, registry} = HostInstallation.registry(host)
+
+    {:ok, registry} =
+      HostInstallation.catalog(host)
+      |> then(fn {:ok, catalog} ->
+        HostInstallation.runtime_registry(host, catalog)
+      end)
 
     assert {:ok, result} = RunBuilder.run(manifest_path, registry)
     assert %{status: :ok, value: %{outcome: :returned, value: value}} = result.value

@@ -3,9 +3,31 @@ defmodule PtcRunner.Kernel.FrozenBundle do
   An immutable, deterministically ordered component compilation result.
 
   Bundles contain compiled component metadata, ordered component IDs, an
-  aggregate source hash, and the compiled PTC-Lisp prelude. An in-VM
-  attestation prevents callers from mutating a bundle struct and presenting it
-  as compiler output during environment assembly.
+  aggregate graph hash, and the compiled PTC-Lisp prelude. The graph hash is
+  bare lowercase SHA-256 over the canonical `ptc.frozen-bundle.v2` framing of
+  every component ID, source hash, and sorted unique direct dependency list.
+  It therefore changes when code or dependency edges change and does not
+  depend on Erlang external-term encoding.
+
+  All integer fields in the framing are unsigned big-endian:
+
+  ```text
+  "ptc.frozen-bundle.v2\\0" ||
+  u32(component_count) ||
+  for each component sorted by UTF-8 component-ID bytes:
+    0x01 ||
+    u32(component_id_bytes) || component_id ||
+    u64(payload_bytes) || payload
+  ```
+
+  The sole record kind is `0x01`. Its payload is RFC 8785 canonical JSON of
+  exactly `{"dependencies":[...],"source_hash":"..."}`. Dependencies are
+  sorted unique direct component IDs and `source_hash` is the existing bare
+  lowercase SHA-256 hex digest. Component IDs and dependencies are UTF-8
+  strings; neither field is nullable or omitted.
+
+  An in-VM attestation prevents callers from mutating a bundle struct and
+  presenting it as compiler output during environment assembly.
 
   Hosts obtain bundles through `PtcRunner.Kernel.compile_bundle/1`; `seal/1`
   and `valid?/1` support the Kernel's construction boundary.
@@ -13,6 +35,7 @@ defmodule PtcRunner.Kernel.FrozenBundle do
   import Bitwise, only: [bor: 2, bxor: 2]
   @enforce_keys [:components, :component_ids, :hash, :prelude]
   defstruct [:components, :component_ids, :hash, :prelude, :attestation]
+  @field_keys Enum.sort([:__struct__, :components, :component_ids, :hash, :prelude, :attestation])
 
   @type t :: %__MODULE__{
           components: [map()],
@@ -81,7 +104,9 @@ defmodule PtcRunner.Kernel.FrozenBundle do
   @spec valid?(t()) :: boolean()
   @doc "Checks that a bundle still matches its in-VM attestation."
   def valid?(%__MODULE__{attestation: attestation} = bundle) when is_binary(attestation),
-    do: secure_compare(attestation, attest(bundle))
+    do:
+      Enum.sort(Map.keys(bundle)) == @field_keys and
+        secure_compare(attestation, attest(bundle))
 
   def valid?(_bundle), do: false
 

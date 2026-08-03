@@ -76,6 +76,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Removed the unreferenced `diagnostic` and `artifact_state` definitions from
+  the published `ptc-command-envelope-v1` schema. Both were emitted but
+  referenced by no envelope branch, and `diagnostic` was a union over the whole
+  diagnostic catalog, so consumers generating types from `$defs` derived a
+  wider diagnostic than any envelope can carry. Validation behaviour is
+  unchanged; an out-of-tree `$ref` pointing at either definition must be
+  repointed at the per-branch definition it needs.
 - The shipped `agent.main/run` entry now validates model-authored terminal
   candidates against the manifest result contract while the bounded loop can
   still request a correction. Rejected values remain withheld; other workflow

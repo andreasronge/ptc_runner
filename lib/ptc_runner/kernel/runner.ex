@@ -18,6 +18,7 @@ defmodule PtcRunner.Kernel.Runner do
   alias PtcRunner.Kernel.RunState
   alias PtcRunner.Kernel.RuntimeTools
   alias PtcRunner.Kernel.SafeMetadata
+  alias PtcRunner.Kernel.StrictJSON
   alias PtcRunner.Lisp
   alias PtcRunner.Lisp.RetainedSize
   alias PtcRunner.Lisp.TrustedTool
@@ -45,7 +46,7 @@ defmodule PtcRunner.Kernel.Runner do
         result =
           apply_provider_cleanup_failure(
             event_sink_error(%{}),
-            RunConfig.close_provider_resources(config),
+            RunConfig.close_provider_session(config),
             %{}
           )
 
@@ -55,9 +56,26 @@ defmodule PtcRunner.Kernel.Runner do
 
   defp run_claimed_attempt(entry_source, config) do
     with :ok <- entry_source_within_limit(entry_source, config.limits),
-         {:ok, state} <- RunState.start(config.limits) do
+         {:ok, state} <-
+           RunState.start(config.limits, provider_session: config.provider_session) do
       try do
-        run_claimed(entry_source, config, state)
+        case transfer_provider_cleanup(config, state) do
+          :ok ->
+            run_claimed(entry_source, config, state)
+
+          {:error, reason} ->
+            close_run_state(state)
+
+            result =
+              reason
+              |> configuration_error(%{})
+              |> apply_provider_cleanup_failure(
+                RunConfig.close_provider_session(config),
+                %{}
+              )
+
+            finalize_result(result, %{}, config.event_sink)
+        end
       after
         stop_run_state(state)
       end
@@ -66,10 +84,14 @@ defmodule PtcRunner.Kernel.Runner do
         result =
           reason
           |> configuration_error(%{})
-          |> apply_provider_cleanup_failure(RunConfig.close_provider_resources(config), %{})
+          |> apply_provider_cleanup_failure(RunConfig.close_provider_session(config), %{})
 
         finalize_result(result, %{}, config.event_sink)
     end
+  end
+
+  defp transfer_provider_cleanup(config, state) do
+    RunConfig.bind_provider_session(config, self(), state.pid)
   end
 
   defp run_claimed(entry_source, config, state) do
@@ -86,7 +108,7 @@ defmodule PtcRunner.Kernel.Runner do
       end
 
     usage = run_state_usage(state)
-    cleanup = RunConfig.close_provider_resources(config)
+    cleanup = RunConfig.close_provider_session(config)
 
     case execution do
       {:ok, result} ->
@@ -183,26 +205,36 @@ defmodule PtcRunner.Kernel.Runner do
          }}
 
       {:ok, step} ->
-        case Lisp.project_boundary_value(kernel_return_value(step.return), :kernel_json) do
-          {:ok, value} ->
-            if terminal_result_within_limit?(value, config.limits.terminal_result_bytes) do
-              value = RetainedSize.detach_binaries(value)
+        with {:ok, value} <-
+               Lisp.project_boundary_value(kernel_return_value(step.return), :kernel_json),
+             {:ok, value} <- project_result(value, config.result_projection) do
+          if terminal_result_within_limit?(value, config.limits.terminal_result_bytes) do
+            value = RetainedSize.detach_binaries(value)
 
-              {:ok,
-               %Result{
-                 value: value,
-                 usage: RunState.usage(state),
-                 evaluation_memory: RunState.evaluation_memory_summary(state)
-               }}
-            else
-              {:error,
-               %Error{
-                 kind: :limit_exceeded,
-                 reason: :terminal_result_exceeded,
-                 details: %{},
-                 usage: RunState.usage(state)
-               }}
-            end
+            {:ok,
+             %Result{
+               value: value,
+               usage: RunState.usage(state),
+               evaluation_memory: RunState.evaluation_memory_summary(state)
+             }}
+          else
+            {:error,
+             %Error{
+               kind: :limit_exceeded,
+               reason: :terminal_result_exceeded,
+               details: %{},
+               usage: RunState.usage(state)
+             }}
+          end
+        else
+          {:error, :invalid_result_projection} ->
+            {:error,
+             %Error{
+               kind: :workflow_failed,
+               reason: :invalid_result_projection,
+               details: %{},
+               usage: RunState.usage(state)
+             }}
 
           {:error, reason} ->
             {:error,
@@ -228,6 +260,15 @@ defmodule PtcRunner.Kernel.Runner do
              ),
            usage: RunState.usage(state)
          }}
+    end
+  end
+
+  defp project_result(value, :native), do: {:ok, value}
+
+  defp project_result(value, :json) do
+    case StrictJSON.admit(value) do
+      {:ok, projected} -> {:ok, projected}
+      {:error, _reason} -> {:error, :invalid_result_projection}
     end
   end
 

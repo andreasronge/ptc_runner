@@ -201,9 +201,10 @@ defmodule PtcRunner.Kernel.MCPHTTPCancellationTest do
                "remote",
                %{"allow" => ["remote.fixture"]},
                %{
-                 directory: File.cwd!(),
+                 application_content_digest: String.duplicate("0", 64),
                  destination: :mission,
                  limits: limits,
+                 installed_limits: limits,
                  owner: owner
                }
              )

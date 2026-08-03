@@ -1,62 +1,443 @@
 defmodule PtcRunner.Kernel.RunBuilder do
   @moduledoc """
-  Shared manifest-backed construction and execution path.
+  Shared path-free request construction and execution path.
 
-  The builder resolves trusted provider names, compiles separate workflow and
-  mission bundles, assembles their environments, starts the configured event
-  sink, and produces the same `PtcRunner.Kernel.RunConfig` accepted by direct
-  Elixir embedding. Frontends should delegate here instead of creating a
-  second manifest, authority, or event path. Relative artifact destinations are
-  anchored once before preflight and the same absolute paths are retained
-  through post-run persistence.
+  Filesystem and memory adapters first acquire a sealed
+  `PtcRunner.Kernel.RunRequest`. The builder then resolves trusted provider
+  names, compiles separate workflow and mission bundles, assembles their
+  environments, starts the configured event sink, and produces the same
+  `PtcRunner.Kernel.RunConfig` accepted by direct Elixir embedding. Relative
+  artifact destinations are anchored once before preflight and the same
+  absolute paths are retained through post-run persistence.
+
+  Provider-free requests cross the same path-free
+  `PtcRunner.Kernel.RunCoordinator` phases 4 and 5 as command frontends, and
+  downstream assembly consumes the resulting sealed `PreparedRun` directly.
+  Pure option validation completes before that one-way consumption.
+  The Mix command also preflights a provider-bearing prepared run, opens its
+  active session, and passes that same session here for runtime assembly. The
+  transitional registry builders remain until acquisition is cut over, but
+  they no longer open a second provider-session owner.
+
+  A provider-bearing build remains owned by its build creator until execution
+  binds it to a Runner or REPL lifecycle owner. The creator must remain alive
+  until that bind or until `close/1`; returning an unstarted build from a
+  short-lived task is not an ownership transfer.
   """
 
   alias PtcRunner.Kernel
-  alias PtcRunner.Kernel.ComponentOverride
+  alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.InspectionArtifact
   alias PtcRunner.Kernel.InspectionSink
-  alias PtcRunner.Kernel.Manifest
+  alias PtcRunner.Kernel.InstallationCatalog
+  alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.MissionEnvironment
+  alias PtcRunner.Kernel.PreparedRun
   alias PtcRunner.Kernel.PrivateDirectory
   alias PtcRunner.Kernel.ProviderRegistry
-  alias PtcRunner.Kernel.ProviderResources
+  alias PtcRunner.Kernel.ProviderSession
+  alias PtcRunner.Kernel.ResourceRegistrar
   alias PtcRunner.Kernel.Result
   alias PtcRunner.Kernel.ResultArtifact
   alias PtcRunner.Kernel.RunConfig
+  alias PtcRunner.Kernel.RunCoordinator
+  alias PtcRunner.Kernel.RunRequest
   alias PtcRunner.Kernel.TraceLog
   alias PtcRunner.Kernel.ValueContract
   alias PtcRunner.Kernel.WorkflowEnvironment
 
-  @spec build(Manifest.t(), ProviderRegistry.t(), keyword()) ::
+  @acquisition_options [
+    :component_override_descriptor,
+    :mission,
+    :private_mission,
+    :result_projection
+  ]
+  @build_options [
+    :inspect,
+    :installed_limits,
+    :output,
+    :private_output,
+    :trace
+  ]
+  @load_options @acquisition_options ++ @build_options
+  @artifact_options [:trace, :inspect, :output, :private_output]
+
+  @spec build(RunRequest.t(), ProviderRegistry.t(), keyword()) ::
           {:ok,
            %{
              entry_source: binary(),
              config: RunConfig.t(),
-             result_contract: ValueContract.t() | nil
+             result_contract: ValueContract.t() | nil,
+             result_projection: :native | :json
            }}
           | {:error, term()}
-  @doc "Builds an entry expression and complete run configuration from a loaded manifest."
-  def build(manifest, registry, opts \\ [])
+  @doc "Builds an entry expression and complete run configuration from a sealed request."
+  def build(request, registry, opts \\ [])
 
-  def build(%Manifest{} = manifest, %ProviderRegistry{} = registry, opts) when is_list(opts) do
-    with {:ok, opts} <- anchor_artifact_options(opts),
-         :ok <- preflight_inspection(opts),
-         :ok <- preflight_artifact_destinations(opts) do
-      input_class = Keyword.get(opts, :input_class, :normal)
+  def build(%RunRequest{} = request, %ProviderRegistry{} = registry, opts) when is_list(opts) do
+    package = request.package
 
-      case providers(manifest, registry, input_class, opts) do
-        {:ok, providers} -> build_with_providers(manifest, providers, opts)
-        {:error, _reason} = error -> error
+    with :ok <- validate_registry(registry),
+         :ok <- validate_build_options(opts),
+         true <- RunRequest.valid?(request),
+         :ok <- validate_installed_limits(package, registry, opts),
+         :ok <- validate_inspection_selection(request, opts) do
+      if provider_free?(package.providers),
+        do: prepare_and_build(request, registry, opts),
+        else: build_provider_bearing(request, registry, opts)
+    else
+      false -> {:error, :invalid_run_request}
+      {:error, _reason} = error -> error
+    end
+  end
+
+  def build(_request, _registry, _opts), do: {:error, :invalid_run_request}
+
+  @spec build_prepared(PreparedRun.t(), ProviderRegistry.t(), keyword()) ::
+          {:ok,
+           %{
+             entry_source: binary(),
+             config: RunConfig.t(),
+             result_contract: ValueContract.t() | nil,
+             result_projection: :native | :json
+           }}
+          | {:error, term()}
+  @doc "Builds a provider-free run directly from the sealed phase-4/5 result."
+  def build_prepared(prepared, registry, opts \\ [])
+
+  def build_prepared(%PreparedRun{} = prepared, %ProviderRegistry{} = registry, opts)
+      when is_list(opts) do
+    request = prepared.request
+
+    with :ok <- validate_registry(registry),
+         true <- PreparedRun.valid?(prepared),
+         true <- provider_free?(request.package.providers),
+         :ok <- validate_build_options(opts),
+         :ok <- validate_installed_limits(request.package, registry, opts),
+         :ok <- validate_inspection_selection(request, opts),
+         :ok <- PreparedRun.consume(prepared) do
+      do_build_prepared(prepared, registry, opts)
+    else
+      false -> {:error, :invalid_prepared_run}
+      {:error, _reason} = error -> error
+    end
+  end
+
+  def build_prepared(_prepared, _registry, _opts), do: {:error, :invalid_prepared_run}
+
+  @doc false
+  @spec preflight_prepared(PreparedRun.t(), keyword()) ::
+          {:ok, keyword()} | {:error, term()}
+  def preflight_prepared(%PreparedRun{} = prepared, opts) when is_list(opts) do
+    with true <- PreparedRun.valid?(prepared),
+         :ok <- validate_build_options(opts),
+         :ok <- validate_inspection_selection(prepared.request, opts),
+         {:ok, anchored_opts} <- anchor_artifact_options(opts),
+         :ok <- preflight_inspection(anchored_opts),
+         :ok <- preflight_artifact_destinations(anchored_opts),
+         :ok <-
+           preflight_trace(
+             prepared.effective_event_policy,
+             prepared.effective_data_class,
+             anchored_opts
+           ),
+         :ok <-
+           preflight_result(
+             prepared.effective_event_policy,
+             prepared.effective_data_class,
+             anchored_opts
+           ) do
+      {:ok, anchored_opts}
+    else
+      false -> {:error, :invalid_prepared_run}
+      {:error, _reason} = error -> error
+    end
+  end
+
+  def preflight_prepared(_prepared, _opts), do: {:error, :invalid_prepared_run}
+
+  @doc false
+  @spec build_active(
+          PreparedRun.t(),
+          ProviderRegistry.t(),
+          ProviderSession.t(),
+          keyword()
+        ) :: {:ok, map()} | {:error, term()}
+  def build_active(
+        %PreparedRun{} = prepared,
+        %ProviderRegistry{} = registry,
+        session,
+        opts
+      )
+      when is_list(opts) do
+    with true <- PreparedRun.active_valid?(prepared),
+         :ok <- validate_registry(registry),
+         true <- ProviderSession.compatible_limits?(session, prepared.request.package.limits),
+         :ok <- validate_build_options(opts),
+         :ok <- validate_installed_limits(prepared.request.package, registry, opts),
+         :ok <- validate_inspection_selection(prepared.request, opts) do
+      # Downstream provider/build failures close the session at the point that
+      # owns it. Only failures before that handoff are cleaned up here.
+      build_active_preflighted(prepared, registry, session, opts)
+    else
+      false ->
+        prefer_cleanup_error({:error, :invalid_active_run}, close_live_session(session))
+
+      {:error, _reason} = error ->
+        prefer_cleanup_error(error, close_live_session(session))
+    end
+  end
+
+  def build_active(_prepared, _registry, _session, _opts),
+    do: {:error, :invalid_active_run}
+
+  @doc false
+  @spec run_active_with_class(
+          PreparedRun.t(),
+          ProviderRegistry.t(),
+          ProviderSession.t(),
+          keyword()
+        ) :: {:ok, term(), :normal | :private} | {:error, term()}
+  def run_active_with_class(prepared, registry, session, opts) do
+    case build_active(prepared, registry, session, opts) do
+      {:ok, built} ->
+        try do
+          case execute_built(built, opts) do
+            {:ok, result} -> {:ok, result, result_class(built.config.event_sink)}
+            other -> other
+          end
+        after
+          if built.config.inspection_sink, do: InspectionSink.stop(built.config.inspection_sink)
+
+          if Process.alive?(built.config.event_sink.pid),
+            do: EventSink.stop(built.config.event_sink)
+        end
+
+      {:error, _reason} = error ->
+        error
+    end
+  end
+
+  @doc false
+  @spec run_prepared_with_class(PreparedRun.t(), ProviderRegistry.t(), keyword()) ::
+          {:ok, term(), :normal | :private} | {:error, term()}
+  def run_prepared_with_class(prepared, registry, opts) do
+    case build_prepared(prepared, registry, opts) do
+      {:ok, built} ->
+        try do
+          case execute_built(built, opts) do
+            {:ok, result} -> {:ok, result, result_class(built.config.event_sink)}
+            other -> other
+          end
+        after
+          if built.config.inspection_sink, do: InspectionSink.stop(built.config.inspection_sink)
+
+          if Process.alive?(built.config.event_sink.pid),
+            do: EventSink.stop(built.config.event_sink)
+        end
+
+      {:error, _reason} = error ->
+        error
+    end
+  end
+
+  defp validate_registry(registry) do
+    if ProviderRegistry.valid?(registry),
+      do: :ok,
+      else: {:error, :invalid_provider_registry}
+  end
+
+  defp validate_build_options(opts) when is_list(opts) do
+    with :ok <- validate_option_shape(opts, @build_options),
+         :ok <- validate_artifact_option_types(opts),
+         true <- valid_optional_installed_limits?(opts),
+         :ok <- validate_result_option_conflict(opts) do
+      :ok
+    else
+      {:error, _reason} = error -> error
+      false -> {:error, :invalid_build_options}
+    end
+  end
+
+  defp validate_load_options(opts) when is_list(opts) do
+    with :ok <- validate_option_shape(opts, @load_options),
+         :ok <- validate_artifact_option_types(opts),
+         true <- valid_optional_installed_limits?(opts),
+         true <- valid_optional_binary?(opts, :component_override_descriptor),
+         true <- valid_optional_binary?(opts, :mission),
+         true <- valid_optional_binary?(opts, :private_mission),
+         true <- valid_result_projection?(opts),
+         :ok <- validate_mission_option_conflict(opts),
+         :ok <- validate_result_option_conflict(opts) do
+      :ok
+    else
+      {:error, _reason} = error -> error
+      false -> {:error, :invalid_build_options}
+    end
+  end
+
+  defp validate_load_options(_opts), do: {:error, :invalid_build_options}
+
+  defp validate_option_shape(opts, allowed) do
+    if Keyword.keyword?(opts) do
+      keys = Keyword.keys(opts)
+
+      if keys -- allowed == [] and length(keys) == MapSet.size(MapSet.new(keys)),
+        do: :ok,
+        else: {:error, :invalid_build_options}
+    else
+      {:error, :invalid_build_options}
+    end
+  end
+
+  defp validate_artifact_option_types(opts) do
+    if Enum.all?(@artifact_options, &valid_optional_binary?(opts, &1)),
+      do: :ok,
+      else: invalid_artifact_destination()
+  end
+
+  defp valid_optional_installed_limits?(opts) do
+    case Keyword.fetch(opts, :installed_limits) do
+      {:ok, limits} -> Limits.valid?(limits)
+      :error -> true
+    end
+  end
+
+  defp valid_optional_binary?(opts, key) do
+    case Keyword.fetch(opts, key) do
+      {:ok, value} -> is_nil(value) or is_binary(value)
+      :error -> true
+    end
+  end
+
+  defp valid_result_projection?(opts) do
+    case Keyword.fetch(opts, :result_projection) do
+      {:ok, projection} -> projection in [:native, :json]
+      :error -> true
+    end
+  end
+
+  defp validate_mission_option_conflict(opts) do
+    if is_binary(Keyword.get(opts, :mission)) and
+         is_binary(Keyword.get(opts, :private_mission)),
+       do: {:error, :conflicting_mission_inputs},
+       else: :ok
+  end
+
+  defp validate_result_option_conflict(opts) do
+    if is_binary(Keyword.get(opts, :output)) and
+         is_binary(Keyword.get(opts, :private_output)),
+       do: {:error, {:result_preflight_failed, :conflicting_result_destinations}},
+       else: :ok
+  end
+
+  defp validate_installed_limits(package, registry, opts) do
+    expected = Keyword.get(opts, :installed_limits, registry.installed_limits)
+
+    cond do
+      not Limits.valid?(expected) -> {:error, :invalid_build_options}
+      package.installed_limits == expected -> :ok
+      true -> {:error, :installed_limits_mismatch}
+    end
+  end
+
+  defp validate_inspection_selection(request, opts) do
+    if request.policy.inspection_capture == is_binary(Keyword.get(opts, :inspect)),
+      do: :ok,
+      else: {:error, :invalid_execution_policy}
+  end
+
+  defp prepare_and_build(request, registry, opts) do
+    installed_limits = Keyword.get(opts, :installed_limits, registry.installed_limits)
+
+    with {:ok, catalog} <-
+           InstallationCatalog.new(%{}, installed_limits: installed_limits) do
+      case RunCoordinator.prepare(request, catalog) do
+        {:ok, prepared} ->
+          try do
+            build_prepared(prepared, registry, opts)
+          after
+            PreparedRun.close(prepared)
+          end
+
+        {:error, _diagnostic} = error ->
+          error
       end
     end
   end
 
-  defp build_with_providers(manifest, providers, opts) do
+  defp do_build_prepared(prepared, registry, opts) do
+    bundles = {prepared.workflow_bundle, prepared.mission_bundle}
+
+    assemble(
+      prepared.request,
+      bundles,
+      prepared.entry_source,
+      registry,
+      opts
+    )
+  end
+
+  defp build_active_preflighted(prepared, registry, session, opts) do
+    with {:ok, providers} <-
+           providers(
+             prepared.request.package,
+             registry,
+             provider_input_class(prepared.request.input.authority),
+             opts,
+             session
+           ) do
+      build_with_providers(
+        prepared.request,
+        {prepared.workflow_bundle, prepared.mission_bundle},
+        prepared.entry_source,
+        providers,
+        opts
+      )
+    end
+  end
+
+  defp build_provider_bearing(request, registry, opts) do
+    with {:ok, workflow_bundle} <- bundle(request.package.workflow_components),
+         {:ok, mission_bundle} <- bundle(request.package.mission_components),
+         :ok <- RunCoordinator.validate_entry(workflow_bundle, request.package.entry) do
+      assemble(
+        request,
+        {workflow_bundle, mission_bundle},
+        "(#{request.package.entry} data/input)",
+        registry,
+        opts
+      )
+    end
+  end
+
+  defp assemble(request, bundles, entry_source, registry, opts) do
+    with {:ok, opts} <- anchor_artifact_options(opts),
+         :ok <- preflight_inspection(opts),
+         :ok <- preflight_artifact_destinations(opts),
+         {:ok, providers} <-
+           providers(
+             request.package,
+             registry,
+             provider_input_class(request.input.authority),
+             opts
+           ) do
+      build_with_providers(request, bundles, entry_source, providers, opts)
+    end
+  end
+
+  defp build_with_providers(
+         request,
+         {workflow_bundle, mission_bundle},
+         entry_source,
+         providers,
+         opts
+       ) do
+    package = request.package
+
     result =
-      with {:ok, workflow_bundle} <- bundle(manifest.workflow_components),
-           {:ok, mission_bundle} <- bundle(manifest.mission_components),
-           {:ok, workflow} <-
+      with {:ok, workflow} <-
              WorkflowEnvironment.new(
                bundle: workflow_bundle,
                capabilities: providers.workflow.capabilities
@@ -65,20 +446,20 @@ defmodule PtcRunner.Kernel.RunBuilder do
              MissionEnvironment.new(
                bundle: mission_bundle,
                capabilities: providers.mission.capabilities,
-               data: manifest.mission_data
+               data: package.mission_data
              ),
-           {:ok, sink} <- event_sink(manifest, providers),
+           {:ok, sink} <- event_sink(request, providers),
            {:ok, inspection_sink, inspection_path} <- inspection_sink(sink, opts),
-           :ok <- capture_prelude_sources(inspection_sink, sink, {workflow, mission}, manifest) do
+           :ok <- capture_prelude_sources(inspection_sink, sink, {workflow, mission}, package) do
         build_config(
-          manifest,
+          {request, entry_source},
           providers,
           workflow,
           mission,
           sink,
           inspection_sink,
           inspection_path,
-          Keyword.get(opts, :component_overrides, [])
+          package.component_overrides
         )
       end
 
@@ -87,12 +468,12 @@ defmodule PtcRunner.Kernel.RunBuilder do
         success
 
       {:error, _reason} = error ->
-        prefer_cleanup_error(error, close_resources(providers.resources))
+        prefer_cleanup_error(error, close_provider_session(providers.provider_session))
     end
   end
 
   defp build_config(
-         manifest,
+         {request, entry_source},
          providers,
          workflow,
          mission,
@@ -101,26 +482,30 @@ defmodule PtcRunner.Kernel.RunBuilder do
          inspection_path,
          component_overrides
        ) do
+    package = request.package
+
     case RunConfig.new(
            workflow_environment: workflow,
            mission_environment: mission,
-           input: %{"input" => manifest.input},
-           limits: manifest.limits,
+           input: %{"input" => request.input.value},
+           limits: package.limits,
            event_sink: sink,
-           result_contract: manifest.contracts.result,
+           result_contract: package.contracts.result,
+           result_projection: request.policy.result_projection,
            inspection_sink: inspection_sink,
            inspection_path: inspection_path,
-           provider_resources: providers.resources,
+           provider_session: providers.provider_session,
            connector_snapshots: providers.snapshots,
            component_overrides: component_overrides,
-           labels: manifest.labels
+           labels: package.labels
          ) do
       {:ok, config} ->
         {:ok,
          %{
-           entry_source: "(#{manifest.entry} data/input)",
+           entry_source: entry_source,
            config: config,
-           result_contract: manifest.contracts.result
+           result_contract: package.contracts.result,
+           result_projection: request.policy.result_projection
          }}
 
       {:error, _reason} = error ->
@@ -192,74 +577,137 @@ defmodule PtcRunner.Kernel.RunBuilder do
     end)
   end
 
-  defp providers(manifest, registry, input_class, opts)
+  defp providers(manifest, registry, input_class, opts, session \\ nil)
        when input_class in [:normal, :private_inspection] do
-    with {:ok, prepared} <- prepare_providers(manifest, registry),
-         :ok <- validate_provider_dependencies(prepared),
-         :ok <- validate_single_workflow_llm(prepared),
-         effective_class <- effective_data_class(input_class, prepared),
-         :ok <- providers_accept(prepared, effective_class),
-         :ok <- preflight_trace(manifest.events.policy, effective_class, opts),
-         :ok <- preflight_result(manifest.events.policy, effective_class, opts),
-         {:ok, preflighted} <- preflight_providers(prepared),
-         {:ok, credentials} <-
-           ProviderRegistry.resolve_credentials(registry, credential_names(prepared)),
-         {:ok, acquired} <- acquire_providers(preflighted, credentials, effective_class) do
-      {:ok,
-       %{
-         acquired
-         | workflow: finalize_capabilities(acquired.workflow),
-           mission: finalize_capabilities(acquired.mission),
-           snapshots: sort_snapshots(acquired.snapshots)
-       }
-       |> Map.delete(:exports)}
+    if provider_specs(manifest) == [] do
+      with :ok <- preflight_trace(manifest.events.policy, input_class, opts),
+           :ok <- preflight_result(manifest.events.policy, input_class, opts) do
+        {:ok, empty_providers(input_class)}
+      end
+    else
+      open_provider_session(manifest, registry, input_class, opts, session)
     end
   end
 
-  defp providers(_manifest, _registry, _input_class, _opts), do: {:error, :invalid_input_class}
+  defp open_provider_session(manifest, registry, input_class, opts, nil) do
+    with {:ok, session} <- ProviderSession.start(manifest.limits) do
+      finish_provider_session(manifest, registry, session, input_class, opts, true)
+    end
+  end
+
+  defp open_provider_session(
+         manifest,
+         registry,
+         input_class,
+         opts,
+         session
+       ) do
+    finish_provider_session(manifest, registry, session, input_class, opts, false)
+  end
+
+  defp finish_provider_session(manifest, registry, session, input_class, opts, preflight?) do
+    result =
+      with {:ok, prepared} <- prepare_providers(manifest, registry, session),
+           :ok <- validate_provider_dependencies(prepared),
+           :ok <- validate_single_workflow_llm(prepared),
+           effective_class <- effective_data_class(input_class, prepared),
+           :ok <- providers_accept(prepared, effective_class),
+           :ok <- preflight_provider_artifacts(preflight?, manifest, effective_class, opts),
+           {:ok, preflighted} <- preflight_providers(prepared) do
+        try do
+          with {:ok, credentials} <-
+                 ProviderRegistry.resolve_credentials(registry, credential_names(prepared)),
+               {:ok, acquired} <- acquire_providers(preflighted, credentials, effective_class) do
+            {:ok,
+             acquired
+             |> Map.put(:workflow, finalize_capabilities(acquired.workflow))
+             |> Map.put(:mission, finalize_capabilities(acquired.mission))
+             |> Map.put(:snapshots, sort_snapshots(acquired.snapshots))
+             |> Map.put(:provider_session, session)
+             |> Map.delete(:exports)}
+          end
+        after
+          release_preflights(preflighted)
+        end
+      end
+
+    case result do
+      {:ok, _providers} = success ->
+        success
+
+      {:unregistered_provider_close, reason, close} ->
+        prefer_cleanup_error(
+          {:error, reason},
+          ProviderSession.close_with_unregistered(session, close)
+        )
+
+      {:error, _reason} = error ->
+        prefer_cleanup_error(error, ProviderSession.close(session))
+    end
+  end
+
+  defp preflight_provider_artifacts(true, manifest, effective_class, opts) do
+    with :ok <- preflight_trace(manifest.events.policy, effective_class, opts),
+         do: preflight_result(manifest.events.policy, effective_class, opts)
+  end
+
+  defp preflight_provider_artifacts(false, _manifest, _effective_class, _opts), do: :ok
 
   defp sort_snapshots(snapshots), do: Enum.sort_by(snapshots, &Map.get(&1, "provider", ""))
 
-  defp prepare_providers(manifest, registry) do
-    manifest
+  defp prepare_providers(package, registry, session) do
+    package
     |> provider_specs()
     |> Enum.with_index()
     |> Enum.reduce_while({:ok, []}, fn {{destination, spec}, index}, {:ok, prepared} ->
-      context = %{
-        directory: manifest.directory,
-        destination: destination,
-        owner: self(),
-        limits: manifest.limits,
-        installed_limits: manifest.installed_limits
-      }
+      case ProviderSession.open_registrar(session) do
+        {:ok, registrar} ->
+          prepare_provider(package, registry, registrar, destination, spec, index, prepared)
 
-      case ProviderRegistry.prepare(
-             registry,
-             spec["name"],
-             Map.get(spec, "config", %{}),
-             context
-           ) do
-        {:ok, provider} ->
-          entry = %{
-            index: index,
-            provider: spec["name"],
-            destination: destination,
-            credential_names: provider.credential_names,
-            data_class: provider.data_class,
-            accepts_data: provider.accepts_data,
-            requires: provider.requires,
-            provides: provider.provides,
-            workflow_llm?: provider.workflow_llm?,
-            prepared: provider
-          }
-
-          {:cont, {:ok, [entry | prepared]}}
-
-        {:error, _reason} = error ->
-          {:halt, error}
+        {:error, _reason} ->
+          {:halt, {:error, :provider_session_unavailable}}
       end
     end)
     |> reverse_success()
+  end
+
+  defp prepare_provider(package, registry, registrar, destination, spec, index, prepared) do
+    context = %{
+      application_content_digest: package.application_content_digest,
+      destination: destination,
+      owner: ResourceRegistrar.owner(registrar),
+      resource_registrar: registrar,
+      limits: package.limits,
+      installed_limits: package.installed_limits
+    }
+
+    case ProviderRegistry.prepare(
+           registry,
+           spec["name"],
+           Map.get(spec, "config", %{}),
+           context
+         ) do
+      {:ok, provider} ->
+        entry = %{
+          index: index,
+          provider: spec["name"],
+          destination: destination,
+          credential_names: provider.credential_names,
+          data_class: provider.data_class,
+          accepts_data: provider.accepts_data,
+          requires: provider.requires,
+          provides: provider.provides,
+          workflow_llm?: provider.workflow_llm?,
+          registrar: registrar,
+          prepared: provider
+        }
+
+        {:cont, {:ok, [entry | prepared]}}
+
+      {:error, _reason} = error ->
+        _ = ResourceRegistrar.abort(registrar)
+        {:halt, error}
+    end
   end
 
   defp preflight_providers(prepared) do
@@ -275,6 +723,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
           {:cont, {:ok, [entry | preflighted]}}
 
         {:error, _reason} = error ->
+          release_preflights(preflighted)
           {:halt, error}
       end
     end)
@@ -285,7 +734,6 @@ defmodule PtcRunner.Kernel.RunBuilder do
     initial = %{
       workflow: %{capabilities: []},
       mission: %{capabilities: []},
-      resources: [],
       snapshots: [],
       exports: %{},
       data_class: effective_class
@@ -299,14 +747,12 @@ defmodule PtcRunner.Kernel.RunBuilder do
   defp acquire_ready_providers(pending, credentials, accumulated) do
     case Enum.split_with(pending, &services_available?(&1, accumulated.exports)) do
       {[], _blocked} ->
-        prefer_cleanup_error(
-          {:error, :provider_dependency_unavailable},
-          close_resources(accumulated.resources)
-        )
+        {:error, :provider_dependency_unavailable}
 
       {ready, blocked} ->
         case acquire_provider_batch(ready, credentials, accumulated) do
           {:ok, next} -> acquire_ready_providers(blocked, credentials, next)
+          {:unregistered_provider_close, _reason, _close} = cleanup -> cleanup
           {:error, _reason} = error -> error
         end
     end
@@ -317,38 +763,48 @@ defmodule PtcRunner.Kernel.RunBuilder do
       provider_credentials = Map.take(credentials, provider.credential_names)
       services = selected_services(current.exports, provider.requires)
 
-      case ProviderRegistry.acquire(provider.preflighted, provider_credentials, services) do
+      result =
+        with :ok <- ResourceRegistrar.activate(provider.registrar) do
+          ProviderRegistry.acquire(provider.preflighted, provider_credentials, services)
+        end
+
+      case result do
         {:ok, built}
         when built.data_class == provider.data_class and
                built.accepts_data == provider.accepts_data ->
-          environment = Map.fetch!(current, provider.destination)
+          case ResourceRegistrar.commit(provider.registrar, built.close) do
+            :ok ->
+              environment = Map.fetch!(current, provider.destination)
 
-          next =
-            current
-            |> Map.put(provider.destination, %{
-              capabilities: [{provider.index, built.capabilities} | environment.capabilities]
-            })
-            |> Map.update!(:snapshots, &maybe_append(&1, built.snapshot))
-            |> Map.update!(:resources, &maybe_prepend(&1, built.close))
-            |> Map.update!(
-              :exports,
-              &merge_provider_exports(&1, provider.provider, built.exports)
-            )
+              next =
+                current
+                |> Map.put(provider.destination, %{
+                  capabilities: [{provider.index, built.capabilities} | environment.capabilities]
+                })
+                |> Map.update!(:snapshots, &maybe_append(&1, built.snapshot))
+                |> Map.update!(
+                  :exports,
+                  &merge_provider_exports(&1, provider.provider, built.exports)
+                )
 
-          {:cont, {:ok, next}}
+              {:cont, {:ok, next}}
+
+            {:error, _reason} ->
+              {:halt, {:unregistered_provider_close, :provider_session_unavailable, built.close}}
+          end
 
         {:ok, built} ->
-          result =
-            prefer_cleanup_error(
-              {:error, :provider_data_policy_changed},
-              close_resources(maybe_prepend(current.resources, built.close))
-            )
+          case ResourceRegistrar.commit(provider.registrar, built.close) do
+            :ok ->
+              {:halt, {:error, :provider_data_policy_changed}}
 
-          {:halt, result}
+            {:error, _reason} ->
+              {:halt, {:unregistered_provider_close, :provider_data_policy_changed, built.close}}
+          end
 
         {:error, _reason} = error ->
-          result = prefer_cleanup_error(error, close_resources(current.resources))
-          {:halt, result}
+          _ = ResourceRegistrar.abort(provider.registrar)
+          {:halt, error}
       end
     end)
   end
@@ -426,6 +882,13 @@ defmodule PtcRunner.Kernel.RunBuilder do
   defp reverse_success({:ok, values}), do: {:ok, Enum.reverse(values)}
   defp reverse_success({:error, _reason} = error), do: error
 
+  defp release_preflights(preflighted) do
+    Enum.each(preflighted, fn
+      %{preflighted: provider} -> ProviderRegistry.release_preflight(provider)
+      provider -> ProviderRegistry.release_preflight(provider)
+    end)
+  end
+
   defp strictest_data_class(:private_inspection, _next), do: :private_inspection
   defp strictest_data_class(_current, :private_inspection), do: :private_inspection
   defp strictest_data_class(:normal, :normal), do: :normal
@@ -448,19 +911,34 @@ defmodule PtcRunner.Kernel.RunBuilder do
   def close(%{config: %RunConfig{} = config}), do: close(config)
 
   def close(%RunConfig{} = config) do
-    result = RunConfig.close_provider_resources(config)
+    result = RunConfig.close_provider_session(config)
     if config.inspection_sink, do: InspectionSink.stop(config.inspection_sink)
 
     if Process.alive?(config.event_sink.pid), do: EventSink.stop(config.event_sink)
     result
   end
 
-  defp close_resources(resources), do: ProviderResources.close(resources)
+  defp close_provider_session(nil), do: :ok
+  defp close_provider_session(session), do: ProviderSession.close(session)
+
+  defp close_live_session(session) do
+    if ProviderSession.alive?(session), do: ProviderSession.close(session), else: :ok
+  end
+
+  defp empty_providers(data_class) do
+    %{
+      workflow: %{capabilities: []},
+      mission: %{capabilities: []},
+      provider_session: nil,
+      snapshots: [],
+      data_class: data_class
+    }
+  end
 
   defp prefer_cleanup_error(_original, {:error, :provider_cleanup_failed} = cleanup), do: cleanup
   defp prefer_cleanup_error(original, :ok), do: original
 
-  # Provider resources are already closed by `Kernel.run_and_events/2`; the
+  # The provider session is already closed by `Kernel.run_and_events/2`; the
   # returned terminal batch is the sole input to both persistence paths.
   defp execute_built(built, opts) do
     {result, terminal_batch} = Kernel.run_and_events(built.entry_source, built.config)
@@ -496,7 +974,8 @@ defmodule PtcRunner.Kernel.RunBuilder do
            %{
              entry_source: binary(),
              config: RunConfig.t(),
-             result_contract: ValueContract.t() | nil
+             result_contract: ValueContract.t() | nil,
+             result_projection: :native | :json
            }}
           | {:error, term()}
   @doc """
@@ -519,28 +998,58 @@ defmodule PtcRunner.Kernel.RunBuilder do
   end
 
   defp load_and_build_with_options(path, registry, opts) do
-    installed_limits = Keyword.get(opts, :installed_limits, registry.installed_limits)
-
-    with {:ok, manifest} <- Manifest.load(path, installed_limits),
-         {:ok, manifest, input_class} <- maybe_override_input(manifest, opts),
-         {:ok, manifest, override} <- maybe_override_component(manifest, opts),
+    with :ok <- validate_load_options(opts),
+         :ok <- validate_registry(registry),
+         installed_limits <- Keyword.get(opts, :installed_limits, registry.installed_limits),
+         true <- Limits.valid?(installed_limits),
+         {:ok, request_opts} <- request_options(opts, installed_limits),
+         {:ok, request} <- ApplicationPackage.request_directory(path, request_opts),
          {:ok, opts} <- anchor_artifact_options(opts),
-         {:ok, built} <-
-           build(
-             manifest,
-             registry,
-             opts
-             |> Keyword.put(:input_class, input_class)
-             |> Keyword.put(:component_overrides, List.wrap(override))
-           ) do
-      {:ok, built, opts}
+         build_opts = Keyword.drop(opts, @acquisition_options),
+         {:ok, built} <- build(request, registry, build_opts) do
+      {:ok, built, build_opts}
+    else
+      false -> {:error, :invalid_build_options}
+      {:error, _reason} = error -> error
+    end
+  end
+
+  defp request_options(opts, installed_limits) do
+    with {:ok, input_opts} <- input_options(opts) do
+      {:ok,
+       input_opts ++
+         [
+           installed_limits: installed_limits,
+           component_override_descriptor: Keyword.get(opts, :component_override_descriptor),
+           inspection_capture: is_binary(Keyword.get(opts, :inspect)),
+           result_projection: Keyword.get(opts, :result_projection, :native)
+         ]}
+    end
+  end
+
+  defp input_options(opts) do
+    case {Keyword.get(opts, :mission), Keyword.get(opts, :private_mission)} do
+      {nil, nil} ->
+        {:ok, [input_authority: :normal]}
+
+      {path, nil} when is_binary(path) ->
+        {:ok, [input: path, input_authority: :normal]}
+
+      {nil, path} when is_binary(path) ->
+        {:ok, [input: path, input_authority: :private]}
+
+      {path, private} when is_binary(path) and is_binary(private) ->
+        {:error, :conflicting_mission_inputs}
+
+      _invalid ->
+        {:error, :invalid_input}
     end
   end
 
   defp anchor_artifact_options(opts) do
     case artifact_anchor_cwd(opts) do
       {:ok, cwd} ->
-        anchor_artifact_options([:trace, :inspect, :output, :private_output], opts, cwd)
+        anchor_artifact_options(@artifact_options, opts, cwd)
 
       {:error, _reason} ->
         invalid_artifact_destination()
@@ -569,7 +1078,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
 
   defp artifact_anchor_cwd(opts) do
     relative? =
-      Enum.any?([:trace, :inspect, :output, :private_output], fn key ->
+      Enum.any?(@artifact_options, fn key ->
         case Keyword.fetch(opts, key) do
           {:ok, path} when is_binary(path) -> Path.type(path) == :relative
           _missing_or_invalid -> false
@@ -581,39 +1090,6 @@ defmodule PtcRunner.Kernel.RunBuilder do
 
   defp invalid_artifact_destination,
     do: {:error, {:artifact_preflight_failed, :invalid_destination}}
-
-  # Applied after the manifest is loaded and before any bundle is compiled, so
-  # the candidate goes through the same dependency, export, signature, and
-  # capability validation as the source it replaces. An override changes which
-  # source compiles, never what compilation permits.
-  #
-  # The candidate reaches the run only here. It is never manifest input and
-  # never mission data, so a generated program cannot introduce or observe one.
-  defp maybe_override_component(%Manifest{} = manifest, opts) do
-    case Keyword.get(opts, :component_override_descriptor) do
-      nil ->
-        {:ok, manifest, nil}
-
-      path ->
-        with {:ok, override} <- ComponentOverride.load(path),
-             {:ok, workflow, workflow_applied?} <-
-               ComponentOverride.apply(manifest.workflow_components, override),
-             {:ok, mission, mission_applied?} <-
-               ComponentOverride.apply(manifest.mission_components, override),
-             :ok <- exactly_one_target(workflow_applied?, mission_applied?) do
-          {:ok, %Manifest{manifest | workflow_components: workflow, mission_components: mission},
-           ComponentOverride.identity(override)}
-        end
-    end
-  end
-
-  # The descriptor names one component, so it must resolve to one. The same ID
-  # can legitimately be selected into both environments, and replacing both
-  # from a single descriptor would evaluate a candidate in a place the operator
-  # never named.
-  defp exactly_one_target(true, true), do: {:error, :ambiguous_override_target}
-  defp exactly_one_target(false, false), do: {:error, :override_component_not_selected}
-  defp exactly_one_target(_workflow, _mission), do: :ok
 
   # A deterministic destination conflict is reported after manifest and input
   # validation (so a bad output path never masks a more useful error) but
@@ -636,7 +1112,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
 
   defp preflight_artifact_destinations(opts) do
     destinations =
-      [:trace, :inspect, :output, :private_output]
+      @artifact_options
       |> Enum.flat_map(fn key ->
         case Keyword.fetch(opts, key) do
           {:ok, path} when is_binary(path) -> [path]
@@ -764,26 +1240,8 @@ defmodule PtcRunner.Kernel.RunBuilder do
     end
   end
 
-  defp maybe_override_input(manifest, opts) do
-    case {Keyword.get(opts, :mission), Keyword.get(opts, :private_mission)} do
-      {nil, nil} ->
-        {:ok, manifest, :normal}
-
-      {path, nil} when is_binary(path) ->
-        with {:ok, manifest} <- Manifest.override_input(manifest, path),
-             do: {:ok, manifest, :normal}
-
-      {nil, path} when is_binary(path) ->
-        with {:ok, manifest} <- Manifest.override_input(manifest, path),
-             do: {:ok, manifest, :private_inspection}
-
-      {path, private} when is_binary(path) and is_binary(private) ->
-        {:error, :conflicting_mission_inputs}
-
-      _invalid ->
-        {:error, :invalid_input}
-    end
-  end
+  defp provider_input_class(:normal), do: :normal
+  defp provider_input_class(:private), do: :private_inspection
 
   defp persistence_failure(:trace), do: :trace_persistence_failed
   defp persistence_failure(:inspection), do: :inspection_persistence_failed
@@ -917,24 +1375,28 @@ defmodule PtcRunner.Kernel.RunBuilder do
 
   defp maybe_append(values, nil), do: values
   defp maybe_append(values, value), do: values ++ [value]
-  defp maybe_prepend(values, nil), do: values
-  defp maybe_prepend(values, value), do: [value | values]
+
+  defp provider_free?(%{workflow: [], mission: []}), do: true
+  defp provider_free?(_providers), do: false
 
   defp bundle([]), do: {:ok, nil}
   defp bundle(components), do: Kernel.compile_bundle(components)
 
-  defp event_sink(manifest, providers) do
+  defp event_sink(request, providers) do
+    policy = request.policy
+    package = request.package
+
     opts =
       []
-      |> maybe_put(:run_id, manifest.events.run_id)
-      |> maybe_put(:trace_id, manifest.events.trace_id)
+      |> maybe_put(:run_id, policy.run_id)
+      |> maybe_put(:trace_id, policy.trace_id)
 
-    policy =
-      if manifest.events.policy == :private or providers.data_class == :private_inspection,
+    effective_policy =
+      if policy.event_policy == :private or providers.data_class == :private_inspection,
         do: :private,
         else: :normal
 
-    EventSink.start(policy, manifest.limits, opts)
+    EventSink.start(effective_policy, package.limits, opts)
   end
 
   defp inspection_sink(event_sink, opts) do

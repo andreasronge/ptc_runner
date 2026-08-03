@@ -2,8 +2,9 @@ defmodule PtcRunner.Kernel.Limits do
   @moduledoc """
   Normalized positive hard ceilings for one Kernel run.
 
-  All values are positive integers; there is no disabled or infinite form.
-  `new/1` accepts only known fields and overlays them on `defaults/0`.
+  Every field, default, accepted range, scope, and identity rule comes from
+  `PtcRunner.Kernel.LimitCatalog`. There is no disabled or infinite form.
+  `new/1` accepts only cataloged fields and overlays them on `defaults/0`.
 
   Time fields are milliseconds and heap fields are BEAM words:
 
@@ -23,44 +24,30 @@ defmodule PtcRunner.Kernel.Limits do
     `terminal_result_bytes` bound values crossing runtime boundaries;
   - `event_payload_bytes`, `normal_event_count`, and `normal_event_bytes` bound
     canonical event collection.
+  - `provider_cleanup_timeout_ms` is sealed for bounded provider cleanup;
+  - `selection_validation_timeout_ms` is sealed for active selection
+    validation;
+  - `doctor_connectivity_timeout_ms` is sealed for `doctor --connect` health
+    checks.
+
+  The installed-only timeouts are cataloged and sealed in this boundary before
+  the later provider-lifecycle and doctor phases begin consuming them. Merely
+  constructing a `Limits` value does not enforce those future operations.
 
   `defaults/0` are the effective limits used when a manifest does not request
   narrower values. `installed_defaults/0` are the larger host-controlled
   ceilings used by manifest-backed frontends. A host may supply another
-  complete `Limits` value as its installation ceiling; manifests can only
-  narrow it.
+  complete `Limits` value as its installation ceiling. Manifests can narrow
+  only catalog rows scoped `:manifest_narrowable`; installed-only values are
+  copied from the host unchanged.
   """
 
-  @defaults %{
-    run_duration_ms: 30_000,
-    workflow_timeout_ms: 30_000,
-    evaluation_timeout_ms: 1_000,
-    workflow_heap_words: 8_000_000,
-    evaluation_heap_words: 1_250_000,
-    provider_heap_words: 5_000_000,
-    live_provider_tasks: 8,
-    workflow_capability_calls: 64,
-    workflow_capability_calls_per_name: 16,
-    mission_capability_calls: 128,
-    mission_capability_calls_per_name: 32,
-    subordinate_evaluations: 16,
-    protocol_errors: 32,
-    entry_source_bytes: 262_144,
-    subordinate_source_bytes: 131_072,
-    evaluation_memory_bytes: 2_000_000,
-    evaluation_history_bytes: 1_000_000,
-    capability_argument_bytes: 262_144,
-    capability_result_bytes: 1_000_000,
-    event_payload_bytes: 262_144,
-    terminal_result_bytes: 1_000_000,
-    normal_event_count: 256,
-    normal_event_bytes: 4_000_000
-  }
-  @installed_defaults Map.merge(@defaults, %{
-                        run_duration_ms: 300_000,
-                        workflow_timeout_ms: 120_000,
-                        evaluation_timeout_ms: 60_000
-                      })
+  alias PtcRunner.Kernel.LimitCatalog
+
+  @defaults LimitCatalog.defaults(:compiled)
+  @installed_defaults LimitCatalog.defaults(:installed)
+  @fields @defaults |> Map.keys() |> Enum.sort()
+  :ok = LimitCatalog.validate_fields!(@fields)
   @enforce_keys Map.keys(@defaults)
   defstruct Map.to_list(@defaults)
 
@@ -87,7 +74,10 @@ defmodule PtcRunner.Kernel.Limits do
           event_payload_bytes: pos_integer(),
           terminal_result_bytes: pos_integer(),
           normal_event_count: pos_integer(),
-          normal_event_bytes: pos_integer()
+          normal_event_bytes: pos_integer(),
+          provider_cleanup_timeout_ms: pos_integer(),
+          selection_validation_timeout_ms: pos_integer(),
+          doctor_connectivity_timeout_ms: pos_integer()
         }
   @spec defaults() :: t()
   @doc "Returns the complete application-independent default limit set."
@@ -97,34 +87,80 @@ defmodule PtcRunner.Kernel.Limits do
   @doc "Returns practical host ceilings for manifest-backed model and connector runs."
   def installed_defaults, do: struct!(__MODULE__, @installed_defaults)
 
-  @names @defaults |> Map.keys() |> Enum.map(&Atom.to_string/1) |> Enum.sort()
-  @name_index Map.new(Map.keys(@defaults), &{Atom.to_string(&1), &1})
+  @spec valid?(term()) :: boolean()
+  @doc "Checks that a complete limits struct contains only positive integer ceilings."
+  def valid?(%__MODULE__{} = limits) do
+    values = Map.from_struct(limits)
+
+    Enum.sort(Map.keys(values)) == @fields and
+      LimitCatalog.valid_values?(values)
+  end
+
+  def valid?(_limits), do: false
 
   @spec names() :: [binary()]
   @doc "Returns every public limit name, sorted, for operator-facing validation."
-  def names, do: @names
+  def names, do: LimitCatalog.names()
 
   @spec name(term()) :: {:ok, atom()} | :error
   @doc "Resolves one public limit name to its field, or `:error` when unknown."
-  def name(value) when is_binary(value), do: Map.fetch(@name_index, value)
-  def name(_value), do: :error
+  def name(value) do
+    case LimitCatalog.fetch(value) do
+      {:ok, row} -> {:ok, row.field}
+      :error -> :error
+    end
+  end
+
+  @spec fetch(t(), binary() | atom()) :: {:ok, pos_integer()} | :error
+  @doc "Reads one cataloged field from a valid limits value."
+  def fetch(%__MODULE__{} = limits, name) do
+    with true <- valid?(limits),
+         {:ok, row} <- LimitCatalog.fetch(name) do
+      Map.fetch(limits, row.field)
+    else
+      _invalid -> :error
+    end
+  end
+
+  def fetch(_limits, _name), do: :error
 
   @spec new(map() | keyword()) :: {:ok, t()} | {:error, :invalid_limits}
   @doc """
   Builds a complete limit set by applying atom-keyed overrides to the defaults.
 
-  Unknown fields and non-positive or non-integer values are rejected.
+  Unknown fields and values outside their cataloged inclusive range are
+  rejected.
   """
   def new(overrides \\ %{}) do
-    overrides = if is_list(overrides), do: Map.new(overrides), else: overrides
+    build(@defaults, overrides)
+  end
 
-    with true <- is_map(overrides),
-         true <- MapSet.subset?(MapSet.new(Map.keys(overrides)), MapSet.new(Map.keys(@defaults))),
-         values = Map.merge(@defaults, overrides),
-         true <- Enum.all?(values, fn {_key, value} -> is_integer(value) and value > 0 end) do
+  @spec installed(map() | keyword()) :: {:ok, t()} | {:error, :invalid_limits}
+  @doc "Builds complete host-installed ceilings from the catalog's installed defaults."
+  def installed(overrides \\ %{}) do
+    build(@installed_defaults, overrides)
+  end
+
+  defp build(base, overrides) do
+    with {:ok, overrides} <- normalize_overrides(overrides),
+         values = Map.merge(base, overrides),
+         true <- LimitCatalog.valid_values?(values) do
       {:ok, struct!(__MODULE__, values)}
     else
       _ -> {:error, :invalid_limits}
     end
   end
+
+  defp normalize_overrides(overrides) when is_map(overrides), do: {:ok, overrides}
+
+  defp normalize_overrides(overrides) when is_list(overrides) do
+    if Keyword.keyword?(overrides) and
+         length(overrides) == MapSet.size(MapSet.new(Keyword.keys(overrides))) do
+      {:ok, Map.new(overrides)}
+    else
+      {:error, :invalid_limits}
+    end
+  end
+
+  defp normalize_overrides(_overrides), do: {:error, :invalid_limits}
 end

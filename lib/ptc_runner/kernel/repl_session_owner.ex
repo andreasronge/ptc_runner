@@ -43,10 +43,10 @@ defmodule PtcRunner.Kernel.ReplSessionOwner do
     :exit, _reason -> :ok
   end
 
-  @spec close_provider_resources(pid(), reference()) ::
+  @spec close_provider_session(pid(), reference()) ::
           :ok | {:error, :provider_cleanup_failed | :session_owner_mismatch}
-  def close_provider_resources(pid, token) do
-    GenServer.call(pid, {token, :close_provider_resources}, :infinity)
+  def close_provider_session(pid, token) do
+    GenServer.call(pid, {token, :close_provider_session}, :infinity)
   catch
     :exit, _reason -> {:error, :session_owner_mismatch}
   end
@@ -69,11 +69,11 @@ defmodule PtcRunner.Kernel.ReplSessionOwner do
     do: {:reply, {:ok, state.config, state.run_state}, state}
 
   def handle_call(
-        {token, :close_provider_resources},
+        {token, :close_provider_session},
         {caller, _tag},
         %{token: token, owner: caller} = state
       ) do
-    {result, state} = close_provider_resources(state)
+    {result, state} = close_provider_session(state)
     {:reply, result, state}
   end
 
@@ -107,20 +107,20 @@ defmodule PtcRunner.Kernel.ReplSessionOwner do
   defp close_resources(state) do
     safely(fn -> RunState.close(state.run_state) end)
     safely(fn -> RunState.stop(state.run_state) end)
-    {_result, state} = close_provider_resources(state)
+    {_result, state} = close_provider_session(state)
     config = state.config
     if config.inspection_sink, do: safely(fn -> InspectionSink.stop(config.inspection_sink) end)
     safely(fn -> EventSink.stop(config.event_sink) end)
     :ok
   end
 
-  defp close_provider_resources(%{provider_cleanup: nil} = state) do
-    result = RunConfig.close_provider_resources(state.config)
-    config = %{state.config | provider_resources: []}
+  defp close_provider_session(%{provider_cleanup: nil} = state) do
+    result = RunConfig.close_provider_session(state.config)
+    config = %{state.config | provider_session: nil}
     {result, %{state | config: config, provider_cleanup: result}}
   end
 
-  defp close_provider_resources(state), do: {state.provider_cleanup, state}
+  defp close_provider_session(state), do: {state.provider_cleanup, state}
 
   defp safely(fun) do
     fun.()

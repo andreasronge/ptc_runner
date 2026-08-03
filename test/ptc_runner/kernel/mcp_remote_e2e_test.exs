@@ -52,7 +52,13 @@ defmodule PtcRunner.Kernel.MCPRemoteE2ETest do
         registry,
         "remote-docs",
         %{"allow" => ["time.city"]},
-        %{directory: File.cwd!(), destination: :mission, limits: limits, owner: self()}
+        %{
+          application_content_digest: String.duplicate("0", 64),
+          destination: :mission,
+          limits: limits,
+          installed_limits: limits,
+          owner: self()
+        }
       )
 
     if is_function(close, 0), do: on_exit(close)

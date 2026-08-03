@@ -10,13 +10,18 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
   and belongs to the evaluator issue.
   """
 
+  alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.HostConfig
   alias PtcRunner.Kernel.HostInstallation
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.LLMReplay
+  alias PtcRunner.Kernel.PreparedRun
   alias PtcRunner.Kernel.ProviderError
   alias PtcRunner.Kernel.ProviderRegistry
+  alias PtcRunner.Kernel.ProviderSession
+  alias PtcRunner.Kernel.ResourceRegistrar
   alias PtcRunner.Kernel.RunBuilder
+  alias PtcRunner.Kernel.RunCoordinator
 
   @request %{"system" => "bounded", "messages" => [%{"role" => "user", "content" => "hi"}]}
 
@@ -179,18 +184,24 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
     end
 
     @tag :tmp_dir
-    test "an optional installation revision changes provider identity", %{tmp_dir: dir} do
+    test "the required installation revision changes provider identity", %{tmp_dir: dir} do
       {:ok, key} = LLMReplay.request_hash(@request)
       write(dir, [%{"request_hash" => key, "response" => %{"n" => 1}}])
 
       snapshot = fn revision ->
         paths = write_application(dir, installation_revision: revision)
         {:ok, host} = HostConfig.load(paths.host)
-        {:ok, registry} = HostInstallation.registry(host)
+
+        {:ok, registry} =
+          HostInstallation.catalog(host)
+          |> then(fn {:ok, catalog} ->
+            HostInstallation.runtime_registry(host, catalog)
+          end)
+
         {:ok, limits} = Limits.new()
 
         context = %{
-          directory: dir,
+          application_content_digest: String.duplicate("0", 64),
           destination: :workflow,
           owner: self(),
           limits: limits,
@@ -202,16 +213,13 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
         built.snapshot
       end
 
-      absent = snapshot.(nil)
       third = snapshot.("deployment-3")
       fourth = snapshot.("deployment-4")
 
-      assert third["installation_revision"] == "deployment-3"
-      refute Map.has_key?(absent, "installation_revision")
+      assert third["declaration"]["installation_revision"] == "deployment-3"
 
       # The revision has to enter the identity before it is hashed, or a
       # revision change would leave trial attribution unchanged.
-      refute absent["snapshot_hash"] == third["snapshot_hash"]
       refute third["snapshot_hash"] == fourth["snapshot_hash"]
     end
 
@@ -248,6 +256,28 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
     end
 
     @tag :tmp_dir
+    test "an unavailable registrar is not reported as invalid fixtures", %{tmp_dir: dir} do
+      {:ok, key} = LLMReplay.request_hash(@request)
+      write(dir, [%{"request_hash" => key, "response" => %{"n" => 1}}])
+
+      {:ok, session} = ProviderSession.start(Limits.defaults())
+      {:ok, registrar} = ProviderSession.open_registrar(session)
+      assert :ok = ResourceRegistrar.activate(registrar)
+      owner = ResourceRegistrar.owner(registrar)
+      assert :ok = ResourceRegistrar.abort(registrar)
+
+      assert {:error, :resource_registrar_unavailable} =
+               LLMReplay.start(dir, "replay.jsonl",
+                 max_entries: 100,
+                 max_result_bytes: 250_000,
+                 owner: owner,
+                 resource_registrar: registrar
+               )
+
+      assert :ok = ProviderSession.close(session)
+    end
+
+    @tag :tmp_dir
     test "fixtures are confined to the host-config directory", %{tmp_dir: dir} do
       File.mkdir_p!(Path.join(dir, "host"))
       File.write!(Path.join(dir, "outside.jsonl"), "{}\n")
@@ -273,10 +303,58 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
 
       paths = write_application(dir)
       {:ok, host} = HostConfig.load(paths.host)
-      {:ok, registry} = HostInstallation.registry(host)
+
+      {:ok, registry} =
+        HostInstallation.catalog(host)
+        |> then(fn {:ok, catalog} ->
+          HostInstallation.runtime_registry(host, catalog)
+        end)
 
       assert {:ok, result} = RunBuilder.run(paths.manifest, registry)
       assert result.value == %{"first" => %{"content" => "a"}, "second" => %{"content" => "b"}}
+    end
+
+    @tag :tmp_dir
+    test "a sealed replay declaration is accepted by the runtime provider path", %{tmp_dir: dir} do
+      {:ok, key} = LLMReplay.request_hash(@request)
+      write(dir, [%{"request_hash" => key, "response" => %{"content" => "a"}}])
+
+      paths = write_application(dir)
+      assert {:ok, host} = HostConfig.load(paths.host)
+      assert {:ok, catalog} = HostInstallation.catalog(host)
+
+      assert {:ok, request} =
+               ApplicationPackage.request_directory(paths.manifest,
+                 installed_limits: catalog.installed_limits
+               )
+
+      assert {:ok, prepared} = RunCoordinator.prepare(request, catalog)
+
+      assert get_in(prepared.provider_declarations, [Access.at(0), :config, "max_entries"]) == 100
+
+      assert {:ok, registry} = HostInstallation.runtime_registry(host, catalog)
+
+      [declaration] = prepared.provider_declarations
+
+      context = %{
+        application_content_digest: prepared.request.package.application_content_digest,
+        destination: declaration.destination,
+        owner: self(),
+        limits: prepared.request.package.limits,
+        installed_limits: prepared.request.package.installed_limits
+      }
+
+      assert {:ok, provider_preparation} =
+               ProviderRegistry.prepare(
+                 registry,
+                 declaration.name,
+                 declaration.config,
+                 context
+               )
+
+      assert provider_preparation.credential_names == []
+      assert :ok = PreparedRun.close(prepared)
+      assert :ok = ProviderRegistry.close(registry)
     end
 
     @tag :tmp_dir
@@ -291,7 +369,12 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
       # instead of the ambiguity.
       paths = write_application(dir, both_llms: true, fixtures: "missing.jsonl")
       {:ok, host} = HostConfig.load(paths.host)
-      {:ok, registry} = HostInstallation.registry(host)
+
+      {:ok, registry} =
+        HostInstallation.catalog(host)
+        |> then(fn {:ok, catalog} ->
+          HostInstallation.runtime_registry(host, catalog)
+        end)
 
       assert {:error, :ambiguous_workflow_llm} = RunBuilder.run(paths.manifest, registry)
     end
@@ -303,7 +386,12 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
 
       paths = write_application(dir, destination: "mission")
       {:ok, host} = HostConfig.load(paths.host)
-      {:ok, registry} = HostInstallation.registry(host)
+
+      {:ok, registry} =
+        HostInstallation.catalog(host)
+        |> then(fn {:ok, catalog} ->
+          HostInstallation.runtime_registry(host, catalog)
+        end)
 
       assert {:error, :provider_destination_denied} = RunBuilder.run(paths.manifest, registry)
     end
@@ -315,7 +403,12 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
 
       paths = write_application(dir, selection: %{"max_result_bytes" => 500_000})
       {:ok, host} = HostConfig.load(paths.host)
-      {:ok, registry} = HostInstallation.registry(host)
+
+      {:ok, registry} =
+        HostInstallation.catalog(host)
+        |> then(fn {:ok, catalog} ->
+          HostInstallation.runtime_registry(host, catalog)
+        end)
 
       assert {:error, :invalid_llm_replay_selection} = RunBuilder.run(paths.manifest, registry)
     end
@@ -358,15 +451,10 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
     replay =
       %{
         "source" => "llm_replay",
+        "installation_revision" => Keyword.get(opts, :installation_revision, "replay-v1"),
         "fixtures" => fixtures,
         "ceilings" => %{"max_entries" => 100, "max_result_bytes" => 250_000}
       }
-      |> then(fn installation ->
-        case Keyword.get(opts, :installation_revision) do
-          nil -> installation
-          revision -> Map.put(installation, "installation_revision", revision)
-        end
-      end)
 
     install =
       if Keyword.get(opts, :both_llms, false) do
@@ -374,6 +462,7 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
           "replay-llm" => replay,
           "live-llm" => %{
             "source" => "llm",
+            "installation_revision" => "live-v1",
             "model" => "openrouter:deepseek/deepseek-v4-flash",
             "credential" => "key"
           }

@@ -88,7 +88,12 @@ defmodule PtcRunner.Kernel.RepoAnalystEvaluationE2ETest do
 
   test "the shipped replay manifest and dedicated host config run unchanged" do
     {:ok, host} = HostConfig.load(@evaluation_host)
-    {:ok, registry} = HostInstallation.registry(host)
+
+    {:ok, registry} =
+      HostInstallation.catalog(host)
+      |> then(fn {:ok, catalog} ->
+        HostInstallation.runtime_registry(host, catalog)
+      end)
 
     assert {:ok, result} = RunBuilder.run(@replay_manifest, registry)
     assert result.value["status"] == "scored"
@@ -135,7 +140,12 @@ defmodule PtcRunner.Kernel.RepoAnalystEvaluationE2ETest do
     workspace = materialize_workspace(directory, get_in(baseline_input, ["case", "id"]))
     host_path = prepare_host(directory, workspace)
     {:ok, host} = HostConfig.load(host_path)
-    {:ok, registry} = HostInstallation.registry(host)
+
+    {:ok, registry} =
+      HostInstallation.catalog(host)
+      |> then(fn {:ok, catalog} ->
+        HostInstallation.runtime_registry(host, catalog)
+      end)
 
     %{
       jq: jq,

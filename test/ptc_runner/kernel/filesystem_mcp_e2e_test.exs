@@ -27,14 +27,25 @@ defmodule PtcRunner.Kernel.FilesystemMCPE2ETest do
     paths = write_application(dir, node)
 
     assert {:ok, host} = HostConfig.load(paths.host)
-    assert {:ok, registry} = HostInstallation.registry(host)
+
+    assert {:ok, registry} =
+             HostInstallation.catalog(host)
+             |> then(fn {:ok, catalog} ->
+               HostInstallation.runtime_registry(host, catalog)
+             end)
+
     assert {:ok, built} = RunBuilder.load_and_build(paths.manifest, registry)
 
     assert [snapshot] = built.config.connector_snapshots
     assert snapshot["provider"] == "workspace"
-    assert snapshot["protocol"] == "mcp-2026-07-28"
+    assert snapshot["declaration"]["source"] == "mcp"
+    assert snapshot["acquisition"]["protocol"] == "mcp-2026-07-28"
+    assert snapshot["acquisition"]["transport"] == "stdio"
+    assert snapshot["acquisition"]["launcher_protocol_version"] == 1
+    assert snapshot["acquisition"]["launcher_sha256"] =~ ~r/\A[0-9a-f]{64}\z/
+    assert snapshot["acquisition"]["server_executable_sha256"] =~ ~r/\A[0-9a-f]{64}\z/
     assert snapshot["snapshot_hash"] =~ ~r/\A[0-9a-f]{64}\z/
-    assert length(snapshot["tools"]) == 5
+    assert length(snapshot["acquisition"]["tools"]) == 5
 
     assert {:ok, result} = RunBuilder.run(paths.manifest, registry)
 

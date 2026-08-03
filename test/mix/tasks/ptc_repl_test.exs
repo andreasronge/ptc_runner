@@ -54,7 +54,11 @@ defmodule Mix.Tasks.Ptc.ReplTest do
   test "a strict manifest supplies the REPL workflow bundle", %{tmp_dir: directory} do
     component_path = Path.join(directory, "helpers.clj")
     manifest_path = Path.join(directory, "ptc.json")
-    File.write!(component_path, "(ns helpers) (defn answer [] 42)")
+
+    File.write!(
+      component_path,
+      "(ns helpers) (defn answer [] 42) (defn run [input] (return input))"
+    )
 
     File.write!(
       manifest_path,
@@ -62,7 +66,7 @@ defmodule Mix.Tasks.Ptc.ReplTest do
         "version" => 1,
         "workflow" => %{
           "components" => [%{"id" => "helpers", "path" => "helpers.clj"}],
-          "entry" => "helpers/answer"
+          "entry" => "helpers/run"
         },
         "input" => %{"value" => %{}}
       })
@@ -134,7 +138,11 @@ defmodule Mix.Tasks.Ptc.ReplTest do
     component_path = Path.join(directory, "helpers.clj")
     manifest_path = Path.join(directory, "private.json")
     trace_path = Path.join(directory, "private.private.jsonl")
-    File.write!(component_path, "(ns helpers) (defn answer [] 42)")
+
+    File.write!(
+      component_path,
+      "(ns helpers) (defn answer [] 42) (defn run [input] (return input))"
+    )
 
     File.write!(
       manifest_path,
@@ -142,7 +150,7 @@ defmodule Mix.Tasks.Ptc.ReplTest do
         "version" => 1,
         "workflow" => %{
           "components" => [%{"id" => "helpers", "path" => "helpers.clj"}],
-          "entry" => "helpers/answer"
+          "entry" => "helpers/run"
         },
         "input" => %{"value" => %{}},
         "events" => %{"policy" => "private"}
