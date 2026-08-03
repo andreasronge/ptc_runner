@@ -154,17 +154,22 @@ defmodule PtcRunner.Kernel.HostInstallation do
     end
   end
 
-  # Admission must ask the same question the request-time check asks, or a
-  # route that needs no backing application is still gated on one: a host-owned
-  # run would fail as `provider_application_unavailable`, and a command-owned
-  # run would start an application it never uses.
-  defp maybe_provider_application(implementation, %{source: :llm} = installation) do
-    adapter = Application.get_env(:ptc_runner, :llm_adapter, PtcRunner.LLM.ReqLLMAdapter)
-
-    case provider_application(adapter, resolved_model(installation.model)) do
-      nil -> implementation
-      application -> Map.put(implementation, :provider_application, application)
-    end
+  # Deliberately static. Catalog construction is an inert phase whose builder is
+  # `inactive_runtime_builder/2`; asking the adapter here would execute
+  # configurable code, and a raising registry or callback would escape as an
+  # exception rather than `{:error, :invalid_host_installation}`. The cost is
+  # that a direct `ollama:`/`openai-compat:` route is still admitted against
+  # :req_llm, which is the long-standing behaviour rather than a regression. The
+  # request-time check in `provider_application_ready/2` is route-aware, so the
+  # error a caller actually sees is correct.
+  defp maybe_provider_application(implementation, %{source: :llm}) do
+    if Application.get_env(
+         :ptc_runner,
+         :llm_adapter,
+         PtcRunner.LLM.ReqLLMAdapter
+       ) == PtcRunner.LLM.ReqLLMAdapter,
+       do: Map.put(implementation, :provider_application, :req_llm),
+       else: implementation
   end
 
   defp maybe_provider_application(implementation, _installation), do: implementation
@@ -1176,16 +1181,6 @@ defmodule PtcRunner.Kernel.HostInstallation do
 
   # `adapter` is always the module resolved by PtcRunner.LLM.adapter!/0, so no
   # non-atom clause is reachable here.
-  # Admission sees the configured model, which may be a registry alias; the
-  # request path routes on the resolved name. Fall back to the raw name, whose
-  # unprefixed form conservatively requires the backing application.
-  defp resolved_model(model) do
-    case PtcRunner.LLM.Registry.resolve(model) do
-      {:ok, resolved} -> resolved
-      _unresolved -> model
-    end
-  end
-
   defp provider_application(adapter, model) when is_atom(adapter) do
     if Code.ensure_loaded?(adapter) and function_exported?(adapter, :provider_application, 1),
       do: adapter.provider_application(model),

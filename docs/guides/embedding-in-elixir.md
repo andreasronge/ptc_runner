@@ -109,8 +109,12 @@ transport outage, because retrying cannot start an OTP application. Adapters
 declare what they need through the optional `provider_application/1` callback on
 `PtcRunner.LLM`, which receives the resolved model and answers `:req_llm` or
 `nil`: one adapter may route some models through a dependency and serve others
-directly over HTTP, and only the former are gated. Both run admission and the
-request-time check consult that same answer.
+directly over HTTP, and only the former fail this way.
+
+Run admission is deliberately coarser. Catalog construction is inert and invokes
+no provider implementation, so it admits every shipped LLM installation against
+`:req_llm` regardless of route. A host-owned run therefore still expects that
+application even for a direct `ollama:` or `openai-compat:` model.
 
 Credential loading is decided separately. `mix ptc.run` reads the nearest `.env`
 whenever a selected LLM installation declares an `env` credential, including for
