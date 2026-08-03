@@ -167,7 +167,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
   def build_active(
         %PreparedRun{} = prepared,
         %ProviderRegistry{} = registry,
-        %ProviderSession{} = session,
+        session,
         opts
       )
       when is_list(opts) do
@@ -601,7 +601,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
          registry,
          input_class,
          opts,
-         %ProviderSession{} = session
+         session
        ) do
     finish_provider_session(manifest, registry, session, input_class, opts, false)
   end
@@ -922,8 +922,8 @@ defmodule PtcRunner.Kernel.RunBuilder do
   defp close_provider_session(nil), do: :ok
   defp close_provider_session(session), do: ProviderSession.close(session)
 
-  defp close_live_session(%ProviderSession{pid: pid} = session) do
-    if Process.alive?(pid), do: ProviderSession.close(session), else: :ok
+  defp close_live_session(session) do
+    if ProviderSession.alive?(session), do: ProviderSession.close(session), else: :ok
   end
 
   defp empty_providers(data_class) do

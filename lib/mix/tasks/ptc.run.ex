@@ -520,6 +520,7 @@ defmodule Mix.Tasks.Ptc.Run do
   defp authorization_mode(%{auth: auth}) when auth in [nil, []], do: "none"
   defp authorization_mode(_transport), do: "static"
 
+  @spec raise_failure(term()) :: no_return()
   defp raise_failure(%CommandDiagnostic{phase: :provider_declaration, code: :provider_unknown}),
     do: Mix.raise("ptc.run failed: :unknown_provider")
 

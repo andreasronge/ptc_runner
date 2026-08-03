@@ -285,7 +285,7 @@ defmodule PtcRunner.Kernel.RunState do
 
   def use_provider_session(
         %__MODULE__{provider_tracker: {:task_tracker, tracker}} = state,
-        %ProviderSession{} = session
+        session
       ) do
     if ProviderSession.valid?(session) do
       :ok = ProviderTaskTracker.close(tracker)
@@ -959,7 +959,7 @@ defmodule PtcRunner.Kernel.RunState do
     end
   end
 
-  defp start_provider_tracker(%ProviderSession{} = session, _run_state),
+  defp start_provider_tracker(session, _run_state),
     do: {:ok, {:provider_session, session}}
 
   defp attach_provider_task({:task_tracker, tracker}, provider),
@@ -974,8 +974,7 @@ defmodule PtcRunner.Kernel.RunState do
     do: ProviderSession.drain_provider_tasks(session)
 
   defp valid_provider_session?(nil), do: true
-  defp valid_provider_session?(%ProviderSession{} = session), do: ProviderSession.valid?(session)
-  defp valid_provider_session?(_session), do: false
+  defp valid_provider_session?(session), do: ProviderSession.valid?(session)
 
   defp call(%__MODULE__{pid: pid, token: token}, request),
     do: GenServer.call(pid, {token, request})

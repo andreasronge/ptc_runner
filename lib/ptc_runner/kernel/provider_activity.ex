@@ -120,8 +120,8 @@ defmodule PtcRunner.Kernel.ProviderActivity do
         from,
         state
       )
-      when is_atom(operation) and is_struct(deadline, Deadline) do
-    if Deadline.valid?(deadline) and not Deadline.expired?(deadline),
+      when is_atom(operation) do
+    if Deadline.live?(deadline),
       do: handle_operation(operation, from, state),
       else: expired_operation(operation, from, state)
   end

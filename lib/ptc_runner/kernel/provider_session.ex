@@ -100,6 +100,11 @@ defmodule PtcRunner.Kernel.ProviderSession do
   def valid?(_session), do: false
 
   @doc false
+  @spec alive?(term()) :: boolean()
+  def alive?(%__MODULE__{} = session), do: valid?(session) and Process.alive?(session.pid)
+  def alive?(_session), do: false
+
+  @doc false
   @spec compatible_limits?(term(), term()) :: boolean()
   def compatible_limits?(%__MODULE__{} = session, %Limits{} = limits) do
     valid?(session) and Limits.valid?(limits) and

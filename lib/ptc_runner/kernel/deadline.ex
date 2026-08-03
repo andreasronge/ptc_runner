@@ -64,5 +64,9 @@ defmodule PtcRunner.Kernel.Deadline do
 
   def valid?(_deadline), do: false
 
+  @doc false
+  @spec live?(term()) :: boolean()
+  def live?(deadline), do: valid?(deadline) and not expired?(deadline)
+
   defp now_ms, do: System.monotonic_time(:millisecond)
 end
