@@ -156,6 +156,43 @@ was fed, not in the judge:
 
 Filed as [#1165](https://github.com/andreasronge/ptc_runner/issues/1165).
 
+## What the private logs show
+
+Analyzed with the runtime's own `inspection-analysis-v2` profile rather than by
+reading JSONL from outside, so the numbers come from the same correlated
+private records an operator would query.
+
+**Every run fetches each record twice, and it is correct.** Across all 9
+authored runs, `evidence.get` calls run 45–50% duplicate — 26 calls for 13
+records. The first hypothesis, that the model's per-source traversal was
+silently dropping records to paging, is **wrong**: `matched` equals `returned`
+in every search and no `truncated` flag is ever set. Attributing the calls by
+`evaluation_id` gives the real answer:
+
+```
+mission-evaluation-10  gets 13  distinct 13   <- the gathering program
+mission-evaluation-36  gets 13  distinct 13   <- the citation verification
+```
+
+One gather pass, one verify pass, no duplicate inside either.
+`resolve-citations` re-reads each cited record from the evidence source instead
+of trusting the copy the program already holds, which is what makes it a check
+rather than a restatement — verifying against the same bytes the model was
+shown would be circular.
+
+The control matters here: **the fast arm shows the identical ratio in all 20 of
+its runs**, so this is a property of the application's verification step, not of
+model-authored retrieval.
+
+**The consequence is a scaling ceiling nobody has costed.** Mission capability
+calls grow at roughly twice the record count plus one search per source, while
+`llm_calls` — the headline metric of this whole comparison — hides that
+completely. The manifests cap `mission_capability_calls` at 512, which is
+reached somewhere around 250 records. A "hundreds of records" incident, the
+exact hard case the next step calls for, would hit that ceiling before it
+tested anything. Either the limit rises or verification stops re-reading; that
+choice belongs in the hard-case design, not in the run that discovers it.
+
 ## Runtime friction found
 
 - [#1165](https://github.com/andreasronge/ptc_runner/issues/1165) —
@@ -167,6 +204,20 @@ Filed as [#1165](https://github.com/andreasronge/ptc_runner/issues/1165).
 - Fixed on this branch: declared annotation counter names containing a hyphen
   could never match, because the tool boundary rewrites hyphens to underscores
   while the declaration grammar requires kebab-case.
+- A private analysis session redacts the *name* in an `unbound_var` error,
+  answering only `private evaluation failed`. The undefined name is the
+  analyst's own script text, not captured private data, so redacting it hides
+  the one fact that would fix the script. Found by elimination over two extra
+  round trips.
+- `defn-` does not bind in dynamic source. `(defn- f [x] x)` followed by
+  `(f 1)` fails `unbound_var` while the same code with `defn` works. It should
+  either work or be rejected as an invalid form; defining nothing and saying
+  nothing is the worst of the three.
+- The analysis profile's `traces`/`inspection` resources want a flat directory.
+  `run.sh` writes one subdirectory per tag, and pointing the profile at that
+  parent returns `{"items" []}` with no diagnostic — indistinguishable from a
+  capture that genuinely holds no runs. This is finding 4's shape (a rejected
+  query reading as an empty result) on the resource-loading path.
 
 ## Runtime capabilities confirmed
 
