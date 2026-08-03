@@ -1003,6 +1003,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
          {:ok, manager} <-
            TokenManager.start(
              owner: context.owner,
+             resource_registrar: Map.get(context, :resource_registrar),
              context: authorization_context,
              authority: authority,
              authority_epoch: authority_epoch
@@ -1023,16 +1024,20 @@ defmodule PtcRunner.Kernel.HostInstallation do
           success
 
         error ->
-          case ManagerCleanup.adopt(manager) do
+          case ManagerCleanup.adopt(manager, Map.get(context, :resource_registrar)) do
             :ok ->
               error
 
             {:error, :cleanup_unavailable} ->
               Process.exit(manager.pid, :kill)
               {:error, :mcp_transport_error}
+
+            {:error, :scope_unavailable} ->
+              {:error, :mcp_transport_error}
           end
       end
     else
+      {:error, :resource_registrar_unavailable} -> {:error, :mcp_transport_error}
       _invalid -> {:error, :mcp_authorization_required}
     end
   end
@@ -1121,7 +1126,8 @@ defmodule PtcRunner.Kernel.HostInstallation do
            LLMReplay.start(host.directory, installation.fixtures,
              max_entries: selected.max_entries,
              max_result_bytes: selected.max_result_bytes,
-             owner: context.owner
+             owner: context.owner,
+             resource_registrar: Map.get(context, :resource_registrar)
            ),
          {:ok, capability} <-
            LLMCapability.new(
@@ -1159,6 +1165,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
   defp acquire_trace_snapshot(directory, installation, selected, context) do
     case TraceSnapshot.start({:directory, directory},
            owner: context.owner,
+           resource_registrar: Map.get(context, :resource_registrar),
            max_source_bytes: selected.max_source_bytes,
            max_result_bytes: selected.max_result_bytes
          ) do
@@ -1203,6 +1210,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
        ) do
     case InspectionSnapshot.start({:directory, directory}, trace_snapshot,
            owner: context.owner,
+           resource_registrar: Map.get(context, :resource_registrar),
            max_files: selected.max_files,
            max_source_bytes: selected.max_source_bytes,
            max_result_bytes: selected.max_result_bytes

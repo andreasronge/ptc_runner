@@ -18,6 +18,8 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManager do
   persistence workers before discarding local state. A failed persistence is
   retained and retried on close; close fails without stopping the manager if
   that retry also fails. Neither response is replayed automatically.
+  Session-owner death adopts unsettled persistence through the bounded cleanup
+  owner before the registrar's cooperative shutdown window ends.
   """
 
   use GenServer
@@ -28,9 +30,11 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManager do
   alias PtcRunner.Kernel.MCPOAuth.Context
   alias PtcRunner.Kernel.MCPOAuth.Discovery
   alias PtcRunner.Kernel.MCPOAuth.LocalFences
+  alias PtcRunner.Kernel.MCPOAuth.ManagerCleanup
   alias PtcRunner.Kernel.MCPOAuth.Scope
   alias PtcRunner.Kernel.MCPOAuth.Store
   alias PtcRunner.Kernel.MCPOAuth.TokenClient
+  alias PtcRunner.Kernel.ResourceRegistrar
 
   @response_transition_timeout_ms 5_000
   @close_timeout_ms @response_transition_timeout_ms + 1_000
@@ -60,6 +64,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManager do
              __MODULE__,
              %{
                owner: owner,
+               resource_registrar: Keyword.get(opts, :resource_registrar),
                context: context,
                authority: authority,
                key: key,
@@ -69,6 +74,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManager do
            ) do
       {:ok, %__MODULE__{pid: pid, resource: authority.resource}}
     else
+      {:error, :resource_registrar_unavailable} = error -> error
       _invalid -> {:error, :invalid_token_manager}
     end
   end
@@ -185,21 +191,29 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManager do
   @impl GenServer
   def init(config) do
     local_fence_identity = LocalFences.identity(config.context.store, config.key)
+    owner_ref = Process.monitor(config.owner)
 
-    {:ok,
-     %{
-       owner_ref: Process.monitor(config.owner),
-       config:
-         config
-         |> Map.delete(:owner)
-         |> Map.put(:local_fence_identity, local_fence_identity),
-       refresh: nil,
-       rejected_generations: MapSet.new(),
-       local_requirement: nil,
-       response_persistences: %{},
-       owner_down: false,
-       closing: nil
-     }}
+    case ResourceRegistrar.register_root(config.resource_registrar) do
+      :ok ->
+        {:ok,
+         %{
+           owner_ref: owner_ref,
+           resource_registrar: config.resource_registrar,
+           config:
+             config
+             |> Map.drop([:owner, :resource_registrar])
+             |> Map.put(:local_fence_identity, local_fence_identity),
+           refresh: nil,
+           rejected_generations: MapSet.new(),
+           local_requirement: nil,
+           response_persistences: %{},
+           owner_down: false,
+           closing: nil
+         }}
+
+      {:error, reason} ->
+        {:stop, reason}
+    end
   end
 
   @impl GenServer
@@ -338,6 +352,8 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManager do
 
   @impl GenServer
   def handle_info({:DOWN, ref, :process, _pid, _reason}, %{owner_ref: ref} = state) do
+    maybe_adopt_unsettled(state)
+
     state
     |> Map.put(:owner_down, true)
     |> Map.update!(:closing, &(&1 || []))
@@ -785,6 +801,15 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManager do
         current
     end)
   end
+
+  defp maybe_adopt_unsettled(%{response_persistences: persistences} = state)
+       when map_size(persistences) > 0 do
+    manager = %__MODULE__{pid: self(), resource: state.config.authority.resource}
+    _ = ManagerCleanup.adopt(manager, state.resource_registrar)
+    :ok
+  end
+
+  defp maybe_adopt_unsettled(_state), do: :ok
 
   defp close_or_continue(%{closing: waiters, response_persistences: persistences} = state)
        when is_list(waiters) and map_size(persistences) == 0 do

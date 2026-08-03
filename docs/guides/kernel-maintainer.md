@@ -432,13 +432,31 @@ make a reusable embedding registry stale.
 
 Each acquisition scope is inert through preparation and local preflight,
 activates immediately before acquisition, then either commits one idempotent
-provider closer or aborts. Before callbacks can start, execution transfers the
-session from its build creator to the Runner or REPL session owner and binds its
-run state. The provider session itself tracks, cancels, and observes in-flight
-Kernel provider work before it runs any closer, including after owner or run
-state death. Normal close and lifecycle-owner death share one bounded
-reverse-order resource drain. Provider-free assembly carries no session and
-starts no provider owner.
+provider closer or aborts. Each registrar supplies a private signal owner for
+process and port roots plus one private scope controller. A provider root must
+monitor the signal owner before its init callback synchronously registers
+through the registrar; only then may its start operation return. The controller
+is a narrow registration gate into one authoritative cleanup owner. Handoff and
+cleanup address that owner directly, so they remain available if the gate
+stalls. The owner serializes registration, terminalization handoff, normal
+cleanup, and session-crash cleanup. Ports must
+be owned by a registered process. Abort drains only that scope, while normal
+cleanup runs the committed closer before the cleanup owner stops the signal
+owner. Roots then get a normal owner-down shutdown window; survivors are killed
+within the same cleanup deadline, and delayed termination observation remains
+in a separately bounded tail. An unsettled OAuth release or persistence root
+leaves that set only after it has stopped accepting work and transferred
+ownership to its bounded retry owner. On abnormal session death, the cleanup
+owner continues accepting terminal handoffs directly during the cooperative
+owner-down window and seals the set when force-close begins. This
+avoids a start-then-register gap, keeps provisional roots isolated, and removes
+reconciliation races between cleanup paths.
+Before callbacks can start, execution transfers the session from its build
+creator to the Runner or REPL session owner and binds its run state. The
+provider session itself tracks, cancels, and observes in-flight Kernel provider
+work before it runs any closer, including after owner or run state death.
+Normal close and lifecycle-owner death share one bounded reverse-order resource
+drain. Provider-free assembly carries no session and starts no provider owner.
 
 Construction failures close already-built resources in reverse order.
 Frontends that build but do not execute a configuration must call the

@@ -13,9 +13,12 @@ defmodule PtcRunner.Kernel.LLMReplayOwner do
 
   use GenServer
 
-  @spec start(%{binary() => [map()]}, pid()) :: {:ok, pid()} | {:error, term()}
-  def start(entries, owner) when is_map(entries) and is_pid(owner) do
-    GenServer.start(__MODULE__, {entries, owner})
+  alias PtcRunner.Kernel.ResourceRegistrar
+
+  @spec start(%{binary() => [map()]}, pid(), ResourceRegistrar.t() | nil) ::
+          {:ok, pid()} | {:error, term()}
+  def start(entries, owner, registrar \\ nil) when is_map(entries) and is_pid(owner) do
+    GenServer.start(__MODULE__, {entries, owner, registrar})
   end
 
   @spec take(pid(), binary()) ::
@@ -35,8 +38,13 @@ defmodule PtcRunner.Kernel.LLMReplayOwner do
   end
 
   @impl GenServer
-  def init({entries, owner}) do
-    {:ok, %{entries: entries, owner_ref: Process.monitor(owner)}}
+  def init({entries, owner, registrar}) do
+    owner_ref = Process.monitor(owner)
+
+    case ResourceRegistrar.register_root(registrar) do
+      :ok -> {:ok, %{entries: entries, owner_ref: owner_ref}}
+      {:error, reason} -> {:stop, reason}
+    end
   end
 
   @impl GenServer

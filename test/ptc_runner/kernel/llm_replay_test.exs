@@ -18,6 +18,8 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
   alias PtcRunner.Kernel.PreparedRun
   alias PtcRunner.Kernel.ProviderError
   alias PtcRunner.Kernel.ProviderRegistry
+  alias PtcRunner.Kernel.ProviderSession
+  alias PtcRunner.Kernel.ResourceRegistrar
   alias PtcRunner.Kernel.RunBuilder
   alias PtcRunner.Kernel.RunCoordinator
 
@@ -251,6 +253,28 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
 
       assert {:error, %ProviderError{kind: :unavailable}} =
                LLMReplay.requester(replay).(@request)
+    end
+
+    @tag :tmp_dir
+    test "an unavailable registrar is not reported as invalid fixtures", %{tmp_dir: dir} do
+      {:ok, key} = LLMReplay.request_hash(@request)
+      write(dir, [%{"request_hash" => key, "response" => %{"n" => 1}}])
+
+      {:ok, session} = ProviderSession.start(Limits.defaults())
+      {:ok, registrar} = ProviderSession.open_registrar(session)
+      assert :ok = ResourceRegistrar.activate(registrar)
+      owner = ResourceRegistrar.owner(registrar)
+      assert :ok = ResourceRegistrar.abort(registrar)
+
+      assert {:error, :resource_registrar_unavailable} =
+               LLMReplay.start(dir, "replay.jsonl",
+                 max_entries: 100,
+                 max_result_bytes: 250_000,
+                 owner: owner,
+                 resource_registrar: registrar
+               )
+
+      assert :ok = ProviderSession.close(session)
     end
 
     @tag :tmp_dir

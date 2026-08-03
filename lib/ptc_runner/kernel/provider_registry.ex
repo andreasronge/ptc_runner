@@ -34,6 +34,19 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
   host authority rather than reconstructing it in CLI-specific options.
   Builder exceptions are contained at their current lifecycle phase.
 
+  A staged acquisition context's `owner` is the private signal owner for that
+  provider's resource scope. Any process or port root started by an acquisition
+  must monitor that owner and synchronously call
+  `PtcRunner.Kernel.ResourceRegistrar.register_root/1` from the root's init
+  callback before its start operation returns. The registrar's private
+  controller forwards registration into the scope's authoritative cleanup
+  owner. Ports must be owned by a registered process. Registration after start
+  returns is unsupported. A root
+  retaining an unsettled OAuth release or persistence fence may call
+  `PtcRunner.Kernel.ResourceRegistrar.handoff_root/2` only after it has stopped
+  accepting work and the terminal operation has a bounded self-owner or
+  adopter.
+
   ## Adding a field to the prepared contract
 
   A prepared map is built in two places: `normalize_prepared/1` defaults and

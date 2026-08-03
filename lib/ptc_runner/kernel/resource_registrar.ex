@@ -5,8 +5,9 @@ defmodule PtcRunner.Kernel.ResourceRegistrar do
   A registrar belongs to one `PtcRunner.Kernel.ProviderSession` acquisition
   scope and is inert until activated. Successful acquisition commits one
   provider close operation for the scope; failed acquisition aborts it.
-  Scoped process-root admission is internal until the shipped-adapter migration
-  activates it. Callers cannot construct or retarget registrar handles.
+  Each scope has a private signal owner for process roots. A root monitors that
+  owner and registers synchronously before its start operation returns. Callers
+  cannot construct or retarget registrar handles.
   """
 
   alias PtcRunner.Kernel.Attestation
@@ -64,14 +65,19 @@ defmodule PtcRunner.Kernel.ResourceRegistrar do
 
   def valid?(_registrar), do: false
 
-  @doc "Returns the process that currently owns this acquisition scope."
+  @doc "Returns the private signal owner for roots in this acquisition scope."
   @spec owner(t()) :: pid() | nil
   def owner(%__MODULE__{} = registrar),
-    do: if(valid?(registrar), do: registrar.session, else: nil)
+    do: if(valid?(registrar), do: registrar.root_owner, else: nil)
 
   def owner(_registrar), do: nil
 
-  @doc false
+  @doc """
+  Registers the calling local process as a root of this active scope.
+
+  A provider process calls this from its init callback after monitoring
+  `owner/1` and before its start operation returns.
+  """
   @spec register_root(t() | nil) :: :ok | {:error, :resource_registrar_unavailable}
   def register_root(nil), do: :ok
 
@@ -80,7 +86,7 @@ defmodule PtcRunner.Kernel.ResourceRegistrar do
 
   def register_root(_registrar), do: {:error, :resource_registrar_unavailable}
 
-  @doc false
+  @doc "Removes an adopted terminalization root from scope cleanup."
   @spec handoff_root(t() | nil, pid()) :: :ok | {:error, :resource_registrar_unavailable}
   def handoff_root(nil, _root), do: :ok
 
@@ -88,13 +94,6 @@ defmodule PtcRunner.Kernel.ResourceRegistrar do
     do: ProviderSession.handoff_root(registrar, root)
 
   def handoff_root(_registrar, _root), do: {:error, :resource_registrar_unavailable}
-
-  @doc false
-  @spec scope_owner(t()) :: pid() | nil
-  def scope_owner(%__MODULE__{} = registrar),
-    do: if(valid?(registrar), do: registrar.root_owner, else: nil)
-
-  def scope_owner(_registrar), do: nil
 
   @doc false
   @spec activate(t()) :: :ok | {:error, :resource_registrar_unavailable}

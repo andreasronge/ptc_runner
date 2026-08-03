@@ -64,6 +64,7 @@ defmodule PtcRunner.Kernel.LLMReplay do
           | :replay_fixtures_too_large
           | :duplicate_replay_entry
           | :replay_entry_limit_exceeded
+          | :resource_registrar_unavailable
 
   @doc """
   Loads one fixture file and starts the owner that tracks sequence position.
@@ -78,10 +79,11 @@ defmodule PtcRunner.Kernel.LLMReplay do
     max_entries = Keyword.fetch!(opts, :max_entries)
     max_result_bytes = Keyword.fetch!(opts, :max_result_bytes)
     owner = Keyword.get(opts, :owner, self())
+    registrar = Keyword.get(opts, :resource_registrar)
 
     with {:ok, raw} <- read_fixtures(directory, path),
          {:ok, entries} <- parse(raw, max_entries, max_result_bytes),
-         {:ok, pid} <- start_owner(entries, owner) do
+         {:ok, pid} <- start_owner(entries, owner, registrar) do
       {:ok,
        %__MODULE__{
          pid: pid,
@@ -252,9 +254,10 @@ defmodule PtcRunner.Kernel.LLMReplay do
     JSONValue.map?(response) and is_integer(bytes) and bytes <= max_result_bytes
   end
 
-  defp start_owner(entries, owner) do
-    case LLMReplayOwner.start(entries, owner) do
+  defp start_owner(entries, owner, registrar) do
+    case LLMReplayOwner.start(entries, owner, registrar) do
       {:ok, pid} -> {:ok, pid}
+      {:error, :resource_registrar_unavailable} = error -> error
       _reason -> {:error, :invalid_replay_fixtures}
     end
   end

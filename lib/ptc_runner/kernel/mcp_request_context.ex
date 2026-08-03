@@ -3,34 +3,49 @@ defmodule PtcRunner.Kernel.MCPRequestContext do
 
   use GenServer
 
+  alias PtcRunner.Kernel.MCPOAuth.ManagerCleanup
   alias PtcRunner.Kernel.MCPOAuth.TokenManager
+  alias PtcRunner.Kernel.ResourceRegistrar
 
   @release_timeout_ms 5_000
   @initial_release_retry_ms 250
   @maximum_release_retry_ms 30_000
 
   @enforce_keys [:pid]
-  defstruct [:pid, :authorization]
+  defstruct [:pid, :authorization, :resource_registrar]
 
-  @type t :: %__MODULE__{pid: pid(), authorization: TokenManager.t() | nil}
+  @type t :: %__MODULE__{
+          pid: pid(),
+          authorization: TokenManager.t() | nil,
+          resource_registrar: ResourceRegistrar.t() | nil
+        }
 
-  @spec start(keyword()) :: {:ok, t()}
+  @spec start(keyword()) :: {:ok, t()} | {:error, :mcp_transport_error}
   def start(opts) do
     owner = Keyword.fetch!(opts, :owner)
     endpoint = Keyword.fetch!(opts, :endpoint)
     headers = Keyword.fetch!(opts, :headers)
     timeout_ms = Keyword.fetch!(opts, :timeout_ms)
     authorization = Keyword.get(opts, :authorization)
+    registrar = Keyword.get(opts, :resource_registrar)
 
     true = is_nil(authorization) or match?(%TokenManager{}, authorization)
 
-    {:ok, pid} =
-      GenServer.start(
-        __MODULE__,
-        {owner, endpoint, headers, timeout_ms, authorization}
-      )
+    case GenServer.start(
+           __MODULE__,
+           {owner, endpoint, headers, timeout_ms, authorization, registrar}
+         ) do
+      {:ok, pid} ->
+        {:ok,
+         %__MODULE__{
+           pid: pid,
+           authorization: authorization,
+           resource_registrar: registrar
+         }}
 
-    {:ok, %__MODULE__{pid: pid, authorization: authorization}}
+      {:error, _reason} ->
+        {:error, :mcp_transport_error}
+    end
   end
 
   @spec begin_request(t()) ::
@@ -66,23 +81,36 @@ defmodule PtcRunner.Kernel.MCPRequestContext do
   end
 
   @spec close(t()) :: :ok | {:error, :mcp_transport_error}
-  def close(%__MODULE__{pid: pid, authorization: authorization}) do
+  def close(%__MODULE__{
+        pid: pid,
+        authorization: authorization,
+        resource_registrar: registrar
+      }) do
     ref = Process.monitor(pid)
+    seal_result = safe_call(pid, :seal)
+
+    adoption_result =
+      if seal_result == :ok,
+        do: adopt_authorization(authorization, registrar),
+        else: :ok
 
     context_result =
       try do
-        case safe_call(pid, :close, @release_timeout_ms) do
-          :ok ->
+        case {seal_result, safe_call(pid, :close, @release_timeout_ms)} do
+          {:ok, :ok} ->
             receive do
               {:DOWN, ^ref, :process, ^pid, _reason} -> :ok
             after
               1_000 -> {:error, :mcp_transport_error}
             end
 
-          {:error, :closed} ->
+          {_seal, :ok} ->
+            {:error, :mcp_transport_error}
+
+          {_seal, {:error, :closed}} ->
             if Process.alive?(pid), do: {:error, :mcp_transport_error}, else: :ok
 
-          {:error, :timeout} ->
+          {_seal, {:error, :timeout}} ->
             {:error, :mcp_transport_error}
         end
       after
@@ -90,9 +118,7 @@ defmodule PtcRunner.Kernel.MCPRequestContext do
       end
 
     authorization_result =
-      if context_result == :ok and match?(%TokenManager{}, authorization),
-        do: TokenManager.close(authorization),
-        else: context_result
+      close_authorization(context_result, authorization, adoption_result)
 
     case {context_result, authorization_result} do
       {:ok, :ok} -> :ok
@@ -101,19 +127,28 @@ defmodule PtcRunner.Kernel.MCPRequestContext do
   end
 
   @impl GenServer
-  def init({owner, endpoint, headers, timeout_ms, authorization}) do
-    {:ok,
-     %{
-       owner_ref: Process.monitor(owner),
-       endpoint: endpoint,
-       headers: headers,
-       timeout_ms: timeout_ms,
-       authorization: authorization,
-       next_id: 1,
-       active: %{},
-       release_workers: %{},
-       closing: nil
-     }}
+  def init({owner, endpoint, headers, timeout_ms, authorization, registrar}) do
+    owner_ref = Process.monitor(owner)
+
+    case ResourceRegistrar.register_root(registrar) do
+      :ok ->
+        {:ok,
+         %{
+           owner_ref: owner_ref,
+           endpoint: endpoint,
+           headers: headers,
+           timeout_ms: timeout_ms,
+           authorization: authorization,
+           resource_registrar: registrar,
+           next_id: 1,
+           active: %{},
+           release_workers: %{},
+           closing: nil
+         }}
+
+      {:error, reason} ->
+        {:stop, reason}
+    end
   end
 
   @impl GenServer
@@ -194,8 +229,22 @@ defmodule PtcRunner.Kernel.MCPRequestContext do
     {:noreply, %{state | closing: {reason, [from | waiters]}}}
   end
 
+  def handle_call(:seal, _from, %{closing: {_reason, _waiters}} = state),
+    do: {:reply, :ok, state}
+
+  def handle_call(:seal, _from, state) do
+    state = %{state | closing: {:close, []}}
+    handoff_result = maybe_handoff_unsettled(state)
+    kill_active(state.active)
+
+    if map_size(state.active) == 0,
+      do: {:stop, :normal, handoff_result, state},
+      else: {:reply, handoff_result, state}
+  end
+
   def handle_call(:close, from, state) do
     state = %{state | closing: {:close, [from]}}
+    maybe_handoff_unsettled(state)
     kill_active(state.active)
 
     if map_size(state.active) == 0,
@@ -211,6 +260,7 @@ defmodule PtcRunner.Kernel.MCPRequestContext do
   @impl GenServer
   def handle_info({:DOWN, ref, :process, _pid, _reason}, %{owner_ref: ref} = state) do
     state = %{state | closing: state.closing || {:owner_down, []}}
+    _ = maybe_handoff_unsettled(state)
     kill_active(state.active)
 
     if map_size(state.active) == 0,
@@ -366,6 +416,50 @@ defmodule PtcRunner.Kernel.MCPRequestContext do
 
   defp reply_waiters(%{closing: {_reason, waiters}}),
     do: Enum.each(waiters, &GenServer.reply(&1, :ok))
+
+  defp maybe_handoff_unsettled(%{active: active, resource_registrar: registrar}) do
+    if Enum.any?(active, fn {_caller, entry} ->
+         is_reference(entry.authorization_ref) or is_map(entry.issued)
+       end) do
+      ResourceRegistrar.handoff_root(registrar, self())
+    else
+      :ok
+    end
+  end
+
+  defp adopt_authorization(nil, _registrar), do: :ok
+
+  defp adopt_authorization(%TokenManager{} = manager, registrar) do
+    case ManagerCleanup.adopt(manager, registrar) do
+      :ok ->
+        :ok
+
+      {:error, :cleanup_unavailable} = error ->
+        Process.exit(manager.pid, :kill)
+        error
+
+      {:error, :scope_unavailable} = error ->
+        error
+    end
+  end
+
+  defp close_authorization(:ok, %TokenManager{} = manager, :ok) do
+    case TokenManager.close(manager) do
+      :ok ->
+        :ok
+
+      {:error, _reason} = error ->
+        error
+    end
+  end
+
+  defp close_authorization(context_result, _authorization, :ok), do: context_result
+
+  defp close_authorization(_context_result, _authorization, {:error, :cleanup_unavailable}),
+    do: {:error, :mcp_transport_error}
+
+  defp close_authorization(_context_result, _authorization, {:error, :scope_unavailable}),
+    do: {:error, :mcp_transport_error}
 
   defp kill_active(active),
     do: Enum.each(Map.keys(active), &Process.exit(&1, :kill))

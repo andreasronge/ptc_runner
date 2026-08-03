@@ -4,6 +4,7 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
   use GenServer
 
   alias PtcRunner.Kernel.InspectionArtifact
+  alias PtcRunner.Kernel.ResourceRegistrar
   alias PtcRunner.Kernel.SafeMetadata
   alias PtcRunner.Kernel.TraceLog
   alias PtcRunner.Lisp.RetainedSize
@@ -36,6 +37,7 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
   def start({:directory, directory}, opts) when is_binary(directory) and is_list(opts) do
     allowed = [
       :owner,
+      :resource_registrar,
       :max_source_bytes,
       :max_retained_bytes,
       :max_result_bytes,
@@ -49,6 +51,7 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
     with true <- Keyword.keys(opts) -- allowed == [],
          true <- String.valid?(directory),
          owner when is_pid(owner) <- Keyword.get(opts, :owner, self()),
+         registrar <- Keyword.get(opts, :resource_registrar),
          max_source_bytes when max_source_bytes in 1..@default_source_bytes <-
            Keyword.get(opts, :max_source_bytes, @default_source_bytes),
          max_retained_bytes when max_retained_bytes in 1..@default_retained_bytes <-
@@ -70,9 +73,9 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
 
       case GenServer.start(
              __MODULE__,
-             {directory, owner, token, max_source_bytes, max_retained_bytes, max_result_bytes,
-              max_directory_entries, max_trace_files, capture_heap_words, capture_hook,
-              listing_hook}
+             {directory, owner, registrar, token, max_source_bytes, max_retained_bytes,
+              max_result_bytes, max_directory_entries, max_trace_files, capture_heap_words,
+              capture_hook, listing_hook}
            ) do
         {:ok, pid} -> {:ok, %__MODULE__{pid: pid, token: token}}
         {:error, {:source_retained_limit_exceeded, _details} = reason} -> {:error, reason}
@@ -136,8 +139,9 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
 
   @impl GenServer
   def init(
-        {directory, owner, token, max_source_bytes, max_retained_bytes, max_result_bytes,
-         max_directory_entries, max_trace_files, capture_heap_words, capture_hook, listing_hook}
+        {directory, owner, registrar, token, max_source_bytes, max_retained_bytes,
+         max_result_bytes, max_directory_entries, max_trace_files, capture_heap_words,
+         capture_hook, listing_hook}
       ) do
     owner_ref = Process.monitor(owner)
 
@@ -153,12 +157,12 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
       )
     end
 
-    case capture_for_owner(capture, owner, owner_ref, capture_heap_words) do
-      {:ok, capture, retained_bytes} ->
-        {:ok, snapshot_state(capture, retained_bytes, token, owner_ref, max_result_bytes)}
-
-      {:error, reason} ->
-        {:stop, reason}
+    with :ok <- ResourceRegistrar.register_root(registrar),
+         {:ok, capture, retained_bytes} <-
+           capture_for_owner(capture, owner, owner_ref, capture_heap_words) do
+      {:ok, snapshot_state(capture, retained_bytes, token, owner_ref, max_result_bytes)}
+    else
+      {:error, reason} -> {:stop, reason}
     end
   end
 

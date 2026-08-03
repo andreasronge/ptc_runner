@@ -93,8 +93,8 @@ defmodule PtcRunner.Kernel.ProviderSessionTest do
     {:ok, first} = ProviderSession.open_registrar(session)
     {:ok, second} = ProviderSession.open_registrar(session)
 
-    first_owner = ResourceRegistrar.scope_owner(first)
-    second_owner = ResourceRegistrar.scope_owner(second)
+    first_owner = ResourceRegistrar.owner(first)
+    second_owner = ResourceRegistrar.owner(second)
 
     assert is_pid(first_owner)
     assert is_pid(second_owner)
@@ -271,7 +271,7 @@ defmodule PtcRunner.Kernel.ProviderSessionTest do
     {:ok, limits} = Limits.new(provider_cleanup_timeout_ms: 100)
     {:ok, session} = ProviderSession.start(limits)
     {:ok, registrar} = ProviderSession.open_registrar(session)
-    owner = ResourceRegistrar.scope_owner(registrar)
+    owner = ResourceRegistrar.owner(registrar)
     owner_monitor = Process.monitor(owner)
 
     assert true = :erlang.suspend_process(owner)
@@ -562,12 +562,12 @@ defmodule PtcRunner.Kernel.ProviderSessionTest do
     root = start_stubborn_root(registrar, parent)
     root_monitor = Process.monitor(root)
     assert_receive {:stubborn_root_ready, ^root}
-    assert true = :erlang.suspend_process(ResourceRegistrar.scope_owner(registrar))
+    assert true = :erlang.suspend_process(ResourceRegistrar.owner(registrar))
     assert :ok = ResourceRegistrar.commit(registrar, nil)
 
     assert {:error, :provider_cleanup_failed} = ProviderSession.close(session)
     assert_receive {:DOWN, ^root_monitor, :process, ^root, :killed}
-    refute Process.alive?(ResourceRegistrar.scope_owner(registrar))
+    refute Process.alive?(ResourceRegistrar.owner(registrar))
     refute Process.alive?(root)
   end
 
@@ -576,7 +576,7 @@ defmodule PtcRunner.Kernel.ProviderSessionTest do
     {:ok, limits} = Limits.new(provider_cleanup_timeout_ms: 100)
     {:ok, session} = ProviderSession.start(limits)
     {:ok, registrar} = ProviderSession.open_registrar(session)
-    signal_owner = ResourceRegistrar.scope_owner(registrar)
+    signal_owner = ResourceRegistrar.owner(registrar)
     signal_monitor = Process.monitor(signal_owner)
     assert true = :erlang.suspend_process(signal_owner)
     assert :ok = ResourceRegistrar.activate(registrar)
@@ -661,7 +661,7 @@ defmodule PtcRunner.Kernel.ProviderSessionTest do
 
     root =
       spawn(fn ->
-        Process.monitor(ResourceRegistrar.scope_owner(registrar))
+        Process.monitor(ResourceRegistrar.owner(registrar))
         :ok = ResourceRegistrar.register_root(registrar)
         send(parent, {:short_root_ready, self()})
         receive do: (:stop -> :ok)
@@ -787,7 +787,7 @@ defmodule PtcRunner.Kernel.ProviderSessionTest do
 
   defp start_owned_root(registrar, parent, label) do
     spawn(fn ->
-      owner = ResourceRegistrar.scope_owner(registrar)
+      owner = ResourceRegistrar.owner(registrar)
       owner_monitor = Process.monitor(owner)
 
       case ResourceRegistrar.register_root(registrar) do
@@ -819,7 +819,7 @@ defmodule PtcRunner.Kernel.ProviderSessionTest do
 
   defp start_stubborn_root(registrar, parent) do
     spawn(fn ->
-      owner = ResourceRegistrar.scope_owner(registrar)
+      owner = ResourceRegistrar.owner(registrar)
       owner_monitor = Process.monitor(owner)
       :ok = ResourceRegistrar.register_root(registrar)
       send(parent, {:stubborn_root_ready, self()})
@@ -833,7 +833,7 @@ defmodule PtcRunner.Kernel.ProviderSessionTest do
 
   defp start_handoff_root(registrar, parent) do
     spawn(fn ->
-      owner = ResourceRegistrar.scope_owner(registrar)
+      owner = ResourceRegistrar.owner(registrar)
       owner_monitor = Process.monitor(owner)
       :ok = ResourceRegistrar.register_root(registrar)
       send(parent, {:handoff_root_ready, self()})
@@ -848,7 +848,7 @@ defmodule PtcRunner.Kernel.ProviderSessionTest do
 
   defp start_notifying_stubborn_root(registrar, parent) do
     spawn(fn ->
-      owner = ResourceRegistrar.scope_owner(registrar)
+      owner = ResourceRegistrar.owner(registrar)
       owner_monitor = Process.monitor(owner)
       :ok = ResourceRegistrar.register_root(registrar)
       send(parent, {:stubborn_root_ready, self()})

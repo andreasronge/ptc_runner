@@ -72,6 +72,8 @@ Completed commits on `codex/stable-cli-contract`:
 | 4 | `416e9346` | Inert provider declarations and effective identity. |
 | 5a | `9db10af5` | Shared absolute-monotonic deadline type and migrated provider activity. |
 | 5b | `e957cc21` | Process-free catalogs and sealed runtime activation. |
+| 5c1 | `804582d9` | One provider-session owner with scoped, bounded LIFO cleanup. |
+| 5c2a | `5ee24051` | Bounded scoped process-root admission and terminal handoff. |
 
 The first local implementation of slice 5, `d38d0bef`, is intentionally not a
 delivery milestone. It demonstrated useful failure cases but combined remote
@@ -131,15 +133,20 @@ and ownership prefix. Every acquired run, acquisition-backed connectivity, or
 temporary probe resource registers its close operation immediately on the same
 LIFO cleanup stack.
 
-An active callback also receives the session's one `ResourceRegistrar`.
-Every shipped or trusted custom adapter creates process and port roots only
-through registrar-owned start/open operations, which atomically register and
-monitor the root before returning it. Creating a root and registering it in a
-later step is unsupported. The root remains provisional until acquisition
-returns and attaches its idempotent closer. Callback failure, exit, or timeout
-terminates the callback worker and force-closes every provisional root, so
-cleanup does not depend on a builder first returning a close function. This is
-an in-memory ownership handshake, not a lease ledger or restart journal.
+An active callback receives the session's scoped `ResourceRegistrar` and its
+private signal owner. Every shipped or trusted custom adapter starts process
+and port roots with that owner; the process root must monitor the owner before
+its init callback synchronously registers itself with the registrar's private
+controller, and any port must be owned by one of those registered processes.
+The controller gates registration into one authoritative cleanup owner;
+terminalization handoff and cleanup reach that owner directly if the gate
+stalls. The start operation returns only
+after that handshake; later registration is unsupported. The root remains
+provisional until acquisition returns and attaches its idempotent closer.
+Callback failure, exit, or timeout terminates the callback worker and drains the
+registrar scope, force-closing every provisional root without depending on a
+builder first returning a close function. This is an in-memory ownership
+handshake, not a lease ledger or restart journal.
 
 Execution and `doctor --connect` use the same session boundary. Provider-free
 commands never open one.
@@ -165,12 +172,19 @@ survive every evaluation and finalize only when that owner closes or dies.
 There is no frontend sink-cleanup path, and an immutable one-shot `RunConfig`
 is never reused as a lifecycle owner.
 
-The caller monitors the session, the session monitors its caller, and the
-registrar monitors every admitted root. Normal close and caller death both
-initiate bounded reverse-order cleanup. Each resource implementation remains
-responsible for making its close operation idempotent. Cleanup failure is
-classified and reported; no registry attempts to reconstruct cleanup after the
-runtime VM dies.
+The caller monitors the session and the session monitors its caller. Each scope
+has one private registration controller, one authoritative cleanup owner that
+monitors its admitted roots, and one signal owner that those roots monitor. The
+controller forwards registration into the cleanup owner; terminalization
+handoff and session cleanup address that owner directly and do not depend on a
+responsive controller. Normal close and caller death both initiate bounded
+reverse-order cleanup. Each resource implementation remains responsible for
+making its close operation idempotent. After its closer runs, the cleanup owner
+stops the signal owner so cooperative roots can terminate normally, then
+force-kills survivors at their fair cleanup cutoff. Delayed `DOWN` observation
+continues only in a separately bounded tail. Cleanup failure is classified and
+reported; no registry attempts to reconstruct cleanup after the runtime VM
+dies.
 
 ### Runtime services
 
@@ -285,9 +299,21 @@ catalogued precedence. The sole exception is an OAuth terminalization root that
 has atomically stopped accepting work and retained an unacknowledged admission
 release or response-persistence fence. `MCPRequestContext` keeps its opaque
 release and bounded retry owner after caller death; an unsettled token manager
-is adopted by the existing bounded cleanup supervisor. Those roots remain live
-and fenced until their terminal operation acknowledges, and are never converted
-to successful cleanup by the handoff.
+is adopted by the bounded cleanup owner. Only after that adoption
+does the registrar hand the root out of its scope owner's force-close set. Those
+roots remain live and fenced until their terminal operation acknowledges, and
+are never converted to successful cleanup by the handoff.
+
+Request-context cleanup first atomically closes the context to new admissions,
+then confirms token-manager adoption and registrar handoff, and only then waits
+for retained releases. This order transfers both roots before a bounded closer
+can time out when release and persistence are unsettled together. The scope
+cleanup owner serializes handoff against cleanup: a completed handoff cannot
+enter the force-close set. On abnormal session death it continues accepting
+terminal handoffs directly during the cooperative owner-down window, then seals
+the set when the force-close cutoff begins and rejects later
+handoffs. Failure to adopt a manager remains distinct from loss of its scope
+after adoption, so callers never kill an already supervised persistence retry.
 
 ### Optional provider applications
 
@@ -529,9 +555,12 @@ Delivery is intentionally split into review-sized commits:
 
 - 5a (complete): shared deadlines;
 - 5b (complete): process-free catalogs and sealed runtime activation;
-- 5c1: replace the resource list with one provider-session owner and scoped,
-  bounded LIFO cleanup;
-- 5c2: route shipped process and port starts through the provisional registrar;
+- 5c1 (complete): replace the resource list with one provider-session owner and
+  scoped, bounded LIFO cleanup;
+- 5c2a (complete): add bounded scoped process-root admission and terminal
+  handoff behind the registrar;
+- 5c2b (current): route shipped process and port starts through the scoped
+  registrar;
 - 5d: application admission, active validation, and credential resolution.
 
 - replace the unpushed draft with the minimal `ProviderSession`, `Deadline`,
@@ -541,8 +570,8 @@ Delivery is intentionally split into review-sized commits:
   and live authority from `HostInstallationOwner` into marked runtime services;
 - remove optional provider applications from the command core's inferred OTP
   startup set and keep their modules available for explicit activation;
-- retain the empty bounded OAuth cleanup supervisor solely for safe handoff of
-  unsettled token managers;
+- retain one bounded OAuth cleanup owner solely for safe handoff of unsettled
+  token managers;
 - add the simple optional-application start gate and disable dotenv in both
   optional applications before either can start;
 - run active selection validators and credential resolution through bounded

@@ -19,6 +19,7 @@ defmodule PtcRunner.Kernel.InspectionSnapshot do
   alias PtcRunner.Kernel.BoundedWorker
   alias PtcRunner.Kernel.InspectionArtifact
   alias PtcRunner.Kernel.InspectionQuery
+  alias PtcRunner.Kernel.ResourceRegistrar
   alias PtcRunner.Kernel.SafeMetadata
   alias PtcRunner.Kernel.TraceSnapshot
   alias PtcRunner.Lisp.RetainedSize
@@ -70,6 +71,7 @@ defmodule PtcRunner.Kernel.InspectionSnapshot do
       when is_binary(directory) and is_list(opts) do
     allowed = [
       :owner,
+      :resource_registrar,
       :max_source_bytes,
       :max_retained_bytes,
       :max_result_bytes,
@@ -84,6 +86,7 @@ defmodule PtcRunner.Kernel.InspectionSnapshot do
          true <- String.valid?(directory),
          true <- TraceSnapshot.valid?(trace_snapshot),
          owner when is_pid(owner) <- Keyword.get(opts, :owner, self()),
+         registrar <- Keyword.get(opts, :resource_registrar),
          max_source_bytes when max_source_bytes in 1..@default_source_bytes <-
            Keyword.get(opts, :max_source_bytes, @default_source_bytes),
          max_retained_bytes when max_retained_bytes in 1..@default_retained_bytes <-
@@ -105,7 +108,7 @@ defmodule PtcRunner.Kernel.InspectionSnapshot do
 
       case GenServer.start(
              __MODULE__,
-             {Path.expand(directory), trace_snapshot, owner, token, max_source_bytes,
+             {Path.expand(directory), trace_snapshot, owner, registrar, token, max_source_bytes,
               max_retained_bytes, max_result_bytes, max_directory_entries, max_files,
               capture_heap_words, capture_hook, listing_hook}
            ) do
@@ -163,7 +166,7 @@ defmodule PtcRunner.Kernel.InspectionSnapshot do
 
   @impl GenServer
   def init(
-        {directory, trace_snapshot, owner, token, max_source_bytes, max_retained_bytes,
+        {directory, trace_snapshot, owner, registrar, token, max_source_bytes, max_retained_bytes,
          max_result_bytes, max_directory_entries, max_files, capture_heap_words, capture_hook,
          listing_hook}
       ) do
@@ -183,19 +186,19 @@ defmodule PtcRunner.Kernel.InspectionSnapshot do
       )
     end
 
-    case capture_for_dependencies(
-           capture,
-           owner,
-           owner_ref,
-           trace_snapshot.pid,
-           trace_ref,
-           capture_heap_words
-         ) do
-      {:ok, capture} ->
-        {:ok, snapshot_state(capture, token, owner_ref, trace_ref, max_result_bytes)}
-
-      {:error, reason} ->
-        {:stop, reason}
+    with :ok <- ResourceRegistrar.register_root(registrar),
+         {:ok, capture} <-
+           capture_for_dependencies(
+             capture,
+             owner,
+             owner_ref,
+             trace_snapshot.pid,
+             trace_ref,
+             capture_heap_words
+           ) do
+      {:ok, snapshot_state(capture, token, owner_ref, trace_ref, max_result_bytes)}
+    else
+      {:error, reason} -> {:stop, reason}
     end
   end
 

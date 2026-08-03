@@ -455,6 +455,7 @@ defmodule PtcRunner.Kernel.MCPSource do
          {:ok, request_context} <-
            MCPRequestContext.start(
              owner: context.owner,
+             resource_registrar: Map.get(context, :resource_registrar),
              endpoint: installed.endpoint,
              headers: headers,
              timeout_ms: selected.timeout_ms,
@@ -469,7 +470,12 @@ defmodule PtcRunner.Kernel.MCPSource do
 
     result =
       case within_deadline(selected.timeout_ms, fn ->
-             prepare_staged_launcher(options, context.owner, selected.timeout_ms)
+             prepare_staged_launcher(
+               options,
+               context.owner,
+               Map.get(context, :resource_registrar),
+               selected.timeout_ms
+             )
            end) do
         {:ok, staged} ->
           staged
@@ -483,8 +489,8 @@ defmodule PtcRunner.Kernel.MCPSource do
     normalize_stdio_acquisition(result)
   end
 
-  defp prepare_staged_launcher(options, owner, lease_ms) do
-    with {:ok, staging} <- MCPLauncherStaging.start(owner, lease_ms) do
+  defp prepare_staged_launcher(options, owner, registrar, lease_ms) do
+    with {:ok, staging} <- MCPLauncherStaging.start(owner, lease_ms, registrar) do
       case with {:ok, launcher} <- resolve_stdio_launcher(options),
                 do: stage_launcher(launcher, staging) do
         {:ok, _staged} = success ->
@@ -509,7 +515,8 @@ defmodule PtcRunner.Kernel.MCPSource do
              min(5_000, remaining_ms),
              &min(&1, remaining_ms)
            ),
-         {:ok, handle} <- MCPStdioTransport.start(options, context.owner) do
+         {:ok, handle} <-
+           MCPStdioTransport.start(options, context.owner, Map.get(context, :resource_registrar)) do
       {:ok,
        %{
          type: :stdio,
