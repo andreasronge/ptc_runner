@@ -3,6 +3,7 @@ import Config
 # Disable automatic .env loading by req_llm so that command-line env vars take precedence
 # This allows: PTC_TEST_MODEL=deepseek-local mix test --include e2e
 config :req_llm, load_dotenv: false
+config :llm_db, load_dotenv: false
 
 # Widen the Sandbox wall-clock budget under test (prod default stays 1 s).
 # The full suite spawns many `PtcRunner.Sandbox.execute/3` children that

@@ -5,7 +5,9 @@ defmodule PtcRunner.Kernel.ProviderActiveSession do
   The opener first verifies the exact sealed `PreparedRun` and
   `InstallationCatalog` pair, consumes the prepared run, and monotonically
   marks provider activity. It then opens the command's `ProviderSession` and
-  invokes active selection validators in declaration order.
+  admits selected optional provider applications according to the sealed
+  runtime services before invoking active selection validators in declaration
+  order.
 
   Each validator runs in a heap- and time-bounded worker with its own
   provisional `ResourceRegistrar`. The callback receives only the normalized
@@ -26,36 +28,53 @@ defmodule PtcRunner.Kernel.ProviderActiveSession do
   alias PtcRunner.Kernel.InstallationCatalog
   alias PtcRunner.Kernel.PreparedRun
   alias PtcRunner.Kernel.ProviderActivity
+  alias PtcRunner.Kernel.ProviderApplicationGate
+  alias PtcRunner.Kernel.ProviderRuntimeServices
   alias PtcRunner.Kernel.ProviderSession
   alias PtcRunner.Kernel.ResourceRegistrar
 
-  @spec open(PreparedRun.t(), InstallationCatalog.t()) ::
+  @spec open(PreparedRun.t(), InstallationCatalog.t(), ProviderRuntimeServices.t()) ::
           {:ok, ProviderSession.t()} | {:error, CommandDiagnostic.t()}
-  def open(%PreparedRun{} = prepared, %InstallationCatalog{} = catalog) do
+  def open(
+        %PreparedRun{} = prepared,
+        %InstallationCatalog{} = catalog,
+        %ProviderRuntimeServices{} = services
+      ) do
     with true <- PreparedRun.valid?(prepared),
          true <- InstallationCatalog.valid?(catalog),
          true <- prepared.catalog_attestation == catalog.attestation,
+         true <- ProviderRuntimeServices.bound_to?(services, catalog.runtime_binding),
          true <- prepared.provider_declarations != [],
          :ok <- PreparedRun.consume(prepared) do
-      open_consumed(prepared, catalog)
+      open_consumed(prepared, catalog, services)
     else
       _invalid -> {:error, internal_diagnostic(false)}
     end
   end
 
-  def open(_prepared, _catalog), do: {:error, internal_diagnostic(false)}
+  def open(_prepared, _catalog, _services), do: {:error, internal_diagnostic(false)}
 
-  defp open_consumed(prepared, catalog) do
+  defp open_consumed(prepared, catalog, services) do
     case ProviderActivity.mark(prepared.provider_activity) do
-      :ok -> open_marked(prepared, catalog)
+      :ok -> open_marked(prepared, catalog, services)
       {:error, _reason} -> fail_without_session(prepared, internal_diagnostic(false))
     end
   end
 
-  defp open_marked(prepared, catalog) do
+  defp open_marked(prepared, catalog, services) do
     case ProviderSession.start(prepared.request.package.limits) do
-      {:ok, session} -> validate_open_session(session, prepared, catalog)
+      {:ok, session} -> admit_open_session(session, prepared, catalog, services)
       {:error, _reason} -> fail_without_session(prepared, internal_diagnostic(true))
+    end
+  end
+
+  defp admit_open_session(session, prepared, catalog, services) do
+    case ProviderApplicationGate.admit(prepared, catalog, services) do
+      :ok ->
+        validate_open_session(session, prepared, catalog)
+
+      {:error, %CommandDiagnostic{} = diagnostic} ->
+        fail_with_session(session, prepared, diagnostic)
     end
   end
 

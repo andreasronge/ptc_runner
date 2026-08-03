@@ -562,9 +562,19 @@ Delivery is intentionally split into review-sized commits:
   handoff behind the registrar;
 - 5c2b (complete): route shipped process and port starts through the scoped
   registrar;
-- 5d1 (current): bounded active selection validation;
-- 5d2: optional application admission; and
+- 5d1 (complete): bounded active selection validation;
+- 5d2a (current): optional application admission inside the new active-session
+  boundary;
+- 5d2b: atomically cut the command frontend over to that boundary and remove
+  optional provider applications from the core OTP startup set; and
 - 5d3: bounded credential resolution.
+
+The 5d2a foundation does not change the legacy `RunBuilder` command path. Its
+runtime-services mode is consumed only by `ProviderActiveSession`. Removing
+`:req_llm` from generated OTP application metadata is intentionally deferred
+to 5d2b, because doing so before the command cutover would strand the legacy
+provider path without its eagerly started application. The cutover and metadata
+removal must land together; no intermediate commit may claim CLI enforcement.
 
 - replace the unpushed draft with the minimal `ProviderSession`, `Deadline`,
   cleanup stack, provisional root registrar, and runtime-services types;

@@ -817,6 +817,8 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
     assert InstallationCatalog.names(catalog) ==
              ~w(inspection live oauth replay static trace)
 
+    assert catalog.implementations["live"].provider_application == :req_llm
+
     assert catalog.descriptors["static"].authorization_mode == :none
     assert catalog.descriptors["static"].credential_names == ["token"]
     assert catalog.descriptors["static"].connectivity_mode == :acquisition

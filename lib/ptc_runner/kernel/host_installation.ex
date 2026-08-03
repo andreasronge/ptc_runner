@@ -141,6 +141,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
          {:ok, descriptor} <- descriptor(installation, rules, authority) do
       implementation =
         %{builder: &inactive_runtime_builder/2}
+        |> maybe_provider_application(installation)
         |> maybe_oauth_builder(installation)
         |> maybe_local_preflight(name, installation, binding)
         |> maybe_connectivity_probe(name, installation, binding)
@@ -151,6 +152,18 @@ defmodule PtcRunner.Kernel.HostInstallation do
        %{descriptor: descriptor, implementation: implementation, authority: authority_binding}}
     end
   end
+
+  defp maybe_provider_application(implementation, %{source: :llm}) do
+    if Application.get_env(
+         :ptc_runner,
+         :llm_adapter,
+         PtcRunner.LLM.ReqLLMAdapter
+       ) == PtcRunner.LLM.ReqLLMAdapter,
+       do: Map.put(implementation, :provider_application, :req_llm),
+       else: implementation
+  end
+
+  defp maybe_provider_application(implementation, _installation), do: implementation
 
   defp maybe_oauth_builder(implementation, %{source: :mcp} = installation) do
     case authority(installation) do

@@ -5,6 +5,8 @@ defmodule PtcRunner.Kernel.ProviderRuntimeServices do
   Construction is process-free and invokes no resolver or context factory.
   Activation may start one private host authority, and OAuth context creation
   remains lazy until a selected catalog requires it.
+  Provider application mode declares whether selected optional applications
+  must be host-started or may be started by a command-owned VM.
   An opaque keyed binding prevents host services from opening a catalog built
   from a different host document without exposing credential declarations.
   """
@@ -17,6 +19,7 @@ defmodule PtcRunner.Kernel.ProviderRuntimeServices do
   @enforce_keys [
     :activation,
     :credential_resolver,
+    :provider_application_mode,
     :oauth_mode,
     :runtime_binding,
     :host_payload
@@ -32,6 +35,7 @@ defmodule PtcRunner.Kernel.ProviderRuntimeServices do
   @type t :: %__MODULE__{
           activation: activation(),
           credential_resolver: credential_resolver(),
+          provider_application_mode: :host_owned | :command_vm,
           oauth_mode: oauth_mode(),
           runtime_binding: binary() | nil,
           host_payload: struct() | nil,
@@ -47,6 +51,7 @@ defmodule PtcRunner.Kernel.ProviderRuntimeServices do
       build(
         Keyword.get(opts, :activation, fn -> {:ok, nil} end),
         Keyword.get(opts, :credential_resolver, &default_credential_resolver/1),
+        Keyword.get(opts, :provider_application_mode, :host_owned),
         Keyword.get(opts, :oauth_mode, :disabled),
         nil,
         nil
@@ -70,6 +75,7 @@ defmodule PtcRunner.Kernel.ProviderRuntimeServices do
           build(
             fn -> HostRuntimePayload.activate(payload) end,
             fn names -> HostRuntimePayload.resolve_credentials(payload, names) end,
+            Keyword.get(opts, :provider_application_mode, :host_owned),
             Keyword.get(opts, :oauth_mode, :disabled),
             binding,
             payload
@@ -191,19 +197,29 @@ defmodule PtcRunner.Kernel.ProviderRuntimeServices do
   defp unique_allowed_options?(opts) do
     keys = Keyword.keys(opts)
 
-    keys -- [:activation, :credential_resolver, :oauth_mode] == [] and
+    keys -- [:activation, :credential_resolver, :provider_application_mode, :oauth_mode] == [] and
       length(keys) == MapSet.size(MapSet.new(keys))
   end
 
   defp unique_oauth_options?(opts) do
     keys = Keyword.keys(opts)
-    keys -- [:oauth_mode] == [] and length(keys) == MapSet.size(MapSet.new(keys))
+
+    keys -- [:provider_application_mode, :oauth_mode] == [] and
+      length(keys) == MapSet.size(MapSet.new(keys))
   end
 
-  defp build(activation, credential_resolver, oauth_mode, runtime_binding, host_payload) do
+  defp build(
+         activation,
+         credential_resolver,
+         provider_application_mode,
+         oauth_mode,
+         runtime_binding,
+         host_payload
+       ) do
     services = %__MODULE__{
       activation: activation,
       credential_resolver: credential_resolver,
+      provider_application_mode: provider_application_mode,
       oauth_mode: oauth_mode,
       runtime_binding: runtime_binding,
       host_payload: host_payload
@@ -220,6 +236,7 @@ defmodule PtcRunner.Kernel.ProviderRuntimeServices do
     do:
       is_function(services.activation, 0) and
         is_function(services.credential_resolver, 1) and
+        services.provider_application_mode in [:host_owned, :command_vm] and
         valid_oauth_mode?(services.oauth_mode) and
         valid_runtime_binding?(services.runtime_binding, services.host_payload)
 
@@ -239,6 +256,6 @@ defmodule PtcRunner.Kernel.ProviderRuntimeServices do
 
   defp payload(services),
     do:
-      {services.activation, services.credential_resolver, services.oauth_mode,
-       services.runtime_binding, services.host_payload}
+      {services.activation, services.credential_resolver, services.provider_application_mode,
+       services.oauth_mode, services.runtime_binding, services.host_payload}
 end

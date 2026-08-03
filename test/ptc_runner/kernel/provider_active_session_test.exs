@@ -1,5 +1,5 @@
 defmodule PtcRunner.Kernel.ProviderActiveSessionTest do
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
 
   alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.CommandDiagnostic
@@ -10,6 +10,7 @@ defmodule PtcRunner.Kernel.ProviderActiveSessionTest do
   alias PtcRunner.Kernel.ProviderActiveSession
   alias PtcRunner.Kernel.ProviderActivity
   alias PtcRunner.Kernel.ProviderDescriptor
+  alias PtcRunner.Kernel.ProviderRuntimeServices
   alias PtcRunner.Kernel.ProviderSession
   alias PtcRunner.Kernel.ResourceRegistrar
   alias PtcRunner.Kernel.RunCoordinator
@@ -26,7 +27,7 @@ defmodule PtcRunner.Kernel.ProviderActiveSessionTest do
 
     {:ok, prepared, catalog} = fixture(validator, ["first", "second"])
 
-    assert {:ok, session} = ProviderActiveSession.open(prepared, catalog)
+    assert {:ok, session} = ProviderActiveSession.open(prepared, catalog, services())
     assert_receive {:validated, "first", first_deadline}
     assert_receive {:validated, "second", second_deadline}
     assert is_integer(first_deadline)
@@ -41,7 +42,7 @@ defmodule PtcRunner.Kernel.ProviderActiveSessionTest do
       fixture(fn _selection, _context -> {:error, :selection_rejected} end)
 
     assert {:error, %CommandDiagnostic{} = diagnostic} =
-             ProviderActiveSession.open(prepared, catalog)
+             ProviderActiveSession.open(prepared, catalog, services())
 
     assert diagnostic.phase == :active_preflight
     assert diagnostic.code == :selection_rejected
@@ -60,7 +61,7 @@ defmodule PtcRunner.Kernel.ProviderActiveSessionTest do
       {:ok, prepared, catalog} = fixture(callback)
 
       assert {:error, %CommandDiagnostic{code: :selection_validation_failed}} =
-               ProviderActiveSession.open(prepared, catalog)
+               ProviderActiveSession.open(prepared, catalog, services())
     end
   end
 
@@ -76,7 +77,7 @@ defmodule PtcRunner.Kernel.ProviderActiveSessionTest do
     {:ok, prepared, catalog} = fixture(validator, ["first"], limits)
 
     assert {:error, %CommandDiagnostic{code: :selection_validation_timeout}} =
-             ProviderActiveSession.open(prepared, catalog)
+             ProviderActiveSession.open(prepared, catalog, services())
 
     assert_receive {:validator_started, worker}
     refute Process.alive?(worker)
@@ -94,7 +95,7 @@ defmodule PtcRunner.Kernel.ProviderActiveSessionTest do
 
         {:ok, limits} = Limits.new(selection_validation_timeout_ms: 100)
         {:ok, prepared, catalog} = fixture(validator, ["first"], limits)
-        send(parent, {:late_result, ProviderActiveSession.open(prepared, catalog)})
+        send(parent, {:late_result, ProviderActiveSession.open(prepared, catalog, services())})
       end)
 
     assert_receive {:late_result_worker, worker}
@@ -135,7 +136,7 @@ defmodule PtcRunner.Kernel.ProviderActiveSessionTest do
     end
 
     {:ok, prepared, catalog} = fixture(validator)
-    assert {:ok, session} = ProviderActiveSession.open(prepared, catalog)
+    assert {:ok, session} = ProviderActiveSession.open(prepared, catalog, services())
     assert_receive {:validator_root, root}
     root_ref = Process.monitor(root)
     assert_receive {:DOWN, ^root_ref, :process, ^root, reason}, 2_000
@@ -170,7 +171,7 @@ defmodule PtcRunner.Kernel.ProviderActiveSessionTest do
         end
 
         {:ok, prepared, catalog} = fixture(validator)
-        ProviderActiveSession.open(prepared, catalog)
+        ProviderActiveSession.open(prepared, catalog, services())
       end)
 
     assert_receive {:caller_death_worker, worker}
@@ -189,7 +190,7 @@ defmodule PtcRunner.Kernel.ProviderActiveSessionTest do
     {:ok, other_prepared, other_catalog} = fixture(callback, ["first"], nil, "other-v1")
 
     assert {:error, %CommandDiagnostic{phase: :internal, provider_activity: false}} =
-             ProviderActiveSession.open(prepared, other_catalog)
+             ProviderActiveSession.open(prepared, other_catalog, services())
 
     assert ProviderActivity.value(prepared.provider_activity) == false
     PreparedRun.close(prepared)
@@ -208,11 +209,103 @@ defmodule PtcRunner.Kernel.ProviderActiveSessionTest do
     end
 
     {:ok, prepared, catalog} = fixture(validator)
-    assert {:ok, session} = ProviderActiveSession.open(prepared, catalog)
+    assert {:ok, session} = ProviderActiveSession.open(prepared, catalog, services())
     close(session, prepared)
   end
 
-  defp fixture(callback, modes \\ ["first"], limits \\ nil, revision \\ "custom-v1") do
+  test "host-owned mode requires the selected provider application to be running" do
+    restore_provider_applications_on_exit()
+    stop_provider_applications()
+
+    {:ok, prepared, catalog} =
+      fixture(fn _selection, _context -> :ok end, ["first"], nil, "custom-v1", :req_llm)
+
+    assert {:error,
+            %CommandDiagnostic{
+              phase: :active_preflight,
+              code: :provider_application_unavailable,
+              provider_activity: true
+            } = diagnostic} =
+             ProviderActiveSession.open(prepared, catalog, services(:host_owned))
+
+    assert diagnostic.subject.name == "selected"
+    assert diagnostic.subject.operation == :application
+    assert diagnostic.subject.occurrence == nil
+    assert ProviderActivity.value(prepared.provider_activity) == :unknown
+  end
+
+  @tag :tmp_dir
+  test "command VM startup disables both dotenv readers before applications start", %{
+    tmp_dir: directory
+  } do
+    restore_provider_applications_on_exit()
+    stop_provider_applications()
+    Application.put_env(:req_llm, :load_dotenv, true, persistent: true)
+    Application.put_env(:llm_db, :load_dotenv, true, persistent: true)
+
+    sentinel = "PTC_PROVIDER_APPLICATION_DOTENV_SENTINEL"
+    previous_sentinel = System.get_env(sentinel)
+    System.delete_env(sentinel)
+
+    on_exit(fn ->
+      if previous_sentinel,
+        do: System.put_env(sentinel, previous_sentinel),
+        else: System.delete_env(sentinel)
+    end)
+
+    File.write!(Path.join(directory, ".env"), "#{sentinel}=must-not-load\n")
+
+    {:ok, prepared, catalog} =
+      fixture(fn _selection, _context -> :ok end, ["first"], nil, "custom-v1", :req_llm)
+
+    File.cd!(directory, fn ->
+      assert {:ok, session} =
+               ProviderActiveSession.open(prepared, catalog, services(:command_vm))
+
+      assert Application.get_env(:req_llm, :load_dotenv) == false
+      assert Application.get_env(:llm_db, :load_dotenv) == false
+      assert System.get_env(sentinel) == nil
+      assert :req_llm in started_applications()
+      assert :llm_db in started_applications()
+
+      close(session, prepared)
+    end)
+  end
+
+  test "command VM mode rejects a prestarted target while host-owned mode accepts it" do
+    restore_provider_applications_on_exit()
+    stop_provider_applications()
+    Application.put_env(:req_llm, :load_dotenv, false, persistent: true)
+    Application.put_env(:llm_db, :load_dotenv, false, persistent: true)
+    assert {:ok, _started} = Application.ensure_all_started(:req_llm)
+
+    {:ok, command_prepared, command_catalog} =
+      fixture(fn _selection, _context -> :ok end, ["first"], nil, "command-v1", :req_llm)
+
+    assert {:error,
+            %CommandDiagnostic{code: :provider_application_unavailable, provider_activity: true}} =
+             ProviderActiveSession.open(
+               command_prepared,
+               command_catalog,
+               services(:command_vm)
+             )
+
+    {:ok, host_prepared, host_catalog} =
+      fixture(fn _selection, _context -> :ok end, ["first"], nil, "host-v1", :req_llm)
+
+    assert {:ok, session} =
+             ProviderActiveSession.open(host_prepared, host_catalog, services(:host_owned))
+
+    close(session, host_prepared)
+  end
+
+  defp fixture(
+         callback,
+         modes \\ ["first"],
+         limits \\ nil,
+         revision \\ "custom-v1",
+         provider_application \\ nil
+       ) do
     limits = limits || Limits.installed_defaults()
     {:ok, rules} = rules()
 
@@ -243,13 +336,20 @@ defmodule PtcRunner.Kernel.ProviderActiveSessionTest do
 
     registrations =
       Map.new(aliases, fn name ->
+        implementation = %{
+          builder: fn _selection, _context -> {:error, :inactive_provider} end,
+          selection_validator: callback
+        }
+
+        implementation =
+          if provider_application,
+            do: Map.put(implementation, :provider_application, provider_application),
+            else: implementation
+
         {name,
          %{
            descriptor: descriptor,
-           implementation: %{
-             builder: fn _selection, _context -> {:error, :inactive_provider} end,
-             selection_validator: callback
-           },
+           implementation: implementation,
            authority: nil
          }}
       end)
@@ -300,5 +400,36 @@ defmodule PtcRunner.Kernel.ProviderActiveSessionTest do
   defp close(session, prepared) do
     assert :ok = ProviderSession.close(session)
     assert :ok = PreparedRun.close(prepared)
+  end
+
+  defp services(mode \\ :host_owned) do
+    {:ok, services} = ProviderRuntimeServices.new(provider_application_mode: mode)
+    services
+  end
+
+  defp started_applications,
+    do: Application.started_applications() |> Enum.map(&elem(&1, 0))
+
+  defp stop_provider_applications do
+    running = started_applications()
+
+    if :req_llm in running, do: Application.stop(:req_llm)
+    if :llm_db in running, do: Application.stop(:llm_db)
+  end
+
+  defp restore_provider_applications_on_exit do
+    initially_running = MapSet.new(started_applications())
+
+    on_exit(fn ->
+      stop_provider_applications()
+      Application.put_env(:req_llm, :load_dotenv, false, persistent: true)
+      Application.put_env(:llm_db, :load_dotenv, false, persistent: true)
+
+      if MapSet.member?(initially_running, :llm_db),
+        do: Application.ensure_all_started(:llm_db)
+
+      if MapSet.member?(initially_running, :req_llm),
+        do: Application.ensure_all_started(:req_llm)
+    end)
   end
 end

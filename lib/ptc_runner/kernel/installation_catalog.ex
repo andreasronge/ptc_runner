@@ -26,6 +26,7 @@ defmodule PtcRunner.Kernel.InstallationCatalog do
     :builder,
     :oauth_builder,
     :local_preflight,
+    :provider_application,
     :selection_validator,
     :connectivity_probe
   ]
@@ -45,6 +46,7 @@ defmodule PtcRunner.Kernel.InstallationCatalog do
           optional(:oauth_builder) => function(),
           optional(:local_preflight) => (map(), map(), ProviderRuntimeServices.t() ->
                                            :ok | {:error, term()}),
+          optional(:provider_application) => :req_llm,
           optional(:selection_validator) => function(),
           optional(:connectivity_probe) => (map(), map(), ProviderRuntimeServices.t() ->
                                               :ok | {:error, term()})
@@ -222,6 +224,7 @@ defmodule PtcRunner.Kernel.InstallationCatalog do
         descriptor.local_preflight != :none,
         Map.get(implementation, :local_preflight)
       ) and
+      valid_provider_application?(Map.get(implementation, :provider_application)) and
       operation_matches?(
         descriptor.selection_validation == :active,
         Map.get(implementation, :selection_validator)
@@ -233,6 +236,10 @@ defmodule PtcRunner.Kernel.InstallationCatalog do
   end
 
   defp valid_implementation?(_descriptor, _implementation), do: false
+
+  defp valid_provider_application?(nil), do: true
+  defp valid_provider_application?(:req_llm), do: true
+  defp valid_provider_application?(_application), do: false
 
   defp operation_matches?(true, callback), do: is_function(callback, 2)
   defp operation_matches?(false, nil), do: true

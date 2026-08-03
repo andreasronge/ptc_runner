@@ -104,7 +104,19 @@ defmodule PtcRunner.Kernel.PreparedRun do
   end
 
   @spec valid?(term()) :: boolean()
-  def valid?(%__MODULE__{attestation: attestation} = prepared) do
+  def valid?(%__MODULE__{} = prepared),
+    do: sealed_valid?(prepared) and ProviderActivity.claimed?(prepared.provider_activity)
+
+  def valid?(_prepared), do: false
+
+  @doc false
+  @spec active_valid?(term()) :: boolean()
+  def active_valid?(%__MODULE__{} = prepared),
+    do: sealed_valid?(prepared) and ProviderActivity.value(prepared.provider_activity) == true
+
+  def active_valid?(_prepared), do: false
+
+  defp sealed_valid?(%__MODULE__{attestation: attestation} = prepared) do
     Enum.sort(Map.keys(prepared)) == @field_keys and
       RunRequest.valid?(prepared.request) and
       bundle_matches?(
@@ -131,11 +143,8 @@ defmodule PtcRunner.Kernel.PreparedRun do
           :post_selection_context
         ])
       ) and
-      ProviderActivity.claimed?(prepared.provider_activity) and
       Attestation.valid?(__MODULE__, payload(prepared), attestation)
   end
-
-  def valid?(_prepared), do: false
 
   @doc false
   @spec consume(t()) :: :ok | {:error, :invalid_prepared_run}

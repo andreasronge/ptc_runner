@@ -37,6 +37,7 @@ defmodule PtcRunner.Kernel.ProviderRuntimeServicesTest do
              )
 
     assert ProviderRuntimeServices.valid?(services)
+    assert services.provider_application_mode == :host_owned
     assert Enum.map(1..3, &:atomics.get(calls, &1)) == [0, 0, 0]
 
     assert {:ok, nil} = ProviderRuntimeServices.activate(services)
@@ -80,5 +81,18 @@ defmodule PtcRunner.Kernel.ProviderRuntimeServicesTest do
 
     assert {:error, :invalid_provider_runtime_services} =
              ProviderRuntimeServices.new(runtime_binding: :crypto.strong_rand_bytes(32))
+
+    assert {:error, :invalid_provider_runtime_services} =
+             ProviderRuntimeServices.new(provider_application_mode: :shared_vm)
+
+    assert {:ok, command_services} =
+             ProviderRuntimeServices.new(provider_application_mode: :command_vm)
+
+    assert ProviderRuntimeServices.valid?(command_services)
+
+    refute ProviderRuntimeServices.valid?(%{
+             command_services
+             | provider_application_mode: :host_owned
+           })
   end
 end
