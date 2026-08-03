@@ -23,6 +23,13 @@ defmodule PtcRunner.Kernel.DeepSeekE2ETest do
   setup_all do
     :ok = PtcRunner.Dotenv.load()
 
+    # The core application no longer starts :req_llm implicitly; a run admits it
+    # through ProviderApplicationGate. This test drives ProviderRegistry.build/4
+    # directly, so it admits the provider application itself, disabling the
+    # dependency's own dotenv reader exactly as the gate does.
+    Application.put_env(:req_llm, :load_dotenv, false, persistent: true)
+    {:ok, _started} = Application.ensure_all_started(:req_llm)
+
     if System.get_env("OPENROUTER_API_KEY") do
       :ok
     else
