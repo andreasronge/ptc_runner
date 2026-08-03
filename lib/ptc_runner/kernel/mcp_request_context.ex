@@ -87,7 +87,11 @@ defmodule PtcRunner.Kernel.MCPRequestContext do
         resource_registrar: registrar
       }) do
     ref = Process.monitor(pid)
-    seal_result = safe_call(pid, :seal)
+    # The sealing callback is already bounded: its only blocking step is the
+    # registrar handoff, which ProviderScopeOwner caps at its own request
+    # timeout. Adding a caller timeout here would only compete with that cap,
+    # and losing the tie skips adoption while reporting success.
+    seal_result = safe_call(pid, :seal, :infinity)
 
     adoption_result =
       if seal_result == :ok,
