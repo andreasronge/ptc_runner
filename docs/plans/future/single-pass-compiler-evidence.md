@@ -130,7 +130,9 @@ Filed as [#1165](https://github.com/andreasronge/ptc_runner/issues/1165).
 
 Probed directly against the mission environment, no model calls involved,
 because the answers decide whether a model-authored retrieval arm is buildable
-at all:
+at all. Every item here was re-verified after this branch rebased onto `main`
+at [PR #1169](https://github.com/andreasronge/ptc_runner/pull/1169), which
+changed the generated-program boundary; all of them still hold.
 
 - Source handed to `kernel/eval-source` may contain `def` and `defn`, and what
   it defines **persists into later `eval-source` calls for the life of the
@@ -148,6 +150,25 @@ at all:
   `mission_tools` (`evaluation.ex`) grants only the mission environment's own
   capability callbacks. Generated code therefore cannot call the model or
   recursively evaluate, and is bounded by `mission_capability_calls`.
+
+Two things `main` added while this branch was away change how generated code
+should be written, and both were confirmed by the same probe:
+
+- **`kernel/check-source` validates without executing.** It answers
+  `{:outcome :valid, :source_hash …}` or `{:outcome :invalid, :diagnostic …}`,
+  and it resolves names against the live mission environment — an undefined
+  function is caught as `:unbound_var` before anything runs, where
+  `(program …)` still surfaces the same fault only at evaluation. A repair loop
+  no longer has to spend an evaluation to learn its program does not compile.
+- **`kernel/eval-source-with` passes data as data.** Parameters arrive at
+  `data/params` inside the evaluated program, so a value never has to be
+  rendered into source text. A hostile string passed as a parameter comes back
+  as a string, intact and never parsed — the injection shape that string
+  concatenation creates is structurally absent rather than escaped around.
+
+The components under `experiments/` still build their programs by
+concatenation and predate this surface. That is now the wrong way to write
+them; see *Next step*.
 
 What this does *not* provide is a prelude in the bundle sense. A runtime `defn`
 is not in the `FrozenBundle`: not covered by the component source hash, not
@@ -238,8 +259,19 @@ One incident with hundreds of records, or heavy cross-referencing, makes both
 testable at once. Phase 2's SREGym capture is the plan's route to it and remains
 its one open item.
 
-Two things can be done before that corpus exists:
+Three things can be done before that corpus exists:
 
+0. **Move the components onto `eval-source-with` and `check-source`.** Both
+   arms build program text by concatenation, and `single-pass.clj` interpolates
+   **model-produced** citation values into source that is then evaluated. A
+   crafted `evidence_id` demonstrably escapes the string literal and changes the
+   program's structure; it was not turned into a forged verification result, so
+   this is a demonstrated injection shape rather than a demonstrated exploit,
+   but the arm's own verification step is the wrong place to leave one. Passing
+   those values as parameters removes the shape rather than escaping it, and
+   `check-source` gives the `authored` arm a repair loop that costs no
+   evaluation. Do this before running the arm, so its numbers describe the
+   design worth keeping.
 1. **Run the `authored` arm on the current three incidents** — nine runs, about
    twenty minutes. Not to win: to check the authoring call produces a runnable
    program at all. The `authoring` annotation counts `program-ran` /
