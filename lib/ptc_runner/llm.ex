@@ -73,8 +73,13 @@ defmodule PtcRunner.LLM do
   failure. The answer is per model, because one adapter may route some models
   through a dependency and others straight over HTTP. Adapters with no such
   dependency omit the callback or return `nil`.
+
+  Constrained to `:req_llm` because that is the only backing application the
+  installation catalog validates and the CLI's ownership selection understands.
+  Admitting arbitrary applications means widening those two consumers as well,
+  which is a deliberate change rather than a side effect of this callback.
   """
-  @callback provider_application(model :: String.t()) :: atom() | nil
+  @callback provider_application(model :: String.t()) :: :req_llm | nil
 
   @optional_callbacks [stream: 2, ensure_ready: 0, provider_application: 1]
 

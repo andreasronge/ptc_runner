@@ -890,7 +890,7 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
     Application.put_env(
       :ptc_runner,
       :host_llm_test_provider_application,
-      :ptc_unstarted_provider_app
+      :req_llm
     )
 
     assert {:error, %PtcRunner.Kernel.ProviderError{} = stopped} =
@@ -898,11 +898,11 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
 
     assert stopped.kind == :internal
     assert stopped.retryable? == false
-    assert stopped.details =~ "ptc_unstarted_provider_app"
+    assert stopped.details =~ "req_llm"
 
-    # The same transport failure with the application running keeps the
-    # retryable transport classification, so the check is not blanket.
-    Application.put_env(:ptc_runner, :host_llm_test_provider_application, :ptc_runner)
+    # A route declaring no backing application keeps the retryable transport
+    # classification, so the check is not blanket.
+    Application.put_env(:ptc_runner, :host_llm_test_provider_application, nil)
 
     assert {:error, %PtcRunner.Kernel.ProviderError{} = running} =
              build_capability.().callback.(request)
@@ -931,7 +931,7 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
     Application.put_env(
       :ptc_runner,
       :host_llm_test_provider_application,
-      :ptc_unstarted_provider_app
+      :req_llm
     )
 
     assert {:error, %PtcRunner.Kernel.ProviderError{} = raised} =

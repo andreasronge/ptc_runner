@@ -106,10 +106,14 @@ A request issued while that application is stopped fails with a non-retryable
 `:internal` provider error naming the application, rather than a retryable
 transport outage, because retrying cannot start an OTP application. Adapters
 declare what they need through the optional `provider_application/1` callback on
-`PtcRunner.LLM`, which receives the resolved model: one adapter may route some
-models through a dependency and serve others directly over HTTP, and only the
-former are gated. Both run admission and the request-time check consult that
-same answer.
+`PtcRunner.LLM`, which receives the resolved model and answers `:req_llm` or
+`nil`: one adapter may route some models through a dependency and serve others
+directly over HTTP, and only the former are gated. Both run admission and the
+request-time check consult that same answer.
+
+Credential loading is decided separately. `mix ptc.run` reads the nearest `.env`
+whenever a selected LLM installation declares an `env` credential, including for
+direct routes that need no backing application at all.
 
 ## Install custom providers
 

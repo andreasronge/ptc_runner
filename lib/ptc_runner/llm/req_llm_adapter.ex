@@ -57,7 +57,7 @@ if Code.ensure_loaded?(ReqLLM) do
     # `openai-compat:` models are plain Req calls that work without it. Routing
     # through parse_provider/1 keeps this answer from drifting from generate_text/3.
     @impl true
-    @spec provider_application(String.t()) :: atom() | nil
+    @spec provider_application(String.t()) :: :req_llm | nil
     def provider_application(model) do
       case parse_provider(model) do
         {:req_llm, _model_id} -> :req_llm

@@ -322,10 +322,11 @@ defmodule Mix.Tasks.Ptc.Run do
   defp maybe_load_dotenv(_prepared, %{host: nil}), do: :ok
 
   defp maybe_load_dotenv(prepared, runtime) do
+    # Keyed on the declared credential, not on provider-application admission: a
+    # direct `ollama:`/`openai-compat:` route needs no backing application but
+    # can still resolve its credential from the nearest `.env`.
     if Enum.any?(prepared.provider_declarations, fn declaration ->
-         with %{provider_application: :req_llm} <-
-                Map.get(runtime.catalog.implementations, declaration.name),
-              %{source: :llm, credential: credential} <-
+         with %{source: :llm, credential: credential} <-
                 Map.get(runtime.host.install, declaration.name),
               %{source: :env} <- Map.get(runtime.host.credentials, credential) do
            true
