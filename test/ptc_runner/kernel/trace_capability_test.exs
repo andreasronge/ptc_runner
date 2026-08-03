@@ -429,8 +429,11 @@ defmodule PtcRunner.Kernel.TraceCapabilityTest do
              TraceLog.query(trace_log, :list_runs, %{"fields" => ["status", 1]})
 
     # A list longer than the selectable set itself can never request more
-    # distinct keys than exist, and is rejected by length alone.
-    over_long = List.duplicate("status", 34)
+    # distinct keys than exist, and is rejected by length alone. The length is
+    # derived from the summary rather than written down, so adding a selectable
+    # field cannot silently move this case inside the bound.
+    assert {:ok, %{"items" => [full]}} = TraceLog.query(trace_log, :list_runs, %{})
+    over_long = List.duplicate("status", map_size(full) + 1)
 
     assert {:error, {:invalid_query, %{argument: "fields", bound: _bound}}} =
              TraceLog.query(trace_log, :list_runs, %{"fields" => over_long})

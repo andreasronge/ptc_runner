@@ -71,6 +71,7 @@
     },
     "frozen-model": {
       "source": "llm_replay",
+      "installation_revision": "incident-compiler-replay-0.1.0",
       "fixtures": "fixtures/replay/compiler.jsonl",
       "ceilings": {
         "max_entries": 512,
@@ -79,6 +80,7 @@
     },
     "live-model": {
       "source": "llm",
+      "installation_revision": "openrouter-deepseek-v3.2-0.1.0",
       "model": "openrouter:deepseek/deepseek-v3.2",
       "credential": "openrouter_key",
       "cache": false,

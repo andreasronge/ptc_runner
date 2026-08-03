@@ -36,6 +36,7 @@ defmodule IncidentCompiler.CompilerTest do
       queue: run!("ptc.queue-backlog.json", []),
       selftest: run!("selftest.json", []),
       refusal: refusal!("ptc.auth-partial.json", ["--trace", trace]),
+      refusal_kind: refusal_kind(trace),
       transcripts: model_request_transcripts(artifact),
       stages: annotation_stages(trace)
     }
@@ -121,8 +122,14 @@ defmodule IncidentCompiler.CompilerTest do
       #
       # The manifest declares this kind, so the refusal names itself instead of
       # arriving as a fingerprint an operator has to precompute to recognise.
-      assert context.refusal =~ "failure_kind: \"unresolved-citations\""
-      refute context.refusal =~ SafeMetadata.fingerprint("failure-kind:unresolved-citations")
+      #
+      # The declared name is asserted on the trace rather than on the CLI
+      # message because `ptc.run` renders atom codes only and never inspects a
+      # term — a value in `details` could be caller content, and the renderer
+      # has no way to tell a declared kind from one.
+      assert context.refusal =~ "workflow_failed/explicit_failure"
+      assert context.refusal_kind == "unresolved-citations"
+      refute context.refusal_kind == SafeMetadata.fingerprint("failure-kind:unresolved-citations")
     end
 
     test "records the refusal as a failed validation stage in the trace", context do
@@ -266,6 +273,14 @@ defmodule IncidentCompiler.CompilerTest do
     |> Enum.filter(&(&1["type"] == "workflow-annotation"))
     |> Enum.map(&get_in(&1, ["data", "data", "stage"]))
     |> Enum.reject(&is_nil/1)
+  end
+
+  defp refusal_kind(trace) do
+    trace
+    |> records()
+    |> Enum.find_value(fn record ->
+      if record["type"] == "run-stopped", do: get_in(record, ["data", "failure_kind"])
+    end)
   end
 
   defp records(path), do: path |> File.stream!() |> Enum.map(&Jason.decode!/1)

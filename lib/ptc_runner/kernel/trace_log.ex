@@ -2026,7 +2026,8 @@ defmodule PtcRunner.Kernel.TraceLog do
   @run_summary_fields ~w(
     run_id trace_id start_timestamp stop_timestamp status terminal_reason
     failure_kind failure_kind_fingerprint labels tags name model provider
-    subordinate_evaluations workflow_capability_calls mission_capability_calls
+    subordinate_evaluations subordinate_source_checks
+    workflow_capability_calls mission_capability_calls
     llm_calls error_count duration_ms workflow_prelude mission_prelude
     mission_inventory_hash mission_inventory_bytes mission_model_context_hash
     mission_model_context_bytes component_overrides connector_snapshots
