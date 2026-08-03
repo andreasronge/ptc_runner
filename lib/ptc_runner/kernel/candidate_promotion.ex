@@ -115,15 +115,15 @@ defmodule PtcRunner.Kernel.CandidatePromotion do
   defp signatures(exports, owned) do
     incomplete =
       exports
-      |> Enum.filter(&(&1.namespace in owned))
-      |> Enum.filter(&(&1.visibility == :prompt))
-      |> Enum.filter(&(missing_contract?(&1) or missing_doc?(&1)))
+      |> Enum.filter(fn export ->
+        export.namespace in owned and export.visibility == :prompt and
+          (missing_contract?(export) or missing_doc?(export))
+      end)
       |> Enum.map(fn export ->
         %{
           "ref" => export.ref,
           "missing" =>
-            [] ++
-              if(missing_contract?(export), do: ["signature"], else: []) ++
+            if(missing_contract?(export), do: ["signature"], else: []) ++
               if(missing_doc?(export), do: ["doc"], else: [])
         }
       end)
@@ -207,19 +207,17 @@ defmodule PtcRunner.Kernel.CandidatePromotion do
     gained = requirements(candidate) -- requirements(installed)
     effect_widened? = rank(candidate.effect) > rank(installed.effect)
 
-    cond do
-      gained == [] and not effect_widened? ->
-        nil
-
-      true ->
-        %{
-          "ref" => candidate.ref,
-          "gained_requirements" => Enum.sort(gained),
-          "effect" => %{
-            "base" => Atom.to_string(installed.effect),
-            "candidate" => Atom.to_string(candidate.effect)
-          }
+    if gained == [] and not effect_widened? do
+      nil
+    else
+      %{
+        "ref" => candidate.ref,
+        "gained_requirements" => Enum.sort(gained),
+        "effect" => %{
+          "base" => Atom.to_string(installed.effect),
+          "candidate" => Atom.to_string(candidate.effect)
         }
+      }
     end
   end
 
