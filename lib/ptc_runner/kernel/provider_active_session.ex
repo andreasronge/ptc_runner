@@ -62,9 +62,7 @@ defmodule PtcRunner.Kernel.ProviderActiveSession do
   end
 
   defp open_marked(prepared, catalog, services) do
-    case ProviderSession.start(prepared.request.package.limits,
-           operation_identity: prepared.attestation
-         ) do
+    case ProviderSession.start_active(prepared.request.package.limits, prepared.attestation) do
       {:ok, session} -> admit_open_session(session, prepared, catalog, services)
       {:error, _reason} -> fail_without_session(prepared, internal_diagnostic(true))
     end
@@ -73,10 +71,17 @@ defmodule PtcRunner.Kernel.ProviderActiveSession do
   defp admit_open_session(session, prepared, catalog, services) do
     case ProviderApplicationGate.admit(prepared, catalog, services) do
       :ok ->
-        validate_open_session(session, prepared, catalog)
+        begin_run(session, prepared, catalog)
 
       {:error, %CommandDiagnostic{} = diagnostic} ->
         fail_with_session(session, prepared, diagnostic)
+    end
+  end
+
+  defp begin_run(session, prepared, catalog) do
+    case ProviderSession.begin_run(session) do
+      {:ok, session} -> validate_open_session(session, prepared, catalog)
+      {:error, _reason} -> fail_after_unavailable_session(prepared, internal_diagnostic(true))
     end
   end
 
@@ -109,15 +114,24 @@ defmodule PtcRunner.Kernel.ProviderActiveSession do
 
   defp validate_selection(session, prepared, catalog, declaration) do
     case ProviderSession.open_registrar(session) do
-      {:ok, registrar} -> validate_in_scope(registrar, prepared, catalog, declaration)
-      {:error, _reason} -> {:error, internal_diagnostic(true)}
+      {:ok, registrar} ->
+        validate_in_scope(
+          registrar,
+          ProviderSession.run_deadline(session),
+          prepared,
+          catalog,
+          declaration
+        )
+
+      {:error, _reason} ->
+        {:error, internal_diagnostic(true)}
     end
   end
 
-  defp validate_in_scope(registrar, prepared, catalog, declaration) do
+  defp validate_in_scope(registrar, run_deadline, prepared, catalog, declaration) do
     result =
       case ResourceRegistrar.activate(registrar) do
-        :ok -> run_validator(registrar, prepared, catalog, declaration)
+        :ok -> run_validator(registrar, run_deadline, prepared, catalog, declaration)
         {:error, _reason} -> {:error, internal_diagnostic(true)}
       end
 
@@ -127,8 +141,12 @@ defmodule PtcRunner.Kernel.ProviderActiveSession do
     end
   end
 
-  defp run_validator(registrar, prepared, catalog, declaration) do
-    deadline = Deadline.new(prepared.request.package.limits.selection_validation_timeout_ms)
+  defp run_validator(registrar, run_deadline, prepared, catalog, declaration) do
+    deadline =
+      Deadline.earliest(
+        run_deadline,
+        Deadline.new(prepared.request.package.limits.selection_validation_timeout_ms)
+      )
 
     callback =
       catalog.implementations |> Map.fetch!(declaration.name) |> Map.fetch!(:selection_validator)
@@ -195,6 +213,12 @@ defmodule PtcRunner.Kernel.ProviderActiveSession do
     PreparedRun.close(prepared)
     {:error, diagnostic}
   end
+
+  # `ProviderSession.begin_run/1` queues token-authenticated cleanup when its
+  # bounded call becomes unavailable. Do not follow that timeout with an
+  # unbounded synchronous close against the same unavailable process.
+  defp fail_after_unavailable_session(prepared, diagnostic),
+    do: fail_without_session(prepared, diagnostic)
 
   defp selection_diagnostic(declaration, code) do
     occurrence = %{destination: declaration.destination, index: declaration.index}

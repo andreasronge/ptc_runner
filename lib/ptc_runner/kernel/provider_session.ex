@@ -4,9 +4,10 @@ defmodule PtcRunner.Kernel.ProviderSession do
 
   A session initially monitors its build creator and owns every acquisition
   scope opened through `PtcRunner.Kernel.ResourceRegistrar`. An active session
-  is sealed to one exact prepared operation and atomically claims that operation
-  before provider acquisition, so neither another prepared run nor a replay can
-  share its cleanup boundary. Before provider
+  is sealed to one exact prepared operation. After optional application
+  admission it anchors that operation's absolute run deadline, then atomically
+  claims the operation before provider acquisition, so neither another prepared
+  run nor a replay can share its cleanup boundary. Before provider
   callbacks can start, execution binds the session exactly once to its lifecycle
   owner and run state. The session then tracks every provider task itself, so
   owner or run-state death drains live tasks before any provider closer runs.
@@ -47,6 +48,8 @@ defmodule PtcRunner.Kernel.ProviderSession do
     :token,
     :creator,
     :operation_identity,
+    :run_duration_ms,
+    :run_deadline,
     :cleanup_timeout_ms,
     :max_heap_words,
     :attestation
@@ -63,23 +66,26 @@ defmodule PtcRunner.Kernel.ProviderSession do
             token: reference(),
             creator: pid(),
             operation_identity: binary() | nil,
+            run_duration_ms: pos_integer(),
+            run_deadline: Deadline.t() | nil,
             cleanup_timeout_ms: pos_integer(),
             max_heap_words: pos_integer(),
             attestation: binary()
           }
 
-  @doc false
-  @spec start(Limits.t(), keyword()) :: {:ok, t()} | {:error, term()}
-  def start(limits, opts \\ [])
+  @spec start(Limits.t()) :: {:ok, t()} | {:error, term()}
+  def start(%Limits{} = limits), do: start_session(limits, nil)
+  def start(_limits), do: {:error, :invalid_provider_session}
 
-  def start(%Limits{} = limits, opts) when is_list(opts) do
-    with true <- Limits.valid?(limits),
-         true <- Keyword.keyword?(opts),
-         keys = Keyword.keys(opts),
-         true <- keys -- [:operation_identity] == [],
-         true <- length(keys) == MapSet.size(MapSet.new(keys)),
-         operation_identity = Keyword.get(opts, :operation_identity),
-         true <- is_nil(operation_identity) or is_binary(operation_identity) do
+  @doc false
+  @spec start_active(Limits.t(), binary()) :: {:ok, t()} | {:error, term()}
+  def start_active(%Limits{} = limits, operation_identity) when is_binary(operation_identity),
+    do: start_session(limits, operation_identity)
+
+  def start_active(_limits, _operation_identity), do: {:error, :invalid_provider_session}
+
+  defp start_session(limits, operation_identity) do
+    if Limits.valid?(limits) do
       creator = self()
       token = make_ref()
 
@@ -90,22 +96,22 @@ defmodule PtcRunner.Kernel.ProviderSession do
             token: token,
             creator: creator,
             operation_identity: operation_identity,
+            run_duration_ms: limits.run_duration_ms,
+            run_deadline: nil,
             cleanup_timeout_ms: limits.provider_cleanup_timeout_ms,
             max_heap_words: limits.provider_heap_words,
             attestation: <<>>
           }
 
-          {:ok, %{session | attestation: Attestation.attest(__MODULE__, payload(session))}}
+          {:ok, seal(session)}
 
         {:error, _reason} = error ->
           error
       end
     else
-      _invalid -> {:error, :invalid_provider_session}
+      {:error, :invalid_provider_session}
     end
   end
-
-  def start(_limits, _opts), do: {:error, :invalid_provider_session}
 
   @spec valid?(term()) :: boolean()
   def valid?(%__MODULE__{} = session),
@@ -113,6 +119,8 @@ defmodule PtcRunner.Kernel.ProviderSession do
       Enum.sort(Map.keys(session)) == @field_keys and is_pid(session.pid) and
         is_reference(session.token) and is_pid(session.creator) and
         (is_nil(session.operation_identity) or is_binary(session.operation_identity)) and
+        is_integer(session.run_duration_ms) and session.run_duration_ms > 0 and
+        (is_nil(session.run_deadline) or Deadline.valid?(session.run_deadline)) and
         Attestation.valid?(__MODULE__, payload(session), session.attestation)
 
   def valid?(_session), do: false
@@ -127,10 +135,72 @@ defmodule PtcRunner.Kernel.ProviderSession do
   def compatible_limits?(%__MODULE__{} = session, %Limits{} = limits) do
     valid?(session) and Limits.valid?(limits) and
       session.cleanup_timeout_ms == limits.provider_cleanup_timeout_ms and
-      session.max_heap_words == limits.provider_heap_words
+      session.max_heap_words == limits.provider_heap_words and
+      compatible_run_duration?(session, limits)
   end
 
   def compatible_limits?(_session, _limits), do: false
+
+  @doc false
+  @spec begin_run(t()) ::
+          {:ok, t()} | {:error, :provider_session_unavailable}
+  def begin_run(%__MODULE__{} = session) do
+    if valid?(session) and session.creator == self() and
+         is_binary(session.operation_identity) and is_nil(session.run_deadline) do
+      run_deadline = Deadline.new(session.run_duration_ms)
+      operation_deadline = Deadline.new(@claim_timeout_ms)
+
+      result =
+        call(
+          session.pid,
+          {session.token, {:begin_run, run_deadline, operation_deadline}},
+          Deadline.remaining(operation_deadline) + @claim_reply_grace_ms,
+          {:error, :provider_session_unavailable}
+        )
+
+      case result do
+        :ok ->
+          {:ok, session |> Map.put(:run_deadline, run_deadline) |> seal()}
+
+        {:error, :provider_session_unavailable} = error ->
+          abandon_unclaimed(session)
+          error
+      end
+    else
+      if valid?(session), do: abandon_unclaimed(session)
+      {:error, :provider_session_unavailable}
+    end
+  end
+
+  def begin_run(_session), do: {:error, :provider_session_unavailable}
+
+  @doc false
+  @spec run_deadline(term()) :: Deadline.t() | nil
+  def run_deadline(%__MODULE__{} = session) do
+    if valid?(session), do: session.run_deadline
+  end
+
+  def run_deadline(_session), do: nil
+
+  @doc false
+  @spec execution_deadline(term()) :: {:ok, Deadline.t() | nil} | :error
+  def execution_deadline(%__MODULE__{} = session) do
+    cond do
+      not valid?(session) ->
+        :error
+
+      is_nil(session.operation_identity) and is_nil(session.run_deadline) ->
+        {:ok, nil}
+
+      is_binary(session.operation_identity) and Deadline.valid?(session.run_deadline) ->
+        {:ok, session.run_deadline}
+
+      true ->
+        :error
+    end
+  end
+
+  def execution_deadline(_session), do: :error
 
   @doc false
   @spec claim_operation(t(), Limits.t(), binary()) ::
@@ -138,7 +208,7 @@ defmodule PtcRunner.Kernel.ProviderSession do
           | {:error, :operation_claimed | :operation_mismatch | :provider_session_unavailable}
   def claim_operation(%__MODULE__{} = session, %Limits{} = limits, identity)
       when is_binary(identity) do
-    if valid?(session) and Limits.valid?(limits) do
+    if valid?(session) and Limits.valid?(limits) and Deadline.valid?(session.run_deadline) do
       deadline = Deadline.new(@claim_timeout_ms)
 
       result =
@@ -147,7 +217,7 @@ defmodule PtcRunner.Kernel.ProviderSession do
             session.pid,
             {session.token,
              {:claim_operation, identity, limits.provider_cleanup_timeout_ms,
-              limits.provider_heap_words, deadline}},
+              limits.provider_heap_words, limits.run_duration_ms, session.run_deadline, deadline}},
             Deadline.remaining(deadline) + @claim_reply_grace_ms
           )
         catch
@@ -166,6 +236,7 @@ defmodule PtcRunner.Kernel.ProviderSession do
           result
       end
     else
+      if valid?(session), do: GenServer.cast(session.pid, {session.token, :close_if_unclaimed})
       {:error, :provider_session_unavailable}
     end
   end
@@ -355,7 +426,9 @@ defmodule PtcRunner.Kernel.ProviderSession do
        owner_monitor: Process.monitor(creator),
        token: token,
        operation_identity: operation_identity,
+       run_deadline: nil,
        operation_claimed?: false,
+       run_duration_ms: limits.run_duration_ms,
        cleanup_timeout_ms: limits.provider_cleanup_timeout_ms,
        cleanup_deadline: nil,
        max_heap_words: limits.provider_heap_words,
@@ -371,18 +444,41 @@ defmodule PtcRunner.Kernel.ProviderSession do
   end
 
   def handle_call(
-        {token, {:claim_operation, identity, cleanup_timeout_ms, max_heap_words, deadline}},
+        {token, {:begin_run, run_deadline, operation_deadline}},
+        {owner, _tag},
+        %{
+          token: token,
+          owner: owner,
+          operation_identity: operation_identity,
+          run_deadline: nil,
+          operation_claimed?: false
+        } = state
+      )
+      when is_binary(operation_identity) do
+    if Deadline.live?(run_deadline) and Deadline.live?(operation_deadline) do
+      {:reply, :ok, %{state | run_deadline: run_deadline}}
+    else
+      {:stop, :normal, {:error, :provider_session_unavailable}, state}
+    end
+  end
+
+  def handle_call(
+        {token,
+         {:claim_operation, identity, cleanup_timeout_ms, max_heap_words, run_duration_ms,
+          run_deadline, deadline}},
         {owner, _tag},
         %{
           token: token,
           owner: owner,
           operation_identity: identity,
+          run_deadline: run_deadline,
+          run_duration_ms: run_duration_ms,
           cleanup_timeout_ms: cleanup_timeout_ms,
           max_heap_words: max_heap_words,
           operation_claimed?: false
         } = state
       ) do
-    if Deadline.live?(deadline) do
+    if Deadline.live?(run_deadline) and Deadline.live?(deadline) do
       {:reply, :ok, %{state | operation_claimed?: true}}
     else
       {:stop, :normal, {:error, :provider_session_unavailable}, state}
@@ -390,7 +486,9 @@ defmodule PtcRunner.Kernel.ProviderSession do
   end
 
   def handle_call(
-        {token, {:claim_operation, _identity, _cleanup_timeout_ms, _max_heap_words, _deadline}},
+        {token,
+         {:claim_operation, _identity, _cleanup_timeout_ms, _max_heap_words, _run_duration_ms,
+          _run_deadline, _deadline}},
         _from,
         %{token: token, operation_claimed?: true} = state
       ) do
@@ -398,11 +496,13 @@ defmodule PtcRunner.Kernel.ProviderSession do
   end
 
   def handle_call(
-        {token, {:claim_operation, _identity, _cleanup_timeout_ms, _max_heap_words, deadline}},
+        {token,
+         {:claim_operation, _identity, _cleanup_timeout_ms, _max_heap_words, _run_duration_ms,
+          run_deadline, deadline}},
         {owner, _tag},
         %{token: token, owner: owner, operation_claimed?: false} = state
       ) do
-    if Deadline.live?(deadline) do
+    if Deadline.live?(run_deadline) and Deadline.live?(deadline) do
       {:reply, {:error, :operation_mismatch}, state}
     else
       {:stop, :normal, {:error, :provider_session_unavailable}, state}
@@ -958,10 +1058,23 @@ defmodule PtcRunner.Kernel.ProviderSession do
       session.token,
       session.creator,
       session.operation_identity,
+      session.run_duration_ms,
+      session.run_deadline,
       session.cleanup_timeout_ms,
       session.max_heap_words
     }
   end
+
+  defp seal(session),
+    do: %{session | attestation: Attestation.attest(__MODULE__, payload(session))}
+
+  defp abandon_unclaimed(session),
+    do: GenServer.cast(session.pid, {session.token, :close_if_unclaimed})
+
+  defp compatible_run_duration?(%__MODULE__{operation_identity: nil}, _limits), do: true
+
+  defp compatible_run_duration?(%__MODULE__{run_duration_ms: run_duration_ms}, limits),
+    do: run_duration_ms == limits.run_duration_ms
 
   defp redact_status(status) do
     Map.new(status, fn

@@ -45,6 +45,7 @@ defmodule PtcRunner.Kernel.RunState do
   """
   use GenServer
 
+  alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.EventSinkState
   alias PtcRunner.Kernel.InspectionSink
@@ -79,28 +80,35 @@ defmodule PtcRunner.Kernel.RunState do
         }
 
   @spec start(Limits.t(), keyword()) :: {:ok, t()} | {:error, term()}
-  @doc "Starts run state with a deadline beginning at construction time."
+  @doc "Starts run state, preserving a supplied active-run deadline when present."
   def start(%Limits{} = limits, opts \\ []) do
     token = make_ref()
     owner = Keyword.get(opts, :owner, self())
     provider_session = Keyword.get(opts, :provider_session)
+    run_deadline = Keyword.get(opts, :run_deadline)
 
-    if Keyword.keys(opts) -- [:owner, :provider_session] == [] and
-         valid_provider_session?(provider_session) do
-      start_state({limits, token, owner, nil, false, nil, provider_session})
+    if Keyword.keys(opts) -- [:owner, :provider_session, :run_deadline] == [] and
+         valid_provider_session?(provider_session) and valid_run_deadline?(run_deadline) do
+      start_state({limits, token, owner, nil, false, nil, provider_session, run_deadline})
     else
       {:error, :invalid_run_state}
     end
   end
 
   @doc false
-  def start_repl(%Limits{} = limits, %EventSink{} = event_sink, inspection_sink) do
+  def start_repl(%Limits{} = limits, %EventSink{} = event_sink, inspection_sink, opts \\ []) do
     with true <- EventSink.owner?(event_sink),
          true <- inspection_owner?(inspection_sink),
+         true <- Keyword.keyword?(opts),
+         true <- Keyword.keys(opts) -- [:run_deadline] == [],
+         run_deadline = Keyword.get(opts, :run_deadline),
+         true <- valid_run_deadline?(run_deadline),
          token = make_ref(),
          owner = self(),
          {:ok, state} <-
-           start_state({limits, token, owner, nil, false, {event_sink, inspection_sink}, nil}) do
+           start_state(
+             {limits, token, owner, nil, false, {event_sink, inspection_sink}, nil, run_deadline}
+           ) do
       {:ok, state}
     else
       _ -> {:error, :session_owner_mismatch}
@@ -115,7 +123,7 @@ defmodule PtcRunner.Kernel.RunState do
     with true <- Keyword.keys(opts) -- [:owner] == [],
          {:ok, event_sink, handle} <- EventSink.prepare(:normal, limits, sink_opts),
          {:ok, state} <-
-           start_state({limits, token, owner, event_sink, true, nil, nil}) do
+           start_state({limits, token, owner, event_sink, true, nil, nil, nil}) do
       {:ok, state, struct!(EventSink, Map.put(handle, :pid, state.pid))}
     else
       _ -> {:error, :invalid_run_state}
@@ -308,8 +316,14 @@ defmodule PtcRunner.Kernel.RunState do
   def use_provider_session(_state, _session), do: {:error, :invalid_run_state}
 
   @impl GenServer
-  def init({limits, token, owner, event_sink, owner_transferable?, repl_resources, _session}) do
-    now = System.monotonic_time(:millisecond)
+  def init(
+        {limits, token, owner, event_sink, owner_transferable?, repl_resources, _session,
+         run_deadline}
+      ) do
+    deadline_ms =
+      if Deadline.valid?(run_deadline),
+        do: Deadline.expires_at(run_deadline),
+        else: System.monotonic_time(:millisecond) + limits.run_duration_ms
 
     {:ok,
      %{
@@ -320,7 +334,7 @@ defmodule PtcRunner.Kernel.RunState do
        event_sink: event_sink,
        repl_resources: repl_resources,
        limits: limits,
-       deadline_ms: now + limits.run_duration_ms,
+       deadline_ms: deadline_ms,
        closed?: false,
        provider_tasks: 0,
        calls: %{workflow: %{}, mission: %{}},
@@ -1022,6 +1036,9 @@ defmodule PtcRunner.Kernel.RunState do
 
   defp valid_provider_session?(nil), do: true
   defp valid_provider_session?(session), do: ProviderSession.valid?(session)
+
+  defp valid_run_deadline?(nil), do: true
+  defp valid_run_deadline?(deadline), do: Deadline.valid?(deadline)
 
   defp call(%__MODULE__{pid: pid, token: token}, request),
     do: GenServer.call(pid, {token, request})

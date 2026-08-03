@@ -31,21 +31,39 @@ defmodule PtcRunner.Kernel.ProviderSessionTest do
     assert {:error, :invalid_provider_session} = ProviderSession.start(invalid)
   end
 
-  test "malformed and duplicate session options fail closed" do
-    assert {:error, :invalid_provider_session} =
-             ProviderSession.start(limits(), [{:operation_identity}])
+  test "an invalid active operation identity fails closed" do
+    assert {:error, :invalid_provider_session} = ProviderSession.start_active(limits(), nil)
+  end
 
-    assert {:error, :invalid_provider_session} =
-             ProviderSession.start(limits(),
-               operation_identity: "first",
-               operation_identity: "second"
-             )
+  @tag timeout: 15_000
+  test "a timed-out begin request cannot mutate a suspended session later" do
+    {:ok, session} = ProviderSession.start_active(limits(), "prepared-operation")
+    monitor = Process.monitor(session.pid)
+    parent = self()
+
+    suspender =
+      spawn(fn ->
+        true = :erlang.suspend_process(session.pid)
+        send(parent, :session_suspended)
+
+        receive do
+          :resume -> true = :erlang.resume_process(session.pid)
+        end
+      end)
+
+    assert_receive :session_suspended
+    Process.send_after(suspender, :resume, 5_250)
+
+    assert {:error, :provider_session_unavailable} = ProviderSession.begin_run(session)
+    assert_receive {:DOWN, ^monitor, :process, _, :normal}, 1_000
+    refute ProviderSession.alive?(session)
   end
 
   test "claimed operation remains claimed after lifecycle ownership transfers" do
     identity = "prepared-operation"
     limits = limits()
-    {:ok, session} = ProviderSession.start(limits, operation_identity: identity)
+    {:ok, session} = ProviderSession.start_active(limits, identity)
+    {:ok, session} = ProviderSession.begin_run(session)
     assert :ok = ProviderSession.claim_operation(session, limits, identity)
 
     lifecycle_owner = spawn(fn -> receive do: (:stop -> :ok) end)

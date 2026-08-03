@@ -40,6 +40,30 @@ defmodule PtcRunner.Kernel.ProviderActiveSessionTest do
     close(session, prepared)
   end
 
+  test "active selection intersects its intrinsic timeout with the ordinary run deadline" do
+    parent = self()
+
+    limits = %{
+      Limits.installed_defaults()
+      | run_duration_ms: 100,
+        selection_validation_timeout_ms: 1_000
+    }
+
+    validator = fn _selection, context ->
+      send(parent, {:selection_deadline, context.deadline_ms})
+      :ok
+    end
+
+    {:ok, prepared, catalog} = fixture(validator, ["first"], limits)
+    assert {:ok, session} = ProviderActiveSession.open(prepared, catalog, services())
+    run_deadline = ProviderSession.run_deadline(session)
+
+    assert_receive {:selection_deadline, selection_deadline}
+    assert selection_deadline == Deadline.expires_at(run_deadline)
+
+    close(session, prepared)
+  end
+
   test "selection rejection returns the closed occurrence diagnostic" do
     {:ok, prepared, catalog} =
       fixture(fn _selection, _context -> {:error, :selection_rejected} end)
@@ -95,17 +119,19 @@ defmodule PtcRunner.Kernel.ProviderActiveSessionTest do
     assert :ok = PreparedRun.close(second)
   end
 
-  test "active build rejects cloned identity with different limits before preparation" do
+  test "active build rejects cloned identity with a different run duration before preparation" do
     parent = self()
     {:ok, prepared, catalog} = fixture(fn _selection, _context -> :ok end)
     assert {:ok, opened_session} = ProviderActiveSession.open(prepared, catalog, services())
     assert :ok = ProviderSession.close(opened_session)
 
     limits = prepared.request.package.limits
-    other_limits = %{limits | provider_cleanup_timeout_ms: limits.provider_cleanup_timeout_ms + 1}
+    other_limits = %{limits | run_duration_ms: limits.run_duration_ms + 1}
 
     assert {:ok, wrong_session} =
-             ProviderSession.start(other_limits, operation_identity: prepared.attestation)
+             ProviderSession.start_active(other_limits, prepared.attestation)
+
+    assert {:ok, wrong_session} = ProviderSession.begin_run(wrong_session)
 
     staged = fn _selection, _context ->
       send(parent, :unexpected_provider_preparation)
@@ -129,6 +155,7 @@ defmodule PtcRunner.Kernel.ProviderActiveSessionTest do
     assert {:ok, registry} = active_registry()
 
     assert {:ok, built} = RunBuilder.build_active(prepared, registry, session, [])
+    assert built.config.run_deadline == ProviderSession.run_deadline(session)
 
     assert {:error, :invalid_active_run} =
              RunBuilder.build_active(prepared, registry, session, [])
