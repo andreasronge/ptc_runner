@@ -147,6 +147,42 @@ for, the model piles citations onto individual claims and breaches a bound the
 13-record incidents never approached. That is a defect in the application's
 contract, not in any arm.
 
+### What the model saw, and what it wrote
+
+Read back through the inspection profile before touching anything, because the
+obvious fix assumes the model lacked information.
+
+**It did not.** The authoring prompt is 10,264 bytes of mission model context
+and it names `limit`, `truncated` *and* `matched` — in every authored run. The
+model was shown that `search` takes a `limit` and answers how many records
+`matched` and whether the page was `truncated`, and used none of the three. The
+fast arm's report prompt is 18,813 bytes; nothing here is a context-size
+failure either.
+
+The three programs it wrote are idiomatically varied — one `reduce`, one
+`->>` with `#()` and `mapcat`, one using keyword access throughout — and
+structurally identical: `list-sources`, then a per-source `search` with `nil`
+in the limit position, then `get-record` per summary. All three ran, all three
+passed `check-source` with no repair, and all three returned exactly 160
+records.
+
+So this is not a broken program and not a missing fact. Each program is correct
+about what it does; none of them entertains the possibility that `search`
+returned less than everything. Reading `records` without reading `matched` is
+the whole failure, and the field was on screen.
+
+That changes what the fix is. Passing `limit 50` repairs this corpus and
+nothing else — the next corpus is 600 records and 50 is wrong again. What the
+evidence argues for is either an authoring prompt that says something about
+completeness rather than trusting the signature to imply it, or a tool that
+makes truncation impossible to ignore: a cursor that must be drained, or a
+refusal to answer a query whose result it had to cut. Documenting the field
+demonstrably is not enough.
+
+One thing `check-source` cannot do, worth knowing before leaning on it: it
+resolves names, not shapes. Every one of these programs is name-correct and
+semantically blind, and it passed all three.
+
 Not fixed here, deliberately. The obvious repairs — pass `limit 50`, read
 `truncated`, raise the citation cap — are each one line, and applying them
 before the failure is recorded would turn a measured result into an anecdote
