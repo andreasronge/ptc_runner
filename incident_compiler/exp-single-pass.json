@@ -1,0 +1,85 @@
+{
+  "version": 1,
+  "workflow": {
+    "components": [
+      {
+        "id": "oneshot",
+        "path": "experiments/components/single-pass.clj",
+        "dependencies": [
+          "kernel",
+          "llm",
+          "result",
+          "workflow.event"
+        ]
+      },
+      {
+        "library": "kernel"
+      },
+      {
+        "library": "llm"
+      },
+      {
+        "library": "result"
+      },
+      {
+        "library": "workflow.event"
+      }
+    ],
+    "entry": "oneshot/run"
+  },
+  "mission": {
+    "components": [
+      {
+        "id": "incident.evidence",
+        "path": "evidence.clj"
+      }
+    ],
+    "data": {}
+  },
+  "input": {
+    "value": {
+      "incident_id": "checkout-5xx",
+      "format": "postmortem",
+      "agent": {
+        "max_turns": 40
+      }
+    }
+  },
+  "contracts": {
+    "input_schema": {
+      "path": "contracts/task.schema.json"
+    },
+    "result_schema": {
+      "path": "contracts/report.schema.json"
+    }
+  },
+  "providers": {
+    "workflow": [
+      {
+        "name": "live-model"
+      }
+    ],
+    "mission": [
+      {
+        "name": "evidence"
+      }
+    ]
+  },
+  "limits": {
+    "run_duration_ms": 600000,
+    "workflow_capability_calls": 256,
+    "mission_capability_calls": 512,
+    "subordinate_evaluations": 64,
+    "workflow_timeout_ms": 600000,
+    "evaluation_timeout_ms": 30000,
+    "normal_event_count": 4096,
+    "workflow_capability_calls_per_name": 64,
+    "mission_capability_calls_per_name": 512
+  },
+  "labels": {
+    "name": "incident-evidence-compiler",
+    "tags": {
+      "mode": "agent"
+    }
+  }
+}

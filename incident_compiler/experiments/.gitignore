@@ -1,0 +1,3 @@
+# Run artifacts: traces, inspection captures, reports, and the appended
+# results.jsonl. Recorded results that back a write-up go in results/ instead.
+runs/

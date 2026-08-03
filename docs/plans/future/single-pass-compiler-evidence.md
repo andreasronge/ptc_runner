@@ -1,8 +1,12 @@
 # Evidence: a single-pass incident compiler against the agent loop
 
-**Status:** experiment record, 2026-08-02/03, branch
+**Status:** experiment record and handoff, 2026-08-02/03, branch
 `worktree-incident-evidence-compiler`. One model, one corpus, three reps per
 cell. Nothing here is a release claim; see *Limits* before quoting any number.
+
+The branch is well ahead of `origin/main` and has no PR open. Unrelated to this
+experiment but outstanding on it: `637958c1`, a fix for a live tagged-union
+contract bug on `main`, is written, tested, and still unlanded.
 
 Context: [`incident-evidence-compiler.md`](incident-evidence-compiler.md) Phase 3
 proposes a four-system comparison and requires bars committed in writing before
@@ -117,14 +121,45 @@ Filed as [#1165](https://github.com/andreasronge/ptc_runner/issues/1165).
   claim is not decidable this way; the oracle's `rubric` exists for a blind
   human pass that has not been run.
 
-## Reusable harness
+## How to continue
 
-`run.sh <incident> <arm> <rep>` runs one cell and appends one JSONL row; it
-clears its own artifacts first, because `ptc.run` refuses to overwrite a result
-— which caught a harness bug where a failed run was being scored against the
-previous run's report. `collect.exs` joins trace annotations, usage, and the
-scorer into that row. Adding statistics is re-invoking with new rep numbers;
-nothing is overwritten and nothing needs redesigning.
+Everything needed is committed under `incident_compiler/`:
+
+| Path | What |
+| --- | --- |
+| `experiments/run.sh` | one cell per invocation; appends one JSONL row |
+| `experiments/collect.exs` | joins trace annotations, usage, and the scorer into that row |
+| `experiments/components/single-pass.clj` | the `fast` arm |
+| `experiments/components/fit.clj` | model-judged applicability via `export-meta` + `describe` |
+| `experiments/components/documented-target.clj` | the documented export `fit` judges |
+| `experiments/components/fit-stress.clj` | synthetic cases proving `fit` discriminates |
+| `exp-single-pass.json`, `exp-loop.json` | the two arms' manifests |
+| `experiments/results/paired-2026-08-03.jsonl` | the 18 rows behind every number above |
+
+Add repeats:
+
+```bash
+export OPENROUTER_API_KEY=...            # or source .env
+./incident_compiler/experiments/run.sh checkout-5xx fast 4
+./incident_compiler/experiments/run.sh checkout-5xx loop 4
+```
+
+Rows land in `incident_compiler/experiments/runs/results.jsonl` (override with
+`PTC_EXP_DIR`); traces and inspection artifacts land beside them. Nothing is
+overwritten — a new rep number is a new row. To extend the recorded set, append
+those rows to `experiments/results/paired-2026-08-03.jsonl` or add a dated file
+next to it.
+
+`run.sh` clears its own per-tag artifacts first, because `ptc.run` refuses to
+overwrite a result. That refusal caught a real harness bug: a failed run was
+being scored against the previous run's report, which would have quietly
+poisoned the whole results file.
+
+**Layout constraint worth knowing.** The manifest loader rejects path
+traversal, so a manifest cannot reference a component outside its own
+directory. That is why the two manifests sit in `incident_compiler/` and point
+*down* into `experiments/components/`, rather than living beside the components
+they select. Moving them produces `:invalid_component`.
 
 ## Next step
 
@@ -144,6 +179,11 @@ After that, in order:
    the loop, so the corpus can be run both ways from the manifest rather than
    from scratch files.
 
-The scratch components used here — `tmp-fast.clj`, `tmp-fit.clj`,
-`tmp-singleshot.clj`, `tmp-hybrid.clj` — are untracked. Item 3 is the decision
-about which, if any, become real.
+The components under `experiments/` are experiment-grade: they work and are
+reproducible, but they have no tests and are not part of the shipped
+application. Item 3 is the decision about which, if any, graduate — at which
+point they need the same treatment as anything else in `incident_compiler/`.
+
+One-off probes used while diagnosing (prompt dumps, shape probes, a
+speculate-then-deoptimise hybrid) were deliberately not kept. The hybrid is
+recoverable from this branch's history if the triage question is reopened.
