@@ -38,7 +38,7 @@
   },
   "input": {
     "value": {
-      "incident_id": "dual-cause-payments",
+      "incident_id": "batch-silent-failure",
       "format": "postmortem",
       "agent": {
         "max_turns": 40

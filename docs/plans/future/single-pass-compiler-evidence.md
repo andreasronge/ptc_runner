@@ -1,12 +1,13 @@
 # Evidence: a single-pass incident compiler against the agent loop
 
 **Status:** experiment record and handoff, 2026-08-02/03, branch
-`worktree-incident-evidence-compiler`. One model, one corpus, ten reps per
-cell. Nothing here is a release claim; see *Limits* before quoting any number.
+`worktree-incident-evidence-compiler`. One model, one corpus; ten reps per cell
+for `fast` and `loop`, three for `authored`. Nothing here is a release claim;
+see *Limits* before quoting any number.
 
-The branch is well ahead of `origin/main` and has no PR open. Unrelated to this
-experiment but outstanding on it: `637958c1`, a fix for a live tagged-union
-contract bug on `main`, is written, tested, and still unlanded.
+The branch is rebased onto `origin/main` and has no PR open. The tagged-union
+contract fix this branch once carried is no longer outstanding: `main` landed
+its own, and this branch's version was dropped as superseded.
 
 Context: [`incident-evidence-compiler.md`](incident-evidence-compiler.md) Phase 3
 proposes a four-system comparison and requires bars committed in writing before
@@ -17,13 +18,15 @@ recording before the pilot is designed.
 
 ## What was compared
 
-Two ways of running the same application, on the same corpus, same model
+Three ways of running the same application, on the same corpus, same model
 (`openrouter:deepseek/deepseek-v3.2`), same result contract and citation check.
+`fast` and `loop` were compared first; `authored` was added later.
 
 | arm | shape |
 | --- | --- |
 | `loop` | `incident.compiler/run` — the shipped `agent.core` loop |
 | `fast` | fetch everything in one program, one model call for the whole report, verify, plus one correction turn if citations fail |
+| `authored` | as `fast`, except the model **writes** the gathering program: one call to author it, `check-source` to validate it, then the same single report call and verification |
 
 The fast arm is a plain PTC-Lisp workflow, ~100 lines: one `kernel/eval-source`
 that searches and fetches every record, one `llm/request` carrying all bodies
@@ -33,7 +36,8 @@ model turns.
 
 ## Result
 
-Three incidents × two arms × ten reps = 60 runs.
+Three incidents × two arms × ten reps = 60 runs, plus a third arm at three
+reps added later — 69 runs in total.
 
 | incident | arm | calls (median, range) | recall (median, range) | published |
 | --- | --- | --- | --- | --- |
@@ -59,6 +63,44 @@ differ (30/30 against 29/30, Fisher p=1.0).
 Every published report in both arms was fully grounded: zero unresolved and
 zero mismatched citations, verified against the evidence source. As one fast
 run shows below, that is a weaker property than it sounds.
+
+### The authored arm
+
+Added later, on the same corpus, after `main` landed `check-source` and
+parameterized evaluation. Three incidents × three reps = 9 runs.
+
+```
+authored  calls median=2  total=18   recall median=0.86  range 0.71-0.86  published 9/9
+```
+
+Same median as `fast` (0.86) at one extra call, and **far more consistent**:
+0.71–0.86 against `fast`'s 0.00–1.00. Because the earlier three-rep record was
+wrong about exactly this — it read a narrow range at small n as stability — the
+claim was checked rather than eyeballed. Resampling `fast` under the authored
+arm's own design, three runs per incident, 200,000 draws:
+
+| | |
+| --- | --- |
+| P(a `fast` sample being this tight) | **0.0002** |
+| P(a `fast` sample's mean being this high) | 0.24 |
+
+So the consistency is real and the central tendency is not. `authored` does not
+compile *better* reports than `fast` on this corpus; it compiles reports whose
+quality varies far less, and it never produced the fully-grounded-but-empty
+report that `fast` did.
+
+**It did not write the program that was predicted.** The expectation was that it
+would re-derive "search once, fetch everything", pay one extra call, and tie.
+Instead it enumerates `list-sources` and searches per source, and it returns
+*fewer* records than `fast` does — median 12, range 9–13, against `fast`'s
+flat 13. Fetching less and scoring the same median, with a fraction of the
+spread, is not what a re-derivation looks like. Why a source-balanced traversal
+would be steadier than a flat fetch is a hypothesis this corpus cannot settle.
+
+**Authoring never failed.** 9/9 programs were runnable and `check-source`
+rejected none, so the repair turn never fired — the same result as the fast
+arm's correction turn, and it costs nothing when unused. That the repair path is
+untested here is a gap, not a reassurance.
 
 ## What was unexpected
 
@@ -203,13 +245,14 @@ Everything needed is committed under `incident_compiler/`:
 | `experiments/run.sh` | one cell per invocation; appends one JSONL row |
 | `experiments/collect.exs` | joins trace annotations, usage, and the scorer into that row |
 | `experiments/components/single-pass.clj` | the `fast` arm |
-| `experiments/components/authored-pass.clj` | the `authored` arm — **built, compile-checked, never run live** |
+| `experiments/components/authored-pass.clj` | the `authored` arm |
 | `experiments/components/fit.clj` | model-judged applicability via `export-meta` + `describe` |
 | `experiments/components/documented-target.clj` | the documented export `fit` judges |
 | `experiments/components/fit-stress.clj` | synthetic cases proving `fit` discriminates |
 | `exp-single-pass.json`, `exp-loop.json`, `exp-authored.json` | the arms' manifests |
 | `experiments/results/paired-2026-08-03.jsonl` | the first 18 rows (reps 1-3) |
 | `experiments/results/paired-2026-08-03-reps-4-10.jsonl` | the further 42 rows (reps 4-10) |
+| `experiments/results/authored-2026-08-03.jsonl` | the 9 authored-arm rows |
 
 Add repeats:
 
@@ -218,6 +261,7 @@ export OPENROUTER_API_KEY=...            # or source .env, which lives in the
                                          # main clone, not in this worktree
 ./incident_compiler/experiments/run.sh checkout-5xx fast 11
 ./incident_compiler/experiments/run.sh checkout-5xx loop 11
+./incident_compiler/experiments/run.sh checkout-5xx authored 4
 ```
 
 The two arms use different manifests, so a `fast` and a `loop` stream can run
@@ -251,34 +295,23 @@ separate mechanisms are blocked on the same missing input:
 
 - `fit/handles?` answers yes 12/12 here because there is no task it should
   reject, so triage cannot be validated.
-- The `authored` arm cannot beat the `fast` arm on a corpus where fetching
-  every record already fits in one context. It can only pay an extra authoring
-  call to re-derive the same program.
+- The `authored` arm has now run, and its result is bounded by the same
+  ceiling: it matches `fast`'s median at one extra call, because a corpus where
+  fetching everything already fits leaves an authored program nothing to be
+  cleverer about. Its one real finding — a far tighter spread — is the kind of
+  claim that needs a corpus where the arms can actually diverge.
 
 One incident with hundreds of records, or heavy cross-referencing, makes both
 testable at once. Phase 2's SREGym capture is the plan's route to it and remains
 its one open item.
 
-Three things can be done before that corpus exists:
+Both arms now pass values as parameters rather than concatenating them into
+source, and the authored arm checks its program before running it. Its nine
+runs are recorded above. What remains:
 
-0. **Move the components onto `eval-source-with` and `check-source`.** Both
-   arms build program text by concatenation, and `single-pass.clj` interpolates
-   **model-produced** citation values into source that is then evaluated. A
-   crafted `evidence_id` demonstrably escapes the string literal and changes the
-   program's structure; it was not turned into a forged verification result, so
-   this is a demonstrated injection shape rather than a demonstrated exploit,
-   but the arm's own verification step is the wrong place to leave one. Passing
-   those values as parameters removes the shape rather than escaping it, and
-   `check-source` gives the `authored` arm a repair loop that costs no
-   evaluation. Do this before running the arm, so its numbers describe the
-   design worth keeping.
-1. **Run the `authored` arm on the current three incidents** — nine runs, about
-   twenty minutes. Not to win: to check the authoring call produces a runnable
-   program at all. The `authoring` annotation counts `program-ran` /
-   `eval-failed` / `records` so authoring quality stays separable from report
-   quality. Predicted outcome is a tie at one extra call; a tie is the useful
-   null, and anything worse is a prompt defect worth finding now rather than
-   confounded with a new corpus.
+1. **More reps on the authored arm.** Nine runs establish the variance result
+   at p=0.0002 but leave the mean unsettled, and the repair path untested
+   because nothing it wrote ever failed to compile.
 2. **Exercise the persistence result.** `eval-source` definitions survive
    across evaluations within a run (see *Runtime capabilities confirmed*), so
    the richer shape is authoring a helper library once and running several cheap
