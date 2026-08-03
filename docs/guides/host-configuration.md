@@ -110,8 +110,12 @@ installation revision and normalized selected policy, never the raw model
 selector or secret.
 
 The command runtime does not ask provider dependencies to load `.env` files.
-Export an `env` credential before invoking the command, or use a shell-local
-environment manager or explicit secret source:
+For a selected shipped LLM whose declared credential uses `env`, the Mix
+frontend instead loads the nearest `.env` through `PtcRunner.Dotenv` after
+provider activity begins and before resolving that credential. Existing process
+variables take precedence. Embedded hosts do not load `.env` implicitly; export
+an `env` credential before invoking them, or use a shell-local environment
+manager or explicit secret source:
 
 ```console
 export OPENROUTER_API_KEY="$(secret-tool lookup service openrouter)"
@@ -119,8 +123,8 @@ mix ptc.run ptc.json --host-config ptc-host.json
 ```
 
 Tools such as `direnv` may populate the process environment before the command
-starts. A `.env` file being Git-ignored does not make it an implicit credential
-source or a safe plaintext secret store.
+starts. A `.env` file being Git-ignored does not make it a safe plaintext secret
+store.
 
 ## Provider sources
 

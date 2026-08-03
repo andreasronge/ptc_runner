@@ -136,7 +136,9 @@ defmodule Mix.Tasks.Ptc.RunTest do
   end
 
   @tag :tmp_dir
-  test "--check reports a host-installed workflow LLM without invoking it", %{tmp_dir: dir} do
+  test "--check reports a host-installed workflow LLM across repeated Mix invocations", %{
+    tmp_dir: dir
+  } do
     restore_provider_applications_on_exit()
     stop_provider_applications()
     Application.put_env(:req_llm, :load_dotenv, true, persistent: true)
@@ -158,6 +160,55 @@ defmodule Mix.Tasks.Ptc.RunTest do
     assert Application.get_env(:llm_db, :load_dotenv) == false
     assert :req_llm in started_applications()
     assert :llm_db in started_applications()
+
+    repeated_output =
+      capture_io(fn ->
+        Mix.Task.reenable("ptc.run")
+        Run.run([manifest_path, "--host-config", host_path, "--check"])
+      end)
+
+    assert repeated_output =~ "workflow  deepseek  llm  revision check-llm-v1"
+  end
+
+  @tag :tmp_dir
+  test "--check resolves a declared LLM credential from the nearest .env", %{tmp_dir: dir} do
+    restore_provider_applications_on_exit()
+    stop_provider_applications()
+
+    credential_env = "PTC_RUN_DOTENV_CREDENTIAL"
+    previous_credential = System.get_env(credential_env)
+    dotenv_key = {PtcRunner.Dotenv, :dotenv_loaded}
+    previous_dotenv_state = :persistent_term.get(dotenv_key, :missing)
+
+    System.delete_env(credential_env)
+    :persistent_term.erase(dotenv_key)
+
+    on_exit(fn ->
+      if previous_credential,
+        do: System.put_env(credential_env, previous_credential),
+        else: System.delete_env(credential_env)
+
+      case previous_dotenv_state do
+        :missing -> :persistent_term.erase(dotenv_key)
+        state -> :persistent_term.put(dotenv_key, state)
+      end
+    end)
+
+    File.write!(Path.join(dir, ".env"), "#{credential_env}=dotenv-secret\n")
+
+    {manifest_path, host_path} =
+      write_llm_check_fixture(dir, %{"env" => credential_env})
+
+    output =
+      File.cd!(dir, fn ->
+        capture_io(fn ->
+          Mix.Task.reenable("ptc.run")
+          Run.run([manifest_path, "--host-config", host_path, "--check"])
+        end)
+      end)
+
+    assert output =~ "workflow  deepseek  llm  revision check-llm-v1"
+    refute output =~ "dotenv-secret"
   end
 
   @tag :tmp_dir
@@ -745,7 +796,10 @@ defmodule Mix.Tasks.Ptc.RunTest do
     path
   end
 
-  defp write_llm_check_fixture(dir) do
+  defp write_llm_check_fixture(
+         dir,
+         credential_declaration \\ %{"literal" => "test-only-secret"}
+       ) do
     File.write!(
       Path.join(dir, "main.clj"),
       ~S|(ns main) (defn run [input] (return input))|
@@ -762,7 +816,7 @@ defmodule Mix.Tasks.Ptc.RunTest do
     }
 
     host = %{
-      "credentials" => %{"openrouter_key" => %{"literal" => "test-only-secret"}},
+      "credentials" => %{"openrouter_key" => credential_declaration},
       "install" => %{
         "deepseek" => %{
           "source" => "llm",

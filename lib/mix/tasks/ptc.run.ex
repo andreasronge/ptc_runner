@@ -44,6 +44,7 @@ defmodule Mix.Tasks.Ptc.Run do
   """
   use Mix.Task
 
+  alias PtcRunner.Dotenv
   alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.HostConfig
@@ -158,7 +159,8 @@ defmodule Mix.Tasks.Ptc.Run do
   defp execute_prepared(prepared, run_opts, opts, runtime) do
     case ProviderActiveSession.open(prepared, runtime.catalog, runtime.services) do
       {:ok, session} ->
-        case active_registry(runtime) do
+        case with :ok <- maybe_load_dotenv(prepared, runtime),
+                  do: active_registry(runtime) do
           {:ok, registry, cleanup} ->
             try do
               execute_with_registry(prepared, registry, session, run_opts, opts, runtime.host)
@@ -220,12 +222,13 @@ defmodule Mix.Tasks.Ptc.Run do
 
   defp runtime(opts) do
     authorizations = Keyword.get_values(opts, :authorize_mcp)
+    provider_application_mode = provider_application_mode()
 
     case {Keyword.get(opts, :host_config), authorizations} do
       {nil, []} ->
         with {:ok, catalog} <- InstallationCatalog.new(),
              {:ok, services} <-
-               ProviderRuntimeServices.new(provider_application_mode: :command_vm),
+               ProviderRuntimeServices.new(provider_application_mode: provider_application_mode),
              do: {:ok, %{catalog: catalog, services: services, host: nil, authorizations: []}}
 
       {nil, _requested} ->
@@ -237,7 +240,7 @@ defmodule Mix.Tasks.Ptc.Run do
              {:ok, catalog} <- HostInstallation.catalog(host),
              {:ok, services} <-
                HostInstallation.runtime_services(host,
-                 provider_application_mode: :command_vm
+                 provider_application_mode: provider_application_mode
                ) do
           {:ok,
            %{
@@ -284,7 +287,7 @@ defmodule Mix.Tasks.Ptc.Run do
              :ok <- authorize_installations(runtime.host, context, runtime.authorizations),
              {:ok, services} <-
                HostInstallation.runtime_services(runtime.host,
-                 provider_application_mode: :command_vm,
+                 provider_application_mode: runtime.services.provider_application_mode,
                  oauth_mode: {:context_factory, fn -> {:ok, context} end}
                ),
              {:ok, registry} <-
@@ -311,6 +314,33 @@ defmodule Mix.Tasks.Ptc.Run do
     close_memory(memory)
     error
   end
+
+  defp provider_application_mode do
+    if :req_llm in started_applications(), do: :host_owned, else: :command_vm
+  end
+
+  defp maybe_load_dotenv(_prepared, %{host: nil}), do: :ok
+
+  defp maybe_load_dotenv(prepared, runtime) do
+    if Enum.any?(prepared.provider_declarations, fn declaration ->
+         with %{provider_application: :req_llm} <-
+                Map.get(runtime.catalog.implementations, declaration.name),
+              %{source: :llm, credential: credential} <-
+                Map.get(runtime.host.install, declaration.name),
+              %{source: :env} <- Map.get(runtime.host.credentials, credential) do
+           true
+         else
+           _other -> false
+         end
+       end) do
+      Dotenv.load()
+    else
+      :ok
+    end
+  end
+
+  defp started_applications,
+    do: Application.started_applications() |> Enum.map(&elem(&1, 0))
 
   defp validate_authorization_targets(_prepared, %{authorizations: []}), do: :ok
 

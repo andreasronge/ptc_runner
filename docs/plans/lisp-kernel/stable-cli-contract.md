@@ -347,6 +347,13 @@ after the marker transition succeeds, so rejection uses the existing
 `provider_activity: true`. A long-lived or repeated in-VM caller must arrange
 safe startup and use `:host_owned` rather than reuse `:command_vm`.
 
+The Mix frontend makes that ownership choice per invocation. It uses
+`:command_vm` while the shipped provider application is stopped and treats an
+already-running application as host-owned. A provider application started by
+one Mix invocation can therefore be reused by a later invocation in the same
+VM, while a fresh one-shot command still configures and starts it only after
+the provider-activity marker.
+
 The optional application and its background processes are VM-owned, not
 session-owned. Session close and caller death close only resources acquired by
 the session; application processes end when the one-shot command VM exits.

@@ -29,6 +29,11 @@ and discover those providers, print a safe resolved view, and close everything
 without invoking the workflow or calling a model — see
 [Host configuration](host-configuration.md#verify-an-installation).
 
+A fresh Mix invocation safely configures and starts a selected optional
+provider application only after provider activity begins. A later `ptc.run`
+invocation in the same VM reuses an already-running application as host-owned,
+so task chaining and `iex -S mix` do not require restarting the VM.
+
 ## Run a manifest
 
 ```console
