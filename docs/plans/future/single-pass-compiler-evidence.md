@@ -212,14 +212,38 @@ than a model failure. And **no program reads `truncated`**, which cost nothing
 here because nothing ever truncated, but is precisely the silent-evidence-loss
 failure the hard case would trigger.
 
-**The consequence is a scaling ceiling nobody has costed.** Mission capability
-calls grow at roughly twice the record count plus one search per source, while
-`llm_calls` — the headline metric of this whole comparison — hides that
-completely. The manifests cap `mission_capability_calls` at 512, which is
-reached somewhere around 250 records. A "hundreds of records" incident, the
-exact hard case the next step calls for, would hit that ceiling before it
-tested anything. Either the limit rises or verification stops re-reading; that
-choice belongs in the hard-case design, not in the run that discovers it.
+**The consequence is a scaling ceiling nobody had costed.** Mission capability
+calls follow `2R + S + 1` exactly — twice the record count, one search per
+source, one `list-sources` — while `llm_calls`, the headline metric of this
+whole comparison, hides it completely. Measured against every incident in the
+corpus, and `checkout-5xx` matches at 2×13+6+1 = 33.
+
+The manifests capped `mission_capability_calls` at 512, reached near 250
+records. **Raised to 4096** (host ceiling 8192), sized from the rule above, in
+preference to weakening verification: re-reading each cited record is what makes
+the check a check, and sampling would trade an integrity property for headroom.
+
+**A second, harder ceiling sits underneath it.** The evidence server caps
+`search` at `@max_limit 50` and defaults a missing limit to 20, and it returns
+no cursor. The fast arm asks for 50 and ignores `truncated`; the authored
+programs pass `nil` and take 20 per source. So no arm can see more than 50
+records from one call, and beyond that the corpus is reachable only by issuing
+*more* searches — per source, or by query. Raising the call limit does not
+touch this.
+
+That is left as it is. A capped, filterable search is what an evidence API
+actually looks like, and changing the system under test to make the experiment
+work would answer a question nobody asked. It does mean the hard case is not
+"can an arm afford hundreds of records" but **"can an arm reach evidence it
+cannot fetch wholesale"** — which is the assumption the fast arm has never had
+stressed, and the one a generated program is supposed to be better at.
+
+Registered before the run, so it can be wrong: on a corpus of several hundred
+records the fast arm should degrade badly, because one 50-record search cannot
+see the evidence; the authored arm should do better only if it searches per
+source *and* passes a limit, which none of the nine programs it has written so
+far does; and no arm reads `truncated`, so all of them will lose evidence
+silently rather than fail.
 
 ## Runtime friction found
 

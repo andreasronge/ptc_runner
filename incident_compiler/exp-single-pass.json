@@ -68,13 +68,13 @@
   "limits": {
     "run_duration_ms": 600000,
     "workflow_capability_calls": 256,
-    "mission_capability_calls": 512,
+    "mission_capability_calls": 4096,
     "subordinate_evaluations": 64,
     "workflow_timeout_ms": 600000,
     "evaluation_timeout_ms": 30000,
     "normal_event_count": 4096,
     "workflow_capability_calls_per_name": 64,
-    "mission_capability_calls_per_name": 512
+    "mission_capability_calls_per_name": 4096
   },
   "labels": {
     "name": "incident-evidence-compiler",

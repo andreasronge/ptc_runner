@@ -11,8 +11,8 @@
     "subordinate_evaluations": 64,
     "workflow_capability_calls": 256,
     "workflow_capability_calls_per_name": 256,
-    "mission_capability_calls": 1024,
-    "mission_capability_calls_per_name": 1024,
+    "mission_capability_calls": 8192,
+    "mission_capability_calls_per_name": 8192,
     "normal_event_count": 8192,
     "normal_event_bytes": 64000000
   },
