@@ -172,7 +172,6 @@ defmodule PtcRunner.Kernel.CommandContract do
             success_envelope("models", models_result())
           ],
       "$defs" => %{
-        "diagnostic" => diagnostic_schema(),
         "unclassified_diagnostic" =>
           diagnostic_schema(
             diagnostic_rows(:run_unclassified),
@@ -191,12 +190,19 @@ defmodule PtcRunner.Kernel.CommandContract do
           recovery_diagnostic_schema(@finalization_uncertain_publication_codes),
         "execution_diagnostic" =>
           diagnostic_schema(Enum.filter(DiagnosticCatalog.rows(), &(&1.phase == :execution))),
-        "artifact_state" => artifact_state(@artifact_states),
         "usage" => usage_schema(),
         "evaluation_memory" => evaluation_memory_schema()
       }
     }
   end
+
+  # The published envelope refs only the per-branch diagnostic definitions. This
+  # union over every catalog row is deliberately not part of the contract: it
+  # exists so callers can assert that each row renders to something the
+  # generated constants admit, without publishing a definition no branch admits.
+  @doc false
+  @spec catalog_diagnostic_schema() :: map()
+  def catalog_diagnostic_schema, do: diagnostic_schema()
 
   @doc false
   @spec unclassified_diagnostic_phase?(atom()) :: boolean()

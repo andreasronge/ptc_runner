@@ -210,14 +210,9 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   end
 
   test "every catalog row renders with its generated schema constants" do
-    schema = CommandContract.schema()
-
     assert {:ok, root} =
              JSV.build(
-               %{
-                 "$ref" => "#/$defs/diagnostic",
-                 "$defs" => schema["$defs"]
-               },
+               CommandContract.catalog_diagnostic_schema(),
                atoms: false,
                warnings: :silent
              )
