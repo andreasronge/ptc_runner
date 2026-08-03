@@ -1,0 +1,40 @@
+{
+  "incident_id": "schema-migration-stall",
+  "opened_at": "2026-07-19T03:05:00Z",
+  "origin": "synthesized-stress",
+  "sources": [
+    {
+      "description": "Statement-level output from the schema migration runner.",
+      "source": "migration-log"
+    },
+    {
+      "description": "Database lock waits and holders sampled every 30 seconds.",
+      "source": "lock-monitor"
+    },
+    {
+      "description": "Connection-pool utilisation samples for the orders service.",
+      "source": "pool-metrics"
+    },
+    {
+      "description": "Monitoring alerts raised against database and service objectives.",
+      "source": "alerts"
+    },
+    {
+      "description": "Release and configuration-change events from the delivery pipeline.",
+      "source": "deployments"
+    },
+    {
+      "description": "Incident channel messages retained for the incident window.",
+      "source": "chat"
+    },
+    {
+      "description": "Incident and change tickets referenced during the response.",
+      "source": "tickets"
+    },
+    {
+      "description": "Runbook and configuration excerpts consulted by responders.",
+      "source": "runbooks"
+    }
+  ],
+  "title": "Schema migration stalled behind a long-running analytics session"
+}

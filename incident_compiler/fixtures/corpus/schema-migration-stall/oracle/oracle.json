@@ -1,0 +1,123 @@
+{
+  "contradicted_hypotheses": [
+    {
+      "evidence_ids": [
+        "chat-7788"
+      ],
+      "must_include": [
+        "pool"
+      ],
+      "note": "An undersized connection pool is the attractive wrong answer. Scaling it three-fold changed nothing, which the report must carry as evidence against the hypothesis rather than omit."
+    },
+    {
+      "evidence_ids": [
+        "chat-7810",
+        "dep-5501"
+      ],
+      "must_include": [
+        "4.22.0"
+      ],
+      "note": "Release 4.22.0 is coincident and unrelated; its rollback completed after recovery had already begun."
+    }
+  ],
+  "incident_id": "schema-migration-stall",
+  "injected_faults": [
+    {
+      "evidence_ids": [
+        "lock-9001",
+        "mig-4410",
+        "lock-9044",
+        "lock-9102"
+      ],
+      "summary": "A long-running analytics session held ACCESS SHARE on public.orders. A schema migration requested ACCESS EXCLUSIVE on the same table, blocked, and every subsequent statement against that table queued behind it. Pool exhaustion was a downstream symptom."
+    }
+  ],
+  "open_questions": [
+    {
+      "must_include": [
+        "analytics"
+      ],
+      "note": "No record names an owner for the analytics-nightly job."
+    },
+    {
+      "must_include": [
+        "impact"
+      ],
+      "note": "No record estimates customer impact during the 87-minute stall."
+    }
+  ],
+  "required_facts": [
+    {
+      "claim": "Analytics session 8821 held ACCESS SHARE on public.orders from 01:47:22Z.",
+      "evidence_ids": [
+        "lock-9001"
+      ],
+      "id": "lock-holder",
+      "must_include": [
+        "8821",
+        "01:47:22"
+      ]
+    },
+    {
+      "claim": "The migration requested ACCESS EXCLUSIVE on public.orders at 02:14:05Z and entered lock wait.",
+      "evidence_ids": [
+        "mig-4410"
+      ],
+      "id": "migration-blocked",
+      "must_include": [
+        "02:14:05"
+      ]
+    },
+    {
+      "claim": "1847 statements queued behind the exclusive lock request.",
+      "evidence_ids": [
+        "lock-9044"
+      ],
+      "id": "queue-depth",
+      "must_include": [
+        "1847"
+      ]
+    },
+    {
+      "claim": "The pool reached 40 of 40 at 03:02:11Z, after the lock wait began.",
+      "evidence_ids": [
+        "pool-3310"
+      ],
+      "id": "pool-is-symptom",
+      "must_include": [
+        "03:02:11"
+      ]
+    },
+    {
+      "claim": "Scaling the pool to 120 connections at 03:14:40Z did not change the saturation.",
+      "evidence_ids": [
+        "chat-7788"
+      ],
+      "id": "scaling-no-effect",
+      "must_include": [
+        "03:14:40",
+        "120"
+      ]
+    },
+    {
+      "claim": "Recovery followed termination of session 8821 at 03:41:02Z.",
+      "evidence_ids": [
+        "lock-9102"
+      ],
+      "id": "recovery-cause",
+      "must_include": [
+        "03:41:02"
+      ]
+    },
+    {
+      "claim": "The migration runner had lock_timeout unset, so a blocked migration waits indefinitely.",
+      "evidence_ids": [
+        "run-2205"
+      ],
+      "id": "no-lock-timeout",
+      "must_include": [
+        "lock_timeout"
+      ]
+    }
+  ]
+}
