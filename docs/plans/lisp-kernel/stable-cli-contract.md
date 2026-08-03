@@ -74,6 +74,7 @@ Completed commits on `codex/stable-cli-contract`:
 | 5b | `e957cc21` | Process-free catalogs and sealed runtime activation. |
 | 5c1 | `804582d9` | One provider-session owner with scoped, bounded LIFO cleanup. |
 | 5c2a | `5ee24051` | Bounded scoped process-root admission and terminal handoff. |
+| 5c2b | `c46a7d2d` | Shipped process and port roots use scoped registration. |
 
 The first local implementation of slice 5, `d38d0bef`, is intentionally not a
 delivery milestone. It demonstrated useful failure cases but combined remote
@@ -559,9 +560,11 @@ Delivery is intentionally split into review-sized commits:
   scoped, bounded LIFO cleanup;
 - 5c2a (complete): add bounded scoped process-root admission and terminal
   handoff behind the registrar;
-- 5c2b (current): route shipped process and port starts through the scoped
+- 5c2b (complete): route shipped process and port starts through the scoped
   registrar;
-- 5d: application admission, active validation, and credential resolution.
+- 5d1 (current): bounded active selection validation;
+- 5d2: optional application admission; and
+- 5d3: bounded credential resolution.
 
 - replace the unpushed draft with the minimal `ProviderSession`, `Deadline`,
   cleanup stack, provisional root registrar, and runtime-services types;
