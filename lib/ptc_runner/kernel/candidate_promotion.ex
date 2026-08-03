@@ -28,6 +28,7 @@ defmodule PtcRunner.Kernel.CandidatePromotion do
 
   alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.Component
+  alias PtcRunner.Kernel.FrozenBundle
   alias PtcRunner.Kernel.PreparedRun
   alias PtcRunner.Lisp.Prelude
   alias PtcRunner.Lisp.Prelude.Export
@@ -318,12 +319,11 @@ defmodule PtcRunner.Kernel.CandidatePromotion do
   defp compile(package, environment),
     do: PtcRunner.Kernel.compile_bundle(components(package, environment))
 
-  defp exports(%{prelude: %Prelude{exports: exports}}), do: exports
-  defp exports(_bundle), do: []
+  defp exports(%FrozenBundle{prelude: %Prelude{exports: exports}}), do: exports
 
   # The compiled bundle records each contributing component's declared
   # namespaces, which is what scopes the criteria to the promoted component.
-  defp namespaces(%{components: components}, component_id) when is_list(components) do
+  defp namespaces(%FrozenBundle{components: components}, component_id) do
     components
     |> Enum.find(&(Map.get(&1, :id) == component_id))
     |> case do
@@ -331,8 +331,6 @@ defmodule PtcRunner.Kernel.CandidatePromotion do
       component -> Map.get(component, :namespaces, [])
     end
   end
-
-  defp namespaces(_bundle, _component_id), do: []
 
   defp components(%ApplicationPackage{} = package, "workflow"), do: package.workflow_components
   defp components(%ApplicationPackage{} = package, "mission"), do: package.mission_components
