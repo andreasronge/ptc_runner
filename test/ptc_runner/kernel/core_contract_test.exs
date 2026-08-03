@@ -4,6 +4,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
   alias PtcRunner.Kernel
   alias PtcRunner.Kernel.Capability
   alias PtcRunner.Kernel.Component
+  alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.Dispatcher
   alias PtcRunner.Kernel.Evaluation
   alias PtcRunner.Kernel.EventSink
@@ -11,12 +12,14 @@ defmodule PtcRunner.Kernel.CoreContractTest do
   alias PtcRunner.Kernel.Library
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.MissionEnvironment
+  alias PtcRunner.Kernel.Program
   alias PtcRunner.Kernel.ProviderError
   alias PtcRunner.Kernel.ProviderSession
   alias PtcRunner.Kernel.ReplSession
   alias PtcRunner.Kernel.ResultArtifact
   alias PtcRunner.Kernel.RunConfig
   alias PtcRunner.Kernel.RunState
+  alias PtcRunner.Kernel.RuntimeTools
   alias PtcRunner.Kernel.SafeMetadata
   alias PtcRunner.Kernel.ValueContract
   alias PtcRunner.Kernel.WorkflowEnvironment
@@ -2459,6 +2462,130 @@ defmodule PtcRunner.Kernel.CoreContractTest do
 
     assert {:ok, %{value: %{kind: :protocol_error, reason: :invalid_kernel_eval_request}}} =
              Kernel.run("(return (kernel/eval \"(return 42)\"))", second_config)
+  end
+
+  test "shipped kernel helpers splice structured parameters without changing source" do
+    assert {:ok, kernel_component} = Library.component("kernel")
+    assert {:ok, bundle} = Kernel.compile_bundle([kernel_component])
+    {:ok, workflow} = WorkflowEnvironment.new(bundle: bundle)
+    {:ok, mission} = MissionEnvironment.new(data: %{"params" => %{"id" => "mission"}})
+    {:ok, limits} = Limits.new()
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "kernel-parameters")
+
+    {:ok, config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        mission_environment: mission,
+        input: %{},
+        limits: limits,
+        event_sink: sink
+      )
+
+    source = ~S"""
+    (let [dynamic-source "(return (get data/params \"id\"))"
+          embedded (program (return (get data/params "id")))
+          prior (kernel/eval embedded)
+          first (kernel/eval-source-with dynamic-source {"id" "evidence-1"})
+          second (kernel/eval-source-with dynamic-source {"id" "evidence-2"})
+          third (kernel/eval-with embedded {"id" "evidence-3"})]
+      (return [(get prior :value)
+               (get first :value)
+               (get second :value)
+               (get third :value)]))
+    """
+
+    assert {:ok, %{value: ["mission", "evidence-1", "evidence-2", "evidence-3"]}} =
+             Kernel.run(source, config)
+  end
+
+  test "kernel evaluation ledger arguments expose identities instead of code or parameters" do
+    limits = Limits.defaults()
+    source = "(return data/params)"
+    params = %{"evidence_id" => "sensitive-evidence-42"}
+
+    projected =
+      RuntimeTools.kernel_eval_ledger_arguments(limits).(%{
+        "kind" => :source,
+        "source" => source,
+        "params" => params
+      })
+
+    assert %{
+             "kind" => "source",
+             "source" => %{"bytes" => source_bytes, "sha256" => "sha256:" <> _},
+             "params" => %{"bytes" => params_bytes, "sha256" => "sha256:" <> _}
+           } = projected
+
+    assert source_bytes == byte_size(source)
+    assert params_bytes > 0
+    refute inspect(projected) =~ source
+    refute inspect(projected) =~ "sensitive-evidence-42"
+
+    assert {:ok, encoded_params} = DeterministicJSON.encode(params)
+
+    assert projected["params"]["sha256"] ==
+             "sha256:" <>
+               Base.encode16(:crypto.hash(:sha256, encoded_params), case: :lower)
+
+    normalized_keyword =
+      RuntimeTools.kernel_eval_ledger_arguments(limits).(%{
+        "kind" => :source,
+        "source" => source,
+        "params" => PtcRunner.Lisp.Keyword.new("evidence-status")
+      })
+
+    assert {:ok, encoded_keyword} = DeterministicJSON.encode("evidence-status")
+
+    assert normalized_keyword["params"]["sha256"] ==
+             "sha256:" <>
+               Base.encode16(:crypto.hash(:sha256, encoded_keyword), case: :lower)
+
+    oversized = String.duplicate("x", limits.subordinate_source_bytes + 1)
+
+    assert %{"source" => %{"bytes" => bytes}} =
+             RuntimeTools.kernel_eval_ledger_arguments(limits).(%{
+               "kind" => :source,
+               "source" => oversized
+             })
+
+    assert bytes == byte_size(oversized)
+
+    refute Map.has_key?(
+             RuntimeTools.kernel_eval_ledger_arguments(limits).(%{
+               "kind" => :source,
+               "source" => oversized
+             })["source"],
+             "sha256"
+           )
+
+    oversized_params = String.duplicate("p", limits.capability_argument_bytes + 1)
+
+    assert %{"params" => %{"invalid" => true}} =
+             RuntimeTools.kernel_eval_ledger_arguments(limits).(%{
+               "kind" => :source,
+               "source" => source,
+               "params" => oversized_params
+             })
+  end
+
+  test "invalid structured evaluation parameters do not consume evaluation quota" do
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, state} = RunState.start(Limits.defaults())
+    limits = Limits.defaults()
+    callback = RuntimeTools.kernel_eval(state, mission, limits, nil)
+
+    assert %{
+             status: :error,
+             kind: :protocol_error,
+             reason: :invalid_kernel_eval_request
+           } =
+             callback.(%{
+               "kind" => :embedded,
+               "program" => Program.new("(return data/params)"),
+               "params" => Program.new("(return 42)")
+             })
+
+    assert %{subordinate_evaluations: 0, protocol_errors: 1} = RunState.usage(state)
   end
 
   test "runtime discovery and workflow annotation helpers expose bounded host facts" do

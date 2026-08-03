@@ -21,7 +21,6 @@ defmodule PtcRunner.Kernel.Runner do
   alias PtcRunner.Kernel.StrictJSON
   alias PtcRunner.Lisp
   alias PtcRunner.Lisp.RetainedSize
-  alias PtcRunner.Lisp.TrustedTool
 
   @spec run(binary(), RunConfig.t()) :: {:ok, Result.t()} | {:error, Error.t()}
   @doc "Executes one validated run configuration and always tears down run state."
@@ -340,7 +339,7 @@ defmodule PtcRunner.Kernel.Runner do
         RuntimeTools.result_contract(config.result_contract)
       )
     )
-    |> Map.new(fn {name, callback} -> {name, %TrustedTool{function: callback}} end)
+    |> RuntimeTools.trusted_tools(config.limits)
   end
 
   defp bundle_prelude(%{bundle: %{prelude: prelude}}), do: prelude

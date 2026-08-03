@@ -14,10 +14,11 @@ defmodule PtcRunner.Lisp.Tool do
     :native_result,
     argument_collisions: :reject,
     visibility: :public,
-    cache: false
+    cache: false,
+    ledger_arguments: :full
   ]
 
-  @fields ~w(name function signature description type expose native_result visibility cache)a
+  @fields ~w(name function signature description type expose native_result visibility cache ledger_arguments)a
 
   @type t :: %__MODULE__{
           name: binary(),
@@ -27,6 +28,7 @@ defmodule PtcRunner.Lisp.Tool do
           type: atom() | nil,
           expose: atom() | nil,
           native_result: keyword() | nil,
+          ledger_arguments: :full | (map() -> map()),
           argument_collisions: :reject | :pass,
           visibility: :public | :private,
           cache: boolean()
@@ -36,12 +38,13 @@ defmodule PtcRunner.Lisp.Tool do
   def new(name, %__MODULE__{} = tool) when is_binary(name),
     do: validate(%{tool | name: tool.name || name, argument_collisions: :reject})
 
-  def new(name, %TrustedTool{function: function})
+  def new(name, %TrustedTool{function: function, ledger_arguments: ledger_arguments})
       when is_binary(name) and is_function(function, 1),
       do:
         validate(%__MODULE__{
           name: name,
           function: function,
+          ledger_arguments: ledger_arguments,
           type: :native,
           argument_collisions: :pass
         })
@@ -117,11 +120,13 @@ defmodule PtcRunner.Lisp.Tool do
            function: function,
            visibility: visibility,
            cache: cache,
+           ledger_arguments: ledger_arguments,
            argument_collisions: collisions
          } = tool
        )
        when is_function(function) and visibility in [:public, :private] and is_boolean(cache) and
-              collisions in [:reject, :pass],
+              collisions in [:reject, :pass] and
+              (ledger_arguments == :full or is_function(ledger_arguments, 1)),
        do: {:ok, tool}
 
   defp validate(_tool), do: {:error, :invalid_tool}

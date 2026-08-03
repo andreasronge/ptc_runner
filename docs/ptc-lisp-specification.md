@@ -4188,6 +4188,32 @@ A Kernel owner instead uses the native continuation path, which preserves the
 full callable state needed by the runtime, and atomically commits continuation
 memory and turn history only for successful turns.
 
+#### Parameterized subordinate evaluation
+
+The shipped workflow `kernel` component exposes two code/value boundaries:
+
+```clojure
+(kernel/eval-with
+  (program (return (get data/params "evidence_id")))
+  {"evidence_id" evidence-id})
+
+(kernel/eval-source-with generated-source
+                         {"evidence_id" evidence-id})
+```
+
+The first argument remains code: `(program ...)` captures opaque static source,
+while `eval-source-with` accepts bounded source text. The second argument must
+project to a JSON value and is available only for that mission evaluation as
+`data/params`. It replaces any mission data already stored at the `"params"`
+key for that evaluation; the one-argument `kernel/eval` and
+`kernel/eval-source` helpers leave mission data unchanged.
+
+Use this boundary for evidence identifiers, paths, queries, and other runtime
+values. Building source strings from those values changes the program identity
+and creates an avoidable code-injection boundary. Parameter values and source
+text are withheld from the public effect ledger; only deterministic byte-size
+and SHA-256 identity metadata is retained.
+
 ### 16.3 Result and Continuation Contract
 
 At the language boundary, ordinary completion produces the value of the last

@@ -9,15 +9,19 @@ defmodule PtcRunner.Kernel.RuntimeTools do
   capability start/stop events.
   """
 
+  alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.Environment
   alias PtcRunner.Kernel.Evaluation
   alias PtcRunner.Kernel.Events
+  alias PtcRunner.Kernel.JSONValue
   alias PtcRunner.Kernel.Program
   alias PtcRunner.Kernel.RunState
   alias PtcRunner.Kernel.SafeMetadata
   alias PtcRunner.Kernel.ValueContract
+  alias PtcRunner.Lisp
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
   alias PtcRunner.Lisp.RetainedSize
+  alias PtcRunner.Lisp.TrustedTool
 
   @mission_contract_version 1
   @mission_routes [
@@ -71,38 +75,50 @@ defmodule PtcRunner.Kernel.RuntimeTools do
   @doc "Builds the workflow-only subordinate-evaluation callback."
   def kernel_eval(state, mission, limits, event_sink, inspection_sink \\ nil) do
     fn
-      %{"kind" => kind, "source" => source} when is_binary(source) ->
+      %{"kind" => kind, "source" => source} = arguments
+      when is_binary(source) and map_size(arguments) == 2 ->
         if keyword_name(kind) == "source" do
-          %{
-            status: :ok,
-            value:
-              Evaluation.evaluate_source(
-                state,
-                mission,
-                source,
-                limits.evaluation_timeout_ms,
-                event_sink,
-                inspection_sink
-              )
-          }
+          evaluate_source(state, mission, source, limits, event_sink, inspection_sink)
         else
           invalid_kernel_eval_request(state)
         end
 
-      %{"kind" => kind, "program" => %Program{source: source}} ->
+      %{"kind" => kind, "source" => source, "params" => params} = arguments
+      when is_binary(source) and map_size(arguments) == 3 ->
+        if keyword_name(kind) == "source" do
+          evaluate_source_with(
+            state,
+            mission,
+            source,
+            params,
+            limits,
+            event_sink,
+            inspection_sink
+          )
+        else
+          invalid_kernel_eval_request(state)
+        end
+
+      %{"kind" => kind, "program" => %Program{source: source}} = arguments
+      when map_size(arguments) == 2 ->
         if keyword_name(kind) == "embedded" do
-          %{
-            status: :ok,
-            value:
-              Evaluation.evaluate_source(
-                state,
-                mission,
-                source,
-                limits.evaluation_timeout_ms,
-                event_sink,
-                inspection_sink
-              )
-          }
+          evaluate_source(state, mission, source, limits, event_sink, inspection_sink)
+        else
+          invalid_kernel_eval_request(state)
+        end
+
+      %{"kind" => kind, "program" => %Program{source: source}, "params" => params} = arguments
+      when map_size(arguments) == 3 ->
+        if keyword_name(kind) == "embedded" do
+          evaluate_source_with(
+            state,
+            mission,
+            source,
+            params,
+            limits,
+            event_sink,
+            inspection_sink
+          )
         else
           invalid_kernel_eval_request(state)
         end
@@ -110,6 +126,157 @@ defmodule PtcRunner.Kernel.RuntimeTools do
       _arguments ->
         invalid_kernel_eval_request(state)
     end
+  end
+
+  @doc false
+  @spec kernel_eval_ledger_arguments(map()) :: (map() -> map())
+  def kernel_eval_ledger_arguments(limits) do
+    fn arguments -> project_kernel_eval_arguments(arguments, limits) end
+  end
+
+  @doc false
+  @spec trusted_tools(map(), map()) :: map()
+  def trusted_tools(tools, limits) when is_map(tools) do
+    Map.new(tools, fn
+      {"kernel-eval" = name, callback} ->
+        {name,
+         %TrustedTool{
+           function: callback,
+           ledger_arguments: kernel_eval_ledger_arguments(limits)
+         }}
+
+      {name, callback} ->
+        {name, %TrustedTool{function: callback}}
+    end)
+  end
+
+  defp evaluate_source(state, mission, source, limits, event_sink, inspection_sink) do
+    %{
+      status: :ok,
+      value:
+        Evaluation.evaluate_source(
+          state,
+          mission,
+          source,
+          limits.evaluation_timeout_ms,
+          event_sink,
+          inspection_sink
+        )
+    }
+  end
+
+  defp evaluate_source_with(
+         state,
+         mission,
+         source,
+         params,
+         limits,
+         event_sink,
+         inspection_sink
+       ) do
+    case normalize_params(params, limits.capability_argument_bytes) do
+      {:ok, params} ->
+        %{
+          status: :ok,
+          value:
+            Evaluation.evaluate_source(
+              state,
+              mission,
+              source,
+              limits.evaluation_timeout_ms,
+              event_sink,
+              inspection_sink,
+              params
+            )
+        }
+
+      {:error, _reason} ->
+        invalid_kernel_eval_request(state)
+    end
+  end
+
+  defp normalize_params(params, max_bytes) do
+    with {:ok, projected} <- Lisp.project_boundary_value(params, :kernel_json),
+         true <- JSONValue.value?(projected),
+         bytes when is_integer(bytes) and bytes <= max_bytes <-
+           RetainedSize.bytes_with_cap(projected, max_bytes) do
+      {:ok, RetainedSize.detach_binaries(projected)}
+    else
+      _other -> {:error, :invalid_params}
+    end
+  end
+
+  defp project_kernel_eval_arguments(arguments, limits) when is_map(arguments) do
+    %{}
+    |> maybe_put_kind(arguments)
+    |> maybe_put_source_identity(arguments, limits.subordinate_source_bytes)
+    |> maybe_put_program_identity(arguments)
+    |> maybe_put_params_identity(arguments, limits.capability_argument_bytes)
+  end
+
+  defp project_kernel_eval_arguments(_arguments, _limits), do: %{"redacted" => true}
+
+  defp maybe_put_kind(projected, arguments) do
+    case keyword_name(Map.get(arguments, "kind")) do
+      kind when kind in ["embedded", "source"] -> Map.put(projected, "kind", kind)
+      _other -> projected
+    end
+  end
+
+  defp maybe_put_source_identity(projected, arguments, max_bytes) do
+    case Map.get(arguments, "source") do
+      source when is_binary(source) and byte_size(source) <= max_bytes ->
+        Map.put(projected, "source", source_identity(source))
+
+      source when is_binary(source) ->
+        Map.put(projected, "source", %{"bytes" => byte_size(source)})
+
+      _other ->
+        projected
+    end
+  end
+
+  defp maybe_put_program_identity(projected, arguments) do
+    case Map.get(arguments, "program") do
+      %Program{byte_size: bytes, digest: digest} ->
+        Map.put(projected, "program", %{
+          "bytes" => bytes,
+          "sha256" => "sha256:" <> digest
+        })
+
+      _other ->
+        projected
+    end
+  end
+
+  defp maybe_put_params_identity(projected, arguments, max_bytes) do
+    case Map.fetch(arguments, "params") do
+      {:ok, params} ->
+        identity =
+          case normalize_params(params, max_bytes) do
+            {:ok, normalized} -> json_identity(normalized)
+            {:error, _reason} -> %{"invalid" => true}
+          end
+
+        Map.put(projected, "params", identity)
+
+      :error ->
+        projected
+    end
+  end
+
+  defp json_identity(value) do
+    case DeterministicJSON.encode(value) do
+      {:ok, encoded} -> source_identity(encoded)
+      {:error, _reason} -> %{"invalid" => true}
+    end
+  end
+
+  defp source_identity(source) do
+    %{
+      "bytes" => byte_size(source),
+      "sha256" => "sha256:" <> Base.encode16(:crypto.hash(:sha256, source), case: :lower)
+    }
   end
 
   @doc "Builds the workflow-only application-result contract callback."

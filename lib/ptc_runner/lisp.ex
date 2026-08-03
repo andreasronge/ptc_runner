@@ -768,7 +768,13 @@ defmodule PtcRunner.Lisp do
 
       tools_meta =
         Map.new(normalized_tools, fn {name, tool} ->
-          {name, %{cache: tool.cache, visibility: tool.visibility, signature: tool.signature}}
+          {name,
+           %{
+             cache: tool.cache,
+             visibility: tool.visibility,
+             signature: tool.signature,
+             ledger_arguments: tool.ledger_arguments
+           }}
         end)
 
       opts =

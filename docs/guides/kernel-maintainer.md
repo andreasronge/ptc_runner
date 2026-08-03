@@ -575,6 +575,10 @@ Authority appears only when a frozen bundle is placed in an environment:
 The subordinate evaluator receives only the mission environment. It never
 inherits or falls back to workflow capabilities. Preserve that separation in
 data structures and function inputs rather than relying on symbol filtering.
+Parameterized subordinate evaluation overlays validated JSON at
+`data/params` without changing the mission grant or the opaque program source.
+Reserved runtime tools use an explicit ledger-argument projector so canonical
+public evidence retains source and parameter identities, never their payloads.
 
 Each `PtcRunner.Kernel.Capability` freezes its public identity, effect,
 visibility, bounded schemas, validator, and trusted callback. Environment
