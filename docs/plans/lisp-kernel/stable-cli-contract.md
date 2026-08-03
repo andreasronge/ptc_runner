@@ -1,8 +1,9 @@
 # Stable CLI and transport-neutral application plan
 
-**Status:** accepted; implementation in progress.
-**Revised:** 2026-08-02 after the first implementation of slice 5 proved too
-large to review or maintain safely.
+**Status:** accepted; Checkpoint A is complete and the remaining work continues
+through follow-up PRs.
+**Revised:** 2026-08-03 to merge the useful active-session cutover before the
+complete stable CLI and keep each later delivery independently reviewable.
 
 This plan delivers a stable command-line contract and a path-free execution
 core without designing infrastructure for a future hosted service. Exact
@@ -65,18 +66,23 @@ Completed commits on `codex/stable-cli-contract`:
 
 | Slice | Commit | Result |
 | --- | --- | --- |
-| 0 | `3f628776` | Bundle hashes include canonical dependency edges. |
-| 1 | `496cbd18` | Sealed, transport-neutral run requests and content identity. |
-| 2 | `4ebfc302` | Closed command preparation, diagnostics, and envelopes. |
-| 3 | `54c26bb7` | Closed generated limit catalog. |
-| 4 | `416e9346` | Inert provider declarations and effective identity. |
-| 5a | `9db10af5` | Shared absolute-monotonic deadline type and migrated provider activity. |
-| 5b | `e957cc21` | Process-free catalogs and sealed runtime activation. |
-| 5c1 | `804582d9` | One provider-session owner with scoped, bounded LIFO cleanup. |
-| 5c2a | `5ee24051` | Bounded scoped process-root admission and terminal handoff. |
-| 5c2b | `c46a7d2d` | Shipped process and port roots use scoped registration. |
-| 5d1 | `4f6981c8` | Active selection validation runs in bounded registrar scopes. |
-| 5d2a | `3a1ced9b` | Active sessions admit selected optional applications. |
+| 0 | `dff98698` | Bundle hashes include canonical dependency edges. |
+| 1 | `1784f0d2` | Sealed, transport-neutral run requests and content identity. |
+| 2 | `2f3d028d` | Closed command preparation, diagnostics, and envelopes. |
+| 3 | `8e2d4a6a` | Closed generated limit catalog. |
+| 4 | `1af044ac` | Inert provider declarations and effective identity. |
+| 5a | `b51804e4` | Shared absolute-monotonic deadline type and migrated provider activity. |
+| 5b | `325d0195` | Process-free catalogs and sealed runtime activation. |
+| 5c1 | `dab44224` | One provider-session owner with scoped, bounded LIFO cleanup. |
+| 5c2a | `6a66eb71` | Bounded scoped process-root admission and terminal handoff. |
+| 5c2b | `bdf80865` | Shipped process and port roots use scoped registration. |
+| 5d1 | `3ef0e99d` | Active selection validation runs in bounded registrar scopes. |
+| 5d2a | `7aa93376` | Active sessions admit selected optional applications. |
+| 5d2b | `8f89175a` | Mix commands use the active boundary and explicit provider startup. |
+
+Commit `1af53948` refreshes the semantic projection after 5d2a. The plan-only
+commit that records Checkpoint A follows 5d2b and does not alter its runtime
+boundary.
 
 The first local implementation of slice 5, `d38d0bef`, is intentionally not a
 delivery milestone. It demonstrated useful failure cases but combined remote
@@ -547,6 +553,26 @@ Every commit must compile and leave all earlier gates green. A numbered slice
 may use `a`, `b`, and `c` commits when necessary to respect the review budget.
 Do not combine unrelated state machines merely to preserve a one-commit slice.
 
+Delivery uses mergeable checkpoints rather than holding every slice in one
+ever-growing branch:
+
+- **Checkpoint A (complete):** slices 0 through 5d2b, providing the sealed
+  preparation model, one provider-session owner, active validation, explicit
+  provider-application admission, and the Mix runtime cutover.
+- **Checkpoint B:** 5d3 and slice 6, completing bounded credentials,
+  process-local OAuth, acquisition, and one-shot execution composition.
+- **Checkpoint C:** slice 7, bounded connectivity and doctor.
+- **Checkpoint D:** slice 8, destination preflight and publication.
+- **Checkpoint E:** slice 9, shared commands and REPL parity.
+- **Checkpoint F:** slice 10, standalone packaging.
+- **Checkpoint G:** slice 11, final acceptance, documentation, and dead-code
+  removal.
+
+Each follow-up checkpoint starts from the updated `origin/main` after its
+predecessor merges. This keeps the deployed boundary useful at every merge and
+prevents unfinished later commands or packaging work from expanding an already
+reviewable PR.
+
 ### Slices 0–4: complete and pushed
 
 The completed results are listed above. They remain the base of the revised
@@ -567,9 +593,9 @@ Delivery is intentionally split into review-sized commits:
 - 5d1 (complete): bounded active selection validation;
 - 5d2a (complete): optional application admission inside the new active-session
   boundary;
-- 5d2b (current): atomically cut the command frontend over to that boundary
+- 5d2b (complete): atomically cut the command frontend over to that boundary
   and remove optional provider applications from the core OTP startup set; and
-- 5d3: bounded credential resolution.
+- 5d3 (Checkpoint B): bounded credential resolution.
 
 Slice 5d2b keeps the Mix command's existing option surface but replaces its
 provider-bearing runtime path atomically: destination preflight completes on
@@ -754,16 +780,20 @@ configured, and the complete branch receives a clean independent review.
 
 ## Delivery and review protocol
 
-Use one feature branch and one PR targeting `origin/main`.
+Use the merge checkpoints above as sequential PRs targeting `origin/main`.
+Do not keep later checkpoints on an unmerged branch merely to preserve the
+original one-PR delivery shape.
 
 Before every commit:
 
 1. keep the diff within the review budget or split it;
-2. run focused tests and `mix precommit`;
-3. run an independent adversarial review of the exact proposed commit in the
-   context of preceding commits;
-4. fix every actionable finding and repeat focused review; and
-5. obtain a fresh clean review of the immutable commit before pushing it.
+2. run focused tests and `mix precommit`; and
+3. record any intentionally deferred limitation in the checkpoint description.
+
+Independent adversarial review may run locally before push or externally on the
+PR. It must be complete before merge, but opening a PR does not require a
+duplicate local review when external review is planned. Fix every actionable
+finding and rerun the affected gates before merging.
 
 Documentation changes also run:
 
@@ -771,12 +801,11 @@ Documentation changes also run:
 MIX_ENV=dev mix docs --warnings-as-errors
 ```
 
-Push only after the exact commit is clean. Record verification and the clean
-review result in the PR body. After the final slice, rebase on `origin/main`,
-rerun the full gates, run a fresh full-branch review against `origin/main`, and
-open or update the PR. If a later finding belongs to an earlier unmerged
-commit, rewrite that commit and re-review affected descendants instead of
-papering over the defect.
+Record verification and review status in the PR body. Before merging each
+checkpoint, reconcile it with the latest `origin/main`, rerun the full gates,
+and complete the chosen local or external review. If a later finding belongs
+to an earlier unmerged commit, fix the owning boundary and recheck affected
+descendants instead of papering over the defect.
 
 ## Required acceptance properties
 
