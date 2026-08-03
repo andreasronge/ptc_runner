@@ -81,8 +81,16 @@ Two consequences must be documented, not discovered:
   dependency on the placeholder, or promotion produces a component nothing can
   reach.
 
-A placeholder is therefore a minimal valid `ns` with no exports, the intended
-dependency list, and at least one declared consumer.
+A placeholder is therefore a valid `ns` with the intended dependency list, at
+least one declared consumer, and a **stub for every export its consumers
+call**. An export-free placeholder does not work: the base application would
+not compile, so there would be no baseline to compare a candidate against and
+nothing for a consumer to depend on. Implementation established this; the
+earlier "minimal `ns` with no exports" wording was wrong.
+
+This also softens the added-export rule in practice. A promotion that replaces
+stubs with real implementations compares export-to-export, so only genuinely
+new exports fall under the added-export baseline.
 
 ### D2 — Materialize first, then gate through the real acquisition path
 

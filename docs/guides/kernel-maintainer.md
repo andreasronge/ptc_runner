@@ -485,7 +485,8 @@ retain only a closed `{:source_role, role, reason}` tag. Command projection
 uses that tag to select the fixed public `input.json` or
 `component-override.json` provenance; it never retains the caller's path.
 Descriptor decoding may additionally retain a typed path authorized by the
-closed four-field override schema. Duplicate and unknown fields expose only
+closed override schema — four required fields plus an optional closed
+`provenance` object. Duplicate and unknown fields expose only
 their safe parent; an invalid declared field may expose that declared field.
 Descriptor/source byte ceilings and descriptor JSON depth/node ceilings remain
 structural `document_limit_exceeded` failures through both captured and
@@ -501,7 +502,14 @@ application content. It uses the versioned
 `PtcRunner.Kernel.ApplicationPackage`: a sorted record stream covers the
 projected manifest, environment-qualified local and shipped component source,
 direct dependency lists, exact contract bytes, and verified override
-identities. The complete manifest input declaration is replaced by the fixed
+identities. Override **attribution** — the resolved environment plus asserted
+authoring provenance — is deliberately excluded from that stream and travels
+only on the package-facing projection. Content identity answers what an
+application is, not who claims to have written part of it, so an asserted
+timestamp or acceptance flag must never perturb the digest. The two paths look
+alike and are not: `ApplicationPackage` strips the environment once for the
+package projection and once more for the content record whose *name* already
+encodes it. Changing the second would alter every override-bearing digest. The complete manifest input declaration is replaced by the fixed
 `{"$ptc_input":"excluded"}` marker. Input form, logical name, bytes, value, and
 digest therefore cannot perturb content identity.
 
