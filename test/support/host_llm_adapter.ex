@@ -21,6 +21,11 @@ defmodule PtcRunner.TestSupport.HostLLMAdapter do
   @impl true
   def stream(_model, _request), do: {:error, :streaming_not_supported}
 
+  # Defaults to nil so every other test keeps the unclassified transport path.
+  @impl true
+  def provider_application,
+    do: Application.get_env(:ptc_runner, :host_llm_test_provider_application)
+
   @impl true
   def ensure_ready do
     owner = Application.fetch_env!(:ptc_runner, :host_llm_test_owner)

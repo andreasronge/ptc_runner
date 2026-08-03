@@ -64,7 +64,17 @@ defmodule PtcRunner.LLM do
   """
   @callback ensure_ready() :: :ok
 
-  @optional_callbacks [stream: 2, ensure_ready: 0]
+  @doc """
+  Names the OTP application this adapter needs running to serve requests.
+
+  Optional. An adapter backed by a dependency the core does not start returns
+  that application's name so a host can report an unstarted provider
+  application as a host misconfiguration rather than as a retryable transport
+  failure. Adapters with no such dependency omit the callback or return `nil`.
+  """
+  @callback provider_application() :: atom() | nil
+
+  @optional_callbacks [stream: 2, ensure_ready: 0, provider_application: 0]
 
   @doc """
   Creates a normalized callback for a configured model.

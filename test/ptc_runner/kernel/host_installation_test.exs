@@ -839,6 +839,78 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
     assert prepared.accepts_data == [:private_inspection]
   end
 
+  @tag :tmp_dir
+  test "an unstarted provider application is a host misconfiguration, not an outage", %{
+    tmp_dir: dir
+  } do
+    previous = %{
+      adapter: Application.get_env(:ptc_runner, :llm_adapter),
+      owner: Application.get_env(:ptc_runner, :host_llm_test_owner),
+      result: Application.get_env(:ptc_runner, :host_llm_test_result),
+      application: Application.get_env(:ptc_runner, :host_llm_test_provider_application)
+    }
+
+    Application.put_env(:ptc_runner, :llm_adapter, PtcRunner.TestSupport.HostLLMAdapter)
+    Application.put_env(:ptc_runner, :host_llm_test_owner, self())
+    Application.put_env(:ptc_runner, :host_llm_test_result, {:error, :transport_boom})
+
+    on_exit(fn ->
+      restore_env(:llm_adapter, previous.adapter)
+      restore_env(:host_llm_test_owner, previous.owner)
+      restore_env(:host_llm_test_result, previous.result)
+      restore_env(:host_llm_test_provider_application, previous.application)
+    end)
+
+    config = %{
+      "credentials" => %{"key" => %{"literal" => "test-llm-secret"}},
+      "install" => %{
+        "deepseek" => %{
+          "source" => "llm",
+          "model" => "openrouter:deepseek/deepseek-v4-flash",
+          "credential" => "key",
+          "installation_revision" => "unstarted-v1"
+        }
+      }
+    }
+
+    host = load_host(dir, config)
+    assert {:ok, catalog} = HostInstallation.catalog(host)
+    assert {:ok, registry} = HostInstallation.runtime_registry(host, catalog)
+    request = %{"messages" => [%{"role" => "user", "content" => "hi"}]}
+
+    build_capability = fn ->
+      assert {:ok, %{capabilities: [capability]}} =
+               ProviderRegistry.build(registry, "deepseek", %{}, context(dir, :workflow))
+
+      capability
+    end
+
+    # An adapter whose backing application is not running: retrying cannot start
+    # an OTP application, so the failure must name the real cause and be final.
+    Application.put_env(
+      :ptc_runner,
+      :host_llm_test_provider_application,
+      :ptc_unstarted_provider_app
+    )
+
+    assert {:error, %PtcRunner.Kernel.ProviderError{} = stopped} =
+             build_capability.().callback.(request)
+
+    assert stopped.kind == :internal
+    assert stopped.retryable? == false
+    assert stopped.details =~ "ptc_unstarted_provider_app"
+
+    # The same transport failure with the application running keeps the
+    # retryable transport classification, so the check is not blanket.
+    Application.put_env(:ptc_runner, :host_llm_test_provider_application, :ptc_runner)
+
+    assert {:error, %PtcRunner.Kernel.ProviderError{} = running} =
+             build_capability.().callback.(request)
+
+    assert running.kind == :unavailable
+    assert running.retryable? == true
+  end
+
   defp context(_directory, destination) do
     {:ok, limits} = Limits.new()
 

@@ -54,6 +54,10 @@ if Code.ensure_loaded?(ReqLLM) do
     end
 
     @impl true
+    @spec provider_application() :: atom()
+    def provider_application, do: :req_llm
+
+    @impl true
     @spec call(String.t(), map()) :: {:ok, map()} | {:error, term()}
     def call(model, %{schema: schema} = req) when is_map(schema) do
       messages = build_messages(req)

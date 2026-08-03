@@ -46,6 +46,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
   alias PtcRunner.Kernel.MCPOAuth.TokenManager
   alias PtcRunner.Kernel.MCPSource
   alias PtcRunner.Kernel.ProviderDescriptor
+  alias PtcRunner.Kernel.ProviderError
   alias PtcRunner.Kernel.ProviderRegistry
   alias PtcRunner.Kernel.ProviderRuntimeServices
   alias PtcRunner.Kernel.ProviderSnapshot
@@ -1113,7 +1114,10 @@ defmodule PtcRunner.Kernel.HostInstallation do
          {:ok, capability} <-
            LLMCapability.new(
              requester: fn request ->
-               requester.(ProviderRegistry.adapter_request(request))
+               request
+               |> ProviderRegistry.adapter_request()
+               |> requester.()
+               |> classify_provider_application(adapter)
              end,
              max_request_bytes: selected.max_request_bytes,
              max_response_bytes: selected.max_response_bytes
@@ -1132,6 +1136,43 @@ defmodule PtcRunner.Kernel.HostInstallation do
     end
   rescue
     _exception -> {:error, :invalid_llm_provider}
+  end
+
+  # The core no longer starts an adapter's backing application on a host's
+  # behalf; a run admits it through ProviderApplicationGate. An embedding host
+  # that drives the registry directly can reach a request with that application
+  # still stopped, where every transport error would otherwise be reported as a
+  # retryable `:unavailable` provider outage. Retrying cannot start an OTP
+  # application, so name the real cause and mark it non-retryable.
+  defp classify_provider_application({:error, _reason} = error, adapter) do
+    case provider_application(adapter) do
+      nil ->
+        error
+
+      application ->
+        if Enum.any?(Application.started_applications(), &(elem(&1, 0) == application)) do
+          error
+        else
+          {:error,
+           ProviderError.new(
+             :internal,
+             "the #{application} provider application is not started; " <>
+               "start it before building this provider, or run through the " <>
+               "prepared-run path that admits it",
+             retryable?: false
+           )}
+        end
+    end
+  end
+
+  defp classify_provider_application(result, _adapter), do: result
+
+  # `adapter` is always the module resolved by PtcRunner.LLM.adapter!/0, so no
+  # non-atom clause is reachable here.
+  defp provider_application(adapter) when is_atom(adapter) do
+    if Code.ensure_loaded?(adapter) and function_exported?(adapter, :provider_application, 0),
+      do: adapter.provider_application(),
+      else: nil
   end
 
   defp acquire_llm_replay(host, installation, selected, context) do
