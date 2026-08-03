@@ -41,6 +41,22 @@ defmodule Mix.Tasks.Ptc.RunTest do
   end
 
   @tag :tmp_dir
+  test "renders shared closed diagnostics for host acquisition failures", %{tmp_dir: dir} do
+    manifest_path = write_manifest(dir, %{"value" => 1})
+    missing_host = Path.join(dir, "missing-host.json")
+    Mix.Task.reenable("ptc.run")
+
+    error =
+      assert_raise Mix.Error, fn ->
+        Run.run([manifest_path, "--host-config", missing_host])
+      end
+
+    assert error.message ==
+             "ptc.run failed: host/host_unavailable: " <>
+               "the host configuration is unavailable"
+  end
+
+  @tag :tmp_dir
   test "rejects quoted-symbol results at the JSON command boundary", %{tmp_dir: dir} do
     File.write!(
       Path.join(dir, "main.clj"),

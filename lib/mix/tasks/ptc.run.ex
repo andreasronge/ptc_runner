@@ -47,7 +47,6 @@ defmodule Mix.Tasks.Ptc.Run do
   alias PtcRunner.Dotenv
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.CommandEngine
-  alias PtcRunner.Kernel.HostConfig
   alias PtcRunner.Kernel.HostInstallation
   alias PtcRunner.Kernel.InstallationCatalog
   alias PtcRunner.Kernel.MCPOAuth.Authority
@@ -226,7 +225,7 @@ defmodule Mix.Tasks.Ptc.Run do
 
     case {Keyword.get(opts, :host_config), authorizations} do
       {nil, []} ->
-        with {:ok, catalog} <- InstallationCatalog.new(),
+        with {:ok, nil, catalog} <- CommandEngine.catalog(nil),
              {:ok, services} <-
                ProviderRuntimeServices.new(provider_application_mode: provider_application_mode),
              do: {:ok, %{catalog: catalog, services: services, host: nil, authorizations: []}}
@@ -236,8 +235,7 @@ defmodule Mix.Tasks.Ptc.Run do
 
       {path, requested} ->
         with true <- requested == Enum.uniq(requested),
-             {:ok, host} <- HostConfig.load(path),
-             {:ok, catalog} <- HostInstallation.catalog(host),
+             {:ok, host, catalog} <- CommandEngine.catalog(path),
              {:ok, services} <-
                HostInstallation.runtime_services(host,
                  provider_application_mode: provider_application_mode

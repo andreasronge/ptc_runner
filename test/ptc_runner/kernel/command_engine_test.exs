@@ -110,6 +110,21 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
              CommandEngine.request(application, catalog, [:not_keyword])
   end
 
+  @tag :tmp_dir
+  test "shared catalog acquisition returns the host and its inert catalog", %{tmp_dir: directory} do
+    host_path = write_host_config(directory, "shared-catalog", valid_host_config())
+
+    assert {:ok, nil, empty_catalog} = CommandEngine.catalog(nil)
+    assert empty_catalog.descriptors == %{}
+
+    assert {:ok, host, catalog} = CommandEngine.catalog(host_path)
+    assert Map.keys(host.install) == ["workspace"]
+    assert InstallationCatalog.names(catalog) == ["workspace"]
+
+    assert {:error, %CommandDiagnostic{phase: :host, code: :host_unavailable}} =
+             CommandEngine.catalog(Path.join(directory, "missing-host.json"))
+  end
+
   test "malformed phase-1 forms retain their recognized command" do
     cases = [
       {["version", "extra"], "version"},
