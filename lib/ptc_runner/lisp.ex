@@ -241,8 +241,9 @@ defmodule PtcRunner.Lisp do
     - `:float_precision` - Number of decimal places for floats in result (default: nil = full precision)
     - `:timeout` - Timeout in milliseconds for entire sandbox execution (default: 1000)
     - `:compile_timeout` - Timeout in milliseconds for the compile phase (parse + analyze) (default: 5000)
-    - `:compile_max_heap` - Compile-worker heap ceiling in words (default:
-      application `:default_max_heap`, or 1_250_000)
+    - `:compile_max_heap` - Compile-worker heap ceiling in words (default: the
+      `:max_heap` value). No ambient application default is consulted, so a
+      sealed run's compile ceiling comes only from its own options.
     - `:pmap_timeout` - Shared absolute deadline in milliseconds for each
       pmap/pcalls operation, including nested parallel calls (default: 5000).
       Increase for LLM-backed tools.
@@ -720,12 +721,10 @@ defmodule PtcRunner.Lisp do
         Keyword.get(opts, :max_parallel_workers, @default_max_parallel_workers),
       max_symbols: Keyword.get(opts, :max_symbols, 10_000),
       compile_timeout: Keyword.get(opts, :compile_timeout, @default_compile_timeout),
-      compile_max_heap:
-        Keyword.get(
-          opts,
-          :compile_max_heap,
-          Application.get_env(:ptc_runner, :default_max_heap, 1_250_000)
-        ),
+      # Defaults to the sandbox `max_heap` rather than any ambient application
+      # default, so a sealed Kernel run cannot have its compile ceiling moved
+      # by process configuration outside the sealed request.
+      compile_max_heap: Keyword.get(opts, :compile_max_heap, max_heap),
       run_deadline_ms: Keyword.get(opts, :run_deadline_ms),
       turn_history: Keyword.get(opts, :turn_history, []),
       max_print_length: Keyword.get(opts, :max_print_length),
@@ -995,7 +994,7 @@ defmodule PtcRunner.Lisp do
 
     compile_opts = [
       timeout: compile_timeout,
-      max_heap: opts.max_heap,
+      max_heap: compile_max_heap,
       link: Map.get(opts, :link, false)
     ]
 
