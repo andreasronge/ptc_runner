@@ -38,7 +38,7 @@
   },
   "input": {
     "value": {
-      "incident_id": "batch-silent-failure",
+      "incident_id": "schema-migration-stall",
       "format": "postmortem",
       "agent": {
         "max_turns": 40
