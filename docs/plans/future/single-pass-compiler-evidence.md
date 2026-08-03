@@ -1,7 +1,7 @@
 # Evidence: a single-pass incident compiler against the agent loop
 
 **Status:** experiment record and handoff, 2026-08-02/03, branch
-`worktree-incident-evidence-compiler`. One model, one corpus, three reps per
+`worktree-incident-evidence-compiler`. One model, one corpus, ten reps per
 cell. Nothing here is a release claim; see *Limits* before quoting any number.
 
 The branch is well ahead of `origin/main` and has no PR open. Unrelated to this
@@ -33,41 +33,60 @@ model turns.
 
 ## Result
 
-Three incidents × two arms × three reps = 18 runs.
+Three incidents × two arms × ten reps = 60 runs.
 
-| incident | arm | calls | required-fact recall | failed |
+| incident | arm | calls (median, range) | recall (median, range) | published |
 | --- | --- | --- | --- | --- |
-| checkout-5xx | fast | 1, 1, 1 | 0.29 / 0.71 / 0.71 | 0/3 |
-| checkout-5xx | loop | 18, 15, 13 | 0.86 / 1.00 / 0.57 | 0/3 |
-| dual-cause-payments | fast | 1, 1, 1 | 0.86 / 0.86 / 0.86 | 0/3 |
-| dual-cause-payments | loop | 9, 17, 9 | 0.57 / *fail* / 0.29 | 1/3 |
-| batch-silent-failure | fast | 1, 1, 1 | 0.60 / 0.80 / 0.80 | 0/3 |
-| batch-silent-failure | loop | 10, 8, 11 | 0.60 / 0.60 / 1.00 | 0/3 |
+| checkout-5xx | fast | 1 (1-1) | 0.86 (0.29-1.00) | 10/10 |
+| checkout-5xx | loop | 16 (10-20) | 0.57 (0.14-1.00) | 10/10 |
+| dual-cause-payments | fast | 1 (1-1) | 0.86 (0.00-1.00) | 10/10 |
+| dual-cause-payments | loop | 15.5 (8-21) | 0.57 (0.14-1.00) | 9/10 |
+| batch-silent-failure | fast | 1 (1-1) | 0.80 (0.40-1.00) | 10/10 |
+| batch-silent-failure | loop | 11 (7-17) | 0.60 (0.40-1.00) | 10/10 |
 
 ```
-fast  calls median= 1  total=  9   recall median=0.80  range 0.29-0.86  published 9/9
-loop  calls median=11  total=110   recall median=0.60  range 0.29-1.00  published 8/9
+fast  calls median= 1  total= 30   recall median=0.86  range 0.00-1.00  published 30/30
+loop  calls median=14  total=410   recall median=0.60  range 0.14-1.00  published 29/30
 ```
+
+The recall difference survives a test that respects incident as a blocking
+factor: shuffling arm labels within each incident (200,000 draws) puts the
+observed block-averaged difference of +0.170 at p=0.017. No single incident
+reaches significance alone (p=0.10, 0.07, 0.66) — the result rests on all three
+blocks pointing the same way, not on any one of them. Publication rate does not
+differ (30/30 against 29/30, Fisher p=1.0).
 
 Every published report in both arms was fully grounded: zero unresolved and
-zero mismatched citations, verified against the evidence source.
+zero mismatched citations, verified against the evidence source. As one fast
+run shows below, that is a weaker property than it sounds.
 
 ## What was unexpected
 
-**The correction turn never fired.** `corrected: 0` in all nine fast runs. It
+**The correction turn never fired.** `corrected: 0` in all thirty fast runs. It
 was added because the loop's one structural advantage is a correction turn, and
 it turned out to be unnecessary on this corpus. It costs nothing when unused.
 
-**The loop is the arm that fabricated.** `dual-cause-payments` rep 2 failed
-closed with `unresolved-citations` after 17 calls. More turns meant more
-opportunities to invent a citation, and the fail-closed check caught it. The
-fast arm never fabricated in nine runs.
+**A fully grounded report can still be worthless.**
+`fast-dual-cause-payments-4` published twenty-one citations, ten of them
+checked, zero unresolved and zero mismatched — and scored 0.00 required-fact
+recall. Every claim it made was traceable to a real record with a matching
+digest; it simply made none of the claims that mattered. The citation check
+verifies grounding, not relevance, and nothing at three reps had exercised the
+gap. This is the most useful thing the extra reps bought.
 
-That inverts the assumption the speculate-then-deoptimise design rested on —
-that the loop is the safe fallback and the single pass is the risky shortcut.
-On this evidence the single pass is *tighter*: never above 0.86, never below
-0.29, and identical three times on one incident. The loop owns both the two
-perfect scores and the only failure.
+**At three reps the single pass looked tighter. It is not.** The earlier record
+said it never scored above 0.86 or below 0.29 and read that stability as
+evidence the single pass was the safer shape. At ten reps both arms span nearly
+the whole range — fast 0.00-1.00, loop 0.14-1.00. The medians separate; the
+distributions overlap heavily. What survives is that the fast arm's median is
+higher at a fourteenth of the calls, not that it is steadier.
+
+**The fabrication reading did not survive either.** The loop still owns the only
+failure — `dual-cause-payments` rep 2, failed closed with
+`unresolved-citations` after 17 calls — but one failure in thirty against zero
+in thirty is no evidence at all (Fisher p=1.0). That more turns mean more
+chances to invent a citation remains a plausible hypothesis with nothing behind
+it. Testing it needs a corpus where either arm fails often enough to count.
 
 ## What was tried and did not pay off
 
@@ -107,11 +126,44 @@ Filed as [#1165](https://github.com/andreasronge/ptc_runner/issues/1165).
   could never match, because the tool boundary rewrites hyphens to underscores
   while the declaration grammar requires kebab-case.
 
+## Runtime capabilities confirmed
+
+Probed directly against the mission environment, no model calls involved,
+because the answers decide whether a model-authored retrieval arm is buildable
+at all:
+
+- Source handed to `kernel/eval-source` may contain `def` and `defn`, and what
+  it defines **persists into later `eval-source` calls for the life of the
+  run**. A function defined in one evaluation is callable from the next.
+- A dynamically defined function may call mission capabilities — one defined in
+  a probe called `incident.evidence/search` and returned its thirteen records.
+- It may **not** shadow a protected namespace's public exports. Both `defn` and
+  `def` against `incident.evidence/resolve-citations` are refused with
+  `invalid_form: … it is a public export of the protected namespace …`, and the
+  real function still answers afterwards. Model-authored code cannot rewrite
+  the citation check that judges it.
+- The generator and the generated code are necessarily on opposite sides.
+  `llm`, `kernel-eval` and `kernel-mission-inventory` are workflow-side only
+  (`runner.ex` `workflow_tools`, reserved in `environment.ex`), while
+  `mission_tools` (`evaluation.ex`) grants only the mission environment's own
+  capability callbacks. Generated code therefore cannot call the model or
+  recursively evaluate, and is bounded by `mission_capability_calls`.
+
+What this does *not* provide is a prelude in the bundle sense. A runtime `defn`
+is not in the `FrozenBundle`: not covered by the component source hash, not
+versioned, dead at end of run, and absent from `mission_inventory` — which is
+built once at run construction, so **the model never sees its own library in
+its tool context**, and with no declared `:signature` there is no `export-meta`
+for `fit/handles?` to read. A generated library that should outlive its run has
+to be promoted into a real component with a docstring and signature.
+
 ## Limits
 
-- **n=3 per cell.** The medians differ (0.80 vs 0.60) but the distributions
-  overlap. This does not establish that the fast arm is better, only that it is
-  not obviously worse at a twelfth of the calls.
+- **n=10 per cell**, 60 runs. The recall difference is significant under a
+  blocked permutation test (p=0.017) and the direction is consistent across all
+  three incidents. The distributions still overlap heavily, the effect leans on
+  three same-direction blocks rather than any single one, and one model on one
+  corpus cannot generalise regardless of p.
 - **One model.** `deepseek-v3.2`. An earlier single-incident probe with
   `claude-haiku-4.5` moved recall but not turn count.
 - **One corpus, no hard case.** Every incident is small and structurally
@@ -130,19 +182,28 @@ Everything needed is committed under `incident_compiler/`:
 | `experiments/run.sh` | one cell per invocation; appends one JSONL row |
 | `experiments/collect.exs` | joins trace annotations, usage, and the scorer into that row |
 | `experiments/components/single-pass.clj` | the `fast` arm |
+| `experiments/components/authored-pass.clj` | the `authored` arm — **built, compile-checked, never run live** |
 | `experiments/components/fit.clj` | model-judged applicability via `export-meta` + `describe` |
 | `experiments/components/documented-target.clj` | the documented export `fit` judges |
 | `experiments/components/fit-stress.clj` | synthetic cases proving `fit` discriminates |
-| `exp-single-pass.json`, `exp-loop.json` | the two arms' manifests |
-| `experiments/results/paired-2026-08-03.jsonl` | the 18 rows behind every number above |
+| `exp-single-pass.json`, `exp-loop.json`, `exp-authored.json` | the arms' manifests |
+| `experiments/results/paired-2026-08-03.jsonl` | the first 18 rows (reps 1-3) |
+| `experiments/results/paired-2026-08-03-reps-4-10.jsonl` | the further 42 rows (reps 4-10) |
 
 Add repeats:
 
 ```bash
-export OPENROUTER_API_KEY=...            # or source .env
-./incident_compiler/experiments/run.sh checkout-5xx fast 4
-./incident_compiler/experiments/run.sh checkout-5xx loop 4
+export OPENROUTER_API_KEY=...            # or source .env, which lives in the
+                                         # main clone, not in this worktree
+./incident_compiler/experiments/run.sh checkout-5xx fast 11
+./incident_compiler/experiments/run.sh checkout-5xx loop 11
 ```
+
+The two arms use different manifests, so a `fast` and a `loop` stream can run
+concurrently; two runs of the *same* arm cannot, because `run.sh` rewrites that
+manifest's `incident_id` in place. Give each stream its own `PTC_EXP_DIR` so the
+two appends to `results.jsonl` cannot interleave. A loop run is roughly 150s
+against the fast arm's 70s, so a full sweep is paced by the loop arm.
 
 Rows land in `incident_compiler/experiments/runs/results.jsonl` (override with
 `PTC_EXP_DIR`); traces and inspection artifacts land beside them. Nothing is
@@ -163,27 +224,49 @@ they select. Moving them produces `:invalid_component`.
 
 ## Next step
 
-**More reps, not more design.** Reps 4-10 on the same three cells gives ~10 per
-cell and lets the medians be compared rather than eyeballed. Roughly 40 minutes
-of runs, no new code.
+**A hard case. Everything else is now waiting on it.** Reps 4-10 are done and
+the medians are settled; running more of the same corpus buys nothing. Two
+separate mechanisms are blocked on the same missing input:
 
-After that, in order:
+- `fit/handles?` answers yes 12/12 here because there is no task it should
+  reject, so triage cannot be validated.
+- The `authored` arm cannot beat the `fast` arm on a corpus where fetching
+  every record already fits in one context. It can only pay an extra authoring
+  call to re-derive the same program.
 
-1. **A hard case.** The corpus cannot exercise the fast arm's limits or
-   validate triage. One incident with hundreds of records, or heavy
-   cross-references, would make both testable. Phase 2's SREGym capture is the
-   plan's route to this and remains its one open item.
-2. **The Phase 3 pilot proper**, with bars committed first. This record is
-   evidence for designing it, not a substitute.
-3. **Decide whether the fast arm becomes a second shipped entry point** beside
-   the loop, so the corpus can be run both ways from the manifest rather than
-   from scratch files.
+One incident with hundreds of records, or heavy cross-referencing, makes both
+testable at once. Phase 2's SREGym capture is the plan's route to it and remains
+its one open item.
+
+Two things can be done before that corpus exists:
+
+1. **Run the `authored` arm on the current three incidents** — nine runs, about
+   twenty minutes. Not to win: to check the authoring call produces a runnable
+   program at all. The `authoring` annotation counts `program-ran` /
+   `eval-failed` / `records` so authoring quality stays separable from report
+   quality. Predicted outcome is a tie at one extra call; a tie is the useful
+   null, and anything worse is a prompt defect worth finding now rather than
+   confounded with a new corpus.
+2. **Exercise the persistence result.** `eval-source` definitions survive
+   across evaluations within a run (see *Runtime capabilities confirmed*), so
+   the richer shape is authoring a helper library once and running several cheap
+   programs against it — filter, aggregate, join — rather than one monolithic
+   fetch. That shape does nothing on 11-13 records and is the whole point on
+   hundreds.
+
+After those, unchanged from before: **the Phase 3 pilot proper**, with bars
+committed first, and then the decision about whether `fast` (and possibly
+`authored`) becomes a second shipped entry point beside the loop.
+
+This record is evidence for designing that pilot, not a substitute for it.
 
 The components under `experiments/` are experiment-grade: they work and are
 reproducible, but they have no tests and are not part of the shipped
-application. Item 3 is the decision about which, if any, graduate — at which
-point they need the same treatment as anything else in `incident_compiler/`.
+application. The entry-point decision is about which, if any, graduate — at
+which point they need the same treatment as anything else in
+`incident_compiler/`.
 
 One-off probes used while diagnosing (prompt dumps, shape probes, a
-speculate-then-deoptimise hybrid) were deliberately not kept. The hybrid is
+speculate-then-deoptimise hybrid, the `eval-source` capability probes behind
+*Runtime capabilities confirmed*) were deliberately not kept. The hybrid is
 recoverable from this branch's history if the triage question is reopened.
