@@ -232,20 +232,15 @@ choice belongs in the hard-case design, not in the run that discovers it.
 - Fixed on this branch: declared annotation counter names containing a hyphen
   could never match, because the tool boundary rewrites hyphens to underscores
   while the declaration grammar requires kebab-case.
-- A private analysis session redacts the *name* in an `unbound_var` error,
-  answering only `private evaluation failed`. The undefined name is the
-  analyst's own script text, not captured private data, so redacting it hides
-  the one fact that would fix the script. Found by elimination over two extra
-  round trips.
-- `defn-` does not bind in dynamic source. `(defn- f [x] x)` followed by
-  `(f 1)` fails `unbound_var` while the same code with `defn` works. It should
-  either work or be rejected as an invalid form; defining nothing and saying
-  nothing is the worst of the three.
-- The analysis profile's `traces`/`inspection` resources want a flat directory.
-  `run.sh` writes one subdirectory per tag, and pointing the profile at that
-  parent returns `{"items" []}` with no diagnostic — indistinguishable from a
-  capture that genuinely holds no runs. This is finding 4's shape (a rejected
-  query reading as an empty result) on the resource-loading path.
+- [#1172](https://github.com/andreasronge/ptc_runner/issues/1172) — hit while
+  analyzing this experiment's own private records. A private session answers
+  `unbound_var` with only `private evaluation failed`, while the identical
+  fault outside one says `Undefined variables: defn-, g, x`; the redacted names
+  are the analyst's own script text, not captured data. Alongside it, `defn-`
+  in dynamic source fails as an undefined *variable* rather than saying it is
+  component-only, and a profile resource directory whose artifacts sit one
+  level down answers `{"items" []}` — a capture that matched nothing reads
+  exactly like one holding no runs.
 
 ## Runtime capabilities confirmed
 
