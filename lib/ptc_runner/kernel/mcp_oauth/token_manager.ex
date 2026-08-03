@@ -60,18 +60,15 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManager do
          owner when is_pid(owner) <- Keyword.get(opts, :owner),
          key = Context.grant_key(context, authority, authority_epoch),
          {:ok, pid} <-
-           GenServer.start(
-             __MODULE__,
-             %{
-               owner: owner,
-               resource_registrar: Keyword.get(opts, :resource_registrar),
-               context: context,
-               authority: authority,
-               key: key,
-               request: Keyword.get(opts, :request),
-               resolver: Keyword.get(opts, :resolver)
-             }
-           ) do
+           start_owner(%{
+             owner: owner,
+             resource_registrar: Keyword.get(opts, :resource_registrar),
+             context: context,
+             authority: authority,
+             key: key,
+             request: Keyword.get(opts, :request),
+             resolver: Keyword.get(opts, :resolver)
+           }) do
       {:ok, %__MODULE__{pid: pid, resource: authority.resource}}
     else
       {:error, :resource_registrar_unavailable} = error -> error
@@ -80,6 +77,23 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManager do
   end
 
   def start(_opts), do: {:error, :invalid_token_manager}
+
+  defp start_owner(%{context: context} = config) do
+    case GenServer.start(__MODULE__, config) do
+      {:ok, pid} = success ->
+        case Store.register_manager(context.store, pid) do
+          :ok ->
+            success
+
+          {:error, _reason} ->
+            Process.exit(pid, :kill)
+            {:error, :invalid_token_manager}
+        end
+
+      {:error, _reason} = error ->
+        error
+    end
+  end
 
   @spec authorization_header(t(), integer(), pid()) :: {:ok, issued()} | {:error, atom()}
   def authorization_header(manager, deadline_ms, admission_owner \\ self())

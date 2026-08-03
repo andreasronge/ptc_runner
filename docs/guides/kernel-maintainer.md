@@ -39,8 +39,10 @@ PTC-Lisp owns replaceable workflow policy:
 Frontends own presentation and host choices. They must enter through
 `PtcRunner.Kernel.ApplicationPackage` and a sealed
 `PtcRunner.Kernel.RunRequest`. The closed command pipeline uses
-`PtcRunner.Kernel.CommandEngine`; the existing Mix command remains on its
-transitional `RunBuilder` adapter until frontend integration is complete.
+`PtcRunner.Kernel.CommandEngine`; the existing Mix command still has its
+transitional argv and presentation adapter, but its runtime path now prepares
+through `RunCoordinator`, preflights destinations, opens
+`ProviderActiveSession`, and gives the same provider session to `RunBuilder`.
 Embedding frontends execute a sealed request through
 `PtcRunner.Kernel.RunBuilder.build/3`. For a provider-free request they may
 instead call the path-free `PtcRunner.Kernel.RunCoordinator` and pass its
@@ -170,9 +172,10 @@ ownership transfers.
 effective projection/digest at construction and on every seal check, so
 provider-bearing preparation cannot bypass declaration processing by calling
 the constructor directly. Such provider-bearing values are presently
-continuation state for the staged command pipeline; `RunBuilder.build_prepared/3`
-rejects them until the active continuation consumes the inert catalog and
-builds a runtime registry.
+continuation state for the staged command pipeline. `RunBuilder.build_prepared/3`
+rejects them; after `ProviderActiveSession` consumes and marks one, the Mix
+adapter opens its runtime registry and passes the active value and same session
+to `RunBuilder.build_active/4`.
 Construction binds each frozen bundle's component IDs, source hashes,
 dependency edges, mission presence, and exported entry back to the sealed
 request. `RunBuilder.build_prepared/3` atomically consumes the prepared run
@@ -204,10 +207,11 @@ separately sealed path-free prepared run. Host-backed catalogs retain only an
 opaque path-free per-alias implementation recipe in the wrapper; they retain
 neither a live owner nor runtime services, host paths, installation payloads,
 credential values, or a credential resolver.
-The active adapter supplies `ProviderRuntimeServices` only when it opens a
-runtime registry. That registry owns the resulting private authority, and
-callers that retain it must use `ProviderRegistry.close/1` when the execution
-scope ends; closing revokes retained builders and credential access.
+The active adapter supplies `ProviderRuntimeServices` when it opens the active
+session. Selected optional applications are admitted before it opens a runtime
+registry. That registry owns the resulting private authority, and callers that
+retain it must use `ProviderRegistry.close/1` when the execution scope ends;
+closing revokes retained builders and credential access.
 Construction
 validates the complete catalog, requires its installed limits to match the captured
 package, requires JSON result projection, binds inspection presence to the

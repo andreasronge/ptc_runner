@@ -38,6 +38,14 @@ defmodule PtcRunner.Kernel.MCPOAuth.Store.Memory do
   def store(%__MODULE__{} = memory),
     do: Store.new(__MODULE__, memory)
 
+  @doc false
+  @spec close(t()) :: :ok
+  def close(%__MODULE__{pid: pid}) do
+    GenServer.call(pid, :close, :infinity)
+  catch
+    :exit, _reason -> :ok
+  end
+
   @impl Store
   def transact(%__MODULE__{pid: pid}, operation, timeout) do
     GenServer.call(pid, operation, timeout)
@@ -59,11 +67,19 @@ defmodule PtcRunner.Kernel.MCPOAuth.Store.Memory do
   @impl Store
   def local_identity(%__MODULE__{pid: pid}), do: {__MODULE__, pid}
 
+  @impl Store
+  def register_manager(%__MODULE__{pid: pid}, manager) when is_pid(manager) do
+    GenServer.call(pid, {:register_manager, manager})
+  catch
+    :exit, _reason -> {:error, :closed}
+  end
+
   @impl GenServer
   def init(owner) do
     {:ok,
      %{
        owner_ref: Process.monitor(owner),
+       managers: MapSet.new(),
        serial: 0,
        principals: %{},
        authorities: %{},
@@ -74,6 +90,21 @@ defmodule PtcRunner.Kernel.MCPOAuth.Store.Memory do
        admissions: %{},
        retirements: %{}
      }}
+  end
+
+  @impl GenServer
+  def handle_call({:register_manager, manager}, _from, state) when is_pid(manager) do
+    if Process.alive?(manager),
+      do: {:reply, :ok, update_in(state.managers, &MapSet.put(&1, manager))},
+      else: {:reply, {:error, :closed}, state}
+  end
+
+  def handle_call(:close, _from, state) do
+    Enum.each(state.managers, fn manager ->
+      if Process.alive?(manager), do: Process.exit(manager, :kill)
+    end)
+
+    {:stop, :normal, :ok, state}
   end
 
   @impl GenServer

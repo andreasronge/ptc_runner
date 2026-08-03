@@ -109,18 +109,18 @@ in a committed project file. A safe provider snapshot records the public
 installation revision and normalized selected policy, never the raw model
 selector or secret.
 
-For local development from a repository checkout, the runtime loads the nearest
-`.env` at startup, so an `env` credential can come from there:
+The command runtime does not ask provider dependencies to load `.env` files.
+Export an `env` credential before invoking the command, or use a shell-local
+environment manager or explicit secret source:
 
 ```console
-cp .env.example .env
-chmod 600 .env
-# Edit .env and set OPENROUTER_API_KEY to the real key.
+export OPENROUTER_API_KEY="$(secret-tool lookup service openrouter)"
+mix ptc.run ptc.json --host-config ptc-host.json
 ```
 
-An already-exported shell variable takes precedence. `.env` is Git-ignored, but
-it is still a plaintext local secret; prefer the shell, `direnv`, or a secret
-manager where appropriate.
+Tools such as `direnv` may populate the process environment before the command
+starts. A `.env` file being Git-ignored does not make it an implicit credential
+source or a safe plaintext secret store.
 
 ## Provider sources
 

@@ -44,6 +44,8 @@ defmodule Mix.Tasks.Ptc.Run do
   """
   use Mix.Task
 
+  alias PtcRunner.Kernel.ApplicationPackage
+  alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.HostConfig
   alias PtcRunner.Kernel.HostInstallation
   alias PtcRunner.Kernel.InstallationCatalog
@@ -52,9 +54,13 @@ defmodule Mix.Tasks.Ptc.Run do
   alias PtcRunner.Kernel.MCPOAuth.Context, as: OAuthContext
   alias PtcRunner.Kernel.MCPOAuth.LoopbackListener
   alias PtcRunner.Kernel.MCPOAuth.Store.Memory
+  alias PtcRunner.Kernel.PreparedRun
+  alias PtcRunner.Kernel.ProviderActiveSession
   alias PtcRunner.Kernel.ProviderRegistry
   alias PtcRunner.Kernel.ProviderRuntimeServices
+  alias PtcRunner.Kernel.ProviderSession
   alias PtcRunner.Kernel.RunBuilder
+  alias PtcRunner.Kernel.RunCoordinator
   alias PtcRunner.Lisp.Format.SymbolRef
 
   @usage "usage: mix ptc.run MANIFEST [--mission PATH | --private-mission PATH] " <>
@@ -64,7 +70,8 @@ defmodule Mix.Tasks.Ptc.Run do
 
   @impl Mix.Task
   def run(args) do
-    Mix.Task.run("app.start")
+    Mix.Task.run("app.config")
+    start_core_application!()
 
     with {opts, [manifest], []} <-
            OptionParser.parse(args,
@@ -85,30 +92,19 @@ defmodule Mix.Tasks.Ptc.Run do
          :ok <- exclusive_destinations(opts),
          :ok <- exclusive_mission_inputs(opts),
          :ok <- check_options(opts),
-         {:ok, registry, host} <- registry(opts) do
+         {:ok, runtime} <- runtime(opts) do
       try do
-        run_opts = run_options(opts)
-
-        result =
-          if Keyword.get(opts, :check, false) do
-            with {:ok, view} <- check(manifest, registry, host, run_opts) do
-              report_check(view)
-            end
-          else
-            with {:ok, result, class} <- run_with_class(manifest, registry, run_opts) do
-              report(result, class, opts)
-            end
-          end
+        result = execute(manifest, opts, runtime)
 
         case result do
           {:error, error} ->
-            Mix.raise("ptc.run failed: #{inspect(error, limit: 10, printable_limit: 1_024)}")
+            raise_failure(error)
 
           completed ->
             completed
         end
       after
-        ProviderRegistry.close(registry)
+        InstallationCatalog.close(runtime.catalog)
       end
     else
       {_opts, _arguments, invalid} when invalid != [] ->
@@ -118,7 +114,82 @@ defmodule Mix.Tasks.Ptc.Run do
         Mix.raise(@usage)
 
       {:error, error} ->
-        Mix.raise("ptc.run failed: #{inspect(error, limit: 10, printable_limit: 1_024)}")
+        raise_failure(error)
+    end
+  end
+
+  defp start_core_application! do
+    case Application.ensure_all_started(:ptc_runner) do
+      {:ok, _started} -> :ok
+      {:error, reason} -> Mix.raise("could not start PtcRunner: #{inspect(reason)}")
+    end
+  end
+
+  defp execute(manifest, opts, runtime) do
+    with {:ok, request} <- request(manifest, runtime.catalog, opts),
+         {:ok, prepared} <- RunCoordinator.prepare(request, runtime.catalog) do
+      try do
+        with :ok <- validate_authorization_targets(prepared, runtime),
+             {:ok, run_opts} <- RunBuilder.preflight_prepared(prepared, run_options(opts)) do
+          execute_prepared(prepared, run_opts, opts, runtime)
+        end
+      after
+        PreparedRun.close(prepared)
+      end
+    end
+  end
+
+  defp execute_prepared(
+         %PreparedRun{provider_declarations: []} = prepared,
+         run_opts,
+         opts,
+         runtime
+       ) do
+    with {:ok, registry} <-
+           ProviderRegistry.new(%{}, installed_limits: runtime.catalog.installed_limits) do
+      try do
+        execute_with_registry(prepared, registry, nil, run_opts, opts, runtime.host)
+      after
+        ProviderRegistry.close(registry)
+      end
+    end
+  end
+
+  defp execute_prepared(prepared, run_opts, opts, runtime) do
+    case ProviderActiveSession.open(prepared, runtime.catalog, runtime.services) do
+      {:ok, session} ->
+        case active_registry(runtime) do
+          {:ok, registry, cleanup} ->
+            try do
+              execute_with_registry(prepared, registry, session, run_opts, opts, runtime.host)
+            after
+              cleanup.()
+            end
+
+          {:error, _reason} = error ->
+            _ = ProviderSession.close(session)
+            error
+        end
+
+      {:error, %CommandDiagnostic{}} = error ->
+        error
+    end
+  end
+
+  defp execute_with_registry(prepared, registry, session, run_opts, opts, host) do
+    if Keyword.get(opts, :check, false) do
+      with {:ok, view} <- check(prepared, registry, session, host, run_opts) do
+        report_check(view)
+      end
+    else
+      result =
+        if session do
+          RunBuilder.run_active_with_class(prepared, registry, session, run_opts)
+        else
+          RunBuilder.run_prepared_with_class(prepared, registry, run_opts)
+        end
+
+      with {:ok, value, class} <- result, do: report(value, class, opts)
     end
   end
 
@@ -147,15 +218,15 @@ defmodule Mix.Tasks.Ptc.Run do
     end
   end
 
-  defp registry(opts) do
+  defp runtime(opts) do
     authorizations = Keyword.get_values(opts, :authorize_mcp)
 
     case {Keyword.get(opts, :host_config), authorizations} do
       {nil, []} ->
         with {:ok, catalog} <- InstallationCatalog.new(),
-             {:ok, services} <- ProviderRuntimeServices.new(),
-             {:ok, registry} <- InstallationCatalog.runtime_registry(catalog, services),
-             do: {:ok, registry, nil}
+             {:ok, services} <-
+               ProviderRuntimeServices.new(provider_application_mode: :command_vm),
+             do: {:ok, %{catalog: catalog, services: services, host: nil, authorizations: []}}
 
       {nil, _requested} ->
         {:error, :authorization_requires_host_config}
@@ -163,33 +234,99 @@ defmodule Mix.Tasks.Ptc.Run do
       {path, requested} ->
         with true <- requested == Enum.uniq(requested),
              {:ok, host} <- HostConfig.load(path),
-             {:ok, memory} <- Memory.start_link(owner: self()),
-             {:ok, store} <- Memory.store(memory),
-             {:ok, authorization_context} <-
+             {:ok, catalog} <- HostInstallation.catalog(host),
+             {:ok, services} <-
+               HostInstallation.runtime_services(host,
+                 provider_application_mode: :command_vm
+               ) do
+          {:ok,
+           %{
+             catalog: catalog,
+             services: services,
+             host: host,
+             authorizations: requested
+           }}
+        else
+          false -> {:error, :duplicate_mcp_authorization}
+          {:error, _reason} = error -> error
+        end
+    end
+  end
+
+  defp active_registry(%{host: nil, catalog: catalog, services: services}) do
+    case InstallationCatalog.runtime_registry(catalog, services) do
+      {:ok, registry} -> {:ok, registry, fn -> ProviderRegistry.close(registry) end}
+      {:error, _reason} = error -> error
+    end
+  end
+
+  defp active_registry(runtime) do
+    if Enum.any?(runtime.catalog.authorities, fn {_name, authority} -> authority != nil end) do
+      active_oauth_registry(runtime)
+    else
+      case InstallationCatalog.runtime_registry(runtime.catalog, runtime.services) do
+        {:ok, registry} -> {:ok, registry, fn -> ProviderRegistry.close(registry) end}
+        {:error, _reason} = error -> error
+      end
+    end
+  end
+
+  defp active_oauth_registry(runtime) do
+    with {:ok, memory} <- Memory.start_link(owner: self()) do
+      result =
+        with {:ok, store} <- Memory.store(memory),
+             {:ok, context} <-
                OAuthContext.new(
                  tenant_id: "local-cli",
                  principal_id: "local-user",
                  store: store
                ),
-             :ok <- authorize_installations(host, authorization_context, requested),
-             {:ok, catalog} <- HostInstallation.catalog(host),
+             :ok <- authorize_installations(runtime.host, context, runtime.authorizations),
              {:ok, services} <-
-               HostInstallation.runtime_services(host,
-                 oauth_mode: {:context_factory, fn -> {:ok, authorization_context} end}
-               ) do
-          try do
-            with {:ok, registry} <-
-                   InstallationCatalog.runtime_registry(catalog, services) do
-              {:ok, registry, host}
-            end
-          after
-            InstallationCatalog.close(catalog)
-          end
-        else
-          false -> {:error, :duplicate_mcp_authorization}
-          {:error, _reason} = error -> error
-          _invalid -> {:error, :invalid_mcp_authorization}
+               HostInstallation.runtime_services(runtime.host,
+                 provider_application_mode: :command_vm,
+                 oauth_mode: {:context_factory, fn -> {:ok, context} end}
+               ),
+             {:ok, registry} <-
+               InstallationCatalog.runtime_registry(runtime.catalog, services) do
+          {:ok, registry,
+           fn ->
+             ProviderRegistry.close(registry)
+             Memory.close(memory)
+           end}
         end
+
+      case result do
+        {:ok, _registry, _cleanup} = success -> success
+        {:error, _reason} = error -> close_memory(memory, error)
+      end
+    end
+  end
+
+  defp close_memory(%Memory{pid: pid}) do
+    if Process.alive?(pid), do: Memory.close(%Memory{pid: pid}), else: :ok
+  end
+
+  defp close_memory(memory, error) do
+    close_memory(memory)
+    error
+  end
+
+  defp validate_authorization_targets(_prepared, %{authorizations: []}), do: :ok
+
+  defp validate_authorization_targets(prepared, runtime) do
+    selected = MapSet.new(prepared.provider_declarations, & &1.name)
+
+    if Enum.all?(runtime.authorizations, fn name ->
+         MapSet.member?(selected, name) and
+           match?(
+             %{source: :mcp, transport: %{oauth: %Authority{}}},
+             Map.get(runtime.host.install, name)
+           )
+       end) do
+      :ok
+    else
+      {:error, :invalid_mcp_authorization}
     end
   end
 
@@ -238,12 +375,46 @@ defmodule Mix.Tasks.Ptc.Run do
 
   defp run_options(opts) do
     opts
-    |> Keyword.drop([:host_config, :authorize_mcp, :check])
-    |> Keyword.put(:result_projection, :json)
+    |> Keyword.drop([
+      :host_config,
+      :authorize_mcp,
+      :check,
+      :mission,
+      :private_mission,
+      :component_override_descriptor
+    ])
   end
 
-  defp check(manifest, registry, host, opts) do
-    with {:ok, built} <- RunBuilder.load_and_build(manifest, registry, opts) do
+  defp request(manifest, catalog, opts) do
+    request_opts =
+      [
+        installed_limits: catalog.installed_limits,
+        result_projection: :json,
+        inspection_capture: Keyword.has_key?(opts, :inspect),
+        input_authority: if(Keyword.has_key?(opts, :private_mission), do: :private, else: :normal)
+      ]
+      |> maybe_request_option(
+        :input,
+        Keyword.get(opts, :mission) || Keyword.get(opts, :private_mission)
+      )
+      |> maybe_request_option(
+        :component_override_descriptor,
+        Keyword.get(opts, :component_override_descriptor)
+      )
+
+    ApplicationPackage.request_directory(manifest, request_opts)
+  end
+
+  defp maybe_request_option(opts, _key, nil), do: opts
+  defp maybe_request_option(opts, key, value), do: Keyword.put(opts, key, value)
+
+  defp check(prepared, registry, session, host, opts) do
+    result =
+      if session,
+        do: RunBuilder.build_active(prepared, registry, session, opts),
+        else: RunBuilder.build_prepared(prepared, registry, opts)
+
+    with {:ok, built} <- result do
       view = resolved_view(built, host)
 
       case RunBuilder.close(built.config) do
@@ -349,8 +520,11 @@ defmodule Mix.Tasks.Ptc.Run do
   defp authorization_mode(%{auth: auth}) when auth in [nil, []], do: "none"
   defp authorization_mode(_transport), do: "static"
 
-  defp run_with_class(manifest, registry, opts),
-    do: RunBuilder.run_with_class(manifest, registry, opts)
+  defp raise_failure(%CommandDiagnostic{phase: :provider_declaration, code: :provider_unknown}),
+    do: Mix.raise("ptc.run failed: :unknown_provider")
+
+  defp raise_failure(error),
+    do: Mix.raise("ptc.run failed: #{inspect(error, limit: 10, printable_limit: 1_024)}")
 
   # A private value never reaches the terminal. Publishing it there would
   # declassify it just as surely as writing it to a normal artifact.

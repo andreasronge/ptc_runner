@@ -14,9 +14,10 @@ defmodule PtcRunner.Kernel.RunBuilder do
   `PtcRunner.Kernel.RunCoordinator` phases 4 and 5 as command frontends, and
   downstream assembly consumes the resulting sealed `PreparedRun` directly.
   Pure option validation completes before that one-way consumption.
-  Provider-bearing preparation remains here until declarative installation
-  descriptors replace builder inspection, but it uses the coordinator's same
-  public-entry validation before any builder inspection.
+  The Mix command also preflights a provider-bearing prepared run, opens its
+  active session, and passes that same session here for runtime assembly. The
+  transitional registry builders remain until acquisition is cut over, but
+  they no longer open a second provider-session owner.
 
   A provider-bearing build remains owned by its build creator until execution
   binds it to a Runner or REPL lifecycle owner. The creator must remain alive
@@ -124,6 +125,123 @@ defmodule PtcRunner.Kernel.RunBuilder do
   end
 
   def build_prepared(_prepared, _registry, _opts), do: {:error, :invalid_prepared_run}
+
+  @doc false
+  @spec preflight_prepared(PreparedRun.t(), keyword()) ::
+          {:ok, keyword()} | {:error, term()}
+  def preflight_prepared(%PreparedRun{} = prepared, opts) when is_list(opts) do
+    with true <- PreparedRun.valid?(prepared),
+         :ok <- validate_build_options(opts),
+         :ok <- validate_inspection_selection(prepared.request, opts),
+         {:ok, anchored_opts} <- anchor_artifact_options(opts),
+         :ok <- preflight_inspection(anchored_opts),
+         :ok <- preflight_artifact_destinations(anchored_opts),
+         :ok <-
+           preflight_trace(
+             prepared.effective_event_policy,
+             prepared.effective_data_class,
+             anchored_opts
+           ),
+         :ok <-
+           preflight_result(
+             prepared.effective_event_policy,
+             prepared.effective_data_class,
+             anchored_opts
+           ) do
+      {:ok, anchored_opts}
+    else
+      false -> {:error, :invalid_prepared_run}
+      {:error, _reason} = error -> error
+    end
+  end
+
+  def preflight_prepared(_prepared, _opts), do: {:error, :invalid_prepared_run}
+
+  @doc false
+  @spec build_active(
+          PreparedRun.t(),
+          ProviderRegistry.t(),
+          ProviderSession.t(),
+          keyword()
+        ) :: {:ok, map()} | {:error, term()}
+  def build_active(
+        %PreparedRun{} = prepared,
+        %ProviderRegistry{} = registry,
+        %ProviderSession{} = session,
+        opts
+      )
+      when is_list(opts) do
+    result =
+      with true <- PreparedRun.active_valid?(prepared),
+           :ok <- validate_registry(registry),
+           true <- ProviderSession.compatible_limits?(session, prepared.request.package.limits),
+           :ok <- validate_build_options(opts),
+           :ok <- validate_installed_limits(prepared.request.package, registry, opts),
+           :ok <- validate_inspection_selection(prepared.request, opts) do
+        build_active_preflighted(prepared, registry, session, opts)
+      else
+        false -> {:error, :invalid_active_run}
+        {:error, _reason} = error -> error
+      end
+
+    case result do
+      {:ok, _built} = success -> success
+      {:error, _reason} = error -> prefer_cleanup_error(error, close_live_session(session))
+    end
+  end
+
+  def build_active(_prepared, _registry, _session, _opts),
+    do: {:error, :invalid_active_run}
+
+  @doc false
+  @spec run_active_with_class(
+          PreparedRun.t(),
+          ProviderRegistry.t(),
+          ProviderSession.t(),
+          keyword()
+        ) :: {:ok, term(), :normal | :private} | {:error, term()}
+  def run_active_with_class(prepared, registry, session, opts) do
+    case build_active(prepared, registry, session, opts) do
+      {:ok, built} ->
+        try do
+          case execute_built(built, opts) do
+            {:ok, result} -> {:ok, result, result_class(built.config.event_sink)}
+            other -> other
+          end
+        after
+          if built.config.inspection_sink, do: InspectionSink.stop(built.config.inspection_sink)
+
+          if Process.alive?(built.config.event_sink.pid),
+            do: EventSink.stop(built.config.event_sink)
+        end
+
+      {:error, _reason} = error ->
+        error
+    end
+  end
+
+  @doc false
+  @spec run_prepared_with_class(PreparedRun.t(), ProviderRegistry.t(), keyword()) ::
+          {:ok, term(), :normal | :private} | {:error, term()}
+  def run_prepared_with_class(prepared, registry, opts) do
+    case build_prepared(prepared, registry, opts) do
+      {:ok, built} ->
+        try do
+          case execute_built(built, opts) do
+            {:ok, result} -> {:ok, result, result_class(built.config.event_sink)}
+            other -> other
+          end
+        after
+          if built.config.inspection_sink, do: InspectionSink.stop(built.config.inspection_sink)
+
+          if Process.alive?(built.config.event_sink.pid),
+            do: EventSink.stop(built.config.event_sink)
+        end
+
+      {:error, _reason} = error ->
+        error
+    end
+  end
 
   defp validate_registry(registry) do
     if ProviderRegistry.valid?(registry),
@@ -260,6 +378,25 @@ defmodule PtcRunner.Kernel.RunBuilder do
       registry,
       opts
     )
+  end
+
+  defp build_active_preflighted(prepared, registry, session, opts) do
+    with {:ok, providers} <-
+           providers(
+             prepared.request.package,
+             registry,
+             provider_input_class(prepared.request.input.authority),
+             opts,
+             session
+           ) do
+      build_with_providers(
+        prepared.request,
+        {prepared.workflow_bundle, prepared.mission_bundle},
+        prepared.entry_source,
+        providers,
+        opts
+      )
+    end
   end
 
   defp build_provider_bearing(request, registry, opts) do
@@ -441,7 +578,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
     end)
   end
 
-  defp providers(manifest, registry, input_class, opts)
+  defp providers(manifest, registry, input_class, opts, session \\ nil)
        when input_class in [:normal, :private_inspection] do
     if provider_specs(manifest) == [] do
       with :ok <- preflight_trace(manifest.events.policy, input_class, opts),
@@ -449,25 +586,34 @@ defmodule PtcRunner.Kernel.RunBuilder do
         {:ok, empty_providers(input_class)}
       end
     else
-      open_provider_session(manifest, registry, input_class, opts)
+      open_provider_session(manifest, registry, input_class, opts, session)
     end
   end
 
-  defp open_provider_session(manifest, registry, input_class, opts) do
+  defp open_provider_session(manifest, registry, input_class, opts, nil) do
     with {:ok, session} <- ProviderSession.start(manifest.limits) do
-      finish_provider_session(manifest, registry, session, input_class, opts)
+      finish_provider_session(manifest, registry, session, input_class, opts, true)
     end
   end
 
-  defp finish_provider_session(manifest, registry, session, input_class, opts) do
+  defp open_provider_session(
+         manifest,
+         registry,
+         input_class,
+         opts,
+         %ProviderSession{} = session
+       ) do
+    finish_provider_session(manifest, registry, session, input_class, opts, false)
+  end
+
+  defp finish_provider_session(manifest, registry, session, input_class, opts, preflight?) do
     result =
       with {:ok, prepared} <- prepare_providers(manifest, registry, session),
            :ok <- validate_provider_dependencies(prepared),
            :ok <- validate_single_workflow_llm(prepared),
            effective_class <- effective_data_class(input_class, prepared),
            :ok <- providers_accept(prepared, effective_class),
-           :ok <- preflight_trace(manifest.events.policy, effective_class, opts),
-           :ok <- preflight_result(manifest.events.policy, effective_class, opts),
+           :ok <- preflight_provider_artifacts(preflight?, manifest, effective_class, opts),
            {:ok, preflighted} <- preflight_providers(prepared) do
         try do
           with {:ok, credentials} <-
@@ -500,6 +646,13 @@ defmodule PtcRunner.Kernel.RunBuilder do
         prefer_cleanup_error(error, ProviderSession.close(session))
     end
   end
+
+  defp preflight_provider_artifacts(true, manifest, effective_class, opts) do
+    with :ok <- preflight_trace(manifest.events.policy, effective_class, opts),
+         do: preflight_result(manifest.events.policy, effective_class, opts)
+  end
+
+  defp preflight_provider_artifacts(false, _manifest, _effective_class, _opts), do: :ok
 
   defp sort_snapshots(snapshots), do: Enum.sort_by(snapshots, &Map.get(&1, "provider", ""))
 
@@ -768,6 +921,10 @@ defmodule PtcRunner.Kernel.RunBuilder do
 
   defp close_provider_session(nil), do: :ok
   defp close_provider_session(session), do: ProviderSession.close(session)
+
+  defp close_live_session(%ProviderSession{pid: pid} = session) do
+    if Process.alive?(pid), do: ProviderSession.close(session), else: :ok
+  end
 
   defp empty_providers(data_class) do
     %{

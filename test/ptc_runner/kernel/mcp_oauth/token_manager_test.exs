@@ -34,6 +34,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManagerTest do
     {:ok,
      authority: authority,
      context: context,
+     memory: memory,
      store: store,
      epoch: claims[authority.installation_id],
      key: key}
@@ -755,6 +756,33 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManagerTest do
     Agent.update(persist?, fn _failed -> true end)
 
     assert_receive {:DOWN, ^manager_ref, :process, _pid, :normal}, 2_000
+  end
+
+  test "closing an ephemeral store terminates its adopted retry managers", context do
+    {:ok, _grant} = seed_grant(context.store, context.key, 60_000)
+    parent = self()
+
+    interceptor = fn
+      {:mark_access_rejected, _key, _generation}, _timeout ->
+        send(parent, :terminal_persistence_attempt)
+        {:return, {:error, :store_error}}
+
+      _operation, _timeout ->
+        :delegate
+    end
+
+    manager = manager_with_interceptor(context, interceptor)
+    manager_ref = Process.monitor(manager.pid)
+    deadline = System.monotonic_time(:millisecond) + 1_000
+
+    assert {:error, :store_error} = TokenManager.reject(manager, 1, deadline)
+    assert_receive :terminal_persistence_attempt
+    assert :ok = ManagerCleanup.adopt(manager)
+    assert_receive :terminal_persistence_attempt
+    assert Process.alive?(manager.pid)
+
+    assert :ok = Memory.close(context.memory)
+    assert_receive {:DOWN, ^manager_ref, :process, _pid, :killed}, 1_000
   end
 
   test "registration-controller loss does not block persistence handoff", context do

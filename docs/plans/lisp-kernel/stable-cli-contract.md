@@ -75,6 +75,8 @@ Completed commits on `codex/stable-cli-contract`:
 | 5c1 | `804582d9` | One provider-session owner with scoped, bounded LIFO cleanup. |
 | 5c2a | `5ee24051` | Bounded scoped process-root admission and terminal handoff. |
 | 5c2b | `c46a7d2d` | Shipped process and port roots use scoped registration. |
+| 5d1 | `4f6981c8` | Active selection validation runs in bounded registrar scopes. |
+| 5d2a | `3a1ced9b` | Active sessions admit selected optional applications. |
 
 The first local implementation of slice 5, `d38d0bef`, is intentionally not a
 delivery milestone. It demonstrated useful failure cases but combined remote
@@ -563,18 +565,27 @@ Delivery is intentionally split into review-sized commits:
 - 5c2b (complete): route shipped process and port starts through the scoped
   registrar;
 - 5d1 (complete): bounded active selection validation;
-- 5d2a (current): optional application admission inside the new active-session
+- 5d2a (complete): optional application admission inside the new active-session
   boundary;
-- 5d2b: atomically cut the command frontend over to that boundary and remove
-  optional provider applications from the core OTP startup set; and
+- 5d2b (current): atomically cut the command frontend over to that boundary
+  and remove optional provider applications from the core OTP startup set; and
 - 5d3: bounded credential resolution.
 
-The 5d2a foundation does not change the legacy `RunBuilder` command path. Its
-runtime-services mode is consumed only by `ProviderActiveSession`. Removing
-`:req_llm` from generated OTP application metadata is intentionally deferred
-to 5d2b, because doing so before the command cutover would strand the legacy
-provider path without its eagerly started application. The cutover and metadata
-removal must land together; no intermediate commit may claim CLI enforcement.
+Slice 5d2b keeps the Mix command's existing option surface but replaces its
+provider-bearing runtime path atomically: destination preflight completes on
+the inert prepared run, `ProviderActiveSession` marks activity and admits
+applications, and `RunBuilder` assembles through that same session. The core
+OTP application no longer infers `:req_llm`; the dependency remains available
+for explicit admission and semantic-revision accounting. Credential resolution
+and provider acquisition still use the transitional runtime registry and are
+the only work intentionally left for 5d3 and slice 6.
+
+The Mix frontend loads application configuration but starts only the PtcRunner
+core before admission, so an ordinary downstream `:req_llm` dependency cannot
+be inherited accidentally through the caller application. Its ephemeral OAuth
+store records every token manager created from it and terminates any adopted
+retry manager before the store itself stops; retry ownership therefore never
+outlives the backing store.
 
 - replace the unpushed draft with the minimal `ProviderSession`, `Deadline`,
   cleanup stack, provisional root registrar, and runtime-services types;
@@ -596,12 +607,16 @@ application-mode, and reverse-close integration tests pass without any
 remote-store or restart-ledger modules. A prestarted application is rejected in
 `:command_vm`; a deliberately hanging application documents the explicit
 bootstrap limitation rather than asserting a false timeout. Provider-free core
-startup leaves every optional provider application stopped. Catalog
+startup leaves every optional provider application stopped, including from a
+downstream Mix project that declares `:req_llm` normally. Catalog
 construction and every provider-free command create no provider-owned process.
 A provider-backed startup regression places a unique sentinel credential in
 `.env`, omits it from the explicit environment and resolver, and proves that
 neither `:req_llm` nor `:llm_db` reads or exposes it after both `load_dotenv`
 flags are disabled and the applications start.
+Forced OAuth terminal-persistence failure proves closing the command's
+ephemeral store terminates an adopted retry manager rather than stranding it
+against a dead store.
 A hung closer proves the one cleanup cutoff terminates remaining registered
 process/port roots without resetting the budget, while every later callback is
 still attempted in reverse order for its reserved share. A builder that starts

@@ -137,64 +137,11 @@ defmodule Mix.Tasks.Ptc.RunTest do
 
   @tag :tmp_dir
   test "--check reports a host-installed workflow LLM without invoking it", %{tmp_dir: dir} do
-    File.write!(
-      Path.join(dir, "main.clj"),
-      ~S|(ns main) (defn run [input] (return input))|
-    )
-
-    manifest = %{
-      "version" => 1,
-      "workflow" => %{
-        "components" => [%{"id" => "main", "path" => "main.clj"}],
-        "entry" => "main/run"
-      },
-      "input" => %{"value" => %{}},
-      "providers" => %{"workflow" => [%{"name" => "deepseek"}]}
-    }
-
-    host = %{
-      "credentials" => %{"openrouter_key" => %{"literal" => "test-only-secret"}},
-      "install" => %{
-        "deepseek" => %{
-          "source" => "llm",
-          "installation_revision" => "check-llm-v1",
-          "model" => "openrouter:deepseek/deepseek-v4-flash",
-          "credential" => "openrouter_key"
-        },
-        "unused-oauth" => %{
-          "source" => "mcp",
-          "installation_revision" => "check-workspace-v1",
-          "transport" => %{
-            "type" => "streamable_http",
-            "endpoint" => "https://mcp.example/mcp",
-            "oauth" => %{
-              "installation_id" => "unused-oauth",
-              "issuer" => "https://auth.example",
-              "scope_ceiling" => ["read"],
-              "default_scopes" => ["read"],
-              "client" => %{
-                "registration" => "pre_registered",
-                "client_id" => "unused-client",
-                "token_endpoint_auth_method" => "none",
-                "grant_types" => ["authorization_code"],
-                "loopback_redirect" => %{
-                  "host" => "127.0.0.1",
-                  "path" => "/callback"
-                }
-              }
-            }
-          },
-          "tools" => %{
-            "read" => %{"as" => "unused.read", "effect" => "read"}
-          }
-        }
-      }
-    }
-
-    manifest_path = Path.join(dir, "ptc.json")
-    host_path = Path.join(dir, "host.json")
-    File.write!(manifest_path, Jason.encode!(manifest))
-    File.write!(host_path, Jason.encode!(host))
+    restore_provider_applications_on_exit()
+    stop_provider_applications()
+    Application.put_env(:req_llm, :load_dotenv, true, persistent: true)
+    Application.put_env(:llm_db, :load_dotenv, true, persistent: true)
+    {manifest_path, host_path} = write_llm_check_fixture(dir)
 
     output =
       capture_io(fn ->
@@ -207,6 +154,35 @@ defmodule Mix.Tasks.Ptc.RunTest do
     assert output =~ "snapshot "
     refute output =~ "openrouter:"
     refute output =~ "test-only-secret"
+    assert Application.get_env(:req_llm, :load_dotenv) == false
+    assert Application.get_env(:llm_db, :load_dotenv) == false
+    assert :req_llm in started_applications()
+    assert :llm_db in started_applications()
+  end
+
+  @tag :tmp_dir
+  test "provider destination preflight completes before application admission", %{tmp_dir: dir} do
+    restore_provider_applications_on_exit()
+    stop_provider_applications()
+    {manifest_path, host_path} = write_llm_check_fixture(dir)
+    occupied = Path.join(dir, "occupied.json")
+    File.write!(occupied, "occupied")
+
+    Mix.Task.reenable("ptc.run")
+
+    assert_raise Mix.Error, ~r/result_destination_exists/, fn ->
+      Run.run([manifest_path, "--host-config", host_path, "--output", occupied])
+    end
+
+    refute :req_llm in started_applications()
+    refute :llm_db in started_applications()
+  end
+
+  test "the core application does not infer optional provider applications" do
+    applications = Application.spec(:ptc_runner, :applications)
+
+    refute :req_llm in applications
+    refute :llm_db in applications
   end
 
   @tag :tmp_dir
@@ -767,5 +743,91 @@ defmodule Mix.Tasks.Ptc.RunTest do
     path = Path.join(dir, "ptc.json")
     File.write!(path, Jason.encode!(manifest))
     path
+  end
+
+  defp write_llm_check_fixture(dir) do
+    File.write!(
+      Path.join(dir, "main.clj"),
+      ~S|(ns main) (defn run [input] (return input))|
+    )
+
+    manifest = %{
+      "version" => 1,
+      "workflow" => %{
+        "components" => [%{"id" => "main", "path" => "main.clj"}],
+        "entry" => "main/run"
+      },
+      "input" => %{"value" => %{}},
+      "providers" => %{"workflow" => [%{"name" => "deepseek"}]}
+    }
+
+    host = %{
+      "credentials" => %{"openrouter_key" => %{"literal" => "test-only-secret"}},
+      "install" => %{
+        "deepseek" => %{
+          "source" => "llm",
+          "installation_revision" => "check-llm-v1",
+          "model" => "openrouter:deepseek/deepseek-v4-flash",
+          "credential" => "openrouter_key"
+        },
+        "unused-oauth" => %{
+          "source" => "mcp",
+          "installation_revision" => "check-workspace-v1",
+          "transport" => %{
+            "type" => "streamable_http",
+            "endpoint" => "https://mcp.example/mcp",
+            "oauth" => %{
+              "installation_id" => "unused-oauth",
+              "issuer" => "https://auth.example",
+              "scope_ceiling" => ["read"],
+              "default_scopes" => ["read"],
+              "client" => %{
+                "registration" => "pre_registered",
+                "client_id" => "unused-client",
+                "token_endpoint_auth_method" => "none",
+                "grant_types" => ["authorization_code"],
+                "loopback_redirect" => %{
+                  "host" => "127.0.0.1",
+                  "path" => "/callback"
+                }
+              }
+            }
+          },
+          "tools" => %{"read" => %{"as" => "unused.read", "effect" => "read"}}
+        }
+      }
+    }
+
+    manifest_path = Path.join(dir, "ptc.json")
+    host_path = Path.join(dir, "host.json")
+    File.write!(manifest_path, Jason.encode!(manifest))
+    File.write!(host_path, Jason.encode!(host))
+    {manifest_path, host_path}
+  end
+
+  defp started_applications,
+    do: Application.started_applications() |> Enum.map(&elem(&1, 0))
+
+  defp stop_provider_applications do
+    running = started_applications()
+
+    if :req_llm in running, do: Application.stop(:req_llm)
+    if :llm_db in running, do: Application.stop(:llm_db)
+  end
+
+  defp restore_provider_applications_on_exit do
+    initially_running = MapSet.new(started_applications())
+
+    on_exit(fn ->
+      stop_provider_applications()
+      Application.put_env(:req_llm, :load_dotenv, false, persistent: true)
+      Application.put_env(:llm_db, :load_dotenv, false, persistent: true)
+
+      if MapSet.member?(initially_running, :llm_db),
+        do: Application.ensure_all_started(:llm_db)
+
+      if MapSet.member?(initially_running, :req_llm),
+        do: Application.ensure_all_started(:req_llm)
+    end)
   end
 end

@@ -244,8 +244,8 @@ defmodule Mix.Tasks.Ptc.GenSemanticRevision do
 
   defp production_dependency?(opts, direct?) do
     only = Keyword.get(opts, :only)
-    runtime? = Keyword.get(opts, :runtime, true)
     optional? = Keyword.get(opts, :optional, false)
+    runtime? = Keyword.get(opts, :runtime, true) or (direct? and optional?)
 
     runtime? and (is_nil(only) or :prod in List.wrap(only)) and
       (direct? or not optional?)
