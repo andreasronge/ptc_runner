@@ -53,6 +53,18 @@ if Code.ensure_loaded?(ReqLLM) do
       :ok
     end
 
+    # Only the ReqLLM route needs the :req_llm application; `ollama:` and
+    # `openai-compat:` models are plain Req calls that work without it. Routing
+    # through parse_provider/1 keeps this answer from drifting from generate_text/3.
+    @impl true
+    @spec provider_application(String.t()) :: :req_llm | nil
+    def provider_application(model) do
+      case parse_provider(model) do
+        {:req_llm, _model_id} -> :req_llm
+        _direct_http -> nil
+      end
+    end
+
     @impl true
     @spec call(String.t(), map()) :: {:ok, map()} | {:error, term()}
     def call(model, %{schema: schema} = req) when is_map(schema) do

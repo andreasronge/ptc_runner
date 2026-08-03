@@ -839,6 +839,119 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
     assert prepared.accepts_data == [:private_inspection]
   end
 
+  @tag :tmp_dir
+  test "an unstarted provider application is a host misconfiguration, not an outage", %{
+    tmp_dir: dir
+  } do
+    previous = %{
+      adapter: Application.get_env(:ptc_runner, :llm_adapter),
+      owner: Application.get_env(:ptc_runner, :host_llm_test_owner),
+      result: Application.get_env(:ptc_runner, :host_llm_test_result),
+      application: Application.get_env(:ptc_runner, :host_llm_test_provider_application)
+    }
+
+    Application.put_env(:ptc_runner, :llm_adapter, PtcRunner.TestSupport.HostLLMAdapter)
+    Application.put_env(:ptc_runner, :host_llm_test_owner, self())
+    Application.put_env(:ptc_runner, :host_llm_test_result, {:error, :transport_boom})
+
+    # An e2e setup_all may have started :req_llm and left it running, which would
+    # quietly dissolve this test's premise. Establish the stopped state rather
+    # than assuming it, and put it back afterwards.
+    req_llm_running? = Enum.any?(Application.started_applications(), &(elem(&1, 0) == :req_llm))
+    if req_llm_running?, do: Application.stop(:req_llm)
+
+    on_exit(fn ->
+      if req_llm_running?, do: Application.ensure_all_started(:req_llm)
+    end)
+
+    on_exit(fn ->
+      restore_env(:llm_adapter, previous.adapter)
+      restore_env(:host_llm_test_owner, previous.owner)
+      restore_env(:host_llm_test_result, previous.result)
+      restore_env(:host_llm_test_provider_application, previous.application)
+    end)
+
+    config = %{
+      "credentials" => %{"key" => %{"literal" => "test-llm-secret"}},
+      "install" => %{
+        "deepseek" => %{
+          "source" => "llm",
+          "model" => "openrouter:deepseek/deepseek-v4-flash",
+          "credential" => "key",
+          "installation_revision" => "unstarted-v1"
+        }
+      }
+    }
+
+    host = load_host(dir, config)
+    assert {:ok, catalog} = HostInstallation.catalog(host)
+    assert {:ok, registry} = HostInstallation.runtime_registry(host, catalog)
+    request = %{"messages" => [%{"role" => "user", "content" => "hi"}]}
+
+    build_capability = fn ->
+      assert {:ok, %{capabilities: [capability]}} =
+               ProviderRegistry.build(registry, "deepseek", %{}, context(dir, :workflow))
+
+      capability
+    end
+
+    # An adapter whose backing application is not running: retrying cannot start
+    # an OTP application, so the failure must name the real cause and be final.
+    Application.put_env(
+      :ptc_runner,
+      :host_llm_test_provider_application,
+      :req_llm
+    )
+
+    assert {:error, %PtcRunner.Kernel.ProviderError{} = stopped} =
+             build_capability.().callback.(request)
+
+    assert stopped.kind == :internal
+    assert stopped.retryable? == false
+    assert stopped.details =~ "req_llm"
+
+    # A route declaring no backing application keeps the retryable transport
+    # classification, so the check is not blanket.
+    Application.put_env(:ptc_runner, :host_llm_test_provider_application, nil)
+
+    assert {:error, %PtcRunner.Kernel.ProviderError{} = running} =
+             build_capability.().callback.(request)
+
+    assert running.kind == :unavailable
+    assert running.retryable? == true
+
+    # An application started and later stopped leaves the adapter raising rather
+    # than returning an error tuple. The check must precede the call, or the
+    # raise unwinds past it and the dispatcher reports a retryable failure.
+    Application.put_env(:ptc_runner, :host_llm_test_raise, true)
+    on_exit(fn -> Application.delete_env(:ptc_runner, :host_llm_test_raise) end)
+
+    # Drop the probe messages the two invocations above produced, so the
+    # refutation below can only observe a fresh adapter call.
+    drain = fn drain ->
+      receive do
+        {:host_llm_request, _model, _request} -> drain.(drain)
+      after
+        0 -> :ok
+      end
+    end
+
+    drain.(drain)
+
+    Application.put_env(
+      :ptc_runner,
+      :host_llm_test_provider_application,
+      :req_llm
+    )
+
+    assert {:error, %PtcRunner.Kernel.ProviderError{} = raised} =
+             build_capability.().callback.(request)
+
+    assert raised.kind == :internal
+    assert raised.retryable? == false
+    refute_receive {:host_llm_request, _model, _request}
+  end
+
   defp context(_directory, destination) do
     {:ok, limits} = Limits.new()
 

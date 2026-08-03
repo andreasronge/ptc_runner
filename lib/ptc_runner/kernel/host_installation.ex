@@ -46,6 +46,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
   alias PtcRunner.Kernel.MCPOAuth.TokenManager
   alias PtcRunner.Kernel.MCPSource
   alias PtcRunner.Kernel.ProviderDescriptor
+  alias PtcRunner.Kernel.ProviderError
   alias PtcRunner.Kernel.ProviderRegistry
   alias PtcRunner.Kernel.ProviderRuntimeServices
   alias PtcRunner.Kernel.ProviderSnapshot
@@ -153,6 +154,14 @@ defmodule PtcRunner.Kernel.HostInstallation do
     end
   end
 
+  # Deliberately static. Catalog construction is an inert phase whose builder is
+  # `inactive_runtime_builder/2`; asking the adapter here would execute
+  # configurable code, and a raising registry or callback would escape as an
+  # exception rather than `{:error, :invalid_host_installation}`. The cost is
+  # that a direct `ollama:`/`openai-compat:` route is still admitted against
+  # :req_llm, which is the long-standing behaviour rather than a regression. The
+  # request-time check in `provider_application_ready/2` is route-aware, so the
+  # error a caller actually sees is correct.
   defp maybe_provider_application(implementation, %{source: :llm}) do
     if Application.get_env(
          :ptc_runner,
@@ -1113,7 +1122,11 @@ defmodule PtcRunner.Kernel.HostInstallation do
          {:ok, capability} <-
            LLMCapability.new(
              requester: fn request ->
-               requester.(ProviderRegistry.adapter_request(request))
+               with :ok <- provider_application_ready(adapter, model) do
+                 request
+                 |> ProviderRegistry.adapter_request()
+                 |> requester.()
+               end
              end,
              max_request_bytes: selected.max_request_bytes,
              max_response_bytes: selected.max_response_bytes
@@ -1132,6 +1145,46 @@ defmodule PtcRunner.Kernel.HostInstallation do
     end
   rescue
     _exception -> {:error, :invalid_llm_provider}
+  end
+
+  # The core no longer starts an adapter's backing application on a host's
+  # behalf; a run admits it through ProviderApplicationGate. An embedding host
+  # that drives the registry directly can reach a request with that application
+  # still stopped, where the failure would otherwise read as a retryable
+  # `:unavailable` provider outage. Retrying cannot start an OTP application, so
+  # name the real cause and mark it final.
+  #
+  # This is checked BEFORE invoking the adapter rather than by classifying its
+  # result: an application that was started and later stopped leaves the adapter
+  # raising (its registry is gone) instead of returning an error tuple, and a
+  # raise would unwind straight past any post-hoc classification.
+  defp provider_application_ready(adapter, model) do
+    case provider_application(adapter, model) do
+      nil ->
+        :ok
+
+      application ->
+        if Enum.any?(Application.started_applications(), &(elem(&1, 0) == application)) do
+          :ok
+        else
+          {:error,
+           ProviderError.new(
+             :internal,
+             "the #{application} provider application is not started; " <>
+               "start it before building this provider, or run through the " <>
+               "prepared-run path that admits it",
+             retryable?: false
+           )}
+        end
+    end
+  end
+
+  # `adapter` is always the module resolved by PtcRunner.LLM.adapter!/0, so no
+  # non-atom clause is reachable here.
+  defp provider_application(adapter, model) when is_atom(adapter) do
+    if Code.ensure_loaded?(adapter) and function_exported?(adapter, :provider_application, 1),
+      do: adapter.provider_application(model),
+      else: nil
   end
 
   defp acquire_llm_replay(host, installation, selected, context) do

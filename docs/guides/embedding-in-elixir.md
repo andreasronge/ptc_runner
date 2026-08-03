@@ -82,6 +82,44 @@ mismatch by default. Trusted embedding may deliberately replace that authority
 for one construction only by supplying the same explicit `:installed_limits`
 to both package acquisition and `RunBuilder.build/3`.
 
+## Start a provider's backing application
+
+The core application deliberately starts no provider dependency on your behalf,
+so depending on `ptc_runner` never starts `req_llm` or `llm_db` inside your
+release. A run admits the application it needs through
+`PtcRunner.Kernel.ProviderApplicationGate`, which `mix ptc.run` reaches by way
+of `ProviderActiveSession.open/3`.
+
+An embedded frontend that drives `ProviderRegistry` and `RunBuilder` directly
+does not pass through that gate, so it owns the admission itself:
+
+```elixir
+Application.put_env(:req_llm, :load_dotenv, false, persistent: true)
+Application.put_env(:llm_db, :load_dotenv, false, persistent: true)
+{:ok, _started} = Application.ensure_all_started(:req_llm)
+```
+
+Set `load_dotenv` to `false` first if the host resolves credentials itself; that
+is what the command-owned gate branch does before starting the application, and
+it keeps the dependency from reading a `.env` the host did not choose.
+
+A request issued while that application is stopped fails with a non-retryable
+`:internal` provider error naming the application, rather than a retryable
+transport outage, because retrying cannot start an OTP application. Adapters
+declare what they need through the optional `provider_application/1` callback on
+`PtcRunner.LLM`, which receives the resolved model and answers `:req_llm` or
+`nil`: one adapter may route some models through a dependency and serve others
+directly over HTTP, and only the former fail this way.
+
+Run admission is deliberately coarser. Catalog construction is inert and invokes
+no provider implementation, so it admits every shipped LLM installation against
+`:req_llm` regardless of route. A host-owned run therefore still expects that
+application even for a direct `ollama:` or `openai-compat:` model.
+
+Credential loading is decided separately. `mix ptc.run` reads the nearest `.env`
+whenever a selected LLM installation declares an `env` credential, including for
+direct routes that need no backing application at all.
+
 ## Install custom providers
 
 Custom provider builders are trusted Elixir functions registered through

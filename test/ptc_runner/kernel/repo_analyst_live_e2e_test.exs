@@ -19,6 +19,7 @@ defmodule PtcRunner.Kernel.RepoAnalystLiveE2ETest do
   alias PtcRunner.Kernel.InspectionArtifact
   alias PtcRunner.Kernel.RunBuilder
   alias PtcRunner.Kernel.TraceLog
+  alias PtcRunner.TestSupport.LLMSupport
 
   @root Path.expand("../../..", __DIR__)
   @host_template Path.join(@root, "repo-analyst.host.json")
@@ -33,6 +34,7 @@ defmodule PtcRunner.Kernel.RepoAnalystLiveE2ETest do
 
   setup_all do
     :ok = PtcRunner.Dotenv.load()
+    :ok = LLMSupport.admit_provider_application!()
     assert System.get_env("OPENROUTER_API_KEY"), "OPENROUTER_API_KEY is not configured"
     :ok
   end
