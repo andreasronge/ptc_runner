@@ -843,6 +843,32 @@ defmodule PtcRunner.Kernel.TraceCapabilityTest do
   end
 
   @tag :tmp_dir
+  test "canonical validation rejects malformed source-check usage counts", %{
+    tmp_dir: directory
+  } do
+    invalid_usages = [
+      "invalid",
+      [],
+      %{"subordinate_source_checks" => -1},
+      %{"subordinate_source_checks" => "1"}
+    ]
+
+    for {usage, index} <- Enum.with_index(invalid_usages) do
+      path = Path.join(directory, "invalid-usage-#{index}.jsonl")
+
+      events = [
+        decoded_event("invalid-usage-#{index}", 1, "run-started"),
+        decoded_event("invalid-usage-#{index}", 2, "run-stopped", %{"usage" => usage})
+      ]
+
+      File.write!(path, Enum.map_join(events, "", &(Jason.encode!(&1) <> "\n")))
+      {:ok, trace_log} = TraceLog.new(source: {:file, path})
+
+      assert {:error, :malformed_source} = TraceLog.query(trace_log, :list_runs, %{})
+    end
+  end
+
+  @tag :tmp_dir
   test "timestamp filters compare instants rather than timestamp spelling", %{tmp_dir: directory} do
     path = Path.join(directory, "timestamp.jsonl")
     event = %{decoded_event("time", 1, "run-started") | "timestamp" => "2026-07-12T12:00:00.1Z"}

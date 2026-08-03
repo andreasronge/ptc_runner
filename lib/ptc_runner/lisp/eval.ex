@@ -706,6 +706,7 @@ defmodule PtcRunner.Lisp.Eval do
 
             origin = EvalContext.current_origin(eval_ctx2)
             private_tool? = Map.get(tool_meta, :visibility) == :private
+            ledger_arguments = Map.get(tool_meta, :ledger_arguments, :full)
 
             case prepare_tool_args(args_map, tool_meta, tool_name_str) do
               {:ok, prepared_args} ->
@@ -716,7 +717,8 @@ defmodule PtcRunner.Lisp.Eval do
                   eval_ctx2,
                   cacheable?,
                   origin,
-                  private_tool?
+                  private_tool?,
+                  ledger_arguments
                 )
 
               {:error, _reason} = error ->
@@ -1414,7 +1416,8 @@ defmodule PtcRunner.Lisp.Eval do
          eval_ctx,
          cacheable?,
          origin,
-         private_tool?
+         private_tool?,
+         ledger_arguments
        ) do
     record_tool_call_inner(
       tool_name,
@@ -1423,7 +1426,8 @@ defmodule PtcRunner.Lisp.Eval do
       eval_ctx,
       cacheable?,
       origin,
-      private_tool?
+      private_tool?,
+      ledger_arguments
     )
   end
 
@@ -1434,7 +1438,8 @@ defmodule PtcRunner.Lisp.Eval do
          eval_ctx,
          cacheable?,
          origin,
-         private_tool?
+         private_tool?,
+         ledger_arguments
        ) do
     # Only compute the canonical cache key when the call
     # is actually cacheable. Avoids the cost of canonicalization for
@@ -1448,7 +1453,7 @@ defmodule PtcRunner.Lisp.Eval do
       tool_call =
         %{
           name: tool_name,
-          args: ledger_tool_args(args_map, private_tool?),
+          args: ledger_tool_args(args_map, private_tool?, ledger_arguments),
           result: ledger_tool_result(cached.result, private_tool?),
           error: nil,
           timestamp: DateTime.utc_now(),
@@ -1485,7 +1490,7 @@ defmodule PtcRunner.Lisp.Eval do
             cacheable?,
             cache_key,
             origin,
-            private_tool?
+            {private_tool?, ledger_arguments}
           )
       end
     end
@@ -1499,7 +1504,7 @@ defmodule PtcRunner.Lisp.Eval do
          cacheable?,
          cache_key,
          origin,
-         private_tool?
+         {private_tool?, ledger_arguments}
        ) do
     :ok = EvalContext.record_tool_activity(eval_ctx)
     start_time = System.monotonic_time(:millisecond)
@@ -1547,7 +1552,7 @@ defmodule PtcRunner.Lisp.Eval do
     tool_call =
       %{
         name: tool_name,
-        args: ledger_tool_args(args_map, private_tool?),
+        args: ledger_tool_args(args_map, private_tool?, ledger_arguments),
         result: ledger_tool_result(result, private_tool?),
         error: ledger_tool_error(error, tool_name, origin),
         timestamp: timestamp,
@@ -1666,8 +1671,16 @@ defmodule PtcRunner.Lisp.Eval do
   defp maybe_put_private_tool(tool_call, true), do: Map.put(tool_call, :private, true)
   defp maybe_put_private_tool(tool_call, false), do: tool_call
 
-  defp ledger_tool_args(args, false), do: args
-  defp ledger_tool_args(args, true), do: redact_source_args(args)
+  defp ledger_tool_args(args, true, _projection), do: redact_source_args(args)
+  defp ledger_tool_args(args, false, :full), do: args
+
+  defp ledger_tool_args(args, false, projection) when is_function(projection, 1) do
+    projection.(args)
+  rescue
+    _exception -> %{"redacted" => true}
+  catch
+    _kind, _reason -> %{"redacted" => true}
+  end
 
   defp ledger_tool_result(result, false), do: result
   defp ledger_tool_result(result, true), do: redact_source_args(result)

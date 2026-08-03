@@ -41,7 +41,6 @@ defmodule PtcRunner.Kernel.ReplSession do
   alias PtcRunner.Lisp
   alias PtcRunner.Lisp.Result, as: Native
   alias PtcRunner.Lisp.RetainedSize
-  alias PtcRunner.Lisp.TrustedTool
 
   @access_table_key {__MODULE__, :access_table}
   @maximum_counter 4_294_967_295
@@ -561,6 +560,21 @@ defmodule PtcRunner.Kernel.ReplSession do
       )
     )
     |> Map.put(
+      "kernel-check-source",
+      RuntimeTools.instrument(
+        session.state,
+        session.config.event_sink,
+        :workflow,
+        "kernel-check-source",
+        RuntimeTools.kernel_check_source(
+          session.state,
+          session.config.mission_environment,
+          session.config.limits,
+          session.config.event_sink
+        )
+      )
+    )
+    |> Map.put(
       "kernel-mission-inventory",
       RuntimeTools.instrument(
         session.state,
@@ -596,7 +610,7 @@ defmodule PtcRunner.Kernel.ReplSession do
         RuntimeTools.result_contract(session.config.result_contract)
       )
     )
-    |> Map.new(fn {name, callback} -> {name, %TrustedTool{function: callback}} end)
+    |> RuntimeTools.trusted_tools(session.config.limits)
   end
 
   defp finish_evaluation(

@@ -28,9 +28,10 @@ defmodule PtcRunner.Lisp.Eval.Context do
   `:result_truncated`. Only the LEDGER copy is bounded — the value returned to
   the program and any evaluation-local `effects.tool_cache` entry keep the full
   result (they are built separately in `record_tool_call`). `:args` is left
-  intact (it is tiny in the fold case and later effect consumers need the raw
-  map for capability identity and canonical argument hashing), as are
-  `:child_trace_id`/`:child_step`.
+  intact by default because later effect consumers may need the raw map for
+  capability identity and canonical argument hashing. A trusted tool may
+  instead install an explicit ledger-only argument projection for sensitive
+  boundaries. `:child_trace_id`/`:child_step` remain intact.
   """
 
   alias PtcRunner.Lisp.Eval.Capture
@@ -403,10 +404,9 @@ defmodule PtcRunner.Lisp.Eval.Context do
 
   # Bound the LEDGER copy of :result only. Preserves every other field,
   # including a nil :result (failed call), :child_trace_id / :child_step
-  # (trace-hierarchy metadata), and — critically — the raw :args map.
-  # `:args` is NOT truncated: effect consumers read it to identify the
-  # capability and compute a canonical arguments hash, and arguments are small
-  # in the paginated-fold use case.
+  # (trace-hierarchy metadata), and the already-selected :args ledger value.
+  # Ordinary tools retain raw arguments; trusted tools may have projected them
+  # before this retention boundary.
   # Small results pass through identically so existing entries are byte-for-
   # byte unchanged.
   defp compact_ledger_entry(%{result: result} = tool_call, cap)

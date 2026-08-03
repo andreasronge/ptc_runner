@@ -25,6 +25,7 @@ defmodule PtcRunner.Kernel.LimitCatalogTest do
     {"run_duration_ms", :run_duration_ms, 30_000, 300_000},
     {"subordinate_evaluations", :subordinate_evaluations, 16, 16},
     {"subordinate_source_bytes", :subordinate_source_bytes, 131_072, 131_072},
+    {"subordinate_source_checks", :subordinate_source_checks, 16, 16},
     {"terminal_result_bytes", :terminal_result_bytes, 1_000_000, 1_000_000},
     {"workflow_capability_calls", :workflow_capability_calls, 64, 64},
     {"workflow_capability_calls_per_name", :workflow_capability_calls_per_name, 16, 16},

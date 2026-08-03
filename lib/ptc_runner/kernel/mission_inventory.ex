@@ -312,6 +312,7 @@ defmodule PtcRunner.Kernel.MissionInventory do
      [
        {"evaluation_timeout_ms", limits.evaluation_timeout_ms},
        {"subordinate_source_bytes", limits.subordinate_source_bytes},
+       {"subordinate_source_checks", limits.subordinate_source_checks},
        {"mission_capability_calls", limits.mission_capability_calls},
        {"mission_capability_calls_per_name", limits.mission_capability_calls_per_name},
        {"capability_argument_bytes", limits.capability_argument_bytes},

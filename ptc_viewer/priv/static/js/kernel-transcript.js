@@ -46,7 +46,7 @@ const LLM_SANITIZED_NOTE =
   'request or provider response.';
 
 const RESERVED_CAPABILITIES = new Set([
-  'kernel-eval', 'kernel-mission-inventory', 'kernel-mission-model-context',
+  'kernel-check-source', 'kernel-eval', 'kernel-mission-inventory', 'kernel-mission-model-context',
   'runtime-usage', 'runtime-remaining', 'cap-list', 'cap-describe', 'workflow-annotate'
 ]);
 

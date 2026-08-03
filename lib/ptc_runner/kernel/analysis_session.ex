@@ -584,6 +584,11 @@ defmodule PtcRunner.Kernel.AnalysisSession do
         limit: limits.subordinate_evaluations,
         remaining: max(limits.subordinate_evaluations - usage.subordinate_evaluations, 0)
       },
+      source_checks: %{
+        used: usage.subordinate_source_checks,
+        limit: limits.subordinate_source_checks,
+        remaining: max(limits.subordinate_source_checks - usage.subordinate_source_checks, 0)
+      },
       mission_calls: %{
         used: total_used,
         limit: limits.mission_capability_calls,

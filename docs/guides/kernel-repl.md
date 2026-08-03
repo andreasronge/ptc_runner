@@ -126,6 +126,9 @@ returning an error map that can be mistaken for an empty result.
 Ordinary bounded mission introspection such as `(tool/runtime-usage {})` and
 `(tool/cap-list {})` is also available. Filesystem, network, LLM, agent,
 workflow, MCP, private-inspection, and nested evaluation authority is absent.
+If an attached workflow kernel component calls `kernel/check-source`, the
+standalone REPL reports `:busy` without charging the check quota: the outer
+interactive form already holds the sole continuation lease.
 
 One session can build up an investigation interactively:
 

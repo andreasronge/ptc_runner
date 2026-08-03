@@ -2,6 +2,7 @@ defmodule PtcRunner.Lisp.OptionsTest do
   use ExUnit.Case, async: true
 
   alias PtcRunner.Lisp
+  alias PtcRunner.Lisp.TrustedTool
 
   describe "float_precision option" do
     test "rounds floats in result to specified precision" do
@@ -305,6 +306,26 @@ defmodule PtcRunner.Lisp.OptionsTest do
 
       assert {:ok, %{return: 10, memory: %{}}} =
                Lisp.run(source, context: ctx, tools: tools)
+    end
+
+    test "trusted tools can project ledger arguments independently of execution arguments" do
+      parent = self()
+
+      tools = %{
+        "capture" => %TrustedTool{
+          function: fn arguments ->
+            send(parent, {:arguments, arguments})
+            :ok
+          end,
+          ledger_arguments: fn _arguments -> %{"redacted" => true} end
+        }
+      }
+
+      assert {:ok, step} =
+               Lisp.run_native(~S|(tool/capture {"secret" "evidence-42"})|, tools: tools)
+
+      assert_receive {:arguments, %{"secret" => "evidence-42"}}
+      assert [%{args: %{"redacted" => true}}] = step.tool_calls
     end
 
     test "tool results work in map literals" do

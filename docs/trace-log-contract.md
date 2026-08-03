@@ -561,7 +561,8 @@ of byte-for-byte provider wire capture after adapter transformation.
 The Viewer defines overlay completeness from canonical evidence. Expected LLM
 calls are canonical `capability-started` events named `llm-request`; a stopped
 call joins only when both private input and output exist. Expected dispatched
-calls exclude reserved Kernel runtime routes (`kernel-eval`, both mission
+calls exclude reserved Kernel runtime routes (`kernel-eval`,
+`kernel-check-source`, both mission
 context routes, runtime usage/remaining, capability discovery, and workflow
 annotation). A run cannot claim a complete overlay when it lacks a terminal
 event, reports dropped events, exceeds the Viewer page budget, or lacks an

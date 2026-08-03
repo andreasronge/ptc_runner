@@ -575,6 +575,20 @@ Authority appears only when a frozen bundle is placed in an environment:
 The subordinate evaluator receives only the mission environment. It never
 inherits or falls back to workflow capabilities. Preserve that separation in
 data structures and function inputs rather than relying on symbol filtering.
+Parameterized subordinate evaluation overlays validated JSON at
+`data/params` without changing the mission grant or the opaque program source.
+Reserved runtime tools use an explicit ledger-argument projector so canonical
+public evidence retains source and parameter identities, never their payloads.
+
+The workflow-only `kernel-check-source` route reuses the same production
+compile stage as mission evaluation. `RunState.reserve_source_check/1` charges
+the independent `subordinate_source_checks` budget and snapshots native memory
+plus its continuation revision without acquiring the evaluation lease. After
+compile, `finish_source_check/2` lets closure/deadline or a committed revision
+win before a result is published. Checks therefore execute no AST, call no
+mission capability, and mutate no continuation. Source is bounded before it is
+hashed; an oversized request exposes only its byte count. The trusted-tool
+ledger likewise retains only source identity for accepted-size requests.
 
 Each `PtcRunner.Kernel.Capability` freezes its public identity, effect,
 visibility, bounded schemas, validator, and trusted callback. Environment
@@ -675,7 +689,10 @@ unchanged. Host and manifest schemas are generated from the same scoped rows,
 and documentation generation fails when the catalog and `Limits` struct
 diverge. `PtcRunner.Kernel.Limits`, `RunState`, `BoundedWorker`, and
 `Dispatcher` document exact counters, deadlines, byte accounting, and cleanup
-ordering.
+ordering. Mission compilation and source checking explicitly use
+`evaluation_heap_words` as `Lisp.run_native/2`'s `compile_max_heap`; callers
+that do not set it compile under their own `:max_heap`, so no ambient
+application default can move a sealed run's compile ceiling.
 
 Standalone `PtcRunner.Kernel.ReplSession` is process-affine. Passing its public
 value does not transfer ownership. A product that needs transferable or

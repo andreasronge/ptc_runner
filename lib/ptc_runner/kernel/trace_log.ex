@@ -1934,7 +1934,8 @@ defmodule PtcRunner.Kernel.TraceLog do
          {:ok, _datetime, 0} <- DateTime.from_iso8601(timestamp),
          type when is_binary(type) <- event["type"],
          true <- type =~ @event_type,
-         true <- JSONValue.map?(event["data"]) do
+         true <- JSONValue.map?(event["data"]),
+         :ok <- validate_event_data(type, event["data"]) do
       :ok
     else
       version when is_integer(version) and version != 1 -> {:error, :unsupported_version}
@@ -1943,6 +1944,25 @@ defmodule PtcRunner.Kernel.TraceLog do
   end
 
   defp validate_event(_event), do: {:error, :malformed_source}
+
+  defp validate_event_data("run-stopped", data) do
+    case Map.fetch(data, "usage") do
+      :error ->
+        :ok
+
+      {:ok, usage} when is_map(usage) ->
+        case Map.fetch(usage, "subordinate_source_checks") do
+          :error -> :ok
+          {:ok, count} when is_integer(count) and count >= 0 -> :ok
+          _invalid_count -> {:error, :malformed_source}
+        end
+
+      _invalid_usage ->
+        {:error, :malformed_source}
+    end
+  end
+
+  defp validate_event_data(_type, _data), do: :ok
 
   defp runs(events, source_kind) do
     events
@@ -1974,6 +1994,7 @@ defmodule PtcRunner.Kernel.TraceLog do
       "model" => Map.get(labels, "model"),
       "provider" => Map.get(labels, "provider"),
       "subordinate_evaluations" => evaluation_count(events, "mission"),
+      "subordinate_source_checks" => subordinate_source_checks(stopped),
       "workflow_capability_calls" => workflow_calls,
       "mission_capability_calls" => mission_calls,
       "llm_calls" => capability_name_count(events, "llm-request"),
@@ -2001,6 +2022,14 @@ defmodule PtcRunner.Kernel.TraceLog do
   # layer never invents missing edges.
   defp empty_prelude,
     do: %{"component_ids" => [], "dependency_indices" => [], "hash" => nil}
+
+  defp subordinate_source_checks(%{
+         "data" => %{"usage" => %{"subordinate_source_checks" => count}}
+       })
+       when is_integer(count) and count >= 0,
+       do: count
+
+  defp subordinate_source_checks(_stopped), do: 0
 
   defp event_positions(%{"sequence" => sequence}) when is_integer(sequence) and sequence > 0,
     do: [sequence]

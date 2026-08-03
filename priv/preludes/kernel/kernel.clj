@@ -41,6 +41,34 @@
       (get response :value)
       response)))
 
+(defn eval-with
+  "Evaluate an opaque static Program with JSON parameters at data/params."
+  [program-value params]
+  (let [response (tool/kernel-eval {:kind :embedded
+                                    :program program-value
+                                    :params params})]
+    (if (= :ok (get response :status))
+      (get response :value)
+      response)))
+
+(defn eval-source-with
+  "Evaluate bounded dynamic source with JSON parameters at data/params."
+  [source params]
+  (let [response (tool/kernel-eval {:kind :source
+                                    :source source
+                                    :params params})]
+    (if (= :ok (get response :status))
+      (get response :value)
+      response)))
+
+(defn check-source
+  "Check bounded dynamic source against the live mission environment without executing it."
+  [source]
+  (let [response (tool/kernel-check-source {:source source})]
+    (if (= :ok (get response :status))
+      (get response :value)
+      response)))
+
 (defn mission-inventory
   "Return the exact frozen model-visible mission inventory JSON."
   []

@@ -74,6 +74,37 @@ defmodule PtcRunner.Kernel.Evaluation do
     |> legacy_projection()
   end
 
+  @spec evaluate_source(
+          RunState.t(),
+          map(),
+          binary(),
+          non_neg_integer(),
+          term(),
+          term(),
+          term()
+        ) :: map()
+  def evaluate_source(
+        state,
+        mission_environment,
+        source,
+        timeout_ms,
+        event_sink,
+        inspection_sink,
+        params
+      )
+      when is_binary(source) do
+    state
+    |> evaluate_source_detailed(
+      mission_environment,
+      source,
+      timeout_ms,
+      event_sink,
+      inspection_sink,
+      params: params
+    )
+    |> legacy_projection()
+  end
+
   @doc false
   @spec evaluate_source_detailed(
           RunState.t(),
@@ -113,7 +144,8 @@ defmodule PtcRunner.Kernel.Evaluation do
           evaluation_id,
           started_ms,
           Keyword.get(opts, :after_started_hook),
-          projection_boundary
+          projection_boundary,
+          Keyword.fetch(opts, :params)
         }
       )
 
@@ -167,7 +199,7 @@ defmodule PtcRunner.Kernel.Evaluation do
          timeout_ms,
          {memory, history, lease},
          capture,
-         {evaluation_id, started_ms, after_started_hook, projection_boundary}
+         {evaluation_id, started_ms, after_started_hook, projection_boundary, params}
        ) do
     limits = RunState.limits(state)
 
@@ -203,8 +235,7 @@ defmodule PtcRunner.Kernel.Evaluation do
           timeout_ms,
           {memory, history, lease},
           capture,
-          deadline_ms,
-          projection_boundary
+          {deadline_ms, projection_boundary, params}
         )
 
       _ = maybe_emit_limit(state, capture.event_sink, result)
@@ -267,13 +298,12 @@ defmodule PtcRunner.Kernel.Evaluation do
          timeout_ms,
          {memory, history, lease},
          capture,
-         deadline_ms,
-         projection_boundary
+         {deadline_ms, projection_boundary, params}
        ) do
     limits = RunState.limits(state)
 
     options = [
-      context: environment.data,
+      context: evaluation_data(environment.data, params),
       memory: memory,
       turn_history: history,
       tools:
@@ -287,6 +317,7 @@ defmodule PtcRunner.Kernel.Evaluation do
       prelude: bundle_prelude(environment),
       timeout: timeout_ms,
       compile_timeout: timeout_ms,
+      compile_max_heap: limits.evaluation_heap_words,
       run_deadline_ms: deadline_ms,
       max_heap: limits.evaluation_heap_words,
       max_program_bytes: limits.subordinate_source_bytes,
@@ -320,6 +351,9 @@ defmodule PtcRunner.Kernel.Evaluation do
         |> put_terminal_provider_failure(step)
     end
   end
+
+  defp evaluation_data(data, :error), do: data
+  defp evaluation_data(data, {:ok, params}), do: Map.put(data, "params", params)
 
   defp commit_result(state, lease, history, step, projection_boundary) do
     case Lisp.project_boundary_value(step.return, projection_boundary) do
@@ -633,7 +667,8 @@ defmodule PtcRunner.Kernel.Evaluation do
     end
   end
 
-  defp mission_tools(environment, state, timeout_ms, event_sink, inspection_sink) do
+  @doc false
+  def mission_tools(environment, state, timeout_ms, event_sink, inspection_sink) do
     environment.capabilities
     |> Map.new(fn {name, _capability} ->
       {name,

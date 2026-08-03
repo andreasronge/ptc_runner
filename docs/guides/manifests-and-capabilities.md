@@ -347,6 +347,7 @@ All limits are positive hard ceilings. A manifest may request lower values:
   "workflow_capability_calls_per_name": 8,
   "mission_capability_calls": 32,
   "subordinate_evaluations": 8,
+  "subordinate_source_checks": 8,
   "terminal_result_bytes": 250000
 }
 ```
@@ -355,9 +356,11 @@ The installation sets the maximum for each one, and a manifest can only request
 that value or less. An omitted limit takes the normal runtime default, capped by
 any lower installed ceiling.
 
-Limits reach further than the six shown above: they also bound process heap,
+Limits reach further than those shown above: they also bound process heap,
 source size, retained continuation memory, provider concurrency, capability
 arguments and results, and canonical events.
+`subordinate_source_checks` is independent of `subordinate_evaluations` and
+mission capability quotas because a check compiles but never executes source.
 
 The host-only `provider_cleanup_timeout_ms`,
 `selection_validation_timeout_ms`, and `doctor_connectivity_timeout_ms` names

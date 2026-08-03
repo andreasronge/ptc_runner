@@ -28,6 +28,7 @@ defmodule PtcRunner.Kernel.LimitCatalog do
     {:mission_capability_calls, 128, 128},
     {:mission_capability_calls_per_name, 32, 32},
     {:subordinate_evaluations, 16, 16},
+    {:subordinate_source_checks, 16, 16},
     {:protocol_errors, 32, 32},
     {:entry_source_bytes, 262_144, 262_144},
     {:subordinate_source_bytes, 131_072, 131_072},

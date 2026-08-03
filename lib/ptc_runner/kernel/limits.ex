@@ -16,7 +16,8 @@ defmodule PtcRunner.Kernel.Limits do
   - `live_provider_tasks` bounds concurrent provider callback processes;
   - `workflow_capability_calls` and `mission_capability_calls` are total call
     quotas, with matching `*_per_name` quotas;
-  - `subordinate_evaluations` and `protocol_errors` bound those operations;
+  - `subordinate_evaluations`, `subordinate_source_checks`, and
+    `protocol_errors` bound those operations;
   - `entry_source_bytes` and `subordinate_source_bytes` bound code;
   - `evaluation_memory_bytes` and `evaluation_history_bytes` independently
     bound retained mission definitions and exact three-value turn history;
@@ -64,6 +65,7 @@ defmodule PtcRunner.Kernel.Limits do
           mission_capability_calls: pos_integer(),
           mission_capability_calls_per_name: pos_integer(),
           subordinate_evaluations: pos_integer(),
+          subordinate_source_checks: pos_integer(),
           protocol_errors: pos_integer(),
           entry_source_bytes: pos_integer(),
           subordinate_source_bytes: pos_integer(),

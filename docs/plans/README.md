@@ -9,6 +9,9 @@ belongs in guides or retained specifications.
 
 ## Remaining Kernel product work
 
+- [`lisp-kernel/generated-program-boundary.md`](lisp-kernel/generated-program-boundary.md)
+  separates runtime values from subordinate program source and adds a bounded,
+  mission-aware source-checking path for generated PTC-Lisp.
 - [`lisp-kernel/stable-cli-contract.md`](lisp-kernel/stable-cli-contract.md)
   turns the product-readiness CLI slice into an implementation-ordered
   protocol, diagnostics, and filesystem-independent application-source plan.
