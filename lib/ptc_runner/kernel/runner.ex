@@ -46,7 +46,7 @@ defmodule PtcRunner.Kernel.Runner do
         result =
           apply_provider_cleanup_failure(
             event_sink_error(%{}),
-            RunConfig.close_provider_resources(config),
+            RunConfig.close_provider_session(config),
             %{}
           )
 
@@ -56,9 +56,26 @@ defmodule PtcRunner.Kernel.Runner do
 
   defp run_claimed_attempt(entry_source, config) do
     with :ok <- entry_source_within_limit(entry_source, config.limits),
-         {:ok, state} <- RunState.start(config.limits) do
+         {:ok, state} <-
+           RunState.start(config.limits, provider_session: config.provider_session) do
       try do
-        run_claimed(entry_source, config, state)
+        case transfer_provider_cleanup(config, state) do
+          :ok ->
+            run_claimed(entry_source, config, state)
+
+          {:error, reason} ->
+            close_run_state(state)
+
+            result =
+              reason
+              |> configuration_error(%{})
+              |> apply_provider_cleanup_failure(
+                RunConfig.close_provider_session(config),
+                %{}
+              )
+
+            finalize_result(result, %{}, config.event_sink)
+        end
       after
         stop_run_state(state)
       end
@@ -67,10 +84,14 @@ defmodule PtcRunner.Kernel.Runner do
         result =
           reason
           |> configuration_error(%{})
-          |> apply_provider_cleanup_failure(RunConfig.close_provider_resources(config), %{})
+          |> apply_provider_cleanup_failure(RunConfig.close_provider_session(config), %{})
 
         finalize_result(result, %{}, config.event_sink)
     end
+  end
+
+  defp transfer_provider_cleanup(config, state) do
+    RunConfig.bind_provider_session(config, self(), state.pid)
   end
 
   defp run_claimed(entry_source, config, state) do
@@ -87,7 +108,7 @@ defmodule PtcRunner.Kernel.Runner do
       end
 
     usage = run_state_usage(state)
-    cleanup = RunConfig.close_provider_resources(config)
+    cleanup = RunConfig.close_provider_session(config)
 
     case execution do
       {:ok, result} ->

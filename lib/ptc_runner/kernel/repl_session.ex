@@ -70,7 +70,7 @@ defmodule PtcRunner.Kernel.ReplSession do
   inconclusive live-sink ownership probe returns
   `{:error, :session_owner_mismatch}` before the recorder is claimed or a run
   state is started and leaves the config untouched. A dead owned sink closes
-  the config's provider resources before setup fails. The config must select
+  the config's provider session before setup fails. The config must select
   the native result projection; a JSON-projection config returns
   `{:error, :invalid_repl_session}` untouched.
   """
@@ -201,7 +201,7 @@ defmodule PtcRunner.Kernel.ReplSession do
 
   defp close_owned(session) do
     state_result = close_run_state(session.state)
-    cleanup = ReplSessionOwner.close_provider_resources(session.owner_pid, session.owner_token)
+    cleanup = ReplSessionOwner.close_provider_session(session.owner_pid, session.owner_token)
 
     if state_result == :ok and cleanup_result?(cleanup) and
          Process.alive?(session.config.event_sink.pid) do
@@ -269,7 +269,7 @@ defmodule PtcRunner.Kernel.ReplSession do
 
   defp abort_owned(session, reason) do
     state_result = close_run_state(session.state)
-    cleanup = ReplSessionOwner.close_provider_resources(session.owner_pid, session.owner_token)
+    cleanup = ReplSessionOwner.close_provider_session(session.owner_pid, session.owner_token)
 
     if state_result == :ok and cleanup_result?(cleanup) and
          Process.alive?(session.config.event_sink.pid) do
@@ -386,14 +386,7 @@ defmodule PtcRunner.Kernel.ReplSession do
   defp start_session_with_state(config, state) do
     case emit_run_started(config) do
       :ok ->
-        case ReplSessionOwner.start(config, state, self()) do
-          {:ok, pid, token} ->
-            register_access(pid, token)
-
-          {:error, reason} ->
-            cleanup = stop_owners(%{config: config, state: state})
-            prefer_cleanup_error({:error, reason}, cleanup)
-        end
+        transfer_and_start_session(config, state)
 
       {:error, :event_sink_already_claimed} ->
         RunState.close(state)
@@ -405,12 +398,49 @@ defmodule PtcRunner.Kernel.ReplSession do
         RunState.close(state)
         RunState.stop(state)
 
-        case RunConfig.close_provider_resources(config) do
+        case RunConfig.close_provider_session(config) do
           :ok -> {:error, :event_sink_error}
           {:error, :provider_cleanup_failed} = error -> error
         end
     end
   end
+
+  defp transfer_and_start_session(config, state) do
+    case RunState.use_provider_session(state, config.provider_session) do
+      {:ok, state} ->
+        bind_and_start_session(config, state)
+
+      {:error, reason} ->
+        cleanup = stop_owners(%{config: config, state: state})
+        prefer_cleanup_error({:error, reason}, cleanup)
+    end
+  end
+
+  defp bind_and_start_session(config, state) do
+    case ReplSessionOwner.start(config, state, self()) do
+      {:ok, pid, token} ->
+        case RunConfig.bind_provider_session(config, pid, state.pid) do
+          :ok ->
+            register_access(pid, token)
+
+          {:error, reason} ->
+            state_result = close_run_state(state)
+            cleanup = ReplSessionOwner.close_provider_session(pid, token)
+            ReplSessionOwner.release(pid, token)
+
+            state_result
+            |> prefer_cleanup_error(cleanup)
+            |> prefer_setup_error(reason)
+        end
+
+      {:error, reason} ->
+        cleanup = stop_owners(%{config: config, state: state})
+        prefer_cleanup_error({:error, reason}, cleanup)
+    end
+  end
+
+  defp prefer_setup_error({:error, :provider_cleanup_failed} = error, _reason), do: error
+  defp prefer_setup_error(_result, reason), do: {:error, reason}
 
   defp finalize(session, outcome, reason) do
     errors = min(max(bounded_counter(session.errors), observed_errors(session)), @maximum_counter)
@@ -795,7 +825,7 @@ defmodule PtcRunner.Kernel.ReplSession do
 
   defp stop_owners(session) do
     if Process.alive?(session.state.pid), do: RunState.stop(session.state)
-    cleanup = RunConfig.close_provider_resources(session.config)
+    cleanup = RunConfig.close_provider_session(session.config)
     if session.config.inspection_sink, do: InspectionSink.stop(session.config.inspection_sink)
 
     if Process.alive?(session.config.event_sink.pid),
@@ -805,7 +835,7 @@ defmodule PtcRunner.Kernel.ReplSession do
   end
 
   defp reject_unstarted_config(config, reason) do
-    cleanup = RunConfig.close_provider_resources(config)
+    cleanup = RunConfig.close_provider_session(config)
 
     if config.inspection_sink,
       do: InspectionSink.stop(config.inspection_sink, @setup_cleanup_timeout_ms)

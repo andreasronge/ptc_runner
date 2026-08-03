@@ -17,6 +17,11 @@ defmodule PtcRunner.Kernel.RunBuilder do
   Provider-bearing preparation remains here until declarative installation
   descriptors replace builder inspection, but it uses the coordinator's same
   public-entry validation before any builder inspection.
+
+  A provider-bearing build remains owned by its build creator until execution
+  binds it to a Runner or REPL lifecycle owner. The creator must remain alive
+  until that bind or until `close/1`; returning an unstarted build from a
+  short-lived task is not an ownership transfer.
   """
 
   alias PtcRunner.Kernel
@@ -30,7 +35,8 @@ defmodule PtcRunner.Kernel.RunBuilder do
   alias PtcRunner.Kernel.PreparedRun
   alias PtcRunner.Kernel.PrivateDirectory
   alias PtcRunner.Kernel.ProviderRegistry
-  alias PtcRunner.Kernel.ProviderResources
+  alias PtcRunner.Kernel.ProviderSession
+  alias PtcRunner.Kernel.ResourceRegistrar
   alias PtcRunner.Kernel.Result
   alias PtcRunner.Kernel.ResultArtifact
   alias PtcRunner.Kernel.RunConfig
@@ -326,7 +332,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
         success
 
       {:error, _reason} = error ->
-        prefer_cleanup_error(error, close_resources(providers.resources))
+        prefer_cleanup_error(error, close_provider_session(providers.provider_session))
     end
   end
 
@@ -352,7 +358,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
            result_projection: request.policy.result_projection,
            inspection_sink: inspection_sink,
            inspection_path: inspection_path,
-           provider_resources: providers.resources,
+           provider_session: providers.provider_session,
            connector_snapshots: providers.snapshots,
            component_overrides: component_overrides,
            labels: package.labels
@@ -437,75 +443,119 @@ defmodule PtcRunner.Kernel.RunBuilder do
 
   defp providers(manifest, registry, input_class, opts)
        when input_class in [:normal, :private_inspection] do
-    with {:ok, prepared} <- prepare_providers(manifest, registry),
-         :ok <- validate_provider_dependencies(prepared),
-         :ok <- validate_single_workflow_llm(prepared),
-         effective_class <- effective_data_class(input_class, prepared),
-         :ok <- providers_accept(prepared, effective_class),
-         :ok <- preflight_trace(manifest.events.policy, effective_class, opts),
-         :ok <- preflight_result(manifest.events.policy, effective_class, opts),
-         {:ok, preflighted} <- preflight_providers(prepared) do
-      try do
-        with {:ok, credentials} <-
-               ProviderRegistry.resolve_credentials(registry, credential_names(prepared)),
-             {:ok, acquired} <- acquire_providers(preflighted, credentials, effective_class) do
-          {:ok,
-           %{
-             acquired
-             | workflow: finalize_capabilities(acquired.workflow),
-               mission: finalize_capabilities(acquired.mission),
-               snapshots: sort_snapshots(acquired.snapshots)
-           }
-           |> Map.delete(:exports)}
-        end
-      after
-        release_preflights(preflighted)
+    if provider_specs(manifest) == [] do
+      with :ok <- preflight_trace(manifest.events.policy, input_class, opts),
+           :ok <- preflight_result(manifest.events.policy, input_class, opts) do
+        {:ok, empty_providers(input_class)}
       end
+    else
+      open_provider_session(manifest, registry, input_class, opts)
+    end
+  end
+
+  defp open_provider_session(manifest, registry, input_class, opts) do
+    with {:ok, session} <- ProviderSession.start(manifest.limits) do
+      finish_provider_session(manifest, registry, session, input_class, opts)
+    end
+  end
+
+  defp finish_provider_session(manifest, registry, session, input_class, opts) do
+    result =
+      with {:ok, prepared} <- prepare_providers(manifest, registry, session),
+           :ok <- validate_provider_dependencies(prepared),
+           :ok <- validate_single_workflow_llm(prepared),
+           effective_class <- effective_data_class(input_class, prepared),
+           :ok <- providers_accept(prepared, effective_class),
+           :ok <- preflight_trace(manifest.events.policy, effective_class, opts),
+           :ok <- preflight_result(manifest.events.policy, effective_class, opts),
+           {:ok, preflighted} <- preflight_providers(prepared) do
+        try do
+          with {:ok, credentials} <-
+                 ProviderRegistry.resolve_credentials(registry, credential_names(prepared)),
+               {:ok, acquired} <- acquire_providers(preflighted, credentials, effective_class) do
+            {:ok,
+             acquired
+             |> Map.put(:workflow, finalize_capabilities(acquired.workflow))
+             |> Map.put(:mission, finalize_capabilities(acquired.mission))
+             |> Map.put(:snapshots, sort_snapshots(acquired.snapshots))
+             |> Map.put(:provider_session, session)
+             |> Map.delete(:exports)}
+          end
+        after
+          release_preflights(preflighted)
+        end
+      end
+
+    case result do
+      {:ok, _providers} = success ->
+        success
+
+      {:unregistered_provider_close, reason, close} ->
+        prefer_cleanup_error(
+          {:error, reason},
+          ProviderSession.close_with_unregistered(session, close)
+        )
+
+      {:error, _reason} = error ->
+        prefer_cleanup_error(error, ProviderSession.close(session))
     end
   end
 
   defp sort_snapshots(snapshots), do: Enum.sort_by(snapshots, &Map.get(&1, "provider", ""))
 
-  defp prepare_providers(package, registry) do
+  defp prepare_providers(package, registry, session) do
     package
     |> provider_specs()
     |> Enum.with_index()
     |> Enum.reduce_while({:ok, []}, fn {{destination, spec}, index}, {:ok, prepared} ->
-      context = %{
-        application_content_digest: package.application_content_digest,
-        destination: destination,
-        owner: self(),
-        limits: package.limits,
-        installed_limits: package.installed_limits
-      }
+      case ProviderSession.open_registrar(session) do
+        {:ok, registrar} ->
+          prepare_provider(package, registry, registrar, destination, spec, index, prepared)
 
-      case ProviderRegistry.prepare(
-             registry,
-             spec["name"],
-             Map.get(spec, "config", %{}),
-             context
-           ) do
-        {:ok, provider} ->
-          entry = %{
-            index: index,
-            provider: spec["name"],
-            destination: destination,
-            credential_names: provider.credential_names,
-            data_class: provider.data_class,
-            accepts_data: provider.accepts_data,
-            requires: provider.requires,
-            provides: provider.provides,
-            workflow_llm?: provider.workflow_llm?,
-            prepared: provider
-          }
-
-          {:cont, {:ok, [entry | prepared]}}
-
-        {:error, _reason} = error ->
-          {:halt, error}
+        {:error, _reason} ->
+          {:halt, {:error, :provider_session_unavailable}}
       end
     end)
     |> reverse_success()
+  end
+
+  defp prepare_provider(package, registry, registrar, destination, spec, index, prepared) do
+    context = %{
+      application_content_digest: package.application_content_digest,
+      destination: destination,
+      owner: ResourceRegistrar.owner(registrar),
+      resource_registrar: registrar,
+      limits: package.limits,
+      installed_limits: package.installed_limits
+    }
+
+    case ProviderRegistry.prepare(
+           registry,
+           spec["name"],
+           Map.get(spec, "config", %{}),
+           context
+         ) do
+      {:ok, provider} ->
+        entry = %{
+          index: index,
+          provider: spec["name"],
+          destination: destination,
+          credential_names: provider.credential_names,
+          data_class: provider.data_class,
+          accepts_data: provider.accepts_data,
+          requires: provider.requires,
+          provides: provider.provides,
+          workflow_llm?: provider.workflow_llm?,
+          registrar: registrar,
+          prepared: provider
+        }
+
+        {:cont, {:ok, [entry | prepared]}}
+
+      {:error, _reason} = error ->
+        _ = ResourceRegistrar.abort(registrar)
+        {:halt, error}
+    end
   end
 
   defp preflight_providers(prepared) do
@@ -532,7 +582,6 @@ defmodule PtcRunner.Kernel.RunBuilder do
     initial = %{
       workflow: %{capabilities: []},
       mission: %{capabilities: []},
-      resources: [],
       snapshots: [],
       exports: %{},
       data_class: effective_class
@@ -546,14 +595,12 @@ defmodule PtcRunner.Kernel.RunBuilder do
   defp acquire_ready_providers(pending, credentials, accumulated) do
     case Enum.split_with(pending, &services_available?(&1, accumulated.exports)) do
       {[], _blocked} ->
-        prefer_cleanup_error(
-          {:error, :provider_dependency_unavailable},
-          close_resources(accumulated.resources)
-        )
+        {:error, :provider_dependency_unavailable}
 
       {ready, blocked} ->
         case acquire_provider_batch(ready, credentials, accumulated) do
           {:ok, next} -> acquire_ready_providers(blocked, credentials, next)
+          {:unregistered_provider_close, _reason, _close} = cleanup -> cleanup
           {:error, _reason} = error -> error
         end
     end
@@ -564,38 +611,48 @@ defmodule PtcRunner.Kernel.RunBuilder do
       provider_credentials = Map.take(credentials, provider.credential_names)
       services = selected_services(current.exports, provider.requires)
 
-      case ProviderRegistry.acquire(provider.preflighted, provider_credentials, services) do
+      result =
+        with :ok <- ResourceRegistrar.activate(provider.registrar) do
+          ProviderRegistry.acquire(provider.preflighted, provider_credentials, services)
+        end
+
+      case result do
         {:ok, built}
         when built.data_class == provider.data_class and
                built.accepts_data == provider.accepts_data ->
-          environment = Map.fetch!(current, provider.destination)
+          case ResourceRegistrar.commit(provider.registrar, built.close) do
+            :ok ->
+              environment = Map.fetch!(current, provider.destination)
 
-          next =
-            current
-            |> Map.put(provider.destination, %{
-              capabilities: [{provider.index, built.capabilities} | environment.capabilities]
-            })
-            |> Map.update!(:snapshots, &maybe_append(&1, built.snapshot))
-            |> Map.update!(:resources, &maybe_prepend(&1, built.close))
-            |> Map.update!(
-              :exports,
-              &merge_provider_exports(&1, provider.provider, built.exports)
-            )
+              next =
+                current
+                |> Map.put(provider.destination, %{
+                  capabilities: [{provider.index, built.capabilities} | environment.capabilities]
+                })
+                |> Map.update!(:snapshots, &maybe_append(&1, built.snapshot))
+                |> Map.update!(
+                  :exports,
+                  &merge_provider_exports(&1, provider.provider, built.exports)
+                )
 
-          {:cont, {:ok, next}}
+              {:cont, {:ok, next}}
+
+            {:error, _reason} ->
+              {:halt, {:unregistered_provider_close, :provider_session_unavailable, built.close}}
+          end
 
         {:ok, built} ->
-          result =
-            prefer_cleanup_error(
-              {:error, :provider_data_policy_changed},
-              close_resources(maybe_prepend(current.resources, built.close))
-            )
+          case ResourceRegistrar.commit(provider.registrar, built.close) do
+            :ok ->
+              {:halt, {:error, :provider_data_policy_changed}}
 
-          {:halt, result}
+            {:error, _reason} ->
+              {:halt, {:unregistered_provider_close, :provider_data_policy_changed, built.close}}
+          end
 
         {:error, _reason} = error ->
-          result = prefer_cleanup_error(error, close_resources(current.resources))
-          {:halt, result}
+          _ = ResourceRegistrar.abort(provider.registrar)
+          {:halt, error}
       end
     end)
   end
@@ -702,19 +759,30 @@ defmodule PtcRunner.Kernel.RunBuilder do
   def close(%{config: %RunConfig{} = config}), do: close(config)
 
   def close(%RunConfig{} = config) do
-    result = RunConfig.close_provider_resources(config)
+    result = RunConfig.close_provider_session(config)
     if config.inspection_sink, do: InspectionSink.stop(config.inspection_sink)
 
     if Process.alive?(config.event_sink.pid), do: EventSink.stop(config.event_sink)
     result
   end
 
-  defp close_resources(resources), do: ProviderResources.close(resources)
+  defp close_provider_session(nil), do: :ok
+  defp close_provider_session(session), do: ProviderSession.close(session)
+
+  defp empty_providers(data_class) do
+    %{
+      workflow: %{capabilities: []},
+      mission: %{capabilities: []},
+      provider_session: nil,
+      snapshots: [],
+      data_class: data_class
+    }
+  end
 
   defp prefer_cleanup_error(_original, {:error, :provider_cleanup_failed} = cleanup), do: cleanup
   defp prefer_cleanup_error(original, :ok), do: original
 
-  # Provider resources are already closed by `Kernel.run_and_events/2`; the
+  # The provider session is already closed by `Kernel.run_and_events/2`; the
   # returned terminal batch is the sole input to both persistence paths.
   defp execute_built(built, opts) do
     {result, terminal_batch} = Kernel.run_and_events(built.entry_source, built.config)
@@ -1151,8 +1219,6 @@ defmodule PtcRunner.Kernel.RunBuilder do
 
   defp maybe_append(values, nil), do: values
   defp maybe_append(values, value), do: values ++ [value]
-  defp maybe_prepend(values, nil), do: values
-  defp maybe_prepend(values, value), do: [value | values]
 
   defp provider_free?(%{workflow: [], mission: []}), do: true
   defp provider_free?(_providers), do: false

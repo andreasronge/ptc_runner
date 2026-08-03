@@ -71,6 +71,7 @@ Completed commits on `codex/stable-cli-contract`:
 | 3 | `54c26bb7` | Closed generated limit catalog. |
 | 4 | `416e9346` | Inert provider declarations and effective identity. |
 | 5a | `9db10af5` | Shared absolute-monotonic deadline type and migrated provider activity. |
+| 5b | `e957cc21` | Process-free catalogs and sealed runtime activation. |
 
 The first local implementation of slice 5, `d38d0bef`, is intentionally not a
 delivery milestone. It demonstrated useful failure cases but combined remote
@@ -527,8 +528,10 @@ work.
 Delivery is intentionally split into review-sized commits:
 
 - 5a (complete): shared deadlines;
-- 5b: process-free catalogs and sealed runtime activation;
-- 5c: one provider-session owner, cleanup stack, and provisional registrar;
+- 5b (complete): process-free catalogs and sealed runtime activation;
+- 5c1: replace the resource list with one provider-session owner and scoped,
+  bounded LIFO cleanup;
+- 5c2: route shipped process and port starts through the provisional registrar;
 - 5d: application admission, active validation, and credential resolution.
 
 - replace the unpushed draft with the minimal `ProviderSession`, `Deadline`,

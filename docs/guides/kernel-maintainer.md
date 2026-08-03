@@ -423,8 +423,22 @@ fixed override source role instead of being attributed to the manifest.
 Assembly compiles components, builds providers, constructs workflow and mission
 environments, freezes limits and inventories, and returns one
 `PtcRunner.Kernel.RunConfig`. A configuration is one-shot. The Runner owns its
-state and attached provider work until terminal publication; provider resources
-close only after in-flight work is cancelled and observed.
+state and attached provider work until terminal publication. Provider-bearing
+assembly opens one `PtcRunner.Kernel.ProviderSession`; each selected provider
+gets one scoped `PtcRunner.Kernel.ResourceRegistrar`. `RunConfig` retains only
+that session rather than an open-ended list of close functions. The caller
+retains the separately constructed provider registry; closing a build does not
+make a reusable embedding registry stale.
+
+Each acquisition scope is inert through preparation and local preflight,
+activates immediately before acquisition, then either commits one idempotent
+provider closer or aborts. Before callbacks can start, execution transfers the
+session from its build creator to the Runner or REPL session owner and binds its
+run state. The provider session itself tracks, cancels, and observes in-flight
+Kernel provider work before it runs any closer, including after owner or run
+state death. Normal close and lifecycle-owner death share one bounded
+reverse-order resource drain. Provider-free assembly carries no session and
+starts no provider owner.
 
 Construction failures close already-built resources in reverse order.
 Frontends that build but do not execute a configuration must call the

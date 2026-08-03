@@ -55,6 +55,7 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
   alias PtcRunner.Kernel.HostInstallationAuthority
   alias PtcRunner.Kernel.JSONValue
   alias PtcRunner.Kernel.Limits
+  alias PtcRunner.Kernel.ResourceRegistrar
 
   @application_content_digest ~r/\A[0-9a-f]{64}\z/
   @build_context_keys [
@@ -69,6 +70,7 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
   defstruct @enforce_keys ++ [authority_owner: nil]
 
   @type build_context :: %{
+          optional(:resource_registrar) => ResourceRegistrar.t(),
           application_content_digest: binary(),
           destination: :workflow | :mission,
           owner: pid(),
@@ -76,6 +78,7 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
           installed_limits: PtcRunner.Kernel.Limits.t()
         }
   @type context :: %{
+          optional(:resource_registrar) => ResourceRegistrar.t(),
           application_content_digest: binary(),
           destination: :workflow | :mission,
           owner: pid(),
@@ -220,8 +223,12 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
 
   Run assembly uses the individual phase functions so the barrier spans every
   selected provider. This convenience path remains useful for embedding and
-  focused provider tests.
+  focused provider tests. It rejects registrar-backed contexts because scoped
+  acquisition requires the run builder's complete multi-provider lifecycle.
   """
+  def build(%__MODULE__{}, _name, _config, %{resource_registrar: _registrar}),
+    do: {:error, :invalid_provider_context}
+
   def build(%__MODULE__{} = registry, name, config, context) do
     with {:ok, prepared} <- prepare(registry, name, config, context),
          {:ok, preflighted} <- preflight(prepared) do
@@ -278,11 +285,12 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
 
   defp validate_build_context(context)
        when is_map(context) and not is_struct(context) do
-    if Enum.sort(Map.keys(context)) == Enum.sort(@build_context_keys) and
+    if valid_build_context_keys?(context) and
          is_binary(context.application_content_digest) and
          context.application_content_digest =~ @application_content_digest and
          context.destination in [:workflow, :mission] and
          is_pid(context.owner) and
+         valid_resource_registrar?(context) and
          match?(%Limits{}, context.limits) and
          match?(%Limits{}, context.installed_limits) do
       :ok
@@ -292,6 +300,18 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
   end
 
   defp validate_build_context(_context), do: {:error, :invalid_provider_context}
+
+  defp valid_build_context_keys?(context) do
+    keys = Enum.sort(Map.keys(context))
+
+    keys == Enum.sort(@build_context_keys) or
+      keys == Enum.sort([:resource_registrar | @build_context_keys])
+  end
+
+  defp valid_resource_registrar?(%{resource_registrar: registrar, owner: owner}),
+    do: ResourceRegistrar.valid?(registrar) and ResourceRegistrar.owner(registrar) == owner
+
+  defp valid_resource_registrar?(_context), do: true
 
   @spec preflight(prepared()) :: {:ok, preflighted()} | {:error, term()}
   @doc false

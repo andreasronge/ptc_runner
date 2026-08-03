@@ -29,6 +29,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
   alias PtcRunner.Kernel.WorkflowEnvironment
   alias PtcRunner.Test.MCPOAuthRecordingStore
   alias PtcRunner.TestSupport.MCPHTTPFixture
+  alias PtcRunner.TestSupport.ProviderSessionFixture
 
   @owner_lifecycle_timeout_ms 30_000
   @max_logical_result_bytes 1_048_576
@@ -609,7 +610,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
              }
            } = result.value
 
-    assert :ok = RunBuilder.close(built)
+    EventSink.stop(built.config.event_sink)
 
     assert marker
            |> File.read!()
@@ -652,7 +653,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
 
     assert {:ok, result} = Kernel.run(built.entry_source, built.config)
     assert %{status: :ok, value: %{"value" => 42}} = get_in(result.value, [:value, :value])
-    assert :ok = RunBuilder.close(built)
+    EventSink.stop(built.config.event_sink)
     assert File.read!(marker) =~ "tools/call"
   end
 
@@ -738,7 +739,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
                    get_in(result.value, [:value, :value, "text"])
       end
 
-      assert :ok = RunBuilder.close(built)
+      EventSink.stop(built.config.event_sink)
     end
   end
 
@@ -784,7 +785,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     assert [snapshot] = built.config.connector_snapshots
     assert snapshot["launcher_sha256"] == file_sha256(launcher)
     assert {:ok, _result} = Kernel.run(built.entry_source, built.config)
-    assert :ok = RunBuilder.close(built)
+    EventSink.stop(built.config.event_sink)
   end
 
   @tag :tmp_dir
@@ -832,7 +833,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
           assert %{status: :ok, value: %{"value" => 42}} = structured
       end
 
-      assert :ok = RunBuilder.close(built)
+      EventSink.stop(built.config.event_sink)
     end
   end
 
@@ -925,7 +926,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
 
     assert %{status: :ok, value: %{"value" => 42}} = get_in(result.value, [:value, :value])
 
-    assert :ok = RunBuilder.close(built)
+    EventSink.stop(built.config.event_sink)
   end
 
   @tag :tmp_dir
@@ -1076,7 +1077,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
              } = failure
 
       assert_effect_state(failure, effect)
-      assert :ok = RunBuilder.close(built)
+      EventSink.stop(built.config.event_sink)
     end
   end
 
@@ -1171,7 +1172,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
           input: %{},
           limits: limits,
           event_sink: sink,
-          provider_resources: [mcp.close]
+          provider_session: ProviderSessionFixture.start([mcp.close], limits)
         )
 
       assert {:error, %{kind: :workflow_failed, reason: :explicit_failure}} =
@@ -1226,7 +1227,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
         assert failure.mutation_state == :indeterminate
       end
 
-      assert :ok = RunBuilder.close(built)
+      EventSink.stop(built.config.event_sink)
     end
   end
 
@@ -1272,7 +1273,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
 
       refute Map.has_key?(failure, :mutation_state)
       refute_receive {:mcp_request, "tools/call", _headers}
-      assert :ok = RunBuilder.close(built)
+      EventSink.stop(built.config.event_sink)
     end
 
     fixture = fixture(self())
@@ -1802,7 +1803,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     assert [snapshot] = built.config.connector_snapshots
     assert Enum.map(snapshot["tools"], & &1["name"]) == ["remote.structured"]
     assert :ok = RunBuilder.close(built)
-    assert :ok = RunBuilder.close(built)
+    assert {:error, :provider_cleanup_failed} = RunBuilder.close(built)
 
     repeated = fixture(parent, sse?: true, sse_extra_response?: true)
     on_exit(repeated.close)
@@ -1871,15 +1872,24 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
 
     build_task =
       Task.async(fn ->
-        dir
-        |> manifest(["remote.structured"])
-        |> RunBuilder.load_and_build(registry(held_open.endpoint, timeout_ms: 5_000))
+        result =
+          dir
+          |> manifest(["remote.structured"])
+          |> RunBuilder.load_and_build(registry(held_open.endpoint, timeout_ms: 5_000))
+
+        send(parent, {:held_build_complete, self(), result})
+
+        receive do
+          :release_build_owner -> :ok
+        end
       end)
 
     assert_receive {:mcp_stream_holding, holder}
-    assert {:ok, held_build} = Task.await(build_task, 2_000)
+    assert_receive {:held_build_complete, build_owner, {:ok, held_build}}, 2_000
     send(holder, :release)
     assert :ok = RunBuilder.close(held_build)
+    send(build_owner, :release_build_owner)
+    assert :ok = Task.await(build_task, 2_000)
 
     cr_only = fixture(parent, sse?: true, sse_line_ending: "\r")
     on_exit(cr_only.close)
@@ -1902,15 +1912,24 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
 
     bom_task =
       Task.async(fn ->
-        dir
-        |> manifest(["remote.structured"])
-        |> RunBuilder.load_and_build(registry(fragmented_bom.endpoint, timeout_ms: 5_000))
+        result =
+          dir
+          |> manifest(["remote.structured"])
+          |> RunBuilder.load_and_build(registry(fragmented_bom.endpoint, timeout_ms: 5_000))
+
+        send(parent, {:bom_build_complete, self(), result})
+
+        receive do
+          :release_build_owner -> :ok
+        end
       end)
 
     assert_receive {:mcp_stream_holding, bom_holder}
-    assert {:ok, bom_build} = Task.await(bom_task, 2_000)
+    assert_receive {:bom_build_complete, bom_build_owner, {:ok, bom_build}}, 2_000
     send(bom_holder, :release)
     assert :ok = RunBuilder.close(bom_build)
+    send(bom_build_owner, :release_build_owner)
+    assert :ok = Task.await(bom_task, 2_000)
 
     duplicate = fixture(parent, duplicate_catalog?: true)
     on_exit(duplicate.close)
