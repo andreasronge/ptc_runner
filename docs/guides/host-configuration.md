@@ -109,13 +109,20 @@ in a committed project file. A safe provider snapshot records the public
 installation revision and normalized selected policy, never the raw model
 selector or secret.
 
-The command runtime does not ask provider dependencies to load `.env` files.
+A command-owned VM disables dependency `.env` readers before starting the
+selected provider application. A reused host-owned application keeps whatever
+its own start applied, because it was already running.
+
 For a selected shipped LLM whose declared credential uses `env`, the Mix
-frontend instead loads the nearest `.env` through `PtcRunner.Dotenv` after
-provider activity begins and before resolving that credential. Existing process
-variables take precedence. Embedded hosts do not load `.env` implicitly; export
-an `env` credential before invoking them, or use a shell-local environment
-manager or explicit secret source:
+frontend loads the nearest `.env` through `PtcRunner.Dotenv` after provider
+activity begins and before resolving that credential. One declared credential
+triggers the load, but the load is not scoped to it: the loader walks up from
+the invocation directory to the filesystem root and sets every variable in the
+first `.env` it finds. This happens once per VM and those variables persist for
+the process lifetime, so a later invocation in the same VM keeps them. Existing
+process variables take precedence. Embedded hosts do not load `.env`
+implicitly; export an `env` credential before invoking them, or use a
+shell-local environment manager or explicit secret source:
 
 ```console
 export OPENROUTER_API_KEY="$(secret-tool lookup service openrouter)"
