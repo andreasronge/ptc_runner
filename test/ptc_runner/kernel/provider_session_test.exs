@@ -2,6 +2,7 @@ defmodule PtcRunner.Kernel.ProviderSessionTest do
   use ExUnit.Case, async: true
 
   alias PtcRunner.Kernel.Limits
+  alias PtcRunner.Kernel.ProviderScopeOwner
   alias PtcRunner.Kernel.ProviderSession
   alias PtcRunner.Kernel.ResourceRegistrar
 
@@ -35,6 +36,9 @@ defmodule PtcRunner.Kernel.ProviderSessionTest do
     {:ok, session} = ProviderSession.start(limits())
     {:ok, registrar} = ProviderSession.open_registrar(session)
     assert :ok = ResourceRegistrar.activate(registrar)
+    root = start_owned_root(registrar, parent, :abnormal)
+    root_monitor = Process.monitor(root)
+    assert_receive {:root_ready, :abnormal, ^root}
 
     assert :ok =
              ResourceRegistrar.commit(registrar, fn ->
@@ -45,9 +49,24 @@ defmodule PtcRunner.Kernel.ProviderSessionTest do
     monitor = Process.monitor(session.pid)
     Process.exit(session.pid, :kill)
     assert_receive {:DOWN, ^monitor, :process, _, :killed}
+    assert_receive {:DOWN, ^root_monitor, :process, ^root, :normal}
 
     assert {:error, :provider_cleanup_failed} = ProviderSession.close(session)
     refute_receive :unexpected_cleanup
+  end
+
+  test "abnormal session death gives a stubborn root one bound before force-kill" do
+    parent = self()
+    {:ok, limits} = Limits.new(provider_cleanup_timeout_ms: 100)
+    {:ok, session} = ProviderSession.start(limits)
+    {:ok, registrar} = ProviderSession.open_registrar(session)
+    assert :ok = ResourceRegistrar.activate(registrar)
+    root = start_stubborn_root(registrar, parent)
+    root_monitor = Process.monitor(root)
+    assert_receive {:stubborn_root_ready, ^root}
+
+    Process.exit(session.pid, :kill)
+    assert_receive {:DOWN, ^root_monitor, :process, ^root, :killed}, 1_000
   end
 
   test "registrars enforce activation and terminal transitions" do
@@ -65,6 +84,595 @@ defmodule PtcRunner.Kernel.ProviderSessionTest do
     assert {:error, :resource_registrar_unavailable} =
              ResourceRegistrar.commit(committed, nil)
 
+    assert :ok = ProviderSession.close(session)
+  end
+
+  test "registrar owners isolate provisional roots by acquisition scope" do
+    parent = self()
+    {:ok, session} = ProviderSession.start(limits())
+    {:ok, first} = ProviderSession.open_registrar(session)
+    {:ok, second} = ProviderSession.open_registrar(session)
+
+    first_owner = ResourceRegistrar.scope_owner(first)
+    second_owner = ResourceRegistrar.scope_owner(second)
+
+    assert is_pid(first_owner)
+    assert is_pid(second_owner)
+    refute first_owner == second_owner
+    refute first_owner == session.pid
+    refute second_owner == session.pid
+
+    assert :ok = ResourceRegistrar.activate(first)
+    assert :ok = ResourceRegistrar.activate(second)
+    first_root = start_owned_root(first, parent, :first)
+    second_root = start_owned_root(second, parent, :second)
+    first_monitor = Process.monitor(first_root)
+    second_monitor = Process.monitor(second_root)
+    observer = start_owner_observer(first_owner, parent)
+    observer_monitor = Process.monitor(observer)
+
+    assert_receive {:root_ready, :first, ^first_root}
+    assert_receive {:root_ready, :second, ^second_root}
+    assert_receive {:observer_ready, ^observer}
+    assert :ok = ResourceRegistrar.abort(first)
+
+    assert_receive {:DOWN, ^first_monitor, :process, ^first_root, :normal}
+    assert_receive {:owner_down_observed, ^observer}
+    refute_receive {:DOWN, ^observer_monitor, :process, ^observer, _reason}
+    assert Process.alive?(observer)
+    refute_receive {:DOWN, ^second_monitor, :process, ^second_root, _reason}
+    assert Process.alive?(second_root)
+
+    Process.exit(observer, :kill)
+    assert_receive {:DOWN, ^observer_monitor, :process, ^observer, :killed}
+    assert :ok = ProviderSession.close(session)
+    assert_receive {:DOWN, ^second_monitor, :process, ^second_root, :normal}
+  end
+
+  test "aborting one scope does not consume a later scope's cleanup deadline" do
+    parent = self()
+    {:ok, limits} = Limits.new(provider_cleanup_timeout_ms: 100)
+    {:ok, session} = ProviderSession.start(limits)
+    {:ok, first} = ProviderSession.open_registrar(session)
+    {:ok, second} = ProviderSession.open_registrar(session)
+    assert :ok = ResourceRegistrar.activate(first)
+    assert :ok = ResourceRegistrar.activate(second)
+    second_root = start_owned_root(second, parent, :later_scope)
+    second_monitor = Process.monitor(second_root)
+    assert_receive {:root_ready, :later_scope, ^second_root}
+
+    assert :ok = ResourceRegistrar.abort(first)
+    Process.send_after(self(), :first_deadline_elapsed, 150)
+    assert_receive :first_deadline_elapsed, 1_000
+
+    assert :ok = ResourceRegistrar.commit(second, nil)
+    assert :ok = ProviderSession.close(session)
+    assert_receive {:DOWN, ^second_monitor, :process, ^second_root, :normal}
+  end
+
+  test "committed closer runs before its scope owner is terminated" do
+    parent = self()
+    {:ok, session} = ProviderSession.start(limits())
+    {:ok, registrar} = ProviderSession.open_registrar(session)
+    assert :ok = ResourceRegistrar.activate(registrar)
+    root = start_owned_root(registrar, parent, :committed)
+    root_monitor = Process.monitor(root)
+    assert_receive {:root_ready, :committed, ^root}
+
+    assert :ok =
+             ResourceRegistrar.commit(registrar, fn ->
+               send(parent, {:closer_saw_root, Process.alive?(root)})
+               :ok
+             end)
+
+    assert :ok = ProviderSession.close(session)
+    assert_receive {:closer_saw_root, true}
+    assert_receive {:DOWN, ^root_monitor, :process, ^root, :normal}
+  end
+
+  test "a dormant scope owner does not consume the existing closer budget" do
+    parent = self()
+    {:ok, limits} = Limits.new(provider_cleanup_timeout_ms: 400)
+    {:ok, session} = ProviderSession.start(limits)
+    {:ok, registrar} = ProviderSession.open_registrar(session)
+    assert :ok = ResourceRegistrar.activate(registrar)
+
+    assert :ok =
+             ResourceRegistrar.commit(registrar, fn ->
+               send(parent, {:budgeted_closer_started, self()})
+
+               receive do
+                 :finish_budgeted_close -> :ok
+               end
+             end)
+
+    spawn(fn -> send(parent, {:budgeted_close_result, ProviderSession.close(session)}) end)
+    assert_receive {:budgeted_closer_started, closer}
+    Process.send_after(closer, :finish_budgeted_close, 250)
+    assert_receive {:budgeted_close_result, :ok}, 1_000
+  end
+
+  test "two healthy committed scopes close within short cleanup slices" do
+    {:ok, limits} = Limits.new(provider_cleanup_timeout_ms: 100)
+    {:ok, session} = ProviderSession.start(limits)
+    {:ok, first} = ProviderSession.open_registrar(session)
+    {:ok, second} = ProviderSession.open_registrar(session)
+    assert :ok = ResourceRegistrar.activate(first)
+    assert :ok = ResourceRegistrar.activate(second)
+    assert :ok = ResourceRegistrar.commit(first, fn -> :ok end)
+    assert :ok = ResourceRegistrar.commit(second, fn -> :ok end)
+
+    assert :ok = ProviderSession.close(session)
+  end
+
+  test "stubborn root cleanup reserves time for later provider closers" do
+    parent = self()
+    {:ok, limits} = Limits.new(provider_cleanup_timeout_ms: 200)
+    {:ok, session} = ProviderSession.start(limits)
+    {:ok, later} = ProviderSession.open_registrar(session)
+    {:ok, stubborn} = ProviderSession.open_registrar(session)
+    assert :ok = ResourceRegistrar.activate(later)
+    assert :ok = ResourceRegistrar.activate(stubborn)
+    root = start_stubborn_root(stubborn, parent)
+    root_monitor = Process.monitor(root)
+    assert_receive {:stubborn_root_ready, ^root}
+
+    assert :ok =
+             ResourceRegistrar.commit(later, fn ->
+               send(parent, :later_provider_closed)
+               :ok
+             end)
+
+    assert :ok = ResourceRegistrar.commit(stubborn, nil)
+    assert {:error, :provider_cleanup_failed} = ProviderSession.close(session)
+    assert_receive :later_provider_closed
+    assert_receive {:DOWN, ^root_monitor, :process, ^root, :killed}
+  end
+
+  test "registered roots retain an observed cleanup window after their closer" do
+    parent = self()
+    {:ok, limits} = Limits.new(provider_cleanup_timeout_ms: 200)
+    {:ok, session} = ProviderSession.start(limits)
+    {:ok, registrar} = ProviderSession.open_registrar(session)
+    assert :ok = ResourceRegistrar.activate(registrar)
+    root = start_stubborn_root(registrar, parent)
+    root_monitor = Process.monitor(root)
+    assert_receive {:stubborn_root_ready, ^root}
+
+    assert :ok =
+             ResourceRegistrar.commit(registrar, fn ->
+               receive do
+                 :never_finish -> :ok
+               end
+             end)
+
+    assert {:error, :provider_cleanup_failed} = ProviderSession.close(session)
+    refute Process.alive?(root)
+    assert_receive {:DOWN, ^root_monitor, :process, ^root, :killed}
+  end
+
+  test "cleanup force-kills a registered root that ignores owner death" do
+    parent = self()
+    {:ok, limits} = Limits.new(provider_cleanup_timeout_ms: 100)
+    {:ok, session} = ProviderSession.start(limits)
+    {:ok, registrar} = ProviderSession.open_registrar(session)
+    assert :ok = ResourceRegistrar.activate(registrar)
+    root = start_stubborn_root(registrar, parent)
+    root_monitor = Process.monitor(root)
+    assert_receive {:stubborn_root_ready, ^root}
+    assert :ok = ResourceRegistrar.commit(registrar, nil)
+
+    assert {:error, :provider_cleanup_failed} = ProviderSession.close(session)
+    refute Process.alive?(root)
+    assert_receive {:DOWN, ^root_monitor, :process, ^root, :killed}
+  end
+
+  test "cleanup force-kills and observes a suspended signal owner without roots" do
+    {:ok, limits} = Limits.new(provider_cleanup_timeout_ms: 100)
+    {:ok, session} = ProviderSession.start(limits)
+    {:ok, registrar} = ProviderSession.open_registrar(session)
+    owner = ResourceRegistrar.scope_owner(registrar)
+    owner_monitor = Process.monitor(owner)
+
+    assert true = :erlang.suspend_process(owner)
+    assert :ok = ResourceRegistrar.activate(registrar)
+    assert :ok = ResourceRegistrar.commit(registrar, nil)
+
+    assert {:error, :provider_cleanup_failed} = ProviderSession.close(session)
+    refute Process.alive?(owner)
+    assert_receive {:DOWN, ^owner_monitor, :process, ^owner, :killed}
+  end
+
+  test "queued cleanup preserves the caller's absolute deadline" do
+    parent = self()
+    {:ok, limits} = Limits.new(provider_cleanup_timeout_ms: 200)
+    {:ok, session} = ProviderSession.start(limits)
+    {:ok, registrar} = ProviderSession.open_registrar(session)
+    assert :ok = ResourceRegistrar.activate(registrar)
+    root = start_stubborn_root(registrar, parent)
+    root_monitor = Process.monitor(root)
+    assert_receive {:stubborn_root_ready, ^root}
+    assert :ok = ResourceRegistrar.commit(registrar, nil)
+
+    _suspender =
+      spawn(fn ->
+        true = :erlang.suspend_process(registrar.cleanup_owner)
+        send(parent, :cleanup_owner_suspended)
+        Process.send_after(self(), :resume, 175)
+
+        receive do
+          :resume -> :erlang.resume_process(registrar.cleanup_owner)
+        end
+      end)
+
+    assert_receive :cleanup_owner_suspended
+
+    assert {:error, :provider_cleanup_failed} = ProviderSession.close(session)
+    refute Process.alive?(root)
+    assert_receive {:DOWN, ^root_monitor, :process, ^root, :killed}
+  end
+
+  test "cleanup does not depend on a responsive scope controller" do
+    parent = self()
+    {:ok, limits} = Limits.new(provider_cleanup_timeout_ms: 100)
+    {:ok, session} = ProviderSession.start(limits)
+    {:ok, registrar} = ProviderSession.open_registrar(session)
+    assert :ok = ResourceRegistrar.activate(registrar)
+    root = start_stubborn_root(registrar, parent)
+    root_monitor = Process.monitor(root)
+    controller_monitor = Process.monitor(registrar.scope_controller)
+    assert_receive {:stubborn_root_ready, ^root}
+    assert :ok = ResourceRegistrar.commit(registrar, nil)
+
+    assert true = :erlang.suspend_process(registrar.scope_controller)
+    assert {:error, :provider_cleanup_failed} = ProviderSession.close(session)
+
+    assert_receive {:DOWN, ^root_monitor, :process, ^root, :killed}
+    assert_receive {:DOWN, ^controller_monitor, :process, _pid, :killed}
+    refute Process.alive?(root)
+    refute Process.alive?(registrar.scope_controller)
+  end
+
+  test "registration stalled at its gate cannot delay session cleanup" do
+    parent = self()
+    {:ok, limits} = Limits.new(provider_cleanup_timeout_ms: 100)
+    {:ok, session} = ProviderSession.start(limits)
+    {:ok, registrar} = ProviderSession.open_registrar(session)
+    assert :ok = ResourceRegistrar.activate(registrar)
+    assert true = :erlang.suspend_process(registrar.scope_controller)
+
+    root =
+      spawn(fn ->
+        send(parent, {:registration_result, ResourceRegistrar.register_root(registrar)})
+      end)
+
+    root_monitor = Process.monitor(root)
+    assert_pending_registrations(session, 1)
+    started_at = System.monotonic_time(:millisecond)
+
+    assert :ok = ProviderSession.close(session)
+    assert System.monotonic_time(:millisecond) - started_at < 1_000
+    assert_receive {:registration_result, {:error, :resource_registrar_unavailable}}
+    assert_receive {:DOWN, ^root_monitor, :process, ^root, :normal}
+    refute Process.alive?(registrar.scope_controller)
+  end
+
+  @tag timeout: 7_000
+  test "registration returns without mutation when the session is unresponsive" do
+    parent = self()
+    {:ok, session} = ProviderSession.start(limits())
+    {:ok, registrar} = ProviderSession.open_registrar(session)
+    assert :ok = ResourceRegistrar.activate(registrar)
+    assert true = :erlang.suspend_process(session.pid)
+
+    root =
+      spawn(fn ->
+        send(parent, {:unresponsive_registration, ResourceRegistrar.register_root(registrar)})
+      end)
+
+    root_monitor = Process.monitor(root)
+    assert_receive {:unresponsive_registration, {:error, :resource_registrar_unavailable}}, 6_000
+    assert_receive {:DOWN, ^root_monitor, :process, ^root, :normal}
+    assert true = :erlang.resume_process(session.pid)
+
+    state = :sys.get_state(session.pid)
+    refute state.scopes[registrar.scope].roots_registered?
+    assert :ok = ResourceRegistrar.abort(registrar)
+    assert :ok = ProviderSession.close(session)
+  end
+
+  test "accepted registration can reply after the mutation cutoff" do
+    parent = self()
+    {:ok, session} = ProviderSession.start(limits())
+    {:ok, registrar} = ProviderSession.open_registrar(session)
+    assert :ok = ResourceRegistrar.activate(registrar)
+    assert true = :erlang.suspend_process(registrar.scope_controller)
+
+    root =
+      spawn(fn ->
+        result = ProviderSession.register_root(registrar, 500)
+        send(parent, {:reserved_registration_response, result})
+      end)
+
+    root_monitor = Process.monitor(root)
+    assert_pending_registrations(session, 1)
+
+    [pending] = Map.values(:sys.get_state(session.pid).pending_registrations)
+    assert pending.response_deadline_ms > pending.mutation_deadline_ms
+    assert true = :erlang.suspend_process(session.pid)
+    assert true = :erlang.resume_process(registrar.scope_controller)
+    assert_message_queue_at_least(session.pid, 1)
+
+    delay_ms = max(pending.mutation_deadline_ms + 1 - System.monotonic_time(:millisecond), 0)
+    Process.send_after(self(), :resume_registration_session, delay_ms)
+    assert_receive :resume_registration_session, 600
+    assert true = :erlang.resume_process(session.pid)
+
+    assert_receive {:reserved_registration_response, :ok}
+    assert_receive {:DOWN, ^root_monitor, :process, ^root, :normal}
+    assert :ok = ResourceRegistrar.abort(registrar)
+    assert :ok = ProviderSession.close(session)
+  end
+
+  test "pending registration admission enforces the root cap per scope" do
+    parent = self()
+    {:ok, limits} = Limits.new(provider_cleanup_timeout_ms: 100)
+    {:ok, session} = ProviderSession.start(limits)
+    {:ok, stalled} = ProviderSession.open_registrar(session)
+    {:ok, healthy} = ProviderSession.open_registrar(session)
+    assert :ok = ResourceRegistrar.activate(stalled)
+    assert :ok = ResourceRegistrar.activate(healthy)
+    assert true = :erlang.suspend_process(stalled.scope_controller)
+
+    waiting =
+      for _index <- 1..ProviderScopeOwner.max_roots() do
+        spawn(fn ->
+          send(parent, {:pending_registration_result, ResourceRegistrar.register_root(stalled)})
+        end)
+      end
+
+    assert_pending_registrations(session, ProviderScopeOwner.max_roots())
+
+    rejected =
+      spawn(fn ->
+        send(parent, {:capped_registration_result, ResourceRegistrar.register_root(stalled)})
+      end)
+
+    rejected_monitor = Process.monitor(rejected)
+    healthy_root = start_owned_root(healthy, parent, :healthy_scope)
+    healthy_monitor = Process.monitor(healthy_root)
+
+    assert_receive {:capped_registration_result, {:error, :resource_registrar_unavailable}}
+    assert_receive {:DOWN, ^rejected_monitor, :process, ^rejected, :normal}
+    assert_receive {:root_ready, :healthy_scope, ^healthy_root}
+
+    started_at = System.monotonic_time(:millisecond)
+    assert :ok = ProviderSession.close(session)
+    assert System.monotonic_time(:millisecond) - started_at < 1_000
+    assert_receive {:DOWN, ^healthy_monitor, :process, ^healthy_root, :normal}
+
+    for _root <- waiting do
+      assert_receive {:pending_registration_result, {:error, :resource_registrar_unavailable}}
+    end
+  end
+
+  test "an expired handoff cannot mutate ownership after reporting failure" do
+    parent = self()
+    {:ok, limits} = Limits.new(provider_cleanup_timeout_ms: 100)
+    {:ok, session} = ProviderSession.start(limits)
+    {:ok, registrar} = ProviderSession.open_registrar(session)
+    assert :ok = ResourceRegistrar.activate(registrar)
+    root = start_stubborn_root(registrar, parent)
+    root_monitor = Process.monitor(root)
+    assert_receive {:stubborn_root_ready, ^root}
+    assert true = :erlang.suspend_process(registrar.cleanup_owner)
+
+    spawn(fn ->
+      result = ProviderScopeOwner.handoff(registrar.cleanup_owner, session.pid, root, 100)
+      send(parent, {:delayed_handoff_result, result})
+    end)
+
+    assert_receive {:delayed_handoff_result, {:error, :provider_scope_unavailable}}, 1_000
+    assert true = :erlang.resume_process(registrar.cleanup_owner)
+
+    assert {:error, :provider_cleanup_failed} = ResourceRegistrar.abort(registrar)
+    assert_receive {:DOWN, ^root_monitor, :process, ^root, :killed}
+    refute Process.alive?(root)
+    assert :ok = ProviderSession.close(session)
+  end
+
+  test "scope controller survives session death during normal root drain" do
+    parent = self()
+    {:ok, limits} = Limits.new(provider_cleanup_timeout_ms: 100)
+    {:ok, session} = ProviderSession.start(limits)
+    {:ok, registrar} = ProviderSession.open_registrar(session)
+    assert :ok = ResourceRegistrar.activate(registrar)
+    root = start_notifying_stubborn_root(registrar, parent)
+    root_monitor = Process.monitor(root)
+    assert_receive {:stubborn_root_ready, ^root}
+    assert :ok = ResourceRegistrar.commit(registrar, nil)
+
+    spawn(fn -> send(parent, {:close_result, ProviderSession.close(session)}) end)
+    assert_receive {:stubborn_owner_down, ^root}
+    Process.exit(session.pid, :kill)
+
+    assert_receive {:DOWN, ^root_monitor, :process, ^root, :killed}, 1_000
+    assert_receive {:close_result, {:error, :provider_cleanup_failed}}
+  end
+
+  test "scope cleanup accepts a terminal handoff during cooperative drain" do
+    parent = self()
+    {:ok, limits} = Limits.new(provider_cleanup_timeout_ms: 100)
+    {:ok, session} = ProviderSession.start(limits)
+    {:ok, registrar} = ProviderSession.open_registrar(session)
+    assert :ok = ResourceRegistrar.activate(registrar)
+    root = start_notifying_stubborn_root(registrar, parent)
+    root_monitor = Process.monitor(root)
+    assert_receive {:stubborn_root_ready, ^root}
+    assert :ok = ResourceRegistrar.commit(registrar, nil)
+
+    spawn(fn -> send(parent, {:close_result, ProviderSession.close(session)}) end)
+    assert_receive {:stubborn_owner_down, ^root}
+
+    assert :ok = ResourceRegistrar.handoff_root(registrar, root)
+    assert_receive {:close_result, :ok}
+    refute_receive {:DOWN, ^root_monitor, :process, ^root, _reason}
+    assert Process.alive?(root)
+
+    Process.exit(root, :kill)
+    assert_receive {:DOWN, ^root_monitor, :process, ^root, :killed}
+  end
+
+  test "queued handoff traffic cannot extend the cooperative cleanup deadline" do
+    parent = self()
+    {:ok, limits} = Limits.new(provider_cleanup_timeout_ms: 100)
+    {:ok, session} = ProviderSession.start(limits)
+    {:ok, registrar} = ProviderSession.open_registrar(session)
+    assert :ok = ResourceRegistrar.activate(registrar)
+    root = start_notifying_stubborn_root(registrar, parent)
+    root_monitor = Process.monitor(root)
+    assert_receive {:stubborn_root_ready, ^root}
+    assert :ok = ResourceRegistrar.commit(registrar, nil)
+
+    spawn(fn -> send(parent, {:close_result, ProviderSession.close(session)}) end)
+    assert_receive {:stubborn_owner_down, ^root}
+
+    noise = spawn(fn -> receive do: (:stop -> :ok) end)
+    operation_deadline_ms = System.monotonic_time(:millisecond) + 5_000
+
+    for _index <- 1..2_000 do
+      send(
+        registrar.cleanup_owner,
+        {ProviderScopeOwner, {:handoff, session.pid, self(), operation_deadline_ms}, noise,
+         make_ref()}
+      )
+    end
+
+    assert_receive {:close_result, {:error, :provider_cleanup_failed}}, 1_000
+    assert_receive {:DOWN, ^root_monitor, :process, ^root, :killed}
+    Process.exit(noise, :kill)
+  end
+
+  test "cleanup force-kills exact roots when the signal owner cannot stop" do
+    parent = self()
+    {:ok, limits} = Limits.new(provider_cleanup_timeout_ms: 100)
+    {:ok, session} = ProviderSession.start(limits)
+    {:ok, registrar} = ProviderSession.open_registrar(session)
+    assert :ok = ResourceRegistrar.activate(registrar)
+    root = start_stubborn_root(registrar, parent)
+    root_monitor = Process.monitor(root)
+    assert_receive {:stubborn_root_ready, ^root}
+    assert true = :erlang.suspend_process(ResourceRegistrar.scope_owner(registrar))
+    assert :ok = ResourceRegistrar.commit(registrar, nil)
+
+    assert {:error, :provider_cleanup_failed} = ProviderSession.close(session)
+    assert_receive {:DOWN, ^root_monitor, :process, ^root, :killed}
+    refute Process.alive?(ResourceRegistrar.scope_owner(registrar))
+    refute Process.alive?(root)
+  end
+
+  test "the signal owner cannot be handed off as though it were a root" do
+    parent = self()
+    {:ok, limits} = Limits.new(provider_cleanup_timeout_ms: 100)
+    {:ok, session} = ProviderSession.start(limits)
+    {:ok, registrar} = ProviderSession.open_registrar(session)
+    signal_owner = ResourceRegistrar.scope_owner(registrar)
+    signal_monitor = Process.monitor(signal_owner)
+    assert true = :erlang.suspend_process(signal_owner)
+    assert :ok = ResourceRegistrar.activate(registrar)
+    root = start_stubborn_root(registrar, parent)
+    root_monitor = Process.monitor(root)
+    assert_receive {:stubborn_root_ready, ^root}
+    assert :ok = ResourceRegistrar.commit(registrar, nil)
+    assert true = :erlang.suspend_process(registrar.cleanup_owner)
+
+    spawn(fn -> send(parent, {:close_result, ProviderSession.close(session)}) end)
+
+    spawn(fn ->
+      send(
+        parent,
+        {:signal_handoff_result, ResourceRegistrar.handoff_root(registrar, signal_owner)}
+      )
+    end)
+
+    assert_message_queue_at_least(registrar.cleanup_owner, 2)
+    assert true = :erlang.resume_process(registrar.cleanup_owner)
+
+    assert_receive {:signal_handoff_result, {:error, :resource_registrar_unavailable}}
+    assert_receive {:close_result, {:error, :provider_cleanup_failed}}, 1_000
+    assert_receive {:DOWN, ^signal_monitor, :process, ^signal_owner, :killed}
+    assert_receive {:DOWN, ^root_monitor, :process, ^root, :killed}
+  end
+
+  test "root admission is capped so forced cleanup remains structurally bounded" do
+    parent = self()
+    {:ok, limits} = Limits.new(provider_cleanup_timeout_ms: 100)
+    {:ok, session} = ProviderSession.start(limits)
+    {:ok, registrar} = ProviderSession.open_registrar(session)
+    assert :ok = ResourceRegistrar.activate(registrar)
+
+    roots =
+      for index <- 1..64 do
+        root = start_owned_root(registrar, parent, index)
+        assert_receive {:root_ready, ^index, ^root}
+        root
+      end
+
+    rejected = start_owned_root(registrar, parent, :over_limit)
+    rejected_monitor = Process.monitor(rejected)
+
+    assert_receive {:root_registration_failed, :over_limit, :resource_registrar_unavailable}
+
+    assert_receive {:DOWN, ^rejected_monitor, :process, ^rejected, :normal}
+
+    monitors = Map.new(roots, &{Process.monitor(&1), &1})
+    started_at = System.monotonic_time(:millisecond)
+    assert :ok = ResourceRegistrar.abort(registrar)
+    assert System.monotonic_time(:millisecond) - started_at < 1_000
+    assert_roots_down(monitors)
+    assert :ok = ProviderSession.close(session)
+  end
+
+  test "a handed-off terminalization root survives scope cleanup" do
+    parent = self()
+    {:ok, session} = ProviderSession.start(limits())
+    {:ok, registrar} = ProviderSession.open_registrar(session)
+    assert :ok = ResourceRegistrar.activate(registrar)
+    root = start_handoff_root(registrar, parent)
+    root_monitor = Process.monitor(root)
+    assert_receive {:handoff_root_ready, ^root}
+    assert :ok = ResourceRegistrar.handoff_root(registrar, root)
+
+    assert :ok = ResourceRegistrar.abort(registrar)
+    assert_receive {:owner_down_observed, ^root}
+    refute_receive {:DOWN, ^root_monitor, :process, ^root, _reason}
+    assert Process.alive?(root)
+
+    Process.exit(root, :kill)
+    assert_receive {:DOWN, ^root_monitor, :process, ^root, :killed}
+    assert :ok = ProviderSession.close(session)
+  end
+
+  test "a registered root can stop before its scope commits" do
+    parent = self()
+    {:ok, session} = ProviderSession.start(limits())
+    {:ok, registrar} = ProviderSession.open_registrar(session)
+    assert :ok = ResourceRegistrar.activate(registrar)
+
+    root =
+      spawn(fn ->
+        Process.monitor(ResourceRegistrar.scope_owner(registrar))
+        :ok = ResourceRegistrar.register_root(registrar)
+        send(parent, {:short_root_ready, self()})
+        receive do: (:stop -> :ok)
+      end)
+
+    root_monitor = Process.monitor(root)
+    assert_receive {:short_root_ready, ^root}
+    send(root, :stop)
+    assert_receive {:DOWN, ^root_monitor, :process, ^root, :normal}
+
+    assert :ok = ResourceRegistrar.commit(registrar, nil)
     assert :ok = ProviderSession.close(session)
   end
 
@@ -174,6 +782,114 @@ defmodule PtcRunner.Kernel.ProviderSessionTest do
     fn ->
       Agent.update(agent, &[value | &1])
       :ok
+    end
+  end
+
+  defp start_owned_root(registrar, parent, label) do
+    spawn(fn ->
+      owner = ResourceRegistrar.scope_owner(registrar)
+      owner_monitor = Process.monitor(owner)
+
+      case ResourceRegistrar.register_root(registrar) do
+        :ok ->
+          send(parent, {:root_ready, label, self()})
+
+          receive do
+            {:DOWN, ^owner_monitor, :process, ^owner, _reason} -> :ok
+          end
+
+        {:error, reason} ->
+          send(parent, {:root_registration_failed, label, reason})
+      end
+    end)
+  end
+
+  defp start_owner_observer(owner, parent) do
+    spawn(fn ->
+      owner_monitor = Process.monitor(owner)
+      send(parent, {:observer_ready, self()})
+
+      receive do
+        {:DOWN, ^owner_monitor, :process, ^owner, _reason} ->
+          send(parent, {:owner_down_observed, self()})
+          receive do: (:stop -> :ok)
+      end
+    end)
+  end
+
+  defp start_stubborn_root(registrar, parent) do
+    spawn(fn ->
+      owner = ResourceRegistrar.scope_owner(registrar)
+      owner_monitor = Process.monitor(owner)
+      :ok = ResourceRegistrar.register_root(registrar)
+      send(parent, {:stubborn_root_ready, self()})
+
+      receive do
+        {:DOWN, ^owner_monitor, :process, ^owner, _reason} ->
+          receive do: (:stop -> :ok)
+      end
+    end)
+  end
+
+  defp start_handoff_root(registrar, parent) do
+    spawn(fn ->
+      owner = ResourceRegistrar.scope_owner(registrar)
+      owner_monitor = Process.monitor(owner)
+      :ok = ResourceRegistrar.register_root(registrar)
+      send(parent, {:handoff_root_ready, self()})
+
+      receive do
+        {:DOWN, ^owner_monitor, :process, ^owner, _reason} ->
+          send(parent, {:owner_down_observed, self()})
+          receive do: (:stop -> :ok)
+      end
+    end)
+  end
+
+  defp start_notifying_stubborn_root(registrar, parent) do
+    spawn(fn ->
+      owner = ResourceRegistrar.scope_owner(registrar)
+      owner_monitor = Process.monitor(owner)
+      :ok = ResourceRegistrar.register_root(registrar)
+      send(parent, {:stubborn_root_ready, self()})
+
+      receive do
+        {:DOWN, ^owner_monitor, :process, ^owner, _reason} ->
+          send(parent, {:stubborn_owner_down, self()})
+          receive do: (:stop -> :ok)
+      end
+    end)
+  end
+
+  defp assert_roots_down(monitors) when map_size(monitors) == 0, do: :ok
+
+  defp assert_roots_down(monitors) do
+    receive do
+      {:DOWN, monitor, :process, root, _reason} when is_map_key(monitors, monitor) ->
+        assert Map.fetch!(monitors, monitor) == root
+        assert_roots_down(Map.delete(monitors, monitor))
+    after
+      1_000 -> flunk("registered roots did not all terminate")
+    end
+  end
+
+  defp assert_pending_registrations(session, expected) do
+    if map_size(:sys.get_state(session.pid).pending_registrations) == expected do
+      :ok
+    else
+      :erlang.yield()
+      assert_pending_registrations(session, expected)
+    end
+  end
+
+  defp assert_message_queue_at_least(pid, expected) do
+    case Process.info(pid, :message_queue_len) do
+      {:message_queue_len, count} when count >= expected ->
+        :ok
+
+      _waiting ->
+        :erlang.yield()
+        assert_message_queue_at_least(pid, expected)
     end
   end
 end

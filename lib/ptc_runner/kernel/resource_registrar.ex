@@ -5,15 +5,22 @@ defmodule PtcRunner.Kernel.ResourceRegistrar do
   A registrar belongs to one `PtcRunner.Kernel.ProviderSession` acquisition
   scope and is inert until activated. Successful acquisition commits one
   provider close operation for the scope; failed acquisition aborts it.
-  Process and port root admission is added with the shipped-adapter migration,
-  so this foundation exposes no unused root-start API. Callers cannot construct
-  or retarget registrar handles.
+  Scoped process-root admission is internal until the shipped-adapter migration
+  activates it. Callers cannot construct or retarget registrar handles.
   """
 
   alias PtcRunner.Kernel.Attestation
   alias PtcRunner.Kernel.ProviderSession
 
-  @enforce_keys [:session, :token, :scope, :attestation]
+  @enforce_keys [
+    :session,
+    :token,
+    :scope,
+    :scope_controller,
+    :root_owner,
+    :cleanup_owner,
+    :attestation
+  ]
   defstruct @enforce_keys
   @field_keys Enum.sort([:__struct__ | @enforce_keys])
 
@@ -21,17 +28,24 @@ defmodule PtcRunner.Kernel.ResourceRegistrar do
             session: pid(),
             token: reference(),
             scope: reference(),
+            scope_controller: pid(),
+            root_owner: pid(),
+            cleanup_owner: pid(),
             attestation: binary()
           }
 
   @doc false
-  @spec new(pid(), reference(), reference()) :: t()
-  def new(session, token, scope)
-      when is_pid(session) and is_reference(token) and is_reference(scope) do
+  @spec new(pid(), reference(), reference(), pid(), pid(), pid()) :: t()
+  def new(session, token, scope, scope_controller, root_owner, cleanup_owner)
+      when is_pid(session) and is_reference(token) and is_reference(scope) and
+             is_pid(scope_controller) and is_pid(root_owner) and is_pid(cleanup_owner) do
     registrar = %__MODULE__{
       session: session,
       token: token,
       scope: scope,
+      scope_controller: scope_controller,
+      root_owner: root_owner,
+      cleanup_owner: cleanup_owner,
       attestation: <<>>
     }
 
@@ -43,16 +57,44 @@ defmodule PtcRunner.Kernel.ResourceRegistrar do
     do:
       Enum.sort(Map.keys(registrar)) == @field_keys and is_pid(registrar.session) and
         is_reference(registrar.token) and is_reference(registrar.scope) and
+        is_pid(registrar.scope_controller) and
+        is_pid(registrar.root_owner) and
+        is_pid(registrar.cleanup_owner) and
         Attestation.valid?(__MODULE__, payload(registrar), registrar.attestation)
 
   def valid?(_registrar), do: false
 
-  @doc "Returns the private process that owns this acquisition scope."
+  @doc "Returns the process that currently owns this acquisition scope."
   @spec owner(t()) :: pid() | nil
   def owner(%__MODULE__{} = registrar),
     do: if(valid?(registrar), do: registrar.session, else: nil)
 
   def owner(_registrar), do: nil
+
+  @doc false
+  @spec register_root(t() | nil) :: :ok | {:error, :resource_registrar_unavailable}
+  def register_root(nil), do: :ok
+
+  def register_root(%__MODULE__{} = registrar),
+    do: ProviderSession.register_root(registrar)
+
+  def register_root(_registrar), do: {:error, :resource_registrar_unavailable}
+
+  @doc false
+  @spec handoff_root(t() | nil, pid()) :: :ok | {:error, :resource_registrar_unavailable}
+  def handoff_root(nil, _root), do: :ok
+
+  def handoff_root(%__MODULE__{} = registrar, root) when is_pid(root),
+    do: ProviderSession.handoff_root(registrar, root)
+
+  def handoff_root(_registrar, _root), do: {:error, :resource_registrar_unavailable}
+
+  @doc false
+  @spec scope_owner(t()) :: pid() | nil
+  def scope_owner(%__MODULE__{} = registrar),
+    do: if(valid?(registrar), do: registrar.root_owner, else: nil)
+
+  def scope_owner(_registrar), do: nil
 
   @doc false
   @spec activate(t()) :: :ok | {:error, :resource_registrar_unavailable}
@@ -72,5 +114,8 @@ defmodule PtcRunner.Kernel.ResourceRegistrar do
   def abort(%__MODULE__{} = registrar), do: ProviderSession.abort_registrar(registrar)
   def abort(_registrar), do: {:error, :provider_cleanup_failed}
 
-  defp payload(registrar), do: {registrar.session, registrar.token, registrar.scope}
+  defp payload(registrar),
+    do:
+      {registrar.session, registrar.token, registrar.scope, registrar.scope_controller,
+       registrar.root_owner, registrar.cleanup_owner}
 end

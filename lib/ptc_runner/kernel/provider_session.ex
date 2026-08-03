@@ -11,6 +11,18 @@ defmodule PtcRunner.Kernel.ProviderSession do
   is either committed with one provider close operation or aborted. Normal
   close and lifecycle-owner death drain committed scopes in reverse commit
   order, then discard remaining provisional scopes in reverse creation order.
+  A local process root monitors its scope's signal owner and synchronously
+  registers with the private scope controller before its start operation
+  returns. The controller forwards registration into one authoritative cleanup
+  owner; terminalization handoff and cleanup address that owner directly and
+  remain available if the controller stalls. Scope cleanup runs its closer
+  first, then the cleanup owner stops the signal owner so registered roots can
+  shut down normally; roots still alive at the bounded cutoff are killed and
+  observed. Registration, terminalization handoff, normal cleanup, and
+  session-crash cleanup therefore share one serialized root set. An OAuth root with unsettled
+  terminal work must close itself to new work and transfer ownership before the
+  force-close phase; abnormal session death permits that handoff during the
+  cooperative owner-down window.
 
   Cleanup shares the sealed `provider_cleanup_timeout_ms` deadline and runs
   each close operation in a heap-bounded worker. Failures never stop later
@@ -24,6 +36,7 @@ defmodule PtcRunner.Kernel.ProviderSession do
   alias PtcRunner.Kernel.BoundedWorker
   alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.Limits
+  alias PtcRunner.Kernel.ProviderScopeOwner
   alias PtcRunner.Kernel.ResourceRegistrar
 
   @enforce_keys [
@@ -34,6 +47,8 @@ defmodule PtcRunner.Kernel.ProviderSession do
     :max_heap_words,
     :attestation
   ]
+  @registration_timeout_ms 5_000
+  @registration_mutation_reserve_ms 50
   defstruct @enforce_keys
   @field_keys Enum.sort([:__struct__ | @enforce_keys])
 
@@ -99,8 +114,19 @@ defmodule PtcRunner.Kernel.ProviderSession do
   def open_registrar(%__MODULE__{} = session) do
     if valid?(session) and session.creator == self() do
       case call(session.pid, {session.token, :open_registrar}, 5_000) do
-        {:ok, scope} -> {:ok, ResourceRegistrar.new(session.pid, session.token, scope)}
-        _failure -> {:error, :provider_session_unavailable}
+        {:ok, scope, scope_controller, root_owner, cleanup_owner} ->
+          {:ok,
+           ResourceRegistrar.new(
+             session.pid,
+             session.token,
+             scope,
+             scope_controller,
+             root_owner,
+             cleanup_owner
+           )}
+
+        _failure ->
+          {:error, :provider_session_unavailable}
       end
     else
       {:error, :provider_session_unavailable}
@@ -214,6 +240,49 @@ defmodule PtcRunner.Kernel.ProviderSession do
   def abort_registrar(%ResourceRegistrar{} = registrar),
     do: registrar_call(registrar, :abort, {:error, :provider_cleanup_failed})
 
+  @doc false
+  def register_root(%ResourceRegistrar{} = registrar),
+    do: register_root(registrar, @registration_timeout_ms)
+
+  @doc false
+  def register_root(%ResourceRegistrar{} = registrar, timeout_ms)
+      when is_integer(timeout_ms) and timeout_ms > 0 do
+    if ResourceRegistrar.valid?(registrar) do
+      response_deadline_ms = System.monotonic_time(:millisecond) + timeout_ms
+
+      mutation_deadline_ms =
+        response_deadline_ms - min(@registration_mutation_reserve_ms, div(timeout_ms, 2))
+
+      call(
+        registrar.session,
+        {registrar.token,
+         {:registrar, registrar.scope,
+          {:register_root, mutation_deadline_ms, response_deadline_ms}}},
+        timeout_ms,
+        {:error, :resource_registrar_unavailable}
+      )
+    else
+      {:error, :resource_registrar_unavailable}
+    end
+  end
+
+  def register_root(_registrar, _timeout_ms), do: {:error, :resource_registrar_unavailable}
+
+  @doc false
+  def handoff_root(%ResourceRegistrar{} = registrar, root) when is_pid(root) do
+    if ResourceRegistrar.valid?(registrar) do
+      case ProviderScopeOwner.handoff(registrar.cleanup_owner, registrar.session, root) do
+        :ok ->
+          :ok
+
+        {:error, _reason} ->
+          {:error, :resource_registrar_unavailable}
+      end
+    else
+      {:error, :resource_registrar_unavailable}
+    end
+  end
+
   @impl true
   def init({creator, token, %Limits{} = limits}) do
     {:ok,
@@ -228,6 +297,7 @@ defmodule PtcRunner.Kernel.ProviderSession do
        run_state: nil,
        run_state_monitor: nil,
        providers: %{},
+       pending_registrations: %{},
        scopes: %{},
        scope_order: [],
        committed: []
@@ -238,21 +308,40 @@ defmodule PtcRunner.Kernel.ProviderSession do
   def handle_call({token, :open_registrar}, {creator, _tag}, state)
       when token == state.token and creator == state.owner do
     scope = make_ref()
-    entry = %{phase: :inactive, close: nil}
 
-    {:reply, {:ok, scope},
-     %{
-       state
-       | scopes: Map.put(state.scopes, scope, entry),
-         scope_order: [scope | state.scope_order]
-     }}
+    case ProviderScopeOwner.start(self(), state.cleanup_timeout_ms) do
+      {:ok, {scope_controller, root_owner, scope_reaper}} ->
+        entry = %{
+          phase: :inactive,
+          close: nil,
+          roots_registered?: false,
+          scope_controller: scope_controller,
+          root_owner: root_owner,
+          scope_reaper: scope_reaper
+        }
+
+        {:reply, {:ok, scope, scope_controller, root_owner, scope_reaper},
+         %{
+           state
+           | scopes: Map.put(state.scopes, scope, entry),
+             scope_order: [scope | state.scope_order]
+         }}
+
+      {:error, :provider_scope_unavailable} ->
+        {:reply, {:error, :provider_session_unavailable}, state}
+    end
   end
 
   def handle_call({token, {:registrar, scope, :activate}}, _from, state)
       when token == state.token do
     case Map.fetch(state.scopes, scope) do
-      {:ok, %{phase: :inactive} = entry} ->
-        {:reply, :ok, put_in(state.scopes[scope], %{entry | phase: :active})}
+      {:ok, %{phase: :inactive, scope_controller: scope_controller} = entry}
+      when is_pid(scope_controller) ->
+        if Process.alive?(scope_controller) do
+          {:reply, :ok, put_in(state.scopes[scope], %{entry | phase: :active})}
+        else
+          {:reply, {:error, :resource_registrar_unavailable}, state}
+        end
 
       _missing_or_closed ->
         {:reply, {:error, :resource_registrar_unavailable}, state}
@@ -262,11 +351,16 @@ defmodule PtcRunner.Kernel.ProviderSession do
   def handle_call({token, {:registrar, scope, {:commit, close}}}, _from, state)
       when token == state.token do
     case Map.fetch(state.scopes, scope) do
-      {:ok, %{phase: :active} = entry} when is_function(close, 0) or is_nil(close) ->
-        entry = %{entry | phase: :committed, close: close}
+      {:ok, %{phase: :active, scope_controller: scope_controller} = entry}
+      when (is_function(close, 0) or is_nil(close)) and is_pid(scope_controller) ->
+        if Process.alive?(scope_controller) do
+          entry = %{entry | phase: :committed, close: close}
 
-        {:reply, :ok,
-         %{put_in(state.scopes[scope], entry) | committed: [scope | state.committed]}}
+          {:reply, :ok,
+           %{put_in(state.scopes[scope], entry) | committed: [scope | state.committed]}}
+        else
+          {:reply, {:error, :resource_registrar_unavailable}, state}
+        end
 
       _missing_or_closed ->
         {:reply, {:error, :resource_registrar_unavailable}, state}
@@ -275,8 +369,63 @@ defmodule PtcRunner.Kernel.ProviderSession do
 
   def handle_call({token, {:registrar, scope, :abort}}, _from, state)
       when token == state.token do
+    state = reject_pending_registrations(state, scope)
     {result, state} = abort_scope(scope, state)
     {:reply, result, state}
+  end
+
+  def handle_call(
+        {token,
+         {:registrar, scope, {:register_root, mutation_deadline_ms, response_deadline_ms}}},
+        {root, _tag} = from,
+        state
+      )
+      when token == state.token and is_pid(root) and node(root) == node() and
+             is_integer(mutation_deadline_ms) and is_integer(response_deadline_ms) do
+    case Map.fetch(state.scopes, scope) do
+      {:ok, %{phase: :active, scope_controller: scope_controller}} ->
+        if before_deadline?(mutation_deadline_ms) and Process.alive?(scope_controller) and
+             pending_registration_count(state.pending_registrations, scope) <
+               ProviderScopeOwner.max_roots() do
+          request_ref = make_ref()
+
+          :ok =
+            ProviderScopeOwner.register(
+              scope_controller,
+              self(),
+              root,
+              self(),
+              request_ref,
+              mutation_deadline_ms
+            )
+
+          timer =
+            Process.send_after(
+              self(),
+              {__MODULE__, :registration_timeout, request_ref},
+              remaining(response_deadline_ms)
+            )
+
+          pending = %{
+            from: from,
+            scope: scope,
+            timer: timer,
+            mutation_deadline_ms: mutation_deadline_ms,
+            response_deadline_ms: response_deadline_ms
+          }
+
+          {:noreply,
+           %{
+             state
+             | pending_registrations: Map.put(state.pending_registrations, request_ref, pending)
+           }}
+        else
+          {:reply, {:error, :resource_registrar_unavailable}, state}
+        end
+
+      _missing_or_closed ->
+        {:reply, {:error, :resource_registrar_unavailable}, state}
+    end
   end
 
   def handle_call(
@@ -324,6 +473,7 @@ defmodule PtcRunner.Kernel.ProviderSession do
       when token == state.token and (is_function(close, 0) or is_nil(close)) do
     state =
       state
+      |> reject_pending_registrations()
       |> drain_provider_tasks_state()
       |> add_committed_close(close)
 
@@ -332,7 +482,7 @@ defmodule PtcRunner.Kernel.ProviderSession do
   end
 
   def handle_call({token, :close}, _from, state) when token == state.token do
-    state = drain_provider_tasks_state(state)
+    state = state |> reject_pending_registrations() |> drain_provider_tasks_state()
     {result, state} = drain(state)
     {:stop, :normal, result, state}
   end
@@ -345,7 +495,7 @@ defmodule PtcRunner.Kernel.ProviderSession do
         {:DOWN, monitor, :process, owner, _reason},
         %{owner_monitor: monitor, owner: owner} = state
       ) do
-    state = drain_provider_tasks_state(state)
+    state = state |> reject_pending_registrations() |> drain_provider_tasks_state()
     {_result, state} = drain(state)
     {:stop, :normal, state}
   end
@@ -362,6 +512,42 @@ defmodule PtcRunner.Kernel.ProviderSession do
     {:noreply, %{state | providers: Map.delete(state.providers, monitor)}}
   end
 
+  def handle_info(
+        {ProviderScopeOwner, :registration_result, request_ref, result},
+        state
+      ) do
+    case Map.pop(state.pending_registrations, request_ref) do
+      {nil, _pending} ->
+        {:noreply, state}
+
+      {%{from: from, scope: scope, timer: timer}, pending} ->
+        Process.cancel_timer(timer)
+        GenServer.reply(from, normalize_registration_result(result))
+
+        state = %{state | pending_registrations: pending}
+
+        state =
+          if result == :ok do
+            update_in(state.scopes[scope], &Map.put(&1, :roots_registered?, true))
+          else
+            state
+          end
+
+        {:noreply, state}
+    end
+  end
+
+  def handle_info({__MODULE__, :registration_timeout, request_ref}, state) do
+    case Map.pop(state.pending_registrations, request_ref) do
+      {nil, _pending} ->
+        {:noreply, state}
+
+      {%{from: from}, pending} ->
+        GenServer.reply(from, {:error, :resource_registrar_unavailable})
+        {:noreply, %{state | pending_registrations: pending}}
+    end
+  end
+
   def handle_info(_message, state), do: {:noreply, state}
 
   if {:format_status, 1} in GenServer.behaviour_info(:callbacks) do
@@ -376,7 +562,7 @@ defmodule PtcRunner.Kernel.ProviderSession do
 
   @impl GenServer
   def terminate(_reason, state) do
-    state = drain_provider_tasks_state(state)
+    state = state |> reject_pending_registrations() |> drain_provider_tasks_state()
     {_result, _state} = drain(state)
     :ok
   end
@@ -398,8 +584,11 @@ defmodule PtcRunner.Kernel.ProviderSession do
 
   defp abort_scope(scope, state) do
     case Map.fetch(state.scopes, scope) do
-      {:ok, %{phase: phase}} when phase in [:inactive, :active] ->
+      {:ok, %{phase: phase} = entry} when phase in [:inactive, :active] ->
+        cleanup = close_roots(entry, Deadline.new(state.cleanup_timeout_ms))
+
         {:ok, remove_scope(scope, state)}
+        |> merge_abort_cleanup(cleanup)
 
       {:ok, _committed} ->
         {{:error, :provider_cleanup_failed}, state}
@@ -411,7 +600,15 @@ defmodule PtcRunner.Kernel.ProviderSession do
 
   defp add_committed_close(state, close) do
     scope = make_ref()
-    entry = %{phase: :committed, close: close}
+
+    entry = %{
+      phase: :committed,
+      close: close,
+      roots_registered?: false,
+      scope_controller: nil,
+      root_owner: nil,
+      scope_reaper: nil
+    }
 
     %{
       state
@@ -454,7 +651,10 @@ defmodule PtcRunner.Kernel.ProviderSession do
                   remaining_slots
                 )
 
-              result = merge_cleanup(result, cleanup)
+              {root_cleanup, remaining_slots} =
+                close_roots(entry, current.cleanup_deadline, remaining_slots)
+
+              result = result |> merge_cleanup(cleanup) |> merge_cleanup(root_cleanup)
               {result, remove_scope(scope, current), remaining_slots}
 
             :error ->
@@ -504,10 +704,12 @@ defmodule PtcRunner.Kernel.ProviderSession do
   defp cleanup_slots(scopes, entries) do
     Enum.reduce(scopes, 0, fn scope, count ->
       case Map.fetch(entries, scope) do
-        {:ok, %{phase: :committed, close: close}} when is_function(close, 0) ->
-          count + 1
+        {:ok, entry} ->
+          count +
+            if(entry.phase == :committed and is_function(entry.close, 0), do: 1, else: 0) +
+            if(entry.roots_registered?, do: 1, else: 0)
 
-        _missing_or_provisional ->
+        :error ->
           count
       end
     end)
@@ -517,6 +719,44 @@ defmodule PtcRunner.Kernel.ProviderSession do
     do: %{state | cleanup_deadline: Deadline.new(state.cleanup_timeout_ms)}
 
   defp ensure_cleanup_deadline(state), do: state
+
+  defp close_roots(entry, deadline) do
+    root_slots = if entry.roots_registered?, do: 1, else: 0
+    {result, _remaining_slots} = close_roots(entry, deadline, root_slots)
+    result
+  end
+
+  defp close_roots(%{scope_controller: nil}, _deadline, remaining_slots),
+    do: {:ok, remaining_slots}
+
+  defp close_roots(entry, deadline, remaining_slots) do
+    remaining_ms = Deadline.remaining(deadline)
+
+    {timeout_ms, next_slots} =
+      if entry.roots_registered? do
+        timeout_ms = if remaining_slots > 0, do: div(remaining_ms, remaining_slots), else: 0
+        {timeout_ms, max(remaining_slots - 1, 0)}
+      else
+        timeout_ms =
+          if remaining_slots > 0,
+            do: div(remaining_ms, remaining_slots + 1),
+            else: remaining_ms
+
+        {timeout_ms, remaining_slots}
+      end
+
+    result = close_roots_with_timeout(entry, timeout_ms)
+
+    {result, next_slots}
+  end
+
+  defp close_roots_with_timeout(entry, timeout_ms) when timeout_ms <= 0 do
+    ProviderScopeOwner.stop(entry.scope_controller, entry.scope_reaper, self(), 0)
+  end
+
+  defp close_roots_with_timeout(entry, timeout_ms) do
+    ProviderScopeOwner.stop(entry.scope_controller, entry.scope_reaper, self(), timeout_ms)
+  end
 
   defp remove_scope(scope, state) do
     case Map.pop(state.scopes, scope) do
@@ -532,6 +772,37 @@ defmodule PtcRunner.Kernel.ProviderSession do
         }
     end
   end
+
+  defp reject_pending_registrations(state, scope \\ :all) do
+    {rejected, retained} =
+      Enum.split_with(state.pending_registrations, fn {_request_ref, pending} ->
+        scope == :all or pending.scope == scope
+      end)
+
+    Enum.each(rejected, fn {_request_ref, %{from: from, timer: timer}} ->
+      Process.cancel_timer(timer)
+      GenServer.reply(from, {:error, :resource_registrar_unavailable})
+    end)
+
+    %{state | pending_registrations: Map.new(retained)}
+  end
+
+  defp pending_registration_count(pending_registrations, scope) do
+    Enum.count(pending_registrations, fn {_request_ref, pending} ->
+      pending.scope == scope
+    end)
+  end
+
+  defp before_deadline?(deadline_ms),
+    do: System.monotonic_time(:millisecond) < deadline_ms
+
+  defp remaining(deadline_ms),
+    do: max(deadline_ms - System.monotonic_time(:millisecond), 0)
+
+  defp normalize_registration_result(:ok), do: :ok
+
+  defp normalize_registration_result(_failure),
+    do: {:error, :resource_registrar_unavailable}
 
   defp registrar_call(registrar, operation, fallback) do
     if ResourceRegistrar.valid?(registrar) do
@@ -554,6 +825,11 @@ defmodule PtcRunner.Kernel.ProviderSession do
 
   defp merge_cleanup(:ok, :ok), do: :ok
   defp merge_cleanup(_left, _right), do: {:error, :provider_cleanup_failed}
+
+  defp merge_abort_cleanup({:ok, state}, :ok), do: {:ok, state}
+
+  defp merge_abort_cleanup({:ok, state}, _failure),
+    do: {{:error, :provider_cleanup_failed}, state}
 
   defp normalize_cleanup(:ok), do: :ok
   defp normalize_cleanup(_failure), do: {:error, :provider_cleanup_failed}
