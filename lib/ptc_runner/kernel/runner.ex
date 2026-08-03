@@ -310,6 +310,21 @@ defmodule PtcRunner.Kernel.Runner do
       )
     )
     |> Map.put(
+      "kernel-check-source",
+      RuntimeTools.instrument(
+        state,
+        config.event_sink,
+        :workflow,
+        "kernel-check-source",
+        RuntimeTools.kernel_check_source(
+          state,
+          config.mission_environment,
+          config.limits,
+          config.event_sink
+        )
+      )
+    )
+    |> Map.put(
       "kernel-mission-inventory",
       RuntimeTools.instrument(
         state,

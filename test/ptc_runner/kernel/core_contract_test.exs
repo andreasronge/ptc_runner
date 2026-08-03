@@ -21,6 +21,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
   alias PtcRunner.Kernel.RunState
   alias PtcRunner.Kernel.RuntimeTools
   alias PtcRunner.Kernel.SafeMetadata
+  alias PtcRunner.Kernel.SourceCheck
   alias PtcRunner.Kernel.ValueContract
   alias PtcRunner.Kernel.WorkflowEnvironment
   alias PtcRunner.Lisp.Format
@@ -48,6 +49,18 @@ defmodule PtcRunner.Kernel.CoreContractTest do
              )
 
     assert {:error, :reserved_capability} = MissionEnvironment.new(capabilities: [reserved])
+
+    assert {:ok, source_check} =
+             Capability.new(
+               name: "kernel-check-source",
+               input_schema: @input_schema,
+               callback: fn _ -> {:ok, nil} end
+             )
+
+    assert {:error, :reserved_capability} =
+             WorkflowEnvironment.new(capabilities: [source_check])
+
+    assert {:error, :reserved_capability} = MissionEnvironment.new(capabilities: [source_check])
   end
 
   test "capability quota reservation is total and per-name atomic" do
@@ -91,6 +104,30 @@ defmodule PtcRunner.Kernel.CoreContractTest do
 
     assert history_bytes > 0
     assert combined_bytes == memory_bytes + history_bytes
+  end
+
+  test "source-check reservations are independently bounded and detect continuation changes" do
+    {:ok, limits} = Limits.new(subordinate_source_checks: 2)
+    {:ok, state} = RunState.start(limits)
+
+    assert {:ok, %{}, revision} = RunState.reserve_source_check(state)
+    assert :ok = RunState.finish_source_check(state, revision)
+
+    assert {:ok, %{}, stale_revision} = RunState.reserve_source_check(state)
+    assert {:ok, %{}, [], lease} = RunState.reserve_evaluation(state)
+    assert :ok = RunState.commit_evaluation(state, lease, %{"retained" => 42}, [])
+    assert {:error, :stale} = RunState.finish_source_check(state, stale_revision)
+    assert {:error, :limit_exceeded} = RunState.reserve_source_check(state)
+
+    assert %{subordinate_source_checks: 2} = RunState.usage(state)
+  end
+
+  test "source checks refuse an active evaluation lease without consuming quota" do
+    {:ok, state} = RunState.start(Limits.defaults())
+    assert {:ok, %{}, [], lease} = RunState.reserve_evaluation(state)
+    assert {:error, :busy} = RunState.reserve_source_check(state)
+    assert %{subordinate_source_checks: 0} = RunState.usage(state)
+    assert :ok = RunState.release_evaluation(state, lease)
   end
 
   test "evaluation status waits for its provider and cannot leak into the next lease" do
@@ -2586,6 +2623,209 @@ defmodule PtcRunner.Kernel.CoreContractTest do
              })
 
     assert %{subordinate_evaluations: 0, protocol_errors: 1} = RunState.usage(state)
+  end
+
+  test "kernel source checks use the frozen mission compiler without executing code" do
+    assert {:ok, kernel_component} = Library.component("kernel")
+    assert {:ok, bundle} = Kernel.compile_bundle([kernel_component])
+    parent = self()
+
+    {:ok, lookup} =
+      Capability.new(
+        name: "lookup",
+        effect: :read,
+        input_schema: @input_schema,
+        callback: fn _arguments ->
+          send(parent, :source_check_executed_capability)
+          {:ok, 42}
+        end
+      )
+
+    {:ok, workflow} = WorkflowEnvironment.new(bundle: bundle)
+    {:ok, mission} = MissionEnvironment.new(capabilities: [lookup])
+    {:ok, limits} = Limits.new(subordinate_source_checks: 2)
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "kernel-source-check")
+
+    {:ok, config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        mission_environment: mission,
+        input: %{},
+        limits: limits,
+        event_sink: sink
+      )
+
+    source = ~S"""
+    (let [valid (kernel/check-source "(return (tool/lookup {}))")
+          invalid (kernel/check-source "(return (tool/missing {}))")
+          usage (tool/runtime-usage {})]
+      (return [valid invalid usage]))
+    """
+
+    assert {:ok, %{value: [valid, invalid, usage]}} = Kernel.run(source, config)
+    assert %{outcome: :valid, source_bytes: valid_bytes, source_hash: "sha256:" <> _} = valid
+    assert valid_bytes == byte_size("(return (tool/lookup {}))")
+
+    assert %{
+             outcome: :invalid,
+             diagnostic: %{kind: :unknown_tool, message: diagnostic, details: %{}}
+           } = invalid
+
+    assert is_binary(diagnostic)
+    assert usage.subordinate_source_checks == 2
+    assert usage.subordinate_evaluations == 0
+    refute_received :source_check_executed_capability
+  end
+
+  test "invalid and oversized source-check requests do not consume check quota or hash oversized code" do
+    {:ok, mission} = MissionEnvironment.new([])
+    limits = Limits.defaults()
+    {:ok, state} = RunState.start(limits)
+    callback = RuntimeTools.kernel_check_source(state, mission, limits, nil)
+
+    assert %{status: :error, reason: :invalid_kernel_check_source_request} = callback.(%{})
+
+    oversized = String.duplicate("x", limits.subordinate_source_bytes + 1)
+
+    assert %{status: :ok, value: %{outcome: :limit_exceeded, source_bytes: bytes} = result} =
+             callback.(%{"source" => oversized})
+
+    assert bytes == byte_size(oversized)
+    refute Map.has_key?(result, :source_hash)
+    assert %{subordinate_source_checks: 0, protocol_errors: 1} = RunState.usage(state)
+  end
+
+  test "source-check diagnostics match subsequent mission compilation failures" do
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, limits} = Limits.new(subordinate_source_checks: 3, subordinate_evaluations: 3)
+    {:ok, state} = RunState.start(limits)
+    callback = RuntimeTools.kernel_check_source(state, mission, limits, nil)
+
+    for source <- ["(unclosed", "missing", "(tool/missing {})"] do
+      assert %{status: :ok, value: %{outcome: :invalid, diagnostic: diagnostic}} =
+               callback.(%{"source" => source})
+
+      assert %{outcome: :evaluation_error, kind: kind, details: %{message: message}} =
+               Evaluation.evaluate_source(state, mission, source, 1_000)
+
+      assert diagnostic.kind == kind
+      assert diagnostic.message == message
+    end
+
+    assert %{subordinate_source_checks: 3, subordinate_evaluations: 3} = RunState.usage(state)
+  end
+
+  test "source-check diagnostics truncate multi-codepoint graphemes by bytes" do
+    {:ok, mission} = MissionEnvironment.new([])
+    limits = Limits.defaults()
+    {:ok, state} = RunState.start(limits)
+    grapheme = "👨‍👩‍👧‍👦"
+    source = "(quote [\"#{String.duplicate(grapheme, 300)}\"])"
+
+    assert %{outcome: :invalid, diagnostic: %{message: message}} =
+             SourceCheck.check(state, mission, source, limits, nil)
+
+    assert byte_size(message) in 4_000..4_096
+    assert String.valid?(message)
+  end
+
+  test "source checks preserve production symbol, timeout, and compiler-heap classifications" do
+    {:ok, mission} = MissionEnvironment.new([])
+
+    many_symbols =
+      "(do " <> Enum.map_join(1..10_001, " ", &("symbol" <> Integer.to_string(&1))) <> ")"
+
+    cases = [
+      {many_symbols, [], :symbol_limit_exceeded, :invalid},
+      {"(let [x 1] (+ x 2))", [evaluation_heap_words: 300], :compile_memory_exceeded,
+       :limit_exceeded}
+    ]
+
+    for {source, overrides, reason, outcome} <- cases do
+      {:ok, limits} = Limits.new(overrides)
+      {:ok, check_state} = RunState.start(limits)
+      {:ok, evaluation_state} = RunState.start(limits)
+
+      checked = SourceCheck.check(check_state, mission, source, limits, nil)
+      checked_reason = get_in(checked, [:diagnostic, :kind]) || Map.get(checked, :reason)
+
+      assert checked.outcome == outcome
+      assert checked_reason == reason
+
+      assert %{outcome: :evaluation_error, kind: ^reason} =
+               Evaluation.evaluate_source(
+                 evaluation_state,
+                 mission,
+                 source,
+                 limits.evaluation_timeout_ms
+               )
+    end
+
+    limits = Limits.defaults()
+    {:ok, timeout_state} = RunState.start(limits)
+
+    assert %{outcome: :limit_exceeded, reason: :compile_timeout} =
+             SourceCheck.check(timeout_state, mission, "42", limits, nil, compile_timeout: 0)
+
+    assert {:error, %{fail: %{reason: :compile_timeout}}} =
+             PtcRunner.Lisp.run_native("42", compile_timeout: 0)
+  end
+
+  test "source checks resolve only committed continuation definitions" do
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, state} = RunState.start(Limits.defaults())
+
+    assert %{outcome: :continued} =
+             Evaluation.evaluate_source(state, mission, "(def retained 42)", 1_000)
+
+    assert %{outcome: :valid} =
+             SourceCheck.check(state, mission, "(return retained)", Limits.defaults(), nil)
+
+    assert %{outcome: :evaluation_error, kind: :unbound_var} =
+             Evaluation.evaluate_source(
+               state,
+               mission,
+               "(do (def leaked 9) (+ missing 1))",
+               1_000
+             )
+
+    assert %{outcome: :invalid, diagnostic: %{kind: :unbound_var}} =
+             SourceCheck.check(state, mission, "(return leaked)", Limits.defaults(), nil)
+
+    assert %{outcome: :valid} =
+             SourceCheck.check(state, mission, "(return retained)", Limits.defaults(), nil)
+  end
+
+  test "source-check finish rejects a compile result after continuation commit or closure" do
+    {:ok, mission} = MissionEnvironment.new([])
+    limits = Limits.defaults()
+    {:ok, state} = RunState.start(limits)
+    parent = self()
+
+    checking =
+      Task.async(fn ->
+        SourceCheck.check(state, mission, "(return 42)", limits, nil,
+          after_compile: fn ->
+            send(parent, :source_compiled)
+
+            receive do
+              :finish_source_check -> :ok
+            end
+          end
+        )
+      end)
+
+    assert_receive :source_compiled
+    assert {:ok, %{}, [], lease} = RunState.reserve_evaluation(state)
+    assert :ok = RunState.commit_evaluation(state, lease, %{"changed" => true}, [])
+    send(checking.pid, :finish_source_check)
+
+    assert %{outcome: :stale, reason: :continuation_changed} = Task.await(checking)
+
+    assert %{outcome: :limit_exceeded, reason: :run_closed} =
+             SourceCheck.check(state, mission, "42", limits, nil,
+               after_compile: fn -> RunState.close(state) end
+             )
   end
 
   test "runtime discovery and workflow annotation helpers expose bounded host facts" do

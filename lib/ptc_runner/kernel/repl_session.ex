@@ -560,6 +560,21 @@ defmodule PtcRunner.Kernel.ReplSession do
       )
     )
     |> Map.put(
+      "kernel-check-source",
+      RuntimeTools.instrument(
+        session.state,
+        session.config.event_sink,
+        :workflow,
+        "kernel-check-source",
+        RuntimeTools.kernel_check_source(
+          session.state,
+          session.config.mission_environment,
+          session.config.limits,
+          session.config.event_sink
+        )
+      )
+    )
+    |> Map.put(
       "kernel-mission-inventory",
       RuntimeTools.instrument(
         session.state,

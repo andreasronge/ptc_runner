@@ -241,6 +241,8 @@ defmodule PtcRunner.Lisp do
     - `:float_precision` - Number of decimal places for floats in result (default: nil = full precision)
     - `:timeout` - Timeout in milliseconds for entire sandbox execution (default: 1000)
     - `:compile_timeout` - Timeout in milliseconds for the compile phase (parse + analyze) (default: 5000)
+    - `:compile_max_heap` - Compile-worker heap ceiling in words (default:
+      application `:default_max_heap`, or 1_250_000)
     - `:pmap_timeout` - Shared absolute deadline in milliseconds for each
       pmap/pcalls operation, including nested parallel calls (default: 5000).
       Increase for LLM-backed tools.
@@ -718,6 +720,12 @@ defmodule PtcRunner.Lisp do
         Keyword.get(opts, :max_parallel_workers, @default_max_parallel_workers),
       max_symbols: Keyword.get(opts, :max_symbols, 10_000),
       compile_timeout: Keyword.get(opts, :compile_timeout, @default_compile_timeout),
+      compile_max_heap:
+        Keyword.get(
+          opts,
+          :compile_max_heap,
+          Application.get_env(:ptc_runner, :default_max_heap, 1_250_000)
+        ),
       run_deadline_ms: Keyword.get(opts, :run_deadline_ms),
       turn_history: Keyword.get(opts, :turn_history, []),
       max_print_length: Keyword.get(opts, :max_print_length),
@@ -861,51 +869,97 @@ defmodule PtcRunner.Lisp do
     compile_timeout = Keyword.get(opts, :compile_timeout, @default_compile_timeout)
     max_heap = Keyword.get(opts, :max_heap, 1_250_000)
 
-    if byte_size(source) > max_program_bytes do
-      {:error, ["program size #{byte_size(source)} bytes exceeds limit of #{max_program_bytes}"]}
-    else
-      validate_bounded(source, compile_timeout, max_heap)
+    validation_opts = [
+      max_program_bytes: max_program_bytes,
+      compile_timeout: compile_timeout,
+      compile_max_heap: max_heap,
+      max_heap: max_heap
+    ]
+
+    case check_native_mode(source, validation_opts, false) do
+      :ok -> :ok
+      {:error, step} -> validate_error(step)
     end
   end
 
-  defp validate_bounded(source, compile_timeout, max_heap) do
-    compile_fn = fn ->
-      with {:ok, raw_ast} <- Parser.parse(source),
-           {:ok, core_ast} <- Analyze.analyze(raw_ast),
-           :ok <- CoreAST.validate(core_ast) do
-        case collect_undefined_vars(core_ast, MapSet.new()) do
-          [] -> :ok
-          undefined -> {:error, Enum.uniq(undefined)}
+  defp validate_error(%{fail: %{reason: :unbound_var, message: message}}) do
+    names = message |> String.split(": ", parts: 2) |> List.last() |> String.split(", ")
+    {:error, names}
+  end
+
+  defp validate_error(%{fail: %{reason: :parse_error, message: message}}),
+    do: {:error, ["Parse error: #{message}"]}
+
+  defp validate_error(%{fail: %{message: message}}), do: {:error, [message]}
+
+  @doc false
+  @spec check_native(String.t(), keyword()) :: :ok | {:error, Step.t()}
+  def check_native(source, opts \\ []) when is_binary(source),
+    do: check_native_mode(source, opts, true)
+
+  defp check_native_mode(source, opts, check_tool_resolution?) do
+    reject_imported_tool_cache!(opts)
+    memory = Keyword.get(opts, :memory, %{})
+    tools = Keyword.get(opts, :tools, %{})
+    max_program_bytes = Keyword.get(opts, :max_program_bytes, @default_max_program_bytes)
+    params = opts |> Keyword.put(:turn_history_mode, :native) |> run_params()
+
+    if byte_size(source) > max_program_bytes do
+      {:error,
+       Step.error(
+         :program_too_large,
+         "program size #{byte_size(source)} bytes exceeds limit of #{max_program_bytes}",
+         memory,
+         %{}
+       )}
+    else
+      with {:ok, prelude} <- attach_prelude(Keyword.get(opts, :prelude), tools, memory),
+           :ok <- validate_parallel_config(params.worker_max_heap, params.max_parallel_workers),
+           {:ok, normalized_tools} <- normalize_tools(tools) do
+        compile_opts =
+          Map.merge(params, %{
+            memory: memory,
+            normalized_tools: normalized_tools,
+            prelude: prelude,
+            check_tool_resolution: check_tool_resolution?
+          })
+
+        case compile_program(source, compile_opts) do
+          {:ok, _core_ast} -> :ok
+          {:error, %Step{} = step} -> {:error, step}
         end
       else
-        {:error, reason} -> {:error, [format_validate_error(reason)]}
+        {:error, %Step{} = step} ->
+          {:error, step}
+
+        {:error, {:invalid_tool, tool_name, reason}} ->
+          {:error,
+           Step.error(:invalid_tool, "Tool '#{tool_name}': #{inspect(reason)}", memory, %{})}
+
+        {:error, {:invalid_config, message}} ->
+          {:error, Step.error(:invalid_config, message, memory, %{})}
       end
-    end
-
-    case PtcRunner.Sandbox.run_bounded(compile_fn,
-           timeout: compile_timeout,
-           max_heap: max_heap
-         ) do
-      {:ok, result} ->
-        result
-
-      {:error, {:timeout, ms}} ->
-        {:error, ["compilation exceeded #{ms}ms limit"]}
-
-      {:error, {:memory_exceeded, bytes}} ->
-        {:error, ["compilation exceeded #{bytes} byte heap limit"]}
-
-      {:error, {:execution_error, msg}} ->
-        {:error, ["compilation failed: #{msg}"]}
     end
   end
 
   defp execute_program(source, opts) do
+    case compile_program(source, Map.put(opts, :check_tool_resolution, true)) do
+      {:ok, core_ast} ->
+        execute_eval(core_ast, apply_run_deadline(opts))
+
+      {:error, %Step{}} = compile_error ->
+        prepare_pre_setup_error(compile_error, opts)
+    end
+  end
+
+  defp compile_program(source, opts) do
     %{
       memory: memory,
       normalized_tools: normalized_tools,
       max_symbols: max_symbols,
-      compile_timeout: compile_timeout
+      compile_timeout: compile_timeout,
+      compile_max_heap: compile_max_heap,
+      check_tool_resolution: check_tool_resolution?
     } = opts
 
     prelude = Map.get(opts, :prelude)
@@ -929,7 +983,12 @@ defmodule PtcRunner.Lisp do
            {:ok, core_ast} <- Analyze.analyze(raw_ast, prelude, prelude_filtered_exports),
            :ok <- CoreAST.validate(core_ast) do
         undefined_vars = core_ast |> collect_undefined_vars(MapSet.new()) |> Enum.uniq()
-        tool_check = check_undefined_tools(core_ast, public_tool_names, tool_names, prelude)
+
+        tool_check =
+          if check_tool_resolution?,
+            do: check_undefined_tools(core_ast, public_tool_names, tool_names, prelude),
+            else: :ok
+
         {:ok, core_ast, undefined_vars, tool_check}
       end
     end
@@ -944,18 +1003,14 @@ defmodule PtcRunner.Lisp do
       {:ok, {:ok, core_ast, undefined_vars, tool_check}} ->
         with :ok <- check_undefined_var_candidates(undefined_vars, memory),
              :ok <- tool_check do
-          execute_eval(core_ast, apply_run_deadline(opts))
+          {:ok, core_ast}
         else
           {:error, _} = compile_error ->
-            compile_error
-            |> handle_compile_error(memory)
-            |> prepare_pre_setup_error(opts)
+            handle_compile_error(compile_error, memory)
         end
 
       {:ok, {:error, _} = compile_error} ->
-        compile_error
-        |> handle_compile_error(memory)
-        |> prepare_pre_setup_error(opts)
+        handle_compile_error(compile_error, memory)
 
       {:error, {:timeout, ms}} ->
         Step.error(
@@ -965,7 +1020,6 @@ defmodule PtcRunner.Lisp do
           %{}
         )
         |> then(&{:error, &1})
-        |> prepare_pre_setup_error(opts)
 
       {:error, {:memory_exceeded, bytes}} ->
         Step.error(
@@ -975,12 +1029,10 @@ defmodule PtcRunner.Lisp do
           %{}
         )
         |> then(&{:error, &1})
-        |> prepare_pre_setup_error(opts)
 
       {:error, {:execution_error, msg}} ->
         Step.error(:compile_error, "compilation failed: #{msg}", memory, %{})
         |> then(&{:error, &1})
-        |> prepare_pre_setup_error(opts)
     end
   end
 
@@ -2717,30 +2769,6 @@ defmodule PtcRunner.Lisp do
   rescue
     ArgumentError -> :error
   end
-
-  # Format errors from parse/analyze for validate/1
-  defp format_validate_error({:parse_error, msg}), do: "Parse error: #{msg}"
-
-  defp format_validate_error({:invalid_arity, _form, msg}), do: "Analysis error: #{msg}"
-
-  defp format_validate_error({:invalid_placeholder, name}),
-    do:
-      "Analysis error: placeholder '#{name}' can only be used inside #() anonymous function syntax"
-
-  defp format_validate_error({:unsupported_java_member, namespace, member}),
-    do: unsupported_java_member_message(namespace, member)
-
-  defp format_validate_error({:unsupported_java_class, class}),
-    do: "Analysis error: unsupported Java class #{class}"
-
-  defp format_validate_error({:java_arity_error, reference_id, details}),
-    do:
-      "Analysis error: Java reference #{reference_id} expects arity #{inspect(details.expected)}, got #{details.actual}"
-
-  defp format_validate_error({type, msg}) when is_atom(type) and is_binary(msg),
-    do: "#{type}: #{msg}"
-
-  defp format_validate_error(other), do: "Error: #{inspect(other)}"
 
   defp unsupported_java_member_message(namespace, member) do
     members = JavaSurface.namespace_members(namespace)

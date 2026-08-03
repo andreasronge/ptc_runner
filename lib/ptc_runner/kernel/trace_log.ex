@@ -1974,6 +1974,8 @@ defmodule PtcRunner.Kernel.TraceLog do
       "model" => Map.get(labels, "model"),
       "provider" => Map.get(labels, "provider"),
       "subordinate_evaluations" => evaluation_count(events, "mission"),
+      "subordinate_source_checks" =>
+        get_in(stopped || %{}, ["data", "usage", "subordinate_source_checks"]) || 0,
       "workflow_capability_calls" => workflow_calls,
       "mission_capability_calls" => mission_calls,
       "llm_calls" => capability_name_count(events, "llm-request"),

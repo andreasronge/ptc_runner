@@ -365,6 +365,7 @@ defmodule PtcRunner.Kernel.RunConfig do
           )
       },
       subordinate_evaluations: limits.subordinate_evaluations,
+      subordinate_source_checks: limits.subordinate_source_checks,
       protocol_errors: limits.protocol_errors + 1,
       evaluation_memory_bytes: limits.evaluation_memory_bytes,
       evaluation_history_bytes: limits.evaluation_history_bytes,

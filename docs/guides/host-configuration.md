@@ -548,6 +548,7 @@ more turns, model calls, and trace events than they allow:
   "run_duration_ms": 86400000,
   "workflow_timeout_ms": 86400000,
   "subordinate_evaluations": 500,
+  "subordinate_source_checks": 500,
   "workflow_capability_calls": 1000,
   "workflow_capability_calls_per_name": 1000,
   "mission_capability_calls": 8000,
@@ -589,6 +590,8 @@ capability ceilings (its model calls), the mission total and per-name ceilings
 (its tool calls), and both the count and byte ceilings for normal events (its
 retained trace evidence). Raising `run_duration_ms` alone does not help, because
 the binding deadline for one workflow entry is `workflow_timeout_ms`.
+Generated-source validation instead consumes `subordinate_source_checks`; it
+does not consume an evaluation or mission capability-call reservation.
 
 ## Verify an installation
 

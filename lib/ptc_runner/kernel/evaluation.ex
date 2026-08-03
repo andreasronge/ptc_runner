@@ -317,6 +317,7 @@ defmodule PtcRunner.Kernel.Evaluation do
       prelude: bundle_prelude(environment),
       timeout: timeout_ms,
       compile_timeout: timeout_ms,
+      compile_max_heap: limits.evaluation_heap_words,
       run_deadline_ms: deadline_ms,
       max_heap: limits.evaluation_heap_words,
       max_program_bytes: limits.subordinate_source_bytes,
@@ -666,7 +667,8 @@ defmodule PtcRunner.Kernel.Evaluation do
     end
   end
 
-  defp mission_tools(environment, state, timeout_ms, event_sink, inspection_sink) do
+  @doc false
+  def mission_tools(environment, state, timeout_ms, event_sink, inspection_sink) do
     environment.capabilities
     |> Map.new(fn {name, _capability} ->
       {name,

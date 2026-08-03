@@ -4,8 +4,9 @@ defmodule PtcRunner.Kernel.RunState do
 
   One GenServer owns the deadline, open/closed status, workflow and mission
   capability counters, live provider-task count, protocol errors, subordinate
-  evaluation count, terminal failure, evaluation-continuation lease, and
-  committed native evaluation memory/history.
+  evaluation and source-check counts, terminal failure,
+  evaluation-continuation lease and revision, and committed native evaluation
+  memory/history.
 
   Reservations and commits are deliberately atomic owner operations. Callers
   must not recreate them as separate read and update steps. The opaque token
@@ -181,6 +182,15 @@ defmodule PtcRunner.Kernel.RunState do
   @doc "Atomically reserves and returns native subordinate memory and turn history."
   def reserve_evaluation(state), do: call(state, :reserve_evaluation)
 
+  @doc false
+  @spec reserve_source_check(t()) :: {:ok, map(), non_neg_integer()} | {:error, atom()}
+  def reserve_source_check(state), do: call(state, :reserve_source_check)
+
+  @doc false
+  @spec finish_source_check(t(), non_neg_integer()) :: :ok | {:error, atom()}
+  def finish_source_check(state, revision) when is_integer(revision) and revision >= 0,
+    do: call(state, {:finish_source_check, revision})
+
   @spec commit_evaluation(t(), reference(), map(), [term()]) :: :ok | {:error, atom()}
   @doc "Atomically commits one bounded native memory/history continuation candidate."
   def commit_evaluation(state, lease, memory, history)
@@ -316,10 +326,12 @@ defmodule PtcRunner.Kernel.RunState do
        calls: %{workflow: %{}, mission: %{}},
        totals: %{workflow: 0, mission: 0},
        evaluations: 0,
+       source_checks: 0,
        protocol_errors: 0,
        terminal_failure: nil,
        memory: %{},
        history: [],
+       continuation_revision: 0,
        evaluation_lease: nil,
        evaluation_release_waiter: nil,
        evaluation_terminal_provider_failure?: false,
@@ -452,6 +464,39 @@ defmodule PtcRunner.Kernel.RunState do
     end
   end
 
+  def handle_call({token, :reserve_source_check}, _from, %{token: token} = state) do
+    cond do
+      state.closed? ->
+        {:reply, {:error, :run_closed}, state}
+
+      deadline_expired?(state) ->
+        {:reply, {:error, :deadline_expired}, state}
+
+      state.evaluation_lease != nil ->
+        {:reply, {:error, :busy}, state}
+
+      state.source_checks >= state.limits.subordinate_source_checks ->
+        {:reply, {:error, :limit_exceeded}, state}
+
+      true ->
+        {:reply, {:ok, state.memory, state.continuation_revision},
+         %{state | source_checks: state.source_checks + 1}}
+    end
+  end
+
+  def handle_call(
+        {token, {:finish_source_check, revision}},
+        _from,
+        %{token: token} = state
+      ) do
+    cond do
+      state.closed? -> {:reply, {:error, :run_closed}, state}
+      deadline_expired?(state) -> {:reply, {:error, :deadline_expired}, state}
+      state.continuation_revision != revision -> {:reply, {:error, :stale}, state}
+      true -> {:reply, :ok, state}
+    end
+  end
+
   def handle_call(
         {token, {:commit_evaluation, lease, memory, history}},
         {caller, _tag},
@@ -510,7 +555,8 @@ defmodule PtcRunner.Kernel.RunState do
              %{
                state
                | memory: RetainedSize.detach_binaries(memory),
-                 history: RetainedSize.detach_binaries(history)
+                 history: RetainedSize.detach_binaries(history),
+                 continuation_revision: state.continuation_revision + 1
              }
              |> clear_evaluation()}
         end
@@ -898,6 +944,7 @@ defmodule PtcRunner.Kernel.RunState do
       remaining_ms: max(state.deadline_ms - System.monotonic_time(:millisecond), 0),
       capability_calls: state.calls,
       subordinate_evaluations: state.evaluations,
+      subordinate_source_checks: state.source_checks,
       protocol_errors: state.protocol_errors,
       evaluation_memory_bytes:
         RetainedSize.bytes_with_cap(state.memory, state.limits.evaluation_memory_bytes),

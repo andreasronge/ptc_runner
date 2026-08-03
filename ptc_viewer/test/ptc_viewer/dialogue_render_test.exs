@@ -239,6 +239,26 @@ defmodule PtcViewer.DialogueRenderTest do
       assert length(Regex.scan(~r/class="kt-provenance/, rendered)) == 1
     end
 
+    test "does not require private records for source-check runtime calls" do
+      rendered =
+        render_fixtures(%{
+          turns: fn turns ->
+            update_in(turns, ["items"], fn items ->
+              Enum.map(items, fn item ->
+                if get_in(item, ["data", "name"]) == "kernel-mission-model-context" do
+                  put_in(item, ["data", "name"], "kernel-check-source")
+                else
+                  item
+                end
+              end)
+            end)
+          end
+        })
+
+      assert rendered =~ "Private inspection overlay loaded."
+      refute rendered =~ "Private inspection overlay is incomplete"
+    end
+
     test "keeps the captured prompt and raw request behind disclosures", %{
       rendered: rendered
     } do

@@ -61,6 +61,14 @@
       (get response :value)
       response)))
 
+(defn check-source
+  "Check bounded dynamic source against the live mission environment without executing it."
+  [source]
+  (let [response (tool/kernel-check-source {:source source})]
+    (if (= :ok (get response :status))
+      (get response :value)
+      response)))
+
 (defn mission-inventory
   "Return the exact frozen model-visible mission inventory JSON."
   []

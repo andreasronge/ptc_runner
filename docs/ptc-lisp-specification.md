@@ -4214,6 +4214,23 @@ and creates an avoidable code-injection boundary. Parameter values and source
 text are withheld from the public effect ledger; only deterministic byte-size
 and SHA-256 identity metadata is retained.
 
+#### Mission-aware source checking
+
+`(kernel/check-source source)` runs the production compiler against the frozen
+mission bundle, granted tool names, and current committed definitions, but does
+not execute the resulting AST. It consumes one `subordinate_source_checks`
+reservation, not a subordinate evaluation or mission capability call. A valid
+result carries the exact source byte count and SHA-256 identity. Compile errors
+return `:invalid` with a diagnostic containing `kind`, a message bounded to
+4,096 UTF-8 bytes, and bounded JSON-safe details.
+
+The remaining closed outcomes are `:limit_exceeded` for source size, check
+quota, compiler timeout/heap, deadline, or closure; `:busy` while an evaluation
+lease is active; and `:stale` when the continuation commits during compilation.
+Oversized source is not hashed. A valid check is advisory: the later
+`kernel/eval-source` or `kernel/eval-source-with` compiles the text again and
+can observe a newer continuation or budget state.
+
 ### 16.3 Result and Continuation Contract
 
 At the language boundary, ordinary completion produces the value of the last
@@ -4435,6 +4452,9 @@ Kernel hosts apply the following relevant defaults from
 |-------|---------|-------------|
 | `evaluation_timeout_ms` | 1,000 | Max execution time per evaluation |
 | `evaluation_heap_words` | 1,250,000 | Evaluator heap ceiling in BEAM words |
+| `subordinate_evaluations` | 16 | Run-wide subordinate execution quota |
+| `subordinate_source_checks` | 16 | Independent run-wide mission compile-check quota |
+| `subordinate_source_bytes` | 131,072 | Source ceiling applied before check hashing or evaluation |
 | `workflow_capability_calls` / `mission_capability_calls` | 64 / 128 | Run-wide capability-call quotas |
 | `workflow_capability_calls_per_name` / `mission_capability_calls_per_name` | 16 / 32 | Per-capability quotas |
 | `capability_argument_bytes` | 262,144 | Capability argument boundary |

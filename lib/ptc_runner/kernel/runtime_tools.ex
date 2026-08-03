@@ -17,6 +17,7 @@ defmodule PtcRunner.Kernel.RuntimeTools do
   alias PtcRunner.Kernel.Program
   alias PtcRunner.Kernel.RunState
   alias PtcRunner.Kernel.SafeMetadata
+  alias PtcRunner.Kernel.SourceCheck
   alias PtcRunner.Kernel.ValueContract
   alias PtcRunner.Lisp
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
@@ -128,10 +129,31 @@ defmodule PtcRunner.Kernel.RuntimeTools do
     end
   end
 
+  @doc "Builds the workflow-only mission-aware source-check callback."
+  def kernel_check_source(state, mission, limits, event_sink) do
+    fn
+      %{"source" => source} = arguments
+      when is_binary(source) and map_size(arguments) == 1 ->
+        %{
+          status: :ok,
+          value: SourceCheck.check(state, mission, source, limits, event_sink)
+        }
+
+      _arguments ->
+        invalid_kernel_check_source_request(state)
+    end
+  end
+
   @doc false
   @spec kernel_eval_ledger_arguments(map()) :: (map() -> map())
   def kernel_eval_ledger_arguments(limits) do
     fn arguments -> project_kernel_eval_arguments(arguments, limits) end
+  end
+
+  @doc false
+  @spec kernel_check_source_ledger_arguments(map()) :: (map() -> map())
+  def kernel_check_source_ledger_arguments(limits) do
+    fn arguments -> project_kernel_check_source_arguments(arguments, limits) end
   end
 
   @doc false
@@ -143,6 +165,13 @@ defmodule PtcRunner.Kernel.RuntimeTools do
          %TrustedTool{
            function: callback,
            ledger_arguments: kernel_eval_ledger_arguments(limits)
+         }}
+
+      {"kernel-check-source" = name, callback} ->
+        {name,
+         %TrustedTool{
+           function: callback,
+           ledger_arguments: kernel_check_source_ledger_arguments(limits)
          }}
 
       {name, callback} ->
@@ -215,6 +244,13 @@ defmodule PtcRunner.Kernel.RuntimeTools do
   end
 
   defp project_kernel_eval_arguments(_arguments, _limits), do: %{"redacted" => true}
+
+  defp project_kernel_check_source_arguments(arguments, limits) when is_map(arguments) do
+    maybe_put_source_identity(%{}, arguments, limits.subordinate_source_bytes)
+  end
+
+  defp project_kernel_check_source_arguments(_arguments, _limits),
+    do: %{"redacted" => true}
 
   defp maybe_put_kind(projected, arguments) do
     case keyword_name(Map.get(arguments, "kind")) do
@@ -447,6 +483,21 @@ defmodule PtcRunner.Kernel.RuntimeTools do
           status: :error,
           kind: :protocol_error,
           reason: :invalid_kernel_eval_request,
+          retryable?: false
+        }
+
+      {:error, :protocol_error_limit} ->
+        %{status: :error, kind: :limit_exceeded, reason: :protocol_errors, retryable?: false}
+    end
+  end
+
+  defp invalid_kernel_check_source_request(state) do
+    case RunState.protocol_error(state) do
+      :ok ->
+        %{
+          status: :error,
+          kind: :protocol_error,
+          reason: :invalid_kernel_check_source_request,
           retryable?: false
         }
 

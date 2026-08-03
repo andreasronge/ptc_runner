@@ -91,6 +91,21 @@ that evaluation. The code digest then remains an identity for code rather than
 for incidental evidence identifiers, and neither source nor parameter payloads
 appear in the public tool-call ledger.
 
+Before evaluating generated text, a workflow can ask the live mission compiler
+for an advisory check:
+
+```clojure
+(kernel/check-source generated-source)
+```
+
+The result is `{:outcome :valid ...}` or a bounded `:invalid` diagnostic; source
+size, check quota, compiler timeout/heap, deadline, and continuation races have
+their own `:limit_exceeded`, `:busy`, or `:stale` outcomes. A check parses and
+resolves the exact mission prelude, capabilities, and current committed
+definitions without executing code or consuming an evaluation/capability call.
+The later evaluation deliberately compiles again, so workflows must still
+handle its result.
+
 ## Use the shipped agent library
 
 The shipped `agent.core` component owns a generic bounded model/tool loop. A

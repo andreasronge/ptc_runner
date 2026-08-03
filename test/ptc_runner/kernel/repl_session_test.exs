@@ -99,6 +99,37 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
     refute inspect(arguments) =~ "secret-evidence"
   end
 
+  test "manifest REPL source checks report busy without charging their quota" do
+    {:ok, component} = Library.component("kernel")
+    {:ok, bundle} = Kernel.compile_bundle([component])
+    {:ok, workflow} = WorkflowEnvironment.new(bundle: bundle)
+    {:ok, mission} = MissionEnvironment.new([])
+    limits = Limits.defaults()
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "repl-source-check")
+
+    {:ok, config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        mission_environment: mission,
+        input: %{},
+        limits: limits,
+        event_sink: sink
+      )
+
+    {:ok, session} = ReplSession.new(config: config)
+
+    assert {:ok,
+            %{
+              return: %{outcome: :busy, reason: :evaluation_in_progress},
+              tool_calls: [%{name: "kernel-check-source", args: arguments}]
+            }, session} =
+             ReplSession.eval(session, ~S|(kernel/check-source "(return 42)")|)
+
+    assert %{"source" => %{"bytes" => 11, "sha256" => "sha256:" <> _}} = arguments
+    refute inspect(arguments) =~ "(return 42)"
+    assert %{subordinate_source_checks: 0} = ReplSession.usage(session)
+  end
+
   test "direct evaluations persist definitions and bounded turn history" do
     {:ok, session} = ReplSession.new()
     assert {:ok, first, session} = ReplSession.eval(session, "(def x 40)")

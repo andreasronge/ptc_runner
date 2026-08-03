@@ -150,6 +150,7 @@ defmodule PtcRunner.Kernel.InspectionAnalysisProfile do
         run_duration_ms: 1_800_000,
         evaluation_timeout_ms: 10_000,
         subordinate_evaluations: 64,
+        subordinate_source_checks: 64,
         mission_capability_calls: 512,
         mission_capability_calls_per_name: 256,
         subordinate_source_bytes: 65_536,
