@@ -105,8 +105,11 @@ it keeps the dependency from reading a `.env` the host did not choose.
 A request issued while that application is stopped fails with a non-retryable
 `:internal` provider error naming the application, rather than a retryable
 transport outage, because retrying cannot start an OTP application. Adapters
-declare the application they need through the optional `provider_application/0`
-callback on `PtcRunner.LLM`.
+declare what they need through the optional `provider_application/1` callback on
+`PtcRunner.LLM`, which receives the resolved model: one adapter may route some
+models through a dependency and serve others directly over HTTP, and only the
+former are gated. Both run admission and the request-time check consult that
+same answer.
 
 ## Install custom providers
 
