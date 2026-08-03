@@ -909,6 +909,37 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
 
     assert running.kind == :unavailable
     assert running.retryable? == true
+
+    # An application started and later stopped leaves the adapter raising rather
+    # than returning an error tuple. The check must precede the call, or the
+    # raise unwinds past it and the dispatcher reports a retryable failure.
+    Application.put_env(:ptc_runner, :host_llm_test_raise, true)
+    on_exit(fn -> Application.delete_env(:ptc_runner, :host_llm_test_raise) end)
+
+    # Drop the probe messages the two invocations above produced, so the
+    # refutation below can only observe a fresh adapter call.
+    drain = fn drain ->
+      receive do
+        {:host_llm_request, _model, _request} -> drain.(drain)
+      after
+        0 -> :ok
+      end
+    end
+
+    drain.(drain)
+
+    Application.put_env(
+      :ptc_runner,
+      :host_llm_test_provider_application,
+      :ptc_unstarted_provider_app
+    )
+
+    assert {:error, %PtcRunner.Kernel.ProviderError{} = raised} =
+             build_capability.().callback.(request)
+
+    assert raised.kind == :internal
+    assert raised.retryable? == false
+    refute_receive {:host_llm_request, _model, _request}
   end
 
   defp context(_directory, destination) do

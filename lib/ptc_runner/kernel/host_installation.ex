@@ -1114,10 +1114,11 @@ defmodule PtcRunner.Kernel.HostInstallation do
          {:ok, capability} <-
            LLMCapability.new(
              requester: fn request ->
-               request
-               |> ProviderRegistry.adapter_request()
-               |> requester.()
-               |> classify_provider_application(adapter)
+               with :ok <- provider_application_ready(adapter, model) do
+                 request
+                 |> ProviderRegistry.adapter_request()
+                 |> requester.()
+               end
              end,
              max_request_bytes: selected.max_request_bytes,
              max_response_bytes: selected.max_response_bytes
@@ -1141,17 +1142,22 @@ defmodule PtcRunner.Kernel.HostInstallation do
   # The core no longer starts an adapter's backing application on a host's
   # behalf; a run admits it through ProviderApplicationGate. An embedding host
   # that drives the registry directly can reach a request with that application
-  # still stopped, where every transport error would otherwise be reported as a
-  # retryable `:unavailable` provider outage. Retrying cannot start an OTP
-  # application, so name the real cause and mark it non-retryable.
-  defp classify_provider_application({:error, _reason} = error, adapter) do
-    case provider_application(adapter) do
+  # still stopped, where the failure would otherwise read as a retryable
+  # `:unavailable` provider outage. Retrying cannot start an OTP application, so
+  # name the real cause and mark it final.
+  #
+  # This is checked BEFORE invoking the adapter rather than by classifying its
+  # result: an application that was started and later stopped leaves the adapter
+  # raising (its registry is gone) instead of returning an error tuple, and a
+  # raise would unwind straight past any post-hoc classification.
+  defp provider_application_ready(adapter, model) do
+    case provider_application(adapter, model) do
       nil ->
-        error
+        :ok
 
       application ->
         if Enum.any?(Application.started_applications(), &(elem(&1, 0) == application)) do
-          error
+          :ok
         else
           {:error,
            ProviderError.new(
@@ -1165,13 +1171,11 @@ defmodule PtcRunner.Kernel.HostInstallation do
     end
   end
 
-  defp classify_provider_application(result, _adapter), do: result
-
   # `adapter` is always the module resolved by PtcRunner.LLM.adapter!/0, so no
   # non-atom clause is reachable here.
-  defp provider_application(adapter) when is_atom(adapter) do
-    if Code.ensure_loaded?(adapter) and function_exported?(adapter, :provider_application, 0),
-      do: adapter.provider_application(),
+  defp provider_application(adapter, model) when is_atom(adapter) do
+    if Code.ensure_loaded?(adapter) and function_exported?(adapter, :provider_application, 1),
+      do: adapter.provider_application(model),
       else: nil
   end
 

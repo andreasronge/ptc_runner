@@ -11,6 +11,12 @@ defmodule PtcRunner.TestSupport.HostLLMAdapter do
       Map.put(request, :probe_pid, self())
     })
 
+    # Mirrors an adapter whose backing application was started and then stopped:
+    # its registry is gone, so it raises instead of returning an error tuple.
+    if Application.get_env(:ptc_runner, :host_llm_test_raise, false) do
+      raise ArgumentError, "unknown registry: FakeAdapter.Finch"
+    end
+
     Application.get_env(
       :ptc_runner,
       :host_llm_test_result,
@@ -23,7 +29,7 @@ defmodule PtcRunner.TestSupport.HostLLMAdapter do
 
   # Defaults to nil so every other test keeps the unclassified transport path.
   @impl true
-  def provider_application,
+  def provider_application(_model),
     do: Application.get_env(:ptc_runner, :host_llm_test_provider_application)
 
   @impl true
