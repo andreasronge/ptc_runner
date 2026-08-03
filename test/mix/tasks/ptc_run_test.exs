@@ -91,6 +91,36 @@ defmodule Mix.Tasks.Ptc.RunTest do
     end
   end
 
+  test "failure rendering ignores persistence result payloads and structural tags" do
+    success =
+      Run.failure_message(
+        {:trace_persistence_failed, :write_failed, {:ok, %{value: "private-success-value"}}}
+      )
+
+    failure =
+      Run.failure_message(
+        {:result_persistence_failed, :write_failed,
+         {:error, %{reason: :"private-failure-reason", value: "private-failure-value"}}}
+      )
+
+    assert success == "trace_persistence_failed/write_failed"
+    assert failure == "result_persistence_failed/write_failed"
+    refute success =~ "ok"
+    refute success =~ "private-success-value"
+    refute failure =~ "error"
+    refute failure =~ "private-failure"
+    assert Run.failure_message(%{private: "arbitrary-term"}) == "internal_error"
+  end
+
+  test "failure rendering retains established source classifications" do
+    assert Run.failure_message({:source_role, :component_override, :invalid_override_descriptor}) ==
+             "source_role/component_override/invalid_override_descriptor"
+
+    assert Run.failure_message(
+             {:source_role, :input_contract, "private-contract-path.json", :duplicate_json_key}
+           ) == "source_role/input_contract/duplicate_json_key"
+  end
+
   @tag :tmp_dir
   test "--private-mission classifies the value before assembly and requires a private sink", %{
     tmp_dir: dir
@@ -304,9 +334,17 @@ defmodule Mix.Tasks.Ptc.RunTest do
 
     Mix.Task.reenable("ptc.run")
 
-    assert_raise Mix.Error, ~r/unknown_provider/, fn ->
-      Run.run([manifest_path, "--host-config", host_path, "--check"])
-    end
+    error =
+      assert_raise Mix.Error, fn ->
+        Run.run([manifest_path, "--host-config", host_path, "--check"])
+      end
+
+    assert error.message ==
+             "ptc.run failed: provider_declaration/provider_unknown: " <>
+               "the selected provider is not installed"
+
+    refute error.message =~ "CommandDiagnostic"
+    refute error.message =~ "attestation"
   end
 
   @tag :tmp_dir

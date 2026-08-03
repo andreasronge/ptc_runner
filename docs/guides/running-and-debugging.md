@@ -176,9 +176,11 @@ workflow decides whether to retry, correct, degrade, or fail. Parser, compiler,
 timeout, heap, source, result, quota, provider, and event failures retain
 bounded classifications at the Kernel boundary.
 
-Current Mix failures are intended for people working from the repository and
-may contain inspected internal runtime terms. Stable JSON command errors and
-exit codes are release work for the shared standalone `ptc` frontend.
+Current Mix failures are intended for people working from the repository.
+Failures returned by the shared preparation and runtime path render only the
+closed diagnostic catalog or a bounded sequence of code atoms; they never
+inspect a rejected runtime term. Stable JSON command errors and exit codes are
+release work for the shared standalone `ptc` frontend.
 
 ### Stable standalone process contract
 

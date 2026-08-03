@@ -550,12 +550,61 @@ defmodule Mix.Tasks.Ptc.Run do
   defp authorization_mode(%{auth: auth}) when auth in [nil, []], do: "none"
   defp authorization_mode(_transport), do: "static"
 
-  @spec raise_failure(term()) :: no_return()
-  defp raise_failure(%CommandDiagnostic{phase: :provider_declaration, code: :provider_unknown}),
-    do: Mix.raise("ptc.run failed: :unknown_provider")
+  @max_failure_code_depth 3
+  @max_failure_codes 4
+  @persistence_failure_codes [
+    :trace_persistence_failed,
+    :inspection_persistence_failed,
+    :result_persistence_failed
+  ]
 
+  @spec raise_failure(term()) :: no_return()
   defp raise_failure(error),
-    do: Mix.raise("ptc.run failed: #{inspect(error, limit: 10, printable_limit: 1_024)}")
+    do: Mix.raise("ptc.run failed: #{failure_message(error)}")
+
+  @doc false
+  @spec failure_message(term()) :: binary()
+  def failure_message(%CommandDiagnostic{} = diagnostic) do
+    if CommandDiagnostic.valid?(diagnostic) do
+      "#{diagnostic.phase}/#{diagnostic.code}: #{diagnostic.message}"
+    else
+      "internal_error"
+    end
+  end
+
+  def failure_message(error) do
+    case error |> failure_codes(0) |> Enum.uniq() |> Enum.take(@max_failure_codes) do
+      [] -> "internal_error"
+      codes -> Enum.map_join(codes, "/", &Atom.to_string/1)
+    end
+  end
+
+  defp failure_codes(value, _depth) when is_atom(value), do: [value]
+
+  defp failure_codes(%{kind: kind, reason: reason}, _depth)
+       when is_atom(kind) and is_atom(reason),
+       do: [kind, reason]
+
+  defp failure_codes(%{reason: reason}, _depth) when is_atom(reason), do: [reason]
+
+  # Persistence failures carry the completed Kernel result in the third
+  # position. It may contain private values and structural `:ok`/`:error`
+  # tags, so only the first two code-owned positions are rendered.
+  defp failure_codes({code, reason, _result}, depth)
+       when code in @persistence_failure_codes and depth < @max_failure_code_depth,
+       do: [code | failure_codes(reason, depth + 1)]
+
+  defp failure_codes({code, reason}, depth)
+       when is_atom(code) and depth < @max_failure_code_depth,
+       do: [code | failure_codes(reason, depth + 1)]
+
+  defp failure_codes({code, second, third}, _depth) when is_atom(code),
+    do: Enum.filter([code, second, third], &is_atom/1)
+
+  defp failure_codes({code, second, third, fourth}, _depth) when is_atom(code),
+    do: Enum.filter([code, second, third, fourth], &is_atom/1)
+
+  defp failure_codes(_value, _depth), do: []
 
   # A private value never reaches the terminal. Publishing it there would
   # declassify it just as surely as writing it to a normal artifact.
