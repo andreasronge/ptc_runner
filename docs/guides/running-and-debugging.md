@@ -208,42 +208,31 @@ suffix callers use, so they can locate the file without a published path.
 Normal discovery excludes the private suffix; private-aware discovery accepts
 and classifies it explicitly.
 
-Stderr is not a second framing channel. The wrapper may write only bounded,
-fixed, code-owned launcher messages there. The packaged boot profile configures
-no Logger or SASL console handler before the command core starts. Optional
-applications may not install one; the pinned packaged dependency audit and
-provider-free/optional-application fixtures enforce that condition. Child
-stderr is captured behind its provider boundary. Expected command diagnostics
-remain inside the stdout envelope.
+An outer release wrapper owns the caller's stdout and stderr before BEAM starts.
+It redirects the VM's ordinary descriptor 1 to the null device, captures the
+VM's descriptor 2, and gives the command writer a private bounded envelope pipe.
+The wrapper alone copies one complete framed envelope from that pipe to caller
+stdout. Child processes and ports must not inherit the envelope descriptor.
 
-The pinned audit also inventories reachable same-VM writes that bypass those
-handlers: `IO.warn`/`:standard_error`, direct descriptor-2 operations, and known
-NIF or dependency writes. A route that can interpolate a selector, endpoint,
-credential, rejected value, callback reason, exception, report, or other
-arbitrary term is unsupported until it is removed or captured behind a closed
-code-owned boundary. The audit fails closed when a pinned dependency revision
-changes or introduces an unclassified stderr or descriptor route.
+Stderr is not a second framing channel. VM stderr is drained behind the outer
+boundary and never copied through verbatim; the wrapper may write only bounded,
+fixed, code-owned launcher messages to caller stderr. The packaged boot profile
+configures no Logger or SASL console handler before the command core starts.
+Optional applications may not install one, and child stderr remains captured
+behind its provider boundary. Expected command diagnostics stay inside the
+stdout envelope.
 
-The release wrapper reserves the caller's stdout as descriptor 3, redirects
-ordinary descriptor 1 to the null device before BEAM startup, and treats
-descriptor 3 as code-owned envelope authority. Child processes and ports must
-not inherit it. Immediately before writing, the wrapper verifies that
-descriptor 3 still names the captured startup destination; it never falls back
-to another descriptor.
+Supported-target sentinels cover `IO.warn`/`:standard_error`, Logger/SASL,
+optional handlers, direct descriptor-2 operations, child stderr, and known
+NIF/native numeric-descriptor routes. A route that can write the private
+envelope descriptor or bypass the wrapper remains unsupported until it is
+removed or captured. This focused evidence is retained without maintaining a
+dependency-version-pinned inventory of every reachable stderr call site.
 
-This is not OS-enforced isolation inside one VM: trusted same-VM native code
-could still name, duplicate, close, or write descriptor 3, and an identity
-check cannot detect an injected write. Each supported packaged target therefore
-has a pinned, focused inventory of reachable NIF/native routes that can target
-numeric descriptors. If that inventory cannot establish that no reachable
-route targets descriptor 3, or dependency drift invalidates it, the release
-requires an outer framing process before claiming one-envelope output.
-
-If the startup-destination identity check fails, or if the caller closes stdout
-and the descriptor write fails, the writer stops without retrying on stderr or
-another descriptor. The wrapper exits `74` within 5,000 milliseconds, measured
-from identity-mismatch detection or the failed descriptor-3 write to observed
-process exit. No valid envelope is promised on either transport failure.
+If envelope framing or its byte bound fails, or if caller stdout closes and the
+wrapper write fails, the wrapper stops without retrying on stderr or another
+descriptor. It exits `74` within 5,000 milliseconds of detecting the transport
+failure. No valid envelope is promised on that path.
 
 `SIGINT`, `SIGTERM`, VM abort, OOM, and failure before the command boundary are
 outside the V1 envelope and stderr-content contract. They may produce no

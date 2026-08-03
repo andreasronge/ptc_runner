@@ -31,16 +31,15 @@ Do not start it to suppress dependency warnings. `IO.warn` writes to stderr,
 never to the stdout envelope, and the shipped fix for the one known warning is
 to pass a structured model value instead of a string spec.
 
-The packaged output audit is deliberately not a trigger. The standalone
+The packaged output audit is deliberately not a trigger. The outer standalone
 wrapper defined in
 [`../lisp-kernel/stable-cli-contract.md`](../lisp-kernel/stable-cli-contract.md)
-writes the envelope through contract-reserved descriptor 3 and redirects
-ordinary dependency stdout on descriptor 1 to the null device, so stdout
-framing does not depend on dependency-closure behavior. Secret-bearing stderr
-paths still need a focused audit, and that audit is not dominated by this
-dependency. If the descriptor-3 packaging spike fails on a supported target,
-that triggers the stable plan's outer framing process rather than ReqLLM
-removal.
+owns caller stdout, redirects ordinary dependency stdout on the VM's descriptor
+1 to the null device, drains VM stderr behind its boundary, and accepts the
+command envelope only through a private bounded pipe. Stdout framing therefore
+does not depend on dependency-closure behavior. Supported-target sentinels still
+cover secret-bearing stderr and numeric-descriptor bypass routes, and that
+focused evidence is not dominated by this dependency.
 
 ## Current evidence
 
@@ -59,9 +58,10 @@ Dependency closure size, counted as physical lines in the locked
 `req_llm` plus `llm_db` is roughly 76,000 lines, more than the library itself.
 That is the dependency-review and artifact-size surface the third trigger
 refers to. It is not an argument about stdout framing, which the separate
-descriptor design addresses independently. This table is a size inventory, not
-a warning-reachability inventory; the stable plan's focused stderr audit must
-independently classify reachable call sites at the exact locked revisions.
+outer-wrapper design addresses independently. This table is a size inventory,
+not a warning-reachability inventory; focused supported-target sentinels cover
+secret-bearing and descriptor-bypass routes without a dependency-version-pinned
+inventory of every reachable call site.
 
 The request and response formats crossing the adapter seam are deliberately
 close to OpenAI's wire format:

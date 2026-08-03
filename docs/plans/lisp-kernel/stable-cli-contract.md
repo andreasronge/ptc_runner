@@ -53,6 +53,9 @@ These are design constraints, not aspirational metrics:
    into several coherent commits to stay within this budget.
 9. Tests cover public transitions, ownership, and failure boundaries. Do not
    mirror every private branch with implementation-shaped unit tests.
+10. Each checkpoint deletes the transitional path it replaces once all callers
+    and tests use the replacement. Do not defer known-dead integration
+    scaffolding to the final acceptance slice.
 
 ## Existing foundation
 
@@ -254,29 +257,33 @@ translation, or store-local identity protocol is part of this plan.
 
 Provider application admission, authorization interaction, a run, and each
 doctor connectivity operation may have different top-level deadlines because
-they are different user operations. Each bounded nested operation also keeps
-its intrinsic absolute deadline: active selection validation uses its installed
+they are different user operations. Each bounded nested operation may also add
+an intrinsic absolute deadline: active selection validation uses its installed
 validation limit, and provider work uses the selected provider's normalized
-timeout when it has one. Work receives the earlier of the top-level and
-intrinsic deadlines while retaining both candidates and which one bound; the
-top-level deadline wins an exact tie. A run-bound expiry is `run_timeout`, while
-a strictly earlier intrinsic expiry uses that sub-operation's closed diagnostic.
-Doctor connectivity retains its connectivity diagnostic mapping, with
-selection-validator expiry remaining `selection_validation_timeout`. Passing
-either deadline through nested work may narrow it but never resets it.
+timeout when it has one. Work receives only the minimum effective deadline; it
+does not retain candidate or exact-tie metadata. If that deadline expires, the
+closed diagnostic comes from the operation class executing at expiry, regardless
+of which candidate supplied the minimum. Kernel evaluator work reports
+`run_timeout`; a provider capability call during Kernel execution reports the
+closed provider-execution diagnostic; active selection validation reports
+`selection_validation_timeout`; and credential, OAuth, acquisition, and doctor
+connectivity work retain their respective closed operation diagnostics. This is
+an intentional coarse diagnostic contract: candidate order and exact ties do
+not change the code. Passing a deadline through nested work may narrow it but
+never resets it.
+
 For an ordinary run or doctor operation, shared OAuth context construction,
 principal claim, and authority-claim batch use the minimum intrinsic deadline
 across all selected OAuth occurrences in the session, intersected with the
-applicable top-level deadline; alias ordering therefore cannot choose or extend
-the shared bound.
+applicable top-level deadline. Alias ordering therefore cannot choose or extend
+the shared bound, and no candidate-attribution state is required.
 
 For a Mix run with explicit authorization, phase 8 first creates one
 `authorization_setup_deadline` from the minimum configured
 `authorization_timeout_ms` among the selected OAuth aliases, before lazily
 constructing the shared context. The effective setup deadline is the minimum of
 that deadline and every selected OAuth occurrence's intrinsic deadline, all
-anchored when setup begins; it retains both candidates and the authorization
-setup deadline wins an exact tie. `Context.new`, its principal claim, and one
+anchored when setup begins. `Context.new`, its principal claim, and one
 authority-claim batch containing all selected OAuth aliases use that effective
 deadline without resetting it. After setup, each requested target in argv order
 receives a fresh top-level authorization deadline for its discovery, listener,
@@ -572,13 +579,19 @@ ever-growing branch:
 - **Checkpoint D:** slice 8, destination preflight and publication.
 - **Checkpoint E:** slice 9, shared commands and REPL parity.
 - **Checkpoint F:** slice 10, standalone packaging.
-- **Checkpoint G:** slice 11, final acceptance, documentation, and dead-code
-  removal.
+- **Checkpoint G:** slice 11, final acceptance and documentation.
 
 Each follow-up checkpoint starts from the updated `origin/main` after its
 predecessor merges. This keeps the deployed boundary useful at every merge and
 prevents unfinished later commands or packaging work from expanding an already
 reviewable PR.
+
+Use one PR per value-bearing checkpoint, not separate PRs for its plan edits,
+prerequisite cleanup, or generated-artifact maintenance. Within that PR, keep
+each commit independently reviewable, run an incremental independent review to
+clean before committing, and push each clean commit. A later commit must remove
+the transitional path it replaces rather than accumulating both paths until
+slice 11.
 
 ### Slices 0–4: complete and pushed
 
@@ -603,6 +616,15 @@ Delivery is intentionally split into review-sized commits:
 - 5d2b (complete): atomically cut the command frontend over to that boundary
   and remove optional provider applications from the core OTP startup set; and
 - 5d3 (Checkpoint B): bounded credential resolution.
+
+Checkpoint B begins with small prerequisite commits that share application
+request and host-catalog acquisition between `mix ptc.run` and the command
+engine, derive complete phase code sets from `DiagnosticCatalog` while keeping
+intentional subtractions explicit, and make the checked-in semantic projection
+reviewable. These commits remove their replaced copies immediately and remain
+part of the Checkpoint B PR; they are not separate cleanup PRs. JSV caching and
+revision-aware seal-only `PreparedRun` validation remain measured follow-up
+work, not prerequisites for Checkpoint B.
 
 Slice 5d2b keeps the Mix command's existing option surface but replaces its
 provider-bearing runtime path atomically: destination preflight completes on
@@ -676,6 +698,9 @@ though no final close callback was returned.
 not commit; a multi-target fixture proves shared context claims do not reset
 their setup deadline, differing selected timeouts use the shortest OAuth
 occurrence's intrinsic deadline, and each interaction has its own anchor;
+fixtures for validation, credentials, OAuth, acquisition, provider execution,
+and Kernel execution prove that either candidate ordering and an exact tie
+retain the operation-class diagnostic;
 explicit authorization is reusable by the immediately following run without
 consuming or renewing its run budget; partial acquisition closes exactly the
 acquired prefix in reverse order. Caller death leaves no session-owned resource
@@ -707,14 +732,18 @@ telemetry, or envelopes; transport status, headers, and body remain bounded. An
 adversarial peer cannot deliver a transport-sized binary into the command
 process before the response limit rejects it. Fixtures prove validate/models
 invoke no local callback, default doctor invokes only audited-local callbacks,
-and an unverified check cannot run before activity is true.
+and an unverified check cannot run before activity is true. Connectivity
+fixtures prove that either deadline-candidate ordering and an exact tie retain
+the connectivity operation-class diagnostic.
 
-The current Mint loop applies cumulative limits only after receiving a complete
-transport message, so finite response fixtures cannot establish this hard
-bound. Keep the adapter as the public boundary, but configure a proven
-transport-level maximum or put the smallest passive/capped receive mechanism
-behind it. Any backend or port-helper change is its own narrowly reviewed
-commit; do not add a second general HTTP stack.
+The current active-mode Mint loop applies cumulative limits only after one
+socket message has already reached the command process, so finite response
+fixtures cannot establish this hard bound. First prove and test an authoritative
+per-message maximum through socket-buffer configuration; otherwise use Mint's
+passive receive mode with an explicit byte cap. Keep the adapter as the public
+boundary. A minimal native or port receive helper is a last resort only if
+neither shipped mechanism can prove the bound, and any such helper is its own
+narrowly reviewed commit. Do not add a second general HTTP stack.
 
 ### Slice 8: destination preflight and publication
 
@@ -731,12 +760,16 @@ exactly `<run_ref>.jsonl` and `<run_ref>.private.jsonl`, respectively.
 ### Slice 9: commands and REPL parity
 
 - finish shared `help`, `version`, `validate`, `models`, `doctor`, `run`, and
-  `init` dispatch;
+  `init` rendering and dispatch;
 - route Mix one-shot and existing REPL modes through the shared preparation and
   session boundaries;
 - add manifest-only `--host-config HOST.json` to the REPL, require it for a
   provider-bearing manifest, and reject it in direct and profile modes; and
-- remove obsolete option names and duplicate frontend logic.
+- remove obsolete option names.
+
+Application-request and host-catalog duplication is removed in Checkpoint B;
+slice 9 is a rendering, dispatch, and REPL-parity cutover rather than another
+acquisition refactor.
 
 **Gate:** Mix/direct parity fixtures produce the same safe outcomes; help,
 version, validate, models, and default doctor have zero provider activity;
@@ -755,11 +788,12 @@ work.
 
 ### Slice 10: standalone packaging
 
-- add the release entrypoint and launcher framing;
+- add the release entrypoint, launcher framing, and a small outer wrapper for
+  the standalone BEAM VM; the existing MCP launcher cannot fill this role;
 - enforce the retained standalone process contract for stdout, stderr, and
   exit status; and
-- add a dependency-version-pinned inventory of reachable direct descriptor and
-  secret-bearing stderr writes, failing on unclassified dependency drift; and
+- capture or redirect the VM child's stderr behind that code-owned boundary,
+  with targeted sentinels for known direct-descriptor and bypass routes; and
 - verify descriptor and signal behavior on supported release targets.
 
 **Gate:** packaged conformance tests cover stdin, stdout, stderr, exit status,
@@ -778,8 +812,7 @@ outer-supervisor plan.
 - update retained CLI, host-configuration, Kernel-maintainer, OAuth, and
   packaging documentation;
 - run memory-vs-directory, provider-free, MCP OAuth, live-model, filesystem,
-  and packaged acceptance matrices; and
-- delete dead scaffolding exposed by the completed integration.
+  and packaged acceptance matrices.
 
 **Gate:** all generated docs/schemas are current, documentation builds with
 warnings as errors, `mix precommit` passes, credentialed acceptance passes when
@@ -797,10 +830,10 @@ Before every commit:
 2. run focused tests and `mix precommit`; and
 3. record any intentionally deferred limitation in the checkpoint description.
 
-Independent adversarial review may run locally before push or externally on the
-PR. It must be complete before merge, but opening a PR does not require a
-duplicate local review when external review is planned. Fix every actionable
-finding and rerun the affected gates before merging.
+The incremental independent review is the required local review before each
+commit. External PR review remains useful but does not replace it or require a
+duplicate local pass over byte-identical content. Fix every actionable finding
+and rerun the affected gates before committing.
 
 Documentation changes also run:
 
@@ -813,6 +846,13 @@ checkpoint, reconcile it with the latest `origin/main`, rerun the full gates,
 and complete the chosen local or external review. If a later finding belongs
 to an earlier unmerged commit, fix the owning boundary and recheck affected
 descendants instead of papering over the defect.
+
+For each commit, review only its uncommitted incremental delta, batch any
+findings, and use focused follow-up review until that exact tree is clean. Run
+the relevant tests and `mix precommit`, then commit and push without changing
+the reviewed tree. At the checkpoint boundary, run one fresh cumulative review
+against a freshly fetched `origin/main`; if the base advances, rebase and repeat
+that cumulative review.
 
 ## Required acceptance properties
 
