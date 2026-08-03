@@ -15,6 +15,7 @@ manifest, execution, result, and trace paths.
 | `mix ptc.run MANIFEST --trace TRACE.jsonl` | Persist bounded canonical events after the run |
 | `mix ptc.run MANIFEST --inspect RUN.inspection.jsonl` | Also write the owner-only private artifact |
 | `mix ptc.run MANIFEST --component-override-descriptor D.json` | Compile one selected component from verified replacement source |
+| `mix ptc.materialize MANIFEST --component ID --out DIR --source S.clj` | Publish model-authored source as a gated candidate component |
 | `mix ptc.repl` | Start the direct transactional PTC-Lisp REPL |
 | `mix ptc.repl -e EXPR -l SETUP.clj` | Run repeatable expressions with optional setup |
 | `mix ptc.repl --manifest MANIFEST` | Reuse a manifest's workflow bundle and capabilities |
@@ -121,21 +122,37 @@ alias before the standalone command contract is released.
 `--component-override-descriptor` compiles one already-selected component from
 different source. It is host command authority: a manifest cannot name an
 override and a generated program cannot observe one. The descriptor carries
-exactly four fields:
+four required fields and one optional provenance object:
 
 ```json
 {
   "component_id": "my.agent",
   "base_source_hash": "sha256:<64 lowercase hex>",
   "source_hash": "sha256:<64 lowercase hex>",
-  "path": "candidate.clj"
+  "path": "candidate.clj",
+  "provenance": {
+    "run_id": "run-2026-08-03-0001",
+    "prompt_hash": "sha256:<64 lowercase hex>",
+    "authored_at": "2026-08-03T09:15:00Z",
+    "accept_widened_effect": false
+  }
 }
 ```
+
+`provenance` is a closed object: unknown keys are refused, and `authored_at`
+must parse as RFC 3339 in UTC. It records **who authored** a candidate and is
+**operator-asserted, verified by nothing** — a `run_id` is a claim about
+origin, not evidence of it. There is no model-id field, because a descriptor is
+a published artifact and raw model selectors must not be published; the
+authoring model is reachable through the run id. Provenance is deliberately
+kept out of content identity, so adding it never changes
+`application_content_digest`.
 
 Both hashes use that `sha256:`-prefixed form. `path` resolves against the
 descriptor's own canonical directory and may not escape it. The descriptor is
 at most 64 KiB and the candidate source at most 1 MiB. Standalone command
-diagnostics authorize descriptor paths against this exact four-field schema:
+diagnostics authorize descriptor paths against this exact schema — the four
+required fields plus the optional `provenance` object described below:
 duplicate or unknown fields report the safe parent pointer, while an invalid
 declared field can report its public field pointer.
 Crossing either byte ceiling, or the descriptor JSON depth/node ceiling, is
@@ -157,10 +174,74 @@ than replacing both. Normal dependency, export, signature, and capability
 validation still applies: an override changes which source compiles, never what
 compilation permits.
 
-The `run-started` event records the component ID and both hashes, never the
-candidate source, so a trace names the base as well as the candidate. Nothing
-here writes: producing candidate source and promoting it are separate steps
-outside this command.
+The `run-started` event records the component ID, both hashes, the resolved
+environment, and any asserted provenance — never the candidate source — so a
+trace names the base as well as the candidate. Nothing here writes: producing
+candidate source is a separate step, described next.
+
+### Promote model-authored source into a component
+
+A model can author a working library inside a run: source handed to
+`kernel/eval-source` may contain `def`/`defn`, and those definitions persist
+for the life of the run. But a runtime `defn` dies with the run — it is not in
+the frozen bundle, not covered by a component source hash, and absent from
+`mission_inventory`. `mix ptc.materialize` closes that loop by turning authored
+bytes into a candidate a later run can evaluate.
+
+```bash
+mix ptc.materialize ptc.json --component my.helper --out private/candidate \
+  --source authored.clj --origin-run-id run-2026-08-03-0001
+```
+
+Source comes from `--source` (raw bytes) or from `--from-result PATH
+--result-pointer /json/pointer`, because `mix ptc.run --output` writes a JSON
+result artifact rather than raw Lisp. The pointer must resolve to one string;
+anything else is refused rather than coerced.
+
+`--out` must not exist. It is created exclusively at mode 0700 with both files
+at 0600 before any content is written, because a candidate extracted from a
+private artifact must not be declassified by publishing it. The exclusive
+create — not a rename — is the no-clobber guarantee, since POSIX `rename` may
+replace an existing empty directory.
+
+The candidate is then re-acquired through the descriptor just written, which is
+the exact path a run takes, and gated:
+
+| Criterion | Question |
+| --- | --- |
+| G1 | Does it resolve to one environment and compile? |
+| G2 | Does every prompt-visible export declare a signature and docstring? |
+| G3 | Does any export reach further than the base it replaces? |
+| G4 | Are declared dependencies unchanged? (preserved by construction) |
+
+A criterion reports `blocked` rather than `fail` when it could not run at all —
+a candidate that does not compile has no export table for G2 and G3 to read.
+
+G2 is promotion policy, not something the runtime enforces: the inventory
+projects `nil` docstrings and contracts without objection, which is exactly why
+an export promoted without them would compile, ship, and be useless to the next
+run's model.
+
+G3 compares per export, never against an application-wide union of capability
+names. If a base export `A` requires `read-tool` and `B` requires `write-tool`,
+`A` gaining `write-tool` adds no name outside the union while materially
+widening `A`. A widening is refused unless you pass `--accept-widened-effect`,
+which is recorded in the report and in the descriptor's provenance.
+
+The gate does **not** check capability grants. Real capability names exist only
+after provider acquisition, so a candidate naming a capability no provider
+grants passes here and fails at run-time assembly, which stays authoritative.
+The gate narrows the distance to that failure; it does not remove it.
+
+Promotion only ever *replaces* a selected component. To have a model author a
+new library, declare a placeholder component first, with the dependency surface
+the generated component may consume and a **stub for every export its consumers
+call** — a component declaring nothing cannot be depended on, and the base
+application would not compile. The model then rewrites it, and both hash checks
+still apply.
+
+Promotion itself stays an explicit human decision. `mix ptc.materialize`
+produces evidence and refuses unfit candidates; it never installs one.
 
 ## Understand results and errors
 

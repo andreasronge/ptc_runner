@@ -12,6 +12,10 @@ belongs in guides or retained specifications.
 - [`lisp-kernel/generated-program-boundary.md`](lisp-kernel/generated-program-boundary.md)
   separates runtime values from subordinate program source and adds a bounded,
   mission-aware source-checking path for generated PTC-Lisp.
+- [`lisp-kernel/promote-authored-component.md`](lisp-kernel/promote-authored-component.md)
+  closes the loop from model-authored runtime source to an attested component:
+  host-side materialization, descriptor provenance, and a promotion gate that
+  does not depend on the removed `run --check`.
 - [`lisp-kernel/stable-cli-contract.md`](lisp-kernel/stable-cli-contract.md)
   turns the product-readiness CLI slice into an implementation-ordered
   protocol, diagnostics, and filesystem-independent application-source plan.

@@ -370,9 +370,15 @@ defmodule PtcRunner.Kernel.ApplicationPackage do
   defp override_environment(false, false), do: {:error, :override_component_not_selected}
 
   defp build(manifest, override_pairs, accounting) do
+    # The package-facing projection keeps the resolved environment and adds
+    # operator-asserted authorship, so an artifact names both the base and the
+    # candidate and where the substitution landed. Content records are built
+    # separately in `override_records/1` from the same pairs and must not gain
+    # either: their name already encodes the environment, and authorship claims
+    # are not content, so `application_content_digest` stays content-derived.
     identities =
-      Enum.map(override_pairs, fn {identity, _override, _accounting} ->
-        Map.delete(identity, "environment")
+      Enum.map(override_pairs, fn {identity, override, _accounting} ->
+        Map.merge(identity, ComponentOverride.attribution(override))
       end)
 
     with {:ok, records} <- content_records(manifest, override_pairs),

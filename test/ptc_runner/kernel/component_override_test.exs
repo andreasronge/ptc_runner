@@ -7,6 +7,7 @@ defmodule PtcRunner.Kernel.ComponentOverrideTest do
   override path.
   """
 
+  alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.ComponentOverride
   alias PtcRunner.Kernel.Library
   alias PtcRunner.Kernel.ProviderRegistry
@@ -164,7 +165,8 @@ defmodule PtcRunner.Kernel.ComponentOverrideTest do
       assert identity == %{
                "component_id" => "agent.retry",
                "base_source_hash" => hash(context.base.source),
-               "source_hash" => hash(File.read!(paths.candidate))
+               "source_hash" => hash(File.read!(paths.candidate)),
+               "environment" => "workflow"
              }
 
       refute inspect(built.config.run_started_metadata) =~ "candidate-marker"
@@ -253,6 +255,117 @@ defmodule PtcRunner.Kernel.ComponentOverrideTest do
 
       refute inspect(identity) =~ "candidate-marker"
     end
+  end
+
+  describe "authoring provenance" do
+    @tag :tmp_dir
+    test "a promoted candidate names the run that authored it", context do
+      paths = write_application(context, context.base, raw: %{"provenance" => provenance()})
+
+      assert {:ok, request} =
+               ApplicationPackage.request_directory(paths.manifest,
+                 component_override_descriptor: paths.descriptor,
+                 result_projection: :native
+               )
+
+      assert [attribution] = request.package.component_overrides
+
+      # Without this a promoted component is anonymous source with a hash: the
+      # artifact could not say which run, or which prompt, produced it.
+      assert attribution["run_id"] == "run-2026-08-03-0001"
+      assert attribution["prompt_hash"] == hash("authoring prompt")
+      assert attribution["authored_at"] == "2026-08-03T09:15:00Z"
+      assert attribution["accept_widened_effect"] == true
+      assert attribution["environment"] == "workflow"
+    end
+
+    @tag :tmp_dir
+    test "provenance never enters content identity", context do
+      without = write_application(context, context.base)
+
+      with_provenance =
+        write_application(
+          Map.put(context, :tmp_dir, Path.join(context.tmp_dir, "provenanced")),
+          context.base,
+          raw: %{"provenance" => provenance()}
+        )
+
+      assert {:ok, plain} =
+               ApplicationPackage.request_directory(without.manifest,
+                 component_override_descriptor: without.descriptor,
+                 result_projection: :native
+               )
+
+      assert {:ok, provenanced} =
+               ApplicationPackage.request_directory(with_provenance.manifest,
+                 component_override_descriptor: with_provenance.descriptor,
+                 result_projection: :native
+               )
+
+      # Content identity must answer "what is this application", not "who says
+      # they wrote it". An asserted timestamp or acceptance flag changing the
+      # digest would make identity depend on an operator's claim.
+      assert provenanced.package.application_content_digest ==
+               plain.package.application_content_digest
+    end
+
+    @tag :tmp_dir
+    test "an unknown provenance key is refused", context do
+      paths =
+        write_application(context, context.base,
+          raw: %{"provenance" => Map.put(provenance(), "model_id", "some/model")}
+        )
+
+      assert {:error, {:source_role, :component_override, reason}} =
+               RunBuilder.run(paths.manifest, context.registry,
+                 component_override_descriptor: paths.descriptor
+               )
+
+      assert {:component_override_path, [{:property, "provenance"}], :invalid_override_descriptor} =
+               reason
+    end
+
+    @tag :tmp_dir
+    test "a non-UTC authored_at is refused", context do
+      paths =
+        write_application(context, context.base,
+          raw: %{
+            "provenance" => Map.put(provenance(), "authored_at", "2026-08-03T09:15:00+02:00")
+          }
+        )
+
+      assert {:error, {:source_role, :component_override, reason}} =
+               RunBuilder.run(paths.manifest, context.registry,
+                 component_override_descriptor: paths.descriptor
+               )
+
+      assert {:component_override_path, [{:property, "provenance"}], :invalid_override_descriptor} =
+               reason
+    end
+
+    @tag :tmp_dir
+    test "a descriptor without provenance still loads", context do
+      paths = write_application(context, context.base)
+
+      assert {:ok, request} =
+               ApplicationPackage.request_directory(paths.manifest,
+                 component_override_descriptor: paths.descriptor,
+                 result_projection: :native
+               )
+
+      assert [attribution] = request.package.component_overrides
+      assert Map.keys(attribution) |> Enum.sort() == ~w(base_source_hash component_id environment
+               source_hash)
+    end
+  end
+
+  defp provenance do
+    %{
+      "run_id" => "run-2026-08-03-0001",
+      "prompt_hash" => hash("authoring prompt"),
+      "authored_at" => "2026-08-03T09:15:00Z",
+      "accept_widened_effect" => true
+    }
   end
 
   defp hash(source), do: ComponentOverride.hash(source)

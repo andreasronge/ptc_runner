@@ -402,6 +402,7 @@ defmodule PtcRunner.Kernel.ApplicationPackageTest do
       source_hash: ComponentOverride.hash("different bytes"),
       source: @source,
       origin: "component-override",
+      provenance: nil,
       descriptor_bytes: :not_a_byte_count
     }
 
