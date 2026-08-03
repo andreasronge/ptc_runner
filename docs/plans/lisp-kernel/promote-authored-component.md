@@ -231,6 +231,14 @@ That is exactly why the gate must impose it — an export promoted without a
 signature and docstring compiles, ships, and is then useless to the next run's
 model.
 
+G2 and G3 judge **the promoted component's own namespaces**, taken from the
+compiled bundle's per-component namespace record. A neighbouring component that
+already shipped without a signature is not this candidate's fault, and failing
+promotion for it would make the gate unusable in any real application. A
+consumer of the promoted component inherits its requirements transitively; that
+is a real consequence and is reported under `transitive`, but it is not judged
+separately, because the widening it inherited is already judged at its source.
+
 G3 compares capability name sets **per export ref**, never an
 application-wide union. A union comparison silently misses the main case: if
 base export `A` uses `read-tool` and `B` uses `write-tool`, then `A` gaining
