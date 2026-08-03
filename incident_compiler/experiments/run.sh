@@ -11,6 +11,7 @@ TAG="${ARM}-${INCIDENT}-${REP}"
 case "$ARM" in
   fast) MANIFEST=exp-single-pass.json ;;
   loop) MANIFEST=exp-loop.json ;;
+  authored) MANIFEST=exp-authored.json ;;
   *) echo "unknown arm $ARM" >&2; exit 2 ;;
 esac
 

@@ -51,6 +51,7 @@ row = %{
   "used_fast" => path["used_fast"],
   "deopt" => path["deopt"],
   "attempts" => annotations["attempts"],
+  "authoring" => annotations["authoring"],
   "verified" => annotations["citations-verified"],
   "required_fact_recall" => score && score.required_fact_recall.ratio,
   "facts_missed" => score && score.required_fact_recall.missed,
