@@ -26,22 +26,37 @@ boundary this plan implements from the outside:
 
 ## Verified basis
 
-Every decision below rests on these facts, each checked against the source at
-the commit this plan was written on. They are recorded here so review does not
-have to re-derive them.
+Every decision rests on these facts, each checked against the source at the
+commit this plan was written on, so review need not re-derive them.
 
 | Fact | Location |
 | --- | --- |
 | An override is applied to **both** component lists, and the environment is derived from which one matched | `application_package.ex:344` |
-| Ambiguity and non-selection are already hard errors: `:ambiguous_override_target`, `:override_component_not_selected` | `application_package.ex:369` |
-| The resolved environment is already recorded on the override identity | `application_package.ex:353` |
+| Ambiguity and non-selection are already hard errors | `application_package.ex:369`, `application_package.ex:370` |
+| The resolved environment is computed but deleted before it reaches the package, and `identity/1` never carried it | `application_package.ex:375`, `component_override.ex:245` |
+| A **second** deletion strips the environment from content records, where it is already encoded in the record name — this one is load-bearing for `application_content_digest` | `application_package.ex:493` |
+| Override selection and environment resolution are **private**; the only public route that applies an override is acquisition | `application_package.ex:342` |
+| Acquisition accepts an override: `acquire_directory/2` takes `:component_override_descriptor` (a path), `acquire_memory/3` takes a built `:component_override` | `application_package.ex:55`, `application_package.ex:56` |
 | `apply/2` copies the **installed** component's dependencies onto the replacement; a candidate supplies source only | `component_override.ex:225` |
-| Descriptor keys are validated twice — declaratively in `schema/0` and manually in `@keys` plus `decode_value/1` | `component_override.ex:38`, `component_override.ex:292` |
+| Descriptor keys are validated manually in `@keys` and `decode_value/1`; `schema/0` drives diagnostic paths, not validation | `component_override.ex:38`, `component_override.ex:292` |
 | `origin` is hardcoded to `"component-override"` on the filesystem load path | `component_override.ex:111` |
-| Capability **names** survive on the export table as `requires` (`"tool:"`-prefixed) and `tool_refs`; the rendered inventory keeps only a coarse resolved effect and `resolved_export_effect/2` is private | `export.ex:72`, `mission_inventory.ex:277` |
-| Export visibility is `:prompt` or `:discoverable`; `doc`, `signature`, and `type` are all nullable, and the inventory projects a `nil` doc and a `nil` contract without objection | `export.ex:68`, `export.ex:88`, `mission_inventory.ex:161`, `mission_inventory.ex:258` |
+| Capability **names** survive on the export table as `requires` (`"tool:"`-prefixed) and `tool_refs`; the rendered inventory keeps only a coarse resolved effect and its resolver is private | `export.ex:72`, `export.ex:73`, `mission_inventory.ex:277` |
+| Export visibility is `:prompt` or `:discoverable`; `signature` and `type` are nullable, `doc` defaults to `nil`, and the inventory projects a `nil` doc and `nil` contract without objection | `export.ex:76`, `export.ex:77`, `export.ex:88`, `mission_inventory.ex:161`, `mission_inventory.ex:258` |
+| Capability requirements are validated during **environment assembly**, not bundle compilation | `environment.ex:17` |
 | `SourceCheck` fingerprints source with the same `sha256:` convention a descriptor carries | `source_check.ex:143` |
 | `run --check` exists today but is deleted by the accepted stable-CLI grammar, which keeps `--component-override-descriptor` | `ptc.run.ex:70`, `stable-cli-contract.md` command surface |
+
+## Scope note
+
+The issue names four missing pieces: materialization, authoring provenance, a
+promotion gate, and component shaping — and says of the gate's third criterion,
+"the last one matters most". This plan delivers all four rather than
+materialization alone.
+
+The gate is not a policy engine. G2 and G3 are a null check and a per-export
+set difference over an export table the compiler already produces. What makes
+them worth building is that without them, "the model wrote something better"
+stays unfalsifiable, which is the issue's stated reason for existing.
 
 ## Decisions
 
@@ -52,28 +67,25 @@ declares a placeholder component first, and the model rewrites it. This
 preserves both hash checks, needs no kernel change, and keeps
 `:override_component_not_selected` a hard error.
 
-The materialization task does **not** re-implement component selection. It
-drives the existing `ApplicationPackage` override path, which already resolves
-the target environment, rejects an ID selected in both environments as
-`:ambiguous_override_target`, and rejects an unselected ID. Reusing it is what
-keeps the gate's view of the effective application identical to a run's.
-
 Two consequences must be documented, not discovered:
 
 - `apply/2` copies the installed component's dependencies onto the
   replacement, so the placeholder fixes, up front, what the generated component
   may *consume*. A candidate cannot acquire a new dependency.
-- The placeholder's own dependency list does not control who may consume it.
-  Any component that will call the generated exports must already declare a
+- The placeholder's dependency list does not control who may consume it. Any
+  component that will call the generated exports must already declare a
   dependency on the placeholder, or promotion produces a component nothing can
   reach.
 
 A placeholder is therefore a minimal valid `ns` with no exports, the intended
 dependency list, and at least one declared consumer.
 
-### D2 — Materialization is a host command, never a runtime capability
+### D2 — Materialize first, then gate through the real acquisition path
 
-Add one Mix task:
+Override selection and environment resolution are private, and the only public
+operation that applies an override is acquisition. Rather than add a seam or
+reimplement selection — either of which lets the gate's view drift from a run's
+— the task materializes first and gates the materialized artifact.
 
 ```text
 mix ptc.materialize MANIFEST --component ID --out DIR
@@ -83,77 +95,95 @@ mix ptc.materialize MANIFEST --component ID --out DIR
     [--accept-widened-effect]
 ```
 
-Source acquisition is explicit because `ptc.run --output` writes a JSON result
-artifact, not raw Lisp. `--source` takes a file of raw candidate bytes.
-`--from-result` reads a run's result artifact and extracts one string at a JSON
-pointer, bounded by the existing `@max_source_bytes`, rejecting a non-string or
-absent target. No other extraction is supported; the task never decodes an
-arbitrary shape looking for something source-like.
+Order of operations:
 
-Provenance values are supplied by the operator, not inferred. `authored_at`
-defaults to the task's wall clock only when the flag is absent, and is recorded
-as `:utc_datetime`.
+1. Acquire the manifest with no override; locate the installed component in
+   the package's public `workflow_components`/`mission_components` and hash its
+   source to get `base_source_hash`.
+2. Create `DIR` with an exclusive `File.mkdir/1`. Existing directory is
+   `:eexist` and terminal. This, not a rename, is the no-clobber primitive:
+   POSIX `rename` may replace an existing empty destination directory, so an
+   exclusive create is the only publication that cannot silently clobber.
+3. Write `candidate.clj` and `descriptor.json` into `DIR`.
+4. Re-acquire the manifest with
+   `component_override_descriptor: DIR/descriptor.json` — the exact path a run
+   takes. Selection, ambiguity, non-selection, and both hash checks are
+   enforced by production code, not by a copy of it.
+5. Assemble and compare export tables (G1–G3).
+6. On any terminal failure, remove `DIR` and exit non-zero. A gate failure
+   leaves nothing behind.
+
+Source acquisition is explicit because `ptc.run --output` writes a JSON result
+artifact, not raw Lisp. `--source` takes raw candidate bytes. `--from-result`
+reads a result artifact under the existing document byte, JSON depth, and node
+limits, then resolves one RFC 6901 pointer to one string, rejecting a
+non-string or absent target. No other extraction is supported.
 
 A run cannot invoke this. A run only *emits* source through channels it already
-has. The descriptor path stays unreachable from anything a run can influence,
-which is the property `ComponentOverride` depends on.
-
-Both files are written atomically: the task materializes into a fresh sibling
-temporary directory and renames it into place, so a half-written
-candidate/descriptor pair is never observable and a check-then-write race
-cannot silently clobber.
+has, and the descriptor path stays unreachable from anything a run can
+influence — the property `ComponentOverride` depends on.
 
 ### D3 — The gate does not depend on `run --check`
 
-`docs/plans/lisp-kernel/stable-cli-contract.md` deletes `run --check` while
-keeping `--component-override-descriptor`, so building the gate on `--check`
-would build on something scheduled for removal.
+The accepted stable-CLI grammar deletes `run --check` while keeping
+`--component-override-descriptor`, so building the gate on `--check` would
+build on something scheduled for removal. Acquisition plus assembly needs no
+provider session and no model call.
 
-The gate instead assembles in-process. It applies the candidate through
-`ApplicationPackage`, takes the resolved environment from that result, and
-compiles the affected environment's components with
-`Kernel.compile_bundle/1`. Workflow and mission components are separate lists
-compiled separately; the plan does not claim one call reproduces a whole run.
-The gate is provider-free and never opens a session.
+The gate assembles as well as compiles. Capability requirements are checked in
+`Environment.assemble/4`, not in `Kernel.compile_bundle/1`, so a candidate
+naming an ungranted capability would otherwise pass materialization and fail
+only inside a later run.
 
 Follow-up, not in this plan: when the stable CLI reaches slice 9, fold the task
-into the shared grammar as a `ptc candidate` command. It is written against
-`ApplicationPackage` and `Kernel.compile_bundle/1`, not Mix argv handling, so
-the fold is mechanical.
+into the shared grammar as a `ptc candidate` command.
 
-### D4 — Provenance is a closed object, carried on the override
+### D4 — Provenance is operator-asserted, closed, and separate from `origin`
 
 `origin` is a bounded free-form string today, hardcoded on the filesystem load
-path and absent from the descriptor schema, so a promoted component is
-anonymous source with a hash.
+path and absent from the descriptor, so a promoted component is anonymous
+source with a hash.
 
-Add an optional `"origin"` object to the descriptor with a closed, individually
-pattern-validated key set and `additionalProperties: false`:
+Add an optional `"provenance"` object to the descriptor — named separately from
+`origin`, which stays an opaque diagnostic label on both `ComponentOverride`
+and `Component` — with a closed, individually validated key set and
+`additionalProperties: false`:
 
-| Key | Shape | Projected into `run-started`? |
+| Key | Descriptor shape | Projected? |
 | --- | --- | --- |
 | `run_id` | bounded ID | yes |
 | `prompt_hash` | `sha256:…` | yes |
-| `authored_at` | RFC 3339 UTC | yes |
+| `authored_at` | RFC 3339 string, parsed to `:utc_datetime` internally | yes |
 | `accept_widened_effect` | boolean | yes |
 | `model_id` | bounded ID | **no** |
 
-`model_id` is descriptor-only. It is not projected in any form — not verbatim,
-because the stable CLI privacy contract forbids publishing raw model selectors,
-and not hashed, because model identifiers are a small enumerable domain and an
-unkeyed SHA-256 of one is trivially reversed by dictionary. An operator who
-wants the model in the artifact must publish it through a channel already
-authorized to carry it.
+These values are **operator-asserted, not attested**. Nothing verifies that
+`run_id` names the run that produced the bytes; `--from-result` does not
+cross-check it. The report and the guide must say so, or provenance reads as a
+guarantee the runtime never made.
 
-`accept_widened_effect` is part of the closed set precisely because G3 records
-the operator's acknowledgement there; omitting it would make the schema reject
-the task's own output.
+`model_id` is descriptor-only, projected in no form — not verbatim, because the
+stable CLI privacy contract forbids publishing raw model selectors, and not
+hashed, because model identifiers are a small enumerable domain and an unkeyed
+SHA-256 of one is trivially reversed by dictionary.
 
-Structured provenance lives on the `ComponentOverride` struct and flows to the
-artifact through `identity/1`, which already carries the environment.
-`Component.origin` keeps a fixed diagnostic label. Encoding a canonical JSON
-blob into that opaque bounded binary would be needless coupling to a field
-whose only job is diagnostics.
+`accept_widened_effect` is in the closed set because G3 records the operator's
+acknowledgement there; omitting it would make the schema reject the task's own
+output.
+
+**This requires two explicit projection changes**, because neither value
+reaches an artifact today: `identity/1` must carry the resolved `environment`,
+and the package-identity path at `application_package.ex:375` must stop
+deleting it. Without both, the round-trip assertion below has nothing to
+assert.
+
+The deletion at `application_package.ex:493` must be left alone. It strips the
+environment from a **content record** whose name already encodes it
+(`"mission/component-id"`), so removing that call would double-encode the
+environment and change `application_content_digest` — an identity-bearing value
+— for every application that uses an override. The two deletions look
+identical and are not. A regression test must pin the content digest of an
+override-bearing application across this change.
 
 ### D5 — Component shaping is a template and a diagnostic, not a prompt hint
 
@@ -164,80 +194,98 @@ shaping hints to any system or planner prompt. Prompts stay domain-blind.
 
 ## Gate criteria
 
-Each criterion reports `pass`, `fail`, or **`blocked`** — G2 and G3 have no
-export table to inspect when G1 fails, and reporting that as `fail` would
-misattribute the cause.
+Each criterion reports `pass`, `fail`, or `blocked` — G2 and G3 have no export
+table when G1 fails, and calling that `fail` would misattribute the cause.
 
 | ID | Criterion | Basis |
 | --- | --- | --- |
-| G1 | Candidate applies to exactly one environment and that environment's bundle compiles | `ApplicationPackage` override path, `Kernel.compile_bundle/1` |
+| G1 | Candidate resolves to exactly one environment, its bundle compiles, and the environment assembles with its granted capabilities | acquisition, `Kernel.compile_bundle/1`, `Environment.assemble/4` |
 | G2 | Every `:prompt`-visible export declares a `:signature` (or `:type` for a value) and a non-empty docstring | `Export.visibility`, `Export.signature`, `Export.type`, `Export.doc` |
-| G3 | No export widens its effect, and the candidate's exports require no capability name the base's did not | `Export.effect`, `Export.requires`, `Export.tool_refs` |
-| G4 | Declared dependencies are unchanged — **preserved by construction**, reported for completeness, not enforced | `component_override.ex:225` |
-| G5 | Candidate ≤ 1 MiB; the encoded descriptor ≤ 64 KiB, checked after final encoding | existing `ComponentOverride` bounds |
+| G3 | No export widens, compared **per export** | `Export.effect`, `Export.requires`, `Export.tool_refs` |
+| G4 | Declared dependencies unchanged — **preserved by construction**, reported, not enforced | `component_override.ex:225` |
+| G5 | Candidate ≤ 1 MiB and the encoded descriptor ≤ 64 KiB, checked on the bytes actually written | existing `ComponentOverride` bounds |
 
-G2 is a **promotion policy**, not a claim that the runtime rejects such
-exports. It does not: the inventory projects `nil` contracts and empty docs
-without objection. That is exactly why the gate has to impose the requirement —
-an export promoted without a signature and docstring compiles, ships, and is
-then useless to the next run's model.
+G2 is a **promotion policy**, not a claim the runtime rejects such exports. It
+does not: the inventory projects `nil` docs and contracts without objection.
+That is exactly why the gate must impose it — an export promoted without a
+signature and docstring compiles, ships, and is then useless to the next run's
+model.
 
-G3 compares capability name sets, not the rendered effect projection, because
-the projection discards the names and its resolver is private. Widening is
-defined over the effect lattice `read < unknown < write`, matching the existing
-resolver's precedence. Comparison is by export `ref`:
+G3 compares capability **name sets per export ref**, never an
+application-wide union. A union comparison silently misses the main case: if
+base export `A` uses `read-tool` and base export `B` uses `write-tool`, then
+`A` gaining `write-tool` adds no name outside the union while materially
+widening `A`. Effect widening is ordered `read < unknown < write`, matching the
+existing resolver's precedence.
 
-- an export present in both whose effect moves up the lattice is a widening;
-- an export whose `requires`/`tool_refs` set gains a name absent from the union
-  of the base's is a widening;
-- an export removed or renamed is reported as a **surface change**, not a
-  widening, and never silently ignored.
+| Export | Rule |
+| --- | --- |
+| In base and candidate | Widening if its effect moves up the lattice, or its `requires`/`tool_refs` set gains a name |
+| Added | Widening unless it requires nothing. There is no baseline to compare against, and silence would make the export-free placeholder case — the primary one — vacuously safe |
+| Removed or renamed | Reported as a **surface change**, never silently ignored, and never counted as widening |
 
-A G3 widening is terminal unless the operator passes
-`--accept-widened-effect`, which is recorded in the report and in the written
-descriptor's origin. An override "changes which source compiles, never what
-compilation permits", so a widening candidate is not a security hole — but it
-is a different risk profile and must not pass silently.
+The added-export rule means the first promotion of an export-free placeholder
+is a widening by construction and requires `--accept-widened-effect`. That is
+the honest reading: going from no capability reach to some reach is exactly the
+change an operator should have to acknowledge once.
+
+A widening is terminal without that flag, which is recorded in the report and
+in the descriptor's provenance. An override "changes which source compiles,
+never what compilation permits", so a widening candidate is not a security
+hole — but it is a different risk profile and must not pass silently.
+
+G5 is evaluated inside materialization, on the final encoded bytes, because
+descriptor size is not knowable until path, provenance, and the acceptance
+decision are all encoded.
 
 ## Implementation slices
 
 Landing as one PR; separate commits.
 
-1. **Descriptor provenance round-trip.** Add the closed `origin` object. This
-   touches more than `schema/0`: `@keys` and `decode_value/1` validate keys
-   manually and both currently require every key, so optional-key handling,
+1. **Descriptor provenance round-trip.** Add the closed `provenance` object.
+   This touches more than `schema/0`: `@keys` and `decode_value/1` validate
+   manually and currently require every key, so optional-key handling,
    duplicate-key path reporting, the struct, `load/1`, `load_application/3`,
-   and `identity/1` all change together. Absent `origin` keeps today's default.
+   and `identity/1` all change together. Carry `environment` through to the
+   package instead of deleting it. Absent provenance keeps today's default.
 2. **Promotion gate.** New `PtcRunner.Kernel.CandidatePromotion` implementing
-   G1–G5 against an `ApplicationPackage` and candidate source, returning a
-   closed `pass | fail | blocked` report. No filesystem writes.
+   G1–G4 over an acquired effective package, returning a closed
+   `pass | fail | blocked` report. No filesystem writes.
 3. **Materialization task.** `mix ptc.materialize` — argument handling, both
-   source-acquisition modes, atomic directory rename, deterministic report,
-   non-zero exit on gate failure.
-4. **Documentation.** The placeholder idiom, its consumer requirement, and the
-   promotion loop in the Kernel maintainer guide and running-and-debugging
-   guide; component template; `docs/plans/README.md` index entry.
+   acquisition modes, exclusive-create publication with failure cleanup, G5 on
+   final bytes, deterministic report, non-zero exit on gate failure.
+4. **Documentation.** The placeholder idiom, its consumer requirement, the
+   operator-asserted nature of provenance, and the promotion loop in the Kernel
+   maintainer guide and running-and-debugging guide; component template;
+   `docs/plans/README.md` index entry.
 
 ## Verification
 
-- Unit coverage per gate criterion: a widened effect, a newly required
-  capability name, a `:prompt` export missing a signature, a removed export, a
-  candidate that fails to compile (asserting G2/G3 report `blocked`), and an ID
-  selected in both environments (asserting `:ambiguous_override_target`).
-- Round-trip test: materialize, then run with the produced descriptor and
-  assert `run-started` names base hash, candidate hash, environment, and the
-  projected origin — and that `model_id` appears nowhere in the artifact.
-- One e2e proving the loop: a mission authors source, `check-source` reports
-  the same `sha256:` digest the descriptor carries, the task materializes and
-  gates it, and a second run executes the promoted component.
+- Unit coverage per criterion: an effect widening; a capability name added to
+  one export while present on another (the union-comparison trap); an added
+  export against an empty base; a removed export; a `:prompt` export missing a
+  signature; a candidate naming an ungranted capability (must fail G1 at
+  assembly, not survive to a run); a candidate that fails to compile (G2/G3
+  `blocked`); an ID selected in both environments
+  (`:ambiguous_override_target`).
+- Publication: `--out` pointing at an existing directory fails `:eexist`, and
+  an existing **empty** directory is not replaced.
+- `application_content_digest` of an override-bearing application is unchanged
+  by slice 1, pinning that only the package-identity deletion moved.
+- Round-trip: materialize, run with the produced descriptor, assert
+  `run-started` names base hash, candidate hash, environment, and projected
+  provenance — and that `model_id` appears nowhere in the artifact.
+- One e2e: a mission authors source, `check-source` reports the same `sha256:`
+  digest the descriptor carries, the task materializes and gates it, and a
+  second run executes the promoted component.
 - `mix precommit` before every commit.
 
 ## Non-goals
 
 - Making `mission_inventory` mutable or re-hashable mid-run.
 - Letting a manifest or a generated program name an override.
-- Automatic promotion. Promotion stays an explicit human decision; this plan
-  makes that decision cheap to reach and well-evidenced, not unnecessary.
+- Automatic promotion, and any claim that provenance is attested rather than
+  asserted.
 - Creating genuinely new component IDs from generated source (D1).
 - A general result-artifact extraction language. `--from-result` resolves one
-  JSON pointer to one string.
+  RFC 6901 pointer to one string.
