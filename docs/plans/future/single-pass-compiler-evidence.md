@@ -184,6 +184,34 @@ The control matters here: **the fast arm shows the identical ratio in all 20 of
 its runs**, so this is a property of the application's verification step, not of
 model-authored retrieval.
 
+**What the model actually wrote, and what it said.** Reading the generated
+sources and the model's own replies back out of the same records:
+
+| | |
+| --- | --- |
+| distinct programs across 9 runs | **8** |
+| replies carrying prose | **0** |
+| report replies wrapped in a ```` ```json ```` fence, against an explicit instruction not to | **7 of 9** |
+| programs reading `data/params` | 0 |
+| programs hardcoding the incident id as a literal | 9 |
+| programs that read `truncated` | 0 |
+
+Eight distinct programs in nine runs, at `temperature 0` with a fixed seed:
+temperature zero is not determinism. No reply ever carried narration — the
+authoring prompt asked for program text and nothing else, and got exactly that
+nine times out of nine. The *report* call is the one it disobeys, fencing its
+JSON in seven of nine replies despite being told not to; `parse-report` strips
+fences, so this costs nothing and would have been invisible without reading the
+exchanges.
+
+Two things follow for work already planned. Every program bakes its incident id
+in as a literal, so **as authored these are single-use artifacts** — promoting
+one into a reusable component (#1167) needs a parameterization step, and the
+authoring prompt never mentions `data/params`, so that is a prompt gap rather
+than a model failure. And **no program reads `truncated`**, which cost nothing
+here because nothing ever truncated, but is precisely the silent-evidence-loss
+failure the hard case would trigger.
+
 **The consequence is a scaling ceiling nobody has costed.** Mission capability
 calls grow at roughly twice the record count plus one search per source, while
 `llm_calls` — the headline metric of this whole comparison — hides that
