@@ -92,6 +92,24 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     refute function_exported?(CommandEngine, :prepare, 2)
   end
 
+  @tag :tmp_dir
+  test "shared request acquisition owns the command policy invariants", %{tmp_dir: directory} do
+    application = write_application(directory, "shared-request", valid_manifest())
+    assert {:ok, catalog} = InstallationCatalog.new()
+
+    assert {:ok, request} =
+             CommandEngine.request(application, catalog,
+               installed_limits: :caller_supplied,
+               result_projection: :native
+             )
+
+    assert request.package.installed_limits == catalog.installed_limits
+    assert request.policy.result_projection == :json
+
+    assert {:error, :invalid_application_options} =
+             CommandEngine.request(application, catalog, [:not_keyword])
+  end
+
   test "malformed phase-1 forms retain their recognized command" do
     cases = [
       {["version", "extra"], "version"},

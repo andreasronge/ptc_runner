@@ -25,6 +25,7 @@ defmodule PtcRunner.Kernel.CommandEngine do
   alias PtcRunner.Kernel.PreparedRun
   alias PtcRunner.Kernel.PrivateDirectory
   alias PtcRunner.Kernel.RunCoordinator
+  alias PtcRunner.Kernel.RunRequest
 
   @artifact_destination_keys [:trace_dir, :inspect, :output, :private_output]
 
@@ -37,6 +38,26 @@ defmodule PtcRunner.Kernel.CommandEngine do
       prepare_with_ref(argv, run_ref)
     end
   end
+
+  @doc false
+  @spec request(binary(), InstallationCatalog.t(), keyword()) ::
+          {:ok, RunRequest.t()} | {:error, term()}
+  def request(application, %InstallationCatalog{} = catalog, options)
+      when is_binary(application) and is_list(options) do
+    if Keyword.keyword?(options) do
+      options =
+        Keyword.merge(options,
+          installed_limits: catalog.installed_limits,
+          result_projection: :json
+        )
+
+      ApplicationPackage.request_directory(application, options)
+    else
+      {:error, :invalid_application_options}
+    end
+  end
+
+  def request(_application, _catalog, _options), do: {:error, :invalid_application_source}
 
   defp prepare_with_ref(argv, run_ref) do
     case CommandParser.parse(argv) do
@@ -71,7 +92,7 @@ defmodule PtcRunner.Kernel.CommandEngine do
       {:ok, catalog} ->
         try do
           result =
-            with {:ok, request} <- request(arguments, catalog, run_ref),
+            with {:ok, request} <- request_arguments(arguments, catalog, run_ref),
                  {:ok, prepared} <- RunCoordinator.prepare(request, catalog) do
               command_preparation(arguments, run_ref, prepared, catalog, destinations)
             else
@@ -286,18 +307,16 @@ defmodule PtcRunner.Kernel.CommandEngine do
     )
   end
 
-  defp request(arguments, catalog, run_ref) do
+  defp request_arguments(arguments, catalog, run_ref) do
     options =
       [
-        installed_limits: catalog.installed_limits,
-        result_projection: :json,
         inspection_capture: Map.has_key?(arguments.options, :inspect)
       ]
       |> maybe_trace_identity(arguments, run_ref)
       |> maybe_input(arguments.options)
       |> maybe_override(arguments.options)
 
-    case ApplicationPackage.request_directory(arguments.application, options) do
+    case request(arguments.application, catalog, options) do
       {:ok, request} ->
         {:ok, request}
 

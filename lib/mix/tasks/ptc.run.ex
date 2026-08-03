@@ -45,8 +45,8 @@ defmodule Mix.Tasks.Ptc.Run do
   use Mix.Task
 
   alias PtcRunner.Dotenv
-  alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.CommandDiagnostic
+  alias PtcRunner.Kernel.CommandEngine
   alias PtcRunner.Kernel.HostConfig
   alias PtcRunner.Kernel.HostInstallation
   alias PtcRunner.Kernel.InstallationCatalog
@@ -419,8 +419,6 @@ defmodule Mix.Tasks.Ptc.Run do
   defp request(manifest, catalog, opts) do
     request_opts =
       [
-        installed_limits: catalog.installed_limits,
-        result_projection: :json,
         inspection_capture: Keyword.has_key?(opts, :inspect),
         input_authority: if(Keyword.has_key?(opts, :private_mission), do: :private, else: :normal)
       ]
@@ -433,7 +431,7 @@ defmodule Mix.Tasks.Ptc.Run do
         Keyword.get(opts, :component_override_descriptor)
       )
 
-    ApplicationPackage.request_directory(manifest, request_opts)
+    CommandEngine.request(manifest, catalog, request_opts)
   end
 
   defp maybe_request_option(opts, _key, nil), do: opts
