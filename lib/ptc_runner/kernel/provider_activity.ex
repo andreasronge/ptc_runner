@@ -100,10 +100,15 @@ defmodule PtcRunner.Kernel.ProviderActivity do
 
   def claimed?(_activity), do: false
 
-  @spec stop(t()) :: :ok
+  @spec stop(t()) ::
+          :ok | {:error, :not_owner | :provider_activity_unavailable}
   def stop(%__MODULE__{} = activity) do
-    _result = call_if_valid(activity, :stop, :ok)
-    :ok
+    case stop_call(activity) do
+      :ok -> :ok
+      {:error, :provider_activity_unavailable} -> {:error, :not_owner}
+      :owner_gone -> :ok
+      :call_unavailable -> {:error, :provider_activity_unavailable}
+    end
   end
 
   def stop(_activity), do: :ok
@@ -170,7 +175,8 @@ defmodule PtcRunner.Kernel.ProviderActivity do
   defp handle_operation(:stop, {caller, _tag}, %{controller: caller} = state),
     do: {:stop, :normal, :ok, state}
 
-  defp handle_operation(:stop, _from, state), do: {:reply, :ok, state}
+  defp handle_operation(:stop, _from, state),
+    do: {:reply, {:error, :provider_activity_unavailable}, state}
 
   defp handle_operation(:value, _from, state),
     do: {:reply, state.state == :active, state}
@@ -245,6 +251,20 @@ defmodule PtcRunner.Kernel.ProviderActivity do
     GenServer.call(owner, {:deadline, operation, deadline}, reply_timeout_ms)
   catch
     :exit, _reason -> fallback
+  end
+
+  defp stop_call(activity) do
+    if valid?(activity) do
+      deadline = Deadline.new(@operation_timeout_ms)
+      reply_timeout_ms = Deadline.remaining(deadline) + @reply_grace_ms
+      GenServer.call(activity.owner, {:deadline, :stop, deadline}, reply_timeout_ms)
+    else
+      :owner_gone
+    end
+  catch
+    :exit, {:noproc, _call} -> :owner_gone
+    :exit, {:normal, _call} -> :owner_gone
+    :exit, _reason -> :call_unavailable
   end
 
   defp creator_attached?(%{creator: creator}) do

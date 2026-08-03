@@ -64,6 +64,7 @@ defmodule PtcRunner.Kernel.CommandContract do
     :reference_missing,
     :document_limit_exceeded,
     :contract_invalid,
+    :input_invalid,
     :input_contract_failed,
     :override_invalid,
     :event_identity_conflict

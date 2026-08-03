@@ -2651,6 +2651,42 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   end
 
   @tag :tmp_dir
+  test "a transferred prepared run reports cleanup by its former owner", %{
+    tmp_dir: directory
+  } do
+    application = write_application(directory, "prepared-transfer", valid_manifest())
+
+    assert {:ok, request} =
+             ApplicationPackage.request_directory(application, result_projection: :json)
+
+    assert {:ok, registry} = ProviderRegistry.new()
+
+    assert {:ok, %PreparedRun{} = prepared} =
+             RunCoordinator.prepare(request, catalog_for(registry))
+
+    parent = self()
+    owner_monitor = Process.monitor(prepared.provider_activity.owner)
+
+    consumer =
+      Task.async(fn ->
+        assert :ok = PreparedRun.consume(prepared)
+        send(parent, :prepared_consumed)
+
+        receive do
+          :close_prepared -> PreparedRun.close(prepared)
+        end
+      end)
+
+    assert_receive :prepared_consumed
+    assert {:error, :not_owner} = PreparedRun.close(prepared)
+    assert Process.alive?(prepared.provider_activity.owner)
+
+    send(consumer.pid, :close_prepared)
+    assert :ok = Task.await(consumer)
+    assert_receive {:DOWN, ^owner_monitor, :process, _, :normal}
+  end
+
+  @tag :tmp_dir
   test "direct embedding assembly consumes the sealed prepared run", %{tmp_dir: directory} do
     application = write_application(directory, "prepared-build", valid_manifest())
 
@@ -3097,7 +3133,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
 
     assert ProviderActivity.claim(activity) == {:error, :provider_activity_unavailable}
     assert Process.alive?(activity.owner)
-    assert :ok = ProviderActivity.stop(activity)
+    assert {:error, :not_owner} = ProviderActivity.stop(activity)
     assert Process.alive?(activity.owner)
 
     send(consumer.pid, :mark)
@@ -3125,13 +3161,41 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert_receive :activity_consumed
     expired_deadline = Deadline.new(1, System.monotonic_time(:millisecond) - 2)
 
-    assert :ok =
+    assert {:error, :provider_activity_unavailable} =
              GenServer.call(
                activity.owner,
                {:deadline, :stop, expired_deadline},
                1_000
              )
 
+    assert Process.alive?(activity.owner)
+    send(consumer.pid, :mark)
+    assert Task.await(consumer) == :ok
+  end
+
+  @tag timeout: 10_000
+  test "a timed-out stop never reports successful cleanup" do
+    assert {:ok, activity} = ProviderActivity.start_link()
+    assert :ok = ProviderActivity.claim(activity)
+    parent = self()
+
+    consumer =
+      Task.async(fn ->
+        assert :ok = ProviderActivity.consume(activity)
+        send(parent, :activity_consumed)
+
+        receive do
+          :mark -> ProviderActivity.mark(activity)
+        end
+      end)
+
+    assert_receive :activity_consumed
+    assert :ok = :sys.suspend(activity.owner)
+
+    assert {:error, :provider_activity_unavailable} =
+             ProviderActivity.stop(activity)
+
+    assert :ok = :sys.resume(activity.owner)
     assert Process.alive?(activity.owner)
     send(consumer.pid, :mark)
     assert Task.await(consumer) == :ok
@@ -3459,7 +3523,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
       })
 
     declared_shape_outcome =
-      assert_error(["validate", declared_shape], "application", "input_contract_failed")
+      assert_error(["validate", declared_shape], "application", "input_invalid")
 
     assert declared_shape_outcome.envelope["error"]["source"] == %{
              "kind" => "application",
@@ -3521,7 +3585,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
       assert_error(
         ["run", invalid_shape, "--input", "array.json"],
         "application",
-        "input_contract_failed"
+        "input_invalid"
       )
 
     assert invalid_shape_outcome.envelope["error"]["source"] == %{

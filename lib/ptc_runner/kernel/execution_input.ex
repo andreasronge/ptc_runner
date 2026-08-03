@@ -76,8 +76,7 @@ defmodule PtcRunner.Kernel.ExecutionInput do
     end
   end
 
-  defp validate_contract(_contract, _value),
-    do: {:error, {:input_contract_failed, %{value_kind: :unknown}}}
+  defp validate_contract(_contract, _value), do: {:error, :invalid_input}
 
   defp authorize_violation_paths(classification, authority) do
     classification

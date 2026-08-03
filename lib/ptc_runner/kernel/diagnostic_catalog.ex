@@ -31,6 +31,8 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
     {:application, :document_limit_exceeded, 3, false,
      "the application document closure exceeds its limit"},
     {:application, :contract_invalid, 3, false, "an application value contract is invalid"},
+    {:application, :input_invalid, 3, false,
+     "the selected input is not an admissible JSON object"},
     {:application, :input_contract_failed, 3, false,
      "the selected input does not satisfy the input contract"},
     {:application, :override_invalid, 3, false, "the component override is invalid"},
@@ -349,6 +351,9 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
 
   def source_kinds(:application, :contract_invalid),
     do: [:application, :input_contract, :result_contract]
+
+  def source_kinds(:application, :input_invalid),
+    do: [:application, :external_input]
 
   def source_kinds(:application, :input_contract_failed),
     do: [:application, :external_input, :input_contract]

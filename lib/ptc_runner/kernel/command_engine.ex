@@ -421,7 +421,7 @@ defmodule PtcRunner.Kernel.CommandEngine do
 
   defp application_projection(role, :invalid_input)
        when role in [:application, :external_input],
-       do: {:input_contract_failed, nil}
+       do: {:input_invalid, nil}
 
   defp application_projection(role, {:input_contract_failed, classification})
        when role in [:application, :external_input],

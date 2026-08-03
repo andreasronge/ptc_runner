@@ -156,8 +156,15 @@ defmodule PtcRunner.Kernel.PreparedRun do
 
   def consume(_prepared), do: {:error, :invalid_prepared_run}
 
-  @doc "Idempotently releases the prepared run's activity owner."
-  @spec close(t()) :: :ok
+  @doc """
+  Idempotently releases the prepared run's activity owner.
+
+  After `consume/1` transfers ownership, only the consuming process can release
+  a live owner; the former owner receives `{:error, :not_owner}`. A bounded-call
+  failure returns `{:error, :provider_activity_unavailable}`.
+  """
+  @spec close(t()) ::
+          :ok | {:error, :not_owner | :provider_activity_unavailable}
   def close(%__MODULE__{provider_activity: activity}), do: ProviderActivity.stop(activity)
   def close(_prepared), do: :ok
 

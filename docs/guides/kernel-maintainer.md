@@ -162,7 +162,9 @@ must retain the marker link through construction. Consuming the prepared run
 atomically transfers that link and the marker's creator monitor to the
 consuming process; cross-process construction and unlinked markers are
 rejected. The current owner must call `PreparedRun.close/1`, which is
-idempotent, and owner death closes the marker even after a normal exit. Marker
+idempotent; a former owner receives `{:error, :not_owner}` after a transfer,
+an unavailable bounded close is reported rather than silently accepted, and
+owner death closes the marker even after a normal exit. Marker
 calls carry a five-second server-clock deadline and a short reply grace: a
 backlogged call fails boundedly, and processing it after the deadline cannot
 apply the queued transition. An expired close still checks the caller against

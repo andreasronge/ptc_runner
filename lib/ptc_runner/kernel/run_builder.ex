@@ -171,22 +171,21 @@ defmodule PtcRunner.Kernel.RunBuilder do
         opts
       )
       when is_list(opts) do
-    result =
-      with true <- PreparedRun.active_valid?(prepared),
-           :ok <- validate_registry(registry),
-           true <- ProviderSession.compatible_limits?(session, prepared.request.package.limits),
-           :ok <- validate_build_options(opts),
-           :ok <- validate_installed_limits(prepared.request.package, registry, opts),
-           :ok <- validate_inspection_selection(prepared.request, opts) do
-        build_active_preflighted(prepared, registry, session, opts)
-      else
-        false -> {:error, :invalid_active_run}
-        {:error, _reason} = error -> error
-      end
+    with true <- PreparedRun.active_valid?(prepared),
+         :ok <- validate_registry(registry),
+         true <- ProviderSession.compatible_limits?(session, prepared.request.package.limits),
+         :ok <- validate_build_options(opts),
+         :ok <- validate_installed_limits(prepared.request.package, registry, opts),
+         :ok <- validate_inspection_selection(prepared.request, opts) do
+      # Downstream provider/build failures close the session at the point that
+      # owns it. Only failures before that handoff are cleaned up here.
+      build_active_preflighted(prepared, registry, session, opts)
+    else
+      false ->
+        prefer_cleanup_error({:error, :invalid_active_run}, close_live_session(session))
 
-    case result do
-      {:ok, _built} = success -> success
-      {:error, _reason} = error -> prefer_cleanup_error(error, close_live_session(session))
+      {:error, _reason} = error ->
+        prefer_cleanup_error(error, close_live_session(session))
     end
   end
 

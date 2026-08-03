@@ -10,9 +10,11 @@ defmodule PtcRunner.Kernel.ProviderActiveSessionTest do
   alias PtcRunner.Kernel.ProviderActiveSession
   alias PtcRunner.Kernel.ProviderActivity
   alias PtcRunner.Kernel.ProviderDescriptor
+  alias PtcRunner.Kernel.ProviderRegistry
   alias PtcRunner.Kernel.ProviderRuntimeServices
   alias PtcRunner.Kernel.ProviderSession
   alias PtcRunner.Kernel.ResourceRegistrar
+  alias PtcRunner.Kernel.RunBuilder
   alias PtcRunner.Kernel.RunCoordinator
   alias PtcRunner.Kernel.SelectionRules
 
@@ -51,6 +53,29 @@ defmodule PtcRunner.Kernel.ProviderActiveSessionTest do
     assert diagnostic.subject.operation == :selection
     assert diagnostic.subject.occurrence == %{destination: :workflow, index: 0}
     assert ProviderActivity.value(prepared.provider_activity) == :unknown
+  end
+
+  test "active build preserves provider dependency failures during session cleanup" do
+    {:ok, prepared, catalog} = fixture(fn _selection, _context -> :ok end)
+    assert {:ok, session} = ProviderActiveSession.open(prepared, catalog, services())
+
+    staged = fn _selection, _context ->
+      {:ok,
+       %{
+         credential_names: [],
+         requires: [:canonical_trace_snapshot],
+         preflight: fn -> {:error, :unexpected_preflight} end
+       }}
+    end
+
+    assert {:ok, registry} =
+             ProviderRegistry.new(%{"selected" => ProviderRegistry.staged(staged)})
+
+    assert {:error, :provider_dependency_unavailable} =
+             RunBuilder.build_active(prepared, registry, session, [])
+
+    refute ProviderSession.alive?(session)
+    assert :ok = PreparedRun.close(prepared)
   end
 
   test "invalid callback results and callback exits are selection failures" do

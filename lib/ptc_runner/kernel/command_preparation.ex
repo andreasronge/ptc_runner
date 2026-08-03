@@ -96,11 +96,19 @@ defmodule PtcRunner.Kernel.CommandPreparation do
 
   def valid?(_preparation), do: false
 
-  @doc "Idempotently releases the embedded prepared run and inert catalog."
-  @spec close(t()) :: :ok
+  @doc """
+  Idempotently releases the embedded prepared run and inert catalog.
+
+  Returns `{:error, :not_owner}` when the prepared run has been transferred to
+  another live process, or `{:error, :provider_activity_unavailable}` when its
+  bounded close cannot complete. The inert catalog is still released.
+  """
+  @spec close(t()) ::
+          :ok | {:error, :not_owner | :provider_activity_unavailable}
   def close(%__MODULE__{prepared_run: prepared_run, catalog: catalog}) do
-    PreparedRun.close(prepared_run)
+    result = PreparedRun.close(prepared_run)
     InstallationCatalog.close(catalog)
+    result
   end
 
   def close(_preparation), do: :ok

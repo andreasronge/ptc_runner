@@ -1,5 +1,14 @@
 defmodule PtcRunner.Kernel.HostRuntimePayload do
-  @moduledoc false
+  @moduledoc """
+  Internal sealed transport for credential-bearing host runtime configuration.
+
+  The authenticated ciphertext prevents credentials from appearing in normal
+  struct inspection or accidental term logging while the payload crosses
+  trusted Kernel boundaries. Its key is VM-local process state, so this is not
+  a confidentiality boundary against trusted code running in the same VM,
+  memory inspection, or crash dumps. Callers must apply the same operational
+  protections to VM diagnostics and dumps as to the original host config.
+  """
 
   alias PtcRunner.Kernel.Attestation
   alias PtcRunner.Kernel.HostConfig

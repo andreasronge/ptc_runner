@@ -177,7 +177,9 @@ the bounded agent loop is still live. When turns remain, it returns the same
 structural classification to the model for one ordinary correction turn; the
 rejected value itself is withheld. Other workflow entries retain only the
 final fail-closed check. A mismatch returns `input_contract_failed` or
-`result_contract_failed`.
+`result_contract_failed`. A selected input that is not an admissible JSON
+object instead returns `input_invalid`, even when no input contract is
+declared.
 
 A rejection does carry a bounded classification, so a mismatch is diagnosable
 without repeating the run under private inspection. The command reports it as:
