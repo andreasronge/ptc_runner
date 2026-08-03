@@ -1,6 +1,6 @@
 # Promoting model-authored source into an attested component
 
-**Status:** proposed; awaiting review. Closes
+**Status:** accepted; converged after five review rounds. Implementation in progress. Closes
 [#1167](https://github.com/andreasronge/ptc_runner/issues/1167).
 
 A model can already author a working library inside a run: source handed to
@@ -31,13 +31,13 @@ commit this plan was written on, so review need not re-derive them.
 
 | Fact | Location |
 | --- | --- |
-| An override is applied to **both** component lists and the environment is derived from which one matched; ambiguity and non-selection are hard errors | `application_package.ex:344-354`, `application_package.ex:369-370` |
-| Override selection and environment resolution are **private**; the only public route that applies an override is acquisition | `application_package.ex:342-344` |
+| An override is applied to **both** component lists and the environment is derived from which one matched; ambiguity and non-selection are hard errors | `application_package.ex:344-354`, `application_package.ex:367-370` |
+| Override selection and environment resolution are **private** (`apply_override/2`, `override_environment/2`); the only public functions that apply an override are the acquisition entry points | `application_package.ex:342-344`, `application_package.ex:367-370`, `application_package.ex:111-146` |
 | Acquisition is the public route that applies an override: `acquire_directory/2` takes `:component_override_descriptor` (a path); `acquire_memory/3` takes `:component_override` as a `{descriptor_name, candidate_name}` pair of logical names — **not** a built `%ComponentOverride{}` | `application_package.ex:298-322`, `application_package.ex:324-338` |
 | The resolved environment is deleted before it reaches the package, and `identity/1` never carried it | `application_package.ex:375`, `component_override.ex:245` |
 | A **second** deletion strips the environment from a content record whose name already encodes it — load-bearing for `application_content_digest` | `application_package.ex:492-493` |
 | `identity/1` output, minus the environment, *is* the encoded override record payload, so anything added to it changes content identity | `application_package.ex:493-495` |
-| `apply/2` copies the **installed** component's dependencies onto the replacement; a candidate supplies source only | `component_override.ex:225` |
+| `apply/2` copies the **installed** component's dependencies onto the replacement; a candidate supplies source only | `component_override.ex:228` |
 | Descriptor keys are validated manually in `@keys` and `decode_value/1`; `schema/0` drives diagnostic paths only | `component_override.ex:38`, `component_override.ex:292`, `component_override.ex:324-336`, `command_path.ex:38` |
 | `origin` is hardcoded to `"component-override"` on the filesystem load path | `component_override.ex:111` |
 | Capability **names** survive on the export table as `requires` and `tool_refs`; the rendered inventory keeps only a coarse effect and its resolver is private | `export.ex:72-73`, `mission_inventory.ex:277` |
@@ -219,7 +219,7 @@ table when G1 fails, and calling that `fail` would misattribute the cause.
 | G1 | Candidate resolves to exactly one environment and that environment's bundle compiles | acquisition, `Kernel.compile_bundle/1` |
 | G2 | Every `:prompt`-visible export declares a `:signature` (or `:type` for a value) and a non-empty docstring | `Export.visibility`, `Export.signature`, `Export.type`, `Export.doc` |
 | G3 | No export widens, compared **per export ref** | `Export.effect`, `Export.requires`, `Export.tool_refs` |
-| G4 | Declared dependencies unchanged — **preserved by construction**, reported, not enforced | `component_override.ex:225` |
+| G4 | Declared dependencies unchanged — **preserved by construction**, reported, not enforced | `component_override.ex:228` |
 | G5 | Candidate ≤ 1 MiB and encoded descriptor ≤ 64 KiB, checked on the bytes actually written | existing `ComponentOverride` bounds |
 
 There is deliberately no capability-grant criterion. Per D3, no static source
