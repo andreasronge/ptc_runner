@@ -192,10 +192,9 @@ defmodule PtcRunner.Kernel.SemanticRevision do
         |> Path.join("**/*")
         |> Path.wildcard(match_dot: true)
       end)
-      |> Enum.filter(&File.regular?/1)
-      |> Enum.map(&Path.relative_to(&1, root))
-      |> Enum.uniq()
-      |> Enum.sort()
+      |> Enum.flat_map(&regular_artifact(&1, root))
+      |> Enum.uniq_by(&elem(&1, 0))
+      |> Enum.sort_by(&elem(&1, 0))
 
     :sha256
     |> :crypto.hash_init()
@@ -205,21 +204,32 @@ defmodule PtcRunner.Kernel.SemanticRevision do
     |> Base.encode16(case: :lower)
   end
 
+  # One stat per candidate yields the regular-file classification, the size, and
+  # the mode together. Statting again while hashing would double the metadata
+  # syscalls, which dominate this projection on a large dependency closure.
+  defp regular_artifact(path, root) do
+    case File.stat(path, time: :posix) do
+      {:ok, %File.Stat{type: :regular, size: size, mode: mode}} ->
+        [{Path.relative_to(path, root), size, mode}]
+
+      _irregular_or_unreadable ->
+        []
+    end
+  end
+
   defp hash_dependency_files(context, root, files) do
-    Enum.reduce(files, context, fn relative, context ->
-      path = Path.join(root, relative)
-      stat = File.stat!(path)
-      execute_mask = Bitwise.band(stat.mode, 0o111)
+    Enum.reduce(files, context, fn {relative, size, mode}, context ->
+      execute_mask = Bitwise.band(mode, 0o111)
 
       context =
         :crypto.hash_update(context, [
           <<0x01, execute_mask>>,
           <<byte_size(relative)::unsigned-big-32>>,
           relative,
-          <<stat.size::unsigned-big-64>>
+          <<size::unsigned-big-64>>
         ])
 
-      hash_dependency_file(context, path)
+      hash_dependency_file(context, Path.join(root, relative))
     end)
   end
 
