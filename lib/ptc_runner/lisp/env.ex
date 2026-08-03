@@ -10,6 +10,15 @@ defmodule PtcRunner.Lisp.Env do
   - `{:variadic_nonempty, name, fun}` - Variadic function requiring at least 1 argument
   - `{:multi_arity, name, tuple_of_funs}` - Multiple arities where tuple index = arity - min_arity
   - `{:collect, fun}` - Collects all args into a list and passes to unary function
+  - `{:special, name}` - Dispatched by name in `PtcRunner.Lisp.Eval.Apply`
+    because it needs the evaluation context (the print channel, the attached
+    prelude), which a plain function cannot reach. Higher-order use needs a
+    second dispatch path, and which one matters: `println` uses a
+    `Apply.closure_to_fun/3` bridge, while the introspection builtins are
+    dispatched by `PtcRunner.Lisp.Runtime.Callable.call/2` from the argument
+    list. Prefer the latter for anything new — a bridge fixes the arity to the
+    wrapper's and binds the converting context, which drops overloads and lets a
+    converted value carry its converter's authority rather than its caller's.
   """
 
   alias PtcRunner.Lisp.Env.Builtin
@@ -23,6 +32,7 @@ defmodule PtcRunner.Lisp.Env do
           | {:variadic_nonempty, atom(), function()}
           | {:multi_arity, atom(), tuple()}
           | {:collect, function()}
+          | {:special, atom()}
           | {:constant, term()}
   @type env :: %{atom() => binding()}
 

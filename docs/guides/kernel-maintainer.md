@@ -127,7 +127,10 @@ facades. The bundle compiler admits only public exports from direct dependency
 namespaces and derives capability requirements through those calls. Evaluated
 source can call every public export in the resolved bundle, including
 `:discoverable` exports omitted from model prompts, so every new edge is also a
-callable-surface review.
+callable-surface review. Those exports are reachable in practice as well as in
+principle: `dir`, `apropos`, `doc`, and `export-meta` read the attached
+prelude's public exports at runtime, filtered to what the calling program may
+invoke, so what a program can discover matches what it can call.
 
 Installed-library selections expand transitively in manifests and through
 `Library.resolve_components/1`; raw `compile_bundle/1` callers still provide a

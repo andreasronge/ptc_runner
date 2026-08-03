@@ -23,6 +23,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   alias PtcRunner.Lisp.Eval.HostContext
   alias PtcRunner.Lisp.Eval.Patterns
   alias PtcRunner.Lisp.Format
+  alias PtcRunner.Lisp.Introspection
   alias PtcRunner.Lisp.Java.Callable, as: JavaCallable
   alias PtcRunner.Lisp.Java.Condition, as: JavaCondition
   alias PtcRunner.Lisp.Java.Primitive, as: JavaPrimitive
@@ -192,6 +193,18 @@ defmodule PtcRunner.Lisp.Eval.Apply do
       end)
 
     {:ok, nil, EvalContext.append_print(eval_ctx, message)}
+  end
+
+  # Special builtins: prelude introspection (dir/apropos/doc/export-meta).
+  # `Introspection.invoke/3` owns validation and answers for this path and for
+  # `Runtime.Callable`'s higher-order path alike, so the two cannot drift.
+  defp do_apply_fun({:special, op}, args, eval_ctx, _do_eval_fn)
+       when op in [:dir, :apropos, :doc, :export_meta] do
+    case Introspection.invoke(op, args, eval_ctx) do
+      {:ok, value} -> {:ok, value, eval_ctx}
+      {:print, text} -> {:ok, nil, EvalContext.append_print(eval_ctx, text)}
+      {:error, reason} -> {:error, reason}
+    end
   end
 
   # Normal builtins: {:normal, fun}
@@ -796,6 +809,15 @@ defmodule PtcRunner.Lisp.Eval.Apply do
       nil
     end
   end
+
+  # Introspection specials are deliberately NOT converted to BEAM functions
+  # here. `Runtime.Callable.call/2` dispatches them from the argument list, so
+  # the tuple keeps both of `dir`'s arities — a unary wrapper would make
+  # `(let [f (identity dir)] (f))` fail an arity that `(dir)` accepts — and it
+  # resolves its visibility filter from the context it RUNS under. Capturing
+  # the converting context would let a privileged prelude export hand
+  # session-authored code the prelude's unrestricted view under
+  # `strict_transitive_calls`.
 
   # Non-closures pass through unchanged
   def closure_to_fun(value, %EvalContext{}, _do_eval_fn) do

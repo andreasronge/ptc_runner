@@ -905,41 +905,16 @@ defmodule PtcRunner.Lisp.Eval do
          %EvalContext{strict_transitive_calls: true} = eval_ctx
        )
        when is_binary(ref) do
-    namespace = ref_namespace(ref)
-
-    cond do
-      namespace == nil ->
-        :ok
-
-      not session_authored_origin?(EvalContext.current_origin(eval_ctx)) ->
-        :ok
-
-      EvalContext.direct_namespace?(eval_ctx, namespace) ->
-        :ok
-
-      true ->
-        requirers = EvalContext.transitive_namespace_requirers(eval_ctx, namespace)
-
-        if requirers == [] do
-          :ok
-        else
-          {:error, {:transitive_call_unauthorized, ref, namespace, requirers}}
-        end
+    if EvalContext.prelude_ref_visible?(eval_ctx, ref) do
+      :ok
+    else
+      namespace = EvalContext.ref_namespace(ref)
+      requirers = EvalContext.transitive_namespace_requirers(eval_ctx, namespace)
+      {:error, {:transitive_call_unauthorized, ref, namespace, requirers}}
     end
   end
 
   defp authorize_prelude_resolution(_ref, %EvalContext{}), do: :ok
-
-  defp session_authored_origin?(nil), do: true
-  defp session_authored_origin?(%{type: :user_closure}), do: true
-  defp session_authored_origin?(_origin), do: false
-
-  defp ref_namespace(ref) when is_binary(ref) do
-    case String.split(ref, "/", parts: 2) do
-      [namespace, _symbol] when namespace != "" -> namespace
-      _ -> nil
-    end
-  end
 
   # ============================================================
   # Evaluation helpers

@@ -257,6 +257,7 @@
              "- Explore first, return last. Use (println ...) only for concise diagnostics; output previews are bounded.\n"
              "- Successful def and defn bindings remain callable in later turns; failed turns publish none of their candidate bindings.\n"
              "- Value references are values; call only function references.\n"
+             "- The API below is the prompt-visible subset: (dir) lists namespaces, (dir \"ns\") its exports, (apropos \"term\") searches, (doc \"ns/name\") prints documentation, (export-meta \"ns/name\") returns it as data. Exports found this way are callable.\n"
              "- Call granted capabilities only with the exact tool/... forms shown below.\n"
              "- Fixed namespaces: clojure.core/core, clojure.string/str/string, clojure.set/set, clojure.walk/walk, regex, Math, System, Boolean, numeric/date/time namespaces, data, tool, and json.\n"
              "- No ns/require/refer/import, user-defined macros, eval/read-string, host file I/O, or general Java interop.\n\n"

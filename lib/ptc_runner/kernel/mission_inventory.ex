@@ -164,13 +164,7 @@ defmodule PtcRunner.Kernel.MissionInventory do
      ]}
   end
 
-  defp export_call(%Export{kind: :constant, ref: ref}), do: ref
-
-  defp export_call(%Export{} = export) do
-    export
-    |> Export.signature()
-    |> String.replace_prefix("(#{export.symbol}", "(#{export.ref}")
-  end
+  defp export_call(%Export{} = export), do: Export.call_form(export)
 
   defp model_entries(mission) do
     with {:ok, exports} <- model_exports(mission),

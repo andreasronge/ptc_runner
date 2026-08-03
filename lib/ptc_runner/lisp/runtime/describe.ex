@@ -571,6 +571,10 @@ defmodule PtcRunner.Lisp.Runtime.Describe do
   defp type_name({:closure, _, _, _, _, _}), do: "function"
   defp type_name({tag, _}) when tag in [:normal, :collect], do: "function"
 
+  defp type_name({:special, name})
+       when name in [:dir, :apropos, :doc, :export_meta, :println],
+       do: "function"
+
   defp type_name({tag, _, _})
        when tag in [:variadic, :variadic_nonempty, :multi_arity, :special],
        do: "function"

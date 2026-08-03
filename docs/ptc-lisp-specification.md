@@ -3473,6 +3473,75 @@ hyphen-to-underscore normalization, as must object keys nested in input
 `const`/`enum` values; the host rejects incompatible schemas rather than
 publishing an exact call that runtime validation cannot accept.
 
+### 9.9 Prelude Introspection
+
+Four builtins read the attached prelude's public exports. They answer
+identically in the REPL, in generated workflow or mission source, and inside a
+prelude export reading another prelude's documentation.
+
+| Form | Result |
+|------|--------|
+| `(dir)` | Sorted vector of namespace names holding public exports |
+| `(dir "ns")` | Sorted vector of export refs in `ns` |
+| `(apropos "term")` | Sorted vector of export refs matching `term` |
+| `(doc "ns/name")` | Prints documentation, returns `nil` |
+| `(export-meta "ns/name")` | Metadata map, or `nil` when unknown |
+
+References are strings, not symbols:
+
+Answers depend on the prelude a given run attaches, so the results below are
+illustrative:
+
+```clojure
+(dir "inspection")                    ; => ...
+(apropos "exchange")                  ; => ...
+(export-meta "inspection/runs")       ; => ...
+(map export-meta (dir "inspection"))  ; => ...
+```
+
+The last line is the point of these being ordinary function values rather than
+special forms: they compose in any position a function is accepted.
+
+`doc` prints and returns `nil` so documentation is charged to the print budget
+rather than the result channel; a program that needs the same information as
+data calls `export-meta`.
+
+`export-meta` reports the full calling contract: `:ref`, `:namespace`,
+`:symbol`, `:kind`, `:call`, `:doc`, `:visibility`, `:effect`, plus
+`:arity`/`:params` for functions and `:signature` or `:type` where declared.
+`doc` renders the reader-facing subset — ref, call form, declared contract,
+effect, and docstring — so `:visibility` and the separate arity and parameter
+fields are available only from `export-meta`. Neither reports capability
+wiring.
+
+The reported effect is conservative. The authoritative value is the
+mission-resolved effect in the prompt inventory, which combines an export's
+declaration with the effects of the capabilities it reaches; a wrapper declaring
+`:read` over a `:write` capability resolves to `:write`. Introspection cannot
+see installed capability effects, so an export that reaches any capability is
+reported as `:write` when its chain declares `:write` and `:unknown` otherwise.
+It is never reported as `:read`, so no answer here presents an unresolved effect
+as safe.
+
+Scope is the attached prelude only. These forms do not search `clojure.core`,
+the Java interop surface, or host capabilities; built-in functions are
+documented in this specification and in `docs/function-reference.md`, and
+granted capabilities appear in the mission inventory.
+
+Both `:prompt` and `:discoverable` exports are visible, which is how a
+`:discoverable` export is found at all. Private `defn-` helpers have no export
+record and never appear, and a namespace holding only private helpers is absent
+from `(dir)`.
+
+Results are filtered to what the running program may actually call, so an
+export these forms return is an export it can invoke. A miss — unknown ref,
+malformed ref, or no attached prelude — is not a failure: `export-meta` returns
+`nil`, `doc` prints a not-found line, and the listing forms return `[]`. A blank
+`apropos` query returns `[]` rather than every export.
+
+`export-meta` is not `clojure.core/meta`, which takes an object rather than a
+reference string and is not implemented.
+
 ## 10. Complete Examples
 
 ### 10.1 Filter and Sum (Pure Query)

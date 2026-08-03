@@ -1793,6 +1793,11 @@ defmodule PtcRunner.Lisp do
   defp externalize_lisp_values({:normal, function}) when is_function(function),
     do: %Format.Builtin{}
 
+  # Context-dispatched builtins (`println`, `apply`, the introspection forms).
+  # Without this the raw binding tuple escapes as the step's return value.
+  defp externalize_lisp_values({:special, name}) when is_atom(name),
+    do: %Format.Builtin{}
+
   defp externalize_lisp_values({:variadic, function, _identity}) when is_function(function),
     do: %Format.Builtin{}
 
