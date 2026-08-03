@@ -7,13 +7,14 @@ defmodule PtcRunner.Kernel.TutorialExamplesE2ETest do
   alias PtcRunner.Kernel.HostConfig
   alias PtcRunner.Kernel.HostInstallation
   alias PtcRunner.Kernel.RunBuilder
+  alias PtcRunner.TestSupport.LLMSupport
 
   @examples Path.expand("../../../examples/kernel-tutorial", __DIR__)
   @host Path.join(@examples, "ptc-host.json")
 
   setup_all do
     :ok = PtcRunner.Dotenv.load()
-    :ok = PtcRunner.TestSupport.LLMSupport.admit_provider_application!()
+    :ok = LLMSupport.admit_provider_application!()
 
     if System.get_env("OPENROUTER_API_KEY") do
       :ok
