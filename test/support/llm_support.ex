@@ -17,6 +17,23 @@ defmodule PtcRunner.TestSupport.LLMSupport do
   @req_opts [retry: :transient, max_retries: 3]
 
   @doc """
+  Admits the shipped LLM provider application for a test that builds providers
+  directly.
+
+  The core application starts no provider dependency, and a run normally admits
+  one through `PtcRunner.Kernel.ProviderApplicationGate`. Tests that drive
+  `ProviderRegistry` or `RunBuilder` without that gate must admit it here, and
+  disable the dependency's own dotenv reader exactly as the command-owned gate
+  branch does.
+  """
+  @spec admit_provider_application!() :: :ok
+  def admit_provider_application! do
+    Application.put_env(:req_llm, :load_dotenv, false, persistent: true)
+    {:ok, _started} = Application.ensure_all_started(:req_llm)
+    :ok
+  end
+
+  @doc """
   Get the default timeout for LLM requests.
   """
   def timeout, do: @timeout

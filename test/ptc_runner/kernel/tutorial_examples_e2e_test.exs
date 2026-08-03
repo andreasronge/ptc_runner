@@ -13,6 +13,7 @@ defmodule PtcRunner.Kernel.TutorialExamplesE2ETest do
 
   setup_all do
     :ok = PtcRunner.Dotenv.load()
+    :ok = PtcRunner.TestSupport.LLMSupport.admit_provider_application!()
 
     if System.get_env("OPENROUTER_API_KEY") do
       :ok

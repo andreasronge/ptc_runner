@@ -33,6 +33,7 @@ defmodule PtcRunner.Kernel.RepoAnalystLiveE2ETest do
 
   setup_all do
     :ok = PtcRunner.Dotenv.load()
+    :ok = PtcRunner.TestSupport.LLMSupport.admit_provider_application!()
     assert System.get_env("OPENROUTER_API_KEY"), "OPENROUTER_API_KEY is not configured"
     :ok
   end
