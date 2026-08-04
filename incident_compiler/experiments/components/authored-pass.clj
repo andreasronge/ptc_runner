@@ -20,7 +20,7 @@
    :annotations {"citations-verified" ["checked" "unresolved" "mismatched"]
                  "attempts" ["passes" "corrected"]
                  "authoring" ["program-ran" "eval-failed" "records" "repaired"]
-                 "coverage" ["gathered" "available" "complete"]}})
+                 "coverage" ["gathered" "available" "complete" "short-partitions"]}})
 
 (defn- strip-fence [content]
   (let [trimmed (str/trim (str content))]
@@ -82,15 +82,22 @@
 
 ;; How many records the incident actually holds, asked of the evidence source
 ;; rather than inferred from what the program returned. `list-sources` reports
-;; `record_count` per source, so this costs one capability call and does not
-;; depend on the authored program being curious about its own completeness —
-;; which, on the stress corpus, none of them was.
+;; `record_count` per source and `search` answers `matched`, so the two
+;; derivations are taken independently and the larger is believed: a program
+;; that returned fewer records than either says exist has missed evidence, and
+;; the check must not depend on the authored program being curious about its own
+;; completeness — which, on the stress corpus, none of them was.
 (def coverage-src
   (str "(let [inc (get data/params \"incident_id\")\n"
-       "      sources (get (incident.evidence/list-sources inc) \"sources\")]\n"
-       "  (return {\"total\" (reduce + 0 (mapv (fn [s] (get s \"record_count\")) sources))\n"
-       "           \"per_source\" (mapv (fn [s] {\"source\" (get s \"source\")\n"
-       "                                      \"count\" (get s \"record_count\")}) sources)}))"))
+       "      sources (get (incident.evidence/list-sources inc) \"sources\")\n"
+       "      pages (mapv (fn [s]\n"
+       "                    (incident.evidence/search inc nil (get s \"source\") 50))\n"
+       "                  sources)\n"
+       "      declared (reduce + 0 (mapv (fn [s] (get s \"record_count\")) sources))\n"
+       "      matched (reduce + 0 (mapv (fn [p] (get p \"matched\")) pages))]\n"
+       "  (return {\"total\" (max declared matched)\n"
+       "           \"short_partitions\" (count (filter (fn [p] (true? (get p \"truncated\")))\n"
+       "                                             pages))}))"))
 
 (defn- coverage [incident-id]
   (let [ev (kernel/eval-source-with coverage-src {"incident_id" incident-id})]
@@ -131,16 +138,19 @@
 (defn- fetch-records [incident-id format]
   (let [records (authored-records incident-id format nil 0)
         cover (coverage incident-id)
-        available (if (nil? cover) 0 (get cover "total"))]
+        available (if (nil? cover) 0 (get cover "total"))
+        short-partitions (if (nil? cover) 0 (get cover "short_partitions"))]
     (if (or (= 0 available) (>= (count records) available))
-      {"records" records "available" available "complete" true}
+      {"records" records "available" available "complete" true
+       "short_partitions" short-partitions}
       ;; One re-authoring call, told only what it missed.
       (let [retry (authored-records incident-id format
                                     (shortfall-note (count records) available) 1)
             better (if (> (count retry) (count records)) retry records)]
         {"records" better
          "available" available
-         "complete" (>= (count better) available)}))))
+         "complete" (>= (count better) available)
+         "short_partitions" short-partitions}))))
 
 ;; The completeness sentence used to be unconditional, which made it a false
 ;; statement the moment retrieval fell short — and a report told it has
@@ -170,7 +180,12 @@
        "  hypothesis, with contradicting records listed alongside supporting ones.\n"
        "- Where the evidence does not answer a question that matters, record an\n"
        "  open question naming the evidence that would answer it.\n"
-       "- Correlation in time is not causation.\n"))
+       "- Correlation in time is not causation.\n"
+       "- Abstention is an outcome, not a failure. If these records do not let you\n"
+       "  say what the incident was, return the insufficient_evidence shape — a\n"
+       "  reason and the open questions it leaves — rather than a report assembled\n"
+       "  from whatever happens to be present. Do not abstain where the evidence\n"
+       "  does support a report, however partial that report has to be.\n"))
 
 (defn- correction-prompt [incident-id format gathered contract detail]
   (str (prompt incident-id format gathered contract)
@@ -227,6 +242,14 @@
   (str "(return (incident.evidence/resolve-citations (get data/params \"incident_id\")\n"
        "                                             (get data/params \"citations\")))"))
 
+;; The contract's second branch. The loop arm already treats an abstention as a
+;; terminal answer; these arms used to run one through citation resolution,
+;; where it fails as uncited — an abstention structurally carries no citations —
+;; and then burns a correction turn asking for citations it must not have. A
+;; prompt that tells the model it may abstain has to accept the answer.
+(defn- abstained? [report]
+  (= "insufficient_evidence" (get report "status")))
+
 (defn- resolve-outcome [incident-id report]
   (let [cites (citations-of report)]
     (if (empty? cites)
@@ -260,16 +283,21 @@
       "coverage"
       {"gathered" (count (get gathered "records"))
        "available" (get gathered "available")
-       "complete" (if (get gathered "complete") 1 0)})
+       "complete" (if (get gathered "complete") 1 0)
+       "short-partitions" (get gathered "short_partitions")})
     (let [first-report (parse-report (ask incident-id format gathered contract))
-          first-outcome (resolve-outcome incident-id first-report)]
+          first-outcome (if (abstained? first-report)
+                          {"ok" true}
+                          (resolve-outcome incident-id first-report))]
       (if (get first-outcome "ok")
         (do (workflow.event/annotate "attempts" {"passes" 1 "corrected" 0})
             (return first-report))
         (let [retry (parse-report
                       (ask-corrected incident-id format gathered contract
                                      (get first-outcome "detail")))
-              retry-outcome (resolve-outcome incident-id retry)]
+              retry-outcome (if (abstained? retry)
+                              {"ok" true}
+                              (resolve-outcome incident-id retry))]
           (workflow.event/annotate "attempts" {"passes" 2 "corrected" 1})
           (if (get retry-outcome "ok")
             (return retry)

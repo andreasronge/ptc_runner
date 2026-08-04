@@ -9,40 +9,47 @@
                    "malformed-report"]
    :annotations {"citations-verified" ["checked" "unresolved" "mismatched"]
                  "attempts" ["passes" "corrected"]
-                 "coverage" ["gathered" "available" "complete"]}})
+                 "coverage" ["gathered" "available" "complete" "short-partitions"]}})
 
 ;; The program is a constant. The incident id reaches it as data at
 ;; `data/params`, never as text substituted into the source, so there is no
 ;; escaping to get right and no value that can change the program's shape.
+;;
+;; It used to be one unfiltered `search` at the cap, which reads whatever the
+;; first page happens to hold and calls it the evidence. On an incident larger
+;; than the cap that silently returns a fraction — and because the fraction is
+;; ordered by time, it is the fraction before anything happened. `search`
+;; answers `matched`, so the program has no need to guess: it partitions by
+;; source, drains each partition, and compares what it holds against what the
+;; source says exists. A partition still over the cap is reported, not hidden;
+;; the search takes no cursor, so there is nothing further to drain it with.
 (def fetch-src
   (str "(let [inc (get data/params \"incident_id\")\n"
-       "      found (get (incident.evidence/search inc nil nil 50) \"records\")\n"
-       "      ids (map (fn [r] (get r \"evidence_id\")) found)]\n"
-       "  (return (mapv (fn [id] (get (incident.evidence/get-record inc id) \"record\")) ids)))"))
-
-(defn- fetch-records [incident-id]
-  (let [ev (kernel/eval-source-with fetch-src {"incident_id" incident-id})]
-    (if (= :returned (get ev :outcome))
-      (get ev :value)
-      (fail (result/error :citation-verification-failed (get ev :outcome))))))
-
-;; What the incident actually holds, asked of the source rather than assumed.
-;; `list-sources` reports `record_count`, so this is one capability call. The
-;; hand-written program above is not changed here: the question is whether a
-;; report told it is working from a fraction behaves differently, not whether a
-;; better fetch would help — it obviously would.
-(def coverage-src
-  (str "(let [inc (get data/params \"incident_id\")\n"
-       "      sources (get (incident.evidence/list-sources inc) \"sources\")]\n"
-       "  (return (reduce + 0 (mapv (fn [s] (get s \"record_count\")) sources))))"))
+       "      sources (get (incident.evidence/list-sources inc) \"sources\")\n"
+       "      pages (mapv (fn [s]\n"
+       "                    (incident.evidence/search inc nil (get s \"source\") 50))\n"
+       "                  sources)\n"
+       "      summaries (mapcat (fn [p] (get p \"records\")) pages)\n"
+       "      ids (distinct (mapv (fn [r] (get r \"evidence_id\")) summaries))]\n"
+       "  (return {\"records\" (mapv (fn [id]\n"
+       "                             (get (incident.evidence/get-record inc id) \"record\"))\n"
+       "                           ids)\n"
+       "           \"available\" (reduce + 0 (mapv (fn [s] (get s \"record_count\")) sources))\n"
+       "           \"matched\" (reduce + 0 (mapv (fn [p] (get p \"matched\")) pages))\n"
+       "           \"short_partitions\" (count (filter (fn [p] (true? (get p \"truncated\")))\n"
+       "                                             pages))}))"))
 
 (defn- gather [incident-id]
-  (let [records (fetch-records incident-id)
-        ev (kernel/eval-source-with coverage-src {"incident_id" incident-id})
-        available (if (= :returned (get ev :outcome)) (get ev :value) 0)]
-    {"records" records
-     "available" available
-     "complete" (or (= 0 available) (>= (count records) available))}))
+  (let [ev (kernel/eval-source-with fetch-src {"incident_id" incident-id})]
+    (if (not= :returned (get ev :outcome))
+      (fail (result/error :citation-verification-failed (get ev :outcome)))
+      (let [found (get ev :value)
+            records (get found "records")
+            available (max (get found "available") (get found "matched"))]
+        {"records" records
+         "available" available
+         "complete" (or (= 0 available) (>= (count records) available))
+         "short_partitions" (get found "short_partitions")}))))
 
 (defn- coverage-sentence [gathered]
   (if (get gathered "complete")
@@ -68,7 +75,12 @@
        "  hypothesis, with contradicting records listed alongside supporting ones.\n"
        "- Where the evidence does not answer a question that matters, record an\n"
        "  open question naming the evidence that would answer it.\n"
-       "- Correlation in time is not causation.\n"))
+       "- Correlation in time is not causation.\n"
+       "- Abstention is an outcome, not a failure. If these records do not let you\n"
+       "  say what the incident was, return the insufficient_evidence shape — a\n"
+       "  reason and the open questions it leaves — rather than a report assembled\n"
+       "  from whatever happens to be present. Do not abstain where the evidence\n"
+       "  does support a report, however partial that report has to be.\n"))
 
 (defn- ask [incident-id format gathered contract]
   (let [response (llm/request {"system" "You return one JSON object and nothing else."
@@ -119,6 +131,14 @@
   (str "(return (incident.evidence/resolve-citations (get data/params \"incident_id\")\n"
        "                                             (get data/params \"citations\")))"))
 
+;; The contract's second branch. The loop arm already treats an abstention as a
+;; terminal answer; these arms used to run one through citation resolution,
+;; where it fails as uncited — an abstention structurally carries no citations —
+;; and then burns a correction turn asking for citations it must not have. A
+;; prompt that tells the model it may abstain has to accept the answer.
+(defn- abstained? [report]
+  (= "insufficient_evidence" (get report "status")))
+
 (defn- resolve-outcome [incident-id report]
   (let [cites (citations-of report)]
     (if (empty? cites)
@@ -160,9 +180,12 @@
       "coverage"
       {"gathered" (count (get gathered "records"))
        "available" (get gathered "available")
-       "complete" (if (get gathered "complete") 1 0)})
+       "complete" (if (get gathered "complete") 1 0)
+       "short-partitions" (get gathered "short_partitions")})
     (let [first-report (parse-report (ask incident-id format gathered contract))
-          first-outcome (resolve-outcome incident-id first-report)]
+          first-outcome (if (abstained? first-report)
+                          {"ok" true}
+                          (resolve-outcome incident-id first-report))]
       (if (get first-outcome "ok")
         (do (workflow.event/annotate "attempts" {"passes" 1 "corrected" 0})
             (return first-report))
@@ -172,7 +195,9 @@
         (let [retry (parse-report
                       (ask-corrected incident-id format gathered contract
                                      (get first-outcome "detail")))
-              retry-outcome (resolve-outcome incident-id retry)]
+              retry-outcome (if (abstained? retry)
+                              {"ok" true}
+                              (resolve-outcome incident-id retry))]
           (workflow.event/annotate "attempts" {"passes" 2 "corrected" 1})
           (if (get retry-outcome "ok")
             (return retry)
