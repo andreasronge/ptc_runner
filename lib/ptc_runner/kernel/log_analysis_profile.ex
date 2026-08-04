@@ -138,10 +138,14 @@ defmodule PtcRunner.Kernel.LogAnalysisProfile do
            listing_hook: Keyword.get(opts, :listing_hook)
          ) do
       {:ok, snapshot} ->
-        case AnalysisResources.new(@id, %{traces: snapshot}) do
-          {:ok, _resources} = success ->
-            success
-
+        with :ok <-
+               AnalysisProfile.refuse_empty_capture(
+                 TraceSnapshot.info(snapshot),
+                 :empty_traces_resource
+               ),
+             {:ok, _resources} = success <- AnalysisResources.new(@id, %{traces: snapshot}) do
+          success
+        else
           {:error, _reason} = error ->
             TraceSnapshot.stop(snapshot)
             error

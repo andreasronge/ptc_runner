@@ -219,6 +219,32 @@ defmodule PtcRunner.Lisp.Eval.Helpers do
     "import" => "not available — no Java interop"
   }
 
+  # Definition heads the prelude compiler understands but the analyzer does not.
+  # In dynamic source the whole form parses as a call to an undefined head, so
+  # the head is the cause and every name the form would have bound is a
+  # consequence — say which is which.
+  @definition_only_forms %{
+    "defn-" =>
+      "'defn-' defines a private helper in component source only; use defn in dynamic source",
+    "ns" =>
+      "'ns' declares a component namespace in component source only; it is not a dynamic form"
+  }
+
+  @doc """
+  Returns the definition-only-form hint for the first matching name, or `nil`.
+
+  Accepts one name or a list of them, and answers `nil` for anything else so
+  callers projecting untrusted diagnostic detail need no shape check first.
+  """
+  @spec definition_only_hint(term()) :: String.t() | nil
+  def definition_only_hint(names) when is_list(names),
+    do: Enum.find_value(names, &definition_only_hint/1)
+
+  def definition_only_hint(name) when is_binary(name) or is_atom(name),
+    do: Map.get(@definition_only_forms, to_string(name))
+
+  def definition_only_hint(_names), do: nil
+
   @doc """
   Formats closure errors with helpful messages.
   """
@@ -227,6 +253,10 @@ defmodule PtcRunner.Lisp.Eval.Helpers do
     var_str = to_string(name)
 
     cond do
+      # Check if the name is a definition head that only component source has
+      hint = definition_only_hint(var_str) ->
+        "Undefined variable: #{var_str}. Hint: #{hint}"
+
       # Check if it's a special form used without parentheses
       MapSet.member?(@special_forms, name) ->
         "Undefined variable: #{var_str}. Hint: '#{var_str}' is a special form, use (#{var_str} ...) with parentheses"

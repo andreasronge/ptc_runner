@@ -174,7 +174,17 @@ defmodule PtcRunner.Kernel.InspectionAnalysisProfile do
              capture_hook: Keyword.get(opts, :capture_hook),
              listing_hook: Keyword.get(opts, :listing_hook)
            ) do
-      capture_inspection(trace_snapshot, inspection, opts)
+      case AnalysisProfile.refuse_empty_capture(
+             TraceSnapshot.info(trace_snapshot),
+             :empty_traces_resource
+           ) do
+        :ok ->
+          capture_inspection(trace_snapshot, inspection, opts)
+
+        {:error, _reason} = error ->
+          TraceSnapshot.stop(trace_snapshot)
+          error
+      end
     end
   end
 
@@ -215,13 +225,18 @@ defmodule PtcRunner.Kernel.InspectionAnalysisProfile do
            listing_hook: Keyword.get(opts, :inspection_listing_hook)
          ) do
       {:ok, inspection_snapshot} ->
-        case AnalysisResources.new(@id, %{
-               traces: trace_snapshot,
-               inspection: inspection_snapshot
-             }) do
-          {:ok, _resources} = success ->
-            success
-
+        with :ok <-
+               AnalysisProfile.refuse_empty_capture(
+                 InspectionSnapshot.info(inspection_snapshot),
+                 :empty_inspection_resource
+               ),
+             {:ok, _resources} = success <-
+               AnalysisResources.new(@id, %{
+                 traces: trace_snapshot,
+                 inspection: inspection_snapshot
+               }) do
+          success
+        else
           {:error, _reason} = error ->
             InspectionSnapshot.stop(inspection_snapshot)
             TraceSnapshot.stop(trace_snapshot)

@@ -346,6 +346,7 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
       info: %{
         capture_id: capture.source_id,
         captured_at: DateTime.utc_now(),
+        file_count: capture.file_count,
         run_count: capture.events |> MapSet.new(& &1["run_id"]) |> MapSet.size(),
         snapshot_hash: SafeMetadata.fingerprint(capture.source_id),
         source_bytes: capture.source_bytes,

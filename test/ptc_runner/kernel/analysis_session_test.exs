@@ -302,11 +302,18 @@ defmodule PtcRunner.Kernel.AnalysisSessionTest do
 
     source = ~S|(loop [s "\\" n 0] (if (= n 19) s (recur (str s s) (inc n))))|
 
+    # The result ceiling builds its own error map rather than going through the
+    # ordinary projection, so it carries the redaction flag independently.
     assert {:ok,
             %{
               status: :error,
               outcome: :result_exceeded,
-              continuation_effect: :committed_with_history
+              continuation_effect: :committed_with_history,
+              error: %{
+                kind: :result_exceeded,
+                message: "public evaluation result exceeded its byte limit",
+                message_redacted?: false
+              }
             }} = AnalysisSession.evaluate(session, source)
 
     assert {:ok,

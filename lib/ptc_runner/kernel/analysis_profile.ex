@@ -45,6 +45,25 @@ defmodule PtcRunner.Kernel.AnalysisProfile do
     end
   end
 
+  @doc """
+  Refuses a capture that admitted no artifact from its resource directory.
+
+  Directory capture is one level deep by design, so a directory whose
+  artifacts sit in subdirectories admits nothing and then answers every query
+  with an empty page — indistinguishable from a capture that genuinely holds
+  no runs. Takes the snapshot's own `info/1` result so both snapshot kinds are
+  checked the same way, and fails closed on any info the owner cannot report.
+  """
+  @spec refuse_empty_capture(term(), atom()) :: :ok | {:error, atom()}
+  def refuse_empty_capture({:ok, %{file_count: file_count}}, _empty_error)
+      when is_integer(file_count) and file_count > 0,
+      do: :ok
+
+  def refuse_empty_capture({:ok, %{file_count: 0}}, empty_error) when is_atom(empty_error),
+    do: {:error, empty_error}
+
+  def refuse_empty_capture(_info, _empty_error), do: {:error, :source_unavailable}
+
   @doc false
   @spec valid_assembly?(
           recipe(),

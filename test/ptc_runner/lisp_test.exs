@@ -498,6 +498,43 @@ defmodule PtcRunner.LispTest do
       assert :ok =
                Lisp.validate("(defn factorial [n] (if (= n 0) 1 (* n (factorial (dec n)))))")
     end
+
+    test "definition-only forms report every undefined name, hint and all" do
+      assert {:error, names} = Lisp.validate("(defn- g [x] (* x 3)) (g 14)")
+      assert names == ["defn-", "g", "x"]
+    end
+  end
+
+  describe "definition-only forms in dynamic source" do
+    test "defn- names its own cause instead of only its consequences" do
+      assert {:error, %{fail: %{reason: :unbound_var, message: message, details: details}}} =
+               Lisp.run("(defn- g [x] (* x 3)) (return (g 14))")
+
+      assert message =~ "Undefined variables: defn-, g, x"
+      assert message =~ "'defn-' defines a private helper in component source only"
+      assert message =~ "use defn in dynamic source"
+      assert details.unbound_names == ["defn-", "g", "x"]
+    end
+
+    test "ns is reported as component-source-only too" do
+      assert {:error, %{fail: %{reason: :unbound_var, message: message}}} =
+               Lisp.run("(ns tools) (return 1)")
+
+      assert message =~ "'ns'"
+      assert message =~ "component source only"
+    end
+
+    test "defn keeps working in dynamic source" do
+      assert {:ok, %{return: 42}} = Lisp.run("(defn f [x] (* x 2)) (f 21)")
+    end
+
+    test "an ordinary undefined variable carries its name in details" do
+      assert {:error, %{fail: %{reason: :unbound_var, message: message, details: details}}} =
+               Lisp.run("undefined-var")
+
+      assert message == "Undefined variable: undefined-var"
+      assert details.unbound_names == ["undefined-var"]
+    end
   end
 
   describe "error propagation" do

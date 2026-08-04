@@ -1540,7 +1540,13 @@ defmodule PtcRunner.Kernel.TraceLog do
          :ok <- verify_sources(directory, after_verify_inventory.files, sources),
          {:ok, events} <- decode_sources(sources),
          {:ok, events, source_id} <- validate_loaded(events, max_source_bytes) do
-      {:ok, %{events: events, source_id: source_id, source_bytes: source_bytes}}
+      {:ok,
+       %{
+         events: events,
+         source_id: source_id,
+         source_bytes: source_bytes,
+         file_count: length(after_verify_inventory.files)
+       }}
     end
   end
 

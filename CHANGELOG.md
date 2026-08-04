@@ -160,6 +160,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Private analysis sessions no longer redact diagnostics built from the
+  operator's own submitted source. An undefined-variable failure now reports
+  its names, each verified to appear verbatim in the submitted source and
+  rebuilt rather than forwarded, so no evaluator text can quote a captured
+  record. Every session error map carries `message_redacted?`, and a withheld
+  message says that it was withheld.
+- `defn-` and `ns` in dynamic source now name their own cause instead of only
+  their consequences ("`'defn-' defines a private helper in component source
+  only; use defn in dynamic source"), and undefined-variable failures carry the
+  names structurally in `details.unbound_names`.
+- `mix ptc.repl` profile resources whose artifacts sit one directory level down
+  are refused with a message that states the rule, instead of capturing zero
+  files and answering every query with an empty page. A started session reports
+  the admitted file and run counts per resource.
 - PTC-Lisp namespace export now uses the shortest round-trippable float
   representation, preventing small finite values such as `1.0e-20` from being
   serialized as zero.

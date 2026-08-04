@@ -101,6 +101,26 @@ files. The task captures it immutably when the session starts. The caller
 cannot select the profile's component, capabilities, limits, mission data,
 labels, persistence policy, or result projection.
 
+Capture is one directory level deep. A resource directory whose artifacts sit
+in subdirectories admits nothing, so the session refuses to start rather than
+answering every query with an empty page:
+
+```
+ptc.repl profile setup failed: the traces resource directory contains no
+*.jsonl trace files at its own level; artifacts in subdirectories are not
+captured
+```
+
+A session that does start reports what it admitted, one line per resource, so
+a partial match is visible before the first query:
+
+```
+Captured traces: 12 files, 12 runs
+```
+
+With `--format jsonl` the same counts appear under `capture` in the
+`session-started` record.
+
 `log-analysis-v2` installs `cap`, `log.core`, and `log.analysis`. It grants
 only:
 
@@ -225,6 +245,34 @@ The initial private frontend is intentionally interactive-only. It rejects
 profile identity, hashes, sizes, timing, outcomes, and usage. It never records
 the evaluated REPL source, returned private value, prints, or retained REPL
 history.
+
+### Private diagnostics
+
+A private session never forwards evaluator message text, because that text can
+quote a captured record. It does rebuild the diagnostics that describe nothing
+but the operator's own input: an undefined-variable failure reports the names
+from the submitted source, each checked to appear verbatim in it.
+
+```clojure
+(defn- g [x] (* x 3)) (return (g 14))
+;=> Error (unbound_var): Undefined variables: defn-, g, x. Hint: 'defn-'
+;   defines a private helper in component source only; use defn in dynamic
+;   source [continuation preserved]
+```
+
+A name that is not in the submitted source is dropped, and the message says so
+rather than presenting a short list as the whole cause. Every other failure
+answers with a fixed string and `message_redacted?` set, so a withheld
+diagnostic is visibly withheld rather than silently absent:
+
+```clojure
+("some-string" 1)
+;=> Error (not_callable): private evaluation failed; diagnostic withheld by
+;   the private result policy [continuation preserved]
+```
+
+The fault `kind`, the continuation effect, and every usage counter stay exact
+in both cases.
 
 ### Separate analysis traces
 

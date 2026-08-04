@@ -261,6 +261,7 @@ defmodule Mix.Tasks.Ptc.ReplTest do
         ])
       end)
 
+    assert output =~ "Captured traces: 1 file, 1 run"
     assert output =~ "#'runs\n"
     assert output =~ "1\n"
     assert output =~ "Analysis trace:"
@@ -368,6 +369,10 @@ defmodule Mix.Tasks.Ptc.ReplTest do
                "command-error"
              ]
 
+    assert List.first(records)["capture"] == %{
+             "traces" => %{"file_count" => 1, "run_count" => 1}
+           }
+
     evaluations = Enum.filter(records, &(&1["type"] == "evaluation"))
     assert Enum.map(evaluations, & &1["result"]["status"]) == ["ok", "error", "ok"]
     assert List.last(evaluations)["result"]["value"] == 42
@@ -412,6 +417,24 @@ defmodule Mix.Tasks.Ptc.ReplTest do
     evaluations = Enum.filter(records, &(&1["type"] == "evaluation"))
     assert length(evaluations) == 2
     assert List.last(records)["category"] == "evaluation"
+  end
+
+  @tag :tmp_dir
+  test "a resource directory whose traces sit one level down is refused", %{tmp_dir: directory} do
+    source = Path.join(directory, "source")
+    output_directory = Path.join(directory, "output")
+    nested = Path.join(source, "run-tag")
+    File.mkdir_p!(nested)
+    File.mkdir!(output_directory)
+    seed_trace(nested, "seed")
+
+    assert_raise Mix.Error,
+                 ~r/the traces resource directory contains no \*\.jsonl trace files at its own level/,
+                 fn ->
+                   Repl.run(profile_args(source, output_directory) ++ ["-e", "42"])
+                 end
+
+    assert File.ls!(output_directory) == []
   end
 
   @tag :tmp_dir

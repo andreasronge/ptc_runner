@@ -881,6 +881,13 @@ defmodule PtcRunner.Lisp do
     end
   end
 
+  # The names are carried structurally so neither this nor any other consumer
+  # has to parse the diagnostic prose (which now also carries hints).
+  defp validate_error(%{
+         fail: %{reason: :unbound_var, details: %{unbound_names: [_ | _] = names}}
+       }),
+       do: {:error, names}
+
   defp validate_error(%{fail: %{reason: :unbound_var, message: message}}) do
     names = message |> String.split(": ", parts: 2) |> List.last() |> String.split(", ")
     {:error, names}
@@ -2108,7 +2115,15 @@ defmodule PtcRunner.Lisp do
       :ok
     else
       label = if length(vars) == 1, do: "Undefined variable", else: "Undefined variables"
-      {:error, Step.error(:unbound_var, "#{label}: #{Enum.join(vars, ", ")}", %{})}
+      message = "#{label}: #{Enum.join(vars, ", ")}#{definition_only_suffix(vars)}"
+      {:error, Step.error(:unbound_var, message, %{}, %{unbound_names: vars})}
+    end
+  end
+
+  defp definition_only_suffix(vars) do
+    case Helpers.definition_only_hint(vars) do
+      nil -> ""
+      hint -> ". Hint: #{hint}"
     end
   end
 

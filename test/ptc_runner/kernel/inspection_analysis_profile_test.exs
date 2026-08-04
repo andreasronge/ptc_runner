@@ -11,6 +11,7 @@ defmodule PtcRunner.Kernel.InspectionAnalysisProfileTest do
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.InspectionAnalysisProfile
   alias PtcRunner.Kernel.InspectionCapability
+  alias PtcRunner.Kernel.LogAnalysisProfile
   alias PtcRunner.Kernel.RunState
   alias PtcRunner.Kernel.SessionTrace
   alias PtcRunner.Kernel.TraceLog
@@ -289,10 +290,114 @@ defmodule PtcRunner.Kernel.InspectionAnalysisProfileTest do
     assert {:ok,
             %{
               status: :error,
-              error: %{message: "private evaluation failed"}
+              error: %{
+                message: "private evaluation failed; diagnostic withheld by the private" <> _,
+                message_redacted?: true
+              }
             } = result} = AnalysisSession.evaluate(session, ~s|("#{secret}" 1)|)
 
     refute inspect(result) =~ secret
+  end
+
+  @tag :tmp_dir
+  test "a private session reports the analyst's own undefined identifiers", %{tmp_dir: root} do
+    fixture = PrivateInspectionFixture.create!(root)
+    {:ok, session, info} = start_internal_session(fixture)
+    on_exit(fn -> AnalysisSession.stop(session) end)
+
+    assert {:ok,
+            %{
+              status: :error,
+              error: %{
+                kind: :unbound_var,
+                message: message,
+                message_redacted?: false
+              }
+            }} = AnalysisSession.evaluate(session, "(defn- g [x] (* x 3)) (return (g 14))")
+
+    assert message =~ "Undefined variables: defn-, g, x"
+    assert message =~ "component source only"
+
+    assert {:ok, %{lifecycle: :closed}} = AnalysisSession.close(session)
+
+    trace_path = Path.join(fixture.output, info.session_id <> ".jsonl")
+    encoded_trace = File.read!(trace_path)
+    refute encoded_trace =~ "Undefined variables"
+    refute encoded_trace =~ "defn-"
+  end
+
+  @tag :tmp_dir
+  test "resource directories whose artifacts sit one level down are refused", %{tmp_dir: root} do
+    fixture = PrivateInspectionFixture.create!(Path.join(root, "nested"))
+    nested_traces = Path.join(root, "nested-traces")
+    nested_inspection = Path.join(root, "nested-inspection")
+    File.mkdir_p!(Path.join(nested_traces, "run-tag"))
+    File.mkdir_p!(Path.join(nested_inspection, "run-tag"))
+
+    File.cp_r!(fixture.traces, Path.join(nested_traces, "run-tag"))
+    File.cp_r!(fixture.inspection, Path.join(nested_inspection, "run-tag"))
+
+    assert {:error, :empty_traces_resource} =
+             InspectionAnalysisProfile.capture(
+               %{"traces" => nested_traces, "inspection" => fixture.inspection},
+               []
+             )
+
+    assert {:error, :empty_inspection_resource} =
+             InspectionAnalysisProfile.capture(
+               %{"traces" => fixture.traces, "inspection" => nested_inspection},
+               []
+             )
+
+    assert {:error, :empty_traces_resource} =
+             LogAnalysisProfile.capture(%{"traces" => nested_traces}, [])
+
+    assert {:ok, resources} = LogAnalysisProfile.capture(%{"traces" => fixture.traces}, [])
+    assert {:ok, %{file_count: 1, run_count: 1}} = AnalysisResources.info(resources)
+    AnalysisResources.stop(resources)
+
+    assert {:ok, private_resources} = capture(fixture)
+
+    assert {:ok,
+            %{
+              traces: %{file_count: 1, run_count: 1},
+              inspection: %{file_count: 1, run_count: 1}
+            }} = AnalysisResources.info(private_resources)
+
+    AnalysisResources.stop(private_resources)
+  end
+
+  @tag :tmp_dir
+  test "a directory whose only artifact holds no runs is captured, not refused", %{tmp_dir: root} do
+    traces = Path.join(root, "traces")
+    File.mkdir_p!(traces)
+    File.write!(Path.join(traces, "empty.jsonl"), "")
+
+    assert {:ok, resources} = LogAnalysisProfile.capture(%{"traces" => traces}, [])
+    assert {:ok, %{file_count: 1, run_count: 0}} = AnalysisResources.info(resources)
+    AnalysisResources.stop(resources)
+  end
+
+  @tag :tmp_dir
+  test "a refused capture leaves no snapshot owner behind", %{tmp_dir: root} do
+    fixture = PrivateInspectionFixture.create!(root)
+    empty_inspection = Path.join(root, "empty-inspection")
+    File.mkdir_p!(empty_inspection)
+
+    monitoring_before = monitoring_processes()
+
+    assert {:error, :empty_inspection_resource} =
+             InspectionAnalysisProfile.capture(
+               %{"traces" => fixture.traces, "inspection" => empty_inspection},
+               []
+             )
+
+    # A live snapshot monitors its owner, so anything that started monitoring
+    # this process during the refused capture and is still alive is a leak.
+    for pid <- monitoring_processes() -- monitoring_before do
+      ref = Process.monitor(pid)
+      assert_receive {:DOWN, ^ref, :process, ^pid, _reason}, 5_000
+    end
   end
 
   @tag :tmp_dir
@@ -354,6 +459,11 @@ defmodule PtcRunner.Kernel.InspectionAnalysisProfileTest do
       refute inspect(result) =~ "private-malformed"
       refute inspect(result) =~ fixture.inspection
     end
+  end
+
+  defp monitoring_processes do
+    {:monitored_by, pids} = Process.info(self(), :monitored_by)
+    pids
   end
 
   defp capture(fixture) do
