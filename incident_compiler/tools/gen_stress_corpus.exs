@@ -274,29 +274,57 @@ defmodule IncidentCompiler.StressCorpus do
         end,
       "contradicted_hypotheses" => [
         %{
+          "id" => "pool-undersized",
+          "claim" => "An undersized connection pool caused the stall.",
           "must_include" => ["pool"],
-          "evidence_ids" => ["chat-7788"],
-          "note" =>
-            "An undersized connection pool is the attractive wrong answer. Scaling it three-fold changed nothing, which the report must carry as evidence against the hypothesis rather than omit."
+          "contradicting_evidence_ids" => ["chat-7788"]
         },
         %{
+          "id" => "release-caused-it",
+          "claim" => "Release 4.22.0 caused the stall.",
           "must_include" => ["4.22.0"],
-          "evidence_ids" => ["chat-7810", "dep-5501"],
-          "note" =>
-            "Release 4.22.0 is coincident and unrelated; its rollback completed after recovery had already begun."
+          "contradicting_evidence_ids" => ["chat-7810", "dep-5501"]
         }
       ],
-      "open_questions" => [
+      "required_open_questions" => [
         %{
+          "id" => "analytics-owner",
+          "question" => "Which team owns the analytics-nightly job that held the lock?",
           "must_include" => ["analytics"],
-          "note" => "No record names an owner for the analytics-nightly job."
-        },
-        %{
-          "must_include" => ["impact"],
-          "note" => "No record estimates customer impact during the 87-minute stall."
+          "evidence_ids" => ["lock-9001"]
         }
-      ]
+      ],
+      "inference_only" => [
+        %{
+          "id" => "lock-causation",
+          "claim" =>
+            "That the analytics session's lock caused the stall is an inference from coincident timing, not a recorded observation.",
+          "all_of" => ["lock", "caused"]
+        }
+      ],
+      # Every filler record is noise: citing one is citing routine traffic that
+      # answers nothing. Listing them makes `noise_citations` meaningful here,
+      # where an arm that fetches the earliest 50 records cites nothing else.
+      "irrelevant_evidence_ids" => irrelevant_ids(),
+      "rubric" => %{
+        "misleading_correlation" =>
+          "Release 4.22.0 (dep-5501) lands minutes before the alert and its rollback (chat-7810) completes after recovery had begun. A report treating either as causal without testing it should lose semantic support precision.",
+        "symptom_as_cause" =>
+          "Pool saturation (pool-3310, alert-6620) is real and downstream. Naming it the cause is the attractive wrong answer; chat-7788 is the record that refutes it.",
+        "coverage" =>
+          "This corpus cannot be fetched whole. A report drawn only from the pre-incident tail should abstain or say plainly that it saw no incident, not narrate normal operations as a postmortem."
+      }
     }
+  end
+
+  # Filler is everything that is not hand-written above.
+  defp irrelevant_ids do
+    authored = for {_, _, id, _, _} <- @needles ++ @plausible_decoys, do: id
+
+    build_records()
+    |> Enum.map(& &1["evidence_id"])
+    |> Enum.reject(&(&1 in authored))
+    |> Enum.sort()
   end
 
   defp incident do

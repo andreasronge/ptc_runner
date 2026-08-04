@@ -602,9 +602,22 @@ In order, and the first is a precondition for everything after it.
   `mix run incident_compiler/tools/gen_stress_corpus.exs`; the generator
   asserts each oracle token appears in the record it names and in no filler
   record.
-- Filed from this work: [#1172](https://github.com/andreasronge/ptc_runner/issues/1172)
-  (private sessions redact the analyst's own identifiers, hit five times in one
-  session). [#1168](https://github.com/andreasronge/ptc_runner/issues/1168)
+- [#1172](https://github.com/andreasronge/ptc_runner/issues/1172) is **fixed**
+  by #1174 and verified against this branch. `unbound_var` now names the
+  operator's own identifiers and explains the cause —
+  `Undefined variables: defn-, priv, x. Hint: 'defn-' defines a private helper
+  in component source only; use defn in dynamic source` — and a resource
+  directory whose artifacts sit one level down is refused rather than answering
+  every query with an empty page. A started session now reports what it
+  admitted (`{"traces": {"file_count": 8, "run_count": 8}, ...}`), which catches
+  a *partial* capture too. `invalid_arity`, `not_callable` and capability
+  failures still collapse to a fixed message, but it now says it is fixed
+  ("diagnostic withheld by the private result policy") and every error map
+  carries `message_redacted`, so a withheld diagnostic is no longer
+  indistinguishable from one that was never produced. `invalid_arity` is the
+  highest-value next entry on that allowlist: it cost a round trip here, and
+  the function name and arity are both in the operator's own source, so it
+  satisfies the existing verbatim rule without weakening it. [#1168](https://github.com/andreasronge/ptc_runner/issues/1168)
   was closed by #1169, which shipped `check-source` and parameterized
   evaluation. [#1167](https://github.com/andreasronge/ptc_runner/issues/1167)
   (promotion) is open and being worked separately.

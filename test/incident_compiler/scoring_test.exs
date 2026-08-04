@@ -59,8 +59,10 @@ defmodule IncidentCompiler.ScoringTest do
       end
     end
 
-    test "the corpus holds ten incidents" do
-      assert length(incidents()) == 10
+    test "the corpus holds eleven incidents" do
+      # Ten small incidents plus `schema-migration-stall`, the 332-record stress
+      # corpus. The count is asserted so that adding one is a deliberate act.
+      assert length(incidents()) == 11
     end
   end
 
