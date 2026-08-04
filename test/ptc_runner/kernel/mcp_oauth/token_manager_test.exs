@@ -1,6 +1,7 @@
 defmodule PtcRunner.Kernel.MCPOAuth.TokenManagerTest do
   use ExUnit.Case, async: false
 
+  alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.MCPOAuth.Authority
   alias PtcRunner.Kernel.MCPOAuth.Binding
@@ -26,7 +27,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManagerTest do
         store,
         "tenant",
         [{authority.installation_id, authority.fingerprint}],
-        1_000
+        Deadline.new(1_000)
       )
 
     key = Context.grant_key(context, authority, claims[authority.installation_id])
@@ -115,17 +116,25 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManagerTest do
     assert_receive {:refresh, "refresh-access-1"}
     assert :ok = TokenManager.release(manager, issued.admission, deadline)
 
-    assert {:ok, stored} = Store.load_grant(context.store, context.key, 1_000)
+    assert {:ok, stored} =
+             Store.load_grant(context.store, context.key, Deadline.new(1_000))
+
     assert stored.refresh_token == "refresh-2"
     assert stored.requested_scopes == MapSet.new(["read", "write"])
     assert stored.granted_scopes == MapSet.new(["read"])
   end
 
   test "uses an unrefreshable access token through its remaining lifetime", context do
-    {:ok, anchor} = Store.time_anchor(context.store, 1_000)
+    {:ok, anchor} = Store.time_anchor(context.store, Deadline.new(1_000))
 
     {:ok, lease} =
-      Store.acquire_mutation(context.store, context.key, :authorization, 5_000, 1_000)
+      Store.acquire_mutation(
+        context.store,
+        context.key,
+        :authorization,
+        5_000,
+        Deadline.new(1_000)
+      )
 
     :ok =
       Store.begin_mutation_dispatch(
@@ -133,7 +142,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManagerTest do
         context.key,
         lease.fence,
         %{freshness_anchor: anchor, freshness_anchor_ttl_ms: 5_000},
-        1_000
+        Deadline.new(1_000)
       )
 
     {:ok, _grant} =
@@ -153,7 +162,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManagerTest do
         },
         500,
         anchor,
-        1_000
+        Deadline.new(1_000)
       )
 
     {:ok, manager} =
@@ -194,7 +203,13 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManagerTest do
              TokenManager.authorization_header(manager, deadline)
 
     assert {:ok, _lease} =
-             Store.acquire_mutation(context.store, context.key, :authorization, 1_000, 1_000)
+             Store.acquire_mutation(
+               context.store,
+               context.key,
+               :authorization,
+               1_000,
+               Deadline.new(1_000)
+             )
   end
 
   test "terminalizes a dispatched refresh failure after the request deadline", context do
@@ -246,7 +261,13 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManagerTest do
     assert_receive {:refresh_result, {:error, :mcp_authorization_required}}
 
     assert {:ok, _lease} =
-             Store.acquire_mutation(context.store, context.key, :authorization, 1_000, 1_000)
+             Store.acquire_mutation(
+               context.store,
+               context.key,
+               :authorization,
+               1_000,
+               Deadline.new(1_000)
+             )
 
     send(refresh.pid, :finish)
     assert {:error, :mcp_authorization_required} = Task.await(refresh)
@@ -277,7 +298,13 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManagerTest do
              TokenManager.authorization_header(manager, deadline)
 
     assert {:ok, _lease} =
-             Store.acquire_mutation(context.store, context.key, :authorization, 1_000, 1_000)
+             Store.acquire_mutation(
+               context.store,
+               context.key,
+               :authorization,
+               1_000,
+               Deadline.new(1_000)
+             )
 
     refute_receive {:refresh, _token}
   end
@@ -307,7 +334,13 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManagerTest do
              TokenManager.authorization_header(manager, deadline)
 
     assert {:ok, _lease} =
-             Store.acquire_mutation(context.store, context.key, :authorization, 1_000, 1_000)
+             Store.acquire_mutation(
+               context.store,
+               context.key,
+               :authorization,
+               1_000,
+               Deadline.new(1_000)
+             )
 
     refute_receive {:refresh, _token}
   end
@@ -333,7 +366,8 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManagerTest do
                deadline
              )
 
-    assert {:ok, nil} = Store.load_requirement(context.store, context.key, 1_000)
+    assert {:ok, nil} =
+             Store.load_requirement(context.store, context.key, Deadline.new(1_000))
   end
 
   test "locally fences a rejected generation when durable rejection fails", context do
@@ -1098,8 +1132,10 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManagerTest do
          metadata_binding \\ nil,
          requested_scopes \\ MapSet.new(["read"])
        ) do
-    {:ok, anchor} = Store.time_anchor(store, 1_000)
-    {:ok, lease} = Store.acquire_mutation(store, key, :authorization, 5_000, 1_000)
+    {:ok, anchor} = Store.time_anchor(store, Deadline.new(1_000))
+
+    {:ok, lease} =
+      Store.acquire_mutation(store, key, :authorization, 5_000, Deadline.new(1_000))
 
     :ok =
       Store.begin_mutation_dispatch(
@@ -1107,7 +1143,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManagerTest do
         key,
         lease.fence,
         %{freshness_anchor: anchor, freshness_anchor_ttl_ms: 5_000},
-        1_000
+        Deadline.new(1_000)
       )
 
     Store.commit_grant(
@@ -1126,13 +1162,15 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManagerTest do
       },
       ttl_ms,
       anchor,
-      1_000
+      Deadline.new(1_000)
     )
   end
 
   defp replace_grant(store, key, granted_scopes) do
-    {:ok, anchor} = Store.time_anchor(store, 1_000)
-    {:ok, lease} = Store.acquire_mutation(store, key, :authorization, 5_000, 1_000)
+    {:ok, anchor} = Store.time_anchor(store, Deadline.new(1_000))
+
+    {:ok, lease} =
+      Store.acquire_mutation(store, key, :authorization, 5_000, Deadline.new(1_000))
 
     :ok =
       Store.begin_mutation_dispatch(
@@ -1140,7 +1178,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManagerTest do
         key,
         lease.fence,
         %{freshness_anchor: anchor, freshness_anchor_ttl_ms: 5_000},
-        1_000
+        Deadline.new(1_000)
       )
 
     Store.commit_grant(
@@ -1158,7 +1196,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManagerTest do
       },
       60_000,
       anchor,
-      1_000
+      Deadline.new(1_000)
     )
   end
 

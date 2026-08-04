@@ -1,6 +1,7 @@
 defmodule PtcRunner.Kernel.MCPOAuth.AuthorizationTest do
   use ExUnit.Case, async: true
 
+  alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.MCPOAuth.Authority
   alias PtcRunner.Kernel.MCPOAuth.Authorization
   alias PtcRunner.Kernel.MCPOAuth.Context
@@ -21,7 +22,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.AuthorizationTest do
         store,
         "tenant",
         [{authority.installation_id, authority.fingerprint}],
-        1_000
+        Deadline.new(1_000)
       )
 
     {:ok,
@@ -162,7 +163,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.AuthorizationTest do
                grant.generation,
                MapSet.new(["write"]),
                5_000,
-               1_000
+               Deadline.new(1_000)
              )
 
     request = request_fixture(context.authority, self(), "max-age=120", "read write")
@@ -488,8 +489,10 @@ defmodule PtcRunner.Kernel.MCPOAuth.AuthorizationTest do
   end
 
   defp seed_grant(store, key) do
-    {:ok, anchor} = Store.time_anchor(store, 1_000)
-    {:ok, lease} = Store.acquire_mutation(store, key, :authorization, 5_000, 1_000)
+    {:ok, anchor} = Store.time_anchor(store, Deadline.new(1_000))
+
+    {:ok, lease} =
+      Store.acquire_mutation(store, key, :authorization, 5_000, Deadline.new(1_000))
 
     :ok =
       Store.begin_mutation_dispatch(
@@ -497,7 +500,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.AuthorizationTest do
         key,
         lease.fence,
         %{freshness_anchor: anchor, freshness_anchor_ttl_ms: 5_000},
-        1_000
+        Deadline.new(1_000)
       )
 
     Store.commit_grant(
@@ -516,7 +519,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.AuthorizationTest do
       },
       60_000,
       anchor,
-      1_000
+      Deadline.new(1_000)
     )
   end
 end
