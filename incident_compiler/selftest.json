@@ -15,7 +15,11 @@
     "data": {}
   },
   "input": {
-    "value": {"incident_id": "checkout-5xx"}
+    "value": {
+      "incident_id": "checkout-5xx",
+      "probe_incident_id": "schema-migration-stall",
+      "probe_evidence_id": "chat-7810"
+    }
   },
   "providers": {
     "mission": [

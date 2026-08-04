@@ -149,6 +149,22 @@ defmodule IncidentCompiler.CompilerTest do
       assert outcome["unknown"]["unresolved"] == ["missing-record"]
       assert outcome["tampered"]["mismatched"] == [outcome["sampled_evidence_id"]]
     end
+
+    # The server used to write its frames with `IO.write/2`. The host grants a
+    # stdio child no `LANG`/`LC_*`, so `:stdio` sat in latin1 mode and rendered
+    # this record's em dash as the literal text `\x{2014}` — invalid JSON, a
+    # protocol error, and a terminal transport. Every arm that fetched the whole
+    # stress corpus died on this one record, and the score it produced looked
+    # like a reasoning failure. Byte equality against the corpus file is the
+    # assertion; anything weaker passes on the escaped form.
+    test "carries a record body containing text outside ASCII byte for byte", context do
+      expected = probe_record()["body"]
+
+      refute String.to_charlist(expected) |> Enum.all?(&(&1 < 128)),
+             "the probed record no longer carries non-ASCII text, so this proves nothing"
+
+      assert context.selftest["probe_body"] == expected
+    end
   end
 
   describe "static authority" do
@@ -284,6 +300,19 @@ defmodule IncidentCompiler.CompilerTest do
   end
 
   defp records(path), do: path |> File.stream!() |> Enum.map(&Jason.decode!/1)
+
+  # The record `selftest.json` names in `probe_evidence_id`, read from the
+  # corpus rather than restated here, so the expectation cannot drift from it.
+  defp probe_record do
+    input = @app |> Path.join("selftest.json") |> File.read!() |> Jason.decode!()
+    %{"probe_incident_id" => incident, "probe_evidence_id" => id} = input["input"]["value"]
+
+    @app
+    |> Path.join("fixtures/corpus/#{incident}/evidence/records.json")
+    |> File.read!()
+    |> Jason.decode!()
+    |> Enum.find(&(&1["evidence_id"] == id))
+  end
 
   defp installed_effects(installation) do
     installation

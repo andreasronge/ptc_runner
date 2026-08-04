@@ -83,8 +83,16 @@ defmodule IncidentCompiler.EvidenceServer do
 
   ## Transport
 
+  # Byte I/O, not character I/O. A stdio MCP server is spawned with whatever
+  # environment the host grants it, and this runtime's allowlist carries no
+  # `LANG`/`LC_*`, so Erlang puts `:stdio` in latin1 mode. `IO.write/2` then
+  # renders any codepoint above 127 as the literal escape `\x{2014}` instead of
+  # its UTF-8 bytes, which is not valid JSON: the client rejects the frame as a
+  # protocol error and the transport is terminal, so one record carrying an em
+  # dash kills the whole session. `binwrite`/`binread` move the bytes the
+  # protocol actually specifies regardless of the child's locale.
   defp loop(corpora) do
-    case IO.read(:stdio, :line) do
+    case IO.binread(:stdio, :line) do
       line when is_binary(line) ->
         line |> String.trim() |> dispatch(corpora)
         loop(corpora)
@@ -118,7 +126,7 @@ defmodule IncidentCompiler.EvidenceServer do
     })
   end
 
-  defp write(message), do: IO.write(:stdio, [encode(message), "\n"])
+  defp write(message), do: IO.binwrite(:stdio, [encode(message), "\n"])
 
   ## Methods
 

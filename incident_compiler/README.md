@@ -6,7 +6,7 @@ every material claim must resolve to a real evidence record before the report
 is published.
 
 Phases 1 and 2 are done: the complete application runs credential-free, and a
-ten-incident corpus with machine-readable oracles and a mechanical scorer is in
+eleven-incident corpus with machine-readable oracles and a mechanical scorer is in
 place. There is still no measured claim about report quality — comparing
 systems is Phase 3, and nothing here has run that comparison.
 

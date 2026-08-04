@@ -27,9 +27,32 @@
      "           \"unknown\" unknown"
      "           \"tampered\" tampered}))"]))
 
+;; The transport carries record text as bytes, and text is not all ASCII. A
+;; server whose stdout is in character mode renders a codepoint above 127 as an
+;; escape rather than its UTF-8 bytes, which is not valid JSON — the frame is
+;; refused, and because a stdio transport failure is terminal, one such record
+;; ends the session. Fetching a record the caller names and handing its body
+;; back verbatim makes that survivable-looking failure assertable.
+(def probe-source
+  (str "(return (get-in (incident.evidence/get-record (get data/params \"incident_id\")\n"
+       "                                              (get data/params \"evidence_id\"))\n"
+       "                [\"record\" \"body\"]))"))
+
+(defn- probe-body [incident-id evidence-id]
+  (let [evaluation (kernel/eval-source-with
+                     probe-source
+                     {"incident_id" incident-id "evidence_id" evidence-id})]
+    (if (= :returned (get evaluation :outcome))
+      (get evaluation :value)
+      (fail (result/error :selftest-failed (get evaluation :outcome))))))
+
 (defn run [input]
   (let [incident-id (get input "incident_id")
         evaluation (kernel/eval-source (mission-source incident-id))]
-    (if (= :returned (get evaluation :outcome))
-      (return (get evaluation :value))
-      (fail (result/error :selftest-failed (get evaluation :outcome))))))
+    (if (not= :returned (get evaluation :outcome))
+      (fail (result/error :selftest-failed (get evaluation :outcome)))
+      (return
+        (assoc (get evaluation :value)
+               "probe_body"
+               (probe-body (get input "probe_incident_id")
+                           (get input "probe_evidence_id")))))))
