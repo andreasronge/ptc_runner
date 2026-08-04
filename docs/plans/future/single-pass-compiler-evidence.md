@@ -123,6 +123,25 @@ Three arms, three reps:
 **Every arm scored zero.** Not "worse" — zero. Three published reports between
 them, all fully grounded, none containing a single required fact.
 
+**But zero here does not mean what it meant on the small corpus, and reading
+the reports is what shows it.** Every published report correctly characterised
+the evidence it was given and named what it was missing:
+
+> The provided evidence shows normal operations for orders-service and its
+> database from 20:01 to 21:25, **with no indication of a schema migration
+> stall** on the public.orders table.
+
+Its open questions ask for migration entries touching `public.orders`, lock
+samples showing waiters on it, and alerts indicating degradation — which are
+precisely the records it never received. The model was handed 50 shift-handover
+notes and objective checks and said so.
+
+So `required_fact_recall` is measuring **retrieval** here, not reasoning, and
+the metric cannot tell a well-hedged 0.00 from a fabricated one. On the
+13-record corpus a 0.00 meant the model had the evidence and missed it; on this
+one it means the evidence never arrived. Reporting both as "scored zero" without
+that distinction was wrong, and only reading the reports caught it.
+
 The prediction registered before the run holds exactly. The authored programs
 fetched **160 records every time** — eight sources times the twenty-record
 default — and 160 is not a number anyone chose; it is what ignoring `truncated`
@@ -182,6 +201,32 @@ demonstrably is not enough.
 One thing `check-source` cannot do, worth knowing before leaning on it: it
 resolves names, not shapes. Every one of these programs is name-correct and
 semantically blind, and it passed all three.
+
+### Telling the model its coverage changed nothing, because it already knew
+
+The report prompt was made truthful — it had been asserting "Every record below
+is the complete evidence" unconditionally, which was false the moment retrieval
+fell short. With an accurate "these are 50 of the 332 records this incident
+holds" the fast arm published 3/3 at 0.00, the same as before.
+
+The reason is not that the model ignored the sentence. Reading the reports from
+both conditions side by side, they are equally hedged: without the sentence it
+already wrote "no indication of a schema migration stall", because fifty
+consecutive shift-handover notes are self-evidently not an incident. The
+coverage line told it something it had inferred from the data.
+
+That does not make the line useless — a corpus whose first fifty records looked
+alarming would not be self-evident — but it does mean this experiment failed to
+test what it was built to test, and the earlier reading of it ("information is
+not the binding constraint") was not supported by it.
+
+One genuine finding survives. The prompt's only rule about missing evidence is
+*"where the evidence does not answer a question that matters, record an open
+question"* — which prescribes handling it **inside** a report. The
+`insufficient_evidence` branch appears solely as an unexplained line of schema
+in the contract dump. A model told it is missing evidence, and told what to do
+when evidence is missing, does the thing it was told. If abstention is wanted,
+the rules have to say so.
 
 Not fixed here, deliberately. The obvious repairs — pass `limit 50`, read
 `truncated`, raise the citation cap — are each one line, and applying them
