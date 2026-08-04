@@ -42,5 +42,6 @@ STATUS=$?
 END=$(date +%s)
 
 mix run "$REPO/incident_compiler/experiments/collect.exs" "$TAG" "$INCIDENT" "$ARM" "$REP" "$STATUS" "$((END-START))" \
-  "$EXP/traces/$TAG/run.jsonl" "$EXP/reports/$TAG.json" >> "$EXP/results.jsonl"
+  "$EXP/traces/$TAG/run.jsonl" "$EXP/reports/$TAG.json" \
+  "$EXP/inspect/$TAG/run.inspection.jsonl" >> "$EXP/results.jsonl"
 tail -1 "$EXP/results.jsonl"

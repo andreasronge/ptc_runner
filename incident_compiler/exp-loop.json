@@ -87,9 +87,10 @@
     "subordinate_evaluations": 64,
     "workflow_timeout_ms": 600000,
     "evaluation_timeout_ms": 30000,
-    "normal_event_count": 4096,
+    "normal_event_count": 8192,
     "workflow_capability_calls_per_name": 64,
-    "mission_capability_calls_per_name": 4096
+    "mission_capability_calls_per_name": 4096,
+    "normal_event_bytes": 64000000
   },
   "labels": {
     "name": "incident-evidence-compiler",
