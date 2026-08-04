@@ -6,34 +6,58 @@ defmodule PtcRunner.Kernel.BoundedWorker do
   late reply before returning to the caller. Callers that are themselves
   disposable workers may opt into `:cancel_with_caller`; the bounded worker is
   then linked for the duration of the call so an untrappable caller kill also
-  terminates blocked work.
+  terminates blocked work. A caller may also supply a `:cancel_with` process;
+  its termination cancels the worker without coupling the two owners.
   """
 
   @doc "Runs a zero-arity function in a monitored process under explicit limits."
   @spec run((-> term()), keyword()) ::
-          {:ok, term()} | {:error, :timeout | :heap_exceeded | :worker_failed}
+          {:ok, term()} | {:error, :timeout | :cancelled | :heap_exceeded | :worker_failed}
   def run(function, opts) when is_function(function, 0) and is_list(opts) do
     timeout_ms = Keyword.fetch!(opts, :timeout_ms)
     max_heap_words = Keyword.fetch!(opts, :max_heap_words)
     cancel_with_caller? = Keyword.get(opts, :cancel_with_caller, false)
+    cancel_with = Keyword.get(opts, :cancel_with)
     timeout_cleanup_hook = Keyword.get(opts, :timeout_cleanup_hook)
 
     if cancel_with_caller? do
       previous_trap_exit = Process.flag(:trap_exit, true)
 
       try do
-        run_worker(function, timeout_ms, max_heap_words, true, timeout_cleanup_hook)
+        run_worker(
+          function,
+          timeout_ms,
+          max_heap_words,
+          true,
+          cancel_with,
+          timeout_cleanup_hook
+        )
       after
         Process.flag(:trap_exit, previous_trap_exit)
       end
     else
-      run_worker(function, timeout_ms, max_heap_words, false, timeout_cleanup_hook)
+      run_worker(
+        function,
+        timeout_ms,
+        max_heap_words,
+        false,
+        cancel_with,
+        timeout_cleanup_hook
+      )
     end
   end
 
-  defp run_worker(function, timeout_ms, max_heap_words, linked?, timeout_cleanup_hook) do
+  defp run_worker(
+         function,
+         timeout_ms,
+         max_heap_words,
+         linked?,
+         cancel_with,
+         timeout_cleanup_hook
+       ) do
     reply_alias = Process.alias()
     reply_ref = make_ref()
+    cancel_monitor = monitor_cancel_target(cancel_with)
 
     spawn_options =
       [
@@ -55,6 +79,7 @@ defmodule PtcRunner.Kernel.BoundedWorker do
 
     receive do
       {^reply_ref, result} ->
+        demonitor_cancel_target(cancel_monitor)
         Process.unalias(reply_alias)
         await_down(pid, monitor_ref)
         unlink(pid, linked?)
@@ -62,18 +87,21 @@ defmodule PtcRunner.Kernel.BoundedWorker do
         {:ok, result}
 
       {:DOWN, ^monitor_ref, :process, ^pid, :killed} ->
+        demonitor_cancel_target(cancel_monitor)
         Process.unalias(reply_alias)
         unlink(pid, linked?)
         drain_exit(pid, linked?)
         {:error, :heap_exceeded}
 
       {:DOWN, ^monitor_ref, :process, ^pid, _reason} ->
+        demonitor_cancel_target(cancel_monitor)
         Process.unalias(reply_alias)
         unlink(pid, linked?)
         drain_exit(pid, linked?)
         {:error, :worker_failed}
 
       {:EXIT, ^pid, reason} when linked? ->
+        demonitor_cancel_target(cancel_monitor)
         await_down(pid, monitor_ref)
         Process.unlink(pid)
         drain_exit(pid, true)
@@ -81,8 +109,17 @@ defmodule PtcRunner.Kernel.BoundedWorker do
         if reason == :killed,
           do: {:error, :heap_exceeded},
           else: {:error, :worker_failed}
+
+      {:DOWN, cancel_ref, :process, cancel_pid, _reason}
+      when cancel_monitor == {cancel_pid, cancel_ref} ->
+        if linked?,
+          do: terminate_linked(pid, monitor_ref, reply_alias, reply_ref),
+          else: terminate(pid, monitor_ref, reply_alias, reply_ref)
+
+        {:error, :cancelled}
     after
       timeout_ms ->
+        demonitor_cancel_target(cancel_monitor)
         run_timeout_cleanup_hook(timeout_cleanup_hook)
 
         if linked?,
@@ -95,6 +132,14 @@ defmodule PtcRunner.Kernel.BoundedWorker do
 
   defp unlink(pid, true), do: Process.unlink(pid)
   defp unlink(_pid, false), do: true
+
+  defp monitor_cancel_target(nil), do: nil
+  defp monitor_cancel_target(pid) when is_pid(pid), do: {pid, Process.monitor(pid)}
+
+  defp demonitor_cancel_target(nil), do: :ok
+
+  defp demonitor_cancel_target({_pid, monitor_ref}),
+    do: Process.demonitor(monitor_ref, [:flush])
 
   defp await_down(pid, monitor_ref) do
     receive do

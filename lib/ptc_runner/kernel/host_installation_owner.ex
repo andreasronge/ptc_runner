@@ -4,6 +4,7 @@ defmodule PtcRunner.Kernel.HostInstallationOwner do
   use GenServer
 
   alias PtcRunner.Kernel.HostConfig
+  alias PtcRunner.Kernel.HostCredentialLease
   alias PtcRunner.Kernel.HostInstallation
   alias PtcRunner.Kernel.HostInstallationAuthority
 
@@ -21,23 +22,13 @@ defmodule PtcRunner.Kernel.HostInstallationOwner do
 
     case GenServer.start(__MODULE__, {host, creator, token, fence}) do
       {:ok, pid} ->
-        try do
-          case HostInstallationAuthority.new(pid, token, fence) do
-            {:ok, authority} ->
-              {:ok, authority}
+        case HostCredentialLease.start(pid) do
+          {:ok, lease_owner, lease_fence, lease_table} ->
+            build_authority(pid, token, fence, lease_owner, lease_fence, lease_table)
 
-            {:error, _reason} = error ->
-              stop(pid, token, :catalog, fence)
-              error
-          end
-        rescue
-          exception ->
+          {:error, _reason} = error ->
             stop(pid, token, :catalog, fence)
-            reraise exception, __STACKTRACE__
-        catch
-          kind, reason ->
-            stop(pid, token, :catalog, fence)
-            :erlang.raise(kind, reason, __STACKTRACE__)
+            error
         end
 
       {:error, _reason} = error ->
@@ -328,6 +319,9 @@ defmodule PtcRunner.Kernel.HostInstallationOwner do
       ),
       do: {:stop, :normal, state}
 
+  def handle_info({:"ETS-TRANSFER", _table, _from, :credential_leases}, state),
+    do: {:noreply, state}
+
   if {:format_status, 1} in GenServer.behaviour_info(:callbacks) do
     @impl GenServer
     def format_status(status), do: redact_status(status)
@@ -386,5 +380,34 @@ defmodule PtcRunner.Kernel.HostInstallationOwner do
       is_binary(name) and Map.has_key?(host.install, name) and is_map(runtime) and
         not is_struct(runtime)
     end)
+  end
+
+  defp build_authority(pid, token, fence, lease_owner, lease_fence, lease_table) do
+    case HostInstallationAuthority.new(
+           pid,
+           token,
+           fence,
+           lease_owner,
+           lease_fence,
+           lease_table
+         ) do
+      {:ok, authority} ->
+        {:ok, authority}
+
+      {:error, _reason} = error ->
+        HostCredentialLease.close(lease_owner, lease_fence, lease_table)
+        stop(pid, token, :catalog, fence)
+        error
+    end
+  rescue
+    exception ->
+      HostCredentialLease.close(lease_owner, lease_fence, lease_table)
+      stop(pid, token, :catalog, fence)
+      reraise exception, __STACKTRACE__
+  catch
+    kind, reason ->
+      HostCredentialLease.close(lease_owner, lease_fence, lease_table)
+      stop(pid, token, :catalog, fence)
+      :erlang.raise(kind, reason, __STACKTRACE__)
   end
 end

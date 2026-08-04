@@ -15,9 +15,11 @@ defmodule PtcRunner.Kernel.RunBuilder do
   downstream assembly consumes the resulting sealed `PreparedRun` directly.
   Pure option validation completes before that one-way consumption.
   The Mix command also preflights a provider-bearing prepared run, opens its
-  active session, and passes that same session here for runtime assembly. The
-  transitional registry builders remain until acquisition is cut over, but
-  they no longer open a second provider-session owner.
+  active session, and passes that same session here for runtime assembly.
+  Credential resolution then runs in owner-linked bounded work under the
+  session's shared run deadline. The transitional registry builders remain
+  until acquisition is cut over, but they no longer open a second
+  provider-session owner.
 
   A provider-bearing build remains owned by its build creator until execution
   binds it to a Runner or REPL lifecycle owner. The creator must remain alive
@@ -27,6 +29,10 @@ defmodule PtcRunner.Kernel.RunBuilder do
 
   alias PtcRunner.Kernel
   alias PtcRunner.Kernel.ApplicationPackage
+  alias PtcRunner.Kernel.BoundedWorker
+  alias PtcRunner.Kernel.CommandDiagnostic
+  alias PtcRunner.Kernel.CommandSubject
+  alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.InspectionArtifact
   alias PtcRunner.Kernel.InspectionSink
@@ -633,7 +639,12 @@ defmodule PtcRunner.Kernel.RunBuilder do
            {:ok, preflighted} <- preflight_providers(prepared) do
         try do
           with {:ok, credentials} <-
-                 ProviderRegistry.resolve_credentials(registry, credential_names(prepared)),
+                 resolve_provider_credentials(
+                   registry,
+                   preflighted,
+                   session,
+                   manifest.limits.provider_heap_words
+                 ),
                {:ok, acquired} <- acquire_providers(preflighted, credentials, effective_class) do
             {:ok,
              acquired
@@ -895,6 +906,71 @@ defmodule PtcRunner.Kernel.RunBuilder do
     |> Enum.uniq()
     |> Enum.sort()
   end
+
+  defp resolve_provider_credentials(registry, providers, session, max_heap_words) do
+    names = credential_names(providers)
+
+    case ProviderSession.execution_deadline(session) do
+      {:ok, nil} ->
+        ProviderRegistry.resolve_credentials(registry, names)
+
+      {:ok, deadline} when names == [] ->
+        if Deadline.expired?(deadline),
+          do: {:error, run_timeout_diagnostic()},
+          else: {:ok, %{}}
+
+      {:ok, deadline} ->
+        resolve_active_credentials(registry, names, providers, session, deadline, max_heap_words)
+
+      :error ->
+        {:error, :provider_session_unavailable}
+    end
+  end
+
+  defp resolve_active_credentials(
+         registry,
+         names,
+         providers,
+         session,
+         deadline,
+         max_heap_words
+       ) do
+    result =
+      case Deadline.remaining(deadline) do
+        0 ->
+          {:error, :timeout}
+
+        timeout_ms ->
+          BoundedWorker.run(fn -> ProviderRegistry.resolve_credentials(registry, names) end,
+            timeout_ms: timeout_ms,
+            max_heap_words: max_heap_words,
+            cancel_with_caller: true,
+            cancel_with: session.pid
+          )
+      end
+
+    if Deadline.expired?(deadline) do
+      {:error, credential_diagnostic(providers)}
+    else
+      case result do
+        {:ok, {:ok, credentials}} -> {:ok, credentials}
+        _failure -> {:error, credential_diagnostic(providers)}
+      end
+    end
+  end
+
+  defp credential_diagnostic(providers) do
+    provider = Enum.find(providers, hd(providers), &(&1.credential_names != []))
+    {:ok, subject} = CommandSubject.provider(provider.provider, :credentials)
+
+    CommandDiagnostic.new!(:active_preflight, :credential_unavailable,
+      subject: subject,
+      provider_activity: true
+    )
+  end
+
+  defp run_timeout_diagnostic,
+    do: CommandDiagnostic.new!(:execution, :run_timeout, provider_activity: true)
 
   defp reverse_success({:ok, values}), do: {:ok, Enum.reverse(values)}
   defp reverse_success({:error, _reason} = error), do: error

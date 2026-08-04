@@ -429,6 +429,9 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
       token: make_ref(),
       role: :catalog,
       fence: :atomics.new(1, signed: true),
+      lease_owner: victim,
+      lease_fence: :atomics.new(1, signed: false),
+      lease_table: make_ref(),
       attestation: <<>>
     }
 

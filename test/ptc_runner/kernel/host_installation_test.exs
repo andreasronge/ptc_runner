@@ -1,6 +1,7 @@
 defmodule PtcRunner.Kernel.HostInstallationTest do
   use ExUnit.Case, async: false
 
+  alias PtcRunner.Kernel.Attestation
   alias PtcRunner.Kernel.HostConfig
   alias PtcRunner.Kernel.HostInstallation
   alias PtcRunner.Kernel.HostInstallationOwner
@@ -96,6 +97,222 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
 
     assert {:error, :credential_resolution_failed} =
              ProviderRegistry.resolve_credentials(registry, ["token"])
+  end
+
+  @tag :tmp_dir
+  test "host-backed credential resolution runs outside the authority owner", %{tmp_dir: dir} do
+    parent = self()
+    host = load_host(dir, http_config())
+    assert {:ok, catalog} = HostInstallation.catalog(host)
+    assert {:ok, services} = HostInstallation.runtime_services(host)
+
+    resolver = fn ["token"] ->
+      send(parent, {:host_credential_resolver, self()})
+      {:ok, %{"token" => "test-secret"}}
+    end
+
+    services = replace_credential_resolver(services, resolver)
+    assert {:ok, registry} = InstallationCatalog.runtime_registry(catalog, services)
+
+    owner_pid = registry.authority_owner.pid
+
+    assert {:ok, %{"token" => "test-secret"}} =
+             ProviderRegistry.resolve_credentials(registry, ["token"])
+
+    assert_receive {:host_credential_resolver, resolver_pid}
+    assert resolver_pid == self()
+    refute resolver_pid == owner_pid
+    lease_table = registry.authority_owner.lease_table
+    assert :ok = ProviderRegistry.close(registry)
+    assert :undefined = :ets.info(lease_table)
+    assert :ok = ProviderRegistry.close(registry)
+  end
+
+  @tag :tmp_dir
+  test "registry close cannot race a completed credential result past lease release", %{
+    tmp_dir: dir
+  } do
+    parent = self()
+    host = load_host(dir, http_config())
+    assert {:ok, catalog} = HostInstallation.catalog(host)
+    assert {:ok, services} = HostInstallation.runtime_services(host)
+
+    resolver = fn ["token"] ->
+      send(parent, {:lease_release_race_started, self()})
+      receive do: (:finish -> {:ok, %{"token" => "test-secret"}})
+    end
+
+    services = replace_credential_resolver(services, resolver)
+    assert {:ok, registry} = InstallationCatalog.runtime_registry(catalog, services)
+
+    caller =
+      spawn(fn ->
+        result = ProviderRegistry.resolve_credentials(registry, ["token"])
+        send(parent, {:lease_release_race_result, result})
+      end)
+
+    caller_ref = Process.monitor(caller)
+    lease_owner = registry.authority_owner.lease_owner
+    lease_fence = registry.authority_owner.lease_fence
+
+    try do
+      assert_receive {:lease_release_race_started, ^caller}
+      assert true = :erlang.suspend_process(lease_owner)
+
+      closer =
+        spawn(fn ->
+          result = ProviderRegistry.close(registry)
+          send(parent, {:lease_release_race_close, result})
+        end)
+
+      assert_eventually(fn -> :atomics.get(lease_fence, 1) == 0 end)
+      send(caller, :finish)
+
+      refute_receive {:lease_release_race_result, _result}, 100
+      :erlang.resume_process(lease_owner)
+
+      assert_receive {:DOWN, ^caller_ref, :process, ^caller, :killed}, 2_000
+      assert_receive {:lease_release_race_close, :ok}, 2_000
+      refute_receive {:lease_release_race_result, _result}
+
+      if Process.alive?(closer), do: Process.exit(closer, :kill)
+    after
+      if Process.alive?(lease_owner), do: :erlang.resume_process(lease_owner)
+      if Process.alive?(caller), do: Process.exit(caller, :kill)
+      ProviderRegistry.close(registry)
+    end
+  end
+
+  @tag :tmp_dir
+  test "an unacknowledged credential lease release terminates without returning", %{tmp_dir: dir} do
+    parent = self()
+    host = load_host(dir, http_config())
+    assert {:ok, catalog} = HostInstallation.catalog(host)
+    assert {:ok, services} = HostInstallation.runtime_services(host)
+
+    resolver = fn ["token"] ->
+      send(parent, {:lease_release_timeout_started, self()})
+      receive do: (:finish -> {:ok, %{"token" => "test-secret"}})
+    end
+
+    services = replace_credential_resolver(services, resolver)
+    assert {:ok, registry} = InstallationCatalog.runtime_registry(catalog, services)
+
+    caller =
+      spawn(fn ->
+        result = ProviderRegistry.resolve_credentials(registry, ["token"])
+        send(parent, {:lease_release_timeout_result, result})
+      end)
+
+    caller_ref = Process.monitor(caller)
+    lease_owner = registry.authority_owner.lease_owner
+
+    try do
+      assert_receive {:lease_release_timeout_started, ^caller}
+      assert true = :erlang.suspend_process(lease_owner)
+      send(caller, :finish)
+
+      assert_receive {:DOWN, ^caller_ref, :process, ^caller, :killed}, 2_000
+      refute_receive {:lease_release_timeout_result, _result}
+    after
+      if Process.alive?(lease_owner), do: :erlang.resume_process(lease_owner)
+      if Process.alive?(caller), do: Process.exit(caller, :kill)
+      ProviderRegistry.close(registry)
+    end
+  end
+
+  @tag :tmp_dir
+  test "registry close cancels in-flight host-backed credential resolution", %{tmp_dir: dir} do
+    parent = self()
+    host = load_host(dir, http_config())
+    assert {:ok, catalog} = HostInstallation.catalog(host)
+    assert {:ok, services} = HostInstallation.runtime_services(host)
+
+    resolver = fn ["token"] ->
+      Process.flag(:trap_exit, true)
+      send(parent, {:host_credential_resolution_started, self()})
+
+      receive do
+        {:EXIT, _lease_owner, _reason} ->
+          send(parent, :host_credential_resolution_survived_link_exit)
+          {:ok, %{"token" => "test-secret"}}
+      end
+    end
+
+    services = replace_credential_resolver(services, resolver)
+    assert {:ok, registry} = InstallationCatalog.runtime_registry(catalog, services)
+
+    caller =
+      spawn(fn ->
+        result = ProviderRegistry.resolve_credentials(registry, ["token"])
+        send(parent, {:host_credential_resolution_result, result})
+      end)
+
+    caller_ref = Process.monitor(caller)
+    authority_owner = registry.authority_owner.pid
+    lease_owner = registry.authority_owner.lease_owner
+
+    try do
+      assert_receive {:host_credential_resolution_started, ^caller}
+      assert true = :erlang.suspend_process(authority_owner)
+      assert true = :erlang.suspend_process(lease_owner)
+      assert :ok = ProviderRegistry.close(registry)
+      assert_receive {:DOWN, ^caller_ref, :process, ^caller, :killed}
+      refute_receive {:host_credential_resolution_result, _result}
+      refute_receive :host_credential_resolution_survived_link_exit
+    after
+      if Process.alive?(authority_owner), do: :erlang.resume_process(authority_owner)
+      if Process.alive?(lease_owner), do: :erlang.resume_process(lease_owner)
+      if Process.alive?(caller), do: Process.exit(caller, :kill)
+      ProviderRegistry.close(registry)
+    end
+  end
+
+  @tag :tmp_dir
+  test "registry creator death drains credential resolution and its lease table", %{tmp_dir: dir} do
+    parent = self()
+    host = load_host(dir, http_config())
+    assert {:ok, catalog} = HostInstallation.catalog(host)
+    assert {:ok, services} = HostInstallation.runtime_services(host)
+
+    resolver = fn ["token"] ->
+      Process.flag(:trap_exit, true)
+      send(parent, {:creator_death_credential_started, self()})
+      receive do: ({:EXIT, _lease_owner, _reason} -> {:ok, %{"token" => "test-secret"}})
+    end
+
+    services = replace_credential_resolver(services, resolver)
+
+    creator =
+      spawn(fn ->
+        {:ok, registry} = InstallationCatalog.runtime_registry(catalog, services)
+        send(parent, {:creator_death_registry, registry})
+        receive do: (:never -> :ok)
+      end)
+
+    creator_ref = Process.monitor(creator)
+    assert_receive {:creator_death_registry, registry}
+
+    caller =
+      spawn(fn ->
+        result = ProviderRegistry.resolve_credentials(registry, ["token"])
+        send(parent, {:creator_death_credential_result, result})
+      end)
+
+    caller_ref = Process.monitor(caller)
+    authority_ref = Process.monitor(registry.authority_owner.pid)
+    lease_ref = Process.monitor(registry.authority_owner.lease_owner)
+    lease_table = registry.authority_owner.lease_table
+
+    assert_receive {:creator_death_credential_started, ^caller}
+    Process.exit(creator, :kill)
+
+    assert_receive {:DOWN, ^creator_ref, :process, ^creator, :killed}
+    assert_receive {:DOWN, ^caller_ref, :process, ^caller, :killed}
+    assert_receive {:DOWN, ^authority_ref, :process, _, :normal}
+    assert_receive {:DOWN, ^lease_ref, :process, _, :normal}
+    assert :undefined = :ets.info(lease_table)
+    refute_receive {:creator_death_credential_result, _result}
   end
 
   @tag :tmp_dir
@@ -1023,6 +1240,31 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
     {:ok, host} = HostConfig.load(path)
     host
   end
+
+  defp replace_credential_resolver(services, resolver) do
+    services = %{services | credential_resolver: resolver}
+
+    payload =
+      {services.activation, services.credential_resolver, services.provider_application_mode,
+       services.oauth_mode, services.runtime_binding, services.host_payload}
+
+    %{services | attestation: Attestation.attest(ProviderRuntimeServices, payload)}
+  end
+
+  defp assert_eventually(predicate, attempts \\ 10_000)
+
+  defp assert_eventually(predicate, attempts) when attempts > 0 do
+    if predicate.() do
+      :ok
+    else
+      receive do
+      after
+        0 -> assert_eventually(predicate, attempts - 1)
+      end
+    end
+  end
+
+  defp assert_eventually(_predicate, 0), do: flunk("condition did not become true")
 
   defp assert_local_preflight_parity(host, name, destination, expected) do
     assert {:ok, catalog} = HostInstallation.catalog(host)

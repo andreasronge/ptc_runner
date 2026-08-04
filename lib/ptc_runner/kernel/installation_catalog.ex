@@ -471,8 +471,13 @@ defmodule PtcRunner.Kernel.InstallationCatalog do
     end)
   end
 
-  defp runtime_credential_resolver(_services, %HostInstallationAuthority{} = owner),
-    do: &HostInstallationAuthority.invoke(owner, {:credentials, &1})
+  defp runtime_credential_resolver(services, %HostInstallationAuthority{} = owner) do
+    resolver = services.credential_resolver
+
+    fn names ->
+      HostInstallationAuthority.with_credential_lease(owner, fn -> resolver.(names) end)
+    end
+  end
 
   defp runtime_credential_resolver(services, nil), do: services.credential_resolver
 

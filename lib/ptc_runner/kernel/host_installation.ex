@@ -333,9 +333,6 @@ defmodule PtcRunner.Kernel.HostInstallation do
     {:ok, authorities}
   end
 
-  def owner_call(%HostConfig{} = host, {:credentials, names}),
-    do: resolve_credentials(host, names)
-
   def owner_call(_host, _request), do: {:error, :invalid_host_installation}
 
   defp descriptor(installation, rules, authority) do

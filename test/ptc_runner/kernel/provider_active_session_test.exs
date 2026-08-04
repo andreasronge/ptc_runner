@@ -103,6 +103,205 @@ defmodule PtcRunner.Kernel.ProviderActiveSessionTest do
     assert :ok = PreparedRun.close(prepared)
   end
 
+  test "active build resolves credentials after every preflight and before acquisition" do
+    parent = self()
+    {:ok, prepared, catalog} = fixture(fn _selection, _context -> :ok end)
+    assert {:ok, session} = ProviderActiveSession.open(prepared, catalog, services())
+
+    staged = fn _selection, _context ->
+      {:ok,
+       %{
+         credential_names: ["secret"],
+         preflight: fn ->
+           send(parent, :credential_preflighted)
+
+           {:ok,
+            fn %{"secret" => "value"} ->
+              send(parent, :credential_acquired)
+              {:ok, capability} = fixture_capability()
+              {:ok, capability}
+            end}
+         end
+       }}
+    end
+
+    resolver = fn ["secret"] ->
+      send(parent, :credential_resolved)
+      {:ok, %{"secret" => "value"}}
+    end
+
+    assert {:ok, registry} =
+             ProviderRegistry.new(%{"selected" => ProviderRegistry.staged(staged)},
+               credential_resolver: resolver
+             )
+
+    assert {:ok, built} = RunBuilder.build_active(prepared, registry, session, [])
+    assert_receive :credential_preflighted
+    assert_receive :credential_resolved
+    assert_receive :credential_acquired
+
+    assert :ok = RunBuilder.close(built)
+    assert :ok = PreparedRun.close(prepared)
+  end
+
+  test "active credential resolution is killed at the shared run deadline" do
+    parent = self()
+    limits = %{Limits.installed_defaults() | run_duration_ms: 1_000}
+    {:ok, prepared, catalog} = fixture(fn _selection, _context -> :ok end, ["first"], limits)
+    assert {:ok, session} = ProviderActiveSession.open(prepared, catalog, services())
+
+    resolver = fn ["secret"] ->
+      send(parent, {:credential_resolver_started, self()})
+      receive do: (:never -> {:ok, %{}})
+    end
+
+    assert {:ok, registry} = credential_registry(resolver, limits)
+
+    assert {:error,
+            %CommandDiagnostic{
+              phase: :active_preflight,
+              code: :credential_unavailable,
+              provider_activity: true,
+              subject: %{name: "selected", operation: :credentials, occurrence: nil}
+            }} = RunBuilder.build_active(prepared, registry, session, [])
+
+    assert_receive {:credential_resolver_started, worker}
+    refute Process.alive?(worker)
+    refute ProviderSession.alive?(session)
+    assert :ok = PreparedRun.close(prepared)
+  end
+
+  test "credentialless active providers do not invoke the resolver" do
+    parent = self()
+    {:ok, prepared, catalog} = fixture(fn _selection, _context -> :ok end)
+    assert {:ok, session} = ProviderActiveSession.open(prepared, catalog, services())
+
+    resolver = fn [] ->
+      send(parent, :unexpected_credential_resolution)
+      {:error, :unexpected_credential_resolution}
+    end
+
+    {:ok, registry} = active_registry(credential_resolver: resolver)
+    assert {:ok, built} = RunBuilder.build_active(prepared, registry, session, [])
+    refute_receive :unexpected_credential_resolution
+
+    assert :ok = RunBuilder.close(built)
+    assert :ok = PreparedRun.close(prepared)
+  end
+
+  test "credentialless providers do not acquire after the shared deadline" do
+    parent = self()
+    limits = %{Limits.installed_defaults() | run_duration_ms: 500}
+    {:ok, prepared, catalog} = fixture(fn _selection, _context -> :ok end, ["first"], limits)
+
+    owner =
+      spawn(fn ->
+        {:ok, session} = ProviderActiveSession.open(prepared, catalog, services())
+
+        staged = fn _selection, _context ->
+          {:ok,
+           %{
+             credential_names: [],
+             preflight: fn ->
+               send(parent, {:credentialless_preflight, self()})
+               receive do: (:finish_preflight -> :ok)
+
+               {:ok,
+                fn %{} ->
+                  send(parent, :unexpected_credentialless_acquisition)
+                  {:ok, capability} = fixture_capability()
+                  {:ok, capability}
+                end}
+             end
+           }}
+        end
+
+        {:ok, registry} =
+          ProviderRegistry.new(%{"selected" => ProviderRegistry.staged(staged)},
+            installed_limits: limits
+          )
+
+        result = RunBuilder.build_active(prepared, registry, session, [])
+        assert :ok = PreparedRun.close(prepared)
+        send(parent, {:credentialless_deadline_result, result})
+      end)
+
+    assert_receive {:credentialless_preflight, ^owner}
+    Process.send_after(self(), :credentialless_deadline_elapsed, 600)
+    assert_receive :credentialless_deadline_elapsed, 1_000
+    send(owner, :finish_preflight)
+
+    assert_receive {:credentialless_deadline_result,
+                    {:error,
+                     %CommandDiagnostic{
+                       phase: :execution,
+                       code: :run_timeout,
+                       provider_activity: true
+                     }}},
+                   2_000
+
+    refute_receive :unexpected_credentialless_acquisition
+  end
+
+  test "active credential resolution dies when its provider session closes" do
+    parent = self()
+    {:ok, prepared, catalog} = fixture(fn _selection, _context -> :ok end)
+
+    resolver = fn ["secret"] ->
+      send(parent, {:session_close_credential_worker, self()})
+      receive do: (:never -> {:ok, %{}})
+    end
+
+    owner =
+      spawn(fn ->
+        {:ok, session} = ProviderActiveSession.open(prepared, catalog, services())
+        send(parent, {:session_close_credential_session, session})
+        {:ok, registry} = credential_registry(resolver)
+        result = RunBuilder.build_active(prepared, registry, session, [])
+        assert :ok = PreparedRun.close(prepared)
+        send(parent, {:session_close_build_result, result})
+        receive do: (:stop -> :ok)
+      end)
+
+    assert_receive {:session_close_credential_session, session}
+    assert_receive {:session_close_credential_worker, worker}
+    worker_ref = Process.monitor(worker)
+    assert :ok = ProviderSession.close(session)
+
+    assert_receive {:DOWN, ^worker_ref, :process, ^worker, :killed}
+    assert_receive {:session_close_build_result, {:error, _reason}}
+    assert Process.alive?(owner)
+    send(owner, :stop)
+  end
+
+  test "active credential resolution dies with its caller and session" do
+    parent = self()
+    {:ok, prepared, catalog} = fixture(fn _selection, _context -> :ok end)
+
+    resolver = fn ["secret"] ->
+      send(parent, {:caller_death_credential_worker, self()})
+      receive do: (:never -> {:ok, %{}})
+    end
+
+    owner =
+      spawn(fn ->
+        {:ok, session} = ProviderActiveSession.open(prepared, catalog, services())
+        send(parent, {:caller_death_credential_session, session})
+        {:ok, registry} = credential_registry(resolver)
+        RunBuilder.build_active(prepared, registry, session, [])
+      end)
+
+    assert_receive {:caller_death_credential_session, session}
+    assert_receive {:caller_death_credential_worker, worker}
+    worker_ref = Process.monitor(worker)
+    session_ref = Process.monitor(session.pid)
+    Process.exit(owner, :kill)
+
+    assert_receive {:DOWN, ^worker_ref, :process, ^worker, :killed}
+    assert_receive {:DOWN, ^session_ref, :process, _, _reason}, 2_000
+    assert :ok = PreparedRun.close(prepared)
+  end
+
   test "active build rejects a session opened for another prepared run" do
     {:ok, first, first_catalog} = fixture(fn _selection, _context -> :ok end)
     {:ok, second, second_catalog} = fixture(fn _selection, _context -> :ok end)
@@ -549,7 +748,7 @@ defmodule PtcRunner.Kernel.ProviderActiveSessionTest do
     )
   end
 
-  defp active_registry do
+  defp active_registry(opts \\ []) do
     {:ok, capability} =
       Capability.new(
         name: "fixture",
@@ -565,7 +764,36 @@ defmodule PtcRunner.Kernel.ProviderActiveSessionTest do
        }}
     end
 
-    ProviderRegistry.new(%{"selected" => ProviderRegistry.staged(staged)})
+    ProviderRegistry.new(%{"selected" => ProviderRegistry.staged(staged)}, opts)
+  end
+
+  defp credential_registry(resolver, installed_limits \\ Limits.installed_defaults()) do
+    staged = fn _selection, _context ->
+      {:ok,
+       %{
+         credential_names: ["secret"],
+         preflight: fn ->
+           {:ok,
+            fn %{"secret" => "value"} ->
+              {:ok, capability} = fixture_capability()
+              {:ok, capability}
+            end}
+         end
+       }}
+    end
+
+    ProviderRegistry.new(%{"selected" => ProviderRegistry.staged(staged)},
+      credential_resolver: resolver,
+      installed_limits: installed_limits
+    )
+  end
+
+  defp fixture_capability do
+    Capability.new(
+      name: "fixture.credential",
+      input_schema: %{"type" => "object", "additionalProperties" => false},
+      callback: fn _arguments -> {:ok, %{}} end
+    )
   end
 
   defp close(session, prepared) do

@@ -16,7 +16,9 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
   Trusted staged builders enforce a global preparation barrier. Every selected
   provider first performs pure selection checks, then every provider completes
   non-secret local preflight, then the registry resolves the union of declared
-  credentials once before any provider is acquired. Preparation also freezes
+  credentials once before any provider is acquired. Active command assembly
+  bounds that resolution by its shared run deadline; direct embedding retains
+  the resolver semantics selected by its caller. Preparation also freezes
   the provider's `data_class` and `accepts_data` policy so run assembly can
   reject an incompatible information flow before preflight or credentials.
   A staged provider may additionally require or provide a bounded, code-owned
