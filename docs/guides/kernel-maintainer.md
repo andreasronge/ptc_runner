@@ -760,11 +760,12 @@ store context.
 Provider implementations later return capabilities plus optional safe connector metadata
 and an idempotent closer. Staged builders may also exchange bounded code-owned
 acquisition services after the global preflight and credential barrier; these
-opaque values never enter environments or artifacts. `RunBuilder` resolves
-those dependencies, owns construction cleanup, and transfers successful
-resources into the run lifecycle. Exact declarative selection grammar belongs
-in `SelectionRules`; active transport behavior belongs in each provider module
-and the later runtime dispatcher.
+opaque values never enter environments or artifacts. `ProviderAcquisition`
+resolves those dependencies and immediately commits each successful resource
+to the provider session's cleanup stack. `RunBuilder` assembles the returned
+capabilities and transfers the session into the run lifecycle. Exact
+declarative selection grammar belongs in `SelectionRules`; active transport
+behavior belongs in each provider module and the later runtime dispatcher.
 
 Provider occurrence contexts are path-free. They carry safe display identity,
 application content and effective digests, final bundle hashes, input
@@ -906,7 +907,7 @@ internals or paths.
 | Mutable resources | `Limits`, `RunState`, `BoundedWorker`, `Dispatcher` |
 | Subordinate execution | `Runner`, `Evaluation`, `RuntimeTools` |
 | Lisp internals | `Lisp.Eval`, `Lisp.Eval.Effects`, `Lisp.Eval.Capture`, `Lisp.Eval.Parallel`, `Lisp.Eval.ParallelRunner` |
-| Providers | `HostConfig`, `HostInstallation`, `LLMCapability`, `MCPSource`, `MCPProtocol`, `TraceCapability`, `InspectionCapability` |
+| Providers | `HostConfig`, `HostInstallation`, `ProviderRegistry`, `ProviderAcquisition`, `ProviderSession`, `LLMCapability`, `MCPSource`, `MCPProtocol`, `TraceCapability`, `InspectionCapability` |
 | Canonical/private evidence | `EventSink`, `TraceLog`, `TraceSnapshot`, `InspectionSink`, `InspectionArtifact`, `InspectionSnapshot`, `InspectionQuery`, `SafeMetadata` |
 | Interactive evaluation | `ReplSession`, `AnalysisProfileRegistry`, `AnalysisSessionBuilder`, `AnalysisSession`, `SessionTrace` |
 

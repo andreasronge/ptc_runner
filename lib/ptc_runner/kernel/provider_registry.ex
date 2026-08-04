@@ -268,7 +268,8 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
   Run assembly uses the individual phase functions so the barrier spans every
   selected provider. This convenience path remains useful for embedding and
   focused provider tests. It rejects registrar-backed contexts because scoped
-  acquisition requires the run builder's complete multi-provider lifecycle.
+  acquisition requires `PtcRunner.Kernel.ProviderAcquisition`'s complete
+  multi-provider lifecycle.
   """
   def build(%__MODULE__{}, _name, _config, %{resource_registrar: _registrar}),
     do: {:error, :invalid_provider_context}
