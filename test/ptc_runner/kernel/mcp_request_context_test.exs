@@ -571,13 +571,15 @@ defmodule PtcRunner.Kernel.MCPRequestContextTest do
         store,
         context.tenant_id,
         [{authority.installation_id, authority.fingerprint}],
-        1_000
+        Deadline.new(1_000)
       )
 
     epoch = claims[authority.installation_id]
     key = Context.grant_key(context, authority, epoch)
-    {:ok, anchor} = Store.time_anchor(store, 1_000)
-    {:ok, lease} = Store.acquire_mutation(store, key, :authorization, 5_000, 1_000)
+    {:ok, anchor} = Store.time_anchor(store, Deadline.new(1_000))
+
+    {:ok, lease} =
+      Store.acquire_mutation(store, key, :authorization, 5_000, Deadline.new(1_000))
 
     :ok =
       Store.begin_mutation_dispatch(
@@ -585,7 +587,7 @@ defmodule PtcRunner.Kernel.MCPRequestContextTest do
         key,
         lease.fence,
         %{freshness_anchor: anchor, freshness_anchor_ttl_ms: 5_000},
-        1_000
+        Deadline.new(1_000)
       )
 
     {:ok, _grant} =
@@ -604,7 +606,7 @@ defmodule PtcRunner.Kernel.MCPRequestContextTest do
         },
         60_000,
         anchor,
-        1_000
+        Deadline.new(1_000)
       )
 
     {:ok, recording_store} =

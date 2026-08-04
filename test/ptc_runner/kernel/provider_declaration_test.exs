@@ -6,6 +6,7 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
   alias PtcRunner.Kernel.CommandOutcome
   alias PtcRunner.Kernel.CommandPreparation
   alias PtcRunner.Kernel.CommandRunRef
+  alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.EffectiveApplication
   alias PtcRunner.Kernel.HostConfig
@@ -706,7 +707,7 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
                store,
                "tenant",
                [{"oauth-primary", "different-fingerprint"}],
-               1_000
+               Deadline.new(1_000)
              )
   end
 
