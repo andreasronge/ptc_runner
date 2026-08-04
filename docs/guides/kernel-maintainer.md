@@ -41,8 +41,10 @@ Frontends own presentation and host choices. They must enter through
 `PtcRunner.Kernel.RunRequest`. The closed command pipeline uses
 `PtcRunner.Kernel.CommandEngine`; the existing Mix command still has its
 transitional argv and presentation adapter, but its runtime path now prepares
-through `RunCoordinator`, preflights destinations, opens
-`ProviderActiveSession`, and gives the same provider session to `RunBuilder`.
+through `RunCoordinator` and preflights destinations. Provider-free one-shot
+runs then execute through a dedicated execution-session owner. Provider-bearing
+runs still open `ProviderActiveSession` in the adapter and give the same
+provider session to `RunBuilder`.
 Embedding frontends execute a sealed request through
 `PtcRunner.Kernel.RunBuilder.build/3`. For a provider-free request they may
 instead call the path-free `PtcRunner.Kernel.RunCoordinator` and pass its
@@ -80,7 +82,9 @@ ApplicationSource -> Manifest -> ApplicationPackage
                   RunCoordinator.prepare (path-free phases 4-5)
                                           |
                                           v
-                         RunBuilder -> immutable RunConfig
+               provider-free ExecutionSessionOwner
+                         |
+                         +-> RunBuilder -> immutable RunConfig
                          |
                          v
 Kernel.run -> Runner -> RunState + Dispatcher + Evaluation
@@ -199,15 +203,18 @@ temporary prepared run after assembly.
 `PtcRunner.Kernel.RunBuilder` remains the shared environment assembly and
 cleanup boundary.
 
-One-shot builder execution freezes the Kernel result, fail-closed disclosure
-class, result-contract decision, terminal canonical events, and optional
-inspection records in a sealed, path-free `ExecutionOutcome`. It then stops
-both sinks before publication consumes only that immutable evidence and the
-bound, sealed `PublicationAuthority`; callers cannot replace the anchored
-destinations after preflight. The Mix adapter still opens
-`ProviderActiveSession` before handing the session to `RunBuilder`; moving that
-active opening and the sinks behind the single execution-session owner remains
-the next lifecycle cutover.
+Provider-free Mix execution consumes the prepared run and constructs both sinks
+inside one execution-session owner. Kernel evaluation runs in a monitored
+subordinate process so caller death can abort it, finalize the canonical event
+batch, and stop both sinks without waiting for evaluation to return. Normal
+one-shot execution freezes the Kernel result, fail-closed disclosure class,
+result-contract decision, terminal canonical events, and optional inspection
+records in a sealed, path-free `ExecutionOutcome`. It then stops both sinks
+before publication consumes only that immutable evidence and the bound, sealed
+`PublicationAuthority`; callers cannot replace the anchored destinations after
+preflight. The Mix adapter still opens `ProviderActiveSession` before handing
+the session to `RunBuilder`; moving that active opening and its sinks behind the
+same execution-session owner remains the next lifecycle cutover.
 
 The staged `PtcRunner.Kernel.CommandEngine` core allocates a command reference
 before strict argv parsing, consumes host/application paths through acquisition

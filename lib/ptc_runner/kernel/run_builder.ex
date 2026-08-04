@@ -13,7 +13,10 @@ defmodule PtcRunner.Kernel.RunBuilder do
   Provider-free requests cross the same path-free
   `PtcRunner.Kernel.RunCoordinator` phases 4 and 5 as command frontends, and
   downstream assembly consumes the resulting sealed `PreparedRun` directly.
-  Pure option validation completes before that one-way consumption.
+  Pure option validation completes before that one-way consumption. The Mix
+  one-shot path performs this assembly inside the coordinator's
+  execution-session owner so the prepared run and both sinks share one
+  caller-death boundary.
   The Mix command also preflights a provider-bearing prepared run, opens its
   active session, and passes that same session here for runtime assembly.
   `PtcRunner.Kernel.ProviderAcquisition` then runs the selected providers'
@@ -119,6 +122,25 @@ defmodule PtcRunner.Kernel.RunBuilder do
 
   def build_prepared(%PreparedRun{} = prepared, %ProviderRegistry{} = registry, opts)
       when is_list(opts) do
+    build_prepared(prepared, registry, opts, :close_opened_sinks)
+  end
+
+  def build_prepared(_prepared, _registry, _opts), do: {:error, :invalid_prepared_run}
+
+  @doc false
+  @spec build_prepared_owned(PreparedRun.t(), ProviderRegistry.t(), keyword()) ::
+          {:ok, map()}
+          | {:error, term()}
+          | {:error, term(),
+             %{event_sink: EventSink.t(), inspection_sink: InspectionSink.t() | nil}}
+  def build_prepared_owned(%PreparedRun{} = prepared, %ProviderRegistry{} = registry, opts)
+      when is_list(opts) do
+    build_prepared(prepared, registry, opts, :return_opened_sinks)
+  end
+
+  def build_prepared_owned(_prepared, _registry, _opts), do: {:error, :invalid_prepared_run}
+
+  defp build_prepared(prepared, registry, opts, failure_mode) do
     request = prepared.request
 
     with :ok <- validate_registry(registry),
@@ -128,14 +150,12 @@ defmodule PtcRunner.Kernel.RunBuilder do
          :ok <- validate_installed_limits(request.package, registry, opts),
          :ok <- validate_inspection_selection(request, opts),
          :ok <- PreparedRun.consume(prepared) do
-      do_build_prepared(prepared, registry, opts)
+      do_build_prepared(prepared, registry, opts, failure_mode)
     else
       false -> {:error, :invalid_prepared_run}
       {:error, _reason} = error -> error
     end
   end
-
-  def build_prepared(_prepared, _registry, _opts), do: {:error, :invalid_prepared_run}
 
   @doc false
   @spec preflight_prepared(PreparedRun.t(), keyword()) ::
@@ -229,19 +249,6 @@ defmodule PtcRunner.Kernel.RunBuilder do
         ) :: {:ok, term(), :normal | :private} | {:error, term()}
   def run_active_with_class(prepared, registry, session, opts) do
     case build_active(prepared, registry, session, opts) do
-      {:ok, built} ->
-        execute_and_publish(built)
-
-      {:error, _reason} = error ->
-        error
-    end
-  end
-
-  @doc false
-  @spec run_prepared_with_class(PreparedRun.t(), ProviderRegistry.t(), keyword()) ::
-          {:ok, term(), :normal | :private} | {:error, term()}
-  def run_prepared_with_class(prepared, registry, opts) do
-    case build_prepared(prepared, registry, opts) do
       {:ok, built} ->
         execute_and_publish(built)
 
@@ -375,7 +382,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
     end
   end
 
-  defp do_build_prepared(prepared, registry, opts) do
+  defp do_build_prepared(prepared, registry, opts, failure_mode) do
     bundles = {prepared.workflow_bundle, prepared.mission_bundle}
 
     assemble(
@@ -383,7 +390,8 @@ defmodule PtcRunner.Kernel.RunBuilder do
       bundles,
       prepared.entry_source,
       registry,
-      opts
+      opts,
+      failure_mode
     )
   end
 
@@ -401,7 +409,8 @@ defmodule PtcRunner.Kernel.RunBuilder do
         {prepared.workflow_bundle, prepared.mission_bundle},
         prepared.entry_source,
         providers,
-        opts
+        opts,
+        :close_opened_sinks
       )
     end
   end
@@ -415,12 +424,13 @@ defmodule PtcRunner.Kernel.RunBuilder do
         {workflow_bundle, mission_bundle},
         "(#{request.package.entry} data/input)",
         registry,
-        opts
+        opts,
+        :close_opened_sinks
       )
     end
   end
 
-  defp assemble(request, bundles, entry_source, registry, opts) do
+  defp assemble(request, bundles, entry_source, registry, opts, failure_mode) do
     with {:ok, opts} <- anchor_artifact_options(opts),
          :ok <- preflight_inspection(opts),
          :ok <- preflight_artifact_destinations(opts),
@@ -431,7 +441,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
              provider_input_class(request.input.authority),
              opts
            ) do
-      build_with_providers(request, bundles, entry_source, providers, opts)
+      build_with_providers(request, bundles, entry_source, providers, opts, failure_mode)
     end
   end
 
@@ -440,7 +450,8 @@ defmodule PtcRunner.Kernel.RunBuilder do
          {workflow_bundle, mission_bundle},
          entry_source,
          providers,
-         opts
+         opts,
+         failure_mode
        ) do
     package = request.package
 
@@ -459,8 +470,16 @@ defmodule PtcRunner.Kernel.RunBuilder do
                data: package.mission_data
              ),
            {:ok, sink} <- event_sink(request, providers),
-           {:ok, inspection_sink, inspection_path} <- inspection_sink(sink, opts),
-           :ok <- capture_prelude_sources(inspection_sink, sink, {workflow, mission}, package) do
+           {:ok, inspection_sink, inspection_path} <-
+             inspection_sink(sink, opts, failure_mode),
+           :ok <-
+             capture_prelude_sources(
+               inspection_sink,
+               sink,
+               {workflow, mission},
+               package,
+               failure_mode
+             ) do
         build_config(
           {request, entry_source},
           providers,
@@ -468,7 +487,8 @@ defmodule PtcRunner.Kernel.RunBuilder do
           mission,
           {sink, inspection_sink, inspection_path},
           package.component_overrides,
-          publication_authority
+          publication_authority,
+          failure_mode
         )
       end
 
@@ -478,6 +498,9 @@ defmodule PtcRunner.Kernel.RunBuilder do
 
       {:error, _reason} = error ->
         prefer_cleanup_error(error, close_provider_session(providers.provider_session))
+
+      {:error, _reason, _opened_sinks} = error ->
+        error
     end
   end
 
@@ -488,7 +511,8 @@ defmodule PtcRunner.Kernel.RunBuilder do
          mission,
          {sink, inspection_sink, inspection_path},
          component_overrides,
-         publication_authority
+         publication_authority,
+         failure_mode
        ) do
     package = request.package
 
@@ -517,9 +541,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
          }}
 
       {:error, _reason} = error ->
-        if inspection_sink, do: InspectionSink.stop(inspection_sink)
-        EventSink.stop(sink)
-        error
+        failed_build(error, sink, inspection_sink, failure_mode)
     end
   end
 
@@ -529,9 +551,15 @@ defmodule PtcRunner.Kernel.RunBuilder do
   # source hashes, so source text comes from the manifest's validated
   # components, joined by the bundle's frozen order. Capture is required and
   # fail-closed: a rejected record prevents the run from starting.
-  defp capture_prelude_sources(nil, _sink, _environments, _manifest), do: :ok
+  defp capture_prelude_sources(nil, _sink, _environments, _manifest, _failure_mode), do: :ok
 
-  defp capture_prelude_sources(inspection_sink, sink, {workflow, mission}, manifest) do
+  defp capture_prelude_sources(
+         inspection_sink,
+         sink,
+         {workflow, mission},
+         manifest,
+         failure_mode
+       ) do
     result =
       with :ok <-
              capture_bundle_sources(
@@ -553,9 +581,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
         :ok
 
       {:error, _reason} = error ->
-        InspectionSink.stop(inspection_sink)
-        EventSink.stop(sink)
-        error
+        failed_build(error, sink, inspection_sink, failure_mode)
     end
   end
 
@@ -1141,7 +1167,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
     EventSink.start(effective_policy, package.limits, opts)
   end
 
-  defp inspection_sink(event_sink, opts) do
+  defp inspection_sink(event_sink, opts, failure_mode) do
     case Keyword.get(opts, :inspect) do
       nil ->
         {:ok, nil, nil}
@@ -1159,13 +1185,23 @@ defmodule PtcRunner.Kernel.RunBuilder do
             {:ok, inspection_sink, path}
           end
 
-        if match?({:error, _reason}, result), do: EventSink.stop(event_sink)
-        result
+        case result do
+          {:ok, _inspection_sink, _path} = success -> success
+          {:error, _reason} = error -> failed_build(error, event_sink, nil, failure_mode)
+        end
 
       _path ->
-        EventSink.stop(event_sink)
-        {:error, :invalid_inspection_path}
+        failed_build({:error, :invalid_inspection_path}, event_sink, nil, failure_mode)
     end
+  end
+
+  defp failed_build({:error, reason}, event_sink, inspection_sink, :return_opened_sinks),
+    do: {:error, reason, %{event_sink: event_sink, inspection_sink: inspection_sink}}
+
+  defp failed_build(error, event_sink, inspection_sink, :close_opened_sinks) do
+    if inspection_sink, do: InspectionSink.stop(inspection_sink)
+    EventSink.stop(event_sink)
+    error
   end
 
   defp anchor_inspection_path(path) do

@@ -61,6 +61,7 @@ defmodule Mix.Tasks.Ptc.Run do
   alias PtcRunner.Kernel.ProviderRegistry
   alias PtcRunner.Kernel.ProviderRuntimeServices
   alias PtcRunner.Kernel.ProviderSession
+  alias PtcRunner.Kernel.PublicationAuthority
   alias PtcRunner.Kernel.RunBuilder
   alias PtcRunner.Kernel.RunCoordinator
   alias PtcRunner.Lisp.Format.SymbolRef
@@ -147,13 +148,17 @@ defmodule Mix.Tasks.Ptc.Run do
          opts,
          runtime
        ) do
-    with {:ok, registry} <-
-           ProviderRegistry.new(%{}, installed_limits: runtime.catalog.installed_limits) do
-      try do
-        execute_with_registry(prepared, registry, nil, run_opts, opts, runtime.host)
-      after
-        ProviderRegistry.close(registry)
+    if Keyword.get(opts, :check, false) do
+      with {:ok, registry} <-
+             ProviderRegistry.new(%{}, installed_limits: runtime.catalog.installed_limits) do
+        try do
+          execute_with_registry(prepared, registry, nil, run_opts, opts, runtime.host)
+        after
+          ProviderRegistry.close(registry)
+        end
       end
+    else
+      execute_provider_free(prepared, run_opts, opts)
     end
   end
 
@@ -197,6 +202,14 @@ defmodule Mix.Tasks.Ptc.Run do
 
       {:error, %CommandDiagnostic{}} = error ->
         error
+    end
+  end
+
+  defp execute_provider_free(prepared, run_opts, opts) do
+    with {:ok, authority} <- PublicationAuthority.new(run_opts),
+         {:ok, outcome} <- RunCoordinator.execute(prepared, authority),
+         {:ok, value, class} <- RunBuilder.publish_execution(outcome, authority) do
+      report(value, class, opts)
     end
   end
 
@@ -251,7 +264,7 @@ defmodule Mix.Tasks.Ptc.Run do
         if session do
           RunBuilder.run_active_with_class(prepared, registry, session, run_opts)
         else
-          RunBuilder.run_prepared_with_class(prepared, registry, run_opts)
+          {:error, :invalid_active_run}
         end
 
       with {:ok, value, class} <- result, do: report(value, class, opts)

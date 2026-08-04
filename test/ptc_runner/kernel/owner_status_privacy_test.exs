@@ -1,9 +1,14 @@
 defmodule PtcRunner.Kernel.OwnerStatusPrivacyTest do
   use ExUnit.Case, async: false
 
+  alias PtcRunner.Kernel.ApplicationPackage
+  alias PtcRunner.Kernel.ExecutionSessionOwner
   alias PtcRunner.Kernel.InspectionSink
+  alias PtcRunner.Kernel.InstallationCatalog
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.MCPRequestContext
+  alias PtcRunner.Kernel.PublicationAuthority
+  alias PtcRunner.Kernel.RunCoordinator
   alias PtcRunner.Kernel.RunState
 
   @logger_handler :owner_status_privacy_probe
@@ -35,6 +40,9 @@ defmodule PtcRunner.Kernel.OwnerStatusPrivacyTest do
     assert {:error, :closed} = GenServer.call(owners.run_state.pid, marker)
     assert {:error, :closed} = GenServer.call(owners.mcp.pid, marker)
 
+    assert {:error, :execution_session_unavailable} =
+             GenServer.call(owners.execution, {:unexpected, marker})
+
     Enum.each(owner_pids(owners), &GenServer.cast(&1, {:unexpected, marker}))
     Enum.each(owner_pids(owners), &:sys.get_status/1)
 
@@ -49,7 +57,8 @@ defmodule PtcRunner.Kernel.OwnerStatusPrivacyTest do
       sink: "PRIVATE_INSPECTION_RECORD_MARKER",
       run_state: "PRIVATE_EVALUATION_MEMORY_MARKER",
       endpoint: "PRIVATE_MCP_ENDPOINT_MARKER",
-      header: "PRIVATE_MCP_HEADER_MARKER"
+      header: "PRIVATE_MCP_HEADER_MARKER",
+      execution: "PRIVATE_EXECUTION_INPUT_MARKER"
     }
 
     owners = start_owners(markers)
@@ -87,7 +96,8 @@ defmodule PtcRunner.Kernel.OwnerStatusPrivacyTest do
       sink: marker,
       run_state: marker,
       endpoint: marker,
-      header: marker
+      header: marker,
+      execution: marker
     })
   end
 
@@ -122,19 +132,55 @@ defmodule PtcRunner.Kernel.OwnerStatusPrivacyTest do
         timeout_ms: 50
       )
 
-    owners = %{store: store, sink: sink, run_state: run_state, mcp: mcp}
+    {execution, execution_catalog} = start_execution_owner(markers.execution)
+
+    owners = %{
+      store: store,
+      sink: sink,
+      run_state: run_state,
+      mcp: mcp,
+      execution: execution,
+      execution_catalog: execution_catalog
+    }
 
     on_exit(fn ->
       Enum.each(owner_pids(owners), fn pid ->
         if Process.alive?(pid), do: GenServer.stop(pid, :normal)
       end)
+
+      InstallationCatalog.close(execution_catalog)
     end)
 
     owners
   end
 
   defp owner_pids(owners),
-    do: [owners.store, owners.sink.pid, owners.run_state.pid, owners.mcp.pid]
+    do: [owners.store, owners.sink.pid, owners.run_state.pid, owners.mcp.pid, owners.execution]
+
+  defp start_execution_owner(marker) do
+    manifest = %{
+      "version" => 1,
+      "workflow" => %{
+        "components" => [%{"id" => "app", "path" => "main.clj"}],
+        "entry" => "app/run"
+      },
+      "input" => %{"value" => %{"private" => marker}}
+    }
+
+    documents = %{
+      "ptc.json" => Jason.encode!(manifest),
+      "main.clj" => "(ns app) (defn run [_input] (loop [] (recur)))"
+    }
+
+    {:ok, request} =
+      ApplicationPackage.request_memory("ptc.json", documents, input_authority: :private)
+
+    {:ok, catalog} = InstallationCatalog.new()
+    {:ok, prepared} = RunCoordinator.prepare(request, catalog)
+    {:ok, authority} = PublicationAuthority.new([])
+    {:ok, owner} = ExecutionSessionOwner.start(prepared, authority, self())
+    {ExecutionSessionOwner.pid(owner), catalog}
+  end
 
   defp drain_logger_events(events) do
     receive do
