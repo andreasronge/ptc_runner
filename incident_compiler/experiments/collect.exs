@@ -187,10 +187,40 @@ retained_index =
     if kept == nil or count > Enum.at(authoring_returns, kept), do: index, else: kept
   end)
 
+# Index into the *evaluations that ran*, not into the ones that happened to
+# fetch something. An attempt returning search summaries calls no `evidence.get`
+# at all, so it contributes an `authoring_returns` entry and no fetch entry;
+# indexing the compacted fetch list then slides past it and selects a later,
+# discarded retry. Every executed dynamic evaluation has an `evaluation-source`
+# record, so that is the list the annotations line up with.
+# Only the *model-authored* attempts, in order, because those are what the
+# `authoring` annotations count. The arm's own programs — the coverage probe and
+# the citation resolver — run in the same mission environment and would slide the
+# index. They are distinguishable without guessing: every arm-owned program takes
+# its incident through `data/params`, and no model-authored one does, because the
+# authoring prompt never mentions it and each generated program hardcodes the id.
+gathering_evaluations =
+  for record <- inspection_records || [],
+      record["record_type"] == "evaluation-source",
+      source = record["payload"]["source"],
+      is_binary(source),
+      not String.contains?(source, "data/params"),
+      do: record["correlation"]["evaluation_id"]
+
+fetches_for = fn id ->
+  case Enum.find(fetches_by_evaluation, &(elem(&1, 0) == id)) do
+    nil -> {id, MapSet.new()}
+    entry -> entry
+  end
+end
+
 selected =
   cond do
+    retained_index != nil and retained_index < length(gathering_evaluations) ->
+      gathering_evaluations |> Enum.at(retained_index) |> fetches_for.()
+
     retained_index != nil ->
-      Enum.at(fetches_by_evaluation, retained_index)
+      nil
 
     is_integer(coverage["gathered"]) ->
       Enum.find(fetches_by_evaluation, fn {_id, ids} ->

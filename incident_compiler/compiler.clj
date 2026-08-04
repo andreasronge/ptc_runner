@@ -166,6 +166,17 @@
       (let [report (agent.core/run-result-value
                      (task-text incident-id format)
                      (agent-config input))]
-        (if (= "insufficient_evidence" (get report "status"))
+        (cond
+          ;; The contract requires `incident_id` to be a non-empty string and
+          ;; nothing more, so a structurally valid answer can name a different
+          ;; incident. Citation resolution would not catch it — it resolves
+          ;; against the requested incident either way — and the abstention
+          ;; branch below skips that check entirely.
+          (not= incident-id (get report "incident_id"))
+          (fail (result/error :citation-verification-refused :foreign-incident))
+
+          (= "insufficient_evidence" (get report "status"))
           (return report)
+
+          :else
           (return (verified incident-id report)))))))

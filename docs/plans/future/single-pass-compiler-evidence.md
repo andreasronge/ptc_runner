@@ -932,6 +932,31 @@ number; one row's basis sharpens from `union` to
 `selected-evaluation-superset`, which is a more honest description of the same
 measurement.
 
+A sixth pass returned two more [P1], both caused by the fifth pass's own fixes:
+
+- **The guard went into two arms and there are three.** `compiler.clj` had the
+  identical wrong-incident fail-open and was missed. Guarded, and the replay
+  fixtures survive unchanged because the check runs after the loop returns and
+  alters no request.
+- **Indexing the retained attempt slid past attempts that fetched nothing.** An
+  authored program returning search summaries makes no `evidence.get` call, so
+  it contributes an `authoring` annotation and no fetch entry, and indexing the
+  compacted fetch list selects a later, discarded retry.
+
+The second is worth recording because the *first* attempt at fixing it was
+wrong in the opposite direction. Indexing `evaluation-source` records instead
+includes the arm's own coverage probe and citation resolver, which slid the
+index the other way and dropped three published runs to `records_read: 0` —
+a number contradicted by those runs having fetched 332 records and scored 0.71.
+The discriminator that works is that **every arm-owned program takes its
+incident through `data/params` and no model-authored one does**: the authoring
+prompt never mentions it, and each generated program hardcodes the id instead.
+
+That mistake was caught only by re-deriving every row and diffing against the
+previous derivation, which is the same discipline that caught the union bug.
+A harness change that cannot be checked against known-good rows should not be
+trusted.
+
 ## Limits
 
 - **n=10 per cell**, 60 runs. The recall difference is significant under a
