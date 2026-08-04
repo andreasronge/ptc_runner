@@ -200,6 +200,67 @@ defmodule PtcRunner.Kernel.ProviderRuntimeServices do
 
   def oauth_context(_services, _deadline), do: {:error, :authorization_context_required}
 
+  @doc false
+  @spec with_oauth_context(t(), Deadline.t(), OAuthContext.t()) ::
+          {:ok, t()} | {:error, :invalid_provider_runtime_services}
+  def with_oauth_context(%__MODULE__{} = services, deadline, %OAuthContext{} = context) do
+    if valid?(services) and Deadline.valid?(deadline) do
+      build(
+        services.activation,
+        services.credential_resolver,
+        services.provider_application_mode,
+        {:context_factory,
+         fn
+           ^deadline -> {:ok, context}
+           _other -> {:error, :authorization_context_required}
+         end},
+        services.runtime_binding,
+        services.host_payload
+      )
+    else
+      {:error, :invalid_provider_runtime_services}
+    end
+  end
+
+  def with_oauth_context(_services, _deadline, _context),
+    do: {:error, :invalid_provider_runtime_services}
+
+  @doc false
+  @spec oauth_authorities(t(), [binary()]) :: {:ok, map()} | {:error, term()}
+  def oauth_authorities(%__MODULE__{host_payload: nil} = services, selected_names)
+      when is_list(selected_names) do
+    if valid?(services), do: {:ok, %{}}, else: {:error, :invalid_provider_runtime_services}
+  end
+
+  def oauth_authorities(%__MODULE__{} = services, selected_names) when is_list(selected_names) do
+    if valid?(services) do
+      HostRuntimePayload.oauth_authorities(services.host_payload, selected_names)
+    else
+      {:error, :invalid_provider_runtime_services}
+    end
+  end
+
+  def oauth_authorities(_services, _selected_names),
+    do: {:error, :invalid_provider_runtime_services}
+
+  @doc false
+  @spec dotenv_required?(t(), [binary()]) :: {:ok, boolean()} | {:error, term()}
+  def dotenv_required?(%__MODULE__{host_payload: nil} = services, selected_names)
+      when is_list(selected_names) do
+    if valid?(services), do: {:ok, false}, else: {:error, :invalid_provider_runtime_services}
+  end
+
+  def dotenv_required?(%__MODULE__{} = services, selected_names) when is_list(selected_names) do
+    if valid?(services) do
+      HostRuntimePayload.dotenv_required?(services.host_payload, selected_names)
+    else
+      {:error, :invalid_provider_runtime_services}
+    end
+  end
+
+  def dotenv_required?(_services, _selected_names),
+    do: {:error, :invalid_provider_runtime_services}
+
   defp unique_allowed_options?(opts) do
     keys = Keyword.keys(opts)
 

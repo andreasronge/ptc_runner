@@ -329,6 +329,26 @@ defmodule PtcRunner.Kernel.HostInstallation do
     end
   end
 
+  def owner_call(%HostConfig{} = host, {:dotenv_required, selected_names})
+      when is_list(selected_names) and length(selected_names) <= 128 do
+    if selected_names == Enum.uniq(selected_names) and
+         Enum.all?(selected_names, &Map.has_key?(host.install, &1)) do
+      required? =
+        Enum.any?(selected_names, fn name ->
+          with %{source: :llm, credential: credential} <- Map.fetch!(host.install, name),
+               %{source: :env} <- Map.get(host.credentials, credential) do
+            true
+          else
+            _not_dotenv_backed -> false
+          end
+        end)
+
+      {:ok, required?}
+    else
+      {:error, :invalid_host_installation}
+    end
+  end
+
   def owner_call(_host, _request), do: {:error, :invalid_host_installation}
 
   defp descriptor(installation, rules, authority) do

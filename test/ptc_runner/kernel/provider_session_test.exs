@@ -35,6 +35,59 @@ defmodule PtcRunner.Kernel.ProviderSessionTest do
     assert {:error, :invalid_provider_session} = ProviderSession.start_active(limits(), nil)
   end
 
+  test "owned active sessions keep execution authority while fixing lifecycle ownership" do
+    parent = self()
+    lifecycle_owner = spawn(fn -> receive do: (:stop -> :ok) end)
+
+    assert {:ok, session} =
+             ProviderSession.start_active_owned(
+               limits(),
+               "prepared-operation",
+               lifecycle_owner,
+               fn opened ->
+                 send(parent, {:session_handed_off, opened})
+                 :ok
+               end
+             )
+
+    assert_receive {:session_handed_off, ^session}
+    assert ProviderSession.lifecycle_owner(session) == lifecycle_owner
+    assert {:ok, session} = ProviderSession.begin_run(session)
+    assert {:ok, registrar} = ProviderSession.open_registrar(session)
+    assert :ok = ResourceRegistrar.abort(registrar)
+
+    run_state = spawn(fn -> receive do: (:stop -> :ok) end)
+    assert :ok = ProviderSession.bind_lifecycle(session, self(), run_state)
+    assert ProviderSession.lifecycle_owner(session) == lifecycle_owner
+
+    session_ref = Process.monitor(session.pid)
+    send(lifecycle_owner, :stop)
+    assert_receive {:DOWN, ^session_ref, :process, _, :normal}
+    send(run_state, :stop)
+  end
+
+  test "owned active session handoff failure closes the provisional session" do
+    lifecycle_owner = spawn(fn -> receive do: (:stop -> :ok) end)
+    parent = self()
+
+    assert {:error, :provider_session_unavailable} =
+             ProviderSession.start_active_owned(
+               limits(),
+               "prepared-operation",
+               lifecycle_owner,
+               fn session ->
+                 send(parent, {:provisional_session, session})
+                 {:error, :owner_unavailable}
+               end
+             )
+
+    assert_receive {:provisional_session, session}
+    session_ref = Process.monitor(session.pid)
+    assert_receive {:DOWN, ^session_ref, :process, _, reason}
+    assert reason in [:normal, :noproc]
+    send(lifecycle_owner, :stop)
+  end
+
   @tag timeout: 15_000
   test "a timed-out begin request cannot mutate a suspended session later" do
     {:ok, session} = ProviderSession.start_active(limits(), "prepared-operation")

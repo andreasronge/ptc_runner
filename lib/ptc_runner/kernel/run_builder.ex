@@ -364,21 +364,70 @@ defmodule PtcRunner.Kernel.RunBuilder do
     do: {:error, :invalid_active_run}
 
   @doc false
-  @spec run_active_with_class(
+  @spec build_active_owned(
           PreparedRun.t(),
           ProviderRegistry.t(),
           ProviderSession.t(),
-          keyword()
-        ) :: {:ok, term(), :normal | :private} | {:error, term()}
-  def run_active_with_class(prepared, registry, session, opts) do
-    case build_active(prepared, registry, session, opts) do
-      {:ok, built} ->
-        execute_and_publish(built)
+          PublicationAuthority.t(),
+          map()
+        ) :: {:ok, map()} | {:error, term()}
+  def build_active_owned(
+        %PreparedRun{} = prepared,
+        %ProviderRegistry{} = registry,
+        session,
+        authority,
+        opened_sinks
+      ) do
+    lifecycle_owner = ProviderSession.lifecycle_owner(session)
+
+    with true <- PreparedRun.active_valid?(prepared),
+         true <- is_pid(lifecycle_owner),
+         :ok <-
+           ProviderSession.claim_operation(
+             session,
+             prepared.request.package.limits,
+             prepared.attestation
+           ),
+         :ok <- validate_registry(registry),
+         true <- PublicationAuthority.valid?(authority),
+         opts = PublicationAuthority.options(authority),
+         :ok <- validate_build_options(opts),
+         :ok <- validate_installed_limits(prepared.request.package, registry, opts),
+         :ok <- validate_inspection_selection(prepared.request, opts),
+         :ok <-
+           validate_opened_sinks(
+             opened_sinks,
+             prepared,
+             authority,
+             lifecycle_owner
+           ) do
+      build_active_preflighted_owned(
+        prepared,
+        registry,
+        session,
+        authority,
+        opened_sinks
+      )
+    else
+      {:error, :operation_claimed} ->
+        {:error, :invalid_active_run}
+
+      {:error, :operation_mismatch} ->
+        prefer_cleanup_error({:error, :invalid_active_run}, close_live_session(session))
+
+      {:error, :provider_session_unavailable} ->
+        {:error, :invalid_active_run}
+
+      false ->
+        prefer_cleanup_error({:error, :invalid_active_run}, close_live_session(session))
 
       {:error, _reason} = error ->
-        error
+        prefer_cleanup_error(error, close_live_session(session))
     end
   end
+
+  def build_active_owned(_prepared, _registry, _session, _authority, _opened_sinks),
+    do: {:error, :invalid_active_run}
 
   defp validate_registry(registry) do
     if ProviderRegistry.valid?(registry),
@@ -557,6 +606,32 @@ defmodule PtcRunner.Kernel.RunBuilder do
     end
   end
 
+  defp build_active_preflighted_owned(
+         prepared,
+         registry,
+         session,
+         authority,
+         opened_sinks
+       ) do
+    with {:ok, providers} <-
+           providers(
+             prepared.request.package,
+             registry,
+             provider_input_class(prepared.request.input.authority),
+             PublicationAuthority.options(authority),
+             session
+           ) do
+      build_with_opened_sinks(
+        prepared.request,
+        {prepared.workflow_bundle, prepared.mission_bundle},
+        prepared.entry_source,
+        providers,
+        authority,
+        opened_sinks
+      )
+    end
+  end
+
   defp build_provider_bearing(request, registry, opts) do
     with {:ok, workflow_bundle} <- bundle(request.package.workflow_components),
          {:ok, mission_bundle} <- bundle(request.package.mission_components),
@@ -703,7 +778,15 @@ defmodule PtcRunner.Kernel.RunBuilder do
      opened_sinks.inspection_path}
   end
 
-  defp validate_opened_sinks(opened_sinks, %PreparedRun{} = prepared, authority)
+  defp validate_opened_sinks(opened_sinks, prepared, authority),
+    do: validate_opened_sinks(opened_sinks, prepared, authority, self())
+
+  defp validate_opened_sinks(
+         opened_sinks,
+         %PreparedRun{} = prepared,
+         authority,
+         expected_owner
+       )
        when is_map(opened_sinks) and map_size(opened_sinks) == 9 do
     with true <-
            Enum.sort(Map.keys(opened_sinks)) == @opened_sink_keys,
@@ -715,43 +798,50 @@ defmodule PtcRunner.Kernel.RunBuilder do
            ),
          %EventSink{} = event_sink <- opened_sinks.event_sink,
          {:ok, owner} <- EventSink.owner(event_sink),
-         true <- owner == self(),
-         true <- PreparedRun.consumed_valid?(prepared),
+         true <- owner == expected_owner,
+         true <-
+           PreparedRun.consumed_valid?(prepared) or PreparedRun.active_valid?(prepared),
          true <- prepared.attestation == opened_sinks.prepared_binding,
          true <- prepared.effective_event_policy == opened_sinks.effective_event_policy,
          true <- PublicationAuthority.matches?(authority, opened_sinks.publication_binding),
          true <- EventSink.policy(event_sink) == opened_sinks.effective_event_policy,
          {:ok, event_identity} <- EventSink.identity(event_sink),
          true <- event_identity == opened_sinks.event_identity,
-         true <- valid_opened_inspection?(opened_sinks) do
+         true <- valid_opened_inspection?(opened_sinks, expected_owner) do
       :ok
     else
       _invalid -> {:error, :invalid_execution_sinks}
     end
   end
 
-  defp validate_opened_sinks(_opened_sinks, _prepared, _authority),
+  defp validate_opened_sinks(_opened_sinks, _prepared, _authority, _expected_owner),
     do: {:error, :invalid_execution_sinks}
 
-  defp valid_opened_inspection?(%{
-         inspection_sink: nil,
-         inspection_path: nil,
-         inspection_identity: nil
-       }),
+  defp valid_opened_inspection?(
+         %{
+           inspection_sink: nil,
+           inspection_path: nil,
+           inspection_identity: nil
+         },
+         _expected_owner
+       ),
        do: true
 
-  defp valid_opened_inspection?(%{
-         inspection_sink: %InspectionSink{} = inspection_sink,
-         inspection_path: path,
-         inspection_identity: identity,
-         event_identity: identity
-       })
+  defp valid_opened_inspection?(
+         %{
+           inspection_sink: %InspectionSink{} = inspection_sink,
+           inspection_path: path,
+           inspection_identity: identity,
+           event_identity: identity
+         },
+         expected_owner
+       )
        when is_binary(path) do
-    InspectionSink.owner?(inspection_sink) and
+    InspectionSink.owner(inspection_sink) == {:ok, expected_owner} and
       InspectionSink.identity(inspection_sink) == {:ok, identity}
   end
 
-  defp valid_opened_inspection?(_opened_sinks), do: false
+  defp valid_opened_inspection?(_opened_sinks, _expected_owner), do: false
 
   defp discard_opened_sinks({:error, reason, _opened_sinks}), do: {:error, reason}
   defp discard_opened_sinks(result), do: result

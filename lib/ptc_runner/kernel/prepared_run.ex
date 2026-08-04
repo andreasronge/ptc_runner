@@ -164,6 +164,17 @@ defmodule PtcRunner.Kernel.PreparedRun do
   def consume(_prepared), do: {:error, :invalid_prepared_run}
 
   @doc false
+  @spec authorize_executor(t(), pid()) :: :ok | {:error, :invalid_prepared_run}
+  def authorize_executor(%__MODULE__{} = prepared, executor) when is_pid(executor) do
+    if consumed_valid?(prepared) and
+         ProviderActivity.authorize_executor(prepared.provider_activity, executor) == :ok,
+       do: :ok,
+       else: {:error, :invalid_prepared_run}
+  end
+
+  def authorize_executor(_prepared, _executor), do: {:error, :invalid_prepared_run}
+
+  @doc false
   @spec begin_build(t()) :: :ok | {:error, :invalid_prepared_run}
   def begin_build(%__MODULE__{} = prepared) do
     if sealed_valid?(prepared) and

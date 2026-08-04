@@ -1,18 +1,17 @@
 defmodule PtcRunner.Kernel.RunCoordinator do
   @moduledoc """
-  Path-free preparation and provider-free one-shot execution.
+  Path-free preparation and one-shot execution.
 
   Bundle compilation and public-entry validation run before provider
   declarations. Provider declaration checks inspect only installed aliases;
   they never invoke a builder, credential resolver, preflight callback, OAuth
   context, store, process, or network operation.
 
-  Provider-free one-shot execution consumes the prepared run inside an
-  execution-session owner. That owner constructs both sinks, keeps responding
-  to caller death while a subordinate worker runs the Kernel, and returns only
-  sealed, path-free execution evidence. Publication remains a separate caller
-  operation. Provider-bearing execution still uses the active-session path
-  until its acquisition lifecycle moves behind the same owner.
+  One-shot execution consumes the prepared run inside an execution-session
+  owner. That owner constructs both sinks, keeps responding to caller death
+  while a subordinate worker performs provider setup and runs the Kernel, and
+  returns only sealed, path-free execution evidence. Publication remains a
+  separate caller operation.
   """
 
   alias PtcRunner.Kernel
@@ -27,6 +26,7 @@ defmodule PtcRunner.Kernel.RunCoordinator do
   alias PtcRunner.Kernel.PreparedRun
   alias PtcRunner.Kernel.ProviderActivity
   alias PtcRunner.Kernel.ProviderDescriptor
+  alias PtcRunner.Kernel.ProviderExecution
   alias PtcRunner.Kernel.ProviderPlan
   alias PtcRunner.Kernel.PublicationAuthority
   alias PtcRunner.Kernel.RunRequest
@@ -100,6 +100,50 @@ defmodule PtcRunner.Kernel.RunCoordinator do
   end
 
   def execute(_prepared, _authority), do: {:error, :invalid_prepared_run}
+
+  @doc false
+  @spec execute(
+          PreparedRun.t(),
+          PublicationAuthority.t(),
+          ProviderExecution.t(),
+          (binary() -> term())
+        ) ::
+          {:ok, ExecutionOutcome.t()}
+          | {:error,
+             :invalid_prepared_run
+             | :invalid_publication_authority
+             | :invalid_provider_execution
+             | term()}
+  def execute(%PreparedRun{} = prepared, authority, provider_execution, notifier)
+      when is_function(notifier, 1) do
+    cond do
+      not PreparedRun.valid?(prepared) ->
+        {:error, :invalid_prepared_run}
+
+      not PublicationAuthority.valid?(authority) ->
+        {:error, :invalid_publication_authority}
+
+      prepared.provider_declarations == [] ->
+        {:error, :invalid_provider_execution}
+
+      not ProviderExecution.valid?(provider_execution) ->
+        {:error, :invalid_provider_execution}
+
+      true ->
+        with {:ok, owner} <-
+               ExecutionSessionOwner.start(
+                 prepared,
+                 authority,
+                 self(),
+                 provider_execution,
+                 notifier
+               ),
+             do: ExecutionSessionOwner.await(owner)
+    end
+  end
+
+  def execute(_prepared, _authority, _provider_execution, _notifier),
+    do: {:error, :invalid_prepared_run}
 
   defp compile_required(components) do
     case Kernel.compile_bundle(components) do

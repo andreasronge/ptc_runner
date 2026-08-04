@@ -680,6 +680,29 @@ though no final close callback was returned.
 
 ### Slice 6: process-local OAuth and acquisition
 
+**Checkpoint B WIP status (2026-08-04):** the branch has completed the bounded
+credential, OAuth-context, provider-acquisition, execution-outcome, publication
+separation, provider-free execution-owner, and owner-created sink commits. The
+current unreviewed WIP cuts provider-backed non-check `mix ptc.run` execution
+over to the same `ExecutionSessionOwner`: a subordinate authorized executor
+performs provider setup and Kernel work while the fixed lifecycle owner tracks
+the provider session, registry, OAuth memory, listener, prepared run, and
+sinks. Runtime setup crosses that boundary as a sealed `ProviderExecution`;
+the raw host configuration and authorization-URL notifier do not enter the
+sealed value. Active assembly reuses the owner's already-opened sealed sinks,
+and the replaced non-check frontend lifecycle plus
+`RunBuilder.run_active_with_class/4` have been removed. `--check` and REPL stay
+on their existing paths for their later parity cutover.
+
+Focused provider-session, active-session, coordinator, and Mix command tests
+pass, including a host-backed provider one-shot smoke test. Before this WIP is
+ready for a normal Checkpoint B commit, add caller-death coverage at blocked
+provider setup/acquisition boundaries, cleanup-order and owner-status/log
+privacy regressions, run the incremental independent review to clean, and run
+the complete precommit, documentation, Dialyzer, and prepush gates. Explicit
+OAuth one-shot success and context-reuse coverage must also be confirmed by
+that repair/review pass.
+
 - adapt the in-memory Store to absolute deadlines with the pre-dispatch and
   in-transaction expiry checks;
 - lazily construct one OAuth context per session and claim only selected

@@ -5,6 +5,7 @@ defmodule PtcRunner.Kernel.ProviderActiveSessionTest do
   alias PtcRunner.Kernel.Capability
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.Deadline
+  alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.InstallationCatalog
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.PreparedRun
@@ -14,6 +15,7 @@ defmodule PtcRunner.Kernel.ProviderActiveSessionTest do
   alias PtcRunner.Kernel.ProviderRegistry
   alias PtcRunner.Kernel.ProviderRuntimeServices
   alias PtcRunner.Kernel.ProviderSession
+  alias PtcRunner.Kernel.PublicationAuthority
   alias PtcRunner.Kernel.ResourceRegistrar
   alias PtcRunner.Kernel.RunBuilder
   alias PtcRunner.Kernel.RunCoordinator
@@ -88,6 +90,86 @@ defmodule PtcRunner.Kernel.ProviderActiveSessionTest do
     assert deadline_ms <= Deadline.expires_at(ProviderSession.run_deadline(session))
 
     close(session, prepared)
+  end
+
+  test "execution-owned setup accepts an already consumed run without releasing it" do
+    {:ok, prepared, catalog} = fixture(fn _selection, _context -> :ok end, ["first"])
+    assert :ok = PreparedRun.consume(prepared)
+    lifecycle_owner = spawn(fn -> receive do: (:stop -> :ok) end)
+    parent = self()
+
+    assert {:ok, session} =
+             ProviderActiveSession.open_consumed_setup(
+               prepared,
+               catalog,
+               services(),
+               lifecycle_owner,
+               fn opened ->
+                 send(parent, {:owned_session, opened})
+                 :ok
+               end
+             )
+
+    assert_receive {:owned_session, ^session}
+    assert PreparedRun.active_valid?(prepared)
+
+    assert {:ok, session} =
+             ProviderActiveSession.begin_owned_run(session, prepared, catalog)
+
+    assert :ok = ProviderSession.close(session)
+    assert PreparedRun.active_valid?(prepared)
+    assert :ok = PreparedRun.close(prepared)
+    send(lifecycle_owner, :stop)
+  end
+
+  test "execution worker builds against sinks owned by the fixed lifecycle owner" do
+    {:ok, prepared, catalog} = fixture(fn _selection, _context -> :ok end, ["first"])
+    assert {:ok, authority} = PublicationAuthority.new([])
+    assert {:ok, opened_sinks} = RunBuilder.open_prepared_sinks(prepared, authority, self())
+    parent = self()
+
+    worker =
+      spawn(fn ->
+        receive do
+          :start_owned_build -> :ok
+        end
+
+        result =
+          with {:ok, session} <-
+                 ProviderActiveSession.open_consumed_setup(
+                   prepared,
+                   catalog,
+                   services(),
+                   parent,
+                   fn _session -> :ok end
+                 ),
+               {:ok, session} <-
+                 ProviderActiveSession.begin_owned_run(session, prepared, catalog),
+               {:ok, registry} <- active_registry(),
+               {:ok, built} <-
+                 RunBuilder.build_active_owned(
+                   prepared,
+                   registry,
+                   session,
+                   authority,
+                   opened_sinks
+                 ) do
+            {:ok, built, registry, session}
+          end
+
+        send(parent, {:owned_build, result})
+      end)
+
+    assert :ok = PreparedRun.authorize_executor(prepared, worker)
+    send(worker, :start_owned_build)
+    worker_ref = Process.monitor(worker)
+    assert_receive {:owned_build, {:ok, built, registry, _session}}, 5_000
+    assert_receive {:DOWN, ^worker_ref, :process, ^worker, :normal}
+    assert {:ok, owner} = EventSink.owner(built.config.event_sink)
+    assert owner == self()
+    assert :ok = RunBuilder.close(built.config)
+    assert :ok = ProviderRegistry.close(registry)
+    assert :ok = PreparedRun.close(prepared)
   end
 
   test "selection rejection returns the closed occurrence diagnostic" do

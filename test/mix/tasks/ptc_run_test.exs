@@ -501,6 +501,48 @@ defmodule Mix.Tasks.Ptc.RunTest do
   end
 
   @tag :tmp_dir
+  test "provider-backed one-shot runs through the execution owner", %{tmp_dir: dir} do
+    manifest_path = write_manifest(dir, %{"value" => 42})
+    trace_directory = Path.join(dir, "traces")
+    File.mkdir_p!(trace_directory)
+
+    capture_io(fn ->
+      Mix.Task.reenable("ptc.run")
+      Run.run([manifest_path, "--trace", Path.join(trace_directory, "seed.jsonl")])
+    end)
+
+    manifest =
+      manifest_path
+      |> File.read!()
+      |> Jason.decode!()
+      |> Map.put("providers", %{"mission" => [%{"name" => "history"}]})
+
+    File.write!(manifest_path, Jason.encode!(manifest))
+
+    host = %{
+      "install" => %{
+        "history" => %{
+          "source" => "ptc_trace_snapshot",
+          "installation_revision" => "trace-run-v1",
+          "directory" => "traces",
+          "ceilings" => %{"max_result_bytes" => 250_000}
+        }
+      }
+    }
+
+    host_path = Path.join(dir, "host.json")
+    File.write!(host_path, Jason.encode!(host))
+
+    output =
+      capture_io(fn ->
+        Mix.Task.reenable("ptc.run")
+        Run.run([manifest_path, "--host-config", host_path])
+      end)
+
+    assert %{"value" => 42} = Jason.decode!(output)
+  end
+
+  @tag :tmp_dir
   test "--check correlates a host-installed private inspection snapshot", %{tmp_dir: dir} do
     manifest_path = write_manifest(dir, %{"value" => 1})
     trace_directory = Path.join(dir, "traces")

@@ -58,6 +58,7 @@ defmodule Mix.Tasks.Ptc.Run do
   alias PtcRunner.Kernel.MCPOAuth.Store.Memory
   alias PtcRunner.Kernel.PreparedRun
   alias PtcRunner.Kernel.ProviderActiveSession
+  alias PtcRunner.Kernel.ProviderExecution
   alias PtcRunner.Kernel.ProviderRegistry
   alias PtcRunner.Kernel.ProviderRuntimeServices
   alias PtcRunner.Kernel.ProviderSession
@@ -143,26 +144,35 @@ defmodule Mix.Tasks.Ptc.Run do
   end
 
   defp execute_prepared(
-         %PreparedRun{provider_declarations: []} = prepared,
+         prepared,
          run_opts,
          opts,
          runtime
        ) do
     if Keyword.get(opts, :check, false) do
-      with {:ok, registry} <-
-             ProviderRegistry.new(%{}, installed_limits: runtime.catalog.installed_limits) do
-        try do
-          execute_with_registry(prepared, registry, nil, run_opts, opts, runtime.host)
-        after
-          ProviderRegistry.close(registry)
-        end
-      end
+      execute_check_prepared(prepared, run_opts, opts, runtime)
     else
-      execute_provider_free(prepared, run_opts, opts)
+      execute_one_shot(prepared, run_opts, opts, runtime)
     end
   end
 
-  defp execute_prepared(
+  defp execute_check_prepared(
+         %PreparedRun{provider_declarations: []} = prepared,
+         run_opts,
+         opts,
+         runtime
+       ) do
+    with {:ok, registry} <-
+           ProviderRegistry.new(%{}, installed_limits: runtime.catalog.installed_limits) do
+      try do
+        execute_with_registry(prepared, registry, nil, run_opts, opts, runtime.host)
+      after
+        ProviderRegistry.close(registry)
+      end
+    end
+  end
+
+  defp execute_check_prepared(
          prepared,
          run_opts,
          opts,
@@ -183,7 +193,7 @@ defmodule Mix.Tasks.Ptc.Run do
     end
   end
 
-  defp execute_prepared(prepared, run_opts, opts, runtime) do
+  defp execute_check_prepared(prepared, run_opts, opts, runtime) do
     case ProviderActiveSession.open(prepared, runtime.catalog, runtime.services) do
       {:ok, session} ->
         case with :ok <- maybe_load_dotenv(prepared, runtime),
@@ -205,12 +215,22 @@ defmodule Mix.Tasks.Ptc.Run do
     end
   end
 
-  defp execute_provider_free(prepared, run_opts, opts) do
+  defp execute_one_shot(prepared, run_opts, opts, runtime) do
     with {:ok, authority} <- PublicationAuthority.new(run_opts),
-         {:ok, outcome} <- RunCoordinator.execute(prepared, authority),
+         {:ok, outcome} <- execute_owned(prepared, authority, runtime),
          {:ok, value, class} <- RunBuilder.publish_execution(outcome, authority) do
       report(value, class, opts)
     end
+  end
+
+  defp execute_owned(%PreparedRun{provider_declarations: []} = prepared, authority, _runtime),
+    do: RunCoordinator.execute(prepared, authority)
+
+  defp execute_owned(prepared, authority, runtime) do
+    RunCoordinator.execute(prepared, authority, runtime.execution, fn url ->
+      Mix.shell().info("Open this one-time authorization URL:\n#{url}")
+      :ok
+    end)
   end
 
   defp execute_after_authorization_setup(prepared, setup_session, run_opts, opts, runtime) do
@@ -255,19 +275,12 @@ defmodule Mix.Tasks.Ptc.Run do
   end
 
   defp execute_with_registry(prepared, registry, session, run_opts, opts, host) do
-    if Keyword.get(opts, :check, false) do
-      with {:ok, view} <- check(prepared, registry, session, host, run_opts) do
-        report_check(view)
-      end
+    with true <- Keyword.get(opts, :check, false),
+         {:ok, view} <- check(prepared, registry, session, host, run_opts) do
+      report_check(view)
     else
-      result =
-        if session do
-          RunBuilder.run_active_with_class(prepared, registry, session, run_opts)
-        else
-          {:error, :invalid_active_run}
-        end
-
-      with {:ok, value, class} <- result, do: report(value, class, opts)
+      false -> {:error, :invalid_check}
+      {:error, _reason} = error -> error
     end
   end
 
@@ -305,7 +318,16 @@ defmodule Mix.Tasks.Ptc.Run do
         with {:ok, nil, catalog} <- CommandEngine.catalog(nil),
              {:ok, services} <-
                ProviderRuntimeServices.new(provider_application_mode: provider_application_mode),
-             do: {:ok, %{catalog: catalog, services: services, host: nil, authorizations: []}}
+             {:ok, execution} <- ProviderExecution.new(catalog, services, []) do
+          {:ok,
+           %{
+             catalog: catalog,
+             services: services,
+             host: nil,
+             authorizations: [],
+             execution: execution
+           }}
+        end
 
       {nil, _requested} ->
         {:error, :authorization_requires_host_config}
@@ -316,13 +338,15 @@ defmodule Mix.Tasks.Ptc.Run do
              {:ok, services} <-
                HostInstallation.runtime_services(host,
                  provider_application_mode: provider_application_mode
-               ) do
+               ),
+             {:ok, execution} <- ProviderExecution.new(catalog, services, requested) do
           {:ok,
            %{
              catalog: catalog,
              services: services,
              host: host,
-             authorizations: requested
+             authorizations: requested,
+             execution: execution
            }}
         else
           false -> {:error, :duplicate_mcp_authorization}

@@ -5,8 +5,12 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
 
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.InspectionSink
+  alias PtcRunner.Kernel.MCPOAuth.LoopbackListener
+  alias PtcRunner.Kernel.MCPOAuth.Store.Memory
   alias PtcRunner.Kernel.PreparedRun
+  alias PtcRunner.Kernel.ProviderExecution
   alias PtcRunner.Kernel.ProviderRegistry
+  alias PtcRunner.Kernel.ProviderSession
   alias PtcRunner.Kernel.PublicationAuthority
   alias PtcRunner.Kernel.RunBuilder
 
@@ -22,7 +26,23 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
              :invalid_prepared_run
              | :invalid_publication_authority
              | :provider_session_required}
-  def start(prepared, authority, caller) when is_pid(caller) do
+  def start(prepared, authority, caller), do: start(prepared, authority, caller, nil, nil)
+
+  @doc false
+  @spec start(
+          PreparedRun.t(),
+          PublicationAuthority.t(),
+          pid(),
+          ProviderExecution.t() | nil,
+          (binary() -> term()) | nil
+        ) ::
+          {:ok, t()}
+          | {:error,
+             :invalid_prepared_run
+             | :invalid_publication_authority
+             | :provider_session_required
+             | :invalid_provider_execution}
+  def start(prepared, authority, caller, provider_execution, notifier) when is_pid(caller) do
     cond do
       not PreparedRun.valid?(prepared) ->
         {:error, :invalid_prepared_run}
@@ -30,20 +50,28 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
       not PublicationAuthority.valid?(authority) ->
         {:error, :invalid_publication_authority}
 
-      prepared.provider_declarations != [] ->
+      prepared.provider_declarations != [] and
+          not (ProviderExecution.valid?(provider_execution) and is_function(notifier, 1)) ->
         {:error, :provider_session_required}
+
+      prepared.provider_declarations == [] and not is_nil(provider_execution) ->
+        {:error, :invalid_provider_execution}
 
       true ->
         token = make_ref()
 
-        case GenServer.start(__MODULE__, {prepared, authority, caller, token}) do
+        case GenServer.start(
+               __MODULE__,
+               {prepared, authority, caller, token, provider_execution, notifier}
+             ) do
           {:ok, pid} -> {:ok, %__MODULE__{pid: pid, token: token}}
           {:error, _reason} -> {:error, :invalid_prepared_run}
         end
     end
   end
 
-  def start(_prepared, _authority, _caller), do: {:error, :invalid_prepared_run}
+  def start(_prepared, _authority, _caller, _provider_execution, _notifier),
+    do: {:error, :invalid_prepared_run}
 
   @doc false
   @spec await(t()) :: {:ok, PtcRunner.Kernel.ExecutionOutcome.t()} | {:error, term()}
@@ -58,7 +86,7 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
   def pid(%__MODULE__{pid: pid}), do: pid
 
   @impl GenServer
-  def init({prepared, authority, caller, token}) do
+  def init({prepared, authority, caller, token, provider_execution, notifier}) do
     caller_ref = Process.monitor(caller)
 
     initial = %{
@@ -67,6 +95,9 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
       caller_ref: caller_ref,
       prepared: prepared,
       registry: nil,
+      provider_session: nil,
+      oauth_memory: nil,
+      oauth_listener: nil,
       built: nil,
       opened_sinks: nil,
       worker_pid: nil,
@@ -77,7 +108,17 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
 
     case RunBuilder.open_prepared_sinks(prepared, authority, self()) do
       {:ok, opened_sinks} ->
-        open_provider_free(initial, authority, opened_sinks)
+        if prepared.provider_declarations == [] do
+          open_provider_free(initial, authority, opened_sinks)
+        else
+          open_provider_execution(
+            initial,
+            authority,
+            opened_sinks,
+            provider_execution,
+            notifier
+          )
+        end
 
       {:error, reason, opened_sinks} ->
         next =
@@ -111,6 +152,18 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
       when not is_nil(result),
       do: {:stop, :normal, result, state}
 
+  def handle_call(
+        {token, {:resource, action, kind, resource}},
+        {worker_pid, _tag},
+        %{token: token, worker_pid: worker_pid} = state
+      )
+      when action in [:put, :drop] and kind in [:session, :registry, :memory, :listener] do
+    case update_resource(state, action, kind, resource) do
+      {:ok, next} -> {:reply, :ok, next}
+      {:error, _reason} = error -> {:reply, error, state}
+    end
+  end
+
   def handle_call({_token, :await}, _from, state),
     do: {:reply, {:error, :execution_session_unavailable}, state}
 
@@ -131,6 +184,7 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
       state
       |> Map.put(:worker_pid, nil)
       |> Map.put(:worker_ref, nil)
+      |> maybe_finalize_failed_execution(result)
       |> close_owned_inputs()
       |> Map.put(:result, result)
 
@@ -234,6 +288,73 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
     end
   end
 
+  defp open_provider_execution(
+         initial,
+         authority,
+         opened_sinks,
+         provider_execution,
+         notifier
+       ) do
+    owner = self()
+    token = initial.token
+
+    {worker_pid, worker_ref} =
+      spawn_monitor(fn ->
+        receive do
+          {^token, :start_execution} ->
+            tracker = fn action, kind, resource ->
+              GenServer.call(
+                owner,
+                {token, {:resource, action, kind, resource}},
+                :infinity
+              )
+            end
+
+            execution_result =
+              ProviderExecution.execute(
+                initial.prepared,
+                authority,
+                opened_sinks,
+                provider_execution,
+                notifier,
+                tracker,
+                owner
+              )
+
+            send(owner, {token, :execution_result, self(), execution_result})
+        end
+      end)
+
+    case PreparedRun.authorize_executor(initial.prepared, worker_pid) do
+      :ok ->
+        send(worker_pid, {token, :start_execution})
+
+        {:ok,
+         %{
+           initial
+           | opened_sinks: opened_sinks,
+             worker_pid: worker_pid,
+             worker_ref: worker_ref
+         }}
+
+      {:error, _reason} ->
+        Process.exit(worker_pid, :kill)
+
+        receive do
+          {:DOWN, ^worker_ref, :process, ^worker_pid, _reason} -> :ok
+        end
+
+        next =
+          initial
+          |> Map.put(:opened_sinks, opened_sinks)
+          |> finalize_aborted_sinks()
+          |> close_owned_inputs()
+          |> Map.put(:result, {:error, :invalid_prepared_run})
+
+        {:ok, next}
+    end
+  end
+
   defp finish_or_wait(%{waiter: nil} = state), do: {:noreply, state}
 
   defp finish_or_wait(%{waiter: waiter, result: result} = state) do
@@ -244,6 +365,7 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
   defp abort(state) do
     state
     |> stop_worker()
+    |> close_runtime_resources()
     |> finalize_aborted_sinks()
     |> close_owned_inputs()
   end
@@ -288,10 +410,68 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
   end
 
   defp close_owned_inputs(state) do
+    state = close_runtime_resources(state)
     close_registry(state.registry)
     close_prepared(state.prepared)
     %{state | registry: nil, prepared: nil}
   end
+
+  defp close_runtime_resources(state) do
+    if state.oauth_listener, do: LoopbackListener.close(state.oauth_listener)
+
+    if state.provider_session && ProviderSession.alive?(state.provider_session),
+      do: ProviderSession.close(state.provider_session)
+
+    close_registry(state.registry)
+    if state.oauth_memory, do: Memory.close(state.oauth_memory)
+
+    %{
+      state
+      | provider_session: nil,
+        registry: nil,
+        oauth_memory: nil,
+        oauth_listener: nil
+    }
+  end
+
+  defp update_resource(state, :put, kind, resource) do
+    field = resource_field(kind)
+
+    if is_nil(Map.fetch!(state, field)) and valid_resource?(kind, resource) do
+      {:ok, Map.put(state, field, resource)}
+    else
+      {:error, :execution_session_unavailable}
+    end
+  end
+
+  defp update_resource(state, :drop, kind, resource) do
+    field = resource_field(kind)
+
+    if Map.fetch!(state, field) === resource do
+      {:ok, Map.put(state, field, nil)}
+    else
+      {:error, :execution_session_unavailable}
+    end
+  end
+
+  defp resource_field(:session), do: :provider_session
+  defp resource_field(:registry), do: :registry
+  defp resource_field(:memory), do: :oauth_memory
+  defp resource_field(:listener), do: :oauth_listener
+
+  defp valid_resource?(:session, session),
+    do: ProviderSession.valid?(session) and ProviderSession.lifecycle_owner(session) == self()
+
+  defp valid_resource?(:registry, registry), do: ProviderRegistry.valid?(registry)
+  defp valid_resource?(:memory, %Memory{pid: pid}), do: is_pid(pid) and Process.alive?(pid)
+  defp valid_resource?(:listener, %LoopbackListener{}), do: true
+  defp valid_resource?(_kind, _resource), do: false
+
+  defp maybe_finalize_failed_execution(state, {:ok, _outcome}),
+    do: %{state | opened_sinks: nil}
+
+  defp maybe_finalize_failed_execution(state, {:error, _reason}),
+    do: finalize_aborted_sinks(state)
 
   defp close_registry(nil), do: :ok
 

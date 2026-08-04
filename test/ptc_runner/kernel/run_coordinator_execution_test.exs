@@ -2,22 +2,47 @@ defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
   use ExUnit.Case, async: false
 
   alias PtcRunner.Kernel.ApplicationPackage
+  alias PtcRunner.Kernel.Capability
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.ExecutionOutcome
   alias PtcRunner.Kernel.ExecutionSessionOwner
   alias PtcRunner.Kernel.InspectionSink
   alias PtcRunner.Kernel.InstallationCatalog
   alias PtcRunner.Kernel.PreparedRun
+  alias PtcRunner.Kernel.ProviderDescriptor
+  alias PtcRunner.Kernel.ProviderExecution
   alias PtcRunner.Kernel.ProviderRegistry
+  alias PtcRunner.Kernel.ProviderRuntimeServices
   alias PtcRunner.Kernel.PublicationAuthority
   alias PtcRunner.Kernel.RunBuilder
   alias PtcRunner.Kernel.RunCoordinator
+  alias PtcRunner.Kernel.SelectionRules
 
   test "provider-free execution returns sealed path-free publication evidence" do
     {prepared, catalog} = prepared_run("(return {\"answer\" 42})")
     assert {:ok, authority} = PublicationAuthority.new([])
 
     assert {:ok, outcome} = RunCoordinator.execute(prepared, authority)
+    assert ExecutionOutcome.valid?(outcome)
+
+    assert {:ok, %{value: %{"answer" => 42}}, :normal} =
+             RunBuilder.publish_execution(outcome, authority)
+
+    assert :ok = PreparedRun.close(prepared)
+    assert :ok = InstallationCatalog.close(catalog)
+  end
+
+  test "provider-backed execution uses the one-shot owner and returns sealed evidence" do
+    {prepared, catalog, services} = provider_prepared_run()
+    assert {:ok, execution} = ProviderExecution.new(catalog, services, [])
+    assert ProviderExecution.valid?(execution)
+    assert {:ok, authority} = PublicationAuthority.new([])
+
+    assert {:ok, outcome} =
+             RunCoordinator.execute(prepared, authority, execution, fn _url ->
+               flunk("ordinary provider execution must not notify authorization")
+             end)
+
     assert ExecutionOutcome.valid?(outcome)
 
     assert {:ok, %{value: %{"answer" => 42}}, :normal} =
@@ -312,6 +337,78 @@ defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
     assert {:ok, catalog} = InstallationCatalog.new()
     assert {:ok, prepared} = RunCoordinator.prepare(request, catalog)
     {prepared, catalog}
+  end
+
+  defp provider_prepared_run do
+    {:ok, rules} = SelectionRules.new(fields: %{}, cross_rules: [], named_sets: %{})
+
+    {:ok, descriptor} =
+      ProviderDescriptor.new(
+        source: :custom,
+        installation_revision: "owned-v1",
+        credential_names: [],
+        authorization_mode: :none,
+        data_class: :normal,
+        accepts_data: [:normal],
+        requires: [],
+        provides: [],
+        destinations: [:workflow],
+        workflow_llm?: false,
+        connectivity_mode: :none,
+        probe_effect: nil,
+        selection_validation: :declarative,
+        selection_rules: rules,
+        authority_fingerprint: nil,
+        local_preflight: :none
+      )
+
+    {:ok, capability} =
+      Capability.new(
+        name: "fixture",
+        input_schema: %{"type" => "object", "additionalProperties" => false},
+        callback: fn _arguments -> {:ok, %{}} end
+      )
+
+    staged = fn _selection, _context ->
+      {:ok,
+       %{
+         credential_names: [],
+         preflight: fn -> {:ok, fn %{} -> {:ok, capability} end} end
+       }}
+    end
+
+    registration = %{
+      descriptor: descriptor,
+      implementation: %{builder: staged},
+      authority: nil
+    }
+
+    assert {:ok, catalog} = InstallationCatalog.new(%{"selected" => registration})
+    assert {:ok, services} = ProviderRuntimeServices.new()
+
+    manifest = %{
+      "version" => 1,
+      "workflow" => %{
+        "components" => [%{"id" => "app", "path" => "main.clj"}],
+        "entry" => "app/run"
+      },
+      "input" => %{"value" => %{}},
+      "providers" => %{
+        "workflow" => [%{"name" => "selected", "config" => %{}}],
+        "mission" => []
+      }
+    }
+
+    documents = %{
+      "ptc.json" => Jason.encode!(manifest),
+      "main.clj" => "(ns app) (defn run [_input] (return {\"answer\" 42}))"
+    }
+
+    assert {:ok, request} =
+             ApplicationPackage.request_memory("ptc.json", documents, result_projection: :json)
+
+    assert {:ok, prepared} = RunCoordinator.prepare(request, catalog)
+    {prepared, catalog, services}
   end
 
   defp oversized_metadata_prepared_run do
