@@ -1,9 +1,18 @@
 # Evidence: a single-pass incident compiler against the agent loop
 
 **Status:** experiment record and handoff, 2026-08-02/03, branch
-`worktree-incident-evidence-compiler`. One model, one corpus; ten reps per cell
-for `fast` and `loop`, three for `authored`. Nothing here is a release claim;
-see *Limits* before quoting any number.
+`worktree-incident-evidence-compiler`, extended 2026-08-04. One model, two
+corpora, 84 recorded runs:
+
+| set | corpus | runs | file |
+| --- | --- | --- | --- |
+| `fast` / `loop`, ten reps per cell | 3 incidents, 9-13 records | 60 | `paired-2026-08-03*.jsonl` |
+| `authored`, three reps | same | 9 | `authored-2026-08-03.jsonl` |
+| all three arms | `schema-migration-stall`, 332 records | 9 | `stress-2026-08-03.jsonl` |
+| coverage-aware arms | same | 6 | `coverage-2026-08-04.jsonl` |
+
+Nothing here is a release claim; see *Limits* before quoting any number, and
+*Conclusion* before quoting the comparison at all.
 
 The branch is rebased onto `origin/main` and has no PR open. The tagged-union
 contract fix this branch once carried is no longer outstanding: `main` landed
@@ -518,43 +527,92 @@ directory. That is why the two manifests sit in `incident_compiler/` and point
 *down* into `experiments/components/`, rather than living beside the components
 they select. Moving them produces `:invalid_component`.
 
+## Conclusion
+
+**On a corpus where retrieval cannot fail, the single pass wins, and
+model-authored retrieval holds up.** At ten reps per cell, `fast` reaches a
+0.86 median required-fact recall at one model call against `loop`'s 0.60 at
+fourteen, and the difference survives a permutation test that respects incident
+as a blocking factor (p=0.017). `authored` matches `fast`'s median at one extra
+call with a far tighter spread — 0.71-0.86 against 0.00-1.00 — and that
+consistency, unlike the median, holds up when tested against a resample of
+`fast` under the authored arm's own design (p=0.0002 for the spread, p=0.24 for
+the mean).
+
+**The scope condition is the finding, not a caveat on it.** The moment
+retrieval *can* fail, all three arms fail together and whatever separates a
+single pass from a loop becomes invisible behind a failure belonging to
+neither. Loop-versus-single-pass is only a meaningful question once retrieval
+is solved, and it is solved in none of the three: no arm reads `matched` or
+`truncated`, so `fast` takes the 50 the search caps at and `authored` takes 160,
+which is eight sources times a default nobody chose.
+
+**The reasoning layer is not what is broken.** Across all 84 runs nothing
+fabricated a citation. On the stress corpus the published reports correctly
+said "no indication of a schema migration stall" and named the missing records
+precisely. What looked like a catastrophic score was a retrieval failure
+wearing a reasoning metric's clothes — see *The stress corpus*, and note that
+this was misread here first and corrected only by reading the reports.
+
 ## Next step
 
-**A hard case. Everything else is now waiting on it.** Reps 4-10 are done and
-the medians are settled; running more of the same corpus buys nothing. Two
-separate mechanisms are blocked on the same missing input:
+In order, and the first is a precondition for everything after it.
 
-- `fit/handles?` answers yes 12/12 here because there is no task it should
-  reject, so triage cannot be validated.
-- The `authored` arm has now run, and its result is bounded by the same
-  ceiling: it matches `fast`'s median at one extra call, because a corpus where
-  fetching everything already fits leaves an authored program nothing to be
-  cleverer about. Its one real finding — a far tighter spread — is the kind of
-  claim that needs a corpus where the arms can actually diverge.
+1. **Fix retrieval in all three arms.** Read `matched`, page until the count is
+   reached. A few lines in each arm. Until this is done no large-corpus
+   comparison of the arms measures anything about the arms.
+2. **Split the metric.** Report retrieval coverage beside
+   `required_fact_recall`, so "never saw the record" and "had it and missed it"
+   stop sharing the number 0.00. The `coverage` annotation already carries what
+   is needed.
+3. **Give the prompt an abstention rule.** Today the only guidance on missing
+   evidence tells the model to record an open question *inside* a report, while
+   `insufficient_evidence` appears solely as an unexplained line of schema. One
+   line, and independently testable: does coverage short of total produce the
+   abstention branch?
+4. **Then the guardrail**, which is the generalisable version of item 1 and
+   should not be attempted before it. The runtime refuses a `return` from an
+   evaluation that consumed a truncated result. Design notes are in *Runtime
+   capabilities confirmed*: the kernel must be told which output field means
+   incomplete (the `snapshot_identity` block in `ptc-host.json` is the
+   precedent), the enforcement point is the evaluation boundary where
+   `capability_activity?` is already derived, and it cannot ride on prints
+   because those are dropped for every non-`:continued` outcome.
+5. **Re-run the stress corpus** once 1-3 land. That is the arm comparison this
+   corpus was built for and has not yet delivered.
 
-One incident with hundreds of records, or heavy cross-referencing, makes both
-testable at once. Phase 2's SREGym capture is the plan's route to it and remains
-its one open item.
+**Do not** add reps on the 13-record corpus. Those medians are settled.
 
-Both arms now pass values as parameters rather than concatenating them into
-source, and the authored arm checks its program before running it. Its nine
-runs are recorded above. What remains:
+## Open items and traps
 
-1. **More reps on the authored arm.** Nine runs establish the variance result
-   at p=0.0002 but leave the mean unsettled, and the repair path untested
-   because nothing it wrote ever failed to compile.
-2. **Exercise the persistence result.** `eval-source` definitions survive
-   across evaluations within a run (see *Runtime capabilities confirmed*), so
-   the richer shape is authoring a helper library once and running several cheap
-   programs against it — filter, aggregate, join — rather than one monolithic
-   fetch. That shape does nothing on 11-13 records and is the whole point on
-   hundreds.
+- **The authored arm's `evidence.get` failure is undiagnosed.** On the
+  coverage-aware runs its programs fetch past 250 records and the 251st call
+  errors — not a limit (4096 ceiling, no protocol errors, 596s remaining).
+- **Its baseline at the raised limits is unmeasured**, so the re-authoring turn
+  has no clean before-and-after.
+- **Raising a limit rewrites the prompt.** `mission_capability_calls` and
+  `mission_capability_calls_per_name` are part of `limit_projection` in
+  `mission_inventory.ex`, which is the mission model context handed to the
+  authoring call. Changing limits between conditions silently changes the
+  input; pin them across any comparison. This confounded the coverage
+  experiment here and nothing in the harness flagged it.
+- **`check-source` resolves names, not shapes.** Every stress program was
+  name-correct, passed the check, and retrieved a fraction of the corpus.
+- **The stress corpus is regenerable** with
+  `mix run incident_compiler/tools/gen_stress_corpus.exs`; the generator
+  asserts each oracle token appears in the record it names and in no filler
+  record.
+- Filed from this work: [#1172](https://github.com/andreasronge/ptc_runner/issues/1172)
+  (private sessions redact the analyst's own identifiers, hit five times in one
+  session). [#1168](https://github.com/andreasronge/ptc_runner/issues/1168)
+  was closed by #1169, which shipped `check-source` and parameterized
+  evaluation. [#1167](https://github.com/andreasronge/ptc_runner/issues/1167)
+  (promotion) is open and being worked separately.
 
-After those, unchanged from before: **the Phase 3 pilot proper**, with bars
-committed first, and then the decision about whether `fast` (and possibly
-`authored`) becomes a second shipped entry point beside the loop.
-
-This record is evidence for designing that pilot, not a substitute for it.
+After those: **the Phase 3 pilot proper**, with bars committed first, and then
+the decision about whether `fast` — and now possibly `authored` — becomes a
+second shipped entry point beside the loop. This record is evidence for
+designing that pilot, not a substitute for it.
 
 The components under `experiments/` are experiment-grade: they work and are
 reproducible, but they have no tests and are not part of the shipped
