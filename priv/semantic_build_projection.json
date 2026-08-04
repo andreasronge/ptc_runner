@@ -129,7 +129,7 @@
     "req_llm",
     "telemetry"
   ],
-  "source_closure_hash": "87c1ee73e3a9715f88f088008c4278947f1cd93c505a52441545566da7274be6",
+  "source_closure_hash": "7490d74fc53199b46c3c4e6ef23d447413d8bf93e4cacd833d4585956cdc8ca1",
   "sources": [
     {
       "bytes": 870,
@@ -247,9 +247,9 @@
       "sha256": "2e352d254afdc26086197a800a898d7d5eec653e5be6c3f9440f2ad1fa71acfc"
     },
     {
-      "bytes": 2536,
+      "bytes": 2711,
       "path": "lib/ptc_runner/kernel/deadline.ex",
-      "sha256": "54d8838228174e9b9326952872d05ea0bce9a40c31a7d73104228e56bc56bb81"
+      "sha256": "29feacab46c7ea01f1281736fb83aeb5f53116dc868bbadd2ea6d238e97b8418"
     },
     {
       "bytes": 4275,
@@ -372,9 +372,9 @@
       "sha256": "102e7c52d89d15c23660358e88a78c23acdf89a1f58e665ee595640bc068f39f"
     },
     {
-      "bytes": 18387,
+      "bytes": 18490,
       "path": "lib/ptc_runner/kernel/installation_catalog.ex",
-      "sha256": "9976eccf9bcb97ea520b7dec637b35e4e9952c7d9a431262895afc2bd1727b19"
+      "sha256": "2bce9cf12711c3fa680018d0836e5a376b28e91ff347490fb3592fb619af626b"
     },
     {
       "bytes": 11019,
@@ -452,9 +452,9 @@
       "sha256": "af3d6f49540c4561648e52a90eb99199ff43789bbf1f9e14998aacb77a397109"
     },
     {
-      "bytes": 17691,
+      "bytes": 18077,
       "path": "lib/ptc_runner/kernel/mcp_oauth/authorization.ex",
-      "sha256": "779708e902c587942ee6819ab72fc15f5b7ef7ac1d82f241b63ddf672f13cbd2"
+      "sha256": "bbad7da96ef09a0af416247d6b3dfc293b653ec1be012880a612aee8979371b3"
     },
     {
       "bytes": 7758,
@@ -467,9 +467,9 @@
       "sha256": "96a5aa27e4bec2944e97b5bff269669940b55cf27617d14071088491746caa3e"
     },
     {
-      "bytes": 3328,
+      "bytes": 3376,
       "path": "lib/ptc_runner/kernel/mcp_oauth/context.ex",
-      "sha256": "a1ea2ef942b8ef85209f3af8745b702354ca5589a671d8a2e3d3027af2a26cad"
+      "sha256": "ea00d91f8ffde62086d81648c957a864f6c4b56b11fd37cd0dca648cc71c8749"
     },
     {
       "bytes": 175,
@@ -552,9 +552,9 @@
       "sha256": "6af87f48c72a1abee10ba5d8573a3f78dce6756a6de483336232a63e7b16a36a"
     },
     {
-      "bytes": 11825,
+      "bytes": 12301,
       "path": "lib/ptc_runner/kernel/mcp_oauth/store.ex",
-      "sha256": "f7ab57592b8b0da37881c5ef5cde38e595a94cba997c0ee584e213ceacc5f043"
+      "sha256": "1306f47c6c37067fd8113fccc9867bea18305edf5af0d771567a27778d78ff2c"
     },
     {
       "bytes": 45528,
@@ -567,9 +567,9 @@
       "sha256": "17956a7981f59a7291f6f08efe298357d42004577493fe26a277dfe46501a3a6"
     },
     {
-      "bytes": 28347,
+      "bytes": 28847,
       "path": "lib/ptc_runner/kernel/mcp_oauth/token_manager.ex",
-      "sha256": "4c65ea65d5d0c5847314ae10dc3ffd26d5e1c537d8091e212da06f6d339ced76"
+      "sha256": "c16198e55c4228653e212064e3a03871202f06e1f3afdfcf46a98acff169f63c"
     },
     {
       "bytes": 189,

@@ -8,6 +8,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.Context do
   principal lifecycle epoch from the configured store.
   """
 
+  alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.MCPOAuth.Authority
   alias PtcRunner.Kernel.MCPOAuth.GrantKey
   alias PtcRunner.Kernel.MCPOAuth.Store
@@ -52,7 +53,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.Context do
          resolver when is_function(resolver, 2) <-
            Keyword.get(opts, :credential_resolver, &missing_credential/2),
          {:ok, principal_epoch} <-
-           Store.claim_principal(store, tenant_id, principal_id, 5_000) do
+           Store.claim_principal(store, tenant_id, principal_id, Deadline.new(5_000)) do
       {:ok,
        %__MODULE__{
          tenant_id: tenant_id,

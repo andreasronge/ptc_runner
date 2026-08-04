@@ -12,6 +12,7 @@ defmodule PtcRunner.Kernel.InstallationCatalog do
   """
 
   alias PtcRunner.Kernel.Attestation
+  alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.HostInstallation
   alias PtcRunner.Kernel.HostInstallationAuthority
   alias PtcRunner.Kernel.Limits
@@ -398,7 +399,12 @@ defmodule PtcRunner.Kernel.InstallationCatalog do
   end
 
   defp activate_oauth_registry(catalog, services, authorities, claims, context, owner) do
-    case Store.claim_authorities(context.store, context.tenant_id, claims, 5_000) do
+    case Store.claim_authorities(
+           context.store,
+           context.tenant_id,
+           claims,
+           Deadline.new(5_000)
+         ) do
       {:ok, epochs} ->
         runtimes =
           Map.new(authorities, fn {name, authority} ->

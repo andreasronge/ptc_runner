@@ -29,6 +29,9 @@ defmodule PtcRunner.Kernel.MCPOAuth.Store do
   @typedoc "Closed transaction command issued by this module."
   @type operation :: tuple()
 
+  @typedoc false
+  @type request_deadline :: Deadline.t() | pos_integer()
+
   @callback transact(adapter_state :: term(), operation(), Deadline.t()) :: term()
   @callback local_identity(adapter_state :: term()) :: term()
   @callback register_manager(adapter_state :: term(), pid()) :: :ok | {:error, atom()}
@@ -69,20 +72,20 @@ defmodule PtcRunner.Kernel.MCPOAuth.Store do
     _kind, _reason -> {:error, :store_error}
   end
 
-  @spec claim_principal(t(), binary(), binary(), pos_integer()) ::
+  @spec claim_principal(t(), binary(), binary(), request_deadline()) ::
           {:ok, term()} | {:error, atom()}
   def claim_principal(store, tenant_id, principal_id, timeout),
     do: call(store, {:claim_principal, tenant_id, principal_id}, timeout)
 
-  @spec claim_authorities(t(), binary(), [{binary(), binary()}], pos_integer()) ::
+  @spec claim_authorities(t(), binary(), [{binary(), binary()}], request_deadline()) ::
           {:ok, %{binary() => term()}} | {:error, atom()}
   def claim_authorities(store, tenant_id, authorities, timeout),
     do: call(store, {:claim_authorities, tenant_id, authorities}, timeout)
 
-  @spec time_anchor(t(), pos_integer()) :: {:ok, term()} | {:error, atom()}
+  @spec time_anchor(t(), request_deadline()) :: {:ok, term()} | {:error, atom()}
   def time_anchor(store, timeout), do: call(store, {:time_anchor}, timeout)
 
-  @spec load_grant(t(), GrantKey.t(), pos_integer()) ::
+  @spec load_grant(t(), GrantKey.t(), request_deadline()) ::
           {:ok, map() | nil} | {:error, atom()}
   def load_grant(store, %GrantKey{} = key, timeout),
     do: call(store, {:load_grant, key}, timeout)
@@ -92,7 +95,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.Store do
           GrantKey.t(),
           :refresh | :authorization,
           pos_integer(),
-          pos_integer()
+          request_deadline()
         ) ::
           {:ok, %{fence: term(), starting_generation: non_neg_integer()}}
           | {:error, atom()}
@@ -100,7 +103,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.Store do
       when mode in [:refresh, :authorization] and is_integer(ttl_ms) and ttl_ms > 0,
       do: call(store, {:acquire_mutation, key, mode, ttl_ms}, timeout)
 
-  @spec begin_mutation_dispatch(t(), GrantKey.t(), term(), map(), pos_integer()) ::
+  @spec begin_mutation_dispatch(t(), GrantKey.t(), term(), map(), request_deadline()) ::
           :ok | {:error, atom()}
   def begin_mutation_dispatch(store, %GrantKey{} = key, fence, binding, timeout)
       when is_map(binding),
@@ -113,7 +116,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.Store do
           map(),
           pos_integer(),
           term(),
-          pos_integer()
+          request_deadline()
         ) :: {:ok, map()} | {:error, atom()}
   def commit_grant(store, %GrantKey{} = key, fence, grant, ttl_ms, anchor, timeout),
     do: call(store, {:commit_grant, key, fence, grant, ttl_ms, anchor}, timeout)
@@ -123,7 +126,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.Store do
           GrantKey.t(),
           term(),
           :not_dispatched | :possibly_dispatched | :invalid_grant,
-          pos_integer()
+          request_deadline()
         ) :: :ok | {:error, atom()}
   def fail_mutation(store, %GrantKey{} = key, fence, outcome, timeout),
     do: call(store, {:fail_mutation, key, fence, outcome}, timeout)
@@ -135,23 +138,30 @@ defmodule PtcRunner.Kernel.MCPOAuth.Store do
   A refresh is poisoned and an authorization-code flow is terminalized. Lease
   expiry alone is not proof of fencing and is insufficient for this operation.
   """
-  @spec recover_mutation(t(), GrantKey.t(), term(), :worker_fenced, pos_integer()) ::
+  @spec recover_mutation(t(), GrantKey.t(), term(), :worker_fenced, request_deadline()) ::
           :ok | {:error, atom()}
   def recover_mutation(store, %GrantKey{} = key, fence, :worker_fenced, timeout),
     do: call(store, {:recover_mutation, key, fence, :worker_fenced}, timeout)
 
-  @spec mark_access_rejected(t(), GrantKey.t(), non_neg_integer(), pos_integer()) ::
+  @spec mark_access_rejected(t(), GrantKey.t(), non_neg_integer(), request_deadline()) ::
           :ok | {:error, atom()}
   def mark_access_rejected(store, %GrantKey{} = key, generation, timeout),
     do: call(store, {:mark_access_rejected, key, generation}, timeout)
 
-  @spec admit_mcp(t(), GrantKey.t(), non_neg_integer(), pos_integer(), pos_integer()) ::
+  @spec admit_mcp(t(), GrantKey.t(), non_neg_integer(), pos_integer(), request_deadline()) ::
           {:ok, term()} | {:error, atom()}
   def admit_mcp(store, %GrantKey{} = key, generation, ttl_ms, timeout) do
     admit_mcp(store, key, generation, self(), ttl_ms, timeout)
   end
 
-  @spec admit_mcp(t(), GrantKey.t(), non_neg_integer(), pid(), pos_integer(), pos_integer()) ::
+  @spec admit_mcp(
+          t(),
+          GrantKey.t(),
+          non_neg_integer(),
+          pid(),
+          pos_integer(),
+          request_deadline()
+        ) ::
           {:ok, term()} | {:error, atom()}
   def admit_mcp(store, %GrantKey{} = key, generation, worker_pid, ttl_ms, timeout)
       when is_pid(worker_pid) do
@@ -159,37 +169,44 @@ defmodule PtcRunner.Kernel.MCPOAuth.Store do
     call(store, {:admit_mcp, admission, key, generation, worker_pid, ttl_ms}, timeout)
   end
 
-  @spec release_mcp(t(), term(), pos_integer()) :: :ok | {:error, atom()}
+  @spec release_mcp(t(), term(), request_deadline()) :: :ok | {:error, atom()}
   def release_mcp(store, admission, timeout),
     do: call(store, {:release_mcp, admission}, timeout)
 
-  @spec begin_flow(t(), GrantKey.t(), map(), pos_integer(), pos_integer()) ::
+  @spec begin_flow(t(), GrantKey.t(), map(), pos_integer(), request_deadline()) ::
           {:ok, map()} | {:error, atom()}
   def begin_flow(store, %GrantKey{} = key, flow, ttl_ms, timeout),
     do: call(store, {:begin_flow, key, flow, ttl_ms}, timeout)
 
-  @spec consume_callback(t(), GrantKey.t(), term(), binary(), binary() | nil, pos_integer()) ::
+  @spec consume_callback(
+          t(),
+          GrantKey.t(),
+          term(),
+          binary(),
+          binary() | nil,
+          request_deadline()
+        ) ::
           {:ok, map()} | {:error, atom()}
   def consume_callback(store, %GrantKey{} = key, flow_id, state, issuer, timeout),
     do: call(store, {:consume_callback, key, flow_id, state, issuer}, timeout)
 
-  @spec deny_flow(t(), GrantKey.t(), term(), binary(), binary() | nil, pos_integer()) ::
+  @spec deny_flow(t(), GrantKey.t(), term(), binary(), binary() | nil, request_deadline()) ::
           :ok | {:error, atom()}
   def deny_flow(store, %GrantKey{} = key, flow_id, state, issuer, timeout),
     do: call(store, {:deny_flow, key, flow_id, state, issuer}, timeout)
 
-  @spec cancel_flow(t(), GrantKey.t(), term(), pos_integer()) ::
+  @spec cancel_flow(t(), GrantKey.t(), term(), request_deadline()) ::
           :ok | {:error, atom()}
   def cancel_flow(store, %GrantKey{} = key, flow_id, timeout),
     do: call(store, {:cancel_flow, key, flow_id}, timeout)
 
-  @spec begin_code_dispatch(t(), GrantKey.t(), term(), term(), map(), pos_integer()) ::
+  @spec begin_code_dispatch(t(), GrantKey.t(), term(), term(), map(), request_deadline()) ::
           :ok | {:error, atom()}
   def begin_code_dispatch(store, %GrantKey{} = key, flow_id, fence, binding, timeout)
       when is_map(binding),
       do: call(store, {:begin_code_dispatch, key, flow_id, fence, binding}, timeout)
 
-  @spec terminalize_flow(t(), GrantKey.t(), term(), pos_integer()) ::
+  @spec terminalize_flow(t(), GrantKey.t(), term(), request_deadline()) ::
           :ok | {:error, atom()}
   def terminalize_flow(store, %GrantKey{} = key, flow_id, timeout),
     do: call(store, {:terminalize_flow, key, flow_id}, timeout)
@@ -200,12 +217,12 @@ defmodule PtcRunner.Kernel.MCPOAuth.Store do
           non_neg_integer(),
           MapSet.t(binary()),
           pos_integer(),
-          pos_integer()
+          request_deadline()
         ) :: {:ok, non_neg_integer()} | {:error, atom()}
   def upsert_requirement(store, %GrantKey{} = key, generation, scopes, ttl_ms, timeout),
     do: call(store, {:upsert_requirement, key, generation, scopes, ttl_ms}, timeout)
 
-  @spec load_requirement(t(), GrantKey.t(), pos_integer()) ::
+  @spec load_requirement(t(), GrantKey.t(), request_deadline()) ::
           {:ok, map() | nil} | {:error, atom()}
   def load_requirement(store, %GrantKey{} = key, timeout),
     do: call(store, {:load_requirement, key}, timeout)
@@ -218,7 +235,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.Store do
           {:replace, binary()} | :release,
           binary(),
           pos_integer(),
-          pos_integer()
+          request_deadline()
         ) :: {:ok, map()} | {:error, atom()}
   def begin_authority_retirement(
         store,
@@ -238,7 +255,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.Store do
           timeout
         )
 
-  @spec complete_authority_retirement(t(), term(), term(), pos_integer()) ::
+  @spec complete_authority_retirement(t(), term(), term(), request_deadline()) ::
           {:ok, term()} | {:error, atom()}
   def complete_authority_retirement(store, intent_id, coordinator, timeout),
     do: call(store, {:complete_authority_retirement, intent_id, coordinator}, timeout)
@@ -250,7 +267,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.Store do
           term(),
           binary(),
           pos_integer(),
-          pos_integer()
+          request_deadline()
         ) :: {:ok, map()} | {:error, atom()}
   def begin_principal_retirement(
         store,
@@ -269,23 +286,25 @@ defmodule PtcRunner.Kernel.MCPOAuth.Store do
           timeout
         )
 
-  @spec complete_principal_retirement(t(), term(), term(), pos_integer()) ::
+  @spec complete_principal_retirement(t(), term(), term(), request_deadline()) ::
           {:ok, term()} | {:error, atom()}
   def complete_principal_retirement(store, intent_id, coordinator, timeout),
     do: call(store, {:complete_principal_retirement, intent_id, coordinator}, timeout)
 
-  @spec inspect_retirements(t(), binary(), pos_integer()) ::
+  @spec inspect_retirements(t(), binary(), request_deadline()) ::
           {:ok, [map()]} | {:error, atom()}
   def inspect_retirements(store, tenant_id, timeout),
     do: call(store, {:inspect_retirements, tenant_id}, timeout)
 
-  defp call({module, adapter_state}, operation, timeout)
-       when is_atom(module) and is_integer(timeout) and timeout > 0 do
-    deadline = Deadline.new(timeout)
+  defp call(store, operation, timeout) when is_integer(timeout) and timeout > 0,
+    do: call(store, operation, Deadline.new(timeout))
 
-    if Deadline.live?(deadline),
-      do: module.transact(adapter_state, operation, deadline),
-      else: {:error, :timeout}
+  defp call({module, adapter_state}, operation, deadline) when is_atom(module) do
+    cond do
+      not Deadline.valid?(deadline) -> {:error, :invalid_store}
+      Deadline.expired?(deadline) -> {:error, :timeout}
+      true -> module.transact(adapter_state, operation, deadline)
+    end
   rescue
     _exception -> {:error, :store_error}
   catch

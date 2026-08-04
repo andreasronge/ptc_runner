@@ -1,6 +1,7 @@
 defmodule PtcRunner.Kernel.MCPOAuth.StoreMemoryTest do
   use ExUnit.Case, async: true
 
+  alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.MCPOAuth.Authority
   alias PtcRunner.Kernel.MCPOAuth.Context
   alias PtcRunner.Kernel.MCPOAuth.Primitives
@@ -15,6 +16,10 @@ defmodule PtcRunner.Kernel.MCPOAuth.StoreMemoryTest do
 
     assert {:ok, {^module, :adapter_state}} = Store.new(module, :adapter_state)
     assert Code.loaded?(module)
+  end
+
+  test "accepts an already anchored caller deadline", context do
+    assert {:ok, _anchor} = Store.time_anchor(context.store, Deadline.new(1_000))
   end
 
   setup do

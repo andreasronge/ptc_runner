@@ -22,6 +22,11 @@ defmodule PtcRunner.Kernel.Deadline do
       when is_integer(timeout_ms) and timeout_ms > 0 and is_integer(anchor_ms),
       do: %__MODULE__{expires_at_ms: anchor_ms + timeout_ms}
 
+  @doc false
+  @spec from_expires_at(integer()) :: t()
+  def from_expires_at(expires_at_ms) when is_integer(expires_at_ms),
+    do: %__MODULE__{expires_at_ms: expires_at_ms}
+
   @doc "Returns the non-negative duration remaining before the cutoff."
   @spec remaining(t()) :: non_neg_integer()
   def remaining(%__MODULE__{} = deadline), do: remaining(deadline, now_ms())
