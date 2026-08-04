@@ -470,10 +470,21 @@ defmodule Mix.Tasks.Ptc.Repl do
       "(limit: #{limit_bytes} bytes)"
   end
 
+  defp profile_setup_error(:empty_traces_resource),
+    do: empty_resource_error("traces", "*.jsonl trace files")
+
+  defp profile_setup_error(:empty_inspection_resource),
+    do: empty_resource_error("inspection", "*.inspection.jsonl records")
+
   defp profile_setup_error(reason) when is_atom(reason),
     do: "ptc.repl profile setup failed: #{reason}"
 
   defp profile_setup_error(_reason), do: "ptc.repl profile setup failed"
+
+  defp empty_resource_error(resource, artifacts) do
+    "ptc.repl profile setup failed: the #{resource} resource directory contains no " <>
+      "#{artifacts} at its own level; artifacts in subdirectories are not captured"
+  end
 
   defp maybe_private_terminal(builder_options, opts) do
     if Keyword.get(opts, :private_terminal, false),
@@ -700,10 +711,34 @@ defmodule Mix.Tasks.Ptc.Repl do
         "profile_id" => info.profile_id,
         "profile_digest" => info.profile_digest,
         "session_id" => info.session_id,
-        "namespaces" => info.namespaces
+        "namespaces" => info.namespaces,
+        "capture" => Map.new(capture_summary(info.snapshot))
       })
+    else
+      Enum.each(capture_summary(info.snapshot), fn {resource, counts} ->
+        Mix.shell().info(
+          "Captured #{resource}: #{pluralize(counts["file_count"], "file")}, " <>
+            pluralize(counts["run_count"], "run")
+        )
+      end)
     end
   end
+
+  # The log profile reports its one trace capture directly; the private profile
+  # reports one entry per captured resource.
+  defp capture_summary(%{traces: traces, inspection: inspection}),
+    do: capture_summary(traces, "traces") ++ capture_summary(inspection, "inspection")
+
+  defp capture_summary(snapshot), do: capture_summary(snapshot, "traces")
+
+  defp capture_summary(%{file_count: file_count, run_count: run_count}, resource)
+       when is_integer(file_count) and is_integer(run_count),
+       do: [{resource, %{"file_count" => file_count, "run_count" => run_count}}]
+
+  defp capture_summary(_info, _resource), do: []
+
+  defp pluralize(1, noun), do: "1 #{noun}"
+  defp pluralize(count, noun), do: "#{count} #{noun}s"
 
   defp present_profile_result(opts, index, input_kind, result) do
     if output_format(opts) == :jsonl do

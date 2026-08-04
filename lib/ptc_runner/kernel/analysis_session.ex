@@ -10,6 +10,12 @@ defmodule PtcRunner.Kernel.AnalysisSession do
   against new forms. Close and abort finalize resources and persistence but
   deliberately leave this GenServer alive for idempotent close retry and info;
   every host must eventually call `stop/1`.
+
+  A session whose profile declares a private result class projects its failure
+  messages through `PtcRunner.Kernel.PrivateDiagnostic`, which rebuilds them
+  from the submitted source instead of forwarding evaluator text. Every error
+  map this module emits carries `message_redacted?` so a withheld diagnostic is
+  distinguishable from one that was never produced.
   """
   use GenServer
 
@@ -20,6 +26,7 @@ defmodule PtcRunner.Kernel.AnalysisSession do
   alias PtcRunner.Kernel.Evaluation
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.JSONValue
+  alias PtcRunner.Kernel.PrivateDiagnostic
   alias PtcRunner.Kernel.RunState
   alias PtcRunner.Kernel.SessionTrace
   alias PtcRunner.Lisp.Format
@@ -173,7 +180,7 @@ defmodule PtcRunner.Kernel.AnalysisSession do
           projection_boundary: :public
         )
 
-      projection = project_result(detailed, state)
+      projection = project_result(detailed, state, source)
       terminal = terminal_result(detailed, state.run_state)
 
       next = Map.update!(state, :evaluation_count, &(&1 + 1))
@@ -332,7 +339,7 @@ defmodule PtcRunner.Kernel.AnalysisSession do
     :ok
   end
 
-  defp project_result(detailed, state) do
+  defp project_result(detailed, state, source) do
     {prints, prints_truncated?} = bounded_prints(Map.get(detailed, :prints, []))
 
     projection = %{
@@ -345,7 +352,7 @@ defmodule PtcRunner.Kernel.AnalysisSession do
       formatted_truncated?: false,
       prints: prints,
       prints_truncated?: prints_truncated?,
-      error: error_projection(detailed, state),
+      error: error_projection(detailed, state, source),
       evaluation_id: detailed.evaluation_id,
       duration_ms: detailed.duration_ms,
       usage: usage_projection(state)
@@ -465,16 +472,20 @@ defmodule PtcRunner.Kernel.AnalysisSession do
 
   defp bounded_prints(_prints), do: {[], true}
 
-  defp error_projection(%{outcome: outcome}, _state) when outcome in [:continued, :returned],
-    do: nil
+  defp error_projection(%{outcome: outcome}, _state, _source)
+       when outcome in [:continued, :returned],
+       do: nil
 
-  defp error_projection(result, state) do
+  defp error_projection(result, state, source) do
     details = Map.get(result, :details, %{})
+    kind = Map.get(result, :kind, result.outcome)
+    {message, redacted?} = error_message(kind, details, state, source)
 
     %{
-      kind: Map.get(result, :kind, result.outcome),
+      kind: kind,
       reason: Map.get(result, :reason),
-      message: error_message(details, state),
+      message: message,
+      message_redacted?: redacted?,
       capability_activity?:
         Map.get(result, :capability_activity?, Map.get(details, :capability_activity?)),
       capability_failure?: Map.get(result, :capability_failure?),
@@ -482,11 +493,19 @@ defmodule PtcRunner.Kernel.AnalysisSession do
     }
   end
 
-  defp error_message(_details, %{profile: %{identity: %{"result_data_class" => class}}})
+  # A private session never forwards evaluator message text; it rebuilds what
+  # the operator's own source already says. See `PrivateDiagnostic`.
+  defp error_message(
+         kind,
+         details,
+         %{profile: %{identity: %{"result_data_class" => class}}},
+         source
+       )
        when class != "normal",
-       do: "private evaluation failed"
+       do: PrivateDiagnostic.project(kind, details, source)
 
-  defp error_message(details, _state), do: bounded_message(Map.get(details, :message))
+  defp error_message(_kind, details, _state, _source),
+    do: {bounded_message(Map.get(details, :message)), false}
 
   defp bounded_message(message) when is_binary(message), do: elem(clip_utf8(message, 4_096), 0)
   defp bounded_message(_message), do: nil
@@ -515,7 +534,9 @@ defmodule PtcRunner.Kernel.AnalysisSession do
       error: %{
         kind: :result_exceeded,
         reason: :terminal_result_bytes,
+        # A fixed profile literal, so no private text is withheld here.
         message: result_limit_message(profile_id),
+        message_redacted?: false,
         capability_activity?: nil,
         capability_failure?: nil,
         retryable?: nil
