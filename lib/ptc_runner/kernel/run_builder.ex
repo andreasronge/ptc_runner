@@ -224,10 +224,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
     case build_active(prepared, registry, session, opts) do
       {:ok, built} ->
         try do
-          case execute_built(built, opts) do
-            {:ok, result} -> {:ok, result, result_class(built.config.event_sink)}
-            other -> other
-          end
+          execute_built(built, opts)
         after
           if built.config.inspection_sink, do: InspectionSink.stop(built.config.inspection_sink)
 
@@ -247,10 +244,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
     case build_prepared(prepared, registry, opts) do
       {:ok, built} ->
         try do
-          case execute_built(built, opts) do
-            {:ok, result} -> {:ok, result, result_class(built.config.event_sink)}
-            other -> other
-          end
+          execute_built(built, opts)
         after
           if built.config.inspection_sink, do: InspectionSink.stop(built.config.inspection_sink)
 
@@ -687,19 +681,34 @@ defmodule PtcRunner.Kernel.RunBuilder do
   defp prefer_cleanup_error(_original, {:error, :provider_cleanup_failed} = cleanup), do: cleanup
   defp prefer_cleanup_error(original, :ok), do: original
 
-  # The provider session is already closed by `Kernel.run_and_events/2`; the
-  # returned terminal batch is the sole input to both persistence paths.
   defp execute_built(built, opts) do
-    {result, terminal_batch} = Kernel.run_and_events(built.entry_source, built.config)
-    result_contract = validate_result(result, built.result_contract)
+    built
+    |> execute_one_shot()
+    |> publish_execution(built, opts)
+  end
 
-    case terminal_batch do
+  # This record is deliberately path-free. `Kernel.run_and_events/2` has
+  # already closed the provider session and frozen the terminal batch; the
+  # separate publication step below is its sole filesystem consumer.
+  defp execute_one_shot(built) do
+    {result, terminal_batch} = Kernel.run_and_events(built.entry_source, built.config)
+
+    %{
+      result: result,
+      result_class: result_class(built.config.event_sink),
+      result_contract: validate_result(result, built.result_contract),
+      terminal_batch: terminal_batch
+    }
+  end
+
+  defp publish_execution(execution, built, opts) do
+    case execution.terminal_batch do
       {:ok, events} ->
-        with :ok <- persist_trace(Keyword.get(opts, :trace), built.config.event_sink, events),
+        with :ok <- persist_trace(Keyword.get(opts, :trace), execution.result_class, events),
              :ok <- persist_inspection(built.config, events),
-             :ok <- result_contract,
-             :ok <- persist_result(result, built.config.event_sink, opts) do
-          result
+             :ok <- execution.result_contract,
+             :ok <- persist_result(execution.result, execution.result_class, opts) do
+          execution_result(execution)
         else
           {:error, {:result_contract_failed, _details}} = error ->
             error
@@ -707,16 +716,25 @@ defmodule PtcRunner.Kernel.RunBuilder do
           {:error, {stage, reason}} ->
             {:error,
              {persistence_failure(stage), reason,
-              disclosable(result, built.config.event_sink, result_contract)}}
+              disclosable(
+                execution.result,
+                execution.result_class,
+                execution.result_contract
+              )}}
         end
 
       {:error, _reason} ->
-        case result_contract do
-          :ok -> result
+        case execution.result_contract do
+          :ok -> execution_result(execution)
           {:error, {:result_contract_failed, _details}} = error -> error
         end
     end
   end
+
+  defp execution_result(%{result: {:ok, result}, result_class: class}),
+    do: {:ok, result, class}
+
+  defp execution_result(%{result: {:error, _reason} = error}), do: error
 
   @spec load_and_build(binary(), ProviderRegistry.t()) ::
           {:ok,
@@ -976,10 +994,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
   def run_with_class(path, registry, opts \\ []) do
     with {:ok, built, opts} <- load_and_build_with_options(path, registry, opts) do
       try do
-        case execute_built(built, opts) do
-          {:ok, result} -> {:ok, result, result_class(built.config.event_sink)}
-          other -> other
-        end
+        execute_built(built, opts)
       after
         if built.config.inspection_sink, do: InspectionSink.stop(built.config.inspection_sink)
 
@@ -999,17 +1014,17 @@ defmodule PtcRunner.Kernel.RunBuilder do
   # A persistence failure is reported by a caller that renders the error, so a
   # private value must not travel inside it. Refusing to write a private value
   # and then printing it in the refusal would defeat the check entirely.
-  defp disclosable(_result, _sink, {:error, {:result_contract_failed, _details}} = error),
+  defp disclosable(_result, _class, {:error, {:result_contract_failed, _details}} = error),
     do: error
 
-  defp disclosable({:ok, %Result{} = result}, sink, :ok) do
-    case result_class(sink) do
+  defp disclosable({:ok, %Result{} = result}, class, :ok) do
+    case class do
       :private -> {:ok, %Result{result | value: :redacted}}
       :normal -> {:ok, result}
     end
   end
 
-  defp disclosable(result, _sink, :ok), do: result
+  defp disclosable(result, _class, :ok), do: result
 
   defp validate_result(_result, nil), do: :ok
 
@@ -1046,9 +1061,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
     end
   end
 
-  defp persist_result({:ok, %Result{} = result}, sink, opts) do
-    class = result_class(sink)
-
+  defp persist_result({:ok, %Result{} = result}, class, opts) do
     case result_destination(opts) do
       {:ok, nil} ->
         :ok
@@ -1064,7 +1077,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
     end
   end
 
-  defp persist_result(_result, _sink, _opts), do: :ok
+  defp persist_result(_result, _class, _opts), do: :ok
 
   defp result_destination(opts) do
     case {Keyword.get(opts, :output), Keyword.get(opts, :private_output)} do
@@ -1093,18 +1106,16 @@ defmodule PtcRunner.Kernel.RunBuilder do
     ValueContract.json_value(value)
   end
 
-  defp persist_trace(nil, _sink, _events), do: :ok
+  defp persist_trace(nil, _class, _events), do: :ok
 
-  defp persist_trace(path, sink, events) when is_binary(path) do
-    private? = EventSink.policy(sink) == :private
-
-    case TraceLog.append_jsonl(path, events, private: private?) do
+  defp persist_trace(path, class, events) when is_binary(path) do
+    case TraceLog.append_jsonl(path, events, private: class == :private) do
       :ok -> :ok
       {:error, reason} -> {:error, {:trace, reason}}
     end
   end
 
-  defp persist_trace(_path, _sink, _events), do: {:error, {:trace, :invalid_trace_log}}
+  defp persist_trace(_path, _class, _events), do: {:error, {:trace, :invalid_trace_log}}
 
   defp persist_inspection(%RunConfig{inspection_sink: nil}, _events), do: :ok
 
