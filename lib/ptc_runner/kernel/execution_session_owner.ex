@@ -411,19 +411,23 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
 
   defp close_owned_inputs(state) do
     state = close_runtime_resources(state)
-    close_registry(state.registry)
     close_prepared(state.prepared)
-    %{state | registry: nil, prepared: nil}
+    %{state | prepared: nil}
   end
 
+  # The worker acquires session, then OAuth memory, then registry, then
+  # listener, so aborting unwinds that order exactly: listener, registry,
+  # memory, session. Closing the registry before its backing store keeps
+  # terminal OAuth persistence available, and closing the session last keeps
+  # its scoped process and port roots alive until every resource that may have
+  # registered one is already closed.
   defp close_runtime_resources(state) do
     if state.oauth_listener, do: LoopbackListener.close(state.oauth_listener)
+    close_registry(state.registry)
+    if state.oauth_memory, do: Memory.close(state.oauth_memory)
 
     if state.provider_session && ProviderSession.alive?(state.provider_session),
       do: ProviderSession.close(state.provider_session)
-
-    close_registry(state.registry)
-    if state.oauth_memory, do: Memory.close(state.oauth_memory)
 
     %{
       state
