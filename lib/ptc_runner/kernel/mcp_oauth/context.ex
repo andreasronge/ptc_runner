@@ -5,7 +5,8 @@ defmodule PtcRunner.Kernel.MCPOAuth.Context do
   Hosts construct a context from already authenticated tenant/principal
   identity. No MCP response, manifest, process dictionary, or application
   environment may supply these values. Construction atomically claims the
-  principal lifecycle epoch from the configured store.
+  principal lifecycle epoch from the configured store under the caller's
+  absolute deadline.
   """
 
   alias PtcRunner.Kernel.Deadline
@@ -41,19 +42,28 @@ defmodule PtcRunner.Kernel.MCPOAuth.Context do
     with true <- Keyword.keyword?(opts),
          keys = Keyword.keys(opts),
          true <-
-           keys -- [:tenant_id, :principal_id, :store, :interaction, :credential_resolver] ==
-             [] and Enum.uniq(keys) == keys,
+           keys --
+             [
+               :tenant_id,
+               :principal_id,
+               :store,
+               :deadline,
+               :interaction,
+               :credential_resolver
+             ] == [] and Enum.uniq(keys) == keys,
          tenant_id when is_binary(tenant_id) <- Keyword.get(opts, :tenant_id),
          true <- bounded_id?(tenant_id),
          principal_id when is_binary(principal_id) <- Keyword.get(opts, :principal_id),
          true <- bounded_id?(principal_id),
          {_module, _state} = store <- Keyword.get(opts, :store),
+         deadline <- Keyword.get(opts, :deadline),
+         true <- Deadline.valid?(deadline),
          interaction <- Keyword.get(opts, :interaction),
          true <- is_nil(interaction) or is_atom(interaction),
          resolver when is_function(resolver, 2) <-
            Keyword.get(opts, :credential_resolver, &missing_credential/2),
          {:ok, principal_epoch} <-
-           Store.claim_principal(store, tenant_id, principal_id, Deadline.new(5_000)) do
+           Store.claim_principal(store, tenant_id, principal_id, deadline) do
       {:ok,
        %__MODULE__{
          tenant_id: tenant_id,

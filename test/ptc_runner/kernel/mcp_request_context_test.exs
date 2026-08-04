@@ -564,7 +564,14 @@ defmodule PtcRunner.Kernel.MCPRequestContextTest do
 
     {:ok, memory} = Memory.start_link(owner: self())
     {:ok, store} = Memory.store(memory)
-    {:ok, context} = Context.new(tenant_id: "tenant", principal_id: "alice", store: store)
+
+    {:ok, context} =
+      Context.new(
+        tenant_id: "tenant",
+        principal_id: "alice",
+        store: store,
+        deadline: Deadline.new(1_000)
+      )
 
     {:ok, claims} =
       Store.claim_authorities(
@@ -616,7 +623,8 @@ defmodule PtcRunner.Kernel.MCPRequestContextTest do
       Context.new(
         tenant_id: context.tenant_id,
         principal_id: context.principal_id,
-        store: recording_store
+        store: recording_store,
+        deadline: Deadline.new(1_000)
       )
 
     {:ok, manager} =

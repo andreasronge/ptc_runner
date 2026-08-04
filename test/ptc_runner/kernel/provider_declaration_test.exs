@@ -599,7 +599,12 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
     assert {:ok, store} = Memory.store(memory)
 
     assert {:ok, context} =
-             OAuthContext.new(tenant_id: "tenant", principal_id: "principal", store: store)
+             OAuthContext.new(
+               tenant_id: "tenant",
+               principal_id: "principal",
+               store: store,
+               deadline: Deadline.new(1_000)
+             )
 
     assert {:ok, services} =
              ProviderRuntimeServices.new(oauth_mode: {:context_factory, fn -> {:ok, context} end})
@@ -681,7 +686,12 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
     assert {:ok, store} = Memory.store(memory)
 
     assert {:ok, context} =
-             OAuthContext.new(tenant_id: "tenant", principal_id: "principal", store: store)
+             OAuthContext.new(
+               tenant_id: "tenant",
+               principal_id: "principal",
+               store: store,
+               deadline: Deadline.new(1_000)
+             )
 
     factory_calls = :atomics.new(1, signed: false)
 

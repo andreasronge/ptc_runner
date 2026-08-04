@@ -47,6 +47,7 @@ defmodule Mix.Tasks.Ptc.Run do
   alias PtcRunner.Dotenv
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.CommandEngine
+  alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.HostInstallation
   alias PtcRunner.Kernel.InstallationCatalog
   alias PtcRunner.Kernel.MCPOAuth.Authority
@@ -280,7 +281,8 @@ defmodule Mix.Tasks.Ptc.Run do
                OAuthContext.new(
                  tenant_id: "local-cli",
                  principal_id: "local-user",
-                 store: store
+                 store: store,
+                 deadline: Deadline.new(5_000)
                ),
              :ok <- authorize_installations(runtime.host, context, runtime.authorizations),
              {:ok, services} <-

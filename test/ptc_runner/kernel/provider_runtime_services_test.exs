@@ -1,6 +1,7 @@
 defmodule PtcRunner.Kernel.ProviderRuntimeServicesTest do
   use ExUnit.Case, async: true
 
+  alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.MCPOAuth.Context, as: OAuthContext
   alias PtcRunner.Kernel.MCPOAuth.Store.Memory
   alias PtcRunner.Kernel.ProviderRuntimeServices
@@ -22,7 +23,12 @@ defmodule PtcRunner.Kernel.ProviderRuntimeServicesTest do
     assert {:ok, store} = Memory.store(memory)
 
     assert {:ok, context} =
-             OAuthContext.new(tenant_id: "tenant", principal_id: "principal", store: store)
+             OAuthContext.new(
+               tenant_id: "tenant",
+               principal_id: "principal",
+               store: store,
+               deadline: Deadline.new(1_000)
+             )
 
     context_factory = fn ->
       :atomics.add(calls, 3, 1)

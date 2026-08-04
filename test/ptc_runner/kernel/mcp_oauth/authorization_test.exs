@@ -15,7 +15,14 @@ defmodule PtcRunner.Kernel.MCPOAuth.AuthorizationTest do
     authority = authority()
     {:ok, memory} = Memory.start_link(owner: self())
     {:ok, store} = Memory.store(memory)
-    {:ok, context} = Context.new(tenant_id: "tenant", principal_id: "alice", store: store)
+
+    {:ok, context} =
+      Context.new(
+        tenant_id: "tenant",
+        principal_id: "alice",
+        store: store,
+        deadline: Deadline.new(1_000)
+      )
 
     {:ok, claims} =
       Store.claim_authorities(
@@ -40,7 +47,8 @@ defmodule PtcRunner.Kernel.MCPOAuth.AuthorizationTest do
       Context.new(
         tenant_id: "tenant",
         principal_id: "alice",
-        store: recording_store
+        store: recording_store,
+        deadline: Deadline.new(1_000)
       )
 
     request =
@@ -241,7 +249,8 @@ defmodule PtcRunner.Kernel.MCPOAuth.AuthorizationTest do
       Context.new(
         tenant_id: "tenant",
         principal_id: "bob",
-        store: context.store
+        store: context.store,
+        deadline: Deadline.new(1_000)
       )
 
     assert {:ok, pending} =

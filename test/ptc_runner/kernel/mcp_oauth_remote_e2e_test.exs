@@ -37,7 +37,14 @@ defmodule PtcRunner.Kernel.MCPOAuthRemoteE2ETest do
 
     {:ok, memory} = Memory.start_link(owner: self())
     {:ok, store} = Memory.store(memory)
-    {:ok, context} = Context.new(tenant_id: "e2e", principal_id: "operator", store: store)
+
+    {:ok, context} =
+      Context.new(
+        tenant_id: "e2e",
+        principal_id: "operator",
+        store: store,
+        deadline: Deadline.new(1_000)
+      )
 
     {:ok, claims} =
       Store.claim_authorities(

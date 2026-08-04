@@ -7,6 +7,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.StoreMemoryTest do
   alias PtcRunner.Kernel.MCPOAuth.Primitives
   alias PtcRunner.Kernel.MCPOAuth.Store
   alias PtcRunner.Kernel.MCPOAuth.Store.Memory
+  alias PtcRunner.Test.MCPOAuthRecordingStore
 
   test "loads a valid external adapter before checking its callback" do
     module = PtcRunner.Test.MCPOAuthUnloadedStore
@@ -26,6 +27,33 @@ defmodule PtcRunner.Kernel.MCPOAuth.StoreMemoryTest do
     assert {:error, :invalid_store} = Store.time_anchor(context.store, 1_000)
   end
 
+  test "context construction forwards the caller's exact deadline", context do
+    parent = self()
+    deadline = Deadline.new(1_000)
+
+    interceptor = fn
+      {:claim_principal, "tenant", "carol"}, received_deadline ->
+        send(parent, {:claim_principal_deadline, received_deadline})
+        :delegate
+
+      _operation, _deadline ->
+        :delegate
+    end
+
+    assert {:ok, store} =
+             MCPOAuthRecordingStore.wrap(context.store, self(), interceptor: interceptor)
+
+    assert {:ok, _context} =
+             Context.new(
+               tenant_id: "tenant",
+               principal_id: "carol",
+               store: store,
+               deadline: deadline
+             )
+
+    assert_receive {:claim_principal_deadline, ^deadline}
+  end
+
   setup do
     {:ok, memory} = Memory.start_link(owner: self())
     {:ok, store} = Memory.store(memory)
@@ -43,14 +71,16 @@ defmodule PtcRunner.Kernel.MCPOAuth.StoreMemoryTest do
       Context.new(
         tenant_id: "tenant",
         principal_id: "alice",
-        store: store
+        store: store,
+        deadline: Deadline.new(1_000)
       )
 
     {:ok, bob} =
       Context.new(
         tenant_id: "tenant",
         principal_id: "bob",
-        store: store
+        store: store,
+        deadline: Deadline.new(1_000)
       )
 
     {:ok,
