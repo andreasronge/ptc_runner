@@ -129,7 +129,7 @@
     "req_llm",
     "telemetry"
   ],
-  "source_closure_hash": "7490d74fc53199b46c3c4e6ef23d447413d8bf93e4cacd833d4585956cdc8ca1",
+  "source_closure_hash": "a9ea06a48b2e1e10c146d8d390160bf9f92209fbeaf7de264161125d2048295b",
   "sources": [
     {
       "bytes": 870,
@@ -552,9 +552,9 @@
       "sha256": "6af87f48c72a1abee10ba5d8573a3f78dce6756a6de483336232a63e7b16a36a"
     },
     {
-      "bytes": 12301,
+      "bytes": 12199,
       "path": "lib/ptc_runner/kernel/mcp_oauth/store.ex",
-      "sha256": "1306f47c6c37067fd8113fccc9867bea18305edf5af0d771567a27778d78ff2c"
+      "sha256": "da025436e6c2910b4ef91adb1f3e2aafaff3d6d524c6e24ee396b9eff28f87ac"
     },
     {
       "bytes": 45528,
