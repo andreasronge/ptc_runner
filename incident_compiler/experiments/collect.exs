@@ -68,21 +68,45 @@ prompt_coverage =
 # capture failed to persist read an unknown number of records, and reporting
 # that as 0.00 is the same conflation this metric exists to prevent — it would
 # read as "retrieved nothing" when the trace may show hundreds of fetches.
-read_ids =
+#
+# Verifier fetches do not count as reads. `resolve-citations` re-reads every
+# cited record from the evidence source — that re-read is what makes the check a
+# check — but a record the model cited from a *search summary*, which carries
+# `content_digest`, would then be credited as a record the model had read. That
+# is precisely backwards for a metric whose job is to separate retrieval from
+# reasoning. The artifact records each dynamic evaluation's source text against
+# its `evaluation_id`, so the verification evaluations can be excluded exactly
+# rather than guessed at by position.
+#
+# It changes no number in the 2026-08-04 round — every cited record had already
+# been fetched while gathering, so the verifier contributed nothing unique in
+# any run — but it would silently inflate coverage the first time an arm cited
+# from a summary.
+inspection_records =
   case File.read(inspect_path) do
-    {:ok, raw} ->
-      raw
-      |> String.split("\n", trim: true)
-      |> Enum.map(&:json.decode/1)
-      |> Enum.filter(&(&1["record_type"] == "capability-output"))
-      |> Enum.map(& &1["payload"])
-      |> Enum.filter(&(&1["name"] == "evidence.get" and &1["result"]["status"] == "ok"))
-      |> Enum.filter(&(&1["result"]["value"]["found"] == true))
-      |> MapSet.new(& &1["result"]["value"]["evidence_id"])
-
-    _unreadable ->
-      nil
+    {:ok, raw} -> raw |> String.split("\n", trim: true) |> Enum.map(&:json.decode/1)
+    _unreadable -> nil
   end
+
+verifier_evaluations =
+  for record <- inspection_records || [],
+      record["record_type"] == "evaluation-source",
+      source = record["payload"]["source"],
+      is_binary(source) and String.contains?(source, "resolve-citations"),
+      into: MapSet.new(),
+      do: record["correlation"]["evaluation_id"]
+
+read_ids =
+  inspection_records &&
+    for record <- inspection_records,
+        record["record_type"] == "capability-output",
+        payload = record["payload"],
+        payload["name"] == "evidence.get",
+        payload["result"]["status"] == "ok",
+        payload["result"]["value"]["found"] == true,
+        not MapSet.member?(verifier_evaluations, payload["evaluation_id"]),
+        into: MapSet.new(),
+        do: payload["result"]["value"]["evidence_id"]
 
 # `read_coverage` counts records; it does not ask which. That is not pedantry:
 # one loop run reached 320 of 332 — 96% — holding **none** of the eleven records
@@ -98,6 +122,13 @@ read_ids =
 # data, only from having retrieved them. This is the number to read first.
 oracle = Scorer.load_oracle("incident_compiler/fixtures/corpus", incident)
 
+#
+# Every record any requirement rests on, including the gaps: a required open
+# question names the evidence that establishes the gap, and an arm that never
+# retrieved it cannot raise the question. Omitting those let `oracle_coverage`
+# read 1.0 on an incident where every record behind its required gaps was
+# missed — `queue-backlog` would drop `chat-4460`, `metric-lag-window` and
+# `ticket-8815`.
 oracle_ids =
   [
     Enum.flat_map(oracle["required_facts"] || [], &(&1["evidence_ids"] || [])),
@@ -105,7 +136,8 @@ oracle_ids =
       oracle["contradicted_hypotheses"] || [],
       &(&1["contradicting_evidence_ids"] || [])
     ),
-    Enum.flat_map(oracle["injected_faults"] || [], &(&1["evidence_ids"] || []))
+    Enum.flat_map(oracle["injected_faults"] || [], &(&1["evidence_ids"] || [])),
+    Enum.flat_map(oracle["required_open_questions"] || [], &(&1["evidence_ids"] || []))
   ]
   |> Enum.concat()
   |> MapSet.new()
@@ -118,7 +150,12 @@ row = %{
   "arm" => arm,
   "rep" => String.to_integer(rep),
   "exit" => String.to_integer(status),
+  # `published` is the run-level fact: the workflow returned a contract-valid
+  # terminal. That is true of an abstention too, so it is not the number to
+  # quote as "published a report" — `report_published` is. Reporting only the
+  # first counts a withheld report as a delivered one.
   "published" => String.to_integer(status) == 0,
+  "report_published" => String.to_integer(status) == 0 and score != nil and not score.abstained,
   "wall_s" => String.to_integer(secs),
   "llm_calls" => llm_calls,
   "coverage" => coverage,
@@ -148,4 +185,19 @@ row = %{
   "claims" => score && score.citation_completeness.claims
 }
 
-IO.puts(:json.encode(row))
+# `:json.encode/1` renders the atom `nil` as the *string* `"nil"`, not as JSON
+# null — only `true`, `false` and `null` are special-cased. Every absent metric
+# was therefore landing in the results file as a string, so a consumer doing
+# `is_number/1` or `is_boolean/1` saw a type error rather than a missing value,
+# and the nil-not-zero distinction this collector goes to some trouble to
+# preserve was destroyed at the last step. Rewrite `nil` to `:null` on the way
+# out, all the way down: `coverage`, `authoring`, `attempts` and `verified` are
+# nested maps that can carry it too.
+normalize = fn
+  nil, _recur -> :null
+  %{} = map, recur -> Map.new(map, fn {k, v} -> {k, recur.(v, recur)} end)
+  list, recur when is_list(list) -> Enum.map(list, &recur.(&1, recur))
+  other, _recur -> other
+end
+
+IO.puts(:json.encode(normalize.(row, normalize)))

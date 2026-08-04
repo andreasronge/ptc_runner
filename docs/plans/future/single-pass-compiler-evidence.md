@@ -380,11 +380,18 @@ two arms emit: `read_coverage` over the whole corpus, and `oracle_coverage` over
 those 9. Recall is over published reports only; an abstention has no observed
 facts and is counted separately.
 
-| arm | n | published | abstained | read coverage | **oracle coverage** | calls | required-fact recall |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `fast` | 6 | 6/6 | 0 | 1.00 | **9/9 in 6/6** | 1 | **0.86** (0.71–0.86) |
-| `authored` | 8 | 4/8 | 1 | 1.00 (0.48–1.00) | 9/9 in 5/8 | 3 | 0.71 |
-| `loop` | 3 | 2/3 | 1 | 0.48 (0.00–0.96) | **0/9 in 3/3** | 35 (26–39) | 0.00 |
+| arm | n | **reports** | abstained | failed | read coverage | **oracle coverage** | calls | required-fact recall |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `fast` | 6 | **6/6** | 0 | 0 | 1.00 | **9/9 in 6/6** | 1 | **0.86** (0.71–0.86) |
+| `authored` | 8 | 3/8 | 1 | 4 | 1.00 (0.48–1.00) | 9/9 in 5/8 | 3 | 0.71 |
+| `loop` | 3 | 1/3 | 1 | 1 | 0.48 (0.00–0.96) | **0/9 in 3/3** | 35 (26–39) | 0.00 |
+
+The first column counts **delivered reports**, not successful runs. An
+abstention exits zero and satisfies the contract, so counting it as a
+publication would credit a withheld report as a delivered one; the row carries
+both `published` (the run returned a contract-valid terminal) and
+`report_published` (that terminal was a report), and only the second belongs in
+a quality comparison.
 
 **The corpus is solvable and the single pass solves it, every time, on one model
 call.** Six of six runs retrieved all 332 records and published a grounded
@@ -396,7 +403,7 @@ for it: it is categorical, and the category is *did the arm reach the evidence*.
 between.** The nine records sit at positions 25–43 within their sources, and the
 search defaults a missing limit to 20 — so an arm that passes a limit drains
 everything and an arm that does not sees none of it. There is no partial
-credit to earn, which is why `published` and `recall` track oracle coverage
+credit to earn, which is why delivered reports and recall track oracle coverage
 exactly and track `read_coverage` not at all.
 
 **The one fact every successful run misses is the same one.**
@@ -664,12 +671,12 @@ silently rather than fail.
 
 ## Runtime friction found
 
-Four of these were found by the 2026-08-04 round and are **not filed yet**;
-they are recorded here first because each of them silently corrupted a
-measurement before it was understood.
+Four of these were found by the 2026-08-04 round; three are now filed. Each of
+them silently corrupted a measurement before it was understood.
 
-- **A stdio MCP child gets no locale, and an Elixir server in character mode
-  then emits invalid JSON.** `HostInstallation` grants a stdio child a fixed
+- [#1177](https://github.com/andreasronge/ptc_runner/issues/1177) — **a stdio
+  MCP child gets no locale, and an Elixir server in character mode then emits
+  invalid JSON.** `HostInstallation` grants a stdio child a fixed
   compatibility environment — `HOME LOGNAME PATH SHELL TERM USER` — with no
   `LANG` or `LC_*`. Erlang therefore puts `:stdio` in latin1 mode, and
   `IO.write/2` renders any codepoint above 127 as the literal escape
@@ -681,7 +688,8 @@ measurement before it was understood.
   Elixir alike — breaks the same way, and only on the records that happen to
   carry non-ASCII text. Worth considering whether the runtime should grant
   `LC_ALL=C.UTF-8`, or say in the launch contract that it does not.
-- **Exceeding the trace event budget fails a run that succeeded.** With
+- [#1178](https://github.com/andreasronge/ptc_runner/issues/1178) — **exceeding
+  the trace event budget fails a run that succeeded.** With
   `--inspect`, `InspectionArtifact.validate_correlations/2` resolves every
   inspection record against the trace's `capability-started` events. When the
   event sink drops events — `normal_event_bytes` defaults to **4 MB** and no
@@ -691,7 +699,8 @@ measurement before it was understood.
   the run was still recorded as a failure. Nothing in the error names the
   budget or the drop, and the trace's own `events_dropped` counter — which
   does — is inside the artifact the failure discards.
-- **A rejected capability argument does not say which argument, or why.** The
+- [#1176](https://github.com/andreasronge/ptc_runner/issues/1176) — **a rejected
+  capability argument does not say which argument, or why.** The
   loop arm called `(incident.evidence/search … nil nil 100)`; the installed
   tool's `inputSchema` caps `limit` at 50, so the dispatcher refused with
   `kind=:protocol_error; reason=:invalid_arguments`. The model has no way to
@@ -776,6 +785,39 @@ built once at run construction, so **the model never sees its own library in
 its tool context**, and with no declared `:signature` there is no `export-meta`
 for `fit/handles?` to read. A generated library that should outlive its run has
 to be promoted into a real component with a docstring and signature.
+
+### What an independent review caught in the harness
+
+Run against the four commits, `codex review` returned four [P2] findings, all in
+`collect.exs` and all real. They are recorded because three of them are the same
+species of defect this round exists to study — a measurement that reads as a
+result.
+
+- **`published` counted abstentions as delivered reports.** It derives from exit
+  status, and an abstention exits zero. The table above originally read 4/8 and
+  2/3 where the truth is 3/8 and 1/3. Fixed by deriving `report_published`
+  separately; every number in this document is the corrected one.
+- **Verifier fetches counted as model reads.** `resolve-citations` re-reads
+  every cited record, and a record cited from a *search summary* — which carries
+  `content_digest`, so citing without fetching is possible — would then be
+  credited to the model. The artifact records each evaluation's source against
+  its `evaluation_id`, so verification evaluations are now excluded exactly.
+  **This changed no number here**: in every run that reached verification, the
+  verifier's fetches were a subset of what had already been gathered.
+- **`oracle_coverage` omitted the evidence behind required open questions.** An
+  arm that never retrieved those records cannot raise the gaps the oracle
+  requires. It happens not to matter for `schema-migration-stall`, whose one
+  such record is already a required-fact record, but on `queue-backlog` it would
+  have let coverage read 1.00 with all three gap records missed.
+- **Absent metrics serialized as the string `"nil"`, not JSON `null`.**
+  `:json.encode/1` special-cases only `true`, `false` and `null`; every other
+  atom becomes a string. So the nil-not-zero distinction added earlier in this
+  round survived the collector and died at the encoder.
+
+The first and last had already reached this document as numbers. That is the
+argument for pointing the review at the harness and not only at the runtime:
+the code that computes a result is as able to be wrong as the code under test,
+and it is not covered by the application's own tests.
 
 ## Limits
 
@@ -886,11 +928,12 @@ the mean).
 is about retrieval, not orchestration.** With the transport defect fixed and
 every arm told to read `matched`, `fast` reaches all nine oracle records in 6 of
 6 runs and publishes a grounded report every time on one model call. `authored`
-reaches them in 5 of 8. `loop` reaches them in **0 of 3**, at 26–39 calls. The
+reaches them in 5 of 8 and delivers 3 reports. `loop` reaches them in **0 of 3**
+at 26–39 calls, and delivers 1. The
 question the first round could not ask — what separates a single pass from a
 loop when retrieval is hard — has an answer that is mostly not about
 orchestration: the arm whose retrieval a human wrote against the API succeeds
-every time, the arm that asks a model to write it succeeds five times in eight,
+every time, the arm that asks a model to write it reaches the evidence five times in eight,
 and the arm that has to discover the API through a boundary that will not name
 the bound it violated does not get there at all.
 
@@ -926,13 +969,14 @@ and is the number to read.
 Items 1–3 of the previous record are **done** and item 5 has run; what follows
 replaces them.
 
-1. **Tell a rejected argument what was wrong with it.** The loop spent an entire
-   run re-sending `limit 100` because `invalid_arguments` names neither the
-   argument nor its bound, while both are in the operator's own declared
-   `inputSchema`. This is the same allowlist question as `invalid_arity` in
-   [#1172](https://github.com/andreasronge/ptc_runner/issues/1172) and satisfies
-   the same verbatim rule. It is the single highest-value fix here: it is the
-   only thing standing between the loop arm and a real measurement.
+1. **Tell a rejected argument what was wrong with it** —
+   [#1176](https://github.com/andreasronge/ptc_runner/issues/1176). The loop
+   spent an entire run re-sending `limit 100` because `invalid_arguments` names
+   neither the argument nor its bound, while both are in the operator's own
+   declared `inputSchema`. Same verbatim rule as `invalid_arity` in
+   [#1175](https://github.com/andreasronge/ptc_runner/issues/1175). It is the
+   single highest-value fix here: it is the only thing standing between the loop
+   arm and a real measurement.
 2. **Then the guardrail**, unchanged in design from the previous record and now
    much better motivated. The runtime refuses a `return` from an evaluation that
    consumed a truncated result. The kernel must be told which output field means
