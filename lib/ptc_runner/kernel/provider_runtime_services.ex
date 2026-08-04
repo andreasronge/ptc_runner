@@ -4,7 +4,9 @@ defmodule PtcRunner.Kernel.ProviderRuntimeServices do
 
   Construction is process-free and invokes no resolver or context factory.
   Activation may start one private host authority, and OAuth context creation
-  remains lazy until a selected catalog requires it.
+  remains lazy until a selected catalog requires it. The context factory
+  receives the registry's absolute operation deadline and must pass it through
+  unchanged rather than creating a fresh budget.
   Provider application mode declares whether selected optional applications
   must be host-started or may be started by a command-owned VM.
   An opaque keyed binding prevents host services from opening a catalog built
@@ -12,6 +14,7 @@ defmodule PtcRunner.Kernel.ProviderRuntimeServices do
   """
 
   alias PtcRunner.Kernel.Attestation
+  alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.HostInstallationAuthority
   alias PtcRunner.Kernel.HostRuntimePayload
   alias PtcRunner.Kernel.MCPOAuth.Context, as: OAuthContext
@@ -31,7 +34,8 @@ defmodule PtcRunner.Kernel.ProviderRuntimeServices do
           ([binary()] -> {:ok, %{binary() => binary()}} | {:error, term()})
   @type activation :: (-> {:ok, struct() | nil} | {:error, term()})
   @type oauth_mode ::
-          :disabled | {:context_factory, (-> {:ok, OAuthContext.t()} | {:error, term()})}
+          :disabled
+          | {:context_factory, (Deadline.t() -> {:ok, OAuthContext.t()} | {:error, term()})}
   @type t :: %__MODULE__{
           activation: activation(),
           credential_resolver: credential_resolver(),
@@ -171,13 +175,13 @@ defmodule PtcRunner.Kernel.ProviderRuntimeServices do
   defp validate_activation_owner(_owner), do: {:error, :invalid_provider_runtime_services}
 
   @doc false
-  @spec oauth_context(t()) ::
+  @spec oauth_context(t(), Deadline.t()) ::
           {:ok, OAuthContext.t()} | {:error, :authorization_context_required}
-  def oauth_context(%__MODULE__{} = services) do
-    if valid?(services) do
+  def oauth_context(%__MODULE__{} = services, deadline) do
+    if valid?(services) and Deadline.valid?(deadline) do
       case services.oauth_mode do
         {:context_factory, factory} ->
-          case factory.() do
+          case factory.(deadline) do
             {:ok, %OAuthContext{} = context} -> {:ok, context}
             _invalid -> {:error, :authorization_context_required}
           end
@@ -193,6 +197,8 @@ defmodule PtcRunner.Kernel.ProviderRuntimeServices do
   catch
     _kind, _reason -> {:error, :authorization_context_required}
   end
+
+  def oauth_context(_services, _deadline), do: {:error, :authorization_context_required}
 
   defp unique_allowed_options?(opts) do
     keys = Keyword.keys(opts)
@@ -241,7 +247,7 @@ defmodule PtcRunner.Kernel.ProviderRuntimeServices do
         valid_runtime_binding?(services.runtime_binding, services.host_payload)
 
   defp valid_oauth_mode?(:disabled), do: true
-  defp valid_oauth_mode?({:context_factory, factory}), do: is_function(factory, 0)
+  defp valid_oauth_mode?({:context_factory, factory}), do: is_function(factory, 1)
   defp valid_oauth_mode?(_mode), do: false
 
   defp valid_runtime_binding?(nil, nil), do: true

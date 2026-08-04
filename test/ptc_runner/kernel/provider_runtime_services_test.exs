@@ -30,8 +30,9 @@ defmodule PtcRunner.Kernel.ProviderRuntimeServicesTest do
                deadline: Deadline.new(1_000)
              )
 
-    context_factory = fn ->
+    context_factory = fn deadline ->
       :atomics.add(calls, 3, 1)
+      send(self(), {:context_factory_deadline, deadline})
       {:ok, context}
     end
 
@@ -52,7 +53,9 @@ defmodule PtcRunner.Kernel.ProviderRuntimeServicesTest do
     assert {:ok, %{"token" => "resolved"}} = services.credential_resolver.(["token"])
     assert Enum.map(1..3, &:atomics.get(calls, &1)) == [1, 1, 0]
 
-    assert {:ok, ^context} = ProviderRuntimeServices.oauth_context(services)
+    deadline = Deadline.new(1_000)
+    assert {:ok, ^context} = ProviderRuntimeServices.oauth_context(services, deadline)
+    assert_receive {:context_factory_deadline, ^deadline}
     assert Enum.map(1..3, &:atomics.get(calls, &1)) == [1, 1, 1]
   end
 
@@ -65,7 +68,7 @@ defmodule PtcRunner.Kernel.ProviderRuntimeServicesTest do
              services.credential_resolver.(["token"])
 
     assert {:error, :authorization_context_required} =
-             ProviderRuntimeServices.oauth_context(services)
+             ProviderRuntimeServices.oauth_context(services, Deadline.new(1_000))
   end
 
   test "the complete seal and callback results fail closed" do
@@ -80,7 +83,7 @@ defmodule PtcRunner.Kernel.ProviderRuntimeServicesTest do
              end)
 
     assert {:error, :invalid_provider_runtime_services} =
-             ProviderRuntimeServices.new(oauth_mode: {:context_factory, fn _arg -> :context end})
+             ProviderRuntimeServices.new(oauth_mode: {:context_factory, fn -> :context end})
 
     assert {:error, :invalid_provider_runtime_services} =
              ProviderRuntimeServices.new(credential_resolver: fn -> {:ok, %{}} end)

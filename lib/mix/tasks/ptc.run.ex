@@ -288,7 +288,7 @@ defmodule Mix.Tasks.Ptc.Run do
              {:ok, services} <-
                HostInstallation.runtime_services(runtime.host,
                  provider_application_mode: runtime.services.provider_application_mode,
-                 oauth_mode: {:context_factory, fn -> {:ok, context} end}
+                 oauth_mode: {:context_factory, fn _deadline -> {:ok, context} end}
                ),
              {:ok, registry} <-
                InstallationCatalog.runtime_registry(runtime.catalog, services) do

@@ -28,6 +28,7 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
   alias PtcRunner.Kernel.RunCoordinator
   alias PtcRunner.Kernel.SelectionRules
   alias PtcRunner.Kernel.TypedCanonicalJSON
+  alias PtcRunner.Test.MCPOAuthRecordingStore
 
   @moduletag :tmp_dir
   @dense_services ~w(
@@ -598,18 +599,41 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
     assert {:ok, memory} = Memory.start_link(owner: self())
     assert {:ok, store} = Memory.store(memory)
 
+    parent = self()
+
+    interceptor = fn
+      {:claim_authorities, "tenant", _authorities}, deadline ->
+        send(parent, {:authority_claim_deadline, deadline})
+        :delegate
+
+      _operation, _deadline ->
+        :delegate
+    end
+
+    assert {:ok, recording_store} =
+             MCPOAuthRecordingStore.wrap(store, self(), interceptor: interceptor)
+
     assert {:ok, context} =
              OAuthContext.new(
                tenant_id: "tenant",
                principal_id: "principal",
-               store: store,
+               store: recording_store,
                deadline: Deadline.new(1_000)
              )
 
     assert {:ok, services} =
-             ProviderRuntimeServices.new(oauth_mode: {:context_factory, fn -> {:ok, context} end})
+             ProviderRuntimeServices.new(
+               oauth_mode:
+                 {:context_factory,
+                  fn deadline ->
+                    send(parent, {:oauth_factory_deadline, deadline})
+                    {:ok, context}
+                  end}
+             )
 
     assert {:ok, registry} = InstallationCatalog.runtime_registry(catalog, services)
+    assert_receive {:oauth_factory_deadline, shared_deadline}
+    assert_receive {:authority_claim_deadline, ^shared_deadline}
 
     limits = Limits.installed_defaults()
 
@@ -699,7 +723,7 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
              ProviderRuntimeServices.new(
                oauth_mode:
                  {:context_factory,
-                  fn ->
+                  fn _deadline ->
                     :atomics.add(factory_calls, 1, 1)
                     {:ok, context}
                   end}

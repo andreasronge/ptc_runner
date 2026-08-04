@@ -126,7 +126,9 @@ defmodule PtcRunner.Kernel.HostInstallation do
           {:ok, ProviderRegistry.t()} | {:error, atom()}
   def runtime_registry(%HostConfig{} = host, %InstallationCatalog{} = catalog, context) do
     with {:ok, services} <-
-           runtime_services(host, oauth_mode: {:context_factory, fn -> {:ok, context} end}) do
+           runtime_services(host,
+             oauth_mode: {:context_factory, fn _deadline -> {:ok, context} end}
+           ) do
       InstallationCatalog.runtime_registry(catalog, services)
     end
   end

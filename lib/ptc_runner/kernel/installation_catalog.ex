@@ -383,14 +383,16 @@ defmodule PtcRunner.Kernel.InstallationCatalog do
   defp runtime_authority_matches?(_authority, _fingerprint), do: false
 
   defp open_oauth_registry(catalog, services, authorities, owner) do
-    case ProviderRuntimeServices.oauth_context(services) do
+    deadline = Deadline.new(5_000)
+
+    case ProviderRuntimeServices.oauth_context(services, deadline) do
       {:ok, context} ->
         claims =
           Enum.map(authorities, fn {_name, authority} ->
             {authority.installation_id, authority.fingerprint}
           end)
 
-        activate_oauth_registry(catalog, services, authorities, claims, context, owner)
+        activate_oauth_registry(catalog, services, authorities, claims, context, owner, deadline)
 
       {:error, _reason} = error ->
         HostInstallationAuthority.release(owner)
@@ -398,12 +400,20 @@ defmodule PtcRunner.Kernel.InstallationCatalog do
     end
   end
 
-  defp activate_oauth_registry(catalog, services, authorities, claims, context, owner) do
+  defp activate_oauth_registry(
+         catalog,
+         services,
+         authorities,
+         claims,
+         context,
+         owner,
+         deadline
+       ) do
     case Store.claim_authorities(
            context.store,
            context.tenant_id,
            claims,
-           Deadline.new(5_000)
+           deadline
          ) do
       {:ok, epochs} ->
         runtimes =
