@@ -94,6 +94,11 @@ defmodule PtcRunner.Kernel.InspectionSink do
   @spec owner(t()) :: {:ok, pid()} | {:error, :inspection_sink_error}
   def owner(sink), do: call(sink, :owner)
 
+  @doc false
+  @spec identity(t()) ::
+          {:ok, %{run_id: binary(), trace_id: binary()}} | {:error, :inspection_sink_error}
+  def identity(sink), do: call(sink, :identity)
+
   @spec stop(t()) :: :ok
   @doc "Stops the sink; repeated or owner-driven stops are harmless."
   def stop(sink), do: stop(sink, @stop_timeout_ms)
@@ -139,6 +144,9 @@ defmodule PtcRunner.Kernel.InspectionSink do
   @impl GenServer
   def handle_call({token, :owner}, _from, %{token: token} = state),
     do: {:reply, {:ok, state.owner}, state}
+
+  def handle_call({token, :identity}, _from, %{token: token} = state),
+    do: {:reply, {:ok, Map.take(state, [:run_id, :trace_id])}, state}
 
   def handle_call({token, :owner?}, {caller, _tag}, %{token: token} = state),
     do: {:reply, caller == state.owner, state}

@@ -75,40 +75,23 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
       result: nil
     }
 
-    case open_provider_free(prepared, authority) do
-      {:ok, registry, built} ->
-        owner = self()
+    case RunBuilder.open_prepared_sinks(prepared, authority, self()) do
+      {:ok, opened_sinks} ->
+        open_provider_free(initial, authority, opened_sinks)
 
-        {worker_pid, worker_ref} =
-          spawn_monitor(fn ->
-            result = RunBuilder.execute_built(built)
-            send(owner, {token, :execution_result, self(), result})
-          end)
-
-        {:ok,
-         %{
-           initial
-           | registry: registry,
-             built: built,
-             worker_pid: worker_pid,
-             worker_ref: worker_ref
-         }}
-
-      {:error, reason, registry} ->
-        close_registry(registry)
-        close_prepared(prepared)
-        {:ok, %{initial | result: {:error, reason}}}
-
-      {:error, reason, registry, opened_sinks} ->
+      {:error, reason, opened_sinks} ->
         next =
           initial
-          |> Map.put(:registry, registry)
           |> Map.put(:opened_sinks, opened_sinks)
           |> finalize_aborted_sinks()
           |> close_owned_inputs()
           |> Map.put(:result, {:error, reason})
 
         {:ok, next}
+
+      {:error, reason} ->
+        close_prepared(prepared)
+        {:ok, %{initial | prepared: nil, result: {:error, reason}}}
     end
   end
 
@@ -193,32 +176,61 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
     :ok
   end
 
-  defp open_provider_free(prepared, authority) do
-    opts = PublicationAuthority.options(authority)
+  defp open_provider_free(initial, authority, opened_sinks) do
+    prepared = initial.prepared
 
-    case ProviderRegistry.new(%{},
-           installed_limits: prepared.request.package.installed_limits
-         ) do
-      {:ok, registry} ->
-        case RunBuilder.build_prepared_owned(prepared, registry, opts) do
-          {:ok, built} ->
-            if PublicationAuthority.binding(built.publication_authority) ==
-                 PublicationAuthority.binding(authority) do
-              {:ok, registry, built}
-            else
-              RunBuilder.close(built.config)
-              {:error, :invalid_publication_authority, registry}
-            end
-
-          {:error, reason} ->
-            {:error, reason, registry}
-
-          {:error, reason, opened_sinks} ->
-            {:error, reason, registry, opened_sinks}
+    result =
+      with {:ok, registry} <-
+             ProviderRegistry.new(%{},
+               installed_limits: prepared.request.package.installed_limits
+             ) do
+        case RunBuilder.build_prepared_owned(prepared, registry, authority, opened_sinks) do
+          {:ok, built} -> {:ok, registry, built}
+          {:error, reason} -> {:error, reason, registry}
         end
+      end
+
+    case result do
+      {:ok, registry, built} ->
+        owner = self()
+        token = initial.token
+
+        {worker_pid, worker_ref} =
+          spawn_monitor(fn ->
+            execution_result = RunBuilder.execute_built(built)
+            send(owner, {token, :execution_result, self(), execution_result})
+          end)
+
+        {:ok,
+         %{
+           initial
+           | registry: registry,
+             built: built,
+             opened_sinks: opened_sinks,
+             worker_pid: worker_pid,
+             worker_ref: worker_ref
+         }}
+
+      {:error, reason, registry} ->
+        next =
+          initial
+          |> Map.put(:registry, registry)
+          |> Map.put(:opened_sinks, opened_sinks)
+          |> finalize_aborted_sinks()
+          |> close_owned_inputs()
+          |> Map.put(:result, {:error, reason})
+
+        {:ok, next}
 
       {:error, reason} ->
-        {:error, reason, nil}
+        next =
+          initial
+          |> Map.put(:opened_sinks, opened_sinks)
+          |> finalize_aborted_sinks()
+          |> close_owned_inputs()
+          |> Map.put(:result, {:error, reason})
+
+        {:ok, next}
     end
   end
 

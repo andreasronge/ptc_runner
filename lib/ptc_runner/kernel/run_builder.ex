@@ -40,6 +40,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
 
   alias PtcRunner.Kernel
   alias PtcRunner.Kernel.ApplicationPackage
+  alias PtcRunner.Kernel.Attestation
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.ExecutionOutcome
   alias PtcRunner.Kernel.InspectionArtifact
@@ -76,6 +77,17 @@ defmodule PtcRunner.Kernel.RunBuilder do
   ]
   @load_options @acquisition_options ++ @build_options
   @artifact_options [:trace, :inspect, :output, :private_output]
+  @opened_sink_keys [
+    :attestation,
+    :effective_event_policy,
+    :event_identity,
+    :event_sink,
+    :inspection_identity,
+    :inspection_path,
+    :inspection_sink,
+    :prepared_binding,
+    :publication_binding
+  ]
 
   @spec build(RunRequest.t(), ProviderRegistry.t(), keyword()) ::
           {:ok,
@@ -128,17 +140,128 @@ defmodule PtcRunner.Kernel.RunBuilder do
   def build_prepared(_prepared, _registry, _opts), do: {:error, :invalid_prepared_run}
 
   @doc false
-  @spec build_prepared_owned(PreparedRun.t(), ProviderRegistry.t(), keyword()) ::
-          {:ok, map()}
-          | {:error, term()}
-          | {:error, term(),
-             %{event_sink: EventSink.t(), inspection_sink: InspectionSink.t() | nil}}
-  def build_prepared_owned(%PreparedRun{} = prepared, %ProviderRegistry{} = registry, opts)
-      when is_list(opts) do
-    build_prepared(prepared, registry, opts, :return_opened_sinks)
+  @spec open_prepared_sinks(PreparedRun.t(), PublicationAuthority.t(), pid()) ::
+          {:ok, map()} | {:error, term()} | {:error, term(), map()}
+  def open_prepared_sinks(%PreparedRun{} = prepared, authority, owner) when is_pid(owner) do
+    with true <- PreparedRun.valid?(prepared),
+         true <- PublicationAuthority.valid?(authority),
+         :ok <- validate_sink_owner(owner),
+         :ok <- PreparedRun.consume(prepared),
+         opts = PublicationAuthority.options(authority),
+         :ok <- preflight_owned_authority(prepared, opts) do
+      do_open_prepared_sinks(prepared, authority, owner, opts)
+    else
+      false -> {:error, :invalid_prepared_run}
+      {:error, _reason} = error -> error
+    end
   end
 
-  def build_prepared_owned(_prepared, _registry, _opts), do: {:error, :invalid_prepared_run}
+  def open_prepared_sinks(_prepared, _authority, _owner),
+    do: {:error, :invalid_prepared_run}
+
+  @doc false
+  @spec build_prepared_owned(
+          PreparedRun.t(),
+          ProviderRegistry.t(),
+          PublicationAuthority.t(),
+          map()
+        ) :: {:ok, map()} | {:error, term()}
+  def build_prepared_owned(
+        %PreparedRun{} = prepared,
+        %ProviderRegistry{} = registry,
+        authority,
+        opened_sinks
+      ) do
+    with :ok <- validate_registry(registry),
+         true <- PreparedRun.consumed_valid?(prepared),
+         true <- provider_free?(prepared.request.package.providers),
+         true <- PublicationAuthority.valid?(authority),
+         opts = PublicationAuthority.options(authority),
+         :ok <- validate_build_options(opts),
+         :ok <- validate_installed_limits(prepared.request.package, registry, opts),
+         :ok <- validate_inspection_selection(prepared.request, opts),
+         :ok <- validate_opened_sinks(opened_sinks, prepared, authority),
+         :ok <- PreparedRun.begin_build(prepared) do
+      build_prepared_with_opened_sinks(prepared, registry, opts, authority, opened_sinks)
+    else
+      false -> {:error, :invalid_prepared_run}
+      {:error, _reason} = error -> error
+    end
+  rescue
+    _exception -> {:error, :invalid_prepared_run}
+  end
+
+  def build_prepared_owned(_prepared, _registry, _authority, _opened_sinks),
+    do: {:error, :invalid_prepared_run}
+
+  defp validate_sink_owner(owner),
+    do: if(owner == self(), do: :ok, else: {:error, :invalid_execution_sinks})
+
+  defp do_open_prepared_sinks(prepared, authority, owner, opts) do
+    case event_sink(prepared.request, %{data_class: prepared.effective_data_class}, owner) do
+      {:ok, event_sink} ->
+        case inspection_sink(event_sink, opts, :return_opened_sinks, owner) do
+          {:ok, inspection_sink, inspection_path} ->
+            opened_sinks(prepared, authority, event_sink, inspection_sink, inspection_path)
+
+          {:error, reason, opened_sinks} ->
+            {:error, reason, opened_sinks}
+        end
+
+      {:error, _reason} = error ->
+        error
+    end
+  end
+
+  defp opened_sinks(prepared, authority, event_sink, inspection_sink, inspection_path) do
+    with {:ok, event_identity} <- EventSink.identity(event_sink),
+         {:ok, inspection_identity} <- opened_inspection_identity(inspection_sink) do
+      descriptor = %{
+        attestation: nil,
+        event_sink: event_sink,
+        inspection_sink: inspection_sink,
+        inspection_path: inspection_path,
+        event_identity: event_identity,
+        inspection_identity: inspection_identity,
+        effective_event_policy: prepared.effective_event_policy,
+        prepared_binding: prepared.attestation,
+        publication_binding: PublicationAuthority.binding(authority)
+      }
+
+      {:ok,
+       %{
+         descriptor
+         | attestation: Attestation.attest(__MODULE__, opened_sinks_payload(descriptor))
+       }}
+    else
+      {:error, reason} ->
+        {:error, reason, %{event_sink: event_sink, inspection_sink: inspection_sink}}
+    end
+  end
+
+  defp opened_inspection_identity(nil), do: {:ok, nil}
+  defp opened_inspection_identity(inspection_sink), do: InspectionSink.identity(inspection_sink)
+
+  defp opened_sinks_payload(opened_sinks), do: Map.delete(opened_sinks, :attestation)
+
+  defp preflight_owned_authority(prepared, opts) do
+    with :ok <- validate_build_options(opts),
+         :ok <- validate_inspection_selection(prepared.request, opts),
+         :ok <- preflight_inspection(opts),
+         :ok <- preflight_artifact_destinations(opts),
+         :ok <-
+           preflight_trace(
+             prepared.effective_event_policy,
+             prepared.effective_data_class,
+             opts
+           ) do
+      preflight_result(
+        prepared.effective_event_policy,
+        prepared.effective_data_class,
+        opts
+      )
+    end
+  end
 
   defp build_prepared(prepared, registry, opts, failure_mode) do
     request = prepared.request
@@ -395,6 +518,25 @@ defmodule PtcRunner.Kernel.RunBuilder do
     )
   end
 
+  defp build_prepared_with_opened_sinks(prepared, registry, opts, authority, opened_sinks) do
+    with {:ok, providers} <-
+           providers(
+             prepared.request.package,
+             registry,
+             provider_input_class(prepared.request.input.authority),
+             opts
+           ) do
+      build_with_opened_sinks(
+        prepared.request,
+        {prepared.workflow_bundle, prepared.mission_bundle},
+        prepared.entry_source,
+        providers,
+        authority,
+        opened_sinks
+      )
+    end
+  end
+
   defp build_active_preflighted(prepared, registry, session, opts) do
     with {:ok, providers} <-
            providers(
@@ -452,13 +594,31 @@ defmodule PtcRunner.Kernel.RunBuilder do
          providers,
          opts,
          failure_mode
+       ),
+       do:
+         build_with_providers(
+           request,
+           {workflow_bundle, mission_bundle},
+           entry_source,
+           providers,
+           opts,
+           failure_mode,
+           :open_sinks
+         )
+
+  defp build_with_providers(
+         request,
+         {workflow_bundle, mission_bundle},
+         entry_source,
+         providers,
+         opts,
+         failure_mode,
+         sink_source
        ) do
     package = request.package
 
     result =
-      with {:ok, publication_authority} <-
-             PublicationAuthority.new(Keyword.take(opts, @artifact_options)),
-           {:ok, workflow} <-
+      with {:ok, workflow} <-
              WorkflowEnvironment.new(
                bundle: workflow_bundle,
                capabilities: providers.workflow.capabilities
@@ -469,9 +629,8 @@ defmodule PtcRunner.Kernel.RunBuilder do
                capabilities: providers.mission.capabilities,
                data: package.mission_data
              ),
-           {:ok, sink} <- event_sink(request, providers),
-           {:ok, inspection_sink, inspection_path} <-
-             inspection_sink(sink, opts, failure_mode),
+           {:ok, publication_authority, sink, inspection_sink, inspection_path} <-
+             execution_sinks(request, providers, opts, failure_mode, sink_source),
            :ok <-
              capture_prelude_sources(
                inspection_sink,
@@ -503,6 +662,99 @@ defmodule PtcRunner.Kernel.RunBuilder do
         error
     end
   end
+
+  defp build_with_opened_sinks(
+         request,
+         {workflow_bundle, mission_bundle},
+         entry_source,
+         providers,
+         authority,
+         opened_sinks
+       ) do
+    build_with_providers(
+      request,
+      {workflow_bundle, mission_bundle},
+      entry_source,
+      providers,
+      PublicationAuthority.options(authority),
+      :return_opened_sinks,
+      {:opened_sinks, authority, opened_sinks}
+    )
+    |> discard_opened_sinks()
+  end
+
+  defp execution_sinks(request, providers, opts, failure_mode, :open_sinks) do
+    with {:ok, authority} <- PublicationAuthority.new(Keyword.take(opts, @artifact_options)),
+         {:ok, event_sink} <- event_sink(request, providers),
+         {:ok, inspection_sink, inspection_path} <-
+           inspection_sink(event_sink, opts, failure_mode) do
+      {:ok, authority, event_sink, inspection_sink, inspection_path}
+    end
+  end
+
+  defp execution_sinks(
+         _request,
+         _providers,
+         _opts,
+         _failure_mode,
+         {:opened_sinks, authority, opened_sinks}
+       ) do
+    {:ok, authority, opened_sinks.event_sink, opened_sinks.inspection_sink,
+     opened_sinks.inspection_path}
+  end
+
+  defp validate_opened_sinks(opened_sinks, %PreparedRun{} = prepared, authority)
+       when is_map(opened_sinks) and map_size(opened_sinks) == 9 do
+    with true <-
+           Enum.sort(Map.keys(opened_sinks)) == @opened_sink_keys,
+         true <-
+           Attestation.valid?(
+             __MODULE__,
+             opened_sinks_payload(opened_sinks),
+             opened_sinks.attestation
+           ),
+         %EventSink{} = event_sink <- opened_sinks.event_sink,
+         {:ok, owner} <- EventSink.owner(event_sink),
+         true <- owner == self(),
+         true <- PreparedRun.consumed_valid?(prepared),
+         true <- prepared.attestation == opened_sinks.prepared_binding,
+         true <- prepared.effective_event_policy == opened_sinks.effective_event_policy,
+         true <- PublicationAuthority.matches?(authority, opened_sinks.publication_binding),
+         true <- EventSink.policy(event_sink) == opened_sinks.effective_event_policy,
+         {:ok, event_identity} <- EventSink.identity(event_sink),
+         true <- event_identity == opened_sinks.event_identity,
+         true <- valid_opened_inspection?(opened_sinks) do
+      :ok
+    else
+      _invalid -> {:error, :invalid_execution_sinks}
+    end
+  end
+
+  defp validate_opened_sinks(_opened_sinks, _prepared, _authority),
+    do: {:error, :invalid_execution_sinks}
+
+  defp valid_opened_inspection?(%{
+         inspection_sink: nil,
+         inspection_path: nil,
+         inspection_identity: nil
+       }),
+       do: true
+
+  defp valid_opened_inspection?(%{
+         inspection_sink: %InspectionSink{} = inspection_sink,
+         inspection_path: path,
+         inspection_identity: identity,
+         event_identity: identity
+       })
+       when is_binary(path) do
+    InspectionSink.owner?(inspection_sink) and
+      InspectionSink.identity(inspection_sink) == {:ok, identity}
+  end
+
+  defp valid_opened_inspection?(_opened_sinks), do: false
+
+  defp discard_opened_sinks({:error, reason, _opened_sinks}), do: {:error, reason}
+  defp discard_opened_sinks(result), do: result
 
   defp build_config(
          {request, entry_source},
@@ -1150,7 +1402,9 @@ defmodule PtcRunner.Kernel.RunBuilder do
   defp bundle([]), do: {:ok, nil}
   defp bundle(components), do: Kernel.compile_bundle(components)
 
-  defp event_sink(request, providers) do
+  defp event_sink(request, providers), do: event_sink(request, providers, self())
+
+  defp event_sink(request, providers, owner) do
     policy = request.policy
     package = request.package
 
@@ -1158,6 +1412,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
       []
       |> maybe_put(:run_id, policy.run_id)
       |> maybe_put(:trace_id, policy.trace_id)
+      |> Keyword.put(:owner, owner)
 
     effective_policy =
       if policy.event_policy == :private or providers.data_class == :private_inspection,
@@ -1167,7 +1422,10 @@ defmodule PtcRunner.Kernel.RunBuilder do
     EventSink.start(effective_policy, package.limits, opts)
   end
 
-  defp inspection_sink(event_sink, opts, failure_mode) do
+  defp inspection_sink(event_sink, opts, failure_mode),
+    do: inspection_sink(event_sink, opts, failure_mode, self())
+
+  defp inspection_sink(event_sink, opts, failure_mode, owner) do
     case Keyword.get(opts, :inspect) do
       nil ->
         {:ok, nil, nil}
@@ -1180,7 +1438,8 @@ defmodule PtcRunner.Kernel.RunBuilder do
                  InspectionSink.start(
                    run_id: identity.run_id,
                    trace_id: identity.trace_id,
-                   schema_version: 2
+                   schema_version: 2,
+                   owner: owner
                  ) do
             {:ok, inspection_sink, path}
           end

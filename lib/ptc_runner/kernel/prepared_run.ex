@@ -116,6 +116,13 @@ defmodule PtcRunner.Kernel.PreparedRun do
 
   def active_valid?(_prepared), do: false
 
+  @doc false
+  @spec consumed_valid?(term()) :: boolean()
+  def consumed_valid?(%__MODULE__{} = prepared),
+    do: sealed_valid?(prepared) and ProviderActivity.consumed?(prepared.provider_activity)
+
+  def consumed_valid?(_prepared), do: false
+
   defp sealed_valid?(%__MODULE__{attestation: attestation} = prepared) do
     Enum.sort(Map.keys(prepared)) == @field_keys and
       RunRequest.valid?(prepared.request) and
@@ -155,6 +162,17 @@ defmodule PtcRunner.Kernel.PreparedRun do
   end
 
   def consume(_prepared), do: {:error, :invalid_prepared_run}
+
+  @doc false
+  @spec begin_build(t()) :: :ok | {:error, :invalid_prepared_run}
+  def begin_build(%__MODULE__{} = prepared) do
+    if sealed_valid?(prepared) and
+         ProviderActivity.begin_build(prepared.provider_activity) == :ok,
+       do: :ok,
+       else: {:error, :invalid_prepared_run}
+  end
+
+  def begin_build(_prepared), do: {:error, :invalid_prepared_run}
 
   @doc """
   Idempotently releases the prepared run's activity owner.
