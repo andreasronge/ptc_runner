@@ -106,8 +106,11 @@ corpus_ids =
   |> Map.keys()
   |> MapSet.new()
 
+# Ordered by first appearance, because order is what breaks a tie below.
 fetches_by_evaluation =
-  Enum.reduce(inspection_records || [], %{}, fn record, acc ->
+  inspection_records
+  |> List.wrap()
+  |> Enum.reduce([], fn record, acc ->
     payload = record["payload"]
     value = payload["result"]["value"]
 
@@ -115,12 +118,17 @@ fetches_by_evaluation =
          payload["result"]["status"] == "ok" and value["found"] == true and
          MapSet.member?(corpus_ids, value["evidence_id"]) and
          not MapSet.member?(verifier_evaluations, payload["evaluation_id"]) do
-      Map.update(
-        acc,
-        payload["evaluation_id"],
-        MapSet.new([value["evidence_id"]]),
-        &MapSet.put(&1, value["evidence_id"])
-      )
+      id = payload["evaluation_id"]
+
+      case Enum.find_index(acc, &(elem(&1, 0) == id)) do
+        nil ->
+          acc ++ [{id, MapSet.new([value["evidence_id"]])}]
+
+        index ->
+          List.update_at(acc, index, fn {^id, ids} ->
+            {id, MapSet.put(ids, value["evidence_id"])}
+          end)
+      end
     else
       acc
     end
@@ -139,25 +147,33 @@ fetches_by_evaluation =
 # union when no arm-reported count exists (the loop, which accumulates across
 # turns and discards nothing) or when nothing matches it. `coverage_basis`
 # records which rule applied, so a row cannot quietly change meaning.
+#
+# On a tie, take the **first** such evaluation, because that is what the arm
+# does: `fetch-records` replaces its result only on a *strictly* larger count,
+# so an equal-sized retry is discarded and the original is what reaches the
+# prompt. Unioning the tied attempts would re-introduce the same over-credit
+# this selection exists to remove, for the case where two attempts fetch the
+# same number of different records.
+selected =
+  if is_integer(coverage["gathered"]) do
+    Enum.find(fetches_by_evaluation, fn {_id, ids} ->
+      MapSet.size(ids) == coverage["gathered"]
+    end)
+  end
+
 {read_ids, coverage_basis} =
   cond do
     is_nil(inspection_records) ->
       {nil, "none"}
 
-    is_integer(coverage["gathered"]) and
-        Enum.any?(fetches_by_evaluation, fn {_id, ids} ->
-          MapSet.size(ids) == coverage["gathered"]
-        end) ->
-      {fetches_by_evaluation
-       |> Enum.filter(fn {_id, ids} -> MapSet.size(ids) == coverage["gathered"] end)
-       |> Enum.map(&elem(&1, 1))
-       |> Enum.reduce(&MapSet.union/2), "selected-evaluation"}
+    selected != nil ->
+      {elem(selected, 1), "selected-evaluation"}
 
-    map_size(fetches_by_evaluation) == 0 ->
+    fetches_by_evaluation == [] ->
       {MapSet.new(), "union"}
 
     true ->
-      {fetches_by_evaluation |> Map.values() |> Enum.reduce(&MapSet.union/2), "union"}
+      {fetches_by_evaluation |> Enum.map(&elem(&1, 1)) |> Enum.reduce(&MapSet.union/2), "union"}
   end
 
 # `read_coverage` counts records; it does not ask which. That is not pedantry:

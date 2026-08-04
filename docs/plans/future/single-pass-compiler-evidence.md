@@ -874,6 +874,16 @@ weak gate; the prompted pass is what found the one that mattered:
 - **[P3] The fixture server treated a stdin read error as a clean EOF**, exiting
   0 on a broken transport. Fixed.
 
+A third pass over the corrected collector returned one more [P1], also correct:
+selecting *every* evaluation whose fetch count matches the arm's reported
+`gathered` and unioning them re-introduces the same over-credit for the case
+where two attempts fetch the same number of *different* records. `fetch-records`
+replaces its result only on a strictly larger count, so an equal-sized retry is
+discarded and the first attempt is what reaches the prompt; the collector now
+takes the first match rather than the union. Two runs here do tie at 160, and in
+both the attempts fetched identical records — so the fix changes no number and
+is purely preventive.
+
 ## Limits
 
 - **n=10 per cell**, 60 runs. The recall difference is significant under a
