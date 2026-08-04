@@ -8,7 +8,8 @@
    :failure-kinds ["unresolved-citations" "citation-verification-failed"
                    "malformed-report"]
    :annotations {"citations-verified" ["checked" "unresolved" "mismatched"]
-                 "attempts" ["passes" "corrected"]}})
+                 "attempts" ["passes" "corrected"]
+                 "coverage" ["gathered" "available" "complete"]}})
 
 ;; The program is a constant. The incident id reaches it as data at
 ;; `data/params`, never as text substituted into the source, so there is no
@@ -25,12 +26,38 @@
       (get ev :value)
       (fail (result/error :citation-verification-failed (get ev :outcome))))))
 
-(defn- prompt [incident-id format records contract]
+;; What the incident actually holds, asked of the source rather than assumed.
+;; `list-sources` reports `record_count`, so this is one capability call. The
+;; hand-written program above is not changed here: the question is whether a
+;; report told it is working from a fraction behaves differently, not whether a
+;; better fetch would help — it obviously would.
+(def coverage-src
+  (str "(let [inc (get data/params \"incident_id\")\n"
+       "      sources (get (incident.evidence/list-sources inc) \"sources\")]\n"
+       "  (return (reduce + 0 (mapv (fn [s] (get s \"record_count\")) sources))))"))
+
+(defn- gather [incident-id]
+  (let [records (fetch-records incident-id)
+        ev (kernel/eval-source-with coverage-src {"incident_id" incident-id})
+        available (if (= :returned (get ev :outcome)) (get ev :value) 0)]
+    {"records" records
+     "available" available
+     "complete" (or (= 0 available) (>= (count records) available))}))
+
+(defn- coverage-sentence [gathered]
+  (if (get gathered "complete")
+    "Every record below is the complete evidence."
+    (str "The records below are " (count (get gathered "records")) " of the "
+         (get gathered "available") " records this incident holds. "
+         "You are not seeing all of the evidence, and retrieval could not be "
+         "made complete.")))
+
+(defn- prompt [incident-id format gathered contract]
   (str "You are compiling an evidence report for incident \"" incident-id "\".\n"
        "Requested output template: \"" format "\".\n\n"
-       "Every record below is the complete evidence. Fields: evidence_id,\n"
+       (coverage-sentence gathered) " Fields: evidence_id,\n"
        "observed_at, source, title, body, content_digest.\n\n"
-       (json/generate-string records)
+       (json/generate-string (get gathered "records"))
        "\n\nReturn ONE JSON object and nothing else — no prose, no code fence.\n"
        "It must satisfy this contract:\n" contract "\n\n"
        "Rules:\n"
@@ -43,20 +70,20 @@
        "  open question naming the evidence that would answer it.\n"
        "- Correlation in time is not causation.\n"))
 
-(defn- ask [incident-id format records contract]
+(defn- ask [incident-id format gathered contract]
   (let [response (llm/request {"system" "You return one JSON object and nothing else."
                                "messages" [{"role" "user"
-                                            "content" (prompt incident-id format records contract)}]})
+                                            "content" (prompt incident-id format gathered contract)}]})
         content (get response "content")]
     (if (string? content)
       content
       (fail (result/error :malformed-report :no-content)))))
 
-(defn- ask-corrected [incident-id format records contract detail]
+(defn- ask-corrected [incident-id format gathered contract detail]
   (let [response (llm/request
                    {"system" "You return one JSON object and nothing else."
                     "messages" [{"role" "user"
-                                 "content" (correction-prompt incident-id format records
+                                 "content" (correction-prompt incident-id format gathered
                                                               contract detail)}]})
         content (get response "content")]
     (if (string? content) content (fail (result/error :malformed-report :no-content)))))
@@ -116,8 +143,8 @@
                            (str/join ", " mismatched))}))))))
 
 
-(defn- correction-prompt [incident-id format records contract detail]
-  (str (prompt incident-id format records contract)
+(defn- correction-prompt [incident-id format gathered contract detail]
+  (str (prompt incident-id format gathered contract)
        "\n\nA previous attempt was rejected because its citations did not resolve "
        "against the evidence source:\n" detail "\n"
        "Every evidence_id must name a record above, and every content_digest must "
@@ -127,9 +154,14 @@
   (let [incident-id (get input "incident_id")
         format (or (get input "format") "postmortem")
         contract (kernel/result-contract-description)
-        records (fetch-records incident-id)]
+        gathered (gather incident-id)]
     (workflow.event/annotate "progress" {"stage" "executing"})
-    (let [first-report (parse-report (ask incident-id format records contract))
+    (workflow.event/annotate
+      "coverage"
+      {"gathered" (count (get gathered "records"))
+       "available" (get gathered "available")
+       "complete" (if (get gathered "complete") 1 0)})
+    (let [first-report (parse-report (ask incident-id format gathered contract))
           first-outcome (resolve-outcome incident-id first-report)]
       (if (get first-outcome "ok")
         (do (workflow.event/annotate "attempts" {"passes" 1 "corrected" 0})
@@ -138,7 +170,7 @@
         ;; This is the loop's only structural advantage over a single pass; the
         ;; cost is one extra call, against the loop's twelve to sixteen.
         (let [retry (parse-report
-                      (ask-corrected incident-id format records contract
+                      (ask-corrected incident-id format gathered contract
                                      (get first-outcome "detail")))
               retry-outcome (resolve-outcome incident-id retry)]
           (workflow.event/annotate "attempts" {"passes" 2 "corrected" 1})

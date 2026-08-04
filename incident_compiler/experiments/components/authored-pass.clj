@@ -19,7 +19,8 @@
    :failure-kinds ["unresolved-citations" "malformed-report" "authoring-failed"]
    :annotations {"citations-verified" ["checked" "unresolved" "mismatched"]
                  "attempts" ["passes" "corrected"]
-                 "authoring" ["program-ran" "eval-failed" "records" "repaired"]}})
+                 "authoring" ["program-ran" "eval-failed" "records" "repaired"]
+                 "coverage" ["gathered" "available" "complete"]}})
 
 (defn- strip-fence [content]
   (let [trimmed (str/trim (str content))]
@@ -79,35 +80,86 @@
           records
           (fail (result/error :authoring-failed :no-records)))))))
 
+;; How many records the incident actually holds, asked of the evidence source
+;; rather than inferred from what the program returned. `list-sources` reports
+;; `record_count` per source, so this costs one capability call and does not
+;; depend on the authored program being curious about its own completeness —
+;; which, on the stress corpus, none of them was.
+(def coverage-src
+  (str "(let [inc (get data/params \"incident_id\")\n"
+       "      sources (get (incident.evidence/list-sources inc) \"sources\")]\n"
+       "  (return {\"total\" (reduce + 0 (mapv (fn [s] (get s \"record_count\")) sources))\n"
+       "           \"per_source\" (mapv (fn [s] {\"source\" (get s \"source\")\n"
+       "                                      \"count\" (get s \"record_count\")}) sources)}))"))
+
+(defn- coverage [incident-id]
+  (let [ev (kernel/eval-source-with coverage-src {"incident_id" incident-id})]
+    (if (= :returned (get ev :outcome)) (get ev :value) nil)))
+
+(defn- shortfall-note [got available]
+  (str "A previous program returned " got " of the " available
+       " evidence records this incident holds. That is not all of them.\n"
+       "Return a corrected program that retrieves every record."))
+
 ;; `check-source` resolves names against the live mission environment without
 ;; executing, and costs no evaluation against the mission budget. That makes one
 ;; repair turn cheap: an authored program that names a function that does not
-;; exist is caught and rewritten before it ever runs, rather than spending an
-;; evaluation to discover the same thing. A second rejection fails closed, so
-;; the annotation still separates "could not write a runnable program" from
-;; "wrote one that produced a bad report".
-(defn- fetch-records [incident-id format]
-  (let [src (author-program incident-id format nil)
+;; exist is caught and rewritten before it ever runs.
+;;
+;; It cannot see the other failure. A program that retrieves a fraction of the
+;; corpus is name-correct and passes; only counting what came back catches it.
+;; So coverage is checked against the source's own `record_count` and a short
+;; program is given one chance to be rewritten knowing what it missed. The note
+;; states the shortfall and nothing else — naming the limit argument would be
+;; telling it the answer rather than testing whether it finds one.
+(defn- authored-records [incident-id format rejection repaired]
+  (let [src (author-program incident-id format rejection)
         check (kernel/check-source src)]
     (if (= :valid (get check :outcome))
-      (run-program src 0)
+      (run-program src repaired)
       (let [detail (get (get check :diagnostic) :message)
-            repaired (author-program incident-id format detail)
-            recheck (kernel/check-source repaired)]
+            second-src (author-program incident-id format detail)
+            recheck (kernel/check-source second-src)]
         (if (= :valid (get recheck :outcome))
-          (run-program repaired 1)
+          (run-program second-src 1)
           (do (workflow.event/annotate
                 "authoring"
                 {"program-ran" 0 "eval-failed" 1 "records" 0 "repaired" 1})
               (fail (result/error :authoring-failed
                                   (get (get recheck :diagnostic) :kind)))))))))
 
-(defn- prompt [incident-id format records contract]
+(defn- fetch-records [incident-id format]
+  (let [records (authored-records incident-id format nil 0)
+        cover (coverage incident-id)
+        available (if (nil? cover) 0 (get cover "total"))]
+    (if (or (= 0 available) (>= (count records) available))
+      {"records" records "available" available "complete" true}
+      ;; One re-authoring call, told only what it missed.
+      (let [retry (authored-records incident-id format
+                                    (shortfall-note (count records) available) 1)
+            better (if (> (count retry) (count records)) retry records)]
+        {"records" better
+         "available" available
+         "complete" (>= (count better) available)}))))
+
+;; The completeness sentence used to be unconditional, which made it a false
+;; statement the moment retrieval fell short — and a report told it has
+;; everything has no reason to abstain. It now says what is actually true, and
+;; the contract already offers `insufficient_evidence` for the short case.
+(defn- coverage-sentence [gathered]
+  (if (get gathered "complete")
+    "Every record below is the complete evidence."
+    (str "The records below are " (count (get gathered "records")) " of the "
+         (get gathered "available") " records this incident holds. "
+         "You are not seeing all of the evidence, and retrieval could not be "
+         "made complete.")))
+
+(defn- prompt [incident-id format gathered contract]
   (str "You are compiling an evidence report for incident \"" incident-id "\".\n"
        "Requested output template: \"" format "\".\n\n"
-       "Every record below is the complete evidence. Fields: evidence_id,\n"
+       (coverage-sentence gathered) " Fields: evidence_id,\n"
        "observed_at, source, title, body, content_digest.\n\n"
-       (json/generate-string records)
+       (json/generate-string (get gathered "records"))
        "\n\nReturn ONE JSON object and nothing else — no prose, no code fence.\n"
        "It must satisfy this contract:\n" contract "\n\n"
        "Rules:\n"
@@ -120,27 +172,27 @@
        "  open question naming the evidence that would answer it.\n"
        "- Correlation in time is not causation.\n"))
 
-(defn- correction-prompt [incident-id format records contract detail]
-  (str (prompt incident-id format records contract)
+(defn- correction-prompt [incident-id format gathered contract detail]
+  (str (prompt incident-id format gathered contract)
        "\n\nA previous attempt was rejected because its citations did not resolve "
        "against the evidence source:\n" detail "\n"
        "Every evidence_id must name a record above, and every content_digest must "
        "be copied exactly from that record. Return the corrected report only."))
 
-(defn- ask [incident-id format records contract]
+(defn- ask [incident-id format gathered contract]
   (let [response (llm/request {"system" "You return one JSON object and nothing else."
                                "messages" [{"role" "user"
-                                            "content" (prompt incident-id format records contract)}]})
+                                            "content" (prompt incident-id format gathered contract)}]})
         content (get response "content")]
     (if (string? content)
       content
       (fail (result/error :malformed-report :no-content)))))
 
-(defn- ask-corrected [incident-id format records contract detail]
+(defn- ask-corrected [incident-id format gathered contract detail]
   (let [response (llm/request
                    {"system" "You return one JSON object and nothing else."
                     "messages" [{"role" "user"
-                                 "content" (correction-prompt incident-id format records
+                                 "content" (correction-prompt incident-id format gathered
                                                               contract detail)}]})
         content (get response "content")]
     (if (string? content) content (fail (result/error :malformed-report :no-content)))))
@@ -202,15 +254,20 @@
   (let [incident-id (get input "incident_id")
         format (or (get input "format") "postmortem")
         contract (kernel/result-contract-description)
-        records (fetch-records incident-id format)]
+        gathered (fetch-records incident-id format)]
     (workflow.event/annotate "progress" {"stage" "executing"})
-    (let [first-report (parse-report (ask incident-id format records contract))
+    (workflow.event/annotate
+      "coverage"
+      {"gathered" (count (get gathered "records"))
+       "available" (get gathered "available")
+       "complete" (if (get gathered "complete") 1 0)})
+    (let [first-report (parse-report (ask incident-id format gathered contract))
           first-outcome (resolve-outcome incident-id first-report)]
       (if (get first-outcome "ok")
         (do (workflow.event/annotate "attempts" {"passes" 1 "corrected" 0})
             (return first-report))
         (let [retry (parse-report
-                      (ask-corrected incident-id format records contract
+                      (ask-corrected incident-id format gathered contract
                                      (get first-outcome "detail")))
               retry-outcome (resolve-outcome incident-id retry)]
           (workflow.event/annotate "attempts" {"passes" 2 "corrected" 1})
