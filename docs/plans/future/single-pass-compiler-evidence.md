@@ -904,11 +904,33 @@ preventive on this data:
   after the fact. It is now `PTC_EXP_SET`, defaulting to the run directory's
   name, and travels through the collector.
 
-**The durable fix for the first is for the arms to annotate the evidence ids
-they returned**, rather than having the collector infer which evaluation was
-kept from a count. That is a change inside the arms and is listed under *Next
-step*; the count-matching selector is what can be done without desynchronising
-the components from the rows they produced.
+A fifth pass raised two [P1], both of which had been deferred once already. Two
+raisings is the signal to stop deferring:
+
+- **Count matching can select the attempt that was *discarded*.** The sharper
+  version of the round-four finding: an attempt that fetches 160 and returns 8,
+  against a retry that fetches 332 and returns 160, has `gathered == 160`
+  matching the thrown-away attempt. Counts cannot disambiguate. But the arm
+  already publishes the answer — its `authoring` annotations state, in order,
+  how many records each attempt *returned*, and `fetch-records` replaces only on
+  a strictly larger count, so the retained attempt is determined exactly.
+  Selection is now by retained attempt index, and where that attempt fetched
+  more than it returned the basis says `selected-evaluation-superset` rather
+  than claiming an exact measurement.
+- **Neither arm checked that its terminal is about the incident it asked for.**
+  Deferred twice on the grounds that changing an arm desynchronises it from the
+  rows it produced — but the guard only *rejects*, and `artifacts_agree` is true
+  on all 17 rows, so it is provably inert for every recorded run. That makes the
+  bookkeeping argument worthless against a live fail-open, and the guard is now
+  in both arms.
+- **[P2] Two conditions sharing one run directory would delete each other's
+  artifacts**, since paths are keyed by tag and only the row carried the set.
+  The set is now folded into the tag when it is not the directory's own name.
+
+Re-deriving all 17 rows against the retained-attempt selector changes no
+number; one row's basis sharpens from `union` to
+`selected-evaluation-superset`, which is a more honest description of the same
+measurement.
 
 ## Limits
 
@@ -1090,15 +1112,15 @@ replaces them.
    contract mid-comparison.
 5. **Fix the corpus generator's identifier scheme** before the next corpus is
    built. See *Open items and traps*.
-6. **Have the arms annotate the evidence ids they returned.** The collector
-   currently infers which retrieval attempt reached the prompt by matching an
-   evaluation's distinct fetch count against the count the arm reports. That is
-   a heuristic with a known hole — a program that fetches more than it returns
-   matches nothing — and the row then says `unrecoverable` rather than lying,
-   which is correct but is not a measurement. One annotation carrying the ids
-   makes the whole inference unnecessary, and makes `prompt_coverage`
-   checkable against the corpus instead of being a count of an outer
-   collection.
+6. **Have the arms record the evidence ids they returned.** Selection now
+   identifies the retained *attempt* exactly, from the arm's own annotations,
+   but coverage is still taken over that attempt's *fetches* — a superset
+   whenever the program filtered or nested what it returned. Recording the ids
+   removes the last inference, and would also let `prompt_coverage` be checked
+   against the corpus instead of being a count of an outer collection. An
+   annotation cannot carry them (annotations are numeric counters), so this
+   needs either a returned-value digest the collector can match or a small
+   change to what the arm evaluates.
 
 **Do not** add reps on the 13-record corpus. Those medians are settled — though
 note in *Limits* that they describe a report prompt that has since changed.

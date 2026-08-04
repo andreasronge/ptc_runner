@@ -166,20 +166,58 @@ fetches_by_evaluation =
 # prompt. Unioning the tied attempts would re-introduce the same over-credit
 # this selection exists to remove, for the case where two attempts fetch the
 # same number of different records.
+# Better than matching counts: the arm says, in order, how many records each
+# gathering attempt *returned*, and `fetch-records` replaces its result only on a
+# strictly larger count. That determines the retained attempt exactly, where a
+# count match can pick the discarded one — attempt 1 fetching 160 and returning 8
+# against a retry fetching 332 and returning 160 has `gathered == 160` matching
+# the attempt that was thrown away.
+authoring_returns =
+  for event <- events,
+      event["type"] == "workflow-annotation",
+      event["data"]["annotation_type"] == "authoring",
+      count = event["data"]["data"]["records"],
+      is_integer(count),
+      do: count
+
+retained_index =
+  authoring_returns
+  |> Enum.with_index()
+  |> Enum.reduce(nil, fn {count, index}, kept ->
+    if kept == nil or count > Enum.at(authoring_returns, kept), do: index, else: kept
+  end)
+
 selected =
-  if is_integer(coverage["gathered"]) do
-    Enum.find(fetches_by_evaluation, fn {_id, ids} ->
-      MapSet.size(ids) == coverage["gathered"]
-    end)
+  cond do
+    retained_index != nil ->
+      Enum.at(fetches_by_evaluation, retained_index)
+
+    is_integer(coverage["gathered"]) ->
+      Enum.find(fetches_by_evaluation, fn {_id, ids} ->
+        MapSet.size(ids) == coverage["gathered"]
+      end)
+
+    true ->
+      nil
   end
+
+# The retained attempt may have fetched more than it returned — filtered, or
+# returned nested. Its fetch set is then a superset of what the model saw, so the
+# basis says so rather than claiming an exact measurement.
+selected_exact? =
+  selected != nil and is_integer(coverage["gathered"]) and
+    MapSet.size(elem(selected, 1)) == coverage["gathered"]
 
 {read_ids, coverage_basis} =
   cond do
     is_nil(inspection_records) ->
       {nil, "none"}
 
-    selected != nil ->
+    selected != nil and selected_exact? ->
       {elem(selected, 1), "selected-evaluation"}
+
+    selected != nil ->
+      {elem(selected, 1), "selected-evaluation-superset"}
 
     # The arm reported a count and no evaluation matches it, so the mapping from
     # fetches to "what the model was given" is not recoverable — a program that

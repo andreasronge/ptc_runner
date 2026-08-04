@@ -11,6 +11,12 @@ TAG="${ARM}-${INCIDENT}-${REP}"
 # conditions produce colliding tags; the results file distinguishes them by
 # `set`, and that has to come from the harness rather than be added afterwards.
 SET="${PTC_EXP_SET:-$(basename "$EXP")}"
+# Artifacts are keyed by tag, so two conditions sharing one PTC_EXP_DIR would
+# delete each other's traces. Fold the set into the tag when it is not the
+# directory name it defaults to.
+if [ "$SET" != "$(basename "$EXP")" ]; then
+  TAG="$(printf %s "$SET" | tr -c "A-Za-z0-9._-" "-")-${TAG}"
+fi
 
 case "$ARM" in
   fast) MANIFEST=exp-single-pass.json ;;

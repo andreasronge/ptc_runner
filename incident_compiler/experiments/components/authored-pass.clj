@@ -250,6 +250,15 @@
 (defn- abstained? [report]
   (= "insufficient_evidence" (get report "status")))
 
+;; A terminal has to be about the incident that was asked for. The contract only
+;; requires `incident_id` to be a non-empty string, so a schema-valid report — or
+;; abstention, which skips citation resolution entirely — naming a different
+;; incident would exit zero and be scored against this incident's oracle. Nothing
+;; downstream can catch it: the citations resolve against the requested incident
+;; either way.
+(defn- own-incident? [incident-id report]
+  (= incident-id (get report "incident_id")))
+
 (defn- resolve-outcome [incident-id report]
   (let [cites (citations-of report)]
     (if (empty? cites)
@@ -286,8 +295,14 @@
        "complete" (if (get gathered "complete") 1 0)
        "short-partitions" (get gathered "short_partitions")})
     (let [first-report (parse-report (ask incident-id format gathered contract))
-          first-outcome (if (abstained? first-report)
+          first-outcome (cond
+                          (not (own-incident? incident-id first-report))
+                          {"ok" false "detail" "the report named a different incident"}
+
+                          (abstained? first-report)
                           {"ok" true}
+
+                          :else
                           (resolve-outcome incident-id first-report))]
       (if (get first-outcome "ok")
         (do (workflow.event/annotate "attempts" {"passes" 1 "corrected" 0})
@@ -295,8 +310,14 @@
         (let [retry (parse-report
                       (ask-corrected incident-id format gathered contract
                                      (get first-outcome "detail")))
-              retry-outcome (if (abstained? retry)
+              retry-outcome (cond
+                              (not (own-incident? incident-id retry))
+                              {"ok" false "detail" "the report named a different incident"}
+
+                              (abstained? retry)
                               {"ok" true}
+
+                              :else
                               (resolve-outcome incident-id retry))]
           (workflow.event/annotate "attempts" {"passes" 2 "corrected" 1})
           (if (get retry-outcome "ok")
