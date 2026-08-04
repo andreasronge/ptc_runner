@@ -199,6 +199,16 @@ temporary prepared run after assembly.
 `PtcRunner.Kernel.RunBuilder` remains the shared environment assembly and
 cleanup boundary.
 
+One-shot builder execution freezes the Kernel result, fail-closed disclosure
+class, result-contract decision, terminal canonical events, and optional
+inspection records in a sealed, path-free `ExecutionOutcome`. It then stops
+both sinks before publication consumes only that immutable evidence and the
+bound, sealed `PublicationAuthority`; callers cannot replace the anchored
+destinations after preflight. The Mix adapter still opens
+`ProviderActiveSession` before handing the session to `RunBuilder`; moving that
+active opening and the sinks behind the single execution-session owner remains
+the next lifecycle cutover.
+
 The staged `PtcRunner.Kernel.CommandEngine` core allocates a command reference
 before strict argv parsing, consumes host/application paths through acquisition
 adapters, and projects failures into `PtcRunner.Kernel.CommandOutcome`. It is

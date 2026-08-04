@@ -27,11 +27,18 @@ defmodule PtcRunner.Kernel.RunBuilder do
   binds it to a Runner or REPL lifecycle owner. The creator must remain alive
   until that bind or until `close/1`; returning an unstarted build from a
   short-lived task is not an ownership transfer.
+
+  One-shot execution freezes its result, disclosure class, contract decision,
+  terminal events, and optional inspection records in a sealed
+  `PtcRunner.Kernel.ExecutionOutcome`. Both sinks stop before the separate
+  publication step consumes that path-free evidence together with the sealed,
+  preflighted `PtcRunner.Kernel.PublicationAuthority` retained by the build.
   """
 
   alias PtcRunner.Kernel
   alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.EventSink
+  alias PtcRunner.Kernel.ExecutionOutcome
   alias PtcRunner.Kernel.InspectionArtifact
   alias PtcRunner.Kernel.InspectionSink
   alias PtcRunner.Kernel.InstallationCatalog
@@ -42,13 +49,13 @@ defmodule PtcRunner.Kernel.RunBuilder do
   alias PtcRunner.Kernel.ProviderAcquisition
   alias PtcRunner.Kernel.ProviderRegistry
   alias PtcRunner.Kernel.ProviderSession
+  alias PtcRunner.Kernel.PublicationAuthority
   alias PtcRunner.Kernel.Result
   alias PtcRunner.Kernel.ResultArtifact
   alias PtcRunner.Kernel.RunConfig
   alias PtcRunner.Kernel.RunCoordinator
   alias PtcRunner.Kernel.RunRequest
   alias PtcRunner.Kernel.TraceLog
-  alias PtcRunner.Kernel.ValueContract
   alias PtcRunner.Kernel.WorkflowEnvironment
 
   @acquisition_options [
@@ -72,7 +79,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
            %{
              entry_source: binary(),
              config: RunConfig.t(),
-             result_contract: ValueContract.t() | nil,
+             publication_authority: PublicationAuthority.t(),
              result_projection: :native | :json
            }}
           | {:error, term()}
@@ -103,7 +110,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
            %{
              entry_source: binary(),
              config: RunConfig.t(),
-             result_contract: ValueContract.t() | nil,
+             publication_authority: PublicationAuthority.t(),
              result_projection: :native | :json
            }}
           | {:error, term()}
@@ -223,14 +230,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
   def run_active_with_class(prepared, registry, session, opts) do
     case build_active(prepared, registry, session, opts) do
       {:ok, built} ->
-        try do
-          execute_built(built, opts)
-        after
-          if built.config.inspection_sink, do: InspectionSink.stop(built.config.inspection_sink)
-
-          if Process.alive?(built.config.event_sink.pid),
-            do: EventSink.stop(built.config.event_sink)
-        end
+        execute_and_publish(built)
 
       {:error, _reason} = error ->
         error
@@ -243,14 +243,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
   def run_prepared_with_class(prepared, registry, opts) do
     case build_prepared(prepared, registry, opts) do
       {:ok, built} ->
-        try do
-          execute_built(built, opts)
-        after
-          if built.config.inspection_sink, do: InspectionSink.stop(built.config.inspection_sink)
-
-          if Process.alive?(built.config.event_sink.pid),
-            do: EventSink.stop(built.config.event_sink)
-        end
+        execute_and_publish(built)
 
       {:error, _reason} = error ->
         error
@@ -452,7 +445,9 @@ defmodule PtcRunner.Kernel.RunBuilder do
     package = request.package
 
     result =
-      with {:ok, workflow} <-
+      with {:ok, publication_authority} <-
+             PublicationAuthority.new(Keyword.take(opts, @artifact_options)),
+           {:ok, workflow} <-
              WorkflowEnvironment.new(
                bundle: workflow_bundle,
                capabilities: providers.workflow.capabilities
@@ -471,10 +466,9 @@ defmodule PtcRunner.Kernel.RunBuilder do
           providers,
           workflow,
           mission,
-          sink,
-          inspection_sink,
-          inspection_path,
-          package.component_overrides
+          {sink, inspection_sink, inspection_path},
+          package.component_overrides,
+          publication_authority
         )
       end
 
@@ -492,10 +486,9 @@ defmodule PtcRunner.Kernel.RunBuilder do
          providers,
          workflow,
          mission,
-         sink,
-         inspection_sink,
-         inspection_path,
-         component_overrides
+         {sink, inspection_sink, inspection_path},
+         component_overrides,
+         publication_authority
        ) do
     package = request.package
 
@@ -519,7 +512,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
          %{
            entry_source: entry_source,
            config: config,
-           result_contract: package.contracts.result,
+           publication_authority: publication_authority,
            result_projection: request.policy.result_projection
          }}
 
@@ -681,34 +674,69 @@ defmodule PtcRunner.Kernel.RunBuilder do
   defp prefer_cleanup_error(_original, {:error, :provider_cleanup_failed} = cleanup), do: cleanup
   defp prefer_cleanup_error(original, :ok), do: original
 
-  defp execute_built(built, opts) do
-    built
-    |> execute_one_shot()
-    |> publish_execution(built, opts)
+  defp execute_and_publish(built) do
+    with {:ok, outcome} <- execute_built(built) do
+      publish_execution(outcome, built.publication_authority)
+    end
   end
 
-  # This record is deliberately path-free. `Kernel.run_and_events/2` has
-  # already closed the provider session and frozen the terminal batch; the
-  # separate publication step below is its sole filesystem consumer.
-  defp execute_one_shot(built) do
-    {result, terminal_batch} = Kernel.run_and_events(built.entry_source, built.config)
+  @doc false
+  @spec execute_built(map()) :: {:ok, ExecutionOutcome.t()} | {:error, term()}
+  def execute_built(%{
+        entry_source: entry_source,
+        config: %RunConfig{} = config,
+        publication_authority: authority
+      })
+      when is_binary(entry_source) do
+    if PublicationAuthority.valid?(authority) do
+      try do
+        {result, terminal_batch} = Kernel.run_and_events(entry_source, config)
 
-    %{
-      result: result,
-      result_class: result_class(built.config.event_sink),
-      result_contract: validate_result(result, built.result_contract),
-      terminal_batch: terminal_batch
-    }
+        ExecutionOutcome.capture(
+          result,
+          terminal_batch,
+          config.event_sink,
+          config.inspection_sink,
+          config.result_contract,
+          authority
+        )
+      after
+        stop_execution_sinks(config)
+      end
+    else
+      reject_execution(config)
+    end
   end
 
-  defp publish_execution(execution, built, opts) do
-    case execution.terminal_batch do
+  def execute_built(%{config: %RunConfig{} = config}), do: reject_execution(config)
+  def execute_built(_built), do: {:error, :invalid_execution_outcome}
+
+  @doc false
+  @spec publish_execution(ExecutionOutcome.t(), PublicationAuthority.t()) ::
+          {:ok, term(), :normal | :private} | {:error, term()}
+  def publish_execution(outcome, authority) do
+    with {:ok, evidence} <- ExecutionOutcome.open(outcome, authority) do
+      do_publish_execution(evidence, PublicationAuthority.options(authority))
+    end
+  end
+
+  defp do_publish_execution(
+         %{
+           result: result,
+           result_class: result_class,
+           result_contract: result_contract,
+           terminal_batch: terminal_batch,
+           inspection: inspection
+         },
+         opts
+       ) do
+    case terminal_batch do
       {:ok, events} ->
-        with :ok <- persist_trace(Keyword.get(opts, :trace), execution.result_class, events),
-             :ok <- persist_inspection(built.config, events),
-             :ok <- execution.result_contract,
-             :ok <- persist_result(execution.result, execution.result_class, opts) do
-          execution_result(execution)
+        with :ok <- persist_trace(Keyword.get(opts, :trace), result_class, events),
+             :ok <- persist_inspection(inspection, opts, events),
+             :ok <- result_contract,
+             :ok <- persist_result(result, result_class, opts) do
+          execution_result(result, result_class)
         else
           {:error, {:result_contract_failed, _details}} = error ->
             error
@@ -717,31 +745,39 @@ defmodule PtcRunner.Kernel.RunBuilder do
             {:error,
              {persistence_failure(stage), reason,
               disclosable(
-                execution.result,
-                execution.result_class,
-                execution.result_contract
+                result,
+                result_class,
+                result_contract
               )}}
         end
 
       {:error, _reason} ->
-        case execution.result_contract do
-          :ok -> execution_result(execution)
+        case result_contract do
+          :ok -> execution_result(result, result_class)
           {:error, {:result_contract_failed, _details}} = error -> error
         end
     end
   end
 
-  defp execution_result(%{result: {:ok, result}, result_class: class}),
+  defp reject_execution(config),
+    do: prefer_cleanup_error({:error, :invalid_execution_outcome}, close(config))
+
+  defp execution_result({:ok, result}, class),
     do: {:ok, result, class}
 
-  defp execution_result(%{result: {:error, _reason} = error}), do: error
+  defp execution_result({:error, _reason} = error, _class), do: error
+
+  defp stop_execution_sinks(%RunConfig{} = config) do
+    if config.inspection_sink, do: InspectionSink.stop(config.inspection_sink)
+    if Process.alive?(config.event_sink.pid), do: EventSink.stop(config.event_sink)
+  end
 
   @spec load_and_build(binary(), ProviderRegistry.t()) ::
           {:ok,
            %{
              entry_source: binary(),
              config: RunConfig.t(),
-             result_contract: ValueContract.t() | nil,
+             publication_authority: PublicationAuthority.t(),
              result_projection: :native | :json
            }}
           | {:error, term()}
@@ -992,15 +1028,8 @@ defmodule PtcRunner.Kernel.RunBuilder do
   from the same event sink the run itself used.
   """
   def run_with_class(path, registry, opts \\ []) do
-    with {:ok, built, opts} <- load_and_build_with_options(path, registry, opts) do
-      try do
-        execute_built(built, opts)
-      after
-        if built.config.inspection_sink, do: InspectionSink.stop(built.config.inspection_sink)
-
-        if Process.alive?(built.config.event_sink.pid),
-          do: EventSink.stop(built.config.event_sink)
-      end
+    with {:ok, built, _anchored_opts} <- load_and_build_with_options(path, registry, opts) do
+      execute_and_publish(built)
     end
   end
 
@@ -1025,41 +1054,6 @@ defmodule PtcRunner.Kernel.RunBuilder do
   end
 
   defp disclosable(result, _class, :ok), do: result
-
-  defp validate_result(_result, nil), do: :ok
-
-  defp validate_result({:ok, %Result{value: value}}, %ValueContract{} = contract) do
-    case json_contract_value(value) do
-      {:ok, public} ->
-        if ValueContract.valid?(contract, public),
-          do: :ok,
-          else: {:error, {:result_contract_failed, ValueContract.classify(contract, public)}}
-
-      {:error, _reason} ->
-        {:error, {:result_contract_failed, %{value_kind: :invalid_json}}}
-    end
-  end
-
-  defp validate_result(_result, %ValueContract{}), do: :ok
-
-  @doc """
-  Returns the effective class of a run's result.
-
-  The effective event policy includes both the manifest policy and the
-  strictest selected provider data class. A private-event run or a provider
-  that emits private inspection data therefore produces a private value.
-
-  Fails closed. Only an explicit `:normal` policy yields a normal class, so a
-  sink that has exited — `EventSink.policy/1` then returns an error tuple —
-  classifies its value private rather than publishable.
-  """
-  @spec result_class(EventSink.t()) :: :normal | :private
-  def result_class(sink) do
-    case EventSink.policy(sink) do
-      :normal -> :normal
-      _other -> :private
-    end
-  end
 
   defp persist_result({:ok, %Result{} = result}, class, opts) do
     case result_destination(opts) do
@@ -1098,14 +1092,6 @@ defmodule PtcRunner.Kernel.RunBuilder do
     end
   end
 
-  # Result values have already crossed the strict Kernel JSON boundary. Decode
-  # the same deterministic bytes used by artifacts and result hashes so result
-  # contracts see ordinary JSON values without a second, potentially lossy
-  # map-key conversion.
-  defp json_contract_value(value) do
-    ValueContract.json_value(value)
-  end
-
   defp persist_trace(nil, _class, _events), do: :ok
 
   defp persist_trace(path, class, events) when is_binary(path) do
@@ -1117,21 +1103,20 @@ defmodule PtcRunner.Kernel.RunBuilder do
 
   defp persist_trace(_path, _class, _events), do: {:error, {:trace, :invalid_trace_log}}
 
-  defp persist_inspection(%RunConfig{inspection_sink: nil}, _events), do: :ok
+  defp persist_inspection(:disabled, _opts, _events), do: :ok
 
-  defp persist_inspection(%RunConfig{} = config, events) do
-    with {:ok, records} <- InspectionSink.records(config.inspection_sink),
-         :ok <-
-           InspectionArtifact.persist(
-             config.inspection_path,
-             records,
-             events
-           ) do
+  defp persist_inspection({:ok, records}, opts, events) do
+    with path when is_binary(path) <- Keyword.get(opts, :inspect),
+         :ok <- InspectionArtifact.persist(path, records, events) do
       :ok
     else
+      nil -> {:error, {:inspection, :invalid_inspection_path}}
       {:error, reason} -> {:error, {:inspection, reason}}
     end
   end
+
+  defp persist_inspection({:error, reason}, _opts, _events),
+    do: {:error, {:inspection, reason}}
 
   defp provider_free?(%{workflow: [], mission: []}), do: true
   defp provider_free?(_providers), do: false
