@@ -337,7 +337,7 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
   end
 
   @tag :tmp_dir
-  test "acquisition failure closes already acquired providers", %{tmp_dir: dir} do
+  test "acquisition failure closes exactly the acquired prefix in reverse order", %{tmp_dir: dir} do
     parent = self()
     File.write!(Path.join(dir, "workflow.clj"), "(ns app) (defn run [x] (return x))")
 
@@ -371,6 +371,7 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
     {:ok, registry} =
       ProviderRegistry.new(%{
         "staged" => ProviderRegistry.staged(staged),
+        "staged-second" => ProviderRegistry.staged(staged),
         "staged-bad" => ProviderRegistry.staged(staged)
       })
 
@@ -379,6 +380,7 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
         dir,
         [
           provider("staged", %{"id" => "first"}),
+          provider("staged-second", %{"id" => "second"}),
           provider("staged-bad", %{"id" => "bad"})
         ],
         []
@@ -386,7 +388,10 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
 
     {:ok, request} = ApplicationPackage.request_directory(manifest, result_projection: :native)
     assert {:error, :fixture_acquisition_failed} = RunBuilder.build(request, registry)
-    assert_receive {:closed_after_acquisition_failure, "first"}
+    assert_receive {:closed_after_acquisition_failure, first_closed}
+    assert_receive {:closed_after_acquisition_failure, second_closed}
+    assert [first_closed, second_closed] == ["second", "first"]
+    refute_receive {:closed_after_acquisition_failure, _id}
   end
 
   @tag :tmp_dir
