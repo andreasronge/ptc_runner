@@ -7,6 +7,10 @@ REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 EXP="${PTC_EXP_DIR:-$REPO/incident_compiler/experiments/runs}"
 INCIDENT="$1"; ARM="$2"; REP="${3:-1}"
 TAG="${ARM}-${INCIDENT}-${REP}"
+# The condition this run belongs to. A tag is (arm, incident, rep) only, so two
+# conditions produce colliding tags; the results file distinguishes them by
+# `set`, and that has to come from the harness rather than be added afterwards.
+SET="${PTC_EXP_SET:-$(basename "$EXP")}"
 
 case "$ARM" in
   fast) MANIFEST=exp-single-pass.json ;;
@@ -43,5 +47,5 @@ END=$(date +%s)
 
 mix run "$REPO/incident_compiler/experiments/collect.exs" "$TAG" "$INCIDENT" "$ARM" "$REP" "$STATUS" "$((END-START))" \
   "$EXP/traces/$TAG/run.jsonl" "$EXP/reports/$TAG.json" \
-  "$EXP/inspect/$TAG/run.inspection.jsonl" >> "$EXP/results.jsonl"
+  "$EXP/inspect/$TAG/run.inspection.jsonl" "$SET" >> "$EXP/results.jsonl"
 tail -1 "$EXP/results.jsonl"

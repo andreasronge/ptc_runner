@@ -1,7 +1,12 @@
 Code.require_file("incident_compiler/tools/scorer.exs")
 alias IncidentCompiler.Scorer
 
-[tag, incident, arm, rep, status, secs, trace, report, inspect_path] = System.argv()
+[tag, incident, arm, rep, status, secs, trace, report, inspect_path | rest] = System.argv()
+
+# The condition this row belongs to. Tags are (arm, incident, rep), so two
+# conditions collide; without this the set has to be bolted on after the fact and
+# a regenerated results file silently loses it.
+set = List.first(rest) || "default"
 
 events =
   case File.read(trace) do
@@ -88,11 +93,18 @@ inspection_records =
     _unreadable -> nil
   end
 
+# A verifier evaluation is one whose program *is* a citation resolution, not one
+# that mentions the resolver somewhere. Every arm builds that program the same
+# way — the call is the returned expression — so anchor on the prefix. A
+# substring test would classify a model-authored program that both retrieved and
+# resolved as pure verification and delete its legitimate reads.
+verifier_prefix = "(return (incident.evidence/resolve-citations"
+
 verifier_evaluations =
   for record <- inspection_records || [],
       record["record_type"] == "evaluation-source",
       source = record["payload"]["source"],
-      is_binary(source) and String.contains?(source, "incident.evidence/resolve-citations"),
+      is_binary(source) and String.starts_with?(String.trim_leading(source), verifier_prefix),
       into: MapSet.new(),
       do: record["correlation"]["evaluation_id"]
 
@@ -169,6 +181,15 @@ selected =
     selected != nil ->
       {elem(selected, 1), "selected-evaluation"}
 
+    # The arm reported a count and no evaluation matches it, so the mapping from
+    # fetches to "what the model was given" is not recoverable — a program that
+    # fetched 332 and filtered to 160 leaves no evaluation with 160 distinct
+    # fetches. Say unknown rather than falling back to the union, which is the
+    # over-credit this selection exists to avoid. The durable fix is for the arms
+    # to annotate the evidence ids they actually returned; see *Next step*.
+    is_integer(coverage["gathered"]) ->
+      {nil, "unrecoverable"}
+
     fetches_by_evaluation == [] ->
       {MapSet.new(), "union"}
 
@@ -237,8 +258,11 @@ reported_incident =
       nil
   end
 
+# Exactly one trace identity, not "at most one": a run that died before writing
+# a trace has zero, and reporting agreement between three absent artifacts is a
+# claim that nothing was checked, dressed as a check that passed.
 artifacts_agree =
-  MapSet.size(trace_run_ids) <= 1 and
+  MapSet.size(trace_run_ids) == 1 and
     (MapSet.size(inspection_run_ids) == 0 or
        MapSet.equal?(trace_run_ids, inspection_run_ids)) and
     reported_incident in [nil, incident]
@@ -253,6 +277,7 @@ end
 
 row = %{
   "tag" => tag,
+  "set" => set,
   "incident" => incident,
   "arm" => arm,
   "rep" => String.to_integer(rep),

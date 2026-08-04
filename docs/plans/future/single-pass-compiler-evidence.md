@@ -884,6 +884,32 @@ takes the first match rather than the union. Two runs here do tie at 160, and in
 both the attempts fetched identical records — so the fix changes no number and
 is purely preventive.
 
+A fourth pass returned one more [P1] and three [P2], all correct and all
+preventive on this data:
+
+- Matching an evaluation by *fetch count* breaks when a program fetches more
+  than it returns — 332 fetched, 160 returned leaves no evaluation with 160
+  distinct fetches. The collector now reports `coverage_basis: "unrecoverable"`
+  and a null coverage rather than falling back to the union, which is the
+  over-credit the selection exists to avoid. No row in this round takes that
+  path; every `union` row is one where the arm reports no count at all.
+- The verifier test was still a substring, so a model-authored program that both
+  retrieved *and* resolved would have had its legitimate reads deleted. Anchored
+  on the returned expression instead.
+- `artifacts_agree` was true when a run died before writing any artifact —
+  agreement between three absent files, reported as a check that passed. Now
+  requires exactly one trace identity.
+- `run.sh` never emitted the `set` field the results file is keyed by, so a
+  second condition would produce colliding tags and the set had to be added
+  after the fact. It is now `PTC_EXP_SET`, defaulting to the run directory's
+  name, and travels through the collector.
+
+**The durable fix for the first is for the arms to annotate the evidence ids
+they returned**, rather than having the collector infer which evaluation was
+kept from a count. That is a change inside the arms and is listed under *Next
+step*; the count-matching selector is what can be done without desynchronising
+the components from the rows they produced.
+
 ## Limits
 
 - **n=10 per cell**, 60 runs. The recall difference is significant under a
@@ -1064,6 +1090,15 @@ replaces them.
    contract mid-comparison.
 5. **Fix the corpus generator's identifier scheme** before the next corpus is
    built. See *Open items and traps*.
+6. **Have the arms annotate the evidence ids they returned.** The collector
+   currently infers which retrieval attempt reached the prompt by matching an
+   evaluation's distinct fetch count against the count the arm reports. That is
+   a heuristic with a known hole — a program that fetches more than it returns
+   matches nothing — and the row then says `unrecoverable` rather than lying,
+   which is correct but is not a measurement. One annotation carrying the ids
+   makes the whole inference unnecessary, and makes `prompt_coverage`
+   checkable against the corpus instead of being a count of an outer
+   collection.
 
 **Do not** add reps on the 13-record corpus. Those medians are settled — though
 note in *Limits* that they describe a report prompt that has since changed.
