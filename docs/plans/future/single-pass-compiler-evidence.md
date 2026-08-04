@@ -383,7 +383,7 @@ facts and is counted separately.
 | arm | n | **reports** | abstained | failed | read coverage | **oracle coverage** | calls | required-fact recall |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | `fast` | 6 | **6/6** | 0 | 0 | 1.00 | **9/9 in 6/6** | 1 | **0.86** (0.71–0.86) |
-| `authored` | 8 | 3/8 | 1 | 4 | 1.00 (0.48–1.00) | 9/9 in 5/8 | 3 | 0.71 |
+| `authored` | 8 | 3/8 | 1 | 4 | 0.48 (0.48–1.00) | 9/9 in 3/8 | 3 | 0.71 |
 | `loop` | 3 | 1/3 | 1 | 1 | 0.48 (0.00–0.96) | **0/9 in 3/3** | 35 (26–39) | 0.00 |
 
 The first column counts **delivered reports**, not successful runs. An
@@ -399,12 +399,17 @@ report at a median 0.86 required-fact recall — against 0.00 for every arm in t
 first round. The separation is not marginal and no significance test is offered
 for it: it is categorical, and the category is *did the arm reach the evidence*.
 
-**Oracle coverage is bimodal. Every run scores 9/9 or 0/9; nothing lands in
-between.** The nine records sit at positions 25–43 within their sources, and the
-search defaults a missing limit to 20 — so an arm that passes a limit drains
-everything and an arm that does not sees none of it. There is no partial
-credit to earn, which is why delivered reports and recall track oracle coverage
-exactly and track `read_coverage` not at all.
+**Oracle coverage is bimodal, and it predicts publication exactly.** Every run
+scores 9/9 or 0/9, nothing between: the nine records sit at positions 25–43
+within their sources and the search defaults a missing limit to 20, so an arm
+that passes a limit drains everything and an arm that does not sees none of it.
+There is no partial credit to earn.
+
+The correspondence with the outcome is total. **All nine runs that reached 9/9
+delivered a report; all eight that reached 0/9 failed, abstained, or published
+the empty-negative report described below.** No run reached the evidence and
+then failed, and none published a real report without it. `read_coverage` tracks
+none of this — the loop's 0.96 run is in the 0/9 group.
 
 **The one fact every successful run misses is the same one.**
 `scaling-no-effect` — that the pool was scaled 40→120 with no effect — is absent
@@ -819,6 +824,56 @@ argument for pointing the review at the harness and not only at the runtime:
 the code that computes a result is as able to be wrong as the code under test,
 and it is not covered by the application's own tests.
 
+A second, adversarial pass — `codex exec` prompted at the measurement rather
+than at the code — returned ten more, three of them [P1]. Bare review-mode is a
+weak gate; the prompted pass is what found the one that mattered:
+
+- **[P1] Coverage credited records the model was never given.** The authored arm
+  may run a second gathering program and discard it: `fetch-records` keeps
+  whichever returned *more* records. On one run the retry fetched all 332 and
+  returned them as eight nested vectors, so `(count …)` saw 8, the arm kept the
+  first program's 160, and the prompt went out holding **none** of the nine
+  oracle records — while the collector, unioning every evaluation's fetches,
+  scored that run **9/9**. Corrected by selecting the evaluation whose distinct
+  fetches match the count the arm itself reports, with `coverage_basis` on every
+  row recording which rule applied. **Authored oracle coverage was 5/8 under the
+  union and is 3/8 under the fix.** This is the third time in this round that a
+  coverage number credited evidence a model never saw.
+- **[P1] `prompt_coverage` is a count of an outer collection and validates
+  nothing.** `run-program` accepts any non-empty sequential value. The same
+  record 332 times, 332 search summaries, or 332 nils all report complete. Not
+  fixed — see *Open items and traps*; the fix is a shape check in the arm, and
+  changing an arm now would desynchronise it from the rows it produced.
+- **[P1] Neither arm checks that the report is about the incident it asked
+  for.** Abstention is recognised from `status` alone and the schema only
+  requires `incident_id` to be a non-empty string, so a contract-valid report
+  naming another incident exits zero and is scored against the requested
+  incident's oracle. No run tripped this; it is a fail-open, not an observed
+  fault.
+- **[P2] `read_coverage` was not scoped to the incident under test** — any
+  fetched id counted against this corpus's size, so records from another
+  incident could push it to or past 1.00. Now intersected with the corpus.
+- **[P2] The verifier exclusion is a substring match**, which over-matches an
+  authored program that merely mentions the resolver. Narrowed to the
+  namespaced `incident.evidence/resolve-citations`, and largely superseded by
+  selecting the gathering evaluation directly.
+- **[P2] The collector never checked that its five inputs describe one run.**
+  Trace, inspection artifact, report, status and incident all arrive as argv.
+  Now cross-checked on `run_id` and the report's own `incident_id`, surfaced as
+  `artifacts_agree` — true on all 17 rows.
+- **[P2] The fast arm does not drain a source holding more than 50 records**, and
+  no fixture has one: the largest source in the corpus is 43. Its drain is
+  therefore *correct here and untested beyond the cap*; it degrades honestly
+  (`short_partitions` and an incomplete coverage sentence) rather than silently,
+  but that path has never run.
+- **[P2] The authored arm's `short_partitions` measures the diagnostic query,
+  not the model's retrieval.** The coverage check always searches at limit 50,
+  so the field reports corpus topology; a program making eight limit-20
+  truncated searches still reports zero. Left as is and recorded, because it is
+  the arm's own instrument rather than a result.
+- **[P3] The fixture server treated a stdin read error as a clean EOF**, exiting
+  0 on a broken transport. Fixed.
+
 ## Limits
 
 - **n=10 per cell**, 60 runs. The recall difference is significant under a
@@ -928,12 +983,12 @@ the mean).
 is about retrieval, not orchestration.** With the transport defect fixed and
 every arm told to read `matched`, `fast` reaches all nine oracle records in 6 of
 6 runs and publishes a grounded report every time on one model call. `authored`
-reaches them in 5 of 8 and delivers 3 reports. `loop` reaches them in **0 of 3**
-at 26–39 calls, and delivers 1. The
+reaches them in **3 of 8** and delivers exactly those 3 as reports. `loop`
+reaches them in **0 of 3** at 26–39 calls. The
 question the first round could not ask — what separates a single pass from a
 loop when retrieval is hard — has an answer that is mostly not about
 orchestration: the arm whose retrieval a human wrote against the API succeeds
-every time, the arm that asks a model to write it reaches the evidence five times in eight,
+every time, the arm that asks a model to write it reaches the evidence three times in eight,
 and the arm that has to discover the API through a boundary that will not name
 the bound it violated does not get there at all.
 
@@ -1015,7 +1070,21 @@ note in *Limits* that they describe a report prompt that has since changed.
   that guessed. Fix this before generating the next corpus; it also
   retrospectively weakens `read_coverage` on any run of this one.
 - **`oracle_coverage` is the honest retrieval metric and `read_coverage` is
-  not.** Both are recorded. Read the first.
+  not.** Both are recorded. Read the first — and read `coverage_basis` beside
+  it, because "records the run fetched" and "records the model was given" are
+  not the same set whenever an arm discards a retrieval attempt.
+- **`prompt_coverage` counts an outer collection and validates nothing else.**
+  No uniqueness, no map shape, no `evidence_id`, no corpus membership. The same
+  record repeated, a vector of vectors, or a list of search summaries all report
+  as complete. Fixing it means a shape check inside the arms — every element a
+  map carrying an `evidence_id` that exists in the corpus — which is the right
+  fix and was not applied here only because changing an arm now would
+  desynchronise it from the rows it produced.
+- **Neither single-pass arm checks that the report names the incident it asked
+  about.** A contract-valid report or abstention declaring another
+  `incident_id` would be accepted and scored against the requested oracle. No
+  run did this; it is a fail-open worth closing before the arms are trusted on a
+  multi-incident sweep.
 - **The authored arm's repair turn is not monotonic.** In two of eight runs the
   re-authored program returned *fewer* records than the one it replaced (332→8,
   and 160→8). The arm keeps the better of the two only because `fetch-records`

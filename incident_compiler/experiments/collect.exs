@@ -92,21 +92,73 @@ verifier_evaluations =
   for record <- inspection_records || [],
       record["record_type"] == "evaluation-source",
       source = record["payload"]["source"],
-      is_binary(source) and String.contains?(source, "resolve-citations"),
+      is_binary(source) and String.contains?(source, "incident.evidence/resolve-citations"),
       into: MapSet.new(),
       do: record["correlation"]["evaluation_id"]
 
-read_ids =
-  inspection_records &&
-    for record <- inspection_records,
-        record["record_type"] == "capability-output",
-        payload = record["payload"],
-        payload["name"] == "evidence.get",
-        payload["result"]["status"] == "ok",
-        payload["result"]["value"]["found"] == true,
-        not MapSet.member?(verifier_evaluations, payload["evaluation_id"]),
-        into: MapSet.new(),
-        do: payload["result"]["value"]["evidence_id"]
+# Fetches grouped by the evaluation that made them, and restricted to records
+# that belong to the incident under test — an id from another corpus is not
+# coverage of this one, and dividing a raw count by this corpus's size would let
+# it read above 1.0.
+corpus_ids =
+  "incident_compiler/fixtures/corpus"
+  |> Scorer.load_records(incident)
+  |> Map.keys()
+  |> MapSet.new()
+
+fetches_by_evaluation =
+  Enum.reduce(inspection_records || [], %{}, fn record, acc ->
+    payload = record["payload"]
+    value = payload["result"]["value"]
+
+    if record["record_type"] == "capability-output" and payload["name"] == "evidence.get" and
+         payload["result"]["status"] == "ok" and value["found"] == true and
+         MapSet.member?(corpus_ids, value["evidence_id"]) and
+         not MapSet.member?(verifier_evaluations, payload["evaluation_id"]) do
+      Map.update(
+        acc,
+        payload["evaluation_id"],
+        MapSet.new([value["evidence_id"]]),
+        &MapSet.put(&1, value["evidence_id"])
+      )
+    else
+      acc
+    end
+  end)
+
+# **Fetched is not the same as given to the model, and the difference is not
+# hypothetical.** The authored arm may run a second gathering program and then
+# discard it — `fetch-records` keeps whichever returned more records — so a
+# retry that fetched the whole corpus but returned it in the wrong shape is
+# thrown away *after* its fetches are already in the artifact. Unioning every
+# evaluation credited one such run with 9/9 oracle coverage when the prompt it
+# actually built held 160 records and none of the nine.
+#
+# So when the arm reports how many records it gathered, believe that: pick the
+# evaluation whose distinct fetches match that count. Only fall back to the
+# union when no arm-reported count exists (the loop, which accumulates across
+# turns and discards nothing) or when nothing matches it. `coverage_basis`
+# records which rule applied, so a row cannot quietly change meaning.
+{read_ids, coverage_basis} =
+  cond do
+    is_nil(inspection_records) ->
+      {nil, "none"}
+
+    is_integer(coverage["gathered"]) and
+        Enum.any?(fetches_by_evaluation, fn {_id, ids} ->
+          MapSet.size(ids) == coverage["gathered"]
+        end) ->
+      {fetches_by_evaluation
+       |> Enum.filter(fn {_id, ids} -> MapSet.size(ids) == coverage["gathered"] end)
+       |> Enum.map(&elem(&1, 1))
+       |> Enum.reduce(&MapSet.union/2), "selected-evaluation"}
+
+    map_size(fetches_by_evaluation) == 0 ->
+      {MapSet.new(), "union"}
+
+    true ->
+      {fetches_by_evaluation |> Map.values() |> Enum.reduce(&MapSet.union/2), "union"}
+  end
 
 # `read_coverage` counts records; it does not ask which. That is not pedantry:
 # one loop run reached 320 of 332 — 96% — holding **none** of the eleven records
@@ -144,6 +196,45 @@ oracle_ids =
 
 oracle_read = read_ids && MapSet.size(MapSet.intersection(read_ids, oracle_ids))
 
+# Nothing here checks that the five inputs describe the same run: the trace,
+# the inspection artifact, the report and the incident all arrive as argv, and a
+# stale or misrouted path yields a plausible row for a different run. That is not
+# theoretical — `run.sh` rewrites the manifest's incident in place, so two
+# concurrent runs of one arm interleave. The artifacts carry identity; join on it.
+trace_run_ids =
+  for event <- events, id = event["run_id"], is_binary(id), into: MapSet.new(), do: id
+
+inspection_run_ids =
+  for record <- inspection_records || [],
+      id = record["run_id"],
+      is_binary(id),
+      into: MapSet.new(),
+      do: id
+
+reported_incident =
+  case File.read(report) do
+    {:ok, raw} ->
+      decoded = :json.decode(raw)
+      Map.get(Map.get(decoded, "value", decoded), "incident_id")
+
+    _unreadable ->
+      nil
+  end
+
+artifacts_agree =
+  MapSet.size(trace_run_ids) <= 1 and
+    (MapSet.size(inspection_run_ids) == 0 or
+       MapSet.equal?(trace_run_ids, inspection_run_ids)) and
+    reported_incident in [nil, incident]
+
+if not artifacts_agree do
+  IO.warn(
+    "artifact mismatch for #{tag}: trace=#{inspect(MapSet.to_list(trace_run_ids))} " <>
+      "inspection=#{inspect(MapSet.to_list(inspection_run_ids))} " <>
+      "report_incident=#{inspect(reported_incident)} requested=#{inspect(incident)}"
+  )
+end
+
 row = %{
   "tag" => tag,
   "incident" => incident,
@@ -154,6 +245,8 @@ row = %{
   # terminal. That is true of an abstention too, so it is not the number to
   # quote as "published a report" — `report_published` is. Reporting only the
   # first counts a withheld report as a delivered one.
+  "coverage_basis" => coverage_basis,
+  "artifacts_agree" => artifacts_agree,
   "published" => String.to_integer(status) == 0,
   "report_published" => String.to_integer(status) == 0 and score != nil and not score.abstained,
   "wall_s" => String.to_integer(secs),

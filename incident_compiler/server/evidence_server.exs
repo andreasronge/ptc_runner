@@ -97,8 +97,16 @@ defmodule IncidentCompiler.EvidenceServer do
         line |> String.trim() |> dispatch(corpora)
         loop(corpora)
 
-      _eof ->
+      :eof ->
         :ok
+
+      # A read failure is not a clean shutdown. Folding it into the `:eof`
+      # branch made the server exit 0 on a broken stdin, which is exactly the
+      # signal a client needs to distinguish "the peer finished" from "the
+      # transport died".
+      {:error, reason} ->
+        IO.puts(:stderr, "stdin read failed: #{inspect(reason)}")
+        System.halt(74)
     end
   end
 
