@@ -129,7 +129,7 @@
     "req_llm",
     "telemetry"
   ],
-  "source_closure_hash": "dc4511e0e56c8c6b0b63ce90edb7aeb74e996f4df528157e0dda37df59e2c92b",
+  "source_closure_hash": "e7bb35c2d9239b112435a190c3cab5aa04602ff7a9062a39ba0b889f5274191e",
   "sources": [
     {
       "bytes": 870,
@@ -322,9 +322,9 @@
       "sha256": "bb9e7d7d2c6fb091a271db9a84ecd3eab39ac5437b5f68052523d52cf4fdf0e0"
     },
     {
-      "bytes": 56298,
+      "bytes": 56064,
       "path": "lib/ptc_runner/kernel/host_installation.ex",
-      "sha256": "5013a08a93ec8cd34b429569f98d803a13cfd0269f3420ec797e9baef76ec789"
+      "sha256": "e35512725e370766e3c626a2ac6b0ec9bb384f75c420fe8084caeec368935c39"
     },
     {
       "bytes": 7245,
@@ -332,9 +332,9 @@
       "sha256": "b51d14b7674bd15db9f8327fd830a97974ce5b3551faea25746d2a19acf37f63"
     },
     {
-      "bytes": 12849,
+      "bytes": 13507,
       "path": "lib/ptc_runner/kernel/host_installation_owner.ex",
-      "sha256": "f9b9c6c76aa2ff741b5704f174e5fe4d86f801d0c0fe5e5da99c04b5e6b5addd"
+      "sha256": "cbd50d532cd2eb76d82a5ed5730bdd21131e2f0e459efcb3e7764979e9c3703b"
     },
     {
       "bytes": 5314,
@@ -372,9 +372,9 @@
       "sha256": "102e7c52d89d15c23660358e88a78c23acdf89a1f58e665ee595640bc068f39f"
     },
     {
-      "bytes": 18617,
+      "bytes": 20935,
       "path": "lib/ptc_runner/kernel/installation_catalog.ex",
-      "sha256": "1dac02ec67ba21ff3207061c4066d97993490c76a24f6409cf7acfedeb489ec3"
+      "sha256": "4c228a07f2cc5ee88018a6cf766bbc762b1194184965abeb3453657e31d67708"
     },
     {
       "bytes": 11019,
@@ -502,9 +502,9 @@
       "sha256": "bc511779ebd0e1f6e6339044147ab62fd7e8eda3dcb472ec5037a397115a1b14"
     },
     {
-      "bytes": 8504,
+      "bytes": 8709,
       "path": "lib/ptc_runner/kernel/mcp_oauth/loopback_listener.ex",
-      "sha256": "235180d3dd046c460ffa16cb12c4481317ac6ca4d3a164dae293d60d49ffc5d9"
+      "sha256": "a0f46094138914c307d6d7c864ee20b68dee9a411482609ce394cfcd7f64534c"
     },
     {
       "bytes": 162,
@@ -647,9 +647,9 @@
       "sha256": "9fac3c24ebc445320c2a9b3e2e8855098cd79e5abbfee7c2e752332038ab19c0"
     },
     {
-      "bytes": 8641,
+      "bytes": 10470,
       "path": "lib/ptc_runner/kernel/provider_active_session.ex",
-      "sha256": "65d5e4e9bcf53ec39706cba2c1a1ddf9c2312d934e050fda46e8c5ad71cfeaab"
+      "sha256": "b9a28c77307787a2c0a5bfc56f5b35262a934d65339b334aa5ff98e6e75a1b33"
     },
     {
       "bytes": 9451,
@@ -677,9 +677,9 @@
       "sha256": "fb2f499428f1a1f40adfab16edae03d5469668aab3aef8cc61175ccce3778ee5"
     },
     {
-      "bytes": 25039,
+      "bytes": 26119,
       "path": "lib/ptc_runner/kernel/provider_registry.ex",
-      "sha256": "3dd5ca45fbe8d5d457be48ed33529dd6720bc89433c954fddd6fc3ad684bbcfa"
+      "sha256": "11dd08d25a5fe571e1fbd72d065f37b5dd1db799a10bdcc71fd9ff4aada1043c"
     },
     {
       "bytes": 9535,
@@ -692,9 +692,9 @@
       "sha256": "3c966d49402041ed52aed30efaa47391e3ca6fd4283de2a4c6476db9f497cf82"
     },
     {
-      "bytes": 35143,
+      "bytes": 35513,
       "path": "lib/ptc_runner/kernel/provider_session.ex",
-      "sha256": "682f77796d891a259f1682d6c59fc9571a63c30fd9b967d922d5fab5ecabb04f"
+      "sha256": "a298a8022838e1bb4416f4d6644ac48d01de200c983e88f01d83035c13100592"
     },
     {
       "bytes": 2983,

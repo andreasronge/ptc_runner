@@ -196,6 +196,30 @@ defmodule PtcRunner.Kernel.HostInstallationOwner do
   end
 
   def handle_call(
+        {:invoke, token, :registry, fence, {:oauth_authority_epoch, name}},
+        _from,
+        %{
+          token: token,
+          role: :registry,
+          fence: fence,
+          oauth_runtimes_installed?: true
+        } = state
+      )
+      when is_binary(name) do
+    result =
+      if current_role?(fence, :registry) do
+        case Map.get(state.oauth_runtimes, name) do
+          %{authority_epoch: authority_epoch} -> {:ok, authority_epoch}
+          _missing -> {:error, :authorization_context_required}
+        end
+      else
+        {:error, :authorization_context_required}
+      end
+
+    {:reply, result, state}
+  end
+
+  def handle_call(
         {:invoke, token, role, fence, {operation, name, selection, context}},
         _from,
         %{host: host, token: token, role: role, fence: fence} = state

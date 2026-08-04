@@ -76,14 +76,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.LoopbackListener do
         opts
       )
       when is_list(opts) do
-    result =
-      with remaining when remaining > 0 <- remaining(pending.deadline_ms),
-           {:ok, socket} <- :gen_tcp.accept(listener.socket, remaining),
-           result <- handle_connection(socket, listener, context, pending, opts) do
-        result
-      else
-        _failure -> {:error, :authorization_callback_failed}
-      end
+    result = await_callback(listener, context, pending, opts)
 
     :gen_tcp.close(listener.socket)
 
@@ -99,6 +92,20 @@ defmodule PtcRunner.Kernel.MCPOAuth.LoopbackListener do
 
   def await(_listener, _context, _pending, _opts),
     do: {:error, :authorization_callback_failed}
+
+  defp await_callback(listener, context, pending, opts) do
+    case remaining(pending.deadline_ms) do
+      0 ->
+        {:error, :authorization_timeout}
+
+      remaining ->
+        case :gen_tcp.accept(listener.socket, remaining) do
+          {:ok, socket} -> handle_connection(socket, listener, context, pending, opts)
+          {:error, :timeout} -> {:error, :authorization_timeout}
+          {:error, _reason} -> {:error, :authorization_callback_failed}
+        end
+    end
+  end
 
   @spec close(t()) :: :ok
   def close(%__MODULE__{socket: socket}) do

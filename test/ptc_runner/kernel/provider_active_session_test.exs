@@ -64,6 +64,32 @@ defmodule PtcRunner.Kernel.ProviderActiveSessionTest do
     close(session, prepared)
   end
 
+  test "setup admission leaves the ordinary run clock stopped until activation" do
+    parent = self()
+
+    validator = fn _selection, context ->
+      send(parent, {:validated_after_run_began, context.deadline_ms})
+      :ok
+    end
+
+    {:ok, prepared, catalog} = fixture(validator, ["first"])
+
+    assert {:ok, session} =
+             ProviderActiveSession.open_setup(prepared, catalog, services())
+
+    assert ProviderSession.run_deadline(session) == nil
+    refute_received {:validated_after_run_began, _deadline_ms}
+
+    assert {:ok, session} =
+             ProviderActiveSession.begin_run(session, prepared, catalog)
+
+    assert Deadline.valid?(ProviderSession.run_deadline(session))
+    assert_receive {:validated_after_run_began, deadline_ms}
+    assert deadline_ms <= Deadline.expires_at(ProviderSession.run_deadline(session))
+
+    close(session, prepared)
+  end
+
   test "selection rejection returns the closed occurrence diagnostic" do
     {:ok, prepared, catalog} =
       fixture(fn _selection, _context -> {:error, :selection_rejected} end)

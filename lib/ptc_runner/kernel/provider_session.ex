@@ -183,6 +183,16 @@ defmodule PtcRunner.Kernel.ProviderSession do
   def run_deadline(_session), do: nil
 
   @doc false
+  @spec bound_to_operation?(term(), term()) :: boolean()
+  def bound_to_operation?(%__MODULE__{} = session, operation_identity)
+      when is_binary(operation_identity) do
+    valid?(session) and session.creator == self() and
+      session.operation_identity == operation_identity
+  end
+
+  def bound_to_operation?(_session, _operation_identity), do: false
+
+  @doc false
   @spec execution_deadline(term()) :: {:ok, Deadline.t() | nil} | :error
   def execution_deadline(%__MODULE__{} = session) do
     cond do

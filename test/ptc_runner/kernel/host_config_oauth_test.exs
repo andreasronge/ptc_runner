@@ -1,10 +1,17 @@
 defmodule PtcRunner.Kernel.HostConfigOAuthTest do
   use ExUnit.Case, async: true
 
+  alias Mix.Tasks.Ptc.Run
+  alias PtcRunner.Kernel.CommandDiagnostic
+  alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.HostConfig
   alias PtcRunner.Kernel.HostInstallation
   alias PtcRunner.Kernel.InstallationCatalog
   alias PtcRunner.Kernel.MCPOAuth.Authority
+  alias PtcRunner.Kernel.MCPOAuth.Context
+  alias PtcRunner.Kernel.MCPOAuth.Store
+  alias PtcRunner.Kernel.MCPOAuth.Store.Memory
+  alias PtcRunner.Kernel.ProviderRegistry
 
   test "decodes OAuth only when normalized static authentication is empty" do
     config = host_config()
@@ -152,6 +159,103 @@ defmodule PtcRunner.Kernel.HostConfigOAuthTest do
     assert public["installation_revision"] == "github-v1"
     refute Map.has_key?(public, "authority")
     refute inspect(public) =~ descriptor.authority_fingerprint
+  end
+
+  test "selected host registry exposes its already-claimed OAuth epoch" do
+    assert {:ok, decoded} = HostConfig.decode(host_config(), "/tmp")
+
+    host =
+      struct!(HostConfig,
+        path: "/tmp/ptc-host.json",
+        directory: "/tmp",
+        runtime: decoded.runtime,
+        limits: decoded.limits,
+        credentials: decoded.credentials,
+        install: decoded.install
+      )
+
+    assert {:ok, catalog} = HostInstallation.catalog(host)
+    assert {:ok, memory} = Memory.start_link(owner: self())
+    assert {:ok, store} = Memory.store(memory)
+    deadline = Deadline.new(1_000)
+
+    assert {:ok, services} =
+             HostInstallation.runtime_services(host,
+               oauth_mode:
+                 {:context_factory,
+                  fn ^deadline ->
+                    Context.new(
+                      tenant_id: "tenant",
+                      principal_id: "principal",
+                      store: store,
+                      deadline: deadline
+                    )
+                  end}
+             )
+
+    assert {:ok, registry} =
+             InstallationCatalog.runtime_registry(catalog, services, ["github"], deadline)
+
+    assert {:ok, authority_epoch} =
+             ProviderRegistry.oauth_authority_epoch(registry, "github", deadline)
+
+    authority = host.install["github"].transport.oauth
+    installation_id = authority.installation_id
+
+    assert {:ok, %{^installation_id => ^authority_epoch}} =
+             Store.claim_authorities(
+               store,
+               "tenant",
+               [{authority.installation_id, authority.fingerprint}],
+               deadline
+             )
+
+    assert {:error, :authorization_context_required} =
+             ProviderRegistry.oauth_authority_epoch(registry, "unselected", deadline)
+
+    owner = registry.authority_owner.pid
+    owner_monitor = Process.monitor(owner)
+    Process.exit(owner, :kill)
+    assert_receive {:DOWN, ^owner_monitor, :process, ^owner, :killed}
+
+    assert {:error, :authorization_context_required} =
+             ProviderRegistry.oauth_authority_epoch(registry, "github", deadline)
+
+    assert :ok = ProviderRegistry.close(registry)
+    assert :ok = Memory.close(memory)
+  end
+
+  test "Mix OAuth deadlines resolve private authorities from the host, not catalog markers" do
+    assert {:ok, decoded} = HostConfig.decode(host_config(), "/tmp")
+
+    host =
+      struct!(HostConfig,
+        path: "/tmp/ptc-host.json",
+        directory: "/tmp",
+        runtime: decoded.runtime,
+        limits: decoded.limits,
+        credentials: decoded.credentials,
+        install: decoded.install
+      )
+
+    assert {:ok, catalog} = HostInstallation.catalog(host)
+    assert catalog.authorities["github"] == :host_runtime
+
+    assert %{"github" => authority} = Run.oauth_authorities(host, ["github"])
+    assert Authority.valid?(authority)
+    assert authority == host.install["github"].transport.oauth
+
+    assert {:error, %CommandDiagnostic{} = diagnostic} =
+             Run.authorization_result(
+               {:error, {:authorization_timeout, "github"}},
+               ["github"],
+               catalog
+             )
+
+    assert diagnostic.phase == :active_preflight
+    assert diagnostic.code == :authorization_unavailable
+    assert diagnostic.subject.name == "github"
+    assert diagnostic.subject.operation == :authorization
   end
 
   defp host_config do

@@ -590,7 +590,15 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
   end
 
   test "OAuth runtime activation requires and binds a principal context" do
-    assert {:ok, catalog} = custom_catalog(authority: oauth_authority("issuer.example"))
+    selected_authority = oauth_authority("selected.example", "selected-oauth")
+    unselected_authority = oauth_authority("unselected.example", "unselected-oauth")
+
+    assert {:ok, catalog} =
+             custom_catalog(
+               authority: selected_authority,
+               extra_authority: unselected_authority
+             )
+
     assert {:ok, services} = ProviderRuntimeServices.new()
 
     assert {:error, :authorization_context_required} =
@@ -602,8 +610,12 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
     parent = self()
 
     interceptor = fn
-      {:claim_authorities, "tenant", _authorities}, deadline ->
-        send(parent, {:authority_claim_deadline, deadline})
+      {:claim_principal, "tenant", "principal"}, deadline ->
+        send(parent, {:principal_claim_deadline, deadline})
+        :delegate
+
+      {:claim_authorities, "tenant", authorities}, deadline ->
+        send(parent, {:authority_claim, authorities, deadline})
         :delegate
 
       _operation, _deadline ->
@@ -613,27 +625,43 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
     assert {:ok, recording_store} =
              MCPOAuthRecordingStore.wrap(store, self(), interceptor: interceptor)
 
-    assert {:ok, context} =
-             OAuthContext.new(
-               tenant_id: "tenant",
-               principal_id: "principal",
-               store: recording_store,
-               deadline: Deadline.new(1_000)
-             )
-
     assert {:ok, services} =
              ProviderRuntimeServices.new(
                oauth_mode:
                  {:context_factory,
                   fn deadline ->
                     send(parent, {:oauth_factory_deadline, deadline})
-                    {:ok, context}
+
+                    OAuthContext.new(
+                      tenant_id: "tenant",
+                      principal_id: "principal",
+                      store: recording_store,
+                      deadline: deadline
+                    )
                   end}
              )
 
-    assert {:ok, registry} = InstallationCatalog.runtime_registry(catalog, services)
+    operation_deadline = Deadline.new(1_000)
+
+    assert {:ok, registry} =
+             InstallationCatalog.runtime_registry(
+               catalog,
+               services,
+               ["selected"],
+               operation_deadline
+             )
+
     assert_receive {:oauth_factory_deadline, shared_deadline}
-    assert_receive {:authority_claim_deadline, ^shared_deadline}
+    assert shared_deadline == operation_deadline
+    assert_receive {:principal_claim_deadline, ^shared_deadline}
+
+    assert_receive {:authority_claim, claims, ^shared_deadline}
+
+    assert claims == [
+             {selected_authority.installation_id, selected_authority.fingerprint}
+           ]
+
+    assert Map.keys(registry.builders) == ["selected"]
 
     limits = Limits.installed_defaults()
 
@@ -647,6 +675,16 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
              })
 
     assert :ok = ProviderRegistry.close(registry)
+  end
+
+  test "runtime registry preserves operation deadline expiry" do
+    assert {:ok, catalog} = custom_catalog()
+    assert {:ok, services} = ProviderRuntimeServices.new()
+
+    expired = Deadline.from_expires_at(System.monotonic_time(:millisecond) - 1)
+
+    assert {:error, :operation_deadline_expired} =
+             InstallationCatalog.runtime_registry(catalog, services, ["selected"], expired)
   end
 
   test "an unbound catalog rejects and releases a generic host authority" do
@@ -1615,6 +1653,10 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
                  |> maybe_active_validator(selection_validation)
              }
            }
+           |> maybe_extra_oauth_registration(
+             rules,
+             Keyword.get(overrides, :extra_authority)
+           )
            |> maybe_extra_registration(rules, Keyword.get(overrides, :extra_revision)) do
       InstallationCatalog.new(registrations)
     end
@@ -1634,6 +1676,42 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
         :oauth_builder,
         fn _selection, _context, _runtime -> {:error, :oauth_runtime_bound} end
       )
+
+  defp maybe_extra_oauth_registration(registrations, _rules, nil), do: registrations
+
+  defp maybe_extra_oauth_registration(registrations, rules, %Authority{} = authority) do
+    {:ok, descriptor} =
+      ProviderDescriptor.new(
+        source: :custom,
+        installation_revision: "unselected-oauth-v1",
+        credential_names: [],
+        authorization_mode: :oauth,
+        data_class: :normal,
+        accepts_data: [:normal],
+        requires: [],
+        provides: [],
+        destinations: [:workflow],
+        workflow_llm?: false,
+        connectivity_mode: :none,
+        probe_effect: nil,
+        selection_validation: :declarative,
+        selection_rules: rules,
+        authority_fingerprint: authority.fingerprint,
+        local_preflight: :unverified
+      )
+
+    Map.put(registrations, "unselected-oauth", %{
+      descriptor: descriptor,
+      authority: authority,
+      implementation: %{
+        builder: fn _selection, _context -> {:error, :inactive_provider} end,
+        oauth_builder: fn _selection, _context, _runtime ->
+          {:error, :unselected_oauth_runtime_bound}
+        end,
+        local_preflight: fn _selection, _context, _services -> :ok end
+      }
+    })
+  end
 
   defp maybe_extra_registration(registrations, _rules, nil), do: registrations
 
@@ -1693,12 +1771,14 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
     }
   end
 
-  defp oauth_authority(issuer_host) do
-    {:ok, decoded} = HostConfig.decode(oauth_host_document(issuer_host), "/tmp")
+  defp oauth_authority(issuer_host, installation_id \\ "oauth-primary") do
+    {:ok, decoded} =
+      HostConfig.decode(oauth_host_document(issuer_host, installation_id), "/tmp")
+
     decoded.install["oauth"].transport.oauth
   end
 
-  defp oauth_host_document(issuer_host) do
+  defp oauth_host_document(issuer_host, installation_id) do
     %{
       "install" => %{
         "oauth" => %{
@@ -1708,7 +1788,7 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
             "type" => "streamable_http",
             "endpoint" => "https://mcp.example/mcp",
             "oauth" => %{
-              "installation_id" => "oauth-primary",
+              "installation_id" => installation_id,
               "issuer" => "https://" <> issuer_host,
               "scope_ceiling" => ["read"],
               "default_scopes" => ["read"],

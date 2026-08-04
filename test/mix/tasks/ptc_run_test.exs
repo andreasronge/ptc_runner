@@ -4,11 +4,35 @@ defmodule Mix.Tasks.Ptc.RunTest do
   import ExUnit.CaptureIO
 
   alias Mix.Tasks.Ptc.Run
+  alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.SafeMetadata
   alias PtcRunner.Kernel.TraceLog
 
   @root Path.expand("../../..", __DIR__)
   @stdio_fixture Path.expand("../../support/mcp_stdio_source_fixture.sh", __DIR__)
+
+  test "OAuth setup and each requested target use their exact independent deadlines" do
+    declarations = [
+      %{name: "first", config: %{"timeout_ms" => 5_000}},
+      %{name: "plain", config: %{"timeout_ms" => 1}},
+      %{name: "first", config: %{"timeout_ms" => 2_000}},
+      %{name: "second", config: %{"timeout_ms" => 3_000}}
+    ]
+
+    authorities = %{
+      "first" => %{authorization_timeout_ms: 7_000},
+      "plain" => nil,
+      "second" => %{authorization_timeout_ms: 4_000}
+    }
+
+    setup = Run.oauth_setup_deadline(declarations, authorities, ["second", "first"], 1_000)
+    first = Run.oauth_target_deadline("first", declarations, authorities, 10_000)
+    second = Run.oauth_target_deadline("second", declarations, authorities, 20_000)
+
+    assert Deadline.expires_at(setup) == 3_000
+    assert Deadline.expires_at(first) == 12_000
+    assert Deadline.expires_at(second) == 23_000
+  end
 
   @tag :tmp_dir
   test "runs the shared manifest path and accepts a confined mission override", %{tmp_dir: dir} do

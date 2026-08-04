@@ -7,7 +7,9 @@ defmodule PtcRunner.Kernel.ProviderActiveSession do
   marks provider activity. It then opens the command's `ProviderSession` and
   admits selected optional provider applications according to the sealed
   runtime services before invoking active selection validators in declaration
-  order.
+  order. `open_setup/3` and `begin_run/3` expose that boundary in two steps for
+  the Mix-only explicit OAuth interaction: setup admission occurs first, while
+  the ordinary run clock and active validators begin only after interaction.
 
   Each validator runs in a heap- and time-bounded worker with its own
   provisional `ResourceRegistrar`. The callback receives only the normalized
@@ -40,6 +42,21 @@ defmodule PtcRunner.Kernel.ProviderActiveSession do
         %InstallationCatalog{} = catalog,
         %ProviderRuntimeServices{} = services
       ) do
+    with {:ok, session} <- open_setup(prepared, catalog, services) do
+      begin_run(session, prepared, catalog)
+    end
+  end
+
+  def open(_prepared, _catalog, _services), do: {:error, internal_diagnostic(false)}
+
+  @doc false
+  @spec open_setup(PreparedRun.t(), InstallationCatalog.t(), ProviderRuntimeServices.t()) ::
+          {:ok, ProviderSession.t()} | {:error, CommandDiagnostic.t()}
+  def open_setup(
+        %PreparedRun{} = prepared,
+        %InstallationCatalog{} = catalog,
+        %ProviderRuntimeServices{} = services
+      ) do
     with true <- PreparedRun.valid?(prepared),
          true <- InstallationCatalog.valid?(catalog),
          true <- prepared.catalog_attestation == catalog.attestation,
@@ -52,7 +69,26 @@ defmodule PtcRunner.Kernel.ProviderActiveSession do
     end
   end
 
-  def open(_prepared, _catalog, _services), do: {:error, internal_diagnostic(false)}
+  def open_setup(_prepared, _catalog, _services), do: {:error, internal_diagnostic(false)}
+
+  @doc false
+  @spec begin_run(ProviderSession.t(), PreparedRun.t(), InstallationCatalog.t()) ::
+          {:ok, ProviderSession.t()} | {:error, CommandDiagnostic.t()}
+  def begin_run(
+        session,
+        %PreparedRun{} = prepared,
+        %InstallationCatalog{} = catalog
+      ) do
+    if PreparedRun.active_valid?(prepared) and InstallationCatalog.valid?(catalog) and
+         prepared.catalog_attestation == catalog.attestation and
+         ProviderSession.bound_to_operation?(session, prepared.attestation) do
+      do_begin_run(session, prepared, catalog)
+    else
+      reject_begin_run(session, prepared)
+    end
+  end
+
+  def begin_run(_session, _prepared, _catalog), do: {:error, internal_diagnostic(false)}
 
   defp open_consumed(prepared, catalog, services) do
     case ProviderActivity.mark(prepared.provider_activity) do
@@ -71,14 +107,14 @@ defmodule PtcRunner.Kernel.ProviderActiveSession do
   defp admit_open_session(session, prepared, catalog, services) do
     case ProviderApplicationGate.admit(prepared, catalog, services) do
       :ok ->
-        begin_run(session, prepared, catalog)
+        {:ok, session}
 
       {:error, %CommandDiagnostic{} = diagnostic} ->
         fail_with_session(session, prepared, diagnostic)
     end
   end
 
-  defp begin_run(session, prepared, catalog) do
+  defp do_begin_run(session, prepared, catalog) do
     case ProviderSession.begin_run(session) do
       {:ok, session} -> validate_open_session(session, prepared, catalog)
       {:error, _reason} -> fail_after_unavailable_session(prepared, internal_diagnostic(true))
@@ -212,6 +248,17 @@ defmodule PtcRunner.Kernel.ProviderActiveSession do
   defp fail_without_session(prepared, diagnostic) do
     PreparedRun.close(prepared)
     {:error, diagnostic}
+  end
+
+  defp reject_begin_run(session, prepared) do
+    diagnostic = internal_diagnostic(ProviderSession.alive?(session))
+
+    if PreparedRun.active_valid?(prepared) and
+         ProviderSession.bound_to_operation?(session, prepared.attestation) do
+      fail_with_session(session, prepared, diagnostic)
+    else
+      {:error, diagnostic}
+    end
   end
 
   # `ProviderSession.begin_run/1` queues token-authenticated cleanup when its

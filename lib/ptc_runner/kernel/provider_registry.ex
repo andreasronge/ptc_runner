@@ -66,7 +66,9 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
   provider-kind facts, as `workflow_llm?` does.
   """
 
+  alias PtcRunner.Kernel.BoundedWorker
   alias PtcRunner.Kernel.Capability
+  alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.HostInstallationAuthority
   alias PtcRunner.Kernel.JSONValue
   alias PtcRunner.Kernel.Limits
@@ -217,6 +219,33 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
   @spec close(t()) :: :ok
   def close(%__MODULE__{authority_owner: owner}), do: HostInstallationAuthority.close(owner)
   def close(_registry), do: :ok
+
+  @doc false
+  @spec oauth_authority_epoch(t(), binary(), Deadline.t()) ::
+          {:ok, term()} | {:error, :authorization_context_required}
+  def oauth_authority_epoch(
+        %__MODULE__{builders: builders, authority_owner: %HostInstallationAuthority{} = owner},
+        name,
+        deadline
+      )
+      when is_binary(name) do
+    if Map.has_key?(builders, name) and Deadline.live?(deadline) do
+      case BoundedWorker.run(
+             fn -> HostInstallationAuthority.invoke(owner, {:oauth_authority_epoch, name}) end,
+             timeout_ms: max(Deadline.remaining(deadline), 1),
+             max_heap_words: 100_000,
+             cancel_with_caller: true
+           ) do
+        {:ok, {:ok, authority_epoch}} -> {:ok, authority_epoch}
+        _unavailable -> {:error, :authorization_context_required}
+      end
+    else
+      {:error, :authorization_context_required}
+    end
+  end
+
+  def oauth_authority_epoch(_registry, _name, _deadline),
+    do: {:error, :authorization_context_required}
 
   @spec staged((map(), context() -> {:ok, prepared()} | {:error, term()})) ::
           staged_builder()

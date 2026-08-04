@@ -386,6 +386,23 @@ defmodule PtcRunner.Kernel.MCPOAuth.AuthorizationTest do
     assert {:error, :invalid_callback_request} = Task.await(task, 1_000)
   end
 
+  test "loopback callback reports an expired interaction as an authorization timeout", context do
+    request = request_fixture(context.authority, self())
+    assert {:ok, listener} = LoopbackListener.start(context.authority)
+
+    assert {:ok, pending} =
+             Authorization.begin_authorization(context.context, context.authority,
+               authority_epoch: context.epoch,
+               redirect_uri: listener.redirect_uri,
+               request: request
+             )
+
+    expired = %{pending | deadline_ms: System.monotonic_time(:millisecond) - 1}
+
+    assert {:error, :authorization_timeout} =
+             LoopbackListener.await(listener, context.context, expired, request: request)
+  end
+
   defp request_fixture(
          authority,
          parent,
