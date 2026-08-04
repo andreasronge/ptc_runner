@@ -401,6 +401,34 @@ defmodule PtcRunner.Kernel.MCPOAuth.StoreMemoryTest do
     end)
   end
 
+  test "a mutation that expires in the mailbox does not commit", context do
+    :ok = :sys.suspend(context.memory.pid)
+
+    assert {:error, :timeout} =
+             Store.claim_authorities(
+               context.store,
+               "tenant",
+               [{"queued-installation", "v1:queued"}],
+               10
+             )
+
+    :ok = :sys.resume(context.memory.pid)
+
+    # This call is sent by the same process, so its reply proves the expired
+    # mutation ahead of it in the mailbox has been handled.
+    assert {:ok, _anchor} = Store.time_anchor(context.store, 1_000)
+
+    assert {:ok, claims} =
+             Store.claim_authorities(
+               context.store,
+               "tenant",
+               [{"queued-installation", "v1:replacement"}],
+               1_000
+             )
+
+    assert Map.has_key?(claims, "queued-installation")
+  end
+
   test "callback state is one-time and cancellation races atomically with code dispatch",
        context do
     key = Context.grant_key(context.alice, context.authority, context.authority_epoch)

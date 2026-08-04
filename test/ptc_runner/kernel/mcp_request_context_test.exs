@@ -1,6 +1,7 @@
 defmodule PtcRunner.Kernel.MCPRequestContextTest do
   use ExUnit.Case, async: true
 
+  alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.MCPOAuth.Authority
   alias PtcRunner.Kernel.MCPOAuth.Context
@@ -78,8 +79,8 @@ defmodule PtcRunner.Kernel.MCPRequestContextTest do
     parent = self()
 
     interceptor = fn
-      {:release_mcp, _admission}, timeout ->
-        send(parent, {:release_timeout, timeout})
+      {:release_mcp, _admission}, deadline ->
+        send(parent, {:release_deadline, deadline})
         :delegate
 
       _operation, _timeout ->
@@ -106,8 +107,8 @@ defmodule PtcRunner.Kernel.MCPRequestContextTest do
     end
 
     assert :ok = MCPRequestContext.finish_request(context)
-    assert_receive {:release_timeout, timeout}
-    assert timeout > 4_000
+    assert_receive {:release_deadline, deadline}
+    assert Deadline.remaining(deadline) > 4_000
     assert :ok = MCPRequestContext.close(context)
   end
 

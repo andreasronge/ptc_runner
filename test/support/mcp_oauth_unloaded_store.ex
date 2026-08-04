@@ -6,5 +6,5 @@ defmodule PtcRunner.Test.MCPOAuthUnloadedStore do
   @behaviour Store
 
   @impl Store
-  def transact(_state, _operation, _timeout), do: {:error, :unsupported}
+  def transact(_state, _operation, _deadline), do: {:error, :unsupported}
 end
