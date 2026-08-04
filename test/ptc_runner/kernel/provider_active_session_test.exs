@@ -134,7 +134,9 @@ defmodule PtcRunner.Kernel.ProviderActiveSessionTest do
     {:ok, prepared, catalog} = fixture(fn _selection, _context -> :ok end)
     assert {:ok, session} = ProviderActiveSession.open(prepared, catalog, services())
 
-    staged = fn _selection, _context ->
+    staged = fn _selection, context ->
+      send(parent, {:provider_context_deadline, context.deadline, context.deadline_ms})
+
       {:ok,
        %{
          credential_names: ["secret"],
@@ -162,6 +164,10 @@ defmodule PtcRunner.Kernel.ProviderActiveSessionTest do
              )
 
     assert {:ok, built} = RunBuilder.build_active(prepared, registry, session, [])
+    run_deadline = ProviderSession.run_deadline(session)
+
+    assert_receive {:provider_context_deadline, ^run_deadline, deadline_ms}
+    assert deadline_ms == Deadline.expires_at(run_deadline)
     assert_receive :credential_preflighted
     assert_receive :credential_resolved
     assert_receive :credential_acquired
@@ -215,28 +221,146 @@ defmodule PtcRunner.Kernel.ProviderActiveSessionTest do
     assert :ok = PreparedRun.close(prepared)
   end
 
-  test "credentialless providers do not acquire after the shared deadline" do
+  test "active provider callbacks are killed at the shared run deadline" do
     parent = self()
-    limits = %{Limits.installed_defaults() | run_duration_ms: 500}
+    limits = %{Limits.installed_defaults() | run_duration_ms: 200}
+
+    for blocked_phase <- [:prepare, :preflight, :acquisition] do
+      {:ok, prepared, catalog} = fixture(fn _selection, _context -> :ok end, ["first"], limits)
+      assert {:ok, session} = ProviderActiveSession.open(prepared, catalog, services())
+
+      block = fn phase ->
+        if phase == blocked_phase do
+          send(parent, {:provider_callback_started, phase, self()})
+          receive do: (:never -> :ok)
+        end
+      end
+
+      staged = fn _selection, _context ->
+        block.(:prepare)
+
+        {:ok,
+         %{
+           credential_names: [],
+           preflight: fn ->
+             block.(:preflight)
+
+             {:ok,
+              fn %{} ->
+                block.(:acquisition)
+                {:ok, capability} = fixture_capability()
+                {:ok, capability}
+              end}
+           end
+         }}
+      end
+
+      assert {:ok, registry} =
+               ProviderRegistry.new(%{"selected" => ProviderRegistry.staged(staged)},
+                 installed_limits: limits
+               )
+
+      assert {:error,
+              %CommandDiagnostic{
+                phase: :provider_acquisition,
+                code: :provider_unavailable,
+                provider_activity: true,
+                subject: %{
+                  name: "selected",
+                  operation: :acquisition,
+                  occurrence: %{destination: :workflow, index: 0}
+                }
+              }} = RunBuilder.build_active(prepared, registry, session, [])
+
+      assert_receive {:provider_callback_started, ^blocked_phase, worker}
+      refute Process.alive?(worker)
+      refute ProviderSession.alive?(session)
+      assert :ok = PreparedRun.close(prepared)
+    end
+  end
+
+  test "active preflight release is killed at the shared cleanup deadline" do
+    parent = self()
+
+    limits = %{
+      Limits.installed_defaults()
+      | run_duration_ms: 100,
+        provider_cleanup_timeout_ms: 100
+    }
+
     {:ok, prepared, catalog} = fixture(fn _selection, _context -> :ok end, ["first"], limits)
+    assert {:ok, session} = ProviderActiveSession.open(prepared, catalog, services())
+
+    staged = fn _selection, _context ->
+      {:ok,
+       %{
+         credential_names: [],
+         preflight: fn ->
+           {:ok,
+            fn %{} ->
+              receive do: (:never -> {:error, :unexpected_acquisition_result})
+            end,
+            fn ->
+              send(parent, {:blocking_preflight_release, self()})
+              receive do: (:never -> :ok)
+            end}
+         end
+       }}
+    end
+
+    assert {:ok, registry} =
+             ProviderRegistry.new(%{"selected" => ProviderRegistry.staged(staged)},
+               installed_limits: limits
+             )
+
+    assert {:error, %CommandDiagnostic{code: :provider_unavailable}} =
+             RunBuilder.build_active(prepared, registry, session, [])
+
+    assert_receive {:blocking_preflight_release, release_worker}
+    refute Process.alive?(release_worker)
+    refute ProviderSession.alive?(session)
+    assert :ok = PreparedRun.close(prepared)
+  end
+
+  test "a provider returned at the expired boundary is retained only for cleanup" do
+    assert_expired_boundary_resource(false)
+  end
+
+  test "an expired provider closer survives a concurrent session close" do
+    assert_expired_boundary_resource(true)
+  end
+
+  defp assert_expired_boundary_resource(close_session?) do
+    parent = self()
+    limits = %{Limits.installed_defaults() | run_duration_ms: 1_000}
 
     owner =
       spawn(fn ->
+        {:ok, prepared, catalog} =
+          fixture(fn _selection, _context -> :ok end, ["first"], limits)
+
         {:ok, session} = ProviderActiveSession.open(prepared, catalog, services())
+        send(parent, {:boundary_session, session})
 
         staged = fn _selection, _context ->
           {:ok,
            %{
              credential_names: [],
              preflight: fn ->
-               send(parent, {:credentialless_preflight, self()})
-               receive do: (:finish_preflight -> :ok)
-
                {:ok,
                 fn %{} ->
-                  send(parent, :unexpected_credentialless_acquisition)
+                  send(parent, {:boundary_acquisition, self()})
+                  receive do: (:finish_boundary_acquisition -> :ok)
                   {:ok, capability} = fixture_capability()
-                  {:ok, capability}
+
+                  {:ok,
+                   %{
+                     capabilities: [capability],
+                     close: fn ->
+                       send(parent, :boundary_provider_closed)
+                       :ok
+                     end
+                   }}
                 end}
              end
            }}
@@ -248,25 +372,39 @@ defmodule PtcRunner.Kernel.ProviderActiveSessionTest do
           )
 
         result = RunBuilder.build_active(prepared, registry, session, [])
-        assert :ok = PreparedRun.close(prepared)
-        send(parent, {:credentialless_deadline_result, result})
+        send(parent, {:boundary_result, result})
+        :ok = PreparedRun.close(prepared)
       end)
 
-    assert_receive {:credentialless_preflight, ^owner}
-    Process.send_after(self(), :credentialless_deadline_elapsed, 600)
-    assert_receive :credentialless_deadline_elapsed, 1_000
-    send(owner, :finish_preflight)
+    try do
+      assert_receive {:boundary_session, session}, 1_000
+      assert_receive {:boundary_acquisition, acquisition_worker}, 1_000
+      acquisition_ref = Process.monitor(acquisition_worker)
+      assert true = :erlang.suspend_process(owner)
+      send(acquisition_worker, :finish_boundary_acquisition)
+      assert_receive {:DOWN, ^acquisition_ref, :process, ^acquisition_worker, :normal}, 1_000
+      wait_until_expired(ProviderSession.run_deadline(session))
+      if close_session?, do: assert(:ok = ProviderSession.close(session))
+      assert true = :erlang.resume_process(owner)
 
-    assert_receive {:credentialless_deadline_result,
-                    {:error,
-                     %CommandDiagnostic{
-                       phase: :execution,
-                       code: :run_timeout,
-                       provider_activity: true
-                     }}},
-                   2_000
+      if close_session? do
+        assert_receive {:boundary_result, {:error, :provider_cleanup_failed}}, 1_000
+      else
+        assert_receive {:boundary_result,
+                        {:error,
+                         %CommandDiagnostic{
+                           phase: :provider_acquisition,
+                           code: :provider_unavailable
+                         }}},
+                       1_000
+      end
 
-    refute_receive :unexpected_credentialless_acquisition
+      assert_receive :boundary_provider_closed, 1_000
+      refute ProviderSession.alive?(session)
+    after
+      resume_if_suspended(owner)
+      if Process.alive?(owner), do: Process.exit(owner, :kill)
+    end
   end
 
   test "active credential resolution dies when its provider session closes" do
@@ -298,6 +436,55 @@ defmodule PtcRunner.Kernel.ProviderActiveSessionTest do
     assert_receive {:session_close_build_result, {:error, _reason}}
     assert Process.alive?(owner)
     send(owner, :stop)
+  end
+
+  test "active preflight release still runs after the provider session closes" do
+    parent = self()
+
+    owner =
+      spawn(fn ->
+        {:ok, prepared, catalog} = fixture(fn _selection, _context -> :ok end)
+        {:ok, session} = ProviderActiveSession.open(prepared, catalog, services())
+        send(parent, {:release_after_close_session, session})
+
+        staged = fn _selection, _context ->
+          {:ok,
+           %{
+             credential_names: [],
+             preflight: fn ->
+               {:ok,
+                fn %{} ->
+                  send(parent, {:release_after_close_acquisition, self()})
+                  receive do: (:never -> {:error, :unexpected_acquisition_result})
+                end,
+                fn ->
+                  send(parent, {:release_after_close_ran, self()})
+                  :ok
+                end}
+             end
+           }}
+        end
+
+        {:ok, registry} =
+          ProviderRegistry.new(%{"selected" => ProviderRegistry.staged(staged)})
+
+        result = RunBuilder.build_active(prepared, registry, session, [])
+        send(parent, {:release_after_close_result, result})
+        :ok = PreparedRun.close(prepared)
+      end)
+
+    owner_ref = Process.monitor(owner)
+
+    assert_receive {:release_after_close_session, session}, 1_000
+    assert_receive {:release_after_close_acquisition, acquisition_worker}, 1_000
+    acquisition_ref = Process.monitor(acquisition_worker)
+    assert :ok = ProviderSession.close(session)
+
+    assert_receive {:DOWN, ^acquisition_ref, :process, ^acquisition_worker, :killed}, 1_000
+    assert_receive {:release_after_close_ran, release_worker}, 1_000
+    refute release_worker == acquisition_worker
+    assert_receive {:release_after_close_result, {:error, _reason}}, 1_000
+    assert_receive {:DOWN, ^owner_ref, :process, ^owner, :normal}, 1_000
   end
 
   test "active credential resolution dies with its caller and session" do
@@ -612,13 +799,22 @@ defmodule PtcRunner.Kernel.ProviderActiveSessionTest do
   end
 
   @tag :tmp_dir
-  test "command VM startup disables both dotenv readers before applications start", %{
+  test "command VM startup disables dotenv readers and warms provider metadata", %{
     tmp_dir: directory
   } do
     restore_provider_applications_on_exit()
     stop_provider_applications()
+    previous_adapter = Application.get_env(:ptc_runner, :llm_adapter)
+    previous_owner = Application.get_env(:ptc_runner, :host_llm_test_owner)
+    Application.put_env(:ptc_runner, :llm_adapter, PtcRunner.TestSupport.HostLLMAdapter)
+    Application.put_env(:ptc_runner, :host_llm_test_owner, self())
     Application.put_env(:req_llm, :load_dotenv, true, persistent: true)
     Application.put_env(:llm_db, :load_dotenv, true, persistent: true)
+
+    on_exit(fn ->
+      restore_env(:llm_adapter, previous_adapter)
+      restore_env(:host_llm_test_owner, previous_owner)
+    end)
 
     sentinel = "PTC_PROVIDER_APPLICATION_DOTENV_SENTINEL"
     previous_sentinel = System.get_env(sentinel)
@@ -644,6 +840,8 @@ defmodule PtcRunner.Kernel.ProviderActiveSessionTest do
       assert System.get_env(sentinel) == nil
       assert :req_llm in started_applications()
       assert :llm_db in started_applications()
+      assert_receive {:host_llm_ensure_ready, warmup_pid}
+      assert warmup_pid == self()
 
       close(session, prepared)
     end)
@@ -827,6 +1025,23 @@ defmodule PtcRunner.Kernel.ProviderActiveSessionTest do
     assert :ok = PreparedRun.close(prepared)
   end
 
+  defp wait_until_expired(deadline) do
+    if Deadline.expired?(deadline) do
+      :ok
+    else
+      receive do
+      after
+        0 -> wait_until_expired(deadline)
+      end
+    end
+  end
+
+  defp resume_if_suspended(pid) do
+    if Process.alive?(pid), do: :erlang.resume_process(pid)
+  catch
+    :error, :badarg -> true
+  end
+
   defp services(mode \\ :host_owned) do
     {:ok, services} = ProviderRuntimeServices.new(provider_application_mode: mode)
     services
@@ -857,4 +1072,7 @@ defmodule PtcRunner.Kernel.ProviderActiveSessionTest do
         do: Application.ensure_all_started(:req_llm)
     end)
   end
+
+  defp restore_env(key, nil), do: Application.delete_env(:ptc_runner, key)
+  defp restore_env(key, value), do: Application.put_env(:ptc_runner, key, value)
 end

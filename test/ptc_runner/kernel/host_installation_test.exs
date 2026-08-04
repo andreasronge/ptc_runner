@@ -2,14 +2,18 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
   use ExUnit.Case, async: false
 
   alias PtcRunner.Kernel.Attestation
+  alias PtcRunner.Kernel.CommandDiagnostic
+  alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.HostConfig
   alias PtcRunner.Kernel.HostInstallation
   alias PtcRunner.Kernel.HostInstallationOwner
   alias PtcRunner.Kernel.HostRuntimePayload
   alias PtcRunner.Kernel.InstallationCatalog
   alias PtcRunner.Kernel.Limits
+  alias PtcRunner.Kernel.ProviderCallbackBoundary
   alias PtcRunner.Kernel.ProviderRegistry
   alias PtcRunner.Kernel.ProviderRuntimeServices
+  alias PtcRunner.Kernel.ProviderSession
   alias PtcRunner.Kernel.RunBuilder
   alias PtcRunner.Kernel.SelectionRules
 
@@ -126,6 +130,105 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
     assert :ok = ProviderRegistry.close(registry)
     assert :undefined = :ets.info(lease_table)
     assert :ok = ProviderRegistry.close(registry)
+  end
+
+  @tag :tmp_dir
+  test "installed provider callbacks are killed with their active deadline", %{tmp_dir: dir} do
+    host = load_host(dir, http_config())
+    assert {:ok, catalog} = HostInstallation.catalog(host)
+    assert {:ok, services} = HostInstallation.runtime_services(host)
+    assert {:ok, registry} = InstallationCatalog.runtime_registry(catalog, services)
+
+    authority_owner = registry.authority_owner.pid
+
+    :sys.replace_state(authority_owner, fn state ->
+      Process.flag(:priority, :low)
+      state
+    end)
+
+    limits = %{Limits.installed_defaults() | run_duration_ms: 500}
+    assert {:ok, session} = ProviderSession.start_active(limits, "installed-deadline-boundary")
+    assert {:ok, session} = ProviderSession.begin_run(session)
+    deadline = ProviderSession.run_deadline(session)
+
+    active_context =
+      context(dir, :mission)
+      |> Map.merge(%{
+        deadline: deadline,
+        deadline_ms: Deadline.expires_at(deadline),
+        limits: limits,
+        installed_limits: limits
+      })
+
+    assert {:ok, prepared} = ProviderRegistry.prepare(registry, "remote", %{}, active_context)
+    assert {:ok, preflighted} = ProviderRegistry.preflight(prepared)
+
+    assert {:ok, credentials} =
+             ProviderRegistry.resolve_credentials(registry, prepared.credential_names)
+
+    assert 1 = :erlang.trace(authority_owner, true, [:procs, :set_on_spawn, {:tracer, self()}])
+    parent = self()
+    occurrence = %{provider: "remote", destination: :mission, index: 0}
+
+    caller =
+      spawn(fn ->
+        result =
+          ProviderCallbackBoundary.invoke(
+            session,
+            limits.provider_heap_words,
+            occurrence,
+            fn -> ProviderRegistry.acquire(preflighted, credentials) end
+          )
+
+        send(parent, {:installed_callback_result, result})
+      end)
+
+    caller_ref = Process.monitor(caller)
+
+    try do
+      assert_receive {:trace, ^authority_owner, :spawn, callback_worker, _spawned}
+      callback_ref = Process.monitor(callback_worker)
+      assert true = :erlang.suspend_process(callback_worker)
+
+      assert_receive {:DOWN, ^callback_ref, :process, ^callback_worker, :killed}, 1_000
+
+      assert_receive {:installed_callback_result,
+                      {:error,
+                       %CommandDiagnostic{
+                         phase: :provider_acquisition,
+                         code: :provider_unavailable
+                       }}}
+
+      assert_receive {:DOWN, ^caller_ref, :process, ^caller, :normal}
+    after
+      :erlang.trace(authority_owner, false, [:all])
+      if Process.alive?(caller), do: Process.exit(caller, :kill)
+      ProviderSession.close(session)
+      ProviderRegistry.close(registry)
+    end
+  end
+
+  test "nested active callback heap failures remain closed diagnostics" do
+    limits = Limits.installed_defaults()
+    assert {:ok, session} = ProviderSession.start_active(limits, "nested-heap-boundary")
+    assert {:ok, session} = ProviderSession.begin_run(session)
+
+    occurrence = %{provider: "remote", destination: :mission, index: 0}
+
+    assert {:error,
+            %CommandDiagnostic{
+              phase: :provider_acquisition,
+              code: :provider_unavailable,
+              subject: %{name: "remote", operation: :acquisition}
+            }} =
+             ProviderCallbackBoundary.invoke(
+               session,
+               limits.provider_heap_words,
+               occurrence,
+               fn -> ProviderCallbackBoundary.nested_failure(:heap_exceeded) end
+             )
+
+    assert :ok = ProviderSession.close(session)
   end
 
   @tag :tmp_dir

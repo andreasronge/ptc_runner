@@ -7,7 +7,7 @@ defmodule PtcRunner.Kernel.HostCredentialLease do
   @operation_timeout_ms 1_000
   @reply_timeout_ms 1_100
 
-  @spec start(pid()) :: {:ok, pid(), :atomics.atomics_ref(), reference()} | {:error, term()}
+  @spec start(pid()) :: {:ok, pid(), :atomics.atomics_ref(), :ets.tid()} | {:error, term()}
   def start(authority_owner) when is_pid(authority_owner) do
     fence = :atomics.new(1, signed: false)
     :ok = :atomics.put(fence, 1, 1)
@@ -33,37 +33,48 @@ defmodule PtcRunner.Kernel.HostCredentialLease do
 
   def start(_authority_owner), do: {:error, :invalid_host_credential_lease}
 
-  @spec bound_to?(pid(), pid(), :atomics.atomics_ref(), reference()) :: boolean()
+  @doc false
+  @spec reference_handle?(term()) :: boolean()
+  def reference_handle?(handle), do: is_reference(handle)
+
+  @spec bound_to?(pid(), pid(), :atomics.atomics_ref(), :ets.tid()) :: boolean()
   def bound_to?(lease_owner, authority_owner, fence, table)
-      when is_pid(lease_owner) and is_pid(authority_owner) and is_reference(fence) and
-             is_reference(table) do
-    GenServer.call(lease_owner, {:bound_to, authority_owner, fence, table}, 1_000) == true
+      when is_pid(lease_owner) and is_pid(authority_owner) do
+    reference_handle?(fence) and reference_handle?(table) and
+      GenServer.call(lease_owner, {:bound_to, authority_owner, fence, table}, 1_000) == true
   catch
     :exit, _reason -> false
   end
 
   def bound_to?(_lease_owner, _authority_owner, _fence, _table), do: false
 
-  @spec claim(pid(), :atomics.atomics_ref(), reference()) ::
+  @spec claim(pid(), :atomics.atomics_ref(), :ets.tid()) ::
           {:ok, reference()} | {:error, :credential_resolution_failed}
   def claim(lease_owner, fence, table)
-      when is_pid(lease_owner) and is_reference(fence) and is_reference(table) do
-    deadline = System.monotonic_time(:millisecond) + @operation_timeout_ms
-    GenServer.call(lease_owner, {:claim, deadline, fence, table}, @reply_timeout_ms)
+      when is_pid(lease_owner) do
+    if reference_handle?(fence) and reference_handle?(table) do
+      deadline = System.monotonic_time(:millisecond) + @operation_timeout_ms
+      GenServer.call(lease_owner, {:claim, deadline, fence, table}, @reply_timeout_ms)
+    else
+      {:error, :credential_resolution_failed}
+    end
   catch
     :exit, _reason -> {:error, :credential_resolution_failed}
   end
 
   def claim(_lease_owner, _fence, _table), do: {:error, :credential_resolution_failed}
 
-  @spec release(pid(), reference(), reference(), pid()) ::
+  @spec release(pid(), :ets.tid(), reference(), pid()) ::
           :ok | {:error, :credential_resolution_failed} | no_return()
   def release(lease_owner, table, lease, worker)
-      when is_pid(lease_owner) and is_reference(table) and is_reference(lease) and
-             is_pid(worker) do
-    case GenServer.call(lease_owner, {:release, table, lease, worker}, @reply_timeout_ms) do
-      :ok -> :ok
-      _unacknowledged -> terminate_unreleased_worker()
+      when is_pid(lease_owner) and is_reference(lease) and is_pid(worker) do
+    if reference_handle?(table) do
+      case GenServer.call(lease_owner, {:release, table, lease, worker}, @reply_timeout_ms) do
+        :ok -> :ok
+        _unacknowledged -> terminate_unreleased_worker()
+      end
+    else
+      {:error, :credential_resolution_failed}
     end
   catch
     :exit, _reason -> terminate_unreleased_worker()
@@ -72,26 +83,30 @@ defmodule PtcRunner.Kernel.HostCredentialLease do
   def release(_lease_owner, _table, _lease, _worker),
     do: {:error, :credential_resolution_failed}
 
-  @spec close(pid(), :atomics.atomics_ref(), reference()) :: :ok
+  @spec close(pid(), :atomics.atomics_ref(), :ets.tid()) :: :ok
   def close(lease_owner, fence, table)
-      when is_pid(lease_owner) and is_reference(fence) and is_reference(table) do
-    close_fence(fence)
-    lease_monitor = Process.monitor(lease_owner)
+      when is_pid(lease_owner) do
+    if reference_handle?(fence) and reference_handle?(table) do
+      close_fence(fence)
+      lease_monitor = Process.monitor(lease_owner)
 
-    result =
-      if Process.alive?(lease_owner) do
-        try do
-          GenServer.call(lease_owner, {:close, fence, table}, @reply_timeout_ms)
-        catch
-          :exit, _reason -> :force
+      result =
+        if Process.alive?(lease_owner) do
+          try do
+            GenServer.call(lease_owner, {:close, fence, table}, @reply_timeout_ms)
+          catch
+            :exit, _reason -> :force
+          end
+        else
+          :force
         end
-      else
-        :force
-      end
 
-    case result do
-      :ok -> await_down(lease_owner, lease_monitor)
-      :force -> force_close(lease_owner, lease_monitor, table)
+      case result do
+        :ok -> await_down(lease_owner, lease_monitor)
+        :force -> force_close(lease_owner, lease_monitor, table)
+      end
+    else
+      :ok
     end
   end
 

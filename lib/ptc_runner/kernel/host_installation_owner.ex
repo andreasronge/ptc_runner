@@ -3,10 +3,13 @@ defmodule PtcRunner.Kernel.HostInstallationOwner do
 
   use GenServer
 
+  alias PtcRunner.Kernel.BoundedWorker
+  alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.HostConfig
   alias PtcRunner.Kernel.HostCredentialLease
   alias PtcRunner.Kernel.HostInstallation
   alias PtcRunner.Kernel.HostInstallationAuthority
+  alias PtcRunner.Kernel.ProviderCallbackBoundary
 
   @authority_marker {__MODULE__, :authority}
   @operation_timeout_ms 1_000
@@ -221,7 +224,7 @@ defmodule PtcRunner.Kernel.HostInstallationOwner do
 
   def handle_call(
         {:invoke, token, role, fence, {operation, name, selection, context}},
-        _from,
+        from,
         %{host: host, token: token, role: role, fence: fence} = state
       )
       when operation in [:prepare, :preflight] and is_binary(name) do
@@ -229,9 +232,9 @@ defmodule PtcRunner.Kernel.HostInstallationOwner do
       request =
         {operation, name, selection, context, Map.get(state.oauth_runtimes, name)}
 
-      case safe_owner_call(host, request, operation) do
+      case bounded_owner_call(host, request, operation, context, from) do
         {:ok, {:private_preflight, acquire}} when operation == :preflight ->
-          store_preflight(state, acquire)
+          store_preflight(state, acquire, callback_bounds(context))
 
         result ->
           {:reply, result, state}
@@ -243,7 +246,7 @@ defmodule PtcRunner.Kernel.HostInstallationOwner do
 
   def handle_call(
         {:invoke, token, role, fence, {:acquire, ticket, credentials, services}},
-        _from,
+        from,
         %{token: token, role: role, fence: fence} = state
       )
       when is_reference(ticket) and is_map(credentials) and is_map(services) do
@@ -252,8 +255,8 @@ defmodule PtcRunner.Kernel.HostInstallationOwner do
         {nil, _preflights} ->
           {:reply, {:error, :invalid_provider_preflight}, state}
 
-        {acquire, preflights} ->
-          result = invoke_acquire(acquire, credentials, services)
+        {preflight, preflights} ->
+          result = bounded_acquire(preflight, credentials, services, from)
           {:reply, result, %{state | preflights: preflights}}
       end
     else
@@ -375,16 +378,64 @@ defmodule PtcRunner.Kernel.HostInstallationOwner do
   defp operation_failure(:prepare), do: {:error, :provider_prepare_failed}
   defp operation_failure(:preflight), do: {:error, :provider_preflight_failed}
 
-  defp store_preflight(state, acquire) when is_function(acquire) do
+  defp bounded_owner_call(host, request, operation, context, from) do
+    case callback_bounds(context) do
+      nil ->
+        safe_owner_call(host, request, operation)
+
+      bounds ->
+        run_bounded(fn -> safe_owner_call(host, request, operation) end, bounds, from)
+    end
+  end
+
+  defp bounded_acquire(%{acquire: acquire, bounds: nil}, credentials, services, _from),
+    do: invoke_acquire(acquire, credentials, services)
+
+  defp bounded_acquire(%{acquire: acquire, bounds: bounds}, credentials, services, from) do
+    run_bounded(fn -> invoke_acquire(acquire, credentials, services) end, bounds, from)
+  end
+
+  defp run_bounded(callback, %{deadline: deadline, max_heap_words: max_heap_words}, from) do
+    result =
+      case Deadline.remaining(deadline) do
+        0 ->
+          {:error, :timeout}
+
+        timeout_ms ->
+          BoundedWorker.run(callback,
+            timeout_ms: timeout_ms,
+            max_heap_words: max_heap_words,
+            cancel_with_caller: true,
+            cancel_with: elem(from, 0)
+          )
+      end
+
+    case result do
+      {:ok, callback_result} -> callback_result
+      {:error, reason} -> ProviderCallbackBoundary.nested_failure(reason)
+    end
+  end
+
+  defp callback_bounds(%{deadline: deadline, limits: %{provider_heap_words: max_heap_words}})
+       when is_integer(max_heap_words) and max_heap_words > 0 do
+    if Deadline.valid?(deadline), do: %{deadline: deadline, max_heap_words: max_heap_words}
+  end
+
+  defp callback_bounds(_context), do: nil
+
+  defp store_preflight(state, acquire, bounds) when is_function(acquire) do
     if map_size(state.preflights) < 128 do
       ticket = make_ref()
-      {:reply, {:ok, ticket}, %{state | preflights: Map.put(state.preflights, ticket, acquire)}}
+
+      preflight = %{acquire: acquire, bounds: bounds}
+
+      {:reply, {:ok, ticket}, %{state | preflights: Map.put(state.preflights, ticket, preflight)}}
     else
       {:reply, {:error, :provider_preflight_failed}, state}
     end
   end
 
-  defp store_preflight(state, _acquire),
+  defp store_preflight(state, _acquire, _bounds),
     do: {:reply, {:error, :invalid_provider_preflight}, state}
 
   defp invoke_acquire(acquire, credentials, services) do

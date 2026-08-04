@@ -8,6 +8,12 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
   Each acquired provider is committed to its provisional registrar immediately,
   before the next provider can run.
 
+  For an active command, provider preparation, preflight, acquisition, and
+  credential resolution run in owner-linked bounded work using the remaining
+  shared run deadline and provider heap limit. Preflight releases use one
+  shared provider-cleanup budget. A direct embedding session without an
+  operation deadline retains the registry's synchronous callback semantics.
+
   This module does not own the provider session. Its caller closes that session
   after any error and retains it with a successful acquisition result.
   """
@@ -17,6 +23,7 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.CommandSubject
   alias PtcRunner.Kernel.Deadline
+  alias PtcRunner.Kernel.ProviderCallbackBoundary
   alias PtcRunner.Kernel.ProviderRegistry
   alias PtcRunner.Kernel.ProviderSession
   alias PtcRunner.Kernel.ResourceRegistrar
@@ -44,22 +51,32 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
       )
       when input_class in [:normal, :private_inspection] and
              is_function(artifact_preflight, 1) do
-    with {:ok, prepared} <- prepare_providers(package, registry, session),
+    max_heap_words = package.limits.provider_heap_words
+
+    with {:ok, prepared} <-
+           prepare_providers(package, registry, session, max_heap_words),
          :ok <- validate_provider_dependencies(prepared),
          :ok <- validate_single_workflow_llm(prepared),
          effective_class <- effective_data_class(input_class, prepared),
          :ok <- providers_accept(prepared, effective_class),
          :ok <- artifact_preflight.(effective_class),
-         {:ok, preflighted} <- preflight_providers(prepared) do
+         {:ok, preflighted} <- preflight_providers(prepared, session, max_heap_words) do
       try do
         with {:ok, credentials} <-
                resolve_provider_credentials(
                  registry,
                  preflighted,
                  session,
-                 package.limits.provider_heap_words
+                 max_heap_words
                ),
-             {:ok, acquired} <- acquire_providers(preflighted, credentials, effective_class) do
+             {:ok, acquired} <-
+               acquire_providers(
+                 preflighted,
+                 credentials,
+                 effective_class,
+                 session,
+                 max_heap_words
+               ) do
           {:ok,
            acquired
            |> Map.put(:workflow, finalize_capabilities(acquired.workflow))
@@ -69,7 +86,7 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
            |> Map.delete(:exports)}
         end
       after
-        release_preflights(preflighted)
+        ProviderCallbackBoundary.release_preflights(preflighted, session, max_heap_words)
       end
     end
   end
@@ -79,14 +96,22 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
 
   defp sort_snapshots(snapshots), do: Enum.sort_by(snapshots, &Map.get(&1, "provider", ""))
 
-  defp prepare_providers(package, registry, session) do
+  defp prepare_providers(package, registry, session, max_heap_words) do
     package
     |> provider_specs()
     |> Enum.with_index()
     |> Enum.reduce_while({:ok, []}, fn {{destination, spec}, index}, {:ok, prepared} ->
       case ProviderSession.open_registrar(session) do
         {:ok, registrar} ->
-          prepare_provider(package, registry, registrar, destination, spec, index, prepared)
+          prepare_provider(
+            package,
+            registry,
+            session,
+            registrar,
+            {destination, spec, index},
+            prepared,
+            max_heap_words
+          )
 
         {:error, _reason} ->
           {:halt, {:error, :provider_session_unavailable}}
@@ -95,23 +120,40 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
     |> reverse_success()
   end
 
-  defp prepare_provider(package, registry, registrar, destination, spec, index, prepared) do
-    context = %{
-      application_content_digest: package.application_content_digest,
-      destination: destination,
-      owner: ResourceRegistrar.owner(registrar),
-      resource_registrar: registrar,
-      limits: package.limits,
-      installed_limits: package.installed_limits
-    }
+  defp prepare_provider(
+         package,
+         registry,
+         session,
+         registrar,
+         {destination, spec, index},
+         prepared,
+         max_heap_words
+       ) do
+    context =
+      session
+      |> ProviderCallbackBoundary.context()
+      |> Map.merge(%{
+        application_content_digest: package.application_content_digest,
+        destination: destination,
+        owner: ResourceRegistrar.owner(registrar),
+        resource_registrar: registrar,
+        limits: package.limits,
+        installed_limits: package.installed_limits
+      })
 
-    case ProviderRegistry.prepare(
-           registry,
-           spec["name"],
-           Map.get(spec, "config", %{}),
-           context
-         ) do
-      {:ok, provider} ->
+    callback = fn ->
+      ProviderRegistry.prepare(
+        registry,
+        spec["name"],
+        Map.get(spec, "config", %{}),
+        context
+      )
+    end
+
+    occurrence = %{provider: spec["name"], destination: destination, index: index}
+
+    case ProviderCallbackBoundary.invoke(session, max_heap_words, occurrence, callback) do
+      {:ok, {:ok, provider}} ->
         entry = %{
           index: index,
           provider: spec["name"],
@@ -128,17 +170,30 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
 
         {:cont, {:ok, [entry | prepared]}}
 
-      {:error, _reason} = error ->
+      {:ok, {:error, _reason} = error} ->
+        _ = ResourceRegistrar.abort(registrar)
+        {:halt, error}
+
+      {:deadline_expired, _callback_result, %CommandDiagnostic{} = diagnostic} ->
+        _ = ResourceRegistrar.abort(registrar)
+        {:halt, {:error, diagnostic}}
+
+      {:error, %CommandDiagnostic{}} = error ->
         _ = ResourceRegistrar.abort(registrar)
         {:halt, error}
     end
   end
 
-  defp preflight_providers(prepared) do
+  defp preflight_providers(prepared, session, max_heap_words) do
     prepared
     |> Enum.reduce_while({:ok, []}, fn provider, {:ok, preflighted} ->
-      case ProviderRegistry.preflight(provider.prepared) do
-        {:ok, phase} ->
+      result =
+        ProviderCallbackBoundary.invoke(session, max_heap_words, provider, fn ->
+          ProviderRegistry.preflight(provider.prepared)
+        end)
+
+      case result do
+        {:ok, {:ok, phase}} ->
           entry =
             provider
             |> Map.delete(:prepared)
@@ -146,15 +201,29 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
 
           {:cont, {:ok, [entry | preflighted]}}
 
-        {:error, _reason} = error ->
-          release_preflights(preflighted)
+        {:ok, {:error, _reason} = error} ->
+          ProviderCallbackBoundary.release_preflights(preflighted, session, max_heap_words)
+          {:halt, error}
+
+        {:deadline_expired, callback_result, %CommandDiagnostic{} = diagnostic} ->
+          release_expired_preflight(callback_result, preflighted, session, max_heap_words)
+          {:halt, {:error, diagnostic}}
+
+        {:error, %CommandDiagnostic{}} = error ->
+          ProviderCallbackBoundary.release_preflights(preflighted, session, max_heap_words)
           {:halt, error}
       end
     end)
     |> reverse_success()
   end
 
-  defp acquire_providers(preflighted, credentials, effective_class) do
+  defp acquire_providers(
+         preflighted,
+         credentials,
+         effective_class,
+         session,
+         max_heap_words
+       ) do
     initial = %{
       workflow: %{capabilities: []},
       mission: %{capabilities: []},
@@ -163,74 +232,102 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
       data_class: effective_class
     }
 
-    acquire_ready_providers(preflighted, credentials, initial)
+    acquire_ready_providers(preflighted, credentials, initial, session, max_heap_words)
   end
 
-  defp acquire_ready_providers([], _credentials, accumulated), do: {:ok, accumulated}
+  defp acquire_ready_providers([], _credentials, accumulated, _session, _max_heap_words),
+    do: {:ok, accumulated}
 
-  defp acquire_ready_providers(pending, credentials, accumulated) do
+  defp acquire_ready_providers(pending, credentials, accumulated, session, max_heap_words) do
     case Enum.split_with(pending, &services_available?(&1, accumulated.exports)) do
       {[], _blocked} ->
         {:error, :provider_dependency_unavailable}
 
       {ready, blocked} ->
-        case acquire_provider_batch(ready, credentials, accumulated) do
-          {:ok, next} -> acquire_ready_providers(blocked, credentials, next)
-          {:unregistered_provider_close, _reason, _close} = cleanup -> cleanup
-          {:error, _reason} = error -> error
+        case acquire_provider_batch(ready, credentials, accumulated, session, max_heap_words) do
+          {:ok, next} ->
+            acquire_ready_providers(blocked, credentials, next, session, max_heap_words)
+
+          {:unregistered_provider_close, _reason, _close} = cleanup ->
+            cleanup
+
+          {:error, _reason} = error ->
+            error
         end
     end
   end
 
-  defp acquire_provider_batch(providers, credentials, accumulated) do
+  defp acquire_provider_batch(providers, credentials, accumulated, session, max_heap_words) do
     Enum.reduce_while(providers, {:ok, accumulated}, fn provider, {:ok, current} ->
       provider_credentials = Map.take(credentials, provider.credential_names)
       services = selected_services(current.exports, provider.requires)
 
       result =
-        with :ok <- ResourceRegistrar.activate(provider.registrar) do
-          ProviderRegistry.acquire(provider.preflighted, provider_credentials, services)
-        end
+        acquire_provider(provider, provider_credentials, services, session, max_heap_words)
 
-      case result do
-        {:ok, built}
-        when built.data_class == provider.data_class and
-               built.accepts_data == provider.accepts_data ->
-          case ResourceRegistrar.commit(provider.registrar, built.close) do
-            :ok ->
-              environment = Map.fetch!(current, provider.destination)
+      handle_acquisition(result, provider, current)
+    end)
+  end
 
-              next =
-                current
-                |> Map.put(provider.destination, %{
-                  capabilities: [{provider.index, built.capabilities} | environment.capabilities]
-                })
-                |> Map.update!(:snapshots, &maybe_append(&1, built.snapshot))
-                |> Map.update!(
-                  :exports,
-                  &merge_provider_exports(&1, provider.provider, built.exports)
-                )
+  defp acquire_provider(provider, credentials, services, session, max_heap_words) do
+    with :ok <- ResourceRegistrar.activate(provider.registrar) do
+      case ProviderCallbackBoundary.invoke(session, max_heap_words, provider, fn ->
+             ProviderRegistry.acquire_unreleased(provider.preflighted, credentials, services)
+           end) do
+        {:ok, callback_result} ->
+          callback_result
 
-              {:cont, {:ok, next}}
-
-            {:error, _reason} ->
-              {:halt, {:unregistered_provider_close, :provider_session_unavailable, built.close}}
-          end
-
-        {:ok, built} ->
-          case ResourceRegistrar.commit(provider.registrar, built.close) do
-            :ok ->
-              {:halt, {:error, :provider_data_policy_changed}}
-
-            {:error, _reason} ->
-              {:halt, {:unregistered_provider_close, :provider_data_policy_changed, built.close}}
-          end
+        {:deadline_expired, callback_result, diagnostic} ->
+          preserve_expired_acquisition(provider, callback_result, diagnostic)
 
         {:error, _reason} = error ->
-          _ = ResourceRegistrar.abort(provider.registrar)
-          {:halt, error}
+          error
       end
-    end)
+    end
+  end
+
+  defp handle_acquisition({:ok, built}, provider, current)
+       when built.data_class == provider.data_class and
+              built.accepts_data == provider.accepts_data do
+    case ResourceRegistrar.commit(provider.registrar, built.close) do
+      :ok ->
+        environment = Map.fetch!(current, provider.destination)
+
+        next =
+          current
+          |> Map.put(provider.destination, %{
+            capabilities: [{provider.index, built.capabilities} | environment.capabilities]
+          })
+          |> Map.update!(:snapshots, &maybe_append(&1, built.snapshot))
+          |> Map.update!(:exports, &merge_provider_exports(&1, provider.provider, built.exports))
+
+        {:cont, {:ok, next}}
+
+      {:error, _reason} ->
+        {:halt, {:unregistered_provider_close, :provider_session_unavailable, built.close}}
+    end
+  end
+
+  defp handle_acquisition({:ok, built}, provider, _current) do
+    case ResourceRegistrar.commit(provider.registrar, built.close) do
+      :ok ->
+        {:halt, {:error, :provider_data_policy_changed}}
+
+      {:error, _reason} ->
+        {:halt, {:unregistered_provider_close, :provider_data_policy_changed, built.close}}
+    end
+  end
+
+  defp handle_acquisition(
+         {:unregistered_provider_close, _reason, _close} = cleanup,
+         _provider,
+         _current
+       ),
+       do: {:halt, cleanup}
+
+  defp handle_acquisition({:error, _reason} = error, provider, _current) do
+    _ = ResourceRegistrar.abort(provider.registrar)
+    {:halt, error}
   end
 
   defp services_available?(provider, exports),
@@ -341,7 +438,7 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
             timeout_ms: timeout_ms,
             max_heap_words: max_heap_words,
             cancel_with_caller: true,
-            cancel_with: session.pid
+            cancel_with: ProviderSession.worker_cancel_target(session)
           )
       end
 
@@ -371,12 +468,26 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
   defp reverse_success({:ok, values}), do: {:ok, Enum.reverse(values)}
   defp reverse_success({:error, _reason} = error), do: error
 
-  defp release_preflights(preflighted) do
-    Enum.each(preflighted, fn
-      %{preflighted: provider} -> ProviderRegistry.release_preflight(provider)
-      provider -> ProviderRegistry.release_preflight(provider)
-    end)
+  defp preserve_expired_acquisition(provider, {:ok, built}, diagnostic) do
+    case ResourceRegistrar.commit(provider.registrar, built.close) do
+      :ok -> {:error, diagnostic}
+      {:error, _reason} -> {:unregistered_provider_close, diagnostic, built.close}
+    end
   end
+
+  defp preserve_expired_acquisition(_provider, _callback_result, diagnostic),
+    do: {:error, diagnostic}
+
+  defp release_expired_preflight({:ok, phase}, preflighted, session, max_heap_words),
+    do:
+      ProviderCallbackBoundary.release_preflights(
+        [phase | preflighted],
+        session,
+        max_heap_words
+      )
+
+  defp release_expired_preflight(_callback_result, preflighted, session, max_heap_words),
+    do: ProviderCallbackBoundary.release_preflights(preflighted, session, max_heap_words)
 
   defp strictest_data_class(:private_inspection, _next), do: :private_inspection
   defp strictest_data_class(_current, :private_inspection), do: :private_inspection

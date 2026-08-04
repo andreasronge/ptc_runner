@@ -18,17 +18,19 @@ defmodule PtcRunner.Kernel.HostInstallationAuthority do
           fence: fence(),
           lease_owner: pid(),
           lease_fence: :atomics.atomics_ref(),
-          lease_table: reference(),
+          lease_table: :ets.tid(),
           attestation: binary() | nil
         }
 
   @doc false
-  @spec new(pid(), reference(), fence(), pid(), :atomics.atomics_ref(), reference()) ::
+  @spec new(pid(), reference(), fence(), pid(), :atomics.atomics_ref(), :ets.tid()) ::
           {:ok, t()} | {:error, :invalid_host_installation_authority}
   def new(pid, token, fence, lease_owner, lease_fence, lease_table)
-      when is_pid(pid) and is_reference(token) and is_reference(fence) and
-             is_pid(lease_owner) and is_reference(lease_fence) and is_reference(lease_table) do
-    if HostInstallationOwner.authenticated?(pid, token) and
+      when is_pid(pid) and is_reference(token) and is_pid(lease_owner) do
+    if HostCredentialLease.reference_handle?(fence) and
+         HostCredentialLease.reference_handle?(lease_fence) and
+         HostCredentialLease.reference_handle?(lease_table) and
+         HostInstallationOwner.authenticated?(pid, token) and
          HostCredentialLease.bound_to?(lease_owner, pid, lease_fence, lease_table) do
       build(pid, token, :catalog, fence, lease_owner, lease_fence, lease_table)
     else
@@ -44,8 +46,10 @@ defmodule PtcRunner.Kernel.HostInstallationAuthority do
     do:
       Enum.sort(Map.keys(authority)) == @field_keys and is_pid(authority.pid) and
         is_reference(authority.token) and authority.role in [:catalog, :registry] and
-        is_reference(authority.fence) and is_pid(authority.lease_owner) and
-        is_reference(authority.lease_fence) and is_reference(authority.lease_table) and
+        HostCredentialLease.reference_handle?(authority.fence) and
+        is_pid(authority.lease_owner) and
+        HostCredentialLease.reference_handle?(authority.lease_fence) and
+        HostCredentialLease.reference_handle?(authority.lease_table) and
         Attestation.valid?(__MODULE__, payload(authority), attestation)
 
   def valid?(_authority), do: false

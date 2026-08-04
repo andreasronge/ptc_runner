@@ -213,6 +213,22 @@ defmodule PtcRunner.Kernel.ProviderSession do
   def execution_deadline(_session), do: :error
 
   @doc false
+  @spec worker_cancel_target(term()) :: pid() | nil
+  def worker_cancel_target(%__MODULE__{} = session) do
+    if valid?(session), do: session.pid
+  end
+
+  def worker_cancel_target(_session), do: nil
+
+  @doc false
+  @spec cleanup_timeout(term()) :: pos_integer() | nil
+  def cleanup_timeout(%__MODULE__{} = session) do
+    if valid?(session), do: session.cleanup_timeout_ms
+  end
+
+  def cleanup_timeout(_session), do: nil
+
+  @doc false
   @spec claim_operation(t(), Limits.t(), binary()) ::
           :ok
           | {:error, :operation_claimed | :operation_mismatch | :provider_session_unavailable}

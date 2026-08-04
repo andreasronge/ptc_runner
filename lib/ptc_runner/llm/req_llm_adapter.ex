@@ -41,7 +41,8 @@ if Code.ensure_loaded?(ReqLLM) do
     Loads the `llm_db` model catalog into its VM-global `:persistent_term`
     store so per-request provider workers read it copy-free instead of
     triggering a large one-time decode inside their bounded heap. Idempotent;
-    called once at capability-build time in the unbounded builder process.
+    called during provider-application admission and at capability build for
+    direct embedding paths.
     """
     @spec ensure_ready() :: :ok
     def ensure_ready do

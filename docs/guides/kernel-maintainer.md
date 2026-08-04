@@ -762,8 +762,12 @@ and an idempotent closer. Staged builders may also exchange bounded code-owned
 acquisition services after the global preflight and credential barrier; these
 opaque values never enter environments or artifacts. `ProviderAcquisition`
 resolves those dependencies and immediately commits each successful resource
-to the provider session's cleanup stack. `RunBuilder` assembles the returned
-capabilities and transfers the session into the run lifecycle. Exact
+to the provider session's cleanup stack. For active commands, its preparation,
+preflight, and acquisition callbacks—including work behind the private host
+installation owner—run in owner-linked workers bounded by the remaining shared
+run deadline and provider heap limit. Preflight releases share the provider
+cleanup budget. `RunBuilder` assembles the returned capabilities and transfers
+the session into the run lifecycle. Exact
 declarative selection grammar belongs in `SelectionRules`; active transport
 behavior belongs in each provider module and the later runtime dispatcher.
 

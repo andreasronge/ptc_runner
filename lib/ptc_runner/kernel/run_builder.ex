@@ -18,8 +18,10 @@ defmodule PtcRunner.Kernel.RunBuilder do
   active session, and passes that same session here for runtime assembly.
   `PtcRunner.Kernel.ProviderAcquisition` then runs the selected providers'
   shared preparation, credentials, and dependency-ordered acquisition barrier.
-  Credential resolution is owner-linked and bounded by the session's run
-  deadline. Registry builders no longer open a second provider-session owner.
+  Active preparation, preflight, acquisition, and credential resolution are
+  owner-linked and bounded by the session's run deadline; preflight releases
+  share the provider-cleanup budget. Registry builders no longer open a second
+  provider-session owner.
 
   A provider-bearing build remains owned by its build creator until execution
   binds it to a Runner or REPL lifecycle owner. The creator must remain alive
