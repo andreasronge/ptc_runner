@@ -783,11 +783,18 @@ defmodule PtcRunner.Kernel.RunBuilder do
          _failure_mode,
          {:opened_sinks, authority, opened_sinks}
        ) do
-    if required_event_policy(request, providers) == EventSink.policy(opened_sinks.event_sink) do
-      {:ok, authority, opened_sinks.event_sink, opened_sinks.inspection_sink,
-       opened_sinks.inspection_path}
-    else
-      {:error, :provider_data_class_drift, opened_sinks}
+    case EventSink.policy(opened_sinks.event_sink) do
+      # An unavailable sink is its own failure, not a contradicted declaration.
+      {:error, :event_sink_error} ->
+        {:error, :event_sink_error, opened_sinks}
+
+      policy ->
+        if required_event_policy(request, providers) == policy do
+          {:ok, authority, opened_sinks.event_sink, opened_sinks.inspection_sink,
+           opened_sinks.inspection_path}
+        else
+          {:error, :provider_data_class_drift, opened_sinks}
+        end
     end
   end
 

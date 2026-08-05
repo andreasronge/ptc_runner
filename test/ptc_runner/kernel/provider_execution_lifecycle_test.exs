@@ -279,6 +279,41 @@ defmodule PtcRunner.Kernel.ProviderExecutionLifecycleTest do
     assert_receive {:execution_result, {:error, :provider_data_class_drift}}, 5_000
   end
 
+  test "a provider acquiring weaker than it declared is refused just as firmly" do
+    # The safe direction still contradicts the sealed declaration the owner
+    # already opened a private sink for, so it is refused rather than accepted
+    # because it happens to be stricter than needed.
+    fixture =
+      provider_fixture(
+        descriptor_data_class: :private_inspection,
+        descriptor_accepts_data: [:normal, :private_inspection],
+        acquire: fn _context -> fixture_capability() end
+      )
+
+    assert fixture.prepared.effective_data_class == :private_inspection
+    parent = self()
+
+    caller =
+      spawn(fn ->
+        {:ok, owner} =
+          ExecutionSessionOwner.start(
+            fixture.prepared,
+            fixture.authority,
+            self(),
+            fixture.execution,
+            &never_notify/1
+          )
+
+        send(parent, {:execution_owner, owner})
+        send(parent, {:execution_result, ExecutionSessionOwner.await(owner)})
+      end)
+
+    assert_receive {:execution_owner, owner}, 5_000
+    on_exit(fn -> release(caller, ExecutionSessionOwner.pid(owner)) end)
+
+    assert_receive {:execution_result, {:error, :provider_data_class_drift}}, 5_000
+  end
+
   test "an execution from another catalog leaves the prepared run reusable" do
     fixture = provider_fixture()
     other = provider_fixture(installation_revision: "other-v1")
@@ -430,7 +465,7 @@ defmodule PtcRunner.Kernel.ProviderExecutionLifecycleTest do
         installation_revision: Keyword.get(opts, :installation_revision, "lifecycle-v1"),
         credential_names: [],
         authorization_mode: :none,
-        data_class: :normal,
+        data_class: Keyword.get(opts, :descriptor_data_class, :normal),
         accepts_data: Keyword.get(opts, :descriptor_accepts_data, [:normal]),
         requires: [],
         provides: [],

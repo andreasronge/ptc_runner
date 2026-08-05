@@ -798,6 +798,22 @@ exactly `<run_ref>.jsonl` and `<run_ref>.private.jsonl`, respectively.
 
 ### Slice 9: commands and REPL parity
 
+Checkpoint B left three transitional execution paths, not two: one-shot runs
+through `ExecutionSessionOwner` and `build_active_owned/5`, `--check` opens its
+own session and calls `build_active/4`, and the REPL opens no active session at
+all and calls `load_and_build/3` with an empty registry. Behavioural drift
+between them has already produced one reachable privacy defect, so treat this
+slice as early simplification rather than work deferred behind later features.
+
+Its first item is descriptor-authoritative acquisition. `ProviderAcquisition`
+currently verifies an acquired build only against the staged callback result,
+never against the sealed descriptor, so a builder may acquire a different data
+class than its installation declares. Preparation uses that declaration for
+privacy and destination decisions, so the descriptor must be authoritative:
+validate staged preparation against it. Keep `RunBuilder`'s sink-policy
+comparison afterwards as defense in depth.
+
+- validate staged provider preparation against the sealed descriptor;
 - finish shared `help`, `version`, `validate`, `models`, `doctor`, `run`, and
   `init` rendering and dispatch;
 - route Mix one-shot and existing REPL modes through the shared preparation and
