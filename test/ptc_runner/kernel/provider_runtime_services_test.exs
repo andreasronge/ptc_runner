@@ -30,9 +30,13 @@ defmodule PtcRunner.Kernel.ProviderRuntimeServicesTest do
                deadline: Deadline.new(1_000)
              )
 
+    parent = self()
+
+    # The factory runs in a deadline-bound worker, so it reports to the test
+    # process rather than to whichever process happens to invoke it.
     context_factory = fn deadline ->
       :atomics.add(calls, 3, 1)
-      send(self(), {:context_factory_deadline, deadline})
+      send(parent, {:context_factory_deadline, deadline})
       {:ok, context}
     end
 
@@ -103,5 +107,48 @@ defmodule PtcRunner.Kernel.ProviderRuntimeServicesTest do
              command_services
              | provider_application_mode: :host_owned
            })
+  end
+
+  test "a context factory that never returns is cancelled at the operation deadline" do
+    parent = self()
+
+    {:ok, services} =
+      ProviderRuntimeServices.new(
+        oauth_mode:
+          {:context_factory,
+           fn _deadline ->
+             send(parent, {:factory_entered, self()})
+             receive do: (:never -> :never)
+           end}
+      )
+
+    deadline = Deadline.new(150)
+
+    # Returning at all is the assertion: an unbounded factory would hang here.
+    # The timeout keeps its own classification rather than being reported as a
+    # missing authorization context.
+    assert {:error, :operation_deadline_expired} =
+             ProviderRuntimeServices.oauth_context(services, deadline)
+
+    assert_receive {:factory_entered, factory}, 5_000
+    reference = Process.monitor(factory)
+    assert_receive {:DOWN, ^reference, :process, ^factory, _reason}, 5_000
+    assert Deadline.expired?(deadline)
+  end
+
+  test "an expired deadline never enters the context factory" do
+    parent = self()
+
+    {:ok, services} =
+      ProviderRuntimeServices.new(
+        oauth_mode: {:context_factory, fn _deadline -> send(parent, :factory_entered) end}
+      )
+
+    expired = Deadline.new(1, System.monotonic_time(:millisecond) - 10_000)
+
+    assert {:error, :operation_deadline_expired} =
+             ProviderRuntimeServices.oauth_context(services, expired)
+
+    refute_received :factory_entered
   end
 end

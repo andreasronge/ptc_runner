@@ -687,31 +687,74 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
              InstallationCatalog.runtime_registry(catalog, services, ["selected"], expired)
   end
 
-  test "an unbound catalog rejects and releases a generic host authority" do
-    assert {:ok, decoded} =
-             HostConfig.decode(
-               %{
-                 "install" => %{
-                   "selected" => %{
-                     "source" => "ptc_trace_snapshot",
-                     "installation_revision" => "selected-v1",
-                     "directory" => "traces"
-                   }
-                 }
-               },
-               "/tmp"
+  test "a runtime registry is refused when activation finishes after the deadline" do
+    assert {:ok, catalog} = custom_catalog()
+    deadline = Deadline.new(50)
+
+    # Activation runs an embedder-supplied callback that cannot be cancelled,
+    # because the authority it returns belongs to the process that created it.
+    # A slow one must still not yield a usable registry past the deadline.
+    activation = fn ->
+      wait_until_expired(deadline)
+      {:ok, nil}
+    end
+
+    assert {:ok, services} = ProviderRuntimeServices.new(activation: activation)
+
+    assert {:error, :operation_deadline_expired} =
+             InstallationCatalog.runtime_registry(catalog, services, ["selected"], deadline)
+  end
+
+  test "an unbound catalog cancels an activation that never returns" do
+    assert {:ok, catalog} = custom_catalog()
+    parent = self()
+
+    activation = fn ->
+      send(parent, {:activation_entered, self()})
+      receive do: (:never -> :never)
+    end
+
+    assert {:ok, services} = ProviderRuntimeServices.new(activation: activation)
+
+    # Returning at all is the assertion: this hangs without a bounded worker,
+    # and the cancellation keeps its timeout classification.
+    assert {:error, :operation_deadline_expired} =
+             InstallationCatalog.runtime_registry(
+               catalog,
+               services,
+               ["selected"],
+               Deadline.new(150)
              )
 
-    host =
-      struct!(HostConfig,
-        path: "/tmp/ptc-host.json",
-        directory: "/tmp",
-        runtime: decoded.runtime,
-        limits: decoded.limits,
-        credentials: decoded.credentials,
-        install: decoded.install
-      )
+    assert_receive {:activation_entered, worker}, 5_000
+    reference = Process.monitor(worker)
+    assert_receive {:DOWN, ^reference, :process, ^worker, _reason}, 5_000
+  end
 
+  test "an unbound catalog releases an authority its activation did not create" do
+    # The generic-authority test below builds its owner inside the activation
+    # callback, so creator-monitor teardown would hide a missing release. This
+    # one hands back an authority the test process owns.
+    assert {:ok, catalog} = custom_catalog()
+    assert {:ok, authority} = HostInstallationOwner.start(generic_host())
+    owner = authority.pid
+    assert Process.alive?(owner)
+
+    assert {:ok, services} = ProviderRuntimeServices.new(activation: fn -> {:ok, authority} end)
+
+    assert {:error, :invalid_provider_registry} =
+             InstallationCatalog.runtime_registry(
+               catalog,
+               services,
+               ["selected"],
+               Deadline.new(1_000)
+             )
+
+    refute Process.alive?(owner)
+  end
+
+  test "an unbound catalog rejects and releases a generic host authority" do
+    host = generic_host()
     assert {:ok, catalog} = custom_catalog()
     parent = self()
 
@@ -1829,5 +1872,39 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
       end
     end)
     |> MapSet.new()
+  end
+
+  defp wait_until_expired(deadline) do
+    if Deadline.expired?(deadline) do
+      :ok
+    else
+      :erlang.yield()
+      wait_until_expired(deadline)
+    end
+  end
+
+  defp generic_host do
+    {:ok, decoded} =
+      HostConfig.decode(
+        %{
+          "install" => %{
+            "selected" => %{
+              "source" => "ptc_trace_snapshot",
+              "installation_revision" => "selected-v1",
+              "directory" => "traces"
+            }
+          }
+        },
+        "/tmp"
+      )
+
+    struct!(HostConfig,
+      path: "/tmp/ptc-host.json",
+      directory: "/tmp",
+      runtime: decoded.runtime,
+      limits: decoded.limits,
+      credentials: decoded.credentials,
+      install: decoded.install
+    )
   end
 end

@@ -161,7 +161,8 @@ defmodule PtcRunner.Kernel.InstallationCatalog do
          true <- ProviderRuntimeServices.bound_to?(services, catalog.runtime_binding),
          true <- valid_runtime_selection?(catalog, selected_names),
          :ok <- validate_operation_deadline(deadline),
-         {:ok, owner} <- activate_registry_owner(services, catalog.runtime_binding) do
+         {:ok, owner} <- activate_registry_owner(services, catalog.runtime_binding, deadline),
+         :ok <- release_expired_owner(owner, deadline) do
       open_runtime_registry(catalog, services, selected_names, owner, deadline)
     else
       {:error, :operation_deadline_expired} = error -> error
@@ -309,16 +310,37 @@ defmodule PtcRunner.Kernel.InstallationCatalog do
 
   defp valid_name?(name), do: is_binary(name) and name =~ @name
 
-  defp activate_registry_owner(services, runtime_binding) do
+  # Activation runs an embedder-supplied callback this function cannot cancel,
+  # because the authority it returns is bound to whichever process created it.
+  # A slow callback must therefore not still yield a usable registry once the
+  # operation deadline has passed.
+  defp release_expired_owner(owner, deadline) do
+    case validate_operation_deadline(deadline) do
+      :ok ->
+        :ok
+
+      {:error, _reason} = error ->
+        HostInstallationAuthority.release(owner)
+        error
+    end
+  end
+
+  # An unbound catalog's activation owns nothing, so it runs under the deadline.
+  # A host-bound authority belongs to whichever process created it, so its
+  # activation cannot move into a disposable worker without re-parenting
+  # ownership; `release_expired_owner/2` bounds that one after the fact.
+  defp activate_registry_owner(services, nil, deadline) do
+    case ProviderRuntimeServices.activate_process_free(services, deadline) do
+      {:ok, nil} -> {:ok, nil}
+      {:error, :operation_deadline_expired} = error -> error
+      {:error, _reason} -> {:error, :invalid_provider_registry}
+    end
+  end
+
+  defp activate_registry_owner(services, runtime_binding, _deadline)
+       when is_binary(runtime_binding) do
     case ProviderRuntimeServices.activate(services) do
-      {:ok, nil} when is_binary(runtime_binding) ->
-        {:error, :invalid_provider_registry}
-
       {:ok, nil} ->
-        {:ok, nil}
-
-      {:ok, catalog_owner} when is_nil(runtime_binding) ->
-        HostInstallationAuthority.release(catalog_owner)
         {:error, :invalid_provider_registry}
 
       {:ok, catalog_owner} ->
