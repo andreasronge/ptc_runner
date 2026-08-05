@@ -814,6 +814,22 @@ validate staged preparation against it. Keep `RunBuilder`'s sink-policy
 comparison afterwards as defense in depth.
 
 - validate staged provider preparation against the sealed descriptor;
+- bound the runtime-service callbacks `InstallationCatalog.runtime_registry/4`
+  invokes. It validates the operation deadline once and then calls the sealed
+  `activation` callback, and for OAuth the context factory, synchronously. Both
+  are embedder-supplied, so a blocking one hangs past the advertised bound and a
+  late activation can still return a registry after expiry. Run them in
+  deadline-bound cancellable workers, release a late authority, and recheck
+  expiry afterwards. Shipped callbacks do not block, so this is a contract gap
+  rather than a defect reachable through the CLI;
+- decide whether `.env` loading is pre-run setup or run work.
+  `ProviderExecution.execute_ordinary/6` starts the session deadline and then
+  calls `Dotenv.load/0`, which waits on a global lock and reads the whole file
+  with no time, byte, or heap bound. `--check` has the same ordering;
+- return zero from `LoopbackListener.remaining/1` on expiry. It floors at one,
+  which makes the expired branch in `await_callback/4` unreachable and lets a
+  trickle client extend `receive_request/3` a millisecond at a time. This
+  predates Checkpoint B;
 - finish shared `help`, `version`, `validate`, `models`, `doctor`, `run`, and
   `init` rendering and dispatch;
 - route Mix one-shot and existing REPL modes through the shared preparation and
