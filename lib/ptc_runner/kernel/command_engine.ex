@@ -25,6 +25,7 @@ defmodule PtcRunner.Kernel.CommandEngine do
   alias PtcRunner.Kernel.PreparedRun
   alias PtcRunner.Kernel.PrivateDirectory
   alias PtcRunner.Kernel.RunCoordinator
+  alias PtcRunner.Kernel.RunRequest
 
   @artifact_destination_keys [:trace_dir, :inspect, :output, :private_output]
 
@@ -37,6 +38,66 @@ defmodule PtcRunner.Kernel.CommandEngine do
       prepare_with_ref(argv, run_ref)
     end
   end
+
+  @doc false
+  @spec request(binary(), InstallationCatalog.t(), keyword()) ::
+          {:ok, RunRequest.t()} | {:error, term()}
+  def request(application, %InstallationCatalog{} = catalog, options)
+      when is_binary(application) and is_list(options) do
+    if Keyword.keyword?(options) do
+      options =
+        Keyword.merge(options,
+          installed_limits: catalog.installed_limits,
+          result_projection: :json
+        )
+
+      ApplicationPackage.request_directory(application, options)
+    else
+      {:error, :invalid_application_options}
+    end
+  end
+
+  def request(_application, _catalog, _options), do: {:error, :invalid_application_source}
+
+  @doc false
+  @spec catalog(binary() | nil) ::
+          {:ok, HostConfig.t() | nil, InstallationCatalog.t()}
+          | {:error, CommandDiagnostic.t()}
+  def catalog(nil) do
+    case InstallationCatalog.new() do
+      {:ok, catalog} -> {:ok, nil, catalog}
+      {:error, _reason} -> {:error, diagnostic(:internal, :internal_error)}
+    end
+  end
+
+  def catalog(path) when is_binary(path) do
+    case HostConfig.load_command(path) do
+      {:ok, host} ->
+        case HostInstallation.catalog(host) do
+          {:ok, catalog} -> {:ok, host, catalog}
+          {:error, _reason} -> {:error, diagnostic(:host, :host_invalid)}
+        end
+
+      {:error, :host_unavailable} ->
+        {:error, diagnostic(:host, :host_unavailable)}
+
+      {:error, :host_invalid} ->
+        {:error, diagnostic(:host, :host_invalid)}
+
+      {:error, {:installation_revision_missing, name}} ->
+        {:ok, subject} = CommandSubject.provider(name, :declaration)
+
+        {:error, CommandDiagnostic.new!(:host, :installation_revision_missing, subject: subject)}
+
+      {:error, {:host_schema_invalid, segments}} ->
+        {:error, host_path_diagnostic(:host_schema_invalid, segments)}
+
+      {:error, {:installed_limit_invalid, segments}} ->
+        {:error, host_path_diagnostic(:installed_limit_invalid, segments)}
+    end
+  end
+
+  def catalog(_source), do: {:error, diagnostic(:host, :host_unavailable)}
 
   defp prepare_with_ref(argv, run_ref) do
     case CommandParser.parse(argv) do
@@ -67,11 +128,11 @@ defmodule PtcRunner.Kernel.CommandEngine do
 
   defp prepare_arguments(%CommandArguments{command: command} = arguments, run_ref, destinations)
        when command in [:validate, :run] do
-    case catalog(arguments.options) do
-      {:ok, catalog} ->
+    case catalog(Map.get(arguments.options, :host_config)) do
+      {:ok, _host, catalog} ->
         try do
           result =
-            with {:ok, request} <- request(arguments, catalog, run_ref),
+            with {:ok, request} <- request_arguments(arguments, catalog, run_ref),
                  {:ok, prepared} <- RunCoordinator.prepare(request, catalog) do
               command_preparation(arguments, run_ref, prepared, catalog, destinations)
             else
@@ -240,43 +301,6 @@ defmodule PtcRunner.Kernel.CommandEngine do
      )}
   end
 
-  defp catalog(options) do
-    case Map.get(options, :host_config) do
-      nil ->
-        InstallationCatalog.new()
-
-      path ->
-        load_catalog(path)
-    end
-  end
-
-  defp load_catalog(path) do
-    case HostConfig.load_command(path) do
-      {:ok, host} ->
-        case HostInstallation.catalog(host) do
-          {:ok, catalog} -> {:ok, catalog}
-          {:error, _reason} -> {:error, diagnostic(:host, :host_invalid)}
-        end
-
-      {:error, :host_unavailable} ->
-        {:error, diagnostic(:host, :host_unavailable)}
-
-      {:error, :host_invalid} ->
-        {:error, diagnostic(:host, :host_invalid)}
-
-      {:error, {:installation_revision_missing, name}} ->
-        {:ok, subject} = CommandSubject.provider(name, :declaration)
-
-        {:error, CommandDiagnostic.new!(:host, :installation_revision_missing, subject: subject)}
-
-      {:error, {:host_schema_invalid, segments}} ->
-        {:error, host_path_diagnostic(:host_schema_invalid, segments)}
-
-      {:error, {:installed_limit_invalid, segments}} ->
-        {:error, host_path_diagnostic(:installed_limit_invalid, segments)}
-    end
-  end
-
   defp host_path_diagnostic(code, segments) do
     {:ok, path} = CommandPath.host(segments)
 
@@ -286,18 +310,16 @@ defmodule PtcRunner.Kernel.CommandEngine do
     )
   end
 
-  defp request(arguments, catalog, run_ref) do
+  defp request_arguments(arguments, catalog, run_ref) do
     options =
       [
-        installed_limits: catalog.installed_limits,
-        result_projection: :json,
         inspection_capture: Map.has_key?(arguments.options, :inspect)
       ]
       |> maybe_trace_identity(arguments, run_ref)
       |> maybe_input(arguments.options)
       |> maybe_override(arguments.options)
 
-    case ApplicationPackage.request_directory(arguments.application, options) do
+    case request(arguments.application, catalog, options) do
       {:ok, request} ->
         {:ok, request}
 

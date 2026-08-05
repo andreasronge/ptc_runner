@@ -6,7 +6,9 @@ defmodule PtcRunner.Kernel.ProviderApplicationGate do
   an inherited target, disables dotenv loading for both `:req_llm` and
   `:llm_db`, and starts the selected target without stopping it at session
   close. The command VM owns the resulting application processes until VM
-  shutdown.
+  shutdown. Once selected applications are admitted, adapter-owned VM-global
+  metadata is warmed before the run clock begins, so its one-time load does not
+  consume a bounded provider worker's heap.
 
   OTP application startup is deliberately synchronous here:
   `Application.ensure_all_started/1` is not cancellable and offers no timeout.
@@ -34,7 +36,7 @@ defmodule PtcRunner.Kernel.ProviderApplicationGate do
       requirements = requirements(prepared, catalog)
 
       case admit_requirements(requirements, services.provider_application_mode) do
-        :ok -> :ok
+        :ok -> warm_requirements(requirements)
         {:error, name} -> {:error, unavailable_diagnostic(name)}
       end
     else
@@ -101,6 +103,15 @@ defmodule PtcRunner.Kernel.ProviderApplicationGate do
           {:halt, {:error, name}}
       end
     end)
+  end
+
+  defp warm_requirements(requirements) do
+    if Enum.any?(requirements, &match?({_name, :req_llm}, &1)) do
+      adapter = PtcRunner.LLM.adapter!()
+      if function_exported?(adapter, :ensure_ready, 0), do: adapter.ensure_ready()
+    end
+
+    :ok
   end
 
   defp unavailable_diagnostic(name) do

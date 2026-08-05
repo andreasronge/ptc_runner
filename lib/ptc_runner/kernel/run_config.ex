@@ -28,6 +28,9 @@ defmodule PtcRunner.Kernel.RunConfig do
   inventory text.
 
   `provider_session` is the single owner-backed provider cleanup boundary.
+  Its optional absolute `run_deadline` is derived from that sealed session so
+  active preflight and later Kernel execution consume one budget rather than
+  anchoring independent durations.
   Before callbacks can start, execution binds it to the Runner or REPL session
   owner and to the run state whose provider tasks it tracks.
   `connector_snapshots` are bounded safe metadata copied into `run-started`;
@@ -48,6 +51,7 @@ defmodule PtcRunner.Kernel.RunConfig do
   environments.
   """
 
+  alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.FrozenBundle
   alias PtcRunner.Kernel.InspectionSink
@@ -71,6 +75,7 @@ defmodule PtcRunner.Kernel.RunConfig do
     :event_sink,
     :event_sink_owner,
     :mission_inventory,
+    :run_deadline,
     :claim_id
   ]
   defstruct [
@@ -81,6 +86,7 @@ defmodule PtcRunner.Kernel.RunConfig do
     :event_sink,
     :event_sink_owner,
     :mission_inventory,
+    :run_deadline,
     :claim_id,
     result_contract: nil,
     result_projection: :native,
@@ -102,6 +108,7 @@ defmodule PtcRunner.Kernel.RunConfig do
           event_sink: EventSink.t(),
           event_sink_owner: pid(),
           mission_inventory: MissionInventory.t(),
+          run_deadline: Deadline.t() | nil,
           claim_id: reference(),
           result_contract: ValueContract.t() | nil,
           result_projection: :native | :json,
@@ -155,7 +162,9 @@ defmodule PtcRunner.Kernel.RunConfig do
            inspection?(Keyword.get(opts, :inspection_sink), Keyword.get(opts, :inspection_path)),
          {:ok, inspection_sink_owner} <-
            inspection_owner(Keyword.get(opts, :inspection_sink)),
-         true <- provider_session?(Keyword.get(opts, :provider_session), limits),
+         provider_session = Keyword.get(opts, :provider_session),
+         true <- provider_session?(provider_session, limits),
+         {:ok, run_deadline} <- provider_run_deadline(provider_session),
          true <- connector_snapshots?(Keyword.get(opts, :connector_snapshots, [])),
          {:ok, session_profile} <- session_profile(Keyword.get(opts, :session_profile)),
          {:ok, labels} <- SafeMetadata.normalize_labels(Keyword.get(opts, :labels, %{})),
@@ -189,13 +198,14 @@ defmodule PtcRunner.Kernel.RunConfig do
          event_sink: sink,
          event_sink_owner: event_sink_owner,
          mission_inventory: mission_inventory,
+         run_deadline: run_deadline,
          claim_id: make_ref(),
          result_contract: Keyword.get(opts, :result_contract),
          result_projection: Keyword.get(opts, :result_projection, :native),
          inspection_sink: Keyword.get(opts, :inspection_sink),
          inspection_sink_owner: inspection_sink_owner,
          inspection_path: Keyword.get(opts, :inspection_path),
-         provider_session: Keyword.get(opts, :provider_session),
+         provider_session: provider_session,
          connector_snapshots: Keyword.get(opts, :connector_snapshots, []),
          session_profile: session_profile,
          labels: labels,
@@ -339,6 +349,9 @@ defmodule PtcRunner.Kernel.RunConfig do
 
   defp provider_session?(session, limits),
     do: ProviderSession.compatible_limits?(session, limits)
+
+  defp provider_run_deadline(nil), do: {:ok, nil}
+  defp provider_run_deadline(session), do: ProviderSession.execution_deadline(session)
 
   defp connector_snapshots?(snapshots) do
     is_list(snapshots) and length(snapshots) <= 128 and

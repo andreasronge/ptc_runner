@@ -12,6 +12,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.Store.Memory do
 
   use GenServer
 
+  alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.MCPOAuth.Binding
   alias PtcRunner.Kernel.MCPOAuth.GrantKey
   alias PtcRunner.Kernel.MCPOAuth.Primitives
@@ -49,8 +50,16 @@ defmodule PtcRunner.Kernel.MCPOAuth.Store.Memory do
   end
 
   @impl Store
-  def transact(%__MODULE__{pid: pid}, operation, timeout) do
-    GenServer.call(pid, operation, timeout)
+  def transact(%__MODULE__{pid: pid}, operation, deadline) do
+    if Deadline.live?(deadline) do
+      GenServer.call(
+        pid,
+        {:transaction, operation, deadline},
+        max(Deadline.remaining(deadline), 1)
+      )
+    else
+      {:error, :timeout}
+    end
   catch
     :exit, {:timeout, _detail} ->
       recover_ambiguous_timeout(pid, operation)
@@ -95,6 +104,12 @@ defmodule PtcRunner.Kernel.MCPOAuth.Store.Memory do
   end
 
   @impl GenServer
+  def handle_call({:transaction, operation, deadline}, from, state) do
+    if Deadline.live?(deadline),
+      do: handle_call(operation, from, state),
+      else: {:reply, {:error, :timeout}, state}
+  end
+
   def handle_call({:register_manager, manager}, _from, state) when is_pid(manager) do
     case Map.fetch(state.managers, manager) do
       {:ok, ref} ->

@@ -56,7 +56,10 @@ defmodule PtcRunner.Kernel.Runner do
   defp run_claimed_attempt(entry_source, config) do
     with :ok <- entry_source_within_limit(entry_source, config.limits),
          {:ok, state} <-
-           RunState.start(config.limits, provider_session: config.provider_session) do
+           RunState.start(config.limits,
+             provider_session: config.provider_session,
+             run_deadline: config.run_deadline
+           ) do
       try do
         case transfer_provider_cleanup(config, state) do
           :ok ->
@@ -114,6 +117,9 @@ defmodule PtcRunner.Kernel.Runner do
         result = apply_provider_cleanup_failure(result, cleanup, usage)
         finalize_result(result, usage, config.event_sink)
 
+      # An unexpected internal exception keeps its original reason and stack
+      # trace. A cleanup failure must not replace a programming defect with a
+      # tidier diagnostic.
       {:raised, kind, reason, stacktrace} ->
         :erlang.raise(kind, reason, stacktrace)
     end

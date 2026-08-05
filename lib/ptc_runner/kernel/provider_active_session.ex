@@ -7,7 +7,9 @@ defmodule PtcRunner.Kernel.ProviderActiveSession do
   marks provider activity. It then opens the command's `ProviderSession` and
   admits selected optional provider applications according to the sealed
   runtime services before invoking active selection validators in declaration
-  order.
+  order. `open_setup/3` and `begin_run/3` expose that boundary in two steps for
+  the Mix-only explicit OAuth interaction: setup admission occurs first, while
+  the ordinary run clock and active validators begin only after interaction.
 
   Each validator runs in a heap- and time-bounded worker with its own
   provisional `ResourceRegistrar`. The callback receives only the normalized
@@ -16,9 +18,14 @@ defmodule PtcRunner.Kernel.ProviderActiveSession do
   so a validator cannot retain a process or port root. Caller death kills the
   linked worker while the session owner drains its provisional scope.
 
-  A successful caller owns both returned session and the consumed prepared
-  run. It must close the session and then release the prepared run's activity
-  marker. A failed open performs both operations before returning.
+  Cleanup responsibility differs by entry point. A frontend-owned caller of
+  `open/3` or `open_setup/3` owns both the returned session and the consumed
+  prepared run: it must close the session and then release the prepared run's
+  activity marker, and a failed open performs both operations before returning.
+  An execution-owned caller of `open_consumed_setup/5` supplies a preparation
+  the execution owner already consumed and a lifecycle owner that receives the
+  session, so a failed open closes neither; the execution owner remains
+  responsible for both.
   """
 
   alias PtcRunner.Kernel.BoundedWorker
@@ -40,6 +47,21 @@ defmodule PtcRunner.Kernel.ProviderActiveSession do
         %InstallationCatalog{} = catalog,
         %ProviderRuntimeServices{} = services
       ) do
+    with {:ok, session} <- open_setup(prepared, catalog, services) do
+      begin_run(session, prepared, catalog)
+    end
+  end
+
+  def open(_prepared, _catalog, _services), do: {:error, internal_diagnostic(false)}
+
+  @doc false
+  @spec open_setup(PreparedRun.t(), InstallationCatalog.t(), ProviderRuntimeServices.t()) ::
+          {:ok, ProviderSession.t()} | {:error, CommandDiagnostic.t()}
+  def open_setup(
+        %PreparedRun{} = prepared,
+        %InstallationCatalog{} = catalog,
+        %ProviderRuntimeServices{} = services
+      ) do
     with true <- PreparedRun.valid?(prepared),
          true <- InstallationCatalog.valid?(catalog),
          true <- prepared.catalog_attestation == catalog.attestation,
@@ -52,44 +74,140 @@ defmodule PtcRunner.Kernel.ProviderActiveSession do
     end
   end
 
-  def open(_prepared, _catalog, _services), do: {:error, internal_diagnostic(false)}
+  def open_setup(_prepared, _catalog, _services), do: {:error, internal_diagnostic(false)}
+
+  @doc false
+  @spec open_consumed_setup(
+          PreparedRun.t(),
+          InstallationCatalog.t(),
+          ProviderRuntimeServices.t(),
+          pid(),
+          (ProviderSession.t() -> :ok | {:error, term()})
+        ) :: {:ok, ProviderSession.t()} | {:error, CommandDiagnostic.t()}
+  def open_consumed_setup(
+        %PreparedRun{} = prepared,
+        %InstallationCatalog{} = catalog,
+        %ProviderRuntimeServices{} = services,
+        lifecycle_owner,
+        handoff
+      )
+      when is_pid(lifecycle_owner) and is_function(handoff, 1) do
+    with true <- PreparedRun.consumed_valid?(prepared),
+         true <- InstallationCatalog.valid?(catalog),
+         true <- prepared.catalog_attestation == catalog.attestation,
+         true <- ProviderRuntimeServices.bound_to?(services, catalog.runtime_binding),
+         true <- prepared.provider_declarations != [] do
+      open_consumed(prepared, catalog, services, {:owned, lifecycle_owner, handoff})
+    else
+      _invalid -> {:error, internal_diagnostic(false)}
+    end
+  end
+
+  def open_consumed_setup(
+        _prepared,
+        _catalog,
+        _services,
+        _lifecycle_owner,
+        _handoff
+      ),
+      do: {:error, internal_diagnostic(false)}
+
+  @doc false
+  @spec begin_run(ProviderSession.t(), PreparedRun.t(), InstallationCatalog.t()) ::
+          {:ok, ProviderSession.t()} | {:error, CommandDiagnostic.t()}
+  def begin_run(
+        session,
+        %PreparedRun{} = prepared,
+        %InstallationCatalog{} = catalog
+      ) do
+    if PreparedRun.active_valid?(prepared) and InstallationCatalog.valid?(catalog) and
+         prepared.catalog_attestation == catalog.attestation and
+         ProviderSession.bound_to_operation?(session, prepared.attestation) do
+      do_begin_run(session, prepared, catalog, :frontend_owned)
+    else
+      reject_begin_run(session, prepared, :frontend_owned)
+    end
+  end
+
+  def begin_run(_session, _prepared, _catalog), do: {:error, internal_diagnostic(false)}
+
+  @doc false
+  @spec begin_owned_run(ProviderSession.t(), PreparedRun.t(), InstallationCatalog.t()) ::
+          {:ok, ProviderSession.t()} | {:error, CommandDiagnostic.t()}
+  def begin_owned_run(session, %PreparedRun{} = prepared, %InstallationCatalog{} = catalog) do
+    if PreparedRun.active_valid?(prepared) and InstallationCatalog.valid?(catalog) and
+         prepared.catalog_attestation == catalog.attestation and
+         ProviderSession.bound_to_operation?(session, prepared.attestation) do
+      do_begin_run(session, prepared, catalog, :execution_owned)
+    else
+      reject_begin_run(session, prepared, :execution_owned)
+    end
+  end
+
+  def begin_owned_run(_session, _prepared, _catalog), do: {:error, internal_diagnostic(false)}
 
   defp open_consumed(prepared, catalog, services) do
+    open_consumed(prepared, catalog, services, :frontend_owned)
+  end
+
+  defp open_consumed(prepared, catalog, services, ownership) do
     case ProviderActivity.mark(prepared.provider_activity) do
-      :ok -> open_marked(prepared, catalog, services)
-      {:error, _reason} -> fail_without_session(prepared, internal_diagnostic(false))
+      :ok -> open_marked(prepared, catalog, services, ownership)
+      {:error, _reason} -> fail_without_session(prepared, internal_diagnostic(false), ownership)
     end
   end
 
-  defp open_marked(prepared, catalog, services) do
-    case ProviderSession.start(prepared.request.package.limits) do
-      {:ok, session} -> admit_open_session(session, prepared, catalog, services)
-      {:error, _reason} -> fail_without_session(prepared, internal_diagnostic(true))
+  defp open_marked(prepared, catalog, services, ownership) do
+    case start_session(prepared, ownership) do
+      {:ok, session} -> admit_open_session(session, prepared, catalog, services, ownership)
+      {:error, _reason} -> fail_without_session(prepared, internal_diagnostic(true), ownership)
     end
   end
 
-  defp admit_open_session(session, prepared, catalog, services) do
+  defp start_session(prepared, :frontend_owned),
+    do: ProviderSession.start_active(prepared.request.package.limits, prepared.attestation)
+
+  defp start_session(prepared, {:owned, lifecycle_owner, handoff}),
+    do:
+      ProviderSession.start_active_owned(
+        prepared.request.package.limits,
+        prepared.attestation,
+        lifecycle_owner,
+        handoff
+      )
+
+  defp admit_open_session(session, prepared, catalog, services, ownership) do
     case ProviderApplicationGate.admit(prepared, catalog, services) do
       :ok ->
-        validate_open_session(session, prepared, catalog)
+        {:ok, session}
 
       {:error, %CommandDiagnostic{} = diagnostic} ->
-        fail_with_session(session, prepared, diagnostic)
+        fail_with_session(session, prepared, diagnostic, ownership)
     end
   end
 
-  defp validate_open_session(session, prepared, catalog) do
+  defp do_begin_run(session, prepared, catalog, ownership) do
+    case ProviderSession.begin_run(session) do
+      {:ok, session} ->
+        validate_open_session(session, prepared, catalog, ownership)
+
+      {:error, _reason} ->
+        fail_after_unavailable_session(prepared, internal_diagnostic(true), ownership)
+    end
+  end
+
+  defp validate_open_session(session, prepared, catalog, ownership) do
     case validate_active_selections(session, prepared, catalog) do
       :ok ->
         {:ok, session}
 
       {:error, %CommandDiagnostic{} = diagnostic} ->
-        fail_with_session(session, prepared, diagnostic)
+        fail_with_session(session, prepared, diagnostic, ownership)
     end
   rescue
-    _exception -> fail_with_session(session, prepared, internal_diagnostic(true))
+    _exception -> fail_with_session(session, prepared, internal_diagnostic(true), ownership)
   catch
-    _kind, _reason -> fail_with_session(session, prepared, internal_diagnostic(true))
+    _kind, _reason -> fail_with_session(session, prepared, internal_diagnostic(true), ownership)
   end
 
   defp validate_active_selections(session, prepared, catalog) do
@@ -107,15 +225,24 @@ defmodule PtcRunner.Kernel.ProviderActiveSession do
 
   defp validate_selection(session, prepared, catalog, declaration) do
     case ProviderSession.open_registrar(session) do
-      {:ok, registrar} -> validate_in_scope(registrar, prepared, catalog, declaration)
-      {:error, _reason} -> {:error, internal_diagnostic(true)}
+      {:ok, registrar} ->
+        validate_in_scope(
+          registrar,
+          ProviderSession.run_deadline(session),
+          prepared,
+          catalog,
+          declaration
+        )
+
+      {:error, _reason} ->
+        {:error, internal_diagnostic(true)}
     end
   end
 
-  defp validate_in_scope(registrar, prepared, catalog, declaration) do
+  defp validate_in_scope(registrar, run_deadline, prepared, catalog, declaration) do
     result =
       case ResourceRegistrar.activate(registrar) do
-        :ok -> run_validator(registrar, prepared, catalog, declaration)
+        :ok -> run_validator(registrar, run_deadline, prepared, catalog, declaration)
         {:error, _reason} -> {:error, internal_diagnostic(true)}
       end
 
@@ -125,8 +252,12 @@ defmodule PtcRunner.Kernel.ProviderActiveSession do
     end
   end
 
-  defp run_validator(registrar, prepared, catalog, declaration) do
-    deadline = Deadline.new(prepared.request.package.limits.selection_validation_timeout_ms)
+  defp run_validator(registrar, run_deadline, prepared, catalog, declaration) do
+    deadline =
+      Deadline.earliest(
+        run_deadline,
+        Deadline.new(prepared.request.package.limits.selection_validation_timeout_ms)
+      )
 
     callback =
       catalog.implementations |> Map.fetch!(declaration.name) |> Map.fetch!(:selection_validator)
@@ -180,19 +311,40 @@ defmodule PtcRunner.Kernel.ProviderActiveSession do
     end
   end
 
-  defp fail_with_session(session, prepared, diagnostic) do
+  defp fail_with_session(session, prepared, diagnostic, ownership) do
     cleanup = ProviderSession.close(session)
-    PreparedRun.close(prepared)
+    maybe_close_prepared(prepared, ownership)
 
     if cleanup == :ok,
       do: {:error, diagnostic},
       else: {:error, cleanup_diagnostic()}
   end
 
-  defp fail_without_session(prepared, diagnostic) do
-    PreparedRun.close(prepared)
+  defp fail_without_session(prepared, diagnostic, ownership) do
+    maybe_close_prepared(prepared, ownership)
     {:error, diagnostic}
   end
+
+  defp reject_begin_run(session, prepared, ownership) do
+    diagnostic = internal_diagnostic(ProviderSession.alive?(session))
+
+    if PreparedRun.active_valid?(prepared) and
+         ProviderSession.bound_to_operation?(session, prepared.attestation) do
+      fail_with_session(session, prepared, diagnostic, ownership)
+    else
+      {:error, diagnostic}
+    end
+  end
+
+  # `ProviderSession.begin_run/1` queues token-authenticated cleanup when its
+  # bounded call becomes unavailable. Do not follow that timeout with an
+  # unbounded synchronous close against the same unavailable process.
+  defp fail_after_unavailable_session(prepared, diagnostic, ownership),
+    do: fail_without_session(prepared, diagnostic, ownership)
+
+  defp maybe_close_prepared(prepared, :frontend_owned), do: PreparedRun.close(prepared)
+  defp maybe_close_prepared(_prepared, {:owned, _lifecycle_owner, _handoff}), do: :ok
+  defp maybe_close_prepared(_prepared, :execution_owned), do: :ok
 
   defp selection_diagnostic(declaration, code) do
     occurrence = %{destination: declaration.destination, index: declaration.index}

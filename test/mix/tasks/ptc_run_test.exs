@@ -4,11 +4,35 @@ defmodule Mix.Tasks.Ptc.RunTest do
   import ExUnit.CaptureIO
 
   alias Mix.Tasks.Ptc.Run
+  alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.SafeMetadata
   alias PtcRunner.Kernel.TraceLog
 
   @root Path.expand("../../..", __DIR__)
   @stdio_fixture Path.expand("../../support/mcp_stdio_source_fixture.sh", __DIR__)
+
+  test "OAuth setup and each requested target use their exact independent deadlines" do
+    declarations = [
+      %{name: "first", config: %{"timeout_ms" => 5_000}},
+      %{name: "plain", config: %{"timeout_ms" => 1}},
+      %{name: "first", config: %{"timeout_ms" => 2_000}},
+      %{name: "second", config: %{"timeout_ms" => 3_000}}
+    ]
+
+    authorities = %{
+      "first" => %{authorization_timeout_ms: 7_000},
+      "plain" => nil,
+      "second" => %{authorization_timeout_ms: 4_000}
+    }
+
+    setup = Run.oauth_setup_deadline(declarations, authorities, ["second", "first"], 1_000)
+    first = Run.oauth_target_deadline("first", declarations, authorities, 10_000)
+    second = Run.oauth_target_deadline("second", declarations, authorities, 20_000)
+
+    assert Deadline.expires_at(setup) == 3_000
+    assert Deadline.expires_at(first) == 12_000
+    assert Deadline.expires_at(second) == 23_000
+  end
 
   @tag :tmp_dir
   test "runs the shared manifest path and accepts a confined mission override", %{tmp_dir: dir} do
@@ -38,6 +62,22 @@ defmodule Mix.Tasks.Ptc.RunTest do
       end)
 
     assert %{"value" => 42} = Jason.decode!(output)
+  end
+
+  @tag :tmp_dir
+  test "renders shared closed diagnostics for host acquisition failures", %{tmp_dir: dir} do
+    manifest_path = write_manifest(dir, %{"value" => 1})
+    missing_host = Path.join(dir, "missing-host.json")
+    Mix.Task.reenable("ptc.run")
+
+    error =
+      assert_raise Mix.Error, fn ->
+        Run.run([manifest_path, "--host-config", missing_host])
+      end
+
+    assert error.message ==
+             "ptc.run failed: host/host_unavailable: " <>
+               "the host configuration is unavailable"
   end
 
   @tag :tmp_dir
@@ -458,6 +498,48 @@ defmodule Mix.Tasks.Ptc.RunTest do
     assert output =~ "mission  history  ptc_trace_snapshot  4 operations"
     assert output =~ "accepts: normal, private_inspection"
     assert output =~ "snapshot "
+  end
+
+  @tag :tmp_dir
+  test "provider-backed one-shot runs through the execution owner", %{tmp_dir: dir} do
+    manifest_path = write_manifest(dir, %{"value" => 42})
+    trace_directory = Path.join(dir, "traces")
+    File.mkdir_p!(trace_directory)
+
+    capture_io(fn ->
+      Mix.Task.reenable("ptc.run")
+      Run.run([manifest_path, "--trace", Path.join(trace_directory, "seed.jsonl")])
+    end)
+
+    manifest =
+      manifest_path
+      |> File.read!()
+      |> Jason.decode!()
+      |> Map.put("providers", %{"mission" => [%{"name" => "history"}]})
+
+    File.write!(manifest_path, Jason.encode!(manifest))
+
+    host = %{
+      "install" => %{
+        "history" => %{
+          "source" => "ptc_trace_snapshot",
+          "installation_revision" => "trace-run-v1",
+          "directory" => "traces",
+          "ceilings" => %{"max_result_bytes" => 250_000}
+        }
+      }
+    }
+
+    host_path = Path.join(dir, "host.json")
+    File.write!(host_path, Jason.encode!(host))
+
+    output =
+      capture_io(fn ->
+        Mix.Task.reenable("ptc.run")
+        Run.run([manifest_path, "--host-config", host_path])
+      end)
+
+    assert %{"value" => 42} = Jason.decode!(output)
   end
 
   @tag :tmp_dir

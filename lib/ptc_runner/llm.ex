@@ -59,8 +59,9 @@ defmodule PtcRunner.LLM do
   (e.g. a `:persistent_term`/ETS catalog) so the first per-request provider
   worker does not pay a large one-time load inside its bounded heap.
 
-  Optional. Invoked once at capability-build time in the unbounded builder
-  process; implementations must be idempotent.
+  Optional. Invoked during selected provider-application admission and again at
+  capability-build time for direct embedding paths; implementations must be
+  idempotent.
   """
   @callback ensure_ready() :: :ok
 
@@ -94,10 +95,9 @@ defmodule PtcRunner.LLM do
   def callback(model, opts \\ []) do
     {adapter_override, opts} = Keyword.pop(opts, :adapter)
     adapter = adapter_override || adapter!()
-    # Warm adapter-owned model metadata (e.g. the llm_db catalog) here, in the
-    # unbounded builder process, so the first bounded provider worker does not
-    # trigger a large one-time decode and exceed its heap ceiling. No-op for
-    # adapters that do not implement it.
+    # Provider-application admission normally warms this before the run clock.
+    # Keep the idempotent call here for direct embedding paths that construct a
+    # capability without that gate.
     if function_exported?(adapter, :ensure_ready, 0), do: adapter.ensure_ready()
     model = PtcRunner.LLM.Registry.resolve!(model)
     merged_opts = Map.new(opts)

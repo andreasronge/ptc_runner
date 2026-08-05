@@ -28,6 +28,13 @@ defmodule PtcRunner.Kernel.DeadlineTest do
     assert Deadline.expired?(deadline, 111)
   end
 
+  test "constructs an exact existing cutoff" do
+    deadline = Deadline.from_expires_at(110)
+
+    assert Deadline.expires_at(deadline) == 110
+    assert Deadline.remaining(deadline, 99) == 11
+  end
+
   test "earliest preserves an existing deadline and never extends it" do
     anchor_ms = System.monotonic_time(:millisecond)
     first = Deadline.new(100, anchor_ms)

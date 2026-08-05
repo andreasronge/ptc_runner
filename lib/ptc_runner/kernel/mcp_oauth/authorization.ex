@@ -10,6 +10,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.Authorization do
   MCP execution.
   """
 
+  alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.MCPOAuth.Authority
   alias PtcRunner.Kernel.MCPOAuth.Binding
   alias PtcRunner.Kernel.MCPOAuth.Context
@@ -35,16 +36,17 @@ defmodule PtcRunner.Kernel.MCPOAuth.Authorization do
          redirect_uri when is_binary(redirect_uri) <- Keyword.get(opts, :redirect_uri),
          :ok <- validate_redirect(authority, redirect_uri),
          {:ok, freshness_anchor} <-
-           Store.time_anchor(context.store, remaining(deadline_ms)),
+           Store.time_anchor(context.store, Deadline.from_expires_at(deadline_ms)),
          {:ok, binding} <-
            Discovery.discover(
              authority,
              discovery_options(opts, deadline_ms, redirect_uri)
            ),
          binding = Map.put(binding, :freshness_anchor, freshness_anchor),
-         {:ok, current_grant} <- Store.load_grant(context.store, key, remaining(deadline_ms)),
+         {:ok, current_grant} <-
+           Store.load_grant(context.store, key, Deadline.from_expires_at(deadline_ms)),
          {:ok, requirement} <-
-           Store.load_requirement(context.store, key, remaining(deadline_ms)),
+           Store.load_requirement(context.store, key, Deadline.from_expires_at(deadline_ms)),
          {:ok, requested_scopes, required_scopes, requirement_version} <-
            flow_scopes(binding, current_grant, requirement, authority),
          material = Primitives.new_flow(),
@@ -82,7 +84,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.Authorization do
              key,
              flow,
              remaining(deadline_ms),
-             remaining(deadline_ms)
+             Deadline.from_expires_at(deadline_ms)
            ) do
       {:ok,
        %PendingAuthorization{
@@ -142,7 +144,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.Authorization do
         context.store,
         pending.key,
         pending.flow_id,
-        max(remaining(pending.deadline_ms), 1)
+        Deadline.new(max(remaining(pending.deadline_ms), 1))
       )
     else
       {:error, :invalid_authorization_context}
@@ -164,7 +166,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.Authorization do
            pending.flow_id,
            state,
            Map.get(callback, :issuer),
-           remaining(pending.deadline_ms)
+           Deadline.from_expires_at(pending.deadline_ms)
          ) do
       :ok -> {:error, :authorization_denied}
       {:error, reason} -> {:error, reason}
@@ -178,7 +180,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.Authorization do
            pending.flow_id,
            state,
            Map.get(callback, :issuer),
-           remaining(pending.deadline_ms)
+           Deadline.from_expires_at(pending.deadline_ms)
          ) do
       {:ok, flow} ->
         complete_consumed_callback(context, pending, flow, code, opts)
@@ -194,7 +196,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.Authorization do
            pending.key,
            :authorization,
            remaining(pending.deadline_ms),
-           remaining(pending.deadline_ms)
+           Deadline.from_expires_at(pending.deadline_ms)
          ) do
       {:ok, lease} ->
         case current_binding(context, flow, pending, opts) do
@@ -215,7 +217,10 @@ defmodule PtcRunner.Kernel.MCPOAuth.Authorization do
   defp complete_with_lease(context, pending, flow, binding, lease, code, opts) do
     with true <- lease.starting_generation == flow.starting_generation,
          {:ok, anchor} <-
-           Store.time_anchor(context.store, remaining(pending.deadline_ms)) do
+           Store.time_anchor(
+             context.store,
+             Deadline.from_expires_at(pending.deadline_ms)
+           ) do
       token_result =
         TokenClient.exchange_code(
           pending.authority,
@@ -268,7 +273,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.Authorization do
              stored_grant,
              grant.ttl_ms,
              anchor,
-             remaining(pending.deadline_ms)
+             Deadline.from_expires_at(pending.deadline_ms)
            ) do
         {:ok, _grant} = success ->
           success
@@ -280,7 +285,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.Authorization do
               pending.key,
               lease.fence,
               :possibly_dispatched,
-              max(remaining(pending.deadline_ms), 1)
+              Deadline.new(max(remaining(pending.deadline_ms), 1))
             )
 
           {:error, :authorization_failed}
@@ -292,7 +297,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.Authorization do
           pending.key,
           lease.fence,
           :possibly_dispatched,
-          max(remaining(pending.deadline_ms), 1)
+          Deadline.new(max(remaining(pending.deadline_ms), 1))
         )
 
       {:error, :mcp_authorization_required}
@@ -316,7 +321,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.Authorization do
         pending.key,
         lease.fence,
         outcome,
-        max(remaining(pending.deadline_ms), 1)
+        Deadline.new(max(remaining(pending.deadline_ms), 1))
       )
 
     {:error, closed_token_error(reason)}
@@ -329,7 +334,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.Authorization do
         pending.key,
         lease.fence,
         :not_dispatched,
-        max(remaining(pending.deadline_ms), 1)
+        Deadline.new(max(remaining(pending.deadline_ms), 1))
       )
 
     cancel_consumed_flow(context, pending)
@@ -341,7 +346,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.Authorization do
         context.store,
         pending.key,
         pending.flow_id,
-        max(remaining(pending.deadline_ms), 1)
+        Deadline.new(max(remaining(pending.deadline_ms), 1))
       )
 
     :ok
@@ -362,7 +367,10 @@ defmodule PtcRunner.Kernel.MCPOAuth.Authorization do
 
   defp current_binding(context, %{binding: old_binding}, pending, opts) do
     with {:ok, freshness_anchor} <-
-           Store.time_anchor(context.store, remaining(pending.deadline_ms)),
+           Store.time_anchor(
+             context.store,
+             Deadline.from_expires_at(pending.deadline_ms)
+           ),
          {:ok, new_binding} <-
            Discovery.discover(
              pending.authority,
@@ -457,7 +465,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.Authorization do
                  context.store,
                  context.tenant_id,
                  [{authority.installation_id, authority.fingerprint}],
-                 5_000
+                 Deadline.new(5_000)
                ) do
           {:ok, Map.fetch!(claims, authority.installation_id)}
         end
@@ -510,7 +518,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.Authorization do
           pending.flow_id,
           lease.fence,
           dispatch_binding,
-          remaining(pending.deadline_ms)
+          Deadline.from_expires_at(pending.deadline_ms)
         )
       end
     end

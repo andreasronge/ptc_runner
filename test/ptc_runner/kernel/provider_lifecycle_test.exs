@@ -337,7 +337,7 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
   end
 
   @tag :tmp_dir
-  test "acquisition failure closes already acquired providers", %{tmp_dir: dir} do
+  test "acquisition failure closes exactly the acquired prefix in reverse order", %{tmp_dir: dir} do
     parent = self()
     File.write!(Path.join(dir, "workflow.clj"), "(ns app) (defn run [x] (return x))")
 
@@ -371,6 +371,7 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
     {:ok, registry} =
       ProviderRegistry.new(%{
         "staged" => ProviderRegistry.staged(staged),
+        "staged-second" => ProviderRegistry.staged(staged),
         "staged-bad" => ProviderRegistry.staged(staged)
       })
 
@@ -379,6 +380,7 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
         dir,
         [
           provider("staged", %{"id" => "first"}),
+          provider("staged-second", %{"id" => "second"}),
           provider("staged-bad", %{"id" => "bad"})
         ],
         []
@@ -386,7 +388,10 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
 
     {:ok, request} = ApplicationPackage.request_directory(manifest, result_projection: :native)
     assert {:error, :fixture_acquisition_failed} = RunBuilder.build(request, registry)
-    assert_receive {:closed_after_acquisition_failure, "first"}
+    assert_receive {:closed_after_acquisition_failure, first_closed}
+    assert_receive {:closed_after_acquisition_failure, second_closed}
+    assert [first_closed, second_closed] == ["second", "first"]
+    refute_receive {:closed_after_acquisition_failure, _id}
   end
 
   @tag :tmp_dir
@@ -490,7 +495,6 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
     {:ok, built} = RunBuilder.load_and_build(path, registry)
 
     assert built.config.event_sink.policy == :private
-    assert RunBuilder.result_class(built.config.event_sink) == :private
     assert :ok = RunBuilder.close(built)
   end
 
@@ -765,6 +769,60 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
 
     for index <- 0..3 do
       assert_receive {:cleanup_attempted, ^index}
+    end
+  end
+
+  @tag :tmp_dir
+  test "invalid split execution builds close every live resource and preserve cleanup failure", %{
+    tmp_dir: directory
+  } do
+    parent = self()
+
+    invalid_builds = [
+      fn config -> %{config: config} end,
+      fn config ->
+        %{entry_source: "(return 1)", config: config, publication_authority: :invalid}
+      end
+    ]
+
+    for {invalid_build, index} <- Enum.with_index(invalid_builds) do
+      {:ok, workflow} = WorkflowEnvironment.new([])
+      {:ok, mission} = MissionEnvironment.new([])
+      limits = limits()
+      {:ok, sink} = EventSink.start(:normal, limits)
+
+      {:ok, inspection} =
+        InspectionSink.start(
+          run_id: "invalid-built-#{index}",
+          trace_id: "invalid-built-#{index}"
+        )
+
+      close = fn ->
+        send(parent, {:invalid_built_resource_closed, index})
+        {:error, :fixture_cleanup_failed}
+      end
+
+      session = ProviderSessionFixture.start([close], limits)
+
+      {:ok, config} =
+        RunConfig.new(
+          workflow_environment: workflow,
+          mission_environment: mission,
+          input: %{},
+          limits: limits,
+          event_sink: sink,
+          inspection_sink: inspection,
+          inspection_path: Path.join(directory, "invalid-#{index}.inspection.jsonl"),
+          provider_session: session
+        )
+
+      assert {:error, :provider_cleanup_failed} =
+               config |> invalid_build.() |> RunBuilder.execute_built()
+
+      assert_receive {:invalid_built_resource_closed, ^index}
+      refute Process.alive?(session.pid)
+      refute Process.alive?(sink.pid)
+      refute Process.alive?(inspection.pid)
     end
   end
 

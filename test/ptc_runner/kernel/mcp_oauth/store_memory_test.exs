@@ -1,11 +1,13 @@
 defmodule PtcRunner.Kernel.MCPOAuth.StoreMemoryTest do
   use ExUnit.Case, async: true
 
+  alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.MCPOAuth.Authority
   alias PtcRunner.Kernel.MCPOAuth.Context
   alias PtcRunner.Kernel.MCPOAuth.Primitives
   alias PtcRunner.Kernel.MCPOAuth.Store
   alias PtcRunner.Kernel.MCPOAuth.Store.Memory
+  alias PtcRunner.Test.MCPOAuthRecordingStore
 
   test "loads a valid external adapter before checking its callback" do
     module = PtcRunner.Test.MCPOAuthUnloadedStore
@@ -15,6 +17,41 @@ defmodule PtcRunner.Kernel.MCPOAuth.StoreMemoryTest do
 
     assert {:ok, {^module, :adapter_state}} = Store.new(module, :adapter_state)
     assert Code.loaded?(module)
+  end
+
+  test "accepts an already anchored caller deadline", context do
+    assert {:ok, _anchor} = Store.time_anchor(context.store, Deadline.new(1_000))
+  end
+
+  test "rejects a relative integer timeout", context do
+    assert {:error, :invalid_store} = Store.time_anchor(context.store, 1_000)
+  end
+
+  test "context construction forwards the caller's exact deadline", context do
+    parent = self()
+    deadline = Deadline.new(1_000)
+
+    interceptor = fn
+      {:claim_principal, "tenant", "carol"}, received_deadline ->
+        send(parent, {:claim_principal_deadline, received_deadline})
+        :delegate
+
+      _operation, _deadline ->
+        :delegate
+    end
+
+    assert {:ok, store} =
+             MCPOAuthRecordingStore.wrap(context.store, self(), interceptor: interceptor)
+
+    assert {:ok, _context} =
+             Context.new(
+               tenant_id: "tenant",
+               principal_id: "carol",
+               store: store,
+               deadline: deadline
+             )
+
+    assert_receive {:claim_principal_deadline, ^deadline}
   end
 
   setup do
@@ -27,21 +64,23 @@ defmodule PtcRunner.Kernel.MCPOAuth.StoreMemoryTest do
         store,
         "tenant",
         [{authority.installation_id, authority.fingerprint}],
-        1_000
+        Deadline.new(1_000)
       )
 
     {:ok, alice} =
       Context.new(
         tenant_id: "tenant",
         principal_id: "alice",
-        store: store
+        store: store,
+        deadline: Deadline.new(1_000)
       )
 
     {:ok, bob} =
       Context.new(
         tenant_id: "tenant",
         principal_id: "bob",
-        store: store
+        store: store,
+        deadline: Deadline.new(1_000)
       )
 
     {:ok,
@@ -91,7 +130,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.StoreMemoryTest do
 
     assert {:ok, alice_grant} = seed_grant(context.store, alice_key, "alice-token")
     assert alice_grant.generation == 1
-    assert {:ok, nil} = Store.load_grant(context.store, bob_key, 1_000)
+    assert {:ok, nil} = Store.load_grant(context.store, bob_key, Deadline.new(1_000))
 
     assert inspect(context.alice) == "#PtcRunner.MCPOAuth.Context<redacted>"
     assert inspect(alice_key) == "#PtcRunner.MCPOAuth.GrantKey<redacted>"
@@ -102,11 +141,13 @@ defmodule PtcRunner.Kernel.MCPOAuth.StoreMemoryTest do
     key = Context.grant_key(context.alice, context.authority, context.authority_epoch)
     {:ok, grant} = seed_grant(context.store, key, "access-1")
 
-    assert {:ok, lease} = Store.acquire_mutation(context.store, key, :refresh, 5_000, 1_000)
+    assert {:ok, lease} =
+             Store.acquire_mutation(context.store, key, :refresh, 5_000, Deadline.new(1_000))
+
     assert lease.starting_generation == grant.generation
 
     assert {:error, :mutation_busy} =
-             Store.acquire_mutation(context.store, key, :refresh, 5_000, 1_000)
+             Store.acquire_mutation(context.store, key, :refresh, 5_000, Deadline.new(1_000))
 
     assert :ok =
              Store.begin_mutation_dispatch(
@@ -114,7 +155,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.StoreMemoryTest do
                key,
                lease.fence,
                dispatch_binding(context.store),
-               1_000
+               Deadline.new(1_000)
              )
 
     assert :ok =
@@ -123,10 +164,10 @@ defmodule PtcRunner.Kernel.MCPOAuth.StoreMemoryTest do
                key,
                lease.fence,
                :possibly_dispatched,
-               1_000
+               Deadline.new(1_000)
              )
 
-    assert {:ok, poisoned} = Store.load_grant(context.store, key, 1_000)
+    assert {:ok, poisoned} = Store.load_grant(context.store, key, Deadline.new(1_000))
     assert poisoned.status == :refresh_indeterminate
     assert poisoned.generation == grant.generation + 1
     refute Map.has_key?(poisoned, :access_token)
@@ -140,7 +181,8 @@ defmodule PtcRunner.Kernel.MCPOAuth.StoreMemoryTest do
 
     worker =
       Task.async(fn ->
-        {:ok, lease} = Store.acquire_mutation(context.store, key, :refresh, 5_000, 1_000)
+        {:ok, lease} =
+          Store.acquire_mutation(context.store, key, :refresh, 5_000, Deadline.new(1_000))
 
         :ok =
           Store.begin_mutation_dispatch(
@@ -148,7 +190,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.StoreMemoryTest do
             key,
             lease.fence,
             dispatch_binding(context.store),
-            1_000
+            Deadline.new(1_000)
           )
 
         send(parent, {:mutation_dispatched, lease.fence})
@@ -161,12 +203,18 @@ defmodule PtcRunner.Kernel.MCPOAuth.StoreMemoryTest do
     assert_receive {:mutation_dispatched, fence}
 
     assert {:error, :stale_mutation} =
-             Store.recover_mutation(context.store, key, {:wrong, fence}, :worker_fenced, 1_000)
+             Store.recover_mutation(
+               context.store,
+               key,
+               {:wrong, fence},
+               :worker_fenced,
+               Deadline.new(1_000)
+             )
 
     _ = Task.shutdown(worker, :brutal_kill)
 
     assert_eventually(fn ->
-      case Store.load_grant(context.store, key, 1_000) do
+      case Store.load_grant(context.store, key, Deadline.new(1_000)) do
         {:ok, %{status: :refresh_indeterminate} = poisoned} ->
           assert poisoned.generation == grant.generation + 1
           refute Map.has_key?(poisoned, :access_token)
@@ -179,7 +227,13 @@ defmodule PtcRunner.Kernel.MCPOAuth.StoreMemoryTest do
     end)
 
     assert {:ok, _lease} =
-             Store.acquire_mutation(context.store, key, :authorization, 1_000, 1_000)
+             Store.acquire_mutation(
+               context.store,
+               key,
+               :authorization,
+               1_000,
+               Deadline.new(1_000)
+             )
   end
 
   test "dispatch admission catches stale and rejected generations before network", context do
@@ -187,21 +241,21 @@ defmodule PtcRunner.Kernel.MCPOAuth.StoreMemoryTest do
     {:ok, grant} = seed_grant(context.store, key, "access-1")
 
     assert {:error, :stale_before_dispatch} =
-             Store.admit_mcp(context.store, key, grant.generation - 1, 1_000, 1_000)
+             Store.admit_mcp(context.store, key, grant.generation - 1, 1_000, Deadline.new(1_000))
 
     assert :ok =
-             Store.mark_access_rejected(context.store, key, grant.generation, 1_000)
+             Store.mark_access_rejected(context.store, key, grant.generation, Deadline.new(1_000))
 
     assert {:error, :rejected_before_dispatch} =
-             Store.admit_mcp(context.store, key, grant.generation, 1_000, 1_000)
+             Store.admit_mcp(context.store, key, grant.generation, 1_000, Deadline.new(1_000))
 
     assert {:ok, refreshed} = replace_grant(context.store, key, "access-2")
     assert refreshed.generation == grant.generation + 1
 
     assert {:ok, admission} =
-             Store.admit_mcp(context.store, key, refreshed.generation, 1_000, 1_000)
+             Store.admit_mcp(context.store, key, refreshed.generation, 1_000, Deadline.new(1_000))
 
-    assert :ok = Store.release_mcp(context.store, admission, 1_000)
+    assert :ok = Store.release_mcp(context.store, admission, Deadline.new(1_000))
   end
 
   test "dispatch admission atomically refuses a known-insufficient grant", context do
@@ -215,11 +269,11 @@ defmodule PtcRunner.Kernel.MCPOAuth.StoreMemoryTest do
                grant.generation,
                MapSet.new(["write"]),
                5_000,
-               1_000
+               Deadline.new(1_000)
              )
 
     assert {:error, :authorization_required} =
-             Store.admit_mcp(context.store, key, grant.generation, 1_000, 1_000)
+             Store.admit_mcp(context.store, key, grant.generation, 1_000, Deadline.new(1_000))
   end
 
   test "an exact-generation challenge overrides nominal granted scopes", context do
@@ -233,11 +287,11 @@ defmodule PtcRunner.Kernel.MCPOAuth.StoreMemoryTest do
                grant.generation,
                MapSet.new(["read"]),
                5_000,
-               1_000
+               Deadline.new(1_000)
              )
 
     assert {:error, :authorization_required} =
-             Store.admit_mcp(context.store, key, grant.generation, 1_000, 1_000)
+             Store.admit_mcp(context.store, key, grant.generation, 1_000, Deadline.new(1_000))
   end
 
   test "a delayed challenge blocks a newer grant that still lacks its scopes", context do
@@ -252,11 +306,11 @@ defmodule PtcRunner.Kernel.MCPOAuth.StoreMemoryTest do
                old.generation,
                MapSet.new(["write"]),
                5_000,
-               1_000
+               Deadline.new(1_000)
              )
 
     assert {:error, :authorization_required} =
-             Store.admit_mcp(context.store, key, current.generation, 1_000, 1_000)
+             Store.admit_mcp(context.store, key, current.generation, 1_000, Deadline.new(1_000))
   end
 
   test "a newer grant clears a delayed challenge only when it covers every scope", context do
@@ -278,21 +332,23 @@ defmodule PtcRunner.Kernel.MCPOAuth.StoreMemoryTest do
                old.generation,
                MapSet.new(["write"]),
                5_000,
-               1_000
+               Deadline.new(1_000)
              )
 
-    assert {:ok, nil} = Store.load_requirement(context.store, key, 1_000)
+    assert {:ok, nil} = Store.load_requirement(context.store, key, Deadline.new(1_000))
 
     assert {:ok, admission} =
-             Store.admit_mcp(context.store, key, current.generation, 1_000, 1_000)
+             Store.admit_mcp(context.store, key, current.generation, 1_000, Deadline.new(1_000))
 
-    assert :ok = Store.release_mcp(context.store, admission, 1_000)
+    assert :ok = Store.release_mcp(context.store, admission, Deadline.new(1_000))
   end
 
   test "a delayed challenge survives concurrent poisoning of its grant", context do
     key = Context.grant_key(context.alice, context.authority, context.authority_epoch)
     {:ok, old} = seed_grant(context.store, key, "access-1")
-    {:ok, lease} = Store.acquire_mutation(context.store, key, :refresh, 5_000, 1_000)
+
+    {:ok, lease} =
+      Store.acquire_mutation(context.store, key, :refresh, 5_000, Deadline.new(1_000))
 
     assert :ok =
              Store.begin_mutation_dispatch(
@@ -300,7 +356,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.StoreMemoryTest do
                key,
                lease.fence,
                dispatch_binding(context.store),
-               1_000
+               Deadline.new(1_000)
              )
 
     assert :ok =
@@ -309,11 +365,11 @@ defmodule PtcRunner.Kernel.MCPOAuth.StoreMemoryTest do
                key,
                lease.fence,
                :possibly_dispatched,
-               1_000
+               Deadline.new(1_000)
              )
 
     assert {:ok, %{status: :refresh_indeterminate, generation: poisoned_generation}} =
-             Store.load_grant(context.store, key, 1_000)
+             Store.load_grant(context.store, key, Deadline.new(1_000))
 
     assert poisoned_generation > old.generation
 
@@ -324,11 +380,11 @@ defmodule PtcRunner.Kernel.MCPOAuth.StoreMemoryTest do
                old.generation,
                MapSet.new(["write"]),
                5_000,
-               1_000
+               Deadline.new(1_000)
              )
 
     assert {:ok, %{scopes: scopes, source_generation: source_generation}} =
-             Store.load_requirement(context.store, key, 1_000)
+             Store.load_requirement(context.store, key, Deadline.new(1_000))
 
     assert scopes == MapSet.new(["write"])
     assert source_generation == old.generation
@@ -345,7 +401,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.StoreMemoryTest do
                grant.generation,
                MapSet.new(["expired"]),
                1,
-               1_000
+               Deadline.new(1_000)
              )
 
     wait_until_after(System.monotonic_time(:millisecond) + 2)
@@ -357,11 +413,14 @@ defmodule PtcRunner.Kernel.MCPOAuth.StoreMemoryTest do
                grant.generation,
                MapSet.new(["current"]),
                5_000,
-               1_000
+               Deadline.new(1_000)
              )
 
     assert second_version > first_version
-    assert {:ok, %{scopes: scopes}} = Store.load_requirement(context.store, key, 1_000)
+
+    assert {:ok, %{scopes: scopes}} =
+             Store.load_requirement(context.store, key, Deadline.new(1_000))
+
     assert scopes == MapSet.new(["current"])
   end
 
@@ -372,7 +431,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.StoreMemoryTest do
     :ok = :sys.suspend(context.memory.pid)
 
     assert {:error, :timeout} =
-             Store.admit_mcp(context.store, key, grant.generation, 1_000, 10)
+             Store.admit_mcp(context.store, key, grant.generation, 1_000, Deadline.new(10))
 
     :ok = :sys.resume(context.memory.pid)
 
@@ -386,7 +445,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.StoreMemoryTest do
           :release,
           "timeout-cleanup",
           1_000,
-          1_000
+          Deadline.new(1_000)
         )
 
       match?(
@@ -395,10 +454,38 @@ defmodule PtcRunner.Kernel.MCPOAuth.StoreMemoryTest do
           context.store,
           retirement.intent_id,
           retirement.coordinator,
-          1_000
+          Deadline.new(1_000)
         )
       )
     end)
+  end
+
+  test "a mutation that expires in the mailbox does not commit", context do
+    :ok = :sys.suspend(context.memory.pid)
+
+    assert {:error, :timeout} =
+             Store.claim_authorities(
+               context.store,
+               "tenant",
+               [{"queued-installation", "v1:queued"}],
+               Deadline.new(10)
+             )
+
+    :ok = :sys.resume(context.memory.pid)
+
+    # This call is sent by the same process, so its reply proves the expired
+    # mutation ahead of it in the mailbox has been handled.
+    assert {:ok, _anchor} = Store.time_anchor(context.store, Deadline.new(1_000))
+
+    assert {:ok, claims} =
+             Store.claim_authorities(
+               context.store,
+               "tenant",
+               [{"queued-installation", "v1:replacement"}],
+               Deadline.new(1_000)
+             )
+
+    assert Map.has_key?(claims, "queued-installation")
   end
 
   test "callback state is one-time and cancellation races atomically with code dispatch",
@@ -406,7 +493,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.StoreMemoryTest do
     key = Context.grant_key(context.alice, context.authority, context.authority_epoch)
     flow = flow(context.store)
 
-    assert {:ok, pending} = Store.begin_flow(context.store, key, flow, 5_000, 1_000)
+    assert {:ok, pending} = Store.begin_flow(context.store, key, flow, 5_000, Deadline.new(1_000))
 
     assert {:ok, consumed} =
              Store.consume_callback(
@@ -415,7 +502,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.StoreMemoryTest do
                pending.id,
                flow.state,
                nil,
-               1_000
+               Deadline.new(1_000)
              )
 
     assert consumed.verifier == flow.verifier
@@ -427,19 +514,32 @@ defmodule PtcRunner.Kernel.MCPOAuth.StoreMemoryTest do
                pending.id,
                flow.state,
                nil,
-               1_000
+               Deadline.new(1_000)
              )
 
     assert {:ok, lease} =
-             Store.acquire_mutation(context.store, key, :authorization, 5_000, 1_000)
+             Store.acquire_mutation(
+               context.store,
+               key,
+               :authorization,
+               5_000,
+               Deadline.new(1_000)
+             )
 
-    assert :ok = Store.cancel_flow(context.store, key, pending.id, 1_000)
+    assert :ok = Store.cancel_flow(context.store, key, pending.id, Deadline.new(1_000))
 
     assert {:ok, _new_lease} =
-             Store.acquire_mutation(context.store, key, :refresh, 5_000, 1_000)
+             Store.acquire_mutation(context.store, key, :refresh, 5_000, Deadline.new(1_000))
 
     assert {:error, :stale_flow} =
-             Store.begin_code_dispatch(context.store, key, pending.id, lease.fence, %{}, 1_000)
+             Store.begin_code_dispatch(
+               context.store,
+               key,
+               pending.id,
+               lease.fence,
+               %{},
+               Deadline.new(1_000)
+             )
   end
 
   test "cached discovery freshness cannot restart after callback delay", context do
@@ -447,7 +547,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.StoreMemoryTest do
     binding = oauth_binding(context.store, 100)
     flow = put_in(flow(context.store), [:binding], binding)
 
-    assert {:ok, pending} = Store.begin_flow(context.store, key, flow, 5_000, 1_000)
+    assert {:ok, pending} = Store.begin_flow(context.store, key, flow, 5_000, Deadline.new(1_000))
 
     assert {:ok, consumed} =
              Store.consume_callback(
@@ -456,7 +556,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.StoreMemoryTest do
                pending.id,
                flow.state,
                nil,
-               1_000
+               Deadline.new(1_000)
              )
 
     assert {:memory_binding_freshness, freshness_deadline_ms} =
@@ -465,7 +565,13 @@ defmodule PtcRunner.Kernel.MCPOAuth.StoreMemoryTest do
     wait_until_after(freshness_deadline_ms)
 
     assert {:ok, lease} =
-             Store.acquire_mutation(context.store, key, :authorization, 5_000, 1_000)
+             Store.acquire_mutation(
+               context.store,
+               key,
+               :authorization,
+               5_000,
+               Deadline.new(1_000)
+             )
 
     cached_binding =
       consumed.binding
@@ -478,13 +584,13 @@ defmodule PtcRunner.Kernel.MCPOAuth.StoreMemoryTest do
                pending.id,
                lease.fence,
                cached_binding,
-               1_000
+               Deadline.new(1_000)
              )
   end
 
   test "a complete PR, server, and CIMD binding cannot outlive its store anchor", context do
     key = Context.grant_key(context.alice, context.authority, context.authority_epoch)
-    {:ok, anchor} = Store.time_anchor(context.store, 1_000)
+    {:ok, anchor} = Store.time_anchor(context.store, Deadline.new(1_000))
     wait_until_after(elem(anchor, 1) + 1)
 
     binding =
@@ -496,12 +602,12 @@ defmodule PtcRunner.Kernel.MCPOAuth.StoreMemoryTest do
     flow = put_in(flow(context.store), [:binding], binding)
 
     assert {:error, :stale_flow} =
-             Store.begin_flow(context.store, key, flow, 5_000, 1_000)
+             Store.begin_flow(context.store, key, flow, 5_000, Deadline.new(1_000))
   end
 
   test "refresh dispatch atomically rejects an expired discovery anchor", context do
     key = Context.grant_key(context.alice, context.authority, context.authority_epoch)
-    {:ok, anchor} = Store.time_anchor(context.store, 1_000)
+    {:ok, anchor} = Store.time_anchor(context.store, Deadline.new(1_000))
 
     binding =
       context.store
@@ -510,7 +616,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.StoreMemoryTest do
       |> Map.put(:freshness_anchor_ttl_ms, 1)
 
     assert {:ok, lease} =
-             Store.acquire_mutation(context.store, key, :refresh, 5_000, 1_000)
+             Store.acquire_mutation(context.store, key, :refresh, 5_000, Deadline.new(1_000))
 
     wait_until_after(elem(anchor, 1) + 1)
 
@@ -520,7 +626,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.StoreMemoryTest do
                key,
                lease.fence,
                binding,
-               1_000
+               Deadline.new(1_000)
              )
   end
 
@@ -529,7 +635,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.StoreMemoryTest do
     {:ok, grant} = seed_grant(context.store, key, "access")
 
     {:ok, admission} =
-      Store.admit_mcp(context.store, key, grant.generation, 5_000, 1_000)
+      Store.admit_mcp(context.store, key, grant.generation, 5_000, Deadline.new(1_000))
 
     {:ok, retirement} =
       Store.begin_authority_retirement(
@@ -540,7 +646,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.StoreMemoryTest do
         :release,
         "release-1",
         5_000,
-        1_000
+        Deadline.new(1_000)
       )
 
     assert {:error, :retirement_not_drained} =
@@ -548,18 +654,18 @@ defmodule PtcRunner.Kernel.MCPOAuth.StoreMemoryTest do
                context.store,
                retirement.intent_id,
                retirement.coordinator,
-               1_000
+               Deadline.new(1_000)
              )
 
-    assert {:error, :stale_authority} = Store.load_grant(context.store, key, 1_000)
-    assert :ok = Store.release_mcp(context.store, admission, 1_000)
+    assert {:error, :stale_authority} = Store.load_grant(context.store, key, Deadline.new(1_000))
+    assert :ok = Store.release_mcp(context.store, admission, Deadline.new(1_000))
 
     assert {:ok, tombstone_epoch} =
              Store.complete_authority_retirement(
                context.store,
                retirement.intent_id,
                retirement.coordinator,
-               1_000
+               Deadline.new(1_000)
              )
 
     refute tombstone_epoch == context.authority_epoch
@@ -569,11 +675,11 @@ defmodule PtcRunner.Kernel.MCPOAuth.StoreMemoryTest do
                context.store,
                "tenant",
                [{context.authority.installation_id, context.authority.fingerprint}],
-               1_000
+               Deadline.new(1_000)
              )
 
     refute reclaimed[context.authority.installation_id] == context.authority_epoch
-    assert {:error, :stale_authority} = Store.load_grant(context.store, key, 1_000)
+    assert {:error, :stale_authority} = Store.load_grant(context.store, key, Deadline.new(1_000))
   end
 
   test "an expired retirement coordinator can be atomically taken over", context do
@@ -586,7 +692,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.StoreMemoryTest do
                :release,
                "takeover",
                1,
-               1_000
+               Deadline.new(1_000)
              )
 
     wait_until_after(System.monotonic_time(:millisecond) + 2)
@@ -600,7 +706,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.StoreMemoryTest do
                :release,
                "takeover",
                5_000,
-               1_000
+               Deadline.new(1_000)
              )
 
     assert replacement.intent_id == first.intent_id
@@ -611,7 +717,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.StoreMemoryTest do
                context.store,
                first.intent_id,
                first.coordinator,
-               1_000
+               Deadline.new(1_000)
              )
 
     assert {:ok, _epoch} =
@@ -619,7 +725,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.StoreMemoryTest do
                context.store,
                replacement.intent_id,
                replacement.coordinator,
-               1_000
+               Deadline.new(1_000)
              )
   end
 
@@ -632,7 +738,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.StoreMemoryTest do
                  {"new-installation", "v1:new"},
                  {context.authority.installation_id, "v1:collision"}
                ],
-               1_000
+               Deadline.new(1_000)
              )
 
     assert {:ok, claims} =
@@ -640,15 +746,15 @@ defmodule PtcRunner.Kernel.MCPOAuth.StoreMemoryTest do
                context.store,
                "tenant",
                [{"new-installation", "v1:new"}],
-               1_000
+               Deadline.new(1_000)
              )
 
     assert Map.has_key?(claims, "new-installation")
   end
 
   defp seed_grant(store, key, access_token, scopes \\ MapSet.new(["read"])) do
-    {:ok, anchor} = Store.time_anchor(store, 1_000)
-    {:ok, lease} = Store.acquire_mutation(store, key, :authorization, 5_000, 1_000)
+    {:ok, anchor} = Store.time_anchor(store, Deadline.new(1_000))
+    {:ok, lease} = Store.acquire_mutation(store, key, :authorization, 5_000, Deadline.new(1_000))
 
     :ok =
       Store.begin_mutation_dispatch(
@@ -656,7 +762,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.StoreMemoryTest do
         key,
         lease.fence,
         dispatch_binding(store),
-        1_000
+        Deadline.new(1_000)
       )
 
     Store.commit_grant(
@@ -673,7 +779,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.StoreMemoryTest do
       },
       60_000,
       anchor,
-      1_000
+      Deadline.new(1_000)
     )
   end
 
@@ -714,7 +820,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.StoreMemoryTest do
   end
 
   defp oauth_binding(store, freshness_ttl_ms) do
-    {:ok, anchor} = Store.time_anchor(store, 1_000)
+    {:ok, anchor} = Store.time_anchor(store, Deadline.new(1_000))
 
     %{
       protected_resource: %{
@@ -753,7 +859,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.StoreMemoryTest do
   end
 
   defp dispatch_binding(store) do
-    {:ok, anchor} = Store.time_anchor(store, 1_000)
+    {:ok, anchor} = Store.time_anchor(store, Deadline.new(1_000))
     %{freshness_anchor: anchor, freshness_anchor_ttl_ms: 5_000}
   end
 

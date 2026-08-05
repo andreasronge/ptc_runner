@@ -680,6 +680,45 @@ though no final close callback was returned.
 
 ### Slice 6: process-local OAuth and acquisition
 
+**Checkpoint B status (2026-08-04):** the branch has completed the bounded
+credential, OAuth-context, provider-acquisition, execution-outcome, publication
+separation, provider-free execution-owner, and owner-created sink commits.
+Provider-backed non-check `mix ptc.run` execution now runs on the same
+`ExecutionSessionOwner`: a subordinate authorized executor performs provider
+setup and Kernel work while the fixed lifecycle owner tracks the provider
+session, registry, OAuth memory, listener, prepared run, and sinks. Runtime
+setup crosses that boundary as a sealed `ProviderExecution`; the raw host
+configuration and authorization-URL notifier do not enter the sealed value.
+Active assembly reuses the owner's already-opened sealed sinks, and the
+replaced non-check frontend lifecycle plus `RunBuilder.run_active_with_class/4`
+have been removed. `--check` and REPL stay on their existing paths for their
+later parity cutover.
+
+The repair pass that followed added caller-death coverage at blocked provider
+setup, acquisition, OAuth interaction, and Kernel execution; owner-status,
+crash-report, and caller-failure privacy regressions; and a loopback OAuth
+fixture that drives the shipped discovery, authorization, and loopback-listener
+code over real HTTP. It also corrected the abort unwind, which closed the
+provider session second rather than last and so disagreed with the nested
+unwind `ProviderExecution` performs itself.
+
+One gate item stays structurally out of reach in process. `HostConfig` never
+enables `allow_insecure_loopback` for an OAuth authority and `HostInstallation`
+never passes it to `MCPSource.builder/1`, so a host-installed streamable-HTTP
+transport always requires HTTPS. An in-process one-shot therefore proves the
+authorization interaction, the run clock that starts only after it settles, and
+the single execution-scoped context shared by selected authorities, but stops at
+that transport rule before the bearer token reaches an authenticated MCP
+request.
+
+Command-level context handoff is therefore covered up to acquisition, and
+authenticated bearer transport is covered independently by the credential-free
+Go OAuth end-to-end test, which constructs `Context`, `TokenManager`, and
+`MCPSource` directly rather than through `ExecutionSessionOwner`. No single test
+currently spans both. Closing that seam needs an HTTPS fixture or a trusted
+remote harness; do not widen `allow_insecure_loopback` into production
+`HostConfig` to reach it from a test.
+
 - adapt the in-memory Store to absolute deadlines with the pre-dispatch and
   in-transaction expiry checks;
 - lazily construct one OAuth context per session and claim only selected
@@ -759,6 +798,38 @@ exactly `<run_ref>.jsonl` and `<run_ref>.private.jsonl`, respectively.
 
 ### Slice 9: commands and REPL parity
 
+Checkpoint B left three transitional execution paths, not two: one-shot runs
+through `ExecutionSessionOwner` and `build_active_owned/5`, `--check` opens its
+own session and calls `build_active/4`, and the REPL opens no active session at
+all and calls `load_and_build/3` with an empty registry. Behavioural drift
+between them has already produced one reachable privacy defect, so treat this
+slice as early simplification rather than work deferred behind later features.
+
+Its first item is descriptor-authoritative acquisition. `ProviderAcquisition`
+currently verifies an acquired build only against the staged callback result,
+never against the sealed descriptor, so a builder may acquire a different data
+class than its installation declares. Preparation uses that declaration for
+privacy and destination decisions, so the descriptor must be authoritative:
+validate staged preparation against it. Keep `RunBuilder`'s sink-policy
+comparison afterwards as defense in depth.
+
+- validate staged provider preparation against the sealed descriptor;
+- bound the runtime-service callbacks `InstallationCatalog.runtime_registry/4`
+  invokes. It validates the operation deadline once and then calls the sealed
+  `activation` callback, and for OAuth the context factory, synchronously. Both
+  are embedder-supplied, so a blocking one hangs past the advertised bound and a
+  late activation can still return a registry after expiry. Run them in
+  deadline-bound cancellable workers, release a late authority, and recheck
+  expiry afterwards. Shipped callbacks do not block, so this is a contract gap
+  rather than a defect reachable through the CLI;
+- decide whether `.env` loading is pre-run setup or run work.
+  `ProviderExecution.execute_ordinary/6` starts the session deadline and then
+  calls `Dotenv.load/0`, which waits on a global lock and reads the whole file
+  with no time, byte, or heap bound. `--check` has the same ordering;
+- return zero from `LoopbackListener.remaining/1` on expiry. It floors at one,
+  which makes the expired branch in `await_callback/4` unreachable and lets a
+  trickle client extend `receive_request/3` a millisecond at a time. This
+  predates Checkpoint B;
 - finish shared `help`, `version`, `validate`, `models`, `doctor`, `run`, and
   `init` rendering and dispatch;
 - route Mix one-shot and existing REPL modes through the shared preparation and

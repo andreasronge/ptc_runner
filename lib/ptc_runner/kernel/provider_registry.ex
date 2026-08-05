@@ -16,7 +16,11 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
   Trusted staged builders enforce a global preparation barrier. Every selected
   provider first performs pure selection checks, then every provider completes
   non-secret local preflight, then the registry resolves the union of declared
-  credentials once before any provider is acquired. Preparation also freezes
+  credentials once before any provider is acquired. Active command assembly
+  bounds preparation, preflight, acquisition, and credential resolution by its
+  shared run deadline; preflight releases share the provider-cleanup budget.
+  Direct embedding retains the synchronous semantics selected by its caller.
+  Preparation also freezes
   the provider's `data_class` and `accepts_data` policy so run assembly can
   reject an incompatible information flow before preflight or credentials.
   A staged provider may additionally require or provide a bounded, code-owned
@@ -64,7 +68,9 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
   provider-kind facts, as `workflow_llm?` does.
   """
 
+  alias PtcRunner.Kernel.BoundedWorker
   alias PtcRunner.Kernel.Capability
+  alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.HostInstallationAuthority
   alias PtcRunner.Kernel.JSONValue
   alias PtcRunner.Kernel.Limits
@@ -78,11 +84,14 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
     :limits,
     :installed_limits
   ]
+  @deadline_context_keys [:deadline, :deadline_ms]
 
   @enforce_keys [:builders, :credential_resolver, :installed_limits]
   defstruct @enforce_keys ++ [authority_owner: nil]
 
   @type build_context :: %{
+          optional(:deadline) => Deadline.t(),
+          optional(:deadline_ms) => integer(),
           optional(:resource_registrar) => ResourceRegistrar.t(),
           application_content_digest: binary(),
           destination: :workflow | :mission,
@@ -91,6 +100,8 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
           installed_limits: PtcRunner.Kernel.Limits.t()
         }
   @type context :: %{
+          optional(:deadline) => Deadline.t(),
+          optional(:deadline_ms) => integer(),
           optional(:resource_registrar) => ResourceRegistrar.t(),
           application_content_digest: binary(),
           destination: :workflow | :mission,
@@ -216,6 +227,33 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
   def close(%__MODULE__{authority_owner: owner}), do: HostInstallationAuthority.close(owner)
   def close(_registry), do: :ok
 
+  @doc false
+  @spec oauth_authority_epoch(t(), binary(), Deadline.t()) ::
+          {:ok, term()} | {:error, :authorization_context_required}
+  def oauth_authority_epoch(
+        %__MODULE__{builders: builders, authority_owner: %HostInstallationAuthority{} = owner},
+        name,
+        deadline
+      )
+      when is_binary(name) do
+    if Map.has_key?(builders, name) and Deadline.live?(deadline) do
+      case BoundedWorker.run(
+             fn -> HostInstallationAuthority.invoke(owner, {:oauth_authority_epoch, name}) end,
+             timeout_ms: max(Deadline.remaining(deadline), 1),
+             max_heap_words: 100_000,
+             cancel_with_caller: true
+           ) do
+        {:ok, {:ok, authority_epoch}} -> {:ok, authority_epoch}
+        _unavailable -> {:error, :authorization_context_required}
+      end
+    else
+      {:error, :authorization_context_required}
+    end
+  end
+
+  def oauth_authority_epoch(_registry, _name, _deadline),
+    do: {:error, :authorization_context_required}
+
   @spec staged((map(), context() -> {:ok, prepared()} | {:error, term()})) ::
           staged_builder()
   @doc """
@@ -237,7 +275,8 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
   Run assembly uses the individual phase functions so the barrier spans every
   selected provider. This convenience path remains useful for embedding and
   focused provider tests. It rejects registrar-backed contexts because scoped
-  acquisition requires the run builder's complete multi-provider lifecycle.
+  acquisition requires `PtcRunner.Kernel.ProviderAcquisition`'s complete
+  multi-provider lifecycle.
   """
   def build(%__MODULE__{}, _name, _config, %{resource_registrar: _registrar}),
     do: {:error, :invalid_provider_context}
@@ -303,6 +342,7 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
          context.application_content_digest =~ @application_content_digest and
          context.destination in [:workflow, :mission] and
          is_pid(context.owner) and
+         valid_context_deadline?(context) and
          valid_resource_registrar?(context) and
          match?(%Limits{}, context.limits) and
          match?(%Limits{}, context.installed_limits) do
@@ -317,9 +357,22 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
   defp valid_build_context_keys?(context) do
     keys = Enum.sort(Map.keys(context))
 
-    keys == Enum.sort(@build_context_keys) or
-      keys == Enum.sort([:resource_registrar | @build_context_keys])
+    Enum.any?(
+      [
+        @build_context_keys,
+        [:resource_registrar | @build_context_keys],
+        @deadline_context_keys ++ @build_context_keys,
+        [:resource_registrar | @deadline_context_keys ++ @build_context_keys]
+      ],
+      &(keys == Enum.sort(&1))
+    )
   end
+
+  defp valid_context_deadline?(%{deadline: deadline, deadline_ms: deadline_ms}),
+    do: Deadline.valid?(deadline) and Deadline.expires_at(deadline) == deadline_ms
+
+  defp valid_context_deadline?(context),
+    do: not Map.has_key?(context, :deadline) and not Map.has_key?(context, :deadline_ms)
 
   defp valid_resource_registrar?(%{resource_registrar: registrar, owner: owner}),
     do: ResourceRegistrar.valid?(registrar) and ResourceRegistrar.owner(registrar) == owner
@@ -366,8 +419,17 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
   def acquire(_preflighted, _credentials), do: {:error, :provider_dependency_unavailable}
 
   @doc false
-  def acquire(
-        %{acquire: acquire, requires: requires, provides: provides} = preflighted,
+  def acquire(preflighted, credentials, services) do
+    acquire_unreleased(preflighted, credentials, services)
+  after
+    release_preflight(preflighted)
+  end
+
+  @doc false
+  @spec acquire_unreleased(preflighted(), credential_values(), acquisition_services()) ::
+          {:ok, built_provider()} | {:error, term()}
+  def acquire_unreleased(
+        %{acquire: acquire, requires: requires, provides: provides},
         credentials,
         services
       )
@@ -379,12 +441,10 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
     else
       {:error, :provider_dependency_unavailable}
     end
-  after
-    release_preflight(preflighted)
   end
 
-  def acquire(
-        %{acquire: acquire, requires: [], provides: provides} = preflighted,
+  def acquire_unreleased(
+        %{acquire: acquire, requires: [], provides: provides},
         credentials,
         %{}
       )
@@ -392,11 +452,9 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
     acquire
     |> invoke_with(credentials, :provider_acquisition_failed)
     |> normalize_build(provides)
-  after
-    release_preflight(preflighted)
   end
 
-  def acquire(_preflighted, _credentials, _services),
+  def acquire_unreleased(_preflighted, _credentials, _services),
     do: {:error, :invalid_provider_preflight}
 
   @doc false

@@ -12,17 +12,17 @@ defmodule PtcRunner.Test.MCPOAuthRecordingStore do
       delegate: {module, adapter_state},
       observer: observer,
       expire_callback?: Keyword.get(opts, :expire_callback?, false),
-      interceptor: Keyword.get(opts, :interceptor, fn _operation, _timeout -> :delegate end)
+      interceptor: Keyword.get(opts, :interceptor, fn _operation, _deadline -> :delegate end)
     })
   end
 
   @impl Store
-  def transact(state, operation, timeout) do
+  def transact(state, operation, deadline) do
     result =
-      case state.interceptor.(operation, timeout) do
+      case state.interceptor.(operation, deadline) do
         :delegate ->
           {module, adapter_state} = state.delegate
-          module.transact(adapter_state, operation, timeout)
+          module.transact(adapter_state, operation, deadline)
 
         {:return, result} ->
           result

@@ -15,6 +15,7 @@ defmodule PtcRunner.Kernel.MCPOAuthRemoteE2ETest do
   @moduletag timeout: 120_000
 
   alias PtcRunner.Kernel
+  alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.MCPHTTPAdapter
@@ -36,14 +37,21 @@ defmodule PtcRunner.Kernel.MCPOAuthRemoteE2ETest do
 
     {:ok, memory} = Memory.start_link(owner: self())
     {:ok, store} = Memory.store(memory)
-    {:ok, context} = Context.new(tenant_id: "e2e", principal_id: "operator", store: store)
+
+    {:ok, context} =
+      Context.new(
+        tenant_id: "e2e",
+        principal_id: "operator",
+        store: store,
+        deadline: Deadline.new(1_000)
+      )
 
     {:ok, claims} =
       Store.claim_authorities(
         store,
         context.tenant_id,
         [{authority.installation_id, authority.fingerprint}],
-        1_000
+        Deadline.new(1_000)
       )
 
     authority_epoch = claims[authority.installation_id]

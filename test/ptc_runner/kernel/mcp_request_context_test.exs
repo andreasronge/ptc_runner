@@ -1,6 +1,7 @@
 defmodule PtcRunner.Kernel.MCPRequestContextTest do
   use ExUnit.Case, async: true
 
+  alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.MCPOAuth.Authority
   alias PtcRunner.Kernel.MCPOAuth.Context
@@ -78,8 +79,8 @@ defmodule PtcRunner.Kernel.MCPRequestContextTest do
     parent = self()
 
     interceptor = fn
-      {:release_mcp, _admission}, timeout ->
-        send(parent, {:release_timeout, timeout})
+      {:release_mcp, _admission}, deadline ->
+        send(parent, {:release_deadline, deadline})
         :delegate
 
       _operation, _timeout ->
@@ -106,8 +107,8 @@ defmodule PtcRunner.Kernel.MCPRequestContextTest do
     end
 
     assert :ok = MCPRequestContext.finish_request(context)
-    assert_receive {:release_timeout, timeout}
-    assert timeout > 4_000
+    assert_receive {:release_deadline, deadline}
+    assert Deadline.remaining(deadline) > 4_000
     assert :ok = MCPRequestContext.close(context)
   end
 
@@ -563,20 +564,29 @@ defmodule PtcRunner.Kernel.MCPRequestContextTest do
 
     {:ok, memory} = Memory.start_link(owner: self())
     {:ok, store} = Memory.store(memory)
-    {:ok, context} = Context.new(tenant_id: "tenant", principal_id: "alice", store: store)
+
+    {:ok, context} =
+      Context.new(
+        tenant_id: "tenant",
+        principal_id: "alice",
+        store: store,
+        deadline: Deadline.new(1_000)
+      )
 
     {:ok, claims} =
       Store.claim_authorities(
         store,
         context.tenant_id,
         [{authority.installation_id, authority.fingerprint}],
-        1_000
+        Deadline.new(1_000)
       )
 
     epoch = claims[authority.installation_id]
     key = Context.grant_key(context, authority, epoch)
-    {:ok, anchor} = Store.time_anchor(store, 1_000)
-    {:ok, lease} = Store.acquire_mutation(store, key, :authorization, 5_000, 1_000)
+    {:ok, anchor} = Store.time_anchor(store, Deadline.new(1_000))
+
+    {:ok, lease} =
+      Store.acquire_mutation(store, key, :authorization, 5_000, Deadline.new(1_000))
 
     :ok =
       Store.begin_mutation_dispatch(
@@ -584,7 +594,7 @@ defmodule PtcRunner.Kernel.MCPRequestContextTest do
         key,
         lease.fence,
         %{freshness_anchor: anchor, freshness_anchor_ttl_ms: 5_000},
-        1_000
+        Deadline.new(1_000)
       )
 
     {:ok, _grant} =
@@ -603,7 +613,7 @@ defmodule PtcRunner.Kernel.MCPRequestContextTest do
         },
         60_000,
         anchor,
-        1_000
+        Deadline.new(1_000)
       )
 
     {:ok, recording_store} =
@@ -613,7 +623,8 @@ defmodule PtcRunner.Kernel.MCPRequestContextTest do
       Context.new(
         tenant_id: context.tenant_id,
         principal_id: context.principal_id,
-        store: recording_store
+        store: recording_store,
+        deadline: Deadline.new(1_000)
       )
 
     {:ok, manager} =

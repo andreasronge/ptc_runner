@@ -1,6 +1,7 @@
 defmodule PtcRunner.Kernel.ProviderRuntimeServicesTest do
   use ExUnit.Case, async: true
 
+  alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.MCPOAuth.Context, as: OAuthContext
   alias PtcRunner.Kernel.MCPOAuth.Store.Memory
   alias PtcRunner.Kernel.ProviderRuntimeServices
@@ -22,10 +23,20 @@ defmodule PtcRunner.Kernel.ProviderRuntimeServicesTest do
     assert {:ok, store} = Memory.store(memory)
 
     assert {:ok, context} =
-             OAuthContext.new(tenant_id: "tenant", principal_id: "principal", store: store)
+             OAuthContext.new(
+               tenant_id: "tenant",
+               principal_id: "principal",
+               store: store,
+               deadline: Deadline.new(1_000)
+             )
 
-    context_factory = fn ->
+    parent = self()
+
+    # The factory runs in a deadline-bound worker, so it reports to the test
+    # process rather than to whichever process happens to invoke it.
+    context_factory = fn deadline ->
       :atomics.add(calls, 3, 1)
+      send(parent, {:context_factory_deadline, deadline})
       {:ok, context}
     end
 
@@ -46,7 +57,9 @@ defmodule PtcRunner.Kernel.ProviderRuntimeServicesTest do
     assert {:ok, %{"token" => "resolved"}} = services.credential_resolver.(["token"])
     assert Enum.map(1..3, &:atomics.get(calls, &1)) == [1, 1, 0]
 
-    assert {:ok, ^context} = ProviderRuntimeServices.oauth_context(services)
+    deadline = Deadline.new(1_000)
+    assert {:ok, ^context} = ProviderRuntimeServices.oauth_context(services, deadline)
+    assert_receive {:context_factory_deadline, ^deadline}
     assert Enum.map(1..3, &:atomics.get(calls, &1)) == [1, 1, 1]
   end
 
@@ -59,7 +72,7 @@ defmodule PtcRunner.Kernel.ProviderRuntimeServicesTest do
              services.credential_resolver.(["token"])
 
     assert {:error, :authorization_context_required} =
-             ProviderRuntimeServices.oauth_context(services)
+             ProviderRuntimeServices.oauth_context(services, Deadline.new(1_000))
   end
 
   test "the complete seal and callback results fail closed" do
@@ -74,7 +87,7 @@ defmodule PtcRunner.Kernel.ProviderRuntimeServicesTest do
              end)
 
     assert {:error, :invalid_provider_runtime_services} =
-             ProviderRuntimeServices.new(oauth_mode: {:context_factory, fn _arg -> :context end})
+             ProviderRuntimeServices.new(oauth_mode: {:context_factory, fn -> :context end})
 
     assert {:error, :invalid_provider_runtime_services} =
              ProviderRuntimeServices.new(credential_resolver: fn -> {:ok, %{}} end)
@@ -94,5 +107,48 @@ defmodule PtcRunner.Kernel.ProviderRuntimeServicesTest do
              command_services
              | provider_application_mode: :host_owned
            })
+  end
+
+  test "a context factory that never returns is cancelled at the operation deadline" do
+    parent = self()
+
+    {:ok, services} =
+      ProviderRuntimeServices.new(
+        oauth_mode:
+          {:context_factory,
+           fn _deadline ->
+             send(parent, {:factory_entered, self()})
+             receive do: (:never -> :never)
+           end}
+      )
+
+    deadline = Deadline.new(150)
+
+    # Returning at all is the assertion: an unbounded factory would hang here.
+    # The timeout keeps its own classification rather than being reported as a
+    # missing authorization context.
+    assert {:error, :operation_deadline_expired} =
+             ProviderRuntimeServices.oauth_context(services, deadline)
+
+    assert_receive {:factory_entered, factory}, 5_000
+    reference = Process.monitor(factory)
+    assert_receive {:DOWN, ^reference, :process, ^factory, _reason}, 5_000
+    assert Deadline.expired?(deadline)
+  end
+
+  test "an expired deadline never enters the context factory" do
+    parent = self()
+
+    {:ok, services} =
+      ProviderRuntimeServices.new(
+        oauth_mode: {:context_factory, fn _deadline -> send(parent, :factory_entered) end}
+      )
+
+    expired = Deadline.new(1, System.monotonic_time(:millisecond) - 10_000)
+
+    assert {:error, :operation_deadline_expired} =
+             ProviderRuntimeServices.oauth_context(services, expired)
+
+    refute_received :factory_entered
   end
 end

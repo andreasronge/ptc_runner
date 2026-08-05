@@ -3,9 +3,13 @@ defmodule PtcRunner.Kernel.HostInstallationOwner do
 
   use GenServer
 
+  alias PtcRunner.Kernel.BoundedWorker
+  alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.HostConfig
+  alias PtcRunner.Kernel.HostCredentialLease
   alias PtcRunner.Kernel.HostInstallation
   alias PtcRunner.Kernel.HostInstallationAuthority
+  alias PtcRunner.Kernel.ProviderCallbackBoundary
 
   @authority_marker {__MODULE__, :authority}
   @operation_timeout_ms 1_000
@@ -21,23 +25,13 @@ defmodule PtcRunner.Kernel.HostInstallationOwner do
 
     case GenServer.start(__MODULE__, {host, creator, token, fence}) do
       {:ok, pid} ->
-        try do
-          case HostInstallationAuthority.new(pid, token, fence) do
-            {:ok, authority} ->
-              {:ok, authority}
+        case HostCredentialLease.start(pid) do
+          {:ok, lease_owner, lease_fence, lease_table} ->
+            build_authority(pid, token, fence, lease_owner, lease_fence, lease_table)
 
-            {:error, _reason} = error ->
-              stop(pid, token, :catalog, fence)
-              error
-          end
-        rescue
-          exception ->
+          {:error, _reason} = error ->
             stop(pid, token, :catalog, fence)
-            reraise exception, __STACKTRACE__
-        catch
-          kind, reason ->
-            stop(pid, token, :catalog, fence)
-            :erlang.raise(kind, reason, __STACKTRACE__)
+            error
         end
 
       {:error, _reason} = error ->
@@ -205,8 +199,32 @@ defmodule PtcRunner.Kernel.HostInstallationOwner do
   end
 
   def handle_call(
-        {:invoke, token, role, fence, {operation, name, selection, context}},
+        {:invoke, token, :registry, fence, {:oauth_authority_epoch, name}},
         _from,
+        %{
+          token: token,
+          role: :registry,
+          fence: fence,
+          oauth_runtimes_installed?: true
+        } = state
+      )
+      when is_binary(name) do
+    result =
+      if current_role?(fence, :registry) do
+        case Map.get(state.oauth_runtimes, name) do
+          %{authority_epoch: authority_epoch} -> {:ok, authority_epoch}
+          _missing -> {:error, :authorization_context_required}
+        end
+      else
+        {:error, :authorization_context_required}
+      end
+
+    {:reply, result, state}
+  end
+
+  def handle_call(
+        {:invoke, token, role, fence, {operation, name, selection, context}},
+        from,
         %{host: host, token: token, role: role, fence: fence} = state
       )
       when operation in [:prepare, :preflight] and is_binary(name) do
@@ -214,9 +232,9 @@ defmodule PtcRunner.Kernel.HostInstallationOwner do
       request =
         {operation, name, selection, context, Map.get(state.oauth_runtimes, name)}
 
-      case safe_owner_call(host, request, operation) do
+      case bounded_owner_call(host, request, operation, context, from) do
         {:ok, {:private_preflight, acquire}} when operation == :preflight ->
-          store_preflight(state, acquire)
+          store_preflight(state, acquire, callback_bounds(context))
 
         result ->
           {:reply, result, state}
@@ -228,7 +246,7 @@ defmodule PtcRunner.Kernel.HostInstallationOwner do
 
   def handle_call(
         {:invoke, token, role, fence, {:acquire, ticket, credentials, services}},
-        _from,
+        from,
         %{token: token, role: role, fence: fence} = state
       )
       when is_reference(ticket) and is_map(credentials) and is_map(services) do
@@ -237,8 +255,8 @@ defmodule PtcRunner.Kernel.HostInstallationOwner do
         {nil, _preflights} ->
           {:reply, {:error, :invalid_provider_preflight}, state}
 
-        {acquire, preflights} ->
-          result = invoke_acquire(acquire, credentials, services)
+        {preflight, preflights} ->
+          result = bounded_acquire(preflight, credentials, services, from)
           {:reply, result, %{state | preflights: preflights}}
       end
     else
@@ -328,6 +346,9 @@ defmodule PtcRunner.Kernel.HostInstallationOwner do
       ),
       do: {:stop, :normal, state}
 
+  def handle_info({:"ETS-TRANSFER", _table, _from, :credential_leases}, state),
+    do: {:noreply, state}
+
   if {:format_status, 1} in GenServer.behaviour_info(:callbacks) do
     @impl GenServer
     def format_status(status), do: redact_status(status)
@@ -357,16 +378,64 @@ defmodule PtcRunner.Kernel.HostInstallationOwner do
   defp operation_failure(:prepare), do: {:error, :provider_prepare_failed}
   defp operation_failure(:preflight), do: {:error, :provider_preflight_failed}
 
-  defp store_preflight(state, acquire) when is_function(acquire) do
+  defp bounded_owner_call(host, request, operation, context, from) do
+    case callback_bounds(context) do
+      nil ->
+        safe_owner_call(host, request, operation)
+
+      bounds ->
+        run_bounded(fn -> safe_owner_call(host, request, operation) end, bounds, from)
+    end
+  end
+
+  defp bounded_acquire(%{acquire: acquire, bounds: nil}, credentials, services, _from),
+    do: invoke_acquire(acquire, credentials, services)
+
+  defp bounded_acquire(%{acquire: acquire, bounds: bounds}, credentials, services, from) do
+    run_bounded(fn -> invoke_acquire(acquire, credentials, services) end, bounds, from)
+  end
+
+  defp run_bounded(callback, %{deadline: deadline, max_heap_words: max_heap_words}, from) do
+    result =
+      case Deadline.remaining(deadline) do
+        0 ->
+          {:error, :timeout}
+
+        timeout_ms ->
+          BoundedWorker.run(callback,
+            timeout_ms: timeout_ms,
+            max_heap_words: max_heap_words,
+            cancel_with_caller: true,
+            cancel_with: elem(from, 0)
+          )
+      end
+
+    case result do
+      {:ok, callback_result} -> callback_result
+      {:error, reason} -> ProviderCallbackBoundary.nested_failure(reason)
+    end
+  end
+
+  defp callback_bounds(%{deadline: deadline, limits: %{provider_heap_words: max_heap_words}})
+       when is_integer(max_heap_words) and max_heap_words > 0 do
+    if Deadline.valid?(deadline), do: %{deadline: deadline, max_heap_words: max_heap_words}
+  end
+
+  defp callback_bounds(_context), do: nil
+
+  defp store_preflight(state, acquire, bounds) when is_function(acquire) do
     if map_size(state.preflights) < 128 do
       ticket = make_ref()
-      {:reply, {:ok, ticket}, %{state | preflights: Map.put(state.preflights, ticket, acquire)}}
+
+      preflight = %{acquire: acquire, bounds: bounds}
+
+      {:reply, {:ok, ticket}, %{state | preflights: Map.put(state.preflights, ticket, preflight)}}
     else
       {:reply, {:error, :provider_preflight_failed}, state}
     end
   end
 
-  defp store_preflight(state, _acquire),
+  defp store_preflight(state, _acquire, _bounds),
     do: {:reply, {:error, :invalid_provider_preflight}, state}
 
   defp invoke_acquire(acquire, credentials, services) do
@@ -386,5 +455,34 @@ defmodule PtcRunner.Kernel.HostInstallationOwner do
       is_binary(name) and Map.has_key?(host.install, name) and is_map(runtime) and
         not is_struct(runtime)
     end)
+  end
+
+  defp build_authority(pid, token, fence, lease_owner, lease_fence, lease_table) do
+    case HostInstallationAuthority.new(
+           pid,
+           token,
+           fence,
+           lease_owner,
+           lease_fence,
+           lease_table
+         ) do
+      {:ok, authority} ->
+        {:ok, authority}
+
+      {:error, _reason} = error ->
+        HostCredentialLease.close(lease_owner, lease_fence, lease_table)
+        stop(pid, token, :catalog, fence)
+        error
+    end
+  rescue
+    exception ->
+      HostCredentialLease.close(lease_owner, lease_fence, lease_table)
+      stop(pid, token, :catalog, fence)
+      reraise exception, __STACKTRACE__
+  catch
+    kind, reason ->
+      HostCredentialLease.close(lease_owner, lease_fence, lease_table)
+      stop(pid, token, :catalog, fence)
+      :erlang.raise(kind, reason, __STACKTRACE__)
   end
 end

@@ -4,6 +4,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
   alias PtcRunner.Kernel
   alias PtcRunner.Kernel.Capability
   alias PtcRunner.Kernel.Component
+  alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.Dispatcher
   alias PtcRunner.Kernel.Evaluation
@@ -72,6 +73,21 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     assert :ok = RunState.reserve_capability(state, :workflow, "read")
     assert {:error, :limit_exceeded} = RunState.reserve_capability(state, :workflow, "read")
     assert {:error, :limit_exceeded} = RunState.reserve_capability(state, :workflow, "other")
+  end
+
+  test "run state preserves a supplied absolute deadline instead of resetting it" do
+    limits = Limits.defaults()
+
+    expired =
+      Deadline.new(
+        limits.run_duration_ms,
+        System.monotonic_time(:millisecond) - limits.run_duration_ms - 1
+      )
+
+    assert {:ok, state} = RunState.start(limits, run_deadline: expired)
+    assert RunState.remaining_ms(state) == 0
+    refute RunState.open?(state)
+    assert :ok = RunState.stop(state)
   end
 
   test "a caller cannot hold two capability reservations at once" do
@@ -742,6 +758,42 @@ defmodule PtcRunner.Kernel.CoreContractTest do
 
     assert :ok = ProviderSession.close(provider_session)
     EventSink.stop(sink)
+  end
+
+  test "run configuration distinguishes generic and unbegun active provider sessions" do
+    {:ok, workflow} = WorkflowEnvironment.new([])
+    {:ok, mission} = MissionEnvironment.new([])
+    limits = Limits.defaults()
+    generic_limits = %{limits | run_duration_ms: limits.run_duration_ms + 1}
+    {:ok, generic_sink} = EventSink.start(:normal, limits)
+    {:ok, active_sink} = EventSink.start(:normal, limits)
+    {:ok, generic_session} = ProviderSession.start(generic_limits)
+    {:ok, active_session} = ProviderSession.start_active(limits, "prepared-operation")
+
+    assert {:ok, %{run_deadline: nil}} =
+             RunConfig.new(
+               workflow_environment: workflow,
+               mission_environment: mission,
+               input: %{},
+               limits: limits,
+               event_sink: generic_sink,
+               provider_session: generic_session
+             )
+
+    assert {:error, :invalid_run_config} =
+             RunConfig.new(
+               workflow_environment: workflow,
+               mission_environment: mission,
+               input: %{},
+               limits: limits,
+               event_sink: active_sink,
+               provider_session: active_session
+             )
+
+    assert :ok = ProviderSession.close(generic_session)
+    assert :ok = ProviderSession.close(active_session)
+    EventSink.stop(generic_sink)
+    EventSink.stop(active_sink)
   end
 
   test "run configuration rejects a mutated result contract" do

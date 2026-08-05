@@ -1,6 +1,7 @@
 defmodule PtcRunner.Kernel.MCPOAuth.AuthorizationTest do
   use ExUnit.Case, async: true
 
+  alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.MCPOAuth.Authority
   alias PtcRunner.Kernel.MCPOAuth.Authorization
   alias PtcRunner.Kernel.MCPOAuth.Context
@@ -14,14 +15,21 @@ defmodule PtcRunner.Kernel.MCPOAuth.AuthorizationTest do
     authority = authority()
     {:ok, memory} = Memory.start_link(owner: self())
     {:ok, store} = Memory.store(memory)
-    {:ok, context} = Context.new(tenant_id: "tenant", principal_id: "alice", store: store)
+
+    {:ok, context} =
+      Context.new(
+        tenant_id: "tenant",
+        principal_id: "alice",
+        store: store,
+        deadline: Deadline.new(1_000)
+      )
 
     {:ok, claims} =
       Store.claim_authorities(
         store,
         "tenant",
         [{authority.installation_id, authority.fingerprint}],
-        1_000
+        Deadline.new(1_000)
       )
 
     {:ok,
@@ -39,7 +47,8 @@ defmodule PtcRunner.Kernel.MCPOAuth.AuthorizationTest do
       Context.new(
         tenant_id: "tenant",
         principal_id: "alice",
-        store: recording_store
+        store: recording_store,
+        deadline: Deadline.new(1_000)
       )
 
     request =
@@ -162,7 +171,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.AuthorizationTest do
                grant.generation,
                MapSet.new(["write"]),
                5_000,
-               1_000
+               Deadline.new(1_000)
              )
 
     request = request_fixture(context.authority, self(), "max-age=120", "read write")
@@ -240,7 +249,8 @@ defmodule PtcRunner.Kernel.MCPOAuth.AuthorizationTest do
       Context.new(
         tenant_id: "tenant",
         principal_id: "bob",
-        store: context.store
+        store: context.store,
+        deadline: Deadline.new(1_000)
       )
 
     assert {:ok, pending} =
@@ -376,6 +386,23 @@ defmodule PtcRunner.Kernel.MCPOAuth.AuthorizationTest do
     assert {:error, :invalid_callback_request} = Task.await(task, 1_000)
   end
 
+  test "loopback callback reports an expired interaction as an authorization timeout", context do
+    request = request_fixture(context.authority, self())
+    assert {:ok, listener} = LoopbackListener.start(context.authority)
+
+    assert {:ok, pending} =
+             Authorization.begin_authorization(context.context, context.authority,
+               authority_epoch: context.epoch,
+               redirect_uri: listener.redirect_uri,
+               request: request
+             )
+
+    expired = %{pending | deadline_ms: System.monotonic_time(:millisecond) - 1}
+
+    assert {:error, :authorization_timeout} =
+             LoopbackListener.await(listener, context.context, expired, request: request)
+  end
+
   defp request_fixture(
          authority,
          parent,
@@ -488,8 +515,10 @@ defmodule PtcRunner.Kernel.MCPOAuth.AuthorizationTest do
   end
 
   defp seed_grant(store, key) do
-    {:ok, anchor} = Store.time_anchor(store, 1_000)
-    {:ok, lease} = Store.acquire_mutation(store, key, :authorization, 5_000, 1_000)
+    {:ok, anchor} = Store.time_anchor(store, Deadline.new(1_000))
+
+    {:ok, lease} =
+      Store.acquire_mutation(store, key, :authorization, 5_000, Deadline.new(1_000))
 
     :ok =
       Store.begin_mutation_dispatch(
@@ -497,7 +526,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.AuthorizationTest do
         key,
         lease.fence,
         %{freshness_anchor: anchor, freshness_anchor_ttl_ms: 5_000},
-        1_000
+        Deadline.new(1_000)
       )
 
     Store.commit_grant(
@@ -516,7 +545,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.AuthorizationTest do
       },
       60_000,
       anchor,
-      1_000
+      Deadline.new(1_000)
     )
   end
 end

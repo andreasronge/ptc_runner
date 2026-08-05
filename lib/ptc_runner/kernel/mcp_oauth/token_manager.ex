@@ -24,6 +24,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManager do
 
   use GenServer
 
+  alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.MCPOAuth.Authority
   alias PtcRunner.Kernel.MCPOAuth.BearerChallenge
   alias PtcRunner.Kernel.MCPOAuth.Binding
@@ -121,7 +122,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManager do
              grant.generation,
              admission_owner,
              remaining(deadline_ms),
-             remaining(deadline_ms)
+             Deadline.from_expires_at(deadline_ms)
            ) do
       {:ok,
        %{
@@ -143,7 +144,11 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManager do
   def release(%__MODULE__{pid: pid}, admission, deadline_ms) do
     case owner_call(pid, :config, deadline_ms) do
       {:ok, config} ->
-        Store.release_mcp(config.context.store, admission, remaining(deadline_ms))
+        Store.release_mcp(
+          config.context.store,
+          admission,
+          Deadline.from_expires_at(deadline_ms)
+        )
 
       {:error, reason} ->
         {:error, reason}
@@ -425,7 +430,11 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManager do
 
   defp usable_grant(pid, config, deadline_ms) do
     with {:ok, grant} <-
-           Store.load_grant(config.context.store, config.key, remaining(deadline_ms)) do
+           Store.load_grant(
+             config.context.store,
+             config.key,
+             Deadline.from_expires_at(deadline_ms)
+           ) do
       cond do
         usable_without_refresh?(grant, config.authority) ->
           {:ok, grant}
@@ -462,7 +471,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManager do
            config.key,
            :refresh,
            remaining(deadline_ms),
-           remaining(deadline_ms)
+           Deadline.from_expires_at(deadline_ms)
          ) do
       {:ok, lease} ->
         if lease.starting_generation == grant.generation do
@@ -482,7 +491,10 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManager do
 
   defp refresh_with_lease(config, grant, lease, deadline_ms) do
     with {:ok, freshness_anchor} <-
-           Store.time_anchor(config.context.store, remaining(deadline_ms)),
+           Store.time_anchor(
+             config.context.store,
+             Deadline.from_expires_at(deadline_ms)
+           ),
          {:ok, binding} <-
            Discovery.discover(
              config.authority,
@@ -492,7 +504,10 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManager do
          true <- binding.refresh_authorized,
          true <- compatible_refresh_binding?(grant, binding),
          {:ok, anchor} <-
-           Store.time_anchor(config.context.store, remaining(deadline_ms)) do
+           Store.time_anchor(
+             config.context.store,
+             Deadline.from_expires_at(deadline_ms)
+           ) do
       result =
         TokenClient.refresh(
           config.authority,
@@ -532,7 +547,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManager do
                stored,
                refreshed.ttl_ms,
                anchor,
-               remaining(deadline_ms)
+               Deadline.from_expires_at(deadline_ms)
              ) do
           {:ok, _grant} = success ->
             success
@@ -544,7 +559,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManager do
                 config.key,
                 lease.fence,
                 :possibly_dispatched,
-                max(remaining(deadline_ms), 1)
+                Deadline.new(max(remaining(deadline_ms), 1))
               )
 
             {:error, :mcp_authorization_required}
@@ -557,7 +572,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManager do
             config.key,
             lease.fence,
             :possibly_dispatched,
-            remaining(deadline_ms)
+            Deadline.new(max(remaining(deadline_ms), 1))
           )
 
         {:error, :mcp_authorization_required}
@@ -586,14 +601,18 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManager do
         config.key,
         lease.fence,
         outcome,
-        remaining(deadline_ms)
+        Deadline.new(max(remaining(deadline_ms), 1))
       )
 
     {:error, close_reason(reason)}
   end
 
   defp retry_after_competing_refresh(config, deadline_ms) do
-    case Store.load_grant(config.context.store, config.key, remaining(deadline_ms)) do
+    case Store.load_grant(
+           config.context.store,
+           config.key,
+           Deadline.from_expires_at(deadline_ms)
+         ) do
       {:ok, grant} ->
         cond do
           usable_without_refresh?(grant, config.authority) ->
@@ -682,7 +701,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManager do
         config.key,
         lease.fence,
         binding,
-        remaining(deadline_ms)
+        Deadline.from_expires_at(deadline_ms)
       )
     end
 
@@ -703,7 +722,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManager do
         config.key,
         lease.fence,
         :not_dispatched,
-        max(remaining(deadline_ms), 1)
+        Deadline.new(max(remaining(deadline_ms), 1))
       )
 
     :ok
@@ -727,7 +746,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManager do
 
   defp release_callback(store, admission) do
     fn deadline_ms ->
-      Store.release_mcp(store, admission, remaining(deadline_ms))
+      Store.release_mcp(store, admission, Deadline.from_expires_at(deadline_ms))
     end
   end
 
@@ -850,7 +869,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManager do
       config.context.store,
       config.key,
       generation,
-      remaining(deadline_ms)
+      Deadline.from_expires_at(deadline_ms)
     )
   rescue
     _exception -> {:error, :store_error}
@@ -865,7 +884,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManager do
            generation,
            scopes,
            config.authority.authorization_timeout_ms,
-           remaining(deadline_ms)
+           Deadline.from_expires_at(deadline_ms)
          ) do
       {:ok, _version} -> :ok
       {:error, _reason} = error -> error

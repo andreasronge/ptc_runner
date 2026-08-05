@@ -91,6 +91,22 @@ defmodule PtcRunner.Kernel.HostRuntimePayload do
 
   def resolve_credentials(_payload, _names), do: {:error, :invalid_host_runtime_payload}
 
+  @doc false
+  @spec oauth_authorities(t(), [binary()]) :: {:ok, map()} | {:error, term()}
+  def oauth_authorities(%__MODULE__{} = payload, selected_names) when is_list(selected_names),
+    do: with_host(payload, &HostInstallation.owner_call(&1, {:oauth_authorities, selected_names}))
+
+  def oauth_authorities(_payload, _selected_names),
+    do: {:error, :invalid_host_runtime_payload}
+
+  @doc false
+  @spec dotenv_required?(t(), [binary()]) :: {:ok, boolean()} | {:error, term()}
+  def dotenv_required?(%__MODULE__{} = payload, selected_names) when is_list(selected_names),
+    do: with_host(payload, &HostInstallation.owner_call(&1, {:dotenv_required, selected_names}))
+
+  def dotenv_required?(_payload, _selected_names),
+    do: {:error, :invalid_host_runtime_payload}
+
   @spec invoke(t(), term()) :: term()
   def invoke(
         %__MODULE__{} = payload,

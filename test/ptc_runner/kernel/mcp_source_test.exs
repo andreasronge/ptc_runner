@@ -7,6 +7,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
 
   alias PtcRunner.Kernel
   alias PtcRunner.Kernel.Capability
+  alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.Dispatcher
   alias PtcRunner.Kernel.EventSink
@@ -299,7 +300,11 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     authorization_config = :sys.get_state(manager.pid).config
 
     {:ok, grant} =
-      Store.load_grant(authorization_config.context.store, authorization_config.key, 1_000)
+      Store.load_grant(
+        authorization_config.context.store,
+        authorization_config.key,
+        Deadline.new(1_000)
+      )
 
     limits = Limits.defaults()
 
@@ -347,7 +352,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
                    authorization_config.key,
                    grant.generation,
                    1_000,
-                   1_000
+                   Deadline.new(1_000)
                  )
 
       403 ->
@@ -355,7 +360,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
                  Store.load_requirement(
                    authorization_config.context.store,
                    authorization_config.key,
-                   1_000
+                   Deadline.new(1_000)
                  )
 
         assert scopes == MapSet.new(["write"])
@@ -2239,20 +2244,29 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
 
     {:ok, memory} = Memory.start_link(owner: self())
     {:ok, store} = Memory.store(memory)
-    {:ok, context} = OAuthContext.new(tenant_id: "tenant", principal_id: "alice", store: store)
+
+    {:ok, context} =
+      OAuthContext.new(
+        tenant_id: "tenant",
+        principal_id: "alice",
+        store: store,
+        deadline: Deadline.new(1_000)
+      )
 
     {:ok, claims} =
       Store.claim_authorities(
         store,
         context.tenant_id,
         [{authority.installation_id, authority.fingerprint}],
-        1_000
+        Deadline.new(1_000)
       )
 
     epoch = claims[authority.installation_id]
     key = OAuthContext.grant_key(context, authority, epoch)
-    {:ok, anchor} = Store.time_anchor(store, 1_000)
-    {:ok, lease} = Store.acquire_mutation(store, key, :authorization, 5_000, 1_000)
+    {:ok, anchor} = Store.time_anchor(store, Deadline.new(1_000))
+
+    {:ok, lease} =
+      Store.acquire_mutation(store, key, :authorization, 5_000, Deadline.new(1_000))
 
     :ok =
       Store.begin_mutation_dispatch(
@@ -2260,7 +2274,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
         key,
         lease.fence,
         %{freshness_anchor: anchor, freshness_anchor_ttl_ms: 5_000},
-        1_000
+        Deadline.new(1_000)
       )
 
     {:ok, _grant} =
@@ -2279,7 +2293,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
         },
         60_000,
         anchor,
-        1_000
+        Deadline.new(1_000)
       )
 
     {:ok, recording_store} =
@@ -2289,7 +2303,8 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
       OAuthContext.new(
         tenant_id: context.tenant_id,
         principal_id: context.principal_id,
-        store: recording_store
+        store: recording_store,
+        deadline: Deadline.new(1_000)
       )
 
     {:ok, manager} =

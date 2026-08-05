@@ -6,6 +6,7 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
   alias PtcRunner.Kernel.CommandOutcome
   alias PtcRunner.Kernel.CommandPreparation
   alias PtcRunner.Kernel.CommandRunRef
+  alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.EffectiveApplication
   alias PtcRunner.Kernel.HostConfig
@@ -27,6 +28,7 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
   alias PtcRunner.Kernel.RunCoordinator
   alias PtcRunner.Kernel.SelectionRules
   alias PtcRunner.Kernel.TypedCanonicalJSON
+  alias PtcRunner.Test.MCPOAuthRecordingStore
 
   @moduletag :tmp_dir
   @dense_services ~w(
@@ -429,6 +431,9 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
       token: make_ref(),
       role: :catalog,
       fence: :atomics.new(1, signed: true),
+      lease_owner: victim,
+      lease_fence: :atomics.new(1, signed: false),
+      lease_table: make_ref(),
       attestation: <<>>
     }
 
@@ -585,7 +590,15 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
   end
 
   test "OAuth runtime activation requires and binds a principal context" do
-    assert {:ok, catalog} = custom_catalog(authority: oauth_authority("issuer.example"))
+    selected_authority = oauth_authority("selected.example", "selected-oauth")
+    unselected_authority = oauth_authority("unselected.example", "unselected-oauth")
+
+    assert {:ok, catalog} =
+             custom_catalog(
+               authority: selected_authority,
+               extra_authority: unselected_authority
+             )
+
     assert {:ok, services} = ProviderRuntimeServices.new()
 
     assert {:error, :authorization_context_required} =
@@ -594,13 +607,61 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
     assert {:ok, memory} = Memory.start_link(owner: self())
     assert {:ok, store} = Memory.store(memory)
 
-    assert {:ok, context} =
-             OAuthContext.new(tenant_id: "tenant", principal_id: "principal", store: store)
+    parent = self()
+
+    interceptor = fn
+      {:claim_principal, "tenant", "principal"}, deadline ->
+        send(parent, {:principal_claim_deadline, deadline})
+        :delegate
+
+      {:claim_authorities, "tenant", authorities}, deadline ->
+        send(parent, {:authority_claim, authorities, deadline})
+        :delegate
+
+      _operation, _deadline ->
+        :delegate
+    end
+
+    assert {:ok, recording_store} =
+             MCPOAuthRecordingStore.wrap(store, self(), interceptor: interceptor)
 
     assert {:ok, services} =
-             ProviderRuntimeServices.new(oauth_mode: {:context_factory, fn -> {:ok, context} end})
+             ProviderRuntimeServices.new(
+               oauth_mode:
+                 {:context_factory,
+                  fn deadline ->
+                    send(parent, {:oauth_factory_deadline, deadline})
 
-    assert {:ok, registry} = InstallationCatalog.runtime_registry(catalog, services)
+                    OAuthContext.new(
+                      tenant_id: "tenant",
+                      principal_id: "principal",
+                      store: recording_store,
+                      deadline: deadline
+                    )
+                  end}
+             )
+
+    operation_deadline = Deadline.new(1_000)
+
+    assert {:ok, registry} =
+             InstallationCatalog.runtime_registry(
+               catalog,
+               services,
+               ["selected"],
+               operation_deadline
+             )
+
+    assert_receive {:oauth_factory_deadline, shared_deadline}
+    assert shared_deadline == operation_deadline
+    assert_receive {:principal_claim_deadline, ^shared_deadline}
+
+    assert_receive {:authority_claim, claims, ^shared_deadline}
+
+    assert claims == [
+             {selected_authority.installation_id, selected_authority.fingerprint}
+           ]
+
+    assert Map.keys(registry.builders) == ["selected"]
 
     limits = Limits.installed_defaults()
 
@@ -616,31 +677,84 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
     assert :ok = ProviderRegistry.close(registry)
   end
 
-  test "an unbound catalog rejects and releases a generic host authority" do
-    assert {:ok, decoded} =
-             HostConfig.decode(
-               %{
-                 "install" => %{
-                   "selected" => %{
-                     "source" => "ptc_trace_snapshot",
-                     "installation_revision" => "selected-v1",
-                     "directory" => "traces"
-                   }
-                 }
-               },
-               "/tmp"
+  test "runtime registry preserves operation deadline expiry" do
+    assert {:ok, catalog} = custom_catalog()
+    assert {:ok, services} = ProviderRuntimeServices.new()
+
+    expired = Deadline.from_expires_at(System.monotonic_time(:millisecond) - 1)
+
+    assert {:error, :operation_deadline_expired} =
+             InstallationCatalog.runtime_registry(catalog, services, ["selected"], expired)
+  end
+
+  test "a runtime registry is refused when activation finishes after the deadline" do
+    assert {:ok, catalog} = custom_catalog()
+    deadline = Deadline.new(50)
+
+    # Activation runs an embedder-supplied callback that cannot be cancelled,
+    # because the authority it returns belongs to the process that created it.
+    # A slow one must still not yield a usable registry past the deadline.
+    activation = fn ->
+      wait_until_expired(deadline)
+      {:ok, nil}
+    end
+
+    assert {:ok, services} = ProviderRuntimeServices.new(activation: activation)
+
+    assert {:error, :operation_deadline_expired} =
+             InstallationCatalog.runtime_registry(catalog, services, ["selected"], deadline)
+  end
+
+  test "an unbound catalog cancels an activation that never returns" do
+    assert {:ok, catalog} = custom_catalog()
+    parent = self()
+
+    activation = fn ->
+      send(parent, {:activation_entered, self()})
+      receive do: (:never -> :never)
+    end
+
+    assert {:ok, services} = ProviderRuntimeServices.new(activation: activation)
+
+    # Returning at all is the assertion: this hangs without a bounded worker,
+    # and the cancellation keeps its timeout classification.
+    assert {:error, :operation_deadline_expired} =
+             InstallationCatalog.runtime_registry(
+               catalog,
+               services,
+               ["selected"],
+               Deadline.new(150)
              )
 
-    host =
-      struct!(HostConfig,
-        path: "/tmp/ptc-host.json",
-        directory: "/tmp",
-        runtime: decoded.runtime,
-        limits: decoded.limits,
-        credentials: decoded.credentials,
-        install: decoded.install
-      )
+    assert_receive {:activation_entered, worker}, 5_000
+    reference = Process.monitor(worker)
+    assert_receive {:DOWN, ^reference, :process, ^worker, _reason}, 5_000
+  end
 
+  test "an unbound catalog releases an authority its activation did not create" do
+    # The generic-authority test below builds its owner inside the activation
+    # callback, so creator-monitor teardown would hide a missing release. This
+    # one hands back an authority the test process owns.
+    assert {:ok, catalog} = custom_catalog()
+    assert {:ok, authority} = HostInstallationOwner.start(generic_host())
+    owner = authority.pid
+    assert Process.alive?(owner)
+
+    assert {:ok, services} = ProviderRuntimeServices.new(activation: fn -> {:ok, authority} end)
+
+    assert {:error, :invalid_provider_registry} =
+             InstallationCatalog.runtime_registry(
+               catalog,
+               services,
+               ["selected"],
+               Deadline.new(1_000)
+             )
+
+    refute Process.alive?(owner)
+  end
+
+  test "an unbound catalog rejects and releases a generic host authority" do
+    host = generic_host()
     assert {:ok, catalog} = custom_catalog()
     parent = self()
 
@@ -677,7 +791,12 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
     assert {:ok, store} = Memory.store(memory)
 
     assert {:ok, context} =
-             OAuthContext.new(tenant_id: "tenant", principal_id: "principal", store: store)
+             OAuthContext.new(
+               tenant_id: "tenant",
+               principal_id: "principal",
+               store: store,
+               deadline: Deadline.new(1_000)
+             )
 
     factory_calls = :atomics.new(1, signed: false)
 
@@ -685,7 +804,7 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
              ProviderRuntimeServices.new(
                oauth_mode:
                  {:context_factory,
-                  fn ->
+                  fn _deadline ->
                     :atomics.add(factory_calls, 1, 1)
                     {:ok, context}
                   end}
@@ -703,7 +822,7 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
                store,
                "tenant",
                [{"oauth-primary", "different-fingerprint"}],
-               1_000
+               Deadline.new(1_000)
              )
   end
 
@@ -1577,6 +1696,10 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
                  |> maybe_active_validator(selection_validation)
              }
            }
+           |> maybe_extra_oauth_registration(
+             rules,
+             Keyword.get(overrides, :extra_authority)
+           )
            |> maybe_extra_registration(rules, Keyword.get(overrides, :extra_revision)) do
       InstallationCatalog.new(registrations)
     end
@@ -1596,6 +1719,42 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
         :oauth_builder,
         fn _selection, _context, _runtime -> {:error, :oauth_runtime_bound} end
       )
+
+  defp maybe_extra_oauth_registration(registrations, _rules, nil), do: registrations
+
+  defp maybe_extra_oauth_registration(registrations, rules, %Authority{} = authority) do
+    {:ok, descriptor} =
+      ProviderDescriptor.new(
+        source: :custom,
+        installation_revision: "unselected-oauth-v1",
+        credential_names: [],
+        authorization_mode: :oauth,
+        data_class: :normal,
+        accepts_data: [:normal],
+        requires: [],
+        provides: [],
+        destinations: [:workflow],
+        workflow_llm?: false,
+        connectivity_mode: :none,
+        probe_effect: nil,
+        selection_validation: :declarative,
+        selection_rules: rules,
+        authority_fingerprint: authority.fingerprint,
+        local_preflight: :unverified
+      )
+
+    Map.put(registrations, "unselected-oauth", %{
+      descriptor: descriptor,
+      authority: authority,
+      implementation: %{
+        builder: fn _selection, _context -> {:error, :inactive_provider} end,
+        oauth_builder: fn _selection, _context, _runtime ->
+          {:error, :unselected_oauth_runtime_bound}
+        end,
+        local_preflight: fn _selection, _context, _services -> :ok end
+      }
+    })
+  end
 
   defp maybe_extra_registration(registrations, _rules, nil), do: registrations
 
@@ -1655,12 +1814,14 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
     }
   end
 
-  defp oauth_authority(issuer_host) do
-    {:ok, decoded} = HostConfig.decode(oauth_host_document(issuer_host), "/tmp")
+  defp oauth_authority(issuer_host, installation_id \\ "oauth-primary") do
+    {:ok, decoded} =
+      HostConfig.decode(oauth_host_document(issuer_host, installation_id), "/tmp")
+
     decoded.install["oauth"].transport.oauth
   end
 
-  defp oauth_host_document(issuer_host) do
+  defp oauth_host_document(issuer_host, installation_id) do
     %{
       "install" => %{
         "oauth" => %{
@@ -1670,7 +1831,7 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
             "type" => "streamable_http",
             "endpoint" => "https://mcp.example/mcp",
             "oauth" => %{
-              "installation_id" => "oauth-primary",
+              "installation_id" => installation_id,
               "issuer" => "https://" <> issuer_host,
               "scope_ceiling" => ["read"],
               "default_scopes" => ["read"],
@@ -1711,5 +1872,39 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
       end
     end)
     |> MapSet.new()
+  end
+
+  defp wait_until_expired(deadline) do
+    if Deadline.expired?(deadline) do
+      :ok
+    else
+      :erlang.yield()
+      wait_until_expired(deadline)
+    end
+  end
+
+  defp generic_host do
+    {:ok, decoded} =
+      HostConfig.decode(
+        %{
+          "install" => %{
+            "selected" => %{
+              "source" => "ptc_trace_snapshot",
+              "installation_revision" => "selected-v1",
+              "directory" => "traces"
+            }
+          }
+        },
+        "/tmp"
+      )
+
+    struct!(HostConfig,
+      path: "/tmp/ptc-host.json",
+      directory: "/tmp",
+      runtime: decoded.runtime,
+      limits: decoded.limits,
+      credentials: decoded.credentials,
+      install: decoded.install
+    )
   end
 end

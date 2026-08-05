@@ -93,6 +93,36 @@ defmodule PtcRunner.Kernel.BoundedWorkerTest do
     assert_receive {:DOWN, ^worker_ref, :process, ^worker, :killed}
   end
 
+  test "a separate cancellation owner terminates bounded work" do
+    parent = self()
+    cancellation_owner = spawn(fn -> receive do: (:stop -> :ok) end)
+
+    caller =
+      spawn(fn ->
+        result =
+          BoundedWorker.run(
+            fn ->
+              send(parent, {:cancelled_worker, self()})
+              receive do: (:never -> :unexpected)
+            end,
+            timeout_ms: 5_000,
+            max_heap_words: 10_000,
+            cancel_with: cancellation_owner
+          )
+
+        send(parent, {:cancelled_result, result})
+      end)
+
+    caller_ref = Process.monitor(caller)
+    assert_receive {:cancelled_worker, worker}
+    worker_ref = Process.monitor(worker)
+    Process.exit(cancellation_owner, :kill)
+
+    assert_receive {:DOWN, ^worker_ref, :process, ^worker, :killed}
+    assert_receive {:cancelled_result, {:error, :cancelled}}
+    assert_receive {:DOWN, ^caller_ref, :process, ^caller, :normal}
+  end
+
   test "successful linked work leaves no exit message" do
     assert {:ok, :done} =
              BoundedWorker.run(fn -> :done end,

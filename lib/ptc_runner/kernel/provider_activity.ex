@@ -3,12 +3,13 @@ defmodule PtcRunner.Kernel.ProviderActivity do
   Owner-backed monotonic provider-activity marker.
 
   A fresh marker belongs to its creating process, remains linked to it, may be
-  claimed by exactly one prepared run, and is consumed once. The marker also
-  monitors its creator so even a normal owner exit closes it. Activity then
-  changes monotonically from false to true. Every transition runs as one
-  operation inside the owner process. Calls carry a server-checked monotonic
-  deadline and allow a short reply grace, so they remain bounded without a
-  timed-out queued transition later mutating the marker.
+  claimed by exactly one prepared run, is consumed once, and admits at most one
+  owned build. The marker also monitors its creator so even a normal owner exit
+  closes it. Activity then changes monotonically from false to true. Every
+  transition runs as one operation inside the owner process. Calls carry a
+  server-checked monotonic deadline and allow a short reply grace, so they
+  remain bounded without a timed-out queued transition later mutating the
+  marker.
   """
 
   use GenServer
@@ -79,6 +80,25 @@ defmodule PtcRunner.Kernel.ProviderActivity do
 
   def consume(_activity), do: {:error, :provider_activity_unavailable}
 
+  @doc false
+  @spec authorize_executor(t(), pid()) :: :ok | {:error, :provider_activity_unavailable}
+  def authorize_executor(%__MODULE__{} = activity, executor) when is_pid(executor),
+    do:
+      call_if_valid(
+        activity,
+        {:authorize_executor, executor},
+        {:error, :provider_activity_unavailable}
+      )
+
+  def authorize_executor(_activity, _executor), do: {:error, :provider_activity_unavailable}
+
+  @doc false
+  @spec begin_build(t()) :: :ok | {:error, :provider_activity_unavailable}
+  def begin_build(%__MODULE__{} = activity),
+    do: call_if_valid(activity, :begin_build, {:error, :provider_activity_unavailable})
+
+  def begin_build(_activity), do: {:error, :provider_activity_unavailable}
+
   @spec mark(t()) :: :ok | {:error, :provider_activity_unavailable}
   def mark(%__MODULE__{} = activity),
     do: call_if_valid(activity, :mark, {:error, :provider_activity_unavailable})
@@ -100,6 +120,14 @@ defmodule PtcRunner.Kernel.ProviderActivity do
 
   def claimed?(_activity), do: false
 
+  @doc false
+  @spec consumed?(t()) :: boolean()
+  def consumed?(%__MODULE__{} = activity) do
+    valid?(activity) and call(activity.owner, :consumed?, false)
+  end
+
+  def consumed?(_activity), do: false
+
   @spec stop(t()) ::
           :ok | {:error, :not_owner | :provider_activity_unavailable}
   def stop(%__MODULE__{} = activity) do
@@ -116,7 +144,15 @@ defmodule PtcRunner.Kernel.ProviderActivity do
   @impl true
   def init(creator) when is_pid(creator) do
     monitor = Process.monitor(creator)
-    {:ok, %{creator: creator, controller: creator, monitor: monitor, state: :unclaimed}}
+
+    {:ok,
+     %{
+       creator: creator,
+       controller: creator,
+       executor: creator,
+       monitor: monitor,
+       state: :unclaimed
+     }}
   end
 
   @impl true
@@ -125,7 +161,7 @@ defmodule PtcRunner.Kernel.ProviderActivity do
         from,
         state
       )
-      when is_atom(operation) do
+      when is_atom(operation) or is_tuple(operation) do
     if Deadline.live?(deadline),
       do: handle_operation(operation, from, state),
       else: expired_operation(operation, from, state)
@@ -163,7 +199,34 @@ defmodule PtcRunner.Kernel.ProviderActivity do
   defp handle_operation(:consume, _from, state),
     do: {:reply, {:error, :provider_activity_unavailable}, state}
 
-  defp handle_operation(:mark, {caller, _tag}, %{controller: caller} = state) do
+  defp handle_operation(
+         {:authorize_executor, executor},
+         {controller, _tag},
+         %{controller: controller, state: :consumed} = state
+       )
+       when is_pid(executor) do
+    if controller_attached?(state) and Process.alive?(executor),
+      do: {:reply, :ok, %{state | executor: executor}},
+      else: unavailable_and_stop(state)
+  end
+
+  defp handle_operation({:authorize_executor, _executor}, _from, state),
+    do: {:reply, {:error, :provider_activity_unavailable}, state}
+
+  defp handle_operation(
+         :begin_build,
+         {caller, _tag},
+         %{controller: caller, state: :consumed} = state
+       ) do
+    if controller_attached?(state),
+      do: transition(:begin_build, state),
+      else: unavailable_and_stop(state)
+  end
+
+  defp handle_operation(:begin_build, _from, state),
+    do: {:reply, {:error, :provider_activity_unavailable}, state}
+
+  defp handle_operation(:mark, {caller, _tag}, %{executor: caller} = state) do
     if controller_attached?(state),
       do: transition(:mark, state),
       else: unavailable_and_stop(state)
@@ -189,15 +252,28 @@ defmodule PtcRunner.Kernel.ProviderActivity do
 
   defp handle_operation(:claimed?, _from, state), do: {:reply, false, state}
 
+  defp handle_operation(
+         :consumed?,
+         {caller, _tag},
+         %{controller: controller, executor: executor, state: :consumed} = state
+       ) do
+    if caller in [controller, executor] and controller_attached?(state),
+      do: {:reply, true, state},
+      else: {:reply, false, state}
+  end
+
+  defp handle_operation(:consumed?, _from, state), do: {:reply, false, state}
+
   defp handle_operation(_operation, _from, state),
     do: {:reply, {:error, :provider_activity_unavailable}, state}
 
   defp expired_operation(operation, _from, state)
-       when operation in [:claim, :consume, :mark],
+       when operation in [:claim, :consume, :begin_build, :mark],
        do: {:reply, {:error, :provider_activity_unavailable}, state}
 
   defp expired_operation(:value, _from, state), do: {:reply, :unknown, state}
   defp expired_operation(:claimed?, _from, state), do: {:reply, false, state}
+  defp expired_operation(:consumed?, _from, state), do: {:reply, false, state}
   defp expired_operation(:stop, from, state), do: handle_operation(:stop, from, state)
 
   defp expired_operation(_operation, _from, state),
@@ -215,6 +291,9 @@ defmodule PtcRunner.Kernel.ProviderActivity do
 
   defp transition(:claim, %{state: :unclaimed} = state),
     do: {:reply, :ok, %{state | state: :claimed}}
+
+  defp transition(:begin_build, %{state: :consumed} = state),
+    do: {:reply, :ok, %{state | state: :built}}
 
   defp transition(:mark, state),
     do: {:reply, :ok, %{state | state: :active}}
@@ -242,7 +321,13 @@ defmodule PtcRunner.Kernel.ProviderActivity do
       Process.link(controller)
     end
 
-    %{state | controller: controller, monitor: Process.monitor(controller), state: next_state}
+    %{
+      state
+      | controller: controller,
+        executor: controller,
+        monitor: Process.monitor(controller),
+        state: next_state
+    }
   end
 
   defp call(owner, operation, fallback) do

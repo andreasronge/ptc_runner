@@ -362,7 +362,9 @@ defmodule PtcRunner.Kernel.ReplSession do
   end
 
   defp start_session(config) do
-    case RunState.start_repl(config.limits, config.event_sink, config.inspection_sink) do
+    case RunState.start_repl(config.limits, config.event_sink, config.inspection_sink,
+           run_deadline: config.run_deadline
+         ) do
       {:ok, state} ->
         start_session_with_state(config, state)
 

@@ -48,61 +48,20 @@ defmodule PtcRunner.Kernel.CommandContract do
     :internal
   ]
   @preclassification_only_phases @unclassified_run_phases -- [:internal]
-  @host_codes [
-    :host_unavailable,
-    :host_invalid,
-    :host_schema_invalid,
-    :installed_limit_invalid,
-    :installation_revision_missing
-  ]
-  @application_codes [
-    :application_unavailable,
-    :invalid_json,
-    :duplicate_property,
-    :schema_violation,
-    :required_property_missing,
-    :reference_missing,
-    :document_limit_exceeded,
-    :contract_invalid,
-    :input_invalid,
-    :input_contract_failed,
-    :override_invalid,
-    :event_identity_conflict
-  ]
+
+  @codes_by_phase DiagnosticCatalog.rows()
+                  |> Enum.group_by(& &1.phase, & &1.code)
+  @host_codes Map.fetch!(@codes_by_phase, :host)
+  @application_codes Map.fetch!(@codes_by_phase, :application)
   @static_application_codes @application_codes -- [:override_invalid, :event_identity_conflict]
-  @bundle_codes [:bundle_invalid, :bundle_limit_exceeded, :compile_failed, :entry_invalid]
-  @provider_declaration_codes [
-    :provider_unknown,
-    :selection_invalid,
-    :selection_unverifiable,
-    :placement_denied,
-    :dependency_invalid,
-    :data_policy_denied
-  ]
-  @local_preflight_codes [:environment_unavailable, :adapter_unavailable, :launcher_unavailable]
-  @active_preflight_codes [
-    :provider_application_unavailable,
-    :selection_rejected,
-    :selection_validation_failed,
-    :selection_validation_timeout,
-    :credential_unavailable,
-    :authorization_required,
-    :authorization_rejected,
-    :authentication_rejected,
-    :connectivity_rejected,
-    :connectivity_protocol_error,
-    :connectivity_unsupported,
-    :connectivity_outcome_unknown,
-    :authorization_unavailable,
-    :connectivity_unavailable,
-    :connectivity_rate_limited
-  ]
-  @provider_acquisition_codes [
-    :provider_unavailable,
-    :provider_protocol_error,
-    :provider_policy_changed
-  ]
-  @provider_cleanup_codes [:provider_cleanup_failed, :provider_cleanup_timeout]
+  @bundle_codes Map.fetch!(@codes_by_phase, :bundle)
+  @provider_declaration_codes Map.fetch!(@codes_by_phase, :provider_declaration)
+  @local_preflight_codes Map.fetch!(@codes_by_phase, :local_preflight)
+  @active_preflight_codes Map.fetch!(@codes_by_phase, :active_preflight)
+  @provider_acquisition_codes Map.fetch!(@codes_by_phase, :provider_acquisition)
+  @result_cleanup_codes Map.fetch!(@codes_by_phase, :result_cleanup)
+  @provider_cleanup_codes @result_cleanup_codes --
+                            [:result_invalid, :result_contract_failed, :result_limit_exceeded]
   @version Mix.Project.config() |> Keyword.fetch!(:version)
   @doctor_notice "doctor --connect may perform one or more real provider requests and may incur provider cost"
   @help_usage %{

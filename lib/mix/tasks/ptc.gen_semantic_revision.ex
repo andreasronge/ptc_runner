@@ -30,7 +30,7 @@ defmodule Mix.Tasks.Ptc.GenSemanticRevision do
     validate_inventory!(inventory)
     projection = projection!(inventory)
     {:ok, encoded} = DeterministicJSON.encode(projection)
-    content = encoded <> "\n"
+    content = Jason.Formatter.pretty_print(encoded) <> "\n"
 
     if check? do
       case File.read(@projection_path) do

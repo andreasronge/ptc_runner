@@ -8,7 +8,8 @@ defmodule PtcRunner.Kernel.Limits do
 
   Time fields are milliseconds and heap fields are BEAM words:
 
-  - `run_duration_ms` bounds the complete run after construction;
+  - `run_duration_ms` bounds the complete ordinary run after optional provider
+    application admission, including active preflight and Kernel execution;
   - `workflow_timeout_ms` and `evaluation_timeout_ms` bound individual
     workflow and subordinate evaluations;
   - `workflow_heap_words`, `evaluation_heap_words`, and

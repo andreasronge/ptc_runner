@@ -121,18 +121,6 @@ defmodule PtcRunner.Kernel.HostInstallation do
 
   def runtime_registry(_host, _catalog), do: {:error, :invalid_provider_registry}
 
-  @doc false
-  @spec runtime_registry(HostConfig.t(), InstallationCatalog.t(), term()) ::
-          {:ok, ProviderRegistry.t()} | {:error, atom()}
-  def runtime_registry(%HostConfig{} = host, %InstallationCatalog{} = catalog, context) do
-    with {:ok, services} <-
-           runtime_services(host, oauth_mode: {:context_factory, fn -> {:ok, context} end}) do
-      InstallationCatalog.runtime_registry(catalog, services)
-    end
-  end
-
-  def runtime_registry(_host, _catalog, _context), do: {:error, :invalid_provider_registry}
-
   defp runtime_binding(host), do: Attestation.attest(__MODULE__, host)
 
   defp registration(name, installation, binding) do
@@ -321,20 +309,45 @@ defmodule PtcRunner.Kernel.HostInstallation do
     end
   end
 
-  def owner_call(%HostConfig{} = host, :oauth_authorities) do
-    authorities =
-      Enum.reduce(host.install, %{}, fn {name, installation}, acc ->
-        case authority(installation) do
-          %Authority{} = authority -> Map.put(acc, name, authority)
-          nil -> acc
-        end
-      end)
+  def owner_call(%HostConfig{} = host, {:oauth_authorities, selected_names})
+      when is_list(selected_names) and length(selected_names) <= 128 do
+    if selected_names == Enum.uniq(selected_names) and
+         Enum.all?(selected_names, &Map.has_key?(host.install, &1)) do
+      authorities =
+        Enum.reduce(selected_names, %{}, fn name, acc ->
+          installation = Map.fetch!(host.install, name)
 
-    {:ok, authorities}
+          case authority(installation) do
+            %Authority{} = authority -> Map.put(acc, name, authority)
+            nil -> acc
+          end
+        end)
+
+      {:ok, authorities}
+    else
+      {:error, :invalid_host_installation}
+    end
   end
 
-  def owner_call(%HostConfig{} = host, {:credentials, names}),
-    do: resolve_credentials(host, names)
+  def owner_call(%HostConfig{} = host, {:dotenv_required, selected_names})
+      when is_list(selected_names) and length(selected_names) <= 128 do
+    if selected_names == Enum.uniq(selected_names) and
+         Enum.all?(selected_names, &Map.has_key?(host.install, &1)) do
+      required? =
+        Enum.any?(selected_names, fn name ->
+          with %{source: :llm, credential: credential} <- Map.fetch!(host.install, name),
+               %{source: :env} <- Map.get(host.credentials, credential) do
+            true
+          else
+            _not_dotenv_backed -> false
+          end
+        end)
+
+      {:ok, required?}
+    else
+      {:error, :invalid_host_installation}
+    end
+  end
 
   def owner_call(_host, _request), do: {:error, :invalid_host_installation}
 
