@@ -15,7 +15,9 @@ defmodule PtcRunner.Kernel.ProviderExecutionOAuthTest do
   alias PtcRunner.Kernel.MCPOAuth.LoopbackListener
   alias PtcRunner.Kernel.MCPOAuth.Store
   alias PtcRunner.Kernel.MCPOAuth.Store.Memory
+  alias PtcRunner.Kernel.PreparedRun
   alias PtcRunner.Kernel.ProviderActiveSession
+  alias PtcRunner.Kernel.ProviderActivity
   alias PtcRunner.Kernel.ProviderExecution
   alias PtcRunner.Kernel.ProviderRegistry
   alias PtcRunner.Kernel.ProviderSession
@@ -259,6 +261,93 @@ defmodule PtcRunner.Kernel.ProviderExecutionOAuthTest do
     refute_received {:oauth_request, "POST", "/token"}
   end
 
+  test "authorizing a provider the run never selected leaves the prepared run reusable" do
+    server = start_server()
+
+    # Both are installed and OAuth-capable, but only "fixture" is selected.
+    fixture =
+      provider_fixture(server, ["fixture"],
+        installed: ["fixture", "second"],
+        authorize: ["second"]
+      )
+
+    assert {:error, :invalid_provider_execution} =
+             RunCoordinator.execute(
+               fixture.prepared,
+               fixture.authority,
+               fixture.execution,
+               &visit_authorization_url(self(), &1)
+             )
+
+    assert PreparedRun.valid?(fixture.prepared)
+    assert ProviderActivity.value(fixture.prepared.provider_activity) == false
+    refute_received {:oauth_request, _method, _path}
+    assert :ok = PreparedRun.close(fixture.prepared)
+  end
+
+  test "forced owner death strands no worker, session, store, or listener" do
+    parent = self()
+    server = start_server()
+    fixture = provider_fixture(server)
+
+    caller =
+      spawn(fn ->
+        {:ok, owner} =
+          ExecutionSessionOwner.start(
+            fixture.prepared,
+            fixture.authority,
+            self(),
+            fixture.execution,
+            fn url ->
+              send(parent, {:blocked_in_notifier, url})
+              receive do: (:never -> :never)
+            end
+          )
+
+        send(parent, {:execution_owner, owner})
+        send(parent, {:execution_result, ExecutionSessionOwner.await(owner)})
+      end)
+
+    assert_receive {:execution_owner, owner}, 5_000
+    owner_pid = ExecutionSessionOwner.pid(owner)
+    on_exit(fn -> if Process.alive?(caller), do: Process.exit(caller, :kill) end)
+    assert_receive {:blocked_in_notifier, _url}, 5_000
+
+    state = :sys.get_state(owner_pid)
+
+    watched = [
+      worker: state.worker_pid,
+      session: state.provider_session.pid,
+      oauth_store: state.oauth_memory.pid,
+      registry_authority: state.registry.authority_owner.pid,
+      event_sink: state.opened_sinks.event_sink.pid,
+      run_activity: fixture.prepared.provider_activity.owner
+    ]
+
+    # Everything must still be running, so the assertions below cannot pass by
+    # observing something that had already finished on its own.
+    Enum.each(watched, fn {name, pid} ->
+      assert Process.alive?(pid), "#{name} was already gone before the kill"
+    end)
+
+    assert match?({:ok, _address}, :inet.sockname(state.oauth_listener.socket))
+    references = Enum.map(watched, fn {name, pid} -> {name, pid, Process.monitor(pid)} end)
+
+    # `:kill` is untrappable, so `terminate/2` never runs and nothing here may
+    # depend on the owner's own cleanup path. The worker is monitored rather
+    # than linked, so this is the case where it could have been left blocked in
+    # the OAuth interaction; in practice it unblocks and exits normally.
+    Process.exit(owner_pid, :kill)
+
+    Enum.each(references, fn {name, pid, reference} ->
+      assert_receive {:DOWN, ^reference, :process, ^pid, _reason},
+                     5_000,
+                     "#{name} outlived the killed owner"
+    end)
+
+    refute match?({:ok, _address}, :inet.sockname(state.oauth_listener.socket))
+  end
+
   defp trace_oauth_stores do
     Code.ensure_loaded!(Memory)
     assert :erlang.trace_pattern({Memory, :start_link, 1}, true, [:local]) == 1
@@ -299,11 +388,15 @@ defmodule PtcRunner.Kernel.ProviderExecutionOAuthTest do
 
   defp expires_in(milliseconds), do: Deadline.expires_at(Deadline.new(milliseconds))
 
-  defp provider_fixture(server, names \\ ["fixture"]) do
-    host = host(server, names)
+  defp provider_fixture(server, names \\ ["fixture"], opts \\ []) do
+    installed = Keyword.get(opts, :installed, names)
+    host = host(server, installed)
     {:ok, catalog} = HostInstallation.catalog(host)
     {:ok, services} = HostInstallation.runtime_services(host)
-    {:ok, execution} = ProviderExecution.new(catalog, services, names)
+
+    {:ok, execution} =
+      ProviderExecution.new(catalog, services, Keyword.get(opts, :authorize, names))
+
     {:ok, authority} = PublicationAuthority.new([])
 
     manifest = %{
