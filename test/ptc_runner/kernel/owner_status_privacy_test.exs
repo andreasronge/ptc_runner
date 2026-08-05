@@ -144,10 +144,7 @@ defmodule PtcRunner.Kernel.OwnerStatusPrivacyTest do
     }
 
     on_exit(fn ->
-      Enum.each(owner_pids(owners), fn pid ->
-        if Process.alive?(pid), do: GenServer.stop(pid, :normal)
-      end)
-
+      Enum.each(owner_pids(owners), &stop_owner/1)
       InstallationCatalog.close(execution_catalog)
     end)
 
@@ -180,6 +177,14 @@ defmodule PtcRunner.Kernel.OwnerStatusPrivacyTest do
     {:ok, authority} = PublicationAuthority.new([])
     {:ok, owner} = ExecutionSessionOwner.start(prepared, authority, self())
     {ExecutionSessionOwner.pid(owner), catalog}
+  end
+
+  # The execution owner stops itself as soon as it sees the test process die, so
+  # an `alive?` check here would still race the shutdown it is guarding.
+  defp stop_owner(pid) do
+    GenServer.stop(pid, :normal)
+  catch
+    :exit, _reason -> :ok
   end
 
   defp drain_logger_events(events) do

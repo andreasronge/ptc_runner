@@ -69,6 +69,21 @@ defmodule PtcRunner.Kernel.ProviderExecution do
 
   def valid?(_execution), do: false
 
+  @doc """
+  Checks that this execution belongs to the exact preparation it will run.
+
+  Callers must decide this before the owner consumes the prepared run, so an
+  execution built from another catalog, or one requesting authorization for a
+  provider the run never selected, leaves that preparation reusable.
+  """
+  @spec bound_to_prepared?(term(), term()) :: boolean()
+  def bound_to_prepared?(%__MODULE__{} = execution, %PreparedRun{} = prepared) do
+    valid?(execution) and prepared.catalog_attestation == execution.catalog.attestation and
+      authorization_targets_valid?(execution, prepared)
+  end
+
+  def bound_to_prepared?(_execution, _prepared), do: false
+
   @doc false
   @spec execute(
           PreparedRun.t(),
@@ -92,8 +107,7 @@ defmodule PtcRunner.Kernel.ProviderExecution do
     with true <- valid?(execution),
          true <- PreparedRun.consumed_valid?(prepared),
          true <- PublicationAuthority.valid?(authority),
-         true <- prepared.catalog_attestation == execution.catalog.attestation,
-         true <- authorization_targets_valid?(execution, prepared),
+         true <- bound_to_prepared?(execution, prepared),
          {:ok, session} <-
            ProviderActiveSession.open_consumed_setup(
              prepared,
@@ -141,29 +155,43 @@ defmodule PtcRunner.Kernel.ProviderExecution do
          tracker,
          session
        ) do
-    if execution.authorizations == [] do
-      execute_ordinary(
-        prepared,
-        authority,
-        opened_sinks,
-        execution,
-        tracker,
-        session
-      )
-    else
-      execute_after_authorization(
-        prepared,
-        authority,
-        opened_sinks,
-        execution,
-        notifier,
-        tracker,
-        session
-      )
-    end
-  after
-    if ProviderSession.alive?(session), do: ProviderSession.close(session)
+    result =
+      if execution.authorizations == [] do
+        execute_ordinary(
+          prepared,
+          authority,
+          opened_sinks,
+          execution,
+          tracker,
+          session
+        )
+      else
+        execute_after_authorization(
+          prepared,
+          authority,
+          opened_sinks,
+          execution,
+          notifier,
+          tracker,
+          session
+        )
+      end
+
+    close_owned_session(result, session, tracker)
+  end
+
+  # A failed session close outranks the result it would otherwise hide, matching
+  # `ProviderActiveSession`'s fail-closed policy. This deliberately runs outside
+  # an `after` block: a raised body must leave the session registered so the
+  # lifecycle owner still closes it rather than dropping it untracked and open.
+  defp close_owned_session(result, session, tracker) do
+    cleanup = if ProviderSession.alive?(session), do: ProviderSession.close(session), else: :ok
     _ = tracker.(:drop, :session, session)
+
+    case cleanup do
+      :ok -> result
+      {:error, _reason} -> {:error, cleanup_diagnostic()}
+    end
   end
 
   defp execute_ordinary(prepared, authority, opened_sinks, execution, tracker, session) do
@@ -552,7 +580,8 @@ defmodule PtcRunner.Kernel.ProviderExecution do
           {:error, reason} when reason in [:timeout, :authorization_timeout] ->
             {:error, {:authorization_timeout, name}}
 
-          {:error, :authorization_context_required} ->
+          {:error, reason}
+          when reason in [:authorization_context_required, :authorization_unavailable] ->
             {:error, {:authorization_unavailable, name}}
 
           {:error, _reason} = error ->
@@ -643,7 +672,7 @@ defmodule PtcRunner.Kernel.ProviderExecution do
 
     Enum.all?(execution.authorizations, fn name ->
       MapSet.member?(selected, name) and
-        execution.catalog.descriptors[name].authorization_mode == :oauth
+        match?(%{authorization_mode: :oauth}, execution.catalog.descriptors[name])
     end)
   end
 
@@ -672,6 +701,9 @@ defmodule PtcRunner.Kernel.ProviderExecution do
       subject: subject
     )
   end
+
+  defp cleanup_diagnostic,
+    do: CommandDiagnostic.new!(:result_cleanup, :provider_cleanup_failed, provider_activity: true)
 
   defp internal_diagnostic,
     do: CommandDiagnostic.new!(:internal, :internal_error, provider_activity: true)

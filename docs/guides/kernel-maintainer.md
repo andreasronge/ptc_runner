@@ -41,10 +41,11 @@ Frontends own presentation and host choices. They must enter through
 `PtcRunner.Kernel.RunRequest`. The closed command pipeline uses
 `PtcRunner.Kernel.CommandEngine`; the existing Mix command still has its
 transitional argv and presentation adapter, but its runtime path now prepares
-through `RunCoordinator` and preflights destinations. Provider-free one-shot
-runs then execute through a dedicated execution-session owner. Provider-bearing
-runs still open `ProviderActiveSession` in the adapter and give the same
-provider session to `RunBuilder`.
+through `RunCoordinator` and preflights destinations. One-shot runs then
+execute through a dedicated execution-session owner, whether or not they select
+providers. A provider-bearing one-shot opens `ProviderActiveSession` inside
+that owner's subordinate worker rather than in the adapter. `--check` and the
+REPL keep their existing adapter-owned sessions until their parity cutover.
 Embedding frontends execute a sealed request through
 `PtcRunner.Kernel.RunBuilder.build/3`. For a provider-free request they may
 instead call the path-free `PtcRunner.Kernel.RunCoordinator` and pass its
@@ -82,7 +83,9 @@ ApplicationSource -> Manifest -> ApplicationPackage
                   RunCoordinator.prepare (path-free phases 4-5)
                                           |
                                           v
-               provider-free ExecutionSessionOwner
+                    one-shot ExecutionSessionOwner
+                         |
+                         +-> sealed ProviderExecution -> ProviderActiveSession
                          |
                          +-> RunBuilder -> immutable RunConfig
                          |
@@ -179,9 +182,12 @@ effective projection/digest at construction and on every seal check, so
 provider-bearing preparation cannot bypass declaration processing by calling
 the constructor directly. Such provider-bearing values are presently
 continuation state for the staged command pipeline. `RunBuilder.build_prepared/3`
-rejects them; after `ProviderActiveSession` consumes and marks one, the Mix
-adapter opens its runtime registry and passes the active value and same session
-to `RunBuilder.build_active/4`. After application admission, that session
+rejects them; after `ProviderActiveSession` consumes and marks one, its runtime
+registry is opened and the active value and same session are passed to
+`RunBuilder`. A one-shot run does that inside the execution-session owner's
+subordinate worker, which calls `build_active_owned/5` with the owner-opened
+sinks; `--check` and the REPL still open the registry in the Mix adapter and
+call `build_active/4` until their parity cutover. After application admission, that session
 anchors one absolute run deadline shared by active selection, construction,
 and Kernel execution. The active build atomically claims the session sealed to
 the exact prepared run; swapping sessions or replaying the same prepared/session
@@ -203,7 +209,7 @@ temporary prepared run after assembly.
 `PtcRunner.Kernel.RunBuilder` remains the shared environment assembly and
 cleanup boundary.
 
-Provider-free Mix execution consumes the prepared run and constructs both sinks
+One-shot Mix execution consumes the prepared run and constructs both sinks
 inside one execution-session owner. Kernel evaluation runs in a monitored
 subordinate process so caller death can abort it, finalize the canonical event
 batch, and stop both sinks without waiting for evaluation to return. Normal
@@ -212,9 +218,21 @@ result-contract decision, terminal canonical events, and optional inspection
 records in a sealed, path-free `ExecutionOutcome`. It then stops both sinks
 before publication consumes only that immutable evidence and the bound, sealed
 `PublicationAuthority`; callers cannot replace the anchored destinations after
-preflight. The Mix adapter still opens `ProviderActiveSession` before handing
-the session to `RunBuilder`; moving that active opening and its sinks behind the
-same execution-session owner remains the next lifecycle cutover.
+preflight.
+
+A provider-bearing one-shot uses the same owner. Runtime setup crosses that
+boundary as a sealed `ProviderExecution`, which carries the inert catalog,
+sealed runtime services, and requested authorization targets but never the raw
+host configuration or the authorization-URL notifier. The owner remains the
+fixed lifecycle owner for the provider session, registry, OAuth store,
+loopback listener, prepared run, and sinks, while an authorized subordinate
+worker performs provider setup, authorization, and Kernel work and reuses the
+owner's already-opened sealed sinks. Aborting unwinds in the exact reverse of
+that acquisition order — listener, registry, store, session — and a failed
+session close outranks the result it would otherwise hide. The owner rejects an
+execution that is not bound to its exact preparation before consuming that
+preparation, so a mismatched catalog or an authorization target the run never
+selected leaves the prepared run reusable.
 
 The staged `PtcRunner.Kernel.CommandEngine` core allocates a command reference
 before strict argv parsing, consumes host/application paths through acquisition

@@ -117,6 +117,13 @@ defmodule PtcRunner.Kernel.Runner do
         result = apply_provider_cleanup_failure(result, cleanup, usage)
         finalize_result(result, usage, config.event_sink)
 
+      # A failed provider close outranks the raised execution it would otherwise
+      # be lost behind: the session is already gone, so no later owner can still
+      # observe that cleanup failure.
+      {:raised, _kind, _reason, _stacktrace} when cleanup != :ok ->
+        result = apply_provider_cleanup_failure(nil, cleanup, usage)
+        finalize_result(result, usage, config.event_sink)
+
       {:raised, kind, reason, stacktrace} ->
         :erlang.raise(kind, reason, stacktrace)
     end

@@ -3,6 +3,7 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
 
   use GenServer
 
+  alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.InspectionSink
   alias PtcRunner.Kernel.MCPOAuth.LoopbackListener
@@ -57,6 +58,12 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
       prepared.provider_declarations == [] and not is_nil(provider_execution) ->
         {:error, :invalid_provider_execution}
 
+      # Decided before `init/1` consumes the prepared run, so an execution from
+      # another catalog leaves that preparation reusable.
+      prepared.provider_declarations != [] and
+          not ProviderExecution.bound_to_prepared?(provider_execution, prepared) ->
+        {:error, :invalid_provider_execution}
+
       true ->
         token = make_ref()
 
@@ -99,6 +106,7 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
       oauth_memory: nil,
       oauth_listener: nil,
       built: nil,
+      cleanup: :ok,
       opened_sinks: nil,
       worker_pid: nil,
       worker_ref: nil,
@@ -126,7 +134,7 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
           |> Map.put(:opened_sinks, opened_sinks)
           |> finalize_aborted_sinks()
           |> close_owned_inputs()
-          |> Map.put(:result, {:error, reason})
+          |> put_result({:error, reason})
 
         {:ok, next}
 
@@ -186,7 +194,7 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
       |> Map.put(:worker_ref, nil)
       |> maybe_finalize_failed_execution(result)
       |> close_owned_inputs()
-      |> Map.put(:result, result)
+      |> put_result(result)
 
     finish_or_wait(next)
   end
@@ -207,7 +215,7 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
       |> Map.put(:worker_pid, nil)
       |> Map.put(:worker_ref, nil)
       |> abort()
-      |> Map.put(:result, {:error, :execution_session_unavailable})
+      |> put_result({:error, :execution_session_unavailable})
 
     finish_or_wait(next)
   end
@@ -272,7 +280,7 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
           |> Map.put(:opened_sinks, opened_sinks)
           |> finalize_aborted_sinks()
           |> close_owned_inputs()
-          |> Map.put(:result, {:error, reason})
+          |> put_result({:error, reason})
 
         {:ok, next}
 
@@ -282,7 +290,7 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
           |> Map.put(:opened_sinks, opened_sinks)
           |> finalize_aborted_sinks()
           |> close_owned_inputs()
-          |> Map.put(:result, {:error, reason})
+          |> put_result({:error, reason})
 
         {:ok, next}
     end
@@ -349,7 +357,7 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
           |> Map.put(:opened_sinks, opened_sinks)
           |> finalize_aborted_sinks()
           |> close_owned_inputs()
-          |> Map.put(:result, {:error, :invalid_prepared_run})
+          |> put_result({:error, :invalid_prepared_run})
 
         {:ok, next}
     end
@@ -426,17 +434,35 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
     close_registry(state.registry)
     if state.oauth_memory, do: Memory.close(state.oauth_memory)
 
-    if state.provider_session && ProviderSession.alive?(state.provider_session),
-      do: ProviderSession.close(state.provider_session)
+    cleanup =
+      if state.provider_session && ProviderSession.alive?(state.provider_session),
+        do: ProviderSession.close(state.provider_session),
+        else: :ok
 
     %{
       state
       | provider_session: nil,
         registry: nil,
         oauth_memory: nil,
-        oauth_listener: nil
+        oauth_listener: nil,
+        cleanup: merge_cleanup(state.cleanup, cleanup)
     }
   end
+
+  # A run whose provider session could not be closed is not a clean run, so the
+  # cleanup failure outranks whatever the worker reported. A run that reaches
+  # normal Runner teardown closes the session there, so this covers the paths
+  # that never get that far and leave the session owner-held.
+  defp merge_cleanup({:error, _reason} = existing, _cleanup), do: existing
+  defp merge_cleanup(_existing, cleanup), do: cleanup
+
+  defp put_result(%{cleanup: {:error, _reason}} = state, _result),
+    do: %{state | result: {:error, cleanup_diagnostic()}}
+
+  defp put_result(state, result), do: %{state | result: result}
+
+  defp cleanup_diagnostic,
+    do: CommandDiagnostic.new!(:result_cleanup, :provider_cleanup_failed, provider_activity: true)
 
   defp update_resource(state, :put, kind, resource) do
     field = resource_field(kind)

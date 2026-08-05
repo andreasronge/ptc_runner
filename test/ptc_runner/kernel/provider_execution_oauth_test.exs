@@ -2,6 +2,7 @@ defmodule PtcRunner.Kernel.ProviderExecutionOAuthTest do
   use ExUnit.Case, async: false
 
   alias PtcRunner.Kernel.ApplicationPackage
+  alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.ExecutionSessionOwner
   alias PtcRunner.Kernel.HostConfig
@@ -235,6 +236,27 @@ defmodule PtcRunner.Kernel.ProviderExecutionOAuthTest do
   defp next_close do
     assert_receive {:trace, _owner, :call, {module, :close, _arguments}}, 5_000
     module
+  end
+
+  test "a notifier that refuses names the provider in its authorization diagnostic" do
+    server = start_server()
+    fixture = provider_fixture(server)
+
+    {:ok, owner} =
+      ExecutionSessionOwner.start(
+        fixture.prepared,
+        fixture.authority,
+        self(),
+        fixture.execution,
+        fn _url -> raise "the operator could not be reached" end
+      )
+
+    assert {:error, %CommandDiagnostic{} = diagnostic} = ExecutionSessionOwner.await(owner)
+    assert diagnostic.phase == :active_preflight
+    assert diagnostic.code == :authorization_unavailable
+    assert diagnostic.subject.name == "fixture"
+    assert diagnostic.subject.operation == :authorization
+    refute_received {:oauth_request, "POST", "/token"}
   end
 
   defp trace_oauth_stores do

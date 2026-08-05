@@ -17,8 +17,10 @@ defmodule PtcRunner.Kernel.RunBuilder do
   one-shot path performs this assembly inside the coordinator's
   execution-session owner so the prepared run and both sinks share one
   caller-death boundary.
-  The Mix command also preflights a provider-bearing prepared run, opens its
-  active session, and passes that same session here for runtime assembly.
+  A provider-bearing prepared run is preflighted the same way, and its active
+  session is passed here for runtime assembly. The one-shot path opens that
+  session inside the execution-session owner; `--check` and the REPL still open
+  it in the Mix adapter until their parity cutover.
   `PtcRunner.Kernel.ProviderAcquisition` then runs the selected providers'
   shared preparation, credentials, and dependency-ordered acquisition barrier.
   Active preparation, preflight, acquisition, and credential resolution are

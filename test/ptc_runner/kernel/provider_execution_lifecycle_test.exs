@@ -3,8 +3,11 @@ defmodule PtcRunner.Kernel.ProviderExecutionLifecycleTest do
 
   alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.Capability
+  alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.ExecutionSessionOwner
   alias PtcRunner.Kernel.InstallationCatalog
+  alias PtcRunner.Kernel.PreparedRun
+  alias PtcRunner.Kernel.ProviderActivity
   alias PtcRunner.Kernel.ProviderDescriptor
   alias PtcRunner.Kernel.ProviderExecution
   alias PtcRunner.Kernel.ProviderRegistry
@@ -157,6 +160,65 @@ defmodule PtcRunner.Kernel.ProviderExecutionLifecycleTest do
     assert_all_down(watched)
   end
 
+  test "a refusing provider closer outranks the worker-death error it would hide" do
+    # Acquisition commits a closer that refuses and the Kernel run then blocks,
+    # so the session is committed, bound, and still owner-held when the worker
+    # dies before it can reach normal Runner teardown.
+    fixture =
+      provider_fixture(
+        body: "(loop [] (recur))",
+        acquire: fn _context ->
+          {:ok, capability} = fixture_capability()
+          {:ok, %{capabilities: [capability], close: fn -> :failed end}}
+        end
+      )
+
+    started = start_owned_execution(fixture)
+    state = await_state(started.owner_pid, & &1.registry)
+
+    # Killing on the acquire callback would race `ResourceRegistrar.commit/2`,
+    # so wait until the session actually holds the committed closer.
+    assert_eventually(fn -> :sys.get_state(state.provider_session.pid).committed != [] end)
+    assert ProviderSession.alive?(state.provider_session)
+
+    Process.exit(state.worker_pid, :kill)
+
+    assert_receive {:execution_result, observed}, 5_000
+    assert {:error, %CommandDiagnostic{} = diagnostic} = observed
+    assert diagnostic.phase == :result_cleanup
+    assert diagnostic.code == :provider_cleanup_failed
+    assert diagnostic.provider_activity
+  end
+
+  test "an execution from another catalog leaves the prepared run reusable" do
+    fixture = provider_fixture()
+    other = provider_fixture(installation_revision: "other-v1")
+
+    assert {:error, :invalid_provider_execution} =
+             RunCoordinator.execute(
+               fixture.prepared,
+               fixture.authority,
+               other.execution,
+               &never_notify/1
+             )
+
+    assert PreparedRun.valid?(fixture.prepared)
+    assert ProviderActivity.value(fixture.prepared.provider_activity) == false
+
+    assert {:error, :invalid_provider_execution} =
+             ExecutionSessionOwner.start(
+               fixture.prepared,
+               fixture.authority,
+               self(),
+               other.execution,
+               &never_notify/1
+             )
+
+    assert PreparedRun.valid?(fixture.prepared)
+    assert :ok = PreparedRun.close(fixture.prepared)
+    assert :ok = PreparedRun.close(other.prepared)
+  end
+
   defp start_owned_execution(fixture) do
     parent = self()
 
@@ -217,6 +279,14 @@ defmodule PtcRunner.Kernel.ProviderExecutionLifecycleTest do
 
   defp await_state(_owner_pid, _projection, 0), do: flunk("owner state never became ready")
 
+  defp assert_eventually(callback, attempts \\ 50_000)
+
+  defp assert_eventually(callback, attempts) when attempts > 0 do
+    if callback.(), do: :ok, else: assert_eventually(callback, attempts - 1)
+  end
+
+  defp assert_eventually(_callback, 0), do: flunk("condition did not become true")
+
   defp watch(processes) do
     Map.new(processes, fn {name, pid} -> {name, {pid, Process.monitor(pid)}} end)
   end
@@ -249,10 +319,9 @@ defmodule PtcRunner.Kernel.ProviderExecutionLifecycleTest do
     :error, :badarg -> false
   end
 
-  defp provider_fixture(opts) do
+  defp provider_fixture(opts \\ []) do
     selection_validation = Keyword.get(opts, :selection_validation, :declarative)
     body = Keyword.get(opts, :body, "(return {\"answer\" 42})")
-
     acquire = Keyword.get(opts, :acquire, fn _context -> fixture_capability() end)
 
     {:ok, rules} = SelectionRules.new(fields: %{}, cross_rules: [], named_sets: %{})
@@ -260,7 +329,7 @@ defmodule PtcRunner.Kernel.ProviderExecutionLifecycleTest do
     {:ok, descriptor} =
       ProviderDescriptor.new(
         source: :custom,
-        installation_revision: "lifecycle-v1",
+        installation_revision: Keyword.get(opts, :installation_revision, "lifecycle-v1"),
         credential_names: [],
         authorization_mode: :none,
         data_class: :normal,
@@ -288,7 +357,10 @@ defmodule PtcRunner.Kernel.ProviderExecutionLifecycleTest do
       end
 
     registration = %{descriptor: descriptor, implementation: implementation, authority: nil}
-    {:ok, catalog} = InstallationCatalog.new(%{"selected" => registration})
+
+    {:ok, catalog} =
+      InstallationCatalog.new(%{"selected" => registration})
+
     {:ok, services} = ProviderRuntimeServices.new()
     {:ok, execution} = ProviderExecution.new(catalog, services, [])
     {:ok, authority} = PublicationAuthority.new([])

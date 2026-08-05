@@ -126,7 +126,7 @@ defmodule PtcRunner.Kernel.RunCoordinator do
       prepared.provider_declarations == [] ->
         {:error, :invalid_provider_execution}
 
-      not ProviderExecution.valid?(provider_execution) ->
+      not ProviderExecution.bound_to_prepared?(provider_execution, prepared) ->
         {:error, :invalid_provider_execution}
 
       true ->
