@@ -134,10 +134,10 @@ start the private owner and its credential lease — with no embedder-supplied
 callback, file, socket, or network reachable inside it. Its input is bounded by
 the confined read ceiling both `HostConfig` loaders share, so every host
 document a command or embedding acquires through them stays within it; an
-embedding that builds a `HostConfig` by other means owns that bound itself. The deadline is checked immediately before the step and
-rechecked after it, so an expired operation releases the authority instead of
-yielding a registry; a pathological activation delays the command rather than
-being cancelled.
+embedding that builds a `HostConfig` by other means owns that bound itself.
+The deadline is checked immediately before the step and rechecked after it, so
+an expired operation releases the authority instead of yielding a registry; a
+pathological activation delays the command rather than being cancelled.
 `PtcRunner.Kernel.RunCoordinator.prepare/2` compiles the captured workflow and
 mission component graphs, validates the public workflow entry, and performs
 provider-inert declaration checks without accepting a path, looking up an
@@ -823,6 +823,13 @@ cleanup budget. `RunBuilder` assembles the returned capabilities and transfers
 the session into the run lifecycle. Exact
 declarative selection grammar belongs in `SelectionRules`; active transport
 behavior belongs in each provider module and the later runtime dispatcher.
+
+Ambient `.env` acquisition belongs to the CLI frontend, not the Kernel. The
+Mix adapter decides once, before the `--check`/one-shot branch, whether a
+selected live-LLM installation declares an environment-backed credential, and
+loads the nearest `.env` there, containing a loader failure as a closed command
+diagnostic. No Kernel module loads it, so an embedding acquires ambient
+environment state only when it chooses to.
 
 Provider occurrence contexts are path-free. They carry safe display identity,
 application content and effective digests, final bundle hashes, input

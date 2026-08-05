@@ -149,10 +149,12 @@ defmodule Mix.Tasks.Ptc.Run do
          opts,
          runtime
        ) do
-    if Keyword.get(opts, :check, false) do
-      execute_check_prepared(prepared, run_opts, opts, runtime)
-    else
-      execute_one_shot(prepared, run_opts, opts, runtime)
+    with :ok <- load_environment_credentials(prepared, runtime) do
+      if Keyword.get(opts, :check, false) do
+        execute_check_prepared(prepared, run_opts, opts, runtime)
+      else
+        execute_one_shot(prepared, run_opts, opts, runtime)
+      end
     end
   end
 
@@ -196,8 +198,7 @@ defmodule Mix.Tasks.Ptc.Run do
   defp execute_check_prepared(prepared, run_opts, opts, runtime) do
     case ProviderActiveSession.open(prepared, runtime.catalog, runtime.services) do
       {:ok, session} ->
-        case with :ok <- maybe_load_dotenv(prepared, runtime),
-                  do: active_registry(prepared, session, runtime) do
+        case active_registry(prepared, session, runtime) do
           {:ok, registry, cleanup} ->
             try do
               execute_with_registry(prepared, registry, session, run_opts, opts, runtime.host)
@@ -238,8 +239,7 @@ defmodule Mix.Tasks.Ptc.Run do
     authorities = oauth_authorities(runtime.host, selected_names)
 
     result =
-      with :ok <- maybe_load_dotenv(prepared, runtime),
-           deadline when not is_nil(deadline) <-
+      with deadline when not is_nil(deadline) <-
              oauth_setup_deadline(
                prepared.provider_declarations,
                authorities,
@@ -593,9 +593,15 @@ defmodule Mix.Tasks.Ptc.Run do
     if :req_llm in started_applications(), do: :host_owned, else: :command_vm
   end
 
-  defp maybe_load_dotenv(_prepared, %{host: nil}), do: :ok
+  # Dotenv discovery reads the filesystem and mutates the VM environment, so it
+  # is command setup rather than bounded run work: it cannot be cancelled by a
+  # deadline or rolled back, and an embedding must never acquire ambient `.env`
+  # state implicitly inside the Kernel. The CLI therefore decides once, after
+  # preparation has established which providers are selected and before any
+  # execution owner, provider session, or run clock exists.
+  defp load_environment_credentials(_prepared, %{host: nil}), do: :ok
 
-  defp maybe_load_dotenv(prepared, runtime) do
+  defp load_environment_credentials(prepared, runtime) do
     # Keyed on the declared credential, not on provider-application admission: a
     # direct `ollama:`/`openai-compat:` route needs no backing application but
     # can still resolve its credential from the nearest `.env`.
@@ -608,10 +614,22 @@ defmodule Mix.Tasks.Ptc.Run do
            _other -> false
          end
        end) do
-      Dotenv.load()
+      load_dotenv()
     else
       :ok
     end
+  end
+
+  # `PtcRunner.Dotenv` reads the file it finds with `File.read!/1`. Inside the
+  # execution owner that raise became a closed internal diagnostic; in the
+  # frontend it would otherwise put a raw exception and the `.env` path in the
+  # command's failure output.
+  defp load_dotenv do
+    Dotenv.load()
+  rescue
+    _exception -> {:error, :dotenv_unavailable}
+  catch
+    _kind, _reason -> {:error, :dotenv_unavailable}
   end
 
   defp started_applications,

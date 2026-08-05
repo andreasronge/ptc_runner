@@ -308,24 +308,6 @@ defmodule PtcRunner.Kernel.ProviderRuntimeServices do
   def oauth_authorities(_services, _selected_names),
     do: {:error, :invalid_provider_runtime_services}
 
-  @doc false
-  @spec dotenv_required?(t(), [binary()]) :: {:ok, boolean()} | {:error, term()}
-  def dotenv_required?(%__MODULE__{host_payload: nil} = services, selected_names)
-      when is_list(selected_names) do
-    if valid?(services), do: {:ok, false}, else: {:error, :invalid_provider_runtime_services}
-  end
-
-  def dotenv_required?(%__MODULE__{} = services, selected_names) when is_list(selected_names) do
-    if valid?(services) do
-      HostRuntimePayload.dotenv_required?(services.host_payload, selected_names)
-    else
-      {:error, :invalid_provider_runtime_services}
-    end
-  end
-
-  def dotenv_required?(_services, _selected_names),
-    do: {:error, :invalid_provider_runtime_services}
-
   defp unique_allowed_options?(opts) do
     keys = Keyword.keys(opts)
 

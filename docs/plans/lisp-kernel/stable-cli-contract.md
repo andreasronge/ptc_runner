@@ -799,8 +799,14 @@ Checkpoint C starts with a small stabilization prefix before adding doctor:
   add a second ownership protocol around initialization that performs no
   external I/O and is already covered by the creator monitor, fence
   arbitration, transfer reconciliation, and stale-authority protection;
-- decide whether `.env` loading is bounded run work or pre-run setup, and make
-  both one-shot and `--check` use that decision;
+- (complete) classify `.env` loading as command setup rather than bounded run
+  work, because dotenv discovery reads the filesystem and mutates the process
+  environment: it cannot be deadline-cancelled or rolled back, and an embedding
+  must not acquire ambient `.env` state implicitly inside the Kernel. The Mix
+  adapter decides once, after preparation and before the `--check`/one-shot
+  branch, so both paths apply the same selected-provider rule and neither
+  charges the load to the run clock. `ProviderExecution.maybe_load_dotenv/2`
+  and the sealed `dotenv_required?` query chain it used are deleted;
 - return zero from `LoopbackListener.remaining/1` on expiry and prove a trickle
   client cannot extend the receive loop; and
 - move `--check` onto the shared execution-owner composition and delete the

@@ -4,7 +4,9 @@ defmodule Mix.Tasks.Ptc.RunTest do
   import ExUnit.CaptureIO
 
   alias Mix.Tasks.Ptc.Run
+  alias PtcRunner.Dotenv
   alias PtcRunner.Kernel.Deadline
+  alias PtcRunner.Kernel.ProviderSession
   alias PtcRunner.Kernel.SafeMetadata
   alias PtcRunner.Kernel.TraceLog
 
@@ -246,24 +248,7 @@ defmodule Mix.Tasks.Ptc.RunTest do
     stop_provider_applications()
 
     credential_env = "PTC_RUN_DOTENV_CREDENTIAL"
-    previous_credential = System.get_env(credential_env)
-    dotenv_key = {PtcRunner.Dotenv, :dotenv_loaded}
-    previous_dotenv_state = :persistent_term.get(dotenv_key, :missing)
-
-    System.delete_env(credential_env)
-    :persistent_term.erase(dotenv_key)
-
-    on_exit(fn ->
-      if previous_credential,
-        do: System.put_env(credential_env, previous_credential),
-        else: System.delete_env(credential_env)
-
-      case previous_dotenv_state do
-        :missing -> :persistent_term.erase(dotenv_key)
-        state -> :persistent_term.put(dotenv_key, state)
-      end
-    end)
-
+    reset_dotenv_state(credential_env)
     File.write!(Path.join(dir, ".env"), "#{credential_env}=dotenv-secret\n")
 
     {manifest_path, host_path} =
@@ -279,6 +264,129 @@ defmodule Mix.Tasks.Ptc.RunTest do
 
     assert output =~ "workflow  deepseek  llm  revision check-llm-v1"
     refute output =~ "dotenv-secret"
+  end
+
+  @tag :tmp_dir
+  test "one-shot and --check apply the same env-credential rule", %{tmp_dir: dir} do
+    restore_provider_applications_on_exit()
+    stop_provider_applications()
+
+    credential_env = "PTC_RUN_DOTENV_SHARED_CREDENTIAL"
+    reset_dotenv_state(credential_env)
+    File.write!(Path.join(dir, ".env"), "#{credential_env}=dotenv-secret\n")
+    {manifest_path, host_path} = write_llm_check_fixture(dir, %{"env" => credential_env})
+
+    one_shot = run_in(dir, [manifest_path, "--host-config", host_path])
+
+    assert System.get_env(credential_env) == "dotenv-secret"
+    refute one_shot =~ "dotenv-secret"
+
+    # Loading is latched per VM, so the check invocation must reload it rather
+    # than inherit the one-shot's environment.
+    clear_dotenv_state(credential_env)
+
+    check = run_in(dir, [manifest_path, "--host-config", host_path, "--check"])
+
+    assert System.get_env(credential_env) == "dotenv-secret"
+    refute check =~ "dotenv-secret"
+  end
+
+  @tag :tmp_dir
+  test "provider-free and literal-credential runs never read the nearest .env", %{tmp_dir: dir} do
+    restore_provider_applications_on_exit()
+    stop_provider_applications()
+
+    credential_env = "PTC_RUN_DOTENV_UNUSED_CREDENTIAL"
+    reset_dotenv_state(credential_env)
+    File.write!(Path.join(dir, ".env"), "#{credential_env}=dotenv-secret\n")
+
+    {literal_manifest, literal_host} = write_llm_check_fixture(dir)
+    _literal = run_in(dir, [literal_manifest, "--host-config", literal_host])
+    assert System.get_env(credential_env) == nil
+
+    free_dir = Path.join(dir, "provider-free")
+    File.mkdir_p!(free_dir)
+    File.write!(Path.join(free_dir, "main.clj"), ~S|(ns main) (defn run [input] (return input))|)
+
+    free_manifest = Path.join(free_dir, "ptc.json")
+
+    File.write!(
+      free_manifest,
+      Jason.encode!(%{
+        "version" => 1,
+        "workflow" => %{
+          "components" => [%{"id" => "main", "path" => "main.clj"}],
+          "entry" => "main/run"
+        },
+        "input" => %{"value" => %{}}
+      })
+    )
+
+    _free = run_in(dir, [free_manifest])
+    assert System.get_env(credential_env) == nil
+  end
+
+  @tag :tmp_dir
+  test "a one-shot loads .env before the run clock starts", %{tmp_dir: dir} do
+    restore_provider_applications_on_exit()
+    stop_provider_applications()
+
+    credential_env = "PTC_RUN_DOTENV_ORDER_CREDENTIAL"
+    reset_dotenv_state(credential_env)
+    File.write!(Path.join(dir, ".env"), "#{credential_env}=dotenv-secret\n")
+    {manifest_path, host_path} = write_llm_check_fixture(dir, %{"env" => credential_env})
+
+    trace_calls(
+      [
+        {{Dotenv, :load, 0}, [{:_, [], [{:return_trace}]}]},
+        {{ProviderSession, :begin_run, 1}, true}
+      ],
+      fn -> run_in(dir, [manifest_path, "--host-config", host_path]) end
+    )
+
+    # Mailbox order across processes is not a happens-before proof, so the
+    # assertion compares the VM's own monotonic trace timestamps, and it uses
+    # the load's return rather than its call so a blocked loader cannot pass.
+    assert_receive {:trace_ts, loader, :return_from, {Dotenv, :load, 0}, :ok, loaded_at}, 5_000
+
+    assert_receive {:trace_ts, _worker, :call, {ProviderSession, :begin_run, [_session]},
+                    run_clock_started_at},
+                   5_000
+
+    assert loader == self()
+    assert loaded_at < run_clock_started_at
+  end
+
+  @tag :tmp_dir
+  test "an unreadable .env fails the command without exposing its path", %{tmp_dir: dir} do
+    restore_provider_applications_on_exit()
+    stop_provider_applications()
+
+    credential_env = "PTC_RUN_DOTENV_UNREADABLE_CREDENTIAL"
+    reset_dotenv_state(credential_env)
+    env_path = Path.join(dir, ".env")
+    File.write!(env_path, "#{credential_env}=dotenv-secret\n")
+    File.chmod!(env_path, 0o000)
+    on_exit(fn -> File.chmod(env_path, 0o600) end)
+
+    {manifest_path, host_path} = write_llm_check_fixture(dir, %{"env" => credential_env})
+
+    # A privileged user can read the file anyway, which would make the failure
+    # unreachable rather than the assertion wrong.
+    if match?({:error, _reason}, File.read(env_path)) do
+      for argv <- [
+            [manifest_path, "--host-config", host_path],
+            [manifest_path, "--host-config", host_path, "--check"]
+          ] do
+        error =
+          assert_raise Mix.Error, fn ->
+            run_in(dir, argv)
+          end
+
+        assert error.message == "ptc.run failed: dotenv_unavailable"
+        refute error.message =~ dir
+      end
+    end
   end
 
   @tag :tmp_dir
@@ -981,6 +1089,78 @@ defmodule Mix.Tasks.Ptc.RunTest do
 
   defp started_applications,
     do: Application.started_applications() |> Enum.map(&elem(&1, 0))
+
+  defp run_in(dir, argv) do
+    File.cd!(dir, fn ->
+      capture_io(fn ->
+        Mix.Task.reenable("ptc.run")
+        Run.run(argv)
+      end)
+    end)
+  end
+
+  defp reset_dotenv_state(credential_env) do
+    previous_credential = System.get_env(credential_env)
+    previous_state = :persistent_term.get(dotenv_key(), :missing)
+    clear_dotenv_state(credential_env)
+
+    on_exit(fn ->
+      if previous_credential,
+        do: System.put_env(credential_env, previous_credential),
+        else: System.delete_env(credential_env)
+
+      case previous_state do
+        :missing -> :persistent_term.erase(dotenv_key())
+        state -> :persistent_term.put(dotenv_key(), state)
+      end
+    end)
+  end
+
+  defp clear_dotenv_state(credential_env) do
+    System.delete_env(credential_env)
+    :persistent_term.erase(dotenv_key())
+  end
+
+  defp dotenv_key, do: {Dotenv, :dotenv_loaded}
+
+  # Traces the named calls in this process and in every process the run spawns,
+  # so an ordering assertion can span the frontend and the execution owner
+  # without tracing unrelated work. A process receives no trace messages for
+  # its own calls while it is its own tracer, so a forwarding tracer collects
+  # them on the test process's behalf.
+  defp trace_calls(functions, operation) do
+    test = self()
+    tracer = spawn_link(fn -> forward_traces(test) end)
+
+    # `:set_on_spawn` keeps the trace inside this invocation's process tree, so
+    # an unrelated process cannot satisfy an ordering assertion.
+    flags = [:call, :monotonic_timestamp, :set_on_spawn, {:tracer, tracer}]
+
+    Enum.each(functions, fn {{module, function, arity}, match_spec} ->
+      Code.ensure_loaded!(module)
+      assert :erlang.trace_pattern({module, function, arity}, match_spec, [:local]) == 1
+    end)
+
+    :erlang.trace(self(), true, flags)
+
+    try do
+      operation.()
+    after
+      :erlang.trace(self(), false, [:call, :set_on_spawn])
+
+      Enum.each(functions, fn {{module, function, arity}, _match_spec} ->
+        :erlang.trace_pattern({module, function, arity}, false, [:local])
+      end)
+    end
+  end
+
+  defp forward_traces(test) do
+    receive do
+      message ->
+        send(test, message)
+        forward_traces(test)
+    end
+  end
 
   defp stop_provider_applications do
     running = started_applications()

@@ -1,7 +1,6 @@
 defmodule PtcRunner.Kernel.ProviderExecution do
   @moduledoc false
 
-  alias PtcRunner.Dotenv
   alias PtcRunner.Kernel.Attestation
   alias PtcRunner.Kernel.BoundedWorker
   alias PtcRunner.Kernel.CommandDiagnostic
@@ -199,7 +198,6 @@ defmodule PtcRunner.Kernel.ProviderExecution do
 
     with {:ok, session} <-
            ProviderActiveSession.begin_owned_run(session, prepared, execution.catalog),
-         :ok <- maybe_load_dotenv(execution.services, selected_names),
          {:ok, authorities} <- oauth_authorities(execution, selected_names),
          deadline <-
            oauth_operation_deadline(
@@ -233,8 +231,7 @@ defmodule PtcRunner.Kernel.ProviderExecution do
        ) do
     selected_names = selected_provider_names(prepared)
 
-    with :ok <- maybe_load_dotenv(execution.services, selected_names),
-         {:ok, authorities} <- oauth_authorities(execution, selected_names),
+    with {:ok, authorities} <- oauth_authorities(execution, selected_names),
          deadline when not is_nil(deadline) <-
            oauth_setup_deadline(
              prepared.provider_declarations,
@@ -418,14 +415,6 @@ defmodule PtcRunner.Kernel.ProviderExecution do
 
   defp registry_result({:error, _reason} = error, _operation, _selected_names, _catalog),
     do: error
-
-  defp maybe_load_dotenv(services, selected_names) do
-    case ProviderRuntimeServices.dotenv_required?(services, selected_names) do
-      {:ok, true} -> Dotenv.load()
-      {:ok, false} -> :ok
-      {:error, _reason} -> {:error, :invalid_provider_execution}
-    end
-  end
 
   defp oauth_authorities(execution, selected_names) do
     with {:ok, authorities} <-
